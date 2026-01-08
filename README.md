@@ -2,15 +2,7 @@
 
 > **WARNING**: This is a work in progress and shouldn't be used for any serious work
 
-`JCC` is a **J**IT **C**11 **C**ompiler. The preprocessor/lexer/parser is built from [chibicc](http://https://github.com/rui314/chibicc) and the VM was built from [c4](https://github.com/rswier/c4) and [write-a-C-interpreter](https://github.com/lotabout/write-a-C-interpreter).
-
-## About
-
-The goal of this project is correctness and safety. This is just a toy, and won't be 🚀🔥 **BLAZING FAST** 🔥🚀. I wouldn't recommend using this for anything important or in any production code. I'm not an expert, so safety features may not be perfect and will have *minimal* to **significant** performance overhead (depending on which features are enabled).
-
-**Status**: All C11 language features are supported (minus `<threads.h>` and `_Thread_local`, see [Thread Support](#thread-support)). There is also partial C23 support (mostly parser/preprocessor features).
-
-See [here](https://takeiteasy.github.io/jcc) for some basic documentation on the API.
+`JCC` is a **J**IT **C**11 **C**ompiler. The preprocessor/lexer/parser is built from [chibicc](http://https://github.com/rui314/chibicc) and the VM was initially built from [c4](https://github.com/rswier/c4) and [write-a-C-interpreter](https://github.com/lotabout/write-a-C-interpreter).
 
 ## Features
 

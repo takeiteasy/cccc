@@ -483,6 +483,25 @@ Node *ast_var_ref(JCC *vm, const char *name) {
     return NULL;
 }
 
+Node *ast_param_ref(JCC *vm, Obj *fn, const char *name) {
+    if (!vm || !fn || !name)
+        return NULL;
+
+    // Find the parameter in the function's params list
+    size_t name_len = strlen(name);
+    for (Obj *param = fn->params; param; param = param->next) {
+        if (strlen(param->name) == name_len &&
+            strncmp(param->name, name, name_len) == 0) {
+            Node *n = alloc_node(vm, ND_VAR);
+            n->var = param;
+            n->ty = param->ty;
+            return n;
+        }
+    }
+
+    return NULL;
+}
+
 // ============================================================================
 // AST Node Construction - Expressions
 // ============================================================================
@@ -602,9 +621,6 @@ void ast_switch_set_default(JCC *vm, Node *switch_node, Node *body) {
 // AST Node Construction - Declarations
 // ============================================================================
 
-// Note: Full function/struct generation is complex and will be implemented
-// in a later phase. For now, we provide the basics for expression generation.
-
 Node *ast_expr_stmt(JCC *vm, Node *expr) {
     if (!vm)
         return NULL;
@@ -612,4 +628,162 @@ Node *ast_expr_stmt(JCC *vm, Node *expr) {
     Node *node = alloc_node(vm, ND_EXPR_STMT);
     node->lhs = expr;
     return node;
+}
+
+// ============================================================================
+// Function Generation
+// ============================================================================
+
+// Helper to create a function type
+static Type *make_func_type(JCC *vm, Type *return_type) {
+    Type *ty = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
+    memset(ty, 0, sizeof(Type));
+    ty->kind = TY_FUNC;
+    ty->return_ty = return_type;
+    ty->size = 8;
+    ty->align = 8;
+    return ty;
+}
+
+// Helper to duplicate a string into the parser arena
+static char *arena_strdup(JCC *vm, const char *str) {
+    if (!str)
+        return NULL;
+    int len = strlen(str);
+    char *s = arena_alloc(&vm->compiler.parser_arena, len + 1);
+    memcpy(s, str, len + 1);
+    return s;
+}
+
+Obj *ast_function(JCC *vm, const char *name, Type *return_type) {
+    if (!vm || !name || !return_type)
+        return NULL;
+
+    // Check if there's already a forward declaration for this function
+    size_t name_len = strlen(name);
+    Obj *existing = NULL;
+
+    for (Obj *obj = vm->compiler.globals; obj; obj = obj->next) {
+        if (obj->is_function && strlen(obj->name) == name_len &&
+            strcmp(obj->name, name) == 0) {
+            existing = obj;
+            break;
+        }
+    }
+
+    if (existing) {
+        // Update existing forward declaration to be a definition
+        existing->is_definition = true;
+        // Update return type if needed
+        if (existing->ty && existing->ty->kind == TY_FUNC) {
+            existing->ty->return_ty = return_type;
+        }
+        return existing;
+    }
+
+    // Create function type
+    Type *func_type = make_func_type(vm, return_type);
+
+    // Create the function object
+    Obj *fn = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
+    memset(fn, 0, sizeof(Obj));
+    fn->name = arena_strdup(vm, name);
+    fn->ty = func_type;
+    fn->align = 8;
+    fn->is_function = true;
+    fn->is_definition = true;
+    fn->is_static = false;
+
+    // Add to globals list
+    fn->next = vm->compiler.globals;
+    vm->compiler.globals = fn;
+
+    // Push to scope so it can be found by name
+    VarScopeNode *sc =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(VarScopeNode));
+    memset(sc, 0, sizeof(VarScopeNode));
+    sc->name = fn->name;
+    sc->name_len = strlen(fn->name);
+    sc->var = fn;
+    sc->next = vm->compiler.scope->vars;
+    vm->compiler.scope->vars = sc;
+
+    return fn;
+}
+
+void ast_function_add_param(JCC *vm, Obj *fn, const char *name, Type *type) {
+    if (!vm || !fn || !name || !type)
+        return;
+
+    // Create parameter local variable
+    Obj *param = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
+    memset(param, 0, sizeof(Obj));
+    param->name = arena_strdup(vm, name);
+    param->ty = type;
+    param->align = type->align;
+    param->is_local = true;
+    param->is_param = true;
+
+    // Add to function's params list (append to maintain order)
+    // The first param added should be first in the list (offset -1),
+    // second param should be second (offset -2), etc.
+    // This matches the calling convention where arg1 is at bp[-1], arg2 at
+    // bp[-2].
+    if (fn->params == NULL) {
+        fn->params = param;
+    } else {
+        Obj *last = fn->params;
+        while (last->next)
+            last = last->next;
+        last->next = param;
+    }
+
+    // Add parameter type to function type (also append)
+    Type *param_type = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
+    memcpy(param_type, type, sizeof(Type));
+    param_type->next = NULL;
+    if (fn->ty->params == NULL) {
+        fn->ty->params = param_type;
+    } else {
+        Type *last = fn->ty->params;
+        while (last->next)
+            last = last->next;
+        last->next = param_type;
+    }
+}
+
+void ast_function_set_body(JCC *vm, Obj *fn, Node *body) {
+    if (!vm || !fn || !body)
+        return;
+
+    // If body is not already a block, wrap it
+    if (body->kind != ND_BLOCK) {
+        Node *block = alloc_node(vm, ND_BLOCK);
+        block->body = body;
+        fn->body = block;
+    } else {
+        fn->body = body;
+    }
+
+    // CRITICAL: Run add_type on the body to assign types to all nodes
+    // This is necessary for code generation to work correctly
+    add_type(vm, fn->body);
+
+    // Mark as having a definition
+    fn->is_definition = true;
+}
+
+void ast_function_set_static(Obj *fn, bool is_static) {
+    if (fn)
+        fn->is_static = is_static;
+}
+
+void ast_function_set_inline(Obj *fn, bool is_inline) {
+    if (fn)
+        fn->is_inline = is_inline;
+}
+
+void ast_function_set_variadic(Obj *fn, bool is_variadic) {
+    if (fn && fn->ty)
+        fn->ty->is_variadic = is_variadic;
 }

@@ -38,6 +38,7 @@ extern Node *ast_binary(JCC *vm, NodeKind op, Node *left, Node *right);
 extern Node *ast_unary(JCC *vm, NodeKind op, Node *operand);
 extern Node *ast_cast(JCC *vm, Node *expr, Type *target_type);
 extern Node *ast_return(JCC *vm, Node *expr);
+extern Node *ast_if(JCC *vm, Node *cond, Node *then_body, Node *else_body);
 extern Node *ast_switch(JCC *vm, Node *cond);
 extern void ast_switch_add_case(JCC *vm, Node *switch_node, Node *value,
                                 Node *body);
@@ -48,6 +49,16 @@ extern const char *ast_enum_constant_name(EnumConstant *ec);
 extern int ast_enum_constant_value(EnumConstant *ec);
 extern Type *ast_make_pointer(JCC *vm, Type *base);
 extern Type *ast_make_array(JCC *vm, Type *base, int len);
+
+// Function generation
+extern Obj *ast_function(JCC *vm, const char *name, Type *return_type);
+extern void ast_function_add_param(JCC *vm, Obj *fn, const char *name,
+                                   Type *type);
+extern void ast_function_set_body(JCC *vm, Obj *fn, Node *body);
+extern void ast_function_set_static(Obj *fn, bool is_static);
+extern void ast_function_set_inline(Obj *fn, bool is_inline);
+extern void ast_function_set_variadic(Obj *fn, bool is_variadic);
+extern Node *ast_param_ref(JCC *vm, Obj *fn, const char *name);
 
 // Register reflection API functions as FFI
 static void register_reflection_ffi(JCC *vm) {
@@ -77,6 +88,7 @@ static void register_reflection_ffi(JCC *vm) {
 
     // Statement construction
     cc_register_cfunc(vm, "ast_return", (void *)ast_return, 2, 0);
+    cc_register_cfunc(vm, "ast_if", (void *)ast_if, 4, 0);
     cc_register_cfunc(vm, "ast_switch", (void *)ast_switch, 2, 0);
     cc_register_cfunc(vm, "ast_switch_add_case", (void *)ast_switch_add_case, 4,
                       0);
@@ -90,6 +102,20 @@ static void register_reflection_ffi(JCC *vm) {
                       (void *)ast_enum_constant_name, 1, 0);
     cc_register_cfunc(vm, "ast_enum_constant_value",
                       (void *)ast_enum_constant_value, 1, 0);
+
+    // Function generation
+    cc_register_cfunc(vm, "ast_function", (void *)ast_function, 3, 0);
+    cc_register_cfunc(vm, "ast_function_add_param",
+                      (void *)ast_function_add_param, 4, 0);
+    cc_register_cfunc(vm, "ast_function_set_body",
+                      (void *)ast_function_set_body, 3, 0);
+    cc_register_cfunc(vm, "ast_function_set_static",
+                      (void *)ast_function_set_static, 2, 0);
+    cc_register_cfunc(vm, "ast_function_set_inline",
+                      (void *)ast_function_set_inline, 2, 0);
+    cc_register_cfunc(vm, "ast_function_set_variadic",
+                      (void *)ast_function_set_variadic, 2, 0);
+    cc_register_cfunc(vm, "ast_param_ref", (void *)ast_param_ref, 3, 0);
 }
 
 // Compile a single pragma macro
@@ -107,6 +133,7 @@ static bool compile_single_pragma_macro(JCC *vm, PragmaMacro *pm) {
     // Save current parser state - keep scope/globals so types remain available
     Obj *saved_locals = vm->compiler.locals;
     Obj *saved_current_fn = vm->compiler.current_fn;
+    Obj *saved_globals = vm->compiler.globals;
 
     // Enter macro mode
     vm->compiler.in_macro_mode = true;
@@ -199,6 +226,17 @@ static bool compile_single_pragma_macro(JCC *vm, PragmaMacro *pm) {
     // Store the compiled function
     pm->compiled_fn = func;
     pm->is_compiled = true;
+
+    // Link macro's new globals (string literals, etc.) to the main program's
+    // globals. Find the end of macro_prog list and link to saved_globals.
+    if (macro_prog) {
+        Obj *last = macro_prog;
+        while (last->next)
+            last = last->next;
+        last->next = saved_globals;
+    }
+    // vm->compiler.globals now includes both macro globals and main program
+    // globals
 
     // Restore parser state (keep the macro's compiled code in text segment)
     vm->compiler.locals = saved_locals;

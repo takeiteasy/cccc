@@ -23,7 +23,7 @@
 
 static void usage(const char *argv0, int exit_code) {
     printf("JCC: JIT C Compiler\n");
-    printf("https://github.com/takeiteasy/jcc\n\n");
+    printf("https://git.sr.ht/~takeiteasy/jcc\n\n");
     printf("Usage: %s [options] file...\n\n", argv0);
     printf("Options:\n");
     printf("\t-h/--help           Show this message\n");

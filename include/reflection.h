@@ -307,6 +307,11 @@ Node *ast_string_literal(JCC *vm, const char *str);
 /*! Create a variable reference node. */
 Node *ast_var_ref(JCC *vm, const char *name);
 
+/*! Create a reference to a function parameter.
+ *  Use this when building function bodies to reference parameters by name.
+ */
+Node *ast_param_ref(JCC *vm, Obj *fn, const char *name);
+
 // ============================================================================
 // AST Node Construction - Expressions
 // ============================================================================
@@ -346,6 +351,68 @@ void ast_switch_set_default(JCC *vm, Node *switch_node, Node *body);
 Node *ast_expr_stmt(JCC *vm, Node *expr);
 
 // ============================================================================
+// Function Generation
+// ============================================================================
+
+/*!
+ * @function ast_function
+ * @abstract Create a new function object.
+ * @param vm The VM context.
+ * @param name The function name.
+ * @param return_type The return type.
+ * @return The newly created function object, or NULL on error.
+ * @discussion The function is automatically added to the globals list
+ *             and will be compiled when the main program is compiled.
+ */
+Obj *ast_function(JCC *vm, const char *name, Type *return_type);
+
+/*!
+ * @function ast_function_add_param
+ * @abstract Add a parameter to a function.
+ * @param vm The VM context.
+ * @param fn The function object.
+ * @param name The parameter name.
+ * @param type The parameter type.
+ * @discussion Parameters are added in order. Call this multiple times
+ *             for multiple parameters.
+ */
+void ast_function_add_param(JCC *vm, Obj *fn, const char *name, Type *type);
+
+/*!
+ * @function ast_function_set_body
+ * @abstract Set the body of a function.
+ * @param vm The VM context.
+ * @param fn The function object.
+ * @param body The function body (a statement or block node).
+ * @discussion If body is not already a ND_BLOCK, it will be wrapped in one.
+ */
+void ast_function_set_body(JCC *vm, Obj *fn, Node *body);
+
+/*!
+ * @function ast_function_set_static
+ * @abstract Set whether a function has static linkage.
+ * @param fn The function object.
+ * @param is_static True for static linkage, false for external.
+ */
+void ast_function_set_static(Obj *fn, bool is_static);
+
+/*!
+ * @function ast_function_set_inline
+ * @abstract Set whether a function is inline.
+ * @param fn The function object.
+ * @param is_inline True for inline, false otherwise.
+ */
+void ast_function_set_inline(Obj *fn, bool is_inline);
+
+/*!
+ * @function ast_function_set_variadic
+ * @abstract Set whether a function is variadic.
+ * @param fn The function object.
+ * @param is_variadic True for variadic, false otherwise.
+ */
+void ast_function_set_variadic(Obj *fn, bool is_variadic);
+
+// ============================================================================
 // Convenience Macros (automatically pass __VM)
 // ============================================================================
 
@@ -357,6 +424,7 @@ Node *ast_expr_stmt(JCC *vm, Node *expr);
 #define AST_FLOAT_LITERAL(val) ast_float_literal(__VM, val)
 #define AST_STRING_LITERAL(str) ast_string_literal(__VM, str)
 #define AST_VAR_REF(name) ast_var_ref(__VM, name)
+#define AST_PARAM_REF(fn, name) ast_param_ref(__VM, fn, name)
 
 #define AST_BINARY(op, l, r) ast_binary(__VM, op, l, r)
 #define AST_UNARY(op, operand) ast_unary(__VM, op, operand)
@@ -389,6 +457,17 @@ Node *ast_expr_stmt(JCC *vm, Node *expr);
 #define AST_FIND_GLOBAL(name) ast_find_global(__VM, name)
 #define AST_GLOBAL_COUNT() ast_global_count(__VM)
 #define AST_GLOBAL_AT(i) ast_global_at(__VM, i)
+
+#define AST_FUNCTION(name, ret_type) ast_function(__VM, name, ret_type)
+#define AST_FUNCTION_ADD_PARAM(fn, name, type)                                 \
+    ast_function_add_param(__VM, fn, name, type)
+#define AST_FUNCTION_SET_BODY(fn, body) ast_function_set_body(__VM, fn, body)
+#define AST_FUNCTION_SET_STATIC(fn, is_static)                                 \
+    ast_function_set_static(fn, is_static)
+#define AST_FUNCTION_SET_INLINE(fn, is_inline)                                 \
+    ast_function_set_inline(fn, is_inline)
+#define AST_FUNCTION_SET_VARIADIC(fn, is_variadic)                             \
+    ast_function_set_variadic(fn, is_variadic)
 
 #ifdef __cplusplus
 }

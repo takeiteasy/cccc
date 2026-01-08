@@ -1063,18 +1063,85 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                 nargs++;
             }
 
-            // Evaluate arguments into registers A0-A7
-            int arg_idx = 0;
-            for (Node *arg = node->args; arg; arg = arg->next) {
-                if (arg_idx < 8) {
-                    if (is_flonum(arg->ty)) {
-                        gen_expr(vm, arg, FREG_A0 + arg_idx);
-                    } else {
-                        gen_expr(vm, arg, REG_A0 + arg_idx);
-                    }
+            // Collect args into array for indexed access
+            Node **arg_array = NULL;
+            if (nargs > 0) {
+                arg_array = calloc(nargs, sizeof(Node *));
+                if (!arg_array)
+                    error("out of memory");
+                int idx = 0;
+                for (Node *a = node->args; a; a = a->next) {
+                    arg_array[idx++] = a;
                 }
-                arg_idx++;
             }
+
+            // Check which arguments contain function calls (to handle register
+            // clobbering). Nested FFI calls will clobber REG_A0-A7.
+            bool *arg_has_call = calloc(nargs > 0 ? nargs : 1, sizeof(bool));
+            if (!arg_has_call)
+                error("out of memory");
+            for (int i = 0; i < nargs; i++) {
+                arg_has_call[i] = contains_funcall(arg_array[i]);
+            }
+
+            // Evaluate arguments into registers A0-A7
+            // CRITICAL: If arg[i] contains a function call, it will clobber
+            // REG_A0-A7. We must save any previous args before evaluating such
+            // an arg.
+            int int_arg_idx = 0;
+            int float_arg_idx = 0;
+            int saved_int_count = 0;
+            int saved_float_count = 0;
+
+            for (int i = 0; i < nargs && i < 8; i++) {
+                Node *arg = arg_array[i];
+
+                // Before evaluating this arg, check if it contains a function
+                // call. If so, save all previously-evaluated arg registers.
+                if (arg_has_call[i] && (int_arg_idx > 0 || float_arg_idx > 0)) {
+                    // Push int regs in reverse order (so we pop correctly)
+                    for (int j = int_arg_idx - 1; j >= 0; j--) {
+                        emit_psh3(vm, REG_A0 + j);
+                    }
+                    saved_int_count = int_arg_idx;
+
+                    // Push float regs: convert to int bits, push
+                    for (int j = float_arg_idx - 1; j >= 0; j--) {
+                        emit_rr(vm, FR2R, REG_T0, FREG_A0 + j);
+                        emit_psh3(vm, REG_T0);
+                    }
+                    saved_float_count = float_arg_idx;
+                }
+
+                if (is_flonum(arg->ty)) {
+                    gen_expr(vm, arg, FREG_A0 + float_arg_idx);
+                    float_arg_idx++;
+                } else {
+                    gen_expr(vm, arg, REG_A0 + int_arg_idx);
+                    int_arg_idx++;
+                }
+
+                // After evaluating this arg, if we saved previous regs, restore
+                // them now.
+                if (arg_has_call[i] &&
+                    (saved_int_count > 0 || saved_float_count > 0)) {
+                    // Restore float regs (were pushed last, pop first)
+                    for (int j = 0; j < saved_float_count; j++) {
+                        emit_pop3(vm, REG_T0);
+                        emit_rr(vm, R2FR, FREG_A0 + j, REG_T0);
+                    }
+                    // Restore int regs
+                    for (int j = 0; j < saved_int_count; j++) {
+                        emit_pop3(vm, REG_A0 + j);
+                    }
+                    saved_int_count = 0;
+                    saved_float_count = 0;
+                }
+            }
+
+            free(arg_has_call);
+            if (arg_array)
+                free(arg_array);
 
             // Emit CALLF with 3 operands: ffi_idx, nargs, double_arg_mask
             emit(vm, CALLF);
