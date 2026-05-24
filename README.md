@@ -1,6 +1,7 @@
 # jcc
 
-> **WARNING**: This is a work in progress and shouldn't be used for any serious work
+> **WARNING**: This is a work in progress and shouldn't be used for any serious work.
+> This has only been tested on `aarch64` architecture with macos.
 
 `JCC` is a **J**IT **C**11 **C**ompiler. The preprocessor/lexer/parser is built from [chibicc](http://https://github.com/rui314/chibicc) and the VM was initially built from [c4](https://github.com/rswier/c4) and [write-a-C-interpreter](https://github.com/lotabout/write-a-C-interpreter).
 
