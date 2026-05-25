@@ -100,10 +100,14 @@ static int get_opcode_operand_count(int op) {
         case MALC: case MFRE: case MCPY: case REALC: case CALC:
             return 1;  // These use register conventions, 1 operand word for register encoding
         
-        // Safety/debug opcodes with operands
-        case CHKB: case CHKI: case MARKI: case MARKA: case CHKPA: case MARKP:
-        case SCOPEIN: case SCOPEOUT: case CHKL: case MARKR: case MARKW:
-            return 1;
+        // Safety opcodes
+        case CHKB:    return 1; // [rs1_base:8|rs2_offset:8] (RR word, no trailing imm)
+        case CHKPA:   return 1; // [rs_ptr:8] (R word)
+        case MARKA:   return 4; // [rs_ptr:8] [offset] [size] [scope_id]
+        case MARKP:   return 3; // [rs_ptr:8|rs_base:8] [origin_type] [size]
+        case CHKI: case MARKI: case CHKL: case MARKR: case MARKW:
+        case SCOPEIN: case SCOPEOUT:
+            return 1; // single immediate (offset or scope_id)
         
         // SETJMP/LONGJMP: [buf_reg] [val_reg] (1 word RR format)
         case SETJMP: case LONGJMP:

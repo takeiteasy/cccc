@@ -1279,67 +1279,333 @@ int op_CALC_fn(JCC *vm) {
 // ========== Safety Opcodes ==========
 
 int op_CHKB_fn(JCC *vm) {
-    // Check array bounds (stub for now)
-    vm->pc++; // Skip operand
+    // Check array bounds.
+    // Format: [CHKB] [rs1:base, rs2:scaled_offset] (RR operand word)
+    // rs1 = base pointer, rs2 = scaled byte offset (index * element_size)
+    long long operands = *vm->pc++;
+    int rs1, rs2;
+    DECODE_RR(operands, rs1, rs2);
+
+    if (!(vm->flags & JCC_BOUNDS_CHECKS))
+        return 0;
+
+    long long base         = vm->regs[rs1];
+    long long scaled_offset = vm->regs[rs2];
+
+    if (scaled_offset < 0) {
+        printf("\n========== ARRAY BOUNDS ERROR ==========\n");
+        printf("Negative array index (scaled offset: %lld)\n", scaled_offset);
+        printf("Base address: 0x%llx\n", base);
+        printf("PC: 0x%llx (offset: %lld)\n",
+               (long long)vm->pc, (long long)(vm->pc - vm->text_seg));
+        printf("=========================================\n");
+        return -1;
+    }
+
+    if (base >= (long long)vm->heap_seg && base < (long long)vm->heap_end) {
+        AllocHeader *header = ((AllocHeader *)base) - 1;
+        if (header->magic == 0xDEADBEEF) {
+            if (scaled_offset >= (long long)header->size) {
+                printf("\n========== ARRAY BOUNDS ERROR ==========\n");
+                printf("Array index out of bounds\n");
+                printf("Scaled offset: %lld bytes\n", scaled_offset);
+                printf("Array size:    %zu bytes\n", header->size);
+                printf("Base address:  0x%llx\n", base);
+                printf("Allocated at PC offset: %lld\n", header->alloc_pc);
+                printf("PC: 0x%llx (offset: %lld)\n",
+                       (long long)vm->pc, (long long)(vm->pc - vm->text_seg));
+                printf("=========================================\n");
+                return -1;
+            }
+        }
+    }
     return 0;
 }
 
 int op_CHKI_fn(JCC *vm) {
-    // Check initialization (stub for now)
-    vm->pc++; // Skip operand
+    // Check initialization: fail if variable at bp+offset has not been written.
+    // Format: [CHKI] [offset:i64]
+    long long offset = *vm->pc++;
+
+    if (!(vm->flags & JCC_UNINIT_DETECTION))
+        return 0;
+
+    long long addr = (long long)(vm->bp + offset);
+    if (!hashmap_get_int(&vm->init_state, addr)) {
+        printf("\n========== UNINITIALIZED VARIABLE READ ==========\n");
+        printf("Attempted to read uninitialized variable\n");
+        printf("Stack offset: %lld\n", offset);
+        printf("Address:      0x%llx\n", addr);
+        printf("BP:           0x%llx\n", (long long)vm->bp);
+        printf("PC:           0x%llx (offset: %lld)\n",
+               (long long)vm->pc, (long long)(vm->pc - vm->text_seg));
+        printf("================================================\n");
+        return -1;
+    }
     return 0;
 }
 
 int op_MARKI_fn(JCC *vm) {
-    // Mark as initialized (stub for now)
-    vm->pc++; // Skip operand
+    // Mark variable at bp+offset as initialized.
+    // Format: [MARKI] [offset:i64]
+    long long offset = *vm->pc++;
+
+    if (!(vm->flags & JCC_UNINIT_DETECTION))
+        return 0;
+
+    long long addr = (long long)(vm->bp + offset);
+    hashmap_put_int(&vm->init_state, addr, (void *)1);
     return 0;
 }
 
 int op_MARKA_fn(JCC *vm) {
-    // Mark address (stub for now)
-    vm->pc += 3; // Skip 3 operands
+    // Mark a stack address for dangling-pointer detection.
+    // Format: [MARKA] [rs:ptr] [offset:i64] [size:i64] [scope_id:i64]
+    long long operands = *vm->pc++;
+    int rs;
+    DECODE_R(operands, rs);
+    long long offset   = *vm->pc++;
+    size_t    size     = (size_t)*vm->pc++;
+    int       scope_id = (int)*vm->pc++;
+
+    if (!(vm->flags & JCC_DANGLING_DETECT) && !(vm->flags & JCC_STACK_INSTR))
+        return 0;
+
+    long long ptr = vm->regs[rs];
+
+    if (vm->debug_vm) {
+        printf("MARKA: tracking ptr 0x%llx (bp=0x%llx offset=%lld size=%zu scope=%d)\n",
+               ptr, (long long)vm->bp, offset, size, scope_id);
+    }
+
+    StackPtrInfo *info = malloc(sizeof(StackPtrInfo));
+    if (!info) {
+        fprintf(stderr, "MARKA: failed to allocate StackPtrInfo\n");
+        return 0;
+    }
+    info->bp       = (long long)vm->bp;
+    info->offset   = offset;
+    info->size     = size;
+    info->scope_id = scope_id;
+    hashmap_put_int(&vm->stack_ptrs, ptr, info);
     return 0;
 }
 
 int op_CHKPA_fn(JCC *vm) {
-    // Check pointer arithmetic (stub for now)
+    // Check pointer arithmetic result against its recorded provenance.
+    // Format: [CHKPA] [rs:ptr_result]
+    long long operands = *vm->pc++;
+    int rs;
+    DECODE_R(operands, rs);
+
+    if (!(vm->flags & JCC_INVALID_ARITH) || !(vm->flags & JCC_PROVENANCE_TRACK))
+        return 0;
+
+    long long ptr = vm->regs[rs];
+    if (ptr == 0)
+        return 0;
+
+    ProvenanceInfo *info = (ProvenanceInfo *)hashmap_get_int(&vm->provenance, ptr);
+    if (info) {
+        long long end = info->base + (long long)info->size;
+        if (ptr < info->base || ptr > end) {
+            const char *origins[] = {"HEAP", "STACK", "GLOBAL"};
+            printf("\n========== INVALID POINTER ARITHMETIC ==========\n");
+            printf("Pointer arithmetic result outside object bounds\n");
+            printf("Origin:      %s\n", origins[info->origin_type]);
+            printf("Object base: 0x%llx\n", info->base);
+            printf("Object size: %zu bytes\n", info->size);
+            printf("Result ptr:  0x%llx\n", ptr);
+            printf("Offset:      %lld bytes from base\n", ptr - info->base);
+            printf("PC:          0x%llx (offset: %lld)\n",
+                   (long long)vm->pc, (long long)(vm->pc - vm->text_seg));
+            printf("===============================================\n");
+            return -1;
+        }
+    }
     return 0;
 }
 
 int op_MARKP_fn(JCC *vm) {
-    // Mark provenance (stub for now)
-    vm->pc += 3; // Skip 3 operands
+    // Record provenance for a pointer (origin, base, size).
+    // Format: [MARKP] [rs_ptr:8 | rs_base:8] [origin_type:i64] [size:i64]
+    long long operands = *vm->pc++;
+    int rs_ptr, rs_base;
+    DECODE_RR(operands, rs_ptr, rs_base);
+    int    origin_type = (int)*vm->pc++;
+    size_t size        = (size_t)*vm->pc++;
+
+    if (!(vm->flags & JCC_PROVENANCE_TRACK))
+        return 0;
+
+    long long ptr  = vm->regs[rs_ptr];
+    long long base = vm->regs[rs_base];
+
+    ProvenanceInfo *info = malloc(sizeof(ProvenanceInfo));
+    if (!info)
+        return 0;
+    info->origin_type = origin_type;
+    info->base        = base;
+    info->size        = size;
+    hashmap_put_int(&vm->provenance, ptr, info);
     return 0;
 }
 
 int op_SCOPEIN_fn(JCC *vm) {
-    // Enter scope (stub for now)
-    vm->pc++; // Skip operand
+    // Activate all stack variables belonging to scope_id.
+    // Format: [SCOPEIN] [scope_id:i64]
+    int scope_id = (int)*vm->pc++;
+
+    if (!(vm->flags & JCC_STACK_INSTR))
+        return 0;
+
+    if (vm->debug_vm)
+        printf("SCOPEIN: entering scope %d (bp=0x%llx)\n", scope_id, (long long)vm->bp);
+
+    for (int i = 0; i < vm->stack_var_meta.capacity; i++) {
+        HashEntry *ent = &vm->stack_var_meta.buckets[i];
+        if (!ent->key || ent->key == (char *)-1)
+            continue;
+        StackVarMeta *meta = (StackVarMeta *)ent->val;
+        if (meta && meta->scope_id == scope_id) {
+            meta->is_alive = 1;
+            meta->bp       = (long long)vm->bp;
+            if (vm->debug_vm)
+                printf("  Activated '%s' at bp%+lld\n", meta->name, meta->offset);
+        }
+    }
     return 0;
 }
 
 int op_SCOPEOUT_fn(JCC *vm) {
-    // Exit scope (stub for now)
-    vm->pc++; // Skip operand
+    // Deactivate variables in scope_id and detect dangling pointers.
+    // Format: [SCOPEOUT] [scope_id:i64]
+    int scope_id = (int)*vm->pc++;
+
+    if (!(vm->flags & JCC_STACK_INSTR))
+        return 0;
+
+    if (vm->debug_vm)
+        printf("SCOPEOUT: exiting scope %d (bp=0x%llx)\n", scope_id, (long long)vm->bp);
+
+    for (int i = 0; i < vm->stack_var_meta.capacity; i++) {
+        HashEntry *ent = &vm->stack_var_meta.buckets[i];
+        if (!ent->key || ent->key == (char *)-1)
+            continue;
+        StackVarMeta *meta = (StackVarMeta *)ent->val;
+        if (meta && meta->scope_id == scope_id && meta->bp == (long long)vm->bp) {
+            meta->is_alive = 0;
+            if (vm->debug_vm)
+                printf("  Deactivated '%s' at bp%+lld (reads=%lld writes=%lld)\n",
+                       meta->name, meta->offset, meta->read_count, meta->write_count);
+        }
+    }
+
+    if (vm->flags & JCC_DANGLING_DETECT) {
+        for (int i = 0; i < vm->stack_ptrs.capacity; i++) {
+            HashEntry *ent = &vm->stack_ptrs.buckets[i];
+            if (!ent->key || ent->key == (char *)-1)
+                continue;
+            StackPtrInfo *ptr_info = (StackPtrInfo *)ent->val;
+            if (ptr_info && ptr_info->scope_id == scope_id &&
+                ptr_info->bp == (long long)vm->bp) {
+                if (vm->flags & JCC_STACK_INSTR_ERRORS) {
+                    printf("\n========== DANGLING POINTER DETECTED ==========\n");
+                    printf("Pointer to stack variable in scope %d still exists\n", scope_id);
+                    printf("BP offset: %lld\n", ptr_info->offset);
+                    printf("Scope is now exiting — this pointer will dangle\n");
+                    printf("PC: 0x%llx (offset: %lld)\n",
+                           (long long)vm->pc, (long long)(vm->pc - vm->text_seg));
+                    printf("==============================================\n");
+                    return -1;
+                } else if (vm->debug_vm) {
+                    printf("WARNING: Dangling pointer detected for scope %d\n", scope_id);
+                }
+            }
+        }
+    }
     return 0;
 }
 
 int op_CHKL_fn(JCC *vm) {
-    // Check liveness (stub for now)
-    vm->pc++; // Skip operand
+    // Check variable liveness before access (use-after-scope / use-after-return).
+    // Format: [CHKL] [offset:i64]
+    long long offset = *vm->pc++;
+
+    if (!(vm->flags & JCC_STACK_INSTR))
+        return 0;
+
+    StackVarMeta *meta =
+        (StackVarMeta *)hashmap_get_int(&vm->stack_var_meta, offset);
+    if (!meta)
+        return 0;
+
+    if (meta->bp != (long long)vm->bp && meta->bp != 0) {
+        if (vm->flags & JCC_STACK_INSTR_ERRORS) {
+            printf("\n========== USE AFTER RETURN DETECTED ==========\n");
+            printf("Variable '%s' at bp%+lld accessed after function return\n",
+                   meta->name, meta->offset);
+            printf("Variable BP:  0x%llx\n", meta->bp);
+            printf("Current BP:   0x%llx\n", (long long)vm->bp);
+            printf("PC:           0x%llx (offset: %lld)\n",
+                   (long long)vm->pc, (long long)(vm->pc - vm->text_seg));
+            printf("==============================================\n");
+            return -1;
+        }
+    }
+
+    if (!meta->is_alive) {
+        if (vm->flags & JCC_STACK_INSTR_ERRORS) {
+            printf("\n========== USE AFTER SCOPE DETECTED ==========\n");
+            printf("Variable '%s' at bp%+lld accessed after scope exit\n",
+                   meta->name, meta->offset);
+            printf("Scope ID: %d\n", meta->scope_id);
+            printf("PC:       0x%llx (offset: %lld)\n",
+                   (long long)vm->pc, (long long)(vm->pc - vm->text_seg));
+            printf("=============================================\n");
+            return -1;
+        } else if (vm->debug_vm) {
+            printf("WARNING: Variable '%s' accessed after scope exit\n", meta->name);
+        }
+    }
     return 0;
 }
 
 int op_MARKR_fn(JCC *vm) {
-    // Mark read (stub for now)
-    vm->pc++; // Skip operand
+    // Record a read access to the variable at bp+offset.
+    // Format: [MARKR] [offset:i64]
+    long long offset = *vm->pc++;
+
+    if (!(vm->flags & JCC_STACK_INSTR))
+        return 0;
+
+    StackVarMeta *meta =
+        (StackVarMeta *)hashmap_get_int(&vm->stack_var_meta, offset);
+    if (meta && meta->bp == (long long)vm->bp) {
+        meta->read_count++;
+        if (vm->debug_vm)
+            printf("MARKR: '%s' read (count=%lld)\n", meta->name, meta->read_count);
+    }
     return 0;
 }
 
 int op_MARKW_fn(JCC *vm) {
-    // Mark write (stub for now)
-    vm->pc++; // Skip operand
+    // Record a write access to the variable at bp+offset; marks it initialized.
+    // Format: [MARKW] [offset:i64]
+    long long offset = *vm->pc++;
+
+    if (!(vm->flags & JCC_STACK_INSTR))
+        return 0;
+
+    StackVarMeta *meta =
+        (StackVarMeta *)hashmap_get_int(&vm->stack_var_meta, offset);
+    if (meta && meta->bp == (long long)vm->bp) {
+        meta->write_count++;
+        if (!meta->initialized)
+            meta->initialized = 1;
+        if (vm->debug_vm)
+            printf("MARKW: '%s' write (count=%lld)\n", meta->name, meta->write_count);
+    }
     return 0;
 }
 

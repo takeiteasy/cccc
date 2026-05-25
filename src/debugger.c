@@ -354,8 +354,7 @@ static int disassemble_instruction(long long *pc, long long *text_seg, long long
             size = 2;
             break;
 
-        // Safety opcodes with operand
-        case CHKB:
+        // Safety opcodes — single immediate (offset or scope_id)
         case CHKI:
         case MARKI:
         case SCOPEIN:
@@ -363,19 +362,48 @@ static int disassemble_instruction(long long *pc, long long *text_seg, long long
         case CHKL:
         case MARKR:
         case MARKW:
-            if (pc + 1 < text_end) {
+            if (pc + 1 < text_end)
                 printf(" %lld", pc[1]);
+            size = 2;
+            break;
+
+        // CHKB: [rs1_base:8|rs2_offset:8] operand word (RR, no trailing imm)
+        case CHKB:
+            if (pc + 1 < text_end) {
+                int rs1 = (int)(pc[1] & 0xFF);
+                int rs2 = (int)((pc[1] >> 8) & 0xFF);
+                printf(" r%d, r%d", rs1, rs2);
             }
             size = 2;
             break;
 
+        // CHKPA: [rs:8] operand word
+        case CHKPA:
+            if (pc + 1 < text_end) {
+                int rs = (int)(pc[1] & 0xFF);
+                printf(" r%d", rs);
+            }
+            size = 2;
+            break;
+
+        // MARKA: [rs_ptr:8] [offset] [size] [scope_id]
         case MARKA:
+            if (pc + 4 < text_end) {
+                int rs = (int)(pc[1] & 0xFF);
+                printf(" r%d, %lld, %lld, %lld", rs, pc[2], pc[3], pc[4]);
+            }
+            size = 5;
+            break;
+
+        // MARKP: [rs_ptr:8|rs_base:8] [origin_type] [size]
         case MARKP:
-             if (pc + 3 < text_end) {
-                printf(" %lld, %lld, %lld", pc[1], pc[2], pc[3]);
-             }
-             size = 4;
-             break;
+            if (pc + 3 < text_end) {
+                int rs1 = (int)(pc[1] & 0xFF);
+                int rs2 = (int)((pc[1] >> 8) & 0xFF);
+                printf(" r%d, r%d, %lld, %lld", rs1, rs2, pc[2], pc[3]);
+            }
+            size = 4;
+            break;
 
         // CHKP3/CHKA3/CHKT3 (register-based safety)
         case CHKP3:

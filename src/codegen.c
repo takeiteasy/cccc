@@ -387,6 +387,88 @@ static int calculate_chain_depth(Obj *current_fn, Obj *owner_fn) {
     return depth;
 }
 
+// ========== Safety Instrumentation Helpers ==========
+
+// Register stack variable metadata for runtime instrumentation.
+// Uses integer key (var->offset) so ops can look it up with hashmap_get_int.
+static void add_stack_var_meta(JCC *vm, const char *name, long long offset,
+                               Type *ty, int scope_id) {
+    if (!(vm->flags & JCC_STACK_INSTR))
+        return;
+    StackVarMeta *meta = calloc(1, sizeof(StackVarMeta));
+    if (!meta)
+        error("failed to allocate stack variable metadata");
+    meta->name     = (char *)name;
+    meta->offset   = offset;
+    meta->ty       = ty;
+    meta->scope_id = scope_id;
+    meta->is_alive = 0;
+    hashmap_put_int(&vm->stack_var_meta, offset, meta);
+}
+
+// Emit SCOPEIN for scope_id.
+static void emit_scopein(JCC *vm, int scope_id) {
+    emit(vm, SCOPEIN);
+    *++vm->text_ptr = scope_id;
+}
+
+// Emit SCOPEOUT for scope_id.
+static void emit_scopeout(JCC *vm, int scope_id) {
+    emit(vm, SCOPEOUT);
+    *++vm->text_ptr = scope_id;
+}
+
+// Emit CHKI (check initialized) for local at bp+offset.
+static void emit_chki(JCC *vm, long long offset) {
+    emit(vm, CHKI);
+    *++vm->text_ptr = offset;
+}
+
+// Emit MARKI (mark initialized) for local at bp+offset.
+static void emit_marki(JCC *vm, long long offset) {
+    emit(vm, MARKI);
+    *++vm->text_ptr = offset;
+}
+
+// Emit CHKL (check liveness) for local at bp+offset.
+static void emit_chkl(JCC *vm, long long offset) {
+    emit(vm, CHKL);
+    *++vm->text_ptr = offset;
+}
+
+// Emit MARKR (mark read) for local at bp+offset.
+static void emit_markr(JCC *vm, long long offset) {
+    emit(vm, MARKR);
+    *++vm->text_ptr = offset;
+}
+
+// Emit MARKW (mark write) for local at bp+offset.
+static void emit_markw(JCC *vm, long long offset) {
+    emit(vm, MARKW);
+    *++vm->text_ptr = offset;
+}
+
+// Emit MARKA (mark address for dangling detection).
+// rs holds the pointer; offset/size/scope_id are compile-time immediates.
+static void emit_marka(JCC *vm, int rs, long long offset, size_t size,
+                       int scope_id) {
+    emit(vm, MARKA);
+    *++vm->text_ptr = ENCODE_R(rs);
+    *++vm->text_ptr = offset;
+    *++vm->text_ptr = (long long)size;
+    *++vm->text_ptr = scope_id;
+}
+
+// Emit MARKP (mark provenance).
+// rs_ptr and rs_base hold the pointer and its allocation base.
+static void emit_markp(JCC *vm, int rs_ptr, int rs_base, int origin_type,
+                       size_t size) {
+    emit(vm, MARKP);
+    *++vm->text_ptr = ENCODE_RR(rs_ptr, rs_base);
+    *++vm->text_ptr = origin_type;
+    *++vm->text_ptr = (long long)size;
+}
+
 // ========== Address Generation ==========
 
 // Generate address of an lvalue into dest_reg
@@ -581,6 +663,18 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                 .function = node->var;
             vm->compiler.num_func_addr_patches++;
         } else {
+            // Stack instrumentation for scalar locals (not arrays/structs).
+            if (node->var->is_local && !node->var->is_param &&
+                node->var->ty && node->var->ty->kind != TY_ARRAY &&
+                node->var->ty->kind != TY_STRUCT &&
+                node->var->ty->kind != TY_UNION) {
+                if (vm->flags & JCC_STACK_INSTR)
+                    emit_chkl(vm, node->var->offset);
+                if (vm->flags & JCC_UNINIT_DETECTION)
+                    emit_chki(vm, node->var->offset);
+                if (vm->flags & JCC_STACK_INSTR)
+                    emit_markr(vm, node->var->offset);
+            }
             // For float types, FREG_A0-A7 have the same raw numbers as
             // REG_A0-A7 Using dest_reg for address calculation would clobber
             // integer regs Solution: use a temp register for address, then load
@@ -611,6 +705,16 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
 
     case ND_ADDR:
         gen_addr(vm, node->lhs, dest_reg);
+        // Track explicit address-of a local var for dangling detection and provenance.
+        if (node->lhs->kind == ND_VAR && node->lhs->var->is_local &&
+            !node->lhs->var->is_block_var) {
+            size_t var_size = node->lhs->var->ty ? node->lhs->var->ty->size : 8;
+            if (vm->flags & (JCC_DANGLING_DETECT | JCC_STACK_INSTR))
+                emit_marka(vm, dest_reg, node->lhs->var->offset, var_size,
+                           vm->current_function_scope_id);
+            if (vm->flags & JCC_PROVENANCE_TRACK)
+                emit_markp(vm, dest_reg, dest_reg, 1 /* STACK */, var_size);
+        }
         return;
 
     case ND_NEG:
@@ -780,7 +884,19 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             default:
                 error("unsupported int op");
             }
+            // For pointer add/sub, emit bounds check (CHKB) before the add and
+            // provenance check (CHKPA) after.
+            bool is_ptr_arith = (node->kind == ND_ADD || node->kind == ND_SUB) &&
+                                node->lhs->ty && node->lhs->ty->base;
+            if (is_ptr_arith && (vm->flags & JCC_BOUNDS_CHECKS))
+                emit_rr(vm, CHKB, dest_reg, r_rhs);
+
             emit_rrr(vm, op, dest_reg, dest_reg, r_rhs);
+
+            if (is_ptr_arith && (vm->flags & (JCC_INVALID_ARITH | JCC_PROVENANCE_TRACK))) {
+                emit(vm, CHKPA);
+                *++vm->text_ptr = ENCODE_R(dest_reg);
+            }
         }
 
         free_temp_reg(r_rhs);
@@ -882,6 +998,18 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         } else {
             // Standard store
             emit_store(vm, node->ty, r_val, r_addr);
+        }
+
+        // Stack instrumentation: record write and mark initialized (scalars only).
+        if (node->lhs->kind == ND_VAR && node->lhs->var->is_local &&
+            !node->lhs->var->is_param &&
+            node->lhs->var->ty && node->lhs->var->ty->kind != TY_ARRAY &&
+            node->lhs->var->ty->kind != TY_STRUCT &&
+            node->lhs->var->ty->kind != TY_UNION) {
+            if (vm->flags & JCC_STACK_INSTR)
+                emit_markw(vm, node->lhs->var->offset);
+            if (vm->flags & JCC_UNINIT_DETECTION)
+                emit_marki(vm, node->lhs->var->offset);
         }
 
         free_temp_reg(r_addr);
@@ -1655,11 +1783,19 @@ static void gen_stmt(JCC *vm, Node *node) {
         return;
 
     switch (node->kind) {
-    case ND_BLOCK:
+    case ND_BLOCK: {
+        int block_scope_id = -1;
+        if (vm->flags & JCC_STACK_INSTR) {
+            block_scope_id = vm->current_scope_id++;
+            emit_scopein(vm, block_scope_id);
+        }
         for (Node *n = node->body; n; n = n->next) {
             gen_stmt(vm, n);
         }
+        if (block_scope_id >= 0)
+            emit_scopeout(vm, block_scope_id);
         return;
+    }
 
     case ND_EXPR_STMT:
         reset_temp_regs();
@@ -1701,6 +1837,9 @@ static void gen_stmt(JCC *vm, Node *node) {
                 gen_expr(vm, node->lhs, REG_A0);
             }
         }
+        // Deactivate function-level scope before returning.
+        if (vm->flags & JCC_STACK_INSTR)
+            emit_scopeout(vm, vm->current_function_scope_id);
         emit(vm, LEV3);
         return;
 
@@ -2104,12 +2243,38 @@ void gen_function(JCC *vm, Obj *fn) {
         }
     }
 
+    // Assign a function-level scope ID for stack instrumentation.
+    int fn_scope_id = vm->current_scope_id++;
+    vm->current_function_scope_id = fn_scope_id;
+
+    // Register all params and locals in the variable metadata map.
+    for (Obj *param = fn->params; param; param = param->next)
+        add_stack_var_meta(vm, param->name, param->offset, param->ty, fn_scope_id);
+    for (Obj *var = fn->locals; var; var = var->next) {
+        bool is_param = false;
+        for (Obj *p = fn->params; p; p = p->next)
+            if (p == var) { is_param = true; break; }
+        bool is_builtin = (var == fn->va_area) || (var == fn->alloca_bottom);
+        if (!is_param && !is_builtin)
+            add_stack_var_meta(vm, var->name, var->offset, var->ty, fn_scope_id);
+    }
+
     // Emit ENT3: [stack_size:32|param_count:32] [float_param_mask]
     long long ent3_operand =
         ((long long)stack_size) | (((long long)reg_param_count) << 32);
     emit(vm, ENT3);
     *++vm->text_ptr = ent3_operand;
     *++vm->text_ptr = float_param_mask;
+
+    // Activate function-level scope (marks params/locals as alive).
+    if (vm->flags & JCC_STACK_INSTR)
+        emit_scopein(vm, fn_scope_id);
+
+    // Mark parameters initialized (they arrive via registers).
+    if (vm->flags & JCC_UNINIT_DETECTION) {
+        for (Obj *param = fn->params; param; param = param->next)
+            emit_marki(vm, param->offset);
+    }
 
     // Allocate heap storage for __block variables
     // Each __block variable gets heap allocation of its type's size
@@ -2138,6 +2303,9 @@ void gen_function(JCC *vm, Obj *fn) {
     if (strcmp(fn->name, "main") == 0) {
         emit_li3(vm, REG_A0, 0);
     }
+    // Deactivate function scope (for fall-through returns).
+    if (vm->flags & JCC_STACK_INSTR)
+        emit_scopeout(vm, fn_scope_id);
     emit(vm, LEV3);
 }
 
