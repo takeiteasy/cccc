@@ -505,6 +505,17 @@ int op_FDIV3_fn(JCC *vm) {
     return 0;
 }
 
+int op_FMOV3_fn(JCC *vm) {
+    // fregs[rd] = fregs[rs1]
+    // Format: [FMOV3] [rd:8|rs1:8|unused:48]
+    long long operands = *vm->pc++;
+    int rd, rs1;
+    DECODE_RR(operands, rd, rs1);
+
+    vm->fregs[rd] = vm->fregs[rs1];
+    return 0;
+}
+
 int op_FNEG3_fn(JCC *vm) {
     // fregs[rd] = -fregs[rs1]
     // Format: [FNEG3] [rd:8|rs1:8|unused:48]

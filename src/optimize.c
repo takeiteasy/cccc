@@ -338,7 +338,7 @@ static void opt_constant_fold(JCC *vm) {
 // Uses a sliding window approach with pattern matching.
 //
 // Patterns:
-// 1. MOV3 ra, ra -> NOP (self-move)
+// 1. MOV3/FMOV3 ra, ra -> NOP (self-move)
 // 2. LI3 rx, A; LI3 rx, B -> LI3 rx, B (overwritten load)
 // 3. PSH3 rx; POP3 rx -> NOP (push/pop same register)
 // 4. JMP to next instruction -> NOP
@@ -367,12 +367,12 @@ static void opt_peephole(JCC *vm) {
     long long *end = vm->text_ptr;
     int opt_count = 0;
 
-    // Pattern 1: MOV3 ra, ra -> NOP (self-move)
+    // Pattern 1: MOV3/FMOV3 ra, ra -> NOP (self-move)
     for (long long *pc = start; pc < end; ) {
         int op = get_opcode(pc);
         int size = get_instr_size(op);
 
-        if (op == MOV3) {
+        if (op == MOV3 || op == FMOV3) {
             int rd = pc[1] & 0xFF;
             int rs = (pc[1] >> 8) & 0xFF;
             if (rd == rs && rd != 0) {

@@ -241,7 +241,7 @@ static void emit_frrr(JCC *vm, int op, int rd, int rs1, int rs2) {
     *++vm->text_ptr = ENCODE_RRR(rd, rs1, rs2);
 }
 
-// Float 2-register ops (for FNEG3)
+// Float 2-register ops
 static void emit_frr(JCC *vm, int op, int rd, int rs1) {
     emit(vm, op);
     *++vm->text_ptr = ENCODE_RR(rd, rs1);
@@ -267,6 +267,10 @@ static void emit_addi3(JCC *vm, int rd, int rs, long long imm) {
 // MOV3: rd = rs
 static void emit_mov3(JCC *vm, int rd, int rs) {
     emit_rrr(vm, MOV3, rd, rs, 0);
+}
+
+static void emit_fmov3(JCC *vm, int rd, int rs) {
+    emit_frr(vm, FMOV3, rd, rs);
 }
 
 // Load operations based on type
@@ -1283,8 +1287,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             // Result in REG_A0/FREG_A0
             if (is_flonum(node->ty)) {
                 if (dest_reg != FREG_A0) {
-                    emit_frr(vm, FNEG3, dest_reg, FREG_A0);
-                    emit_frr(vm, FNEG3, dest_reg, dest_reg);
+                    emit_fmov3(vm, dest_reg, FREG_A0);
                 }
             } else {
                 if (dest_reg != REG_A0) {
@@ -1524,8 +1527,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         // Result in REG_A0/FREG_A0
         if (is_flonum(node->ty)) {
             if (dest_reg != FREG_A0) {
-                emit_frr(vm, FNEG3, dest_reg, FREG_A0); // TODO: Need FMOV3
-                emit_frr(vm, FNEG3, dest_reg, dest_reg);
+                emit_fmov3(vm, dest_reg, FREG_A0);
             }
         } else {
             if (dest_reg != REG_A0) {
@@ -1761,8 +1763,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         // Result is in REG_A0 or FREG_A0
         if (is_flonum(node->ty)) {
             if (dest_reg != FREG_A0) {
-                emit_frr(vm, FNEG3, dest_reg, FREG_A0);
-                emit_frr(vm, FNEG3, dest_reg, dest_reg);
+                emit_fmov3(vm, dest_reg, FREG_A0);
             }
         } else if (dest_reg != REG_A0) {
             emit_mov3(vm, dest_reg, REG_A0);

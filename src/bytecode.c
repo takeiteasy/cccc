@@ -38,35 +38,35 @@ static int get_opcode_operand_count(int op) {
         case JMP:
         case CALL:
             return 1;
-        
+
         // Control flow with register + address (2 words: [rs] [target])
         case JZ3:
         case JNZ3:
             return 2;
-        
+
         // RI format: [rd] [immediate] (2 words)
         case LI3:
         case LEA3:
             return 2;
-        
+
         // RRI format: [rd|rs] [immediate] (2 words)
         case ADDI3:
         case CHKA3:
         case CHKT3:
             return 2;
-        
+
         // ENT3: [stack_size|param_count] [float_param_mask] (2 words)
         case ENT3:
             return 2;
-        
+
         // ADJ has 1 immediate operand
         case ADJ:
             return 1;
-        
+
         // JMPT (jump table): [table_addr] [count] [default_addr] (3 words)
         case JMPT:
             return 3;
-        
+
         // RRR format: [rd|rs1|rs2] (1 word)
         case ADD3: case SUB3: case MUL3: case DIV3: case MOD3:
         case AND3: case OR3: case XOR3: case SHL3: case SHR3:
@@ -75,31 +75,31 @@ static int get_opcode_operand_count(int op) {
         case FADD3: case FSUB3: case FMUL3: case FDIV3:
         case FEQ3: case FNE3: case FLT3: case FLE3: case FGT3: case FGE3:
             return 1;
-        
+
         // RR format: [rd|rs] (1 word)
         case NEG3: case NOT3: case BNOT3:
         case LDR_B: case LDR_H: case LDR_W: case LDR_D:
         case STR_B: case STR_H: case STR_W: case STR_D:
         case FLDR: case FSTR:
-        case FNEG3:
+        case FMOV3: case FNEG3:
         case I2F3: case F2I3: case FR2R: case R2FR:
         case SX1: case SX2: case SX4: case ZX1: case ZX2: case ZX4:
         case CHKP3:
             return 1;
-        
+
         // R format: [rs] (1 word)
         case PSH3: case POP3:
         case CALLI: case JMPI:
             return 1;
-        
+
         // CALLF: [ffi_index] [arg_count] (2 words)
         case CALLF:
             return 2;
-        
+
         // Memory ops: varying operand counts
         case MALC: case MFRE: case MCPY: case REALC: case CALC:
             return 1;  // These use register conventions, 1 operand word for register encoding
-        
+
         // Safety opcodes
         case CHKB:    return 1; // [rs1_base:8|rs2_offset:8] (RR word, no trailing imm)
         case CHKPA:   return 1; // [rs_ptr:8] (R word)
@@ -108,16 +108,16 @@ static int get_opcode_operand_count(int op) {
         case CHKI: case MARKI: case CHKL: case MARKR: case MARKW:
         case SCOPEIN: case SCOPEOUT:
             return 1; // single immediate (offset or scope_id)
-        
+
         // SETJMP/LONGJMP: [buf_reg] [val_reg] (1 word RR format)
         case SETJMP: case LONGJMP:
             return 1;
-        
+
         // Zero operand opcodes
         case LEV3:
         case RETBUF:
             return 0;
-        
+
         default:
             return 0;  // Unknown - assume no operands
     }
@@ -147,18 +147,18 @@ int cc_save_bytecode(JCC *vm, const char *path) {
         fprintf(stderr, "error: invalid arguments to cc_save_bytecode\n");
         return -1;
     }
-    
+
     if (!vm->text_seg || !vm->data_seg) {
         fprintf(stderr, "error: no bytecode to save (compile first)\n");
         return -1;
     }
-    
+
     FILE *f = fopen(path, "wb");
     if (!f) {
         fprintf(stderr, "error: failed to open %s for writing: %s\n", path, strerror(errno));
         return -1;
     }
-    
+
     // Calculate sizes
     long long text_size = (vm->text_ptr - vm->text_seg + 1) * sizeof(long long);
     long long data_size = vm->data_ptr - vm->data_seg;
@@ -166,7 +166,7 @@ int cc_save_bytecode(JCC *vm, const char *path) {
     long long num_instructions = text_size / sizeof(long long);
     long long text_base = (long long)vm->text_seg;
     long long text_end = text_base + text_size;
-    
+
     // Create a copy of text segment for address conversion
     long long *text_copy = malloc(text_size);
     if (!text_copy) {
@@ -175,7 +175,7 @@ int cc_save_bytecode(JCC *vm, const char *path) {
         return -1;
     }
     memcpy(text_copy, vm->text_seg, text_size);
-    
+
     // Mark which positions are operands (not opcodes)
     char *is_operand = calloc(num_instructions, 1);
     if (!is_operand) {
@@ -194,11 +194,11 @@ int cc_save_bytecode(JCC *vm, const char *path) {
             is_operand[i + j] = 1;
         }
     }
-    
+
     // Convert absolute addresses to relative offsets
     for (long long i = 0; i < num_instructions; i++) {
         if (is_operand[i]) continue;
-        
+
         int op = text_copy[i];
         if (opcode_has_address(op)) {
             int addr_idx = get_address_operand_index(op);
@@ -217,41 +217,41 @@ int cc_save_bytecode(JCC *vm, const char *path) {
         }
     }
     free(is_operand);
-    
+
     // Write header
     if (fwrite(JCC_MAGIC, 1, 4, f) != 4) goto write_error;
-    
+
     int version = 1;  // Version 1 for register-based VM
     if (fwrite(&version, sizeof(int), 1, f) != 1) goto write_error;
-    
+
     uint32_t flags = vm->flags;
     if (fwrite(&flags, sizeof(uint32_t), 1, f) != 1) goto write_error;
-    
+
     if (fwrite(&text_size, sizeof(long long), 1, f) != 1) goto write_error;
     if (fwrite(&data_size, sizeof(long long), 1, f) != 1) goto write_error;
     if (fwrite(&main_offset, sizeof(long long), 1, f) != 1) goto write_error;
-    
+
     // Write text segment
     if (fwrite(text_copy, 1, text_size, f) != (size_t)text_size) goto write_error;
     free(text_copy);
     text_copy = NULL;
-    
+
     // Write data segment
     if (data_size > 0) {
         if (fwrite(vm->data_seg, 1, data_size, f) != (size_t)data_size) goto write_error;
     }
-    
+
     fclose(f);
-    
+
     if (vm->debug_vm) {
         printf("Saved bytecode to %s:\n", path);
         printf("  Text size: %lld bytes (%lld instructions)\n", text_size, num_instructions);
         printf("  Data size: %lld bytes\n", data_size);
         printf("  Main offset: %lld\n", main_offset);
     }
-    
+
     return 0;
-    
+
 write_error:
     fprintf(stderr, "error: failed to write bytecode: %s\n", strerror(errno));
     if (text_copy) free(text_copy);
@@ -277,7 +277,7 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
         return -1;
     }
     cursor += 4;
-    
+
     // Read version - only accept version 1
     READ_AND_INCR(version, int);
     if (version != 1) {
@@ -293,12 +293,12 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
     READ_AND_INCR(text_size, long long);
     READ_AND_INCR(data_size, long long);
     READ_AND_INCR(main_offset, long long);
-    
+
     if (text_size < 0 || data_size < 0 || cursor + text_size + data_size > end) {
         fprintf(stderr, "error: invalid bytecode sizes\n");
         return -1;
     }
-    
+
     // Allocate segments
     vm->text_seg = calloc(vm->poolsize, sizeof(long long));
     vm->data_seg = calloc(vm->poolsize, 1);
@@ -308,20 +308,20 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
         fprintf(stderr, "error: failed to allocate memory segments\n");
         return -1;
     }
-    
+
     // Copy text segment
     memcpy(vm->text_seg, cursor, text_size);
     cursor += text_size;
-    
+
     // Copy data segment
     if (data_size > 0) {
         memcpy(vm->data_seg, cursor, data_size);
         cursor += data_size;
     }
-    
+
     // Convert relative offsets back to absolute addresses
     long long num_instructions = text_size / sizeof(long long);
-    
+
     // Mark operand positions
     char *is_operand = calloc(num_instructions, 1);
     if (!is_operand) {
@@ -338,11 +338,11 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
             is_operand[i + j] = 1;
         }
     }
-    
+
     // Convert offsets to addresses
     for (long long i = 0; i < num_instructions; i++) {
         if (is_operand[i]) continue;
-        
+
         int op = vm->text_seg[i];
         if (opcode_has_address(op)) {
             int addr_idx = get_address_operand_index(op);
@@ -361,7 +361,7 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
         }
     }
     free(is_operand);
-    
+
     // Set up pointers
     vm->text_ptr = vm->text_seg + (text_size / sizeof(long long)) - 1;
     vm->data_ptr = vm->data_seg + data_size;
@@ -369,14 +369,14 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
     vm->heap_end = vm->heap_seg + vm->poolsize;
     vm->free_list = NULL;
     vm->text_seg[0] = main_offset;  // Restore main offset
-    
+
     if (vm->debug_vm) {
         printf("Loaded bytecode:\n");
         printf("  Text size: %lld bytes (%lld instructions)\n", text_size, num_instructions);
         printf("  Data size: %lld bytes\n", data_size);
         printf("  Main offset: %lld\n", main_offset);
     }
-    
+
     return 0;
 #undef READ_AND_INCR
 }
@@ -396,21 +396,21 @@ int cc_load_bytecode(JCC *vm, const char *path) {
     fseek(f, 0, SEEK_END);
     size_t file_size = ftell(f);
     fseek(f, 0, SEEK_SET);
-    
+
     char *data = malloc(file_size);
     if (!data) {
         fprintf(stderr, "error: failed to allocate memory for bytecode\n");
         fclose(f);
         return -1;
     }
-    
+
     if (fread(data, 1, file_size, f) != file_size) {
         fprintf(stderr, "error: failed to read bytecode file\n");
         free(data);
         fclose(f);
         return -1;
     }
-    
+
     int result = load_bytecode(vm, data, file_size);
     free(data);
     fclose(f);
@@ -421,7 +421,7 @@ void cc_compile(JCC *vm, Obj *prog) {
     if (!vm) {
         error("VM instance is NULL");
     }
-    
+
     // Initialize VM memory if not already done
     if (!vm->text_seg) {
         // allocate memory
@@ -460,7 +460,7 @@ void cc_compile(JCC *vm, Obj *prog) {
         vm->heap_ptr = vm->heap_seg;
         vm->heap_end = vm->heap_seg + vm->poolsize;
         vm->free_list = NULL;
-        
+
         // Initialize codegen state
         vm->compiler.current_codegen_fn = NULL;
 
@@ -481,7 +481,7 @@ void cc_compile(JCC *vm, Obj *prog) {
 
     // Store the merged program for variable lookup during codegen
     vm->compiler.globals = prog;
-    
+
     // Generate bytecode from AST using new register-based codegen
     gen(vm, prog);
 

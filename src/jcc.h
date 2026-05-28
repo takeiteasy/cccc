@@ -140,6 +140,7 @@ extern "C" {
     X(FSUB3) /* fregs[rd] = fregs[rs1] - fregs[rs2] */                         \
     X(FMUL3) /* fregs[rd] = fregs[rs1] * fregs[rs2] */                         \
     X(FDIV3) /* fregs[rd] = fregs[rs1] / fregs[rs2] */                         \
+    X(FMOV3) /* fregs[rd] = fregs[rs1] */                                      \
     X(FNEG3) /* fregs[rd] = -fregs[rs1] */                                     \
     X(FEQ3)  /* rd = (fregs[rs1] == fregs[rs2]) */                             \
     X(FNE3)  /* rd = (fregs[rs1] != fregs[rs2]) */                             \

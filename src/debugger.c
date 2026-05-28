@@ -342,14 +342,31 @@ static int disassemble_instruction(long long *pc, long long *text_seg, long long
             size = 2;
             break;
 
+        case FMOV3:
         case FNEG3:
+            if (pc + 1 < text_end) {
+                int rd = (int)(pc[1] & 0xFF);
+                int rs = (int)((pc[1] >> 8) & 0xFF);
+                printf(" f%d, f%d", rd, rs);
+            }
+            size = 2;
+            break;
+
         case I2F3:
+            if (pc + 1 < text_end) {
+                int rd = (int)(pc[1] & 0xFF);
+                int rs = (int)((pc[1] >> 8) & 0xFF);
+                printf(" f%d, r%d", rd, rs);
+            }
+            size = 2;
+            break;
+
         case F2I3:
         case FR2R:
             if (pc + 1 < text_end) {
                 int rd = (int)(pc[1] & 0xFF);
                 int rs = (int)((pc[1] >> 8) & 0xFF);
-                printf(" r%d, r%d", rd, rs);
+                printf(" r%d, f%d", rd, rs);
             }
             size = 2;
             break;
