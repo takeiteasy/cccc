@@ -1187,6 +1187,7 @@ typedef struct Compiler {
     CondIncl *cond_incl;      // Conditional inclusion stack
     HashMap pragma_once;      // #pragma once tracking
     HashMap included_headers; // Track included headers for lazy stdlib loading
+    HashMap include_guards;   // Header include guard cache
     int include_next_idx;     // Index for #include_next
 
     // Pragma macro state

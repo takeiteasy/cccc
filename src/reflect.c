@@ -43,9 +43,7 @@ static Obj *reflect_new_var(JCC *vm, char *name, int name_len, Type *ty) {
 }
 
 static char *reflect_unique_name(JCC *vm) {
-    char *name = format(".L..%d", vm->compiler.unique_name_counter++);
-    strarray_push(&vm->compiler.file_buffers, name);
-    return name;
+    return arena_format(vm, ".L..%d", vm->compiler.unique_name_counter++);
 }
 
 static Obj *reflect_new_gvar(JCC *vm, char *name, int name_len, Type *ty) {
@@ -643,16 +641,6 @@ static Type *make_func_type(JCC *vm, Type *return_type) {
     ty->size = 8;
     ty->align = 8;
     return ty;
-}
-
-// Helper to duplicate a string into the parser arena
-static char *arena_strdup(JCC *vm, const char *str) {
-    if (!str)
-        return NULL;
-    int len = strlen(str);
-    char *s = arena_alloc(&vm->compiler.parser_arena, len + 1);
-    memcpy(s, str, len + 1);
-    return s;
 }
 
 Obj *ast_function(JCC *vm, const char *name, Type *return_type) {

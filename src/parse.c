@@ -389,9 +389,7 @@ static Obj *new_gvar(JCC *vm, char *name, int name_len, Type *ty) {
 }
 
 static char *new_unique_name(JCC *vm) {
-    char *name = format(".L..%d", vm->compiler.unique_name_counter++);
-    strarray_push(&vm->compiler.file_buffers, name);
-    return name;
+    return arena_format(vm, ".L..%d", vm->compiler.unique_name_counter++);
 }
 
 static Obj *new_anon_gvar(JCC *vm, Type *ty) {
@@ -2277,7 +2275,7 @@ static Node *stmt(JCC *vm, Token **rest, Token *tok) {
 
     if (tok->kind == TK_IDENT && equal(tok->next, ":")) {
         Node *node = new_node(vm, ND_LABEL, tok);
-        node->label = strndup(tok->loc, tok->len);
+        node->label = arena_strndup(vm, tok->loc, tok->len);
         node->unique_label = new_unique_name(vm);
         node->lhs = stmt(vm, rest, tok->next->next);
         node->goto_next = vm->compiler.labels;
@@ -4202,7 +4200,8 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
         // For "static inline" function
         if (sc && sc->var && sc->var->is_function) {
             if (vm->compiler.current_fn)
-                strarray_push(&vm->compiler.current_fn->refs, sc->var->name);
+                arena_strarray_push(vm, &vm->compiler.current_fn->refs,
+                                    sc->var->name);
             else
                 sc->var->is_root = true;
         }

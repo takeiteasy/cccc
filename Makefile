@@ -82,7 +82,7 @@ $(LIB_OUT): $(SRCS)
 	$(CC) -fpic -shared $(CFLAGS) -o $@ $(filter-out src/main.c, $^) $(LDFLAGS)
 
 test: clean $(EXE_OUT)
-	@./run_tests
+	@python3 test.py
 
 all: clean $(EXE_OUT) $(LIB_OUT) test docs
 

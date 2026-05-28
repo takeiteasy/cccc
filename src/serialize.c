@@ -134,12 +134,246 @@ static const char *get_unary_op_str(NodeKind kind) {
     }
 }
 
+typedef struct {
+    Type **data;
+    int len;
+    int cap;
+} TypeVec;
+
+typedef struct {
+    Type *ty;
+    char *name;
+    int name_len;
+} TypeName;
+
+typedef struct {
+    TypeVec seen;
+    TypeVec defs;
+    TypeName *tags;
+    int tags_len;
+    int tags_cap;
+    TypeName *typedefs;
+    int typedefs_len;
+    int typedefs_cap;
+} SerializeContext;
+
 // Forward declaration
-static void serialize_expr(FILE *f, JCC *vm, Node *node, int parent_prec);
-static void serialize_stmt(FILE *f, JCC *vm, Node *node, int indent);
+static void serialize_expr(FILE *f, JCC *vm, SerializeContext *ctx, Node *node,
+                           int parent_prec);
+static void serialize_stmt(FILE *f, JCC *vm, SerializeContext *ctx, Node *node,
+                           int indent);
+
+static bool same_type_or_origin(Type *a, Type *b) {
+    for (Type *pa = a; pa; pa = pa->origin)
+        for (Type *pb = b; pb; pb = pb->origin)
+            if (pa == pb)
+                return true;
+    return false;
+}
+
+static bool type_vec_contains(TypeVec *vec, Type *ty) {
+    for (int i = 0; i < vec->len; i++)
+        if (same_type_or_origin(vec->data[i], ty))
+            return true;
+    return false;
+}
+
+static void type_vec_push(TypeVec *vec, Type *ty) {
+    if (!ty || type_vec_contains(vec, ty))
+        return;
+
+    if (vec->len >= vec->cap) {
+        vec->cap = vec->cap ? vec->cap * 2 : 16;
+        vec->data = realloc(vec->data, sizeof(Type *) * vec->cap);
+    }
+    vec->data[vec->len++] = ty;
+}
+
+static void type_name_push(TypeName **items, int *len, int *cap, Type *ty,
+                           char *name, int name_len) {
+    if (!ty || !name || name_len <= 0)
+        return;
+
+    if (*len >= *cap) {
+        *cap = *cap ? *cap * 2 : 16;
+        *items = realloc(*items, sizeof(TypeName) * *cap);
+    }
+
+    (*items)[*len].ty = ty;
+    (*items)[*len].name = name;
+    (*items)[*len].name_len = name_len;
+    (*len)++;
+}
+
+static void collect_scope_names(SerializeContext *ctx, JCC *vm) {
+    for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
+        for (TagScopeNode *tag = sc->tags; tag; tag = tag->next)
+            type_name_push(&ctx->tags, &ctx->tags_len, &ctx->tags_cap, tag->ty,
+                           tag->name, tag->name_len);
+
+        for (VarScopeNode *var = sc->vars; var; var = var->next)
+            if (var->type_def)
+                type_name_push(&ctx->typedefs, &ctx->typedefs_len,
+                               &ctx->typedefs_cap, var->type_def, var->name,
+                               var->name_len);
+    }
+}
+
+static TypeName *find_tag_name(SerializeContext *ctx, Type *ty) {
+    if (!ctx || !ty)
+        return NULL;
+
+    for (int i = 0; i < ctx->tags_len; i++)
+        if (same_type_or_origin(ctx->tags[i].ty, ty))
+            return &ctx->tags[i];
+    return NULL;
+}
+
+static TypeName *find_typedef_name(SerializeContext *ctx, Type *ty) {
+    if (!ctx || !ty)
+        return NULL;
+
+    for (int i = 0; i < ctx->typedefs_len; i++)
+        if (same_type_or_origin(ctx->typedefs[i].ty, ty))
+            return &ctx->typedefs[i];
+    return NULL;
+}
+
+static void collect_type(SerializeContext *ctx, Type *ty);
+
+static void collect_node_types(SerializeContext *ctx, Node *node) {
+    if (!node)
+        return;
+
+    collect_type(ctx, node->ty);
+    if (node->var)
+        collect_type(ctx, node->var->ty);
+    if (node->member)
+        collect_type(ctx, node->member->ty);
+    if (node->func_ty)
+        collect_type(ctx, node->func_ty);
+
+    collect_node_types(ctx, node->lhs);
+    collect_node_types(ctx, node->rhs);
+    collect_node_types(ctx, node->cond);
+    collect_node_types(ctx, node->then);
+    collect_node_types(ctx, node->els);
+    collect_node_types(ctx, node->init);
+    collect_node_types(ctx, node->inc);
+    collect_node_types(ctx, node->body);
+    collect_node_types(ctx, node->args);
+
+    for (Node *c = node->case_next; c; c = c->case_next)
+        collect_node_types(ctx, c);
+    collect_node_types(ctx, node->default_case);
+
+    collect_node_types(ctx, node->next);
+}
+
+static void collect_type(SerializeContext *ctx, Type *ty) {
+    if (!ty) {
+        return;
+    }
+
+    if (ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA) {
+        collect_type(ctx, ty->base);
+        return;
+    }
+
+    if (ty->kind == TY_FUNC) {
+        collect_type(ctx, ty->return_ty);
+        for (Type *p = ty->params; p; p = p->next)
+            collect_type(ctx, p);
+        return;
+    }
+
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM)
+        return;
+
+    if (type_vec_contains(&ctx->seen, ty))
+        return;
+    type_vec_push(&ctx->seen, ty);
+
+    for (Member *m = ty->members; m; m = m->next)
+        collect_type(ctx, m->ty);
+
+    type_vec_push(&ctx->defs, ty);
+}
+
+static void collect_obj_types(SerializeContext *ctx, Obj *obj) {
+    collect_type(ctx, obj->ty);
+    collect_node_types(ctx, obj->init_expr);
+
+    for (Obj *param = obj->params; param; param = param->next)
+        collect_type(ctx, param->ty);
+    for (Obj *local = obj->locals; local; local = local->next)
+        collect_type(ctx, local->ty);
+    collect_node_types(ctx, obj->body);
+}
+
+static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty);
+
+static void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
+                                const char *name) {
+    if (!ty) {
+        fprintf(f, "void");
+        if (name && *name)
+            fprintf(f, " %s", name);
+        return;
+    }
+
+    if (ty->kind == TY_ARRAY) {
+        char buf[1024];
+        if (ty->array_len < 0)
+            snprintf(buf, sizeof(buf), "%s[]", name ? name : "");
+        else
+            snprintf(buf, sizeof(buf), "%s[%d]", name ? name : "",
+                     ty->array_len);
+        serialize_type_decl(f, ctx, ty->base, buf);
+        return;
+    }
+
+    if (ty->kind == TY_PTR) {
+        char buf[1024];
+        if (ty->base &&
+            (ty->base->kind == TY_ARRAY || ty->base->kind == TY_FUNC))
+            snprintf(buf, sizeof(buf), "(*%s)", name ? name : "");
+        else
+            snprintf(buf, sizeof(buf), "*%s", name ? name : "");
+        serialize_type_decl(f, ctx, ty->base, buf);
+        return;
+    }
+
+    if (ty->kind == TY_FUNC) {
+        serialize_type(f, ctx, ty->return_ty);
+        if (name && *name)
+            fprintf(f, " %s", name);
+        fprintf(f, "(");
+        bool first = true;
+        for (Type *p = ty->params; p; p = p->next) {
+            if (!first)
+                fprintf(f, ", ");
+            first = false;
+            serialize_type(f, ctx, p);
+        }
+        if (ty->is_variadic) {
+            if (!first)
+                fprintf(f, ", ");
+            fprintf(f, "...");
+        } else if (first) {
+            fprintf(f, "void");
+        }
+        fprintf(f, ")");
+        return;
+    }
+
+    serialize_type(f, ctx, ty);
+    if (name && *name)
+        fprintf(f, " %s", name);
+}
 
 // Serialize type to string
-static void serialize_type(FILE *f, Type *ty) {
+static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
     if (!ty) {
         fprintf(f, "void");
         return;
@@ -177,34 +411,46 @@ static void serialize_type(FILE *f, Type *ty) {
         fprintf(f, "long double");
         break;
     case TY_PTR:
-        serialize_type(f, ty->base);
-        fprintf(f, "*");
+        serialize_type_decl(f, ctx, ty, "");
         break;
     case TY_ARRAY:
-        serialize_type(f, ty->base);
-        fprintf(f, "[%d]", ty->array_len);
+        serialize_type_decl(f, ctx, ty, "");
         break;
-    case TY_STRUCT:
-        if (ty->name)
-            fprintf(f, "struct %.*s", ty->name->len, ty->name->loc);
+    case TY_STRUCT: {
+        TypeName *tag = find_tag_name(ctx, ty);
+        TypeName *alias = find_typedef_name(ctx, ty);
+        if (tag)
+            fprintf(f, "struct %.*s", tag->name_len, tag->name);
+        else if (alias)
+            fprintf(f, "%.*s", alias->name_len, alias->name);
         else
-            fprintf(f, "struct");
+            fprintf(f, "struct /* anonymous */");
         break;
-    case TY_UNION:
-        if (ty->name)
-            fprintf(f, "union %.*s", ty->name->len, ty->name->loc);
+    }
+    case TY_UNION: {
+        TypeName *tag = find_tag_name(ctx, ty);
+        TypeName *alias = find_typedef_name(ctx, ty);
+        if (tag)
+            fprintf(f, "union %.*s", tag->name_len, tag->name);
+        else if (alias)
+            fprintf(f, "%.*s", alias->name_len, alias->name);
         else
-            fprintf(f, "union");
+            fprintf(f, "union /* anonymous */");
         break;
-    case TY_ENUM:
-        if (ty->name)
-            fprintf(f, "enum %.*s", ty->name->len, ty->name->loc);
+    }
+    case TY_ENUM: {
+        TypeName *tag = find_tag_name(ctx, ty);
+        TypeName *alias = find_typedef_name(ctx, ty);
+        if (tag)
+            fprintf(f, "enum %.*s", tag->name_len, tag->name);
+        else if (alias)
+            fprintf(f, "%.*s", alias->name_len, alias->name);
         else
-            fprintf(f, "enum");
+            fprintf(f, "int");
         break;
+    }
     case TY_FUNC:
-        serialize_type(f, ty->return_ty);
-        fprintf(f, "(*)()");
+        serialize_type_decl(f, ctx, ty, "");
         break;
     default:
         fprintf(f, "/* unknown type */");
@@ -253,7 +499,8 @@ static void print_indent_level(FILE *f, int indent) {
 }
 
 // Serialize an expression
-static void serialize_expr(FILE *f, JCC *vm, Node *node, int parent_prec) {
+static void serialize_expr(FILE *f, JCC *vm, SerializeContext *ctx, Node *node,
+                           int parent_prec) {
     (void)vm; // May be used later
 
     if (!node) {
@@ -307,9 +554,9 @@ static void serialize_expr(FILE *f, JCC *vm, Node *node, int parent_prec) {
     case ND_LOGOR:
     case ND_ASSIGN:
     case ND_COMMA:
-        serialize_expr(f, vm, node->lhs, node_prec);
+        serialize_expr(f, vm, ctx, node->lhs, node_prec);
         fprintf(f, " %s ", get_binary_op_str(node->kind));
-        serialize_expr(f, vm, node->rhs, node_prec + 1);
+        serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
         break;
 
     case ND_NEG:
@@ -318,29 +565,29 @@ static void serialize_expr(FILE *f, JCC *vm, Node *node, int parent_prec) {
     case ND_ADDR:
     case ND_DEREF:
         fprintf(f, "%s", get_unary_op_str(node->kind));
-        serialize_expr(f, vm, node->lhs, node_prec);
+        serialize_expr(f, vm, ctx, node->lhs, node_prec);
         break;
 
     case ND_CAST:
         fprintf(f, "(");
-        serialize_type(f, node->ty);
+        serialize_type(f, ctx, node->ty);
         fprintf(f, ")");
-        serialize_expr(f, vm, node->lhs, node_prec);
+        serialize_expr(f, vm, ctx, node->lhs, node_prec);
         break;
 
     case ND_COND:
-        serialize_expr(f, vm, node->cond, 0);
+        serialize_expr(f, vm, ctx, node->cond, 0);
         fprintf(f, " ? ");
-        serialize_expr(f, vm, node->then, 0);
+        serialize_expr(f, vm, ctx, node->then, 0);
         fprintf(f, " : ");
-        serialize_expr(f, vm, node->els, 0);
+        serialize_expr(f, vm, ctx, node->els, 0);
         break;
 
     case ND_FUNCALL:
-        serialize_expr(f, vm, node->lhs, node_prec);
+        serialize_expr(f, vm, ctx, node->lhs, node_prec);
         fprintf(f, "(");
         for (Node *arg = node->args; arg; arg = arg->next) {
-            serialize_expr(f, vm, arg, 0);
+            serialize_expr(f, vm, ctx, arg, 0);
             if (arg->next)
                 fprintf(f, ", ");
         }
@@ -348,7 +595,7 @@ static void serialize_expr(FILE *f, JCC *vm, Node *node, int parent_prec) {
         break;
 
     case ND_MEMBER:
-        serialize_expr(f, vm, node->lhs, node_prec);
+        serialize_expr(f, vm, ctx, node->lhs, node_prec);
         if (node->member && node->member->name)
             fprintf(f, ".%.*s", node->member->name->len,
                     node->member->name->loc);
@@ -359,7 +606,7 @@ static void serialize_expr(FILE *f, JCC *vm, Node *node, int parent_prec) {
     case ND_STMT_EXPR:
         fprintf(f, "({\n");
         for (Node *s = node->body; s; s = s->next) {
-            serialize_stmt(f, vm, s, 1);
+            serialize_stmt(f, vm, ctx, s, 1);
         }
         fprintf(f, "})");
         break;
@@ -378,7 +625,8 @@ static void serialize_expr(FILE *f, JCC *vm, Node *node, int parent_prec) {
 }
 
 // Serialize a statement
-static void serialize_stmt(FILE *f, JCC *vm, Node *node, int indent) {
+static void serialize_stmt(FILE *f, JCC *vm, SerializeContext *ctx, Node *node,
+                           int indent) {
     if (!node)
         return;
 
@@ -388,14 +636,14 @@ static void serialize_stmt(FILE *f, JCC *vm, Node *node, int indent) {
         fprintf(f, "return");
         if (node->lhs) {
             fprintf(f, " ");
-            serialize_expr(f, vm, node->lhs, 0);
+            serialize_expr(f, vm, ctx, node->lhs, 0);
         }
         fprintf(f, ";\n");
         break;
 
     case ND_EXPR_STMT:
         print_indent_level(f, indent);
-        serialize_expr(f, vm, node->lhs, 0);
+        serialize_expr(f, vm, ctx, node->lhs, 0);
         fprintf(f, ";\n");
         break;
 
@@ -403,7 +651,7 @@ static void serialize_stmt(FILE *f, JCC *vm, Node *node, int indent) {
         print_indent_level(f, indent);
         fprintf(f, "{\n");
         for (Node *s = node->body; s; s = s->next) {
-            serialize_stmt(f, vm, s, indent + 1);
+            serialize_stmt(f, vm, ctx, s, indent + 1);
         }
         print_indent_level(f, indent);
         fprintf(f, "}\n");
@@ -412,13 +660,13 @@ static void serialize_stmt(FILE *f, JCC *vm, Node *node, int indent) {
     case ND_IF:
         print_indent_level(f, indent);
         fprintf(f, "if (");
-        serialize_expr(f, vm, node->cond, 0);
+        serialize_expr(f, vm, ctx, node->cond, 0);
         fprintf(f, ")\n");
-        serialize_stmt(f, vm, node->then, indent + 1);
+        serialize_stmt(f, vm, ctx, node->then, indent + 1);
         if (node->els) {
             print_indent_level(f, indent);
             fprintf(f, "else\n");
-            serialize_stmt(f, vm, node->els, indent + 1);
+            serialize_stmt(f, vm, ctx, node->els, indent + 1);
         }
         break;
 
@@ -426,41 +674,41 @@ static void serialize_stmt(FILE *f, JCC *vm, Node *node, int indent) {
         print_indent_level(f, indent);
         fprintf(f, "for (");
         if (node->init)
-            serialize_expr(f, vm, node->init, 0);
+            serialize_expr(f, vm, ctx, node->init, 0);
         fprintf(f, "; ");
         if (node->cond)
-            serialize_expr(f, vm, node->cond, 0);
+            serialize_expr(f, vm, ctx, node->cond, 0);
         fprintf(f, "; ");
         if (node->inc)
-            serialize_expr(f, vm, node->inc, 0);
+            serialize_expr(f, vm, ctx, node->inc, 0);
         fprintf(f, ")\n");
-        serialize_stmt(f, vm, node->then, indent + 1);
+        serialize_stmt(f, vm, ctx, node->then, indent + 1);
         break;
 
     case ND_DO:
         print_indent_level(f, indent);
         fprintf(f, "do\n");
-        serialize_stmt(f, vm, node->then, indent + 1);
+        serialize_stmt(f, vm, ctx, node->then, indent + 1);
         print_indent_level(f, indent);
         fprintf(f, "while (");
-        serialize_expr(f, vm, node->cond, 0);
+        serialize_expr(f, vm, ctx, node->cond, 0);
         fprintf(f, ");\n");
         break;
 
     case ND_SWITCH:
         print_indent_level(f, indent);
         fprintf(f, "switch (");
-        serialize_expr(f, vm, node->cond, 0);
+        serialize_expr(f, vm, ctx, node->cond, 0);
         fprintf(f, ") {\n");
         for (Node *c = node->case_next; c; c = c->case_next) {
             print_indent_level(f, indent);
             fprintf(f, "case %ld:\n", c->begin);
-            serialize_stmt(f, vm, c->body, indent + 1);
+            serialize_stmt(f, vm, ctx, c->body, indent + 1);
         }
         if (node->default_case) {
             print_indent_level(f, indent);
             fprintf(f, "default:\n");
-            serialize_stmt(f, vm, node->default_case->body, indent + 1);
+            serialize_stmt(f, vm, ctx, node->default_case->body, indent + 1);
         }
         print_indent_level(f, indent);
         fprintf(f, "}\n");
@@ -473,7 +721,7 @@ static void serialize_stmt(FILE *f, JCC *vm, Node *node, int indent) {
 
     case ND_LABEL:
         fprintf(f, "%s:\n", node->label);
-        serialize_stmt(f, vm, node->lhs, indent);
+        serialize_stmt(f, vm, ctx, node->lhs, indent);
         break;
 
     case ND_CASE:
@@ -483,14 +731,15 @@ static void serialize_stmt(FILE *f, JCC *vm, Node *node, int indent) {
     default:
         // Treat as expression statement
         print_indent_level(f, indent);
-        serialize_expr(f, vm, node, 0);
+        serialize_expr(f, vm, ctx, node, 0);
         fprintf(f, ";\n");
         break;
     }
 }
 
 // Serialize a function
-static void serialize_function(FILE *f, JCC *vm, Obj *fn) {
+static void serialize_function(FILE *f, JCC *vm, SerializeContext *ctx,
+                               Obj *fn) {
     if (!fn->is_function)
         return;
 
@@ -505,7 +754,7 @@ static void serialize_function(FILE *f, JCC *vm, Obj *fn) {
 
     // Return type
     if (fn->ty && fn->ty->return_ty)
-        serialize_type(f, fn->ty->return_ty);
+        serialize_type(f, ctx, fn->ty->return_ty);
     else
         fprintf(f, "int");
 
@@ -517,8 +766,7 @@ static void serialize_function(FILE *f, JCC *vm, Obj *fn) {
         if (!first)
             fprintf(f, ", ");
         first = false;
-        serialize_type(f, param->ty);
-        fprintf(f, " %s", param->name);
+        serialize_type_decl(f, ctx, param->ty, param->name);
     }
 
     if (fn->ty && fn->ty->is_variadic) {
@@ -537,13 +785,13 @@ static void serialize_function(FILE *f, JCC *vm, Obj *fn) {
             if (var->is_param)
                 continue;
             print_indent_level(f, 1);
-            serialize_type(f, var->ty);
-            fprintf(f, " %s;\n", var->name);
+            serialize_type_decl(f, ctx, var->ty, var->name);
+            fprintf(f, ";\n");
         }
 
         // Function body
         for (Node *s = fn->body; s; s = s->next) {
-            serialize_stmt(f, vm, s, 1);
+            serialize_stmt(f, vm, ctx, s, 1);
         }
 
         fprintf(f, "}\n\n");
@@ -553,7 +801,8 @@ static void serialize_function(FILE *f, JCC *vm, Obj *fn) {
 }
 
 // Serialize global variable
-static void serialize_global_var(FILE *f, JCC *vm, Obj *var) {
+static void serialize_global_var(FILE *f, JCC *vm, SerializeContext *ctx,
+                                 Obj *var) {
     (void)vm;
 
     if (var->is_function)
@@ -566,8 +815,7 @@ static void serialize_global_var(FILE *f, JCC *vm, Obj *var) {
     if (var->is_static)
         fprintf(f, "static ");
 
-    serialize_type(f, var->ty);
-    fprintf(f, " %s", var->name);
+    serialize_type_decl(f, ctx, var->ty, var->name);
 
     if (var->init_data) {
         fprintf(f, " = ");
@@ -582,41 +830,78 @@ static void serialize_global_var(FILE *f, JCC *vm, Obj *var) {
 }
 
 // Serialize struct/union type definition
-static void serialize_struct_def(FILE *f, Type *ty) {
+static const char *aggregate_keyword(Type *ty) {
+    return ty->kind == TY_UNION ? "union" : "struct";
+}
+
+static void serialize_struct_def(FILE *f, SerializeContext *ctx, Type *ty) {
     if (!ty)
         return;
 
-    if (ty->kind == TY_STRUCT)
-        fprintf(f, "struct");
-    else if (ty->kind == TY_UNION)
-        fprintf(f, "union");
-    else
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
         return;
 
-    if (ty->name)
-        fprintf(f, " %.*s", ty->name->len, ty->name->loc);
+    TypeName *tag = find_tag_name(ctx, ty);
+    TypeName *alias = find_typedef_name(ctx, ty);
+
+    if (!tag && alias)
+        fprintf(f, "typedef %s", aggregate_keyword(ty));
+    else
+        fprintf(f, "%s", aggregate_keyword(ty));
+
+    if (tag)
+        fprintf(f, " %.*s", tag->name_len, tag->name);
+
+    if (!ty->members) {
+        if (tag)
+            fprintf(f, ";\n\n");
+        return;
+    }
 
     fprintf(f, " {\n");
     for (Member *m = ty->members; m; m = m->next) {
         fprintf(f, "    ");
-        serialize_type(f, m->ty);
-        if (m->name)
-            fprintf(f, " %.*s", m->name->len, m->name->loc);
+        char name[256] = "";
+        if (m->name) {
+            int len = m->name->len;
+            if (len >= (int)sizeof(name))
+                len = sizeof(name) - 1;
+            memcpy(name, m->name->loc, len);
+            name[len] = '\0';
+        }
+        serialize_type_decl(f, ctx, m->ty, name);
         if (m->is_bitfield)
             fprintf(f, " : %d", m->bit_width);
         fprintf(f, ";\n");
     }
-    fprintf(f, "};\n\n");
+    fprintf(f, "}");
+
+    if (!tag && alias)
+        fprintf(f, " %.*s", alias->name_len, alias->name);
+    fprintf(f, ";\n\n");
 }
 
 // Serialize enum type definition
-static void serialize_enum_def(FILE *f, Type *ty) {
+static void serialize_enum_def(FILE *f, SerializeContext *ctx, Type *ty) {
     if (!ty || ty->kind != TY_ENUM)
         return;
 
-    fprintf(f, "enum");
-    if (ty->name)
-        fprintf(f, " %.*s", ty->name->len, ty->name->loc);
+    TypeName *tag = find_tag_name(ctx, ty);
+    TypeName *alias = find_typedef_name(ctx, ty);
+
+    if (!tag && alias)
+        fprintf(f, "typedef enum");
+    else
+        fprintf(f, "enum");
+
+    if (tag)
+        fprintf(f, " %.*s", tag->name_len, tag->name);
+
+    if (!ty->enum_constants) {
+        if (tag)
+            fprintf(f, ";\n\n");
+        return;
+    }
 
     fprintf(f, " {\n");
     for (EnumConstant *ec = ty->enum_constants; ec; ec = ec->next) {
@@ -625,7 +910,11 @@ static void serialize_enum_def(FILE *f, Type *ty) {
             fprintf(f, ",");
         fprintf(f, "\n");
     }
-    fprintf(f, "};\n\n");
+    fprintf(f, "}");
+
+    if (!tag && alias)
+        fprintf(f, " %.*s", alias->name_len, alias->name);
+    fprintf(f, ";\n\n");
 }
 
 // Public API: Serialize entire program to C source
@@ -633,23 +922,44 @@ void cc_serialize_program(FILE *f, JCC *vm, Obj *prog) {
     if (!f || !prog)
         return;
 
+    SerializeContext ctx = {};
+    collect_scope_names(&ctx, vm);
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (obj->is_function && !obj->is_definition && !obj->body)
+            continue;
+        if (!obj->is_function && obj->name[0] == '.')
+            continue;
+        collect_obj_types(&ctx, obj);
+    }
+
     // Header comment
     fprintf(f, "/* Generated by JCC pragma macro expansion */\n\n");
 
-    // TODO: Collect and serialize type definitions
-    // For now, we assume types are defined elsewhere or forward-declared
+    // Serialize type definitions before declarations that reference them.
+    for (int i = 0; i < ctx.defs.len; i++) {
+        Type *ty = ctx.defs.data[i];
+        if (ty->kind == TY_ENUM)
+            serialize_enum_def(f, &ctx, ty);
+        else
+            serialize_struct_def(f, &ctx, ty);
+    }
 
     // Serialize global variables
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (!obj->is_function)
-            serialize_global_var(f, vm, obj);
+            serialize_global_var(f, vm, &ctx, obj);
     }
 
     // Serialize functions
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (obj->is_function)
-            serialize_function(f, vm, obj);
+            serialize_function(f, vm, &ctx, obj);
     }
+
+    free(ctx.seen.data);
+    free(ctx.defs.data);
+    free(ctx.tags);
+    free(ctx.typedefs);
 }
 
 // Serialize a single node to a string (for debugging)
@@ -664,8 +974,17 @@ char *serialize_node_to_source(JCC *vm, Node *node) {
     if (!f)
         return strdup("/* serialization error */");
 
-    serialize_expr(f, vm, node, 0);
+    SerializeContext ctx = {};
+    collect_scope_names(&ctx, vm);
+    collect_node_types(&ctx, node);
+
+    serialize_expr(f, vm, &ctx, node, 0);
     fclose(f);
+
+    free(ctx.seen.data);
+    free(ctx.defs.data);
+    free(ctx.tags);
+    free(ctx.typedefs);
 
     return buffer;
 }

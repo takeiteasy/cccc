@@ -78,6 +78,7 @@ struct Macro {
 static Token *preprocess2(JCC *vm, Token *tok);
 static Macro *find_macro(JCC *vm, Token *tok);
 static bool file_exists(char *path);
+static char *format_relative_path(JCC *vm, char *base_file, char *filename);
 static char *read_include_filename(JCC *vm, Token **rest, Token *tok,
                                    bool *is_dquote, int *out_len);
 static long eval_const_expr(JCC *vm, Token **rest, Token *tok);
@@ -358,7 +359,7 @@ static Token *copy_line(JCC *vm, Token **rest, Token *tok) {
 }
 
 static Token *new_num_token(JCC *vm, int val, Token *tmpl) {
-    char *buf = format("%d\n", val);
+    char *buf = arena_format(vm, "%d\n", val);
     return tokenize(vm,
                     new_file(vm, tmpl->file->name, tmpl->file->file_no, buf));
 }
@@ -542,8 +543,8 @@ static Token *read_const_expr(JCC *vm, Token **rest, Token *tok) {
             if (filename[0] == '/') {
                 path = filename;
             } else if (is_dquote) {
-                char *relative_path = format(
-                    "%s/%s", dirname(strdup(start->file->name)), filename);
+                char *relative_path =
+                    format_relative_path(vm, start->file->name, filename);
                 if (file_exists(relative_path)) {
                     path = relative_path;
                 }
@@ -654,7 +655,7 @@ static MacroParam *read_macro_params(JCC *vm, Token **rest, Token *tok,
             error_tok(vm, tok, "expected an identifier");
 
         if (equal(tok->next, "...")) {
-            *va_args_name = strndup(tok->loc, tok->len);
+            *va_args_name = arena_strndup(vm, tok->loc, tok->len);
             *rest = skip(vm, tok->next->next, ")");
             return head.next;
         }
@@ -662,7 +663,7 @@ static MacroParam *read_macro_params(JCC *vm, Token **rest, Token *tok,
         MacroParam *m =
             arena_alloc(&vm->compiler.parser_arena, sizeof(MacroParam));
         memset(m, 0, sizeof(MacroParam));
-        m->name = strndup(tok->loc, tok->len);
+        m->name = arena_strndup(vm, tok->loc, tok->len);
         cur = cur->next = m;
         tok = tok->next;
     }
@@ -674,7 +675,7 @@ static MacroParam *read_macro_params(JCC *vm, Token **rest, Token *tok,
 static void read_macro_definition(JCC *vm, Token **rest, Token *tok) {
     if (tok->kind != TK_IDENT)
         error_tok(vm, tok, "macro name must be an identifier");
-    char *name = strndup(tok->loc, tok->len);
+    char *name = arena_strndup(vm, tok->loc, tok->len);
     int name_len = tok->len; // Save name length before moving tok
     tok = tok->next;
 
@@ -815,7 +816,8 @@ static Token *stringize(JCC *vm, Token *hash, Token *arg) {
 // Concatenate two tokens to create a new token.
 static Token *paste(JCC *vm, Token *lhs, Token *rhs) {
     // Paste the two tokens.
-    char *buf = format("%.*s%.*s", lhs->len, lhs->loc, rhs->len, rhs->loc);
+    char *buf =
+        arena_format(vm, "%.*s%.*s", lhs->len, lhs->loc, rhs->len, rhs->loc);
 
     // Tokenize the resulting string.
     Token *tok =
@@ -1023,6 +1025,14 @@ static bool file_exists(char *path) {
     return !stat(path, &st);
 }
 
+static char *format_relative_path(JCC *vm, char *base_file, char *filename) {
+    char *slash = strrchr(base_file, '/');
+    if (!slash)
+        return arena_format(vm, "./%s", filename);
+    return arena_format(vm, "%.*s/%s", (int)(slash - base_file), base_file,
+                        filename);
+}
+
 static bool is_standard_header(const char *filename) {
     static const char *std_headers[] = {
         "assert.h", "ctype.h",        "errno.h",     "float.h",  "inttypes.h",
@@ -1066,8 +1076,10 @@ char *search_include_paths(JCC *vm, char *filename, int filename_len,
     // Search a file from the include paths.
     for (int i = 0; i < paths->len; i++) {
         char *path = format("%s/%s", paths->data[i], filename);
-        if (!file_exists(path))
+        if (!file_exists(path)) {
+            free(path);
             continue;
+        }
         hashmap_put2(&vm->compiler.include_cache, filename, filename_len, path);
         vm->compiler.include_next_idx = i + 1;
         return path;
@@ -1079,7 +1091,8 @@ static char *search_include_next(JCC *vm, char *filename) {
     // First search include_paths
     for (; vm->compiler.include_next_idx < vm->compiler.include_paths.len;
          vm->compiler.include_next_idx++) {
-        char *path = format(
+        char *path = arena_format(
+            vm,
             "%s/%s",
             vm->compiler.include_paths.data[vm->compiler.include_next_idx],
             filename);
@@ -1091,8 +1104,9 @@ static char *search_include_next(JCC *vm, char *filename) {
     int sys_idx =
         vm->compiler.include_next_idx - vm->compiler.include_paths.len;
     for (; sys_idx < vm->compiler.system_include_paths.len; sys_idx++) {
-        char *path = format(
-            "%s/%s", vm->compiler.system_include_paths.data[sys_idx], filename);
+        char *path = arena_format(
+            vm, "%s/%s", vm->compiler.system_include_paths.data[sys_idx],
+            filename);
         if (file_exists(path))
             return path;
     }
@@ -1113,7 +1127,7 @@ static char *read_include_filename(JCC *vm, Token **rest, Token *tok,
         *rest = skip_line(vm, tok->next);
         if (out_len)
             *out_len = tok->len - 2;
-        return strndup(tok->loc + 1, tok->len - 2);
+        return arena_strndup(vm, tok->loc + 1, tok->len - 2);
     }
 
     // Pattern 2: #include <foo.h>
@@ -1159,7 +1173,7 @@ static char *detect_include_guard(JCC *vm, Token *tok) {
     if (tok->kind != TK_IDENT)
         return NULL;
 
-    char *macro = strndup(tok->loc, tok->len);
+    char *macro = arena_strndup(vm, tok->loc, tok->len);
     tok = tok->next;
 
     if (!is_hash(tok) || !equal(tok->next, "define") ||
@@ -1222,8 +1236,7 @@ static Token *include_file(JCC *vm, Token *tok, char *path,
     // If we read the same file before, and if the file was guarded
     // by the usual #ifndef ... #endif pattern, we may be able to
     // skip the file without opening it.
-    static HashMap include_guards;
-    char *guard_name = hashmap_get(&include_guards, path);
+    char *guard_name = hashmap_get(&vm->compiler.include_guards, path);
     if (guard_name && hashmap_get(&vm->compiler.macros, guard_name))
         return tok;
 
@@ -1240,7 +1253,7 @@ static Token *include_file(JCC *vm, Token *tok, char *path,
 
     guard_name = detect_include_guard(vm, tok2);
     if (guard_name)
-        hashmap_put(&include_guards, path, guard_name);
+        hashmap_put(&vm->compiler.include_guards, path, guard_name);
 
     return append(vm, tok2, tok);
 }
@@ -1327,7 +1340,7 @@ static Token *handle_embed_directive(JCC *vm, Token *tok,
         // Pattern: #embed "foo.bin"
         is_dquote = true;
         filename_len = tok->len - 2;
-        filename = strndup(tok->loc + 1, tok->len - 2);
+        filename = arena_strndup(vm, tok->loc + 1, tok->len - 2);
         tok = tok->next;
     } else if (equal(tok, "<")) {
         // Pattern: #embed <foo.bin>
@@ -1398,8 +1411,8 @@ static Token *handle_embed_directive(JCC *vm, Token *tok,
         path = filename;
     } else if (is_dquote) {
         // Try relative to current file first
-        char *relative_path = format(
-            "%s/%s", dirname(strdup(directive_start->file->name)), filename);
+        char *relative_path =
+            format_relative_path(vm, directive_start->file->name, filename);
         if (file_exists(relative_path)) {
             path = relative_path;
         }
@@ -1520,8 +1533,8 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             }
 
             if (filename[0] != '/' && is_dquote) {
-                char *path = format("%s/%s", dirname(strdup(start->file->name)),
-                                    filename);
+                char *path =
+                    format_relative_path(vm, start->file->name, filename);
                 if (file_exists(path)) {
                     tok = include_file(vm, tok, path, start->next->next);
                     continue;
@@ -1565,7 +1578,7 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             tok = tok->next;
             if (tok->kind != TK_IDENT)
                 error_tok(vm, tok, "macro name must be an identifier");
-            undef_macro(vm, strndup(tok->loc, tok->len));
+            undef_macro(vm, arena_strndup(vm, tok->loc, tok->len));
             tok = skip_line(vm, tok->next);
             continue;
         }
@@ -1773,18 +1786,14 @@ static char *format_date(JCC *vm, struct tm *tm) {
         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     };
 
-    char *result = format("\"%s %2d %d\"", mon[tm->tm_mon], tm->tm_mday,
-                          tm->tm_year + 1900);
-    strarray_push(&vm->compiler.file_buffers, result);
-    return result;
+    return arena_format(vm, "\"%s %2d %d\"", mon[tm->tm_mon], tm->tm_mday,
+                        tm->tm_year + 1900);
 }
 
 // __TIME__ is expanded to the current time, e.g. "13:34:03".
 static char *format_time(JCC *vm, struct tm *tm) {
-    char *result =
-        format("\"%02d:%02d:%02d\"", tm->tm_hour, tm->tm_min, tm->tm_sec);
-    strarray_push(&vm->compiler.file_buffers, result);
-    return result;
+    return arena_format(vm, "\"%02d:%02d:%02d\"", tm->tm_hour, tm->tm_min,
+                        tm->tm_sec);
 }
 
 void init_macros(JCC *vm) {

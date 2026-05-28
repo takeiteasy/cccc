@@ -127,7 +127,12 @@
     } while (0)
 
 void strarray_push(StringArray *arr, char *s);
+void arena_strarray_push(JCC *vm, StringArray *arr, char *s);
 char *format(char *fmt, ...) __attribute__((format(printf, 1, 2)));
+char *arena_strdup(JCC *vm, const char *str);
+char *arena_strndup(JCC *vm, const char *str, int len);
+char *arena_format(JCC *vm, char *fmt, ...)
+    __attribute__((format(printf, 2, 3)));
 Token *preprocess(JCC *vm, Token *tok);
 
 //

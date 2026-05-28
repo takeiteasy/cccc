@@ -126,9 +126,6 @@ void cc_init(JCC *vm, uint32_t flags) {
     // (init_macros allocates from the arena, so arena must be initialized first)
     arena_init(&vm->compiler.parser_arena, 0);  // 0 = use default (1MB)
 
-    init_macros(vm);
-    cc_init_parser(vm);
-
     // Initialize init_state HashMap for uninitialized variable detection
     vm->init_state.capacity = 0;  // Will be allocated on first use by hashmap_put
     vm->init_state.buckets = NULL;
@@ -156,6 +153,11 @@ void cc_init(JCC *vm, uint32_t flags) {
     vm->compiler.included_headers.buckets = NULL;
     vm->compiler.included_headers.used = 0;
 
+    // Initialize include_guards HashMap for header guard tracking
+    vm->compiler.include_guards.capacity = 0;
+    vm->compiler.include_guards.buckets = NULL;
+    vm->compiler.include_guards.used = 0;
+
     // Initialize url_to_path HashMap for URL include tracking
     vm->compiler.url_to_path.capacity = 0;
     vm->compiler.url_to_path.buckets = NULL;
@@ -172,6 +174,9 @@ void cc_init(JCC *vm, uint32_t flags) {
     vm->compiler.file_buffers.data = NULL;
     vm->compiler.file_buffers.len = 0;
     vm->compiler.file_buffers.capacity = 0;
+
+    init_macros(vm);
+    cc_init_parser(vm);
 
     // Initialize sorted allocation array for O(log n) pointer validation
     vm->sorted_allocs.addresses = NULL;
@@ -338,17 +343,13 @@ void cc_destroy(JCC *vm) {
         free(vm->compiler.macros.buckets);
     }
 
-    // Free pragma_once HashMap (string keys from file names - allocated, values are just (void*)1)
-    if (vm->compiler.pragma_once.buckets) {
-        for (int i = 0; i < vm->compiler.pragma_once.capacity; i++) {
-            HashEntry *entry = &vm->compiler.pragma_once.buckets[i];
-            if (entry->key && entry->key != (void *)-1 && entry->keylen != -1) {
-                // Free string key (file name)
-                free(entry->key);
-            }
-        }
+    // Free pragma_once HashMap (keys are file paths owned elsewhere)
+    if (vm->compiler.pragma_once.buckets)
         free(vm->compiler.pragma_once.buckets);
-    }
+
+    // Free include_guards HashMap (keys/values are arena or file path data)
+    if (vm->compiler.include_guards.buckets)
+        free(vm->compiler.include_guards.buckets);
 
     // Free FFI table
     if (vm->compiler.ffi_table) {

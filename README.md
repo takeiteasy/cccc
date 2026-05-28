@@ -265,6 +265,9 @@ This will run all test files and report:
 # Enable memory leak detection (platform-specific: leaks on macOS, valgrind on Linux, drmemory on Windows)
 ./run_tests --leaks
 
+# Run tasks in parallel (default: 8 jobs)
+./run_tests -j 4
+
 # Pass additional flags to jcc (all non-option arguments are forwarded)
 ./run_tests -2                    # Run tests with standard safety level
 ./run_tests --vm-heap             # Run tests with VM heap enabled
