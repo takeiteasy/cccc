@@ -27,8 +27,10 @@
 //   Text size: size in bytes (8 bytes)
 //   Data size: size in bytes (8 bytes)
 //   Main offset: instruction index of main() (8 bytes)
+//   Data relocation count (8 bytes)
 //   Text segment: bytecode (text_size bytes)
 //   Data segment: global data (data_size bytes)
+//   Data relocations: data_offset, target_segment, target_offset, addend
 
 // Helper: get the number of operand words consumed by an opcode
 // Returns 0 for simple opcodes, 1 for RRR/RR format, 2 for RI format or special
@@ -46,6 +48,8 @@ static int get_opcode_operand_count(int op) {
 
         // RI format: [rd] [immediate] (2 words)
         case LI3:
+        case LDA3:
+        case LTA3:
         case LEA3:
             return 2;
 
@@ -164,6 +168,7 @@ int cc_save_bytecode(JCC *vm, const char *path) {
     long long data_size = vm->data_ptr - vm->data_seg;
     long long main_offset = vm->text_seg[0];  // main() instruction index
     long long num_instructions = text_size / sizeof(long long);
+    long long data_reloc_count = vm->compiler.num_data_relocs;
     long long text_base = (long long)vm->text_seg;
     long long text_end = text_base + text_size;
 
@@ -175,6 +180,29 @@ int cc_save_bytecode(JCC *vm, const char *path) {
         return -1;
     }
     memcpy(text_copy, vm->text_seg, text_size);
+
+    char *data_copy = NULL;
+    if (data_size > 0) {
+        data_copy = malloc(data_size);
+        if (!data_copy) {
+            fprintf(stderr, "error: failed to allocate temporary data buffer\n");
+            free(text_copy);
+            fclose(f);
+            return -1;
+        }
+        memcpy(data_copy, vm->data_seg, data_size);
+        for (long long i = 0; i < data_reloc_count; i++) {
+            long long slot = vm->compiler.data_relocs[i].data_offset;
+            if (slot < 0 || slot + (long long)sizeof(long long) > data_size) {
+                fprintf(stderr, "error: invalid data relocation offset\n");
+                free(data_copy);
+                free(text_copy);
+                fclose(f);
+                return -1;
+            }
+            *(long long *)(data_copy + slot) = vm->compiler.data_relocs[i].addend;
+        }
+    }
 
     // Mark which positions are operands (not opcodes)
     char *is_operand = calloc(num_instructions, 1);
@@ -221,7 +249,7 @@ int cc_save_bytecode(JCC *vm, const char *path) {
     // Write header
     if (fwrite(JCC_MAGIC, 1, 4, f) != 4) goto write_error;
 
-    int version = 1;  // Version 1 for register-based VM
+    int version = 1;
     if (fwrite(&version, sizeof(int), 1, f) != 1) goto write_error;
 
     uint32_t flags = vm->flags;
@@ -230,6 +258,7 @@ int cc_save_bytecode(JCC *vm, const char *path) {
     if (fwrite(&text_size, sizeof(long long), 1, f) != 1) goto write_error;
     if (fwrite(&data_size, sizeof(long long), 1, f) != 1) goto write_error;
     if (fwrite(&main_offset, sizeof(long long), 1, f) != 1) goto write_error;
+    if (fwrite(&data_reloc_count, sizeof(long long), 1, f) != 1) goto write_error;
 
     // Write text segment
     if (fwrite(text_copy, 1, text_size, f) != (size_t)text_size) goto write_error;
@@ -238,7 +267,20 @@ int cc_save_bytecode(JCC *vm, const char *path) {
 
     // Write data segment
     if (data_size > 0) {
-        if (fwrite(vm->data_seg, 1, data_size, f) != (size_t)data_size) goto write_error;
+        if (fwrite(data_copy, 1, data_size, f) != (size_t)data_size) goto write_error;
+    }
+    free(data_copy);
+    data_copy = NULL;
+
+    for (long long i = 0; i < data_reloc_count; i++) {
+        long long target_segment = vm->compiler.data_relocs[i].target_segment;
+        if (fwrite(&vm->compiler.data_relocs[i].data_offset,
+                   sizeof(long long), 1, f) != 1) goto write_error;
+        if (fwrite(&target_segment, sizeof(long long), 1, f) != 1) goto write_error;
+        if (fwrite(&vm->compiler.data_relocs[i].target_offset,
+                   sizeof(long long), 1, f) != 1) goto write_error;
+        if (fwrite(&vm->compiler.data_relocs[i].addend,
+                   sizeof(long long), 1, f) != 1) goto write_error;
     }
 
     fclose(f);
@@ -247,6 +289,7 @@ int cc_save_bytecode(JCC *vm, const char *path) {
         printf("Saved bytecode to %s:\n", path);
         printf("  Text size: %lld bytes (%lld instructions)\n", text_size, num_instructions);
         printf("  Data size: %lld bytes\n", data_size);
+        printf("  Data relocations: %lld\n", data_reloc_count);
         printf("  Main offset: %lld\n", main_offset);
     }
 
@@ -254,6 +297,7 @@ int cc_save_bytecode(JCC *vm, const char *path) {
 
 write_error:
     fprintf(stderr, "error: failed to write bytecode: %s\n", strerror(errno));
+    if (data_copy) free(data_copy);
     if (text_copy) free(text_copy);
     fclose(f);
     return -1;
@@ -278,7 +322,7 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
     }
     cursor += 4;
 
-    // Read version - only accept version 1
+    // Read version - only accept version 1 
     READ_AND_INCR(version, int);
     if (version != 1) {
         fprintf(stderr, "error: unsupported bytecode version %d (expected 1)\n", version);
@@ -293,8 +337,11 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
     READ_AND_INCR(text_size, long long);
     READ_AND_INCR(data_size, long long);
     READ_AND_INCR(main_offset, long long);
+    READ_AND_INCR(data_reloc_count, long long);
 
-    if (text_size < 0 || data_size < 0 || cursor + text_size + data_size > end) {
+    if (text_size < 0 || data_size < 0 || data_reloc_count < 0 ||
+        data_reloc_count > MAX_CALLS ||
+        cursor + text_size + data_size + data_reloc_count * 4 * (long long)sizeof(long long) > end) {
         fprintf(stderr, "error: invalid bytecode sizes\n");
         return -1;
     }
@@ -317,6 +364,30 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
     if (data_size > 0) {
         memcpy(vm->data_seg, cursor, data_size);
         cursor += data_size;
+    }
+
+    vm->compiler.num_data_relocs = 0;
+    for (long long i = 0; i < data_reloc_count; i++) {
+        READ_AND_INCR(data_offset, long long);
+        READ_AND_INCR(target_segment, long long);
+        READ_AND_INCR(target_offset, long long);
+        READ_AND_INCR(addend, long long);
+
+        if (data_offset < 0 ||
+            data_offset + (long long)sizeof(long long) > data_size ||
+            (target_segment != 0 && target_segment != 1)) {
+            fprintf(stderr, "error: invalid data relocation record\n");
+            return -1;
+        }
+
+        vm->compiler.data_relocs[vm->compiler.num_data_relocs].data_offset =
+            data_offset;
+        vm->compiler.data_relocs[vm->compiler.num_data_relocs].target_segment =
+            (int)target_segment;
+        vm->compiler.data_relocs[vm->compiler.num_data_relocs].target_offset =
+            target_offset;
+        vm->compiler.data_relocs[vm->compiler.num_data_relocs].addend = addend;
+        vm->compiler.num_data_relocs++;
     }
 
     // Convert relative offsets back to absolute addresses
@@ -370,10 +441,26 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
     vm->free_list = NULL;
     vm->text_seg[0] = main_offset;  // Restore main offset
 
+    for (int i = 0; i < vm->compiler.num_data_relocs; i++) {
+        long long value;
+        if (vm->compiler.data_relocs[i].target_segment == 0) {
+            value = (long long)(vm->data_seg +
+                                vm->compiler.data_relocs[i].target_offset +
+                                vm->compiler.data_relocs[i].addend);
+        } else {
+            value = (long long)((char *)vm->text_seg +
+                                vm->compiler.data_relocs[i].target_offset +
+                                vm->compiler.data_relocs[i].addend);
+        }
+        *(long long *)(vm->data_seg + vm->compiler.data_relocs[i].data_offset) =
+            value;
+    }
+
     if (vm->debug_vm) {
         printf("Loaded bytecode:\n");
         printf("  Text size: %lld bytes (%lld instructions)\n", text_size, num_instructions);
         printf("  Data size: %lld bytes\n", data_size);
+        printf("  Data relocations: %lld\n", data_reloc_count);
         printf("  Main offset: %lld\n", main_offset);
     }
 

@@ -305,6 +305,28 @@ int op_LI3_fn(JCC *vm) {
     return 0;
 }
 
+int op_LDA3_fn(JCC *vm) {
+    // Load data-relative address: [LDA3] [rd:8] [byte_offset:64]
+    long long operands = *vm->pc++;
+    int rd;
+    DECODE_R(operands, rd);
+    long long offset = *vm->pc++;
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (long long)(vm->data_seg + offset);
+    return 0;
+}
+
+int op_LTA3_fn(JCC *vm) {
+    // Load text-relative address: [LTA3] [rd:8] [byte_offset:64]
+    long long operands = *vm->pc++;
+    int rd;
+    DECODE_R(operands, rd);
+    long long offset = *vm->pc++;
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (long long)((char *)vm->text_seg + offset);
+    return 0;
+}
+
 int op_MOV3_fn(JCC *vm) {
     // Move register: [MOV3] [rd:8|rs1:8|unused:48]
     long long operands = *vm->pc++;

@@ -60,6 +60,8 @@ static bool is_2word_op(int op) {
 static bool is_3word_op(int op) {
     switch (op) {
         case LI3:    // rd + imm
+        case LDA3:   // rd + data offset
+        case LTA3:   // rd + text offset
         case LEA3:   // rd + imm
         case ADDI3:  // rd, rs + imm
         case JZ3:    // rs + target
@@ -284,6 +286,15 @@ static void opt_constant_fold(JCC *vm) {
                         state.is_const[rd] = false;
                     }
                 }
+                break;
+            }
+
+            case LDA3:
+            case LTA3:
+            case LEA3: {
+                int rd = pc[1] & 0xFF;
+                if (rd < MAX_TRACKED_REGS)
+                    state.is_const[rd] = false;
                 break;
             }
 

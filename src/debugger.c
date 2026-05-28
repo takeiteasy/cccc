@@ -254,6 +254,8 @@ static int disassemble_instruction(long long *pc, long long *text_seg, long long
 
         // Multi-register opcodes (RI format: 1 register word + 1 immediate word)
         case LI3:
+        case LDA3:
+        case LTA3:
         case LEA3:
         case ADDI3:
             if (pc + 2 < text_end) {

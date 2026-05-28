@@ -130,11 +130,13 @@ Obj *cc_link_progs(JCC *vm, Obj **progs, int count) {
                     // Copy definition's properties to the declaration for AST node references
                     existing->is_definition = obj->is_definition;
                     existing->init_data = obj->init_data;
+                    existing->rel = obj->rel;
                     existing->ty = obj->ty;
                 } else if (existing_is_def) {
                     // Existing is definition, copy its properties to this declaration
                     obj->is_definition = existing->is_definition;
                     obj->init_data = existing->init_data;
+                    obj->rel = existing->rel;
                     obj->ty = existing->ty;
                 }
                 // Otherwise both are declarations, keep first one
@@ -159,6 +161,7 @@ Obj *cc_link_progs(JCC *vm, Obj **progs, int count) {
                 // For now, we mark this object to point to the canonical one
                 obj->is_definition = canonical->is_definition;
                 obj->init_data = canonical->init_data;
+                obj->rel = canonical->rel;
                 obj->ty = canonical->ty;
             }
             

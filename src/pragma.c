@@ -215,6 +215,8 @@ static bool compile_single_pragma_macro(JCC *vm, PragmaMacro *pm) {
             if (var->init_data) {
                 memcpy(vm->data_ptr, var->init_data, var->ty->size);
             }
+            if (var->rel)
+                error("pragma macro global relocations are not supported");
 
             vm->data_ptr += var->ty->size;
         }

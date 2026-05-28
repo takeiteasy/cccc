@@ -109,6 +109,8 @@ extern "C" {
     X(SLE3) /* rd = (rs1 <= rs2) */                                            \
     /* Register operations */                                                  \
     X(LI3)   /* rd = immediate */                                              \
+    X(LDA3)  /* rd = data_seg + immediate byte offset */                       \
+    X(LTA3)  /* rd = text_seg + immediate byte offset */                       \
     X(MOV3)  /* rd = rs1 */                                                    \
     X(NEG3)  /* rd = -rs1 (integer unary negation) */                          \
     X(NOT3)  /* rd = !rs (logical not) */                                      \
@@ -1250,6 +1252,14 @@ typedef struct Compiler {
         Obj *function;       // Function whose address to use
     } func_addr_patches[MAX_CALLS];
     int num_func_addr_patches;
+
+    struct {
+        long long data_offset;   // Pointer slot offset in data segment
+        long long target_offset; // Target offset in text/data segment
+        long long addend;        // Byte addend applied to target
+        int target_segment;      // 0 = data, 1 = text
+    } data_relocs[MAX_CALLS];
+    int num_data_relocs;
 
     LabelEntry label_table[MAX_LABELS];
     int num_labels;

@@ -58,6 +58,66 @@ static int find_ffi_function(JCC *vm, const char *name) {
 
     return -1;
 }
+
+static Obj *find_global_obj(Obj *prog, const char *name) {
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (obj->name && strcmp(obj->name, name) == 0)
+            return obj;
+    }
+    return NULL;
+}
+
+static void add_data_reloc(JCC *vm, long long data_offset, int target_segment,
+                           long long target_offset, long long addend) {
+    if (vm->compiler.num_data_relocs >= MAX_CALLS)
+        error("too many data relocations");
+    vm->compiler.data_relocs[vm->compiler.num_data_relocs].data_offset =
+        data_offset;
+    vm->compiler.data_relocs[vm->compiler.num_data_relocs].target_segment =
+        target_segment;
+    vm->compiler.data_relocs[vm->compiler.num_data_relocs].target_offset =
+        target_offset;
+    vm->compiler.data_relocs[vm->compiler.num_data_relocs].addend = addend;
+    vm->compiler.num_data_relocs++;
+}
+
+static void apply_global_relocations(JCC *vm, Obj *prog) {
+    for (Obj *var = prog; var; var = var->next) {
+        if (var->is_function)
+            continue;
+
+        for (Relocation *rel = var->rel; rel; rel = rel->next) {
+            if (!rel->label || !*rel->label)
+                error("invalid global relocation");
+
+            Obj *target = find_global_obj(prog, *rel->label);
+            if (!target)
+                error("undefined relocation target: %s", *rel->label);
+
+            long long target_offset;
+            long long value;
+            int segment;
+
+            if (target->is_function) {
+                if (!target->body)
+                    error("unsupported relocation to undefined function: %s",
+                          target->name);
+                segment = 1;
+                target_offset = target->code_addr * (long long)sizeof(long long);
+                value = (long long)((char *)vm->text_seg + target_offset +
+                                    rel->addend);
+            } else {
+                segment = 0;
+                target_offset = target->offset;
+                value = (long long)(vm->data_seg + target_offset + rel->addend);
+            }
+
+            long long data_offset = var->offset + rel->offset;
+            *(long long *)(vm->data_seg + data_offset) = value;
+            add_data_reloc(vm, data_offset, segment, target_offset, rel->addend);
+        }
+    }
+}
 // ========== Register Allocator ==========
 // Simple bitmap allocator for temporary registers T0-T10
 
@@ -137,12 +197,13 @@ static bool contains_funcall(Node *node) {
 
 typedef struct {
     char *name;
-    long long *address;
+    long long offset;
 } LabelDef;
 
 typedef struct {
     char *name;
     long long *patch_location;
+    bool text_relative;
 } LabelPatch;
 
 static LabelDef label_defs[MAX_LABELS];
@@ -164,12 +225,14 @@ static void define_label(JCC *vm, char *name) {
         error("codegen: too many labels");
     }
     label_defs[num_label_defs].name = name;
-    label_defs[num_label_defs].address = vm->text_ptr + 1;
+    label_defs[num_label_defs].offset =
+        (long long)((vm->text_ptr + 1) - vm->text_seg);
     num_label_defs++;
 }
 
 // Record a jump that needs to be patched later
-static void add_label_patch(char *name, long long *patch_location) {
+static void add_label_patch(char *name, long long *patch_location,
+                            bool text_relative) {
     if (!name)
         return;
     if (num_label_patches >= MAX_LABEL_PATCHES) {
@@ -177,11 +240,12 @@ static void add_label_patch(char *name, long long *patch_location) {
     }
     label_patches[num_label_patches].name = name;
     label_patches[num_label_patches].patch_location = patch_location;
+    label_patches[num_label_patches].text_relative = text_relative;
     num_label_patches++;
 }
 
 // Patch all forward references to labels
-static void patch_labels(void) {
+static void patch_labels(JCC *vm) {
     for (int i = 0; i < num_label_patches; i++) {
         char *name = label_patches[i].name;
         long long *patch = label_patches[i].patch_location;
@@ -189,7 +253,11 @@ static void patch_labels(void) {
         // Find the label definition
         for (int j = 0; j < num_label_defs; j++) {
             if (strcmp(label_defs[j].name, name) == 0) {
-                *patch = (long long)label_defs[j].address;
+                if (label_patches[i].text_relative) {
+                    *patch = label_defs[j].offset * (long long)sizeof(long long);
+                } else {
+                    *patch = (long long)(vm->text_seg + label_defs[j].offset);
+                }
                 break;
             }
         }
@@ -252,6 +320,14 @@ static void emit_frr(JCC *vm, int op, int rd, int rs1) {
 // LI3: rd = immediate
 static void emit_li3(JCC *vm, int rd, long long imm) {
     emit_ri(vm, LI3, rd, imm);
+}
+
+static void emit_lda3(JCC *vm, int rd, long long offset) {
+    emit_ri(vm, LDA3, rd, offset);
+}
+
+static void emit_lta3(JCC *vm, int rd, long long offset) {
+    emit_ri(vm, LTA3, rd, offset);
 }
 
 // LEA3: rd = bp + offset
@@ -481,7 +557,7 @@ static void gen_addr(JCC *vm, Node *node, int dest_reg) {
     case ND_VAR:
         if (node->var->is_function) {
             // Function address - emit placeholder and record patch
-            emit_ri(vm, LI3, dest_reg, 0); // Placeholder
+            emit_lta3(vm, dest_reg, 0); // Placeholder
             long long *addr_loc = vm->text_ptr;
 
             if (vm->compiler.num_func_addr_patches >= MAX_CALLS) {
@@ -579,8 +655,7 @@ static void gen_addr(JCC *vm, Node *node, int dest_reg) {
             }
         } else {
             // Global variable
-            emit_li3(vm, dest_reg,
-                     (long long)(vm->data_seg + node->var->offset));
+            emit_lda3(vm, dest_reg, node->var->offset);
         }
         return;
 
@@ -642,7 +717,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             vm->data_ptr += sizeof(double);
 
             int temp = alloc_temp_reg();
-            emit_li3(vm, temp, (long long)(vm->data_seg + offset));
+            emit_lda3(vm, temp, offset);
             emit_rr(vm, FLDR, dest_reg, temp);
             free_temp_reg(temp);
         } else {
@@ -653,8 +728,8 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
     case ND_VAR:
         if (node->var->is_function) {
             // Function name used as value - function-to-pointer decay
-            // Emit LI3 with placeholder, patch later
-            emit_ri(vm, LI3, dest_reg, 0);      // Placeholder
+            // Emit LTA3 with placeholder, patch later
+            emit_lta3(vm, dest_reg, 0);          // Placeholder
             long long *addr_loc = vm->text_ptr; // Get the immediate slot
 
             // Record patch location for later resolution
@@ -1623,13 +1698,13 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
 
     case ND_LABEL_VAL:
         // Label address: &&label (GCC extension for computed goto)
-        // Emit LI3 with placeholder address that will be patched later
-        emit_ri(vm, LI3, dest_reg, 0); // Load immediate with placeholder
+        // Emit LTA3 with placeholder offset that will be patched later
+        emit_lta3(vm, dest_reg, 0);
         // Get the address slot we just wrote to
         long long *label_addr_loc = vm->text_ptr;
         // Record patch location so it gets resolved when label is defined
         add_label_patch(node->unique_label ? node->unique_label : node->label,
-                        label_addr_loc);
+                        label_addr_loc, true);
         return;
 
     case ND_BLOCK_LITERAL: {
@@ -1649,17 +1724,16 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         desc_offset = (desc_offset + 7) & ~7; // Align to 8 bytes
         vm->data_ptr = vm->data_seg + desc_offset;
 
-        char *desc_base = vm->data_ptr;
         vm->data_ptr += descriptor_size;
 
         // Load descriptor address into temp register
         int r_desc = alloc_temp_reg();
-        emit_li3(vm, r_desc, (long long)desc_base);
+        emit_lda3(vm, r_desc, desc_offset);
         mark_temp_reg_used(r_desc);
 
         // Load function address (will be patched later)
         int r_invoke = alloc_temp_reg();
-        emit_ri(vm, LI3, r_invoke, 0); // Placeholder for function address
+        emit_lta3(vm, r_invoke, 0); // Placeholder for function address
         long long *invoke_addr_loc = vm->text_ptr;
 
         // Record patch for block function address
@@ -1693,7 +1767,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                 emit_lea3(vm, r_val, cap->offset);
                 emit_load(vm, cap->ty, r_val, r_val);
             } else {
-                emit_li3(vm, r_val, (long long)(vm->data_seg + cap->offset));
+                emit_lda3(vm, r_val, cap->offset);
                 emit_load(vm, cap->ty, r_val, r_val);
             }
 
@@ -2051,13 +2125,13 @@ static void gen_stmt(JCC *vm, Node *node) {
             emit(vm, JMP);
             long long *patch = ++vm->text_ptr;
             *patch = 0; // Placeholder
-            add_label_patch(node->unique_label, patch);
+            add_label_patch(node->unique_label, patch, false);
         } else if (node->label) {
             // Named goto - also needs patching
             emit(vm, JMP);
             long long *patch = ++vm->text_ptr;
             *patch = 0; // Placeholder
-            add_label_patch(node->label, patch);
+            add_label_patch(node->label, patch, false);
         }
         return;
 
@@ -2298,7 +2372,7 @@ void gen_function(JCC *vm, Obj *fn) {
     gen_stmt(vm, fn->body);
 
     // Patch all forward jumps (break/continue/goto)
-    patch_labels();
+    patch_labels(vm);
 
     // Implicit return 0 from main
     if (strcmp(fn->name, "main") == 0) {
@@ -2316,6 +2390,7 @@ void gen(JCC *vm, Obj *prog) {
     // Reset patch counters
     vm->compiler.num_call_patches = 0;
     vm->compiler.num_func_addr_patches = 0;
+    vm->compiler.num_data_relocs = 0;
 
     // Initialize text pointer - text_seg[0] is reserved for main entry point
     vm->text_ptr = vm->text_seg;
@@ -2413,10 +2488,11 @@ void gen(JCC *vm, Obj *prog) {
         }
 
         if (fn_def) {
-            long long addr = (long long)(vm->text_seg + fn_def->code_addr);
-            *loc = addr;
+            *loc = fn_def->code_addr * (long long)sizeof(long long);
         }
     }
+
+    apply_global_relocations(vm, prog);
 
     // Find main function and store its address in text_seg[0]
     for (Obj *fn = prog; fn; fn = fn->next) {

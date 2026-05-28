@@ -39,7 +39,7 @@
 #endif
 
 #define JCC_MAGIC "JCC\0"
-#define JCC_VERSION 2 // Version 2: Added flags field to header
+#define JCC_VERSION 3 // Version 3: data/text-relative address opcodes
 
 // Stack canary constant for detecting stack overflows (used when random
 // canaries disabled)
