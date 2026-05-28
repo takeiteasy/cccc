@@ -1290,6 +1290,31 @@ static Token *read_embed_parameter(JCC *vm, Token **rest, Token *tok) {
     return head.next; // NULL if empty parameter
 }
 
+static long eval_embed_limit_expr(JCC *vm, Token *start, Token *expr,
+                                  Token *end) {
+    if (!expr)
+        error_tok(vm, start, "no expression");
+
+    Token head = {};
+    Token *cur = &head;
+
+    for (Token *t = expr; t; t = t->next)
+        cur = cur->next = copy_token(vm, t);
+    cur->next = new_eof(vm, end);
+
+    expr = preprocess2(vm, head.next);
+    if (expr->kind == TK_EOF)
+        error_tok(vm, start, "no expression");
+
+    convert_pp_tokens(vm, expr);
+
+    Token *rest;
+    long val = const_expr(vm, &rest, expr);
+    if (rest->kind != TK_EOF)
+        error_tok(vm, rest, "extra token");
+    return val;
+}
+
 // Main #embed directive handler
 static Token *handle_embed_directive(JCC *vm, Token *tok,
                                      Token *directive_start) {
@@ -1341,21 +1366,8 @@ static Token *handle_embed_directive(JCC *vm, Token *tok,
             has_limit = true;
             Token *start = tok;
             tok = skip(vm, tok->next, "(");
-
-            // For now, parse a simple numeric constant
-            // TODO: Full constant expression support
-            if (tok->kind != TK_PP_NUM && tok->kind != TK_NUM)
-                error_tok(vm, tok, "limit must be a number");
-
-            // Convert PP number to integer
-            if (tok->kind == TK_PP_NUM) {
-                char *endptr;
-                limit = strtol(tok->loc, &endptr, 0);
-            } else {
-                limit = tok->val;
-            }
-            tok = tok->next;
-
+            Token *expr = read_embed_parameter(vm, &tok, tok);
+            limit = eval_embed_limit_expr(vm, start, expr, tok);
             tok = skip(vm, tok, ")");
 
             if (limit < 0)
