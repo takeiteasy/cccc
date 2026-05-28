@@ -32,7 +32,7 @@ static void usage(const char *argv0, int exit_code) {
            "non-standard headers)\n");
     printf("\t-D <macro>[=def]    Define a macro\n");
     printf("\t-U <macro>          Undefine a macro\n");
-    printf("\t-a/--ast            Dump AST (TODO)\n");
+    printf("\t-a/--ast            Dump AST\n");
     printf("\t-P/--print-tokens   Print preprocessed tokens to stdout\n");
     printf("\t-E/--preprocess     Output preprocessed source code (traditional "
            "C -E)\n");
@@ -720,7 +720,7 @@ int main(int argc, const char *argv[]) {
 
     // For JSON output, we don't need to link (especially useful for header
     // files without main())
-    if (output_json) {
+    if (output_json && !dump_ast) {
         // Link programs, but don't fail if linking fails (e.g., no main() in
         // header file)
         Obj *merged_prog = cc_link_progs(&vm, input_progs, input_files_count);
@@ -784,8 +784,18 @@ int main(int argc, const char *argv[]) {
     }
 
     if (dump_ast) {
-        // TODO: Implement AST dumping
-        fprintf(stderr, "warning: -e/--dump-ast not yet implemented\n");
+        FILE *f = out_file ? fopen(out_file, "w") : stdout;
+        if (!f) {
+            fprintf(stderr, "error: failed to open output file %s\n", out_file);
+            exit_code = 1;
+            goto BAIL;
+        }
+        if (output_json)
+            cc_dump_ast_json(f, merged_prog, verbose);
+        else
+            cc_dump_ast(f, merged_prog, verbose);
+        if (f != stdout)
+            fclose(f);
         goto BAIL;
     }
 

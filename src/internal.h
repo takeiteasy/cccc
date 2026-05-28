@@ -331,6 +331,13 @@ int debugger_run(JCC *vm, int argc, char **argv);
 char *serialize_node_to_source(JCC *vm, Node *node);
 
 //
+// dump_ast.c
+//
+
+void cc_dump_ast(FILE *f, Obj *prog, int verbose);
+void cc_dump_ast_json(FILE *f, Obj *prog, int verbose);
+
+//
 // json.c
 //
 
