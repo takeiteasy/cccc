@@ -110,12 +110,14 @@ static Token *new_eof(JCC *vm, Token *tok) {
     return t;
 }
 
-// Extract a #pragma macro function definition and store it
+// Extract a #pragma macro or #pragma comptime function definition and store it
 // Returns the token after the function definition (or original token if
 // extraction failed)
-static Token *extract_pragma_macro(JCC *vm, Token *tok) {
+static Token *extract_pragma_compiletime_function(JCC *vm, Token *tok,
+                                                  char *directive,
+                                                  bool is_macro_entry) {
     // Expected format: <return_type> <function_name>(<params>) { <body> }
-    // tok should be the first token after "macro" on the next line
+    // tok should be the first token after the directive on the next line
 
     Token *start = tok;
     Token *func_name_tok = NULL;
@@ -130,7 +132,8 @@ static Token *extract_pragma_macro(JCC *vm, Token *tok) {
     }
 
     if (!func_name_tok) {
-        error_tok(vm, start, "#pragma macro: expected function definition");
+        error_tok(vm, start, "#pragma %s: expected function definition",
+                  directive);
         return start;
     }
 
@@ -163,7 +166,7 @@ static Token *extract_pragma_macro(JCC *vm, Token *tok) {
         tok = tok->next;
 
     if (!equal(tok, "{")) {
-        error_tok(vm, start, "#pragma macro: expected function body");
+        error_tok(vm, start, "#pragma %s: expected function body", directive);
         return start;
     }
 
@@ -205,11 +208,12 @@ static Token *extract_pragma_macro(JCC *vm, Token *tok) {
     pm->body_tokens = head.next;
     pm->compiled_fn = NULL;
     pm->is_compiled = false;
+    pm->is_macro_entry = is_macro_entry;
     pm->next = vm->compiler.pragma_macros;
     vm->compiler.pragma_macros = pm;
 
     if (vm->debug_vm)
-        printf("Captured pragma macro '%s'\n", name);
+        printf("Captured pragma %s '%s'\n", directive, name);
 
     // Return token after the function
     return body_end ? body_end : tok;
@@ -1697,7 +1701,21 @@ static Token *preprocess2(JCC *vm, Token *tok) {
                 macro_tok = macro_tok->next;
             // Now macro_tok points to the first token of the function
             // definition
-            tok = extract_pragma_macro(vm, macro_tok);
+            tok = extract_pragma_compiletime_function(vm, macro_tok, "macro",
+                                                      true);
+            continue;
+        }
+
+        if (equal(tok, "pragma") && equal(tok->next, "comptime")) {
+            // Skip to end of #pragma comptime line
+            Token *comptime_tok = tok->next->next;
+            while (comptime_tok && !comptime_tok->at_bol &&
+                   comptime_tok->kind != TK_EOF)
+                comptime_tok = comptime_tok->next;
+            // Now comptime_tok points to the first token of the helper
+            // function definition
+            tok = extract_pragma_compiletime_function(vm, comptime_tok,
+                                                      "comptime", false);
             continue;
         }
 

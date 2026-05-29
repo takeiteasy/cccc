@@ -277,8 +277,8 @@ static void patch_macro_call_addresses(JCC *vm, Obj *macro_prog) {
     }
 }
 
-// Compile all pragma macros as one compile-time program so macro bytecode can
-// make ordinary function calls to other pragma macros.
+// Compile all pragma macros and comptime helpers as one compile-time program so
+// macro bytecode can make ordinary function calls across the whole set.
 static bool compile_pragma_macro_program(JCC *vm) {
     int count = 0;
     for (PragmaMacro *pm = vm->compiler.pragma_macros; pm; pm = pm->next)
@@ -299,6 +299,7 @@ static bool compile_pragma_macro_program(JCC *vm) {
 
     vm->compiler.in_macro_mode = true;
     vm->compiler.locals = NULL;
+    vm->compiler.globals = NULL;
     vm->compiler.num_call_patches = 0;
     vm->compiler.num_func_addr_patches = 0;
 
@@ -360,7 +361,7 @@ static bool compile_pragma_macro_program(JCC *vm) {
 
     if (vm->debug_vm) {
         for (int i = 0; i < count; i++) {
-            printf("Compiled pragma macro '%s' at code address %lld\n",
+            printf("Compiled pragma compile-time function '%s' at code address %lld\n",
                    macros[i]->name, macros[i]->compiled_fn->code_addr);
         }
     }
@@ -368,13 +369,13 @@ static bool compile_pragma_macro_program(JCC *vm) {
     return true;
 }
 
-// Compile all pragma macros
+// Compile all pragma macros and comptime helpers
 static void compile_all_pragma_macros(JCC *vm) {
     if (!vm->compiler.pragma_macros)
         return;
 
     if (vm->debug_vm)
-        printf("Compiling %d pragma macro(s)...\n", ({
+        printf("Compiling %d pragma compile-time function(s)...\n", ({
                    int n = 0;
                    for (PragmaMacro *p = vm->compiler.pragma_macros; p;
                         p = p->next)
@@ -456,7 +457,7 @@ static Node *execute_pragma_macro(JCC *vm, PragmaMacro *pm, Node *args,
 // Find pragma macro by name
 static PragmaMacro *find_pragma_macro_by_name(JCC *vm, const char *name) {
     for (PragmaMacro *pm = vm->compiler.pragma_macros; pm; pm = pm->next) {
-        if (strlen(pm->name) == strlen(name) &&
+        if (pm->is_macro_entry && strlen(pm->name) == strlen(name) &&
             strncmp(pm->name, name, strlen(name)) == 0)
             return pm;
     }

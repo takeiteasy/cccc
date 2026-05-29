@@ -723,6 +723,7 @@ typedef struct CondIncl {
  @field body_tokens Original token stream for function body (from preprocessor).
  @field compiled_fn Compiled function object (NULL until compiled).
  @field is_compiled True after successful compilation.
+ @field is_macro_entry True if callable from user program macro call sites.
  @field next Pointer to next macro in linked list.
 */
 typedef struct PragmaMacro {
@@ -730,6 +731,7 @@ typedef struct PragmaMacro {
     Token *body_tokens;       // Original token stream for function body
     Obj *compiled_fn;         // Compiled function object
     bool is_compiled;         // True after successful compilation
+    bool is_macro_entry;      // True for #pragma macro, false for comptime helper
     struct PragmaMacro *next; // Next macro in linked list
 } PragmaMacro;
 

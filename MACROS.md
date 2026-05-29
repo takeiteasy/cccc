@@ -355,6 +355,32 @@ their compile-time bytecode. This includes calls to macros defined later in the
 same translation unit, because all captured macro signatures are made available
 before their bodies are compiled.
 
+Pragma macros can also call explicit compile-time helper functions marked with
+`#pragma comptime`. These helpers are compiled into the same compile-time
+bytecode unit as pragma macros, but they are not expanded from normal program
+call sites:
+
+```c
+#pragma comptime
+int helper(int n) {
+    return n + 1;
+}
+
+#pragma macro
+JCC_Node *make_value(void) {
+    return JCC_AST_INT_LITERAL(helper(41));
+}
+
+int main(void) {
+    return make_value(); // Replaced at compile-time with 42
+}
+```
+
+`#pragma comptime` helpers may call other pragma macros or comptime helpers,
+including helpers defined later in the translation unit. Ordinary runtime
+functions are not automatically compiled for macro use; mark shared
+compile-time helpers explicitly with `#pragma comptime`.
+
 String literals created by `jcc_ast_string_literal()` are immediately allocated in the data segment to ensure they're available at runtime.
 
 See `include/reflection.h` for the complete API documentation.

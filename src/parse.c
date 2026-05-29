@@ -206,7 +206,7 @@ static VarScope *find_var(JCC *vm, Token *tok) {
 // Find a pragma macro by name
 static PragmaMacro *find_pragma_macro(JCC *vm, Token *tok) {
     for (PragmaMacro *pm = vm->compiler.pragma_macros; pm; pm = pm->next) {
-        if (strlen(pm->name) == tok->len &&
+        if (pm->is_macro_entry && strlen(pm->name) == tok->len &&
             strncmp(pm->name, tok->loc, tok->len) == 0) {
             return pm;
         }
