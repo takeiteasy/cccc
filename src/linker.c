@@ -121,6 +121,9 @@ Obj *cc_link_progs(JCC *vm, Obj **progs, int count) {
                                       (existing->is_function && existing->body) ||
                                       (!existing->is_function && existing->init_data);
                 
+                // PLACEHOLDER: Does not check linkage. Two separate files
+                // each with `static void foo(void) {}` are incorrectly rejected.
+                // Tentative definitions (e.g., `int x;`) may also be rejected.
                 if (obj_is_def && existing_is_def) {
                     // Both are definitions - error
                     error_tok(vm, obj->tok, "redefinition of '%s'", obj->name);

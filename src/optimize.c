@@ -43,6 +43,8 @@ static int get_opcode(long long *pc) {
 
 // Check if opcode is a 2-word instruction (op + operand)
 static bool is_2word_op(int op) {
+    // PLACEHOLDER: Catch-all `op >= ADD3` is fragile. Any future 1-word or
+    // 3-word opcode >= ADD3 will break the optimizer's instruction sizing.
     // Most register ops have operands encoded in the second word
     switch (op) {
         case JMP:
@@ -58,6 +60,8 @@ static bool is_2word_op(int op) {
 
 // Check if opcode uses an immediate value (3-word: op + operand + imm)
 static bool is_3word_op(int op) {
+    // PLACEHOLDER: Missing MARKP, CHKA3, CHKT3, and other 3-word opcodes.
+    // An explicit opcode-size table generated from OPS_X would be robust.
     switch (op) {
         case LI3:    // rd + imm
         case LDA3:   // rd + data offset
@@ -107,27 +111,11 @@ static void reset_reg_state(RegState *state) {
     }
 }
 
-// NOP instruction (replace folded instructions with this)
-// We'll use LI3 r0, 0 as NOP since r0 is the zero register (writes discarded)
-#define NOP_OP LI3
-#define NOP_RD 0
-#define NOP_IMM 0
 
-// Emit a NOP at the given location (for 2-word instructions)
-// static void emit_nop_2word(long long *pc) {
-//     // Just leave as-is for now, we could mark for removal in a compaction pass
-//     // For now, we'll convert to LI3 r0, 0 which has no effect
-//     (void)pc;
-// }
-
-// Emit a NOP at the given location (for 3-word instructions)  
-// static void emit_nop_3word(long long *pc) {
-//     pc[0] = NOP_OP;
-//     pc[1] = ENCODE_R(NOP_RD);
-//     pc[2] = NOP_IMM;
-// }
 
 static void opt_constant_fold(JCC *vm) {
+    // PLACEHOLDER: This pass increments folded_count but never actually
+    // rewrites the bytecode with folded constants. It is currently a no-op.
     if (!vm || !vm->text_seg || !vm->text_ptr) {
         return;
     }
@@ -439,6 +427,8 @@ static void opt_peephole(JCC *vm) {
     }
 
     // Pattern 4: JMP to next instruction -> NOP
+    // PLACEHOLDER: Converting JMP to NOP without verifying that no other
+    // jump targets this instruction breaks control flow.
     for (long long *pc = start; pc < end; ) {
         int op = get_opcode(pc);
         int size = get_instr_size(op);

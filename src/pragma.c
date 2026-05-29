@@ -416,6 +416,7 @@ static Node *execute_pragma_macro(JCC *vm, PragmaMacro *pm, Node *args,
 
     // Pass arguments via registers (REG_A0-A7 in the VM calling convention)
     // Arguments are Node* pointers to the AST nodes
+    // PLACEHOLDER: Silently drops arguments beyond the 8th without error.
     int arg_idx = 0;
     for (Node *arg = args; arg && arg_idx < 8; arg = arg->next) {
         vm->regs[REG_A0 + arg_idx] = (long long)arg;

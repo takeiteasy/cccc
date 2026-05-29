@@ -487,6 +487,8 @@ static void mark_type_seen(Type *ty, Type ***seen_types_ptr, int *seen_types_cou
 }
 
 // Helper to recursively collect struct/union/enum types
+// PLACEHOLDER: This function mutates ty->origin to build temporary linked
+// lists, corrupting the type identity graph used by same_type_or_origin.
 static void collect_type_recursive(Type *ty, Type **seen_types, int *seen_types_count, int *seen_types_capacity,
                                    Type **structs, Type **unions, Type **enums) {
     if (!ty) return;

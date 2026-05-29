@@ -737,6 +737,8 @@ void jcc_ast_function_add_param(JCC *vm, JCC_Obj *fn, const char *name,
         return;
 
     // Create parameter local variable
+    // PLACEHOLDER: param->offset is never set. Codegen uses offset to
+    // compute bp + offset, so all reflected params alias the same slot.
     Obj *param = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
     memset(param, 0, sizeof(Obj));
     param->name = arena_strdup(vm, name);

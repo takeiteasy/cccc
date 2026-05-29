@@ -123,12 +123,16 @@ static int get_opcode_operand_count(int op) {
             return 0;
 
         default:
+            // PLACEHOLDER: Returning 0 for unknown opcodes causes misalignment
+            // in save/load address conversion. Should error() or return -1.
             return 0;  // Unknown - assume no operands
     }
 }
 
 // Helper: check if an opcode has an address operand that needs relocation
 static int opcode_has_address(int op) {
+    // PLACEHOLDER: JMPT embeds two addresses (table_addr and default_addr)
+    // that are not converted to relative offsets during save/load.
     return (op == JMP || op == CALL || op == JZ3 || op == JNZ3);
 }
 
@@ -341,7 +345,9 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
 
     if (text_size < 0 || data_size < 0 || data_reloc_count < 0 ||
         data_reloc_count > MAX_CALLS ||
-        cursor + text_size + data_size + data_reloc_count * 4 * (long long)sizeof(long long) > end) {
+        cursor + text_size + data_size + data_reloc_count * 4 * (long long)sizeof(long long) > end ||
+        text_size > vm->poolsize * (long long)sizeof(long long) ||
+        data_size > vm->poolsize) {
         fprintf(stderr, "error: invalid bytecode sizes\n");
         return -1;
     }

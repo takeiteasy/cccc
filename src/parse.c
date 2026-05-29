@@ -190,6 +190,8 @@ static void leave_scope(JCC *vm) {
 
 // Find a variable by name.
 static VarScope *find_var(JCC *vm, Token *tok) {
+    // PLACEHOLDER: Linear scope lookup is O(scopes * vars). For large TUs
+    // this becomes a bottleneck; scopes should use hash tables.
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
         // Linear search through linked list (typically 1-10 entries per scope)
         for (VarScopeNode *node = sc->vars; node; node = node->next) {
@@ -2402,6 +2404,8 @@ static int64_t eval2(JCC *vm, Node *node, char ***label) {
     case ND_MUL:
         return eval(vm, node->lhs) * eval(vm, node->rhs);
     case ND_DIV:
+        // PLACEHOLDER: Division by zero in compile-time eval causes SIGFPE
+        // instead of a clean compiler error. Affects #if, array dims, etc.
         if (node->ty->is_unsigned)
             return (uint64_t)eval(vm, node->lhs) / eval(vm, node->rhs);
         return eval(vm, node->lhs) / eval(vm, node->rhs);
@@ -2990,6 +2994,13 @@ static Node *new_add(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
         rhs = tmp;
     }
 
+    // void* arithmetic is a GNU extension; we allow it for compatibility
+    if (lhs->ty->base->kind == TY_VOID) {
+        rhs = new_binary(vm, ND_MUL, rhs,
+                         new_long(vm, get_vm_size(lhs->ty->base), tok), tok);
+        return new_binary(vm, ND_ADD, lhs, rhs, tok);
+    }
+
     // VLA + num
     if (lhs->ty->base->kind == TY_VLA) {
         rhs = new_binary(vm, ND_MUL, rhs,
@@ -3489,6 +3500,8 @@ static void struct_members(JCC *vm, Token **rest, Token *tok, Type *ty) {
             if (consume(vm, &tok, tok, ":")) {
                 mem->is_bitfield = true;
                 mem->bit_width = const_expr(vm, &tok, tok);
+                // PLACEHOLDER: No validation that bit_width is non-negative
+                // or does not exceed the container type's width.
             }
 
             cur = cur->next = mem;
@@ -4030,6 +4043,8 @@ static Node *generic_selection(JCC *vm, Token **rest, Token *tok) {
         t1 = pointer_to(vm, t1);
     else if (t1->kind == TY_ARRAY)
         t1 = pointer_to(vm, t1->base);
+    // PLACEHOLDER: C11 requires lvalue conversion (stripping qualifiers)
+    // on the controlling expression type before matching associations.
 
     Node *ret = NULL;
 

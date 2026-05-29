@@ -59,7 +59,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-t/--type-checks             Runtime type checking on pointer "
            "dereferences\n");
     printf("\t-z/--uninitialized-detection Uninitialized variable detection\n");
-    printf("\t-O/--overflow-checks         Detect signed integer overflow\n");
+    printf("\t   --overflow-checks         Detect signed integer overflow\n");
     printf("\t-s/--stack-canaries          Stack overflow protection\n");
     printf("\t-k/--heap-canaries           Heap overflow protection\n");
     printf("\t-l/--memory-leak-detection   Track allocations and report leaks "
@@ -98,10 +98,10 @@ static void usage(const char *argv0, int exit_code) {
            "(default: disabled)\n");
     printf("\t                             LEVEL: 0=none, 1=basic, 2=standard, "
            "3=aggressive\n");
-    printf("\t                             -O0: No optimization\n");
-    printf("\t                             -O1: Constant folding only\n");
-    printf("\t                             -O2: Constant folding + peephole\n");
-    printf("\t                             -O3: All optimizations (including "
+    printf("\t                             0: No optimization\n");
+    printf("\t                             1: Constant folding only\n");
+    printf("\t                             2: Constant folding + peephole\n");
+    printf("\t                             3: All optimizations (including "
            "dead code elimination)\n");
     printf("\nExample:\n");
     printf("\t%s -o hello hello.c\n", argv0);
@@ -304,7 +304,7 @@ int main(int argc, const char *argv[]) {
         {"optimize", optional_argument, 0, 1016},
         {0, 0, 0, 0}};
 
-    const char *optstring = "0123haI:D:U:o:dvgbftzOskpliPEMXSjFTVC";
+    const char *optstring = "0123haI:D:U:o:dvgbftzskpliPEMXSjFTVC";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(argc, (char *const *)argv, optstring,
@@ -401,9 +401,7 @@ int main(int argc, const char *argv[]) {
         case 'z':
             flags |= JCC_UNINIT_DETECTION;
             break;
-        case 'O':
-            flags |= JCC_OVERFLOW_CHECKS;
-            break;
+
         case 's':
             flags |= JCC_STACK_CANARIES;
             break;
@@ -829,8 +827,14 @@ int main(int argc, const char *argv[]) {
         goto BAIL;
     }
 
-    // Run the program
-    exit_code = cc_run(&vm, argc, (char **)argv);
+    // Run the program (pass only positional args, not compiler flags)
+    int prog_argc = argc - optind + 1;
+    char **prog_argv = malloc(sizeof(char *) * prog_argc);
+    prog_argv[0] = (char *)argv[0];
+    for (int i = 1; i < prog_argc; i++)
+        prog_argv[i] = (char *)argv[optind + i - 1];
+    exit_code = cc_run(&vm, prog_argc, prog_argv);
+    free(prog_argv);
 
 BAIL:
     cc_destroy(&vm);

@@ -27,6 +27,8 @@ static int find_ffi_function(JCC *vm, const char *name) {
     if (!vm || !name)
         return -1;
 
+    // PLACEHOLDER: This is O(m*n) due to repeated strlen. Replace with a
+    // hash table keyed by function name for O(1) lookup.
     // First try exact match
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
         if (strlen(vm->compiler.ffi_table[i].name) == strlen(name) &&
@@ -266,6 +268,8 @@ static void add_label_patch(char *name, long long *patch_location,
 
 // Patch all forward references to labels
 static void patch_labels(JCC *vm) {
+    // PLACEHOLDER: O(num_patches * num_labels). Replace with a hash table
+    // mapping label name -> definition for O(1) per patch.
     for (int i = 0; i < num_label_patches; i++) {
         char *name = label_patches[i].name;
         long long *patch = label_patches[i].patch_location;
@@ -373,9 +377,9 @@ static void emit_fmov3(JCC *vm, int rd, int rs) {
 // Load operations based on type
 // Load operations based on type
 static void emit_load(JCC *vm, Type *ty, int rd, int rs_addr) {
-    if (ty->kind == TY_CHAR) {
+    if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
         emit_rr(vm, LDR_B, rd, rs_addr);
-        if (ty->is_unsigned)
+        if (ty->is_unsigned || ty->kind == TY_BOOL)
             emit_rr(vm, ZX1, rd, rd);
     } else if (ty->kind == TY_SHORT) {
         emit_rr(vm, LDR_H, rd, rs_addr);
@@ -462,6 +466,8 @@ static Obj *belongs_to_outer_function(Obj *current_fn, Obj *var) {
     if (!current_fn || !current_fn->is_nested || !var || !var->is_local)
         return NULL;
 
+    // PLACEHOLDER: O(depth * locals). Build a hash set of locals/params per
+    // function during codegen preparation for O(1) membership tests.
     // Walk up the parent chain to find which function owns this variable
     for (Obj *parent = current_fn->parent_fn; parent;
          parent = parent->parent_fn) {
@@ -731,6 +737,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
     case ND_NUM:
         if (is_flonum(node->ty)) {
             // Float literal - store in data segment and load
+            // PLACEHOLDER: No bounds check against data segment size.
             long long offset = vm->data_ptr - vm->data_seg;
             offset = (offset + 7) & ~7; // Align
             vm->data_ptr = vm->data_seg + offset;
@@ -2044,7 +2051,9 @@ static void gen_stmt(JCC *vm, Node *node) {
         long long *case_patches[MAX_SWITCH_CASES];
         int num_cases = 0;
 
-        // For each case, compare and emit jump (placeholder)
+        // For each case, compare and emit jump
+        // PLACEHOLDER: Linear search through cases is O(n). Dense switches
+        // should use a jump table (JMPT); >256 cases should be an error.
         for (Node *n = node->case_next; n; n = n->case_next) {
             if (num_cases >= MAX_SWITCH_CASES)
                 break;
@@ -2478,6 +2487,7 @@ void gen(JCC *vm, Obj *prog) {
         long long *loc = vm->compiler.call_patches[i].location;
 
         // Find the function definition in the program list
+        // PLACEHOLDER: O(num_patches * num_functions). Use a hash table.
         Obj *fn_def = NULL;
         for (Obj *fn = prog; fn; fn = fn->next) {
             if (fn->is_function && fn->body &&

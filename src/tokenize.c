@@ -60,7 +60,9 @@ static void verror_at(JCC *vm,
 
         // Format the error message
         int pos = snprintf(msg, 4096, "%s:%d: ", filename, line_no);
+        if (pos > 4096) pos = 4096;
         pos += snprintf(msg + pos, 4096 - pos, "%.*s\n", (int)(end - line), line);
+        if (pos > 4096) pos = 4096;
 
         int indent = strlen(filename) + snprintf(NULL, 0, ":%d: ", line_no);
         int col_offset = display_width(vm, line, loc - line) + indent;
@@ -704,6 +706,8 @@ void convert_pp_tokens(JCC *vm, Token *tok) {
 
 // Initialize line info for all tokens.
 static void add_line_numbers(JCC *vm, Token *tok) {
+    // PLACEHOLDER: O(file_size * num_tokens). Should iterate tokens and
+    // advance a single file pointer instead.
     char *p = vm->compiler.current_file->contents;
     char *line_start = p;
     int n = 1;

@@ -91,7 +91,7 @@ static Token *skip_line(JCC *vm, Token *tok) {
     if (tok->at_bol)
         return tok;
     warn_tok(vm, tok, "extra token");
-    while (tok->at_bol)
+    while (!tok->at_bol)
         tok = tok->next;
     return tok;
 }
@@ -227,6 +227,9 @@ static Hideset *new_hideset(JCC *vm, char *name) {
 }
 
 static Hideset *hideset_union(JCC *vm, Hideset *hs1, Hideset *hs2) {
+    // PLACEHOLDER: Unconditionally copies all of hs1 then appends hs2,
+    // creating duplicates if names exist in both. This grows without
+    // bound during deep macro expansion.
     Hideset head = {};
     Hideset *cur = &head;
 
@@ -1121,7 +1124,7 @@ static char *search_include_next(JCC *vm, char *filename) {
 // Read an #include argument.
 static char *read_include_filename(JCC *vm, Token **rest, Token *tok,
                                    bool *is_dquote, int *out_len) {
-    // Pattern 1: #include "foo.h"
+    // Pattern 1: #include "foo.h" or __has_embed("foo")
     if (tok->kind == TK_STR) {
         // A double-quoted filename for #include is a special kind of
         // token, and we don't want to interpret any escape sequences in it.
@@ -1129,13 +1132,13 @@ static char *read_include_filename(JCC *vm, Token **rest, Token *tok,
         // just two non-control characters, backslash and f.
         // So we don't want to use token->str.
         *is_dquote = true;
-        *rest = skip_line(vm, tok->next);
+        *rest = tok->next;
         if (out_len)
             *out_len = tok->len - 2;
         return arena_strndup(vm, tok->loc + 1, tok->len - 2);
     }
 
-    // Pattern 2: #include <foo.h>
+    // Pattern 2: #include <foo.h> or __has_embed(<foo>)
     if (equal(tok, "<")) {
         // Reconstruct a filename from a sequence of tokens between
         // "<" and ">".
@@ -1147,7 +1150,7 @@ static char *read_include_filename(JCC *vm, Token **rest, Token *tok,
                 error_tok(vm, tok, "expected '>'");
 
         *is_dquote = false;
-        *rest = skip_line(vm, tok->next);
+        *rest = tok->next;
         return join_tokens(vm, start->next, tok, out_len);
     }
 
@@ -1516,6 +1519,7 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             int filename_len;
             char *filename = read_include_filename(vm, &tok, tok->next,
                                                    &is_dquote, &filename_len);
+            tok = skip_line(vm, tok);
 
             // Check for URL includes (supported with both <...> and "...")
             if (is_url(filename)) {
@@ -1568,6 +1572,7 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             int filename_len;
             char *filename = read_include_filename(vm, &tok, tok->next, &ignore,
                                                    &filename_len);
+            tok = skip_line(vm, tok);
             char *path = search_include_next(vm, filename);
             tok = include_file(vm, tok, path ? path : filename,
                                start->next->next);

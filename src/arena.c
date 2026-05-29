@@ -66,8 +66,8 @@ static ArenaBlock *arena_new_block(Arena *arena, size_t min_size) {
 
 // Allocate memory from the arena (bump pointer allocation)
 void *arena_alloc(Arena *arena, size_t size) {
-    // Align to 8 bytes for proper alignment
-    size = (size + 7) & ~7;
+    // Align to 16 bytes for proper alignment (sufficient for long double / SIMD)
+    size = (size + 15) & ~15;
 
     // Check if current block has enough space
     if (!arena->current ||
@@ -90,8 +90,12 @@ void arena_reset(Arena *arena) {
         block->ptr = block->base;
     }
 
-    // Reset current to first block
-    arena->current = arena->blocks;
+    // Reset current to first block (tail of list, i.e., oldest block)
+    // Blocks are added to head, so the tail is the oldest block.
+    ArenaBlock *tail = arena->blocks;
+    while (tail && tail->next)
+        tail = tail->next;
+    arena->current = tail;
 }
 
 // Destroy arena and free all memory

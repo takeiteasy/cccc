@@ -48,7 +48,7 @@ static void *debugger_symbol_address(JCC *vm, DebugSymbol *sym) {
         long long offset = sym->offset;
         if ((vm->flags & JCC_STACK_CANARIES) && offset < 0)
             offset -= 1;
-        return (void *)(vm->bp + offset);
+        return (void *)((char *)vm->bp + offset);
     }
     return (void *)(vm->data_seg + sym->offset);
 }
@@ -689,7 +689,10 @@ void cc_debug_repl(JCC *vm) {
             vm->dbg.single_step = 0;
             vm->dbg.step_over = 1;
             vm->dbg.step_out = 0;
-            // Save current return address (on top of stack after CALL)
+            // PLACEHOLDER: step-over should set a temporary breakpoint at the
+            // instruction after CALL, not snapshot the current stack top. The
+            // current approach reads *vm->sp before CALL has pushed the return
+            // address, so it may capture a local variable or garbage instead.
             if (vm->sp < vm->stack_seg) {
                 vm->dbg.step_over_return_addr = (long long *)*vm->sp;
             }
@@ -775,7 +778,7 @@ void cc_debug_repl(JCC *vm) {
                         }
                     } else {
                         // Large number, treat as bytecode offset
-                        bp_pc = vm->text_seg + num;
+                        bp_pc = (long long *)((char *)vm->text_seg + num);
                         if (bp_pc < vm->text_seg || bp_pc >= vm->text_ptr) {
                             printf("Error: Offset %lld is out of range\n", num);
                             bp_pc = NULL;
@@ -825,9 +828,12 @@ void cc_debug_repl(JCC *vm) {
         else if (STREQ_LIT(cmd, "memory") || STREQ_LIT(cmd, "m")) {
             long long addr;
             if (sscanf(line, "%*s %llx", &addr) == 1) {
-                if (is_valid_vm_address(vm, (void*)addr)) {
+                if (is_valid_vm_address(vm, (void*)addr) &&
+                    is_valid_vm_address(vm, (void*)(addr + sizeof(long long) - 1))) {
+                    long long value;
+                    memcpy(&value, (void *)addr, sizeof(value));
                     printf("Memory at 0x%llx: 0x%016llx (%lld)\n",
-                           addr, *(long long*)addr, *(long long*)addr);
+                           addr, value, value);
                 } else {
                     printf("Error: Invalid memory address 0x%llx\n", addr);
                 }
@@ -1034,7 +1040,7 @@ long long *cc_find_pc_for_source(JCC *vm, File *file, int line) {
         return NULL;
     }
 
-    // Linear search for the first matching source location
+    // PLACEHOLDER: Linear search for the first matching source location.
     // TODO: Could optimize with secondary index
     for (int i = 0; i < vm->dbg.source_map_count; i++) {
         if (vm->dbg.source_map[i].line_no == line) {
@@ -1102,6 +1108,9 @@ DebugSymbol *cc_lookup_symbol(JCC *vm, const char *name) {
 
 // Evaluate an AST node in the current debugger context
 // Returns the evaluated value, or 0 on error
+// PLACEHOLDER: Missing support for ND_CAST, ND_ASSIGN, ND_FUNCALL,
+// ND_MEMBER, ND_DEREF, ND_ADDR, ND_SHL, ND_SHR, ND_GT, ND_GE,
+// ND_COND, ND_COMMA. Conditional breakpoints are extremely limited.
 static long long eval_ast_node(JCC *vm, Node *node, int *error) {
     if (!node) {
         *error = 1;

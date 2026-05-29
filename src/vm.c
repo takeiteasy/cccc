@@ -59,7 +59,8 @@ static int eval1(JCC *vm) {
 #undef X
     };
     int op = *vm->pc++;
-    if (op < 0 || op >= sizeof(op_table) / sizeof(op_table[0])) {
+    if (op < 0 || op >= sizeof(op_table) / sizeof(op_table[0]) ||
+        !op_table[op]) {
         printf("unknown instruction:%d\n", op);
         return -1;
     }
@@ -244,6 +245,9 @@ void cc_destroy(JCC *vm) {
         free(vm->shadow_stack);
     // return_buffer is part of data_seg, no need to free separately
 
+    // PLACEHOLDER: The hashmap key freeing below assumes every key is
+    // heap-allocated. If any key is an arena-allocated token string or a
+    // string literal, this causes an invalid-free. Ownership is not tracked.
     // Free init_state HashMap (string keys, no values to free)
     if (vm->init_state.buckets) {
         for (int i = 0; i < vm->init_state.capacity; i++) {
@@ -737,6 +741,8 @@ int cc_run(JCC *vm, int argc, char **argv) {
     vm->pc = vm->text_seg + main_addr;
 
     // Setup stack
+    // PLACEHOLDER: No guard page or bounds check on vm->sp. Deep recursion
+    // or large stack frames can overflow stack_seg and corrupt memory.
     vm->sp = (long long *)((char *)vm->stack_seg + vm->poolsize * sizeof(long long));
     vm->bp = vm->sp;  // Initialize base pointer to top of stack
 

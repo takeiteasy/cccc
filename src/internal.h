@@ -279,14 +279,9 @@ long long wrap_fread(long long ptr, long long size, long long nmemb,
                      long long stream);
 long long wrap_fwrite(long long ptr, long long size, long long nmemb,
                       long long stream);
-long long wrap_read(long long fd, long long buf, long long count);
-long long wrap_write(long long fd, long long buf, long long count);
-
 //
 // main.c
 //
-
-void codegen(JCC *vm, Obj *prog);
 
 //
 // codegen.c
