@@ -4213,8 +4213,10 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
                 return new_num(vm, sc->enum_val, tok);
         }
 
-        // Check if this is a pragma macro call
-        if (equal(tok->next, "(")) {
+        // Check if this is a pragma macro call. When parsing pragma macro
+        // bytecode itself, keep calls as ordinary C function calls so macros can
+        // call each other directly.
+        if (!vm->compiler.in_macro_mode && equal(tok->next, "(")) {
             PragmaMacro *pm = find_pragma_macro(vm, tok);
             if (pm) {
                 // Create ND_MACRO_CALL node

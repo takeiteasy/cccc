@@ -118,136 +118,250 @@ static void register_reflection_ffi(JCC *vm) {
     cc_register_cfunc(vm, "ast_param_ref", (void *)ast_param_ref, 3, 0);
 }
 
-// Compile a single pragma macro
-// The macro is parsed using the existing scope which already has types from
-// reflection.h (since user must #include <reflection.h> before #pragma macro)
-static bool compile_single_pragma_macro(JCC *vm, PragmaMacro *pm) {
-    if (vm->debug_vm) {
-        printf("Compiling pragma macro '%s'...\n", pm->name);
-        printf("  Macro body tokens:\n");
-        for (Token *t = pm->body_tokens; t && t->kind != TK_EOF; t = t->next) {
-            printf("    [%d] '%.*s'\n", t->kind, t->len, t->loc);
-        }
+static Token *copy_macro_token(JCC *vm, Token *tok) {
+    Token *copy = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
+    *copy = *tok;
+    copy->next = NULL;
+    copy->origin = tok;
+    return copy;
+}
+
+static Token *new_macro_punct(JCC *vm, char *str, Token *tmpl) {
+    Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
+    memset(tok, 0, sizeof(Token));
+    tok->kind = TK_PUNCT;
+    tok->loc = str;
+    tok->len = strlen(str);
+    if (tmpl) {
+        tok->file = tmpl->file;
+        tok->filename = tmpl->filename;
+        tok->line_no = tmpl->line_no;
+        tok->col_no = tmpl->col_no;
     }
+    return tok;
+}
 
-    // Save current parser state - keep scope/globals so types remain available
-    Obj *saved_locals = vm->compiler.locals;
-    Obj *saved_current_fn = vm->compiler.current_fn;
-    Obj *saved_globals = vm->compiler.globals;
-
-    // Enter macro mode
-    vm->compiler.in_macro_mode = true;
-    vm->compiler.locals = NULL;
-
-    // Parse the macro function - scope already has reflection.h types
-    Obj *macro_prog = parse(vm, pm->body_tokens);
-
-    if (!macro_prog) {
-        if (vm->debug_vm)
-            fprintf(stderr, "Failed to parse pragma macro '%s'\n", pm->name);
-
-        // Restore parser state
-        vm->compiler.locals = saved_locals;
-        vm->compiler.current_fn = saved_current_fn;
-        vm->compiler.in_macro_mode = false;
-        return false;
+static Token *new_macro_eof(JCC *vm, Token *tmpl) {
+    Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
+    memset(tok, 0, sizeof(Token));
+    tok->kind = TK_EOF;
+    if (tmpl) {
+        tok->loc = tmpl->loc;
+        tok->len = tmpl->len;
+        tok->file = tmpl->file;
+        tok->filename = tmpl->filename;
+        tok->line_no = tmpl->line_no;
+        tok->col_no = tmpl->col_no;
     }
+    return tok;
+}
 
-    // Find the function in the parsed program
-    Obj *func = NULL;
-    for (Obj *obj = macro_prog; obj; obj = obj->next) {
-        if (obj->is_function && strcmp(obj->name, pm->name) == 0) {
-            func = obj;
+static Token *append_macro_prototype(JCC *vm, Token *cur, PragmaMacro *pm) {
+    Token *last = pm->body_tokens;
+    for (Token *tok = pm->body_tokens; tok && tok->kind != TK_EOF;
+         tok = tok->next) {
+        last = tok;
+        if (equal(tok, "{"))
             break;
-        }
+        cur = cur->next = copy_macro_token(vm, tok);
     }
+    cur = cur->next = new_macro_punct(vm, ";", last);
+    return cur;
+}
 
-    if (!func) {
-        if (vm->debug_vm)
-            fprintf(stderr,
-                    "Could not find pragma macro function '%s' after parsing\n",
-                    pm->name);
-
-        // Restore parser state
-        vm->compiler.locals = saved_locals;
-        vm->compiler.current_fn = saved_current_fn;
-        vm->compiler.in_macro_mode = false;
-        return false;
+static Token *append_macro_definition(JCC *vm, Token *cur, PragmaMacro *pm) {
+    Token *last = pm->body_tokens;
+    for (Token *tok = pm->body_tokens; tok && tok->kind != TK_EOF;
+         tok = tok->next) {
+        last = tok;
+        cur = cur->next = copy_macro_token(vm, tok);
     }
+    (void)last;
+    return cur;
+}
 
-    // Initialize global variables (including string literals) in data segment
-    // This must be done BEFORE gen_function since codegen references data_seg
-    // addresses
-    //
-    // IMPORTANT: The globals list is in reverse order (most recently parsed
-    // first). We need to initialize them in the correct (source) order so that
-    // offsets match what the codegen expects.
+static Token *append_token_list(JCC *vm, Token *cur, Token *tokens) {
+    for (Token *tok = tokens; tok && tok->kind != TK_EOF; tok = tok->next)
+        cur = cur->next = copy_macro_token(vm, tok);
+    return cur;
+}
 
-    // Count globals
+static Token *implicit_reflection_tokens(JCC *vm) {
+    char *header = get_std_header("reflection.h");
+    if (!header)
+        error("could not load embedded reflection.h");
+
+    Token *tokens = tokenize_string(vm, "<implicit-reflection.h>", header);
+    return preprocess(vm, tokens);
+}
+
+static Token *build_combined_macro_tokens(JCC *vm, Token *reflection_tokens,
+                                          PragmaMacro **macros, int count) {
+    Token head = {};
+    Token *cur = &head;
+
+    cur = append_token_list(vm, cur, reflection_tokens);
+
+    for (int i = 0; i < count; i++)
+        cur = append_macro_prototype(vm, cur, macros[i]);
+    for (int i = 0; i < count; i++)
+        cur = append_macro_definition(vm, cur, macros[i]);
+
+    Token *tmpl = count > 0 ? macros[count - 1]->body_tokens : NULL;
+    cur->next = new_macro_eof(vm, tmpl);
+    return head.next;
+}
+
+static Obj *find_macro_function(Obj *prog, const char *name) {
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (obj->is_function && obj->body && strcmp(obj->name, name) == 0)
+            return obj;
+    }
+    return NULL;
+}
+
+static void init_macro_globals(JCC *vm, Obj *macro_prog) {
     int num_globals = 0;
     for (Obj *var = macro_prog; var; var = var->next) {
         if (!var->is_function)
             num_globals++;
     }
 
-    if (num_globals > 0) {
-        // Build array in reverse order (to get source order)
-        Obj **globals_arr = alloca(num_globals * sizeof(Obj *));
-        int idx = num_globals - 1;
-        for (Obj *var = macro_prog; var; var = var->next) {
-            if (!var->is_function)
-                globals_arr[idx--] = var;
-        }
+    if (num_globals == 0)
+        return;
 
-        // Initialize in source order
-        for (int i = 0; i < num_globals; i++) {
-            Obj *var = globals_arr[i];
-
-            // Align data pointer to 8-byte boundary
-            long long offset = vm->data_ptr - vm->data_seg;
-            offset = (offset + 7) & ~7;
-            vm->data_ptr = vm->data_seg + offset;
-
-            // Store the offset in the variable
-            var->offset = vm->data_ptr - vm->data_seg;
-
-            // Copy init_data if present (e.g., string literals)
-            if (var->init_data) {
-                memcpy(vm->data_ptr, var->init_data, var->ty->size);
-            }
-            if (var->rel)
-                error("pragma macro global relocations are not supported");
-
-            vm->data_ptr += var->ty->size;
-        }
+    Obj **globals_arr = alloca(num_globals * sizeof(Obj *));
+    int idx = num_globals - 1;
+    for (Obj *var = macro_prog; var; var = var->next) {
+        if (!var->is_function)
+            globals_arr[idx--] = var;
     }
 
-    // Compile just this function to bytecode
-    gen_function(vm, func);
+    for (int i = 0; i < num_globals; i++) {
+        Obj *var = globals_arr[i];
 
-    // Store the compiled function
-    pm->compiled_fn = func;
-    pm->is_compiled = true;
+        long long offset = vm->data_ptr - vm->data_seg;
+        offset = (offset + 7) & ~7;
+        vm->data_ptr = vm->data_seg + offset;
+        var->offset = vm->data_ptr - vm->data_seg;
 
-    // Link macro's new globals (string literals, etc.) to the main program's
-    // globals. Find the end of macro_prog list and link to saved_globals.
+        if (var->init_data)
+            memcpy(vm->data_ptr, var->init_data, var->ty->size);
+        if (var->rel)
+            error("pragma macro global relocations are not supported");
+
+        vm->data_ptr += var->ty->size;
+    }
+}
+
+static void patch_macro_call_addresses(JCC *vm, Obj *macro_prog) {
+    for (int i = 0; i < vm->compiler.num_call_patches; i++) {
+        Obj *fn = vm->compiler.call_patches[i].function;
+        long long *loc = vm->compiler.call_patches[i].location;
+        Obj *fn_def = find_macro_function(macro_prog, fn->name);
+        if (!fn_def)
+            error("undefined function in pragma macro bytecode: %s", fn->name);
+        *loc = (long long)(vm->text_seg + fn_def->code_addr);
+    }
+
+    for (int i = 0; i < vm->compiler.num_func_addr_patches; i++) {
+        Obj *fn = vm->compiler.func_addr_patches[i].function;
+        long long *loc = vm->compiler.func_addr_patches[i].location;
+        Obj *fn_def = find_macro_function(macro_prog, fn->name);
+        if (!fn_def)
+            error("undefined function address in pragma macro bytecode: %s",
+                  fn->name);
+        *loc = fn_def->code_addr * (long long)sizeof(long long);
+    }
+}
+
+// Compile all pragma macros as one compile-time program so macro bytecode can
+// make ordinary function calls to other pragma macros.
+static bool compile_pragma_macro_program(JCC *vm) {
+    int count = 0;
+    for (PragmaMacro *pm = vm->compiler.pragma_macros; pm; pm = pm->next)
+        count++;
+    if (count == 0)
+        return true;
+
+    PragmaMacro **macros = alloca(count * sizeof(PragmaMacro *));
+    int idx = count - 1;
+    for (PragmaMacro *pm = vm->compiler.pragma_macros; pm; pm = pm->next)
+        macros[idx--] = pm;
+
+    Obj *saved_locals = vm->compiler.locals;
+    Obj *saved_current_fn = vm->compiler.current_fn;
+    Obj *saved_globals = vm->compiler.globals;
+    int saved_num_call_patches = vm->compiler.num_call_patches;
+    int saved_num_func_addr_patches = vm->compiler.num_func_addr_patches;
+
+    vm->compiler.in_macro_mode = true;
+    vm->compiler.locals = NULL;
+    vm->compiler.num_call_patches = 0;
+    vm->compiler.num_func_addr_patches = 0;
+
+    Token *reflection_tokens = implicit_reflection_tokens(vm);
+    Token *tokens =
+        build_combined_macro_tokens(vm, reflection_tokens, macros, count);
+    tokens = preprocess(vm, tokens);
+    Obj *macro_prog = parse(vm, tokens);
+    if (!macro_prog) {
+        vm->compiler.locals = saved_locals;
+        vm->compiler.current_fn = saved_current_fn;
+        vm->compiler.globals = saved_globals;
+        vm->compiler.in_macro_mode = false;
+        vm->compiler.num_call_patches = saved_num_call_patches;
+        vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
+        return false;
+    }
+
+    for (int i = 0; i < count; i++) {
+        Obj *func = find_macro_function(macro_prog, macros[i]->name);
+        if (!func) {
+            if (vm->debug_vm)
+                fprintf(stderr,
+                        "Could not find pragma macro function '%s' after parsing\n",
+                        macros[i]->name);
+            vm->compiler.locals = saved_locals;
+            vm->compiler.current_fn = saved_current_fn;
+            vm->compiler.globals = saved_globals;
+            vm->compiler.in_macro_mode = false;
+            vm->compiler.num_call_patches = saved_num_call_patches;
+            vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
+            return false;
+        }
+        macros[i]->compiled_fn = func;
+        macros[i]->is_compiled = true;
+    }
+
+    init_macro_globals(vm, macro_prog);
+
+    for (Obj *fn = macro_prog; fn; fn = fn->next) {
+        if (fn->is_function && fn->body)
+            gen_function(vm, fn);
+    }
+
+    patch_macro_call_addresses(vm, macro_prog);
+
     if (macro_prog) {
         Obj *last = macro_prog;
         while (last->next)
             last = last->next;
         last->next = saved_globals;
     }
-    // vm->compiler.globals now includes both macro globals and main program
-    // globals
 
-    // Restore parser state (keep the macro's compiled code in text segment)
     vm->compiler.locals = saved_locals;
     vm->compiler.current_fn = saved_current_fn;
     vm->compiler.in_macro_mode = false;
+    vm->compiler.num_call_patches = saved_num_call_patches;
+    vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
 
-    if (vm->debug_vm)
-        printf("Compiled pragma macro '%s' at code address %lld\n", pm->name,
-               func->code_addr);
+    if (vm->debug_vm) {
+        for (int i = 0; i < count; i++) {
+            printf("Compiled pragma macro '%s' at code address %lld\n",
+                   macros[i]->name, macros[i]->compiled_fn->code_addr);
+        }
+    }
 
     return true;
 }
@@ -269,12 +383,8 @@ static void compile_all_pragma_macros(JCC *vm) {
     // Register reflection API as FFI
     register_reflection_ffi(vm);
 
-    for (PragmaMacro *pm = vm->compiler.pragma_macros; pm; pm = pm->next) {
-        if (!compile_single_pragma_macro(vm, pm)) {
-            fprintf(stderr, "Warning: Failed to compile pragma macro '%s'\n",
-                    pm->name);
-        }
-    }
+    if (!compile_pragma_macro_program(vm))
+        fprintf(stderr, "Warning: Failed to compile pragma macros\n");
 }
 
 // Execute a pragma macro and return the generated AST node
