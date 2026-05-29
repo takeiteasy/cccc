@@ -5,8 +5,8 @@
 
 // Define a pragma macro that generates a string literal
 #pragma macro
-Node *make_hello(void) {
-    return ast_string_literal(__jcc_get_vm(), "Hello, World!");
+JCC_Node *make_hello(void) {
+    return jcc_ast_string_literal(jcc_get_vm(), "Hello, World!");
 }
 
 int main(void) {

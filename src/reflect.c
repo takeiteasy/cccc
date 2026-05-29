@@ -22,12 +22,22 @@
 
 #include "./internal.h"
 
-// Global VM pointer for __jcc_get_vm() builtin
+// Aliases so the public API types match reflection.h
+typedef Type JCC_Type;
+typedef Node JCC_Node;
+typedef Obj JCC_Obj;
+typedef Member JCC_Member;
+typedef EnumConstant JCC_EnumConstant;
+typedef Token JCC_Token;
+typedef TypeKind JCC_TypeKind;
+typedef NodeKind JCC_NodeKind;
+
+// Global VM pointer for jcc_get_vm() builtin
 // Set during pragma macro execution, cleared after
 JCC *__jcc_current_vm = NULL;
 
 // Builtin function to get the current VM context
-JCC *__jcc_get_vm(void) { return __jcc_current_vm; }
+JCC *jcc_get_vm(void) { return __jcc_current_vm; }
 
 // ============================================================================
 // Internal Helpers (replicate static functions from parse.c)
@@ -64,7 +74,7 @@ static Obj *reflect_new_anon_gvar(JCC *vm, Type *ty) {
 // Type Lookup and Introspection
 // ============================================================================
 
-Type *ast_find_type(JCC *vm, const char *name) {
+JCC_Type *jcc_ast_find_type(JCC *vm, const char *name) {
     if (!vm || !name)
         return NULL;
 
@@ -91,47 +101,52 @@ Type *ast_find_type(JCC *vm, const char *name) {
     return NULL;
 }
 
-bool ast_type_exists(JCC *vm, const char *name) {
-    return ast_find_type(vm, name) != NULL;
+bool jcc_ast_type_exists(JCC *vm, const char *name) {
+    return jcc_ast_find_type(vm, name) != NULL;
 }
 
-Type *ast_get_type(JCC *vm, const char *name) {
-    // For built-in types
+JCC_Type *jcc_ast_get_type(JCC *vm, const char *name) {
     if (!name)
         return NULL;
 
-    if (strcmp(name, "void") == 0)
-        return ty_void;
-    if (strcmp(name, "char") == 0)
-        return ty_char;
-    if (strcmp(name, "short") == 0)
-        return ty_short;
-    if (strcmp(name, "int") == 0)
-        return ty_int;
-    if (strcmp(name, "long") == 0)
-        return ty_long;
-    if (strcmp(name, "float") == 0)
-        return ty_float;
-    if (strcmp(name, "double") == 0)
-        return ty_double;
-    if (strcmp(name, "_Bool") == 0)
-        return ty_bool;
+    const struct {
+        const char *name;
+        Type *type;
+    } builtins[] = {
+        {"void",   ty_void},
+        {"char",   ty_char},
+        {"short",  ty_short},
+        {"int",    ty_int},
+        {"long",   ty_long},
+        {"float",  ty_float},
+        {"double", ty_double},
+        {"_Bool",  ty_bool},
+    };
 
-    // For user-defined types
-    return ast_find_type(vm, name);
+    for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); i++)
+        if (strcmp(name, builtins[i].name) == 0)
+            return builtins[i].type;
+
+    return jcc_ast_find_type(vm, name);
 }
 
-TypeKind ast_type_kind(Type *ty) { return ty ? ty->kind : TY_VOID; }
+JCC_TypeKind jcc_ast_type_kind(JCC_Type *ty) {
+    return ty ? ty->kind : TY_VOID;
+}
 
-int ast_type_size(Type *ty) { return ty ? ty->size : 0; }
+int jcc_ast_type_size(JCC_Type *ty) { return ty ? ty->size : 0; }
 
-int ast_type_align(Type *ty) { return ty ? ty->align : 0; }
+int jcc_ast_type_align(JCC_Type *ty) { return ty ? ty->align : 0; }
 
-bool ast_type_is_unsigned(Type *ty) { return ty ? ty->is_unsigned : false; }
+bool jcc_ast_type_is_unsigned(JCC_Type *ty) {
+    return ty ? ty->is_unsigned : false;
+}
 
-bool ast_type_is_const(Type *ty) { return ty ? ty->is_const : false; }
+bool jcc_ast_type_is_const(JCC_Type *ty) {
+    return ty ? ty->is_const : false;
+}
 
-Type *ast_type_base(Type *ty) {
+JCC_Type *jcc_ast_type_base(JCC_Type *ty) {
     if (!ty)
         return NULL;
     if (ty->kind != TY_PTR && ty->kind != TY_ARRAY && ty->kind != TY_VLA)
@@ -139,19 +154,19 @@ Type *ast_type_base(Type *ty) {
     return ty->base;
 }
 
-int ast_type_array_len(Type *ty) {
+int jcc_ast_type_array_len(JCC_Type *ty) {
     if (!ty || ty->kind != TY_ARRAY)
         return -1;
     return ty->array_len;
 }
 
-Type *ast_type_return_type(Type *ty) {
+JCC_Type *jcc_ast_type_return_type(JCC_Type *ty) {
     if (!ty || ty->kind != TY_FUNC)
         return NULL;
     return ty->return_ty;
 }
 
-int ast_type_param_count(Type *ty) {
+int jcc_ast_type_param_count(JCC_Type *ty) {
     if (!ty || ty->kind != TY_FUNC)
         return -1;
 
@@ -161,7 +176,7 @@ int ast_type_param_count(Type *ty) {
     return count;
 }
 
-Type *ast_type_param_at(Type *ty, int index) {
+JCC_Type *jcc_ast_type_param_at(JCC_Type *ty, int index) {
     if (!ty || ty->kind != TY_FUNC || index < 0)
         return NULL;
 
@@ -171,13 +186,13 @@ Type *ast_type_param_at(Type *ty, int index) {
     return p;
 }
 
-bool ast_type_is_variadic(Type *ty) {
+bool jcc_ast_type_is_variadic(JCC_Type *ty) {
     if (!ty || ty->kind != TY_FUNC)
         return false;
     return ty->is_variadic;
 }
 
-const char *ast_type_name(Type *ty) {
+const char *jcc_ast_type_name(JCC_Type *ty) {
     if (!ty || !ty->name)
         return NULL;
 
@@ -191,13 +206,13 @@ const char *ast_type_name(Type *ty) {
     return buffer;
 }
 
-Type *ast_make_pointer(JCC *vm, Type *base) {
+JCC_Type *jcc_ast_make_pointer(JCC *vm, JCC_Type *base) {
     if (!vm || !base)
         return NULL;
     return pointer_to(vm, base);
 }
 
-Type *ast_make_array(JCC *vm, Type *base, int len) {
+JCC_Type *jcc_ast_make_array(JCC *vm, JCC_Type *base, int len) {
     if (!vm || !base || len < 0)
         return NULL;
     return array_of(vm, base, len);
@@ -207,7 +222,7 @@ Type *ast_make_array(JCC *vm, Type *base, int len) {
 // Enum Reflection
 // ============================================================================
 
-int ast_enum_count(JCC *vm, Type *enum_type) {
+int jcc_ast_enum_count(JCC *vm, JCC_Type *enum_type) {
     (void)vm; // Unused but kept for API consistency
     if (!enum_type || enum_type->kind != TY_ENUM)
         return -1;
@@ -218,7 +233,7 @@ int ast_enum_count(JCC *vm, Type *enum_type) {
     return count;
 }
 
-EnumConstant *ast_enum_at(JCC *vm, Type *enum_type, int index) {
+JCC_EnumConstant *jcc_ast_enum_at(JCC *vm, JCC_Type *enum_type, int index) {
     (void)vm;
     if (!enum_type || enum_type->kind != TY_ENUM || index < 0)
         return NULL;
@@ -229,7 +244,8 @@ EnumConstant *ast_enum_at(JCC *vm, Type *enum_type, int index) {
     return ec;
 }
 
-EnumConstant *ast_enum_find(JCC *vm, Type *enum_type, const char *name) {
+JCC_EnumConstant *jcc_ast_enum_find(JCC *vm, JCC_Type *enum_type,
+                                    const char *name) {
     (void)vm;
     if (!enum_type || enum_type->kind != TY_ENUM || !name)
         return NULL;
@@ -240,34 +256,36 @@ EnumConstant *ast_enum_find(JCC *vm, Type *enum_type, const char *name) {
     return NULL;
 }
 
-const char *ast_enum_constant_name(EnumConstant *ec) {
+const char *jcc_ast_enum_constant_name(JCC_EnumConstant *ec) {
     return ec ? ec->name : NULL;
 }
 
-int ast_enum_constant_value(EnumConstant *ec) { return ec ? ec->value : 0; }
+int jcc_ast_enum_constant_value(JCC_EnumConstant *ec) {
+    return ec ? ec->value : 0;
+}
 
-const char *ast_enum_name(Type *e) { return ast_type_name(e); }
+const char *jcc_ast_enum_name(JCC_Type *e) { return jcc_ast_type_name(e); }
 
-int ast_enum_value_count(Type *e) {
-    int count = ast_enum_count(NULL, e);
+int jcc_ast_enum_value_count(JCC_Type *e) {
+    int count = jcc_ast_enum_count(NULL, e);
     return count < 0 ? 0 : count;
 }
 
-const char *ast_enum_value_name(Type *e, int index) {
-    EnumConstant *ec = ast_enum_at(NULL, e, index);
-    return ast_enum_constant_name(ec);
+const char *jcc_ast_enum_value_name(JCC_Type *e, int index) {
+    JCC_EnumConstant *ec = jcc_ast_enum_at(NULL, e, index);
+    return jcc_ast_enum_constant_name(ec);
 }
 
-int ast_enum_value(Type *e, int index) {
-    EnumConstant *ec = ast_enum_at(NULL, e, index);
-    return ast_enum_constant_value(ec);
+int jcc_ast_enum_value(JCC_Type *e, int index) {
+    JCC_EnumConstant *ec = jcc_ast_enum_at(NULL, e, index);
+    return jcc_ast_enum_constant_value(ec);
 }
 
 // ============================================================================
 // Struct/Union Member Introspection
 // ============================================================================
 
-int ast_struct_member_count(JCC *vm, Type *struct_type) {
+int jcc_ast_struct_member_count(JCC *vm, JCC_Type *struct_type) {
     (void)vm;
     if (!struct_type)
         return -1;
@@ -280,7 +298,8 @@ int ast_struct_member_count(JCC *vm, Type *struct_type) {
     return count;
 }
 
-Member *ast_struct_member_at(JCC *vm, Type *struct_type, int index) {
+JCC_Member *jcc_ast_struct_member_at(JCC *vm, JCC_Type *struct_type,
+                                        int index) {
     (void)vm;
     if (!struct_type || index < 0)
         return NULL;
@@ -293,7 +312,8 @@ Member *ast_struct_member_at(JCC *vm, Type *struct_type, int index) {
     return m;
 }
 
-Member *ast_struct_member_find(JCC *vm, Type *struct_type, const char *name) {
+JCC_Member *jcc_ast_struct_member_find(JCC *vm, JCC_Type *struct_type,
+                                        const char *name) {
     (void)vm;
     if (!struct_type || !name)
         return NULL;
@@ -308,7 +328,7 @@ Member *ast_struct_member_find(JCC *vm, Type *struct_type, const char *name) {
     return NULL;
 }
 
-const char *ast_member_name(Member *m) {
+const char *jcc_ast_member_name(JCC_Member *m) {
     if (!m || !m->name)
         return NULL;
 
@@ -322,13 +342,15 @@ const char *ast_member_name(Member *m) {
     return buffer;
 }
 
-Type *ast_member_type(Member *m) { return m ? m->ty : NULL; }
+JCC_Type *jcc_ast_member_type(JCC_Member *m) { return m ? m->ty : NULL; }
 
-int ast_member_offset(Member *m) { return m ? m->offset : 0; }
+int jcc_ast_member_offset(JCC_Member *m) { return m ? m->offset : 0; }
 
-bool ast_member_is_bitfield(Member *m) { return m ? m->is_bitfield : false; }
+bool jcc_ast_member_is_bitfield(JCC_Member *m) {
+    return m ? m->is_bitfield : false;
+}
 
-int ast_member_bitfield_width(Member *m) {
+int jcc_ast_member_bitfield_width(JCC_Member *m) {
     return (m && m->is_bitfield) ? m->bit_width : 0;
 }
 
@@ -336,7 +358,7 @@ int ast_member_bitfield_width(Member *m) {
 // Global Symbol Introspection
 // ============================================================================
 
-Obj *ast_find_global(JCC *vm, const char *name) {
+JCC_Obj *jcc_ast_find_global(JCC *vm, const char *name) {
     if (!vm || !name)
         return NULL;
 
@@ -348,7 +370,7 @@ Obj *ast_find_global(JCC *vm, const char *name) {
     return NULL;
 }
 
-int ast_global_count(JCC *vm) {
+int jcc_ast_global_count(JCC *vm) {
     if (!vm)
         return 0;
 
@@ -358,7 +380,7 @@ int ast_global_count(JCC *vm) {
     return count;
 }
 
-Obj *ast_global_at(JCC *vm, int index) {
+JCC_Obj *jcc_ast_global_at(JCC *vm, int index) {
     if (!vm || index < 0)
         return NULL;
 
@@ -368,24 +390,26 @@ Obj *ast_global_at(JCC *vm, int index) {
     return obj;
 }
 
-const char *ast_obj_name(Obj *obj) { return obj ? obj->name : NULL; }
+const char *jcc_ast_obj_name(JCC_Obj *obj) { return obj ? obj->name : NULL; }
 
-Type *ast_obj_type(Obj *obj) { return obj ? obj->ty : NULL; }
+JCC_Type *jcc_ast_obj_type(JCC_Obj *obj) { return obj ? obj->ty : NULL; }
 
-bool ast_obj_is_function(Obj *obj) { return obj ? obj->is_function : false; }
+bool jcc_ast_obj_is_function(JCC_Obj *obj) {
+    return obj ? obj->is_function : false;
+}
 
-bool ast_obj_is_definition(Obj *obj) {
+bool jcc_ast_obj_is_definition(JCC_Obj *obj) {
     return obj ? obj->is_definition : false;
 }
 
-bool ast_obj_is_static(Obj *obj) { return obj ? obj->is_static : false; }
+bool jcc_ast_obj_is_static(JCC_Obj *obj) { return obj ? obj->is_static : false; }
 
 // ============================================================================
 // AST Node Construction - Helper
 // ============================================================================
 
-static Node *alloc_node(JCC *vm, NodeKind kind) {
-    Node *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+static JCC_Node *alloc_node(JCC *vm, JCC_NodeKind kind) {
+    JCC_Node *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     memset(node, 0, sizeof(Node));
     node->kind = kind;
     return node;
@@ -395,27 +419,27 @@ static Node *alloc_node(JCC *vm, NodeKind kind) {
 // AST Node Construction - Literals
 // ============================================================================
 
-Node *ast_int_literal(JCC *vm, int64_t value) {
+JCC_Node *jcc_ast_int_literal(JCC *vm, int64_t value) {
     if (!vm)
         return NULL;
 
-    Node *node = alloc_node(vm, ND_NUM);
+    JCC_Node *node = alloc_node(vm, ND_NUM);
     node->val = value;
     node->ty = ty_long;
     return node;
 }
 
-Node *ast_float_literal(JCC *vm, double value) {
+JCC_Node *jcc_ast_float_literal(JCC *vm, double value) {
     if (!vm)
         return NULL;
 
-    Node *node = alloc_node(vm, ND_NUM);
+    JCC_Node *node = alloc_node(vm, ND_NUM);
     node->fval = value;
     node->ty = ty_double;
     return node;
 }
 
-Node *ast_string_literal(JCC *vm, const char *str) {
+JCC_Node *jcc_ast_string_literal(JCC *vm, const char *str) {
     if (!vm || !str)
         return NULL;
 
@@ -442,13 +466,13 @@ Node *ast_string_literal(JCC *vm, const char *str) {
     vm->data_ptr += len + 1;
 
     // Create a variable reference node
-    Node *node = alloc_node(vm, ND_VAR);
+    JCC_Node *node = alloc_node(vm, ND_VAR);
     node->var = var;
     node->ty = ty;
     return node;
 }
 
-Node *ast_var_ref(JCC *vm, const char *name) {
+JCC_Node *jcc_ast_var_ref(JCC *vm, const char *name) {
     if (!vm || !name)
         return NULL;
 
@@ -460,7 +484,7 @@ Node *ast_var_ref(JCC *vm, const char *name) {
             if (node->name_len == (int)name_len &&
                 strncmp(node->name, name, name_len) == 0) {
                 if (node->var) {
-                    Node *n = alloc_node(vm, ND_VAR);
+                    JCC_Node *n = alloc_node(vm, ND_VAR);
                     n->var = node->var;
                     n->ty = node->var->ty;
                     return n;
@@ -470,9 +494,9 @@ Node *ast_var_ref(JCC *vm, const char *name) {
     }
 
     // Also check globals
-    Obj *global = ast_find_global(vm, name);
+    Obj *global = jcc_ast_find_global(vm, name);
     if (global) {
-        Node *n = alloc_node(vm, ND_VAR);
+        JCC_Node *n = alloc_node(vm, ND_VAR);
         n->var = global;
         n->ty = global->ty;
         return n;
@@ -481,7 +505,7 @@ Node *ast_var_ref(JCC *vm, const char *name) {
     return NULL;
 }
 
-Node *ast_param_ref(JCC *vm, Obj *fn, const char *name) {
+JCC_Node *jcc_ast_param_ref(JCC *vm, JCC_Obj *fn, const char *name) {
     if (!vm || !fn || !name)
         return NULL;
 
@@ -490,7 +514,7 @@ Node *ast_param_ref(JCC *vm, Obj *fn, const char *name) {
     for (Obj *param = fn->params; param; param = param->next) {
         if (strlen(param->name) == name_len &&
             strncmp(param->name, name, name_len) == 0) {
-            Node *n = alloc_node(vm, ND_VAR);
+            JCC_Node *n = alloc_node(vm, ND_VAR);
             n->var = param;
             n->ty = param->ty;
             return n;
@@ -504,31 +528,32 @@ Node *ast_param_ref(JCC *vm, Obj *fn, const char *name) {
 // AST Node Construction - Expressions
 // ============================================================================
 
-Node *ast_binary(JCC *vm, NodeKind op, Node *left, Node *right) {
+JCC_Node *jcc_ast_binary(JCC *vm, JCC_NodeKind op, JCC_Node *left,
+                            JCC_Node *right) {
     if (!vm || !left || !right)
         return NULL;
 
-    Node *node = alloc_node(vm, op);
+    JCC_Node *node = alloc_node(vm, op);
     node->lhs = left;
     node->rhs = right;
     // Type will be determined by add_type pass
     return node;
 }
 
-Node *ast_unary(JCC *vm, NodeKind op, Node *operand) {
+JCC_Node *jcc_ast_unary(JCC *vm, JCC_NodeKind op, JCC_Node *operand) {
     if (!vm || !operand)
         return NULL;
 
-    Node *node = alloc_node(vm, op);
+    JCC_Node *node = alloc_node(vm, op);
     node->lhs = operand;
     return node;
 }
 
-Node *ast_cast(JCC *vm, Node *expr, Type *target_type) {
+JCC_Node *jcc_ast_cast(JCC *vm, JCC_Node *expr, JCC_Type *target_type) {
     if (!vm || !expr || !target_type)
         return NULL;
 
-    Node *node = alloc_node(vm, ND_CAST);
+    JCC_Node *node = alloc_node(vm, ND_CAST);
     node->lhs = expr;
     node->ty = target_type;
     return node;
@@ -538,20 +563,20 @@ Node *ast_cast(JCC *vm, Node *expr, Type *target_type) {
 // AST Node Construction - Statements
 // ============================================================================
 
-Node *ast_return(JCC *vm, Node *expr) {
+JCC_Node *jcc_ast_return(JCC *vm, JCC_Node *expr) {
     if (!vm)
         return NULL;
 
-    Node *node = alloc_node(vm, ND_RETURN);
+    JCC_Node *node = alloc_node(vm, ND_RETURN);
     node->lhs = expr;
     return node;
 }
 
-Node *ast_block(JCC *vm, Node **stmts, int count) {
+JCC_Node *jcc_ast_block(JCC *vm, JCC_Node **stmts, int count) {
     if (!vm)
         return NULL;
 
-    Node *node = alloc_node(vm, ND_BLOCK);
+    JCC_Node *node = alloc_node(vm, ND_BLOCK);
 
     // Link statements together
     Node head = {};
@@ -563,29 +588,31 @@ Node *ast_block(JCC *vm, Node **stmts, int count) {
     return node;
 }
 
-Node *ast_if(JCC *vm, Node *cond, Node *then_body, Node *else_body) {
+JCC_Node *jcc_ast_if(JCC *vm, JCC_Node *cond, JCC_Node *then_body,
+                        JCC_Node *else_body) {
     if (!vm || !cond)
         return NULL;
 
-    Node *node = alloc_node(vm, ND_IF);
+    JCC_Node *node = alloc_node(vm, ND_IF);
     node->cond = cond;
     node->then = then_body;
     node->els = else_body;
     return node;
 }
 
-Node *ast_switch(JCC *vm, Node *cond) {
+JCC_Node *jcc_ast_switch(JCC *vm, JCC_Node *cond) {
     if (!vm || !cond)
         return NULL;
 
-    Node *node = alloc_node(vm, ND_SWITCH);
+    JCC_Node *node = alloc_node(vm, ND_SWITCH);
     node->cond = cond;
     node->case_next = NULL;
     node->default_case = NULL;
     return node;
 }
 
-void ast_switch_add_case(JCC *vm, Node *switch_node, Node *value, Node *body) {
+void jcc_ast_switch_add_case(JCC *vm, JCC_Node *switch_node, JCC_Node *value,
+                                JCC_Node *body) {
     if (!vm || !switch_node || !value || !body)
         return;
 
@@ -593,7 +620,7 @@ void ast_switch_add_case(JCC *vm, Node *switch_node, Node *value, Node *body) {
         return;
 
     // Create a case node
-    Node *case_node = alloc_node(vm, ND_CASE);
+    JCC_Node *case_node = alloc_node(vm, ND_CASE);
     case_node->begin = value->val; // Assuming value is a numeric literal
     case_node->end = value->val;
     case_node->body = body;
@@ -603,14 +630,15 @@ void ast_switch_add_case(JCC *vm, Node *switch_node, Node *value, Node *body) {
     switch_node->case_next = case_node;
 }
 
-void ast_switch_set_default(JCC *vm, Node *switch_node, Node *body) {
+void jcc_ast_switch_set_default(JCC *vm, JCC_Node *switch_node,
+                                    JCC_Node *body) {
     if (!vm || !switch_node || !body)
         return;
 
     if (switch_node->kind != ND_SWITCH)
         return;
 
-    Node *def = alloc_node(vm, ND_CASE);
+    JCC_Node *def = alloc_node(vm, ND_CASE);
     def->body = body;
     switch_node->default_case = def;
 }
@@ -619,11 +647,11 @@ void ast_switch_set_default(JCC *vm, Node *switch_node, Node *body) {
 // AST Node Construction - Declarations
 // ============================================================================
 
-Node *ast_expr_stmt(JCC *vm, Node *expr) {
+JCC_Node *jcc_ast_expr_stmt(JCC *vm, JCC_Node *expr) {
     if (!vm)
         return NULL;
 
-    Node *node = alloc_node(vm, ND_EXPR_STMT);
+    JCC_Node *node = alloc_node(vm, ND_EXPR_STMT);
     node->lhs = expr;
     return node;
 }
@@ -643,7 +671,8 @@ static Type *make_func_type(JCC *vm, Type *return_type) {
     return ty;
 }
 
-Obj *ast_function(JCC *vm, const char *name, Type *return_type) {
+JCC_Obj *jcc_ast_function(JCC *vm, const char *name,
+                            JCC_Type *return_type) {
     if (!vm || !name || !return_type)
         return NULL;
 
@@ -699,7 +728,8 @@ Obj *ast_function(JCC *vm, const char *name, Type *return_type) {
     return fn;
 }
 
-void ast_function_add_param(JCC *vm, Obj *fn, const char *name, Type *type) {
+void jcc_ast_function_add_param(JCC *vm, JCC_Obj *fn, const char *name,
+                                JCC_Type *type) {
     if (!vm || !fn || !name || !type)
         return;
 
@@ -740,13 +770,13 @@ void ast_function_add_param(JCC *vm, Obj *fn, const char *name, Type *type) {
     }
 }
 
-void ast_function_set_body(JCC *vm, Obj *fn, Node *body) {
+void jcc_ast_function_set_body(JCC *vm, JCC_Obj *fn, JCC_Node *body) {
     if (!vm || !fn || !body)
         return;
 
     // If body is not already a block, wrap it
     if (body->kind != ND_BLOCK) {
-        Node *block = alloc_node(vm, ND_BLOCK);
+        JCC_Node *block = alloc_node(vm, ND_BLOCK);
         block->body = body;
         fn->body = block;
     } else {
@@ -761,17 +791,17 @@ void ast_function_set_body(JCC *vm, Obj *fn, Node *body) {
     fn->is_definition = true;
 }
 
-void ast_function_set_static(Obj *fn, bool is_static) {
+void jcc_ast_function_set_static(JCC_Obj *fn, bool is_static) {
     if (fn)
         fn->is_static = is_static;
 }
 
-void ast_function_set_inline(Obj *fn, bool is_inline) {
+void jcc_ast_function_set_inline(JCC_Obj *fn, bool is_inline) {
     if (fn)
         fn->is_inline = is_inline;
 }
 
-void ast_function_set_variadic(Obj *fn, bool is_variadic) {
+void jcc_ast_function_set_variadic(JCC_Obj *fn, bool is_variadic) {
     if (fn && fn->ty)
         fn->ty->is_variadic = is_variadic;
 }

@@ -3,41 +3,41 @@
 // privately.
 
 #pragma macro
-Node *forward_add_two(Node *x) {
+JCC_Node *forward_add_two(JCC_Node *x) {
     return add_two_later(x);
 }
 
 #pragma macro
-Node *add_one(Node *x) {
-    return AST_BINARY(ND_ADD, x, AST_INT_LITERAL(1));
+JCC_Node *add_one(JCC_Node *x) {
+    return JCC_AST_BINARY(JCC_ND_ADD, x, JCC_AST_INT_LITERAL(1));
 }
 
 #pragma macro
-Node *add_two_later(Node *x) {
+JCC_Node *add_two_later(JCC_Node *x) {
     return add_one(add_one(x));
 }
 
 #pragma macro
-Node *chain_top(Node *x) {
+JCC_Node *chain_top(JCC_Node *x) {
     return add_one(add_two_later(x));
 }
 
 #pragma macro
-Node *mutual_even(int n, Node *x) {
+JCC_Node *mutual_even(int n, JCC_Node *x) {
     if (n <= 0)
         return x;
-    return mutual_odd(n - 1, AST_BINARY(ND_ADD, x, AST_INT_LITERAL(1)));
+    return mutual_odd(n - 1, JCC_AST_BINARY(JCC_ND_ADD, x, JCC_AST_INT_LITERAL(1)));
 }
 
 #pragma macro
-Node *mutual_odd(int n, Node *x) {
+JCC_Node *mutual_odd(int n, JCC_Node *x) {
     if (n <= 0)
         return x;
-    return mutual_even(n - 1, AST_BINARY(ND_ADD, x, AST_INT_LITERAL(1)));
+    return mutual_even(n - 1, JCC_AST_BINARY(JCC_ND_ADD, x, JCC_AST_INT_LITERAL(1)));
 }
 
 #pragma macro
-Node *mutual_add_four(Node *x) {
+JCC_Node *mutual_add_four(JCC_Node *x) {
     return mutual_even(4, x);
 }
 
