@@ -306,6 +306,23 @@ static VarScope *push_scope(JCC *vm, char *name, int name_len) {
     return (VarScope *)node;
 }
 
+static void record_type_name(JCC *vm, Type *ty, char *name, int name_len,
+                             bool is_tag) {
+    if (!ty || !name || name_len <= 0)
+        return;
+
+    TypeNameRecord *rec =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(TypeNameRecord));
+    memset(rec, 0, sizeof(TypeNameRecord));
+    rec->ty = ty;
+    rec->name = name;
+    rec->name_len = name_len;
+    rec->owner_fn = vm->compiler.current_fn;
+    rec->is_tag = is_tag;
+    rec->next = vm->compiler.type_names;
+    vm->compiler.type_names = rec;
+}
+
 static Initializer *new_initializer(JCC *vm, Type *ty, bool is_flexible) {
     Initializer *init =
         arena_alloc(&vm->compiler.parser_arena, sizeof(Initializer));
@@ -482,6 +499,7 @@ static void push_tag_scope(JCC *vm, Token *tok, Type *ty) {
     // Insert at head of linked list
     node->next = vm->compiler.scope->tags;
     vm->compiler.scope->tags = node;
+    record_type_name(vm, ty, tok->loc, tok->len, true);
 }
 
 // declspec = ("void" | "_Bool" | "char" | "short" | "int" | "long"
@@ -4323,7 +4341,9 @@ static Token *parse_typedef(JCC *vm, Token *tok, Type *basety) {
         Type *ty = declarator(vm, &tok, tok, basety);
         if (!ty->name)
             error_tok(vm, ty->name_pos, "typedef name omitted");
-        push_scope(vm, get_ident(vm, ty->name), ty->name->len)->type_def = ty;
+        char *name = get_ident(vm, ty->name);
+        push_scope(vm, name, ty->name->len)->type_def = ty;
+        record_type_name(vm, ty, name, ty->name->len, false);
     }
     return tok;
 }

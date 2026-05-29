@@ -700,6 +700,7 @@ struct Obj {
 
     // Code generation (for VM)
     long long code_addr; // Address in text segment where function code starts
+    long long code_end_addr; // Address after function code in text segment
 };
 
 /*!
@@ -1015,7 +1016,17 @@ typedef struct DebugSymbol {
     Type *ty;         // Variable type
     int is_local;     // 1=local (BP-relative), 0=global (data segment)
     int scope_depth;  // Scope depth for shadowing resolution
+    Obj *owner_fn;    // Owning function for locals, NULL for globals
 } DebugSymbol;
+
+typedef struct TypeNameRecord {
+    Type *ty;
+    char *name;
+    int name_len;
+    Obj *owner_fn;
+    bool is_tag;
+    struct TypeNameRecord *next;
+} TypeNameRecord;
 
 /*!
  @struct Watchpoint
@@ -1226,6 +1237,7 @@ typedef struct Compiler {
     Obj *builtin_alloca;   // Builtin alloca function
     Obj *builtin_setjmp;   // Builtin setjmp function
     Obj *builtin_longjmp;  // Builtin longjmp function
+    TypeNameRecord *type_names; // Persistent typedef/tag declarations for -M
 
     // Arena allocator for parser frontend (tokens, AST, preprocessor state)
     Arena parser_arena; // Fast bump-pointer allocator

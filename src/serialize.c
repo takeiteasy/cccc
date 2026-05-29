@@ -144,6 +144,7 @@ typedef struct {
     Type *ty;
     char *name;
     int name_len;
+    Obj *owner_fn;
 } TypeName;
 
 typedef struct {
@@ -155,6 +156,7 @@ typedef struct {
     TypeName *typedefs;
     int typedefs_len;
     int typedefs_cap;
+    Obj *current_fn;
 } SerializeContext;
 
 // Forward declaration
@@ -162,12 +164,34 @@ static void serialize_expr(FILE *f, JCC *vm, SerializeContext *ctx, Node *node,
                            int parent_prec);
 static void serialize_stmt(FILE *f, JCC *vm, SerializeContext *ctx, Node *node,
                            int indent);
+static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
+                                          Obj *owner_fn);
+static bool type_has_tag_for_owner(SerializeContext *ctx, Type *ty,
+                                   Obj *owner_fn);
 
 static bool same_type_or_origin(Type *a, Type *b) {
     for (Type *pa = a; pa; pa = pa->origin)
         for (Type *pb = b; pb; pb = pb->origin)
             if (pa == pb)
                 return true;
+
+    if (a && b && a->kind == b->kind &&
+        (a->kind == TY_STRUCT || a->kind == TY_UNION)) {
+        Member *ma = a->members;
+        Member *mb = b->members;
+        for (; ma && mb; ma = ma->next, mb = mb->next) {
+            if ((ma->name == NULL) != (mb->name == NULL))
+                return false;
+            if (ma->name && (ma->name->len != mb->name->len ||
+                             strncmp(ma->name->loc, mb->name->loc,
+                                     ma->name->len) != 0))
+                return false;
+            if (!same_type_or_origin(ma->ty, mb->ty))
+                return false;
+        }
+        return ma == NULL && mb == NULL;
+    }
+
     return false;
 }
 
@@ -190,7 +214,7 @@ static void type_vec_push(TypeVec *vec, Type *ty) {
 }
 
 static void type_name_push(TypeName **items, int *len, int *cap, Type *ty,
-                           char *name, int name_len) {
+                           char *name, int name_len, Obj *owner_fn) {
     if (!ty || !name || name_len <= 0)
         return;
 
@@ -202,21 +226,24 @@ static void type_name_push(TypeName **items, int *len, int *cap, Type *ty,
     (*items)[*len].ty = ty;
     (*items)[*len].name = name;
     (*items)[*len].name_len = name_len;
+    (*items)[*len].owner_fn = owner_fn;
     (*len)++;
 }
 
 static void collect_scope_names(SerializeContext *ctx, JCC *vm) {
-    for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
-        for (TagScopeNode *tag = sc->tags; tag; tag = tag->next)
-            type_name_push(&ctx->tags, &ctx->tags_len, &ctx->tags_cap, tag->ty,
-                           tag->name, tag->name_len);
-
-        for (VarScopeNode *var = sc->vars; var; var = var->next)
-            if (var->type_def)
-                type_name_push(&ctx->typedefs, &ctx->typedefs_len,
-                               &ctx->typedefs_cap, var->type_def, var->name,
-                               var->name_len);
+    for (TypeNameRecord *rec = vm->compiler.type_names; rec; rec = rec->next) {
+        if (rec->is_tag)
+            type_name_push(&ctx->tags, &ctx->tags_len, &ctx->tags_cap, rec->ty,
+                           rec->name, rec->name_len, rec->owner_fn);
+        else
+            type_name_push(&ctx->typedefs, &ctx->typedefs_len,
+                           &ctx->typedefs_cap, rec->ty, rec->name,
+                           rec->name_len, rec->owner_fn);
     }
+}
+
+static bool name_visible(TypeName *name, Obj *fn) {
+    return name->owner_fn == NULL || name->owner_fn == fn;
 }
 
 static TypeName *find_tag_name(SerializeContext *ctx, Type *ty) {
@@ -224,7 +251,8 @@ static TypeName *find_tag_name(SerializeContext *ctx, Type *ty) {
         return NULL;
 
     for (int i = 0; i < ctx->tags_len; i++)
-        if (same_type_or_origin(ctx->tags[i].ty, ty))
+        if (name_visible(&ctx->tags[i], ctx->current_fn) &&
+            same_type_or_origin(ctx->tags[i].ty, ty))
             return &ctx->tags[i];
     return NULL;
 }
@@ -234,8 +262,36 @@ static TypeName *find_typedef_name(SerializeContext *ctx, Type *ty) {
         return NULL;
 
     for (int i = 0; i < ctx->typedefs_len; i++)
-        if (same_type_or_origin(ctx->typedefs[i].ty, ty))
+        if (name_visible(&ctx->typedefs[i], ctx->current_fn) &&
+            same_type_or_origin(ctx->typedefs[i].ty, ty))
             return &ctx->typedefs[i];
+    return NULL;
+}
+
+static TypeName *find_anonymous_typedef_name(SerializeContext *ctx, Type *ty) {
+    if (!ctx || !ty)
+        return NULL;
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM)
+        return NULL;
+
+    for (int i = 0; i < ctx->typedefs_len; i++) {
+        TypeName *name = &ctx->typedefs[i];
+        if (!name_visible(name, ctx->current_fn) || !name->ty ||
+            name->ty->kind != ty->kind)
+            continue;
+        if (!type_has_tag_for_owner(ctx, name->ty, name->owner_fn))
+            return name;
+    }
+    return NULL;
+}
+
+static Obj *type_decl_owner(SerializeContext *ctx, Type *ty) {
+    for (int i = 0; i < ctx->tags_len; i++)
+        if (same_type_or_origin(ctx->tags[i].ty, ty))
+            return ctx->tags[i].owner_fn;
+    for (int i = 0; i < ctx->typedefs_len; i++)
+        if (same_type_or_origin(ctx->typedefs[i].ty, ty))
+            return ctx->typedefs[i].owner_fn;
     return NULL;
 }
 
@@ -423,6 +479,8 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
             fprintf(f, "struct %.*s", tag->name_len, tag->name);
         else if (alias)
             fprintf(f, "%.*s", alias->name_len, alias->name);
+        else if ((alias = find_anonymous_typedef_name(ctx, ty)))
+            fprintf(f, "%.*s", alias->name_len, alias->name);
         else
             fprintf(f, "struct /* anonymous */");
         break;
@@ -434,6 +492,8 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
             fprintf(f, "union %.*s", tag->name_len, tag->name);
         else if (alias)
             fprintf(f, "%.*s", alias->name_len, alias->name);
+        else if ((alias = find_anonymous_typedef_name(ctx, ty)))
+            fprintf(f, "%.*s", alias->name_len, alias->name);
         else
             fprintf(f, "union /* anonymous */");
         break;
@@ -444,6 +504,8 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
         if (tag)
             fprintf(f, "enum %.*s", tag->name_len, tag->name);
         else if (alias)
+            fprintf(f, "%.*s", alias->name_len, alias->name);
+        else if ((alias = find_anonymous_typedef_name(ctx, ty)))
             fprintf(f, "%.*s", alias->name_len, alias->name);
         else
             fprintf(f, "int");
@@ -779,6 +841,12 @@ static void serialize_function(FILE *f, JCC *vm, SerializeContext *ctx,
 
     if (fn->body) {
         fprintf(f, " {\n");
+        Obj *saved_fn = ctx->current_fn;
+        ctx->current_fn = fn;
+
+        // Function-local typedefs/tags are emitted at the top of the function,
+        // matching the serializer's existing local declaration hoisting.
+        serialize_type_defs_for_owner(f, ctx, fn);
 
         // Local variable declarations
         for (Obj *var = fn->locals; var; var = var->next) {
@@ -795,6 +863,7 @@ static void serialize_function(FILE *f, JCC *vm, SerializeContext *ctx,
         }
 
         fprintf(f, "}\n\n");
+        ctx->current_fn = saved_fn;
     } else {
         fprintf(f, ";\n\n");
     }
@@ -917,6 +986,65 @@ static void serialize_enum_def(FILE *f, SerializeContext *ctx, Type *ty) {
     fprintf(f, ";\n\n");
 }
 
+static bool type_has_tag_for_owner(SerializeContext *ctx, Type *ty,
+                                   Obj *owner_fn) {
+    for (int i = 0; i < ctx->tags_len; i++)
+        if (ctx->tags[i].owner_fn == owner_fn &&
+            same_type_or_origin(ctx->tags[i].ty, ty))
+            return true;
+    return false;
+}
+
+static bool aggregate_typedef_is_definition(SerializeContext *ctx,
+                                            TypeName *alias) {
+    if (!alias->ty)
+        return false;
+    if (alias->ty->kind != TY_STRUCT && alias->ty->kind != TY_UNION &&
+        alias->ty->kind != TY_ENUM)
+        return false;
+    return !type_has_tag_for_owner(ctx, alias->ty, alias->owner_fn);
+}
+
+static void serialize_typedef_alias(FILE *f, SerializeContext *ctx,
+                                    TypeName *alias) {
+    if (!alias || aggregate_typedef_is_definition(ctx, alias))
+        return;
+
+    char name[256];
+    int len = alias->name_len;
+    if (len >= (int)sizeof(name))
+        len = sizeof(name) - 1;
+    memcpy(name, alias->name, len);
+    name[len] = '\0';
+
+    fprintf(f, "typedef ");
+    serialize_type_decl(f, ctx, alias->ty, name);
+    fprintf(f, ";\n\n");
+}
+
+static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
+                                          Obj *owner_fn) {
+    Obj *saved_fn = ctx->current_fn;
+    ctx->current_fn = owner_fn;
+
+    for (int i = 0; i < ctx->defs.len; i++) {
+        Type *ty = ctx->defs.data[i];
+        if (type_decl_owner(ctx, ty) != owner_fn)
+            continue;
+        if (ty->kind == TY_ENUM)
+            serialize_enum_def(f, ctx, ty);
+        else
+            serialize_struct_def(f, ctx, ty);
+    }
+
+    for (int i = ctx->typedefs_len - 1; i >= 0; i--) {
+        if (ctx->typedefs[i].owner_fn == owner_fn)
+            serialize_typedef_alias(f, ctx, &ctx->typedefs[i]);
+    }
+
+    ctx->current_fn = saved_fn;
+}
+
 // Public API: Serialize entire program to C source
 void cc_serialize_program(FILE *f, JCC *vm, Obj *prog) {
     if (!f || !prog)
@@ -935,14 +1063,8 @@ void cc_serialize_program(FILE *f, JCC *vm, Obj *prog) {
     // Header comment
     fprintf(f, "/* Generated by JCC pragma macro expansion */\n\n");
 
-    // Serialize type definitions before declarations that reference them.
-    for (int i = 0; i < ctx.defs.len; i++) {
-        Type *ty = ctx.defs.data[i];
-        if (ty->kind == TY_ENUM)
-            serialize_enum_def(f, &ctx, ty);
-        else
-            serialize_struct_def(f, &ctx, ty);
-    }
+    // Serialize file-scope type definitions before declarations that reference them.
+    serialize_type_defs_for_owner(f, &ctx, NULL);
 
     // Serialize global variables
     for (Obj *obj = prog; obj; obj = obj->next) {

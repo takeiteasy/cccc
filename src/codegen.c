@@ -122,6 +122,22 @@ static void apply_global_relocations(JCC *vm, Obj *prog) {
         }
     }
 }
+
+static void add_debug_symbol(JCC *vm, char *name, long long offset, Type *ty,
+                             int is_local, Obj *owner_fn) {
+    if (!(vm->flags & JCC_ENABLE_DEBUGGER) || !name || !*name)
+        return;
+    if (vm->dbg.num_debug_symbols >= MAX_DEBUG_SYMBOLS)
+        return;
+
+    DebugSymbol *sym = &vm->dbg.debug_symbols[vm->dbg.num_debug_symbols++];
+    sym->name = name;
+    sym->offset = offset;
+    sym->ty = ty;
+    sym->is_local = is_local;
+    sym->scope_depth = 0;
+    sym->owner_fn = owner_fn;
+}
 // ========== Register Allocator ==========
 // Simple bitmap allocator for temporary registers T0-T10
 
@@ -2328,15 +2344,19 @@ void gen_function(JCC *vm, Obj *fn) {
     vm->current_function_scope_id = fn_scope_id;
 
     // Register all params and locals in the variable metadata map.
-    for (Obj *param = fn->params; param; param = param->next)
+    for (Obj *param = fn->params; param; param = param->next) {
         add_stack_var_meta(vm, param->name, param->offset, param->ty, fn_scope_id);
+        add_debug_symbol(vm, param->name, param->offset, param->ty, 1, fn);
+    }
     for (Obj *var = fn->locals; var; var = var->next) {
         bool is_param = false;
         for (Obj *p = fn->params; p; p = p->next)
             if (p == var) { is_param = true; break; }
         bool is_builtin = (var == fn->va_area) || (var == fn->alloca_bottom);
-        if (!is_param && !is_builtin)
+        if (!is_param && !is_builtin) {
             add_stack_var_meta(vm, var->name, var->offset, var->ty, fn_scope_id);
+            add_debug_symbol(vm, var->name, var->offset, var->ty, 1, fn);
+        }
     }
 
     // Emit ENT3: [stack_size:32|param_count:32] [float_param_mask]
@@ -2387,6 +2407,7 @@ void gen_function(JCC *vm, Obj *fn) {
     if (vm->flags & JCC_STACK_INSTR)
         emit_scopeout(vm, fn_scope_id);
     emit(vm, LEV3);
+    fn->code_end_addr = (vm->text_ptr + 1 - vm->text_seg);
 }
 
 // ========== Top-Level Code Generation ==========
@@ -2410,6 +2431,7 @@ void gen(JCC *vm, Obj *prog) {
 
             // Store the offset in the variable
             var->offset = vm->data_ptr - vm->data_seg;
+            add_debug_symbol(vm, var->name, var->offset, var->ty, 0, NULL);
 
             // Copy init_data if present
             if (var->init_data) {

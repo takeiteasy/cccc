@@ -27,6 +27,50 @@ static int is_valid_vm_address(JCC *vm, void *addr) {
     return 0;
 }
 
+static Obj *debugger_current_function(JCC *vm) {
+    if (!vm || !vm->pc)
+        return NULL;
+
+    long long pc_offset = vm->pc - vm->text_seg;
+    for (Obj *fn = vm->compiler.globals; fn; fn = fn->next) {
+        if (!fn->is_function || !fn->body)
+            continue;
+        if (pc_offset >= fn->code_addr && pc_offset < fn->code_end_addr)
+            return fn;
+    }
+    return NULL;
+}
+
+static void *debugger_symbol_address(JCC *vm, DebugSymbol *sym) {
+    if (!sym)
+        return NULL;
+    if (sym->is_local) {
+        long long offset = sym->offset;
+        if ((vm->flags & JCC_STACK_CANARIES) && offset < 0)
+            offset -= 1;
+        return (void *)(vm->bp + offset);
+    }
+    return (void *)(vm->data_seg + sym->offset);
+}
+
+static int debugger_resolve_watch_expr(JCC *vm, const char *expr, void **addr,
+                                       int *size) {
+    long long raw_addr;
+    if (sscanf(expr, "%llx", &raw_addr) == 1) {
+        *addr = (void *)raw_addr;
+        *size = 8;
+        return is_valid_vm_address(vm, *addr);
+    }
+
+    DebugSymbol *sym = cc_lookup_symbol(vm, expr);
+    if (!sym)
+        return 0;
+
+    *addr = debugger_symbol_address(vm, sym);
+    *size = sym->ty ? sym->ty->size : 8;
+    return is_valid_vm_address(vm, *addr);
+}
+
 void debugger_init(JCC *vm) {
     vm->flags |= JCC_ENABLE_DEBUGGER;  // Make sure it's enabled
     vm->dbg.num_breakpoints = 0;
@@ -795,33 +839,12 @@ void cc_debug_repl(JCC *vm) {
         else if (STREQ_LIT(cmd, "watch") || STREQ_LIT(cmd, "w")) {
             char expr[128];
             if (sscanf(line, "%*s %127s", expr) == 1) {
-                // Try to parse as hex address
-                if (expr[0] == '0' && expr[1] == 'x') {
-                    long long addr;
-                    if (sscanf(expr, "%llx", &addr) == 1) {
-                        if (is_valid_vm_address(vm, (void*)addr)) {
-                            cc_add_watchpoint(vm, (void*)addr, 8, WATCH_WRITE | WATCH_CHANGE, expr);
-                        } else {
-                            printf("Error: Invalid memory address 0x%llx\n", addr);
-                        }
-                    }
+                void *addr = NULL;
+                int size = 0;
+                if (debugger_resolve_watch_expr(vm, expr, &addr, &size)) {
+                    cc_add_watchpoint(vm, addr, size, WATCH_WRITE | WATCH_CHANGE, expr);
                 } else {
-                    // Try to look up as variable name
-                    DebugSymbol *sym = cc_lookup_symbol(vm, expr);
-                    if (sym) {
-                        void *addr = sym->is_local ?
-                            (void*)(vm->bp + sym->offset) :
-                            (void*)(vm->data_seg + sym->offset);
-                        if (is_valid_vm_address(vm, addr)) {
-                            int size = sym->ty ? sym->ty->size : 8;
-                            cc_add_watchpoint(vm, addr, size, WATCH_WRITE | WATCH_CHANGE, expr);
-                        } else {
-                            printf("Error: Invalid address for variable '%s'\n", expr);
-                        }
-                    } else {
-                        printf("Error: Variable '%s' not found (symbol table not yet implemented)\n", expr);
-                        printf("Use hex address instead: watch 0x<address>\n");
-                    }
+                    printf("Error: Unable to resolve watch expression '%s'\n", expr);
                 }
             } else {
                 printf("Usage: watch <variable> | watch 0x<address>\n");
@@ -831,38 +854,30 @@ void cc_debug_repl(JCC *vm) {
         else if (STREQ_LIT(cmd, "rwatch")) {
             char expr[128];
             if (sscanf(line, "%*s %127s", expr) == 1) {
-                long long addr;
-                if (sscanf(expr, "%llx", &addr) == 1) {
-                    if (is_valid_vm_address(vm, (void*)addr)) {
-                        cc_add_watchpoint(vm, (void*)addr, 8, WATCH_READ, expr);
-                    } else {
-                        printf("Error: Invalid memory address 0x%llx\n", addr);
-                    }
+                void *addr = NULL;
+                int size = 0;
+                if (debugger_resolve_watch_expr(vm, expr, &addr, &size)) {
+                    cc_add_watchpoint(vm, addr, size, WATCH_READ, expr);
                 } else {
-                    printf("Error: Symbol lookup not yet implemented, use hex address\n");
-                    printf("Usage: rwatch 0x<address>\n");
+                    printf("Error: Unable to resolve watch expression '%s'\n", expr);
                 }
             } else {
-                printf("Usage: rwatch 0x<address>\n");
+                printf("Usage: rwatch <variable> | rwatch 0x<address>\n");
             }
         }
         // AWatch (access watchpoint - read or write)
         else if (STREQ_LIT(cmd, "awatch")) {
             char expr[128];
             if (sscanf(line, "%*s %127s", expr) == 1) {
-                long long addr;
-                if (sscanf(expr, "%llx", &addr) == 1) {
-                    if (is_valid_vm_address(vm, (void*)addr)) {
-                        cc_add_watchpoint(vm, (void*)addr, 8, WATCH_READ | WATCH_WRITE, expr);
-                    } else {
-                        printf("Error: Invalid memory address 0x%llx\n", addr);
-                    }
+                void *addr = NULL;
+                int size = 0;
+                if (debugger_resolve_watch_expr(vm, expr, &addr, &size)) {
+                    cc_add_watchpoint(vm, addr, size, WATCH_READ | WATCH_WRITE, expr);
                 } else {
-                    printf("Error: Symbol lookup not yet implemented, use hex address\n");
-                    printf("Usage: awatch 0x<address>\n");
+                    printf("Error: Unable to resolve watch expression '%s'\n", expr);
                 }
             } else {
-                printf("Usage: awatch 0x<address>\n");
+                printf("Usage: awatch <variable> | awatch 0x<address>\n");
             }
         }
         // Info watch (list watchpoints)
@@ -938,15 +953,17 @@ int debugger_run(JCC *vm, int argc, char **argv) {
     // Set PC to main (code_addr is an offset from text_seg)
     vm->pc = vm->text_seg + main_fn->code_addr;
 
-    // Setup stack for main(argc, argv)
-    vm->sp = vm->stack_seg;
-    vm->bp = vm->stack_seg;
-    vm->initial_sp = vm->stack_seg;
-    vm->initial_bp = vm->stack_seg;
+    // Setup stack for main(argc, argv), matching cc_run().
+    vm->sp = (long long *)((char *)vm->stack_seg +
+                           vm->poolsize * sizeof(long long));
+    vm->bp = vm->sp;
+    vm->initial_sp = vm->sp;
+    vm->initial_bp = vm->bp;
 
     // Setup shadow stack for CFI if enabled
     if (vm->flags & JCC_CFI) {
-        vm->shadow_sp = vm->shadow_stack;
+        vm->shadow_sp = (long long *)((char *)vm->shadow_stack +
+                                      vm->poolsize * sizeof(long long));
     }
 
     // Push argv (pointer to array of strings)
@@ -1053,9 +1070,23 @@ DebugSymbol *cc_lookup_symbol(JCC *vm, const char *name) {
         return NULL;
     }
 
-    // Search in reverse order to find most recent (innermost scope)
+    Obj *current_fn = debugger_current_function(vm);
+
+    // Search locals in the current function first.
     for (int i = vm->dbg.num_debug_symbols - 1; i >= 0; i--) {
         if (vm->dbg.debug_symbols[i].name &&
+            vm->dbg.debug_symbols[i].is_local &&
+            vm->dbg.debug_symbols[i].owner_fn == current_fn &&
+            strlen(vm->dbg.debug_symbols[i].name) == strlen(name) &&
+            strncmp(vm->dbg.debug_symbols[i].name, name, strlen(name)) == 0) {
+            return &vm->dbg.debug_symbols[i];
+        }
+    }
+
+    // Then fall back to globals.
+    for (int i = vm->dbg.num_debug_symbols - 1; i >= 0; i--) {
+        if (vm->dbg.debug_symbols[i].name &&
+            !vm->dbg.debug_symbols[i].is_local &&
             strlen(vm->dbg.debug_symbols[i].name) == strlen(name) &&
             strncmp(vm->dbg.debug_symbols[i].name, name, strlen(name)) == 0) {
             return &vm->dbg.debug_symbols[i];
@@ -1099,17 +1130,9 @@ static long long eval_ast_node(JCC *vm, Node *node, int *error) {
             // Read value from memory
             long long *addr;
             if (sym->is_local) {
-                // Local variable - BP-relative
-                long long offset = sym->offset;
-                // Adjust for stack canaries if enabled
-                // Use same value as STACK_CANARY_SLOTS in vm.c
-                if ((vm->flags & JCC_STACK_CANARIES) && offset < 0) {
-                    offset -= 1;  // STACK_CANARY_SLOTS
-                }
-                addr = vm->bp + offset;
+                addr = (long long *)debugger_symbol_address(vm, sym);
             } else {
-                // Global variable - data segment
-                addr = (long long *)(vm->data_seg + sym->offset);
+                addr = (long long *)debugger_symbol_address(vm, sym);
             }
 
             // Read based on type size
@@ -1330,7 +1353,13 @@ int cc_add_watchpoint(JCC *vm, void *address, int size, int type, const char *ex
             vm->dbg.watchpoints[i].address = address;
             vm->dbg.watchpoints[i].size = size;
             vm->dbg.watchpoints[i].type = type;
-            vm->dbg.watchpoints[i].old_value = 0;  // Will be updated on first check
+            switch (size) {
+                case 1: vm->dbg.watchpoints[i].old_value = *(char *)address; break;
+                case 2: vm->dbg.watchpoints[i].old_value = *(short *)address; break;
+                case 4: vm->dbg.watchpoints[i].old_value = *(int *)address; break;
+                case 8: vm->dbg.watchpoints[i].old_value = *(long long *)address; break;
+                default: vm->dbg.watchpoints[i].old_value = 0; break;
+            }
             vm->dbg.watchpoints[i].expr = expr ? strdup(expr) : NULL;
             vm->dbg.watchpoints[i].enabled = 1;
             vm->dbg.watchpoints[i].hit_count = 0;

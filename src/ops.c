@@ -655,6 +655,7 @@ int op_LDR_B_fn(JCC *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    debugger_check_watchpoint(vm, (void *)vm->regs[rs], 1, WATCH_READ);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(char *)vm->regs[rs];
     return 0;
@@ -667,6 +668,7 @@ int op_LDR_H_fn(JCC *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    debugger_check_watchpoint(vm, (void *)vm->regs[rs], 2, WATCH_READ);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(short *)vm->regs[rs];
     return 0;
@@ -679,6 +681,7 @@ int op_LDR_W_fn(JCC *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    debugger_check_watchpoint(vm, (void *)vm->regs[rs], 4, WATCH_READ);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(int *)vm->regs[rs];
     return 0;
@@ -691,6 +694,7 @@ int op_LDR_D_fn(JCC *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    debugger_check_watchpoint(vm, (void *)vm->regs[rs], 8, WATCH_READ);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(long long *)vm->regs[rs];
     return 0;
@@ -704,6 +708,7 @@ int op_STR_B_fn(JCC *vm) {
     DECODE_RR(operands, rd, rs);
 
     *(char *)vm->regs[rs] = (char)vm->regs[rd];
+    debugger_check_watchpoint(vm, (void *)vm->regs[rs], 1, WATCH_WRITE);
     return 0;
 }
 
@@ -715,6 +720,7 @@ int op_STR_H_fn(JCC *vm) {
     DECODE_RR(operands, rd, rs);
 
     *(short *)vm->regs[rs] = (short)vm->regs[rd];
+    debugger_check_watchpoint(vm, (void *)vm->regs[rs], 2, WATCH_WRITE);
     return 0;
 }
 
@@ -726,6 +732,7 @@ int op_STR_W_fn(JCC *vm) {
     DECODE_RR(operands, rd, rs);
 
     *(int *)vm->regs[rs] = (int)vm->regs[rd];
+    debugger_check_watchpoint(vm, (void *)vm->regs[rs], 4, WATCH_WRITE);
     return 0;
 }
 
@@ -737,6 +744,7 @@ int op_STR_D_fn(JCC *vm) {
     DECODE_RR(operands, rd, rs);
 
     *(long long *)vm->regs[rs] = vm->regs[rd];
+    debugger_check_watchpoint(vm, (void *)vm->regs[rs], 8, WATCH_WRITE);
     return 0;
 }
 
@@ -747,6 +755,7 @@ int op_FLDR_fn(JCC *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    debugger_check_watchpoint(vm, (void *)vm->regs[rs], 8, WATCH_READ);
     vm->fregs[rd] = *(double *)vm->regs[rs];
     return 0;
 }
@@ -759,6 +768,7 @@ int op_FSTR_fn(JCC *vm) {
     DECODE_RR(operands, rd, rs);
 
     *(double *)vm->regs[rs] = vm->fregs[rd];
+    debugger_check_watchpoint(vm, (void *)vm->regs[rs], 8, WATCH_WRITE);
     return 0;
 }
 
