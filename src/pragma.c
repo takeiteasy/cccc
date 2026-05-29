@@ -214,7 +214,9 @@ static Token *build_combined_macro_tokens(JCC *vm, Token *reflection_tokens,
 
 static Obj *find_macro_function(Obj *prog, const char *name) {
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (obj->is_function && obj->body && strcmp(obj->name, name) == 0)
+        if (obj->is_function && obj->body &&
+            strlen(obj->name) == strlen(name) &&
+            strncmp(obj->name, name, strlen(name)) == 0)
             return obj;
     }
     return NULL;
@@ -454,7 +456,8 @@ static Node *execute_pragma_macro(JCC *vm, PragmaMacro *pm, Node *args,
 // Find pragma macro by name
 static PragmaMacro *find_pragma_macro_by_name(JCC *vm, const char *name) {
     for (PragmaMacro *pm = vm->compiler.pragma_macros; pm; pm = pm->next) {
-        if (strcmp(pm->name, name) == 0)
+        if (strlen(pm->name) == strlen(name) &&
+            strncmp(pm->name, name, strlen(name)) == 0)
             return pm;
     }
     return NULL;

@@ -29,7 +29,8 @@ static int find_ffi_function(JCC *vm, const char *name) {
 
     // First try exact match
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
-        if (strcmp(vm->compiler.ffi_table[i].name, name) == 0) {
+        if (strlen(vm->compiler.ffi_table[i].name) == strlen(name) &&
+            strncmp(vm->compiler.ffi_table[i].name, name, strlen(name)) == 0) {
             return i;
         }
     }
@@ -50,7 +51,9 @@ static int find_ffi_function(JCC *vm, const char *name) {
 
         for (int i = 0; i < vm->compiler.ffi_count; i++) {
             if (vm->compiler.ffi_table[i].is_variadic &&
-                strcmp(vm->compiler.ffi_table[i].name, base_name) == 0) {
+                strlen(vm->compiler.ffi_table[i].name) == strlen(base_name) &&
+                strncmp(vm->compiler.ffi_table[i].name, base_name,
+                        strlen(base_name)) == 0) {
                 return i;
             }
         }
@@ -61,7 +64,8 @@ static int find_ffi_function(JCC *vm, const char *name) {
 
 static Obj *find_global_obj(Obj *prog, const char *name) {
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (obj->name && strcmp(obj->name, name) == 0)
+        if (obj->name && strlen(obj->name) == strlen(name) &&
+            strncmp(obj->name, name, strlen(name)) == 0)
             return obj;
     }
     return NULL;
@@ -252,7 +256,8 @@ static void patch_labels(JCC *vm) {
 
         // Find the label definition
         for (int j = 0; j < num_label_defs; j++) {
-            if (strcmp(label_defs[j].name, name) == 0) {
+            if (strlen(label_defs[j].name) == strlen(name) &&
+                strncmp(label_defs[j].name, name, strlen(name)) == 0) {
                 if (label_patches[i].text_relative) {
                     *patch = label_defs[j].offset * (long long)sizeof(long long);
                 } else {
@@ -429,7 +434,7 @@ static Obj *find_static_link_var(Obj *fn) {
     if (!fn || !fn->is_nested)
         return NULL;
     for (Obj *var = fn->locals; var; var = var->next) {
-        if (strcmp(var->name, "__static_link") == 0)
+        if (strncmp(var->name, "__static_link", sizeof("__static_link")) == 0)
             return var;
     }
     return NULL;
@@ -2375,7 +2380,7 @@ void gen_function(JCC *vm, Obj *fn) {
     patch_labels(vm);
 
     // Implicit return 0 from main
-    if (strcmp(fn->name, "main") == 0) {
+    if (strncmp(fn->name, "main", sizeof("main")) == 0) {
         emit_li3(vm, REG_A0, 0);
     }
     // Deactivate function scope (for fall-through returns).
@@ -2453,7 +2458,9 @@ void gen(JCC *vm, Obj *prog) {
         // Find the function definition in the program list
         Obj *fn_def = NULL;
         for (Obj *fn = prog; fn; fn = fn->next) {
-            if (fn->is_function && fn->body && strcmp(fn->name, fn_name) == 0) {
+            if (fn->is_function && fn->body &&
+                strlen(fn->name) == strlen(fn_name) &&
+                strncmp(fn->name, fn_name, strlen(fn_name)) == 0) {
                 fn_def = fn;
                 break;
             }
@@ -2481,7 +2488,9 @@ void gen(JCC *vm, Obj *prog) {
 
         Obj *fn_def = NULL;
         for (Obj *fn = prog; fn; fn = fn->next) {
-            if (fn->is_function && fn->body && strcmp(fn->name, fn_name) == 0) {
+            if (fn->is_function && fn->body &&
+                strlen(fn->name) == strlen(fn_name) &&
+                strncmp(fn->name, fn_name, strlen(fn_name)) == 0) {
                 fn_def = fn;
                 break;
             }
@@ -2496,7 +2505,8 @@ void gen(JCC *vm, Obj *prog) {
 
     // Find main function and store its address in text_seg[0]
     for (Obj *fn = prog; fn; fn = fn->next) {
-        if (fn->is_function && strcmp(fn->name, "main") == 0) {
+        if (fn->is_function &&
+            strncmp(fn->name, "main", sizeof("main")) == 0) {
             vm->text_seg[0] = fn->code_addr;
             return;
         }

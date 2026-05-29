@@ -124,7 +124,8 @@ JCC_Type *jcc_ast_get_type(JCC *vm, const char *name) {
     };
 
     for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); i++)
-        if (strcmp(name, builtins[i].name) == 0)
+        if (strlen(name) == strlen(builtins[i].name) &&
+            strncmp(name, builtins[i].name, strlen(builtins[i].name)) == 0)
             return builtins[i].type;
 
     return jcc_ast_find_type(vm, name);
@@ -251,7 +252,8 @@ JCC_EnumConstant *jcc_ast_enum_find(JCC *vm, JCC_Type *enum_type,
         return NULL;
 
     for (EnumConstant *ec = enum_type->enum_constants; ec; ec = ec->next)
-        if (strcmp(ec->name, name) == 0)
+        if (strlen(ec->name) == strlen(name) &&
+            strncmp(ec->name, name, strlen(name)) == 0)
             return ec;
     return NULL;
 }
@@ -364,7 +366,8 @@ JCC_Obj *jcc_ast_find_global(JCC *vm, const char *name) {
 
     size_t name_len = strlen(name);
     for (Obj *obj = vm->compiler.globals; obj; obj = obj->next) {
-        if (strlen(obj->name) == name_len && strcmp(obj->name, name) == 0)
+        if (strlen(obj->name) == name_len &&
+            strncmp(obj->name, name, name_len) == 0)
             return obj;
     }
     return NULL;
@@ -682,7 +685,7 @@ JCC_Obj *jcc_ast_function(JCC *vm, const char *name,
 
     for (Obj *obj = vm->compiler.globals; obj; obj = obj->next) {
         if (obj->is_function && strlen(obj->name) == name_len &&
-            strcmp(obj->name, name) == 0) {
+            strncmp(obj->name, name, name_len) == 0) {
             existing = obj;
             break;
         }

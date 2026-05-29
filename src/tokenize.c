@@ -922,7 +922,7 @@ Token *tokenize(JCC *vm, File *file) {
 static char *read_file(JCC *vm, char *path) {
     FILE *fp;
 
-    if (strcmp(path, "-") == 0) {
+    if (strncmp(path, "-", sizeof("-")) == 0) {
         // By convention, read from stdin if a given filename is "-".
         fp = stdin;
     } else {

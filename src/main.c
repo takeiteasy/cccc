@@ -331,15 +331,17 @@ int main(int argc, const char *argv[]) {
             break;
         case 1012:
             // --safety=<level> flag
-            if (strcmp(optarg, "none") == 0 || strcmp(optarg, "0") == 0) {
+            if (strncmp(optarg, "none", sizeof("none")) == 0 ||
+                strncmp(optarg, "0", sizeof("0")) == 0) {
                 flags = 0;
-            } else if (strcmp(optarg, "basic") == 0 ||
-                       strcmp(optarg, "1") == 0) {
+            } else if (strncmp(optarg, "basic", sizeof("basic")) == 0 ||
+                       strncmp(optarg, "1", sizeof("1")) == 0) {
                 flags |= JCC_SAFETY_BASIC;
-            } else if (strcmp(optarg, "standard") == 0 ||
-                       strcmp(optarg, "2") == 0) {
+            } else if (strncmp(optarg, "standard", sizeof("standard")) == 0 ||
+                       strncmp(optarg, "2", sizeof("2")) == 0) {
                 flags |= JCC_SAFETY_STANDARD;
-            } else if (strcmp(optarg, "max") == 0 || strcmp(optarg, "3") == 0) {
+            } else if (strncmp(optarg, "max", sizeof("max")) == 0 ||
+                       strncmp(optarg, "3", sizeof("3")) == 0) {
                 flags |= JCC_SAFETY_MAX;
             } else {
                 fprintf(stderr,
@@ -527,7 +529,7 @@ int main(int argc, const char *argv[]) {
     /* Remaining arguments are input files (positional) */
     for (int i = optind; i < argc; i++) {
         const char *a = argv[i];
-        if (strcmp(a, "-") == 0) {
+        if (strncmp(a, "-", sizeof("-")) == 0) {
             input_files = realloc(input_files, sizeof(*input_files) *
                                                    (input_files_count + 1));
             input_files[input_files_count++] = strdup("-");
@@ -545,7 +547,8 @@ int main(int argc, const char *argv[]) {
 
     // If the only input file is "-", read stdin into a temporary file and
     // replace it
-    if (input_files_count == 1 && strcmp(input_files[0], "-") == 0) {
+    if (input_files_count == 1 &&
+        strncmp(input_files[0], "-", sizeof("-")) == 0) {
         char *tmp = read_stdin_to_tmp();
         if (!tmp) {
             fprintf(stderr,
@@ -584,7 +587,8 @@ int main(int argc, const char *argv[]) {
     if (input_files_count == 1) {
         const char *input_file = input_files[0];
         size_t len = strlen(input_file);
-        if (len > 4 && strcmp(input_file + len - 4, ".jbc") == 0) {
+        if (len > 4 &&
+            strncmp(input_file + len - 4, ".jbc", sizeof(".jbc")) == 0) {
             // Load bytecode file
             if (cc_load_bytecode(&vm, input_file) != 0) {
                 fprintf(stderr, "error: failed to load bytecode from %s\n",

@@ -12,6 +12,8 @@
 #include "jcc.h"
 #include "./internal.h"
 
+#define STREQ_LIT(s, lit) (strncmp((s), (lit), sizeof(lit)) == 0)
+
 static int is_valid_vm_address(JCC *vm, void *addr) {
     long long ptr = (long long)addr;
     // Text segment
@@ -621,25 +623,25 @@ void cc_debug_repl(JCC *vm) {
         }
 
         // Help command
-        if (strcmp(cmd, "help") == 0 || strcmp(cmd, "h") == 0 || strcmp(cmd, "?") == 0) {
+        if (STREQ_LIT(cmd, "help") || STREQ_LIT(cmd, "h") || STREQ_LIT(cmd, "?")) {
             print_help();
         }
         // Continue
-        else if (strcmp(cmd, "continue") == 0 || strcmp(cmd, "c") == 0) {
+        else if (STREQ_LIT(cmd, "continue") || STREQ_LIT(cmd, "c")) {
             vm->dbg.single_step = 0;
             vm->dbg.step_over = 0;
             vm->dbg.step_out = 0;
             break;
         }
         // Single step
-        else if (strcmp(cmd, "step") == 0 || strcmp(cmd, "s") == 0) {
+        else if (STREQ_LIT(cmd, "step") || STREQ_LIT(cmd, "s")) {
             vm->dbg.single_step = 1;
             vm->dbg.step_over = 0;
             vm->dbg.step_out = 0;
             break;
         }
         // Step over
-        else if (strcmp(cmd, "next") == 0 || strcmp(cmd, "n") == 0) {
+        else if (STREQ_LIT(cmd, "next") || STREQ_LIT(cmd, "n")) {
             vm->dbg.single_step = 0;
             vm->dbg.step_over = 1;
             vm->dbg.step_out = 0;
@@ -650,7 +652,7 @@ void cc_debug_repl(JCC *vm) {
             break;
         }
         // Step out
-        else if (strcmp(cmd, "finish") == 0 || strcmp(cmd, "f") == 0) {
+        else if (STREQ_LIT(cmd, "finish") || STREQ_LIT(cmd, "f")) {
             vm->dbg.single_step = 0;
             vm->dbg.step_over = 0;
             vm->dbg.step_out = 1;
@@ -658,21 +660,21 @@ void cc_debug_repl(JCC *vm) {
             break;
         }
         // Print registers
-        else if (strcmp(cmd, "registers") == 0 || strcmp(cmd, "r") == 0) {
+        else if (STREQ_LIT(cmd, "registers") || STREQ_LIT(cmd, "r")) {
             debugger_print_registers(vm);
         }
         // Print stack
-        else if (strcmp(cmd, "stack") == 0 || strcmp(cmd, "st") == 0) {
+        else if (STREQ_LIT(cmd, "stack") || STREQ_LIT(cmd, "st")) {
             int count = 10;
             sscanf(line, "%*s %d", &count);
             debugger_print_stack(vm, count);
         }
         // Disassemble
-        else if (strcmp(cmd, "disasm") == 0 || strcmp(cmd, "dis") == 0) {
+        else if (STREQ_LIT(cmd, "disasm") || STREQ_LIT(cmd, "dis")) {
             debugger_disassemble_current(vm);
         }
         // Set breakpoint
-        else if (strcmp(cmd, "break") == 0 || strcmp(cmd, "b") == 0) {
+        else if (STREQ_LIT(cmd, "break") || STREQ_LIT(cmd, "b")) {
             char arg[128];
             char *condition = NULL;
             long long *bp_pc = NULL;
@@ -763,7 +765,7 @@ void cc_debug_repl(JCC *vm) {
             }
         }
         // Delete breakpoint
-        else if (strcmp(cmd, "delete") == 0 || strcmp(cmd, "d") == 0) {
+        else if (STREQ_LIT(cmd, "delete") || STREQ_LIT(cmd, "d")) {
             int num;
             if (sscanf(line, "%*s %d", &num) == 1) {
                 cc_remove_breakpoint(vm, num);
@@ -772,11 +774,11 @@ void cc_debug_repl(JCC *vm) {
             }
         }
         // List breakpoints
-        else if (strcmp(cmd, "list") == 0 || strcmp(cmd, "l") == 0) {
+        else if (STREQ_LIT(cmd, "list") || STREQ_LIT(cmd, "l")) {
             debugger_list_breakpoints(vm);
         }
         // Memory inspection
-        else if (strcmp(cmd, "memory") == 0 || strcmp(cmd, "m") == 0) {
+        else if (STREQ_LIT(cmd, "memory") || STREQ_LIT(cmd, "m")) {
             long long addr;
             if (sscanf(line, "%*s %llx", &addr) == 1) {
                 if (is_valid_vm_address(vm, (void*)addr)) {
@@ -790,7 +792,7 @@ void cc_debug_repl(JCC *vm) {
             }
         }
         // Watch (write watchpoint)
-        else if (strcmp(cmd, "watch") == 0 || strcmp(cmd, "w") == 0) {
+        else if (STREQ_LIT(cmd, "watch") || STREQ_LIT(cmd, "w")) {
             char expr[128];
             if (sscanf(line, "%*s %127s", expr) == 1) {
                 // Try to parse as hex address
@@ -826,7 +828,7 @@ void cc_debug_repl(JCC *vm) {
             }
         }
         // RWatch (read watchpoint)
-        else if (strcmp(cmd, "rwatch") == 0) {
+        else if (STREQ_LIT(cmd, "rwatch")) {
             char expr[128];
             if (sscanf(line, "%*s %127s", expr) == 1) {
                 long long addr;
@@ -845,7 +847,7 @@ void cc_debug_repl(JCC *vm) {
             }
         }
         // AWatch (access watchpoint - read or write)
-        else if (strcmp(cmd, "awatch") == 0) {
+        else if (STREQ_LIT(cmd, "awatch")) {
             char expr[128];
             if (sscanf(line, "%*s %127s", expr) == 1) {
                 long long addr;
@@ -864,9 +866,9 @@ void cc_debug_repl(JCC *vm) {
             }
         }
         // Info watch (list watchpoints)
-        else if (strcmp(cmd, "info") == 0) {
+        else if (STREQ_LIT(cmd, "info")) {
             char subcmd[64];
-            if (sscanf(line, "%*s %63s", subcmd) == 1 && strcmp(subcmd, "watch") == 0) {
+            if (sscanf(line, "%*s %63s", subcmd) == 1 && STREQ_LIT(subcmd, "watch")) {
                 if (vm->dbg.num_watchpoints == 0) {
                     printf("No watchpoints set.\n");
                 } else {
@@ -897,7 +899,7 @@ void cc_debug_repl(JCC *vm) {
             }
         }
         // Quit
-        else if (strcmp(cmd, "quit") == 0 || strcmp(cmd, "q") == 0) {
+        else if (STREQ_LIT(cmd, "quit") || STREQ_LIT(cmd, "q")) {
             printf("Exiting debugger...\n");
             exit(0);
         }
@@ -914,7 +916,8 @@ int debugger_run(JCC *vm, int argc, char **argv) {
     // Find main function
     Obj *main_fn = NULL;
     for (Obj *obj = vm->compiler.globals; obj; obj = obj->next) {
-        if (obj->is_function && obj->name && strcmp(obj->name, "main") == 0) {
+        if (obj->is_function && obj->name &&
+            STREQ_LIT(obj->name, "main")) {
             main_fn = obj;
             break;
         }
@@ -1034,7 +1037,8 @@ long long *cc_find_function_entry(JCC *vm, const char *name) {
 
     // Search through global symbols for function
     for (Obj *fn = vm->compiler.globals; fn; fn = fn->next) {
-        if (fn->is_function && fn->name && strcmp(fn->name, name) == 0) {
+        if (fn->is_function && fn->name && strlen(fn->name) == strlen(name) &&
+            strncmp(fn->name, name, strlen(name)) == 0) {
             if (fn->code_addr >= 0) {
                 return vm->text_seg + fn->code_addr;
             }
@@ -1051,7 +1055,9 @@ DebugSymbol *cc_lookup_symbol(JCC *vm, const char *name) {
 
     // Search in reverse order to find most recent (innermost scope)
     for (int i = vm->dbg.num_debug_symbols - 1; i >= 0; i--) {
-        if (vm->dbg.debug_symbols[i].name && strcmp(vm->dbg.debug_symbols[i].name, name) == 0) {
+        if (vm->dbg.debug_symbols[i].name &&
+            strlen(vm->dbg.debug_symbols[i].name) == strlen(name) &&
+            strncmp(vm->dbg.debug_symbols[i].name, name, strlen(name)) == 0) {
             return &vm->dbg.debug_symbols[i];
         }
     }

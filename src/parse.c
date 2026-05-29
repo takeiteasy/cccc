@@ -4345,7 +4345,8 @@ static void create_param_lvars(JCC *vm, Type *param) {
 static void resolve_goto_labels(JCC *vm) {
     for (Node *x = vm->compiler.gotos; x; x = x->goto_next) {
         for (Node *y = vm->compiler.labels; y; y = y->goto_next) {
-            if (!strcmp(x->label, y->label)) {
+            if (strlen(x->label) == strlen(y->label) &&
+                strncmp(x->label, y->label, strlen(y->label)) == 0) {
                 x->unique_label = y->unique_label;
                 break;
             }
@@ -4565,7 +4566,8 @@ static void scan_globals(JCC *vm) {
         Obj *var2 = vm->compiler.globals;
         for (; var2; var2 = var2->next)
             if (var != var2 && var2->is_definition &&
-                !strcmp(var->name, var2->name))
+                strlen(var->name) == strlen(var2->name) &&
+                strncmp(var->name, var2->name, strlen(var2->name)) == 0)
                 break;
 
         // If there's another definition, the tentative definition

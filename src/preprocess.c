@@ -829,7 +829,7 @@ static Token *paste(JCC *vm, Token *lhs, Token *rhs) {
 
 static bool has_varargs(MacroArg *args) {
     for (MacroArg *ap = args; ap; ap = ap->next)
-        if (!strcmp(ap->name, "__VA_ARGS__"))
+        if (strncmp(ap->name, "__VA_ARGS__", sizeof("__VA_ARGS__")) == 0)
             return ap->tok->kind != TK_EOF;
     return false;
 }
@@ -1041,7 +1041,8 @@ static bool is_standard_header(const char *filename) {
         "time.h",   "Availability.h", "sys/cdefs.h", NULL};
 
     for (int i = 0; std_headers[i]; i++) {
-        if (strcmp(filename, std_headers[i]) == 0)
+        if (strlen(filename) == strlen(std_headers[i]) &&
+            strncmp(filename, std_headers[i], strlen(std_headers[i])) == 0)
             return true;
     }
     return false;
@@ -1210,17 +1211,17 @@ static void register_stdlib_for_header(JCC *vm, const char *header_name) {
     hashmap_put(&vm->compiler.included_headers, header_name, (void *)1);
 
     // Dispatch to appropriate registration function
-    if (strcmp(header_name, "ctype.h") == 0) {
+    if (strncmp(header_name, "ctype.h", sizeof("ctype.h")) == 0) {
         register_ctype_functions(vm);
-    } else if (strcmp(header_name, "math.h") == 0) {
+    } else if (strncmp(header_name, "math.h", sizeof("math.h")) == 0) {
         register_math_functions(vm);
-    } else if (strcmp(header_name, "stdio.h") == 0) {
+    } else if (strncmp(header_name, "stdio.h", sizeof("stdio.h")) == 0) {
         register_stdio_functions(vm);
-    } else if (strcmp(header_name, "stdlib.h") == 0) {
+    } else if (strncmp(header_name, "stdlib.h", sizeof("stdlib.h")) == 0) {
         register_stdlib_functions(vm);
-    } else if (strcmp(header_name, "string.h") == 0) {
+    } else if (strncmp(header_name, "string.h", sizeof("string.h")) == 0) {
         register_string_functions(vm);
-    } else if (strcmp(header_name, "time.h") == 0) {
+    } else if (strncmp(header_name, "time.h", sizeof("time.h")) == 0) {
         register_time_functions(vm);
     }
     // Note: Other headers (like stddef.h, stdbool.h, etc.) don't have runtime
@@ -1964,7 +1965,7 @@ typedef enum {
 } StringKind;
 
 static StringKind getStringKind(Token *tok) {
-    if (!strcmp(tok->loc, "u8"))
+    if (tok->len == 2 && strncmp(tok->loc, "u8", 2) == 0)
         return STR_UTF8;
 
     switch (tok->loc[0]) {

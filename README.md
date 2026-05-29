@@ -131,9 +131,6 @@ JCC provides two modes for variadic foreign functions:
 
 - **Native Inline Assembly**
   - **AAPCS64** (macOS ARM64)
-  - TODO: x86_64 (System V AMD64)
-  - TODO: x86_64 (Windows x64)
-  - TODO: x86_32 (Legacy 32-bit System V)
 - **Optional libffi support** (Other platforms)
   - Build with `make JCC_HAS_FFI=1` to enable libffi support (see [BUILD](#build))
   - Use libffi if your platform isn't supported
@@ -199,18 +196,6 @@ make
 
 > **Note**: The `--use-system-headers` flag is available but experimental. Apple's system headers contain macros and runtime dependencies that JCC cannot fully support.
 
-## TODO
-
-- Support for `_Defer` statement
-- Support for `_Pragma` statement
-- Support for (some) C23 `[[...]]` and GNU `__attribute__((...))` attributes
-- Proper inlining support
-- Support more architectures for native FFI
-  - x86_64 (System V + Windows) + x86_64 (legacy System V only)
-  - No plans for any other systems, but will accept patches
-- Support for pthread + internal thread support
-  - Thread safety features (race condition checks, etc)
-
 ## Building
 
 ```bash
@@ -246,7 +231,7 @@ This produces:
 All test files are located in the `tests/` directory. To run the complete test suite:
 
 ```bash
-./run_tests
+python3 tests.py
 ```
 
 This will run all test files and report:
@@ -259,18 +244,18 @@ This will run all test files and report:
 
 ```bash
 # Run only tests matching a pattern
-./run_tests --match "*embed*"     # Runs test_embed_basic.c, test_embed_empty.c, etc.
-./run_tests --match "test_ptr*"   # Runs test_ptr_arithmetic.c, test_ptr_deref.c, etc.
+python3 tests.py --match "*embed*"     # Runs test_embed_basic.c, test_embed_empty.c, etc.
+python3 tests.py --match "test_ptr*"   # Runs test_ptr_arithmetic.c, test_ptr_deref.c, etc.
 
 # Enable memory leak detection (platform-specific: leaks on macOS, valgrind on Linux, drmemory on Windows)
-./run_tests --leaks
+python3 tests.py --leaks
 
 # Run tasks in parallel (default: 8 jobs)
-./run_tests -j 4
+python3 tests.py -j 4
 
 # Pass additional flags to jcc (all non-option arguments are forwarded)
-./run_tests -2                    # Run tests with standard safety level
-./run_tests --vm-heap             # Run tests with VM heap enabled
+python3 tests.py -2                    # Run tests with standard safety level
+python3 tests.py --vm-heap             # Run tests with VM heap enabled
 ```
 
 Individual tests can be run directly:

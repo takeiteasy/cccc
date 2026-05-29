@@ -554,7 +554,8 @@ int cc_dlsym(JCC *vm, const char *name, void *func_ptr, int num_args, int return
         return -1;
 
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
-        if (strcmp(vm->compiler.ffi_table[i].name, name) == 0) {
+        if (strlen(vm->compiler.ffi_table[i].name) == strlen(name) &&
+            strncmp(vm->compiler.ffi_table[i].name, name, strlen(name)) == 0) {
             if (vm->compiler.ffi_table[i].num_args != num_args || vm->compiler.ffi_table[i].returns_double != returns_double) {
                 fprintf(stderr, "error: FFI function '%s' signature mismatch\n", name);
                 return -1;
