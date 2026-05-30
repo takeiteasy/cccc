@@ -57,7 +57,9 @@ static uint64_t int_hash(long long key) {
     return hash;
 }
 
-void hashmap_put2(HashMap *map, const char *key, int keylen, void *val);
+// Forward declarations for internal raw operations (no key copying)
+static void hashmap_put2_raw(HashMap *map, const char *key, int keylen, void *val);
+static HashEntry *get_or_insert_entry_raw(HashMap *map, char *key, int keylen);
 
 // Make room for new entires in a given hashmap by removing
 // tombstones and possibly extending the bucket size.
@@ -85,7 +87,7 @@ static void rehash(HashMap *map) {
     for (int ii = 0; ii < map->capacity; ii++) {
         HashEntry *ent = &map->buckets[ii];
         if (ent->key && ent->key != TOMBSTONE)
-            hashmap_put2(&map2, ent->key, ent->keylen, ent->val);
+            hashmap_put2_raw(&map2, ent->key, ent->keylen, ent->val);
     }
 
     assert(map2.used == nkeys);
@@ -117,7 +119,7 @@ static HashEntry *get_entry(HashMap *map, char *key, int keylen) {
     return NULL;
 }
 
-static HashEntry *get_or_insert_entry(HashMap *map, char *key, int keylen) {
+static HashEntry *get_or_insert_entry_raw(HashMap *map, char *key, int keylen) {
     if (!map->buckets) {
         map->buckets = calloc(INIT_SIZE, sizeof(HashEntry));
         if (!map->buckets) {
@@ -154,6 +156,28 @@ static HashEntry *get_or_insert_entry(HashMap *map, char *key, int keylen) {
     return NULL;
 }
 
+// Wrapper that makes an owned copy of string keys so the HashMap controls
+// their lifetime. Integer keys (keylen == -1) are stored as-is.
+static HashEntry *get_or_insert_entry(HashMap *map, const char *key, int keylen) {
+    char *owned_key = (char *)key;
+    if (keylen != -1) {
+        owned_key = malloc(keylen + 1);
+        if (!owned_key) {
+            fprintf(stderr, "FATAL: out of memory in HashMap put\n");
+            exit(1);
+        }
+        memcpy(owned_key, key, keylen);
+        owned_key[keylen] = '\0';
+    }
+
+    HashEntry *ent = get_or_insert_entry_raw(map, owned_key, keylen);
+    if (keylen != -1 && ent->key != owned_key) {
+        // Existing entry found; free our unused copy.
+        free(owned_key);
+    }
+    return ent;
+}
+
 void *hashmap_get2(HashMap *map, const char *key, int keylen) {
     HashEntry *ent = get_entry(map, (char*)key, keylen);
     return ent ? ent->val : NULL;
@@ -163,8 +187,13 @@ void *hashmap_get(HashMap *map, const char *key) {
     return hashmap_get2(map, key, strlen(key));
 }
 
+static void hashmap_put2_raw(HashMap *map, const char *key, int keylen, void *val) {
+    HashEntry *ent = get_or_insert_entry_raw(map, (char*)key, keylen);
+    ent->val = val;
+}
+
 void hashmap_put2(HashMap *map, const char *key, int keylen, void *val) {
-    HashEntry *ent = get_or_insert_entry(map, (char*)key, keylen);
+    HashEntry *ent = get_or_insert_entry(map, key, keylen);
     ent->val = val;
 }
 
@@ -172,10 +201,23 @@ void hashmap_put(HashMap *map, const char *key, void *val) {
     hashmap_put2(map, key, strlen(key), val);
 }
 
+// Borrowed key variants: the caller guarantees the key outlives the map.
+void hashmap_put2_borrowed(HashMap *map, const char *key, int keylen, void *val) {
+    HashEntry *ent = get_or_insert_entry_raw(map, (char*)key, keylen);
+    ent->val = val;
+}
+
+void hashmap_put_borrowed(HashMap *map, const char *key, void *val) {
+    hashmap_put2_borrowed(map, key, strlen(key), val);
+}
+
 void hashmap_delete2(HashMap *map, const char *key, int keylen) {
     HashEntry *ent = get_entry(map, (char*)key, keylen);
-    if (ent)
+    if (ent) {
+        if (ent->keylen != -1)
+            free(ent->key);
         ent->key = TOMBSTONE;
+    }
 }
 
 
@@ -262,6 +304,20 @@ void hashmap_delete_int(HashMap *map, long long key) {
         ent->key = TOMBSTONE;
 }
 
+void hashmap_deinit(HashMap *map) {
+    if (!map || !map->buckets)
+        return;
+    for (int i = 0; i < map->capacity; i++) {
+        HashEntry *ent = &map->buckets[i];
+        if (ent->key && ent->key != TOMBSTONE && ent->keylen != -1)
+            free(ent->key);
+    }
+    free(map->buckets);
+    map->buckets = NULL;
+    map->capacity = 0;
+    map->used = 0;
+}
+
 // Iterate over all entries in the map, calling the iterator function
 // for each valid entry. The iterator receives the key, keylen, value,
 // and user_data. If the iterator returns non-zero, iteration stops.
@@ -311,31 +367,57 @@ void hashmap_test(void) {
         exit(1);
     }
 
-    for (int i = 0; i < 5000; i++)
-        hashmap_put(map, format("key %d", i), (void *)(size_t)i);
-    for (int i2 = 1000; i2 < 2000; i2++)
-        hashmap_delete(map, format("key %d", i2));
-    for (int i3 = 1500; i3 < 1600; i3++)
-        hashmap_put(map, format("key %d", i3), (void *)(size_t)i3);
-    for (int i4 = 6000; i4 < 7000; i4++)
-        hashmap_put(map, format("key %d", i4), (void *)(size_t)i4);
+    for (int i = 0; i < 5000; i++) {
+        char *tmp = format("key %d", i);
+        hashmap_put(map, tmp, (void *)(size_t)i);
+        free(tmp);
+    }
+    for (int i2 = 1000; i2 < 2000; i2++) {
+        char *tmp = format("key %d", i2);
+        hashmap_delete(map, tmp);
+        free(tmp);
+    }
+    for (int i3 = 1500; i3 < 1600; i3++) {
+        char *tmp = format("key %d", i3);
+        hashmap_put(map, tmp, (void *)(size_t)i3);
+        free(tmp);
+    }
+    for (int i4 = 6000; i4 < 7000; i4++) {
+        char *tmp = format("key %d", i4);
+        hashmap_put(map, tmp, (void *)(size_t)i4);
+        free(tmp);
+    }
 
-    for (int i5 = 0; i5 < 1000; i5++)
-        assert((size_t)hashmap_get(map, format("key %d", i5)) == i5);
+    for (int i5 = 0; i5 < 1000; i5++) {
+        char *tmp = format("key %d", i5);
+        assert((size_t)hashmap_get(map, tmp) == i5);
+        free(tmp);
+    }
     for (int i6 = 1000; i6 < 1500; i6++)
         assert(hashmap_get(map, "no such key") == NULL);
-    for (int i7 = 1500; i7 < 1600; i7++)
-        assert((size_t)hashmap_get(map, format("key %d", i7)) == i7);
+    for (int i7 = 1500; i7 < 1600; i7++) {
+        char *tmp = format("key %d", i7);
+        assert((size_t)hashmap_get(map, tmp) == i7);
+        free(tmp);
+    }
     for (int i8 = 1600; i8 < 2000; i8++)
         assert(hashmap_get(map, "no such key") == NULL);
-    for (int i9 = 2000; i9 < 5000; i9++)
-        assert((size_t)hashmap_get(map, format("key %d", i9)) == i9);
+    for (int i9 = 2000; i9 < 5000; i9++) {
+        char *tmp = format("key %d", i9);
+        assert((size_t)hashmap_get(map, tmp) == i9);
+        free(tmp);
+    }
     for (int i0 = 5000; i0 < 6000; i0++)
         assert(hashmap_get(map, "no such key") == NULL);
-    for (int i10 = 6000; i10 < 7000; i10++)
-        hashmap_put(map, format("key %d", i10), (void *)(size_t)i10);
+    for (int i10 = 6000; i10 < 7000; i10++) {
+        char *tmp = format("key %d", i10);
+        hashmap_put(map, tmp, (void *)(size_t)i10);
+        free(tmp);
+    }
 
     assert(hashmap_get(map, "no such key") == NULL);
+    hashmap_deinit(map);
+    free(map);
     printf("OK\n");
 }
 
@@ -361,12 +443,12 @@ static int value_gt_100_predicate(char *key, int keylen, void *val, void *user_d
 void hashmap_test_iteration(void) {
     HashMap map = {};
     
-    // Add some test entries
-    hashmap_put(&map, "key1", (void *)(size_t)10);
-    hashmap_put(&map, "key2", (void *)(size_t)200);
-    hashmap_put(&map, "key3", (void *)(size_t)30);
-    hashmap_put(&map, "key4", (void *)(size_t)400);
-    hashmap_put(&map, "key5", (void *)(size_t)50);
+    // Add some test entries (borrowed string literals)
+    hashmap_put_borrowed(&map, "key1", (void *)(size_t)10);
+    hashmap_put_borrowed(&map, "key2", (void *)(size_t)200);
+    hashmap_put_borrowed(&map, "key3", (void *)(size_t)30);
+    hashmap_put_borrowed(&map, "key4", (void *)(size_t)400);
+    hashmap_put_borrowed(&map, "key5", (void *)(size_t)50);
     
     // Test 1: Count all entries using foreach
     int count = 0;
@@ -397,5 +479,6 @@ void hashmap_test_iteration(void) {
     // Test 6: Test with NULL iterator (should not crash)
     hashmap_foreach(&map, NULL, NULL);
     
+    hashmap_deinit(&map);
     printf("HashMap iteration tests: OK\n");
 }

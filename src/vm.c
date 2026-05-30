@@ -237,73 +237,39 @@ void cc_destroy(JCC *vm) {
         free(vm->shadow_stack);
     // return_buffer is part of data_seg, no need to free separately
 
-    // PLACEHOLDER: The hashmap key freeing below assumes every key is
-    // heap-allocated. If any key is an arena-allocated token string or a
-    // string literal, this causes an invalid-free. Ownership is not tracked.
-    // Free init_state HashMap (string keys, no values to free)
-    if (vm->init_state.buckets) {
-        for (int i = 0; i < vm->init_state.capacity; i++) {
-            HashEntry *entry = &vm->init_state.buckets[i];
-            // Free string keys (keylen != -1 means string key, not integer key)
-            if (entry->key && entry->key != (void *)-1 && entry->keylen != -1) {
-                free(entry->key);
-            }
-        }
-        free(vm->init_state.buckets);
-    }
+    // Free VM runtime HashMaps. Integer keys (keylen == -1) are skipped by
+    // hashmap_deinit. Heap-allocated values must be freed first.
+    // Free init_state HashMap (integer keys, no values to free)
+    hashmap_deinit(&vm->init_state);
 
-    // Free stack_ptrs HashMap (string keys + StackPtrInfo values)
+    // Free stack_ptrs HashMap (integer keys + StackPtrInfo values)
     if (vm->stack_ptrs.buckets) {
         for (int i = 0; i < vm->stack_ptrs.capacity; i++) {
             HashEntry *entry = &vm->stack_ptrs.buckets[i];
-            if (entry->key && entry->key != (void *)-1) {
-                // Free string key
-                if (entry->keylen != -1) {
-                    free(entry->key);
-                }
-                // Free StackPtrInfo value
-                if (entry->val) {
-                    free(entry->val);
-                }
-            }
+            if (entry->key && entry->key != (void *)-1 && entry->val)
+                free(entry->val);
         }
-        free(vm->stack_ptrs.buckets);
+        hashmap_deinit(&vm->stack_ptrs);
     }
 
-    // Free provenance HashMap (string keys + ProvenanceInfo values)
+    // Free provenance HashMap (integer keys + ProvenanceInfo values)
     if (vm->provenance.buckets) {
         for (int i = 0; i < vm->provenance.capacity; i++) {
             HashEntry *entry = &vm->provenance.buckets[i];
-            if (entry->key && entry->key != (void *)-1) {
-                // Free string key
-                if (entry->keylen != -1) {
-                    free(entry->key);
-                }
-                // Free ProvenanceInfo value
-                if (entry->val) {
-                    free(entry->val);
-                }
-            }
+            if (entry->key && entry->key != (void *)-1 && entry->val)
+                free(entry->val);
         }
-        free(vm->provenance.buckets);
+        hashmap_deinit(&vm->provenance);
     }
 
-    // Free stack_var_meta HashMap (string keys + StackVarMeta values)
+    // Free stack_var_meta HashMap (integer keys + StackVarMeta values)
     if (vm->stack_var_meta.buckets) {
         for (int i = 0; i < vm->stack_var_meta.capacity; i++) {
             HashEntry *entry = &vm->stack_var_meta.buckets[i];
-            if (entry->key && entry->key != (void *)-1) {
-                // Free string key
-                if (entry->keylen != -1) {
-                    free(entry->key);
-                }
-                // Free StackVarMeta value
-                if (entry->val) {
-                    free(entry->val);
-                }
-            }
+            if (entry->key && entry->key != (void *)-1 && entry->val)
+                free(entry->val);
         }
-        free(vm->stack_var_meta.buckets);
+        hashmap_deinit(&vm->stack_var_meta);
     }
 
     // Free scope variable lists
@@ -322,9 +288,9 @@ void cc_destroy(JCC *vm) {
 
     // Note: alloc_map and ptr_tags removed - now using sorted_allocs for heap tracking
 
-    // Free included_headers HashMap (string literal keys - not allocated, values are casted integers - no heap allocation)
-    if (vm->compiler.included_headers.buckets)
-        free(vm->compiler.included_headers.buckets);
+    // Free compiler HashMaps. Keys are owned by the HashMap (copied on
+    // insert); values are integers, arena-allocated, or freed separately.
+    hashmap_deinit(&vm->compiler.included_headers);
 
     // Free sorted allocation arrays
     if (vm->sorted_allocs.addresses)
@@ -332,20 +298,14 @@ void cc_destroy(JCC *vm) {
     if (vm->sorted_allocs.headers)
         free(vm->sorted_allocs.headers);
 
-    // Free macros HashMap (string keys from tokens - not allocated, Macro values are arena-allocated)
-    if (vm->compiler.macros.buckets) {
-        // Don't free individual Macro values - they're arena-allocated and will be freed by arena_destroy()
-        // Just free the HashMap buckets
-        free(vm->compiler.macros.buckets);
-    }
+    // Free macros HashMap (Macro values are arena-allocated; do not free them)
+    hashmap_deinit(&vm->compiler.macros);
 
-    // Free pragma_once HashMap (keys are file paths owned elsewhere)
-    if (vm->compiler.pragma_once.buckets)
-        free(vm->compiler.pragma_once.buckets);
+    // Free pragma_once HashMap
+    hashmap_deinit(&vm->compiler.pragma_once);
 
-    // Free include_guards HashMap (keys/values are arena or file path data)
-    if (vm->compiler.include_guards.buckets)
-        free(vm->compiler.include_guards.buckets);
+    // Free include_guards HashMap
+    hashmap_deinit(&vm->compiler.include_guards);
 
     // Free FFI table
     if (vm->compiler.ffi_table) {
@@ -387,17 +347,14 @@ void cc_destroy(JCC *vm) {
     if (vm->compiler.url_cache_dir)
         free(vm->compiler.url_cache_dir);
 
-    // Free include_cache HashMap
+    // Free include_cache HashMap (values are malloc'd path strings)
     if (vm->compiler.include_cache.buckets) {
         for (int i = 0; i < vm->compiler.include_cache.capacity; i++) {
             HashEntry *entry = &vm->compiler.include_cache.buckets[i];
-            if (entry->key && entry->key != (void *)-1 && entry->keylen != -1) {
-                // Key is filename (not owned here usually, but let's check usage)
-                // Value is path (malloc'd string)
-                if (entry->val) free(entry->val);
-            }
+            if (entry->key && entry->key != (void *)-1 && entry->val)
+                free(entry->val);
         }
-        free(vm->compiler.include_cache.buckets);
+        hashmap_deinit(&vm->compiler.include_cache);
     }
 
     // Free file buffers
@@ -408,11 +365,7 @@ void cc_destroy(JCC *vm) {
     }
 
     // Free URL to path map
-    if (vm->compiler.url_to_path.buckets) {
-        // Keys are cache paths (owned by file_buffers or similar?), Values are filenames (owned by tokens/files)
-        // We just free the buckets
-        free(vm->compiler.url_to_path.buckets);
-    }
+    hashmap_deinit(&vm->compiler.url_to_path);
 
     // Free watchpoint expressions
     for (int i = 0; i < MAX_WATCHPOINTS; i++) {

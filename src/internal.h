@@ -251,6 +251,14 @@ void hashmap_put2(HashMap *map, const char *key, int keylen, void *val);
 void hashmap_delete(HashMap *map, const char *key);
 void hashmap_delete2(HashMap *map, const char *key, int keylen);
 
+// Borrowed key HashMap functions (keys are NOT copied; caller must ensure lifetime)
+void hashmap_put2_borrowed(HashMap *map, const char *key, int keylen, void *val);
+void hashmap_put_borrowed(HashMap *map, const char *key, void *val);
+
+// Deinitialize a HashMap: free all owned string keys and the bucket array.
+// The HashMap struct itself is NOT freed.
+void hashmap_deinit(HashMap *map);
+
 // Integer key HashMap functions (avoid overhead of snprintf/strdup)
 void *hashmap_get_int(HashMap *map, long long key);
 void hashmap_put_int(HashMap *map, long long key, void *val);

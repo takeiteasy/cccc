@@ -2012,7 +2012,7 @@ static bool is_typename(JCC *vm, Token *tok) {
         };
 
         for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
-            hashmap_put(&map, kw[i], (void *)1);
+            hashmap_put_borrowed(&map, kw[i], (void *)1);
     }
 
     return hashmap_get2(&map, tok->loc, tok->len) || find_typedef(vm, tok);

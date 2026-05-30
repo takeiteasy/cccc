@@ -187,5 +187,6 @@ Obj *cc_link_progs(JCC *vm, Obj **progs, int count) {
         }
     }
     
+    hashmap_deinit(&symbol_map);
     return merged;
 }
