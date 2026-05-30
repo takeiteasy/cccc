@@ -1447,7 +1447,7 @@ static Token *handle_embed_directive(JCC *vm, Token *tok,
 
     // Apply limit parameter
     size_t embed_size = file_size;
-    if (has_limit && (long)file_size > limit) {
+    if (has_limit && file_size > (size_t)limit) {
         embed_size = (size_t)limit;
     }
 

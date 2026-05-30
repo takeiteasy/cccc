@@ -129,16 +129,17 @@ static int get_opcode_operand_count(int op) {
 
 // Helper: check if an opcode has an address operand that needs relocation
 static int opcode_has_address(int op) {
-    // PLACEHOLDER: JMPT embeds two addresses (table_addr and default_addr)
-    // that are not converted to relative offsets during save/load.
-    return (op == JMP || op == CALL || op == JZ3 || op == JNZ3);
+    return (op == JMP || op == CALL || op == JZ3 || op == JNZ3 || op == JMPT);
 }
 
-// Helper: get the operand index (0-based) that contains the address
+// Helper: get the operand index (0-based) that contains the address.
+// For JMPT, this returns the table_addr index (0); default_addr is handled
+// separately because JMPT has two address operands.
 static int get_address_operand_index(int op) {
     switch (op) {
         case JMP:
         case CALL:
+        case JMPT:
             return 0;  // First operand is address
         case JZ3:
         case JNZ3:
@@ -257,6 +258,18 @@ int cc_save_bytecode(JCC *vm, const char *path) {
                     if (vm->debug_vm) {
                         printf("Save: Converting address at [%lld+%d]: 0x%llx -> offset %lld\n",
                                i, addr_idx + 1, value, offset);
+                    }
+                }
+            }
+            // JMPT has a second address operand: default_addr at index 2
+            if (op == JMPT && i + 3 < num_instructions) {
+                long long value = text_copy[i + 3];
+                if (value >= text_base && value < text_end) {
+                    long long offset = (value - text_base) / sizeof(long long);
+                    text_copy[i + 3] = offset;
+                    if (vm->debug_vm) {
+                        printf("Save: Converting JMPT default_addr at [%lld+3]: 0x%llx -> offset %lld\n",
+                               i, value, offset);
                     }
                 }
             }
@@ -456,6 +469,18 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
                     if (vm->debug_vm) {
                         printf("Load: Converting offset at [%lld+%d]: %lld -> 0x%llx\n",
                                i, addr_idx + 1, offset, addr);
+                    }
+                }
+            }
+            // JMPT has a second address operand: default_addr at index 2
+            if (op == JMPT && i + 3 < num_instructions) {
+                long long offset = vm->text_seg[i + 3];
+                if (offset >= 0 && offset < num_instructions) {
+                    long long addr = (long long)(vm->text_seg + offset);
+                    vm->text_seg[i + 3] = addr;
+                    if (vm->debug_vm) {
+                        printf("Load: Converting JMPT default_addr at [%lld+3]: %lld -> 0x%llx\n",
+                               i, offset, addr);
                     }
                 }
             }

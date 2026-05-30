@@ -31,7 +31,8 @@ def detect_platform():
 
 
 def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_args):
-    test_name = test_file.name
+    tests_dir = Path(script_dir) / "tests"
+    test_name = str(test_file.relative_to(tests_dir))
 
     is_negative_test = False
     expects_runtime_error = False
@@ -190,7 +191,10 @@ def main():
 
     platform = detect_platform()
 
-    test_files = sorted(tests_dir.glob("test_*.c"))
+    test_files = sorted(
+        f for f in tests_dir.rglob("test_*.c")
+        if "failures" not in f.parts
+    )
 
     if args.match:
         test_files = [f for f in test_files if fnmatch.fnmatch(f.name, args.match)]
@@ -287,9 +291,10 @@ def main():
         try:
             result = future.result()
         except Exception as e:
+            tests_dir = Path(script_dir) / "tests"
             result = {
                 "idx": idx,
-                "test_name": test_files[idx].name,
+                "test_name": str(test_files[idx].relative_to(tests_dir)),
                 "exit_code": -1,
                 "status": "crashed",
                 "output": str(e),
@@ -451,6 +456,90 @@ def main():
         )
         return result.returncode == 42, result.stdout + result.stderr
 
+    def bytecode_save_load_regression():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bc = Path(tmpdir) / "test.jbc"
+            # Use a switch statement to exercise control flow opcodes
+            src = (
+                "int main(){\n"
+                "  int x = 2;\n"
+                "  int r;\n"
+                "  switch(x){\n"
+                "    case 1: r = 10; break;\n"
+                "    case 2: r = 42; break;\n"
+                "    case 3: r = 30; break;\n"
+                "    default: r = 0; break;\n"
+                "  }\n"
+                "  return r;\n"
+                "}\n"
+            )
+            saved = subprocess.run(
+                [str(jcc), "-o", str(bc), "-"],
+                input=src,
+                capture_output=True,
+                text=True,
+                cwd=script_dir,
+            )
+            if saved.returncode != 0:
+                return False, saved.stdout + saved.stderr
+            if not bc.exists():
+                return False, "bytecode file not created"
+            loaded = subprocess.run(
+                [str(jcc), str(bc)],
+                capture_output=True,
+                text=True,
+                cwd=script_dir,
+            )
+            return loaded.returncode == 42, loaded.stdout + loaded.stderr
+
+    def bytecode_jmpt_load_regression():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bc = Path(tmpdir) / "jmpt.jbc"
+            import struct
+
+            # Opcode values from jcc.h OPS_X enum
+            JMPT = 3
+            LI3 = 46
+            LEV3 = 58
+
+            # Build a minimal valid bytecode file with JMPT in dead code.
+            # main_offset=8 means VM starts at text_seg[8] (LI3 r0, 42; LEV3).
+            # JMPT at text_seg[1] is never executed but must be parsed by loader.
+            header = b"JCC\x00"
+            header += struct.pack("<i", 1)       # version
+            header += struct.pack("<I", 0)       # flags
+            header += struct.pack("<q", 96)      # text_size (12 qwords)
+            header += struct.pack("<q", 0)       # data_size
+            header += struct.pack("<q", 8)       # main_offset
+            header += struct.pack("<q", 0)       # data_reloc_count
+
+            text = b""
+            text += struct.pack("<q", 8)          # qword 0: main_offset
+            text += struct.pack("<q", JMPT)      # qword 1: JMPT opcode
+            text += struct.pack("<q", 6)          # qword 2: table_addr (relative offset)
+            text += struct.pack("<q", 1)          # qword 3: count
+            text += struct.pack("<q", 7)          # qword 4: default_addr (relative offset)
+            text += struct.pack("<q", 0)          # qword 5: padding
+            text += struct.pack("<q", 0)          # qword 6: jump table entry
+            text += struct.pack("<q", 0)          # qword 7: padding
+            text += struct.pack("<q", LI3)       # qword 8: LI3
+            text += struct.pack("<q", 0)          # qword 9: rd=0
+            text += struct.pack("<q", 42)         # qword 10: immediate=42
+            text += struct.pack("<q", LEV3)      # qword 11: LEV3
+
+            bc.write_bytes(header + text)
+
+            # Load and disassemble to verify the loader handles JMPT
+            loaded = subprocess.run(
+                [str(jcc), "-d", str(bc)],
+                capture_output=True,
+                text=True,
+                cwd=script_dir,
+            )
+            output = loaded.stdout + loaded.stderr
+            # Should not crash; exit code 0 means load succeeded
+            return loaded.returncode == 0 and "Disassembly" in output, output
+
     for extra in [
         run_extra_regression(
             "generated_hashmap_tombstones", hashmap_tombstone_regression
@@ -469,6 +558,12 @@ def main():
         ),
         run_extra_regression(
             "generated_optimizer_jump_target", optimizer_jump_target_regression
+        ),
+        run_extra_regression(
+            "generated_bytecode_save_load", bytecode_save_load_regression
+        ),
+        run_extra_regression(
+            "generated_bytecode_jmpt_load", bytecode_jmpt_load_regression
         ),
     ]:
         print_single_result(extra)

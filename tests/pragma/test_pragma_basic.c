@@ -21,5 +21,5 @@ int main(void) {
         return 2;
     }
 
-    return 0;
+    return 42;
 }
