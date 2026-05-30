@@ -48,7 +48,7 @@ static void *debugger_symbol_address(JCC *vm, DebugSymbol *sym) {
         long long offset = sym->offset;
         if ((vm->flags & JCC_STACK_CANARIES) && offset < 0)
             offset -= 1;
-        return (void *)((char *)vm->bp + offset);
+        return (void *)(vm->bp + offset);
     }
     return (void *)(vm->data_seg + sym->offset);
 }
@@ -1114,55 +1114,333 @@ DebugSymbol *cc_lookup_symbol(JCC *vm, const char *name) {
 // Condition Evaluator for Conditional Breakpoints
 // ============================================================================
 
-// Evaluate an AST node in the current debugger context
-// Returns the evaluated value, or 0 on error
-// PLACEHOLDER: Missing support for ND_CAST, ND_ASSIGN, ND_FUNCALL,
-// ND_MEMBER, ND_DEREF, ND_ADDR, ND_SHL, ND_SHR, ND_GT, ND_GE,
-// ND_COND, ND_COMMA. Conditional breakpoints are extremely limited.
-static long long eval_ast_node(JCC *vm, Node *node, int *error) {
+static long long eval_ast_node(JCC *vm, Node *node, int *error);
+
+static int debugger_find_ffi_function(JCC *vm, const char *name) {
+    if (!vm || !name)
+        return -1;
+
+    for (int i = 0; i < vm->compiler.ffi_count; i++) {
+        if (vm->compiler.ffi_table[i].name &&
+            strlen(vm->compiler.ffi_table[i].name) == strlen(name) &&
+            strncmp(vm->compiler.ffi_table[i].name, name, strlen(name)) == 0)
+            return i;
+    }
+
+    return -1;
+}
+
+static void debugger_add_condition_scope_var(VarScopeNode **vars, Obj *var) {
+    if (!var || !var->name || !*var->name)
+        return;
+
+    VarScopeNode *node = calloc(1, sizeof(VarScopeNode));
+    if (!node)
+        error("out of memory");
+    node->var = var;
+    node->name = var->name;
+    node->name_len = strlen(var->name);
+    node->next = *vars;
+    *vars = node;
+}
+
+static void debugger_free_condition_scope(VarScopeNode *vars) {
+    while (vars) {
+        VarScopeNode *next = vars->next;
+        free(vars);
+        vars = next;
+    }
+}
+
+static int debugger_type_is_scalar_integer(Type *ty) {
+    return ty && (is_integer(ty) || ty->kind == TY_PTR || ty->kind == TY_FUNC);
+}
+
+static long long debugger_cast_integer(long long val, Type *ty) {
+    if (!ty)
+        return val;
+    if (ty->kind == TY_BOOL)
+        return val != 0;
+    if (!is_integer(ty))
+        return val;
+
+    switch (ty->size) {
+    case 1:
+        return ty->is_unsigned ? (long long)(uint8_t)val : (long long)(int8_t)val;
+    case 2:
+        return ty->is_unsigned ? (long long)(uint16_t)val : (long long)(int16_t)val;
+    case 4:
+        return ty->is_unsigned ? (long long)(uint32_t)val : (long long)(int32_t)val;
+    default:
+        return val;
+    }
+}
+
+static long long debugger_read_scalar(void *addr, Type *ty) {
+    if (!addr)
+        return 0;
+    if (!ty)
+        return *(long long *)addr;
+
+    switch (ty->kind) {
+    case TY_BOOL:
+        return *(uint8_t *)addr != 0;
+    case TY_CHAR:
+        return ty->is_unsigned ? (long long)*(uint8_t *)addr
+                               : (long long)*(int8_t *)addr;
+    case TY_SHORT:
+        return ty->is_unsigned ? (long long)*(uint16_t *)addr
+                               : (long long)*(int16_t *)addr;
+    case TY_INT:
+    case TY_ENUM:
+        return ty->is_unsigned ? (long long)*(uint32_t *)addr
+                               : (long long)*(int32_t *)addr;
+    default:
+        return *(long long *)addr;
+    }
+}
+
+static void debugger_write_scalar(void *addr, Type *ty, long long val) {
+    if (!addr)
+        return;
+    if (!ty) {
+        *(long long *)addr = val;
+        return;
+    }
+
+    switch (ty->kind) {
+    case TY_BOOL:
+    case TY_CHAR:
+        *(uint8_t *)addr = (uint8_t)val;
+        return;
+    case TY_SHORT:
+        *(uint16_t *)addr = (uint16_t)val;
+        return;
+    case TY_INT:
+    case TY_ENUM:
+        *(uint32_t *)addr = (uint32_t)val;
+        return;
+    default:
+        *(long long *)addr = val;
+        return;
+    }
+}
+
+static long long eval_ast_addr(JCC *vm, Node *node, int *error) {
     if (!node) {
         *error = 1;
         return 0;
     }
 
     switch (node->kind) {
+    case ND_VAR: {
+        if (!node->var || !node->var->name) {
+            printf("Error: Variable has no name\n");
+            *error = 1;
+            return 0;
+        }
+
+        if (node->var->is_function)
+            return (long long)(vm->text_seg + node->var->code_addr);
+
+        DebugSymbol *sym = cc_lookup_symbol(vm, node->var->name);
+        if (sym)
+            return (long long)debugger_symbol_address(vm, sym);
+
+        if (!node->var->is_local)
+            return (long long)(vm->data_seg + node->var->offset);
+
+        printf("Error: Variable '%s' not found in current scope\n", node->var->name);
+        *error = 1;
+        return 0;
+    }
+    case ND_DEREF:
+        return eval_ast_node(vm, node->lhs, error);
+    case ND_MEMBER: {
+        long long base = eval_ast_addr(vm, node->lhs, error);
+        if (*error)
+            return 0;
+        return base + (node->member ? node->member->offset : 0);
+    }
+    case ND_COMMA:
+        (void)eval_ast_node(vm, node->lhs, error);
+        if (*error)
+            return 0;
+        return eval_ast_addr(vm, node->rhs, error);
+    default:
+        printf("Error: Expression is not an lvalue in condition\n");
+        *error = 1;
+        return 0;
+    }
+}
+
+static long long debugger_read_bitfield(Node *node, void *addr) {
+    Member *mem = node->member;
+    unsigned long long raw = debugger_read_scalar(addr, mem->ty);
+    unsigned long long mask = (1ULL << mem->bit_width) - 1;
+    unsigned long long val = (raw >> mem->bit_offset) & mask;
+
+    if (!mem->ty->is_unsigned && mem->bit_width < 64 &&
+        (val & (1ULL << (mem->bit_width - 1))))
+        val |= ~mask;
+
+    return (long long)val;
+}
+
+static void debugger_write_bitfield(Node *node, void *addr, long long val) {
+    Member *mem = node->member;
+    unsigned long long raw = debugger_read_scalar(addr, mem->ty);
+    unsigned long long mask = (1ULL << mem->bit_width) - 1;
+    raw &= ~(mask << mem->bit_offset);
+    raw |= (((unsigned long long)val & mask) << mem->bit_offset);
+    debugger_write_scalar(addr, mem->ty, (long long)raw);
+}
+
+static long long debugger_eval_direct_call(JCC *vm, Node *node, int *error) {
+    // PLACEHOLDER: support full debugger condition call ABI including floats,
+    // structs/unions, variadics, indirect calls, nested static links, and
+    // stack-passed arguments.
+    // Ticket: https://todo.sr.ht/~takeiteasy/jcc/113
+    if (!node->func_ty || node->func_ty->is_variadic) {
+        printf("Error: Variadic function calls in conditions are not supported\n");
+        *error = 1;
+        return 0;
+    }
+    if (!debugger_type_is_scalar_integer(node->ty)) {
+        printf("Error: Non-scalar function return in condition is not supported\n");
+        *error = 1;
+        return 0;
+    }
+
+    long long args[8];
+    int nargs = 0;
+    for (Node *arg = node->args; arg; arg = arg->next) {
+        if (nargs >= 8) {
+            printf("Error: Stack-passed function arguments in conditions are not supported\n");
+            *error = 1;
+            return 0;
+        }
+        if (!debugger_type_is_scalar_integer(arg->ty)) {
+            printf("Error: Non-integer function arguments in conditions are not supported\n");
+            *error = 1;
+            return 0;
+        }
+        args[nargs++] = eval_ast_node(vm, arg, error);
+        if (*error)
+            return 0;
+    }
+
+    if (node->lhs->kind == ND_VAR && node->lhs->var &&
+        node->lhs->var->is_function) {
+        Obj *fn = node->lhs->var;
+        int ffi_idx = debugger_find_ffi_function(vm, fn->name);
+        if (ffi_idx >= 0) {
+            ForeignFunc *ff = &vm->compiler.ffi_table[ffi_idx];
+            if (ff->is_variadic || ff->returns_double) {
+                printf("Error: Full FFI call ABI in conditions is not supported\n");
+                *error = 1;
+                return 0;
+            }
+            switch (nargs) {
+            case 0: return ((long long (*)(void))ff->func_ptr)();
+            case 1: return ((long long (*)(long long))ff->func_ptr)(args[0]);
+            case 2: return ((long long (*)(long long, long long))ff->func_ptr)(args[0], args[1]);
+            case 3: return ((long long (*)(long long, long long, long long))ff->func_ptr)(args[0], args[1], args[2]);
+            case 4: return ((long long (*)(long long, long long, long long, long long))ff->func_ptr)(args[0], args[1], args[2], args[3]);
+            case 5: return ((long long (*)(long long, long long, long long, long long, long long))ff->func_ptr)(args[0], args[1], args[2], args[3], args[4]);
+            case 6: return ((long long (*)(long long, long long, long long, long long, long long, long long))ff->func_ptr)(args[0], args[1], args[2], args[3], args[4], args[5]);
+            case 7: return ((long long (*)(long long, long long, long long, long long, long long, long long, long long))ff->func_ptr)(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
+            case 8: return ((long long (*)(long long, long long, long long, long long, long long, long long, long long, long long))ff->func_ptr)(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
+            }
+        }
+
+        if (fn->is_nested) {
+            printf("Error: Nested function calls in conditions are not supported\n");
+            *error = 1;
+            return 0;
+        }
+
+        long long saved_regs[32];
+        double saved_fregs[32];
+        memcpy(saved_regs, vm->regs, sizeof(saved_regs));
+        memcpy(saved_fregs, vm->fregs, sizeof(saved_fregs));
+        long long *saved_pc = vm->pc;
+        long long *saved_bp = vm->bp;
+        long long *saved_sp = vm->sp;
+        long long *saved_shadow_sp = vm->shadow_sp;
+        uint32_t saved_flags = vm->flags;
+        int saved_single_step = vm->dbg.single_step;
+        int saved_step_over = vm->dbg.step_over;
+        int saved_step_out = vm->dbg.step_out;
+        long long *saved_step_over_return_addr = vm->dbg.step_over_return_addr;
+        long long *saved_step_out_bp = vm->dbg.step_out_bp;
+        int saved_debugger_attached = vm->dbg.debugger_attached;
+
+        for (int i = 0; i < nargs; i++)
+            vm->regs[REG_A0 + i] = args[i];
+
+        vm->flags &= ~JCC_ENABLE_DEBUGGER;
+        vm->dbg.single_step = 0;
+        vm->dbg.step_over = 0;
+        vm->dbg.step_out = 0;
+        vm->dbg.debugger_attached = 0;
+        if (vm->flags & JCC_CFI)
+            *--vm->shadow_sp = 0;
+        *--vm->sp = 0;
+        vm->pc = vm->text_seg + fn->code_addr;
+        int rc = vm_eval(vm);
+        long long result = vm->regs[REG_A0];
+
+        memcpy(vm->regs, saved_regs, sizeof(saved_regs));
+        memcpy(vm->fregs, saved_fregs, sizeof(saved_fregs));
+        vm->pc = saved_pc;
+        vm->bp = saved_bp;
+        vm->sp = saved_sp;
+        vm->shadow_sp = saved_shadow_sp;
+        vm->flags = saved_flags;
+        vm->dbg.single_step = saved_single_step;
+        vm->dbg.step_over = saved_step_over;
+        vm->dbg.step_out = saved_step_out;
+        vm->dbg.step_over_return_addr = saved_step_over_return_addr;
+        vm->dbg.step_out_bp = saved_step_out_bp;
+        vm->dbg.debugger_attached = saved_debugger_attached;
+
+        if (rc < 0) {
+            printf("Error: Function call in condition failed\n");
+            *error = 1;
+            return 0;
+        }
+        return debugger_cast_integer(result, node->ty);
+    }
+
+    printf("Error: Indirect function calls in conditions are not supported\n");
+    *error = 1;
+    return 0;
+}
+
+// Evaluate an AST node in the current debugger context.
+static long long eval_ast_node(JCC *vm, Node *node, int *error) {
+    if (!node) {
+        *error = 1;
+        return 0;
+    }
+
+    add_type(vm, node);
+
+    switch (node->kind) {
         case ND_NUM:
             return node->val;
 
         case ND_VAR: {
-            // Look up variable in symbol table
-            if (!node->var || !node->var->name) {
-                printf("Error: Variable has no name\n");
-                *error = 1;
+            long long addr = eval_ast_addr(vm, node, error);
+            if (*error)
                 return 0;
-            }
-
-            DebugSymbol *sym = cc_lookup_symbol(vm, node->var->name);
-            if (!sym) {
-                printf("Error: Variable '%s' not found in current scope\n", node->var->name);
-                *error = 1;
-                return 0;
-            }
-
-            // Read value from memory
-            long long *addr;
-            if (sym->is_local) {
-                addr = (long long *)debugger_symbol_address(vm, sym);
-            } else {
-                addr = (long long *)debugger_symbol_address(vm, sym);
-            }
-
-            // Read based on type size
-            if (sym->ty) {
-                switch (sym->ty->size) {
-                    case 1: return (long long)*(char *)addr;
-                    case 2: return (long long)*(short *)addr;
-                    case 4: return (long long)*(int *)addr;
-                    case 8: return *addr;
-                    default: return *addr;
-                }
-            }
-            return *addr;
+            if (node->ty && (node->ty->kind == TY_ARRAY ||
+                             node->ty->kind == TY_STRUCT ||
+                             node->ty->kind == TY_UNION ||
+                             node->ty->kind == TY_FUNC))
+                return addr;
+            return debugger_read_scalar((void *)addr, node->ty);
         }
 
         case ND_ADD: {
@@ -1199,6 +1477,8 @@ static long long eval_ast_node(JCC *vm, Node *node, int *error) {
                 *error = 1;
                 return 0;
             }
+            if (node->ty && node->ty->is_unsigned)
+                return (long long)((uint64_t)left / (uint64_t)right);
             return left / right;
         }
 
@@ -1212,7 +1492,27 @@ static long long eval_ast_node(JCC *vm, Node *node, int *error) {
                 *error = 1;
                 return 0;
             }
+            if (node->ty && node->ty->is_unsigned)
+                return (long long)((uint64_t)left % (uint64_t)right);
             return left % right;
+        }
+
+        case ND_SHL: {
+            long long left = eval_ast_node(vm, node->lhs, error);
+            if (*error) return 0;
+            long long right = eval_ast_node(vm, node->rhs, error);
+            if (*error) return 0;
+            return left << right;
+        }
+
+        case ND_SHR: {
+            long long left = eval_ast_node(vm, node->lhs, error);
+            if (*error) return 0;
+            long long right = eval_ast_node(vm, node->rhs, error);
+            if (*error) return 0;
+            if (node->lhs && node->lhs->ty && node->lhs->ty->is_unsigned)
+                return (long long)((uint64_t)left >> right);
+            return left >> right;
         }
 
         case ND_EQ: {
@@ -1236,6 +1536,8 @@ static long long eval_ast_node(JCC *vm, Node *node, int *error) {
             if (*error) return 0;
             long long right = eval_ast_node(vm, node->rhs, error);
             if (*error) return 0;
+            if (node->lhs && node->lhs->ty && node->lhs->ty->is_unsigned)
+                return (uint64_t)left < (uint64_t)right;
             return left < right;
         }
 
@@ -1244,6 +1546,8 @@ static long long eval_ast_node(JCC *vm, Node *node, int *error) {
             if (*error) return 0;
             long long right = eval_ast_node(vm, node->rhs, error);
             if (*error) return 0;
+            if (node->lhs && node->lhs->ty && node->lhs->ty->is_unsigned)
+                return (uint64_t)left <= (uint64_t)right;
             return left <= right;
         }
 
@@ -1277,6 +1581,12 @@ static long long eval_ast_node(JCC *vm, Node *node, int *error) {
             return !val;
         }
 
+        case ND_BITNOT: {
+            long long val = eval_ast_node(vm, node->lhs, error);
+            if (*error) return 0;
+            return ~val;
+        }
+
         case ND_BITAND: {
             long long left = eval_ast_node(vm, node->lhs, error);
             if (*error) return 0;
@@ -1300,6 +1610,64 @@ static long long eval_ast_node(JCC *vm, Node *node, int *error) {
             if (*error) return 0;
             return left ^ right;
         }
+
+        case ND_CAST: {
+            long long val = eval_ast_node(vm, node->lhs, error);
+            if (*error) return 0;
+            return debugger_cast_integer(val, node->ty);
+        }
+
+        case ND_ADDR:
+            return eval_ast_addr(vm, node->lhs, error);
+
+        case ND_DEREF: {
+            long long addr = eval_ast_node(vm, node->lhs, error);
+            if (*error) return 0;
+            if (node->ty && (node->ty->kind == TY_ARRAY ||
+                             node->ty->kind == TY_STRUCT ||
+                             node->ty->kind == TY_UNION))
+                return addr;
+            return debugger_read_scalar((void *)addr, node->ty);
+        }
+
+        case ND_MEMBER: {
+            long long addr = eval_ast_addr(vm, node, error);
+            if (*error) return 0;
+            if (node->member && node->member->is_bitfield)
+                return debugger_read_bitfield(node, (void *)addr);
+            if (node->ty && (node->ty->kind == TY_ARRAY ||
+                             node->ty->kind == TY_STRUCT ||
+                             node->ty->kind == TY_UNION))
+                return addr;
+            return debugger_read_scalar((void *)addr, node->ty);
+        }
+
+        case ND_ASSIGN: {
+            long long val = eval_ast_node(vm, node->rhs, error);
+            if (*error) return 0;
+            long long addr = eval_ast_addr(vm, node->lhs, error);
+            if (*error) return 0;
+            if (node->lhs->kind == ND_MEMBER && node->lhs->member &&
+                node->lhs->member->is_bitfield)
+                debugger_write_bitfield(node->lhs, (void *)addr, val);
+            else
+                debugger_write_scalar((void *)addr, node->lhs->ty, val);
+            return debugger_cast_integer(val, node->ty);
+        }
+
+        case ND_COND: {
+            long long cond = eval_ast_node(vm, node->cond, error);
+            if (*error) return 0;
+            return eval_ast_node(vm, cond ? node->then : node->els, error);
+        }
+
+        case ND_COMMA:
+            (void)eval_ast_node(vm, node->lhs, error);
+            if (*error) return 0;
+            return eval_ast_node(vm, node->rhs, error);
+
+        case ND_FUNCALL:
+            return debugger_eval_direct_call(vm, node, error);
 
         default:
             printf("Error: Unsupported node kind %d in condition\n", node->kind);
@@ -1334,10 +1702,25 @@ static int debugger_eval_condition(JCC *vm, const char *condition_str) {
         printf("Error: Failed to tokenize condition\n");
         return 0;
     }
+    convert_pp_tokens(vm, tok);
 
     // Parse as expression
+    Obj *current_fn = debugger_current_function(vm);
+    Scope condition_scope = {0};
+    for (Obj *obj = vm->compiler.globals; obj; obj = obj->next)
+        debugger_add_condition_scope_var(&condition_scope.vars, obj);
+    if (current_fn) {
+        for (Obj *obj = current_fn->locals; obj; obj = obj->next)
+            debugger_add_condition_scope_var(&condition_scope.vars, obj);
+    }
+
+    Scope *saved_scope = vm->compiler.scope;
+    condition_scope.next = saved_scope;
+    vm->compiler.scope = &condition_scope;
     Token *rest = NULL;
     Node *expr = cc_parse_expr(vm, &rest, tok);
+    vm->compiler.scope = saved_scope;
+    debugger_free_condition_scope(condition_scope.vars);
     if (!expr) {
         printf("Error: Failed to parse condition expression\n");
         return 0;

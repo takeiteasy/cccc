@@ -540,6 +540,67 @@ def main():
             # Should not crash; exit code 0 means load succeeded
             return loaded.returncode == 0 and "Disassembly" in output, output
 
+    def run_debugger_script(src, commands):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfile = Path(tmpdir) / "debugger_condition.c"
+            cfile.write_text(src)
+            result = subprocess.run(
+                [str(jcc), "-g", "-I./include", str(cfile)],
+                input=commands,
+                capture_output=True,
+                text=True,
+                cwd=script_dir,
+            )
+            return result.returncode, result.stdout + result.stderr
+
+    def debugger_condition_expr_regression():
+        src = (
+            "struct S { int x; };\n"
+            "struct S s = {21};\n"
+            "int *p = &s.x;\n"
+            "int g;\n"
+            "int main(void) { return g ? 42 : 1; }\n"
+        )
+        commands = (
+            "break main if (g = ((s.x << 1) == 42 && *p == 21 && "
+            "&s.x != 0 && (s.x > 20 ? 1 : 0) && (0, s.x >= 21)), 0)\n"
+            "continue\n"
+        )
+        code, output = run_debugger_script(src, commands)
+        return code == 42, output
+
+    def debugger_condition_assignment_regression():
+        src = "int g; int main(void) { return g ? 42 : 1; }\n"
+        code, output = run_debugger_script(
+            src, "break main if (g = 1, 0)\ncontinue\n"
+        )
+        return code == 42, output
+
+    def debugger_condition_funcall_regression():
+        src = (
+            "int g;\n"
+            "int answer(int x) { return x + 1; }\n"
+            "int main(void) { return g ? 42 : 1; }\n"
+        )
+        code, output = run_debugger_script(
+            src, "break main if (g = (answer(41) == 42), 0)\ncontinue\n"
+        )
+        return code == 42, output
+
+    def debugger_condition_full_abi_reject_regression():
+        src = (
+            "int takes_double(double x) { return 1; }\n"
+            "int main(void) { return 42; }\n"
+        )
+        code, output = run_debugger_script(
+            src, "break main if takes_double(1.0)\ncontinue\n"
+        )
+        return (
+            code == 42
+            and "Non-integer function arguments in conditions are not supported"
+            in output
+        ), output
+
     for extra in [
         run_extra_regression(
             "generated_hashmap_tombstones", hashmap_tombstone_regression
@@ -564,6 +625,22 @@ def main():
         ),
         run_extra_regression(
             "generated_bytecode_jmpt_load", bytecode_jmpt_load_regression
+        ),
+        run_extra_regression(
+            "generated_debugger_condition_expr",
+            debugger_condition_expr_regression,
+        ),
+        run_extra_regression(
+            "generated_debugger_condition_assignment",
+            debugger_condition_assignment_regression,
+        ),
+        run_extra_regression(
+            "generated_debugger_condition_funcall",
+            debugger_condition_funcall_regression,
+        ),
+        run_extra_regression(
+            "generated_debugger_condition_full_abi_reject",
+            debugger_condition_full_abi_reject_regression,
         ),
     ]:
         print_single_result(extra)

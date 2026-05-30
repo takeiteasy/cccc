@@ -14,9 +14,10 @@ When enabled, the debugger provides a powerful GDB-like interface for controllin
     - By file and line number (`break test.c:42`).
     - At the entry point of a function (`break main`).
     - At a raw bytecode offset (legacy support).
-- **Conditional Breakpoints**: Set breakpoints that only trigger when a specific condition is met. The expression can use local and global variables, arithmetic, comparison, and logical operators.
+- **Conditional Breakpoints**: Set breakpoints that only trigger when a specific condition is met. The expression can use local and global variables, arithmetic, comparison, logical operators, casts, assignments, member and pointer access, ternary expressions, comma expressions, and scalar integer/pointer direct function calls. Assignments and supported function calls are evaluated normally and can change program state.
     - Syntax: `break <location> if <expression>`
     - Example: `break 22 if x > 5`
+    - Full function-call ABI support is not yet available in conditions: floating-point arguments or returns, struct/union returns, variadic calls, indirect calls, nested-function static links, and stack-passed arguments are rejected with diagnostics.
 - **Watchpoints (Data Breakpoints)**: Break execution when memory is read or written. Watchpoints can be set on variables by name or on raw memory addresses.
     - `watch <var|addr>`: Break on write.
     - `rwatch <addr>`: Break on read.
