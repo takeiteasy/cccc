@@ -339,6 +339,8 @@ char *serialize_node_to_source(JCC *vm, Node *node);
 
 void cc_dump_ast(FILE *f, Obj *prog, int verbose);
 void cc_dump_ast_json(FILE *f, Obj *prog, int verbose);
+void cc_dump_node(FILE *f, Node *node, int verbose);      // single-node dump (used by reflect.c)
+const char *cc_node_kind_name(NodeKind kind);             // kind→string (used by reflect.c)
 
 //
 // json.c

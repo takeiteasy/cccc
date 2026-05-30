@@ -435,6 +435,18 @@ void cc_dump_ast(FILE *f, Obj *prog, int verbose) {
         dump_obj(f, obj, verbose);
 }
 
+// Public single-node entry point used by the reflection dump API (#58)
+void cc_dump_node(FILE *f, Node *node, int verbose) {
+    if (!f || !node)
+        return;
+    dump_node(f, node, 0, verbose);
+}
+
+// Public access to the kind-name table used by the AST generator (#58)
+const char *cc_node_kind_name(NodeKind kind) {
+    return node_kind_name(kind);
+}
+
 // ========================================================================
 // JSON AST dump
 // ========================================================================
