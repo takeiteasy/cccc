@@ -462,66 +462,61 @@ static void serialize_global_var_json(FILE *f, Obj *var, int indent) {
     fprintf(f, "}");
 }
 
-// Helper to check if type already seen
-static bool type_seen(Type *ty, Type **seen_types, int seen_types_count) {
-    for (int i = 0; i < seen_types_count; i++)
-        if (seen_types[i] == ty) 
+typedef struct {
+    Type **data;
+    int len;
+    int cap;
+} TypeVec;
+
+static bool type_vec_contains(TypeVec *vec, Type *ty) {
+    for (int i = 0; i < vec->len; i++)
+        if (vec->data[i] == ty)
             return true;
     return false;
 }
 
-// Helper to mark type as seen
-static void mark_type_seen(Type *ty, Type ***seen_types_ptr, int *seen_types_count_ptr, int *seen_types_capacity_ptr) {
-    Type **seen_types = *seen_types_ptr;
-    int seen_types_count = *seen_types_count_ptr;
-    int seen_types_capacity = *seen_types_capacity_ptr;
-
-    if (seen_types_count >= seen_types_capacity) {
-        seen_types_capacity = seen_types_capacity == 0 ? 16 : seen_types_capacity * 2;
-        seen_types = realloc(seen_types, sizeof(Type*) * seen_types_capacity);
-        *seen_types_ptr = seen_types;
-        *seen_types_capacity_ptr = seen_types_capacity;
+static void type_vec_push(TypeVec *vec, Type *ty) {
+    if (vec->len >= vec->cap) {
+        vec->cap = vec->cap == 0 ? 16 : vec->cap * 2;
+        vec->data = realloc(vec->data, sizeof(Type *) * vec->cap);
+        if (!vec->data)
+            error("out of memory");
     }
-    seen_types[seen_types_count] = ty;
-    *seen_types_count_ptr = seen_types_count + 1;
+    vec->data[vec->len++] = ty;
 }
 
 // Helper to recursively collect struct/union/enum types
-// PLACEHOLDER: This function mutates ty->origin to build temporary linked
-// lists, corrupting the type identity graph used by same_type_or_origin.
-static void collect_type_recursive(Type *ty, Type **seen_types, int *seen_types_count, int *seen_types_capacity,
-                                   Type **structs, Type **unions, Type **enums) {
+static void collect_type_recursive(Type *ty, TypeVec *seen_types,
+                                   TypeVec *structs, TypeVec *unions,
+                                   TypeVec *enums) {
     if (!ty) return;
 
     // Mark this type if it's a struct/union/enum
-    if (ty->kind == TY_STRUCT && !type_seen(ty, seen_types, *seen_types_count)) {
-        mark_type_seen(ty, &seen_types, seen_types_count, seen_types_capacity);
-        ty->origin = *structs;
-        *structs = ty;
-    } else if (ty->kind == TY_UNION && !type_seen(ty, seen_types, *seen_types_count)) {
-        mark_type_seen(ty, &seen_types, seen_types_count, seen_types_capacity);
-        ty->origin = *unions;
-        *unions = ty;
-    } else if (ty->kind == TY_ENUM && !type_seen(ty, seen_types, *seen_types_count)) {
-        mark_type_seen(ty, &seen_types, seen_types_count, seen_types_capacity);
-        ty->origin = *enums;
-        *enums = ty;
+    if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_ENUM) &&
+        !type_vec_contains(seen_types, ty)) {
+        type_vec_push(seen_types, ty);
+        if (ty->kind == TY_STRUCT)
+            type_vec_push(structs, ty);
+        else if (ty->kind == TY_UNION)
+            type_vec_push(unions, ty);
+        else
+            type_vec_push(enums, ty);
     }
 
     // Recursively collect from base type (pointers, arrays)
     if (ty->base) 
-        collect_type_recursive(ty->base, seen_types, seen_types_count, seen_types_capacity, structs, unions, enums);
+        collect_type_recursive(ty->base, seen_types, structs, unions, enums);
 
     // Recursively collect from struct/union members
     if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) && ty->members)
         for (Member *m = ty->members; m; m = m->next) 
-            collect_type_recursive(m->ty, seen_types, seen_types_count, seen_types_capacity, structs, unions, enums);
+            collect_type_recursive(m->ty, seen_types, structs, unions, enums);
 
     // Recursively collect from function return type and parameters
     if (ty->kind == TY_FUNC) {
-        collect_type_recursive(ty->return_ty, seen_types, seen_types_count, seen_types_capacity, structs, unions, enums);
+        collect_type_recursive(ty->return_ty, seen_types, structs, unions, enums);
         for (Type *p = ty->params; p; p = p->next) 
-            collect_type_recursive(p, seen_types, seen_types_count, seen_types_capacity, structs, unions, enums);
+            collect_type_recursive(p, seen_types, structs, unions, enums);
     }
 }
 
@@ -530,22 +525,16 @@ void cc_output_json(FILE *f, Obj *prog) {
     if (!f || !prog) 
         return;
 
-    // Track unique struct/union/enum types
-    // We'll use a simple array to track types we've already output
-    Type **seen_types = NULL;
-    int seen_types_count = 0;
-    int seen_types_capacity = 0;
+    TypeVec seen_types = {};
+    TypeVec structs = {};
+    TypeVec unions = {};
+    TypeVec enums = {};
 
     // Start JSON output
     fprintf(f, "{\n");
 
-    // First pass: collect unique struct/union/enum types
-    Type *structs = NULL;
-    Type *unions = NULL;
-    Type *enums = NULL;
-
     for (Obj *obj = prog; obj; obj = obj->next) 
-        collect_type_recursive(obj->ty, seen_types, &seen_types_count, &seen_types_capacity, &structs, &unions, &enums);
+        collect_type_recursive(obj->ty, &seen_types, &structs, &unions, &enums);
 
     // Output functions
     print_indent(f, 1);
@@ -567,11 +556,11 @@ void cc_output_json(FILE *f, Obj *prog) {
     print_indent(f, 1);
     fprintf(f, "\"structs\": [\n");
     first = true;
-    for (Type *st = structs; st; st = st->origin) {
+    for (int i = 0; i < structs.len; i++) {
         if (!first) 
             fprintf(f, ",\n");
         first = false;
-        serialize_aggregate_json(f, st, 2, "struct");
+        serialize_aggregate_json(f, structs.data[i], 2, "struct");
     }
     fprintf(f, "\n");
     print_indent(f, 1);
@@ -581,11 +570,11 @@ void cc_output_json(FILE *f, Obj *prog) {
     print_indent(f, 1);
     fprintf(f, "\"unions\": [\n");
     first = true;
-    for (Type *un = unions; un; un = un->origin) {
+    for (int i = 0; i < unions.len; i++) {
         if (!first) 
             fprintf(f, ",\n");
         first = false;
-        serialize_aggregate_json(f, un, 2, "union");
+        serialize_aggregate_json(f, unions.data[i], 2, "union");
     }
     fprintf(f, "\n");
     print_indent(f, 1);
@@ -595,11 +584,11 @@ void cc_output_json(FILE *f, Obj *prog) {
     print_indent(f, 1);
     fprintf(f, "\"enums\": [\n");
     first = true;
-    for (Type *en = enums; en; en = en->origin) {
+    for (int i = 0; i < enums.len; i++) {
         if (!first) 
             fprintf(f, ",\n");
         first = false;
-        serialize_enum_json(f, en, 2);
+        serialize_enum_json(f, enums.data[i], 2);
     }
     fprintf(f, "\n");
     print_indent(f, 1);
@@ -624,8 +613,10 @@ void cc_output_json(FILE *f, Obj *prog) {
     fprintf(f, "}\n");
 
     // Cleanup
-    if (seen_types)
-        free(seen_types);
+    free(seen_types.data);
+    free(structs.data);
+    free(unions.data);
+    free(enums.data);
 }
 
 void cc_output_source_map_json(JCC *vm, FILE *f) {

@@ -62,7 +62,7 @@ Pattern-matches small instruction sequences and removes redundancies.
 | `MOV3 ra, ra` | NOP | Self-move (no effect) |
 | `LI3 rx, A; LI3 rx, B` | `LI3 rx, B` | Dead store (first overwritten) |
 | `PSH3 rx; POP3 rx` | NOP | Push/pop same register |
-| `JMP next_instr` | NOP | Jump to fall-through |
+| `JMP next_instr` | NOP | Jump to fall-through when the `JMP` is not itself a control-flow target |
 
 ---
 

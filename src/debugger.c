@@ -362,6 +362,9 @@ static int disassemble_instruction(long long *pc, long long *text_seg, long long
         case STR_D:
         case FLDR:
         case FSTR:
+        case FLDR_F32:
+        case FSTR_F32:
+        case FROUND_F32:
             if (pc + 1 < text_end) {
                 int rd = (int)(pc[1] & 0xFF);
                 int rs = (int)((pc[1] >> 8) & 0xFF);

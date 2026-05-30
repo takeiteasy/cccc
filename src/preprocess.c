@@ -226,16 +226,18 @@ static Hideset *new_hideset(JCC *vm, char *name) {
     return hs;
 }
 
+static bool hideset_contains(Hideset *hs, char *s, int len);
+
 static Hideset *hideset_union(JCC *vm, Hideset *hs1, Hideset *hs2) {
-    // PLACEHOLDER: Unconditionally copies all of hs1 then appends hs2,
-    // creating duplicates if names exist in both. This grows without
-    // bound during deep macro expansion.
     Hideset head = {};
     Hideset *cur = &head;
 
     for (; hs1; hs1 = hs1->next)
-        cur = cur->next = new_hideset(vm, hs1->name);
-    cur->next = hs2;
+        if (!hideset_contains(head.next, hs1->name, strlen(hs1->name)))
+            cur = cur->next = new_hideset(vm, hs1->name);
+    for (; hs2; hs2 = hs2->next)
+        if (!hideset_contains(head.next, hs2->name, strlen(hs2->name)))
+            cur = cur->next = new_hideset(vm, hs2->name);
     return head.next;
 }
 

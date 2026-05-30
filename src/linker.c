@@ -100,12 +100,16 @@ Obj *cc_link_progs(JCC *vm, Obj **progs, int count) {
         vm->compiler.link_progs[i] = progs[i];
     }
     
-    // Build a hashmap to detect duplicate symbols
-    // We'll prefer definitions over declarations
+    // Build a hashmap to detect duplicate external-linkage symbols.
+    // Internal-linkage objects are file-local and must not be canonicalized by
+    // name across translation units.
     HashMap symbol_map = {0};
     // First pass: collect all symbols, preferring definitions
     for (int i = 0; i < count; i++) {
         for (Obj *obj = progs[i]; obj; obj = obj->next) {
+            if (obj->is_static)
+                continue;
+
             Obj *existing = hashmap_get(&symbol_map, obj->name);
             
             bool obj_is_def = obj->is_definition || 
@@ -121,9 +125,6 @@ Obj *cc_link_progs(JCC *vm, Obj **progs, int count) {
                                       (existing->is_function && existing->body) ||
                                       (!existing->is_function && existing->init_data);
                 
-                // PLACEHOLDER: Does not check linkage. Two separate files
-                // each with `static void foo(void) {}` are incorrectly rejected.
-                // Tentative definitions (e.g., `int x;`) may also be rejected.
                 if (obj_is_def && existing_is_def) {
                     // Both are definitions - error
                     error_tok(vm, obj->tok, "redefinition of '%s'", obj->name);
@@ -155,7 +156,7 @@ Obj *cc_link_progs(JCC *vm, Obj **progs, int count) {
             // Save next pointer before potentially modifying obj
             Obj *next_obj = obj->next;
             
-            Obj *canonical = hashmap_get(&symbol_map, obj->name);
+            Obj *canonical = obj->is_static ? obj : hashmap_get(&symbol_map, obj->name);
             
             // If this is not the canonical version, update it to reference the canonical one
             if (canonical && canonical != obj) {

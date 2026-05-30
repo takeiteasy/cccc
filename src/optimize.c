@@ -83,6 +83,47 @@ static int get_instr_size(int op) {
     return 1;
 }
 
+static void mark_text_target(JCC *vm, bool *targets, long long *start,
+                             long long *end, long long target) {
+    long long *pc = NULL;
+
+    if (target >= (long long)vm->text_seg &&
+        target <= (long long)end) {
+        pc = (long long *)target;
+    } else if (target % (long long)sizeof(long long) == 0) {
+        long long index = target / (long long)sizeof(long long);
+        pc = vm->text_seg + index;
+    }
+
+    if (pc >= start && pc < end)
+        targets[pc - start] = true;
+}
+
+static bool *build_control_flow_targets(JCC *vm, long long *start,
+                                        long long *end) {
+    size_t count = (size_t)(end - start + 1);
+    bool *targets = calloc(count, sizeof(bool));
+    if (!targets)
+        error("out of memory");
+
+    for (long long *pc = start; pc < end; ) {
+        int op = get_opcode(pc);
+        int size = get_instr_size(op);
+
+        if (op == JMP || op == CALL) {
+            mark_text_target(vm, targets, start, end, pc[1]);
+        } else if (op == JZ3 || op == JNZ3) {
+            mark_text_target(vm, targets, start, end, pc[2]);
+        } else if (op == LTA3) {
+            mark_text_target(vm, targets, start, end, pc[2]);
+        }
+
+        pc += size;
+    }
+
+    return targets;
+}
+
 // ========== Pass 1: Constant Folding ==========
 //
 // Fold arithmetic operations on constant values at compile time.
@@ -365,6 +406,7 @@ static void opt_peephole(JCC *vm) {
     long long *start = vm->text_seg + 1;  // Skip entry point
     long long *end = vm->text_ptr;
     int opt_count = 0;
+    bool *control_flow_targets = build_control_flow_targets(vm, start, end);
 
     // Pattern 1: MOV3/FMOV3 ra, ra -> NOP (self-move)
     for (long long *pc = start; pc < end; ) {
@@ -427,8 +469,6 @@ static void opt_peephole(JCC *vm) {
     }
 
     // Pattern 4: JMP to next instruction -> NOP
-    // PLACEHOLDER: Converting JMP to NOP without verifying that no other
-    // jump targets this instruction breaks control flow.
     for (long long *pc = start; pc < end; ) {
         int op = get_opcode(pc);
         int size = get_instr_size(op);
@@ -436,7 +476,8 @@ static void opt_peephole(JCC *vm) {
         if (op == JMP) {
             long long target = pc[1];
             long long *next = pc + size;
-            if (target == (long long)next) {
+            if (!control_flow_targets[pc - start] &&
+                target == (long long)next) {
                 // Jump to the very next instruction - useless
                 nop_2word(pc);
                 opt_count++;
@@ -451,6 +492,8 @@ static void opt_peephole(JCC *vm) {
     if (vm->debug_vm && opt_count > 0) {
         printf("[opt] peephole: removed %d redundant instructions\n", opt_count);
     }
+
+    free(control_flow_targets);
 }
 
 // ========== Pass 3: Dead Code Elimination ==========

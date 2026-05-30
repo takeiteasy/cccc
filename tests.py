@@ -8,6 +8,7 @@ Supports parallel execution with -j/--jobs.
 import argparse
 import concurrent.futures
 import fnmatch
+import json
 import os
 import re
 import subprocess
@@ -375,12 +376,99 @@ def main():
             output = loaded.stdout + loaded.stderr
             return loaded.returncode != 0 and "unknown opcode" in output, output
 
+    def static_duplicate_regression():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            a = Path(tmpdir) / "a.c"
+            b = Path(tmpdir) / "b.c"
+            main = Path(tmpdir) / "main.c"
+            a.write_text("static int same(void){return 10;} int a(void){return same();}\n")
+            b.write_text("static int same(void){return 32;} int b(void){return same();}\n")
+            main.write_text("int a(void); int b(void); int main(){return a()+b();}\n")
+            result = subprocess.run(
+                [str(jcc), str(a), str(b), str(main)],
+                capture_output=True,
+                text=True,
+                cwd=script_dir,
+            )
+            return result.returncode == 42, result.stdout + result.stderr
+
+    def json_nested_struct_regression():
+        src = (
+            "struct Inner { int x; };\n"
+            "struct Outer { struct Inner in; union U { int i; float f; } u; };\n"
+            "struct Outer make_outer(struct Inner in);\n"
+        )
+        result = subprocess.run(
+            [str(jcc), "--json", "-"],
+            input=src,
+            capture_output=True,
+            text=True,
+            cwd=script_dir,
+        )
+        output = result.stdout + result.stderr
+        if result.returncode != 0:
+            return False, output
+        try:
+            parsed = json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            return False, f"{e}\n{output}"
+        return (
+            "structs" in parsed
+            and "unions" in parsed
+            and len(parsed["structs"]) >= 2
+            and len(parsed["unions"]) >= 1
+        ), output
+
+    def macro_hideset_stress_regression():
+        src = "#define A(x) B(x)\n#define B(x) A(x)\nA(42)\nint main(){return 42;}\n"
+        result = subprocess.run(
+            [str(jcc), "-E", "-"],
+            input=src,
+            capture_output=True,
+            text=True,
+            cwd=script_dir,
+        )
+        return result.returncode == 0 and "42" in result.stdout, result.stdout + result.stderr
+
+    def optimizer_jump_target_regression():
+        src = (
+            "int main(){\n"
+            "  int x = 0;\n"
+            "  goto hop;\n"
+            "hop:\n"
+            "  goto done;\n"
+            "done:\n"
+            "  x = 42;\n"
+            "  return x;\n"
+            "}\n"
+        )
+        result = subprocess.run(
+            [str(jcc), "--optimize=2", "-"],
+            input=src,
+            capture_output=True,
+            text=True,
+            cwd=script_dir,
+        )
+        return result.returncode == 42, result.stdout + result.stderr
+
     for extra in [
         run_extra_regression(
             "generated_hashmap_tombstones", hashmap_tombstone_regression
         ),
         run_extra_regression(
             "generated_unknown_opcode_bytecode", unknown_opcode_regression
+        ),
+        run_extra_regression(
+            "generated_static_duplicate_symbols", static_duplicate_regression
+        ),
+        run_extra_regression(
+            "generated_json_nested_structs", json_nested_struct_regression
+        ),
+        run_extra_regression(
+            "generated_macro_hideset_stress", macro_hideset_stress_regression
+        ),
+        run_extra_regression(
+            "generated_optimizer_jump_target", optimizer_jump_target_regression
         ),
     ]:
         print_single_result(extra)

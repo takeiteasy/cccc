@@ -160,7 +160,10 @@ extern "C" {
     X(CHKA3) /* Check alignment: regs[rs], immediate alignment */              \
     X(CHKT3) /* Check type: regs[rs], immediate TypeKind */                    \
     /* Struct return buffer support */                                         \
-    X(RETBUF) /* Get next return buffer: REG_A0 = rotating pool buffer */
+    X(RETBUF) /* Get next return buffer: REG_A0 = rotating pool buffer */       \
+    X(FLDR_F32)   /* fregs[rd] = (double)*(float*)regs[rs] */                  \
+    X(FSTR_F32)   /* *(float*)regs[rs] = (float)fregs[rd] */                   \
+    X(FROUND_F32) /* fregs[rd] = (float)fregs[rs] */
 
 /*!
  @enum JCC_OP

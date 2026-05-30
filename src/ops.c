@@ -341,14 +341,16 @@ int op_MOV3_fn(JCC *vm) {
 // ========== Register-Based Calling Convention ==========
 
 int op_ENT3_fn(JCC *vm) {
-    // Enter function: [ENT3] [stack_size:32|param_count:32] [float_param_mask]
+    // Enter function: [ENT3] [stack_size:32|param_count:32]
+    // [f32_param_mask:32|float_param_mask:32]
     // Creates new stack frame and copies REG_A0-REG_An and FREG_A0-FREG_An to
     // parameter slots
     long long operands = *vm->pc++;
     int stack_size = (int)(operands & 0xFFFFFFFF);
     int param_count = (int)((operands >> 32) & 0xFFFFFFFF);
-    long long float_param_mask =
-        *vm->pc++; // Second operand: which params are floats
+    unsigned long long masks = (unsigned long long)*vm->pc++;
+    unsigned int float_param_mask = (unsigned int)(masks & 0xFFFFFFFFu);
+    unsigned int f32_param_mask = (unsigned int)(masks >> 32);
 
     // Save old base pointer
     *--vm->sp = (long long)vm->bp;
@@ -377,13 +379,16 @@ int op_ENT3_fn(JCC *vm) {
 
         if (float_param_mask & (1LL << i)) {
             // Float parameter - copy from fregs[]
-            // Store double bits as long long
-            union {
-                double d;
-                long long ll;
-            } conv;
-            conv.d = vm->fregs[FREG_A0 + float_reg_idx];
-            *param_slot = conv.ll;
+            if (f32_param_mask & (1u << i)) {
+                *(float *)param_slot = (float)vm->fregs[FREG_A0 + float_reg_idx];
+            } else {
+                union {
+                    double d;
+                    long long ll;
+                } conv;
+                conv.d = vm->fregs[FREG_A0 + float_reg_idx];
+                *param_slot = conv.ll;
+            }
             float_reg_idx++;
         } else {
             // Integer parameter - copy from regs[]
@@ -769,6 +774,41 @@ int op_FSTR_fn(JCC *vm) {
 
     *(double *)vm->regs[rs] = vm->fregs[rd];
     debugger_check_watchpoint(vm, (void *)vm->regs[rs], 8, WATCH_WRITE);
+    return 0;
+}
+
+int op_FLDR_F32_fn(JCC *vm) {
+    // Float32 load: fregs[rd] = (double)*(float*)regs[rs]
+    // Format: [FLDR_F32] [rd:8|rs:8|unused:48]
+    long long operands = *vm->pc++;
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+
+    debugger_check_watchpoint(vm, (void *)vm->regs[rs], 4, WATCH_READ);
+    vm->fregs[rd] = (double)*(float *)vm->regs[rs];
+    return 0;
+}
+
+int op_FSTR_F32_fn(JCC *vm) {
+    // Float32 store: *(float*)regs[rs] = (float)fregs[rd]
+    // Format: [FSTR_F32] [rd:8|rs:8|unused:48]
+    long long operands = *vm->pc++;
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+
+    *(float *)vm->regs[rs] = (float)vm->fregs[rd];
+    debugger_check_watchpoint(vm, (void *)vm->regs[rs], 4, WATCH_WRITE);
+    return 0;
+}
+
+int op_FROUND_F32_fn(JCC *vm) {
+    // Float32 round: fregs[rd] = (float)fregs[rs]
+    // Format: [FROUND_F32] [rd:8|rs:8|unused:48]
+    long long operands = *vm->pc++;
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+
+    vm->fregs[rd] = (double)(float)vm->fregs[rs];
     return 0;
 }
 

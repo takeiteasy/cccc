@@ -143,3 +143,8 @@ Binary format (little-endian):
 [Text segment: bytecode instructions]
 [Data segment: global variables and constants]
 ```
+
+Floating-point bytecode has separate 64-bit and 32-bit memory operations:
+`FLDR`/`FSTR` load and store `double`, while `FLDR_F32`/`FSTR_F32` load and
+store C `float`. `FROUND_F32` rounds a floating register through `float`
+precision while keeping the VM register file represented as `double`.

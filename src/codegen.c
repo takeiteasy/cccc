@@ -125,6 +125,21 @@ static void apply_global_relocations(JCC *vm, Obj *prog) {
     }
 }
 
+static Obj *find_function_definition_for_patch(Obj *prog, Obj *target) {
+    if (target->is_static && target->body)
+        return target;
+
+    char *fn_name = target->name;
+    for (Obj *fn = prog; fn; fn = fn->next) {
+        if (fn->is_function && fn->body &&
+            strlen(fn->name) == strlen(fn_name) &&
+            strncmp(fn->name, fn_name, strlen(fn_name)) == 0) {
+            return fn;
+        }
+    }
+    return NULL;
+}
+
 static void add_debug_symbol(JCC *vm, char *name, long long offset, Type *ty,
                              int is_local, Obj *owner_fn) {
     if (!(vm->flags & JCC_ENABLE_DEBUGGER) || !name || !*name)
@@ -374,6 +389,10 @@ static void emit_fmov3(JCC *vm, int rd, int rs) {
     emit_frr(vm, FMOV3, rd, rs);
 }
 
+static void emit_fround_f32(JCC *vm, int rd, int rs) {
+    emit_frr(vm, FROUND_F32, rd, rs);
+}
+
 // Load operations based on type
 // Load operations based on type
 static void emit_load(JCC *vm, Type *ty, int rd, int rs_addr) {
@@ -390,7 +409,7 @@ static void emit_load(JCC *vm, Type *ty, int rd, int rs_addr) {
         if (ty->is_unsigned)
             emit_rr(vm, ZX4, rd, rd);
     } else if (is_flonum(ty)) {
-        emit_rr(vm, FLDR, rd, rs_addr);
+        emit_rr(vm, ty->kind == TY_FLOAT ? FLDR_F32 : FLDR, rd, rs_addr);
     } else {
         emit_rr(vm, LDR_D, rd, rs_addr);
     }
@@ -405,7 +424,7 @@ static void emit_store(JCC *vm, Type *ty, int rd_val, int rs_addr) {
     } else if (ty->kind == TY_INT || ty->kind == TY_ENUM) {
         emit_rr(vm, STR_W, rd_val, rs_addr);
     } else if (is_flonum(ty)) {
-        emit_rr(vm, FSTR, rd_val, rs_addr);
+        emit_rr(vm, ty->kind == TY_FLOAT ? FSTR_F32 : FSTR, rd_val, rs_addr);
     } else {
         emit_rr(vm, STR_D, rd_val, rs_addr);
     }
@@ -741,12 +760,17 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             long long offset = vm->data_ptr - vm->data_seg;
             offset = (offset + 7) & ~7; // Align
             vm->data_ptr = vm->data_seg + offset;
-            *(double *)vm->data_ptr = node->fval;
-            vm->data_ptr += sizeof(double);
+            if (node->ty->kind == TY_FLOAT) {
+                *(float *)vm->data_ptr = (float)node->fval;
+                vm->data_ptr += sizeof(float);
+            } else {
+                *(double *)vm->data_ptr = node->fval;
+                vm->data_ptr += sizeof(double);
+            }
 
             int temp = alloc_temp_reg();
             emit_lda3(vm, temp, offset);
-            emit_rr(vm, FLDR, dest_reg, temp);
+            emit_rr(vm, node->ty->kind == TY_FLOAT ? FLDR_F32 : FLDR, dest_reg, temp);
             free_temp_reg(temp);
         } else {
             emit_li3(vm, dest_reg, node->val);
@@ -925,6 +949,8 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                 error("unsupported float op");
             }
             emit_frrr(vm, fop, dest_reg, dest_reg, r_rhs);
+            if (node->ty->kind == TY_FLOAT)
+                emit_fround_f32(vm, dest_reg, dest_reg);
         } else {
             // Integer operations
             gen_expr(vm, node->lhs, dest_reg); // LHS goes directly to dest
@@ -1206,9 +1232,14 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         if (is_flonum(node->ty) && !is_flonum(node->lhs->ty)) {
             // int -> float
             emit_rr(vm, I2F3, dest_reg, dest_reg);
+            if (node->ty->kind == TY_FLOAT)
+                emit_fround_f32(vm, dest_reg, dest_reg);
         } else if (!is_flonum(node->ty) && is_flonum(node->lhs->ty)) {
             // float -> int
             emit_rr(vm, F2I3, dest_reg, dest_reg);
+        } else if (node->ty->kind == TY_FLOAT &&
+                   node->lhs->ty->kind != TY_FLOAT) {
+            emit_fround_f32(vm, dest_reg, dest_reg);
         } else if (!is_flonum(node->ty) && !is_flonum(node->lhs->ty)) {
             // Integer conversion - handle truncation/extension
             if (node->ty->kind == TY_CHAR) {
@@ -2338,13 +2369,16 @@ void gen_function(JCC *vm, Obj *fn) {
     // Record function address (offset from text_seg start)
     fn->code_addr = (vm->text_ptr + 1 - vm->text_seg);
 
-    // Compute float parameter mask for ENT3
-    long long float_param_mask = 0;
+    // Compute float parameter masks for ENT3
+    unsigned int float_param_mask = 0;
+    unsigned int f32_param_mask = 0;
     int pindex = 0;
     for (Obj *param = fn->params; param && pindex < 8;
          param = param->next, pindex++) {
         if (is_flonum(param->ty)) {
-            float_param_mask |= (1LL << pindex);
+            float_param_mask |= (1u << pindex);
+            if (param->ty->kind == TY_FLOAT)
+                f32_param_mask |= (1u << pindex);
         }
     }
 
@@ -2368,12 +2402,14 @@ void gen_function(JCC *vm, Obj *fn) {
         }
     }
 
-    // Emit ENT3: [stack_size:32|param_count:32] [float_param_mask]
+    // Emit ENT3: [stack_size:32|param_count:32] [f32_mask:32|float_mask:32]
     long long ent3_operand =
         ((long long)stack_size) | (((long long)reg_param_count) << 32);
+    long long ent3_masks =
+        (long long)float_param_mask | ((long long)f32_param_mask << 32);
     emit(vm, ENT3);
     *++vm->text_ptr = ent3_operand;
-    *++vm->text_ptr = float_param_mask;
+    *++vm->text_ptr = ent3_masks;
 
     // Activate function-level scope (marks params/locals as alive).
     if (vm->flags & JCC_STACK_INSTR)
@@ -2483,20 +2519,13 @@ void gen(JCC *vm, Obj *prog) {
 
     // Second pass: Patch function call addresses
     for (int i = 0; i < vm->compiler.num_call_patches; i++) {
-        char *fn_name = vm->compiler.call_patches[i].function->name;
+        Obj *target = vm->compiler.call_patches[i].function;
+        char *fn_name = target->name;
         long long *loc = vm->compiler.call_patches[i].location;
 
         // Find the function definition in the program list
         // PLACEHOLDER: O(num_patches * num_functions). Use a hash table.
-        Obj *fn_def = NULL;
-        for (Obj *fn = prog; fn; fn = fn->next) {
-            if (fn->is_function && fn->body &&
-                strlen(fn->name) == strlen(fn_name) &&
-                strncmp(fn->name, fn_name, strlen(fn_name)) == 0) {
-                fn_def = fn;
-                break;
-            }
-        }
+        Obj *fn_def = find_function_definition_for_patch(prog, target);
 
         if (!fn_def) {
             // Check for FFI function
@@ -2515,18 +2544,10 @@ void gen(JCC *vm, Obj *prog) {
 
     // Third pass: Patch function address references (for function pointers)
     for (int i = 0; i < vm->compiler.num_func_addr_patches; i++) {
-        char *fn_name = vm->compiler.func_addr_patches[i].function->name;
+        Obj *target = vm->compiler.func_addr_patches[i].function;
         long long *loc = vm->compiler.func_addr_patches[i].location;
 
-        Obj *fn_def = NULL;
-        for (Obj *fn = prog; fn; fn = fn->next) {
-            if (fn->is_function && fn->body &&
-                strlen(fn->name) == strlen(fn_name) &&
-                strncmp(fn->name, fn_name, strlen(fn_name)) == 0) {
-                fn_def = fn;
-                break;
-            }
-        }
+        Obj *fn_def = find_function_definition_for_patch(prog, target);
 
         if (fn_def) {
             *loc = fn_def->code_addr * (long long)sizeof(long long);

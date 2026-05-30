@@ -84,7 +84,7 @@ static int get_opcode_operand_count(int op) {
         case NEG3: case NOT3: case BNOT3:
         case LDR_B: case LDR_H: case LDR_W: case LDR_D:
         case STR_B: case STR_H: case STR_W: case STR_D:
-        case FLDR: case FSTR:
+        case FLDR: case FSTR: case FLDR_F32: case FSTR_F32: case FROUND_F32:
         case FMOV3: case FNEG3:
         case I2F3: case F2I3: case FR2R: case R2FR:
         case SX1: case SX2: case SX4: case ZX1: case ZX2: case ZX4:

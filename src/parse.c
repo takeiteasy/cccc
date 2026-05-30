@@ -4407,11 +4407,25 @@ static void resolve_goto_labels(JCC *vm) {
 }
 
 static Obj *find_func(JCC *vm, char *name, int name_len) {
-    Scope *sc = vm->compiler.scope;
-    while (sc->next)
-        sc = sc->next;
+    for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
+        for (VarScopeNode *node = sc->vars; node; node = node->next) {
+            if (node->name_len == name_len &&
+                strncmp(node->name, name, name_len) == 0) {
+                VarScope *sc2 = (VarScope *)node;
+                if (sc2->var && sc2->var->is_function)
+                    return sc2->var;
+                return NULL;
+            }
+        }
+    }
+    return NULL;
+}
 
-    // Linear search through linked list
+static Obj *find_func_in_current_scope(JCC *vm, char *name, int name_len) {
+    Scope *sc = vm->compiler.scope;
+    if (!sc)
+        return NULL;
+
     for (VarScopeNode *node = sc->vars; node; node = node->next) {
         if (node->name_len == name_len &&
             strncmp(node->name, name, name_len) == 0) {
@@ -4454,7 +4468,9 @@ static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr) {
         saved_nesting_depth = vm->compiler.fn_nesting_depth;
     }
 
-    Obj *fn = find_func(vm, name_str, ty->name->len);
+    Obj *fn = attr->is_static
+                  ? find_func_in_current_scope(vm, name_str, ty->name->len)
+                  : find_func(vm, name_str, ty->name->len);
     if (fn) {
         // Redeclaration
         if (!fn->is_function)
