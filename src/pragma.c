@@ -60,6 +60,32 @@ extern void jcc_ast_function_set_inline(Obj *fn, bool is_inline);
 extern void jcc_ast_function_set_variadic(Obj *fn, bool is_variadic);
 extern Node *jcc_ast_param_ref(JCC *vm, Obj *fn, const char *name);
 
+// Ticket #58: AST dump
+extern void jcc_dump_tree(JCC *vm, Node *node);
+extern const char *jcc_dump_tree_to_string(JCC *vm, Node *node);
+extern void jcc_dump_ast_gen(JCC *vm, Node *node);
+extern const char *jcc_dump_ast_gen_to_string(JCC *vm, Node *node);
+
+// Ticket #78: source-located macro diagnostics
+extern void jcc_error_at(JCC *vm, Node *node, const char *fmt, ...);
+extern void jcc_warning_at(JCC *vm, Node *node, const char *fmt, ...);
+
+// Previously unregistered statement builders (existing functions, now exposed)
+extern Node *jcc_ast_block(JCC *vm, Node **stmts, int count);
+extern Node *jcc_ast_expr_stmt(JCC *vm, Node *expr);
+
+// Ticket #77: hygienic local variable injection
+extern Node *jcc_ast_local_var(JCC *vm, const char *name, Type *ty);
+extern Node *jcc_ast_local_var_unique(JCC *vm, Type *ty);
+
+// Ticket #51: new expression/statement builders
+extern Node *jcc_ast_assign(JCC *vm, Node *target, Node *value);
+extern Node *jcc_ast_member(JCC *vm, Node *obj, const char *name);
+extern Node *jcc_ast_funcall(JCC *vm, Node *callee, Node **args, int n);
+extern Node *jcc_ast_while(JCC *vm, Node *cond, Node *body);
+extern Node *jcc_ast_for(JCC *vm, Node *init, Node *cond, Node *inc, Node *body);
+extern Node *jcc_ast_do_while(JCC *vm, Node *body, Node *cond);
+
 // Register reflection API functions as FFI
 static void register_reflection_ffi(JCC *vm) {
     // VM accessor
@@ -94,6 +120,32 @@ static void register_reflection_ffi(JCC *vm) {
                       0);
     cc_register_cfunc(vm, "jcc_ast_switch_set_default",
                       (void *)jcc_ast_switch_set_default, 3, 0);
+
+    // Ticket #58: AST dump
+    cc_register_cfunc(vm, "jcc_dump_tree",              (void *)jcc_dump_tree,              2, 0);
+    cc_register_cfunc(vm, "jcc_dump_tree_to_string",    (void *)jcc_dump_tree_to_string,    2, 0);
+    cc_register_cfunc(vm, "jcc_dump_ast_gen",           (void *)jcc_dump_ast_gen,           2, 0);
+    cc_register_cfunc(vm, "jcc_dump_ast_gen_to_string", (void *)jcc_dump_ast_gen_to_string, 2, 0);
+
+    // Ticket #78: source-located macro diagnostics (variadic)
+    cc_register_variadic_cfunc(vm, "jcc_error_at",   (void *)jcc_error_at,   3, 0);
+    cc_register_variadic_cfunc(vm, "jcc_warning_at", (void *)jcc_warning_at, 3, 0);
+
+    // Previously unregistered statement builders
+    cc_register_cfunc(vm, "jcc_ast_block",     (void *)jcc_ast_block,     3, 0);
+    cc_register_cfunc(vm, "jcc_ast_expr_stmt", (void *)jcc_ast_expr_stmt, 2, 0);
+
+    // Ticket #77: hygienic local variable injection
+    cc_register_cfunc(vm, "jcc_ast_local_var",        (void *)jcc_ast_local_var,        3, 0);
+    cc_register_cfunc(vm, "jcc_ast_local_var_unique",  (void *)jcc_ast_local_var_unique,  2, 0);
+
+    // Ticket #51: new expression/statement builders
+    cc_register_cfunc(vm, "jcc_ast_assign",   (void *)jcc_ast_assign,   3, 0);
+    cc_register_cfunc(vm, "jcc_ast_member",   (void *)jcc_ast_member,   3, 0);
+    cc_register_cfunc(vm, "jcc_ast_funcall",  (void *)jcc_ast_funcall,  4, 0);
+    cc_register_cfunc(vm, "jcc_ast_while",    (void *)jcc_ast_while,    3, 0);
+    cc_register_cfunc(vm, "jcc_ast_for",      (void *)jcc_ast_for,      5, 0);
+    cc_register_cfunc(vm, "jcc_ast_do_while", (void *)jcc_ast_do_while, 3, 0);
 
     // Enum reflection
     cc_register_cfunc(vm, "jcc_ast_enum_count", (void *)jcc_ast_enum_count, 2, 0);

@@ -150,6 +150,36 @@ extern JCC *jcc_get_vm(void);
 #define JCC_VM jcc_get_vm()
 
 // ============================================================================
+// Macro Diagnostics (ticket #78)
+// ============================================================================
+
+/*!
+ * @function jcc_error_at
+ * @abstract Emit a compiler error pointing at the source location of a node.
+ * @param vm The VM context.
+ * @param node A node whose tok field provides file/line/col. May be NULL
+ *             (falls back to a location-less error).
+ * @param fmt printf-style format string, followed by format arguments.
+ * @discussion Behaves like the compiler's error_tok(): in normal mode it
+ *             prints the error with file/line/col and source snippet then
+ *             aborts via longjmp or exit.  When vm->collect_errors is set
+ *             it records the error and compilation may continue.
+ */
+void jcc_error_at(JCC *vm, JCC_Node *node, const char *fmt, ...)
+    __attribute__((format(printf, 3, 4)));
+
+/*!
+ * @function jcc_warning_at
+ * @abstract Emit a compiler warning pointing at the source location of a node.
+ * @param vm The VM context.
+ * @param node A node whose tok field provides file/line/col. May be NULL.
+ * @param fmt printf-style format string, followed by format arguments.
+ * @discussion Non-fatal unless vm->warnings_as_errors is set.
+ */
+void jcc_warning_at(JCC *vm, JCC_Node *node, const char *fmt, ...)
+    __attribute__((format(printf, 3, 4)));
+
+// ============================================================================
 // Type Lookup and Introspection
 // ============================================================================
 
@@ -358,6 +388,102 @@ void jcc_ast_switch_set_default(JCC *vm, JCC_Node *switch_node,
 JCC_Node *jcc_ast_expr_stmt(JCC *vm, JCC_Node *expr);
 
 // ============================================================================
+// AST Node Construction - Local Variable Injection (ticket #77)
+// ============================================================================
+
+/*!
+ * @function jcc_ast_local_var
+ * @abstract Declare a named local variable in the current function scope
+ *           and return a variable-reference node for it.
+ * @param vm The VM context.
+ * @param name The variable name (user-visible).
+ * @param ty The variable type.
+ * @return A JCC_ND_VAR node referencing the new local, or NULL if called
+ *         outside a function body or on invalid arguments.
+ * @note  The variable is injected into the current function's locals list
+ *        and will receive a stack offset when the function is compiled.
+ *        For temporaries that must not capture user names, prefer
+ *        jcc_ast_local_var_unique().
+ */
+JCC_Node *jcc_ast_local_var(JCC *vm, const char *name, JCC_Type *ty);
+
+/*!
+ * @function jcc_ast_local_var_unique
+ * @abstract Declare a hygienic (gensym'd) local variable in the current
+ *           function scope and return a variable-reference node for it.
+ * @param vm The VM context.
+ * @param ty The variable type.
+ * @return A JCC_ND_VAR node referencing the new local, or NULL on error.
+ * @note  The generated name begins with ".L.." and is therefore not
+ *        expressible as a user identifier — guaranteed no name capture.
+ *        This is the safe default for macro temporaries.
+ */
+JCC_Node *jcc_ast_local_var_unique(JCC *vm, JCC_Type *ty);
+
+/*! Create an assignment node (target = value). */
+JCC_Node *jcc_ast_assign(JCC *vm, JCC_Node *target, JCC_Node *value);
+
+/*!
+ * @function jcc_ast_member
+ * @abstract Create a struct/union member access node (obj.name).
+ * @param vm The VM context.
+ * @param obj An expression node whose type must be a struct or union.
+ * @param name The member name as a NUL-terminated string.
+ * @return A JCC_ND_MEMBER node, or NULL if the member is not found or
+ *         obj is not a struct/union type.
+ * @note The callee is responsible for dereferencing pointers first;
+ *       pass the struct value directly (use jcc_ast_unary(ND_DEREF,…)
+ *       for pointer-to-struct access).
+ */
+JCC_Node *jcc_ast_member(JCC *vm, JCC_Node *obj, const char *name);
+
+/*!
+ * @function jcc_ast_funcall
+ * @abstract Create a function call node.
+ * @param vm The VM context.
+ * @param callee An expression node that evaluates to a function (or function
+ *               pointer). The callee's lhs field holds this expression.
+ * @param args Array of argument nodes (may be NULL if n == 0).
+ * @param n Number of arguments.
+ * @return A JCC_ND_FUNCALL node, or NULL on error.
+ */
+JCC_Node *jcc_ast_funcall(JCC *vm, JCC_Node *callee, JCC_Node **args, int n);
+
+/*!
+ * @function jcc_ast_while
+ * @abstract Create a while loop node.
+ * @param vm The VM context.
+ * @param cond The loop condition expression.
+ * @param body The loop body statement.
+ * @return A JCC_ND_FOR node (JCC represents while as for with no init/inc),
+ *         or NULL on error.
+ */
+JCC_Node *jcc_ast_while(JCC *vm, JCC_Node *cond, JCC_Node *body);
+
+/*!
+ * @function jcc_ast_for
+ * @abstract Create a for loop node.
+ * @param vm The VM context.
+ * @param init Initialiser expression/statement (may be NULL).
+ * @param cond Loop condition (may be NULL for infinite loop).
+ * @param inc Increment expression (may be NULL).
+ * @param body Loop body.
+ * @return A JCC_ND_FOR node, or NULL on error.
+ */
+JCC_Node *jcc_ast_for(JCC *vm, JCC_Node *init, JCC_Node *cond,
+                       JCC_Node *inc, JCC_Node *body);
+
+/*!
+ * @function jcc_ast_do_while
+ * @abstract Create a do-while loop node.
+ * @param vm The VM context.
+ * @param body The loop body.
+ * @param cond The loop condition (tested after each iteration).
+ * @return A JCC_ND_DO node, or NULL on error.
+ */
+JCC_Node *jcc_ast_do_while(JCC *vm, JCC_Node *body, JCC_Node *cond);
+
+// ============================================================================
 // Function Generation
 // ============================================================================
 
@@ -422,8 +548,59 @@ void jcc_ast_function_set_inline(JCC_Obj *fn, bool is_inline);
 void jcc_ast_function_set_variadic(JCC_Obj *fn, bool is_variadic);
 
 // ============================================================================
+// AST Dump Functions (ticket #58) — Nim-style dumpTree / dumpAstGen
+// ============================================================================
+
+/*!
+ * @function jcc_dump_tree
+ * @abstract Print a human-readable tree representation of a node to stdout.
+ * @param vm The VM context.
+ * @param node The root node to print.
+ * @discussion Reuses the compiler's internal cc_dump_ast text renderer.
+ */
+void jcc_dump_tree(JCC *vm, JCC_Node *node);
+
+/*!
+ * @function jcc_dump_tree_to_string
+ * @abstract Render the tree representation to a heap-allocated string.
+ * @param vm The VM context.
+ * @param node The root node.
+ * @return An arena-allocated NUL-terminated string, or NULL on error.
+ */
+const char *jcc_dump_tree_to_string(JCC *vm, JCC_Node *node);
+
+/*!
+ * @function jcc_dump_ast_gen
+ * @abstract Print jcc_ast_*() builder calls that would reconstruct the node.
+ * @param vm The VM context.
+ * @param node The root node to emit builder calls for.
+ * @discussion Covers all node kinds for which reflect.c has a builder.
+ *             Unsupported kinds are emitted as C comments.
+ */
+void jcc_dump_ast_gen(JCC *vm, JCC_Node *node);
+
+/*!
+ * @function jcc_dump_ast_gen_to_string
+ * @abstract Render the jcc_ast_*() builder call sequence to a string.
+ * @param vm The VM context.
+ * @param node The root node.
+ * @return An arena-allocated NUL-terminated string, or NULL on error.
+ */
+const char *jcc_dump_ast_gen_to_string(JCC *vm, JCC_Node *node);
+
+// ============================================================================
 // Convenience Macros (automatically pass JCC_VM)
 // ============================================================================
+
+// Diagnostic helpers (ticket #78) — note: variadic macros require C99+
+#define JCC_ERROR_AT(node, ...) jcc_error_at(JCC_VM, node, __VA_ARGS__)
+#define JCC_WARNING_AT(node, ...) jcc_warning_at(JCC_VM, node, __VA_ARGS__)
+
+// AST dump helpers (ticket #58)
+#define JCC_DUMP_TREE(node) jcc_dump_tree(JCC_VM, node)
+#define JCC_DUMP_TREE_TO_STRING(node) jcc_dump_tree_to_string(JCC_VM, node)
+#define JCC_DUMP_AST_GEN(node) jcc_dump_ast_gen(JCC_VM, node)
+#define JCC_DUMP_AST_GEN_TO_STRING(node) jcc_dump_ast_gen_to_string(JCC_VM, node)
 
 #define JCC_AST_FIND_TYPE(name) jcc_ast_find_type(JCC_VM, name)
 #define JCC_AST_TYPE_EXISTS(name) jcc_ast_type_exists(JCC_VM, name)
@@ -448,6 +625,14 @@ void jcc_ast_function_set_variadic(JCC_Obj *fn, bool is_variadic);
 #define JCC_AST_SWITCH_SET_DEFAULT(sw, b)                                    \
     jcc_ast_switch_set_default(JCC_VM, sw, b)
 #define JCC_AST_EXPR_STMT(expr) jcc_ast_expr_stmt(JCC_VM, expr)
+#define JCC_AST_LOCAL_VAR(name, ty) jcc_ast_local_var(JCC_VM, name, ty)
+#define JCC_AST_LOCAL_VAR_UNIQUE(ty) jcc_ast_local_var_unique(JCC_VM, ty)
+#define JCC_AST_ASSIGN(target, value) jcc_ast_assign(JCC_VM, target, value)
+#define JCC_AST_MEMBER(obj, name) jcc_ast_member(JCC_VM, obj, name)
+#define JCC_AST_FUNCALL(callee, args, n) jcc_ast_funcall(JCC_VM, callee, args, n)
+#define JCC_AST_WHILE(cond, body) jcc_ast_while(JCC_VM, cond, body)
+#define JCC_AST_FOR(init, cond, inc, body) jcc_ast_for(JCC_VM, init, cond, inc, body)
+#define JCC_AST_DO_WHILE(body, cond) jcc_ast_do_while(JCC_VM, body, cond)
 
 #define JCC_AST_MAKE_POINTER(base) jcc_ast_make_pointer(JCC_VM, base)
 #define JCC_AST_MAKE_ARRAY(base, len) jcc_ast_make_array(JCC_VM, base, len)

@@ -662,6 +662,183 @@ JCC_Node *jcc_ast_expr_stmt(JCC *vm, JCC_Node *expr) {
 }
 
 // ============================================================================
+// Macro Diagnostics (ticket #78)
+// ============================================================================
+
+void jcc_error_at(JCC *vm, JCC_Node *node, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    char buf[4096];
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+
+    if (node && node->tok)
+        error_tok(vm, node->tok, "%s", buf);
+    else
+        error("%s", buf); // no source location available
+}
+
+void jcc_warning_at(JCC *vm, JCC_Node *node, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    char buf[4096];
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+
+    if (node && node->tok)
+        warn_tok(vm, node->tok, "%s", buf);
+    else
+        fprintf(stderr, "warning: %s\n", buf);
+}
+
+// ============================================================================
+// AST Node Construction - Local Variable Injection (ticket #77)
+// ============================================================================
+
+// Allocate a local Obj and prepend it to the current function's locals list.
+// Injected variables receive stack offsets later when cc_compile runs.
+static JCC_Node *make_local_var_node(JCC *vm, char *name, JCC_Type *ty) {
+    if (!vm || !ty)
+        return NULL;
+
+    Obj *fn = vm->compiler.current_fn;
+    if (!fn) {
+        // Not inside a function body — cannot inject a local
+        return NULL;
+    }
+
+    Obj *var = reflect_new_var(vm, name, strlen(name), ty);
+    var->is_local = true;
+    // Prepend to the current function's locals list (same as new_lvar)
+    var->next = fn->locals;
+    fn->locals = var;
+
+    JCC_Node *node = alloc_node(vm, ND_VAR);
+    node->var = var;
+    return node;
+}
+
+JCC_Node *jcc_ast_local_var(JCC *vm, const char *name, JCC_Type *ty) {
+    if (!vm || !name || !ty)
+        return NULL;
+
+    char *arena_name = arena_format(vm, "%s", name);
+    return make_local_var_node(vm, arena_name, ty);
+}
+
+JCC_Node *jcc_ast_local_var_unique(JCC *vm, JCC_Type *ty) {
+    if (!vm || !ty)
+        return NULL;
+
+    // Use the existing gensym to produce a name that can't be captured by
+    // user-written code (prefix .L.. is not valid in user identifiers)
+    char *name = reflect_unique_name(vm);
+    return make_local_var_node(vm, name, ty);
+}
+
+// ============================================================================
+// AST Node Construction - New Expressions (ticket #51)
+// ============================================================================
+
+JCC_Node *jcc_ast_assign(JCC *vm, JCC_Node *target, JCC_Node *value) {
+    if (!vm || !target || !value)
+        return NULL;
+
+    JCC_Node *node = alloc_node(vm, ND_ASSIGN);
+    node->lhs = target;
+    node->rhs = value;
+    return node;
+}
+
+JCC_Node *jcc_ast_member(JCC *vm, JCC_Node *obj, const char *name) {
+    if (!vm || !obj || !name)
+        return NULL;
+
+    // Ensure lhs type is computed (mirrors struct_ref in parse.c:3796)
+    add_type(vm, obj);
+
+    Type *ty = obj->ty;
+    if (!ty || (ty->kind != TY_STRUCT && ty->kind != TY_UNION))
+        return NULL;
+
+    Member *mem = (Member *)jcc_ast_struct_member_find(vm, ty, name);
+    if (!mem)
+        return NULL;
+
+    JCC_Node *node = alloc_node(vm, ND_MEMBER);
+    node->lhs = obj;
+    node->member = mem;
+    return node;
+}
+
+JCC_Node *jcc_ast_funcall(JCC *vm, JCC_Node *callee, JCC_Node **args, int n) {
+    if (!vm || !callee)
+        return NULL;
+
+    // Ensure callee's type is resolved (mirrors funcall() in parse.c:3967)
+    add_type(vm, callee);
+
+    Type *ty = callee->ty;
+    if (!ty)
+        return NULL;
+
+    // Unwrap pointer-to-function (mirrors parse.c:3973)
+    if (ty->kind == TY_PTR && ty->base && ty->base->kind == TY_FUNC)
+        ty = ty->base;
+
+    if (ty->kind != TY_FUNC)
+        return NULL; // callee is not a function type
+
+    JCC_Node *node = alloc_node(vm, ND_FUNCALL);
+    node->lhs = callee;
+    node->func_ty = ty;
+    node->ty = ty->return_ty;
+
+    // Chain argument nodes via ->next (mirrors jcc_ast_block pattern)
+    Node head = {};
+    Node *cur = &head;
+    for (int i = 0; i < n && args[i]; i++)
+        cur = cur->next = args[i];
+    node->args = head.next;
+    return node;
+}
+
+// jcc_ast_while: while(cond) body — represented as ND_FOR with init/inc NULL
+JCC_Node *jcc_ast_while(JCC *vm, JCC_Node *cond, JCC_Node *body) {
+    if (!vm || !cond)
+        return NULL;
+
+    JCC_Node *node = alloc_node(vm, ND_FOR);
+    node->cond = cond;
+    node->then = body;
+    // node->init and node->inc left NULL — this is a while loop
+    return node;
+}
+
+JCC_Node *jcc_ast_for(JCC *vm, JCC_Node *init, JCC_Node *cond,
+                       JCC_Node *inc, JCC_Node *body) {
+    if (!vm)
+        return NULL;
+
+    JCC_Node *node = alloc_node(vm, ND_FOR);
+    node->init = init;
+    node->cond = cond;
+    node->inc = inc;
+    node->then = body;
+    return node;
+}
+
+JCC_Node *jcc_ast_do_while(JCC *vm, JCC_Node *body, JCC_Node *cond) {
+    if (!vm || !cond)
+        return NULL;
+
+    JCC_Node *node = alloc_node(vm, ND_DO);
+    node->then = body;
+    node->cond = cond;
+    return node;
+}
+
+// ============================================================================
 // Function Generation
 // ============================================================================
 
@@ -815,4 +992,223 @@ void jcc_ast_function_set_inline(JCC_Obj *fn, bool is_inline) {
 void jcc_ast_function_set_variadic(JCC_Obj *fn, bool is_variadic) {
     if (fn && fn->ty)
         fn->ty->is_variadic = is_variadic;
+}
+
+// ============================================================================
+// AST Dump Functions (ticket #58)
+// ============================================================================
+
+// ---------------------------------------------------------------------------
+// dumpTree: reuse the existing cc_dump_node text renderer
+// ---------------------------------------------------------------------------
+
+void jcc_dump_tree(JCC *vm, JCC_Node *node) {
+    (void)vm;
+    if (!node)
+        return;
+    cc_dump_node(stdout, node, /*verbose=*/0);
+    fflush(stdout);
+}
+
+const char *jcc_dump_tree_to_string(JCC *vm, JCC_Node *node) {
+    if (!vm || !node)
+        return NULL;
+
+    char *buf = NULL;
+    size_t size = 0;
+    FILE *f = open_memstream(&buf, &size);
+    if (!f)
+        return NULL;
+    cc_dump_node(f, node, /*verbose=*/0);
+    fclose(f);
+
+    // Copy into arena so the caller owns a stable pointer
+    char *result = arena_alloc(&vm->compiler.parser_arena, size + 1);
+    memcpy(result, buf, size);
+    result[size] = '\0';
+    free(buf);
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// dumpAstGen: emit jcc_ast_*() builder calls that reconstruct the node
+// ---------------------------------------------------------------------------
+
+// Forward declaration (mutually recursive with emit_ast_gen_list)
+static void emit_ast_gen(FILE *f, Node *node);
+
+static void emit_ast_gen_list(FILE *f, Node *node) {
+    if (!node) {
+        fprintf(f, "NULL, 0");
+        return;
+    }
+    // Count nodes
+    int n = 0;
+    for (Node *p = node; p; p = p->next) n++;
+    fprintf(f, "(JCC_Node*[]){");
+    for (Node *p = node; p; p = p->next) {
+        emit_ast_gen(f, p);
+        if (p->next) fprintf(f, ", ");
+    }
+    fprintf(f, "}, %d", n);
+}
+
+static void emit_ast_gen(FILE *f, Node *node) {
+    if (!node) {
+        fprintf(f, "NULL");
+        return;
+    }
+
+    switch (node->kind) {
+    case ND_NUM:
+        if (node->ty && (node->ty->kind == TY_FLOAT ||
+                         node->ty->kind == TY_DOUBLE ||
+                         node->ty->kind == TY_LDOUBLE))
+            fprintf(f, "jcc_ast_float_literal(JCC_VM, %Lg)", node->fval);
+        else
+            fprintf(f, "jcc_ast_int_literal(JCC_VM, %lld)", (long long)node->val);
+        break;
+    case ND_VAR:
+        if (node->var && node->var->name)
+            fprintf(f, "jcc_ast_var_ref(JCC_VM, \"%s\")", node->var->name);
+        else
+            fprintf(f, "/* VAR(?) */");
+        break;
+    case ND_ASSIGN:
+        fprintf(f, "jcc_ast_assign(JCC_VM, ");
+        emit_ast_gen(f, node->lhs);
+        fprintf(f, ", ");
+        emit_ast_gen(f, node->rhs);
+        fprintf(f, ")");
+        break;
+    case ND_MEMBER:
+        fprintf(f, "jcc_ast_member(JCC_VM, ");
+        emit_ast_gen(f, node->lhs);
+        // Extract member name from the Token stored in member->name
+        if (node->member && node->member->name)
+            fprintf(f, ", \"%.*s\")", node->member->name->len,
+                    node->member->name->loc);
+        else
+            fprintf(f, ", \"?\")");
+        break;
+    case ND_FUNCALL:
+        fprintf(f, "jcc_ast_funcall(JCC_VM, ");
+        emit_ast_gen(f, node->lhs);
+        fprintf(f, ", ");
+        emit_ast_gen_list(f, node->args);
+        fprintf(f, ")");
+        break;
+    case ND_FOR:
+        if (!node->init && !node->inc) {
+            // Looks like a while loop
+            fprintf(f, "jcc_ast_while(JCC_VM, ");
+            emit_ast_gen(f, node->cond);
+            fprintf(f, ", ");
+            emit_ast_gen(f, node->then);
+            fprintf(f, ")");
+        } else {
+            fprintf(f, "jcc_ast_for(JCC_VM, ");
+            emit_ast_gen(f, node->init);
+            fprintf(f, ", ");
+            emit_ast_gen(f, node->cond);
+            fprintf(f, ", ");
+            emit_ast_gen(f, node->inc);
+            fprintf(f, ", ");
+            emit_ast_gen(f, node->then);
+            fprintf(f, ")");
+        }
+        break;
+    case ND_DO:
+        fprintf(f, "jcc_ast_do_while(JCC_VM, ");
+        emit_ast_gen(f, node->then);
+        fprintf(f, ", ");
+        emit_ast_gen(f, node->cond);
+        fprintf(f, ")");
+        break;
+    case ND_RETURN:
+        fprintf(f, "jcc_ast_return(JCC_VM, ");
+        emit_ast_gen(f, node->lhs);
+        fprintf(f, ")");
+        break;
+    case ND_IF:
+        fprintf(f, "jcc_ast_if(JCC_VM, ");
+        emit_ast_gen(f, node->cond);
+        fprintf(f, ", ");
+        emit_ast_gen(f, node->then);
+        fprintf(f, ", ");
+        emit_ast_gen(f, node->els);
+        fprintf(f, ")");
+        break;
+    case ND_BLOCK:
+        fprintf(f, "jcc_ast_block(JCC_VM, (JCC_Node*[]){");
+        {
+            int i = 0;
+            for (Node *s = node->body; s; s = s->next) {
+                if (i++) fprintf(f, ", ");
+                emit_ast_gen(f, s);
+            }
+        }
+        fprintf(f, "}, %d)", ({
+            int n = 0; for (Node *s = node->body; s; s = s->next) n++; n;
+        }));
+        break;
+    case ND_EXPR_STMT:
+        fprintf(f, "jcc_ast_expr_stmt(JCC_VM, ");
+        emit_ast_gen(f, node->lhs);
+        fprintf(f, ")");
+        break;
+    case ND_CAST:
+        // The target type cannot be fully reconstructed from the AST alone —
+        // emit a placeholder comment for the type argument.
+        fprintf(f, "jcc_ast_cast(JCC_VM, ");
+        emit_ast_gen(f, node->lhs);
+        fprintf(f, ", /* type */ NULL)");
+        break;
+    default:
+        // Binary / unary operators: emit via jcc_ast_binary / jcc_ast_unary
+        if (node->lhs && node->rhs) {
+            fprintf(f, "jcc_ast_binary(JCC_VM, JCC_ND_%s, ",
+                    cc_node_kind_name(node->kind));
+            emit_ast_gen(f, node->lhs);
+            fprintf(f, ", ");
+            emit_ast_gen(f, node->rhs);
+            fprintf(f, ")");
+        } else if (node->lhs) {
+            fprintf(f, "jcc_ast_unary(JCC_VM, JCC_ND_%s, ",
+                    cc_node_kind_name(node->kind));
+            emit_ast_gen(f, node->lhs);
+            fprintf(f, ")");
+        } else {
+            fprintf(f, "/* %s */", cc_node_kind_name(node->kind));
+        }
+        break;
+    }
+}
+
+void jcc_dump_ast_gen(JCC *vm, JCC_Node *node) {
+    (void)vm;
+    if (!node)
+        return;
+    emit_ast_gen(stdout, node);
+    fprintf(stdout, "\n");
+    fflush(stdout);
+}
+
+const char *jcc_dump_ast_gen_to_string(JCC *vm, JCC_Node *node) {
+    if (!vm || !node)
+        return NULL;
+
+    char *buf = NULL;
+    size_t size = 0;
+    FILE *f = open_memstream(&buf, &size);
+    if (!f)
+        return NULL;
+    emit_ast_gen(f, node);
+    fclose(f);
+
+    char *result = arena_alloc(&vm->compiler.parser_arena, size + 1);
+    memcpy(result, buf, size);
+    result[size] = '\0';
+    free(buf);
+    return result;
 }
