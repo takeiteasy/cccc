@@ -179,6 +179,38 @@ void jcc_error_at(JCC *vm, JCC_Node *node, const char *fmt, ...)
 void jcc_warning_at(JCC *vm, JCC_Node *node, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 
+/*!
+ * @function jcc_quote
+ * @abstract Parse a C code template string into an AST node, substituting
+ *           $1/$2/... splice points with the provided argument nodes.
+ * @param vm The VM context.
+ * @param tmpl A C expression or statement as a string literal.
+ *             Use $1, $2, ... to splice in argument nodes (1-indexed,
+ *             reorderable, reusable).  Alternatively, use $$ for sequential
+ *             (left-to-right) splice points — $$ and $N cannot be mixed.
+ * @param ... JCC_Node* arguments corresponding to the splice points.
+ * @return The parsed and substituted AST node, or NULL on error.
+ * @discussion Template is parsed and substituted at macro-execution (compile)
+ *             time; there is no runtime overhead.  Expressions and statements
+ *             are auto-detected.  Capped at ~6 splice nodes due to the 8-
+ *             register FFI limit; use jcc_quote_n for more.
+ */
+JCC_Node *jcc_quote(JCC *vm, const char *tmpl, ...);
+
+/*!
+ * @function jcc_quote_n
+ * @abstract Array-form quasi-quote; validates the splice count and supports
+ *           more than 6 splice nodes.
+ * @param vm The VM context.
+ * @param tmpl A C expression or statement as a string literal with $N splice
+ *             points.
+ * @param nodes Array of JCC_Node* splice arguments.
+ * @param count Length of the nodes array.  If any $K in the template exceeds
+ *              count, a compile-time error is emitted.
+ * @return The parsed and substituted AST node, or NULL on error.
+ */
+JCC_Node *jcc_quote_n(JCC *vm, const char *tmpl, JCC_Node **nodes, int count);
+
 // ============================================================================
 // Type Lookup and Introspection
 // ============================================================================
@@ -591,6 +623,10 @@ const char *jcc_dump_ast_gen_to_string(JCC *vm, JCC_Node *node);
 // ============================================================================
 // Convenience Macros (automatically pass JCC_VM)
 // ============================================================================
+
+// Quasi-quoting helpers (ticket #1)
+#define JCC_QUOTE(tmpl, ...) jcc_quote(JCC_VM, tmpl, ##__VA_ARGS__)
+#define JCC_QUOTE_N(tmpl, nodes, count) jcc_quote_n(JCC_VM, tmpl, nodes, count)
 
 // Diagnostic helpers (ticket #78) — note: variadic macros require C99+
 #define JCC_ERROR_AT(node, ...) jcc_error_at(JCC_VM, node, __VA_ARGS__)

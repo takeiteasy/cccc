@@ -86,6 +86,10 @@ extern Node *jcc_ast_while(JCC *vm, Node *cond, Node *body);
 extern Node *jcc_ast_for(JCC *vm, Node *init, Node *cond, Node *inc, Node *body);
 extern Node *jcc_ast_do_while(JCC *vm, Node *body, Node *cond);
 
+// Ticket #1: quasi-quoting
+extern Node *jcc_quote(JCC *vm, const char *tmpl, ...);
+extern Node *jcc_quote_n(JCC *vm, const char *tmpl, Node **nodes, int count);
+
 // Register reflection API functions as FFI
 static void register_reflection_ffi(JCC *vm) {
     // VM accessor
@@ -168,6 +172,10 @@ static void register_reflection_ffi(JCC *vm) {
     cc_register_cfunc(vm, "jcc_ast_function_set_variadic",
                       (void *)jcc_ast_function_set_variadic, 2, 0);
     cc_register_cfunc(vm, "jcc_ast_param_ref", (void *)jcc_ast_param_ref, 3, 0);
+
+    // Ticket #1: quasi-quoting
+    cc_register_variadic_cfunc(vm, "jcc_quote",   (void *)jcc_quote,   2, 0);
+    cc_register_cfunc(vm,          "jcc_quote_n", (void *)jcc_quote_n, 4, 0);
 }
 
 static Token *copy_macro_token(JCC *vm, Token *tok) {
@@ -581,6 +589,22 @@ static Node *transform_node(JCC *vm, Node *node) {
         // Recursively transform in case the macro result contains more
         // macro calls
         return transform_node(vm, result);
+    }
+
+    // For ND_EXPR_STMT: if the inner expression is replaced by a statement-kind
+    // node (e.g. a macro returned ND_IF or ND_RETURN), lift the statement up
+    // to replace the entire expression-statement wrapper.  Without this,
+    // codegen would try to gen_expr() a statement node and fail.
+    if (node->kind == ND_EXPR_STMT) {
+        node->lhs = transform_node(vm, node->lhs);
+        if (node->lhs) {
+            NodeKind k = node->lhs->kind;
+            if (k == ND_RETURN || k == ND_IF || k == ND_FOR || k == ND_DO ||
+                k == ND_SWITCH || k == ND_BLOCK || k == ND_GOTO ||
+                k == ND_LABEL || k == ND_EXPR_STMT)
+                return node->lhs;
+        }
+        return node;
     }
 
     // Recursively transform all child nodes

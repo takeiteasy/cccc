@@ -1212,3 +1212,310 @@ const char *jcc_dump_ast_gen_to_string(JCC *vm, JCC_Node *node) {
     free(buf);
     return result;
 }
+
+// ============================================================================
+// Quasi-quoting: jcc_quote / jcc_quote_n (ticket #1)
+// ============================================================================
+
+// Classify a token as a splice point:
+//   returns  N>0 if the token is $N (positional, index N)
+//   returns -1   if the token is $$ (incremental sugar)
+//   returns  0   if not a splice point
+static int quote_splice_kind(Token *tok) {
+    if (tok->kind != TK_IDENT || tok->len < 2 || tok->loc[0] != '$')
+        return 0;
+    // "$$" — incremental sugar
+    if (tok->len == 2 && tok->loc[1] == '$')
+        return -1;
+    // "$N..." — all remaining chars must be decimal digits
+    for (int i = 1; i < tok->len; i++)
+        if (tok->loc[i] < '0' || tok->loc[i] > '9')
+            return 0;
+    char buf[32];
+    int numlen = tok->len - 1;
+    if (numlen > 20)
+        return 0; // absurdly large index: not a splice point
+    memcpy(buf, tok->loc + 1, numlen);
+    buf[numlen] = '\0';
+    int n = atoi(buf);
+    return n > 0 ? n : 0;
+}
+
+// Scan the token stream:
+//   - detects mixing of $N and $$ (calls error() on mix)
+//   - rewrites the k-th $$ to $k in the token stream (arena-allocated)
+//   - returns the maximum index referenced (0 if no splice points)
+//   - returns -1 on mixing error
+static int quote_scan_and_rewrite(JCC *vm, Token *toks) {
+    bool has_positional = false;
+    bool has_incremental = false;
+    int max_index = 0;
+    int incr_counter = 0;
+
+    for (Token *t = toks; t && t->kind != TK_EOF; t = t->next) {
+        int k = quote_splice_kind(t);
+        if (k == 0) continue;
+
+        if (k == -1) {
+            // $$ incremental
+            has_incremental = true;
+            if (has_positional) {
+                error("jcc_quote: cannot mix $N positional and $$ incremental "
+                      "splice syntax in one template");
+                return -1;
+            }
+            incr_counter++;
+            // Rewrite this token's loc/len to "$<incr_counter>"
+            char *newname = arena_format(vm, "$%d", incr_counter);
+            t->loc = newname;
+            t->len = (int)strlen(newname);
+            if (incr_counter > max_index)
+                max_index = incr_counter;
+        } else {
+            // $N positional
+            has_positional = true;
+            if (has_incremental) {
+                error("jcc_quote: cannot mix $N positional and $$ incremental "
+                      "splice syntax in one template");
+                return -1;
+            }
+            if (k > max_index)
+                max_index = k;
+        }
+    }
+    return max_index;
+}
+
+// Push a placeholder variable $k into a Scope's var list (arena-allocated).
+// Typed from the corresponding argument node if available, else ty_long.
+static Obj *quote_push_placeholder(JCC *vm, Scope *sc, int k,
+                                    JCC_Node *arg_node) {
+    char *name = arena_format(vm, "$%d", k);
+    int name_len = (int)strlen(name);
+
+    // Derive type from the argument node if available
+    Type *ty = ty_long; // safe fallback
+    if (arg_node) {
+        add_type(vm, arg_node);
+        if (arg_node->ty)
+            ty = arg_node->ty;
+    }
+
+    Obj *var = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
+    memset(var, 0, sizeof(Obj));
+    var->name = name;
+    var->ty = ty;
+    var->align = ty->align;
+
+    VarScopeNode *snode =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(VarScopeNode));
+    memset(snode, 0, sizeof(VarScopeNode));
+    snode->var = var;
+    snode->name = name;
+    snode->name_len = name_len;
+    snode->next = sc->vars;
+    sc->vars = snode;
+
+    return var;
+}
+
+// Substitution walk state
+typedef struct {
+    Obj      *placeholder_vars[64]; // placeholder_vars[i] = Obj for $(i+1)
+    JCC_Node **arg_nodes;
+    int       n_args;
+} QuoteSubstState;
+
+// Walk the parsed tree and replace ND_VAR placeholder nodes with arg nodes.
+// Mirrors the transform_node() field traversal in pragma.c.
+static JCC_Node *quote_substitute(QuoteSubstState *s, JCC_Node *node) {
+    if (!node)
+        return NULL;
+
+    // If this is a var reference to one of our placeholders, substitute it
+    if (node->kind == ND_VAR && node->var) {
+        for (int i = 0; i < s->n_args && i < 64; i++) {
+            if (s->placeholder_vars[i] && node->var == s->placeholder_vars[i])
+                return s->arg_nodes[i];
+        }
+    }
+
+    // Recurse into all child fields (same set as transform_node in pragma.c)
+    node->lhs  = quote_substitute(s, node->lhs);
+    node->rhs  = quote_substitute(s, node->rhs);
+    node->cond = quote_substitute(s, node->cond);
+    node->then = quote_substitute(s, node->then);
+    node->els  = quote_substitute(s, node->els);
+    node->init = quote_substitute(s, node->init);
+    node->inc  = quote_substitute(s, node->inc);
+
+    // body is a statement chain linked via ->next
+    if (node->body) {
+        node->body = quote_substitute(s, node->body);
+        for (JCC_Node *st = node->body; st; st = st->next)
+            if (st->next)
+                st->next = quote_substitute(s, st->next);
+    }
+
+    // args is an argument chain linked via ->next
+    if (node->args) {
+        node->args = quote_substitute(s, node->args);
+        for (JCC_Node *a = node->args; a && a->next; a = a->next)
+            a->next = quote_substitute(s, a->next);
+    }
+
+    // switch case chains
+    for (JCC_Node *c = node->case_next; c; c = c->case_next)
+        c->body = quote_substitute(s, c->body);
+    if (node->default_case)
+        node->default_case->body =
+            quote_substitute(s, node->default_case->body);
+
+    return node;
+}
+
+// Determine lexically whether the token stream should be parsed as a statement.
+// Uses the first token kind/text and, as a fallback, whether the last
+// non-EOF token is ';' (expression-statement form).
+static bool quote_is_stmt(Token *tok) {
+    if (!tok || tok->kind == TK_EOF)
+        return false;
+
+    // Compound statement starting with '{'
+    if (tok->kind == TK_PUNCT && tok->len == 1 && tok->loc[0] == '{')
+        return true;
+
+    // Statement-initiating keywords
+    if (tok->kind == TK_KEYWORD) {
+        static const char *stmt_kws[] = {
+            "return", "if", "while", "for", "do", "switch",
+            "break", "continue", "goto", "case", "default", NULL
+        };
+        for (int i = 0; stmt_kws[i]; i++)
+            if (equal(tok, (char *)stmt_kws[i]))
+                return true;
+    }
+
+    // If the last non-EOF token is ';' it is an expression-statement
+    for (Token *t = tok; t && t->kind != TK_EOF; t = t->next)
+        if (!t->next || t->next->kind == TK_EOF)
+            if (t->kind == TK_PUNCT && t->len == 1 && t->loc[0] == ';')
+                return true;
+
+    return false;
+}
+
+// Shared implementation for both public entry points.
+static JCC_Node *quote_core(JCC *vm, const char *tmpl,
+                             JCC_Node **nodes, int n) {
+    if (!vm || !tmpl)
+        return NULL;
+
+    // 1. Tokenize the template string
+    Token *toks = tokenize_string(vm, (char *)"<quote>", (char *)tmpl);
+    if (!toks)
+        return NULL;
+    convert_pp_tokens(vm, toks);
+
+    // 2. Scan, validate mixing, rewrite $$
+    int max_index = quote_scan_and_rewrite(vm, toks);
+    if (max_index < 0)
+        return NULL; // mixing error already reported
+
+    // 3. Validate count (the array form enforces this; variadic derives n)
+    if (max_index > n) {
+        error("jcc_quote: template references $%d but only %d argument%s supplied",
+              max_index, n, n == 1 ? "" : "s");
+        return NULL;
+    }
+
+    // 4. Build placeholder scope on the stack
+    Scope quote_scope;
+    memset(&quote_scope, 0, sizeof(Scope));
+    quote_scope.next = vm->compiler.scope;
+    vm->compiler.scope = &quote_scope;
+
+    QuoteSubstState subst;
+    memset(&subst, 0, sizeof(subst));
+    subst.arg_nodes = nodes;
+    subst.n_args = (n < 64) ? n : 64;
+
+    for (int k = 1; k <= max_index; k++) {
+        JCC_Node *arg = (k - 1 < n) ? nodes[k - 1] : NULL;
+        Obj *var = quote_push_placeholder(vm, &quote_scope, k, arg);
+        subst.placeholder_vars[k - 1] = var;
+    }
+
+    // 5. Parse (auto-detect expr vs stmt)
+    Token *rest = NULL;
+    JCC_Node *result = NULL;
+    if (quote_is_stmt(toks)) {
+        result = cc_parse_stmt(vm, &rest, toks);
+    } else {
+        result = cc_parse_expr(vm, &rest, toks);
+    }
+
+    // 6. Restore outer scope unconditionally
+    vm->compiler.scope = quote_scope.next;
+
+    if (!result)
+        return NULL;
+
+    // 7. Substitute placeholder vars with caller-provided argument nodes
+    result = quote_substitute(&subst, result);
+
+    // 8. Re-run add_type so spliced-in types propagate correctly
+    add_type(vm, result);
+
+    return result;
+}
+
+JCC_Node *jcc_quote_n(JCC *vm, const char *tmpl, JCC_Node **nodes, int count) {
+    if (!vm || !tmpl || (!nodes && count > 0))
+        return NULL;
+    return quote_core(vm, tmpl, nodes, count);
+}
+
+JCC_Node *jcc_quote(JCC *vm, const char *tmpl, ...) {
+    if (!vm || !tmpl)
+        return NULL;
+
+    // Scan the raw template string to derive max splice index without
+    // tokenising (avoids double arena allocation in quote_core).
+    int max_index = 0;
+    int incr_count = 0;
+
+    for (const char *p = tmpl; *p; p++) {
+        if (*p != '$') continue;
+        const char *q = p + 1;
+        if (*q == '$') {
+            // $$ incremental
+            incr_count++;
+            if (incr_count > max_index)
+                max_index = incr_count;
+            p = q; // skip second $
+        } else if (*q >= '1' && *q <= '9') {
+            // $N positional
+            int n = 0;
+            while (*q >= '0' && *q <= '9')
+                n = n * 10 + (*q++ - '0');
+            if (n > max_index)
+                max_index = n;
+            p = q - 1; // loop will increment past last digit
+        }
+        // lone $ followed by non-digit/zero: not a splice point, ignore
+    }
+
+    // Collect exactly max_index nodes from va_args
+    int n = (max_index < 64) ? max_index : 64;
+    JCC_Node *arg_buf[64];
+    memset(arg_buf, 0, sizeof(arg_buf));
+
+    va_list ap;
+    va_start(ap, tmpl);
+    for (int i = 0; i < n; i++)
+        arg_buf[i] = va_arg(ap, JCC_Node *);
+    va_end(ap);
+
+    return quote_core(vm, tmpl, arg_buf, n);
+}
