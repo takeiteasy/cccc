@@ -10,25 +10,25 @@ typedef enum { COLOR_RED, COLOR_GREEN, COLOR_BLUE } Color;
 
 // Pragma macro to get enum constant name at compile time
 #pragma macro
-JCC_Node *color_name(JCC_Node *value) {
-    JCC *vm = jcc_get_vm();
+_Node *color_name(_Node *value) {
+    _VirtualMachine *vm = __jcc_get_vm();
 
     // Find the Color type
-    JCC_Type *color_type = jcc_ast_find_type(vm, "Color");
+    _Type *color_type = __jcc_ast_find_type(vm, "Color");
     if (!color_type) {
         // Fallback if type not found
-        return jcc_ast_string_literal(vm, "unknown");
+        return __jcc_ast_string_literal(vm, "unknown");
     }
 
     // Build a switch statement that maps values to strings
     // For now, just demonstrate enum introspection works
-    int count = jcc_ast_enum_count(vm, color_type);
+    int count = __jcc_ast_enum_count(vm, color_type);
 
     // Return a string showing we found the enum
     if (count == 3) {
-        return jcc_ast_string_literal(vm, "enum_found");
+        return __jcc_ast_string_literal(vm, "enum_found");
     }
-    return jcc_ast_string_literal(vm, "enum_not_found");
+    return __jcc_ast_string_literal(vm, "enum_not_found");
 }
 
 int main(void) {

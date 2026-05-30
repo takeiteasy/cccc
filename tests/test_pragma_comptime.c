@@ -6,13 +6,13 @@ int inc_int(int n) {
 }
 
 #pragma macro
-JCC_Node *make_answer(void) {
-    return JCC_AST_INT_LITERAL(inc_int(41));
+_Node *make_answer(void) {
+    return _AST_INT_LITERAL(inc_int(41));
 }
 
 #pragma macro
-JCC_Node *add_later_helper(JCC_Node *x) {
-    return JCC_AST_BINARY(JCC_ND_ADD, x, JCC_AST_INT_LITERAL(triple_later(2)));
+_Node *add_later_helper(_Node *x) {
+    return _AST_BINARY(_ADD, x, _AST_INT_LITERAL(triple_later(2)));
 }
 
 #pragma comptime
@@ -35,9 +35,9 @@ int mutual_odd(int n) {
 }
 
 #pragma macro
-JCC_Node *mutual_add_four(JCC_Node *x) {
-    return JCC_AST_BINARY(JCC_ND_ADD, x,
-                          JCC_AST_INT_LITERAL(mutual_even(4)));
+_Node *mutual_add_four(_Node *x) {
+    return _AST_BINARY(_ADD, x,
+                          _AST_INT_LITERAL(mutual_even(4)));
 }
 
 int main(void) {

@@ -815,6 +815,7 @@ typedef struct GotoPatch {
 } GotoPatch;
 
 typedef struct JCC JCC;
+typedef struct JCC _VirtualMachine;
 
 /*!
  @typedef JCCAsmCallback

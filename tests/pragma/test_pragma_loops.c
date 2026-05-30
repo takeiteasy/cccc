@@ -1,5 +1,5 @@
-// Test ticket #51: jcc_ast_while / jcc_ast_for / jcc_ast_do_while builders.
-// Loop nodes are verified via jcc_dump_ast_gen_to_string since they produce
+// Test ticket #51: __jcc_ast_while / __jcc_ast_for / __jcc_ast_do_while builders.
+// Loop nodes are verified via __jcc_dump_ast_gen_to_string since they produce
 // statements (not values) and thus can't be tested in expression contexts.
 // The _to_string form verifies the nodes are constructed correctly.
 
@@ -21,44 +21,44 @@ static int contains(const char *hay, const char *needle) {
 
 // Macro: builds a while node and returns its gen-dump string.
 #pragma macro
-JCC_Node *while_gen_str(JCC_Node *cond, JCC_Node *body) {
-    JCC *vm = jcc_get_vm();
-    JCC_Node *w = jcc_ast_while(vm, cond, body);
-    const char *s = jcc_dump_ast_gen_to_string(vm, w);
-    return jcc_ast_string_literal(vm, s);
+_Node *while_gen_str(_Node *cond, _Node *body) {
+    _VirtualMachine *vm = __jcc_get_vm();
+    _Node *w = __jcc_ast_while(vm, cond, body);
+    const char *s = __jcc_dump_ast_gen_to_string(vm, w);
+    return __jcc_ast_string_literal(vm, s);
 }
 
 // Macro: builds a for node and returns its gen-dump string.
 #pragma macro
-JCC_Node *for_gen_str(JCC_Node *init, JCC_Node *cond, JCC_Node *inc, JCC_Node *body) {
-    JCC *vm = jcc_get_vm();
-    JCC_Node *f = jcc_ast_for(vm, init, cond, inc, body);
-    const char *s = jcc_dump_ast_gen_to_string(vm, f);
-    return jcc_ast_string_literal(vm, s);
+_Node *for_gen_str(_Node *init, _Node *cond, _Node *inc, _Node *body) {
+    _VirtualMachine *vm = __jcc_get_vm();
+    _Node *f = __jcc_ast_for(vm, init, cond, inc, body);
+    const char *s = __jcc_dump_ast_gen_to_string(vm, f);
+    return __jcc_ast_string_literal(vm, s);
 }
 
 // Macro: builds a do-while node and returns its gen-dump string.
 #pragma macro
-JCC_Node *do_while_gen_str(JCC_Node *body, JCC_Node *cond) {
-    JCC *vm = jcc_get_vm();
-    JCC_Node *d = jcc_ast_do_while(vm, body, cond);
-    const char *s = jcc_dump_ast_gen_to_string(vm, d);
-    return jcc_ast_string_literal(vm, s);
+_Node *do_while_gen_str(_Node *body, _Node *cond) {
+    _VirtualMachine *vm = __jcc_get_vm();
+    _Node *d = __jcc_ast_do_while(vm, body, cond);
+    const char *s = __jcc_dump_ast_gen_to_string(vm, d);
+    return __jcc_ast_string_literal(vm, s);
 }
 
 int main(void) {
-    // while: gen dump should mention jcc_ast_while
+    // while: gen dump should mention __jcc_ast_while
     int dummy = 0;
     const char *ws = while_gen_str(dummy, dummy);
-    if (!contains(ws, "jcc_ast_while")) return 1;
+    if (!contains(ws, "__jcc_ast_while")) return 1;
 
-    // for: gen dump should mention jcc_ast_for
+    // for: gen dump should mention __jcc_ast_for
     const char *fs = for_gen_str(dummy, dummy, dummy, dummy);
-    if (!contains(fs, "jcc_ast_for")) return 2;
+    if (!contains(fs, "__jcc_ast_for")) return 2;
 
-    // do-while: gen dump should mention jcc_ast_do_while
+    // do-while: gen dump should mention __jcc_ast_do_while
     const char *ds = do_while_gen_str(dummy, dummy);
-    if (!contains(ds, "jcc_ast_do_while")) return 3;
+    if (!contains(ds, "__jcc_ast_do_while")) return 3;
 
     return 42;
 }

@@ -26,156 +26,156 @@
 extern JCC *__jcc_current_vm;
 
 // Forward declarations for reflection API functions (to register as FFI)
-extern JCC *jcc_get_vm(void);
-extern Type *jcc_ast_find_type(JCC *vm, const char *name);
-extern bool jcc_ast_type_exists(JCC *vm, const char *name);
-extern Type *jcc_ast_get_type(JCC *vm, const char *name);
-extern Node *jcc_ast_int_literal(JCC *vm, int64_t value);
-extern Node *jcc_ast_float_literal(JCC *vm, double value);
-extern Node *jcc_ast_string_literal(JCC *vm, const char *str);
-extern Node *jcc_ast_var_ref(JCC *vm, const char *name);
-extern Node *jcc_ast_binary(JCC *vm, NodeKind op, Node *left, Node *right);
-extern Node *jcc_ast_unary(JCC *vm, NodeKind op, Node *operand);
-extern Node *jcc_ast_cast(JCC *vm, Node *expr, Type *target_type);
-extern Node *jcc_ast_return(JCC *vm, Node *expr);
-extern Node *jcc_ast_if(JCC *vm, Node *cond, Node *then_body, Node *else_body);
-extern Node *jcc_ast_switch(JCC *vm, Node *cond);
-extern void jcc_ast_switch_add_case(JCC *vm, Node *switch_node, Node *value,
+extern JCC *__jcc_get_vm(void);
+extern Type *__jcc_ast_find_type(JCC *vm, const char *name);
+extern bool __jcc_ast_type_exists(JCC *vm, const char *name);
+extern Type *__jcc_ast_get_type(JCC *vm, const char *name);
+extern Node *__jcc_ast_int_literal(JCC *vm, int64_t value);
+extern Node *__jcc_ast_float_literal(JCC *vm, double value);
+extern Node *__jcc_ast_string_literal(JCC *vm, const char *str);
+extern Node *__jcc_ast_var_ref(JCC *vm, const char *name);
+extern Node *__jcc_ast_binary(JCC *vm, NodeKind op, Node *left, Node *right);
+extern Node *__jcc_ast_unary(JCC *vm, NodeKind op, Node *operand);
+extern Node *__jcc_ast_cast(JCC *vm, Node *expr, Type *target_type);
+extern Node *__jcc_ast_return(JCC *vm, Node *expr);
+extern Node *__jcc_ast_if(JCC *vm, Node *cond, Node *then_body, Node *else_body);
+extern Node *__jcc_ast_switch(JCC *vm, Node *cond);
+extern void __jcc_ast_switch_add_case(JCC *vm, Node *switch_node, Node *value,
                                 Node *body);
-extern void jcc_ast_switch_set_default(JCC *vm, Node *switch_node, Node *body);
-extern int jcc_ast_enum_count(JCC *vm, Type *enum_type);
-extern EnumConstant *jcc_ast_enum_at(JCC *vm, Type *enum_type, int index);
-extern const char *jcc_ast_enum_constant_name(EnumConstant *ec);
-extern int jcc_ast_enum_constant_value(EnumConstant *ec);
-extern Type *jcc_ast_make_pointer(JCC *vm, Type *base);
-extern Type *jcc_ast_make_array(JCC *vm, Type *base, int len);
+extern void __jcc_ast_switch_set_default(JCC *vm, Node *switch_node, Node *body);
+extern int __jcc_ast_enum_count(JCC *vm, Type *enum_type);
+extern EnumConstant *__jcc_ast_enum_at(JCC *vm, Type *enum_type, int index);
+extern const char *__jcc_ast_enum_constant_name(EnumConstant *ec);
+extern int __jcc_ast_enum_constant_value(EnumConstant *ec);
+extern Type *__jcc_ast_make_pointer(JCC *vm, Type *base);
+extern Type *__jcc_ast_make_array(JCC *vm, Type *base, int len);
 
 // Function generation
-extern Obj *jcc_ast_function(JCC *vm, const char *name, Type *return_type);
-extern void jcc_ast_function_add_param(JCC *vm, Obj *fn, const char *name,
+extern Obj *__jcc_ast_function(JCC *vm, const char *name, Type *return_type);
+extern void __jcc_ast_function_add_param(JCC *vm, Obj *fn, const char *name,
                                     Type *type);
-extern void jcc_ast_function_set_body(JCC *vm, Obj *fn, Node *body);
-extern void jcc_ast_function_set_static(Obj *fn, bool is_static);
-extern void jcc_ast_function_set_inline(Obj *fn, bool is_inline);
-extern void jcc_ast_function_set_variadic(Obj *fn, bool is_variadic);
-extern Node *jcc_ast_param_ref(JCC *vm, Obj *fn, const char *name);
+extern void __jcc_ast_function_set_body(JCC *vm, Obj *fn, Node *body);
+extern void __jcc_ast_function_set_static(Obj *fn, bool is_static);
+extern void __jcc_ast_function_set_inline(Obj *fn, bool is_inline);
+extern void __jcc_ast_function_set_variadic(Obj *fn, bool is_variadic);
+extern Node *__jcc_ast_param_ref(JCC *vm, Obj *fn, const char *name);
 
 // Ticket #58: AST dump
-extern void jcc_dump_tree(JCC *vm, Node *node);
-extern const char *jcc_dump_tree_to_string(JCC *vm, Node *node);
-extern void jcc_dump_ast_gen(JCC *vm, Node *node);
-extern const char *jcc_dump_ast_gen_to_string(JCC *vm, Node *node);
+extern void __jcc_dump_tree(JCC *vm, Node *node);
+extern const char *__jcc_dump_tree_to_string(JCC *vm, Node *node);
+extern void __jcc_dump_ast_gen(JCC *vm, Node *node);
+extern const char *__jcc_dump_ast_gen_to_string(JCC *vm, Node *node);
 
 // Ticket #78: source-located macro diagnostics
-extern void jcc_error_at(JCC *vm, Node *node, const char *fmt, ...);
-extern void jcc_warning_at(JCC *vm, Node *node, const char *fmt, ...);
+extern void __jcc_error_at(JCC *vm, Node *node, const char *fmt, ...);
+extern void __jcc_warning_at(JCC *vm, Node *node, const char *fmt, ...);
 
 // Previously unregistered statement builders (existing functions, now exposed)
-extern Node *jcc_ast_block(JCC *vm, Node **stmts, int count);
-extern Node *jcc_ast_expr_stmt(JCC *vm, Node *expr);
+extern Node *__jcc_ast_block(JCC *vm, Node **stmts, int count);
+extern Node *__jcc_ast_expr_stmt(JCC *vm, Node *expr);
 
 // Ticket #77: hygienic local variable injection
-extern Node *jcc_ast_local_var(JCC *vm, const char *name, Type *ty);
-extern Node *jcc_ast_local_var_unique(JCC *vm, Type *ty);
+extern Node *__jcc_ast_local_var(JCC *vm, const char *name, Type *ty);
+extern Node *__jcc_ast_local_var_unique(JCC *vm, Type *ty);
 
 // Ticket #51: new expression/statement builders
-extern Node *jcc_ast_assign(JCC *vm, Node *target, Node *value);
-extern Node *jcc_ast_member(JCC *vm, Node *obj, const char *name);
-extern Node *jcc_ast_funcall(JCC *vm, Node *callee, Node **args, int n);
-extern Node *jcc_ast_while(JCC *vm, Node *cond, Node *body);
-extern Node *jcc_ast_for(JCC *vm, Node *init, Node *cond, Node *inc, Node *body);
-extern Node *jcc_ast_do_while(JCC *vm, Node *body, Node *cond);
+extern Node *__jcc_ast_assign(JCC *vm, Node *target, Node *value);
+extern Node *__jcc_ast_member(JCC *vm, Node *obj, const char *name);
+extern Node *__jcc_ast_funcall(JCC *vm, Node *callee, Node **args, int n);
+extern Node *__jcc_ast_while(JCC *vm, Node *cond, Node *body);
+extern Node *__jcc_ast_for(JCC *vm, Node *init, Node *cond, Node *inc, Node *body);
+extern Node *__jcc_ast_do_while(JCC *vm, Node *body, Node *cond);
 
 // Ticket #1: quasi-quoting
-extern Node *jcc_quote(JCC *vm, const char *tmpl, ...);
-extern Node *jcc_quote_n(JCC *vm, const char *tmpl, Node **nodes, int count);
+extern Node *__jcc_quote(JCC *vm, const char *tmpl, ...);
+extern Node *__jcc_quote_n(JCC *vm, const char *tmpl, Node **nodes, int count);
 
 // Register reflection API functions as FFI
 static void register_reflection_ffi(JCC *vm) {
     // VM accessor
-    cc_register_cfunc(vm, "jcc_get_vm", (void *)jcc_get_vm, 0, 0);
+    cc_register_cfunc(vm, "__jcc_get_vm", (void *)__jcc_get_vm, 0, 0);
 
     // Type lookup
-    cc_register_cfunc(vm, "jcc_ast_find_type", (void *)jcc_ast_find_type, 2, 0);
-    cc_register_cfunc(vm, "jcc_ast_type_exists", (void *)jcc_ast_type_exists, 2, 0);
-    cc_register_cfunc(vm, "jcc_ast_get_type", (void *)jcc_ast_get_type, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_find_type", (void *)__jcc_ast_find_type, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_type_exists", (void *)__jcc_ast_type_exists, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_get_type", (void *)__jcc_ast_get_type, 2, 0);
 
     // Type construction
-    cc_register_cfunc(vm, "jcc_ast_make_pointer", (void *)jcc_ast_make_pointer, 2, 0);
-    cc_register_cfunc(vm, "jcc_ast_make_array", (void *)jcc_ast_make_array, 3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_make_pointer", (void *)__jcc_ast_make_pointer, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_make_array", (void *)__jcc_ast_make_array, 3, 0);
 
     // Literal construction
-    cc_register_cfunc(vm, "jcc_ast_int_literal", (void *)jcc_ast_int_literal, 2, 0);
-    cc_register_cfunc(vm, "jcc_ast_float_literal", (void *)jcc_ast_float_literal, 2, 0);
-    cc_register_cfunc(vm, "jcc_ast_string_literal", (void *)jcc_ast_string_literal, 2,
+    cc_register_cfunc(vm, "__jcc_ast_int_literal", (void *)__jcc_ast_int_literal, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_float_literal", (void *)__jcc_ast_float_literal, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_string_literal", (void *)__jcc_ast_string_literal, 2,
                       0);
-    cc_register_cfunc(vm, "jcc_ast_var_ref", (void *)jcc_ast_var_ref, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_var_ref", (void *)__jcc_ast_var_ref, 2, 0);
 
     // Expression construction
-    cc_register_cfunc(vm, "jcc_ast_binary", (void *)jcc_ast_binary, 4, 0);
-    cc_register_cfunc(vm, "jcc_ast_unary", (void *)jcc_ast_unary, 3, 0);
-    cc_register_cfunc(vm, "jcc_ast_cast", (void *)jcc_ast_cast, 3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_binary", (void *)__jcc_ast_binary, 4, 0);
+    cc_register_cfunc(vm, "__jcc_ast_unary", (void *)__jcc_ast_unary, 3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_cast", (void *)__jcc_ast_cast, 3, 0);
 
     // Statement construction
-    cc_register_cfunc(vm, "jcc_ast_return", (void *)jcc_ast_return, 2, 0);
-    cc_register_cfunc(vm, "jcc_ast_if", (void *)jcc_ast_if, 4, 0);
-    cc_register_cfunc(vm, "jcc_ast_switch", (void *)jcc_ast_switch, 2, 0);
-    cc_register_cfunc(vm, "jcc_ast_switch_add_case", (void *)jcc_ast_switch_add_case, 4,
+    cc_register_cfunc(vm, "__jcc_ast_return", (void *)__jcc_ast_return, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_if", (void *)__jcc_ast_if, 4, 0);
+    cc_register_cfunc(vm, "__jcc_ast_switch", (void *)__jcc_ast_switch, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_switch_add_case", (void *)__jcc_ast_switch_add_case, 4,
                       0);
-    cc_register_cfunc(vm, "jcc_ast_switch_set_default",
-                      (void *)jcc_ast_switch_set_default, 3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_switch_set_default",
+                      (void *)__jcc_ast_switch_set_default, 3, 0);
 
     // Ticket #58: AST dump
-    cc_register_cfunc(vm, "jcc_dump_tree",              (void *)jcc_dump_tree,              2, 0);
-    cc_register_cfunc(vm, "jcc_dump_tree_to_string",    (void *)jcc_dump_tree_to_string,    2, 0);
-    cc_register_cfunc(vm, "jcc_dump_ast_gen",           (void *)jcc_dump_ast_gen,           2, 0);
-    cc_register_cfunc(vm, "jcc_dump_ast_gen_to_string", (void *)jcc_dump_ast_gen_to_string, 2, 0);
+    cc_register_cfunc(vm, "__jcc_dump_tree",              (void *)__jcc_dump_tree,              2, 0);
+    cc_register_cfunc(vm, "__jcc_dump_tree_to_string",    (void *)__jcc_dump_tree_to_string,    2, 0);
+    cc_register_cfunc(vm, "__jcc_dump_ast_gen",           (void *)__jcc_dump_ast_gen,           2, 0);
+    cc_register_cfunc(vm, "__jcc_dump_ast_gen_to_string", (void *)__jcc_dump_ast_gen_to_string, 2, 0);
 
     // Ticket #78: source-located macro diagnostics (variadic)
-    cc_register_variadic_cfunc(vm, "jcc_error_at",   (void *)jcc_error_at,   3, 0);
-    cc_register_variadic_cfunc(vm, "jcc_warning_at", (void *)jcc_warning_at, 3, 0);
+    cc_register_variadic_cfunc(vm, "__jcc_error_at",   (void *)__jcc_error_at,   3, 0);
+    cc_register_variadic_cfunc(vm, "__jcc_warning_at", (void *)__jcc_warning_at, 3, 0);
 
     // Previously unregistered statement builders
-    cc_register_cfunc(vm, "jcc_ast_block",     (void *)jcc_ast_block,     3, 0);
-    cc_register_cfunc(vm, "jcc_ast_expr_stmt", (void *)jcc_ast_expr_stmt, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_block",     (void *)__jcc_ast_block,     3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_expr_stmt", (void *)__jcc_ast_expr_stmt, 2, 0);
 
     // Ticket #77: hygienic local variable injection
-    cc_register_cfunc(vm, "jcc_ast_local_var",        (void *)jcc_ast_local_var,        3, 0);
-    cc_register_cfunc(vm, "jcc_ast_local_var_unique",  (void *)jcc_ast_local_var_unique,  2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_local_var",        (void *)__jcc_ast_local_var,        3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_local_var_unique",  (void *)__jcc_ast_local_var_unique,  2, 0);
 
     // Ticket #51: new expression/statement builders
-    cc_register_cfunc(vm, "jcc_ast_assign",   (void *)jcc_ast_assign,   3, 0);
-    cc_register_cfunc(vm, "jcc_ast_member",   (void *)jcc_ast_member,   3, 0);
-    cc_register_cfunc(vm, "jcc_ast_funcall",  (void *)jcc_ast_funcall,  4, 0);
-    cc_register_cfunc(vm, "jcc_ast_while",    (void *)jcc_ast_while,    3, 0);
-    cc_register_cfunc(vm, "jcc_ast_for",      (void *)jcc_ast_for,      5, 0);
-    cc_register_cfunc(vm, "jcc_ast_do_while", (void *)jcc_ast_do_while, 3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_assign",   (void *)__jcc_ast_assign,   3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_member",   (void *)__jcc_ast_member,   3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_funcall",  (void *)__jcc_ast_funcall,  4, 0);
+    cc_register_cfunc(vm, "__jcc_ast_while",    (void *)__jcc_ast_while,    3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_for",      (void *)__jcc_ast_for,      5, 0);
+    cc_register_cfunc(vm, "__jcc_ast_do_while", (void *)__jcc_ast_do_while, 3, 0);
 
     // Enum reflection
-    cc_register_cfunc(vm, "jcc_ast_enum_count", (void *)jcc_ast_enum_count, 2, 0);
-    cc_register_cfunc(vm, "jcc_ast_enum_at", (void *)jcc_ast_enum_at, 3, 0);
-    cc_register_cfunc(vm, "jcc_ast_enum_constant_name",
-                      (void *)jcc_ast_enum_constant_name, 1, 0);
-    cc_register_cfunc(vm, "jcc_ast_enum_constant_value",
-                      (void *)jcc_ast_enum_constant_value, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_enum_count", (void *)__jcc_ast_enum_count, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_enum_at", (void *)__jcc_ast_enum_at, 3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_enum_constant_name",
+                      (void *)__jcc_ast_enum_constant_name, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_enum_constant_value",
+                      (void *)__jcc_ast_enum_constant_value, 1, 0);
 
     // Function generation
-    cc_register_cfunc(vm, "jcc_ast_function", (void *)jcc_ast_function, 3, 0);
-    cc_register_cfunc(vm, "jcc_ast_function_add_param",
-                      (void *)jcc_ast_function_add_param, 4, 0);
-    cc_register_cfunc(vm, "jcc_ast_function_set_body",
-                      (void *)jcc_ast_function_set_body, 3, 0);
-    cc_register_cfunc(vm, "jcc_ast_function_set_static",
-                      (void *)jcc_ast_function_set_static, 2, 0);
-    cc_register_cfunc(vm, "jcc_ast_function_set_inline",
-                      (void *)jcc_ast_function_set_inline, 2, 0);
-    cc_register_cfunc(vm, "jcc_ast_function_set_variadic",
-                      (void *)jcc_ast_function_set_variadic, 2, 0);
-    cc_register_cfunc(vm, "jcc_ast_param_ref", (void *)jcc_ast_param_ref, 3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_function", (void *)__jcc_ast_function, 3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_function_add_param",
+                      (void *)__jcc_ast_function_add_param, 4, 0);
+    cc_register_cfunc(vm, "__jcc_ast_function_set_body",
+                      (void *)__jcc_ast_function_set_body, 3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_function_set_static",
+                      (void *)__jcc_ast_function_set_static, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_function_set_inline",
+                      (void *)__jcc_ast_function_set_inline, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_function_set_variadic",
+                      (void *)__jcc_ast_function_set_variadic, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_param_ref", (void *)__jcc_ast_param_ref, 3, 0);
 
     // Ticket #1: quasi-quoting
-    cc_register_variadic_cfunc(vm, "jcc_quote",   (void *)jcc_quote,   2, 0);
-    cc_register_cfunc(vm,          "jcc_quote_n", (void *)jcc_quote_n, 4, 0);
+    cc_register_variadic_cfunc(vm, "__jcc_quote",   (void *)__jcc_quote,   2, 0);
+    cc_register_cfunc(vm,          "__jcc_quote_n", (void *)__jcc_quote_n, 4, 0);
 }
 
 static Token *copy_macro_token(JCC *vm, Token *tok) {
@@ -462,7 +462,7 @@ static Node *execute_pragma_macro(JCC *vm, PragmaMacro *pm, Node *args,
         printf("Executing pragma macro '%s' with %d args...\n", pm->name,
                arg_count);
 
-    // Set global VM pointer for jcc_get_vm()
+    // Set global VM pointer for __jcc_get_vm()
     __jcc_current_vm = vm;
 
     // Save VM execution state

@@ -1,29 +1,29 @@
-// Test ticket #1: jcc_quote / jcc_quote_n quasi-quoting
+// Test ticket #1: __jcc_quote / __jcc_quote_n quasi-quoting
 
 #include <reflection.h>
 
 // ---- Expression splice: positional $N ------------------------------------
 // Produces: a + b * a  (reuses $1)
 #pragma macro
-JCC_Node *add_mul(JCC_Node *a, JCC_Node *b) {
-    JCC *vm = jcc_get_vm();
-    return jcc_quote(vm, "$1 + $2 * $1", a, b);
+_Node *add_mul(_Node *a, _Node *b) {
+    _VirtualMachine *vm = __jcc_get_vm();
+    return __jcc_quote(vm, "$1 + $2 * $1", a, b);
 }
 
 // ---- Expression splice: reorder ($2 * $1 + $2) ---------------------------
 // Produces: y*x + y
 #pragma macro
-JCC_Node *quad(JCC_Node *x, JCC_Node *y) {
-    JCC *vm = jcc_get_vm();
-    return jcc_quote(vm, "$2 * $1 + $2", x, y);
+_Node *quad(_Node *x, _Node *y) {
+    _VirtualMachine *vm = __jcc_get_vm();
+    return __jcc_quote(vm, "$2 * $1 + $2", x, y);
 }
 
 // ---- Statement splice: return $1; ----------------------------------------
 // Must be called in statement position (not as an expression).
 #pragma macro
-JCC_Node *ret_val(JCC_Node *v) {
-    JCC *vm = jcc_get_vm();
-    return jcc_quote(vm, "return $1;", v);
+_Node *ret_val(_Node *v) {
+    _VirtualMachine *vm = __jcc_get_vm();
+    return __jcc_quote(vm, "return $1;", v);
 }
 
 int get_99(void) {
@@ -34,33 +34,33 @@ int get_99(void) {
 // $$ maps to $1, $2, ... sequentially (left-to-right).
 // Produces: a + b
 #pragma macro
-JCC_Node *sum_incr(JCC_Node *a, JCC_Node *b) {
-    JCC *vm = jcc_get_vm();
-    return jcc_quote(vm, "$$ + $$", a, b);
+_Node *sum_incr(_Node *a, _Node *b) {
+    _VirtualMachine *vm = __jcc_get_vm();
+    return __jcc_quote(vm, "$$ + $$", a, b);
 }
 
-// ---- jcc_quote_n: array form ---------------------------------------------
+// ---- __jcc_quote_n: array form ---------------------------------------------
 // Produces: a + b + c
 #pragma macro
-JCC_Node *add3(JCC_Node *a, JCC_Node *b, JCC_Node *c) {
-    JCC *vm = jcc_get_vm();
-    JCC_Node *args[3] = { a, b, c };
-    return jcc_quote_n(vm, "$1 + $2 + $3", args, 3);
+_Node *add3(_Node *a, _Node *b, _Node *c) {
+    _VirtualMachine *vm = __jcc_get_vm();
+    _Node *args[3] = { a, b, c };
+    return __jcc_quote_n(vm, "$1 + $2 + $3", args, 3);
 }
 
 // ---- No splice points (plain expression) ---------------------------------
 #pragma macro
-JCC_Node *const_expr(void) {
-    JCC *vm = jcc_get_vm();
-    return jcc_quote(vm, "6 * 7");
+_Node *const_expr(void) {
+    _VirtualMachine *vm = __jcc_get_vm();
+    return __jcc_quote(vm, "6 * 7");
 }
 
 // ---- If-statement template -----------------------------------------------
 // Returns one of two values based on sign; invoked as statement in function body.
 #pragma macro
-JCC_Node *clamp_zero(JCC_Node *val) {
-    JCC *vm = jcc_get_vm();
-    return jcc_quote(vm, "if ($1 < 0) return 0; else return $1;", val);
+_Node *clamp_zero(_Node *val) {
+    _VirtualMachine *vm = __jcc_get_vm();
+    return __jcc_quote(vm, "if ($1 < 0) return 0; else return $1;", val);
 }
 
 int clamp(int x) {

@@ -5,24 +5,24 @@
 int add_numbers(int a, int b);
 
 #pragma macro
-JCC_Node *gen_add_func(void) {
-    JCC *vm = jcc_get_vm();
+_Node *gen_add_func(void) {
+    _VirtualMachine *vm = __jcc_get_vm();
 
-    JCC_Type *int_type = jcc_ast_get_type(vm, "int");
-    JCC_Obj *fn = jcc_ast_function(vm, "add_numbers", int_type);
+    _Type *int_type = __jcc_ast_get_type(vm, "int");
+    _Obj *fn = __jcc_ast_function(vm, "add_numbers", int_type);
 
     // Add parameters
-    jcc_ast_function_add_param(vm, fn, "a", int_type);
-    jcc_ast_function_add_param(vm, fn, "b", int_type);
+    __jcc_ast_function_add_param(vm, fn, "a", int_type);
+    __jcc_ast_function_add_param(vm, fn, "b", int_type);
 
     // Body: return a + b;
-    JCC_Node *a_ref = jcc_ast_param_ref(vm, fn, "a");
-    JCC_Node *b_ref = jcc_ast_param_ref(vm, fn, "b");
-    JCC_Node *sum = jcc_ast_binary(vm, JCC_ND_ADD, a_ref, b_ref);
-    JCC_Node *body = jcc_ast_return(vm, sum);
-    jcc_ast_function_set_body(vm, fn, body);
+    _Node *a_ref = __jcc_ast_param_ref(vm, fn, "a");
+    _Node *b_ref = __jcc_ast_param_ref(vm, fn, "b");
+    _Node *sum = __jcc_ast_binary(vm, _ADD, a_ref, b_ref);
+    _Node *body = __jcc_ast_return(vm, sum);
+    __jcc_ast_function_set_body(vm, fn, body);
 
-    return jcc_ast_int_literal(vm, 0);
+    return __jcc_ast_int_literal(vm, 0);
 }
 
 int main(void) {

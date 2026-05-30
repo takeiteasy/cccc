@@ -1,38 +1,38 @@
-// Test ticket #51: jcc_ast_assign, jcc_ast_member, jcc_ast_funcall builders
+// Test ticket #51: __jcc_ast_assign, __jcc_ast_member, __jcc_ast_funcall builders
 
 #include <reflection.h>
 
-// ---- jcc_ast_assign test -----------------------------------------------
+// ---- __jcc_ast_assign test -----------------------------------------------
 // Macro that returns an assignment expression (target = value).
 // Used as: int x; int y = set_var(x, 99);
 // After expansion: int y = (x = 99);  => y == 99, x == 99
 #pragma macro
-JCC_Node *set_var(JCC_Node *target, JCC_Node *value) {
-    JCC *vm = jcc_get_vm();
-    return jcc_ast_assign(vm, target, value);
+_Node *set_var(_Node *target, _Node *value) {
+    _VirtualMachine *vm = __jcc_get_vm();
+    return __jcc_ast_assign(vm, target, value);
 }
 
-// ---- jcc_ast_member test -----------------------------------------------
+// ---- __jcc_ast_member test -----------------------------------------------
 // Macro that returns obj.field (struct member access).
 struct Point { int x; int y; };
 
 #pragma macro
-JCC_Node *get_x(JCC_Node *pt) {
-    JCC *vm = jcc_get_vm();
-    return jcc_ast_member(vm, pt, "x");
+_Node *get_x(_Node *pt) {
+    _VirtualMachine *vm = __jcc_get_vm();
+    return __jcc_ast_member(vm, pt, "x");
 }
 
-// ---- jcc_ast_funcall test ----------------------------------------------
+// ---- __jcc_ast_funcall test ----------------------------------------------
 // Helper function called by the generated funcall node
 int triple(int n) { return n * 3; }
 
 // Macro that generates: triple(arg)
 #pragma macro
-JCC_Node *call_triple(JCC_Node *arg) {
-    JCC *vm = jcc_get_vm();
-    JCC_Node *callee = jcc_ast_var_ref(vm, "triple");
-    JCC_Node *args[1] = { arg };
-    return jcc_ast_funcall(vm, callee, args, 1);
+_Node *call_triple(_Node *arg) {
+    _VirtualMachine *vm = __jcc_get_vm();
+    _Node *callee = __jcc_ast_var_ref(vm, "triple");
+    _Node *args[1] = { arg };
+    return __jcc_ast_funcall(vm, callee, args, 1);
 }
 
 int main(void) {

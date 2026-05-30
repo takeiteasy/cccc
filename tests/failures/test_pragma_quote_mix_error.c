@@ -5,10 +5,10 @@
 #include <reflection.h>
 
 #pragma macro
-JCC_Node *bad_mix(JCC_Node *a, JCC_Node *b) {
-    JCC *vm = jcc_get_vm();
+_Node *bad_mix(_Node *a, _Node *b) {
+    _VirtualMachine *vm = __jcc_get_vm();
     // $1 and $$ in the same template — must error
-    return jcc_quote(vm, "$1 + $$", a, b);
+    return __jcc_quote(vm, "$1 + $$", a, b);
 }
 
 int main(void) {

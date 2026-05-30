@@ -75,6 +75,11 @@ LIB_OUT := libjcc$(DYLIB)
 
 default: $(EXE_OUT)
 
+INCLUDE_HEADERS := $(wildcard include/*.h include/**/*.h)
+
+src/std.c: $(INCLUDE_HEADERS) std.py
+	python3 std.py
+
 $(EXE_OUT): $(SRCS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
