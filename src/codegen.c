@@ -1335,14 +1335,18 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         }
 
         if (ffi_idx >= 0) {
-            // FFI call: args go in REG_A0-A7/FREG_A0-A7, metadata in operands
+            // FFI call: args are stored as source-order 64-bit slots.
+            // Slots 0-7 use REG_A0-A7; slots 8+ are pushed on the VM stack.
             reset_temp_regs();
 
             // Count arguments and compute double_arg_mask
             int nargs = 0;
             uint64_t double_arg_mask = 0;
             for (Node *arg = node->args; arg; arg = arg->next) {
-                if (nargs < 64 && is_flonum(arg->ty)) {
+                if (is_flonum(arg->ty)) {
+                    if (nargs >= 64)
+                        error_tok(vm, arg->tok,
+                                  "too many floating-point FFI arguments");
                     double_arg_mask |= (1ULL << nargs);
                 }
                 nargs++;
@@ -1360,7 +1364,21 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                 }
             }
 
-            // Check which arguments contain function calls (to handle register
+            int num_stack_args = (nargs > 8) ? (nargs - 8) : 0;
+
+            // Push overflow args (8+) right-to-left so vm->sp[0] is arg 8.
+            for (int i = nargs - 1; i >= 8; i--) {
+                Node *arg = arg_array[i];
+                if (is_flonum(arg->ty)) {
+                    gen_expr(vm, arg, FREG_A0);
+                    emit_rr(vm, FR2R, REG_T0, FREG_A0);
+                } else {
+                    gen_expr(vm, arg, REG_T0);
+                }
+                emit_psh3(vm, REG_T0);
+            }
+
+            // Check which register arguments contain function calls (to handle
             // clobbering). Nested FFI calls will clobber REG_A0-A7.
             bool *arg_has_call = calloc(nargs > 0 ? nargs : 1, sizeof(bool));
             if (!arg_has_call)
@@ -1369,58 +1387,37 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                 arg_has_call[i] = contains_funcall(arg_array[i]);
             }
 
-            // Evaluate arguments into registers A0-A7
+            // Evaluate source slots 0-7 into REG_A0-A7.
             // CRITICAL: If arg[i] contains a function call, it will clobber
             // REG_A0-A7. We must save any previous args before evaluating such
             // an arg.
-            int int_arg_idx = 0;
-            int float_arg_idx = 0;
-            int saved_int_count = 0;
-            int saved_float_count = 0;
-
+            int saved_reg_count = 0;
             for (int i = 0; i < nargs && i < 8; i++) {
                 Node *arg = arg_array[i];
 
                 // Before evaluating this arg, check if it contains a function
                 // call. If so, save all previously-evaluated arg registers.
-                if (arg_has_call[i] && (int_arg_idx > 0 || float_arg_idx > 0)) {
-                    // Push int regs in reverse order (so we pop correctly)
-                    for (int j = int_arg_idx - 1; j >= 0; j--) {
+                if (arg_has_call[i] && i > 0) {
+                    for (int j = i - 1; j >= 0; j--) {
                         emit_psh3(vm, REG_A0 + j);
                     }
-                    saved_int_count = int_arg_idx;
-
-                    // Push float regs: convert to int bits, push
-                    for (int j = float_arg_idx - 1; j >= 0; j--) {
-                        emit_rr(vm, FR2R, REG_T0, FREG_A0 + j);
-                        emit_psh3(vm, REG_T0);
-                    }
-                    saved_float_count = float_arg_idx;
+                    saved_reg_count = i;
                 }
 
                 if (is_flonum(arg->ty)) {
-                    gen_expr(vm, arg, FREG_A0 + float_arg_idx);
-                    float_arg_idx++;
+                    gen_expr(vm, arg, FREG_A0);
+                    emit_rr(vm, FR2R, REG_A0 + i, FREG_A0);
                 } else {
-                    gen_expr(vm, arg, REG_A0 + int_arg_idx);
-                    int_arg_idx++;
+                    gen_expr(vm, arg, REG_A0 + i);
                 }
 
                 // After evaluating this arg, if we saved previous regs, restore
                 // them now.
-                if (arg_has_call[i] &&
-                    (saved_int_count > 0 || saved_float_count > 0)) {
-                    // Restore float regs (were pushed last, pop first)
-                    for (int j = 0; j < saved_float_count; j++) {
-                        emit_pop3(vm, REG_T0);
-                        emit_rr(vm, R2FR, FREG_A0 + j, REG_T0);
-                    }
-                    // Restore int regs
-                    for (int j = 0; j < saved_int_count; j++) {
+                if (arg_has_call[i] && saved_reg_count > 0) {
+                    for (int j = 0; j < saved_reg_count; j++) {
                         emit_pop3(vm, REG_A0 + j);
                     }
-                    saved_int_count = 0;
-                    saved_float_count = 0;
+                    saved_reg_count = 0;
                 }
             }
 
@@ -1433,6 +1430,10 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             emit_word(vm, ffi_idx);
             emit_word(vm, nargs);
             emit_word(vm, (long long)double_arg_mask);
+
+            if (num_stack_args > 0) {
+                emit_with_arg(vm, ADJ, num_stack_args);
+            }
 
             // Reset temp regs after call
             reset_temp_regs();

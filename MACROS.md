@@ -72,6 +72,42 @@ int main(void) {
 }
 ```
 
+## Quasi-Quoting
+
+For many macros, writing a C template is clearer than manually composing
+builder calls. `jcc_quote()` parses an expression or statement template during
+macro execution and returns the generated AST node. Use `$1`, `$2`, ... to
+splice macro argument nodes into the template.
+
+```c
+#pragma macro
+JCC_Node *square(JCC_Node *x) {
+    return JCC_QUOTE("($1) * ($1)", x);
+}
+
+int main(void) {
+    return square(6) - 36;
+}
+```
+
+Numbered splice points can be reused or reordered. `$$` is also supported for
+sequential left-to-right splices, but do not mix `$$` and `$N` in the same
+template.
+
+Use `jcc_quote_n()` when the number of splice nodes is dynamic or too large for
+the variadic `jcc_quote()` call:
+
+```c
+#pragma macro
+JCC_Node *add_three(JCC_Node *a, JCC_Node *b, JCC_Node *c) {
+    JCC_Node *nodes[3] = {a, b, c};
+    return jcc_quote_n(jcc_get_vm(), "$1 + $2 + $3", nodes, 3);
+}
+```
+
+Templates may be expressions or statements. Statement templates are useful when
+combined with block or control-flow builders.
+
 ## Type Reflection
 
 One of the most powerful features is type introspection. You can inspect types defined in your program during compilation.
@@ -138,6 +174,20 @@ JCC_Node *get_first_enum_name(void) {
 |----------|-------------|
 | `jcc_get_vm()` | Get the current VM context (required for all API calls) |
 
+### Diagnostics
+
+| Function | Convenience Macro | Description |
+|----------|-------------------|-------------|
+| `jcc_error_at(vm, node, fmt, ...)` | `JCC_ERROR_AT(node, ...)` | Emit a source-located compiler error at `node` |
+| `jcc_warning_at(vm, node, fmt, ...)` | `JCC_WARNING_AT(node, ...)` | Emit a source-located compiler warning at `node` |
+
+### Quoting
+
+| Function | Convenience Macro | Description |
+|----------|-------------------|-------------|
+| `jcc_quote(vm, tmpl, ...)` | `JCC_QUOTE(tmpl, ...)` | Parse a C template and splice `JCC_Node*` arguments |
+| `jcc_quote_n(vm, tmpl, nodes, count)` | `JCC_QUOTE_N(tmpl, nodes, count)` | Array-form quote for dynamic or larger splice lists |
+
 ### Type Lookup
 
 | Function | Convenience Macro | Description |
@@ -157,6 +207,11 @@ JCC_Node *get_first_enum_name(void) {
 | `jcc_ast_type_is_const(ty)` | Check if const-qualified |
 | `jcc_ast_type_base(ty)` | For pointer/array: get base type |
 | `jcc_ast_type_array_len(ty)` | For arrays: get length (-1 if not array) |
+| `jcc_ast_type_return_type(ty)` | For functions: get return type |
+| `jcc_ast_type_param_count(ty)` | For functions: get parameter count |
+| `jcc_ast_type_param_at(ty, index)` | For functions: get parameter type |
+| `jcc_ast_type_is_variadic(ty)` | For functions: check variadic flag |
+| `jcc_ast_type_name(ty)` | Get the type name when available |
 
 ### Type Construction
 
@@ -174,6 +229,10 @@ JCC_Node *get_first_enum_name(void) {
 | `jcc_ast_enum_find(vm, ty, name)` | `JCC_AST_ENUM_FIND(ty, name)` | Find constant by name |
 | `jcc_ast_enum_constant_name(ec)` | `JCC_AST_ENUM_CONSTANT_NAME(ec)` | Get constant name |
 | `jcc_ast_enum_constant_value(ec)` | `JCC_AST_ENUM_CONSTANT_VALUE(ec)` | Get constant value |
+| `jcc_ast_enum_name(ty)` | - | Get enum type name |
+| `jcc_ast_enum_value_count(ty)` | - | Get enum value count |
+| `jcc_ast_enum_value_name(ty, i)` | - | Get enum value name at index |
+| `jcc_ast_enum_value(ty, i)` | - | Get enum value at index |
 
 ### Struct/Union Reflection
 
@@ -185,6 +244,21 @@ JCC_Node *get_first_enum_name(void) {
 | `jcc_ast_member_name(m)` | `JCC_AST_MEMBER_NAME(m)` | Get member name |
 | `jcc_ast_member_type(m)` | `JCC_AST_MEMBER_TYPE(m)` | Get member type |
 | `jcc_ast_member_offset(m)` | `JCC_AST_MEMBER_OFFSET(m)` | Get member offset in bytes |
+| `jcc_ast_member_is_bitfield(m)` | - | Check if member is a bitfield |
+| `jcc_ast_member_bitfield_width(m)` | - | Get bitfield width |
+
+### Global Symbol Reflection
+
+| Function | Convenience Macro | Description |
+|----------|-------------------|-------------|
+| `jcc_ast_find_global(vm, name)` | `JCC_AST_FIND_GLOBAL(name)` | Find global symbol by name |
+| `jcc_ast_global_count(vm)` | `JCC_AST_GLOBAL_COUNT()` | Count global symbols |
+| `jcc_ast_global_at(vm, i)` | `JCC_AST_GLOBAL_AT(i)` | Get global symbol at index |
+| `jcc_ast_obj_name(obj)` | - | Get object name |
+| `jcc_ast_obj_type(obj)` | - | Get object type |
+| `jcc_ast_obj_is_function(obj)` | - | Check if object is a function |
+| `jcc_ast_obj_is_definition(obj)` | - | Check if object has a definition |
+| `jcc_ast_obj_is_static(obj)` | - | Check if object has static linkage |
 
 ### AST Construction - Literals
 
@@ -194,6 +268,7 @@ JCC_Node *get_first_enum_name(void) {
 | `jcc_ast_float_literal(vm, val)` | `JCC_AST_FLOAT_LITERAL(val)` | Create float literal |
 | `jcc_ast_string_literal(vm, str)` | `JCC_AST_STRING_LITERAL(str)` | Create string literal |
 | `jcc_ast_var_ref(vm, name)` | `JCC_AST_VAR_REF(name)` | Reference a variable by name |
+| `jcc_ast_param_ref(vm, fn, name)` | `JCC_AST_PARAM_REF(fn, name)` | Reference a generated function parameter |
 
 ### AST Construction - Expressions
 
@@ -202,6 +277,9 @@ JCC_Node *get_first_enum_name(void) {
 | `jcc_ast_binary(vm, op, l, r)` | `JCC_AST_BINARY(op, l, r)` | Binary operation (JCC_ND_ADD, JCC_ND_MUL, etc.) |
 | `jcc_ast_unary(vm, op, expr)` | `JCC_AST_UNARY(op, expr)` | Unary operation (JCC_ND_NEG, JCC_ND_NOT, etc.) |
 | `jcc_ast_cast(vm, expr, ty)` | `JCC_AST_CAST(expr, ty)` | Type cast |
+| `jcc_ast_assign(vm, target, value)` | `JCC_AST_ASSIGN(target, value)` | Assignment expression |
+| `jcc_ast_member(vm, obj, name)` | `JCC_AST_MEMBER(obj, name)` | Struct/union member access |
+| `jcc_ast_funcall(vm, callee, args, n)` | `JCC_AST_FUNCALL(callee, args, n)` | Function call expression |
 
 ### AST Construction - Statements
 
@@ -214,6 +292,11 @@ JCC_Node *get_first_enum_name(void) {
 | `jcc_ast_switch_add_case(vm, sw, val, body)` | `JCC_AST_SWITCH_ADD_CASE(sw, v, b)` | Add case to switch |
 | `jcc_ast_switch_set_default(vm, sw, body)` | `JCC_AST_SWITCH_SET_DEFAULT(sw, b)` | Set default case |
 | `jcc_ast_expr_stmt(vm, expr)` | `JCC_AST_EXPR_STMT(expr)` | Expression statement |
+| `jcc_ast_local_var(vm, name, ty)` | `JCC_AST_LOCAL_VAR(name, ty)` | Inject a named local variable |
+| `jcc_ast_local_var_unique(vm, ty)` | `JCC_AST_LOCAL_VAR_UNIQUE(ty)` | Inject a hygienic temporary local |
+| `jcc_ast_while(vm, cond, body)` | `JCC_AST_WHILE(cond, body)` | While loop |
+| `jcc_ast_for(vm, init, cond, inc, body)` | `JCC_AST_FOR(init, cond, inc, body)` | For loop |
+| `jcc_ast_do_while(vm, body, cond)` | `JCC_AST_DO_WHILE(body, cond)` | Do-while loop |
 
 ### AST Construction - Function Generation
 
@@ -225,6 +308,15 @@ JCC_Node *get_first_enum_name(void) {
 | `jcc_ast_function_set_static(fn, is_static)` | - | Set static linkage |
 | `jcc_ast_function_set_inline(fn, is_inline)` | - | Set inline attribute |
 | `jcc_ast_function_set_variadic(fn, is_variadic)` | - | Set variadic attribute |
+
+### AST Dumps
+
+| Function | Convenience Macro | Description |
+|----------|-------------------|-------------|
+| `jcc_dump_tree(vm, node)` | `JCC_DUMP_TREE(node)` | Print a human-readable AST tree |
+| `jcc_dump_tree_to_string(vm, node)` | `JCC_DUMP_TREE_TO_STRING(node)` | Render a human-readable AST tree to a string |
+| `jcc_dump_ast_gen(vm, node)` | `JCC_DUMP_AST_GEN(node)` | Print builder calls that reconstruct a node |
+| `jcc_dump_ast_gen_to_string(vm, node)` | `JCC_DUMP_AST_GEN_TO_STRING(node)` | Render builder calls to a string |
 
 ### Node Kinds (for jcc_ast_binary/jcc_ast_unary)
 
@@ -330,6 +422,28 @@ int main(void) {
     return add_numbers(20, 22) - 42;  // Returns 0
 }
 ```
+
+## Hygienic Local Variables
+
+Macros that expand into statements often need temporary locals. Prefer
+`jcc_ast_local_var_unique()` for these temporaries so generated names cannot
+collide with user variables:
+
+```c
+#pragma macro
+JCC_Node *with_temp(JCC_Node *value) {
+    JCC *vm = jcc_get_vm();
+    JCC_Type *int_ty = JCC_AST_GET_TYPE("int");
+    JCC_Node *tmp = JCC_AST_LOCAL_VAR_UNIQUE(int_ty);
+    JCC_Node *set_tmp = JCC_AST_EXPR_STMT(JCC_AST_ASSIGN(tmp, value));
+    JCC_Node *ret_tmp = JCC_AST_RETURN(tmp);
+    JCC_Node *stmts[2] = {set_tmp, ret_tmp};
+    return JCC_AST_BLOCK(stmts, 2);
+}
+```
+
+Use `jcc_ast_local_var()` only when the generated local must have a deliberate,
+user-visible name.
 
 ## Limitations
 

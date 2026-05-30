@@ -1609,9 +1609,9 @@ void cc_register_cfunc_ex(JCC *vm, const char *name, void *func_ptr,
  @param num_fixed_args Number of fixed arguments before the ... (e.g., printf
  has 1: format string).
  @param returns_double 1 if function returns double, 0 if returns long long.
- @discussion This function is only available when JCC_HAS_FFI is defined. When
- libffi is not available, use fixed-argument wrappers instead. Variadic
- functions accept a variable number of arguments after the fixed arguments.
+ @discussion Variadic functions accept a variable number of arguments after the
+ fixed arguments. JCC uses libffi when JCC_HAS_FFI is enabled, and otherwise
+ uses the platform native inline-assembly FFI implementation when available.
              Example: printf has 1 fixed arg (format), fprintf has 2 (stream,
  format).
 */

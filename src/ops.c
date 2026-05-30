@@ -1768,19 +1768,25 @@ int op_CALLF_fn(JCC *vm) {
                ff->name, actual_nargs, ff->num_fixed_args, ff->is_variadic,
                (unsigned long long)double_arg_mask);
 
-    // Collect arguments from registers
-    long long args[8];
-    for (int i = 0; i < actual_nargs && i < 8; i++) {
-        if (double_arg_mask & (1ULL << i)) {
-            // This arg is a double - stored in fregs
-            args[i] = *(long long *)&vm->fregs[FREG_A0 + i];
-        } else {
-            // Integer/pointer arg - stored in regs
+    // Collect source-order 64-bit argument slots. Codegen places slots 0-7 in
+    // REG_A0-A7 and pushes slots 8+ at vm->sp[0...].
+    long long *args =
+        calloc(actual_nargs > 0 ? actual_nargs : 1, sizeof(long long));
+    if (!args) {
+        printf("error: failed to allocate args for FFI\n");
+        return -1;
+    }
+
+    for (int i = 0; i < actual_nargs; i++) {
+        if (i < 8)
             args[i] = vm->regs[REG_A0 + i];
-        }
+        else
+            args[i] = vm->sp[i - 8];
+
         if (vm->debug_vm)
             printf("  arg[%d] = 0x%llx (%lld) [%s]\n", i, args[i], args[i],
-                   (double_arg_mask & (1ULL << i)) ? "double" : "int");
+                   (i < 64 && (double_arg_mask & (1ULL << i))) ? "double"
+                                                                : "int");
     }
 
 #ifdef JCC_HAS_FFI
@@ -1794,6 +1800,7 @@ int op_CALLF_fn(JCC *vm) {
         arg_types = malloc(actual_nargs * sizeof(ffi_type *));
         if (!arg_types) {
             printf("error: failed to allocate arg types for FFI\n");
+            free(args);
             return -1;
         }
 
@@ -1819,12 +1826,21 @@ int op_CALLF_fn(JCC *vm) {
         printf("error: failed to prepare FFI cif (status=%d)\n", status);
         if (arg_types)
             free(arg_types);
+        free(args);
         return -1;
     }
 
     // Build arg pointers array
-    void *arg_ptrs[8];
-    for (int i = 0; i < actual_nargs && i < 8; i++) {
+    void **arg_ptrs =
+        malloc((actual_nargs > 0 ? actual_nargs : 1) * sizeof(void *));
+    if (!arg_ptrs) {
+        printf("error: failed to allocate arg pointers for FFI\n");
+        if (arg_types)
+            free(arg_types);
+        free(args);
+        return -1;
+    }
+    for (int i = 0; i < actual_nargs; i++) {
         arg_ptrs[i] = &args[i];
     }
 
@@ -1841,6 +1857,7 @@ int op_CALLF_fn(JCC *vm) {
 
     if (arg_types)
         free(arg_types);
+    free(arg_ptrs);
 
 #else
     // Fallback implementation without libffi
@@ -1894,7 +1911,7 @@ int op_CALLF_fn(JCC *vm) {
     register double d6 __asm__("d6") = 0.0;
     register double d7 __asm__("d7") = 0.0;
 
-    for (int i = 0; i < actual_nargs && i < 8; i++) {
+    for (int i = 0; i < actual_nargs; i++) {
         int is_double = (i < 64 && (double_arg_mask & (1ULL << i)));
         int is_variadic_arg = (i >= num_fixed);
 
@@ -2070,7 +2087,7 @@ int op_CALLF_fn(JCC *vm) {
     register double xmm6 __asm__("xmm6") = 0.0;
     register double xmm7 __asm__("xmm7") = 0.0;
 
-    for (int i = 0; i < actual_nargs && i < 8; i++) {
+    for (int i = 0; i < actual_nargs; i++) {
         int is_double = (i < 64 && (double_arg_mask & (1ULL << i)));
         int is_variadic_arg = (i >= num_fixed);
 
@@ -2231,6 +2248,7 @@ int op_CALLF_fn(JCC *vm) {
     "FFI inline assembly not implemented for this platform. Build with -DJCC_HAS_FFI to use libffi."
 #endif
 #endif // JCC_HAS_FFI
+    free(args);
     return 0;
 }
 

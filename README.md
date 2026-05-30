@@ -131,9 +131,11 @@ JCC provides two modes for variadic foreign functions:
 
 - **Native Inline Assembly**
   - **AAPCS64** (macOS ARM64)
+  - Supports stack-passed variadic arguments beyond the first 8 VM argument slots
 - **Optional libffi support** (Other platforms)
   - Build with `make JCC_HAS_FFI=1` to enable libffi support (see [BUILD](#build))
   - Use libffi if your platform isn't supported
+  - Supports variadic calls with dynamically marshalled argument lists
 
 ### Inline Assembly
 
