@@ -686,8 +686,7 @@ int cc_run(JCC *vm, int argc, char **argv) {
     vm->pc = vm->text_seg + main_addr;
 
     // Setup stack
-    // PLACEHOLDER: No guard page or bounds check on vm->sp. Deep recursion
-    // or large stack frames can overflow stack_seg and corrupt memory.
+    vm->stack_base = vm->stack_seg;
     vm->sp = (long long *)((char *)vm->stack_seg + vm->poolsize * sizeof(long long));
     vm->bp = vm->sp;  // Initialize base pointer to top of stack
 

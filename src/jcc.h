@@ -1349,6 +1349,9 @@ struct JCC {
     long long *initial_sp; // Initial stack pointer (for exit detection)
     long long *initial_bp; // Initial base pointer (for exit detection)
 
+    // Stack bounds checking
+    long long *stack_base; // Lower bound of stack (stack_seg start)
+
     // Memory Segments
     long long *text_seg;     // Text segment (bytecode instructions)
     long long *text_ptr;     // Current write position (for code generation)

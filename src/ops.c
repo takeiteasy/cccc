@@ -27,6 +27,25 @@
 #include "jcc.h"
 #include <limits.h>
 
+#define STACK_GUARD_SIZE 16
+
+static inline int check_stack_overflow(JCC *vm, int slots_needed) {
+    if (vm->sp - slots_needed - STACK_GUARD_SIZE < vm->stack_base) {
+        printf("\n========== STACK OVERFLOW ==========\n");
+        printf("Stack space exhausted\n");
+        printf("Requested:  %d slots (%d bytes)\n", slots_needed,
+               slots_needed * (int)sizeof(long long));
+        printf("Available:  %ld slots (%ld bytes)\n",
+               (long)(vm->sp - vm->stack_base),
+               (long)(vm->sp - vm->stack_base) * (long)sizeof(long long));
+        printf("PC:         0x%llx (offset: %lld)\n", (long long)vm->pc,
+               (long long)(vm->pc - vm->text_seg));
+        printf("====================================\n");
+        return -1;
+    }
+    return 0;
+}
+
 // ========== Arithmetic Operations ==========
 
 int op_ADD3_fn(JCC *vm) {
@@ -351,6 +370,9 @@ int op_ENT3_fn(JCC *vm) {
     unsigned long long masks = (unsigned long long)*vm->pc++;
     unsigned int float_param_mask = (unsigned int)(masks & 0xFFFFFFFFu);
     unsigned int f32_param_mask = (unsigned int)(masks >> 32);
+
+    int total_slots = stack_size + 1 + ((vm->flags & JCC_STACK_CANARIES) ? 1 : 0);
+    if (check_stack_overflow(vm, total_slots)) return -1;
 
     // Save old base pointer
     *--vm->sp = (long long)vm->bp;
@@ -1091,6 +1113,7 @@ int op_CALL_fn(JCC *vm) {
     long long target = *vm->pc; // Target address is operand at current pc
     long long ret_addr = (long long)(vm->pc + 1); // Return after operand
 
+    if (check_stack_overflow(vm, 1)) return -1;
     *--vm->sp = ret_addr;
     if (vm->flags & JCC_CFI) {
         *--vm->shadow_sp = ret_addr; // Also push to shadow stack for CFI
@@ -1104,6 +1127,7 @@ int op_CALLI_fn(JCC *vm) {
     long long operands = *vm->pc++;
     int rs = (int)(operands & 0xFF);
     long long ret_addr = (long long)vm->pc;
+    if (check_stack_overflow(vm, 1)) return -1;
     *--vm->sp = ret_addr;
     if (vm->flags & JCC_CFI) {
         *--vm->shadow_sp = ret_addr;

@@ -967,6 +967,7 @@ int debugger_run(JCC *vm, int argc, char **argv) {
     vm->pc = vm->text_seg + main_fn->code_addr;
 
     // Setup stack for main(argc, argv), matching cc_run().
+    vm->stack_base = vm->stack_seg;
     vm->sp = (long long *)((char *)vm->stack_seg +
                            vm->poolsize * sizeof(long long));
     vm->bp = vm->sp;

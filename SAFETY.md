@@ -121,6 +121,14 @@ All features listed below can be enabled individually or through the safety leve
   - Places canary values (0xDEADBEEFCAFEBABE) on the stack between saved base pointer and local variables
   - Validates canary on function return (LEV instruction)
   - Detects stack buffer overflows with detailed error reporting including PC offset
+- **Stack bounds checking** (always enabled)
+  - Validates stack pointer stays within allocated stack segment before function calls and frame allocation
+  - Checks at function entry (ENT3) and call instructions (CALL/CALLI) before pushing to stack
+  - Detects stack exhaustion from deep recursion or oversized stack frames
+  - Includes 128-byte guard zone to prevent edge-case overflows
+  - Reports detailed error with requested vs available stack space and PC offset
+  - Zero overhead when stack is within bounds (single pointer comparison)
+  - Prevents memory corruption from stack overflow
 - `--heap-canaries` **Heap overflow protection**
   - Front canary in AllocHeader (before user data)
   - Rear canary after user data
@@ -573,6 +581,59 @@ $ echo $?
 ```
 
 **Note:** Overflow detection is **disabled by default** for zero overhead. When enabled with `--overflow-checks` or `-O`, it uses specialized checked arithmetic opcodes (ADDC, SUBC, MULC, DIVC) that validate operations before completing them. Floating-point operations are not affected by this flag.
+
+### Stack Overflow Detection
+
+#### Deep Recursion
+```c
+// test_stack_overflow_recursion.c - Stack overflow from deep recursion
+int recurse(int n) {
+    if (n <= 0) return 0;
+    return recurse(n - 1) + 1;
+}
+
+int main() {
+    return recurse(100000);  // Stack overflow!
+}
+```
+
+```bash
+$ ./jcc test_stack_overflow_recursion.c
+
+========== STACK OVERFLOW ==========
+Stack space exhausted
+Requested:  1 slots (8 bytes)
+Available:  16 slots (128 bytes)
+PC:         0x1480081e8 (offset: 61)
+====================================
+```
+
+#### Large Stack Frame
+```c
+// test_stack_overflow_large_frame.c - Stack overflow from large local array
+void large_frame() {
+    long long arr[500000];  // 4MB on stack!
+    arr[0] = 42;
+}
+
+int main() {
+    large_frame();  // Stack overflow!
+    return 42;
+}
+```
+
+```bash
+$ ./jcc test_stack_overflow_large_frame.c
+
+========== STACK OVERFLOW ==========
+Stack space exhausted
+Requested:  500009 slots (4000072 bytes)
+Available:  262131 slots (2097048 bytes)
+PC:         0x1280080a8 (offset: 21)
+====================================
+```
+
+**Note:** Stack bounds checking is **always enabled** to prevent memory corruption. The default stack size is 2MB (256KB poolsize × 8 bytes per slot). Stack overflow is always a bug and cannot be disabled.
 
 ### Dangling Pointers
 ```c
