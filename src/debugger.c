@@ -692,12 +692,16 @@ void cc_debug_repl(JCC *vm) {
             vm->dbg.single_step = 0;
             vm->dbg.step_over = 1;
             vm->dbg.step_out = 0;
-            // PLACEHOLDER: step-over should set a temporary breakpoint at the
-            // instruction after CALL, not snapshot the current stack top. The
-            // current approach reads *vm->sp before CALL has pushed the return
-            // address, so it may capture a local variable or garbage instead.
-            if (vm->sp < vm->stack_seg) {
-                vm->dbg.step_over_return_addr = (long long *)*vm->sp;
+            int op = (int)*vm->pc;
+            if (op == CALL || op == CALLI) {
+                // CALL/CALLI: return address is two words after the opcode.
+                // (op word + one operand word). Stop there after the call
+                // returns instead of stepping into the callee.
+                vm->dbg.step_over_return_addr = vm->pc + 2;
+            } else {
+                // Not a call instruction: nothing to skip, just single-step.
+                vm->dbg.step_over = 0;
+                vm->dbg.single_step = 1;
             }
             break;
         }
