@@ -244,6 +244,8 @@ static void init_macro_globals(JCC *vm, Obj *macro_prog) {
 
         long long offset = vm->data_ptr - vm->data_seg;
         offset = (offset + 7) & ~7;
+        if (vm->data_seg + offset + var->ty->size > vm->data_seg + vm->poolsize)
+            error("codegen: data segment overflow");
         vm->data_ptr = vm->data_seg + offset;
         var->offset = vm->data_ptr - vm->data_seg;
 

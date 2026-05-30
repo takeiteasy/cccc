@@ -459,6 +459,8 @@ JCC_Node *jcc_ast_string_literal(JCC *vm, const char *str) {
     // not just set init_data (which is only used during initial emit_program)
     long long offset = vm->data_ptr - vm->data_seg;
     offset = (offset + 7) & ~7; // Align to 8 bytes
+    if (vm->data_seg + offset + len + 1 > vm->data_seg + vm->poolsize)
+        error("codegen: data segment overflow");
     vm->data_ptr = vm->data_seg + offset;
 
     var->offset = offset;

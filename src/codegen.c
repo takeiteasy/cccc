@@ -306,53 +306,72 @@ static void patch_labels(JCC *vm) {
 
 // ========== Emit Helpers ==========
 
-static void emit(JCC *vm, int instruction) {
+static void emit_word(JCC *vm, long long word) {
     if (!vm || !vm->text_ptr)
         error("codegen: text segment not initialized");
-    *++vm->text_ptr = instruction;
+    if (vm->text_ptr + 1 >= vm->text_seg + vm->poolsize)
+        error("codegen: text segment overflow");
+    *++vm->text_ptr = word;
+}
+
+static long long *emit_word_ptr(JCC *vm) {
+    if (!vm || !vm->text_ptr)
+        error("codegen: text segment not initialized");
+    if (vm->text_ptr + 1 >= vm->text_seg + vm->poolsize)
+        error("codegen: text segment overflow");
+    return ++vm->text_ptr;
+}
+
+static void check_data_capacity(JCC *vm, long long needed) {
+    if (vm->data_ptr + needed > vm->data_seg + vm->poolsize)
+        error("codegen: data segment overflow");
+}
+
+static void emit(JCC *vm, int instruction) {
+    emit_word(vm, instruction);
 }
 
 static void emit_with_arg(JCC *vm, int instruction, long long arg) {
-    emit(vm, instruction);
-    *++vm->text_ptr = arg;
+    emit_word(vm, instruction);
+    emit_word(vm, arg);
 }
 
 // 3-register ops: [OP] [rd:8|rs1:8|rs2:8|unused:40]
 static void emit_rrr(JCC *vm, int op, int rd, int rs1, int rs2) {
-    emit(vm, op);
-    *++vm->text_ptr = ENCODE_RRR(rd, rs1, rs2);
+    emit_word(vm, op);
+    emit_word(vm, ENCODE_RRR(rd, rs1, rs2));
 }
 
 // 2-register ops: [OP] [rd:8|rs1:8|unused:48]
 static void emit_rr(JCC *vm, int op, int rd, int rs1) {
-    emit(vm, op);
-    *++vm->text_ptr = ENCODE_RR(rd, rs1);
+    emit_word(vm, op);
+    emit_word(vm, ENCODE_RR(rd, rs1));
 }
 
 // 1-register + immediate: [OP] [rd:8|unused:56] [imm:64]
 static void emit_ri(JCC *vm, int op, int rd, long long imm) {
-    emit(vm, op);
-    *++vm->text_ptr = ENCODE_R(rd);
-    *++vm->text_ptr = imm;
+    emit_word(vm, op);
+    emit_word(vm, ENCODE_R(rd));
+    emit_word(vm, imm);
 }
 
 // Register + register + immediate: [OP] [rd:8|rs:8|unused:48] [imm:64]
 static void emit_rri(JCC *vm, int op, int rd, int rs, long long imm) {
-    emit(vm, op);
-    *++vm->text_ptr = ENCODE_RR(rd, rs);
-    *++vm->text_ptr = imm;
+    emit_word(vm, op);
+    emit_word(vm, ENCODE_RR(rd, rs));
+    emit_word(vm, imm);
 }
 
 // Float 3-register ops
 static void emit_frrr(JCC *vm, int op, int rd, int rs1, int rs2) {
-    emit(vm, op);
-    *++vm->text_ptr = ENCODE_RRR(rd, rs1, rs2);
+    emit_word(vm, op);
+    emit_word(vm, ENCODE_RRR(rd, rs1, rs2));
 }
 
 // Float 2-register ops
 static void emit_frr(JCC *vm, int op, int rd, int rs1) {
-    emit(vm, op);
-    *++vm->text_ptr = ENCODE_RR(rd, rs1);
+    emit_word(vm, op);
+    emit_word(vm, ENCODE_RR(rd, rs1));
 }
 
 // ========== Specific Emit Helpers ==========
@@ -433,8 +452,8 @@ static void emit_store(JCC *vm, Type *ty, int rd_val, int rs_addr) {
 // JZ3: if rs == 0, jump (returns patch location)
 static long long *emit_jz3(JCC *vm, int rs) {
     emit(vm, JZ3);
-    *++vm->text_ptr = ENCODE_R(rs);
-    long long *patch = ++vm->text_ptr;
+    emit_word(vm, ENCODE_R(rs));
+    long long *patch = emit_word_ptr(vm);
     *patch = 0;
     return patch;
 }
@@ -442,8 +461,8 @@ static long long *emit_jz3(JCC *vm, int rs) {
 // JNZ3: if rs != 0, jump (returns patch location)
 static long long *emit_jnz3(JCC *vm, int rs) {
     emit(vm, JNZ3);
-    *++vm->text_ptr = ENCODE_R(rs);
-    long long *patch = ++vm->text_ptr;
+    emit_word(vm, ENCODE_R(rs));
+    long long *patch = emit_word_ptr(vm);
     *patch = 0;
     return patch;
 }
@@ -451,13 +470,13 @@ static long long *emit_jnz3(JCC *vm, int rs) {
 // PSH3: push register value onto stack
 static void emit_psh3(JCC *vm, int rs) {
     emit(vm, PSH3);
-    *++vm->text_ptr = ENCODE_R(rs);
+    emit_word(vm, ENCODE_R(rs));
 }
 
 // POP3: pop stack value into register
 static void emit_pop3(JCC *vm, int rd) {
     emit(vm, POP3);
-    *++vm->text_ptr = ENCODE_R(rd);
+    emit_word(vm, ENCODE_R(rd));
 }
 
 // ========== Forward Declarations ==========
@@ -535,43 +554,43 @@ static void add_stack_var_meta(JCC *vm, const char *name, long long offset,
 // Emit SCOPEIN for scope_id.
 static void emit_scopein(JCC *vm, int scope_id) {
     emit(vm, SCOPEIN);
-    *++vm->text_ptr = scope_id;
+    emit_word(vm, scope_id);
 }
 
 // Emit SCOPEOUT for scope_id.
 static void emit_scopeout(JCC *vm, int scope_id) {
     emit(vm, SCOPEOUT);
-    *++vm->text_ptr = scope_id;
+    emit_word(vm, scope_id);
 }
 
 // Emit CHKI (check initialized) for local at bp+offset.
 static void emit_chki(JCC *vm, long long offset) {
     emit(vm, CHKI);
-    *++vm->text_ptr = offset;
+    emit_word(vm, offset);
 }
 
 // Emit MARKI (mark initialized) for local at bp+offset.
 static void emit_marki(JCC *vm, long long offset) {
     emit(vm, MARKI);
-    *++vm->text_ptr = offset;
+    emit_word(vm, offset);
 }
 
 // Emit CHKL (check liveness) for local at bp+offset.
 static void emit_chkl(JCC *vm, long long offset) {
     emit(vm, CHKL);
-    *++vm->text_ptr = offset;
+    emit_word(vm, offset);
 }
 
 // Emit MARKR (mark read) for local at bp+offset.
 static void emit_markr(JCC *vm, long long offset) {
     emit(vm, MARKR);
-    *++vm->text_ptr = offset;
+    emit_word(vm, offset);
 }
 
 // Emit MARKW (mark write) for local at bp+offset.
 static void emit_markw(JCC *vm, long long offset) {
     emit(vm, MARKW);
-    *++vm->text_ptr = offset;
+    emit_word(vm, offset);
 }
 
 // Emit MARKA (mark address for dangling detection).
@@ -579,10 +598,10 @@ static void emit_markw(JCC *vm, long long offset) {
 static void emit_marka(JCC *vm, int rs, long long offset, size_t size,
                        int scope_id) {
     emit(vm, MARKA);
-    *++vm->text_ptr = ENCODE_R(rs);
-    *++vm->text_ptr = offset;
-    *++vm->text_ptr = (long long)size;
-    *++vm->text_ptr = scope_id;
+    emit_word(vm, ENCODE_R(rs));
+    emit_word(vm, offset);
+    emit_word(vm, (long long)size);
+    emit_word(vm, scope_id);
 }
 
 // Emit MARKP (mark provenance).
@@ -590,9 +609,9 @@ static void emit_marka(JCC *vm, int rs, long long offset, size_t size,
 static void emit_markp(JCC *vm, int rs_ptr, int rs_base, int origin_type,
                        size_t size) {
     emit(vm, MARKP);
-    *++vm->text_ptr = ENCODE_RR(rs_ptr, rs_base);
-    *++vm->text_ptr = origin_type;
-    *++vm->text_ptr = (long long)size;
+    emit_word(vm, ENCODE_RR(rs_ptr, rs_base));
+    emit_word(vm, origin_type);
+    emit_word(vm, (long long)size);
 }
 
 // ========== Address Generation ==========
@@ -755,11 +774,11 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
 
     case ND_NUM:
         if (is_flonum(node->ty)) {
-            // Float literal - store in data segment and load
-            // PLACEHOLDER: No bounds check against data segment size.
             long long offset = vm->data_ptr - vm->data_seg;
             offset = (offset + 7) & ~7; // Align
             vm->data_ptr = vm->data_seg + offset;
+            long long lit_size = (node->ty->kind == TY_FLOAT) ? sizeof(float) : sizeof(double);
+            check_data_capacity(vm, offset + lit_size);
             if (node->ty->kind == TY_FLOAT) {
                 *(float *)vm->data_ptr = (float)node->fval;
                 vm->data_ptr += sizeof(float);
@@ -1028,7 +1047,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
 
             if (is_ptr_arith && (vm->flags & (JCC_INVALID_ARITH | JCC_PROVENANCE_TRACK))) {
                 emit(vm, CHKPA);
-                *++vm->text_ptr = ENCODE_R(dest_reg);
+                emit_word(vm, ENCODE_R(dest_reg));
             }
         }
 
@@ -1168,7 +1187,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
 
         gen_expr(vm, node->then, dest_reg);
         emit(vm, JMP);
-        long long *jmp_end = ++vm->text_ptr;
+        long long *jmp_end = emit_word_ptr(vm);
 
         *jz_else = (long long)(vm->text_ptr + 1);
         gen_expr(vm, node->els, dest_reg);
@@ -1411,9 +1430,9 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
 
             // Emit CALLF with 3 operands: ffi_idx, nargs, double_arg_mask
             emit(vm, CALLF);
-            *++vm->text_ptr = ffi_idx;
-            *++vm->text_ptr = nargs;
-            *++vm->text_ptr = (long long)double_arg_mask;
+            emit_word(vm, ffi_idx);
+            emit_word(vm, nargs);
+            emit_word(vm, (long long)double_arg_mask);
 
             // Reset temp regs after call
             reset_temp_regs();
@@ -1624,7 +1643,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         if (node->lhs->kind == ND_VAR && node->lhs->var->is_function) {
             Obj *fn = node->lhs->var;
             emit(vm, CALL);
-            long long *patch = ++vm->text_ptr;
+            long long *patch = emit_word_ptr(vm);
             *patch = 0; // Will be patched later
 
             // Record call patch location for later resolution
@@ -1641,7 +1660,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             int r_fn = alloc_temp_reg();
             gen_expr(vm, node->lhs, r_fn);
             emit(vm, CALLI);
-            *++vm->text_ptr = ENCODE_R(r_fn);
+            emit_word(vm, ENCODE_R(r_fn));
             free_temp_reg(r_fn);
         }
 
@@ -1689,7 +1708,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         // Both true
         emit_li3(vm, dest_reg, 1);
         emit(vm, JMP);
-        long long *jmp_end = ++vm->text_ptr;
+        long long *jmp_end = emit_word_ptr(vm);
 
         // At least one false
         *jz_false = (long long)(vm->text_ptr + 1);
@@ -1712,7 +1731,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         // Both false
         emit_li3(vm, dest_reg, 0);
         emit(vm, JMP);
-        long long *jmp_end = ++vm->text_ptr;
+        long long *jmp_end = emit_word_ptr(vm);
 
         // At least one true
         *jnz_true = (long long)(vm->text_ptr + 1);
@@ -1781,6 +1800,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         // Allocate descriptor in data segment
         long long desc_offset = vm->data_ptr - vm->data_seg;
         desc_offset = (desc_offset + 7) & ~7; // Align to 8 bytes
+        check_data_capacity(vm, desc_offset + descriptor_size);
         vm->data_ptr = vm->data_seg + desc_offset;
 
         vm->data_ptr += descriptor_size;
@@ -1888,7 +1908,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
 
         // Indirect call via function pointer
         emit(vm, CALLI);
-        *++vm->text_ptr = ENCODE_R(r_fn);
+        emit_word(vm, ENCODE_R(r_fn));
         free_temp_reg(r_fn);
 
         reset_temp_regs();
@@ -1988,7 +2008,7 @@ static void gen_stmt(JCC *vm, Node *node) {
 
         if (node->els) {
             emit(vm, JMP);
-            long long *jmp_end = ++vm->text_ptr;
+            long long *jmp_end = emit_word_ptr(vm);
             *jz_else = (long long)(vm->text_ptr + 1);
             gen_stmt(vm, node->els);
             *jmp_end = (long long)(vm->text_ptr + 1);
@@ -2103,9 +2123,9 @@ static void gen_stmt(JCC *vm, Node *node) {
         long long *end_patch = NULL;
         emit(vm, JMP);
         if (node->default_case) {
-            default_patch = ++vm->text_ptr;
+            default_patch = emit_word_ptr(vm);
         } else {
-            end_patch = ++vm->text_ptr;
+            end_patch = emit_word_ptr(vm);
         }
 
         // Generate switch body - it's a single block or statement
@@ -2184,13 +2204,13 @@ static void gen_stmt(JCC *vm, Node *node) {
         if (node->unique_label) {
             // This is a break or continue statement
             emit(vm, JMP);
-            long long *patch = ++vm->text_ptr;
+            long long *patch = emit_word_ptr(vm);
             *patch = 0; // Placeholder
             add_label_patch(node->unique_label, patch, false);
         } else if (node->label) {
             // Named goto - also needs patching
             emit(vm, JMP);
-            long long *patch = ++vm->text_ptr;
+            long long *patch = emit_word_ptr(vm);
             *patch = 0; // Placeholder
             add_label_patch(node->label, patch, false);
         }
@@ -2218,7 +2238,7 @@ static void gen_stmt(JCC *vm, Node *node) {
         gen_expr(vm, node->lhs, r_target);
         // Emit JMPI - jump indirect to address in register
         emit(vm, JMPI);
-        *++vm->text_ptr = ENCODE_R(r_target);
+        emit_word(vm, ENCODE_R(r_target));
         free_temp_reg(r_target);
         return;
     }
@@ -2408,8 +2428,8 @@ void gen_function(JCC *vm, Obj *fn) {
     long long ent3_masks =
         (long long)float_param_mask | ((long long)f32_param_mask << 32);
     emit(vm, ENT3);
-    *++vm->text_ptr = ent3_operand;
-    *++vm->text_ptr = ent3_masks;
+    emit_word(vm, ent3_operand);
+    emit_word(vm, ent3_masks);
 
     // Activate function-level scope (marks params/locals as alive).
     if (vm->flags & JCC_STACK_INSTR)
@@ -2472,6 +2492,7 @@ void gen(JCC *vm, Obj *prog) {
             // Align data pointer to 8-byte boundary
             long long offset = vm->data_ptr - vm->data_seg;
             offset = (offset + 7) & ~7;
+            check_data_capacity(vm, offset + var->ty->size);
             vm->data_ptr = vm->data_seg + offset;
 
             // Store the offset in the variable
@@ -2493,6 +2514,7 @@ void gen(JCC *vm, Obj *prog) {
         // Align to 8-byte boundary
         long long offset = vm->data_ptr - vm->data_seg;
         offset = (offset + 7) & ~7;
+        check_data_capacity(vm, offset + vm->compiler.return_buffer_size);
         vm->data_ptr = vm->data_seg + offset;
         vm->compiler.return_buffer_pool[i] = vm->data_ptr;
         memset(vm->compiler.return_buffer_pool[i], 0,

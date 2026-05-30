@@ -601,6 +601,38 @@ def main():
             in output
         ), output
 
+    def text_segment_overflow_regression():
+        body = "\n".join(f"x = x + {i};" for i in range(15000))
+        src = f"int main() {{ int x = 0; {body} return x; }}\n"
+        result = subprocess.run(
+            [str(jcc), "-"],
+            input=src,
+            capture_output=True,
+            text=True,
+            cwd=script_dir,
+        )
+        output = result.stdout + result.stderr
+        return (
+            result.returncode != 0 and "text segment overflow" in output
+        ), output
+
+    def data_segment_overflow_regression():
+        body = "\n".join(
+            f"double d{i} = {i}.5;" for i in range(40000)
+        )
+        src = f"{body}\nint main() {{ return 42; }}\n"
+        result = subprocess.run(
+            [str(jcc), "-"],
+            input=src,
+            capture_output=True,
+            text=True,
+            cwd=script_dir,
+        )
+        output = result.stdout + result.stderr
+        return (
+            result.returncode != 0 and "data segment overflow" in output
+        ), output
+
     for extra in [
         run_extra_regression(
             "generated_hashmap_tombstones", hashmap_tombstone_regression
@@ -641,6 +673,16 @@ def main():
         run_extra_regression(
             "generated_debugger_condition_full_abi_reject",
             debugger_condition_full_abi_reject_regression,
+        ),
+        run_extra_regression(
+            "generated_text_segment_overflow",
+            text_segment_overflow_regression,
+            negative=True,
+        ),
+        run_extra_regression(
+            "generated_data_segment_overflow",
+            data_segment_overflow_regression,
+            negative=True,
         ),
     ]:
         print_single_result(extra)
