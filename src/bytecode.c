@@ -33,7 +33,7 @@
 //   Data relocations: data_offset, target_segment, target_offset, addend
 
 // Helper: get the number of operand words consumed by an opcode
-// Returns 0 for simple opcodes, 1 for RRR/RR format, 2 for RI format or special
+// Returns -1 for unknown opcodes.
 static int get_opcode_operand_count(int op) {
     switch (op) {
         // Control flow with address operand (1 word)
@@ -96,13 +96,13 @@ static int get_opcode_operand_count(int op) {
         case CALLI: case JMPI:
             return 1;
 
-        // CALLF: [ffi_index] [arg_count] (2 words)
+        // CALLF: [ffi_index] [arg_count] [double_arg_mask] (3 words)
         case CALLF:
-            return 2;
+            return 3;
 
-        // Memory ops: varying operand counts
+        // Memory ops use register conventions and have no encoded operands.
         case MALC: case MFRE: case MCPY: case REALC: case CALC:
-            return 1;  // These use register conventions, 1 operand word for register encoding
+            return 0;
 
         // Safety opcodes
         case CHKB:    return 1; // [rs1_base:8|rs2_offset:8] (RR word, no trailing imm)
@@ -123,9 +123,7 @@ static int get_opcode_operand_count(int op) {
             return 0;
 
         default:
-            // PLACEHOLDER: Returning 0 for unknown opcodes causes misalignment
-            // in save/load address conversion. Should error() or return -1.
-            return 0;  // Unknown - assume no operands
+            return -1;
     }
 }
 
@@ -222,6 +220,22 @@ int cc_save_bytecode(JCC *vm, const char *path) {
         if (is_operand[i]) continue;
         int op = text_copy[i];
         int operand_count = get_opcode_operand_count(op);
+        if (operand_count < 0) {
+            fprintf(stderr, "error: unknown opcode %d while saving bytecode\n", op);
+            free(is_operand);
+            free(data_copy);
+            free(text_copy);
+            fclose(f);
+            return -1;
+        }
+        if (i + operand_count >= num_instructions) {
+            fprintf(stderr, "error: truncated opcode %d while saving bytecode\n", op);
+            free(is_operand);
+            free(data_copy);
+            free(text_copy);
+            fclose(f);
+            return -1;
+        }
         for (int j = 1; j <= operand_count && i + j < num_instructions; j++) {
             is_operand[i + j] = 1;
         }
@@ -411,6 +425,16 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
         if (is_operand[i]) continue;
         int op = vm->text_seg[i];
         int operand_count = get_opcode_operand_count(op);
+        if (operand_count < 0) {
+            fprintf(stderr, "error: unknown opcode %d in bytecode\n", op);
+            free(is_operand);
+            return -1;
+        }
+        if (i + operand_count >= num_instructions) {
+            fprintf(stderr, "error: truncated opcode %d in bytecode\n", op);
+            free(is_operand);
+            return -1;
+        }
         for (int j = 1; j <= operand_count && i + j < num_instructions; j++) {
             is_operand[i + j] = 1;
         }

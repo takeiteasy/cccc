@@ -2403,18 +2403,24 @@ static int64_t eval2(JCC *vm, Node *node, char ***label) {
         return eval2(vm, node->lhs, label) - eval(vm, node->rhs);
     case ND_MUL:
         return eval(vm, node->lhs) * eval(vm, node->rhs);
-    case ND_DIV:
-        // PLACEHOLDER: Division by zero in compile-time eval causes SIGFPE
-        // instead of a clean compiler error. Affects #if, array dims, etc.
+    case ND_DIV: {
+        int64_t rhs = eval(vm, node->rhs);
+        if (rhs == 0)
+            error_tok(vm, node->rhs->tok, "division by zero in constant expression");
         if (node->ty->is_unsigned)
-            return (uint64_t)eval(vm, node->lhs) / eval(vm, node->rhs);
-        return eval(vm, node->lhs) / eval(vm, node->rhs);
+            return (uint64_t)eval(vm, node->lhs) / (uint64_t)rhs;
+        return eval(vm, node->lhs) / rhs;
+    }
     case ND_NEG:
         return -eval(vm, node->lhs);
-    case ND_MOD:
+    case ND_MOD: {
+        int64_t rhs = eval(vm, node->rhs);
+        if (rhs == 0)
+            error_tok(vm, node->rhs->tok, "division by zero in constant expression");
         if (node->ty->is_unsigned)
-            return (uint64_t)eval(vm, node->lhs) % eval(vm, node->rhs);
-        return eval(vm, node->lhs) % eval(vm, node->rhs);
+            return (uint64_t)eval(vm, node->lhs) % (uint64_t)rhs;
+        return eval(vm, node->lhs) % rhs;
+    }
     case ND_BITAND:
         return eval(vm, node->lhs) & eval(vm, node->rhs);
     case ND_BITOR:
@@ -3500,8 +3506,10 @@ static void struct_members(JCC *vm, Token **rest, Token *tok, Type *ty) {
             if (consume(vm, &tok, tok, ":")) {
                 mem->is_bitfield = true;
                 mem->bit_width = const_expr(vm, &tok, tok);
-                // PLACEHOLDER: No validation that bit_width is non-negative
-                // or does not exceed the container type's width.
+                if (mem->bit_width < 0)
+                    error_tok(vm, tok, "negative bit-field width");
+                if (mem->bit_width > mem->ty->size * CHAR_BIT)
+                    error_tok(vm, tok, "bit-field width exceeds its type");
             }
 
             cur = cur->next = mem;
@@ -4043,10 +4051,13 @@ static Node *generic_selection(JCC *vm, Token **rest, Token *tok) {
         t1 = pointer_to(vm, t1);
     else if (t1->kind == TY_ARRAY)
         t1 = pointer_to(vm, t1->base);
-    // PLACEHOLDER: C11 requires lvalue conversion (stripping qualifiers)
-    // on the controlling expression type before matching associations.
+    t1 = copy_type(vm, t1);
+    t1->is_const = false;
+    t1->is_volatile = false;
+    t1->origin = NULL;
 
-    Node *ret = NULL;
+    Node *match = NULL;
+    Node *default_node = NULL;
 
     while (!consume(vm, rest, tok, ")")) {
         tok = skip(vm, tok, ",");
@@ -4054,18 +4065,19 @@ static Node *generic_selection(JCC *vm, Token **rest, Token *tok) {
         if (equal(tok, "default")) {
             tok = skip(vm, tok->next, ":");
             Node *node = assign(vm, &tok, tok);
-            if (!ret)
-                ret = node;
+            if (!default_node)
+                default_node = node;
             continue;
         }
 
         Type *t2 = typename(vm, &tok, tok);
         tok = skip(vm, tok, ":");
         Node *node = assign(vm, &tok, tok);
-        if (is_compatible(t1, t2))
-            ret = node;
+        if (!match && is_compatible(t1, t2))
+            match = node;
     }
 
+    Node *ret = match ? match : default_node;
     if (!ret)
         error_tok(vm, start,
                   "controlling expression type not compatible with"

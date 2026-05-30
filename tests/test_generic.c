@@ -96,9 +96,7 @@ int main() {
         const int: 222,
         default: 333
     );
-    // Note: const qualifier might be stripped during type comparison
-    // This test verifies the behavior
-    if (value != 111 && value != 222) return 9;
+    if (value != 111) return 9;
     
     // Test 10: Multiple _Generic in same expression
     int sum = _Generic(i, int: 5, default: 0) + 

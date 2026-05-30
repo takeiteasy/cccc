@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
@@ -306,6 +307,83 @@ def main():
             future.add_done_callback(lambda f, idx=arg[0]: on_done(f, idx))
             futures.append(future)
         concurrent.futures.wait(futures)
+
+    def run_extra_regression(name, fn, negative=False):
+        try:
+            ok, output = fn()
+        except Exception as e:
+            ok = False
+            output = str(e)
+
+        return {
+            "idx": len(results),
+            "test_name": name,
+            "exit_code": 42 if ok else 1,
+            "status": "negative_pass"
+            if ok and negative
+            else ("passed" if ok else "failed"),
+            "output": output,
+            "is_negative_test": negative,
+            "expects_runtime_error": False,
+        }
+
+    def hashmap_tombstone_regression():
+        src = "\n".join(
+            f"#define M{i} {i}\n#undef M{i}" for i in range(1000)
+        )
+        src += "\nint main(){ return 42; }\n"
+        result = subprocess.run(
+            [str(jcc), "-"],
+            input=src,
+            capture_output=True,
+            text=True,
+            cwd=script_dir,
+        )
+        return result.returncode == 42, result.stdout + result.stderr
+
+    def unknown_opcode_regression():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bc = Path(tmpdir) / "ok.jbc"
+            bad = Path(tmpdir) / "bad.jbc"
+            src = "int main(){ return 42; }\n"
+            saved = subprocess.run(
+                [str(jcc), "-o", str(bc), "-"],
+                input=src,
+                capture_output=True,
+                text=True,
+                cwd=script_dir,
+            )
+            if saved.returncode != 0:
+                return False, saved.stdout + saved.stderr
+
+            data = bytearray(bc.read_bytes())
+            header_size = 4 + 4 + 4 + 8 + 8 + 8 + 8
+            first_opcode = header_size + 8
+            if first_opcode + 8 > len(data):
+                return False, "bytecode file too small"
+            data[first_opcode:first_opcode + 8] = (999999).to_bytes(
+                8, "little", signed=True
+            )
+            bad.write_bytes(data)
+
+            loaded = subprocess.run(
+                [str(jcc), str(bad)],
+                capture_output=True,
+                text=True,
+                cwd=script_dir,
+            )
+            output = loaded.stdout + loaded.stderr
+            return loaded.returncode != 0 and "unknown opcode" in output, output
+
+    for extra in [
+        run_extra_regression(
+            "generated_hashmap_tombstones", hashmap_tombstone_regression
+        ),
+        run_extra_regression(
+            "generated_unknown_opcode_bytecode", unknown_opcode_regression
+        ),
+    ]:
+        print_single_result(extra)
 
     print()
     print("=======================")

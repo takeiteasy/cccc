@@ -174,10 +174,8 @@ void hashmap_put(HashMap *map, const char *key, void *val) {
 
 void hashmap_delete2(HashMap *map, const char *key, int keylen) {
     HashEntry *ent = get_entry(map, (char*)key, keylen);
-    if (ent) {
+    if (ent)
         ent->key = TOMBSTONE;
-        map->used--;
-    }
 }
 
 

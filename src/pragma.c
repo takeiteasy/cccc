@@ -414,9 +414,8 @@ static Node *execute_pragma_macro(JCC *vm, PragmaMacro *pm, Node *args,
     vm->sp = vm->initial_sp;
     vm->bp = vm->initial_bp;
 
-    // Pass arguments via registers (REG_A0-A7 in the VM calling convention)
-    // Arguments are Node* pointers to the AST nodes
-    // PLACEHOLDER: Silently drops arguments beyond the 8th without error.
+    // Pass arguments via registers (REG_A0-A7 in the VM calling convention).
+    // Arguments are Node* pointers to the AST nodes.
     int arg_idx = 0;
     for (Node *arg = args; arg && arg_idx < 8; arg = arg->next) {
         vm->regs[REG_A0 + arg_idx] = (long long)arg;
@@ -493,6 +492,13 @@ static Node *transform_node(JCC *vm, Node *node) {
         // Execute the macro to get the replacement AST
         if (vm->debug_vm)
             printf("  Executing macro '%s'...\n", pm->name);
+
+        if (node->macro_arg_count > 8) {
+            error_tok(vm, node->tok,
+                      "pragma macro '%s' called with %d arguments; maximum is 8",
+                      node->macro_name, node->macro_arg_count);
+            return node;
+        }
 
         Node *result =
             execute_pragma_macro(vm, pm, node->args, node->macro_arg_count);

@@ -27,76 +27,68 @@
 OPS_X
 #undef X
 
-static int eval1(JCC *vm) {
+int vm_eval(JCC *vm) {
+    static void *op_table[] = {
+#define X(NAME) [NAME] = &&op_##NAME,
+        OPS_X
+#undef X
+    };
+    static const char *op_names[] = {
+#define X(NAME) #NAME,
+        OPS_X
+#undef X
+    };
+
+    vm->cycle = 0;
+
+dispatch:
     vm->cycle++;
 
-    // Debugger hooks - check before executing instruction
     if (vm->flags & JCC_ENABLE_DEBUGGER) {
-        // Check for breakpoints
         if (debugger_check_breakpoint(vm)) {
             printf("\nBreakpoint hit at PC %p (offset: %lld)\n",
                    (void*)vm->pc, (long long)(vm->pc - vm->text_seg));
             cc_debug_repl(vm);
         }
-
         if (vm->dbg.single_step)
             cc_debug_repl(vm);
-
         if (vm->dbg.step_over && vm->pc == vm->dbg.step_over_return_addr) {
             vm->dbg.step_over = 0;
             cc_debug_repl(vm);
         }
-
         if (vm->dbg.step_out && vm->bp != vm->dbg.step_out_bp) {
             vm->dbg.step_out = 0;
             cc_debug_repl(vm);
         }
     }
 
-    static void* op_table[] = {
-#define X(NAME) [NAME] = &&op_##NAME,
-        OPS_X
-#undef X
-    };
-    int op = *vm->pc++;
-    if (op < 0 || op >= sizeof(op_table) / sizeof(op_table[0]) ||
-        !op_table[op]) {
-        printf("unknown instruction:%d\n", op);
-        return -1;
-    }
-
-    // Debug printing
-    if (vm->debug_vm) {
-        // Print opcode name (simplified for new opcode set)
-        static const char *names[] = {
-#define X(NAME) #NAME,
-            OPS_X
-#undef X
-        };
-        if (op >= 0 && op < (int)(sizeof(names)/sizeof(names[0]))) {
-            printf("%lld> %s\n", vm->cycle, names[op]);
-        } else {
-            printf("%lld> OP_%d\n", vm->cycle, op);
+    {
+        int op = *vm->pc++;
+        if (__builtin_expect(op < 0 || op >= (int)(sizeof(op_table) / sizeof(op_table[0])) || !op_table[op], 0)) {
+            printf("unknown instruction:%d\n", op);
+            return -1;
         }
+        if (vm->debug_vm) {
+            if (op >= 0 && op < (int)(sizeof(op_names) / sizeof(op_names[0])))
+                printf("%lld> %s\n", vm->cycle, op_names[op]);
+            else
+                printf("%lld> OP_%d\n", vm->cycle, op);
+        }
+        goto *op_table[op];
     }
 
-    goto *op_table[op];
-#define X(NAME) op_##NAME: return op_##NAME##_fn(vm);
+#define X(NAME)                                                  \
+    op_##NAME: {                                                 \
+        int _r = op_##NAME##_fn(vm);                             \
+        if (__builtin_expect(_r != 0, 0)) return _r;             \
+        if (__builtin_expect(vm->pc == NULL, 0))                 \
+            return (int)vm->regs[REG_A0];                        \
+        goto dispatch;                                           \
+    }
     OPS_X
 #undef X
-    return -1;
-}
 
-int vm_eval(JCC *vm) {
-    int result = 0;
-    vm->cycle = 0;
-    while ((result = eval1(vm)) == 0) {
-        // Check if program has exited (pc set to NULL by LEV3)
-        if (vm->pc == NULL || vm->pc == 0) {
-            return (int)vm->regs[REG_A0];  // Return value in REG_A0
-        }
-    }
-    return result;
+    return -1;
 }
 
 void cc_init(JCC *vm, uint32_t flags) {

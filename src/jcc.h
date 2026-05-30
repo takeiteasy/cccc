@@ -259,7 +259,7 @@ typedef struct HashEntry {
            macros, and other small maps.
  @field buckets Pointer to an array of HashEntry buckets.
  @field capacity Number of buckets allocated.
- @field used Number of buckets currently in use.
+ @field used Number of occupied buckets, including tombstones.
 */
 typedef struct HashMap {
     HashEntry *buckets;
