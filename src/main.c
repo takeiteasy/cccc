@@ -756,11 +756,13 @@ int main(int argc, const char *argv[]) {
     // Expand pragma macros in the AST
     cc_expand_pragma_macros(&vm, merged_prog);
 
-    // Check for errors after macro expansion
-    if (cc_has_errors(&vm)) {
+    // Check for errors and warnings after macro expansion (ticket #78)
+    if (cc_has_errors(&vm) || vm.warning_count > 0) {
         cc_print_all_errors(&vm);
-        exit_code = 1;
-        goto BAIL;
+        if (cc_has_errors(&vm)) {
+            exit_code = 1;
+            goto BAIL;
+        }
     }
 
     // If -M flag is set, output macro-expanded source and exit
