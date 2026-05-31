@@ -1280,8 +1280,8 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                 emit_rr(vm, node->ty->is_unsigned ? ZX4 : SX4, dest_reg,
                         dest_reg);
             } else if (node->ty->kind == TY_BOOL) {
-                emit_rr(vm, SNE3, dest_reg,
-                        REG_ZERO); // dest_reg = (dest_reg != 0)
+                emit_rrr(vm, SNE3, dest_reg, dest_reg,
+                         REG_ZERO); // dest_reg = (dest_reg != 0)
             }
         }
         return;

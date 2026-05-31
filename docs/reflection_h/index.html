@@ -279,6 +279,38 @@ function disclosure_triangle(elt) {
 - Enum reflection
 - Struct/union member introspection
 - AST node construction (literals, expressions, statements)
+- Global variable generation (_AST_GLOBAL_VAR*)
+- Function-building context (_AST_WITH_FN)
+</p>
+<p>## Return-value model
+</p>
+<p>A pragma macro's returned _Node* is **the node spliced at the call site**,
+replacing the invocation.  Top-level definitions (functions, globals) are
+**side effects** — injected into the program regardless of the return value.
+</p>
+<p>- **Expression position** (e.g. `int x = my_macro();`): the macro must
+return a non-NULL node.  Returning NULL is an error.
+</p>
+<p>- **Declaration position** (bare `my_macro();` at file scope, or an
+`inline` auto-run macro): there is no expression to replace.  Returning
+NULL — or declaring the macro `void` — is legal and means "I only emitted
+definitions."
+</p>
+<p>Declare a definition-only macro with a `void` return type for clarity:
+@code
+#pragma macro
+void emit_helpers(void) {
+_Obj *fn = _AST_FUNCTION("helper", _AST_GET_TYPE("int"));
+_AST_WITH_FN(fn) {
+_AST_FUNCTION_SET_BODY(fn, _QUOTE("return 42;"));
+}
+_AST_FORWARD_DECLARE(fn);
+// no return needed
+}
+emit_helpers();
+@endcode
+</p>
+<p>A void macro used in expression position is a compile error.
 </p>
 <p>## Usage
 </p>
@@ -287,15 +319,15 @@ All functions that require VM context use the _VM macro, which
 expands to __jcc_get_vm() - a builtin that returns the current
 VM instance during macro execution.
 </p>
-<p>## Example
+<p>## Example (expression macro)
 </p>
 <p>@code
 #pragma macro
-_Node *make_const_5() {
+_Node *make_const_5(void) {
 return _AST_INT_LITERAL(5);
 }
 </p>
-<p>int main() {
+<p>int main(void) {
 int x = make_const_5();  // x == 5
 return 0;
 }
@@ -376,6 +408,15 @@ return 0;
 <dd></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_global_count" target="_top">__jcc_ast_global_count</a></tt></dt>
 <dd></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_global_var" target="_top">__jcc_ast_global_var</a></tt></dt>
+<dd><p>Create a new named global variable definition.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_global_var_set_init_data" target="_top">__jcc_ast_global_var_set_init_data</a></tt></dt>
+<dd><p>Set the initial data for a generated global variable.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_global_var_set_static" target="_top">__jcc_ast_global_var_set_static</a></tt></dt>
+<dd><p>Set the static (internal linkage) flag on a generated global.
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_if" target="_top">__jcc_ast_if</a></tt></dt>
 <dd></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_int_literal" target="_top">__jcc_ast_int_literal</a></tt></dt>
@@ -417,6 +458,13 @@ function scope and return a variable-reference node for it.
 <dd></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_param_ref" target="_top">__jcc_ast_param_ref</a></tt></dt>
 <dd></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_pop_fn" target="_top">__jcc_ast_pop_fn</a></tt></dt>
+<dd><p>Restore the function context saved by the most recent push.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_push_fn" target="_top">__jcc_ast_push_fn</a></tt></dt>
+<dd><p>Establish fn as the "function currently being built" so that
+_QUOTE("return x;") applies the correct implicit return-type cast.
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_return" target="_top">__jcc_ast_return</a></tt></dt>
 <dd></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_string_literal" target="_top">__jcc_ast_string_literal</a></tt></dt>
@@ -1179,6 +1227,130 @@ for multiple parameters.
 <!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_global_count;name=start --><p>Get the total number of global symbols. <!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_global_count;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_global_var;   name=__jcc_ast_global_var -->
+<a name="//apple_ref/c/func/__jcc_ast_global_var"></a>
+<h3><a name="__jcc_ast_global_var">__jcc_ast_global_var</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_global_var;name=start --><!-- begin abstract --></p>
+<p>Create a new named global variable definition.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_global_var;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_global_var;name=start --><!-- a logicalPath="//apple_ref/c/cl/_Obj //apple_ref/c/tdef/_Obj //apple_ref/c/tag/_Obj //apple_ref/c/struct/_Obj //apple_ref/c/intf/_Obj //apple_ref/doc/anysymbol/_Obj" machineGenerated="true" --><span class="type">_Obj</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_global_var" logicalPath="//apple_ref/c/instm/__jcc_ast_global_var //apple_ref/c/clm/__jcc_ast_global_var //apple_ref/c/intfcm/__jcc_ast_global_var //apple_ref/c/intfm/__jcc_ast_global_var //apple_ref/c/func/__jcc_ast_global_var" target="_top"><span class="function">__jcc_ast_global_var</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">name</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/_Type //apple_ref/c/tdef/_Type //apple_ref/c/tag/_Type //apple_ref/c/struct/_Type //apple_ref/c/intf/_Type //apple_ref/doc/anysymbol/_Type" machineGenerated="true" --><span class="type">_Type</span><!-- /a --> <span class="type">*</span><span class="param">ty</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_global_var;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_global_var/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_global_var/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_global_var/name;   name=name -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_global_var/name"></a>
+<code>name</code>
+</dt>
+<dd><p>The variable name (must be unique among globals).</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_global_var/ty;   name=ty -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_global_var/ty"></a>
+<code>ty</code>
+</dt>
+<dd><p>The variable type.  Use _AST_MAKE_ARRAY(char_ty, len) for byte
+arrays so that the size matches the init_data length.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>The new Obj*, or NULL on error.
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_global_var;name=start --><p>The variable is registered in vm-&gt;compiler.globals.  For inline
+macros the capture loop will stash it in macro_globals and emit
+an extern declaration into every input file's token stream so
+the parser can resolve references.
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_global_var;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_global_var_set_init_data;   name=__jcc_ast_global_var_set_init_data -->
+<a name="//apple_ref/c/func/__jcc_ast_global_var_set_init_data"></a>
+<h3><a name="__jcc_ast_global_var_set_init_data">__jcc_ast_global_var_set_init_data</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_global_var_set_init_data;name=start --><!-- begin abstract --></p>
+<p>Set the initial data for a generated global variable.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_global_var_set_init_data;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_global_var_set_init_data;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_global_var_set_init_data" logicalPath="//apple_ref/c/instm/__jcc_ast_global_var_set_init_data //apple_ref/c/clm/__jcc_ast_global_var_set_init_data //apple_ref/c/intfcm/__jcc_ast_global_var_set_init_data //apple_ref/c/intfm/__jcc_ast_global_var_set_init_data //apple_ref/c/func/__jcc_ast_global_var_set_init_data" target="_top"><span class="function">__jcc_ast_global_var_set_init_data</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/_Obj //apple_ref/c/tdef/_Obj //apple_ref/c/tag/_Obj //apple_ref/c/struct/_Obj //apple_ref/c/intf/_Obj //apple_ref/doc/anysymbol/_Obj" machineGenerated="true" --><span class="type">_Obj</span><!-- /a --> <span class="type">*</span><span class="param">var</span>, 
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">data</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <span class="param">len</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_global_var_set_init_data;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_global_var_set_init_data/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_global_var_set_init_data/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_global_var_set_init_data/var;   name=var -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_global_var_set_init_data/var"></a>
+<code>var</code>
+</dt>
+<dd><p>The global variable object.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_global_var_set_init_data/data;   name=data -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_global_var_set_init_data/data"></a>
+<code>data</code>
+</dt>
+<dd><p>Pointer to the raw byte data.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_global_var_set_init_data/len;   name=len -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_global_var_set_init_data/len"></a>
+<code>len</code>
+</dt>
+<dd><p>Number of bytes to copy.  Must equal var-&gt;ty-&gt;size.</p></dd>
+</dl>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_global_var_set_static;   name=__jcc_ast_global_var_set_static -->
+<a name="//apple_ref/c/func/__jcc_ast_global_var_set_static"></a>
+<h3><a name="__jcc_ast_global_var_set_static">__jcc_ast_global_var_set_static</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_global_var_set_static;name=start --><!-- begin abstract --></p>
+<p>Set the static (internal linkage) flag on a generated global.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_global_var_set_static;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_global_var_set_static;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_global_var_set_static" logicalPath="//apple_ref/c/instm/__jcc_ast_global_var_set_static //apple_ref/c/clm/__jcc_ast_global_var_set_static //apple_ref/c/intfcm/__jcc_ast_global_var_set_static //apple_ref/c/intfm/__jcc_ast_global_var_set_static //apple_ref/c/func/__jcc_ast_global_var_set_static" target="_top"><span class="function">__jcc_ast_global_var_set_static</span></a>(
+    <!-- a logicalPath="//apple_ref/c/cl/_Obj //apple_ref/c/tdef/_Obj //apple_ref/c/tag/_Obj //apple_ref/c/struct/_Obj //apple_ref/c/intf/_Obj //apple_ref/doc/anysymbol/_Obj" machineGenerated="true" --><span class="type">_Obj</span><!-- /a --> <span class="type">*</span><span class="param">var</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <span class="param">is_static</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_global_var_set_static;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_global_var_set_static/var;   name=var -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_global_var_set_static/var"></a>
+<code>var</code>
+</dt>
+<dd><p>The global variable object.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_global_var_set_static/is_static;   name=is_static -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_global_var_set_static/is_static"></a>
+<code>is_static</code>
+</dt>
+<dd><p>True for internal linkage (file-scope static).</p></dd>
+</dl>
+</div>
+<hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_if;   name=__jcc_ast_if -->
 <a name="//apple_ref/c/func/__jcc_ast_if"></a>
 <h3><a name="__jcc_ast_if">__jcc_ast_if</a></h3>
@@ -1501,6 +1673,67 @@ for pointer-to-struct access).
 <!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_param_ref;name=start --><p>Create a reference to a function parameter.
 Use this when building function bodies to reference parameters by name.
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_param_ref;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_pop_fn;   name=__jcc_ast_pop_fn -->
+<a name="//apple_ref/c/func/__jcc_ast_pop_fn"></a>
+<h3><a name="__jcc_ast_pop_fn">__jcc_ast_pop_fn</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_pop_fn;name=start --><!-- begin abstract --></p>
+<p>Restore the function context saved by the most recent push.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_pop_fn;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_pop_fn;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_pop_fn" logicalPath="//apple_ref/c/instm/__jcc_ast_pop_fn //apple_ref/c/clm/__jcc_ast_pop_fn //apple_ref/c/intfcm/__jcc_ast_pop_fn //apple_ref/c/intfm/__jcc_ast_pop_fn //apple_ref/c/func/__jcc_ast_pop_fn" target="_top"><span class="function">__jcc_ast_pop_fn</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_pop_fn;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_pop_fn/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_pop_fn/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+</dl>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_push_fn;   name=__jcc_ast_push_fn -->
+<a name="//apple_ref/c/func/__jcc_ast_push_fn"></a>
+<h3><a name="__jcc_ast_push_fn">__jcc_ast_push_fn</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_push_fn;name=start --><!-- begin abstract --></p>
+<p>Establish fn as the "function currently being built" so that
+_QUOTE("return x;") applies the correct implicit return-type cast.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_push_fn;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_push_fn;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_push_fn" logicalPath="//apple_ref/c/instm/__jcc_ast_push_fn //apple_ref/c/clm/__jcc_ast_push_fn //apple_ref/c/intfcm/__jcc_ast_push_fn //apple_ref/c/intfm/__jcc_ast_push_fn //apple_ref/c/func/__jcc_ast_push_fn" target="_top"><span class="function">__jcc_ast_push_fn</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/_Obj //apple_ref/c/tdef/_Obj //apple_ref/c/tag/_Obj //apple_ref/c/struct/_Obj //apple_ref/c/intf/_Obj //apple_ref/doc/anysymbol/_Obj" machineGenerated="true" --><span class="type">_Obj</span><!-- /a --> <span class="type">*</span><span class="param">fn</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_push_fn;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_push_fn/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_push_fn/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_push_fn/fn;   name=fn -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_push_fn/fn"></a>
+<code>fn</code>
+</dt>
+<dd><p>The generated function whose return type should be used.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_push_fn;name=start --><p>Call __jcc_ast_pop_fn (or use the _AST_WITH_FN macro) to
+restore the previous context.  execute_pragma_macro always
+restores current_fn after the macro returns, so unmatched pushes
+cannot leak into the main parse/codegen pass.
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_push_fn;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_return;   name=__jcc_ast_return -->

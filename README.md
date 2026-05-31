@@ -42,9 +42,11 @@ Options:
 	-P/--print-tokens   Print preprocessed tokens to stdout
 	-E/--preprocess     Output preprocessed source code (traditional C -E)
 	-M/--macro-expand   Output macro-expanded source code (for gcc compatibility)
+	-G/--emit-generated Serialize only pragma-macro-generated objects (no header noise)
 	-j/--json           Output header declarations as JSON
 	-X/--no-preprocess  Disable preprocessing step
 	-S/--no-stdlib      Do not link standard library
+	-c/--compile-only   Compile to bytecode but do not execute
 	-o/--out <file>     Dump bytecode to <file> (no execution)
 	-d/--disassemble    Disassemble bytecode to stdout
 	-v/--verbose        Enable debug logging
@@ -81,6 +83,7 @@ Memory Safety Options (can be combined with safety levels):
 Preprocessor Options:
 	   --embed-limit=SIZE        Set #embed file size warning limit (e.g., 50MB, 100mb, default: 10MB)
 	   --embed-hard-limit        Make #embed limit a hard error instead of warning
+	   --macro-recursion-limit=N Limit recursive pragma macro expansion (default: 256, 0=unlimited)
 
 Optimization Levels:
 	   --optimize[=LEVEL]        Enable bytecode optimization (default: disabled)
@@ -155,6 +158,7 @@ python3 tests.py --match "*embed*"   # Run only tests matching a glob pattern
 python3 tests.py -j 4                # Run with 4 parallel workers
 python3 tests.py -2                  # Run all tests under safety level 2
 python3 tests.py --leaks             # Enable leak detection (leaks on macOS, valgrind on Linux)
+# I recommend running --leaks with -j (takes a long time synchronously)
 ```
 
 ### Sanitizer Builds

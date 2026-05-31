@@ -156,6 +156,16 @@ fuzz-info:
 
 fuzz: fuzz-info
 
+STD_TEMPLATE := gen_std.c
+
+# Regenerate src/std.c from the template.
+# src/std.c is committed so the normal build never needs this; run it
+# explicitly after editing gen_std.c or include/*.h.
+.PHONY: generate-std
+generate-std: $(EXE_OUT)
+	@printf '#include <string.h>\n\n' > src/std.c
+	./$(EXE_OUT) -G -I./include $(STD_TEMPLATE) >> src/std.c
+
 test: clean $(EXE_OUT)
 	@python3 tests.py
 
@@ -223,7 +233,7 @@ clean:
 	@$(RM) -rf profile/*.prof profile/*.txt profile/*.json profile/*.massif
 	@$(RM) -rf fuzz/corpus fuzz/out
 
-.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info
+.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info generate-std
 ifeq ($(UNAME_S),Linux)
 .PHONY: msan
 endif

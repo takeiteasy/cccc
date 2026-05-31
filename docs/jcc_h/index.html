@@ -2237,7 +2237,8 @@ by cc_load_bytecode().
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/cc_serialize_program;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/cc_serialize_program" logicalPath="//apple_ref/c/instm/cc_serialize_program //apple_ref/c/clm/cc_serialize_program //apple_ref/c/intfcm/cc_serialize_program //apple_ref/c/intfm/cc_serialize_program //apple_ref/c/func/cc_serialize_program" target="_top"><span class="function">cc_serialize_program</span></a>(
     <!-- a logicalPath="//apple_ref/c/cl/FILE //apple_ref/c/tdef/FILE //apple_ref/c/tag/FILE //apple_ref/c/struct/FILE //apple_ref/c/intf/FILE //apple_ref/doc/anysymbol/FILE" machineGenerated="true" --><span class="type">FILE</span><!-- /a --> <span class="type">*</span><span class="param">f</span>,
     <a machinegenerated="true" href="index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tag/Obj" logicalPath="//apple_ref/c/cl/Obj //apple_ref/c/tdef/Obj //apple_ref/c/tag/Obj" target="_top"><span class="type">Obj</span></a> <span class="type">*</span><span class="param">prog</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/cc_serialize_program;name=end --></pre>
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tag/Obj" logicalPath="//apple_ref/c/cl/Obj //apple_ref/c/tdef/Obj //apple_ref/c/tag/Obj" target="_top"><span class="type">Obj</span></a> <span class="type">*</span><span class="param">prog</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <span class="param">generated_only</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/cc_serialize_program;name=end --></pre>
 </div>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
 <div class="param_indent">
@@ -2260,10 +2261,17 @@ by cc_load_bytecode().
 <code>prog</code>
 </dt>
 <dd><p>Program AST to serialize.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/cc_serialize_program/generated_only;   name=generated_only -->
+<a name="//apple_ref/doc/functionparam/cc_serialize_program/generated_only"></a>
+<code>generated_only</code>
+</dt>
+<dd><p>If true, only serialize objects created by pragma macros
+(those with is_macro_generated set). Used with -G flag.</p></dd>
 </dl>
 </div>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
-<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/cc_serialize_program;name=start --><p>Used with -M flag to output macro-expanded source that
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/cc_serialize_program;name=start --><p>Used with -M/-G flags to output macro-expanded source that
 can be compiled with gcc or other C compilers.
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/cc_serialize_program;name=end --><!-- end discussion -->
 </p>
@@ -3553,6 +3561,7 @@ defined addresses in the generated text segment.
     <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_compiled //apple_ref/c/data/is_compiled //apple_ref/c/clconst/is_compiled " machineGenerated="true" --><span class="var">is_compiled</span><!-- /a -->; <span class="comment">// True after successful compilation</span> 
     <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_macro_entry //apple_ref/c/data/is_macro_entry //apple_ref/c/clconst/is_macro_entry " machineGenerated="true" --><span class="var">is_macro_entry</span><!-- /a -->; <span class="comment">// True for #pragma macro, false for comptime helper</span> 
     <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_inline //apple_ref/c/data/is_inline //apple_ref/c/clconst/is_inline " machineGenerated="true" --><span class="var">is_inline</span><!-- /a -->; <span class="comment">// True for inline macros (auto-execute at declaration)</span> 
+    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_void_macro //apple_ref/c/data/is_void_macro //apple_ref/c/clconst/is_void_macro " machineGenerated="true" --><span class="var">is_void_macro</span><!-- /a -->; <span class="comment">// True if declared void — definition-only, no splice node</span> 
     <span class="keyword">struct</span> <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/PragmaMacro" logicalPath="//apple_ref/c/cl/PragmaMacro //apple_ref/c/tdef/PragmaMacro" target="_top"><span class="type">PragmaMacro</span></a> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/next //apple_ref/c/data/next //apple_ref/c/clconst/next " machineGenerated="true" --><span class="var">next</span><!-- /a -->; <span class="comment">// Next macro in linked list</span> 
 } <!-- a logicalPath="//apple_ref/c/econst/PragmaMacro //apple_ref/c/data/PragmaMacro //apple_ref/c/clconst/PragmaMacro " machineGenerated="true" --><span class="var">PragmaMacro</span><!-- /a -->;  <!-- headerDoc=declaration;uid=//apple_ref/c/tdef/PragmaMacro;name=end --></pre>
 </div>
@@ -3589,6 +3598,12 @@ defined addresses in the generated text segment.
 <code>is_macro_entry</code>
 </dt>
 <dd><p>True if callable from user program macro call sites.</p></dd>
+<dt>
+<!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/PragmaMacro/is_void_macro;   name=is_void_macro -->
+<a name="//apple_ref/doc/structfield/PragmaMacro/is_void_macro"></a>
+<code>is_void_macro</code>
+</dt>
+<dd><p>True if declared with void return type (definition-only).</p></dd>
 <dt>
 <!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/PragmaMacro/next;   name=next -->
 <a name="//apple_ref/doc/structfield/PragmaMacro/next"></a>
@@ -4492,7 +4507,8 @@ and storage tracking.
     <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_function //apple_ref/c/data/is_function //apple_ref/c/clconst/is_function " machineGenerated="true" --><span class="var">is_function</span><!-- /a -->; 
     <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_definition //apple_ref/c/data/is_definition //apple_ref/c/clconst/is_definition " machineGenerated="true" --><span class="var">is_definition</span><!-- /a -->; 
     <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_static //apple_ref/c/data/is_static //apple_ref/c/clconst/is_static " machineGenerated="true" --><span class="var">is_static</span><!-- /a -->; 
-    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_constexpr //apple_ref/c/data/is_constexpr //apple_ref/c/clconst/is_constexpr " machineGenerated="true" --><span class="var">is_constexpr</span><!-- /a -->;  
+    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_constexpr //apple_ref/c/data/is_constexpr //apple_ref/c/clconst/is_constexpr " machineGenerated="true" --><span class="var">is_constexpr</span><!-- /a -->; 
+    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_macro_generated //apple_ref/c/data/is_macro_generated //apple_ref/c/clconst/is_macro_generated " machineGenerated="true" --><span class="var">is_macro_generated</span><!-- /a -->; <span class="comment">// true if created by a #pragma macro via _AST_FUNCTION/_AST_GLOBAL_VAR</span>  
     <span class="comment">// Global variable</span> 
     <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_tentative //apple_ref/c/data/is_tentative //apple_ref/c/clconst/is_tentative " machineGenerated="true" --><span class="var">is_tentative</span><!-- /a -->; 
     <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_tls //apple_ref/c/data/is_tls //apple_ref/c/clconst/is_tls " machineGenerated="true" --><span class="var">is_tls</span><!-- /a -->; 
