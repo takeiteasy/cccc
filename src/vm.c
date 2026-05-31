@@ -805,6 +805,7 @@ void cc_load_stdlib(JCC *vm) {
     register_wide_functions(vm);
 
     // Mark all headers as included
+    hashmap_put(&vm->compiler.included_headers, "complex.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "ctype.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "dlfcn.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "fcntl.h", (void*)1);

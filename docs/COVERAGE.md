@@ -92,8 +92,8 @@ Conformance status for each C standard. Intended as a reference for `--std` flag
 | `//` single-line comments | ✓ | |
 | `long long int` and `unsigned long long int` | ✓ | |
 | `_Bool` | ✓ | |
-| `_Complex` | ✗ | |
-| `_Imaginary` | ✗ | |
+| `_Complex` | ✓ | Native scalar representation with arithmetic, casts, assignment, and equality |
+| `_Imaginary` | ~ | Accepted as compatibility spelling for the corresponding complex type |
 | Mixed declarations and statements | ✓ | |
 | Variable declaration in `for` initialiser | ✓ | |
 | Variable-length arrays (VLA) | ✓ | Allocated via VM heap |
@@ -106,7 +106,7 @@ Conformance status for each C standard. Intended as a reference for `--std` flag
 | `__func__` predefined identifier | ✓ | |
 | Variadic macros `__VA_ARGS__` | ✓ | |
 | `_Pragma(...)` operator | ✗ | |
-| Hexadecimal floating-point literals (`0x1.8p+1`) | ✗ | |
+| Hexadecimal floating-point literals (`0x1.8p+1`) | ✓ | |
 | `u8"..."` UTF-8 string literals | ✓ | |
 | `u"..."` UTF-16 string literals | ✓ | |
 | `U"..."` UTF-32 string literals | ✓ | |
@@ -119,12 +119,12 @@ Conformance status for each C standard. Intended as a reference for `--std` flag
 
 | Header | Status | Notes |
 |---|---|---|
-| `<complex.h>` | ✗ | |
+| `<complex.h>` | ~ | Construction/projection macros and basic operations; complex function ABI is not supported |
 | `<inttypes.h>` | ✓ | |
 | `<stdbool.h>` | ✓ | |
 | `<stdint.h>` | ✓ | |
 | `<fenv.h>` | ✓ | Host floating-point environment APIs registered |
-| `<tgmath.h>` | ~ | Type-generic macros for real floating types |
+| `<tgmath.h>` | ~ | Type-generic macros for real floating types and complex absolute value |
 | `<wchar.h>` / `<wctype.h>` | ~ | Common wide-character APIs registered |
 | `<iso646.h>` | ✓ | |
 | `snprintf`, `vsnprintf` | ✓ | |
@@ -249,6 +249,6 @@ C17 is a bug-fix release — no new language features or library functions were 
 |---|---|
 | Threading (`<threads.h>`, `pthread`) | JCC is single-threaded |
 | Atomic operations (`<stdatomic.h>` operations) | Headers present; operations are non-atomic |
-| `<complex.h>` / `_Complex` / `_Imaginary` | Complex object representation and codegen are not implemented |
+| Complex function call ABI | Passing or returning complex values by function call is not implemented |
 | Native code generation | JCC produces VM bytecode only |
 | Shared-library auto-linking for arbitrary undeclared symbols | `dlfcn.h` calls are available; `--library` opens requested libraries for registered FFI symbols |

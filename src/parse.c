@@ -272,6 +272,15 @@ static Node *new_ulong(JCC *vm, long val, Token *tok) {
     return node;
 }
 
+static Node *new_complex_node(JCC *vm, Node *real, Node *imag, Type *ty,
+                              Token *tok) {
+    Node *node = new_node(vm, ND_COMPLEX, tok);
+    node->lhs = real;
+    node->rhs = imag;
+    node->ty = ty;
+    return node;
+}
+
 static Node *new_var_node(JCC *vm, Obj *var, Token *tok) {
     Node *node = new_node(vm, ND_VAR, tok);
     node->var = var;
@@ -541,6 +550,8 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
         OTHER = 1 << 16,
         SIGNED = 1 << 17,
         UNSIGNED = 1 << 18,
+        COMPLEX = 1 << 19,
+        IMAGINARY = 1 << 20,
     };
 
     Type *ty = ty_int;
@@ -690,6 +701,10 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
             counter += FLOAT;
         else if (equal(tok, "double"))
             counter += DOUBLE;
+        else if (equal(tok, "_Complex"))
+            counter += COMPLEX;
+        else if (equal(tok, "_Imaginary"))
+            counter += IMAGINARY;
         else if (equal(tok, "signed"))
             counter |= SIGNED;
         else if (equal(tok, "unsigned"))
@@ -749,11 +764,25 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
         case FLOAT:
             ty = ty_float;
             break;
+        case FLOAT + COMPLEX:
+        case FLOAT + IMAGINARY:
+            ty = ty_fcomplex;
+            break;
         case DOUBLE:
             ty = ty_double;
             break;
+        case DOUBLE + COMPLEX:
+        case DOUBLE + IMAGINARY:
+        case COMPLEX:
+        case IMAGINARY:
+            ty = ty_dcomplex;
+            break;
         case LONG + DOUBLE:
             ty = ty_ldouble;
+            break;
+        case LONG + DOUBLE + COMPLEX:
+        case LONG + DOUBLE + IMAGINARY:
+            ty = ty_ldcomplex;
             break;
         default:
             error_tok(vm, tok, "invalid type");
@@ -2008,7 +2037,7 @@ static bool is_typename(JCC *vm, Token *tok) {
             "__restrict",    "__restrict__", "_Noreturn",     "float",
             "double",        "typeof",       "typeof_unqual", "inline",
             "_Thread_local", "__thread",     "_Atomic",       "constexpr",
-            "__block",
+            "__block",       "_Complex",     "_Imaginary",
         };
 
         for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
@@ -4220,6 +4249,48 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
         *rest = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_FRAME_ADDR, start);
         node->ty = pointer_to(vm, ty_void);
+        return node;
+    }
+
+    if (equal(tok, "__jcc_cmplx") || equal(tok, "__jcc_cmplxf") ||
+        equal(tok, "__jcc_cmplxl")) {
+        Type *ty = equal(tok, "__jcc_cmplxf") ? ty_fcomplex :
+                   equal(tok, "__jcc_cmplxl") ? ty_ldcomplex : ty_dcomplex;
+        tok = skip(vm, tok->next, "(");
+        Node *real = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *imag = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        return new_complex_node(vm, real, imag, ty, start);
+    }
+
+    if (equal(tok, "__jcc_creal") || equal(tok, "__jcc_crealf") ||
+        equal(tok, "__jcc_creall") || equal(tok, "__jcc_cimag") ||
+        equal(tok, "__jcc_cimagf") || equal(tok, "__jcc_cimagl")) {
+        bool imag_part = equal(tok, "__jcc_cimag") || equal(tok, "__jcc_cimagf") ||
+                         equal(tok, "__jcc_cimagl");
+        Type *ret_ty = (equal(tok, "__jcc_crealf") || equal(tok, "__jcc_cimagf")) ? ty_float :
+                       (equal(tok, "__jcc_creall") || equal(tok, "__jcc_cimagl")) ? ty_ldouble :
+                       ty_double;
+        tok = skip(vm, tok->next, "(");
+        Node *arg = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        Node *node = new_unary(vm, ND_COMPLEX, arg, start);
+        node->val = imag_part ? 2 : 1;
+        node->ty = ret_ty;
+        return node;
+    }
+
+    if (equal(tok, "__jcc_conj") || equal(tok, "__jcc_conjf") ||
+        equal(tok, "__jcc_conjl")) {
+        Type *ty = equal(tok, "__jcc_conjf") ? ty_fcomplex :
+                   equal(tok, "__jcc_conjl") ? ty_ldcomplex : ty_dcomplex;
+        tok = skip(vm, tok->next, "(");
+        Node *arg = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        Node *node = new_unary(vm, ND_COMPLEX, arg, start);
+        node->val = 3;
+        node->ty = ty;
         return node;
     }
 

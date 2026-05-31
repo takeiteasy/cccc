@@ -1066,7 +1066,7 @@ static char *format_relative_path(JCC *vm, char *base_file, char *filename) {
 
 static bool is_standard_header(const char *filename) {
     static const char *std_headers[] = {
-        "assert.h", "ctype.h",        "errno.h",     "float.h",  "inttypes.h",
+        "assert.h", "complex.h",      "ctype.h",     "errno.h",  "float.h",  "inttypes.h",
         "limits.h", "math.h",         "setjmp.h",    "stdarg.h", "stdbool.h",
         "stddef.h", "stdint.h",       "stdio.h",     "stdlib.h", "string.h",
         "time.h",   "Availability.h", "sys/cdefs.h", NULL};

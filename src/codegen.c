@@ -493,6 +493,7 @@ static void emit_pop3(JCC *vm, int rd) {
 // ========== Forward Declarations ==========
 
 static void gen_expr(JCC *vm, Node *node, int dest_reg);
+static void gen_complex_expr(JCC *vm, Node *node, int real_reg, int imag_reg);
 static void gen_stmt(JCC *vm, Node *node);
 static void gen_addr(JCC *vm, Node *node, int dest_reg);
 
@@ -769,6 +770,164 @@ static void gen_addr(JCC *vm, Node *node, int dest_reg) {
     }
 }
 
+static int complex_part_offset(Type *ty) {
+    return ty && ty->kind == TY_COMPLEX && ty->base ? ty->base->size : 8;
+}
+
+static int complex_load_op(Type *ty) {
+    return ty && ty->kind == TY_COMPLEX && ty->base &&
+           ty->base->kind == TY_FLOAT ? FLDR_F32 : FLDR;
+}
+
+static int complex_store_op(Type *ty) {
+    return ty && ty->kind == TY_COMPLEX && ty->base &&
+           ty->base->kind == TY_FLOAT ? FSTR_F32 : FSTR;
+}
+
+static void emit_float_zero(JCC *vm, int freg) {
+    int r_zero = alloc_temp_reg();
+    emit_li3(vm, r_zero, 0);
+    emit_rr(vm, I2F3, freg, r_zero);
+    free_temp_reg(r_zero);
+}
+
+static void emit_complex_load(JCC *vm, Type *ty, int real_reg, int imag_reg,
+                              int addr_reg) {
+    int op = complex_load_op(ty);
+    emit_rr(vm, op, real_reg, addr_reg);
+    int r_imag_addr = alloc_temp_reg();
+    emit_addi3(vm, r_imag_addr, addr_reg, complex_part_offset(ty));
+    emit_rr(vm, op, imag_reg, r_imag_addr);
+    free_temp_reg(r_imag_addr);
+}
+
+static void emit_complex_store(JCC *vm, Type *ty, int real_reg, int imag_reg,
+                               int addr_reg) {
+    int op = complex_store_op(ty);
+    emit_rr(vm, op, real_reg, addr_reg);
+    int r_imag_addr = alloc_temp_reg();
+    emit_addi3(vm, r_imag_addr, addr_reg, complex_part_offset(ty));
+    emit_rr(vm, op, imag_reg, r_imag_addr);
+    free_temp_reg(r_imag_addr);
+}
+
+static void gen_complex_expr(JCC *vm, Node *node, int real_reg, int imag_reg) {
+    if (!node)
+        error("codegen: null complex expression node");
+
+    if (!is_complex(node->ty)) {
+        gen_expr(vm, node, real_reg);
+        emit_float_zero(vm, imag_reg);
+        return;
+    }
+
+    switch (node->kind) {
+    case ND_COMPLEX:
+        if (node->val == 0) {
+            gen_expr(vm, node->lhs, real_reg);
+            gen_expr(vm, node->rhs, imag_reg);
+            return;
+        }
+        if (node->val == 3) {
+            gen_complex_expr(vm, node->lhs, real_reg, imag_reg);
+            emit_frr(vm, FNEG3, imag_reg, imag_reg);
+            return;
+        }
+        break;
+    case ND_CAST:
+        if (is_complex(node->lhs->ty)) {
+            gen_complex_expr(vm, node->lhs, real_reg, imag_reg);
+        } else {
+            gen_expr(vm, node->lhs, real_reg);
+            if (!is_flonum(node->lhs->ty))
+                emit_rr(vm, I2F3, real_reg, real_reg);
+            emit_float_zero(vm, imag_reg);
+        }
+        if (node->ty->base && node->ty->base->kind == TY_FLOAT) {
+            emit_fround_f32(vm, real_reg, real_reg);
+            emit_fround_f32(vm, imag_reg, imag_reg);
+        }
+        return;
+    case ND_VAR:
+    case ND_DEREF:
+    case ND_MEMBER: {
+        int r_addr = alloc_temp_reg();
+        gen_addr(vm, node, r_addr);
+        emit_complex_load(vm, node->ty, real_reg, imag_reg, r_addr);
+        free_temp_reg(r_addr);
+        return;
+    }
+    case ND_ASSIGN: {
+        gen_complex_expr(vm, node->rhs, real_reg, imag_reg);
+        int r_addr = alloc_temp_reg();
+        gen_addr(vm, node->lhs, r_addr);
+        emit_complex_store(vm, node->ty, real_reg, imag_reg, r_addr);
+        free_temp_reg(r_addr);
+        return;
+    }
+    case ND_COMMA:
+        gen_expr(vm, node->lhs, REG_ZERO);
+        gen_complex_expr(vm, node->rhs, real_reg, imag_reg);
+        return;
+    case ND_NEG:
+        gen_complex_expr(vm, node->lhs, real_reg, imag_reg);
+        emit_frr(vm, FNEG3, real_reg, real_reg);
+        emit_frr(vm, FNEG3, imag_reg, imag_reg);
+        return;
+    case ND_ADD:
+    case ND_SUB:
+    case ND_MUL:
+    case ND_DIV: {
+        int br = REG_T5;
+        int bi = REG_T6;
+        int t0 = REG_T7;
+        int t1 = REG_T8;
+        int t2 = REG_T9;
+        gen_complex_expr(vm, node->lhs, real_reg, imag_reg);
+        gen_complex_expr(vm, node->rhs, br, bi);
+
+        if (node->kind == ND_ADD) {
+            emit_frrr(vm, FADD3, real_reg, real_reg, br);
+            emit_frrr(vm, FADD3, imag_reg, imag_reg, bi);
+        } else if (node->kind == ND_SUB) {
+            emit_frrr(vm, FSUB3, real_reg, real_reg, br);
+            emit_frrr(vm, FSUB3, imag_reg, imag_reg, bi);
+        } else if (node->kind == ND_MUL) {
+            emit_frrr(vm, FMUL3, t0, real_reg, br);
+            emit_frrr(vm, FMUL3, t1, imag_reg, bi);
+            emit_frrr(vm, FSUB3, t0, t0, t1);
+            emit_frrr(vm, FMUL3, t1, real_reg, bi);
+            emit_frrr(vm, FMUL3, imag_reg, imag_reg, br);
+            emit_frrr(vm, FADD3, imag_reg, t1, imag_reg);
+            emit_fmov3(vm, real_reg, t0);
+        } else {
+            emit_frrr(vm, FMUL3, t0, br, br);
+            emit_frrr(vm, FMUL3, t1, bi, bi);
+            emit_frrr(vm, FADD3, t0, t0, t1);
+            emit_frrr(vm, FMUL3, t1, real_reg, br);
+            emit_frrr(vm, FMUL3, t2, imag_reg, bi);
+            emit_frrr(vm, FADD3, t1, t1, t2);
+            emit_frrr(vm, FDIV3, t1, t1, t0);
+            emit_frrr(vm, FMUL3, imag_reg, imag_reg, br);
+            emit_frrr(vm, FMUL3, t2, real_reg, bi);
+            emit_frrr(vm, FSUB3, imag_reg, imag_reg, t2);
+            emit_frrr(vm, FDIV3, imag_reg, imag_reg, t0);
+            emit_fmov3(vm, real_reg, t1);
+        }
+
+        if (node->ty->base && node->ty->base->kind == TY_FLOAT) {
+            emit_fround_f32(vm, real_reg, real_reg);
+            emit_fround_f32(vm, imag_reg, imag_reg);
+        }
+        return;
+    }
+    default:
+        break;
+    }
+
+    error_tok(vm, node->tok, "unsupported complex expression");
+}
+
 // ========== Expression Generation ==========
 
 // Generate code for expression, result in dest_reg (integer) or dest_freg
@@ -776,6 +935,13 @@ static void gen_addr(JCC *vm, Node *node, int dest_reg) {
 static void gen_expr(JCC *vm, Node *node, int dest_reg) {
     if (!node) {
         error("codegen: null expression node");
+    }
+
+    if (is_complex(node->ty)) {
+        int imag_reg = (dest_reg == FREG_A5) ? FREG_A4 : FREG_A5;
+        gen_complex_expr(vm, node, dest_reg == REG_ZERO ? FREG_A0 : dest_reg,
+                         imag_reg);
+        return;
     }
 
     switch (node->kind) {
@@ -805,6 +971,18 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             emit_li3(vm, dest_reg, node->val);
         }
         return;
+
+    case ND_COMPLEX:
+        if (node->val == 1 || node->val == 2) {
+            int imag_reg = (dest_reg == FREG_A7) ? FREG_A6 : FREG_A7;
+            gen_complex_expr(vm, node->lhs, dest_reg, imag_reg);
+            if (node->val == 2)
+                emit_fmov3(vm, dest_reg, imag_reg);
+            if (node->ty->kind == TY_FLOAT)
+                emit_fround_f32(vm, dest_reg, dest_reg);
+            return;
+        }
+        error_tok(vm, node->tok, "unsupported non-complex projection");
 
     case ND_VAR:
         if (node->var->is_function) {
@@ -910,6 +1088,29 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
     case ND_NE:
     case ND_LT:
     case ND_LE: {
+        if (is_complex(node->lhs->ty) || is_complex(node->rhs->ty)) {
+            if (node->kind != ND_EQ && node->kind != ND_NE)
+                error_tok(vm, node->tok, "unsupported complex comparison");
+
+            int ar = FREG_A0;
+            int ai = FREG_A1;
+            int br = FREG_A2;
+            int bi = FREG_A3;
+            gen_complex_expr(vm, node->lhs, ar, ai);
+            gen_complex_expr(vm, node->rhs, br, bi);
+
+            int r_real = alloc_temp_reg();
+            int r_imag = alloc_temp_reg();
+            emit_frrr(vm, FEQ3, r_real, ar, br);
+            emit_frrr(vm, FEQ3, r_imag, ai, bi);
+            emit_rrr(vm, AND3, dest_reg, r_real, r_imag);
+            if (node->kind == ND_NE)
+                emit_rr(vm, NOT3, dest_reg, dest_reg);
+            free_temp_reg(r_imag);
+            free_temp_reg(r_real);
+            return;
+        }
+
         // Check if RHS contains a function call - if so, we need to save LHS
         // because function calls clobber caller-saved temp registers
         bool rhs_has_call = contains_funcall(node->rhs);
@@ -1255,6 +1456,15 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         return;
 
     case ND_CAST:
+        if (is_complex(node->lhs->ty)) {
+            int imag_reg = (dest_reg == FREG_A7) ? FREG_A6 : FREG_A7;
+            gen_complex_expr(vm, node->lhs, dest_reg, imag_reg);
+            if (!is_flonum(node->ty))
+                emit_rr(vm, F2I3, dest_reg, dest_reg);
+            else if (node->ty->kind == TY_FLOAT)
+                emit_fround_f32(vm, dest_reg, dest_reg);
+            return;
+        }
         gen_expr(vm, node->lhs, dest_reg);
         // Add type conversion if needed
         if (is_flonum(node->ty) && !is_flonum(node->lhs->ty)) {
@@ -1287,6 +1497,14 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         return;
 
     case ND_FUNCALL: {
+        if (is_complex(node->ty))
+            error_tok(vm, node->tok,
+                      "complex function return ABI is not supported");
+        for (Node *arg = node->args; arg; arg = arg->next)
+            if (is_complex(arg->ty))
+                error_tok(vm, arg->tok,
+                          "complex function argument ABI is not supported");
+
         // Check if this is a builtin alloca call (used for VLAs)
         if (node->lhs->kind == ND_VAR &&
             node->lhs->var == vm->compiler.builtin_alloca) {
@@ -2308,7 +2526,8 @@ static int assign_stack_offsets(Obj *fn) {
             } else if (var->ty->kind == TY_VLA) {
                 var_size = 1;
             } else if (var->ty->kind == TY_STRUCT ||
-                       var->ty->kind == TY_UNION) {
+                       var->ty->kind == TY_UNION ||
+                       var->ty->kind == TY_COMPLEX) {
                 var_size = (var->ty->size + 7) / 8;
             }
             stack_size += var_size;

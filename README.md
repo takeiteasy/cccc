@@ -107,7 +107,7 @@ Example:
 JCC ships embedded standard library headers compiled directly into the binary — no external headers required at runtime:
 
 - `stdio.h`, `stdlib.h`, `string.h`, `math.h`, `time.h`, `ctype.h`
-- `locale.h`, `signal.h`, `wchar.h`, `wctype.h`, `uchar.h`, `fenv.h`, `tgmath.h`
+- `locale.h`, `signal.h`, `wchar.h`, `wctype.h`, `uchar.h`, `fenv.h`, `complex.h`, `tgmath.h`
 - POSIX headers on macOS/Linux: `dlfcn.h`, `unistd.h`, `fcntl.h`
 - `stdarg.h`, `setjmp.h` — JCC-specific implementations for the VM calling convention
 - `stddef.h`, `stdbool.h`, `stdint.h`, `limits.h`, `float.h`, `iso646.h`

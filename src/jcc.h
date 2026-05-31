@@ -416,6 +416,7 @@ typedef enum {
     TY_UNION = 15,
     TY_ERROR = 16, // error type for recovery
     TY_BLOCK = 17, // Apple blocks (closures)
+    TY_COMPLEX = 18, // C99 complex scalar, base is float/double/long double
 } TypeKind;
 
 typedef struct Node Node;
@@ -555,6 +556,7 @@ typedef enum {
     ND_BLOCK_LITERAL = 49, // Block literal ^{ ... }
     ND_BLOCK_CALL = 50,    // Block invocation
     ND_MACRO_CALL = 51, // Pragma macro invocation (deferred until macro pass)
+    ND_COMPLEX = 52,    // Native complex construction/projection helper
 } NodeKind;
 
 /*!

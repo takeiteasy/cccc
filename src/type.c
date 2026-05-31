@@ -41,6 +41,10 @@ Type *ty_float = &(Type){TY_FLOAT, 4, 4};
 Type *ty_double = &(Type){TY_DOUBLE, 8, 8};
 Type *ty_ldouble = &(Type){TY_LDOUBLE, 16, 16};
 
+Type *ty_fcomplex = &(Type){TY_COMPLEX, 8, 4, false, false, false, false, NULL, &(Type){TY_FLOAT, 4, 4}};
+Type *ty_dcomplex = &(Type){TY_COMPLEX, 16, 8, false, false, false, false, NULL, &(Type){TY_DOUBLE, 8, 8}};
+Type *ty_ldcomplex = &(Type){TY_COMPLEX, 32, 16, false, false, false, false, NULL, &(Type){TY_LDOUBLE, 16, 16}};
+
 static Type ty_error_obj = {TY_ERROR, 0, 1};
 Type *ty_error = &ty_error_obj;
 
@@ -66,9 +70,14 @@ bool is_flonum(Type *ty) {
     ty->kind == TY_LDOUBLE;
 }
 
+bool is_complex(Type *ty) {
+    if (!ty) return false;
+    return ty->kind == TY_COMPLEX;
+}
+
 bool is_numeric(Type *ty) {
     if (!ty) return false;
-    return is_integer(ty) || is_flonum(ty);
+    return is_integer(ty) || is_flonum(ty) || is_complex(ty);
 }
 
 bool is_error_type(Type *ty) {
@@ -98,6 +107,8 @@ bool is_compatible(Type *t1, Type *t2) {
         case TY_DOUBLE:
         case TY_LDOUBLE:
             return true;
+        case TY_COMPLEX:
+            return is_compatible(t1->base, t2->base);
         case TY_PTR:
             return is_compatible(t1->base, t2->base);
         case TY_FUNC: {
@@ -180,6 +191,17 @@ Type *block_type(JCC *vm, Type *return_ty, Type *params) {
     return ty;
 }
 
+Type *complex_type_for(JCC *vm, Type *base) {
+    (void)vm;
+    if (!base || base->kind == TY_DOUBLE)
+        return ty_dcomplex;
+    if (base->kind == TY_FLOAT)
+        return ty_fcomplex;
+    if (base->kind == TY_LDOUBLE)
+        return ty_ldcomplex;
+    return ty_dcomplex;
+}
+
 // Integer promotion: Convert types smaller than int to int (C99 6.3.1.1)
 // char, short, and bit-fields promote to int if all values fit, else unsigned int
 static Type *integer_promotion(Type *ty) {
@@ -220,6 +242,12 @@ static Type *get_common_type(JCC *vm, Type *ty1, Type *ty2) {
     // Handle error types - propagate error
     if (!ty1 || !ty2 || ty1->kind == TY_ERROR || ty2->kind == TY_ERROR)
         return ty_error;
+
+    if (is_complex(ty1) || is_complex(ty2)) {
+        Type *base1 = is_complex(ty1) ? ty1->base : ty1;
+        Type *base2 = is_complex(ty2) ? ty2->base : ty2;
+        return complex_type_for(vm, get_common_type(vm, base1, base2));
+    }
 
     // Handle pointer arithmetic
     if (ty1->base)
@@ -296,7 +324,7 @@ static void usual_arith_conv(JCC *vm, Node **lhs, Node **rhs) {
 }
 
 void add_type(JCC *vm, Node *node) {
-    if (!node || node->ty)
+    if (!node || (node->ty && node->kind != ND_COMPLEX))
         return;
 
     add_type(vm, node->lhs);
@@ -324,6 +352,21 @@ void add_type(JCC *vm, Node *node) {
         case ND_NUM:
             // Parser already sets the correct type from token (ty_double for 3.14, etc.)
             // Don't override it here!
+            return;
+        case ND_COMPLEX:
+            if (node->val == 0) {
+                node->ty = complex_type_for(vm, node->ty ? node->ty->base : ty_double);
+                if (node->lhs)
+                    node->lhs = new_cast(vm, node->lhs, node->ty->base);
+                if (node->rhs)
+                    node->rhs = new_cast(vm, node->rhs, node->ty->base);
+            } else if (node->val == 1 || node->val == 2) {
+                if (!is_complex(node->lhs->ty))
+                    node->lhs = new_cast(vm, node->lhs, complex_type_for(vm, node->ty));
+            } else if (node->val == 3) {
+                if (!is_complex(node->lhs->ty))
+                    node->lhs = new_cast(vm, node->lhs, node->ty);
+            }
             return;
         case ND_ADD:
         case ND_SUB:
@@ -371,8 +414,18 @@ void add_type(JCC *vm, Node *node) {
             return;
         case ND_EQ:
         case ND_NE:
+            if (is_complex(node->lhs->ty) || is_complex(node->rhs->ty)) {
+                usual_arith_conv(vm, &node->lhs, &node->rhs);
+                node->ty = ty_int;
+                return;
+            }
+            usual_arith_conv(vm, &node->lhs, &node->rhs);
+            node->ty = ty_int;
+            return;
         case ND_LT:
         case ND_LE:
+            if (is_complex(node->lhs->ty) || is_complex(node->rhs->ty))
+                error_tok(vm, node->tok, "ordered comparison of complex values is not supported");
             usual_arith_conv(vm, &node->lhs, &node->rhs);
             node->ty = ty_int;
             return;

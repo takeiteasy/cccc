@@ -321,11 +321,15 @@ extern Type *ty_ulong;
 extern Type *ty_float;
 extern Type *ty_double;
 extern Type *ty_ldouble;
+extern Type *ty_fcomplex;
+extern Type *ty_dcomplex;
+extern Type *ty_ldcomplex;
 
 extern Type *ty_error;
 
 bool is_integer(Type *ty);
 bool is_flonum(Type *ty);
+bool is_complex(Type *ty);
 bool is_numeric(Type *ty);
 bool is_error_type(Type *ty);
 bool is_compatible(Type *t1, Type *t2);
@@ -338,6 +342,7 @@ Type *enum_type(JCC *vm);
 Type *struct_type(JCC *vm);
 Type *union_type(JCC *vm);
 Type *block_type(JCC *vm, Type *return_ty, Type *params);
+Type *complex_type_for(JCC *vm, Type *base);
 void add_type(JCC *vm, Node *node);
 
 //
