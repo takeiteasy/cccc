@@ -1325,6 +1325,10 @@ typedef struct Compiler {
     // Optimization settings
     int opt_level; // Optimization level (0=none, 1=basic, 2=standard,
                    // 3=aggressive)
+
+    // Fuzzing / compile-only mode
+    bool compile_only; // If true, compile to bytecode but do not require main()
+                       // or execute (used by AFL++ and other fuzzers)
 } Compiler;
 
 /*!

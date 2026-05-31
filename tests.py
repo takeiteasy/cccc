@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 
@@ -30,7 +31,7 @@ def detect_platform():
         return "unknown"
 
 
-def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_args):
+def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_args, bench=False):
     tests_dir = Path(script_dir) / "tests"
     test_name = str(test_file.relative_to(tests_dir))
 
@@ -101,8 +102,11 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
     else:
         cmd = [str(jcc), "-I./include", *jcc_args, str(test_file)]
 
+    elapsed = None
     if cmd is not None:
+        start = time.perf_counter()
         result = subprocess.run(cmd, capture_output=True, text=True, cwd=script_dir)
+        elapsed = time.perf_counter() - start
         output = result.stdout + result.stderr
         exit_code = result.returncode
 
@@ -131,6 +135,7 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
 
     has_compile_error = (
         "error generated" in output
+        or "errors generated" in output
         or "cannot open file" in output
         or "undefined function" in output
         or "implicit declaration of a function" in output
@@ -163,6 +168,7 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
         "output": output,
         "is_negative_test": is_negative_test,
         "expects_runtime_error": expects_runtime_error,
+        "elapsed": elapsed,
     }
 
 
@@ -175,14 +181,55 @@ def main():
     parser.add_argument(
         "-j", "--jobs", type=int, default=8, help="Number of parallel jobs"
     )
+    parser.add_argument(
+        "--asan", action="store_true", help="Use jcc-asan binary (AddressSanitizer + UBSan)"
+    )
+    parser.add_argument(
+        "--ubsan", action="store_true", help="Use jcc-ubsan binary (UndefinedBehaviorSanitizer)"
+    )
+    parser.add_argument(
+        "--tsan", action="store_true", help="Use jcc-tsan binary (ThreadSanitizer)"
+    )
+    parser.add_argument(
+        "--msan", action="store_true", help="Use jcc-msan binary (MemorySanitizer, Linux-only)"
+    )
+    parser.add_argument(
+        "--binary", help="Path to jcc binary (overrides all other binary options)"
+    )
+    parser.add_argument(
+        "--bench", action="store_true", help="Report per-test execution time"
+    )
+    parser.add_argument(
+        "--profile-cpu", action="store_true", help="Run tests under gperftools CPU profiler (builds jcc-prof if needed)"
+    )
+    parser.add_argument(
+        "--profile-mem", action="store_true", help="Run tests with enhanced memory profiling (macOS: leaks+heap, Linux: valgrind)"
+    )
     args, jcc_args = parser.parse_known_args()
 
     script_dir = Path(__file__).parent.resolve()
-    jcc = script_dir / "jcc"
+
+    if args.binary:
+        jcc = Path(args.binary)
+    elif args.asan:
+        jcc = script_dir / "jcc-asan"
+    elif args.ubsan:
+        jcc = script_dir / "jcc-ubsan"
+    elif args.tsan:
+        jcc = script_dir / "jcc-tsan"
+    elif args.msan:
+        jcc = script_dir / "jcc-msan"
+    else:
+        jcc = script_dir / "jcc"
     tests_dir = script_dir / "tests"
 
     if not jcc.exists():
-        print("Error: jcc executable not found. Please run 'make' first.")
+        binary_name = jcc.name
+        print(f"Error: {binary_name} not found.")
+        if args.binary or args.asan or args.ubsan or args.tsan or args.msan:
+            print("Please build the requested target first (e.g., 'make asan').")
+        else:
+            print("Please run 'make' first.")
         sys.exit(1)
 
     if not tests_dir.exists():
@@ -207,17 +254,35 @@ def main():
     else:
         n_jobs = os.cpu_count() or 1
 
-    use_leaks = args.leaks
+    use_leaks = args.leaks or args.profile_mem
     if use_leaks and platform == "unknown":
         print("Warning: Memory leak detection not supported on this platform")
         use_leaks = False
 
-    print("Running JCC tests...")
+    # CPU profiling: use jcc-prof if available/requested
+    if args.profile_cpu:
+        jcc_prof = script_dir / "jcc-prof"
+        if not jcc_prof.exists():
+            print("jcc-prof not found. Building it now...")
+            build_result = subprocess.run(
+                ["make", "profile-cpu-build"], capture_output=True, text=True, cwd=script_dir
+            )
+            if build_result.returncode != 0 or not jcc_prof.exists():
+                print("Error: failed to build jcc-prof. Run 'make profile-cpu-build' manually.")
+                sys.exit(1)
+        jcc = jcc_prof
+        print("CPU profiling enabled (using jcc-prof)")
+
+    print(f"Running JCC tests using: {jcc.name}")
     if use_leaks:
         leak_tools = {"macos": "leaks", "linux": "valgrind", "windows": "drmemory"}
         print(
             f"Memory leak detection enabled (using '{leak_tools.get(platform, '?')}')"
         )
+    if args.profile_mem:
+        print("Memory profiling enabled (enhanced leak + heap tracking)")
+    if args.bench:
+        print("Benchmarking mode: per-test timing enabled")
     if args.match:
         print(f"Filtering tests matching: {args.match}")
     print(f"Using {n_jobs} parallel jobs")
@@ -225,7 +290,7 @@ def main():
     print()
 
     test_args = [
-        (i, test_file, jcc, str(script_dir), use_leaks, platform, jcc_args)
+        (i, test_file, jcc, str(script_dir), use_leaks, platform, jcc_args, args.bench)
         for i, test_file in enumerate(test_files)
     ]
 
@@ -248,43 +313,51 @@ def main():
         status = result["status"]
         exit_code = result["exit_code"]
         output = result["output"]
+        elapsed = result.get("elapsed")
+
+        timing_str = ""
+        if args.bench and elapsed is not None:
+            timing_str = f" [{elapsed*1000:.1f}ms]"
+            timings.append((test_name, elapsed))
 
         if status == "crashed":
             crashed += 1
             crashed_tests.append(f"{test_name} (exit code: {exit_code})")
-            print(f"💥 {test_name} (CRASHED: exit code {exit_code})")
+            print(f"💥 {test_name} (CRASHED: exit code {exit_code}){timing_str}")
         elif status == "compile_error":
             failed += 1
             failed_tests.append(f"{test_name} (COMPILATION ERROR)")
-            print(f"✗ {test_name} (COMPILATION ERROR)")
+            print(f"✗ {test_name} (COMPILATION ERROR){timing_str}")
             for line in output.splitlines()[:3]:
                 print(f"  {line}")
         elif status == "leak":
             failed += 1
             failed_tests.append(f"{test_name} (MEMORY LEAK)")
-            print(f"💧 {test_name} (MEMORY LEAK)")
+            print(f"💧 {test_name} (MEMORY LEAK){timing_str}")
             leak_lines = [line for line in output.splitlines() if "Leak:" in line][:3]
             for line in leak_lines:
                 print(f"  {line}")
         elif status == "negative_pass":
             negative_passed += 1
             if result["is_negative_test"]:
-                print(f"✓ {test_name} (correctly rejected invalid code)")
+                print(f"✓ {test_name} (correctly rejected invalid code){timing_str}")
             else:
-                print(f"✓ {test_name} (correctly detected runtime error)")
+                print(f"✓ {test_name} (correctly detected runtime error){timing_str}")
         elif status == "passed":
             passed += 1
-            print(f"✓ {test_name}")
+            print(f"✓ {test_name}{timing_str}")
         elif status == "failed":
             failed += 1
             failed_tests.append(f"{test_name} (exit code: {exit_code})")
-            print(f"✗ {test_name} (expected exit code 42, got: {exit_code})")
+            print(f"✗ {test_name} (expected exit code 42, got: {exit_code}){timing_str}")
 
     def flush_results():
         nonlocal next_to_print
         while next_to_print < len(results) and results[next_to_print] is not None:
             print_single_result(results[next_to_print])
             next_to_print += 1
+
+    timings = []
 
     def on_done(future, idx):
         try:
@@ -299,6 +372,7 @@ def main():
                 "output": str(e),
                 "is_negative_test": False,
                 "expects_runtime_error": False,
+                "elapsed": None,
             }
 
         with results_lock:
@@ -334,6 +408,23 @@ def main():
         print("Failed tests:")
         for test in failed_tests:
             print(f"  - {test}")
+
+    if args.bench and timings:
+        print()
+        print("=======================")
+        print("Benchmark Results")
+        print("=======================")
+        timings.sort(key=lambda x: x[1], reverse=True)
+        total_time = sum(t[1] for t in timings)
+        avg_time = total_time / len(timings)
+        print(f"Total time:     {total_time*1000:.1f}ms")
+        print(f"Average/test:   {avg_time*1000:.1f}ms")
+        print(f"Slowest test:   {timings[0][0]} ({timings[0][1]*1000:.1f}ms)")
+        print(f"Fastest test:   {timings[-1][0]} ({timings[-1][1]*1000:.1f}ms)")
+        print()
+        print("Top 5 slowest tests:")
+        for name, elapsed in timings[:5]:
+            print(f"  {elapsed*1000:8.1f}ms  {name}")
 
     if failed > 0 or crashed > 0:
         sys.exit(1)

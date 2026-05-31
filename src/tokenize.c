@@ -284,17 +284,23 @@ void warn_tok(JCC *vm, Token *tok, char *fmt, ...) {
 
 // Consumes the current token if it matches `op`.
 bool equal(Token *tok, char *op) {
-    return memcmp(tok->loc, op, tok->len) == 0 && op[tok->len] == '\0';
+    return tok && strlen(op) == tok->len && memcmp(tok->loc, op, tok->len) == 0;
 }
 
 // Ensure that the current token is `op`.
 Token *skip(JCC *vm, Token *tok, char *op) {
+    if (!tok)
+        error("expected '%s'", op);
     if (!equal(tok, op))
         error_tok(vm, tok, "expected '%s'", op);
     return tok->next;
 }
 
 bool consume(JCC *vm, Token **rest, Token *tok, char *str) {
+    if (!tok) {
+        *rest = NULL;
+        return false;
+    }
     if (equal(tok, str)) {
         *rest = tok->next;
         return true;

@@ -41,6 +41,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-j/--json           Output header declarations as JSON\n");
     printf("\t-X/--no-preprocess  Disable preprocessing step\n");
     printf("\t-S/--no-stdlib      Do not link standard library\n");
+    printf("\t-c/--compile-only   Compile to bytecode but do not execute\n");
     printf("\t-o/--out <file>     Dump bytecode to <file> (no execution)\n");
     printf("\t-d/--disassemble    Disassemble bytecode to stdout\n");
     printf("\t-v/--verbose        Enable debug logging\n");
@@ -245,6 +246,7 @@ int main(int argc, const char *argv[]) {
     int skip_preprocess = 0;   // -X
     int skip_stdlib = 0;       // -S
     int output_json = 0;       // -j
+    int compile_only = 0;      // -c
     int max_errors = 20;        // --max-errors (default: 20)
     int warnings_as_errors = 0; // --Werror
     size_t embed_limit = 0;     // --embed-limit (0 = use default)
@@ -267,6 +269,7 @@ int main(int argc, const char *argv[]) {
         {"no-preprocess", no_argument, 0, 'X'},
         {"no-stdlib", no_argument, 0, 'S'},
         {"json", no_argument, 0, 'j'},
+        {"compile-only", no_argument, 0, 'c'},
         {"debug", no_argument, 0, 'g'},
         {"safety", required_argument, 0, 1012},
         {"bounds-checks", no_argument, 0, 'b'},
@@ -302,7 +305,7 @@ int main(int argc, const char *argv[]) {
         {"macro-recursion-limit", required_argument, 0, 1017},
         {0, 0, 0, 0}};
 
-    const char *optstring = "0123haI:D:U:o:dvgbftzskpliPEMXSjFTVC";
+    const char *optstring = "0123haI:D:U:o:cdvgbftzskpliPEMXSjFTVC";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(argc, (char *const *)argv, optstring,
@@ -466,6 +469,9 @@ int main(int argc, const char *argv[]) {
         case 'j':
             output_json = 1;
             break;
+        case 'c':
+            compile_only = 1;
+            break;
         case 1010:
             max_errors = atoi(optarg);
             if (max_errors <= 0) {
@@ -578,6 +584,7 @@ int main(int argc, const char *argv[]) {
 
     JCC vm;
     cc_init(&vm, flags);
+    vm.compiler.compile_only = compile_only;
 
     if (verbose)
         vm.debug_vm = 1;
@@ -824,6 +831,11 @@ int main(int argc, const char *argv[]) {
     if (cc_has_errors(&vm)) {
         cc_print_all_errors(&vm);
         exit_code = 1;
+        goto BAIL;
+    }
+
+    // Compile-only mode: stop here without requiring main() or executing
+    if (vm.compiler.compile_only) {
         goto BAIL;
     }
 

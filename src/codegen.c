@@ -2594,5 +2594,6 @@ void gen(JCC *vm, Obj *prog) {
         }
     }
 
-    error("main() function not found");
+    if (!vm->compiler.compile_only)
+        error("main() function not found");
 }

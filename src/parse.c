@@ -3000,6 +3000,9 @@ static Node *new_add(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
         rhs = tmp;
     }
 
+    if (!lhs->ty->base)
+        error_tok(vm, tok, "invalid operands");
+
     // void* arithmetic is a GNU extension; we allow it for compatibility
     if (lhs->ty->base->kind == TY_VOID) {
         rhs = new_binary(vm, ND_MUL, rhs,
@@ -3035,6 +3038,9 @@ static Node *new_sub(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
     // num - num
     if (is_numeric(lhs->ty) && is_numeric(rhs->ty))
         return new_binary(vm, ND_SUB, lhs, rhs, tok);
+
+    if (!lhs->ty->base)
+        error_tok(vm, tok, "invalid operands");
 
     // VLA + num
     if (lhs->ty->base->kind == TY_VLA) {

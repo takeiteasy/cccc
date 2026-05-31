@@ -121,6 +121,14 @@ Produces:
 - `jcc` — compiler executable (C source → bytecode → execute)
 - `libjcc.dylib` — shared library for embedding JCC in other applications
 
+JCC uses C23 features such as `#embed`. On macOS, the Apple Clang that ships with Xcode does not support `#embed` — use the Homebrew LLVM Clang instead:
+
+```bash
+brew install llvm
+export CC=/opt/homebrew/opt/llvm/bin/clang
+make
+```
+
 ### Compile to Bytecode
 
 ```bash
@@ -148,6 +156,69 @@ python3 tests.py -j 4                # Run with 4 parallel workers
 python3 tests.py -2                  # Run all tests under safety level 2
 python3 tests.py --leaks             # Enable leak detection (leaks on macOS, valgrind on Linux)
 ```
+
+### Sanitizer Builds
+
+```bash
+make asan     # Build jcc-asan with AddressSanitizer + UBSan
+make ubsan    # Build jcc-ubsan with UndefinedBehaviorSanitizer
+make tsan     # Build jcc-tsan with ThreadSanitizer
+make msan     # Build jcc-msan with MemorySanitizer (Linux only)
+
+# Run the test suite with a sanitizer binary
+python3 tests.py --asan -j 4
+python3 tests.py --ubsan -j 4
+```
+
+### Fuzzing with AFL++
+
+Requires [AFL++](https://github.com/AFLplusplus/AFLplusplus) (`brew install afl-fuzz` on macOS).
+
+```bash
+make afl              # Build jcc-afl with AFL++ instrumentation
+make afl-asan         # Build jcc-afl-asan (AFL++ + AddressSanitizer combo)
+
+cd fuzz
+make seed             # Seed corpus from tests/
+make fuzz             # Start afl-fuzz
+make crashes          # List found crashes
+make triage           # Run crashes with ASan for detailed output
+make minimize         # Minimize crashes with afl-tmin
+```
+
+Fuzzing runs in compile-only mode (`-c`) so no `main()` is required. The `fuzz/` directory contains a README with detailed usage.
+
+### Profiling
+
+**Benchmarking compile times:**
+
+```bash
+make bench                              # Hyperfine benchmark on a representative test
+make bench TEST=tests/test_comprehensive.c  # Benchmark a specific test
+
+# In the test runner
+python3 tests.py --bench                # Report per-test execution time
+python3 tests.py --bench --match "*compre*"  # Time matching tests
+```
+
+**CPU profiling:**
+
+```bash
+make profile-cpu                        # Profile a representative test with gperftools
+make profile-cpu TEST=tests/test_foo.c  # Profile a specific test
+
+# In the test runner
+python3 tests.py --profile-cpu --match "*compre*"  # CPU profile matching tests
+```
+
+**Memory profiling:**
+
+```bash
+make profile-mem                        # Memory profile with leaks (macOS) or valgrind (Linux)
+python3 tests.py --profile-mem --match "*malloc*"   # Profile matching tests
+```
+
+Profiling output is written to `profile/`. See `profile/README.md` for detailed usage.
 
 Running an individual test:
 
