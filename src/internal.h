@@ -357,6 +357,47 @@ void arena_reset(Arena *arena);
 void arena_destroy(Arena *arena);
 
 //
+// vm_mem.c - Virtual memory reserve/commit for VM segments
+//
+
+// Reserve a virtual range of 'bytes' bytes (no physical pages committed).
+// Returns NULL on failure.
+void *jcc_vm_reserve(size_t bytes);
+
+// Commit 'len' bytes at offset 'off' from 'base'.  Pages are zero-filled by
+// the OS.  'off' and 'len' are rounded to the system page size internally.
+// Returns 0 on success, -1 on failure.
+int jcc_vm_commit(void *base, size_t off, size_t len);
+
+// Release a virtual range previously returned by jcc_vm_reserve.
+void jcc_vm_release(void *base, size_t bytes);
+
+//
+// vm.c - Segment allocation / growth helpers (used by codegen, ops, reflect)
+//
+
+// Allocate (reserve + initial commit) all four VM segments using poolsize /
+// poolsize_max from the JCC struct.  Initialises all derived segment pointers.
+void vm_alloc_segments(JCC *vm);
+
+// Ensure the text segment has at least 'num_words' words committed.
+// Returns 0 on success, -1 when the reservation cap is reached.
+int vm_text_ensure_count(JCC *vm, JCCPc num_words);
+
+// Ensure 'needed' more bytes are available in the data segment starting from
+// the current data_ptr.  Returns 0 on success, -1 at cap.
+int vm_data_ensure(JCC *vm, long long needed);
+
+// Grow the heap segment by at least 'need' bytes.
+// Advances heap_end on success.  Returns 0 on success, -1 at cap.
+int vm_heap_grow(JCC *vm, size_t need);
+
+// Grow the stack segment downward to accommodate 'slots_needed' more slots
+// below the current stack_base.  Updates stack_base on success.
+// Returns 0 on success, -1 when the reservation floor is reached.
+int vm_stack_grow(JCC *vm, int slots_needed);
+
+//
 // hashmap.c
 //
 

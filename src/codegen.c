@@ -307,16 +307,22 @@ static void patch_labels(JCC *vm) {
 static void emit_word(JCC *vm, JCCInstrWord word) {
     if (!vm || !vm->text_seg)
         error("codegen: text segment not initialized");
-    if (vm->text_ptr + 1 >= (JCCPc)vm->poolsize)
-        error("codegen: text segment overflow");
+    if (vm->text_ptr + 1 >= (JCCPc)(vm->text_committed / sizeof(JCCInstrWord))) {
+        if (vm_text_ensure_count(vm, vm->text_ptr + 2) != 0)
+            error("codegen: text segment overflow (limit: %d instructions)",
+                  vm->poolsize_max);
+    }
     vm->text_seg[++vm->text_ptr] = word;
 }
 
 static JCCPc emit_word_ptr(JCC *vm) {
     if (!vm || !vm->text_seg)
         error("codegen: text segment not initialized");
-    if (vm->text_ptr + 1 >= (JCCPc)vm->poolsize)
-        error("codegen: text segment overflow");
+    if (vm->text_ptr + 1 >= (JCCPc)(vm->text_committed / sizeof(JCCInstrWord))) {
+        if (vm_text_ensure_count(vm, vm->text_ptr + 2) != 0)
+            error("codegen: text segment overflow (limit: %d instructions)",
+                  vm->poolsize_max);
+    }
     return ++vm->text_ptr;
 }
 
@@ -328,8 +334,8 @@ static JCCPc emit_i64(JCC *vm, long long val) {
 }
 
 static void check_data_capacity(JCC *vm, long long needed) {
-    if (vm->data_ptr + needed > vm->data_seg + vm->poolsize)
-        error("codegen: data segment overflow");
+    if (vm_data_ensure(vm, needed) != 0)
+        error("codegen: data segment overflow (limit: %d bytes)", vm->poolsize_max);
 }
 
 static void emit(JCC *vm, int instruction) {

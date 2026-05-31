@@ -304,9 +304,9 @@ static void init_macro_globals(JCC *vm, Obj *macro_prog) {
 
         long long offset = vm->data_ptr - vm->data_seg;
         offset = (offset + 7) & ~7;
-        if (vm->data_seg + offset + var->ty->size > vm->data_seg + vm->poolsize)
-            error("codegen: data segment overflow");
         vm->data_ptr = vm->data_seg + offset;
+        if (vm_data_ensure(vm, var->ty->size) != 0)
+            error("codegen: data segment overflow (limit: %d bytes)", vm->poolsize_max);
         var->offset = vm->data_ptr - vm->data_seg;
 
         if (var->init_data)
@@ -652,51 +652,12 @@ static void init_vm_segments_for_macros(JCC *vm) {
     if (vm->text_seg)
         return; // Already initialized
 
-    // allocate memory
-    if (!(vm->text_seg = malloc(vm->poolsize * sizeof(JCCInstrWord)))) {
-        error("could not malloc for text area");
-    }
-    if (!(vm->data_seg = malloc(vm->poolsize))) {
-        error("could not malloc for data area");
-    }
-    if (!(vm->stack_seg = malloc(vm->poolsize * sizeof(long long)))) {
-        error("could not malloc for stack area");
-    }
-    if (!(vm->heap_seg = malloc(vm->poolsize))) {
-        error("could not malloc for heap area");
-    }
-
-    // Allocate shadow stack for CFI if enabled
-    if (vm->flags & JCC_CFI) {
-        if (!(vm->shadow_stack = malloc(vm->poolsize * sizeof(long long)))) {
-            error("could not malloc for shadow stack (CFI)");
-        }
-    }
-
-    memset(vm->text_seg, 0, vm->poolsize * sizeof(JCCInstrWord));
-    memset(vm->data_seg, 0, vm->poolsize);
-    memset(vm->stack_seg, 0, vm->poolsize * sizeof(long long));
-    memset(vm->heap_seg, 0, vm->poolsize);
-
-    if (vm->flags & JCC_CFI) {
-        memset(vm->shadow_stack, 0, vm->poolsize * sizeof(long long));
-    }
-
-    vm->old_text_seg = vm->text_seg;
-    vm->text_ptr = 0;
-    vm->data_ptr = vm->data_seg;
-    vm->heap_ptr = vm->heap_seg;
-    vm->heap_end = vm->heap_seg + vm->poolsize;
-    vm->free_list = NULL;
+    // Reserve and commit all segments (base pointers will never move)
+    vm_alloc_segments(vm);
 
     // Initialize codegen state
     vm->compiler.current_codegen_fn = NULL;
-
-    // Initialize stack pointers for macro execution
-    vm->sp = vm->stack_seg + vm->poolsize - 1;
-    vm->bp = vm->sp;
-    vm->initial_sp = vm->sp;
-    vm->initial_bp = vm->bp;
+    // sp/bp/stack_base already set correctly by vm_alloc_segments
 }
 
 // Expand all pragma macro calls in the program

@@ -1401,8 +1401,15 @@ struct JCC {
         int capacity;          // Allocated array capacity
     } sorted_allocs;
 
+    // Segment growth tracking (reserve-and-commit scheme)
+    size_t text_committed;  // committed bytes in text segment
+    size_t data_committed;  // committed bytes in data segment
+    size_t stack_committed; // committed bytes in stack segment
+    size_t heap_committed;  // committed bytes in heap segment
+
     // Configuration
-    int poolsize; // Size of memory segments (bytes)
+    int poolsize;     // Initial committed element count per segment (256K default)
+    int poolsize_max; // Maximum element count for the reserved virtual range
     int debug_vm; // Enable debug output during execution
 
     // Runtime flags (bitwise combination of JCCFlags)

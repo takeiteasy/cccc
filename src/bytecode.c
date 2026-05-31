@@ -225,20 +225,24 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
     if (text_size < 0 || data_size < 0 || data_reloc_count < 0 ||
         data_reloc_count > MAX_CALLS ||
         cursor + text_size + data_size + data_reloc_count * 4 * (long long)sizeof(long long) > end ||
-        text_size > vm->poolsize * (long long)sizeof(JCCInstrWord) ||
+        text_size > vm->poolsize_max * (long long)sizeof(JCCInstrWord) ||
         text_size % (long long)sizeof(JCCInstrWord) != 0 ||
-        data_size > vm->poolsize) {
+        data_size > vm->poolsize_max) {
         fprintf(stderr, "error: invalid bytecode sizes\n");
         return -1;
     }
 
-    // Allocate segments
-    vm->text_seg = calloc(vm->poolsize, sizeof(JCCInstrWord));
-    vm->data_seg = calloc(vm->poolsize, 1);
-    vm->stack_seg = calloc(vm->poolsize, sizeof(long long));
-    vm->heap_seg = calloc(vm->poolsize, 1);
-    if (!vm->text_seg || !vm->data_seg || !vm->stack_seg || !vm->heap_seg) {
-        fprintf(stderr, "error: failed to allocate memory segments\n");
+    // Reserve and commit all segments (base pointers will never move)
+    vm_alloc_segments(vm);
+
+    // Ensure enough committed space for the bytecode being loaded
+    JCCPc num_text_words = (JCCPc)(text_size / (long long)sizeof(JCCInstrWord));
+    if (vm_text_ensure_count(vm, num_text_words) != 0) {
+        fprintf(stderr, "error: could not commit text segment for bytecode\n");
+        return -1;
+    }
+    if (vm_data_ensure(vm, data_size) != 0) {
+        fprintf(stderr, "error: could not commit data segment for bytecode\n");
         return -1;
     }
 
@@ -307,12 +311,9 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
 
     free(is_operand);
 
-    // Set up pointers
+    // Set up pointers (heap_ptr/heap_end/free_list already set by vm_alloc_segments)
     vm->text_ptr = (JCCPc)(text_size / (long long)sizeof(JCCInstrWord)) - 1;
     vm->data_ptr = vm->data_seg + data_size;
-    vm->heap_ptr = vm->heap_seg;
-    vm->heap_end = vm->heap_seg + vm->poolsize;
-    vm->free_list = NULL;
     vm->text_seg[0] = main_offset;  // Restore main offset
 
     for (int i = 0; i < vm->compiler.num_data_relocs; i++) {
@@ -384,42 +385,8 @@ void cc_compile(JCC *vm, Obj *prog) {
 
     // Initialize VM memory if not already done
     if (!vm->text_seg) {
-        // allocate memory
-        if (!(vm->text_seg = malloc(vm->poolsize * sizeof(JCCInstrWord)))) {
-            error("could not malloc for text area");
-        }
-        if (!(vm->data_seg = malloc(vm->poolsize))) {
-            error("could not malloc for data area");
-        }
-        if (!(vm->stack_seg = malloc(vm->poolsize * sizeof(long long)))) {
-            error("could not malloc for stack area");
-        }
-        if (!(vm->heap_seg = malloc(vm->poolsize))) {
-            error("could not malloc for heap area");
-        }
-
-        // Allocate shadow stack for CFI if enabled
-        if (vm->flags & JCC_CFI) {
-            if (!(vm->shadow_stack = malloc(vm->poolsize * sizeof(long long)))) {
-                error("could not malloc for shadow stack (CFI)");
-            }
-        }
-
-        memset(vm->text_seg, 0, vm->poolsize * sizeof(JCCInstrWord));
-        memset(vm->data_seg, 0, vm->poolsize);
-        memset(vm->stack_seg, 0, vm->poolsize * sizeof(long long));
-        memset(vm->heap_seg, 0, vm->poolsize);
-
-        if (vm->flags & JCC_CFI) {
-            memset(vm->shadow_stack, 0, vm->poolsize * sizeof(long long));
-        }
-
-        vm->old_text_seg = vm->text_seg;
-        vm->text_ptr = 0;
-        vm->data_ptr = vm->data_seg;
-        vm->heap_ptr = vm->heap_seg;
-        vm->heap_end = vm->heap_seg + vm->poolsize;
-        vm->free_list = NULL;
+        // Reserve and commit all segments (base pointers will never move)
+        vm_alloc_segments(vm);
 
         // Initialize codegen state
         vm->compiler.current_codegen_fn = NULL;

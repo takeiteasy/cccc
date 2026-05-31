@@ -31,6 +31,13 @@
 
 static inline int check_stack_overflow(JCC *vm, int slots_needed) {
     if (vm->sp - slots_needed - STACK_GUARD_SIZE < vm->stack_base) {
+        // Try to grow the stack downward before reporting overflow.
+        // With PROT_NONE pages below the committed floor, crossing without
+        // growing first would produce a hard SIGSEGV, so growth must happen
+        // here before any sp decrement.
+        if (vm_stack_grow(vm, slots_needed + STACK_GUARD_SIZE) == 0)
+            return 0; // Growth succeeded; retry the caller's operation.
+        // Reservation exhausted — true overflow.
         printf("\n========== STACK OVERFLOW ==========\n");
         printf("Stack space exhausted\n");
         printf("Requested:  %d slots (%d bytes)\n", slots_needed,
@@ -1233,6 +1240,9 @@ int op_PSH3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rs;
     DECODE_R(operands, rs);
+    // Guard BEFORE the decrement: with PROT_NONE below the committed floor,
+    // crossing without growing first produces a hard SIGSEGV.
+    if (check_stack_overflow(vm, 1)) return -1;
     *--vm->sp = vm->regs[rs];
     return 0;
 }
@@ -1323,11 +1333,18 @@ int op_MALC_fn(JCC *vm) {
     size_t size = (requested_size + 7) & ~7;
     size_t total_size = size + sizeof(AllocHeader);
 
-    // Check for OOM
+    // Check for OOM — try to grow the heap before giving up
     size_t available = (size_t)(vm->heap_end - vm->heap_ptr);
     if (total_size > available) {
-        vm->regs[REG_A0] = 0; // Out of memory
-        return 0;
+        if (vm_heap_grow(vm, total_size) != 0) {
+            vm->regs[REG_A0] = 0; // Out of memory (reservation exhausted)
+            return 0;
+        }
+        available = (size_t)(vm->heap_end - vm->heap_ptr);
+        if (total_size > available) {
+            vm->regs[REG_A0] = 0;
+            return 0;
+        }
     }
 
     // Allocate from bump pointer

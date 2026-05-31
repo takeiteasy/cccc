@@ -92,6 +92,161 @@ dispatch:
     return -1;
 }
 
+// ========== Segment reserve-and-commit helpers ==========
+
+void vm_alloc_segments(JCC *vm) {
+    size_t initial_text   = (size_t)vm->poolsize * sizeof(JCCInstrWord);
+    size_t initial_data   = (size_t)vm->poolsize;
+    size_t initial_stack  = (size_t)vm->poolsize * sizeof(long long);
+    size_t initial_heap   = (size_t)vm->poolsize;
+
+    size_t reserved_text  = (size_t)vm->poolsize_max * sizeof(JCCInstrWord);
+    size_t reserved_data  = (size_t)vm->poolsize_max;
+    size_t reserved_stack = (size_t)vm->poolsize_max * sizeof(long long);
+    size_t reserved_heap  = (size_t)vm->poolsize_max;
+
+    // Reserve virtual ranges (base pointers will never move)
+    vm->text_seg  = (JCCInstrWord *)jcc_vm_reserve(reserved_text);
+    vm->data_seg  = (char *)jcc_vm_reserve(reserved_data);
+    vm->stack_seg = (long long *)jcc_vm_reserve(reserved_stack);
+    vm->heap_seg  = (char *)jcc_vm_reserve(reserved_heap);
+    if (!vm->text_seg || !vm->data_seg || !vm->stack_seg || !vm->heap_seg)
+        error("could not reserve VM memory segments");
+
+    // Stack grows downward: commit the TOP initial_stack bytes so that
+    // sp/bp start at the top of the reservation and stack_base sits at
+    // the bottom of the initially-committed slice.
+    size_t stack_top_off = reserved_stack - initial_stack;
+
+    if (jcc_vm_commit(vm->text_seg,  0,             initial_text)  != 0 ||
+        jcc_vm_commit(vm->data_seg,  0,             initial_data)  != 0 ||
+        jcc_vm_commit(vm->stack_seg, stack_top_off, initial_stack) != 0 ||
+        jcc_vm_commit(vm->heap_seg,  0,             initial_heap)  != 0)
+        error("could not commit VM memory segments");
+
+    vm->text_committed  = initial_text;
+    vm->data_committed  = initial_data;
+    vm->stack_committed = initial_stack;
+    vm->heap_committed  = initial_heap;
+
+    // Derived pointers
+    vm->old_text_seg = vm->text_seg;
+    vm->text_ptr     = 0;
+    vm->data_ptr     = vm->data_seg;
+    vm->heap_ptr     = vm->heap_seg;
+    vm->heap_end     = vm->heap_seg + vm->heap_committed;
+    vm->free_list    = NULL;
+
+    // Stack: sp/bp at top of reservation; stack_base = bottom of committed region
+    vm->sp = (long long *)((char *)vm->stack_seg + reserved_stack);
+    vm->bp = vm->sp;
+    vm->stack_base = (long long *)((char *)vm->stack_seg + stack_top_off);
+    vm->initial_sp = vm->sp;
+    vm->initial_bp = vm->bp;
+
+    // CFI shadow stack mirrors the main stack layout
+    if (vm->flags & JCC_CFI) {
+        vm->shadow_stack = (long long *)jcc_vm_reserve(reserved_stack);
+        if (!vm->shadow_stack)
+            error("could not reserve shadow stack");
+        if (jcc_vm_commit(vm->shadow_stack, stack_top_off, initial_stack) != 0)
+            error("could not commit shadow stack");
+        vm->shadow_sp = (long long *)((char *)vm->shadow_stack + reserved_stack);
+    }
+}
+
+int vm_text_ensure_count(JCC *vm, JCCPc num_words) {
+    size_t needed_bytes = (size_t)num_words * sizeof(JCCInstrWord);
+    if (needed_bytes <= vm->text_committed)
+        return 0;
+    size_t reserved = (size_t)vm->poolsize_max * sizeof(JCCInstrWord);
+    if (needed_bytes > reserved)
+        return -1;
+    // Round up to next poolsize-element chunk
+    size_t chunk = (size_t)vm->poolsize * sizeof(JCCInstrWord);
+    size_t new_committed = ((needed_bytes + chunk - 1) / chunk) * chunk;
+    if (new_committed > reserved)
+        new_committed = reserved;
+    if (jcc_vm_commit(vm->text_seg, vm->text_committed,
+                      new_committed - vm->text_committed) != 0)
+        return -1;
+    vm->text_committed = new_committed;
+    return 0;
+}
+
+int vm_data_ensure(JCC *vm, long long needed) {
+    long long current_used = vm->data_ptr - vm->data_seg;
+    long long committed    = (long long)vm->data_committed;
+    if (current_used + needed <= committed)
+        return 0;
+    long long want     = current_used + needed;
+    long long reserved = (long long)vm->poolsize_max;
+    if (want > reserved)
+        return -1;
+    long long chunk = (long long)vm->poolsize;
+    long long new_committed = ((want + chunk - 1) / chunk) * chunk;
+    if (new_committed > reserved)
+        new_committed = reserved;
+    if (jcc_vm_commit(vm->data_seg, (size_t)committed,
+                      (size_t)(new_committed - committed)) != 0)
+        return -1;
+    vm->data_committed = (size_t)new_committed;
+    return 0;
+}
+
+int vm_heap_grow(JCC *vm, size_t need) {
+    size_t current  = vm->heap_committed;
+    size_t reserved = (size_t)vm->poolsize_max;
+    if (current >= reserved)
+        return -1;
+    size_t chunk = (size_t)vm->poolsize;
+    // Commit at least chunk, or enough to satisfy 'need'
+    if (chunk < need)
+        chunk = ((need + (size_t)vm->poolsize - 1) /
+                 (size_t)vm->poolsize) * (size_t)vm->poolsize;
+    if (current + chunk > reserved)
+        chunk = reserved - current;
+    if (chunk < need)
+        return -1; // Can't satisfy even after using all remaining space
+    if (jcc_vm_commit(vm->heap_seg, current, chunk) != 0)
+        return -1;
+    vm->heap_committed += chunk;
+    vm->heap_end = vm->heap_seg + vm->heap_committed;
+    return 0;
+}
+
+int vm_stack_grow(JCC *vm, int slots_needed) {
+    char *seg_start      = (char *)vm->stack_seg;
+    char *current_base   = (char *)vm->stack_base;
+    size_t need_bytes    = (size_t)slots_needed * sizeof(long long);
+    size_t chunk         = (size_t)vm->poolsize * sizeof(long long);
+
+    // Ensure chunk is large enough for the immediate need
+    if (chunk < need_bytes)
+        chunk = ((need_bytes + (size_t)vm->poolsize * sizeof(long long) - 1) /
+                 ((size_t)vm->poolsize * sizeof(long long))) *
+                ((size_t)vm->poolsize * sizeof(long long));
+
+    // Clamp to reservation floor
+    if (current_base - chunk < seg_start) {
+        chunk = (size_t)(current_base - seg_start);
+        if (chunk < need_bytes)
+            return -1; // True overflow — reservation exhausted
+    }
+
+    char *new_base = current_base - chunk;
+    size_t off = (size_t)(new_base - seg_start);
+
+    if (jcc_vm_commit(seg_start, off, chunk) != 0)
+        return -1;
+
+    vm->stack_base = (long long *)new_base;
+    vm->stack_committed += chunk;
+    return 0;
+}
+
+// ========== End segment helpers ==========
+
 void cc_init(JCC *vm, uint32_t flags) {
     // Zero-initialize the VM struct
     memset(vm, 0, sizeof(JCC));
@@ -100,7 +255,8 @@ void cc_init(JCC *vm, uint32_t flags) {
     vm->flags = flags;
 
     // Set defaults
-    vm->poolsize = 256 * 1024;  // 256KB default
+    vm->poolsize = 256 * 1024;              // 256K elements initial commit
+    vm->poolsize_max = 256 * 256 * 1024;   // 64M elements reserved (address space only)
     vm->debug_vm = 0;
 
     // Set #embed directive defaults
@@ -226,16 +382,20 @@ void cc_destroy(JCC *vm) {
     if (!vm)
         return;
     
+    // Release reserved virtual ranges (base pointers never moved)
     if (vm->text_seg)
-        free(vm->text_seg);
+        jcc_vm_release(vm->text_seg,
+                       (size_t)vm->poolsize_max * sizeof(JCCInstrWord));
     if (vm->data_seg)
-        free(vm->data_seg);
+        jcc_vm_release(vm->data_seg,  (size_t)vm->poolsize_max);
     if (vm->stack_seg)
-        free(vm->stack_seg);
+        jcc_vm_release(vm->stack_seg,
+                       (size_t)vm->poolsize_max * sizeof(long long));
     if (vm->heap_seg)
-        free(vm->heap_seg);
+        jcc_vm_release(vm->heap_seg,  (size_t)vm->poolsize_max);
     if (vm->shadow_stack)
-        free(vm->shadow_stack);
+        jcc_vm_release(vm->shadow_stack,
+                       (size_t)vm->poolsize_max * sizeof(long long));
     // return_buffer is part of data_seg, no need to free separately
 
     // Free VM runtime HashMaps. Integer keys (keylen == -1) are skipped by
@@ -684,14 +844,19 @@ int cc_run(JCC *vm, int argc, char **argv) {
     JCCPc main_addr = vm->text_seg[0];
     vm->pc = main_addr;
 
-    // Setup stack
-    vm->stack_base = vm->stack_seg;
-    vm->sp = (long long *)((char *)vm->stack_seg + vm->poolsize * sizeof(long long));
-    vm->bp = vm->sp;  // Initialize base pointer to top of stack
+    // Setup stack — use poolsize_max so sp/bp sit at top of full reservation
+    {
+        size_t reserved_stack = (size_t)vm->poolsize_max * sizeof(long long);
+        size_t initial_stack  = (size_t)vm->poolsize * sizeof(long long);
+        vm->sp = (long long *)((char *)vm->stack_seg + reserved_stack);
+        vm->bp = vm->sp;  // Initialize base pointer to top of stack
+        vm->stack_base = (long long *)((char *)vm->stack_seg +
+                                       reserved_stack - initial_stack);
 
-    // Setup shadow stack for CFI if enabled
-    if (vm->flags & JCC_CFI) {
-        vm->shadow_sp = (long long *)((char *)vm->shadow_stack + vm->poolsize * sizeof(long long));
+        // Shadow stack for CFI
+        if (vm->flags & JCC_CFI) {
+            vm->shadow_sp = (long long *)((char *)vm->shadow_stack + reserved_stack);
+        }
     }
 
     // Save initial stack/base pointers for exit detection in vm_eval
