@@ -93,13 +93,16 @@ extern "C" {
     X(ADD3) /* rd = rs1 + rs2 */                                               \
     X(SUB3) /* rd = rs1 - rs2 */                                               \
     X(MUL3) /* rd = rs1 * rs2 */                                               \
-    X(DIV3) /* rd = rs1 / rs2 */                                               \
-    X(MOD3) /* rd = rs1 % rs2 */                                               \
+    X(DIV3) /* rd = rs1 / rs2 (signed) */                                      \
+    X(UDIV3) /* rd = rs1 / rs2 (unsigned) */                                   \
+    X(MOD3) /* rd = rs1 % rs2 (signed) */                                      \
+    X(UMOD3) /* rd = rs1 % rs2 (unsigned) */                                   \
     X(AND3) /* rd = rs1 & rs2 */                                               \
     X(OR3)  /* rd = rs1 | rs2 */                                               \
     X(XOR3) /* rd = rs1 ^ rs2 */                                               \
     X(SHL3) /* rd = rs1 << rs2 */                                              \
-    X(SHR3) /* rd = rs1 >> rs2 */                                              \
+    X(SHR3) /* rd = rs1 >> rs2 (arithmetic, signed) */                         \
+    X(USHR3) /* rd = rs1 >> rs2 (logical, unsigned) */                         \
     /* Register-based comparisons */                                           \
     X(SEQ3) /* rd = (rs1 == rs2) */                                            \
     X(SNE3) /* rd = (rs1 != rs2) */                                            \

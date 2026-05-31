@@ -146,12 +146,15 @@ static void opt_constant_fold(JCC *vm) {
             case SUB3:
             case MUL3:
             case DIV3:
+            case UDIV3:
             case MOD3:
+            case UMOD3:
             case AND3:
             case OR3:
             case XOR3:
             case SHL3:
             case SHR3:
+            case USHR3:
             case SEQ3:
             case SNE3:
             case SLT3:
@@ -179,15 +182,24 @@ static void opt_constant_fold(JCC *vm) {
                             if (b == 0) can_fold = false;  // Don't fold div by zero
                             else result = a / b;
                             break;
+                        case UDIV3:
+                            if (b == 0) can_fold = false;
+                            else result = (long long)((unsigned long long)a / (unsigned long long)b);
+                            break;
                         case MOD3:
                             if (b == 0) can_fold = false;
                             else result = a % b;
+                            break;
+                        case UMOD3:
+                            if (b == 0) can_fold = false;
+                            else result = (long long)((unsigned long long)a % (unsigned long long)b);
                             break;
                         case AND3: result = a & b; break;
                         case OR3:  result = a | b; break;
                         case XOR3: result = a ^ b; break;
                         case SHL3: result = a << b; break;
                         case SHR3: result = (unsigned long long)a >> b; break;
+                        case USHR3: result = (long long)((unsigned long long)a >> b); break;
                         case SEQ3: result = (a == b) ? 1 : 0; break;
                         case SNE3: result = (a != b) ? 1 : 0; break;
                         case SLT3: result = (a < b) ? 1 : 0; break;

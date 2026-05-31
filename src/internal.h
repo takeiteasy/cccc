@@ -198,8 +198,8 @@ static inline int cc_opcode_operand_words(int op) {
             return 2;
         case JMPT:
             return 3;
-        case ADD3: case SUB3: case MUL3: case DIV3: case MOD3:
-        case AND3: case OR3: case XOR3: case SHL3: case SHR3:
+        case ADD3: case SUB3: case MUL3: case DIV3: case UDIV3: case MOD3: case UMOD3:
+        case AND3: case OR3: case XOR3: case SHL3: case SHR3: case USHR3:
         case SEQ3: case SNE3: case SLT3: case SGE3: case SGT3: case SLE3:
         case MOV3:
         case FADD3: case FSUB3: case FMUL3: case FDIV3:

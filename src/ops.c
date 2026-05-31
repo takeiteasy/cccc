@@ -248,6 +248,60 @@ int op_SHR3_fn(JCC *vm) {
     return 0;
 }
 
+int op_UDIV3_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    unsigned long long a = (unsigned long long)vm->regs[rs1];
+    unsigned long long b = (unsigned long long)vm->regs[rs2];
+
+    if (b == 0) {
+        printf("\n========== DIVISION BY ZERO ==========\n");
+        printf("Attempted unsigned division by zero\n");
+        printf("Operands: %llu / 0\n", a);
+        printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
+               (long long)vm->pc);
+        printf("======================================\n");
+        return -1;
+    }
+
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (long long)(a / b);
+    return 0;
+}
+
+int op_UMOD3_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    unsigned long long a = (unsigned long long)vm->regs[rs1];
+    unsigned long long b = (unsigned long long)vm->regs[rs2];
+
+    if (b == 0) {
+        printf("\n========== MODULO BY ZERO ==========\n");
+        printf("Attempted unsigned modulo by zero\n");
+        printf("Operands: %llu %% 0\n", a);
+        printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
+               (long long)vm->pc);
+        printf("======================================\n");
+        return -1;
+    }
+
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (long long)(a % b);
+    return 0;
+}
+
+int op_USHR3_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    unsigned long long result = (unsigned long long)vm->regs[rs1] >> vm->regs[rs2];
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (long long)result;
+    return 0;
+}
+
 // ========== Comparison Operations ==========
 
 int op_SEQ3_fn(JCC *vm) {

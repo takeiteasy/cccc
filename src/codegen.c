@@ -1004,10 +1004,10 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                 op = MUL3;
                 break;
             case ND_DIV:
-                op = DIV3;
+                op = node->ty->is_unsigned ? UDIV3 : DIV3;
                 break;
             case ND_MOD:
-                op = MOD3;
+                op = node->ty->is_unsigned ? UMOD3 : MOD3;
                 break;
             case ND_BITAND:
                 op = AND3;
@@ -1022,7 +1022,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                 op = SHL3;
                 break;
             case ND_SHR:
-                op = SHR3;
+                op = node->ty->is_unsigned ? USHR3 : SHR3;
                 break;
             case ND_EQ:
                 op = SEQ3;
