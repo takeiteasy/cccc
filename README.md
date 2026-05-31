@@ -228,6 +228,9 @@ This produces:
 ./jcc -I./include -DDEBUG -o debug.bin main.c
 ```
 
+Saved bytecode uses the version 4 format: the VM text segment is a stream of
+32-bit instruction words, with 64-bit immediates split across two words.
+
 ### Running Tests
 
 All test files are located in the `tests/` directory. To run the complete test suite:

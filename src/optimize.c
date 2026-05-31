@@ -37,85 +37,41 @@
 // ========== Helper Functions ==========
 
 // Get opcode from instruction at pc
-static int get_opcode(long long *pc) {
-    return (int)*pc;
+static int get_opcode(JCC *vm, JCCPc pc) {
+    return (int)vm->text_seg[pc];
 }
 
-// Check if opcode is a 2-word instruction (op + operand)
-static bool is_2word_op(int op) {
-    // PLACEHOLDER: Catch-all `op >= ADD3` is fragile. Any future 1-word or
-    // 3-word opcode >= ADD3 will break the optimizer's instruction sizing.
-    // Most register ops have operands encoded in the second word
-    switch (op) {
-        case JMP:
-        case CALL:
-        case JMPT:
-        case JMPI:
-            return true;
-        default:
-            // Check for register-based ops (all 3-reg/2-reg/1-reg ops have operand word)
-            return op >= ADD3;  // All new register ops are >= ADD3
-    }
-}
-
-// Check if opcode uses an immediate value (3-word: op + operand + imm)
-static bool is_3word_op(int op) {
-    // PLACEHOLDER: Missing MARKP, CHKA3, CHKT3, and other 3-word opcodes.
-    // An explicit opcode-size table generated from OPS_X would be robust.
-    switch (op) {
-        case LI3:    // rd + imm
-        case LDA3:   // rd + data offset
-        case LTA3:   // rd + text offset
-        case LEA3:   // rd + imm
-        case ADDI3:  // rd, rs + imm
-        case JZ3:    // rs + target
-        case JNZ3:   // rs + target
-            return true;
-        default:
-            return false;
-    }
-}
-
-// Get instruction size in words
 static int get_instr_size(int op) {
-    if (is_3word_op(op)) return 3;
-    if (is_2word_op(op)) return 2;
-    return 1;
+    return cc_instr_words(op);
 }
 
-static void mark_text_target(JCC *vm, bool *targets, long long *start,
-                             long long *end, long long target) {
-    long long *pc = NULL;
-
-    if (target >= (long long)vm->text_seg &&
-        target <= (long long)end) {
-        pc = (long long *)target;
-    } else if (target % (long long)sizeof(long long) == 0) {
-        long long index = target / (long long)sizeof(long long);
-        pc = vm->text_seg + index;
-    }
-
-    if (pc >= start && pc < end)
-        targets[pc - start] = true;
+static void mark_text_target(JCC *vm, bool *targets, JCCPc start,
+                             JCCPc end, JCCPc target) {
+    (void)vm;
+    if (target >= start && target < end)
+        targets[target - start] = true;
 }
 
-static bool *build_control_flow_targets(JCC *vm, long long *start,
-                                        long long *end) {
+static bool *build_control_flow_targets(JCC *vm, JCCPc start,
+                                        JCCPc end) {
     size_t count = (size_t)(end - start + 1);
     bool *targets = calloc(count, sizeof(bool));
     if (!targets)
         error("out of memory");
 
-    for (long long *pc = start; pc < end; ) {
-        int op = get_opcode(pc);
+    for (JCCPc pc = start; pc < end; ) {
+        int op = get_opcode(vm, pc);
         int size = get_instr_size(op);
+        if (size <= 0)
+            break;
 
         if (op == JMP || op == CALL) {
-            mark_text_target(vm, targets, start, end, pc[1]);
+            mark_text_target(vm, targets, start, end, vm->text_seg[pc + 1]);
         } else if (op == JZ3 || op == JNZ3) {
-            mark_text_target(vm, targets, start, end, pc[2]);
+            mark_text_target(vm, targets, start, end, vm->text_seg[pc + 2]);
         } else if (op == LTA3) {
-            mark_text_target(vm, targets, start, end, pc[2]);
+            JCCPc target = cc_byte_offset_to_pc(cc_read_i64_at(vm, pc + 2));
+            mark_text_target(vm, targets, start, end, target);
         }
 
         pc += size;
@@ -164,21 +120,21 @@ static void opt_constant_fold(JCC *vm) {
     RegState state;
     reset_reg_state(&state);
 
-    long long *start = vm->text_seg + 1;  // Skip entry point at text_seg[0]
-    long long *end = vm->text_ptr;
-    long long *pc = start;
+    JCCPc start = 1;  // Skip entry point at text_seg[0]
+    JCCPc end = vm->text_ptr + 1;
+    JCCPc pc = start;
 
     int folded_count = 0;
 
     while (pc < end) {
-        int op = get_opcode(pc);
+        int op = get_opcode(vm, pc);
         int size = get_instr_size(op);
 
         switch (op) {
             case LI3: {
                 // LI3 rd, imm - register gets constant value
-                int rd = pc[1] & 0xFF;
-                long long imm = pc[2];
+                int rd = vm->text_seg[pc + 1] & 0xFF;
+                long long imm = cc_read_i64_at(vm, pc + 2);
                 if (rd < MAX_TRACKED_REGS && rd != 0) {
                     state.is_const[rd] = true;
                     state.value[rd] = imm;
@@ -204,7 +160,7 @@ static void opt_constant_fold(JCC *vm) {
             case SLE3: {
                 // OP3 rd, rs1, rs2 - check if both operands are constants
                 int rd, rs1, rs2;
-                DECODE_RRR(pc[1], rd, rs1, rs2);
+                DECODE_RRR(vm->text_seg[pc + 1], rd, rs1, rs2);
 
                 if (rs1 < MAX_TRACKED_REGS && rs2 < MAX_TRACKED_REGS &&
                     state.is_const[rs1] && state.is_const[rs2] &&
@@ -268,8 +224,8 @@ static void opt_constant_fold(JCC *vm) {
 
             case MOV3: {
                 // MOV3 rd, rs - copy constant status
-                int rd = pc[1] & 0xFF;
-                int rs = (pc[1] >> 8) & 0xFF;
+                int rd = vm->text_seg[pc + 1] & 0xFF;
+                int rs = (vm->text_seg[pc + 1] >> 8) & 0xFF;
                 if (rd < MAX_TRACKED_REGS && rd != 0) {
                     if (rs < MAX_TRACKED_REGS && state.is_const[rs]) {
                         state.is_const[rd] = true;
@@ -285,8 +241,8 @@ static void opt_constant_fold(JCC *vm) {
             case NOT3:
             case BNOT3: {
                 // Unary ops: rd = OP(rs)
-                int rd = pc[1] & 0xFF;
-                int rs = (pc[1] >> 8) & 0xFF;
+                int rd = vm->text_seg[pc + 1] & 0xFF;
+                int rs = (vm->text_seg[pc + 1] >> 8) & 0xFF;
                 if (rd < MAX_TRACKED_REGS && rd != 0) {
                     if (rs < MAX_TRACKED_REGS && state.is_const[rs]) {
                         long long val = state.value[rs];
@@ -304,9 +260,9 @@ static void opt_constant_fold(JCC *vm) {
 
             case ADDI3: {
                 // ADDI3 rd, rs, imm - if rs is const, result is const
-                int rd = pc[1] & 0xFF;
-                int rs = (pc[1] >> 8) & 0xFF;
-                long long imm = pc[2];
+                int rd = vm->text_seg[pc + 1] & 0xFF;
+                int rs = (vm->text_seg[pc + 1] >> 8) & 0xFF;
+                long long imm = cc_read_i64_at(vm, pc + 2);
                 if (rd < MAX_TRACKED_REGS && rd != 0) {
                     if (rs < MAX_TRACKED_REGS && state.is_const[rs]) {
                         state.is_const[rd] = true;
@@ -321,7 +277,7 @@ static void opt_constant_fold(JCC *vm) {
             case LDA3:
             case LTA3:
             case LEA3: {
-                int rd = pc[1] & 0xFF;
+                int rd = vm->text_seg[pc + 1] & 0xFF;
                 if (rd < MAX_TRACKED_REGS)
                     state.is_const[rd] = false;
                 break;
@@ -346,7 +302,7 @@ static void opt_constant_fold(JCC *vm) {
             case LDR_W:
             case LDR_D:
             case FLDR: {
-                int rd = pc[1] & 0xFF;
+                int rd = vm->text_seg[pc + 1] & 0xFF;
                 if (rd < MAX_TRACKED_REGS) {
                     state.is_const[rd] = false;
                 }
@@ -386,16 +342,9 @@ static void opt_constant_fold(JCC *vm) {
 
 // Mark an instruction as NOP (for later removal or skipping)
 // For 2-word instructions: convert to MOV3 r0, r0 (effectively NOP)
-static void nop_2word(long long *pc) {
-    pc[0] = MOV3;
-    pc[1] = ENCODE_RR(0, 0);  // MOV3 r0, r0 = NOP
-}
-
-// For 3-word instructions: convert to LI3 r0, 0 (effectively NOP) 
-static void nop_3word(long long *pc) {
-    pc[0] = LI3;
-    pc[1] = ENCODE_R(0);
-    pc[2] = 0;  // LI3 r0, 0 = NOP
+static void nop_2word(JCC *vm, JCCPc pc) {
+    vm->text_seg[pc + 0] = MOV3;
+    vm->text_seg[pc + 1] = ENCODE_RR(0, 0);  // MOV3 r0, r0 = NOP
 }
 
 static void opt_peephole(JCC *vm) {
@@ -403,64 +352,43 @@ static void opt_peephole(JCC *vm) {
         return;
     }
 
-    long long *start = vm->text_seg + 1;  // Skip entry point
-    long long *end = vm->text_ptr;
+    JCCPc start = 1;  // Skip entry point
+    JCCPc end = vm->text_ptr + 1;
     int opt_count = 0;
     bool *control_flow_targets = build_control_flow_targets(vm, start, end);
 
     // Pattern 1: MOV3/FMOV3 ra, ra -> NOP (self-move)
-    for (long long *pc = start; pc < end; ) {
-        int op = get_opcode(pc);
+    for (JCCPc pc = start; pc < end; ) {
+        int op = get_opcode(vm, pc);
         int size = get_instr_size(op);
 
         if (op == MOV3 || op == FMOV3) {
-            int rd = pc[1] & 0xFF;
-            int rs = (pc[1] >> 8) & 0xFF;
+            int rd = vm->text_seg[pc + 1] & 0xFF;
+            int rs = (vm->text_seg[pc + 1] >> 8) & 0xFF;
             if (rd == rs && rd != 0) {
                 // Self-move - convert to NOP
-                nop_2word(pc);
+                nop_2word(vm, pc);
                 opt_count++;
             }
         }
         pc += size;
     }
 
-    // Pattern 2: LI3 rx, A; LI3 rx, B -> NOP; LI3 rx, B (dead store)
-    for (long long *pc = start; pc < end; ) {
-        int op = get_opcode(pc);
-        int size = get_instr_size(op);
-
-        if (op == LI3 && pc + size < end) {
-            long long *next = pc + size;
-            int next_op = get_opcode(next);
-            if (next_op == LI3) {
-                int rd1 = pc[1] & 0xFF;
-                int rd2 = next[1] & 0xFF;
-                if (rd1 == rd2 && rd1 != 0) {
-                    // Second LI3 overwrites first - first is dead
-                    nop_3word(pc);
-                    opt_count++;
-                }
-            }
-        }
-        pc += size;
-    }
-
     // Pattern 3: PSH3 rx; POP3 rx -> NOP; NOP (useless push/pop)
-    for (long long *pc = start; pc < end; ) {
-        int op = get_opcode(pc);
+    for (JCCPc pc = start; pc < end; ) {
+        int op = get_opcode(vm, pc);
         int size = get_instr_size(op);
 
         if (op == PSH3 && pc + size < end) {
-            long long *next = pc + size;
-            int next_op = get_opcode(next);
+            JCCPc next = pc + size;
+            int next_op = get_opcode(vm, next);
             if (next_op == POP3) {
-                int rs_push = pc[1] & 0xFF;
-                int rd_pop = next[1] & 0xFF;
+                int rs_push = vm->text_seg[pc + 1] & 0xFF;
+                int rd_pop = vm->text_seg[next + 1] & 0xFF;
                 if (rs_push == rd_pop) {
                     // Push then pop same register - useless
-                    nop_2word(pc);
-                    nop_2word(next);
+                    nop_2word(vm, pc);
+                    nop_2word(vm, next);
                     opt_count++;
                 }
             }
@@ -469,17 +397,17 @@ static void opt_peephole(JCC *vm) {
     }
 
     // Pattern 4: JMP to next instruction -> NOP
-    for (long long *pc = start; pc < end; ) {
-        int op = get_opcode(pc);
+    for (JCCPc pc = start; pc < end; ) {
+        int op = get_opcode(vm, pc);
         int size = get_instr_size(op);
 
         if (op == JMP) {
-            long long target = pc[1];
-            long long *next = pc + size;
+            long long target = vm->text_seg[pc + 1];
+            JCCPc next = pc + size;
             if (!control_flow_targets[pc - start] &&
                 target == (long long)next) {
                 // Jump to the very next instruction - useless
-                nop_2word(pc);
+                nop_2word(vm, pc);
                 opt_count++;
             }
         }
@@ -514,44 +442,44 @@ static void opt_dead_code(JCC *vm) {
         return;
     }
 
-    long long *start = vm->text_seg + 1;  // Skip entry point
-    long long *end = vm->text_ptr;
+    JCCPc start = 1;  // Skip entry point
+    JCCPc end = vm->text_ptr + 1;
     int dce_count = 0;
 
     // Count NOPs created by previous passes (informational only)
     int nop_count = 0;
-    for (long long *pc = start; pc < end; ) {
-        int op = get_opcode(pc);
+    for (JCCPc pc = start; pc < end; ) {
+        int op = get_opcode(vm, pc);
         int size = get_instr_size(op);
 
         // Check if this is a NOP
         if (op == MOV3) {
-            int rd = pc[1] & 0xFF;
-            int rs = (pc[1] >> 8) & 0xFF;
+            int rd = vm->text_seg[pc + 1] & 0xFF;
+            int rs = (vm->text_seg[pc + 1] >> 8) & 0xFF;
             if (rd == 0 && rs == 0) nop_count++;
         } else if (op == LI3) {
-            int rd = pc[1] & 0xFF;
-            if (rd == 0 && pc[2] == 0) nop_count++;
+            int rd = vm->text_seg[pc + 1] & 0xFF;
+            if (rd == 0 && cc_read_i64_at(vm, pc + 2) == 0) nop_count++;
         }
         pc += size;
     }
 
     // Pattern: MOV3 rd, rs followed by another MOV3 rd, rx -> first is dead
     // (if rd is overwritten before being read)
-    for (long long *pc = start; pc < end; ) {
-        int op = get_opcode(pc);
+    for (JCCPc pc = start; pc < end; ) {
+        int op = get_opcode(vm, pc);
         int size = get_instr_size(op);
 
         if (op == MOV3 && pc + size < end) {
-            int rd1 = pc[1] & 0xFF;
-            long long *next = pc + size;
-            int next_op = get_opcode(next);
+            int rd1 = vm->text_seg[pc + 1] & 0xFF;
+            JCCPc next = pc + size;
+            int next_op = get_opcode(vm, next);
             
             if (next_op == MOV3) {
-                int rd2 = next[1] & 0xFF;
+                int rd2 = vm->text_seg[next + 1] & 0xFF;
                 if (rd1 == rd2 && rd1 != 0) {
                     // Consecutive MOV3 to same register - first is dead
-                    nop_2word(pc);
+                    nop_2word(vm, pc);
                     dce_count++;
                 }
             }

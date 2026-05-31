@@ -20,7 +20,7 @@
 #include "jcc.h"
 #include "./internal.h"
 
-// Bytecode file format (V1 - register-based VM):
+// Bytecode file format (V4 - 32-bit text words):
 //   Magic: "JCC\0" (4 bytes)
 //   Version: 1 (4 bytes)
 //   Flags: JCCFlags bitfield (4 bytes)
@@ -32,121 +32,8 @@
 //   Data segment: global data (data_size bytes)
 //   Data relocations: data_offset, target_segment, target_offset, addend
 
-// Helper: get the number of operand words consumed by an opcode
-// Returns -1 for unknown opcodes.
 static int get_opcode_operand_count(int op) {
-    switch (op) {
-        // Control flow with address operand (1 word)
-        case JMP:
-        case CALL:
-            return 1;
-
-        // Control flow with register + address (2 words: [rs] [target])
-        case JZ3:
-        case JNZ3:
-            return 2;
-
-        // RI format: [rd] [immediate] (2 words)
-        case LI3:
-        case LDA3:
-        case LTA3:
-        case LEA3:
-            return 2;
-
-        // RRI format: [rd|rs] [immediate] (2 words)
-        case ADDI3:
-        case CHKA3:
-        case CHKT3:
-            return 2;
-
-        // ENT3: [stack_size|param_count] [float_param_mask] (2 words)
-        case ENT3:
-            return 2;
-
-        // ADJ has 1 immediate operand
-        case ADJ:
-            return 1;
-
-        // JMPT (jump table): [table_addr] [count] [default_addr] (3 words)
-        case JMPT:
-            return 3;
-
-        // RRR format: [rd|rs1|rs2] (1 word)
-        case ADD3: case SUB3: case MUL3: case DIV3: case MOD3:
-        case AND3: case OR3: case XOR3: case SHL3: case SHR3:
-        case SEQ3: case SNE3: case SLT3: case SGE3: case SGT3: case SLE3:
-        case MOV3:
-        case FADD3: case FSUB3: case FMUL3: case FDIV3:
-        case FEQ3: case FNE3: case FLT3: case FLE3: case FGT3: case FGE3:
-            return 1;
-
-        // RR format: [rd|rs] (1 word)
-        case NEG3: case NOT3: case BNOT3:
-        case LDR_B: case LDR_H: case LDR_W: case LDR_D:
-        case STR_B: case STR_H: case STR_W: case STR_D:
-        case FLDR: case FSTR: case FLDR_F32: case FSTR_F32: case FROUND_F32:
-        case FMOV3: case FNEG3:
-        case I2F3: case F2I3: case FR2R: case R2FR:
-        case SX1: case SX2: case SX4: case ZX1: case ZX2: case ZX4:
-        case CHKP3:
-            return 1;
-
-        // R format: [rs] (1 word)
-        case PSH3: case POP3:
-        case CALLI: case JMPI:
-            return 1;
-
-        // CALLF: [ffi_index] [arg_count] [double_arg_mask] (3 words)
-        case CALLF:
-            return 3;
-
-        // Memory ops use register conventions and have no encoded operands.
-        case MALC: case MFRE: case MCPY: case REALC: case CALC:
-            return 0;
-
-        // Safety opcodes
-        case CHKB:    return 1; // [rs1_base:8|rs2_offset:8] (RR word, no trailing imm)
-        case CHKPA:   return 1; // [rs_ptr:8] (R word)
-        case MARKA:   return 4; // [rs_ptr:8] [offset] [size] [scope_id]
-        case MARKP:   return 3; // [rs_ptr:8|rs_base:8] [origin_type] [size]
-        case CHKI: case MARKI: case CHKL: case MARKR: case MARKW:
-        case SCOPEIN: case SCOPEOUT:
-            return 1; // single immediate (offset or scope_id)
-
-        // SETJMP/LONGJMP: [buf_reg] [val_reg] (1 word RR format)
-        case SETJMP: case LONGJMP:
-            return 1;
-
-        // Zero operand opcodes
-        case LEV3:
-        case RETBUF:
-            return 0;
-
-        default:
-            return -1;
-    }
-}
-
-// Helper: check if an opcode has an address operand that needs relocation
-static int opcode_has_address(int op) {
-    return (op == JMP || op == CALL || op == JZ3 || op == JNZ3 || op == JMPT);
-}
-
-// Helper: get the operand index (0-based) that contains the address.
-// For JMPT, this returns the table_addr index (0); default_addr is handled
-// separately because JMPT has two address operands.
-static int get_address_operand_index(int op) {
-    switch (op) {
-        case JMP:
-        case CALL:
-        case JMPT:
-            return 0;  // First operand is address
-        case JZ3:
-        case JNZ3:
-            return 1;  // Second operand is address (first is register)
-        default:
-            return -1;
-    }
+    return cc_opcode_operand_words(op);
 }
 
 int cc_save_bytecode(JCC *vm, const char *path) {
@@ -167,16 +54,13 @@ int cc_save_bytecode(JCC *vm, const char *path) {
     }
 
     // Calculate sizes
-    long long text_size = (vm->text_ptr - vm->text_seg + 1) * sizeof(long long);
+    long long text_size = ((long long)vm->text_ptr + 1) * (long long)sizeof(JCCInstrWord);
     long long data_size = vm->data_ptr - vm->data_seg;
     long long main_offset = vm->text_seg[0];  // main() instruction index
-    long long num_instructions = text_size / sizeof(long long);
+    long long num_instructions = text_size / (long long)sizeof(JCCInstrWord);
     long long data_reloc_count = vm->compiler.num_data_relocs;
-    long long text_base = (long long)vm->text_seg;
-    long long text_end = text_base + text_size;
 
-    // Create a copy of text segment for address conversion
-    long long *text_copy = malloc(text_size);
+    JCCInstrWord *text_copy = malloc(text_size);
     if (!text_copy) {
         fprintf(stderr, "error: failed to allocate temporary buffer\n");
         fclose(f);
@@ -242,45 +126,12 @@ int cc_save_bytecode(JCC *vm, const char *path) {
         }
     }
 
-    // Convert absolute addresses to relative offsets
-    for (long long i = 0; i < num_instructions; i++) {
-        if (is_operand[i]) continue;
-
-        int op = text_copy[i];
-        if (opcode_has_address(op)) {
-            int addr_idx = get_address_operand_index(op);
-            if (addr_idx >= 0 && i + 1 + addr_idx < num_instructions) {
-                long long value = text_copy[i + 1 + addr_idx];
-                // Only convert if this looks like a text segment address
-                if (value >= text_base && value < text_end) {
-                    long long offset = (value - text_base) / sizeof(long long);
-                    text_copy[i + 1 + addr_idx] = offset;
-                    if (vm->debug_vm) {
-                        printf("Save: Converting address at [%lld+%d]: 0x%llx -> offset %lld\n",
-                               i, addr_idx + 1, value, offset);
-                    }
-                }
-            }
-            // JMPT has a second address operand: default_addr at index 2
-            if (op == JMPT && i + 3 < num_instructions) {
-                long long value = text_copy[i + 3];
-                if (value >= text_base && value < text_end) {
-                    long long offset = (value - text_base) / sizeof(long long);
-                    text_copy[i + 3] = offset;
-                    if (vm->debug_vm) {
-                        printf("Save: Converting JMPT default_addr at [%lld+3]: 0x%llx -> offset %lld\n",
-                               i, value, offset);
-                    }
-                }
-            }
-        }
-    }
     free(is_operand);
 
     // Write header
     if (fwrite(JCC_MAGIC, 1, 4, f) != 4) goto write_error;
 
-    int version = 1;
+    int version = JCC_VERSION;
     if (fwrite(&version, sizeof(int), 1, f) != 1) goto write_error;
 
     uint32_t flags = vm->flags;
@@ -353,10 +204,11 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
     }
     cursor += 4;
 
-    // Read version - only accept version 1 
+    // Read version - only accept the current 32-bit instruction format.
     READ_AND_INCR(version, int);
-    if (version != 1) {
-        fprintf(stderr, "error: unsupported bytecode version %d (expected 1)\n", version);
+    if (version != JCC_VERSION) {
+        fprintf(stderr, "error: unsupported bytecode version %d (expected %d)\n",
+                version, JCC_VERSION);
         return -1;
     }
 
@@ -373,14 +225,15 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
     if (text_size < 0 || data_size < 0 || data_reloc_count < 0 ||
         data_reloc_count > MAX_CALLS ||
         cursor + text_size + data_size + data_reloc_count * 4 * (long long)sizeof(long long) > end ||
-        text_size > vm->poolsize * (long long)sizeof(long long) ||
+        text_size > vm->poolsize * (long long)sizeof(JCCInstrWord) ||
+        text_size % (long long)sizeof(JCCInstrWord) != 0 ||
         data_size > vm->poolsize) {
         fprintf(stderr, "error: invalid bytecode sizes\n");
         return -1;
     }
 
     // Allocate segments
-    vm->text_seg = calloc(vm->poolsize, sizeof(long long));
+    vm->text_seg = calloc(vm->poolsize, sizeof(JCCInstrWord));
     vm->data_seg = calloc(vm->poolsize, 1);
     vm->stack_seg = calloc(vm->poolsize, sizeof(long long));
     vm->heap_seg = calloc(vm->poolsize, 1);
@@ -423,8 +276,7 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
         vm->compiler.num_data_relocs++;
     }
 
-    // Convert relative offsets back to absolute addresses
-    long long num_instructions = text_size / sizeof(long long);
+    long long num_instructions = text_size / (long long)sizeof(JCCInstrWord);
 
     // Mark operand positions
     char *is_operand = calloc(num_instructions, 1);
@@ -453,43 +305,10 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
         }
     }
 
-    // Convert offsets to addresses
-    for (long long i = 0; i < num_instructions; i++) {
-        if (is_operand[i]) continue;
-
-        int op = vm->text_seg[i];
-        if (opcode_has_address(op)) {
-            int addr_idx = get_address_operand_index(op);
-            if (addr_idx >= 0 && i + 1 + addr_idx < num_instructions) {
-                long long offset = vm->text_seg[i + 1 + addr_idx];
-                // Convert offset to absolute address
-                if (offset >= 0 && offset < num_instructions) {
-                    long long addr = (long long)(vm->text_seg + offset);
-                    vm->text_seg[i + 1 + addr_idx] = addr;
-                    if (vm->debug_vm) {
-                        printf("Load: Converting offset at [%lld+%d]: %lld -> 0x%llx\n",
-                               i, addr_idx + 1, offset, addr);
-                    }
-                }
-            }
-            // JMPT has a second address operand: default_addr at index 2
-            if (op == JMPT && i + 3 < num_instructions) {
-                long long offset = vm->text_seg[i + 3];
-                if (offset >= 0 && offset < num_instructions) {
-                    long long addr = (long long)(vm->text_seg + offset);
-                    vm->text_seg[i + 3] = addr;
-                    if (vm->debug_vm) {
-                        printf("Load: Converting JMPT default_addr at [%lld+3]: %lld -> 0x%llx\n",
-                               i, offset, addr);
-                    }
-                }
-            }
-        }
-    }
     free(is_operand);
 
     // Set up pointers
-    vm->text_ptr = vm->text_seg + (text_size / sizeof(long long)) - 1;
+    vm->text_ptr = (JCCPc)(text_size / (long long)sizeof(JCCInstrWord)) - 1;
     vm->data_ptr = vm->data_seg + data_size;
     vm->heap_ptr = vm->heap_seg;
     vm->heap_end = vm->heap_seg + vm->poolsize;
@@ -503,9 +322,8 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
                                 vm->compiler.data_relocs[i].target_offset +
                                 vm->compiler.data_relocs[i].addend);
         } else {
-            value = (long long)((char *)vm->text_seg +
-                                vm->compiler.data_relocs[i].target_offset +
-                                vm->compiler.data_relocs[i].addend);
+            value = vm->compiler.data_relocs[i].target_offset +
+                    vm->compiler.data_relocs[i].addend;
         }
         *(long long *)(vm->data_seg + vm->compiler.data_relocs[i].data_offset) =
             value;
@@ -567,7 +385,7 @@ void cc_compile(JCC *vm, Obj *prog) {
     // Initialize VM memory if not already done
     if (!vm->text_seg) {
         // allocate memory
-        if (!(vm->text_seg = malloc(vm->poolsize * sizeof(long long)))) {
+        if (!(vm->text_seg = malloc(vm->poolsize * sizeof(JCCInstrWord)))) {
             error("could not malloc for text area");
         }
         if (!(vm->data_seg = malloc(vm->poolsize))) {
@@ -587,7 +405,7 @@ void cc_compile(JCC *vm, Obj *prog) {
             }
         }
 
-        memset(vm->text_seg, 0, vm->poolsize * sizeof(long long));
+        memset(vm->text_seg, 0, vm->poolsize * sizeof(JCCInstrWord));
         memset(vm->data_seg, 0, vm->poolsize);
         memset(vm->stack_seg, 0, vm->poolsize * sizeof(long long));
         memset(vm->heap_seg, 0, vm->poolsize);
@@ -597,7 +415,7 @@ void cc_compile(JCC *vm, Obj *prog) {
         }
 
         vm->old_text_seg = vm->text_seg;
-        vm->text_ptr = vm->text_seg;
+        vm->text_ptr = 0;
         vm->data_ptr = vm->data_seg;
         vm->heap_ptr = vm->heap_seg;
         vm->heap_end = vm->heap_seg + vm->poolsize;

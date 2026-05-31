@@ -39,7 +39,7 @@
 #endif
 
 #define JCC_MAGIC "JCC\0"
-#define JCC_VERSION 3 // Version 3: data/text-relative address opcodes
+#define JCC_VERSION 4 // Version 4: 32-bit text words with PC-index branches
 
 // Stack canary constant for detecting stack overflows (used when random
 // canaries disabled)
@@ -101,9 +101,12 @@
 #define FREG_A7 17 // Float argument
 
 // Instruction encoding macros for new opcodes
-// RRR format: [OPCODE] [rd:8|rs1:8|rs2:8|unused:40]
+// Text segment words are 32-bit. Wide immediates are stored little-endian in
+// two consecutive instruction words.
+// RRR format: [rd:8|rs1:8|rs2:8|unused:8]
 #define ENCODE_RRR(rd, rs1, rs2)                                               \
-    ((long long)(rd) | ((long long)(rs1) << 8) | ((long long)(rs2) << 16))
+    ((JCCInstrWord)(rd) | ((JCCInstrWord)(rs1) << 8) |                         \
+     ((JCCInstrWord)(rs2) << 16))
 #define DECODE_RRR(operands, rd, rs1, rs2)                                     \
     do {                                                                       \
         rd = (operands) & 0xFF;                                                \
@@ -111,20 +114,133 @@
         rs2 = ((operands) >> 16) & 0xFF;                                       \
     } while (0)
 
-// RR format: [OPCODE] [rd:8|rs1:8|unused:48]
-#define ENCODE_RR(rd, rs1) ((long long)(rd) | ((long long)(rs1) << 8))
+// RR format: [rd:8|rs1:8|unused:16]
+#define ENCODE_RR(rd, rs1)                                                     \
+    ((JCCInstrWord)(rd) | ((JCCInstrWord)(rs1) << 8))
 #define DECODE_RR(operands, rd, rs1)                                           \
     do {                                                                       \
         rd = (operands) & 0xFF;                                                \
         rs1 = ((operands) >> 8) & 0xFF;                                        \
     } while (0)
 
-// RI format: [OPCODE] [rd:8|unused:56] [immediate:64]
-#define ENCODE_R(rd) ((long long)(rd))
+// RI format: [OPCODE] [rd:8|unused:24] [immediate:64 split low, high]
+#define ENCODE_R(rd) ((JCCInstrWord)(rd))
 #define DECODE_R(operands, rd)                                                 \
     do {                                                                       \
         rd = (operands) & 0xFF;                                                \
     } while (0)
+
+static inline uint64_t cc_make_u64(JCCInstrWord lo, JCCInstrWord hi) {
+    return (uint64_t)lo | ((uint64_t)hi << 32);
+}
+
+static inline long long cc_make_i64(JCCInstrWord lo, JCCInstrWord hi) {
+    return (long long)cc_make_u64(lo, hi);
+}
+
+static inline JCCInstrWord cc_i64_lo(long long val) {
+    return (JCCInstrWord)((uint64_t)val & 0xFFFFFFFFu);
+}
+
+static inline JCCInstrWord cc_i64_hi(long long val) {
+    return (JCCInstrWord)(((uint64_t)val >> 32) & 0xFFFFFFFFu);
+}
+
+static inline JCCInstrWord cc_read_word(JCC *vm) {
+    return vm->text_seg[vm->pc++];
+}
+
+static inline long long cc_read_i64(JCC *vm) {
+    JCCInstrWord lo = cc_read_word(vm);
+    JCCInstrWord hi = cc_read_word(vm);
+    return cc_make_i64(lo, hi);
+}
+
+static inline void cc_write_i64_at(JCC *vm, JCCPc pc, long long val) {
+    vm->text_seg[pc] = cc_i64_lo(val);
+    vm->text_seg[pc + 1] = cc_i64_hi(val);
+}
+
+static inline long long cc_read_i64_at(JCC *vm, JCCPc pc) {
+    return cc_make_i64(vm->text_seg[pc], vm->text_seg[pc + 1]);
+}
+
+static inline JCCPc cc_byte_offset_to_pc(long long offset) {
+    if (offset < 0 || offset % (long long)sizeof(JCCInstrWord) != 0)
+        return JCC_INVALID_PC;
+    uint64_t pc = (uint64_t)offset / sizeof(JCCInstrWord);
+    return pc > UINT32_MAX ? JCC_INVALID_PC : (JCCPc)pc;
+}
+
+static inline long long cc_pc_to_byte_offset(JCCPc pc) {
+    return (long long)pc * (long long)sizeof(JCCInstrWord);
+}
+
+static inline int cc_opcode_operand_words(int op) {
+    switch (op) {
+        case JMP:
+        case CALL:
+            return 1;
+        case JZ3:
+        case JNZ3:
+            return 2;
+        case LI3:
+        case LDA3:
+        case LTA3:
+        case LEA3:
+        case ADDI3:
+        case CHKA3:
+        case CHKT3:
+            return 3;
+        case ENT3:
+            return 4;
+        case ADJ:
+            return 2;
+        case JMPT:
+            return 3;
+        case ADD3: case SUB3: case MUL3: case DIV3: case MOD3:
+        case AND3: case OR3: case XOR3: case SHL3: case SHR3:
+        case SEQ3: case SNE3: case SLT3: case SGE3: case SGT3: case SLE3:
+        case MOV3:
+        case FADD3: case FSUB3: case FMUL3: case FDIV3:
+        case FEQ3: case FNE3: case FLT3: case FLE3: case FGT3: case FGE3:
+        case NEG3: case NOT3: case BNOT3:
+        case LDR_B: case LDR_H: case LDR_W: case LDR_D:
+        case STR_B: case STR_H: case STR_W: case STR_D:
+        case FLDR: case FSTR: case FLDR_F32: case FSTR_F32: case FROUND_F32:
+        case FMOV3: case FNEG3:
+        case I2F3: case F2I3: case FR2R: case R2FR:
+        case SX1: case SX2: case SX4: case ZX1: case ZX2: case ZX4:
+        case CHKP3:
+        case PSH3: case POP3:
+        case CALLI: case JMPI:
+        case CHKB:
+        case CHKPA:
+        case SETJMP: case LONGJMP:
+            return 1;
+        case CALLF:
+            return 4;
+        case MALC: case MFRE: case MCPY: case REALC: case CALC:
+        case LEV3:
+        case RETBUF:
+            return 0;
+        case MARKA:
+            return 6;
+        case MARKP:
+            return 4;
+        case CHKI: case MARKI: case CHKL: case MARKR: case MARKW:
+            return 2;
+        case SCOPEIN: case SCOPEOUT:
+            return 1;
+        default:
+            return -1;
+    }
+}
+
+static inline int cc_instr_words(int op) {
+    int operands = cc_opcode_operand_words(op);
+    return operands < 0 ? -1 : operands + 1;
+}
 
 void strarray_push(StringArray *arr, char *s);
 void arena_strarray_push(JCC *vm, StringArray *arr, char *s);

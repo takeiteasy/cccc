@@ -137,13 +137,22 @@ Example output:
 Binary format (little-endian):
 ```
 [Magic: "JCC\0" (4 bytes)]
-[Version: 1 (4 bytes)]
+[Version: 4 (4 bytes)]
+[Flags: JCCFlags bitfield (4 bytes)]
 [Text size: bytes (8 bytes)]
 [Data size: bytes (8 bytes)]
 [Main offset: instruction offset (8 bytes)]
-[Text segment: bytecode instructions]
+[Data relocation count (8 bytes)]
+[Text segment: 32-bit bytecode instruction words]
 [Data segment: global variables and constants]
+[Data relocations]
 ```
+
+The VM text segment uses 32-bit instruction words. Operands that need 64 bits,
+such as C integer immediates and text/data byte offsets, are encoded as two
+consecutive 32-bit words. Direct branch and call targets are instruction
+indexes, while C-visible function and label values are byte offsets from the
+text segment base.
 
 Floating-point bytecode has separate 64-bit and 32-bit memory operations:
 `FLDR`/`FSTR` load and store `double`, while `FLDR_F32`/`FSTR_F32` load and

@@ -109,9 +109,8 @@ static void apply_global_relocations(JCC *vm, Obj *prog) {
                     error("unsupported relocation to undefined function: %s",
                           target->name);
                 segment = 1;
-                target_offset = target->code_addr * (long long)sizeof(long long);
-                value = (long long)((char *)vm->text_seg + target_offset +
-                                    rel->addend);
+                target_offset = cc_pc_to_byte_offset((JCCPc)target->code_addr);
+                value = target_offset + rel->addend;
             } else {
                 segment = 0;
                 target_offset = target->offset;
@@ -234,12 +233,12 @@ static bool contains_funcall(Node *node) {
 
 typedef struct {
     char *name;
-    long long offset;
+    JCCPc offset;
 } LabelDef;
 
 typedef struct {
     char *name;
-    long long *patch_location;
+    JCCPc patch_location;
     bool text_relative;
 } LabelPatch;
 
@@ -262,13 +261,12 @@ static void define_label(JCC *vm, char *name) {
         error("codegen: too many labels");
     }
     label_defs[num_label_defs].name = name;
-    label_defs[num_label_defs].offset =
-        (long long)((vm->text_ptr + 1) - vm->text_seg);
+    label_defs[num_label_defs].offset = vm->text_ptr + 1;
     num_label_defs++;
 }
 
 // Record a jump that needs to be patched later
-static void add_label_patch(char *name, long long *patch_location,
+static void add_label_patch(char *name, JCCPc patch_location,
                             bool text_relative) {
     if (!name)
         return;
@@ -287,16 +285,16 @@ static void patch_labels(JCC *vm) {
     // mapping label name -> definition for O(1) per patch.
     for (int i = 0; i < num_label_patches; i++) {
         char *name = label_patches[i].name;
-        long long *patch = label_patches[i].patch_location;
+        JCCPc patch = label_patches[i].patch_location;
 
         // Find the label definition
         for (int j = 0; j < num_label_defs; j++) {
             if (strlen(label_defs[j].name) == strlen(name) &&
                 strncmp(label_defs[j].name, name, strlen(name)) == 0) {
                 if (label_patches[i].text_relative) {
-                    *patch = label_defs[j].offset * (long long)sizeof(long long);
+                    cc_write_i64_at(vm, patch, cc_pc_to_byte_offset(label_defs[j].offset));
                 } else {
-                    *patch = (long long)(vm->text_seg + label_defs[j].offset);
+                    vm->text_seg[patch] = label_defs[j].offset;
                 }
                 break;
             }
@@ -306,20 +304,27 @@ static void patch_labels(JCC *vm) {
 
 // ========== Emit Helpers ==========
 
-static void emit_word(JCC *vm, long long word) {
-    if (!vm || !vm->text_ptr)
+static void emit_word(JCC *vm, JCCInstrWord word) {
+    if (!vm || !vm->text_seg)
         error("codegen: text segment not initialized");
-    if (vm->text_ptr + 1 >= vm->text_seg + vm->poolsize)
+    if (vm->text_ptr + 1 >= (JCCPc)vm->poolsize)
         error("codegen: text segment overflow");
-    *++vm->text_ptr = word;
+    vm->text_seg[++vm->text_ptr] = word;
 }
 
-static long long *emit_word_ptr(JCC *vm) {
-    if (!vm || !vm->text_ptr)
+static JCCPc emit_word_ptr(JCC *vm) {
+    if (!vm || !vm->text_seg)
         error("codegen: text segment not initialized");
-    if (vm->text_ptr + 1 >= vm->text_seg + vm->poolsize)
+    if (vm->text_ptr + 1 >= (JCCPc)vm->poolsize)
         error("codegen: text segment overflow");
     return ++vm->text_ptr;
+}
+
+static JCCPc emit_i64(JCC *vm, long long val) {
+    JCCPc loc = emit_word_ptr(vm);
+    vm->text_seg[loc] = cc_i64_lo(val);
+    emit_word(vm, cc_i64_hi(val));
+    return loc;
 }
 
 static void check_data_capacity(JCC *vm, long long needed) {
@@ -333,7 +338,7 @@ static void emit(JCC *vm, int instruction) {
 
 static void emit_with_arg(JCC *vm, int instruction, long long arg) {
     emit_word(vm, instruction);
-    emit_word(vm, arg);
+    emit_i64(vm, arg);
 }
 
 // 3-register ops: [OP] [rd:8|rs1:8|rs2:8|unused:40]
@@ -348,18 +353,18 @@ static void emit_rr(JCC *vm, int op, int rd, int rs1) {
     emit_word(vm, ENCODE_RR(rd, rs1));
 }
 
-// 1-register + immediate: [OP] [rd:8|unused:56] [imm:64]
-static void emit_ri(JCC *vm, int op, int rd, long long imm) {
+// 1-register + immediate: [OP] [rd:8|unused:24] [imm:64]
+static JCCPc emit_ri(JCC *vm, int op, int rd, long long imm) {
     emit_word(vm, op);
     emit_word(vm, ENCODE_R(rd));
-    emit_word(vm, imm);
+    return emit_i64(vm, imm);
 }
 
-// Register + register + immediate: [OP] [rd:8|rs:8|unused:48] [imm:64]
-static void emit_rri(JCC *vm, int op, int rd, int rs, long long imm) {
+// Register + register + immediate: [OP] [rd:8|rs:8|unused:16] [imm:64]
+static JCCPc emit_rri(JCC *vm, int op, int rd, int rs, long long imm) {
     emit_word(vm, op);
     emit_word(vm, ENCODE_RR(rd, rs));
-    emit_word(vm, imm);
+    return emit_i64(vm, imm);
 }
 
 // Float 3-register ops
@@ -377,26 +382,26 @@ static void emit_frr(JCC *vm, int op, int rd, int rs1) {
 // ========== Specific Emit Helpers ==========
 
 // LI3: rd = immediate
-static void emit_li3(JCC *vm, int rd, long long imm) {
-    emit_ri(vm, LI3, rd, imm);
+static JCCPc emit_li3(JCC *vm, int rd, long long imm) {
+    return emit_ri(vm, LI3, rd, imm);
 }
 
-static void emit_lda3(JCC *vm, int rd, long long offset) {
-    emit_ri(vm, LDA3, rd, offset);
+static JCCPc emit_lda3(JCC *vm, int rd, long long offset) {
+    return emit_ri(vm, LDA3, rd, offset);
 }
 
-static void emit_lta3(JCC *vm, int rd, long long offset) {
-    emit_ri(vm, LTA3, rd, offset);
+static JCCPc emit_lta3(JCC *vm, int rd, long long offset) {
+    return emit_ri(vm, LTA3, rd, offset);
 }
 
 // LEA3: rd = bp + offset
-static void emit_lea3(JCC *vm, int rd, long long offset) {
-    emit_ri(vm, LEA3, rd, offset);
+static JCCPc emit_lea3(JCC *vm, int rd, long long offset) {
+    return emit_ri(vm, LEA3, rd, offset);
 }
 
 // ADDI3: rd = rs + immediate
-static void emit_addi3(JCC *vm, int rd, int rs, long long imm) {
-    emit_rri(vm, ADDI3, rd, rs, imm);
+static JCCPc emit_addi3(JCC *vm, int rd, int rs, long long imm) {
+    return emit_rri(vm, ADDI3, rd, rs, imm);
 }
 
 // MOV3: rd = rs
@@ -450,20 +455,20 @@ static void emit_store(JCC *vm, Type *ty, int rd_val, int rs_addr) {
 }
 
 // JZ3: if rs == 0, jump (returns patch location)
-static long long *emit_jz3(JCC *vm, int rs) {
+static JCCPc emit_jz3(JCC *vm, int rs) {
     emit(vm, JZ3);
     emit_word(vm, ENCODE_R(rs));
-    long long *patch = emit_word_ptr(vm);
-    *patch = 0;
+    JCCPc patch = emit_word_ptr(vm);
+    vm->text_seg[patch] = 0;
     return patch;
 }
 
 // JNZ3: if rs != 0, jump (returns patch location)
-static long long *emit_jnz3(JCC *vm, int rs) {
+static JCCPc emit_jnz3(JCC *vm, int rs) {
     emit(vm, JNZ3);
     emit_word(vm, ENCODE_R(rs));
-    long long *patch = emit_word_ptr(vm);
-    *patch = 0;
+    JCCPc patch = emit_word_ptr(vm);
+    vm->text_seg[patch] = 0;
     return patch;
 }
 
@@ -566,31 +571,31 @@ static void emit_scopeout(JCC *vm, int scope_id) {
 // Emit CHKI (check initialized) for local at bp+offset.
 static void emit_chki(JCC *vm, long long offset) {
     emit(vm, CHKI);
-    emit_word(vm, offset);
+    emit_i64(vm, offset);
 }
 
 // Emit MARKI (mark initialized) for local at bp+offset.
 static void emit_marki(JCC *vm, long long offset) {
     emit(vm, MARKI);
-    emit_word(vm, offset);
+    emit_i64(vm, offset);
 }
 
 // Emit CHKL (check liveness) for local at bp+offset.
 static void emit_chkl(JCC *vm, long long offset) {
     emit(vm, CHKL);
-    emit_word(vm, offset);
+    emit_i64(vm, offset);
 }
 
 // Emit MARKR (mark read) for local at bp+offset.
 static void emit_markr(JCC *vm, long long offset) {
     emit(vm, MARKR);
-    emit_word(vm, offset);
+    emit_i64(vm, offset);
 }
 
 // Emit MARKW (mark write) for local at bp+offset.
 static void emit_markw(JCC *vm, long long offset) {
     emit(vm, MARKW);
-    emit_word(vm, offset);
+    emit_i64(vm, offset);
 }
 
 // Emit MARKA (mark address for dangling detection).
@@ -599,8 +604,8 @@ static void emit_marka(JCC *vm, int rs, long long offset, size_t size,
                        int scope_id) {
     emit(vm, MARKA);
     emit_word(vm, ENCODE_R(rs));
-    emit_word(vm, offset);
-    emit_word(vm, (long long)size);
+    emit_i64(vm, offset);
+    emit_i64(vm, (long long)size);
     emit_word(vm, scope_id);
 }
 
@@ -611,7 +616,7 @@ static void emit_markp(JCC *vm, int rs_ptr, int rs_base, int origin_type,
     emit(vm, MARKP);
     emit_word(vm, ENCODE_RR(rs_ptr, rs_base));
     emit_word(vm, origin_type);
-    emit_word(vm, (long long)size);
+    emit_i64(vm, (long long)size);
 }
 
 // ========== Address Generation ==========
@@ -622,8 +627,7 @@ static void gen_addr(JCC *vm, Node *node, int dest_reg) {
     case ND_VAR:
         if (node->var->is_function) {
             // Function address - emit placeholder and record patch
-            emit_lta3(vm, dest_reg, 0); // Placeholder
-            long long *addr_loc = vm->text_ptr;
+            JCCPc addr_loc = emit_lta3(vm, dest_reg, 0); // Placeholder
 
             if (vm->compiler.num_func_addr_patches >= MAX_CALLS) {
                 error("too many function address references");
@@ -800,8 +804,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         if (node->var->is_function) {
             // Function name used as value - function-to-pointer decay
             // Emit LTA3 with placeholder, patch later
-            emit_lta3(vm, dest_reg, 0);          // Placeholder
-            long long *addr_loc = vm->text_ptr; // Get the immediate slot
+            JCCPc addr_loc = emit_lta3(vm, dest_reg, 0); // Placeholder
 
             // Record patch location for later resolution
             if (vm->compiler.num_func_addr_patches >= MAX_CALLS) {
@@ -1182,16 +1185,16 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         // Ternary: cond ? then : else
         int r_cond = alloc_temp_reg();
         gen_expr(vm, node->cond, r_cond);
-        long long *jz_else = emit_jz3(vm, r_cond);
+        JCCPc jz_else = emit_jz3(vm, r_cond);
         free_temp_reg(r_cond);
 
         gen_expr(vm, node->then, dest_reg);
         emit(vm, JMP);
-        long long *jmp_end = emit_word_ptr(vm);
+        JCCPc jmp_end = emit_word_ptr(vm);
 
-        *jz_else = (long long)(vm->text_ptr + 1);
+        vm->text_seg[jz_else] = vm->text_ptr + 1;
         gen_expr(vm, node->els, dest_reg);
-        *jmp_end = (long long)(vm->text_ptr + 1);
+        vm->text_seg[jmp_end] = vm->text_ptr + 1;
         return;
     }
 
@@ -1429,7 +1432,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             emit(vm, CALLF);
             emit_word(vm, ffi_idx);
             emit_word(vm, nargs);
-            emit_word(vm, (long long)double_arg_mask);
+            emit_i64(vm, (long long)double_arg_mask);
 
             if (num_stack_args > 0) {
                 emit_with_arg(vm, ADJ, num_stack_args);
@@ -1644,8 +1647,8 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         if (node->lhs->kind == ND_VAR && node->lhs->var->is_function) {
             Obj *fn = node->lhs->var;
             emit(vm, CALL);
-            long long *patch = emit_word_ptr(vm);
-            *patch = 0; // Will be patched later
+            JCCPc patch = emit_word_ptr(vm);
+            vm->text_seg[patch] = 0; // Will be patched later
 
             // Record call patch location for later resolution
             if (vm->compiler.num_call_patches >= MAX_CALLS) {
@@ -1701,21 +1704,21 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         // Logical AND with short-circuit evaluation
         int r_cond = alloc_temp_reg();
         gen_expr(vm, node->lhs, r_cond);
-        long long *jz_false = emit_jz3(vm, r_cond);
+        JCCPc jz_false = emit_jz3(vm, r_cond);
 
         gen_expr(vm, node->rhs, r_cond);
-        long long *jz_false2 = emit_jz3(vm, r_cond);
+        JCCPc jz_false2 = emit_jz3(vm, r_cond);
 
         // Both true
         emit_li3(vm, dest_reg, 1);
         emit(vm, JMP);
-        long long *jmp_end = emit_word_ptr(vm);
+        JCCPc jmp_end = emit_word_ptr(vm);
 
         // At least one false
-        *jz_false = (long long)(vm->text_ptr + 1);
-        *jz_false2 = (long long)(vm->text_ptr + 1);
+        vm->text_seg[jz_false] = vm->text_ptr + 1;
+        vm->text_seg[jz_false2] = vm->text_ptr + 1;
         emit_li3(vm, dest_reg, 0);
-        *jmp_end = (long long)(vm->text_ptr + 1);
+        vm->text_seg[jmp_end] = vm->text_ptr + 1;
         free_temp_reg(r_cond);
         return;
     }
@@ -1724,21 +1727,21 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         // Logical OR with short-circuit evaluation
         int r_cond = alloc_temp_reg();
         gen_expr(vm, node->lhs, r_cond);
-        long long *jnz_true = emit_jnz3(vm, r_cond);
+        JCCPc jnz_true = emit_jnz3(vm, r_cond);
 
         gen_expr(vm, node->rhs, r_cond);
-        long long *jnz_true2 = emit_jnz3(vm, r_cond);
+        JCCPc jnz_true2 = emit_jnz3(vm, r_cond);
 
         // Both false
         emit_li3(vm, dest_reg, 0);
         emit(vm, JMP);
-        long long *jmp_end = emit_word_ptr(vm);
+        JCCPc jmp_end = emit_word_ptr(vm);
 
         // At least one true
-        *jnz_true = (long long)(vm->text_ptr + 1);
-        *jnz_true2 = (long long)(vm->text_ptr + 1);
+        vm->text_seg[jnz_true] = vm->text_ptr + 1;
+        vm->text_seg[jnz_true2] = vm->text_ptr + 1;
         emit_li3(vm, dest_reg, 1);
-        *jmp_end = (long long)(vm->text_ptr + 1);
+        vm->text_seg[jmp_end] = vm->text_ptr + 1;
         free_temp_reg(r_cond);
         return;
     }
@@ -1775,16 +1778,15 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         }
         return;
 
-    case ND_LABEL_VAL:
+    case ND_LABEL_VAL: {
         // Label address: &&label (GCC extension for computed goto)
         // Emit LTA3 with placeholder offset that will be patched later
-        emit_lta3(vm, dest_reg, 0);
-        // Get the address slot we just wrote to
-        long long *label_addr_loc = vm->text_ptr;
+        JCCPc label_addr_loc = emit_lta3(vm, dest_reg, 0);
         // Record patch location so it gets resolved when label is defined
         add_label_patch(node->unique_label ? node->unique_label : node->label,
                         label_addr_loc, true);
         return;
+    }
 
     case ND_BLOCK_LITERAL: {
         // Block literal: creates a block descriptor containing:
@@ -1813,8 +1815,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
 
         // Load function address (will be patched later)
         int r_invoke = alloc_temp_reg();
-        emit_lta3(vm, r_invoke, 0); // Placeholder for function address
-        long long *invoke_addr_loc = vm->text_ptr;
+        JCCPc invoke_addr_loc = emit_lta3(vm, r_invoke, 0); // Placeholder
 
         // Record patch for block function address
         if (vm->compiler.num_func_addr_patches >= MAX_CALLS)
@@ -2002,19 +2003,19 @@ static void gen_stmt(JCC *vm, Node *node) {
         reset_temp_regs();
         int r_cond = alloc_temp_reg();
         gen_expr(vm, node->cond, r_cond);
-        long long *jz_else = emit_jz3(vm, r_cond);
+        JCCPc jz_else = emit_jz3(vm, r_cond);
         free_temp_reg(r_cond);
 
         gen_stmt(vm, node->then);
 
         if (node->els) {
             emit(vm, JMP);
-            long long *jmp_end = emit_word_ptr(vm);
-            *jz_else = (long long)(vm->text_ptr + 1);
+            JCCPc jmp_end = emit_word_ptr(vm);
+            vm->text_seg[jz_else] = vm->text_ptr + 1;
             gen_stmt(vm, node->els);
-            *jmp_end = (long long)(vm->text_ptr + 1);
+            vm->text_seg[jmp_end] = vm->text_ptr + 1;
         } else {
-            *jz_else = (long long)(vm->text_ptr + 1);
+            vm->text_seg[jz_else] = vm->text_ptr + 1;
         }
         return;
     }
@@ -2025,10 +2026,10 @@ static void gen_stmt(JCC *vm, Node *node) {
             gen_stmt(vm, node->init);
         }
 
-        long long *loop_start = vm->text_ptr + 1;
+        JCCPc loop_start = vm->text_ptr + 1;
 
         // Condition
-        long long *jz_end = NULL;
+        JCCPc jz_end = JCC_INVALID_PC;
         if (node->cond) {
             reset_temp_regs();
             int r_cond = alloc_temp_reg();
@@ -2052,7 +2053,8 @@ static void gen_stmt(JCC *vm, Node *node) {
         }
 
         // Jump back to start
-        emit_with_arg(vm, JMP, (long long)loop_start);
+        emit(vm, JMP);
+        emit_word(vm, loop_start);
 
         // Define break label (jumps past loop)
         if (node->brk_label) {
@@ -2060,14 +2062,14 @@ static void gen_stmt(JCC *vm, Node *node) {
         }
 
         // Patch exit
-        if (jz_end) {
-            *jz_end = (long long)(vm->text_ptr + 1);
+        if (jz_end != JCC_INVALID_PC) {
+            vm->text_seg[jz_end] = vm->text_ptr + 1;
         }
         return;
     }
 
     case ND_DO: {
-        long long *loop_start = vm->text_ptr + 1;
+        JCCPc loop_start = vm->text_ptr + 1;
 
         gen_stmt(vm, node->then);
 
@@ -2079,8 +2081,8 @@ static void gen_stmt(JCC *vm, Node *node) {
         reset_temp_regs();
         int r_cond = alloc_temp_reg();
         gen_expr(vm, node->cond, r_cond);
-        long long *jnz_start = emit_jnz3(vm, r_cond);
-        *jnz_start = (long long)loop_start;
+        JCCPc jnz_start = emit_jnz3(vm, r_cond);
+        vm->text_seg[jnz_start] = loop_start;
         free_temp_reg(r_cond);
 
         // Define break label (jumps past loop)
@@ -2100,7 +2102,7 @@ static void gen_stmt(JCC *vm, Node *node) {
 // Count cases and collect case nodes and patch addresses
 #define MAX_SWITCH_CASES 256
         Node *case_nodes[MAX_SWITCH_CASES];
-        long long *case_patches[MAX_SWITCH_CASES];
+        JCCPc case_patches[MAX_SWITCH_CASES];
         int num_cases = 0;
 
         // For each case, compare and emit jump
@@ -2120,8 +2122,8 @@ static void gen_stmt(JCC *vm, Node *node) {
         }
 
         // Jump to default or end
-        long long *default_patch = NULL;
-        long long *end_patch = NULL;
+        JCCPc default_patch = JCC_INVALID_PC;
+        JCCPc end_patch = JCC_INVALID_PC;
         emit(vm, JMP);
         if (node->default_case) {
             default_patch = emit_word_ptr(vm);
@@ -2134,7 +2136,7 @@ static void gen_stmt(JCC *vm, Node *node) {
         // we need to patch their corresponding jumps
         // Store current case info in compiler state for ND_CASE to use
         Node *saved_case_nodes[MAX_SWITCH_CASES];
-        long long *saved_case_patches[MAX_SWITCH_CASES];
+        JCCPc saved_case_patches[MAX_SWITCH_CASES];
         int saved_num_cases = vm->compiler.current_sparse_num;
         for (int i = 0; i < num_cases; i++) {
             saved_case_nodes[i] = vm->compiler.sparse_case_nodes[i];
@@ -2148,7 +2150,7 @@ static void gen_stmt(JCC *vm, Node *node) {
             vm->compiler.sparse_jump_addrs[i] = case_patches[i];
         }
         Node *saved_default = vm->compiler.current_switch_default;
-        long long *saved_default_patch = vm->compiler.current_default_patch;
+        JCCPc saved_default_patch = vm->compiler.current_default_patch;
         vm->compiler.current_switch_default = node->default_case;
         vm->compiler.current_default_patch = default_patch;
 
@@ -2168,8 +2170,8 @@ static void gen_stmt(JCC *vm, Node *node) {
         if (node->brk_label) {
             define_label(vm, node->brk_label);
         }
-        if (end_patch) {
-            *end_patch = (long long)(vm->text_ptr + 1);
+        if (end_patch != JCC_INVALID_PC) {
+            vm->text_seg[end_patch] = vm->text_ptr + 1;
         }
 
         free_temp_reg(r_val);
@@ -2178,18 +2180,18 @@ static void gen_stmt(JCC *vm, Node *node) {
 
     case ND_CASE: {
         // Case within switch - patch jump address and generate body
-        long long target = (long long)(vm->text_ptr + 1);
+        JCCPc target = vm->text_ptr + 1;
 
         // Check if this is the default case
         if (node == vm->compiler.current_switch_default) {
-            if (vm->compiler.current_default_patch) {
-                *vm->compiler.current_default_patch = target;
+            if (vm->compiler.current_default_patch != JCC_INVALID_PC) {
+                vm->text_seg[vm->compiler.current_default_patch] = target;
             }
         } else {
             // Find this case in the sparse switch table and patch it
             for (int i = 0; i < vm->compiler.current_sparse_num; i++) {
                 if (vm->compiler.sparse_case_nodes[i] == node) {
-                    *vm->compiler.sparse_jump_addrs[i] = target;
+                    vm->text_seg[vm->compiler.sparse_jump_addrs[i]] = target;
                     break;
                 }
             }
@@ -2205,14 +2207,14 @@ static void gen_stmt(JCC *vm, Node *node) {
         if (node->unique_label) {
             // This is a break or continue statement
             emit(vm, JMP);
-            long long *patch = emit_word_ptr(vm);
-            *patch = 0; // Placeholder
+            JCCPc patch = emit_word_ptr(vm);
+            vm->text_seg[patch] = 0; // Placeholder
             add_label_patch(node->unique_label, patch, false);
         } else if (node->label) {
             // Named goto - also needs patching
             emit(vm, JMP);
-            long long *patch = emit_word_ptr(vm);
-            *patch = 0; // Placeholder
+            JCCPc patch = emit_word_ptr(vm);
+            vm->text_seg[patch] = 0; // Placeholder
             add_label_patch(node->label, patch, false);
         }
         return;
@@ -2388,7 +2390,7 @@ void gen_function(JCC *vm, Obj *fn) {
     int reg_param_count = is_variadic ? 8 : param_count;
 
     // Record function address (offset from text_seg start)
-    fn->code_addr = (vm->text_ptr + 1 - vm->text_seg);
+    fn->code_addr = vm->text_ptr + 1;
 
     // Compute float parameter masks for ENT3
     unsigned int float_param_mask = 0;
@@ -2429,8 +2431,8 @@ void gen_function(JCC *vm, Obj *fn) {
     long long ent3_masks =
         (long long)float_param_mask | ((long long)f32_param_mask << 32);
     emit(vm, ENT3);
-    emit_word(vm, ent3_operand);
-    emit_word(vm, ent3_masks);
+    emit_i64(vm, ent3_operand);
+    emit_i64(vm, ent3_masks);
 
     // Activate function-level scope (marks params/locals as alive).
     if (vm->flags & JCC_STACK_INSTR)
@@ -2473,7 +2475,7 @@ void gen_function(JCC *vm, Obj *fn) {
     if (vm->flags & JCC_STACK_INSTR)
         emit_scopeout(vm, fn_scope_id);
     emit(vm, LEV3);
-    fn->code_end_addr = (vm->text_ptr + 1 - vm->text_seg);
+    fn->code_end_addr = vm->text_ptr + 1;
 }
 
 // ========== Top-Level Code Generation ==========
@@ -2485,7 +2487,7 @@ void gen(JCC *vm, Obj *prog) {
     vm->compiler.num_data_relocs = 0;
 
     // Initialize text pointer - text_seg[0] is reserved for main entry point
-    vm->text_ptr = vm->text_seg;
+    vm->text_ptr = 0;
 
     // Initialize global variables in data segment
     for (Obj *var = prog; var; var = var->next) {
@@ -2544,7 +2546,7 @@ void gen(JCC *vm, Obj *prog) {
     for (int i = 0; i < vm->compiler.num_call_patches; i++) {
         Obj *target = vm->compiler.call_patches[i].function;
         char *fn_name = target->name;
-        long long *loc = vm->compiler.call_patches[i].location;
+        JCCPc loc = vm->compiler.call_patches[i].location;
 
         // Find the function definition in the program list
         // PLACEHOLDER: O(num_patches * num_functions). Use a hash table.
@@ -2560,20 +2562,18 @@ void gen(JCC *vm, Obj *prog) {
             error("undefined function: %s", fn_name);
         }
 
-        // code_addr is offset, need to add text_seg base
-        long long addr = (long long)(vm->text_seg + fn_def->code_addr);
-        *loc = addr;
+        vm->text_seg[loc] = (JCCPc)fn_def->code_addr;
     }
 
     // Third pass: Patch function address references (for function pointers)
     for (int i = 0; i < vm->compiler.num_func_addr_patches; i++) {
         Obj *target = vm->compiler.func_addr_patches[i].function;
-        long long *loc = vm->compiler.func_addr_patches[i].location;
+        JCCPc loc = vm->compiler.func_addr_patches[i].location;
 
         Obj *fn_def = find_function_definition_for_patch(prog, target);
 
         if (fn_def) {
-            *loc = fn_def->code_addr * (long long)sizeof(long long);
+            cc_write_i64_at(vm, loc, cc_pc_to_byte_offset((JCCPc)fn_def->code_addr));
         }
     }
 

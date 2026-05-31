@@ -46,8 +46,7 @@ dispatch:
 
     if (vm->flags & JCC_ENABLE_DEBUGGER) {
         if (debugger_check_breakpoint(vm)) {
-            printf("\nBreakpoint hit at PC %p (offset: %lld)\n",
-                   (void*)vm->pc, (long long)(vm->pc - vm->text_seg));
+            printf("\nBreakpoint hit at PC %u\n", vm->pc);
             cc_debug_repl(vm);
         }
         if (vm->dbg.single_step)
@@ -63,7 +62,9 @@ dispatch:
     }
 
     {
-        int op = *vm->pc++;
+        if (__builtin_expect(vm->pc == JCC_INVALID_PC, 0))
+            return (int)vm->regs[REG_A0];
+        int op = (int)cc_read_word(vm);
         if (__builtin_expect(op < 0 || op >= (int)(sizeof(op_table) / sizeof(op_table[0])) || !op_table[op], 0)) {
             printf("unknown instruction:%d\n", op);
             return -1;
@@ -81,7 +82,7 @@ dispatch:
     op_##NAME: {                                                 \
         int _r = op_##NAME##_fn(vm);                             \
         if (__builtin_expect(_r != 0, 0)) return _r;             \
-        if (__builtin_expect(vm->pc == NULL, 0))                 \
+        if (__builtin_expect(vm->pc == JCC_INVALID_PC, 0))       \
             return (int)vm->regs[REG_A0];                        \
         goto dispatch;                                           \
     }
@@ -680,10 +681,8 @@ int cc_run(JCC *vm, int argc, char **argv) {
     }
 
     // Get entry point (main function) from text_seg[0]
-    long long main_addr = vm->text_seg[0];
-
-    // main_addr is an offset from text_seg
-    vm->pc = vm->text_seg + main_addr;
+    JCCPc main_addr = vm->text_seg[0];
+    vm->pc = main_addr;
 
     // Setup stack
     vm->stack_base = vm->stack_seg;

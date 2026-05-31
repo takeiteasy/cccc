@@ -321,21 +321,21 @@ static void init_macro_globals(JCC *vm, Obj *macro_prog) {
 static void patch_macro_call_addresses(JCC *vm, Obj *macro_prog) {
     for (int i = 0; i < vm->compiler.num_call_patches; i++) {
         Obj *fn = vm->compiler.call_patches[i].function;
-        long long *loc = vm->compiler.call_patches[i].location;
+        JCCPc loc = vm->compiler.call_patches[i].location;
         Obj *fn_def = find_macro_function(macro_prog, fn->name);
         if (!fn_def)
             error("undefined function in pragma macro bytecode: %s", fn->name);
-        *loc = (long long)(vm->text_seg + fn_def->code_addr);
+        vm->text_seg[loc] = (JCCPc)fn_def->code_addr;
     }
 
     for (int i = 0; i < vm->compiler.num_func_addr_patches; i++) {
         Obj *fn = vm->compiler.func_addr_patches[i].function;
-        long long *loc = vm->compiler.func_addr_patches[i].location;
+        JCCPc loc = vm->compiler.func_addr_patches[i].location;
         Obj *fn_def = find_macro_function(macro_prog, fn->name);
         if (!fn_def)
             error("undefined function address in pragma macro bytecode: %s",
                   fn->name);
-        *loc = fn_def->code_addr * (long long)sizeof(long long);
+        cc_write_i64_at(vm, loc, cc_pc_to_byte_offset((JCCPc)fn_def->code_addr));
     }
 }
 
@@ -466,7 +466,7 @@ static Node *execute_pragma_macro(JCC *vm, PragmaMacro *pm, Node *args,
     __jcc_current_vm = vm;
 
     // Save VM execution state
-    long long *saved_pc = vm->pc;
+    JCCPc saved_pc = vm->pc;
     long long *saved_sp = vm->sp;
     long long *saved_bp = vm->bp;
     long long saved_regs[NUM_REGS];
@@ -489,7 +489,7 @@ static Node *execute_pragma_macro(JCC *vm, PragmaMacro *pm, Node *args,
     *(--vm->sp) = 0;
 
     // Set PC to function entry point
-    vm->pc = vm->text_seg + pm->compiled_fn->code_addr;
+    vm->pc = (JCCPc)pm->compiled_fn->code_addr;
 
     // Execute the macro function
     int saved_debug = vm->debug_vm;
@@ -653,7 +653,7 @@ static void init_vm_segments_for_macros(JCC *vm) {
         return; // Already initialized
 
     // allocate memory
-    if (!(vm->text_seg = malloc(vm->poolsize * sizeof(long long)))) {
+    if (!(vm->text_seg = malloc(vm->poolsize * sizeof(JCCInstrWord)))) {
         error("could not malloc for text area");
     }
     if (!(vm->data_seg = malloc(vm->poolsize))) {
@@ -673,7 +673,7 @@ static void init_vm_segments_for_macros(JCC *vm) {
         }
     }
 
-    memset(vm->text_seg, 0, vm->poolsize * sizeof(long long));
+    memset(vm->text_seg, 0, vm->poolsize * sizeof(JCCInstrWord));
     memset(vm->data_seg, 0, vm->poolsize);
     memset(vm->stack_seg, 0, vm->poolsize * sizeof(long long));
     memset(vm->heap_seg, 0, vm->poolsize);
@@ -683,7 +683,7 @@ static void init_vm_segments_for_macros(JCC *vm) {
     }
 
     vm->old_text_seg = vm->text_seg;
-    vm->text_ptr = vm->text_seg;
+    vm->text_ptr = 0;
     vm->data_ptr = vm->data_seg;
     vm->heap_ptr = vm->heap_seg;
     vm->heap_end = vm->heap_seg + vm->poolsize;

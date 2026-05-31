@@ -17,7 +17,8 @@
 static int is_valid_vm_address(JCC *vm, void *addr) {
     long long ptr = (long long)addr;
     // Text segment
-    if (ptr >= (long long)vm->text_seg && ptr < (long long)vm->text_ptr) return 1;
+    if (ptr >= (long long)vm->text_seg &&
+        ptr < (long long)(vm->text_seg + vm->text_ptr + 1)) return 1;
     // Data segment
     if (ptr >= (long long)vm->data_seg && ptr < (long long)vm->data_ptr) return 1;
     // Heap segment
@@ -28,10 +29,10 @@ static int is_valid_vm_address(JCC *vm, void *addr) {
 }
 
 static Obj *debugger_current_function(JCC *vm) {
-    if (!vm || !vm->pc)
+    if (!vm || vm->pc == JCC_INVALID_PC)
         return NULL;
 
-    long long pc_offset = vm->pc - vm->text_seg;
+    long long pc_offset = vm->pc;
     for (Obj *fn = vm->compiler.globals; fn; fn = fn->next) {
         if (!fn->is_function || !fn->body)
             continue;
@@ -78,13 +79,13 @@ void debugger_init(JCC *vm) {
     vm->dbg.single_step = 0;
     vm->dbg.step_over = 0;
     vm->dbg.step_out = 0;
-    vm->dbg.step_over_return_addr = NULL;
+    vm->dbg.step_over_return_addr = JCC_INVALID_PC;
     vm->dbg.step_out_bp = NULL;
     vm->dbg.debugger_attached = 0;
 
     // Initialize all breakpoints
     for (int i = 0; i < MAX_BREAKPOINTS; i++) {
-        vm->dbg.breakpoints[i].pc = NULL;
+        vm->dbg.breakpoints[i].pc = JCC_INVALID_PC;
         vm->dbg.breakpoints[i].enabled = 0;
         vm->dbg.breakpoints[i].hit_count = 0;
         vm->dbg.breakpoints[i].condition = NULL;
@@ -102,7 +103,7 @@ void debugger_init(JCC *vm) {
     }
 }
 
-int cc_add_breakpoint(JCC *vm, long long *pc) {
+int cc_add_breakpoint(JCC *vm, JCCPc pc) {
     if (vm->dbg.num_breakpoints >= MAX_BREAKPOINTS) {
         printf("Error: Maximum number of breakpoints (%d) reached\n", MAX_BREAKPOINTS);
         return -1;
@@ -111,7 +112,7 @@ int cc_add_breakpoint(JCC *vm, long long *pc) {
     // Check if breakpoint already exists at this PC
     for (int i = 0; i < MAX_BREAKPOINTS; i++) {
         if (vm->dbg.breakpoints[i].enabled && vm->dbg.breakpoints[i].pc == pc) {
-            printf("Breakpoint already exists at PC %p\n", (void*)pc);
+            printf("Breakpoint already exists at PC %u\n", pc);
             return i;
         }
     }
@@ -126,8 +127,7 @@ int cc_add_breakpoint(JCC *vm, long long *pc) {
             vm->dbg.num_breakpoints++;
 
             // Calculate offset from text_seg for display
-            long long offset = (long long)pc - (long long)vm->text_seg;
-            printf("Breakpoint #%d set at PC %p (offset: %lld)\n", i, (void*)pc, offset);
+            printf("Breakpoint #%d set at PC %u\n", i, pc);
             return i;
         }
     }
@@ -147,7 +147,7 @@ void cc_remove_breakpoint(JCC *vm, int index) {
     }
 
     vm->dbg.breakpoints[index].enabled = 0;
-    vm->dbg.breakpoints[index].pc = NULL;
+    vm->dbg.breakpoints[index].pc = JCC_INVALID_PC;
     vm->dbg.breakpoints[index].hit_count = 0;
     if (vm->dbg.breakpoints[index].condition) {
         free(vm->dbg.breakpoints[index].condition);
@@ -191,16 +191,14 @@ void debugger_list_breakpoints(JCC *vm) {
     }
 
     printf("\nBreakpoints:\n");
-    printf("%-5s %-18s %-12s %-10s %-20s\n", "Num", "Address", "Offset", "Hit Count", "Condition");
-    printf("%-5s %-18s %-12s %-10s %-20s\n", "---", "-------", "------", "---------", "---------");
+    printf("%-5s %-12s %-10s %-20s\n", "Num", "PC", "Hit Count", "Condition");
+    printf("%-5s %-12s %-10s %-20s\n", "---", "--", "---------", "---------");
 
     for (int i = 0; i < MAX_BREAKPOINTS; i++) {
         if (vm->dbg.breakpoints[i].enabled) {
-            long long offset = (long long)vm->dbg.breakpoints[i].pc - (long long)vm->text_seg;
-            printf("%-5d 0x%-16llx %-12lld %-10d",
+            printf("%-5d %-12u %-10d",
                    i,
-                   (long long)vm->dbg.breakpoints[i].pc,
-                   offset,
+                   vm->dbg.breakpoints[i].pc,
                    vm->dbg.breakpoints[i].hit_count);
 
             // Print condition if it exists
@@ -217,12 +215,7 @@ void debugger_print_registers(JCC *vm) {
     printf("\n=== Registers ===\n");
     printf("  A0 (return):  0x%016llx (%lld)\n", vm->regs[REG_A0], vm->regs[REG_A0]);
     printf("  FA0 (float):  %f\n", vm->fregs[FREG_A0]);
-    printf("  pc:           %p", (void*)vm->pc);
-    if (vm->pc >= vm->text_seg && vm->pc < vm->text_ptr) {
-        long long offset = (long long)vm->pc - (long long)vm->text_seg;
-        printf(" (offset: %lld)", offset);
-    }
-    printf("\n");
+    printf("  pc:           %u\n", vm->pc);
     printf("  bp:           %p\n", (void*)vm->bp);
     printf("  sp:           %p\n", (void*)vm->sp);
     printf("  cycle:        %lld\n", vm->cycle);
@@ -256,284 +249,21 @@ static const char* opcode_name(int op) {
 }
 
 // Returns the number of words consumed by the instruction (including opcode)
-static int disassemble_instruction(long long *pc, long long *text_seg, long long *text_end) {
-    if (pc >= text_end) return 0;
-    
-    long long offset = (long long)pc - (long long)text_seg;
-    int op = (int)*pc;
+static int disassemble_instruction(JCC *vm, JCCPc pc) {
+    if (pc > vm->text_ptr) return 0;
+
+    int op = (int)vm->text_seg[pc];
     const char *name = opcode_name(op);
-    
-    printf("0x%llx (offset %lld): %-6s", (long long)pc, offset, name);
-    
-    int size = 1; // Default size (just opcode)
-    
-    switch (op) {
-        // Multi-register opcodes (RRR format: 1 operand word with 3 registers)
-        case ADD3:
-        case SUB3:
-        case MUL3:
-        case DIV3:
-        case MOD3:
-        case AND3:
-        case OR3:
-        case XOR3:
-        case SHL3:
-        case SHR3:
-        case SEQ3:
-        case SNE3:
-        case SLT3:
-        case SLE3:
-        case SGT3:
-        case SGE3:
-        case MOV3:
-        case NEG3:
-        case NOT3:
-        case BNOT3:
-            if (pc + 1 < text_end) {
-                int rd = (int)(pc[1] & 0xFF);
-                int rs1 = (int)((pc[1] >> 8) & 0xFF);
-                int rs2 = (int)((pc[1] >> 16) & 0xFF);
-                printf(" r%d, r%d, r%d", rd, rs1, rs2);
-            }
-            size = 2;
-            break;
 
-        // Multi-register opcodes (RI format: 1 register word + 1 immediate word)
-        case LI3:
-        case LDA3:
-        case LTA3:
-        case LEA3:
-        case ADDI3:
-            if (pc + 2 < text_end) {
-                int rd = (int)(pc[1] & 0xFF);
-                long long imm = pc[2];
-                printf(" r%d, %lld", rd, imm);
-            }
-            size = 3;
-            break;
+    printf("%u: %-6s", pc, name);
 
-        // Control flow with operand
-        case JMP:
-        case CALL:
-        case JMPT:
-        case JMPI:
-        case ADJ:
-            if (pc + 1 < text_end) {
-                printf(" %lld", pc[1]);
-            }
-            size = 2;
-            break;
+    int size = cc_instr_words(op);
+    if (size <= 0)
+        size = 1;
 
-        // JZ3/JNZ3: register + target
-        case JZ3:
-        case JNZ3:
-            if (pc + 2 < text_end) {
-                int rs = (int)(pc[1] & 0xFF);
-                printf(" r%d, %lld", rs, pc[2]);
-            }
-            size = 3;
-            break;
-
-        // Register-based calling convention opcodes
-        case ENT3:
-            // ENT3 has 2 operands: [stack_size:32|param_count:32] [float_param_mask]
-            if (pc + 2 < text_end) {
-                int stack_size = (int)(pc[1] & 0xFFFFFFFF);
-                int param_count = (int)((pc[1] >> 32) & 0xFFFFFFFF);
-                long long float_mask = pc[2];
-                printf(" stack=%d, params=%d, floatmask=0x%llx", stack_size, param_count, float_mask);
-            }
-            size = 3;
-            break;
-
-        case LEV3:
-            // LEV3 has no operands
-            size = 1;
-            break;
-
-        // Load/store opcodes (RR format)
-        case LDR_B:
-        case LDR_H:
-        case LDR_W:
-        case LDR_D:
-        case STR_B:
-        case STR_H:
-        case STR_W:
-        case STR_D:
-        case FLDR:
-        case FSTR:
-        case FLDR_F32:
-        case FSTR_F32:
-        case FROUND_F32:
-            if (pc + 1 < text_end) {
-                int rd = (int)(pc[1] & 0xFF);
-                int rs = (int)((pc[1] >> 8) & 0xFF);
-                printf(" r%d, r%d", rd, rs);
-            }
-            size = 2;
-            break;
-
-        // Float operations (FRRR format)
-        case FADD3:
-        case FSUB3:
-        case FMUL3:
-        case FDIV3:
-        case FEQ3:
-        case FNE3:
-        case FLT3:
-        case FLE3:
-        case FGT3:
-        case FGE3:
-            if (pc + 1 < text_end) {
-                int rd = (int)(pc[1] & 0xFF);
-                int rs1 = (int)((pc[1] >> 8) & 0xFF);
-                int rs2 = (int)((pc[1] >> 16) & 0xFF);
-                printf(" f%d, f%d, f%d", rd, rs1, rs2);
-            }
-            size = 2;
-            break;
-
-        case FMOV3:
-        case FNEG3:
-            if (pc + 1 < text_end) {
-                int rd = (int)(pc[1] & 0xFF);
-                int rs = (int)((pc[1] >> 8) & 0xFF);
-                printf(" f%d, f%d", rd, rs);
-            }
-            size = 2;
-            break;
-
-        case I2F3:
-            if (pc + 1 < text_end) {
-                int rd = (int)(pc[1] & 0xFF);
-                int rs = (int)((pc[1] >> 8) & 0xFF);
-                printf(" f%d, r%d", rd, rs);
-            }
-            size = 2;
-            break;
-
-        case F2I3:
-        case FR2R:
-            if (pc + 1 < text_end) {
-                int rd = (int)(pc[1] & 0xFF);
-                int rs = (int)((pc[1] >> 8) & 0xFF);
-                printf(" r%d, f%d", rd, rs);
-            }
-            size = 2;
-            break;
-
-        // Safety opcodes — single immediate (offset or scope_id)
-        case CHKI:
-        case MARKI:
-        case SCOPEIN:
-        case SCOPEOUT:
-        case CHKL:
-        case MARKR:
-        case MARKW:
-            if (pc + 1 < text_end)
-                printf(" %lld", pc[1]);
-            size = 2;
-            break;
-
-        // CHKB: [rs1_base:8|rs2_offset:8] operand word (RR, no trailing imm)
-        case CHKB:
-            if (pc + 1 < text_end) {
-                int rs1 = (int)(pc[1] & 0xFF);
-                int rs2 = (int)((pc[1] >> 8) & 0xFF);
-                printf(" r%d, r%d", rs1, rs2);
-            }
-            size = 2;
-            break;
-
-        // CHKPA: [rs:8] operand word
-        case CHKPA:
-            if (pc + 1 < text_end) {
-                int rs = (int)(pc[1] & 0xFF);
-                printf(" r%d", rs);
-            }
-            size = 2;
-            break;
-
-        // MARKA: [rs_ptr:8] [offset] [size] [scope_id]
-        case MARKA:
-            if (pc + 4 < text_end) {
-                int rs = (int)(pc[1] & 0xFF);
-                printf(" r%d, %lld, %lld, %lld", rs, pc[2], pc[3], pc[4]);
-            }
-            size = 5;
-            break;
-
-        // MARKP: [rs_ptr:8|rs_base:8] [origin_type] [size]
-        case MARKP:
-            if (pc + 3 < text_end) {
-                int rs1 = (int)(pc[1] & 0xFF);
-                int rs2 = (int)((pc[1] >> 8) & 0xFF);
-                printf(" r%d, r%d, %lld, %lld", rs1, rs2, pc[2], pc[3]);
-            }
-            size = 4;
-            break;
-
-        // CHKP3/CHKA3/CHKT3 (register-based safety)
-        case CHKP3:
-        case CHKA3:
-        case CHKT3:
-            if (pc + 1 < text_end) {
-                int rs = (int)(pc[1] & 0xFF);
-                printf(" r%d", rs);
-            }
-            size = 2;
-            break;
-
-        // PSH3/POP3 (register-based stack operations)
-        case PSH3:
-        case POP3:
-            if (pc + 1 < text_end) {
-                int rs = (int)(pc[1] & 0xFF);
-                printf(" r%d", rs);
-            }
-            size = 2;
-            break;
-            
-        // Type conversion
-        case SX1:
-        case SX2:
-        case SX4:
-        case ZX1:
-        case ZX2:
-        case ZX4:
-            if (pc + 1 < text_end) {
-                int rd = (int)(pc[1] & 0xFF);
-                int rs = (int)((pc[1] >> 8) & 0xFF);
-                printf(" r%d, r%d", rd, rs);
-            }
-            size = 2;
-            break;
-
-        // CALLI (indirect call via register)
-        case CALLI:
-            if (pc + 1 < text_end) {
-                int rs = (int)(pc[1] & 0xFF);
-                printf(" r%d", rs);
-            }
-            size = 2;
-            break;
-
-        // R2FR (int to float bit transfer - already covered by FR2R case)
-        case R2FR:
-            if (pc + 1 < text_end) {
-                int rd = (int)(pc[1] & 0xFF);
-                int rs = (int)((pc[1] >> 8) & 0xFF);
-                printf(" f%d, r%d", rd, rs);
-            }
-            size = 2;
-            break;
-
-        default:
-            // 0 operands (size 1)
-            size = 1;
-            break;
+    for (int i = 1; i < size && pc + (JCCPc)i <= vm->text_ptr; i++) {
+        printf(" %u", vm->text_seg[pc + (JCCPc)i]);
     }
-    
     printf("\n");
     return size;
 }
@@ -543,12 +273,11 @@ void cc_disassemble(JCC *vm) {
     
     printf("=== Disassembly ===\n");
     // text_seg[0] is the entry point offset, not an instruction
-    printf("Entry point: 0x%llx (offset %lld)\n", 
-           (long long)(vm->text_seg + vm->text_seg[0]), vm->text_seg[0]);
+    printf("Entry point: %u\n", vm->text_seg[0]);
     
-    long long *pc = vm->text_seg + 1;
-    while (pc < vm->text_ptr) {
-        int size = disassemble_instruction(pc, vm->text_seg, vm->text_ptr);
+    JCCPc pc = 1;
+    while (pc <= vm->text_ptr) {
+        int size = disassemble_instruction(vm, pc);
         if (size == 0) break;
         pc += size;
     }
@@ -556,11 +285,11 @@ void cc_disassemble(JCC *vm) {
 }
 
 void debugger_disassemble_current(JCC *vm) {
-    if (!vm->pc || vm->pc < vm->text_seg || vm->pc >= vm->text_ptr) {
+    if (vm->pc == JCC_INVALID_PC || vm->pc > vm->text_ptr) {
         printf("PC out of text segment range\n");
         return;
     }
-    disassemble_instruction(vm->pc, vm->text_seg, vm->text_ptr);
+    disassemble_instruction(vm, vm->pc);
 }
 
 static void print_help(void) {
@@ -692,12 +421,13 @@ void cc_debug_repl(JCC *vm) {
             vm->dbg.single_step = 0;
             vm->dbg.step_over = 1;
             vm->dbg.step_out = 0;
-            int op = (int)*vm->pc;
+            int op = (int)vm->text_seg[vm->pc];
             if (op == CALL || op == CALLI) {
                 // CALL/CALLI: return address is two words after the opcode.
                 // (op word + one operand word). Stop there after the call
                 // returns instead of stepping into the callee.
-                vm->dbg.step_over_return_addr = vm->pc + 2;
+                vm->dbg.step_over_return_addr =
+                    vm->pc + (JCCPc)cc_instr_words(op);
             } else {
                 // Not a call instruction: nothing to skip, just single-step.
                 vm->dbg.step_over = 0;
@@ -731,7 +461,7 @@ void cc_debug_repl(JCC *vm) {
         else if (STREQ_LIT(cmd, "break") || STREQ_LIT(cmd, "b")) {
             char arg[128];
             char *condition = NULL;
-            long long *bp_pc = NULL;
+            JCCPc bp_pc = JCC_INVALID_PC;
 
             // Try to parse arguments and extract condition if present
             // Format: break <location> [if <condition>]
@@ -767,7 +497,7 @@ void cc_debug_repl(JCC *vm) {
                     }
 
                     bp_pc = cc_find_pc_for_source(vm, target_file, line_num);
-                    if (!bp_pc) {
+                    if (bp_pc == JCC_INVALID_PC) {
                         printf("Error: Could not find code for %s:%d\n", filename, line_num);
                     }
                 }
@@ -780,27 +510,28 @@ void cc_debug_repl(JCC *vm) {
                         File *current_file = NULL;
                         cc_get_source_location(vm, vm->pc, &current_file, NULL, NULL);
                         bp_pc = cc_find_pc_for_source(vm, current_file, num);
-                        if (!bp_pc) {
+                        if (bp_pc == JCC_INVALID_PC) {
                             printf("Error: Could not find code for line %lld\n", num);
                         }
                     } else {
-                        // Large number, treat as bytecode offset
-                        bp_pc = (long long *)((char *)vm->text_seg + num);
-                        if (bp_pc < vm->text_seg || bp_pc >= vm->text_ptr) {
+                        // Large number, treat as bytecode instruction index.
+                        bp_pc = (num >= 0 && num <= vm->text_ptr)
+                                    ? (JCCPc)num
+                                    : JCC_INVALID_PC;
+                        if (bp_pc == JCC_INVALID_PC) {
                             printf("Error: Offset %lld is out of range\n", num);
-                            bp_pc = NULL;
                         }
                     }
                 }
                 // Otherwise treat as function name
                 else {
                     bp_pc = cc_find_function_entry(vm, arg);
-                    if (!bp_pc) {
+                    if (bp_pc == JCC_INVALID_PC) {
                         printf("Error: Function '%s' not found\n", arg);
                     }
                 }
 
-                if (bp_pc) {
+                if (bp_pc != JCC_INVALID_PC) {
                     int bp_idx = cc_add_breakpoint(vm, bp_pc);
                     // Set condition if provided
                     if (bp_idx >= 0 && condition) {
@@ -959,12 +690,11 @@ int debugger_run(JCC *vm, int argc, char **argv) {
     printf("\n========================================\n");
     printf("    JCC Debugger\n");
     printf("========================================\n");
-    printf("Starting at entry point (PC: %p, offset: %lld)\n",
-            (void*)vm->pc, (long long)(vm->pc - vm->text_seg));
+    printf("Starting at entry point (PC: %u)\n", vm->pc);
     printf("Type 'help' for commands, 'c' to continue\n\n");
 
     // Set PC to main (code_addr is an offset from text_seg)
-    vm->pc = vm->text_seg + main_fn->code_addr;
+    vm->pc = (JCCPc)main_fn->code_addr;
 
     // Setup stack for main(argc, argv), matching cc_run().
     vm->stack_base = vm->stack_seg;
@@ -987,7 +717,7 @@ int debugger_run(JCC *vm, int argc, char **argv) {
     // Push dummy return address (NULL to detect exit)
     *--vm->sp = 0;
 
-    printf("Starting debugger at main (PC: %p)\n", (void*)vm->pc);
+    printf("Starting debugger at main (PC: %u)\n", vm->pc);
     printf("Type 'help' for debugger commands\n\n");
 
     // Enter debugger at start
@@ -1002,12 +732,12 @@ int debugger_run(JCC *vm, int argc, char **argv) {
 // Source Mapping Functions (for source-level debugging)
 // ============================================================================
 
-int cc_get_source_location(JCC *vm, long long *pc, File **out_file, int *out_line, int *out_col) {
+int cc_get_source_location(JCC *vm, JCCPc pc, File **out_file, int *out_line, int *out_col) {
     if (!(vm->flags & JCC_ENABLE_DEBUGGER) || !vm->dbg.source_map || vm->dbg.source_map_count == 0) {
         return 0;
     }
 
-    long long pc_offset = pc - vm->text_seg;
+    long long pc_offset = pc;
 
     // Binary search for the source mapping
     // Find the largest offset <= pc_offset
@@ -1043,9 +773,9 @@ int cc_get_source_location(JCC *vm, long long *pc, File **out_file, int *out_lin
     return 1;
 }
 
-long long *cc_find_pc_for_source(JCC *vm, File *file, int line) {
+JCCPc cc_find_pc_for_source(JCC *vm, File *file, int line) {
     if (!(vm->flags & JCC_ENABLE_DEBUGGER) || !vm->dbg.source_map || vm->dbg.source_map_count == 0) {
-        return NULL;
+        return JCC_INVALID_PC;
     }
 
     // PLACEHOLDER: Linear search for the first matching source location.
@@ -1053,17 +783,17 @@ long long *cc_find_pc_for_source(JCC *vm, File *file, int line) {
     for (int i = 0; i < vm->dbg.source_map_count; i++) {
         if (vm->dbg.source_map[i].line_no == line) {
             if (!file || vm->dbg.source_map[i].file == file) {
-                return vm->text_seg + vm->dbg.source_map[i].pc_offset;
+                return (JCCPc)vm->dbg.source_map[i].pc_offset;
             }
         }
     }
 
-    return NULL;
+    return JCC_INVALID_PC;
 }
 
-long long *cc_find_function_entry(JCC *vm, const char *name) {
+JCCPc cc_find_function_entry(JCC *vm, const char *name) {
     if (!name) {
-        return NULL;
+        return JCC_INVALID_PC;
     }
 
     // Search through global symbols for function
@@ -1071,12 +801,12 @@ long long *cc_find_function_entry(JCC *vm, const char *name) {
         if (fn->is_function && fn->name && strlen(fn->name) == strlen(name) &&
             strncmp(fn->name, name, strlen(name)) == 0) {
             if (fn->code_addr >= 0) {
-                return vm->text_seg + fn->code_addr;
+                return (JCCPc)fn->code_addr;
             }
         }
     }
 
-    return NULL;
+    return JCC_INVALID_PC;
 }
 
 DebugSymbol *cc_lookup_symbol(JCC *vm, const char *name) {
@@ -1241,7 +971,7 @@ static long long eval_ast_addr(JCC *vm, Node *node, int *error) {
         }
 
         if (node->var->is_function)
-            return (long long)(vm->text_seg + node->var->code_addr);
+            return cc_pc_to_byte_offset((JCCPc)node->var->code_addr);
 
         DebugSymbol *sym = cc_lookup_symbol(vm, node->var->name);
         if (sym)
@@ -1364,7 +1094,7 @@ static long long debugger_eval_direct_call(JCC *vm, Node *node, int *error) {
         double saved_fregs[32];
         memcpy(saved_regs, vm->regs, sizeof(saved_regs));
         memcpy(saved_fregs, vm->fregs, sizeof(saved_fregs));
-        long long *saved_pc = vm->pc;
+        JCCPc saved_pc = vm->pc;
         long long *saved_bp = vm->bp;
         long long *saved_sp = vm->sp;
         long long *saved_shadow_sp = vm->shadow_sp;
@@ -1372,7 +1102,7 @@ static long long debugger_eval_direct_call(JCC *vm, Node *node, int *error) {
         int saved_single_step = vm->dbg.single_step;
         int saved_step_over = vm->dbg.step_over;
         int saved_step_out = vm->dbg.step_out;
-        long long *saved_step_over_return_addr = vm->dbg.step_over_return_addr;
+        JCCPc saved_step_over_return_addr = vm->dbg.step_over_return_addr;
         long long *saved_step_out_bp = vm->dbg.step_out_bp;
         int saved_debugger_attached = vm->dbg.debugger_attached;
 
@@ -1387,7 +1117,7 @@ static long long debugger_eval_direct_call(JCC *vm, Node *node, int *error) {
         if (vm->flags & JCC_CFI)
             *--vm->shadow_sp = 0;
         *--vm->sp = 0;
-        vm->pc = vm->text_seg + fn->code_addr;
+        vm->pc = (JCCPc)fn->code_addr;
         int rc = vm_eval(vm);
         long long result = vm->regs[REG_A0];
 
@@ -1823,7 +1553,7 @@ int debugger_check_watchpoint(JCC *vm, void *addr, int size, int access_type) {
     }
 
     // Don't check if VM isn't fully initialized (pc, bp, sp should be valid)
-    if (!vm->pc || !vm->bp || !vm->sp || !vm->text_seg) {
+    if (vm->pc == JCC_INVALID_PC || !vm->bp || !vm->sp || !vm->text_seg) {
         return -1;
     }
 

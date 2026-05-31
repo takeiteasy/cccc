@@ -165,6 +165,10 @@ extern "C" {
     X(FSTR_F32)   /* *(float*)regs[rs] = (float)fregs[rd] */                   \
     X(FROUND_F32) /* fregs[rd] = (float)fregs[rs] */
 
+typedef uint32_t JCCInstrWord;
+typedef uint32_t JCCPc;
+#define JCC_INVALID_PC UINT32_MAX
+
 /*!
  @enum JCC_OP
  @abstract VM instruction opcodes for the JCC bytecode.
@@ -800,7 +804,7 @@ typedef struct Scope {
 typedef struct LabelEntry {
     char *name;         // Label name (for named labels)
     char *unique_label; // Unique label identifier (for break/continue)
-    long long *address; // Address in text segment where label is defined
+    JCCPc address;      // Instruction index where label is defined
 } LabelEntry;
 
 /*!
@@ -811,7 +815,7 @@ typedef struct LabelEntry {
 typedef struct GotoPatch {
     char *name;          // Label name to jump to
     char *unique_label;  // Or unique label identifier
-    long long *location; // Location of JMP instruction's address operand
+    JCCPc location;      // Instruction index of JMP target operand
 } GotoPatch;
 
 typedef struct JCC JCC;
@@ -1075,7 +1079,7 @@ typedef struct Watchpoint {
 #endif
 
 typedef struct Breakpoint {
-    long long *pc;   // PC address of breakpoint
+    JCCPc pc;        // Instruction index of breakpoint
     int enabled;     // 1 if enabled, 0 if disabled
     int hit_count;   // Number of times hit
     char *condition; // Optional condition expression (NULL if unconditional)
@@ -1153,7 +1157,7 @@ typedef struct Debugger {
     int single_step; // Single-step mode (stop after each instruction)
     int step_over;   // Step over mode (skip function calls)
     int step_out;    // Step out mode (run until function returns)
-    long long *step_over_return_addr; // Return address for step over
+    JCCPc step_over_return_addr;      // Return PC for step over
     long long *step_out_bp;           // Base pointer for step out
     int debugger_attached;            // Debugger REPL is active
 
@@ -1260,14 +1264,14 @@ typedef struct Compiler {
     int local_offset;  // Current local variable offset
 
     struct {
-        long long *location; // Location in text segment to patch
+        JCCPc location;      // Location in text segment to patch
         Obj *function;       // Function to call
     } call_patches[MAX_CALLS];
     int num_call_patches;
 
     // Function address patches for function pointers
     struct {
-        long long *location; // Location of IMM operand to patch
+        JCCPc location;      // Location of IMM operand to patch
         Obj *function;       // Function whose address to use
     } func_addr_patches[MAX_CALLS];
     int num_func_addr_patches;
@@ -1286,17 +1290,17 @@ typedef struct Compiler {
     int num_goto_patches;
 
     // Switch statement code generation (for dense switches)
-    long long *current_switch_table;  // Jump table being filled
+    JCCPc *current_switch_table;      // Jump table being filled
     long current_switch_min;          // Minimum case value
     long current_switch_size;         // Jump table size
     Node *current_switch_default;     // Default case node
-    long long *current_default_patch; // Patch location for default case jump
+    JCCPc current_default_patch;      // Patch location for default case jump
 
     // Switch statement code generation (for sparse switches)
-    long long *current_sparse_case_table;           // Array of jump addresses
+    JCCPc *current_sparse_case_table;               // Array of jump addresses
     int current_sparse_num;                         // Number of case entries
     Node *sparse_case_nodes[MAX_SPARSE_CASES];      // Case nodes
-    long long *sparse_jump_addrs[MAX_SPARSE_CASES]; // Jump address pointers
+    JCCPc sparse_jump_addrs[MAX_SPARSE_CASES];      // Jump address operands
 
     // Inline assembly callback
     JCCAsmCallback asm_callback; // User-provided callback for asm statements
@@ -1341,7 +1345,7 @@ struct JCC {
     // VM Registers (pure register-based architecture)
     long long regs[32]; // General-purpose register file (NUM_REGS)
     double fregs[32];   // Floating-point register file
-    long long *pc;      // Program counter
+    JCCPc pc;           // Program counter (instruction index)
     long long *bp;      // Base pointer (frame pointer)
     long long *sp;      // Stack pointer
     long long cycle;    // Instruction cycle counter
@@ -1354,10 +1358,10 @@ struct JCC {
     long long *stack_base; // Lower bound of stack (stack_seg start)
 
     // Memory Segments
-    long long *text_seg;     // Text segment (bytecode instructions)
-    long long *text_ptr;     // Current write position (for code generation)
+    JCCInstrWord *text_seg;  // Text segment (32-bit bytecode words)
+    JCCPc text_ptr;          // Current write position (for code generation)
     long long *stack_seg;    // Stack segment
-    long long *old_text_seg; // Backup of original text segment pointer
+    JCCInstrWord *old_text_seg; // Backup of original text segment pointer
     char *data_seg;          // Data segment (global variables/constants)
     char *data_ptr;          // Current write position in data segment
     char *heap_seg;          // Heap segment (for VM malloc/free)
@@ -1883,12 +1887,12 @@ int cc_load_bytecode(JCC *vm, const char *path);
 
 /*!
  @function cc_add_breakpoint
- @abstract Add a breakpoint at a specific program counter address.
+ @abstract Add a breakpoint at a specific program counter.
  @param vm The JCC instance.
- @param pc Program counter address where breakpoint should be set.
+ @param pc Instruction-word index where breakpoint should be set.
  @return Breakpoint index, or -1 if failed (too many breakpoints).
 */
-int cc_add_breakpoint(JCC *vm, long long *pc);
+int cc_add_breakpoint(JCC *vm, JCCPc pc);
 
 /*!
  @function cc_remove_breakpoint
@@ -1939,32 +1943,32 @@ void cc_remove_watchpoint(JCC *vm, int index);
  @function cc_get_source_location
  @abstract Get source file location for a given program counter.
  @param vm The JCC instance.
- @param pc Program counter address.
+ @param pc Instruction-word index.
  @param out_file Pointer to receive the source File pointer (can be NULL).
  @param out_line Pointer to receive the line number (can be NULL).
  @return 1 if location found, 0 if not found.
 */
-int cc_get_source_location(JCC *vm, long long *pc, File **out_file,
+int cc_get_source_location(JCC *vm, JCCPc pc, File **out_file,
                            int *out_line, int *out_col);
 
 /*!
  @function cc_find_pc_for_source
- @abstract Find program counter address for a given source location.
+ @abstract Find program counter index for a given source location.
  @param vm The JCC instance.
  @param file Source file (NULL to search in any file).
  @param line Line number to find.
- @return Program counter address, or NULL if not found.
+ @return Program counter index, or JCC_INVALID_PC if not found.
 */
-long long *cc_find_pc_for_source(JCC *vm, File *file, int line);
+JCCPc cc_find_pc_for_source(JCC *vm, File *file, int line);
 
 /*!
  @function cc_find_function_entry
- @abstract Find program counter address for a function entry point by name.
+ @abstract Find program counter index for a function entry point by name.
  @param vm The JCC instance.
  @param name Function name to find.
- @return Program counter address, or NULL if not found.
+ @return Program counter index, or JCC_INVALID_PC if not found.
 */
-long long *cc_find_function_entry(JCC *vm, const char *name);
+JCCPc cc_find_function_entry(JCC *vm, const char *name);
 
 /*!
  @function cc_lookup_symbol
