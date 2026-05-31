@@ -38,6 +38,8 @@ static void usage(const char *argv0, int exit_code) {
            "C -E)\n");
     printf("\t-M/--macro-expand   Output macro-expanded source code (for gcc "
            "compatibility)\n");
+    printf("\t-G/--emit-generated Serialize only pragma-macro-generated objects "
+           "(no header noise)\n");
     printf("\t-j/--json           Output header declarations as JSON\n");
     printf("\t-X/--no-preprocess  Disable preprocessing step\n");
     printf("\t-S/--no-stdlib      Do not link standard library\n");
@@ -243,6 +245,7 @@ int main(int argc, const char *argv[]) {
     int print_tokens = 0;      // -P
     int preprocess_only = 0;   // -E
     int macro_expand_only = 0; // -M
+    int emit_generated_only = 0; // -G
     int skip_preprocess = 0;   // -X
     int skip_stdlib = 0;       // -S
     int output_json = 0;       // -j
@@ -266,6 +269,7 @@ int main(int argc, const char *argv[]) {
         {"print-tokens", no_argument, 0, 'P'},
         {"preprocess", no_argument, 0, 'E'},
         {"macro-expand", no_argument, 0, 'M'},
+        {"emit-generated", no_argument, 0, 'G'},
         {"no-preprocess", no_argument, 0, 'X'},
         {"no-stdlib", no_argument, 0, 'S'},
         {"json", no_argument, 0, 'j'},
@@ -305,7 +309,7 @@ int main(int argc, const char *argv[]) {
         {"macro-recursion-limit", required_argument, 0, 1017},
         {0, 0, 0, 0}};
 
-    const char *optstring = "0123haI:D:U:o:cdvgbftzskpliPEMXSjFTVC";
+    const char *optstring = "0123haI:D:U:o:cdvgbftzskpliPEMGXSjFTVC";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(argc, (char *const *)argv, optstring,
@@ -459,6 +463,10 @@ int main(int argc, const char *argv[]) {
             break;
         case 'M':
             macro_expand_only = 1;
+            break;
+        case 'G':
+            emit_generated_only = 1;
+            macro_expand_only = 1; // -G implies serialization mode
             break;
         case 'X':
             skip_preprocess = 1;
@@ -793,7 +801,7 @@ int main(int argc, const char *argv[]) {
             fprintf(stderr, "error: failed to open output file %s\n", out_file);
             goto BAIL;
         }
-        cc_serialize_program(f, &vm, merged_prog);
+        cc_serialize_program(f, &vm, merged_prog, emit_generated_only);
         if (f != stdout)
             fclose(f);
         goto BAIL;

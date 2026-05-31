@@ -885,6 +885,7 @@ _Obj *__jcc_ast_function(JCC *vm, const char *name,
 
         // Update existing forward declaration to be a definition
         existing->is_definition = true;
+        existing->is_macro_generated = true;
         // Update return type if needed
         if (existing->ty && existing->ty->kind == TY_FUNC) {
             existing->ty->return_ty = return_type;
@@ -904,6 +905,7 @@ _Obj *__jcc_ast_function(JCC *vm, const char *name,
     fn->is_function = true;
     fn->is_definition = true;
     fn->is_static = false;
+    fn->is_macro_generated = true;
 
     // Add to globals list. The function is not made visible to the parser
     // until source declares it, inline macro prototype synthesis declares it,
@@ -1058,6 +1060,7 @@ _Obj *__jcc_ast_global_var(JCC *vm, const char *name, _Type *ty) {
                 error("expected unique generated global name, got existing "
                       "definition '%s'", name);
             obj->is_definition = true;
+            obj->is_macro_generated = true;
             obj->ty = ty;
             obj->align = ty->align;
             return obj;
@@ -1072,6 +1075,7 @@ _Obj *__jcc_ast_global_var(JCC *vm, const char *name, _Type *ty) {
     var->is_function = false;
     var->is_definition = true;
     var->is_static = false; // default: external linkage; call _set_static to change
+    var->is_macro_generated = true;
 
     var->next = vm->compiler.globals;
     vm->compiler.globals = var;

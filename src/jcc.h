@@ -673,6 +673,7 @@ struct Obj {
     bool is_definition;
     bool is_static;
     bool is_constexpr;
+    bool is_macro_generated; // true if created by a #pragma macro via _AST_FUNCTION/_AST_GLOBAL_VAR
 
     // Global variable
     bool is_tentative;
@@ -1798,13 +1799,15 @@ void cc_expand_pragma_macros(JCC *vm, Obj *prog);
 /*!
  @function cc_serialize_program
  @abstract Serialize a program AST back to C source code.
- @discussion Used with -M flag to output macro-expanded source that
+ @discussion Used with -M/-G flags to output macro-expanded source that
              can be compiled with gcc or other C compilers.
  @param f Output file stream.
  @param vm The JCC instance.
  @param prog Program AST to serialize.
+ @param generated_only If true, only serialize objects created by pragma macros
+                       (those with is_macro_generated set). Used with -G flag.
 */
-void cc_serialize_program(FILE *f, JCC *vm, Obj *prog);
+void cc_serialize_program(FILE *f, JCC *vm, Obj *prog, bool generated_only);
 
 /*!
  @function cc_link_progs

@@ -13,8 +13,7 @@ echo "Generating src/std.c..." >&2
 {
     echo '#include <string.h>'
     echo
-    ./jcc -M -I./include std_template_test.c \
-        | awk '/^char \*.*get_std_header/,/^\}$/'
+    ./jcc -G -I./include std_template_test.c
 } > src/std.c
 
 echo "Done. Rebuild with: make" >&2

@@ -157,6 +157,7 @@ typedef struct {
     int typedefs_len;
     int typedefs_cap;
     Obj *current_fn;
+    bool generated_only; // skip header typedefs; output is consumed alongside normal headers
 } SerializeContext;
 
 // Forward declaration
@@ -630,12 +631,33 @@ static void serialize_expr(FILE *f, JCC *vm, SerializeContext *ctx, Node *node,
         serialize_expr(f, vm, ctx, node->lhs, node_prec);
         break;
 
-    case ND_CAST:
-        fprintf(f, "(");
-        serialize_type(f, ctx, node->ty);
-        fprintf(f, ")");
-        serialize_expr(f, vm, ctx, node->lhs, node_prec);
+    case ND_CAST: {
+        // Suppress widening integer casts — these are always implicit in C.
+        // Only emit a cast if it crosses a type category or narrows/changes signedness.
+        Type *dst = node->ty;
+        Type *src = node->lhs ? node->lhs->ty : NULL;
+        bool dst_int = dst && (dst->kind == TY_BOOL || dst->kind == TY_CHAR ||
+                               dst->kind == TY_SHORT || dst->kind == TY_INT ||
+                               dst->kind == TY_LONG);
+        bool src_int = src && (src->kind == TY_BOOL || src->kind == TY_CHAR ||
+                               src->kind == TY_SHORT || src->kind == TY_INT ||
+                               src->kind == TY_LONG);
+        static const int int_rank[] = {
+            [TY_BOOL]=0, [TY_CHAR]=1, [TY_SHORT]=2, [TY_INT]=3, [TY_LONG]=4
+        };
+        bool widening = dst_int && src_int &&
+                        dst->is_unsigned == src->is_unsigned &&
+                        int_rank[dst->kind] >= int_rank[src->kind];
+        if (widening) {
+            serialize_expr(f, vm, ctx, node->lhs, parent_prec);
+        } else {
+            fprintf(f, "(");
+            serialize_type(f, ctx, node->ty);
+            fprintf(f, ")");
+            serialize_expr(f, vm, ctx, node->lhs, node_prec);
+        }
         break;
+    }
 
     case ND_COND:
         serialize_expr(f, vm, ctx, node->cond, 0);
@@ -814,13 +836,23 @@ static void serialize_function(FILE *f, JCC *vm, SerializeContext *ctx,
     if (fn->is_static)
         fprintf(f, "static ");
 
-    // Return type
-    if (fn->ty && fn->ty->return_ty)
-        serialize_type(f, ctx, fn->ty->return_ty);
-    else
-        fprintf(f, "int");
-
-    fprintf(f, " %s(", fn->name);
+    // Return type — buffer it to pick correct spacing before the name
+    {
+        char *rt = NULL;
+        size_t rtsz = 0;
+        FILE *rtf = open_memstream(&rt, &rtsz);
+        if (fn->ty && fn->ty->return_ty)
+            serialize_type(rtf, ctx, fn->ty->return_ty);
+        else
+            fprintf(rtf, "int");
+        fclose(rtf);
+        // Attach '*' directly to name (C convention); otherwise add a space
+        if (rtsz > 0 && rt[rtsz - 1] == '*')
+            fprintf(f, "%s%s(", rt, fn->name);
+        else
+            fprintf(f, "%s %s(", rt, fn->name);
+        free(rt);
+    }
 
     // Parameters
     bool first = true;
@@ -857,8 +889,14 @@ static void serialize_function(FILE *f, JCC *vm, SerializeContext *ctx,
             fprintf(f, ";\n");
         }
 
-        // Function body
-        for (Node *s = fn->body; s; s = s->next) {
+        // Function body — unpack a single ND_BLOCK to avoid double-brace wrapping.
+        // Both the parser and _AST_FUNCTION_SET_BODY store the body as an ND_BLOCK node.
+        Node *body_stmts;
+        if (fn->body && fn->body->kind == ND_BLOCK && !fn->body->next)
+            body_stmts = fn->body->body;
+        else
+            body_stmts = fn->body;
+        for (Node *s = body_stmts; s; s = s->next) {
             serialize_stmt(f, vm, ctx, s, 1);
         }
 
@@ -1037,22 +1075,28 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
             serialize_struct_def(f, ctx, ty);
     }
 
-    for (int i = ctx->typedefs_len - 1; i >= 0; i--) {
-        if (ctx->typedefs[i].owner_fn == owner_fn)
-            serialize_typedef_alias(f, ctx, &ctx->typedefs[i]);
+    // In generated_only mode the output is consumed alongside normal headers,
+    // so typedefs are already defined by the consumer's includes.
+    if (!ctx->generated_only) {
+        for (int i = ctx->typedefs_len - 1; i >= 0; i--) {
+            if (ctx->typedefs[i].owner_fn == owner_fn)
+                serialize_typedef_alias(f, ctx, &ctx->typedefs[i]);
+        }
     }
 
     ctx->current_fn = saved_fn;
 }
 
 // Public API: Serialize entire program to C source
-void cc_serialize_program(FILE *f, JCC *vm, Obj *prog) {
+void cc_serialize_program(FILE *f, JCC *vm, Obj *prog, bool generated_only) {
     if (!f || !prog)
         return;
 
-    SerializeContext ctx = {};
+    SerializeContext ctx = {.generated_only = generated_only};
     collect_scope_names(&ctx, vm);
     for (Obj *obj = prog; obj; obj = obj->next) {
+        if (generated_only && !obj->is_macro_generated)
+            continue;
         if (obj->is_function && !obj->is_definition && !obj->body)
             continue;
         if (!obj->is_function && obj->name[0] == '.')
@@ -1068,12 +1112,16 @@ void cc_serialize_program(FILE *f, JCC *vm, Obj *prog) {
 
     // Serialize global variables
     for (Obj *obj = prog; obj; obj = obj->next) {
+        if (generated_only && !obj->is_macro_generated)
+            continue;
         if (!obj->is_function)
             serialize_global_var(f, vm, &ctx, obj);
     }
 
     // Serialize functions
     for (Obj *obj = prog; obj; obj = obj->next) {
+        if (generated_only && !obj->is_macro_generated)
+            continue;
         if (obj->is_function)
             serialize_function(f, vm, &ctx, obj);
     }
