@@ -251,8 +251,30 @@ static Token *implicit_reflection_tokens(JCC *vm) {
     if (!header)
         error("could not load embedded reflection.h");
 
+    // The user's translation unit may have already #included reflection.h
+    // (and its transitive includes: stdbool.h, stddef.h, stdint.h), causing
+    // their include guards to be set.  Temporarily clear those guards so the
+    // full content is processed and all typedefs land in the macro compilation
+    // scope.  We restore the guards afterwards so subsequent compilation
+    // phases are unaffected.
+    static const char *guards[] = {
+        "JCC_REFLECTION_H", "__STDBOOL_H", "__STDDEF_H", "__STDINT_H", NULL
+    };
+    void *saved_guards[4] = {};
+    for (int i = 0; guards[i]; i++) {
+        saved_guards[i] = hashmap_get(&vm->compiler.macros, (char *)guards[i]);
+        if (saved_guards[i])
+            hashmap_delete(&vm->compiler.macros, (char *)guards[i]);
+    }
+
     Token *tokens = tokenize_string(vm, "<implicit-reflection.h>", header);
-    return preprocess(vm, tokens);
+    Token *result = preprocess(vm, tokens);
+
+    for (int i = 0; guards[i]; i++)
+        if (saved_guards[i])
+            hashmap_put(&vm->compiler.macros, (char *)guards[i], saved_guards[i]);
+
+    return result;
 }
 
 static Token *build_combined_macro_tokens(JCC *vm, Token *reflection_tokens,
@@ -431,10 +453,15 @@ static bool compile_pragma_macro_program(JCC *vm) {
     return true;
 }
 
-// Compile all pragma macros and comptime helpers
+// Compile all pragma macros and comptime helpers (idempotent)
 static void compile_all_pragma_macros(JCC *vm) {
     if (!vm->compiler.pragma_macros)
         return;
+    // Guard: compile once even if called from both the pre-parse inline phase
+    // and the post-parse cc_expand_pragma_macros phase.
+    if (vm->compiler.pragma_macros_compiled)
+        return;
+    vm->compiler.pragma_macros_compiled = true;
 
     if (vm->debug_vm)
         printf("Compiling %d pragma compile-time function(s)...\n", ({
@@ -658,6 +685,245 @@ static void init_vm_segments_for_macros(JCC *vm) {
     // Initialize codegen state
     vm->compiler.current_codegen_fn = NULL;
     // sp/bp/stack_base already set correctly by vm_alloc_segments
+}
+
+// ---------------------------------------------------------------------------
+// Inline macro pre-parse execution
+// ---------------------------------------------------------------------------
+
+// Write a C-syntax type string into buf[0..bufsize).
+// Returns number of characters written (not counting the NUL).
+// Handles primitives, pointer chains, struct/union/enum tags, and falls back
+// to "int" for unrepresentable types. Does NOT handle function-pointer or
+// array return types — those are uncommon for generated function signatures.
+static int write_type_str(Type *ty, char *buf, int bufsize) {
+    if (!ty || bufsize <= 1)
+        return 0;
+
+    int n = 0;
+
+    if (ty->is_const && bufsize - n > 6)
+        n += snprintf(buf + n, bufsize - n, "const ");
+
+    switch (ty->kind) {
+    case TY_VOID:
+        n += snprintf(buf + n, bufsize - n, "void");
+        break;
+    case TY_BOOL:
+        n += snprintf(buf + n, bufsize - n, "_Bool");
+        break;
+    case TY_CHAR:
+        n += snprintf(buf + n, bufsize - n, "%schar",
+                      ty->is_unsigned ? "unsigned " : "");
+        break;
+    case TY_SHORT:
+        n += snprintf(buf + n, bufsize - n, "%sshort",
+                      ty->is_unsigned ? "unsigned " : "");
+        break;
+    case TY_INT:
+        n += snprintf(buf + n, bufsize - n, "%sint",
+                      ty->is_unsigned ? "unsigned " : "");
+        break;
+    case TY_LONG:
+        n += snprintf(buf + n, bufsize - n, "%slong",
+                      ty->is_unsigned ? "unsigned " : "");
+        break;
+    case TY_FLOAT:
+        n += snprintf(buf + n, bufsize - n, "float");
+        break;
+    case TY_DOUBLE:
+        n += snprintf(buf + n, bufsize - n, "double");
+        break;
+    case TY_PTR:
+        n += write_type_str(ty->base, buf + n, bufsize - n);
+        n += snprintf(buf + n, bufsize - n, " *");
+        break;
+    case TY_STRUCT:
+        if (ty->name)
+            n += snprintf(buf + n, bufsize - n, "struct %.*s",
+                          ty->name->len, ty->name->loc);
+        else
+            n += snprintf(buf + n, bufsize - n, "void /*anon struct*/");
+        break;
+    case TY_UNION:
+        if (ty->name)
+            n += snprintf(buf + n, bufsize - n, "union %.*s",
+                          ty->name->len, ty->name->loc);
+        else
+            n += snprintf(buf + n, bufsize - n, "void /*anon union*/");
+        break;
+    case TY_ENUM:
+        if (ty->name)
+            n += snprintf(buf + n, bufsize - n, "enum %.*s",
+                          ty->name->len, ty->name->loc);
+        else
+            n += snprintf(buf + n, bufsize - n, "int");
+        break;
+    default:
+        // Fallback: emit int. Covers edge cases like TY_LDOUBLE, TY_ARRAY,
+        // TY_FUNC return types, etc.
+        n += snprintf(buf + n, bufsize - n, "int");
+        break;
+    }
+    return n;
+}
+
+// Build a C prototype token stream for fn, e.g.:
+//   int generated_func(void);
+// Prepend these tokens to a file's token stream to give the parser a
+// forward declaration without requiring the user to write one.
+static Token *synthesize_forward_decl_tokens(JCC *vm, Obj *fn) {
+    if (!fn || !fn->ty || fn->ty->kind != TY_FUNC)
+        return NULL;
+
+    char buf[512];
+    char *p   = buf;
+    char *end = buf + sizeof(buf) - 2; // leave room for ";\n\0"
+
+    // Return type
+    p += write_type_str(fn->ty->return_ty, p, (int)(end - p));
+
+    // Space + function name
+    p += snprintf(p, end - p, " %s(", fn->name);
+
+    // Parameter types
+    if (fn->ty->params == NULL) {
+        p += snprintf(p, end - p, "void");
+    } else {
+        bool first = true;
+        for (Type *pt = fn->ty->params; pt; pt = pt->next) {
+            if (!first)
+                p += snprintf(p, end - p, ", ");
+            first = false;
+            p += write_type_str(pt, p, (int)(end - p));
+        }
+        if (fn->ty->is_variadic)
+            p += snprintf(p, end - p, ", ...");
+    }
+
+    p += snprintf(p, end - p, ");\n");
+
+    if (vm->debug_vm)
+        printf("Synthesized forward decl: %s", buf);
+
+    // Tokenise and convert to parser tokens
+    Token *toks = tokenize_string(vm, "<inline-macro-fwd>", buf);
+    if (!toks)
+        return NULL;
+    convert_pp_tokens(vm, toks);
+    return toks;
+}
+
+// Execute all inline (#pragma macro inline) macros before the main parse.
+// For each inline macro:
+//   1. Execute it (it calls __jcc_ast_function etc. to register generated
+//      function Objs in vm->compiler.globals).
+//   2. Capture newly-added Objs and stash them in vm->compiler.macro_globals.
+//   3. Synthesize a forward-declaration token stream for each generated
+//      function and prepend it to every input_tokens[i].
+//
+// After all inline macros have run, vm->compiler.macro_globals contains the
+// generated function definitions. main.c appends them to the merged program
+// before codegen so the name-based call patcher can resolve calls to them.
+void cc_execute_inline_macros(JCC *vm, Token **input_tokens, int count) {
+    if (!vm || !vm->compiler.pragma_macros)
+        return;
+
+    // Quick check: any inline macros?
+    bool any_inline = false;
+    for (PragmaMacro *pm = vm->compiler.pragma_macros; pm; pm = pm->next)
+        if (pm->is_inline) { any_inline = true; break; }
+    if (!any_inline)
+        return;
+
+    if (vm->debug_vm)
+        printf("Pre-parse: executing inline pragma macros...\n");
+
+    // Segments must be initialised before macro bytecode can run.
+    init_vm_segments_for_macros(vm);
+
+    // Compile all macros (idempotent — subsequent call from
+    // cc_expand_pragma_macros is a no-op).
+    compile_all_pragma_macros(vm);
+
+    // Walk the macro list in declaration order (list is prepended, so we
+    // reverse to preserve source order).
+    int macro_count = 0;
+    for (PragmaMacro *pm = vm->compiler.pragma_macros; pm; pm = pm->next)
+        macro_count++;
+
+    PragmaMacro **ordered = alloca(macro_count * sizeof(PragmaMacro *));
+    int idx = macro_count - 1;
+    for (PragmaMacro *pm = vm->compiler.pragma_macros; pm; pm = pm->next)
+        ordered[idx--] = pm;
+
+    for (int i = 0; i < macro_count; i++) {
+        PragmaMacro *pm = ordered[i];
+        if (!pm->is_inline)
+            continue;
+
+        // Snapshot the globals list head before execution. Any Obj prepended
+        // by __jcc_ast_function during macro execution will appear before this
+        // pointer.
+        Obj *globals_before = vm->compiler.globals;
+
+        // Execute the inline macro (no arguments — inline macros are
+        // zero-parameter by convention).
+        execute_pragma_macro(vm, pm, NULL, 0);
+
+        // Collect newly-added Objs (those prepended before globals_before).
+        // Only pick up function definitions (the interesting ones for codegen).
+        for (Obj *o = vm->compiler.globals; o && o != globals_before; o = o->next) {
+            if (!o->is_function || !o->body)
+                continue;
+
+            // Move into macro_globals list (we prepend; order restored later).
+            Obj *copy_link = o->next; // remember the chain for iteration
+            o->next = vm->compiler.macro_globals;
+            vm->compiler.macro_globals = o;
+            (void)copy_link; // iteration via the original globals list is fine
+        }
+
+        // Synthesize a forward declaration for every generated function and
+        // prepend it to all input token streams.
+        for (Obj *o = vm->compiler.globals; o && o != globals_before; o = o->next) {
+            if (!o->is_function || !o->body)
+                continue;
+
+            Token *fwd = synthesize_forward_decl_tokens(vm, o);
+            if (!fwd)
+                continue;
+
+            // Find the last token in the synthetic stream (before its EOF).
+            Token *fwd_tail = fwd;
+            while (fwd_tail->next && fwd_tail->next->kind != TK_EOF)
+                fwd_tail = fwd_tail->next;
+
+            // Prepend to every file's token stream.
+            for (int fi = 0; fi < count; fi++) {
+                if (!input_tokens[fi])
+                    continue;
+                // Clone the fwd chain so each file has its own copy (tokens
+                // carry file/line info; sharing is safe, but cloning avoids
+                // the tail->next aliasing issue when prepending to multiple
+                // files).
+                //
+                // For simplicity, just re-synthesise (tokenize_string
+                // allocates from the arena, which is long-lived).
+                Token *fwd_copy = synthesize_forward_decl_tokens(vm, o);
+                if (!fwd_copy)
+                    continue;
+                Token *tail = fwd_copy;
+                while (tail->next && tail->next->kind != TK_EOF)
+                    tail = tail->next;
+                tail->next = input_tokens[fi];
+                input_tokens[fi] = fwd_copy;
+            }
+        }
+    }
+
+    if (vm->debug_vm)
+        printf("Pre-parse inline macro execution complete.\n");
 }
 
 // Expand all pragma macro calls in the program

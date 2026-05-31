@@ -743,6 +743,7 @@ typedef struct PragmaMacro {
     Obj *compiled_fn;         // Compiled function object
     bool is_compiled;         // True after successful compilation
     bool is_macro_entry;      // True for #pragma macro, false for comptime helper
+    bool is_inline;           // True for inline macros (auto-execute at declaration)
     struct PragmaMacro *next; // Next macro in linked list
 } PragmaMacro;
 
@@ -1215,11 +1216,12 @@ typedef struct Compiler {
     int include_next_idx;     // Index for #include_next
 
     // Pragma macro state
-    PragmaMacro *pragma_macros; // Linked list of captured pragma macros
-    bool in_macro_mode;         // True when compiling/executing a pragma macro
-    bool in_macro_expansion;    // True during macro AST expansion pass
-    Obj *macro_globals; // Globals defined by pragma macros (separate from main
-                        // program)
+    PragmaMacro *pragma_macros;   // Linked list of captured pragma macros
+    bool in_macro_mode;           // True when compiling/executing a pragma macro
+    bool in_macro_expansion;      // True during macro AST expansion pass
+    bool pragma_macros_compiled;  // True after compile_all_pragma_macros has run
+    Obj *macro_globals; // Globals defined by inline pragma macros (injected into
+                        // the final program before codegen)
 
     // #embed directive limits
     size_t embed_limit;      // Soft limit for #embed size (default: 10MB)
@@ -1769,6 +1771,23 @@ Node *cc_parse_stmt(JCC *vm, Token **rest, Token *tok);
 */
 Node *cc_parse_compound_stmt(JCC *vm, Token **rest, Token *tok);
 void cc_init_parser(JCC *vm);
+
+/*!
+ @function cc_execute_inline_macros
+ @abstract Execute all inline pragma macros before parsing.
+ @discussion Compiles and executes every #pragma macro marked with the
+             `inline` keyword. Each inline macro runs automatically at its
+             declaration point (no explicit call needed). Generated functions
+             are stored in vm->compiler.macro_globals and synthetic forward
+             declarations are prepended to every input token stream so the
+             parser can resolve calls to generated functions without manual
+             forward declarations. Must be called after all preprocessing and
+             before cc_parse.
+ @param vm The JCC instance.
+ @param input_tokens Array of preprocessed token streams (one per source file).
+ @param count Number of token streams in the array.
+*/
+void cc_execute_inline_macros(JCC *vm, Token **input_tokens, int count);
 
 /*!
  @function cc_expand_pragma_macros

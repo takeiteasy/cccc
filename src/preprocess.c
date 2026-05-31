@@ -115,7 +115,8 @@ static Token *new_eof(JCC *vm, Token *tok) {
 // extraction failed)
 static Token *extract_pragma_compiletime_function(JCC *vm, Token *tok,
                                                   char *directive,
-                                                  bool is_macro_entry) {
+                                                  bool is_macro_entry,
+                                                  bool is_inline) {
     // Expected format: <return_type> <function_name>(<params>) { <body> }
     // tok should be the first token after the directive on the next line
 
@@ -209,6 +210,7 @@ static Token *extract_pragma_compiletime_function(JCC *vm, Token *tok,
     pm->compiled_fn = NULL;
     pm->is_compiled = false;
     pm->is_macro_entry = is_macro_entry;
+    pm->is_inline = is_inline;
     pm->next = vm->compiler.pragma_macros;
     vm->compiler.pragma_macros = pm;
 
@@ -1707,9 +1709,11 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             while (macro_tok && !macro_tok->at_bol && macro_tok->kind != TK_EOF)
                 macro_tok = macro_tok->next;
             // Now macro_tok points to the first token of the function
-            // definition
+            // definition. If it starts with `inline`, this is an auto-execute
+            // inline macro.
+            bool is_inline_macro = equal(macro_tok, "inline");
             tok = extract_pragma_compiletime_function(vm, macro_tok, "macro",
-                                                      true);
+                                                      true, is_inline_macro);
             continue;
         }
 
@@ -1722,7 +1726,7 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             // Now comptime_tok points to the first token of the helper
             // function definition
             tok = extract_pragma_compiletime_function(vm, comptime_tok,
-                                                      "comptime", false);
+                                                      "comptime", false, false);
             continue;
         }
 

@@ -704,6 +704,13 @@ int main(int argc, const char *argv[]) {
         goto BAIL;
     }
 
+    // Execute inline (#pragma macro inline) macros before parsing.
+    // This compiles and runs them now, synthesises forward declarations for
+    // any functions they generate, and prepends those declarations to every
+    // input token stream so the parser can resolve calls without manual
+    // forward declarations.
+    cc_execute_inline_macros(&vm, input_tokens, input_files_count);
+
     input_progs = calloc(input_files_count, sizeof(Obj *));
     for (int i = 0; i < input_files_count; i++) {
         input_progs[i] = cc_parse(&vm, input_tokens[i]);
@@ -751,6 +758,19 @@ int main(int argc, const char *argv[]) {
     if (!merged_prog) {
         fprintf(stderr, "error: failed to link programs\n");
         goto BAIL;
+    }
+
+    // Inject inline-macro-generated function definitions into the program.
+    // These Objs were created by __jcc_ast_function during pre-parse inline
+    // macro execution and stashed in vm.compiler.macro_globals. They must be
+    // in the prog list so cc_compile calls gen_function on them and the
+    // call-patcher can resolve calls to them by name.
+    if (vm.compiler.macro_globals) {
+        Obj *tail = vm.compiler.macro_globals;
+        while (tail->next)
+            tail = tail->next;
+        tail->next = merged_prog;
+        merged_prog = vm.compiler.macro_globals;
     }
 
     // Expand pragma macros in the AST
