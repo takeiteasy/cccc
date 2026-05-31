@@ -672,7 +672,7 @@ _Node *__jcc_ast_expr_stmt(JCC *vm, _Node *expr) {
 // Macro Diagnostics (ticket #78)
 // ============================================================================
 
-void __jcc_error_at(JCC *vm, _Node *node, const char *fmt, ...) {
+void __jcc_macro_error_at(JCC *vm, _Node *node, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     char buf[4096];
@@ -685,7 +685,7 @@ void __jcc_error_at(JCC *vm, _Node *node, const char *fmt, ...) {
         error("%s", buf); // no source location available
 }
 
-void __jcc_warning_at(JCC *vm, _Node *node, const char *fmt, ...) {
+void __jcc_macro_warning_at(JCC *vm, _Node *node, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     char buf[4096];

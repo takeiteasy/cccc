@@ -276,6 +276,7 @@ Token *tokenize_string(JCC *vm, char *name, char *contents);
 unsigned char *read_binary_file(JCC *vm, char *path, size_t *out_size);
 void cc_output_preprocessed(FILE *f, Token *tok);
 
+#undef unreachable
 #define unreachable() error("internal error at %s:%d", __FILE__, __LINE__)
 
 //

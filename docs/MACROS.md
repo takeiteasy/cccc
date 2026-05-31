@@ -5,7 +5,7 @@ They can inspect compile-time types, build AST nodes, generate functions, and
 replace macro call sites with generated code.
 
 The macro API is automatically available while pragma macro and comptime helper
-functions are compiled. Macro code can use the `_AST_*`, `_QUOTE*`, `_ERROR_AT`,
+functions are compiled. Macro code can use the `_AST_*`, `_QUOTE*`, `_MACRO_ERROR_AT`,
 `_GENSYM`, and `_DUMP_*` convenience macros directly.
 
 ## Execution Model
@@ -292,7 +292,7 @@ Use source-located diagnostics when rejecting a macro argument:
 #pragma macro
 _Node *require_nonzero(_Node *value) {
     if (!value)
-        _ERROR_AT(value, "expected an expression");
+        _MACRO_ERROR_AT(value, "expected an expression");
     return value;
 }
 ```

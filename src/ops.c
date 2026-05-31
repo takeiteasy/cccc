@@ -559,8 +559,6 @@ int op_LEV3_fn(JCC *vm) {
 
 // ========== 3-Register Floating-Point Arithmetic ==========
 
-// ========== 3-Register Floating-Point Arithmetic ==========
-
 int op_FADD3_fn(JCC *vm) {
     // fregs[rd] = fregs[rs1] + fregs[rs2]
     // Format: [FADD3] [rd:8|rs1:8|rs2:8|unused:40]
@@ -893,8 +891,6 @@ int op_FROUND_F32_fn(JCC *vm) {
     vm->fregs[rd] = (double)(float)vm->fregs[rs];
     return 0;
 }
-
-// ========== Phase 1: New Register-Based Opcodes ==========
 
 int op_LEA3_fn(JCC *vm) {
     // Load effective address: regs[rd] = bp + immediate
@@ -2274,31 +2270,4 @@ int op_RETBUF_fn(JCC *vm) {
     vm->runtime_return_buffer_index = (idx + 1) % RETURN_BUFFER_POOL_SIZE;
     vm->regs[REG_A0] = (long long)vm->compiler.return_buffer_pool[idx];
     return 0;
-}
-
-// ========== Random Canary Generation ==========
-
-long long generate_random_canary(void) {
-    long long canary = 0;
-
-#if defined(_WIN32) || defined(_WIN64)
-    srand((unsigned int)time(NULL));
-    canary = ((long long)rand() << 32) | rand();
-#else
-    FILE *f = fopen("/dev/urandom", "rb");
-    if (f) {
-        if (fread(&canary, sizeof(canary), 1, f) != 1) {
-            canary = STACK_CANARY ^ (long long)time(NULL);
-        }
-        fclose(f);
-    } else {
-        canary = STACK_CANARY ^ (long long)time(NULL);
-    }
-#endif
-
-    // Ensure canary has null bytes to make exploitation harder
-    canary &= ~0xFF00000000000000LL;
-    canary |= 0x00FF000000000000LL;
-
-    return canary;
 }

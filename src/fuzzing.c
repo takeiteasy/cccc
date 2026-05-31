@@ -1,7 +1,7 @@
 // JCC libFuzzer harness
 // Compiles C source from memory to catch frontend crashes.
 // Build: clang -g -O1 -fsanitize=fuzzer,address -o fuzz_harness \
-//           src/fuzz_harness.c src/*.c src/stdlib/*.c -I./include
+//           src/fuzzing.c src/*.c src/stdlib/*.c -I./include
 // Run:   ./fuzz_harness corpus/
 
 #include "jcc.h"

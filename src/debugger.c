@@ -220,7 +220,7 @@ void debugger_print_registers(JCC *vm) {
     printf("  sp:           %p\n", (void*)vm->sp);
     printf("  cycle:        %lld\n", vm->cycle);
     // Print first few general registers
-    printf("  T0-T3:        %lld, %lld, %lld, %lld\n", 
+    printf("  T0-T3:        %lld, %lld, %lld, %lld\n",
            vm->regs[REG_T0], vm->regs[REG_T1], vm->regs[REG_T2], vm->regs[REG_T3]);
     printf("\n");
 }
@@ -270,11 +270,11 @@ static int disassemble_instruction(JCC *vm, JCCPc pc) {
 
 void cc_disassemble(JCC *vm) {
     if (!vm || !vm->text_seg) return;
-    
+
     printf("=== Disassembly ===\n");
     // text_seg[0] is the entry point offset, not an instruction
     printf("Entry point: %u\n", vm->text_seg[0]);
-    
+
     JCCPc pc = 1;
     while (pc <= vm->text_ptr) {
         int size = disassemble_instruction(vm, pc);
@@ -1647,4 +1647,31 @@ int debugger_check_watchpoint(JCC *vm, void *addr, int size, int access_type) {
     }
 
     return -1;
+}
+
+// ========== Random Canary Generation ==========
+
+long long generate_random_canary(void) {
+    long long canary = 0;
+
+#if defined(_WIN32) || defined(_WIN64)
+    srand((unsigned int)time(NULL));
+    canary = ((long long)rand() << 32) | rand();
+#else
+    FILE *f = fopen("/dev/urandom", "rb");
+    if (f) {
+        if (fread(&canary, sizeof(canary), 1, f) != 1) {
+            canary = STACK_CANARY ^ (long long)time(NULL);
+        }
+        fclose(f);
+    } else {
+        canary = STACK_CANARY ^ (long long)time(NULL);
+    }
+#endif
+
+    // Ensure canary has null bytes to make exploitation harder
+    canary &= ~0xFF00000000000000LL;
+    canary |= 0x00FF000000000000LL;
+
+    return canary;
 }

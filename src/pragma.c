@@ -81,8 +81,8 @@ extern void __jcc_dump_ast_gen(JCC *vm, Node *node);
 extern const char *__jcc_dump_ast_gen_to_string(JCC *vm, Node *node);
 
 // Ticket #78: source-located macro diagnostics
-extern void __jcc_error_at(JCC *vm, Node *node, const char *fmt, ...);
-extern void __jcc_warning_at(JCC *vm, Node *node, const char *fmt, ...);
+extern void __jcc_macro_error_at(JCC *vm, Node *node, const char *fmt, ...);
+extern void __jcc_macro_warning_at(JCC *vm, Node *node, const char *fmt, ...);
 
 // Previously unregistered statement builders (existing functions, now exposed)
 extern Node *__jcc_ast_block(JCC *vm, Node **stmts, int count);
@@ -166,8 +166,8 @@ static void register_reflection_ffi(JCC *vm) {
     cc_register_cfunc(vm, "__jcc_dump_ast_gen_to_string", (void *)__jcc_dump_ast_gen_to_string, 2, 0);
 
     // Ticket #78: source-located macro diagnostics (variadic)
-    cc_register_variadic_cfunc(vm, "__jcc_error_at",   (void *)__jcc_error_at,   3, 0);
-    cc_register_variadic_cfunc(vm, "__jcc_warning_at", (void *)__jcc_warning_at, 3, 0);
+    cc_register_variadic_cfunc(vm, "__jcc_macro_error_at",   (void *)__jcc_macro_error_at,   3, 0);
+    cc_register_variadic_cfunc(vm, "__jcc_macro_warning_at", (void *)__jcc_macro_warning_at, 3, 0);
 
     // Previously unregistered statement builders
     cc_register_cfunc(vm, "__jcc_ast_block",     (void *)__jcc_ast_block,     3, 0);

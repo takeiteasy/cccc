@@ -164,7 +164,7 @@ const char *__jcc_gensym(JCC *vm, const char *prefix);
 // ============================================================================
 
 /*!
- * @function __jcc_error_at
+ * @function __jcc_macro_error_at
  * @abstract Emit a compiler error pointing at the source location of a node.
  * @param vm The VM context.
  * @param node A node whose tok field provides file/line/col. May be NULL
@@ -175,18 +175,18 @@ const char *__jcc_gensym(JCC *vm, const char *prefix);
  *             aborts via longjmp or exit.  When vm->collect_errors is set
  *             it records the error and compilation may continue.
  */
-void __jcc_error_at(JCC *vm, _Node *node, const char *fmt, ...)
+void __jcc_macro_error_at(JCC *vm, _Node *node, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 
 /*!
- * @function __jcc_warning_at
+ * @function __jcc_macro_warning_at
  * @abstract Emit a compiler warning pointing at the source location of a node.
  * @param vm The VM context.
  * @param node A node whose tok field provides file/line/col. May be NULL.
  * @param fmt printf-style format string, followed by format arguments.
  * @discussion Non-fatal unless vm->warnings_as_errors is set.
  */
-void __jcc_warning_at(JCC *vm, _Node *node, const char *fmt, ...)
+void __jcc_macro_warning_at(JCC *vm, _Node *node, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 
 /*!
@@ -652,8 +652,8 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, _Node *node);
 #define _QUOTE_N(tmpl, nodes, count) __jcc_quote_n(_VM, tmpl, nodes, count)
 
 // Diagnostic helpers (ticket #78) — note: variadic macros require C99+
-#define _ERROR_AT(node, ...) __jcc_error_at(_VM, node, __VA_ARGS__)
-#define _WARNING_AT(node, ...) __jcc_warning_at(_VM, node, __VA_ARGS__)
+#define _MACRO_ERROR_AT(node, ...) __jcc_macro_error_at(_VM, node, __VA_ARGS__)
+#define _MACRO_WARNING_AT(node, ...) __jcc_macro_warning_at(_VM, node, __VA_ARGS__)
 
 // AST dump helpers (ticket #58)
 #define _DUMP_TREE(node) __jcc_dump_tree(_VM, node)

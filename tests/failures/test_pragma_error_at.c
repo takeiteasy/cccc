@@ -1,5 +1,5 @@
 // EXPECT_COMPILE_ERROR
-// Test ticket #78: __jcc_error_at emits a source-located error and fails compilation.
+// Test ticket #78: __jcc_macro_error_at emits a source-located error and fails compilation.
 
 #include <reflection.h>
 
@@ -7,7 +7,7 @@
 #pragma macro
 _Node *always_error(_Node *n) {
     _VirtualMachine *vm = __jcc_get_vm();
-    __jcc_error_at(vm, n, "always_error: this argument is not allowed");
+    __jcc_macro_error_at(vm, n, "always_error: this argument is not allowed");
     return n; // unreachable
 }
 

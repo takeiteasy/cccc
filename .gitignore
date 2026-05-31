@@ -4,16 +4,11 @@ jcc-*
 *.dSYM
 *~
 *.bak
-docs/
 ASSISI.md
 *.txt
 TICKETS
-
-# Fuzzing output
 fuzz/out/
 fuzz/corpus
-
-# Profiling output
 profile/*.prof
 profile/*.json
 profile/*.txt

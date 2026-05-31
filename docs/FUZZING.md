@@ -15,7 +15,7 @@ This produces `jcc-afl` in the project root, compiled with `afl-clang-fast`.
 ### 2. Seed the corpus
 
 ```bash
-make seed
+make fuzz-seed
 ```
 
 Copies all `tests/test_*.c` files into `fuzz/corpus/` as seed inputs.
@@ -23,7 +23,7 @@ Copies all `tests/test_*.c` files into `fuzz/corpus/` as seed inputs.
 ### 3. Run AFL++
 
 ```bash
-make fuzz
+make fuzz-run
 ```
 
 Starts `afl-fuzz` in the background with sensible defaults:
@@ -31,31 +31,31 @@ Starts `afl-fuzz` in the background with sensible defaults:
 - Output: `fuzz/out/`
 - Timeout: 1000ms
 - Memory: none (unlimited)
-- Flags: `-I../include -c` (compile-only, no `main()` required)
+- Flags: `-I./include -c` (compile-only, no `main()` required)
 
 ### 4. Inspect crashes
 
 ```bash
-make crashes        # list crash files
-make triage         # run each crash to see ASan/UBSan output
-make minimize       # minimize all crashes with afl-tmin
+make fuzz-crashes    # list crash files
+make fuzz-triage     # run each crash to see ASan/UBSan output
+make fuzz-minimize   # minimize all crashes with afl-tmin
 ```
 
 ## Manual Usage
 
 ```bash
 # Seed corpus from existing tests
-cp ../tests/test_*.c corpus/
+cp tests/test_*.c fuzz/corpus/
 
 # Run AFL++ (single instance)
-afl-fuzz -i corpus -o out -m none -t 1000 -- ../jcc-afl -I../include -c @@
+afl-fuzz -i fuzz/corpus -o fuzz/out -m none -t 1000 -- ./jcc-afl -I./include -c @@
 
 # Run with ASan + AFL++ (slower but catches more bugs)
 make afl-asan
-afl-fuzz -i corpus -o out -m none -t 1000 -- ../jcc-afl-asan -I../include -c @@
+afl-fuzz -i fuzz/corpus -o fuzz/out -m none -t 1000 -- ./jcc-afl-asan -I./include -c @@
 
 # Resume a stopped session
-afl-fuzz -i - -o out -m none -t 1000 -- ../jcc-afl -I../include -c @@
+afl-fuzz -i - -o fuzz/out -m none -t 1000 -- ./jcc-afl -I./include -c @@
 ```
 
 ## Corpus Tips
@@ -72,17 +72,16 @@ afl-fuzz -i - -o out -m none -t 1000 -- ../jcc-afl -I../include -c @@
 
 ## libFuzzer (optional)
 
-A persistent-mode harness is available in `../src/fuzz_harness.c`.
+A persistent-mode harness is available in `./src/fuzzing.c`.
 Build and run it with:
 
 ```bash
-make libfuzzer
-./fuzz_harness corpus/
+make fuzz_harness
+./fuzz_harness fuzz/corpus/
 ```
 
 ## Cleanup
 
 ```bash
 make clean          # remove corpus, output, and crash directories
-make clean-crashes # keep corpus, remove only crashes and out/
 ```

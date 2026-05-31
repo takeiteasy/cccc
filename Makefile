@@ -82,17 +82,79 @@ endif
 
 afl-asan: jcc-afl-asan
 
-fuzz: afl
+# libFuzzer harness (optional)
+fuzz_harness: src/fuzzing.c $(SRCS)
+	$(CC) $(CFLAGS) -fsanitize=fuzzer,address -o $@ $(filter-out src/main.c, $(SRCS)) $< $(LDFLAGS)
+
+# --- Fuzzing targets (moved from fuzz/Makefile) ---
+
+FUZZ_CORPUS := fuzz/corpus
+FUZZ_OUT := fuzz/out
+FUZZ_CRASHES := $(FUZZ_OUT)/crashes
+FUZZ_TIMEOUT := 1000
+FUZZ_MEMORY := none
+FUZZ_FLAGS := -I./include -c
+
+fuzz-all: fuzz-seed fuzz-run
+
+fuzz-seed:
+	@echo "Seeding corpus from tests/..."
+	@mkdir -p $(FUZZ_CORPUS)
+	@cp tests/test_*.c $(FUZZ_CORPUS)/ 2>/dev/null || true
+	@cp tests/pragma/test_pragma_*.c $(FUZZ_CORPUS)/ 2>/dev/null || true
+	@echo "Corpus seeded with $$(ls $(FUZZ_CORPUS) | wc -l) files"
+
+fuzz-run: jcc-afl
+	@if [ ! -f "jcc-afl" ]; then \
+		echo "Error: jcc-afl not found. Run 'make afl' first."; \
+		exit 1; \
+	fi
+	@mkdir -p $(FUZZ_OUT)
+	@echo "Starting AFL++ fuzzing..."
+	@echo "  input:  $(FUZZ_CORPUS)"
+	@echo "  output: $(FUZZ_OUT)"
+	afl-fuzz -i $(FUZZ_CORPUS) -o $(FUZZ_OUT) -m $(FUZZ_MEMORY) -t $(FUZZ_TIMEOUT) \
+		-- ./jcc-afl $(FUZZ_FLAGS) @@
+
+fuzz-crashes:
+	@if [ -d "$(FUZZ_CRASHES)" ]; then \
+		echo "Crashes found:"; \
+		ls -1 $(FUZZ_CRASHES)/id* 2>/dev/null || echo "  (none yet)"; \
+	else \
+		echo "No crash directory yet."; \
+	fi
+
+fuzz-triage:
+	@if [ -d "$(FUZZ_CRASHES)" ]; then \
+		for f in $(FUZZ_CRASHES)/id*; do \
+			echo "=== $$f ==="; \
+			./jcc-afl $(FUZZ_FLAGS) "$$f" 2>&1 | head -n 20; \
+			echo; \
+		done \
+	else \
+		echo "No crash directory yet."; \
+	fi
+
+fuzz-minimize:
+	@if [ -d "$(FUZZ_CRASHES)" ]; then \
+		for f in $(FUZZ_CRASHES)/id*; do \
+			base=$$(basename "$$f"); \
+			echo "Minimizing $$base..."; \
+			afl-tmin -i "$$f" -o "$(FUZZ_CRASHES)/$${base}.min" -- ./jcc-afl $(FUZZ_FLAGS) @@; \
+		done \
+	else \
+		echo "No crash directory yet."; \
+	fi
+
+fuzz-info:
 	@echo "AFL++ binary built: ./jcc-afl"
 	@echo "Run fuzzing with:"
-	@echo "  cd fuzz && make seed && make fuzz"
+	@echo "  make fuzz-seed && make fuzz-run"
 	@echo ""
 	@echo "For ASan + AFL++ combo (slower, more sensitive):"
 	@echo "  make afl-asan"
 
-# libFuzzer harness (optional)
-fuzz_harness: src/fuzz_harness.c $(SRCS)
-	$(CC) $(CFLAGS) -fsanitize=fuzzer,address -o $@ $(filter-out src/main.c, $(SRCS)) $< $(LDFLAGS)
+fuzz: fuzz-info
 
 test: clean $(EXE_OUT)
 	@python3 tests.py
@@ -100,7 +162,7 @@ test: clean $(EXE_OUT)
 all: clean $(EXE_OUT) $(LIB_OUT) test docs
 
 docs:
-	@headerdoc2html src/jcc.h include/reflection_api.h -o docs/; \
+	@headerdoc2html src/jcc.h include/reflection.h -o docs/; \
 	gatherheaderdoc docs/; \
 	mv docs/masterTOC.html docs/index.html
 
@@ -159,8 +221,9 @@ endif
 clean:
 	@$(RM) -f $(EXE_OUT) $(LIB_OUT) $(SAN_OUT) jcc-afl jcc-afl-asan jcc-prof fuzz_harness
 	@$(RM) -rf profile/*.prof profile/*.txt profile/*.json profile/*.massif
+	@$(RM) -rf fuzz/corpus fuzz/out
 
-.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem
+.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info
 ifeq ($(UNAME_S),Linux)
 .PHONY: msan
 endif
