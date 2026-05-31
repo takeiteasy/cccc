@@ -40,8 +40,10 @@ void generate_std_header(void) {
         "limits.h", "locale.h", "math.h", "reflection.h",
         "setjmp.h", "signal.h", "stdalign.h", "stdarg.h", "stdatomic.h", "stdbool.h",
         "stddef.h", "stdint.h", "stdio.h", "stdlib.h", "stdnoreturn.h",
-        "string.h", "sys/cdefs.h", "tgmath.h", "time.h", "uchar.h",
-        "unistd.h", "wchar.h", "wctype.h",
+        "string.h", "strings.h", "sys/cdefs.h", "sys/mman.h", "sys/stat.h",
+        "sys/time.h", "sys/types.h", "sys/wait.h", "tgmath.h", "time.h", "uchar.h",
+        "unistd.h", "utime.h", "wchar.h", "wctype.h",
+        "arpa/inet.h", "fnmatch.h", "getopt.h", "libgen.h", "poll.h",
         NULL
     };
 

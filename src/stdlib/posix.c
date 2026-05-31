@@ -2,9 +2,20 @@
 #include "../jcc.h"
 
 #if !defined(_WIN32) && !defined(_WIN64)
+#include <arpa/inet.h>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <fnmatch.h>
+#include <getopt.h>
+#include <libgen.h>
+#include <poll.h>
+#include <strings.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/wait.h>
 #include <unistd.h>
+#include <utime.h>
 
 static long long wrap_open(const char *path, long long oflag, long long mode) {
     return (long long)open(path, (int)oflag, (mode_t)mode);
@@ -24,6 +35,19 @@ static long long wrap_rmdir(long long path) { return (long long)rmdir((const cha
 static long long wrap_chdir(long long path) { return (long long)chdir((const char *)path); }
 static long long wrap_usleep(long long usec) { return (long long)usleep((useconds_t)usec); }
 static long long wrap_fork(void) { return (long long)fork(); }
+static long long wrap_pipe(long long fd) { return (long long)pipe((int *)fd); }
+static long long wrap__exit(long long status) { _exit((int)status); return 0; }
+
+static long long wrap_umask(long long cmask) { return (long long)umask((mode_t)cmask); }
+static long long wrap_htonl(long long hostlong) { return (long long)htonl((uint32_t)hostlong); }
+static long long wrap_htons(long long hostshort) { return (long long)htons((uint16_t)hostshort); }
+static long long wrap_ntohl(long long netlong) { return (long long)ntohl((uint32_t)netlong); }
+static long long wrap_ntohs(long long netshort) { return (long long)ntohs((uint16_t)netshort); }
+static long long wrap_inet_addr(long long cp) { return (long long)inet_addr((const char *)cp); }
+static long long wrap_basename(long long path) { return (long long)basename((char *)path); }
+static long long wrap_dirname(long long path) { return (long long)dirname((char *)path); }
+static long long wrap_bzero(long long s, long long n) { bzero((void *)s, (size_t)n); return 0; }
+static long long wrap_bcopy(long long src, long long dst, long long n) { bcopy((const void *)src, (void *)dst, (size_t)n); return 0; }
 
 void register_posix_functions(JCC *vm) {
     cc_register_cfunc(vm, "read", (void*)wrap_read, 3, 0);
@@ -40,6 +64,8 @@ void register_posix_functions(JCC *vm) {
     cc_register_cfunc(vm, "sleep", (void*)sleep, 1, 0);
     cc_register_cfunc(vm, "usleep", (void*)wrap_usleep, 1, 0);
     cc_register_cfunc(vm, "fork", (void*)wrap_fork, 0, 0);
+    cc_register_cfunc(vm, "pipe", (void*)wrap_pipe, 1, 0);
+    cc_register_cfunc(vm, "_exit", (void*)wrap__exit, 1, 0);
     cc_register_cfunc(vm, "execv", (void*)execv, 2, 0);
     cc_register_cfunc(vm, "execve", (void*)execve, 3, 0);
     cc_register_variadic_cfunc(vm, "execl", (void*)execl, 2, 0);
@@ -54,6 +80,45 @@ void register_posix_functions(JCC *vm) {
     cc_register_cfunc(vm, "dlsym", (void*)dlsym, 2, 0);
     cc_register_cfunc(vm, "dlclose", (void*)dlclose, 1, 0);
     cc_register_cfunc(vm, "dlerror", (void*)dlerror, 0, 0);
+
+    cc_register_cfunc(vm, "strcasecmp", (void*)strcasecmp, 2, 0);
+    cc_register_cfunc(vm, "strncasecmp", (void*)strncasecmp, 3, 0);
+    cc_register_cfunc(vm, "bcmp", (void*)bcmp, 3, 0);
+    cc_register_cfunc(vm, "index", (void*)index, 2, 0);
+    cc_register_cfunc(vm, "rindex", (void*)rindex, 2, 0);
+    cc_register_cfunc(vm, "basename", (void*)wrap_basename, 1, 0);
+    cc_register_cfunc(vm, "dirname", (void*)wrap_dirname, 1, 0);
+    cc_register_cfunc(vm, "fnmatch", (void*)fnmatch, 3, 0);
+    cc_register_cfunc(vm, "getopt", (void*)getopt, 3, 0);
+    cc_register_cfunc(vm, "getopt_long", (void*)getopt_long, 5, 0);
+    cc_register_cfunc(vm, "poll", (void*)poll, 3, 0);
+    cc_register_cfunc(vm, "wait", (void*)wait, 1, 0);
+    cc_register_cfunc(vm, "waitpid", (void*)waitpid, 3, 0);
+    cc_register_cfunc(vm, "gettimeofday", (void*)gettimeofday, 2, 0);
+    cc_register_cfunc(vm, "settimeofday", (void*)settimeofday, 2, 0);
+    cc_register_cfunc(vm, "mmap", (void*)mmap, 6, 0);
+    cc_register_cfunc(vm, "munmap", (void*)munmap, 2, 0);
+    cc_register_cfunc(vm, "mprotect", (void*)mprotect, 3, 0);
+    cc_register_cfunc(vm, "msync", (void*)msync, 3, 0);
+    cc_register_cfunc(vm, "posix_madvise", (void*)posix_madvise, 3, 0);
+    cc_register_cfunc(vm, "stat", (void*)stat, 2, 0);
+    cc_register_cfunc(vm, "fstat", (void*)fstat, 2, 0);
+    cc_register_cfunc(vm, "lstat", (void*)lstat, 2, 0);
+    cc_register_cfunc(vm, "chmod", (void*)chmod, 2, 0);
+    cc_register_cfunc(vm, "mkdir", (void*)mkdir, 2, 0);
+    cc_register_cfunc(vm, "mkfifo", (void*)mkfifo, 2, 0);
+    cc_register_cfunc(vm, "umask", (void*)wrap_umask, 1, 0);
+    cc_register_cfunc(vm, "utime", (void*)utime, 2, 0);
+    cc_register_cfunc(vm, "htonl", (void*)wrap_htonl, 1, 0);
+    cc_register_cfunc(vm, "htons", (void*)wrap_htons, 1, 0);
+    cc_register_cfunc(vm, "ntohl", (void*)wrap_ntohl, 1, 0);
+    cc_register_cfunc(vm, "ntohs", (void*)wrap_ntohs, 1, 0);
+    cc_register_cfunc(vm, "inet_addr", (void*)wrap_inet_addr, 1, 0);
+    cc_register_cfunc(vm, "inet_ntoa", (void*)inet_ntoa, 1, 0);
+    cc_register_cfunc(vm, "inet_ntop", (void*)inet_ntop, 4, 0);
+    cc_register_cfunc(vm, "inet_pton", (void*)inet_pton, 3, 0);
+    cc_register_cfunc(vm, "bzero", (void*)wrap_bzero, 2, 0);
+    cc_register_cfunc(vm, "bcopy", (void*)wrap_bcopy, 3, 0);
 }
 #else
 void register_posix_functions(JCC *vm) {

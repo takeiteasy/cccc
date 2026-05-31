@@ -8,10 +8,12 @@
 #endif
 
 #include "stddef.h"
+#include "sys/types.h"
 
+#ifndef _SSIZE_T
 typedef long ssize_t;
-typedef long off_t;
-typedef int pid_t;
+#define _SSIZE_T
+#endif
 
 #ifndef NULL
 #define NULL ((void*)0)
@@ -45,6 +47,8 @@ extern pid_t getpid(void);
 extern pid_t getppid(void);
 extern unsigned int sleep(unsigned int seconds);
 extern int usleep(unsigned int useconds);
+extern int pipe(int fd[2]);
+extern void _exit(int status);
 extern pid_t fork(void);
 extern int execv(const char *path, char *const argv[]);
 extern int execve(const char *path, char *const argv[], char *const envp[]);

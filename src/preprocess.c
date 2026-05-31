@@ -1272,8 +1272,30 @@ static void register_stdlib_for_header(JCC *vm, const char *header_name) {
         register_wide_functions(vm);
     } else if (strncmp(header_name, "wctype.h", sizeof("wctype.h")) == 0) {
         register_wide_functions(vm);
+    } else if (strncmp(header_name, "strings.h", sizeof("strings.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "libgen.h", sizeof("libgen.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "fnmatch.h", sizeof("fnmatch.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "getopt.h", sizeof("getopt.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "poll.h", sizeof("poll.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "sys/wait.h", sizeof("sys/wait.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "sys/time.h", sizeof("sys/time.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "sys/mman.h", sizeof("sys/mman.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "sys/stat.h", sizeof("sys/stat.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "utime.h", sizeof("utime.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "arpa/inet.h", sizeof("arpa/inet.h")) == 0) {
+        register_posix_functions(vm);
     }
-    // Note: Other headers (like stddef.h, stdbool.h, etc.) don't have runtime
+    // Note: Other headers (like stddef.h, stdbool.h, sys/types.h, etc.) don't have runtime
     // functions
 }
 
