@@ -93,6 +93,8 @@ static void usage(const char *argv0, int exit_code) {
            "(e.g., 50MB, 100mb, default: 10MB)\n");
     printf("\t   --embed-hard-limit        Make #embed limit a hard error "
            "instead of warning\n");
+    printf("\t   --macro-recursion-limit=N Limit recursive pragma macro "
+           "expansion (default: 256, 0=unlimited)\n");
     printf("\nOptimization Levels:\n");
     printf("\t   --optimize[=LEVEL]        Enable bytecode optimization "
            "(default: disabled)\n");
@@ -247,6 +249,7 @@ int main(int argc, const char *argv[]) {
     int warnings_as_errors = 0; // --Werror
     size_t embed_limit = 0;     // --embed-limit (0 = use default)
     int embed_hard_error = 0;   // --embed-hard-limit
+    int macro_recursion_limit = -1; // --macro-recursion-limit
     int opt_level = 0; // -O0/-O1/-O2/-O3 (default: 0 = no optimization)
 
     if (argc <= 1)
@@ -296,6 +299,7 @@ int main(int argc, const char *argv[]) {
         {"embed-limit", required_argument, 0, 1014},
         {"embed-hard-limit", no_argument, 0, 1015},
         {"optimize", optional_argument, 0, 1016},
+        {"macro-recursion-limit", required_argument, 0, 1017},
         {0, 0, 0, 0}};
 
     const char *optstring = "0123haI:D:U:o:dvgbftzskpliPEMXSjFTVC";
@@ -494,6 +498,18 @@ int main(int argc, const char *argv[]) {
                 usage(argv[0], 1);
             }
             break;
+        case 1017: { // --macro-recursion-limit
+            char *end = NULL;
+            long val = strtol(optarg, &end, 10);
+            if (!optarg[0] || *end != '\0' || val < 0 || val > INT32_MAX) {
+                fprintf(stderr,
+                        "error: --macro-recursion-limit must be a "
+                        "non-negative integer\n");
+                usage(argv[0], 1);
+            }
+            macro_recursion_limit = (int)val;
+            break;
+        }
         case '?':
             if (optopt)
                 fprintf(stderr, "error: option -%c requires an argument\n",
@@ -604,6 +620,8 @@ int main(int argc, const char *argv[]) {
 
     // Set optimization level
     vm.compiler.opt_level = opt_level;
+    if (macro_recursion_limit >= 0)
+        vm.compiler.macro_recursion_limit = macro_recursion_limit;
 
     // If random canaries are enabled, regenerate the stack canary
     if (vm.flags & JCC_RANDOM_CANARIES) {

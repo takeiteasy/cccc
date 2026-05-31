@@ -2,7 +2,7 @@
 
 > **Warning:** Work in progress. Tested on `aarch64` (Apple Silicon) only.
 
-`JCC` is a **J**IT **C** **C**ompiler for C11, with selected C23 and GNU extensions. It compiles and executes C source files directly — no object files or native binaries are produced. See [COVERAGE.md](./COVERAGE.md) for detailed tables of C99, C11, C23, and GNU extension support.
+`JCC` is a **J**IT **C** **C**ompiler for C11, with selected C23 and GNU extensions. It also expands on top of standard C with additional features like pragma macros and AST construction helpers for hygienic reflection and AST manipulation. It compiles and executes C source files directly — no object files or native binaries are produced. See [COVERAGE.md](./COVERAGE.md) for detailed tables of C99, C11, C23, and GNU extension support.
 
 ## Features
 
@@ -10,7 +10,7 @@
   - Inline pre-parse generators for parser-visible functions and declarations
   - File-scope macro calls for explicit source-order generation
   - Call-site expansion for expression and statement rewriting
-  - Quasi-quoting (`_QUOTE`), type/symbol reflection, and AST construction helpers
+  - Quasi-quoting (`_QUOTE`), hygienic type/symbol reflection, `__jcc_gensym`, and AST construction helpers
 - **Memory safety suite** — runtime detection of common C bugs (see [SAFETY.md](./SAFETY.md))
   - Four preset levels (`-0` through `-3`): zero overhead to paranoid mode
   - Covers use-after-free, buffer overflows, dangling pointers, uninitialized reads, integer overflow, CFI, and more
@@ -23,6 +23,78 @@
   - `./jcc --json -o lib.json lib.h` — useful for generating FFI wrappers
 - **VM heap** — built-in allocator that intercepts `malloc`/`free` at compile time (`--vm-heap`)
   - Required for heap safety features; enabled automatically when heap safety flags are active
+
+## Usage
+
+```
+JCC: JIT C Compiler
+https://git.sr.ht/~takeiteasy/jcc
+
+Usage: ./jcc [options] file...
+
+Options:
+	-h/--help           Show this message
+	-I <path>           Add <path> to include search paths
+	   --isystem <path> Add <path> to system include paths (for non-standard headers)
+	-D <macro>[=def]    Define a macro
+	-U <macro>          Undefine a macro
+	-a/--ast            Dump AST
+	-P/--print-tokens   Print preprocessed tokens to stdout
+	-E/--preprocess     Output preprocessed source code (traditional C -E)
+	-M/--macro-expand   Output macro-expanded source code (for gcc compatibility)
+	-j/--json           Output header declarations as JSON
+	-X/--no-preprocess  Disable preprocessing step
+	-S/--no-stdlib      Do not link standard library
+	-o/--out <file>     Dump bytecode to <file> (no execution)
+	-d/--disassemble    Disassemble bytecode to stdout
+	-v/--verbose        Enable debug logging
+	-g/--debug          Enable interactive debugger
+
+Safety Levels (preset flag combinations):
+	-0/--safety=none     No safety checks (maximum performance)
+	-1/--safety=basic    Essential low-overhead checks (~5-10% overhead)
+	-2/--safety=standard Comprehensive development safety (~20-40% overhead)
+	-3/--safety=max      All safety features for deep debugging (~60-100%+ overhead)
+
+Memory Safety Options (can be combined with safety levels):
+	-b/--bounds-checks           Runtime array bounds checking
+	-f/--uaf-detection           Use-after-free detection
+	-t/--type-checks             Runtime type checking on pointer dereferences
+	-z/--uninitialized-detection Uninitialized variable detection
+	   --overflow-checks         Detect signed integer overflow
+	-s/--stack-canaries          Stack overflow protection
+	-k/--heap-canaries           Heap overflow protection
+	-l/--memory-leak-detection   Track allocations and report leaks at exit
+	-i/--stack-instrumentation   Track stack variable lifetimes and accesses
+	   --stack-errors            Enable runtime errors for stack instrumentation
+	-p/--pointer-sanitizer       Enable all pointer checks (bounds, UAF, type)
+	   --dangling-pointers       Detect use of stack pointers after function return
+	   --alignment-checks        Validate pointer alignment for type
+	   --provenance-tracking     Track pointer origin and validate operations
+	   --invalid-arithmetic      Detect pointer arithmetic outside object bounds
+	-F/--format-string-checks    Validate format strings in printf-family functions
+	   --random-canaries         Use random stack canaries (prevents predictable bypass)
+	   --memory-poisoning        Poison allocated/freed memory (0xCD/0xDD patterns)
+	-T/--memory-tagging          Temporal memory tagging (track pointer generation tags)
+	-V/--vm-heap                 Route all malloc/free through VM heap (enables memory safety)
+
+Preprocessor Options:
+	   --embed-limit=SIZE        Set #embed file size warning limit (e.g., 50MB, 100mb, default: 10MB)
+	   --embed-hard-limit        Make #embed limit a hard error instead of warning
+
+Optimization Levels:
+	   --optimize[=LEVEL]        Enable bytecode optimization (default: disabled)
+	                             LEVEL: 0=none, 1=basic, 2=standard, 3=aggressive
+	                             0: No optimization
+	                             1: Constant folding only
+	                             2: Constant folding + peephole
+	                             3: All optimizations (including dead code elimination)
+
+Example:
+	./jcc -o hello hello.c
+	./jcc -I ./include -D DEBUG -o prog prog.c
+	echo 'int main() { return 42; }' | ./jcc -
+```
 
 ## Standard Library
 

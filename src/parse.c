@@ -4286,6 +4286,7 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
                 node->macro_name = pm->name;
                 node->args = head.next;
                 node->macro_arg_count = arg_count;
+                node->macro_scope = vm->compiler.scope;
                 // Type will be determined after macro expansion
                 node->ty =
                     ty_long; // Placeholder - macros return Node* (pointer)

@@ -27,9 +27,22 @@ extern JCC *__jcc_current_vm;
 
 // Forward declarations for reflection API functions (to register as FFI)
 extern JCC *__jcc_get_vm(void);
+extern const char *__jcc_gensym(JCC *vm, const char *prefix);
 extern Type *__jcc_ast_find_type(JCC *vm, const char *name);
 extern bool __jcc_ast_type_exists(JCC *vm, const char *name);
 extern Type *__jcc_ast_get_type(JCC *vm, const char *name);
+extern TypeKind __jcc_ast_type_kind(Type *ty);
+extern int __jcc_ast_type_size(Type *ty);
+extern int __jcc_ast_type_align(Type *ty);
+extern bool __jcc_ast_type_is_unsigned(Type *ty);
+extern bool __jcc_ast_type_is_const(Type *ty);
+extern Type *__jcc_ast_type_base(Type *ty);
+extern int __jcc_ast_type_array_len(Type *ty);
+extern Type *__jcc_ast_type_return_type(Type *ty);
+extern int __jcc_ast_type_param_count(Type *ty);
+extern Type *__jcc_ast_type_param_at(Type *ty, int index);
+extern bool __jcc_ast_type_is_variadic(Type *ty);
+extern const char *__jcc_ast_type_name(Type *ty);
 extern Node *__jcc_ast_int_literal(JCC *vm, int64_t value);
 extern Node *__jcc_ast_float_literal(JCC *vm, double value);
 extern Node *__jcc_ast_string_literal(JCC *vm, const char *str);
@@ -95,11 +108,31 @@ extern Node *__jcc_quote_n(JCC *vm, const char *tmpl, Node **nodes, int count);
 static void register_reflection_ffi(JCC *vm) {
     // VM accessor
     cc_register_cfunc(vm, "__jcc_get_vm", (void *)__jcc_get_vm, 0, 0);
+    cc_register_cfunc(vm, "__jcc_gensym", (void *)__jcc_gensym, 2, 0);
 
     // Type lookup
     cc_register_cfunc(vm, "__jcc_ast_find_type", (void *)__jcc_ast_find_type, 2, 0);
     cc_register_cfunc(vm, "__jcc_ast_type_exists", (void *)__jcc_ast_type_exists, 2, 0);
     cc_register_cfunc(vm, "__jcc_ast_get_type", (void *)__jcc_ast_get_type, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_type_kind", (void *)__jcc_ast_type_kind, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_type_size", (void *)__jcc_ast_type_size, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_type_align", (void *)__jcc_ast_type_align, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_type_is_unsigned",
+                      (void *)__jcc_ast_type_is_unsigned, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_type_is_const",
+                      (void *)__jcc_ast_type_is_const, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_type_base", (void *)__jcc_ast_type_base, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_type_array_len",
+                      (void *)__jcc_ast_type_array_len, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_type_return_type",
+                      (void *)__jcc_ast_type_return_type, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_type_param_count",
+                      (void *)__jcc_ast_type_param_count, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_type_param_at",
+                      (void *)__jcc_ast_type_param_at, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_type_is_variadic",
+                      (void *)__jcc_ast_type_is_variadic, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_type_name", (void *)__jcc_ast_type_name, 1, 0);
 
     // Type construction
     cc_register_cfunc(vm, "__jcc_ast_make_pointer", (void *)__jcc_ast_make_pointer, 2, 0);
@@ -594,9 +627,9 @@ void cc_execute_top_level_pragma_macro(JCC *vm, char *name, Token *tok,
 }
 
 // Recursively transform macro calls in an AST node
-static Node *transform_node(JCC *vm, Node *node);
+static Node *transform_node(JCC *vm, Node *node, int depth);
 
-static Node *transform_node(JCC *vm, Node *node) {
+static Node *transform_node(JCC *vm, Node *node, int depth) {
     if (!node)
         return NULL;
 
@@ -618,6 +651,15 @@ static Node *transform_node(JCC *vm, Node *node) {
             return node;
         }
 
+        int limit = vm->compiler.macro_recursion_limit;
+        if (limit > 0 && depth >= limit) {
+            error_tok(vm, node->tok,
+                      "pragma macro recursion limit exceeded while expanding "
+                      "'%s' (depth %d, limit %d)",
+                      node->macro_name, depth + 1, limit);
+            return node;
+        }
+
         // Execute the macro to get the replacement AST
         if (vm->debug_vm)
             printf("  Executing macro '%s'...\n", pm->name);
@@ -629,8 +671,12 @@ static Node *transform_node(JCC *vm, Node *node) {
             return node;
         }
 
+        Scope *saved_scope = vm->compiler.scope;
+        if (node->macro_scope)
+            vm->compiler.scope = node->macro_scope;
         Node *result =
             execute_pragma_macro(vm, pm, node->args, node->macro_arg_count);
+        vm->compiler.scope = saved_scope;
 
         if (vm->debug_vm)
             printf("  Macro returned %p (kind=%d)\n", (void *)result,
@@ -655,7 +701,7 @@ static Node *transform_node(JCC *vm, Node *node) {
 
         // Recursively transform in case the macro result contains more
         // macro calls
-        return transform_node(vm, result);
+        return transform_node(vm, result, depth + 1);
     }
 
     // For ND_EXPR_STMT: if the inner expression is replaced by a statement-kind
@@ -663,7 +709,7 @@ static Node *transform_node(JCC *vm, Node *node) {
     // to replace the entire expression-statement wrapper.  Without this,
     // codegen would try to gen_expr() a statement node and fail.
     if (node->kind == ND_EXPR_STMT) {
-        node->lhs = transform_node(vm, node->lhs);
+        node->lhs = transform_node(vm, node->lhs, depth);
         if (node->lhs) {
             NodeKind k = node->lhs->kind;
             if (k == ND_RETURN || k == ND_IF || k == ND_FOR || k == ND_DO ||
@@ -675,40 +721,41 @@ static Node *transform_node(JCC *vm, Node *node) {
     }
 
     // Recursively transform all child nodes
-    node->lhs = transform_node(vm, node->lhs);
-    node->rhs = transform_node(vm, node->rhs);
-    node->cond = transform_node(vm, node->cond);
-    node->then = transform_node(vm, node->then);
-    node->els = transform_node(vm, node->els);
-    node->init = transform_node(vm, node->init);
-    node->inc = transform_node(vm, node->inc);
+    node->lhs = transform_node(vm, node->lhs, depth);
+    node->rhs = transform_node(vm, node->rhs, depth);
+    node->cond = transform_node(vm, node->cond, depth);
+    node->then = transform_node(vm, node->then, depth);
+    node->els = transform_node(vm, node->els, depth);
+    node->init = transform_node(vm, node->init, depth);
+    node->inc = transform_node(vm, node->inc, depth);
 
     // For ND_BLOCK, body is a chain of statements linked via ->next
     // We need to transform each statement in the chain
     if (node->body) {
-        node->body = transform_node(vm, node->body);
+        node->body = transform_node(vm, node->body, depth);
         // Also transform sibling statements in the chain
         for (Node *stmt = node->body; stmt; stmt = stmt->next) {
             if (stmt->next) {
-                stmt->next = transform_node(vm, stmt->next);
+                stmt->next = transform_node(vm, stmt->next, depth);
             }
         }
     }
 
     // Transform argument lists (also a chain)
     if (node->args) {
-        node->args = transform_node(vm, node->args);
+        node->args = transform_node(vm, node->args, depth);
         for (Node *arg = node->args; arg && arg->next; arg = arg->next) {
-            arg->next = transform_node(vm, arg->next);
+            arg->next = transform_node(vm, arg->next, depth);
         }
     }
 
     // Transform case lists for switch
     for (Node *c = node->case_next; c; c = c->case_next) {
-        c->body = transform_node(vm, c->body);
+        c->body = transform_node(vm, c->body, depth);
     }
     if (node->default_case) {
-        node->default_case->body = transform_node(vm, node->default_case->body);
+        node->default_case->body =
+            transform_node(vm, node->default_case->body, depth);
     }
 
     return node;
@@ -1000,7 +1047,7 @@ void cc_expand_pragma_macros(JCC *vm, Obj *prog) {
         vm->compiler.current_fn = fn;
 
         // Transform the function body
-        fn->body = transform_node(vm, fn->body);
+        fn->body = transform_node(vm, fn->body, 0);
     }
 
     // Also check global initializers
@@ -1008,7 +1055,7 @@ void cc_expand_pragma_macros(JCC *vm, Obj *prog) {
         if (var->is_function)
             continue;
         if (var->init_expr) {
-            var->init_expr = transform_node(vm, var->init_expr);
+            var->init_expr = transform_node(vm, var->init_expr, 0);
         }
     }
 

@@ -56,6 +56,13 @@ static char *reflect_unique_name(JCC *vm) {
     return arena_format(vm, ".L..%d", vm->compiler.unique_name_counter++);
 }
 
+const char *__jcc_gensym(JCC *vm, const char *prefix) {
+    if (!vm || !prefix)
+        return NULL;
+    return arena_format(vm, "%s__%d", prefix,
+                        vm->compiler.macro_gensym_counter++);
+}
+
 static Obj *reflect_new_gvar(JCC *vm, char *name, int name_len, Type *ty) {
     Obj *var = reflect_new_var(vm, name, name_len, ty);
     var->next = vm->compiler.globals;
@@ -871,6 +878,11 @@ _Obj *__jcc_ast_function(JCC *vm, const char *name,
     }
 
     if (existing) {
+        if (existing->is_definition)
+            error("expected unique generated function name, got existing "
+                  "definition '%s'",
+                  name);
+
         // Update existing forward declaration to be a definition
         existing->is_definition = true;
         // Update return type if needed
@@ -1404,6 +1416,35 @@ static _Node *quote_substitute(QuoteSubstState *s, _Node *node) {
     return node;
 }
 
+static void quote_rebind_macro_scope(_Node *node, Scope *old_scope,
+                                     Scope *new_scope) {
+    if (!node)
+        return;
+
+    if (node->kind == ND_MACRO_CALL && node->macro_scope == old_scope)
+        node->macro_scope = new_scope;
+
+    quote_rebind_macro_scope(node->lhs, old_scope, new_scope);
+    quote_rebind_macro_scope(node->rhs, old_scope, new_scope);
+    quote_rebind_macro_scope(node->cond, old_scope, new_scope);
+    quote_rebind_macro_scope(node->then, old_scope, new_scope);
+    quote_rebind_macro_scope(node->els, old_scope, new_scope);
+    quote_rebind_macro_scope(node->init, old_scope, new_scope);
+    quote_rebind_macro_scope(node->inc, old_scope, new_scope);
+
+    for (_Node *st = node->body; st; st = st->next)
+        quote_rebind_macro_scope(st, old_scope, new_scope);
+
+    for (_Node *a = node->args; a; a = a->next)
+        quote_rebind_macro_scope(a, old_scope, new_scope);
+
+    for (_Node *c = node->case_next; c; c = c->case_next)
+        quote_rebind_macro_scope(c->body, old_scope, new_scope);
+    if (node->default_case)
+        quote_rebind_macro_scope(node->default_case->body, old_scope,
+                                 new_scope);
+}
+
 // Determine lexically whether the token stream should be parsed as a statement.
 // Uses the first token kind/text and, as a fallback, whether the last
 // non-EOF token is ';' (expression-statement form).
@@ -1484,6 +1525,8 @@ static _Node *quote_core(JCC *vm, const char *tmpl,
     } else {
         result = cc_parse_expr(vm, &rest, toks);
     }
+
+    quote_rebind_macro_scope(result, &quote_scope, quote_scope.next);
 
     // 6. Restore outer scope unconditionally
     vm->compiler.scope = quote_scope.next;

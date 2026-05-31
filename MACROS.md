@@ -6,7 +6,7 @@ replace macro call sites with generated code.
 
 The macro API is automatically available while pragma macro and comptime helper
 functions are compiled. Macro code can use the `_AST_*`, `_QUOTE*`, `_ERROR_AT`,
-and `_DUMP_*` convenience macros directly.
+`_GENSYM`, and `_DUMP_*` convenience macros directly.
 
 ## Execution Model
 
@@ -103,6 +103,10 @@ int main(void) {
 
 Macro arguments are `_Node *` pointers to the original argument ASTs. A macro
 can reuse, inspect, wrap, or replace those nodes.
+
+Macro expansion is bounded by `--macro-recursion-limit=N` to catch accidental
+self-recursive expansions. The default is 256. Set the limit to 0 to disable
+the check.
 
 Statement macros work the same way. Return a statement node such as
 `_AST_RETURN(...)`, `_AST_IF(...)`, `_AST_BLOCK(...)`, or a statement parsed with
@@ -207,6 +211,12 @@ Useful reflection entry points include:
 | Read members | `_AST_STRUCT_MEMBER_AT(ty, i)`, `_AST_MEMBER_NAME(m)`, `_AST_MEMBER_TYPE(m)`, `_AST_MEMBER_OFFSET(m)` |
 | Find globals | `_AST_FIND_GLOBAL(name)`, `_AST_GLOBAL_COUNT()`, `_AST_GLOBAL_AT(i)` |
 
+For call-site macro expansion, `_AST_VAR_REF(name)` and `_AST_FIND_TYPE(name)`
+use the lexical scope where the macro call appears, including nested block
+locals and typedefs. When a macro receives an expression argument and needs the
+exact variable passed by the caller, prefer inspecting the argument node itself
+instead of looking it up again by string name.
+
 ## Function Generation
 
 Generated functions are `_Obj *` values. Create the object, add parameters,
@@ -234,6 +244,23 @@ int main(void) {
 For file-scope explicit calls, call `_AST_FORWARD_DECLARE(fn)` after the
 signature is complete and before source code needs the generated function name.
 Inline macros handle parser-visible declarations automatically.
+
+`_AST_FUNCTION(name, ret_type)` promotes an existing forward declaration with
+the same name to a generated definition. If a definition already exists, JCC
+emits a compile-time error instead of silently replacing it. Use
+`_GENSYM(prefix)` or `__jcc_gensym(_VM, prefix)` for private helper names.
+
+```c
+#pragma macro
+_Node *make_helper(void) {
+    const char *name = _GENSYM("helper");
+    _Type *int_ty = _AST_GET_TYPE("int");
+    _Obj *fn = _AST_FUNCTION(name, int_ty);
+
+    _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(_AST_INT_LITERAL(42)));
+    return _AST_INT_LITERAL(0);
+}
+```
 
 ## Local Variables
 
@@ -352,6 +379,7 @@ AST dump helpers are available while developing macros:
 | `_AST_STRING_LITERAL(str)` | String literal |
 | `_AST_VAR_REF(name)` | Variable reference |
 | `_AST_PARAM_REF(fn, name)` | Generated function parameter reference |
+| `_GENSYM(prefix)` | Unique arena-allocated symbol name using `__jcc_gensym` |
 | `_AST_BINARY(op, l, r)` | Binary expression |
 | `_AST_UNARY(op, operand)` | Unary expression |
 | `_AST_CAST(expr, ty)` | Cast expression |

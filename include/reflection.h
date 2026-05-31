@@ -150,6 +150,15 @@ extern JCC *__jcc_get_vm(void);
  */
 #define _VM __jcc_get_vm()
 
+/*!
+ * @function __jcc_gensym
+ * @abstract Generate a unique identifier string for macro-created symbols.
+ * @param vm The VM context.
+ * @param prefix Prefix for the generated name.
+ * @return An arena-allocated string of the form "<prefix>__<n>".
+ */
+const char *__jcc_gensym(JCC *vm, const char *prefix);
+
 // ============================================================================
 // Macro Diagnostics (ticket #78)
 // ============================================================================
@@ -651,6 +660,7 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, _Node *node);
 #define _DUMP_TREE_TO_STRING(node) __jcc_dump_tree_to_string(_VM, node)
 #define _DUMP_AST_GEN(node) __jcc_dump_ast_gen(_VM, node)
 #define _DUMP_AST_GEN_TO_STRING(node) __jcc_dump_ast_gen_to_string(_VM, node)
+#define _GENSYM(prefix) __jcc_gensym(_VM, prefix)
 
 #define _AST_FIND_TYPE(name) __jcc_ast_find_type(_VM, name)
 #define _AST_TYPE_EXISTS(name) __jcc_ast_type_exists(_VM, name)

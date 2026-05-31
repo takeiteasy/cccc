@@ -420,6 +420,7 @@ typedef enum {
 
 typedef struct Node Node;
 typedef struct Obj Obj;
+typedef struct Scope Scope;
 
 /*!
  @struct Type
@@ -636,6 +637,7 @@ struct Node {
     // Pragma macro call (ND_MACRO_CALL)
     char *macro_name;    // Name of pragma macro to invoke
     int macro_arg_count; // Number of arguments
+    Scope *macro_scope;  // Parser scope active at the macro call site
 };
 
 /*!
@@ -789,13 +791,13 @@ typedef struct TagScopeNode {
     struct TagScopeNode *next;
 } TagScopeNode;
 
-typedef struct Scope {
+struct Scope {
     struct Scope *next;
     // C has two block scopes; one is for variables/typedefs and
     // the other is for struct/union/enum tags.
     VarScopeNode *vars; // Linked list of variables/typedefs (not HashMap)
     TagScopeNode *tags; // Linked list of tags (not HashMap)
-} Scope;
+};
 
 /*!
  @struct LabelEntry
@@ -1210,6 +1212,7 @@ typedef struct Compiler {
     bool in_macro_mode;           // True when compiling/executing a pragma macro
     bool in_macro_expansion;      // True during macro AST expansion pass
     bool pragma_macros_compiled;  // True after compile_all_pragma_macros has run
+    int macro_recursion_limit;    // 0 = unlimited, default = 256
     Obj *macro_globals; // Globals defined by inline pragma macros (injected into
                         // the final program before codegen)
 
@@ -1316,6 +1319,7 @@ typedef struct Compiler {
 
     // Per-instance state (moved from static globals for thread-safety)
     int unique_name_counter; // Counter for new_unique_name()
+    int macro_gensym_counter; // Counter for __jcc_gensym()
     int counter_macro_value; // __COUNTER__ macro value
 
     // Optimization settings
