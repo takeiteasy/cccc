@@ -37,7 +37,7 @@ void register_math_functions(JCC *vm) {
 
     // Basic operations
     cc_register_cfunc(vm, "fabs", (void*)fabs, 1, 1);
-    cc_register_cfunc(vm, "fabsf", (void*)fabsf, 1, 0);
+    cc_register_cfunc(vm, "fabsf", (void*)fabsf, 1, 1);
     cc_register_cfunc(vm, "fabsl", (void*)fabsl, 1, 1);
     cc_register_cfunc_ex(vm, "fmod", (void*)fmod, 2, 1, 0b11);
     cc_register_cfunc_ex(vm, "fmodf", (void*)fmodf, 2, 0, 0b11);

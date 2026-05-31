@@ -863,6 +863,7 @@ typedef struct ForeignFunc {
                         // are variable)
     uint64_t double_arg_mask; // Bitmask indicating which args are doubles (bit
                               // N = arg N)
+    int is_dynamic_placeholder; // 1 for extern declarations awaiting dlsym
 } ForeignFunc;
 
 /*!

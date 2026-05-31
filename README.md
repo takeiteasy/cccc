@@ -36,6 +36,9 @@ Options:
 	-h/--help           Show this message
 	-I <path>           Add <path> to include search paths
 	   --isystem <path> Add <path> to system include paths (for non-standard headers)
+	-L/--library-path <path> Add <path> to dynamic library search paths
+	   --library <name> Link dynamic library by name or path
+	   --link <name>    Alias for --library
 	-D <macro>[=def]    Define a macro
 	-U <macro>          Undefine a macro
 	-a/--ast            Dump AST
@@ -104,14 +107,21 @@ Example:
 JCC ships embedded standard library headers compiled directly into the binary — no external headers required at runtime:
 
 - `stdio.h`, `stdlib.h`, `string.h`, `math.h`, `time.h`, `ctype.h`
+- `locale.h`, `signal.h`, `wchar.h`, `wctype.h`, `uchar.h`, `fenv.h`, `tgmath.h`
+- POSIX headers on macOS/Linux: `dlfcn.h`, `unistd.h`, `fcntl.h`
 - `stdarg.h`, `setjmp.h` — JCC-specific implementations for the VM calling convention
-- `stddef.h`, `stdbool.h`, `stdint.h`, `limits.h`, `float.h`
+- `stddef.h`, `stdbool.h`, `stdint.h`, `limits.h`, `float.h`, `iso646.h`
 
-Headers are embedded by `std.py`, which generates `src/std.c`. To regenerate after modifying files in `include/`:
+Headers are embedded by `gen_std.c`, which generates `src/std.c`. To regenerate after modifying files in `include/`:
 
 ```bash
-python3 std.py && make
+make generate-std && make
 ```
+
+Dynamic libraries can be opened with `--library`/`--link` and searched with
+`-L`/`--library-path`. When libraries are requested, unresolved extern function
+declarations are resolved with `dlsym` before execution; unresolved symbols are
+reported before the VM starts.
 
 ## Building
 

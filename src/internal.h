@@ -521,8 +521,13 @@ long long generate_random_canary(void);
 //
 
 void register_ctype_functions(JCC *vm);
+void register_fenv_functions(JCC *vm);
+void register_locale_functions(JCC *vm);
 void register_math_functions(JCC *vm);
+void register_posix_functions(JCC *vm);
+void register_signal_functions(JCC *vm);
 void register_stdio_functions(JCC *vm);
 void register_stdlib_functions(JCC *vm);
 void register_string_functions(JCC *vm);
 void register_time_functions(JCC *vm);
+void register_wide_functions(JCC *vm);

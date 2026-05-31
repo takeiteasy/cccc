@@ -13,6 +13,8 @@ struct timespec {
     long tv_nsec;
 };
 
+#define TIME_UTC 1
+
 struct tm {
     int tm_sec;
     int tm_min;
@@ -30,7 +32,7 @@ extern double difftime(time_t time1, time_t time0);
 extern time_t mktime(struct tm *timeptr);
 // extern time_t timegm(const struct tm *timeptr);
 extern time_t time(time_t *t);
-// extern int timespec_get(struct timespec *ts, int base);
+extern int timespec_get(struct timespec *ts, int base);
 // extern int timespec_getres(struct timespec *ts, int base);
 extern char *asctime(const struct tm *tm); // deprecated
 extern char *ctime(const time_t *timer); // deprecated

@@ -35,7 +35,7 @@ extern unsigned long long int strtoull(const char* nptr, char** endptr, int base
 
 extern int rand(void);
 extern void srand(unsigned int seed);
-// extern void* aligned_alloc(size_t alignment, size_t size);
+extern void* aligned_alloc(size_t alignment, size_t size);
 extern void* calloc(size_t nmemb, size_t size);
 extern void free(void* ptr);
 // extern void free_sized(void* ptr, size_t size);
@@ -44,9 +44,9 @@ extern void* malloc(size_t size);
 extern void* realloc(void* ptr, size_t size);
 extern void abort(void);
 extern int atexit(void (*func)(void));
-// extern int at_quick_exit(void (*func)(void));
+extern int at_quick_exit(void (*func)(void));
 extern void exit(int status);
-// extern void _Exit(int status);
+extern void _Exit(int status);
 extern char* getenv(const char* name);
 extern void quick_exit(int status);
 extern int system(const char* string);
@@ -64,8 +64,6 @@ typedef struct { long long quot; long long rem; } lldiv_t;
 extern div_t div(int numer, int denom);
 extern ldiv_t ldiv(long int numer, long int denom);
 extern lldiv_t lldiv(long long int numer, long long int denom);
-
-typedef int wchar_t; // Temporary definition for wchar_t
 
 extern int mblen(const char* s, size_t n);
 extern int mbtowc(wchar_t* pwc, const char* s, size_t n);

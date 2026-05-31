@@ -30,6 +30,9 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-I <path>           Add <path> to include search paths\n");
     printf("\t   --isystem <path> Add <path> to system include paths (for "
            "non-standard headers)\n");
+    printf("\t-L/--library-path <path> Add <path> to dynamic library search paths\n");
+    printf("\t   --library <name> Link dynamic library by name or path\n");
+    printf("\t   --link <name>    Alias for --library\n");
     printf("\t-D <macro>[=def]    Define a macro\n");
     printf("\t-U <macro>          Undefine a macro\n");
     printf("\t-a/--ast            Dump AST\n");
@@ -114,6 +117,102 @@ static void usage(const char *argv0, int exit_code) {
     printf("\techo 'int main() { return 42; }' | %s -\n", argv0);
     printf("\n");
     exit(exit_code);
+}
+
+static char *find_requested_library(const char *name, const char **paths,
+                                    int paths_count) {
+    if (!name)
+        return NULL;
+
+    if (strchr(name, '/') || strstr(name, ".dylib") || strstr(name, ".so") ||
+        strstr(name, ".dll"))
+        return strdup(name);
+
+#if defined(_WIN32) || defined(_WIN64)
+    const char *prefix = "";
+    const char *suffix = ".dll";
+#elif defined(__APPLE__)
+    const char *prefix = "lib";
+    const char *suffix = ".dylib";
+#else
+    const char *prefix = "lib";
+    const char *suffix = ".so";
+#endif
+
+    char libname[512];
+    snprintf(libname, sizeof(libname), "%s%s%s", prefix, name, suffix);
+
+    for (int i = 0; i < paths_count; i++) {
+        char candidate[1024];
+        snprintf(candidate, sizeof(candidate), "%s/%s", paths[i], libname);
+        if (access(candidate, F_OK) == 0)
+            return strdup(candidate);
+    }
+
+    return strdup(libname);
+}
+
+static int load_requested_libraries(JCC *vm, const char **libs, int libs_count,
+                                    const char **paths, int paths_count) {
+    for (int i = 0; i < libs_count; i++) {
+        char *path = find_requested_library(libs[i], paths, paths_count);
+        if (!path)
+            return -1;
+        int rc = cc_dlopen(vm, path);
+        free(path);
+        if (rc != 0)
+            return -1;
+    }
+    return 0;
+}
+
+static int ffi_index_by_name(JCC *vm, const char *name) {
+    for (int i = 0; i < vm->compiler.ffi_count; i++) {
+        if (vm->compiler.ffi_table[i].name &&
+            strlen(vm->compiler.ffi_table[i].name) == strlen(name) &&
+            strncmp(vm->compiler.ffi_table[i].name, name, strlen(name)) == 0)
+            return i;
+    }
+    return -1;
+}
+
+static int count_params(Type *ty) {
+    int n = 0;
+    for (Type *p = ty; p; p = p->next)
+        n++;
+    return n;
+}
+
+static void register_dynamic_externs(JCC *vm, Obj *prog) {
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (!obj->is_function || obj->is_definition || !obj->name ||
+            ffi_index_by_name(vm, obj->name) >= 0)
+            continue;
+
+        int nargs = count_params(obj->ty->params);
+        int returns_double = is_flonum(obj->ty->return_ty);
+        if (obj->ty->is_variadic)
+            cc_register_variadic_cfunc(vm, obj->name, (void *)1, nargs,
+                                       returns_double);
+        else
+            cc_register_cfunc(vm, obj->name, (void *)1, nargs, returns_double);
+        vm->compiler.ffi_table[vm->compiler.ffi_count - 1]
+            .is_dynamic_placeholder = 1;
+    }
+}
+
+static int verify_dynamic_externs(JCC *vm) {
+    int ok = 1;
+    for (int i = 0; i < vm->compiler.ffi_count; i++) {
+        ForeignFunc *ff = &vm->compiler.ffi_table[i];
+        if (ff->is_dynamic_placeholder && ff->func_ptr == (void *)1) {
+            fprintf(stderr,
+                    "error: unresolved dynamic library symbol '%s'\n",
+                    ff->name);
+            ok = 0;
+        }
+    }
+    return ok ? 0 : -1;
 }
 
 static char *read_stdin_to_tmp(void) {
@@ -233,6 +332,10 @@ int main(int argc, const char *argv[]) {
     int inc_paths_count = 0;
     const char **sys_inc_paths = NULL; // -isystem
     int sys_inc_paths_count = 0;
+    const char **lib_paths = NULL; // -L / --library-path
+    int lib_paths_count = 0;
+    const char **libs = NULL; // --library / --link
+    int libs_count = 0;
     const char **defines = NULL; // -D
     int defines_count = 0;
     const char **undefs = NULL; // -U
@@ -299,6 +402,9 @@ int main(int argc, const char *argv[]) {
         {"control-flow-integrity", no_argument, 0, 'C'},
         {"include", required_argument, 0, 'I'},
         {"isystem", required_argument, 0, 1013},
+        {"library-path", required_argument, 0, 'L'},
+        {"library", required_argument, 0, 1018},
+        {"link", required_argument, 0, 1018},
         {"define", required_argument, 0, 'D'},
         {"undef", required_argument, 0, 'U'},
         {"max-errors", required_argument, 0, 1010},
@@ -309,7 +415,7 @@ int main(int argc, const char *argv[]) {
         {"macro-recursion-limit", required_argument, 0, 1017},
         {0, 0, 0, 0}};
 
-    const char *optstring = "0123haI:D:U:o:cdvgbftzskpliPEMGXSjFTVC";
+    const char *optstring = "0123haI:L:D:U:o:cdvgbftzskpliPEMGXSjFTVC";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(argc, (char *const *)argv, optstring,
@@ -380,11 +486,20 @@ int main(int argc, const char *argv[]) {
                 realloc(inc_paths, sizeof(*inc_paths) * (inc_paths_count + 1));
             inc_paths[inc_paths_count++] = strdup(optarg);
             break;
+        case 'L':
+            lib_paths =
+                realloc(lib_paths, sizeof(*lib_paths) * (lib_paths_count + 1));
+            lib_paths[lib_paths_count++] = strdup(optarg);
+            break;
         case 1013: // --isystem
             sys_inc_paths =
                 realloc(sys_inc_paths,
                         sizeof(*sys_inc_paths) * (sys_inc_paths_count + 1));
             sys_inc_paths[sys_inc_paths_count++] = strdup(optarg);
+            break;
+        case 1018: // --library / --link
+            libs = realloc(libs, sizeof(*libs) * (libs_count + 1));
+            libs[libs_count++] = strdup(optarg);
             break;
         case 'D':
             defines = realloc(defines, sizeof(*defines) * (defines_count + 1));
@@ -617,6 +732,12 @@ int main(int argc, const char *argv[]) {
                 goto BAIL;
             }
 
+            if (load_requested_libraries(&vm, libs, libs_count, lib_paths,
+                                         lib_paths_count) != 0) {
+                exit_code = 1;
+                goto BAIL;
+            }
+
             // Run the loaded bytecode
             exit_code = cc_run(&vm, argc, (char **)argv);
             goto BAIL;
@@ -807,6 +928,9 @@ int main(int argc, const char *argv[]) {
         goto BAIL;
     }
 
+    if (libs_count > 0)
+        register_dynamic_externs(&vm, merged_prog);
+
     if (print_tokens) {
         for (int i = 0; i < input_files_count; i++) {
             printf("=== Tokens for %s ===\n", input_files[i]);
@@ -844,6 +968,16 @@ int main(int argc, const char *argv[]) {
 
     // Compile-only mode: stop here without requiring main() or executing
     if (vm.compiler.compile_only) {
+        goto BAIL;
+    }
+
+    if (load_requested_libraries(&vm, libs, libs_count, lib_paths,
+                                 lib_paths_count) != 0) {
+        exit_code = 1;
+        goto BAIL;
+    }
+    if (verify_dynamic_externs(&vm) != 0) {
+        exit_code = 1;
         goto BAIL;
     }
 
@@ -887,6 +1021,16 @@ BAIL:
         for (int i = 0; i < inc_paths_count; i++)
             free((void *)inc_paths[i]);
         free(inc_paths);
+    }
+    if (lib_paths) {
+        for (int i = 0; i < lib_paths_count; i++)
+            free((void *)lib_paths[i]);
+        free(lib_paths);
+    }
+    if (libs) {
+        for (int i = 0; i < libs_count; i++)
+            free((void *)libs[i]);
+        free(libs);
     }
     if (sys_inc_paths) {
         for (int i = 0; i < sys_inc_paths_count; i++)

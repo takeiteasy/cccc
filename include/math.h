@@ -16,7 +16,7 @@
 #ifndef HUGE_VALL
 #define HUGE_VALL ((long double)HUGE_VAL)
 #endif
-#define INFINITY (__jcc_inf())
+#define INFINITY (__jcc_inff())
 #define NAN (__jcc_nanf(""))
 
 /* fpclassify values */

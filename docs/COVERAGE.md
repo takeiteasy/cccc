@@ -70,10 +70,10 @@ Conformance status for each C standard. Intended as a reference for `--std` flag
 | `<errno.h>` | ✓ | |
 | `<float.h>` | ✓ | |
 | `<limits.h>` | ✓ | |
-| `<locale.h>` | ✗ | |
+| `<locale.h>` | ✓ | Host locale APIs registered |
 | `<math.h>` | ✓ | Full C99 function set registered |
 | `<setjmp.h>` | ✓ | JCC-specific implementation for VM calling convention |
-| `<signal.h>` | ✗ | |
+| `<signal.h>` | ✓ | Common signal constants, `signal`, and `raise` |
 | `<stdarg.h>` | ✓ | JCC-specific implementation |
 | `<stddef.h>` | ✓ | |
 | `<stdio.h>` | ✓ | |
@@ -120,14 +120,13 @@ Conformance status for each C standard. Intended as a reference for `--std` flag
 | Header | Status | Notes |
 |---|---|---|
 | `<complex.h>` | ✗ | |
-| `<fenv.h>` | ✗ | |
 | `<inttypes.h>` | ✓ | |
-| `<iso646.h>` | ✗ | |
 | `<stdbool.h>` | ✓ | |
 | `<stdint.h>` | ✓ | |
-| `<tgmath.h>` | ✗ | |
-| `<wchar.h>` | ✗ | Header not embedded; type available via host for wrapper use |
-| `<wctype.h>` | ✗ | |
+| `<fenv.h>` | ✓ | Host floating-point environment APIs registered |
+| `<tgmath.h>` | ~ | Type-generic macros for real floating types |
+| `<wchar.h>` / `<wctype.h>` | ~ | Common wide-character APIs registered |
+| `<iso646.h>` | ✓ | |
 | `snprintf`, `vsnprintf` | ✓ | |
 | `strtof`, `strtold`, `strtoll`, `strtoull` | ✓ | |
 | `llabs`, `lldiv` | ✓ | |
@@ -149,7 +148,7 @@ Conformance status for each C standard. Intended as a reference for `--std` flag
 | `_Thread_local` | ~ | Parsed and accepted; no thread-local storage |
 | `_Atomic` types | ~ | Parsed; non-atomic load/store emitted |
 | Anonymous structs and unions | ✓ | |
-| `char16_t` / `char32_t` types | ✗ | |
+| `char16_t` / `char32_t` types | ✓ | Provided by `<uchar.h>` |
 | `u8`, `u`, `U` string and character literal prefixes | ✓ | See C99 row; support predates formal C11 adoption |
 
 ### Standard Library
@@ -160,10 +159,10 @@ Conformance status for each C standard. Intended as a reference for `--std` flag
 | `<stdatomic.h>` | ~ | Header present; operations are non-atomic |
 | `<stdnoreturn.h>` | ✓ | |
 | `<threads.h>` | ✗ | JCC is single-threaded |
-| `<uchar.h>` | ✗ | |
-| `aligned_alloc` | ✗ | |
-| `quick_exit` / `at_quick_exit` | ✗ | |
-| `timespec_get` | ✗ | |
+| `<uchar.h>` | ~ | Types and basic conversion APIs |
+| `aligned_alloc` | ✓ | Backed by host aligned allocation |
+| `quick_exit` / `at_quick_exit` | ✓ | |
+| `timespec_get` | ✓ | `TIME_UTC` |
 
 ---
 
@@ -250,9 +249,6 @@ C17 is a bug-fix release — no new language features or library functions were 
 |---|---|
 | Threading (`<threads.h>`, `pthread`) | JCC is single-threaded |
 | Atomic operations (`<stdatomic.h>` operations) | Headers present; operations are non-atomic |
-| `<locale.h>` | |
-| `<signal.h>` | |
-| `<complex.h>` / `<tgmath.h>` | |
-| `<wchar.h>` / `<wctype.h>` | |
+| `<complex.h>` / `_Complex` / `_Imaginary` | Complex object representation and codegen are not implemented |
 | Native code generation | JCC produces VM bytecode only |
-| Shared libraries / dynamic linking | FFI calls are registered from the host; `dlopen` not supported |
+| Shared-library auto-linking for arbitrary undeclared symbols | `dlfcn.h` calls are available; `--library` opens requested libraries for registered FFI symbols |

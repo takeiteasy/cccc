@@ -36,10 +36,12 @@ char *make_global_name(const char *header) {
 void generate_std_header(void) {
     const char *headers[] = {
         "Availability.h", "assert.h", "ctype.h", "errno.h",
-        "float.h", "inttypes.h", "limits.h", "math.h", "reflection.h",
-        "setjmp.h", "stdalign.h", "stdarg.h", "stdatomic.h", "stdbool.h",
+        "dlfcn.h", "fcntl.h", "fenv.h", "float.h", "inttypes.h", "iso646.h",
+        "limits.h", "locale.h", "math.h", "reflection.h",
+        "setjmp.h", "signal.h", "stdalign.h", "stdarg.h", "stdatomic.h", "stdbool.h",
         "stddef.h", "stdint.h", "stdio.h", "stdlib.h", "stdnoreturn.h",
-        "string.h", "sys/cdefs.h", "time.h",
+        "string.h", "sys/cdefs.h", "tgmath.h", "time.h", "uchar.h",
+        "unistd.h", "wchar.h", "wctype.h",
         NULL
     };
 

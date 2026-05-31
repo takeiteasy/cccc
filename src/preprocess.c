@@ -1244,8 +1244,18 @@ static void register_stdlib_for_header(JCC *vm, const char *header_name) {
     // Dispatch to appropriate registration function
     if (strncmp(header_name, "ctype.h", sizeof("ctype.h")) == 0) {
         register_ctype_functions(vm);
+    } else if (strncmp(header_name, "dlfcn.h", sizeof("dlfcn.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "fcntl.h", sizeof("fcntl.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "fenv.h", sizeof("fenv.h")) == 0) {
+        register_fenv_functions(vm);
+    } else if (strncmp(header_name, "locale.h", sizeof("locale.h")) == 0) {
+        register_locale_functions(vm);
     } else if (strncmp(header_name, "math.h", sizeof("math.h")) == 0) {
         register_math_functions(vm);
+    } else if (strncmp(header_name, "signal.h", sizeof("signal.h")) == 0) {
+        register_signal_functions(vm);
     } else if (strncmp(header_name, "stdio.h", sizeof("stdio.h")) == 0) {
         register_stdio_functions(vm);
     } else if (strncmp(header_name, "stdlib.h", sizeof("stdlib.h")) == 0) {
@@ -1254,6 +1264,14 @@ static void register_stdlib_for_header(JCC *vm, const char *header_name) {
         register_string_functions(vm);
     } else if (strncmp(header_name, "time.h", sizeof("time.h")) == 0) {
         register_time_functions(vm);
+    } else if (strncmp(header_name, "uchar.h", sizeof("uchar.h")) == 0) {
+        register_wide_functions(vm);
+    } else if (strncmp(header_name, "unistd.h", sizeof("unistd.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "wchar.h", sizeof("wchar.h")) == 0) {
+        register_wide_functions(vm);
+    } else if (strncmp(header_name, "wctype.h", sizeof("wctype.h")) == 0) {
+        register_wide_functions(vm);
     }
     // Note: Other headers (like stddef.h, stdbool.h, etc.) don't have runtime
     // functions

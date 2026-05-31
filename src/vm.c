@@ -688,7 +688,8 @@ int cc_dlopen(JCC *vm, const char *lib_path) {
         void *func_ptr = GetProcAddress(handle, ff->name);
         if (!func_ptr) {
             DWORD err = GetLastError();
-            fprintf(stderr, "warning: failed to resolve symbol '%s': error code %lu\n", ff->name, err);
+            if (vm->debug_vm)
+                fprintf(stderr, "warning: failed to resolve symbol '%s': error code %lu\n", ff->name, err);
         } else {
             ff->func_ptr = func_ptr;
             success_count++;
@@ -703,9 +704,10 @@ int cc_dlopen(JCC *vm, const char *lib_path) {
         void *func_ptr = dlsym(handle, ff->name);
         const char *error = dlerror();
 
-        if (error)
-            fprintf(stderr, "warning: failed to resolve symbol '%s': %s\n", ff->name, error);
-        else {
+        if (error) {
+            if (vm->debug_vm)
+                fprintf(stderr, "warning: failed to resolve symbol '%s': %s\n", ff->name, error);
+        } else {
             ff->func_ptr = func_ptr;
             success_count++;
             if (vm->debug_vm)
@@ -791,19 +793,35 @@ int cc_load_libc(JCC *vm) {
 void cc_load_stdlib(JCC *vm) {
     // Register all standard library functions regardless of includes
     register_ctype_functions(vm);
+    register_fenv_functions(vm);
+    register_locale_functions(vm);
     register_math_functions(vm);
+    register_posix_functions(vm);
+    register_signal_functions(vm);
     register_stdio_functions(vm);
     register_stdlib_functions(vm);
     register_string_functions(vm);
     register_time_functions(vm);
+    register_wide_functions(vm);
 
     // Mark all headers as included
     hashmap_put(&vm->compiler.included_headers, "ctype.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "dlfcn.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "fcntl.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "fenv.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "iso646.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "locale.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "math.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "signal.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "stdio.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "stdlib.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "string.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "tgmath.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "time.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "uchar.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "unistd.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "wchar.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "wctype.h", (void*)1);
 }
 
 int cc_run(JCC *vm, int argc, char **argv) {

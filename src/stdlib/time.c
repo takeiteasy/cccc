@@ -1,11 +1,25 @@
 // time.h stdlib function registration
 #include "../jcc.h"
 
+static long long wrap_timespec_get(long long ts, long long base) {
+    if ((int)base != TIME_UTC)
+        return 0;
+#if defined(TIME_UTC)
+    return (long long)timespec_get((struct timespec *)ts, (int)base);
+#elif defined(CLOCK_REALTIME)
+    return clock_gettime(CLOCK_REALTIME, (struct timespec *)ts) == 0 ? base : 0;
+#else
+    (void)ts;
+    return 0;
+#endif
+}
+
 // Register all time.h functions
 void register_time_functions(JCC *vm) {
     // Time retrieval
     cc_register_cfunc(vm, "clock", (void*)clock, 0, 0);
     cc_register_cfunc(vm, "time", (void*)time, 1, 0);
+    cc_register_cfunc(vm, "timespec_get", (void*)wrap_timespec_get, 2, 0);
 
     // Time manipulation
     cc_register_cfunc(vm, "difftime", (void*)difftime, 2, 1);

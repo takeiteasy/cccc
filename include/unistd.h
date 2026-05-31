@@ -1,0 +1,56 @@
+/* unistd.h - core POSIX declarations for JCC */
+
+#ifndef __UNISTD_H
+#define __UNISTD_H
+
+#ifdef _WIN32
+#error "<unistd.h> is only available on POSIX targets in JCC"
+#endif
+
+#include "stddef.h"
+
+typedef long ssize_t;
+typedef long off_t;
+typedef int pid_t;
+
+#ifndef NULL
+#define NULL ((void*)0)
+#endif
+
+#define STDIN_FILENO 0
+#define STDOUT_FILENO 1
+#define STDERR_FILENO 2
+
+#ifndef SEEK_SET
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+#endif
+
+#define F_OK 0
+#define X_OK 1
+#define W_OK 2
+#define R_OK 4
+
+extern ssize_t read(int fd, void *buf, size_t count);
+extern ssize_t write(int fd, const void *buf, size_t count);
+extern int close(int fd);
+extern off_t lseek(int fd, off_t offset, int whence);
+extern int access(const char *path, int amode);
+extern int unlink(const char *path);
+extern int rmdir(const char *path);
+extern int chdir(const char *path);
+extern char *getcwd(char *buf, size_t size);
+extern pid_t getpid(void);
+extern pid_t getppid(void);
+extern unsigned int sleep(unsigned int seconds);
+extern int usleep(unsigned int useconds);
+extern pid_t fork(void);
+extern int execv(const char *path, char *const argv[]);
+extern int execve(const char *path, char *const argv[], char *const envp[]);
+extern int execl(const char *path, const char *arg, ...);
+extern int execlp(const char *file, const char *arg, ...);
+extern int execle(const char *path, const char *arg, ...);
+extern int execvp(const char *file, char *const argv[]);
+
+#endif /* __UNISTD_H */

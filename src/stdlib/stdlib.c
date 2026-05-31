@@ -2,6 +2,15 @@
 #include "../jcc.h"
 #include <wchar.h>
 
+static void *jcc_aligned_alloc(size_t alignment, size_t size) {
+    void *ptr = NULL;
+    if (alignment == 0 || (alignment & (alignment - 1)) != 0)
+        return NULL;
+    if (posix_memalign(&ptr, alignment, size) != 0)
+        return NULL;
+    return ptr;
+}
+
 // Wrapper for realloc that matches C11 semantics
 static void *jcc_realloc(void *ptr, size_t size) {
     if (size == 0) {
@@ -38,6 +47,7 @@ void register_stdlib_functions(JCC *vm) {
     cc_register_cfunc(vm, "srand", (void*)srand, 1, 0);
 
     // Memory allocation functions
+    cc_register_cfunc(vm, "aligned_alloc", (void*)jcc_aligned_alloc, 2, 0);
     cc_register_cfunc(vm, "calloc", (void*)calloc, 2, 0);
     cc_register_cfunc(vm, "free", (void*)free, 1, 0);
     cc_register_cfunc(vm, "malloc", (void*)malloc, 1, 0);
@@ -49,6 +59,8 @@ void register_stdlib_functions(JCC *vm) {
     cc_register_cfunc(vm, "exit", (void*)exit, 1, 0);
     cc_register_cfunc(vm, "_Exit", (void*)_Exit, 1, 0);
     cc_register_cfunc(vm, "atexit", (void*)atexit, 1, 0);
+    cc_register_cfunc(vm, "at_quick_exit", (void*)at_quick_exit, 1, 0);
+    cc_register_cfunc(vm, "quick_exit", (void*)quick_exit, 1, 0);
 
     // Environment
     cc_register_cfunc(vm, "getenv", (void*)getenv, 1, 0);
