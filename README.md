@@ -6,10 +6,11 @@
 
 ## Features
 
-- **Pragma macros** — compile-time metaprogramming: write C functions that execute during compilation to generate and transform AST nodes (see [MACROS.md](./MACROS.md))
-  - Quasi-quoting (`_QUOTE`), full type reflection, and AST construction API
-  - `inline` pragma macros auto-execute at their declaration point — no explicit call site required
-  - `#pragma comptime` helpers for shared compile-time utility functions
+- **Pragma macros** — compile-time metaprogramming with C functions that run during compilation (see [MACROS.md](./MACROS.md))
+  - Inline pre-parse generators for parser-visible functions and declarations
+  - File-scope macro calls for explicit source-order generation
+  - Call-site expansion for expression and statement rewriting
+  - Quasi-quoting (`_QUOTE`), type/symbol reflection, and AST construction helpers
 - **Memory safety suite** — runtime detection of common C bugs (see [SAFETY.md](./SAFETY.md))
   - Four preset levels (`-0` through `-3`): zero overhead to paranoid mode
   - Covers use-after-free, buffer overflows, dangling pointers, uninitialized reads, integer overflow, CFI, and more
@@ -85,7 +86,7 @@ echo $?   # Should be 42
 
 ## Acknowledgements
 
-This project is based on [chibicc](https://github.com/rui314/chibicc) and [c4](https://github.com/rswier/c4) / [write-a-C-interpreter](https://github.com/lotabout/write-a-C-interpreter). The preprocessor and parser is built directly off chibicc. The original x86_64 codegen was removed and replaced with a slightly modified version of c4 (old versions lost to time). The VM has been replaced since then (twice), but the original preprocessor and parser framework remains.
+This project builds on [chibicc](https://github.com/rui314/chibicc) for the C frontend and on ideas from [c4](https://github.com/rswier/c4) / [write-a-C-interpreter](https://github.com/lotabout/write-a-C-interpreter) for the VM-oriented execution model. JCC keeps that small-compiler lineage while using its own bytecode VM, safety instrumentation, optimizer, debugger, and compile-time metaprogramming system.
 
 ## License
 

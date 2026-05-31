@@ -58,6 +58,7 @@ extern void __jcc_ast_function_set_body(JCC *vm, Obj *fn, Node *body);
 extern void __jcc_ast_function_set_static(Obj *fn, bool is_static);
 extern void __jcc_ast_function_set_inline(Obj *fn, bool is_inline);
 extern void __jcc_ast_function_set_variadic(Obj *fn, bool is_variadic);
+extern Node *__jcc_ast_forward_declare(JCC *vm, Obj *fn);
 extern Node *__jcc_ast_param_ref(JCC *vm, Obj *fn, const char *name);
 
 // Ticket #58: AST dump
@@ -171,12 +172,16 @@ static void register_reflection_ffi(JCC *vm) {
                       (void *)__jcc_ast_function_set_inline, 2, 0);
     cc_register_cfunc(vm, "__jcc_ast_function_set_variadic",
                       (void *)__jcc_ast_function_set_variadic, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_forward_declare",
+                      (void *)__jcc_ast_forward_declare, 2, 0);
     cc_register_cfunc(vm, "__jcc_ast_param_ref", (void *)__jcc_ast_param_ref, 3, 0);
 
     // Ticket #1: quasi-quoting
     cc_register_variadic_cfunc(vm, "__jcc_quote",   (void *)__jcc_quote,   2, 0);
     cc_register_cfunc(vm,          "__jcc_quote_n", (void *)__jcc_quote_n, 4, 0);
 }
+
+static void init_vm_segments_for_macros(JCC *vm);
 
 static Token *copy_macro_token(JCC *vm, Token *tok) {
     Token *copy = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
@@ -378,6 +383,7 @@ static bool compile_pragma_macro_program(JCC *vm) {
     Obj *saved_locals = vm->compiler.locals;
     Obj *saved_current_fn = vm->compiler.current_fn;
     Obj *saved_globals = vm->compiler.globals;
+    Scope *saved_scope = vm->compiler.scope;
     int saved_num_call_patches = vm->compiler.num_call_patches;
     int saved_num_func_addr_patches = vm->compiler.num_func_addr_patches;
 
@@ -396,6 +402,7 @@ static bool compile_pragma_macro_program(JCC *vm) {
         vm->compiler.locals = saved_locals;
         vm->compiler.current_fn = saved_current_fn;
         vm->compiler.globals = saved_globals;
+        vm->compiler.scope = saved_scope;
         vm->compiler.in_macro_mode = false;
         vm->compiler.num_call_patches = saved_num_call_patches;
         vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
@@ -412,6 +419,7 @@ static bool compile_pragma_macro_program(JCC *vm) {
             vm->compiler.locals = saved_locals;
             vm->compiler.current_fn = saved_current_fn;
             vm->compiler.globals = saved_globals;
+            vm->compiler.scope = saved_scope;
             vm->compiler.in_macro_mode = false;
             vm->compiler.num_call_patches = saved_num_call_patches;
             vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
@@ -430,15 +438,10 @@ static bool compile_pragma_macro_program(JCC *vm) {
 
     patch_macro_call_addresses(vm, macro_prog);
 
-    if (macro_prog) {
-        Obj *last = macro_prog;
-        while (last->next)
-            last = last->next;
-        last->next = saved_globals;
-    }
-
     vm->compiler.locals = saved_locals;
     vm->compiler.current_fn = saved_current_fn;
+    vm->compiler.globals = saved_globals;
+    vm->compiler.scope = saved_scope;
     vm->compiler.in_macro_mode = false;
     vm->compiler.num_call_patches = saved_num_call_patches;
     vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
@@ -551,6 +554,43 @@ static PragmaMacro *find_pragma_macro_by_name(JCC *vm, const char *name) {
             return pm;
     }
     return NULL;
+}
+
+void cc_execute_top_level_pragma_macro(JCC *vm, char *name, Token *tok,
+                                       Node *args, int arg_count) {
+    if (!vm || !name)
+        return;
+
+    PragmaMacro *pm = find_pragma_macro_by_name(vm, name);
+    if (!pm) {
+        error_tok(vm, tok, "undefined pragma macro: %s", name);
+        return;
+    }
+
+    if (pm->is_inline) {
+        error_tok(vm, tok, "inline pragma macro '%s' cannot be called explicitly",
+                  name);
+        return;
+    }
+
+    if (arg_count > 8) {
+        error_tok(vm, tok,
+                  "pragma macro '%s' called with %d arguments; maximum is 8",
+                  name, arg_count);
+        return;
+    }
+
+    init_vm_segments_for_macros(vm);
+    compile_all_pragma_macros(vm);
+
+    if (!pm->is_compiled) {
+        error_tok(vm, tok, "pragma macro '%s' failed to compile", name);
+        return;
+    }
+
+    Node *result = execute_pragma_macro(vm, pm, args, arg_count);
+    if (!result)
+        error_tok(vm, tok, "pragma macro '%s' returned NULL", name);
 }
 
 // Recursively transform macro calls in an AST node

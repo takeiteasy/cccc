@@ -893,21 +893,51 @@ _Obj *__jcc_ast_function(JCC *vm, const char *name,
     fn->is_definition = true;
     fn->is_static = false;
 
-    // Add to globals list
+    // Add to globals list. The function is not made visible to the parser
+    // until source declares it, inline macro prototype synthesis declares it,
+    // or __jcc_ast_forward_declare() publishes it explicitly.
     fn->next = vm->compiler.globals;
     vm->compiler.globals = fn;
 
-    // Push to scope so it can be found by name
-    VarScopeNode *sc =
-        arena_alloc(&vm->compiler.parser_arena, sizeof(VarScopeNode));
-    memset(sc, 0, sizeof(VarScopeNode));
-    sc->name = fn->name;
-    sc->name_len = strlen(fn->name);
-    sc->var = fn;
-    sc->next = vm->compiler.scope->vars;
-    vm->compiler.scope->vars = sc;
-
     return fn;
+}
+
+_Node *__jcc_ast_forward_declare(JCC *vm, _Obj *fn) {
+    if (!vm || !fn || !fn->is_function || !fn->ty || fn->ty->kind != TY_FUNC)
+        return NULL;
+    if (!vm->compiler.scope)
+        return NULL;
+
+    int name_len = (int)strlen(fn->name);
+    for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
+        for (VarScopeNode *node = sc->vars; node; node = node->next) {
+            if (node->name_len != name_len ||
+                strncmp(node->name, fn->name, name_len) != 0)
+                continue;
+
+            if (node->var && node->var->is_function) {
+                _Node *noop = alloc_node(vm, ND_NULL_EXPR);
+                noop->ty = ty_void;
+                return noop;
+            }
+
+            error("conflicting declaration for generated function '%s'",
+                  fn->name);
+        }
+    }
+
+    VarScopeNode *decl =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(VarScopeNode));
+    memset(decl, 0, sizeof(VarScopeNode));
+    decl->name = fn->name;
+    decl->name_len = name_len;
+    decl->var = fn;
+    decl->next = vm->compiler.scope->vars;
+    vm->compiler.scope->vars = decl;
+
+    _Node *noop = alloc_node(vm, ND_NULL_EXPR);
+    noop->ty = ty_void;
+    return noop;
 }
 
 void __jcc_ast_function_add_param(JCC *vm, _Obj *fn, const char *name,

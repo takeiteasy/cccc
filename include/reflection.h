@@ -534,6 +534,19 @@ _Obj *__jcc_ast_function(JCC *vm, const char *name,
                             _Type *return_type);
 
 /*!
+ * @function __jcc_ast_forward_declare
+ * @abstract Make a generated function visible at the current source position.
+ * @param vm The VM context.
+ * @param fn A function object created with __jcc_ast_function().
+ * @return A no-op _Node on success, or NULL on invalid arguments.
+ * @discussion Top-level explicit macro calls run at their source position.
+ *             Call this after creating a function when later source should be
+ *             able to call that generated function without a handwritten
+ *             prototype.
+ */
+_Node *__jcc_ast_forward_declare(JCC *vm, _Obj *fn);
+
+/*!
  * @function __jcc_ast_function_add_param
  * @abstract Add a parameter to a function.
  * @param vm The VM context.
@@ -719,6 +732,7 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, _Node *node);
 
 #define _AST_FUNCTION(name, ret_type)                                       \
     __jcc_ast_function(_VM, name, ret_type)
+#define _AST_FORWARD_DECLARE(fn) __jcc_ast_forward_declare(_VM, fn)
 #define _AST_FUNCTION_ADD_PARAM(fn, name, type)                             \
     __jcc_ast_function_add_param(_VM, fn, name, type)
 #define _AST_FUNCTION_SET_BODY(fn, body)                                    \

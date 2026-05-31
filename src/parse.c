@@ -4691,6 +4691,37 @@ Obj *parse(JCC *vm, Token *tok) {
             continue;
         }
 
+        // A known pragma macro may be called as a file-scope compile-time
+        // directive. The returned node is ignored; side effects such as
+        // generated declarations/functions are kept in the active parse state.
+        if (!vm->compiler.in_macro_mode && tok->kind == TK_IDENT &&
+            equal(tok->next, "(")) {
+            PragmaMacro *pm = find_pragma_macro(vm, tok);
+            if (pm) {
+                Token *macro_tok = tok;
+                tok = tok->next->next;
+
+                Node head = {};
+                Node *cur = &head;
+                int arg_count = 0;
+
+                while (!equal(tok, ")")) {
+                    if (cur != &head)
+                        tok = skip(vm, tok, ",");
+                    Node *arg = assign(vm, &tok, tok);
+                    cur = cur->next = arg;
+                    arg_count++;
+                }
+
+                tok = skip(vm, tok, ")");
+                tok = skip(vm, tok, ";");
+
+                cc_execute_top_level_pragma_macro(vm, pm->name, macro_tok,
+                                                  head.next, arg_count);
+                continue;
+            }
+        }
+
         VarAttr attr = {};
         Type *basety = declspec(vm, &tok, tok, &attr);
 

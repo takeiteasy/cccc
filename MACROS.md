@@ -1,122 +1,154 @@
 # JCC Pragma Macros
 
-JCC introduces a powerful compile-time metaprogramming feature called **Pragma Macros**. This allows you to write C functions that are executed *during compilation* to generate code, inspect types, and perform reflection.
+Pragma macros are C functions that JCC compiles and runs during compilation.
+They can inspect compile-time types, build AST nodes, generate functions, and
+replace macro call sites with generated code.
 
-## Overview
+The macro API is automatically available while pragma macro and comptime helper
+functions are compiled. Macro code can use the `_AST_*`, `_QUOTE*`, `_ERROR_AT`,
+and `_DUMP_*` convenience macros directly.
 
-A pragma macro is a standard C function prefixed with `#pragma macro`. When JCC encounters a call to this function:
-1. The macro function is compiled to bytecode during the parsing phase
-2. When the call site is reached during AST traversal, the macro is executed
-3. The returned AST `_Node*` replaces the original function call in the AST
-4. Compilation continues with the transformed AST
+## Execution Model
 
-This enables Lisp-like macros in C, allowing you to write functions that generate code.
+JCC supports three pragma macro execution forms:
 
-## Basic Usage
+| Form | Source shape | When it runs | What the return value means |
+|------|--------------|--------------|-----------------------------|
+| Inline generation | `#pragma macro inline _Node *gen(void)` | Before the main parse | Ignored; side effects generate declarations/functions |
+| File-scope call | `gen();` at file scope | While parsing that file, at that source position | Ignored; side effects generate declarations/functions |
+| Call-site expansion | `gen(args...)` inside code | During macro expansion after parsing | Replaces the call expression or statement |
 
-To define a pragma macro:
-1. Add `#pragma macro` before a function definition
-2. The function must return a `_Node*` (an AST node)
-3. Use the reflection API; `<reflection.h>` is included implicitly while pragma
-   macro functions are compiled
+The macro function itself must return `_Node *`. For generation-style macros,
+return `_AST_INT_LITERAL(0)` or another harmless node; the generated functions
+and declarations come from API calls made by the macro.
+
+## Inline Generation
+
+Use an `inline` pragma macro when generated functions should be available to the
+whole parsed program without an explicit call site. Inline macros run before the
+main parse, and functions created with `_AST_FUNCTION()` receive parser-visible
+synthetic declarations automatically.
 
 ```c
 #pragma macro
-_Node *make_const_5(void) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    return __jcc_ast_int_literal(vm, 5);
+inline _Node *generate_answer(void) {
+    _Type *int_ty = _AST_GET_TYPE("int");
+    _Obj *fn = _AST_FUNCTION("answer", int_ty);
+
+    _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(_AST_INT_LITERAL(42)));
+    return _AST_INT_LITERAL(0);
 }
 
 int main(void) {
-    int x = make_const_5(); // Replaced at compile-time with: int x = 5;
-    return x - 5;           // Returns 0
+    return answer();
 }
 ```
 
-## The VM Context
+Inline macros take no call-site arguments. Use them for global code generation:
+boilerplate functions, enum conversion helpers, serializers, or any generated
+definition that source code needs to call normally.
 
-All AST construction and reflection functions require access to the compiler state (the VM). Use `__jcc_get_vm()` to obtain this context:
+## File-Scope Macro Calls
 
-```c
-#pragma macro
-_Node *my_macro(void) {
-    _VirtualMachine *vm = __jcc_get_vm();  // Get the VM context
-    return __jcc_ast_int_literal(vm, 42);
-}
-```
-
-The implicitly included `<reflection.h>` also provides convenience macros that automatically pass `__jcc_get_vm()`:
+Use a file-scope macro call when generation should happen at a specific source
+position. The macro runs when the parser reaches the call. If the macro creates
+a function that later source should call, publish it with
+`_AST_FORWARD_DECLARE(fn)`.
 
 ```c
 #pragma macro
-_Node *my_macro(void) {
-    return _AST_INT_LITERAL(42);  // Equivalent to __jcc_ast_int_literal(__jcc_get_vm(), 42)
+_Node *generate_add(void) {
+    _Type *int_ty = _AST_GET_TYPE("int");
+    _Obj *fn = _AST_FUNCTION("add", int_ty);
+
+    _AST_FUNCTION_ADD_PARAM(fn, "a", int_ty);
+    _AST_FUNCTION_ADD_PARAM(fn, "b", int_ty);
+
+    _Node *sum = _AST_BINARY(_ADD, _AST_PARAM_REF(fn, "a"),
+                             _AST_PARAM_REF(fn, "b"));
+    _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(sum));
+    _AST_FORWARD_DECLARE(fn);
+
+    return _AST_INT_LITERAL(0);
 }
-```
 
-## Inline Pragma Macros
-
-An `inline` pragma macro runs automatically at its declaration point — no explicit call site is required. This is useful for macros that generate functions or definitions that need to be visible to the rest of the translation unit.
-
-Add the `inline` keyword between `#pragma macro` and the return type:
-
-```c
-#pragma macro
-inline _Node *generate_add(void) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Type *int_type = __jcc_ast_get_type(vm, "int");
-
-    _Obj *fn = __jcc_ast_function(vm, "add", int_type);
-    __jcc_ast_function_add_param(vm, fn, "a", int_type);
-    __jcc_ast_function_add_param(vm, fn, "b", int_type);
-
-    _Node *body = __jcc_ast_return(vm,
-        __jcc_ast_binary(vm, _ADD,
-            __jcc_ast_param_ref(vm, fn, "a"),
-            __jcc_ast_param_ref(vm, fn, "b")));
-    __jcc_ast_function_set_body(vm, fn, body);
-
-    return __jcc_ast_int_literal(vm, 0); // return value is ignored
-}
+generate_add();
 
 int main(void) {
-    // No macro call and no forward declaration needed.
-    // generate_add() ran at declaration; add() is now defined.
-    return add(20, 22) - 42;  // Returns 0
+    return add(20, 22);
 }
 ```
 
-Key differences from regular pragma macros:
+The declaration created by `_AST_FORWARD_DECLARE(fn)` is visible from the macro
+call position onward. Code before the file-scope call follows normal C
+declaration rules and cannot call the generated function by name.
 
-- **Auto-execution**: the macro runs when the compiler reaches its declaration, not when it is called.
-- **No call site**: the function never appears in the program's source as a call.
-- **Automatic forward declarations**: any functions created with `__jcc_ast_function()` inside an inline macro get synthetic forward declarations prepended to the token stream, so later code can call them without manual `extern` declarations.
-- **No arguments**: inline macros always take `void`; they cannot receive `_Node*` arguments from a call site.
+## Call-Site Expansion
 
-## Macro Arguments
-
-Pragma macros can receive arguments. The arguments are passed as `_Node*` pointers to the original AST nodes from the call site:
+A normal pragma macro call inside an expression or statement is parsed as a
+macro call node. During macro expansion, JCC executes the macro and replaces the
+call with the returned AST.
 
 ```c
 #pragma macro
 _Node *double_it(_Node *value) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    // Create: (value + value)
-    return __jcc_ast_binary(vm, _ADD, value, value);
+    return _AST_BINARY(_ADD, value, value);
 }
 
 int main(void) {
-    int x = double_it(21);  // Becomes: int x = (21 + 21);
-    return x - 42;          // Returns 0
+    int x = double_it(21);
+    return x;
 }
 ```
 
+Macro arguments are `_Node *` pointers to the original argument ASTs. A macro
+can reuse, inspect, wrap, or replace those nodes.
+
+Statement macros work the same way. Return a statement node such as
+`_AST_RETURN(...)`, `_AST_IF(...)`, `_AST_BLOCK(...)`, or a statement parsed with
+`_QUOTE(...)`.
+
+```c
+#pragma macro
+_Node *return_if_zero(_Node *value) {
+    return _QUOTE("if ($1 == 0) return 0;", value);
+}
+
+int main(void) {
+    int x = 0;
+    return_if_zero(x);
+    return 1;
+}
+```
+
+## Comptime Helpers
+
+Use `#pragma comptime` for helper functions that should be callable by pragma
+macros but should not expand from ordinary program call sites.
+
+```c
+#pragma comptime
+int plus_one(int n) {
+    return n + 1;
+}
+
+#pragma macro
+_Node *make_value(void) {
+    return _AST_INT_LITERAL(plus_one(41));
+}
+
+int main(void) {
+    return make_value();
+}
+```
+
+Pragma macros and comptime helpers are compiled together, so they can call each
+other even when the callee appears later in the translation unit.
+
 ## Quasi-Quoting
 
-For many macros, writing a C template is clearer than manually composing
-builder calls. `__jcc_quote()` parses an expression or statement template during
-macro execution and returns the generated AST node. Use `$1`, `$2`, ... to
-splice macro argument nodes into the template.
+`_QUOTE(tmpl, ...)` parses a C expression or statement template and splices
+`_Node *` values into `$1`, `$2`, and later numbered holes.
 
 ```c
 #pragma macro
@@ -125,420 +157,251 @@ _Node *square(_Node *x) {
 }
 
 int main(void) {
-    return square(6) - 36;
+    return square(6);
 }
 ```
 
-Numbered splice points can be reused or reordered. `$$` is also supported for
-sequential left-to-right splices, but do not mix `$$` and `$N` in the same
-template.
-
-Use `__jcc_quote_n()` when the number of splice nodes is dynamic or too large for
-the variadic `__jcc_quote()` call:
+Numbered holes can be reused and reordered. Use `$$` for sequential left-to-
+right holes when order is enough:
 
 ```c
 #pragma macro
-_Node *add_three(_Node *a, _Node *b, _Node *c) {
-    _Node *nodes[3] = {a, b, c};
-    return __jcc_quote_n(__jcc_get_vm(), "$1 + $2 + $3", nodes, 3);
+_Node *sum2(_Node *a, _Node *b) {
+    return _QUOTE("$$ + $$", a, b);
 }
 ```
 
-Templates may be expressions or statements. Statement templates are useful when
-combined with block or control-flow builders.
+Do not mix `$N` and `$$` in one template. Use `_QUOTE_N(tmpl, nodes, count)`
+when splice nodes are already in an array.
 
-## Type Reflection
+## Type And Symbol Reflection
 
-One of the most powerful features is type introspection. You can inspect types defined in your program during compilation.
-
-### Enum Reflection Example
+Macros can inspect types and global symbols that are visible at the macro
+execution point.
 
 ```c
-#include <string.h>
-
-typedef enum { COLOR_RED, COLOR_GREEN, COLOR_BLUE } Color;
+typedef enum { RED, GREEN, BLUE } Color;
 
 #pragma macro
-_Node *enum_count_check(void) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    
-    // Find the Color type by name
-    _Type *color_type = __jcc_ast_find_type(vm, "Color");
-    if (!color_type) {
-        return __jcc_ast_string_literal(vm, "type_not_found");
-    }
-    
-    // Get the number of enum constants
-    int count = __jcc_ast_enum_count(vm, color_type);
-    
-    if (count == 3) {
-        return __jcc_ast_string_literal(vm, "has_3_colors");
-    }
-    return __jcc_ast_string_literal(vm, "unexpected_count");
+_Node *color_count(void) {
+    _Type *color = _AST_FIND_TYPE("Color");
+    if (!color)
+        return _AST_INT_LITERAL(-1);
+    return _AST_INT_LITERAL(_AST_ENUM_COUNT(color));
 }
 
 int main(void) {
-    const char *result = enum_count_check();
-    return strcmp(result, "has_3_colors");  // Returns 0 if equal
+    return color_count();
 }
 ```
 
-### Iterating Enum Constants
+Useful reflection entry points include:
 
-```c
-#pragma macro
-_Node *get_first_enum_name(void) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    
-    _Type *color_type = __jcc_ast_find_type(vm, "Color");
-    if (!color_type) {
-        return __jcc_ast_string_literal(vm, "unknown");
-    }
-    
-    // Get the first enum constant
-    _EnumConstant *ec = __jcc_ast_enum_at(vm, color_type, 0);
-    if (ec) {
-        const char *name = __jcc_ast_enum_constant_name(ec);
-        return __jcc_ast_string_literal(vm, name);  // Returns "COLOR_RED"
-    }
-    return __jcc_ast_string_literal(vm, "no_constants");
-}
-```
-
-## API Reference
-
-### VM Context
-
-| Function | Description |
-|----------|-------------|
-| `__jcc_get_vm()` | Get the current VM context (required for all API calls) |
-
-### Diagnostics
-
-| Function | Convenience Macro | Description |
-|----------|-------------------|-------------|
-| `__jcc_error_at(vm, node, fmt, ...)` | `_ERROR_AT(node, ...)` | Emit a source-located compiler error at `node` |
-| `__jcc_warning_at(vm, node, fmt, ...)` | `_WARNING_AT(node, ...)` | Emit a source-located compiler warning at `node` |
-
-### Quoting
-
-| Function | Convenience Macro | Description |
-|----------|-------------------|-------------|
-| `__jcc_quote(vm, tmpl, ...)` | `_QUOTE(tmpl, ...)` | Parse a C template and splice `_Node*` arguments |
-| `__jcc_quote_n(vm, tmpl, nodes, count)` | `_QUOTE_N(tmpl, nodes, count)` | Array-form quote for dynamic or larger splice lists |
-
-### Type Lookup
-
-| Function | Convenience Macro | Description |
-|----------|-------------------|-------------|
-| `__jcc_ast_find_type(vm, name)` | `_AST_FIND_TYPE(name)` | Find a type by name (typedef, struct, enum) |
-| `__jcc_ast_type_exists(vm, name)` | `_AST_TYPE_EXISTS(name)` | Check if a type exists |
-| `__jcc_ast_get_type(vm, name)` | `_AST_GET_TYPE(name)` | Get type (includes built-in types like "int") |
-
-### Type Introspection
-
-These functions take no `vm` argument, so their macros are plain aliases.
-
-| Function | Convenience Macro | Description |
-|----------|-------------------|-------------|
-| `__jcc_ast_type_kind(ty)` | `_AST_TYPE_KIND(ty)` | Get `_TypeKind` (`_INT`, `_ENUM`, `_STRUCT`, etc.) |
-| `__jcc_ast_type_size(ty)` | `_AST_TYPE_SIZE(ty)` | Get `sizeof()` in bytes |
-| `__jcc_ast_type_align(ty)` | `_AST_TYPE_ALIGN(ty)` | Get alignment in bytes |
-| `__jcc_ast_type_is_unsigned(ty)` | `_AST_TYPE_IS_UNSIGNED(ty)` | Check if unsigned |
-| `__jcc_ast_type_is_const(ty)` | `_AST_TYPE_IS_CONST(ty)` | Check if const-qualified |
-| `__jcc_ast_type_base(ty)` | `_AST_TYPE_BASE(ty)` | For pointer/array: get base type |
-| `__jcc_ast_type_array_len(ty)` | `_AST_TYPE_ARRAY_LEN(ty)` | For arrays: get length (-1 if not array) |
-| `__jcc_ast_type_return_type(ty)` | `_AST_TYPE_RETURN_TYPE(ty)` | For functions: get return type |
-| `__jcc_ast_type_param_count(ty)` | `_AST_TYPE_PARAM_COUNT(ty)` | For functions: get parameter count |
-| `__jcc_ast_type_param_at(ty, index)` | `_AST_TYPE_PARAM_AT(ty, i)` | For functions: get parameter type at index |
-| `__jcc_ast_type_is_variadic(ty)` | `_AST_TYPE_IS_VARIADIC(ty)` | For functions: check variadic flag |
-| `__jcc_ast_type_name(ty)` | `_AST_TYPE_NAME(ty)` | Get the type name when available |
-
-### Type Construction
-
-| Function | Convenience Macro | Description |
-|----------|-------------------|-------------|
-| `__jcc_ast_make_pointer(vm, base)` | `_AST_MAKE_POINTER(base)` | Create pointer type |
-| `__jcc_ast_make_array(vm, base, len)` | `_AST_MAKE_ARRAY(base, len)` | Create array type |
-
-### Enum Reflection
-
-| Function | Convenience Macro | Description |
-|----------|-------------------|-------------|
-| `__jcc_ast_enum_count(vm, ty)` | `_AST_ENUM_COUNT(ty)` | Number of constants (-1 if not enum) |
-| `__jcc_ast_enum_at(vm, ty, i)` | `_AST_ENUM_AT(ty, i)` | Get constant at index |
-| `__jcc_ast_enum_find(vm, ty, name)` | `_AST_ENUM_FIND(ty, name)` | Find constant by name |
-| `__jcc_ast_enum_constant_name(ec)` | `_AST_ENUM_CONSTANT_NAME(ec)` | Get constant name |
-| `__jcc_ast_enum_constant_value(ec)` | `_AST_ENUM_CONSTANT_VALUE(ec)` | Get constant integer value |
-| `__jcc_ast_enum_name(ty)` | `_AST_ENUM_NAME(ty)` | Get enum type name |
-| `__jcc_ast_enum_value_count(ty)` | `_AST_ENUM_VALUE_COUNT(ty)` | Get enum value count |
-| `__jcc_ast_enum_value_name(ty, i)` | `_AST_ENUM_VALUE_NAME(ty, i)` | Get enum value name at index |
-| `__jcc_ast_enum_value(ty, i)` | `_AST_ENUM_VALUE(ty, i)` | Get enum integer value at index |
-
-### Struct/Union Reflection
-
-| Function | Convenience Macro | Description |
-|----------|-------------------|-------------|
-| `__jcc_ast_struct_member_count(vm, ty)` | `_AST_STRUCT_MEMBER_COUNT(ty)` | Number of members |
-| `__jcc_ast_struct_member_at(vm, ty, i)` | `_AST_STRUCT_MEMBER_AT(ty, i)` | Get member at index |
-| `__jcc_ast_struct_member_find(vm, ty, name)` | `_AST_STRUCT_MEMBER_FIND(ty, name)` | Find member by name |
-| `__jcc_ast_member_name(m)` | `_AST_MEMBER_NAME(m)` | Get member name |
-| `__jcc_ast_member_type(m)` | `_AST_MEMBER_TYPE(m)` | Get member type |
-| `__jcc_ast_member_offset(m)` | `_AST_MEMBER_OFFSET(m)` | Get member offset in bytes |
-| `__jcc_ast_member_is_bitfield(m)` | `_AST_MEMBER_IS_BITFIELD(m)` | Check if member is a bitfield |
-| `__jcc_ast_member_bitfield_width(m)` | `_AST_MEMBER_BITFIELD_WIDTH(m)` | Get bitfield width in bits |
-
-### Global Symbol Reflection
-
-| Function | Convenience Macro | Description |
-|----------|-------------------|-------------|
-| `__jcc_ast_find_global(vm, name)` | `_AST_FIND_GLOBAL(name)` | Find global symbol by name |
-| `__jcc_ast_global_count(vm)` | `_AST_GLOBAL_COUNT()` | Count global symbols |
-| `__jcc_ast_global_at(vm, i)` | `_AST_GLOBAL_AT(i)` | Get global symbol at index |
-| `__jcc_ast_obj_name(obj)` | `_AST_OBJ_NAME(obj)` | Get object name |
-| `__jcc_ast_obj_type(obj)` | `_AST_OBJ_TYPE(obj)` | Get object type |
-| `__jcc_ast_obj_is_function(obj)` | `_AST_OBJ_IS_FUNCTION(obj)` | Check if object is a function |
-| `__jcc_ast_obj_is_definition(obj)` | `_AST_OBJ_IS_DEFINITION(obj)` | Check if object has a definition |
-| `__jcc_ast_obj_is_static(obj)` | `_AST_OBJ_IS_STATIC(obj)` | Check if object has static linkage |
-
-### AST Construction - Literals
-
-| Function | Convenience Macro | Description |
-|----------|-------------------|-------------|
-| `__jcc_ast_int_literal(vm, val)` | `_AST_INT_LITERAL(val)` | Create integer literal |
-| `__jcc_ast_float_literal(vm, val)` | `_AST_FLOAT_LITERAL(val)` | Create float literal |
-| `__jcc_ast_string_literal(vm, str)` | `_AST_STRING_LITERAL(str)` | Create string literal |
-| `__jcc_ast_var_ref(vm, name)` | `_AST_VAR_REF(name)` | Reference a variable by name |
-| `__jcc_ast_param_ref(vm, fn, name)` | `_AST_PARAM_REF(fn, name)` | Reference a generated function parameter |
-
-### AST Construction - Expressions
-
-| Function | Convenience Macro | Description |
-|----------|-------------------|-------------|
-| `__jcc_ast_binary(vm, op, l, r)` | `_AST_BINARY(op, l, r)` | Binary operation (_ADD, _MUL, etc.) |
-| `__jcc_ast_unary(vm, op, expr)` | `_AST_UNARY(op, expr)` | Unary operation (_NEG, _NOT, etc.) |
-| `__jcc_ast_cast(vm, expr, ty)` | `_AST_CAST(expr, ty)` | Type cast |
-| `__jcc_ast_assign(vm, target, value)` | `_AST_ASSIGN(target, value)` | Assignment expression |
-| `__jcc_ast_member(vm, obj, name)` | `_AST_MEMBER(obj, name)` | Struct/union member access |
-| `__jcc_ast_funcall(vm, callee, args, n)` | `_AST_FUNCALL(callee, args, n)` | Function call expression |
-
-### AST Construction - Statements
-
-| Function | Convenience Macro | Description |
-|----------|-------------------|-------------|
-| `__jcc_ast_return(vm, expr)` | `_AST_RETURN(expr)` | Return statement |
-| `__jcc_ast_block(vm, stmts, n)` | `_AST_BLOCK(stmts, n)` | Block of statements |
-| `__jcc_ast_if(vm, cond, then, else)` | `_AST_IF(c, t, e)` | If statement |
-| `__jcc_ast_switch(vm, cond)` | `_AST_SWITCH(cond)` | Switch statement |
-| `__jcc_ast_switch_add_case(vm, sw, val, body)` | `_AST_SWITCH_ADD_CASE(sw, v, b)` | Add case to switch |
-| `__jcc_ast_switch_set_default(vm, sw, body)` | `_AST_SWITCH_SET_DEFAULT(sw, b)` | Set default case |
-| `__jcc_ast_expr_stmt(vm, expr)` | `_AST_EXPR_STMT(expr)` | Expression statement |
-| `__jcc_ast_local_var(vm, name, ty)` | `_AST_LOCAL_VAR(name, ty)` | Inject a named local variable |
-| `__jcc_ast_local_var_unique(vm, ty)` | `_AST_LOCAL_VAR_UNIQUE(ty)` | Inject a hygienic temporary local |
-| `__jcc_ast_while(vm, cond, body)` | `_AST_WHILE(cond, body)` | While loop |
-| `__jcc_ast_for(vm, init, cond, inc, body)` | `_AST_FOR(init, cond, inc, body)` | For loop |
-| `__jcc_ast_do_while(vm, body, cond)` | `_AST_DO_WHILE(body, cond)` | Do-while loop |
-
-### AST Construction - Function Generation
-
-| Function | Convenience Macro | Description |
-|----------|-------------------|-------------|
-| `__jcc_ast_function(vm, name, ret_type)` | `_AST_FUNCTION(name, ret_type)` | Create a new function |
-| `__jcc_ast_function_add_param(vm, fn, name, ty)` | `_AST_FUNCTION_ADD_PARAM(fn, name, ty)` | Add parameter to function |
-| `__jcc_ast_function_set_body(vm, fn, body)` | `_AST_FUNCTION_SET_BODY(fn, body)` | Set function body |
-| `__jcc_ast_function_set_static(fn, is_static)` | - | Set static linkage |
-| `__jcc_ast_function_set_inline(fn, is_inline)` | - | Set inline attribute |
-| `__jcc_ast_function_set_variadic(fn, is_variadic)` | - | Set variadic attribute |
-
-### AST Dumps
-
-| Function | Convenience Macro | Description |
-|----------|-------------------|-------------|
-| `__jcc_dump_tree(vm, node)` | `_DUMP_TREE(node)` | Print a human-readable AST tree |
-| `__jcc_dump_tree_to_string(vm, node)` | `_DUMP_TREE_TO_STRING(node)` | Render a human-readable AST tree to a string |
-| `__jcc_dump_ast_gen(vm, node)` | `_DUMP_AST_GEN(node)` | Print builder calls that reconstruct a node |
-| `__jcc_dump_ast_gen_to_string(vm, node)` | `_DUMP_AST_GEN_TO_STRING(node)` | Render builder calls to a string |
-
-### Node Kinds (for __jcc_ast_binary/__jcc_ast_unary)
-
-```c
-// Arithmetic
-_ADD, _SUB, _MUL, _DIV, _MOD, _NEG
-
-// Bitwise
-_BITAND, _BITOR, _BITXOR, _BITNOT, _SHL, _SHR
-
-// Comparison
-_EQ, _NE, _LT, _LE
-
-// Logical
-_NOT, _LOGAND, _LOGOR
-
-// Other
-_ASSIGN, _ADDR, _DEREF, _COMMA
-```
+| Task | API |
+|------|-----|
+| Find a type by name | `_AST_FIND_TYPE(name)` |
+| Get a built-in or named type | `_AST_GET_TYPE(name)` |
+| Count enum constants | `_AST_ENUM_COUNT(ty)` |
+| Read enum constants | `_AST_ENUM_AT(ty, i)`, `_AST_ENUM_CONSTANT_NAME(ec)`, `_AST_ENUM_CONSTANT_VALUE(ec)` |
+| Count struct/union members | `_AST_STRUCT_MEMBER_COUNT(ty)` |
+| Read members | `_AST_STRUCT_MEMBER_AT(ty, i)`, `_AST_MEMBER_NAME(m)`, `_AST_MEMBER_TYPE(m)`, `_AST_MEMBER_OFFSET(m)` |
+| Find globals | `_AST_FIND_GLOBAL(name)`, `_AST_GLOBAL_COUNT()`, `_AST_GLOBAL_AT(i)` |
 
 ## Function Generation
 
-Pragma macros can generate entire functions at compile-time. This is useful for generating boilerplate code, serializers, enum-to-string converters, and more.
-
-### Basic Function Generation
+Generated functions are `_Obj *` values. Create the object, add parameters,
+build a body, and install the body.
 
 ```c
-// Forward declare the function we'll generate
-int generated_func(void);
-
 #pragma macro
-_Node *generate_func(void) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    
-    // Create a function that returns 42
-    _Obj *fn = __jcc_ast_function(vm, "generated_func", __jcc_ast_get_type(vm, "int"));
-    
-    // Set the function body: return 42;
-    _Node *body = __jcc_ast_return(vm, __jcc_ast_int_literal(vm, 42));
-    __jcc_ast_function_set_body(vm, fn, body);
-    
-    // Return NULL - the function is already added to globals
-    return _AST_INT_LITERAL(0);  // Placeholder, value ignored
+inline _Node *generate_is_even(void) {
+    _Type *int_ty = _AST_GET_TYPE("int");
+    _Obj *fn = _AST_FUNCTION("is_even", int_ty);
+    _AST_FUNCTION_ADD_PARAM(fn, "n", int_ty);
+
+    _Node *n = _AST_PARAM_REF(fn, "n");
+    _Node *body = _AST_RETURN(_QUOTE("$1 % 2 == 0", n));
+    _AST_FUNCTION_SET_BODY(fn, body);
+
+    return _AST_INT_LITERAL(0);
 }
 
 int main(void) {
-    generate_func();  // Macro runs at compile-time, generates the function
-    
-    int result = generated_func();  // Call the generated function
-    return result - 42;  // Returns 0
+    return is_even(42) ? 42 : 1;
 }
 ```
 
-### Function Generation API
+For file-scope explicit calls, call `_AST_FORWARD_DECLARE(fn)` after the
+signature is complete and before source code needs the generated function name.
+Inline macros handle parser-visible declarations automatically.
 
-| Function | Description |
-|----------|-------------|
-| `__jcc_ast_function(vm, name, ret_type)` | Create a new function object |
-| `__jcc_ast_function_add_param(vm, fn, name, type)` | Add a parameter to the function |
-| `__jcc_ast_function_set_body(vm, fn, body)` | Set the function body (statement node) |
-| `__jcc_ast_function_set_static(fn, is_static)` | Set static linkage |
-| `__jcc_ast_function_set_inline(fn, is_inline)` | Set inline attribute |
-| `__jcc_ast_function_set_variadic(fn, is_variadic)` | Set variadic attribute |
+## Local Variables
 
-### Important Notes
-
-1. **Forward declarations required**: You must forward-declare the generated function before the macro call so the compiler knows its signature when it's called later.
-
-2. **Macro return value**: The macro still needs to return a `_Node*`, but for function generation this is typically just a placeholder value (like `_AST_INT_LITERAL(0)`).
-
-3. **Function lookup**: `__jcc_ast_function()` checks for existing forward declarations and updates them rather than creating duplicates.
-
-### Generating Functions with Parameters
-
-```c
-// Forward declare
-int add_numbers(int a, int b);
-
-#pragma macro
-_Node *gen_add_func(void) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    
-    _Type *int_type = __jcc_ast_get_type(vm, "int");
-    _Obj *fn = __jcc_ast_function(vm, "add_numbers", int_type);
-    
-    // Add parameters
-    __jcc_ast_function_add_param(vm, fn, "a", int_type);
-    __jcc_ast_function_add_param(vm, fn, "b", int_type);
-    
-    // Body: return a + b;
-    // Use __jcc_ast_param_ref to reference parameters, and assign to intermediate variables
-    _Node *a_ref = __jcc_ast_param_ref(vm, fn, "a");
-    _Node *b_ref = __jcc_ast_param_ref(vm, fn, "b");
-    _Node *sum = __jcc_ast_binary(vm, _ADD, a_ref, b_ref);
-    _Node *body = __jcc_ast_return(vm, sum);
-    __jcc_ast_function_set_body(vm, fn, body);
-    
-    return __jcc_ast_int_literal(vm, 0);
-}
-
-int main(void) {
-    gen_add_func();
-    return add_numbers(20, 22) - 42;  // Returns 0
-}
-```
-
-## Hygienic Local Variables
-
-Macros that expand into statements often need temporary locals. Prefer
-`__jcc_ast_local_var_unique()` for these temporaries so generated names cannot
-collide with user variables:
+Macros that expand into statements can inject locals into the current function.
+Prefer `_AST_LOCAL_VAR_UNIQUE(ty)` for temporary variables; it creates a name
+that user source cannot capture.
 
 ```c
 #pragma macro
-_Node *with_temp(_Node *value) {
-    _VirtualMachine *vm = __jcc_get_vm();
+_Node *save_then_return(_Node *value) {
     _Type *int_ty = _AST_GET_TYPE("int");
     _Node *tmp = _AST_LOCAL_VAR_UNIQUE(int_ty);
-    _Node *set_tmp = _AST_EXPR_STMT(_AST_ASSIGN(tmp, value));
-    _Node *ret_tmp = _AST_RETURN(tmp);
-    _Node *stmts[2] = {set_tmp, ret_tmp};
+    _Node *stmts[2] = {
+        _AST_EXPR_STMT(_AST_ASSIGN(tmp, value)),
+        _AST_RETURN(tmp),
+    };
     return _AST_BLOCK(stmts, 2);
 }
 ```
 
-Use `__jcc_ast_local_var()` only when the generated local must have a deliberate,
-user-visible name.
+Use `_AST_LOCAL_VAR(name, ty)` only when the generated local is meant to have a
+specific user-visible name.
 
-## Limitations
+## Diagnostics And Debugging
 
-Current limitations of pragma macros:
-
-1. **Single expression context**: Macros are designed to return a single expression node that replaces the call. Complex multi-statement generation requires using `__jcc_ast_block()`.
-
-2. **Compile-time only**: Macro code runs during compilation. Runtime values cannot be inspected.
-
-3. **Forward declarations for generated functions**: Functions generated by macros must be forward-declared before the point where they are called.
-
-4. **Argument count**: Pragma macro calls currently support at most 8
-   arguments. Calls with more arguments are rejected during compilation.
-
-## Implementation Notes
-
-Pragma macros work by:
-1. Capturing the function body tokens during preprocessing
-2. Compiling captured macro functions to bytecode before macro expansion
-3. Executing the bytecode in the same VM when the macro is called
-4. Replacing the call AST node with the returned node
-5. Running `add_type()` on the result to ensure proper type information
-
-Pragma macro functions can call other pragma macro functions directly from
-their compile-time bytecode. This includes calls to macros defined later in the
-same translation unit, because all captured macro signatures are made available
-before their bodies are compiled.
-
-Pragma macros can also call explicit compile-time helper functions marked with
-`#pragma comptime`. These helpers are compiled into the same compile-time
-bytecode unit as pragma macros, but they are not expanded from normal program
-call sites:
+Use source-located diagnostics when rejecting a macro argument:
 
 ```c
-#pragma comptime
-int helper(int n) {
-    return n + 1;
-}
-
 #pragma macro
-_Node *make_value(void) {
-    return _AST_INT_LITERAL(helper(41));
-}
-
-int main(void) {
-    return make_value(); // Replaced at compile-time with 42
+_Node *require_nonzero(_Node *value) {
+    if (!value)
+        _ERROR_AT(value, "expected an expression");
+    return value;
 }
 ```
 
-`#pragma comptime` helpers may call other pragma macros or comptime helpers,
-including helpers defined later in the translation unit. Ordinary runtime
-functions are not automatically compiled for macro use; mark shared
-compile-time helpers explicitly with `#pragma comptime`.
+AST dump helpers are available while developing macros:
 
-String literals created by `__jcc_ast_string_literal()` are immediately allocated in the data segment to ensure they're available at runtime.
+| Helper | Use |
+|--------|-----|
+| `_DUMP_TREE(node)` | Print a readable tree |
+| `_DUMP_TREE_TO_STRING(node)` | Render a tree into a string |
+| `_DUMP_AST_GEN(node)` | Print builder calls for a node |
+| `_DUMP_AST_GEN_TO_STRING(node)` | Render builder calls into a string |
 
-See `include/reflection.h` for the complete API documentation.
+## API Reference
+
+### Type APIs
+
+| Convenience macro | Description |
+|-------------------|-------------|
+| `_AST_FIND_TYPE(name)` | Find a typedef, struct, union, or enum by name |
+| `_AST_TYPE_EXISTS(name)` | Test whether a type name exists |
+| `_AST_GET_TYPE(name)` | Get a named or built-in type such as `"int"` |
+| `_AST_TYPE_KIND(ty)` | Get `_TypeKind` |
+| `_AST_TYPE_SIZE(ty)` | Get size in bytes |
+| `_AST_TYPE_ALIGN(ty)` | Get alignment in bytes |
+| `_AST_TYPE_IS_UNSIGNED(ty)` | Test unsigned integer type |
+| `_AST_TYPE_IS_CONST(ty)` | Test const-qualified type |
+| `_AST_TYPE_BASE(ty)` | Get pointer or array base type |
+| `_AST_TYPE_ARRAY_LEN(ty)` | Get array length, or `-1` |
+| `_AST_TYPE_RETURN_TYPE(ty)` | Get function return type |
+| `_AST_TYPE_PARAM_COUNT(ty)` | Count function parameters |
+| `_AST_TYPE_PARAM_AT(ty, i)` | Get function parameter type |
+| `_AST_TYPE_IS_VARIADIC(ty)` | Test variadic function type |
+| `_AST_TYPE_NAME(ty)` | Get a type name when available |
+| `_AST_MAKE_POINTER(base)` | Create pointer type |
+| `_AST_MAKE_ARRAY(base, len)` | Create array type |
+
+### Enum APIs
+
+| Convenience macro | Description |
+|-------------------|-------------|
+| `_AST_ENUM_COUNT(ty)` | Count enum constants |
+| `_AST_ENUM_AT(ty, i)` | Get enum constant at index |
+| `_AST_ENUM_FIND(ty, name)` | Find enum constant by name |
+| `_AST_ENUM_CONSTANT_NAME(ec)` | Get enum constant name |
+| `_AST_ENUM_CONSTANT_VALUE(ec)` | Get enum constant value |
+| `_AST_ENUM_NAME(ty)` | Get enum type name |
+| `_AST_ENUM_VALUE_COUNT(ty)` | Count enum values |
+| `_AST_ENUM_VALUE_NAME(ty, i)` | Get enum value name |
+| `_AST_ENUM_VALUE(ty, i)` | Get enum value |
+
+### Struct And Union APIs
+
+| Convenience macro | Description |
+|-------------------|-------------|
+| `_AST_STRUCT_MEMBER_COUNT(ty)` | Count members |
+| `_AST_STRUCT_MEMBER_AT(ty, i)` | Get member at index |
+| `_AST_STRUCT_MEMBER_FIND(ty, name)` | Find member by name |
+| `_AST_MEMBER_NAME(m)` | Get member name |
+| `_AST_MEMBER_TYPE(m)` | Get member type |
+| `_AST_MEMBER_OFFSET(m)` | Get member offset |
+| `_AST_MEMBER_IS_BITFIELD(m)` | Test bitfield member |
+| `_AST_MEMBER_BITFIELD_WIDTH(m)` | Get bitfield width |
+
+### Global Symbol APIs
+
+| Convenience macro | Description |
+|-------------------|-------------|
+| `_AST_FIND_GLOBAL(name)` | Find global object |
+| `_AST_GLOBAL_COUNT()` | Count globals |
+| `_AST_GLOBAL_AT(i)` | Get global at index |
+| `_AST_OBJ_NAME(obj)` | Get object name |
+| `_AST_OBJ_TYPE(obj)` | Get object type |
+| `_AST_OBJ_IS_FUNCTION(obj)` | Test function object |
+| `_AST_OBJ_IS_DEFINITION(obj)` | Test definition |
+| `_AST_OBJ_IS_STATIC(obj)` | Test static linkage |
+
+### AST Builder APIs
+
+| Convenience macro | Description |
+|-------------------|-------------|
+| `_AST_INT_LITERAL(val)` | Integer literal |
+| `_AST_FLOAT_LITERAL(val)` | Floating-point literal |
+| `_AST_STRING_LITERAL(str)` | String literal |
+| `_AST_VAR_REF(name)` | Variable reference |
+| `_AST_PARAM_REF(fn, name)` | Generated function parameter reference |
+| `_AST_BINARY(op, l, r)` | Binary expression |
+| `_AST_UNARY(op, operand)` | Unary expression |
+| `_AST_CAST(expr, ty)` | Cast expression |
+| `_AST_ASSIGN(target, value)` | Assignment expression |
+| `_AST_MEMBER(obj, name)` | Struct/union member expression |
+| `_AST_FUNCALL(callee, args, n)` | Function call expression |
+| `_AST_RETURN(expr)` | Return statement |
+| `_AST_BLOCK(stmts, count)` | Compound statement |
+| `_AST_IF(cond, then_body, else_body)` | If statement |
+| `_AST_SWITCH(cond)` | Switch statement |
+| `_AST_SWITCH_ADD_CASE(sw, value, body)` | Add switch case |
+| `_AST_SWITCH_SET_DEFAULT(sw, body)` | Set switch default |
+| `_AST_EXPR_STMT(expr)` | Expression statement |
+| `_AST_LOCAL_VAR(name, ty)` | Named local variable |
+| `_AST_LOCAL_VAR_UNIQUE(ty)` | Hygienic temporary local |
+| `_AST_WHILE(cond, body)` | While loop |
+| `_AST_FOR(init, cond, inc, body)` | For loop |
+| `_AST_DO_WHILE(body, cond)` | Do-while loop |
+
+### Function Builder APIs
+
+| Convenience macro | Description |
+|-------------------|-------------|
+| `_AST_FUNCTION(name, ret_type)` | Create a function object |
+| `_AST_FORWARD_DECLARE(fn)` | Publish a generated function declaration at the current source position |
+| `_AST_FUNCTION_ADD_PARAM(fn, name, ty)` | Add function parameter |
+| `_AST_FUNCTION_SET_BODY(fn, body)` | Set function body |
+| `_AST_FUNCTION_SET_STATIC(fn, flag)` | Set static linkage |
+| `_AST_FUNCTION_SET_INLINE(fn, flag)` | Set inline flag |
+| `_AST_FUNCTION_SET_VARIADIC(fn, flag)` | Set variadic flag |
+
+### Node Kinds
+
+Use these constants with `_AST_BINARY()` and `_AST_UNARY()`:
+
+```c
+_ADD, _SUB, _MUL, _DIV, _MOD, _NEG
+_BITAND, _BITOR, _BITXOR, _BITNOT, _SHL, _SHR
+_EQ, _NE, _LT, _LE
+_NOT, _LOGAND, _LOGOR
+_ASSIGN, _ADDR, _DEREF, _COMMA
+```
+
+## Constraints
+
+- Pragma macro calls accept at most 8 arguments.
+- Macro code runs at compile time and cannot inspect runtime values.
+- File-scope explicit generation follows source order. Use inline macros for
+  whole-program pre-parse generation, or `_AST_FORWARD_DECLARE(fn)` for
+  explicit file-scope publication.
+- `_AST_FORWARD_DECLARE(fn)` publishes function names only. Types, globals, and
+  other declarations follow the normal parser state visible at the macro
+  execution point.
