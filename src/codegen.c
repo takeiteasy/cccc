@@ -2297,38 +2297,8 @@ static int assign_stack_offsets(Obj *fn) {
             }
         }
 
-        // Skip builtin variables (va_area and alloca_bottom) and params
-        // Note: va_area and alloca_bottom are handled as locals if present
+        // Skip builtin variables (va_area and alloca_bottom) and params.
         bool is_builtin = (var == fn->va_area) || (var == fn->alloca_bottom);
-        if (is_builtin) {
-            // Treat builtins as locals for offset purposes
-            // (Original code skipped is_param && is_builtin checks
-            // differently?) Let's match original logic: Original: bool
-            // is_builtin = (var == fn->va_area) || (var == fn->alloca_bottom);
-            // if (!is_param && !is_builtin) ...
-            // So builtins were skipped? Where are they allocated?
-            // Ah, va_area is an array, it needs space!
-            // Wait, original code SKIPPED them?
-            // "bool is_builtin = (var == fn->va_area) || (var ==
-            // fn->alloca_bottom);" "if (!is_param && !is_builtin) {" -> assigns
-            // offset. So va_area and alloca_bottom did NOT get offsets in the
-            // loop? Let me check the original code again.
-        }
-
-        // RE-CHECKING ORIGINAL CODE:
-        // if (!is_param && !is_builtin) { ... assign offset ... }
-        // So they were indeed skipped.
-        // But they must have storage!
-        // Maybe they are parameters? No, new_lvar.
-        // Or maybe they are added to locals list? Yes.
-        // Wait, if they don't get offsets, how are they accessed?
-        // Maybe logic handles them separately?
-        // Or maybe my reading of original code is wrong.
-
-        // Let's stick strictly to original logic for now.
-        // Original:
-        // bool is_builtin = (var == fn->va_area) || (var == fn->alloca_bottom);
-        // if (!is_param && !is_builtin) { ... }
 
         if (!is_param && !is_builtin) {
             // Calculate how many slots this variable needs
@@ -2345,24 +2315,6 @@ static int assign_stack_offsets(Obj *fn) {
             var->offset = -stack_size;
         }
     }
-
-    // However, we skipped va_area/alloca_bottom. They need offsets!
-    // Wait, maybe I misread the original code.
-    // Let's look at line 1632 in original view:
-    // 1632:         bool is_builtin = (var == fn->va_area) || (var ==
-    // fn->alloca_bottom); 1634:         if (!is_param && !is_builtin) {
-    //
-    // If they are skipped, they have offset 0?
-    // But they are used!
-    // Ah, maybe they are ONLY used via distinct pointers in `check_builtin`
-    // etc? But `va_start` uses `va_area`.
-
-    // I suspect the original code I viewed might have been incomplete or I
-    // missed something. Let's assume ONLY `!is_param` needs offset. But
-    // `is_builtin` check was there.
-
-    // Safest bet: Just copy the logic exactly.
-    // If original code was broken/weird, I preserve behavior.
 
     // Ensure 16-byte stack alignment
     if (stack_size % 2 != 0) {

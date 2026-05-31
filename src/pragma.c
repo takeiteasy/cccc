@@ -74,6 +74,16 @@ extern void __jcc_ast_function_set_variadic(Obj *fn, bool is_variadic);
 extern Node *__jcc_ast_forward_declare(JCC *vm, Obj *fn);
 extern Node *__jcc_ast_param_ref(JCC *vm, Obj *fn, const char *name);
 
+// Ticket #152: global variable generation
+extern Obj  *__jcc_ast_global_var(JCC *vm, const char *name, Type *ty);
+extern void  __jcc_ast_global_var_set_init_data(JCC *vm, Obj *var,
+                                                const char *data, int len);
+extern void  __jcc_ast_global_var_set_static(Obj *var, bool is_static);
+
+// Ticket #148: function-building context (push/pop current_fn for _QUOTE)
+extern void __jcc_ast_push_fn(JCC *vm, Obj *fn);
+extern void __jcc_ast_pop_fn(JCC *vm);
+
 // Ticket #58: AST dump
 extern void __jcc_dump_tree(JCC *vm, Node *node);
 extern const char *__jcc_dump_tree_to_string(JCC *vm, Node *node);
@@ -208,6 +218,20 @@ static void register_reflection_ffi(JCC *vm) {
     cc_register_cfunc(vm, "__jcc_ast_forward_declare",
                       (void *)__jcc_ast_forward_declare, 2, 0);
     cc_register_cfunc(vm, "__jcc_ast_param_ref", (void *)__jcc_ast_param_ref, 3, 0);
+
+    // Ticket #152: global variable generation
+    cc_register_cfunc(vm, "__jcc_ast_global_var",
+                      (void *)__jcc_ast_global_var, 3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_global_var_set_init_data",
+                      (void *)__jcc_ast_global_var_set_init_data, 4, 0);
+    cc_register_cfunc(vm, "__jcc_ast_global_var_set_static",
+                      (void *)__jcc_ast_global_var_set_static, 2, 0);
+
+    // Ticket #148: function-building context
+    cc_register_cfunc(vm, "__jcc_ast_push_fn",
+                      (void *)__jcc_ast_push_fn, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_pop_fn",
+                      (void *)__jcc_ast_pop_fn, 1, 0);
 
     // Ticket #1: quasi-quoting
     cc_register_variadic_cfunc(vm, "__jcc_quote",   (void *)__jcc_quote,   2, 0);
@@ -528,12 +552,14 @@ static Node *execute_pragma_macro(JCC *vm, PragmaMacro *pm, Node *args,
     // Set global VM pointer for __jcc_get_vm()
     __jcc_current_vm = vm;
 
-    // Save VM execution state
+    // Save VM execution state (including current_fn so a macro that calls
+    // __jcc_ast_push_fn without a matching pop cannot leak context).
     JCCPc saved_pc = vm->pc;
     long long *saved_sp = vm->sp;
     long long *saved_bp = vm->bp;
     long long saved_regs[NUM_REGS];
     memcpy(saved_regs, vm->regs, sizeof(saved_regs));
+    Obj *saved_current_fn = vm->compiler.current_fn;
 
     // Reset stack for macro execution
     vm->sp = vm->initial_sp;
@@ -566,11 +592,13 @@ static Node *execute_pragma_macro(JCC *vm, PragmaMacro *pm, Node *args,
     // Clear VM pointer
     __jcc_current_vm = NULL;
 
-    // Restore VM execution state
+    // Restore VM execution state (current_fn last so it overrides any leaked
+    // push_fn call that wasn't matched by a pop_fn inside the macro).
     vm->pc = saved_pc;
     vm->sp = saved_sp;
     vm->bp = saved_bp;
     memcpy(vm->regs, saved_regs, sizeof(saved_regs));
+    vm->compiler.current_fn = saved_current_fn;
 
     if (vm->debug_vm && result)
         printf("Pragma macro '%s' returned node of kind %d\n", pm->name,
@@ -622,8 +650,9 @@ void cc_execute_top_level_pragma_macro(JCC *vm, char *name, Token *tok,
     }
 
     Node *result = execute_pragma_macro(vm, pm, args, arg_count);
-    if (!result)
-        error_tok(vm, tok, "pragma macro '%s' returned NULL", name);
+    // Declaration position: NULL (or void return) is legal — the macro may have
+    // emitted definitions as side-effects without having a node to splice.
+    (void)result;
 }
 
 // Recursively transform macro calls in an AST node
@@ -641,6 +670,14 @@ static Node *transform_node(JCC *vm, Node *node, int depth) {
         PragmaMacro *pm = find_pragma_macro_by_name(vm, node->macro_name);
         if (!pm) {
             error_tok(vm, node->tok, "undefined pragma macro: %s",
+                      node->macro_name);
+            return node;
+        }
+
+        if (pm->is_void_macro) {
+            error_tok(vm, node->tok,
+                      "void pragma macro '%s' cannot be used as an expression; "
+                      "it only emits definitions",
                       node->macro_name);
             return node;
         }
@@ -901,6 +938,53 @@ static Token *synthesize_forward_decl_tokens(JCC *vm, Obj *fn) {
     return toks;
 }
 
+// Build an extern declaration token stream for a generated global variable.
+// Handles arrays by walking the type chain: e.g. char[6] emits
+//   extern char banner_data[6];
+// rather than the incorrect  extern int banner_data;  that write_type_str's
+// TY_ARRAY fallback would produce.
+static Token *synthesize_global_decl_tokens(JCC *vm, Obj *var) {
+    if (!var || var->is_function)
+        return NULL;
+
+    char buf[512];
+    char *p   = buf;
+    char *end = buf + sizeof(buf) - 2;
+
+    p += snprintf(p, end - p, "extern ");
+
+    // For array types, emit base_type name[len1][len2]... syntax.
+    // Walk the type chain to collect dimensions, then emit them after the name.
+    if (var->ty && var->ty->kind == TY_ARRAY) {
+        // Collect array dimensions
+        int dims[16];
+        int ndims = 0;
+        Type *t = var->ty;
+        while (t && t->kind == TY_ARRAY && ndims < 16) {
+            dims[ndims++] = t->array_len;
+            t = t->base;
+        }
+        // t is now the element type
+        p += write_type_str(t, p, (int)(end - p));
+        p += snprintf(p, end - p, " %s", var->name);
+        for (int i = 0; i < ndims; i++)
+            p += snprintf(p, end - p, "[%d]", dims[i]);
+        p += snprintf(p, end - p, ";\n");
+    } else {
+        p += write_type_str(var->ty, p, (int)(end - p));
+        p += snprintf(p, end - p, " %s;\n", var->name);
+    }
+
+    if (vm->debug_vm)
+        printf("Synthesized global extern decl: %s", buf);
+
+    Token *toks = tokenize_string(vm, "<inline-macro-gvar>", buf);
+    if (!toks)
+        return NULL;
+    convert_pp_tokens(vm, toks);
+    return toks;
+}
+
 // Execute all inline (#pragma macro inline) macros before the main parse.
 // For each inline macro:
 //   1. Execute it (it calls __jcc_ast_function etc. to register generated
@@ -958,53 +1042,45 @@ void cc_execute_inline_macros(JCC *vm, Token **input_tokens, int count) {
         // zero-parameter by convention).
         execute_pragma_macro(vm, pm, NULL, 0);
 
-        // Collect newly-added Objs (those prepended before globals_before).
-        // Only pick up function definitions (the interesting ones for codegen).
+        // Collect newly-added Objs (those prepended before globals_before):
+        // function definitions AND global variable definitions.
         for (Obj *o = vm->compiler.globals; o && o != globals_before; o = o->next) {
-            if (!o->is_function || !o->body)
+            bool is_fn_def  = o->is_function  && o->body;
+            bool is_gvar_def = !o->is_function && o->is_definition;
+            if (!is_fn_def && !is_gvar_def)
                 continue;
 
             // Move into macro_globals list (we prepend; order restored later).
-            Obj *copy_link = o->next; // remember the chain for iteration
             o->next = vm->compiler.macro_globals;
             vm->compiler.macro_globals = o;
-            (void)copy_link; // iteration via the original globals list is fine
         }
 
-        // Synthesize a forward declaration for every generated function and
-        // prepend it to all input token streams.
+        // Synthesize forward declarations for every generated function and
+        // extern declarations for every generated global variable, prepending
+        // them to all input token streams so the parser can resolve references.
         for (Obj *o = vm->compiler.globals; o && o != globals_before; o = o->next) {
-            if (!o->is_function || !o->body)
+            bool is_fn_def  = o->is_function  && o->body;
+            bool is_gvar_def = !o->is_function && o->is_definition;
+            if (!is_fn_def && !is_gvar_def)
                 continue;
-
-            Token *fwd = synthesize_forward_decl_tokens(vm, o);
-            if (!fwd)
-                continue;
-
-            // Find the last token in the synthetic stream (before its EOF).
-            Token *fwd_tail = fwd;
-            while (fwd_tail->next && fwd_tail->next->kind != TK_EOF)
-                fwd_tail = fwd_tail->next;
 
             // Prepend to every file's token stream.
             for (int fi = 0; fi < count; fi++) {
                 if (!input_tokens[fi])
                     continue;
-                // Clone the fwd chain so each file has its own copy (tokens
-                // carry file/line info; sharing is safe, but cloning avoids
-                // the tail->next aliasing issue when prepending to multiple
-                // files).
-                //
-                // For simplicity, just re-synthesise (tokenize_string
-                // allocates from the arena, which is long-lived).
-                Token *fwd_copy = synthesize_forward_decl_tokens(vm, o);
-                if (!fwd_copy)
+                // Re-synthesise each time: tokenize_string allocates from the
+                // arena (long-lived), and re-synthesising avoids tail->next
+                // aliasing when prepending to multiple files.
+                Token *decl = is_fn_def
+                    ? synthesize_forward_decl_tokens(vm, o)
+                    : synthesize_global_decl_tokens(vm, o);
+                if (!decl)
                     continue;
-                Token *tail = fwd_copy;
+                Token *tail = decl;
                 while (tail->next && tail->next->kind != TK_EOF)
                     tail = tail->next;
                 tail->next = input_tokens[fi];
-                input_tokens[fi] = fwd_copy;
+                input_tokens[fi] = decl;
             }
         }
     }

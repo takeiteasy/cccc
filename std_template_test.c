@@ -20,7 +20,7 @@ char *read_header_file(const char *path) {
 }
 
 #pragma macro
-_Node *generate_std_header(void) {
+void generate_std_header(void) {
     const char *headers[] = {
         "Availability.h", "assert.h", "ctype.h", "errno.h",
         "float.h", "inttypes.h", "limits.h", "math.h", "reflection.h",
@@ -58,8 +58,6 @@ _Node *generate_std_header(void) {
 
     _AST_FUNCTION_SET_BODY(fn, _AST_BLOCK(stmts, n));
     _AST_FORWARD_DECLARE(fn);
-
-    return _AST_INT_LITERAL(0);
 }
 
 generate_std_header();

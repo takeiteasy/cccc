@@ -26,6 +26,38 @@
  * - Enum reflection
  * - Struct/union member introspection
  * - AST node construction (literals, expressions, statements)
+ * - Global variable generation (_AST_GLOBAL_VAR*)
+ * - Function-building context (_AST_WITH_FN)
+ *
+ * ## Return-value model
+ *
+ * A pragma macro's returned _Node* is **the node spliced at the call site**,
+ * replacing the invocation.  Top-level definitions (functions, globals) are
+ * **side effects** — injected into the program regardless of the return value.
+ *
+ *  - **Expression position** (e.g. `int x = my_macro();`): the macro must
+ *    return a non-NULL node.  Returning NULL is an error.
+ *
+ *  - **Declaration position** (bare `my_macro();` at file scope, or an
+ *    `inline` auto-run macro): there is no expression to replace.  Returning
+ *    NULL — or declaring the macro `void` — is legal and means "I only emitted
+ *    definitions."
+ *
+ * Declare a definition-only macro with a `void` return type for clarity:
+ * @code
+ * #pragma macro
+ * void emit_helpers(void) {
+ *     _Obj *fn = _AST_FUNCTION("helper", _AST_GET_TYPE("int"));
+ *     _AST_WITH_FN(fn) {
+ *         _AST_FUNCTION_SET_BODY(fn, _QUOTE("return 42;"));
+ *     }
+ *     _AST_FORWARD_DECLARE(fn);
+ *     // no return needed
+ * }
+ * emit_helpers();
+ * @endcode
+ *
+ * A void macro used in expression position is a compile error.
  *
  * ## Usage
  *
@@ -34,15 +66,15 @@
  * expands to __jcc_get_vm() - a builtin that returns the current
  * VM instance during macro execution.
  *
- * ## Example
+ * ## Example (expression macro)
  *
  * @code
  * #pragma macro
- * _Node *make_const_5() {
+ * _Node *make_const_5(void) {
  *     return _AST_INT_LITERAL(5);
  * }
  *
- * int main() {
+ * int main(void) {
  *     int x = make_const_5();  // x == 5
  *     return 0;
  * }
@@ -603,6 +635,68 @@ void __jcc_ast_function_set_inline(_Obj *fn, bool is_inline);
 void __jcc_ast_function_set_variadic(_Obj *fn, bool is_variadic);
 
 // ============================================================================
+// Global Variable Generation (ticket #152)
+// ============================================================================
+
+/*!
+ * @function __jcc_ast_global_var
+ * @abstract Create a new named global variable definition.
+ * @param vm   The VM context.
+ * @param name The variable name (must be unique among globals).
+ * @param ty   The variable type.  Use _AST_MAKE_ARRAY(char_ty, len) for byte
+ *             arrays so that the size matches the init_data length.
+ * @return The new Obj*, or NULL on error.
+ * @discussion The variable is registered in vm->compiler.globals.  For inline
+ *             macros the capture loop will stash it in macro_globals and emit
+ *             an extern declaration into every input file's token stream so
+ *             the parser can resolve references.
+ */
+_Obj *__jcc_ast_global_var(JCC *vm, const char *name, _Type *ty);
+
+/*!
+ * @function __jcc_ast_global_var_set_init_data
+ * @abstract Set the initial data for a generated global variable.
+ * @param vm   The VM context.
+ * @param var  The global variable object.
+ * @param data Pointer to the raw byte data.
+ * @param len  Number of bytes to copy.  Must equal var->ty->size.
+ */
+void __jcc_ast_global_var_set_init_data(JCC *vm, _Obj *var,
+                                        const char *data, int len);
+
+/*!
+ * @function __jcc_ast_global_var_set_static
+ * @abstract Set the static (internal linkage) flag on a generated global.
+ * @param var       The global variable object.
+ * @param is_static True for internal linkage (file-scope static).
+ */
+void __jcc_ast_global_var_set_static(_Obj *var, bool is_static);
+
+// ============================================================================
+// Function-building context (ticket #148)
+// ============================================================================
+
+/*!
+ * @function __jcc_ast_push_fn
+ * @abstract Establish fn as the "function currently being built" so that
+ *           _QUOTE("return x;") applies the correct implicit return-type cast.
+ * @param vm The VM context.
+ * @param fn The generated function whose return type should be used.
+ * @discussion Call __jcc_ast_pop_fn (or use the _AST_WITH_FN macro) to
+ *             restore the previous context.  execute_pragma_macro always
+ *             restores current_fn after the macro returns, so unmatched pushes
+ *             cannot leak into the main parse/codegen pass.
+ */
+void __jcc_ast_push_fn(JCC *vm, _Obj *fn);
+
+/*!
+ * @function __jcc_ast_pop_fn
+ * @abstract Restore the function context saved by the most recent push.
+ * @param vm The VM context.
+ */
+void __jcc_ast_pop_fn(JCC *vm);
+
+// ============================================================================
 // AST Dump Functions (ticket #58) — Nim-style dumpTree / dumpAstGen
 // ============================================================================
 
@@ -753,6 +847,26 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, _Node *node);
     __jcc_ast_function_set_inline(fn, is_inline)
 #define _AST_FUNCTION_SET_VARIADIC(fn, is_variadic)                         \
     __jcc_ast_function_set_variadic(fn, is_variadic)
+
+// Global variable generation (ticket #152)
+#define _AST_GLOBAL_VAR(name, ty)                                           \
+    __jcc_ast_global_var(_VM, name, ty)
+#define _AST_GLOBAL_VAR_SET_INIT_DATA(var, data, len)                       \
+    __jcc_ast_global_var_set_init_data(_VM, var, data, len)
+#define _AST_GLOBAL_VAR_SET_STATIC(var, is_static)                          \
+    __jcc_ast_global_var_set_static(var, is_static)
+
+// Function-building context (ticket #148)
+// Usage:
+//   _AST_WITH_FN(fn) {
+//       _AST_FUNCTION_SET_BODY(fn, _QUOTE("return 42;"));
+//   }
+// Inside the block, current_fn is set to fn so _QUOTE("return x;") casts
+// to the correct return type.  The pop always runs even on early exit.
+#define _AST_WITH_FN(fn)                                                    \
+    for (int _jcc_fn_ctx_ = (__jcc_ast_push_fn(_VM, (fn)), 1);             \
+         _jcc_fn_ctx_;                                                      \
+         _jcc_fn_ctx_ = (__jcc_ast_pop_fn(_VM), 0))
 
 #ifdef __cplusplus
 }

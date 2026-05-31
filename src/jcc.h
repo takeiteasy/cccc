@@ -734,6 +734,7 @@ typedef struct CondIncl {
  @field compiled_fn Compiled function object (NULL until compiled).
  @field is_compiled True after successful compilation.
  @field is_macro_entry True if callable from user program macro call sites.
+ @field is_void_macro True if declared with void return type (definition-only).
  @field next Pointer to next macro in linked list.
 */
 typedef struct PragmaMacro {
@@ -743,6 +744,7 @@ typedef struct PragmaMacro {
     bool is_compiled;         // True after successful compilation
     bool is_macro_entry;      // True for #pragma macro, false for comptime helper
     bool is_inline;           // True for inline macros (auto-execute at declaration)
+    bool is_void_macro;       // True if declared void — definition-only, no splice node
     struct PragmaMacro *next; // Next macro in linked list
 } PragmaMacro;
 

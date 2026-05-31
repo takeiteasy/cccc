@@ -201,6 +201,25 @@ static Token *extract_pragma_compiletime_function(JCC *vm, Token *tok,
     // Convert preprocessor tokens to parser tokens (TK_PP_NUM -> TK_NUM, etc.)
     convert_pp_tokens(vm, head.next);
 
+    // Detect void return type: scan tokens before the function name, skipping
+    // 'inline', and check whether the return-type token is 'void' without a
+    // following '*' (which would be a void* pointer, not a void return).
+    bool is_void_macro = false;
+    {
+        Token *t = start;
+        // Skip 'inline' keyword if present
+        if (t && equal(t, "inline"))
+            t = t->next;
+        // Check whether the return type starts with 'void' and the next
+        // meaningful token is NOT '*' (pointer) — i.e. plain void return.
+        if (t && t->kind == TK_IDENT && t->len == 4 &&
+            strncmp(t->loc, "void", 4) == 0) {
+            Token *after = t->next;
+            if (after && !equal(after, "*"))
+                is_void_macro = true;
+        }
+    }
+
     // Create PragmaMacro entry
     PragmaMacro *pm =
         arena_alloc(&vm->compiler.parser_arena, sizeof(PragmaMacro));
@@ -211,6 +230,7 @@ static Token *extract_pragma_compiletime_function(JCC *vm, Token *tok,
     pm->is_compiled = false;
     pm->is_macro_entry = is_macro_entry;
     pm->is_inline = is_inline;
+    pm->is_void_macro = is_void_macro;
     pm->next = vm->compiler.pragma_macros;
     vm->compiler.pragma_macros = pm;
 

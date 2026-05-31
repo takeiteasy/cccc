@@ -2072,9 +2072,15 @@ static Node *stmt(JCC *vm, Token **rest, Token *tok) {
         *rest = skip(vm, tok, ";");
 
         add_type(vm, exp);
-        Type *ty = vm->compiler.current_fn->ty->return_ty;
-        if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
-            exp = new_cast(vm, exp, vm->compiler.current_fn->ty->return_ty);
+        // current_fn may be NULL when a _QUOTE template is parsed at file scope
+        // (e.g. inside a top-level pragma macro call that uses _QUOTE("return x;")).
+        // Guard the implicit return-type cast; types will be resolved by add_type
+        // later, or by the caller establishing context via _AST_WITH_FN.
+        if (vm->compiler.current_fn) {
+            Type *ty = vm->compiler.current_fn->ty->return_ty;
+            if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
+                exp = new_cast(vm, exp, ty);
+        }
 
         node->lhs = exp;
         return node;
@@ -4594,7 +4600,35 @@ static Token *global_variable(JCC *vm, Token *tok, Type *basety,
         if (!ty->name)
             error_tok(vm, ty->name_pos, "variable name omitted");
 
-        Obj *var = new_gvar(vm, get_ident(vm, ty->name), ty->name->len, ty);
+        char *var_name     = get_ident(vm, ty->name);
+        int   var_name_len = (int)ty->name->len;
+
+        // For extern declarations, check whether a macro-generated global
+        // already exists in macro_globals.  If so, push the macro Obj into
+        // scope directly so code referencing this name uses the same Obj that
+        // will have init_data and the correct data-segment offset in codegen.
+        // (Global variable references are offset-based, unlike function calls
+        // which are patched by name, so both the scope and codegen must agree
+        // on the same Obj.)
+        if (attr->is_extern && vm->compiler.macro_globals) {
+            Obj *mg = NULL;
+            for (Obj *o = vm->compiler.macro_globals; o; o = o->next) {
+                if (!o->is_function &&
+                    (int)strlen(o->name) == var_name_len &&
+                    strncmp(o->name, var_name, var_name_len) == 0) {
+                    mg = o;
+                    break;
+                }
+            }
+            if (mg) {
+                push_scope(vm, var_name, var_name_len)->var = mg;
+                if (equal(tok, "="))
+                    gvar_initializer(vm, &tok, tok->next, mg);
+                continue;
+            }
+        }
+
+        Obj *var = new_gvar(vm, var_name, var_name_len, ty);
         var->is_definition = !attr->is_extern;
         var->is_static = attr->is_static;
         var->is_tls = attr->is_tls;

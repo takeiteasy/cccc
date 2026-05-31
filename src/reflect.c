@@ -1037,6 +1037,104 @@ void __jcc_ast_function_set_variadic(_Obj *fn, bool is_variadic) {
 }
 
 // ============================================================================
+// Global Variable Generation (ticket #152)
+// ============================================================================
+
+// Create a new named global variable.  The type determines layout; use
+// __jcc_ast_make_array(vm, char_ty, len) to get a char[len] type so that
+// the codegen init_data copy (codegen.c) copies the right number of bytes.
+_Obj *__jcc_ast_global_var(JCC *vm, const char *name, _Type *ty) {
+    if (!vm || !name || !ty)
+        return NULL;
+
+    size_t name_len = strlen(name);
+
+    // Reuse an existing forward declaration if present (same logic as
+    // __jcc_ast_function).
+    for (Obj *obj = vm->compiler.globals; obj; obj = obj->next) {
+        if (!obj->is_function && strlen(obj->name) == name_len &&
+            strncmp(obj->name, name, name_len) == 0) {
+            if (obj->is_definition)
+                error("expected unique generated global name, got existing "
+                      "definition '%s'", name);
+            obj->is_definition = true;
+            obj->ty = ty;
+            obj->align = ty->align;
+            return obj;
+        }
+    }
+
+    Obj *var = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
+    memset(var, 0, sizeof(Obj));
+    var->name = arena_strdup(vm, name);
+    var->ty = ty;
+    var->align = ty->align;
+    var->is_function = false;
+    var->is_definition = true;
+    var->is_static = false; // default: external linkage; call _set_static to change
+
+    var->next = vm->compiler.globals;
+    vm->compiler.globals = var;
+    return var;
+}
+
+// Set the initial data for a global variable.  data[0..len-1] is copied into
+// the arena.  The variable's type must have ty->size == len; use
+// _AST_MAKE_ARRAY(char_ty, len) to ensure the sizes match.
+void __jcc_ast_global_var_set_init_data(JCC *vm, _Obj *var,
+                                        const char *data, int len) {
+    if (!vm || !var || !data || len <= 0)
+        return;
+    char *buf = arena_alloc(&vm->compiler.parser_arena, len);
+    memcpy(buf, data, len);
+    var->init_data = buf;
+}
+
+// Set the static flag on a generated global (true = internal linkage).
+void __jcc_ast_global_var_set_static(_Obj *var, bool is_static) {
+    if (var)
+        var->is_static = is_static;
+}
+
+// ============================================================================
+// Function-building context (ticket #148): _AST_WITH_FN support
+// ============================================================================
+
+// Small internal save-stack so macros can push/pop current_fn cleanly.
+// Macro execution is single-threaded so a module-level stack is fine.
+#define JCC_FN_CONTEXT_STACK_DEPTH 16
+static Obj *_fn_context_stack[JCC_FN_CONTEXT_STACK_DEPTH];
+static int  _fn_context_depth = 0;
+
+// Push a new function context: vm->compiler.current_fn is saved on the stack
+// and replaced by fn.  Inside this context, _QUOTE("return x;") will find
+// current_fn and apply the correct implicit return-type cast.
+void __jcc_ast_push_fn(JCC *vm, _Obj *fn) {
+    if (!vm)
+        return;
+    if (_fn_context_depth >= JCC_FN_CONTEXT_STACK_DEPTH) {
+        error("__jcc_ast_push_fn: function context stack overflow (max %d)",
+              JCC_FN_CONTEXT_STACK_DEPTH);
+        return;
+    }
+    _fn_context_stack[_fn_context_depth++] = vm->compiler.current_fn;
+    vm->compiler.current_fn = fn;
+}
+
+// Pop the most recently pushed function context, restoring current_fn to its
+// previous value.
+void __jcc_ast_pop_fn(JCC *vm) {
+    if (!vm)
+        return;
+    if (_fn_context_depth <= 0) {
+        // Unmatched pop — reset to NULL rather than crashing.
+        vm->compiler.current_fn = NULL;
+        return;
+    }
+    vm->compiler.current_fn = _fn_context_stack[--_fn_context_depth];
+}
+
+// ============================================================================
 // AST Dump Functions (ticket #58)
 // ============================================================================
 

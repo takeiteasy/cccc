@@ -1,12 +1,39 @@
 # JCC Pragma Macros
 
 Pragma macros are C functions that JCC compiles and runs during compilation.
-They can inspect compile-time types, build AST nodes, generate functions, and
-replace macro call sites with generated code.
+They can inspect compile-time types, build AST nodes, generate functions and
+global variables, and replace macro call sites with generated code.
 
 The macro API is automatically available while pragma macro and comptime helper
 functions are compiled. Macro code can use the `_AST_*`, `_QUOTE*`, `_MACRO_ERROR_AT`,
 `_GENSYM`, and `_DUMP_*` convenience macros directly.
+
+## Return-Value Model
+
+A pragma macro's return value is **the node spliced at the call site**, replacing
+the invocation. Top-level definitions — functions created with `_AST_FUNCTION()`,
+globals with `_AST_GLOBAL_VAR()` — are **side effects** injected regardless of what
+the macro returns.
+
+| Call context | Return value |
+|--------------|--------------|
+| Expression position (`int x = mac()`) | Must return a non-NULL `_Node *`. NULL is a compile error. |
+| Declaration position (file-scope `mac();` or `inline` auto-run) | Returning NULL or `void` is legal — means "I only emitted definitions." |
+
+For definition-only macros, declare the return type `void`. This is self-documenting
+and lets you omit the return statement entirely. Using a `void` macro in expression
+position is a compile error.
+
+```c
+#pragma macro
+void emit_helpers(void) {
+    // build functions, globals — no return needed
+}
+emit_helpers();
+```
+
+`_Node *` macros may still return NULL in declaration position without error. The
+old `return _AST_INT_LITERAL(0)` idiom still works but is no longer needed.
 
 ## Execution Model
 
@@ -14,13 +41,21 @@ JCC supports three pragma macro execution forms:
 
 | Form | Source shape | When it runs | What the return value means |
 |------|--------------|--------------|-----------------------------|
-| Inline generation | `#pragma macro inline _Node *gen(void)` | Before the main parse | Ignored; side effects generate declarations/functions |
-| File-scope call | `gen();` at file scope | While parsing that file, at that source position | Ignored; side effects generate declarations/functions |
+| Inline generation | `#pragma macro` + `inline void gen(void)` | Before the main parse | Ignored; side effects generate declarations/functions/globals |
+| File-scope call | `gen();` at file scope | While parsing that file, at that source position | Ignored; side effects generate declarations/functions/globals |
 | Call-site expansion | `gen(args...)` inside code | During macro expansion after parsing | Replaces the call expression or statement |
 
-The macro function itself must return `_Node *`. For generation-style macros,
-return `_AST_INT_LITERAL(0)` or another harmless node; the generated functions
-and declarations come from API calls made by the macro.
+### Inline macro stdlib constraint
+
+Inline macros compile and execute **before the main parse begins**. The macro
+program only has `reflection.h` (and its transitive `stdbool.h`, `stddef.h`,
+`stdint.h` includes) available implicitly. Headers included by the user file
+(`stdio.h`, `stdlib.h`, etc.) are **not** in scope.
+
+If your macro or comptime helper calls `fopen`, `malloc`, `strcmp`, or other
+stdlib functions, use a **file-scope call** instead of `inline`. File-scope
+calls compile the macro program during the main parse, after the user's includes
+have been processed and those functions are in scope.
 
 ## Inline Generation
 
@@ -31,12 +66,10 @@ synthetic declarations automatically.
 
 ```c
 #pragma macro
-inline _Node *generate_answer(void) {
+inline void generate_answer(void) {
     _Type *int_ty = _AST_GET_TYPE("int");
     _Obj *fn = _AST_FUNCTION("answer", int_ty);
-
     _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(_AST_INT_LITERAL(42)));
-    return _AST_INT_LITERAL(0);
 }
 
 int main(void) {
@@ -51,13 +84,13 @@ definition that source code needs to call normally.
 ## File-Scope Macro Calls
 
 Use a file-scope macro call when generation should happen at a specific source
-position. The macro runs when the parser reaches the call. If the macro creates
-a function that later source should call, publish it with
-`_AST_FORWARD_DECLARE(fn)`.
+position, or when the macro needs stdlib functions from the user's includes. The
+macro runs when the parser reaches the call. If the macro creates a function that
+later source should call, publish it with `_AST_FORWARD_DECLARE(fn)`.
 
 ```c
 #pragma macro
-_Node *generate_add(void) {
+void generate_add(void) {
     _Type *int_ty = _AST_GET_TYPE("int");
     _Obj *fn = _AST_FUNCTION("add", int_ty);
 
@@ -68,8 +101,6 @@ _Node *generate_add(void) {
                              _AST_PARAM_REF(fn, "b"));
     _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(sum));
     _AST_FORWARD_DECLARE(fn);
-
-    return _AST_INT_LITERAL(0);
 }
 
 generate_add();
@@ -87,7 +118,7 @@ declaration rules and cannot call the generated function by name.
 
 A normal pragma macro call inside an expression or statement is parsed as a
 macro call node. During macro expansion, JCC executes the macro and replaces the
-call with the returned AST.
+call with the returned AST. The macro **must** return a non-NULL node.
 
 ```c
 #pragma macro
@@ -178,6 +209,28 @@ _Node *sum2(_Node *a, _Node *b) {
 Do not mix `$N` and `$$` in one template. Use `_QUOTE_N(tmpl, nodes, count)`
 when splice nodes are already in an array.
 
+### `_QUOTE` inside generated function bodies
+
+`_QUOTE("return x;")` needs to know the enclosing function's return type to
+apply the correct implicit cast. When building a generated function body, wrap
+the quote call in `_AST_WITH_FN(fn)` to establish that context:
+
+```c
+#pragma macro
+inline void generate_answer(void) {
+    _Type *int_ty = _AST_GET_TYPE("int");
+    _Obj *fn = _AST_FUNCTION("answer", int_ty);
+    _AST_WITH_FN(fn) {
+        _AST_FUNCTION_SET_BODY(fn, _QUOTE("return 42;"));
+    }
+}
+```
+
+Without `_AST_WITH_FN`, `_QUOTE("return x;")` at file scope (where there is no
+enclosing function) will compile but the implicit return-type cast is skipped.
+For macros that only use `_AST_RETURN(_AST_INT_LITERAL(...))` directly this does
+not matter; it matters when the template produces a `return` statement.
+
 ## Type And Symbol Reflection
 
 Macros can inspect types and global symbols that are visible at the macro
@@ -224,16 +277,15 @@ build a body, and install the body.
 
 ```c
 #pragma macro
-inline _Node *generate_is_even(void) {
+inline void generate_is_even(void) {
     _Type *int_ty = _AST_GET_TYPE("int");
     _Obj *fn = _AST_FUNCTION("is_even", int_ty);
     _AST_FUNCTION_ADD_PARAM(fn, "n", int_ty);
 
     _Node *n = _AST_PARAM_REF(fn, "n");
-    _Node *body = _AST_RETURN(_QUOTE("$1 % 2 == 0", n));
-    _AST_FUNCTION_SET_BODY(fn, body);
-
-    return _AST_INT_LITERAL(0);
+    _AST_WITH_FN(fn) {
+        _AST_FUNCTION_SET_BODY(fn, _QUOTE("return $1 % 2 == 0;", n));
+    }
 }
 
 int main(void) {
@@ -252,14 +304,45 @@ emits a compile-time error instead of silently replacing it. Use
 
 ```c
 #pragma macro
-_Node *make_helper(void) {
+void make_helper(void) {
     const char *name = _GENSYM("helper");
     _Type *int_ty = _AST_GET_TYPE("int");
     _Obj *fn = _AST_FUNCTION(name, int_ty);
-
     _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(_AST_INT_LITERAL(42)));
-    return _AST_INT_LITERAL(0);
 }
+```
+
+## Global Variable Generation
+
+Macros can emit global variables with initial data. Use `_AST_MAKE_ARRAY` to
+size the type to match the data length; the codegen copies exactly `ty->size`
+bytes from the init data.
+
+```c
+#pragma macro
+inline void embed_version(void) {
+    _Type *char_ty = _AST_GET_TYPE("char");
+    _Type *arr_ty  = _AST_MAKE_ARRAY(char_ty, 8);
+    _Obj  *var     = _AST_GLOBAL_VAR("version_str", arr_ty);
+    _AST_GLOBAL_VAR_SET_INIT_DATA(var, "1.0.0\0\0", 8);
+    _AST_GLOBAL_VAR_SET_STATIC(var, 1);  // internal linkage
+}
+
+int main(void) {
+    return version_str[0] != '1';
+}
+```
+
+For inline macros, the capture loop synthesizes an `extern` declaration that the
+parser uses to resolve references to the generated variable. For file-scope calls,
+add a file-scope `extern` declaration before code that references the variable:
+
+```c
+extern char version_str[];
+
+#pragma macro
+void embed_version(void) { ... }
+embed_version();
 ```
 
 ## Local Variables
@@ -410,6 +493,15 @@ AST dump helpers are available while developing macros:
 | `_AST_FUNCTION_SET_STATIC(fn, flag)` | Set static linkage |
 | `_AST_FUNCTION_SET_INLINE(fn, flag)` | Set inline flag |
 | `_AST_FUNCTION_SET_VARIADIC(fn, flag)` | Set variadic flag |
+| `_AST_WITH_FN(fn) { ... }` | Set `fn` as the current function context for the block so `_QUOTE("return x;")` applies the correct return-type cast |
+
+### Global Variable Builder APIs
+
+| Convenience macro | Description |
+|-------------------|-------------|
+| `_AST_GLOBAL_VAR(name, ty)` | Create a global variable definition |
+| `_AST_GLOBAL_VAR_SET_INIT_DATA(var, data, len)` | Set raw initial data (`len` must equal `ty->size`) |
+| `_AST_GLOBAL_VAR_SET_STATIC(var, flag)` | Set internal linkage (file-scope `static`) |
 
 ### Node Kinds
 
@@ -427,9 +519,15 @@ _ASSIGN, _ADDR, _DEREF, _COMMA
 
 - Pragma macro calls accept at most 8 arguments.
 - Macro code runs at compile time and cannot inspect runtime values.
+- Inline macros compile before the main parse; only `reflection.h` and its
+  transitive includes (`stdbool.h`, `stddef.h`, `stdint.h`) are available. Use
+  a file-scope call if the macro needs `stdio.h`, `stdlib.h`, or other headers
+  from the user file.
 - File-scope explicit generation follows source order. Use inline macros for
   whole-program pre-parse generation, or `_AST_FORWARD_DECLARE(fn)` for
   explicit file-scope publication.
 - `_AST_FORWARD_DECLARE(fn)` publishes function names only. Types, globals, and
   other declarations follow the normal parser state visible at the macro
   execution point.
+- `void` pragma macros cannot be used in expression position; doing so is a
+  compile error.
