@@ -28,5 +28,5 @@ int main(void) {
     // No macro call — inline macros run automatically.
     // generated_func was created by the inline macro above.
     int result = generated_func();
-    return result - 42;  // 0 on success
+    return result;  // 0 on success
 }

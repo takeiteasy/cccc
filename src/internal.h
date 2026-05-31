@@ -514,15 +514,6 @@ void print_escaped_string(FILE *f, const char *str);
 long long generate_random_canary(void);
 
 //
-// url_fetch.c
-//
-
-bool is_url(const char *filename);
-void init_url_cache(JCC *vm);
-void clear_url_cache(JCC *vm);
-char *fetch_url_to_cache(JCC *vm, const char *url);
-
-//
 // stdlib
 //
 

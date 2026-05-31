@@ -243,10 +243,6 @@ int main(int argc, const char *argv[]) {
     int skip_preprocess = 0;   // -X
     int skip_stdlib = 0;       // -S
     int output_json = 0;       // -j
-#ifdef JCC_HAS_CURL
-    char *url_cache_dir = NULL; // --url-cache-dir
-    int url_cache_clear = 0;    // --url-cache-clear
-#endif
     int max_errors = 20;        // --max-errors (default: 20)
     int warnings_as_errors = 0; // --Werror
     size_t embed_limit = 0;     // --embed-limit (0 = use default)
@@ -295,8 +291,6 @@ int main(int argc, const char *argv[]) {
         {"isystem", required_argument, 0, 1013},
         {"define", required_argument, 0, 'D'},
         {"undef", required_argument, 0, 'U'},
-        {"url-cache-dir", required_argument, 0, 1008},
-        {"url-cache-clear", no_argument, 0, 1009},
         {"max-errors", required_argument, 0, 1010},
         {"Werror", no_argument, 0, 1011},
         {"embed-limit", required_argument, 0, 1014},
@@ -468,14 +462,6 @@ int main(int argc, const char *argv[]) {
         case 'j':
             output_json = 1;
             break;
-#ifdef JCC_HAS_CURL
-        case 1008:
-            url_cache_dir = strdup(optarg);
-            break;
-        case 1009:
-            url_cache_clear = 1;
-            break;
-#endif
         case 1010:
             max_errors = atoi(optarg);
             if (max_errors <= 0) {
@@ -623,16 +609,6 @@ int main(int argc, const char *argv[]) {
     if (vm.flags & JCC_RANDOM_CANARIES) {
         vm.stack_canary = generate_random_canary();
     }
-
-#ifdef JCC_HAS_CURL
-    // Configure URL cache if needed
-    if (url_cache_dir) {
-        vm.compiler.url_cache_dir = url_cache_dir;
-    }
-    if (url_cache_clear) {
-        clear_url_cache(&vm);
-    }
-#endif
 
     // Enable error collection for better error reporting
     vm.collect_errors = true;

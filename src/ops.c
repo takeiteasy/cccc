@@ -1874,78 +1874,7 @@ int op_CALLF_fn(JCC *vm) {
                                                                 : "int");
     }
 
-#ifdef JCC_HAS_FFI
-    // libffi implementation
-    ffi_cif cif;
-    ffi_type **arg_types = NULL;
-    ffi_type *return_type =
-        ff->returns_double ? &ffi_type_double : &ffi_type_sint64;
-
-    if (actual_nargs > 0) {
-        arg_types = malloc(actual_nargs * sizeof(ffi_type *));
-        if (!arg_types) {
-            printf("error: failed to allocate arg types for FFI\n");
-            free(args);
-            return -1;
-        }
-
-        for (int i = 0; i < actual_nargs; i++) {
-            if (i < 64 && (double_arg_mask & (1ULL << i))) {
-                arg_types[i] = &ffi_type_double;
-            } else {
-                arg_types[i] = &ffi_type_sint64;
-            }
-        }
-    }
-
-    ffi_status status;
-    if (ff->is_variadic) {
-        status = ffi_prep_cif_var(&cif, FFI_DEFAULT_ABI, ff->num_fixed_args,
-                                  actual_nargs, return_type, arg_types);
-    } else {
-        status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI, actual_nargs, return_type,
-                              arg_types);
-    }
-
-    if (status != FFI_OK) {
-        printf("error: failed to prepare FFI cif (status=%d)\n", status);
-        if (arg_types)
-            free(arg_types);
-        free(args);
-        return -1;
-    }
-
-    // Build arg pointers array
-    void **arg_ptrs =
-        malloc((actual_nargs > 0 ? actual_nargs : 1) * sizeof(void *));
-    if (!arg_ptrs) {
-        printf("error: failed to allocate arg pointers for FFI\n");
-        if (arg_types)
-            free(arg_types);
-        free(args);
-        return -1;
-    }
-    for (int i = 0; i < actual_nargs; i++) {
-        arg_ptrs[i] = &args[i];
-    }
-
-    // Call the function
-    if (ff->returns_double) {
-        double result;
-        ffi_call(&cif, FFI_FN(ff->func_ptr), &result, arg_ptrs);
-        vm->fregs[FREG_A0] = result;
-    } else {
-        long long result;
-        ffi_call(&cif, FFI_FN(ff->func_ptr), &result, arg_ptrs);
-        vm->regs[REG_A0] = result;
-    }
-
-    if (arg_types)
-        free(arg_types);
-    free(arg_ptrs);
-
-#else
-    // Fallback implementation without libffi
+    // Inline assembly implementation
 #if defined(__aarch64__) || defined(__arm64__)
     // ARM64 inline assembly - uses register calling convention
     int num_fixed = ff->is_variadic ? ff->num_fixed_args : actual_nargs;
@@ -2329,10 +2258,8 @@ int op_CALLF_fn(JCC *vm) {
         vm->regs[REG_A0] = result;
     }
 #else
-#error                                                                         \
-    "FFI inline assembly not implemented for this platform. Build with -DJCC_HAS_FFI to use libffi."
+#error "FFI inline assembly not implemented for this platform."
 #endif
-#endif // JCC_HAS_FFI
     free(args);
     return 0;
 }

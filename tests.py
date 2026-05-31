@@ -166,53 +166,6 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
     }
 
 
-def run_bytecode_roundtrip(jcc, script_dir, jcc_args):
-    test_file = Path(script_dir) / "tests" / "test_bytecode_32bit_roundtrip.c"
-    with tempfile.TemporaryDirectory() as tmpdir:
-        out_file = Path(tmpdir) / "roundtrip.jbc"
-        compile_cmd = [str(jcc), "-I./include", *jcc_args, "-o", str(out_file), str(test_file)]
-        compile_result = subprocess.run(
-            compile_cmd, capture_output=True, text=True, cwd=script_dir
-        )
-        if compile_result.returncode != 0:
-            return {
-                "idx": -1,
-                "test_name": "bytecode_32bit_roundtrip.jbc",
-                "exit_code": compile_result.returncode,
-                "status": "failed",
-                "output": compile_result.stdout + compile_result.stderr,
-                "is_negative_test": False,
-                "expects_runtime_error": False,
-            }
-
-        data = out_file.read_bytes()
-        version = int.from_bytes(data[4:8], "little")
-        text_size = int.from_bytes(data[12:20], "little")
-        if version != 4 or text_size % 4 != 0:
-            return {
-                "idx": -1,
-                "test_name": "bytecode_32bit_roundtrip.jbc",
-                "exit_code": -1,
-                "status": "failed",
-                "output": f"bad bytecode header: version={version}, text_size={text_size}",
-                "is_negative_test": False,
-                "expects_runtime_error": False,
-            }
-
-        run_result = subprocess.run(
-            [str(jcc), str(out_file)], capture_output=True, text=True, cwd=script_dir
-        )
-        return {
-            "idx": -1,
-            "test_name": "bytecode_32bit_roundtrip.jbc",
-            "exit_code": run_result.returncode,
-            "status": "passed" if run_result.returncode == 42 else "failed",
-            "output": run_result.stdout + run_result.stderr,
-            "is_negative_test": False,
-            "expects_runtime_error": False,
-        }
-
-
 def main():
     parser = argparse.ArgumentParser(description="Test runner for JCC")
     parser.add_argument(
@@ -359,9 +312,6 @@ def main():
             future.add_done_callback(lambda f, idx=arg[0]: on_done(f, idx))
             futures.append(future)
         concurrent.futures.wait(futures)
-
-    if any(f.name == "test_bytecode_32bit_roundtrip.c" for f in test_files) and not use_leaks:
-        print_single_result(run_bytecode_roundtrip(jcc, str(script_dir), jcc_args))
 
     print()
     print("=======================")

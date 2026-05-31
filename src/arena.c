@@ -7,12 +7,10 @@
 
 // Platform-specific includes and definitions
 #if defined(_WIN32) || defined(_WIN64)
-#include <windows.h>
 #define ARENA_MMAP(size) VirtualAlloc(NULL, (size), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE)
 #define ARENA_MUNMAP(ptr, size) VirtualFree((ptr), 0, MEM_RELEASE)
 #define MAP_FAILED NULL
 #else
-#include <sys/mman.h>
 #define ARENA_MMAP(size) mmap(NULL, (size), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
 #define ARENA_MUNMAP(ptr, size) munmap((ptr), (size))
 #endif

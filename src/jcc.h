@@ -39,13 +39,10 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #endif
 
-// libffi support for variadic foreign functions
-#ifdef JCC_HAS_FFI
-#include <ffi.h>
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -850,9 +847,6 @@ typedef void (*JCCAsmCallback)(JCC *vm, const char *asm_str, void *user_data);
  @field is_variadic True if function is variadic (accepts ... arguments).
  @field num_fixed_args For variadic functions: number of fixed args before ...
  (e.g., printf has 1: format string).
- @field cif libffi call interface (only when JCC_HAS_FFI is defined).
- @field arg_types Array of argument types for libffi (NULL if not prepared, only
- when JCC_HAS_FFI is defined).
 */
 typedef struct ForeignFunc {
     char *name;
@@ -864,10 +858,6 @@ typedef struct ForeignFunc {
                         // are variable)
     uint64_t double_arg_mask; // Bitmask indicating which args are doubles (bit
                               // N = arg N)
-#ifdef JCC_HAS_FFI
-    ffi_cif cif;          // libffi call interface
-    ffi_type **arg_types; // Array of argument types (NULL if not prepared)
-#endif
 } ForeignFunc;
 
 /*!
@@ -1260,10 +1250,6 @@ typedef struct Compiler {
     HashMap include_cache;            // Cache for search_include_paths
     StringArray file_buffers; // Track allocated file buffers for cleanup
 
-    // URL include cache (only used when JCC_HAS_CURL is enabled)
-    char *url_cache_dir; // Directory for caching downloaded headers
-    HashMap url_to_path; // Maps URLs to cached file paths
-
     // Code generation state
     int label_counter; // For generating unique labels
     int local_offset;  // Current local variable offset
@@ -1627,9 +1613,8 @@ void cc_register_cfunc_ex(JCC *vm, const char *name, void *func_ptr,
  has 1: format string).
  @param returns_double 1 if function returns double, 0 if returns long long.
  @discussion Variadic functions accept a variable number of arguments after the
- fixed arguments. JCC uses libffi when JCC_HAS_FFI is enabled, and otherwise
- uses the platform native inline-assembly FFI implementation when available.
-             Example: printf has 1 fixed arg (format), fprintf has 2 (stream,
+ fixed arguments. JCC uses platform native inline-assembly to call variadic
+ functions. Example: printf has 1 fixed arg (format), fprintf has 2 (stream,
  format).
 */
 void cc_register_variadic_cfunc(JCC *vm, const char *name, void *func_ptr,

@@ -30,7 +30,7 @@ JCC includes optional bytecode optimization passes that can improve execution pe
 
 ## Optimization Passes
 
-### Phase 1: Constant Folding (`-O1`)
+### Phase 1: Constant Folding (`--optimize=1`)
 
 Tracks constant values through register operations and computes results at compile time.
 
@@ -52,7 +52,7 @@ int x = 2 + 3;  // Constant folding computes 5 at compile time
 
 ---
 
-### Phase 2: Peephole Optimization (`-O2`)
+### Phase 2: Peephole Optimization (`--optimize=2`)
 
 Pattern-matches small instruction sequences and removes redundancies.
 
@@ -66,7 +66,7 @@ Pattern-matches small instruction sequences and removes redundancies.
 
 ---
 
-### Phase 3: Dead Code Elimination (`-O3`)
+### Phase 3: Dead Code Elimination (`--optimize=3`)
 
 Removes demonstrably dead code using conservative analysis.
 
@@ -95,9 +95,9 @@ word footprint so PC-index branch targets remain valid:
 
 ## Best Practices
 
-1. **Development**: Use `-O0` (default) for predictable debugging
-2. **Testing**: Run test suite with `-O3` to catch optimization bugs
-3. **Production**: Use `-O2` for a good balance of speed and safety
+1. **Development**: Use the default (no `--optimize` flag) for predictable debugging
+2. **Testing**: Run the test suite with `--optimize=3` to catch optimization bugs
+3. **Production**: Use `--optimize=2` for a good balance of speed and safety
 
 ## Combining with Safety Features
 

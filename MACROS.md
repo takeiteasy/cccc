@@ -54,6 +54,45 @@ _Node *my_macro(void) {
 }
 ```
 
+## Inline Pragma Macros
+
+An `inline` pragma macro runs automatically at its declaration point — no explicit call site is required. This is useful for macros that generate functions or definitions that need to be visible to the rest of the translation unit.
+
+Add the `inline` keyword between `#pragma macro` and the return type:
+
+```c
+#pragma macro
+inline _Node *generate_add(void) {
+    _VirtualMachine *vm = __jcc_get_vm();
+    _Type *int_type = __jcc_ast_get_type(vm, "int");
+
+    _Obj *fn = __jcc_ast_function(vm, "add", int_type);
+    __jcc_ast_function_add_param(vm, fn, "a", int_type);
+    __jcc_ast_function_add_param(vm, fn, "b", int_type);
+
+    _Node *body = __jcc_ast_return(vm,
+        __jcc_ast_binary(vm, _ADD,
+            __jcc_ast_param_ref(vm, fn, "a"),
+            __jcc_ast_param_ref(vm, fn, "b")));
+    __jcc_ast_function_set_body(vm, fn, body);
+
+    return __jcc_ast_int_literal(vm, 0); // return value is ignored
+}
+
+int main(void) {
+    // No macro call and no forward declaration needed.
+    // generate_add() ran at declaration; add() is now defined.
+    return add(20, 22) - 42;  // Returns 0
+}
+```
+
+Key differences from regular pragma macros:
+
+- **Auto-execution**: the macro runs when the compiler reaches its declaration, not when it is called.
+- **No call site**: the function never appears in the program's source as a call.
+- **Automatic forward declarations**: any functions created with `__jcc_ast_function()` inside an inline macro get synthetic forward declarations prepended to the token stream, so later code can call them without manual `extern` declarations.
+- **No arguments**: inline macros always take `void`; they cannot receive `_Node*` arguments from a call site.
+
 ## Macro Arguments
 
 Pragma macros can receive arguments. The arguments are passed as `_Node*` pointers to the original AST nodes from the call site:
@@ -198,20 +237,22 @@ _Node *get_first_enum_name(void) {
 
 ### Type Introspection
 
-| Function | Description |
-|----------|-------------|
-| `__jcc_ast_type_kind(ty)` | Get _TypeKind (_INT, _ENUM, _STRUCT, etc.) |
-| `__jcc_ast_type_size(ty)` | Get sizeof() in bytes |
-| `__jcc_ast_type_align(ty)` | Get alignment in bytes |
-| `__jcc_ast_type_is_unsigned(ty)` | Check if unsigned |
-| `__jcc_ast_type_is_const(ty)` | Check if const-qualified |
-| `__jcc_ast_type_base(ty)` | For pointer/array: get base type |
-| `__jcc_ast_type_array_len(ty)` | For arrays: get length (-1 if not array) |
-| `__jcc_ast_type_return_type(ty)` | For functions: get return type |
-| `__jcc_ast_type_param_count(ty)` | For functions: get parameter count |
-| `__jcc_ast_type_param_at(ty, index)` | For functions: get parameter type |
-| `__jcc_ast_type_is_variadic(ty)` | For functions: check variadic flag |
-| `__jcc_ast_type_name(ty)` | Get the type name when available |
+These functions take no `vm` argument, so their macros are plain aliases.
+
+| Function | Convenience Macro | Description |
+|----------|-------------------|-------------|
+| `__jcc_ast_type_kind(ty)` | `_AST_TYPE_KIND(ty)` | Get `_TypeKind` (`_INT`, `_ENUM`, `_STRUCT`, etc.) |
+| `__jcc_ast_type_size(ty)` | `_AST_TYPE_SIZE(ty)` | Get `sizeof()` in bytes |
+| `__jcc_ast_type_align(ty)` | `_AST_TYPE_ALIGN(ty)` | Get alignment in bytes |
+| `__jcc_ast_type_is_unsigned(ty)` | `_AST_TYPE_IS_UNSIGNED(ty)` | Check if unsigned |
+| `__jcc_ast_type_is_const(ty)` | `_AST_TYPE_IS_CONST(ty)` | Check if const-qualified |
+| `__jcc_ast_type_base(ty)` | `_AST_TYPE_BASE(ty)` | For pointer/array: get base type |
+| `__jcc_ast_type_array_len(ty)` | `_AST_TYPE_ARRAY_LEN(ty)` | For arrays: get length (-1 if not array) |
+| `__jcc_ast_type_return_type(ty)` | `_AST_TYPE_RETURN_TYPE(ty)` | For functions: get return type |
+| `__jcc_ast_type_param_count(ty)` | `_AST_TYPE_PARAM_COUNT(ty)` | For functions: get parameter count |
+| `__jcc_ast_type_param_at(ty, index)` | `_AST_TYPE_PARAM_AT(ty, i)` | For functions: get parameter type at index |
+| `__jcc_ast_type_is_variadic(ty)` | `_AST_TYPE_IS_VARIADIC(ty)` | For functions: check variadic flag |
+| `__jcc_ast_type_name(ty)` | `_AST_TYPE_NAME(ty)` | Get the type name when available |
 
 ### Type Construction
 
@@ -228,11 +269,11 @@ _Node *get_first_enum_name(void) {
 | `__jcc_ast_enum_at(vm, ty, i)` | `_AST_ENUM_AT(ty, i)` | Get constant at index |
 | `__jcc_ast_enum_find(vm, ty, name)` | `_AST_ENUM_FIND(ty, name)` | Find constant by name |
 | `__jcc_ast_enum_constant_name(ec)` | `_AST_ENUM_CONSTANT_NAME(ec)` | Get constant name |
-| `__jcc_ast_enum_constant_value(ec)` | `_AST_ENUM_CONSTANT_VALUE(ec)` | Get constant value |
-| `__jcc_ast_enum_name(ty)` | - | Get enum type name |
-| `__jcc_ast_enum_value_count(ty)` | - | Get enum value count |
-| `__jcc_ast_enum_value_name(ty, i)` | - | Get enum value name at index |
-| `__jcc_ast_enum_value(ty, i)` | - | Get enum value at index |
+| `__jcc_ast_enum_constant_value(ec)` | `_AST_ENUM_CONSTANT_VALUE(ec)` | Get constant integer value |
+| `__jcc_ast_enum_name(ty)` | `_AST_ENUM_NAME(ty)` | Get enum type name |
+| `__jcc_ast_enum_value_count(ty)` | `_AST_ENUM_VALUE_COUNT(ty)` | Get enum value count |
+| `__jcc_ast_enum_value_name(ty, i)` | `_AST_ENUM_VALUE_NAME(ty, i)` | Get enum value name at index |
+| `__jcc_ast_enum_value(ty, i)` | `_AST_ENUM_VALUE(ty, i)` | Get enum integer value at index |
 
 ### Struct/Union Reflection
 
@@ -244,8 +285,8 @@ _Node *get_first_enum_name(void) {
 | `__jcc_ast_member_name(m)` | `_AST_MEMBER_NAME(m)` | Get member name |
 | `__jcc_ast_member_type(m)` | `_AST_MEMBER_TYPE(m)` | Get member type |
 | `__jcc_ast_member_offset(m)` | `_AST_MEMBER_OFFSET(m)` | Get member offset in bytes |
-| `__jcc_ast_member_is_bitfield(m)` | - | Check if member is a bitfield |
-| `__jcc_ast_member_bitfield_width(m)` | - | Get bitfield width |
+| `__jcc_ast_member_is_bitfield(m)` | `_AST_MEMBER_IS_BITFIELD(m)` | Check if member is a bitfield |
+| `__jcc_ast_member_bitfield_width(m)` | `_AST_MEMBER_BITFIELD_WIDTH(m)` | Get bitfield width in bits |
 
 ### Global Symbol Reflection
 
@@ -254,11 +295,11 @@ _Node *get_first_enum_name(void) {
 | `__jcc_ast_find_global(vm, name)` | `_AST_FIND_GLOBAL(name)` | Find global symbol by name |
 | `__jcc_ast_global_count(vm)` | `_AST_GLOBAL_COUNT()` | Count global symbols |
 | `__jcc_ast_global_at(vm, i)` | `_AST_GLOBAL_AT(i)` | Get global symbol at index |
-| `__jcc_ast_obj_name(obj)` | - | Get object name |
-| `__jcc_ast_obj_type(obj)` | - | Get object type |
-| `__jcc_ast_obj_is_function(obj)` | - | Check if object is a function |
-| `__jcc_ast_obj_is_definition(obj)` | - | Check if object has a definition |
-| `__jcc_ast_obj_is_static(obj)` | - | Check if object has static linkage |
+| `__jcc_ast_obj_name(obj)` | `_AST_OBJ_NAME(obj)` | Get object name |
+| `__jcc_ast_obj_type(obj)` | `_AST_OBJ_TYPE(obj)` | Get object type |
+| `__jcc_ast_obj_is_function(obj)` | `_AST_OBJ_IS_FUNCTION(obj)` | Check if object is a function |
+| `__jcc_ast_obj_is_definition(obj)` | `_AST_OBJ_IS_DEFINITION(obj)` | Check if object has a definition |
+| `__jcc_ast_obj_is_static(obj)` | `_AST_OBJ_IS_STATIC(obj)` | Check if object has static linkage |
 
 ### AST Construction - Literals
 

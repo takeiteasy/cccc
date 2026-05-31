@@ -308,13 +308,6 @@ void cc_init(JCC *vm, uint32_t flags) {
     vm->compiler.include_guards.buckets = NULL;
     vm->compiler.include_guards.used = 0;
 
-    // Initialize url_to_path HashMap for URL include tracking
-    vm->compiler.url_to_path.capacity = 0;
-    vm->compiler.url_to_path.buckets = NULL;
-    vm->compiler.url_to_path.used = 0;
-    vm->compiler.url_to_path.used = 0;
-    vm->compiler.url_cache_dir = NULL;  // Will be initialized on first URL include
-
     // Initialize include_cache HashMap
     vm->compiler.include_cache.capacity = 0;
     vm->compiler.include_cache.buckets = NULL;
@@ -359,11 +352,6 @@ void cc_init(JCC *vm, uint32_t flags) {
     // Add default system include path for <...> includes
     cc_system_include(vm, "./include");
 
-    // If VM was built with libffi support, define JCC_HAS_FFI for user code
-#ifdef JCC_HAS_FFI
-    cc_define(vm, "JCC_HAS_FFI", "1");
-#endif
-
     // Initialize error collection fields
     vm->errors = NULL;
     vm->errors_tail = NULL;
@@ -381,7 +369,7 @@ void cc_init(JCC *vm, uint32_t flags) {
 void cc_destroy(JCC *vm) {
     if (!vm)
         return;
-    
+
     // Release reserved virtual ranges (base pointers never moved)
     if (vm->text_seg)
         jcc_vm_release(vm->text_seg,
@@ -470,13 +458,8 @@ void cc_destroy(JCC *vm) {
 
     // Free FFI table
     if (vm->compiler.ffi_table) {
-        for (int i = 0; i < vm->compiler.ffi_count; i++) {
+        for (int i = 0; i < vm->compiler.ffi_count; i++)
             free(vm->compiler.ffi_table[i].name);
-#ifdef JCC_HAS_FFI
-            if (vm->compiler.ffi_table[i].arg_types)
-                free(vm->compiler.ffi_table[i].arg_types);
-#endif
-        }
         free(vm->compiler.ffi_table);
     }
 
@@ -504,10 +487,6 @@ void cc_destroy(JCC *vm) {
     if (vm->compiler.input_files)
         free(vm->compiler.input_files);
 
-    // Free URL cache directory
-    if (vm->compiler.url_cache_dir)
-        free(vm->compiler.url_cache_dir);
-
     // Free include_cache HashMap (values are malloc'd path strings)
     if (vm->compiler.include_cache.buckets) {
         for (int i = 0; i < vm->compiler.include_cache.capacity; i++) {
@@ -524,9 +503,6 @@ void cc_destroy(JCC *vm) {
             free(vm->compiler.file_buffers.data[i]);
         free(vm->compiler.file_buffers.data);
     }
-
-    // Free URL to path map
-    hashmap_deinit(&vm->compiler.url_to_path);
 
     // Free watchpoint expressions
     for (int i = 0; i < MAX_WATCHPOINTS; i++) {
@@ -622,9 +598,6 @@ void cc_register_cfunc_ex(JCC *vm, const char *name, void *func_ptr, int num_arg
         .is_variadic = 0,
         .num_fixed_args = num_args,
         .double_arg_mask = double_arg_mask
-#ifdef JCC_HAS_FFI
-        , .arg_types = NULL
-#endif
     };
 }
 
@@ -653,9 +626,6 @@ void cc_register_variadic_cfunc(JCC *vm, const char *name, void *func_ptr, int n
         .is_variadic = 1,
         .num_fixed_args = num_fixed_args,
         .double_arg_mask = 0  // Variadic functions don't use mask - doubles passed as bits
-#ifdef JCC_HAS_FFI
-        , .arg_types = NULL  // Will be prepared during first CALLF
-#endif
     };
 }
 
@@ -873,3 +843,56 @@ int cc_run(JCC *vm, int argc, char **argv) {
 
     return (vm->flags & JCC_ENABLE_DEBUGGER) ? debugger_run(vm, argc, argv) : vm_eval(vm);
 }
+
+#if defined(_WIN32) || defined(_WIN64)
+static size_t jcc_vm_page_size(void) {
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return (size_t)si.dwPageSize;
+}
+
+void *jcc_vm_reserve(size_t bytes) {
+    void *p = VirtualAlloc(NULL, bytes, MEM_RESERVE, PAGE_NOACCESS);
+    return p; // NULL on failure
+}
+
+int jcc_vm_commit(void *base, size_t off, size_t len) {
+    size_t pgsz = jcc_vm_page_size();
+    // Align offset down, extend length to cover full pages
+    size_t aligned_off = off & ~(pgsz - 1);
+    size_t aligned_end = (off + len + pgsz - 1) & ~(pgsz - 1);
+    size_t aligned_len = aligned_end - aligned_off;
+    void *p = VirtualAlloc((char *)base + aligned_off, aligned_len,
+                           MEM_COMMIT, PAGE_READWRITE);
+    return (p == NULL) ? -1 : 0;
+}
+
+void jcc_vm_release(void *base, size_t bytes) {
+    (void)bytes;
+    VirtualFree(base, 0, MEM_RELEASE);
+}
+#else // POSIX
+static size_t jcc_vm_page_size(void) {
+    return (size_t)sysconf(_SC_PAGESIZE);
+}
+
+void *jcc_vm_reserve(size_t bytes) {
+    void *p = mmap(NULL, bytes, PROT_NONE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    return (p == MAP_FAILED) ? NULL : p;
+}
+
+int jcc_vm_commit(void *base, size_t off, size_t len) {
+    size_t pgsz = jcc_vm_page_size();
+    // Align offset down, extend length to cover full pages
+    size_t aligned_off = off & ~(pgsz - 1);
+    size_t aligned_end = (off + len + pgsz - 1) & ~(pgsz - 1);
+    size_t aligned_len = aligned_end - aligned_off;
+    return mprotect((char *)base + aligned_off, aligned_len,
+                    PROT_READ | PROT_WRITE);
+}
+
+void jcc_vm_release(void *base, size_t bytes) {
+    munmap(base, bytes);
+}
+#endif

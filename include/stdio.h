@@ -1,15 +1,5 @@
 /*
  * stdio.h - Standard I/O functions for JCC VM
- *
- * This header provides two modes for variadic stdio functions:
- *
- * WITH libffi (JCC_HAS_FFI defined):
- *   - True variadic function declarations (printf, scanf, etc.)
- *   - Unlimited arguments supported via libffi
- *
- * WITHOUT libffi (default):
- *   - Macro-based dispatch to fixed-argument variants
- *   - Supports printf, sprintf, fprintf, scanf, sscanf, fscanf with 0-16 additional arguments
  */
 
 #ifndef __STDIO_H
@@ -74,7 +64,7 @@ typedef long fpos_t;
 // ==================================================
 // Variadic function declarations 
 // ==================================================
-// Now supported via ARM64 inline assembly without requireing libffi
+// Supported via platform inline assembly
 
 // Printf family
 extern int printf(const char *fmt, ...);

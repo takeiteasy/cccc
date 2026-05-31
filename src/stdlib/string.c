@@ -1,11 +1,7 @@
 // string.h stdlib function registration
 #include "../jcc.h"
 
-// Wrapper functions for string.h to ensure correct ABI conversion
-long long wrap_strlen(long long s) {
-    return (long long)strlen((const char *)s);
-}
-
+// Wrapper functions for string.h to sign-extend int return values
 long long wrap_strcmp(long long s1, long long s2) {
     return (long long)strcmp((const char *)s1, (const char *)s2);
 }
@@ -28,7 +24,7 @@ void register_string_functions(JCC *vm) {
     cc_register_cfunc(vm, "memccpy", (void*)memccpy, 4, 0);
 
     // String length
-    cc_register_cfunc(vm, "strlen", (void*)wrap_strlen, 1, 0);
+    cc_register_cfunc(vm, "strlen", (void*)strlen, 1, 0);
 
     // String comparison
     cc_register_cfunc(vm, "strcmp", (void*)wrap_strcmp, 2, 0);
