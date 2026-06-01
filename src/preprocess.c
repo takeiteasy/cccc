@@ -1555,6 +1555,71 @@ static Token *handle_embed_directive(JCC *vm, Token *tok,
     return tok;
 }
 
+typedef enum {
+    PP_NONE = 0,
+    PP_IF, PP_IFDEF, PP_IFNDEF,
+    PP_ELIF, PP_ELIFDEF, PP_ELIFNDEF,
+    PP_ELSE, PP_ENDIF,
+    PP_INCLUDE, PP_INCLUDE_NEXT,
+    PP_DEFINE, PP_UNDEF,
+    PP_LINE, PP_PRAGMA, PP_EMBED,
+    PP_ERROR, PP_WARNING,
+} PPDir;
+
+static PPDir pp_directive(Token *tok) {
+    const char *s = tok->loc;
+    switch (tok->len) {
+    case 2:
+        if (s[0]=='i' && s[1]=='f') return PP_IF;
+        break;
+    case 4:
+        switch (s[0]) {
+        case 'e':
+            if (s[1]=='l') {
+                if (s[2]=='i' && s[3]=='f') return PP_ELIF;
+                if (s[2]=='s' && s[3]=='e') return PP_ELSE;
+            }
+            break;
+        case 'l': if (s[1]=='i' && s[2]=='n' && s[3]=='e') return PP_LINE; break;
+        }
+        break;
+    case 5:
+        switch (s[0]) {
+        case 'e':
+            switch (s[1]) {
+            case 'm': if (memcmp(s+2,"bed",3)==0) return PP_EMBED;  break;
+            case 'n': if (memcmp(s+2,"dif",3)==0) return PP_ENDIF;  break;
+            case 'r': if (memcmp(s+2,"ror",3)==0) return PP_ERROR;  break;
+            }
+            break;
+        case 'i': if (memcmp(s+1,"fdef",4)==0) return PP_IFDEF;  break;
+        case 'u': if (memcmp(s+1,"ndef",4)==0) return PP_UNDEF;  break;
+        }
+        break;
+    case 6:
+        switch (s[0]) {
+        case 'd': if (memcmp(s+1,"efine",5)==0) return PP_DEFINE;  break;
+        case 'i': if (memcmp(s+1,"fndef",5)==0) return PP_IFNDEF;  break;
+        case 'p': if (memcmp(s+1,"ragma",5)==0) return PP_PRAGMA;  break;
+        }
+        break;
+    case 7:
+        switch (s[0]) {
+        case 'e': if (memcmp(s+1,"lifdef",6)==0) return PP_ELIFDEF;  break;
+        case 'i': if (memcmp(s+1,"nclude",6)==0) return PP_INCLUDE;  break;
+        case 'w': if (memcmp(s+1,"arning",6)==0) return PP_WARNING;  break;
+        }
+        break;
+    case 8:
+        if (memcmp(s,"elifndef",8)==0) return PP_ELIFNDEF;
+        break;
+    case 12:
+        if (memcmp(s,"include_next",12)==0) return PP_INCLUDE_NEXT;
+        break;
+    }
+    return PP_NONE;
+}
+
 // Visit all tokens in `tok` while evaluating preprocessing
 // macros and directives.
 static Token *preprocess2(JCC *vm, Token *tok) {
@@ -1578,7 +1643,13 @@ static Token *preprocess2(JCC *vm, Token *tok) {
         Token *start = tok;
         tok = tok->next;
 
-        if (equal(tok, "include")) {
+        if (tok->kind == TK_PP_NUM) {
+            read_line_marker(vm, &tok, tok);
+            continue;
+        }
+
+        switch (pp_directive(tok)) {
+        case PP_INCLUDE: {
             bool is_dquote;
             int filename_len;
             char *filename = read_include_filename(vm, &tok, tok->next,
@@ -1590,7 +1661,7 @@ static Token *preprocess2(JCC *vm, Token *tok) {
                     format_relative_path(vm, start->file->name, filename);
                 if (file_exists(path)) {
                     tok = include_file(vm, tok, path, start->next->next);
-                    continue;
+                    break;
                 }
             }
 
@@ -1602,16 +1673,14 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             // For quoted includes, if not found in include_paths, also try
             // system_include_paths This is needed for system headers that use
             // quoted includes for internal files
-            if (!path && is_dquote) {
+            if (!path && is_dquote)
                 path = search_include_paths(vm, filename, filename_len, true);
-            }
 
             tok = include_file(vm, tok, path ? path : filename,
                                start->next->next);
-            continue;
+            break;
         }
-
-        if (equal(tok, "include_next")) {
+        case PP_INCLUDE_NEXT: {
             bool ignore;
             int filename_len;
             char *filename = read_include_filename(vm, &tok, tok->next, &ignore,
@@ -1620,182 +1689,133 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             char *path = search_include_next(vm, filename);
             tok = include_file(vm, tok, path ? path : filename,
                                start->next->next);
-            continue;
+            break;
         }
-
-        if (equal(tok, "define")) {
+        case PP_DEFINE:
             read_macro_definition(vm, &tok, tok->next);
-            continue;
-        }
-
-        if (equal(tok, "undef")) {
+            break;
+        case PP_UNDEF:
             tok = tok->next;
             if (tok->kind != TK_IDENT)
                 error_tok(vm, tok, "macro name must be an identifier");
             undef_macro(vm, arena_strndup(vm, tok->loc, tok->len));
             tok = skip_line(vm, tok->next);
-            continue;
-        }
-
-        if (equal(tok, "if")) {
+            break;
+        case PP_IF: {
             long val = eval_const_expr(vm, &tok, tok);
             push_cond_incl(vm, start, val);
             if (!val)
                 tok = skip_cond_incl(vm, tok);
-            continue;
+            break;
         }
-
-        if (equal(tok, "ifdef")) {
+        case PP_IFDEF: {
             bool defined = find_macro(vm, tok->next);
             push_cond_incl(vm, tok, defined);
             tok = skip_line(vm, tok->next->next);
             if (!defined)
                 tok = skip_cond_incl(vm, tok);
-            continue;
+            break;
         }
-
-        if (equal(tok, "ifndef")) {
+        case PP_IFNDEF: {
             bool defined = find_macro(vm, tok->next);
             push_cond_incl(vm, tok, !defined);
             tok = skip_line(vm, tok->next->next);
             if (defined)
                 tok = skip_cond_incl(vm, tok);
-            continue;
+            break;
         }
-
-        if (equal(tok, "elif")) {
+        case PP_ELIF:
             if (!vm->compiler.cond_incl ||
                 vm->compiler.cond_incl->ctx == IN_ELSE)
                 error_tok(vm, start, "stray #elif");
             vm->compiler.cond_incl->ctx = IN_ELIF;
-
             if (!vm->compiler.cond_incl->included &&
                 eval_const_expr(vm, &tok, tok))
                 vm->compiler.cond_incl->included = true;
             else
                 tok = skip_cond_incl(vm, tok);
-            continue;
-        }
-
-        if (equal(tok, "elifdef")) {
+            break;
+        case PP_ELIFDEF: {
             if (!vm->compiler.cond_incl ||
                 vm->compiler.cond_incl->ctx == IN_ELSE)
                 error_tok(vm, start, "stray #elifdef");
             vm->compiler.cond_incl->ctx = IN_ELIF;
-
             bool defined = find_macro(vm, tok->next);
             tok = skip_line(vm, tok->next->next);
             if (!vm->compiler.cond_incl->included && defined)
                 vm->compiler.cond_incl->included = true;
             else
                 tok = skip_cond_incl(vm, tok);
-            continue;
+            break;
         }
-
-        if (equal(tok, "elifndef")) {
+        case PP_ELIFNDEF: {
             if (!vm->compiler.cond_incl ||
                 vm->compiler.cond_incl->ctx == IN_ELSE)
                 error_tok(vm, start, "stray #elifndef");
             vm->compiler.cond_incl->ctx = IN_ELIF;
-
             bool defined = find_macro(vm, tok->next);
             tok = skip_line(vm, tok->next->next);
             if (!vm->compiler.cond_incl->included && !defined)
                 vm->compiler.cond_incl->included = true;
             else
                 tok = skip_cond_incl(vm, tok);
-            continue;
+            break;
         }
-
-        if (equal(tok, "else")) {
+        case PP_ELSE:
             if (!vm->compiler.cond_incl ||
                 vm->compiler.cond_incl->ctx == IN_ELSE)
                 error_tok(vm, start, "stray #else");
             vm->compiler.cond_incl->ctx = IN_ELSE;
             tok = skip_line(vm, tok->next);
-
             if (vm->compiler.cond_incl->included)
                 tok = skip_cond_incl(vm, tok);
-            continue;
-        }
-
-        if (equal(tok, "endif")) {
+            break;
+        case PP_ENDIF:
             if (!vm->compiler.cond_incl)
                 error_tok(vm, start, "stray #endif");
             vm->compiler.cond_incl = vm->compiler.cond_incl->next;
             tok = skip_line(vm, tok->next);
-            continue;
-        }
-
-        if (equal(tok, "line")) {
+            break;
+        case PP_LINE:
             read_line_marker(vm, &tok, tok->next);
-            continue;
-        }
-
-        if (tok->kind == TK_PP_NUM) {
-            read_line_marker(vm, &tok, tok);
-            continue;
-        }
-
-        if (equal(tok, "pragma") && equal(tok->next, "once")) {
-            hashmap_put(&vm->compiler.pragma_once, tok->file->name, (void *)1);
-            tok = skip_line(vm, tok->next->next);
-            continue;
-        }
-
-        if (equal(tok, "pragma") && equal(tok->next, "macro")) {
-            // Skip to end of #pragma macro line
-            Token *macro_tok = tok->next->next; // Skip "pragma" and "macro"
-            while (macro_tok && !macro_tok->at_bol && macro_tok->kind != TK_EOF)
-                macro_tok = macro_tok->next;
-            // Now macro_tok points to the first token of the function
-            // definition. If it starts with `inline`, this is an auto-execute
-            // inline macro.
-            bool is_inline_macro = equal(macro_tok, "inline");
-            tok = extract_pragma_compiletime_function(vm, macro_tok, "macro",
-                                                      true, is_inline_macro);
-            continue;
-        }
-
-        if (equal(tok, "pragma") && equal(tok->next, "comptime")) {
-            // Skip to end of #pragma comptime line
-            Token *comptime_tok = tok->next->next;
-            while (comptime_tok && !comptime_tok->at_bol &&
-                   comptime_tok->kind != TK_EOF)
-                comptime_tok = comptime_tok->next;
-            // Now comptime_tok points to the first token of the helper
-            // function definition
-            tok = extract_pragma_compiletime_function(vm, comptime_tok,
-                                                      "comptime", false, false);
-            continue;
-        }
-
-        if (equal(tok, "pragma")) {
-            do {
-                tok = tok->next;
-            } while (!tok->at_bol);
-            continue;
-        }
-
-        if (equal(tok, "embed")) {
+            break;
+        case PP_PRAGMA:
+            if (equal(tok->next, "once")) {
+                hashmap_put(&vm->compiler.pragma_once, tok->file->name, (void *)1);
+                tok = skip_line(vm, tok->next->next);
+            } else if (equal(tok->next, "macro")) {
+                Token *macro_tok = tok->next->next;
+                while (macro_tok && !macro_tok->at_bol && macro_tok->kind != TK_EOF)
+                    macro_tok = macro_tok->next;
+                bool is_inline_macro = equal(macro_tok, "inline");
+                tok = extract_pragma_compiletime_function(vm, macro_tok, "macro",
+                                                          true, is_inline_macro);
+            } else if (equal(tok->next, "comptime")) {
+                Token *comptime_tok = tok->next->next;
+                while (comptime_tok && !comptime_tok->at_bol &&
+                       comptime_tok->kind != TK_EOF)
+                    comptime_tok = comptime_tok->next;
+                tok = extract_pragma_compiletime_function(vm, comptime_tok,
+                                                          "comptime", false, false);
+            } else {
+                do { tok = tok->next; } while (!tok->at_bol);
+            }
+            break;
+        case PP_EMBED:
             tok = handle_embed_directive(vm, tok->next, start);
-            continue;
-        }
-
-        if (equal(tok, "error"))
+            break;
+        case PP_ERROR:
             error_tok(vm, tok, "error");
-
-        if (equal(tok, "warning")) {
+            break;
+        case PP_WARNING:
             warn_tok(vm, tok, "warning");
             tok = skip_line(vm, tok->next);
-            continue;
+            break;
+        default:
+            // `#`-only line is legal (null directive).
+            if (tok->at_bol) continue;
+            error_tok(vm, tok, "invalid preprocessor directive");
         }
-
-        // `#`-only line is legal. It's called a null directive.
-        if (tok->at_bol)
-            continue;
-
-        error_tok(vm, tok, "invalid preprocessor directive");
     }
 
     cur->next = tok;

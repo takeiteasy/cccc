@@ -32,6 +32,20 @@ char *make_global_name(const char *header) {
     return buf;
 }
 
+// Build: if (strcmp(filename, header) == 0) return __jcc_std_XXX;
+#pragma comptime
+_Node *make_strcmp_return(_Obj *fn, _Type *char_ptr_ty, const char *header) {
+    char *gname = make_global_name(header);
+    _Node *args[2] = {
+        _AST_PARAM_REF(fn, "filename"),
+        _AST_STRING_LITERAL(header)
+    };
+    _Node *cmp  = _AST_FUNCALL(_AST_VAR_REF("strcmp"), args, 2);
+    _Node *cond = _AST_BINARY(_EQ, cmp, _AST_INT_LITERAL(0));
+    _Node *ret  = _AST_RETURN(_AST_CAST(_AST_VAR_REF(gname), char_ptr_ty));
+    return _AST_IF(cond, ret, NULL);
+}
+
 #pragma macro
 void generate_std_header(void) {
     const char *headers[] = {
@@ -52,40 +66,73 @@ void generate_std_header(void) {
     _Obj  *fn          = _AST_FUNCTION("get_std_header", char_ptr_ty);
     _AST_FUNCTION_ADD_PARAM(fn, "filename", char_ptr_ty);
 
-    _Node **stmts = malloc(24 * sizeof(_Node *));
-    int n = 0;
-
     _AST_WITH_FN(fn) {
+        // Count total headers that exist on disk and emit their globals.
+        int total = 0;
         for (int i = 0; headers[i]; i++) {
             char path[256];
             snprintf(path, sizeof(path), "include/%s", headers[i]);
             char *content = read_header_file(path);
             if (!content) continue;
 
-            // Emit a static global holding this header's content.
             int content_len = (int)strlen(content) + 1;
             char *gname   = make_global_name(headers[i]);
             _Type *arr_ty = _AST_MAKE_ARRAY(char_ty, content_len);
             _Obj  *gvar   = _AST_GLOBAL_VAR(gname, arr_ty);
             _AST_GLOBAL_VAR_SET_INIT_DATA(gvar, content, content_len);
             _AST_GLOBAL_VAR_SET_STATIC(gvar, 1);
-
-            // Build: if (strcmp(filename, "X.h") == 0) return __jcc_std_X_h;
-            _Node *strcmp_args[2] = {
-                _AST_PARAM_REF(fn, "filename"),
-                _AST_STRING_LITERAL(headers[i])
-            };
-            _Node *cmp  = _AST_FUNCALL(_AST_VAR_REF("strcmp"), strcmp_args, 2);
-            _Node *cond = _AST_BINARY(_EQ, cmp, _AST_INT_LITERAL(0));
-            _Node *ret  = _AST_RETURN(_AST_CAST(_AST_VAR_REF(gname), char_ptr_ty));
-
-            stmts[n++] = _AST_IF(cond, ret, NULL);
+            total++;
         }
 
+        // Build a trie dispatching on filename[0] (first char of the header
+        // name). Within each case, sequential strcmp checks are used. Since
+        // most first-char buckets are small (1-3 headers), this reduces the
+        // average number of comparisons from O(N) to O(bucket_size).
+        _Node *first_char = _AST_UNARY(_DEREF, _AST_PARAM_REF(fn, "filename"));
+        _Node *sw = _AST_SWITCH(first_char);
+
+        // Find each unique first character and build its case.
+        unsigned char seen[256] = {0};
+        for (int i = 0; headers[i]; i++) {
+            unsigned char c = (unsigned char)headers[i][0];
+            if (seen[c]) continue;
+            seen[c] = 1;
+
+            // Count headers in this bucket.
+            int bucket_size = 0;
+            for (int j = 0; headers[j]; j++) {
+                if ((unsigned char)headers[j][0] == c) {
+                    char path[256];
+                    snprintf(path, sizeof(path), "include/%s", headers[j]);
+                    if (read_header_file(path)) bucket_size++;
+                }
+            }
+            if (bucket_size == 0) continue;
+
+            // Build the case body: one strcmp-return per header in bucket,
+            // then return NULL for non-matching names with this first char.
+            _Node **case_stmts = malloc((bucket_size + 1) * sizeof(_Node *));
+            int cn = 0;
+            for (int j = 0; headers[j]; j++) {
+                if ((unsigned char)headers[j][0] != c) continue;
+                char path[256];
+                snprintf(path, sizeof(path), "include/%s", headers[j]);
+                if (!read_header_file(path)) continue;
+                case_stmts[cn++] = make_strcmp_return(fn, char_ptr_ty, headers[j]);
+            }
+            case_stmts[cn++] = _AST_RETURN(_AST_INT_LITERAL(0));
+
+            _Node *case_body = _AST_BLOCK(case_stmts, cn);
+            _AST_SWITCH_ADD_CASE(sw, _AST_INT_LITERAL(c), case_body);
+        }
+
+        _Node **stmts = malloc(3 * sizeof(_Node *));
+        int n = 0;
+        stmts[n++] = sw;
         stmts[n++] = _AST_RETURN(_AST_INT_LITERAL(0));
+        _AST_FUNCTION_SET_BODY(fn, _AST_BLOCK(stmts, n));
     }
 
-    _AST_FUNCTION_SET_BODY(fn, _AST_BLOCK(stmts, n));
     _AST_FORWARD_DECLARE(fn);
 }
 

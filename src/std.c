@@ -49,98 +49,164 @@ static char __jcc_std_ctype_h[449] = "/* ctype.h - character classification for 
 static char __jcc_std_assert_h[302] = "/* assert.h - assertion macro for JCC C compiler */\n\n#ifndef __ASSERT_H\n#define __ASSERT_H\n\n#include \"stdio.h\"\n#include \"stdlib.h\"\n\n#ifdef NDEBUG\n#define assert(expr) ((void)0)\n#else\n#define assert(expr) ((expr) ? (void)0 : (puts(\"Assertion failed: \" #expr), abort()))\n#endif\n\n#endif /* __ASSERT_H */\n";
 static char __jcc_std_Availability_h[5305] = "/*\n * JCC stub for Apple's Availability.h\n * \n * This header provides empty definitions for Apple's availability macros.\n * These macros are used in macOS/iOS SDK headers to mark API availability\n * but are not needed for actual compilation - they just add metadata.\n * \n * Since JCC doesn't support the __attribute__((availability(...))) syntax,\n * we define all the macros as empty.\n */\n\n#ifndef __AVAILABILITY__\n#define __AVAILABILITY__\n\n/* __has_* feature testing macros - define as returning 0 if not already defined */\n#ifndef __has_feature\n#define __has_feature(x) 0\n#endif\n#ifndef __has_extension\n#define __has_extension(x) 0\n#endif\n#ifndef __has_attribute\n#define __has_attribute(x) 0\n#endif\n#ifndef __has_include\n#define __has_include(x) 0\n#endif\n#ifndef __has_builtin\n#define __has_builtin(x) 0\n#endif\n#ifndef __has_cpp_attribute\n#define __has_cpp_attribute(x) 0\n#endif\n\n/* Header inline macros (needed for sys/_types/_fd_def.h and others) */\n#ifndef __header_inline\n#define __header_inline static inline\n#endif\n#ifndef __header_always_inline\n#define __header_always_inline static inline\n#endif\n\n/* Strip __attribute__ specifications - JCC doesn't parse all attribute positions.\n * These are optimizer hints and not required for correct compilation. */\n#ifndef __attribute__\n#define __attribute__(x)\n#endif\n\n/* GCC keyword aliases that may not have trailing underscores */\n#ifndef __signed\n#define __signed signed\n#endif\n\n/* C linkage macros (normally defined in sys/cdefs.h but may not be available early) */\n#ifndef __BEGIN_DECLS\n#define __BEGIN_DECLS\n#endif\n#ifndef __END_DECLS\n#define __END_DECLS\n#endif\n\n/* sys/cdefs.h attribute macros - these use __attribute__ which we strip */\n#ifndef __dead2\n#define __dead2\n#endif\n#ifndef __pure2\n#define __pure2\n#endif\n#ifndef __unused\n#define __unused\n#endif\n#ifndef __used\n#define __used\n#endif\n#ifndef __cold\n#define __cold\n#endif\n#ifndef __deprecated\n#define __deprecated\n#endif\n#ifndef __deprecated_msg\n#define __deprecated_msg(msg)\n#endif\n#ifndef __unavailable\n#define __unavailable\n#endif\n#ifndef __warn_result\n#define __warn_result\n#endif\n#ifndef __restrict\n#define __restrict restrict\n#endif\n\n/* API deprecation target version (large number = never deprecated) */\n#ifndef __API_TO_BE_DEPRECATED\n#define __API_TO_BE_DEPRECATED 100000\n#endif\n\n/* Empty definitions for availability macros */\n#define __API_AVAILABLE(...)\n#define __API_AVAILABLE_BEGIN(...)\n#define __API_AVAILABLE_END\n\n#define __API_DEPRECATED(...)\n#define __API_DEPRECATED_WITH_REPLACEMENT(...)\n#define __API_DEPRECATED_BEGIN(...)\n#define __API_DEPRECATED_END\n\n#define __API_UNAVAILABLE(...)\n#define __API_UNAVAILABLE_BEGIN(...)\n#define __API_UNAVAILABLE_END\n\n/* Legacy macros (still used in some headers) */\n#define __OSX_AVAILABLE_STARTING(mac, iphone)\n#define __OSX_AVAILABLE_BUT_DEPRECATED(mac_start, mac_dep, iph_start, iph_dep)\n#define __OSX_AVAILABLE_BUT_DEPRECATED_MSG(mac_start, mac_dep, iph_start, iph_dep, msg)\n\n/* OS availability macros */\n#define __OS_AVAILABILITY(target, availability)\n#define __OS_AVAILABILITY_MSG(target, availability, msg)\n\n/* Swift availability (not relevant for C) */\n#define __SWIFT_UNAVAILABLE\n#define __SWIFT_UNAVAILABLE_MSG(msg)\n\n/* Platform-specific availability macros */\n#define __OSX_AVAILABLE(v)\n#define __IOS_AVAILABLE(v)\n#define __TVOS_AVAILABLE(v)\n#define __WATCHOS_AVAILABLE(v)\n#define __VISIONOS_AVAILABLE(v)\n\n#define __OSX_DEPRECATED(start, dep, msg)\n#define __IOS_DEPRECATED(start, dep, msg)\n#define __TVOS_DEPRECATED(start, dep, msg)\n#define __WATCHOS_DEPRECATED(start, dep, msg)\n\n#define __OSX_UNAVAILABLE\n#define __IOS_UNAVAILABLE\n#define __TVOS_UNAVAILABLE\n#define __WATCHOS_UNAVAILABLE\n\n/* Platform prohibited macros (used for APIs not available on certain platforms) */\n#define __OSX_PROHIBITED\n#define __IOS_PROHIBITED\n#define __TVOS_PROHIBITED\n#define __WATCHOS_PROHIBITED\n#define __VISIONOS_PROHIBITED\n\n/* Darwin alias macros (used for symbol versioning) */\n#define __DARWIN_ALIAS(x)\n#define __DARWIN_ALIAS_C(x)\n#define __DARWIN_ALIAS_I(x)\n#define __DARWIN_ALIAS_STARTING(x, y, z)\n#define __DARWIN_INODE64(x)\n#define __DARWIN_1050(x)\n#define __DARWIN_EXTSN(x)\n#define __DARWIN_EXTSN_C(x)\n\n/* POSIX deprecation macros */\n#define __POSIX_C_DEPRECATED(v)\n\n/* Attribute availability (empty) */\n#define __AVAILABILITY_INTERNAL__MAC_10_0\n#define __AVAILABILITY_INTERNAL__MAC_10_1\n#define __AVAILABILITY_INTERNAL__MAC_10_2\n#define __AVAILABILITY_INTERNAL__MAC_10_3\n#define __AVAILABILITY_INTERNAL__MAC_10_4\n#define __AVAILABILITY_INTERNAL__MAC_10_5\n#define __AVAILABILITY_INTERNAL__MAC_10_6\n#define __AVAILABILITY_INTERNAL__MAC_10_7\n#define __AVAILABILITY_INTERNAL__MAC_10_8\n#define __AVAILABILITY_INTERNAL__MAC_10_9\n#define __AVAILABILITY_INTERNAL__MAC_10_10\n#define __AVAILABILITY_INTERNAL__MAC_10_11\n#define __AVAILABILITY_INTERNAL__MAC_10_12\n#define __AVAILABILITY_INTERNAL__MAC_10_13\n#define __AVAILABILITY_INTERNAL__MAC_10_14\n#define __AVAILABILITY_INTERNAL__MAC_10_15\n#define __AVAILABILITY_INTERNAL__MAC_11_0\n#define __AVAILABILITY_INTERNAL__MAC_12_0\n#define __AVAILABILITY_INTERNAL__MAC_13_0\n#define __AVAILABILITY_INTERNAL__MAC_14_0\n#define __AVAILABILITY_INTERNAL__MAC_15_0\n\n/* Include AvailabilityMacros.h for MAC_OS_X_VERSION_* constants */\n/* We provide a stub for this too */\n\n#endif /* __AVAILABILITY__ */\n";
 char *get_std_header(char *filename) {
-    if (strcmp(filename, "Availability.h") == 0)
-        return (char *)__jcc_std_Availability_h;
-    if (strcmp(filename, "assert.h") == 0)
-        return (char *)__jcc_std_assert_h;
-    if (strcmp(filename, "ctype.h") == 0)
-        return (char *)__jcc_std_ctype_h;
-    if (strcmp(filename, "errno.h") == 0)
-        return (char *)__jcc_std_errno_h;
-    if (strcmp(filename, "complex.h") == 0)
-        return (char *)__jcc_std_complex_h;
-    if (strcmp(filename, "dlfcn.h") == 0)
-        return (char *)__jcc_std_dlfcn_h;
-    if (strcmp(filename, "fcntl.h") == 0)
-        return (char *)__jcc_std_fcntl_h;
-    if (strcmp(filename, "fenv.h") == 0)
-        return (char *)__jcc_std_fenv_h;
-    if (strcmp(filename, "float.h") == 0)
-        return (char *)__jcc_std_float_h;
-    if (strcmp(filename, "inttypes.h") == 0)
-        return (char *)__jcc_std_inttypes_h;
-    if (strcmp(filename, "iso646.h") == 0)
-        return (char *)__jcc_std_iso646_h;
-    if (strcmp(filename, "limits.h") == 0)
-        return (char *)__jcc_std_limits_h;
-    if (strcmp(filename, "locale.h") == 0)
-        return (char *)__jcc_std_locale_h;
-    if (strcmp(filename, "math.h") == 0)
-        return (char *)__jcc_std_math_h;
-    if (strcmp(filename, "reflection.h") == 0)
-        return (char *)__jcc_std_reflection_h;
-    if (strcmp(filename, "setjmp.h") == 0)
-        return (char *)__jcc_std_setjmp_h;
-    if (strcmp(filename, "signal.h") == 0)
-        return (char *)__jcc_std_signal_h;
-    if (strcmp(filename, "stdalign.h") == 0)
-        return (char *)__jcc_std_stdalign_h;
-    if (strcmp(filename, "stdarg.h") == 0)
-        return (char *)__jcc_std_stdarg_h;
-    if (strcmp(filename, "stdatomic.h") == 0)
-        return (char *)__jcc_std_stdatomic_h;
-    if (strcmp(filename, "stdbool.h") == 0)
-        return (char *)__jcc_std_stdbool_h;
-    if (strcmp(filename, "stddef.h") == 0)
-        return (char *)__jcc_std_stddef_h;
-    if (strcmp(filename, "stdint.h") == 0)
-        return (char *)__jcc_std_stdint_h;
-    if (strcmp(filename, "stdio.h") == 0)
-        return (char *)__jcc_std_stdio_h;
-    if (strcmp(filename, "stdlib.h") == 0)
-        return (char *)__jcc_std_stdlib_h;
-    if (strcmp(filename, "stdnoreturn.h") == 0)
-        return (char *)__jcc_std_stdnoreturn_h;
-    if (strcmp(filename, "string.h") == 0)
-        return (char *)__jcc_std_string_h;
-    if (strcmp(filename, "strings.h") == 0)
-        return (char *)__jcc_std_strings_h;
-    if (strcmp(filename, "sys/cdefs.h") == 0)
-        return (char *)__jcc_std_sys_cdefs_h;
-    if (strcmp(filename, "sys/mman.h") == 0)
-        return (char *)__jcc_std_sys_mman_h;
-    if (strcmp(filename, "sys/stat.h") == 0)
-        return (char *)__jcc_std_sys_stat_h;
-    if (strcmp(filename, "sys/time.h") == 0)
-        return (char *)__jcc_std_sys_time_h;
-    if (strcmp(filename, "sys/types.h") == 0)
-        return (char *)__jcc_std_sys_types_h;
-    if (strcmp(filename, "sys/wait.h") == 0)
-        return (char *)__jcc_std_sys_wait_h;
-    if (strcmp(filename, "tgmath.h") == 0)
-        return (char *)__jcc_std_tgmath_h;
-    if (strcmp(filename, "time.h") == 0)
-        return (char *)__jcc_std_time_h;
-    if (strcmp(filename, "uchar.h") == 0)
-        return (char *)__jcc_std_uchar_h;
-    if (strcmp(filename, "unistd.h") == 0)
-        return (char *)__jcc_std_unistd_h;
-    if (strcmp(filename, "utime.h") == 0)
-        return (char *)__jcc_std_utime_h;
-    if (strcmp(filename, "wchar.h") == 0)
-        return (char *)__jcc_std_wchar_h;
-    if (strcmp(filename, "wctype.h") == 0)
-        return (char *)__jcc_std_wctype_h;
-    if (strcmp(filename, "arpa/inet.h") == 0)
-        return (char *)__jcc_std_arpa_inet_h;
-    if (strcmp(filename, "fnmatch.h") == 0)
-        return (char *)__jcc_std_fnmatch_h;
-    if (strcmp(filename, "getopt.h") == 0)
-        return (char *)__jcc_std_getopt_h;
-    if (strcmp(filename, "libgen.h") == 0)
-        return (char *)__jcc_std_libgen_h;
-    if (strcmp(filename, "poll.h") == 0)
-        return (char *)__jcc_std_poll_h;
+    switch (*filename) {
+    case 112:
+        {
+            if (strcmp(filename, "poll.h") == 0)
+                return (char *)__jcc_std_poll_h;
+            return 0;
+        }
+    case 103:
+        {
+            if (strcmp(filename, "getopt.h") == 0)
+                return (char *)__jcc_std_getopt_h;
+            return 0;
+        }
+    case 119:
+        {
+            if (strcmp(filename, "wchar.h") == 0)
+                return (char *)__jcc_std_wchar_h;
+            if (strcmp(filename, "wctype.h") == 0)
+                return (char *)__jcc_std_wctype_h;
+            return 0;
+        }
+    case 117:
+        {
+            if (strcmp(filename, "uchar.h") == 0)
+                return (char *)__jcc_std_uchar_h;
+            if (strcmp(filename, "unistd.h") == 0)
+                return (char *)__jcc_std_unistd_h;
+            if (strcmp(filename, "utime.h") == 0)
+                return (char *)__jcc_std_utime_h;
+            return 0;
+        }
+    case 116:
+        {
+            if (strcmp(filename, "tgmath.h") == 0)
+                return (char *)__jcc_std_tgmath_h;
+            if (strcmp(filename, "time.h") == 0)
+                return (char *)__jcc_std_time_h;
+            return 0;
+        }
+    case 115:
+        {
+            if (strcmp(filename, "setjmp.h") == 0)
+                return (char *)__jcc_std_setjmp_h;
+            if (strcmp(filename, "signal.h") == 0)
+                return (char *)__jcc_std_signal_h;
+            if (strcmp(filename, "stdalign.h") == 0)
+                return (char *)__jcc_std_stdalign_h;
+            if (strcmp(filename, "stdarg.h") == 0)
+                return (char *)__jcc_std_stdarg_h;
+            if (strcmp(filename, "stdatomic.h") == 0)
+                return (char *)__jcc_std_stdatomic_h;
+            if (strcmp(filename, "stdbool.h") == 0)
+                return (char *)__jcc_std_stdbool_h;
+            if (strcmp(filename, "stddef.h") == 0)
+                return (char *)__jcc_std_stddef_h;
+            if (strcmp(filename, "stdint.h") == 0)
+                return (char *)__jcc_std_stdint_h;
+            if (strcmp(filename, "stdio.h") == 0)
+                return (char *)__jcc_std_stdio_h;
+            if (strcmp(filename, "stdlib.h") == 0)
+                return (char *)__jcc_std_stdlib_h;
+            if (strcmp(filename, "stdnoreturn.h") == 0)
+                return (char *)__jcc_std_stdnoreturn_h;
+            if (strcmp(filename, "string.h") == 0)
+                return (char *)__jcc_std_string_h;
+            if (strcmp(filename, "strings.h") == 0)
+                return (char *)__jcc_std_strings_h;
+            if (strcmp(filename, "sys/cdefs.h") == 0)
+                return (char *)__jcc_std_sys_cdefs_h;
+            if (strcmp(filename, "sys/mman.h") == 0)
+                return (char *)__jcc_std_sys_mman_h;
+            if (strcmp(filename, "sys/stat.h") == 0)
+                return (char *)__jcc_std_sys_stat_h;
+            if (strcmp(filename, "sys/time.h") == 0)
+                return (char *)__jcc_std_sys_time_h;
+            if (strcmp(filename, "sys/types.h") == 0)
+                return (char *)__jcc_std_sys_types_h;
+            if (strcmp(filename, "sys/wait.h") == 0)
+                return (char *)__jcc_std_sys_wait_h;
+            return 0;
+        }
+    case 114:
+        {
+            if (strcmp(filename, "reflection.h") == 0)
+                return (char *)__jcc_std_reflection_h;
+            return 0;
+        }
+    case 109:
+        {
+            if (strcmp(filename, "math.h") == 0)
+                return (char *)__jcc_std_math_h;
+            return 0;
+        }
+    case 108:
+        {
+            if (strcmp(filename, "limits.h") == 0)
+                return (char *)__jcc_std_limits_h;
+            if (strcmp(filename, "locale.h") == 0)
+                return (char *)__jcc_std_locale_h;
+            if (strcmp(filename, "libgen.h") == 0)
+                return (char *)__jcc_std_libgen_h;
+            return 0;
+        }
+    case 105:
+        {
+            if (strcmp(filename, "inttypes.h") == 0)
+                return (char *)__jcc_std_inttypes_h;
+            if (strcmp(filename, "iso646.h") == 0)
+                return (char *)__jcc_std_iso646_h;
+            return 0;
+        }
+    case 102:
+        {
+            if (strcmp(filename, "fcntl.h") == 0)
+                return (char *)__jcc_std_fcntl_h;
+            if (strcmp(filename, "fenv.h") == 0)
+                return (char *)__jcc_std_fenv_h;
+            if (strcmp(filename, "float.h") == 0)
+                return (char *)__jcc_std_float_h;
+            if (strcmp(filename, "fnmatch.h") == 0)
+                return (char *)__jcc_std_fnmatch_h;
+            return 0;
+        }
+    case 100:
+        {
+            if (strcmp(filename, "dlfcn.h") == 0)
+                return (char *)__jcc_std_dlfcn_h;
+            return 0;
+        }
+    case 101:
+        {
+            if (strcmp(filename, "errno.h") == 0)
+                return (char *)__jcc_std_errno_h;
+            return 0;
+        }
+    case 99:
+        {
+            if (strcmp(filename, "ctype.h") == 0)
+                return (char *)__jcc_std_ctype_h;
+            if (strcmp(filename, "complex.h") == 0)
+                return (char *)__jcc_std_complex_h;
+            return 0;
+        }
+    case 97:
+        {
+            if (strcmp(filename, "assert.h") == 0)
+                return (char *)__jcc_std_assert_h;
+            if (strcmp(filename, "arpa/inet.h") == 0)
+                return (char *)__jcc_std_arpa_inet_h;
+            return 0;
+        }
+    case 65:
+        {
+            if (strcmp(filename, "Availability.h") == 0)
+                return (char *)__jcc_std_Availability_h;
+            return 0;
+        }
+    }
     return 0;
 }
 

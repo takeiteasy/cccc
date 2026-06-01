@@ -513,6 +513,110 @@ static void push_tag_scope(JCC *vm, Token *tok, Type *ty) {
     record_type_name(vm, ty, tok->loc, tok->len, true);
 }
 
+typedef enum {
+    DK_NONE = 0,
+    // Storage class
+    DK_TYPEDEF, DK_STATIC, DK_EXTERN, DK_INLINE, DK_TLS, DK_CONSTEXPR, DK_BLOCK_VAR,
+    // Qualifiers
+    DK_CONST, DK_VOLATILE,
+    // Ignored
+    DK_AUTO, DK_REGISTER, DK_RESTRICT, DK_NORETURN,
+    // Special
+    DK_ATOMIC, DK_ALIGNAS,
+    // Composite
+    DK_STRUCT, DK_UNION, DK_ENUM, DK_TYPEOF, DK_TYPEOF_UNQUAL,
+    // Built-in types
+    DK_VOID, DK_BOOL, DK_CHAR, DK_SHORT, DK_INT, DK_LONG,
+    DK_FLOAT, DK_DOUBLE, DK_COMPLEX, DK_IMAGINARY, DK_SIGNED, DK_UNSIGNED,
+} DeclKw;
+
+static DeclKw declspec_kw(Token *tok) {
+    const char *s = tok->loc;
+    switch (tok->len) {
+    case 3:  // int
+        if (s[0]=='i' && s[1]=='n' && s[2]=='t') return DK_INT;
+        break;
+    case 4:  // auto, char, enum, long, void
+        switch (s[0]) {
+        case 'a': if (s[1]=='u' && s[2]=='t' && s[3]=='o') return DK_AUTO;  break;
+        case 'c': if (s[1]=='h' && s[2]=='a' && s[3]=='r') return DK_CHAR;  break;
+        case 'e': if (s[1]=='n' && s[2]=='u' && s[3]=='m') return DK_ENUM;  break;
+        case 'l': if (s[1]=='o' && s[2]=='n' && s[3]=='g') return DK_LONG;  break;
+        case 'v': if (s[1]=='o' && s[2]=='i' && s[3]=='d') return DK_VOID;  break;
+        }
+        break;
+    case 5:  // _Bool, const, float, short, union
+        switch (s[0]) {
+        case '_': if (memcmp(s+1,"Bool",4)==0) return DK_BOOL;     break;
+        case 'c': if (memcmp(s+1,"onst",4)==0) return DK_CONST;    break;
+        case 'f': if (memcmp(s+1,"loat",4)==0) return DK_FLOAT;    break;
+        case 's': if (memcmp(s+1,"hort",4)==0) return DK_SHORT;    break;
+        case 'u': if (memcmp(s+1,"nion",4)==0) return DK_UNION;    break;
+        }
+        break;
+    case 6:  // double, extern, inline, signed, static, struct, typeof
+        switch (s[0]) {
+        case 'd': if (memcmp(s+1,"ouble",5)==0) return DK_DOUBLE;  break;
+        case 'e': if (memcmp(s+1,"xtern",5)==0) return DK_EXTERN;  break;
+        case 'i': if (memcmp(s+1,"nline",5)==0) return DK_INLINE;  break;
+        case 's':
+            if (memcmp(s+1,"igned",5)==0) return DK_SIGNED;
+            if (memcmp(s+1,"tatic",5)==0) return DK_STATIC;
+            if (memcmp(s+1,"truct",5)==0) return DK_STRUCT;
+            break;
+        case 't': if (memcmp(s+1,"ypeof",5)==0) return DK_TYPEOF;  break;
+        }
+        break;
+    case 7:  // _Atomic, __block, typedef
+        if (s[0] == '_') {
+            if (s[1]=='A' && memcmp(s+2,"tomic",5)==0) return DK_ATOMIC;
+            if (s[1]=='_' && memcmp(s+2,"block",5)==0) return DK_BLOCK_VAR;
+        } else if (s[0]=='t' && memcmp(s+1,"ypedef",6)==0) {
+            return DK_TYPEDEF;
+        }
+        break;
+    case 8:  // _Alignas, _Complex, __thread, register, restrict, unsigned, volatile
+        switch (s[0]) {
+        case '_':
+            switch (s[1]) {
+            case 'A': if (memcmp(s+2,"lignas",6)==0) return DK_ALIGNAS;  break;
+            case 'C': if (memcmp(s+2,"omplex",6)==0) return DK_COMPLEX;  break;
+            case '_': if (memcmp(s+2,"thread",6)==0) return DK_TLS;      break;
+            }
+            break;
+        case 'r':
+            if (memcmp(s+1,"egister",7)==0) return DK_REGISTER;
+            if (memcmp(s+1,"estrict",7)==0) return DK_RESTRICT;
+            break;
+        case 'u': if (memcmp(s+1,"nsigned",7)==0) return DK_UNSIGNED;   break;
+        case 'v': if (memcmp(s+1,"olatile",7)==0) return DK_VOLATILE;   break;
+        }
+        break;
+    case 9:  // _Noreturn, constexpr
+        switch (s[0]) {
+        case '_': if (memcmp(s+1,"Noreturn",8)==0) return DK_NORETURN;   break;
+        case 'c': if (memcmp(s+1,"onstexpr",8)==0) return DK_CONSTEXPR;  break;
+        }
+        break;
+    case 10:  // __restrict, _Imaginary
+        if (s[0]=='_') {
+            if (s[1]=='_' && memcmp(s+2,"restrict",8)==0) return DK_RESTRICT;
+            if (s[1]=='I' && memcmp(s+2,"maginary",8)==0) return DK_IMAGINARY;
+        }
+        break;
+    case 12:  // __restrict__
+        if (memcmp(s,"__restrict__",12)==0) return DK_RESTRICT;
+        break;
+    case 13:  // _Thread_local, typeof_unqual
+        switch (s[0]) {
+        case '_': if (memcmp(s+1,"Thread_local",12)==0) return DK_TLS;           break;
+        case 't': if (memcmp(s+1,"ypeof_unqual",12)==0) return DK_TYPEOF_UNQUAL; break;
+        }
+        break;
+    }
+    return DK_NONE;
+}
+
 // declspec = ("void" | "_Bool" | "char" | "short" | "int" | "long"
 //             | "typedef" | "static" | "extern" | "inline"
 //             | "_Thread_local" | "__thread"
@@ -561,81 +665,52 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
     bool is_volatile = false;
 
     while (is_typename(vm, tok)) {
-        // Handle __attribute__ at the beginning of declspec
         if (equal(tok, "__attribute__")) {
             tok = attribute_list(vm, tok, NULL);
             continue;
         }
-        // Handle C23 [[...]] attributes
         if (equal(tok, "[") && equal(tok->next, "[")) {
             tok = c23_attribute_list(vm, tok, NULL);
             continue;
         }
 
-        // Handle storage class specifiers.
-        if (equal(tok, "typedef") || equal(tok, "static") ||
-            equal(tok, "extern") || equal(tok, "inline") ||
-            equal(tok, "_Thread_local") || equal(tok, "__thread") ||
-            equal(tok, "constexpr") || equal(tok, "__block")) {
+        DeclKw dk = declspec_kw(tok);
+        switch (dk) {
+        case DK_TYPEDEF: case DK_STATIC: case DK_EXTERN: case DK_INLINE:
+        case DK_TLS: case DK_CONSTEXPR: case DK_BLOCK_VAR:
             if (!attr)
-                error_tok(
-                    vm, tok,
-                    "storage class specifier is not allowed in this context");
-
-            if (equal(tok, "typedef"))
-                attr->is_typedef = true;
-            else if (equal(tok, "static"))
-                attr->is_static = true;
-            else if (equal(tok, "extern"))
-                attr->is_extern = true;
-            else if (equal(tok, "inline"))
-                attr->is_inline = true;
-            else if (equal(tok, "constexpr"))
-                attr->is_constexpr = true;
-            else if (equal(tok, "__block"))
-                attr->is_block_var = true;
-            else
-                attr->is_tls = true;
-
+                error_tok(vm, tok,
+                          "storage class specifier is not allowed in this context");
+            if      (dk == DK_TYPEDEF)   attr->is_typedef   = true;
+            else if (dk == DK_STATIC)    attr->is_static    = true;
+            else if (dk == DK_EXTERN)    attr->is_extern    = true;
+            else if (dk == DK_INLINE)    attr->is_inline    = true;
+            else if (dk == DK_CONSTEXPR) attr->is_constexpr = true;
+            else if (dk == DK_BLOCK_VAR) attr->is_block_var = true;
+            else                         attr->is_tls       = true;
             if (attr->is_typedef && attr->is_static + attr->is_extern +
-                                            attr->is_inline + attr->is_tls >
-                                        1)
+                                        attr->is_inline + attr->is_tls > 1)
                 error_tok(vm, tok,
                           "typedef may not be used together with static,"
                           " extern, inline, __thread or _Thread_local");
-
-            // __block is mutually exclusive with auto, register, static, extern
-            if (attr->is_block_var &&
-                (attr->is_static || attr->is_extern || attr->is_tls))
+            if (attr->is_block_var && (attr->is_static || attr->is_extern || attr->is_tls))
                 error_tok(vm, tok,
                           "__block may not be used together with static,"
                           " extern, __thread or _Thread_local");
             tok = tok->next;
             continue;
-        }
-
-        // Handle const qualifier (now enforced)
-        if (consume(vm, &tok, tok, "const")) {
+        case DK_CONST:
             is_const = true;
+            tok = tok->next;
             continue;
-        }
-
-        // Handle volatile qualifier
-        if (consume(vm, &tok, tok, "volatile")) {
+        case DK_VOLATILE:
             is_volatile = true;
+            tok = tok->next;
             continue;
-        }
-
-        // These keywords are recognized but ignored.
-        if (consume(vm, &tok, tok, "auto") ||
-            consume(vm, &tok, tok, "register") ||
-            consume(vm, &tok, tok, "restrict") ||
-            consume(vm, &tok, tok, "__restrict") ||
-            consume(vm, &tok, tok, "__restrict__") ||
-            consume(vm, &tok, tok, "_Noreturn"))
+        case DK_AUTO: case DK_REGISTER: case DK_RESTRICT: case DK_NORETURN:
+            tok = tok->next;
             continue;
-
-        if (equal(tok, "_Atomic")) {
+        case DK_ATOMIC:
             tok = tok->next;
             if (equal(tok, "(")) {
                 ty = typename(vm, &tok, tok->next);
@@ -643,74 +718,43 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
             }
             is_atomic = true;
             continue;
-        }
-
-        if (equal(tok, "_Alignas")) {
+        case DK_ALIGNAS:
             if (!attr)
                 error_tok(vm, tok, "_Alignas is not allowed in this context");
             tok = skip(vm, tok->next, "(");
-
             if (is_typename(vm, tok))
                 attr->align = typename(vm, &tok, tok)->align;
             else
                 attr->align = const_expr(vm, &tok, tok);
             tok = skip(vm, tok, ")");
             continue;
-        }
-
-        // Handle user-defined types.
-        Type *ty2 = find_typedef(vm, tok);
-        if (equal(tok, "struct") || equal(tok, "union") || equal(tok, "enum") ||
-            equal(tok, "typeof") || equal(tok, "typeof_unqual") || ty2) {
-            if (counter)
-                break;
-
-            if (equal(tok, "struct")) {
-                ty = struct_decl(vm, &tok, tok->next);
-            } else if (equal(tok, "union")) {
-                ty = union_decl(vm, &tok, tok->next);
-            } else if (equal(tok, "enum")) {
-                ty = enum_specifier(vm, &tok, tok->next);
-            } else if (equal(tok, "typeof")) {
-                ty = typeof_specifier(vm, &tok, tok->next);
-            } else if (equal(tok, "typeof_unqual")) {
-                ty = typeof_unqual_specifier(vm, &tok, tok->next);
-            } else {
-                ty = ty2;
-                tok = tok->next;
-            }
-
+        case DK_STRUCT: case DK_UNION: case DK_ENUM:
+        case DK_TYPEOF: case DK_TYPEOF_UNQUAL: case DK_NONE: {
+            Type *ty2 = (dk == DK_NONE) ? find_typedef(vm, tok) : NULL;
+            if (counter) goto declspec_done;
+            if      (dk == DK_STRUCT)        ty = struct_decl(vm, &tok, tok->next);
+            else if (dk == DK_UNION)         ty = union_decl(vm, &tok, tok->next);
+            else if (dk == DK_ENUM)          ty = enum_specifier(vm, &tok, tok->next);
+            else if (dk == DK_TYPEOF)        ty = typeof_specifier(vm, &tok, tok->next);
+            else if (dk == DK_TYPEOF_UNQUAL) ty = typeof_unqual_specifier(vm, &tok, tok->next);
+            else                             { ty = ty2; tok = tok->next; }
             counter += OTHER;
             continue;
         }
-
-        // Handle built-in types.
-        if (equal(tok, "void"))
-            counter += VOID;
-        else if (equal(tok, "_Bool"))
-            counter += BOOL;
-        else if (equal(tok, "char"))
-            counter += CHAR;
-        else if (equal(tok, "short"))
-            counter += SHORT;
-        else if (equal(tok, "int"))
-            counter += INT;
-        else if (equal(tok, "long"))
-            counter += LONG;
-        else if (equal(tok, "float"))
-            counter += FLOAT;
-        else if (equal(tok, "double"))
-            counter += DOUBLE;
-        else if (equal(tok, "_Complex"))
-            counter += COMPLEX;
-        else if (equal(tok, "_Imaginary"))
-            counter += IMAGINARY;
-        else if (equal(tok, "signed"))
-            counter |= SIGNED;
-        else if (equal(tok, "unsigned"))
-            counter |= UNSIGNED;
-        else
-            unreachable();
+        case DK_VOID:      counter += VOID;      break;
+        case DK_BOOL:      counter += BOOL;      break;
+        case DK_CHAR:      counter += CHAR;      break;
+        case DK_SHORT:     counter += SHORT;     break;
+        case DK_INT:       counter += INT;       break;
+        case DK_LONG:      counter += LONG;      break;
+        case DK_FLOAT:     counter += FLOAT;     break;
+        case DK_DOUBLE:    counter += DOUBLE;    break;
+        case DK_COMPLEX:   counter += COMPLEX;   break;
+        case DK_IMAGINARY: counter += IMAGINARY; break;
+        case DK_SIGNED:    counter |= SIGNED;    break;
+        case DK_UNSIGNED:  counter |= UNSIGNED;  break;
+        default: unreachable();
+        }
 
         switch (counter) {
         case VOID:
@@ -790,7 +834,7 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
 
         tok = tok->next;
     }
-
+declspec_done:
     if (is_atomic) {
         ty = copy_type(vm, ty);
         ty->is_atomic = true;
