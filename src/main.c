@@ -172,10 +172,11 @@ static int load_requested_libraries(JCC *vm, const char **libs, int libs_count,
 }
 
 static int ffi_index_by_name(JCC *vm, const char *name) {
+    size_t len = strlen(name);
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
         if (vm->compiler.ffi_table[i].name &&
-            strlen(vm->compiler.ffi_table[i].name) == strlen(name) &&
-            strncmp(vm->compiler.ffi_table[i].name, name, strlen(name)) == 0)
+            vm->compiler.ffi_table[i].name_len == len &&
+            memcmp(vm->compiler.ffi_table[i].name, name, len) == 0)
             return i;
     }
     return -1;

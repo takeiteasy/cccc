@@ -713,6 +713,12 @@ struct Obj {
     // Code generation (for VM)
     long long code_addr; // Address in text segment where function code starts
     long long code_end_addr; // Address after function code in text segment
+
+    // Lazy membership set for belongs_to_outer_function (#165).
+    // Populated on first query; keyed by (long long)(intptr_t)var_ptr → var_ptr.
+    // Free with hashmap_deinit_borrowed after codegen completes.
+    HashMap local_set;
+    bool local_set_built;
 };
 
 /*!
@@ -859,6 +865,7 @@ typedef void (*JCCAsmCallback)(JCC *vm, const char *asm_str, void *user_data);
 */
 typedef struct ForeignFunc {
     char *name;
+    size_t name_len;  // strlen(name), cached to avoid O(n) strlen per lookup (#164)
     void *func_ptr;
     int num_args;
     int returns_double;

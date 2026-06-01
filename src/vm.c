@@ -603,6 +603,7 @@ void cc_register_cfunc_ex(JCC *vm, const char *name, void *func_ptr, int num_arg
     // Add function to registry (non-variadic)
     vm->compiler.ffi_table[vm->compiler.ffi_count++] = (ForeignFunc){
         .name = strdup(name),
+        .name_len = strlen(name),
         .func_ptr = func_ptr,
         .num_args = num_args,
         .returns_double = returns_double,
@@ -631,6 +632,7 @@ void cc_register_variadic_cfunc(JCC *vm, const char *name, void *func_ptr, int n
     // For now, we set it to num_fixed_args as a placeholder
     vm->compiler.ffi_table[vm->compiler.ffi_count++] = (ForeignFunc){
         .name = strdup(name),
+        .name_len = strlen(name),
         .func_ptr = func_ptr,
         .num_args = num_fixed_args,  // Will be updated during CALLF
         .returns_double = returns_double,
@@ -644,9 +646,10 @@ int cc_dlsym(JCC *vm, const char *name, void *func_ptr, int num_args, int return
     if (!vm || !name || !func_ptr)
         return -1;
 
+    size_t name_len = strlen(name);
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
-        if (strlen(vm->compiler.ffi_table[i].name) == strlen(name) &&
-            strncmp(vm->compiler.ffi_table[i].name, name, strlen(name)) == 0) {
+        if (vm->compiler.ffi_table[i].name_len == name_len &&
+            memcmp(vm->compiler.ffi_table[i].name, name, name_len) == 0) {
             if (vm->compiler.ffi_table[i].num_args != num_args || vm->compiler.ffi_table[i].returns_double != returns_double) {
                 fprintf(stderr, "error: FFI function '%s' signature mismatch\n", name);
                 return -1;

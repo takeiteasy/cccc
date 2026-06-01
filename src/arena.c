@@ -70,8 +70,15 @@ void *arena_alloc(Arena *arena, size_t size) {
     // Check if current block has enough space
     if (!arena->current ||
         (arena->current->ptr + size > arena->current->base + arena->current->size)) {
-        // Need a new block
-        arena->current = arena_new_block(arena, size);
+        // After arena_reset all blocks have been rewound; scan the list for one
+        // with room before allocating a fresh block. This ensures that reset
+        // blocks are actually reused rather than orphaned. (#53)
+        ArenaBlock *b = arena->blocks;
+        for (; b; b = b->next) {
+            if (b->ptr + size <= b->base + b->size)
+                break;
+        }
+        arena->current = b ? b : arena_new_block(arena, size);
     }
 
     // Allocate from current block (bump pointer)
@@ -81,15 +88,16 @@ void *arena_alloc(Arena *arena, size_t size) {
     return ptr;
 }
 
-// Reset arena (reuse all blocks without deallocating)
+// Reset arena (reuse all blocks without deallocating).
+// Rewinds every block's bump pointer to base so subsequent arena_alloc calls
+// can refill them. arena_alloc scans the block list for room, so all blocks
+// are eligible for reuse after a reset. (#53)
 void arena_reset(Arena *arena) {
-    // Reset all block pointers to base
     for (ArenaBlock *block = arena->blocks; block; block = block->next) {
         block->ptr = block->base;
     }
-
-    // Reset current to first block (tail of list, i.e., oldest block)
-    // Blocks are added to head, so the tail is the oldest block.
+    // Point current at the oldest (smallest-index) block so the common case
+    // of filling blocks in order starts at the beginning of the list again.
     ArenaBlock *tail = arena->blocks;
     while (tail && tail->next)
         tail = tail->next;

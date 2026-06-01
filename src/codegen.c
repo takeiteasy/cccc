@@ -27,25 +27,24 @@ static int find_ffi_function(JCC *vm, const char *name) {
     if (!vm || !name)
         return -1;
 
-    // PLACEHOLDER: This is O(m*n) due to repeated strlen. Replace with a
-    // hash table keyed by function name for O(1) lookup.
-    // First try exact match
+    // Exact match: compare using the cached name_len to avoid repeated strlen. (#164)
+    size_t len = strlen(name);
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
-        if (strlen(vm->compiler.ffi_table[i].name) == strlen(name) &&
-            strncmp(vm->compiler.ffi_table[i].name, name, strlen(name)) == 0) {
+        if (vm->compiler.ffi_table[i].name_len == len &&
+            memcmp(vm->compiler.ffi_table[i].name, name, len) == 0) {
             return i;
         }
     }
 
     // If no exact match, check if this looks like a specialized variadic name
-    size_t len = strlen(name);
+    // (e.g. "printf2" → base "printf"). Compute base_len once.
     if ((len > 1 && isdigit(name[len - 1])) ||
         (len > 2 && isdigit(name[len - 1]) && isdigit(name[len - 2]))) {
         char base_name[256];
         strncpy(base_name, name, sizeof(base_name) - 1);
         base_name[sizeof(base_name) - 1] = '\0';
 
-        int base_len = len;
+        size_t base_len = len;
         while (base_len > 0 && isdigit(base_name[base_len - 1])) {
             base_len--;
         }
@@ -53,9 +52,8 @@ static int find_ffi_function(JCC *vm, const char *name) {
 
         for (int i = 0; i < vm->compiler.ffi_count; i++) {
             if (vm->compiler.ffi_table[i].is_variadic &&
-                strlen(vm->compiler.ffi_table[i].name) == strlen(base_name) &&
-                strncmp(vm->compiler.ffi_table[i].name, base_name,
-                        strlen(base_name)) == 0) {
+                vm->compiler.ffi_table[i].name_len == base_len &&
+                memcmp(vm->compiler.ffi_table[i].name, base_name, base_len) == 0) {
                 return i;
             }
         }
@@ -639,27 +637,30 @@ static Obj *find_static_link_var(Obj *fn) {
     return NULL;
 }
 
-// Check if a variable belongs to an outer (enclosing) function
-// Returns the owning function, or NULL if it's from the current function
+// Ensure parent->local_set is populated with all its locals and params.
+// Keyed by (long long)(intptr_t)var so membership is O(1). (#165)
+static void ensure_local_set(Obj *parent) {
+    if (parent->local_set_built)
+        return;
+    for (Obj *local = parent->locals; local; local = local->next)
+        hashmap_put_int(&parent->local_set, (long long)(intptr_t)local, local);
+    for (Obj *param = parent->params; param; param = param->next)
+        hashmap_put_int(&parent->local_set, (long long)(intptr_t)param, param);
+    parent->local_set_built = true;
+}
+
+// Check if a variable belongs to an outer (enclosing) function.
+// Returns the owning function, or NULL if it belongs to the current function.
+// O(depth) using per-function lazy hash sets instead of O(depth * locals). (#165)
 static Obj *belongs_to_outer_function(Obj *current_fn, Obj *var) {
     if (!current_fn || !current_fn->is_nested || !var || !var->is_local)
         return NULL;
 
-    // PLACEHOLDER: O(depth * locals). Build a hash set of locals/params per
-    // function during codegen preparation for O(1) membership tests.
-    // Walk up the parent chain to find which function owns this variable
     for (Obj *parent = current_fn->parent_fn; parent;
          parent = parent->parent_fn) {
-        // Check if var is in parent's locals
-        for (Obj *local = parent->locals; local; local = local->next) {
-            if (local == var)
-                return parent;
-        }
-        // Also check parent's params (which are also in locals)
-        for (Obj *param = parent->params; param; param = param->next) {
-            if (param == var)
-                return parent;
-        }
+        ensure_local_set(parent);
+        if (hashmap_get_int(&parent->local_set, (long long)(intptr_t)var))
+            return parent;
     }
     return NULL;
 }
@@ -2882,6 +2883,15 @@ void gen(JCC *vm, Obj *prog) {
     for (Obj *fn = prog; fn; fn = fn->next) {
         if (fn->is_function && fn->body) {
             gen_function(vm, fn);
+        }
+    }
+
+    // Free per-function local_set hash tables built lazily by
+    // belongs_to_outer_function during the pass above. (#165)
+    for (Obj *fn = prog; fn; fn = fn->next) {
+        if (fn->local_set_built) {
+            hashmap_deinit_borrowed(&fn->local_set);
+            fn->local_set_built = false;
         }
     }
 

@@ -856,10 +856,11 @@ static int debugger_find_ffi_function(JCC *vm, const char *name) {
     if (!vm || !name)
         return -1;
 
+    size_t len = strlen(name);
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
         if (vm->compiler.ffi_table[i].name &&
-            strlen(vm->compiler.ffi_table[i].name) == strlen(name) &&
-            strncmp(vm->compiler.ffi_table[i].name, name, strlen(name)) == 0)
+            vm->compiler.ffi_table[i].name_len == len &&
+            memcmp(vm->compiler.ffi_table[i].name, name, len) == 0)
             return i;
     }
 
