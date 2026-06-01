@@ -19,6 +19,7 @@
 
 #include "jcc.h"
 #include "./internal.h"
+#include <limits.h>
 
 //
 // Bytecode Optimizer
@@ -106,13 +107,205 @@ static void reset_reg_state(RegState *state) {
         state->is_const[i] = false;
         state->value[i] = 0;
     }
+    state->is_const[REG_ZERO] = true;
+    state->value[REG_ZERO] = 0;
+}
+
+static void set_const_reg(RegState *state, int rd, long long value) {
+    if (rd <= REG_ZERO || rd >= MAX_TRACKED_REGS)
+        return;
+    state->is_const[rd] = true;
+    state->value[rd] = value;
+}
+
+static void invalidate_reg(RegState *state, int rd) {
+    if (rd <= REG_ZERO || rd >= MAX_TRACKED_REGS)
+        return;
+    state->is_const[rd] = false;
+    state->value[rd] = 0;
+}
+
+static int find_const_reg(RegState *state, long long value) {
+    for (int i = 0; i < MAX_TRACKED_REGS; i++) {
+        if (state->is_const[i] && state->value[i] == value)
+            return i;
+    }
+    return -1;
+}
+
+static bool add_overflows(long long a, long long b) {
+    return (b > 0 && a > LLONG_MAX - b) ||
+           (b < 0 && a < LLONG_MIN - b);
+}
+
+static bool sub_overflows(long long a, long long b) {
+    return (b < 0 && a > LLONG_MAX + b) ||
+           (b > 0 && a < LLONG_MIN + b);
+}
+
+static bool mul_overflows(long long a, long long b) {
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_mul_overflow)
+    long long result;
+    return __builtin_mul_overflow(a, b, &result);
+#endif
+#endif
+    if (a > 0) {
+        if (b > 0)
+            return a > LLONG_MAX / b;
+        return b < LLONG_MIN / a;
+    }
+    if (a < 0) {
+        if (b > 0)
+            return a < LLONG_MIN / b;
+        return a != 0 && b < LLONG_MAX / a;
+    }
+    return false;
+}
+
+static bool eval_binary_const(int op, long long a, long long b,
+                              bool preserve_overflow_traps,
+                              long long *out) {
+    switch (op) {
+        case ADD3:
+            if (preserve_overflow_traps && add_overflows(a, b))
+                return false;
+            *out = (long long)((unsigned long long)a + (unsigned long long)b);
+            return true;
+        case SUB3:
+            if (preserve_overflow_traps && sub_overflows(a, b))
+                return false;
+            *out = (long long)((unsigned long long)a - (unsigned long long)b);
+            return true;
+        case MUL3:
+            if (preserve_overflow_traps && mul_overflows(a, b))
+                return false;
+            *out = (long long)((unsigned long long)a * (unsigned long long)b);
+            return true;
+        case DIV3:
+            if (b == 0 || (a == LLONG_MIN && b == -1))
+                return false;
+            *out = a / b;
+            return true;
+        case UDIV3:
+            if (b == 0)
+                return false;
+            *out = (long long)((unsigned long long)a / (unsigned long long)b);
+            return true;
+        case MOD3:
+            if (b == 0 || (a == LLONG_MIN && b == -1))
+                return false;
+            *out = a % b;
+            return true;
+        case UMOD3:
+            if (b == 0)
+                return false;
+            *out = (long long)((unsigned long long)a % (unsigned long long)b);
+            return true;
+        case AND3:
+            *out = a & b;
+            return true;
+        case OR3:
+            *out = a | b;
+            return true;
+        case XOR3:
+            *out = a ^ b;
+            return true;
+        case SHL3:
+            if (b < 0 || b >= 63 || a < 0 || a > (LLONG_MAX >> b))
+                return false;
+            *out = a << b;
+            return true;
+        case SHR3:
+            if (b < 0 || b >= 64 || a < 0)
+                return false;
+            *out = a >> b;
+            return true;
+        case USHR3:
+            if (b < 0 || b >= 64)
+                return false;
+            *out = (long long)((unsigned long long)a >> b);
+            return true;
+        case SEQ3:
+            *out = (a == b) ? 1 : 0;
+            return true;
+        case SNE3:
+            *out = (a != b) ? 1 : 0;
+            return true;
+        case SLT3:
+            *out = (a < b) ? 1 : 0;
+            return true;
+        case SGE3:
+            *out = (a >= b) ? 1 : 0;
+            return true;
+        case SGT3:
+            *out = (a > b) ? 1 : 0;
+            return true;
+        case SLE3:
+            *out = (a <= b) ? 1 : 0;
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool eval_unary_const(int op, long long value, long long *out) {
+    switch (op) {
+        case NEG3:
+            if (value == LLONG_MIN)
+                return false;
+            *out = -value;
+            return true;
+        case NOT3:
+            *out = !value;
+            return true;
+        case BNOT3:
+            *out = ~value;
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool eval_extend_const(int op, long long value, long long *out) {
+    switch (op) {
+        case SX1:
+            *out = (long long)(int8_t)value;
+            return true;
+        case SX2:
+            *out = (long long)(int16_t)value;
+            return true;
+        case SX4:
+            *out = (long long)(int32_t)value;
+            return true;
+        case ZX1:
+            *out = (long long)(uint8_t)value;
+            return true;
+        case ZX2:
+            *out = (long long)(uint16_t)value;
+            return true;
+        case ZX4:
+            *out = (long long)(uint32_t)value;
+            return true;
+        default:
+            return false;
+    }
+}
+
+static void emit_mov_nop(JCC *vm, JCCPc pc) {
+    vm->text_seg[pc + 0] = MOV3;
+    vm->text_seg[pc + 1] = ENCODE_RR(REG_ZERO, REG_ZERO);
+}
+
+static void emit_li_nop(JCC *vm, JCCPc pc) {
+    vm->text_seg[pc + 0] = LI3;
+    vm->text_seg[pc + 1] = ENCODE_R(REG_ZERO);
+    cc_write_i64_at(vm, pc + 2, 0);
 }
 
 
 
 static void opt_constant_fold(JCC *vm) {
-    // PLACEHOLDER: This pass increments folded_count but never actually
-    // rewrites the bytecode with folded constants. It is currently a no-op.
     if (!vm || !vm->text_seg || !vm->text_ptr) {
         return;
     }
@@ -125,20 +318,23 @@ static void opt_constant_fold(JCC *vm) {
     JCCPc pc = start;
 
     int folded_count = 0;
+    bool *control_flow_targets = build_control_flow_targets(vm, start, end);
 
     while (pc < end) {
+        if (pc != start && control_flow_targets[pc - start])
+            reset_reg_state(&state);
+
         int op = get_opcode(vm, pc);
         int size = get_instr_size(op);
+        if (size <= 0)
+            break;
 
         switch (op) {
             case LI3: {
                 // LI3 rd, imm - register gets constant value
                 int rd = vm->text_seg[pc + 1] & 0xFF;
                 long long imm = cc_read_i64_at(vm, pc + 2);
-                if (rd < MAX_TRACKED_REGS && rd != 0) {
-                    state.is_const[rd] = true;
-                    state.value[rd] = imm;
-                }
+                set_const_reg(&state, rd, imm);
                 break;
             }
 
@@ -172,64 +368,21 @@ static void opt_constant_fold(JCC *vm) {
                     long long a = state.value[rs1];
                     long long b = state.value[rs2];
                     long long result = 0;
-                    bool can_fold = true;
-
-                    switch (op) {
-                        case ADD3: result = a + b; break;
-                        case SUB3: result = a - b; break;
-                        case MUL3: result = a * b; break;
-                        case DIV3:
-                            if (b == 0) can_fold = false;  // Don't fold div by zero
-                            else result = a / b;
-                            break;
-                        case UDIV3:
-                            if (b == 0) can_fold = false;
-                            else result = (long long)((unsigned long long)a / (unsigned long long)b);
-                            break;
-                        case MOD3:
-                            if (b == 0) can_fold = false;
-                            else result = a % b;
-                            break;
-                        case UMOD3:
-                            if (b == 0) can_fold = false;
-                            else result = (long long)((unsigned long long)a % (unsigned long long)b);
-                            break;
-                        case AND3: result = a & b; break;
-                        case OR3:  result = a | b; break;
-                        case XOR3: result = a ^ b; break;
-                        case SHL3: result = a << b; break;
-                        case SHR3: result = (unsigned long long)a >> b; break;
-                        case USHR3: result = (long long)((unsigned long long)a >> b); break;
-                        case SEQ3: result = (a == b) ? 1 : 0; break;
-                        case SNE3: result = (a != b) ? 1 : 0; break;
-                        case SLT3: result = (a < b) ? 1 : 0; break;
-                        case SGE3: result = (a >= b) ? 1 : 0; break;
-                        case SGT3: result = (a > b) ? 1 : 0; break;
-                        case SLE3: result = (a <= b) ? 1 : 0; break;
-                        default: can_fold = false; break;
-                    }
+                    bool can_fold = eval_binary_const(
+                        op, a, b, vm->flags & JCC_OVERFLOW_CHECKS, &result);
 
                     if (can_fold) {
-                        // Replace this 2-word OP3 with 3-word LI3
-                        // We can only do this if there's room (we have 2 words, need 3)
-                        // For now, just update the result register's known value
-                        // A more sophisticated approach would restructure the bytecode
-                        state.is_const[rd] = true;
-                        state.value[rd] = result;
-                        
-                        // Convert OP3 to LI3 in place
-                        // Problem: OP3 is 2 words, LI3 is 3 words
-                        // Solution: Look backwards for the LI3 that loaded rs1 or rs2
-                        // and replace the whole sequence
-                        // For now, let's just track the constant but not rewrite
-                        // (Full rewrite requires more complex code motion)
-                        folded_count++;
+                        int const_reg = find_const_reg(&state, result);
+                        if (const_reg >= 0) {
+                            vm->text_seg[pc + 0] = MOV3;
+                            vm->text_seg[pc + 1] = ENCODE_RR(rd, const_reg);
+                            folded_count++;
+                        }
+                        set_const_reg(&state, rd, result);
                     }
                 } else {
                     // Result is not a constant
-                    if (rd < MAX_TRACKED_REGS) {
-                        state.is_const[rd] = false;
-                    }
+                    invalidate_reg(&state, rd);
                 }
                 break;
             }
@@ -238,14 +391,10 @@ static void opt_constant_fold(JCC *vm) {
                 // MOV3 rd, rs - copy constant status
                 int rd = vm->text_seg[pc + 1] & 0xFF;
                 int rs = (vm->text_seg[pc + 1] >> 8) & 0xFF;
-                if (rd < MAX_TRACKED_REGS && rd != 0) {
-                    if (rs < MAX_TRACKED_REGS && state.is_const[rs]) {
-                        state.is_const[rd] = true;
-                        state.value[rd] = state.value[rs];
-                    } else {
-                        state.is_const[rd] = false;
-                    }
-                }
+                if (rs < MAX_TRACKED_REGS && state.is_const[rs])
+                    set_const_reg(&state, rd, state.value[rs]);
+                else
+                    invalidate_reg(&state, rd);
                 break;
             }
 
@@ -255,17 +404,20 @@ static void opt_constant_fold(JCC *vm) {
                 // Unary ops: rd = OP(rs)
                 int rd = vm->text_seg[pc + 1] & 0xFF;
                 int rs = (vm->text_seg[pc + 1] >> 8) & 0xFF;
-                if (rd < MAX_TRACKED_REGS && rd != 0) {
-                    if (rs < MAX_TRACKED_REGS && state.is_const[rs]) {
-                        long long val = state.value[rs];
-                        if (op == NEG3) val = -val;
-                        else if (op == NOT3) val = !val;
-                        else if (op == BNOT3) val = ~val;
-                        state.is_const[rd] = true;
-                        state.value[rd] = val;
-                    } else {
-                        state.is_const[rd] = false;
+                if (rd < MAX_TRACKED_REGS && rd != 0 &&
+                    rs < MAX_TRACKED_REGS && state.is_const[rs]) {
+                    long long result = 0;
+                    if (eval_unary_const(op, state.value[rs], &result)) {
+                        int const_reg = find_const_reg(&state, result);
+                        if (const_reg >= 0) {
+                            vm->text_seg[pc + 0] = MOV3;
+                            vm->text_seg[pc + 1] = ENCODE_RR(rd, const_reg);
+                            folded_count++;
+                        }
+                        set_const_reg(&state, rd, result);
                     }
+                } else {
+                    invalidate_reg(&state, rd);
                 }
                 break;
             }
@@ -275,13 +427,46 @@ static void opt_constant_fold(JCC *vm) {
                 int rd = vm->text_seg[pc + 1] & 0xFF;
                 int rs = (vm->text_seg[pc + 1] >> 8) & 0xFF;
                 long long imm = cc_read_i64_at(vm, pc + 2);
-                if (rd < MAX_TRACKED_REGS && rd != 0) {
-                    if (rs < MAX_TRACKED_REGS && state.is_const[rs]) {
-                        state.is_const[rd] = true;
-                        state.value[rd] = state.value[rs] + imm;
-                    } else {
-                        state.is_const[rd] = false;
+                if (rd < MAX_TRACKED_REGS && rd != 0 &&
+                    rs < MAX_TRACKED_REGS && state.is_const[rs]) {
+                    long long result = 0;
+                    if (eval_binary_const(ADD3, state.value[rs], imm,
+                                          vm->flags & JCC_OVERFLOW_CHECKS,
+                                          &result)) {
+                        vm->text_seg[pc + 0] = LI3;
+                        vm->text_seg[pc + 1] = ENCODE_R(rd);
+                        cc_write_i64_at(vm, pc + 2, result);
+                        set_const_reg(&state, rd, result);
+                        folded_count++;
                     }
+                } else {
+                    invalidate_reg(&state, rd);
+                }
+                break;
+            }
+
+            case SX1:
+            case SX2:
+            case SX4:
+            case ZX1:
+            case ZX2:
+            case ZX4: {
+                int rd = vm->text_seg[pc + 1] & 0xFF;
+                int rs = (vm->text_seg[pc + 1] >> 8) & 0xFF;
+                if (rd < MAX_TRACKED_REGS && rd != 0 &&
+                    rs < MAX_TRACKED_REGS && state.is_const[rs]) {
+                    long long result = 0;
+                    if (eval_extend_const(op, state.value[rs], &result)) {
+                        int const_reg = find_const_reg(&state, result);
+                        if (const_reg >= 0) {
+                            vm->text_seg[pc + 0] = MOV3;
+                            vm->text_seg[pc + 1] = ENCODE_RR(rd, const_reg);
+                            folded_count++;
+                        }
+                        set_const_reg(&state, rd, result);
+                    }
+                } else {
+                    invalidate_reg(&state, rd);
                 }
                 break;
             }
@@ -290,8 +475,7 @@ static void opt_constant_fold(JCC *vm) {
             case LTA3:
             case LEA3: {
                 int rd = vm->text_seg[pc + 1] & 0xFF;
-                if (rd < MAX_TRACKED_REGS)
-                    state.is_const[rd] = false;
+                invalidate_reg(&state, rd);
                 break;
             }
 
@@ -315,20 +499,18 @@ static void opt_constant_fold(JCC *vm) {
             case LDR_D:
             case FLDR: {
                 int rd = vm->text_seg[pc + 1] & 0xFF;
-                if (rd < MAX_TRACKED_REGS) {
-                    state.is_const[rd] = false;
-                }
+                invalidate_reg(&state, rd);
                 break;
             }
 
             // Function calls clobber return registers
             case CALLF:
-                if (REG_A0 < MAX_TRACKED_REGS) state.is_const[REG_A0] = false;
+                invalidate_reg(&state, REG_A0);
                 break;
 
             default:
-                // For other instructions, conservatively invalidate destination if any
-                // Most will have dest in low 8 bits if present
+                if (size == 2)
+                    invalidate_reg(&state, vm->text_seg[pc + 1] & 0xFF);
                 break;
         }
 
@@ -336,8 +518,10 @@ static void opt_constant_fold(JCC *vm) {
     }
 
     if (vm->debug_vm && folded_count > 0) {
-        printf("[opt] constant folding: tracked %d constant expressions\n", folded_count);
+        printf("[opt] constant folding: rewrote %d constant expressions\n", folded_count);
     }
+
+    free(control_flow_targets);
 }
 
 // ========== Pass 2: Peephole Optimization ==========
@@ -351,13 +535,6 @@ static void opt_constant_fold(JCC *vm) {
 // 3. PSH3 rx; POP3 rx -> NOP (push/pop same register)
 // 4. JMP to next instruction -> NOP
 //
-
-// Mark an instruction as NOP (for later removal or skipping)
-// For 2-word instructions: convert to MOV3 r0, r0 (effectively NOP)
-static void nop_2word(JCC *vm, JCCPc pc) {
-    vm->text_seg[pc + 0] = MOV3;
-    vm->text_seg[pc + 1] = ENCODE_RR(0, 0);  // MOV3 r0, r0 = NOP
-}
 
 static void opt_peephole(JCC *vm) {
     if (!vm || !vm->text_seg || !vm->text_ptr) {
@@ -379,8 +556,28 @@ static void opt_peephole(JCC *vm) {
             int rs = (vm->text_seg[pc + 1] >> 8) & 0xFF;
             if (rd == rs && rd != 0) {
                 // Self-move - convert to NOP
-                nop_2word(vm, pc);
+                emit_mov_nop(vm, pc);
                 opt_count++;
+            }
+        }
+        pc += size;
+    }
+
+    // Pattern 2: LI3 rx, A; LI3 rx, B -> NOP; LI3 rx, B
+    for (JCCPc pc = start; pc < end; ) {
+        int op = get_opcode(vm, pc);
+        int size = get_instr_size(op);
+
+        if (op == LI3 && pc + size < end) {
+            JCCPc next = pc + size;
+            int next_op = get_opcode(vm, next);
+            if (next_op == LI3 && !control_flow_targets[next - start]) {
+                int rd1 = vm->text_seg[pc + 1] & 0xFF;
+                int rd2 = vm->text_seg[next + 1] & 0xFF;
+                if (rd1 == rd2 && rd1 != REG_ZERO) {
+                    emit_li_nop(vm, pc);
+                    opt_count++;
+                }
             }
         }
         pc += size;
@@ -399,8 +596,8 @@ static void opt_peephole(JCC *vm) {
                 int rd_pop = vm->text_seg[next + 1] & 0xFF;
                 if (rs_push == rd_pop) {
                     // Push then pop same register - useless
-                    nop_2word(vm, pc);
-                    nop_2word(vm, next);
+                    emit_mov_nop(vm, pc);
+                    emit_mov_nop(vm, next);
                     opt_count++;
                 }
             }
@@ -419,7 +616,7 @@ static void opt_peephole(JCC *vm) {
             if (!control_flow_targets[pc - start] &&
                 target == (long long)next) {
                 // Jump to the very next instruction - useless
-                nop_2word(vm, pc);
+                emit_mov_nop(vm, pc);
                 opt_count++;
             }
         }
@@ -491,7 +688,7 @@ static void opt_dead_code(JCC *vm) {
                 int rd2 = vm->text_seg[next + 1] & 0xFF;
                 if (rd1 == rd2 && rd1 != 0) {
                     // Consecutive MOV3 to same register - first is dead
-                    nop_2word(vm, pc);
+                    emit_mov_nop(vm, pc);
                     dce_count++;
                 }
             }

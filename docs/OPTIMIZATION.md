@@ -32,23 +32,28 @@ JCC includes optional bytecode optimization passes that can improve execution pe
 
 ### Phase 1: Constant Folding (`--optimize=1`)
 
-Tracks constant values through register operations and computes results at compile time.
+Tracks constant values through register operations and rewrites bytecode when
+the replacement fits in the original instruction footprint.
 
 **What it optimizes:**
 - `LI3` (load immediate) values are tracked
 - `MOV3` (register copy) propagates constant status
-- `ADDI3` (add immediate) computes result if source is constant
-- Arithmetic operations (`ADD3`, `SUB3`, `MUL3`, `DIV3`, etc.) are evaluated when both operands are constants
-- Unary operations (`NEG3`, `NOT3`, `BNOT3`) on constants
+- Sign and zero extension operations propagate constant status
+- `ADDI3` (add immediate) becomes a same-width `LI3` when the source is constant
+- Arithmetic operations (`ADD3`, `SUB3`, `MUL3`, `DIV3`, etc.) are evaluated when both operands are constants and rewritten to `MOV3` when the result is already available in a tracked register
+- Unary operations (`NEG3`, `NOT3`, `BNOT3`) on constants are rewritten to `MOV3` when the result is already available in a tracked register
 
 **Example:**
 ```c
-int x = 2 + 3;  // Constant folding computes 5 at compile time
+int x = 42 + 0;  // Rewritten to reuse the known 42 register value
 ```
 
 **Limitations:**
 - Constants are invalidated at control flow boundaries (jumps, calls, returns)
+- Constants are invalidated at known branch targets to avoid folding across control-flow joins
 - Memory loads reset constant tracking for the destination register
+- Two-word register operations are not expanded into wider `LI3` instructions; this keeps branch targets stable
+- Division by zero, signed division overflow, invalid shifts, and overflow-checked signed arithmetic are not folded
 
 ---
 
