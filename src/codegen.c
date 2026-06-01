@@ -149,6 +149,12 @@ static void add_debug_symbol(JCC *vm, char *name, long long offset, Type *ty,
 // ========== Register Allocator ==========
 // Simple bitmap allocator for temporary registers T0-T10
 
+// PLACEHOLDER: file-scope statics (temp_reg_in_use, num_label_defs,
+// num_label_patches, label_defs[], label_patches[]) are shared across all
+// JCC instances compiled in the same process. Move them onto the JCC/Compiler
+// struct as part of the thread-safety work tracked in ticket #139 so two JCC
+// instances (or two threads) can compile in parallel.
+// Ticket: https://todo.sr.ht/~takeiteasy/jcc/161
 static unsigned int temp_reg_in_use = 0;
 
 static const int temp_reg_map[] = {REG_T0, REG_T1, REG_T2, REG_T3,

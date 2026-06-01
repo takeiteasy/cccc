@@ -682,24 +682,12 @@ int main(int argc, const char *argv[]) {
         if (!tmp) {
             fprintf(stderr,
                     "error: failed to read stdin into temporary file\n");
-            // cleanup before exit
-            for (int i = 0; i < inc_paths_count; i++)
-                free((void *)inc_paths[i]);
-            free(inc_paths);
-            for (int i = 0; i < sys_inc_paths_count; i++)
-                free((void *)sys_inc_paths[i]);
-            free(sys_inc_paths);
-            for (int i = 0; i < defines_count; i++)
-                free((void *)defines[i]);
-            free(defines);
-            for (int i = 0; i < undefs_count; i++)
-                free((void *)undefs[i]);
-            free(undefs);
-            for (int i = 0; i < input_files_count; i++)
-                free((void *)input_files[i]);
-            free(input_files);
-            free(out_file);
-            usage((char *)argv[0], 1);
+            // PLACEHOLDER: duplicated BAIL cleanup. JCC/cc_init haven't run
+            // yet, so we can't goto BAIL; full fix is to init a JCC up
+            // front. For now, leak the arg arrays and return directly —
+            // they're about to be reclaimed by exit() anyway.
+            // Ticket: https://todo.sr.ht/~takeiteasy/jcc/163
+            return 1;
         }
         free((void *)input_files[0]);
         input_files[0] = tmp;

@@ -741,6 +741,10 @@ int op_LDR_B_fn(JCC *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    // PLACEHOLDER: watchpoint check is invoked unconditionally on every
+    // load/store even when the debugger is disabled. Guard at the call site
+    // (or move into an opt-in opcode suffix) so -O runs don't pay the call.
+    // Ticket: https://todo.sr.ht/~takeiteasy/jcc/157
     debugger_check_watchpoint(vm, (void *)vm->regs[rs], 1, WATCH_READ);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(char *)vm->regs[rs];
@@ -1651,6 +1655,11 @@ int op_SCOPEIN_fn(JCC *vm) {
     if (vm->debug_vm)
         printf("SCOPEIN: entering scope %d (bp=0x%llx)\n", scope_id, (long long)vm->bp);
 
+    // PLACEHOLDER: O(capacity) full hashmap scan on every scope entry. The
+    // VM already maintains vm->scope_vars per-scope linked lists during
+    // codegen; iterate that list (scope_vars[scope_id].head) for O(vars in
+    // scope) instead of O(total tracked vars).
+    // Ticket: https://todo.sr.ht/~takeiteasy/jcc/159
     for (int i = 0; i < vm->stack_var_meta.capacity; i++) {
         HashEntry *ent = &vm->stack_var_meta.buckets[i];
         if (!ent->key || ent->key == (char *)-1)
@@ -1677,6 +1686,9 @@ int op_SCOPEOUT_fn(JCC *vm) {
     if (vm->debug_vm)
         printf("SCOPEOUT: exiting scope %d (bp=0x%llx)\n", scope_id, (long long)vm->bp);
 
+    // PLACEHOLDER: O(capacity) full hashmap scan on every scope exit; same
+    // fix as SCOPEIN — walk vm->scope_vars[scope_id] directly.
+    // Ticket: https://todo.sr.ht/~takeiteasy/jcc/159
     for (int i = 0; i < vm->stack_var_meta.capacity; i++) {
         HashEntry *ent = &vm->stack_var_meta.buckets[i];
         if (!ent->key || ent->key == (char *)-1)
@@ -1806,6 +1818,11 @@ int op_SETJMP_fn(JCC *vm) {
     jmp_buf[0] = (long long)vm->pc;
     jmp_buf[1] = (long long)vm->sp;
     jmp_buf[2] = (long long)vm->bp;
+    // PLACEHOLDER: shadow stack (JCC_CFI) is not captured into jmp_buf, so a
+    // subsequent longjmp can return to a scope whose shadow entries are out of
+    // sync with the unwound frames. Save/restore vm->shadow_sp (and any
+    // necessary shadow entries) here.
+    // Ticket: https://todo.sr.ht/~takeiteasy/jcc/158
     vm->regs[REG_A0] = 0; // setjmp returns 0 on direct call
     return 0;
 }
@@ -1817,6 +1834,8 @@ int op_LONGJMP_fn(JCC *vm) {
     vm->pc = (JCCPc)jmp_buf[0];
     vm->sp = (long long *)jmp_buf[1];
     vm->bp = (long long *)jmp_buf[2];
+    // PLACEHOLDER: mirror of setjmp shadow-stack save. See SETJMP note.
+    // Ticket: https://todo.sr.ht/~takeiteasy/jcc/158
     vm->regs[REG_A0] = val ? val : 1; // Return value (never 0)
     return 0;
 }
@@ -1852,6 +1871,10 @@ int op_CALLF_fn(JCC *vm) {
 
     // Collect source-order 64-bit argument slots. Codegen places slots 0-7 in
     // REG_A0-A7 and pushes slots 8+ at vm->sp[0...].
+    // PLACEHOLDER: heap-allocates and frees an args scratch buffer on every
+    // FFI call. Use a reusable per-VM scratch buffer (or a small VLA capped
+    // to a sensible max) to avoid the allocator round-trip.
+    // Ticket: https://todo.sr.ht/~takeiteasy/jcc/160
     long long *args =
         calloc(actual_nargs > 0 ? actual_nargs : 1, sizeof(long long));
     if (!args) {

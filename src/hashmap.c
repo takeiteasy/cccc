@@ -360,6 +360,11 @@ int hashmap_count_if(HashMap *map, HashMapIterator predicate, void *user_data) {
     return count;
 }
 
+// PLACEHOLDER: hashmap_test / hashmap_test_iteration are unreachable from
+// the binary (declared in internal.h but never called; the test harness uses
+// Python's tests.py). Remove or wire into a self-test target. Both are
+// about 120 lines of dead code that ship in jcc.
+// Ticket: https://todo.sr.ht/~takeiteasy/jcc/162
 void hashmap_test(void) {
     HashMap *map = calloc(1, sizeof(HashMap));
     if (!map) {
