@@ -1,6 +1,19 @@
 SRCS := $(wildcard src/*.c src/stdlib/*.c)
 CFLAGS := -Wall -O0 -g -std=c23 -Wno-deprecated-declarations -Wno-switch -Wno-inline-asm
 LDFLAGS :=
+LLVM_CONFIG ?= llvm-config
+
+ifeq ($(JCC_HAS_LLVM),1)
+LLVM_CONFIG_FOUND := $(shell command -v $(LLVM_CONFIG) 2>/dev/null)
+ifeq ($(LLVM_CONFIG_FOUND),)
+$(error JCC_HAS_LLVM=1 requires llvm-config; set LLVM_CONFIG=/path/to/llvm-config)
+endif
+LLVM_CFLAGS := $(shell $(LLVM_CONFIG) --cflags)
+LLVM_LDFLAGS := $(shell $(LLVM_CONFIG) --ldflags)
+LLVM_LIBS := $(shell $(LLVM_CONFIG) --libs core native analysis) $(shell $(LLVM_CONFIG) --system-libs)
+CFLAGS += -DJCC_HAS_LLVM=1 $(LLVM_CFLAGS)
+LDFLAGS += $(LLVM_LDFLAGS) $(LLVM_LIBS)
+endif
 
 ifeq ($(OS),Windows_NT)
 	EXE := .EXE
@@ -85,6 +98,15 @@ afl-asan: jcc-afl-asan
 # libFuzzer harness (optional)
 fuzz_harness: src/fuzzing.c $(SRCS)
 	$(CC) $(CFLAGS) -fsanitize=fuzzer,address -o $@ $(filter-out src/main.c, $(SRCS)) $< $(LDFLAGS)
+
+llvm-smoke: $(filter-out src/main.c, $(SRCS)) tests/llvm_smoke.c
+ifneq ($(JCC_HAS_LLVM),1)
+	@echo "Error: llvm-smoke requires JCC_HAS_LLVM=1"
+	@exit 1
+else
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	./$@
+endif
 
 # --- Fuzzing targets (moved from fuzz/Makefile) ---
 
@@ -229,11 +251,11 @@ else
 endif
 
 clean:
-	@$(RM) -f $(EXE_OUT) $(LIB_OUT) $(SAN_OUT) jcc-afl jcc-afl-asan jcc-prof fuzz_harness
+	@$(RM) -f $(EXE_OUT) $(LIB_OUT) $(SAN_OUT) jcc-afl jcc-afl-asan jcc-prof fuzz_harness llvm-smoke
 	@$(RM) -rf profile/*.prof profile/*.txt profile/*.json profile/*.massif
 	@$(RM) -rf fuzz/corpus fuzz/out
 
-.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info generate-std
+.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness llvm-smoke bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info generate-std
 ifeq ($(UNAME_S),Linux)
 .PHONY: msan
 endif
