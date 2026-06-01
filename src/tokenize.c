@@ -712,24 +712,23 @@ void convert_pp_tokens(JCC *vm, Token *tok) {
 
 // Initialize line info for all tokens.
 static void add_line_numbers(JCC *vm, Token *tok) {
-    // PLACEHOLDER: O(file_size * num_tokens). Should iterate tokens and
-    // advance a single file pointer instead.
     char *p = vm->compiler.current_file->contents;
     char *line_start = p;
     int n = 1;
 
-    do {
-        if (p == tok->loc) {
-            tok->line_no = n;
-            // Calculate column number using display_width for UTF-8 support
-            tok->col_no = display_width(vm, line_start, tok->loc - line_start) + 1;
-            tok = tok->next;
+    for (Token *t = tok; ; t = t->next) {
+        while (p < t->loc) {
+            if (*p == '\n') {
+                n++;
+                line_start = p + 1;
+            }
+            p++;
         }
-        if (*p == '\n') {
-            n++;
-            line_start = p + 1;  // Next line starts after newline
-        }
-    } while (*p++);
+        t->line_no = n;
+        t->col_no = display_width(vm, line_start, t->loc - line_start) + 1;
+        if (t->kind == TK_EOF)
+            break;
+    }
 }
 
 Token *tokenize_string_literal(JCC *vm, Token *tok, Type *basety) {

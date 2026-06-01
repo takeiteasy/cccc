@@ -373,13 +373,12 @@ void hashmap_put_borrowed(HashMap *map, const char *key, void *val);
 // Deinitialize a HashMap: free all owned string keys and the bucket array.
 // The HashMap struct itself is NOT freed.
 void hashmap_deinit(HashMap *map);
+void hashmap_deinit_borrowed(HashMap *map);
 
 // Integer key HashMap functions (avoid overhead of snprintf/strdup)
 void *hashmap_get_int(HashMap *map, long long key);
 void hashmap_put_int(HashMap *map, long long key, void *val);
 void hashmap_delete_int(HashMap *map, long long key);
-void hashmap_test(void);
-
 // HashMap iteration
 // Callback function type for iteration
 // Return 0 to continue iteration, non-zero to stop
@@ -388,7 +387,6 @@ typedef int (*HashMapIterator)(char *key, int keylen, void *val,
 
 void hashmap_foreach(HashMap *map, HashMapIterator iter, void *user_data);
 int hashmap_count_if(HashMap *map, HashMapIterator predicate, void *user_data);
-void hashmap_test_iteration(void);
 
 //
 // stdlib.c

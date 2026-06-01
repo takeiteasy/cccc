@@ -948,6 +948,7 @@ _Node *__jcc_ast_forward_declare(JCC *vm, _Obj *fn) {
     decl->var = fn;
     decl->next = vm->compiler.scope->vars;
     vm->compiler.scope->vars = decl;
+    hashmap_put2_borrowed(&vm->compiler.scope->var_map, decl->name, decl->name_len, decl);
 
     _Node *noop = alloc_node(vm, ND_NULL_EXPR);
     noop->ty = ty_void;

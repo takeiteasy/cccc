@@ -158,8 +158,12 @@ Type *func_type(JCC *vm, Type *return_ty) {
 }
 
 Type *array_of(JCC *vm, Type *base, int len) {
-    // PLACEHOLDER: base->size * len can overflow int. No overflow check.
-    Type *ty = new_type(vm, TY_ARRAY, base->size * len, base->align);
+    int sz;
+    if (len > 0 && __builtin_mul_overflow(base->size, len, &sz))
+        error("array size overflow: element size %d times length %d exceeds INT_MAX", base->size, len);
+    else
+        sz = base->size * len;
+    Type *ty = new_type(vm, TY_ARRAY, sz, base->align);
     ty->base = base;
     ty->array_len = len;
     return ty;

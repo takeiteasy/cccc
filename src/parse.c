@@ -185,20 +185,23 @@ static void enter_scope(JCC *vm) {
 }
 
 static void leave_scope(JCC *vm) {
+    hashmap_deinit_borrowed(&vm->compiler.scope->var_map);
+    hashmap_deinit_borrowed(&vm->compiler.scope->tag_map);
     vm->compiler.scope = vm->compiler.scope->next;
 }
 
 // Find a variable by name.
 static VarScope *find_var(JCC *vm, Token *tok) {
-    // PLACEHOLDER: Linear scope lookup is O(scopes * vars). For large TUs
-    // this becomes a bottleneck; scopes should use hash tables.
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
-        // Linear search through linked list (typically 1-10 entries per scope)
-        for (VarScopeNode *node = sc->vars; node; node = node->next) {
-            if (node->name_len == tok->len &&
-                strncmp(node->name, tok->loc, tok->len) == 0) {
-                // Return pointer to VarScope fields within the node
+        if (sc->var_map.buckets) {
+            VarScopeNode *node = hashmap_get2(&sc->var_map, tok->loc, tok->len);
+            if (node)
                 return (VarScope *)node;
+        } else {
+            for (VarScopeNode *node = sc->vars; node; node = node->next) {
+                if (node->name_len == tok->len &&
+                    strncmp(node->name, tok->loc, tok->len) == 0)
+                    return (VarScope *)node;
             }
         }
     }
@@ -218,11 +221,15 @@ static PragmaMacro *find_pragma_macro(JCC *vm, Token *tok) {
 
 static Type *find_tag(JCC *vm, Token *tok) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
-        // Linear search through linked list (typically 1-10 entries per scope)
-        for (TagScopeNode *node = sc->tags; node; node = node->next) {
-            if (node->name_len == tok->len &&
-                strncmp(node->name, tok->loc, tok->len) == 0) {
+        if (sc->tag_map.buckets) {
+            TagScopeNode *node = hashmap_get2(&sc->tag_map, tok->loc, tok->len);
+            if (node)
                 return node->ty;
+        } else {
+            for (TagScopeNode *node = sc->tags; node; node = node->next) {
+                if (node->name_len == tok->len &&
+                    strncmp(node->name, tok->loc, tok->len) == 0)
+                    return node->ty;
             }
         }
     }
@@ -310,10 +317,9 @@ static VarScope *push_scope(JCC *vm, char *name, int name_len) {
     memset(node, 0, sizeof(VarScopeNode));
     node->name = name;
     node->name_len = name_len;
-    // Insert at head of linked list
     node->next = vm->compiler.scope->vars;
     vm->compiler.scope->vars = node;
-    // Return pointer to VarScope fields within the node
+    hashmap_put2_borrowed(&vm->compiler.scope->var_map, name, name_len, node);
     return (VarScope *)node;
 }
 
@@ -507,9 +513,9 @@ static void push_tag_scope(JCC *vm, Token *tok, Type *ty) {
     node->name = tok->loc;
     node->name_len = tok->len;
     node->ty = ty;
-    // Insert at head of linked list
     node->next = vm->compiler.scope->tags;
     vm->compiler.scope->tags = node;
+    hashmap_put2_borrowed(&vm->compiler.scope->tag_map, tok->loc, tok->len, node);
     record_type_name(vm, ty, tok->loc, tok->len, true);
 }
 

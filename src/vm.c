@@ -513,6 +513,12 @@ void cc_destroy(JCC *vm) {
         }
     }
 
+    // Free scope HashMap buckets (heap-allocated; not in the arena)
+    for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
+        hashmap_deinit_borrowed(&sc->var_map);
+        hashmap_deinit_borrowed(&sc->tag_map);
+    }
+
     // Destroy parser arena (frees all tokens, AST nodes, preprocessor state)
     arena_destroy(&vm->compiler.parser_arena);
 }

@@ -318,6 +318,16 @@ void hashmap_deinit(HashMap *map) {
     map->used = 0;
 }
 
+// Like hashmap_deinit but does not free keys (for borrowed-key maps).
+void hashmap_deinit_borrowed(HashMap *map) {
+    if (!map || !map->buckets)
+        return;
+    free(map->buckets);
+    map->buckets = NULL;
+    map->capacity = 0;
+    map->used = 0;
+}
+
 // Iterate over all entries in the map, calling the iterator function
 // for each valid entry. The iterator receives the key, keylen, value,
 // and user_data. If the iterator returns non-zero, iteration stops.
@@ -358,132 +368,4 @@ int hashmap_count_if(HashMap *map, HashMapIterator predicate, void *user_data) {
             count++;
     }
     return count;
-}
-
-// PLACEHOLDER: hashmap_test / hashmap_test_iteration are unreachable from
-// the binary (declared in internal.h but never called; the test harness uses
-// Python's tests.py). Remove or wire into a self-test target. Both are
-// about 120 lines of dead code that ship in jcc.
-// Ticket: https://todo.sr.ht/~takeiteasy/jcc/162
-void hashmap_test(void) {
-    HashMap *map = calloc(1, sizeof(HashMap));
-    if (!map) {
-        fprintf(stderr, "FATAL: out of memory in hashmap_test\n");
-        exit(1);
-    }
-
-    for (int i = 0; i < 5000; i++) {
-        char *tmp = format("key %d", i);
-        hashmap_put(map, tmp, (void *)(size_t)i);
-        free(tmp);
-    }
-    for (int i2 = 1000; i2 < 2000; i2++) {
-        char *tmp = format("key %d", i2);
-        hashmap_delete(map, tmp);
-        free(tmp);
-    }
-    for (int i3 = 1500; i3 < 1600; i3++) {
-        char *tmp = format("key %d", i3);
-        hashmap_put(map, tmp, (void *)(size_t)i3);
-        free(tmp);
-    }
-    for (int i4 = 6000; i4 < 7000; i4++) {
-        char *tmp = format("key %d", i4);
-        hashmap_put(map, tmp, (void *)(size_t)i4);
-        free(tmp);
-    }
-
-    for (int i5 = 0; i5 < 1000; i5++) {
-        char *tmp = format("key %d", i5);
-        assert((size_t)hashmap_get(map, tmp) == i5);
-        free(tmp);
-    }
-    for (int i6 = 1000; i6 < 1500; i6++)
-        assert(hashmap_get(map, "no such key") == NULL);
-    for (int i7 = 1500; i7 < 1600; i7++) {
-        char *tmp = format("key %d", i7);
-        assert((size_t)hashmap_get(map, tmp) == i7);
-        free(tmp);
-    }
-    for (int i8 = 1600; i8 < 2000; i8++)
-        assert(hashmap_get(map, "no such key") == NULL);
-    for (int i9 = 2000; i9 < 5000; i9++) {
-        char *tmp = format("key %d", i9);
-        assert((size_t)hashmap_get(map, tmp) == i9);
-        free(tmp);
-    }
-    for (int i0 = 5000; i0 < 6000; i0++)
-        assert(hashmap_get(map, "no such key") == NULL);
-    for (int i10 = 6000; i10 < 7000; i10++) {
-        char *tmp = format("key %d", i10);
-        hashmap_put(map, tmp, (void *)(size_t)i10);
-        free(tmp);
-    }
-
-    assert(hashmap_get(map, "no such key") == NULL);
-    hashmap_deinit(map);
-    free(map);
-    printf("OK\n");
-}
-
-// Test callback for counting entries
-static int count_callback(char *key, int keylen, void *val, void *user_data) {
-    int *count = (int *)user_data;
-    (*count)++;
-    return 0;  // Continue iteration
-}
-
-// Test callback that stops after 3 entries
-static int stop_after_3_callback(char *key, int keylen, void *val, void *user_data) {
-    int *count = (int *)user_data;
-    (*count)++;
-    return (*count >= 3) ? 1 : 0;  // Stop after 3
-}
-
-// Test callback for count_if (count entries with value > 100)
-static int value_gt_100_predicate(char *key, int keylen, void *val, void *user_data) {
-    return ((size_t)val > 100) ? 1 : 0;
-}
-
-void hashmap_test_iteration(void) {
-    HashMap map = {};
-    
-    // Add some test entries (borrowed string literals)
-    hashmap_put_borrowed(&map, "key1", (void *)(size_t)10);
-    hashmap_put_borrowed(&map, "key2", (void *)(size_t)200);
-    hashmap_put_borrowed(&map, "key3", (void *)(size_t)30);
-    hashmap_put_borrowed(&map, "key4", (void *)(size_t)400);
-    hashmap_put_borrowed(&map, "key5", (void *)(size_t)50);
-    
-    // Test 1: Count all entries using foreach
-    int count = 0;
-    hashmap_foreach(&map, count_callback, &count);
-    assert(count == 5);
-    
-    // Test 2: Stop iteration early
-    count = 0;
-    hashmap_foreach(&map, stop_after_3_callback, &count);
-    assert(count == 3);
-    
-    // Test 3: Count entries with value > 100
-    int count_gt_100 = hashmap_count_if(&map, value_gt_100_predicate, NULL);
-    assert(count_gt_100 == 2);  // key2 (200) and key4 (400)
-    
-    // Test 4: Delete an entry and verify count decreases
-    hashmap_delete(&map, "key3");
-    count = 0;
-    hashmap_foreach(&map, count_callback, &count);
-    assert(count == 4);
-    
-    // Test 5: Test with empty map
-    HashMap empty_map = {};
-    count = 0;
-    hashmap_foreach(&empty_map, count_callback, &count);
-    assert(count == 0);
-    
-    // Test 6: Test with NULL iterator (should not crash)
-    hashmap_foreach(&map, NULL, NULL);
-    
-    hashmap_deinit(&map);
-    printf("HashMap iteration tests: OK\n");
 }

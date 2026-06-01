@@ -674,6 +674,13 @@ int main(int argc, const char *argv[]) {
         usage((char *)argv[0], 1);
     }
 
+    JCC vm;
+    cc_init(&vm, flags);
+    vm.compiler.compile_only = compile_only;
+
+    if (verbose)
+        vm.debug_vm = 1;
+
     // If the only input file is "-", read stdin into a temporary file and
     // replace it
     if (input_files_count == 1 &&
@@ -682,23 +689,12 @@ int main(int argc, const char *argv[]) {
         if (!tmp) {
             fprintf(stderr,
                     "error: failed to read stdin into temporary file\n");
-            // PLACEHOLDER: duplicated BAIL cleanup. JCC/cc_init haven't run
-            // yet, so we can't goto BAIL; full fix is to init a JCC up
-            // front. For now, leak the arg arrays and return directly —
-            // they're about to be reclaimed by exit() anyway.
-            // Ticket: https://todo.sr.ht/~takeiteasy/jcc/163
-            return 1;
+            exit_code = 1;
+            goto BAIL;
         }
         free((void *)input_files[0]);
         input_files[0] = tmp;
     }
-
-    JCC vm;
-    cc_init(&vm, flags);
-    vm.compiler.compile_only = compile_only;
-
-    if (verbose)
-        vm.debug_vm = 1;
 
     // Check if input is a bytecode file (.jbc extension)
     // If so, load and run it directly without compilation
