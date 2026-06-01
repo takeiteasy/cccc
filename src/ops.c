@@ -531,7 +531,14 @@ int op_LEV3_fn(JCC *vm) {
     // Get return address
     long long ret_addr = *vm->sp++;
 
-    // CFI validation
+    // Check if returning from main (ret_addr == 0)
+    if (ret_addr == 0) {
+        vm->pc = JCC_INVALID_PC; // Signal end of execution
+        return 0;
+    }
+
+    // CFI validation. main() starts from a synthetic return address instead of
+    // a CALL instruction, so the ret_addr == 0 sentinel above has no shadow entry.
     if (vm->flags & JCC_CFI) {
         long long shadow_ret_addr = *vm->shadow_sp++;
         if (shadow_ret_addr != ret_addr) {
@@ -545,12 +552,6 @@ int op_LEV3_fn(JCC *vm) {
             printf("====================================\n");
             return -1;
         }
-    }
-
-    // Check if returning from main (ret_addr == 0)
-    if (ret_addr == 0) {
-        vm->pc = JCC_INVALID_PC; // Signal end of execution
-        return 0;
     }
 
     vm->pc = (JCCPc)ret_addr;

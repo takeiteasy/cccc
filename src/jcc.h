@@ -50,120 +50,120 @@ extern "C" {
 
 #define OPS_X                                                                  \
     /* Control flow */                                                         \
-    X(JMP)   /* Unconditional jump */                                          \
-    X(CALL)  /* Call function (direct) */                                      \
-    X(CALLI) /* Call function (indirect via register) */                       \
-    X(JMPT)  /* Jump table */                                                  \
-    X(JMPI)  /* Indirect jump */                                               \
+    X(JMP, 1)   /* Unconditional jump */                                       \
+    X(CALL, 1)  /* Call function (direct) */                                   \
+    X(CALLI, 1) /* Call function (indirect via register) */                    \
+    X(JMPT, 3)  /* Jump table */                                               \
+    X(JMPI, 1)  /* Indirect jump */                                            \
     /* VM memory operations (self-contained, no system calls) */               \
-    X(MALC)                                                                    \
-    X(MFRE)                                                                    \
-    X(MCPY)                                                                    \
-    X(REALC)                                                                   \
-    X(CALC)                                                                    \
+    X(MALC, 0)                                                                 \
+    X(MFRE, 0)                                                                 \
+    X(MCPY, 0)                                                                 \
+    X(REALC, 0)                                                                \
+    X(CALC, 0)                                                                 \
     /* Type conversion instructions (in-register) */                           \
-    X(SX1)   /* Sign extend 1 byte to 8 bytes */                               \
-    X(SX2)   /* Sign extend 2 bytes to 8 bytes */                              \
-    X(SX4)   /* Sign extend 4 bytes to 8 bytes */                              \
-    X(ZX1)   /* Zero extend 1 byte to 8 bytes */                               \
-    X(ZX2)   /* Zero extend 2 bytes to 8 bytes */                              \
-    X(ZX4)   /* Zero extend 4 bytes to 8 bytes */                              \
-    X(CALLF) /* Foreign function interface */                                  \
+    X(SX1, 1)   /* Sign extend 1 byte to 8 bytes */                            \
+    X(SX2, 1)   /* Sign extend 2 bytes to 8 bytes */                           \
+    X(SX4, 1)   /* Sign extend 4 bytes to 8 bytes */                           \
+    X(ZX1, 1)   /* Zero extend 1 byte to 8 bytes */                            \
+    X(ZX2, 1)   /* Zero extend 2 bytes to 8 bytes */                           \
+    X(ZX4, 1)   /* Zero extend 4 bytes to 8 bytes */                           \
+    X(CALLF, 4) /* Foreign function interface */                               \
     /* Memory safety opcodes (keep legacy for instrumentation) */              \
-    X(CHKB)  /* Check array bounds */                                          \
-    X(CHKI)  /* Check initialization */                                        \
-    X(MARKI) /* Mark as initialized */                                         \
-    X(MARKA) /* Mark address (track stack pointer for dangling detection) */   \
-    X(CHKPA) /* Check pointer arithmetic (invalid arithmetic detection) */     \
-    X(MARKP) /* Mark provenance (track pointer origin) */                      \
+    X(CHKB, 1)  /* Check array bounds */                                       \
+    X(CHKI, 2)  /* Check initialization */                                     \
+    X(MARKI, 2) /* Mark as initialized */                                      \
+    X(MARKA, 6) /* Mark address (track stack pointer for dangling detection) */\
+    X(CHKPA, 1) /* Check pointer arithmetic (invalid arithmetic detection) */  \
+    X(MARKP, 4) /* Mark provenance (track pointer origin) */                   \
     /* Stack instrumentation opcodes */                                        \
-    X(SCOPEIN)  /* Mark scope entry (allocate/activate variables) */           \
-    X(SCOPEOUT) /* Mark scope exit (invalidate variables, detect dangling      \
+    X(SCOPEIN, 1)  /* Mark scope entry (allocate/activate variables) */        \
+    X(SCOPEOUT, 1) /* Mark scope exit (invalidate variables, detect dangling   \
                    pointers) */                                                \
-    X(CHKL)     /* Check variable liveness before access */                    \
-    X(MARKR)    /* Mark variable read access */                                \
-    X(MARKW)    /* Mark variable write access */                               \
+    X(CHKL, 2)     /* Check variable liveness before access */                 \
+    X(MARKR, 2)    /* Mark variable read access */                             \
+    X(MARKW, 2)    /* Mark variable write access */                            \
     /* Non-local jump instructions (setjmp/longjmp) */                         \
-    X(SETJMP)  /* Save execution context to jmp_buf, return 0 */               \
-    X(LONGJMP) /* Restore execution context from jmp_buf, return val */        \
+    X(SETJMP, 1)  /* Save execution context to jmp_buf, return 0 */            \
+    X(LONGJMP, 1) /* Restore execution context from jmp_buf, return val */     \
     /* Register-based arithmetic */                                            \
-    X(ADD3) /* rd = rs1 + rs2 */                                               \
-    X(SUB3) /* rd = rs1 - rs2 */                                               \
-    X(MUL3) /* rd = rs1 * rs2 */                                               \
-    X(DIV3) /* rd = rs1 / rs2 (signed) */                                      \
-    X(UDIV3) /* rd = rs1 / rs2 (unsigned) */                                   \
-    X(MOD3) /* rd = rs1 % rs2 (signed) */                                      \
-    X(UMOD3) /* rd = rs1 % rs2 (unsigned) */                                   \
-    X(AND3) /* rd = rs1 & rs2 */                                               \
-    X(OR3)  /* rd = rs1 | rs2 */                                               \
-    X(XOR3) /* rd = rs1 ^ rs2 */                                               \
-    X(SHL3) /* rd = rs1 << rs2 */                                              \
-    X(SHR3) /* rd = rs1 >> rs2 (arithmetic, signed) */                         \
-    X(USHR3) /* rd = rs1 >> rs2 (logical, unsigned) */                         \
+    X(ADD3, 1) /* rd = rs1 + rs2 */                                            \
+    X(SUB3, 1) /* rd = rs1 - rs2 */                                            \
+    X(MUL3, 1) /* rd = rs1 * rs2 */                                            \
+    X(DIV3, 1) /* rd = rs1 / rs2 (signed) */                                   \
+    X(UDIV3, 1) /* rd = rs1 / rs2 (unsigned) */                                \
+    X(MOD3, 1) /* rd = rs1 % rs2 (signed) */                                   \
+    X(UMOD3, 1) /* rd = rs1 % rs2 (unsigned) */                                \
+    X(AND3, 1) /* rd = rs1 & rs2 */                                            \
+    X(OR3, 1)  /* rd = rs1 | rs2 */                                            \
+    X(XOR3, 1) /* rd = rs1 ^ rs2 */                                            \
+    X(SHL3, 1) /* rd = rs1 << rs2 */                                           \
+    X(SHR3, 1) /* rd = rs1 >> rs2 (arithmetic, signed) */                      \
+    X(USHR3, 1) /* rd = rs1 >> rs2 (logical, unsigned) */                      \
     /* Register-based comparisons */                                           \
-    X(SEQ3) /* rd = (rs1 == rs2) */                                            \
-    X(SNE3) /* rd = (rs1 != rs2) */                                            \
-    X(SLT3) /* rd = (rs1 < rs2) */                                             \
-    X(SGE3) /* rd = (rs1 >= rs2) */                                            \
-    X(SGT3) /* rd = (rs1 > rs2) */                                             \
-    X(SLE3) /* rd = (rs1 <= rs2) */                                            \
+    X(SEQ3, 1) /* rd = (rs1 == rs2) */                                         \
+    X(SNE3, 1) /* rd = (rs1 != rs2) */                                         \
+    X(SLT3, 1) /* rd = (rs1 < rs2) */                                          \
+    X(SGE3, 1) /* rd = (rs1 >= rs2) */                                         \
+    X(SGT3, 1) /* rd = (rs1 > rs2) */                                          \
+    X(SLE3, 1) /* rd = (rs1 <= rs2) */                                         \
     /* Register operations */                                                  \
-    X(LI3)   /* rd = immediate */                                              \
-    X(LDA3)  /* rd = data_seg + immediate byte offset */                       \
-    X(LTA3)  /* rd = text_seg + immediate byte offset */                       \
-    X(MOV3)  /* rd = rs1 */                                                    \
-    X(NEG3)  /* rd = -rs1 (integer unary negation) */                          \
-    X(NOT3)  /* rd = !rs (logical not) */                                      \
-    X(BNOT3) /* rd = ~rs (bitwise not) */                                      \
-    X(ADDI3) /* rd = rs1 + immediate */                                        \
-    X(LEA3)  /* rd = bp + immediate (local variable address) */                \
+    X(LI3, 3)   /* rd = immediate */                                           \
+    X(LDA3, 3)  /* rd = data_seg + immediate byte offset */                    \
+    X(LTA3, 3)  /* rd = text_seg + immediate byte offset */                    \
+    X(MOV3, 1)  /* rd = rs1 */                                                 \
+    X(NEG3, 1)  /* rd = -rs1 (integer unary negation) */                       \
+    X(NOT3, 1)  /* rd = !rs (logical not) */                                   \
+    X(BNOT3, 1) /* rd = ~rs (bitwise not) */                                   \
+    X(ADDI3, 3) /* rd = rs1 + immediate */                                     \
+    X(LEA3, 3)  /* rd = bp + immediate (local variable address) */             \
     /* Register-based control flow */                                          \
-    X(JZ3)  /* if (regs[rs] == 0) pc = target */                               \
-    X(JNZ3) /* if (regs[rs] != 0) pc = target */                               \
+    X(JZ3, 2)  /* if (regs[rs] == 0) pc = target */                            \
+    X(JNZ3, 2) /* if (regs[rs] != 0) pc = target */                            \
     /* Register-based function frame */                                        \
-    X(ENT3) /* Enter function: stack_size|param_count */                       \
-    X(LEV3) /* Leave function: return value in REG_A0 */                       \
-    X(ADJ)  /* Adjust stack pointer */                                         \
-    X(PSH3) /* Push regs[rs] onto stack: *--sp = regs[rs] */                   \
-    X(POP3) /* Pop from stack into regs[rd]: rd = *sp++ */                     \
+    X(ENT3, 4) /* Enter function: stack_size|param_count */                    \
+    X(LEV3, 0) /* Leave function: return value in REG_A0 */                    \
+    X(ADJ, 2)  /* Adjust stack pointer */                                      \
+    X(PSH3, 1) /* Push regs[rs] onto stack: *--sp = regs[rs] */                \
+    X(POP3, 1) /* Pop from stack into regs[rd]: rd = *sp++ */                  \
     /* Register-based load/store */                                            \
-    X(LDR_B) /* regs[rd] = *(char*)regs[rs] (load byte, sign-extend) */        \
-    X(LDR_H) /* regs[rd] = *(short*)regs[rs] (load halfword, sign-extend) */   \
-    X(LDR_W) /* regs[rd] = *(int*)regs[rs] (load word, sign-extend) */         \
-    X(LDR_D) /* regs[rd] = *(long long*)regs[rs] (load dword) */               \
-    X(STR_B) /* *(char*)regs[rs] = regs[rd] (store byte) */                    \
-    X(STR_H) /* *(short*)regs[rs] = regs[rd] (store halfword) */               \
-    X(STR_W) /* *(int*)regs[rs] = regs[rd] (store word) */                     \
-    X(STR_D) /* *(long long*)regs[rs] = regs[rd] (store dword) */              \
+    X(LDR_B, 1) /* regs[rd] = *(char*)regs[rs] (load byte, sign-extend) */     \
+    X(LDR_H, 1) /* regs[rd] = *(short*)regs[rs] (load halfword, sign-extend) */\
+    X(LDR_W, 1) /* regs[rd] = *(int*)regs[rs] (load word, sign-extend) */      \
+    X(LDR_D, 1) /* regs[rd] = *(long long*)regs[rs] (load dword) */            \
+    X(STR_B, 1) /* *(char*)regs[rs] = regs[rd] (store byte) */                 \
+    X(STR_H, 1) /* *(short*)regs[rs] = regs[rd] (store halfword) */            \
+    X(STR_W, 1) /* *(int*)regs[rs] = regs[rd] (store word) */                  \
+    X(STR_D, 1) /* *(long long*)regs[rs] = regs[rd] (store dword) */           \
     /* Floating-point register operations */                                   \
-    X(FLDR)  /* fregs[rd] = *(double*)regs[rs] */                              \
-    X(FSTR)  /* *(double*)regs[rs] = fregs[rd] */                              \
-    X(FADD3) /* fregs[rd] = fregs[rs1] + fregs[rs2] */                         \
-    X(FSUB3) /* fregs[rd] = fregs[rs1] - fregs[rs2] */                         \
-    X(FMUL3) /* fregs[rd] = fregs[rs1] * fregs[rs2] */                         \
-    X(FDIV3) /* fregs[rd] = fregs[rs1] / fregs[rs2] */                         \
-    X(FMOV3) /* fregs[rd] = fregs[rs1] */                                      \
-    X(FNEG3) /* fregs[rd] = -fregs[rs1] */                                     \
-    X(FEQ3)  /* rd = (fregs[rs1] == fregs[rs2]) */                             \
-    X(FNE3)  /* rd = (fregs[rs1] != fregs[rs2]) */                             \
-    X(FLT3)  /* rd = (fregs[rs1] < fregs[rs2]) */                              \
-    X(FLE3)  /* rd = (fregs[rs1] <= fregs[rs2]) */                             \
-    X(FGT3)  /* rd = (fregs[rs1] > fregs[rs2]) */                              \
-    X(FGE3)  /* rd = (fregs[rs1] >= fregs[rs2]) */                             \
-    X(I2F3)  /* fregs[rd] = (double)regs[rs] */                                \
-    X(F2I3)  /* regs[rd] = (long long)fregs[rs] */                             \
-    X(FR2R)  /* regs[rd] = *(long long*)&fregs[rs] (bit-pattern transfer) */   \
-    X(R2FR)  /* fregs[rd] = *(double*)&regs[rs] (bit-pattern transfer, reverse \
+    X(FLDR, 1)  /* fregs[rd] = *(double*)regs[rs] */                           \
+    X(FSTR, 1)  /* *(double*)regs[rs] = fregs[rd] */                           \
+    X(FADD3, 1) /* fregs[rd] = fregs[rs1] + fregs[rs2] */                      \
+    X(FSUB3, 1) /* fregs[rd] = fregs[rs1] - fregs[rs2] */                      \
+    X(FMUL3, 1) /* fregs[rd] = fregs[rs1] * fregs[rs2] */                      \
+    X(FDIV3, 1) /* fregs[rd] = fregs[rs1] / fregs[rs2] */                      \
+    X(FMOV3, 1) /* fregs[rd] = fregs[rs1] */                                   \
+    X(FNEG3, 1) /* fregs[rd] = -fregs[rs1] */                                  \
+    X(FEQ3, 1)  /* rd = (fregs[rs1] == fregs[rs2]) */                          \
+    X(FNE3, 1)  /* rd = (fregs[rs1] != fregs[rs2]) */                          \
+    X(FLT3, 1)  /* rd = (fregs[rs1] < fregs[rs2]) */                           \
+    X(FLE3, 1)  /* rd = (fregs[rs1] <= fregs[rs2]) */                          \
+    X(FGT3, 1)  /* rd = (fregs[rs1] > fregs[rs2]) */                           \
+    X(FGE3, 1)  /* rd = (fregs[rs1] >= fregs[rs2]) */                          \
+    X(I2F3, 1)  /* fregs[rd] = (double)regs[rs] */                             \
+    X(F2I3, 1)  /* regs[rd] = (long long)fregs[rs] */                          \
+    X(FR2R, 1)  /* regs[rd] = *(long long*)&fregs[rs] (bit-pattern transfer) */\
+    X(R2FR, 1)  /* fregs[rd] = *(double*)&regs[rs] (bit-pattern transfer, reverse \
                 of FR2R) */                                                    \
     /* Register-based safety opcodes */                                        \
-    X(CHKP3) /* Check pointer validity: regs[rs] */                            \
-    X(CHKA3) /* Check alignment: regs[rs], immediate alignment */              \
-    X(CHKT3) /* Check type: regs[rs], immediate TypeKind */                    \
+    X(CHKP3, 1) /* Check pointer validity: regs[rs] */                         \
+    X(CHKA3, 3) /* Check alignment: regs[rs], immediate alignment */           \
+    X(CHKT3, 3) /* Check type: regs[rs], immediate TypeKind */                 \
     /* Struct return buffer support */                                         \
-    X(RETBUF) /* Get next return buffer: REG_A0 = rotating pool buffer */       \
-    X(FLDR_F32)   /* fregs[rd] = (double)*(float*)regs[rs] */                  \
-    X(FSTR_F32)   /* *(float*)regs[rs] = (float)fregs[rd] */                   \
-    X(FROUND_F32) /* fregs[rd] = (float)fregs[rs] */
+    X(RETBUF, 0) /* Get next return buffer: REG_A0 = rotating pool buffer */    \
+    X(FLDR_F32, 1)   /* fregs[rd] = (double)*(float*)regs[rs] */               \
+    X(FSTR_F32, 1)   /* *(float*)regs[rs] = (float)fregs[rd] */                \
+    X(FROUND_F32, 1) /* fregs[rd] = (float)fregs[rs] */
 
 typedef uint32_t JCCInstrWord;
 typedef uint32_t JCCPc;
@@ -177,7 +177,7 @@ typedef uint32_t JCCPc;
  emitted by the code generator and interpreted by the VM executor.
 */
 typedef enum {
-#define X(NAME) NAME,
+#define X(NAME, OPERANDS) NAME,
     OPS_X
 #undef X
 } JCC_OP;

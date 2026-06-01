@@ -30,6 +30,11 @@ JCC includes optional bytecode optimization passes that can improve execution pe
 
 ## Optimization Passes
 
+Optimizer bytecode walks use the shared instruction-size metadata generated
+from `OPS_X` in `src/jcc.h`. Each opcode declares its operand-word count beside
+the opcode name, so optimizer passes, bytecode serialization, and debugger
+disassembly stay aligned when instructions are added.
+
 ### Phase 1: Constant Folding (`--optimize=1`)
 
 Tracks constant values through register operations and rewrites bytecode when

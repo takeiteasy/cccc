@@ -23,18 +23,18 @@
 #include "jcc.h"
 #include "./internal.h"
 
-#define X(NAME) extern int op_##NAME##_fn(JCC *vm);
+#define X(NAME, OPERANDS) extern int op_##NAME##_fn(JCC *vm);
 OPS_X
 #undef X
 
 int vm_eval(JCC *vm) {
     static void *op_table[] = {
-#define X(NAME) [NAME] = &&op_##NAME,
+#define X(NAME, OPERANDS) [NAME] = &&op_##NAME,
         OPS_X
 #undef X
     };
     static const char *op_names[] = {
-#define X(NAME) #NAME,
+#define X(NAME, OPERANDS) #NAME,
         OPS_X
 #undef X
     };
@@ -78,7 +78,7 @@ dispatch:
         goto *op_table[op];
     }
 
-#define X(NAME)                                                  \
+#define X(NAME, OPERANDS)                                        \
     op_##NAME: {                                                 \
         int _r = op_##NAME##_fn(vm);                             \
         if (__builtin_expect(_r != 0, 0)) return _r;             \

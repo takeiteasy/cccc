@@ -177,64 +177,14 @@ static inline long long cc_pc_to_byte_offset(JCCPc pc) {
 }
 
 static inline int cc_opcode_operand_words(int op) {
-    switch (op) {
-        case JMP:
-        case CALL:
-            return 1;
-        case JZ3:
-        case JNZ3:
-            return 2;
-        case LI3:
-        case LDA3:
-        case LTA3:
-        case LEA3:
-        case ADDI3:
-        case CHKA3:
-        case CHKT3:
-            return 3;
-        case ENT3:
-            return 4;
-        case ADJ:
-            return 2;
-        case JMPT:
-            return 3;
-        case ADD3: case SUB3: case MUL3: case DIV3: case UDIV3: case MOD3: case UMOD3:
-        case AND3: case OR3: case XOR3: case SHL3: case SHR3: case USHR3:
-        case SEQ3: case SNE3: case SLT3: case SGE3: case SGT3: case SLE3:
-        case MOV3:
-        case FADD3: case FSUB3: case FMUL3: case FDIV3:
-        case FEQ3: case FNE3: case FLT3: case FLE3: case FGT3: case FGE3:
-        case NEG3: case NOT3: case BNOT3:
-        case LDR_B: case LDR_H: case LDR_W: case LDR_D:
-        case STR_B: case STR_H: case STR_W: case STR_D:
-        case FLDR: case FSTR: case FLDR_F32: case FSTR_F32: case FROUND_F32:
-        case FMOV3: case FNEG3:
-        case I2F3: case F2I3: case FR2R: case R2FR:
-        case SX1: case SX2: case SX4: case ZX1: case ZX2: case ZX4:
-        case CHKP3:
-        case PSH3: case POP3:
-        case CALLI: case JMPI:
-        case CHKB:
-        case CHKPA:
-        case SETJMP: case LONGJMP:
-            return 1;
-        case CALLF:
-            return 4;
-        case MALC: case MFRE: case MCPY: case REALC: case CALC:
-        case LEV3:
-        case RETBUF:
-            return 0;
-        case MARKA:
-            return 6;
-        case MARKP:
-            return 4;
-        case CHKI: case MARKI: case CHKL: case MARKR: case MARKW:
-            return 2;
-        case SCOPEIN: case SCOPEOUT:
-            return 1;
-        default:
-            return -1;
-    }
+    static const int operand_words[] = {
+#define X(NAME, OPERANDS) [NAME] = OPERANDS,
+        OPS_X
+#undef X
+    };
+    if (op < 0 || op >= (int)(sizeof(operand_words) / sizeof(operand_words[0])))
+        return -1;
+    return operand_words[op];
 }
 
 static inline int cc_instr_words(int op) {

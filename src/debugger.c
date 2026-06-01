@@ -239,7 +239,7 @@ void debugger_print_stack(JCC *vm, int count) {
 
 static const char* opcode_name(int op) {
     static const char *names[] = {
-#define X(NAME) #NAME,
+#define X(NAME, OPERANDS) #NAME,
         OPS_X
 #undef X
     };
