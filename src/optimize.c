@@ -46,6 +46,18 @@ static int get_instr_size(int op) {
     return cc_instr_words(op);
 }
 
+static int get_instr_size_at(JCC *vm, JCCPc pc, JCCPc end) {
+    int op = get_opcode(vm, pc);
+    int size = get_instr_size(op);
+    if (op == JMPT && pc + 3 < end) {
+        JCCPc table_pc = vm->text_seg[pc + 1];
+        JCCInstrWord count = vm->text_seg[pc + 2];
+        if (table_pc == pc + 4 && table_pc + (JCCPc)count <= end)
+            size += (int)count;
+    }
+    return size;
+}
+
 static void mark_text_target(JCC *vm, bool *targets, JCCPc start,
                              JCCPc end, JCCPc target) {
     (void)vm;
@@ -62,7 +74,7 @@ static bool *build_control_flow_targets(JCC *vm, JCCPc start,
 
     for (JCCPc pc = start; pc < end; ) {
         int op = get_opcode(vm, pc);
-        int size = get_instr_size(op);
+        int size = get_instr_size_at(vm, pc, end);
         if (size <= 0)
             break;
 
@@ -70,6 +82,15 @@ static bool *build_control_flow_targets(JCC *vm, JCCPc start,
             mark_text_target(vm, targets, start, end, vm->text_seg[pc + 1]);
         } else if (op == JZ3 || op == JNZ3) {
             mark_text_target(vm, targets, start, end, vm->text_seg[pc + 2]);
+        } else if (op == JMPT && pc + 3 < end) {
+            JCCPc table_pc = vm->text_seg[pc + 1];
+            JCCInstrWord count = vm->text_seg[pc + 2];
+            mark_text_target(vm, targets, start, end, vm->text_seg[pc + 3]);
+            if (table_pc + (JCCPc)count <= end) {
+                for (JCCInstrWord i = 0; i < count; i++)
+                    mark_text_target(vm, targets, start, end,
+                                     vm->text_seg[table_pc + (JCCPc)i]);
+            }
         } else if (op == LTA3) {
             JCCPc target = cc_byte_offset_to_pc(cc_read_i64_at(vm, pc + 2));
             mark_text_target(vm, targets, start, end, target);
@@ -325,7 +346,7 @@ static void opt_constant_fold(JCC *vm) {
             reset_reg_state(&state);
 
         int op = get_opcode(vm, pc);
-        int size = get_instr_size(op);
+        int size = get_instr_size_at(vm, pc, end);
         if (size <= 0)
             break;
 
@@ -549,7 +570,7 @@ static void opt_peephole(JCC *vm) {
     // Pattern 1: MOV3/FMOV3 ra, ra -> NOP (self-move)
     for (JCCPc pc = start; pc < end; ) {
         int op = get_opcode(vm, pc);
-        int size = get_instr_size(op);
+        int size = get_instr_size_at(vm, pc, end);
 
         if (op == MOV3 || op == FMOV3) {
             int rd = vm->text_seg[pc + 1] & 0xFF;
@@ -566,7 +587,7 @@ static void opt_peephole(JCC *vm) {
     // Pattern 2: LI3 rx, A; LI3 rx, B -> NOP; LI3 rx, B
     for (JCCPc pc = start; pc < end; ) {
         int op = get_opcode(vm, pc);
-        int size = get_instr_size(op);
+        int size = get_instr_size_at(vm, pc, end);
 
         if (op == LI3 && pc + size < end) {
             JCCPc next = pc + size;
@@ -586,7 +607,7 @@ static void opt_peephole(JCC *vm) {
     // Pattern 3: PSH3 rx; POP3 rx -> NOP; NOP (useless push/pop)
     for (JCCPc pc = start; pc < end; ) {
         int op = get_opcode(vm, pc);
-        int size = get_instr_size(op);
+        int size = get_instr_size_at(vm, pc, end);
 
         if (op == PSH3 && pc + size < end) {
             JCCPc next = pc + size;
@@ -608,7 +629,7 @@ static void opt_peephole(JCC *vm) {
     // Pattern 4: JMP to next instruction -> NOP
     for (JCCPc pc = start; pc < end; ) {
         int op = get_opcode(vm, pc);
-        int size = get_instr_size(op);
+        int size = get_instr_size_at(vm, pc, end);
 
         if (op == JMP) {
             long long target = vm->text_seg[pc + 1];
@@ -659,7 +680,7 @@ static void opt_dead_code(JCC *vm) {
     int nop_count = 0;
     for (JCCPc pc = start; pc < end; ) {
         int op = get_opcode(vm, pc);
-        int size = get_instr_size(op);
+        int size = get_instr_size_at(vm, pc, end);
 
         // Check if this is a NOP
         if (op == MOV3) {
@@ -677,7 +698,7 @@ static void opt_dead_code(JCC *vm) {
     // (if rd is overwritten before being read)
     for (JCCPc pc = start; pc < end; ) {
         int op = get_opcode(vm, pc);
-        int size = get_instr_size(op);
+        int size = get_instr_size_at(vm, pc, end);
 
         if (op == MOV3 && pc + size < end) {
             int rd1 = vm->text_seg[pc + 1] & 0xFF;

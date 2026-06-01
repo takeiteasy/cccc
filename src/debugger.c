@@ -264,6 +264,12 @@ static int disassemble_instruction(JCC *vm, JCCPc pc) {
     for (int i = 1; i < size && pc + (JCCPc)i <= vm->text_ptr; i++) {
         printf(" %u", vm->text_seg[pc + (JCCPc)i]);
     }
+    if (op == JMPT && pc + 3 <= vm->text_ptr) {
+        JCCPc table_pc = vm->text_seg[pc + 1];
+        JCCInstrWord count = vm->text_seg[pc + 2];
+        if (table_pc == pc + 4 && table_pc + (JCCPc)count <= vm->text_ptr + 1)
+            size += (int)count;
+    }
     printf("\n");
     return size;
 }

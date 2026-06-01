@@ -1289,18 +1289,14 @@ typedef struct Compiler {
     GotoPatch goto_patches[MAX_LABELS];
     int num_goto_patches;
 
-    // Switch statement code generation (for dense switches)
-    JCCPc *current_switch_table;      // Jump table being filled
-    long current_switch_min;          // Minimum case value
-    long current_switch_size;         // Jump table size
+    // Switch statement code generation
+    void *current_switch_cases;       // Codegen-owned SwitchCasePatch array
+    int current_switch_num;           // Number of case entries
+    JCCPc current_switch_table_start; // Dense jump table start, or invalid
+    long current_switch_min;          // Minimum case value for dense switches
+    long current_switch_size;         // Jump table size for dense switches
     Node *current_switch_default;     // Default case node
     JCCPc current_default_patch;      // Patch location for default case jump
-
-    // Switch statement code generation (for sparse switches)
-    JCCPc *current_sparse_case_table;               // Array of jump addresses
-    int current_sparse_num;                         // Number of case entries
-    Node *sparse_case_nodes[MAX_SPARSE_CASES];      // Case nodes
-    JCCPc sparse_jump_addrs[MAX_SPARSE_CASES];      // Jump address operands
 
     // Inline assembly callback
     JCCAsmCallback asm_callback; // User-provided callback for asm statements

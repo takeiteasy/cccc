@@ -35,6 +35,12 @@ from `OPS_X` in `src/jcc.h`. Each opcode declares its operand-word count beside
 the opcode name, so optimizer passes, bytecode serialization, and debugger
 disassembly stay aligned when instructions are added.
 
+Code generation also performs structural lowering before the optional optimizer
+runs. Dense `switch` statements use the VM's `JMPT` jump-table instruction, while
+sparse switches use a balanced compare/jump tree. Label and function-call patch
+resolution uses hash maps during codegen so large functions and multi-file
+programs avoid quadratic patch scans.
+
 ### Phase 1: Constant Folding (`--optimize=1`)
 
 Tracks constant values through register operations and rewrites bytecode when

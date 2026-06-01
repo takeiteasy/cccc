@@ -124,19 +124,11 @@ static void apply_global_relocations(JCC *vm, Obj *prog) {
     }
 }
 
-static Obj *find_function_definition_for_patch(Obj *prog, Obj *target) {
+static Obj *find_function_definition_for_patch(HashMap *fn_defs, Obj *target) {
     if (target->is_static && target->body)
         return target;
 
-    char *fn_name = target->name;
-    for (Obj *fn = prog; fn; fn = fn->next) {
-        if (fn->is_function && fn->body &&
-            strlen(fn->name) == strlen(fn_name) &&
-            strncmp(fn->name, fn_name, strlen(fn_name)) == 0) {
-            return fn;
-        }
-    }
-    return NULL;
+    return hashmap_get(fn_defs, target->name);
 }
 
 static void add_debug_symbol(JCC *vm, char *name, long long offset, Type *ty,
@@ -281,25 +273,26 @@ static void add_label_patch(char *name, JCCPc patch_location,
 
 // Patch all forward references to labels
 static void patch_labels(JCC *vm) {
-    // PLACEHOLDER: O(num_patches * num_labels). Replace with a hash table
-    // mapping label name -> definition for O(1) per patch.
+    HashMap label_map = {};
+    for (int i = 0; i < num_label_defs; i++)
+        hashmap_put(&label_map, label_defs[i].name,
+                    (void *)(uintptr_t)label_defs[i].offset);
+
     for (int i = 0; i < num_label_patches; i++) {
         char *name = label_patches[i].name;
         JCCPc patch = label_patches[i].patch_location;
+        JCCPc offset = (JCCPc)(uintptr_t)hashmap_get(&label_map, name);
+        if (!offset)
+            continue;
 
-        // Find the label definition
-        for (int j = 0; j < num_label_defs; j++) {
-            if (strlen(label_defs[j].name) == strlen(name) &&
-                strncmp(label_defs[j].name, name, strlen(name)) == 0) {
-                if (label_patches[i].text_relative) {
-                    cc_write_i64_at(vm, patch, cc_pc_to_byte_offset(label_defs[j].offset));
-                } else {
-                    vm->text_seg[patch] = label_defs[j].offset;
-                }
-                break;
-            }
+        if (label_patches[i].text_relative) {
+            cc_write_i64_at(vm, patch, cc_pc_to_byte_offset(offset));
+        } else {
+            vm->text_seg[patch] = offset;
         }
     }
+
+    hashmap_deinit(&label_map);
 }
 
 // ========== Emit Helpers ==========
@@ -476,6 +469,136 @@ static JCCPc emit_jnz3(JCC *vm, int rs) {
     JCCPc patch = emit_word_ptr(vm);
     vm->text_seg[patch] = 0;
     return patch;
+}
+
+typedef struct {
+    Node *node;
+    long begin;
+    long end;
+    JCCPc table_entry;
+    JCCPc *patches;
+    int num_patches;
+    int cap_patches;
+} SwitchCasePatch;
+
+typedef struct {
+    JCCPc *items;
+    int len;
+    int cap;
+} PatchList;
+
+static void add_patch_to_list(PatchList *list, JCCPc patch) {
+    if (list->len == list->cap) {
+        int new_cap = list->cap ? list->cap * 2 : 16;
+        JCCPc *items = realloc(list->items, sizeof(JCCPc) * new_cap);
+        if (!items)
+            error("out of memory");
+        list->items = items;
+        list->cap = new_cap;
+    }
+    list->items[list->len++] = patch;
+}
+
+static void add_case_patch(SwitchCasePatch *entry, JCCPc patch) {
+    if (entry->num_patches == entry->cap_patches) {
+        int new_cap = entry->cap_patches ? entry->cap_patches * 2 : 2;
+        JCCPc *patches = realloc(entry->patches, sizeof(JCCPc) * new_cap);
+        if (!patches)
+            error("out of memory");
+        entry->patches = patches;
+        entry->cap_patches = new_cap;
+    }
+    entry->patches[entry->num_patches++] = patch;
+}
+
+static SwitchCasePatch *find_switch_case(SwitchCasePatch *cases, int num_cases,
+                                         Node *node) {
+    for (int i = 0; i < num_cases; i++)
+        if (cases[i].node == node)
+            return &cases[i];
+    return NULL;
+}
+
+static int compare_switch_cases(const void *a, const void *b) {
+    const SwitchCasePatch *ca = a;
+    const SwitchCasePatch *cb = b;
+    if (ca->begin < cb->begin)
+        return -1;
+    if (ca->begin > cb->begin)
+        return 1;
+    return 0;
+}
+
+static SwitchCasePatch *collect_switch_cases(Node *node, int *num_cases,
+                                             long *min_case, long *max_case,
+                                             long *covered_values) {
+    int cap = 16;
+    SwitchCasePatch *cases = calloc(cap, sizeof(SwitchCasePatch));
+    if (!cases)
+        error("out of memory");
+
+    *num_cases = 0;
+    *covered_values = 0;
+    for (Node *n = node->case_next; n; n = n->case_next) {
+        if (*num_cases == cap) {
+            cap *= 2;
+            SwitchCasePatch *new_cases =
+                realloc(cases, sizeof(SwitchCasePatch) * cap);
+            if (!new_cases)
+                error("out of memory");
+            memset(new_cases + *num_cases, 0,
+                   sizeof(SwitchCasePatch) * (cap - *num_cases));
+            cases = new_cases;
+        }
+
+        long begin = n->begin;
+        long end = n->end;
+        cases[*num_cases].node = n;
+        cases[*num_cases].begin = begin;
+        cases[*num_cases].end = end;
+        cases[*num_cases].table_entry = JCC_INVALID_PC;
+
+        if (*num_cases == 0 || begin < *min_case)
+            *min_case = begin;
+        if (*num_cases == 0 || end > *max_case)
+            *max_case = end;
+        *covered_values += end - begin + 1;
+        (*num_cases)++;
+    }
+
+    qsort(cases, *num_cases, sizeof(SwitchCasePatch), compare_switch_cases);
+    return cases;
+}
+
+static void free_switch_cases(SwitchCasePatch *cases, int num_cases) {
+    if (!cases)
+        return;
+    for (int i = 0; i < num_cases; i++)
+        free(cases[i].patches);
+    free(cases);
+}
+
+static void emit_sparse_switch_tree(JCC *vm, SwitchCasePatch *cases, int lo,
+                                    int hi, int r_val, int r_cmp,
+                                    PatchList *fail_patches) {
+    if (lo > hi) {
+        emit(vm, JMP);
+        add_patch_to_list(fail_patches, emit_word_ptr(vm));
+        return;
+    }
+
+    int mid = lo + (hi - lo) / 2;
+    emit_li3(vm, r_cmp, cases[mid].begin);
+    emit_rrr(vm, SLT3, r_cmp, r_val, r_cmp);
+    JCCPc left_patch = emit_jnz3(vm, r_cmp);
+
+    emit_li3(vm, r_cmp, cases[mid].end);
+    emit_rrr(vm, SGT3, r_cmp, r_val, r_cmp);
+    add_case_patch(&cases[mid], emit_jz3(vm, r_cmp));
+
+    emit_sparse_switch_tree(vm, cases, mid + 1, hi, r_val, r_cmp, fail_patches);
+    vm->text_seg[left_patch] = vm->text_ptr + 1;
+    emit_sparse_switch_tree(vm, cases, lo, mid - 1, r_val, r_cmp, fail_patches);
 }
 
 // PSH3: push register value onto stack
@@ -2317,87 +2440,114 @@ static void gen_stmt(JCC *vm, Node *node) {
     }
 
     case ND_SWITCH: {
-        // Simple switch implementation using linear search
-        // Evaluate switch expression
         reset_temp_regs();
         int r_val = alloc_temp_reg();
         gen_expr(vm, node->cond, r_val);
 
-// Count cases and collect case nodes and patch addresses
-#define MAX_SWITCH_CASES 256
-        Node *case_nodes[MAX_SWITCH_CASES];
-        JCCPc case_patches[MAX_SWITCH_CASES];
         int num_cases = 0;
+        long min_case = 0;
+        long max_case = 0;
+        long covered_values = 0;
+        SwitchCasePatch *cases =
+            collect_switch_cases(node, &num_cases, &min_case, &max_case,
+                                 &covered_values);
+        long span = num_cases ? max_case - min_case + 1 : 0;
+        bool use_jump_table =
+            num_cases > 0 && covered_values >= 4 && span <= covered_values * 2;
 
-        // For each case, compare and emit jump
-        // PLACEHOLDER: Linear search through cases is O(n). Dense switches
-        // should use a jump table (JMPT); >256 cases should be an error.
-        for (Node *n = node->case_next; n; n = n->case_next) {
-            if (num_cases >= MAX_SWITCH_CASES)
-                break;
-            case_nodes[num_cases] = n; // Store node pointer for matching
-
-            int r_case = alloc_temp_reg();
-            emit_li3(vm, r_case, n->begin);
-            emit_rrr(vm, SEQ3, r_case, r_val, r_case);
-            case_patches[num_cases] = emit_jnz3(vm, r_case);
-            free_temp_reg(r_case);
-            num_cases++;
-        }
-
-        // Jump to default or end
         JCCPc default_patch = JCC_INVALID_PC;
         JCCPc end_patch = JCC_INVALID_PC;
-        emit(vm, JMP);
-        if (node->default_case) {
+        JCCPc table_start = JCC_INVALID_PC;
+        PatchList fail_patches = {};
+
+        if (num_cases == 0) {
+            emit(vm, JMP);
+            if (node->default_case)
+                default_patch = emit_word_ptr(vm);
+            else
+                end_patch = emit_word_ptr(vm);
+        } else if (use_jump_table) {
+            emit_addi3(vm, REG_A0, r_val, -min_case);
+            emit(vm, JMPT);
+            JCCPc table_operand = emit_word_ptr(vm);
+            emit_word(vm, (JCCInstrWord)span);
             default_patch = emit_word_ptr(vm);
+            table_start = vm->text_ptr + 1;
+            vm->text_seg[table_operand] = table_start;
+            for (long i = 0; i < span; i++)
+                emit_word(vm, 0);
+
+            for (int i = 0; i < num_cases; i++) {
+                for (long value = cases[i].begin; value <= cases[i].end; value++) {
+                    JCCPc entry = table_start + (JCCPc)(value - min_case);
+                    vm->text_seg[entry] = JCC_INVALID_PC;
+                    cases[i].table_entry = entry;
+                }
+            }
         } else {
-            end_patch = emit_word_ptr(vm);
+            int r_cmp = alloc_temp_reg();
+            emit_sparse_switch_tree(vm, cases, 0, num_cases - 1, r_val, r_cmp,
+                                    &fail_patches);
+            free_temp_reg(r_cmp);
+            if (node->default_case) {
+                emit(vm, JMP);
+                default_patch = emit_word_ptr(vm);
+            }
         }
 
-        // Generate switch body - it's a single block or statement
-        // When ND_CASE nodes are encountered during body generation,
-        // we need to patch their corresponding jumps
-        // Store current case info in compiler state for ND_CASE to use
-        Node *saved_case_nodes[MAX_SWITCH_CASES];
-        JCCPc saved_case_patches[MAX_SWITCH_CASES];
-        int saved_num_cases = vm->compiler.current_sparse_num;
-        for (int i = 0; i < num_cases; i++) {
-            saved_case_nodes[i] = vm->compiler.sparse_case_nodes[i];
-            saved_case_patches[i] = vm->compiler.sparse_jump_addrs[i];
-        }
-
-        // Set current switch state
-        vm->compiler.current_sparse_num = num_cases;
-        for (int i = 0; i < num_cases; i++) {
-            vm->compiler.sparse_case_nodes[i] = case_nodes[i];
-            vm->compiler.sparse_jump_addrs[i] = case_patches[i];
-        }
+        void *saved_cases = vm->compiler.current_switch_cases;
+        int saved_num_cases = vm->compiler.current_switch_num;
+        JCCPc saved_table_start = vm->compiler.current_switch_table_start;
+        long saved_switch_min = vm->compiler.current_switch_min;
+        long saved_switch_size = vm->compiler.current_switch_size;
         Node *saved_default = vm->compiler.current_switch_default;
         JCCPc saved_default_patch = vm->compiler.current_default_patch;
+
+        vm->compiler.current_switch_cases = cases;
+        vm->compiler.current_switch_num = num_cases;
+        vm->compiler.current_switch_table_start = table_start;
+        vm->compiler.current_switch_min = min_case;
+        vm->compiler.current_switch_size = span;
         vm->compiler.current_switch_default = node->default_case;
         vm->compiler.current_default_patch = default_patch;
 
-        // Generate the switch body
         gen_stmt(vm, node->then);
 
-        // Restore previous switch state (for nested switches)
-        vm->compiler.current_sparse_num = saved_num_cases;
-        for (int i = 0; i < saved_num_cases; i++) {
-            vm->compiler.sparse_case_nodes[i] = saved_case_nodes[i];
-            vm->compiler.sparse_jump_addrs[i] = saved_case_patches[i];
-        }
+        vm->compiler.current_switch_cases = saved_cases;
+        vm->compiler.current_switch_num = saved_num_cases;
+        vm->compiler.current_switch_table_start = saved_table_start;
+        vm->compiler.current_switch_min = saved_switch_min;
+        vm->compiler.current_switch_size = saved_switch_size;
         vm->compiler.current_switch_default = saved_default;
         vm->compiler.current_default_patch = saved_default_patch;
 
-        // Patch the break target (end of switch)
         if (node->brk_label) {
             define_label(vm, node->brk_label);
         }
+        JCCPc end_target = vm->text_ptr + 1;
         if (end_patch != JCC_INVALID_PC) {
-            vm->text_seg[end_patch] = vm->text_ptr + 1;
+            vm->text_seg[end_patch] = end_target;
+        }
+        if (!node->default_case && default_patch != JCC_INVALID_PC) {
+            vm->text_seg[default_patch] = end_target;
+        }
+        for (int i = 0; i < fail_patches.len; i++) {
+            vm->text_seg[fail_patches.items[i]] = node->default_case
+                ? vm->text_seg[default_patch]
+                : end_target;
+        }
+        if (use_jump_table) {
+            JCCPc default_target = node->default_case ? vm->text_seg[default_patch]
+                                                      : end_target;
+            for (long i = 0; i < span; i++) {
+                JCCPc entry = table_start + (JCCPc)i;
+                if (vm->text_seg[entry] == 0)
+                    vm->text_seg[entry] = default_target;
+            }
         }
 
+        free(fail_patches.items);
+        free_switch_cases(cases, num_cases);
         free_temp_reg(r_val);
         return;
     }
@@ -2412,11 +2562,21 @@ static void gen_stmt(JCC *vm, Node *node) {
                 vm->text_seg[vm->compiler.current_default_patch] = target;
             }
         } else {
-            // Find this case in the sparse switch table and patch it
-            for (int i = 0; i < vm->compiler.current_sparse_num; i++) {
-                if (vm->compiler.sparse_case_nodes[i] == node) {
-                    vm->text_seg[vm->compiler.sparse_jump_addrs[i]] = target;
-                    break;
+            SwitchCasePatch *cases =
+                (SwitchCasePatch *)vm->compiler.current_switch_cases;
+            SwitchCasePatch *entry =
+                find_switch_case(cases, vm->compiler.current_switch_num, node);
+            if (entry) {
+                if (vm->compiler.current_switch_table_start != JCC_INVALID_PC) {
+                    for (long value = entry->begin; value <= entry->end; value++) {
+                        JCCPc table_entry =
+                            vm->compiler.current_switch_table_start +
+                            (JCCPc)(value - vm->compiler.current_switch_min);
+                        vm->text_seg[table_entry] = target;
+                    }
+                }
+                for (int i = 0; i < entry->num_patches; i++) {
+                    vm->text_seg[entry->patches[i]] = target;
                 }
             }
         }
@@ -2719,15 +2879,19 @@ void gen(JCC *vm, Obj *prog) {
         }
     }
 
+    HashMap fn_defs = {};
+    for (Obj *fn = prog; fn; fn = fn->next) {
+        if (fn->is_function && fn->body && !fn->is_static)
+            hashmap_put(&fn_defs, fn->name, fn);
+    }
+
     // Second pass: Patch function call addresses
     for (int i = 0; i < vm->compiler.num_call_patches; i++) {
         Obj *target = vm->compiler.call_patches[i].function;
         char *fn_name = target->name;
         JCCPc loc = vm->compiler.call_patches[i].location;
 
-        // Find the function definition in the program list
-        // PLACEHOLDER: O(num_patches * num_functions). Use a hash table.
-        Obj *fn_def = find_function_definition_for_patch(prog, target);
+        Obj *fn_def = find_function_definition_for_patch(&fn_defs, target);
 
         if (!fn_def) {
             // Check for FFI function
@@ -2747,12 +2911,14 @@ void gen(JCC *vm, Obj *prog) {
         Obj *target = vm->compiler.func_addr_patches[i].function;
         JCCPc loc = vm->compiler.func_addr_patches[i].location;
 
-        Obj *fn_def = find_function_definition_for_patch(prog, target);
+        Obj *fn_def = find_function_definition_for_patch(&fn_defs, target);
 
         if (fn_def) {
             cc_write_i64_at(vm, loc, cc_pc_to_byte_offset((JCCPc)fn_def->code_addr));
         }
     }
+
+    hashmap_deinit(&fn_defs);
 
     apply_global_relocations(vm, prog);
 
