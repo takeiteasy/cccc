@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <glob.h>
 
 #pragma comptime
 char *read_header_file(const char *path) {
@@ -43,6 +44,65 @@ const char *header_source_path(const char *header) {
     return path;
 }
 
+#pragma comptime
+char *copy_header_name(const char *path) {
+    const char *prefix = "include/";
+    int prefix_len = (int)strlen(prefix);
+    if (strncmp(path, prefix, prefix_len) == 0)
+        path += prefix_len;
+
+    int len = (int)strlen(path);
+    char *copy = malloc(len + 1);
+    memcpy(copy, path, len + 1);
+    return copy;
+}
+
+#pragma comptime
+int header_name_less(const char *a, const char *b) {
+    return strcmp(a, b) < 0;
+}
+
+#pragma comptime
+void sort_headers(char **headers, int count) {
+    for (int i = 0; i < count; i++) {
+        for (int j = i + 1; j < count; j++) {
+            if (header_name_less(headers[j], headers[i])) {
+                char *tmp = headers[i];
+                headers[i] = headers[j];
+                headers[j] = tmp;
+            }
+        }
+    }
+}
+
+#pragma comptime
+char **discover_headers(void) {
+    glob_t g;
+    memset(&g, 0, sizeof(g));
+
+    int rc = glob("include/*.h", 0, NULL, &g);
+    if (rc != 0 && rc != GLOB_NOMATCH)
+        return NULL;
+
+    rc = glob("include/*/*.h", GLOB_APPEND, NULL, &g);
+    if (rc != 0 && rc != GLOB_NOMATCH) {
+        globfree(&g);
+        return NULL;
+    }
+
+    int count = (int)g.gl_pathc + 1; // plus reflection.h
+    char **headers = malloc((count + 1) * sizeof(char *));
+    int n = 0;
+    headers[n++] = copy_header_name("reflection.h");
+    for (int i = 0; i < (int)g.gl_pathc; i++)
+        headers[n++] = copy_header_name(g.gl_pathv[i]);
+    headers[n] = NULL;
+
+    sort_headers(headers, n);
+    globfree(&g);
+    return headers;
+}
+
 // Build: if (strcmp(filename, header) == 0) return __jcc_std_XXX;
 #pragma comptime
 _Node *make_strcmp_return(_Obj *fn, _Type *char_ptr_ty, const char *header) {
@@ -59,18 +119,9 @@ _Node *make_strcmp_return(_Obj *fn, _Type *char_ptr_ty, const char *header) {
 
 #pragma macro
 void generate_std_header(void) {
-    const char *headers[] = {
-        "Availability.h", "assert.h", "ctype.h", "errno.h",
-        "complex.h", "dlfcn.h", "fcntl.h", "fenv.h", "float.h", "inttypes.h", "iso646.h",
-        "limits.h", "locale.h", "math.h", "reflection.h",
-        "setjmp.h", "signal.h", "stdalign.h", "stdarg.h", "stdatomic.h", "stdbool.h",
-        "stddef.h", "stdint.h", "stdio.h", "stdlib.h", "stdnoreturn.h",
-        "string.h", "strings.h", "sys/cdefs.h", "sys/mman.h", "sys/stat.h",
-        "sys/time.h", "sys/types.h", "sys/wait.h", "tgmath.h", "time.h", "uchar.h",
-        "unistd.h", "utime.h", "wchar.h", "wctype.h",
-        "arpa/inet.h", "fnmatch.h", "getopt.h", "libgen.h", "poll.h",
-        NULL
-    };
+    char **headers = discover_headers();
+    if (!headers)
+        return;
 
     _Type *char_ty     = _AST_GET_TYPE("char");
     _Type *char_ptr_ty = _AST_MAKE_POINTER(char_ty);

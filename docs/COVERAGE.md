@@ -245,34 +245,34 @@ C17 is a bug-fix release — no new language features or library functions were 
 
 ## POSIX
 
-POSIX headers are embedded and backed by host OS calls. They are only available on POSIX targets (not Windows). The preprocessor defines `__POSIX__` when a POSIX header has been included.
+POSIX headers are embedded and backed by host OS calls. They are only available on POSIX targets (not Windows).
 
 | Header | Status | Notes |
 |---|---|---|
 | `<arpa/inet.h>` | ✓ | Network byte-order conversion (`htonl`, `htons`, `ntohl`, `ntohs`), address manipulation (`inet_addr`, `inet_ntoa`, `inet_ntop`, `inet_pton`) |
+| `<dirent.h>` | ✓ | Directory entry iteration (`opendir`, `readdir`, `closedir`, `DIR`, `struct dirent`) |
 | `<dlfcn.h>` | ✓ | Dynamic loading (`dlopen`, `dlsym`, `dlclose`, `dlerror`) |
 | `<fcntl.h>` | ✓ | File control (`open`, `creat`, `fcntl`), `O_*` and `S_*` permission constants |
 | `<fnmatch.h>` | ✓ | Filename pattern matching (`fnmatch`, `FNM_*` constants) |
 | `<getopt.h>` | ✓ | Command-line option parsing (`getopt`, `getopt_long`, `optarg`, `optind`, `opterr`, `optopt`, `struct option`) |
+| `<glob.h>` | ✓ | Pathname globbing (`glob`, `globfree`, `glob_t`, `GLOB_*` constants) |
+| `<grp.h>` | ✓ | Group database (`getgrgid`, `getgrnam`, `struct group`) |
 | `<libgen.h>` | ✓ | Pathname manipulation (`basename`, `dirname`) |
+| `<netdb.h>` | ✓ | Network database (`gethostbyname`, `getaddrinfo`, `freeaddrinfo`, `struct hostent`, `struct addrinfo`) |
+| `<netinet/in.h>` | ✓ | Internet address family (`struct sockaddr_in`, `struct in_addr`, `in_port_t`, `in_addr_t`, `INADDR_*`, `IPPROTO_*`) |
 | `<poll.h>` | ✓ | Event polling (`poll`, `struct pollfd`, `nfds_t`, `POLL_*` constants) |
+| `<pwd.h>` | ✓ | Password database (`getpwuid`, `getpwnam`, `struct passwd`) |
+| `<regex.h>` | ✓ | Regular expression matching (`regcomp`, `regexec`, `regerror`, `regfree`, `regex_t`, `regmatch_t`) |
 | `<strings.h>` | ✓ | BSD string functions (`strcasecmp`, `strncasecmp`, `bzero`, `bcopy`, `bcmp`, `index`, `rindex`) |
 | `<sys/mman.h>` | ✓ | Memory management (`mmap`, `munmap`, `mprotect`, `msync`, `posix_madvise`), `PROT_*`, `MAP_*`, `MS_*`, `MADV_*` constants |
+| `<sys/socket.h>` | ✓ | Socket API (`socket`, `bind`, `listen`, `accept`, `connect`, `setsockopt`, `getsockname`, `shutdown`, `struct sockaddr`, `socklen_t`) |
 | `<sys/stat.h>` | ✓ | File status (`stat`, `fstat`, `lstat`, `chmod`, `mkdir`, `mkfifo`, `umask`), `struct stat`, `S_*` constants and macros |
 | `<sys/time.h>` | ✓ | Time operations (`gettimeofday`, `settimeofday`), `struct timeval`, `struct timezone`, `timeradd`, `timersub` |
-| `<sys/types.h>` | ✓ | Basic system types (`dev_t`, `ino_t`, `mode_t`, `nlink_t`, `uid_t`, `gid_t`, `off_t`, `pid_t`, `blksize_t`, `blkcnt_t`, `useconds_t`) |
+| `<sys/types.h>` | ✓ | Basic system types (`dev_t`, `ino_t`, `mode_t`, `nlink_t`, `uid_t`, `gid_t`, `off_t`, `pid_t`, `blksize_t`, `blkcnt_t`, `useconds_t`, `sa_family_t`, `socklen_t`) |
 | `<sys/wait.h>` | ✓ | Process wait (`wait`, `waitpid`), `WNOHANG`, `WUNTRACED`, `WIFEXITED`, `WEXITSTATUS`, `WIFSIGNALED`, `WTERMSIG`, `WIFSTOPPED`, `WSTOPSIG`, `WCOREDUMP` |
+| `<termios.h>` | ✓ | Terminal I/O (`tcgetattr`, `tcsetattr`, `struct termios`, `cc_t`, `speed_t`, `tcflag_t`) |
 | `<unistd.h>` | ✓ | Core POSIX API (`read`, `write`, `close`, `lseek`, `access`, `unlink`, `rmdir`, `chdir`, `getcwd`, `getpid`, `getppid`, `sleep`, `usleep`, `pipe`, `fork`, `execv`, `execve`, `execl`, `execlp`, `execle`, `execvp`, `_exit`, `ssize_t`, `STDIN/STDOUT/STDERR_FILENO`, `SEEK_*`, `F_*`/`R_*`/`W_*`/`X_OK`) |
 | `<utime.h>` | ✓ | File time manipulation (`utime`, `struct utimbuf`) |
-| `<dirent.h>` | ✗ | (Ticket #154) Directory entry iteration — `opendir`, `readdir`, `closedir` |
-| `<netdb.h>` | ✗ | (Ticket #153) Network database — `gethostbyname`, `getaddrinfo`, `freeaddrinfo` |
-| `<netinet/in.h>` | ✗ | (Ticket #153) Internet address family — `sockaddr_in`, `in_addr`, `INADDR_ANY` |
-| `<sys/socket.h>` | ✗ | (Ticket #153) Socket API — `socket`, `bind`, `listen`, `accept`, `connect` |
-| `<termios.h>` | ✗ | (Ticket #154) Terminal I/O — `tcgetattr`, `tcsetattr` |
-| `<pwd.h>` | ✗ | (Ticket #154) Password database — `getpwuid`, `getpwnam` |
-| `<grp.h>` | ✗ | (Ticket #154) Group database — `getgrgid`, `getgrnam` |
-| `<regex.h>` | ✗ | (Ticket #154) Regular expression matching — `regcomp`, `regexec` |
-| `<glob.h>` | ✗ | (Ticket #154) Pathname globbing — `glob`, `globfree` |
 
 ---
 

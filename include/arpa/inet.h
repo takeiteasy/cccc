@@ -7,15 +7,8 @@
 #error "<arpa/inet.h> is only available on POSIX targets in JCC"
 #endif
 
-#include "stdint.h"
 #include "stddef.h"
-
-#define AF_INET  2
-#define AF_INET6 30
-
-struct in_addr {
-    uint32_t s_addr;
-};
+#include "netinet/in.h"
 
 extern uint32_t htonl(uint32_t hostlong);
 extern uint16_t htons(uint16_t hostshort);

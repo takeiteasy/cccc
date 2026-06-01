@@ -19,6 +19,8 @@ typedef int               pid_t;
 typedef int               blksize_t;
 typedef long long         blkcnt_t;
 typedef unsigned int      useconds_t;
+typedef unsigned char     sa_family_t;
+typedef unsigned int      socklen_t;
 #else
 /* Linux / generic POSIX */
 typedef unsigned long     dev_t;
@@ -32,6 +34,8 @@ typedef int               pid_t;
 typedef long              blksize_t;
 typedef long              blkcnt_t;
 typedef unsigned int      useconds_t;
+typedef unsigned short    sa_family_t;
+typedef unsigned int      socklen_t;
 #endif
 
 #endif /* __SYS_TYPES_H */

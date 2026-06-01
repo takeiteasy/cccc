@@ -1294,6 +1294,28 @@ static void register_stdlib_for_header(JCC *vm, const char *header_name) {
         register_posix_functions(vm);
     } else if (strncmp(header_name, "arpa/inet.h", sizeof("arpa/inet.h")) == 0) {
         register_posix_functions(vm);
+    } else if (strncmp(header_name, "dirent.h", sizeof("dirent.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "glob.h", sizeof("glob.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "grp.h", sizeof("grp.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "netdb.h", sizeof("netdb.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "netinet/in.h", sizeof("netinet/in.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "in.h", sizeof("in.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "pwd.h", sizeof("pwd.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "regex.h", sizeof("regex.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "sys/socket.h", sizeof("sys/socket.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "socket.h", sizeof("socket.h")) == 0) {
+        register_posix_functions(vm);
+    } else if (strncmp(header_name, "termios.h", sizeof("termios.h")) == 0) {
+        register_posix_functions(vm);
     }
     // Note: Other headers (like stddef.h, stdbool.h, sys/types.h, etc.) don't have runtime
     // functions

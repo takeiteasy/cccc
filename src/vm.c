@@ -820,17 +820,26 @@ void cc_load_stdlib(JCC *vm) {
     // Mark all headers as included
     hashmap_put(&vm->compiler.included_headers, "complex.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "ctype.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "dirent.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "dlfcn.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "fcntl.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "fenv.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "glob.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "grp.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "iso646.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "locale.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "math.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "netdb.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "netinet/in.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "pwd.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "regex.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "signal.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "stdio.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "stdlib.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "string.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "sys/socket.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "tgmath.h", (void*)1);
+    hashmap_put(&vm->compiler.included_headers, "termios.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "time.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "uchar.h", (void*)1);
     hashmap_put(&vm->compiler.included_headers, "unistd.h", (void*)1);

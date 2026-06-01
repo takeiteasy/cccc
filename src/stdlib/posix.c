@@ -3,17 +3,26 @@
 
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <arpa/inet.h>
+#include <dirent.h>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <fnmatch.h>
 #include <getopt.h>
+#include <glob.h>
+#include <grp.h>
 #include <libgen.h>
+#include <netdb.h>
+#include <netinet/in.h>
 #include <poll.h>
+#include <pwd.h>
+#include <regex.h>
 #include <strings.h>
+#include <sys/socket.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/wait.h>
+#include <termios.h>
 #include <unistd.h>
 #include <utime.h>
 
@@ -48,6 +57,9 @@ static long long wrap_basename(long long path) { return (long long)basename((cha
 static long long wrap_dirname(long long path) { return (long long)dirname((char *)path); }
 static long long wrap_bzero(long long s, long long n) { bzero((void *)s, (size_t)n); return 0; }
 static long long wrap_bcopy(long long src, long long dst, long long n) { bcopy((const void *)src, (void *)dst, (size_t)n); return 0; }
+static long long wrap_freeaddrinfo(long long res) { freeaddrinfo((struct addrinfo *)res); return 0; }
+static long long wrap_globfree(long long pglob) { globfree((glob_t *)pglob); return 0; }
+static long long wrap_regfree(long long preg) { regfree((regex_t *)preg); return 0; }
 
 void register_posix_functions(JCC *vm) {
     cc_register_cfunc(vm, "read", (void*)wrap_read, 3, 0);
@@ -119,6 +131,34 @@ void register_posix_functions(JCC *vm) {
     cc_register_cfunc(vm, "inet_pton", (void*)inet_pton, 3, 0);
     cc_register_cfunc(vm, "bzero", (void*)wrap_bzero, 2, 0);
     cc_register_cfunc(vm, "bcopy", (void*)wrap_bcopy, 3, 0);
+
+    cc_register_cfunc(vm, "socket", (void*)socket, 3, 0);
+    cc_register_cfunc(vm, "bind", (void*)bind, 3, 0);
+    cc_register_cfunc(vm, "listen", (void*)listen, 2, 0);
+    cc_register_cfunc(vm, "accept", (void*)accept, 3, 0);
+    cc_register_cfunc(vm, "connect", (void*)connect, 3, 0);
+    cc_register_cfunc(vm, "setsockopt", (void*)setsockopt, 5, 0);
+    cc_register_cfunc(vm, "getsockname", (void*)getsockname, 3, 0);
+    cc_register_cfunc(vm, "shutdown", (void*)shutdown, 2, 0);
+    cc_register_cfunc(vm, "gethostbyname", (void*)gethostbyname, 1, 0);
+    cc_register_cfunc(vm, "getaddrinfo", (void*)getaddrinfo, 4, 0);
+    cc_register_cfunc(vm, "freeaddrinfo", (void*)wrap_freeaddrinfo, 1, 0);
+
+    cc_register_cfunc(vm, "opendir", (void*)opendir, 1, 0);
+    cc_register_cfunc(vm, "readdir", (void*)readdir, 1, 0);
+    cc_register_cfunc(vm, "closedir", (void*)closedir, 1, 0);
+    cc_register_cfunc(vm, "tcgetattr", (void*)tcgetattr, 2, 0);
+    cc_register_cfunc(vm, "tcsetattr", (void*)tcsetattr, 3, 0);
+    cc_register_cfunc(vm, "getpwuid", (void*)getpwuid, 1, 0);
+    cc_register_cfunc(vm, "getpwnam", (void*)getpwnam, 1, 0);
+    cc_register_cfunc(vm, "getgrgid", (void*)getgrgid, 1, 0);
+    cc_register_cfunc(vm, "getgrnam", (void*)getgrnam, 1, 0);
+    cc_register_cfunc(vm, "regcomp", (void*)regcomp, 3, 0);
+    cc_register_cfunc(vm, "regexec", (void*)regexec, 5, 0);
+    cc_register_cfunc(vm, "regerror", (void*)regerror, 4, 0);
+    cc_register_cfunc(vm, "regfree", (void*)wrap_regfree, 1, 0);
+    cc_register_cfunc(vm, "glob", (void*)glob, 4, 0);
+    cc_register_cfunc(vm, "globfree", (void*)wrap_globfree, 1, 0);
 }
 #else
 void register_posix_functions(JCC *vm) {
