@@ -3,8 +3,6 @@
 // We verify compilation completes (warning is non-fatal) and the
 // program runs to the correct exit code.
 
-#include <reflection.h>
-
 // Macro that emits a warning at the argument's source location,
 // then returns the argument unchanged.
 #pragma macro

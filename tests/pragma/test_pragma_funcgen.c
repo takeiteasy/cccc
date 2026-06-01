@@ -1,8 +1,6 @@
 // Test pragma macro function generation
 // A macro that generates a simple function at compile time
 
-#include <reflection.h>
-
 // Pragma macro that generates a function returning a constant
 #pragma macro
 _Node *generate_const_func(_Node *name_node, _Node *value_node) {

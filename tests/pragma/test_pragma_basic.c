@@ -1,8 +1,6 @@
 // Test basic pragma macro functionality
 // A macro that returns a constant integer literal
 
-#include <reflection.h>
-
 // Define a pragma macro that generates an integer literal
 #pragma macro
 _Node *make_five(void) { return __jcc_ast_int_literal(__jcc_get_vm(), 5); }

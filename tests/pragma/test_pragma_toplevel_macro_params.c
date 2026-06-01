@@ -1,7 +1,5 @@
 // Test ticket #122: file-scope macro call publishes generated parameters.
 
-#include <reflection.h>
-
 #pragma macro
 _Node *generate_add(void) {
     _Type *int_ty = _AST_GET_TYPE("int");

@@ -313,12 +313,11 @@ static Token *implicit_reflection_tokens(JCC *vm) {
     if (!header)
         error("could not load embedded reflection.h");
 
-    // The user's translation unit may have already #included reflection.h
-    // (and its transitive includes: stdbool.h, stddef.h, stdint.h), causing
-    // their include guards to be set.  Temporarily clear those guards so the
-    // full content is processed and all typedefs land in the macro compilation
-    // scope.  We restore the guards afterwards so subsequent compilation
-    // phases are unaffected.
+    // The user's translation unit may already have included stdbool.h,
+    // stddef.h, or stdint.h. Temporarily clear those guards so reflection.h's
+    // private macro API is processed completely in the macro compilation
+    // scope. We restore the guards afterwards so subsequent compilation phases
+    // are unaffected.
     static const char *guards[] = {
         "JCC_REFLECTION_H", "__STDBOOL_H", "__STDDEF_H", "__STDINT_H", NULL
     };

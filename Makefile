@@ -172,7 +172,7 @@ test: clean $(EXE_OUT)
 all: clean $(EXE_OUT) $(LIB_OUT) test docs
 
 docs:
-	@headerdoc2html src/jcc.h include/reflection.h -o docs/; \
+	@headerdoc2html src/jcc.h src/reflection.h -o docs/; \
 	gatherheaderdoc docs/; \
 	mv docs/masterTOC.html docs/index.html
 

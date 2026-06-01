@@ -32,6 +32,17 @@ char *make_global_name(const char *header) {
     return buf;
 }
 
+// reflection.h is private to pragma macros. Keep embedding it, but do not
+// keep it under include/ where user source can find it as a JCC header.
+#pragma comptime
+const char *header_source_path(const char *header) {
+    if (strcmp(header, "reflection.h") == 0)
+        return "src/reflection.h";
+    static char path[256];
+    snprintf(path, sizeof(path), "include/%s", header);
+    return path;
+}
+
 // Build: if (strcmp(filename, header) == 0) return __jcc_std_XXX;
 #pragma comptime
 _Node *make_strcmp_return(_Obj *fn, _Type *char_ptr_ty, const char *header) {
@@ -70,9 +81,7 @@ void generate_std_header(void) {
         // Count total headers that exist on disk and emit their globals.
         int total = 0;
         for (int i = 0; headers[i]; i++) {
-            char path[256];
-            snprintf(path, sizeof(path), "include/%s", headers[i]);
-            char *content = read_header_file(path);
+            char *content = read_header_file(header_source_path(headers[i]));
             if (!content) continue;
 
             int content_len = (int)strlen(content) + 1;
@@ -102,9 +111,7 @@ void generate_std_header(void) {
             int bucket_size = 0;
             for (int j = 0; headers[j]; j++) {
                 if ((unsigned char)headers[j][0] == c) {
-                    char path[256];
-                    snprintf(path, sizeof(path), "include/%s", headers[j]);
-                    if (read_header_file(path)) bucket_size++;
+                    if (read_header_file(header_source_path(headers[j]))) bucket_size++;
                 }
             }
             if (bucket_size == 0) continue;
@@ -115,9 +122,7 @@ void generate_std_header(void) {
             int cn = 0;
             for (int j = 0; headers[j]; j++) {
                 if ((unsigned char)headers[j][0] != c) continue;
-                char path[256];
-                snprintf(path, sizeof(path), "include/%s", headers[j]);
-                if (!read_header_file(path)) continue;
+                if (!read_header_file(header_source_path(headers[j]))) continue;
                 case_stmts[cn++] = make_strcmp_return(fn, char_ptr_ty, headers[j]);
             }
             case_stmts[cn++] = _AST_RETURN(_AST_INT_LITERAL(0));

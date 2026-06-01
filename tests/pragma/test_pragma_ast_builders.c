@@ -1,7 +1,5 @@
 // Test ticket #51: __jcc_ast_assign, __jcc_ast_member, __jcc_ast_funcall builders
 
-#include <reflection.h>
-
 // ---- __jcc_ast_assign test -----------------------------------------------
 // Macro that returns an assignment expression (target = value).
 // Used as: int x; int y = set_var(x, 99);

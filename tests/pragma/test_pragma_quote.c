@@ -1,7 +1,5 @@
 // Test ticket #1: __jcc_quote / __jcc_quote_n quasi-quoting
 
-#include <reflection.h>
-
 // ---- Expression splice: positional $N ------------------------------------
 // Produces: a + b * a  (reuses $1)
 #pragma macro

@@ -1,8 +1,6 @@
 // EXPECT_COMPILE_ERROR
 // Test ticket #78: __jcc_macro_error_at emits a source-located error and fails compilation.
 
-#include <reflection.h>
-
 // Macro that always errors with a located message.
 #pragma macro
 _Node *always_error(_Node *n) {

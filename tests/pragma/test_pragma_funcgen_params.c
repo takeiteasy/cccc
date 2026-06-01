@@ -1,6 +1,4 @@
 // Test: Generate a function with parameters at compile-time
-#include <reflection.h>
-
 // Forward declare the function we'll generate
 int add_numbers(int a, int b);
 

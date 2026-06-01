@@ -1,7 +1,6 @@
 // Test pragma macro with enum reflection
 // Generates an enum-to-string function at compile time
 
-#include <reflection.h>
 #include <stdio.h>
 #include <string.h>
 

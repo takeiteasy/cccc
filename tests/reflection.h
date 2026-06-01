@@ -1,0 +1,1 @@
+#define USER_REFLECTION_VALUE 42

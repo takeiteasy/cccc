@@ -4,8 +4,10 @@ Pragma macros are C functions that JCC compiles and runs during compilation.
 They can inspect compile-time types, build AST nodes, generate functions and
 global variables, and replace macro call sites with generated code.
 
-The macro API is automatically available while pragma macro and comptime helper
-functions are compiled. Macro code can use the `_AST_*`, `_QUOTE*`, `_MACRO_ERROR_AT`,
+The macro API is private to pragma macro compilation. JCC embeds its own
+`reflection.h` and injects it automatically while pragma macro and comptime
+helper functions are compiled, but that bundled header is not on the public
+include path. Macro code can use the `_AST_*`, `_QUOTE*`, `_MACRO_ERROR_AT`,
 `_GENSYM`, and `_DUMP_*` convenience macros directly.
 
 ## Return-Value Model
@@ -13,7 +15,8 @@ functions are compiled. Macro code can use the `_AST_*`, `_QUOTE*`, `_MACRO_ERRO
 A pragma macro's return value is **the node spliced at the call site**, replacing
 the invocation. Top-level definitions — functions created with `_AST_FUNCTION()`,
 globals with `_AST_GLOBAL_VAR()` — are **side effects** injected regardless of what
-the macro returns.
+the macro returns. How generated names become visible to the parser depends on
+which execution form you use.
 
 | Call context | Return value |
 |--------------|--------------|
@@ -48,9 +51,9 @@ JCC supports three pragma macro execution forms:
 ### Inline macro stdlib constraint
 
 Inline macros compile and execute **before the main parse begins**. The macro
-program only has `reflection.h` (and its transitive `stdbool.h`, `stddef.h`,
-`stdint.h` includes) available implicitly. Headers included by the user file
-(`stdio.h`, `stdlib.h`, etc.) are **not** in scope.
+program only has JCC's private `reflection.h` API and its transitive
+`stdbool.h`, `stddef.h`, and `stdint.h` includes available implicitly. Headers
+included by the user file (`stdio.h`, `stdlib.h`, etc.) are **not** in scope.
 
 If your macro or comptime helper calls `fopen`, `malloc`, `strcmp`, or other
 stdlib functions, use a **file-scope call** instead of `inline`. File-scope
@@ -134,6 +137,13 @@ int main(void) {
 
 Macro arguments are `_Node *` pointers to the original argument ASTs. A macro
 can reuse, inspect, wrap, or replace those nodes.
+
+Call-site expansion happens after the containing function body has already been
+parsed. If a call-site macro creates a separate top-level function or global and
+the same parsed code also names that object, normal C declaration rules still
+apply: provide a prototype or extern declaration before the use. Use an inline
+macro or a file-scope macro call when you want JCC to publish generated
+declarations for you.
 
 Macro expansion is bounded by `--macro-recursion-limit=N` to catch accidental
 self-recursive expansions. The default is 256. Set the limit to 0 to disable
@@ -388,6 +398,12 @@ AST dump helpers are available while developing macros:
 | `_DUMP_TREE_TO_STRING(node)` | Render a tree into a string |
 | `_DUMP_AST_GEN(node)` | Print builder calls for a node |
 | `_DUMP_AST_GEN_TO_STRING(node)` | Render builder calls into a string |
+
+The interactive VM debugger (`-g`) does not currently stop inside pragma macro
+execution. Macro bytecode runs during compilation, before the final program is
+started under the debugger, and JCC suppresses VM debug tracing while invoking
+macro functions. Use `_DUMP_*` helpers and source-located diagnostics for macro
+debugging.
 
 ## API Reference
 

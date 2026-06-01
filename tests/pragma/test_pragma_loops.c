@@ -3,7 +3,6 @@
 // statements (not values) and thus can't be tested in expression contexts.
 // The _to_string form verifies the nodes are constructed correctly.
 
-#include <reflection.h>
 #include <string.h>
 
 static int contains(const char *hay, const char *needle) {

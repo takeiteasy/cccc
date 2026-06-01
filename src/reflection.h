@@ -61,7 +61,8 @@
  *
  * ## Usage
  *
- * This header is automatically included when compiling pragma macros.
+ * This private header is embedded into JCC and automatically injected when
+ * compiling pragma macros. It is not installed as a public runtime header.
  * All functions that require VM context use the _VM macro, which
  * expands to __jcc_get_vm() - a builtin that returns the current
  * VM instance during macro execution.

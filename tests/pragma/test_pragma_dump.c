@@ -2,7 +2,6 @@
 // The _to_string variants return a string we can inspect at compile time.
 // Verified by checking the returned strings contain expected substrings.
 
-#include <reflection.h>
 #include <string.h>
 
 // Helper: runtime strlen-based substring check (no strstr in JCC stdlib)

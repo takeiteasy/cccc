@@ -1,7 +1,5 @@
 // Test ticket #122: explicit pragma macro calls at file scope.
 
-#include <reflection.h>
-
 #pragma macro
 _Node *generate_answer(void) {
     _Type *int_ty = _AST_GET_TYPE("int");

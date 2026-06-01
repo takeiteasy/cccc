@@ -5,8 +5,6 @@
 // Loop bodies use global state (no intermediate locals needed in the generated
 // function) so __jcc_ast_local_var's current_fn-injection is not required here.
 
-#include <reflection.h>
-
 // ---- Globals modified by the generated loops ----
 int g_while_result;
 int g_for_result;

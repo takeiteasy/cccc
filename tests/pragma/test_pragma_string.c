@@ -1,6 +1,5 @@
 // Test pragma macro with string literal generation
 
-#include <reflection.h>
 #include <string.h>
 
 // Define a pragma macro that generates a string literal

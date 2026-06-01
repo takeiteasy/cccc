@@ -2,8 +2,6 @@
 // Test ticket #1: mixing $N positional and $$ incremental in one template
 // should produce a compile-time error.
 
-#include <reflection.h>
-
 #pragma macro
 _Node *bad_mix(_Node *a, _Node *b) {
     _VirtualMachine *vm = __jcc_get_vm();

@@ -1,8 +1,6 @@
 // EXPECT_COMPILE_ERROR
 // Test ticket #122: generated functions are visible only after publication.
 
-#include <reflection.h>
-
 #pragma macro
 _Node *generate_late(void) {
     _Type *int_ty = _AST_GET_TYPE("int");

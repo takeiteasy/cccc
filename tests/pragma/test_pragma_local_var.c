@@ -1,7 +1,5 @@
 // Test ticket #77: __jcc_ast_local_var / __jcc_ast_local_var_unique
 
-#include <reflection.h>
-
 // Macro that creates a hygienic temporary, assigns arg*2 to it, and returns it.
 // Demonstrates that the gensym'd name doesn't collide with user locals.
 #pragma macro

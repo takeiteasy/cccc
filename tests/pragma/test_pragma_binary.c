@@ -1,7 +1,5 @@
 // Test pragma macro with binary expression generation
 
-#include <reflection.h>
-
 // Define a pragma macro that generates: (a + b) * 2
 #pragma macro
 _Node *double_sum(_Node *a, _Node *b) {
