@@ -94,6 +94,11 @@ static void usage(const char *argv0, int exit_code) {
            "pointer generation tags)\n");
     printf("\t-V/--vm-heap                 Route all malloc/free through VM "
            "heap (enables memory safety)\n");
+    printf("\nLanguage Standard:\n");
+    printf("\t   --std=<std>       Select C language standard (default: gnu17)\n");
+    printf("\t                     Supported: c99, c11, c17/c18, c23/c2x\n");
+    printf("\t                     GNU variants: gnu99, gnu11, gnu17/gnu18, gnu23/gnu2x\n");
+    printf("\t                     Note: -std currently affects predefined macros only\n");
     printf("\nPreprocessor Options:\n");
     printf("\t   --embed-limit=SIZE        Set #embed file size warning limit "
            "(e.g., 50MB, 100mb, default: 10MB)\n");
@@ -359,6 +364,7 @@ int main(int argc, const char *argv[]) {
     int embed_hard_error = 0;   // --embed-hard-limit
     int macro_recursion_limit = -1; // --macro-recursion-limit
     int opt_level = 0; // -O0/-O1/-O2/-O3 (default: 0 = no optimization)
+    const char *std_arg = NULL; // --std=<standard>
 
     if (argc <= 1)
         usage(argv[0], 1);
@@ -413,7 +419,22 @@ int main(int argc, const char *argv[]) {
         {"embed-hard-limit", no_argument, 0, 1015},
         {"optimize", optional_argument, 0, 1016},
         {"macro-recursion-limit", required_argument, 0, 1017},
+        {"std", required_argument, 0, 1019},
         {0, 0, 0, 0}};
+
+    // Rewrite single-dash -std=... to --std=... so getopt_long picks it up.
+    // This mirrors the gcc/clang convention of accepting both forms.
+    for (int i = 1; i < argc; i++) {
+        if (strncmp(argv[i], "-std", 4) == 0 && argv[i][0] == '-' &&
+            argv[i][1] != '-') {
+            // Allocate a new string with an extra leading '-'
+            size_t len = strlen(argv[i]);
+            char *rewritten = malloc(len + 2);
+            rewritten[0] = '-';
+            memcpy(rewritten + 1, argv[i], len + 1);
+            argv[i] = rewritten; // argv[i] is char* (cast from const char*)
+        }
+    }
 
     const char *optstring = "0123haI:L:D:U:o:cdvgbftzskpliPEMGXSjFTVC";
     int opt;
@@ -639,6 +660,9 @@ int main(int argc, const char *argv[]) {
             macro_recursion_limit = (int)val;
             break;
         }
+        case 1019: // --std=<standard>
+            std_arg = optarg;
+            break;
         case '?':
             if (optopt)
                 fprintf(stderr, "error: option -%c requires an argument\n",
@@ -742,6 +766,40 @@ int main(int argc, const char *argv[]) {
     vm.compiler.opt_level = opt_level;
     if (macro_recursion_limit >= 0)
         vm.compiler.macro_recursion_limit = macro_recursion_limit;
+
+    // Apply -std=<standard> if specified, then re-emit std macros
+    if (std_arg) {
+        CStdVersion ver = JCC_STD_C17;
+        bool is_gnu = true;
+        const char *s = std_arg;
+        // Consume optional "gnu" / "c" prefix
+        if (strncmp(s, "gnu", 3) == 0) {
+            is_gnu = true;
+            s += 3;
+        } else if (s[0] == 'c') {
+            is_gnu = false;
+            s += 1;
+        } else {
+            fprintf(stderr, "error: unknown C standard '%s'\n", std_arg);
+            usage(argv[0], 1);
+        }
+        // Map suffix to version
+        if (strcmp(s, "99") == 0) {
+            ver = JCC_STD_C99;
+        } else if (strcmp(s, "11") == 0) {
+            ver = JCC_STD_C11;
+        } else if (strcmp(s, "17") == 0 || strcmp(s, "18") == 0) {
+            ver = JCC_STD_C17;
+        } else if (strcmp(s, "23") == 0 || strcmp(s, "2x") == 0) {
+            ver = JCC_STD_C23;
+        } else {
+            fprintf(stderr, "error: unknown C standard '%s'\n", std_arg);
+            usage(argv[0], 1);
+        }
+        vm.compiler.c_std = ver;
+        vm.compiler.c_std_gnu = is_gnu;
+        define_std_macros(&vm);
+    }
 
     // If random canaries are enabled, regenerate the stack canary
     if (vm.flags & JCC_RANDOM_CANARIES) {

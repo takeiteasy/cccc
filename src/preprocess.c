@@ -1822,6 +1822,21 @@ static Token *preprocess2(JCC *vm, Token *tok) {
     return head.next;
 }
 
+// (Re)define standard-dependent predefined macros from vm->compiler.c_std.
+// This function is authoritative and idempotent — it can be called more than
+// once (e.g. first with the default inside cc_init, then again after the user's
+// -std= flag is parsed) and always produces the complete correct state.
+void define_std_macros(JCC *vm) {
+    const char *v;
+    switch (vm->compiler.c_std) {
+    case JCC_STD_C99: v = "199901L"; break;
+    case JCC_STD_C11: v = "201112L"; break;
+    case JCC_STD_C23: v = "202311L"; break;
+    case JCC_STD_C17: default: v = "201710L"; break;
+    }
+    define_macro(vm, "__STDC_VERSION__", (char *)v);
+}
+
 void define_macro(JCC *vm, char *name, char *buf) {
     Token *tok = tokenize(vm, new_file(vm, "<built-in>", 1, buf));
     add_macro(vm, name, strlen(name), true, tok);
@@ -1904,7 +1919,7 @@ void init_macros(JCC *vm) {
     define_macro(vm, "__STDC_NO_COMPLEX__", "1");
     define_macro(vm, "__STDC_UTF_16__", "1");
     define_macro(vm, "__STDC_UTF_32__", "1");
-    define_macro(vm, "__STDC_VERSION__", "201112L");
+    define_std_macros(vm);
     define_macro(vm, "__STDC__", "1");
     define_macro(vm, "__USER_LABEL_PREFIX__", "");
     define_macro(vm, "__alignof__", "_Alignof");

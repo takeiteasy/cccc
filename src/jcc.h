@@ -1205,6 +1205,20 @@ typedef struct Debugger {
  FFI). Separated from VM runtime state to clarify the compilation/execution
  boundary.
 */
+/*!
+ @enum CStdVersion
+ @abstract Selected C language standard version.
+ @discussion Used to drive __STDC_VERSION__ and other standard-dependent
+ predefined macros. GNU variants (gnu99, gnu11, etc.) are stored separately
+ in Compiler.c_std_gnu.
+*/
+typedef enum {
+    JCC_STD_C99,  // C99  / GNU99  — __STDC_VERSION__ 199901L
+    JCC_STD_C11,  // C11  / GNU11  — __STDC_VERSION__ 201112L
+    JCC_STD_C17,  // C17/C18 / GNU17/GNU18 — __STDC_VERSION__ 201710L (default)
+    JCC_STD_C23,  // C23/C2x / GNU23/GNU2x — __STDC_VERSION__ 202311L
+} CStdVersion;
+
 typedef struct Compiler {
     // Preprocessor state
     bool skip_preprocess;     // Skip preprocessing step
@@ -1329,6 +1343,10 @@ typedef struct Compiler {
     // Optimization settings
     int opt_level; // Optimization level (0=none, 1=basic, 2=standard,
                    // 3=aggressive)
+
+    // C language standard selection
+    CStdVersion c_std;  // Selected standard version (default: JCC_STD_C17)
+    bool c_std_gnu;     // True for gnuXX variants (gnu17, gnu11, …)
 
     // Fuzzing / compile-only mode
     bool compile_only; // If true, compile to bytecode but do not require main()

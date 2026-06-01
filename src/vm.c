@@ -319,6 +319,10 @@ void cc_init(JCC *vm, uint32_t flags) {
     vm->compiler.file_buffers.len = 0;
     vm->compiler.file_buffers.capacity = 0;
 
+    // Default to GNU C17 (matches modern gcc/clang defaults)
+    vm->compiler.c_std = JCC_STD_C17;
+    vm->compiler.c_std_gnu = true;
+
     init_macros(vm);
     cc_init_parser(vm);
 
