@@ -17,7 +17,7 @@
  * [0] - saved pc (program counter)
  * [1] - saved sp (stack pointer)
  * [2] - saved bp (base pointer)
- * [3] - saved ax (accumulator)
+ * [3] - CFI shadow-stack offset: (char*)shadow_sp - (char*)shadow_stack, or -1 if CFI disabled
  * [4] - reserved for future use
  *
  * Implementation Strategy:

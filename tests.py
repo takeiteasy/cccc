@@ -37,6 +37,7 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
 
     is_negative_test = False
     expects_runtime_error = False
+    per_test_flags = []
     try:
         with open(test_file, "r") as f:
             first_line = f.readline()
@@ -44,12 +45,15 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
                 is_negative_test = True
             if "EXPECT_RUNTIME_ERROR" in first_line:
                 expects_runtime_error = True
+            if "JCC_FLAGS:" in first_line:
+                flags_str = first_line.split("JCC_FLAGS:", 1)[1].strip().rstrip("*/").strip()
+                per_test_flags = flags_str.split()
     except Exception:
         pass
 
     if use_leaks:
         if platform == "macos":
-            normal_cmd = [str(jcc), "-I./include", *jcc_args, str(test_file)]
+            normal_cmd = [str(jcc), "-I./include", *jcc_args, *per_test_flags, str(test_file)]
             normal_result = subprocess.run(
                 normal_cmd, capture_output=True, text=True, cwd=script_dir
             )
@@ -60,6 +64,7 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
                 str(jcc),
                 "-I./include",
                 *jcc_args,
+                *per_test_flags,
                 str(test_file),
             ]
             leak_result = subprocess.run(
@@ -84,6 +89,7 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
                 str(jcc),
                 "-I./include",
                 *jcc_args,
+                *per_test_flags,
                 str(test_file),
             ]
         elif platform == "windows":
@@ -95,12 +101,13 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
                 str(jcc),
                 "-I./include",
                 *jcc_args,
+                *per_test_flags,
                 str(test_file),
             ]
         else:
-            cmd = [str(jcc), "-I./include", *jcc_args, str(test_file)]
+            cmd = [str(jcc), "-I./include", *jcc_args, *per_test_flags, str(test_file)]
     else:
-        cmd = [str(jcc), "-I./include", *jcc_args, str(test_file)]
+        cmd = [str(jcc), "-I./include", *jcc_args, *per_test_flags, str(test_file)]
 
     elapsed = None
     if cmd is not None:

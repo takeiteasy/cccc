@@ -1818,11 +1818,10 @@ int op_SETJMP_fn(JCC *vm) {
     jmp_buf[0] = (long long)vm->pc;
     jmp_buf[1] = (long long)vm->sp;
     jmp_buf[2] = (long long)vm->bp;
-    // PLACEHOLDER: shadow stack (JCC_CFI) is not captured into jmp_buf, so a
-    // subsequent longjmp can return to a scope whose shadow entries are out of
-    // sync with the unwound frames. Save/restore vm->shadow_sp (and any
-    // necessary shadow entries) here.
-    // Ticket: https://todo.sr.ht/~takeiteasy/jcc/158
+    if (vm->flags & JCC_CFI)
+        jmp_buf[3] = (long long)((char *)vm->shadow_sp - (char *)vm->shadow_stack);
+    else
+        jmp_buf[3] = -1;
     vm->regs[REG_A0] = 0; // setjmp returns 0 on direct call
     return 0;
 }
@@ -1834,8 +1833,14 @@ int op_LONGJMP_fn(JCC *vm) {
     vm->pc = (JCCPc)jmp_buf[0];
     vm->sp = (long long *)jmp_buf[1];
     vm->bp = (long long *)jmp_buf[2];
-    // PLACEHOLDER: mirror of setjmp shadow-stack save. See SETJMP note.
-    // Ticket: https://todo.sr.ht/~takeiteasy/jcc/158
+    if (vm->flags & JCC_CFI) {
+        long long saved_offset = jmp_buf[3];
+        size_t reserved_stack = (size_t)vm->poolsize_max * sizeof(long long);
+        if (saved_offset < 0 || (size_t)saved_offset > reserved_stack ||
+            saved_offset % (long long)sizeof(long long) != 0)
+            return -1; // corrupted or non-CFI jmp_buf used under CFI
+        vm->shadow_sp = (long long *)((char *)vm->shadow_stack + saved_offset);
+    }
     vm->regs[REG_A0] = val ? val : 1; // Return value (never 0)
     return 0;
 }
@@ -1871,15 +1876,17 @@ int op_CALLF_fn(JCC *vm) {
 
     // Collect source-order 64-bit argument slots. Codegen places slots 0-7 in
     // REG_A0-A7 and pushes slots 8+ at vm->sp[0...].
-    // PLACEHOLDER: heap-allocates and frees an args scratch buffer on every
-    // FFI call. Use a reusable per-VM scratch buffer (or a small VLA capped
-    // to a sensible max) to avoid the allocator round-trip.
-    // Ticket: https://todo.sr.ht/~takeiteasy/jcc/160
-    long long *args =
-        calloc(actual_nargs > 0 ? actual_nargs : 1, sizeof(long long));
-    if (!args) {
-        printf("error: failed to allocate args for FFI\n");
-        return -1;
+    enum { CALLF_STACK_ARG_SLOTS = 32 };
+    long long stack_args_buf[CALLF_STACK_ARG_SLOTS];
+    long long *heap_args = NULL;
+    long long *args = stack_args_buf;
+    if (actual_nargs > CALLF_STACK_ARG_SLOTS) {
+        heap_args = malloc((size_t)actual_nargs * sizeof(long long));
+        if (!heap_args) {
+            printf("error: failed to allocate args for FFI\n");
+            return -1;
+        }
+        args = heap_args;
     }
 
     for (int i = 0; i < actual_nargs; i++) {
@@ -2280,7 +2287,7 @@ int op_CALLF_fn(JCC *vm) {
 #else
 #error "FFI inline assembly not implemented for this platform."
 #endif
-    free(args);
+    free(heap_args);
     return 0;
 }
 
