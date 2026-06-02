@@ -278,14 +278,13 @@ All features listed below can be enabled individually or through the safety leve
 
 ## FFI Safety Features
 
-The allow/deny/disable policy described here is tracked as FFI safety work and
-is not currently enforced by the scalar native-call bridge or runtime `dlsym`
-call path.
+The allow/deny/disable policy applies to registered FFI calls and runtime
+native symbols returned by VM-managed `dlsym`.
 
 - `--ffi-allow=func1,func2` **FFI function whitelist**
   - Comma-separated list of allowed FFI function names
   - When allow list is non-empty, only listed functions can be called via FFI
-  - Enforced at runtime during CALLF instruction execution
+  - Enforced at runtime during registered FFI and runtime `dlsym` calls
   - Use with `cc_ffi_allow()` API for programmatic configuration
 - `--ffi-deny=func1,func2` **FFI function blacklist**
   - Comma-separated list of denied FFI function names
@@ -297,15 +296,16 @@ call path.
   - Overrides both allow and deny lists
   - Useful for sandboxing untrusted code
 - `--ffi-errors-fatal` **Make FFI errors abort execution**
-  - By default, FFI safety violations print warnings and skip the call
-  - With this flag, violations cause the program to abort with exit code 1
+  - By default, FFI safety violations print diagnostics, skip the call, zero
+    the native return registers, and continue
+  - With this flag, violations abort execution as runtime errors
   - Provides strict enforcement mode for production environments
 - `--ffi-type-checking` **Runtime type validation on FFI calls**
-  - Validates argument counts match registered FFI function signatures
-  - Checks argument types are compatible with expected parameter types
-  - Detects type mismatches at compile time before calling native code
-  - Supports variadic functions (only checks fixed parameters)
-  - Uses lenient compatibility rules (void* with any pointer, all integers, all floats)
+  - Validates argument counts for registered FFI function signatures
+  - Requires exact arity for non-variadic functions
+  - Requires at least the fixed argument count for variadic functions
+  - Runtime `dlsym` calls are policy-checked but do not have registered
+    signatures for arity checking yet
 
 ## Example Usage
 
@@ -892,7 +892,7 @@ $ ./jcc --ffi-deny=printf0 test.c
 
 # Fatal mode: abort on error
 $ ./jcc --ffi-deny=printf0 --ffi-errors-fatal test.c
-<FFI error printed, program aborts with exit code 1>
+<FFI error printed, program aborts as a runtime error>
 ```
 
 ### FFI Type Checking - Argument Count Mismatch
@@ -910,9 +910,7 @@ int main() {
 ```bash
 $ ./jcc --ffi-type-checking test_ffi_arg_count.c
 
-test_ffi_arg_count.c:6: FFI function 'strcmp': argument count mismatch (expected 2, got 1)
-    int result = strcmp("hello");
-                 ^
+error: FFI function 'strcmp': argument count mismatch (requires 2, called with 1)
 ```
 
 ### FFI Type Checking - Type Mismatch

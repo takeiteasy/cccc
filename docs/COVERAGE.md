@@ -283,6 +283,6 @@ POSIX headers are embedded and backed by host OS calls. They are only available 
 | Threading (`<threads.h>`, `pthread`) | JCC is single-threaded |
 | Atomic operations (`<stdatomic.h>` operations) | Headers present; operations are non-atomic |
 | Complex function call ABI | Passing or returning complex values by function call is not implemented |
-| Full native ABI for runtime `dlsym` calls | Runtime dynamic function calls support scalar/pointer signatures; aggregate by-value arguments/returns, callbacks, variadic function-pointer calls, and full platform ABI classification are not implemented |
+| Full native ABI for runtime `dlsym` calls | Runtime dynamic function calls support scalar/pointer signatures; optional `JCC_HAS_FFI=1` builds use libffi for the current scalar/double metadata. Aggregate by-value arguments/returns, callbacks, variadic function-pointer calls, and full platform ABI descriptors are not implemented |
 | Native code generation | JCC produces VM bytecode only |
 | Shared-library auto-linking for arbitrary undeclared symbols | `dlfcn.h` calls are available; `--library` opens requested libraries for registered FFI symbols |

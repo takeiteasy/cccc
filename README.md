@@ -83,6 +83,13 @@ Memory Safety Options (can be combined with safety levels):
 	-T/--memory-tagging          Temporal memory tagging (track pointer generation tags)
 	-V/--vm-heap                 Route all malloc/free through VM heap (enables memory safety)
 
+FFI Safety Options:
+	   --ffi-allow=list          Allow only comma-separated native function names
+	   --ffi-deny=list           Deny comma-separated native function names
+	   --disable-ffi             Block all registered and dynamic native calls
+	   --ffi-errors-fatal        Abort execution on FFI policy violations
+	   --ffi-type-checking       Validate registered FFI call arity at runtime
+
 Preprocessor Options:
 	   --embed-limit=SIZE        Set #embed file size warning limit (e.g., 50MB, 100mb, default: 10MB)
 	   --embed-hard-limit        Make #embed limit a hard error instead of warning
@@ -136,6 +143,7 @@ symbols from that handle are live.
 ```bash
 make          # Build jcc
 make all      # Build jcc + libjcc.dylib, then run the test suite
+make JCC_HAS_FFI=1   # Build with optional libffi-backed native calls
 ```
 
 Produces:

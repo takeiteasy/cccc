@@ -94,6 +94,12 @@ static void usage(const char *argv0, int exit_code) {
            "pointer generation tags)\n");
     printf("\t-V/--vm-heap                 Route all malloc/free through VM "
            "heap (enables memory safety)\n");
+    printf("\nFFI Safety Options:\n");
+    printf("\t   --ffi-allow=list          Allow only comma-separated native function names\n");
+    printf("\t   --ffi-deny=list           Deny comma-separated native function names\n");
+    printf("\t   --disable-ffi             Block all registered and dynamic native calls\n");
+    printf("\t   --ffi-errors-fatal        Abort execution on FFI policy violations\n");
+    printf("\t   --ffi-type-checking       Validate registered FFI call arity at runtime\n");
     printf("\nLanguage Standard:\n");
     printf("\t   --std=<std>       Select C language standard (default: gnu17)\n");
     printf("\t                     Supported: c99, c11, c17/c18, c23/c2x\n");
@@ -122,6 +128,33 @@ static void usage(const char *argv0, int exit_code) {
     printf("\techo 'int main() { return 42; }' | %s -\n", argv0);
     printf("\n");
     exit(exit_code);
+}
+
+static void configure_ffi_name_list(JCC *vm, const char *list,
+                                    void (*add)(JCC *, const char *)) {
+    const char *p = list;
+    while (p && *p) {
+        while (*p == ',' || isspace((unsigned char)*p))
+            p++;
+        const char *start = p;
+        while (*p && *p != ',')
+            p++;
+        const char *end = p;
+        while (end > start && isspace((unsigned char)end[-1]))
+            end--;
+        if (end > start) {
+            size_t len = (size_t)(end - start);
+            char *name = malloc(len + 1);
+            if (!name)
+                error("failed to allocate FFI policy name");
+            memcpy(name, start, len);
+            name[len] = '\0';
+            add(vm, name);
+            free(name);
+        }
+        if (*p == ',')
+            p++;
+    }
 }
 
 static char *find_requested_library(const char *name, const char **paths,
@@ -366,6 +399,13 @@ int main(int argc, const char *argv[]) {
     int macro_recursion_limit = -1; // --macro-recursion-limit
     int opt_level = 0; // -O0/-O1/-O2/-O3 (default: 0 = no optimization)
     const char *std_arg = NULL; // --std=<standard>
+    const char **ffi_allow_args = NULL;
+    int ffi_allow_args_count = 0;
+    const char **ffi_deny_args = NULL;
+    int ffi_deny_args_count = 0;
+    int disable_all_ffi = 0;
+    int ffi_errors_fatal = 0;
+    int enable_ffi_type_checking = 0;
 
     if (argc <= 1)
         usage(argv[0], 1);
@@ -421,6 +461,11 @@ int main(int argc, const char *argv[]) {
         {"optimize", optional_argument, 0, 1016},
         {"macro-recursion-limit", required_argument, 0, 1017},
         {"std", required_argument, 0, 1019},
+        {"ffi-allow", required_argument, 0, 1020},
+        {"ffi-deny", required_argument, 0, 1021},
+        {"disable-ffi", no_argument, 0, 1022},
+        {"ffi-errors-fatal", no_argument, 0, 1023},
+        {"ffi-type-checking", no_argument, 0, 1024},
         {0, 0, 0, 0}};
 
     // Rewrite single-dash -std=... to --std=... so getopt_long picks it up.
@@ -664,6 +709,25 @@ int main(int argc, const char *argv[]) {
         case 1019: // --std=<standard>
             std_arg = optarg;
             break;
+        case 1020:
+            ffi_allow_args = realloc(ffi_allow_args, sizeof(*ffi_allow_args) *
+                                                         (ffi_allow_args_count + 1));
+            ffi_allow_args[ffi_allow_args_count++] = strdup(optarg);
+            break;
+        case 1021:
+            ffi_deny_args = realloc(ffi_deny_args, sizeof(*ffi_deny_args) *
+                                                     (ffi_deny_args_count + 1));
+            ffi_deny_args[ffi_deny_args_count++] = strdup(optarg);
+            break;
+        case 1022:
+            disable_all_ffi = 1;
+            break;
+        case 1023:
+            ffi_errors_fatal = 1;
+            break;
+        case 1024:
+            enable_ffi_type_checking = 1;
+            break;
         case '?':
             if (optopt)
                 fprintf(stderr, "error: option -%c requires an argument\n",
@@ -702,6 +766,13 @@ int main(int argc, const char *argv[]) {
     JCC vm;
     cc_init(&vm, flags);
     vm.compiler.compile_only = compile_only;
+    vm.disable_all_ffi = disable_all_ffi;
+    vm.ffi_errors_fatal = ffi_errors_fatal;
+    vm.enable_ffi_type_checking = enable_ffi_type_checking;
+    for (int i = 0; i < ffi_allow_args_count; i++)
+        configure_ffi_name_list(&vm, ffi_allow_args[i], cc_ffi_allow);
+    for (int i = 0; i < ffi_deny_args_count; i++)
+        configure_ffi_name_list(&vm, ffi_deny_args[i], cc_ffi_deny);
 
     if (verbose)
         vm.debug_vm = 1;
@@ -1074,6 +1145,16 @@ BAIL:
         for (int i = 0; i < libs_count; i++)
             free((void *)libs[i]);
         free(libs);
+    }
+    if (ffi_allow_args) {
+        for (int i = 0; i < ffi_allow_args_count; i++)
+            free((void *)ffi_allow_args[i]);
+        free(ffi_allow_args);
+    }
+    if (ffi_deny_args) {
+        for (int i = 0; i < ffi_deny_args_count; i++)
+            free((void *)ffi_deny_args[i]);
+        free(ffi_deny_args);
     }
     if (sys_inc_paths) {
         for (int i = 0; i < sys_inc_paths_count; i++)

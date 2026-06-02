@@ -1940,6 +1940,70 @@ int op_DLERROR_fn(JCC *vm) {
 
 // ========== FFI ==========
 
+static int jcc_ffi_name_in_list(char **list, int count, const char *name) {
+    if (!name)
+        name = "<anonymous>";
+    size_t len = strlen(name);
+    for (int i = 0; i < count; i++) {
+        if (strlen(list[i]) == len && memcmp(list[i], name, len) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static int jcc_handle_ffi_policy_error(JCC *vm, const char *kind,
+                                       const char *name,
+                                       const char *details) {
+    if (!name)
+        name = "<anonymous>";
+    printf("\n========== FFI SAFETY ERROR ==========\n");
+    printf("Error type: %s\n", kind);
+    printf("Function:   %s\n", name);
+    printf("Details:    %s\n", details);
+    printf("PC offset:  %u\n", (unsigned)vm->pc);
+    printf("======================================\n");
+    vm->regs[REG_A0] = 0;
+    vm->fregs[FREG_A0] = 0.0;
+    return vm->ffi_errors_fatal ? -1 : 0;
+}
+
+static int jcc_check_ffi_policy(JCC *vm, const char *name, int actual_nargs,
+                                int is_variadic, int num_fixed_args) {
+    if (vm->disable_all_ffi)
+        return jcc_handle_ffi_policy_error(
+            vm, "FFI Disabled", name,
+            "All FFI calls are disabled via --disable-ffi");
+
+    if (vm->ffi_allow_count > 0 &&
+        !jcc_ffi_name_in_list(vm->ffi_allow_list, vm->ffi_allow_count, name))
+        return jcc_handle_ffi_policy_error(vm, "FFI Access Denied", name,
+                                           "Function not in allow list");
+
+    if (vm->ffi_allow_count == 0 &&
+        jcc_ffi_name_in_list(vm->ffi_deny_list, vm->ffi_deny_count, name))
+        return jcc_handle_ffi_policy_error(vm, "FFI Access Denied", name,
+                                           "Function in deny list");
+
+    if (vm->enable_ffi_type_checking) {
+        if (is_variadic) {
+            if (actual_nargs < num_fixed_args) {
+                printf("error: FFI function '%s': argument count mismatch "
+                       "(requires at least %d, called with %d)\n",
+                       name ? name : "<anonymous>", num_fixed_args,
+                       actual_nargs);
+                return -1;
+            }
+        } else if (actual_nargs != num_fixed_args) {
+            printf("error: FFI function '%s': argument count mismatch "
+                   "(requires %d, called with %d)\n",
+                   name ? name : "<anonymous>", num_fixed_args, actual_nargs);
+            return -1;
+        }
+    }
+
+    return 1;
+}
+
 int jcc_call_native_function(JCC *vm, void *func_ptr, const char *name,
                              long long *args, int actual_nargs,
                              uint64_t double_arg_mask, int returns_double,
@@ -1950,6 +2014,71 @@ int jcc_call_native_function(JCC *vm, void *func_ptr, const char *name,
         return -1;
     }
 
+    int policy = jcc_check_ffi_policy(vm, name, actual_nargs, is_variadic,
+                                      num_fixed_args);
+    if (policy <= 0)
+        return policy;
+
+#ifdef JCC_HAS_FFI
+    ffi_cif cif;
+    ffi_type **arg_types = NULL;
+    ffi_type *return_type =
+        returns_double ? &ffi_type_double : &ffi_type_sint64;
+
+    if (actual_nargs > 0) {
+        arg_types = malloc((size_t)actual_nargs * sizeof(ffi_type *));
+        if (!arg_types) {
+            printf("error: failed to allocate arg types for FFI\n");
+            return -1;
+        }
+        for (int i = 0; i < actual_nargs; i++)
+            arg_types[i] = (i < 64 && (double_arg_mask & (1ULL << i)))
+                               ? &ffi_type_double
+                               : &ffi_type_sint64;
+    }
+
+    ffi_status status;
+    if (is_variadic) {
+        status = ffi_prep_cif_var(&cif, FFI_DEFAULT_ABI,
+                                  (unsigned int)num_fixed_args,
+                                  (unsigned int)actual_nargs, return_type,
+                                  arg_types);
+    } else {
+        status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI,
+                              (unsigned int)actual_nargs, return_type,
+                              arg_types);
+    }
+
+    if (status != FFI_OK) {
+        printf("error: failed to prepare FFI cif (status=%d)\n", status);
+        free(arg_types);
+        return -1;
+    }
+
+    void **arg_ptrs =
+        malloc((size_t)(actual_nargs > 0 ? actual_nargs : 1) * sizeof(void *));
+    if (!arg_ptrs) {
+        printf("error: failed to allocate arg pointers for FFI\n");
+        free(arg_types);
+        return -1;
+    }
+    for (int i = 0; i < actual_nargs; i++)
+        arg_ptrs[i] = &args[i];
+
+    if (returns_double) {
+        double result;
+        ffi_call(&cif, FFI_FN(func_ptr), &result, arg_ptrs);
+        vm->fregs[FREG_A0] = result;
+    } else {
+        long long result;
+        ffi_call(&cif, FFI_FN(func_ptr), &result, arg_ptrs);
+        vm->regs[REG_A0] = result;
+    }
+
+    free(arg_ptrs);
+    free(arg_types);
+    return 0;
+#else
     // Inline assembly implementation
 #if defined(__aarch64__) || defined(__arm64__)
     // ARM64 inline assembly - uses register calling convention
@@ -2337,6 +2466,7 @@ int jcc_call_native_function(JCC *vm, void *func_ptr, const char *name,
 #error "FFI inline assembly not implemented for this platform."
 #endif
     return 0;
+#endif
 }
 
 int op_CALLF_fn(JCC *vm) {

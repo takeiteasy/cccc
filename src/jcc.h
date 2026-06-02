@@ -35,6 +35,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#ifdef JCC_HAS_FFI
+#include <ffi.h>
+#endif
 #if defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
 #else
@@ -1486,6 +1489,16 @@ struct JCC {
     int runtime_return_buffer_index; // Runtime rotating index for return
                                      // buffers
 
+    char **ffi_allow_list;
+    int ffi_allow_count;
+    int ffi_allow_capacity;
+    char **ffi_deny_list;
+    int ffi_deny_count;
+    int ffi_deny_capacity;
+    int disable_all_ffi;
+    int ffi_errors_fatal;
+    int enable_ffi_type_checking;
+
     // Debugger state (enable via JCC_ENABLE_DEBUGGER flag)
     Debugger dbg;
 
@@ -1633,6 +1646,33 @@ void cc_undef(JCC *vm, char *name);
  @param user_data Optional user context pointer passed to the callback.
 */
 void cc_set_asm_callback(JCC *vm, JCCAsmCallback callback, void *user_data);
+
+/*!
+ @function cc_ffi_allow
+ @abstract Add a native function name to the FFI allow list.
+ @discussion When the allow list is non-empty, only listed names may be called
+             through registered FFI or runtime dynamic symbols.
+*/
+void cc_ffi_allow(JCC *vm, const char *name);
+
+/*!
+ @function cc_ffi_deny
+ @abstract Add a native function name to the FFI deny list.
+ @discussion The deny list is checked only when the allow list is empty.
+*/
+void cc_ffi_deny(JCC *vm, const char *name);
+
+/*!
+ @function cc_ffi_clear_allow_list
+ @abstract Remove all names from the FFI allow list.
+*/
+void cc_ffi_clear_allow_list(JCC *vm);
+
+/*!
+ @function cc_ffi_clear_deny_list
+ @abstract Remove all names from the FFI deny list.
+*/
+void cc_ffi_clear_deny_list(JCC *vm);
 
 /*!
  @function cc_register_cfunc

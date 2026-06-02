@@ -569,6 +569,10 @@ void cc_init(JCC *vm, uint32_t flags) {
     // Add default system include path for <...> includes
     cc_system_include(vm, "./include");
 
+#ifdef JCC_HAS_FFI
+    cc_define(vm, "JCC_HAS_FFI", "1");
+#endif
+
     // Initialize error collection fields
     vm->errors = NULL;
     vm->errors_tail = NULL;
@@ -699,6 +703,15 @@ void cc_destroy(JCC *vm) {
     free(vm->dyn_error);
     vm->dyn_error = NULL;
 
+    cc_ffi_clear_allow_list(vm);
+    free(vm->ffi_allow_list);
+    vm->ffi_allow_list = NULL;
+    vm->ffi_allow_capacity = 0;
+    cc_ffi_clear_deny_list(vm);
+    free(vm->ffi_deny_list);
+    vm->ffi_deny_list = NULL;
+    vm->ffi_deny_capacity = 0;
+
     // Free error message buffer if set
     if (vm->error_message) {
         free(vm->error_message);
@@ -811,6 +824,54 @@ void cc_undef(JCC *vm, char *name) {
 void cc_set_asm_callback(JCC *vm, JCCAsmCallback callback, void *user_data) {
     vm->compiler.asm_callback = callback;
     vm->compiler.asm_user_data = user_data;
+}
+
+static void cc_ffi_list_add(char ***list, int *count, int *capacity,
+                            const char *name) {
+    if (!name || !*name)
+        return;
+    size_t len = strlen(name);
+    for (int i = 0; i < *count; i++) {
+        if (strlen((*list)[i]) == len && memcmp((*list)[i], name, len) == 0)
+            return;
+    }
+    if (*count >= *capacity) {
+        *capacity = *capacity ? *capacity * 2 : 8;
+        *list = realloc(*list, (size_t)*capacity * sizeof(char *));
+        if (!*list)
+            error("cc_ffi_list_add: realloc failed");
+    }
+    (*list)[(*count)++] = strdup(name);
+}
+
+void cc_ffi_allow(JCC *vm, const char *name) {
+    if (!vm)
+        error("cc_ffi_allow: vm is NULL");
+    cc_ffi_list_add(&vm->ffi_allow_list, &vm->ffi_allow_count,
+                    &vm->ffi_allow_capacity, name);
+}
+
+void cc_ffi_deny(JCC *vm, const char *name) {
+    if (!vm)
+        error("cc_ffi_deny: vm is NULL");
+    cc_ffi_list_add(&vm->ffi_deny_list, &vm->ffi_deny_count,
+                    &vm->ffi_deny_capacity, name);
+}
+
+void cc_ffi_clear_allow_list(JCC *vm) {
+    if (!vm)
+        return;
+    for (int i = 0; i < vm->ffi_allow_count; i++)
+        free(vm->ffi_allow_list[i]);
+    vm->ffi_allow_count = 0;
+}
+
+void cc_ffi_clear_deny_list(JCC *vm) {
+    if (!vm)
+        return;
+    for (int i = 0; i < vm->ffi_deny_count; i++)
+        free(vm->ffi_deny_list[i]);
+    vm->ffi_deny_count = 0;
 }
 
 void cc_register_cfunc(JCC *vm, const char *name, void *func_ptr, int num_args, int returns_double) {
