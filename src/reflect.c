@@ -846,6 +846,141 @@ _Node *__jcc_ast_do_while(JCC *vm, _Node *body, _Node *cond) {
 }
 
 // ============================================================================
+// AST Node Construction - New Expression Builders (ticket #171)
+// ============================================================================
+
+// align_to: round n up to the nearest multiple of align (mirrors parse.c)
+static inline int reflect_align_to(int n, int align) {
+    return (n + align - 1) / align * align;
+}
+
+// _AST_COND(cond, then, else) — ternary ?: expression
+_Node *__jcc_ast_cond(JCC *vm, _Node *cond, _Node *then_expr,
+                          _Node *else_expr) {
+    if (!vm || !cond || !then_expr || !else_expr)
+        return NULL;
+    _Node *node = alloc_node(vm, ND_COND);
+    node->cond = cond;
+    node->then = then_expr;
+    node->els = else_expr;
+    // Type is resolved by add_type pass
+    return node;
+}
+
+// _AST_NULL() — typed null pointer: (void *)0
+_Node *__jcc_ast_null(JCC *vm) {
+    if (!vm)
+        return NULL;
+    _Node *zero = __jcc_ast_int_literal(vm, 0);
+    if (!zero)
+        return NULL;
+    _Node *node = alloc_node(vm, ND_CAST);
+    node->lhs = zero;
+    node->ty = pointer_to(vm, ty_void);
+    return node;
+}
+
+// _AST_SIZEOF_TYPE(ty) — sizeof(ty) as a compile-time integer literal
+_Node *__jcc_ast_sizeof_type(JCC *vm, _Type *ty) {
+    if (!vm || !ty)
+        return NULL;
+    return __jcc_ast_int_literal(vm, ty->size);
+}
+
+// _AST_ALIGNOF_TYPE(ty) — _Alignof(ty) as a compile-time integer literal
+_Node *__jcc_ast_alignof_type(JCC *vm, _Type *ty) {
+    if (!vm || !ty)
+        return NULL;
+    return __jcc_ast_int_literal(vm, ty->align);
+}
+
+// _AST_SIZEOF_EXPR(expr) — sizeof(expr): run add_type then return the size
+_Node *__jcc_ast_sizeof_expr(JCC *vm, _Node *expr) {
+    if (!vm || !expr)
+        return NULL;
+    add_type(vm, expr);
+    if (!expr->ty)
+        return NULL;
+    return __jcc_ast_int_literal(vm, expr->ty->size);
+}
+
+// _AST_SUBSCRIPT(arr, idx) — arr[idx], desugared as *(arr + idx * sizeof(*arr))
+// Mirrors new_add() in parse.c: the index must be pre-scaled by the element
+// size so that codegen emits a plain integer ADD (it does not scale internally).
+_Node *__jcc_ast_subscript(JCC *vm, _Node *arr, _Node *idx) {
+    if (!vm || !arr || !idx)
+        return NULL;
+
+    // Resolve types so we can inspect pointer/array base
+    add_type(vm, arr);
+    add_type(vm, idx);
+
+    // Canonicalize: pointer must be on the left (handle idx + arr too)
+    _Node *ptr = arr;
+    _Node *num = idx;
+    if (ptr->ty && !ptr->ty->base && num->ty && num->ty->base) {
+        ptr = idx;
+        num = arr;
+    }
+
+    // Scale index by element size for pointer arithmetic
+    if (ptr->ty && ptr->ty->base) {
+        int elem_size = ptr->ty->base->size;
+        // Build: num * elem_size
+        _Node *scale = alloc_node(vm, ND_NUM);
+        scale->val = elem_size;
+        scale->ty = ty_long;
+        _Node *scaled = alloc_node(vm, ND_MUL);
+        scaled->lhs = num;
+        scaled->rhs = scale;
+        // Build: ptr + scaled
+        _Node *add = alloc_node(vm, ND_ADD);
+        add->lhs = ptr;
+        add->rhs = scaled;
+        add->ty = ptr->ty; // pointer result type
+        // Dereference: *(ptr + scaled)
+        _Node *deref = alloc_node(vm, ND_DEREF);
+        deref->lhs = add;
+        return deref;
+    }
+
+    // Fallback: integer subscript (unusual but safe)
+    _Node *add = alloc_node(vm, ND_ADD);
+    add->lhs = ptr;
+    add->rhs = num;
+    _Node *deref = alloc_node(vm, ND_DEREF);
+    deref->lhs = add;
+    return deref;
+}
+
+// _AST_COMMA(lhs, rhs) — comma expression: evaluate lhs, discard, yield rhs
+_Node *__jcc_ast_comma(JCC *vm, _Node *lhs, _Node *rhs) {
+    return __jcc_ast_binary(vm, ND_COMMA, lhs, rhs);
+}
+
+// ============================================================================
+// AST Type Construction - Qualified Types (ticket #171)
+// ============================================================================
+
+// _AST_MAKE_CONST(ty) — return a const-qualified copy of ty
+_Type *__jcc_ast_make_const(JCC *vm, _Type *ty) {
+    if (!vm || !ty)
+        return NULL;
+    Type *result = copy_type(vm, ty);
+    result->is_const = true;
+    return result;
+}
+
+// _AST_MAKE_VOLATILE(ty) — return a volatile-qualified copy of ty
+_Type *__jcc_ast_make_volatile(JCC *vm, _Type *ty) {
+    if (!vm || !ty)
+        return NULL;
+    Type *result = copy_type(vm, ty);
+    result->is_volatile = true;
+    return result;
+}
+
+// ============================================================================
 // Function Generation
 // ============================================================================
 
@@ -1037,6 +1172,41 @@ void __jcc_ast_function_set_inline(_Obj *fn, bool is_inline) {
 void __jcc_ast_function_set_variadic(_Obj *fn, bool is_variadic) {
     if (fn && fn->ty)
         fn->ty->is_variadic = is_variadic;
+}
+
+// _AST_FUNCTION_PROTOTYPE(name, ret) — create a forward declaration (no body).
+// The same params API (_AST_FUNCTION_ADD_PARAM) applies; use
+// _AST_FORWARD_DECLARE to make it visible in scope.
+_Obj *__jcc_ast_function_prototype(JCC *vm, const char *name,
+                                    _Type *return_type) {
+    if (!vm || !name || !return_type)
+        return NULL;
+
+    size_t name_len = strlen(name);
+
+    // If a forward-declaration or prototype already exists, return it.
+    for (Obj *obj = vm->compiler.globals; obj; obj = obj->next) {
+        if (obj->is_function && strlen(obj->name) == name_len &&
+            strncmp(obj->name, name, name_len) == 0) {
+            return obj;
+        }
+    }
+
+    Type *func_type = make_func_type(vm, return_type);
+
+    Obj *fn = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
+    memset(fn, 0, sizeof(Obj));
+    fn->name = arena_strdup(vm, name);
+    fn->ty = func_type;
+    fn->align = 8;
+    fn->is_function = true;
+    fn->is_definition = false; // prototype, no body
+    fn->is_static = false;
+    fn->is_macro_generated = true;
+
+    fn->next = vm->compiler.globals;
+    vm->compiler.globals = fn;
+    return fn;
 }
 
 // ============================================================================
@@ -1694,6 +1864,234 @@ _Node *__jcc_quote(JCC *vm, const char *tmpl, ...) {
     va_end(ap);
 
     return quote_core(vm, tmpl, arg_buf, n);
+}
+
+// ============================================================================
+// Type / Declaration Builders (ticket #171)
+// ============================================================================
+
+// Helper: synthesize a Token for use as a name field in Type/Member.
+// The token's loc is an arena-allocated copy of name so it outlives the call.
+static Token *reflect_make_name_token(JCC *vm, const char *name, int name_len) {
+    Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
+    memset(tok, 0, sizeof(Token));
+    tok->kind = TK_IDENT;
+    tok->loc = arena_strdup(vm, name);
+    tok->len = name_len;
+    return tok;
+}
+
+// Helper: expose a struct/union/enum type by tag name so _AST_FIND_TYPE(name)
+// resolves it. Mirrors push_tag_scope + record_type_name in parse.c.
+static void reflect_push_tag_scope(JCC *vm, const char *name, int name_len,
+                                   Type *ty) {
+    if (!vm || !vm->compiler.scope)
+        return;
+
+    // Insert into tag scope linked list + hashmap
+    TagScopeNode *node =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(TagScopeNode));
+    memset(node, 0, sizeof(TagScopeNode));
+    node->name = arena_strdup(vm, name);
+    node->name_len = name_len;
+    node->ty = ty;
+    node->next = vm->compiler.scope->tags;
+    vm->compiler.scope->tags = node;
+    hashmap_put2_borrowed(&vm->compiler.scope->tag_map, node->name,
+                          node->name_len, node);
+
+    // Record for type_names list (-M support)
+    TypeNameRecord *rec =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(TypeNameRecord));
+    memset(rec, 0, sizeof(TypeNameRecord));
+    rec->ty = ty;
+    rec->name = node->name;
+    rec->name_len = name_len;
+    rec->owner_fn = vm->compiler.current_fn;
+    rec->is_tag = true;
+    rec->next = vm->compiler.type_names;
+    vm->compiler.type_names = rec;
+}
+
+// Helper: expose a typedef by name so _AST_FIND_TYPE(name) resolves it.
+// Mirrors push_scope(...)->type_def = ty + record_type_name in parse.c.
+static void reflect_push_typedef_scope(JCC *vm, const char *name, int name_len,
+                                       Type *ty) {
+    if (!vm || !vm->compiler.scope)
+        return;
+
+    VarScopeNode *node =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(VarScopeNode));
+    memset(node, 0, sizeof(VarScopeNode));
+    node->name = arena_strdup(vm, name);
+    node->name_len = name_len;
+    node->type_def = ty;
+    node->next = vm->compiler.scope->vars;
+    vm->compiler.scope->vars = node;
+    hashmap_put2_borrowed(&vm->compiler.scope->var_map, node->name,
+                          node->name_len, node);
+
+    // Record for type_names list
+    TypeNameRecord *rec =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(TypeNameRecord));
+    memset(rec, 0, sizeof(TypeNameRecord));
+    rec->ty = ty;
+    rec->name = node->name;
+    rec->name_len = name_len;
+    rec->owner_fn = vm->compiler.current_fn;
+    rec->is_tag = false;
+    rec->next = vm->compiler.type_names;
+    vm->compiler.type_names = rec;
+}
+
+// _AST_MAKE_STRUCT(name) — create and expose a new struct type.
+// Fields are added with _AST_STRUCT_ADD_FIELD.
+_Type *__jcc_ast_make_struct(JCC *vm, const char *name) {
+    if (!vm || !name)
+        return NULL;
+    Type *ty = struct_type(vm);
+    int name_len = (int)strlen(name);
+    ty->name = reflect_make_name_token(vm, name, name_len);
+    ty->size = 0;
+    ty->align = 1;
+    reflect_push_tag_scope(vm, name, name_len, ty);
+    return ty;
+}
+
+// _AST_MAKE_UNION(name) — create and expose a new union type.
+_Type *__jcc_ast_make_union(JCC *vm, const char *name) {
+    if (!vm || !name)
+        return NULL;
+    Type *ty = union_type(vm);
+    int name_len = (int)strlen(name);
+    ty->name = reflect_make_name_token(vm, name, name_len);
+    ty->size = 0;
+    ty->align = 1;
+    reflect_push_tag_scope(vm, name, name_len, ty);
+    return ty;
+}
+
+// _AST_STRUCT_ADD_FIELD(ty, name, field_type) — append a field to a struct or
+// union type and recompute the aggregate size/alignment.
+_Type *__jcc_ast_struct_add_field(JCC *vm, _Type *ty, const char *name,
+                                   _Type *field_type) {
+    if (!vm || !ty || !name || !field_type)
+        return NULL;
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
+        return NULL;
+
+    int name_len = (int)strlen(name);
+
+    Member *mem = arena_alloc(&vm->compiler.parser_arena, sizeof(Member));
+    memset(mem, 0, sizeof(Member));
+    mem->ty = field_type;
+    mem->name = reflect_make_name_token(vm, name, name_len);
+    mem->align = field_type->align;
+
+    // Append to the end of the members list to maintain declaration order
+    if (!ty->members) {
+        ty->members = mem;
+    } else {
+        Member *last = ty->members;
+        while (last->next)
+            last = last->next;
+        last->next = mem;
+    }
+
+    // Recompute layout for all fields from scratch
+    if (ty->kind == TY_STRUCT) {
+        int bits = 0;
+        int new_align = 1;
+        for (Member *m = ty->members; m; m = m->next) {
+            bits = reflect_align_to(bits, m->align * 8);
+            m->offset = bits / 8;
+            bits += m->ty->size * 8;
+            if (new_align < m->align)
+                new_align = m->align;
+        }
+        ty->align = new_align;
+        ty->size = reflect_align_to(bits, ty->align * 8) / 8;
+        if (ty->size == 0) ty->size = 1; // empty struct -> 1 byte
+    } else {
+        // Union: all members at offset 0, size = max member size
+        int new_size = 0;
+        int new_align = 1;
+        for (Member *m = ty->members; m; m = m->next) {
+            m->offset = 0;
+            if (new_align < m->align) new_align = m->align;
+            if (new_size < m->ty->size) new_size = m->ty->size;
+        }
+        ty->align = new_align;
+        ty->size = reflect_align_to(new_size, new_align);
+        if (ty->size == 0) ty->size = 1;
+    }
+
+    return ty;
+}
+
+// _AST_MAKE_ENUM(name) — create and expose a new enum type.
+// Constants are added with _AST_ENUM_ADD_CONSTANT.
+_Type *__jcc_ast_make_enum(JCC *vm, const char *name) {
+    if (!vm || !name)
+        return NULL;
+    Type *ty = enum_type(vm);
+    int name_len = (int)strlen(name);
+    ty->name = reflect_make_name_token(vm, name, name_len);
+    reflect_push_tag_scope(vm, name, name_len, ty);
+    return ty;
+}
+
+// _AST_ENUM_ADD_CONSTANT(ty, name, value) — add a named constant to an enum
+// type and expose it as an integer constant in current scope.
+void __jcc_ast_enum_add_constant(JCC *vm, _Type *ty, const char *name,
+                                  int value) {
+    if (!vm || !ty || !name || ty->kind != TY_ENUM)
+        return;
+
+    int name_len = (int)strlen(name);
+
+    // Append constant to type's enum_constants list
+    EnumConstant *ec =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(EnumConstant));
+    memset(ec, 0, sizeof(EnumConstant));
+    ec->name = arena_strdup(vm, name);
+    ec->value = value;
+    if (!ty->enum_constants) {
+        ty->enum_constants = ec;
+    } else {
+        EnumConstant *last = ty->enum_constants;
+        while (last->next)
+            last = last->next;
+        last->next = ec;
+    }
+
+    // Expose as a compile-time integer constant in current scope
+    // (mirrors the push_scope + enum_ty/enum_val assignment in parse.c:1137)
+    if (!vm->compiler.scope)
+        return;
+    VarScopeNode *sc =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(VarScopeNode));
+    memset(sc, 0, sizeof(VarScopeNode));
+    sc->name = arena_strdup(vm, name);
+    sc->name_len = name_len;
+    sc->enum_ty = ty;
+    sc->enum_val = value;
+    sc->next = vm->compiler.scope->vars;
+    vm->compiler.scope->vars = sc;
+    hashmap_put2_borrowed(&vm->compiler.scope->var_map, sc->name, sc->name_len,
+                          sc);
+}
+
+// _AST_MAKE_TYPEDEF(name, underlying) — register name as a typedef alias for
+// underlying so that _AST_FIND_TYPE(name) and C code can use it.
+void __jcc_ast_make_typedef(JCC *vm, const char *name, _Type *underlying) {
+    if (!vm || !name || !underlying)
+        return;
+    int name_len = (int)strlen(name);
+    // Give the underlying type this name if it has none
+    if (!underlying->name)
+        underlying->name = reflect_make_name_token(vm, name, name_len);
+    reflect_push_typedef_scope(vm, name, name_len, underlying);
 }
 
 // ============================================================================

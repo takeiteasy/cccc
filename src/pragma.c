@@ -114,6 +114,33 @@ extern Node *__jcc_ast_do_while(JCC *vm, Node *body, Node *cond);
 extern Node *__jcc_quote(JCC *vm, const char *tmpl, ...);
 extern Node *__jcc_quote_n(JCC *vm, const char *tmpl, Node **nodes, int count);
 
+// Ticket #171: new expression builders
+extern Node  *__jcc_ast_cond(JCC *vm, Node *cond, Node *then_expr, Node *else_expr);
+extern Node  *__jcc_ast_null(JCC *vm);
+extern Node  *__jcc_ast_sizeof_type(JCC *vm, Type *ty);
+extern Node  *__jcc_ast_alignof_type(JCC *vm, Type *ty);
+extern Node  *__jcc_ast_sizeof_expr(JCC *vm, Node *expr);
+extern Node  *__jcc_ast_subscript(JCC *vm, Node *arr, Node *idx);
+extern Node  *__jcc_ast_comma(JCC *vm, Node *lhs, Node *rhs);
+
+// Ticket #171: qualified type builders
+extern Type  *__jcc_ast_make_const(JCC *vm, Type *ty);
+extern Type  *__jcc_ast_make_volatile(JCC *vm, Type *ty);
+
+// Ticket #171: function prototype builder
+extern Obj   *__jcc_ast_function_prototype(JCC *vm, const char *name,
+                                            Type *return_type);
+
+// Ticket #171: struct/union/enum/typedef type builders
+extern Type  *__jcc_ast_make_struct(JCC *vm, const char *name);
+extern Type  *__jcc_ast_make_union(JCC *vm, const char *name);
+extern Type  *__jcc_ast_struct_add_field(JCC *vm, Type *ty, const char *name,
+                                          Type *field_type);
+extern Type  *__jcc_ast_make_enum(JCC *vm, const char *name);
+extern void   __jcc_ast_enum_add_constant(JCC *vm, Type *ty, const char *name,
+                                           int value);
+extern void   __jcc_ast_make_typedef(JCC *vm, const char *name, Type *underlying);
+
 // Ticket #188: comptime variable access
 extern int64_t __jcc_get_comptime_int(JCC *vm, const char *name);
 extern double  __jcc_get_comptime_float(JCC *vm, const char *name);
@@ -243,6 +270,37 @@ static void register_reflection_ffi(JCC *vm) {
     // Ticket #1: quasi-quoting
     cc_register_variadic_cfunc(vm, "__jcc_quote",   (void *)__jcc_quote,   2, 0);
     cc_register_cfunc(vm,          "__jcc_quote_n", (void *)__jcc_quote_n, 4, 0);
+
+    // Ticket #171: new expression builders
+    cc_register_cfunc(vm, "__jcc_ast_cond",         (void *)__jcc_ast_cond,         4, 0);
+    cc_register_cfunc(vm, "__jcc_ast_null",         (void *)__jcc_ast_null,         1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_sizeof_type",  (void *)__jcc_ast_sizeof_type,  2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_alignof_type", (void *)__jcc_ast_alignof_type, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_sizeof_expr",  (void *)__jcc_ast_sizeof_expr,  2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_subscript",    (void *)__jcc_ast_subscript,    3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_comma",        (void *)__jcc_ast_comma,        3, 0);
+
+    // Ticket #171: qualified type builders
+    cc_register_cfunc(vm, "__jcc_ast_make_const",    (void *)__jcc_ast_make_const,    2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_make_volatile", (void *)__jcc_ast_make_volatile, 2, 0);
+
+    // Ticket #171: function prototype builder
+    cc_register_cfunc(vm, "__jcc_ast_function_prototype",
+                      (void *)__jcc_ast_function_prototype, 3, 0);
+
+    // Ticket #171: struct/union/enum/typedef type builders
+    cc_register_cfunc(vm, "__jcc_ast_make_struct",
+                      (void *)__jcc_ast_make_struct, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_make_union",
+                      (void *)__jcc_ast_make_union, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_struct_add_field",
+                      (void *)__jcc_ast_struct_add_field, 4, 0);
+    cc_register_cfunc(vm, "__jcc_ast_make_enum",
+                      (void *)__jcc_ast_make_enum, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_enum_add_constant",
+                      (void *)__jcc_ast_enum_add_constant, 4, 0);
+    cc_register_cfunc(vm, "__jcc_ast_make_typedef",
+                      (void *)__jcc_ast_make_typedef, 3, 0);
 
     // Ticket #188: comptime variable access
     cc_register_cfunc(vm, "__jcc_get_comptime_int",

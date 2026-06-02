@@ -309,6 +309,12 @@ _Type *__jcc_ast_make_pointer(JCC *vm, _Type *base);
 /*! Create an array type with specified length. */
 _Type *__jcc_ast_make_array(JCC *vm, _Type *base, int length);
 
+// Ticket #171: qualified type constructors
+/*! Return a const-qualified copy of ty. */
+_Type *__jcc_ast_make_const(JCC *vm, _Type *ty);
+/*! Return a volatile-qualified copy of ty. */
+_Type *__jcc_ast_make_volatile(JCC *vm, _Type *ty);
+
 // ============================================================================
 // Enum Reflection
 // ============================================================================
@@ -433,6 +439,30 @@ _Node *__jcc_ast_unary(JCC *vm, _NodeKind op, _Node *operand);
 
 /*! Create a type cast node. */
 _Node *__jcc_ast_cast(JCC *vm, _Node *expr, _Type *target_type);
+
+// Ticket #171: new expression builders
+
+/*! Create a ternary conditional expression node (cond ? then_expr : else_expr). */
+_Node *__jcc_ast_cond(JCC *vm, _Node *cond, _Node *then_expr,
+                          _Node *else_expr);
+
+/*! Create a typed null pointer node: (void *)0. */
+_Node *__jcc_ast_null(JCC *vm);
+
+/*! Return sizeof(ty) as a compile-time integer literal. */
+_Node *__jcc_ast_sizeof_type(JCC *vm, _Type *ty);
+
+/*! Return _Alignof(ty) as a compile-time integer literal. */
+_Node *__jcc_ast_alignof_type(JCC *vm, _Type *ty);
+
+/*! Return sizeof(expr): resolve the expression's type then emit its size. */
+_Node *__jcc_ast_sizeof_expr(JCC *vm, _Node *expr);
+
+/*! Create an array subscript node: arr[idx], desugared as *(arr+idx). */
+_Node *__jcc_ast_subscript(JCC *vm, _Node *arr, _Node *idx);
+
+/*! Create a comma expression node: evaluate lhs for side effects, yield rhs. */
+_Node *__jcc_ast_comma(JCC *vm, _Node *lhs, _Node *rhs);
 
 // ============================================================================
 // AST Node Construction - Statements
@@ -635,6 +665,94 @@ void __jcc_ast_function_set_inline(_Obj *fn, bool is_inline);
  */
 void __jcc_ast_function_set_variadic(_Obj *fn, bool is_variadic);
 
+// Ticket #171: function prototype (forward declaration only, no body)
+/*!
+ * @function __jcc_ast_function_prototype
+ * @abstract Create a function forward declaration (prototype) without a body.
+ * @param vm The VM context.
+ * @param name The function name.
+ * @param return_type The return type.
+ * @return The declaration Obj*, or NULL on error.
+ * @discussion Use _AST_FUNCTION_ADD_PARAM to add parameters and
+ *             _AST_FORWARD_DECLARE to expose it in scope. A subsequent
+ *             _AST_FUNCTION call with the same name will reuse this Obj and
+ *             fill in the body.
+ */
+_Obj *__jcc_ast_function_prototype(JCC *vm, const char *name,
+                                    _Type *return_type);
+
+// Ticket #171: struct/union/enum/typedef type builders
+
+/*!
+ * @function __jcc_ast_make_struct
+ * @abstract Create and expose a new named struct type.
+ * @param vm The VM context.
+ * @param name The struct tag name.
+ * @return The new struct _Type*, or NULL on error.
+ * @discussion Use _AST_STRUCT_ADD_FIELD to add fields after creation.
+ *             The type is immediately visible via _AST_FIND_TYPE(name).
+ */
+_Type *__jcc_ast_make_struct(JCC *vm, const char *name);
+
+/*!
+ * @function __jcc_ast_make_union
+ * @abstract Create and expose a new named union type.
+ * @param vm The VM context.
+ * @param name The union tag name.
+ * @return The new union _Type*, or NULL on error.
+ */
+_Type *__jcc_ast_make_union(JCC *vm, const char *name);
+
+/*!
+ * @function __jcc_ast_struct_add_field
+ * @abstract Append a field to a struct or union and recompute its layout.
+ * @param vm The VM context.
+ * @param ty The struct or union type to modify.
+ * @param name The field name.
+ * @param field_type The field's type.
+ * @return ty on success, or NULL on error.
+ * @discussion For struct types, offsets are recalculated from scratch after
+ *             each field addition. For union types, all fields stay at offset 0
+ *             and the union size is updated to the maximum field size.
+ */
+_Type *__jcc_ast_struct_add_field(JCC *vm, _Type *ty, const char *name,
+                                   _Type *field_type);
+
+/*!
+ * @function __jcc_ast_make_enum
+ * @abstract Create and expose a new named enum type.
+ * @param vm The VM context.
+ * @param name The enum tag name.
+ * @return The new enum _Type*, or NULL on error.
+ * @discussion Use _AST_ENUM_ADD_CONSTANT to add constants after creation.
+ */
+_Type *__jcc_ast_make_enum(JCC *vm, const char *name);
+
+/*!
+ * @function __jcc_ast_enum_add_constant
+ * @abstract Add a named constant to an enum type and expose it in scope.
+ * @param vm The VM context.
+ * @param ty The enum type.
+ * @param name The constant name.
+ * @param value The constant integer value.
+ * @discussion The constant is appended to ty->enum_constants and also pushed
+ *             into the current scope so it is usable as an integer constant in
+ *             subsequently compiled code.
+ */
+void __jcc_ast_enum_add_constant(JCC *vm, _Type *ty, const char *name,
+                                  int value);
+
+/*!
+ * @function __jcc_ast_make_typedef
+ * @abstract Register a typedef alias for a type and expose it in scope.
+ * @param vm The VM context.
+ * @param name The typedef name.
+ * @param underlying The aliased type.
+ * @discussion After this call, _AST_FIND_TYPE(name) resolves to underlying and
+ *             subsequently compiled code can use name as a type name.
+ */
+void __jcc_ast_make_typedef(JCC *vm, const char *name, _Type *underlying);
+
 // ============================================================================
 // Global Variable Generation (ticket #152)
 // ============================================================================
@@ -785,6 +903,21 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, _Node *node);
 #define _AST_UNARY(op, operand) __jcc_ast_unary(_VM, op, operand)
 #define _AST_CAST(expr, ty) __jcc_ast_cast(_VM, expr, ty)
 
+// Ticket #171: new expression builders
+// Ternary conditional: cond ? then_expr : else_expr
+#define _AST_COND(c, t, e) __jcc_ast_cond(_VM, c, t, e)
+// Typed null pointer: (void *)0
+#define _AST_NULL() __jcc_ast_null(_VM)
+// sizeof(type) / _Alignof(type) as a compile-time integer literal
+#define _AST_SIZEOF_TYPE(ty) __jcc_ast_sizeof_type(_VM, ty)
+#define _AST_ALIGNOF_TYPE(ty) __jcc_ast_alignof_type(_VM, ty)
+// sizeof(expr): resolves expr's type then returns its size as an integer literal
+#define _AST_SIZEOF_EXPR(expr) __jcc_ast_sizeof_expr(_VM, expr)
+// Array subscript: arr[idx] (desugared as *(arr+idx))
+#define _AST_SUBSCRIPT(arr, idx) __jcc_ast_subscript(_VM, arr, idx)
+// Comma expression: evaluate lhs (for side effects), yield rhs
+#define _AST_COMMA(lhs, rhs) __jcc_ast_comma(_VM, lhs, rhs)
+
 #define _AST_RETURN(expr) __jcc_ast_return(_VM, expr)
 #define _AST_BLOCK(stmts, count) __jcc_ast_block(_VM, stmts, count)
 #define _AST_IF(c, t, e) __jcc_ast_if(_VM, c, t, e)
@@ -805,6 +938,10 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, _Node *node);
 
 #define _AST_MAKE_POINTER(base) __jcc_ast_make_pointer(_VM, base)
 #define _AST_MAKE_ARRAY(base, len) __jcc_ast_make_array(_VM, base, len)
+
+// Ticket #171: qualified type constructors
+#define _AST_MAKE_CONST(ty)    __jcc_ast_make_const(_VM, ty)
+#define _AST_MAKE_VOLATILE(ty) __jcc_ast_make_volatile(_VM, ty)
 
 #define _AST_ENUM_COUNT(ty) __jcc_ast_enum_count(_VM, ty)
 #define _AST_ENUM_AT(ty, i) __jcc_ast_enum_at(_VM, ty, i)
@@ -848,6 +985,32 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, _Node *node);
     __jcc_ast_function_set_inline(fn, is_inline)
 #define _AST_FUNCTION_SET_VARIADIC(fn, is_variadic)                         \
     __jcc_ast_function_set_variadic(fn, is_variadic)
+
+// Ticket #171: function forward declaration / prototype builder
+// Creates a declaration-only Obj (no body); use _AST_FUNCTION_ADD_PARAM for
+// parameters and _AST_FORWARD_DECLARE to make it visible in scope.
+#define _AST_FUNCTION_PROTOTYPE(name, ret)                                  \
+    __jcc_ast_function_prototype(_VM, name, ret)
+
+// Ticket #171: struct/union/enum/typedef type builders
+// Build a new named aggregate and expose it so _AST_GET_TYPE(name) resolves it.
+//
+//   _Type *s = _AST_MAKE_STRUCT("Point");
+//   _AST_STRUCT_ADD_FIELD(s, "x", _AST_GET_TYPE("int"));
+//   _AST_STRUCT_ADD_FIELD(s, "y", _AST_GET_TYPE("int"));
+//
+// _AST_STRUCT_ADD_FIELD works for both struct and union types.
+// _AST_MAKE_TYPEDEF registers name as an alias for underlying.
+// _AST_ENUM_ADD_CONSTANT adds a constant to the enum AND to scope (usable as int).
+#define _AST_MAKE_STRUCT(name)     __jcc_ast_make_struct(_VM, name)
+#define _AST_MAKE_UNION(name)      __jcc_ast_make_union(_VM, name)
+#define _AST_STRUCT_ADD_FIELD(ty, name, field_type) \
+    __jcc_ast_struct_add_field(_VM, ty, name, field_type)
+#define _AST_MAKE_ENUM(name)       __jcc_ast_make_enum(_VM, name)
+#define _AST_ENUM_ADD_CONSTANT(ty, name, value) \
+    __jcc_ast_enum_add_constant(_VM, ty, name, value)
+#define _AST_MAKE_TYPEDEF(name, underlying) \
+    __jcc_ast_make_typedef(_VM, name, underlying)
 
 // Comptime variable access (ticket #188)
 // Read an integer-typed #pragma comptime variable's value at compile time.

@@ -4,7 +4,6 @@ jcc-*
 *.dSYM
 *~
 *.bak
-ASSISI.md
 *.txt
 TICKETS
 fuzz/out/
