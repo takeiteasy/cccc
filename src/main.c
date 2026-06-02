@@ -31,7 +31,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --isystem <path> Add <path> to system include paths (for "
            "non-standard headers)\n");
     printf("\t-L/--library-path <path> Add <path> to dynamic library search paths\n");
-    printf("\t   --library <name> Link dynamic library by name or path\n");
+    printf("\t-l/--library <name> Link dynamic library by name or path\n");
     printf("\t   --link <name>    Alias for --library\n");
     printf("\t-D <macro>[=def]    Define a macro\n");
     printf("\t-U <macro>          Undefine a macro\n");
@@ -68,7 +68,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --overflow-checks         Detect signed integer overflow\n");
     printf("\t-s/--stack-canaries          Stack overflow protection\n");
     printf("\t-k/--heap-canaries           Heap overflow protection\n");
-    printf("\t-l/--memory-leak-detection   Track allocations and report leaks "
+    printf("\t-m/--memory-leak-detection   Track allocations and report leaks "
            "at exit\n");
     printf("\t-i/--stack-instrumentation   Track stack variable lifetimes and "
            "accesses\n");
@@ -434,7 +434,7 @@ int main(int argc, const char *argv[]) {
         {"stack-canaries", no_argument, 0, 's'},
         {"heap-canaries", no_argument, 0, 'k'},
         {"pointer-sanitizer", no_argument, 0, 'p'},
-        {"memory-leak-detection", no_argument, 0, 'l'},
+        {"memory-leak-detection", no_argument, 0, 'm'},
         {"stack-instrumentation", no_argument, 0, 'i'},
         {"stack-errors", no_argument, 0, 1005},
         {"dangling-pointers", no_argument, 0, 1001},
@@ -450,8 +450,8 @@ int main(int argc, const char *argv[]) {
         {"include", required_argument, 0, 'I'},
         {"isystem", required_argument, 0, 1013},
         {"library-path", required_argument, 0, 'L'},
-        {"library", required_argument, 0, 1018},
-        {"link", required_argument, 0, 1018},
+        {"library", required_argument, 0, 'l'},
+        {"link", required_argument, 0, 'l'},
         {"define", required_argument, 0, 'D'},
         {"undef", required_argument, 0, 'U'},
         {"max-errors", required_argument, 0, 1010},
@@ -482,7 +482,7 @@ int main(int argc, const char *argv[]) {
         }
     }
 
-    const char *optstring = "0123haI:L:D:U:o:cdvgbftzskpliPEMGXSjFTVC";
+    const char *optstring = "0123haI:L:D:U:o:cdvgbftzskpmiPEMGXSjFTVCl:";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(argc, (char *const *)argv, optstring,
@@ -564,7 +564,7 @@ int main(int argc, const char *argv[]) {
                         sizeof(*sys_inc_paths) * (sys_inc_paths_count + 1));
             sys_inc_paths[sys_inc_paths_count++] = strdup(optarg);
             break;
-        case 1018: // --library / --link
+        case 'l': // --library / --link
             libs = realloc(libs, sizeof(*libs) * (libs_count + 1));
             libs[libs_count++] = strdup(optarg);
             break;
@@ -598,7 +598,7 @@ int main(int argc, const char *argv[]) {
         case 'p':
             flags |= JCC_POINTER_SANITIZER;
             break;
-        case 'l':
+        case 'm':
             flags |= JCC_MEMORY_LEAK_DETECT;
             break;
         case 'i':

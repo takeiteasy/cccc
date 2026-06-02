@@ -1940,7 +1940,7 @@ int op_DLERROR_fn(JCC *vm) {
 
 // ========== FFI ==========
 
-static int jcc_ffi_name_in_list(char **list, int count, const char *name) {
+int jcc_ffi_name_in_list(char **list, int count, const char *name) {
     if (!name)
         name = "<anonymous>";
     size_t len = strlen(name);

@@ -2,27 +2,26 @@ SRCS := $(wildcard src/*.c src/stdlib/*.c)
 CFLAGS := -Wall -O0 -g -std=c23 -Wno-deprecated-declarations -Wno-switch -Wno-inline-asm
 LDFLAGS :=
 
-# Optional libffi support for native FFI calls.
-# Enable with: make JCC_HAS_FFI=1
-ifdef JCC_HAS_FFI
-  ifneq ($(JCC_HAS_FFI),0)
-    CFLAGS += -DJCC_HAS_FFI=1
-    LIBFFI_CFLAGS := $(shell pkg-config --cflags libffi 2>/dev/null)
-    LIBFFI_LDFLAGS := $(shell pkg-config --libs libffi 2>/dev/null)
+# libffi support for native FFI calls.
+# Enabled by default; disable with: make JCC_HAS_FFI=0
+JCC_HAS_FFI ?= 1
+ifneq ($(JCC_HAS_FFI),0)
+  CFLAGS += -DJCC_HAS_FFI=1
+  LIBFFI_CFLAGS := $(shell pkg-config --cflags libffi 2>/dev/null)
+  LIBFFI_LDFLAGS := $(shell pkg-config --libs libffi 2>/dev/null)
 
-    ifeq ($(LIBFFI_LDFLAGS),)
-      ifeq ($(shell uname -s),Darwin)
-        LIBFFI_CFLAGS := -I/opt/homebrew/opt/libffi/include -I/usr/local/opt/libffi/include
-        LIBFFI_LDFLAGS := -L/opt/homebrew/opt/libffi/lib -L/usr/local/opt/libffi/lib -lffi
-      else
-        LIBFFI_CFLAGS := -I/usr/include -I/usr/local/include
-        LIBFFI_LDFLAGS := -L/usr/lib -L/usr/local/lib -lffi
-      endif
+  ifeq ($(LIBFFI_LDFLAGS),)
+    ifeq ($(shell uname -s),Darwin)
+      LIBFFI_CFLAGS := -I/opt/homebrew/opt/libffi/include -I/usr/local/opt/libffi/include
+      LIBFFI_LDFLAGS := -L/opt/homebrew/opt/libffi/lib -L/usr/local/opt/libffi/lib -lffi
+    else
+      LIBFFI_CFLAGS := -I/usr/include -I/usr/local/include
+      LIBFFI_LDFLAGS := -L/usr/lib -L/usr/local/lib -lffi
     endif
-
-    CFLAGS += $(LIBFFI_CFLAGS)
-    LDFLAGS += $(LIBFFI_LDFLAGS)
   endif
+
+  CFLAGS += $(LIBFFI_CFLAGS)
+  LDFLAGS += $(LIBFFI_LDFLAGS)
 endif
 
 ifeq ($(OS),Windows_NT)

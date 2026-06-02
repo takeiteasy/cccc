@@ -37,7 +37,7 @@ Options:
 	-I <path>           Add <path> to include search paths
 	   --isystem <path> Add <path> to system include paths (for non-standard headers)
 	-L/--library-path <path> Add <path> to dynamic library search paths
-	   --library <name> Link dynamic library by name or path
+	-l/--library <name> Link dynamic library by name or path
 	   --link <name>    Alias for --library
 	-D <macro>[=def]    Define a macro
 	-U <macro>          Undefine a macro
@@ -69,7 +69,7 @@ Memory Safety Options (can be combined with safety levels):
 	   --overflow-checks         Detect signed integer overflow
 	-s/--stack-canaries          Stack overflow protection
 	-k/--heap-canaries           Heap overflow protection
-	-l/--memory-leak-detection   Track allocations and report leaks at exit
+	-m/--memory-leak-detection   Track allocations and report leaks at exit
 	-i/--stack-instrumentation   Track stack variable lifetimes and accesses
 	   --stack-errors            Enable runtime errors for stack instrumentation
 	-p/--pointer-sanitizer       Enable all pointer checks (bounds, UAF, type)
@@ -141,9 +141,9 @@ symbols from that handle are live.
 ## Building
 
 ```bash
-make          # Build jcc
+make          # Build jcc with libffi-backed native calls
 make all      # Build jcc + libjcc.dylib, then run the test suite
-make JCC_HAS_FFI=1   # Build with optional libffi-backed native calls
+make JCC_HAS_FFI=0   # Build without libffi-backed native calls
 ```
 
 Produces:

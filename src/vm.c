@@ -183,6 +183,25 @@ long long jcc_rt_dlsym(JCC *vm, long long handle_token, const char *symbol) {
     }
 #endif
 
+    // Apply FFI policy checks at lookup time so denied symbols cannot be
+    // obtained as callable function pointers.
+    if (vm->disable_all_ffi) {
+        jcc_set_dyn_error(vm, "dlsym blocked: all FFI calls are disabled");
+        return 0;
+    }
+    if (vm->ffi_allow_count > 0 &&
+        !jcc_ffi_name_in_list(vm->ffi_allow_list, vm->ffi_allow_count, symbol)) {
+        jcc_set_dyn_error(vm, "dlsym blocked: '%s' not in --ffi-allow list",
+                          symbol);
+        return 0;
+    }
+    if (vm->ffi_allow_count == 0 &&
+        jcc_ffi_name_in_list(vm->ffi_deny_list, vm->ffi_deny_count, symbol)) {
+        jcc_set_dyn_error(vm, "dlsym blocked: '%s' is in --ffi-deny list",
+                          symbol);
+        return 0;
+    }
+
     return jcc_add_dynamic_symbol(vm, lib_idx, ptr, symbol);
 }
 
