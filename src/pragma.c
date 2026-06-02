@@ -338,6 +338,45 @@ static Token *find_top_level_eq(Token *tokens) {
     return NULL;
 }
 
+// Find the struct/union tag in a comptime var's decl_tokens.
+// For `struct Dims { int w; int h; } dims = {...};` returns the 'Dims' token
+// and writes the 'struct' keyword token to *kw_out.
+// Returns NULL for anonymous structs or typedef'd aggregate types (no
+// struct/union keyword present), which cannot have a cast synthesized.
+static Token *comptime_struct_tag(Token *decl_tokens, Token **kw_out) {
+    for (Token *t = decl_tokens; t && t->kind != TK_EOF; t = t->next) {
+        if (equal(t, "struct") || equal(t, "union")) {
+            Token *next = t->next;
+            if (next && next->kind == TK_IDENT) {
+                if (kw_out) *kw_out = t;
+                return next;
+            }
+            // Anonymous struct/union: no synthesizable cast.
+            return NULL;
+        }
+    }
+    return NULL; // Typedef'd aggregate or plain scalar.
+}
+
+// True if this comptime var's initializer should be evaluated via
+// __jcc_comptime_init (ticket #191/#192) rather than the constant init_data
+// path. Both build_combined_macro_tokens and build_comptime_init_fn_tokens
+// call this so they agree on which vars are routed through the init fn.
+//
+// Scalar initializers (= <non-brace-expr>): always routed.
+// Tagged struct/union initializers (= { ... }): routed iff a tag can be
+// extracted (so the compound-literal cast can be synthesized).
+// Anonymous / typedef'd aggregates: remain on the constant path.
+static bool comptime_var_uses_init_fn(ComptimeVar *cv) {
+    Token *eq = find_top_level_eq(cv->decl_tokens);
+    if (!eq)
+        return false; // No initializer at all.
+    if (!eq->next || !equal(eq->next, "{"))
+        return true;  // Scalar expression init.
+    // Aggregate init: routable only if we can synthesize (struct/union Tag).
+    return comptime_struct_tag(cv->decl_tokens, NULL) != NULL;
+}
+
 // Inject decl_tokens up to (not including) eq_tok, then emit ';'.
 // Produces a declaration without its initializer, e.g. "int buf_size ;"
 static Token *append_decl_stripped(JCC *vm, Token *cur, Token *decl_tokens,
@@ -349,15 +388,17 @@ static Token *append_decl_stripped(JCC *vm, Token *cur, Token *decl_tokens,
     return cur;
 }
 
-// Build a __jcc_comptime_init function that assigns each scalar comptime var's
-// initializer expression in source order. Returns token list via
-// tokenize_string, or NULL when there are no scalar-init vars.
+// Build a __jcc_comptime_init function that assigns each comptime var's
+// initializer expression in source order. Handles:
+//   - scalar expression inits:  name = expr ;
+//   - tagged struct/union inits: name = (struct Tag){ ... } ;
+// Returns a token list via tokenize_string, or NULL when there are no vars
+// routed through the init fn.
 static Token *build_comptime_init_fn_tokens(JCC *vm,
                                              ComptimeVar **vars, int count) {
     bool has_any = false;
     for (int i = 0; i < count; i++) {
-        Token *eq = find_top_level_eq(vars[i]->decl_tokens);
-        if (eq && !(eq->next && equal(eq->next, "{"))) {
+        if (comptime_var_uses_init_fn(vars[i])) {
             has_any = true;
             break;
         }
@@ -373,24 +414,49 @@ static Token *build_comptime_init_fn_tokens(JCC *vm,
 
     for (int i = 0; i < count; i++) {
         ComptimeVar *cv = vars[i];
+        if (!comptime_var_uses_init_fn(cv)) continue;
+
         Token *eq = find_top_level_eq(cv->decl_tokens);
-        if (!eq) continue;
-        // Aggregate init (= { ... }) stays on the constant path; skip here.
-        if (eq->next && equal(eq->next, "{")) continue;
+        if (!eq) continue; // Should not happen if predicate is true, but be safe.
 
-        p += snprintf(p, end - p, "%s=", cv->name);
+        if (eq->next && equal(eq->next, "{")) {
+            // Aggregate init: emit  name = (struct Tag){ ... } ;
+            Token *kw = NULL;
+            Token *tag = comptime_struct_tag(cv->decl_tokens, &kw);
+            // tag != NULL is guaranteed by comptime_var_uses_init_fn, but guard.
+            if (!tag || !kw) continue;
+            p += snprintf(p, end - p, "%s=(%.*s %.*s)",
+                          cv->name,
+                          kw->len,  kw->loc,   // "struct" or "union"
+                          tag->len, tag->loc);  // tag name
 
-        // Emit RHS tokens from after '=' up to the terminating ';'.
-        int depth = 0;
-        for (Token *t = eq->next; t && t->kind != TK_EOF; t = t->next) {
-            if (equal(t, "{")) depth++;
-            else if (equal(t, "}")) depth--;
-            else if (depth == 0 && equal(t, ";")) break;
-            if (p + t->len + 2 >= end)
-                error("comptime init function source overflow (too many/long tokens)");
-            p += snprintf(p, end - p, " %.*s", t->len, t->loc);
+            // Emit the brace-group '{ ... }' verbatim from eq->next.
+            int depth = 0;
+            for (Token *t = eq->next; t && t->kind != TK_EOF; t = t->next) {
+                if (equal(t, "{")) depth++;
+                else if (equal(t, "}")) { depth--; }
+                else if (depth == 0 && equal(t, ";")) break;
+                if (p + t->len + 2 >= end)
+                    error("comptime init function source overflow (too many/long tokens)");
+                p += snprintf(p, end - p, " %.*s", t->len, t->loc);
+                if (equal(t, "}") && depth == 0) break;
+            }
+            p += snprintf(p, end - p, ";\n");
+        } else {
+            // Scalar expression init: emit  name = expr ;
+            p += snprintf(p, end - p, "%s=", cv->name);
+
+            int depth = 0;
+            for (Token *t = eq->next; t && t->kind != TK_EOF; t = t->next) {
+                if (equal(t, "{")) depth++;
+                else if (equal(t, "}")) depth--;
+                else if (depth == 0 && equal(t, ";")) break;
+                if (p + t->len + 2 >= end)
+                    error("comptime init function source overflow (too many/long tokens)");
+                p += snprintf(p, end - p, " %.*s", t->len, t->loc);
+            }
+            p += snprintf(p, end - p, ";\n");
         }
-        p += snprintf(p, end - p, ";\n");
     }
 
     p += snprintf(p, end - p, "}\n");
@@ -451,17 +517,18 @@ static Token *build_combined_macro_tokens(JCC *vm, Token *reflection_tokens,
     }
 
     // Inject comptime variable declarations as file-scope globals.
-    // For scalar-expression initializers (= <non-brace-expr>), strip the
-    // initializer so the parser never sees the non-constant expression as a
-    // global initializer (which would hard-error via eval2). The initializer
-    // is instead evaluated by __jcc_comptime_init (ticket #191).
-    // Aggregate ({...}) and uninitialised vars are injected as-is (constant
-    // path, unchanged from #188).
+    // Vars routed through __jcc_comptime_init (ticket #191/#192) have their
+    // initializer stripped so the parser never sees a non-constant expression
+    // as a global initializer (which would hard-error via eval2). The stripped
+    // var is declared as a zero-initialized global; __jcc_comptime_init fills
+    // it in at VM run time.
+    // Uninitialised vars, and aggregate vars whose initializer is constant or
+    // whose tag cannot be synthesized, are injected as-is (constant path).
     for (int i = 0; i < nv; i++) {
         ComptimeVar *cv = vars[i];
-        Token *eq = find_top_level_eq(cv->decl_tokens);
-        if (eq && eq->next && !equal(eq->next, "{")) {
-            // Scalar-expression init: inject declaration without initializer.
+        if (comptime_var_uses_init_fn(cv)) {
+            // Strip initializer; __jcc_comptime_init will assign it.
+            Token *eq = find_top_level_eq(cv->decl_tokens);
             cur = append_decl_stripped(vm, cur, cv->decl_tokens, eq);
         } else {
             cur = append_token_list(vm, cur, cv->decl_tokens);
@@ -600,14 +667,17 @@ static void evaluate_comptime_vars(JCC *vm, Obj *macro_prog) {
 
         TypeKind kind = obj->ty->kind;
         if (kind == TY_STRUCT || kind == TY_UNION) {
-            // Aggregate types: require a constant initializer (init_data).
-            // Non-constant struct/union initializers are deferred as a
-            // follow-up to ticket #191.
-            if (!obj->init_data) {
+            // Routed vars (ticket #192): __jcc_comptime_init wrote the bytes
+            // into the data segment, so init_data is NULL — that is expected.
+            // Non-routed vars (constant path): init_data must be present.
+            // Anonymous/typedef'd structs with non-constant initializers are
+            // not yet supported and fall through to the warning below.
+            if (!obj->init_data && !comptime_var_uses_init_fn(cv)) {
                 fprintf(stderr,
                         "Warning: comptime struct/union var '%s' has a "
-                        "non-constant initializer (not yet supported; "
-                        "deferred as follow-up to ticket #191)\n", cv->name);
+                        "non-constant initializer and no synthesizable tag "
+                        "(anonymous or typedef'd aggregates not yet supported)\n",
+                        cv->name);
                 continue;
             }
 
