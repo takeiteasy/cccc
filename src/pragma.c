@@ -114,6 +114,13 @@ extern Node *__jcc_ast_do_while(JCC *vm, Node *body, Node *cond);
 extern Node *__jcc_quote(JCC *vm, const char *tmpl, ...);
 extern Node *__jcc_quote_n(JCC *vm, const char *tmpl, Node **nodes, int count);
 
+// Ticket #188: comptime variable access
+extern int64_t __jcc_get_comptime_int(JCC *vm, const char *name);
+extern double  __jcc_get_comptime_float(JCC *vm, const char *name);
+extern Node   *__jcc_get_comptime_var(JCC *vm, const char *name);
+extern Node   *__jcc_get_comptime_member(JCC *vm, const char *var_name,
+                                         const char *field);
+
 // Register reflection API functions as FFI
 static void register_reflection_ffi(JCC *vm) {
     // VM accessor
@@ -236,6 +243,16 @@ static void register_reflection_ffi(JCC *vm) {
     // Ticket #1: quasi-quoting
     cc_register_variadic_cfunc(vm, "__jcc_quote",   (void *)__jcc_quote,   2, 0);
     cc_register_cfunc(vm,          "__jcc_quote_n", (void *)__jcc_quote_n, 4, 0);
+
+    // Ticket #188: comptime variable access
+    cc_register_cfunc(vm, "__jcc_get_comptime_int",
+                      (void *)__jcc_get_comptime_int, 2, 0);
+    cc_register_cfunc(vm, "__jcc_get_comptime_float",
+                      (void *)__jcc_get_comptime_float, 2, 1); // returns double
+    cc_register_cfunc(vm, "__jcc_get_comptime_var",
+                      (void *)__jcc_get_comptime_var, 2, 0);
+    cc_register_cfunc(vm, "__jcc_get_comptime_member",
+                      (void *)__jcc_get_comptime_member, 3, 0);
 }
 
 static void init_vm_segments_for_macros(JCC *vm);
@@ -345,6 +362,11 @@ static Token *build_combined_macro_tokens(JCC *vm, Token *reflection_tokens,
 
     cur = append_token_list(vm, cur, reflection_tokens);
 
+    // Include comptime variable declarations as file-scope globals so the
+    // macro program can reference them by name.
+    for (ComptimeVar *cv = vm->compiler.comptime_vars; cv; cv = cv->next)
+        cur = append_token_list(vm, cur, cv->decl_tokens);
+
     for (int i = 0; i < count; i++)
         cur = append_macro_prototype(vm, cur, macros[i]);
     for (int i = 0; i < count; i++)
@@ -363,6 +385,129 @@ static Obj *find_macro_function(Obj *prog, const char *name) {
             return obj;
     }
     return NULL;
+}
+
+static Obj *find_macro_global(Obj *prog, const char *name) {
+    size_t len = strlen(name);
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (!obj->is_function && strlen(obj->name) == len &&
+            strncmp(obj->name, name, len) == 0)
+            return obj;
+    }
+    return NULL;
+}
+
+// Read a scalar value from the macro VM's data segment.
+static bool read_comptime_scalar(JCC *vm, Obj *obj, bool *is_float_out,
+                                 int64_t *int_out, double *float_out) {
+    if (!obj || !obj->init_data)
+        return false;
+    char *base = vm->data_seg + obj->offset;
+    TypeKind kind = obj->ty->kind;
+    switch (kind) {
+    case TY_FLOAT:
+        *is_float_out = true;
+        *float_out = (double)(*(float *)base);
+        return true;
+    case TY_DOUBLE:
+    case TY_LDOUBLE:
+        *is_float_out = true;
+        *float_out = *(double *)base;
+        return true;
+    default:
+        if (obj->ty->size == 1) { *int_out = obj->ty->is_unsigned ? (int64_t)*(uint8_t *)base  : (int64_t)*(int8_t *)base; }
+        else if (obj->ty->size == 2) { *int_out = obj->ty->is_unsigned ? (int64_t)*(uint16_t *)base : (int64_t)*(int16_t *)base; }
+        else if (obj->ty->size == 4) { *int_out = obj->ty->is_unsigned ? (int64_t)*(uint32_t *)base : (int64_t)*(int32_t *)base; }
+        else { *int_out = (int64_t)*(int64_t *)base; }
+        *is_float_out = false;
+        return true;
+    }
+}
+
+static void evaluate_comptime_vars(JCC *vm, Obj *macro_prog) {
+    for (ComptimeVar *cv = vm->compiler.comptime_vars; cv; cv = cv->next) {
+        if (cv->is_evaluated)
+            continue;
+
+        Obj *obj = find_macro_global(macro_prog, cv->name);
+        if (!obj) {
+            fprintf(stderr, "Warning: comptime var '%s' not found in macro program\n",
+                    cv->name);
+            continue;
+        }
+
+        if (!obj->init_data) {
+            fprintf(stderr,
+                    "Warning: comptime var '%s' has no constant initializer "
+                    "(non-constant initializers require ticket #191)\n", cv->name);
+            continue;
+        }
+
+        // Pointer vars create relocations — rejected at preprocess time, but
+        // guard here too in case something slips through.
+        if (obj->rel) {
+            fprintf(stderr, "Warning: comptime var '%s' has a relocation "
+                    "(pointer/string vars are not yet supported)\n", cv->name);
+            continue;
+        }
+
+        TypeKind kind = obj->ty->kind;
+        if (kind == TY_STRUCT || kind == TY_UNION) {
+            cv->is_struct = true;
+            char *base = vm->data_seg + obj->offset;
+            for (Member *mem = obj->ty->members; mem; mem = mem->next) {
+                if (mem->is_bitfield)
+                    continue;
+                TypeKind mk = mem->ty->kind;
+                // Only scalar integer and float members are exposed.
+                if (mk == TY_STRUCT || mk == TY_UNION || mk == TY_ARRAY ||
+                    mk == TY_PTR)
+                    continue;
+
+                ComptimeVarMember *m =
+                    arena_alloc(&vm->compiler.parser_arena, sizeof(ComptimeVarMember));
+                memset(m, 0, sizeof(ComptimeVarMember));
+                if (mem->name) {
+                    char *mname = arena_alloc(&vm->compiler.parser_arena,
+                                             mem->name->len + 1);
+                    memcpy(mname, mem->name->loc, mem->name->len);
+                    mname[mem->name->len] = '\0';
+                    m->name = mname;
+                }
+
+                char *mbase = base + mem->offset;
+                if (mk == TY_FLOAT) {
+                    m->is_float = true;
+                    m->float_val = (double)(*(float *)mbase);
+                } else if (mk == TY_DOUBLE || mk == TY_LDOUBLE) {
+                    m->is_float = true;
+                    m->float_val = *(double *)mbase;
+                } else {
+                    int sz = mem->ty->size;
+                    if (sz == 1) m->int_val = mem->ty->is_unsigned ? (int64_t)*(uint8_t *)mbase  : (int64_t)*(int8_t *)mbase;
+                    else if (sz == 2) m->int_val = mem->ty->is_unsigned ? (int64_t)*(uint16_t *)mbase : (int64_t)*(int16_t *)mbase;
+                    else if (sz == 4) m->int_val = mem->ty->is_unsigned ? (int64_t)*(uint32_t *)mbase : (int64_t)*(int32_t *)mbase;
+                    else m->int_val = *(int64_t *)mbase;
+                }
+
+                m->next = cv->members;
+                cv->members = m;
+            }
+        } else {
+            read_comptime_scalar(vm, obj, &cv->is_float, &cv->int_val, &cv->float_val);
+        }
+
+        cv->is_evaluated = true;
+
+        if (vm->debug_vm) {
+            if (cv->is_struct)
+                printf("Evaluated comptime struct '%s'\n", cv->name);
+            else if (cv->is_float)
+                printf("Evaluated comptime var '%s' = %f\n", cv->name, cv->float_val);
+            else
+                printf("Evaluated comptime var '%s' = %lld\n", cv->name, cv->int_val);
+        }
+    }
 }
 
 static void init_macro_globals(JCC *vm, Obj *macro_prog) {
@@ -486,6 +631,7 @@ static bool compile_pragma_macro_program(JCC *vm) {
     }
 
     init_macro_globals(vm, macro_prog);
+    evaluate_comptime_vars(vm, macro_prog);
 
     for (Obj *fn = macro_prog; fn; fn = fn->next) {
         if (fn->is_function && fn->body)

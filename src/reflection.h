@@ -849,6 +849,22 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, _Node *node);
 #define _AST_FUNCTION_SET_VARIADIC(fn, is_variadic)                         \
     __jcc_ast_function_set_variadic(fn, is_variadic)
 
+// Comptime variable access (ticket #188)
+// Read an integer-typed #pragma comptime variable's value at compile time.
+int64_t __jcc_get_comptime_int(JCC *vm, const char *name);
+// Read a float/double-typed #pragma comptime variable's value.
+double __jcc_get_comptime_float(JCC *vm, const char *name);
+// Read a comptime scalar variable as an AST literal node (_Node*).
+_Node *__jcc_get_comptime_var(JCC *vm, const char *name);
+// Read a named field from a comptime struct variable as an AST literal node.
+_Node *__jcc_get_comptime_member(JCC *vm, const char *var_name,
+                                  const char *field);
+
+#define _AST_GET_COMPTIME_INT(name)           __jcc_get_comptime_int(_VM, name)
+#define _AST_GET_COMPTIME_FLOAT(name)         __jcc_get_comptime_float(_VM, name)
+#define _AST_GET_COMPTIME_VAR(name)           __jcc_get_comptime_var(_VM, name)
+#define _AST_GET_COMPTIME_MEMBER(var, field)  __jcc_get_comptime_member(_VM, var, field)
+
 // Global variable generation (ticket #152)
 #define _AST_GLOBAL_VAR(name, ty)                                           \
     __jcc_ast_global_var(_VM, name, ty)

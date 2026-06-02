@@ -1695,3 +1695,56 @@ _Node *__jcc_quote(JCC *vm, const char *tmpl, ...) {
 
     return quote_core(vm, tmpl, arg_buf, n);
 }
+
+// ============================================================================
+// Ticket #188: Comptime Variable Access
+// ============================================================================
+
+static ComptimeVar *find_comptime_var(JCC *vm, const char *name) {
+    size_t len = strlen(name);
+    for (ComptimeVar *cv = vm->compiler.comptime_vars; cv; cv = cv->next) {
+        if (strlen(cv->name) == len && strncmp(cv->name, name, len) == 0)
+            return cv;
+    }
+    return NULL;
+}
+
+int64_t __jcc_get_comptime_int(JCC *vm, const char *name) {
+    if (!vm || !name) return 0;
+    ComptimeVar *cv = find_comptime_var(vm, name);
+    if (!cv || !cv->is_evaluated || cv->is_struct) return 0;
+    return cv->is_float ? (int64_t)cv->float_val : cv->int_val;
+}
+
+double __jcc_get_comptime_float(JCC *vm, const char *name) {
+    if (!vm || !name) return 0.0;
+    ComptimeVar *cv = find_comptime_var(vm, name);
+    if (!cv || !cv->is_evaluated || cv->is_struct) return 0.0;
+    return cv->is_float ? cv->float_val : (double)cv->int_val;
+}
+
+_Node *__jcc_get_comptime_var(JCC *vm, const char *name) {
+    if (!vm || !name) return NULL;
+    ComptimeVar *cv = find_comptime_var(vm, name);
+    if (!cv || !cv->is_evaluated || cv->is_struct) return NULL;
+    if (cv->is_float)
+        return __jcc_ast_float_literal(vm, cv->float_val);
+    return __jcc_ast_int_literal(vm, cv->int_val);
+}
+
+_Node *__jcc_get_comptime_member(JCC *vm, const char *var_name,
+                                  const char *field) {
+    if (!vm || !var_name || !field) return NULL;
+    ComptimeVar *cv = find_comptime_var(vm, var_name);
+    if (!cv || !cv->is_evaluated || !cv->is_struct) return NULL;
+    size_t flen = strlen(field);
+    for (ComptimeVarMember *m = cv->members; m; m = m->next) {
+        if (m->name && strlen(m->name) == flen &&
+            strncmp(m->name, field, flen) == 0) {
+            if (m->is_float)
+                return __jcc_ast_float_literal(vm, m->float_val);
+            return __jcc_ast_int_literal(vm, m->int_val);
+        }
+    }
+    return NULL;
+}

@@ -765,6 +765,30 @@ typedef struct PragmaMacro {
     struct PragmaMacro *next; // Next macro in linked list
 } PragmaMacro;
 
+// A struct member value captured from a comptime struct variable.
+typedef struct ComptimeVarMember {
+    char *name;
+    bool is_float;
+    int64_t int_val;
+    double float_val;
+    struct ComptimeVarMember *next;
+} ComptimeVarMember;
+
+// A variable or struct instance declared with #pragma comptime.
+// Values are read from the macro VM's data segment after compilation and
+// cached here so macro FFI callbacks can return them without VM access.
+typedef struct ComptimeVar {
+    char *name;               // Variable name
+    Token *decl_tokens;       // Full declaration tokens (included in macro program)
+    bool is_struct;           // True if the top-level type is a struct/union
+    bool is_evaluated;        // True after values have been read from the data segment
+    bool is_float;            // True for float/double scalar types
+    int64_t int_val;          // Scalar integer value (or 0 for structs)
+    double float_val;         // Scalar float/double value
+    ComptimeVarMember *members; // Per-field values for struct vars (NULL for scalars)
+    struct ComptimeVar *next;
+} ComptimeVar;
+
 /*!
  @struct Scope
  @abstract Represents a parser block scope. Two kinds of block scopes are
@@ -1262,6 +1286,7 @@ typedef struct Compiler {
 
     // Pragma macro state
     PragmaMacro *pragma_macros;   // Linked list of captured pragma macros
+    ComptimeVar *comptime_vars;   // Linked list of #pragma comptime variable decls
     bool in_macro_mode;           // True when compiling/executing a pragma macro
     bool in_macro_expansion;      // True during macro AST expansion pass
     bool pragma_macros_compiled;  // True after compile_all_pragma_macros has run

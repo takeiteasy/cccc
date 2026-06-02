@@ -241,6 +241,99 @@ static Token *extract_pragma_compiletime_function(JCC *vm, Token *tok,
     return body_end ? body_end : tok;
 }
 
+// Extract a #pragma comptime variable declaration (not a function).
+// Extracts tokens up to and including the terminating ';', creates a
+// ComptimeVar entry, and returns the token after the ';'.
+static Token *extract_pragma_comptime_var(JCC *vm, Token *tok) {
+    Token *start = tok;
+
+    // Find the variable name: the last identifier before '=' or ';' at depth 0.
+    char *name = NULL;
+    {
+        Token *probe = tok;
+        Token *last_ident = NULL;
+        int brace_depth = 0, bracket_depth = 0;
+        while (probe && probe->kind != TK_EOF) {
+            if (equal(probe, "{")) brace_depth++;
+            else if (equal(probe, "}")) brace_depth--;
+            else if (equal(probe, "[")) bracket_depth++;
+            else if (equal(probe, "]")) bracket_depth--;
+            else if (brace_depth == 0 && bracket_depth == 0) {
+                if (equal(probe, "=") || equal(probe, ";"))
+                    break;
+                if (probe->kind == TK_IDENT)
+                    last_ident = probe;
+            }
+            probe = probe->next;
+        }
+        if (!last_ident) {
+            error_tok(vm, start, "#pragma comptime: expected variable name");
+            return start;
+        }
+        name = arena_alloc(&vm->compiler.parser_arena, last_ident->len + 1);
+        memcpy(name, last_ident->loc, last_ident->len);
+        name[last_ident->len] = '\0';
+    }
+
+    // Reject pointer/string comptime vars: these create relocations which
+    // the macro program's data segment does not support (ticket #188 scope).
+    // Check for '*' at depth 0 before the variable name.
+    {
+        Token *probe = tok;
+        int depth = 0;
+        while (probe && probe->kind != TK_EOF) {
+            if (equal(probe, "{")) depth++;
+            else if (equal(probe, "}")) depth--;
+            else if (depth == 0) {
+                if (equal(probe, "=") || equal(probe, ";")) break;
+                if (equal(probe, "*")) {
+                    error_tok(vm, probe,
+                              "#pragma comptime: pointer/string variables are not "
+                              "supported yet (ticket #188 scope: int/float/struct only)");
+                    return start;
+                }
+            }
+            probe = probe->next;
+        }
+    }
+
+    // Extract tokens up to and including the terminating ';'.
+    Token head = {};
+    Token *cur = &head;
+    Token *body_end = NULL;
+    {
+        int brace_depth = 0;
+        for (Token *t = start; t && t->kind != TK_EOF; t = t->next) {
+            if (equal(t, "{")) brace_depth++;
+            else if (equal(t, "}")) brace_depth--;
+            cur = cur->next = copy_token(vm, t);
+            if (brace_depth == 0 && equal(t, ";")) {
+                body_end = t->next;
+                break;
+            }
+        }
+    }
+    if (!body_end) {
+        error_tok(vm, start, "#pragma comptime: variable declaration not terminated");
+        return start;
+    }
+    cur->next = new_eof(vm, body_end);
+    convert_pp_tokens(vm, head.next);
+
+    ComptimeVar *cv =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(ComptimeVar));
+    memset(cv, 0, sizeof(ComptimeVar));
+    cv->name = name;
+    cv->decl_tokens = head.next;
+    cv->next = vm->compiler.comptime_vars;
+    vm->compiler.comptime_vars = cv;
+
+    if (vm->debug_vm)
+        printf("Captured comptime var '%s'\n", name);
+
+    return body_end;
+}
+
 static Hideset *new_hideset(JCC *vm, char *name) {
     Hideset *hs = arena_alloc(&vm->compiler.parser_arena, sizeof(Hideset));
     memset(hs, 0, sizeof(Hideset));
@@ -1817,8 +1910,35 @@ static Token *preprocess2(JCC *vm, Token *tok) {
                 while (comptime_tok && !comptime_tok->at_bol &&
                        comptime_tok->kind != TK_EOF)
                     comptime_tok = comptime_tok->next;
-                tok = extract_pragma_compiletime_function(vm, comptime_tok,
-                                                          "comptime", false, false);
+                // Detect variable vs function: scan (respecting brace depth) for
+                // "ident (" before ";". If found, it's a function; otherwise a var.
+                bool looks_like_function = false;
+                {
+                    Token *probe = comptime_tok;
+                    int brace_depth = 0;
+                    while (probe && probe->kind != TK_EOF) {
+                        if (equal(probe, "{"))
+                            brace_depth++;
+                        else if (equal(probe, "}"))
+                            brace_depth--;
+                        else if (brace_depth == 0) {
+                            if (equal(probe, ";"))
+                                break;
+                            if (probe->kind == TK_IDENT && probe->next &&
+                                equal(probe->next, "(")) {
+                                looks_like_function = true;
+                                break;
+                            }
+                        }
+                        probe = probe->next;
+                    }
+                }
+                if (looks_like_function) {
+                    tok = extract_pragma_compiletime_function(vm, comptime_tok,
+                                                              "comptime", false, false);
+                } else {
+                    tok = extract_pragma_comptime_var(vm, comptime_tok);
+                }
             } else {
                 do { tok = tok->next; } while (!tok->at_bol);
             }

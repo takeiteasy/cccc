@@ -190,6 +190,61 @@ int main(void) {
 Pragma macros and comptime helpers are compiled together, so they can call each
 other even when the callee appears later in the translation unit.
 
+## Comptime Variables (ticket #188)
+
+`#pragma comptime` can also precede a **variable or struct declaration** with a
+constant initializer. The value is evaluated during the pre-parse phase and
+stored so that pragma macros can read it at compile time.
+
+### Scalar comptime variables
+
+```c
+#pragma comptime
+int tile_size = 64;
+
+#pragma comptime
+double pi = 3.14159;
+
+#pragma macro
+_Node *area_of_n_tiles(_Node *n) {
+    int64_t ts = _AST_GET_COMPTIME_INT("tile_size");
+    return _QUOTE("$$ * $$", n, _AST_INT_LITERAL(ts * ts));
+}
+```
+
+| API | Returns | Description |
+|---|---|---|
+| `_AST_GET_COMPTIME_INT(name)` | `int64_t` | Integer value of a comptime scalar |
+| `_AST_GET_COMPTIME_FLOAT(name)` | `double` | Float/double value of a comptime scalar |
+| `_AST_GET_COMPTIME_VAR(name)` | `_Node *` | Comptime scalar as an AST literal node |
+
+### Struct comptime variables
+
+```c
+#pragma comptime
+struct Config { int width; int height; int channels; } cfg = { 1920, 1080, 3 };
+
+#pragma macro
+_Node *pixel_count(void) {
+    _Node *w = _AST_GET_COMPTIME_MEMBER("cfg", "width");
+    _Node *h = _AST_GET_COMPTIME_MEMBER("cfg", "height");
+    return _AST_BINARY(_MUL, w, h);
+}
+```
+
+`_AST_GET_COMPTIME_MEMBER(var_name, field)` returns the field's value as an
+AST literal node. Integer and float/double members are supported. Pointer and
+array members are not accessible this way (ticket #188 scope).
+
+### Scope notes
+
+- Comptime variables must have **constant initializers** (literals and
+  arithmetic on literals). Calls to comptime functions in the initializer
+  require ticket #191.
+- Pointer and string variables produce a compile-time error at this point;
+  use `_AST_STRING_LITERAL` inside the macro body instead.
+- Comptime variables are **not emitted** into the output binary.
+
 ## Quasi-Quoting
 
 `_QUOTE(tmpl, ...)` parses a C expression or statement template and splices
