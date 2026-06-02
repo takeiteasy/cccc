@@ -88,11 +88,6 @@ void register_posix_functions(JCC *vm) {
     cc_register_cfunc(vm, "creat", (void*)wrap_creat, 2, 0);
     cc_register_variadic_cfunc(vm, "fcntl", (void*)fcntl, 2, 0);
 
-    cc_register_cfunc(vm, "dlopen", (void*)dlopen, 2, 0);
-    cc_register_cfunc(vm, "dlsym", (void*)dlsym, 2, 0);
-    cc_register_cfunc(vm, "dlclose", (void*)dlclose, 1, 0);
-    cc_register_cfunc(vm, "dlerror", (void*)dlerror, 0, 0);
-
     cc_register_cfunc(vm, "strcasecmp", (void*)strcasecmp, 2, 0);
     cc_register_cfunc(vm, "strncasecmp", (void*)strncasecmp, 3, 0);
     cc_register_cfunc(vm, "bcmp", (void*)bcmp, 3, 0);

@@ -251,7 +251,7 @@ POSIX headers are embedded and backed by host OS calls. They are only available 
 |---|---|---|
 | `<arpa/inet.h>` | ✓ | Network byte-order conversion (`htonl`, `htons`, `ntohl`, `ntohs`), address manipulation (`inet_addr`, `inet_ntoa`, `inet_ntop`, `inet_pton`) |
 | `<dirent.h>` | ✓ | Directory entry iteration (`opendir`, `readdir`, `closedir`, `DIR`, `struct dirent`) |
-| `<dlfcn.h>` | ✓ | Dynamic loading (`dlopen`, `dlsym`, `dlclose`, `dlerror`) |
+| `<dlfcn.h>` | ✓ | VM-managed dynamic loading (`dlopen`, `dlsym`, `dlclose`, `dlerror`); `dlsym` function symbols are callable through typed function pointers for scalar/pointer signatures |
 | `<fcntl.h>` | ✓ | File control (`open`, `creat`, `fcntl`), `O_*` and `S_*` permission constants |
 | `<fnmatch.h>` | ✓ | Filename pattern matching (`fnmatch`, `FNM_*` constants) |
 | `<getopt.h>` | ✓ | Command-line option parsing (`getopt`, `getopt_long`, `optarg`, `optind`, `opterr`, `optopt`, `struct option`) |
@@ -283,5 +283,6 @@ POSIX headers are embedded and backed by host OS calls. They are only available 
 | Threading (`<threads.h>`, `pthread`) | JCC is single-threaded |
 | Atomic operations (`<stdatomic.h>` operations) | Headers present; operations are non-atomic |
 | Complex function call ABI | Passing or returning complex values by function call is not implemented |
+| Full native ABI for runtime `dlsym` calls | Runtime dynamic function calls support scalar/pointer signatures; aggregate by-value arguments/returns, callbacks, variadic function-pointer calls, and full platform ABI classification are not implemented |
 | Native code generation | JCC produces VM bytecode only |
 | Shared-library auto-linking for arbitrary undeclared symbols | `dlfcn.h` calls are available; `--library` opens requested libraries for registered FFI symbols |

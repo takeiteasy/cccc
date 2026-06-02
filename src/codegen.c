@@ -71,6 +71,14 @@ static Obj *find_global_obj(Obj *prog, const char *name) {
     return NULL;
 }
 
+static bool is_extern_func_name(Node *node, const char *name) {
+    if (!node || node->kind != ND_VAR || !node->var || !node->var->is_function ||
+        node->var->is_definition || !node->var->name)
+        return false;
+    return strlen(node->var->name) == strlen(name) &&
+           memcmp(node->var->name, name, strlen(name)) == 0;
+}
+
 static void add_data_reloc(JCC *vm, long long data_offset, int target_segment,
                            long long target_offset, long long addend) {
     if (vm->compiler.num_data_relocs >= MAX_CALLS)
@@ -1683,6 +1691,49 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             return;
         }
 
+        if (is_extern_func_name(node->lhs, "dlopen")) {
+            reset_temp_regs();
+            if (!node->args || !node->args->next)
+                error_tok(vm, node->tok, "dlopen requires path and mode arguments");
+            gen_expr(vm, node->args, REG_A0);
+            gen_expr(vm, node->args->next, REG_A1);
+            emit(vm, DLOPEN);
+            if (dest_reg != REG_A0)
+                emit_mov3(vm, dest_reg, REG_A0);
+            return;
+        }
+
+        if (is_extern_func_name(node->lhs, "dlsym")) {
+            reset_temp_regs();
+            if (!node->args || !node->args->next)
+                error_tok(vm, node->tok, "dlsym requires handle and symbol arguments");
+            gen_expr(vm, node->args, REG_A0);
+            gen_expr(vm, node->args->next, REG_A1);
+            emit(vm, DLSYM);
+            if (dest_reg != REG_A0)
+                emit_mov3(vm, dest_reg, REG_A0);
+            return;
+        }
+
+        if (is_extern_func_name(node->lhs, "dlclose")) {
+            reset_temp_regs();
+            if (!node->args)
+                error_tok(vm, node->tok, "dlclose requires a handle argument");
+            gen_expr(vm, node->args, REG_A0);
+            emit(vm, DLCLOSE);
+            if (dest_reg != REG_A0)
+                emit_mov3(vm, dest_reg, REG_A0);
+            return;
+        }
+
+        if (is_extern_func_name(node->lhs, "dlerror")) {
+            reset_temp_regs();
+            emit(vm, DLERROR);
+            if (dest_reg != REG_A0)
+                emit_mov3(vm, dest_reg, REG_A0);
+            return;
+        }
+
         // Check for FFI call - foreign functions use register-based calling
         // convention with operand-based metadata (ffi_idx, nargs,
         // double_arg_mask)
@@ -1829,8 +1880,16 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
 
         // Count total args and collect into array for indexed access
         int nargs = 0;
-        for (Node *a = node->args; a; a = a->next)
+        uint64_t call_double_arg_mask = 0;
+        for (Node *a = node->args; a; a = a->next) {
+            if (is_flonum(a->ty)) {
+                if (nargs >= 64)
+                    error_tok(vm, a->tok,
+                              "too many floating-point native-call arguments");
+                call_double_arg_mask |= (1ULL << nargs);
+            }
             nargs++;
+        }
 
         Node **arg_array = NULL;
         if (nargs > 0) {
@@ -2017,8 +2076,11 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             // Indirect call - function pointer in register
             int r_fn = alloc_temp_reg();
             gen_expr(vm, node->lhs, r_fn);
-            emit(vm, CALLI);
+            emit(vm, CALLN);
             emit_word(vm, ENCODE_R(r_fn));
+            emit_word(vm, ((JCCInstrWord)(is_flonum(node->ty) ? 1 : 0) << 16) |
+                              (JCCInstrWord)(nargs & 0xFFFF));
+            emit_i64(vm, (long long)call_double_arg_mask);
             free_temp_reg(r_fn);
         }
 

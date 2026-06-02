@@ -4825,6 +4825,27 @@ static void declare_builtin_functions(JCC *vm) {
     longjmp_ty->params->next = copy_type(vm, ty_int);
     vm->compiler.builtin_longjmp = new_gvar(vm, "longjmp", 7, longjmp_ty);
     vm->compiler.builtin_longjmp->is_definition = false;
+
+    Type *dlopen_ty = func_type(vm, pointer_to(vm, ty_void));
+    dlopen_ty->params = pointer_to(vm, ty_char);
+    dlopen_ty->params->next = copy_type(vm, ty_int);
+    vm->compiler.builtin_dlopen = new_gvar(vm, "dlopen", 6, dlopen_ty);
+    vm->compiler.builtin_dlopen->is_definition = false;
+
+    Type *dlsym_ty = func_type(vm, pointer_to(vm, ty_void));
+    dlsym_ty->params = pointer_to(vm, ty_void);
+    dlsym_ty->params->next = pointer_to(vm, ty_char);
+    vm->compiler.builtin_dlsym = new_gvar(vm, "dlsym", 5, dlsym_ty);
+    vm->compiler.builtin_dlsym->is_definition = false;
+
+    Type *dlclose_ty = func_type(vm, ty_int);
+    dlclose_ty->params = pointer_to(vm, ty_void);
+    vm->compiler.builtin_dlclose = new_gvar(vm, "dlclose", 7, dlclose_ty);
+    vm->compiler.builtin_dlclose->is_definition = false;
+
+    Type *dlerror_ty = func_type(vm, pointer_to(vm, ty_char));
+    vm->compiler.builtin_dlerror = new_gvar(vm, "dlerror", 7, dlerror_ty);
+    vm->compiler.builtin_dlerror->is_definition = false;
 }
 
 // program = (typedef | function-definition | global-variable)*

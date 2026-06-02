@@ -7,6 +7,6 @@ int main(void) {
     void *sym = dlsym(handle, "printf");
     if (!sym) return 2;
 
-    if (dlclose(handle) != 0) return 3;
+    if (dlclose(handle) == 0) return 3;
     return 42;
 }

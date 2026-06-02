@@ -356,6 +356,16 @@ int vm_heap_grow(JCC *vm, size_t need);
 // Returns 0 on success, -1 when the reservation floor is reached.
 int vm_stack_grow(JCC *vm, int slots_needed);
 
+long long jcc_rt_dlopen(JCC *vm, const char *path, int mode);
+long long jcc_rt_dlsym(JCC *vm, long long handle_token, const char *symbol);
+long long jcc_rt_dlclose(JCC *vm, long long handle_token);
+long long jcc_rt_dlerror(JCC *vm);
+DynamicSymbol *jcc_find_dynamic_symbol(JCC *vm, long long token);
+int jcc_call_native_function(JCC *vm, void *func_ptr, const char *name,
+                             long long *args, int actual_nargs,
+                             uint64_t double_arg_mask, int returns_double,
+                             int is_variadic, int num_fixed_args);
+
 //
 // hashmap.c
 //

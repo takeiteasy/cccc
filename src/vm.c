@@ -23,6 +23,209 @@
 #include "jcc.h"
 #include "./internal.h"
 
+#define JCC_DYN_TOKEN_BASE (-0x4a434300LL)
+
+static void jcc_set_dyn_error(JCC *vm, const char *fmt, ...) {
+    if (!vm)
+        return;
+    free(vm->dyn_error);
+    vm->dyn_error = NULL;
+
+    va_list ap;
+    va_start(ap, fmt);
+    va_list ap2;
+    va_copy(ap2, ap);
+    int n = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+    if (n >= 0) {
+        vm->dyn_error = malloc((size_t)n + 1);
+        if (vm->dyn_error)
+            vsnprintf(vm->dyn_error, (size_t)n + 1, fmt, ap2);
+    }
+    va_end(ap2);
+}
+
+static void jcc_clear_dyn_error(JCC *vm) {
+    if (!vm)
+        return;
+    free(vm->dyn_error);
+    vm->dyn_error = NULL;
+}
+
+static DynamicLibrary *jcc_find_dynamic_library(JCC *vm, long long token,
+                                                int *idx_out) {
+    if (!vm)
+        return NULL;
+    for (int i = 0; i < vm->dynlib_count; i++) {
+        if (vm->dynlibs[i].token == (int)token && !vm->dynlibs[i].is_closed) {
+            if (idx_out)
+                *idx_out = i;
+            return &vm->dynlibs[i];
+        }
+    }
+    return NULL;
+}
+
+DynamicSymbol *jcc_find_dynamic_symbol(JCC *vm, long long token) {
+    if (!vm)
+        return NULL;
+    for (int i = 0; i < vm->dynsym_count; i++) {
+        DynamicSymbol *sym = &vm->dynsyms[i];
+        if (sym->token == (int)token && sym->is_live)
+            return sym;
+    }
+    return NULL;
+}
+
+static int jcc_add_dynamic_library(JCC *vm, void *handle, const char *path) {
+    if (vm->dynlib_count >= vm->dynlib_capacity) {
+        int new_cap = vm->dynlib_capacity ? vm->dynlib_capacity * 2 : 16;
+        DynamicLibrary *new_libs =
+            realloc(vm->dynlibs, (size_t)new_cap * sizeof(DynamicLibrary));
+        if (!new_libs) {
+            jcc_set_dyn_error(vm, "dynamic library registry allocation failed");
+            return 0;
+        }
+        vm->dynlibs = new_libs;
+        vm->dynlib_capacity = new_cap;
+    }
+
+    int token = JCC_DYN_TOKEN_BASE - vm->dyn_next_token++;
+    vm->dynlibs[vm->dynlib_count++] = (DynamicLibrary){
+        .handle = handle,
+        .path = path ? strdup(path) : NULL,
+        .token = token,
+        .live_symbol_count = 0,
+        .is_closed = 0,
+    };
+    return token;
+}
+
+static int jcc_add_dynamic_symbol(JCC *vm, int lib_idx, void *func_ptr,
+                                  const char *name) {
+    if (vm->dynsym_count >= vm->dynsym_capacity) {
+        int new_cap = vm->dynsym_capacity ? vm->dynsym_capacity * 2 : 32;
+        DynamicSymbol *new_syms =
+            realloc(vm->dynsyms, (size_t)new_cap * sizeof(DynamicSymbol));
+        if (!new_syms) {
+            jcc_set_dyn_error(vm, "dynamic symbol registry allocation failed");
+            return 0;
+        }
+        vm->dynsyms = new_syms;
+        vm->dynsym_capacity = new_cap;
+    }
+
+    int token = JCC_DYN_TOKEN_BASE - vm->dyn_next_token++;
+    vm->dynsyms[vm->dynsym_count++] = (DynamicSymbol){
+        .func_ptr = func_ptr,
+        .name = name ? strdup(name) : NULL,
+        .token = token,
+        .library_index = lib_idx,
+        .is_live = 1,
+    };
+    vm->dynlibs[lib_idx].live_symbol_count++;
+    return token;
+}
+
+long long jcc_rt_dlopen(JCC *vm, const char *path, int mode) {
+    if (!vm)
+        return 0;
+    jcc_clear_dyn_error(vm);
+
+#if defined(_WIN32) || defined(_WIN64)
+    (void)mode;
+    HMODULE handle = path ? LoadLibraryA(path) : GetModuleHandleA(NULL);
+    if (!handle) {
+        jcc_set_dyn_error(vm, "dlopen failed: error code %lu",
+                          (unsigned long)GetLastError());
+        return 0;
+    }
+    return jcc_add_dynamic_library(vm, (void *)handle, path);
+#else
+    void *handle = dlopen(path, mode ? mode : RTLD_LAZY);
+    if (!handle) {
+        const char *err = dlerror();
+        jcc_set_dyn_error(vm, "%s", err ? err : "dlopen failed");
+        return 0;
+    }
+    return jcc_add_dynamic_library(vm, handle, path);
+#endif
+}
+
+long long jcc_rt_dlsym(JCC *vm, long long handle_token, const char *symbol) {
+    if (!vm || !symbol) {
+        jcc_set_dyn_error(vm, "dlsym requires a symbol name");
+        return 0;
+    }
+    jcc_clear_dyn_error(vm);
+
+    int lib_idx = -1;
+    DynamicLibrary *lib = jcc_find_dynamic_library(vm, handle_token, &lib_idx);
+    if (!lib) {
+        jcc_set_dyn_error(vm, "invalid dynamic library handle");
+        return 0;
+    }
+
+#if defined(_WIN32) || defined(_WIN64)
+    void *ptr = (void *)GetProcAddress((HMODULE)lib->handle, symbol);
+    if (!ptr) {
+        jcc_set_dyn_error(vm, "dlsym failed for '%s': error code %lu", symbol,
+                          (unsigned long)GetLastError());
+        return 0;
+    }
+#else
+    dlerror();
+    void *ptr = dlsym(lib->handle, symbol);
+    const char *err = dlerror();
+    if (err) {
+        jcc_set_dyn_error(vm, "%s", err);
+        return 0;
+    }
+#endif
+
+    return jcc_add_dynamic_symbol(vm, lib_idx, ptr, symbol);
+}
+
+long long jcc_rt_dlclose(JCC *vm, long long handle_token) {
+    if (!vm)
+        return -1;
+    jcc_clear_dyn_error(vm);
+
+    int lib_idx = -1;
+    DynamicLibrary *lib = jcc_find_dynamic_library(vm, handle_token, &lib_idx);
+    (void)lib_idx;
+    if (!lib) {
+        jcc_set_dyn_error(vm, "invalid dynamic library handle");
+        return -1;
+    }
+    if (lib->live_symbol_count > 0) {
+        jcc_set_dyn_error(vm, "cannot dlclose handle with live callable symbols");
+        return -1;
+    }
+
+#if defined(_WIN32) || defined(_WIN64)
+    if (lib->path && !FreeLibrary((HMODULE)lib->handle)) {
+        jcc_set_dyn_error(vm, "dlclose failed: error code %lu",
+                          (unsigned long)GetLastError());
+        return -1;
+    }
+#else
+    if (dlclose(lib->handle) != 0) {
+        const char *err = dlerror();
+        jcc_set_dyn_error(vm, "%s", err ? err : "dlclose failed");
+        return -1;
+    }
+#endif
+    lib->is_closed = 1;
+    return 0;
+}
+
+long long jcc_rt_dlerror(JCC *vm) {
+    if (!vm || !vm->dyn_error)
+        return 0;
+    return (long long)vm->dyn_error;
+}
+
 #define X(NAME, OPERANDS) extern int op_##NAME##_fn(JCC *vm);
 OPS_X
 #undef X
@@ -354,6 +557,15 @@ void cc_init(JCC *vm, uint32_t flags) {
     // For now, initialize to fixed value; it will be regenerated if random canaries enabled
     vm->stack_canary = STACK_CANARY;
 
+    vm->dynlibs = NULL;
+    vm->dynlib_count = 0;
+    vm->dynlib_capacity = 0;
+    vm->dynsyms = NULL;
+    vm->dynsym_count = 0;
+    vm->dynsym_capacity = 0;
+    vm->dyn_next_token = 1;
+    vm->dyn_error = NULL;
+
     // Add default system include path for <...> includes
     cc_system_include(vm, "./include");
 
@@ -467,6 +679,25 @@ void cc_destroy(JCC *vm) {
             free(vm->compiler.ffi_table[i].name);
         free(vm->compiler.ffi_table);
     }
+
+    for (int i = 0; i < vm->dynlib_count; i++) {
+        DynamicLibrary *lib = &vm->dynlibs[i];
+        if (lib->handle && !lib->is_closed) {
+#if defined(_WIN32) || defined(_WIN64)
+            if (lib->path)
+                FreeLibrary((HMODULE)lib->handle);
+#else
+            dlclose(lib->handle);
+#endif
+        }
+        free(lib->path);
+    }
+    for (int i = 0; i < vm->dynsym_count; i++)
+        free(vm->dynsyms[i].name);
+    free(vm->dynlibs);
+    free(vm->dynsyms);
+    free(vm->dyn_error);
+    vm->dyn_error = NULL;
 
     // Free error message buffer if set
     if (vm->error_message) {

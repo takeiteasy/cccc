@@ -53,6 +53,7 @@ extern "C" {
     X(JMP, 1)   /* Unconditional jump */                                       \
     X(CALL, 1)  /* Call function (direct) */                                   \
     X(CALLI, 1) /* Call function (indirect via register) */                    \
+    X(CALLN, 4) /* Native-aware indirect call */                               \
     X(JMPT, 3)  /* Jump table */                                               \
     X(JMPI, 1)  /* Indirect jump */                                            \
     /* VM memory operations (self-contained, no system calls) */               \
@@ -69,6 +70,10 @@ extern "C" {
     X(ZX2, 1)   /* Zero extend 2 bytes to 8 bytes */                           \
     X(ZX4, 1)   /* Zero extend 4 bytes to 8 bytes */                           \
     X(CALLF, 4) /* Foreign function interface */                               \
+    X(DLOPEN, 0)                                                                \
+    X(DLSYM, 0)                                                                 \
+    X(DLCLOSE, 0)                                                               \
+    X(DLERROR, 0)                                                               \
     /* Memory safety opcodes (keep legacy for instrumentation) */              \
     X(CHKB, 1)  /* Check array bounds */                                       \
     X(CHKI, 2)  /* Check initialization */                                     \
@@ -877,6 +882,22 @@ typedef struct ForeignFunc {
     int is_dynamic_placeholder; // 1 for extern declarations awaiting dlsym
 } ForeignFunc;
 
+typedef struct DynamicLibrary {
+    void *handle;
+    char *path;
+    int token;
+    int live_symbol_count;
+    int is_closed;
+} DynamicLibrary;
+
+typedef struct DynamicSymbol {
+    void *func_ptr;
+    char *name;
+    int token;
+    int library_index;
+    int is_live;
+} DynamicSymbol;
+
 /*!
  @struct AllocHeader
  @abstract Metadata header stored before each heap allocation for tracking.
@@ -1272,6 +1293,10 @@ typedef struct Compiler {
     Obj *builtin_alloca;   // Builtin alloca function
     Obj *builtin_setjmp;   // Builtin setjmp function
     Obj *builtin_longjmp;  // Builtin longjmp function
+    Obj *builtin_dlopen;   // VM-managed dlopen
+    Obj *builtin_dlsym;    // VM-managed dlsym
+    Obj *builtin_dlclose;  // VM-managed dlclose
+    Obj *builtin_dlerror;  // VM-managed dlerror
     TypeNameRecord *type_names; // Persistent typedef/tag declarations for -M
 
     // Arena allocator for parser frontend (tokens, AST, preprocessor state)
@@ -1463,6 +1488,15 @@ struct JCC {
 
     // Debugger state (enable via JCC_ENABLE_DEBUGGER flag)
     Debugger dbg;
+
+    DynamicLibrary *dynlibs;
+    int dynlib_count;
+    int dynlib_capacity;
+    DynamicSymbol *dynsyms;
+    int dynsym_count;
+    int dynsym_capacity;
+    int dyn_next_token;
+    char *dyn_error;
 
     // Compiler state (preprocessor, parser, codegen)
     Compiler compiler;

@@ -278,6 +278,10 @@ All features listed below can be enabled individually or through the safety leve
 
 ## FFI Safety Features
 
+The allow/deny/disable policy described here is tracked as FFI safety work and
+is not currently enforced by the scalar native-call bridge or runtime `dlsym`
+call path.
+
 - `--ffi-allow=func1,func2` **FFI function whitelist**
   - Comma-separated list of allowed FFI function names
   - When allow list is non-empty, only listed functions can be called via FFI

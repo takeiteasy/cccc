@@ -124,6 +124,13 @@ Dynamic libraries can be opened with `--library`/`--link` and searched with
 declarations are resolved with `dlsym` before execution; unresolved symbols are
 reported before the VM starts.
 
+Programs can also use `<dlfcn.h>` at runtime. `dlopen`, `dlsym`, `dlclose`, and
+`dlerror` are VM-managed builtins; symbols returned by `dlsym` are callable
+through typed function pointers for supported scalar/pointer signatures. JCC
+keeps ordinary VM function pointers separate from native symbol tokens, rejects
+arbitrary numeric native-call targets, and refuses `dlclose` while callable
+symbols from that handle are live.
+
 ## Building
 
 ```bash

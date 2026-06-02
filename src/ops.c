@@ -1208,6 +1208,69 @@ int op_CALLI_fn(JCC *vm) {
     return 0;
 }
 
+int op_CALLN_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rs = (int)(operands & 0xFF);
+    JCCInstrWord meta = cc_read_word(vm);
+    int actual_nargs = (int)(meta & 0xFFFF);
+    int returns_double = (int)((meta >> 16) & 1);
+    uint64_t double_arg_mask = (uint64_t)cc_read_i64(vm);
+
+    long long target_value = vm->regs[rs];
+    DynamicSymbol *sym = jcc_find_dynamic_symbol(vm, target_value);
+    if (sym) {
+        enum { CALLN_STACK_ARG_SLOTS = 32 };
+        long long stack_args_buf[CALLN_STACK_ARG_SLOTS];
+        long long *heap_args = NULL;
+        long long *args = stack_args_buf;
+        if (actual_nargs > CALLN_STACK_ARG_SLOTS) {
+            heap_args = malloc((size_t)actual_nargs * sizeof(long long));
+            if (!heap_args) {
+                printf("error: failed to allocate args for native call\n");
+                return -1;
+            }
+            args = heap_args;
+        }
+
+        int int_reg_idx = 0;
+        int fp_reg_idx = 0;
+        for (int i = 0; i < actual_nargs; i++) {
+            if (i >= 8) {
+                args[i] = vm->sp[i - 8];
+            } else if (i < 64 && (double_arg_mask & (1ULL << i))) {
+                union {
+                    double d;
+                    long long ll;
+                } conv;
+                conv.d = vm->fregs[FREG_A0 + fp_reg_idx++];
+                args[i] = conv.ll;
+            } else {
+                args[i] = vm->regs[REG_A0 + int_reg_idx++];
+            }
+        }
+
+        int rc = jcc_call_native_function(vm, sym->func_ptr, sym->name, args,
+                                          actual_nargs, double_arg_mask,
+                                          returns_double, 0, actual_nargs);
+        free(heap_args);
+        return rc;
+    }
+
+    long long ret_addr = (long long)vm->pc;
+    if (check_stack_overflow(vm, 1)) return -1;
+    *--vm->sp = ret_addr;
+    if (vm->flags & JCC_CFI) {
+        *--vm->shadow_sp = ret_addr;
+    }
+    JCCPc target = cc_byte_offset_to_pc(target_value);
+    if (target == JCC_INVALID_PC || target > vm->text_ptr) {
+        printf("error: invalid indirect call target: %lld\n", target_value);
+        return -1;
+    }
+    vm->pc = target;
+    return 0;
+}
+
 int op_JMPT_fn(JCC *vm) {
     JCCPc table_pc = cc_read_word(vm);
     JCCInstrWord count = cc_read_word(vm);
@@ -1851,66 +1914,46 @@ int op_LONGJMP_fn(JCC *vm) {
     return 0;
 }
 
+int op_DLOPEN_fn(JCC *vm) {
+    const char *path = (const char *)vm->regs[REG_A0];
+    int mode = (int)vm->regs[REG_A1];
+    vm->regs[REG_A0] = jcc_rt_dlopen(vm, path, mode);
+    return 0;
+}
+
+int op_DLSYM_fn(JCC *vm) {
+    long long handle = vm->regs[REG_A0];
+    const char *symbol = (const char *)vm->regs[REG_A1];
+    vm->regs[REG_A0] = jcc_rt_dlsym(vm, handle, symbol);
+    return 0;
+}
+
+int op_DLCLOSE_fn(JCC *vm) {
+    vm->regs[REG_A0] = jcc_rt_dlclose(vm, vm->regs[REG_A0]);
+    return 0;
+}
+
+int op_DLERROR_fn(JCC *vm) {
+    vm->regs[REG_A0] = jcc_rt_dlerror(vm);
+    return 0;
+}
+
 // ========== FFI ==========
 
-int op_CALLF_fn(JCC *vm) {
-    // Foreign function call using register-based calling convention
-    // Operands: [ffi_idx, nargs, double_arg_mask]
-    // Arguments: REG_A0-A7 for integers, FREG_A0-A7 for doubles (based on
-    // double_arg_mask)
-
-    int func_idx = (int)cc_read_word(vm);
-    int actual_nargs = (int)cc_read_word(vm);
-    uint64_t double_arg_mask = (uint64_t)cc_read_i64(vm);
-
-    if (func_idx < 0 || func_idx >= vm->compiler.ffi_count) {
-        printf("error: invalid FFI function index: %d\n", func_idx);
+int jcc_call_native_function(JCC *vm, void *func_ptr, const char *name,
+                             long long *args, int actual_nargs,
+                             uint64_t double_arg_mask, int returns_double,
+                             int is_variadic, int num_fixed_args) {
+    if (!func_ptr) {
+        printf("error: native function '%s' not resolved\n",
+               name ? name : "<anonymous>");
         return -1;
-    }
-
-    ForeignFunc *ff = &vm->compiler.ffi_table[func_idx];
-    if (!ff->func_ptr) {
-        printf("error: FFI function '%s' not resolved\n", ff->name);
-        return -1;
-    }
-
-    if (vm->debug_vm)
-        printf("CALLF: calling %s with %d args (fixed: %d, variadic: %d, "
-               "double_mask: 0x%llx)\n",
-               ff->name, actual_nargs, ff->num_fixed_args, ff->is_variadic,
-               (unsigned long long)double_arg_mask);
-
-    // Collect source-order 64-bit argument slots. Codegen places slots 0-7 in
-    // REG_A0-A7 and pushes slots 8+ at vm->sp[0...].
-    enum { CALLF_STACK_ARG_SLOTS = 32 };
-    long long stack_args_buf[CALLF_STACK_ARG_SLOTS];
-    long long *heap_args = NULL;
-    long long *args = stack_args_buf;
-    if (actual_nargs > CALLF_STACK_ARG_SLOTS) {
-        heap_args = malloc((size_t)actual_nargs * sizeof(long long));
-        if (!heap_args) {
-            printf("error: failed to allocate args for FFI\n");
-            return -1;
-        }
-        args = heap_args;
-    }
-
-    for (int i = 0; i < actual_nargs; i++) {
-        if (i < 8)
-            args[i] = vm->regs[REG_A0 + i];
-        else
-            args[i] = vm->sp[i - 8];
-
-        if (vm->debug_vm)
-            printf("  arg[%d] = 0x%llx (%lld) [%s]\n", i, args[i], args[i],
-                   (i < 64 && (double_arg_mask & (1ULL << i))) ? "double"
-                                                                : "int");
     }
 
     // Inline assembly implementation
 #if defined(__aarch64__) || defined(__arm64__)
     // ARM64 inline assembly - uses register calling convention
-    int num_fixed = ff->is_variadic ? ff->num_fixed_args : actual_nargs;
+    int num_fixed = is_variadic ? num_fixed_args : actual_nargs;
     int int_reg_idx = 0;
     int fp_reg_idx = 0;
     int stack_args = 0;
@@ -2032,7 +2075,7 @@ int op_CALLF_fn(JCC *vm) {
 
     int stack_bytes = (stack_args * 8 + 15) & ~15;
 
-    if (ff->returns_double) {
+    if (returns_double) {
         register double result __asm__("d0");
         __asm__ volatile("sub sp, sp, %2\n\t"
                          "cbz %2, 2f\n\t"
@@ -2048,7 +2091,7 @@ int op_CALLF_fn(JCC *vm) {
                          "blr %1\n\t"
                          "add sp, sp, %2"
                          : "=r"(result)
-                         : "r"(ff->func_ptr), "r"((long long)stack_bytes),
+                         : "r"(func_ptr), "r"((long long)stack_bytes),
                            "r"(stack_area), "r"((long long)stack_args), "r"(x0),
                            "r"(x1), "r"(x2), "r"(x3), "r"(x4), "r"(x5), "r"(x6),
                            "r"(x7), "w"(d0), "w"(d1), "w"(d2), "w"(d3), "w"(d4),
@@ -2072,7 +2115,7 @@ int op_CALLF_fn(JCC *vm) {
                          "blr %1\n\t"
                          "add sp, sp, %2"
                          : "=r"(result)
-                         : "r"(ff->func_ptr), "r"((long long)stack_bytes),
+                         : "r"(func_ptr), "r"((long long)stack_bytes),
                            "r"(stack_area), "r"((long long)stack_args), "r"(x0),
                            "r"(x1), "r"(x2), "r"(x3), "r"(x4), "r"(x5), "r"(x6),
                            "r"(x7), "w"(d0), "w"(d1), "w"(d2), "w"(d3), "w"(d4),
@@ -2087,7 +2130,7 @@ int op_CALLF_fn(JCC *vm) {
     // FP args: xmm0-xmm7
     // For variadic functions, AL contains number of vector registers used
 
-    int num_fixed = ff->is_variadic ? ff->num_fixed_args : actual_nargs;
+    int num_fixed = is_variadic ? num_fixed_args : actual_nargs;
     int int_reg_idx = 0;
     int fp_reg_idx = 0;
     int stack_args = 0;
@@ -2205,9 +2248,9 @@ int op_CALLF_fn(JCC *vm) {
     int stack_bytes = (stack_args * 8 + 15) & ~15;
 
     // For variadic functions, AL must contain number of XMM registers used
-    unsigned char num_xmm = ff->is_variadic ? (unsigned char)num_xmm_used : 0;
+    unsigned char num_xmm = is_variadic ? (unsigned char)num_xmm_used : 0;
 
-    if (ff->returns_double) {
+    if (returns_double) {
         register double result __asm__("xmm0");
         if (stack_bytes > 0) {
             long long sb = stack_bytes;
@@ -2232,7 +2275,7 @@ int op_CALLF_fn(JCC *vm) {
                 "call *%1\n\t"         // Call the function
                 "add %%r10, %%rsp"     // Restore stack
                 : "=x"(result)
-                : "r"(ff->func_ptr), "m"(sb), "r"(stack_area), "m"(sa),
+                : "r"(func_ptr), "m"(sb), "r"(stack_area), "m"(sa),
                   "m"(num_xmm), "r"(rdi), "r"(rsi), "r"(rdx), "r"(rcx), "r"(r8),
                   "r"(r9), "x"(xmm0), "x"(xmm1), "x"(xmm2), "x"(xmm3),
                   "x"(xmm4), "x"(xmm5), "x"(xmm6), "x"(xmm7)
@@ -2241,7 +2284,7 @@ int op_CALLF_fn(JCC *vm) {
             __asm__ volatile("movzbl %1, %%eax\n\t" // Load num_xmm into AL
                              "call *%2\n\t"         // Call the function
                              : "=x"(result)
-                             : "m"(num_xmm), "r"(ff->func_ptr), "r"(rdi),
+                             : "m"(num_xmm), "r"(func_ptr), "r"(rdi),
                                "r"(rsi), "r"(rdx), "r"(rcx), "r"(r8), "r"(r9),
                                "x"(xmm0), "x"(xmm1), "x"(xmm2), "x"(xmm3),
                                "x"(xmm4), "x"(xmm5), "x"(xmm6), "x"(xmm7)
@@ -2273,7 +2316,7 @@ int op_CALLF_fn(JCC *vm) {
                 "call *%1\n\t"         // Call the function
                 "add %%r10, %%rsp"     // Restore stack
                 : "=a"(result)
-                : "r"(ff->func_ptr), "m"(sb), "r"(stack_area), "m"(sa),
+                : "r"(func_ptr), "m"(sb), "r"(stack_area), "m"(sa),
                   "m"(num_xmm), "r"(rdi), "r"(rsi), "r"(rdx), "r"(rcx), "r"(r8),
                   "r"(r9), "x"(xmm0), "x"(xmm1), "x"(xmm2), "x"(xmm3),
                   "x"(xmm4), "x"(xmm5), "x"(xmm6), "x"(xmm7)
@@ -2282,7 +2325,7 @@ int op_CALLF_fn(JCC *vm) {
             __asm__ volatile("movzbl %1, %%eax\n\t" // Load num_xmm into AL
                              "call *%2\n\t"         // Call the function
                              : "=a"(result)
-                             : "m"(num_xmm), "r"(ff->func_ptr), "r"(rdi),
+                             : "m"(num_xmm), "r"(func_ptr), "r"(rdi),
                                "r"(rsi), "r"(rdx), "r"(rcx), "r"(r8), "r"(r9),
                                "x"(xmm0), "x"(xmm1), "x"(xmm2), "x"(xmm3),
                                "x"(xmm4), "x"(xmm5), "x"(xmm6), "x"(xmm7)
@@ -2293,8 +2336,64 @@ int op_CALLF_fn(JCC *vm) {
 #else
 #error "FFI inline assembly not implemented for this platform."
 #endif
-    free(heap_args);
     return 0;
+}
+
+int op_CALLF_fn(JCC *vm) {
+    // Foreign function call using register-based calling convention
+    // Operands: [ffi_idx, nargs, double_arg_mask]
+    int func_idx = (int)cc_read_word(vm);
+    int actual_nargs = (int)cc_read_word(vm);
+    uint64_t double_arg_mask = (uint64_t)cc_read_i64(vm);
+
+    if (func_idx < 0 || func_idx >= vm->compiler.ffi_count) {
+        printf("error: invalid FFI function index: %d\n", func_idx);
+        return -1;
+    }
+
+    ForeignFunc *ff = &vm->compiler.ffi_table[func_idx];
+    if (!ff->func_ptr) {
+        printf("error: FFI function '%s' not resolved\n", ff->name);
+        return -1;
+    }
+
+    if (vm->debug_vm)
+        printf("CALLF: calling %s with %d args (fixed: %d, variadic: %d, "
+               "double_mask: 0x%llx)\n",
+               ff->name, actual_nargs, ff->num_fixed_args, ff->is_variadic,
+               (unsigned long long)double_arg_mask);
+
+    enum { CALLF_STACK_ARG_SLOTS = 32 };
+    long long stack_args_buf[CALLF_STACK_ARG_SLOTS];
+    long long *heap_args = NULL;
+    long long *args = stack_args_buf;
+    if (actual_nargs > CALLF_STACK_ARG_SLOTS) {
+        heap_args = malloc((size_t)actual_nargs * sizeof(long long));
+        if (!heap_args) {
+            printf("error: failed to allocate args for FFI\n");
+            return -1;
+        }
+        args = heap_args;
+    }
+
+    for (int i = 0; i < actual_nargs; i++) {
+        if (i < 8)
+            args[i] = vm->regs[REG_A0 + i];
+        else
+            args[i] = vm->sp[i - 8];
+
+        if (vm->debug_vm)
+            printf("  arg[%d] = 0x%llx (%lld) [%s]\n", i, args[i], args[i],
+                   (i < 64 && (double_arg_mask & (1ULL << i))) ? "double"
+                                                                : "int");
+    }
+
+    int rc = jcc_call_native_function(vm, ff->func_ptr, ff->name, args,
+                                      actual_nargs, double_arg_mask,
+                                      ff->returns_double, ff->is_variadic,
+                                      ff->num_fixed_args);
+    free(heap_args);
+    return rc;
 }
 
 // ========== Struct Return Buffer Support ==========
