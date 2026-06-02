@@ -1557,17 +1557,78 @@ static int quote_splice_kind(Token *tok) {
 }
 
 // Scan the token stream:
-//   - detects mixing of $N and $$ (calls error() on mix)
-//   - rewrites the k-th $$ to $k in the token stream (arena-allocated)
+//   - detects mixing of $N/$@N positional and $$/$@ incremental (error on mix)
+//   - rewrites the k-th $$ or $@ to a canonical $k or $@k token
+//     (collapsing the multi-token $@N / $@ sequences in-place)
+//   - sets *splice_mask (bit k-1) for each $@k splice index seen
 //   - returns the maximum index referenced (0 if no splice points)
 //   - returns -1 on mixing error
-static int quote_scan_and_rewrite(JCC *vm, Token *toks) {
+static int quote_scan_and_rewrite(JCC *vm, Token *toks, uint64_t *splice_mask) {
     bool has_positional = false;
     bool has_incremental = false;
     int max_index = 0;
     int incr_counter = 0;
+    if (splice_mask) *splice_mask = 0;
 
     for (Token *t = toks; t && t->kind != TK_EOF; t = t->next) {
+        // Check for $@ splice syntax: a lone '$' ident followed by '@' punct.
+        // $@N  → positional splice (index N)
+        // $@   → incremental splice (next sequential index)
+        if (t->kind == TK_IDENT && t->len == 1 && t->loc[0] == '$' &&
+            t->next && t->next->kind == TK_PUNCT &&
+            t->next->len == 1 && t->next->loc[0] == '@') {
+            Token *at_tok  = t->next;
+            Token *num_tok = at_tok->next;
+            int k;
+
+            if (num_tok && num_tok->kind == TK_NUM) {
+                // $@N positional splice
+                has_positional = true;
+                if (has_incremental) {
+                    error("__jcc_quote: cannot mix positional ($@N) and incremental "
+                          "($@ / $$) splice syntax in one template");
+                    return -1;
+                }
+                // Parse the index from the number token's text
+                int numlen = (num_tok->len < 20) ? num_tok->len : 20;
+                char buf[32];
+                memcpy(buf, num_tok->loc, numlen);
+                buf[numlen] = '\0';
+                k = atoi(buf);
+                if (k <= 0) {
+                    error("__jcc_quote: $@0 is not a valid splice index "
+                          "(splice indices start at 1)");
+                    return -1;
+                }
+                // Collapse three tokens ($ @ N) into one named $@k
+                char *newname = arena_format(vm, "$@%d", k);
+                t->loc = newname;
+                t->len = (int)strlen(newname);
+                t->next = num_tok->next; // skip @ and N tokens
+            } else {
+                // $@ incremental splice
+                has_incremental = true;
+                if (has_positional) {
+                    error("__jcc_quote: cannot mix positional ($@N) and incremental "
+                          "($@ / $$) splice syntax in one template");
+                    return -1;
+                }
+                incr_counter++;
+                k = incr_counter;
+                // Collapse two tokens ($ @) into one named $@k
+                char *newname = arena_format(vm, "$@%d", k);
+                t->loc = newname;
+                t->len = (int)strlen(newname);
+                t->next = at_tok->next; // skip @ token
+            }
+
+            if (k > max_index) max_index = k;
+            if (splice_mask && k >= 1 && k <= 64)
+                *splice_mask |= (uint64_t)1 << (k - 1);
+            continue;
+        }
+
+        // Regular $N / $$ scalar splice points
         int k = quote_splice_kind(t);
         if (k == 0) continue;
 
@@ -1601,11 +1662,11 @@ static int quote_scan_and_rewrite(JCC *vm, Token *toks) {
     return max_index;
 }
 
-// Push a placeholder variable $k into a Scope's var list (arena-allocated).
-// Typed from the corresponding argument node if available, else ty_long.
-static Obj *quote_push_placeholder(JCC *vm, Scope *sc, int k,
+// Push a placeholder variable with the given name into a Scope's var list
+// (arena-allocated).  Typed from the corresponding argument node if
+// available, else ty_long.
+static Obj *quote_push_placeholder(JCC *vm, Scope *sc, char *name,
                                     _Node *arg_node) {
-    char *name = arena_format(vm, "$%d", k);
     int name_len = (int)strlen(name);
 
     // Derive type from the argument node if available
@@ -1637,21 +1698,47 @@ static Obj *quote_push_placeholder(JCC *vm, Scope *sc, int k,
 // Substitution walk state
 typedef struct {
     Obj      *placeholder_vars[64]; // placeholder_vars[i] = Obj for $(i+1)
-    _Node **arg_nodes;
+    Obj      *splice_vars[64];      // splice_vars[i]      = Obj for $@(i+1)
+    _Node   **arg_nodes;
     int       n_args;
 } QuoteSubstState;
 
+// If stmt is an ND_EXPR_STMT whose sole expression is a reference to a splice
+// placeholder $@k, return the caller's node chain for index k.  Otherwise NULL.
+static _Node *splice_chain_for(QuoteSubstState *s, _Node *stmt) {
+    if (!stmt || stmt->kind != ND_EXPR_STMT) return NULL;
+    _Node *inner = stmt->lhs;
+    if (!inner || inner->kind != ND_VAR || !inner->var) return NULL;
+    for (int i = 0; i < s->n_args && i < 64; i++) {
+        if (s->splice_vars[i] && inner->var == s->splice_vars[i])
+            return s->arg_nodes[i]; // chain head (may be NULL = empty splice)
+    }
+    return NULL; // not a splice placeholder
+}
+
 // Walk the parsed tree and replace ND_VAR placeholder nodes with arg nodes.
 // Mirrors the transform_node() field traversal in pragma.c.
+// Splice placeholders ($@k) are expanded in statement-list positions (body).
+// Using $@k outside a statement-list position is a compile-time error.
 static _Node *quote_substitute(QuoteSubstState *s, _Node *node) {
     if (!node)
         return NULL;
 
     // If this is a var reference to one of our placeholders, substitute it
     if (node->kind == ND_VAR && node->var) {
+        // Scalar placeholder $k → 1:1 replacement
         for (int i = 0; i < s->n_args && i < 64; i++) {
             if (s->placeholder_vars[i] && node->var == s->placeholder_vars[i])
                 return s->arg_nodes[i];
+        }
+        // Splice placeholder $@k in a non-list context → error
+        for (int i = 0; i < s->n_args && i < 64; i++) {
+            if (s->splice_vars[i] && node->var == s->splice_vars[i]) {
+                error("__jcc_quote: $@%d is only valid in statement-list "
+                      "position (inside a block { }); cannot be used as an "
+                      "expression", i + 1);
+                return node; // return unchanged to avoid a NULL crash
+            }
         }
     }
 
@@ -1664,12 +1751,30 @@ static _Node *quote_substitute(QuoteSubstState *s, _Node *node) {
     node->init = quote_substitute(s, node->init);
     node->inc  = quote_substitute(s, node->inc);
 
-    // body is a statement chain linked via ->next
+    // body is a statement chain linked via ->next.
+    // Splice placeholders in body position expand to N statements.
     if (node->body) {
-        node->body = quote_substitute(s, node->body);
-        for (_Node *st = node->body; st; st = st->next)
-            if (st->next)
-                st->next = quote_substitute(s, st->next);
+        Node head_val = {};
+        Node *cur = &head_val;
+        for (_Node *st = node->body; st; ) {
+            _Node *next_st = st->next;
+            st->next = NULL; // isolate before recursing
+
+            _Node *chain = splice_chain_for(s, st);
+            if (chain) {
+                // Append the entire caller-provided chain
+                _Node *tail = chain;
+                while (tail->next) tail = tail->next;
+                cur->next = chain;
+                cur = tail;
+            } else {
+                _Node *sub = quote_substitute(s, st);
+                if (sub) { cur->next = sub; cur = sub; }
+            }
+            st = next_st;
+        }
+        cur->next = NULL;
+        node->body = head_val.next;
     }
 
     // args is an argument chain linked via ->next
@@ -1761,8 +1866,9 @@ static _Node *quote_core(JCC *vm, const char *tmpl,
         return NULL;
     convert_pp_tokens(vm, toks);
 
-    // 2. Scan, validate mixing, rewrite $$
-    int max_index = quote_scan_and_rewrite(vm, toks);
+    // 2. Scan, validate mixing, rewrite $$ / $@ / $@N
+    uint64_t splice_mask = 0;
+    int max_index = quote_scan_and_rewrite(vm, toks, &splice_mask);
     if (max_index < 0)
         return NULL; // mixing error already reported
 
@@ -1784,10 +1890,22 @@ static _Node *quote_core(JCC *vm, const char *tmpl,
     subst.arg_nodes = nodes;
     subst.n_args = (n < 64) ? n : 64;
 
+    // Register scalar placeholders $k for all referenced indices
     for (int k = 1; k <= max_index; k++) {
         _Node *arg = (k - 1 < n) ? nodes[k - 1] : NULL;
-        Obj *var = quote_push_placeholder(vm, &quote_scope, k, arg);
+        char *name = arena_format(vm, "$%d", k);
+        Obj *var = quote_push_placeholder(vm, &quote_scope, name, arg);
         subst.placeholder_vars[k - 1] = var;
+    }
+
+    // Register splice placeholders $@k for each $@k / $@ index seen
+    for (int k = 1; k <= max_index && k <= 64; k++) {
+        if (!(splice_mask & ((uint64_t)1 << (k - 1)))) continue;
+        char *name = arena_format(vm, "$@%d", k);
+        // Type doesn't matter for splice placeholders — the whole
+        // ND_EXPR_STMT wrapper is discarded during substitution.
+        Obj *var = quote_push_placeholder(vm, &quote_scope, name, NULL);
+        subst.splice_vars[k - 1] = var;
     }
 
     // 5. Parse (auto-detect expr vs stmt)
@@ -1828,6 +1946,7 @@ _Node *__jcc_quote(JCC *vm, const char *tmpl, ...) {
 
     // Scan the raw template string to derive max splice index without
     // tokenising (avoids double arena allocation in quote_core).
+    // Handles $N, $$, $@N, and $@ forms.
     int max_index = 0;
     int incr_count = 0;
 
@@ -1835,13 +1954,31 @@ _Node *__jcc_quote(JCC *vm, const char *tmpl, ...) {
         if (*p != '$') continue;
         const char *q = p + 1;
         if (*q == '$') {
-            // $$ incremental
+            // $$ incremental scalar splice
             incr_count++;
             if (incr_count > max_index)
                 max_index = incr_count;
             p = q; // skip second $
+        } else if (*q == '@') {
+            // $@N positional splice or $@ incremental splice
+            const char *r = q + 1;
+            if (*r >= '1' && *r <= '9') {
+                // $@N positional splice
+                int idx = 0;
+                while (*r >= '0' && *r <= '9')
+                    idx = idx * 10 + (*r++ - '0');
+                if (idx > max_index)
+                    max_index = idx;
+                p = r - 1; // loop will advance past last digit
+            } else {
+                // $@ incremental splice
+                incr_count++;
+                if (incr_count > max_index)
+                    max_index = incr_count;
+                p = q; // skip @
+            }
         } else if (*q >= '1' && *q <= '9') {
-            // $N positional
+            // $N positional scalar splice
             int n = 0;
             while (*q >= '0' && *q <= '9')
                 n = n * 10 + (*q++ - '0');
@@ -1849,7 +1986,7 @@ _Node *__jcc_quote(JCC *vm, const char *tmpl, ...) {
                 max_index = n;
             p = q - 1; // loop will increment past last digit
         }
-        // lone $ followed by non-digit/zero: not a splice point, ignore
+        // lone $ followed by anything else: not a splice point, ignore
     }
 
     // Collect exactly max_index nodes from va_args
@@ -1864,6 +2001,24 @@ _Node *__jcc_quote(JCC *vm, const char *tmpl, ...) {
     va_end(ap);
 
     return quote_core(vm, tmpl, arg_buf, n);
+}
+
+// Build a ->next-linked chain from an array of nodes and return the head.
+// Useful for constructing the list argument to a $@k splice.
+// A single node is a chain of length 1; passing count==0 returns NULL.
+_Node *__jcc_node_list(JCC *vm, _Node **nodes, int count) {
+    if (!vm || !nodes || count <= 0)
+        return NULL;
+
+    Node *head = nodes[0];
+    Node *cur  = head;
+    for (int i = 1; i < count; i++) {
+        if (!nodes[i]) break;
+        cur->next = nodes[i];
+        cur = cur->next;
+    }
+    if (cur) cur->next = NULL;
+    return head;
 }
 
 // ============================================================================

@@ -274,6 +274,48 @@ _Node *sum2(_Node *a, _Node *b) {
 Do not mix `$N` and `$$` in one template. Use `_QUOTE_N(tmpl, nodes, count)`
 when splice nodes are already in an array.
 
+### List splicing with `$@N` and `$@`
+
+`$@k;` in **statement-list position** expands an entire `->next`-linked node
+chain into the block, replacing one placeholder with N statements. This is
+typed unquote-splicing (ticket #172).
+
+```c
+#pragma macro
+_Node *double_inc(_Node *x) {
+    _Node *chain = _NODE_LIST((_Node*[]){
+        _QUOTE("$1 += 1;", x),
+        _QUOTE("$1 += 1;", x),
+    }, 2);
+    return _QUOTE("{ $@1; }", chain);
+}
+
+int get_plus_two(int v) {
+    double_inc(v);
+    return v;  // v + 2
+}
+```
+
+`$@` is the incremental (sequential) form, parallel to `$$`:
+
+```c
+#pragma macro
+_Node *two_increments(_Node *a, _Node *b) {
+    return _QUOTE("{ $@; $@; }",
+                  _QUOTE("$1 += 10;", a),
+                  _QUOTE("$1 += 20;", b));
+}
+```
+
+You can mix a scalar `$N` and a list `$@N` in the same template when both are
+positional. `_NODE_LIST(arr, count)` builds the `->next` chain from an array.
+An existing `->next` chain (e.g. `_AST_BLOCK(...)->body`) can also be passed
+directly as the splice argument.
+
+List splices are valid **only in statement-list position** (inside a `{ ... }`
+block). Using `$@k` as an expression operand is a compile-time error. Call-arg
+splicing (#194) and initializer splicing (#195) are not yet supported.
+
 ### `_QUOTE` inside generated function bodies
 
 `_QUOTE("return x;")` needs to know the enclosing function's return type to
@@ -534,6 +576,7 @@ debugging.
 | `_AST_VAR_REF(name)` | Variable reference |
 | `_AST_PARAM_REF(fn, name)` | Generated function parameter reference |
 | `_GENSYM(prefix)` | Unique arena-allocated symbol name using `__jcc_gensym` |
+| `_NODE_LIST(arr, count)` | Build a `->next`-linked node chain from an array for use as a `$@k` splice argument |
 | `_AST_BINARY(op, l, r)` | Binary expression |
 | `_AST_UNARY(op, operand)` | Unary expression |
 | `_AST_CAST(expr, ty)` | Cast expression |

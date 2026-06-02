@@ -225,12 +225,29 @@ void __jcc_macro_warning_at(JCC *vm, _Node *node, const char *fmt, ...)
 /*!
  * @function __jcc_quote
  * @abstract Parse a C code template string into an AST node, substituting
- *           $1/$2/... splice points with the provided argument nodes.
+ *           splice points with the provided argument nodes.
  * @param vm The VM context.
  * @param tmpl A C expression or statement as a string literal.
- *             Use $1, $2, ... to splice in argument nodes (1-indexed,
- *             reorderable, reusable).  Alternatively, use $$ for sequential
- *             (left-to-right) splice points — $$ and $N cannot be mixed.
+ *
+ *   **Scalar splices** — replace a single position with one node:
+ *     - `$1`, `$2`, ... positional (1-indexed, reorderable, reusable).
+ *     - `$$` sequential (left-to-right); cannot be mixed with `$N`.
+ *
+ *   **List splices** — expand a statement-position placeholder into a chain
+ *   of N statements (ticket #172):
+ *     - `$@1`, `$@2`, ... positional list splice.  The argument must be a
+ *       `->next`-linked node chain (see `_NODE_LIST` / `__jcc_node_list`).
+ *       Each `$@k;` in the template is replaced by the entire chain.
+ *     - `$@` sequential list splice, parallel to `$$`.
+ *     - List splice identifiers (`$@k`) may share their index with scalar
+ *       splices (`$k`) in the same template, but positional and incremental
+ *       styles cannot be mixed within one template.
+ *
+ *   List splices are valid **only in statement-list position** (inside a
+ *   `{ ... }` block).  Using `$@k` as an expression operand is a
+ *   compile-time error.  Call-argument and initializer splicing are not yet
+ *   supported.
+ *
  * @param ... _Node* arguments corresponding to the splice points.
  * @return The parsed and substituted AST node, or NULL on error.
  * @discussion Template is parsed and substituted at macro-execution (compile)
@@ -245,14 +262,30 @@ _Node *__jcc_quote(JCC *vm, const char *tmpl, ...);
  * @abstract Array-form quasi-quote; validates the splice count and supports
  *           more than 6 splice nodes.
  * @param vm The VM context.
- * @param tmpl A C expression or statement as a string literal with $N splice
- *             points.
+ * @param tmpl A C expression or statement as a string literal with $N / $@N
+ *             splice points.
  * @param nodes Array of _Node* splice arguments.
  * @param count Length of the nodes array.  If any $K in the template exceeds
  *              count, a compile-time error is emitted.
  * @return The parsed and substituted AST node, or NULL on error.
  */
 _Node *__jcc_quote_n(JCC *vm, const char *tmpl, _Node **nodes, int count);
+
+/*!
+ * @function __jcc_node_list
+ * @abstract Build a `->next`-linked node chain from an array, returning the
+ *           head.  Use the result as the argument to a `$@k` list splice.
+ * @param vm    The VM context.
+ * @param nodes Array of _Node* to link together.  Linking stops at the first
+ *              NULL element or at count, whichever comes first.
+ * @param count Number of elements in the array.
+ * @return Head of the chain, or NULL if count == 0 or nodes is NULL.
+ * @discussion A single node is a valid chain of length 1.  An existing
+ *             `->next` chain (e.g. `__jcc_ast_block(...)->body`) can also be
+ *             passed directly as the splice argument without going through
+ *             this helper.
+ */
+_Node *__jcc_node_list(JCC *vm, _Node **nodes, int count);
 
 // ============================================================================
 // Type Lookup and Introspection
@@ -860,9 +893,12 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, _Node *node);
 // Convenience Macros (automatically pass _VM)
 // ============================================================================
 
-// Quasi-quoting helpers (ticket #1)
+// Quasi-quoting helpers (ticket #1, #172)
 #define _QUOTE(tmpl, ...) __jcc_quote(_VM, tmpl, ##__VA_ARGS__)
 #define _QUOTE_N(tmpl, nodes, count) __jcc_quote_n(_VM, tmpl, nodes, count)
+// Build a ->next-linked chain from a compound-literal array for $@k splices:
+//   _NODE_LIST((_Node*[]){ a, b, c }, 3)
+#define _NODE_LIST(nodes, count) __jcc_node_list(_VM, nodes, count)
 
 // Diagnostic helpers (ticket #78) — note: variadic macros require C99+
 #define _MACRO_ERROR_AT(node, ...) __jcc_macro_error_at(_VM, node, __VA_ARGS__)

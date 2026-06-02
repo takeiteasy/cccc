@@ -110,9 +110,10 @@ extern Node *__jcc_ast_while(JCC *vm, Node *cond, Node *body);
 extern Node *__jcc_ast_for(JCC *vm, Node *init, Node *cond, Node *inc, Node *body);
 extern Node *__jcc_ast_do_while(JCC *vm, Node *body, Node *cond);
 
-// Ticket #1: quasi-quoting
+// Ticket #1: quasi-quoting; Ticket #172: list splice helper
 extern Node *__jcc_quote(JCC *vm, const char *tmpl, ...);
 extern Node *__jcc_quote_n(JCC *vm, const char *tmpl, Node **nodes, int count);
+extern Node *__jcc_node_list(JCC *vm, Node **nodes, int count);
 
 // Ticket #171: new expression builders
 extern Node  *__jcc_ast_cond(JCC *vm, Node *cond, Node *then_expr, Node *else_expr);
@@ -268,8 +269,11 @@ static void register_reflection_ffi(JCC *vm) {
                       (void *)__jcc_ast_pop_fn, 1, 0);
 
     // Ticket #1: quasi-quoting
-    cc_register_variadic_cfunc(vm, "__jcc_quote",   (void *)__jcc_quote,   2, 0);
-    cc_register_cfunc(vm,          "__jcc_quote_n", (void *)__jcc_quote_n, 4, 0);
+    cc_register_variadic_cfunc(vm, "__jcc_quote",      (void *)__jcc_quote,      2, 0);
+    cc_register_cfunc(vm,          "__jcc_quote_n",    (void *)__jcc_quote_n,    4, 0);
+
+    // Ticket #172: list splice helper
+    cc_register_cfunc(vm,          "__jcc_node_list",  (void *)__jcc_node_list,  3, 0);
 
     // Ticket #171: new expression builders
     cc_register_cfunc(vm, "__jcc_ast_cond",         (void *)__jcc_ast_cond,         4, 0);
@@ -1190,17 +1194,33 @@ static Node *transform_node(JCC *vm, Node *node, int depth) {
     }
 
     // For ND_EXPR_STMT: if the inner expression is replaced by a statement-kind
-    // node (e.g. a macro returned ND_IF or ND_RETURN), lift the statement up
-    // to replace the entire expression-statement wrapper.  Without this,
-    // codegen would try to gen_expr() a statement node and fail.
+    // node (e.g. a macro returned ND_IF, ND_BLOCK, ND_RETURN, ...), lift the
+    // statement up to replace the entire expression-statement wrapper.
+    // Without this, codegen would try to gen_expr() a statement node and fail.
+    //
+    // When lifting, preserve the sibling chain: any statements that follow this
+    // EXPR_STMT in the enclosing block must continue executing after the lifted
+    // statement.  We attach them via ->next so the body traversal above picks
+    // them up in subsequent loop iterations.
     if (node->kind == ND_EXPR_STMT) {
         node->lhs = transform_node(vm, node->lhs, depth);
         if (node->lhs) {
             NodeKind k = node->lhs->kind;
             if (k == ND_RETURN || k == ND_IF || k == ND_FOR || k == ND_DO ||
                 k == ND_SWITCH || k == ND_BLOCK || k == ND_GOTO ||
-                k == ND_LABEL || k == ND_EXPR_STMT)
-                return node->lhs;
+                k == ND_LABEL || k == ND_EXPR_STMT) {
+                Node *lifted = node->lhs;
+                // Re-attach the sibling chain so statements after the macro
+                // call are not dropped.  Walk to the tail of the lifted node
+                // so we don't clobber a non-NULL ->next on the lifted result
+                // (e.g. a macro that returned a pre-linked chain).
+                if (node->next) {
+                    Node *tail = lifted;
+                    while (tail->next) tail = tail->next;
+                    tail->next = node->next;
+                }
+                return lifted;
+            }
         }
         return node;
     }
@@ -1567,12 +1587,24 @@ void cc_expand_pragma_macros(JCC *vm, Obj *prog) {
         if (vm->debug_vm)
             printf("Expanding macros in function '%s'...\n", fn->name);
 
-        // Set current function context
+        // Set current function context, including the locals list so that
+        // any new_lvar() calls inside __jcc_quote (e.g. pointer temps for
+        // compound assignments in quote templates) are added to THIS
+        // function's locals and get proper stack-offset allocation in codegen.
         vm->compiler.current_fn = fn;
+        vm->compiler.locals = fn->locals;
 
         // Transform the function body
         fn->body = transform_node(vm, fn->body, 0);
+
+        // Flush new locals (created by quote templates) back into fn->locals.
+        fn->locals = vm->compiler.locals;
     }
+
+    // Clear locals so a stray new_lvar in a global-init comptime context
+    // cannot silently attach to the last function's frame.
+    vm->compiler.locals = NULL;
+    vm->compiler.current_fn = NULL;
 
     // Also check global initializers
     for (Obj *var = prog; var; var = var->next) {
