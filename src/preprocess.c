@@ -1924,6 +1924,11 @@ static Token *preprocess2(JCC *vm, Token *tok) {
                         else if (brace_depth == 0) {
                             if (equal(probe, ";"))
                                 break;
+                            // A top-level '=' means this is a variable
+                            // declaration; function signatures never have '='
+                            // before the body '{'.
+                            if (equal(probe, "="))
+                                break;
                             if (probe->kind == TK_IDENT && probe->next &&
                                 equal(probe->next, "(")) {
                                 looks_like_function = true;

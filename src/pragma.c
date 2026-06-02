@@ -325,6 +325,83 @@ static Token *append_token_list(JCC *vm, Token *cur, Token *tokens) {
     return cur;
 }
 
+// Find the first top-level '=' in a token list (brace-depth 0).
+// Returns the token AT '=', or NULL if none found.
+static Token *find_top_level_eq(Token *tokens) {
+    int depth = 0;
+    for (Token *t = tokens; t && t->kind != TK_EOF; t = t->next) {
+        if (equal(t, "{")) depth++;
+        else if (equal(t, "}")) depth--;
+        else if (depth == 0 && equal(t, "="))
+            return t;
+    }
+    return NULL;
+}
+
+// Inject decl_tokens up to (not including) eq_tok, then emit ';'.
+// Produces a declaration without its initializer, e.g. "int buf_size ;"
+static Token *append_decl_stripped(JCC *vm, Token *cur, Token *decl_tokens,
+                                   Token *eq_tok) {
+    for (Token *t = decl_tokens; t && t->kind != TK_EOF && t != eq_tok;
+         t = t->next)
+        cur = cur->next = copy_macro_token(vm, t);
+    cur = cur->next = new_macro_punct(vm, ";", eq_tok);
+    return cur;
+}
+
+// Build a __jcc_comptime_init function that assigns each scalar comptime var's
+// initializer expression in source order. Returns token list via
+// tokenize_string, or NULL when there are no scalar-init vars.
+static Token *build_comptime_init_fn_tokens(JCC *vm,
+                                             ComptimeVar **vars, int count) {
+    bool has_any = false;
+    for (int i = 0; i < count; i++) {
+        Token *eq = find_top_level_eq(vars[i]->decl_tokens);
+        if (eq && !(eq->next && equal(eq->next, "{"))) {
+            has_any = true;
+            break;
+        }
+    }
+    if (!has_any)
+        return NULL;
+
+    char buf[16384];
+    char *p   = buf;
+    char *end = buf + sizeof(buf) - 4;
+
+    p += snprintf(p, end - p, "void __jcc_comptime_init(void){\n");
+
+    for (int i = 0; i < count; i++) {
+        ComptimeVar *cv = vars[i];
+        Token *eq = find_top_level_eq(cv->decl_tokens);
+        if (!eq) continue;
+        // Aggregate init (= { ... }) stays on the constant path; skip here.
+        if (eq->next && equal(eq->next, "{")) continue;
+
+        p += snprintf(p, end - p, "%s=", cv->name);
+
+        // Emit RHS tokens from after '=' up to the terminating ';'.
+        int depth = 0;
+        for (Token *t = eq->next; t && t->kind != TK_EOF; t = t->next) {
+            if (equal(t, "{")) depth++;
+            else if (equal(t, "}")) depth--;
+            else if (depth == 0 && equal(t, ";")) break;
+            if (p + t->len + 2 >= end)
+                error("comptime init function source overflow (too many/long tokens)");
+            p += snprintf(p, end - p, " %.*s", t->len, t->loc);
+        }
+        p += snprintf(p, end - p, ";\n");
+    }
+
+    p += snprintf(p, end - p, "}\n");
+
+    Token *toks = tokenize_string(vm, "<comptime-init-fn>", buf);
+    if (!toks)
+        return NULL;
+    convert_pp_tokens(vm, toks);
+    return toks;
+}
+
 static Token *implicit_reflection_tokens(JCC *vm) {
     char *header = get_std_header("reflection.h");
     if (!header)
@@ -362,15 +439,45 @@ static Token *build_combined_macro_tokens(JCC *vm, Token *reflection_tokens,
 
     cur = append_token_list(vm, cur, reflection_tokens);
 
-    // Include comptime variable declarations as file-scope globals so the
-    // macro program can reference them by name.
+    // Reverse comptime_vars to source order (list is prepended, so reversed).
+    int nv = 0;
     for (ComptimeVar *cv = vm->compiler.comptime_vars; cv; cv = cv->next)
-        cur = append_token_list(vm, cur, cv->decl_tokens);
+        nv++;
+    ComptimeVar **vars = nv > 0 ? alloca(nv * sizeof(ComptimeVar *)) : NULL;
+    if (nv > 0) {
+        int idx = nv - 1;
+        for (ComptimeVar *cv = vm->compiler.comptime_vars; cv; cv = cv->next)
+            vars[idx--] = cv;
+    }
+
+    // Inject comptime variable declarations as file-scope globals.
+    // For scalar-expression initializers (= <non-brace-expr>), strip the
+    // initializer so the parser never sees the non-constant expression as a
+    // global initializer (which would hard-error via eval2). The initializer
+    // is instead evaluated by __jcc_comptime_init (ticket #191).
+    // Aggregate ({...}) and uninitialised vars are injected as-is (constant
+    // path, unchanged from #188).
+    for (int i = 0; i < nv; i++) {
+        ComptimeVar *cv = vars[i];
+        Token *eq = find_top_level_eq(cv->decl_tokens);
+        if (eq && eq->next && !equal(eq->next, "{")) {
+            // Scalar-expression init: inject declaration without initializer.
+            cur = append_decl_stripped(vm, cur, cv->decl_tokens, eq);
+        } else {
+            cur = append_token_list(vm, cur, cv->decl_tokens);
+        }
+    }
 
     for (int i = 0; i < count; i++)
         cur = append_macro_prototype(vm, cur, macros[i]);
     for (int i = 0; i < count; i++)
         cur = append_macro_definition(vm, cur, macros[i]);
+
+    // Synthesized init function: runs after bytecode is compiled to evaluate
+    // scalar comptime var initializers that call comptime functions.
+    Token *init_fn = build_comptime_init_fn_tokens(vm, vars, nv);
+    if (init_fn)
+        cur = append_token_list(vm, cur, init_fn);
 
     Token *tmpl = count > 0 ? macros[count - 1]->body_tokens : NULL;
     cur->next = new_macro_eof(vm, tmpl);
@@ -398,9 +505,12 @@ static Obj *find_macro_global(Obj *prog, const char *name) {
 }
 
 // Read a scalar value from the macro VM's data segment.
+// Valid after init_macro_globals has allocated storage; the value may have
+// been written by a constant-initializer memcpy, by __jcc_comptime_init, or
+// left as zero (no initializer).
 static bool read_comptime_scalar(JCC *vm, Obj *obj, bool *is_float_out,
                                  int64_t *int_out, double *float_out) {
-    if (!obj || !obj->init_data)
+    if (!obj)
         return false;
     char *base = vm->data_seg + obj->offset;
     TypeKind kind = obj->ty->kind;
@@ -424,6 +534,50 @@ static bool read_comptime_scalar(JCC *vm, Obj *obj, bool *is_float_out,
     }
 }
 
+// Execute the synthesized __jcc_comptime_init function (if present) to
+// evaluate scalar comptime variable initializers that call comptime
+// functions. Must be called after gen_function + patch_macro_call_addresses
+// so all bytecode and call targets are resolved.
+static void run_comptime_var_initializers(JCC *vm, Obj *macro_prog) {
+    Obj *init_fn = find_macro_function(macro_prog, "__jcc_comptime_init");
+    if (!init_fn)
+        return;
+
+    if (vm->debug_vm)
+        printf("Running __jcc_comptime_init for comptime variable initializers...\n");
+
+    __jcc_current_vm = vm;
+
+    JCCPc      saved_pc   = vm->pc;
+    long long *saved_sp   = vm->sp;
+    long long *saved_bp   = vm->bp;
+    long long  saved_regs[NUM_REGS];
+    memcpy(saved_regs, vm->regs, sizeof(saved_regs));
+    Obj *saved_current_fn = vm->compiler.current_fn;
+
+    vm->sp = vm->initial_sp;
+    vm->bp = vm->initial_bp;
+    *(--vm->sp) = 0; // sentinel return address
+
+    vm->pc = (JCCPc)init_fn->code_addr;
+
+    int saved_debug = vm->debug_vm;
+    vm->debug_vm = 0;
+    vm_eval(vm);
+    vm->debug_vm = saved_debug;
+
+    __jcc_current_vm = NULL;
+
+    vm->pc            = saved_pc;
+    vm->sp            = saved_sp;
+    vm->bp            = saved_bp;
+    memcpy(vm->regs, saved_regs, sizeof(saved_regs));
+    vm->compiler.current_fn = saved_current_fn;
+
+    if (vm->debug_vm)
+        printf("__jcc_comptime_init completed.\n");
+}
+
 static void evaluate_comptime_vars(JCC *vm, Obj *macro_prog) {
     for (ComptimeVar *cv = vm->compiler.comptime_vars; cv; cv = cv->next) {
         if (cv->is_evaluated)
@@ -433,13 +587,6 @@ static void evaluate_comptime_vars(JCC *vm, Obj *macro_prog) {
         if (!obj) {
             fprintf(stderr, "Warning: comptime var '%s' not found in macro program\n",
                     cv->name);
-            continue;
-        }
-
-        if (!obj->init_data) {
-            fprintf(stderr,
-                    "Warning: comptime var '%s' has no constant initializer "
-                    "(non-constant initializers require ticket #191)\n", cv->name);
             continue;
         }
 
@@ -453,6 +600,17 @@ static void evaluate_comptime_vars(JCC *vm, Obj *macro_prog) {
 
         TypeKind kind = obj->ty->kind;
         if (kind == TY_STRUCT || kind == TY_UNION) {
+            // Aggregate types: require a constant initializer (init_data).
+            // Non-constant struct/union initializers are deferred as a
+            // follow-up to ticket #191.
+            if (!obj->init_data) {
+                fprintf(stderr,
+                        "Warning: comptime struct/union var '%s' has a "
+                        "non-constant initializer (not yet supported; "
+                        "deferred as follow-up to ticket #191)\n", cv->name);
+                continue;
+            }
+
             cv->is_struct = true;
             char *base = vm->data_seg + obj->offset;
             for (Member *mem = obj->ty->members; mem; mem = mem->next) {
@@ -494,6 +652,11 @@ static void evaluate_comptime_vars(JCC *vm, Obj *macro_prog) {
                 cv->members = m;
             }
         } else {
+            // Scalar: read from data segment unconditionally. The value is
+            // valid after init_macro_globals allocates storage — it was either
+            // written by a constant-initializer memcpy (init_data path), by
+            // __jcc_comptime_init (ticket #191 non-constant path), or is zero
+            // for an uninitialised var.
             read_comptime_scalar(vm, obj, &cv->is_float, &cv->int_val, &cv->float_val);
         }
 
@@ -630,15 +793,27 @@ static bool compile_pragma_macro_program(JCC *vm) {
         macros[i]->is_compiled = true;
     }
 
+    // Step 1: allocate data segment storage for all globals and memcpy any
+    //         constant initializer bytes (init_data path).
     init_macro_globals(vm, macro_prog);
-    evaluate_comptime_vars(vm, macro_prog);
 
+    // Step 2: generate bytecode for all functions, including the synthesized
+    //         __jcc_comptime_init helper produced by build_combined_macro_tokens.
     for (Obj *fn = macro_prog; fn; fn = fn->next) {
         if (fn->is_function && fn->body)
             gen_function(vm, fn);
     }
 
+    // Step 3: patch call addresses so __jcc_comptime_init can call comptime fns.
     patch_macro_call_addresses(vm, macro_prog);
+
+    // Step 4: run __jcc_comptime_init to evaluate scalar comptime var
+    //         initializers (ticket #191). This writes results into the data
+    //         segment via normal VM store instructions.
+    run_comptime_var_initializers(vm, macro_prog);
+
+    // Step 5: read comptime var values out of the data segment.
+    evaluate_comptime_vars(vm, macro_prog);
 
     vm->compiler.locals = saved_locals;
     vm->compiler.current_fn = saved_current_fn;
