@@ -1,34 +1,38 @@
-# JCC Pragma Macros
+# JCC Compile-Time Macros
 
-Pragma macros are C functions that JCC compiles and runs during compilation.
-They can inspect compile-time types, build AST nodes, generate functions and
-global variables, and replace macro call sites with generated code.
+Compile-time macros are C functions that JCC compiles and runs during
+compilation. They can inspect compile-time types, build AST nodes, generate
+functions and global variables, and replace macro call sites with generated code.
 
-The macro API is private to pragma macro compilation. JCC embeds its own
-`reflection.h` and injects it automatically while pragma macro and comptime
-helper functions are compiled, but that bundled header is not on the public
-include path. Macro code can use the `_AST_*`, `_QUOTE*`, `_MACRO_ERROR_AT`,
-`_GENSYM`, and `_DUMP_*` convenience macros directly.
+A macro function is declared by annotating it with `[[jcc::macro]]` (C23
+attribute syntax) or the equivalent `__attribute__((macro))` (GNU attribute
+syntax). Either form is accepted everywhere.
+
+The macro API is private to macro compilation. JCC embeds its own `reflection.h`
+and injects it automatically while macro and comptime helper functions are
+compiled, but that bundled header is not on the public include path. Macro code
+can use the `_AST_*`, `_QUOTE*`, `_MACRO_ERROR_AT`, `_GENSYM`, and `_DUMP_*`
+convenience macros directly.
 
 ## Return-Value Model
 
-A pragma macro's return value is **the node spliced at the call site**, replacing
-the invocation. Top-level definitions — functions created with `_AST_FUNCTION()`,
-globals with `_AST_GLOBAL_VAR()` — are **side effects** injected regardless of what
-the macro returns. How generated names become visible to the parser depends on
-which execution form you use.
+A macro's return value is **the node spliced at the call site**, replacing the
+invocation. Top-level definitions — functions created with `_AST_FUNCTION()`,
+globals with `_AST_GLOBAL_VAR()` — are **side effects** injected regardless of
+what the macro returns. How generated names become visible to the parser depends
+on which execution form you use.
 
 | Call context | Return value |
 |--------------|--------------|
 | Expression position (`int x = mac()`) | Must return a non-NULL `_Node *`. NULL is a compile error. |
-| Declaration position (file-scope `mac();` or `inline` auto-run) | Returning NULL or `void` is legal — means "I only emitted definitions." |
+| Declaration position (file-scope `mac();` or inline auto-run) | Returning NULL or `void` is legal — means "I only emitted definitions." |
 
-For definition-only macros, declare the return type `void`. This is self-documenting
-and lets you omit the return statement entirely. Using a `void` macro in expression
-position is a compile error.
+For definition-only macros, declare the return type `void`. This is
+self-documenting and lets you omit the return statement entirely. Using a `void`
+macro in expression position is a compile error.
 
 ```c
-#pragma macro
+[[jcc::macro]]
 void emit_helpers(void) {
     // build functions, globals — no return needed
 }
@@ -40,11 +44,11 @@ old `return _AST_INT_LITERAL(0)` idiom still works but is no longer needed.
 
 ## Execution Model
 
-JCC supports three pragma macro execution forms:
+JCC supports three macro execution forms:
 
 | Form | Source shape | When it runs | What the return value means |
 |------|--------------|--------------|-----------------------------|
-| Inline generation | `#pragma macro` + `inline void gen(void)` | Before the main parse | Ignored; side effects generate declarations/functions/globals |
+| Inline generation | `[[jcc::macro, inline]] void gen(void)` | Before the main parse | Ignored; side effects generate declarations/functions/globals |
 | File-scope call | `gen();` at file scope | While parsing that file, at that source position | Ignored; side effects generate declarations/functions/globals |
 | Call-site expansion | `gen(args...)` inside code | During macro expansion after parsing | Replaces the call expression or statement |
 
@@ -62,14 +66,14 @@ have been processed and those functions are in scope.
 
 ## Inline Generation
 
-Use an `inline` pragma macro when generated functions should be available to the
-whole parsed program without an explicit call site. Inline macros run before the
-main parse, and functions created with `_AST_FUNCTION()` receive parser-visible
+Use an inline macro when generated functions should be available to the whole
+parsed program without an explicit call site. Inline macros run before the main
+parse, and functions created with `_AST_FUNCTION()` receive parser-visible
 synthetic declarations automatically.
 
 ```c
-#pragma macro
-inline void generate_answer(void) {
+[[jcc::macro, inline]]
+void generate_answer(void) {
     _Type *int_ty = _AST_GET_TYPE("int");
     _Obj *fn = _AST_FUNCTION("answer", int_ty);
     _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(_AST_INT_LITERAL(42)));
@@ -79,6 +83,8 @@ int main(void) {
     return answer();
 }
 ```
+
+The GNU-attribute equivalent is `__attribute__((macro, inline))`.
 
 Inline macros take no call-site arguments. Use them for global code generation:
 boilerplate functions, enum conversion helpers, serializers, or any generated
@@ -92,7 +98,7 @@ macro runs when the parser reaches the call. If the macro creates a function tha
 later source should call, publish it with `_AST_FORWARD_DECLARE(fn)`.
 
 ```c
-#pragma macro
+[[jcc::macro]]
 void generate_add(void) {
     _Type *int_ty = _AST_GET_TYPE("int");
     _Obj *fn = _AST_FUNCTION("add", int_ty);
@@ -119,12 +125,12 @@ declaration rules and cannot call the generated function by name.
 
 ## Call-Site Expansion
 
-A normal pragma macro call inside an expression or statement is parsed as a
-macro call node. During macro expansion, JCC executes the macro and replaces the
-call with the returned AST. The macro **must** return a non-NULL node.
+A normal macro call inside an expression or statement is parsed as a macro call
+node. During macro expansion, JCC executes the macro and replaces the call with
+the returned AST. The macro **must** return a non-NULL node.
 
 ```c
-#pragma macro
+[[jcc::macro]]
 _Node *double_it(_Node *value) {
     return _AST_BINARY(_ADD, value, value);
 }
@@ -154,7 +160,7 @@ Statement macros work the same way. Return a statement node such as
 `_QUOTE(...)`.
 
 ```c
-#pragma macro
+[[jcc::macro]]
 _Node *return_if_zero(_Node *value) {
     return _QUOTE("if ($1 == 0) return 0;", value);
 }
@@ -168,16 +174,16 @@ int main(void) {
 
 ## Comptime Helpers
 
-Use `#pragma comptime` for helper functions that should be callable by pragma
-macros but should not expand from ordinary program call sites.
+Use `[[jcc::comptime]]` for helper functions that should be callable by macros
+but should not expand from ordinary program call sites.
 
 ```c
-#pragma comptime
+[[jcc::comptime]]
 int plus_one(int n) {
     return n + 1;
 }
 
-#pragma macro
+[[jcc::macro]]
 _Node *make_value(void) {
     return _AST_INT_LITERAL(plus_one(41));
 }
@@ -187,25 +193,27 @@ int main(void) {
 }
 ```
 
-Pragma macros and comptime helpers are compiled together, so they can call each
-other even when the callee appears later in the translation unit.
+Macros and comptime helpers are compiled together, so they can call each other
+even when the callee appears later in the translation unit.
+
+The GNU-attribute equivalent is `__attribute__((comptime))`.
 
 ## Comptime Variables (ticket #188)
 
-`#pragma comptime` can also precede a **variable or struct declaration** with a
+`[[jcc::comptime]]` can also precede a **variable or struct declaration** with a
 constant initializer. The value is evaluated during the pre-parse phase and
-stored so that pragma macros can read it at compile time.
+stored so that macros can read it at compile time.
 
 ### Scalar comptime variables
 
 ```c
-#pragma comptime
+[[jcc::comptime]]
 int tile_size = 64;
 
-#pragma comptime
+[[jcc::comptime]]
 double pi = 3.14159;
 
-#pragma macro
+[[jcc::macro]]
 _Node *area_of_n_tiles(_Node *n) {
     int64_t ts = _AST_GET_COMPTIME_INT("tile_size");
     return _QUOTE("$$ * $$", n, _AST_INT_LITERAL(ts * ts));
@@ -221,10 +229,10 @@ _Node *area_of_n_tiles(_Node *n) {
 ### Struct comptime variables
 
 ```c
-#pragma comptime
+[[jcc::comptime]]
 struct Config { int width; int height; int channels; } cfg = { 1920, 1080, 3 };
 
-#pragma macro
+[[jcc::macro]]
 _Node *pixel_count(void) {
     _Node *w = _AST_GET_COMPTIME_MEMBER("cfg", "width");
     _Node *h = _AST_GET_COMPTIME_MEMBER("cfg", "height");
@@ -251,7 +259,7 @@ array members are not accessible this way (ticket #188 scope).
 `_Node *` values into `$1`, `$2`, and later numbered holes.
 
 ```c
-#pragma macro
+[[jcc::macro]]
 _Node *square(_Node *x) {
     return _QUOTE("($1) * ($1)", x);
 }
@@ -265,7 +273,7 @@ Numbered holes can be reused and reordered. Use `$$` for sequential left-to-
 right holes when order is enough:
 
 ```c
-#pragma macro
+[[jcc::macro]]
 _Node *sum2(_Node *a, _Node *b) {
     return _QUOTE("$$ + $$", a, b);
 }
@@ -281,7 +289,7 @@ chain into the block, replacing one placeholder with N statements. This is
 typed unquote-splicing (ticket #172).
 
 ```c
-#pragma macro
+[[jcc::macro]]
 _Node *double_inc(_Node *x) {
     _Node *chain = _NODE_LIST((_Node*[]){
         _QUOTE("$1 += 1;", x),
@@ -299,7 +307,7 @@ int get_plus_two(int v) {
 `$@` is the incremental (sequential) form, parallel to `$$`:
 
 ```c
-#pragma macro
+[[jcc::macro]]
 _Node *two_increments(_Node *a, _Node *b) {
     return _QUOTE("{ $@; $@; }",
                   _QUOTE("$1 += 10;", a),
@@ -323,8 +331,8 @@ apply the correct implicit cast. When building a generated function body, wrap
 the quote call in `_AST_WITH_FN(fn)` to establish that context:
 
 ```c
-#pragma macro
-inline void generate_answer(void) {
+[[jcc::macro, inline]]
+void generate_answer(void) {
     _Type *int_ty = _AST_GET_TYPE("int");
     _Obj *fn = _AST_FUNCTION("answer", int_ty);
     _AST_WITH_FN(fn) {
@@ -346,7 +354,7 @@ execution point.
 ```c
 typedef enum { RED, GREEN, BLUE } Color;
 
-#pragma macro
+[[jcc::macro]]
 _Node *color_count(void) {
     _Type *color = _AST_FIND_TYPE("Color");
     if (!color)
@@ -383,8 +391,8 @@ Generated functions are `_Obj *` values. Create the object, add parameters,
 build a body, and install the body.
 
 ```c
-#pragma macro
-inline void generate_is_even(void) {
+[[jcc::macro, inline]]
+void generate_is_even(void) {
     _Type *int_ty = _AST_GET_TYPE("int");
     _Obj *fn = _AST_FUNCTION("is_even", int_ty);
     _AST_FUNCTION_ADD_PARAM(fn, "n", int_ty);
@@ -410,7 +418,7 @@ emits a compile-time error instead of silently replacing it. Use
 `_GENSYM(prefix)` or `__jcc_gensym(_VM, prefix)` for private helper names.
 
 ```c
-#pragma macro
+[[jcc::macro]]
 void make_helper(void) {
     const char *name = _GENSYM("helper");
     _Type *int_ty = _AST_GET_TYPE("int");
@@ -426,8 +434,8 @@ size the type to match the data length; the codegen copies exactly `ty->size`
 bytes from the init data.
 
 ```c
-#pragma macro
-inline void embed_version(void) {
+[[jcc::macro, inline]]
+void embed_version(void) {
     _Type *char_ty = _AST_GET_TYPE("char");
     _Type *arr_ty  = _AST_MAKE_ARRAY(char_ty, 8);
     _Obj  *var     = _AST_GLOBAL_VAR("version_str", arr_ty);
@@ -447,7 +455,7 @@ add a file-scope `extern` declaration before code that references the variable:
 ```c
 extern char version_str[];
 
-#pragma macro
+[[jcc::macro]]
 void embed_version(void) { ... }
 embed_version();
 ```
@@ -459,7 +467,7 @@ Prefer `_AST_LOCAL_VAR_UNIQUE(ty)` for temporary variables; it creates a name
 that user source cannot capture.
 
 ```c
-#pragma macro
+[[jcc::macro]]
 _Node *save_then_return(_Node *value) {
     _Type *int_ty = _AST_GET_TYPE("int");
     _Node *tmp = _AST_LOCAL_VAR_UNIQUE(int_ty);
@@ -479,7 +487,7 @@ specific user-visible name.
 Use source-located diagnostics when rejecting a macro argument:
 
 ```c
-#pragma macro
+[[jcc::macro]]
 _Node *require_nonzero(_Node *value) {
     if (!value)
         _MACRO_ERROR_AT(value, "expected an expression");
@@ -496,7 +504,7 @@ AST dump helpers are available while developing macros:
 | `_DUMP_AST_GEN(node)` | Print builder calls for a node |
 | `_DUMP_AST_GEN_TO_STRING(node)` | Render builder calls into a string |
 
-The interactive VM debugger (`-g`) does not currently stop inside pragma macro
+The interactive VM debugger (`-g`) does not currently stop inside macro
 execution. Macro bytecode runs during compilation, before the final program is
 started under the debugger, and JCC suppresses VM debug tracing while invoking
 macro functions. Use `_DUMP_*` helpers and source-located diagnostics for macro
@@ -629,9 +637,21 @@ _NOT, _LOGAND, _LOGOR
 _ASSIGN, _ADDR, _DEREF, _COMMA
 ```
 
+## Attribute Syntax
+
+Both C23 attribute syntax and GNU attribute syntax are accepted everywhere:
+
+| C23 form | GNU form |
+|----------|----------|
+| `[[jcc::macro]]` | `__attribute__((macro))` |
+| `[[jcc::macro, inline]]` | `__attribute__((macro, inline))` |
+| `[[jcc::comptime]]` | `__attribute__((comptime))` |
+
+The canonical form used in this document and in JCC examples is `[[jcc::macro]]`.
+
 ## Constraints
 
-- Pragma macro calls accept at most 8 arguments.
+- Macro calls accept at most 8 arguments.
 - Macro code runs at compile time and cannot inspect runtime values.
 - Inline macros compile before the main parse; only `reflection.h` and its
   transitive includes (`stdbool.h`, `stddef.h`, `stdint.h`) are available. Use
@@ -643,5 +663,5 @@ _ASSIGN, _ADDR, _DEREF, _COMMA
 - `_AST_FORWARD_DECLARE(fn)` publishes function names only. Types, globals, and
   other declarations follow the normal parser state visible at the macro
   execution point.
-- `void` pragma macros cannot be used in expression position; doing so is a
-  compile error.
+- `void` macros cannot be used in expression position; doing so is a compile
+  error.

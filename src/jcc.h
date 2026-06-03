@@ -742,10 +742,11 @@ typedef struct CondIncl {
 } CondIncl;
 
 /*!
- @struct PragmaMacro
- @abstract Represents a compile-time pragma macro function.
- @discussion Pragma macros are functions marked with #pragma macro that
-             execute during compilation to generate or transform AST nodes.
+ @struct MacroFn
+ @abstract Represents a compile-time macro function.
+ @discussion Macro functions are functions marked with [[jcc::macro]] or
+             __attribute__((macro)) that execute during compilation to generate
+             or transform AST nodes.
  @field name Function name.
  @field body_tokens Original token stream for function body (from preprocessor).
  @field compiled_fn Compiled function object (NULL until compiled).
@@ -754,16 +755,16 @@ typedef struct CondIncl {
  @field is_void_macro True if declared with void return type (definition-only).
  @field next Pointer to next macro in linked list.
 */
-typedef struct PragmaMacro {
+typedef struct MacroFn {
     char *name;               // Function name
     Token *body_tokens;       // Original token stream for function body
     Obj *compiled_fn;         // Compiled function object
     bool is_compiled;         // True after successful compilation
-    bool is_macro_entry;      // True for #pragma macro, false for comptime helper
+    bool is_macro_entry;      // True for [[jcc::macro]], false for comptime helper
     bool is_inline;           // True for inline macros (auto-execute at declaration)
     bool is_void_macro;       // True if declared void — definition-only, no splice node
-    struct PragmaMacro *next; // Next macro in linked list
-} PragmaMacro;
+    struct MacroFn *next;     // Next macro in linked list
+} MacroFn;
 
 // A struct member value captured from a comptime struct variable.
 typedef struct ComptimeVarMember {
@@ -1284,14 +1285,14 @@ typedef struct Compiler {
     HashMap include_guards;   // Header include guard cache
     int include_next_idx;     // Index for #include_next
 
-    // Pragma macro state
-    PragmaMacro *pragma_macros;   // Linked list of captured pragma macros
-    ComptimeVar *comptime_vars;   // Linked list of #pragma comptime variable decls
-    bool in_macro_mode;           // True when compiling/executing a pragma macro
-    bool in_macro_expansion;      // True during macro AST expansion pass
-    bool pragma_macros_compiled;  // True after compile_all_pragma_macros has run
-    int macro_recursion_limit;    // 0 = unlimited, default = 256
-    Obj *macro_globals; // Globals defined by inline pragma macros (injected into
+    // Compile-time macro state
+    MacroFn *macro_fns;              // Linked list of captured macro functions
+    ComptimeVar *comptime_vars;      // Linked list of [[jcc::comptime]] variable decls
+    bool in_macro_mode;              // True when compiling/executing a macro function
+    bool in_macro_expansion;         // True during macro AST expansion pass
+    bool macro_fns_compiled;         // True after compile_all_macros has run
+    int macro_recursion_limit;       // 0 = unlimited, default = 256
+    Obj *macro_globals; // Globals defined by inline macros (injected into
                         // the final program before codegen)
 
     // #embed directive limits
@@ -1895,15 +1896,15 @@ void cc_init_parser(JCC *vm);
 
 /*!
  @function cc_execute_inline_macros
- @abstract Execute all inline pragma macros before parsing.
- @discussion Compiles and executes every #pragma macro marked with the
-             `inline` keyword. Each inline macro runs automatically at its
-             declaration point (no explicit call needed). Generated functions
-             are stored in vm->compiler.macro_globals and synthetic forward
-             declarations are prepended to every input token stream so the
-             parser can resolve calls to generated functions without manual
-             forward declarations. Must be called after all preprocessing and
-             before cc_parse.
+ @abstract Execute all inline macros before parsing.
+ @discussion Compiles and executes every [[jcc::macro, inline]] (or
+             __attribute__((macro, inline))) macro. Each inline macro runs
+             automatically at its declaration point (no explicit call needed).
+             Generated functions are stored in vm->compiler.macro_globals and
+             synthetic forward declarations are prepended to every input token
+             stream so the parser can resolve calls to generated functions
+             without manual forward declarations. Must be called after all
+             preprocessing and before cc_parse.
  @param vm The JCC instance.
  @param input_tokens Array of preprocessed token streams (one per source file).
  @param count Number of token streams in the array.
@@ -1911,15 +1912,15 @@ void cc_init_parser(JCC *vm);
 void cc_execute_inline_macros(JCC *vm, Token **input_tokens, int count);
 
 /*!
- @function cc_expand_pragma_macros
- @abstract Expand all pragma macro calls in the AST.
+ @function cc_expand_macros
+ @abstract Expand all macro calls in the AST.
  @discussion Walks the AST and replaces ND_MACRO_CALL nodes with the
-             generated AST from executing the corresponding pragma macro.
+             generated AST from executing the corresponding macro function.
              Must be called after cc_parse and before cc_compile.
  @param vm The JCC instance.
  @param prog Linked list of top-level Obj returned by cc_parse.
 */
-void cc_expand_pragma_macros(JCC *vm, Obj *prog);
+void cc_expand_macros(JCC *vm, Obj *prog);
 
 /*!
  @function cc_serialize_program

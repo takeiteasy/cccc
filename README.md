@@ -2,12 +2,12 @@
 
 > **Warning:** Work in progress. Tested on `aarch64` (Apple Silicon) only.
 
-`JCC` is a **J**IT **C** **C**ompiler for C11, with selected C23 and GNU extensions. It also expands on top of standard C with additional features like pragma macros and AST construction helpers for hygienic reflection and AST manipulation. It compiles and executes C source files directly — no object files or native binaries are produced. See [COVERAGE.md](docs/COVERAGE.md) for detailed tables of C99, C11, C23, and GNU extension support.
+`JCC` is a **J**IT **C** **C**ompiler for C11, with selected C23 and GNU extensions. It also expands on top of standard C with additional features like compile-time macros (`[[jcc::macro]]`) and AST construction helpers for hygienic reflection and AST manipulation. It compiles and executes C source files directly — no object files or native binaries are produced. See [COVERAGE.md](docs/COVERAGE.md) for detailed tables of C99, C11, C23, and GNU extension support.
 
 ## Features
 
-- **Pragma macros** — compile-time metaprogramming with C functions that run during compilation (see [MACROS.md](docs/MACROS.md))
-  - Inline pre-parse generators for parser-visible functions and declarations
+- **Compile-time macros** — C functions annotated with `[[jcc::macro]]` or `__attribute__((macro))` that run during compilation (see [MACROS.md](docs/MACROS.md))
+  - Inline pre-parse generators for parser-visible functions and declarations (`[[jcc::macro, inline]]`)
   - File-scope macro calls for explicit source-order generation
   - Call-site expansion for expression and statement rewriting
   - Quasi-quoting (`_QUOTE`), hygienic type/symbol reflection, `__jcc_gensym`, and AST construction helpers
@@ -93,7 +93,7 @@ FFI Safety Options:
 Preprocessor Options:
 	   --embed-limit=SIZE        Set #embed file size warning limit (e.g., 50MB, 100mb, default: 10MB)
 	   --embed-hard-limit        Make #embed limit a hard error instead of warning
-	   --macro-recursion-limit=N Limit recursive pragma macro expansion (default: 256, 0=unlimited)
+	   --macro-recursion-limit=N Limit recursive macro expansion (default: 256, 0=unlimited)
 
 Optimization Levels:
 	   --optimize[=LEVEL]        Enable bytecode optimization (default: disabled)

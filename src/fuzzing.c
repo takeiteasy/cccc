@@ -89,8 +89,8 @@ static int compile_only_from_string(const char *src, size_t len) {
         return 1;
     }
 
-    // Expand pragma macros
-    cc_expand_pragma_macros(&vm, merged);
+    // Expand macros
+    cc_expand_macros(&vm, merged);
 
     // Compile to bytecode (no main() required in compile_only mode)
     cc_compile(&vm, merged);

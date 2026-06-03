@@ -123,7 +123,7 @@ fuzz-seed:
 	@echo "Seeding corpus from tests/..."
 	@mkdir -p $(FUZZ_CORPUS)
 	@cp tests/test_*.c $(FUZZ_CORPUS)/ 2>/dev/null || true
-	@cp tests/pragma/test_pragma_*.c $(FUZZ_CORPUS)/ 2>/dev/null || true
+	@cp tests/macros/test_macros_*.c $(FUZZ_CORPUS)/ 2>/dev/null || true
 	@echo "Corpus seeded with $$(ls $(FUZZ_CORPUS) | wc -l) files"
 
 fuzz-run: jcc-afl

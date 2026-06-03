@@ -208,9 +208,9 @@ static VarScope *find_var(JCC *vm, Token *tok) {
     return NULL;
 }
 
-// Find a pragma macro by name
-static PragmaMacro *find_pragma_macro(JCC *vm, Token *tok) {
-    for (PragmaMacro *pm = vm->compiler.pragma_macros; pm; pm = pm->next) {
+// Find a macro function by name
+static MacroFn *find_macro_fn(JCC *vm, Token *tok) {
+    for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next) {
         if (pm->is_macro_entry && strlen(pm->name) == tok->len &&
             strncmp(pm->name, tok->loc, tok->len) == 0) {
             return pm;
@@ -4391,11 +4391,11 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
                 return new_num(vm, sc->enum_val, tok);
         }
 
-        // Check if this is a pragma macro call. When parsing pragma macro
-        // bytecode itself, keep calls as ordinary C function calls so macros can
-        // call each other directly.
+        // Check if this is a macro call. When parsing macro bytecode itself,
+        // keep calls as ordinary C function calls so macros can call each
+        // other directly.
         if (!vm->compiler.in_macro_mode && equal(tok->next, "(")) {
-            PragmaMacro *pm = find_pragma_macro(vm, tok);
+            MacroFn *pm = find_macro_fn(vm, tok);
             if (pm) {
                 // Create ND_MACRO_CALL node
                 Token *macro_tok = tok;
@@ -4874,12 +4874,12 @@ Obj *parse(JCC *vm, Token *tok) {
             continue;
         }
 
-        // A known pragma macro may be called as a file-scope compile-time
+        // A known macro function may be called as a file-scope compile-time
         // directive. The returned node is ignored; side effects such as
         // generated declarations/functions are kept in the active parse state.
         if (!vm->compiler.in_macro_mode && tok->kind == TK_IDENT &&
             equal(tok->next, "(")) {
-            PragmaMacro *pm = find_pragma_macro(vm, tok);
+            MacroFn *pm = find_macro_fn(vm, tok);
             if (pm) {
                 Token *macro_tok = tok;
                 tok = tok->next->next;
@@ -4899,8 +4899,8 @@ Obj *parse(JCC *vm, Token *tok) {
                 tok = skip(vm, tok, ")");
                 tok = skip(vm, tok, ";");
 
-                cc_execute_top_level_pragma_macro(vm, pm->name, macro_tok,
-                                                  head.next, arg_count);
+                cc_execute_top_level_macro(vm, pm->name, macro_tok,
+                                           head.next, arg_count);
                 continue;
             }
         }

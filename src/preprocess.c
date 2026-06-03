@@ -110,15 +110,14 @@ static Token *new_eof(JCC *vm, Token *tok) {
     return t;
 }
 
-// Extract a #pragma macro or #pragma comptime function definition and store it
-// Returns the token after the function definition (or original token if
-// extraction failed)
-static Token *extract_pragma_compiletime_function(JCC *vm, Token *tok,
-                                                  char *directive,
-                                                  bool is_macro_entry,
-                                                  bool is_inline) {
+// Extract a [[jcc::macro]] / __attribute__((macro)) or comptime function
+// definition and store it. Returns the token after the function definition
+// (or original token if extraction failed).
+static Token *extract_macro_function(JCC *vm, Token *tok,
+                                     bool is_macro_entry,
+                                     bool is_inline) {
     // Expected format: <return_type> <function_name>(<params>) { <body> }
-    // tok should be the first token after the directive on the next line
+    // tok should be the first token of the function definition
 
     Token *start = tok;
     Token *func_name_tok = NULL;
@@ -133,8 +132,8 @@ static Token *extract_pragma_compiletime_function(JCC *vm, Token *tok,
     }
 
     if (!func_name_tok) {
-        error_tok(vm, start, "#pragma %s: expected function definition",
-                  directive);
+        error_tok(vm, start,
+                  "__attribute__((macro)): expected function definition");
         return start;
     }
 
@@ -167,7 +166,8 @@ static Token *extract_pragma_compiletime_function(JCC *vm, Token *tok,
         tok = tok->next;
 
     if (!equal(tok, "{")) {
-        error_tok(vm, start, "#pragma %s: expected function body", directive);
+        error_tok(vm, start,
+                  "__attribute__((macro)): expected function body");
         return start;
     }
 
@@ -201,17 +201,11 @@ static Token *extract_pragma_compiletime_function(JCC *vm, Token *tok,
     // Convert preprocessor tokens to parser tokens (TK_PP_NUM -> TK_NUM, etc.)
     convert_pp_tokens(vm, head.next);
 
-    // Detect void return type: scan tokens before the function name, skipping
-    // 'inline', and check whether the return-type token is 'void' without a
-    // following '*' (which would be a void* pointer, not a void return).
+    // Detect void return type: check whether the return-type token is 'void'
+    // without a following '*' (which would be a void* pointer, not void return).
     bool is_void_macro = false;
     {
         Token *t = start;
-        // Skip 'inline' keyword if present
-        if (t && equal(t, "inline"))
-            t = t->next;
-        // Check whether the return type starts with 'void' and the next
-        // meaningful token is NOT '*' (pointer) — i.e. plain void return.
         if (t && t->kind == TK_IDENT && t->len == 4 &&
             strncmp(t->loc, "void", 4) == 0) {
             Token *after = t->next;
@@ -220,10 +214,10 @@ static Token *extract_pragma_compiletime_function(JCC *vm, Token *tok,
         }
     }
 
-    // Create PragmaMacro entry
-    PragmaMacro *pm =
-        arena_alloc(&vm->compiler.parser_arena, sizeof(PragmaMacro));
-    memset(pm, 0, sizeof(PragmaMacro));
+    // Create MacroFn entry
+    MacroFn *pm =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(MacroFn));
+    memset(pm, 0, sizeof(MacroFn));
     pm->name = name;
     pm->body_tokens = head.next;
     pm->compiled_fn = NULL;
@@ -231,20 +225,21 @@ static Token *extract_pragma_compiletime_function(JCC *vm, Token *tok,
     pm->is_macro_entry = is_macro_entry;
     pm->is_inline = is_inline;
     pm->is_void_macro = is_void_macro;
-    pm->next = vm->compiler.pragma_macros;
-    vm->compiler.pragma_macros = pm;
+    pm->next = vm->compiler.macro_fns;
+    vm->compiler.macro_fns = pm;
 
     if (vm->debug_vm)
-        printf("Captured pragma %s '%s'\n", directive, name);
+        printf("Captured %s macro function '%s'\n",
+               is_macro_entry ? "macro" : "comptime", name);
 
     // Return token after the function
     return body_end ? body_end : tok;
 }
 
-// Extract a #pragma comptime variable declaration (not a function).
+// Extract a [[jcc::comptime]] variable declaration (not a function).
 // Extracts tokens up to and including the terminating ';', creates a
 // ComptimeVar entry, and returns the token after the ';'.
-static Token *extract_pragma_comptime_var(JCC *vm, Token *tok) {
+static Token *extract_comptime_var(JCC *vm, Token *tok) {
     Token *start = tok;
 
     // Find the variable name: the last identifier before '=' or ';' at depth 0.
@@ -267,7 +262,8 @@ static Token *extract_pragma_comptime_var(JCC *vm, Token *tok) {
             probe = probe->next;
         }
         if (!last_ident) {
-            error_tok(vm, start, "#pragma comptime: expected variable name");
+            error_tok(vm, start,
+                      "__attribute__((comptime)): expected variable name");
             return start;
         }
         name = arena_alloc(&vm->compiler.parser_arena, last_ident->len + 1);
@@ -288,8 +284,9 @@ static Token *extract_pragma_comptime_var(JCC *vm, Token *tok) {
                 if (equal(probe, "=") || equal(probe, ";")) break;
                 if (equal(probe, "*")) {
                     error_tok(vm, probe,
-                              "#pragma comptime: pointer/string variables are not "
-                              "supported yet (ticket #188 scope: int/float/struct only)");
+                              "__attribute__((comptime)): pointer/string variables "
+                              "are not supported yet (ticket #188 scope: "
+                              "int/float/struct only)");
                     return start;
                 }
             }
@@ -314,7 +311,8 @@ static Token *extract_pragma_comptime_var(JCC *vm, Token *tok) {
         }
     }
     if (!body_end) {
-        error_tok(vm, start, "#pragma comptime: variable declaration not terminated");
+        error_tok(vm, start,
+                  "__attribute__((comptime)): variable declaration not terminated");
         return start;
     }
     cur->next = new_eof(vm, body_end);
@@ -1735,6 +1733,123 @@ static PPDir pp_directive(Token *tok) {
     return PP_NONE;
 }
 
+// Scan the attribute argument list of a GNU __attribute__(( ... )) or C23
+// [[ ... ]] block for [[jcc::macro]], [[jcc::comptime]], __attribute__((macro)),
+// __attribute__((comptime)), and the inline modifier. If a macro/comptime marker
+// is found, extract the following function or variable definition from the token
+// stream, register it as a MacroFn or ComptimeVar, update *tok_ptr to the token
+// after the extracted definition, and return true.
+//
+// If the attribute block contains no macro/comptime marker (e.g. [[nodiscard]],
+// __attribute__((unused))), *tok_ptr is left unchanged and the function returns
+// false so the token flows to the parser as normal.
+static bool try_extract_attr_macro(JCC *vm, Token **tok_ptr) {
+    Token *tok = *tok_ptr;
+    bool is_gnu_attr = false;
+    bool is_c23_attr = false;
+
+    if (equal(tok, "__attribute__") &&
+        tok->next && equal(tok->next, "(") &&
+        tok->next->next && equal(tok->next->next, "("))
+        is_gnu_attr = true;
+    else if (equal(tok, "[") && tok->next && equal(tok->next, "["))
+        is_c23_attr = true;
+
+    if (!is_gnu_attr && !is_c23_attr)
+        return false;
+
+    // Scan inside the attribute argument list for macro/comptime/inline markers.
+    bool is_macro_kind    = false;
+    bool is_comptime_kind = false;
+    bool is_inline        = false;
+    Token *attr_end       = NULL;
+
+    Token *scan = is_gnu_attr ? tok->next->next->next  // skip __attribute__ ( (
+                              : tok->next->next;        // skip [ [
+    int depth = 0;
+
+    for (Token *t = scan; t && t->kind != TK_EOF; t = t->next) {
+        if (is_gnu_attr) {
+            if (equal(t, "(")) { depth++; continue; }
+            if (equal(t, ")")) {
+                if (depth == 0) {
+                    if (t->next && equal(t->next, ")"))
+                        attr_end = t->next->next;
+                    break;
+                }
+                depth--;
+                continue;
+            }
+        } else {
+            if (equal(t, "[")) { depth++; continue; }
+            if (equal(t, "]")) {
+                if (depth == 0) {
+                    if (t->next && equal(t->next, "]"))
+                        attr_end = t->next->next;
+                    break;
+                }
+                depth--;
+                continue;
+            }
+        }
+
+        if (depth != 0) continue;
+        if (equal(t, ",")) continue;
+
+        if (equal(t, "macro")) {
+            is_macro_kind = true;
+        } else if (equal(t, "comptime")) {
+            is_comptime_kind = true;
+        } else if (equal(t, "inline")) {
+            is_inline = true;
+        } else if (equal(t, "jcc") &&
+                   t->next && equal(t->next, ":") &&
+                   t->next->next && equal(t->next->next, ":") &&
+                   t->next->next->next) {
+            Token *after_scope = t->next->next->next;
+            if (equal(after_scope, "macro"))
+                is_macro_kind = true;
+            else if (equal(after_scope, "comptime"))
+                is_comptime_kind = true;
+        }
+    }
+
+    // Only act on a positive macro/comptime match.
+    if ((!is_macro_kind && !is_comptime_kind) || !attr_end)
+        return false;
+
+    bool is_macro_entry = is_macro_kind; // macro=true, comptime=false
+
+    // Probe what follows attr_end: function or variable?
+    // Heuristic: scan (respecting brace depth) for "ident (" before ";" or "=".
+    bool looks_like_function = false;
+    {
+        Token *probe = attr_end;
+        int brace_depth = 0;
+        while (probe && probe->kind != TK_EOF) {
+            if (equal(probe, "{"))       brace_depth++;
+            else if (equal(probe, "}")) brace_depth--;
+            else if (brace_depth == 0) {
+                if (equal(probe, ";") || equal(probe, "=")) break;
+                if (probe->kind == TK_IDENT && probe->next &&
+                    equal(probe->next, "(")) {
+                    looks_like_function = true;
+                    break;
+                }
+            }
+            probe = probe->next;
+        }
+    }
+
+    if (is_macro_entry || looks_like_function) {
+        *tok_ptr = extract_macro_function(vm, attr_end,
+                                          is_macro_entry, is_inline);
+    } else {
+        *tok_ptr = extract_comptime_var(vm, attr_end);
+    }
+    return true;
+}
+
 // Visit all tokens in `tok` while evaluating preprocessing
 // macros and directives.
 static Token *preprocess2(JCC *vm, Token *tok) {
@@ -1748,6 +1863,12 @@ static Token *preprocess2(JCC *vm, Token *tok) {
 
         // Pass through if it is not a "#".
         if (!is_hash(tok)) {
+            // Intercept [[jcc::macro]] / __attribute__((macro)) and comptime
+            // attribute blocks before they reach the parser. On a match,
+            // the definition is extracted into the MacroFn/ComptimeVar list
+            // and tok is advanced past it; nothing is added to the output.
+            if (try_extract_attr_macro(vm, &tok))
+                continue;
             tok->line_delta = tok->file->line_delta;
             tok->filename = tok->file->display_name;
             cur = cur->next = tok;
@@ -1898,52 +2019,6 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             if (equal(tok->next, "once")) {
                 hashmap_put(&vm->compiler.pragma_once, tok->file->name, (void *)1);
                 tok = skip_line(vm, tok->next->next);
-            } else if (equal(tok->next, "macro")) {
-                Token *macro_tok = tok->next->next;
-                while (macro_tok && !macro_tok->at_bol && macro_tok->kind != TK_EOF)
-                    macro_tok = macro_tok->next;
-                bool is_inline_macro = equal(macro_tok, "inline");
-                tok = extract_pragma_compiletime_function(vm, macro_tok, "macro",
-                                                          true, is_inline_macro);
-            } else if (equal(tok->next, "comptime")) {
-                Token *comptime_tok = tok->next->next;
-                while (comptime_tok && !comptime_tok->at_bol &&
-                       comptime_tok->kind != TK_EOF)
-                    comptime_tok = comptime_tok->next;
-                // Detect variable vs function: scan (respecting brace depth) for
-                // "ident (" before ";". If found, it's a function; otherwise a var.
-                bool looks_like_function = false;
-                {
-                    Token *probe = comptime_tok;
-                    int brace_depth = 0;
-                    while (probe && probe->kind != TK_EOF) {
-                        if (equal(probe, "{"))
-                            brace_depth++;
-                        else if (equal(probe, "}"))
-                            brace_depth--;
-                        else if (brace_depth == 0) {
-                            if (equal(probe, ";"))
-                                break;
-                            // A top-level '=' means this is a variable
-                            // declaration; function signatures never have '='
-                            // before the body '{'.
-                            if (equal(probe, "="))
-                                break;
-                            if (probe->kind == TK_IDENT && probe->next &&
-                                equal(probe->next, "(")) {
-                                looks_like_function = true;
-                                break;
-                            }
-                        }
-                        probe = probe->next;
-                    }
-                }
-                if (looks_like_function) {
-                    tok = extract_pragma_compiletime_function(vm, comptime_tok,
-                                                              "comptime", false, false);
-                } else {
-                    tok = extract_pragma_comptime_var(vm, comptime_tok);
-                }
             } else {
                 do { tok = tok->next; } while (!tok->at_bol);
             }

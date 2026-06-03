@@ -249,8 +249,8 @@ Token *preprocess(JCC *vm, Token *tok);
 Node *new_cast(JCC *vm, Node *expr, Type *ty);
 int64_t const_expr(JCC *vm, Token **rest, Token *tok);
 Obj *parse(JCC *vm, Token *tok);
-void cc_execute_top_level_pragma_macro(JCC *vm, char *name, Token *tok,
-                                       Node *args, int arg_count);
+void cc_execute_top_level_macro(JCC *vm, char *name, Token *tok,
+                                Node *args, int arg_count);
 
 //
 // type.c

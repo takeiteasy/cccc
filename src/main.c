@@ -1017,8 +1017,8 @@ int main(int argc, const char *argv[]) {
         merged_prog = vm.compiler.macro_globals;
     }
 
-    // Expand pragma macros in the AST
-    cc_expand_pragma_macros(&vm, merged_prog);
+    // Expand macros in the AST
+    cc_expand_macros(&vm, merged_prog);
 
     // Check for errors and warnings after macro expansion (ticket #78)
     if (cc_has_errors(&vm) || vm.warning_count > 0) {
