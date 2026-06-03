@@ -141,14 +141,17 @@ symbols from that handle are live.
 ## Building
 
 ```bash
-make          # Build jcc with libffi-backed native calls
+make          # Build jcc
 make all      # Build jcc + libjcc.dylib, then run the test suite
-make JCC_HAS_FFI=0   # Build without libffi-backed native calls
 ```
 
 Produces:
 - `jcc` — compiler executable (C source → bytecode → execute)
 - `libjcc.dylib` — shared library for embedding JCC in other applications
+
+JCC requires libffi for native FFI calls. The Makefile uses `pkg-config
+libffi` when available, with Homebrew and common Unix fallbacks.
+
 
 JCC uses C23 features such as `#embed`. On macOS, the Apple Clang that ships with Xcode does not support `#embed` — use the Homebrew LLVM Clang instead:
 
@@ -159,12 +162,11 @@ make
 ```
 
 Optional LLVM support is available for internal bytecode-to-LLVM IR backend
-work. It is disabled by default and currently only links and smoke-tests LLVM;
-it does not add a user-facing LLVM output mode.
+work. It is disabled by default and does not add a user-facing LLVM output
+mode.
 
 ```bash
 make JCC_HAS_LLVM=1 LLVM_CONFIG=/opt/homebrew/opt/llvm/bin/llvm-config
-make JCC_HAS_LLVM=1 LLVM_CONFIG=/opt/homebrew/opt/llvm/bin/llvm-config llvm-smoke
 ```
 
 ### Compile to Bytecode

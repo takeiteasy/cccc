@@ -23,6 +23,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
+#include <ffi.h>
 #include <libgen.h>
 #include <math.h>
 #include <setjmp.h>
@@ -35,9 +36,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
-#ifdef JCC_HAS_FFI
-#include <ffi.h>
-#endif
 #if defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
 #else

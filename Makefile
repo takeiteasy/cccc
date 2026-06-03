@@ -1,7 +1,9 @@
 SRCS := $(wildcard src/*.c src/stdlib/*.c)
-CFLAGS := -Wall -O0 -g -std=c23 -Wno-deprecated-declarations -Wno-switch -Wno-inline-asm
+BASE_CFLAGS := -Wall -O0 -g -std=c23 -Wno-deprecated-declarations -Wno-switch
+CFLAGS := $(BASE_CFLAGS)
 LDFLAGS :=
 LLVM_CONFIG ?= llvm-config
+PKG_CONFIG ?= pkg-config
 
 ifeq ($(JCC_HAS_LLVM),1)
 LLVM_CONFIG_FOUND := $(shell command -v $(LLVM_CONFIG) 2>/dev/null)
@@ -15,27 +17,22 @@ CFLAGS += -DJCC_HAS_LLVM=1 $(LLVM_CFLAGS)
 LDFLAGS += $(LLVM_LDFLAGS) $(LLVM_LIBS)
 endif
 
-# libffi support for native FFI calls.
-# Enabled by default; disable with: make JCC_HAS_FFI=0
-JCC_HAS_FFI ?= 1
-ifneq ($(JCC_HAS_FFI),0)
-  CFLAGS += -DJCC_HAS_FFI=1
-  LIBFFI_CFLAGS := $(shell pkg-config --cflags libffi 2>/dev/null)
-  LIBFFI_LDFLAGS := $(shell pkg-config --libs libffi 2>/dev/null)
+# libffi is required for native FFI calls.
+LIBFFI_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags libffi 2>/dev/null)
+LIBFFI_LDFLAGS ?= $(shell $(PKG_CONFIG) --libs libffi 2>/dev/null)
 
-  ifeq ($(LIBFFI_LDFLAGS),)
-    ifeq ($(shell uname -s),Darwin)
-      LIBFFI_CFLAGS := -I/opt/homebrew/opt/libffi/include -I/usr/local/opt/libffi/include
-      LIBFFI_LDFLAGS := -L/opt/homebrew/opt/libffi/lib -L/usr/local/opt/libffi/lib -lffi
-    else
-      LIBFFI_CFLAGS := -I/usr/include -I/usr/local/include
-      LIBFFI_LDFLAGS := -L/usr/lib -L/usr/local/lib -lffi
-    endif
+ifeq ($(LIBFFI_LDFLAGS),)
+  ifeq ($(shell uname -s),Darwin)
+    LIBFFI_CFLAGS := -I/opt/homebrew/opt/libffi/include -I/usr/local/opt/libffi/include
+    LIBFFI_LDFLAGS := -L/opt/homebrew/opt/libffi/lib -L/usr/local/opt/libffi/lib -lffi
+  else
+    LIBFFI_CFLAGS := -I/usr/include -I/usr/local/include
+    LIBFFI_LDFLAGS := -L/usr/lib -L/usr/local/lib -lffi
   endif
-
-  CFLAGS += $(LIBFFI_CFLAGS)
-  LDFLAGS += $(LIBFFI_LDFLAGS)
 endif
+
+CFLAGS += $(LIBFFI_CFLAGS)
+LDFLAGS += $(LIBFFI_LDFLAGS)
 
 ifeq ($(OS),Windows_NT)
 	EXE := .EXE
@@ -120,15 +117,6 @@ afl-asan: jcc-afl-asan
 # libFuzzer harness (optional)
 fuzz_harness: src/fuzzing.c $(SRCS)
 	$(CC) $(CFLAGS) -fsanitize=fuzzer,address -o $@ $(filter-out src/main.c, $(SRCS)) $< $(LDFLAGS)
-
-llvm-smoke: $(filter-out src/main.c, $(SRCS)) tests/llvm_smoke.c
-ifneq ($(JCC_HAS_LLVM),1)
-	@echo "Error: llvm-smoke requires JCC_HAS_LLVM=1"
-	@exit 1
-else
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
-	./$@
-endif
 
 # --- Fuzzing targets (moved from fuzz/Makefile) ---
 
@@ -273,11 +261,11 @@ else
 endif
 
 clean:
-	@$(RM) -f $(EXE_OUT) $(LIB_OUT) $(SAN_OUT) jcc-afl jcc-afl-asan jcc-prof fuzz_harness llvm-smoke
+	@$(RM) -f $(EXE_OUT) $(LIB_OUT) $(SAN_OUT) jcc-afl jcc-afl-asan jcc-prof fuzz_harness
 	@$(RM) -rf profile/*.prof profile/*.txt profile/*.json profile/*.massif
 	@$(RM) -rf fuzz/corpus fuzz/out
 
-.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness llvm-smoke bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info generate-std
+.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info generate-std
 ifeq ($(UNAME_S),Linux)
 .PHONY: msan
 endif

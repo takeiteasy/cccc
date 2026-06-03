@@ -20,8 +20,6 @@
 #include "./internal.h"
 
 #ifdef JCC_HAS_LLVM
-#include <llvm-c/Core.h>
-#include <llvm-c/Target.h>
 #include <llvm/Config/llvm-config.h>
 #endif
 
@@ -38,39 +36,5 @@ const char *cc_llvm_backend_version(void) {
     return LLVM_VERSION_STRING;
 #else
     return "disabled";
-#endif
-}
-
-int cc_llvm_backend_smoke_test(void) {
-#ifdef JCC_HAS_LLVM
-    if (LLVMInitializeNativeTarget() != 0)
-        return -1;
-    if (LLVMInitializeNativeAsmPrinter() != 0)
-        return -1;
-
-    LLVMContextRef context = LLVMContextCreate();
-    if (!context)
-        return -1;
-
-    LLVMModuleRef module =
-        LLVMModuleCreateWithNameInContext("jcc-llvm-smoke", context);
-    if (!module) {
-        LLVMContextDispose(context);
-        return -1;
-    }
-
-    LLVMBuilderRef builder = LLVMCreateBuilderInContext(context);
-    if (!builder) {
-        LLVMDisposeModule(module);
-        LLVMContextDispose(context);
-        return -1;
-    }
-
-    LLVMDisposeBuilder(builder);
-    LLVMDisposeModule(module);
-    LLVMContextDispose(context);
-    return 0;
-#else
-    return -1;
 #endif
 }

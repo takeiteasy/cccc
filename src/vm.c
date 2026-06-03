@@ -588,9 +588,7 @@ void cc_init(JCC *vm, uint32_t flags) {
     // Add default system include path for <...> includes
     cc_system_include(vm, "./include");
 
-#ifdef JCC_HAS_FFI
     cc_define(vm, "JCC_HAS_FFI", "1");
-#endif
 
     // Initialize error collection fields
     vm->errors = NULL;
