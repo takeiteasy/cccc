@@ -7,7 +7,7 @@
 ## Features
 
 - **Compile-time macros** — C functions annotated with `[[jcc::macro]]` or `__attribute__((macro))` that run during compilation (see [MACROS.md](docs/MACROS.md))
-  - Inline pre-parse generators for parser-visible functions and declarations (`[[jcc::macro, inline]]`)
+  - Inline pre-parse generators for parser-visible functions and declarations (`[[jcc::macro(inline)]]`)
   - File-scope macro calls for explicit source-order generation
   - Call-site expansion for expression and statement rewriting
   - Quasi-quoting (`_QUOTE`), hygienic type/symbol reflection, `__jcc_gensym`, and AST construction helpers

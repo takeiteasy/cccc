@@ -1798,19 +1798,29 @@ static bool try_extract_attr_macro(JCC *vm, Token **tok_ptr) {
 
         if (equal(t, "macro")) {
             is_macro_kind = true;
+            // macro(inline) — inline is an argument, not a separate attribute
+            if (t->next && equal(t->next, "(") &&
+                t->next->next && equal(t->next->next, "inline") &&
+                t->next->next->next && equal(t->next->next->next, ")"))
+                is_inline = true;
         } else if (equal(t, "comptime")) {
             is_comptime_kind = true;
-        } else if (equal(t, "inline")) {
-            is_inline = true;
         } else if (equal(t, "jcc") &&
                    t->next && equal(t->next, ":") &&
                    t->next->next && equal(t->next->next, ":") &&
                    t->next->next->next) {
             Token *after_scope = t->next->next->next;
-            if (equal(after_scope, "macro"))
+            if (equal(after_scope, "macro")) {
                 is_macro_kind = true;
-            else if (equal(after_scope, "comptime"))
+                // jcc::macro(inline)
+                if (after_scope->next && equal(after_scope->next, "(") &&
+                    after_scope->next->next && equal(after_scope->next->next, "inline") &&
+                    after_scope->next->next->next &&
+                    equal(after_scope->next->next->next, ")"))
+                    is_inline = true;
+            } else if (equal(after_scope, "comptime")) {
                 is_comptime_kind = true;
+            }
         }
     }
 

@@ -48,7 +48,7 @@ JCC supports three macro execution forms:
 
 | Form | Source shape | When it runs | What the return value means |
 |------|--------------|--------------|-----------------------------|
-| Inline generation | `[[jcc::macro, inline]] void gen(void)` | Before the main parse | Ignored; side effects generate declarations/functions/globals |
+| Inline generation | `[[jcc::macro(inline)]] void gen(void)` | Before the main parse | Ignored; side effects generate declarations/functions/globals |
 | File-scope call | `gen();` at file scope | While parsing that file, at that source position | Ignored; side effects generate declarations/functions/globals |
 | Call-site expansion | `gen(args...)` inside code | During macro expansion after parsing | Replaces the call expression or statement |
 
@@ -72,7 +72,7 @@ parse, and functions created with `_AST_FUNCTION()` receive parser-visible
 synthetic declarations automatically.
 
 ```c
-[[jcc::macro, inline]]
+[[jcc::macro(inline)]]
 void generate_answer(void) {
     _Type *int_ty = _AST_GET_TYPE("int");
     _Obj *fn = _AST_FUNCTION("answer", int_ty);
@@ -84,7 +84,7 @@ int main(void) {
 }
 ```
 
-The GNU-attribute equivalent is `__attribute__((macro, inline))`.
+The GNU-attribute equivalent is `__attribute__((macro(inline)))`.
 
 Inline macros take no call-site arguments. Use them for global code generation:
 boilerplate functions, enum conversion helpers, serializers, or any generated
@@ -331,7 +331,7 @@ apply the correct implicit cast. When building a generated function body, wrap
 the quote call in `_AST_WITH_FN(fn)` to establish that context:
 
 ```c
-[[jcc::macro, inline]]
+[[jcc::macro(inline)]]
 void generate_answer(void) {
     _Type *int_ty = _AST_GET_TYPE("int");
     _Obj *fn = _AST_FUNCTION("answer", int_ty);
@@ -391,7 +391,7 @@ Generated functions are `_Obj *` values. Create the object, add parameters,
 build a body, and install the body.
 
 ```c
-[[jcc::macro, inline]]
+[[jcc::macro(inline)]]
 void generate_is_even(void) {
     _Type *int_ty = _AST_GET_TYPE("int");
     _Obj *fn = _AST_FUNCTION("is_even", int_ty);
@@ -434,7 +434,7 @@ size the type to match the data length; the codegen copies exactly `ty->size`
 bytes from the init data.
 
 ```c
-[[jcc::macro, inline]]
+[[jcc::macro(inline)]]
 void embed_version(void) {
     _Type *char_ty = _AST_GET_TYPE("char");
     _Type *arr_ty  = _AST_MAKE_ARRAY(char_ty, 8);
@@ -644,7 +644,7 @@ Both C23 attribute syntax and GNU attribute syntax are accepted everywhere:
 | C23 form | GNU form |
 |----------|----------|
 | `[[jcc::macro]]` | `__attribute__((macro))` |
-| `[[jcc::macro, inline]]` | `__attribute__((macro, inline))` |
+| `[[jcc::macro(inline)]]` | `__attribute__((macro(inline)))` |
 | `[[jcc::comptime]]` | `__attribute__((comptime))` |
 
 The canonical form used in this document and in JCC examples is `[[jcc::macro]]`.

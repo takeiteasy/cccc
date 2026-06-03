@@ -331,10 +331,10 @@ function disclosure_triangle(elt) {
 <dd><p>Resolve a symbol in a dynamic library.
 </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/cc_execute_inline_macros" target="_top">cc_execute_inline_macros</a></tt></dt>
-<dd><p>Execute all inline pragma macros before parsing.
+<dd><p>Execute all inline macros before parsing.
 </p></dd>
-<dt><tt><a href="index.html#//apple_ref/c/func/cc_expand_pragma_macros" target="_top">cc_expand_pragma_macros</a></tt></dt>
-<dd><p>Expand all pragma macro calls in the AST.
+<dt><tt><a href="index.html#//apple_ref/c/func/cc_expand_macros" target="_top">cc_expand_macros</a></tt></dt>
+<dd><p>Expand all macro calls in the AST.
 </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/cc_ffi_allow" target="_top">cc_ffi_allow</a></tt></dt>
 <dd><p>Add a native function name to the FFI allow list.
@@ -940,7 +940,7 @@ or cc_register_variadic_cfunc.
 <h3><a name="cc_execute_inline_macros">cc_execute_inline_macros</a></h3>
 <hr class="afterName">
 <p><!-- headerDoc=abstract;uid=//apple_ref/c/func/cc_execute_inline_macros;name=start --><!-- begin abstract --></p>
-<p>Execute all inline pragma macros before parsing.
+<p>Execute all inline macros before parsing.
 <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/cc_execute_inline_macros;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/cc_execute_inline_macros;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/cc_execute_inline_macros" logicalPath="//apple_ref/c/instm/cc_execute_inline_macros //apple_ref/c/clm/cc_execute_inline_macros //apple_ref/c/intfcm/cc_execute_inline_macros //apple_ref/c/intfm/cc_execute_inline_macros //apple_ref/c/func/cc_execute_inline_macros" target="_top"><span class="function">cc_execute_inline_macros</span></a>(
@@ -972,51 +972,51 @@ or cc_register_variadic_cfunc.
 </dl>
 </div>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
-<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/cc_execute_inline_macros;name=start --><p>Compiles and executes every #pragma macro marked with the
-`inline` keyword. Each inline macro runs automatically at its
-declaration point (no explicit call needed). Generated functions
-are stored in vm-&gt;compiler.macro_globals and synthetic forward
-declarations are prepended to every input token stream so the
-parser can resolve calls to generated functions without manual
-forward declarations. Must be called after all preprocessing and
-before cc_parse.
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/cc_execute_inline_macros;name=start --><p>Compiles and executes every [[jcc::macro, inline]] (or
+__attribute__((macro, inline))) macro. Each inline macro runs
+automatically at its declaration point (no explicit call needed).
+Generated functions are stored in vm-&gt;compiler.macro_globals and
+synthetic forward declarations are prepended to every input token
+stream so the parser can resolve calls to generated functions
+without manual forward declarations. Must be called after all
+preprocessing and before cc_parse.
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/cc_execute_inline_macros;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
-<!-- headerDoc=func;  uid=//apple_ref/c/func/cc_expand_pragma_macros;   name=cc_expand_pragma_macros -->
-<a name="//apple_ref/c/func/cc_expand_pragma_macros"></a>
-<h3><a name="cc_expand_pragma_macros">cc_expand_pragma_macros</a></h3>
+<!-- headerDoc=func;  uid=//apple_ref/c/func/cc_expand_macros;   name=cc_expand_macros -->
+<a name="//apple_ref/c/func/cc_expand_macros"></a>
+<h3><a name="cc_expand_macros">cc_expand_macros</a></h3>
 <hr class="afterName">
-<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/cc_expand_pragma_macros;name=start --><!-- begin abstract --></p>
-<p>Expand all pragma macro calls in the AST.
-<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/cc_expand_pragma_macros;name=end --></p>
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/cc_expand_macros;name=start --><!-- begin abstract --></p>
+<p>Expand all macro calls in the AST.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/cc_expand_macros;name=end --></p>
 <div class="declaration_indent">
-<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/cc_expand_pragma_macros;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/cc_expand_pragma_macros" logicalPath="//apple_ref/c/instm/cc_expand_pragma_macros //apple_ref/c/clm/cc_expand_pragma_macros //apple_ref/c/intfcm/cc_expand_pragma_macros //apple_ref/c/intfm/cc_expand_pragma_macros //apple_ref/c/func/cc_expand_pragma_macros" target="_top"><span class="function">cc_expand_pragma_macros</span></a>(
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/cc_expand_macros;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/cc_expand_macros" logicalPath="//apple_ref/c/instm/cc_expand_macros //apple_ref/c/clm/cc_expand_macros //apple_ref/c/intfcm/cc_expand_macros //apple_ref/c/intfm/cc_expand_macros //apple_ref/c/func/cc_expand_macros" target="_top"><span class="function">cc_expand_macros</span></a>(
     <a machinegenerated="true" href="index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tag/Obj" logicalPath="//apple_ref/c/cl/Obj //apple_ref/c/tdef/Obj //apple_ref/c/tag/Obj" target="_top"><span class="type">Obj</span></a> <span class="type">*</span><span class="param">prog</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/cc_expand_pragma_macros;name=end --></pre>
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tag/Obj" logicalPath="//apple_ref/c/cl/Obj //apple_ref/c/tdef/Obj //apple_ref/c/tag/Obj" target="_top"><span class="type">Obj</span></a> <span class="type">*</span><span class="param">prog</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/cc_expand_macros;name=end --></pre>
 </div>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
 <div class="param_indent">
 <dl>
 <dt>
-<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/cc_expand_pragma_macros/vm;   name=vm -->
-<a name="//apple_ref/doc/functionparam/cc_expand_pragma_macros/vm"></a>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/cc_expand_macros/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/cc_expand_macros/vm"></a>
 <code>vm</code>
 </dt>
 <dd><p>The JCC instance.</p></dd>
 <dt>
-<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/cc_expand_pragma_macros/prog;   name=prog -->
-<a name="//apple_ref/doc/functionparam/cc_expand_pragma_macros/prog"></a>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/cc_expand_macros/prog;   name=prog -->
+<a name="//apple_ref/doc/functionparam/cc_expand_macros/prog"></a>
 <code>prog</code>
 </dt>
 <dd><p>Linked list of top-level Obj returned by cc_parse.</p></dd>
 </dl>
 </div>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
-<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/cc_expand_pragma_macros;name=start --><p>Walks the AST and replaces ND_MACRO_CALL nodes with the
-generated AST from executing the corresponding pragma macro.
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/cc_expand_macros;name=start --><p>Walks the AST and replaces ND_MACRO_CALL nodes with the
+generated AST from executing the corresponding macro function.
 Must be called after cc_parse and before cc_compile.
-<!-- headerDoc=discussion;uid=//apple_ref/c/func/cc_expand_pragma_macros;name=end --><!-- end discussion -->
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/cc_expand_macros;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/cc_ffi_allow;   name=cc_ffi_allow -->
@@ -2526,14 +2526,14 @@ during code generation.
 <dd><p>Tracks labels used for goto and labeled statements and their
 defined addresses in the generated text segment.
 </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/tdef/MacroFn" target="_top">MacroFn</a></tt></dt>
+<dd><p>Represents a compile-time macro function.
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/tdef/Member" target="_top">Member</a></tt></dt>
 <dd><p>Member (field) descriptor for struct and union types.
 </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/tdef/NodeKind" target="_top">NodeKind</a></tt></dt>
 <dd><p>Kinds of AST nodes produced by the parser.
-</p></dd>
-<dt><tt><a href="index.html#//apple_ref/c/tdef/PragmaMacro" target="_top">PragmaMacro</a></tt></dt>
-<dd><p>Represents a compile-time pragma macro function.
 </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/tdef/ProvenanceInfo" target="_top">ProvenanceInfo</a></tt></dt>
 <dd><p>Tracks pointer provenance (origin) for validation.
@@ -2871,14 +2871,14 @@ compilation.
     <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/HashMap" logicalPath="//apple_ref/c/cl/HashMap //apple_ref/c/tdef/HashMap" target="_top"><span class="type">HashMap</span></a> <!-- a logicalPath="//apple_ref/c/econst/included_headers //apple_ref/c/data/included_headers //apple_ref/c/clconst/included_headers " machineGenerated="true" --><span class="var">included_headers</span><!-- /a -->; <span class="comment">// Track included headers for lazy stdlib loading</span> 
     <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/HashMap" logicalPath="//apple_ref/c/cl/HashMap //apple_ref/c/tdef/HashMap" target="_top"><span class="type">HashMap</span></a> <!-- a logicalPath="//apple_ref/c/econst/include_guards //apple_ref/c/data/include_guards //apple_ref/c/clconst/include_guards " machineGenerated="true" --><span class="var">include_guards</span><!-- /a -->; <span class="comment">// Header include guard cache</span> 
     <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/include_next_idx //apple_ref/c/data/include_next_idx //apple_ref/c/clconst/include_next_idx " machineGenerated="true" --><span class="var">include_next_idx</span><!-- /a -->; <span class="comment">// Index for #include_next</span>  
-    <span class="comment">// Pragma macro state</span> 
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/PragmaMacro" logicalPath="//apple_ref/c/cl/PragmaMacro //apple_ref/c/tdef/PragmaMacro" target="_top"><span class="type">PragmaMacro</span></a> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/pragma_macros //apple_ref/c/data/pragma_macros //apple_ref/c/clconst/pragma_macros " machineGenerated="true" --><span class="var">pragma_macros</span><!-- /a -->; <span class="comment">// Linked list of captured pragma macros</span> 
-    <!-- a logicalPath="//apple_ref/c/cl/ComptimeVar //apple_ref/c/tdef/ComptimeVar //apple_ref/c/tag/ComptimeVar //apple_ref/c/struct/ComptimeVar //apple_ref/c/intf/ComptimeVar //apple_ref/doc/anysymbol/ComptimeVar" machineGenerated="true" --><span class="type">ComptimeVar</span><!-- /a --> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/comptime_vars //apple_ref/c/data/comptime_vars //apple_ref/c/clconst/comptime_vars " machineGenerated="true" --><span class="var">comptime_vars</span><!-- /a -->; <span class="comment">// Linked list of #pragma comptime variable decls</span> 
-    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/in_macro_mode //apple_ref/c/data/in_macro_mode //apple_ref/c/clconst/in_macro_mode " machineGenerated="true" --><span class="var">in_macro_mode</span><!-- /a -->; <span class="comment">// True when compiling/executing a pragma macro</span> 
+    <span class="comment">// Compile-time macro state</span> 
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/MacroFn" logicalPath="//apple_ref/c/cl/MacroFn //apple_ref/c/tdef/MacroFn" target="_top"><span class="type">MacroFn</span></a> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/macro_fns //apple_ref/c/data/macro_fns //apple_ref/c/clconst/macro_fns " machineGenerated="true" --><span class="var">macro_fns</span><!-- /a -->; <span class="comment">// Linked list of captured macro functions</span> 
+    <!-- a logicalPath="//apple_ref/c/cl/ComptimeVar //apple_ref/c/tdef/ComptimeVar //apple_ref/c/tag/ComptimeVar //apple_ref/c/struct/ComptimeVar //apple_ref/c/intf/ComptimeVar //apple_ref/doc/anysymbol/ComptimeVar" machineGenerated="true" --><span class="type">ComptimeVar</span><!-- /a --> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/comptime_vars //apple_ref/c/data/comptime_vars //apple_ref/c/clconst/comptime_vars " machineGenerated="true" --><span class="var">comptime_vars</span><!-- /a -->; <span class="comment">// Linked list of [[jcc::comptime]] variable decls</span> 
+    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/in_macro_mode //apple_ref/c/data/in_macro_mode //apple_ref/c/clconst/in_macro_mode " machineGenerated="true" --><span class="var">in_macro_mode</span><!-- /a -->; <span class="comment">// True when compiling/executing a macro function</span> 
     <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/in_macro_expansion //apple_ref/c/data/in_macro_expansion //apple_ref/c/clconst/in_macro_expansion " machineGenerated="true" --><span class="var">in_macro_expansion</span><!-- /a -->; <span class="comment">// True during macro AST expansion pass</span> 
-    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/pragma_macros_compiled //apple_ref/c/data/pragma_macros_compiled //apple_ref/c/clconst/pragma_macros_compiled " machineGenerated="true" --><span class="var">pragma_macros_compiled</span><!-- /a -->; <span class="comment">// True after compile_all_pragma_macros has run</span> 
+    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/macro_fns_compiled //apple_ref/c/data/macro_fns_compiled //apple_ref/c/clconst/macro_fns_compiled " machineGenerated="true" --><span class="var">macro_fns_compiled</span><!-- /a -->; <span class="comment">// True after compile_all_macros has run</span> 
     <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/macro_recursion_limit //apple_ref/c/data/macro_recursion_limit //apple_ref/c/clconst/macro_recursion_limit " machineGenerated="true" --><span class="var">macro_recursion_limit</span><!-- /a -->; <span class="comment">// 0 = unlimited, default = 256</span> 
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tag/Obj" logicalPath="//apple_ref/c/cl/Obj //apple_ref/c/tdef/Obj //apple_ref/c/tag/Obj" target="_top"><span class="type">Obj</span></a> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/macro_globals //apple_ref/c/data/macro_globals //apple_ref/c/clconst/macro_globals " machineGenerated="true" --><span class="var">macro_globals</span><!-- /a -->; <span class="comment">// Globals defined by inline pragma macros (injected into</span> 
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tag/Obj" logicalPath="//apple_ref/c/cl/Obj //apple_ref/c/tdef/Obj //apple_ref/c/tag/Obj" target="_top"><span class="type">Obj</span></a> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/macro_globals //apple_ref/c/data/macro_globals //apple_ref/c/clconst/macro_globals " machineGenerated="true" --><span class="var">macro_globals</span><!-- /a -->; <span class="comment">// Globals defined by inline macros (injected into</span> 
     <span class="comment">// the final program before codegen)</span>  
     <span class="comment">// #embed directive limits</span> 
     <!-- a logicalPath="//apple_ref/c/cl/size_t //apple_ref/c/tdef/size_t //apple_ref/c/tag/size_t //apple_ref/c/struct/size_t //apple_ref/c/intf/size_t //apple_ref/doc/anysymbol/size_t" machineGenerated="true" --><span class="type">size_t</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/embed_limit //apple_ref/c/data/embed_limit //apple_ref/c/clconst/embed_limit " machineGenerated="true" --><span class="var">embed_limit</span><!-- /a -->; <span class="comment">// Soft limit for #embed size (default: 10MB)</span> 
@@ -3548,6 +3548,79 @@ defined addresses in the generated text segment.
 } <!-- a logicalPath="//apple_ref/c/econst/LabelEntry //apple_ref/c/data/LabelEntry //apple_ref/c/clconst/LabelEntry " machineGenerated="true" --><span class="var">LabelEntry</span><!-- /a -->;  <!-- headerDoc=declaration;uid=//apple_ref/c/tdef/LabelEntry;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
+<!-- headerDoc=tdef;  uid=//apple_ref/c/tdef/MacroFn;   name=MacroFn -->
+<a name="//apple_ref/c/tdef/MacroFn"></a>
+<h3><a name="MacroFn">MacroFn</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/tdef/MacroFn;name=start --><!-- begin abstract --></p>
+<p>Represents a compile-time macro function.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/tdef/MacroFn;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/tdef/MacroFn;name=start --><span class="keyword">typedef</span> <span class="keyword">struct</span> <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/MacroFn" logicalPath="//apple_ref/c/cl/MacroFn //apple_ref/c/tdef/MacroFn" target="_top"><span class="type">MacroFn</span></a> { 
+    <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/name //apple_ref/c/data/name //apple_ref/c/clconst/name " machineGenerated="true" --><span class="var">name</span><!-- /a -->; <span class="comment">// Function name</span> 
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/Token" logicalPath="//apple_ref/c/cl/Token //apple_ref/c/tdef/Token" target="_top"><span class="type">Token</span></a> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/body_tokens //apple_ref/c/data/body_tokens //apple_ref/c/clconst/body_tokens " machineGenerated="true" --><span class="var">body_tokens</span><!-- /a -->; <span class="comment">// Original token stream for function body</span> 
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tag/Obj" logicalPath="//apple_ref/c/cl/Obj //apple_ref/c/tdef/Obj //apple_ref/c/tag/Obj" target="_top"><span class="type">Obj</span></a> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/compiled_fn //apple_ref/c/data/compiled_fn //apple_ref/c/clconst/compiled_fn " machineGenerated="true" --><span class="var">compiled_fn</span><!-- /a -->; <span class="comment">// Compiled function object</span> 
+    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_compiled //apple_ref/c/data/is_compiled //apple_ref/c/clconst/is_compiled " machineGenerated="true" --><span class="var">is_compiled</span><!-- /a -->; <span class="comment">// True after successful compilation</span> 
+    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_macro_entry //apple_ref/c/data/is_macro_entry //apple_ref/c/clconst/is_macro_entry " machineGenerated="true" --><span class="var">is_macro_entry</span><!-- /a -->; <span class="comment">// True for [[jcc::macro]], false for comptime helper</span> 
+    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_inline //apple_ref/c/data/is_inline //apple_ref/c/clconst/is_inline " machineGenerated="true" --><span class="var">is_inline</span><!-- /a -->; <span class="comment">// True for inline macros (auto-execute at declaration)</span> 
+    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_void_macro //apple_ref/c/data/is_void_macro //apple_ref/c/clconst/is_void_macro " machineGenerated="true" --><span class="var">is_void_macro</span><!-- /a -->; <span class="comment">// True if declared void — definition-only, no splice node</span> 
+    <span class="keyword">struct</span> <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/MacroFn" logicalPath="//apple_ref/c/cl/MacroFn //apple_ref/c/tdef/MacroFn" target="_top"><span class="type">MacroFn</span></a> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/next //apple_ref/c/data/next //apple_ref/c/clconst/next " machineGenerated="true" --><span class="var">next</span><!-- /a -->; <span class="comment">// Next macro in linked list</span> 
+} <!-- a logicalPath="//apple_ref/c/econst/MacroFn //apple_ref/c/data/MacroFn //apple_ref/c/clconst/MacroFn " machineGenerated="true" --><span class="var">MacroFn</span><!-- /a -->;  <!-- headerDoc=declaration;uid=//apple_ref/c/tdef/MacroFn;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Fields</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/MacroFn/name;   name=name -->
+<a name="//apple_ref/doc/structfield/MacroFn/name"></a>
+<code>name</code>
+</dt>
+<dd><p>Function name.</p></dd>
+<dt>
+<!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/MacroFn/body_tokens;   name=body_tokens -->
+<a name="//apple_ref/doc/structfield/MacroFn/body_tokens"></a>
+<code>body_tokens</code>
+</dt>
+<dd><p>Original token stream for function body (from preprocessor).</p></dd>
+<dt>
+<!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/MacroFn/compiled_fn;   name=compiled_fn -->
+<a name="//apple_ref/doc/structfield/MacroFn/compiled_fn"></a>
+<code>compiled_fn</code>
+</dt>
+<dd><p>Compiled function object (NULL until compiled).</p></dd>
+<dt>
+<!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/MacroFn/is_compiled;   name=is_compiled -->
+<a name="//apple_ref/doc/structfield/MacroFn/is_compiled"></a>
+<code>is_compiled</code>
+</dt>
+<dd><p>True after successful compilation.</p></dd>
+<dt>
+<!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/MacroFn/is_macro_entry;   name=is_macro_entry -->
+<a name="//apple_ref/doc/structfield/MacroFn/is_macro_entry"></a>
+<code>is_macro_entry</code>
+</dt>
+<dd><p>True if callable from user program macro call sites.</p></dd>
+<dt>
+<!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/MacroFn/is_void_macro;   name=is_void_macro -->
+<a name="//apple_ref/doc/structfield/MacroFn/is_void_macro"></a>
+<code>is_void_macro</code>
+</dt>
+<dd><p>True if declared with void return type (definition-only).</p></dd>
+<dt>
+<!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/MacroFn/next;   name=next -->
+<a name="//apple_ref/doc/structfield/MacroFn/next"></a>
+<code>next</code>
+</dt>
+<dd><p>Pointer to next macro in linked list.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/tdef/MacroFn;name=start --><p>Macro functions are functions marked with [[jcc::macro]] or
+__attribute__((macro)) that execute during compilation to generate
+or transform AST nodes.
+<!-- headerDoc=discussion;uid=//apple_ref/c/tdef/MacroFn;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
 <!-- headerDoc=tdef;  uid=//apple_ref/c/tdef/Member;   name=Member -->
 <a name="//apple_ref/c/tdef/Member"></a>
 <h3><a name="Member">Member</a></h3>
@@ -3658,78 +3731,6 @@ defined addresses in the generated text segment.
     <!-- a logicalPath="//apple_ref/c/econst/ND_COMPLEX //apple_ref/c/data/ND_COMPLEX //apple_ref/c/clconst/ND_COMPLEX " machineGenerated="true" --><span class="var">ND_COMPLEX</span><!-- /a --> = <span class="number">52</span>, <span class="comment">// Native complex construction/projection helper</span> 
 } <!-- a logicalPath="//apple_ref/c/econst/NodeKind //apple_ref/c/data/NodeKind //apple_ref/c/clconst/NodeKind " machineGenerated="true" --><span class="var">NodeKind</span><!-- /a -->;  <!-- headerDoc=declaration;uid=//apple_ref/c/tdef/NodeKind;name=end --></pre>
 </div>
-<hr class="betweenAPIEntries">
-<!-- headerDoc=tdef;  uid=//apple_ref/c/tdef/PragmaMacro;   name=PragmaMacro -->
-<a name="//apple_ref/c/tdef/PragmaMacro"></a>
-<h3><a name="PragmaMacro">PragmaMacro</a></h3>
-<hr class="afterName">
-<p><!-- headerDoc=abstract;uid=//apple_ref/c/tdef/PragmaMacro;name=start --><!-- begin abstract --></p>
-<p>Represents a compile-time pragma macro function.
-<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/tdef/PragmaMacro;name=end --></p>
-<div class="declaration_indent">
-<pre><!-- headerDoc=declaration;uid=//apple_ref/c/tdef/PragmaMacro;name=start --><span class="keyword">typedef</span> <span class="keyword">struct</span> <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/PragmaMacro" logicalPath="//apple_ref/c/cl/PragmaMacro //apple_ref/c/tdef/PragmaMacro" target="_top"><span class="type">PragmaMacro</span></a> { 
-    <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/name //apple_ref/c/data/name //apple_ref/c/clconst/name " machineGenerated="true" --><span class="var">name</span><!-- /a -->; <span class="comment">// Function name</span> 
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/Token" logicalPath="//apple_ref/c/cl/Token //apple_ref/c/tdef/Token" target="_top"><span class="type">Token</span></a> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/body_tokens //apple_ref/c/data/body_tokens //apple_ref/c/clconst/body_tokens " machineGenerated="true" --><span class="var">body_tokens</span><!-- /a -->; <span class="comment">// Original token stream for function body</span> 
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tag/Obj" logicalPath="//apple_ref/c/cl/Obj //apple_ref/c/tdef/Obj //apple_ref/c/tag/Obj" target="_top"><span class="type">Obj</span></a> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/compiled_fn //apple_ref/c/data/compiled_fn //apple_ref/c/clconst/compiled_fn " machineGenerated="true" --><span class="var">compiled_fn</span><!-- /a -->; <span class="comment">// Compiled function object</span> 
-    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_compiled //apple_ref/c/data/is_compiled //apple_ref/c/clconst/is_compiled " machineGenerated="true" --><span class="var">is_compiled</span><!-- /a -->; <span class="comment">// True after successful compilation</span> 
-    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_macro_entry //apple_ref/c/data/is_macro_entry //apple_ref/c/clconst/is_macro_entry " machineGenerated="true" --><span class="var">is_macro_entry</span><!-- /a -->; <span class="comment">// True for #pragma macro, false for comptime helper</span> 
-    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_inline //apple_ref/c/data/is_inline //apple_ref/c/clconst/is_inline " machineGenerated="true" --><span class="var">is_inline</span><!-- /a -->; <span class="comment">// True for inline macros (auto-execute at declaration)</span> 
-    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_void_macro //apple_ref/c/data/is_void_macro //apple_ref/c/clconst/is_void_macro " machineGenerated="true" --><span class="var">is_void_macro</span><!-- /a -->; <span class="comment">// True if declared void — definition-only, no splice node</span> 
-    <span class="keyword">struct</span> <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/PragmaMacro" logicalPath="//apple_ref/c/cl/PragmaMacro //apple_ref/c/tdef/PragmaMacro" target="_top"><span class="type">PragmaMacro</span></a> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/next //apple_ref/c/data/next //apple_ref/c/clconst/next " machineGenerated="true" --><span class="var">next</span><!-- /a -->; <span class="comment">// Next macro in linked list</span> 
-} <!-- a logicalPath="//apple_ref/c/econst/PragmaMacro //apple_ref/c/data/PragmaMacro //apple_ref/c/clconst/PragmaMacro " machineGenerated="true" --><span class="var">PragmaMacro</span><!-- /a -->;  <!-- headerDoc=declaration;uid=//apple_ref/c/tdef/PragmaMacro;name=end --></pre>
-</div>
-<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Fields</font></h5>
-<div class="param_indent">
-<dl>
-<dt>
-<!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/PragmaMacro/name;   name=name -->
-<a name="//apple_ref/doc/structfield/PragmaMacro/name"></a>
-<code>name</code>
-</dt>
-<dd><p>Function name.</p></dd>
-<dt>
-<!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/PragmaMacro/body_tokens;   name=body_tokens -->
-<a name="//apple_ref/doc/structfield/PragmaMacro/body_tokens"></a>
-<code>body_tokens</code>
-</dt>
-<dd><p>Original token stream for function body (from preprocessor).</p></dd>
-<dt>
-<!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/PragmaMacro/compiled_fn;   name=compiled_fn -->
-<a name="//apple_ref/doc/structfield/PragmaMacro/compiled_fn"></a>
-<code>compiled_fn</code>
-</dt>
-<dd><p>Compiled function object (NULL until compiled).</p></dd>
-<dt>
-<!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/PragmaMacro/is_compiled;   name=is_compiled -->
-<a name="//apple_ref/doc/structfield/PragmaMacro/is_compiled"></a>
-<code>is_compiled</code>
-</dt>
-<dd><p>True after successful compilation.</p></dd>
-<dt>
-<!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/PragmaMacro/is_macro_entry;   name=is_macro_entry -->
-<a name="//apple_ref/doc/structfield/PragmaMacro/is_macro_entry"></a>
-<code>is_macro_entry</code>
-</dt>
-<dd><p>True if callable from user program macro call sites.</p></dd>
-<dt>
-<!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/PragmaMacro/is_void_macro;   name=is_void_macro -->
-<a name="//apple_ref/doc/structfield/PragmaMacro/is_void_macro"></a>
-<code>is_void_macro</code>
-</dt>
-<dd><p>True if declared with void return type (definition-only).</p></dd>
-<dt>
-<!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/PragmaMacro/next;   name=next -->
-<a name="//apple_ref/doc/structfield/PragmaMacro/next"></a>
-<code>next</code>
-</dt>
-<dd><p>Pointer to next macro in linked list.</p></dd>
-</dl>
-</div>
-<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
-<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/tdef/PragmaMacro;name=start --><p>Pragma macros are functions marked with #pragma macro that
-execute during compilation to generate or transform AST nodes.
-<!-- headerDoc=discussion;uid=//apple_ref/c/tdef/PragmaMacro;name=end --><!-- end discussion -->
-</p>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=tdef;  uid=//apple_ref/c/tdef/ProvenanceInfo;   name=ProvenanceInfo -->
 <a name="//apple_ref/c/tdef/ProvenanceInfo"></a>
@@ -5076,7 +5077,7 @@ flag.
 <p class="gapBeforeFooter"> </p>
 <hr class="afterFooter">
 <div class="hd_copyright_and_timestamp">
-<p class="hd_timestamp">Last Updated: Tuesday, June 02, 2026
+<p class="hd_timestamp">Last Updated: Wednesday, June 03, 2026
 </p>
 </div>
 </td>

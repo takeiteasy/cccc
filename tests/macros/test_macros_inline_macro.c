@@ -8,7 +8,7 @@
 // Notably absent: manual forward declaration for generated_func,
 //                 and any explicit macro call site.
 
-[[jcc::macro, inline]]
+[[jcc::macro(inline)]]
 _Node *generate_const_func(void) {
     _VirtualMachine *vm = __jcc_get_vm();
 

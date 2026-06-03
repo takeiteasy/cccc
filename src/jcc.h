@@ -1897,8 +1897,8 @@ void cc_init_parser(JCC *vm);
 /*!
  @function cc_execute_inline_macros
  @abstract Execute all inline macros before parsing.
- @discussion Compiles and executes every [[jcc::macro, inline]] (or
-             __attribute__((macro, inline))) macro. Each inline macro runs
+ @discussion Compiles and executes every [[jcc::macro(inline)]] (or
+             __attribute__((macro(inline)))) macro. Each inline macro runs
              automatically at its declaration point (no explicit call needed).
              Generated functions are stored in vm->compiler.macro_globals and
              synthetic forward declarations are prepended to every input token

@@ -578,9 +578,13 @@ _QUOTE("return x;") applies the correct implicit return-type cast.
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_macro_warning_at" target="_top">__jcc_macro_warning_at</a></tt></dt>
 <dd><p>Emit a compiler warning pointing at the source location of a node.
 </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_node_list" target="_top">__jcc_node_list</a></tt></dt>
+<dd><p>Build a `-&gt;next`-linked node chain from an array, returning the
+head.  Use the result as the argument to a `$@k` list splice.
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_quote" target="_top">__jcc_quote</a></tt></dt>
 <dd><p>Parse a C code template string into an AST node, substituting
-$1/$2/... splice points with the provided argument nodes.
+splice points with the provided argument nodes.
 </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_quote_n" target="_top">__jcc_quote_n</a></tt></dt>
 <dd><p>Array-form quasi-quote; validates the splice count and supports
@@ -2826,13 +2830,64 @@ it records the error and compilation may continue.
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_macro_warning_at;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_node_list;   name=__jcc_node_list -->
+<a name="//apple_ref/c/func/__jcc_node_list"></a>
+<h3><a name="__jcc_node_list">__jcc_node_list</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_node_list;name=start --><!-- begin abstract --></p>
+<p>Build a `-&gt;next`-linked node chain from an array, returning the
+head.  Use the result as the argument to a `$@k` list splice.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_node_list;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_node_list;name=start --><!-- a logicalPath="//apple_ref/c/cl/_Node //apple_ref/c/tdef/_Node //apple_ref/c/tag/_Node //apple_ref/c/struct/_Node //apple_ref/c/intf/_Node //apple_ref/doc/anysymbol/_Node" machineGenerated="true" --><span class="type">_Node</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_node_list" logicalPath="//apple_ref/c/instm/__jcc_node_list //apple_ref/c/clm/__jcc_node_list //apple_ref/c/intfcm/__jcc_node_list //apple_ref/c/intfm/__jcc_node_list //apple_ref/c/func/__jcc_node_list" target="_top"><span class="function">__jcc_node_list</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/_Node //apple_ref/c/tdef/_Node //apple_ref/c/tag/_Node //apple_ref/c/struct/_Node //apple_ref/c/intf/_Node //apple_ref/doc/anysymbol/_Node" machineGenerated="true" --><span class="type">_Node</span><!-- /a --> <span class="type">*</span><span class="type">*</span><span class="param">nodes</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <span class="param">count</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_node_list;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_node_list/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_node_list/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_node_list/nodes;   name=nodes -->
+<a name="//apple_ref/doc/functionparam/__jcc_node_list/nodes"></a>
+<code>nodes</code>
+</dt>
+<dd><p>Array of _Node* to link together.  Linking stops at the first
+NULL element or at count, whichever comes first.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_node_list/count;   name=count -->
+<a name="//apple_ref/doc/functionparam/__jcc_node_list/count"></a>
+<code>count</code>
+</dt>
+<dd><p>Number of elements in the array.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>Head of the chain, or NULL if count == 0 or nodes is NULL.
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_node_list;name=start --><p>A single node is a valid chain of length 1.  An existing
+`-&gt;next` chain (e.g. `__jcc_ast_block(...)-&gt;body`) can also be
+passed directly as the splice argument without going through
+this helper.
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_node_list;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_quote;   name=__jcc_quote -->
 <a name="//apple_ref/c/func/__jcc_quote"></a>
 <h3><a name="__jcc_quote">__jcc_quote</a></h3>
 <hr class="afterName">
 <p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_quote;name=start --><!-- begin abstract --></p>
 <p>Parse a C code template string into an AST node, substituting
-$1/$2/... splice points with the provided argument nodes.
+splice points with the provided argument nodes.
 <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_quote;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_quote;name=start --><!-- a logicalPath="//apple_ref/c/cl/_Node //apple_ref/c/tdef/_Node //apple_ref/c/tag/_Node //apple_ref/c/struct/_Node //apple_ref/c/intf/_Node //apple_ref/doc/anysymbol/_Node" machineGenerated="true" --><span class="type">_Node</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_quote" logicalPath="//apple_ref/c/instm/__jcc_quote //apple_ref/c/clm/__jcc_quote //apple_ref/c/intfcm/__jcc_quote //apple_ref/c/intfm/__jcc_quote //apple_ref/c/func/__jcc_quote" target="_top"><span class="function">__jcc_quote</span></a>(
@@ -2854,10 +2909,28 @@ $1/$2/... splice points with the provided argument nodes.
 <a name="//apple_ref/doc/functionparam/__jcc_quote/tmpl"></a>
 <code>tmpl</code>
 </dt>
-<dd><p>A C expression or statement as a string literal.
-Use $1, $2, ... to splice in argument nodes (1-indexed,
-reorderable, reusable).  Alternatively, use $$ for sequential
-(left-to-right) splice points — $$ and $N cannot be mixed.</p></dd>
+<dd>
+<p>A C expression or statement as a string literal.
+</p>
+<p>**Scalar splices** — replace a single position with one node:
+- `$1`, `$2`, ... positional (1-indexed, reorderable, reusable).
+- `$$` sequential (left-to-right); cannot be mixed with `$N`.
+</p>
+<p>**List splices** — expand a statement-position placeholder into a chain
+of N statements (ticket #172):
+- `$@1`, `$@2`, ... positional list splice.  The argument must be a
+`-&gt;next`-linked node chain (see `_NODE_LIST` / `__jcc_node_list`).
+Each `$@k;` in the template is replaced by the entire chain.
+- `$@` sequential list splice, parallel to `$$`.
+- List splice identifiers (`$@k`) may share their index with scalar
+splices (`$k`) in the same template, but positional and incremental
+styles cannot be mixed within one template.
+</p>
+<p>List splices are valid **only in statement-list position** (inside a
+`{ ... }` block).  Using `$@k` as an expression operand is a
+compile-time error.  Call-argument and initializer splicing are not yet
+supported.</p>
+</dd>
 <dt>
 <!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_quote/...;   name=... -->
 <a name="//apple_ref/doc/functionparam/__jcc_quote/..."></a>
@@ -2908,8 +2981,8 @@ more than 6 splice nodes.
 <a name="//apple_ref/doc/functionparam/__jcc_quote_n/tmpl"></a>
 <code>tmpl</code>
 </dt>
-<dd><p>A C expression or statement as a string literal with $N splice
-points.</p></dd>
+<dd><p>A C expression or statement as a string literal with $N / $@N
+splice points.</p></dd>
 <dt>
 <!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_quote_n/nodes;   name=nodes -->
 <a name="//apple_ref/doc/functionparam/__jcc_quote_n/nodes"></a>
@@ -2952,7 +3025,7 @@ count, a compile-time error is emitted.</p></dd>
 <p class="gapBeforeFooter"> </p>
 <hr class="afterFooter">
 <div class="hd_copyright_and_timestamp">
-<p class="hd_timestamp">Last Updated: Tuesday, June 02, 2026
+<p class="hd_timestamp">Last Updated: Wednesday, June 03, 2026
 </p>
 </div>
 </td>
