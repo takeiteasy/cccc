@@ -158,6 +158,15 @@ export CC=/opt/homebrew/opt/llvm/bin/clang
 make
 ```
 
+Optional LLVM support is available for internal bytecode-to-LLVM IR backend
+work. It is disabled by default and currently only links and smoke-tests LLVM;
+it does not add a user-facing LLVM output mode.
+
+```bash
+make JCC_HAS_LLVM=1 LLVM_CONFIG=/opt/homebrew/opt/llvm/bin/llvm-config
+make JCC_HAS_LLVM=1 LLVM_CONFIG=/opt/homebrew/opt/llvm/bin/llvm-config llvm-smoke
+```
+
 ### Compile to Bytecode
 
 ```bash

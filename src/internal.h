@@ -438,6 +438,14 @@ int vm_eval(JCC *vm);
 void cc_optimize(JCC *vm, int level);
 
 //
+// llvm_backend.c
+//
+
+bool cc_llvm_backend_enabled(void);
+const char *cc_llvm_backend_version(void);
+int cc_llvm_backend_smoke_test(void);
+
+//
 // debugger.c
 //
 
