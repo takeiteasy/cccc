@@ -486,6 +486,9 @@ void cc_init(JCC *vm, uint32_t flags) {
     vm->compiler.embed_hard_limit = 50 * 1024 * 1024;  // 50MB secondary warning
     vm->compiler.embed_hard_error = false;              // Default to warnings, not errors
     vm->compiler.macro_recursion_limit = 256;
+    vm->compiler.warnings = 0;
+    vm->compiler.warning_errors = 0;
+    vm->compiler.warning_no_errors = 0;
 
     // Return buffer pool will be allocated in data segment during codegen
     vm->compiler.return_buffer_size = 1024;

@@ -51,6 +51,14 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-d/--disassemble    Disassemble bytecode to stdout\n");
     printf("\t-v/--verbose        Enable debug logging\n");
     printf("\t-g/--debug          Enable interactive debugger\n");
+    printf("\nWarning Options:\n");
+    printf("\t-Wall               Enable common warning categories\n");
+    printf("\t-Wextra             Enable extra warning categories\n");
+    printf("\t-W<name>            Enable a warning category\n");
+    printf("\t-Wno-<name>         Disable a warning category\n");
+    printf("\t-Werror/--Werror    Treat enabled warnings as errors\n");
+    printf("\t-Werror=<name>      Treat one warning category as an error\n");
+    printf("\t-Wno-error=<name>   Do not promote one warning category\n");
     printf("\nSafety Levels (preset flag combinations):\n");
     printf("\t-0/--safety=none     No safety checks (maximum performance)\n");
     printf("\t-1/--safety=basic    Essential low-overhead checks (~5-10%% "
@@ -361,6 +369,63 @@ static size_t parse_size(const char *str, const char *flag_name) {
     return (size_t)(value * multiplier);
 }
 
+static void parse_warning_option(const char *arg, uint64_t *warnings,
+                                 uint64_t *warning_errors,
+                                 uint64_t *warning_no_errors,
+                                 int *warnings_as_errors) {
+    if (strcmp(arg, "error") == 0) {
+        *warnings_as_errors = 1;
+        *warning_no_errors = 0;
+        return;
+    }
+
+    if (strncmp(arg, "error=", 6) == 0) {
+        const char *name = arg + 6;
+        uint64_t mask = jcc_warning_mask_for_name(name);
+        if (!mask || jcc_warning_is_group_name(name)) {
+            fprintf(stderr, "error: unknown warning option '-Werror=%s'\n", name);
+            exit(1);
+        }
+        *warnings |= mask;
+        *warning_errors |= mask;
+        *warning_no_errors &= ~mask;
+        return;
+    }
+
+    if (strncmp(arg, "no-error=", 9) == 0) {
+        const char *name = arg + 9;
+        uint64_t mask = jcc_warning_mask_for_name(name);
+        if (!mask || jcc_warning_is_group_name(name)) {
+            fprintf(stderr, "error: unknown warning option '-Wno-error=%s'\n", name);
+            exit(1);
+        }
+        *warning_errors &= ~mask;
+        *warning_no_errors |= mask;
+        return;
+    }
+
+    bool disable = false;
+    const char *name = arg;
+    if (strncmp(arg, "no-", 3) == 0) {
+        disable = true;
+        name = arg + 3;
+    }
+
+    uint64_t mask = jcc_warning_mask_for_name(name);
+    if (!mask) {
+        fprintf(stderr, "error: unknown warning option '-W%s'\n", arg);
+        exit(1);
+    }
+
+    if (disable) {
+        *warnings &= ~mask;
+        *warning_errors &= ~mask;
+        *warning_no_errors &= ~mask;
+    } else {
+        *warnings |= mask;
+    }
+}
+
 int main(int argc, const char *argv[]) {
     int exit_code = 0;
     const char **input_files = NULL;
@@ -393,7 +458,10 @@ int main(int argc, const char *argv[]) {
     int output_json = 0;       // -j
     int compile_only = 0;      // -c
     int max_errors = 20;        // --max-errors (default: 20)
-    int warnings_as_errors = 0; // --Werror
+    int warnings_as_errors = 0; // -Werror / --Werror
+    uint64_t warnings = 0;
+    uint64_t warning_errors = 0;
+    uint64_t warning_no_errors = 0;
     size_t embed_limit = 0;     // --embed-limit (0 = use default)
     int embed_hard_error = 0;   // --embed-hard-limit
     int macro_recursion_limit = -1; // --macro-recursion-limit
@@ -482,7 +550,7 @@ int main(int argc, const char *argv[]) {
         }
     }
 
-    const char *optstring = "0123haI:L:D:U:o:cdvgbftzskpmiPEMGXSjFTVCl:";
+    const char *optstring = "0123haI:L:D:U:o:cdvgbftzskpmiPEMGXSjFTVCl:W:";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(argc, (char *const *)argv, optstring,
@@ -672,6 +740,11 @@ int main(int argc, const char *argv[]) {
             break;
         case 1011:
             warnings_as_errors = 1;
+            warning_no_errors = 0;
+            break;
+        case 'W':
+            parse_warning_option(optarg, &warnings, &warning_errors,
+                                 &warning_no_errors, &warnings_as_errors);
             break;
         case 1014: // --embed-limit
             embed_limit = parse_size(optarg, "--embed-limit");
@@ -882,6 +955,9 @@ int main(int argc, const char *argv[]) {
     vm.collect_errors = true;
     vm.max_errors = max_errors;
     vm.warnings_as_errors = warnings_as_errors;
+    vm.compiler.warnings = warnings;
+    vm.compiler.warning_errors = warning_errors;
+    vm.compiler.warning_no_errors = warning_no_errors;
     jmp_buf err_buf;
     vm.error_jmp_buf = &err_buf;
 

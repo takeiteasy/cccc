@@ -254,6 +254,52 @@ typedef enum {
 } JCCFlags;
 
 /*!
+ @enum JCCWarning
+ @abstract Bitwise flags for compiler warning categories.
+ @discussion
+ These flags control suppressible compiler diagnostics. They are separate from
+ JCCFlags because the warning set can grow independently of runtime safety
+ flags and uses a 64-bit mask.
+*/
+typedef enum {
+    JCC_WARN_UNUSED = (1ULL << 0),
+    JCC_WARN_IMPLICIT_FUNCTION_DECLARATION = (1ULL << 1),
+    JCC_WARN_IMPLICIT_INT = (1ULL << 2),
+    JCC_WARN_RETURN_TYPE = (1ULL << 3),
+    JCC_WARN_SHADOW = (1ULL << 4),
+    JCC_WARN_FORMAT = (1ULL << 5),
+    JCC_WARN_CONVERSION = (1ULL << 6),
+    JCC_WARN_SIGN_COMPARE = (1ULL << 7),
+    JCC_WARN_POINTER_ARITH = (1ULL << 8),
+    JCC_WARN_PEDANTIC = (1ULL << 9),
+    JCC_WARN_DEPRECATED = (1ULL << 10),
+    JCC_WARN_CPP = (1ULL << 11),
+    JCC_WARN_EXTRA_TOKENS = (1ULL << 12),
+    JCC_WARN_LARGE_FILE_EMBED = (1ULL << 13),
+    JCC_WARN_JCC_MACRO = (1ULL << 14),
+
+    JCC_WARN_ALL = JCC_WARN_UNUSED |
+                   JCC_WARN_IMPLICIT_FUNCTION_DECLARATION |
+                   JCC_WARN_IMPLICIT_INT |
+                   JCC_WARN_RETURN_TYPE |
+                   JCC_WARN_SHADOW |
+                   JCC_WARN_FORMAT |
+                   JCC_WARN_CONVERSION |
+                   JCC_WARN_SIGN_COMPARE |
+                   JCC_WARN_POINTER_ARITH |
+                   JCC_WARN_PEDANTIC |
+                   JCC_WARN_DEPRECATED |
+                   JCC_WARN_CPP |
+                   JCC_WARN_EXTRA_TOKENS |
+                   JCC_WARN_LARGE_FILE_EMBED |
+                   JCC_WARN_JCC_MACRO,
+    JCC_WARN_EXTRA = JCC_WARN_SHADOW |
+                     JCC_WARN_SIGN_COMPARE |
+                     JCC_WARN_CONVERSION |
+                     JCC_WARN_POINTER_ARITH,
+} JCCWarning;
+
+/*!
  @struct HashEntry
  @abstract Simple key/value bucket used by the project's HashMap.
  @field key Null-terminated string key.
@@ -1161,6 +1207,7 @@ typedef struct CompileError {
     int line_no;               // Line number
     int col_no;                // Column number
     int severity;              // 0 = error, 1 = warning
+    const char *warn_name;     // Warning option name, or NULL for errors
 } CompileError;
 
 /*!
@@ -1297,6 +1344,11 @@ typedef struct Compiler {
     size_t embed_limit;      // Soft limit for #embed size (default: 10MB)
     size_t embed_hard_limit; // Secondary warning threshold (default: 50MB)
     bool embed_hard_error;   // If true, exceeding limit is a hard error
+
+    // Warning configuration
+    uint64_t warnings;        // Enabled JCCWarning categories
+    uint64_t warning_errors;  // Categories promoted by -Werror=<name>
+    uint64_t warning_no_errors; // Categories demoted after global -Werror
 
     // Tokenization state
     File *current_file; // Input file

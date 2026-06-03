@@ -692,10 +692,17 @@ void __jcc_macro_warning_at(JCC *vm, _Node *node, const char *fmt, ...) {
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
 
-    if (node && node->tok)
-        warn_tok(vm, node->tok, "%s", buf);
-    else
-        fprintf(stderr, "warning: %s\n", buf);
+    if (node && node->tok) {
+        warn_tok(vm, node->tok, JCC_WARN_JCC_MACRO, "%s", buf);
+    } else if (vm && (vm->compiler.warnings & JCC_WARN_JCC_MACRO)) {
+        bool as_error = (vm->warnings_as_errors &&
+                         !(vm->compiler.warning_no_errors & JCC_WARN_JCC_MACRO)) ||
+                        (vm->compiler.warning_errors & JCC_WARN_JCC_MACRO);
+        if (as_error)
+            error("%s", buf);
+        else
+            fprintf(stderr, "warning: %s [-Wjcc-macro]\n", buf);
+    }
 }
 
 // ============================================================================

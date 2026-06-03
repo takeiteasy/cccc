@@ -6,7 +6,7 @@
 #include <string.h>
 #include <glob.h>
 
-#pragma comptime
+[[jcc::comptime]]
 char *read_header_file(const char *path) {
     void *f = fopen(path, "rb");
     if (!f) return NULL;
@@ -22,7 +22,7 @@ char *read_header_file(const char *path) {
 
 // Sanitize a header filename into a valid C identifier, e.g.
 // "sys/cdefs.h" -> "__jcc_std_sys_cdefs_h"
-#pragma comptime
+[[jcc::comptime]]
 char *make_global_name(const char *header) {
     char *buf = malloc(strlen(header) + 12);
     memcpy(buf, "__jcc_std_", 10);
@@ -35,7 +35,7 @@ char *make_global_name(const char *header) {
 
 // reflection.h is private to pragma macros. Keep embedding it, but do not
 // keep it under include/ where user source can find it as a JCC header.
-#pragma comptime
+[[jcc::comptime]]
 const char *header_source_path(const char *header) {
     if (strcmp(header, "reflection.h") == 0)
         return "src/reflection.h";
@@ -44,7 +44,7 @@ const char *header_source_path(const char *header) {
     return path;
 }
 
-#pragma comptime
+[[jcc::comptime]]
 char *copy_header_name(const char *path) {
     const char *prefix = "include/";
     int prefix_len = (int)strlen(prefix);
@@ -57,12 +57,12 @@ char *copy_header_name(const char *path) {
     return copy;
 }
 
-#pragma comptime
+[[jcc::comptime]]
 int header_name_less(const char *a, const char *b) {
     return strcmp(a, b) < 0;
 }
 
-#pragma comptime
+[[jcc::comptime]]
 void sort_headers(char **headers, int count) {
     for (int i = 0; i < count; i++) {
         for (int j = i + 1; j < count; j++) {
@@ -75,7 +75,7 @@ void sort_headers(char **headers, int count) {
     }
 }
 
-#pragma comptime
+[[jcc::comptime]]
 char **discover_headers(void) {
     glob_t g;
     memset(&g, 0, sizeof(g));
@@ -104,7 +104,7 @@ char **discover_headers(void) {
 }
 
 // Build: if (strcmp(filename, header) == 0) return __jcc_std_XXX;
-#pragma comptime
+[[jcc::comptime]]
 _Node *make_strcmp_return(_Obj *fn, _Type *char_ptr_ty, const char *header) {
     char *gname = make_global_name(header);
     _Node *args[2] = {
@@ -117,7 +117,7 @@ _Node *make_strcmp_return(_Obj *fn, _Type *char_ptr_ty, const char *header) {
     return _AST_IF(cond, ret, NULL);
 }
 
-#pragma macro
+[[jcc::macro]]
 void generate_std_header(void) {
     char **headers = discover_headers();
     if (!headers)

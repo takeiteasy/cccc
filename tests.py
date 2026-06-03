@@ -38,16 +38,24 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
     is_negative_test = False
     expects_runtime_error = False
     per_test_flags = []
+    expect_stderr = None
+    reject_stderr = None
     try:
         with open(test_file, "r") as f:
-            first_line = f.readline()
-            if "EXPECT_COMPILE_ERROR" in first_line:
+            header_lines = [f.readline() for _ in range(5)]
+            header = "".join(header_lines)
+            if "EXPECT_COMPILE_ERROR" in header:
                 is_negative_test = True
-            if "EXPECT_RUNTIME_ERROR" in first_line:
+            if "EXPECT_RUNTIME_ERROR" in header:
                 expects_runtime_error = True
-            if "JCC_FLAGS:" in first_line:
-                flags_str = first_line.split("JCC_FLAGS:", 1)[1].strip().rstrip("*/").strip()
-                per_test_flags = flags_str.split()
+            for line in header_lines:
+                if "JCC_FLAGS:" in line:
+                    flags_str = line.split("JCC_FLAGS:", 1)[1].strip().rstrip("*/").strip()
+                    per_test_flags = flags_str.split()
+                if "JCC_EXPECT_STDERR:" in line:
+                    expect_stderr = line.split("JCC_EXPECT_STDERR:", 1)[1].strip().rstrip("*/").strip()
+                if "JCC_REJECT_STDERR:" in line:
+                    reject_stderr = line.split("JCC_REJECT_STDERR:", 1)[1].strip().rstrip("*/").strip()
     except Exception:
         pass
 
@@ -145,11 +153,13 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
         or "errors generated" in output
         or "cannot open file" in output
         or "undefined function" in output
+        or "unknown warning option" in output
         or "implicit declaration of a function" in output
         or ("expected" in output and "got" in output)
     )
 
     crashed = exit_code in (134, 139, 136, 141, -6, -11, -8, -13)
+    stderr_mismatch = None
 
     if crashed:
         status = "crashed"
@@ -167,6 +177,14 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
     else:
         status = "failed"
 
+    if status in ("passed", "negative_pass"):
+        if expect_stderr and not re.search(expect_stderr, output, re.MULTILINE):
+            status = "stderr_mismatch"
+            stderr_mismatch = f"expected stderr to match: {expect_stderr}"
+        elif reject_stderr and re.search(reject_stderr, output, re.MULTILINE):
+            status = "stderr_mismatch"
+            stderr_mismatch = f"expected stderr not to match: {reject_stderr}"
+
     return {
         "idx": idx,
         "test_name": test_name,
@@ -175,6 +193,7 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
         "output": output,
         "is_negative_test": is_negative_test,
         "expects_runtime_error": expects_runtime_error,
+        "stderr_mismatch": stderr_mismatch,
         "elapsed": elapsed,
     }
 
@@ -357,6 +376,12 @@ def main():
             failed += 1
             failed_tests.append(f"{test_name} (exit code: {exit_code})")
             print(f"✗ {test_name} (expected exit code 42, got: {exit_code}){timing_str}")
+        elif status == "stderr_mismatch":
+            failed += 1
+            failed_tests.append(f"{test_name} ({result['stderr_mismatch']})")
+            print(f"✗ {test_name} ({result['stderr_mismatch']}){timing_str}")
+            for line in output.splitlines()[:5]:
+                print(f"  {line}")
 
     def flush_results():
         nonlocal next_to_print
@@ -379,6 +404,7 @@ def main():
                 "output": str(e),
                 "is_negative_test": False,
                 "expects_runtime_error": False,
+                "stderr_mismatch": None,
                 "elapsed": None,
             }
 

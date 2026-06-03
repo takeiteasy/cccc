@@ -212,8 +212,11 @@ void error_tok(JCC *vm, Token *tok, char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 bool error_tok_recover(JCC *vm, Token *tok, char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
-void warn_tok(JCC *vm, Token *tok, char *fmt, ...)
-    __attribute__((format(printf, 3, 4)));
+void warn_tok(JCC *vm, Token *tok, JCCWarning category, char *fmt, ...)
+    __attribute__((format(printf, 4, 5)));
+const char *jcc_warning_name(JCCWarning warning);
+uint64_t jcc_warning_mask_for_name(const char *name);
+bool jcc_warning_is_group_name(const char *name);
 bool equal(Token *tok, char *op);
 Token *skip(JCC *vm, Token *tok, char *op);
 bool consume(JCC *vm, Token **rest, Token *tok, char *str);

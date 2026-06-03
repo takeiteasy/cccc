@@ -90,7 +90,7 @@ static bool is_hash(Token *tok) { return tok->at_bol && equal(tok, "#"); }
 static Token *skip_line(JCC *vm, Token *tok) {
     if (tok->at_bol)
         return tok;
-    warn_tok(vm, tok, "extra token");
+    warn_tok(vm, tok, JCC_WARN_EXTRA_TOKENS, "extra token");
     while (!tok->at_bol)
         tok = tok->next;
     return tok;
@@ -1634,7 +1634,7 @@ static Token *handle_embed_directive(JCC *vm, Token *tok,
                       "limit: %zu bytes)",
                       path, embed_size, vm->compiler.embed_limit);
         } else {
-            warn_tok(vm, directive_start,
+            warn_tok(vm, directive_start, JCC_WARN_LARGE_FILE_EMBED,
                      "embedding large file: %s (%zu bytes)", path, embed_size);
         }
     }
@@ -1645,7 +1645,7 @@ static Token *handle_embed_directive(JCC *vm, Token *tok,
                       "limit: %zu bytes)",
                       path, embed_size, vm->compiler.embed_hard_limit);
         } else {
-            warn_tok(vm, directive_start,
+            warn_tok(vm, directive_start, JCC_WARN_LARGE_FILE_EMBED,
                      "embedding very large file: %s (%zu bytes)", path,
                      embed_size);
         }
@@ -2040,7 +2040,7 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             error_tok(vm, tok, "error");
             break;
         case PP_WARNING:
-            warn_tok(vm, tok, "warning");
+            warn_tok(vm, tok, JCC_WARN_CPP, "warning");
             tok = skip_line(vm, tok->next);
             break;
         default:

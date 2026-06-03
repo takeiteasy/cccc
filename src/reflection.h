@@ -217,7 +217,8 @@ void __jcc_macro_error_at(JCC *vm, _Node *node, const char *fmt, ...)
  * @param vm The VM context.
  * @param node A node whose tok field provides file/line/col. May be NULL.
  * @param fmt printf-style format string, followed by format arguments.
- * @discussion Non-fatal unless vm->warnings_as_errors is set.
+ * @discussion Emitted only when -Wjcc-macro is enabled. Non-fatal unless
+ *             promoted with -Werror or -Werror=jcc-macro.
  */
 void __jcc_macro_warning_at(JCC *vm, _Node *node, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));

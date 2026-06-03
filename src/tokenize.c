@@ -32,13 +32,61 @@ void error(char *fmt, ...) {
     exit(1);
 }
 
-// Reports an error message in the following format.
+typedef struct {
+    const char *name;
+    uint64_t mask;
+    bool is_group;
+} WarningInfo;
+
+static const WarningInfo warning_infos[] = {
+    {"unused", JCC_WARN_UNUSED, false},
+    {"implicit-function-declaration", JCC_WARN_IMPLICIT_FUNCTION_DECLARATION, false},
+    {"implicit-int", JCC_WARN_IMPLICIT_INT, false},
+    {"return-type", JCC_WARN_RETURN_TYPE, false},
+    {"shadow", JCC_WARN_SHADOW, false},
+    {"format", JCC_WARN_FORMAT, false},
+    {"conversion", JCC_WARN_CONVERSION, false},
+    {"sign-compare", JCC_WARN_SIGN_COMPARE, false},
+    {"pointer-arith", JCC_WARN_POINTER_ARITH, false},
+    {"pedantic", JCC_WARN_PEDANTIC, false},
+    {"deprecated", JCC_WARN_DEPRECATED, false},
+    {"cpp", JCC_WARN_CPP, false},
+    {"extra-tokens", JCC_WARN_EXTRA_TOKENS, false},
+    {"large-file-embed", JCC_WARN_LARGE_FILE_EMBED, false},
+    {"jcc-macro", JCC_WARN_JCC_MACRO, false},
+    {"all", JCC_WARN_ALL, true},
+    {"extra", JCC_WARN_EXTRA, true},
+};
+
+const char *jcc_warning_name(JCCWarning warning) {
+    uint64_t mask = (uint64_t)warning;
+    for (size_t i = 0; i < sizeof(warning_infos) / sizeof(*warning_infos); i++)
+        if (!warning_infos[i].is_group && warning_infos[i].mask == mask)
+            return warning_infos[i].name;
+    return NULL;
+}
+
+uint64_t jcc_warning_mask_for_name(const char *name) {
+    for (size_t i = 0; i < sizeof(warning_infos) / sizeof(*warning_infos); i++)
+        if (strcmp(warning_infos[i].name, name) == 0)
+            return warning_infos[i].mask;
+    return 0;
+}
+
+bool jcc_warning_is_group_name(const char *name) {
+    for (size_t i = 0; i < sizeof(warning_infos) / sizeof(*warning_infos); i++)
+        if (strcmp(warning_infos[i].name, name) == 0)
+            return warning_infos[i].is_group;
+    return false;
+}
+
+// Reports a diagnostic message in the following format.
 //
 // foo.c:10: x = y + 1;
-//               ^ <error message here>
-static void verror_at(JCC *vm,
-                      char *filename, char *input, int line_no,
-                      char *loc, char *fmt, va_list ap) {
+//               ^ error: <message here>
+static void vdiagnostic_at(JCC *vm, char *filename, char *input, int line_no,
+                           char *loc, const char *kind,
+                           const char *warn_name, char *fmt, va_list ap) {
     // Find a line containing `loc`.
     char *line = loc;
     while (input < line && line[-1] != '\n')
@@ -58,7 +106,7 @@ static void verror_at(JCC *vm,
         }
         memset(msg, 0, 4096);
 
-        // Format the error message
+        // Format the diagnostic message
         int pos = snprintf(msg, 4096, "%s:%d: ", filename, line_no);
         if (pos > 4096) pos = 4096;
         pos += snprintf(msg + pos, 4096 - pos, "%.*s\n", (int)(end - line), line);
@@ -66,12 +114,25 @@ static void verror_at(JCC *vm,
 
         int indent = strlen(filename) + snprintf(NULL, 0, ":%d: ", line_no);
         int col_offset = display_width(vm, line, loc - line) + indent;
-        pos += snprintf(msg + pos, 4096 - pos, "%*s^ ", col_offset, "");
+        pos += snprintf(msg + pos, 4096 - pos, "%*s^ %s: ", col_offset, "", kind);
 
         va_list ap_copy;
         va_copy(ap_copy, ap);
-        vsnprintf(msg + pos, 4096 - pos, fmt, ap_copy);
+        int written = vsnprintf(msg + pos, 4096 - pos, fmt, ap_copy);
         va_end(ap_copy);
+        if (written > 0) {
+            pos += written;
+            if (pos > 4096) pos = 4096;
+        }
+        if (warn_name && pos < 4096) {
+            int suffix = snprintf(msg + pos, 4096 - pos, " [-W%s]", warn_name);
+            if (suffix > 0) {
+                pos += suffix;
+                if (pos > 4096) pos = 4096;
+            }
+        }
+        if (pos < 4096)
+            snprintf(msg + pos, 4096 - pos, "\n");
 
         vm->error_message = msg;
         return;  // Don't print to stderr or exit
@@ -85,9 +146,16 @@ static void verror_at(JCC *vm,
     int pos = display_width(vm, line, loc - line) + indent;
 
     fprintf(stderr, "%*s", pos, ""); // print pos spaces.
-    fprintf(stderr, "^ ");
+    fprintf(stderr, "^ %s: ", kind);
     vfprintf(stderr, fmt, ap);
+    if (warn_name)
+        fprintf(stderr, " [-W%s]", warn_name);
     fprintf(stderr, "\n");
+}
+
+static void verror_at(JCC *vm, char *filename, char *input, int line_no,
+                      char *loc, char *fmt, va_list ap) {
+    vdiagnostic_at(vm, filename, input, line_no, loc, "error", NULL, fmt, ap);
 }
 
 void error_at(JCC *vm, char *loc, char *fmt, ...) {
@@ -117,6 +185,7 @@ void error_at(JCC *vm, char *loc, char *fmt, ...) {
         err->line_no = line_no;
         err->col_no = col_no;
         err->severity = 0; // error
+        err->warn_name = NULL;
         err->next = NULL;
 
         // Append to list
@@ -151,6 +220,7 @@ void error_tok(JCC *vm, Token *tok, char *fmt, ...) {
         err->line_no = tok->line_no;
         err->col_no = tok->col_no;
         err->severity = 0; // error
+        err->warn_name = NULL;
         err->next = NULL;
 
         // Append to list
@@ -187,6 +257,7 @@ bool error_tok_recover(JCC *vm, Token *tok, char *fmt, ...) {
         err->line_no = tok->line_no;
         err->col_no = tok->col_no;
         err->severity = 0; // error
+        err->warn_name = NULL;
         err->next = NULL;
 
         // Append to list
@@ -218,21 +289,31 @@ bool error_tok_recover(JCC *vm, Token *tok, char *fmt, ...) {
     exit(1);
 }
 
-void warn_tok(JCC *vm, Token *tok, char *fmt, ...) {
+void warn_tok(JCC *vm, Token *tok, JCCWarning category, char *fmt, ...) {
+    uint64_t mask = (uint64_t)category;
+    if (!vm || !(vm->compiler.warnings & mask))
+        return;
+
+    const char *warn_name = jcc_warning_name(category);
+    bool is_error = (vm->warnings_as_errors &&
+                     !(vm->compiler.warning_no_errors & mask)) ||
+                    (vm->compiler.warning_errors & mask);
+
     va_list ap;
     va_start(ap, fmt);
-    verror_at(vm, tok->file->name, tok->file->contents, tok->line_no, tok->loc, fmt, ap);
+    vdiagnostic_at(vm, tok->file->name, tok->file->contents, tok->line_no,
+                   tok->loc, is_error ? "error" : "warning", warn_name, fmt, ap);
     va_end(ap);
 
     // If error_jmp_buf is set but collect_errors is false, print the warning now
     // (verror_at will have stored it in error_message without printing)
-    if (vm && vm->error_jmp_buf && !vm->collect_errors && !vm->warnings_as_errors && vm->error_message) {
+    if (vm->error_jmp_buf && !vm->collect_errors && !is_error && vm->error_message) {
         fprintf(stderr, "%s", vm->error_message);
         vm->error_message = NULL;
     }
 
-    // If warnings are treated as errors, call error_tok instead
-    if (vm && vm->warnings_as_errors) {
+    // If this warning is treated as an error, collect it as an error and abort.
+    if (is_error) {
         if (vm->error_message) {
             CompileError *err = arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
             err->message = vm->error_message;
@@ -240,6 +321,7 @@ void warn_tok(JCC *vm, Token *tok, char *fmt, ...) {
             err->line_no = tok->line_no;
             err->col_no = tok->col_no;
             err->severity = 0; // error (not warning)
+            err->warn_name = warn_name;
             err->next = NULL;
 
             // Append to list
@@ -268,6 +350,7 @@ void warn_tok(JCC *vm, Token *tok, char *fmt, ...) {
         err->line_no = tok->line_no;
         err->col_no = tok->col_no;
         err->severity = 1; // warning
+        err->warn_name = warn_name;
         err->next = NULL;
 
         // Append to list
