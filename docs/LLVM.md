@@ -1,5 +1,7 @@
 # LLVM Backend
 
+> TODO: This is a stub, the LLVM backend is not yet implemented. Only the build system integration is available at the moment.
+
 JCC has optional LLVM linkage for bytecode-to-LLVM IR backend work. Enable it at
 build time with `JCC_HAS_LLVM=1`.
 
