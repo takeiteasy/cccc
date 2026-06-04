@@ -56,6 +56,8 @@ typedef struct {
     Type *type_def;
     Type *enum_ty;
     int enum_val;
+    bool is_deprecated;
+    char *deprecated_msg;
 } VarScope;
 
 // Variable attributes such as typedef or extern.
@@ -67,6 +69,10 @@ typedef struct {
     bool is_tls;
     bool is_constexpr;
     bool is_block_var; // __block storage qualifier (Apple blocks)
+    bool is_maybe_unused;
+    bool is_deprecated;
+    char *deprecated_msg;
+    Token *attribute_tok;
     int align;
 } VarAttr;
 
@@ -118,8 +124,10 @@ static Type *typeof_specifier(JCC *vm, Token **rest, Token *tok);
 static Type *typeof_unqual_specifier(JCC *vm, Token **rest, Token *tok);
 static Type *type_suffix(JCC *vm, Token **rest, Token *tok, Type *ty);
 static Type *declarator(JCC *vm, Token **rest, Token *tok, Type *ty);
-static Token *attribute_list(JCC *vm, Token *tok, Type *ty);
-static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty);
+static Token *attribute_list(JCC *vm, Token *tok, Type *ty, VarAttr *attr);
+static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty, VarAttr *attr);
+static void inherit_semantic_attrs(Type *dst, Type *src);
+static Type *apply_var_attrs_to_type(JCC *vm, Type *ty, VarAttr *attr);
 static Node *declaration(JCC *vm, Token **rest, Token *tok, Type *basety,
                          VarAttr *attr);
 static void array_initializer2(JCC *vm, Token **rest, Token *tok,
@@ -184,7 +192,40 @@ static void enter_scope(JCC *vm) {
     vm->compiler.scope = sc;
 }
 
+static char *obj_display_name(Obj *var) {
+    return var->display_name ? var->display_name : var->name;
+}
+
+static void warn_deprecated_use(JCC *vm, Token *tok, char *name,
+                                char *message) {
+    if (message)
+        warn_tok(vm, tok, JCC_WARN_DEPRECATED, "'%s' is deprecated: %s", name,
+                 message);
+    else
+        warn_tok(vm, tok, JCC_WARN_DEPRECATED, "'%s' is deprecated", name);
+}
+
+static Type *type_after_deprecated_use(JCC *vm, Type *ty) {
+    Type *copy = copy_type(vm, ty);
+    copy->is_deprecated = false;
+    copy->deprecated_msg = NULL;
+    return copy;
+}
+
+static void warn_unused_scope(JCC *vm, Scope *sc) {
+    for (VarScopeNode *node = sc->vars; node; node = node->next) {
+        Obj *var = node->var;
+        if (!var || !var->is_local_symbol || !var->tok || var->is_used ||
+            var->is_maybe_unused)
+            continue;
+        warn_tok(vm, var->tok, JCC_WARN_UNUSED, "unused %s '%s'",
+                 var->is_param ? "parameter" : "variable",
+                 obj_display_name(var));
+    }
+}
+
 static void leave_scope(JCC *vm) {
+    warn_unused_scope(vm, vm->compiler.scope);
     hashmap_deinit_borrowed(&vm->compiler.scope->var_map);
     hashmap_deinit_borrowed(&vm->compiler.scope->tag_map);
     vm->compiler.scope = vm->compiler.scope->next;
@@ -206,6 +247,30 @@ static VarScope *find_var(JCC *vm, Token *tok) {
         }
     }
     return NULL;
+}
+
+static void warn_if_shadowing(JCC *vm, Token *tok) {
+    if (!tok || !vm->compiler.current_fn || !vm->compiler.scope)
+        return;
+
+    for (Scope *sc = vm->compiler.scope->next; sc; sc = sc->next) {
+        VarScopeNode *node = sc->var_map.buckets
+                                 ? hashmap_get2(&sc->var_map, tok->loc, tok->len)
+                                 : NULL;
+        if (!node) {
+            for (node = sc->vars; node; node = node->next)
+                if (node->name_len == tok->len &&
+                    !strncmp(node->name, tok->loc, tok->len))
+                    break;
+        }
+        if (!node)
+            continue;
+        if (node->var && !node->var->is_function)
+            warn_tok(vm, tok, JCC_WARN_SHADOW,
+                     "declaration of '%.*s' shadows an outer variable",
+                     tok->len, tok->loc);
+        return;
+    }
 }
 
 // Find a macro function by name
@@ -401,13 +466,21 @@ static Obj *new_var(JCC *vm, char *name, int name_len, Type *ty) {
     var->name = name;
     var->ty = ty;
     var->align = ty->align;
+    var->tok = ty->name;
+    var->display_name =
+        ty->name ? arena_strndup(vm, ty->name->loc, ty->name->len) : name;
+    var->is_maybe_unused = ty->is_maybe_unused;
+    var->is_deprecated = ty->is_deprecated;
+    var->deprecated_msg = ty->deprecated_msg;
     push_scope(vm, name, name_len)->var = var;
     return var;
 }
 
 static Obj *new_lvar(JCC *vm, char *name, int name_len, Type *ty) {
+    warn_if_shadowing(vm, ty->name);
     Obj *var = new_var(vm, name, name_len, ty);
     var->is_local = true;
+    var->is_local_symbol = ty->name && name_len > 0;
     var->next = vm->compiler.locals;
     vm->compiler.locals = var;
     return var;
@@ -691,11 +764,11 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
 
     while (is_typename(vm, tok)) {
         if (equal(tok, "__attribute__")) {
-            tok = attribute_list(vm, tok, NULL);
+            tok = attribute_list(vm, tok, NULL, attr);
             continue;
         }
         if (equal(tok, "[") && equal(tok->next, "[")) {
-            tok = c23_attribute_list(vm, tok, NULL);
+            tok = c23_attribute_list(vm, tok, NULL, attr);
             continue;
         }
 
@@ -763,7 +836,18 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
             else if (dk == DK_ENUM)          ty = enum_specifier(vm, &tok, tok->next);
             else if (dk == DK_TYPEOF)        ty = typeof_specifier(vm, &tok, tok->next);
             else if (dk == DK_TYPEOF_UNQUAL) ty = typeof_unqual_specifier(vm, &tok, tok->next);
-            else                             { ty = ty2; tok = tok->next; }
+            else {
+                VarScope *sc = find_var(vm, tok);
+                if (!vm->compiler.in_type_lookahead && sc &&
+                    sc->is_deprecated)
+                    warn_deprecated_use(
+                        vm, tok, arena_strndup(vm, tok->loc, tok->len),
+                        sc->deprecated_msg);
+                ty = sc && sc->is_deprecated
+                         ? type_after_deprecated_use(vm, ty2)
+                         : ty2;
+                tok = tok->next;
+            }
             counter += OTHER;
             continue;
         }
@@ -865,6 +949,13 @@ declspec_done:
         warn_tok(vm, start, JCC_WARN_IMPLICIT_INT,
                  "type specifier missing, defaults to 'int'");
 
+    if (attr && (attr->is_maybe_unused || attr->is_deprecated)) {
+        ty = copy_type(vm, ty);
+        ty->is_maybe_unused = attr->is_maybe_unused;
+        ty->is_deprecated = attr->is_deprecated;
+        ty->deprecated_msg = attr->deprecated_msg;
+    }
+
     if (is_atomic) {
         ty = copy_type(vm, ty);
         ty->is_atomic = true;
@@ -963,7 +1054,7 @@ static Type *type_suffix(JCC *vm, Token **rest, Token *tok, Type *ty) {
     if (equal(tok, "("))
         return func_params(vm, rest, tok->next, ty);
 
-    if (equal(tok, "["))
+    if (equal(tok, "[") && !equal(tok->next, "["))
         return array_dimensions(vm, rest, tok->next, ty);
 
     *rest = tok;
@@ -998,8 +1089,10 @@ static Type *pointers(JCC *vm, Token **rest, Token *tok, Type *ty) {
 // type-suffix attribute?
 static Type *declarator(JCC *vm, Token **rest, Token *tok, Type *ty) {
     // Handle __attribute__ before declarator
-    tok = attribute_list(vm, tok, ty);
-    tok = c23_attribute_list(vm, tok, ty);
+    VarAttr prefix_attr = {};
+    tok = attribute_list(vm, tok, NULL, &prefix_attr);
+    tok = c23_attribute_list(vm, tok, NULL, &prefix_attr);
+    ty = apply_var_attrs_to_type(vm, ty, &prefix_attr);
 
     ty = pointers(vm, &tok, tok, ty);
 
@@ -1025,6 +1118,7 @@ static Type *declarator(JCC *vm, Token **rest, Token *tok, Type *ty) {
 
         // Create a block type instead of function pointer
         Type *block_ty = block_type(vm, func_ty->return_ty, func_ty->params);
+        inherit_semantic_attrs(block_ty, ty);
         block_ty->name = name;
         block_ty->name_pos = name_pos;
 
@@ -1048,11 +1142,15 @@ static Type *declarator(JCC *vm, Token **rest, Token *tok, Type *ty) {
         tok = tok->next;
     }
 
+    Type *inner_ty = ty;
     ty = type_suffix(vm, rest, tok, ty);
+    inherit_semantic_attrs(ty, inner_ty);
 
     // Handle __attribute__ after declarator
-    tok = attribute_list(vm, *rest, ty);
-    tok = c23_attribute_list(vm, tok, ty);
+    VarAttr suffix_attr = {};
+    tok = attribute_list(vm, *rest, NULL, &suffix_attr);
+    tok = c23_attribute_list(vm, tok, NULL, &suffix_attr);
+    ty = apply_var_attrs_to_type(vm, ty, &suffix_attr);
 
     ty->name = name;
     ty->name_pos = name_pos;
@@ -1064,8 +1162,10 @@ static Type *declarator(JCC *vm, Token **rest, Token *tok, Type *ty) {
 // type-suffix attribute?
 static Type *abstract_declarator(JCC *vm, Token **rest, Token *tok, Type *ty) {
     // Handle __attribute__ before abstract declarator
-    tok = attribute_list(vm, tok, ty);
-    tok = c23_attribute_list(vm, tok, ty);
+    VarAttr prefix_attr = {};
+    tok = attribute_list(vm, tok, NULL, &prefix_attr);
+    tok = c23_attribute_list(vm, tok, NULL, &prefix_attr);
+    ty = apply_var_attrs_to_type(vm, ty, &prefix_attr);
 
     ty = pointers(vm, &tok, tok, ty);
 
@@ -1137,8 +1237,11 @@ static Type *enum_specifier(JCC *vm, Token **rest, Token *tok) {
             error_tok(vm, tag, "unknown enum type");
         if (ty->kind != TY_ENUM)
             error_tok(vm, tag, "not an enum tag");
+        if (ty->is_deprecated)
+            warn_deprecated_use(vm, tag, get_ident(vm, tag),
+                                ty->deprecated_msg);
         *rest = tok;
-        return ty;
+        return ty->is_deprecated ? type_after_deprecated_use(vm, ty) : ty;
     }
 
     tok = skip(vm, tok, "{");
@@ -1155,12 +1258,18 @@ static Type *enum_specifier(JCC *vm, Token **rest, Token *tok) {
         int name_len = tok->len;
         tok = tok->next;
 
+        VarAttr enum_attr = {};
+        tok = attribute_list(vm, tok, NULL, &enum_attr);
+        tok = c23_attribute_list(vm, tok, NULL, &enum_attr);
+
         if (equal(tok, "="))
             val = const_expr(vm, &tok, tok->next);
 
         VarScope *sc = push_scope(vm, name, name_len);
         sc->enum_ty = ty;
         sc->enum_val = val;
+        sc->is_deprecated = enum_attr.is_deprecated;
+        sc->deprecated_msg = enum_attr.deprecated_msg;
 
         // Store enum constant in Type structure for code emission
         struct EnumConstant *ec = arena_alloc(&vm->compiler.parser_arena,
@@ -1294,7 +1403,14 @@ static Node *declaration(JCC *vm, Token **rest, Token *tok, Type *basety,
 
         if (attr && attr->is_static) {
             // static local variable
+            warn_if_shadowing(vm, ty->name);
             Obj *var = new_anon_gvar(vm, ty);
+            var->tok = ty->name;
+            var->display_name = get_ident(vm, ty->name);
+            var->is_local_symbol = true;
+            var->is_maybe_unused = ty->is_maybe_unused;
+            var->is_deprecated = ty->is_deprecated;
+            var->deprecated_msg = ty->deprecated_msg;
             push_scope(vm, get_ident(vm, ty->name), ty->name->len)->var = var;
             if (equal(tok, "="))
                 gvar_initializer(vm, &tok, tok->next, var);
@@ -2418,11 +2534,19 @@ static Node *stmt(JCC *vm, Token **rest, Token *tok) {
         return node;
     }
 
+    VarAttr label_attr = {};
+    tok = attribute_list(vm, tok, NULL, &label_attr);
+    tok = c23_attribute_list(vm, tok, NULL, &label_attr);
+
     if (tok->kind == TK_IDENT && equal(tok->next, ":")) {
         Node *node = new_node(vm, ND_LABEL, tok);
         node->label = arena_strndup(vm, tok->loc, tok->len);
         node->unique_label = new_unique_name(vm);
-        node->lhs = stmt(vm, rest, tok->next->next);
+        Token *body_tok = tok->next->next;
+        body_tok = attribute_list(vm, body_tok, NULL, &label_attr);
+        body_tok = c23_attribute_list(vm, body_tok, NULL, &label_attr);
+        node->label_maybe_unused = label_attr.is_maybe_unused;
+        node->lhs = stmt(vm, rest, body_tok);
         node->goto_next = vm->compiler.labels;
         vm->compiler.labels = node;
         return node;
@@ -3466,7 +3590,9 @@ static Node *block_literal(JCC *vm, Token **rest, Token *tok) {
     for (int i = param_count - 1; i >= 0; i--) {
         Type *p = param_array[i];
         if (p->name) {
-            new_lvar(vm, get_ident(vm, p->name), p->name->len, p);
+            Obj *param =
+                new_lvar(vm, get_ident(vm, p->name), p->name->len, p);
+            param->is_param = true;
         }
     }
 
@@ -3659,10 +3785,53 @@ static void struct_members(JCC *vm, Token **rest, Token *tok, Type *ty) {
     ty->members = head.next;
 }
 
+static bool is_attr_name(Token *tok, char *name) {
+    if (equal(tok, name))
+        return true;
+    int len = strlen(name);
+    return tok->len == len + 4 && !memcmp(tok->loc, "__", 2) &&
+           !memcmp(tok->loc + 2, name, len) &&
+           !memcmp(tok->loc + 2 + len, "__", 2);
+}
+
+static void apply_semantic_attr(Type *ty, VarAttr *attr, Token *tok,
+                                bool unused, bool deprecated, char *message) {
+    if (ty) {
+        ty->is_maybe_unused |= unused;
+        ty->is_deprecated |= deprecated;
+        if (message)
+            ty->deprecated_msg = message;
+    }
+    if (attr) {
+        attr->is_maybe_unused |= unused;
+        attr->is_deprecated |= deprecated;
+        if (message)
+            attr->deprecated_msg = message;
+        if (unused || deprecated)
+            attr->attribute_tok = tok;
+    }
+}
+
+static Type *apply_var_attrs_to_type(JCC *vm, Type *ty, VarAttr *attr) {
+    if (!attr || (!attr->is_maybe_unused && !attr->is_deprecated))
+        return ty;
+    ty = copy_type(vm, ty);
+    apply_semantic_attr(ty, NULL, attr->attribute_tok, attr->is_maybe_unused,
+                        attr->is_deprecated, attr->deprecated_msg);
+    return ty;
+}
+
+static void inherit_semantic_attrs(Type *dst, Type *src) {
+    if (!dst || !src)
+        return;
+    dst->is_maybe_unused |= src->is_maybe_unused;
+    dst->is_deprecated |= src->is_deprecated;
+    if (!dst->deprecated_msg)
+        dst->deprecated_msg = src->deprecated_msg;
+}
+
 // attribute = ("__attribute__" "(" "(" attribute-list ")" ")")*
-// All attributes are accepted but most are ignored (only packed/aligned are
-// used)
-static Token *attribute_list(JCC *vm, Token *tok, Type *ty) {
+static Token *attribute_list(JCC *vm, Token *tok, Type *ty, VarAttr *attr) {
     while (consume(vm, &tok, tok, "__attribute__")) {
         tok = skip(vm, tok, "(");
         tok = skip(vm, tok, "(");
@@ -3673,6 +3842,8 @@ static Token *attribute_list(JCC *vm, Token *tok, Type *ty) {
             if (!first)
                 tok = skip(vm, tok, ",");
             first = false;
+
+            Token *attr_tok = tok;
 
             // Handle packed attribute
             if (consume(vm, &tok, tok, "packed")) {
@@ -3693,9 +3864,30 @@ static Token *attribute_list(JCC *vm, Token *tok, Type *ty) {
                 continue;
             }
 
+            bool unused = is_attr_name(tok, "unused");
+            bool deprecated = is_attr_name(tok, "deprecated");
+            if (unused || deprecated) {
+                tok = tok->next;
+                char *message = NULL;
+                if (equal(tok, "(")) {
+                    int depth = 1;
+                    tok = tok->next;
+                    if (deprecated && tok->kind == TK_STR)
+                        message = tok->str;
+                    while (depth > 0) {
+                        if (equal(tok, "("))
+                            depth++;
+                        else if (equal(tok, ")"))
+                            depth--;
+                        tok = tok->next;
+                    }
+                }
+                apply_semantic_attr(ty, attr, attr_tok, unused, deprecated,
+                                    message);
+                continue;
+            }
+
             // Handle all other attributes - just consume and ignore them
-            // This includes: unused, noreturn, const, pure, nonnull,
-            // warn_unused_result, etc.
             if (tok->kind == TK_IDENT) {
                 tok = tok->next;
 
@@ -3726,8 +3918,8 @@ static Token *attribute_list(JCC *vm, Token *tok, Type *ty) {
 }
 
 // c23-attribute = ("[[" attribute-list "]]")*
-// C23/C++11 style attributes - all are parsed and ignored
-static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty) {
+static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty,
+                                 VarAttr *attr) {
     while (equal(tok, "[") && equal(tok->next, "[")) {
         tok = tok->next->next; // Skip [[
 
@@ -3742,15 +3934,17 @@ static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty) {
             if (tok->kind != TK_IDENT)
                 error_tok(vm, tok, "expected attribute name");
 
-            // All C23 attributes are parsed and discarded:
-            // deprecated, nodiscard, maybe_unused, noreturn, _Noreturn,
-            // fallthrough, unsequenced, reproducible, etc.
+            Token *attr_tok = tok;
+            bool unused = equal(tok, "maybe_unused");
+            bool deprecated = equal(tok, "deprecated");
             tok = tok->next;
 
-            // Optional attribute argument: [[deprecated("message")]]
+            char *message = NULL;
             if (equal(tok, "(")) {
                 int depth = 1;
                 tok = tok->next;
+                if (deprecated && tok->kind == TK_STR)
+                    message = tok->str;
                 while (depth > 0) {
                     if (equal(tok, "("))
                         depth++;
@@ -3759,6 +3953,8 @@ static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty) {
                     tok = tok->next;
                 }
             }
+            apply_semantic_attr(ty, attr, attr_tok, unused, deprecated,
+                                message);
         }
 
         tok = skip(vm, tok, "]");
@@ -3771,8 +3967,8 @@ static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty) {
 // struct-union-decl = attribute? ident? ("{" struct-members)?
 static Type *struct_union_decl(JCC *vm, Token **rest, Token *tok) {
     Type *ty = struct_type(vm);
-    tok = attribute_list(vm, tok, ty);
-    tok = c23_attribute_list(vm, tok, ty);
+    tok = attribute_list(vm, tok, ty, NULL);
+    tok = c23_attribute_list(vm, tok, ty, NULL);
 
     // Read a tag.
     Token *tag = NULL;
@@ -3785,8 +3981,13 @@ static Type *struct_union_decl(JCC *vm, Token **rest, Token *tok) {
         *rest = tok;
 
         Type *ty2 = find_tag(vm, tag);
-        if (ty2)
-            return ty2;
+        if (ty2) {
+            if (ty2->is_deprecated)
+                warn_deprecated_use(vm, tag, get_ident(vm, tag),
+                                    ty2->deprecated_msg);
+            return ty2->is_deprecated ? type_after_deprecated_use(vm, ty2)
+                                      : ty2;
+        }
 
         ty->size = -1;
         push_tag_scope(vm, tag, ty);
@@ -3797,8 +3998,8 @@ static Type *struct_union_decl(JCC *vm, Token **rest, Token *tok) {
 
     // Construct a struct object.
     struct_members(vm, &tok, tok, ty);
-    tok = attribute_list(vm, tok, ty);
-    *rest = c23_attribute_list(vm, tok, ty);
+    tok = attribute_list(vm, tok, ty, NULL);
+    *rest = c23_attribute_list(vm, tok, ty, NULL);
 
     if (tag) {
         // If this is a redefinition, overwrite a previous type.
@@ -4425,10 +4626,20 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
         }
 
         if (sc) {
-            if (sc->var)
+            if (sc->var) {
+                sc->var->is_used = true;
+                if (sc->var->is_deprecated)
+                    warn_deprecated_use(vm, tok, obj_display_name(sc->var),
+                                        sc->var->deprecated_msg);
                 return new_var_node(vm, sc->var, tok);
-            if (sc->enum_ty)
+            }
+            if (sc->enum_ty) {
+                if (sc->is_deprecated)
+                    warn_deprecated_use(
+                        vm, tok, arena_strndup(vm, tok->loc, tok->len),
+                        sc->deprecated_msg);
                 return new_num(vm, sc->enum_val, tok);
+            }
         }
 
         // Check if this is a macro call. When parsing macro bytecode itself,
@@ -4554,7 +4765,10 @@ static Token *parse_typedef(JCC *vm, Token *tok, Type *basety) {
         if (!ty->name)
             error_tok(vm, ty->name_pos, "typedef name omitted");
         char *name = get_ident(vm, ty->name);
-        push_scope(vm, name, ty->name->len)->type_def = ty;
+        VarScope *sc = push_scope(vm, name, ty->name->len);
+        sc->type_def = ty;
+        sc->is_deprecated = ty->is_deprecated;
+        sc->deprecated_msg = ty->deprecated_msg;
         record_type_name(vm, ty, name, ty->name->len, false);
     }
     return tok;
@@ -4565,7 +4779,9 @@ static void create_param_lvars(JCC *vm, Type *param) {
         create_param_lvars(vm, param->next);
         if (!param->name)
             error_tok(vm, param->name_pos, "parameter name omitted");
-        new_lvar(vm, get_ident(vm, param->name), param->name->len, param);
+        Obj *var =
+            new_lvar(vm, get_ident(vm, param->name), param->name->len, param);
+        var->is_param = true;
     }
 }
 
@@ -4580,6 +4796,7 @@ static void resolve_goto_labels(JCC *vm) {
             if (strlen(x->label) == strlen(y->label) &&
                 strncmp(x->label, y->label, strlen(y->label)) == 0) {
                 x->unique_label = y->unique_label;
+                y->label_used = true;
                 break;
             }
         }
@@ -4587,6 +4804,11 @@ static void resolve_goto_labels(JCC *vm) {
         if (x->unique_label == NULL)
             error_tok(vm, x->tok->next, "use of undeclared label");
     }
+
+    for (Node *label = vm->compiler.labels; label; label = label->goto_next)
+        if (!label->label_used && !label->label_maybe_unused)
+            warn_tok(vm, label->tok, JCC_WARN_UNUSED, "unused label '%s'",
+                     label->label);
 
     vm->compiler.gotos = vm->compiler.labels = NULL;
 }
@@ -4714,6 +4936,10 @@ static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr) {
             error_tok(vm, tok,
                       "static declaration follows a non-static declaration");
         fn->is_definition = fn->is_definition || equal(tok, "{");
+        fn->is_maybe_unused |= ty->is_maybe_unused;
+        fn->is_deprecated |= ty->is_deprecated;
+        if (ty->deprecated_msg)
+            fn->deprecated_msg = ty->deprecated_msg;
     } else {
         fn = new_gvar(vm, name_str, ty->name->len, ty);
         fn->is_function = true;
@@ -4849,7 +5075,18 @@ static Token *global_variable(JCC *vm, Token *tok, Type *basety,
             }
         }
 
+        VarScope *previous = find_var(vm, ty->name);
         Obj *var = new_gvar(vm, var_name, var_name_len, ty);
+        if (previous && previous->var && !previous->var->is_function) {
+            var->is_maybe_unused |= previous->var->is_maybe_unused;
+            var->is_deprecated |= previous->var->is_deprecated;
+            if (!var->deprecated_msg)
+                var->deprecated_msg = previous->var->deprecated_msg;
+            previous->var->is_maybe_unused |= var->is_maybe_unused;
+            previous->var->is_deprecated |= var->is_deprecated;
+            if (!previous->var->deprecated_msg)
+                previous->var->deprecated_msg = var->deprecated_msg;
+        }
         var->is_definition = !attr->is_extern;
         var->is_static = attr->is_static;
         var->is_tls = attr->is_tls;
@@ -4906,6 +5143,35 @@ static void scan_globals(JCC *vm) {
 
     cur->next = NULL;
     vm->compiler.globals = head.next;
+}
+
+static void warn_unused_globals(JCC *vm) {
+    for (Obj *var = vm->compiler.globals; var; var = var->next) {
+        if (!var->is_static || !var->is_definition || var->is_local_symbol ||
+            var->is_macro_generated || !var->tok || var->is_used ||
+            var->is_maybe_unused)
+            continue;
+
+        bool already_checked = false;
+        bool redeclaration_used = false;
+        for (Obj *other = vm->compiler.globals; other; other = other->next) {
+            if (other == var)
+                already_checked = true;
+            if (other == var || other->is_function != var->is_function ||
+                strcmp(other->name, var->name) != 0)
+                continue;
+            if (!already_checked)
+                redeclaration_used = true;
+            if (other->is_used || other->is_maybe_unused)
+                redeclaration_used = true;
+        }
+        if (redeclaration_used)
+            continue;
+
+        warn_tok(vm, var->tok, JCC_WARN_UNUSED, "unused %s '%s'",
+                 var->is_function ? "function" : "variable",
+                 obj_display_name(var));
+    }
 }
 
 static void declare_builtin_functions(JCC *vm) {
@@ -5033,6 +5299,7 @@ Obj *parse(JCC *vm, Token *tok) {
 
     // Remove redundant tentative definitions.
     scan_globals(vm);
+    warn_unused_globals(vm);
     return vm->compiler.globals;
 }
 

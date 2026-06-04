@@ -527,6 +527,11 @@ struct Type {
     struct Type *params;
     bool is_variadic;
     struct Type *next;
+
+    // Declaration attributes used by semantic warnings
+    bool is_maybe_unused;
+    bool is_deprecated;
+    char *deprecated_msg;
 };
 
 /*!
@@ -655,6 +660,8 @@ struct Node {
     char *label;
     char *unique_label;
     struct Node *goto_next;
+    bool label_used;
+    bool label_maybe_unused;
 
     // Switch
     struct Node *case_next;
@@ -711,10 +718,16 @@ struct Node {
 struct Obj {
     struct Obj *next;
     char *name;    // Variable name
+    char *display_name; // Source identifier when storage uses a synthetic name
     Type *ty;      // Type
     Token *tok;    // representative token
     bool is_local; // local or global/function
     int align;     // alignment
+    bool is_used;
+    bool is_maybe_unused;
+    bool is_deprecated;
+    bool is_local_symbol;
+    char *deprecated_msg;
 
     // Local variable
     int offset;
@@ -859,6 +872,8 @@ typedef struct VarScopeNode {
     Type *type_def;
     Type *enum_ty;
     int enum_val;
+    bool is_deprecated;
+    char *deprecated_msg;
     // Additional fields for linked list
     char *name;
     int name_len;

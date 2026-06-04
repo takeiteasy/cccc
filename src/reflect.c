@@ -496,6 +496,7 @@ _Node *__jcc_ast_var_ref(JCC *vm, const char *name) {
             if (node->name_len == (int)name_len &&
                 strncmp(node->name, name, name_len) == 0) {
                 if (node->var) {
+                    node->var->is_used = true;
                     _Node *n = alloc_node(vm, ND_VAR);
                     n->var = node->var;
                     n->ty = node->var->ty;
@@ -508,6 +509,7 @@ _Node *__jcc_ast_var_ref(JCC *vm, const char *name) {
     // Also check globals
     Obj *global = __jcc_ast_find_global(vm, name);
     if (global) {
+        global->is_used = true;
         _Node *n = alloc_node(vm, ND_VAR);
         n->var = global;
         n->ty = global->ty;
@@ -526,6 +528,7 @@ _Node *__jcc_ast_param_ref(JCC *vm, _Obj *fn, const char *name) {
     for (Obj *param = fn->params; param; param = param->next) {
         if (strlen(param->name) == name_len &&
             strncmp(param->name, name, name_len) == 0) {
+            param->is_used = true;
             _Node *n = alloc_node(vm, ND_VAR);
             n->var = param;
             n->ty = param->ty;

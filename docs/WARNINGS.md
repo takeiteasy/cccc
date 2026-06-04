@@ -54,6 +54,14 @@ system:
   `-Wreturn-type`. JCC inserts a correctly typed zero return where needed.
   Returning a value from a void function preserves the expression's side
   effects.
+- Unused named local variables, parameters, labels, internal-linkage
+  variables, and internal-linkage functions use `-Wunused`. Compiler-generated
+  and external-linkage symbols are excluded.
+- Local variables and parameters that shadow an outer variable or parameter,
+  including a global variable, use `-Wshadow`.
+- Uses of deprecated functions, variables, typedefs, struct/union/enum tags,
+  and enumerators use `-Wdeprecated`. Attribute messages are included when
+  present.
 - `#warning` uses `-Wcpp`.
 - Extra preprocessor tokens use `-Wextra-tokens`.
 - Large `#embed` files use `-Wlarge-file-embed`.
@@ -67,6 +75,14 @@ Return fallthrough analysis recognizes returns, block sequencing, and complete
 `if`/`else` branches. It conservatively treats loops, switches, and gotos as
 potentially reaching the end of a function. Falling through `main` returns zero
 without a warning.
+
+`__attribute__((unused))` and `[[maybe_unused]]` suppress `-Wunused` for
+variables, parameters, internal functions, and labels.
+`__attribute__((deprecated))` and `[[deprecated]]`, with optional string
+messages, mark declarations for `-Wdeprecated`.
+
+Any expression reference counts as a symbol use, including assignment targets
+and `(void)symbol`. Set-but-not-used analysis is not currently performed.
 
 The remaining semantic categories are available for command-line compatibility
 and are implemented in smaller follow-up tasks.

@@ -1,5 +1,6 @@
 // Test C23 [[...]] attribute syntax
-// All attributes are parsed but ignored (no semantic effect)
+// Layout-neutral attributes are accepted; selected diagnostic attributes have
+// warning-system semantics.
 
 // Test attributes on functions (attributes after return type, like __attribute__)
 int [[nodiscard]] get_value(void) {
@@ -71,7 +72,7 @@ int [[reproducible]] repro_func(int a) {
 
 // Main test function
 int main() {
-    // All functions should work normally since attributes are ignored
+    // Attributes do not change runtime behavior.
     int v = get_value();
     if (v != 42) return 1;
 
