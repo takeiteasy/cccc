@@ -20,9 +20,9 @@
 #include "jcc.h"
 #include "./internal.h"
 
-// Bytecode file format (V4 - 32-bit text words):
+// Bytecode file format (V5 - 32-bit text words):
 //   Magic: "JCC\0" (4 bytes)
-//   Version: 1 (4 bytes)
+//   Version: JCC_VERSION (4 bytes)
 //   Flags: JCCFlags bitfield (4 bytes)
 //   Text size: size in bytes (8 bytes)
 //   Data size: size in bytes (8 bytes)
@@ -31,6 +31,9 @@
 //   Text segment: bytecode (text_size bytes)
 //   Data segment: global data (data_size bytes)
 //   Data relocations: data_offset, target_segment, target_offset, addend
+//   Return buffer count (8 bytes)
+//   Return buffer size (8 bytes)
+//   Return buffer offsets: data-segment byte offset for each buffer
 //   FFI table count (8 bytes)
 //   FFI entries: name_len (4 bytes), name (name_len bytes),
 //                num_args (4), returns_double (4), is_variadic (4),
@@ -85,6 +88,24 @@ int cc_save_bytecode(JCC *vm, const char *path) {
     long long main_offset = vm->text_seg[0];  // main() instruction index
     long long num_instructions = text_size / (long long)sizeof(JCCInstrWord);
     long long data_reloc_count = vm->compiler.num_data_relocs;
+    long long return_buffer_count = vm->compiler.return_buffer_count;
+    long long return_buffer_size = vm->compiler.return_buffer_size;
+
+    if (return_buffer_count < 0 ||
+        return_buffer_count > RETURN_BUFFER_POOL_SIZE ||
+        return_buffer_size <= 0) {
+        fprintf(stderr, "error: invalid return buffer metadata\n");
+        fclose(f);
+        return -1;
+    }
+    for (long long i = 0; i < return_buffer_count; i++) {
+        long long offset = vm->compiler.return_buffer_offsets[i];
+        if (offset < 0 || offset + return_buffer_size > data_size) {
+            fprintf(stderr, "error: invalid return buffer offset\n");
+            fclose(f);
+            return -1;
+        }
+    }
 
     JCCInstrWord *text_copy = malloc(text_size);
     if (!text_copy) {
@@ -192,6 +213,13 @@ int cc_save_bytecode(JCC *vm, const char *path) {
                    sizeof(long long), 1, f) != 1) goto write_error;
     }
 
+    if (fwrite(&return_buffer_count, sizeof(long long), 1, f) != 1) goto write_error;
+    if (fwrite(&return_buffer_size, sizeof(long long), 1, f) != 1) goto write_error;
+    for (long long i = 0; i < return_buffer_count; i++) {
+        if (fwrite(&vm->compiler.return_buffer_offsets[i],
+                   sizeof(long long), 1, f) != 1) goto write_error;
+    }
+
     // Write FFI table (name + metadata per entry; func_ptr is resolved at load time)
     long long ffi_count = vm->compiler.ffi_count;
     if (fwrite(&ffi_count, sizeof(long long), 1, f) != 1) goto write_error;
@@ -223,6 +251,8 @@ int cc_save_bytecode(JCC *vm, const char *path) {
         printf("  Text size: %lld bytes (%lld instructions)\n", text_size, num_instructions);
         printf("  Data size: %lld bytes\n", data_size);
         printf("  Data relocations: %lld\n", data_reloc_count);
+        printf("  Return buffers: %lld x %lld bytes\n", return_buffer_count,
+               return_buffer_size);
         printf("  FFI entries: %lld\n", ffi_count);
         printf("  Main offset: %lld\n", main_offset);
     }
@@ -276,7 +306,8 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
 
     if (text_size < 0 || data_size < 0 || data_reloc_count < 0 ||
         data_reloc_count > MAX_CALLS ||
-        cursor + text_size + data_size + data_reloc_count * 4 * (long long)sizeof(long long) > end ||
+        cursor + text_size + data_size +
+            data_reloc_count * 4 * (long long)sizeof(long long) > end ||
         text_size > vm->poolsize_max * (long long)sizeof(JCCInstrWord) ||
         text_size % (long long)sizeof(JCCInstrWord) != 0 ||
         data_size > vm->poolsize_max) {
@@ -330,6 +361,35 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
             target_offset;
         vm->compiler.data_relocs[vm->compiler.num_data_relocs].addend = addend;
         vm->compiler.num_data_relocs++;
+    }
+
+    READ_AND_INCR(return_buffer_count, long long);
+    READ_AND_INCR(return_buffer_size, long long);
+    if (return_buffer_count < 0 ||
+        return_buffer_count > RETURN_BUFFER_POOL_SIZE ||
+        return_buffer_size <= 0 ||
+        cursor + return_buffer_count * (long long)sizeof(long long) > end) {
+        fprintf(stderr, "error: invalid return buffer metadata\n");
+        return -1;
+    }
+
+    vm->compiler.return_buffer_count = (int)return_buffer_count;
+    vm->compiler.return_buffer_size = (int)return_buffer_size;
+    vm->compiler.return_buffer_index = 0;
+    vm->runtime_return_buffer_index = 0;
+    for (int i = 0; i < RETURN_BUFFER_POOL_SIZE; i++) {
+        vm->compiler.return_buffer_offsets[i] = -1;
+        vm->compiler.return_buffer_pool[i] = NULL;
+    }
+    for (long long i = 0; i < return_buffer_count; i++) {
+        READ_AND_INCR(return_buffer_offset, long long);
+        if (return_buffer_offset < 0 ||
+            return_buffer_offset + return_buffer_size > data_size) {
+            fprintf(stderr, "error: invalid return buffer offset\n");
+            return -1;
+        }
+        vm->compiler.return_buffer_offsets[i] = return_buffer_offset;
+        vm->compiler.return_buffer_pool[i] = vm->data_seg + return_buffer_offset;
     }
 
     // Read FFI table (name + metadata; func_ptr is resolved by the caller via
@@ -444,6 +504,8 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
         printf("  Text size: %lld bytes (%lld instructions)\n", text_size, num_instructions);
         printf("  Data size: %lld bytes\n", data_size);
         printf("  Data relocations: %lld\n", data_reloc_count);
+        printf("  Return buffers: %lld x %lld bytes\n", return_buffer_count,
+               return_buffer_size);
         printf("  Main offset: %lld\n", main_offset);
     }
 

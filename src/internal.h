@@ -39,7 +39,7 @@
 #endif
 
 #define JCC_MAGIC "JCC\0"
-#define JCC_VERSION 4 // Version 4: 32-bit text words with PC-index branches
+#define JCC_VERSION 5 // Version 5: persisted return-buffer ABI metadata
 
 // Stack canary constant for detecting stack overflows (used when random
 // canaries disabled)

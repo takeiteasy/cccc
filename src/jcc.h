@@ -1493,6 +1493,9 @@ typedef struct Compiler {
 
     // Struct/union return buffer pool (copy-before-return approach)
     char *return_buffer_pool[RETURN_BUFFER_POOL_SIZE]; // Pool of return buffers
+    long long return_buffer_offsets[RETURN_BUFFER_POOL_SIZE]; // Data offsets
+                                                              // serialized in .jbc
+    int return_buffer_count; // Number of active return buffers
     int return_buffer_index; // Current buffer index (rotates 0-7)
     int return_buffer_size;  // Size of each buffer (1024 bytes)
 

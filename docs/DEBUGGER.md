@@ -146,13 +146,19 @@ Binary format (little-endian):
 [Text segment: 32-bit bytecode instruction words]
 [Data segment: global variables and constants]
 [Data relocations]
+[Return buffer count (8 bytes)]
+[Return buffer size (8 bytes)]
+[Return buffer data offsets]
+[FFI table]
 ```
 
 The VM text segment uses 32-bit instruction words. Operands that need 64 bits,
 such as C integer immediates and text/data byte offsets, are encoded as two
 consecutive 32-bit words. Direct branch and call targets are instruction
 indexes, while C-visible function and label values are byte offsets from the
-text segment base.
+text segment base. Saved bytecode stores data relocations and aggregate
+return-buffer offsets separately from raw segment bytes so `cc_load_bytecode()`
+can rebuild process-local VM pointers after loading.
 
 Floating-point bytecode has separate 64-bit and 32-bit memory operations:
 `FLDR`/`FSTR` load and store `double`, while `FLDR_F32`/`FSTR_F32` load and

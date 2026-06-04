@@ -205,7 +205,7 @@ make JCC_HAS_LLVM=1 LLVM_CONFIG=/opt/homebrew/opt/llvm/bin/llvm-config
 ./jcc -I./include -DDEBUG -o debug.bin main.c
 ```
 
-Bytecode uses 32-bit instruction words; 64-bit immediates are split across two consecutive words.
+Bytecode uses 32-bit instruction words; 64-bit immediates are split across two consecutive words. Saved `.jbc` files include relocation and ABI metadata so loaded programs re-anchor global pointers, function-pointer offsets, FFI entries, and aggregate return buffers to the new VM instance.
 
 ## Running Tests
 

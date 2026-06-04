@@ -2142,8 +2142,17 @@ int op_RETBUF_fn(JCC *vm) {
     // Get next return buffer from rotating pool at runtime
     // This ensures chained struct-returning calls (e.g., f(g(), h()))
     // get different buffers automatically
-    int idx = vm->runtime_return_buffer_index;
-    vm->runtime_return_buffer_index = (idx + 1) % RETURN_BUFFER_POOL_SIZE;
+    int count = vm->compiler.return_buffer_count;
+    if (count <= 0 || count > RETURN_BUFFER_POOL_SIZE) {
+        printf("error: invalid return buffer pool metadata\n");
+        return -1;
+    }
+    int idx = vm->runtime_return_buffer_index % count;
+    if (!vm->compiler.return_buffer_pool[idx]) {
+        printf("error: return buffer pool was not rehydrated\n");
+        return -1;
+    }
+    vm->runtime_return_buffer_index = (idx + 1) % count;
     vm->regs[REG_A0] = (long long)vm->compiler.return_buffer_pool[idx];
     return 0;
 }

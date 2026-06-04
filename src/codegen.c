@@ -2985,6 +2985,7 @@ void gen(JCC *vm, Obj *prog) {
         check_data_capacity(vm, offset + vm->compiler.return_buffer_size);
         vm->data_ptr = vm->data_seg + offset;
         vm->compiler.return_buffer_pool[i] = vm->data_ptr;
+        vm->compiler.return_buffer_offsets[i] = offset;
         memset(vm->compiler.return_buffer_pool[i], 0,
                vm->compiler.return_buffer_size);
         vm->data_ptr += vm->compiler.return_buffer_size;
