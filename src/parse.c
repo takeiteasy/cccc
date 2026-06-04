@@ -4790,6 +4790,108 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
         return node;
     }
 
+    // ND_BITOP: integer bit-manipulation builtins (#212)
+    // val encoding: (op_selector << 8) | bit_width
+    //   op: 0=CLZ 1=CTZ 2=POPCOUNT 3=PARITY 4=FFS 5=BSWAP
+    if (equal(tok, "__builtin_clz") || equal(tok, "__builtin_clzll")) {
+        int width = equal(tok, "__builtin_clzll") ? 64 : 32;
+        tok = skip(vm, tok->next, "(");
+        Node *arg = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        add_type(vm, arg);
+        Node *node = new_unary(vm, ND_BITOP, arg, start);
+        node->val = (0 << 8) | width;
+        node->ty = ty_int;
+        return node;
+    }
+
+    if (equal(tok, "__builtin_ctz") || equal(tok, "__builtin_ctzll")) {
+        int width = equal(tok, "__builtin_ctzll") ? 64 : 32;
+        tok = skip(vm, tok->next, "(");
+        Node *arg = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        add_type(vm, arg);
+        Node *node = new_unary(vm, ND_BITOP, arg, start);
+        node->val = (1 << 8) | width;
+        node->ty = ty_int;
+        return node;
+    }
+
+    if (equal(tok, "__builtin_popcount") || equal(tok, "__builtin_popcountll")) {
+        tok = skip(vm, tok->next, "(");
+        Node *arg = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        add_type(vm, arg);
+        Node *node = new_unary(vm, ND_BITOP, arg, start);
+        node->val = (2 << 8) | 0;
+        node->ty = ty_int;
+        return node;
+    }
+
+    if (equal(tok, "__builtin_parity") || equal(tok, "__builtin_parityll")) {
+        tok = skip(vm, tok->next, "(");
+        Node *arg = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        add_type(vm, arg);
+        Node *node = new_unary(vm, ND_BITOP, arg, start);
+        node->val = (3 << 8) | 0;
+        node->ty = ty_int;
+        return node;
+    }
+
+    if (equal(tok, "__builtin_ffs") || equal(tok, "__builtin_ffsll")) {
+        int width = equal(tok, "__builtin_ffsll") ? 64 : 32;
+        tok = skip(vm, tok->next, "(");
+        Node *arg = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        add_type(vm, arg);
+        Node *node = new_unary(vm, ND_BITOP, arg, start);
+        node->val = (4 << 8) | width;
+        node->ty = ty_int;
+        return node;
+    }
+
+    if (equal(tok, "__builtin_bswap16") || equal(tok, "__builtin_bswap32") ||
+        equal(tok, "__builtin_bswap64")) {
+        int bytes = equal(tok, "__builtin_bswap16") ? 2 :
+                    equal(tok, "__builtin_bswap32") ? 4 : 8;
+        tok = skip(vm, tok->next, "(");
+        Node *arg = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        add_type(vm, arg);
+        Node *node = new_unary(vm, ND_BITOP, arg, start);
+        node->val = (5 << 8) | bytes;
+        node->ty = (bytes == 2) ? ty_ushort : (bytes == 4) ? ty_uint : ty_ulong;
+        return node;
+    }
+
+    // ND_OVERFLOW_ARITH: checked arithmetic builtins (#213)
+    // val: 0=add 1=sub 2=mul; lhs=a, rhs=b, cas_addr=result_ptr
+    if (equal(tok, "__builtin_add_overflow") || equal(tok, "__builtin_sub_overflow") ||
+        equal(tok, "__builtin_mul_overflow")) {
+        int op = equal(tok, "__builtin_add_overflow") ? 0 :
+                 equal(tok, "__builtin_sub_overflow") ? 1 : 2;
+        tok = skip(vm, tok->next, "(");
+        Node *a = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *b = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *ptr = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        add_type(vm, a);
+        add_type(vm, b);
+        add_type(vm, ptr);
+        if (ptr->ty->kind != TY_PTR)
+            error_tok(vm, ptr->tok, "__builtin_*_overflow: third argument must be a pointer");
+        Node *node = new_node(vm, ND_OVERFLOW_ARITH, start);
+        node->lhs = a;
+        node->rhs = b;
+        node->cas_addr = ptr;
+        node->val = op;
+        node->ty = ty_int;
+        return node;
+    }
+
     if (equal(tok, "__jcc_cmplx") || equal(tok, "__jcc_cmplxf") ||
         equal(tok, "__jcc_cmplxl")) {
         Type *ty = equal(tok, "__jcc_cmplxf") ? ty_fcomplex :

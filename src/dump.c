@@ -76,6 +76,8 @@ static const char *node_kind_name(NodeKind kind) {
     case ND_BLOCK_CALL:    return "BLOCK_CALL";
     case ND_MACRO_CALL:    return "MACRO_CALL";
     case ND_UNREACHABLE:   return "UNREACHABLE";
+    case ND_BITOP:         return "BITOP";
+    case ND_OVERFLOW_ARITH: return "OVERFLOW_ARITH";
     default:               return "UNKNOWN";
     }
 }

@@ -2155,3 +2155,162 @@ int op_BTRAP_fn(JCC *vm) {
     printf("==========================================\n");
     return -1;
 }
+
+// ========== Bit-Manipulation Builtins ==========
+
+int op_CLZ_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+    long long width = cc_read_i64(vm);
+    long long val = vm->regs[rs];
+    long long result;
+    if (width <= 32)
+        result = (val == 0) ? 32 : __builtin_clz((unsigned int)(uint32_t)val);
+    else
+        result = (val == 0) ? 64 : __builtin_clzll((unsigned long long)val);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = result;
+    return 0;
+}
+
+int op_CTZ_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+    long long width = cc_read_i64(vm);
+    long long val = vm->regs[rs];
+    long long result;
+    if (width <= 32)
+        result = (val == 0) ? 32 : __builtin_ctz((unsigned int)(uint32_t)val);
+    else
+        result = (val == 0) ? 64 : __builtin_ctzll((unsigned long long)val);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = result;
+    return 0;
+}
+
+int op_POPCOUNT_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+    long long result = __builtin_popcountll((unsigned long long)vm->regs[rs]);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = result;
+    return 0;
+}
+
+int op_FFS_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+    long long width = cc_read_i64(vm);
+    long long val = vm->regs[rs];
+    long long result;
+    if (width <= 32)
+        result = __builtin_ffs((int)(int32_t)val); // returns 0 for 0, spec-defined
+    else
+        result = __builtin_ffsll((long long)val);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = result;
+    return 0;
+}
+
+int op_BSWAP_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+    long long byte_width = cc_read_i64(vm);
+    long long val = vm->regs[rs];
+    long long result;
+    if (byte_width <= 2)
+        result = (long long)__builtin_bswap16((uint16_t)val);
+    else if (byte_width <= 4)
+        result = (long long)__builtin_bswap32((uint32_t)val);
+    else
+        result = (long long)__builtin_bswap64((uint64_t)val);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = result;
+    return 0;
+}
+
+// ========== Checked Arithmetic Builtins ==========
+
+int op_IOVFL_fn(JCC *vm) {
+    // Operand: (op_type << 8) | (size_bytes << 1) | is_unsigned
+    // op_type: 0=add, 1=sub, 2=mul
+    // Inputs: a=regs[REG_A0], b=regs[REG_A1], ptr=regs[REG_A2]
+    // Output: overflow bool in regs[REG_A0]; result stored via ptr
+    long long packed = cc_read_i64(vm);
+    int op_type  = (int)((packed >> 8) & 0xFF);
+    int size_enc = (int)(packed & 0xFF);
+    int nbytes   = (size_enc >> 1) & 0x7F;
+    int unsign   = size_enc & 1;
+
+    long long a   = vm->regs[REG_A0];
+    long long b   = vm->regs[REG_A1];
+    void     *ptr = (void *)vm->regs[REG_A2];
+
+    int overflow = 0;
+    long long result = 0;
+
+    if (!unsign) {
+        // Signed overflow: compute in 64-bit, check fit
+        switch (op_type) {
+        case 0: result = a + b; break;
+        case 1: result = a - b; break;
+        case 2: result = a * b; break;
+        }
+        if (nbytes <= 1) {
+            overflow = (result < -128 || result > 127);
+            if (ptr) *(int8_t *)ptr = (int8_t)result;
+        } else if (nbytes <= 2) {
+            overflow = (result < -32768 || result > 32767);
+            if (ptr) *(int16_t *)ptr = (int16_t)result;
+        } else if (nbytes <= 4) {
+            overflow = (result < (long long)INT32_MIN || result > (long long)INT32_MAX);
+            if (ptr) *(int32_t *)ptr = (int32_t)result;
+        } else {
+            // 64-bit signed: use host overflow detection
+            long long r64;
+            if (op_type == 0)
+                overflow = __builtin_add_overflow(a, b, &r64);
+            else if (op_type == 1)
+                overflow = __builtin_sub_overflow(a, b, &r64);
+            else
+                overflow = __builtin_mul_overflow(a, b, &r64);
+            result = r64;
+            if (ptr) *(int64_t *)ptr = r64;
+        }
+    } else {
+        // Unsigned overflow: compute in 64-bit with masking
+        unsigned long long ua = (unsigned long long)a;
+        unsigned long long ub = (unsigned long long)b;
+        unsigned long long ur;
+        switch (op_type) {
+        case 0: ur = ua + ub; break;
+        case 1: ur = ua - ub; break;
+        default: ur = ua * ub; break;
+        }
+        unsigned long long mask = (nbytes >= 8) ? UINT64_MAX :
+                                  ((1ULL << (nbytes * 8)) - 1ULL);
+        unsigned long long truncated = ur & mask;
+        if (nbytes <= 1)      { overflow = (ur != truncated); if (ptr) *(uint8_t *)ptr  = (uint8_t)truncated;  }
+        else if (nbytes <= 2) { overflow = (ur != truncated); if (ptr) *(uint16_t *)ptr = (uint16_t)truncated; }
+        else if (nbytes <= 4) { overflow = (ur != truncated); if (ptr) *(uint32_t *)ptr = (uint32_t)truncated; }
+        else                  {
+            unsigned long long r64u;
+            if (op_type == 0)
+                overflow = __builtin_add_overflow(ua, ub, &r64u);
+            else if (op_type == 1)
+                overflow = __builtin_sub_overflow(ua, ub, &r64u);
+            else
+                overflow = __builtin_mul_overflow(ua, ub, &r64u);
+            if (ptr) *(uint64_t *)ptr = r64u;
+        }
+        result = (long long)truncated;
+    }
+
+    vm->regs[REG_A0] = overflow ? 1 : 0;
+    return 0;
+}

@@ -2186,6 +2186,61 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         emit_lea3(vm, dest_reg, 0);
         return;
 
+    case ND_BITOP: {
+        // Bit-manipulation builtins: val = (op_selector<<8) | bit_width
+        int bitop_op = (int)(node->val >> 8);
+        int bitop_width = (int)(node->val & 0xFF);
+        int bitop_tmp = alloc_temp_reg();
+        gen_expr(vm, node->lhs, bitop_tmp);
+        switch (bitop_op) {
+        case 0: // CLZ
+            emit_rri(vm, CLZ, dest_reg, bitop_tmp, bitop_width);
+            break;
+        case 1: // CTZ
+            emit_rri(vm, CTZ, dest_reg, bitop_tmp, bitop_width);
+            break;
+        case 2: // POPCOUNT
+            emit_rr(vm, POPCOUNT, dest_reg, bitop_tmp);
+            break;
+        case 3: { // PARITY = popcount & 1
+            int parity_tmp = alloc_temp_reg();
+            emit_rr(vm, POPCOUNT, dest_reg, bitop_tmp);
+            emit_li3(vm, parity_tmp, 1);
+            emit_rrr(vm, AND3, dest_reg, dest_reg, parity_tmp);
+            free_temp_reg(parity_tmp);
+            break;
+        }
+        case 4: // FFS
+            emit_rri(vm, FFS, dest_reg, bitop_tmp, bitop_width);
+            break;
+        case 5: // BSWAP (bitop_width is byte-width)
+            emit_rri(vm, BSWAP, dest_reg, bitop_tmp, bitop_width);
+            break;
+        default:
+            error_tok(vm, node->tok, "codegen: unknown ND_BITOP selector %d", bitop_op);
+        }
+        free_temp_reg(bitop_tmp);
+        return;
+    }
+
+    case ND_OVERFLOW_ARITH: {
+        // Checked arithmetic: val=0/1/2 (add/sub/mul)
+        // a→REG_A0, b→REG_A1, ptr→REG_A2; result bool→dest_reg
+        // Encode op_type and result type kind in a single immediate
+        Type *result_ty = node->cas_addr->ty->base;
+        // type_kind encoding: (size_bytes << 1) | is_unsigned
+        int kind_enc = (result_ty->size << 1) | (result_ty->is_unsigned ? 1 : 0);
+        long long packed = ((long long)node->val << 8) | kind_enc;
+        reset_temp_regs();
+        gen_expr(vm, node->lhs, REG_A0);
+        gen_expr(vm, node->rhs, REG_A1);
+        gen_expr(vm, node->cas_addr, REG_A2);
+        emit_with_arg(vm, IOVFL, packed);
+        if (dest_reg != REG_A0)
+            emit_mov3(vm, dest_reg, REG_A0);
+        return;
+    }
+
     case ND_VLA_PTR:
         // VLA pointer/designator: load the stored pointer value
         // VLAs are implemented by storing a pointer to dynamically allocated

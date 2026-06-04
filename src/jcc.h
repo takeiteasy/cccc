@@ -170,7 +170,16 @@ extern "C" {
     X(FLDR_F32, 1)   /* fregs[rd] = (double)*(float*)regs[rs] */               \
     X(FSTR_F32, 1)   /* *(float*)regs[rs] = (float)fregs[rd] */                \
     X(FROUND_F32, 1) /* fregs[rd] = (float)fregs[rs] */               \
-    X(BTRAP, 0)      /* Halt execution (unreachable/builtin trap) */
+    X(BTRAP, 0)      /* Halt execution (unreachable/builtin trap) */    \
+    /* Bit-manipulation builtins */                                        \
+    X(CLZ,      3)   /* rd = clz(rs); operand2 = bit-width (32 or 64) */  \
+    X(CTZ,      3)   /* rd = ctz(rs); operand2 = bit-width (32 or 64) */  \
+    X(POPCOUNT, 1)   /* rd = popcount(rs) — width-agnostic 64-bit */       \
+    X(FFS,      3)   /* rd = ffs(rs); operand2 = bit-width; 0 maps to 0 */\
+    X(BSWAP,    3)   /* rd = bswap(rs); operand2 = byte-width (2,4,8) */   \
+    /* Checked arithmetic builtins */                                      \
+    X(IOVFL,    2)   /* overflow arith: a=A0,b=A1,ptr=A2,bool→A0;         \
+                        operand = (op_type<<8)|type_kind */
 
 typedef uint32_t JCCInstrWord;
 typedef uint32_t JCCPc;
@@ -630,6 +639,8 @@ typedef enum {
     ND_MACRO_CALL = 51, // Pragma macro invocation (deferred until macro pass)
     ND_COMPLEX = 52,    // Native complex construction/projection helper
     ND_UNREACHABLE = 53, // __builtin_unreachable() - code path that must not execute
+    ND_BITOP = 54,      // Bit-manipulation builtins; val = (op<<8)|bit_width, lhs = arg
+    ND_OVERFLOW_ARITH = 55, // Checked arithmetic; val = 0/1/2 (add/sub/mul), lhs=a, rhs=b, cas_addr=ptr
 } NodeKind;
 
 /*!
