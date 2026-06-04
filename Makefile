@@ -225,6 +225,21 @@ else
 		'./jcc -I./include $(PROFILE_TEST)'
 endif
 
+# Cross-compiler benchmark suite: JCC vs GCC.
+# Runs every benchmark under JCC × {none,O1,O2,O3} and GCC × {O0,O1,O2,O3},
+# verifies identical output, and emits a table + JSON report.
+BENCH_RUNS ?= 3
+BENCH_WARMUP ?= 1
+
+bench-compare: jcc
+	@python3 bench.py --runs $(BENCH_RUNS) --warmup $(BENCH_WARMUP)
+
+bench-compare-quick: jcc
+	@python3 bench.py --runs 2 --warmup 1
+
+bench-compare-json: jcc
+	@python3 bench.py --format json --runs $(BENCH_RUNS) --warmup $(BENCH_WARMUP)
+
 profile-cpu-build: $(SRCS)
 ifeq ($(HAS_GPROFILER),)
 	@echo "Error: gperftools libprofiler not found. Install with 'brew install gperftools'."
@@ -265,7 +280,7 @@ clean:
 	@$(RM) -rf profile/*.prof profile/*.txt profile/*.json profile/*.massif
 	@$(RM) -rf fuzz/corpus fuzz/out
 
-.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info generate-std
+.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info generate-std bench-compare bench-compare-quick bench-compare-json
 ifeq ($(UNAME_S),Linux)
 .PHONY: msan
 endif

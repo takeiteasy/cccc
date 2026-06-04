@@ -12,3 +12,6 @@ profile/*.prof
 profile/*.json
 profile/*.txt
 profile/*.massif
+build/bench-*
+benchmarks/results/
+benchmarks/results/*.json

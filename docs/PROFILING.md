@@ -86,8 +86,20 @@ CPUPROFILE_FREQUENCY=1000 ./jcc-prof -I./include tests/test_comprehensive.c
 python3 tests.py --bench                        # Benchmark all tests
 python3 tests.py --bench --match "*compre*"     # Benchmark matching tests
 python3 tests.py --profile-cpu --match "*compre*"  # CPU profile matching tests
-python3 tests.py --profile-mem --match "*compre*"  # Memory profile matching tests
+python3 tests.py --profile-mem --match "*malloc*"  # Memory profile matching tests
 ```
+
+## Cross-Compiler Benchmarks (JCC vs GCC)
+
+For a higher-level view — comparing JCC to a real C compiler on the same portable workloads — see [BENCHMARKS.md](BENCHMARKS.md). The benchmark suite runs each workload under JCC × {none,O1,O2,O3} and GCC × {O0,O1,O2,O3}, verifies identical output, and reports per-config wall-clock timings plus speedup ratios.
+
+```bash
+make bench-compare            # full run
+make bench-compare-quick      # quick run
+python3 bench.py --filter fib.c   # one benchmark
+```
+
+The hyperfine-based `make bench` and the cross-compiler `make bench-compare` are complementary: `make bench` profiles a single workload in depth (with shell-startup variation), while `make bench-compare` produces a side-by-side matrix of how JCC stacks up against GCC.
 
 ## Output Files
 

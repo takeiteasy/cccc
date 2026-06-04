@@ -280,6 +280,16 @@ python3 tests.py --profile-mem --match "*malloc*"   # Profile matching tests
 
 Profiling output is written to `profile/`. See [PROFILING.md](docs/PROFILING.md) for detailed usage.
 
+**Cross-compiler benchmarks (JCC vs GCC):**
+
+```bash
+make bench-compare            # run the benchmark suite (JCC × {none,O1,O2,O3} vs GCC × {O0,O1,O2,O3})
+make bench-compare-quick      # 2-iteration quick run
+python3 bench.py --filter fib.c   # run a single benchmark
+```
+
+See [BENCHMARKS.md](docs/BENCHMARKS.md) for the full guide and the list of included workloads.
+
 Running an individual test:
 
 ```bash
