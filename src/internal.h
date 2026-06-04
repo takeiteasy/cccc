@@ -251,6 +251,7 @@ Token *preprocess(JCC *vm, Token *tok);
 
 Node *new_cast(JCC *vm, Node *expr, Type *ty);
 int64_t const_expr(JCC *vm, Token **rest, Token *tok);
+bool node_int_const_fits(JCC *vm, Node *expr, Type *to);
 Obj *parse(JCC *vm, Token *tok);
 void cc_execute_top_level_macro(JCC *vm, char *name, Token *tok,
                                 Node *args, int arg_count);
@@ -298,6 +299,7 @@ Type *union_type(JCC *vm);
 Type *block_type(JCC *vm, Type *return_ty, Type *params);
 Type *complex_type_for(JCC *vm, Type *base);
 void add_type(JCC *vm, Node *node);
+void warn_implicit_conversion(JCC *vm, Node *expr, Type *to, Token *tok);
 
 //
 // unicode.c

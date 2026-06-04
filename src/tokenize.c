@@ -45,7 +45,16 @@ static const WarningInfo warning_infos[] = {
     {"return-type", JCC_WARN_RETURN_TYPE, false},
     {"shadow", JCC_WARN_SHADOW, false},
     {"format", JCC_WARN_FORMAT, false},
+    // -Wconversion is the umbrella: enables integer narrowing, sign-conversion,
+    // and float-conversion.  The first entry maps the name to the full group
+    // mask so -Wconversion / -Wno-conversion / -Werror=conversion all cover all
+    // three sub-categories.  The second (non-group) entry exists only so that
+    // jcc_warning_name(JCC_WARN_CONVERSION) (exact-bit match) still returns
+    // "conversion" for the [-Wconversion] tag in integer-narrowing diagnostics.
+    {"conversion", JCC_WARN_CONVERSION_GROUP, false},
     {"conversion", JCC_WARN_CONVERSION, false},
+    {"sign-conversion", JCC_WARN_SIGN_CONVERSION, false},
+    {"float-conversion", JCC_WARN_FLOAT_CONVERSION, false},
     {"sign-compare", JCC_WARN_SIGN_COMPARE, false},
     {"pointer-arith", JCC_WARN_POINTER_ARITH, false},
     {"pedantic", JCC_WARN_PEDANTIC, false},

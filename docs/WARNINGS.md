@@ -27,7 +27,9 @@ The warning infrastructure recognizes these category names:
 - `return-type`
 - `shadow`
 - `format`
-- `conversion`
+- `conversion` (umbrella; enables `sign-conversion` and `float-conversion` too)
+- `sign-conversion`
+- `float-conversion`
 - `sign-compare`
 - `pointer-arith`
 - `pedantic`
@@ -36,6 +38,9 @@ The warning infrastructure recognizes these category names:
 - `extra-tokens`
 - `large-file-embed`
 - `jcc-macro`
+
+`conversion` is an umbrella name: `-Wconversion` enables `sign-conversion` and
+`float-conversion` as well as the integer-narrowing check.
 
 `all` and `extra` are group names used by `-Wall`, `-Wno-all`, `-Wextra`, and
 `-Wno-extra`.
@@ -84,5 +89,25 @@ messages, mark declarations for `-Wdeprecated`.
 Any expression reference counts as a symbol use, including assignment targets
 and `(void)symbol`. Set-but-not-used analysis is not currently performed.
 
-The remaining semantic categories are available for command-line compatibility
-and are implemented in smaller follow-up tasks.
+- Implicit integer-to-narrower-integer conversions use `-Wconversion`
+  (e.g. `long` → `int`, `int` → `char`).  Conversions where the source is a
+  compile-time constant that fits in the destination are silently accepted.
+  Compound-assignment operators (`+=`, `-=`, etc.) on narrower-than-`int`
+  lvalues also fire `-Wconversion` because the result is implicitly narrowed
+  back to the lvalue type.
+- Implicit signed↔unsigned integer conversions use `-Wsign-conversion`
+  (e.g. `int x = -1; unsigned int y = x;`).
+- Implicit conversions between floating-point and integer types, or from a
+  wider float to a narrower float, use `-Wfloat-conversion`
+  (e.g. `double d = 3.7; int i = d;`).
+- `-Wconversion` is an umbrella: it enables integer narrowing, sign-conversion,
+  and float-conversion together.  Each sub-category can also be enabled or
+  suppressed independently with `-Wsign-conversion`, `-Wfloat-conversion`,
+  `-Wno-sign-conversion`, and `-Wno-float-conversion`.
+- `-Werror=conversion` promotes all three conversion sub-categories to errors.
+- Comparisons between signed and unsigned integers use `-Wsign-compare`.
+  Comparisons where one operand is a non-negative integer constant are exempt
+  (e.g. `x < 5` and `x == 0` stay quiet).
+- Arithmetic on `void *` or function pointers (a GNU extension) uses
+  `-Wpointer-arith`.  The operation is still performed; only the diagnostic
+  is added.

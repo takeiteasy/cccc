@@ -2313,6 +2313,7 @@ static Node *stmt(JCC *vm, Token **rest, Token *tok) {
                 warn_tok(vm, node->tok, JCC_WARN_RETURN_TYPE,
                          "void function should not return a value");
             } else if (ty->kind != TY_STRUCT && ty->kind != TY_UNION) {
+                warn_implicit_conversion(vm, exp, ty, node->tok);
                 exp = new_cast(vm, exp, ty);
             }
         }
@@ -2807,6 +2808,27 @@ int64_t const_expr(JCC *vm, Token **rest, Token *tok) {
     return eval(vm, node);
 }
 
+// Returns true when `expr` is an integer constant expression whose value fits
+// within the range of `to` without truncation.  Used to suppress -Wconversion
+// false positives such as `char c = 0;` or `char c = 1 + 1;`.
+bool node_int_const_fits(JCC *vm, Node *expr, Type *to) {
+    if (!expr || !to || !is_integer(to))
+        return false;
+    if (!is_const_expr(vm, expr))
+        return false;
+    int64_t val = eval(vm, expr);
+    if (to->is_unsigned) {
+        // Unsigned destination: value must be in [0, 2^bits-1].
+        uint64_t max = (to->size >= 8) ? UINT64_MAX : ((uint64_t)1 << (to->size * 8)) - 1;
+        return (uint64_t)val <= max;
+    } else {
+        // Signed destination: value must be in [-(2^(bits-1)), 2^(bits-1)-1].
+        int64_t min = (to->size >= 8) ? INT64_MIN : -(int64_t)((uint64_t)1 << (to->size * 8 - 1));
+        int64_t max = (to->size >= 8) ? INT64_MAX : (int64_t)(((uint64_t)1 << (to->size * 8 - 1)) - 1);
+        return val >= min && val <= max;
+    }
+}
+
 static double eval_double(JCC *vm, Node *node) {
     add_type(vm, node);
 
@@ -3254,6 +3276,8 @@ static Node *new_add(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
 
     // void* arithmetic is a GNU extension; we allow it for compatibility
     if (lhs->ty->base->kind == TY_VOID) {
+        warn_tok(vm, tok, JCC_WARN_POINTER_ARITH,
+                 "pointer of type 'void *' used in arithmetic");
         rhs = new_binary(vm, ND_MUL, rhs,
                          new_long(vm, get_vm_size(lhs->ty->base), tok), tok);
         return new_binary(vm, ND_ADD, lhs, rhs, tok);
@@ -3265,6 +3289,11 @@ static Node *new_add(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
                          new_var_node(vm, lhs->ty->base->vla_size, tok), tok);
         return new_binary(vm, ND_ADD, lhs, rhs, tok);
     }
+
+    // Function pointer arithmetic is a GNU extension
+    if (lhs->ty->base->kind == TY_FUNC)
+        warn_tok(vm, tok, JCC_WARN_POINTER_ARITH,
+                 "pointer to a function used in arithmetic");
 
     // ptr + num
     rhs = new_binary(vm, ND_MUL, rhs,
@@ -3303,6 +3332,12 @@ static Node *new_sub(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
 
     // ptr - num
     if (lhs->ty->base && is_integer(rhs->ty)) {
+        if (lhs->ty->base->kind == TY_VOID)
+            warn_tok(vm, tok, JCC_WARN_POINTER_ARITH,
+                     "pointer of type 'void *' used in arithmetic");
+        else if (lhs->ty->base->kind == TY_FUNC)
+            warn_tok(vm, tok, JCC_WARN_POINTER_ARITH,
+                     "pointer to a function used in arithmetic");
         rhs = new_binary(vm, ND_MUL, rhs,
                          new_long(vm, get_vm_size(lhs->ty->base), tok), tok);
         add_type(vm, rhs);
@@ -3313,6 +3348,12 @@ static Node *new_sub(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
 
     // ptr - ptr, which returns how many elements are between the two.
     if (lhs->ty->base && rhs->ty->base) {
+        if (lhs->ty->base->kind == TY_VOID || rhs->ty->base->kind == TY_VOID)
+            warn_tok(vm, tok, JCC_WARN_POINTER_ARITH,
+                     "pointer of type 'void *' used in arithmetic");
+        else if (lhs->ty->base->kind == TY_FUNC || rhs->ty->base->kind == TY_FUNC)
+            warn_tok(vm, tok, JCC_WARN_POINTER_ARITH,
+                     "pointer to a function used in arithmetic");
         Node *node = new_binary(vm, ND_SUB, lhs, rhs, tok);
         node->ty = ty_long;
         return new_binary(vm, ND_DIV, node,
@@ -4325,8 +4366,10 @@ static Node *funcall(JCC *vm, Token **rest, Token *tok, Node *fn) {
         }
 
         if (param_ty) {
-            if (param_ty->kind != TY_STRUCT && param_ty->kind != TY_UNION)
+            if (param_ty->kind != TY_STRUCT && param_ty->kind != TY_UNION) {
+                warn_implicit_conversion(vm, arg, param_ty, tok);
                 arg = new_cast(vm, arg, param_ty);
+            }
             param_ty = param_ty->next;
         } else if (arg->ty->kind == TY_FLOAT) {
             // If parameter type is omitted (e.g. in "..."), float

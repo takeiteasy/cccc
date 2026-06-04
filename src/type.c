@@ -327,6 +327,88 @@ static void usual_arith_conv(JCC *vm, Node **lhs, Node **rhs) {
     *rhs = new_cast(vm, *rhs, ty);
 }
 
+// Emit a -Wconversion / -Wsign-conversion / -Wfloat-conversion warning if the
+// implicit conversion from expr->ty to `to` is lossy.  Call this BEFORE
+// new_cast() so expr->ty is still the source type.
+//
+// Categories:
+//   -Wconversion      integer -> narrower integer (by size)
+//   -Wsign-conversion integer -> same-or-narrower integer with differing signedness
+//   -Wfloat-conversion float -> integer, integer -> float, or float -> narrower float
+//
+// Integer cases are suppressed when the source is a constant that fits in the
+// destination type (e.g. `char c = 0;` is silent).
+void warn_implicit_conversion(JCC *vm, Node *expr, Type *to, Token *tok) {
+    if (!vm || !expr || !to || !expr->ty)
+        return;
+    Type *from = expr->ty;
+    // Skip error types and identical types.
+    if (from->kind == TY_ERROR || to->kind == TY_ERROR)
+        return;
+    if (from->kind == to->kind && from->is_unsigned == to->is_unsigned)
+        return;
+
+    if (is_integer(from) && is_integer(to)) {
+        // Constant-fit suppression: if the value is known to fit, stay silent.
+        if (node_int_const_fits(vm, expr, to))
+            return;
+        if (from->size > to->size) {
+            // Narrowing: integer -> smaller integer.
+            warn_tok(vm, tok, JCC_WARN_CONVERSION,
+                     "implicit conversion loses integer precision: %s%s to %s%s",
+                     from->is_unsigned ? "unsigned " : "",
+                     (from->kind == TY_LONG) ? "long" :
+                     (from->kind == TY_INT)  ? "int"  :
+                     (from->kind == TY_SHORT) ? "short" : "char",
+                     to->is_unsigned ? "unsigned " : "",
+                     (to->kind == TY_LONG)  ? "long"  :
+                     (to->kind == TY_INT)   ? "int"   :
+                     (to->kind == TY_SHORT) ? "short" : "char");
+        } else if (from->is_unsigned != to->is_unsigned) {
+            // Same-size (or widening) but signedness change.
+            warn_tok(vm, tok, JCC_WARN_SIGN_CONVERSION,
+                     "implicit conversion changes signedness");
+        }
+        return;
+    }
+
+    if (is_flonum(from) || is_flonum(to)) {
+        if (is_integer(to)) {
+            // float -> integer (value always truncated).
+            warn_tok(vm, tok, JCC_WARN_FLOAT_CONVERSION,
+                     "implicit conversion from floating-point to integer");
+        } else if (is_integer(from)) {
+            // integer -> float (may lose precision for large integers).
+            warn_tok(vm, tok, JCC_WARN_FLOAT_CONVERSION,
+                     "implicit conversion from integer to floating-point");
+        } else if (is_flonum(from) && is_flonum(to) && from->size > to->size) {
+            // float narrowing: double -> float, long double -> double/float.
+            warn_tok(vm, tok, JCC_WARN_FLOAT_CONVERSION,
+                     "implicit conversion loses floating-point precision");
+        }
+    }
+}
+
+// Check for a signed/unsigned comparison mismatch BEFORE usual_arith_conv
+// normalises signedness away.  Both operands must be integers after promotion.
+// Constant non-negative operands are exempted (e.g. `x < 5` is quiet).
+static void check_sign_compare(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
+    if (!is_integer(lhs->ty) || !is_integer(rhs->ty))
+        return;
+    // Apply integer promotion to reflect what the comparison actually uses.
+    bool lhs_unsigned = integer_promotion(lhs->ty)->is_unsigned;
+    bool rhs_unsigned = integer_promotion(rhs->ty)->is_unsigned;
+    if (lhs_unsigned == rhs_unsigned)
+        return;
+    // Suppress when one operand is a non-negative integer constant.
+    if (lhs->kind == ND_NUM && lhs->val >= 0)
+        return;
+    if (rhs->kind == ND_NUM && rhs->val >= 0)
+        return;
+    warn_tok(vm, tok, JCC_WARN_SIGN_COMPARE,
+             "comparison of integers with different signs");
+}
+
 void add_type(JCC *vm, Node *node) {
     if (!node || (node->ty && node->kind != ND_COMPLEX))
         return;
@@ -412,8 +494,10 @@ void add_type(JCC *vm, Node *node) {
                 }
                 error_tok(vm, node->lhs->tok, "cannot assign to const-qualified variable");
             }
-            if (node->lhs->ty->kind != TY_STRUCT && node->lhs->ty->kind != TY_UNION)
+            if (node->lhs->ty->kind != TY_STRUCT && node->lhs->ty->kind != TY_UNION) {
+                warn_implicit_conversion(vm, node->rhs, node->lhs->ty, node->lhs->tok);
                 node->rhs = new_cast(vm, node->rhs, node->lhs->ty);
+            }
             node->ty = node->lhs->ty;
             return;
         case ND_EQ:
@@ -423,6 +507,7 @@ void add_type(JCC *vm, Node *node) {
                 node->ty = ty_int;
                 return;
             }
+            check_sign_compare(vm, node->lhs, node->rhs, node->tok);
             usual_arith_conv(vm, &node->lhs, &node->rhs);
             node->ty = ty_int;
             return;
@@ -430,6 +515,7 @@ void add_type(JCC *vm, Node *node) {
         case ND_LE:
             if (is_complex(node->lhs->ty) || is_complex(node->rhs->ty))
                 error_tok(vm, node->tok, "ordered comparison of complex values is not supported");
+            check_sign_compare(vm, node->lhs, node->rhs, node->tok);
             usual_arith_conv(vm, &node->lhs, &node->rhs);
             node->ty = ty_int;
             return;
