@@ -1,3 +1,4 @@
+// JCC_FLAGS: -std=c23
 // Test #embed limit parameter with full constant expressions
 #define LIMIT_BASE 1
 #define LIMIT_EXPR (LIMIT_BASE + 1)

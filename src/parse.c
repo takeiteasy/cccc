@@ -691,7 +691,10 @@ static DeclKw declspec_kw(Token *tok) {
     case 9:  // _Noreturn, constexpr
         switch (s[0]) {
         case '_': if (memcmp(s+1,"Noreturn",8)==0) return DK_NORETURN;   break;
-        case 'c': if (memcmp(s+1,"onstexpr",8)==0) return DK_CONSTEXPR;  break;
+        // constexpr is only a keyword in C23; below C23 it is downgraded to
+        // TK_IDENT in convert_pp_tokens so it can be used as an identifier.
+        case 'c': if (memcmp(s+1,"onstexpr",8)==0)
+            return tok->kind == TK_KEYWORD ? DK_CONSTEXPR : DK_NONE; break;
         }
         break;
     case 10:  // __restrict, _Imaginary
@@ -782,7 +785,11 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
             if      (dk == DK_TYPEDEF)   attr->is_typedef   = true;
             else if (dk == DK_STATIC)    attr->is_static    = true;
             else if (dk == DK_EXTERN)    attr->is_extern    = true;
-            else if (dk == DK_INLINE)    attr->is_inline    = true;
+            else if (dk == DK_INLINE) {
+                if (vm->compiler.c_std < JCC_STD_C99)
+                    error_tok(vm, tok, "'inline' is not available before C99");
+                attr->is_inline = true;
+            }
             else if (dk == DK_CONSTEXPR) attr->is_constexpr = true;
             else if (dk == DK_BLOCK_VAR) attr->is_block_var = true;
             else                         attr->is_tls       = true;
@@ -1038,12 +1045,16 @@ static Type *array_dimensions(JCC *vm, Token **rest, Token *tok, Type *ty) {
         return array_of(vm, ty, -1);
     }
 
+    Token *expr_tok = tok;
     Node *expr = conditional(vm, &tok, tok);
     tok = skip(vm, tok, "]");
     ty = type_suffix(vm, rest, tok, ty);
 
-    if (ty->kind == TY_VLA || !is_const_expr(vm, expr))
+    if (ty->kind == TY_VLA || !is_const_expr(vm, expr)) {
+        if (vm->compiler.c_std < JCC_STD_C99)
+            error_tok(vm, expr_tok, "variable-length arrays are not available before C99");
         return vla_of(vm, ty, expr);
+    }
     return array_of(vm, ty, eval(vm, expr));
 }
 
@@ -1618,6 +1629,8 @@ static Member *struct_designator(JCC *vm, Token **rest, Token *tok, Type *ty) {
 // designation = ("[" const-expr "]" | "." ident)* "="? initializer
 static void designation(JCC *vm, Token **rest, Token *tok, Initializer *init) {
     if (equal(tok, "[")) {
+        if (vm->compiler.c_std < JCC_STD_C99)
+            error_tok(vm, tok, "designated initializers are not available before C99");
         if (init->ty->kind != TY_ARRAY)
             error_tok(vm, tok, "array index in non-array initializer");
 
@@ -1632,6 +1645,8 @@ static void designation(JCC *vm, Token **rest, Token *tok, Initializer *init) {
     }
 
     if (equal(tok, ".") && init->ty->kind == TY_STRUCT) {
+        if (vm->compiler.c_std < JCC_STD_C99)
+            error_tok(vm, tok, "designated initializers are not available before C99");
         Member *mem = struct_designator(vm, &tok, tok, init->ty);
         designation(vm, &tok, tok, init->children[mem->idx]);
         init->expr = NULL;
@@ -1648,6 +1663,8 @@ static void designation(JCC *vm, Token **rest, Token *tok, Initializer *init) {
     }
 
     if (equal(tok, ".") && init->ty->kind == TY_UNION) {
+        if (vm->compiler.c_std < JCC_STD_C99)
+            error_tok(vm, tok, "designated initializers are not available before C99");
         Member *mem = struct_designator(vm, &tok, tok, init->ty);
         init->mem = mem;
         designation(vm, rest, tok, init->children[mem->idx]);
@@ -1723,6 +1740,8 @@ static void array_initializer1(JCC *vm, Token **rest, Token *tok,
         first = false;
 
         if (equal(tok, "[")) {
+            if (vm->compiler.c_std < JCC_STD_C99)
+                error_tok(vm, tok, "designated initializers are not available before C99");
             int begin, end;
             array_designator(vm, &tok, tok, init->ty, &begin, &end);
 
@@ -1802,6 +1821,8 @@ static void struct_initializer1(JCC *vm, Token **rest, Token *tok,
         first = false;
 
         if (equal(tok, ".")) {
+            if (vm->compiler.c_std < JCC_STD_C99)
+                error_tok(vm, tok, "designated initializers are not available before C99");
             mem = struct_designator(vm, &tok, tok, init->ty);
             designation(vm, &tok, tok, init->children[mem->idx]);
             mem = mem->next;
@@ -2567,8 +2588,11 @@ static Node *compound_stmt(JCC *vm, Token **rest, Token *tok) {
 
     enter_scope(vm);
 
+    bool seen_stmt = false;
     while (!equal(tok, "}")) {
         if (is_typename(vm, tok) && !equal(tok->next, ":")) {
+            if (seen_stmt && vm->compiler.c_std < JCC_STD_C99)
+                error_tok(vm, tok, "mixing declarations and code is not available before C99");
             VarAttr attr = {};
             Type *basety = declspec(vm, &tok, tok, &attr);
 
@@ -2594,6 +2618,7 @@ static Node *compound_stmt(JCC *vm, Token **rest, Token *tok) {
             // initialized but not assigned later
             vm->compiler.initializing_var = NULL;
             cur = cur->next = stmt(vm, &tok, tok);
+            seen_stmt = true;
         }
         add_type(vm, cur);
     }
@@ -3775,8 +3800,11 @@ static void struct_members(JCC *vm, Token **rest, Token *tok, Type *ty) {
         bool first = true;
 
         // Anonymous struct member
+        Token *anon_tok = tok;
         if ((basety->kind == TY_STRUCT || basety->kind == TY_UNION) &&
             consume(vm, &tok, tok, ";")) {
+            if (vm->compiler.c_std < JCC_STD_C11)
+                error_tok(vm, anon_tok, "anonymous structs/unions are not available before C11");
             Member *mem =
                 arena_alloc(&vm->compiler.parser_arena, sizeof(Member));
             memset(mem, 0, sizeof(Member));
@@ -3818,6 +3846,9 @@ static void struct_members(JCC *vm, Token **rest, Token *tok, Type *ty) {
     // called a "flexible array member". It should behave as if
     // if were a zero-sized array.
     if (cur != &head && cur->ty->kind == TY_ARRAY && cur->ty->array_len < 0) {
+        if (vm->compiler.c_std < JCC_STD_C99)
+            error_tok(vm, cur->name ? cur->name : *rest,
+                      "flexible array members are not available before C99");
         cur->ty = array_of(vm, cur->ty->base, 0);
         ty->is_flexible = true;
     }
@@ -3962,6 +3993,8 @@ static Token *attribute_list(JCC *vm, Token *tok, Type *ty, VarAttr *attr) {
 static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty,
                                  VarAttr *attr) {
     while (equal(tok, "[") && equal(tok->next, "[")) {
+        if (vm->compiler.c_std < JCC_STD_C23)
+            error_tok(vm, tok, "'[[...]]' attributes are not available before C23");
         tok = tok->next->next; // Skip [[
 
         bool first = true;
@@ -4233,6 +4266,8 @@ static Node *postfix(JCC *vm, Token **rest, Token *tok) {
     if (equal(tok, "(") && is_typename(vm, tok->next)) {
         // Compound literal
         Token *start = tok;
+        if (vm->compiler.c_std < JCC_STD_C99)
+            error_tok(vm, start, "compound literals are not available before C99");
         Type *ty = typename(vm, &tok, tok->next);
         tok = skip(vm, tok, ")");
 
@@ -4527,8 +4562,11 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
         return new_ulong(vm, node->ty->align, tok);
     }
 
-    if (equal(tok, "_Generic"))
+    if (equal(tok, "_Generic")) {
+        if (vm->compiler.c_std < JCC_STD_C11)
+            error_tok(vm, tok, "'_Generic' is not available before C11");
         return generic_selection(vm, rest, tok->next);
+    }
 
     if (equal(tok, "__builtin_types_compatible_p")) {
         tok = skip(vm, tok->next, "(");
@@ -5046,15 +5084,18 @@ static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr) {
 
     tok = skip(vm, tok, "{");
 
-    // [https://www.sigbus.info/n1570#6.4.2.2p1] "__func__" is
-    // automatically defined as a local variable containing the
-    // current function name.
-    push_scope(vm, "__func__", 8)->var = new_string_literal(
-        vm, fn->name, array_of(vm, ty_char, strlen(fn->name) + 1));
+    // [https://www.sigbus.info/n1570#6.4.2.2p1] "__func__" is automatically
+    // defined as a local variable containing the current function name.
+    // Not available before C99 — omitting it causes a natural undeclared-
+    // identifier error if used in C89 mode.
+    if (vm->compiler.c_std >= JCC_STD_C99) {
+        push_scope(vm, "__func__", 8)->var = new_string_literal(
+            vm, fn->name, array_of(vm, ty_char, strlen(fn->name) + 1));
 
-    // [GNU] __FUNCTION__ is yet another name of __func__.
-    push_scope(vm, "__FUNCTION__", 12)->var = new_string_literal(
-        vm, fn->name, array_of(vm, ty_char, strlen(fn->name) + 1));
+        // [GNU] __FUNCTION__ is yet another name of __func__.
+        push_scope(vm, "__FUNCTION__", 12)->var = new_string_literal(
+            vm, fn->name, array_of(vm, ty_char, strlen(fn->name) + 1));
+    }
 
     fn->body = compound_stmt(vm, &tok, tok);
     append_implicit_return(vm, fn, ty->name);

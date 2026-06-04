@@ -1,3 +1,4 @@
+// JCC_FLAGS: -std=c23
 // Test #embed with limit(0) and if_empty - limit(0) makes file "empty"
 int main() {
     // test_data.bin contains 3 bytes, but limit(0) makes it empty

@@ -1,3 +1,4 @@
+// JCC_FLAGS: -std=c23
 // Test constexpr parsing in JCC
 constexpr int MAX_SIZE = 100;
 

@@ -1,4 +1,4 @@
-// JCC_FLAGS: -Wdeprecated
+// JCC_FLAGS: -Wdeprecated -std=c23
 // JCC_EXPECT_STDERR: 5 warnings generated.
 
 int old_function(void) __attribute__((deprecated("use replacement")));

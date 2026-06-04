@@ -658,6 +658,8 @@ static bool convert_pp_int(JCC *vm, Token *tok) {
         p += 2;
         base = 16;
     } else if (!strncasecmp(p, "0b", 2) && (p[2] == '0' || p[2] == '1')) {
+        if (vm->compiler.c_std < JCC_STD_C23)
+            error_tok(vm, tok, "binary integer literals are not available before C23");
         p += 2;
         base = 2;
     } else if (*p == '0') {
@@ -670,7 +672,8 @@ static bool convert_pp_int(JCC *vm, Token *tok) {
     int j = 0;
     for (char *s = p; *s && j < 255; s++) {
         if (*s == '\'') {
-            // Skip digit separator
+            if (vm->compiler.c_std < JCC_STD_C23)
+                error_tok(vm, tok, "digit separators are not available before C23");
             continue;
         }
         // Stop at suffix (L, U, l, u) or non-alphanumeric
@@ -793,11 +796,61 @@ static void convert_pp_number(JCC *vm, Token *tok) {
     tok->ty = ty;
 }
 
+// Check whether a newly-recognised keyword is available in the selected -std.
+// Returns true if the keyword is allowed; on false the caller should downgrade
+// the token to TK_IDENT.  Emits an error_tok for reserved-name violations.
+// Tokens from macro expansion (t->origin != NULL) are exempt — those come from
+// header macros that abstract over standard versions.
+static bool keyword_std_ok(JCC *vm, Token *t) {
+    if (t->origin)
+        return true;
+    CStdVersion s = vm->compiler.c_std;
+    int len = t->len;
+    char *kw = t->loc;
+
+#define KW(str) (len == (int)sizeof(str)-1 && memcmp(kw, str, len) == 0)
+
+    // C99 reserved names — illegal below C99 (fire when -std=c89 is selected)
+    if (s < JCC_STD_C99) {
+        if (KW("restrict") || KW("__restrict") || KW("__restrict__"))
+            error_tok(vm, t, "'%.*s' is not available before C99", len, kw);
+        if (KW("_Bool"))
+            error_tok(vm, t, "'_Bool' is not available before C99");
+        if (KW("_Complex") || KW("_Imaginary"))
+            error_tok(vm, t, "'%.*s' is not available before C99", len, kw);
+    }
+
+    // C11 reserved names — illegal below C11
+    if (s < JCC_STD_C11) {
+        if (KW("_Alignof") || KW("_Alignas"))
+            error_tok(vm, t, "'%.*s' is not available before C11", len, kw);
+        if (KW("_Noreturn"))
+            error_tok(vm, t, "'_Noreturn' is not available before C11");
+        if (KW("_Thread_local") || KW("__thread"))
+            error_tok(vm, t, "'%.*s' is not available before C11", len, kw);
+        if (KW("_Atomic"))
+            error_tok(vm, t, "'_Atomic' is not available before C11");
+        if (KW("_Static_assert"))
+            error_tok(vm, t, "'_Static_assert' is not available before C11");
+    }
+
+    // C23 keywords that were valid identifiers in earlier standards — downgrade
+    if (s < JCC_STD_C23) {
+        if (KW("constexpr") || KW("static_assert"))
+            return false;
+    }
+
+#undef KW
+    return true;
+}
+
 void convert_pp_tokens(JCC *vm, Token *tok) {
     for (Token *t = tok; t->kind != TK_EOF; t = t->next) {
-        if (is_keyword(t))
+        if (is_keyword(t)) {
             t->kind = TK_KEYWORD;
-        else if (t->kind == TK_PP_NUM)
+            if (!keyword_std_ok(vm, t))
+                t->kind = TK_IDENT;
+        } else if (t->kind == TK_PP_NUM)
             convert_pp_number(vm, t);
     }
 }
@@ -851,6 +904,8 @@ Token *tokenize(JCC *vm, File *file) {
     while (*p) {
         // Skip line comments (but NOT inside #include paths where URLs may contain //)
         if (startswith(vm, p, "//") && !in_include_path) {
+            if (vm->compiler.c_std < JCC_STD_C99)
+                error_at(vm, p, "line comments are not available before C99");
             p += 2;
             while (*p != '\n')
                 p++;

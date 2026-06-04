@@ -929,7 +929,9 @@ int main(int argc, const char *argv[]) {
             usage(argv[0], 1);
         }
         // Map suffix to version
-        if (strcmp(s, "99") == 0) {
+        if (strcmp(s, "89") == 0 || strcmp(s, "90") == 0) {
+            ver = JCC_STD_C89;
+        } else if (strcmp(s, "99") == 0) {
             ver = JCC_STD_C99;
         } else if (strcmp(s, "11") == 0) {
             ver = JCC_STD_C11;

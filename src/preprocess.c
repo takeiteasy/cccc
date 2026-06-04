@@ -2034,6 +2034,8 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             }
             break;
         case PP_EMBED:
+            if (vm->compiler.c_std < JCC_STD_C23)
+                error_tok(vm, tok, "'#embed' is not available before C23");
             tok = handle_embed_directive(vm, tok->next, start);
             break;
         case PP_ERROR:
@@ -2061,6 +2063,9 @@ static Token *preprocess2(JCC *vm, Token *tok) {
 void define_std_macros(JCC *vm) {
     const char *v;
     switch (vm->compiler.c_std) {
+    case JCC_STD_C89:
+        undef_macro(vm, "__STDC_VERSION__");
+        return;
     case JCC_STD_C99: v = "199901L"; break;
     case JCC_STD_C11: v = "201112L"; break;
     case JCC_STD_C23: v = "202311L"; break;

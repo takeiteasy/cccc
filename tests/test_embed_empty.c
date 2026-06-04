@@ -1,3 +1,4 @@
+// JCC_FLAGS: -std=c23
 int main() {
     unsigned char data[] = {
         #embed "embed_data/empty_file.bin"

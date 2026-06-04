@@ -1338,6 +1338,7 @@ typedef struct Debugger {
  in Compiler.c_std_gnu.
 */
 typedef enum {
+    JCC_STD_C89,  // C89/C90 / GNU89/GNU90 — __STDC_VERSION__ not defined
     JCC_STD_C99,  // C99  / GNU99  — __STDC_VERSION__ 199901L
     JCC_STD_C11,  // C11  / GNU11  — __STDC_VERSION__ 201112L
     JCC_STD_C17,  // C17/C18 / GNU17/GNU18 — __STDC_VERSION__ 201710L (default)
