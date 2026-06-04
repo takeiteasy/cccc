@@ -154,7 +154,6 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
         or "cannot open file" in output
         or "undefined function" in output
         or "unknown warning option" in output
-        or "implicit declaration of a function" in output
         or ("expected" in output and "got" in output)
     )
 

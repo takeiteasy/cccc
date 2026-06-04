@@ -45,11 +45,28 @@ The warning infrastructure recognizes these category names:
 The current implementation wires existing warning producers into the warning
 system:
 
+- Missing declaration type specifiers use `-Wimplicit-int` and default to
+  `int`.
+- Calls before a declaration use `-Wimplicit-function-declaration` and create
+  an external `int`-returning placeholder until an explicit declaration or
+  definition is parsed.
+- Invalid scalar returns and reachable ends of non-void functions use
+  `-Wreturn-type`. JCC inserts a correctly typed zero return where needed.
+  Returning a value from a void function preserves the expression's side
+  effects.
 - `#warning` uses `-Wcpp`.
 - Extra preprocessor tokens use `-Wextra-tokens`.
 - Large `#embed` files use `-Wlarge-file-embed`.
 - `__jcc_macro_warning_at` uses `-Wjcc-macro`.
 
-The semantic categories are reserved for parser/type/codegen diagnostics and
-are available for command-line compatibility. Their checks are implemented in
-smaller follow-up tasks.
+Implicit functions that remain unresolved are hard errors during code
+generation. Missing return values for struct and union functions are also hard
+errors because JCC cannot synthesize a safe aggregate value.
+
+Return fallthrough analysis recognizes returns, block sequencing, and complete
+`if`/`else` branches. It conservatively treats loops, switches, and gotos as
+potentially reaching the end of a function. Falling through `main` returns zero
+without a warning.
+
+The remaining semantic categories are available for command-line compatibility
+and are implemented in smaller follow-up tasks.

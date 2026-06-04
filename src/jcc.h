@@ -727,6 +727,7 @@ struct Obj {
     bool is_definition;
     bool is_static;
     bool is_constexpr;
+    bool is_implicit; // synthesized by an implicit function declaration
     bool is_macro_generated; // true if created by a #pragma macro via _AST_FUNCTION/_AST_GLOBAL_VAR
 
     // Global variable
@@ -1364,6 +1365,7 @@ typedef struct Compiler {
                            // initialization)
     Obj *current_fn;       // Function being parsed
     int fn_nesting_depth;  // Current function nesting depth (0 = top-level)
+    bool in_type_lookahead; // Parsing a declarator only to classify it
     Node *gotos;           // Goto statements in current function
     Node *labels;          // Labels in current function
     char *brk_label;       // Current break jump target

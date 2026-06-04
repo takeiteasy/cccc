@@ -422,6 +422,23 @@ static Obj *new_gvar(JCC *vm, char *name, int name_len, Type *ty) {
     return var;
 }
 
+static Obj *new_implicit_function(JCC *vm, Token *tok) {
+    Type *ty = func_type(vm, ty_int);
+    ty->is_variadic = true;
+
+    Scope *saved_scope = vm->compiler.scope;
+    while (vm->compiler.scope->next)
+        vm->compiler.scope = vm->compiler.scope->next;
+    Obj *fn = new_gvar(vm, arena_strndup(vm, tok->loc, tok->len), tok->len, ty);
+    vm->compiler.scope = saved_scope;
+
+    fn->is_function = true;
+    fn->is_definition = false;
+    fn->is_static = false;
+    fn->is_implicit = true;
+    return fn;
+}
+
 static char *new_unique_name(JCC *vm) {
     return arena_format(vm, ".L..%d", vm->compiler.unique_name_counter++);
 }
@@ -644,6 +661,8 @@ static DeclKw declspec_kw(Token *tok) {
 // until that point represent. When we reach a non-typename token,
 // we returns the current type object.
 static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
+    Token *start = tok;
+
     // We use a single integer as counters for all typenames.
     // For example, bits 0 and 1 represents how many times we saw the
     // keyword "void" so far. With this, we can use a switch statement
@@ -721,6 +740,7 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
             if (equal(tok, "(")) {
                 ty = typename(vm, &tok, tok->next);
                 tok = skip(vm, tok, ")");
+                counter = OTHER;
             }
             is_atomic = true;
             continue;
@@ -841,6 +861,10 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
         tok = tok->next;
     }
 declspec_done:
+    if (counter == 0 && !vm->compiler.in_type_lookahead)
+        warn_tok(vm, start, JCC_WARN_IMPLICIT_INT,
+                 "type specifier missing, defaults to 'int'");
+
     if (is_atomic) {
         ty = copy_type(vm, ty);
         ty->is_atomic = true;
@@ -2144,8 +2168,20 @@ static Node *stmt(JCC *vm, Token **rest, Token *tok) {
 
     if (equal(tok, "return")) {
         Node *node = new_node(vm, ND_RETURN, tok);
-        if (consume(vm, rest, tok->next, ";"))
+        if (consume(vm, rest, tok->next, ";")) {
+            if (vm->compiler.current_fn) {
+                Type *ty = vm->compiler.current_fn->ty->return_ty;
+                if (ty->kind != TY_VOID) {
+                    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
+                        error_tok(vm, tok,
+                                  "non-void aggregate function should return a value");
+                    warn_tok(vm, tok, JCC_WARN_RETURN_TYPE,
+                             "non-void function should return a value");
+                    node->lhs = new_cast(vm, new_num(vm, 0, tok), ty);
+                }
+            }
             return node;
+        }
 
         Node *exp = expr(vm, &tok, tok->next);
         *rest = skip(vm, tok, ";");
@@ -2157,8 +2193,12 @@ static Node *stmt(JCC *vm, Token **rest, Token *tok) {
         // later, or by the caller establishing context via _AST_WITH_FN.
         if (vm->compiler.current_fn) {
             Type *ty = vm->compiler.current_fn->ty->return_ty;
-            if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
+            if (ty->kind == TY_VOID) {
+                warn_tok(vm, node->tok, JCC_WARN_RETURN_TYPE,
+                         "void function should not return a value");
+            } else if (ty->kind != TY_STRUCT && ty->kind != TY_UNION) {
                 exp = new_cast(vm, exp, ty);
+            }
         }
 
         node->lhs = exp;
@@ -4427,8 +4467,19 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
             }
         }
 
-        if (equal(tok->next, "("))
-            error_tok(vm, tok, "implicit declaration of a function");
+        if (equal(tok->next, "(")) {
+            warn_tok(vm, tok, JCC_WARN_IMPLICIT_FUNCTION_DECLARATION,
+                     "implicit declaration of function '%.*s'", tok->len,
+                     tok->loc);
+
+            Obj *fn = new_implicit_function(vm, tok);
+            if (vm->compiler.current_fn)
+                arena_strarray_push(vm, &vm->compiler.current_fn->refs,
+                                    fn->name);
+            else
+                fn->is_root = true;
+            return new_var_node(vm, fn, tok);
+        }
 
         // Try error recovery if enabled
         if (vm->collect_errors &&
@@ -4584,6 +4635,50 @@ static void mark_live(JCC *vm, Obj *var) {
     }
 }
 
+static bool statement_terminates(Node *node) {
+    if (!node)
+        return false;
+
+    switch (node->kind) {
+    case ND_RETURN:
+        return true;
+    case ND_BLOCK: {
+        Node *last = node->body;
+        if (!last)
+            return false;
+        while (last->next)
+            last = last->next;
+        return statement_terminates(last);
+    }
+    case ND_IF:
+        return node->els && statement_terminates(node->then) &&
+               statement_terminates(node->els);
+    default:
+        return false;
+    }
+}
+
+static void append_implicit_return(JCC *vm, Obj *fn, Token *tok) {
+    Type *ty = fn->ty->return_ty;
+    if (ty->kind == TY_VOID || strcmp(fn->name, "main") == 0 ||
+        statement_terminates(fn->body))
+        return;
+
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
+        error_tok(vm, tok, "control reaches end of non-void aggregate function");
+
+    warn_tok(vm, tok, JCC_WARN_RETURN_TYPE,
+             "control reaches end of non-void function");
+
+    Node *ret = new_node(vm, ND_RETURN, tok);
+    ret->lhs = new_cast(vm, new_num(vm, 0, tok), ty);
+
+    Node **cur = &fn->body->body;
+    while (*cur)
+        cur = &(*cur)->next;
+    *cur = ret;
+}
+
 static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr) {
     Type *ty = declarator(vm, &tok, tok, basety);
     if (!ty->name)
@@ -4609,6 +4704,10 @@ static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr) {
         // Redeclaration
         if (!fn->is_function)
             error_tok(vm, tok, "redeclared as a different kind of symbol");
+        if (fn->is_implicit) {
+            fn->ty = ty;
+            fn->is_implicit = false;
+        }
         if (fn->is_definition && equal(tok, "{"))
             error_tok(vm, tok, "redefinition of %s", name_str);
         if (!fn->is_static && attr->is_static)
@@ -4689,6 +4788,7 @@ static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr) {
         vm, fn->name, array_of(vm, ty_char, strlen(fn->name) + 1));
 
     fn->body = compound_stmt(vm, &tok, tok);
+    append_implicit_return(vm, fn, ty->name);
     fn->locals = vm->compiler.locals;
     leave_scope(vm);
     resolve_goto_labels(vm);
@@ -4772,7 +4872,10 @@ static bool is_function(JCC *vm, Token *tok) {
         return false;
 
     Type dummy = {};
+    bool saved_lookahead = vm->compiler.in_type_lookahead;
+    vm->compiler.in_type_lookahead = true;
     Type *ty = declarator(vm, &tok, tok, &dummy);
+    vm->compiler.in_type_lookahead = saved_lookahead;
     return ty->kind == TY_FUNC;
 }
 

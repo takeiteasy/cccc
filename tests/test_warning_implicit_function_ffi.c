@@ -1,0 +1,6 @@
+// JCC_FLAGS: -Wimplicit-function-declaration
+// JCC_EXPECT_STDERR: implicit declaration of function 'puts' \[-Wimplicit-function-declaration\]
+int main(void) {
+    puts("implicit FFI declaration");
+    return 42;
+}
