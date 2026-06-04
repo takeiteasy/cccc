@@ -283,9 +283,10 @@ Profiling output is written to `profile/`. See [PROFILING.md](docs/PROFILING.md)
 **Cross-compiler benchmarks (JCC vs GCC):**
 
 ```bash
-make bench-compare            # run the benchmark suite (JCC × {none,O1,O2,O3} vs GCC × {O0,O1,O2,O3})
+make bench-compare            # run the benchmark suite (JCC × {none,O1,O2,O3} + JCC-jbc × {none,O1,O2,O3} vs GCC × {O0,O1,O2,O3})
 make bench-compare-quick      # 2-iteration quick run
 python3 bench.py --filter fib.c   # run a single benchmark
+python3 bench.py --no-jbc         # skip the precompiled-bytecode columns
 ```
 
 See [BENCHMARKS.md](docs/BENCHMARKS.md) for the full guide and the list of included workloads.

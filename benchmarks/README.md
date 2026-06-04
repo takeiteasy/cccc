@@ -1,6 +1,6 @@
 # JCC Benchmark Suite
 
-Cross-compiler micro-benchmarks for comparing **JCC** (across all `--optimize` levels) against **GCC** (across `-O0..-O3`).
+Cross-compiler micro-benchmarks for comparing **JCC** (across all `--optimize` levels, in both parse+exec and precompiled-bytecode modes) against **GCC** (across `-O0..-O3`).
 
 Each program is plain C99/C11, prints a single `result: …` line on stdout, and exits with code `42`. They are auto-discovered by `bench.py` and the standard `tests.py` smoke-runs them.
 
@@ -23,11 +23,12 @@ Each program is plain C99/C11, prints a single `result: …` line on stdout, and
 # From the repo root
 make bench-compare            # full run (~10 min)
 make bench-compare-quick      # 2 iterations (~5 min)
-python3 bench.py --filter fib.c    # one benchmark only
+python3 bench.py --filter fib.c             # one benchmark only
+python3 bench.py --no-jbc --filter fib.c    # skip the jcc-jbc* (precompiled bytecode) columns
 ```
 
 See [docs/BENCHMARKS.md](../docs/BENCHMARKS.md) for the full guide — how the runner works, how to read the table, and how to add new benchmarks.
 
 ## Results
 
-Each run writes a JSON report to `results/run-<UTC>.json` with raw timings, compiler versions, and host info so results are reproducible and comparable across machines.
+Each run writes a JSON report to `results/run-<UTC>.json` with raw timings, compiler versions, host info, and per-`jcc-jbc*` `compile_ms` (the one-time cost of producing the bytecode file). All of this is included so results are reproducible and comparable across machines.
