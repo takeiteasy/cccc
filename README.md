@@ -158,6 +158,12 @@ keeps ordinary VM function pointers separate from native symbol tokens, rejects
 arbitrary numeric native-call targets, and refuses `dlclose` while callable
 symbols from that handle are live.
 
+## Performance
+
+JCC prioritises **correctness over raw execution speed**. It implements a tree-walking bytecode interpreter rather than a JIT-to-native backend, and most of the engineering effort goes into compile-time metaprogramming, safety instrumentation, and AST reflection instead of runtime codegen. The trade-off is a substantial gap versus mature native compilers — see [BENCHMARKS.md](docs/BENCHMARKS.md) for full numbers. On the included workload suite, JCC's geometric mean is roughly **~21× slower than `gcc -O2`** across all `--optimize` levels: integer-loop-heavy programs like the sieve benchmark sit around 90×, FP-heavy workloads like matrix multiplication and Mandelbrot land in the 55–65× range, and even control-flow-bound programs (`fib`, `ackermann`, `nqueens`, `quicksort`) run 6–20× slower. The `jcc-jbc*` columns show the interpreter itself is the dominant cost even when the one-time source-to-bytecode compile is excluded — JCC trades execution speed for portability, inspectability, and the ability to run untrusted or sandboxed code inside a single self-contained binary.
+
+Please note, that while JCC prioritises correctness over raw execution speed, it doesn't mean that it's not a concern. Hopefully it will be fast enough for most use cases, and faster in the future.
+
 ## Building
 
 ```bash
