@@ -90,7 +90,7 @@ static bool is_hash(Token *tok) { return tok->at_bol && equal(tok, "#"); }
 static Token *skip_line(JCC *vm, Token *tok) {
     if (tok->at_bol)
         return tok;
-    warn_tok(vm, tok, JCC_WARN_EXTRA_TOKENS, "extra token");
+    warn_tok(vm, tok, JCC_WARN_EXTRA_TOKENS, "extra tokens after directive");
     while (!tok->at_bol)
         tok = tok->next;
     return tok;
@@ -726,7 +726,7 @@ static long eval_const_expr(JCC *vm, Token **rest, Token *tok) {
     Token *rest2;
     long val = const_expr(vm, &rest2, expr);
     if (rest2->kind != TK_EOF)
-        error_tok(vm, rest2, "extra token");
+        error_tok(vm, rest2, "extra tokens after #if expression");
     return val;
 }
 
@@ -830,7 +830,7 @@ static MacroArg *read_macro_arg_one(JCC *vm, Token **rest, Token *tok,
             break;
 
         if (tok->kind == TK_EOF)
-            error_tok(vm, tok, "premature end of input");
+            error_tok(vm, tok, "premature end of input in macro argument list");
 
         if (equal(tok, "("))
             level++;
@@ -882,7 +882,8 @@ static MacroArg *read_macro_args(JCC *vm, Token **rest, Token *tok,
         arg->is_va_args = true;
         cur = cur->next = arg;
     } else if (pp) {
-        error_tok(vm, start, "too many arguments");
+        error_tok(vm, start, "too many arguments to macro '%.*s'",
+                  start->len, start->loc);
     }
 
     skip(vm, tok, ")");
@@ -1262,7 +1263,7 @@ static char *read_include_filename(JCC *vm, Token **rest, Token *tok,
         // Find closing ">".
         for (; !equal(tok, ">"); tok = tok->next)
             if (tok->at_bol || tok->kind == TK_EOF)
-                error_tok(vm, tok, "expected '>'");
+                error_tok(vm, tok, "expected '>' after include filename");
 
         *is_dquote = false;
         *rest = tok->next;
@@ -1277,7 +1278,7 @@ static char *read_include_filename(JCC *vm, Token **rest, Token *tok,
         return read_include_filename(vm, &tok2, tok2, is_dquote, out_len);
     }
 
-    error_tok(vm, tok, "expected a filename");
+    error_tok(vm, tok, "expected a filename for include directive");
     return NULL;
 }
 
@@ -1473,7 +1474,7 @@ static Token *read_embed_parameter(JCC *vm, Token **rest, Token *tok) {
             break;
 
         if (tok->kind == TK_EOF)
-            error_tok(vm, tok, "premature end of input");
+            error_tok(vm, tok, "premature end of input in #embed parameter list");
 
         if (equal(tok, "("))
             level++;
@@ -1509,7 +1510,7 @@ static long eval_embed_limit_expr(JCC *vm, Token *start, Token *expr,
     Token *rest;
     long val = const_expr(vm, &rest, expr);
     if (rest->kind != TK_EOF)
-        error_tok(vm, rest, "extra token");
+        error_tok(vm, rest, "extra tokens after #if expression");
     return val;
 }
 
@@ -1535,7 +1536,7 @@ static Token *handle_embed_directive(JCC *vm, Token *tok,
         Token *end = tok;
         while (!equal(end, ">")) {
             if (end->at_bol || end->kind == TK_EOF)
-                error_tok(vm, end, "expected '>'");
+                error_tok(vm, end, "expected '>' after #embed filename");
             end = end->next;
         }
 
@@ -1543,7 +1544,7 @@ static Token *handle_embed_directive(JCC *vm, Token *tok,
         filename = join_tokens(vm, tok, end, &filename_len);
         tok = end->next;
     } else {
-        error_tok(vm, tok, "expected a filename");
+        error_tok(vm, tok, "expected a filename for #embed");
         return tok;
     }
 
@@ -2001,9 +2002,10 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             break;
         }
         case PP_ELIF:
-            if (!vm->compiler.cond_incl ||
-                vm->compiler.cond_incl->ctx == IN_ELSE)
-                error_tok(vm, start, "stray #elif");
+            if (!vm->compiler.cond_incl)
+                error_tok(vm, start, "stray #elif without matching #if");
+            if (vm->compiler.cond_incl->ctx == IN_ELSE)
+                error_tok(vm, start, "stray #elif after #else");
             vm->compiler.cond_incl->ctx = IN_ELIF;
             if (!vm->compiler.cond_incl->included &&
                 eval_const_expr(vm, &tok, tok))
@@ -2012,9 +2014,10 @@ static Token *preprocess2(JCC *vm, Token *tok) {
                 tok = skip_cond_incl(vm, tok);
             break;
         case PP_ELIFDEF: {
-            if (!vm->compiler.cond_incl ||
-                vm->compiler.cond_incl->ctx == IN_ELSE)
-                error_tok(vm, start, "stray #elifdef");
+            if (!vm->compiler.cond_incl)
+                error_tok(vm, start, "stray #elifdef without matching #if");
+            if (vm->compiler.cond_incl->ctx == IN_ELSE)
+                error_tok(vm, start, "stray #elifdef after #else");
             vm->compiler.cond_incl->ctx = IN_ELIF;
             bool defined = find_macro(vm, tok->next);
             tok = skip_line(vm, tok->next->next);
@@ -2025,9 +2028,10 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             break;
         }
         case PP_ELIFNDEF: {
-            if (!vm->compiler.cond_incl ||
-                vm->compiler.cond_incl->ctx == IN_ELSE)
-                error_tok(vm, start, "stray #elifndef");
+            if (!vm->compiler.cond_incl)
+                error_tok(vm, start, "stray #elifndef without matching #if");
+            if (vm->compiler.cond_incl->ctx == IN_ELSE)
+                error_tok(vm, start, "stray #elifndef after #else");
             vm->compiler.cond_incl->ctx = IN_ELIF;
             bool defined = find_macro(vm, tok->next);
             tok = skip_line(vm, tok->next->next);
@@ -2038,9 +2042,10 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             break;
         }
         case PP_ELSE:
-            if (!vm->compiler.cond_incl ||
-                vm->compiler.cond_incl->ctx == IN_ELSE)
-                error_tok(vm, start, "stray #else");
+            if (!vm->compiler.cond_incl)
+                error_tok(vm, start, "stray #else without matching #if");
+            if (vm->compiler.cond_incl->ctx == IN_ELSE)
+                error_tok(vm, start, "stray #else after previous #else");
             vm->compiler.cond_incl->ctx = IN_ELSE;
             tok = skip_line(vm, tok->next);
             if (vm->compiler.cond_incl->included)
@@ -2048,7 +2053,7 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             break;
         case PP_ENDIF:
             if (!vm->compiler.cond_incl)
-                error_tok(vm, start, "stray #endif");
+                error_tok(vm, start, "stray #endif without matching #if");
             vm->compiler.cond_incl = vm->compiler.cond_incl->next;
             tok = skip_line(vm, tok->next);
             break;
@@ -2059,6 +2064,14 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             if (equal(tok->next, "once")) {
                 hashmap_put(&vm->compiler.pragma_once, tok->file->name, (void *)1);
                 tok = skip_line(vm, tok->next->next);
+            } else if (equal(tok->next, "macro")) {
+                error_tok(vm, tok->next,
+                          "#pragma macro is no longer supported; use "
+                          "[[jcc::macro]] or __attribute__((macro))");
+            } else if (equal(tok->next, "comptime")) {
+                error_tok(vm, tok->next,
+                          "#pragma comptime is no longer supported; use "
+                          "[[jcc::comptime]] or __attribute__((comptime))");
             } else {
                 do { tok = tok->next; } while (!tok->at_bol);
             }
@@ -2068,17 +2081,32 @@ static Token *preprocess2(JCC *vm, Token *tok) {
                 error_tok(vm, tok, "'#embed' is not available before C23");
             tok = handle_embed_directive(vm, tok->next, start);
             break;
-        case PP_ERROR:
-            error_tok(vm, tok, "error");
+        case PP_ERROR: {
+            Token *msg_end;
+            Token *msg = copy_line(vm, &msg_end, tok->next);
+            char *text = join_tokens(vm, msg, NULL, NULL);
+            if (text && text[0])
+                error_tok(vm, tok, "%s", text);
+            else
+                error_tok(vm, tok, "#error directive");
             break;
-        case PP_WARNING:
-            warn_tok(vm, tok, JCC_WARN_CPP, "warning");
-            tok = skip_line(vm, tok->next);
+        }
+        case PP_WARNING: {
+            Token *msg_end;
+            Token *msg = copy_line(vm, &msg_end, tok->next);
+            char *text = join_tokens(vm, msg, NULL, NULL);
+            if (text && text[0])
+                warn_tok(vm, tok, JCC_WARN_CPP, "%s", text);
+            else
+                warn_tok(vm, tok, JCC_WARN_CPP, "#warning directive");
+            tok = msg_end;
             break;
+        }
         default:
             // `#`-only line is legal (null directive).
             if (tok->at_bol) continue;
-            error_tok(vm, tok, "invalid preprocessor directive");
+            error_tok(vm, tok, "invalid preprocessor directive '%.*s'",
+                      tok->len, tok->loc);
         }
     }
 
@@ -2427,7 +2455,9 @@ Token *preprocess(JCC *vm, Token *tok) {
     tok = preprocess2(vm, tok);
     if (vm->compiler.cond_incl)
         error_tok(vm, vm->compiler.cond_incl->tok,
-                  "unterminated conditional directive");
+                  "unterminated conditional directive (started with #%.*s)",
+                  vm->compiler.cond_incl->tok->len,
+                  vm->compiler.cond_incl->tok->loc);
     convert_pp_tokens(vm, tok);
     join_adjacent_string_literals(vm, tok);
 

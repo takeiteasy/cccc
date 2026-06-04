@@ -163,8 +163,34 @@ static void vdiagnostic_at(JCC *vm, char *filename, char *input, int line_no,
 }
 
 static void verror_at(JCC *vm, char *filename, char *input, int line_no,
-                      char *loc, char *fmt, va_list ap) {
+                       char *loc, char *fmt, va_list ap) {
     vdiagnostic_at(vm, filename, input, line_no, loc, "error", NULL, fmt, ap);
+}
+
+// Compute line number from a token's location if it hasn't been set yet.
+// This handles tokens created before add_line_numbers() runs (e.g. errors
+// during tokenize()).
+static int tok_line_no(Token *tok) {
+    if (tok->line_no > 0)
+        return tok->line_no;
+    if (!tok->file || !tok->file->contents || !tok->loc)
+        return 0;
+    int line_no = 1;
+    for (char *p = tok->file->contents; p < tok->loc; p++)
+        if (*p == '\n')
+            line_no++;
+    return line_no;
+}
+
+static int tok_col_no(Token *tok) {
+    if (tok->col_no > 0)
+        return tok->col_no;
+    if (!tok->file || !tok->file->contents || !tok->loc)
+        return 0;
+    char *line_start = tok->loc;
+    while (line_start > tok->file->contents && line_start[-1] != '\n')
+        line_start--;
+    return (int)(tok->loc - line_start) + 1;
 }
 
 void error_at(JCC *vm, char *loc, char *fmt, ...) {
@@ -216,9 +242,12 @@ void error_at(JCC *vm, char *loc, char *fmt, ...) {
 }
 
 void error_tok(JCC *vm, Token *tok, char *fmt, ...) {
+    int line_no = tok_line_no(tok);
+    int col_no = tok_col_no(tok);
+
     va_list ap;
     va_start(ap, fmt);
-    verror_at(vm, tok->file->name, tok->file->contents, tok->line_no, tok->loc, fmt, ap);
+    verror_at(vm, tok->file->name, tok->file->contents, line_no, tok->loc, fmt, ap);
     va_end(ap);
 
     // Collect error if error collection is enabled
@@ -226,8 +255,8 @@ void error_tok(JCC *vm, Token *tok, char *fmt, ...) {
         CompileError *err = arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
         err->message = vm->error_message;
         err->filename = tok->file->name;
-        err->line_no = tok->line_no;
-        err->col_no = tok->col_no;
+        err->line_no = line_no;
+        err->col_no = col_no;
         err->severity = 0; // error
         err->warn_name = NULL;
         err->next = NULL;
@@ -253,9 +282,12 @@ void error_tok(JCC *vm, Token *tok, char *fmt, ...) {
 // Error reporting with recovery support (Level 2)
 // Returns true if parsing should continue with recovery, false if max errors hit
 bool error_tok_recover(JCC *vm, Token *tok, char *fmt, ...) {
+    int line_no = tok_line_no(tok);
+    int col_no = tok_col_no(tok);
+
     va_list ap;
     va_start(ap, fmt);
-    verror_at(vm, tok->file->name, tok->file->contents, tok->line_no, tok->loc, fmt, ap);
+    verror_at(vm, tok->file->name, tok->file->contents, line_no, tok->loc, fmt, ap);
     va_end(ap);
 
     // Collect error if error collection is enabled
@@ -263,8 +295,8 @@ bool error_tok_recover(JCC *vm, Token *tok, char *fmt, ...) {
         CompileError *err = arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
         err->message = vm->error_message;
         err->filename = tok->file->name;
-        err->line_no = tok->line_no;
-        err->col_no = tok->col_no;
+        err->line_no = line_no;
+        err->col_no = col_no;
         err->severity = 0; // error
         err->warn_name = NULL;
         err->next = NULL;
@@ -303,6 +335,9 @@ void warn_tok(JCC *vm, Token *tok, JCCWarning category, char *fmt, ...) {
     if (!vm || !(vm->compiler.warnings & mask))
         return;
 
+    int line_no = tok_line_no(tok);
+    int col_no = tok_col_no(tok);
+
     const char *warn_name = jcc_warning_name(category);
     bool is_error = (vm->warnings_as_errors &&
                      !(vm->compiler.warning_no_errors & mask)) ||
@@ -310,7 +345,7 @@ void warn_tok(JCC *vm, Token *tok, JCCWarning category, char *fmt, ...) {
 
     va_list ap;
     va_start(ap, fmt);
-    vdiagnostic_at(vm, tok->file->name, tok->file->contents, tok->line_no,
+    vdiagnostic_at(vm, tok->file->name, tok->file->contents, line_no,
                    tok->loc, is_error ? "error" : "warning", warn_name, fmt, ap);
     va_end(ap);
 
@@ -327,8 +362,8 @@ void warn_tok(JCC *vm, Token *tok, JCCWarning category, char *fmt, ...) {
             CompileError *err = arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
             err->message = vm->error_message;
             err->filename = tok->file->name;
-            err->line_no = tok->line_no;
-            err->col_no = tok->col_no;
+            err->line_no = line_no;
+            err->col_no = col_no;
             err->severity = 0; // error (not warning)
             err->warn_name = warn_name;
             err->next = NULL;
@@ -356,8 +391,8 @@ void warn_tok(JCC *vm, Token *tok, JCCWarning category, char *fmt, ...) {
         CompileError *err = arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
         err->message = vm->error_message;
         err->filename = tok->file->name;
-        err->line_no = tok->line_no;
-        err->col_no = tok->col_no;
+        err->line_no = line_no;
+        err->col_no = col_no;
         err->severity = 1; // warning
         err->warn_name = warn_name;
         err->next = NULL;

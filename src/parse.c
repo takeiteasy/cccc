@@ -529,7 +529,8 @@ static Obj *new_string_literal(JCC *vm, char *p, Type *ty) {
 
 static char *get_ident(JCC *vm, Token *tok) {
     if (tok->kind != TK_IDENT)
-        error_tok(vm, tok, "expected an identifier");
+        error_tok(vm, tok, "expected an identifier, found '%.*s'", tok->len,
+                  tok->loc);
     char *s = arena_alloc(&vm->compiler.parser_arena, tok->len + 1);
     memcpy(s, tok->loc, tok->len);
     s[tok->len] = '\0';
@@ -2268,7 +2269,8 @@ static Node *asm_stmt(JCC *vm, Token **rest, Token *tok) {
 
     tok = skip(vm, tok, "(");
     if (tok->kind != TK_STR || tok->ty->base->kind != TY_CHAR)
-        error_tok(vm, tok, "expected string literal");
+        error_tok(vm, tok, "expected string literal, found '%.*s'", tok->len,
+                  tok->loc);
     node->asm_str = tok->str;
     *rest = skip(vm, tok->next, ")");
     return node;
@@ -2295,7 +2297,8 @@ static Node *stmt(JCC *vm, Token **rest, Token *tok) {
         long long val = const_expr(vm, &tok, tok);
         tok = skip(vm, tok, ",");
         if (tok->kind != TK_STR)
-            error_tok(vm, tok, "expected string literal");
+            error_tok(vm, tok, "expected string literal, found '%.*s'",
+                      tok->len, tok->loc);
         if (!val)
             error_tok(vm, tok, "%s", tok->str);
         tok = skip(vm, tok->next, ")");
@@ -2754,21 +2757,26 @@ static int64_t eval2(JCC *vm, Node *node, char ***label) {
         return 0;
     case ND_MEMBER:
         if (!label)
-            error_tok(vm, node->tok, "not a compile-time constant");
+            error_tok(vm, node->tok,
+                      "not a compile-time constant (member access)");
         if (node->ty->kind != TY_ARRAY)
-            error_tok(vm, node->tok, "invalid initializer");
+            error_tok(vm, node->tok,
+                      "invalid initializer (member is not an array)");
         return eval_rval(vm, node->lhs, label) + node->member->offset;
     case ND_VAR:
         if (!label)
-            error_tok(vm, node->tok, "not a compile-time constant");
+            error_tok(vm, node->tok,
+                      "not a compile-time constant (variable reference)");
         if (node->var->ty->kind != TY_ARRAY && node->var->ty->kind != TY_FUNC)
-            error_tok(vm, node->tok, "invalid initializer");
+            error_tok(vm, node->tok,
+                      "invalid initializer (expected address of array or function)");
         *label = &node->var->name;
         return 0;
     case ND_NUM:
         return node->val;
     default:
-        error_tok(vm, node->tok, "not a compile-time constant");
+        error_tok(vm, node->tok,
+                  "not a compile-time constant (expression)");
         return 0;
     }
 }
@@ -2777,7 +2785,8 @@ static int64_t eval_rval(JCC *vm, Node *node, char ***label) {
     switch (node->kind) {
     case ND_VAR:
         if (node->var->is_local)
-            error_tok(vm, node->tok, "not a compile-time constant");
+            error_tok(vm, node->tok,
+                      "not a compile-time constant (local variable)");
         *label = &node->var->name;
         return 0;
     case ND_DEREF:
@@ -3287,7 +3296,7 @@ static Node *new_add(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
         return new_binary(vm, ND_ADD, lhs, rhs, tok);
 
     if (lhs->ty->base && rhs->ty->base)
-        error_tok(vm, tok, "invalid operands");
+        error_tok(vm, tok, "cannot add two pointers");
 
     // Canonicalize `num + ptr` to `ptr + num`.
     if (!lhs->ty->base && rhs->ty->base) {
@@ -3297,7 +3306,7 @@ static Node *new_add(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
     }
 
     if (!lhs->ty->base)
-        error_tok(vm, tok, "invalid operands");
+        error_tok(vm, tok, "invalid operands to + (expected pointer and integer)");
 
     // void* arithmetic is a GNU extension; we allow it for compatibility
     if (lhs->ty->base->kind == TY_VOID) {
@@ -3343,7 +3352,7 @@ static Node *new_sub(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
         return new_binary(vm, ND_SUB, lhs, rhs, tok);
 
     if (!lhs->ty->base)
-        error_tok(vm, tok, "invalid operands");
+        error_tok(vm, tok, "invalid operands to - (left operand is not a pointer)");
 
     // VLA + num
     if (lhs->ty->base->kind == TY_VLA) {
@@ -3385,7 +3394,7 @@ static Node *new_sub(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
                           new_num(vm, lhs->ty->base->size, tok), tok);
     }
 
-    error_tok(vm, tok, "invalid operands");
+    error_tok(vm, tok, "invalid operands to -");
     return NULL;
 }
 
@@ -4230,7 +4239,8 @@ static Node *struct_ref(JCC *vm, Node *node, Token *tok) {
                 err_node->ty = ty_error;
                 return err_node;
             }
-            error_tok(vm, tok, "no such member");
+            error_tok(vm, tok, "no such member '%.*s'", tok->len,
+                      tok->loc);
         }
         node = new_unary(vm, ND_MEMBER, node, tok);
         node->member = mem;
@@ -4783,7 +4793,8 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
             return node;
         }
 
-        error_tok(vm, tok, "undefined variable");
+        error_tok(vm, tok, "undefined variable '%.*s'", tok->len,
+                  tok->loc);
     }
 
     if (tok->kind == TK_STR) {
@@ -4821,7 +4832,8 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
 
     // Try error recovery if enabled
     if (vm->collect_errors &&
-        error_tok_recover(vm, tok, "expected an expression")) {
+        error_tok_recover(vm, tok, "expected an expression, found '%.*s'",
+                          tok->len, tok->loc)) {
         // Skip the invalid token and return error placeholder
         *rest = tok->next;
         Node *node = new_node(vm, ND_NUM, tok);
@@ -4830,7 +4842,8 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
         return node;
     }
 
-    error_tok(vm, tok, "expected an expression");
+    error_tok(vm, tok, "expected an expression, found '%.*s'", tok->len,
+              tok->loc);
     return NULL;
 }
 
@@ -5319,7 +5332,8 @@ Obj *parse(JCC *vm, Token *tok) {
             long long val = const_expr(vm, &tok, tok);
             tok = skip(vm, tok, ",");
             if (tok->kind != TK_STR)
-                error_tok(vm, tok, "expected string literal");
+                error_tok(vm, tok, "expected string literal, found '%.*s'",
+                          tok->len, tok->loc);
             if (!val)
                 error_tok(vm, tok, "%s", tok->str);
             tok = skip(vm, tok->next, ")");
