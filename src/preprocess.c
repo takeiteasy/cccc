@@ -1900,6 +1900,36 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             int filename_len;
             char *filename = read_include_filename(vm, &tok, tok->next,
                                                    &is_dquote, &filename_len);
+            // Gate standard headers that require a minimum C version.
+            {
+                static const struct { const char *name; CStdVersion min; } gates[] = {
+                    // C99 headers
+                    {"complex.h",    JCC_STD_C99},
+                    {"fenv.h",       JCC_STD_C99},
+                    {"inttypes.h",   JCC_STD_C99},
+                    {"iso646.h",     JCC_STD_C99},
+                    {"stdbool.h",    JCC_STD_C99},
+                    {"stdint.h",     JCC_STD_C99},
+                    {"tgmath.h",     JCC_STD_C99},
+                    {"wchar.h",      JCC_STD_C99},
+                    {"wctype.h",     JCC_STD_C99},
+                    // C11 headers
+                    {"stdalign.h",   JCC_STD_C11},
+                    {"stdatomic.h",  JCC_STD_C11},
+                    {"stdnoreturn.h",JCC_STD_C11},
+                    {"uchar.h",      JCC_STD_C11},
+                    {NULL, 0}
+                };
+                for (int gi = 0; gates[gi].name; gi++) {
+                    if (strcmp(filename, gates[gi].name) == 0 &&
+                        vm->compiler.c_std < gates[gi].min) {
+                        const char *req = gates[gi].min == JCC_STD_C11 ? "C11" : "C99";
+                        error_tok(vm, start->next,
+                                  "<%s> is not available before %s", filename, req);
+                        break;
+                    }
+                }
+            }
             tok = skip_line(vm, tok);
 
             if (filename[0] != '/' && is_dquote) {
