@@ -9,15 +9,15 @@
 #include "stdint.h"
 
 /* Floating-point constants */
-#define HUGE_VAL (__jcc_huge_val())
+#define HUGE_VAL (__builtin_huge_val())
 #ifndef HUGE_VALF
 #define HUGE_VALF ((float)HUGE_VAL)
 #endif
 #ifndef HUGE_VALL
 #define HUGE_VALL ((long double)HUGE_VAL)
 #endif
-#define INFINITY (__jcc_inff())
-#define NAN (__jcc_nanf(""))
+#define INFINITY (__builtin_inf())
+#define NAN (__builtin_nan(""))
 
 /* fpclassify values */
 #define FP_INFINITE 1

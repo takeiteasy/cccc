@@ -4642,6 +4642,152 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
         return node;
     }
 
+    // __builtin_huge_val() -> double infinity
+    if (equal(tok, "__builtin_huge_val")) {
+        tok = skip(vm, tok->next, "(");
+        *rest = skip(vm, tok, ")");
+        Node *node = new_node(vm, ND_NUM, start);
+        node->fval = HUGE_VAL;
+        node->ty = ty_double;
+        return node;
+    }
+
+    // __builtin_huge_valf() -> float infinity
+    if (equal(tok, "__builtin_huge_valf")) {
+        tok = skip(vm, tok->next, "(");
+        *rest = skip(vm, tok, ")");
+        Node *node = new_node(vm, ND_NUM, start);
+        node->fval = (float)HUGE_VAL;
+        node->ty = ty_float;
+        return node;
+    }
+
+    // __builtin_inf() / __builtin_inff() -> infinity
+    if (equal(tok, "__builtin_inf") || equal(tok, "__builtin_inff")) {
+        bool is_f = equal(tok, "__builtin_inff");
+        tok = skip(vm, tok->next, "(");
+        *rest = skip(vm, tok, ")");
+        Node *node = new_node(vm, ND_NUM, start);
+        node->fval = INFINITY;
+        node->ty = is_f ? ty_float : ty_double;
+        return node;
+    }
+
+    // __builtin_nan("tag") / __builtin_nanf("tag") -> NaN
+    if (equal(tok, "__builtin_nan") || equal(tok, "__builtin_nanf")) {
+        bool is_f = equal(tok, "__builtin_nanf");
+        tok = skip(vm, tok->next, "(");
+        // Parse and discard the string tag argument
+        Node *tag = assign(vm, &tok, tok);
+        (void)tag;
+        *rest = skip(vm, tok, ")");
+        Node *node = new_node(vm, ND_NUM, start);
+        node->fval = NAN;
+        node->ty = is_f ? ty_float : ty_double;
+        return node;
+    }
+
+    // __builtin_isnan(x) -> x != x
+    if (equal(tok, "__builtin_isnan")) {
+        tok = skip(vm, tok->next, "(");
+        Node *arg = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        // PLACEHOLDER: arg is evaluated twice; should use a temp for side-effecting exprs
+        Node *node = new_binary(vm, ND_NE, arg, arg, start);
+        return node;
+    }
+
+    // __builtin_isinf(x) -> x == HUGE_VAL || x == -HUGE_VAL
+    if (equal(tok, "__builtin_isinf")) {
+        tok = skip(vm, tok->next, "(");
+        Node *arg = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        Node *huge = new_node(vm, ND_NUM, start);
+        huge->fval = HUGE_VAL;
+        huge->ty = ty_double;
+        Node *neg_huge = new_unary(vm, ND_NEG, huge, start);
+        // PLACEHOLDER: arg is evaluated twice; should use a temp for side-effecting exprs
+        Node *eq_pos = new_binary(vm, ND_EQ, arg, huge, start);
+        Node *eq_neg = new_binary(vm, ND_EQ, arg, neg_huge, start);
+        Node *node = new_binary(vm, ND_LOGOR, eq_pos, eq_neg, start);
+        return node;
+    }
+
+    // __builtin_isfinite(x) -> !(x != x || x == HUGE_VAL || x == -HUGE_VAL)
+    if (equal(tok, "__builtin_isfinite")) {
+        tok = skip(vm, tok->next, "(");
+        Node *arg = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        Node *huge = new_node(vm, ND_NUM, start);
+        huge->fval = HUGE_VAL;
+        huge->ty = ty_double;
+        Node *neg_huge = new_unary(vm, ND_NEG, huge, start);
+        // PLACEHOLDER: arg is evaluated multiple times; should use a temp
+        Node *nan_check = new_binary(vm, ND_NE, arg, arg, start);
+        Node *inf_pos = new_binary(vm, ND_EQ, arg, huge, start);
+        Node *inf_neg = new_binary(vm, ND_EQ, arg, neg_huge, start);
+        Node *inf_check = new_binary(vm, ND_LOGOR, inf_pos, inf_neg, start);
+        Node *any = new_binary(vm, ND_LOGOR, nan_check, inf_check, start);
+        Node *node = new_unary(vm, ND_NOT, any, start);
+        return node;
+    }
+
+    // __builtin_signbit(x) -> x < 0
+    if (equal(tok, "__builtin_signbit")) {
+        tok = skip(vm, tok->next, "(");
+        Node *arg = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        Node *zero = new_node(vm, ND_NUM, start);
+        zero->fval = 0.0;
+        zero->ty = ty_double;
+        Node *node = new_binary(vm, ND_LT, arg, zero, start);
+        return node;
+    }
+
+    // __builtin_expect(exp, c) -> exp (branch prediction hint, ignored for now)
+    if (equal(tok, "__builtin_expect")) {
+        tok = skip(vm, tok->next, "(");
+        Node *exp = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *c = assign(vm, &tok, tok);
+        (void)c;
+        *rest = skip(vm, tok, ")");
+        return exp;
+    }
+
+    // __builtin_constant_p(expr) -> 1 if compile-time constant, 0 otherwise
+    if (equal(tok, "__builtin_constant_p")) {
+        tok = skip(vm, tok->next, "(");
+        Node *expr = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        add_type(vm, expr);
+        int is_const = is_const_expr(vm, expr);
+        return new_num(vm, is_const ? 1 : 0, start);
+    }
+
+    // __builtin_alloca(size) -> dynamic stack allocation
+    if (equal(tok, "__builtin_alloca")) {
+        tok = skip(vm, tok->next, "(");
+        Node *sz = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        Node *node = new_unary(vm, ND_FUNCALL,
+            new_var_node(vm, vm->compiler.builtin_alloca, sz->tok), sz->tok);
+        node->func_ty = vm->compiler.builtin_alloca->ty;
+        node->ty = vm->compiler.builtin_alloca->ty->return_ty;
+        node->args = sz;
+        add_type(vm, sz);
+        return node;
+    }
+
+    // __builtin_unreachable() -> trap / unreachable
+    if (equal(tok, "__builtin_unreachable")) {
+        tok = skip(vm, tok->next, "(");
+        *rest = skip(vm, tok, ")");
+        Node *node = new_node(vm, ND_UNREACHABLE, start);
+        node->ty = ty_void;
+        return node;
+    }
+
     if (equal(tok, "__jcc_cmplx") || equal(tok, "__jcc_cmplxf") ||
         equal(tok, "__jcc_cmplxl")) {
         Type *ty = equal(tok, "__jcc_cmplxf") ? ty_fcomplex :

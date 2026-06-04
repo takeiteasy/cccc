@@ -1086,6 +1086,10 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
     case ND_NULL_EXPR:
         return;
 
+    case ND_UNREACHABLE:
+        emit(vm, BTRAP);
+        return;
+
     case ND_NUM:
         if (is_flonum(node->ty)) {
             long long offset = vm->data_ptr - vm->data_seg;

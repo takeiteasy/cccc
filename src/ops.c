@@ -2147,3 +2147,11 @@ int op_RETBUF_fn(JCC *vm) {
     vm->regs[REG_A0] = (long long)vm->compiler.return_buffer_pool[idx];
     return 0;
 }
+
+int op_BTRAP_fn(JCC *vm) {
+    printf("\n========== UNREACHABLE EXECUTED ==========\n");
+    printf("__builtin_unreachable() or TRAP was executed at PC %u\n", vm->pc);
+    printf("This code path should never be reached.\n");
+    printf("==========================================\n");
+    return -1;
+}

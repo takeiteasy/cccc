@@ -75,6 +75,7 @@ static const char *node_kind_name(NodeKind kind) {
     case ND_BLOCK_LITERAL: return "BLOCK_LITERAL";
     case ND_BLOCK_CALL:    return "BLOCK_CALL";
     case ND_MACRO_CALL:    return "MACRO_CALL";
+    case ND_UNREACHABLE:   return "UNREACHABLE";
     default:               return "UNKNOWN";
     }
 }
@@ -370,6 +371,7 @@ static void dump_node(FILE *f, Node *node, int depth, int verbose) {
     case ND_GOTO:
     case ND_LABEL_VAL:
     case ND_MACRO_CALL:
+    case ND_UNREACHABLE:
         // Leaf-ish nodes: nothing more to dump
         break;
 
@@ -838,6 +840,7 @@ static void dump_ast_json_node(FILE *f, Node *node, int indent) {
     case ND_MEMZERO:
     case ND_FRAME_ADDR:
     case ND_NULL_EXPR:
+    case ND_UNREACHABLE:
         // Leaf nodes with no extra fields
         break;
 

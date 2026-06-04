@@ -233,8 +233,13 @@ C17 is a bug-fix release — no new language features or library functions were 
 | Switch case ranges `case 1 ... 5:` | ✓ | |
 | Zero-length arrays `int arr[0]` | ✓ | |
 | Nested functions | ✓ | Access to parent-scope variables via static link |
-| `__builtin_expect` | ~ | Parsed; branch-probability hint ignored |
-| `__builtin_unreachable` | ✗ | |
+| `__builtin_expect` | ✓ | Lowered to expression (hint ignored) |
+| `__builtin_unreachable` | ✓ | Emits BTRAP VM opcode |
+| `__builtin_alloca` | ✓ | Dynamic stack allocation |
+| `__builtin_constant_p` | ✓ | Compile-time constant test |
+| `__builtin_isnan` / `__builtin_isinf` / `__builtin_isfinite` | ✓ | Lowered to comparisons |
+| `__builtin_signbit` | ✓ | Lowered to `x < 0` |
+| `__builtin_huge_val` / `__builtin_inf` / `__builtin_nan` | ✓ | Float/double constant nodes |
 | `__builtin_offsetof` | ✓ | |
 | `__thread` storage class | ~ | Parsed; treated as `static` |
 | `__restrict` / `__restrict__` | ~ | Parsed; aliasing not tracked |

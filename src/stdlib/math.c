@@ -2,39 +2,8 @@
 #include "../jcc.h"
 #include <math.h>
 
-// Special value helpers
-static double __jcc_huge_val(void) {
-    double huge = HUGE_VAL;
-    return huge;
-}
-
-static float __jcc_inff(void) {
-    float inf = INFINITY;
-    return inf;
-}
-
-static float __jcc_nanf(const char *s) {
-    (void)s;  // Unused parameter
-    return NAN;
-}
-
-static int __jcc_isnan(double x) {
-    return isnan(x);
-}
-
-static int __jcc_isinf(double x) {
-    return isinf(x);
-}
-
 // Register all math.h functions
 void register_math_functions(JCC *vm) {
-    // Special values
-    cc_register_cfunc(vm, "__jcc_huge_val", (void*)__jcc_huge_val, 0, 1);
-    cc_register_cfunc(vm, "__jcc_inff", (void*)__jcc_inff, 0, 1);
-    cc_register_cfunc(vm, "__jcc_nanf", (void*)__jcc_nanf, 1, 1);
-    cc_register_cfunc(vm, "__jcc_isnan", (void*)__jcc_isnan, 1, 0);
-    cc_register_cfunc(vm, "__jcc_isinf", (void*)__jcc_isinf, 1, 0);
-
     // Basic operations
     cc_register_cfunc(vm, "fabs", (void*)fabs, 1, 1);
     cc_register_cfunc(vm, "fabsf", (void*)fabsf, 1, 1);

@@ -169,7 +169,8 @@ extern "C" {
     X(RETBUF, 0) /* Get next return buffer: REG_A0 = rotating pool buffer */    \
     X(FLDR_F32, 1)   /* fregs[rd] = (double)*(float*)regs[rs] */               \
     X(FSTR_F32, 1)   /* *(float*)regs[rs] = (float)fregs[rd] */                \
-    X(FROUND_F32, 1) /* fregs[rd] = (float)fregs[rs] */
+    X(FROUND_F32, 1) /* fregs[rd] = (float)fregs[rs] */               \
+    X(BTRAP, 0)      /* Halt execution (unreachable/builtin trap) */
 
 typedef uint32_t JCCInstrWord;
 typedef uint32_t JCCPc;
@@ -622,6 +623,7 @@ typedef enum {
     ND_BLOCK_CALL = 50,    // Block invocation
     ND_MACRO_CALL = 51, // Pragma macro invocation (deferred until macro pass)
     ND_COMPLEX = 52,    // Native complex construction/projection helper
+    ND_UNREACHABLE = 53, // __builtin_unreachable() - code path that must not execute
 } NodeKind;
 
 /*!
