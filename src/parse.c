@@ -141,7 +141,7 @@ static Node *lvar_initializer(JCC *vm, Token **rest, Token *tok, Obj *var);
 static void gvar_initializer(JCC *vm, Token **rest, Token *tok, Obj *var);
 static Node *create_vla_init(JCC *vm, Initializer *init, Type *ty, Obj *var,
                              Token *tok);
-static Node *compound_stmt(JCC *vm, Token **rest, Token *tok);
+static Node *compound_stmt(JCC *vm, Token **rest, Token *tok, Token **close_tok);
 static Node *stmt(JCC *vm, Token **rest, Token *tok);
 static Node *expr_stmt(JCC *vm, Token **rest, Token *tok);
 static Node *expr(JCC *vm, Token **rest, Token *tok);
@@ -2584,13 +2584,13 @@ static Node *stmt(JCC *vm, Token **rest, Token *tok) {
     }
 
     if (equal(tok, "{"))
-        return compound_stmt(vm, rest, tok->next);
+        return compound_stmt(vm, rest, tok->next, NULL);
 
     return expr_stmt(vm, rest, tok);
 }
 
 // compound-stmt = (typedef | declaration | stmt)* "}"
-static Node *compound_stmt(JCC *vm, Token **rest, Token *tok) {
+static Node *compound_stmt(JCC *vm, Token **rest, Token *tok, Token **close_tok) {
     Node *node = new_node(vm, ND_BLOCK, tok);
     Node head = {};
     Node *cur = &head;
@@ -2638,6 +2638,8 @@ static Node *compound_stmt(JCC *vm, Token **rest, Token *tok) {
     leave_scope(vm);
 
     node->body = head.next;
+    if (close_tok)
+        *close_tok = tok;
     *rest = tok->next;
     return node;
 }
@@ -3686,7 +3688,7 @@ static Node *block_literal(JCC *vm, Token **rest, Token *tok) {
 
     // Now parse the block body - params are visible in scope
     tok = skip(vm, tok, "{");
-    block_fn->body = compound_stmt(vm, &tok, tok);
+    block_fn->body = compound_stmt(vm, &tok, tok, NULL);
     block_fn->locals = vm->compiler.locals;
 
     leave_scope(vm);
@@ -4531,7 +4533,7 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
     if (equal(tok, "(") && equal(tok->next, "{")) {
         // This is a GNU statement expresssion.
         Node *node = new_node(vm, ND_STMT_EXPR, tok);
-        node->body = compound_stmt(vm, &tok, tok->next->next)->body;
+        node->body = compound_stmt(vm, &tok, tok->next->next, NULL)->body;
         *rest = skip(vm, tok, ")");
         return node;
     }
@@ -5264,8 +5266,9 @@ static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr) {
             vm, fn->name, array_of(vm, ty_char, strlen(fn->name) + 1));
     }
 
-    fn->body = compound_stmt(vm, &tok, tok);
-    append_implicit_return(vm, fn, ty->name);
+    Token *close_brace = NULL;
+    fn->body = compound_stmt(vm, &tok, tok, &close_brace);
+    append_implicit_return(vm, fn, close_brace ? close_brace : ty->name);
     fn->locals = vm->compiler.locals;
     leave_scope(vm);
     resolve_goto_labels(vm);
@@ -5569,7 +5572,7 @@ Node *cc_parse_stmt(JCC *vm, Token **rest, Token *tok) {
 }
 
 Node *cc_parse_compound_stmt(JCC *vm, Token **rest, Token *tok) {
-    return compound_stmt(vm, rest, tok);
+    return compound_stmt(vm, rest, tok, NULL);
 }
 
 void cc_init_parser(JCC *vm) { error_var->ty = ty_error; }

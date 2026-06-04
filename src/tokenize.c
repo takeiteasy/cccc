@@ -92,6 +92,23 @@ bool jcc_warning_is_group_name(const char *name) {
 // Reports a diagnostic message in the following format.
 //
 // foo.c:10: x = y + 1;
+static void print_escaped_string_fp(FILE *f, const char *s) {
+    for (; *s; s++) {
+        switch (*s) {
+        case '"':  fputs("\\\"", f); break;
+        case '\\': fputs("\\\\", f); break;
+        case '\n': fputs("\\n",  f); break;
+        case '\r': fputs("\\r",  f); break;
+        case '\t': fputs("\\t",  f); break;
+        default:
+            if ((unsigned char)*s < 0x20)
+                fprintf(f, "\\u%04x", (unsigned char)*s);
+            else
+                fputc(*s, f);
+        }
+    }
+}
+
 //               ^ error: <message here>
 static void vdiagnostic_at(JCC *vm, char *filename, char *input, int line_no,
                            char *loc, const char *kind,
@@ -104,6 +121,27 @@ static void vdiagnostic_at(JCC *vm, char *filename, char *input, int line_no,
     char *end = loc;
     while (*end && *end != '\n')
         end++;
+
+    int col_no = (int)(loc - line) + 1;
+
+    // JSON diagnostic mode: emit one JSON object per diagnostic, no buffering.
+    if (vm && vm->compiler.diagnostic_json) {
+        char plain_msg[4096];
+        va_list ap2;
+        va_copy(ap2, ap);
+        vsnprintf(plain_msg, sizeof(plain_msg), fmt, ap2);
+        va_end(ap2);
+        fprintf(stderr, "{\"severity\":\"%s\",\"file\":\"", kind);
+        print_escaped_string_fp(stderr, filename);
+        fprintf(stderr, "\",\"line\":%d,\"column\":%d,\"message\":\"", line_no, col_no);
+        print_escaped_string_fp(stderr, plain_msg);
+        if (warn_name)
+            fprintf(stderr, "\",\"option\":\"-W%s\"}\n", warn_name);
+        else
+            fprintf(stderr, "\",\"option\":null}\n");
+        vm->error_message = NULL;
+        return;
+    }
 
     // If error handling or error collection is enabled, save error to buffer
     if (vm && (vm->error_jmp_buf || vm->collect_errors)) {
@@ -332,7 +370,17 @@ bool error_tok_recover(JCC *vm, Token *tok, char *fmt, ...) {
 
 void warn_tok(JCC *vm, Token *tok, JCCWarning category, char *fmt, ...) {
     uint64_t mask = (uint64_t)category;
-    if (!vm || !(vm->compiler.warnings & mask))
+
+    // Use per-token effective state if the preprocessor stamped it; otherwise
+    // fall back to the global compiler warning state.
+    uint64_t eff_warnings = (tok && tok->diag_warnings)
+        ? (tok->diag_warnings & ~(1ULL << 63))
+        : (vm ? vm->compiler.warnings : 0);
+    uint64_t eff_werror   = (tok && tok->diag_werror)
+        ? (tok->diag_werror & ~(1ULL << 63))
+        : (vm ? vm->compiler.warning_errors : 0);
+
+    if (!vm || !(eff_warnings & mask))
         return;
 
     int line_no = tok_line_no(tok);
@@ -341,7 +389,7 @@ void warn_tok(JCC *vm, Token *tok, JCCWarning category, char *fmt, ...) {
     const char *warn_name = jcc_warning_name(category);
     bool is_error = (vm->warnings_as_errors &&
                      !(vm->compiler.warning_no_errors & mask)) ||
-                    (vm->compiler.warning_errors & mask);
+                    (eff_werror & mask);
 
     va_list ap;
     va_start(ap, fmt);
@@ -1438,8 +1486,8 @@ void cc_print_all_errors(JCC *vm) {
         err = err->next;
     }
 
-    // Print summary
-    if (error_num > 0 || warning_num > 0) {
+    // Print summary (suppressed in JSON mode)
+    if (!vm->compiler.diagnostic_json && (error_num > 0 || warning_num > 0)) {
         fprintf(stderr, "\n");
         if (error_num > 0 && warning_num > 0) {
             fprintf(stderr, "%d error%s and %d warning%s generated.\n",

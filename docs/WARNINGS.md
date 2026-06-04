@@ -17,6 +17,50 @@ compiler diagnostics. Warnings are disabled by default; enable categories with
 
 Options are processed left to right, so later flags override earlier flags.
 
+## Pragma-Based Suppression
+
+Within source files, `#pragma GCC diagnostic` (also accepted as `#pragma clang
+diagnostic` or `#pragma JCC diagnostic`) controls warning state inline:
+
+```c
+#pragma GCC diagnostic push           // save current warning state
+#pragma GCC diagnostic pop            // restore saved state
+#pragma GCC diagnostic ignored "-Wunused"   // suppress a category
+#pragma GCC diagnostic warning "-Wunused"   // enable a category as warning
+#pragma GCC diagnostic error   "-Wunused"   // promote a category to error
+```
+
+`push` and `pop` nest: each `push` saves the current state onto a stack, and
+the matching `pop` restores it. Unmatched `pop` emits a `-Wcpp` diagnostic.
+
+Pragma state is per-token and takes effect immediately at the pragma's source
+position, so it correctly suppresses warnings on variables declared or used
+after the pragma, including the implicit-return warning at the end of a
+function.
+
+## Machine-Readable Output
+
+Pass `-fdiagnostics-format=json` to emit one JSON object per diagnostic to
+stderr instead of the human-readable format:
+
+```json
+{"severity":"warning","file":"foo.c","line":10,"column":5,"message":"unused variable 'x'","option":"-Wunused"}
+{"severity":"error","file":"foo.c","line":20,"column":1,"message":"expected ';'","option":null}
+```
+
+Fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `severity` | string | `"warning"` or `"error"` |
+| `file` | string | Source file path |
+| `line` | number | 1-based line number |
+| `column` | number | 1-based column number |
+| `message` | string | Diagnostic text |
+| `option` | string or null | `-W` flag name, or `null` for hard errors |
+
+The trailing summary line (`N warnings generated.`) is suppressed in JSON mode.
+
 ## Supported Names
 
 The warning infrastructure recognizes these category names:

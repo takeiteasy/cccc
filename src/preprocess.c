@@ -1861,6 +1861,98 @@ static bool try_extract_attr_macro(JCC *vm, Token **tok_ptr) {
     return true;
 }
 
+// Handle #pragma GCC diagnostic <action> ["-Wname"]
+// Returns the token after the consumed pragma line.
+static Token *handle_gcc_diagnostic(JCC *vm, Token *tok) {
+    if (equal(tok, "push")) {
+        // Grow the stack if needed
+        if (vm->compiler.diag_stack_depth >= vm->compiler.diag_stack_cap) {
+            int new_cap = vm->compiler.diag_stack_cap ? vm->compiler.diag_stack_cap * 2 : 4;
+            vm->compiler.diag_stack_warnings =
+                realloc(vm->compiler.diag_stack_warnings, sizeof(uint64_t) * new_cap);
+            vm->compiler.diag_stack_werror =
+                realloc(vm->compiler.diag_stack_werror, sizeof(uint64_t) * new_cap);
+            vm->compiler.diag_stack_cap = new_cap;
+        }
+        int d = vm->compiler.diag_stack_depth++;
+        vm->compiler.diag_stack_warnings[d] = vm->compiler.warnings;
+        vm->compiler.diag_stack_werror[d]   = vm->compiler.warning_errors;
+        return skip_line(vm, tok->next);
+    }
+
+    if (equal(tok, "pop")) {
+        if (vm->compiler.diag_stack_depth <= 0) {
+            warn_tok(vm, tok, JCC_WARN_CPP,
+                     "#pragma GCC diagnostic pop with no matching push");
+        } else {
+            int d = --vm->compiler.diag_stack_depth;
+            vm->compiler.warnings       = vm->compiler.diag_stack_warnings[d];
+            vm->compiler.warning_errors = vm->compiler.diag_stack_werror[d];
+        }
+        return skip_line(vm, tok->next);
+    }
+
+    // ignore / warning / error — next token must be a string literal "-Wname"
+    bool do_ignore  = equal(tok, "ignore") || equal(tok, "ignored");
+    bool do_warning = equal(tok, "warning");
+    bool do_error   = equal(tok, "error");
+
+    if (do_ignore || do_warning || do_error) {
+        Token *action_tok = tok;
+        tok = tok->next;
+        // Expect a string token like "-Wunused"
+        if (!tok || tok->kind != TK_STR || tok->at_bol) {
+            warn_tok(vm, action_tok, JCC_WARN_CPP,
+                     "#pragma GCC diagnostic: expected warning option string");
+            return skip_line(vm, tok ? tok : action_tok);
+        }
+        // tok->str holds the unescaped string contents (no quotes).
+        const char *s = tok->str;
+
+        // Must start with "-W"
+        if (!s || s[0] != '-' || s[1] != 'W') {
+            warn_tok(vm, tok, JCC_WARN_CPP,
+                     "#pragma GCC diagnostic: option must begin with '-W'");
+            return skip_line(vm, tok->next);
+        }
+
+        // Extract the warning name (strip leading "-W")
+        char name[256];
+        int namelen = (int)strlen(s) - 2;
+        if (namelen <= 0 || namelen >= (int)sizeof(name)) {
+            warn_tok(vm, tok, JCC_WARN_CPP,
+                     "#pragma GCC diagnostic: malformed warning option '%s'", s);
+            return skip_line(vm, tok->next);
+        }
+        memcpy(name, s + 2, namelen);
+        name[namelen] = '\0';
+
+        uint64_t mask = jcc_warning_mask_for_name(name);
+        if (!mask) {
+            warn_tok(vm, tok, JCC_WARN_CPP,
+                     "#pragma GCC diagnostic: unknown warning option '-W%s'", name);
+            return skip_line(vm, tok->next);
+        }
+
+        if (do_ignore) {
+            vm->compiler.warnings       &= ~mask;
+            vm->compiler.warning_errors &= ~mask;
+        } else if (do_warning) {
+            vm->compiler.warnings       |=  mask;
+            vm->compiler.warning_errors &= ~mask;
+        } else { // do_error
+            vm->compiler.warnings       |=  mask;
+            vm->compiler.warning_errors |=  mask;
+        }
+        return skip_line(vm, tok->next);
+    }
+
+    warn_tok(vm, tok, JCC_WARN_CPP,
+             "#pragma GCC diagnostic: unknown action '%.*s'",
+             tok->len, tok->loc);
+    return skip_line(vm, tok->next);
+}
+
 // Visit all tokens in `tok` while evaluating preprocessing
 // macros and directives.
 static Token *preprocess2(JCC *vm, Token *tok) {
@@ -1882,6 +1974,9 @@ static Token *preprocess2(JCC *vm, Token *tok) {
                 continue;
             tok->line_delta = tok->file->line_delta;
             tok->filename = tok->file->display_name;
+            // Stamp the effective diagnostic state so warn_tok can use it.
+            tok->diag_warnings = (1ULL << 63) | vm->compiler.warnings;
+            tok->diag_werror   = (1ULL << 63) | vm->compiler.warning_errors;
             cur = cur->next = tok;
             tok = tok->next;
             continue;
@@ -2072,6 +2167,11 @@ static Token *preprocess2(JCC *vm, Token *tok) {
                 error_tok(vm, tok->next,
                           "#pragma comptime is no longer supported; use "
                           "[[jcc::comptime]] or __attribute__((comptime))");
+            } else if ((equal(tok->next, "GCC") ||
+                        equal(tok->next, "clang") ||
+                        equal(tok->next, "JCC")) &&
+                       equal(tok->next->next, "diagnostic")) {
+                tok = handle_gcc_diagnostic(vm, tok->next->next->next);
             } else {
                 do { tok = tok->next; } while (!tok->at_bol);
             }

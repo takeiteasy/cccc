@@ -59,6 +59,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-Werror/--Werror    Treat enabled warnings as errors\n");
     printf("\t-Werror=<name>      Treat one warning category as an error\n");
     printf("\t-Wno-error=<name>   Do not promote one warning category\n");
+    printf("\t-fdiagnostics-format=json  Output diagnostics as JSON objects\n");
     printf("\nSafety Levels (preset flag combinations):\n");
     printf("\t-0/--safety=none     No safety checks (maximum performance)\n");
     printf("\t-1/--safety=basic    Essential low-overhead checks (~5-10%% "
@@ -474,6 +475,7 @@ int main(int argc, const char *argv[]) {
     int disable_all_ffi = 0;
     int ffi_errors_fatal = 0;
     int enable_ffi_type_checking = 0;
+    int diagnostic_json = 0;
 
     if (argc <= 1)
         usage(argv[0], 1);
@@ -534,19 +536,20 @@ int main(int argc, const char *argv[]) {
         {"disable-ffi", no_argument, 0, 1022},
         {"ffi-errors-fatal", no_argument, 0, 1023},
         {"ffi-type-checking", no_argument, 0, 1024},
+        {"fdiagnostics-format", required_argument, 0, 1025},
         {0, 0, 0, 0}};
 
-    // Rewrite single-dash -std=... to --std=... so getopt_long picks it up.
-    // This mirrors the gcc/clang convention of accepting both forms.
+    // Rewrite single-dash -std=... and -fdiagnostics-format=... to double-dash
+    // long-option form so getopt_long can match them.
     for (int i = 1; i < argc; i++) {
-        if (strncmp(argv[i], "-std", 4) == 0 && argv[i][0] == '-' &&
-            argv[i][1] != '-') {
-            // Allocate a new string with an extra leading '-'
+        if ((strncmp(argv[i], "-std", 4) == 0 ||
+             strncmp(argv[i], "-fdiagnostics-format", 20) == 0) &&
+            argv[i][0] == '-' && argv[i][1] != '-') {
             size_t len = strlen(argv[i]);
             char *rewritten = malloc(len + 2);
             rewritten[0] = '-';
             memcpy(rewritten + 1, argv[i], len + 1);
-            argv[i] = rewritten; // argv[i] is char* (cast from const char*)
+            argv[i] = rewritten;
         }
     }
 
@@ -801,6 +804,16 @@ int main(int argc, const char *argv[]) {
         case 1024:
             enable_ffi_type_checking = 1;
             break;
+        case 1025:
+            if (strcmp(optarg, "json") == 0) {
+                diagnostic_json = 1;
+            } else {
+                fprintf(stderr,
+                        "error: unsupported -fdiagnostics-format value '%s' "
+                        "(supported: json)\n", optarg);
+                usage(argv[0], 1);
+            }
+            break;
         case '?':
             if (optopt)
                 fprintf(stderr, "error: option -%c requires an argument\n",
@@ -839,6 +852,7 @@ int main(int argc, const char *argv[]) {
     JCC vm;
     cc_init(&vm, flags);
     vm.compiler.compile_only = compile_only;
+    vm.compiler.diagnostic_json = diagnostic_json;
     vm.disable_all_ffi = disable_all_ffi;
     vm.ffi_errors_fatal = ffi_errors_fatal;
     vm.enable_ffi_type_checking = enable_ffi_type_checking;

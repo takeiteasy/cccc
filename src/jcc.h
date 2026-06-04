@@ -452,6 +452,12 @@ typedef struct Token {
     Hideset *hideset; // For macro expansion
     struct Token
         *origin; // If this is expanded from a macro, the original token
+
+    // Effective diagnostic state stamped by the preprocessor.
+    // Bit 63 is a sentinel: if set, bits 0-62 are the active warning mask
+    // at the point this token was emitted (overrides vm->compiler.warnings).
+    uint64_t diag_warnings; // effective JCCWarning mask (bit63 = stamped)
+    uint64_t diag_werror;   // effective warning_errors mask (bit63 = stamped)
 } Token;
 
 /*!
@@ -1376,6 +1382,15 @@ typedef struct Compiler {
     uint64_t warnings;        // Enabled JCCWarning categories
     uint64_t warning_errors;  // Categories promoted by -Werror=<name>
     uint64_t warning_no_errors; // Categories demoted after global -Werror
+
+    // #pragma GCC diagnostic push/pop stack
+    uint64_t *diag_stack_warnings;   // saved warnings bitmasks
+    uint64_t *diag_stack_werror;     // saved warning_errors bitmasks
+    int       diag_stack_depth;      // current stack depth
+    int       diag_stack_cap;        // allocated capacity
+
+    // Diagnostic output format
+    bool diagnostic_json; // -fdiagnostics-format=json
 
     // Tokenization state
     File *current_file; // Input file

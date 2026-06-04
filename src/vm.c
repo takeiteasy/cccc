@@ -691,6 +691,12 @@ void cc_destroy(JCC *vm) {
     // Free macros HashMap (Macro values are arena-allocated; do not free them)
     hashmap_deinit(&vm->compiler.macros);
 
+    // Free #pragma GCC diagnostic stack
+    if (vm->compiler.diag_stack_warnings)
+        free(vm->compiler.diag_stack_warnings);
+    if (vm->compiler.diag_stack_werror)
+        free(vm->compiler.diag_stack_werror);
+
     // Free pragma_once HashMap
     hashmap_deinit(&vm->compiler.pragma_once);
 
