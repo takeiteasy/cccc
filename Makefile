@@ -200,6 +200,7 @@ generate-std: $(EXE_OUT)
 
 test: clean $(EXE_OUT)
 	@python3 tests.py
+	@python3 tests_jbc.py
 
 all: clean $(EXE_OUT) $(LIB_OUT) test docs
 

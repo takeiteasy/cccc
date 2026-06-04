@@ -31,6 +31,10 @@
 //   Text segment: bytecode (text_size bytes)
 //   Data segment: global data (data_size bytes)
 //   Data relocations: data_offset, target_segment, target_offset, addend
+//   FFI table count (8 bytes)
+//   FFI entries: name_len (4 bytes), name (name_len bytes),
+//                num_args (4), returns_double (4), is_variadic (4),
+//                num_fixed_args (4), double_arg_mask (8), is_dynamic_placeholder (4)
 
 static int get_opcode_operand_count(int op) {
     return cc_opcode_operand_words(op);
@@ -165,6 +169,30 @@ int cc_save_bytecode(JCC *vm, const char *path) {
                    sizeof(long long), 1, f) != 1) goto write_error;
     }
 
+    // Write FFI table (name + metadata per entry; func_ptr is resolved at load time)
+    long long ffi_count = vm->compiler.ffi_count;
+    if (fwrite(&ffi_count, sizeof(long long), 1, f) != 1) goto write_error;
+    for (long long i = 0; i < ffi_count; i++) {
+        ForeignFunc *ff = &vm->compiler.ffi_table[i];
+        int name_len = ff->name ? (int)ff->name_len : 0;
+        if (fwrite(&name_len, sizeof(int), 1, f) != 1) goto write_error;
+        if (name_len > 0) {
+            if (fwrite(ff->name, 1, name_len, f) != (size_t)name_len) goto write_error;
+        }
+        int num_args = ff->num_args;
+        int returns_double = ff->returns_double;
+        int is_variadic = ff->is_variadic;
+        int num_fixed_args = ff->num_fixed_args;
+        uint64_t double_arg_mask = ff->double_arg_mask;
+        int is_dynamic_placeholder = ff->is_dynamic_placeholder;
+        if (fwrite(&num_args, sizeof(int), 1, f) != 1) goto write_error;
+        if (fwrite(&returns_double, sizeof(int), 1, f) != 1) goto write_error;
+        if (fwrite(&is_variadic, sizeof(int), 1, f) != 1) goto write_error;
+        if (fwrite(&num_fixed_args, sizeof(int), 1, f) != 1) goto write_error;
+        if (fwrite(&double_arg_mask, sizeof(uint64_t), 1, f) != 1) goto write_error;
+        if (fwrite(&is_dynamic_placeholder, sizeof(int), 1, f) != 1) goto write_error;
+    }
+
     fclose(f);
 
     if (vm->debug_vm) {
@@ -172,6 +200,7 @@ int cc_save_bytecode(JCC *vm, const char *path) {
         printf("  Text size: %lld bytes (%lld instructions)\n", text_size, num_instructions);
         printf("  Data size: %lld bytes\n", data_size);
         printf("  Data relocations: %lld\n", data_reloc_count);
+        printf("  FFI entries: %lld\n", ffi_count);
         printf("  Main offset: %lld\n", main_offset);
     }
 
@@ -279,6 +308,62 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
         vm->compiler.data_relocs[vm->compiler.num_data_relocs].addend = addend;
         vm->compiler.num_data_relocs++;
     }
+
+    // Read FFI table (name + metadata; func_ptr is resolved by the caller via
+    // cc_load_libc / load_requested_libraries)
+    READ_AND_INCR(ffi_count, long long);
+    if (ffi_count < 0 || ffi_count > MAX_CALLS) {
+        fprintf(stderr, "error: invalid FFI count %lld in bytecode\n", ffi_count);
+        return -1;
+    }
+    if (ffi_count > vm->compiler.ffi_capacity) {
+        vm->compiler.ffi_capacity = (int)ffi_count;
+        vm->compiler.ffi_table = realloc(vm->compiler.ffi_table,
+            vm->compiler.ffi_capacity * sizeof(ForeignFunc));
+        if (!vm->compiler.ffi_table) {
+            fprintf(stderr, "error: failed to allocate FFI table\n");
+            return -1;
+        }
+    }
+    for (long long i = 0; i < ffi_count; i++) {
+        READ_AND_INCR(name_len, int);
+        if (name_len < 0 || name_len > 4096 ||
+            cursor + name_len + 5 * (long long)sizeof(int) + (long long)sizeof(uint64_t) > end) {
+            fprintf(stderr, "error: invalid FFI entry header at index %lld\n", i);
+            return -1;
+        }
+        char *name = NULL;
+        size_t actual_name_len = 0;
+        if (name_len > 0) {
+            name = malloc((size_t)name_len + 1);
+            if (!name) {
+                fprintf(stderr, "error: failed to allocate FFI entry name\n");
+                return -1;
+            }
+            memcpy(name, cursor, (size_t)name_len);
+            name[name_len] = '\0';
+            cursor += name_len;
+            actual_name_len = (size_t)name_len;
+        }
+        READ_AND_INCR(num_args_i, int);
+        READ_AND_INCR(returns_double_i, int);
+        READ_AND_INCR(is_variadic_i, int);
+        READ_AND_INCR(num_fixed_args_i, int);
+        READ_AND_INCR(double_arg_mask, uint64_t);
+        READ_AND_INCR(is_dynamic_placeholder_i, int);
+
+        ForeignFunc *ff = &vm->compiler.ffi_table[i];
+        ff->name = name;
+        ff->name_len = actual_name_len;
+        ff->func_ptr = NULL;
+        ff->num_args = num_args_i;
+        ff->returns_double = returns_double_i;
+        ff->is_variadic = is_variadic_i;
+        ff->num_fixed_args = num_fixed_args_i;
+        ff->double_arg_mask = double_arg_mask;
+        ff->is_dynamic_placeholder = is_dynamic_placeholder_i;
+    }
+    vm->compiler.ffi_count = (int)ffi_count;
 
     long long num_instructions = text_size / (long long)sizeof(JCCInstrWord);
 

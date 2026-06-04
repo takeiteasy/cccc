@@ -899,6 +899,22 @@ int main(int argc, const char *argv[]) {
                 goto BAIL;
             }
 
+            // Resolve stdlib FFI entries (func_ptr is null after cc_load_bytecode;
+            // dlsym against libc will fill in printf, malloc, etc.)
+            int stdlib_entries = 0;
+            for (int i = 0; i < vm.compiler.ffi_count; i++) {
+                if (!vm.compiler.ffi_table[i].is_dynamic_placeholder)
+                    stdlib_entries++;
+            }
+            if (stdlib_entries > 0) {
+                if (cc_load_libc(&vm) != 0) {
+                    fprintf(stderr,
+                            "error: failed to resolve stdlib FFI symbols\n");
+                    exit_code = 1;
+                    goto BAIL;
+                }
+            }
+
             if (load_requested_libraries(&vm, libs, libs_count, lib_paths,
                                          lib_paths_count) != 0) {
                 exit_code = 1;
