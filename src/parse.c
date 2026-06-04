@@ -864,7 +864,13 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
         case DK_CHAR:      counter += CHAR;      break;
         case DK_SHORT:     counter += SHORT;     break;
         case DK_INT:       counter += INT;       break;
-        case DK_LONG:      counter += LONG;      break;
+        case DK_LONG:
+            if ((counter & LONG) && vm->compiler.c_std < JCC_STD_C99 &&
+                !vm->compiler.in_type_lookahead)
+                warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+                         "'long long' is a C99 extension");
+            counter += LONG;
+            break;
         case DK_FLOAT:     counter += FLOAT;     break;
         case DK_DOUBLE:    counter += DOUBLE;    break;
         case DK_COMPLEX:   counter += COMPLEX;   break;
@@ -4002,8 +4008,10 @@ static Token *attribute_list(JCC *vm, Token *tok, Type *ty, VarAttr *attr) {
 static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty,
                                  VarAttr *attr) {
     while (equal(tok, "[") && equal(tok->next, "[")) {
-        if (vm->compiler.c_std < JCC_STD_C23)
-            error_tok(vm, tok, "'[[...]]' attributes are not available before C23");
+        if (vm->compiler.c_std < JCC_STD_C23 &&
+            !vm->compiler.in_type_lookahead)
+            warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+                     "'[[...]]' attributes are a C23 extension");
         tok = tok->next->next; // Skip [[
 
         bool first = true;
