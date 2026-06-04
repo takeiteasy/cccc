@@ -115,10 +115,20 @@ system:
 - Extra preprocessor tokens use `-Wextra-tokens`.
 - Large `#embed` files use `-Wlarge-file-embed`.
 - `__jcc_macro_warning_at` uses `-Wjcc-macro`.
+- Pre-standard use of supported language extensions uses `-Wpedantic`:
+  `//` comments before C99, `long long` before C99, variable-length arrays
+  before C99, compound literals before C99, designated initializers before
+  C99, mixed declarations and statements before C99, anonymous structs/unions
+  before C11, `_Generic` before C11, `[[...]]` attributes before C23, and
+  binary integer literals before C23. These extensions compile unless
+  `-Wpedantic` is promoted with `-Werror=pedantic` or `-Werror`.
 
 Implicit functions that remain unresolved are hard errors during code
 generation. Missing return values for struct and union functions are also hard
 errors because JCC cannot synthesize a safe aggregate value.
+
+C23 digit separators remain hard errors before C23 rather than pedantic
+warnings.
 
 Return fallthrough analysis recognizes returns, block sequencing, and complete
 `if`/`else` branches. It conservatively treats loops, switches, and gotos as

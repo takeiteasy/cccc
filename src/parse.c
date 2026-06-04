@@ -1059,7 +1059,8 @@ static Type *array_dimensions(JCC *vm, Token **rest, Token *tok, Type *ty) {
 
     if (ty->kind == TY_VLA || !is_const_expr(vm, expr)) {
         if (vm->compiler.c_std < JCC_STD_C99)
-            error_tok(vm, expr_tok, "variable-length arrays are not available before C99");
+            warn_tok(vm, expr_tok, JCC_WARN_PEDANTIC,
+                     "variable-length arrays are a C99 extension");
         return vla_of(vm, ty, expr);
     }
     return array_of(vm, ty, eval(vm, expr));
@@ -1637,7 +1638,8 @@ static Member *struct_designator(JCC *vm, Token **rest, Token *tok, Type *ty) {
 static void designation(JCC *vm, Token **rest, Token *tok, Initializer *init) {
     if (equal(tok, "[")) {
         if (vm->compiler.c_std < JCC_STD_C99)
-            error_tok(vm, tok, "designated initializers are not available before C99");
+            warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+                     "designated initializers are a C99 extension");
         if (init->ty->kind != TY_ARRAY)
             error_tok(vm, tok, "array index in non-array initializer");
 
@@ -1653,7 +1655,8 @@ static void designation(JCC *vm, Token **rest, Token *tok, Initializer *init) {
 
     if (equal(tok, ".") && init->ty->kind == TY_STRUCT) {
         if (vm->compiler.c_std < JCC_STD_C99)
-            error_tok(vm, tok, "designated initializers are not available before C99");
+            warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+                     "designated initializers are a C99 extension");
         Member *mem = struct_designator(vm, &tok, tok, init->ty);
         designation(vm, &tok, tok, init->children[mem->idx]);
         init->expr = NULL;
@@ -1671,7 +1674,8 @@ static void designation(JCC *vm, Token **rest, Token *tok, Initializer *init) {
 
     if (equal(tok, ".") && init->ty->kind == TY_UNION) {
         if (vm->compiler.c_std < JCC_STD_C99)
-            error_tok(vm, tok, "designated initializers are not available before C99");
+            warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+                     "designated initializers are a C99 extension");
         Member *mem = struct_designator(vm, &tok, tok, init->ty);
         init->mem = mem;
         designation(vm, rest, tok, init->children[mem->idx]);
@@ -1748,7 +1752,8 @@ static void array_initializer1(JCC *vm, Token **rest, Token *tok,
 
         if (equal(tok, "[")) {
             if (vm->compiler.c_std < JCC_STD_C99)
-                error_tok(vm, tok, "designated initializers are not available before C99");
+                warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+                         "designated initializers are a C99 extension");
             int begin, end;
             array_designator(vm, &tok, tok, init->ty, &begin, &end);
 
@@ -1829,7 +1834,8 @@ static void struct_initializer1(JCC *vm, Token **rest, Token *tok,
 
         if (equal(tok, ".")) {
             if (vm->compiler.c_std < JCC_STD_C99)
-                error_tok(vm, tok, "designated initializers are not available before C99");
+                warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+                         "designated initializers are a C99 extension");
             mem = struct_designator(vm, &tok, tok, init->ty);
             designation(vm, &tok, tok, init->children[mem->idx]);
             mem = mem->next;
@@ -2601,7 +2607,8 @@ static Node *compound_stmt(JCC *vm, Token **rest, Token *tok, Token **close_tok)
     while (!equal(tok, "}")) {
         if (is_typename(vm, tok) && !equal(tok->next, ":")) {
             if (seen_stmt && vm->compiler.c_std < JCC_STD_C99)
-                error_tok(vm, tok, "mixing declarations and code is not available before C99");
+                warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+                         "mixing declarations and code is a C99 extension");
             VarAttr attr = {};
             Type *basety = declspec(vm, &tok, tok, &attr);
 
@@ -3821,7 +3828,8 @@ static void struct_members(JCC *vm, Token **rest, Token *tok, Type *ty) {
         if ((basety->kind == TY_STRUCT || basety->kind == TY_UNION) &&
             consume(vm, &tok, tok, ";")) {
             if (vm->compiler.c_std < JCC_STD_C11)
-                error_tok(vm, anon_tok, "anonymous structs/unions are not available before C11");
+                warn_tok(vm, anon_tok, JCC_WARN_PEDANTIC,
+                         "anonymous structs/unions are a C11 extension");
             Member *mem =
                 arena_alloc(&vm->compiler.parser_arena, sizeof(Member));
             memset(mem, 0, sizeof(Member));
@@ -4287,7 +4295,8 @@ static Node *postfix(JCC *vm, Token **rest, Token *tok) {
         // Compound literal
         Token *start = tok;
         if (vm->compiler.c_std < JCC_STD_C99)
-            error_tok(vm, start, "compound literals are not available before C99");
+            warn_tok(vm, start, JCC_WARN_PEDANTIC,
+                     "compound literals are a C99 extension");
         Type *ty = typename(vm, &tok, tok->next);
         tok = skip(vm, tok, ")");
 
@@ -4584,7 +4593,8 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
 
     if (equal(tok, "_Generic")) {
         if (vm->compiler.c_std < JCC_STD_C11)
-            error_tok(vm, tok, "'_Generic' is not available before C11");
+            warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+                     "'_Generic' is a C11 extension");
         return generic_selection(vm, rest, tok->next);
     }
 

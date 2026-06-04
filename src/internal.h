@@ -212,6 +212,8 @@ void error_tok(JCC *vm, Token *tok, char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 bool error_tok_recover(JCC *vm, Token *tok, char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
+void warn_at(JCC *vm, char *loc, JCCWarning category, char *fmt, ...)
+    __attribute__((format(printf, 4, 5)));
 void warn_tok(JCC *vm, Token *tok, JCCWarning category, char *fmt, ...)
     __attribute__((format(printf, 4, 5)));
 const char *jcc_warning_name(JCCWarning warning);

@@ -457,6 +457,92 @@ void warn_tok(JCC *vm, Token *tok, JCCWarning category, char *fmt, ...) {
     }
 }
 
+void warn_at(JCC *vm, char *loc, JCCWarning category, char *fmt, ...) {
+    uint64_t mask = (uint64_t)category;
+
+    if (!vm || !(vm->compiler.warnings & mask))
+        return;
+
+    int line_no = 1;
+    for (char *p = vm->compiler.current_file->contents; p < loc; p++)
+        if (*p == '\n')
+            line_no++;
+
+    int col_no = 1;
+    char *line_start = loc;
+    while (line_start > vm->compiler.current_file->contents &&
+           line_start[-1] != '\n') {
+        line_start--;
+        col_no++;
+    }
+
+    const char *warn_name = jcc_warning_name(category);
+    bool is_error = (vm->warnings_as_errors &&
+                     !(vm->compiler.warning_no_errors & mask)) ||
+                    (vm->compiler.warning_errors & mask);
+
+    va_list ap;
+    va_start(ap, fmt);
+    vdiagnostic_at(vm, vm->compiler.current_file->name,
+                   vm->compiler.current_file->contents, line_no, loc,
+                   is_error ? "error" : "warning", warn_name, fmt, ap);
+    va_end(ap);
+
+    if (vm->error_jmp_buf && !vm->collect_errors && !is_error &&
+        vm->error_message) {
+        fprintf(stderr, "%s", vm->error_message);
+        vm->error_message = NULL;
+    }
+
+    if (is_error) {
+        if (vm->error_message) {
+            CompileError *err =
+                arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
+            err->message = vm->error_message;
+            err->filename = vm->compiler.current_file->name;
+            err->line_no = line_no;
+            err->col_no = col_no;
+            err->severity = 0;
+            err->warn_name = warn_name;
+            err->next = NULL;
+
+            if (!vm->errors) {
+                vm->errors = vm->errors_tail = err;
+            } else {
+                vm->errors_tail->next = err;
+                vm->errors_tail = err;
+            }
+            vm->error_count++;
+            vm->error_message = NULL;
+        }
+
+        if (vm->error_jmp_buf)
+            longjmp(*vm->error_jmp_buf, 1);
+        exit(1);
+    }
+
+    if (vm->collect_errors && vm->error_message) {
+        CompileError *err =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
+        err->message = vm->error_message;
+        err->filename = vm->compiler.current_file->name;
+        err->line_no = line_no;
+        err->col_no = col_no;
+        err->severity = 1;
+        err->warn_name = warn_name;
+        err->next = NULL;
+
+        if (!vm->errors) {
+            vm->errors = vm->errors_tail = err;
+        } else {
+            vm->errors_tail->next = err;
+            vm->errors_tail = err;
+        }
+        vm->warning_count++;
+        vm->error_message = NULL;
+    }
+}
+
 // Consumes the current token if it matches `op`.
 bool equal(Token *tok, char *op) {
     return tok && strlen(op) == tok->len && memcmp(tok->loc, op, tok->len) == 0;
@@ -742,7 +828,8 @@ static bool convert_pp_int(JCC *vm, Token *tok) {
         base = 16;
     } else if (!strncasecmp(p, "0b", 2) && (p[2] == '0' || p[2] == '1')) {
         if (vm->compiler.c_std < JCC_STD_C23)
-            error_tok(vm, tok, "binary integer literals are not available before C23");
+            warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+                     "binary integer literals are a C23 extension");
         p += 2;
         base = 2;
     } else if (*p == '0') {
@@ -988,7 +1075,8 @@ Token *tokenize(JCC *vm, File *file) {
         // Skip line comments (but NOT inside #include paths where URLs may contain //)
         if (startswith(vm, p, "//") && !in_include_path) {
             if (vm->compiler.c_std < JCC_STD_C99)
-                error_at(vm, p, "line comments are not available before C99");
+                warn_at(vm, p, JCC_WARN_PEDANTIC,
+                        "'//' comments are a C99 extension");
             p += 2;
             while (*p != '\n')
                 p++;

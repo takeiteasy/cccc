@@ -253,7 +253,8 @@ static int verify_dynamic_externs(JCC *vm) {
     int ok = 1;
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
         ForeignFunc *ff = &vm->compiler.ffi_table[i];
-        if (ff->is_dynamic_placeholder && ff->func_ptr == (void *)1) {
+        if (ff->is_dynamic_placeholder &&
+            (!ff->func_ptr || ff->func_ptr == (void *)1)) {
             fprintf(stderr,
                     "error: unresolved dynamic library symbol '%s'\n",
                     ff->name);
@@ -899,24 +900,23 @@ int main(int argc, const char *argv[]) {
                 goto BAIL;
             }
 
-            // Resolve stdlib FFI entries (func_ptr is null after cc_load_bytecode;
-            // dlsym against libc will fill in printf, malloc, etc.)
+            // Rehydrate stdlib FFI entries. This mirrors parse+execute so
+            // wrapper registrations such as realloc and wide-char helpers keep
+            // their VM-facing signatures after a bytecode load.
             int stdlib_entries = 0;
             for (int i = 0; i < vm.compiler.ffi_count; i++) {
                 if (!vm.compiler.ffi_table[i].is_dynamic_placeholder)
                     stdlib_entries++;
             }
-            if (stdlib_entries > 0) {
-                if (cc_load_libc(&vm) != 0) {
-                    fprintf(stderr,
-                            "error: failed to resolve stdlib FFI symbols\n");
-                    exit_code = 1;
-                    goto BAIL;
-                }
-            }
+            if (stdlib_entries > 0)
+                cc_load_stdlib(&vm);
 
             if (load_requested_libraries(&vm, libs, libs_count, lib_paths,
                                          lib_paths_count) != 0) {
+                exit_code = 1;
+                goto BAIL;
+            }
+            if (verify_dynamic_externs(&vm) != 0) {
                 exit_code = 1;
                 goto BAIL;
             }

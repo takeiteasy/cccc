@@ -85,6 +85,10 @@ Conformance status for each C standard. Intended as a reference for `--std` flag
 
 ## C99
 
+Supported C99, C11, and C23 language features may also be accepted as
+extensions in older `--std` modes. Enable `-Wpedantic` to diagnose those
+pre-standard uses, or `-Werror=pedantic` to reject them.
+
 ### Language
 
 | Feature | Status | Notes |

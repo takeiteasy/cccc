@@ -904,19 +904,49 @@ void cc_register_cfunc(JCC *vm, const char *name, void *func_ptr, int num_args, 
     cc_register_cfunc_ex(vm, name, func_ptr, num_args, returns_double, 0);
 }
 
+static ForeignFunc *find_registered_ffi(JCC *vm, const char *name) {
+    size_t name_len = strlen(name);
+    for (int i = 0; i < vm->compiler.ffi_count; i++) {
+        ForeignFunc *ff = &vm->compiler.ffi_table[i];
+        if (ff->name && ff->name_len == name_len &&
+            memcmp(ff->name, name, name_len) == 0)
+            return ff;
+    }
+    return NULL;
+}
+
+static void ensure_ffi_capacity(JCC *vm, const char *caller) {
+    if (vm->compiler.ffi_count < vm->compiler.ffi_capacity)
+        return;
+
+    vm->compiler.ffi_capacity =
+        vm->compiler.ffi_capacity ? vm->compiler.ffi_capacity * 2 : 32;
+    vm->compiler.ffi_table =
+        realloc(vm->compiler.ffi_table,
+                vm->compiler.ffi_capacity * sizeof(ForeignFunc));
+    if (!vm->compiler.ffi_table)
+        error("%s: realloc failed", caller);
+}
+
 void cc_register_cfunc_ex(JCC *vm, const char *name, void *func_ptr, int num_args, int returns_double, uint64_t double_arg_mask) {
     if (!vm)
         error("cc_register_cfunc_ex: vm is NULL");
     if (!name || !func_ptr)
         error("cc_register_cfunc_ex: name or func_ptr is NULL");
 
-    // Expand capacity if needed
-    if (vm->compiler.ffi_count >= vm->compiler.ffi_capacity) {
-        vm->compiler.ffi_capacity = vm->compiler.ffi_capacity ? vm->compiler.ffi_capacity * 2 : 32;
-        vm->compiler.ffi_table = realloc(vm->compiler.ffi_table, vm->compiler.ffi_capacity * sizeof(ForeignFunc));
-        if (!vm->compiler.ffi_table)
-            error("cc_register_cfunc_ex: realloc failed");
+    ForeignFunc *existing = find_registered_ffi(vm, name);
+    if (existing) {
+        existing->func_ptr = func_ptr;
+        existing->num_args = num_args;
+        existing->returns_double = returns_double;
+        existing->is_variadic = 0;
+        existing->num_fixed_args = num_args;
+        existing->double_arg_mask = double_arg_mask;
+        existing->is_dynamic_placeholder = 0;
+        return;
     }
+
+    ensure_ffi_capacity(vm, "cc_register_cfunc_ex");
 
     // Add function to registry (non-variadic)
     vm->compiler.ffi_table[vm->compiler.ffi_count++] = (ForeignFunc){
@@ -937,13 +967,19 @@ void cc_register_variadic_cfunc(JCC *vm, const char *name, void *func_ptr, int n
     if (!name || !func_ptr)
         error("cc_register_variadic_cfunc: name or func_ptr is NULL");
 
-    // Expand capacity if needed
-    if (vm->compiler.ffi_count >= vm->compiler.ffi_capacity) {
-        vm->compiler.ffi_capacity = vm->compiler.ffi_capacity ? vm->compiler.ffi_capacity * 2 : 32;
-        vm->compiler.ffi_table = realloc(vm->compiler.ffi_table, vm->compiler.ffi_capacity * sizeof(ForeignFunc));
-        if (!vm->compiler.ffi_table)
-            error("cc_register_variadic_cfunc: realloc failed");
+    ForeignFunc *existing = find_registered_ffi(vm, name);
+    if (existing) {
+        existing->func_ptr = func_ptr;
+        existing->num_args = num_fixed_args;
+        existing->returns_double = returns_double;
+        existing->is_variadic = 1;
+        existing->num_fixed_args = num_fixed_args;
+        existing->double_arg_mask = 0;
+        existing->is_dynamic_placeholder = 0;
+        return;
     }
+
+    ensure_ffi_capacity(vm, "cc_register_variadic_cfunc");
 
     // Add variadic function to registry
     // Note: num_args will be updated dynamically during CALLF based on actual call

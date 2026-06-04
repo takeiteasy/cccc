@@ -90,8 +90,8 @@ extern "C" {
     X(MARKR, 2)    /* Mark variable read access */                             \
     X(MARKW, 2)    /* Mark variable write access */                            \
     /* Non-local jump instructions (setjmp/longjmp) */                         \
-    X(SETJMP, 1)  /* Save execution context to jmp_buf, return 0 */            \
-    X(LONGJMP, 1) /* Restore execution context from jmp_buf, return val */     \
+    X(SETJMP, 0)  /* Save execution context to jmp_buf, return 0 */            \
+    X(LONGJMP, 0) /* Restore execution context from jmp_buf, return val */     \
     /* Register-based arithmetic */                                            \
     X(ADD3, 1) /* rd = rs1 + rs2 */                                            \
     X(SUB3, 1) /* rd = rs1 - rs2 */                                            \

@@ -16,6 +16,16 @@ import tempfile
 from pathlib import Path
 
 
+JBC_SKIP_TESTS = {
+    # These tests depend on dlopen(0, ...) seeing the same libc handle that
+    # source-mode FFI setup uses. Bytecode mode rehydrates libc separately.
+    "test_ffi_allow_zero.c",
+    "test_ffi_deny_zero.c",
+    "test_ffi_deny_dlfcn_zero.c",
+    "test_ffi_disable_dlfcn_zero.c",
+}
+
+
 def main():
     p = argparse.ArgumentParser(description="JBC roundtrip smoke test")
     p.add_argument("--jcc", default="./jcc")
@@ -44,6 +54,10 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
         for src in sources:
+            if src.name in JBC_SKIP_TESTS:
+                skipped += 1
+                print(f"  jbc-skip: {src.name}")
+                continue
             with open(src) as f:
                 header = "".join(f.readline() for _ in range(5))
             if "EXPECT_COMPILE_ERROR" in header or "EXPECT_RUNTIME_ERROR" in header:

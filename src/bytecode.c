@@ -40,6 +40,28 @@ static int get_opcode_operand_count(int op) {
     return cc_opcode_operand_words(op);
 }
 
+static int get_instruction_word_count(JCCInstrWord *text, long long pc,
+                                      long long num_instructions) {
+    int op = (int)text[pc];
+    int operand_count = get_opcode_operand_count(op);
+    if (operand_count < 0)
+        return -1;
+    if (pc + operand_count >= num_instructions)
+        return -2;
+
+    int word_count = operand_count + 1;
+    if (op == JMPT) {
+        JCCPc table_pc = text[pc + 1];
+        JCCInstrWord count = text[pc + 2];
+        if (table_pc == pc + 4) {
+            if (table_pc + (JCCPc)count > (JCCPc)num_instructions)
+                return -2;
+            word_count += (int)count;
+        }
+    }
+    return word_count;
+}
+
 int cc_save_bytecode(JCC *vm, const char *path) {
     if (!vm || !path) {
         fprintf(stderr, "error: invalid arguments to cc_save_bytecode\n");
@@ -108,8 +130,9 @@ int cc_save_bytecode(JCC *vm, const char *path) {
     for (long long i = 1; i < num_instructions; i++) {
         if (is_operand[i]) continue;
         int op = text_copy[i];
-        int operand_count = get_opcode_operand_count(op);
-        if (operand_count < 0) {
+        int word_count =
+            get_instruction_word_count(text_copy, i, num_instructions);
+        if (word_count == -1) {
             fprintf(stderr, "error: unknown opcode %d while saving bytecode\n", op);
             free(is_operand);
             free(data_copy);
@@ -117,7 +140,7 @@ int cc_save_bytecode(JCC *vm, const char *path) {
             fclose(f);
             return -1;
         }
-        if (i + operand_count >= num_instructions) {
+        if (word_count < 0) {
             fprintf(stderr, "error: truncated opcode %d while saving bytecode\n", op);
             free(is_operand);
             free(data_copy);
@@ -125,7 +148,7 @@ int cc_save_bytecode(JCC *vm, const char *path) {
             fclose(f);
             return -1;
         }
-        for (int j = 1; j <= operand_count && i + j < num_instructions; j++) {
+        for (int j = 1; j < word_count && i + j < num_instructions; j++) {
             is_operand[i + j] = 1;
         }
     }
@@ -378,18 +401,19 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
     for (long long i = 1; i < num_instructions; i++) {
         if (is_operand[i]) continue;
         int op = vm->text_seg[i];
-        int operand_count = get_opcode_operand_count(op);
-        if (operand_count < 0) {
+        int word_count =
+            get_instruction_word_count(vm->text_seg, i, num_instructions);
+        if (word_count == -1) {
             fprintf(stderr, "error: unknown opcode %d in bytecode\n", op);
             free(is_operand);
             return -1;
         }
-        if (i + operand_count >= num_instructions) {
+        if (word_count < 0) {
             fprintf(stderr, "error: truncated opcode %d in bytecode\n", op);
             free(is_operand);
             return -1;
         }
-        for (int j = 1; j <= operand_count && i + j < num_instructions; j++) {
+        for (int j = 1; j < word_count && i + j < num_instructions; j++) {
             is_operand[i + j] = 1;
         }
     }
