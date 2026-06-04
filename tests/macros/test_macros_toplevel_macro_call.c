@@ -6,7 +6,6 @@ _Node *generate_answer(void) {
     _Obj *fn = _AST_FUNCTION("generated_answer", int_ty);
 
     _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(_AST_INT_LITERAL(42)));
-    _AST_FORWARD_DECLARE(fn);
 
     return _AST_INT_LITERAL(0);
 }

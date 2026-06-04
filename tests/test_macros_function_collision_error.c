@@ -5,7 +5,7 @@ int existing_function(void) {
     return 1;
 }
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *clobber_existing(void) {
     _Type *int_ty = _AST_GET_TYPE("int");
     _Obj *fn = _AST_FUNCTION("existing_function", int_ty);

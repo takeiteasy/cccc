@@ -4,7 +4,7 @@
 // Macro that returns an assignment expression (target = value).
 // Used as: int x; int y = set_var(x, 99);
 // After expansion: int y = (x = 99);  => y == 99, x == 99
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *set_var(_Node *target, _Node *value) {
     _VirtualMachine *vm = __jcc_get_vm();
     return __jcc_ast_assign(vm, target, value);
@@ -14,7 +14,7 @@ _Node *set_var(_Node *target, _Node *value) {
 // Macro that returns obj.field (struct member access).
 struct Point { int x; int y; };
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *get_x(_Node *pt) {
     _VirtualMachine *vm = __jcc_get_vm();
     return __jcc_ast_member(vm, pt, "x");
@@ -25,7 +25,7 @@ _Node *get_x(_Node *pt) {
 int triple(int n) { return n * 3; }
 
 // Macro that generates: triple(arg)
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *call_triple(_Node *arg) {
     _VirtualMachine *vm = __jcc_get_vm();
     _Node *callee = __jcc_ast_var_ref(vm, "triple");

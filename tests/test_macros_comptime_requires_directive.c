@@ -5,7 +5,7 @@ int runtime_helper(int n) {
     return n + 1;
 }
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *uses_runtime_helper(void) {
     return _AST_INT_LITERAL(runtime_helper(41));
 }

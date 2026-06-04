@@ -7,7 +7,7 @@ int compute_value(void) { return 0x12345678; }
 [[jcc::comptime]]
 union Data { int i; unsigned char bytes[4]; } data = { compute_value() };
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *get_value(void) {
     return _AST_GET_COMPTIME_MEMBER("data", "i");
 }

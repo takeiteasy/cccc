@@ -4,7 +4,7 @@
 [[jcc::comptime]]
 int base = 20;
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *doubled(void) {
     return _AST_INT_LITERAL(_AST_GET_COMPTIME_INT("base") * 2);
 }
@@ -12,7 +12,7 @@ _Node *doubled(void) {
 [[jcc::comptime]]
 int bonus = 2;
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *total(void) {
     int64_t b = _AST_GET_COMPTIME_INT("base");
     int64_t n = _AST_GET_COMPTIME_INT("bonus");

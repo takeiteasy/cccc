@@ -11,7 +11,6 @@ _Node *generate_add(void) {
     _Node *sum = _AST_BINARY(_ADD, _AST_PARAM_REF(fn, "a"),
                              _AST_PARAM_REF(fn, "b"));
     _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(sum));
-    _AST_FORWARD_DECLARE(fn);
 
     return _AST_INT_LITERAL(0);
 }

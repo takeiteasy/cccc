@@ -1,6 +1,6 @@
 // Test __jcc_gensym and _GENSYM for collision-safe generated names.
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *gensym_test(void) {
     const char *a = _GENSYM("helper");
     const char *b = __jcc_gensym(_VM, "helper");

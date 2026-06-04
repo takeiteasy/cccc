@@ -1454,30 +1454,112 @@ static Token *synthesize_global_decl_tokens(JCC *vm, Obj *var) {
     return toks;
 }
 
-// Execute all inline macros before the main parse.
-// For each inline macro:
-//   1. Execute it (it calls __jcc_ast_function etc. to register generated
-//      function Objs in vm->compiler.globals).
-//   2. Capture newly-added Objs and stash them in vm->compiler.macro_globals.
-//   3. Synthesize a forward-declaration token stream for each generated
-//      function and prepend it to every input_tokens[i].
+// Scan a single token stream for file-scope calls to non-inline macros,
+// execute them, collect generated definitions, and remove the call tokens.
+static void scan_and_execute_global_calls(JCC *vm, Token **tokens_ptr) {
+    Token *prev = NULL;
+    Token *tok = *tokens_ptr;
+    int brace_depth = 0;
+    int paren_depth = 0;
+
+    while (tok && tok->kind != TK_EOF) {
+        // Track brace/paren depth
+        if (equal(tok, "{")) brace_depth++;
+        else if (equal(tok, "}")) brace_depth--;
+        else if (equal(tok, "(")) paren_depth++;
+        else if (equal(tok, ")")) paren_depth--;
+
+        // Only match at file scope (outside braces and parens)
+        if (brace_depth == 0 && paren_depth == 0 &&
+            tok->kind == TK_IDENT && tok->next && equal(tok->next, "(")) {
+            // Check if this identifier is a non-inline macro
+            MacroFn *pm = NULL;
+            for (MacroFn *m = vm->compiler.macro_fns; m; m = m->next) {
+                if (m->is_macro_entry && !m->is_inline &&
+                    strlen(m->name) == tok->len &&
+                    strncmp(m->name, tok->loc, tok->len) == 0) {
+                    pm = m;
+                    break;
+                }
+            }
+
+            if (pm) {
+                // Find matching ')'
+                Token *after_paren = tok->next->next;
+                int call_depth = 1;
+                while (after_paren && after_paren->kind != TK_EOF && call_depth > 0) {
+                    if (equal(after_paren, "(")) call_depth++;
+                    else if (equal(after_paren, ")")) {
+                        call_depth--;
+                        if (call_depth == 0) break;
+                    }
+                    after_paren = after_paren->next;
+                }
+
+                if (after_paren && call_depth == 0) {
+                    Token *after_semi = after_paren->next;
+                    if (after_semi && equal(after_semi, ";")) {
+                        Token *next_tok = after_semi->next;
+
+                        // For now, only zero-argument calls are supported
+                        // for pre-parse global generation.
+                        Token *arg_check = tok->next->next; // after '('
+                        if (arg_check != after_paren) {
+                            error_tok(vm, tok,
+                                "file-scope macro call '%.*s' with arguments is not supported for global generation",
+                                tok->len, tok->loc);
+                        }
+
+                        if (!pm->is_compiled) {
+                            error_tok(vm, tok, "macro '%.*s' failed to compile",
+                                      tok->len, tok->loc);
+                        }
+
+                        execute_macro_fn(vm, pm, NULL, 0);
+
+                        // Remove the call tokens from the stream
+                        if (prev) {
+                            prev->next = next_tok;
+                        } else {
+                            *tokens_ptr = next_tok;
+                        }
+                        tok = next_tok;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        prev = tok;
+        tok = tok->next;
+    }
+}
+
+// Execute file-scope calls to non-inline macros before the main parse.
+// For each file-scope call:
+//   1. Scan the preprocessed token stream for zero-arg calls to non-inline
+//      macros at file scope (brace depth 0, paren depth 0).
+//   2. Execute the macro (it calls __jcc_ast_function etc.).
+//   3. Capture newly-added Objs and stash them in vm->compiler.macro_globals.
+//   4. Remove the call tokens so the parser never sees them.
+//   5. Synthesize forward-declaration token streams for each generated
+//      function/global and prepend them to every input_tokens[i].
 //
-// After all inline macros have run, vm->compiler.macro_globals contains the
-// generated function definitions. main.c appends them to the merged program
-// before codegen so the name-based call patcher can resolve calls to them.
+// After this runs, vm->compiler.macro_globals contains the generated
+// definitions. main.c appends them to the merged program before codegen.
 void cc_execute_inline_macros(JCC *vm, Token **input_tokens, int count) {
     if (!vm || !vm->compiler.macro_fns)
         return;
 
-    // Quick check: any inline macros?
-    bool any_inline = false;
+    // Quick check: any non-inline macros?
+    bool any_global = false;
     for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next)
-        if (pm->is_inline) { any_inline = true; break; }
-    if (!any_inline)
+        if (!pm->is_inline) { any_global = true; break; }
+    if (!any_global)
         return;
 
     if (vm->debug_vm)
-        printf("Pre-parse: executing inline macros...\n");
+        printf("Pre-parse: executing global macro calls...\n");
 
     // Segments must be initialised before macro bytecode can run.
     init_vm_segments_for_macros(vm);
@@ -1486,76 +1568,59 @@ void cc_execute_inline_macros(JCC *vm, Token **input_tokens, int count) {
     // cc_expand_macros is a no-op).
     compile_all_macros(vm);
 
-    // Walk the macro list in declaration order (list is prepended, so we
-    // reverse to preserve source order).
-    int macro_count = 0;
-    for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next)
-        macro_count++;
+    // Ensure a top-level scope exists so that macros can register typedefs,
+    // enums, and struct tags that later parser code needs to resolve.
+    if (!vm->compiler.scope) {
+        Scope *sc = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
+        memset(sc, 0, sizeof(Scope));
+        vm->compiler.scope = sc;
+    }
 
-    MacroFn **ordered = alloca(macro_count * sizeof(MacroFn *));
-    int idx = macro_count - 1;
-    for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next)
-        ordered[idx--] = pm;
+    // Scan every input token stream for file-scope calls
+    for (int fi = 0; fi < count; fi++) {
+        if (!input_tokens[fi])
+            continue;
+        scan_and_execute_global_calls(vm, &input_tokens[fi]);
+    }
 
-    for (int i = 0; i < macro_count; i++) {
-        MacroFn *pm = ordered[i];
-        if (!pm->is_inline)
+    // Move all objects created by pre-parse macro execution from globals
+    // into macro_globals so they survive parse()'s reset of globals.
+    if (vm->compiler.globals) {
+        Obj *tail = vm->compiler.globals;
+        while (tail->next)
+            tail = tail->next;
+        tail->next = vm->compiler.macro_globals;
+        vm->compiler.macro_globals = vm->compiler.globals;
+        vm->compiler.globals = NULL;
+    }
+
+    // Synthesize forward declarations for every generated function and
+    // extern declarations for every generated global variable, prepending
+    // them to all input token streams so the parser can resolve references.
+    for (Obj *o = vm->compiler.macro_globals; o; o = o->next) {
+        bool is_fn_def  = o->is_function  && o->body;
+        bool is_gvar_def = !o->is_function && o->is_definition;
+        if (!is_fn_def && !is_gvar_def)
             continue;
 
-        // Snapshot the globals list head before execution. Any Obj prepended
-        // by __jcc_ast_function during macro execution will appear before this
-        // pointer.
-        Obj *globals_before = vm->compiler.globals;
-
-        // Execute the inline macro (no arguments — inline macros are
-        // zero-parameter by convention).
-        execute_macro_fn(vm, pm, NULL, 0);
-
-        // Collect newly-added Objs (those prepended before globals_before):
-        // function definitions AND global variable definitions.
-        for (Obj *o = vm->compiler.globals; o && o != globals_before; o = o->next) {
-            bool is_fn_def  = o->is_function  && o->body;
-            bool is_gvar_def = !o->is_function && o->is_definition;
-            if (!is_fn_def && !is_gvar_def)
+        for (int fi = 0; fi < count; fi++) {
+            if (!input_tokens[fi])
                 continue;
-
-            // Move into macro_globals list (we prepend; order restored later).
-            o->next = vm->compiler.macro_globals;
-            vm->compiler.macro_globals = o;
-        }
-
-        // Synthesize forward declarations for every generated function and
-        // extern declarations for every generated global variable, prepending
-        // them to all input token streams so the parser can resolve references.
-        for (Obj *o = vm->compiler.globals; o && o != globals_before; o = o->next) {
-            bool is_fn_def  = o->is_function  && o->body;
-            bool is_gvar_def = !o->is_function && o->is_definition;
-            if (!is_fn_def && !is_gvar_def)
+            Token *decl = is_fn_def
+                ? synthesize_forward_decl_tokens(vm, o)
+                : synthesize_global_decl_tokens(vm, o);
+            if (!decl)
                 continue;
-
-            // Prepend to every file's token stream.
-            for (int fi = 0; fi < count; fi++) {
-                if (!input_tokens[fi])
-                    continue;
-                // Re-synthesise each time: tokenize_string allocates from the
-                // arena (long-lived), and re-synthesising avoids tail->next
-                // aliasing when prepending to multiple files.
-                Token *decl = is_fn_def
-                    ? synthesize_forward_decl_tokens(vm, o)
-                    : synthesize_global_decl_tokens(vm, o);
-                if (!decl)
-                    continue;
-                Token *tail = decl;
-                while (tail->next && tail->next->kind != TK_EOF)
-                    tail = tail->next;
-                tail->next = input_tokens[fi];
-                input_tokens[fi] = decl;
-            }
+            Token *tail = decl;
+            while (tail->next && tail->next->kind != TK_EOF)
+                tail = tail->next;
+            tail->next = input_tokens[fi];
+            input_tokens[fi] = decl;
         }
     }
 
     if (vm->debug_vm)
-        printf("Pre-parse inline macro execution complete.\n");
+        printf("Pre-parse global macro execution complete.\n");
 }
 
 // Expand all macro calls in the program

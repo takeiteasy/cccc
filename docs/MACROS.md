@@ -25,7 +25,7 @@ on which execution form you use.
 | Call context | Return value |
 |--------------|--------------|
 | Expression position (`int x = mac()`) | Must return a non-NULL `_Node *`. NULL is a compile error. |
-| Declaration position (file-scope `mac();` or inline auto-run) | Returning NULL or `void` is legal — means "I only emitted definitions." |
+| Declaration position (file-scope `mac();`) | Returning NULL or `void` is legal — means "I only emitted definitions." |
 
 For definition-only macros, declare the return type `void`. This is
 self-documenting and lets you omit the return statement entirely. Using a `void`
@@ -44,93 +44,61 @@ old `return _AST_INT_LITERAL(0)` idiom still works but is no longer needed.
 
 ## Execution Model
 
-JCC supports three macro execution forms:
+JCC supports two macro execution forms:
 
 | Form | Source shape | When it runs | What the return value means |
 |------|--------------|--------------|-----------------------------|
-| Inline generation | `[[jcc::macro(inline)]] void gen(void)` | Before the main parse | Ignored; side effects generate declarations/functions/globals |
-| File-scope call | `gen();` at file scope | While parsing that file, at that source position | Ignored; side effects generate declarations/functions/globals |
-| Call-site expansion | `gen(args...)` inside code | During macro expansion after parsing | Replaces the call expression or statement |
+| Global generation | `[[jcc::macro]] void gen(void)` called at file scope | Before the main parse | Ignored; side effects generate declarations/functions/globals visible everywhere |
+| Call-site expansion | `[[jcc::macro(inline)]] _Node *gen(args...)` called inside code | During macro expansion after parsing | Replaces the call expression or statement |
 
-### Inline macro stdlib constraint
+### Pre-parse macro stdlib constraint
 
-Inline macros compile and execute **before the main parse begins**. The macro
-program only has JCC's private `reflection.h` API and its transitive
+Global-generation macros compile and execute **before the main parse begins**.
+The macro program only has JCC's private `reflection.h` API and its transitive
 `stdbool.h`, `stddef.h`, and `stdint.h` includes available implicitly. Headers
 included by the user file (`stdio.h`, `stdlib.h`, etc.) are **not** in scope.
 
 If your macro or comptime helper calls `fopen`, `malloc`, `strcmp`, or other
-stdlib functions, use a **file-scope call** instead of `inline`. File-scope
-calls compile the macro program during the main parse, after the user's includes
-have been processed and those functions are in scope.
+stdlib functions, use an **expression-position inline macro** instead; the macro
+program is compiled during the main parse, after the user's includes have been
+processed and those functions are in scope.
 
-## Inline Generation
+## Global Generation
 
-Use an inline macro when generated functions should be available to the whole
-parsed program without an explicit call site. Inline macros run before the main
-parse, and functions created with `_AST_FUNCTION()` receive parser-visible
-synthetic declarations automatically.
+Use a non-inline macro with a file-scope call when generated functions should be
+available to the whole parsed program. The call runs before the main parse, and
+JCC automatically synthesizes forward declarations for every generated function
+and `extern` declarations for every generated global variable, so no manual
+publication is needed.
 
 ```c
-[[jcc::macro(inline)]]
+[[jcc::macro]]
 void generate_answer(void) {
     _Type *int_ty = _AST_GET_TYPE("int");
     _Obj *fn = _AST_FUNCTION("answer", int_ty);
     _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(_AST_INT_LITERAL(42)));
 }
 
+generate_answer();
+
 int main(void) {
     return answer();
 }
 ```
 
-The GNU-attribute equivalent is `__attribute__((macro(inline)))`.
-
-Inline macros take no call-site arguments. Use them for global code generation:
-boilerplate functions, enum conversion helpers, serializers, or any generated
-definition that source code needs to call normally.
-
-## File-Scope Macro Calls
-
-Use a file-scope macro call when generation should happen at a specific source
-position, or when the macro needs stdlib functions from the user's includes. The
-macro runs when the parser reaches the call. If the macro creates a function that
-later source should call, publish it with `_AST_FORWARD_DECLARE(fn)`.
-
-```c
-[[jcc::macro]]
-void generate_add(void) {
-    _Type *int_ty = _AST_GET_TYPE("int");
-    _Obj *fn = _AST_FUNCTION("add", int_ty);
-
-    _AST_FUNCTION_ADD_PARAM(fn, "a", int_ty);
-    _AST_FUNCTION_ADD_PARAM(fn, "b", int_ty);
-
-    _Node *sum = _AST_BINARY(_ADD, _AST_PARAM_REF(fn, "a"),
-                             _AST_PARAM_REF(fn, "b"));
-    _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(sum));
-    _AST_FORWARD_DECLARE(fn);
-}
-
-generate_add();
-
-int main(void) {
-    return add(20, 22);
-}
-```
-
-The declaration created by `_AST_FORWARD_DECLARE(fn)` is visible from the macro
-call position onward. Code before the file-scope call follows normal C
-declaration rules and cannot call the generated function by name.
+Global-generation macros take no call-site arguments. Use them for boilerplate
+functions, enum conversion helpers, serializers, or any generated definition
+that source code needs to call normally.
 
 ## Call-Site Expansion
 
-A normal macro call inside an expression or statement is parsed as a macro call
-node. During macro expansion, JCC executes the macro and replaces the call with
-the returned AST. The macro **must** return a non-NULL node.
+Use an inline macro (`[[jcc::macro(inline)]]`) for call-site expansion inside
+expressions or statements. The call is replaced with the returned AST during
+macro expansion. Inline macros **must** return a non-NULL node and cannot be
+used at file scope.
 
 ```c
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *double_it(_Node *value) {
     return _AST_BINARY(_ADD, value, value);
 }
@@ -145,11 +113,10 @@ Macro arguments are `_Node *` pointers to the original argument ASTs. A macro
 can reuse, inspect, wrap, or replace those nodes.
 
 Call-site expansion happens after the containing function body has already been
-parsed. If a call-site macro creates a separate top-level function or global and
-the same parsed code also names that object, normal C declaration rules still
-apply: provide a prototype or extern declaration before the use. Use an inline
-macro or a file-scope macro call when you want JCC to publish generated
-declarations for you.
+parsed. If an inline macro creates a separate top-level function or global, the
+same parsed code can name that object only if normal C declaration rules are
+satisfied. Use a global-generation macro when you want JCC to publish generated
+declarations automatically.
 
 Macro expansion is bounded by `--macro-recursion-limit=N` to catch accidental
 self-recursive expansions. The default is 256. Set the limit to 0 to disable
@@ -331,7 +298,7 @@ apply the correct implicit cast. When building a generated function body, wrap
 the quote call in `_AST_WITH_FN(fn)` to establish that context:
 
 ```c
-[[jcc::macro(inline)]]
+[[jcc::macro]]
 void generate_answer(void) {
     _Type *int_ty = _AST_GET_TYPE("int");
     _Obj *fn = _AST_FUNCTION("answer", int_ty);
@@ -339,6 +306,7 @@ void generate_answer(void) {
         _AST_FUNCTION_SET_BODY(fn, _QUOTE("return 42;"));
     }
 }
+generate_answer();
 ```
 
 Without `_AST_WITH_FN`, `_QUOTE("return x;")` at file scope (where there is no
@@ -391,7 +359,7 @@ Generated functions are `_Obj *` values. Create the object, add parameters,
 build a body, and install the body.
 
 ```c
-[[jcc::macro(inline)]]
+[[jcc::macro]]
 void generate_is_even(void) {
     _Type *int_ty = _AST_GET_TYPE("int");
     _Obj *fn = _AST_FUNCTION("is_even", int_ty);
@@ -402,15 +370,18 @@ void generate_is_even(void) {
         _AST_FUNCTION_SET_BODY(fn, _QUOTE("return $1 % 2 == 0;", n));
     }
 }
+generate_is_even();
 
 int main(void) {
     return is_even(42) ? 42 : 1;
 }
 ```
 
-For file-scope explicit calls, call `_AST_FORWARD_DECLARE(fn)` after the
-signature is complete and before source code needs the generated function name.
-Inline macros handle parser-visible declarations automatically.
+For global-generation macros, JCC automatically synthesizes forward
+declarations for every generated function definition, so `_AST_FORWARD_DECLARE`
+is no longer required. You only need it when a macro creates a prototype that
+later source should reference before the definition is provided (e.g. a
+prototype generated by one macro and promoted to a definition by another).
 
 `_AST_FUNCTION(name, ret_type)` promotes an existing forward declaration with
 the same name to a generated definition. If a definition already exists, JCC
@@ -425,6 +396,7 @@ void make_helper(void) {
     _Obj *fn = _AST_FUNCTION(name, int_ty);
     _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(_AST_INT_LITERAL(42)));
 }
+make_helper();
 ```
 
 ## Global Variable Generation
@@ -434,7 +406,7 @@ size the type to match the data length; the codegen copies exactly `ty->size`
 bytes from the init data.
 
 ```c
-[[jcc::macro(inline)]]
+[[jcc::macro]]
 void embed_version(void) {
     _Type *char_ty = _AST_GET_TYPE("char");
     _Type *arr_ty  = _AST_MAKE_ARRAY(char_ty, 8);
@@ -442,19 +414,18 @@ void embed_version(void) {
     _AST_GLOBAL_VAR_SET_INIT_DATA(var, "1.0.0\0\0", 8);
     _AST_GLOBAL_VAR_SET_STATIC(var, 1);  // internal linkage
 }
+embed_version();
 
 int main(void) {
     return version_str[0] != '1';
 }
 ```
 
-For inline macros, the capture loop synthesizes an `extern` declaration that the
-parser uses to resolve references to the generated variable. For file-scope calls,
-add a file-scope `extern` declaration before code that references the variable:
+Global-generation macros automatically synthesize an `extern` declaration for
+every generated global variable, so the parser can resolve references without a
+manual declaration.
 
 ```c
-extern char version_str[];
-
 [[jcc::macro]]
 void embed_version(void) { ... }
 embed_version();
@@ -653,13 +624,13 @@ The canonical form used in this document and in JCC examples is `[[jcc::macro]]`
 
 - Macro calls accept at most 8 arguments.
 - Macro code runs at compile time and cannot inspect runtime values.
-- Inline macros compile before the main parse; only `reflection.h` and its
-  transitive includes (`stdbool.h`, `stddef.h`, `stdint.h`) are available. Use
-  a file-scope call if the macro needs `stdio.h`, `stdlib.h`, or other headers
+- Global-generation macros compile before the main parse; only `reflection.h`
+  and its transitive includes (`stdbool.h`, `stddef.h`, `stdint.h`) are available.
+  Use an inline macro if the macro needs `stdio.h`, `stdlib.h`, or other headers
   from the user file.
-- File-scope explicit generation follows source order. Use inline macros for
-  whole-program pre-parse generation, or `_AST_FORWARD_DECLARE(fn)` for
-  explicit file-scope publication.
+- Global-generation macros run before the main parse, so generated definitions
+  are visible everywhere. Inline macros expand at the call site and follow
+  normal C declaration rules for any side-effect definitions they emit.
 - `_AST_FORWARD_DECLARE(fn)` publishes function names only. Types, globals, and
   other declarations follow the normal parser state visible at the macro
   execution point.

@@ -3,12 +3,12 @@
 [[jcc::comptime]]
 int magic = 42;
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *get_magic(void) {
     return _AST_GET_COMPTIME_VAR("magic");
 }
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *get_magic_int(void) {
     return _AST_INT_LITERAL(_AST_GET_COMPTIME_INT("magic"));
 }

@@ -3,12 +3,12 @@
 [[jcc::comptime]]
 double scale = 2.5;
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *get_scale(void) {
     return _AST_GET_COMPTIME_VAR("scale");
 }
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *check_scale(void) {
     double s = _AST_GET_COMPTIME_FLOAT("scale");
     // scale * 4 == 10 — check via int cast to avoid float equality issues

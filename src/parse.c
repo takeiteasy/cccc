@@ -4997,6 +4997,17 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
         if (!vm->compiler.in_macro_mode && equal(tok->next, "(")) {
             MacroFn *pm = find_macro_fn(vm, tok);
             if (pm) {
+                // Inline macros expand at the call site; non-inline macros
+                // are global-generation only and cannot be used in expression
+                // position.
+                if (!pm->is_inline) {
+                    error_tok(vm, tok,
+                              "macro '%.*s' is not marked inline; use "
+                              "[[jcc::macro(inline)]] for expression-position "
+                              "calls",
+                              tok->len, tok->loc);
+                }
+
                 // Create ND_MACRO_CALL node
                 Token *macro_tok = tok;
                 tok = tok->next->next; // Skip identifier and '('
@@ -5600,33 +5611,35 @@ Obj *parse(JCC *vm, Token *tok) {
             continue;
         }
 
-        // A known macro function may be called as a file-scope compile-time
-        // directive. The returned node is ignored; side effects such as
-        // generated declarations/functions are kept in the active parse state.
+        // File-scope macro calls to non-inline macros are executed pre-parse
+        // by cc_execute_inline_macros and their tokens are removed. If the
+        // parser still sees one, it had arguments or was missed; skip it.
+        // Inline macros cannot be used at file scope.
         if (!vm->compiler.in_macro_mode && tok->kind == TK_IDENT &&
             equal(tok->next, "(")) {
             MacroFn *pm = find_macro_fn(vm, tok);
             if (pm) {
-                Token *macro_tok = tok;
-                tok = tok->next->next;
-
-                Node head = {};
-                Node *cur = &head;
-                int arg_count = 0;
-
-                while (!equal(tok, ")")) {
-                    if (cur != &head)
-                        tok = skip(vm, tok, ",");
-                    Node *arg = assign(vm, &tok, tok);
-                    cur = cur->next = arg;
-                    arg_count++;
+                if (pm->is_inline) {
+                    error_tok(vm, tok,
+                              "inline macro '%.*s' cannot be used at file "
+                              "scope; use it in an expression",
+                              tok->len, tok->loc);
                 }
 
+                // Skip the call tokens (was executed pre-parse).
+                // Walk to matching ')' respecting nesting.
+                tok = tok->next->next; // after '('
+                int depth = 1;
+                while (tok && tok->kind != TK_EOF && depth > 0) {
+                    if (equal(tok, "(")) depth++;
+                    else if (equal(tok, ")")) {
+                        depth--;
+                        if (depth == 0) break;
+                    }
+                    tok = tok->next;
+                }
                 tok = skip(vm, tok, ")");
                 tok = skip(vm, tok, ";");
-
-                cc_execute_top_level_macro(vm, pm->name, macro_tok,
-                                           head.next, arg_count);
                 continue;
             }
         }

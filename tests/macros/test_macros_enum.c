@@ -8,7 +8,7 @@
 typedef enum { COLOR_RED, COLOR_GREEN, COLOR_BLUE } Color;
 
 // Pragma macro to get enum constant name at compile time
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *color_name(_Node *value) {
     _VirtualMachine *vm = __jcc_get_vm();
 

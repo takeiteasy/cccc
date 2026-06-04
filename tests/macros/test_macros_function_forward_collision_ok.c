@@ -2,7 +2,7 @@
 
 int generated_answer(void);
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *generate_answer(void) {
     _Type *int_ty = _AST_GET_TYPE("int");
     _Obj *fn = _AST_FUNCTION("generated_answer", int_ty);

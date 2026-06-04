@@ -5,7 +5,7 @@
 
 // Macro that emits a warning at the argument's source location,
 // then returns the argument unchanged.
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *warn_if_zero(_Node *n) {
     _VirtualMachine *vm = __jcc_get_vm();
     // Always emit a warning — we're testing the mechanism, not the logic

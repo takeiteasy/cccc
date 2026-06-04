@@ -5,12 +5,12 @@ int inc_int(int n) {
     return n + 1;
 }
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *make_answer(void) {
     return _AST_INT_LITERAL(inc_int(41));
 }
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *add_later_helper(_Node *x) {
     return _AST_BINARY(_ADD, x, _AST_INT_LITERAL(triple_later(2)));
 }
@@ -34,7 +34,7 @@ int mutual_odd(int n) {
     return 1 + mutual_even(n - 1);
 }
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *mutual_add_four(_Node *x) {
     return _AST_BINARY(_ADD, x,
                           _AST_INT_LITERAL(mutual_even(4)));

@@ -1,11 +1,11 @@
 // Test finite nested macro expansion under the default recursion limit.
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *finish_step(_Node *x) {
     return _AST_BINARY(_ADD, x, _AST_INT_LITERAL(1));
 }
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *start_step(_Node *x) {
     return _QUOTE("finish_step($1)", x);
 }

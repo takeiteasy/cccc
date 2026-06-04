@@ -2,7 +2,7 @@
 // Test ticket #1: mixing $N positional and $$ incremental in one template
 // should produce a compile-time error.
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *bad_mix(_Node *a, _Node *b) {
     _VirtualMachine *vm = __jcc_get_vm();
     // $1 and $$ in the same template — must error

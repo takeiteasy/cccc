@@ -16,8 +16,7 @@ _Node *choose(void) {
     _Node *body = _AST_RETURN(
         _AST_COND(cond, _AST_INT_LITERAL(1), _AST_INT_LITERAL(2)));
     _AST_FUNCTION_SET_BODY(fn, body);
-    _AST_FORWARD_DECLARE(fn);
-    return _AST_INT_LITERAL(0);
+        return _AST_INT_LITERAL(0);
 }
 choose();
 
@@ -32,8 +31,7 @@ _Node *get_null_ptr(void) {
     _Node *body = _AST_RETURN(
         _AST_CAST(_AST_CAST(_AST_NULL(), long_ty), int_ty));
     _AST_FUNCTION_SET_BODY(fn, body);
-    _AST_FORWARD_DECLARE(fn);
-    return _AST_INT_LITERAL(0);
+        return _AST_INT_LITERAL(0);
 }
 get_null_ptr();
 
@@ -44,8 +42,7 @@ _Node *size_of_int(void) {
     _Obj *fn = _AST_FUNCTION("macro_sizeof_int", int_ty);
     _Node *body = _AST_RETURN(_AST_SIZEOF_TYPE(int_ty));
     _AST_FUNCTION_SET_BODY(fn, body);
-    _AST_FORWARD_DECLARE(fn);
-    return _AST_INT_LITERAL(0);
+        return _AST_INT_LITERAL(0);
 }
 size_of_int();
 
@@ -56,8 +53,7 @@ _Node *align_of_double(void) {
     _Obj *fn = _AST_FUNCTION("macro_alignof_double", int_ty);
     _Node *body = _AST_RETURN(_AST_CAST(_AST_ALIGNOF_TYPE(dbl_ty), int_ty));
     _AST_FUNCTION_SET_BODY(fn, body);
-    _AST_FORWARD_DECLARE(fn);
-    return _AST_INT_LITERAL(0);
+        return _AST_INT_LITERAL(0);
 }
 align_of_double();
 
@@ -71,8 +67,7 @@ _Node *sizeof_expr_test(void) {
     _Node *body = _AST_RETURN(
         _AST_CAST(_AST_SIZEOF_EXPR(_AST_PARAM_REF(fn, "x")), int_ty));
     _AST_FUNCTION_SET_BODY(fn, body);
-    _AST_FORWARD_DECLARE(fn);
-    return _AST_INT_LITERAL(0);
+        return _AST_INT_LITERAL(0);
 }
 sizeof_expr_test();
 
@@ -87,8 +82,7 @@ _Node *subscript_test(void) {
     _Node *body = _AST_RETURN(
         _AST_SUBSCRIPT(_AST_PARAM_REF(fn, "arr"), _AST_INT_LITERAL(2)));
     _AST_FUNCTION_SET_BODY(fn, body);
-    _AST_FORWARD_DECLARE(fn);
-    return _AST_INT_LITERAL(0);
+        return _AST_INT_LITERAL(0);
 }
 subscript_test();
 
@@ -102,8 +96,7 @@ _Node *comma_test(void) {
     _Node *body = _AST_RETURN(
         _AST_COMMA(_AST_INT_LITERAL(0), _AST_INT_LITERAL(42)));
     _AST_FUNCTION_SET_BODY(fn, body);
-    _AST_FORWARD_DECLARE(fn);
-    return _AST_INT_LITERAL(0);
+        return _AST_INT_LITERAL(0);
 }
 comma_test();
 
@@ -165,8 +158,7 @@ _Node *make_struct_test(void) {
     _Node *yref = _AST_MEMBER(_AST_UNARY(_DEREF, _AST_PARAM_REF(fn, "v")), "y");
     _Node *body = _AST_RETURN(_AST_BINARY(_ADD, xref, yref));
     _AST_FUNCTION_SET_BODY(fn, body);
-    _AST_FORWARD_DECLARE(fn);
-    return _AST_INT_LITERAL(0);
+        return _AST_INT_LITERAL(0);
 }
 make_struct_test();
 

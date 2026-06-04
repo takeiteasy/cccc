@@ -8,7 +8,7 @@ int page_count(void) { return 4; }
 [[jcc::comptime]]
 int buf_size = page_count() * 4096;
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *get_buf_size(void) {
     return _AST_INT_LITERAL(_AST_GET_COMPTIME_INT("buf_size"));
 }

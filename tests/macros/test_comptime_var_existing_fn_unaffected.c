@@ -7,12 +7,12 @@ int double_it(int n) { return n * 2; }
 [[jcc::comptime]]
 int answer = 21;
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *get_answer(void) {
     return _AST_INT_LITERAL(_AST_GET_COMPTIME_INT("answer") * 2);
 }
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *use_helper(_Node *x) {
     return _AST_BINARY(_ADD, x, _AST_INT_LITERAL(double_it(1)));
 }

@@ -4,7 +4,7 @@
 // ---- Positional list splice: $@1 ------------------------------------------
 // double_inc builds a two-statement chain (x+=1; x+=1;) and splices it
 // into a block using the positional $@1 splice.
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *double_inc(_Node *x) {
     _VirtualMachine *vm = __jcc_get_vm();
     _Node *s1    = __jcc_quote(vm, "$1 += 1;", x);
@@ -22,7 +22,7 @@ int get_plus_two(int v) {
 // accumulate3 takes an accumulator variable and three addends; builds a
 // three-statement chain and splices it.  All inner templates reference only
 // macro arguments (which are call-site nodes, in scope at macro execution).
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *accumulate3(_Node *acc, _Node *a, _Node *b, _Node *c) {
     _VirtualMachine *vm = __jcc_get_vm();
     _Node *s1    = __jcc_quote(vm, "$1 += $2;", acc, a);
@@ -40,7 +40,7 @@ int test_accumulate(void) {
 
 // ---- Incremental splice $@ (two statements) --------------------------------
 // two_increments builds two stmts and splices them via incremental $@.
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *two_increments(_Node *a, _Node *b) {
     _VirtualMachine *vm = __jcc_get_vm();
     _Node *s1 = __jcc_quote(vm, "$1 += 10;", a);
@@ -56,7 +56,7 @@ int test_incr(void) {
 
 // ---- Mixed scalar $1 and list splice $@2 -----------------------------------
 // if_then uses scalar $1 for the condition and list splice $@2 for the body.
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *if_then(_Node *cond, _Node *body_expr) {
     _VirtualMachine *vm = __jcc_get_vm();
     // Wrap the expression argument in a statement so it can be list-spliced.

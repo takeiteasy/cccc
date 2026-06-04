@@ -2,7 +2,7 @@
 // A macro that generates a simple function at compile time
 
 // Pragma macro that generates a function returning a constant
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *generate_const_func(_Node *name_node, _Node *value_node) {
     _VirtualMachine *vm = __jcc_get_vm();
 

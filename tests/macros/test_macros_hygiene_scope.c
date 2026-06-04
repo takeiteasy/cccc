@@ -1,16 +1,16 @@
 // Test macro hygiene: call-site variable and typedef lookup.
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *read_value(void) {
     return _AST_VAR_REF("value");
 }
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *read_value_via_quote(void) {
     return _QUOTE("read_value()");
 }
 
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *local_alias_size(void) {
     _Type *ty = _AST_FIND_TYPE("LocalAlias");
     if (!ty)

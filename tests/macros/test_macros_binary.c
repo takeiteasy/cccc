@@ -1,7 +1,7 @@
 // Test pragma macro with binary expression generation
 
 // Define a pragma macro that generates: (a + b) * 2
-[[jcc::macro]]
+[[jcc::macro(inline)]]
 _Node *double_sum(_Node *a, _Node *b) {
     _VirtualMachine *vm = __jcc_get_vm();
     _Node *sum = __jcc_ast_binary(vm, _ADD, a, b);
