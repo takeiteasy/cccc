@@ -1456,6 +1456,9 @@ static Token *synthesize_global_decl_tokens(JCC *vm, Obj *var) {
 
 // Scan a single token stream for file-scope calls to non-inline macros,
 // execute them, collect generated definitions, and remove the call tokens.
+// Newly generated Obj definitions are drained into vm->compiler.macro_globals
+// immediately after each execution using a saved-next walk, so globals is
+// always restored to its pre-call state and no cycle can form.
 static void scan_and_execute_global_calls(JCC *vm, Token **tokens_ptr) {
     Token *prev = NULL;
     Token *tok = *tokens_ptr;
@@ -1515,7 +1518,23 @@ static void scan_and_execute_global_calls(JCC *vm, Token **tokens_ptr) {
                                       tok->len, tok->loc);
                         }
 
+                        // Snapshot globals before execution so we can identify
+                        // the objects this call generates.
+                        Obj *globals_before = vm->compiler.globals;
+
                         execute_macro_fn(vm, pm, NULL, 0);
+
+                        // Drain newly prepended objects into macro_globals using
+                        // a saved-next walk so we never overwrite a next pointer
+                        // we still need to follow (which would create a cycle).
+                        Obj *o = vm->compiler.globals;
+                        while (o && o != globals_before) {
+                            Obj *next_obj = o->next;
+                            o->next = vm->compiler.macro_globals;
+                            vm->compiler.macro_globals = o;
+                            o = next_obj;
+                        }
+                        vm->compiler.globals = globals_before;
 
                         // Remove the call tokens from the stream
                         if (prev) {
@@ -1540,7 +1559,8 @@ static void scan_and_execute_global_calls(JCC *vm, Token **tokens_ptr) {
 //   1. Scan the preprocessed token stream for zero-arg calls to non-inline
 //      macros at file scope (brace depth 0, paren depth 0).
 //   2. Execute the macro (it calls __jcc_ast_function etc.).
-//   3. Capture newly-added Objs and stash them in vm->compiler.macro_globals.
+//   3. Drain newly-added Objs into vm->compiler.macro_globals immediately
+//      (safe saved-next walk; globals is restored to its pre-call state).
 //   4. Remove the call tokens so the parser never sees them.
 //   5. Synthesize forward-declaration token streams for each generated
 //      function/global and prepend them to every input_tokens[i].
@@ -1576,22 +1596,14 @@ void cc_execute_inline_macros(JCC *vm, Token **input_tokens, int count) {
         vm->compiler.scope = sc;
     }
 
-    // Scan every input token stream for file-scope calls
+    // Scan every input token stream for file-scope calls.
+    // scan_and_execute_global_calls drains generated objects into
+    // macro_globals directly and restores globals after each call,
+    // so no bulk-move is needed here.
     for (int fi = 0; fi < count; fi++) {
         if (!input_tokens[fi])
             continue;
         scan_and_execute_global_calls(vm, &input_tokens[fi]);
-    }
-
-    // Move all objects created by pre-parse macro execution from globals
-    // into macro_globals so they survive parse()'s reset of globals.
-    if (vm->compiler.globals) {
-        Obj *tail = vm->compiler.globals;
-        while (tail->next)
-            tail = tail->next;
-        tail->next = vm->compiler.macro_globals;
-        vm->compiler.macro_globals = vm->compiler.globals;
-        vm->compiler.globals = NULL;
     }
 
     // Synthesize forward declarations for every generated function and
