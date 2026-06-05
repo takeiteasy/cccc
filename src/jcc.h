@@ -1669,6 +1669,14 @@ struct JCC {
     bool vm_profile_enabled;
     uint64_t vm_profile_counts[OP_COUNT];
     uint64_t vm_profile_total;
+    // Dynamic opcode bigram (transition) profile. Indexed as
+    // bigram_counts[prev * OP_COUNT + cur]. vm_profile_bigram_total counts the
+    // number of recorded transitions (== total opcodes - 1 when the profile
+    // spans the entire run).
+    uint64_t vm_profile_bigram_counts[OP_COUNT * OP_COUNT];
+    uint64_t vm_profile_bigram_total;
+    int vm_profile_prev_op;
+    bool vm_profile_bigram_started;
 
     // Debugger state (enable via JCC_ENABLE_DEBUGGER flag)
     Debugger dbg;

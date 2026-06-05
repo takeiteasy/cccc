@@ -252,6 +252,11 @@ void cc_vm_profile_reset(JCC *vm) {
         return;
     memset(vm->vm_profile_counts, 0, sizeof(vm->vm_profile_counts));
     vm->vm_profile_total = 0;
+    memset(vm->vm_profile_bigram_counts, 0,
+           sizeof(vm->vm_profile_bigram_counts));
+    vm->vm_profile_bigram_total = 0;
+    vm->vm_profile_prev_op = -1;
+    vm->vm_profile_bigram_started = false;
 }
 
 void cc_vm_profile_print(JCC *vm, FILE *f) {
@@ -284,6 +289,38 @@ void cc_vm_profile_print(JCC *vm, FILE *f) {
                      (double)vm->vm_profile_total;
         fprintf(f, "%-12s %12llu %6.2f%%\n", name ? name : "UNKNOWN",
                 (unsigned long long)vm->vm_profile_counts[best], pct);
+    }
+
+    fprintf(f, "\nVM opcode bigram profile (top 25)\n");
+    fprintf(f, "total_transitions: %llu\n",
+            (unsigned long long)vm->vm_profile_bigram_total);
+    if (vm->vm_profile_bigram_total == 0)
+        return;
+
+    bool bg_printed[OP_COUNT * OP_COUNT] = {0};
+    for (int shown = 0; shown < 25; shown++) {
+        int best = -1;
+        for (int i = 0; i < OP_COUNT * OP_COUNT; i++) {
+            if (bg_printed[i] || vm->vm_profile_bigram_counts[i] == 0)
+                continue;
+            if (best < 0 ||
+                vm->vm_profile_bigram_counts[i] >
+                    vm->vm_profile_bigram_counts[best])
+                best = i;
+        }
+        if (best < 0 || vm->vm_profile_bigram_counts[best] == 0)
+            break;
+        bg_printed[best] = true;
+
+        int prev = best / OP_COUNT;
+        int cur = best % OP_COUNT;
+        const char *pn = cc_opcode_name(prev);
+        const char *cn = cc_opcode_name(cur);
+        double bpct = (double)vm->vm_profile_bigram_counts[best] * 100.0 /
+                      (double)vm->vm_profile_bigram_total;
+        fprintf(f, "%-12s %-12s %12llu %6.2f%%\n", pn ? pn : "UNKNOWN",
+                cn ? cn : "UNKNOWN",
+                (unsigned long long)vm->vm_profile_bigram_counts[best], bpct);
     }
 }
 
@@ -359,7 +396,33 @@ int cc_vm_profile_write_json(JCC *vm, const char *path, const char *mode,
                 (unsigned long long)count, pct);
     }
 
-    fprintf(f, "\n  ]\n");
+    fprintf(f, "\n  ],\n");
+    fprintf(f, "  \"total_bigrams\": %llu,\n",
+            (unsigned long long)vm->vm_profile_bigram_total);
+    fprintf(f, "  \"bigrams\": [");
+    bool first_bg = true;
+    for (int prev = 0; prev < OP_COUNT; prev++) {
+        for (int cur = 0; cur < OP_COUNT; cur++) {
+            uint64_t count =
+                vm->vm_profile_bigram_counts[prev * OP_COUNT + cur];
+            if (count == 0)
+                continue;
+            const char *pn = cc_opcode_name(prev);
+            const char *cn = cc_opcode_name(cur);
+            double bpct = vm->vm_profile_bigram_total
+                              ? (double)count * 100.0 /
+                                    (double)vm->vm_profile_bigram_total
+                              : 0.0;
+            fprintf(f, "%s\n    {\"from\": \"", first_bg ? "" : ",");
+            json_escape(f, pn ? pn : "UNKNOWN");
+            fprintf(f, "\", \"to\": \"");
+            json_escape(f, cn ? cn : "UNKNOWN");
+            fprintf(f, "\", \"count\": %llu, \"percent\": %.6f}",
+                    (unsigned long long)count, bpct);
+            first_bg = false;
+        }
+    }
+    fprintf(f, "%s\n  ]\n", first_bg ? "" : "\n  ");
     fprintf(f, "}\n");
     int rc = ferror(f) ? -1 : 0;
     if (fclose(f) != 0)
@@ -407,6 +470,14 @@ dispatch:
         if (__builtin_expect(vm->vm_profile_enabled, 0)) {
             vm->vm_profile_counts[op]++;
             vm->vm_profile_total++;
+            if (vm->vm_profile_bigram_started) {
+                int prev = vm->vm_profile_prev_op;
+                vm->vm_profile_bigram_counts[prev * OP_COUNT + op]++;
+                vm->vm_profile_bigram_total++;
+            } else {
+                vm->vm_profile_bigram_started = true;
+            }
+            vm->vm_profile_prev_op = op;
         }
         if (vm->debug_vm) {
             const char *name = cc_opcode_name(op);

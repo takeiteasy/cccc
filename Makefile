@@ -198,6 +198,22 @@ generate-std: $(EXE_OUT)
 	@printf '#include <string.h>\n\n' > src/std.c
 	./$(EXE_OUT) -G -I./include $(STD_TEMPLATE) >> src/std.c
 
+# Standalone developer tool: static opcode n-gram miner for .jbc files.
+# Reuses OPS_X from src/jcc.h so it tracks the opcode table automatically.
+# Link-time only needs the C runtime; jcc.h pulls in libffi headers but the
+# tool itself uses no FFI symbols.
+TOOL_CFLAGS := -Wall -O2 -std=c23 -I src $(LIBFFI_CFLAGS)
+tools/bytecode_ngrams: tools/bytecode_ngrams.c
+	$(CC) $(TOOL_CFLAGS) -o $@ $<
+
+# Use-def fusion candidate detector. Walks text segments, tracks register
+# def/use, reports adjacent def->use pairs with single readers.
+tools/fusion_candidates: tools/fusion_candidates.c
+	$(CC) $(TOOL_CFLAGS) -o $@ $<
+
+.PHONY: build-tools
+build-tools: tools/bytecode_ngrams tools/fusion_candidates
+
 test: clean $(EXE_OUT)
 	@python3 tests.py
 	@python3 tests_jbc.py
@@ -277,11 +293,11 @@ else
 endif
 
 clean:
-	@$(RM) -f $(EXE_OUT) $(LIB_OUT) $(SAN_OUT) jcc-afl jcc-afl-asan jcc-prof fuzz_harness
+	@$(RM) -f $(EXE_OUT) $(LIB_OUT) $(SAN_OUT) jcc-afl jcc-afl-asan jcc-prof fuzz_harness tools/bytecode_ngrams tools/fusion_candidates
 	@$(RM) -rf profile/*.prof profile/*.txt profile/*.json profile/*.massif
 	@$(RM) -rf fuzz/corpus fuzz/out
 
-.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info generate-std bench-compare bench-compare-quick bench-compare-json
+.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info generate-std bench-compare bench-compare-quick bench-compare-json build-tools
 ifeq ($(UNAME_S),Linux)
 .PHONY: msan
 endif

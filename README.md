@@ -281,6 +281,52 @@ python3 tests.py --profile-cpu --match "*compre*"  # CPU profile matching tests
 python3 tests.py --vm-profile --match "*profile*"  # Per-test opcode JSON
 ```
 
+The profile includes both per-opcode counts and dynamic opcode bigram (transition)
+counts. The bigram section appears in the text output ("VM opcode bigram profile")
+and as the `"bigrams"` array in the JSON. Bigram frequencies reflect what is
+actually executed at runtime, complementing the static n-gram tool below.
+
+**Opcode n-gram mining (discover fusion candidates):**
+
+```bash
+make build-tools                                      # builds tools/bytecode_ngrams
+./jcc -I./include -o /tmp/sieve.jbc benchmarks/sieve.c
+./tools/bytecode_ngrams -n 2 -t 15 /tmp/sieve.jbc     # top 15 opcode pairs
+./tools/bytecode_ngrams -n 3 -t 15 /tmp/sieve.jbc     # top 15 opcode triples
+./tools/bytecode_ngrams -n 2 -p /tmp/sieve.jbc        # per-file + aggregate
+```
+
+Ranks 2-grams and 3-grams by static occurrence across one or more `.jbc` files.
+Useful for finding common instruction sequences that could be fused into new
+opcodes (see ticket #250).
+
+**Cross-referencing static and dynamic counts:**
+
+```bash
+./jcc --vm-profile-json /tmp/sieve.json -I./include benchmarks/sieve.c
+python3 tools/cross_ref_ngrams.py /tmp/sieve.jbc benchmarks/sieve.c
+```
+
+Combines the static n-gram analysis (per-`.jbc`) with the runtime bigram
+profile (per-execution) and ranks opcode pairs by `static × dynamic`
+count. Sequences that are both common in the bytecode and hot at runtime
+are the strongest fusion candidates.
+
+**Use-def fusion candidate detector:**
+
+```bash
+make build-tools                                      # builds tools/fusion_candidates
+./tools/fusion_candidates -t 50 /tmp/sieve.jbc       # top 50 def->use pairs
+./tools/fusion_candidates -j -t 50 /tmp/sieve.jbc    # JSON output for scripting
+```
+
+Walks the text segment, tracks register defs and use counts, and reports
+adjacent `def -> use` pairs where the definer has a single reader. These
+are the strongest candidates for opcode fusion. The detector does not
+modify bytecode; it is a reporting tool. Cross-referencing with the
+runtime bigram profile above gives a complete priority list for
+designing new opcodes.
+
 **Memory profiling:**
 
 ```bash
