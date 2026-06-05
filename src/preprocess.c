@@ -1674,7 +1674,7 @@ typedef enum {
     PP_IF, PP_IFDEF, PP_IFNDEF,
     PP_ELIF, PP_ELIFDEF, PP_ELIFNDEF,
     PP_ELSE, PP_ENDIF,
-    PP_INCLUDE, PP_INCLUDE_NEXT,
+    PP_INCLUDE, PP_INCLUDE_NEXT, PP_INCLUDE_COMPTIME,
     PP_DEFINE, PP_UNDEF,
     PP_LINE, PP_PRAGMA, PP_EMBED,
     PP_ERROR, PP_WARNING,
@@ -1729,6 +1729,9 @@ static PPDir pp_directive(Token *tok) {
         break;
     case 12:
         if (memcmp(s,"include_next",12)==0) return PP_INCLUDE_NEXT;
+        break;
+    case 16:
+        if (memcmp(s,"include_comptime",16)==0) return PP_INCLUDE_COMPTIME;
         break;
     }
     return PP_NONE;
@@ -2100,6 +2103,20 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             char *path = search_include_next(vm, filename);
             tok = include_file(vm, tok, path ? path : filename,
                                start->next->next);
+            break;
+        }
+        case PP_INCLUDE_COMPTIME: {
+            bool is_dquote;
+            int filename_len;
+            char *filename = read_include_filename(vm, &tok, tok->next,
+                                                   &is_dquote, &filename_len);
+            tok = skip_line(vm, tok);
+            // Queue for the comptime compilation pass; skip in runtime TU.
+            // build_combined_macro_tokens injects these as plain #include
+            // directives processed when in_macro_mode is true.
+            char *bracketed = arena_format(vm, is_dquote ? "\"%s\"" : "<%s>",
+                                           filename);
+            strarray_push(&vm->compiler.comptime_pending_includes, bracketed);
             break;
         }
         case PP_DEFINE:

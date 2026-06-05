@@ -29,6 +29,7 @@ extern JCC *__jcc_current_vm;
 // Forward declarations for reflection API functions (to register as FFI)
 extern JCC *__jcc_get_vm(void);
 extern const char *__jcc_gensym(JCC *vm, const char *prefix);
+extern void __jcc_forward_include(JCC *vm, const char *header);
 extern Token *__jcc_ast_current_token(JCC *vm);
 extern Token *__jcc_ast_synthetic_token(JCC *vm, const char *label);
 extern Token *__jcc_ast_token_from_node(Node *node);
@@ -164,6 +165,7 @@ static void register_reflection_ffi(JCC *vm) {
     // VM accessor
     cc_register_cfunc(vm, "__jcc_get_vm", (void *)__jcc_get_vm, 0, 0);
     cc_register_cfunc(vm, "__jcc_gensym", (void *)__jcc_gensym, 2, 0);
+    cc_register_cfunc(vm, "__jcc_forward_include", (void *)__jcc_forward_include, 2, 0);
 
     // Source location helpers
     cc_register_cfunc(vm, "__jcc_ast_current_token",
@@ -698,6 +700,16 @@ static Token *build_combined_macro_tokens(JCC *vm, Token *reflection_tokens,
     Token *cur = &head;
 
     cur = append_token_list(vm, cur, reflection_tokens);
+
+    // Inject #include_comptime requests as plain #include directives so they
+    // are processed by the comptime preprocessing pass (#196).
+    for (int i = 0; i < vm->compiler.comptime_pending_includes.len; i++) {
+        char *src = arena_format(vm, "#include %s\n",
+                                 vm->compiler.comptime_pending_includes.data[i]);
+        Token *inc_toks = tokenize_string(vm, "<comptime-include>", src);
+        cur = append_token_list(vm, cur, inc_toks);
+    }
+
     if (vm->compiler.macro_context_tokens)
         cur = append_token_list(vm, cur, vm->compiler.macro_context_tokens);
 

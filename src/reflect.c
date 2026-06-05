@@ -63,6 +63,16 @@ const char *__jcc_gensym(JCC *vm, const char *prefix) {
                         vm->compiler.macro_gensym_counter++);
 }
 
+void __jcc_forward_include(JCC *vm, const char *header) {
+    if (!vm || !header)
+        return;
+    StringArray *arr = &vm->compiler.forward_includes;
+    for (int i = 0; i < arr->len; i++)
+        if (strcmp(arr->data[i], header) == 0)
+            return;
+    strarray_push(arr, strdup(header));
+}
+
 _Token *__jcc_ast_current_token(JCC *vm) {
     return vm ? vm->compiler.macro_call_tok : NULL;
 }

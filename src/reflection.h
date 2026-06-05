@@ -194,6 +194,18 @@ extern JCC *__jcc_get_vm(void);
 const char *__jcc_gensym(JCC *vm, const char *prefix);
 
 /*!
+ * @function __jcc_forward_include
+ * @abstract Register a header to be prepended as an #include in serialized output.
+ * @discussion Called from a macro body to declare that the generated runtime code
+ *             depends on @a header. The header string must include delimiters,
+ *             e.g. @c "<string.h>" or @c "\"myheader.h\"". Duplicate registrations
+ *             for the same header are silently ignored.
+ * @param vm     The VM context.
+ * @param header The header string including angle-brackets or quotes.
+ */
+void __jcc_forward_include(JCC *vm, const char *header);
+
+/*!
  * @function __jcc_macroexpand_1
  * @abstract Lisp-style single-step macro expansion (macroexpand-1 semantics).
  * @discussion If @a node is an @c ND_MACRO_CALL node, execute the macro once
@@ -989,6 +1001,7 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, _Node *node);
 #define _DUMP_AST_GEN(node) __jcc_dump_ast_gen(_VM, node)
 #define _DUMP_AST_GEN_TO_STRING(node) __jcc_dump_ast_gen_to_string(_VM, node)
 #define _GENSYM(prefix) __jcc_gensym(_VM, prefix)
+#define _FORWARD_INCLUDE(header) __jcc_forward_include(_VM, header)
 #define _MACROEXPAND_1(node) __jcc_macroexpand_1(_VM, node)
 #define _MACROEXPAND(node) __jcc_macroexpand(_VM, node)
 

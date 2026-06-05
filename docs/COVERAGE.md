@@ -100,7 +100,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `long long int` and `unsigned long long int` | ✓ | |
 | `_Bool` | ✓ | |
 | `_Complex` | ✓ | Native scalar representation with arithmetic, casts, assignment, and equality |
-| `_Imaginary` | ~ | Accepted as compatibility spelling for the corresponding complex type |
+| `_Imaginary` | ~ | Accepted as compatibility spelling for the corresponding complex type. Tracked on [#278](https://todo.sr.ht/~takeiteasy/jcc/278) and [#279](https://todo.sr.ht/~takeiteasy/jcc/279) |
 | Mixed declarations and statements | ✓ | |
 | Variable declaration in `for` initialiser | ✓ | |
 | Variable-length arrays (VLA) | ✓ | Allocated via VM heap |
@@ -447,6 +447,42 @@ These are JCC's own extensions for compile-time metaprogramming. They are interc
 [[jcc::macro]] int square(int x) { return x * x; }
 __attribute__((comptime)) const int version = 42;
 ```
+
+#### `#include_comptime` (JCC-specific)
+
+Includes a header only during the comptime compilation pass. The header and
+any macros or types it defines are invisible to the runtime translation unit.
+Use this when a `[[jcc::comptime]]` helper needs a dependency (e.g.
+`<glob.h>`, `<dirent.h>`) that must not bleed into runtime code.
+
+**Source:** `src/preprocess.c` (`PP_INCLUDE_COMPTIME` case), `src/macros.c` (`build_combined_macro_tokens`)
+
+```c
+#include_comptime <glob.h>
+
+[[jcc::comptime]]
+int glob_struct_size(void) { return (int)sizeof(glob_t); }
+```
+
+See [MACROS.md — Comptime-only includes](MACROS.md) for full documentation.
+
+#### `__jcc_forward_include` (JCC-specific)
+
+Reflection API function callable from macro bodies. Registers a header to be
+prepended as an `#include` directive in the serialized C output. Duplicate
+registrations for the same header are deduplicated.
+
+**Source:** `src/reflect.c` (`__jcc_forward_include`), `src/serialize.c` (`cc_serialize_program`)
+
+```c
+[[jcc::macro]]
+void gen_helpers(void) {
+    _FORWARD_INCLUDE("<string.h>");
+    // ... generate functions that call strlen() ...
+}
+```
+
+See [MACROS.md — Forward includes in generated output](MACROS.md) for full documentation.
 
 ### Parsed but Ignored
 

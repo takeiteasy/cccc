@@ -91,6 +91,35 @@ Global-generation macros take no call-site arguments. Use them for boilerplate
 functions, enum conversion helpers, serializers, or any generated definition
 that source code needs to call normally.
 
+### Forward includes in generated output
+
+When a macro generates code that calls a standard-library function, its
+serialized C output needs a matching `#include`. Use
+`__jcc_forward_include(vm, header)` (or the `_FORWARD_INCLUDE(header)`
+convenience macro) to register a header; JCC prepends it to the emitted file.
+
+```c
+[[jcc::macro]]
+void gen_string_helpers(void) {
+    _FORWARD_INCLUDE("<string.h>");   // emitted at top of generated output
+    _Obj *fn = _AST_FUNCTION("str_len", _AST_GET_TYPE("int"));
+    // ... build body calling strlen() ...
+}
+
+gen_string_helpers();
+```
+
+Multiple calls with the same header are deduplicated — only one `#include`
+line appears in the output regardless of how many macros request it.
+
+The `header` argument must include angle-bracket or quote delimiters:
+`"<stdio.h>"` for system headers, `"\"myheader.h\""` for user headers.
+
+`__jcc_forward_include` is the runtime-output counterpart to
+`#include_comptime` (see [Comptime-only includes](#comptime-only-includes)):
+`__jcc_forward_include` injects into the runtime output only;
+`#include_comptime` feeds a header into the comptime unit only.
+
 ## Call-Site Expansion
 
 Use an inline macro (`[[jcc::macro(inline)]]`) for call-site expansion inside
@@ -165,6 +194,31 @@ Macros and comptime helpers are compiled together, so they can call each other
 even when the callee appears later in the translation unit.
 
 The GNU-attribute equivalent is `__attribute__((comptime))`.
+
+### Comptime-only includes
+
+Use `#include_comptime` to include a header only during the comptime
+compilation pass. The header and any macros or types it defines are invisible
+to the runtime translation unit.
+
+```c
+#include_comptime <glob.h>   // only visible to comptime helpers
+
+[[jcc::comptime]]
+int glob_struct_nonempty(void) {
+    return (int)sizeof(glob_t) > 0;  // glob_t is available here
+}
+
+// glob_t is NOT defined for ordinary runtime code below this point
+int main(void) {
+    return glob_struct_nonempty() ? 42 : 1;
+}
+```
+
+This is the comptime counterpart to `__jcc_forward_include` (see
+[Forward includes in generated output](#forward-includes-in-generated-output)):
+`#include_comptime` feeds a header into the comptime unit only;
+`__jcc_forward_include` emits an `#include` into the runtime output only.
 
 ## Comptime Variables
 

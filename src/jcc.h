@@ -1501,7 +1501,9 @@ typedef struct Compiler {
     StringArray include_paths;        // Quote include search paths
     StringArray system_include_paths; // System header search paths for <...>
     HashMap include_cache;            // Cache for search_include_paths
-    StringArray file_buffers; // Track allocated file buffers for cleanup
+    StringArray file_buffers;         // Track allocated file buffers for cleanup
+    StringArray forward_includes;          // Headers to prepend to serialized output (#276)
+    StringArray comptime_pending_includes; // #include_comptime filenames queued for comptime pass (#196)
 
     // Code generation state
     int label_counter; // For generating unique labels
