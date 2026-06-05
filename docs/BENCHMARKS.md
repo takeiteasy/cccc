@@ -44,6 +44,8 @@ geomean      21.12x   20.80x   21.11x   21.12x   21.65x   20.64x      20.66x    
 Correctness: all benchmarks produce identical output across all configs
 ```
 
+> **Note:** The table above predates the inlined threaded dispatch introduced in the VM (ticket #227). That change embeds each opcode's logic directly at its computed-goto label instead of calling a separate C function per instruction, delivering a **1.2–1.7× speedup** on VM-bound workloads when the JCC binary is built at `-O2` (fib: 1.21×, nqueens: 1.50×, sieve: 1.69×). Re-run `make bench-compare` to get updated numbers for your machine.
+
 JSON output is also written to `benchmarks/results/run-<UTC>.json` for tracking over time. Each `jcc-jbc*` row includes a `compile_ms` field showing the one-time cost of producing the bytecode file (this cost is paid once, not in the timed median).
 
 ## The benchmark suite

@@ -363,6 +363,32 @@ int vm_heap_grow(JCC *vm, size_t need);
 // Returns 0 on success, -1 when the reservation floor is reached.
 int vm_stack_grow(JCC *vm, int slots_needed);
 
+#define STACK_GUARD_SIZE 16
+
+#define WATCHPOINT_CHECK(vm, addr, size, kind)                          \
+    do {                                                                \
+        if ((vm)->flags & JCC_ENABLE_DEBUGGER)                          \
+            debugger_check_watchpoint((vm), (addr), (size), (kind));    \
+    } while (0)
+
+static inline int check_stack_overflow(JCC *vm, int slots_needed) {
+    if (vm->sp - slots_needed - STACK_GUARD_SIZE < vm->stack_base) {
+        if (vm_stack_grow(vm, slots_needed + STACK_GUARD_SIZE) == 0)
+            return 0;
+        printf("\n========== STACK OVERFLOW ==========\n");
+        printf("Stack space exhausted\n");
+        printf("Requested:  %d slots (%d bytes)\n", slots_needed,
+               slots_needed * (int)sizeof(long long));
+        printf("Available:  %ld slots (%ld bytes)\n",
+               (long)(vm->sp - vm->stack_base),
+               (long)(vm->sp - vm->stack_base) * (long)sizeof(long long));
+        printf("PC:         %u\n", vm->pc);
+        printf("====================================\n");
+        return -1;
+    }
+    return 0;
+}
+
 long long jcc_rt_dlopen(JCC *vm, const char *path, int mode);
 long long jcc_rt_dlsym(JCC *vm, long long handle_token, const char *symbol);
 long long jcc_rt_dlclose(JCC *vm, long long handle_token);

@@ -1,4 +1,4 @@
-SRCS := $(wildcard src/*.c src/stdlib/*.c)
+SRCS := $(filter-out src/ops.c, $(wildcard src/*.c src/stdlib/*.c))
 BASE_CFLAGS := -Wall -O0 -g -std=c23 -Wno-deprecated-declarations -Wno-switch
 CFLAGS := $(BASE_CFLAGS)
 LDFLAGS :=

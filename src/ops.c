@@ -27,44 +27,10 @@
 #include "jcc.h"
 #include <limits.h>
 
-#define STACK_GUARD_SIZE 16
-
-// Guard watchpoint checks so production runs (no JCC_ENABLE_DEBUGGER) skip
-// the call entirely rather than paying the call/return overhead on every
-// load and store. debugger_check_watchpoint already short-circuits on the
-// same flag, but the call itself was still emitted unconditionally. (#157)
-#define WATCHPOINT_CHECK(vm, addr, size, kind)                          \
-    do {                                                                \
-        if ((vm)->flags & JCC_ENABLE_DEBUGGER)                          \
-            debugger_check_watchpoint((vm), (addr), (size), (kind));    \
-    } while (0)
-
-static inline int check_stack_overflow(JCC *vm, int slots_needed) {
-    if (vm->sp - slots_needed - STACK_GUARD_SIZE < vm->stack_base) {
-        // Try to grow the stack downward before reporting overflow.
-        // With PROT_NONE pages below the committed floor, crossing without
-        // growing first would produce a hard SIGSEGV, so growth must happen
-        // here before any sp decrement.
-        if (vm_stack_grow(vm, slots_needed + STACK_GUARD_SIZE) == 0)
-            return 0; // Growth succeeded; retry the caller's operation.
-        // Reservation exhausted — true overflow.
-        printf("\n========== STACK OVERFLOW ==========\n");
-        printf("Stack space exhausted\n");
-        printf("Requested:  %d slots (%d bytes)\n", slots_needed,
-               slots_needed * (int)sizeof(long long));
-        printf("Available:  %ld slots (%ld bytes)\n",
-               (long)(vm->sp - vm->stack_base),
-               (long)(vm->sp - vm->stack_base) * (long)sizeof(long long));
-        printf("PC:         %u\n", vm->pc);
-        printf("====================================\n");
-        return -1;
-    }
-    return 0;
-}
 
 // ========== Arithmetic Operations ==========
 
-int op_ADD3_fn(JCC *vm) {
+static inline int op_ADD3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -89,7 +55,7 @@ int op_ADD3_fn(JCC *vm) {
     return 0;
 }
 
-int op_SUB3_fn(JCC *vm) {
+static inline int op_SUB3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -114,7 +80,7 @@ int op_SUB3_fn(JCC *vm) {
     return 0;
 }
 
-int op_MUL3_fn(JCC *vm) {
+static inline int op_MUL3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -155,7 +121,7 @@ int op_MUL3_fn(JCC *vm) {
     return 0;
 }
 
-int op_DIV3_fn(JCC *vm) {
+static inline int op_DIV3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -190,7 +156,7 @@ int op_DIV3_fn(JCC *vm) {
     return 0;
 }
 
-int op_MOD3_fn(JCC *vm) {
+static inline int op_MOD3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -215,7 +181,7 @@ int op_MOD3_fn(JCC *vm) {
 
 // ========== Bitwise Operations ==========
 
-int op_AND3_fn(JCC *vm) {
+static inline int op_AND3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -225,7 +191,7 @@ int op_AND3_fn(JCC *vm) {
     return 0;
 }
 
-int op_OR3_fn(JCC *vm) {
+static inline int op_OR3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -235,7 +201,7 @@ int op_OR3_fn(JCC *vm) {
     return 0;
 }
 
-int op_XOR3_fn(JCC *vm) {
+static inline int op_XOR3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -245,7 +211,7 @@ int op_XOR3_fn(JCC *vm) {
     return 0;
 }
 
-int op_SHL3_fn(JCC *vm) {
+static inline int op_SHL3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -255,7 +221,7 @@ int op_SHL3_fn(JCC *vm) {
     return 0;
 }
 
-int op_SHR3_fn(JCC *vm) {
+static inline int op_SHR3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -265,7 +231,7 @@ int op_SHR3_fn(JCC *vm) {
     return 0;
 }
 
-int op_UDIV3_fn(JCC *vm) {
+static inline int op_UDIV3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -287,7 +253,7 @@ int op_UDIV3_fn(JCC *vm) {
     return 0;
 }
 
-int op_UMOD3_fn(JCC *vm) {
+static inline int op_UMOD3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -309,7 +275,7 @@ int op_UMOD3_fn(JCC *vm) {
     return 0;
 }
 
-int op_USHR3_fn(JCC *vm) {
+static inline int op_USHR3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -321,7 +287,7 @@ int op_USHR3_fn(JCC *vm) {
 
 // ========== Comparison Operations ==========
 
-int op_SEQ3_fn(JCC *vm) {
+static inline int op_SEQ3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -331,7 +297,7 @@ int op_SEQ3_fn(JCC *vm) {
     return 0;
 }
 
-int op_SNE3_fn(JCC *vm) {
+static inline int op_SNE3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -341,7 +307,7 @@ int op_SNE3_fn(JCC *vm) {
     return 0;
 }
 
-int op_SLT3_fn(JCC *vm) {
+static inline int op_SLT3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -351,7 +317,7 @@ int op_SLT3_fn(JCC *vm) {
     return 0;
 }
 
-int op_SGE3_fn(JCC *vm) {
+static inline int op_SGE3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -361,7 +327,7 @@ int op_SGE3_fn(JCC *vm) {
     return 0;
 }
 
-int op_SGT3_fn(JCC *vm) {
+static inline int op_SGT3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -371,7 +337,7 @@ int op_SGT3_fn(JCC *vm) {
     return 0;
 }
 
-int op_SLE3_fn(JCC *vm) {
+static inline int op_SLE3_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -383,7 +349,7 @@ int op_SLE3_fn(JCC *vm) {
 
 // ========== Data Movement ==========
 
-int op_LI3_fn(JCC *vm) {
+static inline int op_LI3_fn(JCC *vm) {
     // Load immediate: [LI3] [rd:8] [immediate:64]
     long long operands = cc_read_word(vm);
     int rd;
@@ -394,7 +360,7 @@ int op_LI3_fn(JCC *vm) {
     return 0;
 }
 
-int op_LDA3_fn(JCC *vm) {
+static inline int op_LDA3_fn(JCC *vm) {
     // Load data-relative address: [LDA3] [rd:8] [byte_offset:64]
     long long operands = cc_read_word(vm);
     int rd;
@@ -405,7 +371,7 @@ int op_LDA3_fn(JCC *vm) {
     return 0;
 }
 
-int op_LTA3_fn(JCC *vm) {
+static inline int op_LTA3_fn(JCC *vm) {
     // Load text-relative address: [LTA3] [rd:8] [byte_offset:64]
     long long operands = cc_read_word(vm);
     int rd;
@@ -416,7 +382,7 @@ int op_LTA3_fn(JCC *vm) {
     return 0;
 }
 
-int op_MOV3_fn(JCC *vm) {
+static inline int op_MOV3_fn(JCC *vm) {
     // Move register: [MOV3] [rd:8|rs1:8|unused:48]
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
@@ -429,7 +395,7 @@ int op_MOV3_fn(JCC *vm) {
 
 // ========== Register-Based Calling Convention ==========
 
-int op_ENT3_fn(JCC *vm) {
+static inline int op_ENT3_fn(JCC *vm) {
     // Enter function: [ENT3] [stack_size:32|param_count:32]
     // [f32_param_mask:32|float_param_mask:32]
     // Creates new stack frame and copies REG_A0-REG_An and FREG_A0-FREG_An to
@@ -512,7 +478,7 @@ int op_ENT3_fn(JCC *vm) {
     return 0;
 }
 
-int op_LEV3_fn(JCC *vm) {
+static inline int op_LEV3_fn(JCC *vm) {
     // Leave function: return value already in REG_A0/FREG_A0, restore frame
     // (Caller placed return value in REG_A0 before LEV3)
 
@@ -570,7 +536,7 @@ int op_LEV3_fn(JCC *vm) {
 
 // ========== 3-Register Floating-Point Arithmetic ==========
 
-int op_FADD3_fn(JCC *vm) {
+static inline int op_FADD3_fn(JCC *vm) {
     // fregs[rd] = fregs[rs1] + fregs[rs2]
     // Format: [FADD3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -581,7 +547,7 @@ int op_FADD3_fn(JCC *vm) {
     return 0;
 }
 
-int op_FSUB3_fn(JCC *vm) {
+static inline int op_FSUB3_fn(JCC *vm) {
     // fregs[rd] = fregs[rs1] - fregs[rs2]
     // Format: [FSUB3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -592,7 +558,7 @@ int op_FSUB3_fn(JCC *vm) {
     return 0;
 }
 
-int op_FMUL3_fn(JCC *vm) {
+static inline int op_FMUL3_fn(JCC *vm) {
     // fregs[rd] = fregs[rs1] * fregs[rs2]
     // Format: [FMUL3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -603,7 +569,7 @@ int op_FMUL3_fn(JCC *vm) {
     return 0;
 }
 
-int op_FDIV3_fn(JCC *vm) {
+static inline int op_FDIV3_fn(JCC *vm) {
     // fregs[rd] = fregs[rs1] / fregs[rs2]
     // Format: [FDIV3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -623,7 +589,7 @@ int op_FDIV3_fn(JCC *vm) {
     return 0;
 }
 
-int op_FMOV3_fn(JCC *vm) {
+static inline int op_FMOV3_fn(JCC *vm) {
     // fregs[rd] = fregs[rs1]
     // Format: [FMOV3] [rd:8|rs1:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -634,7 +600,7 @@ int op_FMOV3_fn(JCC *vm) {
     return 0;
 }
 
-int op_FNEG3_fn(JCC *vm) {
+static inline int op_FNEG3_fn(JCC *vm) {
     // fregs[rd] = -fregs[rs1]
     // Format: [FNEG3] [rd:8|rs1:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -647,7 +613,7 @@ int op_FNEG3_fn(JCC *vm) {
 
 // ========== 3-Register Floating-Point Comparisons ==========
 
-int op_FEQ3_fn(JCC *vm) {
+static inline int op_FEQ3_fn(JCC *vm) {
     // regs[rd] = (fregs[rs1] == fregs[rs2])
     // Format: [FEQ3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -658,7 +624,7 @@ int op_FEQ3_fn(JCC *vm) {
     return 0;
 }
 
-int op_FNE3_fn(JCC *vm) {
+static inline int op_FNE3_fn(JCC *vm) {
     // regs[rd] = (fregs[rs1] != fregs[rs2])
     // Format: [FNE3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -669,7 +635,7 @@ int op_FNE3_fn(JCC *vm) {
     return 0;
 }
 
-int op_FLT3_fn(JCC *vm) {
+static inline int op_FLT3_fn(JCC *vm) {
     // regs[rd] = (fregs[rs1] < fregs[rs2])
     // Format: [FLT3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -680,7 +646,7 @@ int op_FLT3_fn(JCC *vm) {
     return 0;
 }
 
-int op_FLE3_fn(JCC *vm) {
+static inline int op_FLE3_fn(JCC *vm) {
     // regs[rd] = (fregs[rs1] <= fregs[rs2])
     // Format: [FLE3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -691,7 +657,7 @@ int op_FLE3_fn(JCC *vm) {
     return 0;
 }
 
-int op_FGT3_fn(JCC *vm) {
+static inline int op_FGT3_fn(JCC *vm) {
     // regs[rd] = (fregs[rs1] > fregs[rs2])
     // Format: [FGT3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -702,7 +668,7 @@ int op_FGT3_fn(JCC *vm) {
     return 0;
 }
 
-int op_FGE3_fn(JCC *vm) {
+static inline int op_FGE3_fn(JCC *vm) {
     // regs[rd] = (fregs[rs1] >= fregs[rs2])
     // Format: [FGE3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -715,7 +681,7 @@ int op_FGE3_fn(JCC *vm) {
 
 // ========== Internal Operations ==========
 
-int op_ADDI3_fn(JCC *vm) {
+static inline int op_ADDI3_fn(JCC *vm) {
     // Add immediate: regs[rd] = regs[rs1] + immediate
     // Format: [ADDI3] [rd:8|rs1:8|unused:48] [immediate:64]
     // Used for struct offset calculations: struct_addr + offset
@@ -729,7 +695,7 @@ int op_ADDI3_fn(JCC *vm) {
     return 0;
 }
 
-int op_NEG3_fn(JCC *vm) {
+static inline int op_NEG3_fn(JCC *vm) {
     // Integer negation: regs[rd] = -regs[rs1]
     // Format: [NEG3] [rd:8|rs1:8|unused:48]
     // Replaces PUSH/-1/MUL pattern for ND_NEG
@@ -744,7 +710,7 @@ int op_NEG3_fn(JCC *vm) {
 
 // ========== Register-Based Load/Store ==========
 
-int op_LDR_B_fn(JCC *vm) {
+static inline int op_LDR_B_fn(JCC *vm) {
     // Load byte (sign-extend): regs[rd] = *(char*)regs[rs]
     // Format: [LDR_B] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -757,7 +723,7 @@ int op_LDR_B_fn(JCC *vm) {
     return 0;
 }
 
-int op_LDR_H_fn(JCC *vm) {
+static inline int op_LDR_H_fn(JCC *vm) {
     // Load halfword (sign-extend): regs[rd] = *(short*)regs[rs]
     // Format: [LDR_H] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -770,7 +736,7 @@ int op_LDR_H_fn(JCC *vm) {
     return 0;
 }
 
-int op_LDR_W_fn(JCC *vm) {
+static inline int op_LDR_W_fn(JCC *vm) {
     // Load word (sign-extend): regs[rd] = *(int*)regs[rs]
     // Format: [LDR_W] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -783,7 +749,7 @@ int op_LDR_W_fn(JCC *vm) {
     return 0;
 }
 
-int op_LDR_D_fn(JCC *vm) {
+static inline int op_LDR_D_fn(JCC *vm) {
     // Load dword: regs[rd] = *(long long*)regs[rs]
     // Format: [LDR_D] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -796,7 +762,7 @@ int op_LDR_D_fn(JCC *vm) {
     return 0;
 }
 
-int op_STR_B_fn(JCC *vm) {
+static inline int op_STR_B_fn(JCC *vm) {
     // Store byte: *(char*)regs[rs] = regs[rd]
     // Format: [STR_B] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -808,7 +774,7 @@ int op_STR_B_fn(JCC *vm) {
     return 0;
 }
 
-int op_STR_H_fn(JCC *vm) {
+static inline int op_STR_H_fn(JCC *vm) {
     // Store halfword: *(short*)regs[rs] = regs[rd]
     // Format: [STR_H] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -820,7 +786,7 @@ int op_STR_H_fn(JCC *vm) {
     return 0;
 }
 
-int op_STR_W_fn(JCC *vm) {
+static inline int op_STR_W_fn(JCC *vm) {
     // Store word: *(int*)regs[rs] = regs[rd]
     // Format: [STR_W] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -832,7 +798,7 @@ int op_STR_W_fn(JCC *vm) {
     return 0;
 }
 
-int op_STR_D_fn(JCC *vm) {
+static inline int op_STR_D_fn(JCC *vm) {
     // Store dword: *(long long*)regs[rs] = regs[rd]
     // Format: [STR_D] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -844,7 +810,7 @@ int op_STR_D_fn(JCC *vm) {
     return 0;
 }
 
-int op_FLDR_fn(JCC *vm) {
+static inline int op_FLDR_fn(JCC *vm) {
     // Float load: fregs[rd] = *(double*)regs[rs]
     // Format: [FLDR] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -856,7 +822,7 @@ int op_FLDR_fn(JCC *vm) {
     return 0;
 }
 
-int op_FSTR_fn(JCC *vm) {
+static inline int op_FSTR_fn(JCC *vm) {
     // Float store: *(double*)regs[rs] = fregs[rd]
     // Format: [FSTR] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -868,7 +834,7 @@ int op_FSTR_fn(JCC *vm) {
     return 0;
 }
 
-int op_FLDR_F32_fn(JCC *vm) {
+static inline int op_FLDR_F32_fn(JCC *vm) {
     // Float32 load: fregs[rd] = (double)*(float*)regs[rs]
     // Format: [FLDR_F32] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -880,7 +846,7 @@ int op_FLDR_F32_fn(JCC *vm) {
     return 0;
 }
 
-int op_FSTR_F32_fn(JCC *vm) {
+static inline int op_FSTR_F32_fn(JCC *vm) {
     // Float32 store: *(float*)regs[rs] = (float)fregs[rd]
     // Format: [FSTR_F32] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -892,7 +858,7 @@ int op_FSTR_F32_fn(JCC *vm) {
     return 0;
 }
 
-int op_FROUND_F32_fn(JCC *vm) {
+static inline int op_FROUND_F32_fn(JCC *vm) {
     // Float32 round: fregs[rd] = (float)fregs[rs]
     // Format: [FROUND_F32] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -903,7 +869,7 @@ int op_FROUND_F32_fn(JCC *vm) {
     return 0;
 }
 
-int op_LEA3_fn(JCC *vm) {
+static inline int op_LEA3_fn(JCC *vm) {
     // Load effective address: regs[rd] = bp + immediate
     // Format: [LEA3] [rd:8|unused:56] [immediate:64]
     long long operands = cc_read_word(vm);
@@ -916,7 +882,7 @@ int op_LEA3_fn(JCC *vm) {
     return 0;
 }
 
-int op_I2F3_fn(JCC *vm) {
+static inline int op_I2F3_fn(JCC *vm) {
     // Int to float: fregs[rd] = (double)regs[rs]
     // Format: [I2F3] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -927,7 +893,7 @@ int op_I2F3_fn(JCC *vm) {
     return 0;
 }
 
-int op_F2I3_fn(JCC *vm) {
+static inline int op_F2I3_fn(JCC *vm) {
     // Float to int: regs[rd] = (long long)fregs[rs]
     // Format: [F2I3] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -939,7 +905,7 @@ int op_F2I3_fn(JCC *vm) {
     return 0;
 }
 
-int op_FR2R_fn(JCC *vm) {
+static inline int op_FR2R_fn(JCC *vm) {
     // Float register to integer register (bit-pattern transfer, no conversion)
     // Format: [FR2R] [rd:8|rs:8|unused:48]
     // Copies the raw IEEE 754 bits of the double to an integer register
@@ -958,7 +924,7 @@ int op_FR2R_fn(JCC *vm) {
     return 0;
 }
 
-int op_R2FR_fn(JCC *vm) {
+static inline int op_R2FR_fn(JCC *vm) {
     // Integer register to float register (bit-pattern transfer, no conversion)
     // Format: [R2FR] [rd:8|rs:8|unused:48]
     // Copies the raw bits from integer register to a double (reverse of FR2R)
@@ -975,7 +941,7 @@ int op_R2FR_fn(JCC *vm) {
     return 0;
 }
 
-int op_JZ3_fn(JCC *vm) {
+static inline int op_JZ3_fn(JCC *vm) {
     // Branch if zero: if (regs[rs] == 0) pc = target
     // Format: [JZ3] [rs:8|unused:56] [target:64]
     long long operands = cc_read_word(vm);
@@ -988,7 +954,7 @@ int op_JZ3_fn(JCC *vm) {
     return 0;
 }
 
-int op_JNZ3_fn(JCC *vm) {
+static inline int op_JNZ3_fn(JCC *vm) {
     // Branch if non-zero: if (regs[rs] != 0) pc = target
     // Format: [JNZ3] [rs:8|unused:56] [target:64]
     long long operands = cc_read_word(vm);
@@ -1001,7 +967,7 @@ int op_JNZ3_fn(JCC *vm) {
     return 0;
 }
 
-int op_NOT3_fn(JCC *vm) {
+static inline int op_NOT3_fn(JCC *vm) {
     // Logical not: regs[rd] = !regs[rs]
     // Format: [NOT3] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1013,7 +979,7 @@ int op_NOT3_fn(JCC *vm) {
     return 0;
 }
 
-int op_BNOT3_fn(JCC *vm) {
+static inline int op_BNOT3_fn(JCC *vm) {
     // Bitwise not: regs[rd] = ~regs[rs]
     // Format: [BNOT3] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1027,7 +993,7 @@ int op_BNOT3_fn(JCC *vm) {
 
 // ========== Register-Based Safety Opcodes ==========
 
-int op_CHKP3_fn(JCC *vm) {
+static inline int op_CHKP3_fn(JCC *vm) {
     // Check pointer validity (register-based version of CHKP)
     // Format: [CHKP3] [rs:8|unused:56]
     long long operands = cc_read_word(vm);
@@ -1072,7 +1038,7 @@ int op_CHKP3_fn(JCC *vm) {
     return 0;
 }
 
-int op_CHKA3_fn(JCC *vm) {
+static inline int op_CHKA3_fn(JCC *vm) {
     // Check pointer alignment (register-based version of CHKA)
     // Format: [CHKA3] [rs:8|unused:56] [alignment:64]
     long long operands = cc_read_word(vm);
@@ -1103,7 +1069,7 @@ int op_CHKA3_fn(JCC *vm) {
     return 0;
 }
 
-int op_CHKT3_fn(JCC *vm) {
+static inline int op_CHKT3_fn(JCC *vm) {
     // Check type on dereference (register-based version of CHKT)
     // Format: [CHKT3] [rs:8|unused:56] [expected_type:64]
     long long operands = cc_read_word(vm);
@@ -1170,12 +1136,12 @@ int op_CHKT3_fn(JCC *vm) {
 
 // ========== Control Flow Opcodes ==========
 
-int op_JMP_fn(JCC *vm) {
+static inline int op_JMP_fn(JCC *vm) {
     vm->pc = cc_read_word(vm);
     return 0;
 }
 
-int op_CALL_fn(JCC *vm) {
+static inline int op_CALL_fn(JCC *vm) {
     // Call subroutine: push return address to main stack and shadow stack
     JCCPc target = cc_read_word(vm);
     long long ret_addr = (long long)vm->pc;
@@ -1189,7 +1155,7 @@ int op_CALL_fn(JCC *vm) {
     return 0;
 }
 
-int op_CALLI_fn(JCC *vm) {
+static inline int op_CALLI_fn(JCC *vm) {
     // Call indirect: function address in register (read from operand)
     long long operands = cc_read_word(vm);
     int rs = (int)(operands & 0xFF);
@@ -1208,7 +1174,7 @@ int op_CALLI_fn(JCC *vm) {
     return 0;
 }
 
-int op_CALLN_fn(JCC *vm) {
+static inline int op_CALLN_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rs = (int)(operands & 0xFF);
     JCCInstrWord meta = cc_read_word(vm);
@@ -1271,7 +1237,7 @@ int op_CALLN_fn(JCC *vm) {
     return 0;
 }
 
-int op_JMPT_fn(JCC *vm) {
+static inline int op_JMPT_fn(JCC *vm) {
     JCCPc table_pc = cc_read_word(vm);
     JCCInstrWord count = cc_read_word(vm);
     JCCPc default_pc = cc_read_word(vm);
@@ -1284,7 +1250,7 @@ int op_JMPT_fn(JCC *vm) {
     return 0;
 }
 
-int op_JMPI_fn(JCC *vm) {
+static inline int op_JMPI_fn(JCC *vm) {
     // Jump indirect - address in register specified by operand
     // Format: [JMPI] [rs:8|unused:56]
     long long operands = cc_read_word(vm);
@@ -1299,12 +1265,12 @@ int op_JMPI_fn(JCC *vm) {
     return 0;
 }
 
-int op_ADJ_fn(JCC *vm) {
+static inline int op_ADJ_fn(JCC *vm) {
     vm->sp = vm->sp + cc_read_i64(vm);
     return 0;
 }
 
-int op_PSH3_fn(JCC *vm) {
+static inline int op_PSH3_fn(JCC *vm) {
     // Push register value onto stack: *--sp = regs[rs]
     // Format: [PSH3] [rs:8|unused:56]
     long long operands = cc_read_word(vm);
@@ -1317,7 +1283,7 @@ int op_PSH3_fn(JCC *vm) {
     return 0;
 }
 
-int op_POP3_fn(JCC *vm) {
+static inline int op_POP3_fn(JCC *vm) {
     // Pop from stack into register: regs[rd] = *sp++
     // Format: [POP3] [rd:8|unused:56]
     long long operands = cc_read_word(vm);
@@ -1329,7 +1295,7 @@ int op_POP3_fn(JCC *vm) {
 
 // ========== Type Conversion Opcodes ==========
 
-int op_SX1_fn(JCC *vm) {
+static inline int op_SX1_fn(JCC *vm) {
     // Sign extend 1 byte to 8 bytes: regs[rd] = (long long)(char)regs[rs]
     // Format: [SX1] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1339,7 +1305,7 @@ int op_SX1_fn(JCC *vm) {
     return 0;
 }
 
-int op_SX2_fn(JCC *vm) {
+static inline int op_SX2_fn(JCC *vm) {
     // Sign extend 2 bytes to 8 bytes: regs[rd] = (long long)(short)regs[rs]
     // Format: [SX2] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1349,7 +1315,7 @@ int op_SX2_fn(JCC *vm) {
     return 0;
 }
 
-int op_SX4_fn(JCC *vm) {
+static inline int op_SX4_fn(JCC *vm) {
     // Sign extend 4 bytes to 8 bytes: regs[rd] = (long long)(int)regs[rs]
     // Format: [SX4] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1359,7 +1325,7 @@ int op_SX4_fn(JCC *vm) {
     return 0;
 }
 
-int op_ZX1_fn(JCC *vm) {
+static inline int op_ZX1_fn(JCC *vm) {
     // Zero extend 1 byte to 8 bytes: regs[rd] = (long long)(unsigned
     // char)regs[rs] Format: [ZX1] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1369,7 +1335,7 @@ int op_ZX1_fn(JCC *vm) {
     return 0;
 }
 
-int op_ZX2_fn(JCC *vm) {
+static inline int op_ZX2_fn(JCC *vm) {
     // Zero extend 2 bytes to 8 bytes: regs[rd] = (long long)(unsigned
     // short)regs[rs] Format: [ZX2] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1379,7 +1345,7 @@ int op_ZX2_fn(JCC *vm) {
     return 0;
 }
 
-int op_ZX4_fn(JCC *vm) {
+static inline int op_ZX4_fn(JCC *vm) {
     // Zero extend 4 bytes to 8 bytes: regs[rd] = (long long)(unsigned
     // int)regs[rs] Format: [ZX4] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1391,7 +1357,7 @@ int op_ZX4_fn(JCC *vm) {
 
 // ========== Memory Allocation Opcodes ==========
 
-int op_MALC_fn(JCC *vm) {
+static inline int op_MALC_fn(JCC *vm) {
     // malloc: size in REG_A0, return pointer in REG_A0
     long long requested_size = vm->regs[REG_A0];
     if (requested_size <= 0) {
@@ -1436,7 +1402,7 @@ int op_MALC_fn(JCC *vm) {
     return 0;
 }
 
-int op_MFRE_fn(JCC *vm) {
+static inline int op_MFRE_fn(JCC *vm) {
     // free: pointer in REG_A0
     void *ptr = (void *)vm->regs[REG_A0];
     if (!ptr) {
@@ -1470,7 +1436,7 @@ int op_MFRE_fn(JCC *vm) {
     return 0;
 }
 
-int op_MCPY_fn(JCC *vm) {
+static inline int op_MCPY_fn(JCC *vm) {
     // memcpy: dest in REG_A0, src in REG_A1, count in REG_A2
     void *dest = (void *)vm->regs[REG_A0];
     void *src = (void *)vm->regs[REG_A1];
@@ -1479,7 +1445,7 @@ int op_MCPY_fn(JCC *vm) {
     return 0;
 }
 
-int op_REALC_fn(JCC *vm) {
+static inline int op_REALC_fn(JCC *vm) {
     // realloc: ptr in REG_A0, new_size in REG_A1, return in REG_A0
     void *ptr = (void *)vm->regs[REG_A0];
     long long new_size = vm->regs[REG_A1];
@@ -1521,7 +1487,7 @@ int op_REALC_fn(JCC *vm) {
     return 0;
 }
 
-int op_CALC_fn(JCC *vm) {
+static inline int op_CALC_fn(JCC *vm) {
     // calloc: nmemb in REG_A0, size in REG_A1, return in REG_A0
     long long nmemb = vm->regs[REG_A0];
     long long size = vm->regs[REG_A1];
@@ -1540,7 +1506,7 @@ int op_CALC_fn(JCC *vm) {
 
 // ========== Safety Opcodes ==========
 
-int op_CHKB_fn(JCC *vm) {
+static inline int op_CHKB_fn(JCC *vm) {
     // Check array bounds.
     // Format: [CHKB] [rs1:base, rs2:scaled_offset] (RR operand word)
     // rs1 = base pointer, rs2 = scaled byte offset (index * element_size)
@@ -1584,7 +1550,7 @@ int op_CHKB_fn(JCC *vm) {
     return 0;
 }
 
-int op_CHKI_fn(JCC *vm) {
+static inline int op_CHKI_fn(JCC *vm) {
     // Check initialization: fail if variable at bp+offset has not been written.
     // Format: [CHKI] [offset:i64]
     long long offset = cc_read_i64(vm);
@@ -1607,7 +1573,7 @@ int op_CHKI_fn(JCC *vm) {
     return 0;
 }
 
-int op_MARKI_fn(JCC *vm) {
+static inline int op_MARKI_fn(JCC *vm) {
     // Mark variable at bp+offset as initialized.
     // Format: [MARKI] [offset:i64]
     long long offset = cc_read_i64(vm);
@@ -1620,7 +1586,7 @@ int op_MARKI_fn(JCC *vm) {
     return 0;
 }
 
-int op_MARKA_fn(JCC *vm) {
+static inline int op_MARKA_fn(JCC *vm) {
     // Mark a stack address for dangling-pointer detection.
     // Format: [MARKA] [rs:ptr] [offset:i64] [size:i64] [scope_id:i64]
     long long operands = cc_read_word(vm);
@@ -1653,7 +1619,7 @@ int op_MARKA_fn(JCC *vm) {
     return 0;
 }
 
-int op_CHKPA_fn(JCC *vm) {
+static inline int op_CHKPA_fn(JCC *vm) {
     // Check pointer arithmetic result against its recorded provenance.
     // Format: [CHKPA] [rs:ptr_result]
     long long operands = cc_read_word(vm);
@@ -1688,7 +1654,7 @@ int op_CHKPA_fn(JCC *vm) {
     return 0;
 }
 
-int op_MARKP_fn(JCC *vm) {
+static inline int op_MARKP_fn(JCC *vm) {
     // Record provenance for a pointer (origin, base, size).
     // Format: [MARKP] [rs_ptr:8 | rs_base:8] [origin_type:i64] [size:i64]
     long long operands = cc_read_word(vm);
@@ -1713,7 +1679,7 @@ int op_MARKP_fn(JCC *vm) {
     return 0;
 }
 
-int op_SCOPEIN_fn(JCC *vm) {
+static inline int op_SCOPEIN_fn(JCC *vm) {
     // Activate all stack variables belonging to scope_id.
     // Format: [SCOPEIN] [scope_id:i64]
     int scope_id = (int)cc_read_word(vm);
@@ -1744,7 +1710,7 @@ int op_SCOPEIN_fn(JCC *vm) {
     return 0;
 }
 
-int op_SCOPEOUT_fn(JCC *vm) {
+static inline int op_SCOPEOUT_fn(JCC *vm) {
     // Deactivate variables in scope_id and detect dangling pointers.
     // Format: [SCOPEOUT] [scope_id:i64]
     int scope_id = (int)cc_read_word(vm);
@@ -1797,7 +1763,7 @@ int op_SCOPEOUT_fn(JCC *vm) {
     return 0;
 }
 
-int op_CHKL_fn(JCC *vm) {
+static inline int op_CHKL_fn(JCC *vm) {
     // Check variable liveness before access (use-after-scope / use-after-return).
     // Format: [CHKL] [offset:i64]
     long long offset = cc_read_i64(vm);
@@ -1841,7 +1807,7 @@ int op_CHKL_fn(JCC *vm) {
     return 0;
 }
 
-int op_MARKR_fn(JCC *vm) {
+static inline int op_MARKR_fn(JCC *vm) {
     // Record a read access to the variable at bp+offset.
     // Format: [MARKR] [offset:i64]
     long long offset = cc_read_i64(vm);
@@ -1859,7 +1825,7 @@ int op_MARKR_fn(JCC *vm) {
     return 0;
 }
 
-int op_MARKW_fn(JCC *vm) {
+static inline int op_MARKW_fn(JCC *vm) {
     // Record a write access to the variable at bp+offset; marks it initialized.
     // Format: [MARKW] [offset:i64]
     long long offset = cc_read_i64(vm);
@@ -1881,7 +1847,7 @@ int op_MARKW_fn(JCC *vm) {
 
 // ========== Setjmp/Longjmp ==========
 
-int op_SETJMP_fn(JCC *vm) {
+static inline int op_SETJMP_fn(JCC *vm) {
     // setjmp: jmp_buf address in REG_A0, return 0 in REG_A0
     long long *jmp_buf = (long long *)vm->regs[REG_A0];
     jmp_buf[0] = (long long)vm->pc;
@@ -1895,7 +1861,7 @@ int op_SETJMP_fn(JCC *vm) {
     return 0;
 }
 
-int op_LONGJMP_fn(JCC *vm) {
+static inline int op_LONGJMP_fn(JCC *vm) {
     // longjmp: jmp_buf address in REG_A0, value in REG_A1
     long long *jmp_buf = (long long *)vm->regs[REG_A0];
     long long val = vm->regs[REG_A1];
@@ -1914,26 +1880,26 @@ int op_LONGJMP_fn(JCC *vm) {
     return 0;
 }
 
-int op_DLOPEN_fn(JCC *vm) {
+static inline int op_DLOPEN_fn(JCC *vm) {
     const char *path = (const char *)vm->regs[REG_A0];
     int mode = (int)vm->regs[REG_A1];
     vm->regs[REG_A0] = jcc_rt_dlopen(vm, path, mode);
     return 0;
 }
 
-int op_DLSYM_fn(JCC *vm) {
+static inline int op_DLSYM_fn(JCC *vm) {
     long long handle = vm->regs[REG_A0];
     const char *symbol = (const char *)vm->regs[REG_A1];
     vm->regs[REG_A0] = jcc_rt_dlsym(vm, handle, symbol);
     return 0;
 }
 
-int op_DLCLOSE_fn(JCC *vm) {
+static inline int op_DLCLOSE_fn(JCC *vm) {
     vm->regs[REG_A0] = jcc_rt_dlclose(vm, vm->regs[REG_A0]);
     return 0;
 }
 
-int op_DLERROR_fn(JCC *vm) {
+static inline int op_DLERROR_fn(JCC *vm) {
     vm->regs[REG_A0] = jcc_rt_dlerror(vm);
     return 0;
 }
@@ -2079,7 +2045,7 @@ int jcc_call_native_function(JCC *vm, void *func_ptr, const char *name,
     return 0;
 }
 
-int op_CALLF_fn(JCC *vm) {
+static inline int op_CALLF_fn(JCC *vm) {
     // Foreign function call using register-based calling convention
     // Operands: [ffi_idx, nargs, double_arg_mask]
     int func_idx = (int)cc_read_word(vm);
@@ -2138,7 +2104,7 @@ int op_CALLF_fn(JCC *vm) {
 
 // ========== Struct Return Buffer Support ==========
 
-int op_RETBUF_fn(JCC *vm) {
+static inline int op_RETBUF_fn(JCC *vm) {
     // Get next return buffer from rotating pool at runtime
     // This ensures chained struct-returning calls (e.g., f(g(), h()))
     // get different buffers automatically
@@ -2157,7 +2123,7 @@ int op_RETBUF_fn(JCC *vm) {
     return 0;
 }
 
-int op_BTRAP_fn(JCC *vm) {
+static inline int op_BTRAP_fn(JCC *vm) {
     printf("\n========== UNREACHABLE EXECUTED ==========\n");
     printf("__builtin_unreachable() or TRAP was executed at PC %u\n", vm->pc);
     printf("This code path should never be reached.\n");
@@ -2167,7 +2133,7 @@ int op_BTRAP_fn(JCC *vm) {
 
 // ========== Bit-Manipulation Builtins ==========
 
-int op_CLZ_fn(JCC *vm) {
+static inline int op_CLZ_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
@@ -2183,7 +2149,7 @@ int op_CLZ_fn(JCC *vm) {
     return 0;
 }
 
-int op_CTZ_fn(JCC *vm) {
+static inline int op_CTZ_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
@@ -2199,7 +2165,7 @@ int op_CTZ_fn(JCC *vm) {
     return 0;
 }
 
-int op_POPCOUNT_fn(JCC *vm) {
+static inline int op_POPCOUNT_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
@@ -2209,7 +2175,7 @@ int op_POPCOUNT_fn(JCC *vm) {
     return 0;
 }
 
-int op_FFS_fn(JCC *vm) {
+static inline int op_FFS_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
@@ -2225,7 +2191,7 @@ int op_FFS_fn(JCC *vm) {
     return 0;
 }
 
-int op_BSWAP_fn(JCC *vm) {
+static inline int op_BSWAP_fn(JCC *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
@@ -2245,7 +2211,7 @@ int op_BSWAP_fn(JCC *vm) {
 
 // ========== Checked Arithmetic Builtins ==========
 
-int op_IOVFL_fn(JCC *vm) {
+static inline int op_IOVFL_fn(JCC *vm) {
     // Operand: (op_type << 8) | (size_bytes << 1) | is_unsigned
     // op_type: 0=add, 1=sub, 2=mul
     // Inputs: a=regs[REG_A0], b=regs[REG_A1], ptr=regs[REG_A2]

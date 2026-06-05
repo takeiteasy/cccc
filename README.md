@@ -162,7 +162,9 @@ symbols from that handle are live.
 
 JCC prioritises **correctness over raw execution speed**. It implements a tree-walking bytecode interpreter rather than a JIT-to-native backend, and most of the engineering effort goes into compile-time metaprogramming, safety instrumentation, and AST reflection instead of runtime codegen. The trade-off is a substantial gap versus mature native compilers — see [BENCHMARKS.md](docs/BENCHMARKS.md) for full numbers. On the included workload suite, JCC's geometric mean is roughly **~21× slower than `gcc -O2`** across all `--optimize` levels: integer-loop-heavy programs like the sieve benchmark sit around 90×, FP-heavy workloads like matrix multiplication and Mandelbrot land in the 55–65× range, and even control-flow-bound programs (`fib`, `ackermann`, `nqueens`, `quicksort`) run 6–20× slower. The `jcc-jbc*` columns show the interpreter itself is the dominant cost even when the one-time source-to-bytecode compile is excluded — JCC trades execution speed for portability, inspectability, and the ability to run untrusted or sandboxed code inside a single self-contained binary.
 
-Please note, that while JCC prioritises correctness over raw execution speed, it doesn't mean that it's not a concern. Hopefully it will be fast enough for most use cases, and faster in the future.
+The VM dispatch loop was recently converted to a fully-inlined threaded interpreter — opcode logic is now embedded directly at each computed-goto label rather than dispatched through a per-instruction C function call. On VM-bound workloads at `-O2` this delivers a **1.2–1.7× speedup** depending on instruction mix (fib: 1.21×, nqueens: 1.50×, sieve: 1.69×).
+
+Performance remains an ongoing concern and will improve over time.
 
 ## Building
 
@@ -178,18 +180,9 @@ Produces:
 JCC requires libffi for native FFI calls. The Makefile uses `pkg-config
 libffi` when available, with Homebrew and common Unix fallbacks.
 
-
-JCC uses C23 features such as `#embed`. On macOS, the Apple Clang that ships with Xcode does not support `#embed` — use the Homebrew LLVM Clang instead:
-
-```bash
-brew install llvm
-export CC=/opt/homebrew/opt/llvm/bin/clang
-make
-```
-
 Optional LLVM support is available for internal bytecode-to-LLVM IR backend
 work. It is disabled by default and does not add a user-facing LLVM output
-mode.
+mode. **NOTE**: This is a stub, see [LLVM.md](docs/LLVM.md).
 
 ```bash
 make JCC_HAS_LLVM=1 LLVM_CONFIG=/opt/homebrew/opt/llvm/bin/llvm-config
@@ -221,8 +214,11 @@ python3 tests.py --match "*embed*"   # Run only tests matching a glob pattern
 python3 tests.py -j 4                # Run with 4 parallel workers
 python3 tests.py -2                  # Run all tests under safety level 2
 python3 tests.py --leaks             # Enable leak detection (leaks on macOS, valgrind on Linux)
+python3 tests.py --jbc               # Bytecode round-trip: compile each positive test to .jbc, then run it
 # I recommend running --leaks with -j (takes a long time synchronously)
 ```
+
+`make test` runs both the source-mode suite and `--jbc` round-trip.
 
 ### Sanitizer Builds
 

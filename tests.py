@@ -3,6 +3,10 @@
 
 Runs all test_*.c files in tests/ directory and reports results.
 Supports parallel execution with -j/--jobs.
+
+With --jbc, runs the bytecode round-trip: compile each positive test to
+a .jbc file and execute it, exercising the cc_save_bytecode / cc_load_bytecode
+FFI-table persistence and the cc_load_libc resolution path.
 """
 
 import argparse
@@ -19,6 +23,17 @@ import time
 from pathlib import Path
 
 
+# Tests that fail under the .jbc round-trip but pass in source mode.
+# These depend on dlopen(0, ...) seeing the same libc handle that source-mode
+# FFI setup uses; bytecode mode rehydrates libc separately.
+JBC_SKIP_TESTS = {
+    "test_ffi_allow_zero.c",
+    "test_ffi_deny_zero.c",
+    "test_ffi_deny_dlfcn_zero.c",
+    "test_ffi_disable_dlfcn_zero.c",
+}
+
+
 def detect_platform():
     system = os.uname().sysname if hasattr(os, "uname") else os.name
     if system == "Darwin":
@@ -31,7 +46,7 @@ def detect_platform():
         return "unknown"
 
 
-def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_args, bench=False):
+def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_args, bench=False, jbc_mode=False):
     tests_dir = Path(script_dir) / "tests"
     test_name = str(test_file.relative_to(tests_dir))
 
@@ -58,6 +73,12 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
                     reject_stderr = line.split("JCC_REJECT_STDERR:", 1)[1].strip().rstrip("*/").strip()
     except Exception:
         pass
+
+    if jbc_mode:
+        return run_jbc_roundtrip(
+            idx, test_file, test_name, jcc, script_dir, jcc_args, per_test_flags,
+            is_negative_test, expects_runtime_error, bench,
+        )
 
     if use_leaks:
         if platform == "macos":
@@ -197,6 +218,74 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
     }
 
 
+def run_jbc_roundtrip(idx, test_file, test_name, jcc, script_dir, jcc_args,
+                      per_test_flags, is_negative_test, expects_runtime_error, bench):
+    """Compile a test to .jbc, then run it. Returns a result dict.
+
+    Skips negative tests (EXPECT_COMPILE_ERROR / EXPECT_RUNTIME_ERROR) and
+    tests listed in JBC_SKIP_TESTS, since the round-trip is only meaningful
+    for tests that produce a working executable.
+    """
+    skip_reason = None
+    if is_negative_test:
+        skip_reason = "negative test"
+    elif expects_runtime_error:
+        skip_reason = "negative test"
+    elif test_file.name in JBC_SKIP_TESTS:
+        skip_reason = "jbc-incompatible"
+    if skip_reason:
+        return {
+            "idx": idx,
+            "test_name": test_name,
+            "exit_code": 0,
+            "status": "jbc_skipped",
+            "output": "",
+            "is_negative_test": is_negative_test,
+            "expects_runtime_error": expects_runtime_error,
+            "stderr_mismatch": None,
+            "elapsed": None,
+            "skip_reason": skip_reason,
+        }
+
+    with tempfile.TemporaryDirectory() as tmp:
+        jbc_path = Path(tmp) / (test_file.stem + ".jbc")
+        save_cmd = [
+            str(jcc), "-I./include", *jcc_args, *per_test_flags,
+            "-o", str(jbc_path), str(test_file),
+        ]
+        save = subprocess.run(save_cmd, capture_output=True, text=True, cwd=script_dir)
+        if save.returncode != 0:
+            return {
+                "idx": idx,
+                "test_name": test_name,
+                "exit_code": save.returncode,
+                "status": "jbc_save_failed",
+                "output": save.stderr,
+                "is_negative_test": False,
+                "expects_runtime_error": False,
+                "stderr_mismatch": None,
+                "elapsed": None,
+            }
+
+        run_cmd = [str(jcc), str(jbc_path)]
+        start = time.perf_counter() if bench else None
+        run = subprocess.run(run_cmd, capture_output=True, text=True, cwd=script_dir)
+        elapsed = (time.perf_counter() - start) if bench else None
+        output = run.stdout + run.stderr
+        status = "jbc_passed" if run.returncode == 42 else "jbc_failed"
+        return {
+            "idx": idx,
+            "test_name": test_name,
+            "exit_code": run.returncode,
+            "status": status,
+            "output": output,
+            "is_negative_test": False,
+            "expects_runtime_error": False,
+            "stderr_mismatch": None,
+            "elapsed": elapsed,
+        }
+
+
 def main():
     parser = argparse.ArgumentParser(description="Test runner for JCC")
     parser.add_argument(
@@ -229,6 +318,11 @@ def main():
     )
     parser.add_argument(
         "--profile-mem", action="store_true", help="Run tests with enhanced memory profiling (macOS: leaks+heap, Linux: valgrind)"
+    )
+    parser.add_argument(
+        "--jbc", action="store_true",
+        help="Run the .jbc bytecode round-trip: compile each positive test to a .jbc, then run it. "
+             "Negative tests and a small set of FFI tests that cannot survive rehydration are skipped."
     )
     args, jcc_args = parser.parse_known_args()
 
@@ -284,6 +378,14 @@ def main():
         print("Warning: Memory leak detection not supported on this platform")
         use_leaks = False
 
+    if args.jbc:
+        if use_leaks:
+            print("Warning: --leaks/--profile-mem are not supported in --jbc mode and will be ignored.")
+            use_leaks = False
+        if args.profile_cpu:
+            print("Warning: --profile-cpu is not supported in --jbc mode and will be ignored.")
+            args.profile_cpu = False
+
     # CPU profiling: use jcc-prof if available/requested
     if args.profile_cpu:
         jcc_prof = script_dir / "jcc-prof"
@@ -310,12 +412,14 @@ def main():
         print("Benchmarking mode: per-test timing enabled")
     if args.match:
         print(f"Filtering tests matching: {args.match}")
+    if args.jbc:
+        print("JBC mode: compiling each positive test to .jbc, then executing the bytecode")
     print(f"Using {n_jobs} parallel jobs")
     print("=======================")
     print()
 
     test_args = [
-        (i, test_file, jcc, str(script_dir), use_leaks, platform, jcc_args, args.bench)
+        (i, test_file, jcc, str(script_dir), use_leaks, platform, jcc_args, args.bench, args.jbc)
         for i, test_file in enumerate(test_files)
     ]
 
@@ -328,11 +432,17 @@ def main():
     failed = 0
     crashed = 0
     negative_passed = 0
+    jbc_passed = 0
+    jbc_failed = 0
+    jbc_skipped = 0
+    jbc_save_failed = 0
     failed_tests = []
     crashed_tests = []
+    jbc_skipped_tests = []
 
     def print_single_result(result):
         nonlocal total, passed, failed, crashed, negative_passed
+        nonlocal jbc_passed, jbc_failed, jbc_skipped, jbc_save_failed
         total += 1
         test_name = result["test_name"]
         status = result["status"]
@@ -381,6 +491,28 @@ def main():
             print(f"✗ {test_name} ({result['stderr_mismatch']}){timing_str}")
             for line in output.splitlines()[:5]:
                 print(f"  {line}")
+        elif status == "jbc_passed":
+            jbc_passed += 1
+            print(f"✓ {test_name}{timing_str}")
+        elif status == "jbc_skipped":
+            jbc_skipped += 1
+            reason = result.get("skip_reason", "")
+            if reason:
+                jbc_skipped_tests.append(f"{test_name} ({reason})")
+        elif status == "jbc_save_failed":
+            jbc_save_failed += 1
+            failed += 1
+            failed_tests.append(f"{test_name} (JBC SAVE FAILED)")
+            print(f"✗ {test_name} (JBC SAVE FAILED){timing_str}")
+            for line in output.splitlines()[:3]:
+                print(f"  {line}")
+        elif status == "jbc_failed":
+            jbc_failed += 1
+            failed += 1
+            failed_tests.append(f"{test_name} (JBC RUNTIME FAILED, exit {exit_code})")
+            print(f"✗ {test_name} (JBC RUNTIME FAILED, exit {exit_code}){timing_str}")
+            for line in output.splitlines()[:3]:
+                print(f"  {line}")
 
     def flush_results():
         nonlocal next_to_print
@@ -423,11 +555,18 @@ def main():
     print("=======================")
     print("Test Results Summary")
     print("=======================")
-    print(f"Total:          {total}")
-    print(f"Passed:         {passed}")
-    print(f"Negative tests: {negative_passed} (correctly rejected invalid code)")
-    print(f"Failed:         {failed}")
-    print(f"Crashed:        {crashed}")
+    if args.jbc:
+        print(f"Total:          {total}")
+        print(f"JBC passed:     {jbc_passed}")
+        print(f"JBC skipped:    {jbc_skipped}")
+        print(f"JBC failed:     {jbc_failed}")
+        print(f"JBC save fail:  {jbc_save_failed}")
+    else:
+        print(f"Total:          {total}")
+        print(f"Passed:         {passed}")
+        print(f"Negative tests: {negative_passed} (correctly rejected invalid code)")
+        print(f"Failed:         {failed}")
+        print(f"Crashed:        {crashed}")
 
     if crashed > 0:
         print()
@@ -439,6 +578,12 @@ def main():
         print()
         print("Failed tests:")
         for test in failed_tests:
+            print(f"  - {test}")
+
+    if args.jbc and jbc_skipped > 0:
+        print()
+        print(f"JBC skipped tests ({jbc_skipped}):")
+        for test in jbc_skipped_tests:
             print(f"  - {test}")
 
     if args.bench and timings:
@@ -461,8 +606,12 @@ def main():
     if failed > 0 or crashed > 0:
         sys.exit(1)
     else:
-        print()
-        print("All tests passed! 🎉")
+        if args.jbc:
+            print()
+            print(f"All {jbc_passed} jbc roundtrips passed ({jbc_skipped} skipped).")
+        else:
+            print()
+            print("All tests passed! 🎉")
         sys.exit(0)
 
 

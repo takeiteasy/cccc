@@ -245,9 +245,7 @@ long long jcc_rt_dlerror(JCC *vm) {
     return (long long)vm->dyn_error;
 }
 
-#define X(NAME, OPERANDS) extern int op_##NAME##_fn(JCC *vm);
-OPS_X
-#undef X
+#include "ops.c"
 
 int vm_eval(JCC *vm) {
     static void *op_table[] = {
