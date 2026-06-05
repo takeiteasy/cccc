@@ -1953,6 +1953,29 @@ static Token *handle_gcc_diagnostic(JCC *vm, Token *tok) {
     return skip_line(vm, tok->next);
 }
 
+// Dispatch the body of a #pragma directive or a _Pragma() operator.
+// tok is the first content token (after "#pragma" / after the destringized string).
+static Token *handle_pragma_body(JCC *vm, Token *tok) {
+    if (equal(tok, "once")) {
+        hashmap_put(&vm->compiler.pragma_once, tok->file->name, (void *)1);
+        return skip_line(vm, tok->next);
+    } else if (equal(tok, "macro")) {
+        error_tok(vm, tok,
+                  "#pragma macro is no longer supported; use "
+                  "[[jcc::macro]] or __attribute__((macro))");
+    } else if (equal(tok, "comptime")) {
+        error_tok(vm, tok,
+                  "#pragma comptime is no longer supported; use "
+                  "[[jcc::comptime]] or __attribute__((comptime))");
+    } else if ((equal(tok, "GCC") || equal(tok, "clang") || equal(tok, "JCC")) &&
+               equal(tok->next, "diagnostic")) {
+        return handle_gcc_diagnostic(vm, tok->next->next);
+    } else {
+        do { tok = tok->next; } while (!tok->at_bol && tok->kind != TK_EOF);
+    }
+    return tok;
+}
+
 // Visit all tokens in `tok` while evaluating preprocessing
 // macros and directives.
 static Token *preprocess2(JCC *vm, Token *tok) {
@@ -1972,6 +1995,22 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             // and tok is advanced past it; nothing is added to the output.
             if (try_extract_attr_macro(vm, &tok))
                 continue;
+
+            // _Pragma("string") — C99 §6.10.9: equivalent to #pragma string
+            if (equal(tok, "_Pragma")) {
+                tok = tok->next;
+                tok = skip(vm, tok, "(");
+                if (tok->kind != TK_STR)
+                    error_tok(vm, tok, "_Pragma requires a string literal");
+                char *content = arena_format(vm, "%s\n", tok->str);
+                Token *pragma_toks = tokenize(
+                    vm, new_file(vm, tok->file->name, tok->file->file_no, content));
+                handle_pragma_body(vm, pragma_toks);
+                tok = tok->next;
+                tok = skip(vm, tok, ")");
+                continue;
+            }
+
             tok->line_delta = tok->file->line_delta;
             tok->filename = tok->file->display_name;
             // Stamp the effective diagnostic state so warn_tok can use it.
@@ -2156,25 +2195,7 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             read_line_marker(vm, &tok, tok->next);
             break;
         case PP_PRAGMA:
-            if (equal(tok->next, "once")) {
-                hashmap_put(&vm->compiler.pragma_once, tok->file->name, (void *)1);
-                tok = skip_line(vm, tok->next->next);
-            } else if (equal(tok->next, "macro")) {
-                error_tok(vm, tok->next,
-                          "#pragma macro is no longer supported; use "
-                          "[[jcc::macro]] or __attribute__((macro))");
-            } else if (equal(tok->next, "comptime")) {
-                error_tok(vm, tok->next,
-                          "#pragma comptime is no longer supported; use "
-                          "[[jcc::comptime]] or __attribute__((comptime))");
-            } else if ((equal(tok->next, "GCC") ||
-                        equal(tok->next, "clang") ||
-                        equal(tok->next, "JCC")) &&
-                       equal(tok->next->next, "diagnostic")) {
-                tok = handle_gcc_diagnostic(vm, tok->next->next->next);
-            } else {
-                do { tok = tok->next; } while (!tok->at_bol);
-            }
+            tok = handle_pragma_body(vm, tok->next);
             break;
         case PP_EMBED:
             if (vm->compiler.c_std < JCC_STD_C23)

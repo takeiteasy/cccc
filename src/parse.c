@@ -1042,9 +1042,10 @@ static Type *func_params(JCC *vm, Token **rest, Token *tok, Type *ty) {
     return ty;
 }
 
-// array-dimensions = ("static" | "restrict")* const-expr? "]" type-suffix
+// array-dimensions = ("static" | "restrict" | "const" | "volatile" | "_Atomic")* const-expr? "]" type-suffix
 static Type *array_dimensions(JCC *vm, Token **rest, Token *tok, Type *ty) {
-    while (equal(tok, "static") || equal(tok, "restrict"))
+    while (equal(tok, "static") || equal(tok, "restrict") ||
+           equal(tok, "const")  || equal(tok, "volatile") || equal(tok, "_Atomic"))
         tok = tok->next;
 
     if (equal(tok, "]")) {
@@ -5347,6 +5348,40 @@ static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr) {
         vm->compiler.fn_nesting_depth++;
 
     enter_scope(vm);
+
+    // K&R declaration-list: type declarations between ')' and '{' that give
+    // explicit types to the parameter names.  Update ty->params *before*
+    // create_param_lvars so that stack-slot sizes are derived from the correct
+    // types (e.g. a double param must get an 8-byte slot, not a 4-byte int slot).
+    while (!equal(tok, "{") && tok->kind != TK_EOF && is_typename(vm, tok)) {
+        VarAttr knr_attr = {};
+        Type *basety = declspec(vm, &tok, tok, &knr_attr);
+        bool first = true;
+        for (;;) {
+            if (!first)
+                tok = skip(vm, tok, ",");
+            first = false;
+            Type *decl_ty = declarator(vm, &tok, tok, basety);
+            if (decl_ty->name) {
+                char *pname = decl_ty->name->loc;
+                int   plen  = decl_ty->name->len;
+                for (Type *p = ty->params; p; p = p->next) {
+                    if (p->name && p->name->len == plen &&
+                        !memcmp(p->name->loc, pname, plen)) {
+                        Token *saved_name = p->name;
+                        Type  *saved_next = p->next;
+                        *p = *decl_ty;
+                        p->name = saved_name;
+                        p->next = saved_next;
+                        break;
+                    }
+                }
+            }
+            if (!consume(vm, &tok, tok, ","))
+                break;
+        }
+        tok = skip(vm, tok, ";");
+    }
 
     create_param_lvars(vm, ty->params);
 

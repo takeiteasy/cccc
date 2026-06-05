@@ -50,7 +50,7 @@ Conformance status for each C standard. Intended as a reference for `--std` flag
 | String literals and concatenation | ✓ | |
 | `L"..."` wide string literals | ✓ | Parsed; stored as UTF-32 |
 | `L'...'` wide character literals | ✓ | |
-| K&R-style function definitions | ✗ | |
+| K&R-style function definitions | ✓ | |
 | Trigraphs | ✗ | Removed in C23; intentionally not supported |
 | `#include`, `#define`, `#undef` | ✓ | |
 | `#ifdef`, `#ifndef`, `#if`, `#elif`, `#else`, `#endif` | ✓ | |
@@ -106,10 +106,10 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | Compound literals | ✓ | |
 | `inline` functions | ~ | Parsed; behaves like `static` — no inlining optimisation |
 | `restrict` pointers | ~ | Parsed and accepted; aliasing not tracked |
-| `static` array-parameter indices (`void f(int a[static 10])`) | ✗ | |
+| `static` array-parameter indices (`void f(int a[static 10])`) | ~ | Parsed and accepted; minimum-size constraint not enforced |
 | `__func__` predefined identifier | ✓ | |
 | Variadic macros `__VA_ARGS__` | ✓ | |
-| `_Pragma(...)` operator | ✗ | |
+| `_Pragma(...)` operator | ✓ | |
 | Hexadecimal floating-point literals (`0x1.8p+1`) | ✓ | |
 | `u8"..."` UTF-8 string literals | ✓ | |
 | `u"..."` UTF-16 string literals | ✓ | |
