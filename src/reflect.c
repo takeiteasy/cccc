@@ -1929,8 +1929,13 @@ static _Node *quote_core(JCC *vm, const char *tmpl,
 
     quote_rebind_macro_scope(result, &quote_scope, quote_scope.next);
 
-    // 6. Restore outer scope unconditionally
-    vm->compiler.scope = quote_scope.next;
+    // 6. Restore outer scope, freeing any hashmap buckets accumulated in the
+    //    quote scope (var_map from push_scope, tag_map from struct/enum tags).
+    while (vm->compiler.scope != quote_scope.next) {
+        hashmap_deinit_borrowed(&vm->compiler.scope->var_map);
+        hashmap_deinit_borrowed(&vm->compiler.scope->tag_map);
+        vm->compiler.scope = vm->compiler.scope->next;
+    }
 
     if (!result)
         return NULL;
