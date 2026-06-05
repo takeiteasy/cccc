@@ -2120,8 +2120,9 @@ void cc_expand_macros(JCC *vm, Obj *prog);
 /*!
  @function cc_serialize_program
  @abstract Serialize a program AST back to C source code.
- @discussion Used with -M/-G flags to output macro-expanded source that
-             can be compiled with gcc or other C compilers.
+ @discussion Used with -M/--dump-expanded and -G flags to output
+             macro-expanded source that can be compiled with gcc or other
+             C compilers.
  @param f Output file stream.
  @param vm The JCC instance.
  @param prog Program AST to serialize.

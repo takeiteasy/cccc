@@ -192,6 +192,20 @@ extern JCC *__jcc_get_vm(void);
  */
 const char *__jcc_gensym(JCC *vm, const char *prefix);
 
+/*!
+ * @function __jcc_macroexpand
+ * @abstract Lisp-style single-step macro expansion (macroexpand-1 semantics).
+ * @discussion If @a node is an @c ND_MACRO_CALL node, execute the macro once
+ *             and return the resulting node without splicing it into the AST
+ *             or recursing into nested macro calls. If @a node is not a macro
+ *             call, it is returned unchanged (identity). Useful for inspecting
+ *             macro output from a comptime context or for writing meta-macros.
+ * @param vm The VM context.
+ * @param node The node to (possibly) expand.
+ * @return The expanded node, or @a node itself if it is not a macro call.
+ */
+_Node *__jcc_macroexpand(JCC *vm, _Node *node);
+
 // ============================================================================
 // Generated Node Source Locations (ticket #173)
 // ============================================================================
@@ -962,6 +976,7 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, _Node *node);
 #define _DUMP_AST_GEN(node) __jcc_dump_ast_gen(_VM, node)
 #define _DUMP_AST_GEN_TO_STRING(node) __jcc_dump_ast_gen_to_string(_VM, node)
 #define _GENSYM(prefix) __jcc_gensym(_VM, prefix)
+#define _MACROEXPAND(node) __jcc_macroexpand(_VM, node)
 
 #define _AST_CURRENT_TOKEN() __jcc_ast_current_token(_VM)
 #define _AST_SYNTHETIC_TOKEN(label) __jcc_ast_synthetic_token(_VM, label)

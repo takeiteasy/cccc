@@ -155,6 +155,9 @@ extern Node   *__jcc_get_comptime_var(JCC *vm, const char *name);
 extern Node   *__jcc_get_comptime_member(JCC *vm, const char *var_name,
                                          const char *field);
 
+// Ticket #277: Lisp-style single-macro expansion
+extern Node   *__jcc_macroexpand(JCC *vm, Node *node);
+
 // Register reflection API functions as FFI
 static void register_reflection_ffi(JCC *vm) {
     // VM accessor
@@ -333,6 +336,10 @@ static void register_reflection_ffi(JCC *vm) {
                       (void *)__jcc_get_comptime_var, 2, 0);
     cc_register_cfunc(vm, "__jcc_get_comptime_member",
                       (void *)__jcc_get_comptime_member, 3, 0);
+
+    // Ticket #277: Lisp-style single-macro expansion
+    cc_register_cfunc(vm, "__jcc_macroexpand",
+                      (void *)__jcc_macroexpand, 2, 0);
 }
 
 static void init_vm_segments_for_macros(JCC *vm);
@@ -1199,6 +1206,27 @@ static MacroFn *find_macro_fn_by_name(JCC *vm, const char *name) {
             return pm;
     }
     return NULL;
+}
+
+// Ticket #277: Lisp-style single-macro expansion (macroexpand-1 semantics).
+// If node is an ND_MACRO_CALL, execute the macro once and return the result
+// without splicing it into the AST or recursing. If node is not a macro call,
+// return it unchanged (identity).
+Node *__jcc_macroexpand(JCC *vm, Node *node) {
+    if (!vm || !node)
+        return node;
+    if (node->kind != ND_MACRO_CALL)
+        return node;
+    MacroFn *pm = find_macro_fn_by_name(vm, node->macro_name);
+    if (!pm || !pm->is_compiled)
+        return node;
+    Scope *saved_scope = vm->compiler.scope;
+    if (node->macro_scope)
+        vm->compiler.scope = node->macro_scope;
+    Node *result = execute_macro_fn(vm, pm, node->tok, node->args,
+                                    node->macro_arg_count);
+    vm->compiler.scope = saved_scope;
+    return result ? result : node;
 }
 
 void cc_execute_top_level_macro(JCC *vm, char *name, Token *tok,

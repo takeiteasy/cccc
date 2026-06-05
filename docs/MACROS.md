@@ -507,6 +507,32 @@ started under the debugger, and JCC suppresses VM debug tracing while invoking
 macro functions. Use `_DUMP_*` helpers and source-located diagnostics for macro
 debugging.
 
+### macroexpand — single-step expansion
+
+`_MACROEXPAND(node)` expands a single macro call node without splicing the
+result into the AST or recursing into nested calls. This mirrors Lisp's
+`macroexpand-1`: it is useful for inspecting what another macro would produce or
+for writing meta-macros that transform macro output before returning it.
+
+```c
+[[jcc::macro(inline)]]
+_Node *make_list(void) { /* ... */ }
+
+[[jcc::comptime]]
+void debug_macro(void) {
+    // Inspect what make_list() would expand to, without executing it
+    _Node *call = _QUOTE("make_list()");
+    _Node *expanded = _MACROEXPAND(call);
+    _DUMP_TREE(expanded);
+}
+```
+
+If `node` is not an `ND_MACRO_CALL`, `_MACROEXPAND` returns `node` unchanged
+(identity). If the named macro is not found or has not compiled, it also returns
+`node` unchanged.
+
+The underlying function is `__jcc_macroexpand(JCC *vm, _Node *node)`.
+
 ## API Reference
 
 ### Type APIs
@@ -581,6 +607,7 @@ debugging.
 | `_AST_VAR_REF(name)` | Variable reference |
 | `_AST_PARAM_REF(fn, name)` | Generated function parameter reference |
 | `_GENSYM(prefix)` | Unique arena-allocated symbol name using `__jcc_gensym` |
+| `_MACROEXPAND(node)` | Single-step macro expansion (identity if not a macro call) |
 | `_AST_CURRENT_TOKEN()` | Opaque token for the active macro call site |
 | `_AST_SYNTHETIC_TOKEN(label)` | Opaque synthetic token for generated diagnostics |
 | `_AST_TOKEN_FROM_NODE(node)` | Opaque source token attached to a node |

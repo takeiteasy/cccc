@@ -301,7 +301,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-P/--print-tokens   Print preprocessed tokens to stdout\n");
     printf("\t-E/--preprocess     Output preprocessed source code (traditional "
            "C -E)\n");
-    printf("\t-M/--macro-expand   Output macro-expanded source code (for gcc "
+    printf("\t-M/--dump-expanded  Output macro-expanded source code (for gcc "
            "compatibility)\n");
     printf("\t-G/--emit-generated Serialize only pragma-macro-generated objects "
            "(no header noise)\n");
@@ -719,7 +719,7 @@ int main(int argc, const char *argv[]) {
     uint32_t flags = 0;        // JCCFlags bitfield for runtime features
     int print_tokens = 0;      // -P
     int preprocess_only = 0;   // -E
-    int macro_expand_only = 0; // -M
+    int dump_expanded_only = 0; // -M
     int emit_generated_only = 0; // -G
     int skip_preprocess = 0;   // -X
     int skip_stdlib = 0;       // -S
@@ -763,7 +763,7 @@ int main(int argc, const char *argv[]) {
         {"ast", no_argument, 0, 'a'},
         {"print-tokens", no_argument, 0, 'P'},
         {"preprocess", no_argument, 0, 'E'},
-        {"macro-expand", no_argument, 0, 'M'},
+        {"dump-expanded", no_argument, 0, 'M'},
         {"emit-generated", no_argument, 0, 'G'},
         {"no-preprocess", no_argument, 0, 'X'},
         {"no-stdlib", no_argument, 0, 'S'},
@@ -1005,11 +1005,11 @@ int main(int argc, const char *argv[]) {
             preprocess_only = 1;
             break;
         case 'M':
-            macro_expand_only = 1;
+            dump_expanded_only = 1;
             break;
         case 'G':
             emit_generated_only = 1;
-            macro_expand_only = 1; // -G implies serialization mode
+            dump_expanded_only = 1; // -G implies serialization mode
             break;
         case 'X':
             skip_preprocess = 1;
@@ -1152,7 +1152,7 @@ int main(int argc, const char *argv[]) {
     }
 
     if (native_mode) {
-        if (preprocess_only || macro_expand_only || print_tokens ||
+        if (preprocess_only || dump_expanded_only || print_tokens ||
             output_json || dump_ast) {
             fprintf(stderr,
                     "error: --native cannot be combined with frontend output modes\n");
@@ -1484,8 +1484,8 @@ int main(int argc, const char *argv[]) {
         }
     }
 
-    // If -M flag is set, output macro-expanded source and exit
-    if (macro_expand_only) {
+    // If -M/--dump-expanded flag is set, output macro-expanded source and exit
+    if (dump_expanded_only) {
         FILE *f = out_file ? fopen(out_file, "w") : stdout;
         if (!f) {
             fprintf(stderr, "error: failed to open output file %s\n", out_file);
