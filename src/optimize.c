@@ -58,6 +58,94 @@ static int get_instr_size_at(JCC *vm, JCCPc pc, JCCPc end) {
     return size;
 }
 
+static int get_compacted_instr_size_at(JCC *vm, JCCPc pc, JCCPc end) {
+    int op = get_opcode(vm, pc);
+    int size = get_instr_size(op);
+    if (op == JMPT && pc + 3 < end) {
+        JCCInstrWord count = vm->text_seg[pc + 2];
+        if (pc + 4 + (JCCPc)count <= end)
+            size += (int)count;
+    }
+    return size;
+}
+
+typedef struct {
+    bool active;
+    int nwords;
+    JCCInstrWord words[4];
+} OptReplacement;
+
+static void set_li_replacement(OptReplacement *repls, JCCPc pc, int rd,
+                               long long imm) {
+    repls[pc].active = true;
+    repls[pc].nwords = 4;
+    repls[pc].words[0] = LI3;
+    repls[pc].words[1] = ENCODE_R(rd);
+    repls[pc].words[2] = cc_i64_lo(imm);
+    repls[pc].words[3] = cc_i64_hi(imm);
+}
+
+static bool is_nop_at(JCC *vm, JCCPc pc) {
+    int op = get_opcode(vm, pc);
+    if (op == MOV3) {
+        int rd = vm->text_seg[pc + 1] & 0xFF;
+        int rs = (vm->text_seg[pc + 1] >> 8) & 0xFF;
+        return rd == REG_ZERO && rs == REG_ZERO;
+    }
+    if (op == LI3) {
+        int rd = vm->text_seg[pc + 1] & 0xFF;
+        return rd == REG_ZERO && cc_read_i64_at(vm, pc + 2) == 0;
+    }
+    return false;
+}
+
+static bool li_matches_replacement(JCC *vm, JCCPc pc,
+                                   const OptReplacement *repl) {
+    if (!repl->active || repl->nwords != 4 || repl->words[0] != LI3)
+        return false;
+    if (get_opcode(vm, pc) != LI3)
+        return false;
+    return vm->text_seg[pc + 1] == repl->words[1] &&
+           vm->text_seg[pc + 2] == repl->words[2] &&
+           vm->text_seg[pc + 3] == repl->words[3];
+}
+
+static JCCPc remap_pc(JCCPc *pc_map, JCCPc old_end, JCCPc target) {
+    if (target == JCC_INVALID_PC)
+        return target;
+    if (target <= old_end)
+        return pc_map[target];
+    return target;
+}
+
+static void remap_text_byte_offset_at(JCC *vm, JCCPc operand_pc,
+                                      JCCPc *pc_map, JCCPc old_end) {
+    long long old_offset = cc_read_i64_at(vm, operand_pc);
+    JCCPc old_target = cc_byte_offset_to_pc(old_offset);
+    if (old_target == JCC_INVALID_PC)
+        return;
+    JCCPc new_target = remap_pc(pc_map, old_end, old_target);
+    if (new_target != JCC_INVALID_PC)
+        cc_write_i64_at(vm, operand_pc, cc_pc_to_byte_offset(new_target));
+}
+
+static void remap_function_metadata(Obj *obj, JCCPc *pc_map, JCCPc old_end) {
+    for (; obj; obj = obj->next) {
+        if (obj->is_function) {
+            if (obj->code_addr >= 0) {
+                JCCPc pc = (JCCPc)obj->code_addr;
+                if (pc <= old_end)
+                    obj->code_addr = remap_pc(pc_map, old_end, pc);
+            }
+            if (obj->code_end_addr >= 0) {
+                JCCPc pc = (JCCPc)obj->code_end_addr;
+                if (pc <= old_end)
+                    obj->code_end_addr = remap_pc(pc_map, old_end, pc);
+            }
+        }
+    }
+}
+
 static void mark_text_target(JCC *vm, bool *targets, JCCPc start,
                              JCCPc end, JCCPc target) {
     (void)vm;
@@ -144,14 +232,6 @@ static void invalidate_reg(RegState *state, int rd) {
         return;
     state->is_const[rd] = false;
     state->value[rd] = 0;
-}
-
-static int find_const_reg(RegState *state, long long value) {
-    for (int i = 0; i < MAX_TRACKED_REGS; i++) {
-        if (state->is_const[i] && state->value[i] == value)
-            return i;
-    }
-    return -1;
 }
 
 static bool add_overflows(long long a, long long b) {
@@ -326,7 +406,7 @@ static void emit_li_nop(JCC *vm, JCCPc pc) {
 
 
 
-static void opt_constant_fold(JCC *vm) {
+static void opt_constant_fold(JCC *vm, OptReplacement *repls) {
     if (!vm || !vm->text_seg || !vm->text_ptr) {
         return;
     }
@@ -393,12 +473,8 @@ static void opt_constant_fold(JCC *vm) {
                         op, a, b, vm->flags & JCC_OVERFLOW_CHECKS, &result);
 
                     if (can_fold) {
-                        int const_reg = find_const_reg(&state, result);
-                        if (const_reg >= 0) {
-                            vm->text_seg[pc + 0] = MOV3;
-                            vm->text_seg[pc + 1] = ENCODE_RR(rd, const_reg);
-                            folded_count++;
-                        }
+                        set_li_replacement(repls, pc, rd, result);
+                        folded_count++;
                         set_const_reg(&state, rd, result);
                     }
                 } else {
@@ -429,12 +505,8 @@ static void opt_constant_fold(JCC *vm) {
                     rs < MAX_TRACKED_REGS && state.is_const[rs]) {
                     long long result = 0;
                     if (eval_unary_const(op, state.value[rs], &result)) {
-                        int const_reg = find_const_reg(&state, result);
-                        if (const_reg >= 0) {
-                            vm->text_seg[pc + 0] = MOV3;
-                            vm->text_seg[pc + 1] = ENCODE_RR(rd, const_reg);
-                            folded_count++;
-                        }
+                        set_li_replacement(repls, pc, rd, result);
+                        folded_count++;
                         set_const_reg(&state, rd, result);
                     }
                 } else {
@@ -478,12 +550,8 @@ static void opt_constant_fold(JCC *vm) {
                     rs < MAX_TRACKED_REGS && state.is_const[rs]) {
                     long long result = 0;
                     if (eval_extend_const(op, state.value[rs], &result)) {
-                        int const_reg = find_const_reg(&state, result);
-                        if (const_reg >= 0) {
-                            vm->text_seg[pc + 0] = MOV3;
-                            vm->text_seg[pc + 1] = ENCODE_RR(rd, const_reg);
-                            folded_count++;
-                        }
+                        set_li_replacement(repls, pc, rd, result);
+                        folded_count++;
                         set_const_reg(&state, rd, result);
                     }
                 } else {
@@ -508,6 +576,7 @@ static void opt_constant_fold(JCC *vm) {
             case JMPI:
             case CALL:
             case CALLI:
+            case CALLN:
             case ENT3:
             case LEV3:
                 reset_reg_state(&state);
@@ -723,6 +792,177 @@ static void opt_dead_code(JCC *vm) {
     }
 }
 
+// ========== Pass 4: Bytecode Compaction ==========
+
+static void retarget_compacted_bytecode(JCC *vm, JCCPc *pc_map,
+                                        JCCPc *new_to_old,
+                                        JCCPc old_end,
+                                        JCCPc new_end) {
+    vm->text_seg[0] = remap_pc(pc_map, old_end, vm->text_seg[0]);
+
+    for (JCCPc pc = 1; pc < new_end; ) {
+        JCCPc old_pc = new_to_old[pc];
+        int op = get_opcode(vm, pc);
+        int size = get_compacted_instr_size_at(vm, pc, new_end);
+        if (size <= 0)
+            break;
+
+        if (op == JMP || op == CALL) {
+            JCCPc old_target = vm->text_seg[pc + 1];
+            vm->text_seg[pc + 1] = remap_pc(pc_map, old_end, old_target);
+        } else if (op == JZ3 || op == JNZ3) {
+            JCCPc old_target = vm->text_seg[pc + 2];
+            vm->text_seg[pc + 2] = remap_pc(pc_map, old_end, old_target);
+        } else if (op == JMPT && pc + 3 < new_end && old_pc <= old_end) {
+            JCCPc old_table = vm->text_seg[pc + 1];
+            JCCInstrWord count = vm->text_seg[pc + 2];
+            JCCPc old_default = vm->text_seg[pc + 3];
+            JCCPc new_table = remap_pc(pc_map, old_end, old_table);
+            vm->text_seg[pc + 1] = new_table;
+            vm->text_seg[pc + 3] = remap_pc(pc_map, old_end, old_default);
+            if (new_table + (JCCPc)count <= new_end) {
+                for (JCCInstrWord i = 0; i < count; i++) {
+                    JCCPc entry = new_table + (JCCPc)i;
+                    vm->text_seg[entry] =
+                        remap_pc(pc_map, old_end, vm->text_seg[entry]);
+                }
+            }
+        } else if (op == LTA3) {
+            remap_text_byte_offset_at(vm, pc + 2, pc_map, old_end);
+        }
+
+        pc += size;
+    }
+
+    remap_function_metadata(vm->compiler.globals, pc_map, old_end);
+
+    if (vm->dbg.source_map) {
+        for (int i = 0; i < vm->dbg.source_map_count; i++) {
+            long long pc = vm->dbg.source_map[i].pc_offset;
+            if (pc >= 0 && (JCCPc)pc <= old_end)
+                vm->dbg.source_map[i].pc_offset =
+                    remap_pc(pc_map, old_end, (JCCPc)pc);
+        }
+    }
+
+    for (int i = 0; i < vm->compiler.num_data_relocs; i++) {
+        if (vm->compiler.data_relocs[i].target_segment != 1)
+            continue;
+        JCCPc old_pc = cc_byte_offset_to_pc(
+            vm->compiler.data_relocs[i].target_offset);
+        if (old_pc == JCC_INVALID_PC || old_pc > old_end)
+            continue;
+        JCCPc new_pc = remap_pc(pc_map, old_end, old_pc);
+        long long new_offset = cc_pc_to_byte_offset(new_pc);
+        vm->compiler.data_relocs[i].target_offset = new_offset;
+        long long value = new_offset + vm->compiler.data_relocs[i].addend;
+        *(long long *)(vm->data_seg +
+                       vm->compiler.data_relocs[i].data_offset) = value;
+    }
+}
+
+static void opt_compact_bytecode(JCC *vm, OptReplacement *repls) {
+    if (!vm || !vm->text_seg || !vm->text_ptr)
+        return;
+
+    JCCPc old_end = vm->text_ptr + 1;
+    JCCPc *pc_map = calloc((size_t)old_end + 1, sizeof(JCCPc));
+    JCCPc *new_to_old = calloc((size_t)old_end + 8, sizeof(JCCPc));
+    if (!pc_map || !new_to_old)
+        error("out of memory");
+
+    JCCInstrWord *new_text = malloc(((size_t)old_end + 8) *
+                                    sizeof(JCCInstrWord));
+    if (!new_text)
+        error("out of memory");
+
+    size_t cap = (size_t)old_end + 8;
+    JCCPc out = 1;
+    new_text[0] = vm->text_seg[0];
+    new_to_old[0] = 0;
+
+    int removed = 0;
+    int expanded = 0;
+
+    for (JCCPc pc = 1; pc < old_end; ) {
+        int op = get_opcode(vm, pc);
+        int old_size = get_instr_size_at(vm, pc, old_end);
+        if (old_size <= 0)
+            break;
+
+        JCCPc next = pc + (JCCPc)old_size;
+        bool remove = !repls[pc].active && is_nop_at(vm, pc);
+        if (!remove && !repls[pc].active && next < old_end)
+            remove = li_matches_replacement(vm, pc, &repls[next]);
+        int new_size = remove ? 0 : (repls[pc].active ? repls[pc].nwords
+                                                       : old_size);
+        pc_map[pc] = out;
+        for (int i = 1; i < old_size && pc + (JCCPc)i <= old_end; i++)
+            pc_map[pc + (JCCPc)i] = out;
+        if (op == JMPT && pc + 3 < old_end) {
+            JCCPc table_pc = vm->text_seg[pc + 1];
+            JCCInstrWord count = vm->text_seg[pc + 2];
+            if (table_pc == pc + 4 &&
+                table_pc + (JCCPc)count <= old_end) {
+                for (JCCInstrWord i = 0; i < count; i++)
+                    pc_map[table_pc + (JCCPc)i] =
+                        out + 4 + (JCCPc)i;
+            }
+        }
+
+        if (remove) {
+            removed++;
+            pc += old_size;
+            continue;
+        }
+
+        if ((size_t)out + (size_t)new_size + 1 > cap) {
+            cap = (cap * 2) + (size_t)new_size + 8;
+            JCCInstrWord *grown =
+                realloc(new_text, cap * sizeof(JCCInstrWord));
+            JCCPc *grown_old = realloc(new_to_old, cap * sizeof(JCCPc));
+            if (!grown || !grown_old)
+                error("out of memory");
+            new_text = grown;
+            new_to_old = grown_old;
+        }
+
+        if (repls[pc].active) {
+            memcpy(&new_text[out], repls[pc].words,
+                   (size_t)new_size * sizeof(JCCInstrWord));
+            if (new_size != old_size)
+                expanded++;
+        } else {
+            memcpy(&new_text[out], &vm->text_seg[pc],
+                   (size_t)old_size * sizeof(JCCInstrWord));
+        }
+        for (int i = 0; i < new_size; i++)
+            new_to_old[out + (JCCPc)i] = pc;
+
+        out += (JCCPc)new_size;
+        pc += old_size;
+    }
+    pc_map[old_end] = out;
+
+    if (out != old_end || removed > 0 || expanded > 0) {
+        if (vm_text_ensure_count(vm, out + 1) != 0)
+            error("optimizer: text segment overflow during compaction");
+        memcpy(&vm->text_seg[1], &new_text[1],
+               ((size_t)out - 1) * sizeof(JCCInstrWord));
+        vm->text_ptr = out - 1;
+        retarget_compacted_bytecode(vm, pc_map, new_to_old, old_end, out);
+        if (vm->debug_vm) {
+            printf("[opt] compaction: removed %d NOPs, expanded %d folds, "
+                   "text words %u -> %u\n",
+                   removed, expanded, old_end, out);
+        }
+    }
+
+    free(new_text);
+    free(new_to_old);
+    free(pc_map);
+}
+
 // ========== Main Entry Point ==========
 
 void cc_optimize(JCC *vm, int level) {
@@ -730,9 +970,14 @@ void cc_optimize(JCC *vm, int level) {
         return;
     }
 
+    JCCPc end = vm->text_ptr + 1;
+    OptReplacement *repls = calloc((size_t)end + 1, sizeof(OptReplacement));
+    if (!repls)
+        error("out of memory");
+
     // Level 1: Basic optimization (constant folding)
     if (level >= 1) {
-        opt_constant_fold(vm);
+        opt_constant_fold(vm, repls);
     }
 
     // Level 2: Standard optimization (+ peephole)
@@ -744,4 +989,7 @@ void cc_optimize(JCC *vm, int level) {
     if (level >= 3) {
         opt_dead_code(vm);
     }
+
+    opt_compact_bytecode(vm, repls);
+    free(repls);
 }

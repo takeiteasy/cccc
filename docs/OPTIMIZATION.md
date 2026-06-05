@@ -43,27 +43,27 @@ programs avoid quadratic patch scans.
 
 ### Phase 1: Constant Folding (`--optimize=1`)
 
-Tracks constant values through register operations and rewrites bytecode when
-the replacement fits in the original instruction footprint.
+Tracks constant values through register operations and records foldable integer
+operations for replacement with `LI3`. A final compaction pass rebuilds bytecode
+when replacements change instruction width.
 
 **What it optimizes:**
 - `LI3` (load immediate) values are tracked
 - `MOV3` (register copy) propagates constant status
-- Sign and zero extension operations propagate constant status
+- Sign and zero extension operations on constants become `LI3`
 - `ADDI3` (add immediate) becomes a same-width `LI3` when the source is constant
-- Arithmetic operations (`ADD3`, `SUB3`, `MUL3`, `DIV3`, etc.) are evaluated when both operands are constants and rewritten to `MOV3` when the result is already available in a tracked register
-- Unary operations (`NEG3`, `NOT3`, `BNOT3`) on constants are rewritten to `MOV3` when the result is already available in a tracked register
+- Arithmetic operations (`ADD3`, `SUB3`, `MUL3`, `DIV3`, etc.) are evaluated when both operands are constants and rewritten to `LI3`
+- Unary operations (`NEG3`, `NOT3`, `BNOT3`) on constants are rewritten to `LI3`
 
 **Example:**
 ```c
-int x = 42 + 0;  // Rewritten to reuse the known 42 register value
+int x = 42 + 0;  // Rewritten to load the folded constant directly
 ```
 
 **Limitations:**
 - Constants are invalidated at control flow boundaries (jumps, calls, returns)
 - Constants are invalidated at known branch targets to avoid folding across control-flow joins
 - Memory loads reset constant tracking for the destination register
-- Two-word register operations are not expanded into wider `LI3` instructions; this keeps branch targets stable
 - Division by zero, signed division overflow, invalid shifts, and overflow-checked signed arithmetic are not folded
 
 ---
@@ -88,7 +88,7 @@ Removes demonstrably dead code using conservative analysis.
 
 **What it removes:**
 - Consecutive `MOV3` to the same destination register (first is dead)
-- Counts and tracks NOP sequences from previous passes
+- NOP sequences from previous passes are removed by bytecode compaction
 
 > **Note:** DCE uses a **conservative approach** to ensure correctness. Full unreachable code elimination after unconditional jumps is not implemented as it requires comprehensive jump target analysis that could affect code with computed gotos, switch tables, or inline assembly. This design choice prioritizes safety over aggressive optimization.
 
@@ -103,11 +103,11 @@ after codegen and before execution:
 Source Code → Parser → AST → Codegen → Bytecode → [Optimizer] → VM Execution
 ```
 
-Optimizations transform the bytecode in place. Instructions keep their original
-word footprint so PC-index branch targets remain valid:
-- Dead instructions are converted to NOPs (`MOV3 r0, r0` or `LI3 r0, 0`)
-- NOPs execute with minimal overhead (write to zero register, which is discarded)
-- Future work may compact NOPs out entirely
+Optimizations first transform or mark bytecode, then rebuild the text segment
+when instruction widths change or NOPs can be removed. The compaction pass
+retargets direct branches and calls, dense `JMPT` jump tables, `LTA3` text
+addresses, the entry point, debugger/source metadata, function ranges, and
+serialized text relocations so PC-index targets remain valid after compaction.
 
 ## Best Practices
 
