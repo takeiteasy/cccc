@@ -624,6 +624,7 @@ static void opt_constant_fold(JCC *vm, OptReplacement *repls) {
 // 2. LI3 rx, A; LI3 rx, B -> LI3 rx, B (overwritten load)
 // 3. PSH3 rx; POP3 rx -> NOP (push/pop same register)
 // 4. JMP to next instruction -> NOP
+// 5. LDR_W rd, rs; SX4 rd, rd -> LDR_W rd, rs (SX4 is redundant)
 //
 
 static void opt_peephole(JCC *vm) {
@@ -713,8 +714,30 @@ static void opt_peephole(JCC *vm) {
         pc += size;
     }
 
-    // Pattern 5: MOV3 ra, rb; MOV3 rb, ra -> MOV3 ra, rb (second is nop if rb not used)
-    // This is more complex - skip for now
+    // Pattern 5: LDR_W rd, rs; SX4 rd, rd -> LDR_W rd, rs (SX4 is redundant)
+    // LDR_W already sign-extends to 64 bits, so a self-extending SX4 on the same register is a no-op.
+    // Do NOT apply to ZX4 — unsigned loads need the zero-extension.
+    for (JCCPc pc = start; pc < end; ) {
+        int op = get_opcode(vm, pc);
+        int size = get_instr_size_at(vm, pc, end);
+
+        if (op == LDR_W && pc + size < end) {
+            JCCPc next = pc + size;
+            if (!control_flow_targets[next - start]) {
+                int next_op = get_opcode(vm, next);
+                if (next_op == SX4) {
+                    int rd_ldr = vm->text_seg[pc   + 1] & 0xFF;
+                    int rd_sx4 = vm->text_seg[next + 1] & 0xFF;
+                    int rs_sx4 = (vm->text_seg[next + 1] >> 8) & 0xFF;
+                    if (rd_ldr == rd_sx4 && rd_sx4 == rs_sx4) {
+                        emit_mov_nop(vm, next);
+                        opt_count++;
+                    }
+                }
+            }
+        }
+        pc += size;
+    }
 
     if (vm->debug_vm && opt_count > 0) {
         printf("[opt] peephole: removed %d redundant instructions\n", opt_count);
