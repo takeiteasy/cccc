@@ -26,8 +26,15 @@
 #include <unistd.h>
 #include <utime.h>
 
-static long long wrap_open(const char *path, long long oflag, long long mode) {
-    return (long long)open(path, (int)oflag, (mode_t)mode);
+static long long wrap_open(const char *path, long long oflag, ...) {
+    mode_t mode = 0;
+    if (oflag & O_CREAT) {
+        va_list ap;
+        va_start(ap, oflag);
+        mode = (mode_t)(unsigned int)va_arg(ap, unsigned int);
+        va_end(ap);
+    }
+    return (long long)open(path, (int)oflag, mode);
 }
 
 static long long wrap_creat(const char *path, long long mode) {

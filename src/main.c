@@ -432,8 +432,8 @@ int main(int argc, const char *argv[]) {
     int exit_code = 0;
     const char **input_files = NULL;
     int input_files_count = 0;
-    Obj **input_progs = NULL;
-    Token **input_tokens = NULL;
+    Obj **volatile input_progs = NULL;
+    Token **volatile input_tokens = NULL;
     const char **inc_paths = NULL; // -I
     int inc_paths_count = 0;
     const char **sys_inc_paths = NULL; // -isystem
