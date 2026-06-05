@@ -593,6 +593,12 @@ _QUOTE("return x;") applies the correct implicit return-type cast.
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_macro_warning_at" target="_top">__jcc_macro_warning_at</a></tt></dt>
 <dd><p>Emit a compiler warning pointing at the source location of a node.
 </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_macroexpand" target="_top">__jcc_macroexpand</a></tt></dt>
+<dd><p>Lisp-style full macro expansion.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_macroexpand_1" target="_top">__jcc_macroexpand_1</a></tt></dt>
+<dd><p>Lisp-style single-step macro expansion (macroexpand-1 semantics).
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_node_list" target="_top">__jcc_node_list</a></tt></dt>
 <dd><p>Build a `-&gt;next`-linked node chain from an array, returning the
 head.  Use the result as the argument to a `$@k` list splice.
@@ -3012,6 +3018,90 @@ it records the error and compilation may continue.
 <!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_macro_warning_at;name=start --><p>Emitted only when -Wjcc-macro is enabled. Non-fatal unless
 promoted with -Werror or -Werror=jcc-macro.
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_macro_warning_at;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_macroexpand;   name=__jcc_macroexpand -->
+<a name="//apple_ref/c/func/__jcc_macroexpand"></a>
+<h3><a name="__jcc_macroexpand">__jcc_macroexpand</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_macroexpand;name=start --><!-- begin abstract --></p>
+<p>Lisp-style full macro expansion.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_macroexpand;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_macroexpand;name=start --><!-- a logicalPath="//apple_ref/c/cl/_Node //apple_ref/c/tdef/_Node //apple_ref/c/tag/_Node //apple_ref/c/struct/_Node //apple_ref/c/intf/_Node //apple_ref/doc/anysymbol/_Node" machineGenerated="true" --><span class="type">_Node</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_macroexpand" logicalPath="//apple_ref/c/instm/__jcc_macroexpand //apple_ref/c/clm/__jcc_macroexpand //apple_ref/c/intfcm/__jcc_macroexpand //apple_ref/c/intfm/__jcc_macroexpand //apple_ref/c/func/__jcc_macroexpand" target="_top"><span class="function">__jcc_macroexpand</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/_Node //apple_ref/c/tdef/_Node //apple_ref/c/tag/_Node //apple_ref/c/struct/_Node //apple_ref/c/intf/_Node //apple_ref/doc/anysymbol/_Node" machineGenerated="true" --><span class="type">_Node</span><!-- /a --> <span class="type">*</span><span class="param">node</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_macroexpand;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_macroexpand/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_macroexpand/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_macroexpand/node;   name=node -->
+<a name="//apple_ref/doc/functionparam/__jcc_macroexpand/node"></a>
+<code>node</code>
+</dt>
+<dd><p>The node to fully expand.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>The fully expanded node, or @a node itself if it is not a macro call.
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_macroexpand;name=start --><p>Repeatedly calls @c __jcc_macroexpand_1 on the top-level node
+until it is no longer an @c ND_MACRO_CALL (i.e. the form is
+stable). Does not recurse into child nodes. Respects the VM's
+@c macro_recursion_limit.
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_macroexpand;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_macroexpand_1;   name=__jcc_macroexpand_1 -->
+<a name="//apple_ref/c/func/__jcc_macroexpand_1"></a>
+<h3><a name="__jcc_macroexpand_1">__jcc_macroexpand_1</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_macroexpand_1;name=start --><!-- begin abstract --></p>
+<p>Lisp-style single-step macro expansion (macroexpand-1 semantics).
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_macroexpand_1;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_macroexpand_1;name=start --><!-- a logicalPath="//apple_ref/c/cl/_Node //apple_ref/c/tdef/_Node //apple_ref/c/tag/_Node //apple_ref/c/struct/_Node //apple_ref/c/intf/_Node //apple_ref/doc/anysymbol/_Node" machineGenerated="true" --><span class="type">_Node</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_macroexpand_1" logicalPath="//apple_ref/c/instm/__jcc_macroexpand_1 //apple_ref/c/clm/__jcc_macroexpand_1 //apple_ref/c/intfcm/__jcc_macroexpand_1 //apple_ref/c/intfm/__jcc_macroexpand_1 //apple_ref/c/func/__jcc_macroexpand_1" target="_top"><span class="function">__jcc_macroexpand_1</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/_Node //apple_ref/c/tdef/_Node //apple_ref/c/tag/_Node //apple_ref/c/struct/_Node //apple_ref/c/intf/_Node //apple_ref/doc/anysymbol/_Node" machineGenerated="true" --><span class="type">_Node</span><!-- /a --> <span class="type">*</span><span class="param">node</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_macroexpand_1;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_macroexpand_1/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_macroexpand_1/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_macroexpand_1/node;   name=node -->
+<a name="//apple_ref/doc/functionparam/__jcc_macroexpand_1/node"></a>
+<code>node</code>
+</dt>
+<dd><p>The node to (possibly) expand.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>The expanded node, or @a node itself if it is not a macro call.
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_macroexpand_1;name=start --><p>If @a node is an @c ND_MACRO_CALL node, execute the macro once
+and return the resulting node without splicing it into the AST
+or recursing into nested macro calls. If @a node is not a macro
+call, it is returned unchanged (identity).
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_macroexpand_1;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_node_list;   name=__jcc_node_list -->

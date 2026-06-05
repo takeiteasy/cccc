@@ -156,6 +156,7 @@ extern Node   *__jcc_get_comptime_member(JCC *vm, const char *var_name,
                                          const char *field);
 
 // Ticket #277: Lisp-style single-macro expansion
+extern Node   *__jcc_macroexpand_1(JCC *vm, Node *node);
 extern Node   *__jcc_macroexpand(JCC *vm, Node *node);
 
 // Register reflection API functions as FFI
@@ -337,7 +338,9 @@ static void register_reflection_ffi(JCC *vm) {
     cc_register_cfunc(vm, "__jcc_get_comptime_member",
                       (void *)__jcc_get_comptime_member, 3, 0);
 
-    // Ticket #277: Lisp-style single-macro expansion
+    // Ticket #277: Lisp-style macro expansion
+    cc_register_cfunc(vm, "__jcc_macroexpand_1",
+                      (void *)__jcc_macroexpand_1, 2, 0);
     cc_register_cfunc(vm, "__jcc_macroexpand",
                       (void *)__jcc_macroexpand, 2, 0);
 }
@@ -1208,11 +1211,9 @@ static MacroFn *find_macro_fn_by_name(JCC *vm, const char *name) {
     return NULL;
 }
 
-// Ticket #277: Lisp-style single-macro expansion (macroexpand-1 semantics).
-// If node is an ND_MACRO_CALL, execute the macro once and return the result
-// without splicing it into the AST or recursing. If node is not a macro call,
-// return it unchanged (identity).
-Node *__jcc_macroexpand(JCC *vm, Node *node) {
+// Ticket #277: Lisp-style single-step macro expansion (macroexpand-1).
+// Expands the outermost ND_MACRO_CALL exactly once; identity for anything else.
+Node *__jcc_macroexpand_1(JCC *vm, Node *node) {
     if (!vm || !node)
         return node;
     if (node->kind != ND_MACRO_CALL)
@@ -1227,6 +1228,33 @@ Node *__jcc_macroexpand(JCC *vm, Node *node) {
                                     node->macro_arg_count);
     vm->compiler.scope = saved_scope;
     return result ? result : node;
+}
+
+// Ticket #277: Lisp-style full macro expansion (macroexpand).
+// Repeatedly expands the outermost node via macroexpand_1 until it is no
+// longer an ND_MACRO_CALL (i.e. until the form is stable at the top level).
+// Does not recurse into child nodes — only the top-level call is expanded.
+Node *__jcc_macroexpand(JCC *vm, Node *node) {
+    if (!vm || !node)
+        return node;
+    int limit = vm->compiler.macro_recursion_limit;
+    int depth = 0;
+    Node *current = node;
+    while (current && current->kind == ND_MACRO_CALL) {
+        if (limit > 0 && depth >= limit) {
+            error_tok(vm, current->tok,
+                      "macroexpand: recursion limit exceeded expanding "
+                      "'%s' (depth %d, limit %d)",
+                      current->macro_name, depth + 1, limit);
+            return current;
+        }
+        Node *next = __jcc_macroexpand_1(vm, current);
+        if (next == current)
+            break;
+        current = next;
+        depth++;
+    }
+    return current;
 }
 
 void cc_execute_top_level_macro(JCC *vm, char *name, Token *tok,

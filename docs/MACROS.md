@@ -507,31 +507,48 @@ started under the debugger, and JCC suppresses VM debug tracing while invoking
 macro functions. Use `_DUMP_*` helpers and source-located diagnostics for macro
 debugging.
 
-### macroexpand — single-step expansion
+### macroexpand — macro expansion
 
-`_MACROEXPAND(node)` expands a single macro call node without splicing the
-result into the AST or recursing into nested calls. This mirrors Lisp's
-`macroexpand-1`: it is useful for inspecting what another macro would produce or
-for writing meta-macros that transform macro output before returning it.
+Two functions are provided, matching Lisp's `macroexpand-1` / `macroexpand`
+pair.
+
+**`_MACROEXPAND_1(node)`** expands a single macro call node exactly once,
+without splicing the result into the AST or recursing. Useful when you need
+to observe one expansion step at a time or write meta-macros that inspect
+intermediate forms.
+
+**`_MACROEXPAND(node)`** repeatedly calls `_MACROEXPAND_1` on the top-level
+node until it is no longer a macro call (the form is *stable*). It does not
+recurse into child nodes — only the outermost call is expanded. The VM's
+`macro_recursion_limit` applies; exceeding it is a compile error.
 
 ```c
 [[jcc::macro(inline)]]
-_Node *make_list(void) { /* ... */ }
+_Node *make_answer(void) { return _AST_INT_LITERAL(42); }
+
+[[jcc::macro(inline)]]
+_Node *wrap_answer(void) { return _QUOTE("make_answer()"); }
 
 [[jcc::comptime]]
 void debug_macro(void) {
-    // Inspect what make_list() would expand to, without executing it
-    _Node *call = _QUOTE("make_list()");
-    _Node *expanded = _MACROEXPAND(call);
-    _DUMP_TREE(expanded);
+    _Node *call = _QUOTE("wrap_answer()");
+
+    // One step: wrap_answer() -> make_answer() (still a macro call)
+    _Node *step1 = _MACROEXPAND_1(call);
+    _DUMP_TREE(step1);
+
+    // Full expansion: wrap_answer() -> make_answer() -> 42
+    _Node *full = _MACROEXPAND(call);
+    _DUMP_TREE(full);
 }
 ```
 
-If `node` is not an `ND_MACRO_CALL`, `_MACROEXPAND` returns `node` unchanged
-(identity). If the named macro is not found or has not compiled, it also returns
-`node` unchanged.
+If `node` is not a macro call, both functions return `node` unchanged
+(identity). If the named macro is not found or has not compiled, `node` is
+returned unchanged.
 
-The underlying function is `__jcc_macroexpand(JCC *vm, _Node *node)`.
+Underlying functions: `__jcc_macroexpand_1(JCC *vm, _Node *node)` and
+`__jcc_macroexpand(JCC *vm, _Node *node)`.
 
 ## API Reference
 
@@ -607,7 +624,8 @@ The underlying function is `__jcc_macroexpand(JCC *vm, _Node *node)`.
 | `_AST_VAR_REF(name)` | Variable reference |
 | `_AST_PARAM_REF(fn, name)` | Generated function parameter reference |
 | `_GENSYM(prefix)` | Unique arena-allocated symbol name using `__jcc_gensym` |
-| `_MACROEXPAND(node)` | Single-step macro expansion (identity if not a macro call) |
+| `_MACROEXPAND_1(node)` | Single-step macro expansion (identity if not a macro call) |
+| `_MACROEXPAND(node)` | Full macro expansion — repeats until the top-level form is stable |
 | `_AST_CURRENT_TOKEN()` | Opaque token for the active macro call site |
 | `_AST_SYNTHETIC_TOKEN(label)` | Opaque synthetic token for generated diagnostics |
 | `_AST_TOKEN_FROM_NODE(node)` | Opaque source token attached to a node |
