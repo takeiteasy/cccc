@@ -63,6 +63,49 @@ const char *__jcc_gensym(JCC *vm, const char *prefix) {
                         vm->compiler.macro_gensym_counter++);
 }
 
+_Token *__jcc_ast_current_token(JCC *vm) {
+    return vm ? vm->compiler.macro_call_tok : NULL;
+}
+
+_Token *__jcc_ast_synthetic_token(JCC *vm, const char *label) {
+    if (!vm)
+        return NULL;
+
+    if (!label || !label[0])
+        label = "generated";
+
+    char *display_name = arena_format(vm, "<jcc macro: %s>", label);
+    char *contents = arena_format(vm, "%s\n", label);
+    File *file = new_file(vm, display_name, 0, contents);
+
+    Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
+    memset(tok, 0, sizeof(Token));
+    tok->kind = TK_IDENT;
+    tok->loc = contents;
+    tok->len = (int)strlen(label);
+    tok->file = file;
+    tok->filename = file->display_name;
+    tok->line_no = 1;
+    tok->col_no = 1;
+    return tok;
+}
+
+_Token *__jcc_ast_token_from_node(_Node *node) {
+    return node ? node->tok : NULL;
+}
+
+_Node *__jcc_ast_set_token(_Node *node, _Token *tok) {
+    if (node)
+        node->tok = tok;
+    return node;
+}
+
+_Node *__jcc_ast_copy_location(_Node *dst, _Node *src) {
+    if (dst)
+        dst->tok = src ? src->tok : NULL;
+    return dst;
+}
+
 static Obj *reflect_new_gvar(JCC *vm, char *name, int name_len, Type *ty) {
     Obj *var = reflect_new_var(vm, name, name_len, ty);
     var->next = vm->compiler.globals;
@@ -422,6 +465,7 @@ static _Node *alloc_node(JCC *vm, _NodeKind kind) {
     _Node *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     memset(node, 0, sizeof(Node));
     node->kind = kind;
+    node->tok = vm ? vm->compiler.macro_call_tok : NULL;
     return node;
 }
 

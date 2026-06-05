@@ -466,6 +466,31 @@ _Node *require_nonzero(_Node *value) {
 }
 ```
 
+Builder-created nodes automatically use the macro invocation as their source
+location. When a diagnostic should point somewhere else, use the location
+helpers explicitly:
+
+```c
+[[jcc::macro]]
+_Node *checked_double(_Node *value) {
+    _Node *expr = _AST_BINARY(_ADD, value, value);
+    return _AST_COPY_LOCATION(expr, value);
+}
+```
+
+Use `_AST_SYNTHETIC_TOKEN(label)` for diagnostics that belong to deliberately
+generated code rather than the call site or an input expression:
+
+```c
+[[jcc::macro]]
+_Node *generated_error(void) {
+    _Node *expr = _AST_INT_LITERAL(0);
+    _AST_SET_TOKEN(expr, _AST_SYNTHETIC_TOKEN("generated expression"));
+    _MACRO_ERROR_AT(expr, "generated expression is invalid here");
+    return expr;
+}
+```
+
 AST dump helpers are available while developing macros:
 
 | Helper | Use |
@@ -555,6 +580,11 @@ debugging.
 | `_AST_VAR_REF(name)` | Variable reference |
 | `_AST_PARAM_REF(fn, name)` | Generated function parameter reference |
 | `_GENSYM(prefix)` | Unique arena-allocated symbol name using `__jcc_gensym` |
+| `_AST_CURRENT_TOKEN()` | Opaque token for the active macro call site |
+| `_AST_SYNTHETIC_TOKEN(label)` | Opaque synthetic token for generated diagnostics |
+| `_AST_TOKEN_FROM_NODE(node)` | Opaque source token attached to a node |
+| `_AST_SET_TOKEN(node, tok)` | Attach a token to a node and return the node |
+| `_AST_COPY_LOCATION(dst, src)` | Copy source location from one node to another |
 | `_NODE_LIST(arr, count)` | Build a `->next`-linked node chain from an array for use as a `$@k` splice argument |
 | `_AST_BINARY(op, l, r)` | Binary expression |
 | `_AST_UNARY(op, operand)` | Unary expression |

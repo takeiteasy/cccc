@@ -353,6 +353,12 @@ return 0;
 <dd></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_cond" target="_top">__jcc_ast_cond</a></tt></dt>
 <dd></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_copy_location" target="_top">__jcc_ast_copy_location</a></tt></dt>
+<dd><p>Copy the source token from one node to another.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_current_token" target="_top">__jcc_ast_current_token</a></tt></dt>
+<dd><p>Return the token for the macro invocation currently being executed.
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_do_while" target="_top">__jcc_ast_do_while</a></tt></dt>
 <dd><p>Create a do-while loop node.
 </p></dd>
@@ -498,6 +504,9 @@ _QUOTE("return x;") applies the correct implicit return-type cast.
 </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_return" target="_top">__jcc_ast_return</a></tt></dt>
 <dd></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_set_token" target="_top">__jcc_ast_set_token</a></tt></dt>
+<dd><p>Attach an opaque source token to a node.
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_sizeof_expr" target="_top">__jcc_ast_sizeof_expr</a></tt></dt>
 <dd></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_sizeof_type" target="_top">__jcc_ast_sizeof_type</a></tt></dt>
@@ -521,6 +530,12 @@ _QUOTE("return x;") applies the correct implicit return-type cast.
 <dd></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_switch_set_default" target="_top">__jcc_ast_switch_set_default</a></tt></dt>
 <dd></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_synthetic_token" target="_top">__jcc_ast_synthetic_token</a></tt></dt>
+<dd><p>Create an opaque synthetic source token for generated AST nodes.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_token_from_node" target="_top">__jcc_ast_token_from_node</a></tt></dt>
+<dd><p>Return the opaque source token attached to a node.
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_type_align" target="_top">__jcc_ast_type_align</a></tt></dt>
 <dd></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_type_array_len" target="_top">__jcc_ast_type_array_len</a></tt></dt>
@@ -690,6 +705,70 @@ more than 6 splice nodes.
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
 <!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_cond;name=start --><p>Create a ternary conditional expression node (cond ? then_expr : else_expr). <!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_cond;name=end --><!-- end discussion -->
 </p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_copy_location;   name=__jcc_ast_copy_location -->
+<a name="//apple_ref/c/func/__jcc_ast_copy_location"></a>
+<h3><a name="__jcc_ast_copy_location">__jcc_ast_copy_location</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_copy_location;name=start --><!-- begin abstract --></p>
+<p>Copy the source token from one node to another.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_copy_location;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_copy_location;name=start --><!-- a logicalPath="//apple_ref/c/cl/_Node //apple_ref/c/tdef/_Node //apple_ref/c/tag/_Node //apple_ref/c/struct/_Node //apple_ref/c/intf/_Node //apple_ref/doc/anysymbol/_Node" machineGenerated="true" --><span class="type">_Node</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_copy_location" logicalPath="//apple_ref/c/instm/__jcc_ast_copy_location //apple_ref/c/clm/__jcc_ast_copy_location //apple_ref/c/intfcm/__jcc_ast_copy_location //apple_ref/c/intfm/__jcc_ast_copy_location //apple_ref/c/func/__jcc_ast_copy_location" target="_top"><span class="function">__jcc_ast_copy_location</span></a>(
+    <!-- a logicalPath="//apple_ref/c/cl/_Node //apple_ref/c/tdef/_Node //apple_ref/c/tag/_Node //apple_ref/c/struct/_Node //apple_ref/c/intf/_Node //apple_ref/doc/anysymbol/_Node" machineGenerated="true" --><span class="type">_Node</span><!-- /a --> <span class="type">*</span><span class="param">dst</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/_Node //apple_ref/c/tdef/_Node //apple_ref/c/tag/_Node //apple_ref/c/struct/_Node //apple_ref/c/intf/_Node //apple_ref/doc/anysymbol/_Node" machineGenerated="true" --><span class="type">_Node</span><!-- /a --> <span class="type">*</span><span class="param">src</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_copy_location;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_copy_location/dst;   name=dst -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_copy_location/dst"></a>
+<code>dst</code>
+</dt>
+<dd><p>Generated node to update.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_copy_location/src;   name=src -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_copy_location/src"></a>
+<code>src</code>
+</dt>
+<dd><p>Source node whose location should be reused.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>dst, for chaining.
+
+<!-- end return value --></p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_current_token;   name=__jcc_ast_current_token -->
+<a name="//apple_ref/c/func/__jcc_ast_current_token"></a>
+<h3><a name="__jcc_ast_current_token">__jcc_ast_current_token</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_current_token;name=start --><!-- begin abstract --></p>
+<p>Return the token for the macro invocation currently being executed.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_current_token;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_current_token;name=start --><!-- a logicalPath="//apple_ref/c/cl/_Token //apple_ref/c/tdef/_Token //apple_ref/c/tag/_Token //apple_ref/c/struct/_Token //apple_ref/c/intf/_Token //apple_ref/doc/anysymbol/_Token" machineGenerated="true" --><span class="type">_Token</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_current_token" logicalPath="//apple_ref/c/instm/__jcc_ast_current_token //apple_ref/c/clm/__jcc_ast_current_token //apple_ref/c/intfcm/__jcc_ast_current_token //apple_ref/c/intfm/__jcc_ast_current_token //apple_ref/c/func/__jcc_ast_current_token" target="_top"><span class="function">__jcc_ast_current_token</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_current_token;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_current_token/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_current_token/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>Opaque token for the active macro call site, or NULL outside macro
+execution.
+
+<!-- end return value --></p>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_do_while;   name=__jcc_ast_do_while -->
 <a name="//apple_ref/c/func/__jcc_ast_do_while"></a>
@@ -2128,6 +2207,42 @@ cannot leak into the main parse/codegen pass.
 <!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_return;name=start --><p>Create a return statement node. <!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_return;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_set_token;   name=__jcc_ast_set_token -->
+<a name="//apple_ref/c/func/__jcc_ast_set_token"></a>
+<h3><a name="__jcc_ast_set_token">__jcc_ast_set_token</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_set_token;name=start --><!-- begin abstract --></p>
+<p>Attach an opaque source token to a node.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_set_token;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_set_token;name=start --><!-- a logicalPath="//apple_ref/c/cl/_Node //apple_ref/c/tdef/_Node //apple_ref/c/tag/_Node //apple_ref/c/struct/_Node //apple_ref/c/intf/_Node //apple_ref/doc/anysymbol/_Node" machineGenerated="true" --><span class="type">_Node</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_set_token" logicalPath="//apple_ref/c/instm/__jcc_ast_set_token //apple_ref/c/clm/__jcc_ast_set_token //apple_ref/c/intfcm/__jcc_ast_set_token //apple_ref/c/intfm/__jcc_ast_set_token //apple_ref/c/func/__jcc_ast_set_token" target="_top"><span class="function">__jcc_ast_set_token</span></a>(
+    <!-- a logicalPath="//apple_ref/c/cl/_Node //apple_ref/c/tdef/_Node //apple_ref/c/tag/_Node //apple_ref/c/struct/_Node //apple_ref/c/intf/_Node //apple_ref/doc/anysymbol/_Node" machineGenerated="true" --><span class="type">_Node</span><!-- /a --> <span class="type">*</span><span class="param">node</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/_Token //apple_ref/c/tdef/_Token //apple_ref/c/tag/_Token //apple_ref/c/struct/_Token //apple_ref/c/intf/_Token //apple_ref/doc/anysymbol/_Token" machineGenerated="true" --><span class="type">_Token</span><!-- /a --> <span class="type">*</span><span class="param">tok</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_set_token;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_set_token/node;   name=node -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_set_token/node"></a>
+<code>node</code>
+</dt>
+<dd><p>Node to update.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_set_token/tok;   name=tok -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_set_token/tok"></a>
+<code>tok</code>
+</dt>
+<dd><p>Token from __jcc_ast_current_token(),
+__jcc_ast_synthetic_token(), or __jcc_ast_token_from_node().</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>node, for chaining.
+
+<!-- end return value --></p>
+<hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_sizeof_expr;   name=__jcc_ast_sizeof_expr -->
 <a name="//apple_ref/c/func/__jcc_ast_sizeof_expr"></a>
 <h3><a name="__jcc_ast_sizeof_expr">__jcc_ast_sizeof_expr</a></h3>
@@ -2318,6 +2433,74 @@ and the union size is updated to the maximum field size.
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
 <!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_switch_set_default;name=start --><p>Set the default case for a switch statement. <!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_switch_set_default;name=end --><!-- end discussion -->
 </p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_synthetic_token;   name=__jcc_ast_synthetic_token -->
+<a name="//apple_ref/c/func/__jcc_ast_synthetic_token"></a>
+<h3><a name="__jcc_ast_synthetic_token">__jcc_ast_synthetic_token</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_synthetic_token;name=start --><!-- begin abstract --></p>
+<p>Create an opaque synthetic source token for generated AST nodes.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_synthetic_token;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_synthetic_token;name=start --><!-- a logicalPath="//apple_ref/c/cl/_Token //apple_ref/c/tdef/_Token //apple_ref/c/tag/_Token //apple_ref/c/struct/_Token //apple_ref/c/intf/_Token //apple_ref/doc/anysymbol/_Token" machineGenerated="true" --><span class="type">_Token</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_synthetic_token" logicalPath="//apple_ref/c/instm/__jcc_ast_synthetic_token //apple_ref/c/clm/__jcc_ast_synthetic_token //apple_ref/c/intfcm/__jcc_ast_synthetic_token //apple_ref/c/intfm/__jcc_ast_synthetic_token //apple_ref/c/func/__jcc_ast_synthetic_token" target="_top"><span class="function">__jcc_ast_synthetic_token</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">label</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_synthetic_token;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_synthetic_token/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_synthetic_token/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_synthetic_token/label;   name=label -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_synthetic_token/label"></a>
+<code>label</code>
+</dt>
+<dd><p>Short diagnostic label for the synthetic location.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>Arena-allocated synthetic token, or NULL on error.
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_synthetic_token;name=start --><p>Use this when a generated node should diagnose against a stable
+generated location instead of the macro call or an input node.
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_synthetic_token;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_token_from_node;   name=__jcc_ast_token_from_node -->
+<a name="//apple_ref/c/func/__jcc_ast_token_from_node"></a>
+<h3><a name="__jcc_ast_token_from_node">__jcc_ast_token_from_node</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_token_from_node;name=start --><!-- begin abstract --></p>
+<p>Return the opaque source token attached to a node.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_token_from_node;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_token_from_node;name=start --><!-- a logicalPath="//apple_ref/c/cl/_Token //apple_ref/c/tdef/_Token //apple_ref/c/tag/_Token //apple_ref/c/struct/_Token //apple_ref/c/intf/_Token //apple_ref/doc/anysymbol/_Token" machineGenerated="true" --><span class="type">_Token</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_token_from_node" logicalPath="//apple_ref/c/instm/__jcc_ast_token_from_node //apple_ref/c/clm/__jcc_ast_token_from_node //apple_ref/c/intfcm/__jcc_ast_token_from_node //apple_ref/c/intfm/__jcc_ast_token_from_node //apple_ref/c/func/__jcc_ast_token_from_node" target="_top"><span class="function">__jcc_ast_token_from_node</span></a>(
+    <!-- a logicalPath="//apple_ref/c/cl/_Node //apple_ref/c/tdef/_Node //apple_ref/c/tag/_Node //apple_ref/c/struct/_Node //apple_ref/c/intf/_Node //apple_ref/doc/anysymbol/_Node" machineGenerated="true" --><span class="type">_Node</span><!-- /a --> <span class="type">*</span><span class="param">node</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_token_from_node;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_token_from_node/node;   name=node -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_token_from_node/node"></a>
+<code>node</code>
+</dt>
+<dd><p>Node to inspect.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>The node token, or NULL.
+
+<!-- end return value --></p>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_type_align;   name=__jcc_ast_type_align -->
 <a name="//apple_ref/c/func/__jcc_ast_type_align"></a>
@@ -3026,7 +3209,7 @@ count, a compile-time error is emitted.</p></dd>
 <p class="gapBeforeFooter"> </p>
 <hr class="afterFooter">
 <div class="hd_copyright_and_timestamp">
-<p class="hd_timestamp">Last Updated: Thursday, June 04, 2026
+<p class="hd_timestamp">Last Updated: Friday, June 05, 2026
 </p>
 </div>
 </td>

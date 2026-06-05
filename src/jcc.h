@@ -1439,6 +1439,7 @@ typedef struct Compiler {
     bool in_macro_expansion;         // True during macro AST expansion pass
     bool macro_fns_compiled;         // True after compile_all_macros has run
     int macro_recursion_limit;       // 0 = unlimited, default = 256
+    Token *macro_call_tok;           // Active macro invocation token
     Obj *macro_globals; // Globals defined by inline macros (injected into
                         // the final program before codegen)
 

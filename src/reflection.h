@@ -193,6 +193,57 @@ extern JCC *__jcc_get_vm(void);
 const char *__jcc_gensym(JCC *vm, const char *prefix);
 
 // ============================================================================
+// Generated Node Source Locations (ticket #173)
+// ============================================================================
+
+/*!
+ * @function __jcc_ast_current_token
+ * @abstract Return the token for the macro invocation currently being executed.
+ * @param vm The VM context.
+ * @return Opaque token for the active macro call site, or NULL outside macro
+ *         execution.
+ */
+_Token *__jcc_ast_current_token(JCC *vm);
+
+/*!
+ * @function __jcc_ast_synthetic_token
+ * @abstract Create an opaque synthetic source token for generated AST nodes.
+ * @param vm The VM context.
+ * @param label Short diagnostic label for the synthetic location.
+ * @return Arena-allocated synthetic token, or NULL on error.
+ * @discussion Use this when a generated node should diagnose against a stable
+ *             generated location instead of the macro call or an input node.
+ */
+_Token *__jcc_ast_synthetic_token(JCC *vm, const char *label);
+
+/*!
+ * @function __jcc_ast_token_from_node
+ * @abstract Return the opaque source token attached to a node.
+ * @param node Node to inspect.
+ * @return The node token, or NULL.
+ */
+_Token *__jcc_ast_token_from_node(_Node *node);
+
+/*!
+ * @function __jcc_ast_set_token
+ * @abstract Attach an opaque source token to a node.
+ * @param node Node to update.
+ * @param tok Token from __jcc_ast_current_token(),
+ *            __jcc_ast_synthetic_token(), or __jcc_ast_token_from_node().
+ * @return node, for chaining.
+ */
+_Node *__jcc_ast_set_token(_Node *node, _Token *tok);
+
+/*!
+ * @function __jcc_ast_copy_location
+ * @abstract Copy the source token from one node to another.
+ * @param dst Generated node to update.
+ * @param src Source node whose location should be reused.
+ * @return dst, for chaining.
+ */
+_Node *__jcc_ast_copy_location(_Node *dst, _Node *src);
+
+// ============================================================================
 // Macro Diagnostics (ticket #78)
 // ============================================================================
 
@@ -911,6 +962,12 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, _Node *node);
 #define _DUMP_AST_GEN(node) __jcc_dump_ast_gen(_VM, node)
 #define _DUMP_AST_GEN_TO_STRING(node) __jcc_dump_ast_gen_to_string(_VM, node)
 #define _GENSYM(prefix) __jcc_gensym(_VM, prefix)
+
+#define _AST_CURRENT_TOKEN() __jcc_ast_current_token(_VM)
+#define _AST_SYNTHETIC_TOKEN(label) __jcc_ast_synthetic_token(_VM, label)
+#define _AST_TOKEN_FROM_NODE(node) __jcc_ast_token_from_node(node)
+#define _AST_SET_TOKEN(node, tok) __jcc_ast_set_token(node, tok)
+#define _AST_COPY_LOCATION(dst, src) __jcc_ast_copy_location(dst, src)
 
 #define _AST_FIND_TYPE(name) __jcc_ast_find_type(_VM, name)
 #define _AST_TYPE_EXISTS(name) __jcc_ast_type_exists(_VM, name)

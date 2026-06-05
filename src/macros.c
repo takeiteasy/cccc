@@ -29,6 +29,11 @@ extern JCC *__jcc_current_vm;
 // Forward declarations for reflection API functions (to register as FFI)
 extern JCC *__jcc_get_vm(void);
 extern const char *__jcc_gensym(JCC *vm, const char *prefix);
+extern Token *__jcc_ast_current_token(JCC *vm);
+extern Token *__jcc_ast_synthetic_token(JCC *vm, const char *label);
+extern Token *__jcc_ast_token_from_node(Node *node);
+extern Node *__jcc_ast_set_token(Node *node, Token *tok);
+extern Node *__jcc_ast_copy_location(Node *dst, Node *src);
 extern Type *__jcc_ast_find_type(JCC *vm, const char *name);
 extern bool __jcc_ast_type_exists(JCC *vm, const char *name);
 extern Type *__jcc_ast_get_type(JCC *vm, const char *name);
@@ -155,6 +160,18 @@ static void register_reflection_ffi(JCC *vm) {
     // VM accessor
     cc_register_cfunc(vm, "__jcc_get_vm", (void *)__jcc_get_vm, 0, 0);
     cc_register_cfunc(vm, "__jcc_gensym", (void *)__jcc_gensym, 2, 0);
+
+    // Source location helpers
+    cc_register_cfunc(vm, "__jcc_ast_current_token",
+                      (void *)__jcc_ast_current_token, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_synthetic_token",
+                      (void *)__jcc_ast_synthetic_token, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_token_from_node",
+                      (void *)__jcc_ast_token_from_node, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_set_token",
+                      (void *)__jcc_ast_set_token, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_copy_location",
+                      (void *)__jcc_ast_copy_location, 2, 0);
 
     // Type lookup
     cc_register_cfunc(vm, "__jcc_ast_find_type", (void *)__jcc_ast_find_type, 2, 0);
@@ -1005,8 +1022,8 @@ static void compile_all_macros(JCC *vm) {
 }
 
 // Execute a macro function and return the generated AST node
-static Node *execute_macro_fn(JCC *vm, MacroFn *pm, Node *args,
-                                  int arg_count) {
+static Node *execute_macro_fn(JCC *vm, MacroFn *pm, Token *call_tok,
+                              Node *args, int arg_count) {
     if (!pm || !pm->is_compiled || !pm->compiled_fn)
         return NULL;
 
@@ -1025,6 +1042,8 @@ static Node *execute_macro_fn(JCC *vm, MacroFn *pm, Node *args,
     long long saved_regs[NUM_REGS];
     memcpy(saved_regs, vm->regs, sizeof(saved_regs));
     Obj *saved_current_fn = vm->compiler.current_fn;
+    Token *saved_macro_call_tok = vm->compiler.macro_call_tok;
+    vm->compiler.macro_call_tok = call_tok;
 
     // Reset stack for macro execution
     vm->sp = vm->initial_sp;
@@ -1064,6 +1083,7 @@ static Node *execute_macro_fn(JCC *vm, MacroFn *pm, Node *args,
     vm->bp = saved_bp;
     memcpy(vm->regs, saved_regs, sizeof(saved_regs));
     vm->compiler.current_fn = saved_current_fn;
+    vm->compiler.macro_call_tok = saved_macro_call_tok;
 
     if (vm->debug_vm && result)
         printf("Macro function '%s' returned node of kind %d\n", pm->name,
@@ -1114,7 +1134,7 @@ void cc_execute_top_level_macro(JCC *vm, char *name, Token *tok,
         return;
     }
 
-    Node *result = execute_macro_fn(vm, pm, args, arg_count);
+    Node *result = execute_macro_fn(vm, pm, tok, args, arg_count);
     // Declaration position: NULL (or void return) is legal — the macro may have
     // emitted definitions as side-effects without having a node to splice.
     (void)result;
@@ -1177,7 +1197,7 @@ static Node *transform_node(JCC *vm, Node *node, int depth) {
         if (node->macro_scope)
             vm->compiler.scope = node->macro_scope;
         Node *result =
-            execute_macro_fn(vm, pm, node->args, node->macro_arg_count);
+            execute_macro_fn(vm, pm, node->tok, node->args, node->macro_arg_count);
         vm->compiler.scope = saved_scope;
 
         if (vm->debug_vm)
@@ -1534,7 +1554,7 @@ static void scan_and_execute_global_calls(JCC *vm, Token **tokens_ptr) {
                         // the objects this call generates.
                         Obj *globals_before = vm->compiler.globals;
 
-                        execute_macro_fn(vm, pm, NULL, 0);
+                        execute_macro_fn(vm, pm, tok, NULL, 0);
 
                         // Drain newly prepended objects into macro_globals using
                         // a saved-next walk so we never overwrite a next pointer
