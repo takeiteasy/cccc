@@ -48,7 +48,7 @@ JCC supports two macro execution forms:
 
 | Form | Source shape | When it runs | What the return value means |
 |------|--------------|--------------|-----------------------------|
-| Global generation | `[[jcc::macro]] void gen(char *a1, ...)` called at file scope | Before the main parse | Ignored; side effects generate declarations/functions/globals visible everywhere. Args are stringified into `char *` parameters. |
+| Global generation | `[[jcc::macro]] void gen(char *a1, ...)` called at file scope | Before the main parse | `NULL` / `void` return means side-effects only. An `ND_BLOCK` return splices its body declarations directly into file scope (see [Block return](#block-return-from-file-scope-macros)). Args are stringified into `char *` parameters. |
 | Call-site expansion | `[[jcc::macro(inline)]] _Node *gen(_Node *a1, ...)` called inside code | During macro expansion after parsing | Replaces the call expression or statement |
 
 ### Pre-parse macro declaration context
@@ -116,6 +116,38 @@ TYPES
 `"int"`, `"float"`, or `"double"`, and `list_type` emits one definition per
 type. Use this for boilerplate enum conversion helpers, serializers, or any
 generated definition that source code needs to call normally.
+
+### Block return from file-scope macros
+
+A file-scope macro can return an `ND_BLOCK` node to emit a bundle of related
+declarations in one call. When JCC sees a block return from a global-scope
+macro, it **unwraps** the block and splices its declarations directly into the
+file-scope token stream so they are parsed as top-level definitions.
+
+```c
+[[jcc::macro]]
+_Node *emit_widget_helpers(void) {
+    return _QUOTE("{ struct Widget { int x; int y; }; void widget_init(struct Widget *w) { w->x = 0; w->y = 0; } }");
+}
+
+emit_widget_helpers();
+
+int main(void) {
+    struct Widget w;
+    widget_init(&w);     // widget_init is visible as a global function
+    return w.x == 0 ? 42 : 1;
+}
+```
+
+After expansion, `struct Widget` and `widget_init` appear directly in the
+global scope as if the user had written them verbatim. Any number of
+declarations can be grouped in the returned block.
+
+This approach complements the side-effect style (calling `_AST_FUNCTION` etc.):
+- **Side-effect style** — better when the generated declarations depend on
+  runtime-computed names or types.
+- **Block-return style** — better when the declarations can be expressed as
+  literal C source and returned from one place.
 
 ### Forward includes in generated output
 
@@ -300,6 +332,35 @@ array members are not accessible this way.
 - Pointer and string variables produce a compile-time error at this point;
   use `_AST_STRING_LITERAL` inside the macro body instead.
 - Comptime variables are **not emitted** into the output binary.
+
+### constexpr variables
+
+C23 `constexpr` variables can also be read by macros via a separate API.
+Unlike `comptime` variables (which are JCC-specific), `constexpr` follows
+standard C23 restricted constant-expression grammar — no function calls,
+no variable references in the initializer.
+
+```c
+constexpr int BUF_SIZE = 256;
+constexpr double SCALE  = 1.5;
+
+[[jcc::macro(inline)]]
+_Node *make_buf_size(void) {
+    return _AST_GET_CONSTEXPR_VALUE("BUF_SIZE");
+}
+```
+
+| API | Returns | Description |
+|---|---|---|
+| `_AST_GET_CONSTEXPR_VALUE(name)` | `_Node *` | Evaluated initializer of a global `constexpr` variable as an AST literal node (integer or float) |
+
+`_AST_GET_CONSTEXPR_VALUE` errors at compile time if the name does not refer to
+a visible global `constexpr` variable.
+
+**`constexpr` vs `comptime`** — these are distinct qualifiers. A `constexpr`
+variable is not accessible via `_AST_GET_COMPTIME_*` and vice versa. Use
+`constexpr` for standard C23 constants; use `comptime` for JCC-extension values
+that can reference comptime functions.
 
 ## Quasi-Quoting
 

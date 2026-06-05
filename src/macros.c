@@ -156,6 +156,9 @@ extern Node   *__jcc_get_comptime_var(JCC *vm, const char *name);
 extern Node   *__jcc_get_comptime_member(JCC *vm, const char *var_name,
                                          const char *field);
 
+// Ticket #189: constexpr variable access
+extern Node   *__jcc_get_constexpr_value(JCC *vm, const char *name);
+
 // Ticket #277: Lisp-style single-macro expansion
 extern Node   *__jcc_macroexpand_1(JCC *vm, Node *node);
 extern Node   *__jcc_macroexpand(JCC *vm, Node *node);
@@ -339,6 +342,10 @@ static void register_reflection_ffi(JCC *vm) {
                       (void *)__jcc_get_comptime_var, 2, 0);
     cc_register_cfunc(vm, "__jcc_get_comptime_member",
                       (void *)__jcc_get_comptime_member, 3, 0);
+
+    // Ticket #189: constexpr variable access
+    cc_register_cfunc(vm, "__jcc_get_constexpr_value",
+                      (void *)__jcc_get_constexpr_value, 2, 0);
 
     // Ticket #277: Lisp-style macro expansion
     cc_register_cfunc(vm, "__jcc_macroexpand_1",
@@ -1771,7 +1778,8 @@ static void scan_and_execute_global_calls(JCC *vm, Token **tokens_ptr) {
                             scope_before->next =
                                 vm->compiler.macro_context_scope;
 
-                        execute_macro_fn(vm, pm, tok, NULL, 0);
+                        Node *block_result =
+                            execute_macro_fn(vm, pm, tok, NULL, 0);
                         if (scope_before)
                             scope_before->next = saved_scope_next;
                         vm->compiler.scope = scope_before;
@@ -1787,6 +1795,47 @@ static void scan_and_execute_global_calls(JCC *vm, Token **tokens_ptr) {
                             o = next_obj;
                         }
                         vm->compiler.globals = globals_before;
+
+                        // Ticket #233: if the macro returned an ND_BLOCK, splice
+                        // its body tokens into the stream so they are re-parsed
+                        // at global scope instead of being silently discarded.
+                        // The block came from $quote("{ ... }") so the token
+                        // chain is: outer-'{' -> body tokens -> outer-'}' -> EOF.
+                        // We start from block_result->tok->next (the token after
+                        // the outer '{') and walk forward, tracking brace depth
+                        // starting at 0, stopping just before the outer '}'.
+                        // Note: compound_stmt adds declarations as side effects
+                        // so block->body may be NULL; use tok-level injection.
+                        if (block_result &&
+                            block_result->kind == ND_BLOCK &&
+                            block_result->tok &&
+                            block_result->tok->kind != TK_EOF &&
+                            !equal(block_result->tok, "}")) {
+                            Token *body_first = block_result->tok;
+                            Token *body_last  = NULL;
+                            int bdepth = 0;
+                            for (Token *t = body_first;
+                                 t && t->kind != TK_EOF;
+                                 t = t->next) {
+                                if (equal(t, "{"))
+                                    bdepth++;
+                                else if (equal(t, "}")) {
+                                    if (bdepth == 0)
+                                        break; // outer closing brace
+                                    bdepth--;
+                                }
+                                body_last = t;
+                            }
+                            if (body_last) {
+                                body_last->next = next_tok;
+                                if (prev)
+                                    prev->next = body_first;
+                                else
+                                    *tokens_ptr = body_first;
+                                tok = body_first;
+                                continue;
+                            }
+                        }
 
                         // Remove the call tokens from the stream
                         if (prev) {

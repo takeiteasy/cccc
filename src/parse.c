@@ -5752,4 +5752,7 @@ Node *cc_parse_compound_stmt(JCC *vm, Token **rest, Token *tok) {
     return compound_stmt(vm, rest, tok, NULL);
 }
 
+int64_t cc_eval(JCC *vm, Node *node) { return eval(vm, node); }
+double  cc_eval_double(JCC *vm, Node *node) { return eval_double(vm, node); }
+
 void cc_init_parser(JCC *vm) { error_var->ty = ty_error; }

@@ -2089,6 +2089,8 @@ Node *cc_parse_stmt(JCC *vm, Token **rest, Token *tok);
  @return AST node representing the parsed compound statement.
 */
 Node *cc_parse_compound_stmt(JCC *vm, Token **rest, Token *tok);
+int64_t cc_eval(JCC *vm, Node *node);
+double  cc_eval_double(JCC *vm, Node *node);
 void cc_init_parser(JCC *vm);
 
 /*!

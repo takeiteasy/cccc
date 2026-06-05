@@ -2376,3 +2376,12 @@ _Node *__jcc_get_comptime_member(JCC *vm, const char *var_name,
     }
     return NULL;
 }
+
+_Node *__jcc_get_constexpr_value(JCC *vm, const char *name) {
+    if (!vm || !name) return NULL;
+    Obj *obj = (Obj *)__jcc_ast_find_global(vm, name);
+    if (!obj || !obj->is_constexpr || !obj->init_expr) return NULL;
+    if (obj->ty->kind >= TY_FLOAT)
+        return __jcc_ast_float_literal(vm, cc_eval_double(vm, obj->init_expr));
+    return __jcc_ast_int_literal(vm, cc_eval(vm, obj->init_expr));
+}

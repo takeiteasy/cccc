@@ -1164,6 +1164,14 @@ _Node *__jcc_get_comptime_member(JCC *vm, const char *var_name,
 #define _AST_GET_COMPTIME_VAR(name)           __jcc_get_comptime_var(_VM, name)
 #define _AST_GET_COMPTIME_MEMBER(var, field)  __jcc_get_comptime_member(_VM, var, field)
 
+// Constexpr variable access (ticket #189)
+// Read the evaluated initializer of a global `constexpr` variable as an AST literal node.
+// Returns ND_NUM (integer) or ND_NUM (float) depending on the variable's type.
+// Errors at compile time if the name does not refer to a visible constexpr variable.
+_Node *__jcc_get_constexpr_value(JCC *vm, const char *name);
+
+#define _AST_GET_CONSTEXPR_VALUE(name)  __jcc_get_constexpr_value(_VM, name)
+
 // Global variable generation (ticket #152)
 #define _AST_GLOBAL_VAR(name, ty)                                           \
     __jcc_ast_global_var(_VM, name, ty)
