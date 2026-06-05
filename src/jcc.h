@@ -714,6 +714,7 @@ struct Node {
     Type *func_ty;
     struct Node *args;
     bool pass_by_stack;
+    bool has_splice_arg; // deferred arity/cast check needed after quote_substitute
     Obj *ret_buffer;
 
     // Goto or labeled statement, or labels-as-values
@@ -802,6 +803,7 @@ struct Obj {
     bool is_constexpr;
     bool is_implicit; // synthesized by an implicit function declaration
     bool is_macro_generated; // true if created by a #pragma macro via _AST_FUNCTION/_AST_GLOBAL_VAR
+    bool is_splice_placeholder; // true for $@k vars synthesised by quote_core
 
     // Global variable
     bool is_tentative;

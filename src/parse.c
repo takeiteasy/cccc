@@ -4413,6 +4413,7 @@ static Node *funcall(JCC *vm, Token **rest, Token *tok, Node *fn) {
 
     Node head = {};
     Node *cur = &head;
+    bool deferred_splice = false;
 
     while (!equal(tok, ")")) {
         if (cur != &head)
@@ -4421,31 +4422,38 @@ static Node *funcall(JCC *vm, Token **rest, Token *tok, Node *fn) {
         Node *arg = assign(vm, &tok, tok);
         add_type(vm, arg);
 
-        if (!param_ty && !ty->is_variadic) {
-            if (vm->collect_errors &&
-                error_tok_recover(vm, tok, "too many arguments")) {
-                // Continue parsing to find more errors, but don't add this arg
-                continue;
-            }
-            error_tok(vm, tok, "too many arguments");
-        }
+        // Detect $@k splice placeholder: defer all arity/cast checks from here on.
+        if (!deferred_splice &&
+            arg->kind == ND_VAR && arg->var && arg->var->is_splice_placeholder)
+            deferred_splice = true;
 
-        if (param_ty) {
-            if (param_ty->kind != TY_STRUCT && param_ty->kind != TY_UNION) {
-                warn_implicit_conversion(vm, arg, param_ty, tok);
-                arg = new_cast(vm, arg, param_ty);
+        if (!deferred_splice) {
+            if (!param_ty && !ty->is_variadic) {
+                if (vm->collect_errors &&
+                    error_tok_recover(vm, tok, "too many arguments")) {
+                    // Continue parsing to find more errors, but don't add this arg
+                    continue;
+                }
+                error_tok(vm, tok, "too many arguments");
             }
-            param_ty = param_ty->next;
-        } else if (arg->ty->kind == TY_FLOAT) {
-            // If parameter type is omitted (e.g. in "..."), float
-            // arguments are promoted to double.
-            arg = new_cast(vm, arg, ty_double);
+
+            if (param_ty) {
+                if (param_ty->kind != TY_STRUCT && param_ty->kind != TY_UNION) {
+                    warn_implicit_conversion(vm, arg, param_ty, tok);
+                    arg = new_cast(vm, arg, param_ty);
+                }
+                param_ty = param_ty->next;
+            } else if (arg->ty->kind == TY_FLOAT) {
+                // If parameter type is omitted (e.g. in "..."), float
+                // arguments are promoted to double.
+                arg = new_cast(vm, arg, ty_double);
+            }
         }
 
         cur = cur->next = arg;
     }
 
-    if (param_ty) {
+    if (!deferred_splice && param_ty) {
         if (vm->collect_errors &&
             error_tok_recover(vm, tok, "too few arguments")) {
             // Create placeholder arguments for missing parameters
@@ -4467,6 +4475,7 @@ static Node *funcall(JCC *vm, Token **rest, Token *tok, Node *fn) {
     node->func_ty = ty;
     node->ty = ty->return_ty;
     node->args = head.next;
+    node->has_splice_arg = deferred_splice;
 
     // If a function returns a struct, it is caller's responsibility
     // to allocate a space for the return value.

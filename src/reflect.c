@@ -2002,6 +2002,51 @@ static bool quote_is_stmt(Token *tok) {
     return false;
 }
 
+// After quote_substitute, walk the AST and re-apply parameter casts + arity
+// validation for any ND_FUNCALL nodes that had $@k splice placeholders (which
+// bypassed parse-time checking in funcall()).
+static void recheck_spliced_funcalls(JCC *vm, _Node *node) {
+    if (!node)
+        return;
+    recheck_spliced_funcalls(vm, node->lhs);
+    recheck_spliced_funcalls(vm, node->rhs);
+    recheck_spliced_funcalls(vm, node->cond);
+    recheck_spliced_funcalls(vm, node->then);
+    recheck_spliced_funcalls(vm, node->els);
+    recheck_spliced_funcalls(vm, node->init);
+    recheck_spliced_funcalls(vm, node->inc);
+    for (_Node *n = node->body; n; n = n->next)
+        recheck_spliced_funcalls(vm, n);
+    for (_Node *a = node->args; a; a = a->next)
+        recheck_spliced_funcalls(vm, a);
+
+    if (node->kind != ND_FUNCALL || !node->has_splice_arg)
+        return;
+    node->has_splice_arg = false;
+
+    Type *param_ty = node->func_ty->params;
+    Node **ap = &node->args;
+    while (*ap) {
+        if (!param_ty) {
+            if (!node->func_ty->is_variadic)
+                error_tok(vm, node->tok,
+                          "too many arguments (after splice expansion)");
+            break;
+        }
+        Node *a = *ap;
+        if (param_ty->kind != TY_STRUCT && param_ty->kind != TY_UNION) {
+            warn_implicit_conversion(vm, a, param_ty, node->tok);
+            Node *cast_node = new_cast(vm, a, param_ty);
+            cast_node->next = a->next;
+            *ap = cast_node;
+        }
+        param_ty = param_ty->next;
+        ap = &(*ap)->next;
+    }
+    if (param_ty)
+        error_tok(vm, node->tok, "too few arguments (after splice expansion)");
+}
+
 // Shared implementation for both public entry points.
 static _Node *quote_core(JCC *vm, const char *tmpl,
                              _Node **nodes, int n) {
@@ -2053,6 +2098,7 @@ static _Node *quote_core(JCC *vm, const char *tmpl,
         // Type doesn't matter for splice placeholders — the whole
         // ND_EXPR_STMT wrapper is discarded during substitution.
         Obj *var = quote_push_placeholder(vm, &quote_scope, name, NULL);
+        var->is_splice_placeholder = true;
         subst.splice_vars[k - 1] = var;
     }
 
@@ -2080,6 +2126,10 @@ static _Node *quote_core(JCC *vm, const char *tmpl,
 
     // 7. Substitute placeholder vars with caller-provided argument nodes
     result = quote_substitute(&subst, result);
+
+    // 7b. Re-apply parameter casts and validate arity for any ND_FUNCALL nodes
+    //     that deferred their checks because a $@k splice placeholder was present.
+    recheck_spliced_funcalls(vm, result);
 
     // 8. Re-run add_type so spliced-in types propagate correctly
     add_type(vm, result);

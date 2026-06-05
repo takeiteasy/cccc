@@ -435,9 +435,11 @@ directly as the splice argument.
 ### Call-argument splicing
 
 `$@k` can also appear as a **direct argument to a function call** in a `_QUOTE`
-template, expanding the chain into the callee's argument list. This is currently
-supported for **variadic callees** — functions that accept a variable-argument
-tail (`...`). The splice occupies zero or more argument slots in the variadic
+template, expanding the chain into the callee's argument list. This works for
+both **variadic callees** (functions accepting `...`) and **fixed-arity
+callees** (functions with an exact parameter count).
+
+For variadic callees the splice occupies zero or more slots in the variadic
 portion:
 
 ```c
@@ -458,19 +460,30 @@ _Node *call_sum3(_Node *a, _Node *b, _Node *c) {
 }
 ```
 
+For fixed-arity callees the spliced nodes must produce exactly the right number
+of arguments after expansion. Parameter casts are applied post-expansion:
+
+```c
+int add3(int a, int b, int c) { return a + b + c; }
+
+[[jcc::macro(inline)]]
+_Node *call_add3(_Node *a, _Node *b, _Node *c) {
+    _Node *chain = _NODE_LIST((_Node*[]){ a, b, c }, 3);
+    return _QUOTE("add3($@1)", chain); // → add3(a, b, c)
+}
+```
+
 Mixing a scalar `$N` with a call-arg splice `$@M` in one template is supported:
 
 ```c
-return _QUOTE("base_plus_sum($1, 2, $@2)", base_node, pair_chain);
+return _QUOTE("add3($1, $@2)", first_node, pair_chain);
 ```
 
 An empty chain (`_NODE_LIST` with `count == 0`, which returns NULL) is a valid
 splice that inserts zero arguments. Using `$@k` as a sub-expression operand
 (e.g. `"foo($@1 + 1)"`) rather than a direct argument remains a compile-time
-error.
-
-Splicing into fixed-arity callees (functions without `...`) is not yet
-supported — the parser validates arity before substitution runs.
+error. Splicing the wrong number of arguments into a fixed-arity callee is also
+a compile-time error.
 
 ### `_QUOTE` inside generated function bodies
 
