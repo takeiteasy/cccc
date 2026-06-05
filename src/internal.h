@@ -39,7 +39,7 @@
 #endif
 
 #define JCC_MAGIC "JCC\0"
-#define JCC_VERSION 5 // Version 5: persisted return-buffer ABI metadata
+#define JCC_VERSION 6 // Version 6: persisted FFI allow/deny/disable policy
 
 // Stack canary constant for detecting stack overflows (used when random
 // canaries disabled)

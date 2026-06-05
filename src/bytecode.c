@@ -244,6 +244,28 @@ int cc_save_bytecode(JCC *vm, const char *path) {
         if (fwrite(&is_dynamic_placeholder, sizeof(int), 1, f) != 1) goto write_error;
     }
 
+    // Write FFI policy (allow list, deny list, disable flag)
+    {
+        int disable_ffi = vm->disable_all_ffi;
+        if (fwrite(&disable_ffi, sizeof(int), 1, f) != 1) goto write_error;
+
+        int allow_count = vm->ffi_allow_count;
+        if (fwrite(&allow_count, sizeof(int), 1, f) != 1) goto write_error;
+        for (int i = 0; i < allow_count; i++) {
+            int len = (int)strlen(vm->ffi_allow_list[i]);
+            if (fwrite(&len, sizeof(int), 1, f) != 1) goto write_error;
+            if (fwrite(vm->ffi_allow_list[i], 1, len, f) != (size_t)len) goto write_error;
+        }
+
+        int deny_count = vm->ffi_deny_count;
+        if (fwrite(&deny_count, sizeof(int), 1, f) != 1) goto write_error;
+        for (int i = 0; i < deny_count; i++) {
+            int len = (int)strlen(vm->ffi_deny_list[i]);
+            if (fwrite(&len, sizeof(int), 1, f) != 1) goto write_error;
+            if (fwrite(vm->ffi_deny_list[i], 1, len, f) != (size_t)len) goto write_error;
+        }
+    }
+
     fclose(f);
 
     if (vm->debug_vm) {
@@ -254,6 +276,8 @@ int cc_save_bytecode(JCC *vm, const char *path) {
         printf("  Return buffers: %lld x %lld bytes\n", return_buffer_count,
                return_buffer_size);
         printf("  FFI entries: %lld\n", ffi_count);
+        printf("  FFI allow: %d  deny: %d  disable: %d\n",
+               vm->ffi_allow_count, vm->ffi_deny_count, vm->disable_all_ffi);
         printf("  Main offset: %lld\n", main_offset);
     }
 
@@ -448,6 +472,58 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
     }
     vm->compiler.ffi_count = (int)ffi_count;
 
+    // Read FFI policy (allow list, deny list, disable flag)
+    {
+        READ_AND_INCR(disable_ffi_i, int);
+        vm->disable_all_ffi |= disable_ffi_i;
+
+        READ_AND_INCR(allow_count_i, int);
+        if (allow_count_i < 0 || allow_count_i > MAX_CALLS) {
+            fprintf(stderr, "error: invalid FFI allow count in bytecode\n");
+            return -1;
+        }
+        for (int i = 0; i < allow_count_i; i++) {
+            READ_AND_INCR(len, int);
+            if (len < 0 || len > 4096 || cursor + len > end) {
+                fprintf(stderr, "error: invalid FFI allow entry at index %d\n", i);
+                return -1;
+            }
+            char *name = malloc((size_t)len + 1);
+            if (!name) {
+                fprintf(stderr, "error: failed to allocate FFI allow entry\n");
+                return -1;
+            }
+            memcpy(name, cursor, (size_t)len);
+            name[len] = '\0';
+            cursor += len;
+            cc_ffi_allow(vm, name);
+            free(name);
+        }
+
+        READ_AND_INCR(deny_count_i, int);
+        if (deny_count_i < 0 || deny_count_i > MAX_CALLS) {
+            fprintf(stderr, "error: invalid FFI deny count in bytecode\n");
+            return -1;
+        }
+        for (int i = 0; i < deny_count_i; i++) {
+            READ_AND_INCR(len, int);
+            if (len < 0 || len > 4096 || cursor + len > end) {
+                fprintf(stderr, "error: invalid FFI deny entry at index %d\n", i);
+                return -1;
+            }
+            char *name = malloc((size_t)len + 1);
+            if (!name) {
+                fprintf(stderr, "error: failed to allocate FFI deny entry\n");
+                return -1;
+            }
+            memcpy(name, cursor, (size_t)len);
+            name[len] = '\0';
+            cursor += len;
+            cc_ffi_deny(vm, name);
+            free(name);
+        }
+    }
+
     long long num_instructions = text_size / (long long)sizeof(JCCInstrWord);
 
     // Mark operand positions
@@ -506,6 +582,8 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
         printf("  Data relocations: %lld\n", data_reloc_count);
         printf("  Return buffers: %lld x %lld bytes\n", return_buffer_count,
                return_buffer_size);
+        printf("  FFI allow: %d  deny: %d  disable: %d\n",
+               vm->ffi_allow_count, vm->ffi_deny_count, vm->disable_all_ffi);
         printf("  Main offset: %lld\n", main_offset);
     }
 

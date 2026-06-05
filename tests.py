@@ -23,14 +23,7 @@ import time
 from pathlib import Path
 
 
-# Tests that fail under the .jbc round-trip but pass in source mode.
-# These depend on dlopen(0, ...) seeing the same libc handle that source-mode
-# FFI setup uses; bytecode mode rehydrates libc separately.
 JBC_SKIP_TESTS = {
-    "test_ffi_allow_zero.c",
-    "test_ffi_deny_zero.c",
-    "test_ffi_deny_dlfcn_zero.c",
-    "test_ffi_disable_dlfcn_zero.c",
 }
 
 # Tests that hang under leaks --atExit due to fork()/wait() interactions
