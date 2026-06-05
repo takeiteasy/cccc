@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Cross-reference static and dynamic opcode bigram counts.
+"""Cross-reference static and dynamic opcode n-gram counts.
 
 Reads the text output of tools/bytecode_ngrams (static .jbc analysis) and
-the JSON output of `jcc --vm-profile-json` (runtime bigram counts) and
-prints a unified ranking. The score is `static_count * dynamic_count`,
+the JSON output of `jcc --vm-profile-json` (runtime bigram/trigram counts)
+and prints a unified ranking. The score is `static_count * dynamic_count`,
 so sequences that are both common in the bytecode AND executed many
 times rise to the top — these are the strongest fusion candidates
 (see ticket #250).
@@ -18,9 +18,6 @@ passed to the compiled program so you can profile non-default inputs
 Environment variables:
     JCC          path to the jcc binary     (default: ./jcc)
     NGRAM_TOOL   path to bytecode_ngrams    (default: ./tools/bytecode_ngrams)
-
-The VM profile currently tracks only bigrams; trigram cross-referencing
-falls back to scoring the trigram's first bigram as a heuristic.
 """
 import argparse
 import json
@@ -52,12 +49,21 @@ def parse_static(text):
 
 
 def load_dynamic(path):
-    """Return {sequence: dict} from a --vm-profile-json file."""
+    """Return two dicts from a --vm-profile-json file:
+      bigrams:  {sequence_str: count}
+      trigrams: {sequence_str: count}  (empty dict if not present)
+    """
     with open(path) as f:
         data = json.load(f)
-    return {
-        f"{b['from']} -> {b['to']}": b for b in data.get("bigrams", [])
+    bigrams = {
+        f"{b['from']} -> {b['to']}": b["count"]
+        for b in data.get("bigrams", [])
     }
+    trigrams = {
+        f"{t['a']} -> {t['b']} -> {t['c']}": t["count"]
+        for t in data.get("trigrams", [])
+    }
+    return bigrams, trigrams
 
 
 def main():
@@ -71,10 +77,12 @@ def main():
                     help="Path to bytecode_ngrams tool")
     ap.add_argument("--top", type=int, default=25,
                     help="Show only top N rows (default 25)")
+    ap.add_argument("-n", "--ngram-size", type=int, default=2,
+                    choices=[2, 3], help="N-gram size (default 2)")
     args = ap.parse_args()
 
     result = subprocess.run(
-        [args.ngram_tool, "-n", "2", "-t", "9999", args.jbc],
+        [args.ngram_tool, "-n", str(args.ngram_size), "-t", "9999", args.jbc],
         capture_output=True, text=True, check=True,
     )
     static_text = result.stdout
@@ -86,20 +94,28 @@ def main():
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     try:
-        dynamic = load_dynamic(profile_path)
+        bigrams, trigrams = load_dynamic(profile_path)
     finally:
         try:
             os.unlink(profile_path)
         except OSError:
             pass
 
+    if args.ngram_size == 3 and not trigrams:
+        print("warning: VM profile contains no trigram data; "
+              "rebuild with a JCC that supports trigram profiling",
+              file=sys.stderr)
+
     print(f"{'static':>8s}  {'dynamic':>10s}  {'score':>12s}  sequence")
     rows = []
     for s_count, s_seq in parse_static(static_text):
-        d = dynamic.get(s_seq)
-        if d is None:
+        if args.ngram_size == 2:
+            d_count = bigrams.get(s_seq)
+        else:
+            d_count = trigrams.get(s_seq)
+        if d_count is None:
             continue
-        rows.append((s_count * d["count"], s_count, d["count"], s_seq))
+        rows.append((s_count * d_count, s_count, d_count, s_seq))
     rows.sort(reverse=True)
     for score, s_count, d_count, s_seq in rows[:args.top]:
         print(f"{s_count:>8d}  {d_count:>10d}  {score:>12d}  {s_seq}")
@@ -107,4 +123,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

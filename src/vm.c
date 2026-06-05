@@ -257,6 +257,12 @@ void cc_vm_profile_reset(JCC *vm) {
     vm->vm_profile_bigram_total = 0;
     vm->vm_profile_prev_op = -1;
     vm->vm_profile_bigram_started = false;
+    if (vm->vm_profile_trigram_counts)
+        memset(vm->vm_profile_trigram_counts, 0,
+               (size_t)OP_COUNT * OP_COUNT * OP_COUNT * sizeof(uint64_t));
+    vm->vm_profile_trigram_total = 0;
+    vm->vm_profile_prev2_op = -1;
+    vm->vm_profile_trigram_started = false;
 }
 
 void cc_vm_profile_print(JCC *vm, FILE *f) {
@@ -422,8 +428,63 @@ int cc_vm_profile_write_json(JCC *vm, const char *path, const char *mode,
             first_bg = false;
         }
     }
-    fprintf(f, "%s\n  ]\n", first_bg ? "" : "\n  ");
-    fprintf(f, "}\n");
+    fprintf(f, "%s\n  ]", first_bg ? "" : "\n  ");
+
+    // Trigram section (only when tracking was enabled and data exists)
+    if (vm->vm_profile_trigram_counts && vm->vm_profile_trigram_total > 0) {
+        // Collect top-25 trigrams by count
+        typedef struct { int a, b, c; uint64_t count; } TG;
+        int cap = 25;
+        TG *top = calloc(cap, sizeof(TG));
+        if (top) {
+            for (int a = 0; a < OP_COUNT; a++) {
+                for (int b = 0; b < OP_COUNT; b++) {
+                    for (int c = 0; c < OP_COUNT; c++) {
+                        uint64_t cnt = vm->vm_profile_trigram_counts[
+                            ((size_t)a * OP_COUNT + b) * OP_COUNT + c];
+                        if (cnt == 0) continue;
+                        // Insert into top[] if larger than minimum
+                        int min_idx = 0;
+                        for (int k = 1; k < cap; k++)
+                            if (top[k].count < top[min_idx].count)
+                                min_idx = k;
+                        if (cnt > top[min_idx].count)
+                            top[min_idx] = (TG){a, b, c, cnt};
+                    }
+                }
+            }
+            // Sort descending by count (simple selection sort for 25 elements)
+            for (int i = 0; i < cap - 1; i++)
+                for (int j = i + 1; j < cap; j++)
+                    if (top[j].count > top[i].count) { TG tmp = top[i]; top[i] = top[j]; top[j] = tmp; }
+
+            fprintf(f, ",\n  \"total_trigrams\": %llu,\n",
+                    (unsigned long long)vm->vm_profile_trigram_total);
+            fprintf(f, "  \"trigrams\": [");
+            bool first_tg = true;
+            for (int i = 0; i < cap; i++) {
+                if (top[i].count == 0) break;
+                const char *an = cc_opcode_name(top[i].a);
+                const char *bn = cc_opcode_name(top[i].b);
+                const char *cn = cc_opcode_name(top[i].c);
+                double tpct = (double)top[i].count * 100.0 /
+                              (double)vm->vm_profile_trigram_total;
+                fprintf(f, "%s\n    {\"a\": \"", first_tg ? "" : ",");
+                json_escape(f, an ? an : "UNKNOWN");
+                fprintf(f, "\", \"b\": \"");
+                json_escape(f, bn ? bn : "UNKNOWN");
+                fprintf(f, "\", \"c\": \"");
+                json_escape(f, cn ? cn : "UNKNOWN");
+                fprintf(f, "\", \"count\": %llu, \"percent\": %.6f}",
+                        (unsigned long long)top[i].count, tpct);
+                first_tg = false;
+            }
+            fprintf(f, "\n  ]");
+            free(top);
+        }
+    }
+
+    fprintf(f, "\n}\n");
     int rc = ferror(f) ? -1 : 0;
     if (fclose(f) != 0)
         rc = -1;
@@ -474,6 +535,16 @@ dispatch:
                 int prev = vm->vm_profile_prev_op;
                 vm->vm_profile_bigram_counts[prev * OP_COUNT + op]++;
                 vm->vm_profile_bigram_total++;
+                if (vm->vm_profile_trigram_counts) {
+                    if (vm->vm_profile_trigram_started) {
+                        int prev2 = vm->vm_profile_prev2_op;
+                        vm->vm_profile_trigram_counts[
+                            ((size_t)prev2 * OP_COUNT + prev) * OP_COUNT + op]++;
+                        vm->vm_profile_trigram_total++;
+                    }
+                    vm->vm_profile_prev2_op = prev;
+                    vm->vm_profile_trigram_started = true;
+                }
             } else {
                 vm->vm_profile_bigram_started = true;
             }
@@ -817,6 +888,10 @@ void cc_destroy(JCC *vm) {
         jcc_vm_release(vm->shadow_stack,
                        (size_t)vm->poolsize_max * sizeof(long long));
     // return_buffer is part of data_seg, no need to free separately
+    if (vm->vm_profile_trigram_counts) {
+        free(vm->vm_profile_trigram_counts);
+        vm->vm_profile_trigram_counts = NULL;
+    }
 
     // Free VM runtime HashMaps. Integer keys (keylen == -1) are skipped by
     // hashmap_deinit. Heap-allocated values must be freed first.

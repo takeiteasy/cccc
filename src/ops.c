@@ -2419,3 +2419,118 @@ static inline int op_IOVFL_fn(JCC *vm) {
     vm->regs[REG_A0] = overflow ? 1 : 0;
     return 0;
 }
+
+// ========== Fused bp-relative (local) load/store ==========
+// These replace the common LEA3+LDR/STR two-opcode sequence for local vars.
+
+static inline int op_LDR_LOCAL_B_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd;
+    DECODE_R(operands, rd);
+    long long offset = cc_read_i64(vm);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = *(char *)(vm->bp + offset);
+    return 0;
+}
+
+static inline int op_LDR_LOCAL_H_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd;
+    DECODE_R(operands, rd);
+    long long offset = cc_read_i64(vm);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = *(short *)(vm->bp + offset);
+    return 0;
+}
+
+static inline int op_LDR_LOCAL_W_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd;
+    DECODE_R(operands, rd);
+    long long offset = cc_read_i64(vm);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = *(int *)(vm->bp + offset);
+    return 0;
+}
+
+static inline int op_LDR_LOCAL_D_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd;
+    DECODE_R(operands, rd);
+    long long offset = cc_read_i64(vm);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = *(long long *)(vm->bp + offset);
+    return 0;
+}
+
+static inline int op_STR_LOCAL_B_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd;
+    DECODE_R(operands, rd);
+    long long offset = cc_read_i64(vm);
+    *(char *)(vm->bp + offset) = (char)vm->regs[rd];
+    return 0;
+}
+
+static inline int op_STR_LOCAL_H_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd;
+    DECODE_R(operands, rd);
+    long long offset = cc_read_i64(vm);
+    *(short *)(vm->bp + offset) = (short)vm->regs[rd];
+    return 0;
+}
+
+static inline int op_STR_LOCAL_W_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd;
+    DECODE_R(operands, rd);
+    long long offset = cc_read_i64(vm);
+    *(int *)(vm->bp + offset) = (int)vm->regs[rd];
+    return 0;
+}
+
+static inline int op_STR_LOCAL_D_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd;
+    DECODE_R(operands, rd);
+    long long offset = cc_read_i64(vm);
+    *(long long *)(vm->bp + offset) = vm->regs[rd];
+    return 0;
+}
+
+static inline int op_FLDR_LOCAL_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd;
+    DECODE_R(operands, rd);
+    long long offset = cc_read_i64(vm);
+    jcc_freg_set_f64(vm, rd, *(double *)(vm->bp + offset));
+    return 0;
+}
+
+static inline int op_FSTR_LOCAL_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd;
+    DECODE_R(operands, rd);
+    long long offset = cc_read_i64(vm);
+    *(double *)(vm->bp + offset) = jcc_freg_get_f64(vm, rd);
+    return 0;
+}
+
+static inline int op_FLDR_LOCAL_F32_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd;
+    DECODE_R(operands, rd);
+    long long offset = cc_read_i64(vm);
+    jcc_freg_set_f32(vm, rd, *(float *)(vm->bp + offset));
+    return 0;
+}
+
+static inline int op_FSTR_LOCAL_F32_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd;
+    DECODE_R(operands, rd);
+    long long offset = cc_read_i64(vm);
+    *(float *)(vm->bp + offset) = jcc_freg_get_f32(vm, rd);
+    return 0;
+}

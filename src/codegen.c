@@ -473,6 +473,46 @@ static void emit_load(JCC *vm, Type *ty, int rd, int rs_addr) {
     }
 }
 
+// Fused load from bp-relative local slot — replaces LEA3+LDR
+static void emit_local_load(JCC *vm, Type *ty, int rd, long long offset) {
+    if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
+        emit_ri(vm, LDR_LOCAL_B, rd, offset);
+        if (ty->is_unsigned || ty->kind == TY_BOOL)
+            emit_rr(vm, ZX1, rd, rd);
+    } else if (ty->kind == TY_SHORT) {
+        emit_ri(vm, LDR_LOCAL_H, rd, offset);
+        if (ty->is_unsigned)
+            emit_rr(vm, ZX2, rd, rd);
+    } else if (ty->kind == TY_INT || ty->kind == TY_ENUM) {
+        emit_ri(vm, LDR_LOCAL_W, rd, offset);
+        if (ty->is_unsigned)
+            emit_rr(vm, ZX4, rd, rd);
+    } else if (ty->kind == TY_FLOAT) {
+        emit_ri(vm, FLDR_LOCAL_F32, rd, offset);
+    } else if (ty->kind == TY_DOUBLE || ty->kind == TY_LDOUBLE) {
+        emit_ri(vm, FLDR_LOCAL, rd, offset);
+    } else {
+        emit_ri(vm, LDR_LOCAL_D, rd, offset);
+    }
+}
+
+// Fused store to bp-relative local slot — replaces LEA3+STR
+static void emit_local_store(JCC *vm, Type *ty, int rd_val, long long offset) {
+    if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
+        emit_ri(vm, STR_LOCAL_B, rd_val, offset);
+    } else if (ty->kind == TY_SHORT) {
+        emit_ri(vm, STR_LOCAL_H, rd_val, offset);
+    } else if (ty->kind == TY_INT || ty->kind == TY_ENUM) {
+        emit_ri(vm, STR_LOCAL_W, rd_val, offset);
+    } else if (ty->kind == TY_FLOAT) {
+        emit_ri(vm, FSTR_LOCAL_F32, rd_val, offset);
+    } else if (ty->kind == TY_DOUBLE || ty->kind == TY_LDOUBLE) {
+        emit_ri(vm, FSTR_LOCAL, rd_val, offset);
+    } else {
+        emit_ri(vm, STR_LOCAL_D, rd_val, offset);
+    }
+}
+
 // Store operations based on type
 static void emit_store(JCC *vm, Type *ty, int rd_val, int rs_addr) {
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
@@ -703,6 +743,25 @@ static int calculate_chain_depth(Obj *current_fn, Obj *owner_fn) {
         depth++;
     }
     return depth;
+}
+
+// Returns true when a ND_VAR node can be loaded/stored with a fused
+// LDR_LOCAL/STR_LOCAL opcode instead of a LEA3+LDR/STR pair.
+// Requires: node->kind == ND_VAR.
+static bool is_simple_local_scalar(JCC *vm, Node *node) {
+    if (!node->var->is_local)
+        return false;
+    if (node->var->is_block_var)
+        return false;
+    if (belongs_to_outer_function(vm->compiler.current_fn, node->var))
+        return false;
+    if (node->var->is_param &&
+        (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION))
+        return false;
+    return node->ty->kind != TY_ARRAY &&
+           node->ty->kind != TY_STRUCT &&
+           node->ty->kind != TY_UNION &&
+           node->ty->kind != TY_COMPLEX;
 }
 
 // ========== Safety Instrumentation Helpers ==========
@@ -1184,11 +1243,12 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                 if (vm->flags & JCC_STACK_INSTR)
                     emit_markr(vm, node->var->offset);
             }
-            // For float types, FREG_A0-A7 have the same raw numbers as
-            // REG_A0-A7 Using dest_reg for address calculation would clobber
-            // integer regs Solution: use a temp register for address, then load
-            // into dest_reg
-            if (is_flonum(node->ty)) {
+            // Fused local load: skip the LEA3+LDR two-step for simple locals
+            if (is_simple_local_scalar(vm, node)) {
+                emit_local_load(vm, node->ty, dest_reg, node->var->offset);
+            } else if (is_flonum(node->ty)) {
+                // For float types, FREG_A0-A7 have the same raw numbers as
+                // REG_A0-A7. Use a temp register to avoid clobbering int regs.
                 int r_addr = alloc_temp_reg();
                 gen_addr(vm, node, r_addr);
                 emit_load(vm, node->ty, dest_reg, r_addr);
@@ -1490,9 +1550,15 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         // called. We need to re-mark r_val as in-use before allocating r_addr!
         mark_temp_reg_used(r_val);
 
-        // Now compute LHS address (after any function calls in RHS are done)
-        int r_addr = alloc_temp_reg();
-        gen_addr(vm, node->lhs, r_addr);
+        // Fused local store: skip LEA3+STR for simple locals
+        bool lhs_fused = node->lhs->kind == ND_VAR &&
+                         is_simple_local_scalar(vm, node->lhs);
+        int r_addr = -1;
+        if (!lhs_fused) {
+            // Now compute LHS address (after any function calls in RHS are done)
+            r_addr = alloc_temp_reg();
+            gen_addr(vm, node->lhs, r_addr);
+        }
 
         // Handle Bitfields specially (Read-Modify-Write)
         if (node->lhs->kind == ND_MEMBER && node->lhs->member->is_bitfield) {
@@ -1532,6 +1598,8 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             free_temp_reg(r_new);
             free_temp_reg(r_mask);
             free_temp_reg(r_container);
+        } else if (lhs_fused) {
+            emit_local_store(vm, node->ty, r_val, node->lhs->var->offset);
         } else {
             // Standard store
             emit_store(vm, node->ty, r_val, r_addr);
@@ -1549,7 +1617,8 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                 emit_marki(vm, node->lhs->var->offset);
         }
 
-        free_temp_reg(r_addr);
+        if (r_addr >= 0)
+            free_temp_reg(r_addr);
 
         // Assignment result is the value
         // If bitfield, r_val holds the RHS value, which is correct

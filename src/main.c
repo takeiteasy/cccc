@@ -879,6 +879,11 @@ int main(int argc, const char *argv[]) {
     vm.ffi_errors_fatal = ffi_errors_fatal;
     vm.enable_ffi_type_checking = enable_ffi_type_checking;
     vm.vm_profile_enabled = vm_profile;
+    if (vm_profile) {
+        vm.vm_profile_trigram_counts = calloc(
+            (size_t)OP_COUNT * OP_COUNT * OP_COUNT, sizeof(uint64_t));
+        // Failure is non-fatal: trigram section will be skipped in JSON output
+    }
     for (int i = 0; i < ffi_allow_args_count; i++)
         configure_ffi_name_list(&vm, ffi_allow_args[i], cc_ffi_allow);
     for (int i = 0; i < ffi_deny_args_count; i++)

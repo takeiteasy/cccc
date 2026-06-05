@@ -194,7 +194,20 @@ extern "C" {
     X(BSWAP,    3)   /* rd = bswap(rs); operand2 = byte-width (2,4,8) */   \
     /* Checked arithmetic builtins */                                      \
     X(IOVFL,    2)   /* overflow arith: a=A0,b=A1,ptr=A2,bool→A0;         \
-                        operand = (op_type<<8)|type_kind */
+                        operand = (op_type<<8)|type_kind */                \
+    /* Fused bp-relative (local) load/store — replaces LEA3+LDR/STR */    \
+    X(LDR_LOCAL_B, 3) /* regs[rd] = *(char*)(bp+offset) */                \
+    X(LDR_LOCAL_H, 3) /* regs[rd] = *(short*)(bp+offset) */               \
+    X(LDR_LOCAL_W, 3) /* regs[rd] = *(int*)(bp+offset) */                 \
+    X(LDR_LOCAL_D, 3) /* regs[rd] = *(long long*)(bp+offset) */           \
+    X(STR_LOCAL_B, 3) /* *(char*)(bp+offset) = regs[rd] */                \
+    X(STR_LOCAL_H, 3) /* *(short*)(bp+offset) = regs[rd] */               \
+    X(STR_LOCAL_W, 3) /* *(int*)(bp+offset) = regs[rd] */                 \
+    X(STR_LOCAL_D, 3) /* *(long long*)(bp+offset) = regs[rd] */           \
+    X(FLDR_LOCAL,     3) /* fregs[rd] = *(double*)(bp+offset) */          \
+    X(FSTR_LOCAL,     3) /* *(double*)(bp+offset) = fregs[rd] */          \
+    X(FLDR_LOCAL_F32, 3) /* fregs[rd] = *(float*)(bp+offset) */           \
+    X(FSTR_LOCAL_F32, 3) /* *(float*)(bp+offset) = (float)fregs[rd] */
 
 typedef uint32_t JCCInstrWord;
 typedef uint32_t JCCPc;
@@ -1677,6 +1690,12 @@ struct JCC {
     uint64_t vm_profile_bigram_total;
     int vm_profile_prev_op;
     bool vm_profile_bigram_started;
+    // Dynamic opcode trigram profile. Heap-allocated OP_COUNT^3 array (too
+    // large for inline storage). NULL until profiling is enabled.
+    uint64_t *vm_profile_trigram_counts;
+    uint64_t vm_profile_trigram_total;
+    int vm_profile_prev2_op;
+    bool vm_profile_trigram_started;
 
     // Debugger state (enable via JCC_ENABLE_DEBUGGER flag)
     Debugger dbg;
