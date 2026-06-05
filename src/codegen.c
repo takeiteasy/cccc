@@ -3039,8 +3039,9 @@ void gen_function(JCC *vm, Obj *fn) {
     // Patch all forward jumps (break/continue/goto)
     patch_labels(vm);
 
-    // Implicit return 0 from main
-    if (strncmp(fn->name, "main", sizeof("main")) == 0) {
+    // Implicit return 0 from entry function
+    const char *entry_fn = vm->compiler.entry_name ? vm->compiler.entry_name : "main";
+    if (strncmp(fn->name, entry_fn, strlen(entry_fn) + 1) == 0) {
         emit_li3(vm, REG_A0, 0);
     }
     // Deactivate function scope (for fall-through returns).
@@ -3167,15 +3168,16 @@ void gen(JCC *vm, Obj *prog) {
 
     apply_global_relocations(vm, prog);
 
-    // Find main function and store its address in text_seg[0]
+    // Find entry function and store its address in text_seg[0]
+    const char *entry = vm->compiler.entry_name ? vm->compiler.entry_name : "main";
     for (Obj *fn = prog; fn; fn = fn->next) {
         if (fn->is_function &&
-            strncmp(fn->name, "main", sizeof("main")) == 0) {
+            strncmp(fn->name, entry, strlen(entry) + 1) == 0) {
             vm->text_seg[0] = fn->code_addr;
             return;
         }
     }
 
     if (!vm->compiler.compile_only)
-        error("main() function not found");
+        error("%s() function not found", entry);
 }

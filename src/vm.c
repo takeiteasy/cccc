@@ -1496,13 +1496,15 @@ int cc_run(JCC *vm, int argc, char **argv) {
     vm->initial_sp = vm->sp;
     vm->initial_bp = vm->bp;
 
-    // Push a sentinel return address (0) so LEV can detect when main returns
-    // Stack layout before main's ENT:
-    // [argv] [argc] [ret=0] ← sp
-    // ENT will push old_bp and set bp=sp
-    *--vm->sp = (long long)argv;  // argv parameter (will be at bp+3 after ENT)
-    *--vm->sp = argc;             // argc parameter (will be at bp+2 after ENT)
-    *--vm->sp = 0;                // Return address = NULL (signals exit, will be at bp+1 after ENT)
+    // Pass argc/argv via integer argument registers (ENT3 spills these to the
+    // stack frame at bp[-1]/bp[-2], matching the register-based calling convention).
+    vm->regs[REG_A0] = argc;
+    vm->regs[REG_A1] = (long long)argv;
+
+    // Push a sentinel return address (0) so LEV can detect when main returns.
+    // Stack layout before main's ENT:  [ret=0] ← sp
+    // ENT will push old_bp and set bp=sp; ret_addr sits at bp[+1] after ENT.
+    *--vm->sp = 0;
 
     return (vm->flags & JCC_ENABLE_DEBUGGER) ? debugger_run(vm, argc, argv) : vm_eval(vm);
 }

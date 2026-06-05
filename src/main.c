@@ -486,6 +486,7 @@ int main(int argc, const char *argv[]) {
     const char *vm_profile_mode = NULL;
     const char *vm_profile_input = NULL;
     int vm_profile_ran = 0;
+    const char *entry_name = NULL; // -e / --entry
 
     if (argc <= 1)
         usage(argv[0], 1);
@@ -550,6 +551,7 @@ int main(int argc, const char *argv[]) {
         {"vm-profile", no_argument, 0, 1026},
         {"profile-opcodes", no_argument, 0, 1026},
         {"vm-profile-json", required_argument, 0, 1027},
+        {"entry", required_argument, 0, 'e'},
         {0, 0, 0, 0}};
 
     // Rewrite single-dash -std=... and -fdiagnostics-format=... to double-dash
@@ -566,10 +568,17 @@ int main(int argc, const char *argv[]) {
         }
     }
 
-    const char *optstring = "0123haI:L:D:U:o:cdvgbftzskpmiPEMGXSjFTVCl:W:";
+    // Find "--" separator: args after it are forwarded to the compiled program
+    int dashdash = -1;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--") == 0) { dashdash = i; break; }
+    }
+    int getopt_argc = (dashdash >= 0) ? dashdash : argc;
+
+    const char *optstring = "0123haI:L:D:U:o:cdvgbftzskpmiPEMGXSjFTVCl:W:e:";
     int opt;
     opterr = 0; // we'll handle errors explicitly
-    while ((opt = getopt_long(argc, (char *const *)argv, optstring,
+    while ((opt = getopt_long(getopt_argc, (char *const *)argv, optstring,
                               long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
@@ -619,6 +628,9 @@ int main(int argc, const char *argv[]) {
                 usage(argv[0], 1);
             }
             out_file = strdup(optarg);
+            break;
+        case 'e':
+            entry_name = optarg;
             break;
         case 'd':
             disassemble = 1;
@@ -852,8 +864,8 @@ int main(int argc, const char *argv[]) {
         }
     }
 
-    /* Remaining arguments are input files (positional) */
-    for (int i = optind; i < argc; i++) {
+    /* Remaining arguments are input files (positional, up to "--" if present) */
+    for (int i = optind; i < getopt_argc; i++) {
         const char *a = argv[i];
         if (strncmp(a, "-", sizeof("-")) == 0) {
             input_files = realloc(input_files, sizeof(*input_files) *
@@ -874,6 +886,7 @@ int main(int argc, const char *argv[]) {
     JCC vm;
     cc_init(&vm, flags);
     vm.compiler.compile_only = compile_only;
+    vm.compiler.entry_name = (char *)entry_name;
     vm.compiler.diagnostic_json = diagnostic_json;
     vm.disable_all_ffi = disable_all_ffi;
     vm.ffi_errors_fatal = ffi_errors_fatal;
@@ -1249,12 +1262,20 @@ int main(int argc, const char *argv[]) {
         goto BAIL;
     }
 
-    // Run the program (pass only positional args, not compiler flags)
-    int prog_argc = argc - optind + 1;
-    char **prog_argv = malloc(sizeof(char *) * prog_argc);
+    // Run the program. If "--" was given, forward only args after it; otherwise
+    // fall back to the old behaviour of passing all positional args.
+    int prog_argc, prog_start;
+    if (dashdash >= 0) {
+        prog_start = dashdash + 1;
+        prog_argc  = argc - dashdash; // argv[0] + everything after "--"
+    } else {
+        prog_start = optind;
+        prog_argc  = argc - optind + 1;
+    }
+    char **prog_argv = malloc(sizeof(char *) * (size_t)prog_argc);
     prog_argv[0] = (char *)argv[0];
     for (int i = 1; i < prog_argc; i++)
-        prog_argv[i] = (char *)argv[optind + i - 1];
+        prog_argv[i] = (char *)argv[prog_start + i - 1];
     exit_code = cc_run(&vm, prog_argc, prog_argv);
     vm_profile_mode = "source";
     vm_profile_input = input_files_count == 1 ? input_files[0] : "multiple";

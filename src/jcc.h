@@ -1562,6 +1562,9 @@ typedef struct Compiler {
     CStdVersion c_std;  // Selected standard version (default: JCC_STD_C17)
     bool c_std_gnu;     // True for gnuXX variants (gnu17, gnu11, …)
 
+    // Custom entry point name (NULL means "main")
+    char *entry_name;
+
     // Fuzzing / compile-only mode
     bool compile_only; // If true, compile to bytecode but do not require main()
                        // or execute (used by AFL++ and other fuzzers)
