@@ -18,34 +18,38 @@ Sample output:
 ====================================================================================================
  JCC vs GCC benchmark results (median ms, lower is better)
 ====================================================================================================
-benchmark    jcc      jcc-O1   jcc-O2   jcc-O3   jcc-jbc  jcc-jbc-O1  jcc-jbc-O2  jcc-jbc-O3  gcc-O0  gcc-O1  gcc-O2  gcc-O3
------------  -------  -------  -------  -------  -------  ----------  ----------  ----------  ------  ------  ------  ------
-ackermann    883.1    851.5    842.2    860.9    827.1    822.5       899.9       835.1       153.0   134.3   123.9   123.5
-binary_tree  1283.5   1210.5   1275.6   1459.1   1446.1   1396.5      1482.3      1200.0      186.9   152.9   153.0   137.3
-fib          822.5    824.3    847.3    752.0    682.4    684.0       671.7       673.7       132.1   125.5   123.0   124.0
-mandelbrot   8372.5   8423.1   8341.1   9158.5   9125.2   9076.9      8784.4      9123.3      268.9   160.7   153.4   152.6
-matrix_mul   7580.8   7542.4   7429.3   7307.1   8485.5   7790.3      7315.6      7337.3      149.4   114.6   118.7   113.4
-nqueens      1862.7   1740.3   1946.8   1746.4   2190.2   1691.2      1666.1      1695.1      132.2   114.0   115.3   117.3
-quicksort    2456.1   2557.5   2462.7   2448.3   2369.1   2403.7      2385.1      2383.7      133.2   116.7   127.0   178.4
-sieve        13309.6  13263.9  13244.3  13297.3  13397.8  13256.5     13208.6     13171.6     222.1   139.6   146.2   141.9
+benchmark    jcc       jcc-O1   jcc-O2   jcc-O3   jcc-jbc  jcc-jbc-O1  jcc-jbc-O2  jcc-jbc-O3  gcc-O0  gcc-O1  gcc-O2  gcc-O3
+-----------  --------  -------  -------  -------  -------  ----------  ----------  ----------  ------  ------  ------  ------
+ackermann    721.2     734.9    726.3    715.0    706.5    698.7       720.9       688.0       235.8   132.9   123.7   123.9
+binary_tree  862.1     858.8    876.2    861.0    922.2    880.8       878.5       853.7       150.5   138.5   139.1   140.6
+fib          625.9     613.4    625.0    605.5    595.2    617.0       611.6       586.2       138.0   127.1   124.4   149.0
+mandelbrot   6880.9    6942.3   6924.6   6803.2   7772.1   7459.9      8366.3      7094.8      260.4   158.8   152.8   149.7
+matrix_mul   5827.0    6169.2   5537.7   5701.0   6474.0   5524.3      5296.7      5327.5      192.1   126.1   126.0   129.6
+nqueens      1367.2    1246.4   1260.0   1318.3   1302.0   1221.1      1338.5      1242.9      131.5   123.1   124.2   123.0
+quicksort    1841.7    2001.6   2074.0   2197.4   1843.2   1993.2      2339.9      2065.6      143.7   125.5   125.5   131.3
+sieve        10107.7   9802.9   9710.2   9915.6   10313.1  11712.1     11935.8     11817.5     179.3   147.3   144.4   140.0
 
 Speedup vs gcc -O2 (>1.0x = slower than gcc -O2):
-benchmark    jcc      jcc-O1   jcc-O2   jcc-O3   jcc-jbc  jcc-jbc-O1  jcc-jbc-O2  jcc-jbc-O3  gcc-O0  gcc-O1  gcc-O2  gcc-O3
------------  -------  -------  -------  -------  -------  ----------  ----------  ----------  ------  ------  ------  ------
-ackermann    7.1x     6.9x     6.8x     6.9x     6.7x     6.6x        7.3x        6.7x        1.2x    1.1x    1.0x    1.00x
-binary_tree  8.4x     7.9x     8.3x     9.5x     9.5x     9.1x        9.7x        7.8x        1.2x    1.00x   1.0x    0.90x
-fib          6.7x     6.7x     6.9x     6.1x     5.5x     5.6x        5.5x        5.5x        1.1x    1.0x    1.0x    1.0x
-mandelbrot   54.6x    54.9x    54.4x    59.7x    59.5x    59.2x       57.3x       59.5x       1.8x    1.0x    1.0x    0.99x
-matrix_mul   63.8x    63.5x    62.6x    61.5x    71.5x    65.6x       61.6x       61.8x       1.3x    0.96x   1.0x    0.96x
-nqueens      16.2x    15.1x    16.9x    15.1x    19.0x    14.7x       14.5x       14.7x       1.1x    0.99x   1.0x    1.0x
-quicksort    19.3x    20.1x    19.4x    19.3x    18.7x    18.9x       18.8x       18.8x       1.0x    0.92x   1.0x    1.4x
-sieve        91.0x    90.7x    90.6x    90.9x    91.6x    90.7x       90.3x       90.1x       1.5x    0.95x   1.0x    0.97x
-geomean      21.12x   20.80x   21.11x   21.12x   21.65x   20.64x      20.66x      20.08x      1.26x   1.00x   1.00x   1.02x
+benchmark    jcc     jcc-O1  jcc-O2  jcc-O3  jcc-jbc  jcc-jbc-O1  jcc-jbc-O2  jcc-jbc-O3  gcc-O0  gcc-O1  gcc-O2  gcc-O3
+-----------  ------  ------  ------  ------  -------  ----------  ----------  ----------  ------  ------  ------  ------
+ackermann    5.8x    5.9x    5.9x    5.8x    5.7x     5.6x        5.8x        5.6x        1.9x    1.1x    1.0x    1.0x
+binary_tree  6.2x    6.2x    6.3x    6.2x    6.6x     6.3x        6.3x        6.1x        1.1x    1.0x    1.0x    1.0x
+fib          5.0x    4.9x    5.0x    4.9x    4.8x     5.0x        4.9x        4.7x        1.1x    1.0x    1.0x    1.2x
+mandelbrot   45.0x   45.4x   45.3x   44.5x   50.9x    48.8x       54.8x       46.4x       1.7x    1.0x    1.0x    1.0x
+matrix_mul   46.3x   49.0x   44.0x   45.3x   51.4x    43.9x       42.0x       42.3x       1.5x    1.0x    1.0x    1.0x
+nqueens      11.0x   10.0x   10.1x   10.6x   10.5x    9.8x        10.8x       10.0x       1.1x    1.0x    1.0x    1.0x
+quicksort    14.7x   15.9x   16.5x   17.5x   14.7x    15.9x       18.6x       16.5x       1.1x    1.0x    1.0x    1.0x
+sieve        70.0x   67.9x   67.3x   68.7x   71.4x    81.1x       82.7x       81.9x       1.2x    1.0x    1.0x    1.0x
+geomean      15.99x  16.04x  15.94x  16.08x  16.39x   16.23x      16.98x      15.98x      1.32x   1.02x   1.00x   1.03x
 
 Correctness: all benchmarks produce identical output across all configs
 ```
 
-> **Note:** The table above predates the inlined threaded dispatch introduced in the VM (ticket #227). That change embeds each opcode's logic directly at its computed-goto label instead of calling a separate C function per instruction, delivering a **1.2–1.7× speedup** on VM-bound workloads when the JCC binary is built at `-O2` (fib: 1.21×, nqueens: 1.50×, sieve: 1.69×). Re-run `make bench-compare` to get updated numbers for your machine.
+Two significant VM improvements are reflected in these numbers:
+- **#227 — inlined threaded dispatch**: opcode logic is embedded directly at each computed-goto label rather than dispatched through a C function call per instruction (1.2–1.7× improvement on VM-bound workloads).
+- **#250 — fused local load/store opcodes**: the ubiquitous `LEA3+LDR/STR` two-opcode address+dereference sequence for local variables is replaced by a single `LDR_LOCAL_*`/`STR_LOCAL_*` opcode (~23% geomean improvement over the pre-#250 baseline).
+
+Re-run `make bench-compare` to get updated numbers for your machine.
 
 JSON output is also written to `benchmarks/results/run-<UTC>.json` for tracking over time. Each `jcc-jbc*` row includes a `compile_ms` field showing the one-time cost of producing the bytecode file (this cost is paid once, not in the timed median).
 
@@ -93,7 +97,7 @@ The `jcc-jbc*` columns are the cleanest apples-to-apples comparison with GCC: bo
 
 If you want to break out compile time vs execution time for JCC, see `make bench` (hyperfine) and `make profile-cpu` in the existing [PROFILING.md](PROFILING.md).
 If you want to see where VM execution is concentrated, use `tools/bench.py --vm-profile`
-and compare dynamic counts for opcodes such as `LEA3`, `LDR_D`, `STR_D`,
+and compare dynamic counts for opcodes such as `LDR_LOCAL_D`, `STR_LOCAL_D`,
 `ADD3`, and `MUL3` across optimization levels.
 
 ## Bytecode (.jbc) configs
