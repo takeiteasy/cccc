@@ -4792,8 +4792,10 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
         return node;
     }
 
-    // __builtin_unreachable() -> trap / unreachable
-    if (equal(tok, "__builtin_unreachable")) {
+    // __builtin_unreachable() / __builtin_trap() / __builtin_debugtrap() -> BTRAP
+    if (equal(tok, "__builtin_unreachable") ||
+        equal(tok, "__builtin_trap") ||
+        equal(tok, "__builtin_debugtrap")) {
         tok = skip(vm, tok->next, "(");
         *rest = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_UNREACHABLE, start);
@@ -5627,6 +5629,21 @@ static void declare_builtin_functions(JCC *vm) {
     Type *dlerror_ty = func_type(vm, pointer_to(vm, ty_char));
     vm->compiler.builtin_dlerror = new_gvar(vm, "dlerror", 7, dlerror_ty);
     vm->compiler.builtin_dlerror->is_definition = false;
+
+    // signal(int sig, void (*func)(int)) -> void (*)(int)
+    Type *signal_handler_ty = func_type(vm, ty_void);
+    signal_handler_ty->params = copy_type(vm, ty_int);
+    Type *signal_ty = func_type(vm, pointer_to(vm, signal_handler_ty));
+    signal_ty->params = copy_type(vm, ty_int);
+    signal_ty->params->next = pointer_to(vm, signal_handler_ty);
+    vm->compiler.builtin_signal = new_gvar(vm, "signal", 6, signal_ty);
+    vm->compiler.builtin_signal->is_definition = false;
+
+    // raise(int sig) -> int
+    Type *raise_ty = func_type(vm, ty_int);
+    raise_ty->params = copy_type(vm, ty_int);
+    vm->compiler.builtin_raise = new_gvar(vm, "raise", 5, raise_ty);
+    vm->compiler.builtin_raise->is_definition = false;
 }
 
 // program = (typedef | function-definition | global-variable)*

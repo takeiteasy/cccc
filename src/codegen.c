@@ -1765,6 +1765,40 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             return;
         }
 
+        // Check if this is VM-managed signal() builtin
+        if (is_extern_func_name(node->lhs, "signal") ||
+            (node->lhs->kind == ND_VAR &&
+             node->lhs->var == vm->compiler.builtin_signal)) {
+            if (!node->args || !node->args->next) {
+                error_tok(vm, node->tok, "signal requires sig and handler arguments");
+            }
+            reset_temp_regs();
+            gen_expr(vm, node->args, REG_A0);             // sig
+            gen_expr(vm, node->args->next, REG_A1);       // handler
+            emit(vm, VSIGNAL);
+            if (dest_reg != REG_A0)
+                emit_mov3(vm, dest_reg, REG_A0);
+            return;
+        }
+
+        // Check if this is VM-managed raise() builtin
+        if (is_extern_func_name(node->lhs, "raise") ||
+            (node->lhs->kind == ND_VAR &&
+             node->lhs->var == vm->compiler.builtin_raise)) {
+            if (!node->args) {
+                error_tok(vm, node->tok, "raise requires a sig argument");
+            }
+            reset_temp_regs();
+            gen_expr(vm, node->args, REG_A0); // sig
+            emit(vm, VRAISE);
+            /* VRAISE may jump into a VM handler; when the handler returns it
+               lands here. Normalise REG_A0 = 0 so raise() always returns 0. */
+            emit_li3(vm, REG_A0, 0);
+            if (dest_reg != REG_A0)
+                emit_mov3(vm, dest_reg, REG_A0);
+            return;
+        }
+
         // Check if this is setjmp builtin
         if (node->lhs->kind == ND_VAR &&
             node->lhs->var == vm->compiler.builtin_setjmp) {

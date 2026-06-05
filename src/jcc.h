@@ -27,6 +27,7 @@
 #include <libgen.h>
 #include <math.h>
 #include <setjmp.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -186,6 +187,9 @@ extern "C" {
     X(FSTR_F32, 1)   /* *(float*)regs[rs] = fregs[rd] as f32 */                \
     X(FROUND_F32, 1) /* fregs[rd] = (float)fregs[rs], tagged f32 */             \
     X(BTRAP, 0)      /* Halt execution (unreachable/builtin trap) */    \
+    /* VM-managed signal handling */                                      \
+    X(VSIGNAL, 0)   /* signal(sig, handler): register VM signal action */ \
+    X(VRAISE,  0)   /* raise(sig): deliver signal from VM context */      \
     /* Bit-manipulation builtins */                                        \
     X(CLZ,      3)   /* rd = clz(rs); operand2 = bit-width (32 or 64) */  \
     X(CTZ,      3)   /* rd = ctz(rs); operand2 = bit-width (32 or 64) */  \
@@ -986,6 +990,14 @@ typedef struct GotoPatch {
 typedef struct JCC JCC;
 typedef struct JCC _VirtualMachine;
 
+/* Per-signal action slot for VM-managed signal handling */
+#define JCC_NSIG 32
+
+typedef struct {
+    int      action;      /* 0=DFL, 1=IGN, 2=VM handler */
+    long long handler_fn; /* VM function pointer when action==2 */
+} JCCSigSlot;
+
 typedef enum {
     JCC_FREG_F64 = 0,
     JCC_FREG_F32,
@@ -1472,6 +1484,8 @@ typedef struct Compiler {
     Obj *builtin_alloca;   // Builtin alloca function
     Obj *builtin_setjmp;   // Builtin setjmp function
     Obj *builtin_longjmp;  // Builtin longjmp function
+    Obj *builtin_signal;   // VM-managed signal() registration
+    Obj *builtin_raise;    // VM-managed raise() delivery
     Obj *builtin_dlopen;   // VM-managed dlopen
     Obj *builtin_dlsym;    // VM-managed dlsym
     Obj *builtin_dlclose;  // VM-managed dlclose
@@ -1714,6 +1728,9 @@ struct JCC {
 
     // Compiler state (preprocessor, parser, codegen)
     Compiler compiler;
+
+    // VM-managed signal table
+    JCCSigSlot vm_sigslots[JCC_NSIG];
 
     // Error handling (setjmp/longjmp for exception-like behavior)
     jmp_buf

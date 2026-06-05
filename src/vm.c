@@ -503,6 +503,33 @@ int vm_eval(JCC *vm) {
 dispatch:
     vm->cycle++;
 
+    /* Poll pending signals (fast path: branch predicted not-taken) */
+    if (__builtin_expect(_jcc_any_pending != 0, 0)) {
+        _jcc_any_pending = 0;
+        for (int _sig = 1; _sig < JCC_NSIG; _sig++) {
+            if (!_jcc_pending[_sig]) continue;
+            _jcc_pending[_sig] = 0;
+            JCCSigSlot *_slot = &vm->vm_sigslots[_sig];
+            if (_slot->action == 1) continue; /* IGN */
+            if (_slot->action == 2) {
+                /* VM handler: push return address and jump to handler */
+                JCCPc _target = cc_byte_offset_to_pc(_slot->handler_fn);
+                if (_target == JCC_INVALID_PC || _target > vm->text_ptr) {
+                    fprintf(stderr, "error: invalid signal handler for sig %d\n", _sig);
+                    return -1;
+                }
+                if (check_stack_overflow(vm, 1)) return -1;
+                *--vm->sp = (long long)vm->pc;
+                if (vm->flags & JCC_CFI) *--vm->shadow_sp = (long long)vm->pc;
+                vm->regs[REG_A0] = (long long)_sig;
+                vm->pc = _target;
+                goto dispatch; /* resume at handler; delivers one signal per re-entry */
+            }
+            /* DFL: delegate to host */
+            raise(_sig);
+        }
+    }
+
     if (vm->flags & JCC_ENABLE_DEBUGGER) {
         if (debugger_check_breakpoint(vm)) {
             printf("\nBreakpoint hit at PC %u\n", vm->pc);

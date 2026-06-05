@@ -604,6 +604,12 @@ void register_locale_functions(JCC *vm);
 void register_math_functions(JCC *vm);
 void register_posix_functions(JCC *vm);
 void register_signal_functions(JCC *vm);
+
+/* VM-managed signal pending flags (set only by async-safe native shims) */
+extern volatile sig_atomic_t _jcc_pending[JCC_NSIG];
+extern volatile sig_atomic_t _jcc_any_pending;
+/* Async-safe native shim installed for user-registered VM signal handlers */
+void _jcc_sig_shim(int sig);
 void register_stdio_functions(JCC *vm);
 void register_stdlib_functions(JCC *vm);
 void register_string_functions(JCC *vm);

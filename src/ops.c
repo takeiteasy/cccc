@@ -2254,11 +2254,105 @@ static inline int op_RETBUF_fn(JCC *vm) {
 }
 
 static inline int op_BTRAP_fn(JCC *vm) {
-    printf("\n========== UNREACHABLE EXECUTED ==========\n");
-    printf("__builtin_unreachable() or TRAP was executed at PC %u\n", vm->pc);
-    printf("This code path should never be reached.\n");
-    printf("==========================================\n");
+    if (vm->flags & JCC_ENABLE_DEBUGGER) {
+        printf("\nBTRAP: debugger break-in at PC %u\n", vm->pc);
+        cc_debug_repl(vm);
+        return 0;
+    }
+    fprintf(stderr, "BTRAP: trap executed at PC %u\n", vm->pc);
     return -1;
+}
+
+// ========== VM-Managed Signal Handling ==========
+
+/* Returns true if sig cannot be caught or ignored (SIGKILL, SIGSTOP) */
+static inline bool sig_is_uncatchable(int sig) {
+#if defined(SIGKILL) && defined(SIGSTOP)
+    return sig == SIGKILL || sig == SIGSTOP;
+#elif defined(SIGKILL)
+    return sig == SIGKILL;
+#else
+    return false;
+#endif
+}
+
+static inline int op_VSIGNAL_fn(JCC *vm) {
+    int  sig  = (int)vm->regs[REG_A0];
+    long long func = vm->regs[REG_A1];
+
+    if (sig <= 0 || sig >= JCC_NSIG || sig_is_uncatchable(sig)) {
+        vm->regs[REG_A0] = -1; /* SIG_ERR */
+        return 0;
+    }
+
+    JCCSigSlot *slot = &vm->vm_sigslots[sig];
+
+    /* Return old handler representation */
+    long long old;
+    if (slot->action == 1)      old = 1; /* SIG_IGN */
+    else if (slot->action == 2) old = slot->handler_fn;
+    else                        old = 0; /* SIG_DFL */
+    vm->regs[REG_A0] = old;
+
+    if (func == 0) {
+        /* SIG_DFL: restore host default */
+        signal(sig, SIG_DFL);
+        slot->action     = 0;
+        slot->handler_fn = 0;
+    } else if (func == 1) {
+        /* SIG_IGN: ignore on both VM and host */
+        signal(sig, SIG_IGN);
+        slot->action     = 1;
+        slot->handler_fn = 0;
+    } else {
+        /* VM function pointer: install async-safe shim as native handler */
+        signal(sig, _jcc_sig_shim);
+        slot->action     = 2;
+        slot->handler_fn = func;
+    }
+    return 0;
+}
+
+static inline int op_VRAISE_fn(JCC *vm) {
+    int sig = (int)vm->regs[REG_A0];
+
+    if (sig <= 0 || sig >= JCC_NSIG) {
+        vm->regs[REG_A0] = -1;
+        return 0;
+    }
+
+    /* SIGTRAP with debugger active: break into REPL */
+#ifdef SIGTRAP
+    if (sig == SIGTRAP && (vm->flags & JCC_ENABLE_DEBUGGER)) {
+        printf("\nSIGTRAP: debugger break-in at PC %u\n", vm->pc);
+        cc_debug_repl(vm);
+        vm->regs[REG_A0] = 0;
+        return 0;
+    }
+#endif
+
+    JCCSigSlot *slot = &vm->vm_sigslots[sig];
+    switch (slot->action) {
+    case 1: /* IGN */
+        vm->regs[REG_A0] = 0;
+        return 0;
+    case 2: { /* VM handler: push return address and jump to handler */
+        JCCPc target = cc_byte_offset_to_pc(slot->handler_fn);
+        if (target == JCC_INVALID_PC || target > vm->text_ptr) {
+            fprintf(stderr, "error: invalid signal handler address for sig %d\n", sig);
+            return -1;
+        }
+        if (check_stack_overflow(vm, 1)) return -1;
+        *--vm->sp = (long long)vm->pc;
+        if (vm->flags & JCC_CFI) *--vm->shadow_sp = (long long)vm->pc;
+        vm->regs[REG_A0] = (long long)sig;
+        vm->pc = target;
+        return 0; /* dispatch loop will goto dispatch → execute handler */
+    }
+    default: /* DFL: delegate to host */
+        vm->regs[REG_A0] = (long long)raise(sig);
+        return 0;
+    }
 }
 
 // ========== Bit-Manipulation Builtins ==========
