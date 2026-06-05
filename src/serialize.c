@@ -695,6 +695,14 @@ static void serialize_expr(FILE *f, JCC *vm, SerializeContext *ctx, Node *node,
         fprintf(f, "})");
         break;
 
+    case ND_MEMZERO:
+        if (node->var)
+            fprintf(f, "__builtin_memset(&%s, 0, sizeof(%s))",
+                    node->var->name, node->var->name);
+        else
+            fprintf(f, "/* memzero */");
+        break;
+
     case ND_NULL_EXPR:
         // Empty expression
         break;
@@ -821,6 +829,42 @@ static void serialize_stmt(FILE *f, JCC *vm, SerializeContext *ctx, Node *node,
     }
 }
 
+static void serialize_function_signature(FILE *f, SerializeContext *ctx,
+                                         Obj *fn) {
+    if (fn->is_static)
+        fprintf(f, "static ");
+
+    char *rt = NULL;
+    size_t rtsz = 0;
+    FILE *rtf = open_memstream(&rt, &rtsz);
+    if (fn->ty && fn->ty->return_ty)
+        serialize_type(rtf, ctx, fn->ty->return_ty);
+    else
+        fprintf(rtf, "int");
+    fclose(rtf);
+    if (rtsz > 0 && rt[rtsz - 1] == '*')
+        fprintf(f, "%s%s(", rt, fn->name);
+    else
+        fprintf(f, "%s %s(", rt, fn->name);
+    free(rt);
+
+    bool first = true;
+    for (Obj *param = fn->params; param; param = param->next) {
+        if (!first)
+            fprintf(f, ", ");
+        first = false;
+        serialize_type_decl(f, ctx, param->ty, param->name);
+    }
+
+    if (fn->ty && fn->ty->is_variadic && !first) {
+        fprintf(f, ", ...");
+    } else if (first) {
+        fprintf(f, "void");
+    }
+
+    fprintf(f, ")");
+}
+
 // Serialize a function
 static void serialize_function(FILE *f, JCC *vm, SerializeContext *ctx,
                                Obj *fn) {
@@ -832,44 +876,7 @@ static void serialize_function(FILE *f, JCC *vm, SerializeContext *ctx,
     if (!fn->is_definition && !fn->body)
         return;
 
-    // Static keyword
-    if (fn->is_static)
-        fprintf(f, "static ");
-
-    // Return type — buffer it to pick correct spacing before the name
-    {
-        char *rt = NULL;
-        size_t rtsz = 0;
-        FILE *rtf = open_memstream(&rt, &rtsz);
-        if (fn->ty && fn->ty->return_ty)
-            serialize_type(rtf, ctx, fn->ty->return_ty);
-        else
-            fprintf(rtf, "int");
-        fclose(rtf);
-        // Attach '*' directly to name (C convention); otherwise add a space
-        if (rtsz > 0 && rt[rtsz - 1] == '*')
-            fprintf(f, "%s%s(", rt, fn->name);
-        else
-            fprintf(f, "%s %s(", rt, fn->name);
-        free(rt);
-    }
-
-    // Parameters
-    bool first = true;
-    for (Obj *param = fn->params; param; param = param->next) {
-        if (!first)
-            fprintf(f, ", ");
-        first = false;
-        serialize_type_decl(f, ctx, param->ty, param->name);
-    }
-
-    if (fn->ty && fn->ty->is_variadic) {
-        if (!first)
-            fprintf(f, ", ");
-        fprintf(f, "...");
-    }
-
-    fprintf(f, ")");
+    serialize_function_signature(f, ctx, fn);
 
     if (fn->body) {
         fprintf(f, " {\n");
@@ -1116,6 +1123,17 @@ void cc_serialize_program(FILE *f, JCC *vm, Obj *prog, bool generated_only) {
             continue;
         if (!obj->is_function)
             serialize_global_var(f, vm, &ctx, obj);
+    }
+
+    // Serialize function prototypes before bodies so generated C is valid when
+    // a function is called before its definition appears in the Obj list.
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (generated_only && !obj->is_macro_generated)
+            continue;
+        if (!obj->is_function || (!obj->is_definition && !obj->body))
+            continue;
+        serialize_function_signature(f, &ctx, obj);
+        fprintf(f, ";\n\n");
     }
 
     // Serialize functions

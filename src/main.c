@@ -20,6 +20,268 @@
 #include "./internal.h"
 #include "jcc.h"
 #include <getopt.h>
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
+
+typedef struct {
+    const char **data;
+    int len;
+    int cap;
+} ArgVec;
+
+static void argv_push(ArgVec *args, const char *arg) {
+    if (args->len + 1 >= args->cap) {
+        int new_cap = args->cap ? args->cap * 2 : 16;
+        const char **new_data = realloc(args->data, sizeof(char *) * new_cap);
+        if (!new_data)
+            error("failed to allocate argument vector");
+        args->data = new_data;
+        args->cap = new_cap;
+    }
+    args->data[args->len++] = arg;
+    args->data[args->len] = NULL;
+}
+
+static char *make_tmp_path(const char *suffix) {
+#if defined(_WIN32)
+    (void)suffix;
+    return NULL;
+#else
+    char template[] = "/tmp/jcc-native-XXXXXX";
+    int fd = mkstemp(template);
+    if (fd < 0)
+        return NULL;
+    close(fd);
+
+    size_t len = strlen(template) + strlen(suffix) + 1;
+    char *path = malloc(len);
+    if (!path) {
+        unlink(template);
+        return NULL;
+    }
+    snprintf(path, len, "%s%s", template, suffix);
+    if (rename(template, path) != 0) {
+        unlink(template);
+        free(path);
+        return NULL;
+    }
+    return path;
+#endif
+}
+
+static char *path_find_executable(const char *name) {
+    if (!name || !*name)
+        return NULL;
+    if (strchr(name, '/'))
+        return access(name, X_OK) == 0 ? strdup(name) : NULL;
+
+    const char *path_env = getenv("PATH");
+    if (!path_env)
+        return NULL;
+    char *paths = strdup(path_env);
+    if (!paths)
+        return NULL;
+
+    char *saveptr = NULL;
+    for (char *dir = strtok_r(paths, ":", &saveptr); dir;
+         dir = strtok_r(NULL, ":", &saveptr)) {
+        size_t len = strlen(dir) + 1 + strlen(name) + 1;
+        char *candidate = malloc(len);
+        if (!candidate)
+            continue;
+        snprintf(candidate, len, "%s/%s", dir, name);
+        if (access(candidate, X_OK) == 0) {
+            free(paths);
+            return candidate;
+        }
+        free(candidate);
+    }
+    free(paths);
+    return NULL;
+}
+
+static char *select_native_compiler(void) {
+    const char *env_cc = getenv("JCC_NATIVE_CC");
+    if (env_cc && *env_cc) {
+        char *found = path_find_executable(env_cc);
+        if (found)
+            return found;
+        fprintf(stderr, "error: JCC_NATIVE_CC compiler '%s' not found\n",
+                env_cc);
+        return NULL;
+    }
+
+    const char *candidates[] = {"cc", "clang", "gcc"};
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+        char *found = path_find_executable(candidates[i]);
+        if (found)
+            return found;
+    }
+
+    fprintf(stderr,
+            "error: no native C compiler found (tried cc, clang, gcc)\n");
+    return NULL;
+}
+
+static int run_argv(char *const argv[]) {
+#if defined(_WIN32)
+    (void)argv;
+    fprintf(stderr, "error: --native is not supported on Windows yet\n");
+    return 1;
+#else
+    pid_t pid = fork();
+    if (pid < 0) {
+        fprintf(stderr, "error: failed to fork native compiler: %s\n",
+                strerror(errno));
+        return 1;
+    }
+    if (pid == 0) {
+        execvp(argv[0], argv);
+        fprintf(stderr, "error: failed to execute %s: %s\n", argv[0],
+                strerror(errno));
+        _exit(127);
+    }
+
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) {
+        fprintf(stderr, "error: failed to wait for %s: %s\n", argv[0],
+                strerror(errno));
+        return 1;
+    }
+    if (WIFEXITED(status))
+        return WEXITSTATUS(status);
+    if (WIFSIGNALED(status))
+        return 128 + WTERMSIG(status);
+    return 1;
+#endif
+}
+
+static int run_native_backend(JCC *vm, Obj *prog, const char *out_file,
+                              const char **inc_paths, int inc_paths_count,
+                              const char **sys_inc_paths,
+                              int sys_inc_paths_count, const char **lib_paths,
+                              int lib_paths_count, const char **libs,
+                              int libs_count, const char **defines,
+                              int defines_count, const char **undefs,
+                              int undefs_count, const char *std_arg,
+                              int dashdash, int argc, const char *argv[]) {
+    char *cc = select_native_compiler();
+    if (!cc)
+        return 1;
+
+    char *source_path = make_tmp_path(".c");
+    if (!source_path) {
+        fprintf(stderr, "error: failed to create native source file\n");
+        free(cc);
+        return 1;
+    }
+
+    char *exe_path = out_file ? strdup(out_file) : make_tmp_path("");
+    if (!exe_path) {
+        fprintf(stderr, "error: failed to create native output file\n");
+        unlink(source_path);
+        free(source_path);
+        free(cc);
+        return 1;
+    }
+
+    FILE *f = fopen(source_path, "w");
+    if (!f) {
+        fprintf(stderr, "error: failed to open %s: %s\n", source_path,
+                strerror(errno));
+        unlink(source_path);
+        free(source_path);
+        if (!out_file)
+            unlink(exe_path);
+        free(exe_path);
+        free(cc);
+        return 1;
+    }
+    cc_serialize_program(f, vm, prog, false);
+    if (fclose(f) != 0) {
+        fprintf(stderr, "error: failed to write %s: %s\n", source_path,
+                strerror(errno));
+        unlink(source_path);
+        free(source_path);
+        if (!out_file)
+            unlink(exe_path);
+        free(exe_path);
+        free(cc);
+        return 1;
+    }
+
+    ArgVec cc_args = {0};
+    argv_push(&cc_args, cc);
+    argv_push(&cc_args, source_path);
+    argv_push(&cc_args, "-o");
+    argv_push(&cc_args, exe_path);
+    if (std_arg) {
+        size_t len = strlen(std_arg) + 6;
+        char *std_flag = malloc(len);
+        if (!std_flag)
+            error("failed to allocate -std flag");
+        snprintf(std_flag, len, "-std=%s", std_arg);
+        argv_push(&cc_args, std_flag);
+    }
+    for (int i = 0; i < inc_paths_count; i++) {
+        argv_push(&cc_args, "-I");
+        argv_push(&cc_args, inc_paths[i]);
+    }
+    for (int i = 0; i < sys_inc_paths_count; i++) {
+        argv_push(&cc_args, "-isystem");
+        argv_push(&cc_args, sys_inc_paths[i]);
+    }
+    for (int i = 0; i < defines_count; i++) {
+        size_t len = strlen(defines[i]) + 3;
+        char *flag = malloc(len);
+        if (!flag)
+            error("failed to allocate -D flag");
+        snprintf(flag, len, "-D%s", defines[i]);
+        argv_push(&cc_args, flag);
+    }
+    for (int i = 0; i < undefs_count; i++) {
+        size_t len = strlen(undefs[i]) + 3;
+        char *flag = malloc(len);
+        if (!flag)
+            error("failed to allocate -U flag");
+        snprintf(flag, len, "-U%s", undefs[i]);
+        argv_push(&cc_args, flag);
+    }
+    for (int i = 0; i < lib_paths_count; i++) {
+        argv_push(&cc_args, "-L");
+        argv_push(&cc_args, lib_paths[i]);
+    }
+    for (int i = 0; i < libs_count; i++) {
+        size_t len = strlen(libs[i]) + 3;
+        char *flag = malloc(len);
+        if (!flag)
+            error("failed to allocate -l flag");
+        snprintf(flag, len, "-l%s", libs[i]);
+        argv_push(&cc_args, flag);
+    }
+
+    int rc = run_argv((char *const *)cc_args.data);
+    if (rc == 0 && !out_file) {
+        ArgVec run_args = {0};
+        argv_push(&run_args, exe_path);
+        if (dashdash >= 0) {
+            for (int i = dashdash + 1; i < argc; i++)
+                argv_push(&run_args, argv[i]);
+        }
+        rc = run_argv((char *const *)run_args.data);
+        free(run_args.data);
+    }
+
+    unlink(source_path);
+    if (!out_file)
+        unlink(exe_path);
+    free(cc_args.data);
+    free(source_path);
+    free(exe_path);
+    free(cc);
+    return rc;
+}
 
 static void usage(const char *argv0, int exit_code) {
     printf("JCC: JIT C Compiler\n");
@@ -47,7 +309,8 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-X/--no-preprocess  Disable preprocessing step\n");
     printf("\t-S/--no-stdlib      Do not link standard library\n");
     printf("\t-c/--compile-only   Compile to bytecode but do not execute\n");
-    printf("\t-o/--out <file>     Dump bytecode to <file> (no execution)\n");
+    printf("\t-o/--out <file>     Write bytecode, or native executable with --native\n");
+    printf("\t   --native         Compile post-macro C with cc/clang/gcc instead of VM bytecode\n");
     printf("\t-d/--disassemble    Disassemble bytecode to stdout\n");
     printf("\t-v/--verbose        Enable debug logging\n");
     printf("\t-g/--debug          Enable interactive debugger\n");
@@ -487,6 +750,7 @@ int main(int argc, const char *argv[]) {
     const char *vm_profile_input = NULL;
     int vm_profile_ran = 0;
     const char *entry_name = NULL; // -e / --entry
+    int native_mode = 0;
 
     if (argc <= 1)
         usage(argv[0], 1);
@@ -552,6 +816,7 @@ int main(int argc, const char *argv[]) {
         {"profile-opcodes", no_argument, 0, 1026},
         {"vm-profile-json", required_argument, 0, 1027},
         {"entry", required_argument, 0, 'e'},
+        {"native", no_argument, 0, 1028},
         {0, 0, 0, 0}};
 
     // Rewrite single-dash -std=... and -fdiagnostics-format=... to double-dash
@@ -848,6 +1113,9 @@ int main(int argc, const char *argv[]) {
             free(vm_profile_json);
             vm_profile_json = strdup(optarg);
             break;
+        case 1028:
+            native_mode = 1;
+            break;
         case '?':
             if (optopt)
                 fprintf(stderr, "error: option -%c requires an argument\n",
@@ -881,6 +1149,42 @@ int main(int argc, const char *argv[]) {
     if (input_files_count == 0) {
         fprintf(stderr, "error: no input files\n");
         usage((char *)argv[0], 1);
+    }
+
+    if (native_mode) {
+        if (preprocess_only || macro_expand_only || print_tokens ||
+            output_json || dump_ast) {
+            fprintf(stderr,
+                    "error: --native cannot be combined with frontend output modes\n");
+            usage(argv[0], 1);
+        }
+        if (compile_only || disassemble || entry_name || opt_level != 0 ||
+            vm_profile || vm_profile_json) {
+            fprintf(stderr,
+                    "error: --native cannot be combined with VM bytecode options\n");
+            usage(argv[0], 1);
+        }
+        if (flags != 0) {
+            fprintf(stderr,
+                    "error: --native cannot be combined with VM runtime safety/debug options\n");
+            usage(argv[0], 1);
+        }
+        if (ffi_allow_args_count || ffi_deny_args_count || disable_all_ffi ||
+            ffi_errors_fatal || enable_ffi_type_checking) {
+            fprintf(stderr,
+                    "error: --native cannot be combined with JCC FFI policy options\n");
+            usage(argv[0], 1);
+        }
+        for (int i = 0; i < input_files_count; i++) {
+            size_t len = strlen(input_files[i]);
+            if (len > 4 &&
+                strncmp(input_files[i] + len - 4, ".jbc", sizeof(".jbc")) == 0) {
+                fprintf(stderr,
+                        "error: --native expects C source input, not bytecode '%s'\n",
+                        input_files[i]);
+                usage(argv[0], 1);
+            }
+        }
     }
 
     JCC vm;
@@ -1190,6 +1494,15 @@ int main(int argc, const char *argv[]) {
         cc_serialize_program(f, &vm, merged_prog, emit_generated_only);
         if (f != stdout)
             fclose(f);
+        goto BAIL;
+    }
+
+    if (native_mode) {
+        exit_code = run_native_backend(
+            &vm, merged_prog, out_file, inc_paths, inc_paths_count,
+            sys_inc_paths, sys_inc_paths_count, lib_paths, lib_paths_count,
+            libs, libs_count, defines, defines_count, undefs, undefs_count,
+            std_arg, dashdash, argc, argv);
         goto BAIL;
     }
 
