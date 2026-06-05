@@ -1,6 +1,9 @@
 # C Language Coverage
 
-Conformance status for each C standard. Intended as a reference for `--std` flag work.
+Conformance status for each C standard, plus the GNU built-in functions and
+attribute syntaxes that JCC accepts. Intended as a reference for `--std` flag
+work and as a checklist of what is currently parsed vs. what is semantically
+honoured.
 
 | Status | Meaning |
 |---|---|
@@ -104,12 +107,12 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | Flexible array members (`struct { int n; int arr[]; }`) | ✓ | |
 | Designated initialisers — structs and arrays | ✓ | |
 | Compound literals | ✓ | |
-| `inline` functions | ~ | Parsed; behaves like `static` — no inlining optimisation |
-| `restrict` pointers | ~ | Parsed and accepted; aliasing not tracked |
-| `static` array-parameter indices (`void f(int a[static 10])`) | ~ | Parsed and accepted; minimum-size constraint not enforced |
+| `inline` functions | ~ | Parsed; behaves like `static` — no inlining optimisation ([#205](https://todo.sr.ht/~takeiteasy/jcc/205)) |
+| `restrict` pointers | ~ | Parsed and accepted; aliasing not tracked ([#262](https://todo.sr.ht/~takeiteasy/jcc/262)) |
+| `static` array-parameter indices (`void f(int a[static 10])`) | ~ | Parsed and accepted; minimum-size constraint+not enforced |
 | `__func__` predefined identifier | ✓ | |
 | Variadic macros `__VA_ARGS__` | ✓ | |
-| `_Pragma(...)` operator | ✓ | |
+`_Pragma(...)` operator | ✓ | |
 | Hexadecimal floating-point literals (`0x1.8p+1`) | ✓ | |
 | `u8"..."` UTF-8 string literals | ✓ | |
 | `u"..."` UTF-16 string literals | ✓ | |
@@ -195,7 +198,7 @@ C17 is a bug-fix release — no new language features or library functions were 
 | `_BitInt(N)` arbitrary-precision integers | ✗ | |
 | Binary integer literals `0b10101010` | ✓ | |
 | Digit separators `1'000'000` | ✓ | |
-| `[[...]]` attributes | ~ | Parsed and accepted; all attributes are ignored |
+| `[[...]]` attributes | ~ | Parsed; `[[maybe_unused]]` and `[[deprecated]]` supported (see [Attributes](#attributes)) |
 | `bool`, `true`, `false` as keywords (not just macros) | ~ | Available via `<stdbool.h>`; not reserved keywords at the tokeniser level |
 | `u8` character literals (`u8'x'`) | ✗ | |
 | Unnamed function parameters (`void f(int, double)`) | ✓ | |
@@ -231,24 +234,288 @@ C17 is a bug-fix release — no new language features or library functions were 
 | Feature | Status | Notes |
 |---|---|---|
 | Statement expressions `({ ... })` | ✓ | |
-| `__attribute__((...))` | ~ | Parsed; all attributes ignored |
+| `__attribute__((...))` | ~ | Parsed; `aligned`, `packed`, `unused`, `deprecated` supported (see [Attributes](#attributes)) |
 | Labels as values `&&label` | ✓ | |
 | Computed goto `goto *expr` | ✓ | |
 | Switch case ranges `case 1 ... 5:` | ✓ | |
 | Zero-length arrays `int arr[0]` | ✓ | |
 | Nested functions | ✓ | Access to parent-scope variables via static link |
-| `__builtin_expect` | ✓ | Lowered to expression (hint ignored) |
-| `__builtin_unreachable` | ✓ | Emits BTRAP VM opcode |
-| `__builtin_alloca` | ✓ | Dynamic stack allocation |
-| `__builtin_constant_p` | ✓ | Compile-time constant test |
-| `__builtin_isnan` / `__builtin_isinf` / `__builtin_isfinite` | ✓ | Lowered to comparisons |
-| `__builtin_signbit` | ✓ | Lowered to `x < 0` |
-| `__builtin_huge_val` / `__builtin_inf` / `__builtin_nan` | ✓ | Float/double constant nodes |
-| `__builtin_offsetof` | ✓ | |
+| `__builtin_*` | ✓ | Lowered by the compiler; see [Built-in Functions](#built-in-functions) for the full list |
 | `__thread` storage class | ~ | Parsed; treated as `static` |
-| `__restrict` / `__restrict__` | ~ | Parsed; aliasing not tracked |
+| `__restrict` / `__restrict__` | ~ | Parsed; aliasing not tracked ([#262](https://todo.sr.ht/~takeiteasy/jcc/262)) |
 | `__typeof__` | ✓ | Synonym for `typeof` |
 | `__asm__` / `asm(...)` inline assembly | ~ | Accepted; executed as a no-op unless a callback emits custom bytecode |
+
+---
+
+## Built-in Functions
+
+JCC supports a subset of GCC's `__builtin_*` functions. These are parsed and
+lowered directly in the compiler — they do not require any header include and
+do not link against host libc. A catch-all ticket
+([#215](https://todo.sr.ht/~takeiteasy/jcc/215)) tracks remaining GNU builtins
+not yet implemented.
+
+### Math Constants
+
+| Builtin | Return type | Description |
+|---------|-------------|-------------|
+| `__builtin_huge_val()` | `double` | Positive infinity (double) |
+| `__builtin_huge_valf()` | `float` | Positive infinity (float) |
+| `__builtin_huge_vall()` | `long double` | Positive infinity (long double) |
+| `__builtin_inf()` | `double` | Positive infinity |
+| `__builtin_inff()` | `float` | Positive infinity (float) |
+| `__builtin_nan(tag)` | `double` | NaN; `tag` is a string literal (ignored) |
+| `__builtin_nanf(tag)` | `float` | NaN (float) |
+
+### Math Predicates
+
+These are lowered to equivalent arithmetic comparisons at parse time.
+
+| Builtin | Description |
+|---------|-------------|
+| `__builtin_isnan(x)` | Non-zero if `x` is NaN |
+| `__builtin_isinf(x)` | Non-zero if `x` is infinite |
+| `__builtin_isfinite(x)` | Non-zero if `x` is finite (not NaN, not infinite) |
+| `__builtin_signbit(x)` | Non-zero if `x` is negative |
+
+### Compiler Introspection
+
+| Builtin | Description |
+|---------|-------------|
+| `__builtin_constant_p(expr)` | `1` if `expr` is a compile-time constant, else `0` |
+| `__builtin_types_compatible_p(t1, t2)` | `1` if types `t1` and `t2` are compatible |
+| `__builtin_reg_class(type)` | `0` = integer/pointer, `1` = float, `2` = other |
+| `__builtin_expect(expr, hint)` | Returns `expr`; `hint` is a branch-prediction hint (ignored) |
+| `__builtin_offsetof(type, member)` | Compile-time offset of `member` within `type` |
+
+### Memory and Control Flow
+
+| Builtin | Description |
+|---------|-------------|
+| `__builtin_alloca(size)` | Dynamically allocate `size` bytes on the stack |
+| `__builtin_frame_address(0)` | Returns the current frame's base pointer (level 0 only) |
+| `__builtin_unreachable()` | Marks an unreachable code path; halts the VM if executed |
+
+### Atomic Operations
+
+| Builtin | Description |
+|---------|-------------|
+| `__builtin_compare_and_swap(addr, old, new)` | CAS; returns bool |
+| `__builtin_atomic_exchange(addr, val)` | Atomic exchange; returns old value |
+
+### Bit-Manipulation Builtins
+
+These are implemented as VM opcodes. The `ll` variants operate on 64-bit
+values; the non-`ll` variants operate on 32-bit (unsigned int) values.
+
+Behaviour for zero input on `clz`/`ctz` is undefined (as in GCC). `ffs(0)`
+returns `0` by definition.
+
+| Builtin | Return type | Description |
+|---------|-------------|-------------|
+| `__builtin_clz(x)` | `int` | Count leading zeros (32-bit) |
+| `__builtin_clzll(x)` | `int` | Count leading zeros (64-bit) |
+| `__builtin_ctz(x)` | `int` | Count trailing zeros (32-bit) |
+| `__builtin_ctzll(x)` | `int` | Count trailing zeros (64-bit) |
+| `__builtin_popcount(x)` | `int` | Population count (number of set bits, 32-bit) |
+| `__builtin_popcountll(x)` | `int` | Population count (64-bit) |
+| `__builtin_parity(x)` | `int` | Parity: `1` if odd number of set bits, else `0` (32-bit) |
+| `__builtin_parityll(x)` | `int` | Parity (64-bit) |
+| `__builtin_ffs(x)` | `int` | Index (1-based) of lowest set bit; `0` if `x == 0` (32-bit) |
+| `__builtin_ffsll(x)` | `int` | `ffs` for 64-bit values |
+| `__builtin_bswap16(x)` | `unsigned short` | Byte-swap a 16-bit value |
+| `__builtin_bswap32(x)` | `unsigned int` | Byte-swap a 32-bit value |
+| `__builtin_bswap64(x)` | `unsigned long` | Byte-swap a 64-bit value |
+
+Width-variant pairs (`clz`/`clzll`, `ctz`/`ctzll`, etc.) share a single VM
+opcode (`CLZ`, `CTZ`, `FFS`) with a width operand. The byte-swap variants share
+the `BSWAP` opcode.
+
+### Checked Arithmetic Builtins
+
+These perform the arithmetic and report whether the result overflowed.
+
+```c
+int __builtin_add_overflow(a, b, result_ptr)
+int __builtin_sub_overflow(a, b, result_ptr)
+int __builtin_mul_overflow(a, b, result_ptr)
+```
+
+- Computes `a OP b`.
+- Stores the (possibly wrapped) result through `result_ptr`.
+- Returns non-zero (true) if the result overflowed for the type of `*result_ptr`.
+- The result type is determined by the type of `*result_ptr`.
+- All standard integer widths (char through long long) and their unsigned
+  variants are supported.
+- Implemented via the `IOVFL` VM opcode.
+
+**Example:**
+
+```c
+#include <limits.h>
+
+int sz;
+if (__builtin_mul_overflow(base->size, len, &sz))
+    error("array size overflow");
+
+long long r;
+if (__builtin_mul_overflow(a, b, &r))
+    handle_overflow();
+```
+
+---
+
+## Attributes
+
+JCC supports GNU `__attribute__((...))` and C23 `[[...]]` attribute syntaxes.
+The most common diagnostic and layout attributes are fully implemented; the
+rest are **parsed and silently ignored** by the attribute consumer.
+
+### Quick Reference
+
+| Attribute | Syntax | Status | Semantics |
+|-----------|--------|--------|-----------|
+| `aligned(N)` | GNU | ✓ | Sets minimum alignment on types and variables |
+| `packed` | GNU | ✓ | Suppresses struct member padding |
+| `unused` / `__unused__` | GNU | ✓ | Suppresses `-Wunused` warnings |
+| `deprecated` / `__deprecated__` | GNU | ✓ | Emits `-Wdeprecated` warnings |
+| `deprecated("msg")` | GNU | ✓ | Emits `-Wdeprecated` with custom message |
+| `maybe_unused` | C23 | ✓ | Suppresses `-Wunused` warnings |
+| `deprecated` | C23 | ✓ | Emits `-Wdeprecated` warnings |
+| `deprecated("msg")` | C23 | ✓ | Emits `-Wdeprecated` with custom message |
+| `macro` | GNU | ✓ | JCC-specific; compile-time macro (see [MACROS.md](MACROS.md)) |
+| `comptime` | GNU | ✓ | JCC-specific; compile-time variable evaluation (see [MACROS.md](MACROS.md)) |
+| *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
+
+### Supported Attributes
+
+#### `__attribute__((aligned(N)))`
+
+Sets minimum alignment for a type or variable. The argument is a constant expression specifying the alignment in bytes. Can also be used without an argument (`__attribute__((aligned))`) to request maximum useful alignment.
+
+**Source:** `src/parse.c:3945-3954`
+
+```c
+struct __attribute__((aligned(16))) vec4 { float x, y, z, w; };
+int __attribute__((aligned(64))) cache_line;
+```
+
+#### `__attribute__((packed))`
+
+Prevents the compiler from inserting padding between struct/union members, and can also prevent alignment-based padding at the end of a struct.
+
+**Source:** `src/parse.c:3938-3942`, `src/parse.c:4140-4163`
+
+```c
+struct __attribute__((packed)) {
+    char c;
+    int i;  // directly follows c with no padding
+};
+```
+
+#### `__attribute__((unused))` / `__attribute__((__unused__))` / `[[maybe_unused]]`
+
+Suppresses `-Wunused` warnings on variables, functions, parameters, typedefs, and labels. Both the GNU and C23 forms (`[[maybe_unused]]`) are recognised with full semantic effect.
+
+**Source:** `src/parse.c:3956-3976` (GNU), `src/parse.c:4031` (C23)
+
+```c
+int __attribute__((unused)) x;       // GNU
+int [[maybe_unused]] y;              // C23
+__attribute__((unused)) static void helper(void) {}
+```
+
+#### `__attribute__((deprecated))` / `__attribute__((__deprecated__))` / `[[deprecated]]`
+
+Marks a declaration as deprecated. Warnings are emitted via `-Wdeprecated` when the identifier is used. Supports an optional message string that is included in the warning output.
+
+**Source:** `src/parse.c:3957-3976` (GNU), `src/parse.c:4032-4040` (C23), `src/parse.c:199-206` (warning emission), `src/parse.c:4977-4990` (use-site checks)
+
+```c
+int __attribute__((deprecated("use bar instead"))) old_func(void);
+int [[deprecated]] legacy_var;
+```
+
+#### `__attribute__((macro))` / `__attribute__((comptime))` (JCC-specific)
+
+These are JCC's own extensions for compile-time metaprogramming. They are intercepted by the preprocessor and do not reach the general attribute parser. See [MACROS.md](MACROS.md) for details.
+
+**Source:** `src/preprocess.c:1737-1796`
+
+```c
+[[jcc::macro]] int square(int x) { return x * x; }
+__attribute__((comptime)) const int version = 42;
+```
+
+### Parsed but Ignored
+
+Any GNU `__attribute__` identifier that is not explicitly handled (i.e., not `packed`, `aligned`, `unused`/`__unused__`, or `deprecated`/`__deprecated__`) is **consumed and silently ignored**. The parser skips the attribute name and any parenthesised argument list, then continues.
+
+**Source:** `src/parse.c:3979-3997`
+
+Similarly, any C23 `[[...]]` attribute other than `maybe_unused` or `deprecated` is **consumed and silently ignored** by the C23 attribute parser.
+
+**Source:** `src/parse.c:4010-4058`
+
+Ignored attributes include (but are not limited to):
+
+| Attribute | Syntax | Tracking |
+|-----------|--------|----------|
+| `nodiscard` | C23 | [#219](https://todo.sr.ht/~takeiteasy/jcc/219) |
+| `fallthrough` | C23 | Statement-level attribute support pending; [#219](https://todo.sr.ht/~takeiteasy/jcc/219) |
+| `no_unique_address` | C23 | [#219](https://todo.sr.ht/~takeiteasy/jcc/219) |
+| `noreturn` | C23/GNU | [#216](https://todo.sr.ht/~takeiteasy/jcc/216) |
+| `pure` | GNU | [#217](https://todo.sr.ht/~takeiteasy/jcc/217) |
+| `const` | GNU | [#217](https://todo.sr.ht/~takeiteasy/jcc/217) |
+| `cleanup` | GNU | [#218](https://todo.sr.ht/~takeiteasy/jcc/218) |
+| `format(printf,...)` | GNU | [#214](https://todo.sr.ht/~takeiteasy/jcc/214) |
+| `visibility` | GNU | |
+| `section` | GNU | |
+| `weak` | GNU | |
+| `weakref` | GNU | |
+| `alias` | GNU | |
+| `constructor` / `destructor` | GNU | |
+| `hot` / `cold` | GNU | |
+| `always_inline` / `flatten` / `noinline` | GNU | |
+| `returns_nonnull` / `nonnull` | GNU | |
+| `malloc` | GNU | |
+| `alloc_size` / `alloc_align` | GNU | |
+| `sentinel` | GNU | |
+| `format_arg` | GNU | |
+| `warn_unused_result` | GNU | |
+| `unsequenced` | C23 | |
+| `reproducible` | C23 | |
+
+### Open Tickets
+
+| # | Attribute | Priority | Description |
+|---|-----------|----------|-------------|
+| [#214](https://todo.sr.ht/~takeiteasy/jcc/214) | `format(printf, fmt, args)` | medium-high | Type-check printf/scanf format strings at compile time |
+| [#215](https://todo.sr.ht/~takeiteasy/jcc/215) | Catch-all | medium | Remaining GNU builtins and attributes |
+| [#216](https://todo.sr.ht/~takeiteasy/jcc/216) | `noreturn` / `[[noreturn]]` | high | Mark functions that never return; integrate with control-flow analysis |
+| [#217](https://todo.sr.ht/~takeiteasy/jcc/217) | `pure` / `const` | medium | Side-effect-free function annotations for optimisation |
+| [#218](https://todo.sr.ht/~takeiteasy/jcc/218) | `cleanup(func)` | medium | Scope-based cleanup callbacks (RAII-style) |
+| [#219](https://todo.sr.ht/~takeiteasy/jcc/219) | `nodiscard`, `fallthrough`, `no_unique_address` | medium | Remaining standard C23 attributes |
+
+The JCC-specific `@`-prefix attribute syntax is tracked separately in
+[#234](https://todo.sr.ht/~takeiteasy/jcc/234).
+
+### Position in Grammar
+
+Attributes are accepted at these positions in the grammar:
+
+| Position | GNU `__attribute__` | C23 `[[...]]` | Source Location |
+|----------|---------------------|---------------|-----------------|
+| Storage class specifier sequence | ✓ | ✓ | `src/parse.c:770-775` |
+| Before declarator (prefix) | ✓ | ✓ | `src/parse.c:1110-1112` |
+| After declarator (suffix) | ✓ | ✓ | `src/parse.c:1168-1170` |
+| Before abstract declarator | ✓ | ✓ | `src/parse.c:1183-1185` |
+| Struct/union — before tag | ✓ | ✓ | `src/parse.c:4063-4064` |
+| Struct/union — after body | ✓ | ✓ | `src/parse.c:4094-4095` |
+| Enum specifier | ✓ | ✓ | `src/parse.c:1280-1281` |
+| Labels | ✓ | ✓ | `src/parse.c:2569-2578` |
+| Statement level | ✗ | ✗ | Not yet supported |
 
 ---
 
@@ -276,7 +543,7 @@ POSIX headers are embedded and backed by host OS calls. They are only available 
 | `<sys/mman.h>` | ✓ | Memory management (`mmap`, `munmap`, `mprotect`, `msync`, `posix_madvise`), `PROT_*`, `MAP_*`, `MS_*`, `MADV_*` constants |
 | `<sys/socket.h>` | ✓ | Socket API (`socket`, `bind`, `listen`, `accept`, `connect`, `setsockopt`, `getsockname`, `shutdown`, `struct sockaddr`, `socklen_t`) |
 | `<sys/stat.h>` | ✓ | File status (`stat`, `fstat`, `lstat`, `chmod`, `mkdir`, `mkfifo`, `umask`), `struct stat`, `S_*` constants and macros |
-| `<sys/time.h>` | ✓ | Time operations (`gettimeofday`, `settimeofday`), `struct timeval`, `struct timezone`, `timeradd`, `timersub` |
+| `<sys/time.h>` | ✓ | Time operations (`gettimeofday`, `settimeofday`), `struct timeval`, `struct timezone`, `timeradd`, `timersub`) |
 | `<sys/types.h>` | ✓ | Basic system types (`dev_t`, `ino_t`, `mode_t`, `nlink_t`, `uid_t`, `gid_t`, `off_t`, `pid_t`, `blksize_t`, `blkcnt_t`, `useconds_t`, `sa_family_t`, `socklen_t`) |
 | `<sys/wait.h>` | ✓ | Process wait (`wait`, `waitpid`), `WNOHANG`, `WUNTRACED`, `WIFEXITED`, `WEXITSTATUS`, `WIFSIGNALED`, `WTERMSIG`, `WIFSTOPPED`, `WSTOPSIG`, `WCOREDUMP` |
 | `<termios.h>` | ✓ | Terminal I/O (`tcgetattr`, `tcsetattr`, `struct termios`, `cc_t`, `speed_t`, `tcflag_t`) |
