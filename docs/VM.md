@@ -4,7 +4,7 @@
 
 ## Overview
 
-JCC compiles C source into a portable, register-based bytecode that runs on a built-in interpreter (the **VM**).  There are no native object files or JIT-to-machine-code backends; the same binary that parses C also executes it.  This design trades raw execution speed for portability, inspectability, and deep runtime instrumentation.
+JCC's C frontend produces a portable, register-based bytecode that runs on a built-in interpreter (the **VM**).  The VM is the runtime that powers `[[jcc::macro]]` execution and doubles as a self-contained, introspectable runtime for the memory-safety suite, the debugger, the profiler, and any program run without `--native`.  It is intentionally not a JIT-to-machine-code backend: every opcode is interpreted, which keeps the same binary that parses C also able to execute it (or to hand macro-expanded C off to `cc` / `clang` / `gcc` via `--native` — see the [README](../README.md)).  This design trades raw execution speed for portability, deep runtime instrumentation, and the ability to run untrusted or sandboxed code in a single self-contained binary.
 
 Key properties:
 
@@ -412,6 +412,8 @@ Enable profiling with `--vm-profile` (text report) or `--vm-profile-json <file>`
 Static n-gram mining (`tools/bytecode_ngrams`) and use-def fusion analysis (`tools/fusion_candidates`) complement the dynamic data by showing which sequences are common in the bytecode *and* hot at runtime — the strongest candidates for new fused opcodes.
 
 ## Performance Notes
+
+The VM is the runtime for compile-time macro bodies and for VM-only workflows (the safety suite, the debugger, the profiler, quick iteration without a system compiler).  For production code, `--native` hands macro-expanded C to `cc` / `clang` / `gcc` and skips the VM entirely, so the interpreter cost only matters for the things that *run on it*.
 
 Two optimisations have significantly reduced interpreter overhead:
 

@@ -97,11 +97,20 @@ Removes demonstrably dead code using conservative analysis.
 ## How It Works
 
 The optimizer operates on the generated 32-bit bytecode words in `text_seg[]`
-after codegen and before execution:
+after codegen and before execution. The compiler pipeline forks at the bytecode
+stage:
 
 ```
-Source Code → Parser → AST → Codegen → Bytecode → [Optimizer] → VM Execution
+                                                    ┌─→ [Optimizer] → VM Execution
+Source Code → Parser → AST → Codegen → Bytecode ───┤
+                                                    └─→ --native → cc / clang / gcc
 ```
+
+The optimizer is a **VM-only pass** — it rewrites bytecode before the
+interpreter runs it. `--native` serialises the (unoptimised) bytecode to C and
+hands it to a system compiler, so `--optimize` is rejected in `--native` mode
+and the system compiler does the optimisation instead. See the
+[README](../README.md#compile-natively-production) for the production path.
 
 Optimizations first transform or mark bytecode, then rebuild the text segment
 when instruction widths change or NOPs can be removed. The compaction pass
@@ -111,13 +120,17 @@ serialized text relocations so PC-index targets remain valid after compaction.
 
 ## Best Practices
 
-1. **Development**: Use the default (no `--optimize` flag) for predictable debugging
+1. **Development (VM)**: Use the default (no `--optimize` flag) for predictable debugging
 2. **Testing**: Run the test suite with `--optimize=3` to catch optimization bugs
-3. **Production**: Use `--optimize=2` for a good balance of speed and safety
+3. **VM-only workflows** (debugger, safety suite, `--vm-profile`): Use `--optimize=2` for a good balance of speed and safety
+4. **Production builds**: Use `--native` — the system compiler handles optimisation, and the JCC frontend cost is the only JCC-specific overhead in the loop
 
 ## Combining with Safety Features
 
-Optimization and safety features are independent:
+Both `--optimize` and the `-0` … `-3` safety levels (and the individual flags
+they expand to) are **VM-only** — they are rejected under `--native`, which
+hands optimisation and instrumentation off to the system compiler. The examples
+below are for the VM path:
 
 ```bash
 # Maximum safety, no optimization
