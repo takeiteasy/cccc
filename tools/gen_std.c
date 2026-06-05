@@ -1,5 +1,5 @@
 // std_template_test.c - builds get_std_header as AST; use -G to emit C.
-// Usage: make stdlib
+// Usage: make generate-std
 
 #include <stdio.h>
 #include <stdlib.h>
