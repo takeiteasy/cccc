@@ -1440,6 +1440,8 @@ typedef struct Compiler {
     bool macro_fns_compiled;         // True after compile_all_macros has run
     int macro_recursion_limit;       // 0 = unlimited, default = 256
     Token *macro_call_tok;           // Active macro invocation token
+    Token *macro_context_tokens;      // Safe file-scope decls visible to macro bytecode
+    Scope *macro_context_scope;       // Parser scope produced from macro_context_tokens
     Obj *macro_globals; // Globals defined by inline macros (injected into
                         // the final program before codegen)
 

@@ -405,6 +405,110 @@ static Token *append_token_list(JCC *vm, Token *cur, Token *tokens) {
     return cur;
 }
 
+static Token *find_matching_brace(Token *tok) {
+    int depth = 0;
+    for (Token *t = tok; t && t->kind != TK_EOF; t = t->next) {
+        if (equal(t, "{"))
+            depth++;
+        else if (equal(t, "}")) {
+            depth--;
+            if (depth == 0)
+                return t;
+        }
+    }
+    return NULL;
+}
+
+static bool starts_file_scope_call(Token *tok) {
+    return tok && tok->kind == TK_IDENT && tok->next && equal(tok->next, "(");
+}
+
+// Capture file-scope declarations that can safely be prepended to the macro
+// bytecode program: typedefs, tag declarations, prototypes, externs, and other
+// declarations without top-level initializers. Function bodies and file-scope
+// macro calls are skipped so ordinary program code is not compiled into the
+// macro VM.
+static Token *build_macro_context_tokens(JCC *vm, Token **input_tokens,
+                                         int count) {
+    Token head = {};
+    Token *cur = &head;
+
+    for (int fi = 0; fi < count; fi++) {
+        Token *tok = input_tokens[fi];
+        while (tok && tok->kind != TK_EOF) {
+            Token *start = tok;
+
+            if (starts_file_scope_call(tok)) {
+                while (tok && tok->kind != TK_EOF && !equal(tok, ";"))
+                    tok = tok->next;
+                if (tok && equal(tok, ";"))
+                    tok = tok->next;
+                continue;
+            }
+
+            bool has_top_level_eq = false;
+            bool is_function_body = false;
+            int paren_depth = 0;
+            int bracket_depth = 0;
+            int brace_depth = 0;
+            Token *prev_sig = NULL;
+
+            while (tok && tok->kind != TK_EOF) {
+                if (brace_depth == 0 && paren_depth == 0 &&
+                    bracket_depth == 0) {
+                    if (equal(tok, "="))
+                        has_top_level_eq = true;
+
+                    if (equal(tok, "{") && prev_sig &&
+                        equal(prev_sig, ")")) {
+                        is_function_body = true;
+                        Token *close = find_matching_brace(tok);
+                        tok = close ? close->next : tok->next;
+                        break;
+                    }
+
+                    if (equal(tok, ";")) {
+                        if (!has_top_level_eq) {
+                            for (Token *t = start; t != tok->next &&
+                                 t && t->kind != TK_EOF; t = t->next)
+                                cur = cur->next = copy_macro_token(vm, t);
+                        }
+                        tok = tok->next;
+                        break;
+                    }
+                }
+
+                if (equal(tok, "("))
+                    paren_depth++;
+                else if (equal(tok, ")") && paren_depth > 0)
+                    paren_depth--;
+                else if (equal(tok, "["))
+                    bracket_depth++;
+                else if (equal(tok, "]") && bracket_depth > 0)
+                    bracket_depth--;
+                else if (equal(tok, "{"))
+                    brace_depth++;
+                else if (equal(tok, "}") && brace_depth > 0)
+                    brace_depth--;
+
+                if (!equal(tok, ";"))
+                    prev_sig = tok;
+                tok = tok->next;
+            }
+
+            if (!tok || tok->kind == TK_EOF)
+                break;
+            if (is_function_body)
+                continue;
+        }
+    }
+
+    if (!head.next)
+        return NULL;
+    cur->next = new_macro_eof(vm, cur);
+    return head.next;
+}
+
 // Find the first top-level '=' in a token list (brace-depth 0).
 // Returns the token AT '=', or NULL if none found.
 static Token *find_top_level_eq(Token *tokens) {
@@ -584,6 +688,8 @@ static Token *build_combined_macro_tokens(JCC *vm, Token *reflection_tokens,
     Token *cur = &head;
 
     cur = append_token_list(vm, cur, reflection_tokens);
+    if (vm->compiler.macro_context_tokens)
+        cur = append_token_list(vm, cur, vm->compiler.macro_context_tokens);
 
     // Reverse comptime_vars to source order (list is prepended, so reversed).
     int nv = 0;
@@ -926,6 +1032,7 @@ static bool compile_macro_program(JCC *vm) {
         vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
         return false;
     }
+    vm->compiler.macro_context_scope = vm->compiler.scope;
 
     for (int i = 0; i < count; i++) {
         Obj *func = find_macro_function(macro_prog, macros[i]->name);
@@ -937,10 +1044,6 @@ static bool compile_macro_program(JCC *vm) {
             vm->compiler.locals = saved_locals;
             vm->compiler.current_fn = saved_current_fn;
             vm->compiler.globals = saved_globals;
-            for (Scope *sc = vm->compiler.scope; sc != saved_scope; sc = sc->next) {
-                hashmap_deinit_borrowed(&sc->var_map);
-                hashmap_deinit_borrowed(&sc->tag_map);
-            }
             vm->compiler.scope = saved_scope;
             vm->compiler.in_macro_mode = false;
             vm->compiler.num_call_patches = saved_num_call_patches;
@@ -976,10 +1079,6 @@ static bool compile_macro_program(JCC *vm) {
     vm->compiler.locals = saved_locals;
     vm->compiler.current_fn = saved_current_fn;
     vm->compiler.globals = saved_globals;
-    for (Scope *sc = vm->compiler.scope; sc != saved_scope; sc = sc->next) {
-        hashmap_deinit_borrowed(&sc->var_map);
-        hashmap_deinit_borrowed(&sc->tag_map);
-    }
     vm->compiler.scope = saved_scope;
     vm->compiler.in_macro_mode = false;
     vm->compiler.num_call_patches = saved_num_call_patches;
@@ -1553,8 +1652,17 @@ static void scan_and_execute_global_calls(JCC *vm, Token **tokens_ptr) {
                         // Snapshot globals before execution so we can identify
                         // the objects this call generates.
                         Obj *globals_before = vm->compiler.globals;
+                        Scope *scope_before = vm->compiler.scope;
+                        Scope *saved_scope_next =
+                            scope_before ? scope_before->next : NULL;
+                        if (scope_before && vm->compiler.macro_context_scope)
+                            scope_before->next =
+                                vm->compiler.macro_context_scope;
 
                         execute_macro_fn(vm, pm, tok, NULL, 0);
+                        if (scope_before)
+                            scope_before->next = saved_scope_next;
+                        vm->compiler.scope = scope_before;
 
                         // Drain newly prepended objects into macro_globals using
                         // a saved-next walk so we never overwrite a next pointer
@@ -1603,6 +1711,10 @@ void cc_execute_inline_macros(JCC *vm, Token **input_tokens, int count) {
     if (!vm || !vm->compiler.macro_fns)
         return;
 
+    if (!vm->compiler.macro_context_tokens)
+        vm->compiler.macro_context_tokens =
+            build_macro_context_tokens(vm, input_tokens, count);
+
     // Quick check: any non-inline macros?
     bool any_global = false;
     for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next)
@@ -1642,8 +1754,10 @@ void cc_execute_inline_macros(JCC *vm, Token **input_tokens, int count) {
     // extern declarations for every generated global variable, prepending
     // them to all input token streams so the parser can resolve references.
     for (Obj *o = vm->compiler.macro_globals; o; o = o->next) {
-        bool is_fn_def  = o->is_function  && o->body;
-        bool is_gvar_def = !o->is_function && o->is_definition;
+        bool is_fn_def  = o->is_function  && o->body &&
+                          o->is_macro_generated;
+        bool is_gvar_def = !o->is_function && o->is_definition &&
+                            o->is_macro_generated;
         if (!is_fn_def && !is_gvar_def)
             continue;
 

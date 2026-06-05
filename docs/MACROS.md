@@ -51,17 +51,18 @@ JCC supports two macro execution forms:
 | Global generation | `[[jcc::macro]] void gen(void)` called at file scope | Before the main parse | Ignored; side effects generate declarations/functions/globals visible everywhere |
 | Call-site expansion | `[[jcc::macro(inline)]] _Node *gen(args...)` called inside code | During macro expansion after parsing | Replaces the call expression or statement |
 
-### Pre-parse macro stdlib constraint
+### Pre-parse macro declaration context
 
 Global-generation macros compile and execute **before the main parse begins**.
-The macro program only has JCC's private `reflection.h` API and its transitive
-`stdbool.h`, `stddef.h`, and `stdint.h` includes available implicitly. Headers
-included by the user file (`stdio.h`, `stdlib.h`, etc.) are **not** in scope.
+The macro program has JCC's private `reflection.h` API plus a conservative
+snapshot of safe file-scope declarations from the preprocessed source. That
+snapshot includes typedefs, struct/union/enum tag declarations, function
+prototypes, `extern` declarations, and declarations without function bodies.
 
-If your macro or comptime helper calls `fopen`, `malloc`, `strcmp`, or other
-stdlib functions, use an **expression-position inline macro** instead; the macro
-program is compiled during the main parse, after the user's includes have been
-processed and those functions are in scope.
+This makes included types and prototypes visible to `[[jcc::comptime]]` helpers
+used by global-generation macros, but it does not compile arbitrary non-macro
+program definitions into the macro VM. Function bodies, file-scope macro calls,
+and initialized global definitions are skipped.
 
 ## Global Generation
 
@@ -654,10 +655,10 @@ The canonical form used in this document and in JCC examples is `[[jcc::macro]]`
 
 - Macro calls accept at most 8 arguments.
 - Macro code runs at compile time and cannot inspect runtime values.
-- Global-generation macros compile before the main parse; only `reflection.h`
-  and its transitive includes (`stdbool.h`, `stddef.h`, `stdint.h`) are available.
-  Use an inline macro if the macro needs `stdio.h`, `stdlib.h`, or other headers
-  from the user file.
+- Global-generation macros compile before the main parse. They can see safe
+  file-scope declarations from preprocessed includes and source, but arbitrary
+  non-macro function bodies and initialized globals are not compiled into the
+  macro VM.
 - Global-generation macros run before the main parse, so generated definitions
   are visible everywhere. Inline macros expand at the call site and follow
   normal C declaration rules for any side-effect definitions they emit.

@@ -1058,11 +1058,14 @@ _Obj *__jcc_ast_function(JCC *vm, const char *name,
     size_t name_len = strlen(name);
     Obj *existing = NULL;
 
-    for (Obj *obj = vm->compiler.globals; obj; obj = obj->next) {
-        if (obj->is_function && strlen(obj->name) == name_len &&
-            strncmp(obj->name, name, name_len) == 0) {
-            existing = obj;
-            break;
+    Obj *lists[] = { vm->compiler.globals, vm->compiler.macro_globals };
+    for (int i = 0; i < 2 && !existing; i++) {
+        for (Obj *obj = lists[i]; obj; obj = obj->next) {
+            if (obj->is_function && strlen(obj->name) == name_len &&
+                strncmp(obj->name, name, name_len) == 0) {
+                existing = obj;
+                break;
+            }
         }
     }
 
@@ -1239,10 +1242,13 @@ _Obj *__jcc_ast_function_prototype(JCC *vm, const char *name,
     size_t name_len = strlen(name);
 
     // If a forward-declaration or prototype already exists, return it.
-    for (Obj *obj = vm->compiler.globals; obj; obj = obj->next) {
-        if (obj->is_function && strlen(obj->name) == name_len &&
-            strncmp(obj->name, name, name_len) == 0) {
-            return obj;
+    Obj *lists[] = { vm->compiler.globals, vm->compiler.macro_globals };
+    for (int i = 0; i < 2; i++) {
+        for (Obj *obj = lists[i]; obj; obj = obj->next) {
+            if (obj->is_function && strlen(obj->name) == name_len &&
+                strncmp(obj->name, name, name_len) == 0) {
+                return obj;
+            }
         }
     }
 
