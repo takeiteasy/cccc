@@ -432,9 +432,45 @@ positional. `_NODE_LIST(arr, count)` builds the `->next` chain from an array.
 An existing `->next` chain (e.g. `_AST_BLOCK(...)->body`) can also be passed
 directly as the splice argument.
 
-List splices are valid **only in statement-list position** (inside a `{ ... }`
-block). Using `$@k` as an expression operand is a compile-time error. Call-arg
-splicing and initializer splicing are not yet supported.
+### Call-argument splicing
+
+`$@k` can also appear as a **direct argument to a function call** in a `_QUOTE`
+template, expanding the chain into the callee's argument list. This is currently
+supported for **variadic callees** — functions that accept a variable-argument
+tail (`...`). The splice occupies zero or more argument slots in the variadic
+portion:
+
+```c
+#include <stdarg.h>
+
+int sum_ints(int count, ...) {
+    va_list args; va_start(args, count);
+    int s = 0;
+    for (int i = 0; i < count; i++) s += va_arg(args, int);
+    va_end(args);
+    return s;
+}
+
+[[jcc::macro(inline)]]
+_Node *call_sum3(_Node *a, _Node *b, _Node *c) {
+    _Node *chain = _NODE_LIST((_Node*[]){ a, b, c }, 3);
+    return _QUOTE("sum_ints(3, $@1)", chain); // → sum_ints(3, a, b, c)
+}
+```
+
+Mixing a scalar `$N` with a call-arg splice `$@M` in one template is supported:
+
+```c
+return _QUOTE("base_plus_sum($1, 2, $@2)", base_node, pair_chain);
+```
+
+An empty chain (`_NODE_LIST` with `count == 0`, which returns NULL) is a valid
+splice that inserts zero arguments. Using `$@k` as a sub-expression operand
+(e.g. `"foo($@1 + 1)"`) rather than a direct argument remains a compile-time
+error.
+
+Splicing into fixed-arity callees (functions without `...`) is not yet
+supported — the parser validates arity before substitution runs.
 
 ### `_QUOTE` inside generated function bodies
 

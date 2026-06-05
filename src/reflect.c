@@ -1802,6 +1802,22 @@ typedef struct {
 
 // If stmt is an ND_EXPR_STMT whose sole expression is a reference to a splice
 // placeholder $@k, return the caller's node chain for index k.  Otherwise NULL.
+static _Node *splice_chain_for(QuoteSubstState *s, _Node *stmt);
+
+// Like splice_chain_for but for a bare expression-position arg (ND_VAR directly,
+// not wrapped in ND_EXPR_STMT).  Returns true and sets *out_chain if arg is a
+// $@k placeholder; false otherwise.  *out_chain may be NULL for an empty splice.
+static bool splice_chain_for_arg(QuoteSubstState *s, _Node *arg, _Node **out_chain) {
+    if (!arg || arg->kind != ND_VAR || !arg->var) return false;
+    for (int i = 0; i < s->n_args && i < 64; i++) {
+        if (s->splice_vars[i] && arg->var == s->splice_vars[i]) {
+            *out_chain = s->arg_nodes[i];
+            return true;
+        }
+    }
+    return false;
+}
+
 static _Node *splice_chain_for(QuoteSubstState *s, _Node *stmt) {
     if (!stmt || stmt->kind != ND_EXPR_STMT) return NULL;
     _Node *inner = stmt->lhs;
@@ -1828,12 +1844,13 @@ static _Node *quote_substitute(QuoteSubstState *s, _Node *node) {
             if (s->placeholder_vars[i] && node->var == s->placeholder_vars[i])
                 return s->arg_nodes[i];
         }
-        // Splice placeholder $@k in a non-list context → error
+        // Splice placeholder $@k used as a sub-expression → error.
+        // (Direct arg-list position is handled in the ->args block below.)
         for (int i = 0; i < s->n_args && i < 64; i++) {
             if (s->splice_vars[i] && node->var == s->splice_vars[i]) {
                 error("__jcc_quote: $@%d is only valid in statement-list "
-                      "position (inside a block { }); cannot be used as an "
-                      "expression", i + 1);
+                      "position (inside a block { }) or as a direct call "
+                      "argument; cannot be used as a sub-expression", i + 1);
                 return node; // return unchanged to avoid a NULL crash
             }
         }
@@ -1874,11 +1891,45 @@ static _Node *quote_substitute(QuoteSubstState *s, _Node *node) {
         node->body = head_val.next;
     }
 
-    // args is an argument chain linked via ->next
+    // args is an argument chain linked via ->next.
+    // Splice placeholders ($@k) in direct arg position expand to N expressions.
     if (node->args) {
-        node->args = quote_substitute(s, node->args);
-        for (_Node *a = node->args; a && a->next; a = a->next)
-            a->next = quote_substitute(s, a->next);
+        bool has_splice = false;
+        for (_Node *a = node->args; a; a = a->next) {
+            _Node *dummy;
+            if (splice_chain_for_arg(s, a, &dummy)) { has_splice = true; break; }
+        }
+
+        if (has_splice) {
+            Node head_val = {};
+            Node *cur = &head_val;
+            for (_Node *a = node->args; a; ) {
+                _Node *next_a = a->next;
+                a->next = NULL;
+
+                _Node *chain;
+                if (splice_chain_for_arg(s, a, &chain)) {
+                    if (chain) {
+                        _Node *tail = chain;
+                        while (tail->next) tail = tail->next;
+                        cur->next = chain;
+                        cur = tail;
+                    }
+                    // Empty splice: arg disappears (chain == NULL → no-op)
+                } else {
+                    _Node *sub = quote_substitute(s, a);
+                    if (sub) { cur->next = sub; cur = sub; }
+                }
+                cur->next = NULL;
+                a = next_a;
+            }
+            node->args = head_val.next;
+        } else {
+            // No splice: existing scalar substitution (unchanged)
+            node->args = quote_substitute(s, node->args);
+            for (_Node *a = node->args; a && a->next; a = a->next)
+                a->next = quote_substitute(s, a->next);
+        }
     }
 
     // switch case chains
