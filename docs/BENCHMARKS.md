@@ -9,6 +9,7 @@ make bench-compare            # full run: 3 timed iterations per (bench, config)
 make bench-compare-quick      # 2 iterations, ~5 min, good for quick checks
 python3 bench.py --filter fib.c    # run a single benchmark
 python3 bench.py --no-jbc --filter fib.c   # skip the jcc-jbc columns
+python3 bench.py --filter fib.c --vm-profile   # also write opcode profile JSON
 ```
 
 Sample output:
@@ -76,6 +77,10 @@ All programs are portable C99/C11, exit with code `42` (so the standard `tests.p
 7. **Verify** that every config's stdout matches the JCC reference. A mismatch is flagged in the report and causes a non-zero exit.
 8. **Report** as a human-readable table + a JSON file.
 
+With `--vm-profile`, JCC and JCC-JBC configs also write dynamic opcode count
+profiles to `benchmarks/results/vm-profile-<UTC>/`. The benchmark JSON records
+the `vm_profile_json` path for each profiled config.
+
 ## What's being measured
 
 There are three different timings per benchmark:
@@ -87,6 +92,9 @@ There are three different timings per benchmark:
 The `jcc-jbc*` columns are the cleanest apples-to-apples comparison with GCC: both are "compile once, run many times" measurements. The `jcc*` columns show what you'd actually pay as an end user of the `jcc` CLI.
 
 If you want to break out compile time vs execution time for JCC, see `make bench` (hyperfine) and `make profile-cpu` in the existing [PROFILING.md](PROFILING.md).
+If you want to see where VM execution is concentrated, use `bench.py --vm-profile`
+and compare dynamic counts for opcodes such as `LEA3`, `LDR_D`, `STR_D`,
+`ADD3`, and `MUL3` across optimization levels.
 
 ## Bytecode (.jbc) configs
 
@@ -113,6 +121,7 @@ If you see a `MISMATCH` in the output, the JCC output differs from at least one 
 - **Run multiple iterations** (`--runs 5` or more) for benchmarks under ~50ms.
 - **Use `--filter`** to iterate on a single benchmark while tuning it.
 - **Use `--no-jbc`** when iterating on parse/compile performance — it cuts the bench in half by skipping the bytecode-execution columns.
+- **Use `--vm-profile`** when optimizing bytecode generation or VM dispatch — it shows dynamic opcode mix for each JCC config.
 - **Compare JSON files over time** — `benchmarks/results/run-*.json` includes the compiler versions, host info, and run settings so results are reproducible.
 
 ## Adding a new benchmark

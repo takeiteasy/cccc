@@ -250,6 +250,17 @@ static inline int cc_instr_words(int op) {
     return operands < 0 ? -1 : operands + 1;
 }
 
+static inline const char *cc_opcode_name(int op) {
+    static const char *names[] = {
+#define X(NAME, OPERANDS) [NAME] = #NAME,
+        OPS_X
+#undef X
+    };
+    if (op < 0 || op >= (int)(sizeof(names) / sizeof(names[0])) || !names[op])
+        return NULL;
+    return names[op];
+}
+
 void strarray_push(StringArray *arr, char *s);
 void arena_strarray_push(JCC *vm, StringArray *arr, char *s);
 char *format(char *fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -521,6 +532,10 @@ void gen(JCC *vm, Obj *prog);
 //
 
 int vm_eval(JCC *vm);
+void cc_vm_profile_reset(JCC *vm);
+void cc_vm_profile_print(JCC *vm, FILE *f);
+int cc_vm_profile_write_json(JCC *vm, const char *path, const char *mode,
+                             const char *input_name);
 
 //
 // optimize.c

@@ -211,6 +211,7 @@ typedef enum {
 #define X(NAME, OPERANDS) NAME,
     OPS_X
 #undef X
+    OP_COUNT,
 } JCC_OP;
 
 /*!
@@ -1663,6 +1664,11 @@ struct JCC {
     int disable_all_ffi;
     int ffi_errors_fatal;
     int enable_ffi_type_checking;
+
+    // VM opcode execution profiling
+    bool vm_profile_enabled;
+    uint64_t vm_profile_counts[OP_COUNT];
+    uint64_t vm_profile_total;
 
     // Debugger state (enable via JCC_ENABLE_DEBUGGER flag)
     Debugger dbg;

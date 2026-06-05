@@ -273,6 +273,14 @@ make profile-cpu TEST=tests/test_foo.c  # Profile a specific test
 python3 tests.py --profile-cpu --match "*compre*"  # CPU profile matching tests
 ```
 
+**VM opcode profiling:**
+
+```bash
+./jcc --vm-profile -I./include tests/test_comprehensive.c
+./jcc --vm-profile-json profile/vm-opcodes/comprehensive.json -I./include tests/test_comprehensive.c
+python3 tests.py --vm-profile --match "*profile*"  # Per-test opcode JSON
+```
+
 **Memory profiling:**
 
 ```bash
@@ -289,6 +297,7 @@ make bench-compare            # run the benchmark suite (JCC × {none,O1,O2,O3} 
 make bench-compare-quick      # 2-iteration quick run
 python3 bench.py --filter fib.c   # run a single benchmark
 python3 bench.py --no-jbc         # skip the precompiled-bytecode columns
+python3 bench.py --filter fib.c --vm-profile  # include opcode profile JSON
 ```
 
 See [BENCHMARKS.md](docs/BENCHMARKS.md) for the full guide and the list of included workloads.

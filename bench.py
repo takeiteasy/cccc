@@ -21,6 +21,7 @@ Options:
     --filter PATTERN    glob filter on benchmark source names
     --no-correctness    skip the stdout-equality check
     --no-jbc            skip the jcc-jbc* (precompiled bytecode) configs
+    --vm-profile        collect VM opcode profile JSON for JCC/JBC configs
     --keep-builds       keep compiled gcc binaries in build/ (default: clean)
     --quiet             suppress per-benchmark progress output
 """
@@ -174,10 +175,18 @@ def run_benchmark(src, args, root, build_dir, log):
 
     log("  running jcc variants...")
     for label, extra in JCC_CONFIGS:
+        profile_path = None
+        if args.vm_profile:
+            profile_path = args.vm_profile_dir / f"{src.stem}-{label}.json"
         def make_jcc():
-            cmd = [args.jcc, args.include, *extra, str(src)]
+            profile_args = (
+                ["--vm-profile-json", str(profile_path)] if profile_path else []
+            )
+            cmd = [args.jcc, args.include, *extra, *profile_args, str(src)]
             return run_cmd(cmd, root)
         r = time_runs(make_jcc, args.runs, args.warmup)
+        if profile_path:
+            r["vm_profile_json"] = str(profile_path)
         results[label] = r
         log(f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms")
 
@@ -188,10 +197,18 @@ def run_benchmark(src, args, root, build_dir, log):
                 continue
             jbc = jbc_paths[label]
             _, compile_ms = run_cmd([args.jcc, args.include, *extra, "-o", str(jbc), str(src)], root)
+            profile_path = None
+            if args.vm_profile:
+                profile_path = args.vm_profile_dir / f"{src.stem}-{label}.json"
             def make_jbc():
-                return run_cmd([args.jcc, str(jbc)], root)
+                profile_args = (
+                    ["--vm-profile-json", str(profile_path)] if profile_path else []
+                )
+                return run_cmd([args.jcc, *profile_args, str(jbc)], root)
             r = time_runs(make_jbc, args.runs, args.warmup)
             r["compile_ms"] = compile_ms * 1000.0
+            if profile_path:
+                r["vm_profile_json"] = str(profile_path)
             results[label] = r
             log(f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms  compile={r['compile_ms']:>8.1f}ms")
 
@@ -365,6 +382,8 @@ def main():
     p.add_argument("--no-correctness", action="store_true")
     p.add_argument("--no-jbc", action="store_true",
                    help="skip the jcc-jbc* (precompiled bytecode) configs")
+    p.add_argument("--vm-profile", action="store_true",
+                   help="write VM opcode profile JSON for JCC/JBC configs")
     p.add_argument("--keep-builds", action="store_true")
     p.add_argument("--quiet", action="store_true")
     args = p.parse_args()
@@ -376,6 +395,12 @@ def main():
         sys.exit(1)
     build_dir = root / "build"
     build_dir.mkdir(exist_ok=True)
+    args.run_id = make_run_id()
+    if args.vm_profile:
+        args.vm_profile_dir = bench_dir / "results" / f"vm-profile-{args.run_id}"
+        args.vm_profile_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        args.vm_profile_dir = None
 
     jcc_path = (root / args.jcc).resolve() if not os.path.isabs(args.jcc) else Path(args.jcc)
     if not jcc_path.exists():
@@ -411,6 +436,8 @@ def main():
     jcc_cfg_str = " × {none,O1,O2,O3}"
     jbc_cfg_str = "" if args.no_jbc else "    jcc-jbc × {none,O1,O2,O3}"
     log(f"Configs: jcc{jcc_cfg_str}{jbc_cfg_str}    gcc × {{O0,O1,O2,O3}}")
+    if args.vm_profile:
+        log(f"VM opcode profiles: {args.vm_profile_dir}")
 
     records = []
     for src in sources:
@@ -456,7 +483,7 @@ def main():
             print("Correctness: all benchmarks produce identical output across all configs")
 
     if args.format in ("json", "both"):
-        run_id = make_run_id()
+        run_id = args.run_id
         if args.json_out:
             out_path = Path(args.json_out)
         else:

@@ -51,6 +51,9 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-d/--disassemble    Disassemble bytecode to stdout\n");
     printf("\t-v/--verbose        Enable debug logging\n");
     printf("\t-g/--debug          Enable interactive debugger\n");
+    printf("\t   --vm-profile     Count executed VM opcodes and print a report\n");
+    printf("\t   --profile-opcodes Alias for --vm-profile\n");
+    printf("\t   --vm-profile-json <file> Write VM opcode profile JSON\n");
     printf("\nWarning Options:\n");
     printf("\t-Wall               Enable common warning categories\n");
     printf("\t-Wextra             Enable extra warning categories\n");
@@ -477,6 +480,12 @@ int main(int argc, const char *argv[]) {
     int ffi_errors_fatal = 0;
     int enable_ffi_type_checking = 0;
     int diagnostic_json = 0;
+    int vm_profile = 0;
+    int vm_profile_text = 0;
+    char *vm_profile_json = NULL;
+    const char *vm_profile_mode = NULL;
+    const char *vm_profile_input = NULL;
+    int vm_profile_ran = 0;
 
     if (argc <= 1)
         usage(argv[0], 1);
@@ -538,6 +547,9 @@ int main(int argc, const char *argv[]) {
         {"ffi-errors-fatal", no_argument, 0, 1023},
         {"ffi-type-checking", no_argument, 0, 1024},
         {"fdiagnostics-format", required_argument, 0, 1025},
+        {"vm-profile", no_argument, 0, 1026},
+        {"profile-opcodes", no_argument, 0, 1026},
+        {"vm-profile-json", required_argument, 0, 1027},
         {0, 0, 0, 0}};
 
     // Rewrite single-dash -std=... and -fdiagnostics-format=... to double-dash
@@ -815,6 +827,15 @@ int main(int argc, const char *argv[]) {
                 usage(argv[0], 1);
             }
             break;
+        case 1026:
+            vm_profile = 1;
+            vm_profile_text = 1;
+            break;
+        case 1027:
+            vm_profile = 1;
+            free(vm_profile_json);
+            vm_profile_json = strdup(optarg);
+            break;
         case '?':
             if (optopt)
                 fprintf(stderr, "error: option -%c requires an argument\n",
@@ -857,6 +878,7 @@ int main(int argc, const char *argv[]) {
     vm.disable_all_ffi = disable_all_ffi;
     vm.ffi_errors_fatal = ffi_errors_fatal;
     vm.enable_ffi_type_checking = enable_ffi_type_checking;
+    vm.vm_profile_enabled = vm_profile;
     for (int i = 0; i < ffi_allow_args_count; i++)
         configure_ffi_name_list(&vm, ffi_allow_args[i], cc_ffi_allow);
     for (int i = 0; i < ffi_deny_args_count; i++)
@@ -923,6 +945,9 @@ int main(int argc, const char *argv[]) {
 
             // Run the loaded bytecode
             exit_code = cc_run(&vm, argc, (char **)argv);
+            vm_profile_mode = "jbc";
+            vm_profile_input = input_file;
+            vm_profile_ran = 1;
             goto BAIL;
         }
     }
@@ -1226,9 +1251,24 @@ int main(int argc, const char *argv[]) {
     for (int i = 1; i < prog_argc; i++)
         prog_argv[i] = (char *)argv[optind + i - 1];
     exit_code = cc_run(&vm, prog_argc, prog_argv);
+    vm_profile_mode = "source";
+    vm_profile_input = input_files_count == 1 ? input_files[0] : "multiple";
+    vm_profile_ran = 1;
     free(prog_argv);
 
 BAIL:
+    if (vm_profile && vm_profile_ran) {
+        if (vm_profile_text)
+            cc_vm_profile_print(&vm, stderr);
+        if (vm_profile_json &&
+            cc_vm_profile_write_json(&vm, vm_profile_json, vm_profile_mode,
+                                     vm_profile_input) != 0) {
+            fprintf(stderr, "error: failed to write VM profile JSON to %s\n",
+                    vm_profile_json);
+            if (exit_code == 0 || exit_code == 42)
+                exit_code = 1;
+        }
+    }
     cc_destroy(&vm);
     if (input_tokens)
         free(input_tokens);
@@ -1239,6 +1279,8 @@ BAIL:
     }
     if (out_file)
         free(out_file);
+    if (vm_profile_json)
+        free(vm_profile_json);
     if (inc_paths) {
         for (int i = 0; i < inc_paths_count; i++)
             free((void *)inc_paths[i]);

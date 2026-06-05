@@ -25,6 +25,7 @@ make bench-compare            # full run (~10 min)
 make bench-compare-quick      # 2 iterations (~5 min)
 python3 bench.py --filter fib.c             # one benchmark only
 python3 bench.py --no-jbc --filter fib.c    # skip the jcc-jbc* (precompiled bytecode) columns
+python3 bench.py --filter fib.c --vm-profile # write VM opcode profiles too
 ```
 
 See [docs/BENCHMARKS.md](../docs/BENCHMARKS.md) for the full guide — how the runner works, how to read the table, and how to add new benchmarks.
@@ -32,5 +33,9 @@ See [docs/BENCHMARKS.md](../docs/BENCHMARKS.md) for the full guide — how the r
 ## Results
 
 Each run writes a JSON report to `results/run-<UTC>.json` with raw timings, compiler versions, host info, and per-`jcc-jbc*` `compile_ms` (the one-time cost of producing the bytecode file). All of this is included so results are reproducible and comparable across machines.
+
+With `--vm-profile`, JCC and JCC-JBC configs also write dynamic opcode count
+profiles under `results/vm-profile-<UTC>/`, and each profiled timing record
+contains its `vm_profile_json` path.
 
 The VM dispatch loop was converted to a fully-inlined threaded interpreter in ticket #227 — a **1.2–1.7× speedup** on VM-bound workloads at `-O2` (fib: 1.21×, nqueens: 1.50×, sieve: 1.69×). Any stored results predating this change will not reflect the improvement.

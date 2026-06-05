@@ -1,6 +1,7 @@
 # JCC Profiling Scripts
 
-Helper scripts and Makefile targets for CPU and memory profiling of JCC.
+Helper scripts and Makefile targets for CPU, memory, and VM opcode profiling
+of JCC.
 
 ## Prerequisites
 
@@ -26,6 +27,20 @@ make profile-cpu TEST=foo.c   # Profile a specific test
 
 This produces `profile/cpu.prof` (raw gperftools profile data) and a text summary.
 On macOS you can also open the result in `pprof` (Go tool) or Instruments.
+
+### VM Opcode Profiling
+
+```bash
+./jcc --vm-profile -I./include tests/test_comprehensive.c
+./jcc --vm-profile-json profile/vm-opcodes/comprehensive.json -I./include tests/test_comprehensive.c
+./jcc --profile-opcodes build/fib.jbc
+```
+
+`--vm-profile` prints a compact dynamic opcode count table to stderr after the
+program exits. `--vm-profile-json <file>` writes the same data as JSON without
+printing the table, which keeps benchmark stdout checks clean. The JSON includes
+the execution mode (`source` or `jbc`), selected `--optimize` level, total VM
+cycles, total profiled opcodes, and per-op counts and percentages.
 
 ### Memory Profiling
 
@@ -87,7 +102,13 @@ python3 tests.py --bench                        # Benchmark all tests
 python3 tests.py --bench --match "*compre*"     # Benchmark matching tests
 python3 tests.py --profile-cpu --match "*compre*"  # CPU profile matching tests
 python3 tests.py --profile-mem --match "*malloc*"  # Memory profile matching tests
+python3 tests.py --vm-profile --match "*profile*"  # VM opcode JSON profiles
+python3 tests.py --jbc --vm-profile --match "*profile*"  # Profile .jbc execution
 ```
+
+`tests.py --vm-profile` writes one JSON file per test under
+`profile/vm-opcodes/`. In `--jbc` mode it profiles the bytecode execution phase,
+not the source-to-bytecode save step.
 
 ## Cross-Compiler Benchmarks (JCC vs GCC)
 
@@ -97,9 +118,14 @@ For a higher-level view — comparing JCC to a real C compiler on the same porta
 make bench-compare            # full run
 make bench-compare-quick      # quick run
 python3 bench.py --filter fib.c   # one benchmark
+python3 bench.py --filter fib.c --vm-profile   # include opcode profile JSON
 ```
 
 The hyperfine-based `make bench` and the cross-compiler `make bench-compare` are complementary: `make bench` profiles a single workload in depth (with shell-startup variation), while `make bench-compare` produces a side-by-side matrix of how JCC stacks up against GCC.
+
+When `bench.py --vm-profile` is enabled, JCC and JCC-JBC configs write per
+benchmark/config opcode profiles under `benchmarks/results/vm-profile-<UTC>/`.
+Each timing record in the benchmark JSON includes its `vm_profile_json` path.
 
 ## Output Files
 
@@ -111,3 +137,5 @@ All profiling output is written to `profile/`:
 | `profile/cpu.prof` | gperftools | Raw CPU profile |
 | `profile/cpu.txt` | gperftools | Text CPU profile summary |
 | `profile/mem.massif` | valgrind | Memory allocation timeline (Linux) |
+| `profile/vm-opcodes/*.json` | JCC VM profiler | Dynamic opcode counts per test |
+| `benchmarks/results/vm-profile-*/` | JCC VM profiler | Opcode profiles for benchmark configs |

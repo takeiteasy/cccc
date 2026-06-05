@@ -45,7 +45,15 @@ def detect_platform():
         return "unknown"
 
 
-def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_args, bench=False, jbc_mode=False):
+def vm_profile_path(profile_dir, test_name, mode):
+    if not profile_dir:
+        return None
+    safe = test_name.replace(os.sep, "__").replace("/", "__")
+    return Path(profile_dir) / f"{safe}.{mode}.json"
+
+
+def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_args,
+                    bench=False, jbc_mode=False, profile_dir=None):
     tests_dir = Path(script_dir) / "tests"
     test_name = str(test_file.relative_to(tests_dir))
 
@@ -76,12 +84,17 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
     if jbc_mode:
         return run_jbc_roundtrip(
             idx, test_file, test_name, jcc, script_dir, jcc_args, per_test_flags,
-            is_negative_test, expects_runtime_error, bench,
+            is_negative_test, expects_runtime_error, bench, profile_dir,
         )
 
     if use_leaks:
         if platform == "macos":
-            normal_cmd = [str(jcc), "-I./include", *jcc_args, *per_test_flags, str(test_file)]
+            profile_json = vm_profile_path(profile_dir, test_name, "source")
+            profile_args = ["--vm-profile-json", str(profile_json)] if profile_json else []
+            normal_cmd = [
+                str(jcc), "-I./include", *jcc_args, *per_test_flags,
+                *profile_args, str(test_file),
+            ]
             normal_result = subprocess.run(
                 normal_cmd, capture_output=True, text=True, cwd=script_dir
             )
@@ -95,6 +108,7 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
                     "-I./include",
                     *jcc_args,
                     *per_test_flags,
+                    *profile_args,
                     str(test_file),
                 ]
                 try:
@@ -116,6 +130,8 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
             is_leaking = "0 leaks" not in leak_output
             cmd = None
         elif platform == "linux":
+            profile_json = vm_profile_path(profile_dir, test_name, "source")
+            profile_args = ["--vm-profile-json", str(profile_json)] if profile_json else []
             cmd = [
                 "valgrind",
                 "--leak-check=full",
@@ -125,9 +141,12 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
                 "-I./include",
                 *jcc_args,
                 *per_test_flags,
+                *profile_args,
                 str(test_file),
             ]
         elif platform == "windows":
+            profile_json = vm_profile_path(profile_dir, test_name, "source")
+            profile_args = ["--vm-profile-json", str(profile_json)] if profile_json else []
             cmd = [
                 "drmemory",
                 "-batch",
@@ -137,12 +156,23 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
                 "-I./include",
                 *jcc_args,
                 *per_test_flags,
+                *profile_args,
                 str(test_file),
             ]
         else:
-            cmd = [str(jcc), "-I./include", *jcc_args, *per_test_flags, str(test_file)]
+            profile_json = vm_profile_path(profile_dir, test_name, "source")
+            profile_args = ["--vm-profile-json", str(profile_json)] if profile_json else []
+            cmd = [
+                str(jcc), "-I./include", *jcc_args, *per_test_flags,
+                *profile_args, str(test_file),
+            ]
     else:
-        cmd = [str(jcc), "-I./include", *jcc_args, *per_test_flags, str(test_file)]
+        profile_json = vm_profile_path(profile_dir, test_name, "source")
+        profile_args = ["--vm-profile-json", str(profile_json)] if profile_json else []
+        cmd = [
+            str(jcc), "-I./include", *jcc_args, *per_test_flags,
+            *profile_args, str(test_file),
+        ]
 
     elapsed = None
     if cmd is not None:
@@ -221,11 +251,13 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
         "expects_runtime_error": expects_runtime_error,
         "stderr_mismatch": stderr_mismatch,
         "elapsed": elapsed,
+        "vm_profile": str(profile_json) if profile_json else None,
     }
 
 
 def run_jbc_roundtrip(idx, test_file, test_name, jcc, script_dir, jcc_args,
-                      per_test_flags, is_negative_test, expects_runtime_error, bench):
+                      per_test_flags, is_negative_test, expects_runtime_error,
+                      bench, profile_dir=None):
     """Compile a test to .jbc, then run it. Returns a result dict.
 
     Skips negative tests (EXPECT_COMPILE_ERROR / EXPECT_RUNTIME_ERROR) and
@@ -251,6 +283,7 @@ def run_jbc_roundtrip(idx, test_file, test_name, jcc, script_dir, jcc_args,
             "stderr_mismatch": None,
             "elapsed": None,
             "skip_reason": skip_reason,
+            "vm_profile": None,
         }
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -271,9 +304,12 @@ def run_jbc_roundtrip(idx, test_file, test_name, jcc, script_dir, jcc_args,
                 "expects_runtime_error": False,
                 "stderr_mismatch": None,
                 "elapsed": None,
+                "vm_profile": None,
             }
 
-        run_cmd = [str(jcc), str(jbc_path)]
+        profile_json = vm_profile_path(profile_dir, test_name, "jbc")
+        profile_args = ["--vm-profile-json", str(profile_json)] if profile_json else []
+        run_cmd = [str(jcc), *profile_args, str(jbc_path)]
         start = time.perf_counter() if bench else None
         run = subprocess.run(run_cmd, capture_output=True, text=True, cwd=script_dir)
         elapsed = (time.perf_counter() - start) if bench else None
@@ -289,6 +325,7 @@ def run_jbc_roundtrip(idx, test_file, test_name, jcc, script_dir, jcc_args,
             "expects_runtime_error": False,
             "stderr_mismatch": None,
             "elapsed": elapsed,
+            "vm_profile": str(profile_json) if profile_json else None,
         }
 
 
@@ -324,6 +361,10 @@ def main():
     )
     parser.add_argument(
         "--profile-mem", action="store_true", help="Run tests with enhanced memory profiling (macOS: leaks+heap, Linux: valgrind)"
+    )
+    parser.add_argument(
+        "--vm-profile", action="store_true",
+        help="Collect per-test VM opcode profile JSON under profile/vm-opcodes"
     )
     parser.add_argument(
         "--jbc", action="store_true",
@@ -416,6 +457,11 @@ def main():
         print("Memory profiling enabled (enhanced leak + heap tracking)")
     if args.bench:
         print("Benchmarking mode: per-test timing enabled")
+    profile_dir = None
+    if args.vm_profile:
+        profile_dir = script_dir / "profile" / "vm-opcodes"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        print(f"VM opcode profiling enabled (JSON: {profile_dir})")
     if args.match:
         print(f"Filtering tests matching: {args.match}")
     if args.jbc:
@@ -425,7 +471,10 @@ def main():
     print()
 
     test_args = [
-        (i, test_file, jcc, str(script_dir), use_leaks, platform, jcc_args, args.bench, args.jbc)
+        (
+            i, test_file, jcc, str(script_dir), use_leaks, platform, jcc_args,
+            args.bench, args.jbc, str(profile_dir) if profile_dir else None,
+        )
         for i, test_file in enumerate(test_files)
     ]
 

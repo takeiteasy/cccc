@@ -247,14 +247,129 @@ long long jcc_rt_dlerror(JCC *vm) {
 
 #include "ops.c"
 
+void cc_vm_profile_reset(JCC *vm) {
+    if (!vm)
+        return;
+    memset(vm->vm_profile_counts, 0, sizeof(vm->vm_profile_counts));
+    vm->vm_profile_total = 0;
+}
+
+void cc_vm_profile_print(JCC *vm, FILE *f) {
+    if (!vm || !f || !vm->vm_profile_enabled)
+        return;
+
+    fprintf(f, "\nVM opcode profile\n");
+    fprintf(f, "total_opcodes: %llu\n",
+            (unsigned long long)vm->vm_profile_total);
+    fprintf(f, "cycles:        %lld\n", vm->cycle);
+    if (vm->vm_profile_total == 0)
+        return;
+
+    bool printed[OP_COUNT] = {0};
+    for (;;) {
+        int best = -1;
+        for (int op = 0; op < OP_COUNT; op++) {
+            if (printed[op] || vm->vm_profile_counts[op] == 0)
+                continue;
+            if (best < 0 ||
+                vm->vm_profile_counts[op] > vm->vm_profile_counts[best])
+                best = op;
+        }
+        if (best < 0 || vm->vm_profile_counts[best] == 0)
+            break;
+        printed[best] = true;
+
+        const char *name = cc_opcode_name(best);
+        double pct = (double)vm->vm_profile_counts[best] * 100.0 /
+                     (double)vm->vm_profile_total;
+        fprintf(f, "%-12s %12llu %6.2f%%\n", name ? name : "UNKNOWN",
+                (unsigned long long)vm->vm_profile_counts[best], pct);
+    }
+}
+
+static void json_escape(FILE *f, const char *s) {
+    for (; s && *s; s++) {
+        unsigned char c = (unsigned char)*s;
+        switch (c) {
+        case '\\':
+            fputs("\\\\", f);
+            break;
+        case '"':
+            fputs("\\\"", f);
+            break;
+        case '\n':
+            fputs("\\n", f);
+            break;
+        case '\r':
+            fputs("\\r", f);
+            break;
+        case '\t':
+            fputs("\\t", f);
+            break;
+        default:
+            if (c < 0x20)
+                fprintf(f, "\\u%04x", c);
+            else
+                fputc(c, f);
+            break;
+        }
+    }
+}
+
+int cc_vm_profile_write_json(JCC *vm, const char *path, const char *mode,
+                             const char *input_name) {
+    if (!vm || !path)
+        return -1;
+
+    FILE *f = fopen(path, "w");
+    if (!f)
+        return -1;
+
+    fprintf(f, "{\n");
+    fprintf(f, "  \"tool\": \"jcc-vm-profile\",\n");
+    fprintf(f, "  \"version\": \"1\",\n");
+    fprintf(f, "  \"mode\": \"");
+    json_escape(f, mode ? mode : "unknown");
+    fprintf(f, "\",\n");
+    fprintf(f, "  \"input\": \"");
+    json_escape(f, input_name ? input_name : "");
+    fprintf(f, "\",\n");
+    fprintf(f, "  \"optimize_level\": %d,\n", vm->compiler.opt_level);
+    fprintf(f, "  \"cycles\": %lld,\n", vm->cycle);
+    fprintf(f, "  \"total_opcodes\": %llu,\n",
+            (unsigned long long)vm->vm_profile_total);
+    fprintf(f, "  \"opcodes\": [\n");
+
+    bool first = true;
+    for (int op = 0; op < OP_COUNT; op++) {
+        uint64_t count = vm->vm_profile_counts[op];
+        if (count == 0)
+            continue;
+        const char *name = cc_opcode_name(op);
+        double pct = vm->vm_profile_total
+                         ? (double)count * 100.0 /
+                               (double)vm->vm_profile_total
+                         : 0.0;
+        if (!first)
+            fprintf(f, ",\n");
+        first = false;
+        fprintf(f, "    {\"opcode\": \"");
+        json_escape(f, name ? name : "UNKNOWN");
+        fprintf(f, "\", \"count\": %llu, \"percent\": %.6f}",
+                (unsigned long long)count, pct);
+    }
+
+    fprintf(f, "\n  ]\n");
+    fprintf(f, "}\n");
+    int rc = ferror(f) ? -1 : 0;
+    if (fclose(f) != 0)
+        rc = -1;
+    return rc;
+}
+
 int vm_eval(JCC *vm) {
     static void *op_table[] = {
 #define X(NAME, OPERANDS) [NAME] = &&op_##NAME,
-        OPS_X
-#undef X
-    };
-    static const char *op_names[] = {
-#define X(NAME, OPERANDS) #NAME,
         OPS_X
 #undef X
     };
@@ -289,9 +404,14 @@ dispatch:
             printf("unknown instruction:%d\n", op);
             return -1;
         }
+        if (__builtin_expect(vm->vm_profile_enabled, 0)) {
+            vm->vm_profile_counts[op]++;
+            vm->vm_profile_total++;
+        }
         if (vm->debug_vm) {
-            if (op >= 0 && op < (int)(sizeof(op_names) / sizeof(op_names[0])))
-                printf("%lld> %s\n", vm->cycle, op_names[op]);
+            const char *name = cc_opcode_name(op);
+            if (name)
+                printf("%lld> %s\n", vm->cycle, name);
             else
                 printf("%lld> OP_%d\n", vm->cycle, op);
         }
@@ -1205,6 +1325,7 @@ int cc_run(JCC *vm, int argc, char **argv) {
     if (!vm || !vm->text_seg) {
         error("VM not initialized - call cc_compile first");
     }
+    cc_vm_profile_reset(vm);
 
     // Get entry point (main function) from text_seg[0]
     JCCPc main_addr = vm->text_seg[0];
