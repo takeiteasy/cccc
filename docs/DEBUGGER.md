@@ -86,6 +86,44 @@ At test_debugger_enhanced.c:21:5
 (jcc-dbg) continue            # Run to completion
 ```
 
+## Programmatic Break-in
+
+When the debugger is enabled (`-g`), several mechanisms drop execution into the interactive REPL from within the running program.
+
+### `__builtin_debugtrap()`
+
+Inserts a hard-coded break-in point in source code.  The BTRAP opcode it emits enters the debugger REPL immediately; execution continues when you type `continue`.
+
+```c
+#include <stdio.h>
+
+int main(void) {
+    int x = compute();
+    __builtin_debugtrap();   /* execution pauses here under -g */
+    printf("x = %d\n", x);
+    return 0;
+}
+```
+
+Without `-g`, `__builtin_debugtrap()` (and `__builtin_trap()`) terminate the program.
+
+### `__builtin_trap()`
+
+Like `__builtin_debugtrap()` but semantically unconditional: it is never expected to continue.  Under `-g` it still breaks into the REPL (you can continue), but in production builds it aborts.  Use it to guard unreachable paths that should never execute.
+
+### `raise(SIGTRAP)` via VM signal handling
+
+When a VM signal handler is registered for `SIGTRAP` and `-g` is active, `raise(SIGTRAP)` also enters the debugger REPL.  This matches the behaviour of native debugger trap instructions on AArch64 Apple platforms.
+
+```c
+#include <signal.h>
+
+int main(void) {
+    raise(SIGTRAP);   /* breaks into debugger REPL under -g */
+    return 0;
+}
+```
+
 ## Source Map API
 
 JCC provides a programmatic API for accessing source location information, which is useful for building custom debugging tools or IDE integrations.

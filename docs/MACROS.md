@@ -165,7 +165,7 @@ even when the callee appears later in the translation unit.
 
 The GNU-attribute equivalent is `__attribute__((comptime))`.
 
-## Comptime Variables (ticket #188)
+## Comptime Variables
 
 `[[jcc::comptime]]` can also precede a **variable or struct declaration** with a
 constant initializer. The value is evaluated during the pre-parse phase and
@@ -209,13 +209,13 @@ _Node *pixel_count(void) {
 
 `_AST_GET_COMPTIME_MEMBER(var_name, field)` returns the field's value as an
 AST literal node. Integer and float/double members are supported. Pointer and
-array members are not accessible this way (ticket #188 scope).
+array members are not accessible this way.
 
 ### Scope notes
 
 - Comptime variables must have **constant initializers** (literals and
   arithmetic on literals). Calls to comptime functions in the initializer
-  require ticket #191.
+  are not yet supported.
 - Pointer and string variables produce a compile-time error at this point;
   use `_AST_STRING_LITERAL` inside the macro body instead.
 - Comptime variables are **not emitted** into the output binary.
@@ -253,7 +253,7 @@ when splice nodes are already in an array.
 
 `$@k;` in **statement-list position** expands an entire `->next`-linked node
 chain into the block, replacing one placeholder with N statements. This is
-typed unquote-splicing (ticket #172).
+typed unquote-splicing.
 
 ```c
 [[jcc::macro]]
@@ -289,7 +289,7 @@ directly as the splice argument.
 
 List splices are valid **only in statement-list position** (inside a `{ ... }`
 block). Using `$@k` as an expression operand is a compile-time error. Call-arg
-splicing (#194) and initializer splicing (#195) are not yet supported.
+splicing and initializer splicing are not yet supported.
 
 ### `_QUOTE` inside generated function bodies
 

@@ -2,16 +2,27 @@
 
 > **Warning:** Work in progress. Tested on `aarch64` (Apple Silicon) only.
 
-`JCC` is a **J**IT **C** **C**ompiler for C11, with selected C23 and GNU extensions. It also expands on top of standard C with additional features like compile-time macros (`[[jcc::macro]]`) and AST construction helpers for hygienic reflection and AST manipulation. It compiles and executes C source files directly — no object files or native binaries are produced. See [COVERAGE.md](docs/COVERAGE.md) for detailed tables of C99, C11, C23, and GNU extension support.
+`JCC` (**J**IT **C** **C**ompiler) is a C frontend and compile-time metaprogramming system built around a portable bytecode VM. It preprocesses C, runs `[[jcc::macro]]` / `__attribute__((macro))` functions during compilation, and then either executes the result in the VM or hands a macro-expanded C program off to a real system compiler (`--native`) for an actual native build.
+
+The VM is what lets macros actually run at compile time, and it doubles as a self-contained runtime for prototyping, sandboxing, debugging, and the memory-safety / profiling tools. For production code, use `--native` and let `cc` / `clang` / `gcc` do the heavy lifting — JCC is positioned as a frontend drop-in, not a replacement for a system toolchain. The VM is here when you need a toolchain-free, introspectable, or sandboxed execution environment.
+
+JCC supports C11 as the baseline, with selected C23 and GNU extensions. See [COVERAGE.md](docs/COVERAGE.md) for detailed tables of C99, C11, C23, and GNU extension support.
 
 ## Features
 
-- **Register-based bytecode VM** — compiles C to a portable instruction set with 32 integer and 32 floating-point registers, then executes it in a built-in interpreter (see [VM.md](docs/VM.md))
 - **Compile-time macros** — C functions annotated with `[[jcc::macro]]` or `__attribute__((macro))` that run during compilation (see [MACROS.md](docs/MACROS.md))
   - Inline pre-parse generators for parser-visible functions and declarations (`[[jcc::macro(inline)]]`)
   - File-scope macro calls for explicit source-order generation
   - Call-site expansion for expression and statement rewriting
   - Quasi-quoting (`_QUOTE`), hygienic type/symbol reflection, `__jcc_gensym`, and AST construction helpers
+- **Native compilation pipeline** — `--native` runs the JCC frontend (preprocessor, compile-time macros) and hands the resulting C to `JCC_NATIVE_CC` (or `cc` / `clang` / `gcc`) for an actual native build
+  - This is the production path: full toolchain performance, system libraries, no VM overhead
+  - Without `-o`, the temporary executable is run and its exit status is returned
+  - `-I`, `-isystem`, `-D`, `-U`, `-L`, `-l`, and `--std=` are forwarded to the underlying compiler
+- **Register-based bytecode VM** — compiles C to a portable instruction set with 32 integer and 32 floating-point registers, then executes it in a built-in interpreter (see [VM.md](docs/VM.md))
+  - Powers compile-time macro execution
+  - Serves as a toolchain-free, introspectable runtime for the safety suite, debugger, and profiler
+  - Use it for portability, sandboxing, and quick iteration without a system compiler
 - **Memory safety suite** — runtime detection of common C bugs (see [SAFETY.md](docs/SAFETY.md))
   - Four preset levels (`-0` through `-3`): zero overhead to paranoid mode
   - Covers use-after-free, buffer overflows, dangling pointers, uninitialized reads, integer overflow, CFI, and more
@@ -55,7 +66,8 @@ Options:
 	-X/--no-preprocess  Disable preprocessing step
 	-S/--no-stdlib      Do not link standard library
 	-c/--compile-only   Compile to bytecode but do not execute
-	-o/--out <file>     Dump bytecode to <file> (no execution)
+	-o/--out <file>     Write bytecode, or native executable with --native
+	   --native         Compile post-macro C with cc/clang/gcc instead of VM bytecode
 	-d/--disassemble    Disassemble bytecode to stdout
 	-v/--verbose        Enable debug logging
 	-g/--debug          Enable interactive debugger
@@ -128,8 +140,9 @@ Optimization Levels:
 	                             3: All optimizations (including dead code elimination)
 
 Example:
-	./jcc -o hello hello.c
-	./jcc -I ./include -D DEBUG -o prog prog.c
+	./jcc --native -o hello hello.c              # native build via cc/clang/gcc
+	./jcc --native -I ./include -D DEBUG -o prog prog.c
+	./jcc -o hello hello.c                       # bytecode + run on the VM
 	echo 'int main() { return 42; }' | ./jcc -
 ```
 
@@ -164,13 +177,13 @@ symbols from that handle are live.
 
 ## Performance
 
-JCC prioritises **correctness over raw execution speed**. It implements a tree-walking bytecode interpreter rather than a JIT-to-native backend, and most of the engineering effort goes into compile-time metaprogramming, safety instrumentation, and AST reflection instead of runtime codegen. The trade-off is a substantial gap versus mature native compilers — see [BENCHMARKS.md](docs/BENCHMARKS.md) for full numbers. On the included workload suite, JCC's geometric mean is roughly **~16× slower than `gcc -O2`** across all `--optimize` levels: integer-loop-heavy programs like the sieve benchmark sit around 70×, FP-heavy workloads like matrix multiplication and Mandelbrot land in the 45–50× range, and control-flow-bound programs (`fib`, `ackermann`, `nqueens`, `quicksort`) run 5–15× slower. The `jcc-jbc*` columns show the interpreter itself is the dominant cost even when the one-time source-to-bytecode compile is excluded — JCC trades execution speed for portability, inspectability, and the ability to run untrusted or sandboxed code inside a single self-contained binary.
+The bytecode VM is the runtime that powers compile-time macro execution, not an execution engine competing with system toolchains. For production code, `--native` hands macro-expanded C to `cc` / `clang` / `gcc`, and you get the full performance of your system toolchain — JCC's frontend cost is the only JCC-specific overhead in the loop.
 
-Two VM improvements have driven the gap down from an earlier ~21× baseline:
+When code does run on the VM (macro bodies, `--vm-heap` allocations, the debugger, the safety suite, `--vm-profile`, or any program run without `--native`), it pays the cost of a portable tree-walking interpreter. See [BENCHMARKS.md](docs/BENCHMARKS.md) for full numbers. On the included workload suite, JCC's geometric mean is roughly **~16× slower than `gcc -O2`** across all `--optimize` levels: integer-loop-heavy programs like the sieve benchmark sit around 70×, FP-heavy workloads like matrix multiplication and Mandelbrot land in the 45–50× range, and control-flow-bound programs (`fib`, `ackermann`, `nqueens`, `quicksort`) run 5–15× slower. The `jcc-jbc*` columns show the interpreter itself is the dominant cost even when the one-time source-to-bytecode compile is excluded. That gap is the price of a single self-contained binary that can run untrusted or sandboxed code, expose every opcode to a profiler, and feed compile-time macros a real execution environment.
+
+VM work focuses on what matters for macro expansion cost and VM-only workflows (debugger, safety suite, profiling). Recent improvements that have driven the gap down from an earlier ~21× baseline:
 - **Inlined threaded dispatch (#227)**: opcode logic is embedded at each computed-goto label rather than dispatched through a C function call per instruction.
 - **Fused local load/store opcodes (#250)**: the common `LEA3+LDR/STR` two-opcode address+dereference sequence for local variables is replaced by single `LDR_LOCAL_*`/`STR_LOCAL_*` opcodes, eliminating one dispatch and one register-pressure hop per scalar local access.
-
-Performance remains an ongoing concern and will improve over time.
 
 ## Building
 
@@ -180,24 +193,47 @@ make all      # Build jcc + libjcc.dylib, then run the test suite
 ```
 
 Produces:
-- `jcc` — compiler executable (C source → bytecode → execute)
+- `jcc` — compiler executable (C source → VM bytecode, or → native via `--native`)
 - `libjcc.dylib` — shared library for embedding JCC in other applications
 
 JCC requires libffi for native FFI calls. The Makefile uses `pkg-config
 libffi` when available, with Homebrew and common Unix fallbacks.
 
 Optional LLVM support is available for internal bytecode-to-LLVM IR backend
-work. It is disabled by default and does not add a user-facing LLVM output
-mode. **NOTE**: This is a stub, see [LLVM.md](docs/LLVM.md).
+work. It is disabled by default. For native executables without LLVM, `--native`
+serializes the post-macro C program and compiles it with `cc`, `clang`, or
+`gcc`. See [LLVM.md](docs/LLVM.md).
 
 ```bash
 make JCC_HAS_LLVM=1 LLVM_CONFIG=/opt/homebrew/opt/llvm/bin/llvm-config
 ```
 
-### Compile to Bytecode
+### Compile Natively (production)
+
+`--native` is the default production path: JCC preprocesses, expands compile-time macros, then hands the resulting C to a real system compiler. Without `-o`, the temporary executable is run and its exit status is returned.
 
 ```bash
-# Compile and run immediately
+# Compile macro-expanded C with the system C compiler and run it
+./jcc --native program.c
+
+# Write a native executable
+./jcc --native -o program program.c
+
+# Override compiler selection
+JCC_NATIVE_CC=clang ./jcc --native program.c
+
+# Forward include / define / library flags to the underlying compiler
+./jcc --native -I./include -DDEBUG -L./lib -lz -o app app.c
+```
+
+Native mode runs JCC's preprocessing and compile-time macro stages first, then passes serialized C to `JCC_NATIVE_CC` when set, otherwise `cc`, `clang`, or `gcc`. `-I`, `-isystem`, `-D`, `-U`, `-L`, `-l`, and `--std=` are forwarded; VM-only options (bytecode output, disassembler, `--optimize`, debugger, profiler, `-0`…`-3` safety levels) are rejected in this mode. See [LLVM.md](docs/LLVM.md) for the planned bytecode-to-LLVM backend, which will provide a second native path.
+
+### Run in the VM
+
+Without `--native`, JCC compiles C to portable bytecode and runs it in its built-in interpreter. Use this when you want a toolchain-free, introspectable, or sandboxed runtime — for macro bodies, quick iteration, the debugger, the safety suite, or `--vm-profile`.
+
+```bash
+# Compile and run immediately on the VM
 ./jcc program.c
 
 # Compile to a bytecode file for later execution

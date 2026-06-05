@@ -76,7 +76,7 @@ honoured.
 | `<locale.h>` | ✓ | Host locale APIs registered |
 | `<math.h>` | ✓ | Full C99 function set registered |
 | `<setjmp.h>` | ✓ | JCC-specific implementation for VM calling convention |
-| `<signal.h>` | ✓ | Common signal constants, `signal`, and `raise` |
+| `<signal.h>` | ✓ | Full POSIX signal set (Darwin/macOS values); `signal` and `raise` are VM-managed — handlers are called synchronously from the dispatch loop, never from within a native signal context.  `SIGTRAP` with `-g` breaks into the debugger. |
 | `<stdarg.h>` | ✓ | JCC-specific implementation |
 | `<stddef.h>` | ✓ | |
 | `<stdio.h>` | ✓ | |

@@ -292,9 +292,9 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 
 | Opcode | Description |
 |--------|-------------|
-| `BTRAP` | Unreachable / builtin trap.  Breaks into the debugger when `-g` is active; otherwise aborts execution. |
-| `VSIGNAL` | Register a VM-managed signal handler |
-| `VRAISE` | Deliver a signal from VM context |
+| `BTRAP` | Unreachable / builtin trap.  Breaks into the debugger REPL when `-g` is active; otherwise prints a message and aborts.  Emitted for `__builtin_unreachable()`, `__builtin_trap()`, and `__builtin_debugtrap()`. |
+| `VSIGNAL` | VM-managed `signal(sig, handler)`.  Stores the per-signal action (DFL / IGN / VM function pointer) in `vm_sigslots` and installs an async-safe native shim when a VM handler is registered. Returns the previous handler. |
+| `VRAISE` | VM-managed `raise(sig)`.  Delivers the signal synchronously from VM context: IGN is a no-op; DFL delegates to the host OS; a VM handler is invoked by pushing the return address and jumping to the handler.  `SIGTRAP` with `-g` enters the debugger REPL instead. |
 
 ### Fused Local Load / Store
 
