@@ -7,9 +7,9 @@ A focused cross-compiler benchmark suite that compares **JCC** (across all `--op
 ```bash
 make bench-compare            # full run: 3 timed iterations per (bench, config), ~10 min
 make bench-compare-quick      # 2 iterations, ~5 min, good for quick checks
-python3 bench.py --filter fib.c    # run a single benchmark
-python3 bench.py --no-jbc --filter fib.c   # skip the jcc-jbc columns
-python3 bench.py --filter fib.c --vm-profile   # also write opcode profile JSON
+python3 tools/bench.py --filter fib.c    # run a single benchmark
+python3 tools/bench.py --no-jbc --filter fib.c   # skip the jcc-jbc columns
+python3 tools/bench.py --filter fib.c --vm-profile   # also write opcode profile JSON
 ```
 
 Sample output:
@@ -51,7 +51,7 @@ JSON output is also written to `benchmarks/results/run-<UTC>.json` for tracking 
 
 ## The benchmark suite
 
-All programs are portable C99/C11, exit with code `42` (so the standard `tests.py` smoke-runs them for free), and print a single canonical `result: …` line on stdout. Each takes a single optional compile-time size via `-DBENCH_N=<value>` (default tuned for ~1-15s on `jcc` default).
+All programs are portable C99/C11, exit with code `42` (so the standard `tools/tests.py` smoke-runs them for free), and print a single canonical `result: …` line on stdout. Each takes a single optional compile-time size via `-DBENCH_N=<value>` (default tuned for ~1-15s on `jcc` default).
 
 | Benchmark | What it measures | Default size | Result |
 |-----------|------------------|--------------|--------|
@@ -66,7 +66,7 @@ All programs are portable C99/C11, exit with code `42` (so the standard `tests.p
 
 ## How it works
 
-`bench.py` does the following for each benchmark:
+`tools/bench.py` does the following for each benchmark:
 
 1. **Compile** the source with GCC at every optimization level (cached in `build/`).
 2. **Compile** the source with JCC at every `--optimize` level to a `.jbc` bytecode file (cached in `build/`, like the GCC binaries).
@@ -92,7 +92,7 @@ There are three different timings per benchmark:
 The `jcc-jbc*` columns are the cleanest apples-to-apples comparison with GCC: both are "compile once, run many times" measurements. The `jcc*` columns show what you'd actually pay as an end user of the `jcc` CLI.
 
 If you want to break out compile time vs execution time for JCC, see `make bench` (hyperfine) and `make profile-cpu` in the existing [PROFILING.md](PROFILING.md).
-If you want to see where VM execution is concentrated, use `bench.py --vm-profile`
+If you want to see where VM execution is concentrated, use `tools/bench.py --vm-profile`
 and compare dynamic counts for opcodes such as `LEA3`, `LDR_D`, `STR_D`,
 `ADD3`, and `MUL3` across optimization levels.
 
@@ -111,7 +111,7 @@ The bytecode format self-resolves FFI symbols (libc functions like `printf`, `ma
 
 ## Correctness across compilers
 
-C11 leaves some leeway for floating-point contraction (FMA), which can produce bit-different results between `-O0` and `-O2`. To keep the comparison fair, `bench.py` compiles GCC with `-ffp-contract=off -std=c11`. This matches the C11 default FP semantics and matches what JCC's bytecode interpreter does (no FMA opcodes).
+C11 leaves some leeway for floating-point contraction (FMA), which can produce bit-different results between `-O0` and `-O2`. To keep the comparison fair, `tools/bench.py` compiles GCC with `-ffp-contract=off -std=c11`. This matches the C11 default FP semantics and matches what JCC's bytecode interpreter does (no FMA opcodes).
 
 If you see a `MISMATCH` in the output, the JCC output differs from at least one GCC config. That's worth investigating — either a JCC bug, a missing `-D` define, or a benchmark that needs a tolerance check.
 
@@ -132,15 +132,15 @@ If you see a `MISMATCH` in the output, the JCC output differs from at least one 
    - Optionally `#define BENCH_N <default>` so size is tunable.
    - Print a single canonical line: `result: <value>`.
    - `return 42;`.
-3. `python3 bench.py --filter "<name>.c"` to verify it runs and matches GCC.
-4. The standard `tests.py` will pick it up automatically (exit code 42).
+3. `python3 tools/bench.py --filter "<name>.c"` to verify it runs and matches GCC.
+4. The standard `tools/tests.py` will pick it up automatically (exit code 42).
 
 If the benchmark has a per-program result that varies by FP order of operations, consider using integer-only arithmetic or summing a checksum over a deterministic input.
 
 ## Cross-compiler flag notes
 
-- `bench.py` auto-detects when the system `gcc` is actually Apple Clang (on macOS) and switches to a Homebrew `gcc-15`/`gcc-14`/etc. if available. Pass `--gcc PATH` to override.
-- Add clang to the matrix by editing `JCC_CONFIGS` / `GCC_CONFIGS` in `bench.py` (or wait for the v2 extension that adds a `--with-clang` flag).
+- `tools/bench.py` auto-detects when the system `gcc` is actually Apple Clang (on macOS) and switches to a Homebrew `gcc-15`/`gcc-14`/etc. if available. Pass `--gcc PATH` to override.
+- Add clang to the matrix by editing `JCC_CONFIGS` / `GCC_CONFIGS` in `tools/bench.py` (or wait for the v2 extension that adds a `--with-clang` flag).
 
 ## Reading the report
 

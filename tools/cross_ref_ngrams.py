@@ -29,8 +29,10 @@ import re
 import subprocess
 import sys
 
-JCC = os.environ.get("JCC", "./jcc")
-NGRAM_TOOL = os.environ.get("NGRAM_TOOL", "./tools/bytecode_ngrams")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+JCC = os.environ.get("JCC", os.path.join(ROOT, "jcc"))
+NGRAM_TOOL = os.environ.get("NGRAM_TOOL",
+                            os.path.join(ROOT, "tools/bytecode_ngrams"))
 
 STATIC_RE = re.compile(
     r"^\s*(?P<count>\d+)\s+(?P<ops>(?:[A-Z0-9_]+(?:\s+[A-Z0-9_]+)+))"

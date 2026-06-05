@@ -388,7 +388,7 @@ def main():
     p.add_argument("--quiet", action="store_true")
     args = p.parse_args()
 
-    root = Path(__file__).parent.resolve()
+    root = Path(__file__).parent.parent.resolve()
     bench_dir = root / args.benchmarks
     if not bench_dir.exists():
         print(f"error: benchmark directory not found: {bench_dir}", file=sys.stderr)

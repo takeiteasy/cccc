@@ -58,6 +58,9 @@ Options:
 	-d/--disassemble    Disassemble bytecode to stdout
 	-v/--verbose        Enable debug logging
 	-g/--debug          Enable interactive debugger
+	   --vm-profile     Count executed VM opcodes and print a report
+	   --profile-opcodes Alias for --vm-profile
+	   --vm-profile-json <file> Write VM opcode profile JSON
 
 Warning Options:
 	-Wall               Enable common warning categories
@@ -140,7 +143,7 @@ JCC ships embedded standard library headers compiled directly into the binary �
 - `stdarg.h`, `setjmp.h` — JCC-specific implementations for the VM calling convention
 - `stddef.h`, `stdbool.h`, `stdint.h`, `limits.h`, `float.h`, `iso646.h`
 
-Headers are embedded by `gen_std.c`, which generates `src/std.c`. To regenerate after modifying files in `include/`:
+Headers are embedded by `tools/gen_std.c`, which generates `src/std.c`. To regenerate after modifying files in `include/`:
 
 ```bash
 make generate-std && make
@@ -209,12 +212,12 @@ Bytecode uses 32-bit instruction words; 64-bit immediates are split across two c
 ## Running Tests
 
 ```bash
-python3 tests.py                     # Full test suite
-python3 tests.py --match "*embed*"   # Run only tests matching a glob pattern
-python3 tests.py -j 4                # Run with 4 parallel workers
-python3 tests.py -2                  # Run all tests under safety level 2
-python3 tests.py --leaks             # Enable leak detection (leaks on macOS, valgrind on Linux)
-python3 tests.py --jbc               # Bytecode round-trip: compile each positive test to .jbc, then run it
+python3 tools/tests.py                     # Full test suite
+python3 tools/tests.py --match "*embed*"   # Run only tests matching a glob pattern
+python3 tools/tests.py -j 4                # Run with 4 parallel workers
+python3 tools/tests.py -2                  # Run all tests under safety level 2
+python3 tools/tests.py --leaks             # Enable leak detection (leaks on macOS, valgrind on Linux)
+python3 tools/tests.py --jbc               # Bytecode round-trip: compile each positive test to .jbc, then run it
 # I recommend running --leaks with -j (takes a long time synchronously)
 ```
 
@@ -229,8 +232,8 @@ make tsan     # Build jcc-tsan with ThreadSanitizer
 make msan     # Build jcc-msan with MemorySanitizer (Linux only)
 
 # Run the test suite with a sanitizer binary
-python3 tests.py --asan -j 4
-python3 tests.py --ubsan -j 4
+python3 tools/tests.py --asan -j 4
+python3 tools/tests.py --ubsan -j 4
 ```
 
 ### Fuzzing with AFL++
@@ -259,8 +262,8 @@ make bench                              # Hyperfine benchmark on a representativ
 make bench TEST=tests/test_comprehensive.c  # Benchmark a specific test
 
 # In the test runner
-python3 tests.py --bench                # Report per-test execution time
-python3 tests.py --bench --match "*compre*"  # Time matching tests
+python3 tools/tests.py --bench                # Report per-test execution time
+python3 tools/tests.py --bench --match "*compre*"  # Time matching tests
 ```
 
 **CPU profiling:**
@@ -270,7 +273,7 @@ make profile-cpu                        # Profile a representative test with gpe
 make profile-cpu TEST=tests/test_foo.c  # Profile a specific test
 
 # In the test runner
-python3 tests.py --profile-cpu --match "*compre*"  # CPU profile matching tests
+python3 tools/tests.py --profile-cpu --match "*compre*"  # CPU profile matching tests
 ```
 
 **VM opcode profiling:**
@@ -278,7 +281,7 @@ python3 tests.py --profile-cpu --match "*compre*"  # CPU profile matching tests
 ```bash
 ./jcc --vm-profile -I./include tests/test_comprehensive.c
 ./jcc --vm-profile-json profile/vm-opcodes/comprehensive.json -I./include tests/test_comprehensive.c
-python3 tests.py --vm-profile --match "*profile*"  # Per-test opcode JSON
+python3 tools/tests.py --vm-profile --match "*profile*"  # Per-test opcode JSON
 ```
 
 The profile includes both per-opcode counts and dynamic opcode bigram (transition)
@@ -331,7 +334,7 @@ designing new opcodes.
 
 ```bash
 make profile-mem                        # Memory profile with leaks (macOS) or valgrind (Linux)
-python3 tests.py --profile-mem --match "*malloc*"   # Profile matching tests
+python3 tools/tests.py --profile-mem --match "*malloc*"   # Profile matching tests
 ```
 
 Profiling output is written to `profile/`. See [PROFILING.md](docs/PROFILING.md) for detailed usage.
@@ -341,9 +344,9 @@ Profiling output is written to `profile/`. See [PROFILING.md](docs/PROFILING.md)
 ```bash
 make bench-compare            # run the benchmark suite (JCC × {none,O1,O2,O3} + JCC-jbc × {none,O1,O2,O3} vs GCC × {O0,O1,O2,O3})
 make bench-compare-quick      # 2-iteration quick run
-python3 bench.py --filter fib.c   # run a single benchmark
-python3 bench.py --no-jbc         # skip the precompiled-bytecode columns
-python3 bench.py --filter fib.c --vm-profile  # include opcode profile JSON
+python3 tools/bench.py --filter fib.c   # run a single benchmark
+python3 tools/bench.py --no-jbc         # skip the precompiled-bytecode columns
+python3 tools/bench.py --filter fib.c --vm-profile  # include opcode profile JSON
 ```
 
 See [BENCHMARKS.md](docs/BENCHMARKS.md) for the full guide and the list of included workloads.

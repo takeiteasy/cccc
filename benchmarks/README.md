@@ -2,7 +2,7 @@
 
 Cross-compiler micro-benchmarks for comparing **JCC** (across all `--optimize` levels, in both parse+exec and precompiled-bytecode modes) against **GCC** (across `-O0..-O3`).
 
-Each program is plain C99/C11, prints a single `result: …` line on stdout, and exits with code `42`. They are auto-discovered by `bench.py` and the standard `tests.py` smoke-runs them.
+Each program is plain C99/C11, prints a single `result: …` line on stdout, and exits with code `42`. They are auto-discovered by `tools/bench.py` and the standard `tools/tests.py` smoke-runs them.
 
 ## Programs
 
@@ -23,9 +23,9 @@ Each program is plain C99/C11, prints a single `result: …` line on stdout, and
 # From the repo root
 make bench-compare            # full run (~10 min)
 make bench-compare-quick      # 2 iterations (~5 min)
-python3 bench.py --filter fib.c             # one benchmark only
-python3 bench.py --no-jbc --filter fib.c    # skip the jcc-jbc* (precompiled bytecode) columns
-python3 bench.py --filter fib.c --vm-profile # write VM opcode profiles too
+python3 tools/bench.py --filter fib.c             # one benchmark only
+python3 tools/bench.py --no-jbc --filter fib.c    # skip the jcc-jbc* (precompiled bytecode) columns
+python3 tools/bench.py --filter fib.c --vm-profile # write VM opcode profiles too
 ```
 
 See [docs/BENCHMARKS.md](../docs/BENCHMARKS.md) for the full guide — how the runner works, how to read the table, and how to add new benchmarks.

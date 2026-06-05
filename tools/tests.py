@@ -373,7 +373,7 @@ def main():
     )
     args, jcc_args = parser.parse_known_args()
 
-    script_dir = Path(__file__).parent.resolve()
+    script_dir = Path(__file__).parent.parent.resolve()
 
     if args.binary:
         jcc = Path(args.binary)

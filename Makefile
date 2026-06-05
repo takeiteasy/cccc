@@ -188,11 +188,11 @@ fuzz-info:
 
 fuzz: fuzz-info
 
-STD_TEMPLATE := gen_std.c
+STD_TEMPLATE := tools/gen_std.c
 
 # Regenerate src/std.c from the template.
 # src/std.c is committed so the normal build never needs this; run it
-# explicitly after editing gen_std.c or include/*.h.
+# explicitly after editing tools/gen_std.c or include/*.h.
 .PHONY: generate-std
 generate-std: $(EXE_OUT)
 	@printf '#include <string.h>\n\n' > src/std.c
@@ -215,8 +215,7 @@ tools/fusion_candidates: tools/fusion_candidates.c
 build-tools: tools/bytecode_ngrams tools/fusion_candidates
 
 test: clean $(EXE_OUT)
-	@python3 tests.py
-	@python3 tests_jbc.py
+	@python3 tools/tests.py
 
 all: clean $(EXE_OUT) $(LIB_OUT) test docs
 
@@ -249,13 +248,13 @@ BENCH_RUNS ?= 3
 BENCH_WARMUP ?= 1
 
 bench-compare: jcc
-	@python3 bench.py --runs $(BENCH_RUNS) --warmup $(BENCH_WARMUP)
+	@python3 tools/bench.py --runs $(BENCH_RUNS) --warmup $(BENCH_WARMUP)
 
 bench-compare-quick: jcc
-	@python3 bench.py --runs 2 --warmup 1
+	@python3 tools/bench.py --runs 2 --warmup 1
 
 bench-compare-json: jcc
-	@python3 bench.py --format json --runs $(BENCH_RUNS) --warmup $(BENCH_WARMUP)
+	@python3 tools/bench.py --format json --runs $(BENCH_RUNS) --warmup $(BENCH_WARMUP)
 
 profile-cpu-build: $(SRCS)
 ifeq ($(HAS_GPROFILER),)

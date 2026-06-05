@@ -95,18 +95,18 @@ CPUPROFILE=profile/out.prof ./jcc-prof -I./include tests/test_comprehensive.c
 CPUPROFILE_FREQUENCY=1000 ./jcc-prof -I./include tests/test_comprehensive.c
 ```
 
-## tests.py Integration
+## tools/tests.py Integration
 
 ```bash
-python3 tests.py --bench                        # Benchmark all tests
-python3 tests.py --bench --match "*compre*"     # Benchmark matching tests
-python3 tests.py --profile-cpu --match "*compre*"  # CPU profile matching tests
-python3 tests.py --profile-mem --match "*malloc*"  # Memory profile matching tests
-python3 tests.py --vm-profile --match "*profile*"  # VM opcode JSON profiles
-python3 tests.py --jbc --vm-profile --match "*profile*"  # Profile .jbc execution
+python3 tools/tests.py --bench                        # Benchmark all tests
+python3 tools/tests.py --bench --match "*compre*"     # Benchmark matching tests
+python3 tools/tests.py --profile-cpu --match "*compre*"  # CPU profile matching tests
+python3 tools/tests.py --profile-mem --match "*malloc*"  # Memory profile matching tests
+python3 tools/tests.py --vm-profile --match "*profile*"  # VM opcode JSON profiles
+python3 tools/tests.py --jbc --vm-profile --match "*profile*"  # Profile .jbc execution
 ```
 
-`tests.py --vm-profile` writes one JSON file per test under
+`tools/tests.py --vm-profile` writes one JSON file per test under
 `profile/vm-opcodes/`. In `--jbc` mode it profiles the bytecode execution phase,
 not the source-to-bytecode save step.
 
@@ -117,13 +117,13 @@ For a higher-level view — comparing JCC to a real C compiler on the same porta
 ```bash
 make bench-compare            # full run
 make bench-compare-quick      # quick run
-python3 bench.py --filter fib.c   # one benchmark
-python3 bench.py --filter fib.c --vm-profile   # include opcode profile JSON
+python3 tools/bench.py --filter fib.c   # one benchmark
+python3 tools/bench.py --filter fib.c --vm-profile   # include opcode profile JSON
 ```
 
 The hyperfine-based `make bench` and the cross-compiler `make bench-compare` are complementary: `make bench` profiles a single workload in depth (with shell-startup variation), while `make bench-compare` produces a side-by-side matrix of how JCC stacks up against GCC.
 
-When `bench.py --vm-profile` is enabled, JCC and JCC-JBC configs write per
+When `tools/bench.py --vm-profile` is enabled, JCC and JCC-JBC configs write per
 benchmark/config opcode profiles under `benchmarks/results/vm-profile-<UTC>/`.
 Each timing record in the benchmark JSON includes its `vm_profile_json` path.
 
