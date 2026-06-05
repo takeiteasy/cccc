@@ -48,8 +48,8 @@ JCC supports two macro execution forms:
 
 | Form | Source shape | When it runs | What the return value means |
 |------|--------------|--------------|-----------------------------|
-| Global generation | `[[jcc::macro]] void gen(void)` called at file scope | Before the main parse | Ignored; side effects generate declarations/functions/globals visible everywhere |
-| Call-site expansion | `[[jcc::macro(inline)]] _Node *gen(args...)` called inside code | During macro expansion after parsing | Replaces the call expression or statement |
+| Global generation | `[[jcc::macro]] void gen(char *a1, ...)` called at file scope | Before the main parse | Ignored; side effects generate declarations/functions/globals visible everywhere. Args are stringified into `char *` parameters. |
+| Call-site expansion | `[[jcc::macro(inline)]] _Node *gen(_Node *a1, ...)` called inside code | During macro expansion after parsing | Replaces the call expression or statement |
 
 ### Pre-parse macro declaration context
 
@@ -87,9 +87,35 @@ int main(void) {
 }
 ```
 
-Global-generation macros take no call-site arguments. Use them for boilerplate
-functions, enum conversion helpers, serializers, or any generated definition
-that source code needs to call normally.
+### File-scope arguments and the X-macro pattern
+
+Global-generation macros accept up to 8 comma-separated arguments at the call
+site. Each argument's token sequence is stringified and delivered as a
+`char *` to the matching parameter: string literals pass their raw value, while
+keywords, identifiers, and numbers pass their spelling. This makes the
+C-preprocessor X-macro pattern work directly with file-scope macro calls:
+
+```c
+#define TYPES X(int) X(float) X(double)
+
+[[jcc::macro]]
+void list_type(char *name) {
+    _Type *int_ty = _AST_GET_TYPE("int");
+    _Obj *fn = _AST_FUNCTION(name, int_ty);
+    _AST_WITH_FN(fn) {
+        _AST_FUNCTION_SET_BODY(fn, _QUOTE("return 42;"));
+    }
+}
+
+#define X(T) list_type(#T);
+TYPES
+#undef X
+```
+
+`TYPES` expands to three file-scope macro calls, each receiving the string
+`"int"`, `"float"`, or `"double"`, and `list_type` emits one definition per
+type. Use this for boilerplate enum conversion helpers, serializers, or any
+generated definition that source code needs to call normally.
 
 ### Forward includes in generated output
 
