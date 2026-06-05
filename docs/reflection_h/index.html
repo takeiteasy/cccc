@@ -304,7 +304,7 @@ _Obj *fn = _AST_FUNCTION("helper", _AST_GET_TYPE("int"));
 _AST_WITH_FN(fn) {
 _AST_FUNCTION_SET_BODY(fn, _QUOTE("return 42;"));
 }
-_AST_FORWARD_DECLARE(fn);
+_AST_PUBLISH(fn);
 // no return needed
 }
 emit_helpers();
@@ -395,7 +395,7 @@ return 0;
 <dd><p>Create a for loop node.
 </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_forward_declare" target="_top">__jcc_ast_forward_declare</a></tt></dt>
-<dd><p>Make a generated function visible at the current source position.
+<dd><p>Deprecated alias for publishing a generated function.
 </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_funcall" target="_top">__jcc_ast_funcall</a></tt></dt>
 <dd><p>Create a function call node.
@@ -498,6 +498,12 @@ function scope and return a variable-reference node for it.
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_pop_fn" target="_top">__jcc_ast_pop_fn</a></tt></dt>
 <dd><p>Restore the function context saved by the most recent push.
 </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_publish" target="_top">__jcc_ast_publish</a></tt></dt>
+<dd><p>Make a generated object visible at the current source position.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_publish_type" target="_top">__jcc_ast_publish_type</a></tt></dt>
+<dd><p>Accept a generated type declaration as already published.
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_push_fn" target="_top">__jcc_ast_push_fn</a></tt></dt>
 <dd><p>Establish fn as the "function currently being built" so that
 _QUOTE("return x;") applies the correct implicit return-type cast.
@@ -580,6 +586,9 @@ _QUOTE("return x;") applies the correct implicit return-type cast.
 </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_dump_tree_to_string" target="_top">__jcc_dump_tree_to_string</a></tt></dt>
 <dd><p>Render the tree representation to a heap-allocated string.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_forward_include" target="_top">__jcc_forward_include</a></tt></dt>
+<dd><p>Register a header to be prepended as an #include in serialized output.
 </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_gensym" target="_top">__jcc_gensym</a></tt></dt>
 <dd><p>Generate a unique identifier string for macro-created symbols.
@@ -1096,7 +1105,7 @@ subsequently compiled code.
 <h3><a name="__jcc_ast_forward_declare">__jcc_ast_forward_declare</a></h3>
 <hr class="afterName">
 <p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_forward_declare;name=start --><!-- begin abstract --></p>
-<p>Make a generated function visible at the current source position.
+<p>Deprecated alias for publishing a generated function.
 <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_forward_declare;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_forward_declare;name=start --><!-- a logicalPath="//apple_ref/c/cl/_Node //apple_ref/c/tdef/_Node //apple_ref/c/tag/_Node //apple_ref/c/struct/_Node //apple_ref/c/intf/_Node //apple_ref/doc/anysymbol/_Node" machineGenerated="true" --><span class="type">_Node</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_forward_declare" logicalPath="//apple_ref/c/instm/__jcc_ast_forward_declare //apple_ref/c/clm/__jcc_ast_forward_declare //apple_ref/c/intfcm/__jcc_ast_forward_declare //apple_ref/c/intfm/__jcc_ast_forward_declare //apple_ref/c/func/__jcc_ast_forward_declare" target="_top"><span class="function">__jcc_ast_forward_declare</span></a>(
@@ -1126,10 +1135,7 @@ subsequently compiled code.
 
 <!-- end return value --></p>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
-<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_forward_declare;name=start --><p>Top-level explicit macro calls run at their source position.
-Call this after creating a function when later source should be
-able to call that generated function without a handwritten
-prototype.
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_forward_declare;name=start --><p>Use __jcc_ast_publish(vm, fn, NULL) or _AST_PUBLISH(fn).
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_forward_declare;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
@@ -1322,7 +1328,7 @@ for multiple parameters.
 <!-- end return value --></p>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
 <!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_function_prototype;name=start --><p>Use _AST_FUNCTION_ADD_PARAM to add parameters and
-_AST_FORWARD_DECLARE to expose it in scope. A subsequent
+_AST_PUBLISH to expose it in scope. A subsequent
 _AST_FUNCTION call with the same name will reuse this Obj and
 fill in the body.
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_function_prototype;name=end --><!-- end discussion -->
@@ -1863,7 +1869,7 @@ The type is immediately visible via _AST_FIND_TYPE(name).
 <p>Register a typedef alias for a type and expose it in scope.
 <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_make_typedef;name=end --></p>
 <div class="declaration_indent">
-<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_make_typedef;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_make_typedef" logicalPath="//apple_ref/c/instm/__jcc_ast_make_typedef //apple_ref/c/clm/__jcc_ast_make_typedef //apple_ref/c/intfcm/__jcc_ast_make_typedef //apple_ref/c/intfm/__jcc_ast_make_typedef //apple_ref/c/func/__jcc_ast_make_typedef" target="_top"><span class="function">__jcc_ast_make_typedef</span></a>(
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_make_typedef;name=start --><!-- a logicalPath="//apple_ref/c/cl/_Type //apple_ref/c/tdef/_Type //apple_ref/c/tag/_Type //apple_ref/c/struct/_Type //apple_ref/c/intf/_Type //apple_ref/doc/anysymbol/_Type" machineGenerated="true" --><span class="type">_Type</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_make_typedef" logicalPath="//apple_ref/c/instm/__jcc_ast_make_typedef //apple_ref/c/clm/__jcc_ast_make_typedef //apple_ref/c/intfcm/__jcc_ast_make_typedef //apple_ref/c/intfm/__jcc_ast_make_typedef //apple_ref/c/func/__jcc_ast_make_typedef" target="_top"><span class="function">__jcc_ast_make_typedef</span></a>(
     <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
     <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">name</span>,
     <!-- a logicalPath="//apple_ref/c/cl/_Type //apple_ref/c/tdef/_Type //apple_ref/c/tag/_Type //apple_ref/c/struct/_Type //apple_ref/c/intf/_Type //apple_ref/doc/anysymbol/_Type" machineGenerated="true" --><span class="type">_Type</span><!-- /a --> <span class="type">*</span><span class="param">underlying</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_make_typedef;name=end --></pre>
@@ -1891,6 +1897,11 @@ The type is immediately visible via _AST_FIND_TYPE(name).
 <dd><p>The aliased type.</p></dd>
 </dl>
 </div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>The aliased type after registration, or NULL on invalid arguments.
+
+<!-- end return value --></p>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
 <!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_make_typedef;name=start --><p>After this call, _AST_FIND_TYPE(name) resolves to underlying and
 subsequently compiled code can use name as a type name.
@@ -2161,6 +2172,103 @@ Use this when building function bodies to reference parameters by name.
 <dd><p>The VM context.</p></dd>
 </dl>
 </div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_publish;   name=__jcc_ast_publish -->
+<a name="//apple_ref/c/func/__jcc_ast_publish"></a>
+<h3><a name="__jcc_ast_publish">__jcc_ast_publish</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_publish;name=start --><!-- begin abstract --></p>
+<p>Make a generated object visible at the current source position.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_publish;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_publish;name=start --><!-- a logicalPath="//apple_ref/c/cl/_Node //apple_ref/c/tdef/_Node //apple_ref/c/tag/_Node //apple_ref/c/struct/_Node //apple_ref/c/intf/_Node //apple_ref/doc/anysymbol/_Node" machineGenerated="true" --><span class="type">_Node</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_publish" logicalPath="//apple_ref/c/instm/__jcc_ast_publish //apple_ref/c/clm/__jcc_ast_publish //apple_ref/c/intfcm/__jcc_ast_publish //apple_ref/c/intfm/__jcc_ast_publish //apple_ref/c/func/__jcc_ast_publish" target="_top"><span class="function">__jcc_ast_publish</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/_Obj //apple_ref/c/tdef/_Obj //apple_ref/c/tag/_Obj //apple_ref/c/struct/_Obj //apple_ref/c/intf/_Obj //apple_ref/doc/anysymbol/_Obj" machineGenerated="true" --><span class="type">_Obj</span><!-- /a --> <span class="type">*</span><span class="param">obj</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/_Token //apple_ref/c/tdef/_Token //apple_ref/c/tag/_Token //apple_ref/c/struct/_Token //apple_ref/c/intf/_Token //apple_ref/doc/anysymbol/_Token" machineGenerated="true" --><span class="type">_Token</span><!-- /a --> <span class="type">*</span><span class="param">tok</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_publish;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_publish/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_publish/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_publish/obj;   name=obj -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_publish/obj"></a>
+<code>obj</code>
+</dt>
+<dd><p>A function or global variable object created by the AST builders.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_publish/tok;   name=tok -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_publish/tok"></a>
+<code>tok</code>
+</dt>
+<dd><p>Optional representative token for diagnostics, or NULL.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>A no-op _Node on success, or NULL on invalid arguments.
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_publish;name=start --><p>Top-level explicit macro calls run at their source position.
+Call this after creating a function or global variable when
+later macro-generated code at the same parse point should be
+able to reference it without a handwritten declaration.
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_publish;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_publish_type;   name=__jcc_ast_publish_type -->
+<a name="//apple_ref/c/func/__jcc_ast_publish_type"></a>
+<h3><a name="__jcc_ast_publish_type">__jcc_ast_publish_type</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_publish_type;name=start --><!-- begin abstract --></p>
+<p>Accept a generated type declaration as already published.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_publish_type;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_publish_type;name=start --><!-- a logicalPath="//apple_ref/c/cl/_Node //apple_ref/c/tdef/_Node //apple_ref/c/tag/_Node //apple_ref/c/struct/_Node //apple_ref/c/intf/_Node //apple_ref/doc/anysymbol/_Node" machineGenerated="true" --><span class="type">_Node</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_publish_type" logicalPath="//apple_ref/c/instm/__jcc_ast_publish_type //apple_ref/c/clm/__jcc_ast_publish_type //apple_ref/c/intfcm/__jcc_ast_publish_type //apple_ref/c/intfm/__jcc_ast_publish_type //apple_ref/c/func/__jcc_ast_publish_type" target="_top"><span class="function">__jcc_ast_publish_type</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/_Type //apple_ref/c/tdef/_Type //apple_ref/c/tag/_Type //apple_ref/c/struct/_Type //apple_ref/c/intf/_Type //apple_ref/doc/anysymbol/_Type" machineGenerated="true" --><span class="type">_Type</span><!-- /a --> <span class="type">*</span><span class="param">ty</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/_Token //apple_ref/c/tdef/_Token //apple_ref/c/tag/_Token //apple_ref/c/struct/_Token //apple_ref/c/intf/_Token //apple_ref/doc/anysymbol/_Token" machineGenerated="true" --><span class="type">_Token</span><!-- /a --> <span class="type">*</span><span class="param">tok</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_publish_type;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_publish_type/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_publish_type/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_publish_type/ty;   name=ty -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_publish_type/ty"></a>
+<code>ty</code>
+</dt>
+<dd><p>A type created by _AST_MAKE_STRUCT, _AST_MAKE_UNION,
+_AST_MAKE_ENUM, or _AST_MAKE_TYPEDEF.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_publish_type/tok;   name=tok -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_publish_type/tok"></a>
+<code>tok</code>
+</dt>
+<dd><p>Optional representative token for diagnostics, or NULL.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>A no-op _Node on success, or NULL on invalid arguments.
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_publish_type;name=start --><p>Generated type builders self-register in tag or typedef scope.
+This function lets _AST_PUBLISH(type) be used uniformly.
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_publish_type;name=end --><!-- end discussion -->
+</p>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_push_fn;   name=__jcc_ast_push_fn -->
 <a name="//apple_ref/c/func/__jcc_ast_push_fn"></a>
@@ -2874,6 +2982,43 @@ Unsupported kinds are emitted as C comments.
 <p>An arena-allocated NUL-terminated string, or NULL on error.
 
 <!-- end return value --></p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_forward_include;   name=__jcc_forward_include -->
+<a name="//apple_ref/c/func/__jcc_forward_include"></a>
+<h3><a name="__jcc_forward_include">__jcc_forward_include</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_forward_include;name=start --><!-- begin abstract --></p>
+<p>Register a header to be prepended as an #include in serialized output.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_forward_include;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_forward_include;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_forward_include" logicalPath="//apple_ref/c/instm/__jcc_forward_include //apple_ref/c/clm/__jcc_forward_include //apple_ref/c/intfcm/__jcc_forward_include //apple_ref/c/intfm/__jcc_forward_include //apple_ref/c/func/__jcc_forward_include" target="_top"><span class="function">__jcc_forward_include</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">header</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_forward_include;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_forward_include/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_forward_include/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_forward_include/header;   name=header -->
+<a name="//apple_ref/doc/functionparam/__jcc_forward_include/header"></a>
+<code>header</code>
+</dt>
+<dd><p>The header string including angle-brackets or quotes.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_forward_include;name=start --><p>Called from a macro body to declare that the generated runtime code
+depends on @a header. The header string must include delimiters,
+e.g. @c "&lt;string.h&gt;" or @c "\"myheader.h\"". Duplicate registrations
+for the same header are silently ignored.
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_forward_include;name=end --><!-- end discussion -->
+</p>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_gensym;   name=__jcc_gensym -->
 <a name="//apple_ref/c/func/__jcc_gensym"></a>

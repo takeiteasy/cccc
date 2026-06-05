@@ -1111,50 +1111,77 @@ _Obj *__jcc_ast_function(JCC *vm, const char *name,
 
     // Add to globals list. The function is not made visible to the parser
     // until source declares it, inline macro prototype synthesis declares it,
-    // or __jcc_ast_forward_declare() publishes it explicitly.
+    // or __jcc_ast_publish() publishes it explicitly.
     fn->next = vm->compiler.globals;
     vm->compiler.globals = fn;
 
     return fn;
 }
 
-_Node *__jcc_ast_forward_declare(JCC *vm, _Obj *fn) {
-    if (!vm || !fn || !fn->is_function || !fn->ty || fn->ty->kind != TY_FUNC)
+static _Node *reflect_noop_node(JCC *vm) {
+    _Node *noop = alloc_node(vm, ND_NULL_EXPR);
+    noop->ty = ty_void;
+    return noop;
+}
+
+_Node *__jcc_ast_publish(JCC *vm, _Obj *obj, _Token *tok) {
+    if (!vm || !obj || !obj->ty)
         return NULL;
     if (!vm->compiler.scope)
         return NULL;
 
-    int name_len = (int)strlen(fn->name);
+    if (tok)
+        obj->tok = tok;
+
+    int name_len = (int)strlen(obj->name);
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
         for (VarScopeNode *node = sc->vars; node; node = node->next) {
             if (node->name_len != name_len ||
-                strncmp(node->name, fn->name, name_len) != 0)
+                strncmp(node->name, obj->name, name_len) != 0)
                 continue;
 
-            if (node->var && node->var->is_function) {
-                _Node *noop = alloc_node(vm, ND_NULL_EXPR);
-                noop->ty = ty_void;
-                return noop;
-            }
+            if (node->var == obj)
+                return reflect_noop_node(vm);
 
-            error("conflicting declaration for generated function '%s'",
-                  fn->name);
+            if (obj->is_function && node->var && node->var->is_function)
+                return reflect_noop_node(vm);
+
+            if (tok)
+                error_tok(vm, tok,
+                          "conflicting declaration for generated %s '%s'",
+                          obj->is_function ? "function" : "global variable",
+                          obj->name);
+            error("conflicting declaration for generated %s '%s'",
+                  obj->is_function ? "function" : "global variable",
+                  obj->name);
         }
     }
 
     VarScopeNode *decl =
         arena_alloc(&vm->compiler.parser_arena, sizeof(VarScopeNode));
     memset(decl, 0, sizeof(VarScopeNode));
-    decl->name = fn->name;
+    decl->name = obj->name;
     decl->name_len = name_len;
-    decl->var = fn;
+    decl->var = obj;
     decl->next = vm->compiler.scope->vars;
     vm->compiler.scope->vars = decl;
     hashmap_put2_borrowed(&vm->compiler.scope->var_map, decl->name, decl->name_len, decl);
 
-    _Node *noop = alloc_node(vm, ND_NULL_EXPR);
-    noop->ty = ty_void;
-    return noop;
+    return reflect_noop_node(vm);
+}
+
+_Node *__jcc_ast_publish_type(JCC *vm, _Type *ty, _Token *tok) {
+    (void)ty;
+    (void)tok;
+    if (!vm)
+        return NULL;
+    return reflect_noop_node(vm);
+}
+
+_Node *__jcc_ast_forward_declare(JCC *vm, _Obj *fn) {
+    if (!vm || !fn || !fn->is_function || !fn->ty || fn->ty->kind != TY_FUNC)
+        return NULL;
+    return __jcc_ast_publish(vm, fn, NULL);
 }
 
 void __jcc_ast_function_add_param(JCC *vm, _Obj *fn, const char *name,
@@ -1243,7 +1270,7 @@ void __jcc_ast_function_set_variadic(_Obj *fn, bool is_variadic) {
 
 // _AST_FUNCTION_PROTOTYPE(name, ret) — create a forward declaration (no body).
 // The same params API (_AST_FUNCTION_ADD_PARAM) applies; use
-// _AST_FORWARD_DECLARE to make it visible in scope.
+// _AST_PUBLISH to make it visible in scope.
 _Obj *__jcc_ast_function_prototype(JCC *vm, const char *name,
                                     _Type *return_type) {
     if (!vm || !name || !return_type)
@@ -2314,14 +2341,15 @@ void __jcc_ast_enum_add_constant(JCC *vm, _Type *ty, const char *name,
 
 // _AST_MAKE_TYPEDEF(name, underlying) — register name as a typedef alias for
 // underlying so that _AST_FIND_TYPE(name) and C code can use it.
-void __jcc_ast_make_typedef(JCC *vm, const char *name, _Type *underlying) {
+_Type *__jcc_ast_make_typedef(JCC *vm, const char *name, _Type *underlying) {
     if (!vm || !name || !underlying)
-        return;
+        return NULL;
     int name_len = (int)strlen(name);
     // Give the underlying type this name if it has none
     if (!underlying->name)
         underlying->name = reflect_make_name_token(vm, name, name_len);
     reflect_push_typedef_scope(vm, name, name_len, underlying);
+    return underlying;
 }
 
 // ============================================================================

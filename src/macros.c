@@ -78,6 +78,8 @@ extern void __jcc_ast_function_set_body(JCC *vm, Obj *fn, Node *body);
 extern void __jcc_ast_function_set_static(Obj *fn, bool is_static);
 extern void __jcc_ast_function_set_inline(Obj *fn, bool is_inline);
 extern void __jcc_ast_function_set_variadic(Obj *fn, bool is_variadic);
+extern Node *__jcc_ast_publish(JCC *vm, Obj *obj, Token *tok);
+extern Node *__jcc_ast_publish_type(JCC *vm, Type *ty, Token *tok);
 extern Node *__jcc_ast_forward_declare(JCC *vm, Obj *fn);
 extern Node *__jcc_ast_param_ref(JCC *vm, Obj *fn, const char *name);
 
@@ -147,7 +149,7 @@ extern Type  *__jcc_ast_struct_add_field(JCC *vm, Type *ty, const char *name,
 extern Type  *__jcc_ast_make_enum(JCC *vm, const char *name);
 extern void   __jcc_ast_enum_add_constant(JCC *vm, Type *ty, const char *name,
                                            int value);
-extern void   __jcc_ast_make_typedef(JCC *vm, const char *name, Type *underlying);
+extern Type  *__jcc_ast_make_typedef(JCC *vm, const char *name, Type *underlying);
 
 // Ticket #188: comptime variable access
 extern int64_t __jcc_get_comptime_int(JCC *vm, const char *name);
@@ -277,6 +279,10 @@ static void register_reflection_ffi(JCC *vm) {
                       (void *)__jcc_ast_function_set_inline, 2, 0);
     cc_register_cfunc(vm, "__jcc_ast_function_set_variadic",
                       (void *)__jcc_ast_function_set_variadic, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_publish",
+                      (void *)__jcc_ast_publish, 3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_publish_type",
+                      (void *)__jcc_ast_publish_type, 3, 0);
     cc_register_cfunc(vm, "__jcc_ast_forward_declare",
                       (void *)__jcc_ast_forward_declare, 2, 0);
     cc_register_cfunc(vm, "__jcc_ast_param_ref", (void *)__jcc_ast_param_ref, 3, 0);

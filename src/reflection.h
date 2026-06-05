@@ -51,7 +51,7 @@
  *     _AST_WITH_FN(fn) {
  *         _AST_FUNCTION_SET_BODY(fn, _QUOTE("return 42;"));
  *     }
- *     _AST_FORWARD_DECLARE(fn);
+ *     _AST_PUBLISH(fn);
  *     // no return needed
  * }
  * emit_helpers();
@@ -730,15 +730,39 @@ _Obj *__jcc_ast_function(JCC *vm, const char *name,
                             _Type *return_type);
 
 /*!
+ * @function __jcc_ast_publish
+ * @abstract Make a generated object visible at the current source position.
+ * @param vm The VM context.
+ * @param obj A function or global variable object created by the AST builders.
+ * @param tok Optional representative token for diagnostics, or NULL.
+ * @return A no-op _Node on success, or NULL on invalid arguments.
+ * @discussion Top-level explicit macro calls run at their source position.
+ *             Call this after creating a function or global variable when
+ *             later macro-generated code at the same parse point should be
+ *             able to reference it without a handwritten declaration.
+ */
+_Node *__jcc_ast_publish(JCC *vm, _Obj *obj, _Token *tok);
+
+/*!
+ * @function __jcc_ast_publish_type
+ * @abstract Accept a generated type declaration as already published.
+ * @param vm The VM context.
+ * @param ty A type created by _AST_MAKE_STRUCT, _AST_MAKE_UNION,
+ *           _AST_MAKE_ENUM, or _AST_MAKE_TYPEDEF.
+ * @param tok Optional representative token for diagnostics, or NULL.
+ * @return A no-op _Node on success, or NULL on invalid arguments.
+ * @discussion Generated type builders self-register in tag or typedef scope.
+ *             This function lets _AST_PUBLISH(type) be used uniformly.
+ */
+_Node *__jcc_ast_publish_type(JCC *vm, _Type *ty, _Token *tok);
+
+/*!
  * @function __jcc_ast_forward_declare
- * @abstract Make a generated function visible at the current source position.
+ * @abstract Deprecated alias for publishing a generated function.
  * @param vm The VM context.
  * @param fn A function object created with __jcc_ast_function().
  * @return A no-op _Node on success, or NULL on invalid arguments.
- * @discussion Top-level explicit macro calls run at their source position.
- *             Call this after creating a function when later source should be
- *             able to call that generated function without a handwritten
- *             prototype.
+ * @discussion Use __jcc_ast_publish(vm, fn, NULL) or _AST_PUBLISH(fn).
  */
 _Node *__jcc_ast_forward_declare(JCC *vm, _Obj *fn);
 
@@ -798,7 +822,7 @@ void __jcc_ast_function_set_variadic(_Obj *fn, bool is_variadic);
  * @param return_type The return type.
  * @return The declaration Obj*, or NULL on error.
  * @discussion Use _AST_FUNCTION_ADD_PARAM to add parameters and
- *             _AST_FORWARD_DECLARE to expose it in scope. A subsequent
+ *             _AST_PUBLISH to expose it in scope. A subsequent
  *             _AST_FUNCTION call with the same name will reuse this Obj and
  *             fill in the body.
  */
@@ -872,10 +896,11 @@ void __jcc_ast_enum_add_constant(JCC *vm, _Type *ty, const char *name,
  * @param vm The VM context.
  * @param name The typedef name.
  * @param underlying The aliased type.
+ * @return The aliased type after registration, or NULL on invalid arguments.
  * @discussion After this call, _AST_FIND_TYPE(name) resolves to underlying and
  *             subsequently compiled code can use name as a type name.
  */
-void __jcc_ast_make_typedef(JCC *vm, const char *name, _Type *underlying);
+_Type *__jcc_ast_make_typedef(JCC *vm, const char *name, _Type *underlying);
 
 // ============================================================================
 // Global Variable Generation (ticket #152)
@@ -1110,7 +1135,17 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, _Node *node);
 
 #define _AST_FUNCTION(name, ret_type)                                       \
     __jcc_ast_function(_VM, name, ret_type)
-#define _AST_FORWARD_DECLARE(fn) __jcc_ast_forward_declare(_VM, fn)
+#define _AST_PUBLISH(decl)                                                  \
+    _Generic((decl),                                                        \
+        _Obj *: __jcc_ast_publish,                                          \
+        _Type *: __jcc_ast_publish_type                                     \
+    )(_VM, (decl), 0)
+#define _AST_PUBLISH_AT(decl, tok)                                          \
+    _Generic((decl),                                                        \
+        _Obj *: __jcc_ast_publish,                                          \
+        _Type *: __jcc_ast_publish_type                                     \
+    )(_VM, (decl), (tok))
+#define _AST_FORWARD_DECLARE(fn) __jcc_ast_publish(_VM, fn, 0)
 #define _AST_FUNCTION_ADD_PARAM(fn, name, type)                             \
     __jcc_ast_function_add_param(_VM, fn, name, type)
 #define _AST_FUNCTION_SET_BODY(fn, body)                                    \
@@ -1124,7 +1159,7 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, _Node *node);
 
 // Ticket #171: function forward declaration / prototype builder
 // Creates a declaration-only Obj (no body); use _AST_FUNCTION_ADD_PARAM for
-// parameters and _AST_FORWARD_DECLARE to make it visible in scope.
+// parameters and _AST_PUBLISH to make it visible in scope.
 #define _AST_FUNCTION_PROTOTYPE(name, ret)                                  \
     __jcc_ast_function_prototype(_VM, name, ret)
 
@@ -1136,7 +1171,7 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, _Node *node);
 //   _AST_STRUCT_ADD_FIELD(s, "y", _AST_GET_TYPE("int"));
 //
 // _AST_STRUCT_ADD_FIELD works for both struct and union types.
-// _AST_MAKE_TYPEDEF registers name as an alias for underlying.
+// _AST_MAKE_TYPEDEF registers name as an alias for underlying and returns it.
 // _AST_ENUM_ADD_CONSTANT adds a constant to the enum AND to scope (usable as int).
 #define _AST_MAKE_STRUCT(name)     __jcc_ast_make_struct(_VM, name)
 #define _AST_MAKE_UNION(name)      __jcc_ast_make_union(_VM, name)
