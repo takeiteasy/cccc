@@ -1703,14 +1703,58 @@ static void scan_and_execute_global_calls(JCC *vm, Token **tokens_ptr) {
                     if (after_semi && equal(after_semi, ";")) {
                         Token *next_tok = after_semi->next;
 
-                        // For now, only zero-argument calls are supported
-                        // for pre-parse global generation.
-                        Token *arg_check = tok->next->next; // after '('
-                        if (arg_check != after_paren) {
-                            error_tok(vm, tok,
-                                "file-scope macro call '%.*s' with arguments is not supported for global generation",
-                                tok->len, tok->loc);
+                        // Collect comma-separated arguments as char* strings.
+                        // Each argument token sequence is stringified and
+                        // placed directly in VM registers (REG_A0+) so that
+                        // macro parameters declared as `char *` receive the
+                        // actual string data, not a Node wrapper.
+                        // TK_STR tokens pass their string value directly;
+                        // keywords/idents/numbers pass their spelling.
+                        char *arg_strs[8];
+                        int arg_count = 0;
+                        Token *a = tok->next->next; // first token after '('
+                        while (a && a != after_paren && arg_count < 8) {
+                            int depth = 0;
+                            Token *arg_start = a;
+                            Token *arg_end = a;
+                            while (a && a != after_paren) {
+                                if (equal(a, "(")) depth++;
+                                else if (equal(a, ")")) depth--;
+                                if (depth == 0 && equal(a, ",")) {
+                                    a = a->next;
+                                    break;
+                                }
+                                arg_end = a;
+                                a = a->next;
+                            }
+                            char *str;
+                            if (arg_start == arg_end &&
+                                arg_start->kind == TK_STR) {
+                                str = arg_start->str;
+                            } else {
+                                int total = 0;
+                                for (Token *t = arg_start;
+                                     t && t != a && t != after_paren;
+                                     t = t->next)
+                                    total += t->len;
+                                str = arena_alloc(
+                                    &vm->compiler.parser_arena, total + 1);
+                                int pos = 0;
+                                for (Token *t = arg_start;
+                                     t && t != a && t != after_paren;
+                                     t = t->next) {
+                                    memcpy(str + pos, t->loc, t->len);
+                                    pos += t->len;
+                                }
+                                str[pos] = '\0';
+                            }
+                            arg_strs[arg_count++] = str;
                         }
+                        // Place char* values in registers before calling
+                        // execute_macro_fn with NULL args so the arg-setup
+                        // loop inside does not overwrite them.
+                        for (int i = 0; i < arg_count; i++)
+                            vm->regs[REG_A0 + i] = (long long)arg_strs[i];
 
                         if (!pm->is_compiled) {
                             error_tok(vm, tok, "macro '%.*s' failed to compile",
