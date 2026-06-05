@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <glob.h>
+#include_comptime <glob.h>
 
 [[jcc::comptime]]
 char *read_header_file(const char *path) {
@@ -119,6 +119,8 @@ _Node *make_strcmp_return(_Obj *fn, _Type *char_ptr_ty, const char *header) {
 
 [[jcc::macro]]
 void generate_std_header(void) {
+    _FORWARD_INCLUDE("<string.h>");
+
     char **headers = discover_headers();
     if (!headers)
         return;
@@ -189,7 +191,7 @@ void generate_std_header(void) {
         _AST_FUNCTION_SET_BODY(fn, _AST_BLOCK(stmts, n));
     }
 
-    _AST_FORWARD_DECLARE(fn);
+    _AST_PUBLISH(fn);
 }
 
 generate_std_header();

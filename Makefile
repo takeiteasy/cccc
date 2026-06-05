@@ -198,8 +198,7 @@ generate-std: $(EXE_OUT)
 	@set -e; \
 	tmp=$$(mktemp src/std.c.tmp.XXXXXX); \
 	trap 'rm -f "$$tmp"' EXIT; \
-	printf '#include <string.h>\n\n' > "$$tmp"; \
-	./$(EXE_OUT) -G -I./include $(STD_TEMPLATE) >> "$$tmp"; \
+	./$(EXE_OUT) -G -I./include $(STD_TEMPLATE) > "$$tmp"; \
 	if cmp -s "$$tmp" src/std.c; then \
 		rm -f "$$tmp"; \
 	else \
