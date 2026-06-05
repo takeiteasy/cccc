@@ -280,9 +280,9 @@ This is the comptime counterpart to `__jcc_forward_include` (see
 
 ## Comptime Variables
 
-`[[jcc::comptime]]` can also precede a **variable or struct declaration** with a
-constant initializer. The value is evaluated during the pre-parse phase and
-stored so that macros can read it at compile time.
+`[[jcc::comptime]]` can also precede a **variable or struct declaration**. The
+value is evaluated during the pre-parse phase and stored so that macros can
+read it at compile time.
 
 ### Scalar comptime variables
 
@@ -320,15 +320,18 @@ _Node *pixel_count(void) {
 }
 ```
 
+Struct and union comptime variables can use tagged, anonymous, or typedef'd
+aggregate types. Initializers may be constant expressions or expressions that
+call comptime helper functions.
+
 `_AST_GET_COMPTIME_MEMBER(var_name, field)` returns the field's value as an
 AST literal node. Integer and float/double members are supported. Pointer and
 array members are not accessible this way.
 
 ### Scope notes
 
-- Comptime variables must have **constant initializers** (literals and
-  arithmetic on literals). Calls to comptime functions in the initializer
-  are not yet supported.
+- Comptime variables support constant initializers and initializers that call
+  comptime helper functions.
 - Pointer and string variables produce a compile-time error at this point;
   use `_AST_STRING_LITERAL` inside the macro body instead.
 - Comptime variables are **not emitted** into the output binary.

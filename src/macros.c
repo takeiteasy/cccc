@@ -547,43 +547,88 @@ static Token *find_top_level_eq(Token *tokens) {
     return NULL;
 }
 
-// Find the struct/union tag in a comptime var's decl_tokens.
-// For `struct Dims { int w; int h; } dims = {...};` returns the 'Dims' token
-// and writes the 'struct' keyword token to *kw_out.
-// Returns NULL for anonymous structs or typedef'd aggregate types (no
-// struct/union keyword present), which cannot have a cast synthesized.
-static Token *comptime_struct_tag(Token *decl_tokens, Token **kw_out) {
-    for (Token *t = decl_tokens; t && t->kind != TK_EOF; t = t->next) {
+typedef enum {
+    COMPTIME_AGG_CAST_NONE,
+    COMPTIME_AGG_CAST_TAGGED,
+    COMPTIME_AGG_CAST_TYPEDEF,
+    COMPTIME_AGG_CAST_TYPEOF,
+} ComptimeAggregateCastKind;
+
+typedef struct {
+    ComptimeAggregateCastKind kind;
+    Token *kw;   // "struct" or "union" for tagged aggregates
+    Token *name; // tag or typedef name
+} ComptimeAggregateCast;
+
+static bool token_matches_name(Token *tok, const char *name) {
+    return tok && tok->kind == TK_IDENT &&
+           strlen(name) == (size_t)tok->len &&
+           strncmp(tok->loc, name, tok->len) == 0;
+}
+
+// Determine which compound-literal cast can initialize a comptime aggregate.
+// Handles:
+//   - tagged:    struct Dims { ... } dims -> (struct Dims){ ... }
+//   - typedef'd: Dims dims                 -> (Dims){ ... }
+//   - anonymous: struct { ... } dims       -> (typeof(dims)){ ... }
+static ComptimeAggregateCast comptime_aggregate_cast(ComptimeVar *cv) {
+    ComptimeAggregateCast cast = { COMPTIME_AGG_CAST_NONE, NULL, NULL };
+    Token *typedef_name = NULL;
+    int brace_depth = 0, bracket_depth = 0, paren_depth = 0;
+
+    for (Token *t = cv->decl_tokens; t && t->kind != TK_EOF; t = t->next) {
+        if (equal(t, "{")) brace_depth++;
+        else if (equal(t, "}")) brace_depth--;
+        else if (equal(t, "[")) bracket_depth++;
+        else if (equal(t, "]")) bracket_depth--;
+        else if (equal(t, "(")) paren_depth++;
+        else if (equal(t, ")")) paren_depth--;
+
+        if (brace_depth != 0 || bracket_depth != 0 || paren_depth != 0)
+            continue;
+        if (equal(t, "=") || equal(t, ";"))
+            break;
+
         if (equal(t, "struct") || equal(t, "union")) {
             Token *next = t->next;
             if (next && next->kind == TK_IDENT) {
-                if (kw_out) *kw_out = t;
-                return next;
+                cast.kind = COMPTIME_AGG_CAST_TAGGED;
+                cast.kw = t;
+                cast.name = next;
+                return cast;
             }
-            // Anonymous struct/union: no synthesizable cast.
-            return NULL;
+            cast.kind = COMPTIME_AGG_CAST_TYPEOF;
+            return cast;
         }
+
+        if (t->kind == TK_IDENT && !token_matches_name(t, cv->name) &&
+            !typedef_name)
+            typedef_name = t;
     }
-    return NULL; // Typedef'd aggregate or plain scalar.
+
+    if (typedef_name) {
+        cast.kind = COMPTIME_AGG_CAST_TYPEDEF;
+        cast.name = typedef_name;
+    }
+    return cast;
 }
 
 // True if this comptime var's initializer should be evaluated via
-// __jcc_comptime_init (ticket #191/#192) rather than the constant init_data
+// __jcc_comptime_init (ticket #191/#192/#193) rather than the constant init_data
 // path. Both build_combined_macro_tokens and build_comptime_init_fn_tokens
 // call this so they agree on which vars are routed through the init fn.
 //
 // Scalar initializers (= <non-brace-expr>): always routed.
-// Tagged struct/union initializers (= { ... }): routed iff a tag can be
-// extracted (so the compound-literal cast can be synthesized).
-// Anonymous / typedef'd aggregates: remain on the constant path.
+// Aggregate initializers (= { ... }): routed iff a compound-literal cast can
+// be synthesized from a tag, typedef name, or typeof(var).
 static bool comptime_var_uses_init_fn(ComptimeVar *cv) {
     Token *eq = find_top_level_eq(cv->decl_tokens);
     if (!eq)
         return false; // No initializer at all.
     if (!eq->next || !equal(eq->next, "{"))
         return true;  // Scalar expression init.
-    // Aggregate init: routable only if we can synthesize (struct/union Tag).
-    return comptime_struct_tag(cv->decl_tokens, NULL) != NULL;
+    // Aggregate init: routable only if a cast form can be synthesized.
+    return comptime_aggregate_cast(cv).kind != COMPTIME_AGG_CAST_NONE;
 }
 
 // Inject decl_tokens up to (not including) eq_tok, then emit ';'.
@@ -600,7 +645,7 @@ static Token *append_decl_stripped(JCC *vm, Token *cur, Token *decl_tokens,
 // Build a __jcc_comptime_init function that assigns each comptime var's
 // initializer expression in source order. Handles:
 //   - scalar expression inits:  name = expr ;
-//   - tagged struct/union inits: name = (struct Tag){ ... } ;
+//   - aggregate inits:          name = (<aggregate type>){ ... } ;
 // Returns a token list via tokenize_string, or NULL when there are no vars
 // routed through the init fn.
 static Token *build_comptime_init_fn_tokens(JCC *vm,
@@ -629,15 +674,22 @@ static Token *build_comptime_init_fn_tokens(JCC *vm,
         if (!eq) continue; // Should not happen if predicate is true, but be safe.
 
         if (eq->next && equal(eq->next, "{")) {
-            // Aggregate init: emit  name = (struct Tag){ ... } ;
-            Token *kw = NULL;
-            Token *tag = comptime_struct_tag(cv->decl_tokens, &kw);
-            // tag != NULL is guaranteed by comptime_var_uses_init_fn, but guard.
-            if (!tag || !kw) continue;
-            p += snprintf(p, end - p, "%s=(%.*s %.*s)",
-                          cv->name,
-                          kw->len,  kw->loc,   // "struct" or "union"
-                          tag->len, tag->loc);  // tag name
+            // Aggregate init: emit  name = (<aggregate type>){ ... } ;
+            ComptimeAggregateCast cast = comptime_aggregate_cast(cv);
+            if (cast.kind == COMPTIME_AGG_CAST_TAGGED) {
+                p += snprintf(p, end - p, "%s=(%.*s %.*s)",
+                              cv->name,
+                              cast.kw->len, cast.kw->loc,
+                              cast.name->len, cast.name->loc);
+            } else if (cast.kind == COMPTIME_AGG_CAST_TYPEDEF) {
+                p += snprintf(p, end - p, "%s=(%.*s)",
+                              cv->name, cast.name->len, cast.name->loc);
+            } else if (cast.kind == COMPTIME_AGG_CAST_TYPEOF) {
+                p += snprintf(p, end - p, "%s=(typeof(%s))",
+                              cv->name, cv->name);
+            } else {
+                continue;
+            }
 
             // Emit the brace-group '{ ... }' verbatim from eq->next.
             int depth = 0;
@@ -888,16 +940,14 @@ static void evaluate_comptime_vars(JCC *vm, Obj *macro_prog) {
 
         TypeKind kind = obj->ty->kind;
         if (kind == TY_STRUCT || kind == TY_UNION) {
-            // Routed vars (ticket #192): __jcc_comptime_init wrote the bytes
+            // Routed vars: __jcc_comptime_init wrote the bytes
             // into the data segment, so init_data is NULL — that is expected.
             // Non-routed vars (constant path): init_data must be present.
-            // Anonymous/typedef'd structs with non-constant initializers are
-            // not yet supported and fall through to the warning below.
             if (!obj->init_data && !comptime_var_uses_init_fn(cv)) {
                 fprintf(stderr,
                         "Warning: comptime struct/union var '%s' has a "
-                        "non-constant initializer and no synthesizable tag "
-                        "(anonymous or typedef'd aggregates not yet supported)\n",
+                        "non-constant initializer that could not be routed "
+                        "through __jcc_comptime_init\n",
                         cv->name);
                 continue;
             }
