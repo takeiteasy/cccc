@@ -39,7 +39,7 @@
 #endif
 
 #define JCC_MAGIC "JCC\0"
-#define JCC_VERSION 6 // Version 6: persisted FFI allow/deny/disable policy
+#define JCC_VERSION 7 // Version 7: typed f32/f64 floating-register opcodes
 
 // Stack canary constant for detecting stack overflows (used when random
 // canaries disabled)
@@ -174,6 +174,64 @@ static inline JCCPc cc_byte_offset_to_pc(long long offset) {
 
 static inline long long cc_pc_to_byte_offset(JCCPc pc) {
     return (long long)pc * (long long)sizeof(JCCInstrWord);
+}
+
+static inline void jcc_freg_set_f64(JCC *vm, int reg, double value) {
+    vm->fregs[reg].tag = JCC_FREG_F64;
+    vm->fregs[reg].value.f64 = value;
+}
+
+static inline void jcc_freg_set_f32(JCC *vm, int reg, float value) {
+    vm->fregs[reg].tag = JCC_FREG_F32;
+    vm->fregs[reg].value.f32 = value;
+}
+
+static inline double jcc_freg_get_f64(JCC *vm, int reg) {
+    return vm->fregs[reg].tag == JCC_FREG_F32
+               ? (double)vm->fregs[reg].value.f32
+               : vm->fregs[reg].value.f64;
+}
+
+static inline float jcc_freg_get_f32(JCC *vm, int reg) {
+    return vm->fregs[reg].tag == JCC_FREG_F32
+               ? vm->fregs[reg].value.f32
+               : (float)vm->fregs[reg].value.f64;
+}
+
+static inline long long jcc_freg_raw_f64(JCC *vm, int reg) {
+    union {
+        double d;
+        long long ll;
+    } conv;
+    conv.d = jcc_freg_get_f64(vm, reg);
+    return conv.ll;
+}
+
+static inline int jcc_freg_raw_f32(JCC *vm, int reg) {
+    union {
+        float f;
+        int i;
+    } conv;
+    conv.f = jcc_freg_get_f32(vm, reg);
+    return conv.i;
+}
+
+static inline void jcc_freg_set_raw_f64(JCC *vm, int reg, long long bits) {
+    union {
+        double d;
+        long long ll;
+    } conv;
+    conv.ll = bits;
+    jcc_freg_set_f64(vm, reg, conv.d);
+}
+
+static inline void jcc_freg_set_raw_f32(JCC *vm, int reg, int bits) {
+    union {
+        float f;
+        int i;
+    } conv;
+    conv.i = bits;
+    jcc_freg_set_f32(vm, reg, conv.f);
 }
 
 static inline int cc_opcode_operand_words(int op) {

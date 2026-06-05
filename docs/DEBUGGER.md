@@ -160,7 +160,10 @@ text segment base. Saved bytecode stores data relocations and aggregate
 return-buffer offsets separately from raw segment bytes so `cc_load_bytecode()`
 can rebuild process-local VM pointers after loading.
 
-Floating-point bytecode has separate 64-bit and 32-bit memory operations:
-`FLDR`/`FSTR` load and store `double`, while `FLDR_F32`/`FSTR_F32` load and
-store C `float`. `FROUND_F32` rounds a floating register through `float`
-precision while keeping the VM register file represented as `double`.
+Floating-point bytecode uses a tagged register file. `FLDR`/`FSTR` load and
+store `double` values tagged as f64, while `FLDR_F32`/`FSTR_F32` load and store
+C `float` values tagged as f32. Arithmetic and comparison opcodes without a
+suffix operate as f64; `_F32` opcodes operate in f32 precision. `FROUND_F32`
+converts a floating register to f32 and tags the destination as f32. Raw-bit
+moves are typed: `FR2R`/`R2FR` move f64 payloads, and `FR2R_F32`/`R2FR_F32`
+move f32 payloads.

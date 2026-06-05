@@ -161,15 +161,30 @@ extern "C" {
     X(FR2R, 1)  /* regs[rd] = *(long long*)&fregs[rs] (bit-pattern transfer) */\
     X(R2FR, 1)  /* fregs[rd] = *(double*)&regs[rs] (bit-pattern transfer, reverse \
                 of FR2R) */                                                    \
+    X(FADD3_F32, 1) /* fregs[rd] = (float)(fregs[rs1] + fregs[rs2]) */         \
+    X(FSUB3_F32, 1) /* fregs[rd] = (float)(fregs[rs1] - fregs[rs2]) */         \
+    X(FMUL3_F32, 1) /* fregs[rd] = (float)(fregs[rs1] * fregs[rs2]) */         \
+    X(FDIV3_F32, 1) /* fregs[rd] = (float)(fregs[rs1] / fregs[rs2]) */         \
+    X(FNEG3_F32, 1) /* fregs[rd] = (float)-fregs[rs1] */                       \
+    X(FEQ3_F32, 1)  /* rd = ((float)fregs[rs1] == (float)fregs[rs2]) */        \
+    X(FNE3_F32, 1)  /* rd = ((float)fregs[rs1] != (float)fregs[rs2]) */        \
+    X(FLT3_F32, 1)  /* rd = ((float)fregs[rs1] < (float)fregs[rs2]) */         \
+    X(FLE3_F32, 1)  /* rd = ((float)fregs[rs1] <= (float)fregs[rs2]) */        \
+    X(FGT3_F32, 1)  /* rd = ((float)fregs[rs1] > (float)fregs[rs2]) */         \
+    X(FGE3_F32, 1)  /* rd = ((float)fregs[rs1] >= (float)fregs[rs2]) */        \
+    X(I2F3_F32, 1)  /* fregs[rd] = (float)regs[rs] */                          \
+    X(F2I3_F32, 1)  /* regs[rd] = (long long)(float)fregs[rs] */               \
+    X(FR2R_F32, 1)  /* regs[rd] = raw float payload bits from fregs[rs] */      \
+    X(R2FR_F32, 1)  /* fregs[rd] = raw float payload bits from regs[rs] */      \
     /* Register-based safety opcodes */                                        \
     X(CHKP3, 1) /* Check pointer validity: regs[rs] */                         \
     X(CHKA3, 3) /* Check alignment: regs[rs], immediate alignment */           \
     X(CHKT3, 3) /* Check type: regs[rs], immediate TypeKind */                 \
     /* Struct return buffer support */                                         \
     X(RETBUF, 0) /* Get next return buffer: REG_A0 = rotating pool buffer */    \
-    X(FLDR_F32, 1)   /* fregs[rd] = (double)*(float*)regs[rs] */               \
-    X(FSTR_F32, 1)   /* *(float*)regs[rs] = (float)fregs[rd] */                \
-    X(FROUND_F32, 1) /* fregs[rd] = (float)fregs[rs] */               \
+    X(FLDR_F32, 1)   /* fregs[rd] = *(float*)regs[rs], tagged f32 */           \
+    X(FSTR_F32, 1)   /* *(float*)regs[rs] = fregs[rd] as f32 */                \
+    X(FROUND_F32, 1) /* fregs[rd] = (float)fregs[rs], tagged f32 */             \
     X(BTRAP, 0)      /* Halt execution (unreachable/builtin trap) */    \
     /* Bit-manipulation builtins */                                        \
     X(CLZ,      3)   /* rd = clz(rs); operand2 = bit-width (32 or 64) */  \
@@ -957,6 +972,23 @@ typedef struct GotoPatch {
 typedef struct JCC JCC;
 typedef struct JCC _VirtualMachine;
 
+typedef enum {
+    JCC_FREG_F64 = 0,
+    JCC_FREG_F32,
+    JCC_FREG_V4F32,
+    JCC_FREG_V2F64,
+} JCCFRegTag;
+
+typedef struct {
+    JCCFRegTag tag;
+    union {
+        float f32;
+        double f64;
+        float v4f32[4];
+        double v2f64[2];
+    } value;
+} JCCFReg;
+
 /*!
  @typedef JCCAsmCallback
  @abstract Callback invoked when an `asm("...")` statement is encountered
@@ -1533,7 +1565,7 @@ typedef struct Compiler {
 struct JCC {
     // VM Registers (pure register-based architecture)
     long long regs[32]; // General-purpose register file (NUM_REGS)
-    double fregs[32];   // Floating-point register file
+    JCCFReg fregs[32];  // Tagged floating-point register file
     JCCPc pc;           // Program counter (instruction index)
     long long *bp;      // Base pointer (frame pointer)
     long long *sp;      // Stack pointer

@@ -438,14 +438,11 @@ static inline int op_ENT3_fn(JCC *vm) {
         if (float_param_mask & (1LL << i)) {
             // Float parameter - copy from fregs[]
             if (f32_param_mask & (1u << i)) {
-                *(float *)param_slot = (float)vm->fregs[FREG_A0 + float_reg_idx];
+                *(float *)param_slot =
+                    jcc_freg_get_f32(vm, FREG_A0 + float_reg_idx);
             } else {
-                union {
-                    double d;
-                    long long ll;
-                } conv;
-                conv.d = vm->fregs[FREG_A0 + float_reg_idx];
-                *param_slot = conv.ll;
+                *param_slot =
+                    jcc_freg_raw_f64(vm, FREG_A0 + float_reg_idx);
             }
             float_reg_idx++;
         } else {
@@ -543,7 +540,8 @@ static inline int op_FADD3_fn(JCC *vm) {
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
 
-    vm->fregs[rd] = vm->fregs[rs1] + vm->fregs[rs2];
+    jcc_freg_set_f64(vm, rd,
+                     jcc_freg_get_f64(vm, rs1) + jcc_freg_get_f64(vm, rs2));
     return 0;
 }
 
@@ -554,7 +552,8 @@ static inline int op_FSUB3_fn(JCC *vm) {
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
 
-    vm->fregs[rd] = vm->fregs[rs1] - vm->fregs[rs2];
+    jcc_freg_set_f64(vm, rd,
+                     jcc_freg_get_f64(vm, rs1) - jcc_freg_get_f64(vm, rs2));
     return 0;
 }
 
@@ -565,7 +564,8 @@ static inline int op_FMUL3_fn(JCC *vm) {
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
 
-    vm->fregs[rd] = vm->fregs[rs1] * vm->fregs[rs2];
+    jcc_freg_set_f64(vm, rd,
+                     jcc_freg_get_f64(vm, rs1) * jcc_freg_get_f64(vm, rs2));
     return 0;
 }
 
@@ -577,7 +577,7 @@ static inline int op_FDIV3_fn(JCC *vm) {
     DECODE_RRR(operands, rd, rs1, rs2);
 
     // Division by zero check
-    if (vm->fregs[rs2] == 0.0) {
+    if (jcc_freg_get_f64(vm, rs2) == 0.0) {
         printf("\n========== DIVISION BY ZERO ==========\n");
         printf("Floating-point division by zero detected!\n");
         printf("PC offset: %lld\n", (long long)(vm->pc - 1));
@@ -585,7 +585,8 @@ static inline int op_FDIV3_fn(JCC *vm) {
         return -1;
     }
 
-    vm->fregs[rd] = vm->fregs[rs1] / vm->fregs[rs2];
+    jcc_freg_set_f64(vm, rd,
+                     jcc_freg_get_f64(vm, rs1) / jcc_freg_get_f64(vm, rs2));
     return 0;
 }
 
@@ -607,7 +608,61 @@ static inline int op_FNEG3_fn(JCC *vm) {
     int rd, rs1;
     DECODE_RR(operands, rd, rs1);
 
-    vm->fregs[rd] = -vm->fregs[rs1];
+    jcc_freg_set_f64(vm, rd, -jcc_freg_get_f64(vm, rs1));
+    return 0;
+}
+
+static inline int op_FADD3_F32_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    jcc_freg_set_f32(vm, rd,
+                     jcc_freg_get_f32(vm, rs1) + jcc_freg_get_f32(vm, rs2));
+    return 0;
+}
+
+static inline int op_FSUB3_F32_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    jcc_freg_set_f32(vm, rd,
+                     jcc_freg_get_f32(vm, rs1) - jcc_freg_get_f32(vm, rs2));
+    return 0;
+}
+
+static inline int op_FMUL3_F32_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    jcc_freg_set_f32(vm, rd,
+                     jcc_freg_get_f32(vm, rs1) * jcc_freg_get_f32(vm, rs2));
+    return 0;
+}
+
+static inline int op_FDIV3_F32_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+
+    if (jcc_freg_get_f32(vm, rs2) == 0.0f) {
+        printf("\n========== DIVISION BY ZERO ==========\n");
+        printf("Floating-point division by zero detected!\n");
+        printf("PC offset: %lld\n", (long long)(vm->pc - 1));
+        printf("======================================\n");
+        return -1;
+    }
+
+    jcc_freg_set_f32(vm, rd,
+                     jcc_freg_get_f32(vm, rs1) / jcc_freg_get_f32(vm, rs2));
+    return 0;
+}
+
+static inline int op_FNEG3_F32_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1;
+    DECODE_RR(operands, rd, rs1);
+
+    jcc_freg_set_f32(vm, rd, -jcc_freg_get_f32(vm, rs1));
     return 0;
 }
 
@@ -620,7 +675,7 @@ static inline int op_FEQ3_fn(JCC *vm) {
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
 
-    vm->regs[rd] = (vm->fregs[rs1] == vm->fregs[rs2]);
+    vm->regs[rd] = (jcc_freg_get_f64(vm, rs1) == jcc_freg_get_f64(vm, rs2));
     return 0;
 }
 
@@ -631,7 +686,7 @@ static inline int op_FNE3_fn(JCC *vm) {
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
 
-    vm->regs[rd] = (vm->fregs[rs1] != vm->fregs[rs2]);
+    vm->regs[rd] = (jcc_freg_get_f64(vm, rs1) != jcc_freg_get_f64(vm, rs2));
     return 0;
 }
 
@@ -642,7 +697,7 @@ static inline int op_FLT3_fn(JCC *vm) {
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
 
-    vm->regs[rd] = (vm->fregs[rs1] < vm->fregs[rs2]);
+    vm->regs[rd] = (jcc_freg_get_f64(vm, rs1) < jcc_freg_get_f64(vm, rs2));
     return 0;
 }
 
@@ -653,7 +708,7 @@ static inline int op_FLE3_fn(JCC *vm) {
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
 
-    vm->regs[rd] = (vm->fregs[rs1] <= vm->fregs[rs2]);
+    vm->regs[rd] = (jcc_freg_get_f64(vm, rs1) <= jcc_freg_get_f64(vm, rs2));
     return 0;
 }
 
@@ -664,7 +719,7 @@ static inline int op_FGT3_fn(JCC *vm) {
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
 
-    vm->regs[rd] = (vm->fregs[rs1] > vm->fregs[rs2]);
+    vm->regs[rd] = (jcc_freg_get_f64(vm, rs1) > jcc_freg_get_f64(vm, rs2));
     return 0;
 }
 
@@ -675,7 +730,55 @@ static inline int op_FGE3_fn(JCC *vm) {
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
 
-    vm->regs[rd] = (vm->fregs[rs1] >= vm->fregs[rs2]);
+    vm->regs[rd] = (jcc_freg_get_f64(vm, rs1) >= jcc_freg_get_f64(vm, rs2));
+    return 0;
+}
+
+static inline int op_FEQ3_F32_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    vm->regs[rd] = (jcc_freg_get_f32(vm, rs1) == jcc_freg_get_f32(vm, rs2));
+    return 0;
+}
+
+static inline int op_FNE3_F32_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    vm->regs[rd] = (jcc_freg_get_f32(vm, rs1) != jcc_freg_get_f32(vm, rs2));
+    return 0;
+}
+
+static inline int op_FLT3_F32_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    vm->regs[rd] = (jcc_freg_get_f32(vm, rs1) < jcc_freg_get_f32(vm, rs2));
+    return 0;
+}
+
+static inline int op_FLE3_F32_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    vm->regs[rd] = (jcc_freg_get_f32(vm, rs1) <= jcc_freg_get_f32(vm, rs2));
+    return 0;
+}
+
+static inline int op_FGT3_F32_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    vm->regs[rd] = (jcc_freg_get_f32(vm, rs1) > jcc_freg_get_f32(vm, rs2));
+    return 0;
+}
+
+static inline int op_FGE3_F32_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    vm->regs[rd] = (jcc_freg_get_f32(vm, rs1) >= jcc_freg_get_f32(vm, rs2));
     return 0;
 }
 
@@ -818,7 +921,7 @@ static inline int op_FLDR_fn(JCC *vm) {
     DECODE_RR(operands, rd, rs);
 
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 8, WATCH_READ);
-    vm->fregs[rd] = *(double *)vm->regs[rs];
+    jcc_freg_set_f64(vm, rd, *(double *)vm->regs[rs]);
     return 0;
 }
 
@@ -829,20 +932,20 @@ static inline int op_FSTR_fn(JCC *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
-    *(double *)vm->regs[rs] = vm->fregs[rd];
+    *(double *)vm->regs[rs] = jcc_freg_get_f64(vm, rd);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 8, WATCH_WRITE);
     return 0;
 }
 
 static inline int op_FLDR_F32_fn(JCC *vm) {
-    // Float32 load: fregs[rd] = (double)*(float*)regs[rs]
+    // Float32 load: fregs[rd] = *(float*)regs[rs]
     // Format: [FLDR_F32] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 4, WATCH_READ);
-    vm->fregs[rd] = (double)*(float *)vm->regs[rs];
+    jcc_freg_set_f32(vm, rd, *(float *)vm->regs[rs]);
     return 0;
 }
 
@@ -853,7 +956,7 @@ static inline int op_FSTR_F32_fn(JCC *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
-    *(float *)vm->regs[rs] = (float)vm->fregs[rd];
+    *(float *)vm->regs[rs] = jcc_freg_get_f32(vm, rd);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 4, WATCH_WRITE);
     return 0;
 }
@@ -865,7 +968,7 @@ static inline int op_FROUND_F32_fn(JCC *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
-    vm->fregs[rd] = (double)(float)vm->fregs[rs];
+    jcc_freg_set_f32(vm, rd, jcc_freg_get_f32(vm, rs));
     return 0;
 }
 
@@ -889,7 +992,17 @@ static inline int op_I2F3_fn(JCC *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
-    vm->fregs[rd] = (double)vm->regs[rs];
+    jcc_freg_set_f64(vm, rd, (double)vm->regs[rs]);
+    return 0;
+}
+
+static inline int op_I2F3_F32_fn(JCC *vm) {
+    // Int to float: fregs[rd] = (float)regs[rs]
+    long long operands = cc_read_word(vm);
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+
+    jcc_freg_set_f32(vm, rd, (float)vm->regs[rs]);
     return 0;
 }
 
@@ -901,7 +1014,18 @@ static inline int op_F2I3_fn(JCC *vm) {
     DECODE_RR(operands, rd, rs);
 
     if (rd != REG_ZERO)
-        vm->regs[rd] = (long long)vm->fregs[rs];
+        vm->regs[rd] = (long long)jcc_freg_get_f64(vm, rs);
+    return 0;
+}
+
+static inline int op_F2I3_F32_fn(JCC *vm) {
+    // Float to int: regs[rd] = (long long)fregs[rs]
+    long long operands = cc_read_word(vm);
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (long long)jcc_freg_get_f32(vm, rs);
     return 0;
 }
 
@@ -914,13 +1038,19 @@ static inline int op_FR2R_fn(JCC *vm) {
     DECODE_RR(operands, rd, rs);
 
     if (rd != REG_ZERO) {
-        union {
-            double d;
-            long long ll;
-        } conv;
-        conv.d = vm->fregs[rs];
-        vm->regs[rd] = conv.ll;
+        vm->regs[rd] = jcc_freg_raw_f64(vm, rs);
     }
+    return 0;
+}
+
+static inline int op_FR2R_F32_fn(JCC *vm) {
+    // Float register to integer register (raw f32 payload bits)
+    long long operands = cc_read_word(vm);
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (unsigned int)jcc_freg_raw_f32(vm, rs);
     return 0;
 }
 
@@ -932,12 +1062,17 @@ static inline int op_R2FR_fn(JCC *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
-    union {
-        double d;
-        long long ll;
-    } conv;
-    conv.ll = vm->regs[rs];
-    vm->fregs[rd] = conv.d;
+    jcc_freg_set_raw_f64(vm, rd, vm->regs[rs]);
+    return 0;
+}
+
+static inline int op_R2FR_F32_fn(JCC *vm) {
+    // Integer register to float register (raw f32 payload bits)
+    long long operands = cc_read_word(vm);
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+
+    jcc_freg_set_raw_f32(vm, rd, (int)vm->regs[rs]);
     return 0;
 }
 
@@ -1204,12 +1339,7 @@ static inline int op_CALLN_fn(JCC *vm) {
             if (i >= 8) {
                 args[i] = vm->sp[i - 8];
             } else if (i < 64 && (double_arg_mask & (1ULL << i))) {
-                union {
-                    double d;
-                    long long ll;
-                } conv;
-                conv.d = vm->fregs[FREG_A0 + fp_reg_idx++];
-                args[i] = conv.ll;
+                args[i] = jcc_freg_raw_f64(vm, FREG_A0 + fp_reg_idx++);
             } else {
                 args[i] = vm->regs[REG_A0 + int_reg_idx++];
             }
@@ -1929,7 +2059,7 @@ static int jcc_handle_ffi_policy_error(JCC *vm, const char *kind,
     printf("PC offset:  %u\n", (unsigned)vm->pc);
     printf("======================================\n");
     vm->regs[REG_A0] = 0;
-    vm->fregs[FREG_A0] = 0.0;
+    jcc_freg_set_f64(vm, FREG_A0, 0.0);
     return vm->ffi_errors_fatal ? -1 : 0;
 }
 
@@ -2033,7 +2163,7 @@ int jcc_call_native_function(JCC *vm, void *func_ptr, const char *name,
     if (returns_double) {
         double result;
         ffi_call(&cif, FFI_FN(func_ptr), &result, arg_ptrs);
-        vm->fregs[FREG_A0] = result;
+        jcc_freg_set_f64(vm, FREG_A0, result);
     } else {
         long long result;
         ffi_call(&cif, FFI_FN(func_ptr), &result, arg_ptrs);

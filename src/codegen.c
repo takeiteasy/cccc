@@ -428,6 +428,29 @@ static void emit_fround_f32(JCC *vm, int rd, int rs) {
     emit_frr(vm, FROUND_F32, rd, rs);
 }
 
+static int fop_for_type(Type *ty, int f64_op) {
+    if (!ty || ty->kind != TY_FLOAT)
+        return f64_op;
+    switch (f64_op) {
+    case FADD3: return FADD3_F32;
+    case FSUB3: return FSUB3_F32;
+    case FMUL3: return FMUL3_F32;
+    case FDIV3: return FDIV3_F32;
+    case FNEG3: return FNEG3_F32;
+    case FEQ3: return FEQ3_F32;
+    case FNE3: return FNE3_F32;
+    case FLT3: return FLT3_F32;
+    case FLE3: return FLE3_F32;
+    case FGT3: return FGT3_F32;
+    case FGE3: return FGE3_F32;
+    case I2F3: return I2F3_F32;
+    case F2I3: return F2I3_F32;
+    case FR2R: return FR2R_F32;
+    case R2FR: return R2FR_F32;
+    default: return f64_op;
+    }
+}
+
 // Load operations based on type
 // Load operations based on type
 static void emit_load(JCC *vm, Type *ty, int rd, int rs_addr) {
@@ -968,7 +991,8 @@ static void gen_complex_expr(JCC *vm, Node *node, int real_reg, int imag_reg) {
         }
         if (node->val == 3) {
             gen_complex_expr(vm, node->lhs, real_reg, imag_reg);
-            emit_frr(vm, FNEG3, imag_reg, imag_reg);
+            emit_frr(vm, fop_for_type(node->ty->base, FNEG3), imag_reg,
+                     imag_reg);
             return;
         }
         break;
@@ -978,7 +1002,8 @@ static void gen_complex_expr(JCC *vm, Node *node, int real_reg, int imag_reg) {
         } else {
             gen_expr(vm, node->lhs, real_reg);
             if (!is_flonum(node->lhs->ty))
-                emit_rr(vm, I2F3, real_reg, real_reg);
+                emit_rr(vm, fop_for_type(node->ty->base, I2F3), real_reg,
+                        real_reg);
             emit_float_zero(vm, imag_reg);
         }
         if (node->ty->base && node->ty->base->kind == TY_FLOAT) {
@@ -1009,8 +1034,8 @@ static void gen_complex_expr(JCC *vm, Node *node, int real_reg, int imag_reg) {
         return;
     case ND_NEG:
         gen_complex_expr(vm, node->lhs, real_reg, imag_reg);
-        emit_frr(vm, FNEG3, real_reg, real_reg);
-        emit_frr(vm, FNEG3, imag_reg, imag_reg);
+        emit_frr(vm, fop_for_type(node->ty->base, FNEG3), real_reg, real_reg);
+        emit_frr(vm, fop_for_type(node->ty->base, FNEG3), imag_reg, imag_reg);
         return;
     case ND_ADD:
     case ND_SUB:
@@ -1024,32 +1049,37 @@ static void gen_complex_expr(JCC *vm, Node *node, int real_reg, int imag_reg) {
         gen_complex_expr(vm, node->lhs, real_reg, imag_reg);
         gen_complex_expr(vm, node->rhs, br, bi);
 
+        int fadd = fop_for_type(node->ty->base, FADD3);
+        int fsub = fop_for_type(node->ty->base, FSUB3);
+        int fmul = fop_for_type(node->ty->base, FMUL3);
+        int fdiv = fop_for_type(node->ty->base, FDIV3);
+
         if (node->kind == ND_ADD) {
-            emit_frrr(vm, FADD3, real_reg, real_reg, br);
-            emit_frrr(vm, FADD3, imag_reg, imag_reg, bi);
+            emit_frrr(vm, fadd, real_reg, real_reg, br);
+            emit_frrr(vm, fadd, imag_reg, imag_reg, bi);
         } else if (node->kind == ND_SUB) {
-            emit_frrr(vm, FSUB3, real_reg, real_reg, br);
-            emit_frrr(vm, FSUB3, imag_reg, imag_reg, bi);
+            emit_frrr(vm, fsub, real_reg, real_reg, br);
+            emit_frrr(vm, fsub, imag_reg, imag_reg, bi);
         } else if (node->kind == ND_MUL) {
-            emit_frrr(vm, FMUL3, t0, real_reg, br);
-            emit_frrr(vm, FMUL3, t1, imag_reg, bi);
-            emit_frrr(vm, FSUB3, t0, t0, t1);
-            emit_frrr(vm, FMUL3, t1, real_reg, bi);
-            emit_frrr(vm, FMUL3, imag_reg, imag_reg, br);
-            emit_frrr(vm, FADD3, imag_reg, t1, imag_reg);
+            emit_frrr(vm, fmul, t0, real_reg, br);
+            emit_frrr(vm, fmul, t1, imag_reg, bi);
+            emit_frrr(vm, fsub, t0, t0, t1);
+            emit_frrr(vm, fmul, t1, real_reg, bi);
+            emit_frrr(vm, fmul, imag_reg, imag_reg, br);
+            emit_frrr(vm, fadd, imag_reg, t1, imag_reg);
             emit_fmov3(vm, real_reg, t0);
         } else {
-            emit_frrr(vm, FMUL3, t0, br, br);
-            emit_frrr(vm, FMUL3, t1, bi, bi);
-            emit_frrr(vm, FADD3, t0, t0, t1);
-            emit_frrr(vm, FMUL3, t1, real_reg, br);
-            emit_frrr(vm, FMUL3, t2, imag_reg, bi);
-            emit_frrr(vm, FADD3, t1, t1, t2);
-            emit_frrr(vm, FDIV3, t1, t1, t0);
-            emit_frrr(vm, FMUL3, imag_reg, imag_reg, br);
-            emit_frrr(vm, FMUL3, t2, real_reg, bi);
-            emit_frrr(vm, FSUB3, imag_reg, imag_reg, t2);
-            emit_frrr(vm, FDIV3, imag_reg, imag_reg, t0);
+            emit_frrr(vm, fmul, t0, br, br);
+            emit_frrr(vm, fmul, t1, bi, bi);
+            emit_frrr(vm, fadd, t0, t0, t1);
+            emit_frrr(vm, fmul, t1, real_reg, br);
+            emit_frrr(vm, fmul, t2, imag_reg, bi);
+            emit_frrr(vm, fadd, t1, t1, t2);
+            emit_frrr(vm, fdiv, t1, t1, t0);
+            emit_frrr(vm, fmul, imag_reg, imag_reg, br);
+            emit_frrr(vm, fmul, t2, real_reg, bi);
+            emit_frrr(vm, fsub, imag_reg, imag_reg, t2);
+            emit_frrr(vm, fdiv, imag_reg, imag_reg, t0);
             emit_fmov3(vm, real_reg, t1);
         }
 
@@ -1199,7 +1229,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
     case ND_NEG:
         gen_expr(vm, node->lhs, dest_reg);
         if (is_flonum(node->ty)) {
-            emit_frr(vm, FNEG3, dest_reg, dest_reg);
+            emit_frr(vm, fop_for_type(node->ty, FNEG3), dest_reg, dest_reg);
         } else {
             emit_rr(vm, NEG3, dest_reg, dest_reg);
         }
@@ -1243,8 +1273,10 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
 
             int r_real = alloc_temp_reg();
             int r_imag = alloc_temp_reg();
-            emit_frrr(vm, FEQ3, r_real, ar, br);
-            emit_frrr(vm, FEQ3, r_imag, ai, bi);
+            emit_frrr(vm, fop_for_type(node->lhs->ty->base, FEQ3), r_real, ar,
+                      br);
+            emit_frrr(vm, fop_for_type(node->lhs->ty->base, FEQ3), r_imag, ai,
+                      bi);
             emit_rrr(vm, AND3, dest_reg, r_real, r_imag);
             if (node->kind == ND_NE)
                 emit_rr(vm, NOT3, dest_reg, dest_reg);
@@ -1279,12 +1311,14 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                 // convert back dest_reg is FREG_*, so we use FR2R to move bits
                 // to an int temp
                 int r_temp = alloc_temp_reg();
-                emit_rr(vm, FR2R, r_temp, dest_reg); // Float bits -> int reg
+                emit_rr(vm, fop_for_type(node->lhs->ty, FR2R), r_temp,
+                        dest_reg); // Float bits -> int reg
                 emit_psh3(vm, r_temp);               // Push int reg to stack
                 gen_expr(vm, node->rhs,
                          r_rhs);       // Evaluate RHS (may clobber all)
                 emit_pop3(vm, r_temp); // Pop saved bits into int reg
-                emit_rr(vm, R2FR, dest_reg, r_temp); // Int bits -> float reg
+                emit_rr(vm, fop_for_type(node->lhs->ty, R2FR), dest_reg,
+                        r_temp); // Int bits -> float reg
                 free_temp_reg(r_temp);
             } else {
                 gen_expr(vm, node->rhs, r_rhs);
@@ -1319,9 +1353,8 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             default:
                 error("unsupported float op");
             }
-            emit_frrr(vm, fop, dest_reg, dest_reg, r_rhs);
-            if (node->ty->kind == TY_FLOAT)
-                emit_fround_f32(vm, dest_reg, dest_reg);
+            emit_frrr(vm, fop_for_type(node->lhs->ty, fop), dest_reg, dest_reg,
+                      r_rhs);
         } else {
             // Integer operations
             gen_expr(vm, node->lhs, dest_reg); // LHS goes directly to dest
@@ -1602,7 +1635,8 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             int imag_reg = (dest_reg == FREG_A7) ? FREG_A6 : FREG_A7;
             gen_complex_expr(vm, node->lhs, dest_reg, imag_reg);
             if (!is_flonum(node->ty))
-                emit_rr(vm, F2I3, dest_reg, dest_reg);
+                emit_rr(vm, fop_for_type(node->lhs->ty->base, F2I3), dest_reg,
+                        dest_reg);
             else if (node->ty->kind == TY_FLOAT)
                 emit_fround_f32(vm, dest_reg, dest_reg);
             return;
@@ -1611,12 +1645,10 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         // Add type conversion if needed
         if (is_flonum(node->ty) && !is_flonum(node->lhs->ty)) {
             // int -> float
-            emit_rr(vm, I2F3, dest_reg, dest_reg);
-            if (node->ty->kind == TY_FLOAT)
-                emit_fround_f32(vm, dest_reg, dest_reg);
+            emit_rr(vm, fop_for_type(node->ty, I2F3), dest_reg, dest_reg);
         } else if (!is_flonum(node->ty) && is_flonum(node->lhs->ty)) {
             // float -> int
-            emit_rr(vm, F2I3, dest_reg, dest_reg);
+            emit_rr(vm, fop_for_type(node->lhs->ty, F2I3), dest_reg, dest_reg);
         } else if (node->ty->kind == TY_FLOAT &&
                    node->lhs->ty->kind != TY_FLOAT) {
             emit_fround_f32(vm, dest_reg, dest_reg);
@@ -1920,7 +1952,8 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                     // push
                     int freg = FREG_A0; // Use as scratch
                     gen_expr(vm, arg, freg);
-                    emit_rr(vm, FR2R, REG_T0, freg); // Move bits to REG_T0
+                    emit_rr(vm, fop_for_type(arg->ty, FR2R), REG_T0,
+                            freg); // Move bits to REG_T0
                     emit_psh3(vm, REG_T0);
                 } else {
                     // Integer/pointer arg: evaluate to temp reg, push
@@ -1948,6 +1981,7 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         int float_arg_idx = 0;
         int saved_int_count = 0;   // How many int regs we saved
         int saved_float_count = 0; // How many float regs we saved
+        bool float_arg_is_f32[8] = {0};
 
         for (int i = 0; i < nargs && i < 8; i++) {
             Node *arg = arg_array[i];
@@ -1965,7 +1999,8 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
 
                 // Push float regs: convert to int bits, push
                 for (int j = float_arg_idx - 1; j >= 0; j--) {
-                    emit_rr(vm, FR2R, REG_T0, FREG_A0 + j);
+                    emit_rr(vm, float_arg_is_f32[j] ? FR2R_F32 : FR2R,
+                            REG_T0, FREG_A0 + j);
                     emit_psh3(vm, REG_T0);
                 }
                 saved_float_count = float_arg_idx;
@@ -1989,6 +2024,8 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                     // Fixed param double: put in float register
                     if (float_arg_idx < 8) {
                         gen_expr(vm, arg, FREG_A0 + float_arg_idx);
+                        float_arg_is_f32[float_arg_idx] =
+                            arg->ty->kind == TY_FLOAT;
                         float_arg_idx++;
                     }
                 }
@@ -2008,7 +2045,8 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                 // Restore float regs (were pushed last, pop first)
                 for (int j = 0; j < saved_float_count; j++) {
                     emit_pop3(vm, REG_T0);
-                    emit_rr(vm, R2FR, FREG_A0 + j, REG_T0);
+                    emit_rr(vm, float_arg_is_f32[j] ? R2FR_F32 : R2FR,
+                            FREG_A0 + j, REG_T0);
                 }
                 // Restore int regs
                 for (int j = 0; j < saved_int_count; j++) {
