@@ -2069,7 +2069,7 @@ static Node *create_lvar_init(JCC *vm, Initializer *init, Type *ty,
     return new_binary(vm, ND_ASSIGN, lhs, init->expr, tok);
 }
 
-// Called from reflect.c quote_substitute to expand ND_INIT_SPLICE nodes.
+// Called from relfection.c quote_substitute to expand ND_INIT_SPLICE nodes.
 // Builds positional ND_ASSIGN chains for each struct field or array element
 // from the ->next-linked chain of expression nodes.
 Node *node_expand_init_splice(JCC *vm, Obj *var, Type *ty, Node *chain, Token *tok) {

@@ -1547,7 +1547,7 @@ const char *__jcc_dump_tree_to_string(JCC *vm, $node_t *node);
  * @abstract Print __jcc_ast_*() builder calls that would reconstruct the node.
  * @param vm The VM context.
  * @param node The root node to emit builder calls for.
- * @discussion Covers all node kinds for which reflect.c has a builder.
+ * @discussion Covers all node kinds for which relfection.c has a builder.
  *             Unsupported kinds are emitted as C comments.
  *             Convenience wrapper: $dump_ast_gen(node).
  */

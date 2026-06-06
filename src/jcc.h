@@ -966,8 +966,8 @@ struct Scope {
     struct Scope *next;
     // C has two block scopes; one is for variables/typedefs and
     // the other is for struct/union/enum tags.
-    VarScopeNode *vars; // Linked list (kept for reflect.c iteration)
-    TagScopeNode *tags; // Linked list (kept for reflect.c iteration)
+    VarScopeNode *vars; // Linked list (kept for relfection.c iteration)
+    TagScopeNode *tags; // Linked list (kept for relfection.c iteration)
     HashMap var_map;    // O(1) name lookup; NULL buckets = use linear fallback
     HashMap tag_map;
 };

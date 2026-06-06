@@ -327,7 +327,7 @@ Obj *parse(JCC *vm, Token *tok);
 void cc_execute_top_level_macro(JCC *vm, char *name, Token *tok,
                                 Node *args, int arg_count);
 // Expand a deferred ND_INIT_SPLICE node into positional ND_ASSIGN chains.
-// Called by quote_substitute in reflect.c after the splice chain is resolved.
+// Called by quote_substitute in relfection.c after the splice chain is resolved.
 Node *node_expand_init_splice(JCC *vm, Obj *var, Type *ty, Node *chain, Token *tok);
 
 //
@@ -580,8 +580,8 @@ char *serialize_node_to_source(JCC *vm, Node *node);
 
 void cc_dump_ast(FILE *f, Obj *prog, int verbose);
 void cc_dump_ast_json(FILE *f, Obj *prog, int verbose);
-void cc_dump_node(FILE *f, Node *node, int verbose);      // single-node dump (used by reflect.c)
-const char *cc_node_kind_name(NodeKind kind);             // kind→string (used by reflect.c)
+void cc_dump_node(FILE *f, Node *node, int verbose);      // single-node dump (used by relfection.c)
+const char *cc_node_kind_name(NodeKind kind);             // kind→string (used by relfection.c)
 
 //
 // json.c

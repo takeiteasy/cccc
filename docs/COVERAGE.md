@@ -532,7 +532,7 @@ Reflection API function callable from macro bodies. Registers a header to be
 prepended as an `#include` directive in the serialized C output. Duplicate
 registrations for the same header are deduplicated.
 
-**Source:** `src/reflect.c` (`__jcc_forward_include`), `src/serialize.c` (`cc_serialize_program`)
+**Source:** `src/relfection.c` (`__jcc_forward_include`), `src/serialize.c` (`cc_serialize_program`)
 
 ```c
 [[jcc::comptime]]

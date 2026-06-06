@@ -23,7 +23,7 @@
 
 #include "./internal.h"
 
-// External declaration from reflect.c
+// External declaration from relfection.c
 extern JCC *__jcc_current_vm;
 
 // Forward declarations for reflection API functions (to register as FFI)
