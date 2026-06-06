@@ -674,6 +674,8 @@ typedef enum {
     ND_UNREACHABLE = 53, // __builtin_unreachable() - code path that must not execute
     ND_BITOP = 54,      // Bit-manipulation builtins; val = (op<<8)|bit_width, lhs = arg
     ND_OVERFLOW_ARITH = 55, // Checked arithmetic; val = 0/1/2 (add/sub/mul), lhs=a, rhs=b, cas_addr=ptr
+    ND_INIT_SPLICE = 56,    // Deferred compound-literal $@k splice; expanded by quote_substitute
+                            // var=lvar, lhs=ND_VAR($@k placeholder)
 } NodeKind;
 
 /*!

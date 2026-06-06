@@ -1935,7 +1935,7 @@ static void initializer2(JCC *vm, Token **rest, Token *tok, Initializer *init) {
         // Handle that case first.
         Node *expr = assign(vm, rest, tok);
         add_type(vm, expr);
-        if (expr->ty->kind == TY_STRUCT) {
+        if (expr->ty->kind == TY_STRUCT || expr->kind == ND_MACRO_CALL) {
             init->expr = expr;
             return;
         }
@@ -2069,6 +2069,45 @@ static Node *create_lvar_init(JCC *vm, Initializer *init, Type *ty,
     return new_binary(vm, ND_ASSIGN, lhs, init->expr, tok);
 }
 
+// Called from reflect.c quote_substitute to expand ND_INIT_SPLICE nodes.
+// Builds positional ND_ASSIGN chains for each struct field or array element
+// from the ->next-linked chain of expression nodes.
+Node *node_expand_init_splice(JCC *vm, Obj *var, Type *ty, Node *chain, Token *tok) {
+    InitDesg base_desg = {NULL, 0, NULL, var};
+    Node *result = new_node(vm, ND_NULL_EXPR, tok);
+    Node *elem = chain;
+
+    if (ty->kind == TY_STRUCT) {
+        int count = 0;
+        for (Member *mem = ty->members; mem; mem = mem->next) count++;
+        int i = 0;
+        for (Member *mem = ty->members; mem; mem = mem->next, i++) {
+            if (!elem)
+                error_tok(vm, tok, "$@k initializer splice: too few elements (got %d, struct has %d fields)", i, count);
+            InitDesg desg2 = {&base_desg, 0, mem};
+            Node *lhs = init_desg_expr(vm, &desg2, tok);
+            result = new_binary(vm, ND_COMMA, result,
+                                new_binary(vm, ND_ASSIGN, lhs, elem, tok), tok);
+            elem = elem->next;
+        }
+        if (elem)
+            error_tok(vm, tok, "$@k initializer splice: too many elements (struct has %d fields)", count);
+    } else if (ty->kind == TY_ARRAY) {
+        for (int i = 0; i < ty->array_len; i++) {
+            if (!elem)
+                error_tok(vm, tok, "$@k initializer splice: too few elements (got %d, array has %d elements)", i, ty->array_len);
+            InitDesg desg2 = {&base_desg, i};
+            Node *lhs = init_desg_expr(vm, &desg2, tok);
+            result = new_binary(vm, ND_COMMA, result,
+                                new_binary(vm, ND_ASSIGN, lhs, elem, tok), tok);
+            elem = elem->next;
+        }
+        if (elem)
+            error_tok(vm, tok, "$@k initializer splice: too many elements (array has %d elements)", ty->array_len);
+    }
+    return result;
+}
+
 // Generate initialization for VLA
 // Unlike create_lvar_init which uses ty->array_len, VLAs have
 // runtime-determined size We generate assignments based on the number of
@@ -2116,8 +2155,40 @@ static Node *create_vla_init(JCC *vm, Initializer *init, Type *ty, Obj *var,
 //   x[0][1] = 7;
 //   x[1][0] = 8;
 //   x[1][1] = 9;
+// Returns true if init->children[0] holds a sole $@k splice placeholder.
+// Errors immediately if $@k is mixed with other initializer elements.
+static bool init_is_sole_splice(JCC *vm, Initializer *init, Type *ty, Token *tok) {
+    if (ty->kind != TY_STRUCT && ty->kind != TY_ARRAY) return false;
+    if (!init->children || !init->children[0] || !init->children[0]->expr) return false;
+    Node *expr = init->children[0]->expr;
+    if (expr->kind != ND_VAR || !expr->var || !expr->var->is_splice_placeholder) return false;
+
+    // Validate no other children have exprs (sole-element constraint)
+    if (ty->kind == TY_ARRAY) {
+        for (int i = 1; i < ty->array_len; i++)
+            if (init->children[i] && init->children[i]->expr)
+                error_tok(vm, tok, "cannot mix $@k with other initializer elements");
+    } else {
+        for (Member *m = ty->members; m; m = m->next)
+            if (m->idx > 0 && init->children[m->idx] && init->children[m->idx]->expr)
+                error_tok(vm, tok, "cannot mix $@k with other initializer elements");
+    }
+    return true;
+}
+
 static Node *lvar_initializer(JCC *vm, Token **rest, Token *tok, Obj *var) {
     Initializer *init = initializer(vm, rest, tok, var->ty, &var->ty);
+
+    // $@k splice in compound-literal context: defer lowering to quote_substitute
+    if (init_is_sole_splice(vm, init, var->ty, tok)) {
+        Node *zero = new_node(vm, ND_MEMZERO, tok);
+        zero->var = var;
+        Node *splice = new_node(vm, ND_INIT_SPLICE, tok);
+        splice->var = var;
+        splice->lhs = init->children[0]->expr; // ND_VAR($@k)
+        return new_binary(vm, ND_COMMA, zero, splice, tok);
+    }
+
     InitDesg desg = {NULL, 0, NULL, var};
 
     // If a partial initializer list is given, the standard requires

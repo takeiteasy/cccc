@@ -326,6 +326,9 @@ bool node_int_const_fits(JCC *vm, Node *expr, Type *to);
 Obj *parse(JCC *vm, Token *tok);
 void cc_execute_top_level_macro(JCC *vm, char *name, Token *tok,
                                 Node *args, int arg_count);
+// Expand a deferred ND_INIT_SPLICE node into positional ND_ASSIGN chains.
+// Called by quote_substitute in reflect.c after the splice chain is resolved.
+Node *node_expand_init_splice(JCC *vm, Obj *var, Type *ty, Node *chain, Token *tok);
 
 //
 // type.c

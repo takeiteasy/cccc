@@ -113,6 +113,14 @@ static void print_escaped_string_fp(FILE *f, const char *s) {
 static void vdiagnostic_at(JCC *vm, char *filename, char *input, int line_no,
                            char *loc, const char *kind,
                            const char *warn_name, char *fmt, va_list ap) {
+    // Guard: loc must be within the file's contents buffer.
+    // Synthesized tokens (e.g. incremental $@k placeholders) may have their
+    // loc rewritten to arena memory; clamp to input start so display_width
+    // does not scan out-of-bounds arena bytes.
+    char *file_end = input + strlen(input);
+    if (loc < input || loc > file_end)
+        loc = input;
+
     // Find a line containing `loc`.
     char *line = loc;
     while (input < line && line[-1] != '\n')

@@ -1697,10 +1697,12 @@ static int quote_scan_and_rewrite(JCC *vm, Token *toks, uint64_t *splice_mask) {
                           "(splice indices start at 1)");
                     return -1;
                 }
-                // Collapse three tokens ($ @ N) into one named $@k
-                char *newname = arena_format(vm, "$@%d", k);
-                t->loc = newname;
-                t->len = (int)strlen(newname);
+                // Collapse three tokens ($ @ N) into one token.
+                // Keep t->loc pointing into the template file buffer so that
+                // error diagnostics can compute the correct column offset.
+                // Since "$@N" is literally in the template text, spanning
+                // t->loc through the end of num_tok covers the exact text.
+                t->len = (int)(num_tok->loc + num_tok->len - t->loc);
                 t->next = num_tok->next; // skip @ and N tokens
             } else {
                 // $@ incremental splice
@@ -1789,11 +1791,17 @@ static Obj *quote_push_placeholder(JCC *vm, Scope *sc, char *name,
     snode->next = sc->vars;
     sc->vars = snode;
 
+    // Also register in the hashmap so find_var can locate the placeholder
+    // even after push_scope initializes sc->var_map (which happens when the
+    // compound literal creates its anonymous variable via new_var).
+    hashmap_put2_borrowed(&sc->var_map, name, name_len, snode);
+
     return var;
 }
 
 // Substitution walk state
 typedef struct {
+    JCC      *vm;                   // compiler context (needed for ND_INIT_SPLICE expansion)
     Obj      *placeholder_vars[64]; // placeholder_vars[i] = Obj for $(i+1)
     Obj      *splice_vars[64];      // splice_vars[i]      = Obj for $@(i+1)
     _Node   **arg_nodes;
@@ -1845,15 +1853,30 @@ static _Node *quote_substitute(QuoteSubstState *s, _Node *node) {
                 return s->arg_nodes[i];
         }
         // Splice placeholder $@k used as a sub-expression → error.
-        // (Direct arg-list position is handled in the ->args block below.)
+        // (Direct arg-list and initializer positions are handled elsewhere.)
         for (int i = 0; i < s->n_args && i < 64; i++) {
             if (s->splice_vars[i] && node->var == s->splice_vars[i]) {
                 error("__jcc_quote: $@%d is only valid in statement-list "
-                      "position (inside a block { }) or as a direct call "
-                      "argument; cannot be used as a sub-expression", i + 1);
+                      "position (inside a block { }), as a direct call "
+                      "argument, or as the sole element of a compound-literal "
+                      "initializer; cannot be used as a sub-expression", i + 1);
                 return node; // return unchanged to avoid a NULL crash
             }
         }
+    }
+
+    // Initializer-list splice: expand deferred compound-literal $@k splice
+    if (node->kind == ND_INIT_SPLICE) {
+        if (!node->lhs || node->lhs->kind != ND_VAR || !node->lhs->var)
+            error("ND_INIT_SPLICE: missing splice var (internal error)");
+        for (int i = 0; i < s->n_args && i < 64; i++) {
+            if (s->splice_vars[i] && node->lhs->var == s->splice_vars[i]) {
+                _Node *chain = s->arg_nodes[i];
+                return node_expand_init_splice(s->vm, node->var, node->var->ty, chain, node->tok);
+            }
+        }
+        error("ND_INIT_SPLICE: unresolved splice var (internal error)");
+        return node;
     }
 
     // Recurse into all child fields (same set as transform_node in pragma.c)
@@ -2080,6 +2103,7 @@ static _Node *quote_core(JCC *vm, const char *tmpl,
 
     QuoteSubstState subst;
     memset(&subst, 0, sizeof(subst));
+    subst.vm       = vm;
     subst.arg_nodes = nodes;
     subst.n_args = (n < 64) ? n : 64;
 

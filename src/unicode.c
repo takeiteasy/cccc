@@ -80,8 +80,9 @@ uint32_t decode_utf8(JCC *vm, char **new_pos, char *p) {
     }
 
     for (int i = 1; i < len; i++) {
-        if ((unsigned char)p[i] >> 6 != 0b10)
+        if ((unsigned char)p[i] >> 6 != 0b10) {
             error_at(vm, start, "invalid UTF-8 sequence");
+        }
         c = (c << 6) | (p[i] & 0b111111);
     }
 

@@ -485,6 +485,50 @@ splice that inserts zero arguments. Using `$@k` as a sub-expression operand
 error. Splicing the wrong number of arguments into a fixed-arity callee is also
 a compile-time error.
 
+### Compound-literal initializer-list splice
+
+`$@k` can also appear as the **sole element** inside the braces of a compound
+literal, splicing a node chain as positional initializers for a struct or
+fixed-size array:
+
+```c
+[[jcc::macro(inline)]]
+_Node *make_point(_Node *px, _Node *py) {
+    _VirtualMachine *vm = __jcc_get_vm();
+    _Node *chain = _NODE_LIST((_Node*[]){ px, py }, 2);
+    return _QUOTE("(struct Point){ $@1 }", chain);
+    // → (struct Point){ .x = px, .y = py }  (positional, left-to-right)
+}
+
+struct Point p = make_point(10, 32); // p.x == 10, p.y == 32
+```
+
+Array compound literals are also supported:
+
+```c
+[[jcc::macro(inline)]]
+_Node *make_arr3(_Node *a, _Node *b, _Node *c) {
+    _VirtualMachine *vm = __jcc_get_vm();
+    _Node *chain = _NODE_LIST((_Node*[]){ a, b, c }, 3);
+    return _QUOTE("(int[3]){ $@1 }", chain);
+}
+```
+
+**V1 restrictions:**
+- `$@k` must be the only element in the braces — mixing with other initializer
+  elements is a compile-time error.
+- Initializers are positional (no designator syntax like `.field = val`).
+- Arrays must be explicitly sized; inferred-length `arr[]` is not supported.
+- A mismatch between the chain length and the number of struct fields or array
+  elements is a compile-time error.
+
+Mixing a scalar placeholder with a compound-literal splice in one template is
+fine, as long as the splice occupies the sole braces element:
+
+```c
+return _QUOTE("(struct Point){ $@2 }", unused_scalar, chain);
+```
+
 ### `_QUOTE` inside generated function bodies
 
 `_QUOTE("return x;")` needs to know the enclosing function's return type to
