@@ -9,8 +9,8 @@ int local_header_type_size(void) {
 
 [[jcc::macro]]
 void generate_local_header_context_result(void) {
-    _Obj *fn = _AST_FUNCTION("local_header_context_result", _AST_GET_TYPE("int"));
-    _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(_AST_INT_LITERAL(local_header_type_size() ? 42 : 1)));
+    $obj_t *fn = $function("local_header_context_result", $get_type("int"));
+    $function_set_body(fn, $return($int_literal(local_header_type_size() ? 42 : 1)));
 }
 
 generate_local_header_context_result();

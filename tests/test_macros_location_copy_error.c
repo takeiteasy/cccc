@@ -2,10 +2,10 @@
 // JCC_EXPECT_STDERR: test_macros_location_copy_error\.c:13:.*copy_loc\(40\)
 
 [[jcc::macro(inline)]]
-_Node *copy_loc(_Node *value) {
-    _Node *node = _AST_BINARY(_ADD, value, _AST_INT_LITERAL(1));
-    _AST_COPY_LOCATION(node, value);
-    _MACRO_ERROR_AT(node, "copied generated location");
+$node_t *copy_loc($node_t *value) {
+    $node_t *node = $binary(nk_add, value, $int_literal(1));
+    $copy_location(node, value);
+    $macro_error_at(node, "copied generated location");
     return node;
 }
 

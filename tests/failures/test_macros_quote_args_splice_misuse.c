@@ -7,8 +7,8 @@
 int sum_ints(int count, ...) { return 0; }
 
 [[jcc::macro(inline)]]
-_Node *bad_arg_splice(_Node *x) {
-    _VirtualMachine *vm = __jcc_get_vm();
+$node_t *bad_arg_splice($node_t *x) {
+    $vm_t *vm = __jcc_get_vm();
     // $@1 cannot be used as an operand inside an expression; it must be a
     // direct argument, not a sub-expression.
     return __jcc_quote(vm, "sum_ints(1, $@1 + 1)", x);

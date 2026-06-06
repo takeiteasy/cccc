@@ -1,8 +1,8 @@
-// Test __jcc_gensym and _GENSYM for collision-safe generated names.
+// Test __jcc_gensym and $gensym for collision-safe generated names.
 
 [[jcc::macro(inline)]]
-_Node *gensym_test(void) {
-    const char *a = _GENSYM("helper");
+$node_t *gensym_test(void) {
+    const char *a = $gensym("helper");
     const char *b = __jcc_gensym(_VM, "helper");
 
     int same = 1;
@@ -13,15 +13,15 @@ _Node *gensym_test(void) {
         }
     }
 
-    _Type *int_ty = _AST_GET_TYPE("int");
-    _Obj *fn_a = _AST_FUNCTION(a, int_ty);
-    _Obj *fn_b = _AST_FUNCTION(b, int_ty);
-    _AST_FUNCTION_SET_BODY(fn_a, _AST_RETURN(_AST_INT_LITERAL(1)));
-    _AST_FUNCTION_SET_BODY(fn_b, _AST_RETURN(_AST_INT_LITERAL(2)));
+    $type_t *int_ty = $get_type("int");
+    $obj_t *fn_a = $function(a, int_ty);
+    $obj_t *fn_b = $function(b, int_ty);
+    $function_set_body(fn_a, $return($int_literal(1)));
+    $function_set_body(fn_b, $return($int_literal(2)));
 
     if (same || !fn_a || !fn_b || a[0] != 'h' || b[0] != 'h')
-        return _AST_INT_LITERAL(1);
-    return _AST_INT_LITERAL(42);
+        return $int_literal(1);
+    return $int_literal(42);
 }
 
 int main(void) {

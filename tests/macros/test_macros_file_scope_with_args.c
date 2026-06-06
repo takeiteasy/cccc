@@ -4,10 +4,10 @@
 
 [[jcc::macro]]
 void make_named_func(char *name) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Type *int_ty = __jcc_ast_get_type(vm, "int");
-    _Obj *fn = __jcc_ast_function(vm, name, int_ty);
-    _Node *body = __jcc_ast_return(vm, __jcc_ast_int_literal(vm, 42));
+    $vm_t *vm = __jcc_get_vm();
+    $type_t *int_ty = __jcc_ast_get_type(vm, "int");
+    $obj_t *fn = __jcc_ast_function(vm, name, int_ty);
+    $node_t *body = __jcc_ast_return(vm, __jcc_ast_int_literal(vm, 42));
     __jcc_ast_function_set_body(vm, fn, body);
 }
 

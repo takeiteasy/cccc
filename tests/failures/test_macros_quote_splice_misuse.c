@@ -3,8 +3,8 @@
 // list) must produce a compile-time error.
 
 [[jcc::macro(inline)]]
-_Node *bad_splice(_Node *x) {
-    _VirtualMachine *vm = __jcc_get_vm();
+$node_t *bad_splice($node_t *x) {
+    $vm_t *vm = __jcc_get_vm();
     // $@1 is a list splice — it cannot be used as an expression operand.
     return __jcc_quote(vm, "$@1 + 1", x);
 }

@@ -4,16 +4,16 @@
 struct Dims { int width; int height; int depth; } dims = { 640, 480, 3 };
 
 [[jcc::macro(inline)]]
-_Node *get_area(void) {
+$node_t *get_area(void) {
     // width * height at compile time
-    _Node *w = _AST_GET_COMPTIME_MEMBER("dims", "width");
-    _Node *h = _AST_GET_COMPTIME_MEMBER("dims", "height");
-    return _AST_BINARY(_MUL, w, h);
+    $node_t *w = $get_comptime_member("dims", "width");
+    $node_t *h = $get_comptime_member("dims", "height");
+    return $binary(nk_mul, w, h);
 }
 
 [[jcc::macro(inline)]]
-_Node *get_depth(void) {
-    return _AST_GET_COMPTIME_MEMBER("dims", "depth");
+$node_t *get_depth(void) {
+    return $get_comptime_member("dims", "depth");
 }
 
 int main(void) {

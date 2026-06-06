@@ -804,7 +804,7 @@ struct Obj {
     bool is_static;
     bool is_constexpr;
     bool is_implicit; // synthesized by an implicit function declaration
-    bool is_macro_generated; // true if created by a #pragma macro via _AST_FUNCTION/_AST_GLOBAL_VAR
+    bool is_macro_generated; // true if created by a #pragma macro via $function/$global_var
     bool is_splice_placeholder; // true for $@k vars synthesised by quote_core
 
     // Global variable
@@ -992,7 +992,7 @@ typedef struct GotoPatch {
 } GotoPatch;
 
 typedef struct JCC JCC;
-typedef struct JCC _VirtualMachine;
+typedef struct JCC $vm_t;
 
 /* Per-signal action slot for VM-managed signal handling */
 #define JCC_NSIG 32

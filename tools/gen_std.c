@@ -105,32 +105,32 @@ char **discover_headers(void) {
 
 // Build: if (strcmp(filename, header) == 0) return __jcc_std_XXX;
 [[jcc::comptime]]
-_Node *make_strcmp_return(_Obj *fn, _Type *char_ptr_ty, const char *header) {
+$node_t *make_strcmp_return($obj_t *fn, $type_t *char_ptr_ty, const char *header) {
     char *gname = make_global_name(header);
-    _Node *args[2] = {
-        _AST_PARAM_REF(fn, "filename"),
-        _AST_STRING_LITERAL(header)
+    $node_t *args[2] = {
+        $param_ref(fn, "filename"),
+        $string_literal(header)
     };
-    _Node *cmp  = _AST_FUNCALL(_AST_VAR_REF("strcmp"), args, 2);
-    _Node *cond = _AST_BINARY(_EQ, cmp, _AST_INT_LITERAL(0));
-    _Node *ret  = _AST_RETURN(_AST_CAST(_AST_VAR_REF(gname), char_ptr_ty));
-    return _AST_IF(cond, ret, NULL);
+    $node_t *cmp  = $funcall($var_ref("strcmp"), args, 2);
+    $node_t *cond = $binary(nk_eq, cmp, $int_literal(0));
+    $node_t *ret  = $return($cast($var_ref(gname), char_ptr_ty));
+    return $if(cond, ret, NULL);
 }
 
 [[jcc::macro]]
 void generate_std_header(void) {
-    _FORWARD_INCLUDE("<string.h>");
+    $forward_include("<string.h>");
 
     char **headers = discover_headers();
     if (!headers)
         return;
 
-    _Type *char_ty     = _AST_GET_TYPE("char");
-    _Type *char_ptr_ty = _AST_MAKE_POINTER(char_ty);
-    _Obj  *fn          = _AST_FUNCTION("get_std_header", char_ptr_ty);
-    _AST_FUNCTION_ADD_PARAM(fn, "filename", char_ptr_ty);
+    $type_t *char_ty     = $get_type("char");
+    $type_t *char_ptr_ty = $make_pointer(char_ty);
+    $obj_t  *fn          = $function("get_std_header", char_ptr_ty);
+    $function_add_param(fn, "filename", char_ptr_ty);
 
-    _AST_WITH_FN(fn) {
+    $with_fn(fn) {
         // Count total headers that exist on disk and emit their globals.
         int total = 0;
         for (int i = 0; headers[i]; i++) {
@@ -139,10 +139,10 @@ void generate_std_header(void) {
 
             int content_len = (int)strlen(content) + 1;
             char *gname   = make_global_name(headers[i]);
-            _Type *arr_ty = _AST_MAKE_ARRAY(char_ty, content_len);
-            _Obj  *gvar   = _AST_GLOBAL_VAR(gname, arr_ty);
-            _AST_GLOBAL_VAR_SET_INIT_DATA(gvar, content, content_len);
-            _AST_GLOBAL_VAR_SET_STATIC(gvar, 1);
+            $type_t *arr_ty = $make_array(char_ty, content_len);
+            $obj_t  *gvar   = $global_var(gname, arr_ty);
+            $global_var_set_init_data(gvar, content, content_len);
+            $global_var_set_static(gvar, 1);
             total++;
         }
 
@@ -150,8 +150,8 @@ void generate_std_header(void) {
         // name). Within each case, sequential strcmp checks are used. Since
         // most first-char buckets are small (1-3 headers), this reduces the
         // average number of comparisons from O(N) to O(bucket_size).
-        _Node *first_char = _AST_UNARY(_DEREF, _AST_PARAM_REF(fn, "filename"));
-        _Node *sw = _AST_SWITCH(first_char);
+        $node_t *first_char = $unary(nk_deref, $param_ref(fn, "filename"));
+        $node_t *sw = $switch(first_char);
 
         // Find each unique first character and build its case.
         unsigned char seen[256] = {0};
@@ -171,27 +171,27 @@ void generate_std_header(void) {
 
             // Build the case body: one strcmp-return per header in bucket,
             // then return NULL for non-matching names with this first char.
-            _Node **case_stmts = malloc((bucket_size + 1) * sizeof(_Node *));
+            $node_t **case_stmts = malloc((bucket_size + 1) * sizeof($node_t *));
             int cn = 0;
             for (int j = 0; headers[j]; j++) {
                 if ((unsigned char)headers[j][0] != c) continue;
                 if (!read_header_file(header_source_path(headers[j]))) continue;
                 case_stmts[cn++] = make_strcmp_return(fn, char_ptr_ty, headers[j]);
             }
-            case_stmts[cn++] = _AST_RETURN(_AST_INT_LITERAL(0));
+            case_stmts[cn++] = $return($int_literal(0));
 
-            _Node *case_body = _AST_BLOCK(case_stmts, cn);
-            _AST_SWITCH_ADD_CASE(sw, _AST_INT_LITERAL(c), case_body);
+            $node_t *case_body = $block(case_stmts, cn);
+            $switch_add_case(sw, $int_literal(c), case_body);
         }
 
-        _Node **stmts = malloc(3 * sizeof(_Node *));
+        $node_t **stmts = malloc(3 * sizeof($node_t *));
         int n = 0;
         stmts[n++] = sw;
-        stmts[n++] = _AST_RETURN(_AST_INT_LITERAL(0));
-        _AST_FUNCTION_SET_BODY(fn, _AST_BLOCK(stmts, n));
+        stmts[n++] = $return($int_literal(0));
+        $function_set_body(fn, $block(stmts, n));
     }
 
-    _AST_PUBLISH(fn);
+    $publish(fn);
 }
 
 generate_std_header();

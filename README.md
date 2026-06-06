@@ -14,7 +14,7 @@ JCC supports C11 as the baseline, with selected C23 and GNU extensions. See [COV
   - Inline pre-parse generators for parser-visible functions and declarations (`[[jcc::macro(inline)]]`)
   - File-scope macro calls for explicit source-order generation
   - Call-site expansion for expression and statement rewriting
-  - Quasi-quoting (`_QUOTE`), hygienic type/symbol reflection, `__jcc_gensym`, and AST construction helpers
+  - Quasi-quoting (`$quote`), hygienic type/symbol reflection, `__jcc_gensym`, and AST construction helpers
 - **Native compilation pipeline** — `--native` runs the JCC frontend (preprocessor, compile-time macros) and hands the resulting C to `JCC_NATIVE_CC` (or `cc` / `clang` / `gcc`) for an actual native build
   - This is the production path: full toolchain performance, system libraries, no VM overhead
   - Without `-o`, the temporary executable is run and its exit status is returned

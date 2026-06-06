@@ -3,24 +3,24 @@
 // ---- Expression splice: positional $N ------------------------------------
 // Produces: a + b * a  (reuses $1)
 [[jcc::macro(inline)]]
-_Node *add_mul(_Node *a, _Node *b) {
-    _VirtualMachine *vm = __jcc_get_vm();
+$node_t *add_mul($node_t *a, $node_t *b) {
+    $vm_t *vm = __jcc_get_vm();
     return __jcc_quote(vm, "$1 + $2 * $1", a, b);
 }
 
 // ---- Expression splice: reorder ($2 * $1 + $2) ---------------------------
 // Produces: y*x + y
 [[jcc::macro(inline)]]
-_Node *quad(_Node *x, _Node *y) {
-    _VirtualMachine *vm = __jcc_get_vm();
+$node_t *quad($node_t *x, $node_t *y) {
+    $vm_t *vm = __jcc_get_vm();
     return __jcc_quote(vm, "$2 * $1 + $2", x, y);
 }
 
 // ---- Statement splice: return $1; ----------------------------------------
 // Must be called in statement position (not as an expression).
 [[jcc::macro(inline)]]
-_Node *ret_val(_Node *v) {
-    _VirtualMachine *vm = __jcc_get_vm();
+$node_t *ret_val($node_t *v) {
+    $vm_t *vm = __jcc_get_vm();
     return __jcc_quote(vm, "return $1;", v);
 }
 
@@ -32,32 +32,32 @@ int get_99(void) {
 // $$ maps to $1, $2, ... sequentially (left-to-right).
 // Produces: a + b
 [[jcc::macro(inline)]]
-_Node *sum_incr(_Node *a, _Node *b) {
-    _VirtualMachine *vm = __jcc_get_vm();
+$node_t *sum_incr($node_t *a, $node_t *b) {
+    $vm_t *vm = __jcc_get_vm();
     return __jcc_quote(vm, "$$ + $$", a, b);
 }
 
 // ---- __jcc_quote_n: array form ---------------------------------------------
 // Produces: a + b + c
 [[jcc::macro(inline)]]
-_Node *add3(_Node *a, _Node *b, _Node *c) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *args[3] = { a, b, c };
+$node_t *add3($node_t *a, $node_t *b, $node_t *c) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *args[3] = { a, b, c };
     return __jcc_quote_n(vm, "$1 + $2 + $3", args, 3);
 }
 
 // ---- No splice points (plain expression) ---------------------------------
 [[jcc::macro(inline)]]
-_Node *const_expr(void) {
-    _VirtualMachine *vm = __jcc_get_vm();
+$node_t *const_expr(void) {
+    $vm_t *vm = __jcc_get_vm();
     return __jcc_quote(vm, "6 * 7");
 }
 
 // ---- If-statement template -----------------------------------------------
 // Returns one of two values based on sign; invoked as statement in function body.
 [[jcc::macro(inline)]]
-_Node *clamp_zero(_Node *val) {
-    _VirtualMachine *vm = __jcc_get_vm();
+$node_t *clamp_zero($node_t *val) {
+    $vm_t *vm = __jcc_get_vm();
     return __jcc_quote(vm, "if ($1 < 0) return 0; else return $1;", val);
 }
 

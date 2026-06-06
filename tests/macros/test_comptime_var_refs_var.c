@@ -11,13 +11,13 @@ int a = compute_base() * 3;   // a == 21
 int b = a * 2;                 // b == 42  (references a)
 
 [[jcc::macro(inline)]]
-_Node *get_a(void) {
-    return _AST_INT_LITERAL(_AST_GET_COMPTIME_INT("a"));
+$node_t *get_a(void) {
+    return $int_literal($get_comptime_int("a"));
 }
 
 [[jcc::macro(inline)]]
-_Node *get_b(void) {
-    return _AST_INT_LITERAL(_AST_GET_COMPTIME_INT("b"));
+$node_t *get_b(void) {
+    return $int_literal($get_comptime_int("b"));
 }
 
 int main(void) {

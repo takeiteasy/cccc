@@ -14,18 +14,18 @@ struct { int width; int height; } dims = { compute_width(), 768 };
 union { int i; unsigned char bytes[4]; } data = { compute_value() };
 
 [[jcc::macro(inline)]]
-_Node *get_width(void) {
-    return _AST_GET_COMPTIME_MEMBER("dims", "width");
+$node_t *get_width(void) {
+    return $get_comptime_member("dims", "width");
 }
 
 [[jcc::macro(inline)]]
-_Node *get_height(void) {
-    return _AST_GET_COMPTIME_MEMBER("dims", "height");
+$node_t *get_height(void) {
+    return $get_comptime_member("dims", "height");
 }
 
 [[jcc::macro(inline)]]
-_Node *get_value(void) {
-    return _AST_GET_COMPTIME_MEMBER("data", "i");
+$node_t *get_value(void) {
+    return $get_comptime_member("data", "i");
 }
 
 int main(void) {

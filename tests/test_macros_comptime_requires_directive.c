@@ -6,8 +6,8 @@ int runtime_helper(int n) {
 }
 
 [[jcc::macro(inline)]]
-_Node *uses_runtime_helper(void) {
-    return _AST_INT_LITERAL(runtime_helper(41));
+$node_t *uses_runtime_helper(void) {
+    return $int_literal(runtime_helper(41));
 }
 
 int main(void) {

@@ -1,18 +1,18 @@
 // Test ticket #122: file-scope macro call publishes generated parameters.
 
 [[jcc::macro]]
-_Node *generate_add(void) {
-    _Type *int_ty = _AST_GET_TYPE("int");
-    _Obj *fn = _AST_FUNCTION("generated_add", int_ty);
+$node_t *generate_add(void) {
+    $type_t *int_ty = $get_type("int");
+    $obj_t *fn = $function("generated_add", int_ty);
 
-    _AST_FUNCTION_ADD_PARAM(fn, "a", int_ty);
-    _AST_FUNCTION_ADD_PARAM(fn, "b", int_ty);
+    $function_add_param(fn, "a", int_ty);
+    $function_add_param(fn, "b", int_ty);
 
-    _Node *sum = _AST_BINARY(_ADD, _AST_PARAM_REF(fn, "a"),
-                             _AST_PARAM_REF(fn, "b"));
-    _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(sum));
+    $node_t *sum = $binary(nk_add, $param_ref(fn, "a"),
+                             $param_ref(fn, "b"));
+    $function_set_body(fn, $return(sum));
 
-    return _AST_INT_LITERAL(0);
+    return $int_literal(0);
 }
 
 generate_add();

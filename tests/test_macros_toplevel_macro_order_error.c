@@ -3,9 +3,9 @@
 
 [[jcc::macro]]
 void generate_late(void) {
-    _Type *int_ty = _AST_GET_TYPE("int");
-    _Obj *fn = _AST_FUNCTION("late_generated", int_ty);
-    _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(_AST_INT_LITERAL(42)));
+    $type_t *int_ty = $get_type("int");
+    $obj_t *fn = $function("late_generated", int_ty);
+    $function_set_body(fn, $return($int_literal(42)));
 }
 
 int main(void) {

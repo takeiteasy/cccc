@@ -9,8 +9,8 @@ int items = get_item_count();   // forward ref — get_item_count defined below
 int get_item_count(void) { return 6; }
 
 [[jcc::macro(inline)]]
-_Node *get_items(void) {
-    return _AST_INT_LITERAL(_AST_GET_COMPTIME_INT("items"));
+$node_t *get_items(void) {
+    return $int_literal($get_comptime_int("items"));
 }
 
 int main(void) {

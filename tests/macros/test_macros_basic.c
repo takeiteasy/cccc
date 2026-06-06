@@ -3,7 +3,7 @@
 
 // Define a pragma macro that generates an integer literal
 [[jcc::macro(inline)]]
-_Node *make_five(void) { return __jcc_ast_int_literal(__jcc_get_vm(), 5); }
+$node_t *make_five(void) { return __jcc_ast_int_literal(__jcc_get_vm(), 5); }
 
 // Use the macro in code
 int main(void) {

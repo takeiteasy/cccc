@@ -3,16 +3,16 @@
 
 // Pragma macro that generates a function returning a constant
 [[jcc::macro(inline)]]
-_Node *generate_const_func(_Node *name_node, _Node *value_node) {
-    _VirtualMachine *vm = __jcc_get_vm();
+$node_t *generate_const_func($node_t *name_node, $node_t *value_node) {
+    $vm_t *vm = __jcc_get_vm();
 
     // Create a function: int generated_func(void) { return 42; }
-    _Type *int_type = __jcc_ast_get_type(vm, "int");
-    _Obj *fn = __jcc_ast_function(vm, "generated_func", int_type);
+    $type_t *int_type = __jcc_ast_get_type(vm, "int");
+    $obj_t *fn = __jcc_ast_function(vm, "generated_func", int_type);
     
     // Set the body to return 42
-    _Node *ret_val = __jcc_ast_int_literal(vm, 42);
-    _Node *ret_stmt = __jcc_ast_return(vm, ret_val);
+    $node_t *ret_val = __jcc_ast_int_literal(vm, 42);
+    $node_t *ret_stmt = __jcc_ast_return(vm, ret_val);
     __jcc_ast_function_set_body(vm, fn, ret_stmt);
     
     // Return a placeholder (the function generation is a side effect)

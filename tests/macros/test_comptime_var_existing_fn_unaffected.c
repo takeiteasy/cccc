@@ -8,13 +8,13 @@ int double_it(int n) { return n * 2; }
 int answer = 21;
 
 [[jcc::macro(inline)]]
-_Node *get_answer(void) {
-    return _AST_INT_LITERAL(_AST_GET_COMPTIME_INT("answer") * 2);
+$node_t *get_answer(void) {
+    return $int_literal($get_comptime_int("answer") * 2);
 }
 
 [[jcc::macro(inline)]]
-_Node *use_helper(_Node *x) {
-    return _AST_BINARY(_ADD, x, _AST_INT_LITERAL(double_it(1)));
+$node_t *use_helper($node_t *x) {
+    return $binary(nk_add, x, $int_literal(double_it(1)));
 }
 
 int main(void) {

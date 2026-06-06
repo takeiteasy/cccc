@@ -4,13 +4,13 @@
 int magic = 42;
 
 [[jcc::macro(inline)]]
-_Node *get_magic(void) {
-    return _AST_GET_COMPTIME_VAR("magic");
+$node_t *get_magic(void) {
+    return $get_comptime_var("magic");
 }
 
 [[jcc::macro(inline)]]
-_Node *get_magic_int(void) {
-    return _AST_INT_LITERAL(_AST_GET_COMPTIME_INT("magic"));
+$node_t *get_magic_int(void) {
+    return $int_literal($get_comptime_int("magic"));
 }
 
 int main(void) {

@@ -6,13 +6,13 @@ int inc_int(int n) {
 }
 
 [[jcc::macro(inline)]]
-_Node *make_answer(void) {
-    return _AST_INT_LITERAL(inc_int(41));
+$node_t *make_answer(void) {
+    return $int_literal(inc_int(41));
 }
 
 [[jcc::macro(inline)]]
-_Node *add_later_helper(_Node *x) {
-    return _AST_BINARY(_ADD, x, _AST_INT_LITERAL(triple_later(2)));
+$node_t *add_later_helper($node_t *x) {
+    return $binary(nk_add, x, $int_literal(triple_later(2)));
 }
 
 [[jcc::comptime]]
@@ -35,9 +35,9 @@ int mutual_odd(int n) {
 }
 
 [[jcc::macro(inline)]]
-_Node *mutual_add_four(_Node *x) {
-    return _AST_BINARY(_ADD, x,
-                          _AST_INT_LITERAL(mutual_even(4)));
+$node_t *mutual_add_four($node_t *x) {
+    return $binary(nk_add, x,
+                          $int_literal(mutual_even(4)));
 }
 
 int main(void) {

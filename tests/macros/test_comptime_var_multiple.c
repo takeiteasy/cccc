@@ -5,18 +5,18 @@
 int base = 20;
 
 [[jcc::macro(inline)]]
-_Node *doubled(void) {
-    return _AST_INT_LITERAL(_AST_GET_COMPTIME_INT("base") * 2);
+$node_t *doubled(void) {
+    return $int_literal($get_comptime_int("base") * 2);
 }
 
 [[jcc::comptime]]
 int bonus = 2;
 
 [[jcc::macro(inline)]]
-_Node *total(void) {
-    int64_t b = _AST_GET_COMPTIME_INT("base");
-    int64_t n = _AST_GET_COMPTIME_INT("bonus");
-    return _AST_INT_LITERAL(b + n);
+$node_t *total(void) {
+    int64_t b = $get_comptime_int("base");
+    int64_t n = $get_comptime_int("bonus");
+    return $int_literal(b + n);
 }
 
 int main(void) {

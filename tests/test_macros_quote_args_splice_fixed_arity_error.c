@@ -12,9 +12,9 @@ int add2(int a, int b) {
 
 // Too few: splice 2 nodes into a 3-parameter callee.
 [[jcc::macro(inline)]]
-_Node *too_few_splice(_Node *a, _Node *b) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *chain = __jcc_node_list(vm, (_Node*[]){ a, b }, 2);
+$node_t *too_few_splice($node_t *a, $node_t *b) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ a, b }, 2);
     return __jcc_quote(vm, "add3($@1)", chain);
 }
 

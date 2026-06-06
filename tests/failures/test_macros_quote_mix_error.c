@@ -3,8 +3,8 @@
 // should produce a compile-time error.
 
 [[jcc::macro(inline)]]
-_Node *bad_mix(_Node *a, _Node *b) {
-    _VirtualMachine *vm = __jcc_get_vm();
+$node_t *bad_mix($node_t *a, $node_t *b) {
+    $vm_t *vm = __jcc_get_vm();
     // $1 and $$ in the same template — must error
     return __jcc_quote(vm, "$1 + $$", a, b);
 }

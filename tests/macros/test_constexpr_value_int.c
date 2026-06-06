@@ -5,13 +5,13 @@ constexpr int LIMIT = 100;
 constexpr int NEG   = -7;
 
 [[jcc::macro(inline)]]
-_Node *get_limit(void) {
-    return _AST_GET_CONSTEXPR_VALUE("LIMIT");
+$node_t *get_limit(void) {
+    return $get_constexpr_value("LIMIT");
 }
 
 [[jcc::macro(inline)]]
-_Node *get_neg(void) {
-    return _AST_GET_CONSTEXPR_VALUE("NEG");
+$node_t *get_neg(void) {
+    return $get_constexpr_value("NEG");
 }
 
 int main(void) {

@@ -2,10 +2,10 @@
 // JCC_EXPECT_STDERR: <jcc macro: generated expression>:1: generated expression
 
 [[jcc::macro(inline)]]
-_Node *synthetic_loc(void) {
-    _Node *node = _AST_INT_LITERAL(0);
-    _AST_SET_TOKEN(node, _AST_SYNTHETIC_TOKEN("generated expression"));
-    _MACRO_ERROR_AT(node, "synthetic generated location");
+$node_t *synthetic_loc(void) {
+    $node_t *node = $int_literal(0);
+    $set_token(node, $synthetic_token("generated expression"));
+    $macro_error_at(node, "synthetic generated location");
     return node;
 }
 

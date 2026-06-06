@@ -3,10 +3,10 @@
 // JCC_EXPECT_STDERR: error: conflicting declaration for generated global variable 'conflict_name'
 
 [[jcc::macro(inline)]]
-_Node *publish_conflicting_global(void) {
-    _Obj *g = _AST_GLOBAL_VAR("conflict_name", _AST_GET_TYPE("int"));
-    _AST_PUBLISH_AT(g, _AST_SYNTHETIC_TOKEN("publish conflict"));
-    return _AST_INT_LITERAL(0);
+$node_t *publish_conflicting_global(void) {
+    $obj_t *g = $global_var("conflict_name", $get_type("int"));
+    $publish_at(g, $synthetic_token("publish conflict"));
+    return $int_literal(0);
 }
 
 int main(void) {

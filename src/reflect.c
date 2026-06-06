@@ -23,14 +23,14 @@
 #include "./internal.h"
 
 // Aliases so the public API types match reflection.h
-typedef Type _Type;
-typedef Node _Node;
-typedef Obj _Obj;
-typedef Member _Member;
-typedef EnumConstant _EnumConstant;
-typedef Token _Token;
-typedef TypeKind _TypeKind;
-typedef NodeKind _NodeKind;
+typedef Type $type_t;
+typedef Node $node_t;
+typedef Obj $obj_t;
+typedef Member $member_t;
+typedef EnumConstant $enum_constant_t;
+typedef Token $token_t;
+typedef TypeKind $type_kind_t;
+typedef NodeKind $node_kind_t;
 
 // Global VM pointer for __jcc_get_vm() builtin
 // Set during pragma macro execution, cleared after
@@ -73,11 +73,11 @@ void __jcc_forward_include(JCC *vm, const char *header) {
     strarray_push(arr, strdup(header));
 }
 
-_Token *__jcc_ast_current_token(JCC *vm) {
+$token_t *__jcc_ast_current_token(JCC *vm) {
     return vm ? vm->compiler.macro_call_tok : NULL;
 }
 
-_Token *__jcc_ast_synthetic_token(JCC *vm, const char *label) {
+$token_t *__jcc_ast_synthetic_token(JCC *vm, const char *label) {
     if (!vm)
         return NULL;
 
@@ -100,17 +100,17 @@ _Token *__jcc_ast_synthetic_token(JCC *vm, const char *label) {
     return tok;
 }
 
-_Token *__jcc_ast_token_from_node(_Node *node) {
+$token_t *__jcc_ast_token_from_node($node_t *node) {
     return node ? node->tok : NULL;
 }
 
-_Node *__jcc_ast_set_token(_Node *node, _Token *tok) {
+$node_t *__jcc_ast_set_token($node_t *node, $token_t *tok) {
     if (node)
         node->tok = tok;
     return node;
 }
 
-_Node *__jcc_ast_copy_location(_Node *dst, _Node *src) {
+$node_t *__jcc_ast_copy_location($node_t *dst, $node_t *src) {
     if (dst)
         dst->tok = src ? src->tok : NULL;
     return dst;
@@ -134,7 +134,7 @@ static Obj *reflect_new_anon_gvar(JCC *vm, Type *ty) {
 // Type Lookup and Introspection
 // ============================================================================
 
-_Type *__jcc_ast_find_type(JCC *vm, const char *name) {
+$type_t *__jcc_ast_find_type(JCC *vm, const char *name) {
     if (!vm || !name)
         return NULL;
 
@@ -165,7 +165,7 @@ bool __jcc_ast_type_exists(JCC *vm, const char *name) {
     return __jcc_ast_find_type(vm, name) != NULL;
 }
 
-_Type *__jcc_ast_get_type(JCC *vm, const char *name) {
+$type_t *__jcc_ast_get_type(JCC *vm, const char *name) {
     if (!name)
         return NULL;
 
@@ -191,23 +191,23 @@ _Type *__jcc_ast_get_type(JCC *vm, const char *name) {
     return __jcc_ast_find_type(vm, name);
 }
 
-_TypeKind __jcc_ast_type_kind(_Type *ty) {
+$type_kind_t __jcc_ast_type_kind($type_t *ty) {
     return ty ? ty->kind : TY_VOID;
 }
 
-int __jcc_ast_type_size(_Type *ty) { return ty ? ty->size : 0; }
+int __jcc_ast_type_size($type_t *ty) { return ty ? ty->size : 0; }
 
-int __jcc_ast_type_align(_Type *ty) { return ty ? ty->align : 0; }
+int __jcc_ast_type_align($type_t *ty) { return ty ? ty->align : 0; }
 
-bool __jcc_ast_type_is_unsigned(_Type *ty) {
+bool __jcc_ast_type_is_unsigned($type_t *ty) {
     return ty ? ty->is_unsigned : false;
 }
 
-bool __jcc_ast_type_is_const(_Type *ty) {
+bool __jcc_ast_type_is_const($type_t *ty) {
     return ty ? ty->is_const : false;
 }
 
-_Type *__jcc_ast_type_base(_Type *ty) {
+$type_t *__jcc_ast_type_base($type_t *ty) {
     if (!ty)
         return NULL;
     if (ty->kind != TY_PTR && ty->kind != TY_ARRAY && ty->kind != TY_VLA)
@@ -215,19 +215,19 @@ _Type *__jcc_ast_type_base(_Type *ty) {
     return ty->base;
 }
 
-int __jcc_ast_type_array_len(_Type *ty) {
+int __jcc_ast_type_array_len($type_t *ty) {
     if (!ty || ty->kind != TY_ARRAY)
         return -1;
     return ty->array_len;
 }
 
-_Type *__jcc_ast_type_return_type(_Type *ty) {
+$type_t *__jcc_ast_type_return_type($type_t *ty) {
     if (!ty || ty->kind != TY_FUNC)
         return NULL;
     return ty->return_ty;
 }
 
-int __jcc_ast_type_param_count(_Type *ty) {
+int __jcc_ast_type_param_count($type_t *ty) {
     if (!ty || ty->kind != TY_FUNC)
         return -1;
 
@@ -237,7 +237,7 @@ int __jcc_ast_type_param_count(_Type *ty) {
     return count;
 }
 
-_Type *__jcc_ast_type_param_at(_Type *ty, int index) {
+$type_t *__jcc_ast_type_param_at($type_t *ty, int index) {
     if (!ty || ty->kind != TY_FUNC || index < 0)
         return NULL;
 
@@ -247,13 +247,13 @@ _Type *__jcc_ast_type_param_at(_Type *ty, int index) {
     return p;
 }
 
-bool __jcc_ast_type_is_variadic(_Type *ty) {
+bool __jcc_ast_type_is_variadic($type_t *ty) {
     if (!ty || ty->kind != TY_FUNC)
         return false;
     return ty->is_variadic;
 }
 
-const char *__jcc_ast_type_name(_Type *ty) {
+const char *__jcc_ast_type_name($type_t *ty) {
     if (!ty || !ty->name)
         return NULL;
 
@@ -267,13 +267,13 @@ const char *__jcc_ast_type_name(_Type *ty) {
     return buffer;
 }
 
-_Type *__jcc_ast_make_pointer(JCC *vm, _Type *base) {
+$type_t *__jcc_ast_make_pointer(JCC *vm, $type_t *base) {
     if (!vm || !base)
         return NULL;
     return pointer_to(vm, base);
 }
 
-_Type *__jcc_ast_make_array(JCC *vm, _Type *base, int len) {
+$type_t *__jcc_ast_make_array(JCC *vm, $type_t *base, int len) {
     if (!vm || !base || len < 0)
         return NULL;
     return array_of(vm, base, len);
@@ -283,7 +283,7 @@ _Type *__jcc_ast_make_array(JCC *vm, _Type *base, int len) {
 // Enum Reflection
 // ============================================================================
 
-int __jcc_ast_enum_count(JCC *vm, _Type *enum_type) {
+int __jcc_ast_enum_count(JCC *vm, $type_t *enum_type) {
     (void)vm; // Unused but kept for API consistency
     if (!enum_type || enum_type->kind != TY_ENUM)
         return -1;
@@ -294,7 +294,7 @@ int __jcc_ast_enum_count(JCC *vm, _Type *enum_type) {
     return count;
 }
 
-_EnumConstant *__jcc_ast_enum_at(JCC *vm, _Type *enum_type, int index) {
+$enum_constant_t *__jcc_ast_enum_at(JCC *vm, $type_t *enum_type, int index) {
     (void)vm;
     if (!enum_type || enum_type->kind != TY_ENUM || index < 0)
         return NULL;
@@ -305,7 +305,7 @@ _EnumConstant *__jcc_ast_enum_at(JCC *vm, _Type *enum_type, int index) {
     return ec;
 }
 
-_EnumConstant *__jcc_ast_enum_find(JCC *vm, _Type *enum_type,
+$enum_constant_t *__jcc_ast_enum_find(JCC *vm, $type_t *enum_type,
                                     const char *name) {
     (void)vm;
     if (!enum_type || enum_type->kind != TY_ENUM || !name)
@@ -318,28 +318,28 @@ _EnumConstant *__jcc_ast_enum_find(JCC *vm, _Type *enum_type,
     return NULL;
 }
 
-const char *__jcc_ast_enum_constant_name(_EnumConstant *ec) {
+const char *__jcc_ast_enum_constant_name($enum_constant_t *ec) {
     return ec ? ec->name : NULL;
 }
 
-int __jcc_ast_enum_constant_value(_EnumConstant *ec) {
+int __jcc_ast_enum_constant_value($enum_constant_t *ec) {
     return ec ? ec->value : 0;
 }
 
-const char *__jcc_ast_enum_name(_Type *e) { return __jcc_ast_type_name(e); }
+const char *__jcc_ast_enum_name($type_t *e) { return __jcc_ast_type_name(e); }
 
-int __jcc_ast_enum_value_count(_Type *e) {
+int __jcc_ast_enum_value_count($type_t *e) {
     int count = __jcc_ast_enum_count(NULL, e);
     return count < 0 ? 0 : count;
 }
 
-const char *__jcc_ast_enum_value_name(_Type *e, int index) {
-    _EnumConstant *ec = __jcc_ast_enum_at(NULL, e, index);
+const char *__jcc_ast_enum_value_name($type_t *e, int index) {
+    $enum_constant_t *ec = __jcc_ast_enum_at(NULL, e, index);
     return __jcc_ast_enum_constant_name(ec);
 }
 
-int __jcc_ast_enum_value(_Type *e, int index) {
-    _EnumConstant *ec = __jcc_ast_enum_at(NULL, e, index);
+int __jcc_ast_enum_value($type_t *e, int index) {
+    $enum_constant_t *ec = __jcc_ast_enum_at(NULL, e, index);
     return __jcc_ast_enum_constant_value(ec);
 }
 
@@ -347,7 +347,7 @@ int __jcc_ast_enum_value(_Type *e, int index) {
 // Struct/Union Member Introspection
 // ============================================================================
 
-int __jcc_ast_struct_member_count(JCC *vm, _Type *struct_type) {
+int __jcc_ast_struct_member_count(JCC *vm, $type_t *struct_type) {
     (void)vm;
     if (!struct_type)
         return -1;
@@ -360,7 +360,7 @@ int __jcc_ast_struct_member_count(JCC *vm, _Type *struct_type) {
     return count;
 }
 
-_Member *__jcc_ast_struct_member_at(JCC *vm, _Type *struct_type,
+$member_t *__jcc_ast_struct_member_at(JCC *vm, $type_t *struct_type,
                                         int index) {
     (void)vm;
     if (!struct_type || index < 0)
@@ -374,7 +374,7 @@ _Member *__jcc_ast_struct_member_at(JCC *vm, _Type *struct_type,
     return m;
 }
 
-_Member *__jcc_ast_struct_member_find(JCC *vm, _Type *struct_type,
+$member_t *__jcc_ast_struct_member_find(JCC *vm, $type_t *struct_type,
                                         const char *name) {
     (void)vm;
     if (!struct_type || !name)
@@ -390,7 +390,7 @@ _Member *__jcc_ast_struct_member_find(JCC *vm, _Type *struct_type,
     return NULL;
 }
 
-const char *__jcc_ast_member_name(_Member *m) {
+const char *__jcc_ast_member_name($member_t *m) {
     if (!m || !m->name)
         return NULL;
 
@@ -404,15 +404,15 @@ const char *__jcc_ast_member_name(_Member *m) {
     return buffer;
 }
 
-_Type *__jcc_ast_member_type(_Member *m) { return m ? m->ty : NULL; }
+$type_t *__jcc_ast_member_type($member_t *m) { return m ? m->ty : NULL; }
 
-int __jcc_ast_member_offset(_Member *m) { return m ? m->offset : 0; }
+int __jcc_ast_member_offset($member_t *m) { return m ? m->offset : 0; }
 
-bool __jcc_ast_member_is_bitfield(_Member *m) {
+bool __jcc_ast_member_is_bitfield($member_t *m) {
     return m ? m->is_bitfield : false;
 }
 
-int __jcc_ast_member_bitfield_width(_Member *m) {
+int __jcc_ast_member_bitfield_width($member_t *m) {
     return (m && m->is_bitfield) ? m->bit_width : 0;
 }
 
@@ -420,7 +420,7 @@ int __jcc_ast_member_bitfield_width(_Member *m) {
 // Global Symbol Introspection
 // ============================================================================
 
-_Obj *__jcc_ast_find_global(JCC *vm, const char *name) {
+$obj_t *__jcc_ast_find_global(JCC *vm, const char *name) {
     if (!vm || !name)
         return NULL;
 
@@ -443,7 +443,7 @@ int __jcc_ast_global_count(JCC *vm) {
     return count;
 }
 
-_Obj *__jcc_ast_global_at(JCC *vm, int index) {
+$obj_t *__jcc_ast_global_at(JCC *vm, int index) {
     if (!vm || index < 0)
         return NULL;
 
@@ -453,26 +453,26 @@ _Obj *__jcc_ast_global_at(JCC *vm, int index) {
     return obj;
 }
 
-const char *__jcc_ast_obj_name(_Obj *obj) { return obj ? obj->name : NULL; }
+const char *__jcc_ast_obj_name($obj_t *obj) { return obj ? obj->name : NULL; }
 
-_Type *__jcc_ast_obj_type(_Obj *obj) { return obj ? obj->ty : NULL; }
+$type_t *__jcc_ast_obj_type($obj_t *obj) { return obj ? obj->ty : NULL; }
 
-bool __jcc_ast_obj_is_function(_Obj *obj) {
+bool __jcc_ast_obj_is_function($obj_t *obj) {
     return obj ? obj->is_function : false;
 }
 
-bool __jcc_ast_obj_is_definition(_Obj *obj) {
+bool __jcc_ast_obj_is_definition($obj_t *obj) {
     return obj ? obj->is_definition : false;
 }
 
-bool __jcc_ast_obj_is_static(_Obj *obj) { return obj ? obj->is_static : false; }
+bool __jcc_ast_obj_is_static($obj_t *obj) { return obj ? obj->is_static : false; }
 
 // ============================================================================
 // AST Node Construction - Helper
 // ============================================================================
 
-static _Node *alloc_node(JCC *vm, _NodeKind kind) {
-    _Node *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+static $node_t *alloc_node(JCC *vm, $node_kind_t kind) {
+    $node_t *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     memset(node, 0, sizeof(Node));
     node->kind = kind;
     node->tok = vm ? vm->compiler.macro_call_tok : NULL;
@@ -483,27 +483,27 @@ static _Node *alloc_node(JCC *vm, _NodeKind kind) {
 // AST Node Construction - Literals
 // ============================================================================
 
-_Node *__jcc_ast_int_literal(JCC *vm, int64_t value) {
+$node_t *__jcc_ast_int_literal(JCC *vm, int64_t value) {
     if (!vm)
         return NULL;
 
-    _Node *node = alloc_node(vm, ND_NUM);
+    $node_t *node = alloc_node(vm, ND_NUM);
     node->val = value;
     node->ty = ty_long;
     return node;
 }
 
-_Node *__jcc_ast_float_literal(JCC *vm, double value) {
+$node_t *__jcc_ast_float_literal(JCC *vm, double value) {
     if (!vm)
         return NULL;
 
-    _Node *node = alloc_node(vm, ND_NUM);
+    $node_t *node = alloc_node(vm, ND_NUM);
     node->fval = value;
     node->ty = ty_double;
     return node;
 }
 
-_Node *__jcc_ast_string_literal(JCC *vm, const char *str) {
+$node_t *__jcc_ast_string_literal(JCC *vm, const char *str) {
     if (!vm || !str)
         return NULL;
 
@@ -532,13 +532,13 @@ _Node *__jcc_ast_string_literal(JCC *vm, const char *str) {
     vm->data_ptr += len + 1;
 
     // Create a variable reference node
-    _Node *node = alloc_node(vm, ND_VAR);
+    $node_t *node = alloc_node(vm, ND_VAR);
     node->var = var;
     node->ty = ty;
     return node;
 }
 
-_Node *__jcc_ast_var_ref(JCC *vm, const char *name) {
+$node_t *__jcc_ast_var_ref(JCC *vm, const char *name) {
     if (!vm || !name)
         return NULL;
 
@@ -551,7 +551,7 @@ _Node *__jcc_ast_var_ref(JCC *vm, const char *name) {
                 strncmp(node->name, name, name_len) == 0) {
                 if (node->var) {
                     node->var->is_used = true;
-                    _Node *n = alloc_node(vm, ND_VAR);
+                    $node_t *n = alloc_node(vm, ND_VAR);
                     n->var = node->var;
                     n->ty = node->var->ty;
                     return n;
@@ -564,7 +564,7 @@ _Node *__jcc_ast_var_ref(JCC *vm, const char *name) {
     Obj *global = __jcc_ast_find_global(vm, name);
     if (global) {
         global->is_used = true;
-        _Node *n = alloc_node(vm, ND_VAR);
+        $node_t *n = alloc_node(vm, ND_VAR);
         n->var = global;
         n->ty = global->ty;
         return n;
@@ -573,7 +573,7 @@ _Node *__jcc_ast_var_ref(JCC *vm, const char *name) {
     return NULL;
 }
 
-_Node *__jcc_ast_param_ref(JCC *vm, _Obj *fn, const char *name) {
+$node_t *__jcc_ast_param_ref(JCC *vm, $obj_t *fn, const char *name) {
     if (!vm || !fn || !name)
         return NULL;
 
@@ -583,7 +583,7 @@ _Node *__jcc_ast_param_ref(JCC *vm, _Obj *fn, const char *name) {
         if (strlen(param->name) == name_len &&
             strncmp(param->name, name, name_len) == 0) {
             param->is_used = true;
-            _Node *n = alloc_node(vm, ND_VAR);
+            $node_t *n = alloc_node(vm, ND_VAR);
             n->var = param;
             n->ty = param->ty;
             return n;
@@ -597,32 +597,32 @@ _Node *__jcc_ast_param_ref(JCC *vm, _Obj *fn, const char *name) {
 // AST Node Construction - Expressions
 // ============================================================================
 
-_Node *__jcc_ast_binary(JCC *vm, _NodeKind op, _Node *left,
-                            _Node *right) {
+$node_t *__jcc_ast_binary(JCC *vm, $node_kind_t op, $node_t *left,
+                            $node_t *right) {
     if (!vm || !left || !right)
         return NULL;
 
-    _Node *node = alloc_node(vm, op);
+    $node_t *node = alloc_node(vm, op);
     node->lhs = left;
     node->rhs = right;
     // Type will be determined by add_type pass
     return node;
 }
 
-_Node *__jcc_ast_unary(JCC *vm, _NodeKind op, _Node *operand) {
+$node_t *__jcc_ast_unary(JCC *vm, $node_kind_t op, $node_t *operand) {
     if (!vm || !operand)
         return NULL;
 
-    _Node *node = alloc_node(vm, op);
+    $node_t *node = alloc_node(vm, op);
     node->lhs = operand;
     return node;
 }
 
-_Node *__jcc_ast_cast(JCC *vm, _Node *expr, _Type *target_type) {
+$node_t *__jcc_ast_cast(JCC *vm, $node_t *expr, $type_t *target_type) {
     if (!vm || !expr || !target_type)
         return NULL;
 
-    _Node *node = alloc_node(vm, ND_CAST);
+    $node_t *node = alloc_node(vm, ND_CAST);
     node->lhs = expr;
     node->ty = target_type;
     return node;
@@ -632,20 +632,20 @@ _Node *__jcc_ast_cast(JCC *vm, _Node *expr, _Type *target_type) {
 // AST Node Construction - Statements
 // ============================================================================
 
-_Node *__jcc_ast_return(JCC *vm, _Node *expr) {
+$node_t *__jcc_ast_return(JCC *vm, $node_t *expr) {
     if (!vm)
         return NULL;
 
-    _Node *node = alloc_node(vm, ND_RETURN);
+    $node_t *node = alloc_node(vm, ND_RETURN);
     node->lhs = expr;
     return node;
 }
 
-_Node *__jcc_ast_block(JCC *vm, _Node **stmts, int count) {
+$node_t *__jcc_ast_block(JCC *vm, $node_t **stmts, int count) {
     if (!vm)
         return NULL;
 
-    _Node *node = alloc_node(vm, ND_BLOCK);
+    $node_t *node = alloc_node(vm, ND_BLOCK);
 
     // Link statements together
     Node head = {};
@@ -657,31 +657,31 @@ _Node *__jcc_ast_block(JCC *vm, _Node **stmts, int count) {
     return node;
 }
 
-_Node *__jcc_ast_if(JCC *vm, _Node *cond, _Node *then_body,
-                        _Node *else_body) {
+$node_t *__jcc_ast_if(JCC *vm, $node_t *cond, $node_t *then_body,
+                        $node_t *else_body) {
     if (!vm || !cond)
         return NULL;
 
-    _Node *node = alloc_node(vm, ND_IF);
+    $node_t *node = alloc_node(vm, ND_IF);
     node->cond = cond;
     node->then = then_body;
     node->els = else_body;
     return node;
 }
 
-_Node *__jcc_ast_switch(JCC *vm, _Node *cond) {
+$node_t *__jcc_ast_switch(JCC *vm, $node_t *cond) {
     if (!vm || !cond)
         return NULL;
 
-    _Node *node = alloc_node(vm, ND_SWITCH);
+    $node_t *node = alloc_node(vm, ND_SWITCH);
     node->cond = cond;
     node->case_next = NULL;
     node->default_case = NULL;
     return node;
 }
 
-void __jcc_ast_switch_add_case(JCC *vm, _Node *switch_node, _Node *value,
-                                _Node *body) {
+void __jcc_ast_switch_add_case(JCC *vm, $node_t *switch_node, $node_t *value,
+                                $node_t *body) {
     if (!vm || !switch_node || !value || !body)
         return;
 
@@ -689,7 +689,7 @@ void __jcc_ast_switch_add_case(JCC *vm, _Node *switch_node, _Node *value,
         return;
 
     // Create a case node
-    _Node *case_node = alloc_node(vm, ND_CASE);
+    $node_t *case_node = alloc_node(vm, ND_CASE);
     case_node->begin = value->val; // Assuming value is a numeric literal
     case_node->end = value->val;
     case_node->body = body;
@@ -699,15 +699,15 @@ void __jcc_ast_switch_add_case(JCC *vm, _Node *switch_node, _Node *value,
     switch_node->case_next = case_node;
 }
 
-void __jcc_ast_switch_set_default(JCC *vm, _Node *switch_node,
-                                    _Node *body) {
+void __jcc_ast_switch_set_default(JCC *vm, $node_t *switch_node,
+                                    $node_t *body) {
     if (!vm || !switch_node || !body)
         return;
 
     if (switch_node->kind != ND_SWITCH)
         return;
 
-    _Node *def = alloc_node(vm, ND_CASE);
+    $node_t *def = alloc_node(vm, ND_CASE);
     def->body = body;
     switch_node->default_case = def;
 }
@@ -716,11 +716,11 @@ void __jcc_ast_switch_set_default(JCC *vm, _Node *switch_node,
 // AST Node Construction - Declarations
 // ============================================================================
 
-_Node *__jcc_ast_expr_stmt(JCC *vm, _Node *expr) {
+$node_t *__jcc_ast_expr_stmt(JCC *vm, $node_t *expr) {
     if (!vm)
         return NULL;
 
-    _Node *node = alloc_node(vm, ND_EXPR_STMT);
+    $node_t *node = alloc_node(vm, ND_EXPR_STMT);
     node->lhs = expr;
     return node;
 }
@@ -729,7 +729,7 @@ _Node *__jcc_ast_expr_stmt(JCC *vm, _Node *expr) {
 // Macro Diagnostics (ticket #78)
 // ============================================================================
 
-void __jcc_macro_error_at(JCC *vm, _Node *node, const char *fmt, ...) {
+void __jcc_macro_error_at(JCC *vm, $node_t *node, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     char buf[4096];
@@ -742,7 +742,7 @@ void __jcc_macro_error_at(JCC *vm, _Node *node, const char *fmt, ...) {
         error("%s", buf); // no source location available
 }
 
-void __jcc_macro_warning_at(JCC *vm, _Node *node, const char *fmt, ...) {
+void __jcc_macro_warning_at(JCC *vm, $node_t *node, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     char buf[4096];
@@ -768,7 +768,7 @@ void __jcc_macro_warning_at(JCC *vm, _Node *node, const char *fmt, ...) {
 
 // Allocate a local Obj and prepend it to the current function's locals list.
 // Injected variables receive stack offsets later when cc_compile runs.
-static _Node *make_local_var_node(JCC *vm, char *name, _Type *ty) {
+static $node_t *make_local_var_node(JCC *vm, char *name, $type_t *ty) {
     if (!vm || !ty)
         return NULL;
 
@@ -784,12 +784,12 @@ static _Node *make_local_var_node(JCC *vm, char *name, _Type *ty) {
     var->next = fn->locals;
     fn->locals = var;
 
-    _Node *node = alloc_node(vm, ND_VAR);
+    $node_t *node = alloc_node(vm, ND_VAR);
     node->var = var;
     return node;
 }
 
-_Node *__jcc_ast_local_var(JCC *vm, const char *name, _Type *ty) {
+$node_t *__jcc_ast_local_var(JCC *vm, const char *name, $type_t *ty) {
     if (!vm || !name || !ty)
         return NULL;
 
@@ -797,7 +797,7 @@ _Node *__jcc_ast_local_var(JCC *vm, const char *name, _Type *ty) {
     return make_local_var_node(vm, arena_name, ty);
 }
 
-_Node *__jcc_ast_local_var_unique(JCC *vm, _Type *ty) {
+$node_t *__jcc_ast_local_var_unique(JCC *vm, $type_t *ty) {
     if (!vm || !ty)
         return NULL;
 
@@ -811,17 +811,17 @@ _Node *__jcc_ast_local_var_unique(JCC *vm, _Type *ty) {
 // AST Node Construction - New Expressions (ticket #51)
 // ============================================================================
 
-_Node *__jcc_ast_assign(JCC *vm, _Node *target, _Node *value) {
+$node_t *__jcc_ast_assign(JCC *vm, $node_t *target, $node_t *value) {
     if (!vm || !target || !value)
         return NULL;
 
-    _Node *node = alloc_node(vm, ND_ASSIGN);
+    $node_t *node = alloc_node(vm, ND_ASSIGN);
     node->lhs = target;
     node->rhs = value;
     return node;
 }
 
-_Node *__jcc_ast_member(JCC *vm, _Node *obj, const char *name) {
+$node_t *__jcc_ast_member(JCC *vm, $node_t *obj, const char *name) {
     if (!vm || !obj || !name)
         return NULL;
 
@@ -836,13 +836,13 @@ _Node *__jcc_ast_member(JCC *vm, _Node *obj, const char *name) {
     if (!mem)
         return NULL;
 
-    _Node *node = alloc_node(vm, ND_MEMBER);
+    $node_t *node = alloc_node(vm, ND_MEMBER);
     node->lhs = obj;
     node->member = mem;
     return node;
 }
 
-_Node *__jcc_ast_funcall(JCC *vm, _Node *callee, _Node **args, int n) {
+$node_t *__jcc_ast_funcall(JCC *vm, $node_t *callee, $node_t **args, int n) {
     if (!vm || !callee)
         return NULL;
 
@@ -860,7 +860,7 @@ _Node *__jcc_ast_funcall(JCC *vm, _Node *callee, _Node **args, int n) {
     if (ty->kind != TY_FUNC)
         return NULL; // callee is not a function type
 
-    _Node *node = alloc_node(vm, ND_FUNCALL);
+    $node_t *node = alloc_node(vm, ND_FUNCALL);
     node->lhs = callee;
     node->func_ty = ty;
     node->ty = ty->return_ty;
@@ -875,23 +875,23 @@ _Node *__jcc_ast_funcall(JCC *vm, _Node *callee, _Node **args, int n) {
 }
 
 // __jcc_ast_while: while(cond) body — represented as ND_FOR with init/inc NULL
-_Node *__jcc_ast_while(JCC *vm, _Node *cond, _Node *body) {
+$node_t *__jcc_ast_while(JCC *vm, $node_t *cond, $node_t *body) {
     if (!vm || !cond)
         return NULL;
 
-    _Node *node = alloc_node(vm, ND_FOR);
+    $node_t *node = alloc_node(vm, ND_FOR);
     node->cond = cond;
     node->then = body;
     // node->init and node->inc left NULL — this is a while loop
     return node;
 }
 
-_Node *__jcc_ast_for(JCC *vm, _Node *init, _Node *cond,
-                       _Node *inc, _Node *body) {
+$node_t *__jcc_ast_for(JCC *vm, $node_t *init, $node_t *cond,
+                       $node_t *inc, $node_t *body) {
     if (!vm)
         return NULL;
 
-    _Node *node = alloc_node(vm, ND_FOR);
+    $node_t *node = alloc_node(vm, ND_FOR);
     node->init = init;
     node->cond = cond;
     node->inc = inc;
@@ -899,11 +899,11 @@ _Node *__jcc_ast_for(JCC *vm, _Node *init, _Node *cond,
     return node;
 }
 
-_Node *__jcc_ast_do_while(JCC *vm, _Node *body, _Node *cond) {
+$node_t *__jcc_ast_do_while(JCC *vm, $node_t *body, $node_t *cond) {
     if (!vm || !cond)
         return NULL;
 
-    _Node *node = alloc_node(vm, ND_DO);
+    $node_t *node = alloc_node(vm, ND_DO);
     node->then = body;
     node->cond = cond;
     return node;
@@ -918,12 +918,12 @@ static inline int reflect_align_to(int n, int align) {
     return (n + align - 1) / align * align;
 }
 
-// _AST_COND(cond, then, else) — ternary ?: expression
-_Node *__jcc_ast_cond(JCC *vm, _Node *cond, _Node *then_expr,
-                          _Node *else_expr) {
+// $cond(cond, then, else) — ternary ?: expression
+$node_t *__jcc_ast_cond(JCC *vm, $node_t *cond, $node_t *then_expr,
+                          $node_t *else_expr) {
     if (!vm || !cond || !then_expr || !else_expr)
         return NULL;
-    _Node *node = alloc_node(vm, ND_COND);
+    $node_t *node = alloc_node(vm, ND_COND);
     node->cond = cond;
     node->then = then_expr;
     node->els = else_expr;
@@ -931,35 +931,35 @@ _Node *__jcc_ast_cond(JCC *vm, _Node *cond, _Node *then_expr,
     return node;
 }
 
-// _AST_NULL() — typed null pointer: (void *)0
-_Node *__jcc_ast_null(JCC *vm) {
+// $null() — typed null pointer: (void *)0
+$node_t *__jcc_ast_null(JCC *vm) {
     if (!vm)
         return NULL;
-    _Node *zero = __jcc_ast_int_literal(vm, 0);
+    $node_t *zero = __jcc_ast_int_literal(vm, 0);
     if (!zero)
         return NULL;
-    _Node *node = alloc_node(vm, ND_CAST);
+    $node_t *node = alloc_node(vm, ND_CAST);
     node->lhs = zero;
     node->ty = pointer_to(vm, ty_void);
     return node;
 }
 
-// _AST_SIZEOF_TYPE(ty) — sizeof(ty) as a compile-time integer literal
-_Node *__jcc_ast_sizeof_type(JCC *vm, _Type *ty) {
+// $sizeof_type(ty) — sizeof(ty) as a compile-time integer literal
+$node_t *__jcc_ast_sizeof_type(JCC *vm, $type_t *ty) {
     if (!vm || !ty)
         return NULL;
     return __jcc_ast_int_literal(vm, ty->size);
 }
 
-// _AST_ALIGNOF_TYPE(ty) — _Alignof(ty) as a compile-time integer literal
-_Node *__jcc_ast_alignof_type(JCC *vm, _Type *ty) {
+// $alignof_type(ty) — _Alignof(ty) as a compile-time integer literal
+$node_t *__jcc_ast_alignof_type(JCC *vm, $type_t *ty) {
     if (!vm || !ty)
         return NULL;
     return __jcc_ast_int_literal(vm, ty->align);
 }
 
-// _AST_SIZEOF_EXPR(expr) — sizeof(expr): run add_type then return the size
-_Node *__jcc_ast_sizeof_expr(JCC *vm, _Node *expr) {
+// $sizeof_expr(expr) — sizeof(expr): run add_type then return the size
+$node_t *__jcc_ast_sizeof_expr(JCC *vm, $node_t *expr) {
     if (!vm || !expr)
         return NULL;
     add_type(vm, expr);
@@ -968,10 +968,10 @@ _Node *__jcc_ast_sizeof_expr(JCC *vm, _Node *expr) {
     return __jcc_ast_int_literal(vm, expr->ty->size);
 }
 
-// _AST_SUBSCRIPT(arr, idx) — arr[idx], desugared as *(arr + idx * sizeof(*arr))
+// $subscript(arr, idx) — arr[idx], desugared as *(arr + idx * sizeof(*arr))
 // Mirrors new_add() in parse.c: the index must be pre-scaled by the element
 // size so that codegen emits a plain integer ADD (it does not scale internally).
-_Node *__jcc_ast_subscript(JCC *vm, _Node *arr, _Node *idx) {
+$node_t *__jcc_ast_subscript(JCC *vm, $node_t *arr, $node_t *idx) {
     if (!vm || !arr || !idx)
         return NULL;
 
@@ -980,8 +980,8 @@ _Node *__jcc_ast_subscript(JCC *vm, _Node *arr, _Node *idx) {
     add_type(vm, idx);
 
     // Canonicalize: pointer must be on the left (handle idx + arr too)
-    _Node *ptr = arr;
-    _Node *num = idx;
+    $node_t *ptr = arr;
+    $node_t *num = idx;
     if (ptr->ty && !ptr->ty->base && num->ty && num->ty->base) {
         ptr = idx;
         num = arr;
@@ -991,34 +991,34 @@ _Node *__jcc_ast_subscript(JCC *vm, _Node *arr, _Node *idx) {
     if (ptr->ty && ptr->ty->base) {
         int elem_size = ptr->ty->base->size;
         // Build: num * elem_size
-        _Node *scale = alloc_node(vm, ND_NUM);
+        $node_t *scale = alloc_node(vm, ND_NUM);
         scale->val = elem_size;
         scale->ty = ty_long;
-        _Node *scaled = alloc_node(vm, ND_MUL);
+        $node_t *scaled = alloc_node(vm, ND_MUL);
         scaled->lhs = num;
         scaled->rhs = scale;
         // Build: ptr + scaled
-        _Node *add = alloc_node(vm, ND_ADD);
+        $node_t *add = alloc_node(vm, ND_ADD);
         add->lhs = ptr;
         add->rhs = scaled;
         add->ty = ptr->ty; // pointer result type
         // Dereference: *(ptr + scaled)
-        _Node *deref = alloc_node(vm, ND_DEREF);
+        $node_t *deref = alloc_node(vm, ND_DEREF);
         deref->lhs = add;
         return deref;
     }
 
     // Fallback: integer subscript (unusual but safe)
-    _Node *add = alloc_node(vm, ND_ADD);
+    $node_t *add = alloc_node(vm, ND_ADD);
     add->lhs = ptr;
     add->rhs = num;
-    _Node *deref = alloc_node(vm, ND_DEREF);
+    $node_t *deref = alloc_node(vm, ND_DEREF);
     deref->lhs = add;
     return deref;
 }
 
-// _AST_COMMA(lhs, rhs) — comma expression: evaluate lhs, discard, yield rhs
-_Node *__jcc_ast_comma(JCC *vm, _Node *lhs, _Node *rhs) {
+// $comma(lhs, rhs) — comma expression: evaluate lhs, discard, yield rhs
+$node_t *__jcc_ast_comma(JCC *vm, $node_t *lhs, $node_t *rhs) {
     return __jcc_ast_binary(vm, ND_COMMA, lhs, rhs);
 }
 
@@ -1026,8 +1026,8 @@ _Node *__jcc_ast_comma(JCC *vm, _Node *lhs, _Node *rhs) {
 // AST Type Construction - Qualified Types (ticket #171)
 // ============================================================================
 
-// _AST_MAKE_CONST(ty) — return a const-qualified copy of ty
-_Type *__jcc_ast_make_const(JCC *vm, _Type *ty) {
+// $make_const(ty) — return a const-qualified copy of ty
+$type_t *__jcc_ast_make_const(JCC *vm, $type_t *ty) {
     if (!vm || !ty)
         return NULL;
     Type *result = copy_type(vm, ty);
@@ -1035,8 +1035,8 @@ _Type *__jcc_ast_make_const(JCC *vm, _Type *ty) {
     return result;
 }
 
-// _AST_MAKE_VOLATILE(ty) — return a volatile-qualified copy of ty
-_Type *__jcc_ast_make_volatile(JCC *vm, _Type *ty) {
+// $make_volatile(ty) — return a volatile-qualified copy of ty
+$type_t *__jcc_ast_make_volatile(JCC *vm, $type_t *ty) {
     if (!vm || !ty)
         return NULL;
     Type *result = copy_type(vm, ty);
@@ -1059,8 +1059,8 @@ static Type *make_func_type(JCC *vm, Type *return_type) {
     return ty;
 }
 
-_Obj *__jcc_ast_function(JCC *vm, const char *name,
-                            _Type *return_type) {
+$obj_t *__jcc_ast_function(JCC *vm, const char *name,
+                            $type_t *return_type) {
     if (!vm || !name || !return_type)
         return NULL;
 
@@ -1118,13 +1118,13 @@ _Obj *__jcc_ast_function(JCC *vm, const char *name,
     return fn;
 }
 
-static _Node *reflect_noop_node(JCC *vm) {
-    _Node *noop = alloc_node(vm, ND_NULL_EXPR);
+static $node_t *reflect_noop_node(JCC *vm) {
+    $node_t *noop = alloc_node(vm, ND_NULL_EXPR);
     noop->ty = ty_void;
     return noop;
 }
 
-_Node *__jcc_ast_publish(JCC *vm, _Obj *obj, _Token *tok) {
+$node_t *__jcc_ast_publish(JCC *vm, $obj_t *obj, $token_t *tok) {
     if (!vm || !obj || !obj->ty)
         return NULL;
     if (!vm->compiler.scope)
@@ -1170,7 +1170,7 @@ _Node *__jcc_ast_publish(JCC *vm, _Obj *obj, _Token *tok) {
     return reflect_noop_node(vm);
 }
 
-_Node *__jcc_ast_publish_type(JCC *vm, _Type *ty, _Token *tok) {
+$node_t *__jcc_ast_publish_type(JCC *vm, $type_t *ty, $token_t *tok) {
     (void)ty;
     (void)tok;
     if (!vm)
@@ -1178,14 +1178,14 @@ _Node *__jcc_ast_publish_type(JCC *vm, _Type *ty, _Token *tok) {
     return reflect_noop_node(vm);
 }
 
-_Node *__jcc_ast_forward_declare(JCC *vm, _Obj *fn) {
+$node_t *__jcc_ast_forward_declare(JCC *vm, $obj_t *fn) {
     if (!vm || !fn || !fn->is_function || !fn->ty || fn->ty->kind != TY_FUNC)
         return NULL;
     return __jcc_ast_publish(vm, fn, NULL);
 }
 
-void __jcc_ast_function_add_param(JCC *vm, _Obj *fn, const char *name,
-                                _Type *type) {
+void __jcc_ast_function_add_param(JCC *vm, $obj_t *fn, const char *name,
+                                $type_t *type) {
     if (!vm || !fn || !name || !type)
         return;
 
@@ -1232,13 +1232,13 @@ void __jcc_ast_function_add_param(JCC *vm, _Obj *fn, const char *name,
     }
 }
 
-void __jcc_ast_function_set_body(JCC *vm, _Obj *fn, _Node *body) {
+void __jcc_ast_function_set_body(JCC *vm, $obj_t *fn, $node_t *body) {
     if (!vm || !fn || !body)
         return;
 
     // If body is not already a block, wrap it
     if (body->kind != ND_BLOCK) {
-        _Node *block = alloc_node(vm, ND_BLOCK);
+        $node_t *block = alloc_node(vm, ND_BLOCK);
         block->body = body;
         fn->body = block;
     } else {
@@ -1253,26 +1253,26 @@ void __jcc_ast_function_set_body(JCC *vm, _Obj *fn, _Node *body) {
     fn->is_definition = true;
 }
 
-void __jcc_ast_function_set_static(_Obj *fn, bool is_static) {
+void __jcc_ast_function_set_static($obj_t *fn, bool is_static) {
     if (fn)
         fn->is_static = is_static;
 }
 
-void __jcc_ast_function_set_inline(_Obj *fn, bool is_inline) {
+void __jcc_ast_function_set_inline($obj_t *fn, bool is_inline) {
     if (fn)
         fn->is_inline = is_inline;
 }
 
-void __jcc_ast_function_set_variadic(_Obj *fn, bool is_variadic) {
+void __jcc_ast_function_set_variadic($obj_t *fn, bool is_variadic) {
     if (fn && fn->ty)
         fn->ty->is_variadic = is_variadic;
 }
 
-// _AST_FUNCTION_PROTOTYPE(name, ret) — create a forward declaration (no body).
-// The same params API (_AST_FUNCTION_ADD_PARAM) applies; use
-// _AST_PUBLISH to make it visible in scope.
-_Obj *__jcc_ast_function_prototype(JCC *vm, const char *name,
-                                    _Type *return_type) {
+// $function_prototype(name, ret) — create a forward declaration (no body).
+// The same params API ($function_add_param) applies; use
+// $publish to make it visible in scope.
+$obj_t *__jcc_ast_function_prototype(JCC *vm, const char *name,
+                                    $type_t *return_type) {
     if (!vm || !name || !return_type)
         return NULL;
 
@@ -1313,7 +1313,7 @@ _Obj *__jcc_ast_function_prototype(JCC *vm, const char *name,
 // Create a new named global variable.  The type determines layout; use
 // __jcc_ast_make_array(vm, char_ty, len) to get a char[len] type so that
 // the codegen init_data copy (codegen.c) copies the right number of bytes.
-_Obj *__jcc_ast_global_var(JCC *vm, const char *name, _Type *ty) {
+$obj_t *__jcc_ast_global_var(JCC *vm, const char *name, $type_t *ty) {
     if (!vm || !name || !ty)
         return NULL;
 
@@ -1352,8 +1352,8 @@ _Obj *__jcc_ast_global_var(JCC *vm, const char *name, _Type *ty) {
 
 // Set the initial data for a global variable.  data[0..len-1] is copied into
 // the arena.  The variable's type must have ty->size == len; use
-// _AST_MAKE_ARRAY(char_ty, len) to ensure the sizes match.
-void __jcc_ast_global_var_set_init_data(JCC *vm, _Obj *var,
+// $make_array(char_ty, len) to ensure the sizes match.
+void __jcc_ast_global_var_set_init_data(JCC *vm, $obj_t *var,
                                         const char *data, int len) {
     if (!vm || !var || !data || len <= 0)
         return;
@@ -1363,13 +1363,13 @@ void __jcc_ast_global_var_set_init_data(JCC *vm, _Obj *var,
 }
 
 // Set the static flag on a generated global (true = internal linkage).
-void __jcc_ast_global_var_set_static(_Obj *var, bool is_static) {
+void __jcc_ast_global_var_set_static($obj_t *var, bool is_static) {
     if (var)
         var->is_static = is_static;
 }
 
 // ============================================================================
-// Function-building context (ticket #148): _AST_WITH_FN support
+// Function-building context (ticket #148): $with_fn support
 // ============================================================================
 
 // Small internal save-stack so macros can push/pop current_fn cleanly.
@@ -1379,9 +1379,9 @@ static Obj *_fn_context_stack[JCC_FN_CONTEXT_STACK_DEPTH];
 static int  _fn_context_depth = 0;
 
 // Push a new function context: vm->compiler.current_fn is saved on the stack
-// and replaced by fn.  Inside this context, _QUOTE("return x;") will find
+// and replaced by fn.  Inside this context, $quote("return x;") will find
 // current_fn and apply the correct implicit return-type cast.
-void __jcc_ast_push_fn(JCC *vm, _Obj *fn) {
+void __jcc_ast_push_fn(JCC *vm, $obj_t *fn) {
     if (!vm)
         return;
     if (_fn_context_depth >= JCC_FN_CONTEXT_STACK_DEPTH) {
@@ -1414,7 +1414,7 @@ void __jcc_ast_pop_fn(JCC *vm) {
 // dumpTree: reuse the existing cc_dump_node text renderer
 // ---------------------------------------------------------------------------
 
-void __jcc_dump_tree(JCC *vm, _Node *node) {
+void __jcc_dump_tree(JCC *vm, $node_t *node) {
     (void)vm;
     if (!node)
         return;
@@ -1422,7 +1422,7 @@ void __jcc_dump_tree(JCC *vm, _Node *node) {
     fflush(stdout);
 }
 
-const char *__jcc_dump_tree_to_string(JCC *vm, _Node *node) {
+const char *__jcc_dump_tree_to_string(JCC *vm, $node_t *node) {
     if (!vm || !node)
         return NULL;
 
@@ -1457,7 +1457,7 @@ static void emit_ast_gen_list(FILE *f, Node *node) {
     // Count nodes
     int n = 0;
     for (Node *p = node; p; p = p->next) n++;
-    fprintf(f, "(_Node*[]){");
+    fprintf(f, "($node_t*[]){");
     for (Node *p = node; p; p = p->next) {
         emit_ast_gen(f, p);
         if (p->next) fprintf(f, ", ");
@@ -1552,7 +1552,7 @@ static void emit_ast_gen(FILE *f, Node *node) {
         fprintf(f, ")");
         break;
     case ND_BLOCK:
-        fprintf(f, "__jcc_ast_block(_VM, (_Node*[]){");
+        fprintf(f, "__jcc_ast_block(_VM, ($node_t*[]){");
         {
             int i = 0;
             for (Node *s = node->body; s; s = s->next) {
@@ -1597,7 +1597,7 @@ static void emit_ast_gen(FILE *f, Node *node) {
     }
 }
 
-void __jcc_dump_ast_gen(JCC *vm, _Node *node) {
+void __jcc_dump_ast_gen(JCC *vm, $node_t *node) {
     (void)vm;
     if (!node)
         return;
@@ -1606,7 +1606,7 @@ void __jcc_dump_ast_gen(JCC *vm, _Node *node) {
     fflush(stdout);
 }
 
-const char *__jcc_dump_ast_gen_to_string(JCC *vm, _Node *node) {
+const char *__jcc_dump_ast_gen_to_string(JCC *vm, $node_t *node) {
     if (!vm || !node)
         return NULL;
 
@@ -1765,7 +1765,7 @@ static int quote_scan_and_rewrite(JCC *vm, Token *toks, uint64_t *splice_mask) {
 // (arena-allocated).  Typed from the corresponding argument node if
 // available, else ty_long.
 static Obj *quote_push_placeholder(JCC *vm, Scope *sc, char *name,
-                                    _Node *arg_node) {
+                                    $node_t *arg_node) {
     int name_len = (int)strlen(name);
 
     // Derive type from the argument node if available
@@ -1804,18 +1804,18 @@ typedef struct {
     JCC      *vm;                   // compiler context (needed for ND_INIT_SPLICE expansion)
     Obj      *placeholder_vars[64]; // placeholder_vars[i] = Obj for $(i+1)
     Obj      *splice_vars[64];      // splice_vars[i]      = Obj for $@(i+1)
-    _Node   **arg_nodes;
+    $node_t   **arg_nodes;
     int       n_args;
 } QuoteSubstState;
 
 // If stmt is an ND_EXPR_STMT whose sole expression is a reference to a splice
 // placeholder $@k, return the caller's node chain for index k.  Otherwise NULL.
-static _Node *splice_chain_for(QuoteSubstState *s, _Node *stmt);
+static $node_t *splice_chain_for(QuoteSubstState *s, $node_t *stmt);
 
 // Like splice_chain_for but for a bare expression-position arg (ND_VAR directly,
 // not wrapped in ND_EXPR_STMT).  Returns true and sets *out_chain if arg is a
 // $@k placeholder; false otherwise.  *out_chain may be NULL for an empty splice.
-static bool splice_chain_for_arg(QuoteSubstState *s, _Node *arg, _Node **out_chain) {
+static bool splice_chain_for_arg(QuoteSubstState *s, $node_t *arg, $node_t **out_chain) {
     if (!arg || arg->kind != ND_VAR || !arg->var) return false;
     for (int i = 0; i < s->n_args && i < 64; i++) {
         if (s->splice_vars[i] && arg->var == s->splice_vars[i]) {
@@ -1826,9 +1826,9 @@ static bool splice_chain_for_arg(QuoteSubstState *s, _Node *arg, _Node **out_cha
     return false;
 }
 
-static _Node *splice_chain_for(QuoteSubstState *s, _Node *stmt) {
+static $node_t *splice_chain_for(QuoteSubstState *s, $node_t *stmt) {
     if (!stmt || stmt->kind != ND_EXPR_STMT) return NULL;
-    _Node *inner = stmt->lhs;
+    $node_t *inner = stmt->lhs;
     if (!inner || inner->kind != ND_VAR || !inner->var) return NULL;
     for (int i = 0; i < s->n_args && i < 64; i++) {
         if (s->splice_vars[i] && inner->var == s->splice_vars[i])
@@ -1841,7 +1841,7 @@ static _Node *splice_chain_for(QuoteSubstState *s, _Node *stmt) {
 // Mirrors the transform_node() field traversal in pragma.c.
 // Splice placeholders ($@k) are expanded in statement-list positions (body).
 // Using $@k outside a statement-list position is a compile-time error.
-static _Node *quote_substitute(QuoteSubstState *s, _Node *node) {
+static $node_t *quote_substitute(QuoteSubstState *s, $node_t *node) {
     if (!node)
         return NULL;
 
@@ -1871,7 +1871,7 @@ static _Node *quote_substitute(QuoteSubstState *s, _Node *node) {
             error("ND_INIT_SPLICE: missing splice var (internal error)");
         for (int i = 0; i < s->n_args && i < 64; i++) {
             if (s->splice_vars[i] && node->lhs->var == s->splice_vars[i]) {
-                _Node *chain = s->arg_nodes[i];
+                $node_t *chain = s->arg_nodes[i];
                 return node_expand_init_splice(s->vm, node->var, node->var->ty, chain, node->tok);
             }
         }
@@ -1893,19 +1893,19 @@ static _Node *quote_substitute(QuoteSubstState *s, _Node *node) {
     if (node->body) {
         Node head_val = {};
         Node *cur = &head_val;
-        for (_Node *st = node->body; st; ) {
-            _Node *next_st = st->next;
+        for ($node_t *st = node->body; st; ) {
+            $node_t *next_st = st->next;
             st->next = NULL; // isolate before recursing
 
-            _Node *chain = splice_chain_for(s, st);
+            $node_t *chain = splice_chain_for(s, st);
             if (chain) {
                 // Append the entire caller-provided chain
-                _Node *tail = chain;
+                $node_t *tail = chain;
                 while (tail->next) tail = tail->next;
                 cur->next = chain;
                 cur = tail;
             } else {
-                _Node *sub = quote_substitute(s, st);
+                $node_t *sub = quote_substitute(s, st);
                 if (sub) { cur->next = sub; cur = sub; }
             }
             st = next_st;
@@ -1918,29 +1918,29 @@ static _Node *quote_substitute(QuoteSubstState *s, _Node *node) {
     // Splice placeholders ($@k) in direct arg position expand to N expressions.
     if (node->args) {
         bool has_splice = false;
-        for (_Node *a = node->args; a; a = a->next) {
-            _Node *dummy;
+        for ($node_t *a = node->args; a; a = a->next) {
+            $node_t *dummy;
             if (splice_chain_for_arg(s, a, &dummy)) { has_splice = true; break; }
         }
 
         if (has_splice) {
             Node head_val = {};
             Node *cur = &head_val;
-            for (_Node *a = node->args; a; ) {
-                _Node *next_a = a->next;
+            for ($node_t *a = node->args; a; ) {
+                $node_t *next_a = a->next;
                 a->next = NULL;
 
-                _Node *chain;
+                $node_t *chain;
                 if (splice_chain_for_arg(s, a, &chain)) {
                     if (chain) {
-                        _Node *tail = chain;
+                        $node_t *tail = chain;
                         while (tail->next) tail = tail->next;
                         cur->next = chain;
                         cur = tail;
                     }
                     // Empty splice: arg disappears (chain == NULL → no-op)
                 } else {
-                    _Node *sub = quote_substitute(s, a);
+                    $node_t *sub = quote_substitute(s, a);
                     if (sub) { cur->next = sub; cur = sub; }
                 }
                 cur->next = NULL;
@@ -1950,13 +1950,13 @@ static _Node *quote_substitute(QuoteSubstState *s, _Node *node) {
         } else {
             // No splice: existing scalar substitution (unchanged)
             node->args = quote_substitute(s, node->args);
-            for (_Node *a = node->args; a && a->next; a = a->next)
+            for ($node_t *a = node->args; a && a->next; a = a->next)
                 a->next = quote_substitute(s, a->next);
         }
     }
 
     // switch case chains
-    for (_Node *c = node->case_next; c; c = c->case_next)
+    for ($node_t *c = node->case_next; c; c = c->case_next)
         c->body = quote_substitute(s, c->body);
     if (node->default_case)
         node->default_case->body =
@@ -1965,7 +1965,7 @@ static _Node *quote_substitute(QuoteSubstState *s, _Node *node) {
     return node;
 }
 
-static void quote_rebind_macro_scope(_Node *node, Scope *old_scope,
+static void quote_rebind_macro_scope($node_t *node, Scope *old_scope,
                                      Scope *new_scope) {
     if (!node)
         return;
@@ -1981,13 +1981,13 @@ static void quote_rebind_macro_scope(_Node *node, Scope *old_scope,
     quote_rebind_macro_scope(node->init, old_scope, new_scope);
     quote_rebind_macro_scope(node->inc, old_scope, new_scope);
 
-    for (_Node *st = node->body; st; st = st->next)
+    for ($node_t *st = node->body; st; st = st->next)
         quote_rebind_macro_scope(st, old_scope, new_scope);
 
-    for (_Node *a = node->args; a; a = a->next)
+    for ($node_t *a = node->args; a; a = a->next)
         quote_rebind_macro_scope(a, old_scope, new_scope);
 
-    for (_Node *c = node->case_next; c; c = c->case_next)
+    for ($node_t *c = node->case_next; c; c = c->case_next)
         quote_rebind_macro_scope(c->body, old_scope, new_scope);
     if (node->default_case)
         quote_rebind_macro_scope(node->default_case->body, old_scope,
@@ -2028,7 +2028,7 @@ static bool quote_is_stmt(Token *tok) {
 // After quote_substitute, walk the AST and re-apply parameter casts + arity
 // validation for any ND_FUNCALL nodes that had $@k splice placeholders (which
 // bypassed parse-time checking in funcall()).
-static void recheck_spliced_funcalls(JCC *vm, _Node *node) {
+static void recheck_spliced_funcalls(JCC *vm, $node_t *node) {
     if (!node)
         return;
     recheck_spliced_funcalls(vm, node->lhs);
@@ -2038,9 +2038,9 @@ static void recheck_spliced_funcalls(JCC *vm, _Node *node) {
     recheck_spliced_funcalls(vm, node->els);
     recheck_spliced_funcalls(vm, node->init);
     recheck_spliced_funcalls(vm, node->inc);
-    for (_Node *n = node->body; n; n = n->next)
+    for ($node_t *n = node->body; n; n = n->next)
         recheck_spliced_funcalls(vm, n);
-    for (_Node *a = node->args; a; a = a->next)
+    for ($node_t *a = node->args; a; a = a->next)
         recheck_spliced_funcalls(vm, a);
 
     if (node->kind != ND_FUNCALL || !node->has_splice_arg)
@@ -2071,8 +2071,8 @@ static void recheck_spliced_funcalls(JCC *vm, _Node *node) {
 }
 
 // Shared implementation for both public entry points.
-static _Node *quote_core(JCC *vm, const char *tmpl,
-                             _Node **nodes, int n) {
+static $node_t *quote_core(JCC *vm, const char *tmpl,
+                             $node_t **nodes, int n) {
     if (!vm || !tmpl)
         return NULL;
 
@@ -2109,7 +2109,7 @@ static _Node *quote_core(JCC *vm, const char *tmpl,
 
     // Register scalar placeholders $k for all referenced indices
     for (int k = 1; k <= max_index; k++) {
-        _Node *arg = (k - 1 < n) ? nodes[k - 1] : NULL;
+        $node_t *arg = (k - 1 < n) ? nodes[k - 1] : NULL;
         char *name = arena_format(vm, "$%d", k);
         Obj *var = quote_push_placeholder(vm, &quote_scope, name, arg);
         subst.placeholder_vars[k - 1] = var;
@@ -2128,7 +2128,7 @@ static _Node *quote_core(JCC *vm, const char *tmpl,
 
     // 5. Parse (auto-detect expr vs stmt)
     Token *rest = NULL;
-    _Node *result = NULL;
+    $node_t *result = NULL;
     if (quote_is_stmt(toks)) {
         result = cc_parse_stmt(vm, &rest, toks);
     } else {
@@ -2161,13 +2161,13 @@ static _Node *quote_core(JCC *vm, const char *tmpl,
     return result;
 }
 
-_Node *__jcc_quote_n(JCC *vm, const char *tmpl, _Node **nodes, int count) {
+$node_t *__jcc_quote_n(JCC *vm, const char *tmpl, $node_t **nodes, int count) {
     if (!vm || !tmpl || (!nodes && count > 0))
         return NULL;
     return quote_core(vm, tmpl, nodes, count);
 }
 
-_Node *__jcc_quote(JCC *vm, const char *tmpl, ...) {
+$node_t *__jcc_quote(JCC *vm, const char *tmpl, ...) {
     if (!vm || !tmpl)
         return NULL;
 
@@ -2218,13 +2218,13 @@ _Node *__jcc_quote(JCC *vm, const char *tmpl, ...) {
 
     // Collect exactly max_index nodes from va_args
     int n = (max_index < 64) ? max_index : 64;
-    _Node *arg_buf[64];
+    $node_t *arg_buf[64];
     memset(arg_buf, 0, sizeof(arg_buf));
 
     va_list ap;
     va_start(ap, tmpl);
     for (int i = 0; i < n; i++)
-        arg_buf[i] = va_arg(ap, _Node *);
+        arg_buf[i] = va_arg(ap, $node_t *);
     va_end(ap);
 
     return quote_core(vm, tmpl, arg_buf, n);
@@ -2233,7 +2233,7 @@ _Node *__jcc_quote(JCC *vm, const char *tmpl, ...) {
 // Build a ->next-linked chain from an array of nodes and return the head.
 // Useful for constructing the list argument to a $@k splice.
 // A single node is a chain of length 1; passing count==0 returns NULL.
-_Node *__jcc_node_list(JCC *vm, _Node **nodes, int count) {
+$node_t *__jcc_node_list(JCC *vm, $node_t **nodes, int count) {
     if (!vm || !nodes || count <= 0)
         return NULL;
 
@@ -2263,7 +2263,7 @@ static Token *reflect_make_name_token(JCC *vm, const char *name, int name_len) {
     return tok;
 }
 
-// Helper: expose a struct/union/enum type by tag name so _AST_FIND_TYPE(name)
+// Helper: expose a struct/union/enum type by tag name so $find_type(name)
 // resolves it. Mirrors push_tag_scope + record_type_name in parse.c.
 static void reflect_push_tag_scope(JCC *vm, const char *name, int name_len,
                                    Type *ty) {
@@ -2295,7 +2295,7 @@ static void reflect_push_tag_scope(JCC *vm, const char *name, int name_len,
     vm->compiler.type_names = rec;
 }
 
-// Helper: expose a typedef by name so _AST_FIND_TYPE(name) resolves it.
+// Helper: expose a typedef by name so $find_type(name) resolves it.
 // Mirrors push_scope(...)->type_def = ty + record_type_name in parse.c.
 static void reflect_push_typedef_scope(JCC *vm, const char *name, int name_len,
                                        Type *ty) {
@@ -2326,9 +2326,9 @@ static void reflect_push_typedef_scope(JCC *vm, const char *name, int name_len,
     vm->compiler.type_names = rec;
 }
 
-// _AST_MAKE_STRUCT(name) — create and expose a new struct type.
-// Fields are added with _AST_STRUCT_ADD_FIELD.
-_Type *__jcc_ast_make_struct(JCC *vm, const char *name) {
+// $make_struct(name) — create and expose a new struct type.
+// Fields are added with $struct_add_field.
+$type_t *__jcc_ast_make_struct(JCC *vm, const char *name) {
     if (!vm || !name)
         return NULL;
     Type *ty = struct_type(vm);
@@ -2340,8 +2340,8 @@ _Type *__jcc_ast_make_struct(JCC *vm, const char *name) {
     return ty;
 }
 
-// _AST_MAKE_UNION(name) — create and expose a new union type.
-_Type *__jcc_ast_make_union(JCC *vm, const char *name) {
+// $make_union(name) — create and expose a new union type.
+$type_t *__jcc_ast_make_union(JCC *vm, const char *name) {
     if (!vm || !name)
         return NULL;
     Type *ty = union_type(vm);
@@ -2353,10 +2353,10 @@ _Type *__jcc_ast_make_union(JCC *vm, const char *name) {
     return ty;
 }
 
-// _AST_STRUCT_ADD_FIELD(ty, name, field_type) — append a field to a struct or
+// $struct_add_field(ty, name, field_type) — append a field to a struct or
 // union type and recompute the aggregate size/alignment.
-_Type *__jcc_ast_struct_add_field(JCC *vm, _Type *ty, const char *name,
-                                   _Type *field_type) {
+$type_t *__jcc_ast_struct_add_field(JCC *vm, $type_t *ty, const char *name,
+                                   $type_t *field_type) {
     if (!vm || !ty || !name || !field_type)
         return NULL;
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
@@ -2411,9 +2411,9 @@ _Type *__jcc_ast_struct_add_field(JCC *vm, _Type *ty, const char *name,
     return ty;
 }
 
-// _AST_MAKE_ENUM(name) — create and expose a new enum type.
-// Constants are added with _AST_ENUM_ADD_CONSTANT.
-_Type *__jcc_ast_make_enum(JCC *vm, const char *name) {
+// $make_enum(name) — create and expose a new enum type.
+// Constants are added with $enum_add_constant.
+$type_t *__jcc_ast_make_enum(JCC *vm, const char *name) {
     if (!vm || !name)
         return NULL;
     Type *ty = enum_type(vm);
@@ -2423,9 +2423,9 @@ _Type *__jcc_ast_make_enum(JCC *vm, const char *name) {
     return ty;
 }
 
-// _AST_ENUM_ADD_CONSTANT(ty, name, value) — add a named constant to an enum
+// $enum_add_constant(ty, name, value) — add a named constant to an enum
 // type and expose it as an integer constant in current scope.
-void __jcc_ast_enum_add_constant(JCC *vm, _Type *ty, const char *name,
+void __jcc_ast_enum_add_constant(JCC *vm, $type_t *ty, const char *name,
                                   int value) {
     if (!vm || !ty || !name || ty->kind != TY_ENUM)
         return;
@@ -2464,9 +2464,9 @@ void __jcc_ast_enum_add_constant(JCC *vm, _Type *ty, const char *name,
                           sc);
 }
 
-// _AST_MAKE_TYPEDEF(name, underlying) — register name as a typedef alias for
-// underlying so that _AST_FIND_TYPE(name) and C code can use it.
-_Type *__jcc_ast_make_typedef(JCC *vm, const char *name, _Type *underlying) {
+// $make_typedef(name, underlying) — register name as a typedef alias for
+// underlying so that $find_type(name) and C code can use it.
+$type_t *__jcc_ast_make_typedef(JCC *vm, const char *name, $type_t *underlying) {
     if (!vm || !name || !underlying)
         return NULL;
     int name_len = (int)strlen(name);
@@ -2504,7 +2504,7 @@ double __jcc_get_comptime_float(JCC *vm, const char *name) {
     return cv->is_float ? cv->float_val : (double)cv->int_val;
 }
 
-_Node *__jcc_get_comptime_var(JCC *vm, const char *name) {
+$node_t *__jcc_get_comptime_var(JCC *vm, const char *name) {
     if (!vm || !name) return NULL;
     ComptimeVar *cv = find_comptime_var(vm, name);
     if (!cv || !cv->is_evaluated || cv->is_struct) return NULL;
@@ -2513,7 +2513,7 @@ _Node *__jcc_get_comptime_var(JCC *vm, const char *name) {
     return __jcc_ast_int_literal(vm, cv->int_val);
 }
 
-_Node *__jcc_get_comptime_member(JCC *vm, const char *var_name,
+$node_t *__jcc_get_comptime_member(JCC *vm, const char *var_name,
                                   const char *field) {
     if (!vm || !var_name || !field) return NULL;
     ComptimeVar *cv = find_comptime_var(vm, var_name);
@@ -2530,7 +2530,7 @@ _Node *__jcc_get_comptime_member(JCC *vm, const char *var_name,
     return NULL;
 }
 
-_Node *__jcc_get_constexpr_value(JCC *vm, const char *name) {
+$node_t *__jcc_get_constexpr_value(JCC *vm, const char *name) {
     if (!vm || !name) return NULL;
     Obj *obj = (Obj *)__jcc_ast_find_global(vm, name);
     if (!obj || !obj->is_constexpr || !obj->init_expr) return NULL;

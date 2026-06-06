@@ -7,10 +7,10 @@ struct Triple { int a; int b; int c; };
 // ---- Test 1: splice into a struct compound literal --------------------------
 // Builds a two-element chain and splices it as positional initializers for Point.
 [[jcc::macro(inline)]]
-_Node *make_point(_Node *px, _Node *py) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *chain = __jcc_node_list(vm, (_Node*[]){ px, py }, 2);
-    return _QUOTE("(struct Point){ $@1 }", chain);
+$node_t *make_point($node_t *px, $node_t *py) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ px, py }, 2);
+    return $quote("(struct Point){ $@1 }", chain);
 }
 
 int test_struct_splice(void) {
@@ -22,10 +22,10 @@ int test_struct_splice(void) {
 // Builds a three-element chain and splices it into int[3].
 // The compound literal decays to a pointer; sum all elements.
 [[jcc::macro(inline)]]
-_Node *make_arr3(_Node *a, _Node *b, _Node *c) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *chain = __jcc_node_list(vm, (_Node*[]){ a, b, c }, 3);
-    return _QUOTE("(int[3]){ $@1 }", chain);
+$node_t *make_arr3($node_t *a, $node_t *b, $node_t *c) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ a, b, c }, 3);
+    return $quote("(int[3]){ $@1 }", chain);
 }
 
 int test_array_splice(void) {
@@ -36,10 +36,10 @@ int test_array_splice(void) {
 // ---- Test 3: struct splice with expression arguments (not just literals) -----
 // Verifies that non-trivial caller expressions are correctly substituted.
 [[jcc::macro(inline)]]
-_Node *make_triple(_Node *a, _Node *b, _Node *c) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *chain = __jcc_node_list(vm, (_Node*[]){ a, b, c }, 3);
-    return _QUOTE("(struct Triple){ $@1 }", chain);
+$node_t *make_triple($node_t *a, $node_t *b, $node_t *c) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ a, b, c }, 3);
+    return $quote("(struct Triple){ $@1 }", chain);
 }
 
 int test_struct_triple(void) {
@@ -51,10 +51,10 @@ int test_struct_triple(void) {
 // ---- Test 4: scalar $1 combined with a separate splice $@2 ------------------
 // Verifies that scalar and splice placeholders coexist in one template.
 [[jcc::macro(inline)]]
-_Node *scale_and_make_point(_Node *scale, _Node *px, _Node *py) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *chain = __jcc_node_list(vm, (_Node*[]){ px, py }, 2);
-    return _QUOTE("(struct Point){ $@2 }", scale, chain);
+$node_t *scale_and_make_point($node_t *scale, $node_t *px, $node_t *py) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ px, py }, 2);
+    return $quote("(struct Point){ $@2 }", scale, chain);
 }
 
 int test_scalar_and_splice(void) {

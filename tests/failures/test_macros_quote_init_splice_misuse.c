@@ -5,11 +5,11 @@
 struct Point { int x; int y; };
 
 [[jcc::macro(inline)]]
-_Node *bad_point(_Node *a) {
-    _VirtualMachine *vm = __jcc_get_vm();
+$node_t *bad_point($node_t *a) {
+    $vm_t *vm = __jcc_get_vm();
     // Only 1 element in chain but struct Point has 2 fields → error.
-    _Node *chain = __jcc_node_list(vm, (_Node*[]){ a }, 1);
-    return _QUOTE("(struct Point){ $@1 }", chain);
+    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ a }, 1);
+    return $quote("(struct Point){ $@1 }", chain);
 }
 
 int main(void) {

@@ -6,11 +6,11 @@ int existing_function(void) {
 }
 
 [[jcc::macro(inline)]]
-_Node *clobber_existing(void) {
-    _Type *int_ty = _AST_GET_TYPE("int");
-    _Obj *fn = _AST_FUNCTION("existing_function", int_ty);
-    _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(_AST_INT_LITERAL(42)));
-    return _AST_INT_LITERAL(0);
+$node_t *clobber_existing(void) {
+    $type_t *int_ty = $get_type("int");
+    $obj_t *fn = $function("existing_function", int_ty);
+    $function_set_body(fn, $return($int_literal(42)));
+    return $int_literal(0);
 }
 
 int main(void) {

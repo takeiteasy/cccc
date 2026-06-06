@@ -5,13 +5,13 @@ constexpr double SCALE = 3.5;
 constexpr float  HALF  = 0.5f;
 
 [[jcc::macro(inline)]]
-_Node *get_scale(void) {
-    return _AST_GET_CONSTEXPR_VALUE("SCALE");
+$node_t *get_scale(void) {
+    return $get_constexpr_value("SCALE");
 }
 
 [[jcc::macro(inline)]]
-_Node *get_half(void) {
-    return _AST_GET_CONSTEXPR_VALUE("HALF");
+$node_t *get_half(void) {
+    return $get_constexpr_value("HALF");
 }
 
 int main(void) {

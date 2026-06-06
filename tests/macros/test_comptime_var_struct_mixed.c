@@ -18,18 +18,18 @@ struct Config {
 } cfg = { base_width(), 240, scale };
 
 [[jcc::macro(inline)]]
-_Node *get_width(void) {
-    return _AST_GET_COMPTIME_MEMBER("cfg", "width");
+$node_t *get_width(void) {
+    return $get_comptime_member("cfg", "width");
 }
 
 [[jcc::macro(inline)]]
-_Node *get_height(void) {
-    return _AST_GET_COMPTIME_MEMBER("cfg", "height");
+$node_t *get_height(void) {
+    return $get_comptime_member("cfg", "height");
 }
 
 [[jcc::macro(inline)]]
-_Node *get_scale(void) {
-    return _AST_GET_COMPTIME_MEMBER("cfg", "scale");
+$node_t *get_scale(void) {
+    return $get_comptime_member("cfg", "scale");
 }
 
 int main(void) {

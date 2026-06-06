@@ -1,59 +1,59 @@
-// Test ticket #271: unified _AST_PUBLISH API.
+// Test ticket #271: unified $publish API.
 
 [[jcc::macro]]
 void publish_proto(void) {
-    _Type *int_ty = _AST_GET_TYPE("int");
-    _Obj *proto = _AST_FUNCTION_PROTOTYPE("published_add_one", int_ty);
-    _AST_FUNCTION_ADD_PARAM(proto, "x", int_ty);
-    _AST_PUBLISH(proto);
+    $type_t *int_ty = $get_type("int");
+    $obj_t *proto = $function_prototype("published_add_one", int_ty);
+    $function_add_param(proto, "x", int_ty);
+    $publish(proto);
 }
 publish_proto();
 
 [[jcc::macro]]
 void define_published_fn(void) {
-    _Type *int_ty = _AST_GET_TYPE("int");
-    _Obj *fn = _AST_FUNCTION("published_add_one", int_ty);
-    _AST_FUNCTION_SET_BODY(fn,
-        _AST_RETURN(_AST_BINARY(_ADD, _AST_PARAM_REF(fn, "x"),
-                                _AST_INT_LITERAL(1))));
+    $type_t *int_ty = $get_type("int");
+    $obj_t *fn = $function("published_add_one", int_ty);
+    $function_set_body(fn,
+        $return($binary(nk_add, $param_ref(fn, "x"),
+                                $int_literal(1))));
 }
 define_published_fn();
 
 [[jcc::macro]]
 void publish_global_and_types(void) {
-    _Type *char_ty = _AST_GET_TYPE("char");
-    _Type *arr_ty = _AST_MAKE_ARRAY(char_ty, 4);
-    _Obj *g = _AST_GLOBAL_VAR("published_bytes", arr_ty);
-    _AST_GLOBAL_VAR_SET_INIT_DATA(g, "JCC\0", 4);
-    _AST_PUBLISH_AT(g, _AST_SYNTHETIC_TOKEN("published global"));
+    $type_t *char_ty = $get_type("char");
+    $type_t *arr_ty = $make_array(char_ty, 4);
+    $obj_t *g = $global_var("published_bytes", arr_ty);
+    $global_var_set_init_data(g, "JCC\0", 4);
+    $publish_at(g, $synthetic_token("published global"));
 
-    _Type *int_ty = _AST_GET_TYPE("int");
-    _Type *point = _AST_MAKE_STRUCT("PublishedPoint");
-    _AST_STRUCT_ADD_FIELD(point, "x", int_ty);
-    _AST_STRUCT_ADD_FIELD(point, "y", int_ty);
-    _AST_PUBLISH(point);
+    $type_t *int_ty = $get_type("int");
+    $type_t *point = $make_struct("PublishedPoint");
+    $struct_add_field(point, "x", int_ty);
+    $struct_add_field(point, "y", int_ty);
+    $publish(point);
 
-    _Type *tagged = _AST_MAKE_ENUM("PublishedTag");
-    _AST_ENUM_ADD_CONSTANT(tagged, "PUBLISHED_TAG_OK", 7);
-    _AST_PUBLISH(tagged);
+    $type_t *tagged = $make_enum("PublishedTag");
+    $enum_add_constant(tagged, "PUBLISHED_TAG_OK", 7);
+    $publish(tagged);
 
-    _AST_PUBLISH(_AST_MAKE_TYPEDEF("PublishedLong", _AST_GET_TYPE("long")));
+    $publish($make_typedef("PublishedLong", $get_type("long")));
 }
 publish_global_and_types();
 
 [[jcc::macro]]
 void forward_alias_still_works(void) {
-    _Type *int_ty = _AST_GET_TYPE("int");
-    _Obj *proto = _AST_FUNCTION_PROTOTYPE("published_alias_fn", int_ty);
-    _AST_FORWARD_DECLARE(proto);
+    $type_t *int_ty = $get_type("int");
+    $obj_t *proto = $function_prototype("published_alias_fn", int_ty);
+    $forward_declare(proto);
 }
 forward_alias_still_works();
 
 [[jcc::macro]]
 void define_alias_fn(void) {
-    _Type *int_ty = _AST_GET_TYPE("int");
-    _Obj *fn = _AST_FUNCTION("published_alias_fn", int_ty);
-    _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(_AST_INT_LITERAL(5)));
+    $type_t *int_ty = $get_type("int");
+    $obj_t *fn = $function("published_alias_fn", int_ty);
+    $function_set_body(fn, $return($int_literal(5)));
 }
 define_alias_fn();
 

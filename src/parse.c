@@ -2411,10 +2411,10 @@ static Node *stmt(JCC *vm, Token **rest, Token *tok) {
         *rest = skip(vm, tok, ";");
 
         add_type(vm, exp);
-        // current_fn may be NULL when a _QUOTE template is parsed at file scope
-        // (e.g. inside a top-level pragma macro call that uses _QUOTE("return x;")).
+        // current_fn may be NULL when a $quote template is parsed at file scope
+        // (e.g. inside a top-level pragma macro call that uses $quote("return x;")).
         // Guard the implicit return-type cast; types will be resolved by add_type
-        // later, or by the caller establishing context via _AST_WITH_FN.
+        // later, or by the caller establishing context via $with_fn.
         if (vm->compiler.current_fn) {
             Type *ty = vm->compiler.current_fn->ty->return_ty;
             if (ty->kind == TY_VOID) {

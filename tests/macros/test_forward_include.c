@@ -4,13 +4,13 @@
 
 [[jcc::macro]]
 void gen_answer(void) {
-    _VirtualMachine *vm = _VM;
+    $vm_t *vm = _VM;
     // Register the same header twice — output must contain only one entry.
     __jcc_forward_include(vm, "<stddef.h>");
     __jcc_forward_include(vm, "<stddef.h>");
     __jcc_forward_include(vm, "<stdint.h>");
-    _Obj *fn = _AST_FUNCTION("get_answer", _AST_GET_TYPE("int"));
-    _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(_AST_INT_LITERAL(42)));
+    $obj_t *fn = $function("get_answer", $get_type("int"));
+    $function_set_body(fn, $return($int_literal(42)));
 }
 
 gen_answer();

@@ -18,28 +18,28 @@ int g_do_result;
 // approach: g_while_result is both the counter and the accumulator.
 // Generated: while (g_while_result < 10) g_while_result = g_while_result + 1;
 [[jcc::macro(inline)]]
-_Node *gen_while_func() {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Type *void_ty = __jcc_ast_get_type(vm, "void");
-    _Obj *fn = __jcc_ast_function(vm, "fill_while", void_ty);
+$node_t *gen_while_func() {
+    $vm_t *vm = __jcc_get_vm();
+    $type_t *void_ty = __jcc_ast_get_type(vm, "void");
+    $obj_t *fn = __jcc_ast_function(vm, "fill_while", void_ty);
 
-    _Type *int_ty = __jcc_ast_get_type(vm, "int");
+    $type_t *int_ty = __jcc_ast_get_type(vm, "int");
     (void)int_ty;
 
     // cond: g_while_result < 10
-    _Node *lhs_c  = __jcc_ast_var_ref(vm, "g_while_result");
-    _Node *ten    = __jcc_ast_int_literal(vm, 10);
-    _Node *cond   = __jcc_ast_binary(vm, _LT, lhs_c, ten);
+    $node_t *lhs_c  = __jcc_ast_var_ref(vm, "g_while_result");
+    $node_t *ten    = __jcc_ast_int_literal(vm, 10);
+    $node_t *cond   = __jcc_ast_binary(vm, nk_lt, lhs_c, ten);
 
     // body: g_while_result = g_while_result + 1
-    _Node *lhs_a  = __jcc_ast_var_ref(vm, "g_while_result");
-    _Node *lhs_a2 = __jcc_ast_var_ref(vm, "g_while_result");
-    _Node *one    = __jcc_ast_int_literal(vm, 1);
-    _Node *add    = __jcc_ast_binary(vm, _ADD, lhs_a2, one);
-    _Node *asgn   = __jcc_ast_assign(vm, lhs_a, add);
-    _Node *body   = __jcc_ast_expr_stmt(vm, asgn);
+    $node_t *lhs_a  = __jcc_ast_var_ref(vm, "g_while_result");
+    $node_t *lhs_a2 = __jcc_ast_var_ref(vm, "g_while_result");
+    $node_t *one    = __jcc_ast_int_literal(vm, 1);
+    $node_t *add    = __jcc_ast_binary(vm, nk_add, lhs_a2, one);
+    $node_t *asgn   = __jcc_ast_assign(vm, lhs_a, add);
+    $node_t *body   = __jcc_ast_expr_stmt(vm, asgn);
 
-    _Node *loop = __jcc_ast_while(vm, cond, body);
+    $node_t *loop = __jcc_ast_while(vm, cond, body);
     __jcc_ast_function_set_body(vm, fn, loop);
     return __jcc_ast_int_literal(vm, 0);
 }
@@ -47,24 +47,24 @@ _Node *gen_while_func() {
 // Macro: generates a function that uses a for loop.
 // Generated: for (; g_for_result < 5; ) g_for_result = g_for_result + 1;
 [[jcc::macro(inline)]]
-_Node *gen_for_func() {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Type *void_ty = __jcc_ast_get_type(vm, "void");
-    _Obj *fn = __jcc_ast_function(vm, "fill_for", void_ty);
+$node_t *gen_for_func() {
+    $vm_t *vm = __jcc_get_vm();
+    $type_t *void_ty = __jcc_ast_get_type(vm, "void");
+    $obj_t *fn = __jcc_ast_function(vm, "fill_for", void_ty);
 
-    _Node *lhs_c  = __jcc_ast_var_ref(vm, "g_for_result");
-    _Node *five   = __jcc_ast_int_literal(vm, 5);
-    _Node *cond   = __jcc_ast_binary(vm, _LT, lhs_c, five);
+    $node_t *lhs_c  = __jcc_ast_var_ref(vm, "g_for_result");
+    $node_t *five   = __jcc_ast_int_literal(vm, 5);
+    $node_t *cond   = __jcc_ast_binary(vm, nk_lt, lhs_c, five);
 
-    _Node *lhs_a  = __jcc_ast_var_ref(vm, "g_for_result");
-    _Node *lhs_a2 = __jcc_ast_var_ref(vm, "g_for_result");
-    _Node *one    = __jcc_ast_int_literal(vm, 1);
-    _Node *add    = __jcc_ast_binary(vm, _ADD, lhs_a2, one);
-    _Node *asgn   = __jcc_ast_assign(vm, lhs_a, add);
-    _Node *body   = __jcc_ast_expr_stmt(vm, asgn);
+    $node_t *lhs_a  = __jcc_ast_var_ref(vm, "g_for_result");
+    $node_t *lhs_a2 = __jcc_ast_var_ref(vm, "g_for_result");
+    $node_t *one    = __jcc_ast_int_literal(vm, 1);
+    $node_t *add    = __jcc_ast_binary(vm, nk_add, lhs_a2, one);
+    $node_t *asgn   = __jcc_ast_assign(vm, lhs_a, add);
+    $node_t *body   = __jcc_ast_expr_stmt(vm, asgn);
 
     // for(NULL, cond, NULL, body) — init and inc are NULL
-    _Node *loop = __jcc_ast_for(vm, (void*)0, cond, (void*)0, body);
+    $node_t *loop = __jcc_ast_for(vm, (void*)0, cond, (void*)0, body);
     __jcc_ast_function_set_body(vm, fn, loop);
     return __jcc_ast_int_literal(vm, 0);
 }
@@ -73,23 +73,23 @@ _Node *gen_for_func() {
 // Generated: do { g_do_result = g_do_result + 1; } while (g_do_result < 3);
 // After: g_do_result == 3 (started at 0, runs 3 times)
 [[jcc::macro(inline)]]
-_Node *gen_do_func() {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Type *void_ty = __jcc_ast_get_type(vm, "void");
-    _Obj *fn = __jcc_ast_function(vm, "fill_do", void_ty);
+$node_t *gen_do_func() {
+    $vm_t *vm = __jcc_get_vm();
+    $type_t *void_ty = __jcc_ast_get_type(vm, "void");
+    $obj_t *fn = __jcc_ast_function(vm, "fill_do", void_ty);
 
-    _Node *lhs_b  = __jcc_ast_var_ref(vm, "g_do_result");
-    _Node *lhs_b2 = __jcc_ast_var_ref(vm, "g_do_result");
-    _Node *one    = __jcc_ast_int_literal(vm, 1);
-    _Node *add    = __jcc_ast_binary(vm, _ADD, lhs_b2, one);
-    _Node *asgn   = __jcc_ast_assign(vm, lhs_b, add);
-    _Node *body   = __jcc_ast_expr_stmt(vm, asgn);
+    $node_t *lhs_b  = __jcc_ast_var_ref(vm, "g_do_result");
+    $node_t *lhs_b2 = __jcc_ast_var_ref(vm, "g_do_result");
+    $node_t *one    = __jcc_ast_int_literal(vm, 1);
+    $node_t *add    = __jcc_ast_binary(vm, nk_add, lhs_b2, one);
+    $node_t *asgn   = __jcc_ast_assign(vm, lhs_b, add);
+    $node_t *body   = __jcc_ast_expr_stmt(vm, asgn);
 
-    _Node *lhs_c  = __jcc_ast_var_ref(vm, "g_do_result");
-    _Node *three  = __jcc_ast_int_literal(vm, 3);
-    _Node *cond   = __jcc_ast_binary(vm, _LT, lhs_c, three);
+    $node_t *lhs_c  = __jcc_ast_var_ref(vm, "g_do_result");
+    $node_t *three  = __jcc_ast_int_literal(vm, 3);
+    $node_t *cond   = __jcc_ast_binary(vm, nk_lt, lhs_c, three);
 
-    _Node *loop = __jcc_ast_do_while(vm, body, cond);
+    $node_t *loop = __jcc_ast_do_while(vm, body, cond);
     __jcc_ast_function_set_body(vm, fn, loop);
     return __jcc_ast_int_literal(vm, 0);
 }

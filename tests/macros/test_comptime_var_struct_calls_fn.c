@@ -10,15 +10,15 @@ int compute_width(void) { return 1920; }
 struct Dims { int width; int height; } dims = { compute_width(), 1080 };
 
 [[jcc::macro(inline)]]
-_Node *get_area(void) {
-    _Node *w = _AST_GET_COMPTIME_MEMBER("dims", "width");
-    _Node *h = _AST_GET_COMPTIME_MEMBER("dims", "height");
-    return _AST_BINARY(_MUL, w, h);
+$node_t *get_area(void) {
+    $node_t *w = $get_comptime_member("dims", "width");
+    $node_t *h = $get_comptime_member("dims", "height");
+    return $binary(nk_mul, w, h);
 }
 
 [[jcc::macro(inline)]]
-_Node *get_width(void) {
-    return _AST_GET_COMPTIME_MEMBER("dims", "width");
+$node_t *get_width(void) {
+    return $get_comptime_member("dims", "width");
 }
 
 int main(void) {

@@ -14,9 +14,9 @@ int add2(int a, int b) {
 // ---- Test 1: splice all args into a fixed-arity callee ----------------------
 // all three arguments come from a spliced chain; no scalar args.
 [[jcc::macro(inline)]]
-_Node *call_add3(_Node *a, _Node *b, _Node *c) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *chain = __jcc_node_list(vm, (_Node*[]){ a, b, c }, 3);
+$node_t *call_add3($node_t *a, $node_t *b, $node_t *c) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ a, b, c }, 3);
     return __jcc_quote(vm, "add3($@1)", chain);
 }
 
@@ -27,9 +27,9 @@ int test_full_fixed_splice(void) {
 // ---- Test 2: scalar prefix + splice tail into fixed-arity callee ------------
 // $1 fills the first fixed parameter; $@2 expands to fill the rest.
 [[jcc::macro(inline)]]
-_Node *call_add3_mixed(_Node *a, _Node *b, _Node *c) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *chain = __jcc_node_list(vm, (_Node*[]){ b, c }, 2);
+$node_t *call_add3_mixed($node_t *a, $node_t *b, $node_t *c) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ b, c }, 2);
     return __jcc_quote(vm, "add3($1, $@2)", a, chain);
 }
 
@@ -39,9 +39,9 @@ int test_prefix_then_fixed_splice(void) {
 
 // ---- Test 3: splice into a two-parameter fixed callee -----------------------
 [[jcc::macro(inline)]]
-_Node *call_add2(_Node *a, _Node *b) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *chain = __jcc_node_list(vm, (_Node*[]){ a, b }, 2);
+$node_t *call_add2($node_t *a, $node_t *b) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ a, b }, 2);
     return __jcc_quote(vm, "add2($@1)", chain);
 }
 
@@ -53,9 +53,9 @@ int test_two_param_fixed_splice(void) {
 // Splice double literals into int parameters; the cast should truncate them.
 // 10.7 → 10, 21.3 → 21, 10.9 → 10 — correct result is 41 (not 42.9).
 [[jcc::macro(inline)]]
-_Node *call_add3_cast(_Node *a, _Node *b, _Node *c) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *chain = __jcc_node_list(vm, (_Node*[]){ a, b, c }, 3);
+$node_t *call_add3_cast($node_t *a, $node_t *b, $node_t *c) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ a, b, c }, 3);
     return __jcc_quote(vm, "add3($@1)", chain);
 }
 

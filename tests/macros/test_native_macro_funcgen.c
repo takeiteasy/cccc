@@ -1,12 +1,12 @@
 // JCC_FLAGS: --native
 [[jcc::macro(inline)]]
-_Node *gen_native_answer(_Node *unused) {
+$node_t *gen_native_answer($node_t *unused) {
     (void)unused;
-    _Obj *fn = _AST_FUNCTION("native_answer", _AST_GET_TYPE("int"));
-    _AST_WITH_FN(fn) {
-        _AST_FUNCTION_SET_BODY(fn, _QUOTE("return 42;"));
+    $obj_t *fn = $function("native_answer", $get_type("int"));
+    $with_fn(fn) {
+        $function_set_body(fn, $quote("return 42;"));
     }
-    return _AST_INT_LITERAL(0);
+    return $int_literal(0);
 }
 
 int native_answer(void);

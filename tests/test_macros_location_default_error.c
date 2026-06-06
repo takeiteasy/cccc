@@ -2,9 +2,9 @@
 // JCC_EXPECT_STDERR: test_macros_location_default_error\.c:[0-9]+:.*default_loc
 
 [[jcc::macro(inline)]]
-_Node *default_loc(void) {
-    _Node *node = _AST_BINARY(_ADD, _AST_INT_LITERAL(1), _AST_INT_LITERAL(2));
-    _MACRO_ERROR_AT(node, "default generated location");
+$node_t *default_loc(void) {
+    $node_t *node = $binary(nk_add, $int_literal(1), $int_literal(2));
+    $macro_error_at(node, "default generated location");
     return node;
 }
 

@@ -89,7 +89,7 @@ extern void  __jcc_ast_global_var_set_init_data(JCC *vm, Obj *var,
                                                 const char *data, int len);
 extern void  __jcc_ast_global_var_set_static(Obj *var, bool is_static);
 
-// Ticket #148: function-building context (push/pop current_fn for _QUOTE)
+// Ticket #148: function-building context (push/pop current_fn for $quote)
 extern void __jcc_ast_push_fn(JCC *vm, Obj *fn);
 extern void __jcc_ast_pop_fn(JCC *vm);
 

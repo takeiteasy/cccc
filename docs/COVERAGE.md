@@ -477,7 +477,7 @@ registrations for the same header are deduplicated.
 ```c
 [[jcc::macro]]
 void gen_helpers(void) {
-    _FORWARD_INCLUDE("<string.h>");
+    $forward_include("<string.h>");
     // ... generate functions that call strlen() ...
 }
 ```

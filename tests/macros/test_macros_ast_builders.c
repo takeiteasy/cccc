@@ -5,8 +5,8 @@
 // Used as: int x; int y = set_var(x, 99);
 // After expansion: int y = (x = 99);  => y == 99, x == 99
 [[jcc::macro(inline)]]
-_Node *set_var(_Node *target, _Node *value) {
-    _VirtualMachine *vm = __jcc_get_vm();
+$node_t *set_var($node_t *target, $node_t *value) {
+    $vm_t *vm = __jcc_get_vm();
     return __jcc_ast_assign(vm, target, value);
 }
 
@@ -15,8 +15,8 @@ _Node *set_var(_Node *target, _Node *value) {
 struct Point { int x; int y; };
 
 [[jcc::macro(inline)]]
-_Node *get_x(_Node *pt) {
-    _VirtualMachine *vm = __jcc_get_vm();
+$node_t *get_x($node_t *pt) {
+    $vm_t *vm = __jcc_get_vm();
     return __jcc_ast_member(vm, pt, "x");
 }
 
@@ -26,10 +26,10 @@ int triple(int n) { return n * 3; }
 
 // Macro that generates: triple(arg)
 [[jcc::macro(inline)]]
-_Node *call_triple(_Node *arg) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *callee = __jcc_ast_var_ref(vm, "triple");
-    _Node *args[1] = { arg };
+$node_t *call_triple($node_t *arg) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *callee = __jcc_ast_var_ref(vm, "triple");
+    $node_t *args[1] = { arg };
     return __jcc_ast_funcall(vm, callee, args, 1);
 }
 

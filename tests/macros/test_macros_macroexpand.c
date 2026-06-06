@@ -1,31 +1,31 @@
-// Test ticket #277: __jcc_macroexpand / __jcc_macroexpand_1 / _MACROEXPAND reflection API
+// Test ticket #277: __jcc_macroexpand / __jcc_macroexpand_1 / $macroexpand reflection API
 
 // A simple macro to expand in tests
 [[jcc::macro(inline)]]
-_Node *make_answer(void) {
+$node_t *make_answer(void) {
     return __jcc_ast_int_literal(__jcc_get_vm(), 42);
 }
 
 // A macro that wraps make_answer() — used to test multi-level expansion
 [[jcc::macro(inline)]]
-_Node *wrap_answer(void) {
+$node_t *wrap_answer(void) {
     return __jcc_quote(__jcc_get_vm(), "make_answer()");
 }
 
 // Test 1: macroexpand_1 on a macro-call node expands one level
 [[jcc::macro(inline)]]
-_Node *test_expand_1_macro_call(void) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *call = __jcc_quote(vm, "make_answer()");
+$node_t *test_expand_1_macro_call(void) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *call = __jcc_quote(vm, "make_answer()");
     return __jcc_macroexpand_1(vm, call);
 }
 
 // Test 2: macroexpand_1 on a non-macro node is identity
 [[jcc::macro(inline)]]
-_Node *test_expand_1_identity(void) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *lit = __jcc_ast_int_literal(vm, 99);
-    _Node *result = __jcc_macroexpand_1(vm, lit);
+$node_t *test_expand_1_identity(void) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *lit = __jcc_ast_int_literal(vm, 99);
+    $node_t *result = __jcc_macroexpand_1(vm, lit);
     return __jcc_ast_int_literal(vm, result == lit ? 1 : 0);
 }
 
@@ -33,28 +33,28 @@ _Node *test_expand_1_identity(void) {
 // After one step wrap_answer() -> make_answer(); a second macroexpand_1 then
 // resolves that to 42, proving the first step stopped after one expansion.
 [[jcc::macro(inline)]]
-_Node *test_expand_1_single_level(void) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *call = __jcc_quote(vm, "wrap_answer()");
-    _Node *step1 = __jcc_macroexpand_1(vm, call);
-    _Node *step2 = __jcc_macroexpand_1(vm, step1);
+$node_t *test_expand_1_single_level(void) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *call = __jcc_quote(vm, "wrap_answer()");
+    $node_t *step1 = __jcc_macroexpand_1(vm, call);
+    $node_t *step2 = __jcc_macroexpand_1(vm, step1);
     return step2;
 }
 
 // Test 4: macroexpand fully expands wrap_answer() -> make_answer() -> 42
 [[jcc::macro(inline)]]
-_Node *test_expand_full(void) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *call = __jcc_quote(vm, "wrap_answer()");
+$node_t *test_expand_full(void) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *call = __jcc_quote(vm, "wrap_answer()");
     return __jcc_macroexpand(vm, call);
 }
 
 // Test 5: macroexpand on a non-macro node is identity
 [[jcc::macro(inline)]]
-_Node *test_expand_full_identity(void) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *lit = __jcc_ast_int_literal(vm, 77);
-    _Node *result = __jcc_macroexpand(vm, lit);
+$node_t *test_expand_full_identity(void) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *lit = __jcc_ast_int_literal(vm, 77);
+    $node_t *result = __jcc_macroexpand(vm, lit);
     return __jcc_ast_int_literal(vm, result == lit ? 1 : 0);
 }
 

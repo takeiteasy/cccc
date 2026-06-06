@@ -11,20 +11,20 @@ syntax). Either form is accepted everywhere.
 The macro API is private to macro compilation. JCC embeds its own `reflection.h`
 and injects it automatically while macro and comptime helper functions are
 compiled, but that bundled header is not on the public include path. Macro code
-can use the `_AST_*`, `_QUOTE*`, `_MACRO_ERROR_AT`, `_GENSYM`, and `_DUMP_*`
+can use the `$*`, `$quote*`, `$macro_error_at`, `$gensym`, and `$dump_*`
 convenience macros directly.
 
 ## Return-Value Model
 
 A macro's return value is **the node spliced at the call site**, replacing the
-invocation. Top-level definitions — functions created with `_AST_FUNCTION()`,
-globals with `_AST_GLOBAL_VAR()` — are **side effects** injected regardless of
+invocation. Top-level definitions — functions created with `$function()`,
+globals with `$global_var()` — are **side effects** injected regardless of
 what the macro returns. How generated names become visible to the parser depends
 on which execution form you use.
 
 | Call context | Return value |
 |--------------|--------------|
-| Expression position (`int x = mac()`) | Must return a non-NULL `_Node *`. NULL is a compile error. |
+| Expression position (`int x = mac()`) | Must return a non-NULL `$node_t *`. NULL is a compile error. |
 | Declaration position (file-scope `mac();`) | Returning NULL or `void` is legal — means "I only emitted definitions." |
 
 For definition-only macros, declare the return type `void`. This is
@@ -39,8 +39,8 @@ void emit_helpers(void) {
 emit_helpers();
 ```
 
-`_Node *` macros may still return NULL in declaration position without error. The
-old `return _AST_INT_LITERAL(0)` idiom still works but is no longer needed.
+`$node_t *` macros may still return NULL in declaration position without error. The
+old `return $int_literal(0)` idiom still works but is no longer needed.
 
 ## Execution Model
 
@@ -49,7 +49,7 @@ JCC supports two macro execution forms:
 | Form | Source shape | When it runs | What the return value means |
 |------|--------------|--------------|-----------------------------|
 | Global generation | `[[jcc::macro]] void gen(char *a1, ...)` called at file scope | Before the main parse | `NULL` / `void` return means side-effects only. An `ND_BLOCK` return splices its body declarations directly into file scope (see [Block return](#block-return-from-file-scope-macros)). Args are stringified into `char *` parameters. |
-| Call-site expansion | `[[jcc::macro(inline)]] _Node *gen(_Node *a1, ...)` called inside code | During macro expansion after parsing | Replaces the call expression or statement |
+| Call-site expansion | `[[jcc::macro(inline)]] $node_t *gen($node_t *a1, ...)` called inside code | During macro expansion after parsing | Replaces the call expression or statement |
 
 ### Pre-parse macro declaration context
 
@@ -75,9 +75,9 @@ publication is needed.
 ```c
 [[jcc::macro]]
 void generate_answer(void) {
-    _Type *int_ty = _AST_GET_TYPE("int");
-    _Obj *fn = _AST_FUNCTION("answer", int_ty);
-    _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(_AST_INT_LITERAL(42)));
+    $type_t *int_ty = $get_type("int");
+    $obj_t *fn = $function("answer", int_ty);
+    $function_set_body(fn, $return($int_literal(42)));
 }
 
 generate_answer();
@@ -100,10 +100,10 @@ C-preprocessor X-macro pattern work directly with file-scope macro calls:
 
 [[jcc::macro]]
 void list_type(char *name) {
-    _Type *int_ty = _AST_GET_TYPE("int");
-    _Obj *fn = _AST_FUNCTION(name, int_ty);
-    _AST_WITH_FN(fn) {
-        _AST_FUNCTION_SET_BODY(fn, _QUOTE("return 42;"));
+    $type_t *int_ty = $get_type("int");
+    $obj_t *fn = $function(name, int_ty);
+    $with_fn(fn) {
+        $function_set_body(fn, $quote("return 42;"));
     }
 }
 
@@ -126,8 +126,8 @@ file-scope token stream so they are parsed as top-level definitions.
 
 ```c
 [[jcc::macro]]
-_Node *emit_widget_helpers(void) {
-    return _QUOTE("{ struct Widget { int x; int y; }; void widget_init(struct Widget *w) { w->x = 0; w->y = 0; } }");
+$node_t *emit_widget_helpers(void) {
+    return $quote("{ struct Widget { int x; int y; }; void widget_init(struct Widget *w) { w->x = 0; w->y = 0; } }");
 }
 
 emit_widget_helpers();
@@ -143,7 +143,7 @@ After expansion, `struct Widget` and `widget_init` appear directly in the
 global scope as if the user had written them verbatim. Any number of
 declarations can be grouped in the returned block.
 
-This approach complements the side-effect style (calling `_AST_FUNCTION` etc.):
+This approach complements the side-effect style (calling `$function` etc.):
 - **Side-effect style** — better when the generated declarations depend on
   runtime-computed names or types.
 - **Block-return style** — better when the declarations can be expressed as
@@ -153,14 +153,14 @@ This approach complements the side-effect style (calling `_AST_FUNCTION` etc.):
 
 When a macro generates code that calls a standard-library function, its
 serialized C output needs a matching `#include`. Use
-`__jcc_forward_include(vm, header)` (or the `_FORWARD_INCLUDE(header)`
+`__jcc_forward_include(vm, header)` (or the `$forward_include(header)`
 convenience macro) to register a header; JCC prepends it to the emitted file.
 
 ```c
 [[jcc::macro]]
 void gen_string_helpers(void) {
-    _FORWARD_INCLUDE("<string.h>");   // emitted at top of generated output
-    _Obj *fn = _AST_FUNCTION("str_len", _AST_GET_TYPE("int"));
+    $forward_include("<string.h>");   // emitted at top of generated output
+    $obj_t *fn = $function("str_len", $get_type("int"));
     // ... build body calling strlen() ...
 }
 
@@ -187,8 +187,8 @@ used at file scope.
 
 ```c
 [[jcc::macro(inline)]]
-_Node *double_it(_Node *value) {
-    return _AST_BINARY(_ADD, value, value);
+$node_t *double_it($node_t *value) {
+    return $binary(nk_add, value, value);
 }
 
 int main(void) {
@@ -197,7 +197,7 @@ int main(void) {
 }
 ```
 
-Macro arguments are `_Node *` pointers to the original argument ASTs. A macro
+Macro arguments are `$node_t *` pointers to the original argument ASTs. A macro
 can reuse, inspect, wrap, or replace those nodes.
 
 Call-site expansion happens after the containing function body has already been
@@ -211,13 +211,13 @@ self-recursive expansions. The default is 256. Set the limit to 0 to disable
 the check.
 
 Statement macros work the same way. Return a statement node such as
-`_AST_RETURN(...)`, `_AST_IF(...)`, `_AST_BLOCK(...)`, or a statement parsed with
-`_QUOTE(...)`.
+`$return(...)`, `$if(...)`, `$block(...)`, or a statement parsed with
+`$quote(...)`.
 
 ```c
 [[jcc::macro]]
-_Node *return_if_zero(_Node *value) {
-    return _QUOTE("if ($1 == 0) return 0;", value);
+$node_t *return_if_zero($node_t *value) {
+    return $quote("if ($1 == 0) return 0;", value);
 }
 
 int main(void) {
@@ -239,8 +239,8 @@ int plus_one(int n) {
 }
 
 [[jcc::macro]]
-_Node *make_value(void) {
-    return _AST_INT_LITERAL(plus_one(41));
+$node_t *make_value(void) {
+    return $int_literal(plus_one(41));
 }
 
 int main(void) {
@@ -294,17 +294,17 @@ int tile_size = 64;
 double pi = 3.14159;
 
 [[jcc::macro]]
-_Node *area_of_n_tiles(_Node *n) {
-    int64_t ts = _AST_GET_COMPTIME_INT("tile_size");
-    return _QUOTE("$$ * $$", n, _AST_INT_LITERAL(ts * ts));
+$node_t *area_of_n_tiles($node_t *n) {
+    int64_t ts = $get_comptime_int("tile_size");
+    return $quote("$$ * $$", n, $int_literal(ts * ts));
 }
 ```
 
 | API | Returns | Description |
 |---|---|---|
-| `_AST_GET_COMPTIME_INT(name)` | `int64_t` | Integer value of a comptime scalar |
-| `_AST_GET_COMPTIME_FLOAT(name)` | `double` | Float/double value of a comptime scalar |
-| `_AST_GET_COMPTIME_VAR(name)` | `_Node *` | Comptime scalar as an AST literal node |
+| `$get_comptime_int(name)` | `int64_t` | Integer value of a comptime scalar |
+| `$get_comptime_float(name)` | `double` | Float/double value of a comptime scalar |
+| `$get_comptime_var(name)` | `$node_t *` | Comptime scalar as an AST literal node |
 
 ### Struct comptime variables
 
@@ -313,10 +313,10 @@ _Node *area_of_n_tiles(_Node *n) {
 struct Config { int width; int height; int channels; } cfg = { 1920, 1080, 3 };
 
 [[jcc::macro]]
-_Node *pixel_count(void) {
-    _Node *w = _AST_GET_COMPTIME_MEMBER("cfg", "width");
-    _Node *h = _AST_GET_COMPTIME_MEMBER("cfg", "height");
-    return _AST_BINARY(_MUL, w, h);
+$node_t *pixel_count(void) {
+    $node_t *w = $get_comptime_member("cfg", "width");
+    $node_t *h = $get_comptime_member("cfg", "height");
+    return $binary(nk_mul, w, h);
 }
 ```
 
@@ -324,7 +324,7 @@ Struct and union comptime variables can use tagged, anonymous, or typedef'd
 aggregate types. Initializers may be constant expressions or expressions that
 call comptime helper functions.
 
-`_AST_GET_COMPTIME_MEMBER(var_name, field)` returns the field's value as an
+`$get_comptime_member(var_name, field)` returns the field's value as an
 AST literal node. Integer and float/double members are supported. Pointer and
 array members are not accessible this way.
 
@@ -333,7 +333,7 @@ array members are not accessible this way.
 - Comptime variables support constant initializers and initializers that call
   comptime helper functions.
 - Pointer and string variables produce a compile-time error at this point;
-  use `_AST_STRING_LITERAL` inside the macro body instead.
+  use `$string_literal` inside the macro body instead.
 - Comptime variables are **not emitted** into the output binary.
 
 ### constexpr variables
@@ -348,32 +348,32 @@ constexpr int BUF_SIZE = 256;
 constexpr double SCALE  = 1.5;
 
 [[jcc::macro(inline)]]
-_Node *make_buf_size(void) {
-    return _AST_GET_CONSTEXPR_VALUE("BUF_SIZE");
+$node_t *make_buf_size(void) {
+    return $get_constexpr_value("BUF_SIZE");
 }
 ```
 
 | API | Returns | Description |
 |---|---|---|
-| `_AST_GET_CONSTEXPR_VALUE(name)` | `_Node *` | Evaluated initializer of a global `constexpr` variable as an AST literal node (integer or float) |
+| `$get_constexpr_value(name)` | `$node_t *` | Evaluated initializer of a global `constexpr` variable as an AST literal node (integer or float) |
 
-`_AST_GET_CONSTEXPR_VALUE` errors at compile time if the name does not refer to
+`$get_constexpr_value` errors at compile time if the name does not refer to
 a visible global `constexpr` variable.
 
 **`constexpr` vs `comptime`** — these are distinct qualifiers. A `constexpr`
-variable is not accessible via `_AST_GET_COMPTIME_*` and vice versa. Use
+variable is not accessible via `$get_comptime_*` and vice versa. Use
 `constexpr` for standard C23 constants; use `comptime` for JCC-extension values
 that can reference comptime functions.
 
 ## Quasi-Quoting
 
-`_QUOTE(tmpl, ...)` parses a C expression or statement template and splices
-`_Node *` values into `$1`, `$2`, and later numbered holes.
+`$quote(tmpl, ...)` parses a C expression or statement template and splices
+`$node_t *` values into `$1`, `$2`, and later numbered holes.
 
 ```c
 [[jcc::macro]]
-_Node *square(_Node *x) {
-    return _QUOTE("($1) * ($1)", x);
+$node_t *square($node_t *x) {
+    return $quote("($1) * ($1)", x);
 }
 
 int main(void) {
@@ -386,12 +386,12 @@ right holes when order is enough:
 
 ```c
 [[jcc::macro]]
-_Node *sum2(_Node *a, _Node *b) {
-    return _QUOTE("$$ + $$", a, b);
+$node_t *sum2($node_t *a, $node_t *b) {
+    return $quote("$$ + $$", a, b);
 }
 ```
 
-Do not mix `$N` and `$$` in one template. Use `_QUOTE_N(tmpl, nodes, count)`
+Do not mix `$N` and `$$` in one template. Use `$quote_n(tmpl, nodes, count)`
 when splice nodes are already in an array.
 
 ### List splicing with `$@N` and `$@`
@@ -402,12 +402,12 @@ typed unquote-splicing.
 
 ```c
 [[jcc::macro]]
-_Node *double_inc(_Node *x) {
-    _Node *chain = _NODE_LIST((_Node*[]){
-        _QUOTE("$1 += 1;", x),
-        _QUOTE("$1 += 1;", x),
+$node_t *double_inc($node_t *x) {
+    $node_t *chain = $node_list(($node_t*[]){
+        $quote("$1 += 1;", x),
+        $quote("$1 += 1;", x),
     }, 2);
-    return _QUOTE("{ $@1; }", chain);
+    return $quote("{ $@1; }", chain);
 }
 
 int get_plus_two(int v) {
@@ -420,21 +420,21 @@ int get_plus_two(int v) {
 
 ```c
 [[jcc::macro]]
-_Node *two_increments(_Node *a, _Node *b) {
-    return _QUOTE("{ $@; $@; }",
-                  _QUOTE("$1 += 10;", a),
-                  _QUOTE("$1 += 20;", b));
+$node_t *two_increments($node_t *a, $node_t *b) {
+    return $quote("{ $@; $@; }",
+                  $quote("$1 += 10;", a),
+                  $quote("$1 += 20;", b));
 }
 ```
 
 You can mix a scalar `$N` and a list `$@N` in the same template when both are
-positional. `_NODE_LIST(arr, count)` builds the `->next` chain from an array.
-An existing `->next` chain (e.g. `_AST_BLOCK(...)->body`) can also be passed
+positional. `$node_list(arr, count)` builds the `->next` chain from an array.
+An existing `->next` chain (e.g. `$block(...)->body`) can also be passed
 directly as the splice argument.
 
 ### Call-argument splicing
 
-`$@k` can also appear as a **direct argument to a function call** in a `_QUOTE`
+`$@k` can also appear as a **direct argument to a function call** in a `$quote`
 template, expanding the chain into the callee's argument list. This works for
 both **variadic callees** (functions accepting `...`) and **fixed-arity
 callees** (functions with an exact parameter count).
@@ -454,9 +454,9 @@ int sum_ints(int count, ...) {
 }
 
 [[jcc::macro(inline)]]
-_Node *call_sum3(_Node *a, _Node *b, _Node *c) {
-    _Node *chain = _NODE_LIST((_Node*[]){ a, b, c }, 3);
-    return _QUOTE("sum_ints(3, $@1)", chain); // → sum_ints(3, a, b, c)
+$node_t *call_sum3($node_t *a, $node_t *b, $node_t *c) {
+    $node_t *chain = $node_list(($node_t*[]){ a, b, c }, 3);
+    return $quote("sum_ints(3, $@1)", chain); // → sum_ints(3, a, b, c)
 }
 ```
 
@@ -467,19 +467,19 @@ of arguments after expansion. Parameter casts are applied post-expansion:
 int add3(int a, int b, int c) { return a + b + c; }
 
 [[jcc::macro(inline)]]
-_Node *call_add3(_Node *a, _Node *b, _Node *c) {
-    _Node *chain = _NODE_LIST((_Node*[]){ a, b, c }, 3);
-    return _QUOTE("add3($@1)", chain); // → add3(a, b, c)
+$node_t *call_add3($node_t *a, $node_t *b, $node_t *c) {
+    $node_t *chain = $node_list(($node_t*[]){ a, b, c }, 3);
+    return $quote("add3($@1)", chain); // → add3(a, b, c)
 }
 ```
 
 Mixing a scalar `$N` with a call-arg splice `$@M` in one template is supported:
 
 ```c
-return _QUOTE("add3($1, $@2)", first_node, pair_chain);
+return $quote("add3($1, $@2)", first_node, pair_chain);
 ```
 
-An empty chain (`_NODE_LIST` with `count == 0`, which returns NULL) is a valid
+An empty chain (`$node_list` with `count == 0`, which returns NULL) is a valid
 splice that inserts zero arguments. Using `$@k` as a sub-expression operand
 (e.g. `"foo($@1 + 1)"`) rather than a direct argument remains a compile-time
 error. Splicing the wrong number of arguments into a fixed-arity callee is also
@@ -493,10 +493,10 @@ fixed-size array:
 
 ```c
 [[jcc::macro(inline)]]
-_Node *make_point(_Node *px, _Node *py) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *chain = _NODE_LIST((_Node*[]){ px, py }, 2);
-    return _QUOTE("(struct Point){ $@1 }", chain);
+$node_t *make_point($node_t *px, $node_t *py) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *chain = $node_list(($node_t*[]){ px, py }, 2);
+    return $quote("(struct Point){ $@1 }", chain);
     // → (struct Point){ .x = px, .y = py }  (positional, left-to-right)
 }
 
@@ -507,10 +507,10 @@ Array compound literals are also supported:
 
 ```c
 [[jcc::macro(inline)]]
-_Node *make_arr3(_Node *a, _Node *b, _Node *c) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *chain = _NODE_LIST((_Node*[]){ a, b, c }, 3);
-    return _QUOTE("(int[3]){ $@1 }", chain);
+$node_t *make_arr3($node_t *a, $node_t *b, $node_t *c) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *chain = $node_list(($node_t*[]){ a, b, c }, 3);
+    return $quote("(int[3]){ $@1 }", chain);
 }
 ```
 
@@ -526,30 +526,30 @@ Mixing a scalar placeholder with a compound-literal splice in one template is
 fine, as long as the splice occupies the sole braces element:
 
 ```c
-return _QUOTE("(struct Point){ $@2 }", unused_scalar, chain);
+return $quote("(struct Point){ $@2 }", unused_scalar, chain);
 ```
 
-### `_QUOTE` inside generated function bodies
+### `$quote` inside generated function bodies
 
-`_QUOTE("return x;")` needs to know the enclosing function's return type to
+`$quote("return x;")` needs to know the enclosing function's return type to
 apply the correct implicit cast. When building a generated function body, wrap
-the quote call in `_AST_WITH_FN(fn)` to establish that context:
+the quote call in `$with_fn(fn)` to establish that context:
 
 ```c
 [[jcc::macro]]
 void generate_answer(void) {
-    _Type *int_ty = _AST_GET_TYPE("int");
-    _Obj *fn = _AST_FUNCTION("answer", int_ty);
-    _AST_WITH_FN(fn) {
-        _AST_FUNCTION_SET_BODY(fn, _QUOTE("return 42;"));
+    $type_t *int_ty = $get_type("int");
+    $obj_t *fn = $function("answer", int_ty);
+    $with_fn(fn) {
+        $function_set_body(fn, $quote("return 42;"));
     }
 }
 generate_answer();
 ```
 
-Without `_AST_WITH_FN`, `_QUOTE("return x;")` at file scope (where there is no
+Without `$with_fn`, `$quote("return x;")` at file scope (where there is no
 enclosing function) will compile but the implicit return-type cast is skipped.
-For macros that only use `_AST_RETURN(_AST_INT_LITERAL(...))` directly this does
+For macros that only use `$return($int_literal(...))` directly this does
 not matter; it matters when the template produces a `return` statement.
 
 ## Type And Symbol Reflection
@@ -561,11 +561,11 @@ execution point.
 typedef enum { RED, GREEN, BLUE } Color;
 
 [[jcc::macro]]
-_Node *color_count(void) {
-    _Type *color = _AST_FIND_TYPE("Color");
+$node_t *color_count(void) {
+    $type_t *color = $find_type("Color");
     if (!color)
-        return _AST_INT_LITERAL(-1);
-    return _AST_INT_LITERAL(_AST_ENUM_COUNT(color));
+        return $int_literal(-1);
+    return $int_literal($enum_count(color));
 }
 
 int main(void) {
@@ -577,15 +577,15 @@ Useful reflection entry points include:
 
 | Task | API |
 |------|-----|
-| Find a type by name | `_AST_FIND_TYPE(name)` |
-| Get a built-in or named type | `_AST_GET_TYPE(name)` |
-| Count enum constants | `_AST_ENUM_COUNT(ty)` |
-| Read enum constants | `_AST_ENUM_AT(ty, i)`, `_AST_ENUM_CONSTANT_NAME(ec)`, `_AST_ENUM_CONSTANT_VALUE(ec)` |
-| Count struct/union members | `_AST_STRUCT_MEMBER_COUNT(ty)` |
-| Read members | `_AST_STRUCT_MEMBER_AT(ty, i)`, `_AST_MEMBER_NAME(m)`, `_AST_MEMBER_TYPE(m)`, `_AST_MEMBER_OFFSET(m)` |
-| Find globals | `_AST_FIND_GLOBAL(name)`, `_AST_GLOBAL_COUNT()`, `_AST_GLOBAL_AT(i)` |
+| Find a type by name | `$find_type(name)` |
+| Get a built-in or named type | `$get_type(name)` |
+| Count enum constants | `$enum_count(ty)` |
+| Read enum constants | `$enum_at(ty, i)`, `$enum_constant_name(ec)`, `$enum_constant_value(ec)` |
+| Count struct/union members | `$struct_member_count(ty)` |
+| Read members | `$struct_member_at(ty, i)`, `$member_name(m)`, `$member_type(m)`, `$member_offset(m)` |
+| Find globals | `$find_global(name)`, `$global_count()`, `$global_at(i)` |
 
-For call-site macro expansion, `_AST_VAR_REF(name)` and `_AST_FIND_TYPE(name)`
+For call-site macro expansion, `$var_ref(name)` and `$find_type(name)`
 use the lexical scope where the macro call appears, including nested block
 locals and typedefs. When a macro receives an expression argument and needs the
 exact variable passed by the caller, prefer inspecting the argument node itself
@@ -593,19 +593,19 @@ instead of looking it up again by string name.
 
 ## Function Generation
 
-Generated functions are `_Obj *` values. Create the object, add parameters,
+Generated functions are `$obj_t *` values. Create the object, add parameters,
 build a body, and install the body.
 
 ```c
 [[jcc::macro]]
 void generate_is_even(void) {
-    _Type *int_ty = _AST_GET_TYPE("int");
-    _Obj *fn = _AST_FUNCTION("is_even", int_ty);
-    _AST_FUNCTION_ADD_PARAM(fn, "n", int_ty);
+    $type_t *int_ty = $get_type("int");
+    $obj_t *fn = $function("is_even", int_ty);
+    $function_add_param(fn, "n", int_ty);
 
-    _Node *n = _AST_PARAM_REF(fn, "n");
-    _AST_WITH_FN(fn) {
-        _AST_FUNCTION_SET_BODY(fn, _QUOTE("return $1 % 2 == 0;", n));
+    $node_t *n = $param_ref(fn, "n");
+    $with_fn(fn) {
+        $function_set_body(fn, $quote("return $1 % 2 == 0;", n));
     }
 }
 generate_is_even();
@@ -617,46 +617,46 @@ int main(void) {
 
 For global-generation macros, JCC automatically synthesizes forward
 declarations for every generated function definition, so manual publication is
-not required for ordinary generated definitions. Use `_AST_PUBLISH(obj)` when a
+not required for ordinary generated definitions. Use `$publish(obj)` when a
 macro creates a declaration that later macro-generated code at the same parse
 point should reference before a definition is provided, such as a prototype
 generated by one macro and promoted to a definition by another.
 
-`_AST_FUNCTION(name, ret_type)` promotes an existing forward declaration with
+`$function(name, ret_type)` promotes an existing forward declaration with
 the same name to a generated definition. If a definition already exists, JCC
 emits a compile-time error instead of silently replacing it. Use
-`_GENSYM(prefix)` or `__jcc_gensym(_VM, prefix)` for private helper names.
+`$gensym(prefix)` or `__jcc_gensym(_VM, prefix)` for private helper names.
 
 ```c
 [[jcc::macro]]
 void make_helper(void) {
-    const char *name = _GENSYM("helper");
-    _Type *int_ty = _AST_GET_TYPE("int");
-    _Obj *fn = _AST_FUNCTION(name, int_ty);
-    _AST_FUNCTION_SET_BODY(fn, _AST_RETURN(_AST_INT_LITERAL(42)));
+    const char *name = $gensym("helper");
+    $type_t *int_ty = $get_type("int");
+    $obj_t *fn = $function(name, int_ty);
+    $function_set_body(fn, $return($int_literal(42)));
 }
 make_helper();
 ```
 
-`_AST_PUBLISH_AT(obj, tok)` is the same operation with an explicit diagnostic
-token. Pass `_AST_SYNTHETIC_TOKEN("label")` when the declaration belongs to
-generated code rather than a source token. `_AST_FORWARD_DECLARE(fn)` remains as
-a compatibility alias for `_AST_PUBLISH(fn)`.
+`$publish_at(obj, tok)` is the same operation with an explicit diagnostic
+token. Pass `$synthetic_token("label")` when the declaration belongs to
+generated code rather than a source token. `$forward_declare(fn)` remains as
+a compatibility alias for `$publish(fn)`.
 
 ## Global Variable Generation
 
-Macros can emit global variables with initial data. Use `_AST_MAKE_ARRAY` to
+Macros can emit global variables with initial data. Use `$make_array` to
 size the type to match the data length; the codegen copies exactly `ty->size`
 bytes from the init data.
 
 ```c
 [[jcc::macro]]
 void embed_version(void) {
-    _Type *char_ty = _AST_GET_TYPE("char");
-    _Type *arr_ty  = _AST_MAKE_ARRAY(char_ty, 8);
-    _Obj  *var     = _AST_GLOBAL_VAR("version_str", arr_ty);
-    _AST_GLOBAL_VAR_SET_INIT_DATA(var, "1.0.0\0\0", 8);
-    _AST_GLOBAL_VAR_SET_STATIC(var, 1);  // internal linkage
+    $type_t *char_ty = $get_type("char");
+    $type_t *arr_ty  = $make_array(char_ty, 8);
+    $obj_t  *var     = $global_var("version_str", arr_ty);
+    $global_var_set_init_data(var, "1.0.0\0\0", 8);
+    $global_var_set_static(var, 1);  // internal linkage
 }
 embed_version();
 
@@ -681,39 +681,39 @@ it:
 ```c
 [[jcc::macro]]
 void embed_banner(void) {
-    _Type *char_ty = _AST_GET_TYPE("char");
-    _Type *arr_ty = _AST_MAKE_ARRAY(char_ty, 4);
-    _Obj *var = _AST_GLOBAL_VAR("banner", arr_ty);
-    _AST_GLOBAL_VAR_SET_INIT_DATA(var, "JCC\0", 4);
-    _AST_PUBLISH_AT(var, _AST_SYNTHETIC_TOKEN("generated banner"));
+    $type_t *char_ty = $get_type("char");
+    $type_t *arr_ty = $make_array(char_ty, 4);
+    $obj_t *var = $global_var("banner", arr_ty);
+    $global_var_set_init_data(var, "JCC\0", 4);
+    $publish_at(var, $synthetic_token("generated banner"));
 }
 embed_banner();
 ```
 
 Struct, union, enum, and typedef builders self-publish in tag or typedef scope.
-`_AST_PUBLISH(type)` is accepted for those generated types as a no-op, which
+`$publish(type)` is accepted for those generated types as a no-op, which
 lets macros use one publication call uniformly.
 
 ## Local Variables
 
 Macros that expand into statements can inject locals into the current function.
-Prefer `_AST_LOCAL_VAR_UNIQUE(ty)` for temporary variables; it creates a name
+Prefer `$local_var_unique(ty)` for temporary variables; it creates a name
 that user source cannot capture.
 
 ```c
 [[jcc::macro]]
-_Node *save_then_return(_Node *value) {
-    _Type *int_ty = _AST_GET_TYPE("int");
-    _Node *tmp = _AST_LOCAL_VAR_UNIQUE(int_ty);
-    _Node *stmts[2] = {
-        _AST_EXPR_STMT(_AST_ASSIGN(tmp, value)),
-        _AST_RETURN(tmp),
+$node_t *save_then_return($node_t *value) {
+    $type_t *int_ty = $get_type("int");
+    $node_t *tmp = $local_var_unique(int_ty);
+    $node_t *stmts[2] = {
+        $expr_stmt($assign(tmp, value)),
+        $return(tmp),
     };
-    return _AST_BLOCK(stmts, 2);
+    return $block(stmts, 2);
 }
 ```
 
-Use `_AST_LOCAL_VAR(name, ty)` only when the generated local is meant to have a
+Use `$local_var(name, ty)` only when the generated local is meant to have a
 specific user-visible name.
 
 ## Diagnostics And Debugging
@@ -722,9 +722,9 @@ Use source-located diagnostics when rejecting a macro argument:
 
 ```c
 [[jcc::macro]]
-_Node *require_nonzero(_Node *value) {
+$node_t *require_nonzero($node_t *value) {
     if (!value)
-        _MACRO_ERROR_AT(value, "expected an expression");
+        $macro_error_at(value, "expected an expression");
     return value;
 }
 ```
@@ -735,21 +735,21 @@ helpers explicitly:
 
 ```c
 [[jcc::macro]]
-_Node *checked_double(_Node *value) {
-    _Node *expr = _AST_BINARY(_ADD, value, value);
-    return _AST_COPY_LOCATION(expr, value);
+$node_t *checked_double($node_t *value) {
+    $node_t *expr = $binary(nk_add, value, value);
+    return $copy_location(expr, value);
 }
 ```
 
-Use `_AST_SYNTHETIC_TOKEN(label)` for diagnostics that belong to deliberately
+Use `$synthetic_token(label)` for diagnostics that belong to deliberately
 generated code rather than the call site or an input expression:
 
 ```c
 [[jcc::macro]]
-_Node *generated_error(void) {
-    _Node *expr = _AST_INT_LITERAL(0);
-    _AST_SET_TOKEN(expr, _AST_SYNTHETIC_TOKEN("generated expression"));
-    _MACRO_ERROR_AT(expr, "generated expression is invalid here");
+$node_t *generated_error(void) {
+    $node_t *expr = $int_literal(0);
+    $set_token(expr, $synthetic_token("generated expression"));
+    $macro_error_at(expr, "generated expression is invalid here");
     return expr;
 }
 ```
@@ -758,15 +758,15 @@ AST dump helpers are available while developing macros:
 
 | Helper | Use |
 |--------|-----|
-| `_DUMP_TREE(node)` | Print a readable tree |
-| `_DUMP_TREE_TO_STRING(node)` | Render a tree into a string |
-| `_DUMP_AST_GEN(node)` | Print builder calls for a node |
-| `_DUMP_AST_GEN_TO_STRING(node)` | Render builder calls into a string |
+| `$dump_tree(node)` | Print a readable tree |
+| `$dump_tree_to_string(node)` | Render a tree into a string |
+| `$dump_ast_gen(node)` | Print builder calls for a node |
+| `$dump_ast_gen_to_string(node)` | Render builder calls into a string |
 
 The interactive VM debugger (`-g`) does not currently stop inside macro
 execution. Macro bytecode runs during compilation, before the final program is
 started under the debugger, and JCC suppresses VM debug tracing while invoking
-macro functions. Use `_DUMP_*` helpers and source-located diagnostics for macro
+macro functions. Use `$dump_*` helpers and source-located diagnostics for macro
 debugging.
 
 ### macroexpand — macro expansion
@@ -774,34 +774,34 @@ debugging.
 Two functions are provided, matching Lisp's `macroexpand-1` / `macroexpand`
 pair.
 
-**`_MACROEXPAND_1(node)`** expands a single macro call node exactly once,
+**`$macroexpand_1(node)`** expands a single macro call node exactly once,
 without splicing the result into the AST or recursing. Useful when you need
 to observe one expansion step at a time or write meta-macros that inspect
 intermediate forms.
 
-**`_MACROEXPAND(node)`** repeatedly calls `_MACROEXPAND_1` on the top-level
+**`$macroexpand(node)`** repeatedly calls `$macroexpand_1` on the top-level
 node until it is no longer a macro call (the form is *stable*). It does not
 recurse into child nodes — only the outermost call is expanded. The VM's
 `macro_recursion_limit` applies; exceeding it is a compile error.
 
 ```c
 [[jcc::macro(inline)]]
-_Node *make_answer(void) { return _AST_INT_LITERAL(42); }
+$node_t *make_answer(void) { return $int_literal(42); }
 
 [[jcc::macro(inline)]]
-_Node *wrap_answer(void) { return _QUOTE("make_answer()"); }
+$node_t *wrap_answer(void) { return $quote("make_answer()"); }
 
 [[jcc::comptime]]
 void debug_macro(void) {
-    _Node *call = _QUOTE("wrap_answer()");
+    $node_t *call = $quote("wrap_answer()");
 
     // One step: wrap_answer() -> make_answer() (still a macro call)
-    _Node *step1 = _MACROEXPAND_1(call);
-    _DUMP_TREE(step1);
+    $node_t *step1 = $macroexpand_1(call);
+    $dump_tree(step1);
 
     // Full expansion: wrap_answer() -> make_answer() -> 42
-    _Node *full = _MACROEXPAND(call);
-    _DUMP_TREE(full);
+    $node_t *full = $macroexpand(call);
+    $dump_tree(full);
 }
 ```
 
@@ -809,8 +809,8 @@ If `node` is not a macro call, both functions return `node` unchanged
 (identity). If the named macro is not found or has not compiled, `node` is
 returned unchanged.
 
-Underlying functions: `__jcc_macroexpand_1(JCC *vm, _Node *node)` and
-`__jcc_macroexpand(JCC *vm, _Node *node)`.
+Underlying functions: `__jcc_macroexpand_1(JCC *vm, $node_t *node)` and
+`__jcc_macroexpand(JCC *vm, $node_t *node)`.
 
 ## API Reference
 
@@ -818,134 +818,134 @@ Underlying functions: `__jcc_macroexpand_1(JCC *vm, _Node *node)` and
 
 | Convenience macro | Description |
 |-------------------|-------------|
-| `_AST_FIND_TYPE(name)` | Find a typedef, struct, union, or enum by name |
-| `_AST_TYPE_EXISTS(name)` | Test whether a type name exists |
-| `_AST_GET_TYPE(name)` | Get a named or built-in type such as `"int"` |
-| `_AST_TYPE_KIND(ty)` | Get `_TypeKind` |
-| `_AST_TYPE_SIZE(ty)` | Get size in bytes |
-| `_AST_TYPE_ALIGN(ty)` | Get alignment in bytes |
-| `_AST_TYPE_IS_UNSIGNED(ty)` | Test unsigned integer type |
-| `_AST_TYPE_IS_CONST(ty)` | Test const-qualified type |
-| `_AST_TYPE_BASE(ty)` | Get pointer or array base type |
-| `_AST_TYPE_ARRAY_LEN(ty)` | Get array length, or `-1` |
-| `_AST_TYPE_RETURN_TYPE(ty)` | Get function return type |
-| `_AST_TYPE_PARAM_COUNT(ty)` | Count function parameters |
-| `_AST_TYPE_PARAM_AT(ty, i)` | Get function parameter type |
-| `_AST_TYPE_IS_VARIADIC(ty)` | Test variadic function type |
-| `_AST_TYPE_NAME(ty)` | Get a type name when available |
-| `_AST_MAKE_POINTER(base)` | Create pointer type |
-| `_AST_MAKE_ARRAY(base, len)` | Create array type |
+| `$find_type(name)` | Find a typedef, struct, union, or enum by name |
+| `$type_exists(name)` | Test whether a type name exists |
+| `$get_type(name)` | Get a named or built-in type such as `"int"` |
+| `$type_kind(ty)` | Get `$type_kind_t` |
+| `$type_size(ty)` | Get size in bytes |
+| `$type_align(ty)` | Get alignment in bytes |
+| `$type_is_unsigned(ty)` | Test unsigned integer type |
+| `$type_is_const(ty)` | Test const-qualified type |
+| `$type_base(ty)` | Get pointer or array base type |
+| `$type_array_len(ty)` | Get array length, or `-1` |
+| `$type_return_type(ty)` | Get function return type |
+| `$type_param_count(ty)` | Count function parameters |
+| `$type_param_at(ty, i)` | Get function parameter type |
+| `$type_is_variadic(ty)` | Test variadic function type |
+| `$type_name(ty)` | Get a type name when available |
+| `$make_pointer(base)` | Create pointer type |
+| `$make_array(base, len)` | Create array type |
 
 ### Enum APIs
 
 | Convenience macro | Description |
 |-------------------|-------------|
-| `_AST_ENUM_COUNT(ty)` | Count enum constants |
-| `_AST_ENUM_AT(ty, i)` | Get enum constant at index |
-| `_AST_ENUM_FIND(ty, name)` | Find enum constant by name |
-| `_AST_ENUM_CONSTANT_NAME(ec)` | Get enum constant name |
-| `_AST_ENUM_CONSTANT_VALUE(ec)` | Get enum constant value |
-| `_AST_ENUM_NAME(ty)` | Get enum type name |
-| `_AST_ENUM_VALUE_COUNT(ty)` | Count enum values |
-| `_AST_ENUM_VALUE_NAME(ty, i)` | Get enum value name |
-| `_AST_ENUM_VALUE(ty, i)` | Get enum value |
+| `$enum_count(ty)` | Count enum constants |
+| `$enum_at(ty, i)` | Get enum constant at index |
+| `$enum_find(ty, name)` | Find enum constant by name |
+| `$enum_constant_name(ec)` | Get enum constant name |
+| `$enum_constant_value(ec)` | Get enum constant value |
+| `$enum_name(ty)` | Get enum type name |
+| `$enum_value_count(ty)` | Count enum values |
+| `$enum_value_name(ty, i)` | Get enum value name |
+| `$enum_value(ty, i)` | Get enum value |
 
 ### Struct And Union APIs
 
 | Convenience macro | Description |
 |-------------------|-------------|
-| `_AST_STRUCT_MEMBER_COUNT(ty)` | Count members |
-| `_AST_STRUCT_MEMBER_AT(ty, i)` | Get member at index |
-| `_AST_STRUCT_MEMBER_FIND(ty, name)` | Find member by name |
-| `_AST_MEMBER_NAME(m)` | Get member name |
-| `_AST_MEMBER_TYPE(m)` | Get member type |
-| `_AST_MEMBER_OFFSET(m)` | Get member offset |
-| `_AST_MEMBER_IS_BITFIELD(m)` | Test bitfield member |
-| `_AST_MEMBER_BITFIELD_WIDTH(m)` | Get bitfield width |
+| `$struct_member_count(ty)` | Count members |
+| `$struct_member_at(ty, i)` | Get member at index |
+| `$struct_member_find(ty, name)` | Find member by name |
+| `$member_name(m)` | Get member name |
+| `$member_type(m)` | Get member type |
+| `$member_offset(m)` | Get member offset |
+| `$member_is_bitfield(m)` | Test bitfield member |
+| `$member_bitfield_width(m)` | Get bitfield width |
 
 ### Global Symbol APIs
 
 | Convenience macro | Description |
 |-------------------|-------------|
-| `_AST_FIND_GLOBAL(name)` | Find global object |
-| `_AST_GLOBAL_COUNT()` | Count globals |
-| `_AST_GLOBAL_AT(i)` | Get global at index |
-| `_AST_OBJ_NAME(obj)` | Get object name |
-| `_AST_OBJ_TYPE(obj)` | Get object type |
-| `_AST_OBJ_IS_FUNCTION(obj)` | Test function object |
-| `_AST_OBJ_IS_DEFINITION(obj)` | Test definition |
-| `_AST_OBJ_IS_STATIC(obj)` | Test static linkage |
+| `$find_global(name)` | Find global object |
+| `$global_count()` | Count globals |
+| `$global_at(i)` | Get global at index |
+| `$obj_name(obj)` | Get object name |
+| `$obj_type(obj)` | Get object type |
+| `$obj_is_function(obj)` | Test function object |
+| `$obj_is_definition(obj)` | Test definition |
+| `$obj_is_static(obj)` | Test static linkage |
 
 ### AST Builder APIs
 
 | Convenience macro | Description |
 |-------------------|-------------|
-| `_AST_INT_LITERAL(val)` | Integer literal |
-| `_AST_FLOAT_LITERAL(val)` | Floating-point literal |
-| `_AST_STRING_LITERAL(str)` | String literal |
-| `_AST_VAR_REF(name)` | Variable reference |
-| `_AST_PARAM_REF(fn, name)` | Generated function parameter reference |
-| `_GENSYM(prefix)` | Unique arena-allocated symbol name using `__jcc_gensym` |
-| `_MACROEXPAND_1(node)` | Single-step macro expansion (identity if not a macro call) |
-| `_MACROEXPAND(node)` | Full macro expansion — repeats until the top-level form is stable |
-| `_AST_CURRENT_TOKEN()` | Opaque token for the active macro call site |
-| `_AST_SYNTHETIC_TOKEN(label)` | Opaque synthetic token for generated diagnostics |
-| `_AST_TOKEN_FROM_NODE(node)` | Opaque source token attached to a node |
-| `_AST_SET_TOKEN(node, tok)` | Attach a token to a node and return the node |
-| `_AST_COPY_LOCATION(dst, src)` | Copy source location from one node to another |
-| `_NODE_LIST(arr, count)` | Build a `->next`-linked node chain from an array for use as a `$@k` splice argument |
-| `_AST_BINARY(op, l, r)` | Binary expression |
-| `_AST_UNARY(op, operand)` | Unary expression |
-| `_AST_CAST(expr, ty)` | Cast expression |
-| `_AST_ASSIGN(target, value)` | Assignment expression |
-| `_AST_MEMBER(obj, name)` | Struct/union member expression |
-| `_AST_FUNCALL(callee, args, n)` | Function call expression |
-| `_AST_RETURN(expr)` | Return statement |
-| `_AST_BLOCK(stmts, count)` | Compound statement |
-| `_AST_IF(cond, then_body, else_body)` | If statement |
-| `_AST_SWITCH(cond)` | Switch statement |
-| `_AST_SWITCH_ADD_CASE(sw, value, body)` | Add switch case |
-| `_AST_SWITCH_SET_DEFAULT(sw, body)` | Set switch default |
-| `_AST_EXPR_STMT(expr)` | Expression statement |
-| `_AST_LOCAL_VAR(name, ty)` | Named local variable |
-| `_AST_LOCAL_VAR_UNIQUE(ty)` | Hygienic temporary local |
-| `_AST_WHILE(cond, body)` | While loop |
-| `_AST_FOR(init, cond, inc, body)` | For loop |
-| `_AST_DO_WHILE(body, cond)` | Do-while loop |
+| `$int_literal(val)` | Integer literal |
+| `$float_literal(val)` | Floating-point literal |
+| `$string_literal(str)` | String literal |
+| `$var_ref(name)` | Variable reference |
+| `$param_ref(fn, name)` | Generated function parameter reference |
+| `$gensym(prefix)` | Unique arena-allocated symbol name using `__jcc_gensym` |
+| `$macroexpand_1(node)` | Single-step macro expansion (identity if not a macro call) |
+| `$macroexpand(node)` | Full macro expansion — repeats until the top-level form is stable |
+| `$current_token()` | Opaque token for the active macro call site |
+| `$synthetic_token(label)` | Opaque synthetic token for generated diagnostics |
+| `$token_from_node(node)` | Opaque source token attached to a node |
+| `$set_token(node, tok)` | Attach a token to a node and return the node |
+| `$copy_location(dst, src)` | Copy source location from one node to another |
+| `$node_list(arr, count)` | Build a `->next`-linked node chain from an array for use as a `$@k` splice argument |
+| `$binary(op, l, r)` | Binary expression |
+| `$unary(op, operand)` | Unary expression |
+| `$cast(expr, ty)` | Cast expression |
+| `$assign(target, value)` | Assignment expression |
+| `$member(obj, name)` | Struct/union member expression |
+| `$funcall(callee, args, n)` | Function call expression |
+| `$return(expr)` | Return statement |
+| `$block(stmts, count)` | Compound statement |
+| `$if(cond, then_body, else_body)` | If statement |
+| `$switch(cond)` | Switch statement |
+| `$switch_add_case(sw, value, body)` | Add switch case |
+| `$switch_set_default(sw, body)` | Set switch default |
+| `$expr_stmt(expr)` | Expression statement |
+| `$local_var(name, ty)` | Named local variable |
+| `$local_var_unique(ty)` | Hygienic temporary local |
+| `$while(cond, body)` | While loop |
+| `$for(init, cond, inc, body)` | For loop |
+| `$do_while(body, cond)` | Do-while loop |
 
 ### Function Builder APIs
 
 | Convenience macro | Description |
 |-------------------|-------------|
-| `_AST_PUBLISH(obj_or_type)` | Publish a generated function/global in current scope; accepted as a no-op for generated types |
-| `_AST_PUBLISH_AT(obj_or_type, tok)` | Publish with an explicit diagnostic token |
-| `_AST_FUNCTION(name, ret_type)` | Create a function object |
-| `_AST_FORWARD_DECLARE(fn)` | Deprecated alias for `_AST_PUBLISH(fn)` |
-| `_AST_FUNCTION_ADD_PARAM(fn, name, ty)` | Add function parameter |
-| `_AST_FUNCTION_SET_BODY(fn, body)` | Set function body |
-| `_AST_FUNCTION_SET_STATIC(fn, flag)` | Set static linkage |
-| `_AST_FUNCTION_SET_INLINE(fn, flag)` | Set inline flag |
-| `_AST_FUNCTION_SET_VARIADIC(fn, flag)` | Set variadic flag |
-| `_AST_WITH_FN(fn) { ... }` | Set `fn` as the current function context for the block so `_QUOTE("return x;")` applies the correct return-type cast |
+| `$publish(obj_or_type)` | Publish a generated function/global in current scope; accepted as a no-op for generated types |
+| `$publish_at(obj_or_type, tok)` | Publish with an explicit diagnostic token |
+| `$function(name, ret_type)` | Create a function object |
+| `$forward_declare(fn)` | Deprecated alias for `$publish(fn)` |
+| `$function_add_param(fn, name, ty)` | Add function parameter |
+| `$function_set_body(fn, body)` | Set function body |
+| `$function_set_static(fn, flag)` | Set static linkage |
+| `$function_set_inline(fn, flag)` | Set inline flag |
+| `$function_set_variadic(fn, flag)` | Set variadic flag |
+| `$with_fn(fn) { ... }` | Set `fn` as the current function context for the block so `$quote("return x;")` applies the correct return-type cast |
 
 ### Global Variable Builder APIs
 
 | Convenience macro | Description |
 |-------------------|-------------|
-| `_AST_GLOBAL_VAR(name, ty)` | Create a global variable definition |
-| `_AST_GLOBAL_VAR_SET_INIT_DATA(var, data, len)` | Set raw initial data (`len` must equal `ty->size`) |
-| `_AST_GLOBAL_VAR_SET_STATIC(var, flag)` | Set internal linkage (file-scope `static`) |
+| `$global_var(name, ty)` | Create a global variable definition |
+| `$global_var_set_init_data(var, data, len)` | Set raw initial data (`len` must equal `ty->size`) |
+| `$global_var_set_static(var, flag)` | Set internal linkage (file-scope `static`) |
 
 ### Node Kinds
 
-Use these constants with `_AST_BINARY()` and `_AST_UNARY()`:
+Use these constants with `$binary()` and `$unary()`:
 
 ```c
-_ADD, _SUB, _MUL, _DIV, _MOD, _NEG
-_BITAND, _BITOR, _BITXOR, _BITNOT, _SHL, _SHR
-_EQ, _NE, _LT, _LE
-_NOT, _LOGAND, _LOGOR
-_ASSIGN, _ADDR, _DEREF, _COMMA
+nk_add, nk_sub, nk_mul, nk_div, nk_mod, nk_neg
+nk_bitand, nk_bitor, nk_bitxor, nk_bitnot, nk_shl, nk_shr
+nk_eq, nk_ne, nk_lt, nk_le
+nk_not, nk_logand, nk_logor
+nk_assign, nk_addr, nk_deref, nk_comma
 ```
 
 ## Attribute Syntax
@@ -971,8 +971,8 @@ The canonical form used in this document and in JCC examples is `[[jcc::macro]]`
 - Global-generation macros run before the main parse, so generated definitions
   are visible everywhere. Inline macros expand at the call site and follow
   normal C declaration rules for any side-effect definitions they emit.
-- `_AST_PUBLISH(obj)` publishes generated functions and globals in the current
+- `$publish(obj)` publishes generated functions and globals in the current
   parser scope. Generated struct/union/enum/typedef types already self-publish,
-  and `_AST_PUBLISH(type)` is accepted as a no-op.
+  and `$publish(type)` is accepted as a no-op.
 - `void` macros cannot be used in expression position; doing so is a compile
   error.

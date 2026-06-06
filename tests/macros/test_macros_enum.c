@@ -9,11 +9,11 @@ typedef enum { COLOR_RED, COLOR_GREEN, COLOR_BLUE } Color;
 
 // Pragma macro to get enum constant name at compile time
 [[jcc::macro(inline)]]
-_Node *color_name(_Node *value) {
-    _VirtualMachine *vm = __jcc_get_vm();
+$node_t *color_name($node_t *value) {
+    $vm_t *vm = __jcc_get_vm();
 
     // Find the Color type
-    _Type *color_type = __jcc_ast_find_type(vm, "Color");
+    $type_t *color_type = __jcc_ast_find_type(vm, "Color");
     if (!color_type) {
         // Fallback if type not found
         return __jcc_ast_string_literal(vm, "unknown");

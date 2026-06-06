@@ -4,7 +4,7 @@
 
 // Define a pragma macro that generates a string literal
 [[jcc::macro(inline)]]
-_Node *make_hello(void) {
+$node_t *make_hello(void) {
     return __jcc_ast_string_literal(__jcc_get_vm(), "Hello, World!");
 }
 

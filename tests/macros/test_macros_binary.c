@@ -2,11 +2,11 @@
 
 // Define a pragma macro that generates: (a + b) * 2
 [[jcc::macro(inline)]]
-_Node *double_sum(_Node *a, _Node *b) {
-    _VirtualMachine *vm = __jcc_get_vm();
-    _Node *sum = __jcc_ast_binary(vm, _ADD, a, b);
-    _Node *two = __jcc_ast_int_literal(vm, 2);
-    return __jcc_ast_binary(vm, _MUL, sum, two);
+$node_t *double_sum($node_t *a, $node_t *b) {
+    $vm_t *vm = __jcc_get_vm();
+    $node_t *sum = __jcc_ast_binary(vm, nk_add, a, b);
+    $node_t *two = __jcc_ast_int_literal(vm, 2);
+    return __jcc_ast_binary(vm, nk_mul, sum, two);
 }
 
 int main(void) {

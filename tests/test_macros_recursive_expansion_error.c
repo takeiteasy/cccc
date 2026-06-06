@@ -2,8 +2,8 @@
 // Recursive macro expansion should report a compiler error, not crash.
 
 [[jcc::macro(inline)]]
-_Node *recurse_forever(void) {
-    return _QUOTE("recurse_forever()");
+$node_t *recurse_forever(void) {
+    return $quote("recurse_forever()");
 }
 
 int main(void) {
