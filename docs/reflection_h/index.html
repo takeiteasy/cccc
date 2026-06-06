@@ -639,6 +639,18 @@ $quote("return x;") applies the correct implicit return-type cast.
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_var_ref" target="_top">__jcc_ast_var_ref</a></tt></dt>
 <dd><p>Build a variable reference AST node.
 </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_vararg_at" target="_top">__jcc_ast_vararg_at</a></tt></dt>
+<dd><p>Return an inline macro's variadic AST argument by zero-based index.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_vararg_count" target="_top">__jcc_ast_vararg_count</a></tt></dt>
+<dd><p>Return the number of variadic arguments for the active macro call.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_vararg_str_at" target="_top">__jcc_ast_vararg_str_at</a></tt></dt>
+<dd><p>Return a global-generation macro's stringified variadic argument.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_varargs_as_array" target="_top">__jcc_ast_varargs_as_array</a></tt></dt>
+<dd><p>Return an inline macro's variadic AST arguments as an array.
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_while" target="_top">__jcc_ast_while</a></tt></dt>
 <dd><p>Create a while loop node.
 </p></dd>
@@ -4666,6 +4678,151 @@ Convenience wrapper: $synthetic_token(label).
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
 <!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_var_ref;name=start --><p>Convenience wrapper: $var_ref(name).
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_var_ref;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_vararg_at;   name=__jcc_ast_vararg_at -->
+<a name="//apple_ref/c/func/__jcc_ast_vararg_at"></a>
+<h3><a name="__jcc_ast_vararg_at">__jcc_ast_vararg_at</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_vararg_at;name=start --><!-- begin abstract --></p>
+<p>Return an inline macro's variadic AST argument by zero-based index.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_vararg_at;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_vararg_at;name=start -->$<!-- a logicalPath="//apple_ref/c/cl/node_t //apple_ref/c/tdef/node_t //apple_ref/c/tag/node_t //apple_ref/c/struct/node_t //apple_ref/c/intf/node_t //apple_ref/doc/anysymbol/node_t" machineGenerated="true" --><span class="type">node_t</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_vararg_at" logicalPath="//apple_ref/c/instm/__jcc_ast_vararg_at //apple_ref/c/clm/__jcc_ast_vararg_at //apple_ref/c/intfcm/__jcc_ast_vararg_at //apple_ref/c/intfm/__jcc_ast_vararg_at //apple_ref/c/func/__jcc_ast_vararg_at" target="_top"><span class="function">__jcc_ast_vararg_at</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <span class="param">index</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_vararg_at;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_vararg_at/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_vararg_at/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_vararg_at/index;   name=index -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_vararg_at/index"></a>
+<code>index</code>
+</dt>
+<dd><p>Zero-based variadic argument index.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>The argument node.
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_vararg_at;name=start --><p>Emits a compile-time error if @a index is out of range or the
+active macro call is a global-generation string macro.
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_vararg_at;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_vararg_count;   name=__jcc_ast_vararg_count -->
+<a name="//apple_ref/c/func/__jcc_ast_vararg_count"></a>
+<h3><a name="__jcc_ast_vararg_count">__jcc_ast_vararg_count</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_vararg_count;name=start --><!-- begin abstract --></p>
+<p>Return the number of variadic arguments for the active macro call.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_vararg_count;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_vararg_count;name=start --><!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_vararg_count" logicalPath="//apple_ref/c/instm/__jcc_ast_vararg_count //apple_ref/c/clm/__jcc_ast_vararg_count //apple_ref/c/intfcm/__jcc_ast_vararg_count //apple_ref/c/intfm/__jcc_ast_vararg_count //apple_ref/c/func/__jcc_ast_vararg_count" target="_top"><span class="function">__jcc_ast_vararg_count</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_vararg_count;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_vararg_count/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_vararg_count/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>Number of arguments after the fixed parameters.
+
+<!-- end return value --></p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_vararg_str_at;   name=__jcc_ast_vararg_str_at -->
+<a name="//apple_ref/c/func/__jcc_ast_vararg_str_at"></a>
+<h3><a name="__jcc_ast_vararg_str_at">__jcc_ast_vararg_str_at</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_vararg_str_at;name=start --><!-- begin abstract --></p>
+<p>Return a global-generation macro's stringified variadic argument.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_vararg_str_at;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_vararg_str_at;name=start --><span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_vararg_str_at" logicalPath="//apple_ref/c/instm/__jcc_ast_vararg_str_at //apple_ref/c/clm/__jcc_ast_vararg_str_at //apple_ref/c/intfcm/__jcc_ast_vararg_str_at //apple_ref/c/intfm/__jcc_ast_vararg_str_at //apple_ref/c/func/__jcc_ast_vararg_str_at" target="_top"><span class="function">__jcc_ast_vararg_str_at</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <span class="param">index</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_vararg_str_at;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_vararg_str_at/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_vararg_str_at/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_vararg_str_at/index;   name=index -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_vararg_str_at/index"></a>
+<code>index</code>
+</dt>
+<dd><p>Zero-based variadic argument index.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>The stringified token argument.
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_vararg_str_at;name=start --><p>Emits a compile-time error if @a index is out of range or the
+active macro call is an inline AST macro.
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_vararg_str_at;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_varargs_as_array;   name=__jcc_ast_varargs_as_array -->
+<a name="//apple_ref/c/func/__jcc_ast_varargs_as_array"></a>
+<h3><a name="__jcc_ast_varargs_as_array">__jcc_ast_varargs_as_array</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_varargs_as_array;name=start --><!-- begin abstract --></p>
+<p>Return an inline macro's variadic AST arguments as an array.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_varargs_as_array;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_varargs_as_array;name=start -->$<!-- a logicalPath="//apple_ref/c/cl/node_t //apple_ref/c/tdef/node_t //apple_ref/c/tag/node_t //apple_ref/c/struct/node_t //apple_ref/c/intf/node_t //apple_ref/doc/anysymbol/node_t" machineGenerated="true" --><span class="type">node_t</span><!-- /a --> <span class="type">*</span><span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_varargs_as_array" logicalPath="//apple_ref/c/instm/__jcc_ast_varargs_as_array //apple_ref/c/clm/__jcc_ast_varargs_as_array //apple_ref/c/intfcm/__jcc_ast_varargs_as_array //apple_ref/c/intfm/__jcc_ast_varargs_as_array //apple_ref/c/func/__jcc_ast_varargs_as_array" target="_top"><span class="function">__jcc_ast_varargs_as_array</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_varargs_as_array;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_varargs_as_array/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_varargs_as_array/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>Borrowed array of variadic argument nodes, or NULL when the active
+inline macro call has no variadic arguments.
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_varargs_as_array;name=start --><p>The returned array is read-only and valid only for the current
+macro call's lifetime. It shares nodes with the original macro
+arguments and does not consume or clone them. Emits a
+compile-time error if the active macro call is a
+global-generation string macro.
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_varargs_as_array;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_while;   name=__jcc_ast_while -->

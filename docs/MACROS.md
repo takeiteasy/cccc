@@ -87,35 +87,47 @@ int main(void) {
 }
 ```
 
-### File-scope arguments and the X-macro pattern
+### File-scope arguments and variadic macro tails
 
-Global-generation macros accept up to 8 comma-separated arguments at the call
-site. Each argument's token sequence is stringified and delivered as a
-`char *` to the matching parameter: string literals pass their raw value, while
-keywords, identifiers, and numbers pass their spelling. This makes the
-C-preprocessor X-macro pattern work directly with file-scope macro calls:
+Global-generation macros accept up to 8 fixed parameters plus an unbounded
+trailing `...` tail. Each fixed argument's token sequence is stringified and
+delivered as a `char *` to the matching parameter: string literals pass their
+raw value, while keywords, identifiers, and numbers pass their spelling. The
+variadic tail is available through `_AST_VARARG_COUNT()` and
+`_AST_VARARG_STR_AT(i)`.
 
 ```c
-#define TYPES X(int) X(float) X(double)
-
 [[jcc::comptime]]
-void list_type(char *name) {
-    $type_t *int_ty = $get_type("int");
-    $obj_t *fn = $function(name, int_ty);
-    $with_fn(fn) {
+void gen_types(...) {
+    for (int i = 0; i < _AST_VARARG_COUNT(); i++) {
+        const char *name = _AST_VARARG_STR_AT(i);
+        $obj_t *fn = $function(name, $get_type("int"));
         $function_set_body(fn, $quote("return 42;"));
     }
 }
 
-#define X(T) list_type(#T);
-TYPES
-#undef X
+gen_types(type_int, type_float, type_double);
 ```
 
-`TYPES` expands to three file-scope macro calls, each receiving the string
-`"int"`, `"float"`, or `"double"`, and `list_type` emits one definition per
-type. Use this for boilerplate enum conversion helpers, serializers, or any
-generated definition that source code needs to call normally.
+Use this for boilerplate enum conversion helpers, serializers, or any generated
+definition that source code needs to call normally. Fixed parameters still use
+ordinary C parameter names:
+
+```c
+[[jcc::comptime]]
+void gen_prefixed(char *prefix, ...) {
+    for (int i = 0; i < _AST_VARARG_COUNT(); i++) {
+        const char *name = _AST_VARARG_STR_AT(i);
+        // prefix is the fixed string argument; name is each tail argument.
+    }
+}
+
+gen_prefixed("api", read, write, close);
+```
+
+The 8-argument limit applies only to fixed parameters. A macro declaration with
+more than 8 named parameters is rejected, but a trailing `...` can receive any
+number of additional call-site arguments.
 
 ### Block return from file-scope macros
 
@@ -214,6 +226,47 @@ int main(void) {
 
 Macro arguments are `$node_t *` pointers to the original argument ASTs. A macro
 can reuse, inspect, wrap, or replace those nodes.
+
+Inline macros also support a trailing `...` parameter. Fixed arguments are
+passed as normal `$node_t *` parameters, and the variadic tail is available
+through `_AST_VARARG_COUNT()`, `_AST_VARARG_AT(i)`, and
+`_AST_VARARGS_AS_ARRAY()`. A macro with only `...` is valid:
+
+```c
+[[jcc::comptime(inline)]]
+$node_t *sum_all(...) {
+    $node_t *acc = _AST_VARARG_AT(0);
+    for (int i = 1; i < _AST_VARARG_COUNT(); i++)
+        acc = $binary(nk_add, acc, _AST_VARARG_AT(i));
+    return acc;
+}
+
+int x = sum_all(1, 2, 3, 4);
+```
+
+Use `_AST_VARARGS_AS_ARRAY()` when forwarding the tail to an array-form builder
+such as `$funcall(callee, args, n)`:
+
+```c
+[[jcc::comptime(inline)]]
+$node_t *forward_call($node_t *fn_node, ...) {
+    return $funcall(fn_node,
+                    _AST_VARARGS_AS_ARRAY(),
+                    _AST_VARARG_COUNT());
+}
+
+int x = forward_call(target_fn, 1, 2, 3);
+```
+
+`_AST_VARARGS_AS_ARRAY()` returns a borrowed read-only `$node_t **` slice that
+is valid only for the current macro call. It returns `NULL` when the variadic
+tail is empty. Forwarding shares AST nodes; it does not consume or clone them.
+Static macro-to-macro forwarding is handled with `$quote` and splice syntax.
+Dynamic macro-call construction is not part of this API.
+
+`_AST_VARARG_AT(i)` and `_AST_VARARG_STR_AT(i)` use zero-based indexes.
+Variadic helpers report a compile-time error when an index is negative, out of
+range, or the helper is used with the wrong macro execution form.
 
 Call-site expansion happens after the containing function body has already been
 parsed. If an inline macro creates a separate top-level function or global, the
@@ -968,6 +1021,7 @@ Underlying functions: `__jcc_macroexpand_1(JCC *vm, $node_t *node)` and
 | `$assign(target, value)` | Assignment expression |
 | `$member(obj, name)` | Struct/union member expression |
 | `$funcall(callee, args, n)` | Function call expression |
+| `_AST_VARARGS_AS_ARRAY()` | Borrowed inline variadic argument array for forwarding |
 | `$return(expr)` | Return statement |
 | `$block(stmts, count)` | Compound statement |
 | `$if(cond, then_body, else_body)` | If statement |
@@ -1030,7 +1084,8 @@ The canonical form used in this document and in JCC examples is `[[jcc::comptime
 
 ## Constraints
 
-- Macro calls accept at most 8 arguments.
+- Macro declarations accept at most 8 fixed parameters. A trailing `...`
+  variadic tail can receive additional call-site arguments.
 - Macro code runs at compile time and cannot inspect runtime values.
 - Global-generation macros compile before the main parse. They can see safe
   file-scope declarations from preprocessed includes and source, but arbitrary

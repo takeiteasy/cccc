@@ -886,6 +886,8 @@ typedef struct MacroFn {
     bool is_macro_entry;      // True for all comptime functions (entry-callable from user code)
     bool is_inline;           // True for inline macros (auto-execute at declaration)
     bool is_void_macro;       // True if declared void — definition-only, no splice node
+    bool is_variadic;         // True if declaration has a trailing ...
+    int fixed_param_count;    // Number of named parameters before ...
     struct MacroFn *next;     // Next macro in linked list
 } MacroFn;
 
@@ -1447,6 +1449,10 @@ typedef struct Compiler {
     bool macro_fns_compiled;         // True after compile_all_macros has run
     int macro_recursion_limit;       // 0 = unlimited, default = 256
     Token *macro_call_tok;           // Active macro invocation token
+    Node **macro_vararg_nodes;        // Active inline macro variadic AST args
+    char **macro_vararg_strs;         // Active global macro variadic string args
+    int macro_vararg_count;           // Number of active variadic args
+    bool macro_vararg_string_mode;    // True when varargs are char* token strings
     Token *macro_context_tokens;      // Safe file-scope decls visible to macro bytecode
     Scope *macro_context_scope;       // Parser scope produced from macro_context_tokens
     Obj *macro_globals; // Globals defined by inline macros (injected into

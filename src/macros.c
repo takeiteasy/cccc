@@ -164,6 +164,67 @@ extern Node   *__jcc_get_constexpr_value(JCC *vm, const char *name);
 // Ticket #277: Lisp-style single-macro expansion
 extern Node   *__jcc_macroexpand_1(JCC *vm, Node *node);
 extern Node   *__jcc_macroexpand(JCC *vm, Node *node);
+extern int     __jcc_ast_vararg_count(JCC *vm);
+extern Node   *__jcc_ast_vararg_at(JCC *vm, int index);
+extern Node   **__jcc_ast_varargs_as_array(JCC *vm);
+extern const char *__jcc_ast_vararg_str_at(JCC *vm, int index);
+
+int __jcc_ast_vararg_count(JCC *vm) {
+    return vm ? vm->compiler.macro_vararg_count : 0;
+}
+
+int _AST_VARARG_COUNT(void) {
+    return __jcc_ast_vararg_count(__jcc_get_vm());
+}
+
+Node *__jcc_ast_vararg_at(JCC *vm, int index) {
+    if (!vm)
+        return NULL;
+    if (vm->compiler.macro_vararg_string_mode)
+        error_tok(vm, vm->compiler.macro_call_tok,
+                  "_AST_VARARG_AT is only valid for inline AST macros");
+    if (index < 0 || index >= vm->compiler.macro_vararg_count)
+        error_tok(vm, vm->compiler.macro_call_tok,
+                  "_AST_VARARG_AT index %d out of range (count %d)",
+                  index, vm->compiler.macro_vararg_count);
+    return vm->compiler.macro_vararg_nodes[index];
+}
+
+Node *_AST_VARARG_AT(int index) {
+    return __jcc_ast_vararg_at(__jcc_get_vm(), index);
+}
+
+Node **__jcc_ast_varargs_as_array(JCC *vm) {
+    if (!vm)
+        return NULL;
+    if (vm->compiler.macro_vararg_string_mode)
+        error_tok(vm, vm->compiler.macro_call_tok,
+                  "_AST_VARARGS_AS_ARRAY is only valid for inline AST macros");
+    if (vm->compiler.macro_vararg_count == 0)
+        return NULL;
+    return vm->compiler.macro_vararg_nodes;
+}
+
+Node **_AST_VARARGS_AS_ARRAY(void) {
+    return __jcc_ast_varargs_as_array(__jcc_get_vm());
+}
+
+const char *__jcc_ast_vararg_str_at(JCC *vm, int index) {
+    if (!vm)
+        return NULL;
+    if (!vm->compiler.macro_vararg_string_mode)
+        error_tok(vm, vm->compiler.macro_call_tok,
+                  "_AST_VARARG_STR_AT is only valid for global-generation string macros");
+    if (index < 0 || index >= vm->compiler.macro_vararg_count)
+        error_tok(vm, vm->compiler.macro_call_tok,
+                  "_AST_VARARG_STR_AT index %d out of range (count %d)",
+                  index, vm->compiler.macro_vararg_count);
+    return vm->compiler.macro_vararg_strs[index];
+}
+
+const char *_AST_VARARG_STR_AT(int index) {
+    return __jcc_ast_vararg_str_at(__jcc_get_vm(), index);
+}
 
 // Register reflection API functions as FFI
 static void register_reflection_ffi(JCC *vm) {
@@ -358,6 +419,22 @@ static void register_reflection_ffi(JCC *vm) {
                       (void *)__jcc_macroexpand_1, 2, 0);
     cc_register_cfunc(vm, "__jcc_macroexpand",
                       (void *)__jcc_macroexpand, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_vararg_count",
+                      (void *)__jcc_ast_vararg_count, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_vararg_at",
+                      (void *)__jcc_ast_vararg_at, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_varargs_as_array",
+                      (void *)__jcc_ast_varargs_as_array, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_vararg_str_at",
+                      (void *)__jcc_ast_vararg_str_at, 2, 0);
+    cc_register_cfunc(vm, "_AST_VARARG_COUNT",
+                      (void *)_AST_VARARG_COUNT, 0, 0);
+    cc_register_cfunc(vm, "_AST_VARARG_AT",
+                      (void *)_AST_VARARG_AT, 1, 0);
+    cc_register_cfunc(vm, "_AST_VARARGS_AS_ARRAY",
+                      (void *)_AST_VARARGS_AS_ARRAY, 0, 0);
+    cc_register_cfunc(vm, "_AST_VARARG_STR_AT",
+                      (void *)_AST_VARARG_STR_AT, 1, 0);
 }
 
 static void init_vm_segments_for_macros(JCC *vm);
@@ -1211,6 +1288,14 @@ static Node *execute_macro_fn(JCC *vm, MacroFn *pm, Token *call_tok,
     if (!pm || !pm->is_compiled || !pm->compiled_fn)
         return NULL;
 
+    if (!pm->is_variadic && arg_count > 8)
+        error_tok(vm, call_tok, "macro '%s' called with %d arguments; maximum is 8",
+                  pm->name, arg_count);
+    if (pm->is_variadic && arg_count < pm->fixed_param_count)
+        error_tok(vm, call_tok,
+                  "macro '%s' called with %d arguments; expected at least %d",
+                  pm->name, arg_count, pm->fixed_param_count);
+
     if (vm->debug_vm)
         printf("Executing macro function '%s' with %d args...\n", pm->name,
                arg_count);
@@ -1227,6 +1312,10 @@ static Node *execute_macro_fn(JCC *vm, MacroFn *pm, Token *call_tok,
     memcpy(saved_regs, vm->regs, sizeof(saved_regs));
     Obj *saved_current_fn = vm->compiler.current_fn;
     Token *saved_macro_call_tok = vm->compiler.macro_call_tok;
+    Node **saved_vararg_nodes = vm->compiler.macro_vararg_nodes;
+    char **saved_vararg_strs = vm->compiler.macro_vararg_strs;
+    int saved_vararg_count = vm->compiler.macro_vararg_count;
+    bool saved_vararg_string_mode = vm->compiler.macro_vararg_string_mode;
     vm->compiler.macro_call_tok = call_tok;
 
     // Reset stack for macro execution
@@ -1234,11 +1323,36 @@ static Node *execute_macro_fn(JCC *vm, MacroFn *pm, Token *call_tok,
     vm->bp = vm->initial_bp;
 
     // Pass arguments via registers (REG_A0-A7 in the VM calling convention).
-    // Arguments are Node* pointers to the AST nodes.
-    int arg_idx = 0;
-    for (Node *arg = args; arg && arg_idx < 8; arg = arg->next) {
-        vm->regs[REG_A0 + arg_idx] = (long long)arg;
-        arg_idx++;
+    // Inline macro arguments are Node* pointers to the AST nodes. Global
+    // generation callers preload char* fixed arguments and set string-mode
+    // varargs before entering this helper.
+    if (args) {
+        int fixed_count = pm->is_variadic ? pm->fixed_param_count : 8;
+        int arg_idx = 0;
+        Node *arg = args;
+        for (; arg && arg_idx < fixed_count && arg_idx < 8; arg = arg->next) {
+            vm->regs[REG_A0 + arg_idx] = (long long)arg;
+            arg_idx++;
+        }
+
+        if (pm->is_variadic) {
+            int var_count = arg_count - pm->fixed_param_count;
+            Node **var_nodes = var_count > 0 ? alloca(var_count * sizeof(Node *)) : NULL;
+            for (int i = 0; i < var_count; i++) {
+                var_nodes[i] = arg;
+                if (arg)
+                    arg = arg->next;
+            }
+            vm->compiler.macro_vararg_nodes = var_nodes;
+            vm->compiler.macro_vararg_strs = NULL;
+            vm->compiler.macro_vararg_count = var_count;
+            vm->compiler.macro_vararg_string_mode = false;
+        } else {
+            vm->compiler.macro_vararg_nodes = NULL;
+            vm->compiler.macro_vararg_strs = NULL;
+            vm->compiler.macro_vararg_count = 0;
+            vm->compiler.macro_vararg_string_mode = false;
+        }
     }
 
     // Push sentinel return address (0) so we can detect when function
@@ -1254,8 +1368,9 @@ static Node *execute_macro_fn(JCC *vm, MacroFn *pm, Token *call_tok,
     vm_eval(vm);
     vm->debug_vm = saved_debug;
 
-    // Get the returned Node* from regs[REG_A0]
-    Node *result = (Node *)vm->regs[REG_A0];
+    // Get the returned Node* from regs[REG_A0]. Void macros do not produce a
+    // meaningful VM return value; treat them as side-effect-only.
+    Node *result = pm->is_void_macro ? NULL : (Node *)vm->regs[REG_A0];
 
     // Clear VM pointer
     __jcc_current_vm = NULL;
@@ -1268,6 +1383,10 @@ static Node *execute_macro_fn(JCC *vm, MacroFn *pm, Token *call_tok,
     memcpy(vm->regs, saved_regs, sizeof(saved_regs));
     vm->compiler.current_fn = saved_current_fn;
     vm->compiler.macro_call_tok = saved_macro_call_tok;
+    vm->compiler.macro_vararg_nodes = saved_vararg_nodes;
+    vm->compiler.macro_vararg_strs = saved_vararg_strs;
+    vm->compiler.macro_vararg_count = saved_vararg_count;
+    vm->compiler.macro_vararg_string_mode = saved_vararg_string_mode;
 
     if (vm->debug_vm && result)
         printf("Macro function '%s' returned node of kind %d\n", pm->name,
@@ -1349,7 +1468,7 @@ void cc_execute_top_level_macro(JCC *vm, char *name, Token *tok,
         return;
     }
 
-    if (arg_count > 8) {
+    if (!pm->is_variadic && arg_count > 8) {
         error_tok(vm, tok,
                   "macro '%s' called with %d arguments; maximum is 8",
                   name, arg_count);
@@ -1416,7 +1535,7 @@ static Node *transform_node(JCC *vm, Node *node, int depth) {
         if (vm->debug_vm)
             printf("  Executing macro '%s'...\n", pm->name);
 
-        if (node->macro_arg_count > 8) {
+        if (!pm->is_variadic && node->macro_arg_count > 8) {
             error_tok(vm, node->tok,
                       "macro '%s' called with %d arguments; maximum is 8",
                       node->macro_name, node->macro_arg_count);
@@ -1773,10 +1892,27 @@ static void scan_and_execute_global_calls(JCC *vm, Token **tokens_ptr) {
                         // actual string data, not a Node wrapper.
                         // TK_STR tokens pass their string value directly;
                         // keywords/idents/numbers pass their spelling.
-                        char *arg_strs[8];
+                        int max_args = 0;
+                        if (tok->next->next != after_paren) {
+                            max_args = 1;
+                            int count_depth = 0;
+                            for (Token *t = tok->next->next;
+                                 t && t != after_paren;
+                                 t = t->next) {
+                                if (equal(t, "("))
+                                    count_depth++;
+                                else if (equal(t, ")") && count_depth > 0)
+                                    count_depth--;
+                                else if (count_depth == 0 && equal(t, ","))
+                                    max_args++;
+                            }
+                        }
+                        char **arg_strs = max_args > 0
+                            ? alloca(max_args * sizeof(char *))
+                            : NULL;
                         int arg_count = 0;
                         Token *a = tok->next->next; // first token after '('
-                        while (a && a != after_paren && arg_count < 8) {
+                        while (a && a != after_paren) {
                             int depth = 0;
                             Token *arg_start = a;
                             Token *arg_end = a;
@@ -1797,14 +1933,14 @@ static void scan_and_execute_global_calls(JCC *vm, Token **tokens_ptr) {
                             } else {
                                 int total = 0;
                                 for (Token *t = arg_start;
-                                     t && t != a && t != after_paren;
+                                     t && t != arg_end->next;
                                      t = t->next)
                                     total += t->len;
                                 str = arena_alloc(
                                     &vm->compiler.parser_arena, total + 1);
                                 int pos = 0;
                                 for (Token *t = arg_start;
-                                     t && t != a && t != after_paren;
+                                     t && t != arg_end->next;
                                      t = t->next) {
                                     memcpy(str + pos, t->loc, t->len);
                                     pos += t->len;
@@ -1813,10 +1949,25 @@ static void scan_and_execute_global_calls(JCC *vm, Token **tokens_ptr) {
                             }
                             arg_strs[arg_count++] = str;
                         }
+                        if (!pm->is_variadic && arg_count > 8) {
+                            error_tok(vm, tok,
+                                      "macro '%.*s' called with %d arguments; maximum is 8",
+                                      tok->len, tok->loc, arg_count);
+                        }
+                        if (pm->is_variadic && arg_count < pm->fixed_param_count) {
+                            error_tok(vm, tok,
+                                      "macro '%.*s' called with %d arguments; expected at least %d",
+                                      tok->len, tok->loc, arg_count,
+                                      pm->fixed_param_count);
+                        }
                         // Place char* values in registers before calling
                         // execute_macro_fn with NULL args so the arg-setup
                         // loop inside does not overwrite them.
-                        for (int i = 0; i < arg_count; i++)
+                        int fixed_count = pm->is_variadic ? pm->fixed_param_count
+                                                          : arg_count;
+                        if (fixed_count > 8)
+                            fixed_count = 8;
+                        for (int i = 0; i < fixed_count; i++)
                             vm->regs[REG_A0 + i] = (long long)arg_strs[i];
 
                         if (!pm->is_compiled) {
@@ -1834,8 +1985,35 @@ static void scan_and_execute_global_calls(JCC *vm, Token **tokens_ptr) {
                             scope_before->next =
                                 vm->compiler.macro_context_scope;
 
+                        Node **saved_vararg_nodes =
+                            vm->compiler.macro_vararg_nodes;
+                        char **saved_vararg_strs =
+                            vm->compiler.macro_vararg_strs;
+                        int saved_vararg_count =
+                            vm->compiler.macro_vararg_count;
+                        bool saved_vararg_string_mode =
+                            vm->compiler.macro_vararg_string_mode;
+                        if (pm->is_variadic) {
+                            vm->compiler.macro_vararg_nodes = NULL;
+                            vm->compiler.macro_vararg_strs =
+                                arg_strs + pm->fixed_param_count;
+                            vm->compiler.macro_vararg_count =
+                                arg_count - pm->fixed_param_count;
+                            vm->compiler.macro_vararg_string_mode = true;
+                        } else {
+                            vm->compiler.macro_vararg_nodes = NULL;
+                            vm->compiler.macro_vararg_strs = NULL;
+                            vm->compiler.macro_vararg_count = 0;
+                            vm->compiler.macro_vararg_string_mode = true;
+                        }
+
                         Node *block_result =
-                            execute_macro_fn(vm, pm, tok, NULL, 0);
+                            execute_macro_fn(vm, pm, tok, NULL, arg_count);
+                        vm->compiler.macro_vararg_nodes = saved_vararg_nodes;
+                        vm->compiler.macro_vararg_strs = saved_vararg_strs;
+                        vm->compiler.macro_vararg_count = saved_vararg_count;
+                        vm->compiler.macro_vararg_string_mode =
+                            saved_vararg_string_mode;
                         if (scope_before)
                             scope_before->next = saved_scope_next;
                         vm->compiler.scope = scope_before;

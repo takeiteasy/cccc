@@ -137,6 +137,75 @@ static Token *extract_macro_function(JCC *vm, Token *tok,
         return start;
     }
 
+    bool is_variadic = false;
+    int fixed_param_count = 0;
+    {
+        Token *param_start = func_name_tok->next->next;
+        Token *param_end = func_name_tok->next;
+        int depth = 1;
+        while (param_end && param_end->kind != TK_EOF) {
+            param_end = param_end->next;
+            if (equal(param_end, "("))
+                depth++;
+            else if (equal(param_end, ")")) {
+                depth--;
+                if (depth == 0)
+                    break;
+            }
+        }
+
+        if (!param_end || param_end->kind == TK_EOF) {
+            error_tok(vm, func_name_tok, "[[jcc::comptime]]: unterminated parameter list");
+            return start;
+        }
+
+        if (param_start != param_end) {
+            bool only_void = param_start->kind == TK_IDENT &&
+                             param_start->len == 4 &&
+                             strncmp(param_start->loc, "void", 4) == 0 &&
+                             param_start->next == param_end;
+            if (!only_void) {
+                bool saw_segment_token = false;
+                int paren = 0;
+                int bracket = 0;
+                for (Token *t = param_start; t && t != param_end; t = t->next) {
+                    if (equal(t, "("))
+                        paren++;
+                    else if (equal(t, ")") && paren > 0)
+                        paren--;
+                    else if (equal(t, "["))
+                        bracket++;
+                    else if (equal(t, "]") && bracket > 0)
+                        bracket--;
+
+                    if (paren == 0 && bracket == 0 && equal(t, "...")) {
+                        is_variadic = true;
+                        break;
+                    }
+
+                    if (paren == 0 && bracket == 0 && equal(t, ",")) {
+                        if (saw_segment_token)
+                            fixed_param_count++;
+                        saw_segment_token = false;
+                        continue;
+                    }
+
+                    if (paren == 0 && bracket == 0)
+                        saw_segment_token = true;
+                }
+                if (saw_segment_token && !is_variadic)
+                    fixed_param_count++;
+                else if (saw_segment_token && is_variadic)
+                    fixed_param_count++;
+            }
+        }
+    }
+
+    if (fixed_param_count > 8)
+        error_tok(vm, func_name_tok,
+                  "macro '%.*s' declares %d fixed parameters; maximum is 8",
+                  func_name_tok->len, func_name_tok->loc, fixed_param_count);
+
     // Extract function name
     char *name =
         arena_alloc(&vm->compiler.parser_arena, func_name_tok->len + 1);
@@ -225,6 +294,8 @@ static Token *extract_macro_function(JCC *vm, Token *tok,
     pm->is_macro_entry = is_macro_entry;
     pm->is_inline = is_inline;
     pm->is_void_macro = is_void_macro;
+    pm->is_variadic = is_variadic;
+    pm->fixed_param_count = fixed_param_count;
     pm->next = vm->compiler.macro_fns;
     vm->compiler.macro_fns = pm;
 

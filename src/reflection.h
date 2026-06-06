@@ -236,6 +236,55 @@ $node_t *__jcc_macroexpand_1(JCC *vm, $node_t *node);
  */
 $node_t *__jcc_macroexpand(JCC *vm, $node_t *node);
 
+/*!
+ * @function __jcc_ast_vararg_count
+ * @abstract Return the number of variadic arguments for the active macro call.
+ * @param vm The VM context.
+ * @return Number of arguments after the fixed parameters.
+ */
+int __jcc_ast_vararg_count(JCC *vm);
+
+/*!
+ * @function __jcc_ast_vararg_at
+ * @abstract Return an inline macro's variadic AST argument by zero-based index.
+ * @param vm The VM context.
+ * @param index Zero-based variadic argument index.
+ * @return The argument node.
+ * @discussion Emits a compile-time error if @a index is out of range or the
+ *             active macro call is a global-generation string macro.
+ */
+$node_t *__jcc_ast_vararg_at(JCC *vm, int index);
+
+/*!
+ * @function __jcc_ast_varargs_as_array
+ * @abstract Return an inline macro's variadic AST arguments as an array.
+ * @param vm The VM context.
+ * @return Borrowed array of variadic argument nodes, or NULL when the active
+ *         inline macro call has no variadic arguments.
+ * @discussion The returned array is read-only and valid only for the current
+ *             macro call's lifetime. It shares nodes with the original macro
+ *             arguments and does not consume or clone them. Emits a
+ *             compile-time error if the active macro call is a
+ *             global-generation string macro.
+ */
+$node_t **__jcc_ast_varargs_as_array(JCC *vm);
+
+/*!
+ * @function __jcc_ast_vararg_str_at
+ * @abstract Return a global-generation macro's stringified variadic argument.
+ * @param vm The VM context.
+ * @param index Zero-based variadic argument index.
+ * @return The stringified token argument.
+ * @discussion Emits a compile-time error if @a index is out of range or the
+ *             active macro call is an inline AST macro.
+ */
+const char *__jcc_ast_vararg_str_at(JCC *vm, int index);
+
+int _AST_VARARG_COUNT();
+$node_t *_AST_VARARG_AT(int index);
+$node_t **_AST_VARARGS_AS_ARRAY();
+const char *_AST_VARARG_STR_AT(int index);
+
 // ============================================================================
 // Generated Node Source Locations (ticket #173)
 // ============================================================================
@@ -1538,6 +1587,10 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, $node_t *node);
 #define $forward_include(header) __jcc_forward_include(_VM, header)
 #define $macroexpand_1(node) __jcc_macroexpand_1(_VM, node)
 #define $macroexpand(node) __jcc_macroexpand(_VM, node)
+#define _AST_VARARG_COUNT() __jcc_ast_vararg_count(_VM)
+#define _AST_VARARG_AT(i) __jcc_ast_vararg_at(_VM, i)
+#define _AST_VARARGS_AS_ARRAY() __jcc_ast_varargs_as_array(_VM)
+#define _AST_VARARG_STR_AT(i) __jcc_ast_vararg_str_at(_VM, i)
 
 #define $current_token() __jcc_ast_current_token(_VM)
 #define $synthetic_token(label) __jcc_ast_synthetic_token(_VM, label)
