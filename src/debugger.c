@@ -1053,20 +1053,23 @@ static long long debugger_eval_direct_call(JCC *vm, Node *node, int *error) {
         return 0;
     }
 
-    long long args[8];
     int nargs = 0;
+    for (Node *arg = node->args; arg; arg = arg->next)
+        nargs++;
+
+    long long *args = NULL;
+    if (nargs > 0) {
+        args = alloca((size_t)nargs * sizeof(long long));
+    }
+
+    int arg_idx = 0;
     for (Node *arg = node->args; arg; arg = arg->next) {
-        if (nargs >= 8) {
-            printf("Error: Stack-passed function arguments in conditions are not supported\n");
-            *error = 1;
-            return 0;
-        }
         if (!debugger_type_is_scalar_integer(arg->ty)) {
             printf("Error: Non-integer function arguments in conditions are not supported\n");
             *error = 1;
             return 0;
         }
-        args[nargs++] = eval_ast_node(vm, arg, error);
+        args[arg_idx++] = eval_ast_node(vm, arg, error);
         if (*error)
             return 0;
     }
@@ -1079,6 +1082,11 @@ static long long debugger_eval_direct_call(JCC *vm, Node *node, int *error) {
             ForeignFunc *ff = &vm->compiler.ffi_table[ffi_idx];
             if (ff->is_variadic || ff->returns_double) {
                 printf("Error: Full FFI call ABI in conditions is not supported\n");
+                *error = 1;
+                return 0;
+            }
+            if (nargs > 8) {
+                printf("Error: Stack-passed FFI arguments in conditions are not supported\n");
                 *error = 1;
                 return 0;
             }
@@ -1117,7 +1125,9 @@ static long long debugger_eval_direct_call(JCC *vm, Node *node, int *error) {
         long long *saved_step_out_bp = vm->dbg.step_out_bp;
         int saved_debugger_attached = vm->dbg.debugger_attached;
 
-        for (int i = 0; i < nargs; i++)
+        for (int i = nargs - 1; i >= 8; i--)
+            *--vm->sp = args[i];
+        for (int i = 0; i < nargs && i < 8; i++)
             vm->regs[REG_A0 + i] = args[i];
 
         vm->flags &= ~JCC_ENABLE_DEBUGGER;

@@ -50,7 +50,7 @@ All segments are reserved upfront as large virtual ranges and committed in `pool
 * **Struct returns** use a rotating pool of return buffers allocated in the data segment; the `RETBUF` opcode yields the next buffer address.
 * **Spilled arguments** (more than 8) are pushed onto the stack before the call.
 
-The `ENT3` opcode builds the stack frame, copies register arguments to their stack slots, and optionally writes a stack canary.  `LEV3` restores `bp`, checks the canary, pops the return address, and resumes at the caller.
+The `ENT3` opcode builds the stack frame, copies register arguments and stack-passed fixed arguments to their callee-local parameter slots, and optionally writes a stack canary. For variadic functions, `ENT3` still reserves and spills the first 8 argument slots so `va_arg` can consume any register-passed variadic tail; variadic arguments beyond those slots remain in the caller's stack area. `LEV3` restores `bp`, checks the canary, pops the return address, and resumes at the caller.
 
 ## Instruction Encoding
 
@@ -100,7 +100,7 @@ Opcodes are grouped by function.  Operands are shown as `rd = destination`, `rs 
 
 | Opcode | Operands | Description |
 |--------|----------|-------------|
-| `ENT3` | 4 | Enter function: `stack_size`, `param_count`, `float_param_mask`, `f32_param_mask` |
+| `ENT3` | 4 | Enter function: `stack_size`, `spill_param_count`, `float_param_mask`, `f32_param_mask` |
 | `LEV3` | 0 | Leave function: restore frame, check canary, return to caller |
 | `ADJ` | 2 | Adjust stack pointer by signed immediate |
 | `PSH3` | 1 | Push `regs[rs]` onto the stack |

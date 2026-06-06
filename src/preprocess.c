@@ -201,11 +201,6 @@ static Token *extract_macro_function(JCC *vm, Token *tok,
         }
     }
 
-    if (fixed_param_count > 8)
-        error_tok(vm, func_name_tok,
-                  "macro '%.*s' declares %d fixed parameters; maximum is 8",
-                  func_name_tok->len, func_name_tok->loc, fixed_param_count);
-
     // Extract function name
     char *name =
         arena_alloc(&vm->compiler.parser_arena, func_name_tok->len + 1);

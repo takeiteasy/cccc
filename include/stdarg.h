@@ -5,9 +5,9 @@
  * Implements C99/C11 variable argument list support for the JCC VM.
  * 
  * Stack Layout for Variadic Functions (after ENT3):
- *   Stack Args      (args 8+, caller's frame)
+ *   Stack Args      (call args 8+, caller's frame)
  *   [arg9]          ← bp[+3]
- *   [arg8]          ← bp[+2]   (first stack arg)
+ *   [arg8]          ← bp[+2]   (first stack-passed arg)
  *   [ret_addr]      ← bp[+1]
  *   [old_bp]        ← bp[+0]   (base pointer points here)
  *   ---- callee frame below ----
@@ -18,7 +18,9 @@
  *   [locals...]     ← bp[-9] and below
  * 
  * Register-based calling: first 8 args in REG_A0-A7, spilled by ENT3.
- * Args 9+ are pushed to stack before CALL, remain in caller's frame.
+ * Args 9+ are pushed to stack before CALL. ENT3 copies fixed stack-passed
+ * parameters into callee local slots; va_arg reads the remaining variadic tail
+ * from the caller's stack area.
  * 
  * va_list is a struct that tracks position in both regions and knows
  * when to switch from the register-spill area to the stack args area.
@@ -46,7 +48,7 @@ typedef struct {
  * 
  * Computes:
  * - reg_ptr: address of first variadic arg = &last - 8 (one slot before last)
- * - stack_ptr: address of first stack arg = bp + 16 (bp[+2])
+ * - stack_ptr: address of first stack variadic arg
  * - reg_count: how many varargs fit in remaining register spill slots
  * 
  * Stack geometry: last is at bp[-(param_idx+1)], bp[-8] is last reg slot.
@@ -67,18 +69,22 @@ typedef struct {
  * at bp[-0], but we have a simpler method: assume fixed params start at bp[-1].
  * The number of fixed params = (&(bp[-1]) - &last) / 8 + 1.
  *
- * Since we can't easily find bp from &last alone, we use __builtin_frame_address.
- * JCC compiles this to LEA 0 which gives bp.
+ * Since we can't easily find bp from &last alone, we use
+ * __builtin_frame_address. JCC compiles this to LEA 0 which gives bp. When the
+ * last fixed parameter itself was stack-passed, ENT3 has copied it into a local
+ * slot, so the first stack variadic argument is after those stack-passed fixed
+ * arguments in the caller's frame.
  */
 #define va_start(ap, last) do { \
     long long *__bp = (long long *)__builtin_frame_address(0); \
     (ap).reg_ptr = (char *)((long long *)&(last) - 1); \
-    (ap).stack_ptr = (char *)(__bp + 2); \
     /* Count remaining reg slots: last is at __bp[-(N+1)], reg area ends at __bp[-8] */ \
     /* Remaining = 8 - (N+1) = number of slots from (last-1) down to __bp[-8] */ \
     int __param_slot = (int)(__bp - (long long *)&(last)); \
     (ap).reg_count = 8 - __param_slot; \
     if ((ap).reg_count < 0) (ap).reg_count = 0; \
+    int __stack_fixed = __param_slot > 8 ? __param_slot - 8 : 0; \
+    (ap).stack_ptr = (char *)(__bp + 2 + __stack_fixed); \
 } while(0)
 
 /*

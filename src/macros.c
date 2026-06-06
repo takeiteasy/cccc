@@ -1282,15 +1282,22 @@ static void compile_all_macros(JCC *vm) {
         fprintf(stderr, "Warning: Failed to compile macro functions\n");
 }
 
+static void setup_macro_call_slots(JCC *vm, long long *fixed_args,
+                                   int fixed_count) {
+    for (int i = fixed_count - 1; i >= 8; i--)
+        *(--vm->sp) = fixed_args[i];
+    for (int i = 0; i < fixed_count && i < 8; i++)
+        vm->regs[REG_A0 + i] = fixed_args[i];
+}
+
 // Execute a macro function and return the generated AST node
 static Node *execute_macro_fn(JCC *vm, MacroFn *pm, Token *call_tok,
-                              Node *args, int arg_count) {
+                              Node *args, int arg_count,
+                              long long *fixed_arg_values,
+                              int fixed_arg_count) {
     if (!pm || !pm->is_compiled || !pm->compiled_fn)
         return NULL;
 
-    if (!pm->is_variadic && arg_count > 8)
-        error_tok(vm, call_tok, "macro '%s' called with %d arguments; maximum is 8",
-                  pm->name, arg_count);
     if (pm->is_variadic && arg_count < pm->fixed_param_count)
         error_tok(vm, call_tok,
                   "macro '%s' called with %d arguments; expected at least %d",
@@ -1322,18 +1329,24 @@ static Node *execute_macro_fn(JCC *vm, MacroFn *pm, Token *call_tok,
     vm->sp = vm->initial_sp;
     vm->bp = vm->initial_bp;
 
-    // Pass arguments via registers (REG_A0-A7 in the VM calling convention).
+    // Pass fixed arguments using the VM calling convention.
     // Inline macro arguments are Node* pointers to the AST nodes. Global
     // generation callers preload char* fixed arguments and set string-mode
     // varargs before entering this helper.
-    if (args) {
-        int fixed_count = pm->is_variadic ? pm->fixed_param_count : 8;
-        int arg_idx = 0;
+    if (fixed_arg_values) {
+        setup_macro_call_slots(vm, fixed_arg_values, fixed_arg_count);
+    } else if (args) {
+        int fixed_count = pm->is_variadic ? pm->fixed_param_count : arg_count;
+        long long *fixed_args =
+            fixed_count > 0 ? alloca((size_t)fixed_count * sizeof(long long))
+                            : NULL;
         Node *arg = args;
-        for (; arg && arg_idx < fixed_count && arg_idx < 8; arg = arg->next) {
-            vm->regs[REG_A0 + arg_idx] = (long long)arg;
-            arg_idx++;
+        for (int i = 0; i < fixed_count; i++) {
+            fixed_args[i] = (long long)arg;
+            if (arg)
+                arg = arg->next;
         }
+        setup_macro_call_slots(vm, fixed_args, fixed_count);
 
         if (pm->is_variadic) {
             int var_count = arg_count - pm->fixed_param_count;
@@ -1419,7 +1432,7 @@ Node *__jcc_macroexpand_1(JCC *vm, Node *node) {
     if (node->macro_scope)
         vm->compiler.scope = node->macro_scope;
     Node *result = execute_macro_fn(vm, pm, node->tok, node->args,
-                                    node->macro_arg_count);
+                                    node->macro_arg_count, NULL, 0);
     vm->compiler.scope = saved_scope;
     return result ? result : node;
 }
@@ -1468,13 +1481,6 @@ void cc_execute_top_level_macro(JCC *vm, char *name, Token *tok,
         return;
     }
 
-    if (!pm->is_variadic && arg_count > 8) {
-        error_tok(vm, tok,
-                  "macro '%s' called with %d arguments; maximum is 8",
-                  name, arg_count);
-        return;
-    }
-
     init_vm_segments_for_macros(vm);
     compile_all_macros(vm);
 
@@ -1483,7 +1489,7 @@ void cc_execute_top_level_macro(JCC *vm, char *name, Token *tok,
         return;
     }
 
-    Node *result = execute_macro_fn(vm, pm, tok, args, arg_count);
+    Node *result = execute_macro_fn(vm, pm, tok, args, arg_count, NULL, 0);
     // Declaration position: NULL (or void return) is legal — the macro may have
     // emitted definitions as side-effects without having a node to splice.
     (void)result;
@@ -1535,18 +1541,12 @@ static Node *transform_node(JCC *vm, Node *node, int depth) {
         if (vm->debug_vm)
             printf("  Executing macro '%s'...\n", pm->name);
 
-        if (!pm->is_variadic && node->macro_arg_count > 8) {
-            error_tok(vm, node->tok,
-                      "macro '%s' called with %d arguments; maximum is 8",
-                      node->macro_name, node->macro_arg_count);
-            return node;
-        }
-
         Scope *saved_scope = vm->compiler.scope;
         if (node->macro_scope)
             vm->compiler.scope = node->macro_scope;
         Node *result =
-            execute_macro_fn(vm, pm, node->tok, node->args, node->macro_arg_count);
+            execute_macro_fn(vm, pm, node->tok, node->args,
+                             node->macro_arg_count, NULL, 0);
         vm->compiler.scope = saved_scope;
 
         if (vm->debug_vm)
@@ -1949,26 +1949,23 @@ static void scan_and_execute_global_calls(JCC *vm, Token **tokens_ptr) {
                             }
                             arg_strs[arg_count++] = str;
                         }
-                        if (!pm->is_variadic && arg_count > 8) {
-                            error_tok(vm, tok,
-                                      "macro '%.*s' called with %d arguments; maximum is 8",
-                                      tok->len, tok->loc, arg_count);
-                        }
                         if (pm->is_variadic && arg_count < pm->fixed_param_count) {
                             error_tok(vm, tok,
                                       "macro '%.*s' called with %d arguments; expected at least %d",
                                       tok->len, tok->loc, arg_count,
                                       pm->fixed_param_count);
                         }
-                        // Place char* values in registers before calling
-                        // execute_macro_fn with NULL args so the arg-setup
-                        // loop inside does not overwrite them.
+                        // Place char* values using the VM calling convention
+                        // before calling execute_macro_fn with NULL args so
+                        // the arg-setup loop inside does not overwrite them.
                         int fixed_count = pm->is_variadic ? pm->fixed_param_count
                                                           : arg_count;
-                        if (fixed_count > 8)
-                            fixed_count = 8;
+                        long long *fixed_args =
+                            fixed_count > 0
+                                ? alloca((size_t)fixed_count * sizeof(long long))
+                                : NULL;
                         for (int i = 0; i < fixed_count; i++)
-                            vm->regs[REG_A0 + i] = (long long)arg_strs[i];
+                            fixed_args[i] = (long long)arg_strs[i];
 
                         if (!pm->is_compiled) {
                             error_tok(vm, tok, "macro '%.*s' failed to compile",
@@ -2008,7 +2005,8 @@ static void scan_and_execute_global_calls(JCC *vm, Token **tokens_ptr) {
                         }
 
                         Node *block_result =
-                            execute_macro_fn(vm, pm, tok, NULL, arg_count);
+                            execute_macro_fn(vm, pm, tok, NULL, arg_count,
+                                             fixed_args, fixed_count);
                         vm->compiler.macro_vararg_nodes = saved_vararg_nodes;
                         vm->compiler.macro_vararg_strs = saved_vararg_strs;
                         vm->compiler.macro_vararg_count = saved_vararg_count;

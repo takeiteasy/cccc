@@ -396,13 +396,13 @@ static inline int op_MOV3_fn(JCC *vm) {
 // ========== Register-Based Calling Convention ==========
 
 static inline int op_ENT3_fn(JCC *vm) {
-    // Enter function: [ENT3] [stack_size:32|param_count:32]
+    // Enter function: [ENT3] [stack_size:32|spill_param_count:32]
     // [f32_param_mask:32|float_param_mask:32]
-    // Creates new stack frame and copies REG_A0-REG_An and FREG_A0-FREG_An to
-    // parameter slots
+    // Creates new stack frame and copies register and stack-passed arguments to
+    // parameter slots.
     long long operands = cc_read_i64(vm);
     int stack_size = (int)(operands & 0xFFFFFFFF);
-    int param_count = (int)((operands >> 32) & 0xFFFFFFFF);
+    int spill_param_count = (int)((operands >> 32) & 0xFFFFFFFF);
     unsigned long long masks = (unsigned long long)cc_read_i64(vm);
     unsigned int float_param_mask = (unsigned int)(masks & 0xFFFFFFFFu);
     unsigned int f32_param_mask = (unsigned int)(masks >> 32);
@@ -423,19 +423,22 @@ static inline int op_ENT3_fn(JCC *vm) {
     // Parameters are now stored at negative offsets like locals
     vm->sp = vm->sp - stack_size;
 
-    // Copy register arguments to their stack slots
-    // Parameters are at bp[-1], bp[-2], ... bp[-param_count]
-    // Map: REG_Ai/FREG_Ai -> bp[-i-1] depending on float_param_mask
+    // Copy arguments to their stack slots.
+    // Parameters are at bp[-1], bp[-2], ... bp[-spill_param_count]
+    // Slots 0-7 come from REG_Ai/FREG_Ai depending on float_param_mask.
+    // Slots 8+ were pushed by the caller and are visible at bp[+2], bp[+3], ...
     // We need separate int and float register indices
     int int_reg_idx = 0;
     int float_reg_idx = 0;
-    for (int i = 0; i < param_count && i < 8; i++) {
+    for (int i = 0; i < spill_param_count; i++) {
         long long *param_slot = vm->bp - 1 - i;
         if (vm->flags & JCC_STACK_CANARIES) {
             param_slot--; // Account for canary slot
         }
 
-        if (float_param_mask & (1LL << i)) {
+        if (i >= 8) {
+            *param_slot = vm->bp[2 + (i - 8)];
+        } else if (float_param_mask & (1LL << i)) {
             // Float parameter - copy from fregs[]
             if (f32_param_mask & (1u << i)) {
                 *(float *)param_slot =

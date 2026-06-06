@@ -2916,12 +2916,14 @@ static int assign_stack_offsets(Obj *fn) {
         param_count++;
     }
 
-    // For variadic functions, copy all 8 potential arg registers
+    // For variadic functions, copy all 8 potential arg registers so va_arg can
+    // consume any register-passed variadic tail. Fixed params beyond 8 need
+    // their own local slots too.
     bool is_variadic = fn->ty && fn->ty->is_variadic;
-    int reg_param_count = is_variadic ? 8 : param_count;
+    int spill_param_count = is_variadic && param_count < 8 ? 8 : param_count;
 
     // Stack size starts with space for parameters (at negative offsets)
-    int stack_size = reg_param_count;
+    int stack_size = spill_param_count;
 
     // Assign parameter offsets (negative, starting at -1)
     // Parameters: bp[-1], bp[-2], ...
@@ -2993,7 +2995,7 @@ void gen_function(JCC *vm, Obj *fn) {
     for (Obj *param = fn->params; param; param = param->next)
         param_count++;
     bool is_variadic = fn->ty && fn->ty->is_variadic;
-    int reg_param_count = is_variadic ? 8 : param_count;
+    int spill_param_count = is_variadic && param_count < 8 ? 8 : param_count;
 
     // Record function address (offset from text_seg start)
     fn->code_addr = vm->text_ptr + 1;
@@ -3033,7 +3035,7 @@ void gen_function(JCC *vm, Obj *fn) {
 
     // Emit ENT3: [stack_size:32|param_count:32] [f32_mask:32|float_mask:32]
     long long ent3_operand =
-        ((long long)stack_size) | (((long long)reg_param_count) << 32);
+        ((long long)stack_size) | (((long long)spill_param_count) << 32);
     long long ent3_masks =
         (long long)float_param_mask | ((long long)f32_param_mask << 32);
     emit(vm, ENT3);

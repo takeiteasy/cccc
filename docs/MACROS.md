@@ -89,11 +89,11 @@ int main(void) {
 
 ### File-scope arguments and variadic macro tails
 
-Global-generation macros accept up to 8 fixed parameters plus an unbounded
-trailing `...` tail. Each fixed argument's token sequence is stringified and
-delivered as a `char *` to the matching parameter: string literals pass their
-raw value, while keywords, identifiers, and numbers pass their spelling. The
-variadic tail is available through `_AST_VARARG_COUNT()` and
+Global-generation macros accept fixed parameters plus an unbounded trailing
+`...` tail. Each fixed argument's token sequence is stringified and delivered
+as a `char *` to the matching parameter: string literals pass their raw value,
+while keywords, identifiers, and numbers pass their spelling. The variadic tail
+is available through `_AST_VARARG_COUNT()` and
 `_AST_VARARG_STR_AT(i)`.
 
 ```c
