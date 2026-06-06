@@ -8,7 +8,7 @@ int items = get_item_count();   // forward ref — get_item_count defined below
 [[jcc::comptime]]
 int get_item_count(void) { return 6; }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_items(void) {
     return $int_literal($get_comptime_int("items"));
 }

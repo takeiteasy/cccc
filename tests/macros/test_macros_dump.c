@@ -20,7 +20,7 @@ static int contains(const char *hay, const char *needle) {
 
 // Macro: takes an int literal node, dumps it as tree and as gen,
 // returns the original node (the dumps are the side effect we inspect).
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *dump_and_pass($node_t *n) {
     $vm_t *vm = __jcc_get_vm();
 
@@ -34,7 +34,7 @@ $node_t *dump_and_pass($node_t *n) {
 }
 
 // Macro: returns the tree dump string of the argument node.
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *tree_string($node_t *n) {
     $vm_t *vm = __jcc_get_vm();
     const char *s = __jcc_dump_tree_to_string(vm, n);
@@ -43,7 +43,7 @@ $node_t *tree_string($node_t *n) {
 }
 
 // Macro: returns the ast-gen dump string of the argument node.
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *gen_string($node_t *n) {
     $vm_t *vm = __jcc_get_vm();
     const char *s = __jcc_dump_ast_gen_to_string(vm, n);

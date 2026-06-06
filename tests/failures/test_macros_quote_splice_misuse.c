@@ -2,7 +2,7 @@
 // Test ticket #172: using $@N as an expression operand (outside a statement
 // list) must produce a compile-time error.
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *bad_splice($node_t *x) {
     $vm_t *vm = __jcc_get_vm();
     // $@1 is a list splice — it cannot be used as an expression operand.

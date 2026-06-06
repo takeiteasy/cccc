@@ -5,7 +5,7 @@
 
 // Macro that emits a warning at the argument's source location,
 // then returns the argument unchanged.
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *warn_if_zero($node_t *n) {
     $vm_t *vm = __jcc_get_vm();
     // Always emit a warning — we're testing the mechanism, not the logic

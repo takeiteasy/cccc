@@ -9,14 +9,14 @@ int compute_width(void) { return 1920; }
 [[jcc::comptime]]
 struct Dims { int width; int height; } dims = { compute_width(), 1080 };
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_area(void) {
     $node_t *w = $get_comptime_member("dims", "width");
     $node_t *h = $get_comptime_member("dims", "height");
     return $binary(nk_mul, w, h);
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_width(void) {
     return $get_comptime_member("dims", "width");
 }

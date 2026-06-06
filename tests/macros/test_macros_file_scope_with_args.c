@@ -2,7 +2,7 @@
 // A non-inline macro that receives a char* name generates a function with
 // that name; the call happens before the main parse.
 
-[[jcc::macro]]
+[[jcc::comptime]]
 void make_named_func(char *name) {
     $vm_t *vm = __jcc_get_vm();
     $type_t *int_ty = __jcc_ast_get_type(vm, "int");

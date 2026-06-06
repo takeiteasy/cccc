@@ -6,7 +6,7 @@
 
 int sum_ints(int count, ...) { return 0; }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *bad_arg_splice($node_t *x) {
     $vm_t *vm = __jcc_get_vm();
     // $@1 cannot be used as an operand inside an expression; it must be a

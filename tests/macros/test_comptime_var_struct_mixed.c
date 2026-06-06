@@ -17,17 +17,17 @@ struct Config {
     int scale;
 } cfg = { base_width(), 240, scale };
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_width(void) {
     return $get_comptime_member("cfg", "width");
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_height(void) {
     return $get_comptime_member("cfg", "height");
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_scale(void) {
     return $get_comptime_member("cfg", "scale");
 }

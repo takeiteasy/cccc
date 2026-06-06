@@ -3,7 +3,7 @@
 [[jcc::comptime]]
 struct Dims { int width; int height; int depth; } dims = { 640, 480, 3 };
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_area(void) {
     // width * height at compile time
     $node_t *w = $get_comptime_member("dims", "width");
@@ -11,7 +11,7 @@ $node_t *get_area(void) {
     return $binary(nk_mul, w, h);
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_depth(void) {
     return $get_comptime_member("dims", "depth");
 }

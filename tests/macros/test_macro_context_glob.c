@@ -6,7 +6,7 @@ int glob_type_size(void) {
     return sizeof(g) > 0;
 }
 
-[[jcc::macro]]
+[[jcc::comptime]]
 void generate_glob_context_result(void) {
     $obj_t *fn = $function("glob_context_result", $get_type("int"));
     $function_set_body(fn, $return($int_literal(glob_type_size() ? 42 : 1)));

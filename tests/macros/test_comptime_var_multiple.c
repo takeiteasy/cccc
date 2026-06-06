@@ -4,7 +4,7 @@
 [[jcc::comptime]]
 int base = 20;
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *doubled(void) {
     return $int_literal($get_comptime_int("base") * 2);
 }
@@ -12,7 +12,7 @@ $node_t *doubled(void) {
 [[jcc::comptime]]
 int bonus = 2;
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *total(void) {
     int64_t b = $get_comptime_int("base");
     int64_t n = $get_comptime_int("bonus");

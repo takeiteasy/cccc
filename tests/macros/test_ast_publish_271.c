@@ -1,6 +1,6 @@
 // Test ticket #271: unified $publish API.
 
-[[jcc::macro]]
+[[jcc::comptime]]
 void publish_proto(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *proto = $function_prototype("published_add_one", int_ty);
@@ -9,7 +9,7 @@ void publish_proto(void) {
 }
 publish_proto();
 
-[[jcc::macro]]
+[[jcc::comptime]]
 void define_published_fn(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("published_add_one", int_ty);
@@ -19,7 +19,7 @@ void define_published_fn(void) {
 }
 define_published_fn();
 
-[[jcc::macro]]
+[[jcc::comptime]]
 void publish_global_and_types(void) {
     $type_t *char_ty = $get_type("char");
     $type_t *arr_ty = $make_array(char_ty, 4);
@@ -41,7 +41,7 @@ void publish_global_and_types(void) {
 }
 publish_global_and_types();
 
-[[jcc::macro]]
+[[jcc::comptime]]
 void forward_alias_still_works(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *proto = $function_prototype("published_alias_fn", int_ty);
@@ -49,7 +49,7 @@ void forward_alias_still_works(void) {
 }
 forward_alias_still_works();
 
-[[jcc::macro]]
+[[jcc::comptime]]
 void define_alias_fn(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("published_alias_fn", int_ty);

@@ -2,7 +2,7 @@
 // A macro that generates a simple function at compile time
 
 // Pragma macro that generates a function returning a constant
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *generate_const_func($node_t *name_node, $node_t *value_node) {
     $vm_t *vm = __jcc_get_vm();
 

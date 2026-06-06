@@ -5096,7 +5096,7 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
                 if (!pm->is_inline) {
                     error_tok(vm, tok,
                               "macro '%.*s' is not marked inline; use "
-                              "[[jcc::macro(inline)]] for expression-position "
+                              "[[jcc::comptime(inline)]] for expression-position "
                               "calls",
                               tok->len, tok->loc);
                 }

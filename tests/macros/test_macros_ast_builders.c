@@ -4,7 +4,7 @@
 // Macro that returns an assignment expression (target = value).
 // Used as: int x; int y = set_var(x, 99);
 // After expansion: int y = (x = 99);  => y == 99, x == 99
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *set_var($node_t *target, $node_t *value) {
     $vm_t *vm = __jcc_get_vm();
     return __jcc_ast_assign(vm, target, value);
@@ -14,7 +14,7 @@ $node_t *set_var($node_t *target, $node_t *value) {
 // Macro that returns obj.field (struct member access).
 struct Point { int x; int y; };
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_x($node_t *pt) {
     $vm_t *vm = __jcc_get_vm();
     return __jcc_ast_member(vm, pt, "x");
@@ -25,7 +25,7 @@ $node_t *get_x($node_t *pt) {
 int triple(int n) { return n * 3; }
 
 // Macro that generates: triple(arg)
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *call_triple($node_t *arg) {
     $vm_t *vm = __jcc_get_vm();
     $node_t *callee = __jcc_ast_var_ref(vm, "triple");

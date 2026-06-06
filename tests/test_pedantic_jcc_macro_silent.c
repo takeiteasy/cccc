@@ -1,6 +1,6 @@
 // JCC_FLAGS: -std=c99 -Wpedantic
 // JCC_REJECT_STDERR: \[-Wpedantic\]
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_42(void) {
     return $int_literal(42);
 }

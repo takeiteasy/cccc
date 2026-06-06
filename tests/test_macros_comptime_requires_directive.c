@@ -5,7 +5,7 @@ int runtime_helper(int n) {
     return n + 1;
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *uses_runtime_helper(void) {
     return $int_literal(runtime_helper(41));
 }

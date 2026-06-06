@@ -873,7 +873,7 @@ typedef struct CondIncl {
  @field body_tokens Original token stream for function body (from preprocessor).
  @field compiled_fn Compiled function object (NULL until compiled).
  @field is_compiled True after successful compilation.
- @field is_macro_entry True if callable from user program macro call sites.
+ @field is_macro_entry True if callable from user program macro call sites (always true for [[jcc::comptime]] functions).
  @field is_void_macro True if declared with void return type (definition-only).
  @field next Pointer to next macro in linked list.
 */
@@ -882,7 +882,7 @@ typedef struct MacroFn {
     Token *body_tokens;       // Original token stream for function body
     Obj *compiled_fn;         // Compiled function object
     bool is_compiled;         // True after successful compilation
-    bool is_macro_entry;      // True for [[jcc::macro]], false for comptime helper
+    bool is_macro_entry;      // True for all comptime functions (entry-callable from user code)
     bool is_inline;           // True for inline macros (auto-execute at declaration)
     bool is_void_macro;       // True if declared void — definition-only, no splice node
     struct MacroFn *next;     // Next macro in linked list

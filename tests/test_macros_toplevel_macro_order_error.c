@@ -1,7 +1,7 @@
 // Test ticket #229: global macro calls run pre-parse, so generated
 // functions are visible everywhere regardless of source order.
 
-[[jcc::macro]]
+[[jcc::comptime]]
 void generate_late(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("late_generated", int_ty);

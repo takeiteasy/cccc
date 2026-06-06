@@ -2,7 +2,7 @@
 
 // ---- Expression splice: positional $N ------------------------------------
 // Produces: a + b * a  (reuses $1)
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *add_mul($node_t *a, $node_t *b) {
     $vm_t *vm = __jcc_get_vm();
     return __jcc_quote(vm, "$1 + $2 * $1", a, b);
@@ -10,7 +10,7 @@ $node_t *add_mul($node_t *a, $node_t *b) {
 
 // ---- Expression splice: reorder ($2 * $1 + $2) ---------------------------
 // Produces: y*x + y
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *quad($node_t *x, $node_t *y) {
     $vm_t *vm = __jcc_get_vm();
     return __jcc_quote(vm, "$2 * $1 + $2", x, y);
@@ -18,7 +18,7 @@ $node_t *quad($node_t *x, $node_t *y) {
 
 // ---- Statement splice: return $1; ----------------------------------------
 // Must be called in statement position (not as an expression).
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *ret_val($node_t *v) {
     $vm_t *vm = __jcc_get_vm();
     return __jcc_quote(vm, "return $1;", v);
@@ -31,7 +31,7 @@ int get_99(void) {
 // ---- $$ incremental sugar ------------------------------------------------
 // $$ maps to $1, $2, ... sequentially (left-to-right).
 // Produces: a + b
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *sum_incr($node_t *a, $node_t *b) {
     $vm_t *vm = __jcc_get_vm();
     return __jcc_quote(vm, "$$ + $$", a, b);
@@ -39,7 +39,7 @@ $node_t *sum_incr($node_t *a, $node_t *b) {
 
 // ---- __jcc_quote_n: array form ---------------------------------------------
 // Produces: a + b + c
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *add3($node_t *a, $node_t *b, $node_t *c) {
     $vm_t *vm = __jcc_get_vm();
     $node_t *args[3] = { a, b, c };
@@ -47,7 +47,7 @@ $node_t *add3($node_t *a, $node_t *b, $node_t *c) {
 }
 
 // ---- No splice points (plain expression) ---------------------------------
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *const_expr(void) {
     $vm_t *vm = __jcc_get_vm();
     return __jcc_quote(vm, "6 * 7");
@@ -55,7 +55,7 @@ $node_t *const_expr(void) {
 
 // ---- If-statement template -----------------------------------------------
 // Returns one of two values based on sign; invoked as statement in function body.
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *clamp_zero($node_t *val) {
     $vm_t *vm = __jcc_get_vm();
     return __jcc_quote(vm, "if ($1 < 0) return 0; else return $1;", val);

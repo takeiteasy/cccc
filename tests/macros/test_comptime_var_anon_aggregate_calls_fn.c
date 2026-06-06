@@ -13,17 +13,17 @@ struct { int width; int height; } dims = { compute_width(), 768 };
 [[jcc::comptime]]
 union { int i; unsigned char bytes[4]; } data = { compute_value() };
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_width(void) {
     return $get_comptime_member("dims", "width");
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_height(void) {
     return $get_comptime_member("dims", "height");
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_value(void) {
     return $get_comptime_member("data", "i");
 }

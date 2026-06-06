@@ -5,12 +5,12 @@ int inc_int(int n) {
     return n + 1;
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *make_answer(void) {
     return $int_literal(inc_int(41));
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *add_later_helper($node_t *x) {
     return $binary(nk_add, x, $int_literal(triple_later(2)));
 }
@@ -34,7 +34,7 @@ int mutual_odd(int n) {
     return 1 + mutual_even(n - 1);
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *mutual_add_four($node_t *x) {
     return $binary(nk_add, x,
                           $int_literal(mutual_even(4)));

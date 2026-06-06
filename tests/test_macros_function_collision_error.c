@@ -5,7 +5,7 @@ int existing_function(void) {
     return 1;
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *clobber_existing(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("existing_function", int_ty);

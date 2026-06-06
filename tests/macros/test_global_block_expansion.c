@@ -1,7 +1,7 @@
 // Ticket #233: ND_BLOCK returned from a file-scope macro call is unwrapped and
 // its declarations are spliced directly into global scope.
 
-[[jcc::macro]]
+[[jcc::comptime]]
 $node_t *emit_widget_helpers(void) {
     return $quote("{ struct Widget { int x; int y; }; void widget_init(struct Widget *w) { w->x = 0; w->y = 0; } void widget_set(struct Widget *w, int x, int y) { w->x = x; w->y = y; } }");
 }

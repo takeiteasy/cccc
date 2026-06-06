@@ -4,7 +4,7 @@
 
 #define ITEMS X(foo) X(bar) X(baz)
 
-[[jcc::macro]]
+[[jcc::comptime]]
 void make_fn(char *name) {
     $vm_t *vm = __jcc_get_vm();
     $type_t *int_ty = __jcc_ast_get_type(vm, "int");

@@ -23,17 +23,17 @@ Dims dims = { compute_width(), 720 };
 [[jcc::comptime]]
 Data data = { compute_value() };
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_width(void) {
     return $get_comptime_member("dims", "width");
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_height(void) {
     return $get_comptime_member("dims", "height");
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_value(void) {
     return $get_comptime_member("data", "i");
 }

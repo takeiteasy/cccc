@@ -2,7 +2,7 @@
 // JCC_EXPECT_STDERR: <jcc macro: publish conflict>:1: publish conflict
 // JCC_EXPECT_STDERR: error: conflicting declaration for generated global variable 'conflict_name'
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *publish_conflicting_global(void) {
     $obj_t *g = $global_var("conflict_name", $get_type("int"));
     $publish_at(g, $synthetic_token("publish conflict"));

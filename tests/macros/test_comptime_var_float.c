@@ -3,12 +3,12 @@
 [[jcc::comptime]]
 double scale = 2.5;
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_scale(void) {
     return $get_comptime_var("scale");
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *check_scale(void) {
     double s = $get_comptime_float("scale");
     // scale * 4 == 10 — check via int cast to avoid float equality issues

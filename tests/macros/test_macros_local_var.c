@@ -2,7 +2,7 @@
 
 // Macro that creates a hygienic temporary, assigns arg*2 to it, and returns it.
 // Demonstrates that the gensym'd name doesn't collide with user locals.
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *doubled($node_t *arg) {
     $vm_t *vm = __jcc_get_vm();
 
@@ -22,7 +22,7 @@ $node_t *doubled($node_t *arg) {
 
 // Macro that creates a named local and returns a reference to it.
 // Proves __jcc_ast_local_var works (not just the unique variant).
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *make_local_forty_two(void) {
     $vm_t *vm = __jcc_get_vm();
     $type_t *ty_int = __jcc_ast_get_type(vm, "int");

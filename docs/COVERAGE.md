@@ -496,14 +496,14 @@ int __attribute__((deprecated("use bar instead"))) old_func(void);
 int [[deprecated]] legacy_var;
 ```
 
-#### `__attribute__((macro))` / `__attribute__((comptime))` (JCC-specific)
+#### `__attribute__((comptime))` / `__attribute__((comptime))` (JCC-specific)
 
 These are JCC's own extensions for compile-time metaprogramming. They are intercepted by the preprocessor and do not reach the general attribute parser. See [MACROS.md](MACROS.md) for details.
 
 **Source:** `src/preprocess.c:1737-1796`
 
 ```c
-[[jcc::macro]] int square(int x) { return x * x; }
+[[jcc::comptime]] int square(int x) { return x * x; }
 __attribute__((comptime)) const int version = 42;
 ```
 
@@ -534,7 +534,7 @@ registrations for the same header are deduplicated.
 **Source:** `src/reflect.c` (`__jcc_forward_include`), `src/serialize.c` (`cc_serialize_program`)
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 void gen_helpers(void) {
     $forward_include("<string.h>");
     // ... generate functions that call strlen() ...

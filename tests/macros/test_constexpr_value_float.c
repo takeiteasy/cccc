@@ -4,12 +4,12 @@
 constexpr double SCALE = 3.5;
 constexpr float  HALF  = 0.5f;
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_scale(void) {
     return $get_constexpr_value("SCALE");
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_half(void) {
     return $get_constexpr_value("HALF");
 }

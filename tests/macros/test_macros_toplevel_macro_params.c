@@ -1,6 +1,6 @@
 // Test ticket #122: file-scope macro call publishes generated parameters.
 
-[[jcc::macro]]
+[[jcc::comptime]]
 $node_t *generate_add(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("generated_add", int_ty);

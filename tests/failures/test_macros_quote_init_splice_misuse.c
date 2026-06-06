@@ -4,7 +4,7 @@
 
 struct Point { int x; int y; };
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *bad_point($node_t *a) {
     $vm_t *vm = __jcc_get_vm();
     // Only 1 element in chain but struct Point has 2 fields → error.

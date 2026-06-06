@@ -4,12 +4,12 @@
 constexpr int LIMIT = 100;
 constexpr int NEG   = -7;
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_limit(void) {
     return $get_constexpr_value("LIMIT");
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_neg(void) {
     return $get_constexpr_value("NEG");
 }

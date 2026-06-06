@@ -7,12 +7,12 @@ int double_it(int n) { return n * 2; }
 [[jcc::comptime]]
 int answer = 21;
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *get_answer(void) {
     return $int_literal($get_comptime_int("answer") * 2);
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *use_helper($node_t *x) {
     return $binary(nk_add, x, $int_literal(double_it(1)));
 }

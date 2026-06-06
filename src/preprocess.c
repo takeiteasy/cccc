@@ -110,9 +110,9 @@ static Token *new_eof(JCC *vm, Token *tok) {
     return t;
 }
 
-// Extract a [[jcc::macro]] / __attribute__((macro)) or comptime function
-// definition and store it. Returns the token after the function definition
-// (or original token if extraction failed).
+// Extract a [[jcc::comptime]] / __attribute__((comptime)) function definition
+// and store it. [[jcc::macro]] / __attribute__((macro)) are deprecated aliases.
+// Returns the token after the function definition (or original token on failure).
 static Token *extract_macro_function(JCC *vm, Token *tok,
                                      bool is_macro_entry,
                                      bool is_inline) {
@@ -133,7 +133,7 @@ static Token *extract_macro_function(JCC *vm, Token *tok,
 
     if (!func_name_tok) {
         error_tok(vm, start,
-                  "__attribute__((macro)): expected function definition");
+                  "[[jcc::comptime]]: expected function definition");
         return start;
     }
 
@@ -229,8 +229,7 @@ static Token *extract_macro_function(JCC *vm, Token *tok,
     vm->compiler.macro_fns = pm;
 
     if (vm->debug_vm)
-        printf("Captured %s macro function '%s'\n",
-               is_macro_entry ? "macro" : "comptime", name);
+        printf("Captured comptime function '%s'\n", name);
 
     // Return token after the function
     return body_end ? body_end : tok;
@@ -1738,10 +1737,11 @@ static PPDir pp_directive(Token *tok) {
 }
 
 // Scan the attribute argument list of a GNU __attribute__(( ... )) or C23
-// [[ ... ]] block for [[jcc::macro]], [[jcc::comptime]], __attribute__((macro)),
-// __attribute__((comptime)), and the inline modifier. If a macro/comptime marker
-// is found, extract the following function or variable definition from the token
-// stream, register it as a MacroFn or ComptimeVar, update *tok_ptr to the token
+// [[ ... ]] block for [[jcc::comptime]], __attribute__((comptime)), and the
+// inline modifier. [[jcc::macro]] / __attribute__((macro)) are deprecated aliases
+// and are accepted with the same behavior. If a comptime marker is found, extract
+// the following function or variable definition from the token stream, register
+// it as a MacroFn or ComptimeVar, update *tok_ptr to the token
 // after the extracted definition, and return true.
 //
 // If the attribute block contains no macro/comptime marker (e.g. [[nodiscard]],
@@ -1802,13 +1802,18 @@ static bool try_extract_attr_macro(JCC *vm, Token **tok_ptr) {
 
         if (equal(t, "macro")) {
             is_macro_kind = true;
-            // macro(inline) — inline is an argument, not a separate attribute
+            // macro(inline) — deprecated alias; inline argument still honoured
             if (t->next && equal(t->next, "(") &&
                 t->next->next && equal(t->next->next, "inline") &&
                 t->next->next->next && equal(t->next->next->next, ")"))
                 is_inline = true;
         } else if (equal(t, "comptime")) {
             is_comptime_kind = true;
+            // comptime(inline)
+            if (t->next && equal(t->next, "(") &&
+                t->next->next && equal(t->next->next, "inline") &&
+                t->next->next->next && equal(t->next->next->next, ")"))
+                is_inline = true;
         } else if (equal(t, "jcc") &&
                    t->next && equal(t->next, ":") &&
                    t->next->next && equal(t->next->next, ":") &&
@@ -1816,7 +1821,7 @@ static bool try_extract_attr_macro(JCC *vm, Token **tok_ptr) {
             Token *after_scope = t->next->next->next;
             if (equal(after_scope, "macro")) {
                 is_macro_kind = true;
-                // jcc::macro(inline)
+                // jcc::macro(inline) — deprecated alias; inline still honoured
                 if (after_scope->next && equal(after_scope->next, "(") &&
                     after_scope->next->next && equal(after_scope->next->next, "inline") &&
                     after_scope->next->next->next &&
@@ -1824,6 +1829,12 @@ static bool try_extract_attr_macro(JCC *vm, Token **tok_ptr) {
                     is_inline = true;
             } else if (equal(after_scope, "comptime")) {
                 is_comptime_kind = true;
+                // jcc::comptime(inline)
+                if (after_scope->next && equal(after_scope->next, "(") &&
+                    after_scope->next->next && equal(after_scope->next->next, "inline") &&
+                    after_scope->next->next->next &&
+                    equal(after_scope->next->next->next, ")"))
+                    is_inline = true;
             }
         }
     }
@@ -1832,7 +1843,12 @@ static bool try_extract_attr_macro(JCC *vm, Token **tok_ptr) {
     if ((!is_macro_kind && !is_comptime_kind) || !attr_end)
         return false;
 
-    bool is_macro_entry = is_macro_kind; // macro=true, comptime=false
+    // Support [[jcc::comptime]] inline fn() — detect the inline keyword
+    // that follows the closing ]] and treat it like comptime(inline).
+    if (is_comptime_kind && !is_inline && attr_end && equal(attr_end, "inline")) {
+        is_inline = true;
+        attr_end = attr_end->next;
+    }
 
     // Probe what follows attr_end: function or variable?
     // Heuristic: scan (respecting brace depth) for "ident (" before ";" or "=".
@@ -1855,9 +1871,12 @@ static bool try_extract_attr_macro(JCC *vm, Token **tok_ptr) {
         }
     }
 
-    if (is_macro_entry || looks_like_function) {
-        *tok_ptr = extract_macro_function(vm, attr_end,
-                                          is_macro_entry, is_inline);
+    // Route to function or variable extraction. Use is_macro_kind (not a
+    // combined entry flag) to avoid misrouting [[jcc::comptime]] variables.
+    // All annotated functions — both [[jcc::macro]] and [[jcc::comptime]] —
+    // are entry-callable from user code (is_macro_entry=true).
+    if (is_macro_kind || looks_like_function) {
+        *tok_ptr = extract_macro_function(vm, attr_end, true, is_inline);
     } else {
         *tok_ptr = extract_comptime_var(vm, attr_end);
     }
@@ -1965,7 +1984,7 @@ static Token *handle_pragma_body(JCC *vm, Token *tok) {
     } else if (equal(tok, "macro")) {
         error_tok(vm, tok,
                   "#pragma macro is no longer supported; use "
-                  "[[jcc::macro]] or __attribute__((macro))");
+                  "[[jcc::comptime]] or __attribute__((comptime))");
     } else if (equal(tok, "comptime")) {
         error_tok(vm, tok,
                   "#pragma comptime is no longer supported; use "

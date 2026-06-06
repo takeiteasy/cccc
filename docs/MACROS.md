@@ -4,8 +4,8 @@ Compile-time macros are C functions that JCC compiles and runs during
 compilation. They can inspect compile-time types, build AST nodes, generate
 functions and global variables, and replace macro call sites with generated code.
 
-A macro function is declared by annotating it with `[[jcc::macro]]` (C23
-attribute syntax) or the equivalent `__attribute__((macro))` (GNU attribute
+A macro function is declared by annotating it with `[[jcc::comptime]]` (C23
+attribute syntax) or the equivalent `__attribute__((comptime))` (GNU attribute
 syntax). Either form is accepted everywhere.
 
 The macro API is private to macro compilation. JCC embeds its own `reflection.h`
@@ -32,7 +32,7 @@ self-documenting and lets you omit the return statement entirely. Using a `void`
 macro in expression position is a compile error.
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 void emit_helpers(void) {
     // build functions, globals — no return needed
 }
@@ -48,8 +48,8 @@ JCC supports two macro execution forms:
 
 | Form | Source shape | When it runs | What the return value means |
 |------|--------------|--------------|-----------------------------|
-| Global generation | `[[jcc::macro]] void gen(char *a1, ...)` called at file scope | Before the main parse | `NULL` / `void` return means side-effects only. An `ND_BLOCK` return splices its body declarations directly into file scope (see [Block return](#block-return-from-file-scope-macros)). Args are stringified into `char *` parameters. |
-| Call-site expansion | `[[jcc::macro(inline)]] $node_t *gen($node_t *a1, ...)` called inside code | During macro expansion after parsing | Replaces the call expression or statement |
+| Global generation | `[[jcc::comptime]] void gen(char *a1, ...)` called at file scope | Before the main parse | `NULL` / `void` return means side-effects only. An `ND_BLOCK` return splices its body declarations directly into file scope (see [Block return](#block-return-from-file-scope-macros)). Args are stringified into `char *` parameters. |
+| Call-site expansion | `[[jcc::comptime(inline)]] $node_t *gen($node_t *a1, ...)` called inside code | During macro expansion after parsing | Replaces the call expression or statement |
 
 ### Pre-parse macro declaration context
 
@@ -73,7 +73,7 @@ and `extern` declarations for every generated global variable, so no manual
 publication is needed.
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 void generate_answer(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("answer", int_ty);
@@ -98,7 +98,7 @@ C-preprocessor X-macro pattern work directly with file-scope macro calls:
 ```c
 #define TYPES X(int) X(float) X(double)
 
-[[jcc::macro]]
+[[jcc::comptime]]
 void list_type(char *name) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function(name, int_ty);
@@ -125,7 +125,7 @@ macro, it **unwraps** the block and splices its declarations directly into the
 file-scope token stream so they are parsed as top-level definitions.
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 $node_t *emit_widget_helpers(void) {
     return $quote("{ struct Widget { int x; int y; }; void widget_init(struct Widget *w) { w->x = 0; w->y = 0; } }");
 }
@@ -157,7 +157,7 @@ serialized C output needs a matching `#include`. Use
 convenience macro) to register a header; JCC prepends it to the emitted file.
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 void gen_string_helpers(void) {
     $forward_include("<string.h>");   // emitted at top of generated output
     $obj_t *fn = $function("str_len", $get_type("int"));
@@ -180,13 +180,28 @@ The `header` argument must include angle-bracket or quote delimiters:
 
 ## Call-Site Expansion
 
-Use an inline macro (`[[jcc::macro(inline)]]`) for call-site expansion inside
-expressions or statements. The call is replaced with the returned AST during
-macro expansion. Inline macros **must** return a non-NULL node and cannot be
-used at file scope.
+Use an inline macro for call-site expansion inside expressions or statements.
+The call is replaced with the returned AST during macro expansion. Inline macros
+**must** return a non-NULL node and cannot be used at file scope.
+
+Two equivalent spellings are accepted:
 
 ```c
-[[jcc::macro(inline)]]
+// Attribute argument form
+[[jcc::comptime(inline)]]
+$node_t *double_it($node_t *value) {
+    return $binary(nk_add, value, value);
+}
+
+// C keyword form (preferred)
+[[jcc::comptime]]
+inline $node_t *double_it($node_t *value) {
+    return $binary(nk_add, value, value);
+}
+```
+
+```c
+[[jcc::comptime(inline)]]
 $node_t *double_it($node_t *value) {
     return $binary(nk_add, value, value);
 }
@@ -215,7 +230,7 @@ Statement macros work the same way. Return a statement node such as
 `$quote(...)`.
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 $node_t *return_if_zero($node_t *value) {
     return $quote("if ($1 == 0) return 0;", value);
 }
@@ -229,8 +244,9 @@ int main(void) {
 
 ## Comptime Helpers
 
-Use `[[jcc::comptime]]` for helper functions that should be callable by macros
-but should not expand from ordinary program call sites.
+All `[[jcc::comptime]]` functions are entry-callable from user code. A plain
+helper that is only called by other comptime functions still uses the same
+attribute — the distinction is just whether you call it from user code or not.
 
 ```c
 [[jcc::comptime]]
@@ -238,7 +254,7 @@ int plus_one(int n) {
     return n + 1;
 }
 
-[[jcc::macro]]
+[[jcc::comptime]]
 $node_t *make_value(void) {
     return $int_literal(plus_one(41));
 }
@@ -248,10 +264,13 @@ int main(void) {
 }
 ```
 
-Macros and comptime helpers are compiled together, so they can call each other
-even when the callee appears later in the translation unit.
+All comptime functions are compiled together in a single pass, so they can call
+each other even when the callee appears later in the translation unit.
 
 The GNU-attribute equivalent is `__attribute__((comptime))`.
+
+> **Deprecated:** `[[jcc::macro]]` and `__attribute__((macro))` are accepted as
+> aliases for `[[jcc::comptime]]` for backwards compatibility.
 
 ### Comptime-only includes
 
@@ -293,7 +312,7 @@ int tile_size = 64;
 [[jcc::comptime]]
 double pi = 3.14159;
 
-[[jcc::macro]]
+[[jcc::comptime]]
 $node_t *area_of_n_tiles($node_t *n) {
     int64_t ts = $get_comptime_int("tile_size");
     return $quote("$$ * $$", n, $int_literal(ts * ts));
@@ -312,7 +331,7 @@ $node_t *area_of_n_tiles($node_t *n) {
 [[jcc::comptime]]
 struct Config { int width; int height; int channels; } cfg = { 1920, 1080, 3 };
 
-[[jcc::macro]]
+[[jcc::comptime]]
 $node_t *pixel_count(void) {
     $node_t *w = $get_comptime_member("cfg", "width");
     $node_t *h = $get_comptime_member("cfg", "height");
@@ -347,7 +366,7 @@ no variable references in the initializer.
 constexpr int BUF_SIZE = 256;
 constexpr double SCALE  = 1.5;
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *make_buf_size(void) {
     return $get_constexpr_value("BUF_SIZE");
 }
@@ -371,7 +390,7 @@ that can reference comptime functions.
 `$node_t *` values into `$1`, `$2`, and later numbered holes.
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 $node_t *square($node_t *x) {
     return $quote("($1) * ($1)", x);
 }
@@ -385,7 +404,7 @@ Numbered holes can be reused and reordered. Use `$$` for sequential left-to-
 right holes when order is enough:
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 $node_t *sum2($node_t *a, $node_t *b) {
     return $quote("$$ + $$", a, b);
 }
@@ -401,7 +420,7 @@ chain into the block, replacing one placeholder with N statements. This is
 typed unquote-splicing.
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 $node_t *double_inc($node_t *x) {
     $node_t *chain = $node_list(($node_t*[]){
         $quote("$1 += 1;", x),
@@ -419,7 +438,7 @@ int get_plus_two(int v) {
 `$@` is the incremental (sequential) form, parallel to `$$`:
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 $node_t *two_increments($node_t *a, $node_t *b) {
     return $quote("{ $@; $@; }",
                   $quote("$1 += 10;", a),
@@ -453,7 +472,7 @@ int sum_ints(int count, ...) {
     return s;
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *call_sum3($node_t *a, $node_t *b, $node_t *c) {
     $node_t *chain = $node_list(($node_t*[]){ a, b, c }, 3);
     return $quote("sum_ints(3, $@1)", chain); // → sum_ints(3, a, b, c)
@@ -466,7 +485,7 @@ of arguments after expansion. Parameter casts are applied post-expansion:
 ```c
 int add3(int a, int b, int c) { return a + b + c; }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *call_add3($node_t *a, $node_t *b, $node_t *c) {
     $node_t *chain = $node_list(($node_t*[]){ a, b, c }, 3);
     return $quote("add3($@1)", chain); // → add3(a, b, c)
@@ -492,7 +511,7 @@ literal, splicing a node chain as positional initializers for a struct or
 fixed-size array:
 
 ```c
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *make_point($node_t *px, $node_t *py) {
     $vm_t *vm = __jcc_get_vm();
     $node_t *chain = $node_list(($node_t*[]){ px, py }, 2);
@@ -506,7 +525,7 @@ struct Point p = make_point(10, 32); // p.x == 10, p.y == 32
 Array compound literals are also supported:
 
 ```c
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *make_arr3($node_t *a, $node_t *b, $node_t *c) {
     $vm_t *vm = __jcc_get_vm();
     $node_t *chain = $node_list(($node_t*[]){ a, b, c }, 3);
@@ -536,7 +555,7 @@ apply the correct implicit cast. When building a generated function body, wrap
 the quote call in `$with_fn(fn)` to establish that context:
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 void generate_answer(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("answer", int_ty);
@@ -560,7 +579,7 @@ execution point.
 ```c
 typedef enum { RED, GREEN, BLUE } Color;
 
-[[jcc::macro]]
+[[jcc::comptime]]
 $node_t *color_count(void) {
     $type_t *color = $find_type("Color");
     if (!color)
@@ -597,7 +616,7 @@ Generated functions are `$obj_t *` values. Create the object, add parameters,
 build a body, and install the body.
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 void generate_is_even(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("is_even", int_ty);
@@ -628,7 +647,7 @@ emits a compile-time error instead of silently replacing it. Use
 `$gensym(prefix)` or `__jcc_gensym(_VM, prefix)` for private helper names.
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 void make_helper(void) {
     const char *name = $gensym("helper");
     $type_t *int_ty = $get_type("int");
@@ -650,7 +669,7 @@ size the type to match the data length; the codegen copies exactly `ty->size`
 bytes from the init data.
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 void embed_version(void) {
     $type_t *char_ty = $get_type("char");
     $type_t *arr_ty  = $make_array(char_ty, 8);
@@ -670,7 +689,7 @@ every generated global variable, so the parser can resolve references without a
 manual declaration.
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 void embed_version(void) { ... }
 embed_version();
 ```
@@ -679,7 +698,7 @@ For explicit same-scope visibility, publish a generated global after creating
 it:
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 void embed_banner(void) {
     $type_t *char_ty = $get_type("char");
     $type_t *arr_ty = $make_array(char_ty, 4);
@@ -701,7 +720,7 @@ Prefer `$local_var_unique(ty)` for temporary variables; it creates a name
 that user source cannot capture.
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 $node_t *save_then_return($node_t *value) {
     $type_t *int_ty = $get_type("int");
     $node_t *tmp = $local_var_unique(int_ty);
@@ -721,7 +740,7 @@ specific user-visible name.
 Use source-located diagnostics when rejecting a macro argument:
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 $node_t *require_nonzero($node_t *value) {
     if (!value)
         $macro_error_at(value, "expected an expression");
@@ -734,7 +753,7 @@ location. When a diagnostic should point somewhere else, use the location
 helpers explicitly:
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 $node_t *checked_double($node_t *value) {
     $node_t *expr = $binary(nk_add, value, value);
     return $copy_location(expr, value);
@@ -745,7 +764,7 @@ Use `$synthetic_token(label)` for diagnostics that belong to deliberately
 generated code rather than the call site or an input expression:
 
 ```c
-[[jcc::macro]]
+[[jcc::comptime]]
 $node_t *generated_error(void) {
     $node_t *expr = $int_literal(0);
     $set_token(expr, $synthetic_token("generated expression"));
@@ -785,10 +804,10 @@ recurse into child nodes — only the outermost call is expanded. The VM's
 `macro_recursion_limit` applies; exceeding it is a compile error.
 
 ```c
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *make_answer(void) { return $int_literal(42); }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *wrap_answer(void) { return $quote("make_answer()"); }
 
 [[jcc::comptime]]
@@ -954,11 +973,11 @@ Both C23 attribute syntax and GNU attribute syntax are accepted everywhere:
 
 | C23 form | GNU form |
 |----------|----------|
-| `[[jcc::macro]]` | `__attribute__((macro))` |
-| `[[jcc::macro(inline)]]` | `__attribute__((macro(inline)))` |
+| `[[jcc::comptime]]` | `__attribute__((comptime))` |
+| `[[jcc::comptime(inline)]]` | `__attribute__((macro(inline)))` |
 | `[[jcc::comptime]]` | `__attribute__((comptime))` |
 
-The canonical form used in this document and in JCC examples is `[[jcc::macro]]`.
+The canonical form used in this document and in JCC examples is `[[jcc::comptime]]`.
 
 ## Constraints
 

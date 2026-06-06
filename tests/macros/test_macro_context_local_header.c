@@ -7,7 +7,7 @@ int local_header_type_size(void) {
     return sizeof(item) > 0 && item.value == 42;
 }
 
-[[jcc::macro]]
+[[jcc::comptime]]
 void generate_local_header_context_result(void) {
     $obj_t *fn = $function("local_header_context_result", $get_type("int"));
     $function_set_body(fn, $return($int_literal(local_header_type_size() ? 42 : 1)));

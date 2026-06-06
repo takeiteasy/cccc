@@ -2,7 +2,7 @@
 // Forward declare the function we'll generate
 int add_numbers(int a, int b);
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *gen_add_func(void) {
     $vm_t *vm = __jcc_get_vm();
 

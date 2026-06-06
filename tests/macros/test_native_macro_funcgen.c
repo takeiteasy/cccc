@@ -1,5 +1,5 @@
 // JCC_FLAGS: --native
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *gen_native_answer($node_t *unused) {
     (void)unused;
     $obj_t *fn = $function("native_answer", $get_type("int"));

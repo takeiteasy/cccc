@@ -2,7 +2,7 @@
 // that should be prepended to serialized output. Duplicate calls for the
 // same header must be collapsed to a single #include in the output.
 
-[[jcc::macro]]
+[[jcc::comptime]]
 void gen_answer(void) {
     $vm_t *vm = _VM;
     // Register the same header twice — output must contain only one entry.

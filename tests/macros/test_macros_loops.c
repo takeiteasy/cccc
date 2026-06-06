@@ -19,7 +19,7 @@ static int contains(const char *hay, const char *needle) {
 }
 
 // Macro: builds a while node and returns its gen-dump string.
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *while_gen_str($node_t *cond, $node_t *body) {
     $vm_t *vm = __jcc_get_vm();
     $node_t *w = __jcc_ast_while(vm, cond, body);
@@ -28,7 +28,7 @@ $node_t *while_gen_str($node_t *cond, $node_t *body) {
 }
 
 // Macro: builds a for node and returns its gen-dump string.
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *for_gen_str($node_t *init, $node_t *cond, $node_t *inc, $node_t *body) {
     $vm_t *vm = __jcc_get_vm();
     $node_t *f = __jcc_ast_for(vm, init, cond, inc, body);
@@ -37,7 +37,7 @@ $node_t *for_gen_str($node_t *init, $node_t *cond, $node_t *inc, $node_t *body) 
 }
 
 // Macro: builds a do-while node and returns its gen-dump string.
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *do_while_gen_str($node_t *body, $node_t *cond) {
     $vm_t *vm = __jcc_get_vm();
     $node_t *d = __jcc_ast_do_while(vm, body, cond);

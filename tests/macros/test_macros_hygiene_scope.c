@@ -1,16 +1,16 @@
 // Test macro hygiene: call-site variable and typedef lookup.
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *read_value(void) {
     return $var_ref("value");
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *read_value_via_quote(void) {
     return $quote("read_value()");
 }
 
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *local_alias_size(void) {
     $type_t *ty = $find_type("LocalAlias");
     if (!ty)

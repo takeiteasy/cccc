@@ -1,5 +1,5 @@
 // EXPECT_COMPILE_ERROR
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *ninth($node_t *a0, $node_t *a1, $node_t *a2, $node_t *a3,
              $node_t *a4, $node_t *a5, $node_t *a6, $node_t *a7,
              $node_t *a8) {

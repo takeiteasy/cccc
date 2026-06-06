@@ -2,7 +2,7 @@
 // Test ticket #78: __jcc_macro_error_at emits a source-located error and fails compilation.
 
 // Macro that always errors with a located message.
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *always_error($node_t *n) {
     $vm_t *vm = __jcc_get_vm();
     __jcc_macro_error_at(vm, n, "always_error: this argument is not allowed");

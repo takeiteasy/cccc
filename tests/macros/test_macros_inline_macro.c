@@ -5,7 +5,7 @@
 //   - Generates definitions visible to the whole program
 //   - No explicit forward declaration needed
 
-[[jcc::macro]]
+[[jcc::comptime]]
 void generate_const_func(void) {
     $vm_t *vm = __jcc_get_vm();
 

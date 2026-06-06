@@ -1,19 +1,19 @@
 // Test ticket #277: __jcc_macroexpand / __jcc_macroexpand_1 / $macroexpand reflection API
 
 // A simple macro to expand in tests
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *make_answer(void) {
     return __jcc_ast_int_literal(__jcc_get_vm(), 42);
 }
 
 // A macro that wraps make_answer() — used to test multi-level expansion
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *wrap_answer(void) {
     return __jcc_quote(__jcc_get_vm(), "make_answer()");
 }
 
 // Test 1: macroexpand_1 on a macro-call node expands one level
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *test_expand_1_macro_call(void) {
     $vm_t *vm = __jcc_get_vm();
     $node_t *call = __jcc_quote(vm, "make_answer()");
@@ -21,7 +21,7 @@ $node_t *test_expand_1_macro_call(void) {
 }
 
 // Test 2: macroexpand_1 on a non-macro node is identity
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *test_expand_1_identity(void) {
     $vm_t *vm = __jcc_get_vm();
     $node_t *lit = __jcc_ast_int_literal(vm, 99);
@@ -32,7 +32,7 @@ $node_t *test_expand_1_identity(void) {
 // Test 3: macroexpand_1 on wrap_answer() expands only one level.
 // After one step wrap_answer() -> make_answer(); a second macroexpand_1 then
 // resolves that to 42, proving the first step stopped after one expansion.
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *test_expand_1_single_level(void) {
     $vm_t *vm = __jcc_get_vm();
     $node_t *call = __jcc_quote(vm, "wrap_answer()");
@@ -42,7 +42,7 @@ $node_t *test_expand_1_single_level(void) {
 }
 
 // Test 4: macroexpand fully expands wrap_answer() -> make_answer() -> 42
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *test_expand_full(void) {
     $vm_t *vm = __jcc_get_vm();
     $node_t *call = __jcc_quote(vm, "wrap_answer()");
@@ -50,7 +50,7 @@ $node_t *test_expand_full(void) {
 }
 
 // Test 5: macroexpand on a non-macro node is identity
-[[jcc::macro(inline)]]
+[[jcc::comptime(inline)]]
 $node_t *test_expand_full_identity(void) {
     $vm_t *vm = __jcc_get_vm();
     $node_t *lit = __jcc_ast_int_literal(vm, 77);
