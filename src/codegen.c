@@ -1349,22 +1349,19 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         // because function calls clobber caller-saved temp registers
         bool rhs_has_call = contains_funcall(node->rhs);
 
-        // Mark dest_reg as used so we don't allocate the same register for RHS
-        // This is critical for statement expressions where temp regs might have
-        // been reset
-        mark_temp_reg_used(dest_reg);
-
-        int r_rhs = alloc_temp_reg();
-
+        // Evaluate LHS first, then allocate r_rhs. gen_expr frees all temps
+        // before returning, so the pool is empty after LHS completes. This keeps
+        // peak usage at O(1) per level instead of O(chain-depth), fixing register
+        // exhaustion on long left-associative chains (ticket #295).
         if (is_flonum(node->lhs->ty)) {
             // Float operations
             gen_expr(vm, node->lhs,
                      dest_reg); // LHS goes directly to dest (float reg)
 
-            // CRITICAL: LHS might contain a function call which resets temp
-            // regs. Re-mark dest_reg as used so RHS calculation doesn't clobber
-            // it.
+            // LHS might contain a function call which resets temp regs.
+            // Re-mark dest_reg as used so r_rhs allocation doesn't clobber it.
             mark_temp_reg_used(dest_reg);
+            int r_rhs = alloc_temp_reg();
 
             if (rhs_has_call) {
                 // For floats: convert to int, push to stack, evaluate RHS, pop,
@@ -1415,14 +1412,15 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             }
             emit_frrr(vm, fop_for_type(node->lhs->ty, fop), dest_reg, dest_reg,
                       r_rhs);
+            free_temp_reg(r_rhs);
         } else {
             // Integer operations
             gen_expr(vm, node->lhs, dest_reg); // LHS goes directly to dest
 
-            // CRITICAL: LHS might contain a function call which resets temp
-            // regs. Re-mark dest_reg as used so RHS calculation doesn't clobber
-            // it.
+            // LHS might contain a function call which resets temp regs.
+            // Re-mark dest_reg as used so r_rhs allocation doesn't clobber it.
             mark_temp_reg_used(dest_reg);
+            int r_rhs = alloc_temp_reg();
 
             if (rhs_has_call) {
                 // Save LHS to stack before function call in RHS
@@ -1494,9 +1492,9 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                 emit(vm, CHKPA);
                 emit_word(vm, ENCODE_R(dest_reg));
             }
+            free_temp_reg(r_rhs);
         }
 
-        free_temp_reg(r_rhs);
         return;
     }
 
