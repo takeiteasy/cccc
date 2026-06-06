@@ -1,4 +1,4 @@
-// JCC_FLAGS: -std=c99
+// JCC_FLAGS: --std=c99
 int f(void) {
     int *p = (int []){10, 20, 30};
     return p[1];

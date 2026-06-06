@@ -537,7 +537,7 @@ void gen(JCC *vm, Obj *prog);
 int vm_eval(JCC *vm);
 void cc_vm_profile_reset(JCC *vm);
 void cc_vm_profile_print(JCC *vm, FILE *f);
-int cc_vm_profile_write_json(JCC *vm, const char *path, const char *mode,
+int cc_vm_profile_write_json(JCC *vm, FILE *f, const char *mode,
                              const char *input_name);
 
 //

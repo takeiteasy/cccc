@@ -1475,7 +1475,7 @@ typedef struct Compiler {
     int       diag_stack_cap;        // allocated capacity
 
     // Diagnostic output format
-    bool diagnostic_json; // -fdiagnostics-format=json
+    bool diagnostic_json; // --json (general JSON output flag)
 
     // Tokenization state
     File *current_file; // Input file
@@ -2239,6 +2239,20 @@ void cc_output_source_map_json(JCC *vm, FILE *f);
  @return 0 on success, -1 on error.
 */
 int cc_save_bytecode(JCC *vm, const char *path);
+
+/*!
+ @function cc_write_bytecode
+ @abstract Write compiled bytecode to an open stdio stream.
+ @discussion Serializes the text segment, data segment, and necessary
+             metadata as a binary blob to @c f. The output is the same
+             format as cc_save_bytecode(), so it can be loaded with
+             cc_load_bytecode() after being written to a file.
+ @param vm The JCC instance containing compiled bytecode.
+ @param f Output stream opened in binary mode (e.g. stdout via
+          @c freopen with "wb", or a file returned by fopen("wb")).
+ @return 0 on success, -1 on error.
+*/
+int cc_write_bytecode(JCC *vm, FILE *f);
 
 /*!
  @function cc_load_bytecode

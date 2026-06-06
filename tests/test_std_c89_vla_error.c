@@ -1,4 +1,4 @@
-/* JCC_FLAGS: -std=c89 -Wpedantic */
+/* JCC_FLAGS: --std=c89 -Wpedantic */
 /* JCC_EXPECT_STDERR: warning: variable-length arrays are a C99 extension \[-Wpedantic\] */
 int f(int n) {
     int arr[n];

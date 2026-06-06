@@ -2,9 +2,9 @@
 
 > **Warning:** Work in progress. Tested on `aarch64` (Apple Silicon) only.
 
-`JCC` (**J**IT **C** **C**ompiler) is a C frontend and compile-time metaprogramming system built around a portable bytecode VM. It preprocesses C, runs `[[jcc::macro]]` / `__attribute__((macro))` functions during compilation, and then either executes the result in the VM or hands a macro-expanded C program off to a real system compiler (`--native`) for an actual native build.
+`JCC` (**J**IT **C** **C**ompiler) is a C frontend and compile-time metaprogramming system built around a portable bytecode VM. It preprocesses C, runs `[[jcc::macro]]` / `__attribute__((macro))` functions during compilation, and then either executes the result in the VM or hands a macro-expanded C program off to a real system compiler (`-c=native`) for an actual native build.
 
-The VM is what lets macros actually run at compile time, and it doubles as a self-contained runtime for prototyping, sandboxing, debugging, and the memory-safety / profiling tools. For production code, use `--native` and let `cc` / `clang` / `gcc` do the heavy lifting — JCC is positioned as a frontend drop-in, not a replacement for a system toolchain. The VM is here when you need a toolchain-free, introspectable, or sandboxed execution environment.
+The VM is what lets macros actually run at compile time, and it doubles as a self-contained runtime for prototyping, sandboxing, debugging, and the memory-safety / profiling tools. For production code, use `-c=native` and let `cc` / `clang` / `gcc` do the heavy lifting — JCC is positioned as a frontend drop-in, not a replacement for a system toolchain. The VM is here when you need a toolchain-free, introspectable, or sandboxed execution environment.
 
 JCC supports C11 as the baseline, with selected C23 and GNU extensions. See [COVERAGE.md](docs/COVERAGE.md) for detailed tables of C99, C11, C23, and GNU extension support. For an real world example see [gen_std.c](tools/gen_std.c). This generated and embed the standard library wrapper for JCC.
 
@@ -15,9 +15,9 @@ JCC supports C11 as the baseline, with selected C23 and GNU extensions. See [COV
   - File-scope macro calls for explicit source-order generation
   - Call-site expansion for expression and statement rewriting
   - Quasi-quoting (`$quote`), hygienic type/symbol reflection, `__jcc_gensym`, and AST construction helpers
-- **Native compilation pipeline** — `--native` runs the JCC frontend (preprocessor, compile-time macros) and hands the resulting C to `JCC_NATIVE_CC` (or `cc` / `clang` / `gcc`) for an actual native build
+- **Native compilation pipeline** — `-c=native` runs the JCC frontend (preprocessor, compile-time macros) and hands the resulting C to `JCC_NATIVE_CC` (or `cc` / `clang` / `gcc`) for an actual native build
   - This is the production path: full toolchain performance, system libraries, no VM overhead
-  - Without `-o`, the temporary executable is run and its exit status is returned
+  - `-o <file>` is required to name the produced executable; the temporary C source is removed after the build
   - `-I`, `-isystem`, `-D`, `-U`, `-L`, `-l`, and `--std=` are forwarded to the underlying compiler
 - **Register-based bytecode VM** — compiles C to a portable instruction set with 32 integer and 32 floating-point registers, then executes it in a built-in interpreter (see [VM.md](docs/VM.md))
   - Powers compile-time macro execution
@@ -36,7 +36,7 @@ JCC supports C11 as the baseline, with selected C23 and GNU extensions. See [COV
 - **Warning controls** — gcc/clang-style `-W` categories and `-Werror` promotion (see [WARNINGS.md](docs/WARNINGS.md))
   - Warnings are disabled by default and can be enabled with `-Wall`, `-Wextra`, or individual categories
 - **JSON reflection output** — dump all function, struct, union, enum, and global definitions
-  - `./jcc --json -o lib.json lib.h` — useful for generating FFI wrappers
+  - `./jcc --ffi-decls -o lib.json lib.h` — useful for generating FFI wrappers
 - **VM heap** — built-in allocator that intercepts `malloc`/`free` at compile time (`--vm-heap`)
   - Required for heap safety features; enabled automatically when heap safety flags are active
 
@@ -51,39 +51,40 @@ Usage: ./jcc [options] file...
 Options:
 	-h/--help           Show this message
 	-I <path>           Add <path> to include search paths
-	   --isystem <path> Add <path> to system include paths (for non-standard headers)
+	-J/--isystem <path> Add <path> to system include paths (for non-standard headers)
 	-L/--library-path <path> Add <path> to dynamic library search paths
 	-l/--library <name> Link dynamic library by name or path
-	   --link <name>    Alias for --library
 	-D <macro>[=def]    Define a macro
 	-U <macro>          Undefine a macro
 	-a/--ast            Dump AST
 	-P/--print-tokens   Print preprocessed tokens to stdout
 	-E/--preprocess     Output preprocessed source code (traditional C -E)
 	-M/--macro-expand   Output macro-expanded source code (for gcc compatibility)
-	-G/--emit-generated Serialize only pragma-macro-generated objects (no header noise)
-	-j/--json           Output header declarations as JSON
+	-G/--emit-generated Serialize only comptime macro-generated objects (no header noise)
+	-j/--json           Emit JSON for all eligible output (diagnostics, header declarations, --fusion-candidates, etc.)
+	-K/--ffi-decls      Emit parsed function/struct/enum declarations as JSON (for FFI wrapper generation)
 	-X/--no-preprocess  Disable preprocessing step
 	-S/--no-stdlib      Do not link standard library
-	-c/--compile-only   Compile to bytecode but do not execute
-	-o/--out <file>     Write bytecode, or native executable with --native
-	   --native         Compile post-macro C with cc/clang/gcc instead of VM bytecode
+	-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: bytecode (default), native
+	                         bytecode: write .jbc (to -o file, or stdout if -o omitted)
+	                         native:   require -o file; build a native executable via
+	                                   JCC_NATIVE_CC (cc, clang, or gcc)
+	-o/--out <file>     Output file. Required for -c=native; for -c=bytecode, writes the
+	                     .jbc (or sends it to stdout if -o is omitted)
 	-d/--disassemble    Disassemble bytecode to stdout
 	-v/--verbose        Enable debug logging
 	-g/--debug          Enable interactive debugger
-	   --vm-profile     Count executed VM opcodes and print a report
-	   --profile-opcodes Alias for --vm-profile
-	   --vm-profile-json <file> Write VM opcode profile JSON
+	-Y/--vm-profile     Count executed VM opcodes and print a report
+	                    Combine with --json to also dump the profile as JSON to stdout
 
 Warning Options:
 	-Wall               Enable common warning categories
 	-Wextra             Enable extra warning categories
 	-W<name>            Enable a warning category
 	-Wno-<name>         Disable a warning category
-	-Werror/--Werror    Treat enabled warnings as errors
+	-q/--Werror         Treat enabled warnings as errors
 	-Werror=<name>      Treat one warning category as an error
 	-Wno-error=<name>   Do not promote one warning category
-	-fdiagnostics-format=json  Output diagnostics as JSON objects
 
 Safety Levels (preset flag combinations):
 	-0/--safety=none     No safety checks (maximum performance)
@@ -114,25 +115,26 @@ Memory Safety Options (can be combined with safety levels):
 	-V/--vm-heap                 Route all malloc/free through VM heap (enables memory safety)
 
 FFI Safety Options:
-	   --ffi-allow=list          Allow only comma-separated native function names
-	   --ffi-deny=list           Deny comma-separated native function names
-	   --disable-ffi             Block all registered and dynamic native calls
-	   --ffi-errors-fatal        Abort execution on FFI policy violations
+	-H/--ffi-allow=list          Allow only comma-separated native function names
+	-u/--ffi-deny=list           Deny comma-separated native function names
+	-R/--disable-ffi             Block all registered and dynamic native calls
+	-y/--ffi-errors-fatal        Abort execution on FFI policy violations
 	   --ffi-type-checking       Validate registered FFI call arity at runtime
 
 Language Standard:
-	   --std=<std>       Select C language standard (default: gnu17)
+	-Q/--std=<std>       Select C language standard (default: gnu23)
 	                     Supported: c99, c11, c17/c18, c23/c2x
 	                     GNU variants: gnu99, gnu11, gnu17/gnu18, gnu23/gnu2x
-	                     Note: -std currently affects predefined macros only
+	                     Note: -Q/--std currently affects predefined macros only
 
 Preprocessor Options:
-	   --embed-limit=SIZE        Set #embed file size warning limit (e.g., 50MB, 100mb, default: 10MB)
-	   --embed-hard-limit        Make #embed limit a hard error instead of warning
-	   --macro-recursion-limit=N Limit recursive pragma macro expansion (default: 256, 0=unlimited)
+	-r/--embed-limit=SIZE        Set #embed file size warning limit (e.g., 50MB, 100mb, default: 10MB)
+	-w/--embed-hard-limit        Make #embed limit a hard error instead of warning
+	-n/--macro-recursion-limit=N Limit recursive pragma macro expansion (default: 256, 0=unlimited)
+	-x/--max-errors=N            Cap diagnostics at N (default: 20)
 
 Optimization Levels:
-	   --optimize[=LEVEL]        Enable bytecode optimization (default: disabled)
+	-O/--optimize[=LEVEL]        Enable bytecode optimization (default: disabled)
 	                             LEVEL: 0=none, 1=basic, 2=standard, 3=aggressive
 	                             0: No optimization
 	                             1: Constant folding only
@@ -140,9 +142,10 @@ Optimization Levels:
 	                             3: All optimizations (including dead code elimination)
 
 Example:
-	./jcc --native -o hello hello.c              # native build via cc/clang/gcc
-	./jcc --native -I ./include -D DEBUG -o prog prog.c
+	./jcc -c=native -o hello hello.c             # native build via cc/clang/gcc
+	./jcc -c=native -I ./include -D DEBUG -o prog prog.c
 	./jcc -o hello hello.c                       # bytecode + run on the VM
+	./jcc -c -o hello.jbc hello.c                # bytecode only (no run); -c=native requires -o
 	echo 'int main() { return 42; }' | ./jcc -
 ```
 
@@ -163,7 +166,7 @@ Headers are embedded by `tools/gen_std.c`, which generates `src/std.c`. To regen
 make generate-std && make
 ```
 
-Dynamic libraries can be opened with `--library`/`--link` and searched with
+Dynamic libraries can be opened with `--library` and searched with
 `-L`/`--library-path`. When libraries are requested, unresolved extern function
 declarations are resolved with `dlsym` before execution; unresolved symbols are
 reported before the VM starts.
@@ -177,9 +180,9 @@ symbols from that handle are live.
 
 ## Performance
 
-The bytecode VM is the runtime that powers compile-time macro execution, not an execution engine competing with system toolchains. For production code, `--native` hands macro-expanded C to `cc` / `clang` / `gcc`, and you get the full performance of your system toolchain — JCC's frontend cost is the only JCC-specific overhead in the loop.
+The bytecode VM is the runtime that powers compile-time macro execution, not an execution engine competing with system toolchains. For production code, `-c=native` hands macro-expanded C to `cc` / `clang` / `gcc`, and you get the full performance of your system toolchain — JCC's frontend cost is the only JCC-specific overhead in the loop.
 
-When code does run on the VM (macro bodies, `--vm-heap` allocations, the debugger, the safety suite, `--vm-profile`, or any program run without `--native`), it pays the cost of a portable tree-walking interpreter. See [BENCHMARKS.md](docs/BENCHMARKS.md) for full numbers. On the included workload suite, JCC's geometric mean is roughly **~16× slower than `gcc -O2`** across all `--optimize` levels: integer-loop-heavy programs like the sieve benchmark sit around 70×, FP-heavy workloads like matrix multiplication and Mandelbrot land in the 45–50× range, and control-flow-bound programs (`fib`, `ackermann`, `nqueens`, `quicksort`) run 5–15× slower. The `jcc-jbc*` columns show the interpreter itself is the dominant cost even when the one-time source-to-bytecode compile is excluded. That gap is the price of a single self-contained binary that can run untrusted or sandboxed code, expose every opcode to a profiler, and feed compile-time macros a real execution environment.
+When code does run on the VM (macro bodies, `--vm-heap` allocations, the debugger, the safety suite, `--vm-profile`, or any program run without `-c=native`), it pays the cost of a portable tree-walking interpreter. See [BENCHMARKS.md](docs/BENCHMARKS.md) for full numbers. On the included workload suite, JCC's geometric mean is roughly **~16× slower than `gcc -O2`** across all `--optimize` levels: integer-loop-heavy programs like the sieve benchmark sit around 70×, FP-heavy workloads like matrix multiplication and Mandelbrot land in the 45–50× range, and control-flow-bound programs (`fib`, `ackermann`, `nqueens`, `quicksort`) run 5–15× slower. The `jcc-jbc*` columns show the interpreter itself is the dominant cost even when the one-time source-to-bytecode compile is excluded. That gap is the price of a single self-contained binary that can run untrusted or sandboxed code, expose every opcode to a profiler, and feed compile-time macros a real execution environment.
 
 VM work focuses on what matters for macro expansion cost and VM-only workflows (debugger, safety suite, profiling). Recent improvements that have driven the gap down from an earlier ~21× baseline:
 - **Inlined threaded dispatch (#227)**: opcode logic is embedded at each computed-goto label rather than dispatched through a C function call per instruction.
@@ -193,16 +196,16 @@ make all      # Build jcc + libjcc.dylib, then run the test suite
 ```
 
 Produces:
-- `jcc` — compiler executable (C source → VM bytecode, or → native via `--native`)
+- `jcc` — compiler executable (C source → VM bytecode, or → native via `-c=native`)
 - `libjcc.dylib` — shared library for embedding JCC in other applications
 
 JCC requires libffi for native FFI calls. The Makefile uses `pkg-config
 libffi` when available, with Homebrew and common Unix fallbacks.
 
 Optional LLVM support is available for internal bytecode-to-LLVM IR backend
-work. It is disabled by default. For native executables without LLVM, `--native`
-serializes the post-macro C program and compiles it with `cc`, `clang`, or
-`gcc`. See [LLVM.md](docs/LLVM.md).
+work. It is disabled by default. For native executables without LLVM,
+`-c=native` serializes the post-macro C program and compiles it with `cc`,
+`clang`, or `gcc`. See [LLVM.md](docs/LLVM.md).
 
 ```bash
 make JCC_HAS_LLVM=1 LLVM_CONFIG=/opt/homebrew/opt/llvm/bin/llvm-config
@@ -210,27 +213,24 @@ make JCC_HAS_LLVM=1 LLVM_CONFIG=/opt/homebrew/opt/llvm/bin/llvm-config
 
 ### Compile Natively (production)
 
-`--native` is the default production path: JCC preprocesses, expands compile-time macros, then hands the resulting C to a real system compiler. Without `-o`, the temporary executable is run and its exit status is returned.
+`-c=native` is the production path: JCC preprocesses, expands compile-time macros, then hands the resulting C to a real system compiler. `-o <file>` is **required** to name the output executable; the temporary C source is removed after the build.
 
 ```bash
-# Compile macro-expanded C with the system C compiler and run it
-./jcc --native program.c
-
-# Write a native executable
-./jcc --native -o program program.c
+# Write a native executable (build only — does not run)
+./jcc -c=native -o program program.c
 
 # Override compiler selection
-JCC_NATIVE_CC=clang ./jcc --native program.c
+JCC_NATIVE_CC=clang ./jcc -c=native -o program program.c
 
 # Forward include / define / library flags to the underlying compiler
-./jcc --native -I./include -DDEBUG -L./lib -lz -o app app.c
+./jcc -c=native -I./include -DDEBUG -L./lib -lz -o app app.c
 ```
 
-Native mode runs JCC's preprocessing and compile-time macro stages first, then passes serialized C to `JCC_NATIVE_CC` when set, otherwise `cc`, `clang`, or `gcc`. `-I`, `-isystem`, `-D`, `-U`, `-L`, `-l`, and `--std=` are forwarded; VM-only options (bytecode output, disassembler, `--optimize`, debugger, profiler, `-0`…`-3` safety levels) are rejected in this mode. See [LLVM.md](docs/LLVM.md) for the planned bytecode-to-LLVM backend, which will provide a second native path.
+Native mode runs JCC's preprocessing and compile-time macro stages first, then passes serialized C to `JCC_NATIVE_CC` when set, otherwise `cc`, `clang`, or `gcc`. `-I`, `-isystem`, `-D`, `-U`, `-L`, `-l`, and `--std=` are forwarded; VM-only options (bytecode output, disassembler, `--optimize`, debugger, profiler, `-0`…`-3` safety levels) are rejected in this mode. To run the binary afterwards, invoke it directly: `./program`. See [LLVM.md](docs/LLVM.md) for the planned bytecode-to-LLVM backend, which will provide a second native path.
 
 ### Run in the VM
 
-Without `--native`, JCC compiles C to portable bytecode and runs it in its built-in interpreter. Use this when you want a toolchain-free, introspectable, or sandboxed runtime — for macro bodies, quick iteration, the debugger, the safety suite, or `--vm-profile`.
+Without `-c=native`, JCC compiles C to portable bytecode and runs it in its built-in interpreter. Use this when you want a toolchain-free, introspectable, or sandboxed runtime — for macro bodies, quick iteration, the debugger, the safety suite, or `--vm-profile`.
 
 ```bash
 # Compile and run immediately on the VM
@@ -319,7 +319,7 @@ python3 tools/tests.py --profile-cpu --match "*compre*"  # CPU profile matching 
 
 ```bash
 ./jcc --vm-profile -I./include tests/test_comprehensive.c
-./jcc --vm-profile-json profile/vm-opcodes/comprehensive.json -I./include tests/test_comprehensive.c
+./jcc --vm-profile --json -I./include tests/test_comprehensive.c > profile/vm-opcodes/comprehensive.json
 python3 tools/tests.py --vm-profile --match "*profile*"  # Per-test opcode JSON
 ```
 
@@ -346,7 +346,7 @@ new opcodes (see ticket #250).
 **Cross-referencing static and dynamic counts:**
 
 ```bash
-./jcc --vm-profile-json /tmp/sieve.json -I./include benchmarks/sieve.c
+./jcc --vm-profile --json -I./include benchmarks/sieve.c > /tmp/sieve.json
 python3 tools/cross_ref_ngrams.py /tmp/sieve.jbc benchmarks/sieve.c
 ```
 
@@ -359,7 +359,7 @@ are the strongest fusion candidates.
 
 ```bash
 ./jcc --fusion-candidates=50 /tmp/sieve.jbc                       # top 50 def->use pairs
-./jcc --fusion-candidates=50 -fdiagnostics-format=json /tmp/sieve.jbc  # JSON output
+./jcc --fusion-candidates=50 --json /tmp/sieve.jbc                # JSON output
 ./jcc --fusion-candidates=50 benchmarks/sieve.c                   # compile-then-analyze
 ```
 

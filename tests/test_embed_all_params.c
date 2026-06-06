@@ -1,4 +1,4 @@
-// JCC_FLAGS: -std=c23
+// JCC_FLAGS: --std=c23
 // Test #embed with all parameters: prefix, suffix, limit, if_empty
 int main() {
     // test_data.bin contains 3 bytes, but we limit to 2

@@ -2,7 +2,7 @@
 
 A focused cross-compiler benchmark suite that measures the cost of the **JCC bytecode VM** (the runtime that powers `[[jcc::macro]]` execution, the safety suite, the debugger, and the profiler) by comparing it against **GCC** (across `-O0` through `-O3`). Every benchmark is plain C99/C11, so the comparison is apples-to-apples. The suite also times JCC's precompiled-bytecode mode (`jcc-jbc*`) so you can separate the bytecode VM cost from the source-to-bytecode compile cost.
 
-For production builds, JCC also offers a `--native` mode that hands macro-expanded C to `cc` / `clang` / `gcc` — that path bypasses the VM entirely and matches the `gcc*` columns below. The benchmarks in this document are deliberately scoped to the VM, because that is the part JCC is responsible for.
+For production builds, JCC also offers a `-c=native` mode that hands macro-expanded C to `cc` / `clang` / `gcc` — that path bypasses the VM entirely and matches the `gcc*` columns below. The benchmarks in this document are deliberately scoped to the VM, because that is the part JCC is responsible for.
 
 ## Quick start
 
@@ -97,7 +97,7 @@ There are three different timings per benchmark:
 
 The `jcc-jbc*` columns are the cleanest apples-to-apples comparison with GCC: both are "compile once, run many times" measurements. The `jcc*` columns show what you'd actually pay as an end user of the `jcc` CLI.
 
-`--native` is not in the matrix above: it would be redundant with `gcc*` because it just hands the same C to a system compiler. If you want to add a `--native` column, run `./jcc --native -o build/<bench>.bin benchmarks/<bench>.c` and time `[build/<bench>.bin]` — the numbers should match `gcc-O2`/`gcc-O3` (plus a fixed JCC frontend cost, which is the same for every column and not what this doc is measuring).
+`-c=native` is not in the matrix above: it would be redundant with `gcc*` because it just hands the same C to a system compiler. If you want to add a `-c=native` column, run `./jcc -c=native -o build/<bench>.bin benchmarks/<bench>.c` and time `[build/<bench>.bin]` — the numbers should match `gcc-O2`/`gcc-O3` (plus a fixed JCC frontend cost, which is the same for every column and not what this doc is measuring).
 
 If you want to break out compile time vs execution time for JCC, see `make bench` (hyperfine) and `make profile-cpu` in the existing [PROFILING.md](PROFILING.md).
 If you want to see where VM execution is concentrated, use `tools/bench.py --vm-profile`

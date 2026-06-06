@@ -584,7 +584,7 @@ $ echo $?
 42
 ```
 
-**Note:** Overflow detection is **disabled by default** for zero overhead. When enabled with `--overflow-checks` or `-O`, it uses specialized checked arithmetic opcodes (ADDC, SUBC, MULC, DIVC) that validate operations before completing them. Floating-point operations are not affected by this flag.
+**Note:** Overflow detection is **disabled by default** for zero overhead. When enabled with `--overflow-checks`, it uses specialized checked arithmetic opcodes (ADDC, SUBC, MULC, DIVC) that validate operations before completing them. Floating-point operations are not affected by this flag.
 
 ### Stack Overflow Detection
 

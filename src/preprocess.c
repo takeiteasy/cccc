@@ -2445,7 +2445,7 @@ static Token *preprocess2(JCC *vm, Token *tok) {
 // (Re)define standard-dependent predefined macros from vm->compiler.c_std.
 // This function is authoritative and idempotent — it can be called more than
 // once (e.g. first with the default inside cc_init, then again after the user's
-// -std= flag is parsed) and always produces the complete correct state.
+// -std= flag (long form: --std=) is parsed) and always produces the complete correct state.
 void define_std_macros(JCC *vm) {
     const char *v;
     switch (vm->compiler.c_std) {

@@ -1,4 +1,4 @@
-// JCC_FLAGS: -Wall -Wno-unused -Wno-shadow -Wno-deprecated -std=c23
+// JCC_FLAGS: -Wall -Wno-unused -Wno-shadow -Wno-deprecated --std=c23
 // JCC_REJECT_STDERR: warning:
 
 int value;

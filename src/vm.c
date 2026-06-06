@@ -359,13 +359,9 @@ static void json_escape(FILE *f, const char *s) {
     }
 }
 
-int cc_vm_profile_write_json(JCC *vm, const char *path, const char *mode,
+int cc_vm_profile_write_json(JCC *vm, FILE *f, const char *mode,
                              const char *input_name) {
-    if (!vm || !path)
-        return -1;
-
-    FILE *f = fopen(path, "w");
-    if (!f)
+    if (!vm || !f)
         return -1;
 
     fprintf(f, "{\n");
@@ -485,10 +481,7 @@ int cc_vm_profile_write_json(JCC *vm, const char *path, const char *mode,
     }
 
     fprintf(f, "\n}\n");
-    int rc = ferror(f) ? -1 : 0;
-    if (fclose(f) != 0)
-        rc = -1;
-    return rc;
+    return ferror(f) ? -1 : 0;
 }
 
 int vm_eval(JCC *vm) {
@@ -834,7 +827,7 @@ void cc_init(JCC *vm, uint32_t flags) {
     vm->compiler.file_buffers.capacity = 0;
 
     // Default to GNU C17 (matches modern gcc/clang defaults)
-    vm->compiler.c_std = JCC_STD_C17;
+    vm->compiler.c_std = JCC_STD_C23;
     vm->compiler.c_std_gnu = true;
 
     init_macros(vm);

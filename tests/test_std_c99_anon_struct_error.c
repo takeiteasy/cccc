@@ -1,4 +1,4 @@
-// JCC_FLAGS: -std=c99 -Wpedantic
+// JCC_FLAGS: --std=c99 -Wpedantic
 // JCC_EXPECT_STDERR: warning: anonymous structs/unions are a C11 extension \[-Wpedantic\]
 struct Outer {
     int x;

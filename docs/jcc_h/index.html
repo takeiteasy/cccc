@@ -458,6 +458,9 @@ FFI.
 <dt><tt><a href="index.html#//apple_ref/c/func/cc_undef" target="_top">cc_undef</a></tt></dt>
 <dd><p>Remove a preprocessor macro definition from the VM.
 </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/cc_write_bytecode" target="_top">cc_write_bytecode</a></tt></dt>
+<dd><p>Write compiled bytecode to an open stdio stream.
+</p></dd>
 </dl>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/cc_add_breakpoint;   name=cc_add_breakpoint -->
@@ -2452,6 +2455,49 @@ are searched after regular include paths for "..." includes.
 <dd><p>Macro identifier to remove.</p></dd>
 </dl>
 </div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/cc_write_bytecode;   name=cc_write_bytecode -->
+<a name="//apple_ref/c/func/cc_write_bytecode"></a>
+<h3><a name="cc_write_bytecode">cc_write_bytecode</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/cc_write_bytecode;name=start --><!-- begin abstract --></p>
+<p>Write compiled bytecode to an open stdio stream.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/cc_write_bytecode;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/cc_write_bytecode;name=start --><!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/cc_write_bytecode" logicalPath="//apple_ref/c/instm/cc_write_bytecode //apple_ref/c/clm/cc_write_bytecode //apple_ref/c/intfcm/cc_write_bytecode //apple_ref/c/intfm/cc_write_bytecode //apple_ref/c/func/cc_write_bytecode" target="_top"><span class="function">cc_write_bytecode</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/FILE //apple_ref/c/tdef/FILE //apple_ref/c/tag/FILE //apple_ref/c/struct/FILE //apple_ref/c/intf/FILE //apple_ref/doc/anysymbol/FILE" machineGenerated="true" --><span class="type">FILE</span><!-- /a --> <span class="type">*</span><span class="param">f</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/cc_write_bytecode;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/cc_write_bytecode/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/cc_write_bytecode/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The JCC instance containing compiled bytecode.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/cc_write_bytecode/f;   name=f -->
+<a name="//apple_ref/doc/functionparam/cc_write_bytecode/f"></a>
+<code>f</code>
+</dt>
+<dd><p>Output stream opened in binary mode (e.g. stdout via
+@c freopen with "wb", or a file returned by fopen("wb")).</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>0 on success, -1 on error.
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/cc_write_bytecode;name=start --><p>Serializes the text segment, data segment, and necessary
+metadata as a binary blob to @c f. The output is the same
+format as cc_save_bytecode(), so it can be loaded with
+cc_load_bytecode() after being written to a file.
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/cc_write_bytecode;name=end --><!-- end discussion -->
+</p>
 <hr class="betweenSections">
 <a name="HeaderDoc_datatypes"></a>
 <h2 class="h2tight">Typedefs</h2>
@@ -2909,7 +2955,7 @@ compilation.
     <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/diag_stack_depth //apple_ref/c/data/diag_stack_depth //apple_ref/c/clconst/diag_stack_depth " machineGenerated="true" --><span class="var">diag_stack_depth</span><!-- /a -->; <span class="comment">// current stack depth</span> 
     <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/diag_stack_cap //apple_ref/c/data/diag_stack_cap //apple_ref/c/clconst/diag_stack_cap " machineGenerated="true" --><span class="var">diag_stack_cap</span><!-- /a -->; <span class="comment">// allocated capacity</span>  
     <span class="comment">// Diagnostic output format</span> 
-    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/diagnostic_json //apple_ref/c/data/diagnostic_json //apple_ref/c/clconst/diagnostic_json " machineGenerated="true" --><span class="var">diagnostic_json</span><!-- /a -->; <span class="comment">// -fdiagnostics-format=json</span>  
+    <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/diagnostic_json //apple_ref/c/data/diagnostic_json //apple_ref/c/clconst/diagnostic_json " machineGenerated="true" --><span class="var">diagnostic_json</span><!-- /a -->; <span class="comment">// --json (general JSON output flag)</span>  
     <span class="comment">// Tokenization state</span> 
     <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/File" logicalPath="//apple_ref/c/cl/File //apple_ref/c/tdef/File" target="_top"><span class="type">File</span></a> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/current_file //apple_ref/c/data/current_file //apple_ref/c/clconst/current_file " machineGenerated="true" --><span class="var">current_file</span><!-- /a -->; <span class="comment">// Input file</span> 
     <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/File" logicalPath="//apple_ref/c/cl/File //apple_ref/c/tdef/File" target="_top"><span class="type">File</span></a> <span class="type">*</span><span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/input_files //apple_ref/c/data/input_files //apple_ref/c/clconst/input_files " machineGenerated="true" --><span class="var">input_files</span><!-- /a -->; <span class="comment">// A list of all input files</span> 
@@ -5225,7 +5271,7 @@ flag.
 <p class="gapBeforeFooter"> </p>
 <hr class="afterFooter">
 <div class="hd_copyright_and_timestamp">
-<p class="hd_timestamp">Last Updated: Saturday, June 06, 2026
+<p class="hd_timestamp">Last Updated: Sunday, June 07, 2026
 </p>
 </div>
 </td>

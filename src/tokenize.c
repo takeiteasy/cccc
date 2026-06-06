@@ -988,7 +988,7 @@ static bool keyword_std_ok(JCC *vm, Token *t) {
 
 #define KW(str) (len == (int)sizeof(str)-1 && memcmp(kw, str, len) == 0)
 
-    // C99 reserved names — illegal below C99 (fire when -std=c89 is selected)
+    // C99 reserved names — illegal below C99 (fire when --std=c89 is selected)
     if (s < JCC_STD_C99) {
         if (KW("restrict") || KW("__restrict") || KW("__restrict__"))
             error_tok(vm, t, "'%.*s' is not available before C99", len, kw);

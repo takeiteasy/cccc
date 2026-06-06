@@ -40,7 +40,7 @@ function.
 
 ## Machine-Readable Output
 
-Pass `-fdiagnostics-format=json` to emit one JSON object per diagnostic to
+Pass `--json` to emit one JSON object per diagnostic to
 stderr instead of the human-readable format:
 
 ```json

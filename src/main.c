@@ -20,8 +20,15 @@
 #include "./internal.h"
 #include "jcc.h"
 #include <getopt.h>
-#ifndef _WIN32
+#if defined(_WIN32)
+#include <io.h>
+#define JCC_ISATTY _isatty
+#define JCC_FILENO _fileno
+#else
 #include <sys/wait.h>
+#include <unistd.h>
+#define JCC_ISATTY isatty
+#define JCC_FILENO fileno
 #endif
 
 typedef struct {
@@ -127,7 +134,7 @@ static char *select_native_compiler(void) {
 static int run_argv(char *const argv[]) {
 #if defined(_WIN32)
     (void)argv;
-    fprintf(stderr, "error: --native is not supported on Windows yet\n");
+    fprintf(stderr, "error: -c=native is not supported on Windows yet\n");
     return 1;
 #else
     pid_t pid = fork();
@@ -164,8 +171,13 @@ static int run_native_backend(JCC *vm, Obj *prog, const char *out_file,
                               int lib_paths_count, const char **libs,
                               int libs_count, const char **defines,
                               int defines_count, const char **undefs,
-                              int undefs_count, const char *std_arg,
-                              int dashdash, int argc, const char *argv[]) {
+                              int undefs_count, const char *std_arg) {
+    if (!out_file) {
+        fprintf(stderr,
+                "error: -c=native requires -o <file> (no executable path given)\n");
+        return 1;
+    }
+
     char *cc = select_native_compiler();
     if (!cc)
         return 1;
@@ -177,9 +189,9 @@ static int run_native_backend(JCC *vm, Obj *prog, const char *out_file,
         return 1;
     }
 
-    char *exe_path = out_file ? strdup(out_file) : make_tmp_path("");
+    char *exe_path = strdup(out_file);
     if (!exe_path) {
-        fprintf(stderr, "error: failed to create native output file\n");
+        fprintf(stderr, "error: failed to duplicate native output path\n");
         unlink(source_path);
         free(source_path);
         free(cc);
@@ -192,8 +204,6 @@ static int run_native_backend(JCC *vm, Obj *prog, const char *out_file,
                 strerror(errno));
         unlink(source_path);
         free(source_path);
-        if (!out_file)
-            unlink(exe_path);
         free(exe_path);
         free(cc);
         return 1;
@@ -204,8 +214,6 @@ static int run_native_backend(JCC *vm, Obj *prog, const char *out_file,
                 strerror(errno));
         unlink(source_path);
         free(source_path);
-        if (!out_file)
-            unlink(exe_path);
         free(exe_path);
         free(cc);
         return 1;
@@ -262,20 +270,8 @@ static int run_native_backend(JCC *vm, Obj *prog, const char *out_file,
     }
 
     int rc = run_argv((char *const *)cc_args.data);
-    if (rc == 0 && !out_file) {
-        ArgVec run_args = {0};
-        argv_push(&run_args, exe_path);
-        if (dashdash >= 0) {
-            for (int i = dashdash + 1; i < argc; i++)
-                argv_push(&run_args, argv[i]);
-        }
-        rc = run_argv((char *const *)run_args.data);
-        free(run_args.data);
-    }
 
     unlink(source_path);
-    if (!out_file)
-        unlink(exe_path);
     free(cc_args.data);
     free(source_path);
     free(exe_path);
@@ -290,11 +286,10 @@ static void usage(const char *argv0, int exit_code) {
     printf("Options:\n");
     printf("\t-h/--help           Show this message\n");
     printf("\t-I <path>           Add <path> to include search paths\n");
-    printf("\t   --isystem <path> Add <path> to system include paths (for "
+    printf("\t-J/--isystem <path> Add <path> to system include paths (for "
            "non-standard headers)\n");
     printf("\t-L/--library-path <path> Add <path> to dynamic library search paths\n");
     printf("\t-l/--library <name> Link dynamic library by name or path\n");
-    printf("\t   --link <name>    Alias for --library\n");
     printf("\t-D <macro>[=def]    Define a macro\n");
     printf("\t-U <macro>          Undefine a macro\n");
     printf("\t-a/--ast            Dump AST\n");
@@ -303,29 +298,36 @@ static void usage(const char *argv0, int exit_code) {
            "C -E)\n");
     printf("\t-M/--dump-expanded  Output macro-expanded source code (for gcc "
            "compatibility)\n");
-    printf("\t-G/--emit-generated Serialize only pragma-macro-generated objects "
+    printf("\t-G/--emit-generated Serialize only comptime macro-generated objects "
            "(no header noise)\n");
-    printf("\t-j/--json           Output header declarations as JSON\n");
+    printf("\t-j/--json           Emit JSON for all eligible output "
+           "(diagnostics, header declarations, --fusion-candidates, etc.)\n");
+    printf("\t-K/--ffi-decls      Emit parsed function/struct/enum declarations "
+           "as JSON (for FFI wrapper generation)\n");
     printf("\t-X/--no-preprocess  Disable preprocessing step\n");
     printf("\t-S/--no-stdlib      Do not link standard library\n");
-    printf("\t-c/--compile-only   Compile to bytecode but do not execute\n");
-    printf("\t-o/--out <file>     Write bytecode, or native executable with --native\n");
-    printf("\t   --native         Compile post-macro C with cc/clang/gcc instead of VM bytecode\n");
+    printf("\t-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: bytecode (default), native\n");
+    printf("\t                         bytecode: write .jbc (to -o file, or stdout if -o omitted\n");
+    printf("\t                                  and stdout is not a TTY)\n");
+    printf("\t                         native:   require -o file; build a native executable via\n");
+    printf("\t                                  JCC_NATIVE_CC (cc, clang, or gcc)\n");
+    printf("\t                         Use -cnative or --compile=native (short form must be\n");
+    printf("\t                         attached; long form may use '=' or separate arg).\n");
+    printf("\t-o/--out <file>     Output file. Required for -c=native. For -c=bytecode, writes\n");
+    printf("\t                     bytecode to <file>; if omitted, writes to stdout\n");
     printf("\t-d/--disassemble    Disassemble bytecode to stdout\n");
     printf("\t-v/--verbose        Enable debug logging\n");
     printf("\t-g/--debug          Enable interactive debugger\n");
-    printf("\t   --vm-profile     Count executed VM opcodes and print a report\n");
-    printf("\t   --profile-opcodes Alias for --vm-profile\n");
-    printf("\t   --vm-profile-json <file> Write VM opcode profile JSON\n");
+    printf("\t-Y/--vm-profile     Count executed VM opcodes and print a report\n");
+    printf("\t                    Combine with --json to also dump the profile as JSON to stdout\n");
     printf("\nWarning Options:\n");
     printf("\t-Wall               Enable common warning categories\n");
     printf("\t-Wextra             Enable extra warning categories\n");
     printf("\t-W<name>            Enable a warning category\n");
     printf("\t-Wno-<name>         Disable a warning category\n");
-    printf("\t-Werror/--Werror    Treat enabled warnings as errors\n");
+    printf("\t-q/--Werror         Treat enabled warnings as errors\n");
     printf("\t-Werror=<name>      Treat one warning category as an error\n");
     printf("\t-Wno-error=<name>   Do not promote one warning category\n");
-    printf("\t-fdiagnostics-format=json  Output diagnostics as JSON objects\n");
     printf("\nSafety Levels (preset flag combinations):\n");
     printf("\t-0/--safety=none     No safety checks (maximum performance)\n");
     printf("\t-1/--safety=basic    Essential low-overhead checks (~5-10%% "
@@ -370,25 +372,26 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-V/--vm-heap                 Route all malloc/free through VM "
            "heap (enables memory safety)\n");
     printf("\nFFI Safety Options:\n");
-    printf("\t   --ffi-allow=list          Allow only comma-separated native function names\n");
-    printf("\t   --ffi-deny=list           Deny comma-separated native function names\n");
-    printf("\t   --disable-ffi             Block all registered and dynamic native calls\n");
-    printf("\t   --ffi-errors-fatal        Abort execution on FFI policy violations\n");
+    printf("\t-H/--ffi-allow=list          Allow only comma-separated native function names\n");
+    printf("\t-u/--ffi-deny=list           Deny comma-separated native function names\n");
+    printf("\t-R/--disable-ffi             Block all registered and dynamic native calls\n");
+    printf("\t-y/--ffi-errors-fatal        Abort execution on FFI policy violations\n");
     printf("\t   --ffi-type-checking       Validate registered FFI call arity at runtime\n");
     printf("\nLanguage Standard:\n");
-    printf("\t   --std=<std>       Select C language standard (default: gnu17)\n");
+    printf("\t-Q/--std=<std>       Select C language standard (default: gnu17)\n");
     printf("\t                     Supported: c99, c11, c17/c18, c23/c2x\n");
     printf("\t                     GNU variants: gnu99, gnu11, gnu17/gnu18, gnu23/gnu2x\n");
-    printf("\t                     Note: -std currently affects predefined macros only\n");
+    printf("\t                     Note: -Q/--std currently affects predefined macros only\n");
     printf("\nPreprocessor Options:\n");
-    printf("\t   --embed-limit=SIZE        Set #embed file size warning limit "
+    printf("\t-r/--embed-limit=SIZE        Set #embed file size warning limit "
            "(e.g., 50MB, 100mb, default: 10MB)\n");
-    printf("\t   --embed-hard-limit        Make #embed limit a hard error "
+    printf("\t-w/--embed-hard-limit        Make #embed limit a hard error "
            "instead of warning\n");
-    printf("\t   --macro-recursion-limit=N Limit recursive pragma macro "
+    printf("\t-n/--macro-recursion-limit=N Limit recursive pragma macro "
            "expansion (default: 256, 0=unlimited)\n");
+    printf("\t-x/--max-errors=N            Cap diagnostics at N (default: 20)\n");
     printf("\nOptimization Levels:\n");
-    printf("\t   --optimize[=LEVEL]        Enable bytecode optimization "
+    printf("\t-O/--optimize[=LEVEL]        Enable bytecode optimization "
            "(default: disabled)\n");
     printf("\t                             LEVEL: 0=none, 1=basic, 2=standard, "
            "3=aggressive\n");
@@ -399,14 +402,14 @@ static void usage(const char *argv0, int exit_code) {
            "dead code elimination)\n");
     printf("\nStatic Bytecode Analysis (compile or load input, walk text "
            "segment, exit):\n");
-    printf("\t   --ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, "
+    printf("\t-A/--ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, "
            "default 2)\n");
     printf("\t   --ngrams-top=N          Show top N sequences (default 25)\n");
     printf("\t   --ngrams-per-file       Print a per-input section in addition "
            "to the aggregate\n");
-    printf("\t   --fusion-candidates[=N] Use-def fusion candidate analysis (top "
+    printf("\t-B/--fusion-candidates[=N] Use-def fusion candidate analysis (top "
            "N, default 50)\n");
-    printf("\t                          JSON output via -fdiagnostics-format=json\n");
+    printf("\t                          JSON output via -j/--json\n");
     printf("\nExample:\n");
     printf("\t%s -o hello hello.c\n", argv0);
     printf("\t%s -I ./include -D DEBUG -o prog prog.c\n", argv0);
@@ -716,7 +719,7 @@ int main(int argc, const char *argv[]) {
     int sys_inc_paths_count = 0;
     const char **lib_paths = NULL; // -L / --library-path
     int lib_paths_count = 0;
-    const char **libs = NULL; // --library / --link
+    const char **libs = NULL; // --library
     int libs_count = 0;
     const char **defines = NULL; // -D
     int defines_count = 0;
@@ -733,8 +736,11 @@ int main(int argc, const char *argv[]) {
     int emit_generated_only = 0; // -G
     int skip_preprocess = 0;   // -X
     int skip_stdlib = 0;       // -S
-    int output_json = 0;       // -j
-    int compile_only = 0;      // -c
+    int output_json = 0;       // -j (general "emit JSON" flag)
+    int output_ffi_decls = 0;  // --ffi-decls
+    int compile_only = 0;      // -c (set whenever -c/--compile is given; semantics:
+                                //   "compile, do not execute". -c=bytecode writes bytecode,
+                                //   -c=native hands off to the system compiler.)
     int max_errors = 20;        // --max-errors (default: 20)
     int warnings_as_errors = 0; // -Werror / --Werror
     uint64_t warnings = 0;
@@ -752,15 +758,13 @@ int main(int argc, const char *argv[]) {
     int disable_all_ffi = 0;
     int ffi_errors_fatal = 0;
     int enable_ffi_type_checking = 0;
-    int diagnostic_json = 0;
     int vm_profile = 0;
     int vm_profile_text = 0;
-    char *vm_profile_json = NULL;
     const char *vm_profile_mode = NULL;
     const char *vm_profile_input = NULL;
     int vm_profile_ran = 0;
     const char *entry_name = NULL; // -e / --entry
-    int native_mode = 0;
+    enum { COMPILE_NONE, COMPILE_BYTECODE, COMPILE_NATIVE } compile_format = COMPILE_NONE;
     int run_ngrams = 0;            // 0 = off; 2 or 3 = enabled with n-gram size
     int ngrams_top = 25;
     int ngrams_per_file = 0;
@@ -784,14 +788,15 @@ int main(int argc, const char *argv[]) {
         {"no-preprocess", no_argument, 0, 'X'},
         {"no-stdlib", no_argument, 0, 'S'},
         {"json", no_argument, 0, 'j'},
-        {"compile-only", no_argument, 0, 'c'},
+        {"ffi-decls", no_argument, 0, 'K'},
+        {"compile", optional_argument, 0, 'c'},
         {"debug", no_argument, 0, 'g'},
         {"safety", required_argument, 0, 1012},
         {"bounds-checks", no_argument, 0, 'b'},
         {"uaf-detection", no_argument, 0, 'f'},
         {"type-checks", no_argument, 0, 't'},
         {"uninitialized-detection", no_argument, 0, 'z'},
-        {"overflow-checks", no_argument, 0, 'O'},
+        {"overflow-checks", no_argument, 0, 1034},
         {"stack-canaries", no_argument, 0, 's'},
         {"heap-canaries", no_argument, 0, 'k'},
         {"pointer-sanitizer", no_argument, 0, 'p'},
@@ -809,49 +814,30 @@ int main(int argc, const char *argv[]) {
         {"vm-heap", no_argument, 0, 'V'},
         {"control-flow-integrity", no_argument, 0, 'C'},
         {"include", required_argument, 0, 'I'},
-        {"isystem", required_argument, 0, 1013},
+        {"isystem", required_argument, 0, 'J'},
         {"library-path", required_argument, 0, 'L'},
         {"library", required_argument, 0, 'l'},
-        {"link", required_argument, 0, 'l'},
         {"define", required_argument, 0, 'D'},
         {"undef", required_argument, 0, 'U'},
-        {"max-errors", required_argument, 0, 1010},
-        {"Werror", no_argument, 0, 1011},
-        {"embed-limit", required_argument, 0, 1014},
-        {"embed-hard-limit", no_argument, 0, 1015},
-        {"optimize", optional_argument, 0, 1016},
-        {"macro-recursion-limit", required_argument, 0, 1017},
-        {"std", required_argument, 0, 1019},
-        {"ffi-allow", required_argument, 0, 1020},
-        {"ffi-deny", required_argument, 0, 1021},
-        {"disable-ffi", no_argument, 0, 1022},
-        {"ffi-errors-fatal", no_argument, 0, 1023},
+        {"max-errors", required_argument, 0, 'x'},
+        {"Werror", no_argument, 0, 'q'},
+        {"embed-limit", required_argument, 0, 'r'},
+        {"embed-hard-limit", no_argument, 0, 'w'},
+        {"optimize", optional_argument, 0, 'O'},
+        {"macro-recursion-limit", required_argument, 0, 'n'},
+        {"std", required_argument, 0, 'Q'},
+        {"ffi-allow", required_argument, 0, 'H'},
+        {"ffi-deny", required_argument, 0, 'u'},
+        {"disable-ffi", no_argument, 0, 'R'},
+        {"ffi-errors-fatal", no_argument, 0, 'y'},
         {"ffi-type-checking", no_argument, 0, 1024},
-        {"fdiagnostics-format", required_argument, 0, 1025},
-        {"vm-profile", no_argument, 0, 1026},
-        {"profile-opcodes", no_argument, 0, 1026},
-        {"vm-profile-json", required_argument, 0, 1027},
+        {"vm-profile", no_argument, 0, 'Y'},
         {"entry", required_argument, 0, 'e'},
-        {"native", no_argument, 0, 1028},
-        {"ngrams", optional_argument, 0, 1029},
+        {"ngrams", optional_argument, 0, 'A'},
         {"ngrams-top", required_argument, 0, 1030},
         {"ngrams-per-file", no_argument, 0, 1031},
-        {"fusion-candidates", optional_argument, 0, 1032},
+        {"fusion-candidates", optional_argument, 0, 'B'},
         {0, 0, 0, 0}};
-
-    // Rewrite single-dash -std=... and -fdiagnostics-format=... to double-dash
-    // long-option form so getopt_long can match them.
-    for (int i = 1; i < argc; i++) {
-        if ((strncmp(argv[i], "-std", 4) == 0 ||
-             strncmp(argv[i], "-fdiagnostics-format", 20) == 0) &&
-            argv[i][0] == '-' && argv[i][1] != '-') {
-            size_t len = strlen(argv[i]);
-            char *rewritten = malloc(len + 2);
-            rewritten[0] = '-';
-            memcpy(rewritten + 1, argv[i], len + 1);
-            argv[i] = rewritten;
-        }
-    }
 
     // Find "--" separator: args after it are forwarded to the compiled program
     int dashdash = -1;
@@ -860,7 +846,7 @@ int main(int argc, const char *argv[]) {
     }
     int getopt_argc = (dashdash >= 0) ? dashdash : argc;
 
-    const char *optstring = "0123haI:L:D:U:o:cdvgbftzskpmiPEMGXSjFTVCl:W:e:";
+    const char *optstring = "0123haI:L:D:U:o:c::dvgbftzskpmiPEMGXSjFTVCl:W:e:O::J:Y:A::B::KQ:Rx:q:n:r:wH:u:y";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(getopt_argc, (char *const *)argv, optstring,
@@ -939,13 +925,13 @@ int main(int argc, const char *argv[]) {
                 realloc(lib_paths, sizeof(*lib_paths) * (lib_paths_count + 1));
             lib_paths[lib_paths_count++] = strdup(optarg);
             break;
-        case 1013: // --isystem
+        case 'J': // --isystem
             sys_inc_paths =
                 realloc(sys_inc_paths,
                         sizeof(*sys_inc_paths) * (sys_inc_paths_count + 1));
             sys_inc_paths[sys_inc_paths_count++] = strdup(optarg);
             break;
-        case 'l': // --library / --link
+        case 'l': // --library
             libs = realloc(libs, sizeof(*libs) * (libs_count + 1));
             libs[libs_count++] = strdup(optarg);
             break;
@@ -968,6 +954,9 @@ int main(int argc, const char *argv[]) {
             break;
         case 'z':
             flags |= JCC_UNINIT_DETECTION;
+            break;
+        case 1034: // --overflow-checks
+            flags |= JCC_OVERFLOW_CHECKS;
             break;
 
         case 's':
@@ -1040,10 +1029,35 @@ int main(int argc, const char *argv[]) {
         case 'j':
             output_json = 1;
             break;
-        case 'c':
+        case 'c': { // -c[FMT]/--compile[=FMT]
+            // Bare -c / --compile defaults to bytecode. The optional
+            // argument selects the format. Note: GNU getopt's `::` only
+            // supports attached form for short options (e.g. `-cnative`),
+            // not `-c=native`. The long form accepts `--compile=native`
+            // and `--compile native` (the latter as a separate arg). Strip
+            // a leading `=` to be friendly to BSD getopt / `-c=native`
+            // callers even though GNU's getopt rejects that form outright.
             compile_only = 1;
+            const char *fmt = optarg;
+            if (fmt && fmt[0] == '=')
+                fmt++;
+            if (!fmt || !*fmt) {
+                compile_format = COMPILE_BYTECODE;
+            } else if (strcmp(fmt, "bytecode") == 0 || strcmp(fmt, "bc") == 0 ||
+                       strcmp(fmt, "jbc") == 0) {
+                compile_format = COMPILE_BYTECODE;
+            } else if (strcmp(fmt, "native") == 0 || strcmp(fmt, "n") == 0) {
+                compile_format = COMPILE_NATIVE;
+            } else {
+                fprintf(stderr,
+                        "error: invalid --compile format '%s' "
+                        "(use 'bytecode' or 'native')\n",
+                        fmt);
+                usage(argv[0], 1);
+            }
             break;
-        case 1010:
+        }
+        case 'x': // --max-errors
             max_errors = atoi(optarg);
             if (max_errors <= 0) {
                 fprintf(stderr,
@@ -1051,7 +1065,7 @@ int main(int argc, const char *argv[]) {
                 usage(argv[0], 1);
             }
             break;
-        case 1011:
+        case 'q': // --Werror
             warnings_as_errors = 1;
             warning_no_errors = 0;
             break;
@@ -1059,13 +1073,13 @@ int main(int argc, const char *argv[]) {
             parse_warning_option(optarg, &warnings, &warning_errors,
                                  &warning_no_errors, &warnings_as_errors);
             break;
-        case 1014: // --embed-limit
+        case 'r': // --embed-limit
             embed_limit = parse_size(optarg, "--embed-limit");
             break;
-        case 1015: // --embed-hard-limit
+        case 'w': // --embed-hard-limit
             embed_hard_error = 1;
             break;
-        case 1016: // --optimize (or -O)
+        case 'O': // --optimize / -O (also matches --optimize via long_options)
             if (optarg == NULL) {
                 // Just -O or --optimize without argument means -O1
                 opt_level = 1;
@@ -1080,7 +1094,7 @@ int main(int argc, const char *argv[]) {
                 usage(argv[0], 1);
             }
             break;
-        case 1017: { // --macro-recursion-limit
+        case 'n': { // --macro-recursion-limit
             char *end = NULL;
             long val = strtol(optarg, &end, 10);
             if (!optarg[0] || *end != '\0' || val < 0 || val > INT32_MAX) {
@@ -1092,51 +1106,33 @@ int main(int argc, const char *argv[]) {
             macro_recursion_limit = (int)val;
             break;
         }
-        case 1019: // --std=<standard>
+        case 'Q': // --std=<standard>
             std_arg = optarg;
             break;
-        case 1020:
+        case 'H':
             ffi_allow_args = realloc(ffi_allow_args, sizeof(*ffi_allow_args) *
                                                          (ffi_allow_args_count + 1));
             ffi_allow_args[ffi_allow_args_count++] = strdup(optarg);
             break;
-        case 1021:
+        case 'u':
             ffi_deny_args = realloc(ffi_deny_args, sizeof(*ffi_deny_args) *
                                                      (ffi_deny_args_count + 1));
             ffi_deny_args[ffi_deny_args_count++] = strdup(optarg);
             break;
-        case 1022:
+        case 'R':
             disable_all_ffi = 1;
             break;
-        case 1023:
+        case 'y':
             ffi_errors_fatal = 1;
             break;
         case 1024:
             enable_ffi_type_checking = 1;
             break;
-        case 1025:
-            if (strcmp(optarg, "json") == 0) {
-                diagnostic_json = 1;
-            } else {
-                fprintf(stderr,
-                        "error: unsupported -fdiagnostics-format value '%s' "
-                        "(supported: json)\n", optarg);
-                usage(argv[0], 1);
-            }
-            break;
-        case 1026:
+        case 'Y':
             vm_profile = 1;
             vm_profile_text = 1;
             break;
-        case 1027:
-            vm_profile = 1;
-            free(vm_profile_json);
-            vm_profile_json = strdup(optarg);
-            break;
-        case 1028:
-            native_mode = 1;
-            break;
-        case 1029: { // --ngrams[=N]
+        case 'A': { // --ngrams[=N]
             if (optarg == NULL) {
                 run_ngrams = 2;
             } else if (optarg[0] >= '0' && optarg[0] <= '9' && optarg[1] == '\0') {
@@ -1168,7 +1164,7 @@ int main(int argc, const char *argv[]) {
         case 1031: // --ngrams-per-file
             ngrams_per_file = 1;
             break;
-        case 1032: { // --fusion-candidates[=N]
+        case 'B': { // --fusion-candidates[=N]
             if (optarg == NULL) {
                 run_fusion = 1;
             } else {
@@ -1184,6 +1180,9 @@ int main(int argc, const char *argv[]) {
             }
             break;
         }
+        case 'K': // --ffi-decls
+            output_ffi_decls = 1;
+            break;
         case '?':
             if (optopt)
                 fprintf(stderr, "error: option -%c requires an argument\n",
@@ -1219,28 +1218,28 @@ int main(int argc, const char *argv[]) {
         usage((char *)argv[0], 1);
     }
 
-    if (native_mode) {
+    if (compile_format == COMPILE_NATIVE) {
         if (preprocess_only || dump_expanded_only || print_tokens ||
-            output_json || dump_ast) {
+            output_json || output_ffi_decls || dump_ast) {
             fprintf(stderr,
-                    "error: --native cannot be combined with frontend output modes\n");
+                    "error: -c=native cannot be combined with frontend output modes\n");
             usage(argv[0], 1);
         }
-        if (compile_only || disassemble || entry_name || opt_level != 0 ||
-            vm_profile || vm_profile_json) {
+        if (disassemble || entry_name || opt_level != 0 ||
+            vm_profile) {
             fprintf(stderr,
-                    "error: --native cannot be combined with VM bytecode options\n");
+                    "error: -c=native cannot be combined with VM bytecode options\n");
             usage(argv[0], 1);
         }
         if (flags != 0) {
             fprintf(stderr,
-                    "error: --native cannot be combined with VM runtime safety/debug options\n");
+                    "error: -c=native cannot be combined with VM runtime safety/debug options\n");
             usage(argv[0], 1);
         }
         if (ffi_allow_args_count || ffi_deny_args_count || disable_all_ffi ||
             ffi_errors_fatal || enable_ffi_type_checking) {
             fprintf(stderr,
-                    "error: --native cannot be combined with JCC FFI policy options\n");
+                    "error: -c=native cannot be combined with JCC FFI policy options\n");
             usage(argv[0], 1);
         }
         for (int i = 0; i < input_files_count; i++) {
@@ -1248,10 +1247,15 @@ int main(int argc, const char *argv[]) {
             if (len > 4 &&
                 strncmp(input_files[i] + len - 4, ".jbc", sizeof(".jbc")) == 0) {
                 fprintf(stderr,
-                        "error: --native expects C source input, not bytecode '%s'\n",
+                        "error: -c=native expects C source input, not bytecode '%s'\n",
                         input_files[i]);
                 usage(argv[0], 1);
             }
+        }
+        if (!out_file) {
+            fprintf(stderr,
+                    "error: -c=native requires -o <file>\n");
+            usage(argv[0], 1);
         }
     }
 
@@ -1263,7 +1267,7 @@ int main(int argc, const char *argv[]) {
             usage(argv[0], 1);
         }
         if (preprocess_only || dump_expanded_only || print_tokens ||
-            output_json || dump_ast) {
+            output_json || output_ffi_decls || dump_ast) {
             fprintf(stderr,
                     "error: --ngrams/--fusion-candidates cannot be combined "
                     "with frontend output modes\n");
@@ -1275,10 +1279,10 @@ int main(int argc, const char *argv[]) {
                     "with VM bytecode output or entry options\n");
             usage(argv[0], 1);
         }
-        if (vm_profile || vm_profile_json) {
+        if (vm_profile) {
             fprintf(stderr,
                     "error: --ngrams/--fusion-candidates cannot be combined "
-                    "with --vm-profile*\n");
+                    "with --vm-profile\n");
             usage(argv[0], 1);
         }
         if (flags & JCC_ENABLE_DEBUGGER) {
@@ -1293,10 +1297,10 @@ int main(int argc, const char *argv[]) {
                     "with VM runtime safety options\n");
             usage(argv[0], 1);
         }
-        if (native_mode) {
+        if (compile_format == COMPILE_NATIVE) {
             fprintf(stderr,
                     "error: --ngrams/--fusion-candidates cannot be combined "
-                    "with --native\n");
+                    "with -c=native\n");
             usage(argv[0], 1);
         }
     }
@@ -1305,7 +1309,7 @@ int main(int argc, const char *argv[]) {
     cc_init(&vm, flags);
     vm.compiler.compile_only = compile_only;
     vm.compiler.entry_name = (char *)entry_name;
-    vm.compiler.diagnostic_json = diagnostic_json;
+    vm.compiler.diagnostic_json = output_json;
     vm.disable_all_ffi = disable_all_ffi;
     vm.ffi_errors_fatal = ffi_errors_fatal;
     vm.enable_ffi_type_checking = enable_ffi_type_checking;
@@ -1378,7 +1382,7 @@ int main(int argc, const char *argv[]) {
             } else {
                 CcAnalyzeFusionOptions opts = {
                     .top_n = run_fusion,
-                    .json = diagnostic_json,
+                    .json = output_json,
                 };
                 fusion_state = cc_analyze_fusion_begin(&opts);
                 for (int i = 0; i < input_files_count; i++) {
@@ -1463,7 +1467,7 @@ int main(int argc, const char *argv[]) {
     if (macro_recursion_limit >= 0)
         vm.compiler.macro_recursion_limit = macro_recursion_limit;
 
-    // Apply -std=<standard> if specified, then re-emit std macros
+    // Apply --std=<standard> if specified, then re-emit std macros
     if (std_arg) {
         CStdVersion ver = JCC_STD_C17;
         bool is_gnu = true;
@@ -1600,9 +1604,9 @@ int main(int argc, const char *argv[]) {
         goto BAIL;
     }
 
-    // For JSON output, we don't need to link (especially useful for header
-    // files without main())
-    if (output_json && !dump_ast) {
+    // For --ffi-decls, emit parsed function/struct/enum declarations. We
+    // don't need to link (especially useful for header files without main()).
+    if (output_ffi_decls) {
         // Link programs, but don't fail if linking fails (e.g., no main() in
         // header file)
         Obj *merged_prog = cc_link_progs(&vm, input_progs, input_files_count);
@@ -1671,15 +1675,6 @@ int main(int argc, const char *argv[]) {
         goto BAIL;
     }
 
-    if (native_mode) {
-        exit_code = run_native_backend(
-            &vm, merged_prog, out_file, inc_paths, inc_paths_count,
-            sys_inc_paths, sys_inc_paths_count, lib_paths, lib_paths_count,
-            libs, libs_count, defines, defines_count, undefs, undefs_count,
-            std_arg, dashdash, argc, argv);
-        goto BAIL;
-    }
-
     if (libs_count > 0)
         register_dynamic_externs(&vm, merged_prog);
 
@@ -1718,8 +1713,48 @@ int main(int argc, const char *argv[]) {
         goto BAIL;
     }
 
-    // Compile-only mode: stop here without requiring main() or executing
-    if (vm.compiler.compile_only) {
+    // -c/--compile: write bytecode (or hand off to native) and exit. This
+    // runs BEFORE the "save bytecode to out_file, then run" branch below so
+    // -c=bytecode can write to stdout / arbitrary paths and -c=native can
+    // short-circuit out of the VM runtime path. The order is also the fix
+    // for ticket #300: previously `compile_only` short-circuited at
+    // `goto BAIL;` before the legacy `out_file` save block, silently
+    // swallowing `-c -o foo.jbc`.
+    if (compile_format == COMPILE_BYTECODE) {
+        if (out_file) {
+            if (cc_save_bytecode(&vm, out_file) != 0) {
+                fprintf(stderr, "error: failed to save bytecode to %s\n",
+                        out_file);
+                exit_code = 1;
+                goto BAIL;
+            }
+            fprintf(stderr, "Bytecode saved to %s\n", out_file);
+        } else {
+            if (JCC_ISATTY(JCC_FILENO(stdout))) {
+                fprintf(stderr,
+                        "error: refusing to write bytecode to a terminal; "
+                        "use -o <file> or redirect stdout\n");
+                exit_code = 1;
+                goto BAIL;
+            }
+            if (cc_write_bytecode(&vm, stdout) != 0) {
+                fprintf(stderr, "error: failed to write bytecode to stdout\n");
+                exit_code = 1;
+                goto BAIL;
+            }
+            fflush(stdout);
+        }
+        goto BAIL;
+    }
+
+    if (compile_format == COMPILE_NATIVE) {
+        // -c=native is rejected above if out_file is NULL, so exe_path is
+        // always a user-supplied path here.
+        exit_code = run_native_backend(
+            &vm, merged_prog, out_file, inc_paths, inc_paths_count,
+            sys_inc_paths, sys_inc_paths_count, lib_paths, lib_paths_count,
+            libs, libs_count, defines, defines_count, undefs, undefs_count,
+            std_arg);
         goto BAIL;
     }
 
@@ -1757,7 +1792,7 @@ int main(int argc, const char *argv[]) {
         } else {
             CcAnalyzeFusionOptions opts = {
                 .top_n = run_fusion,
-                .json = diagnostic_json,
+                .json = output_json,
             };
             fusion_state = cc_analyze_fusion_begin(&opts);
             const char *label = input_files_count == 1
@@ -1773,13 +1808,13 @@ int main(int argc, const char *argv[]) {
     }
 
     if (out_file) {
-        // Save bytecode to file and exit
+        // Save bytecode to file and exit (legacy path: no -c, just -o).
         if (cc_save_bytecode(&vm, out_file) != 0) {
             fprintf(stderr, "error: failed to save bytecode to %s\n", out_file);
             exit_code = 1;
             goto BAIL;
         }
-        printf("Bytecode saved to %s\n", out_file);
+        fprintf(stderr, "Bytecode saved to %s\n", out_file);
         goto BAIL;
     }
 
@@ -1807,11 +1842,11 @@ BAIL:
     if (vm_profile && vm_profile_ran) {
         if (vm_profile_text)
             cc_vm_profile_print(&vm, stderr);
-        if (vm_profile_json &&
-            cc_vm_profile_write_json(&vm, vm_profile_json, vm_profile_mode,
+        if (output_json &&
+            cc_vm_profile_write_json(&vm, stdout, vm_profile_mode,
                                      vm_profile_input) != 0) {
-            fprintf(stderr, "error: failed to write VM profile JSON to %s\n",
-                    vm_profile_json);
+            fprintf(stderr,
+                    "error: failed to write VM profile JSON to stdout\n");
             if (exit_code == 0 || exit_code == 42)
                 exit_code = 1;
         }
@@ -1834,8 +1869,6 @@ BAIL:
     }
     if (out_file)
         free(out_file);
-    if (vm_profile_json)
-        free(vm_profile_json);
     if (inc_paths) {
         for (int i = 0; i < inc_paths_count; i++)
             free((void *)inc_paths[i]);

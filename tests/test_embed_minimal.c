@@ -1,4 +1,4 @@
-// JCC_FLAGS: -std=c23
+// JCC_FLAGS: --std=c23
 int main() {
     unsigned char data[] = {
 #embed "embed_data/test_data.bin"

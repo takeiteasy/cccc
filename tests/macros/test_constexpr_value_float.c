@@ -1,4 +1,4 @@
-// JCC_FLAGS: -std=c23
+// JCC_FLAGS: --std=c23
 // Ticket #189: float constexpr variable readable from a macro.
 
 constexpr double SCALE = 3.5;

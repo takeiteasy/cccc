@@ -1,4 +1,4 @@
-// JCC_FLAGS: -std=c23
+// JCC_FLAGS: --std=c23
 // Test #embed parameter order independence
 // Parameters should work in any order
 int main() {

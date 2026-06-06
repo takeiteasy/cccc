@@ -31,7 +31,7 @@ Starts `afl-fuzz` in the background with sensible defaults:
 - Output: `fuzz/out/`
 - Timeout: 1000ms
 - Memory: none (unlimited)
-- Flags: `-I./include -c` (compile-only, no `main()` required)
+- Flags: `-I./include -c` (bytecode compile, no `main()` required)
 
 ### 4. Inspect crashes
 
@@ -61,8 +61,8 @@ afl-fuzz -i - -o fuzz/out -m none -t 1000 -- ./jcc-afl -I./include -c @@
 ## Corpus Tips
 
 - The existing `tests/` suite provides excellent seeds — they cover many C constructs.
-- AFL++ will mutate these; even removing `main()` is fine because `-c` (compile-only)
-  does not require an entry point.
+- AFL++ will mutate these; even removing `main()` is fine because `-c`
+  (bytecode compile) does not require an entry point.
 - For deeper fuzzing, add hand-crafted seeds for edge cases:
   - Empty files
   - Very long identifiers

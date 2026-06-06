@@ -1,4 +1,4 @@
-// JCC_FLAGS: -std=c23
+// JCC_FLAGS: --std=c23
 // Ticket #189: integer constexpr variable readable from a macro.
 
 constexpr int LIMIT = 100;

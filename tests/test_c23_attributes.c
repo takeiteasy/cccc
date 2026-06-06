@@ -1,4 +1,4 @@
-// JCC_FLAGS: -std=c23
+// JCC_FLAGS: --std=c23
 // Test C23 [[...]] attribute syntax
 // Layout-neutral attributes are accepted; selected diagnostic attributes have
 // warning-system semantics.

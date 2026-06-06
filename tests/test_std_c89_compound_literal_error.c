@@ -1,4 +1,4 @@
-/* JCC_FLAGS: -std=c89 -Wpedantic */
+/* JCC_FLAGS: --std=c89 -Wpedantic */
 /* JCC_EXPECT_STDERR: warning: compound literals are a C99 extension \[-Wpedantic\] */
 int f(void) {
     int *p = (int []){1, 2, 3};

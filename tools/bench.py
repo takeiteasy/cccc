@@ -180,12 +180,13 @@ def run_benchmark(src, args, root, build_dir, log):
             profile_path = args.vm_profile_dir / f"{src.stem}-{label}.json"
         def make_jcc():
             profile_args = (
-                ["--vm-profile-json", str(profile_path)] if profile_path else []
+                ["--vm-profile", "--json"] if profile_path else []
             )
             cmd = [args.jcc, args.include, *extra, *profile_args, str(src)]
             return run_cmd(cmd, root)
         r = time_runs(make_jcc, args.runs, args.warmup)
-        if profile_path:
+        if profile_path and r.get("stdout"):
+            profile_path.write_text(r["stdout"])
             r["vm_profile_json"] = str(profile_path)
         results[label] = r
         log(f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms")
@@ -202,12 +203,13 @@ def run_benchmark(src, args, root, build_dir, log):
                 profile_path = args.vm_profile_dir / f"{src.stem}-{label}.json"
             def make_jbc():
                 profile_args = (
-                    ["--vm-profile-json", str(profile_path)] if profile_path else []
+                    ["--vm-profile", "--json"] if profile_path else []
                 )
                 return run_cmd([args.jcc, *profile_args, str(jbc)], root)
             r = time_runs(make_jbc, args.runs, args.warmup)
             r["compile_ms"] = compile_ms * 1000.0
-            if profile_path:
+            if profile_path and r.get("stdout"):
+                profile_path.write_text(r["stdout"])
                 r["vm_profile_json"] = str(profile_path)
             results[label] = r
             log(f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms  compile={r['compile_ms']:>8.1f}ms")

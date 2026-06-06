@@ -32,15 +32,15 @@ On macOS you can also open the result in `pprof` (Go tool) or Instruments.
 
 ```bash
 ./jcc --vm-profile -I./include tests/test_comprehensive.c
-./jcc --vm-profile-json profile/vm-opcodes/comprehensive.json -I./include tests/test_comprehensive.c
-./jcc --profile-opcodes build/fib.jbc
+./jcc --vm-profile --json -I./include tests/test_comprehensive.c > profile/vm-opcodes/comprehensive.json
+./jcc -Y build/fib.jbc
 ```
 
 `--vm-profile` prints a compact dynamic opcode count table to stderr after the
-program exits. `--vm-profile-json <file>` writes the same data as JSON without
-printing the table, which keeps benchmark stdout checks clean. The JSON includes
-the execution mode (`source` or `jbc`), selected `--optimize` level, total VM
-cycles, total profiled opcodes, and per-op counts and percentages.
+program exits. Combine it with `--json` to also write the same data as JSON to
+stdout. The JSON includes the execution mode (`source` or `jbc`), selected
+`--optimize` level, total VM cycles, total profiled opcodes, and per-op counts
+and percentages.
 
 ### Static Bytecode Analysis
 
@@ -59,7 +59,7 @@ any execution), jcc has two in-process analyses:
 
 # Use-def fusion candidate detection
 ./jcc --fusion-candidates=50 /tmp/sieve.jbc
-./jcc --fusion-candidates=50 -fdiagnostics-format=json /tmp/sieve.jbc
+./jcc --fusion-candidates=50 --json /tmp/sieve.jbc
 ```
 
 `--ngrams[=N]` walks the text segment of one or more `.jbc` files and ranks
@@ -69,11 +69,10 @@ limits the rows per section.
 
 `--fusion-candidates[=N]` walks the text segment, tracks register defs/uses
 per instruction, and reports adjacent `def -> use` pairs where the defining
-instruction has a single reader. Add `-fdiagnostics-format=json` to get JSON
-output for scripting.
+instruction has a single reader. Add `--json` to get JSON output for scripting.
 
 These two analyses are mutually exclusive with `--vm-profile*`, `-g/--debug`,
-`-d/--disassemble`, `--native`, and any safety / execution / output flags.
+`-d/--disassemble`, `-c=native`, and any safety / execution / output flags.
 See [PROFILING.md](PROFILING.md) and [VM.md](VM.md) for how to combine the
 static counts with the dynamic bigram profile to surface the strongest
 fusion candidates.

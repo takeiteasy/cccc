@@ -2,7 +2,7 @@
 """Cross-reference static and dynamic opcode n-gram counts.
 
 Reads the text output of `jcc --ngrams` (static .jbc analysis) and
-the JSON output of `jcc --vm-profile-json` (runtime bigram/trigram counts)
+the JSON output of `jcc --vm-profile --json` (runtime bigram/trigram counts)
 and prints a unified ranking. The score is `static_count * dynamic_count`,
 so sequences that are both common in the bytecode AND executed many
 times rise to the top — these are the strongest fusion candidates
@@ -24,6 +24,7 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JCC = os.environ.get("JCC", os.path.join(ROOT, "jcc"))
@@ -46,7 +47,7 @@ def parse_static(text):
 
 
 def load_dynamic(path):
-    """Return two dicts from a --vm-profile-json file:
+    """Return two dicts from a --vm-profile --json output file:
       bigrams:  {sequence_str: count}
       trigrams: {sequence_str: count}  (empty dict if not present)
     """
@@ -83,11 +84,12 @@ def main():
     static_text = result.stdout
 
     profile_path = "/tmp/_jcc_xref_profile.json"
-    subprocess.call(
-        [args.jcc, "--vm-profile-json", profile_path,
+    profile_proc = subprocess.run(
+        [args.jcc, "--vm-profile", "--json",
          "-I", "include", args.source] + args.run_args,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        capture_output=True, text=True,
     )
+    Path(profile_path).write_text(profile_proc.stdout)
     try:
         bigrams, trigrams = load_dynamic(profile_path)
     finally:

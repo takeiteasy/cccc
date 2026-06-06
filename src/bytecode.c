@@ -65,20 +65,14 @@ static int get_instruction_word_count(JCCInstrWord *text, long long pc,
     return word_count;
 }
 
-int cc_save_bytecode(JCC *vm, const char *path) {
-    if (!vm || !path) {
-        fprintf(stderr, "error: invalid arguments to cc_save_bytecode\n");
+int cc_write_bytecode(JCC *vm, FILE *f) {
+    if (!vm || !f) {
+        fprintf(stderr, "error: invalid arguments to cc_write_bytecode\n");
         return -1;
     }
 
     if (!vm->text_seg || !vm->data_seg) {
-        fprintf(stderr, "error: no bytecode to save (compile first)\n");
-        return -1;
-    }
-
-    FILE *f = fopen(path, "wb");
-    if (!f) {
-        fprintf(stderr, "error: failed to open %s for writing: %s\n", path, strerror(errno));
+        fprintf(stderr, "error: no bytecode to write (compile first)\n");
         return -1;
     }
 
@@ -95,14 +89,12 @@ int cc_save_bytecode(JCC *vm, const char *path) {
         return_buffer_count > RETURN_BUFFER_POOL_SIZE ||
         return_buffer_size <= 0) {
         fprintf(stderr, "error: invalid return buffer metadata\n");
-        fclose(f);
         return -1;
     }
     for (long long i = 0; i < return_buffer_count; i++) {
         long long offset = vm->compiler.return_buffer_offsets[i];
         if (offset < 0 || offset + return_buffer_size > data_size) {
             fprintf(stderr, "error: invalid return buffer offset\n");
-            fclose(f);
             return -1;
         }
     }
@@ -110,7 +102,6 @@ int cc_save_bytecode(JCC *vm, const char *path) {
     JCCInstrWord *text_copy = malloc(text_size);
     if (!text_copy) {
         fprintf(stderr, "error: failed to allocate temporary buffer\n");
-        fclose(f);
         return -1;
     }
     memcpy(text_copy, vm->text_seg, text_size);
@@ -121,7 +112,6 @@ int cc_save_bytecode(JCC *vm, const char *path) {
         if (!data_copy) {
             fprintf(stderr, "error: failed to allocate temporary data buffer\n");
             free(text_copy);
-            fclose(f);
             return -1;
         }
         memcpy(data_copy, vm->data_seg, data_size);
@@ -131,7 +121,6 @@ int cc_save_bytecode(JCC *vm, const char *path) {
                 fprintf(stderr, "error: invalid data relocation offset\n");
                 free(data_copy);
                 free(text_copy);
-                fclose(f);
                 return -1;
             }
             *(long long *)(data_copy + slot) = vm->compiler.data_relocs[i].addend;
@@ -143,7 +132,6 @@ int cc_save_bytecode(JCC *vm, const char *path) {
     if (!is_operand) {
         fprintf(stderr, "error: failed to allocate operand map\n");
         free(text_copy);
-        fclose(f);
         return -1;
     }
     // Note: text_seg[0] is metadata (main entry offset), skip it
@@ -154,19 +142,17 @@ int cc_save_bytecode(JCC *vm, const char *path) {
         int word_count =
             get_instruction_word_count(text_copy, i, num_instructions);
         if (word_count == -1) {
-            fprintf(stderr, "error: unknown opcode %d while saving bytecode\n", op);
+            fprintf(stderr, "error: unknown opcode %d while writing bytecode\n", op);
             free(is_operand);
             free(data_copy);
             free(text_copy);
-            fclose(f);
             return -1;
         }
         if (word_count < 0) {
-            fprintf(stderr, "error: truncated opcode %d while saving bytecode\n", op);
+            fprintf(stderr, "error: truncated opcode %d while writing bytecode\n", op);
             free(is_operand);
             free(data_copy);
             free(text_copy);
-            fclose(f);
             return -1;
         }
         for (int j = 1; j < word_count && i + j < num_instructions; j++) {
@@ -266,10 +252,7 @@ int cc_save_bytecode(JCC *vm, const char *path) {
         }
     }
 
-    fclose(f);
-
     if (vm->debug_vm) {
-        printf("Saved bytecode to %s:\n", path);
         printf("  Text size: %lld bytes (%lld instructions)\n", text_size, num_instructions);
         printf("  Data size: %lld bytes\n", data_size);
         printf("  Data relocations: %lld\n", data_reloc_count);
@@ -287,8 +270,36 @@ write_error:
     fprintf(stderr, "error: failed to write bytecode: %s\n", strerror(errno));
     if (data_copy) free(data_copy);
     if (text_copy) free(text_copy);
-    fclose(f);
     return -1;
+}
+
+int cc_save_bytecode(JCC *vm, const char *path) {
+    if (!vm || !path) {
+        fprintf(stderr, "error: invalid arguments to cc_save_bytecode\n");
+        return -1;
+    }
+
+    if (!vm->text_seg || !vm->data_seg) {
+        fprintf(stderr, "error: no bytecode to save (compile first)\n");
+        return -1;
+    }
+
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        fprintf(stderr, "error: failed to open %s for writing: %s\n", path, strerror(errno));
+        return -1;
+    }
+
+    int rc = cc_write_bytecode(vm, f);
+    fclose(f);
+    if (rc != 0)
+        return -1;
+
+    if (vm->debug_vm) {
+        printf("Saved bytecode to %s\n", path);
+    }
+
+    return 0;
 }
 
 static int load_bytecode(JCC *vm, const char *data, size_t size) {

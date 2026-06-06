@@ -1,4 +1,4 @@
-// JCC_FLAGS: -std=c23
+// JCC_FLAGS: --std=c23
 // Test C23 digit separators (single quotes in numeric literals)
 
 int main() {

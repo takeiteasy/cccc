@@ -1,4 +1,4 @@
-// JCC_FLAGS: -std=c99
+// JCC_FLAGS: --std=c99
 int f(void) {
     int x = 1;
     x = 2;

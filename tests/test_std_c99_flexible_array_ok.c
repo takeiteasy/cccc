@@ -1,4 +1,4 @@
-// JCC_FLAGS: -std=c99
+// JCC_FLAGS: --std=c99
 struct S {
     int len;
     int data[];

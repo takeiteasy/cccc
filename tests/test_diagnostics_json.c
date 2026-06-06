@@ -1,4 +1,4 @@
-// JCC_FLAGS: -Wunused -fdiagnostics-format=json
+// JCC_FLAGS: -Wunused --json
 // JCC_EXPECT_STDERR: "severity":"warning"
 // JCC_EXPECT_STDERR: "option":"-Wunused"
 // JCC_REJECT_STDERR: warnings generated.

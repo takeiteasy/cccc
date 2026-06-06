@@ -90,7 +90,7 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
     if use_leaks:
         if platform == "macos":
             profile_json = vm_profile_path(profile_dir, test_name, "source")
-            profile_args = ["--vm-profile-json", str(profile_json)] if profile_json else []
+            profile_args = ["--vm-profile", "--json"] if profile_json else []
             normal_cmd = [
                 str(jcc), "-I./include", *jcc_args, *per_test_flags,
                 *profile_args, str(test_file),
@@ -131,7 +131,7 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
             cmd = None
         elif platform == "linux":
             profile_json = vm_profile_path(profile_dir, test_name, "source")
-            profile_args = ["--vm-profile-json", str(profile_json)] if profile_json else []
+            profile_args = ["--vm-profile", "--json"] if profile_json else []
             cmd = [
                 "valgrind",
                 "--leak-check=full",
@@ -146,7 +146,7 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
             ]
         elif platform == "windows":
             profile_json = vm_profile_path(profile_dir, test_name, "source")
-            profile_args = ["--vm-profile-json", str(profile_json)] if profile_json else []
+            profile_args = ["--vm-profile", "--json"] if profile_json else []
             cmd = [
                 "drmemory",
                 "-batch",
@@ -161,14 +161,14 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
             ]
         else:
             profile_json = vm_profile_path(profile_dir, test_name, "source")
-            profile_args = ["--vm-profile-json", str(profile_json)] if profile_json else []
+            profile_args = ["--vm-profile", "--json"] if profile_json else []
             cmd = [
                 str(jcc), "-I./include", *jcc_args, *per_test_flags,
                 *profile_args, str(test_file),
             ]
     else:
         profile_json = vm_profile_path(profile_dir, test_name, "source")
-        profile_args = ["--vm-profile-json", str(profile_json)] if profile_json else []
+        profile_args = ["--vm-profile", "--json"] if profile_json else []
         cmd = [
             str(jcc), "-I./include", *jcc_args, *per_test_flags,
             *profile_args, str(test_file),
@@ -179,6 +179,8 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
         start = time.perf_counter()
         result = subprocess.run(cmd, capture_output=True, text=True, cwd=script_dir)
         elapsed = time.perf_counter() - start
+        if profile_json and result.stdout:
+            Path(profile_json).write_text(result.stdout)
         output = result.stdout + result.stderr
         exit_code = result.returncode
 
@@ -308,7 +310,7 @@ def run_jbc_roundtrip(idx, test_file, test_name, jcc, script_dir, jcc_args,
             }
 
         profile_json = vm_profile_path(profile_dir, test_name, "jbc")
-        profile_args = ["--vm-profile-json", str(profile_json)] if profile_json else []
+        profile_args = ["--vm-profile", "--json"] if profile_json else []
         run_cmd = [str(jcc), *profile_args, str(jbc_path)]
         start = time.perf_counter() if bench else None
         run = subprocess.run(run_cmd, capture_output=True, text=True, cwd=script_dir)
