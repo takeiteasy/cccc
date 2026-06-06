@@ -248,6 +248,65 @@ C17 is a bug-fix release — no new language features or library functions were 
 
 ---
 
+## Microsoft Extensions
+
+A subset of MSVC's compiler extensions is recognised by JCC. The feasibility,
+no-op policy, and the question of which extensions to support versus reject
+are open design questions tracked in
+[#289](https://todo.sr.ht/~takeiteasy/jcc/289). The table below mirrors the
+groups from that ticket.
+
+| Feature | Status | Notes |
+|---|---|---|
+| `__declspec(align(n))` | ✗ | Spelling alias of `__attribute__((aligned(n)))` — pending |
+| `__declspec(deprecated)` | ✗ | Maps to existing `-Wdeprecated` — pending |
+| `__declspec(dllimport)` / `dllexport` | ✗ | JCC module export — pending |
+| `__declspec(naked)` | ✗ | No-op in the VM — pending |
+| `__declspec(noalias)` / `noinline` / `inline` | ✗ | Hint-only — pending |
+| `__declspec(noreturn)` / `nothrow` | ✗ | C11 equivalents exist — pending |
+| `__declspec(restrict)` | ✗ | Lands with [#267](https://todo.sr.ht/~takeiteasy/jcc/267)–[#269](https://todo.sr.ht/~takeiteasy/jcc/269) restrict work |
+| `__declspec(safebuffers)` / `selectany` / `code_seg` / `allocate` | ✗ | No-op shims — pending |
+| `__declspec(thread)` | ✗ | TLS via VM per-thread storage — pending |
+| `__cdecl` / `__stdcall` / `__fastcall` / `__thiscall` / `__vectorcall` | ✗ | Calling-convention keywords, no-op (JCC has a single VM ABI) — pending |
+| `__ptr32` / `__ptr64` / `__sptr` / `__uptr` / `__unaligned` / `__w64` | ✗ | Pointer modifiers, no-op — pending |
+| `__forceinline` / `__inline` | ✗ | Fold to existing `inline` — pending |
+| `__assume(expr)` | ✗ | Optimizer hint — pending |
+| `__noop` | ✗ | Variable-arg no-op builtin — pending |
+| `__debugbreak` | ✗ | Trap opcode — pending |
+| `__int8` / `__int16` / `__int32` / `__int64` | ✗ | Spelling aliases of `<stdint.h>` types — pending |
+| `__try` / `__except` / `__finally` / `__leave` | ✗ | SEH; parsing is non-trivial and tied to the Windows kernel unwinder — see [#289](https://todo.sr.ht/~takeiteasy/jcc/289) |
+| `__declspec(uuid)` / `__uuidof` | ✗ | COM-specific; not applicable to C — see [#289](https://todo.sr.ht/~takeiteasy/jcc/289) |
+| `__clrcall` / `__interface` / `__if_exists` / `#pragma managed` | ✗ | C++/CLI-specific; rejected — see [#289](https://todo.sr.ht/~takeiteasy/jcc/289) |
+| `__readfsbyte` / `__readgsbyte` / `__readcr*` | ✗ | Segment-prefix intrinsics — pending |
+| `_ReturnAddress` / `_AddressOfReturnAddress` | ✗ | VM frame inspection opcode — pending |
+| `_InterlockedCompareExchange*` / `_InterlockedExchange*` / `_InterlockedIncrement*` / `_InterlockedAdd*` | ✗ | Layered on existing `__atomic_*` opcodes — pending |
+| `_rotl8/16/32/64` / `_rotr8/16/32/64` | ✗ | Rotate intrinsics — pending |
+| `_bittest*` / `_bittestandset` / `_bittestandreset` / `_bittestandcomplement` | ✗ | Bit-test intrinsics — pending |
+| `__popcnt16/32/64` | ✗ | Population count intrinsics — pending |
+| `__cpuid` / `__cpuidex` | ✗ | Host CPU info — pending |
+| `__emul` / `__emulu` / `_umul128` / `__umulh` | ✗ | 64-bit multiplication helpers — pending |
+| `#pragma once` | ✓ | |
+| `#pragma comment(lib, "x")` | ✗ | Link hint, no-op — pending |
+| `#pragma warning(push/pop/disable/default)` / `suppress:` | ✗ | Maps to JCC's `-W` system — pending |
+| `#pragma pack(...)` | ✓ | |
+| `#pragma message("...")` | ✓ | |
+| `#pragma region` / `#pragma endregion` | ✗ | IDE-only, no-op — pending |
+| `#pragma intrinsic(...)` / `#pragma function(...)` | ✗ | Intrinsic toggle, no-op — pending |
+| `#pragma optimize(...)` | ✗ | No-op — pending |
+| `#pragma loop(...)` | ✗ | Loop-hint pragma, no-op — pending |
+| `#pragma data_seg` / `bss_seg` / `code_seg` | ✗ | Section placement, no-op — pending |
+| `#pragma section(...)` | ✗ | No-op — pending |
+| `#pragma init_seg("lib")` | ✗ | No-op — pending |
+| `#pragma runtime_checks(...)` / `strict_gs_check` | ✗ | No-op — pending |
+| `__pragma(...)` | ✗ | In-macro pragma wrapper — pending |
+| `_MSC_VER` / `_MSC_FULL_VER` / `_MSC_BUILD` | ✗ | JCC-specific value in compat header — pending |
+| `_MSVC_LANG` / `_MSC_EXTENSIONS` | ✗ | `201710L` / `1` in compat header — pending |
+| `_MSC_WARNING_DURATION` | ✗ | `0` in compat header — pending |
+| `__FUNCSIG__` / `__FUNCDNAME__` / `__FUNCTION__` | ✗ | Implementable via reflection — pending |
+| `__COUNTER__` | ✗ | Pre-existing extension? verify and document — pending |
+
+---
+
 ## Built-in Functions
 
 JCC supports a subset of GCC's `__builtin_*` functions. These are parsed and

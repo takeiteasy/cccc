@@ -174,6 +174,8 @@ typedef enum {
  * @function __jcc_get_vm
  * @abstract Builtin that returns the current parent VM context.
  * @discussion Set before calling a pragma macro and cleared after.
+ *             Use the @c _VM convenience macro inside a macro body to refer
+ *             to the active VM instance.
  * @return Pointer to the current JCC VM instance.
  */
 extern JCC *__jcc_get_vm(void);
@@ -190,6 +192,7 @@ extern JCC *__jcc_get_vm(void);
  * @param vm The VM context.
  * @param prefix Prefix for the generated name.
  * @return An arena-allocated string of the form "<prefix>__<n>".
+ * @discussion Convenience wrapper: $gensym(prefix).
  */
 const char *__jcc_gensym(JCC *vm, const char *prefix);
 
@@ -200,6 +203,7 @@ const char *__jcc_gensym(JCC *vm, const char *prefix);
  *             depends on @a header. The header string must include delimiters,
  *             e.g. @c "<string.h>" or @c "\"myheader.h\"". Duplicate registrations
  *             for the same header are silently ignored.
+ *             Convenience wrapper: $forward_include(header).
  * @param vm     The VM context.
  * @param header The header string including angle-brackets or quotes.
  */
@@ -212,6 +216,7 @@ void __jcc_forward_include(JCC *vm, const char *header);
  *             and return the resulting node without splicing it into the AST
  *             or recursing into nested macro calls. If @a node is not a macro
  *             call, it is returned unchanged (identity).
+ *             Convenience wrapper: $macroexpand_1(node).
  * @param vm The VM context.
  * @param node The node to (possibly) expand.
  * @return The expanded node, or @a node itself if it is not a macro call.
@@ -224,7 +229,7 @@ $node_t *__jcc_macroexpand_1(JCC *vm, $node_t *node);
  * @discussion Repeatedly calls @c __jcc_macroexpand_1 on the top-level node
  *             until it is no longer an @c ND_MACRO_CALL (i.e. the form is
  *             stable). Does not recurse into child nodes. Respects the VM's
- *             @c macro_recursion_limit.
+ *             @c macro_recursion_limit.  Convenience wrapper: $macroexpand(node).
  * @param vm The VM context.
  * @param node The node to fully expand.
  * @return The fully expanded node, or @a node itself if it is not a macro call.
@@ -241,6 +246,7 @@ $node_t *__jcc_macroexpand(JCC *vm, $node_t *node);
  * @param vm The VM context.
  * @return Opaque token for the active macro call site, or NULL outside macro
  *         execution.
+ * @discussion Convenience wrapper: $current_token().
  */
 $token_t *__jcc_ast_current_token(JCC *vm);
 
@@ -252,6 +258,7 @@ $token_t *__jcc_ast_current_token(JCC *vm);
  * @return Arena-allocated synthetic token, or NULL on error.
  * @discussion Use this when a generated node should diagnose against a stable
  *             generated location instead of the macro call or an input node.
+ *             Convenience wrapper: $synthetic_token(label).
  */
 $token_t *__jcc_ast_synthetic_token(JCC *vm, const char *label);
 
@@ -260,6 +267,7 @@ $token_t *__jcc_ast_synthetic_token(JCC *vm, const char *label);
  * @abstract Return the opaque source token attached to a node.
  * @param node Node to inspect.
  * @return The node token, or NULL.
+ * @discussion Convenience wrapper: $token_from_node(node).
  */
 $token_t *__jcc_ast_token_from_node($node_t *node);
 
@@ -270,6 +278,7 @@ $token_t *__jcc_ast_token_from_node($node_t *node);
  * @param tok Token from __jcc_ast_current_token(),
  *            __jcc_ast_synthetic_token(), or __jcc_ast_token_from_node().
  * @return node, for chaining.
+ * @discussion Convenience wrapper: $set_token(node, tok).
  */
 $node_t *__jcc_ast_set_token($node_t *node, $token_t *tok);
 
@@ -279,6 +288,7 @@ $node_t *__jcc_ast_set_token($node_t *node, $token_t *tok);
  * @param dst Generated node to update.
  * @param src Source node whose location should be reused.
  * @return dst, for chaining.
+ * @discussion Convenience wrapper: $copy_location(dst, src).
  */
 $node_t *__jcc_ast_copy_location($node_t *dst, $node_t *src);
 
@@ -297,6 +307,7 @@ $node_t *__jcc_ast_copy_location($node_t *dst, $node_t *src);
  *             prints the error with file/line/col and source snippet then
  *             aborts via longjmp or exit.  When vm->collect_errors is set
  *             it records the error and compilation may continue.
+ *             Convenience wrapper: $macro_error_at(node, ...).
  */
 void __jcc_macro_error_at(JCC *vm, $node_t *node, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
@@ -309,6 +320,7 @@ void __jcc_macro_error_at(JCC *vm, $node_t *node, const char *fmt, ...)
  * @param fmt printf-style format string, followed by format arguments.
  * @discussion Emitted only when -Wjcc-macro is enabled. Non-fatal unless
  *             promoted with -Werror or -Werror=jcc-macro.
+ *             Convenience wrapper: $macro_warning_at(node, ...).
  */
 void __jcc_macro_warning_at(JCC *vm, $node_t *node, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
@@ -345,6 +357,7 @@ void __jcc_macro_warning_at(JCC *vm, $node_t *node, const char *fmt, ...)
  *             time; there is no runtime overhead.  Expressions and statements
  *             are auto-detected.  Capped at ~6 splice nodes due to the 8-
  *             register FFI limit; use __jcc_quote_n for more.
+ *             Convenience wrapper: $quote(tmpl, ...).
  */
 $node_t *__jcc_quote(JCC *vm, const char *tmpl, ...);
 
@@ -359,6 +372,7 @@ $node_t *__jcc_quote(JCC *vm, const char *tmpl, ...);
  * @param count Length of the nodes array.  If any $K in the template exceeds
  *              count, a compile-time error is emitted.
  * @return The parsed and substituted AST node, or NULL on error.
+ * @discussion Convenience wrapper: $quote_n(tmpl, nodes, count).
  */
 $node_t *__jcc_quote_n(JCC *vm, const char *tmpl, $node_t **nodes, int count);
 
@@ -374,7 +388,7 @@ $node_t *__jcc_quote_n(JCC *vm, const char *tmpl, $node_t **nodes, int count);
  * @discussion A single node is a valid chain of length 1.  An existing
  *             `->next` chain (e.g. `__jcc_ast_block(...)->body`) can also be
  *             passed directly as the splice argument without going through
- *             this helper.
+ *             this helper.  Convenience wrapper: $node_list(nodes, count).
  */
 $node_t *__jcc_node_list(JCC *vm, $node_t **nodes, int count);
 
@@ -382,171 +396,493 @@ $node_t *__jcc_node_list(JCC *vm, $node_t **nodes, int count);
 // Type Lookup and Introspection
 // ============================================================================
 
-/*! Find a type by name (struct/union/enum tag). Returns NULL if not found. */
+/*!
+ * @function __jcc_ast_find_type
+ * @abstract Look up a type by tag name (struct/union/enum).
+ * @param vm The VM context.
+ * @param name The tag name to look up.
+ * @return The matching $type_t*, or NULL if not found.
+ * @discussion Convenience wrapper: $find_type(name).
+ */
 $type_t *__jcc_ast_find_type(JCC *vm, const char *name);
 
-/*! Check if a type exists by name. */
+/*!
+ * @function __jcc_ast_type_exists
+ * @abstract Check whether a type is currently in scope by name.
+ * @param vm The VM context.
+ * @param name The type name to look up.
+ * @return True if the name resolves to a type, false otherwise.
+ * @discussion Convenience wrapper: $type_exists(name).
+ */
 bool __jcc_ast_type_exists(JCC *vm, const char *name);
 
-/*! Lookup a type by name (includes built-in types). */
+/*!
+ * @function __jcc_ast_get_type
+ * @abstract Look up a type by name, falling back to the built-in primitives.
+ * @param vm The VM context.
+ * @param name The type name to look up.
+ * @return The matching $type_t*, or NULL if not found.
+ * @discussion Convenience wrapper: $get_type(name).
+ */
 $type_t *__jcc_ast_get_type(JCC *vm, const char *name);
 
-/*! Get the $type_kind_t of a type. */
+/*!
+ * @function __jcc_ast_type_kind
+ * @abstract Return the $type_kind_t tag of a type.
+ * @param ty The type to inspect.
+ * @return The type kind (tk_int, tk_struct, tk_ptr, ...).
+ * @discussion Convenience wrapper: $type_kind(ty).
+ */
 $type_kind_t __jcc_ast_type_kind($type_t *ty);
 
-/*! Get sizeof() value in bytes. */
+/*!
+ * @function __jcc_ast_type_size
+ * @abstract Return sizeof(ty) in bytes.
+ * @param ty The type to inspect.
+ * @return The size in bytes.
+ * @discussion Convenience wrapper: $type_size(ty).
+ */
 int __jcc_ast_type_size($type_t *ty);
 
-/*! Get alignment in bytes. */
+/*!
+ * @function __jcc_ast_type_align
+ * @abstract Return _Alignof(ty) in bytes.
+ * @param ty The type to inspect.
+ * @return The alignment in bytes.
+ * @discussion Convenience wrapper: $type_align(ty).
+ */
 int __jcc_ast_type_align($type_t *ty);
 
-/*! Check if type is unsigned. */
+/*!
+ * @function __jcc_ast_type_is_unsigned
+ * @abstract Test whether an integer type is unsigned.
+ * @param ty The type to inspect.
+ * @return True for unsigned integer types, false otherwise.
+ * @discussion Convenience wrapper: $type_is_unsigned(ty).
+ */
 bool __jcc_ast_type_is_unsigned($type_t *ty);
 
-/*! Check if type is const-qualified. */
+/*!
+ * @function __jcc_ast_type_is_const
+ * @abstract Test whether a type is const-qualified.
+ * @param ty The type to inspect.
+ * @return True if ty has a const qualifier, false otherwise.
+ * @discussion Convenience wrapper: $type_is_const(ty).
+ */
 bool __jcc_ast_type_is_const($type_t *ty);
 
-/*! For pointer/array types: get the base type. */
+/*!
+ * @function __jcc_ast_type_base
+ * @abstract Return the element type of a pointer or array.
+ * @param ty The pointer/array type to inspect.
+ * @return The base $type_t*, or NULL if ty is not a pointer or array.
+ * @discussion Convenience wrapper: $type_base(ty).
+ */
 $type_t *__jcc_ast_type_base($type_t *ty);
 
-/*! For array types: get the array length. Returns -1 if not an array. */
+/*!
+ * @function __jcc_ast_type_array_len
+ * @abstract Return the fixed length of an array type.
+ * @param ty The array type to inspect.
+ * @return The element count for tk_array types, -1 otherwise.
+ * @discussion Convenience wrapper: $type_array_len(ty).
+ */
 int __jcc_ast_type_array_len($type_t *ty);
 
-/*! For function types: get return type. */
+/*!
+ * @function __jcc_ast_type_return_type
+ * @abstract Return the return type of a function type.
+ * @param ty The function type to inspect.
+ * @return The return $type_t*, or NULL if ty is not a function type.
+ * @discussion Convenience wrapper: $type_return_type(ty).
+ */
 $type_t *__jcc_ast_type_return_type($type_t *ty);
 
-/*! For function types: get parameter count. */
+/*!
+ * @function __jcc_ast_type_param_count
+ * @abstract Return the number of declared parameters of a function type.
+ * @param ty The function type to inspect.
+ * @return The parameter count for tk_func types, -1 otherwise.
+ * @discussion Convenience wrapper: $type_param_count(ty).
+ */
 int __jcc_ast_type_param_count($type_t *ty);
 
-/*! For function types: get parameter type at index. */
+/*!
+ * @function __jcc_ast_type_param_at
+ * @abstract Return the type of the parameter at the given index.
+ * @param ty The function type to inspect.
+ * @param index Zero-based parameter index.
+ * @return The parameter's $type_t*, or NULL on out-of-range or non-function ty.
+ * @discussion Convenience wrapper: $type_param_at(ty, index).
+ */
 $type_t *__jcc_ast_type_param_at($type_t *ty, int index);
 
-/*! For function types: check if variadic. */
+/*!
+ * @function __jcc_ast_type_is_variadic
+ * @abstract Test whether a function type is variadic.
+ * @param ty The type to inspect.
+ * @return True for variadic function types, false otherwise.
+ * @discussion Convenience wrapper: $type_is_variadic(ty).
+ */
 bool __jcc_ast_type_is_variadic($type_t *ty);
 
-/*! Get type name (for named types). */
+/*!
+ * @function __jcc_ast_type_name
+ * @abstract Return the user-visible name of a type, if any.
+ * @param ty The type to inspect.
+ * @return A NUL-terminated string owned by ty, or NULL for anonymous types.
+ * @discussion Convenience wrapper: $type_name(ty).
+ */
 const char *__jcc_ast_type_name($type_t *ty);
 
-/*! Create a pointer type to base. */
+/*!
+ * @function __jcc_ast_make_pointer
+ * @abstract Build a pointer-to-base type.
+ * @param vm The VM context.
+ * @param base The pointed-to type.
+ * @return A $type_t* representing "base *", or NULL on error.
+ * @discussion Convenience wrapper: $make_pointer(base).
+ */
 $type_t *__jcc_ast_make_pointer(JCC *vm, $type_t *base);
 
-/*! Create an array type with specified length. */
+/*!
+ * @function __jcc_ast_make_array
+ * @abstract Build a fixed-length array type.
+ * @param vm The VM context.
+ * @param base The element type.
+ * @param length The element count.
+ * @return A $type_t* representing "base[length]", or NULL on error.
+ * @discussion Convenience wrapper: $make_array(base, length).
+ */
 $type_t *__jcc_ast_make_array(JCC *vm, $type_t *base, int length);
 
 // Ticket #171: qualified type constructors
-/*! Return a const-qualified copy of ty. */
+/*!
+ * @function __jcc_ast_make_const
+ * @abstract Return a const-qualified copy of ty.
+ * @param vm The VM context.
+ * @param ty The type to qualify.
+ * @return A const-qualified $type_t*, or NULL on error.
+ * @discussion Convenience wrapper: $make_const(ty).
+ */
 $type_t *__jcc_ast_make_const(JCC *vm, $type_t *ty);
-/*! Return a volatile-qualified copy of ty. */
+/*!
+ * @function __jcc_ast_make_volatile
+ * @abstract Return a volatile-qualified copy of ty.
+ * @param vm The VM context.
+ * @param ty The type to qualify.
+ * @return A volatile-qualified $type_t*, or NULL on error.
+ * @discussion Convenience wrapper: $make_volatile(ty).
+ */
 $type_t *__jcc_ast_make_volatile(JCC *vm, $type_t *ty);
 
 // ============================================================================
 // Enum Reflection
 // ============================================================================
 
-/*! Get the number of enum constants. Returns -1 if not an enum. */
+/*!
+ * @function __jcc_ast_enum_count
+ * @abstract Return the number of constants in an enum type.
+ * @param vm The VM context.
+ * @param enum_type The enum type to inspect.
+ * @return The constant count, or -1 if enum_type is not an enum.
+ * @discussion Convenience wrapper: $enum_count(ty).
+ */
 int __jcc_ast_enum_count(JCC *vm, $type_t *enum_type);
 
-/*! Get enum constant at index (0-based). */
+/*!
+ * @function __jcc_ast_enum_at
+ * @abstract Return the enum constant at a given index.
+ * @param vm The VM context.
+ * @param enum_type The enum type to inspect.
+ * @param index Zero-based index.
+ * @return The $enum_constant_t*, or NULL on out-of-range or non-enum.
+ * @discussion Convenience wrapper: $enum_at(ty, index).
+ */
 $enum_constant_t *__jcc_ast_enum_at(JCC *vm, $type_t *enum_type, int index);
 
-/*! Find enum constant by name. */
+/*!
+ * @function __jcc_ast_enum_find
+ * @abstract Look up an enum constant by name.
+ * @param vm The VM context.
+ * @param enum_type The enum type to search.
+ * @param name The constant name to look up.
+ * @return The matching $enum_constant_t*, or NULL if not found.
+ * @discussion Convenience wrapper: $enum_find(ty, name).
+ */
 $enum_constant_t *__jcc_ast_enum_find(JCC *vm, $type_t *enum_type,
                                     const char *name);
 
-/*! Get enum constant name. */
+/*!
+ * @function __jcc_ast_enum_constant_name
+ * @abstract Return the name of an enum constant.
+ * @param ec The enum constant.
+ * @return A NUL-terminated string owned by ec.
+ * @discussion Convenience wrapper: $enum_constant_name(ec).
+ */
 const char *__jcc_ast_enum_constant_name($enum_constant_t *ec);
 
-/*! Get enum constant value. */
+/*!
+ * @function __jcc_ast_enum_constant_value
+ * @abstract Return the integer value of an enum constant.
+ * @param ec The enum constant.
+ * @return The constant's integer value.
+ * @discussion Convenience wrapper: $enum_constant_value(ec).
+ */
 int __jcc_ast_enum_constant_value($enum_constant_t *ec);
 
-/*! Get the name of an enum type. */
+/*!
+ * @function __jcc_ast_enum_name
+ * @abstract Return the tag name of an enum type.
+ * @param e The enum type to inspect.
+ * @return A NUL-terminated string owned by e.
+ * @discussion Convenience wrapper: $enum_name(ty).
+ */
 const char *__jcc_ast_enum_name($type_t *e);
 
-/*! Get the number of values in an enum. */
+/*!
+ * @function __jcc_ast_enum_value_count
+ * @abstract Return the number of values in an enum type.
+ * @param e The enum type to inspect.
+ * @return The constant count, or -1 if e is not an enum.
+ * @discussion Convenience wrapper: $enum_value_count(ty).
+ */
 int __jcc_ast_enum_value_count($type_t *e);
 
-/*! Get the name of an enum value at index. */
+/*!
+ * @function __jcc_ast_enum_value_name
+ * @abstract Return the name of the enum constant at the given index.
+ * @param e The enum type to inspect.
+ * @param index Zero-based index.
+ * @return A NUL-terminated string, or NULL on out-of-range.
+ * @discussion Convenience wrapper: $enum_value_name(ty, index).
+ */
 const char *__jcc_ast_enum_value_name($type_t *e, int index);
 
-/*! Get the integer value of an enum constant at index. */
+/*!
+ * @function __jcc_ast_enum_value
+ * @abstract Return the integer value of the enum constant at the given index.
+ * @param e The enum type to inspect.
+ * @param index Zero-based index.
+ * @return The constant's integer value, or -1 on out-of-range.
+ * @discussion Convenience wrapper: $enum_value(ty, index).
+ */
 int __jcc_ast_enum_value($type_t *e, int index);
 
 // ============================================================================
 // Struct/Union Member Introspection
 // ============================================================================
 
-/*! Get the number of members. Returns -1 if not a struct/union. */
+/*!
+ * @function __jcc_ast_struct_member_count
+ * @abstract Return the number of members of a struct or union type.
+ * @param vm The VM context.
+ * @param struct_type The struct or union type to inspect.
+ * @return The member count, or -1 if struct_type is not a struct/union.
+ * @discussion Convenience wrapper: $struct_member_count(ty).
+ */
 int __jcc_ast_struct_member_count(JCC *vm, $type_t *struct_type);
 
-/*! Get member at index (0-based). */
+/*!
+ * @function __jcc_ast_struct_member_at
+ * @abstract Return the member at the given index.
+ * @param vm The VM context.
+ * @param struct_type The struct or union type to inspect.
+ * @param index Zero-based member index.
+ * @return The $member_t*, or NULL on out-of-range or non-aggregate.
+ * @discussion Convenience wrapper: $struct_member_at(ty, index).
+ */
 $member_t *__jcc_ast_struct_member_at(JCC *vm, $type_t *struct_type,
                                         int index);
 
-/*! Find member by name. */
+/*!
+ * @function __jcc_ast_struct_member_find
+ * @abstract Look up a struct or union member by name.
+ * @param vm The VM context.
+ * @param struct_type The struct or union type to search.
+ * @param name The member name to look up.
+ * @return The matching $member_t*, or NULL if not found.
+ * @discussion Convenience wrapper: $struct_member_find(ty, name).
+ */
 $member_t *__jcc_ast_struct_member_find(JCC *vm, $type_t *struct_type,
                                         const char *name);
 
-/*! Get member name. */
+/*!
+ * @function __jcc_ast_member_name
+ * @abstract Return the name of a struct/union member.
+ * @param m The member to inspect.
+ * @return A NUL-terminated string owned by m.
+ * @discussion Convenience wrapper: $member_name(m).
+ */
 const char *__jcc_ast_member_name($member_t *m);
 
-/*! Get member type. */
+/*!
+ * @function __jcc_ast_member_type
+ * @abstract Return the type of a struct/union member.
+ * @param m The member to inspect.
+ * @return The member's $type_t*.
+ * @discussion Convenience wrapper: $member_type(m).
+ */
 $type_t *__jcc_ast_member_type($member_t *m);
 
-/*! Get member offset in bytes. */
+/*!
+ * @function __jcc_ast_member_offset
+ * @abstract Return the byte offset of a struct/union member.
+ * @param m The member to inspect.
+ * @return The offset in bytes.
+ * @discussion Convenience wrapper: $member_offset(m).
+ */
 int __jcc_ast_member_offset($member_t *m);
 
-/*! Check if member is a bitfield. */
+/*!
+ * @function __jcc_ast_member_is_bitfield
+ * @abstract Test whether a member is a bitfield.
+ * @param m The member to inspect.
+ * @return True if the member is a bitfield, false otherwise.
+ * @discussion Convenience wrapper: $member_is_bitfield(m).
+ */
 bool __jcc_ast_member_is_bitfield($member_t *m);
 
-/*! Get bitfield width. */
+/*!
+ * @function __jcc_ast_member_bitfield_width
+ * @abstract Return the bit width of a bitfield member.
+ * @param m The member to inspect.
+ * @return The bit width for bitfield members, 0 otherwise.
+ * @discussion Convenience wrapper: $member_bitfield_width(m).
+ */
 int __jcc_ast_member_bitfield_width($member_t *m);
 
 // ============================================================================
 // Global Symbol Introspection
 // ============================================================================
 
-/*! Find a global symbol by name. */
+/*!
+ * @function __jcc_ast_find_global
+ * @abstract Look up a global symbol by name.
+ * @param vm The VM context.
+ * @param name The global name to look up.
+ * @return The matching $obj_t*, or NULL if not found.
+ * @discussion Convenience wrapper: $find_global(name).
+ */
 $obj_t *__jcc_ast_find_global(JCC *vm, const char *name);
 
-/*! Get the total number of global symbols. */
+/*!
+ * @function __jcc_ast_global_count
+ * @abstract Return the total number of global symbols.
+ * @param vm The VM context.
+ * @return The count of globals.
+ * @discussion Convenience wrapper: $global_count().
+ */
 int __jcc_ast_global_count(JCC *vm);
 
-/*! Get global symbol at index (0-based). */
+/*!
+ * @function __jcc_ast_global_at
+ * @abstract Return the global symbol at the given index.
+ * @param vm The VM context.
+ * @param index Zero-based global index.
+ * @return The $obj_t* at the given slot, or NULL on out-of-range.
+ * @discussion Convenience wrapper: $global_at(index).
+ */
 $obj_t *__jcc_ast_global_at(JCC *vm, int index);
 
-/*! Get the name of an object. */
+/*!
+ * @function __jcc_ast_obj_name
+ * @abstract Return the name of a global object.
+ * @param obj The object to inspect.
+ * @return A NUL-terminated string owned by obj.
+ * @discussion Convenience wrapper: $obj_name(obj).
+ */
 const char *__jcc_ast_obj_name($obj_t *obj);
 
-/*! Get the type of an object. */
+/*!
+ * @function __jcc_ast_obj_type
+ * @abstract Return the type of a global object.
+ * @param obj The object to inspect.
+ * @return The object's $type_t*.
+ * @discussion Convenience wrapper: $obj_type(obj).
+ */
 $type_t *__jcc_ast_obj_type($obj_t *obj);
 
-/*! Check if object is a function. */
+/*!
+ * @function __jcc_ast_obj_is_function
+ * @abstract Test whether a global object is a function.
+ * @param obj The object to inspect.
+ * @return True for functions, false for variables.
+ * @discussion Convenience wrapper: $obj_is_function(obj).
+ */
 bool __jcc_ast_obj_is_function($obj_t *obj);
 
-/*! Check if object is a definition. */
+/*!
+ * @function __jcc_ast_obj_is_definition
+ * @abstract Test whether a global object has a definition.
+ * @param obj The object to inspect.
+ * @return True for defined objects, false for declarations only.
+ * @discussion Convenience wrapper: $obj_is_definition(obj).
+ */
 bool __jcc_ast_obj_is_definition($obj_t *obj);
 
-/*! Check if object has static linkage. */
+/*!
+ * @function __jcc_ast_obj_is_static
+ * @abstract Test whether a global object has internal (static) linkage.
+ * @param obj The object to inspect.
+ * @return True for static linkage, false for external.
+ * @discussion Convenience wrapper: $obj_is_static(obj).
+ */
 bool __jcc_ast_obj_is_static($obj_t *obj);
 
 // ============================================================================
 // AST Node Construction - Literals
 // ============================================================================
 
-/*! Create an integer literal node. */
+/*!
+ * @function __jcc_ast_int_literal
+ * @abstract Build an integer literal AST node.
+ * @param vm The VM context.
+ * @param value The integer value.
+ * @return An nk_num node for value.
+ * @discussion Convenience wrapper: $int_literal(value).
+ */
 $node_t *__jcc_ast_int_literal(JCC *vm, int64_t value);
 
-/*! Create a floating-point literal node. */
+/*!
+ * @function __jcc_ast_float_literal
+ * @abstract Build a floating-point literal AST node.
+ * @param vm The VM context.
+ * @param value The floating-point value.
+ * @return An nk_num node for value.
+ * @discussion Convenience wrapper: $float_literal(value).
+ */
 $node_t *__jcc_ast_float_literal(JCC *vm, double value);
 
-/*! Create a string literal node. */
+/*!
+ * @function __jcc_ast_string_literal
+ * @abstract Build a string literal AST node.
+ * @param vm The VM context.
+ * @param str A NUL-terminated string.
+ * @return An nk_num string-literal node.
+ * @discussion Convenience wrapper: $string_literal(str).
+ */
 $node_t *__jcc_ast_string_literal(JCC *vm, const char *str);
 
-/*! Create a variable reference node. */
+/*!
+ * @function __jcc_ast_var_ref
+ * @abstract Build a variable reference AST node.
+ * @param vm The VM context.
+ * @param name The variable name.
+ * @return An nk_var node referencing name.
+ * @discussion Convenience wrapper: $var_ref(name).
+ */
 $node_t *__jcc_ast_var_ref(JCC *vm, const char *name);
 
-/*! Create a reference to a function parameter.
- *  Use this when building function bodies to reference parameters by name.
+/*!
+ * @function __jcc_ast_param_ref
+ * @abstract Build a reference to a function parameter by name.
+ * @param vm The VM context.
+ * @param fn The function object whose parameter is being referenced.
+ * @param name The parameter name.
+ * @return An nk_var node for the named parameter.
+ * @discussion Use this when building function bodies to reference parameters
+ *             by name.  Convenience wrapper: $param_ref(fn, name).
  */
 $node_t *__jcc_ast_param_ref(JCC *vm, $obj_t *fn, const char *name);
 
@@ -554,66 +890,197 @@ $node_t *__jcc_ast_param_ref(JCC *vm, $obj_t *fn, const char *name);
 // AST Node Construction - Expressions
 // ============================================================================
 
-/*! Create a binary operation node. */
+/*!
+ * @function __jcc_ast_binary
+ * @abstract Build a binary operation AST node.
+ * @param vm The VM context.
+ * @param op The operator kind (nk_add, nk_sub, ...).
+ * @param left The left-hand operand.
+ * @param right The right-hand operand.
+ * @return The binary expression node.
+ * @discussion Convenience wrapper: $binary(op, left, right).
+ */
 $node_t *__jcc_ast_binary(JCC *vm, $node_kind_t op, $node_t *left,
                             $node_t *right);
 
-/*! Create a unary operation node. */
+/*!
+ * @function __jcc_ast_unary
+ * @abstract Build a unary operation AST node.
+ * @param vm The VM context.
+ * @param op The operator kind (nk_neg, nk_deref, ...).
+ * @param operand The operand expression.
+ * @return The unary expression node.
+ * @discussion Convenience wrapper: $unary(op, operand).
+ */
 $node_t *__jcc_ast_unary(JCC *vm, $node_kind_t op, $node_t *operand);
 
-/*! Create a type cast node. */
+/*!
+ * @function __jcc_ast_cast
+ * @abstract Build a type cast AST node.
+ * @param vm The VM context.
+ * @param expr The expression to cast.
+ * @param target_type The type to cast to.
+ * @return An nk_cast node.
+ * @discussion Convenience wrapper: $cast(expr, target_type).
+ */
 $node_t *__jcc_ast_cast(JCC *vm, $node_t *expr, $type_t *target_type);
 
 // Ticket #171: new expression builders
 
-/*! Create a ternary conditional expression node (cond ? then_expr : else_expr). */
+/*!
+ * @function __jcc_ast_cond
+ * @abstract Build a ternary conditional expression node (cond ? then : else).
+ * @param vm The VM context.
+ * @param cond The condition expression.
+ * @param then_expr The expression evaluated when cond is non-zero.
+ * @param else_expr The expression evaluated when cond is zero.
+ * @return An nk_cond node.
+ * @discussion Convenience wrapper: $cond(cond, then_expr, else_expr).
+ */
 $node_t *__jcc_ast_cond(JCC *vm, $node_t *cond, $node_t *then_expr,
                           $node_t *else_expr);
 
-/*! Create a typed null pointer node: (void *)0. */
+/*!
+ * @function __jcc_ast_null
+ * @abstract Build a typed null pointer node: (void *)0.
+ * @param vm The VM context.
+ * @return An nk_num node representing a typed NULL.
+ * @discussion Convenience wrapper: $null().
+ */
 $node_t *__jcc_ast_null(JCC *vm);
 
-/*! Return sizeof(ty) as a compile-time integer literal. */
+/*!
+ * @function __jcc_ast_sizeof_type
+ * @abstract Emit sizeof(ty) as a compile-time integer literal.
+ * @param vm The VM context.
+ * @param ty The type to measure.
+ * @return An nk_num node holding sizeof(ty).
+ * @discussion Convenience wrapper: $sizeof_type(ty).
+ */
 $node_t *__jcc_ast_sizeof_type(JCC *vm, $type_t *ty);
 
-/*! Return _Alignof(ty) as a compile-time integer literal. */
+/*!
+ * @function __jcc_ast_alignof_type
+ * @abstract Emit _Alignof(ty) as a compile-time integer literal.
+ * @param vm The VM context.
+ * @param ty The type to measure.
+ * @return An nk_num node holding _Alignof(ty).
+ * @discussion Convenience wrapper: $alignof_type(ty).
+ */
 $node_t *__jcc_ast_alignof_type(JCC *vm, $type_t *ty);
 
-/*! Return sizeof(expr): resolve the expression's type then emit its size. */
+/*!
+ * @function __jcc_ast_sizeof_expr
+ * @abstract Emit sizeof(expr): resolve the expression's type then its size.
+ * @param vm The VM context.
+ * @param expr The expression whose type to measure.
+ * @return An nk_num node holding sizeof(expr).
+ * @discussion Convenience wrapper: $sizeof_expr(expr).
+ */
 $node_t *__jcc_ast_sizeof_expr(JCC *vm, $node_t *expr);
 
-/*! Create an array subscript node: arr[idx], desugared as *(arr+idx). */
+/*!
+ * @function __jcc_ast_subscript
+ * @abstract Build an array subscript node: arr[idx], desugared as *(arr+idx).
+ * @param vm The VM context.
+ * @param arr The array (or pointer) expression.
+ * @param idx The index expression.
+ * @return An nk_add / nk_deref node pair representing the subscript.
+ * @discussion Convenience wrapper: $subscript(arr, idx).
+ */
 $node_t *__jcc_ast_subscript(JCC *vm, $node_t *arr, $node_t *idx);
 
-/*! Create a comma expression node: evaluate lhs for side effects, yield rhs. */
+/*!
+ * @function __jcc_ast_comma
+ * @abstract Build a comma expression: evaluate lhs, yield rhs.
+ * @param vm The VM context.
+ * @param lhs The expression evaluated for side effects.
+ * @param rhs The expression whose value is the result.
+ * @return An nk_comma node.
+ * @discussion Convenience wrapper: $comma(lhs, rhs).
+ */
 $node_t *__jcc_ast_comma(JCC *vm, $node_t *lhs, $node_t *rhs);
 
 // ============================================================================
 // AST Node Construction - Statements
 // ============================================================================
 
-/*! Create a return statement node. */
+/*!
+ * @function __jcc_ast_return
+ * @abstract Build a return statement node.
+ * @param vm The VM context.
+ * @param expr The value to return (may be NULL for `return;` in void functions).
+ * @return An nk_return node.
+ * @discussion Convenience wrapper: $return(expr).
+ */
 $node_t *__jcc_ast_return(JCC *vm, $node_t *expr);
 
-/*! Create a block (compound statement) node. */
+/*!
+ * @function __jcc_ast_block
+ * @abstract Build a block (compound statement) node.
+ * @param vm The VM context.
+ * @param stmts Array of statement nodes, or NULL if count is 0.
+ * @param count Number of statements in the array.
+ * @return An nk_block node.
+ * @discussion Convenience wrapper: $block(stmts, count).
+ */
 $node_t *__jcc_ast_block(JCC *vm, $node_t **stmts, int count);
 
-/*! Create an if statement node. */
+/*!
+ * @function __jcc_ast_if
+ * @abstract Build an if statement node.
+ * @param vm The VM context.
+ * @param cond The condition expression.
+ * @param then_body The body executed when cond is non-zero.
+ * @param else_body The body executed when cond is zero, or NULL.
+ * @return An nk_if node.
+ * @discussion Convenience wrapper: $if(cond, then_body, else_body).
+ */
 $node_t *__jcc_ast_if(JCC *vm, $node_t *cond, $node_t *then_body,
                         $node_t *else_body);
 
-/*! Create a switch statement node. */
+/*!
+ * @function __jcc_ast_switch
+ * @abstract Build a switch statement node.
+ * @param vm The VM context.
+ * @param cond The expression to switch on.
+ * @return An nk_switch node.  Use __jcc_ast_switch_add_case and
+ *         __jcc_ast_switch_set_default to populate it.
+ * @discussion Convenience wrapper: $switch(cond).
+ */
 $node_t *__jcc_ast_switch(JCC *vm, $node_t *cond);
 
-/*! Add a case to a switch statement. */
+/*!
+ * @function __jcc_ast_switch_add_case
+ * @abstract Append a case to a switch statement.
+ * @param vm The VM context.
+ * @param switch_node The switch node returned by __jcc_ast_switch.
+ * @param value The case value expression.
+ * @param body The body statement for this case.
+ * @discussion Convenience wrapper: $switch_add_case(sw, value, body).
+ */
 void __jcc_ast_switch_add_case(JCC *vm, $node_t *switch_node,
                                 $node_t *value, $node_t *body);
 
-/*! Set the default case for a switch statement. */
+/*!
+ * @function __jcc_ast_switch_set_default
+ * @abstract Set the default case for a switch statement.
+ * @param vm The VM context.
+ * @param switch_node The switch node returned by __jcc_ast_switch.
+ * @param body The default-case body statement.
+ * @discussion Convenience wrapper: $switch_set_default(sw, body).
+ */
 void __jcc_ast_switch_set_default(JCC *vm, $node_t *switch_node,
                                     $node_t *body);
 
-/*! Create an expression statement node. */
+/*!
+ * @function __jcc_ast_expr_stmt
+ * @abstract Build an expression statement node.
+ * @param vm The VM context.
+ * @param expr The expression to evaluate for side effects.
+ * @return An nk_expr_stmt node.
+ * @discussion Convenience wrapper: $expr_stmt(expr).
+ */
 $node_t *__jcc_ast_expr_stmt(JCC *vm, $node_t *expr);
 
 // ============================================================================
@@ -633,6 +1100,7 @@ $node_t *__jcc_ast_expr_stmt(JCC *vm, $node_t *expr);
  *        and will receive a stack offset when the function is compiled.
  *        For temporaries that must not capture user names, prefer
  *        __jcc_ast_local_var_unique().
+ * @discussion Convenience wrapper: $local_var(name, ty).
  */
 $node_t *__jcc_ast_local_var(JCC *vm, const char *name, $type_t *ty);
 
@@ -646,10 +1114,19 @@ $node_t *__jcc_ast_local_var(JCC *vm, const char *name, $type_t *ty);
  * @note  The generated name begins with ".L.." and is therefore not
  *        expressible as a user identifier — guaranteed no name capture.
  *        This is the safe default for macro temporaries.
+ * @discussion Convenience wrapper: $local_var_unique(ty).
  */
 $node_t *__jcc_ast_local_var_unique(JCC *vm, $type_t *ty);
 
-/*! Create an assignment node (target = value). */
+/*!
+ * @function __jcc_ast_assign
+ * @abstract Build an assignment node (target = value).
+ * @param vm The VM context.
+ * @param target The lvalue expression being assigned to.
+ * @param value The rvalue expression to assign.
+ * @return An nk_assign node, or NULL on error.
+ * @discussion Convenience wrapper: $assign(target, value).
+ */
 $node_t *__jcc_ast_assign(JCC *vm, $node_t *target, $node_t *value);
 
 /*!
@@ -663,6 +1140,7 @@ $node_t *__jcc_ast_assign(JCC *vm, $node_t *target, $node_t *value);
  * @note The callee is responsible for dereferencing pointers first;
  *       pass the struct value directly (use __jcc_ast_unary(ND_DEREF,…)
  *       for pointer-to-struct access).
+ * @discussion Convenience wrapper: $member(obj, name).
  */
 $node_t *__jcc_ast_member(JCC *vm, $node_t *obj, const char *name);
 
@@ -675,6 +1153,7 @@ $node_t *__jcc_ast_member(JCC *vm, $node_t *obj, const char *name);
  * @param args Array of argument nodes (may be NULL if n == 0).
  * @param n Number of arguments.
  * @return A nk_funcall node, or NULL on error.
+ * @discussion Convenience wrapper: $funcall(callee, args, n).
  */
 $node_t *__jcc_ast_funcall(JCC *vm, $node_t *callee, $node_t **args, int n);
 
@@ -686,6 +1165,7 @@ $node_t *__jcc_ast_funcall(JCC *vm, $node_t *callee, $node_t **args, int n);
  * @param body The loop body statement.
  * @return A nk_for node (JCC represents while as for with no init/inc),
  *         or NULL on error.
+ * @discussion Convenience wrapper: $while(cond, body).
  */
 $node_t *__jcc_ast_while(JCC *vm, $node_t *cond, $node_t *body);
 
@@ -698,6 +1178,7 @@ $node_t *__jcc_ast_while(JCC *vm, $node_t *cond, $node_t *body);
  * @param inc Increment expression (may be NULL).
  * @param body Loop body.
  * @return A nk_for node, or NULL on error.
+ * @discussion Convenience wrapper: $for(init, cond, inc, body).
  */
 $node_t *__jcc_ast_for(JCC *vm, $node_t *init, $node_t *cond,
                        $node_t *inc, $node_t *body);
@@ -709,6 +1190,7 @@ $node_t *__jcc_ast_for(JCC *vm, $node_t *init, $node_t *cond,
  * @param body The loop body.
  * @param cond The loop condition (tested after each iteration).
  * @return A nk_do node, or NULL on error.
+ * @discussion Convenience wrapper: $do_while(body, cond).
  */
 $node_t *__jcc_ast_do_while(JCC *vm, $node_t *body, $node_t *cond);
 
@@ -725,6 +1207,7 @@ $node_t *__jcc_ast_do_while(JCC *vm, $node_t *body, $node_t *cond);
  * @return The newly created function object, or NULL on error.
  * @discussion The function is automatically added to the globals list
  *             and will be compiled when the main program is compiled.
+ *             Convenience wrapper: $function(name, return_type).
  */
 $obj_t *__jcc_ast_function(JCC *vm, const char *name,
                             $type_t *return_type);
@@ -740,6 +1223,7 @@ $obj_t *__jcc_ast_function(JCC *vm, const char *name,
  *             Call this after creating a function or global variable when
  *             later macro-generated code at the same parse point should be
  *             able to reference it without a handwritten declaration.
+ *             Convenience wrapper: $publish(obj) / $publish_at(obj, tok).
  */
 $node_t *__jcc_ast_publish(JCC *vm, $obj_t *obj, $token_t *tok);
 
@@ -752,7 +1236,8 @@ $node_t *__jcc_ast_publish(JCC *vm, $obj_t *obj, $token_t *tok);
  * @param tok Optional representative token for diagnostics, or NULL.
  * @return A no-op $node_t on success, or NULL on invalid arguments.
  * @discussion Generated type builders self-register in tag or typedef scope.
- *             This function lets $publish(type) be used uniformly.
+ *             This function lets $publish(type) be used uniformly; there
+ *             is no separate convenience macro for this entry point.
  */
 $node_t *__jcc_ast_publish_type(JCC *vm, $type_t *ty, $token_t *tok);
 
@@ -763,6 +1248,7 @@ $node_t *__jcc_ast_publish_type(JCC *vm, $type_t *ty, $token_t *tok);
  * @param fn A function object created with __jcc_ast_function().
  * @return A no-op $node_t on success, or NULL on invalid arguments.
  * @discussion Use __jcc_ast_publish(vm, fn, NULL) or $publish(fn).
+ *             Convenience wrapper: $forward_declare(fn).
  */
 $node_t *__jcc_ast_forward_declare(JCC *vm, $obj_t *fn);
 
@@ -774,7 +1260,8 @@ $node_t *__jcc_ast_forward_declare(JCC *vm, $obj_t *fn);
  * @param name The parameter name.
  * @param type The parameter type.
  * @discussion Parameters are added in order. Call this multiple times
- *             for multiple parameters.
+ *             for multiple parameters.  Convenience wrapper:
+ *             $function_add_param(fn, name, type).
  */
 void __jcc_ast_function_add_param(JCC *vm, $obj_t *fn, const char *name,
                                 $type_t *type);
@@ -786,6 +1273,7 @@ void __jcc_ast_function_add_param(JCC *vm, $obj_t *fn, const char *name,
  * @param fn The function object.
  * @param body The function body (a statement or block node).
  * @discussion If body is not already a nk_block, it will be wrapped in one.
+ *             Convenience wrapper: $function_set_body(fn, body).
  */
 void __jcc_ast_function_set_body(JCC *vm, $obj_t *fn, $node_t *body);
 
@@ -794,6 +1282,7 @@ void __jcc_ast_function_set_body(JCC *vm, $obj_t *fn, $node_t *body);
  * @abstract Set whether a function has static linkage.
  * @param fn The function object.
  * @param is_static True for static linkage, false for external.
+ * @discussion Convenience wrapper: $function_set_static(fn, is_static).
  */
 void __jcc_ast_function_set_static($obj_t *fn, bool is_static);
 
@@ -802,6 +1291,7 @@ void __jcc_ast_function_set_static($obj_t *fn, bool is_static);
  * @abstract Set whether a function is inline.
  * @param fn The function object.
  * @param is_inline True for inline, false otherwise.
+ * @discussion Convenience wrapper: $function_set_inline(fn, is_inline).
  */
 void __jcc_ast_function_set_inline($obj_t *fn, bool is_inline);
 
@@ -810,6 +1300,7 @@ void __jcc_ast_function_set_inline($obj_t *fn, bool is_inline);
  * @abstract Set whether a function is variadic.
  * @param fn The function object.
  * @param is_variadic True for variadic, false otherwise.
+ * @discussion Convenience wrapper: $function_set_variadic(fn, is_variadic).
  */
 void __jcc_ast_function_set_variadic($obj_t *fn, bool is_variadic);
 
@@ -824,7 +1315,7 @@ void __jcc_ast_function_set_variadic($obj_t *fn, bool is_variadic);
  * @discussion Use $function_add_param to add parameters and
  *             $publish to expose it in scope. A subsequent
  *             $function call with the same name will reuse this Obj and
- *             fill in the body.
+ *             fill in the body.  Convenience wrapper: $function_prototype(name, return_type).
  */
 $obj_t *__jcc_ast_function_prototype(JCC *vm, const char *name,
                                     $type_t *return_type);
@@ -839,6 +1330,7 @@ $obj_t *__jcc_ast_function_prototype(JCC *vm, const char *name,
  * @return The new struct $type_t*, or NULL on error.
  * @discussion Use $struct_add_field to add fields after creation.
  *             The type is immediately visible via $find_type(name).
+ *             Convenience wrapper: $make_struct(name).
  */
 $type_t *__jcc_ast_make_struct(JCC *vm, const char *name);
 
@@ -848,6 +1340,7 @@ $type_t *__jcc_ast_make_struct(JCC *vm, const char *name);
  * @param vm The VM context.
  * @param name The union tag name.
  * @return The new union $type_t*, or NULL on error.
+ * @discussion Convenience wrapper: $make_union(name).
  */
 $type_t *__jcc_ast_make_union(JCC *vm, const char *name);
 
@@ -862,6 +1355,7 @@ $type_t *__jcc_ast_make_union(JCC *vm, const char *name);
  * @discussion For struct types, offsets are recalculated from scratch after
  *             each field addition. For union types, all fields stay at offset 0
  *             and the union size is updated to the maximum field size.
+ *             Convenience wrapper: $struct_add_field(ty, name, field_type).
  */
 $type_t *__jcc_ast_struct_add_field(JCC *vm, $type_t *ty, const char *name,
                                    $type_t *field_type);
@@ -873,6 +1367,7 @@ $type_t *__jcc_ast_struct_add_field(JCC *vm, $type_t *ty, const char *name,
  * @param name The enum tag name.
  * @return The new enum $type_t*, or NULL on error.
  * @discussion Use $enum_add_constant to add constants after creation.
+ *             Convenience wrapper: $make_enum(name).
  */
 $type_t *__jcc_ast_make_enum(JCC *vm, const char *name);
 
@@ -885,7 +1380,8 @@ $type_t *__jcc_ast_make_enum(JCC *vm, const char *name);
  * @param value The constant integer value.
  * @discussion The constant is appended to ty->enum_constants and also pushed
  *             into the current scope so it is usable as an integer constant in
- *             subsequently compiled code.
+ *             subsequently compiled code.  Convenience wrapper:
+ *             $enum_add_constant(ty, name, value).
  */
 void __jcc_ast_enum_add_constant(JCC *vm, $type_t *ty, const char *name,
                                   int value);
@@ -899,6 +1395,7 @@ void __jcc_ast_enum_add_constant(JCC *vm, $type_t *ty, const char *name,
  * @return The aliased type after registration, or NULL on invalid arguments.
  * @discussion After this call, $find_type(name) resolves to underlying and
  *             subsequently compiled code can use name as a type name.
+ *             Convenience wrapper: $make_typedef(name, underlying).
  */
 $type_t *__jcc_ast_make_typedef(JCC *vm, const char *name, $type_t *underlying);
 
@@ -918,6 +1415,7 @@ $type_t *__jcc_ast_make_typedef(JCC *vm, const char *name, $type_t *underlying);
  *             macros the capture loop will stash it in macro_globals and emit
  *             an extern declaration into every input file's token stream so
  *             the parser can resolve references.
+ *             Convenience wrapper: $global_var(name, ty).
  */
 $obj_t *__jcc_ast_global_var(JCC *vm, const char *name, $type_t *ty);
 
@@ -928,6 +1426,7 @@ $obj_t *__jcc_ast_global_var(JCC *vm, const char *name, $type_t *ty);
  * @param var  The global variable object.
  * @param data Pointer to the raw byte data.
  * @param len  Number of bytes to copy.  Must equal var->ty->size.
+ * @discussion Convenience wrapper: $global_var_set_init_data(var, data, len).
  */
 void __jcc_ast_global_var_set_init_data(JCC *vm, $obj_t *var,
                                         const char *data, int len);
@@ -937,6 +1436,7 @@ void __jcc_ast_global_var_set_init_data(JCC *vm, $obj_t *var,
  * @abstract Set the static (internal linkage) flag on a generated global.
  * @param var       The global variable object.
  * @param is_static True for internal linkage (file-scope static).
+ * @discussion Convenience wrapper: $global_var_set_static(var, is_static).
  */
 void __jcc_ast_global_var_set_static($obj_t *var, bool is_static);
 
@@ -953,7 +1453,9 @@ void __jcc_ast_global_var_set_static($obj_t *var, bool is_static);
  * @discussion Call __jcc_ast_pop_fn (or use the $with_fn macro) to
  *             restore the previous context.  execute_pragma_macro always
  *             restores current_fn after the macro returns, so unmatched pushes
- *             cannot leak into the main parse/codegen pass.
+ *             cannot leak into the main parse/codegen pass.  There is no
+ *             1:1 convenience macro; use the @c $with_fn(fn) { ... } block
+ *             helper to bracket push/pop pairs in a macro body.
  */
 void __jcc_ast_push_fn(JCC *vm, $obj_t *fn);
 
@@ -961,6 +1463,9 @@ void __jcc_ast_push_fn(JCC *vm, $obj_t *fn);
  * @function __jcc_ast_pop_fn
  * @abstract Restore the function context saved by the most recent push.
  * @param vm The VM context.
+ * @discussion Inverse of __jcc_ast_push_fn; typically used through the
+ *             @c $with_fn(fn) { ... } block helper, which performs the
+ *             matching pop even on early exit.
  */
 void __jcc_ast_pop_fn(JCC *vm);
 
@@ -974,6 +1479,7 @@ void __jcc_ast_pop_fn(JCC *vm);
  * @param vm The VM context.
  * @param node The root node to print.
  * @discussion Reuses the compiler's internal cc_dump_ast text renderer.
+ *             Convenience wrapper: $dump_tree(node).
  */
 void __jcc_dump_tree(JCC *vm, $node_t *node);
 
@@ -983,6 +1489,7 @@ void __jcc_dump_tree(JCC *vm, $node_t *node);
  * @param vm The VM context.
  * @param node The root node.
  * @return An arena-allocated NUL-terminated string, or NULL on error.
+ * @discussion Convenience wrapper: $dump_tree_to_string(node).
  */
 const char *__jcc_dump_tree_to_string(JCC *vm, $node_t *node);
 
@@ -993,6 +1500,7 @@ const char *__jcc_dump_tree_to_string(JCC *vm, $node_t *node);
  * @param node The root node to emit builder calls for.
  * @discussion Covers all node kinds for which reflect.c has a builder.
  *             Unsupported kinds are emitted as C comments.
+ *             Convenience wrapper: $dump_ast_gen(node).
  */
 void __jcc_dump_ast_gen(JCC *vm, $node_t *node);
 
@@ -1002,6 +1510,7 @@ void __jcc_dump_ast_gen(JCC *vm, $node_t *node);
  * @param vm The VM context.
  * @param node The root node.
  * @return An arena-allocated NUL-terminated string, or NULL on error.
+ * @discussion Convenience wrapper: $dump_ast_gen_to_string(node).
  */
 const char *__jcc_dump_ast_gen_to_string(JCC *vm, $node_t *node);
 
@@ -1184,13 +1693,45 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, $node_t *node);
     __jcc_ast_make_typedef(_VM, name, underlying)
 
 // Comptime variable access (ticket #188)
-// Read an integer-typed #pragma comptime variable's value at compile time.
+/*!
+ * @function __jcc_get_comptime_int
+ * @abstract Read an integer-typed @c #pragma comptime variable's value at
+ *           compile time.
+ * @param vm The VM context.
+ * @param name The comptime variable's name.
+ * @return The 64-bit integer value, or 0 if the variable is not defined.
+ * @discussion Convenience wrapper: $get_comptime_int(name).
+ */
 int64_t __jcc_get_comptime_int(JCC *vm, const char *name);
-// Read a float/double-typed #pragma comptime variable's value.
+/*!
+ * @function __jcc_get_comptime_float
+ * @abstract Read a float/double-typed @c #pragma comptime variable's value
+ *           at compile time.
+ * @param vm The VM context.
+ * @param name The comptime variable's name.
+ * @return The double value, or 0.0 if the variable is not defined.
+ * @discussion Convenience wrapper: $get_comptime_float(name).
+ */
 double __jcc_get_comptime_float(JCC *vm, const char *name);
-// Read a comptime scalar variable as an AST literal node ($node_t*).
+/*!
+ * @function __jcc_get_comptime_var
+ * @abstract Read a comptime scalar variable as an AST literal node.
+ * @param vm The VM context.
+ * @param name The comptime variable's name.
+ * @return A nk_num node representing the variable's value, or NULL on error.
+ * @discussion Convenience wrapper: $get_comptime_var(name).
+ */
 $node_t *__jcc_get_comptime_var(JCC *vm, const char *name);
-// Read a named field from a comptime struct variable as an AST literal node.
+/*!
+ * @function __jcc_get_comptime_member
+ * @abstract Read a named field from a comptime struct variable as an AST
+ *           literal node.
+ * @param vm The VM context.
+ * @param var_name The comptime struct variable's name.
+ * @param field The field name to look up.
+ * @return A nk_num node for the field's value, or NULL on error.
+ * @discussion Convenience wrapper: $get_comptime_member(var_name, field).
+ */
 $node_t *__jcc_get_comptime_member(JCC *vm, const char *var_name,
                                   const char *field);
 
@@ -1200,9 +1741,18 @@ $node_t *__jcc_get_comptime_member(JCC *vm, const char *var_name,
 #define $get_comptime_member(var, field)  __jcc_get_comptime_member(_VM, var, field)
 
 // Constexpr variable access (ticket #189)
-// Read the evaluated initializer of a global `constexpr` variable as an AST literal node.
-// Returns ND_NUM (integer) or ND_NUM (float) depending on the variable's type.
-// Errors at compile time if the name does not refer to a visible constexpr variable.
+/*!
+ * @function __jcc_get_constexpr_value
+ * @abstract Read the evaluated initializer of a global @c constexpr variable
+ *           as an AST literal node.
+ * @param vm The VM context.
+ * @param name The constexpr variable's name.
+ * @return A nk_num node (integer or float, depending on the variable's type),
+ *         or NULL on error.
+ * @discussion Errors at compile time if @a name does not refer to a visible
+ *             @c constexpr variable.  Convenience wrapper:
+ *             $get_constexpr_value(name).
+ */
 $node_t *__jcc_get_constexpr_value(JCC *vm, const char *name);
 
 #define $get_constexpr_value(name)  __jcc_get_constexpr_value(_VM, name)
