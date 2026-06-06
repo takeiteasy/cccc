@@ -1883,6 +1883,69 @@ static bool try_extract_attr_macro(JCC *vm, Token **tok_ptr) {
     return true;
 }
 
+// Returns true if tok starts a function definition: finds ident( ... ) {
+// This is stricter than the look-ahead in try_extract_attr_macro — it requires
+// the opening brace to be present, so bare call-statements like foo(); are not
+// mistaken for definitions.
+static bool probe_function_definition(Token *tok) {
+    Token *probe = tok;
+    while (probe && probe->kind != TK_EOF) {
+        if (equal(probe, ";")) return false;
+        if (probe->kind == TK_IDENT && probe->next && equal(probe->next, "(")) {
+            // Scan past the parameter list
+            Token *p = probe->next;
+            int depth = 0;
+            while (p && p->kind != TK_EOF) {
+                if (equal(p, "("))       depth++;
+                else if (equal(p, ")")) { depth--; if (depth == 0) { p = p->next; break; } }
+                p = p->next;
+            }
+            // Skip optional attribute/qualifier tokens then look for {
+            while (p && p->kind != TK_EOF && !equal(p, "{") && !equal(p, ";"))
+                p = p->next;
+            return p && equal(p, "{");
+        }
+        probe = probe->next;
+    }
+    return false;
+}
+
+// Returns true if tok starts a plain variable/struct declaration (has an
+// identifier before = or ; and no function-body brace at depth 0).
+static bool probe_var_declaration(Token *tok) {
+    Token *probe = tok;
+    bool found_ident = false;
+    int depth = 0;
+    while (probe && probe->kind != TK_EOF) {
+        if (equal(probe, "{"))       depth++;
+        else if (equal(probe, "}")) depth--;
+        else if (depth == 0) {
+            if (equal(probe, "=") || equal(probe, ";")) return found_ident;
+            if (probe->kind == TK_IDENT)                found_ident = true;
+        }
+        probe = probe->next;
+    }
+    return false;
+}
+
+// Inside a #pragma jcc comptime begin...end block, try to intercept an
+// unannotated function definition or variable declaration and extract it
+// as an implicit [[jcc::comptime]] entity.  Called from preprocess2 AFTER
+// the _Pragma check so _Pragma tokens are never mis-routed.
+// Returns true and advances *tok_ptr past the extracted definition on match.
+static bool try_extract_comptime_block_decl(JCC *vm, Token **tok_ptr) {
+    Token *tok = *tok_ptr;
+    if (probe_function_definition(tok)) {
+        *tok_ptr = extract_macro_function(vm, tok, true, false);
+        return true;
+    }
+    if (probe_var_declaration(tok)) {
+        *tok_ptr = extract_comptime_var(vm, tok);
+        return true;
+    }
+    return false;
+}
+
 // Handle #pragma GCC diagnostic <action> ["-Wname"]
 // Returns the token after the consumed pragma line.
 static Token *handle_gcc_diagnostic(JCC *vm, Token *tok) {
@@ -1989,6 +2052,26 @@ static Token *handle_pragma_body(JCC *vm, Token *tok) {
         error_tok(vm, tok,
                   "#pragma comptime is no longer supported; use "
                   "[[jcc::comptime]] or __attribute__((comptime))");
+    } else if (equal(tok, "jcc")) {
+        Token *sub = tok->next;
+        if (equal(sub, "comptime")) {
+            Token *after = sub->next;
+            bool is_begin = after && equal(after, "begin");
+            if (vm->compiler.in_comptime_block)
+                error_tok(vm, tok, "#pragma jcc comptime: blocks cannot be nested");
+            vm->compiler.in_comptime_block = true;
+            vm->compiler.comptime_block_file = tok->file;
+            return skip_line(vm, is_begin ? after->next : after);
+        } else if (equal(sub, "end")) {
+            if (!vm->compiler.in_comptime_block)
+                error_tok(vm, tok, "stray #pragma jcc end without matching #pragma jcc comptime");
+            vm->compiler.in_comptime_block = false;
+            vm->compiler.comptime_block_file = NULL;
+            return skip_line(vm, sub->next);
+        } else {
+            error_tok(vm, sub && sub->kind != TK_EOF ? sub : tok,
+                      "unknown #pragma jcc directive");
+        }
     } else if ((equal(tok, "GCC") || equal(tok, "clang") || equal(tok, "JCC")) &&
                equal(tok->next, "diagnostic")) {
         return handle_gcc_diagnostic(vm, tok->next->next);
@@ -2033,6 +2116,21 @@ static Token *preprocess2(JCC *vm, Token *tok) {
                 continue;
             }
 
+            // Inside a #pragma jcc comptime begin...end block: intercept
+            // unannotated function definitions and variable declarations.
+            if (vm->compiler.in_comptime_block) {
+                // Auto-close if the file that opened the block has ended.
+                if (tok->file != vm->compiler.comptime_block_file) {
+                    warn_tok(vm, tok, JCC_WARN_COMPTIME_BLOCK_LEAK,
+                             "unclosed #pragma jcc comptime begin in included file; "
+                             "block closed automatically");
+                    vm->compiler.in_comptime_block = false;
+                    vm->compiler.comptime_block_file = NULL;
+                } else if (try_extract_comptime_block_decl(vm, &tok)) {
+                    continue;
+                }
+            }
+
             tok->line_delta = tok->file->line_delta;
             tok->filename = tok->file->display_name;
             // Stamp the effective diagnostic state so warn_tok can use it.
@@ -2057,6 +2155,13 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             int filename_len;
             char *filename = read_include_filename(vm, &tok, tok->next,
                                                    &is_dquote, &filename_len);
+            // Inside a comptime block, treat as #include_comptime.
+            if (vm->compiler.in_comptime_block) {
+                tok = skip_line(vm, tok);
+                char *bracketed = arena_format(vm, is_dquote ? "\"%s\"" : "<%s>", filename);
+                strarray_push(&vm->compiler.comptime_pending_includes, bracketed);
+                break;
+            }
             // Gate standard headers that require a minimum C version.
             {
                 static const struct { const char *name; CStdVersion min; } gates[] = {

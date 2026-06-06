@@ -320,9 +320,10 @@ typedef enum {
     JCC_WARN_EXTRA_TOKENS = (1ULL << 12),
     JCC_WARN_LARGE_FILE_EMBED = (1ULL << 13),
     JCC_WARN_JCC_MACRO = (1ULL << 14),
+    JCC_WARN_COMPTIME_BLOCK_LEAK = (1ULL << 15), // unclosed #pragma jcc comptime begin in included file
     // Conversion sub-categories (JCC_WARN_CONVERSION is integer narrowing)
-    JCC_WARN_SIGN_CONVERSION = (1ULL << 15),  // signed/unsigned mismatch on assign/arg/return
-    JCC_WARN_FLOAT_CONVERSION = (1ULL << 16), // float<->int or float narrowing
+    JCC_WARN_SIGN_CONVERSION = (1ULL << 16),  // signed/unsigned mismatch on assign/arg/return
+    JCC_WARN_FLOAT_CONVERSION = (1ULL << 17), // float<->int or float narrowing
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
     JCC_WARN_CONVERSION_GROUP = JCC_WARN_CONVERSION |
@@ -1441,6 +1442,8 @@ typedef struct Compiler {
     ComptimeVar *comptime_vars;      // Linked list of [[jcc::comptime]] variable decls
     bool in_macro_mode;              // True when compiling/executing a macro function
     bool in_macro_expansion;         // True during macro AST expansion pass
+    bool in_comptime_block;          // True inside #pragma jcc comptime begin...end
+    File *comptime_block_file;       // File that opened the comptime block (for auto-close)
     bool macro_fns_compiled;         // True after compile_all_macros has run
     int macro_recursion_limit;       // 0 = unlimited, default = 256
     Token *macro_call_tok;           // Active macro invocation token

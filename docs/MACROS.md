@@ -272,6 +272,55 @@ The GNU-attribute equivalent is `__attribute__((comptime))`.
 > **Deprecated:** `[[jcc::macro]]` and `__attribute__((macro))` are accepted as
 > aliases for `[[jcc::comptime]]` for backwards compatibility.
 
+### Comptime block
+
+`#pragma jcc comptime begin` / `#pragma jcc end` opens a block where every
+declaration is implicitly `[[jcc::comptime]]` — no per-declaration attribute
+required.
+
+```c
+#pragma jcc comptime begin
+#include <glob.h>              // treated as #include_comptime
+int glob_count(const char *pat, int flags) {
+    glob_t g;
+    glob(pat, flags, NULL, &g);
+    int n = (int)g.gl_pathc;
+    globfree(&g);
+    return n;
+}
+int helper = 7;                // comptime variable
+#pragma jcc end
+
+// Back to normal runtime code
+int main(void) { ... }
+```
+
+Inside a comptime block:
+- `#include` directives are queued as `#include_comptime` — invisible to the runtime translation unit.
+- Function definitions are treated as `[[jcc::comptime]]`.
+- Variable and struct declarations are treated as comptime variables.
+- Existing `[[jcc::comptime(inline)]]` annotations are respected; explicit attributes always take precedence.
+
+Blocks cannot be nested. A second `#pragma jcc comptime begin` while one is
+already open is a hard error.
+
+**Bare form** — omit `begin` to activate without a keyword; close with
+`#pragma jcc end` as usual. Useful at the top of a dedicated comptime helper
+file where the whole file is comptime:
+
+```c
+#pragma jcc comptime
+int double_it(int n) { return n * 2; }
+int scale = 3;
+#pragma jcc end
+
+int main(void) { return double_it(scale * 7); }
+```
+
+**Auto-close in headers** — if a header opens a comptime block but omits
+`#pragma jcc end`, the block is closed automatically when the header ends
+and a `[-Wcomptime-block-leak]` warning is emitted.
+
 ### Comptime-only includes
 
 Use `#include_comptime` to include a header only during the comptime

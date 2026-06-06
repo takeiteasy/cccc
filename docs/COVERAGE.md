@@ -286,6 +286,7 @@ groups from that ticket.
 | `__cpuid` / `__cpuidex` | ✗ | Host CPU info — pending |
 | `__emul` / `__emulu` / `_umul128` / `__umulh` | ✗ | 64-bit multiplication helpers — pending |
 | `#pragma once` | ✓ | |
+| `#pragma jcc comptime [begin]` / `#pragma jcc end` | ✓ | Comptime block — see [MACROS.md](MACROS.md#comptime-block) |
 | `#pragma comment(lib, "x")` | ✗ | Link hint, no-op — pending |
 | `#pragma warning(push/pop/disable/default)` / `suppress:` | ✗ | Maps to JCC's `-W` system — pending |
 | `#pragma pack(...)` | ✓ | |
