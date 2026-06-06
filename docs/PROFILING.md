@@ -42,6 +42,42 @@ printing the table, which keeps benchmark stdout checks clean. The JSON includes
 the execution mode (`source` or `jbc`), selected `--optimize` level, total VM
 cycles, total profiled opcodes, and per-op counts and percentages.
 
+### Static Bytecode Analysis
+
+For understanding *static* instruction patterns in `.jbc` files (independent of
+any execution), jcc has two in-process analyses:
+
+```bash
+# Static n-gram mining on a pre-compiled .jbc
+./jcc -o /tmp/sieve.jbc -I./include benchmarks/sieve.c
+./jcc --ngrams=2 --ngrams-top=15 /tmp/sieve.jbc
+./jcc --ngrams=3 --ngrams-top=15 /tmp/sieve.jbc
+./jcc --ngrams=2 --ngrams-per-file /tmp/sieve.jbc
+
+# Same analysis directly on .c source — compiles in-process first
+./jcc --ngrams=2 --ngrams-top=15 -I./include benchmarks/sieve.c
+
+# Use-def fusion candidate detection
+./jcc --fusion-candidates=50 /tmp/sieve.jbc
+./jcc --fusion-candidates=50 -fdiagnostics-format=json /tmp/sieve.jbc
+```
+
+`--ngrams[=N]` walks the text segment of one or more `.jbc` files and ranks
+2-grams (`N=2`, default) or 3-grams (`N=3`) by occurrence. `--ngrams-per-file`
+also prints a per-input section in addition to the aggregate. `--ngrams-top=N`
+limits the rows per section.
+
+`--fusion-candidates[=N]` walks the text segment, tracks register defs/uses
+per instruction, and reports adjacent `def -> use` pairs where the defining
+instruction has a single reader. Add `-fdiagnostics-format=json` to get JSON
+output for scripting.
+
+These two analyses are mutually exclusive with `--vm-profile*`, `-g/--debug`,
+`-d/--disassemble`, `--native`, and any safety / execution / output flags.
+See [PROFILING.md](PROFILING.md) and [VM.md](VM.md) for how to combine the
+static counts with the dynamic bigram profile to surface the strongest
+fusion candidates.
+
 ### Memory Profiling
 
 ```bash

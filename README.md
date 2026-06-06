@@ -331,16 +331,17 @@ actually executed at runtime, complementing the static n-gram tool below.
 **Opcode n-gram mining (discover fusion candidates):**
 
 ```bash
-make build-tools                                      # builds tools/bytecode_ngrams
 ./jcc -I./include -o /tmp/sieve.jbc benchmarks/sieve.c
-./tools/bytecode_ngrams -n 2 -t 15 /tmp/sieve.jbc     # top 15 opcode pairs
-./tools/bytecode_ngrams -n 3 -t 15 /tmp/sieve.jbc     # top 15 opcode triples
-./tools/bytecode_ngrams -n 2 -p /tmp/sieve.jbc        # per-file + aggregate
+./jcc --ngrams=2 --ngrams-top=15 /tmp/sieve.jbc      # top 15 opcode pairs
+./jcc --ngrams=3 --ngrams-top=15 /tmp/sieve.jbc      # top 15 opcode triples
+./jcc --ngrams=2 --ngrams-per-file /tmp/sieve.jbc    # per-file + aggregate
+./jcc --ngrams=2 benchmarks/sieve.c                  # compile-then-analyze
 ```
 
-Ranks 2-grams and 3-grams by static occurrence across one or more `.jbc` files.
-Useful for finding common instruction sequences that could be fused into new
-opcodes (see ticket #250).
+Ranks 2-grams and 3-grams by static occurrence across one or more `.jbc`
+files (or directly from `.c` source — the compiler runs in-process).
+Useful for finding common instruction sequences that could be fused into
+new opcodes (see ticket #250).
 
 **Cross-referencing static and dynamic counts:**
 
@@ -357,9 +358,9 @@ are the strongest fusion candidates.
 **Use-def fusion candidate detector:**
 
 ```bash
-make build-tools                                      # builds tools/fusion_candidates
-./tools/fusion_candidates -t 50 /tmp/sieve.jbc       # top 50 def->use pairs
-./tools/fusion_candidates -j -t 50 /tmp/sieve.jbc    # JSON output for scripting
+./jcc --fusion-candidates=50 /tmp/sieve.jbc                       # top 50 def->use pairs
+./jcc --fusion-candidates=50 -fdiagnostics-format=json /tmp/sieve.jbc  # JSON output
+./jcc --fusion-candidates=50 benchmarks/sieve.c                   # compile-then-analyze
 ```
 
 Walks the text segment, tracks register defs and use counts, and reports

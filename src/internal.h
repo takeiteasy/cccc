@@ -547,6 +547,35 @@ int cc_vm_profile_write_json(JCC *vm, const char *path, const char *mode,
 void cc_optimize(JCC *vm, int level);
 
 //
+// analyze.c
+//
+
+typedef struct {
+    int n;        // 2 or 3
+    int top_n;
+    bool per_file;
+} CcAnalyzeNgramOptions;
+
+typedef struct {
+    int top_n;
+    bool json;    // emit JSON instead of text
+} CcAnalyzeFusionOptions;
+
+typedef struct CcNgramState CcNgramState;
+typedef struct CcFusionState CcFusionState;
+
+CcNgramState *cc_analyze_ngram_begin(const CcAnalyzeNgramOptions *opts);
+void cc_analyze_ngram_feed(CcNgramState *st, const JCCInstrWord *text,
+                           long long num_words, const char *label, FILE *out);
+void cc_analyze_ngram_finish(CcNgramState *st, FILE *out);
+
+CcFusionState *cc_analyze_fusion_begin(const CcAnalyzeFusionOptions *opts);
+void cc_analyze_fusion_feed(CcFusionState *st, const JCCInstrWord *text,
+                            long long num_words, const char *label,
+                            FILE *out);
+void cc_analyze_fusion_finish(CcFusionState *st, FILE *out);
+
+//
 // llvm_backend.c
 //
 

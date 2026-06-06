@@ -2,8 +2,6 @@ jcc
 jcc.exe
 jcc-*
 libjcc*
-tools/bytecode_ngrams
-tools/fusion_candidates
 *.dSYM
 *~
 *.bak

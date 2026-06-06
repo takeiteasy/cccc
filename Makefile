@@ -6,15 +6,15 @@ LLVM_CONFIG ?= llvm-config
 PKG_CONFIG ?= pkg-config
 
 ifeq ($(JCC_HAS_LLVM),1)
-LLVM_CONFIG_FOUND := $(shell command -v $(LLVM_CONFIG) 2>/dev/null)
+	LLVM_CONFIG_FOUND := $(shell command -v $(LLVM_CONFIG) 2>/dev/null)
 ifeq ($(LLVM_CONFIG_FOUND),)
-$(error JCC_HAS_LLVM=1 requires llvm-config; set LLVM_CONFIG=/path/to/llvm-config)
+	$(error JCC_HAS_LLVM=1 requires llvm-config; set LLVM_CONFIG=/path/to/llvm-config)
 endif
-LLVM_CFLAGS := $(shell $(LLVM_CONFIG) --cflags)
-LLVM_LDFLAGS := $(shell $(LLVM_CONFIG) --ldflags)
-LLVM_LIBS := $(shell $(LLVM_CONFIG) --libs core native analysis) $(shell $(LLVM_CONFIG) --system-libs)
-CFLAGS += -DJCC_HAS_LLVM=1 $(LLVM_CFLAGS)
-LDFLAGS += $(LLVM_LDFLAGS) $(LLVM_LIBS)
+	LLVM_CFLAGS := $(shell $(LLVM_CONFIG) --cflags)
+	LLVM_LDFLAGS := $(shell $(LLVM_CONFIG) --ldflags)
+	LLVM_LIBS := $(shell $(LLVM_CONFIG) --libs core native analysis) $(shell $(LLVM_CONFIG) --system-libs)
+	CFLAGS += -DJCC_HAS_LLVM=1 $(LLVM_CFLAGS)
+	LDFLAGS += $(LLVM_LDFLAGS) $(LLVM_LIBS)
 endif
 
 # libffi is required for native FFI calls.
@@ -205,22 +205,6 @@ generate-std: $(EXE_OUT)
 		mv "$$tmp" src/std.c; \
 	fi
 
-# Standalone developer tool: static opcode n-gram miner for .jbc files.
-# Reuses OPS_X from src/jcc.h so it tracks the opcode table automatically.
-# Link-time only needs the C runtime; jcc.h pulls in libffi headers but the
-# tool itself uses no FFI symbols.
-TOOL_CFLAGS := -Wall -O2 -std=c23 -I src $(LIBFFI_CFLAGS)
-tools/bytecode_ngrams: tools/bytecode_ngrams.c
-	$(CC) $(TOOL_CFLAGS) -o $@ $<
-
-# Use-def fusion candidate detector. Walks text segments, tracks register
-# def/use, reports adjacent def->use pairs with single readers.
-tools/fusion_candidates: tools/fusion_candidates.c
-	$(CC) $(TOOL_CFLAGS) -o $@ $<
-
-.PHONY: build-tools
-build-tools: tools/bytecode_ngrams tools/fusion_candidates
-
 test: clean $(EXE_OUT)
 	@python3 tools/tests.py
 
@@ -299,11 +283,11 @@ else
 endif
 
 clean:
-	@$(RM) -f $(EXE_OUT) $(LIB_OUT) $(SAN_OUT) jcc-afl jcc-afl-asan jcc-prof fuzz_harness tools/bytecode_ngrams tools/fusion_candidates
+	@$(RM) -f $(EXE_OUT) $(LIB_OUT) $(SAN_OUT) jcc-afl jcc-afl-asan jcc-prof fuzz_harness
 	@$(RM) -rf profile/*.prof profile/*.txt profile/*.json profile/*.massif
 	@$(RM) -rf fuzz/corpus fuzz/out
 
-.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info generate-std bench-compare bench-compare-quick bench-compare-json build-tools
+.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info generate-std bench-compare bench-compare-quick bench-compare-json
 ifeq ($(UNAME_S),Linux)
 .PHONY: msan
 endif

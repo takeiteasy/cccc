@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cross-reference static and dynamic opcode n-gram counts.
 
-Reads the text output of tools/bytecode_ngrams (static .jbc analysis) and
+Reads the text output of `jcc --ngrams` (static .jbc analysis) and
 the JSON output of `jcc --vm-profile-json` (runtime bigram/trigram counts)
 and prints a unified ranking. The score is `static_count * dynamic_count`,
 so sequences that are both common in the bytecode AND executed many
@@ -17,7 +17,6 @@ passed to the compiled program so you can profile non-default inputs
 
 Environment variables:
     JCC          path to the jcc binary     (default: ./jcc)
-    NGRAM_TOOL   path to bytecode_ngrams    (default: ./tools/bytecode_ngrams)
 """
 import argparse
 import json
@@ -28,8 +27,6 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JCC = os.environ.get("JCC", os.path.join(ROOT, "jcc"))
-NGRAM_TOOL = os.environ.get("NGRAM_TOOL",
-                            os.path.join(ROOT, "tools/bytecode_ngrams"))
 
 STATIC_RE = re.compile(
     r"^\s*(?P<count>\d+)\s+(?P<ops>(?:[A-Z0-9_]+(?:\s+[A-Z0-9_]+)+))"
@@ -73,8 +70,6 @@ def main():
     ap.add_argument("run_args", nargs=argparse.REMAINDER,
                     help="Extra arguments passed to the compiled program")
     ap.add_argument("--jcc", default=JCC, help="Path to jcc binary")
-    ap.add_argument("--ngram-tool", default=NGRAM_TOOL,
-                    help="Path to bytecode_ngrams tool")
     ap.add_argument("--top", type=int, default=25,
                     help="Show only top N rows (default 25)")
     ap.add_argument("-n", "--ngram-size", type=int, default=2,
@@ -82,7 +77,7 @@ def main():
     args = ap.parse_args()
 
     result = subprocess.run(
-        [args.ngram_tool, "-n", str(args.ngram_size), "-t", "9999", args.jbc],
+        [args.jcc, f"--ngrams={args.ngram_size}", "--ngrams-top=9999", args.jbc],
         capture_output=True, text=True, check=True,
     )
     static_text = result.stdout

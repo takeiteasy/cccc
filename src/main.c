@@ -397,6 +397,16 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                             2: Constant folding + peephole\n");
     printf("\t                             3: All optimizations (including "
            "dead code elimination)\n");
+    printf("\nStatic Bytecode Analysis (compile or load input, walk text "
+           "segment, exit):\n");
+    printf("\t   --ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, "
+           "default 2)\n");
+    printf("\t   --ngrams-top=N          Show top N sequences (default 25)\n");
+    printf("\t   --ngrams-per-file       Print a per-input section in addition "
+           "to the aggregate\n");
+    printf("\t   --fusion-candidates[=N] Use-def fusion candidate analysis (top "
+           "N, default 50)\n");
+    printf("\t                          JSON output via -fdiagnostics-format=json\n");
     printf("\nExample:\n");
     printf("\t%s -o hello hello.c\n", argv0);
     printf("\t%s -I ./include -D DEBUG -o prog prog.c\n", argv0);
@@ -751,6 +761,12 @@ int main(int argc, const char *argv[]) {
     int vm_profile_ran = 0;
     const char *entry_name = NULL; // -e / --entry
     int native_mode = 0;
+    int run_ngrams = 0;            // 0 = off; 2 or 3 = enabled with n-gram size
+    int ngrams_top = 25;
+    int ngrams_per_file = 0;
+    int run_fusion = 0;            // 0 = off; >0 = enabled, value is top-N
+    CcNgramState *ngram_state = NULL;
+    CcFusionState *fusion_state = NULL;
 
     if (argc <= 1)
         usage(argv[0], 1);
@@ -817,6 +833,10 @@ int main(int argc, const char *argv[]) {
         {"vm-profile-json", required_argument, 0, 1027},
         {"entry", required_argument, 0, 'e'},
         {"native", no_argument, 0, 1028},
+        {"ngrams", optional_argument, 0, 1029},
+        {"ngrams-top", required_argument, 0, 1030},
+        {"ngrams-per-file", no_argument, 0, 1031},
+        {"fusion-candidates", optional_argument, 0, 1032},
         {0, 0, 0, 0}};
 
     // Rewrite single-dash -std=... and -fdiagnostics-format=... to double-dash
@@ -1116,6 +1136,54 @@ int main(int argc, const char *argv[]) {
         case 1028:
             native_mode = 1;
             break;
+        case 1029: { // --ngrams[=N]
+            if (optarg == NULL) {
+                run_ngrams = 2;
+            } else if (optarg[0] >= '0' && optarg[0] <= '9' && optarg[1] == '\0') {
+                run_ngrams = optarg[0] - '0';
+            } else {
+                fprintf(stderr,
+                        "error: invalid --ngrams value '%s' (use 2 or 3)\n",
+                        optarg);
+                usage(argv[0], 1);
+            }
+            if (run_ngrams != 2 && run_ngrams != 3) {
+                fprintf(stderr,
+                        "error: --ngrams must be 2 or 3 (got %d)\n", run_ngrams);
+                usage(argv[0], 1);
+            }
+            break;
+        }
+        case 1030: { // --ngrams-top=N
+            char *end = NULL;
+            long val = strtol(optarg, &end, 10);
+            if (!optarg[0] || *end != '\0' || val <= 0 || val > INT32_MAX) {
+                fprintf(stderr,
+                        "error: --ngrams-top must be a positive integer\n");
+                usage(argv[0], 1);
+            }
+            ngrams_top = (int)val;
+            break;
+        }
+        case 1031: // --ngrams-per-file
+            ngrams_per_file = 1;
+            break;
+        case 1032: { // --fusion-candidates[=N]
+            if (optarg == NULL) {
+                run_fusion = 1;
+            } else {
+                char *end = NULL;
+                long val = strtol(optarg, &end, 10);
+                if (!optarg[0] || *end != '\0' || val <= 0 || val > INT32_MAX) {
+                    fprintf(stderr,
+                            "error: --fusion-candidates top-N must be a "
+                            "positive integer\n");
+                    usage(argv[0], 1);
+                }
+                run_fusion = (int)val;
+            }
+            break;
+        }
         case '?':
             if (optopt)
                 fprintf(stderr, "error: option -%c requires an argument\n",
@@ -1187,6 +1255,52 @@ int main(int argc, const char *argv[]) {
         }
     }
 
+    if (run_ngrams || run_fusion) {
+        // Static analysis is mutually exclusive with execution / output modes.
+        if (run_ngrams && run_fusion) {
+            fprintf(stderr,
+                    "error: --ngrams and --fusion-candidates cannot be combined\n");
+            usage(argv[0], 1);
+        }
+        if (preprocess_only || dump_expanded_only || print_tokens ||
+            output_json || dump_ast) {
+            fprintf(stderr,
+                    "error: --ngrams/--fusion-candidates cannot be combined "
+                    "with frontend output modes\n");
+            usage(argv[0], 1);
+        }
+        if (compile_only || disassemble || out_file || entry_name) {
+            fprintf(stderr,
+                    "error: --ngrams/--fusion-candidates cannot be combined "
+                    "with VM bytecode output or entry options\n");
+            usage(argv[0], 1);
+        }
+        if (vm_profile || vm_profile_json) {
+            fprintf(stderr,
+                    "error: --ngrams/--fusion-candidates cannot be combined "
+                    "with --vm-profile*\n");
+            usage(argv[0], 1);
+        }
+        if (flags & JCC_ENABLE_DEBUGGER) {
+            fprintf(stderr,
+                    "error: --ngrams/--fusion-candidates cannot be combined "
+                    "with -g/--debug\n");
+            usage(argv[0], 1);
+        }
+        if (flags != 0) {
+            fprintf(stderr,
+                    "error: --ngrams/--fusion-candidates cannot be combined "
+                    "with VM runtime safety options\n");
+            usage(argv[0], 1);
+        }
+        if (native_mode) {
+            fprintf(stderr,
+                    "error: --ngrams/--fusion-candidates cannot be combined "
+                    "with --native\n");
+            usage(argv[0], 1);
+        }
+    }
+
     JCC vm;
     cc_init(&vm, flags);
     vm.compiler.compile_only = compile_only;
@@ -1226,6 +1340,66 @@ int main(int argc, const char *argv[]) {
 
     // Check if input is a bytecode file (.jbc extension)
     // If so, load and run it directly without compilation
+    //
+    // In analysis mode we accept multiple .jbc files and walk each one in
+    // turn, aggregating counts across all of them.
+    if (input_files_count >= 1 && (run_ngrams || run_fusion)) {
+        int all_jbc = 1;
+        for (int i = 0; i < input_files_count; i++) {
+            size_t len = strlen(input_files[i]);
+            if (len <= 4 ||
+                strncmp(input_files[i] + len - 4, ".jbc", sizeof(".jbc")) != 0) {
+                all_jbc = 0;
+                break;
+            }
+        }
+        if (all_jbc) {
+            if (run_ngrams) {
+                CcAnalyzeNgramOptions opts = {
+                    .n = run_ngrams,
+                    .top_n = ngrams_top,
+                    .per_file = ngrams_per_file,
+                };
+                ngram_state = cc_analyze_ngram_begin(&opts);
+                for (int i = 0; i < input_files_count; i++) {
+                    if (cc_load_bytecode(&vm, input_files[i]) != 0) {
+                        fprintf(stderr,
+                                "error: failed to load bytecode from %s\n",
+                                input_files[i]);
+                        exit_code = 1;
+                        goto BAIL;
+                    }
+                    cc_analyze_ngram_feed(ngram_state, vm.text_seg,
+                                          (long long)vm.text_ptr + 1,
+                                          input_files[i], stdout);
+                }
+                cc_analyze_ngram_finish(ngram_state, stdout);
+                ngram_state = NULL;
+            } else {
+                CcAnalyzeFusionOptions opts = {
+                    .top_n = run_fusion,
+                    .json = diagnostic_json,
+                };
+                fusion_state = cc_analyze_fusion_begin(&opts);
+                for (int i = 0; i < input_files_count; i++) {
+                    if (cc_load_bytecode(&vm, input_files[i]) != 0) {
+                        fprintf(stderr,
+                                "error: failed to load bytecode from %s\n",
+                                input_files[i]);
+                        exit_code = 1;
+                        goto BAIL;
+                    }
+                    cc_analyze_fusion_feed(fusion_state, vm.text_seg,
+                                           (long long)vm.text_ptr + 1,
+                                           input_files[i], stdout);
+                }
+                cc_analyze_fusion_finish(fusion_state, stdout);
+                fusion_state = NULL;
+            }
+            goto BAIL;
+        }
+    }
+
     if (input_files_count == 1) {
         const char *input_file = input_files[0];
         size_t len = strlen(input_file);
@@ -1564,6 +1738,40 @@ int main(int argc, const char *argv[]) {
         goto BAIL;
     }
 
+    // Static bytecode analysis on the just-compiled text segment.
+    if (run_ngrams || run_fusion) {
+        if (run_ngrams) {
+            CcAnalyzeNgramOptions opts = {
+                .n = run_ngrams,
+                .top_n = ngrams_top,
+                .per_file = ngrams_per_file,
+            };
+            ngram_state = cc_analyze_ngram_begin(&opts);
+            const char *label = input_files_count == 1
+                                     ? input_files[0]
+                                     : "<merged source>";
+            cc_analyze_ngram_feed(ngram_state, vm.text_seg,
+                                  (long long)vm.text_ptr + 1, label, stdout);
+            cc_analyze_ngram_finish(ngram_state, stdout);
+            ngram_state = NULL;
+        } else {
+            CcAnalyzeFusionOptions opts = {
+                .top_n = run_fusion,
+                .json = diagnostic_json,
+            };
+            fusion_state = cc_analyze_fusion_begin(&opts);
+            const char *label = input_files_count == 1
+                                     ? input_files[0]
+                                     : "<merged source>";
+            cc_analyze_fusion_feed(fusion_state, vm.text_seg,
+                                   (long long)vm.text_ptr + 1, label,
+                                   stdout);
+            cc_analyze_fusion_finish(fusion_state, stdout);
+            fusion_state = NULL;
+        }
+        goto BAIL;
+    }
+
     if (out_file) {
         // Save bytecode to file and exit
         if (cc_save_bytecode(&vm, out_file) != 0) {
@@ -1609,6 +1817,14 @@ BAIL:
         }
     }
     cc_destroy(&vm);
+    // Defensive: free analysis state if it was allocated but not finalized
+    // (shouldn't happen given the dispatch flow, but keeps leak-checkers happy).
+    if (ngram_state) {
+        cc_analyze_ngram_finish(ngram_state, stdout);
+    }
+    if (fusion_state) {
+        cc_analyze_fusion_finish(fusion_state, stdout);
+    }
     if (input_tokens)
         free(input_tokens);
     if (input_progs) {

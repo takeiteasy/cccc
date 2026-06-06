@@ -409,7 +409,7 @@ The VM can collect dynamic execution statistics:
 
 Enable profiling with `--vm-profile` (text report) or `--vm-profile-json <file>` (JSON output).  The JSON schema includes `total_opcodes`, `total_bigrams`, per-opcode arrays, and per-bigram arrays with percentages.
 
-Static n-gram mining (`tools/bytecode_ngrams`) and use-def fusion analysis (`tools/fusion_candidates`) complement the dynamic data by showing which sequences are common in the bytecode *and* hot at runtime — the strongest candidates for new fused opcodes.
+Static n-gram mining (`jcc --ngrams`) and use-def fusion analysis (`jcc --fusion-candidates`) complement the dynamic data by showing which sequences are common in the bytecode *and* hot at runtime — the strongest candidates for new fused opcodes.
 
 ## Performance Notes
 
@@ -421,12 +421,3 @@ Two optimisations have significantly reduced interpreter overhead:
 2. **Fused local load/store** — The common `LEA3 + LDR/STR` pair for local variables is collapsed into a single `LDR_LOCAL_*` / `STR_LOCAL_*` opcode, saving one dispatch and one register-pressure hop per access.
 
 The dominant cost remains the interpreter itself (as opposed to compile time); see [BENCHMARKS.md](BENCHMARKS.md) for full numbers and [PROFILING.md](PROFILING.md) for analysis tooling.
-
-## See Also
-
-* [SAFETY.md](SAFETY.md) — Safety levels, flags, and runtime error output.
-* [OPTIMIZATION.md](OPTIMIZATION.md) — Bytecode optimisation passes (constant folding, peephole, DCE).
-* [DEBUGGER.md](DEBUGGER.md) — Interactive debugger commands and source maps.
-* [PROFILING.md](PROFILING.md) — VM opcode profiles, n-gram mining, and fusion candidate detection.
-* [BENCHMARKS.md](BENCHMARKS.md) — Performance methodology and cross-compiler comparisons.
-* [LLVM.md](LLVM.md) — Experimental bytecode-to-LLVM backend (stub).
