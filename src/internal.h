@@ -329,6 +329,9 @@ void cc_execute_top_level_macro(JCC *vm, char *name, Token *tok,
 // Expand a deferred ND_INIT_SPLICE node into positional ND_ASSIGN chains.
 // Called by quote_substitute in relfection.c after the splice chain is resolved.
 Node *node_expand_init_splice(JCC *vm, Obj *var, Type *ty, Node *chain, Token *tok);
+// Compile-time constant evaluators (wrappers around the static eval/eval_double).
+int64_t cc_eval(JCC *vm, Node *node);
+double  cc_eval_double(JCC *vm, Node *node);
 
 //
 // type.c

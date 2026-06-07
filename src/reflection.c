@@ -1044,18 +1044,77 @@ $node_t *__jcc_ast_comma(JCC *vm, $node_t *lhs, $node_t *rhs) {
 }
 
 // ============================================================================
-// AST Initializer Builders (ticket #296)
+// AST Initializer Builders (ticket #296, file-scope path ticket #304)
 // ============================================================================
 
+// Write a single constant scalar value to buf[0..ty->size-1].
+// Calls cc_eval / cc_eval_double which error() on non-constant expressions.
+static void reflect_write_constexpr(JCC *vm, char *buf, Type *ty, Node *node) {
+    if (is_flonum(ty)) {
+        double v = cc_eval_double(vm, node);
+        if (ty->kind == TY_FLOAT)
+            *(float *)buf = (float)v;
+        else
+            *(double *)buf = v;
+        return;
+    }
+    int64_t v = cc_eval(vm, node);
+    switch (ty->size) {
+    case 1: *(int8_t *)buf  = (int8_t)v;  break;
+    case 2: *(int16_t *)buf = (int16_t)v; break;
+    case 4: *(int32_t *)buf = (int32_t)v; break;
+    case 8: *(int64_t *)buf = v;          break;
+    default:
+        error_tok(vm, node ? node->tok : NULL,
+                  "unsupported element size %d in file-scope compound literal", ty->size);
+    }
+}
+
+// Create an anonymous static global var for a file-scope compound literal.
+// Returns ND_VAR(anon_gvar); gen() will copy init_data into the data segment.
+static Node *make_gvar_compound_literal(JCC *vm, Type *ty, Node **inits, int n) {
+    Obj *var = reflect_new_anon_gvar(vm, ty);
+    var->is_static = true;
+
+    char *buf = arena_alloc(&vm->compiler.parser_arena, ty->size);
+    memset(buf, 0, ty->size);
+    var->init_data = buf;
+
+    if (ty->kind == TY_ARRAY) {
+        int elem_sz = ty->base->size;
+        for (int i = 0; i < n && i < ty->array_len; i++) {
+            if (!inits[i]) continue;
+            reflect_write_constexpr(vm, buf + i * elem_sz, ty->base, inits[i]);
+        }
+    } else if (ty->kind == TY_STRUCT) {
+        int i = 0;
+        for (Member *m = ty->members; m && i < n; m = m->next) {
+            if (!m->name) { i++; continue; }
+            if (!inits[i]) { i++; continue; }
+            reflect_write_constexpr(vm, buf + m->offset, m->ty, inits[i]);
+            i++;
+        }
+    } else if (n > 0 && inits[0]) {
+        reflect_write_constexpr(vm, buf, ty, inits[0]);
+    }
+
+    Node *node = alloc_node(vm, ND_VAR);
+    node->var = var;
+    node->ty = ty;
+    return node;
+}
+
 // $compound_literal(ty, ...) — positional compound literal: zero + assign chain
-// Mirrors parse.c:4375 compound literal lowering. Requires function scope.
+// Mirrors parse.c:4375 compound literal lowering.
+// At function scope: emits stack-var + ND_ASSIGN chain (supports non-constant values).
+// At file scope: emits static anon gvar with constant init_data (ticket #304).
 $node_t *__jcc_ast_compound_literal(JCC *vm, $type_t *ty, $node_t **inits, int n) {
     if (!vm || !ty)
         return NULL;
     Token *tok = vm->compiler.macro_call_tok;
     Obj *fn = vm->compiler.current_fn;
-    if (!fn) // file scope not supported (V1 limit — see ticket for anon gvar path)
-        return NULL;
+    if (!fn)
+        return make_gvar_compound_literal(vm, ty, inits, n);
 
     char *name = reflect_unique_name(vm);
     Obj *var = reflect_new_var(vm, name, strlen(name), ty);
@@ -1104,7 +1163,8 @@ $node_t *__jcc_ast_init_array(JCC *vm, $type_t *elem_ty, $node_t **elems, int n)
 }
 
 // $init_struct(ty, fields, values, n) — designated struct/union init
-// Partial init is fine: unmentioned fields remain zero from ND_MEMZERO.
+// Partial init is fine: unmentioned fields remain zero.
+// At file scope: emits static anon gvar with constant init_data (ticket #304).
 $node_t *__jcc_ast_init_struct(JCC *vm, $type_t *ty, const char **fields,
                                 $node_t **values, int n) {
     if (!vm || !ty || n <= 0)
@@ -1112,8 +1172,24 @@ $node_t *__jcc_ast_init_struct(JCC *vm, $type_t *ty, const char **fields,
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
         return NULL;
     Obj *fn = vm->compiler.current_fn;
-    if (!fn)
-        return NULL;
+    if (!fn) {
+        // File scope: static anon gvar with constant init_data
+        Obj *var = reflect_new_anon_gvar(vm, ty);
+        var->is_static = true;
+        char *buf = arena_alloc(&vm->compiler.parser_arena, ty->size);
+        memset(buf, 0, ty->size);
+        var->init_data = buf;
+        for (int i = 0; i < n; i++) {
+            if (!fields[i] || !values[i]) continue;
+            Member *mem = (Member *)__jcc_ast_struct_member_find(vm, ty, fields[i]);
+            if (!mem) return NULL;
+            reflect_write_constexpr(vm, buf + mem->offset, mem->ty, values[i]);
+        }
+        Node *node = alloc_node(vm, ND_VAR);
+        node->var = var;
+        node->ty = ty;
+        return node;
+    }
 
     char *name = reflect_unique_name(vm);
     Obj *var = reflect_new_var(vm, name, strlen(name), ty);
