@@ -1042,6 +1042,142 @@ $node_t *__jcc_ast_comma(JCC *vm, $node_t *lhs, $node_t *rhs) {
 }
 
 // ============================================================================
+// AST Initializer Builders (ticket #296)
+// ============================================================================
+
+// $compound_literal(ty, ...) — positional compound literal: zero + assign chain
+// Mirrors parse.c:4375 compound literal lowering. Requires function scope.
+$node_t *__jcc_ast_compound_literal(JCC *vm, $type_t *ty, $node_t **inits, int n) {
+    if (!vm || !ty)
+        return NULL;
+    Token *tok = vm->compiler.macro_call_tok;
+    Obj *fn = vm->compiler.current_fn;
+    if (!fn) // file scope not supported (V1 limit — see ticket for anon gvar path)
+        return NULL;
+
+    char *name = reflect_unique_name(vm);
+    Obj *var = reflect_new_var(vm, name, strlen(name), ty);
+    var->is_local = true;
+    // Prepend to vm->compiler.locals (not fn->locals) so cc_expand_macros
+    // picks up the new var when it flushes: fn->locals = vm->compiler.locals.
+    var->next = vm->compiler.locals;
+    vm->compiler.locals = var;
+
+    Node *zero = alloc_node(vm, ND_MEMZERO);
+    zero->var = var;
+
+    Node *chain = NULL;
+    if (n > 0 && inits) {
+        for (int i = 0; i < n - 1; i++)
+            if (inits[i])
+                inits[i]->next = inits[i + 1];
+        if (inits[n - 1])
+            inits[n - 1]->next = NULL;
+        chain = inits[0];
+    }
+
+    Node *assignments = node_expand_init_splice(vm, var, ty, chain, tok);
+
+    Node *init_comma = alloc_node(vm, ND_COMMA);
+    init_comma->lhs = zero;
+    init_comma->rhs = assignments;
+
+    Node *var_ref = alloc_node(vm, ND_VAR);
+    var_ref->var = var;
+    var_ref->ty = ty;
+
+    Node *result = alloc_node(vm, ND_COMMA);
+    result->lhs = init_comma;
+    result->rhs = var_ref;
+    add_type(vm, result);
+    return result;
+}
+
+// $init_array(elem_ty, ...) — array compound literal with explicit element type
+$node_t *__jcc_ast_init_array(JCC *vm, $type_t *elem_ty, $node_t **elems, int n) {
+    if (!vm || !elem_ty || !elems || n <= 0)
+        return NULL;
+    Type *arr_ty = array_of(vm, elem_ty, n);
+    return __jcc_ast_compound_literal(vm, arr_ty, elems, n);
+}
+
+// $init_struct(ty, fields, values, n) — designated struct/union init
+// Partial init is fine: unmentioned fields remain zero from ND_MEMZERO.
+$node_t *__jcc_ast_init_struct(JCC *vm, $type_t *ty, const char **fields,
+                                $node_t **values, int n) {
+    if (!vm || !ty || n <= 0)
+        return NULL;
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
+        return NULL;
+    Obj *fn = vm->compiler.current_fn;
+    if (!fn)
+        return NULL;
+
+    char *name = reflect_unique_name(vm);
+    Obj *var = reflect_new_var(vm, name, strlen(name), ty);
+    var->is_local = true;
+    var->next = vm->compiler.locals;
+    vm->compiler.locals = var;
+
+    // Walk all struct members and emit explicit assignments.
+    // Specified fields use the caller-provided value; unspecified fields get 0.
+    // This avoids relying on ND_MEMZERO, which is a no-op in gen_expr context.
+    Node *assignments = alloc_node(vm, ND_NULL_EXPR);
+    for (Member *mem = ty->members; mem; mem = mem->next) {
+        if (!mem->name)
+            continue;
+
+        // Find caller-provided value for this member (if any)
+        int name_len = mem->name->len;
+        Node *val = NULL;
+        for (int i = 0; i < n; i++) {
+            if (!fields[i] || !values[i])
+                continue;
+            if ((int)strlen(fields[i]) == name_len &&
+                strncmp(mem->name->loc, fields[i], name_len) == 0) {
+                val = values[i];
+                break;
+            }
+        }
+        if (!val)
+            val = __jcc_ast_int_literal(vm, 0); // zero for unspecified fields
+
+        Node *var_ref = alloc_node(vm, ND_VAR);
+        var_ref->var = var;
+        var_ref->ty = ty;
+
+        Node *mem_node = alloc_node(vm, ND_MEMBER);
+        mem_node->lhs = var_ref;
+        mem_node->member = mem;
+        add_type(vm, mem_node);
+
+        Node *assign = alloc_node(vm, ND_ASSIGN);
+        assign->lhs = mem_node;
+        assign->rhs = val;
+        add_type(vm, assign);
+
+        Node *comma = alloc_node(vm, ND_COMMA);
+        comma->lhs = assignments;
+        comma->rhs = assign;
+        assignments = comma;
+    }
+
+    Node *init_comma = alloc_node(vm, ND_COMMA);
+    init_comma->lhs = alloc_node(vm, ND_NULL_EXPR); // placeholder; memzero not needed
+    init_comma->rhs = assignments;
+
+    Node *var_ref = alloc_node(vm, ND_VAR);
+    var_ref->var = var;
+    var_ref->ty = ty;
+
+    Node *result = alloc_node(vm, ND_COMMA);
+    result->lhs = init_comma;
+    result->rhs = var_ref;
+    add_type(vm, result);
+    return result;
+}
+
+// ============================================================================
 // AST Type Construction - Qualified Types (ticket #171)
 // ============================================================================
 
@@ -1395,11 +1531,13 @@ void __jcc_ast_global_var_set_static($obj_t *var, bool is_static) {
 // Macro execution is single-threaded so a module-level stack is fine.
 #define JCC_FN_CONTEXT_STACK_DEPTH 16
 static Obj *_fn_context_stack[JCC_FN_CONTEXT_STACK_DEPTH];
+static Obj *_fn_locals_stack[JCC_FN_CONTEXT_STACK_DEPTH]; // saved vm->compiler.locals
 static int  _fn_context_depth = 0;
 
-// Push a new function context: vm->compiler.current_fn is saved on the stack
-// and replaced by fn.  Inside this context, $quote("return x;") will find
-// current_fn and apply the correct implicit return-type cast.
+// Push a new function context: saves current_fn and vm->compiler.locals, then
+// switches both to fn.  Any vars allocated inside the $with_fn block (e.g. from
+// $compound_literal) go into fn->locals via vm->compiler.locals; they are flushed
+// back to fn->locals on pop so assign_stack_offsets sees them correctly.
 void __jcc_ast_push_fn(JCC *vm, $obj_t *fn) {
     if (!vm)
         return;
@@ -1408,12 +1546,16 @@ void __jcc_ast_push_fn(JCC *vm, $obj_t *fn) {
               JCC_FN_CONTEXT_STACK_DEPTH);
         return;
     }
-    _fn_context_stack[_fn_context_depth++] = vm->compiler.current_fn;
+    int d = _fn_context_depth++;
+    _fn_context_stack[d] = vm->compiler.current_fn;
+    _fn_locals_stack[d]  = vm->compiler.locals;  // save outer locals pointer
     vm->compiler.current_fn = fn;
+    vm->compiler.locals = fn->locals;            // switch to inner fn's locals
 }
 
-// Pop the most recently pushed function context, restoring current_fn to its
-// previous value.
+// Pop the most recently pushed function context.  Flushes any vars that were
+// added to vm->compiler.locals during the $with_fn block into fn->locals, then
+// restores the outer current_fn and locals.
 void __jcc_ast_pop_fn(JCC *vm) {
     if (!vm)
         return;
@@ -1422,7 +1564,12 @@ void __jcc_ast_pop_fn(JCC *vm) {
         vm->compiler.current_fn = NULL;
         return;
     }
-    vm->compiler.current_fn = _fn_context_stack[--_fn_context_depth];
+    // Flush vars added inside the block back into the inner function.
+    if (vm->compiler.current_fn)
+        vm->compiler.current_fn->locals = vm->compiler.locals;
+    int d = --_fn_context_depth;
+    vm->compiler.current_fn = _fn_context_stack[d];
+    vm->compiler.locals     = _fn_locals_stack[d];  // restore outer locals
 }
 
 // ============================================================================

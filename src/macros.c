@@ -177,6 +177,12 @@ extern Node   *__jcc_get_comptime_member(JCC *vm, const char *var_name,
 // Ticket #189: constexpr variable access
 extern Node   *__jcc_get_constexpr_value(JCC *vm, const char *name);
 
+// Ticket #296: initializer builders
+extern Node   *__jcc_ast_compound_literal(JCC *vm, Type *ty, Node **inits, int n);
+extern Node   *__jcc_ast_init_array(JCC *vm, Type *elem_ty, Node **elems, int n);
+extern Node   *__jcc_ast_init_struct(JCC *vm, Type *ty, const char **fields,
+                                     Node **values, int n);
+
 // Ticket #277: Lisp-style single-macro expansion
 extern Node   *__jcc_macroexpand_1(JCC *vm, Node *node);
 extern Node   *__jcc_macroexpand(JCC *vm, Node *node);
@@ -457,6 +463,14 @@ static void register_reflection_ffi(JCC *vm) {
     // Ticket #189: constexpr variable access
     cc_register_cfunc(vm, "__jcc_get_constexpr_value",
                       (void *)__jcc_get_constexpr_value, 2, 0);
+
+    // Ticket #296: initializer builders
+    cc_register_cfunc(vm, "__jcc_ast_compound_literal",
+                      (void *)__jcc_ast_compound_literal, 3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_init_array",
+                      (void *)__jcc_ast_init_array, 3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_init_struct",
+                      (void *)__jcc_ast_init_struct, 4, 0);
 
     // Ticket #277: Lisp-style macro expansion
     cc_register_cfunc(vm, "__jcc_macroexpand_1",

@@ -1906,6 +1906,46 @@ $node_t *__jcc_get_constexpr_value(JCC *vm, const char *name);
 
 #define $get_constexpr_value(name)  __jcc_get_constexpr_value(_VM, name)
 
+// ============================================================================
+// Initializer Builders (ticket #296)
+// ============================================================================
+
+/**
+ * @abstract Build a positional compound literal: zero-initialise an anonymous
+ *           local var then positionally assign @a inits via node_expand_init_splice.
+ * @note Requires function scope (file-scope not supported in V1).
+ */
+$node_t *__jcc_ast_compound_literal(JCC *vm, $type_t *ty, $node_t **inits, int n);
+
+/**
+ * @abstract Build an array compound literal.  Element type is explicit to avoid
+ *           long-inference surprises with $int_literal.
+ */
+$node_t *__jcc_ast_init_array(JCC *vm, $type_t *elem_ty, $node_t **elems, int n);
+
+/**
+ * @abstract Build a designated struct/union initializer.  Unmentioned fields
+ *           are zero-initialised.  Partial init (n < member count) is allowed.
+ */
+$node_t *__jcc_ast_init_struct(JCC *vm, $type_t *ty, const char **fields,
+                                $node_t **values, int n);
+
+/** Positional compound literal — element count inferred from __VA_ARGS__. */
+#define $compound_literal(ty, ...)                                      \
+    __jcc_ast_compound_literal(_VM, ty,                                 \
+        ($node_t *[]){__VA_ARGS__},                                     \
+        (int)(sizeof(($node_t *[]){__VA_ARGS__}) / sizeof($node_t *)))
+
+/** Array compound literal with explicit element type. */
+#define $init_array(elem_ty, ...)                                       \
+    __jcc_ast_init_array(_VM, elem_ty,                                  \
+        ($node_t *[]){__VA_ARGS__},                                     \
+        (int)(sizeof(($node_t *[]){__VA_ARGS__}) / sizeof($node_t *)))
+
+/** Designated struct/union init — fields and values are separate arrays. */
+#define $init_struct(ty, fields, values, n)                             \
+    __jcc_ast_init_struct(_VM, ty, fields, values, n)
+
 // Global variable generation (ticket #152)
 #define $global_var(name, ty)                                           \
     __jcc_ast_global_var(_VM, name, ty)
