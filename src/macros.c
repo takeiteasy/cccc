@@ -63,6 +63,10 @@ extern Node *__jcc_ast_switch(JCC *vm, Node *cond);
 extern void __jcc_ast_switch_add_case(JCC *vm, Node *switch_node, Node *value,
                                 Node *body);
 extern void __jcc_ast_switch_set_default(JCC *vm, Node *switch_node, Node *body);
+extern Node *__jcc_ast_block_add_stmt(JCC *vm, Node *block, Node *stmt);
+extern Node *__jcc_ast_block_add_current_stmt(JCC *vm, Node *stmt);
+extern void __jcc_ast_switch_add_current_case(JCC *vm, Node *value, Node *body);
+extern void __jcc_ast_switch_set_current_default(JCC *vm, Node *body);
 extern int __jcc_ast_enum_count(JCC *vm, Type *enum_type);
 extern EnumConstant *__jcc_ast_enum_at(JCC *vm, Type *enum_type, int index);
 extern const char *__jcc_ast_enum_constant_name(EnumConstant *ec);
@@ -92,6 +96,14 @@ extern void  __jcc_ast_global_var_set_static(Obj *var, bool is_static);
 // Ticket #148: function-building context (push/pop current_fn for $quote)
 extern void __jcc_ast_push_fn(JCC *vm, Obj *fn);
 extern void __jcc_ast_pop_fn(JCC *vm);
+extern void __jcc_ast_push_block(JCC *vm, Node *block);
+extern void __jcc_ast_pop_block(JCC *vm);
+extern void __jcc_ast_push_struct(JCC *vm, Type *ty);
+extern void __jcc_ast_pop_struct(JCC *vm);
+extern void __jcc_ast_push_switch(JCC *vm, Node *switch_node);
+extern void __jcc_ast_pop_switch(JCC *vm);
+extern void __jcc_ast_push_enum(JCC *vm, Type *ty);
+extern void __jcc_ast_pop_enum(JCC *vm);
 
 // Ticket #58: AST dump
 extern void __jcc_dump_tree(JCC *vm, Node *node);
@@ -146,9 +158,13 @@ extern Type  *__jcc_ast_make_struct(JCC *vm, const char *name);
 extern Type  *__jcc_ast_make_union(JCC *vm, const char *name);
 extern Type  *__jcc_ast_struct_add_field(JCC *vm, Type *ty, const char *name,
                                           Type *field_type);
+extern Type  *__jcc_ast_struct_add_current_field(JCC *vm, const char *name,
+                                                  Type *field_type);
 extern Type  *__jcc_ast_make_enum(JCC *vm, const char *name);
 extern void   __jcc_ast_enum_add_constant(JCC *vm, Type *ty, const char *name,
                                            int value);
+extern void   __jcc_ast_enum_add_current_constant(JCC *vm, const char *name,
+                                                   int value);
 extern Type  *__jcc_ast_make_typedef(JCC *vm, const char *name, Type *underlying);
 
 // Ticket #188: comptime variable access
@@ -293,6 +309,10 @@ static void register_reflection_ffi(JCC *vm) {
                       0);
     cc_register_cfunc(vm, "__jcc_ast_switch_set_default",
                       (void *)__jcc_ast_switch_set_default, 3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_switch_add_current_case",
+                      (void *)__jcc_ast_switch_add_current_case, 3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_switch_set_current_default",
+                      (void *)__jcc_ast_switch_set_current_default, 2, 0);
 
     // Ticket #58: AST dump
     cc_register_cfunc(vm, "__jcc_dump_tree",              (void *)__jcc_dump_tree,              2, 0);
@@ -306,6 +326,10 @@ static void register_reflection_ffi(JCC *vm) {
 
     // Previously unregistered statement builders
     cc_register_cfunc(vm, "__jcc_ast_block",     (void *)__jcc_ast_block,     3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_block_add_stmt",
+                      (void *)__jcc_ast_block_add_stmt, 3, 0);
+    cc_register_cfunc(vm, "__jcc_ast_block_add_current_stmt",
+                      (void *)__jcc_ast_block_add_current_stmt, 2, 0);
     cc_register_cfunc(vm, "__jcc_ast_expr_stmt", (void *)__jcc_ast_expr_stmt, 2, 0);
 
     // Ticket #77: hygienic local variable injection
@@ -361,6 +385,22 @@ static void register_reflection_ffi(JCC *vm) {
                       (void *)__jcc_ast_push_fn, 2, 0);
     cc_register_cfunc(vm, "__jcc_ast_pop_fn",
                       (void *)__jcc_ast_pop_fn, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_push_block",
+                      (void *)__jcc_ast_push_block, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_pop_block",
+                      (void *)__jcc_ast_pop_block, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_push_struct",
+                      (void *)__jcc_ast_push_struct, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_pop_struct",
+                      (void *)__jcc_ast_pop_struct, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_push_switch",
+                      (void *)__jcc_ast_push_switch, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_pop_switch",
+                      (void *)__jcc_ast_pop_switch, 1, 0);
+    cc_register_cfunc(vm, "__jcc_ast_push_enum",
+                      (void *)__jcc_ast_push_enum, 2, 0);
+    cc_register_cfunc(vm, "__jcc_ast_pop_enum",
+                      (void *)__jcc_ast_pop_enum, 1, 0);
 
     // Ticket #1: quasi-quoting
     cc_register_variadic_cfunc(vm, "__jcc_quote",      (void *)__jcc_quote,      2, 0);
@@ -393,10 +433,14 @@ static void register_reflection_ffi(JCC *vm) {
                       (void *)__jcc_ast_make_union, 2, 0);
     cc_register_cfunc(vm, "__jcc_ast_struct_add_field",
                       (void *)__jcc_ast_struct_add_field, 4, 0);
+    cc_register_cfunc(vm, "__jcc_ast_struct_add_current_field",
+                      (void *)__jcc_ast_struct_add_current_field, 3, 0);
     cc_register_cfunc(vm, "__jcc_ast_make_enum",
                       (void *)__jcc_ast_make_enum, 2, 0);
     cc_register_cfunc(vm, "__jcc_ast_enum_add_constant",
                       (void *)__jcc_ast_enum_add_constant, 4, 0);
+    cc_register_cfunc(vm, "__jcc_ast_enum_add_current_constant",
+                      (void *)__jcc_ast_enum_add_current_constant, 3, 0);
     cc_register_cfunc(vm, "__jcc_ast_make_typedef",
                       (void *)__jcc_ast_make_typedef, 3, 0);
 

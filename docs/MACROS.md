@@ -1024,10 +1024,11 @@ Underlying functions: `__jcc_macroexpand_1(JCC *vm, $node_t *node)` and
 | `_AST_VARARGS_AS_ARRAY()` | Borrowed inline variadic argument array for forwarding |
 | `$return(expr)` | Return statement |
 | `$block(stmts, count)` | Compound statement |
+| `$block_add_stmt(block, stmt)` / `$block_add_stmt(stmt)` | Append a statement to a block; shorthand form uses `$with_block` |
 | `$if(cond, then_body, else_body)` | If statement |
 | `$switch(cond)` | Switch statement |
-| `$switch_add_case(sw, value, body)` | Add switch case |
-| `$switch_set_default(sw, body)` | Set switch default |
+| `$switch_add_case(sw, value, body)` / `$switch_add_case(value, body)` | Add switch case; shorthand form uses `$with_switch` |
+| `$switch_set_default(sw, body)` / `$switch_set_default(body)` | Set switch default; shorthand form uses `$with_switch` |
 | `$expr_stmt(expr)` | Expression statement |
 | `$local_var(name, ty)` | Named local variable |
 | `$local_var_unique(ty)` | Hygienic temporary local |
@@ -1049,6 +1050,47 @@ Underlying functions: `__jcc_macroexpand_1(JCC *vm, $node_t *node)` and
 | `$function_set_inline(fn, flag)` | Set inline flag |
 | `$function_set_variadic(fn, flag)` | Set variadic flag |
 | `$with_fn(fn) { ... }` | Set `fn` as the current function context for the block so `$quote("return x;")` applies the correct return-type cast |
+| `$with_block(block) { ... }` | Set `block` as the current block context for `$block_add_stmt(stmt)` |
+
+### Aggregate And Switch Builder Contexts
+
+Scoped builder helpers let macros group child additions without repeating the
+parent pointer at every call site. The explicit forms remain available.
+
+```c
+[[jcc::comptime]]
+void generate_point(void) {
+    $type_t *int_ty = $get_type("int");
+    $type_t *point = $make_struct("Point");
+    $with_struct(point) {
+        $struct_add_field("x", int_ty);
+        $struct_add_field("y", int_ty);
+    }
+}
+generate_point();
+```
+
+```c
+[[jcc::comptime]]
+void generate_switch(void) {
+    $type_t *int_ty = $get_type("int");
+    $obj_t *fn = $function("classify", int_ty);
+    $function_add_param(fn, "x", int_ty);
+
+    $with_fn(fn) {
+        $node_t *sw = $switch($param_ref(fn, "x"));
+        $with_switch(sw) {
+            $switch_add_case($int_literal(0), $return($int_literal(1)));
+            $switch_set_default($return($int_literal(-1)));
+        }
+        $function_set_body(fn, sw);
+    }
+}
+generate_switch();
+```
+
+`$with_enum(e)` similarly enables `$enum_add_constant(name, value)`, and
+`$with_block(block)` enables `$block_add_stmt(stmt)`.
 
 ### Global Variable Builder APIs
 

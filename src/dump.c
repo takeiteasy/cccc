@@ -331,7 +331,7 @@ static void dump_node(FILE *f, Node *node, int depth, int verbose) {
         break;
 
     case ND_CASE:
-        dump_node(f, node->then, depth + 1, verbose);
+        dump_node(f, node->lhs, depth + 1, verbose);
         break;
 
     case ND_FUNCALL: case ND_BLOCK_CALL:
@@ -721,8 +721,8 @@ static void dump_ast_json_node(FILE *f, Node *node, int indent) {
             JSON_FIELD(f, d, first, "end");
             fprintf(f, "%ld", node->end);
         }
-        JSON_FIELD(f, d, first, "then");
-        dump_ast_json_node(f, node->then, d);
+        JSON_FIELD(f, d, first, "body");
+        dump_ast_json_node(f, node->lhs, d);
         break;
 
     case ND_GOTO:

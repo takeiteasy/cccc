@@ -1076,6 +1076,18 @@ $node_t *__jcc_ast_return(JCC *vm, $node_t *expr);
 $node_t *__jcc_ast_block(JCC *vm, $node_t **stmts, int count);
 
 /*!
+ * @function __jcc_ast_block_add_stmt
+ * @abstract Append a statement to a block node.
+ * @param vm The VM context.
+ * @param block The nk_block node to modify.
+ * @param stmt The statement to append.
+ * @return The block on success, or NULL on invalid arguments.
+ * @discussion Convenience wrapper: $block_add_stmt(block, stmt), or
+ *             $block_add_stmt(stmt) inside $with_block(block).
+ */
+$node_t *__jcc_ast_block_add_stmt(JCC *vm, $node_t *block, $node_t *stmt);
+
+/*!
  * @function __jcc_ast_if
  * @abstract Build an if statement node.
  * @param vm The VM context.
@@ -1106,7 +1118,8 @@ $node_t *__jcc_ast_switch(JCC *vm, $node_t *cond);
  * @param switch_node The switch node returned by __jcc_ast_switch.
  * @param value The case value expression.
  * @param body The body statement for this case.
- * @discussion Convenience wrapper: $switch_add_case(sw, value, body).
+ * @discussion Convenience wrapper: $switch_add_case(sw, value, body), or
+ *             $switch_add_case(value, body) inside $with_switch(sw).
  */
 void __jcc_ast_switch_add_case(JCC *vm, $node_t *switch_node,
                                 $node_t *value, $node_t *body);
@@ -1117,7 +1130,8 @@ void __jcc_ast_switch_add_case(JCC *vm, $node_t *switch_node,
  * @param vm The VM context.
  * @param switch_node The switch node returned by __jcc_ast_switch.
  * @param body The default-case body statement.
- * @discussion Convenience wrapper: $switch_set_default(sw, body).
+ * @discussion Convenience wrapper: $switch_set_default(sw, body), or
+ *             $switch_set_default(body) inside $with_switch(sw).
  */
 void __jcc_ast_switch_set_default(JCC *vm, $node_t *switch_node,
                                     $node_t *body);
@@ -1518,6 +1532,58 @@ void __jcc_ast_push_fn(JCC *vm, $obj_t *fn);
  */
 void __jcc_ast_pop_fn(JCC *vm);
 
+/*!
+ * @function __jcc_ast_push_block
+ * @abstract Establish a block as the current statement-append context.
+ * @param vm The VM context.
+ * @param block The nk_block node being populated.
+ * @discussion Use with $with_block(block) so $block_add_stmt(stmt) appends to
+ *             block without repeating the block pointer.
+ */
+void __jcc_ast_push_block(JCC *vm, $node_t *block);
+void __jcc_ast_pop_block(JCC *vm);
+$node_t *__jcc_ast_block_add_current_stmt(JCC *vm, $node_t *stmt);
+
+/*!
+ * @function __jcc_ast_push_struct
+ * @abstract Establish a struct or union as the current field-add context.
+ * @param vm The VM context.
+ * @param ty The aggregate type being populated.
+ * @discussion Use with $with_struct(ty) so $struct_add_field(name, ty) appends
+ *             to the current aggregate.
+ */
+void __jcc_ast_push_struct(JCC *vm, $type_t *ty);
+void __jcc_ast_pop_struct(JCC *vm);
+$type_t *__jcc_ast_struct_add_current_field(JCC *vm, const char *name,
+                                            $type_t *field_type);
+
+/*!
+ * @function __jcc_ast_push_switch
+ * @abstract Establish a switch node as the current case/default context.
+ * @param vm The VM context.
+ * @param switch_node The switch node being populated.
+ * @discussion Use with $with_switch(sw) so $switch_add_case(value, body) and
+ *             $switch_set_default(body) append to the current switch.
+ */
+void __jcc_ast_push_switch(JCC *vm, $node_t *switch_node);
+void __jcc_ast_pop_switch(JCC *vm);
+void __jcc_ast_switch_add_current_case(JCC *vm, $node_t *value,
+                                       $node_t *body);
+void __jcc_ast_switch_set_current_default(JCC *vm, $node_t *body);
+
+/*!
+ * @function __jcc_ast_push_enum
+ * @abstract Establish an enum as the current constant-add context.
+ * @param vm The VM context.
+ * @param ty The enum type being populated.
+ * @discussion Use with $with_enum(ty) so $enum_add_constant(name, value)
+ *             appends to the current enum.
+ */
+void __jcc_ast_push_enum(JCC *vm, $type_t *ty);
+void __jcc_ast_pop_enum(JCC *vm);
+void __jcc_ast_enum_add_current_constant(JCC *vm, const char *name,
+                                         int value);
+
 // ============================================================================
 // AST Dump Functions (ticket #58) — Nim-style dumpTree / dumpAstGen
 // ============================================================================
@@ -1592,6 +1658,9 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, $node_t *node);
 #define _AST_VARARGS_AS_ARRAY() __jcc_ast_varargs_as_array(_VM)
 #define _AST_VARARG_STR_AT(i) __jcc_ast_vararg_str_at(_VM, i)
 
+#define __jcc_dispatch_2(_1, _2, which, ...) which(_1, _2)
+#define __jcc_dispatch_3(_1, _2, _3, which, ...) which(_1, _2, _3)
+
 #define $current_token() __jcc_ast_current_token(_VM)
 #define $synthetic_token(label) __jcc_ast_synthetic_token(_VM, label)
 #define $token_from_node(node) __jcc_ast_token_from_node(node)
@@ -1643,12 +1712,29 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, $node_t *node);
 
 #define $return(expr) __jcc_ast_return(_VM, expr)
 #define $block(stmts, count) __jcc_ast_block(_VM, stmts, count)
+#define __jcc_block_add_stmt_1(stmt, _ignored)                          \
+    __jcc_ast_block_add_current_stmt(_VM, stmt)
+#define __jcc_block_add_stmt_2(block, stmt)                              \
+    __jcc_ast_block_add_stmt(_VM, block, stmt)
+#define $block_add_stmt(...)                                             \
+    __jcc_dispatch_2(__VA_ARGS__, __jcc_block_add_stmt_2,                \
+                     __jcc_block_add_stmt_1)
 #define $if(c, t, e) __jcc_ast_if(_VM, c, t, e)
 #define $switch(cond) __jcc_ast_switch(_VM, cond)
-#define $switch_add_case(sw, v, b)                                      \
+#define __jcc_switch_add_case_2(v, b, _ignored)                          \
+    __jcc_ast_switch_add_current_case(_VM, v, b)
+#define __jcc_switch_add_case_3(sw, v, b)                                \
     __jcc_ast_switch_add_case(_VM, sw, v, b)
-#define $switch_set_default(sw, b)                                    \
+#define $switch_add_case(...)                                            \
+    __jcc_dispatch_3(__VA_ARGS__, __jcc_switch_add_case_3,               \
+                     __jcc_switch_add_case_2)
+#define __jcc_switch_set_default_1(b, _ignored)                          \
+    __jcc_ast_switch_set_current_default(_VM, b)
+#define __jcc_switch_set_default_2(sw, b)                                \
     __jcc_ast_switch_set_default(_VM, sw, b)
+#define $switch_set_default(...)                                         \
+    __jcc_dispatch_2(__VA_ARGS__, __jcc_switch_set_default_2,            \
+                     __jcc_switch_set_default_1)
 #define $expr_stmt(expr) __jcc_ast_expr_stmt(_VM, expr)
 #define $local_var(name, ty) __jcc_ast_local_var(_VM, name, ty)
 #define $local_var_unique(ty) __jcc_ast_local_var_unique(_VM, ty)
@@ -1737,11 +1823,21 @@ const char *__jcc_dump_ast_gen_to_string(JCC *vm, $node_t *node);
 // $enum_add_constant adds a constant to the enum AND to scope (usable as int).
 #define $make_struct(name)     __jcc_ast_make_struct(_VM, name)
 #define $make_union(name)      __jcc_ast_make_union(_VM, name)
-#define $struct_add_field(ty, name, field_type) \
+#define __jcc_struct_add_field_2(name, field_type, _ignored)             \
+    __jcc_ast_struct_add_current_field(_VM, name, field_type)
+#define __jcc_struct_add_field_3(ty, name, field_type)                   \
     __jcc_ast_struct_add_field(_VM, ty, name, field_type)
+#define $struct_add_field(...)                                           \
+    __jcc_dispatch_3(__VA_ARGS__, __jcc_struct_add_field_3,              \
+                     __jcc_struct_add_field_2)
 #define $make_enum(name)       __jcc_ast_make_enum(_VM, name)
-#define $enum_add_constant(ty, name, value) \
+#define __jcc_enum_add_constant_2(name, value, _ignored)                 \
+    __jcc_ast_enum_add_current_constant(_VM, name, value)
+#define __jcc_enum_add_constant_3(ty, name, value)                       \
     __jcc_ast_enum_add_constant(_VM, ty, name, value)
+#define $enum_add_constant(...)                                          \
+    __jcc_dispatch_3(__VA_ARGS__, __jcc_enum_add_constant_3,             \
+                     __jcc_enum_add_constant_2)
 #define $make_typedef(name, underlying) \
     __jcc_ast_make_typedef(_VM, name, underlying)
 
@@ -1829,6 +1925,26 @@ $node_t *__jcc_get_constexpr_value(JCC *vm, const char *name);
     for (int _jcc_fn_ctx_ = (__jcc_ast_push_fn(_VM, (fn)), 1);             \
          _jcc_fn_ctx_;                                                      \
          _jcc_fn_ctx_ = (__jcc_ast_pop_fn(_VM), 0))
+
+#define $with_block(block)                                               \
+    for (int _jcc_block_ctx_ = (__jcc_ast_push_block(_VM, (block)), 1);  \
+         _jcc_block_ctx_;                                                \
+         _jcc_block_ctx_ = (__jcc_ast_pop_block(_VM), 0))
+
+#define $with_struct(ty)                                                 \
+    for (int _jcc_struct_ctx_ = (__jcc_ast_push_struct(_VM, (ty)), 1);   \
+         _jcc_struct_ctx_;                                               \
+         _jcc_struct_ctx_ = (__jcc_ast_pop_struct(_VM), 0))
+
+#define $with_switch(sw)                                                 \
+    for (int _jcc_switch_ctx_ = (__jcc_ast_push_switch(_VM, (sw)), 1);   \
+         _jcc_switch_ctx_;                                               \
+         _jcc_switch_ctx_ = (__jcc_ast_pop_switch(_VM), 0))
+
+#define $with_enum(ty)                                                   \
+    for (int _jcc_enum_ctx_ = (__jcc_ast_push_enum(_VM, (ty)), 1);       \
+         _jcc_enum_ctx_;                                                 \
+         _jcc_enum_ctx_ = (__jcc_ast_pop_enum(_VM), 0))
 
 #ifdef __cplusplus
 }

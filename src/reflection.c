@@ -657,6 +657,22 @@ $node_t *__jcc_ast_block(JCC *vm, $node_t **stmts, int count) {
     return node;
 }
 
+$node_t *__jcc_ast_block_add_stmt(JCC *vm, $node_t *block, $node_t *stmt) {
+    if (!vm || !block || !stmt || block->kind != ND_BLOCK)
+        return NULL;
+
+    stmt->next = NULL;
+    if (!block->body) {
+        block->body = stmt;
+    } else {
+        Node *last = block->body;
+        while (last->next)
+            last = last->next;
+        last->next = stmt;
+    }
+    return block;
+}
+
 $node_t *__jcc_ast_if(JCC *vm, $node_t *cond, $node_t *then_body,
                         $node_t *else_body) {
     if (!vm || !cond)
@@ -677,6 +693,7 @@ $node_t *__jcc_ast_switch(JCC *vm, $node_t *cond) {
     node->cond = cond;
     node->case_next = NULL;
     node->default_case = NULL;
+    node->then = alloc_node(vm, ND_BLOCK);
     return node;
 }
 
@@ -692,11 +709,12 @@ void __jcc_ast_switch_add_case(JCC *vm, $node_t *switch_node, $node_t *value,
     $node_t *case_node = alloc_node(vm, ND_CASE);
     case_node->begin = value->val; // Assuming value is a numeric literal
     case_node->end = value->val;
-    case_node->body = body;
+    case_node->lhs = body;
 
     // Add to switch's case list
     case_node->case_next = switch_node->case_next;
     switch_node->case_next = case_node;
+    __jcc_ast_block_add_stmt(vm, switch_node->then, case_node);
 }
 
 void __jcc_ast_switch_set_default(JCC *vm, $node_t *switch_node,
@@ -708,8 +726,9 @@ void __jcc_ast_switch_set_default(JCC *vm, $node_t *switch_node,
         return;
 
     $node_t *def = alloc_node(vm, ND_CASE);
-    def->body = body;
+    def->lhs = body;
     switch_node->default_case = def;
+    __jcc_ast_block_add_stmt(vm, switch_node->then, def);
 }
 
 // ============================================================================
@@ -1407,6 +1426,129 @@ void __jcc_ast_pop_fn(JCC *vm) {
 }
 
 // ============================================================================
+// Scoped AST builder contexts (ticket #232)
+// ============================================================================
+
+#define JCC_AST_CONTEXT_STACK_DEPTH 16
+
+static Node *_block_context_stack[JCC_AST_CONTEXT_STACK_DEPTH];
+static int _block_context_depth = 0;
+static Type *_struct_context_stack[JCC_AST_CONTEXT_STACK_DEPTH];
+static int _struct_context_depth = 0;
+static Node *_switch_context_stack[JCC_AST_CONTEXT_STACK_DEPTH];
+static int _switch_context_depth = 0;
+static Type *_enum_context_stack[JCC_AST_CONTEXT_STACK_DEPTH];
+static int _enum_context_depth = 0;
+
+$type_t *__jcc_ast_struct_add_field(JCC *vm, $type_t *ty, const char *name,
+                                    $type_t *field_type);
+void __jcc_ast_enum_add_constant(JCC *vm, $type_t *ty, const char *name,
+                                  int value);
+
+void __jcc_ast_push_block(JCC *vm, $node_t *block) {
+    (void)vm;
+    if (_block_context_depth >= JCC_AST_CONTEXT_STACK_DEPTH) {
+        error("__jcc_ast_push_block: block context stack overflow (max %d)",
+              JCC_AST_CONTEXT_STACK_DEPTH);
+        return;
+    }
+    _block_context_stack[_block_context_depth++] = block;
+}
+
+void __jcc_ast_pop_block(JCC *vm) {
+    (void)vm;
+    if (_block_context_depth > 0)
+        _block_context_depth--;
+}
+
+void __jcc_ast_push_struct(JCC *vm, $type_t *ty) {
+    (void)vm;
+    if (_struct_context_depth >= JCC_AST_CONTEXT_STACK_DEPTH) {
+        error("__jcc_ast_push_struct: struct context stack overflow (max %d)",
+              JCC_AST_CONTEXT_STACK_DEPTH);
+        return;
+    }
+    _struct_context_stack[_struct_context_depth++] = ty;
+}
+
+void __jcc_ast_pop_struct(JCC *vm) {
+    (void)vm;
+    if (_struct_context_depth > 0)
+        _struct_context_depth--;
+}
+
+void __jcc_ast_push_switch(JCC *vm, $node_t *switch_node) {
+    (void)vm;
+    if (_switch_context_depth >= JCC_AST_CONTEXT_STACK_DEPTH) {
+        error("__jcc_ast_push_switch: switch context stack overflow (max %d)",
+              JCC_AST_CONTEXT_STACK_DEPTH);
+        return;
+    }
+    _switch_context_stack[_switch_context_depth++] = switch_node;
+}
+
+void __jcc_ast_pop_switch(JCC *vm) {
+    (void)vm;
+    if (_switch_context_depth > 0)
+        _switch_context_depth--;
+}
+
+void __jcc_ast_push_enum(JCC *vm, $type_t *ty) {
+    (void)vm;
+    if (_enum_context_depth >= JCC_AST_CONTEXT_STACK_DEPTH) {
+        error("__jcc_ast_push_enum: enum context stack overflow (max %d)",
+              JCC_AST_CONTEXT_STACK_DEPTH);
+        return;
+    }
+    _enum_context_stack[_enum_context_depth++] = ty;
+}
+
+void __jcc_ast_pop_enum(JCC *vm) {
+    (void)vm;
+    if (_enum_context_depth > 0)
+        _enum_context_depth--;
+}
+
+$node_t *__jcc_ast_block_add_current_stmt(JCC *vm, $node_t *stmt) {
+    if (_block_context_depth <= 0)
+        return NULL;
+    return __jcc_ast_block_add_stmt(
+        vm, _block_context_stack[_block_context_depth - 1], stmt);
+}
+
+$type_t *__jcc_ast_struct_add_current_field(JCC *vm, const char *name,
+                                            $type_t *field_type) {
+    if (_struct_context_depth <= 0)
+        return NULL;
+    return __jcc_ast_struct_add_field(
+        vm, _struct_context_stack[_struct_context_depth - 1], name,
+        field_type);
+}
+
+void __jcc_ast_switch_add_current_case(JCC *vm, $node_t *value,
+                                       $node_t *body) {
+    if (_switch_context_depth <= 0)
+        return;
+    __jcc_ast_switch_add_case(vm, _switch_context_stack[_switch_context_depth - 1],
+                              value, body);
+}
+
+void __jcc_ast_switch_set_current_default(JCC *vm, $node_t *body) {
+    if (_switch_context_depth <= 0)
+        return;
+    __jcc_ast_switch_set_default(
+        vm, _switch_context_stack[_switch_context_depth - 1], body);
+}
+
+void __jcc_ast_enum_add_current_constant(JCC *vm, const char *name,
+                                         int value) {
+    if (_enum_context_depth <= 0)
+        return;
+    __jcc_ast_enum_add_constant(vm, _enum_context_stack[_enum_context_depth - 1],
+                                name, value);
+}
+
+// ============================================================================
 // AST Dump Functions (ticket #58)
 // ============================================================================
 
@@ -1957,10 +2099,10 @@ static $node_t *quote_substitute(QuoteSubstState *s, $node_t *node) {
 
     // switch case chains
     for ($node_t *c = node->case_next; c; c = c->case_next)
-        c->body = quote_substitute(s, c->body);
+        c->lhs = quote_substitute(s, c->lhs);
     if (node->default_case)
-        node->default_case->body =
-            quote_substitute(s, node->default_case->body);
+        node->default_case->lhs =
+            quote_substitute(s, node->default_case->lhs);
 
     return node;
 }
@@ -1988,9 +2130,9 @@ static void quote_rebind_macro_scope($node_t *node, Scope *old_scope,
         quote_rebind_macro_scope(a, old_scope, new_scope);
 
     for ($node_t *c = node->case_next; c; c = c->case_next)
-        quote_rebind_macro_scope(c->body, old_scope, new_scope);
+        quote_rebind_macro_scope(c->lhs, old_scope, new_scope);
     if (node->default_case)
-        quote_rebind_macro_scope(node->default_case->body, old_scope,
+        quote_rebind_macro_scope(node->default_case->lhs, old_scope,
                                  new_scope);
 }
 

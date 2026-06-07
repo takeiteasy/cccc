@@ -351,6 +351,9 @@ return 0;
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_block" target="_top">__jcc_ast_block</a></tt></dt>
 <dd><p>Build a block (compound statement) node.
 </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_block_add_stmt" target="_top">__jcc_ast_block_add_stmt</a></tt></dt>
+<dd><p>Append a statement to a block node.
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_cast" target="_top">__jcc_ast_cast</a></tt></dt>
 <dd><p>Build a type cast AST node.
 </p></dd>
@@ -545,9 +548,21 @@ function scope and return a variable-reference node for it.
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_publish_type" target="_top">__jcc_ast_publish_type</a></tt></dt>
 <dd><p>Accept a generated type declaration as already published.
 </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_push_block" target="_top">__jcc_ast_push_block</a></tt></dt>
+<dd><p>Establish a block as the current statement-append context.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_push_enum" target="_top">__jcc_ast_push_enum</a></tt></dt>
+<dd><p>Establish an enum as the current constant-add context.
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_push_fn" target="_top">__jcc_ast_push_fn</a></tt></dt>
 <dd><p>Establish fn as the "function currently being built" so that
 $quote("return x;") applies the correct implicit return-type cast.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_push_struct" target="_top">__jcc_ast_push_struct</a></tt></dt>
+<dd><p>Establish a struct or union as the current field-add context.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_push_switch" target="_top">__jcc_ast_push_switch</a></tt></dt>
+<dd><p>Establish a switch node as the current case/default context.
 </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_ast_return" target="_top">__jcc_ast_return</a></tt></dt>
 <dd><p>Build a return statement node.
@@ -902,6 +917,53 @@ more than 6 splice nodes.
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
 <!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_block;name=start --><p>Convenience wrapper: $block(stmts, count).
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_block;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_block_add_stmt;   name=__jcc_ast_block_add_stmt -->
+<a name="//apple_ref/c/func/__jcc_ast_block_add_stmt"></a>
+<h3><a name="__jcc_ast_block_add_stmt">__jcc_ast_block_add_stmt</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_block_add_stmt;name=start --><!-- begin abstract --></p>
+<p>Append a statement to a block node.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_block_add_stmt;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_block_add_stmt;name=start -->$<!-- a logicalPath="//apple_ref/c/cl/node_t //apple_ref/c/tdef/node_t //apple_ref/c/tag/node_t //apple_ref/c/struct/node_t //apple_ref/c/intf/node_t //apple_ref/doc/anysymbol/node_t" machineGenerated="true" --><span class="type">node_t</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_block_add_stmt" logicalPath="//apple_ref/c/instm/__jcc_ast_block_add_stmt //apple_ref/c/clm/__jcc_ast_block_add_stmt //apple_ref/c/intfcm/__jcc_ast_block_add_stmt //apple_ref/c/intfm/__jcc_ast_block_add_stmt //apple_ref/c/func/__jcc_ast_block_add_stmt" target="_top"><span class="function">__jcc_ast_block_add_stmt</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    $<!-- a logicalPath="//apple_ref/c/cl/node_t //apple_ref/c/tdef/node_t //apple_ref/c/tag/node_t //apple_ref/c/struct/node_t //apple_ref/c/intf/node_t //apple_ref/doc/anysymbol/node_t" machineGenerated="true" --><span class="type">node_t</span><!-- /a --> <span class="type">*</span><span class="param">block</span>,
+    $<!-- a logicalPath="//apple_ref/c/cl/node_t //apple_ref/c/tdef/node_t //apple_ref/c/tag/node_t //apple_ref/c/struct/node_t //apple_ref/c/intf/node_t //apple_ref/doc/anysymbol/node_t" machineGenerated="true" --><span class="type">node_t</span><!-- /a --> <span class="type">*</span><span class="param">stmt</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_block_add_stmt;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_block_add_stmt/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_block_add_stmt/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_block_add_stmt/block;   name=block -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_block_add_stmt/block"></a>
+<code>block</code>
+</dt>
+<dd><p>The nk_block node to modify.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_block_add_stmt/stmt;   name=stmt -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_block_add_stmt/stmt"></a>
+<code>stmt</code>
+</dt>
+<dd><p>The statement to append.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>The block on success, or NULL on invalid arguments.
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_block_add_stmt;name=start --><p>Convenience wrapper: $block_add_stmt(block, stmt), or
+$block_add_stmt(stmt) inside $with_block(block).
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_block_add_stmt;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_cast;   name=__jcc_ast_cast -->
@@ -3494,6 +3556,76 @@ is no separate convenience macro for this entry point.
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_publish_type;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_push_block;   name=__jcc_ast_push_block -->
+<a name="//apple_ref/c/func/__jcc_ast_push_block"></a>
+<h3><a name="__jcc_ast_push_block">__jcc_ast_push_block</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_push_block;name=start --><!-- begin abstract --></p>
+<p>Establish a block as the current statement-append context.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_push_block;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_push_block;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_push_block" logicalPath="//apple_ref/c/instm/__jcc_ast_push_block //apple_ref/c/clm/__jcc_ast_push_block //apple_ref/c/intfcm/__jcc_ast_push_block //apple_ref/c/intfm/__jcc_ast_push_block //apple_ref/c/func/__jcc_ast_push_block" target="_top"><span class="function">__jcc_ast_push_block</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    $<!-- a logicalPath="//apple_ref/c/cl/node_t //apple_ref/c/tdef/node_t //apple_ref/c/tag/node_t //apple_ref/c/struct/node_t //apple_ref/c/intf/node_t //apple_ref/doc/anysymbol/node_t" machineGenerated="true" --><span class="type">node_t</span><!-- /a --> <span class="type">*</span><span class="param">block</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_push_block;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_push_block/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_push_block/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_push_block/block;   name=block -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_push_block/block"></a>
+<code>block</code>
+</dt>
+<dd><p>The nk_block node being populated.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_push_block;name=start --><p>Use with $with_block(block) so $block_add_stmt(stmt) appends to
+block without repeating the block pointer.
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_push_block;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_push_enum;   name=__jcc_ast_push_enum -->
+<a name="//apple_ref/c/func/__jcc_ast_push_enum"></a>
+<h3><a name="__jcc_ast_push_enum">__jcc_ast_push_enum</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_push_enum;name=start --><!-- begin abstract --></p>
+<p>Establish an enum as the current constant-add context.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_push_enum;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_push_enum;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_push_enum" logicalPath="//apple_ref/c/instm/__jcc_ast_push_enum //apple_ref/c/clm/__jcc_ast_push_enum //apple_ref/c/intfcm/__jcc_ast_push_enum //apple_ref/c/intfm/__jcc_ast_push_enum //apple_ref/c/func/__jcc_ast_push_enum" target="_top"><span class="function">__jcc_ast_push_enum</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    $<!-- a logicalPath="//apple_ref/c/cl/type_t //apple_ref/c/tdef/type_t //apple_ref/c/tag/type_t //apple_ref/c/struct/type_t //apple_ref/c/intf/type_t //apple_ref/doc/anysymbol/type_t" machineGenerated="true" --><span class="type">type_t</span><!-- /a --> <span class="type">*</span><span class="param">ty</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_push_enum;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_push_enum/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_push_enum/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_push_enum/ty;   name=ty -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_push_enum/ty"></a>
+<code>ty</code>
+</dt>
+<dd><p>The enum type being populated.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_push_enum;name=start --><p>Use with $with_enum(ty) so $enum_add_constant(name, value)
+appends to the current enum.
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_push_enum;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_push_fn;   name=__jcc_ast_push_fn -->
 <a name="//apple_ref/c/func/__jcc_ast_push_fn"></a>
 <h3><a name="__jcc_ast_push_fn">__jcc_ast_push_fn</a></h3>
@@ -3532,6 +3664,76 @@ cannot leak into the main parse/codegen pass.  There is no
 1:1 convenience macro; use the @c $with_fn(fn) { ... } block
 helper to bracket push/pop pairs in a macro body.
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_push_fn;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_push_struct;   name=__jcc_ast_push_struct -->
+<a name="//apple_ref/c/func/__jcc_ast_push_struct"></a>
+<h3><a name="__jcc_ast_push_struct">__jcc_ast_push_struct</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_push_struct;name=start --><!-- begin abstract --></p>
+<p>Establish a struct or union as the current field-add context.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_push_struct;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_push_struct;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_push_struct" logicalPath="//apple_ref/c/instm/__jcc_ast_push_struct //apple_ref/c/clm/__jcc_ast_push_struct //apple_ref/c/intfcm/__jcc_ast_push_struct //apple_ref/c/intfm/__jcc_ast_push_struct //apple_ref/c/func/__jcc_ast_push_struct" target="_top"><span class="function">__jcc_ast_push_struct</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    $<!-- a logicalPath="//apple_ref/c/cl/type_t //apple_ref/c/tdef/type_t //apple_ref/c/tag/type_t //apple_ref/c/struct/type_t //apple_ref/c/intf/type_t //apple_ref/doc/anysymbol/type_t" machineGenerated="true" --><span class="type">type_t</span><!-- /a --> <span class="type">*</span><span class="param">ty</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_push_struct;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_push_struct/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_push_struct/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_push_struct/ty;   name=ty -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_push_struct/ty"></a>
+<code>ty</code>
+</dt>
+<dd><p>The aggregate type being populated.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_push_struct;name=start --><p>Use with $with_struct(ty) so $struct_add_field(name, ty) appends
+to the current aggregate.
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_push_struct;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_push_switch;   name=__jcc_ast_push_switch -->
+<a name="//apple_ref/c/func/__jcc_ast_push_switch"></a>
+<h3><a name="__jcc_ast_push_switch">__jcc_ast_push_switch</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_push_switch;name=start --><!-- begin abstract --></p>
+<p>Establish a switch node as the current case/default context.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_ast_push_switch;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_push_switch;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_ast_push_switch" logicalPath="//apple_ref/c/instm/__jcc_ast_push_switch //apple_ref/c/clm/__jcc_ast_push_switch //apple_ref/c/intfcm/__jcc_ast_push_switch //apple_ref/c/intfm/__jcc_ast_push_switch //apple_ref/c/func/__jcc_ast_push_switch" target="_top"><span class="function">__jcc_ast_push_switch</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    $<!-- a logicalPath="//apple_ref/c/cl/node_t //apple_ref/c/tdef/node_t //apple_ref/c/tag/node_t //apple_ref/c/struct/node_t //apple_ref/c/intf/node_t //apple_ref/doc/anysymbol/node_t" machineGenerated="true" --><span class="type">node_t</span><!-- /a --> <span class="type">*</span><span class="param">switch_node</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_ast_push_switch;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_push_switch/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_push_switch/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_ast_push_switch/switch_node;   name=switch_node -->
+<a name="//apple_ref/doc/functionparam/__jcc_ast_push_switch/switch_node"></a>
+<code>switch_node</code>
+</dt>
+<dd><p>The switch node being populated.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_push_switch;name=start --><p>Use with $with_switch(sw) so $switch_add_case(value, body) and
+$switch_set_default(body) append to the current switch.
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_push_switch;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_ast_return;   name=__jcc_ast_return -->
@@ -4047,7 +4249,8 @@ __jcc_ast_switch_set_default to populate it.
 </dl>
 </div>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
-<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_switch_add_case;name=start --><p>Convenience wrapper: $switch_add_case(sw, value, body).
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_switch_add_case;name=start --><p>Convenience wrapper: $switch_add_case(sw, value, body), or
+$switch_add_case(value, body) inside $with_switch(sw).
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_switch_add_case;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
@@ -4088,7 +4291,8 @@ __jcc_ast_switch_set_default to populate it.
 </dl>
 </div>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
-<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_switch_set_default;name=start --><p>Convenience wrapper: $switch_set_default(sw, body).
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_switch_set_default;name=start --><p>Convenience wrapper: $switch_set_default(sw, body), or
+$switch_set_default(body) inside $with_switch(sw).
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_ast_switch_set_default;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">

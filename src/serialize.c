@@ -310,6 +310,22 @@ static void collect_node_types(SerializeContext *ctx, Node *node) {
     if (node->func_ty)
         collect_type(ctx, node->func_ty);
 
+    if (node->kind == ND_SWITCH) {
+        collect_node_types(ctx, node->cond);
+        for (Node *c = node->case_next; c; c = c->case_next)
+            collect_node_types(ctx, c->lhs);
+        if (node->default_case)
+            collect_node_types(ctx, node->default_case->lhs);
+        collect_node_types(ctx, node->next);
+        return;
+    }
+
+    if (node->kind == ND_CASE) {
+        collect_node_types(ctx, node->lhs);
+        collect_node_types(ctx, node->next);
+        return;
+    }
+
     collect_node_types(ctx, node->lhs);
     collect_node_types(ctx, node->rhs);
     collect_node_types(ctx, node->cond);
@@ -319,10 +335,6 @@ static void collect_node_types(SerializeContext *ctx, Node *node) {
     collect_node_types(ctx, node->inc);
     collect_node_types(ctx, node->body);
     collect_node_types(ctx, node->args);
-
-    for (Node *c = node->case_next; c; c = c->case_next)
-        collect_node_types(ctx, c);
-    collect_node_types(ctx, node->default_case);
 
     collect_node_types(ctx, node->next);
 }
@@ -795,12 +807,12 @@ static void serialize_stmt(FILE *f, JCC *vm, SerializeContext *ctx, Node *node,
         for (Node *c = node->case_next; c; c = c->case_next) {
             print_indent_level(f, indent);
             fprintf(f, "case %ld:\n", c->begin);
-            serialize_stmt(f, vm, ctx, c->body, indent + 1);
+            serialize_stmt(f, vm, ctx, c->lhs, indent + 1);
         }
         if (node->default_case) {
             print_indent_level(f, indent);
             fprintf(f, "default:\n");
-            serialize_stmt(f, vm, ctx, node->default_case->body, indent + 1);
+            serialize_stmt(f, vm, ctx, node->default_case->lhs, indent + 1);
         }
         print_indent_level(f, indent);
         fprintf(f, "}\n");
