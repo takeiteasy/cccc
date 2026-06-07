@@ -837,6 +837,91 @@ $node_t *save_then_return($node_t *value) {
 Use `$local_var(name, ty)` only when the generated local is meant to have a
 specific user-visible name.
 
+`$local_var_unique` and `$local_var` work correctly inside `$with_fn` blocks:
+the new local is allocated to the function established by `$with_fn`, not to
+any outer function context.
+
+## Initializer Builders
+
+Three builders create initialized aggregate values without requiring `$quote`
+template syntax.
+
+### `$compound_literal(ty, ...)`
+
+Positional compound literal. Elements are assigned left-to-right to struct
+members or array elements. All fields/elements must be provided.
+
+```c
+[[jcc::comptime(inline)]]
+$node_t *make_point($node_t *px, $node_t *py) {
+    $type_t *pt = $get_type("Point");
+    $node_t *lit = $compound_literal(pt, px, py);
+    return $member(lit, "x");
+}
+```
+
+### `$init_array(elem_ty, ...)`
+
+Array compound literal with explicit element type. The array length is inferred
+from the argument count.
+
+```c
+[[jcc::comptime(inline)]]
+$node_t *second_of_three($node_t *a, $node_t *b, $node_t *c) {
+    $type_t *int_ty = $get_type("int");
+    $node_t *arr = $init_array(int_ty, a, b, c);
+    return $subscript(arr, $int_literal(1));
+}
+```
+
+### `$init_struct(ty, fields, values, n)`
+
+Designated struct or union init. `fields` is a `const char **` naming the
+members; `values` is the corresponding `$node_t **` array; `n` is the count.
+Unspecified members are zero-initialized.
+
+```c
+[[jcc::comptime(inline)]]
+$node_t *partial_point(void) {
+    $type_t *pt = $get_type("Point");
+    const char *flds[] = {"x"};
+    $node_t *vals[] = {$int_literal(5)};
+    $node_t *s = $init_struct(pt, flds, vals, 1);
+    return $member(s, "y");   // y == 0
+}
+```
+
+### Storage model
+
+| Call context | Storage |
+|---|---|
+| Inside a function (inline macro or `$with_fn` block) | Stack-allocated local; zeroed and assigned at run time |
+| Outside any `$with_fn` in a non-inline macro | Static anonymous global variable; init data is evaluated at compile time and stored in the data segment |
+
+The file-scope (static) case requires that initializer values are compile-time
+constants that can be folded by `cc_eval`. Passing a non-constant expression
+(e.g. a function call) in that context is a compile-time error.
+
+```c
+[[jcc::comptime]]
+void gen_lookup(void) {
+    $type_t *int_ty = $get_type("int");
+
+    // Outside $with_fn: static global int[4] = {0, 1, 4, 9}
+    $node_t *table = $init_array(int_ty,
+        $int_literal(0), $int_literal(1),
+        $int_literal(4), $int_literal(9));
+
+    $obj_t *fn = $function("lookup", int_ty);
+    $with_fn(fn) {
+        $function_add_param(fn, "i", int_ty);
+        $function_set_body(fn,
+            $return($subscript(table, $param_ref(fn, "i"))));
+    }
+}
+gen_lookup();
+```
+
 ## Diagnostics And Debugging
 
 Use source-located diagnostics when rejecting a macro argument:
@@ -1020,6 +1105,10 @@ Underlying functions: `__jcc_macroexpand_1(JCC *vm, $node_t *node)` and
 | `$cast(expr, ty)` | Cast expression |
 | `$assign(target, value)` | Assignment expression |
 | `$member(obj, name)` | Struct/union member expression |
+| `$subscript(arr, idx)` | Array subscript expression (`arr[idx]`) |
+| `$compound_literal(ty, ...)` | Positional compound literal; stack-local in function scope, static global outside `$with_fn` |
+| `$init_array(elem_ty, ...)` | Array compound literal with explicit element type; length inferred from argument count |
+| `$init_struct(ty, fields, values, n)` | Designated struct/union init; unspecified members are zero |
 | `$funcall(callee, args, n)` | Function call expression |
 | `_AST_VARARGS_AS_ARRAY()` | Borrowed inline variadic argument array for forwarding |
 | `$return(expr)` | Return statement |
