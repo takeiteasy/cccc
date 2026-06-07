@@ -171,6 +171,7 @@ extern Type  *__jcc_ast_make_typedef(JCC *vm, const char *name, Type *underlying
 extern int64_t __jcc_get_comptime_int(JCC *vm, const char *name);
 extern double  __jcc_get_comptime_float(JCC *vm, const char *name);
 extern Node   *__jcc_get_comptime_var(JCC *vm, const char *name);
+extern Node   *__jcc_get_comptime_ptr(JCC *vm, const char *name);
 extern Node   *__jcc_get_comptime_member(JCC *vm, const char *var_name,
                                          const char *field);
 
@@ -457,6 +458,8 @@ static void register_reflection_ffi(JCC *vm) {
                       (void *)__jcc_get_comptime_float, 2, 1); // returns double
     cc_register_cfunc(vm, "__jcc_get_comptime_var",
                       (void *)__jcc_get_comptime_var, 2, 0);
+    cc_register_cfunc(vm, "__jcc_get_comptime_ptr",
+                      (void *)__jcc_get_comptime_ptr, 2, 0);
     cc_register_cfunc(vm, "__jcc_get_comptime_member",
                       (void *)__jcc_get_comptime_member, 3, 0);
 
@@ -1037,6 +1040,36 @@ static bool read_comptime_scalar(JCC *vm, Obj *obj, bool *is_float_out,
     }
 }
 
+static Obj *make_comptime_shadow_obj(JCC *vm, Obj *src) {
+    if (!vm || !src || !src->ty || src->ty->size <= 0)
+        return NULL;
+
+    Obj *dst = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
+    memset(dst, 0, sizeof(Obj));
+    dst->name = arena_format(vm, ".L.comptime.%d",
+                             vm->compiler.unique_name_counter++);
+    dst->display_name = dst->name;
+    dst->ty = src->ty;
+    dst->align = src->ty->align;
+    dst->tok = src->tok;
+    dst->is_static = true;
+    dst->is_definition = true;
+    dst->is_macro_generated = true;
+    dst->init_data = arena_alloc(&vm->compiler.parser_arena, src->ty->size);
+    memcpy(dst->init_data, vm->data_seg + src->offset, src->ty->size);
+    return dst;
+}
+
+static void link_comptime_shadow_objs(JCC *vm) {
+    for (ComptimeVar *cv = vm->compiler.comptime_vars; cv; cv = cv->next) {
+        Obj *obj = cv->ptr_obj;
+        if (!obj || obj->next)
+            continue;
+        obj->next = vm->compiler.globals;
+        vm->compiler.globals = obj;
+    }
+}
+
 // Execute the synthesized __jcc_comptime_init function (if present) to
 // evaluate scalar comptime variable initializers that call comptime
 // functions. Must be called after gen_function + patch_macro_call_addresses
@@ -1102,6 +1135,7 @@ static void evaluate_comptime_vars(JCC *vm, Obj *macro_prog) {
         }
 
         TypeKind kind = obj->ty->kind;
+        cv->ptr_obj = make_comptime_shadow_obj(vm, obj);
         if (kind == TY_STRUCT || kind == TY_UNION) {
             // Routed vars: __jcc_comptime_init wrote the bytes
             // into the data segment, so init_data is NULL — that is expected.
@@ -1348,6 +1382,7 @@ static bool compile_macro_program(JCC *vm) {
     vm->compiler.in_macro_mode = false;
     vm->compiler.num_call_patches = saved_num_call_patches;
     vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
+    link_comptime_shadow_objs(vm);
 
     if (vm->debug_vm) {
         for (int i = 0; i < count; i++) {

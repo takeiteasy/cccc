@@ -2069,42 +2069,108 @@ static Node *create_lvar_init(JCC *vm, Initializer *init, Type *ty,
     return new_binary(vm, ND_ASSIGN, lhs, init->expr, tok);
 }
 
-// Called from relfection.c quote_substitute to expand ND_INIT_SPLICE nodes.
-// Builds positional ND_ASSIGN chains for each struct field or array element
-// from the ->next-linked chain of expression nodes.
-Node *node_expand_init_splice(JCC *vm, Obj *var, Type *ty, Node *chain, Token *tok) {
+static bool is_init_splice_expr(Node *expr) {
+    return expr && expr->kind == ND_VAR && expr->var &&
+           expr->var->is_splice_placeholder;
+}
+
+static int init_tail_count(Node *tail) {
+    int n = 0;
+    for (; tail; tail = tail->next)
+        n++;
+    return n;
+}
+
+static Member *member_at_index(Type *ty, int idx) {
+    for (Member *mem = ty->members; mem; mem = mem->next)
+        if (mem->idx == idx)
+            return mem;
+    return NULL;
+}
+
+static Node *init_lhs_at(JCC *vm, Obj *var, Type *ty, int idx, Token *tok) {
     InitDesg base_desg = {NULL, 0, NULL, var};
+    if (ty->kind == TY_STRUCT) {
+        Member *mem = member_at_index(ty, idx);
+        if (!mem)
+            return NULL;
+        InitDesg desg = {&base_desg, 0, mem};
+        return init_desg_expr(vm, &desg, tok);
+    }
+
+    if (ty->kind == TY_ARRAY) {
+        InitDesg desg = {&base_desg, idx};
+        return init_desg_expr(vm, &desg, tok);
+    }
+
+    return NULL;
+}
+
+static Node *append_init_assignment(JCC *vm, Node *result, Obj *var, Type *ty,
+                                    int idx, Node *rhs, Token *tok) {
+    Node *lhs = init_lhs_at(vm, var, ty, idx, tok);
+    if (!lhs)
+        error_tok(vm, tok, "$@k initializer splice target is out of range");
+    rhs->next = NULL;
+    return new_binary(vm, ND_COMMA, result,
+                      new_binary(vm, ND_ASSIGN, lhs, rhs, tok), tok);
+}
+
+// Called from reflection.c quote_substitute to expand ND_INIT_SPLICE nodes.
+// Builds positional ND_ASSIGN chains for a splice chain plus any ordinary
+// initializer tail that followed the $@k placeholder in the source template.
+Node *node_expand_init_splice(JCC *vm, Node *splice, Node *chain) {
+    Obj *var = splice->var;
+    Type *ty = var->ty;
+    Token *tok = splice->tok;
     Node *result = new_node(vm, ND_NULL_EXPR, tok);
     Node *elem = chain;
+    int start = splice->init_start_index;
+    int splice_count = 0;
+    int tail_count = init_tail_count(splice->init_tail);
 
+    for (Node *n = chain; n; n = n->next)
+        splice_count++;
+
+    int capacity = 0;
     if (ty->kind == TY_STRUCT) {
-        int count = 0;
-        for (Member *mem = ty->members; mem; mem = mem->next) count++;
-        int i = 0;
-        for (Member *mem = ty->members; mem; mem = mem->next, i++) {
-            if (!elem)
-                error_tok(vm, tok, "$@k initializer splice: too few elements (got %d, struct has %d fields)", i, count);
-            InitDesg desg2 = {&base_desg, 0, mem};
-            Node *lhs = init_desg_expr(vm, &desg2, tok);
-            result = new_binary(vm, ND_COMMA, result,
-                                new_binary(vm, ND_ASSIGN, lhs, elem, tok), tok);
-            elem = elem->next;
-        }
-        if (elem)
-            error_tok(vm, tok, "$@k initializer splice: too many elements (struct has %d fields)", count);
+        for (Member *mem = ty->members; mem; mem = mem->next)
+            capacity++;
     } else if (ty->kind == TY_ARRAY) {
-        for (int i = 0; i < ty->array_len; i++) {
-            if (!elem)
-                error_tok(vm, tok, "$@k initializer splice: too few elements (got %d, array has %d elements)", i, ty->array_len);
-            InitDesg desg2 = {&base_desg, i};
-            Node *lhs = init_desg_expr(vm, &desg2, tok);
-            result = new_binary(vm, ND_COMMA, result,
-                                new_binary(vm, ND_ASSIGN, lhs, elem, tok), tok);
-            elem = elem->next;
+        if (splice->init_inferred_array) {
+            int len = start + splice_count + tail_count;
+            var->ty = ty = array_of(vm, ty->base, len);
         }
-        if (elem)
-            error_tok(vm, tok, "$@k initializer splice: too many elements (array has %d elements)", ty->array_len);
+        capacity = ty->array_len;
+    } else {
+        return result;
     }
+
+    int total = splice_count + tail_count;
+    if (total < capacity - start)
+        error_tok(vm, tok,
+                  "$@k initializer splice: too few elements (got %d, need %d)",
+                  total, capacity - start);
+    if (total > capacity - start)
+        error_tok(vm, tok,
+                  "$@k initializer splice: too many elements (got %d, need %d)",
+                  total, capacity - start);
+
+    int idx = start;
+    while (elem) {
+        Node *next = elem->next;
+        elem->next = NULL;
+        result = append_init_assignment(vm, result, var, ty, idx++, elem, tok);
+        elem = next;
+    }
+
+    for (Node *tail = splice->init_tail; tail; ) {
+        Node *next = tail->next;
+        tail->next = NULL;
+        result = append_init_assignment(vm, result, var, ty, idx++, tail, tok);
+        tail = next;
+    }
+
     return result;
 }
 
@@ -2155,39 +2221,90 @@ static Node *create_vla_init(JCC *vm, Initializer *init, Type *ty, Obj *var,
 //   x[0][1] = 7;
 //   x[1][0] = 8;
 //   x[1][1] = 9;
-// Returns true if init->children[0] holds a sole $@k splice placeholder.
-// Errors immediately if $@k is mixed with other initializer elements.
-static bool init_is_sole_splice(JCC *vm, Initializer *init, Type *ty, Token *tok) {
-    if (ty->kind != TY_STRUCT && ty->kind != TY_ARRAY) return false;
-    if (!init->children || !init->children[0] || !init->children[0]->expr) return false;
-    Node *expr = init->children[0]->expr;
-    if (expr->kind != ND_VAR || !expr->var || !expr->var->is_splice_placeholder) return false;
+static Node *append_init_tail(Node *tail, Node *expr) {
+    if (!expr)
+        return tail;
+    expr->next = NULL;
+    if (!tail)
+        return expr;
+    Node *cur = tail;
+    while (cur->next)
+        cur = cur->next;
+    cur->next = expr;
+    return tail;
+}
 
-    // Validate no other children have exprs (sole-element constraint)
+static bool build_deferred_init_splice(JCC *vm, Initializer *init, Obj *var,
+                                       bool inferred_array, Token *tok,
+                                       Node **out) {
+    Type *ty = var->ty;
+    if ((ty->kind != TY_STRUCT && ty->kind != TY_ARRAY) || !init->children)
+        return false;
+
+    int len = 0;
     if (ty->kind == TY_ARRAY) {
-        for (int i = 1; i < ty->array_len; i++)
-            if (init->children[i] && init->children[i]->expr)
-                error_tok(vm, tok, "cannot mix $@k with other initializer elements");
+        len = ty->array_len;
     } else {
-        for (Member *m = ty->members; m; m = m->next)
-            if (m->idx > 0 && init->children[m->idx] && init->children[m->idx]->expr)
-                error_tok(vm, tok, "cannot mix $@k with other initializer elements");
+        for (Member *mem = ty->members; mem; mem = mem->next)
+            len++;
     }
+
+    int splice_idx = -1;
+    Node *placeholder = NULL;
+    for (int i = 0; i < len; i++) {
+        Initializer *child = init->children[i];
+        if (!child || !is_init_splice_expr(child->expr))
+            continue;
+        if (splice_idx >= 0)
+            error_tok(vm, tok, "only one $@k initializer splice is supported");
+        splice_idx = i;
+        placeholder = child->expr;
+    }
+    if (splice_idx < 0)
+        return false;
+
+    Node *node = new_node(vm, ND_MEMZERO, tok);
+    node->var = var;
+
+    InitDesg base_desg = {NULL, 0, NULL, var};
+    for (int i = 0; i < splice_idx; i++) {
+        Initializer *child = init->children[i];
+        if (!child)
+            continue;
+        InitDesg desg = {&base_desg, i};
+        if (ty->kind == TY_STRUCT)
+            desg.member = member_at_index(ty, i);
+        Node *rhs = create_lvar_init(vm, child, child->ty, &desg, tok);
+        node = new_binary(vm, ND_COMMA, node, rhs, tok);
+    }
+
+    Node *tail = NULL;
+    for (int i = splice_idx + 1; i < len; i++) {
+        Initializer *child = init->children[i];
+        if (child && child->expr)
+            tail = append_init_tail(tail, child->expr);
+    }
+
+    Node *splice = new_node(vm, ND_INIT_SPLICE, tok);
+    splice->var = var;
+    splice->lhs = placeholder;
+    splice->init_tail = tail;
+    splice->init_start_index = splice_idx;
+    splice->init_inferred_array = inferred_array;
+
+    *out = new_binary(vm, ND_COMMA, node, splice, tok);
     return true;
 }
 
 static Node *lvar_initializer(JCC *vm, Token **rest, Token *tok, Obj *var) {
+    bool inferred_array = var->ty->kind == TY_ARRAY && var->ty->size < 0;
     Initializer *init = initializer(vm, rest, tok, var->ty, &var->ty);
 
-    // $@k splice in compound-literal context: defer lowering to quote_substitute
-    if (init_is_sole_splice(vm, init, var->ty, tok)) {
-        Node *zero = new_node(vm, ND_MEMZERO, tok);
-        zero->var = var;
-        Node *splice = new_node(vm, ND_INIT_SPLICE, tok);
-        splice->var = var;
-        splice->lhs = init->children[0]->expr; // ND_VAR($@k)
-        return new_binary(vm, ND_COMMA, zero, splice, tok);
-    }
+    // $@k splice in compound-literal context: defer final positional lowering
+    // until quote_substitute knows the caller-provided chain length.
+    Node *deferred = NULL;
+    if (build_deferred_init_splice(vm, init, var, inferred_array, tok, &deferred))
+        return deferred;
 
     InitDesg desg = {NULL, 0, NULL, var};
 

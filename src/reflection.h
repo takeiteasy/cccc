@@ -395,10 +395,9 @@ void __jcc_macro_warning_at(JCC *vm, $node_t *node, const char *fmt, ...)
  *       splices (`$k`) in the same template, but positional and incremental
  *       styles cannot be mixed within one template.
  *
- *   List splices are valid **only in statement-list position** (inside a
- *   `{ ... }` block).  Using `$@k` as an expression operand is a
- *   compile-time error.  Call-argument and initializer splicing are not yet
- *   supported.
+ *   List splices are valid in statement-list position (inside a `{ ... }`
+ *   block), direct call-argument position, or compound-literal initializer
+ *   lists. Using `$@k` as an expression operand is a compile-time error.
  *
  * @param ... $node_t* arguments corresponding to the splice points.
  * @return The parsed and substituted AST node, or NULL on error.
@@ -1872,6 +1871,17 @@ double __jcc_get_comptime_float(JCC *vm, const char *name);
  */
 $node_t *__jcc_get_comptime_var(JCC *vm, const char *name);
 /*!
+ * @function __jcc_get_comptime_ptr
+ * @abstract Return the address of a comptime variable as a generated-code AST
+ *           pointer node.
+ * @param vm The VM context.
+ * @param name The comptime variable's name.
+ * @return An nk_addr node pointing at a static shadow copy of the evaluated
+ *         comptime variable, or NULL on error.
+ * @discussion Convenience wrapper: $get_comptime_ptr(name).
+ */
+$node_t *__jcc_get_comptime_ptr(JCC *vm, const char *name);
+/*!
  * @function __jcc_get_comptime_member
  * @abstract Read a named field from a comptime struct variable as an AST
  *           literal node.
@@ -1887,6 +1897,7 @@ $node_t *__jcc_get_comptime_member(JCC *vm, const char *var_name,
 #define $get_comptime_int(name)           __jcc_get_comptime_int(_VM, name)
 #define $get_comptime_float(name)         __jcc_get_comptime_float(_VM, name)
 #define $get_comptime_var(name)           __jcc_get_comptime_var(_VM, name)
+#define $get_comptime_ptr(name)           __jcc_get_comptime_ptr(_VM, name)
 #define $get_comptime_member(var, field)  __jcc_get_comptime_member(_VM, var, field)
 
 // Constexpr variable access (ticket #189)

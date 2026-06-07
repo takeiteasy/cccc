@@ -753,6 +753,9 @@ struct Node {
 
     // Variable
     Obj *var;
+    struct Node *init_tail; // Tail expressions after a deferred initializer splice
+    int init_start_index;   // Positional field/element index for ND_INIT_SPLICE
+    bool init_inferred_array; // True when array length must be finalized post-splice
 
     // Numeric literal
     int64_t val;
@@ -915,6 +918,7 @@ typedef struct ComptimeVar {
     bool is_float;            // True for float/double scalar types
     int64_t int_val;          // Scalar integer value (or 0 for structs)
     double float_val;         // Scalar float/double value
+    Obj *ptr_obj;             // Parent-side shadow object for $get_comptime_ptr
     ComptimeVarMember *members; // Per-field values for struct vars (NULL for scalars)
     struct ComptimeVar *next;
 } ComptimeVar;

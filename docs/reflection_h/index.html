@@ -699,6 +699,10 @@ compile time.
 <dd><p>Read a named field from a comptime struct variable as an AST
 literal node.
 </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__jcc_get_comptime_ptr" target="_top">__jcc_get_comptime_ptr</a></tt></dt>
+<dd><p>Return the address of a comptime variable as a generated-code AST
+pointer node.
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__jcc_get_comptime_var" target="_top">__jcc_get_comptime_var</a></tt></dt>
 <dd><p>Read a comptime scalar variable as an AST literal node.
 </p></dd>
@@ -5429,6 +5433,47 @@ literal node.
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_get_comptime_member;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_get_comptime_ptr;   name=__jcc_get_comptime_ptr -->
+<a name="//apple_ref/c/func/__jcc_get_comptime_ptr"></a>
+<h3><a name="__jcc_get_comptime_ptr">__jcc_get_comptime_ptr</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_get_comptime_ptr;name=start --><!-- begin abstract --></p>
+<p>Return the address of a comptime variable as a generated-code AST
+pointer node.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__jcc_get_comptime_ptr;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_get_comptime_ptr;name=start -->$<!-- a logicalPath="//apple_ref/c/cl/node_t //apple_ref/c/tdef/node_t //apple_ref/c/tag/node_t //apple_ref/c/struct/node_t //apple_ref/c/intf/node_t //apple_ref/doc/anysymbol/node_t" machineGenerated="true" --><span class="type">node_t</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__jcc_get_comptime_ptr" logicalPath="//apple_ref/c/instm/__jcc_get_comptime_ptr //apple_ref/c/clm/__jcc_get_comptime_ptr //apple_ref/c/intfcm/__jcc_get_comptime_ptr //apple_ref/c/intfm/__jcc_get_comptime_ptr //apple_ref/c/func/__jcc_get_comptime_ptr" target="_top"><span class="function">__jcc_get_comptime_ptr</span></a>(
+    <a machinegenerated="true" href="../jcc_h/index.html#//apple_ref/c/tag/JCC" logicalPath="//apple_ref/c/cl/JCC //apple_ref/c/tdef/JCC //apple_ref/c/tag/JCC" target="_top"><span class="type">JCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">name</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__jcc_get_comptime_ptr;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_get_comptime_ptr/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__jcc_get_comptime_ptr/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_get_comptime_ptr/name;   name=name -->
+<a name="//apple_ref/doc/functionparam/__jcc_get_comptime_ptr/name"></a>
+<code>name</code>
+</dt>
+<dd><p>The comptime variable's name.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>An nk_addr node pointing at a static shadow copy of the evaluated
+comptime variable, or NULL on error.
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_get_comptime_ptr;name=start --><p>Convenience wrapper: $get_comptime_ptr(name).
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__jcc_get_comptime_ptr;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__jcc_get_comptime_var;   name=__jcc_get_comptime_var -->
 <a name="//apple_ref/c/func/__jcc_get_comptime_var"></a>
 <h3><a name="__jcc_get_comptime_var">__jcc_get_comptime_var</a></h3>
@@ -5806,10 +5851,9 @@ Each `$@k;` in the template is replaced by the entire chain.
 splices (`$k`) in the same template, but positional and incremental
 styles cannot be mixed within one template.
 </p>
-<p>List splices are valid **only in statement-list position** (inside a
-`{ ... }` block).  Using `$@k` as an expression operand is a
-compile-time error.  Call-argument and initializer splicing are not yet
-supported.</p>
+<p>List splices are valid in statement-list position (inside a `{ ... }`
+block), direct call-argument position, or compound-literal initializer
+lists. Using `$@k` as an expression operand is a compile-time error.</p>
 </dd>
 <dt>
 <!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__jcc_quote/...;   name=... -->

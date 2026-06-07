@@ -446,6 +446,22 @@ $node_t *area_of_n_tiles($node_t *n) {
 | `$get_comptime_int(name)` | `int64_t` | Integer value of a comptime scalar |
 | `$get_comptime_float(name)` | `double` | Float/double value of a comptime scalar |
 | `$get_comptime_var(name)` | `$node_t *` | Comptime scalar as an AST literal node |
+| `$get_comptime_ptr(name)` | `$node_t *` | Address of a static shadow copy of the evaluated comptime variable |
+
+Use `$get_comptime_ptr(name)` when generated code needs an addressable value
+rather than a literal copy:
+
+```c
+[[jcc::comptime]]
+int threshold = 42;
+
+[[jcc::comptime(inline)]]
+$node_t *threshold_ptr(void) {
+    return $get_comptime_ptr("threshold");
+}
+
+int *p = threshold_ptr(); // *p == 42
+```
 
 ### Struct comptime variables
 
@@ -628,9 +644,8 @@ a compile-time error.
 
 ### Compound-literal initializer-list splice
 
-`$@k` can also appear as the **sole element** inside the braces of a compound
-literal, splicing a node chain as positional initializers for a struct or
-fixed-size array:
+`$@k` can also appear inside the braces of a compound literal, splicing a node
+chain as positional initializers for a struct or array:
 
 ```c
 [[jcc::comptime(inline)]]
@@ -655,16 +670,24 @@ $node_t *make_arr3($node_t *a, $node_t *b, $node_t *c) {
 }
 ```
 
-**V1 restrictions:**
-- `$@k` must be the only element in the braces — mixing with other initializer
-  elements is a compile-time error.
-- Initializers are positional (no designator syntax like `.field = val`).
-- Arrays must be explicitly sized; inferred-length `arr[]` is not supported.
-- A mismatch between the chain length and the number of struct fields or array
-  elements is a compile-time error.
+The splice can mix with ordinary positional initializer elements. Elements
+after the splice are placed after the expanded chain:
+
+```c
+return $quote("(struct Triple){ 1, $@1 }", pair_chain);
+return $quote("(int[]){ 1, $@1, 4 }", pair_chain);
+```
+
+Inferred array length is supported for compound literals such as
+`(int[]){ $@1 }` and `(int[]){ 1, $@1, 4 }`.
+
+Initializer splices remain positional; use `$init_struct` for designated or
+partial struct/union initialization. A mismatch between the expanded element
+count and the number of struct fields or explicit array elements is a
+compile-time error.
 
 Mixing a scalar placeholder with a compound-literal splice in one template is
-fine, as long as the splice occupies the sole braces element:
+fine:
 
 ```c
 return $quote("(struct Point){ $@2 }", unused_scalar, chain);

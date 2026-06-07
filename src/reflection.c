@@ -1137,7 +1137,11 @@ $node_t *__jcc_ast_compound_literal(JCC *vm, $type_t *ty, $node_t **inits, int n
         chain = inits[0];
     }
 
-    Node *assignments = node_expand_init_splice(vm, var, ty, chain, tok);
+    Node *splice = alloc_node(vm, ND_INIT_SPLICE);
+    splice->tok = tok;
+    splice->var = var;
+    splice->init_start_index = 0;
+    Node *assignments = node_expand_init_splice(vm, splice, chain);
 
     Node *init_comma = alloc_node(vm, ND_COMMA);
     init_comma->lhs = zero;
@@ -2239,7 +2243,7 @@ static $node_t *quote_substitute(QuoteSubstState *s, $node_t *node) {
         for (int i = 0; i < s->n_args && i < 64; i++) {
             if (s->splice_vars[i] && node->lhs->var == s->splice_vars[i]) {
                 $node_t *chain = s->arg_nodes[i];
-                return node_expand_init_splice(s->vm, node->var, node->var->ty, chain, node->tok);
+                return node_expand_init_splice(s->vm, node, chain);
             }
         }
         error("ND_INIT_SPLICE: unresolved splice var (internal error)");
@@ -2878,6 +2882,21 @@ $node_t *__jcc_get_comptime_var(JCC *vm, const char *name) {
     if (cv->is_float)
         return __jcc_ast_float_literal(vm, cv->float_val);
     return __jcc_ast_int_literal(vm, cv->int_val);
+}
+
+$node_t *__jcc_get_comptime_ptr(JCC *vm, const char *name) {
+    if (!vm || !name) return NULL;
+    ComptimeVar *cv = find_comptime_var(vm, name);
+    if (!cv || !cv->is_evaluated || !cv->ptr_obj) return NULL;
+
+    Node *var = alloc_node(vm, ND_VAR);
+    var->var = cv->ptr_obj;
+    var->ty = cv->ptr_obj->ty;
+
+    Node *addr = alloc_node(vm, ND_ADDR);
+    addr->lhs = var;
+    add_type(vm, addr);
+    return addr;
 }
 
 $node_t *__jcc_get_comptime_member(JCC *vm, const char *var_name,
