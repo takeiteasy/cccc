@@ -279,6 +279,21 @@ same parsed code can name that object only if normal C declaration rules are
 satisfied. Use a global-generation macro when you want JCC to publish generated
 declarations automatically.
 
+Comptime functions can use ordinary static data tables for lookup work,
+including pointer arrays and struct arrays that point at string literals or
+other static data:
+
+```c
+[[jcc::comptime]]
+const char *lookup(const char *name) {
+    static const char *headers[] = {"stdio.h", "string.h"};
+    return strcmp(name, headers[0]) == 0 ? headers[0] : 0;
+}
+```
+
+Static initializer tables that store function pointers are not supported in the
+comptime VM yet.
+
 Macro expansion is bounded by `--macro-recursion-limit=N` to catch accidental
 self-recursive expansions. The default is 256. Set the limit to 0 to disable
 the check.

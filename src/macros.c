@@ -997,6 +997,16 @@ static Obj *find_macro_global(Obj *prog, const char *name) {
     return NULL;
 }
 
+static Obj *find_macro_obj(Obj *prog, const char *name) {
+    size_t len = strlen(name);
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (obj->name && strlen(obj->name) == len &&
+            strncmp(obj->name, name, len) == 0)
+            return obj;
+    }
+    return NULL;
+}
+
 // Read a scalar value from the macro VM's data segment.
 // Valid after init_macro_globals has allocated storage; the value may have
 // been written by a constant-initializer memcpy, by __jcc_comptime_init, or
@@ -1196,10 +1206,27 @@ static void init_macro_globals(JCC *vm, Obj *macro_prog) {
 
         if (var->init_data)
             memcpy(vm->data_ptr, var->init_data, var->ty->size);
-        if (var->rel)
-            error("macro function global relocations are not supported");
 
         vm->data_ptr += var->ty->size;
+    }
+
+    for (int i = 0; i < num_globals; i++) {
+        Obj *var = globals_arr[i];
+        for (Relocation *rel = var->rel; rel; rel = rel->next) {
+            if (!rel->label || !*rel->label)
+                error("invalid macro function global relocation");
+
+            Obj *target = find_macro_obj(macro_prog, *rel->label);
+            if (!target)
+                error("undefined macro function global relocation target: %s",
+                      *rel->label);
+            if (target->is_function)
+                error("macro function global text relocations are not supported");
+
+            long long data_offset = var->offset + rel->offset;
+            *(long long *)(vm->data_seg + data_offset) =
+                (long long)(vm->data_seg + target->offset + rel->addend);
+        }
     }
 }
 

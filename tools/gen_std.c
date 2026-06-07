@@ -117,39 +117,50 @@ $node_t *make_strcmp_return($obj_t *fn, $type_t *char_ptr_ty, const char *header
     return $if(cond, ret, NULL);
 }
 
-struct reg_entry { char *header; char *fn; };
+struct reg_entry { const char *header; const char *fn; };
 
 // Map header name to its stdlib registration function name.
 // Returns NULL for headers that don't need runtime registration.
 [[jcc::comptime]]
 const char *reg_fn_for_header(const char *header) {
-    static struct reg_entry *map = NULL;
-    static int n = 0;
-    if (!map) {
-        static const char raw[] = {
-            #embed "stdlib.tsv"
-            , 0
-        };
-        const char *p = raw;
-        while (*p) {
-            const char *nl = strchr(p, '\n');
-            if (!nl) break;
-            const char *tab = strchr(p, '\t');
-            if (tab && tab < nl) {
-                int hlen = (int)(tab - p);
-                int flen = (int)(nl - tab - 1);
-                map = realloc(map, (n + 1) * sizeof(struct reg_entry));
-                map[n].header = malloc(hlen + 1);
-                memcpy(map[n].header, p, hlen);
-                map[n].header[hlen] = 0;
-                map[n].fn = malloc(flen + 1);
-                memcpy(map[n].fn, tab + 1, flen);
-                map[n].fn[flen] = 0;
-                n++;
-            }
-            p = nl + 1;
-        }
-    }
+    static const struct reg_entry map[] = {
+        {"arpa/inet.h", "register_posix_functions"},
+        {"ctype.h", "register_ctype_functions"},
+        {"dirent.h", "register_posix_functions"},
+        {"dlfcn.h", "register_posix_functions"},
+        {"fcntl.h", "register_posix_functions"},
+        {"fenv.h", "register_fenv_functions"},
+        {"fnmatch.h", "register_posix_functions"},
+        {"getopt.h", "register_posix_functions"},
+        {"glob.h", "register_posix_functions"},
+        {"grp.h", "register_posix_functions"},
+        {"libgen.h", "register_posix_functions"},
+        {"locale.h", "register_locale_functions"},
+        {"math.h", "register_math_functions"},
+        {"netdb.h", "register_posix_functions"},
+        {"netinet/in.h", "register_posix_functions"},
+        {"poll.h", "register_posix_functions"},
+        {"pwd.h", "register_posix_functions"},
+        {"regex.h", "register_posix_functions"},
+        {"signal.h", "register_signal_functions"},
+        {"stdio.h", "register_stdio_functions"},
+        {"stdlib.h", "register_stdlib_functions"},
+        {"string.h", "register_string_functions"},
+        {"strings.h", "register_posix_functions"},
+        {"sys/mman.h", "register_posix_functions"},
+        {"sys/socket.h", "register_posix_functions"},
+        {"sys/stat.h", "register_posix_functions"},
+        {"sys/time.h", "register_posix_functions"},
+        {"sys/wait.h", "register_posix_functions"},
+        {"termios.h", "register_posix_functions"},
+        {"time.h", "register_time_functions"},
+        {"uchar.h", "register_wide_functions"},
+        {"unistd.h", "register_posix_functions"},
+        {"utime.h", "register_posix_functions"},
+        {"wchar.h", "register_wide_functions"},
+        {"wctype.h", "register_wide_functions"},
+    };
+    int n = (int)(sizeof(map) / sizeof(map[0]));
     int lo = 0, hi = n - 1;
     while (lo <= hi) {
         int mid = (lo + hi) / 2;
