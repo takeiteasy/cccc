@@ -799,9 +799,11 @@ static $node_t *make_local_var_node(JCC *vm, char *name, $type_t *ty) {
 
     Obj *var = reflect_new_var(vm, name, strlen(name), ty);
     var->is_local = true;
-    // Prepend to the current function's locals list (same as new_lvar)
-    var->next = fn->locals;
-    fn->locals = var;
+    // Prepend to vm->compiler.locals, not fn->locals directly.
+    // cc_expand_macros flushes vm->compiler.locals back into fn->locals at the
+    // end of each function, and push_fn/pop_fn manages this for $with_fn blocks.
+    var->next = vm->compiler.locals;
+    vm->compiler.locals = var;
 
     $node_t *node = alloc_node(vm, ND_VAR);
     node->var = var;

@@ -31,6 +31,24 @@ $node_t *make_local_forty_two(void) {
     return __jcc_ast_assign(vm, var, val);
 }
 
+// Ticket #305: $local_var_unique inside $with_fn must land in the inner
+// function's locals, not the outer macro's locals (vm->compiler.locals fix).
+[[jcc::comptime]]
+$node_t *gen_add_fn(void) {
+    $type_t *int_ty = $get_type("int");
+    $obj_t *fn = $function("local_var_add", int_ty);
+    $with_fn(fn) {
+        $node_t *tmp = $local_var_unique(int_ty);
+        $node_t *asgn = $assign(tmp, $int_literal(3));
+        $node_t *read = $local_var_unique(int_ty);
+        $node_t *asgn2 = $assign(read, $int_literal(4));
+        $node_t *sum = $binary(nk_add, asgn, asgn2);
+        $function_set_body(fn, $return(sum));
+    }
+    return $int_literal(0);
+}
+gen_add_fn();
+
 int main(void) {
     // doubled: unique temp should not capture any existing local
     int result = doubled(7);    // tmp = 7*2 = 14 (assign expr = 14)
@@ -42,6 +60,9 @@ int main(void) {
     // named local
     int v = make_local_forty_two();  // named_tmp = 42
     if (v != 42) return 3;
+
+    // $local_var_unique inside $with_fn (ticket #305)
+    if (local_var_add() != 7) return 4;
 
     return 42;
 }
