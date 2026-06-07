@@ -64,6 +64,11 @@ used by global-generation macros, but it does not compile arbitrary non-macro
 program definitions into the macro VM. Function bodies, file-scope macro calls,
 and initialized global definitions are skipped.
 
+To prevent declarations from regular `#include`d headers from leaking into the
+comptime pass, pass `--strict-comptime-includes`. Only the main source file's own
+file-scope declarations are forwarded; `#include_comptime` and
+`#pragma jcc comptime begin...end` blocks are unaffected.
+
 ## Global Generation
 
 Use a non-inline macro with a file-scope call when generated functions should be

@@ -593,6 +593,18 @@ static Token *build_macro_context_tokens(JCC *vm, Token **input_tokens,
     Token head = {};
     Token *cur = &head;
 
+    // Derive the main source file name from the first input token stream.
+    // When --strict-comptime-includes is set, only declarations whose tokens
+    // originate from this file are forwarded to the comptime pass.
+    char *main_filename = NULL;
+    if (vm->compiler.strict_comptime_includes && count > 0 && input_tokens[0]) {
+        Token *t = input_tokens[0];
+        while (t && t->kind == TK_EOF)
+            t = t->next;
+        if (t)
+            main_filename = t->filename;
+    }
+
     for (int fi = 0; fi < count; fi++) {
         Token *tok = input_tokens[fi];
         while (tok && tok->kind != TK_EOF) {
@@ -629,9 +641,15 @@ static Token *build_macro_context_tokens(JCC *vm, Token **input_tokens,
 
                     if (equal(tok, ";")) {
                         if (!has_top_level_eq) {
-                            for (Token *t = start; t != tok->next &&
-                                 t && t->kind != TK_EOF; t = t->next)
-                                cur = cur->next = copy_macro_token(vm, t);
+                            bool skip = vm->compiler.strict_comptime_includes &&
+                                         main_filename &&
+                                         start->filename &&
+                                         strcmp(start->filename, main_filename) != 0;
+                            if (!skip) {
+                                for (Token *t = start; t != tok->next &&
+                                     t && t->kind != TK_EOF; t = t->next)
+                                    cur = cur->next = copy_macro_token(vm, t);
+                            }
                         }
                         tok = tok->next;
                         break;

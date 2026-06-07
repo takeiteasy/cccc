@@ -1451,6 +1451,7 @@ typedef struct Compiler {
     bool in_comptime_block;          // True inside #pragma jcc comptime begin...end
     File *comptime_block_file;       // File that opened the comptime block (for auto-close)
     bool macro_fns_compiled;         // True after compile_all_macros has run
+    bool strict_comptime_includes;   // --strict-comptime-includes: don't forward regular #include decls to comptime pass
     int macro_recursion_limit;       // 0 = unlimited, default = 256
     Token *macro_call_tok;           // Active macro invocation token
     Node **macro_vararg_nodes;        // Active inline macro variadic AST args

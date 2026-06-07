@@ -390,6 +390,9 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-n/--macro-recursion-limit=N Limit recursive pragma macro "
            "expansion (default: 256, 0=unlimited)\n");
     printf("\t-x/--max-errors=N            Cap diagnostics at N (default: 20)\n");
+    printf("\t   --strict-comptime-includes Only forward the main source file's own\n");
+    printf("\t                             declarations to the comptime pass (skip\n");
+    printf("\t                             declarations from regular #includes)\n");
     printf("\nOptimization Levels:\n");
     printf("\t-O/--optimize[=LEVEL]        Enable bytecode optimization "
            "(default: disabled)\n");
@@ -765,6 +768,7 @@ int main(int argc, const char *argv[]) {
     int vm_profile_ran = 0;
     const char *entry_name = NULL; // -e / --entry
     enum { COMPILE_NONE, COMPILE_BYTECODE, COMPILE_NATIVE } compile_format = COMPILE_NONE;
+    int strict_comptime_includes = 0; // --strict-comptime-includes
     int run_ngrams = 0;            // 0 = off; 2 or 3 = enabled with n-gram size
     int ngrams_top = 25;
     int ngrams_per_file = 0;
@@ -837,6 +841,7 @@ int main(int argc, const char *argv[]) {
         {"ngrams-top", required_argument, 0, 1030},
         {"ngrams-per-file", no_argument, 0, 1031},
         {"fusion-candidates", optional_argument, 0, 'B'},
+        {"strict-comptime-includes", no_argument, 0, 1050},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1164,6 +1169,9 @@ int main(int argc, const char *argv[]) {
         case 1031: // --ngrams-per-file
             ngrams_per_file = 1;
             break;
+        case 1050: // --strict-comptime-includes
+            strict_comptime_includes = 1;
+            break;
         case 'B': { // --fusion-candidates[=N]
             if (optarg == NULL) {
                 run_fusion = 1;
@@ -1308,6 +1316,7 @@ int main(int argc, const char *argv[]) {
     JCC vm;
     cc_init(&vm, flags);
     vm.compiler.compile_only = compile_only;
+    vm.compiler.strict_comptime_includes = strict_comptime_includes;
     vm.compiler.entry_name = (char *)entry_name;
     vm.compiler.diagnostic_json = output_json;
     vm.disable_all_ffi = disable_all_ffi;
