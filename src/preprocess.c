@@ -81,6 +81,8 @@ static bool file_exists(char *path);
 static char *format_relative_path(JCC *vm, char *base_file, char *filename);
 static char *read_include_filename(JCC *vm, Token **rest, Token *tok,
                                    bool *is_dquote, int *out_len);
+char *search_include_paths(JCC *vm, char *filename, int filename_len,
+                           bool is_system);
 static long eval_const_expr(JCC *vm, Token **rest, Token *tok);
 
 static bool is_hash(Token *tok) { return tok->at_bol && equal(tok, "#"); }
@@ -685,6 +687,178 @@ generate_embed_tokens_with_params(JCC *vm, unsigned char *data, size_t size,
     return head.next;
 }
 
+static bool consume_pp_name(JCC *vm, Token **rest, Token *tok,
+                            char **vendor, char **name) {
+    if (tok->kind != TK_IDENT)
+        return false;
+
+    Token *first = tok;
+    tok = tok->next;
+
+    if (equal(tok, "::") || (equal(tok, ":") && equal(tok->next, ":"))) {
+        tok = equal(tok, "::") ? tok->next : tok->next->next;
+        if (tok->kind != TK_IDENT)
+            error_tok(vm, tok, "expected identifier after '::'");
+        *vendor = arena_strndup(vm, first->loc, first->len);
+        *name = arena_strndup(vm, tok->loc, tok->len);
+        *rest = tok->next;
+        return true;
+    }
+
+    *vendor = NULL;
+    *name = arena_strndup(vm, first->loc, first->len);
+    *rest = tok;
+    return true;
+}
+
+static char *resolve_include_probe(JCC *vm, Token *start, char *filename,
+                                   int filename_len, bool is_dquote) {
+    if (filename[0] == '/')
+        return filename;
+
+    if (is_dquote) {
+        char *relative_path = format_relative_path(vm, start->file->name, filename);
+        if (file_exists(relative_path))
+            return relative_path;
+    }
+
+    char *path = search_include_paths(vm, filename, filename_len, !is_dquote);
+
+    if (!path && is_dquote)
+        path = search_include_paths(vm, filename, filename_len, true);
+
+    return path;
+}
+
+static int eval_has_include(JCC *vm, Token **rest, Token *tok) {
+    Token *start = tok;
+    tok = skip(vm, tok->next, "(");
+
+    bool is_dquote;
+    int filename_len;
+    char *filename =
+        read_include_filename(vm, &tok, tok, &is_dquote, &filename_len);
+    tok = skip(vm, tok, ")");
+    *rest = tok;
+
+    char *path = resolve_include_probe(vm, start, filename, filename_len,
+                                       is_dquote);
+    return path && file_exists(path);
+}
+
+static bool is_has_feature_supported(JCC *vm, char *name) {
+    if (!strcmp(name, "c99"))
+        return vm->compiler.c_std >= JCC_STD_C99;
+    if (!strcmp(name, "c11"))
+        return vm->compiler.c_std >= JCC_STD_C11;
+    if (!strcmp(name, "c23"))
+        return vm->compiler.c_std >= JCC_STD_C23;
+
+    if (!strcmp(name, "c_alignas") || !strcmp(name, "c_alignof") ||
+        !strcmp(name, "c_generic_selections") ||
+        !strcmp(name, "c_static_assert"))
+        return vm->compiler.c_std >= JCC_STD_C11;
+
+    return false;
+}
+
+static bool is_has_attribute_supported(char *name) {
+    return !strcmp(name, "aligned") || !strcmp(name, "packed") ||
+           !strcmp(name, "unused") || !strcmp(name, "__unused__") ||
+           !strcmp(name, "deprecated") || !strcmp(name, "__deprecated__") ||
+           !strcmp(name, "macro") || !strcmp(name, "comptime");
+}
+
+static bool is_has_builtin_supported(char *name) {
+    static const char *builtins[] = {
+        "__builtin_types_compatible_p",
+        "__builtin_reg_class",
+        "__builtin_compare_and_swap",
+        "__builtin_atomic_exchange",
+        "__builtin_frame_address",
+        "__builtin_huge_val",
+        "__builtin_huge_valf",
+        "__builtin_inf",
+        "__builtin_inff",
+        "__builtin_nan",
+        "__builtin_nanf",
+        "__builtin_isnan",
+        "__builtin_isinf",
+        "__builtin_isfinite",
+        "__builtin_signbit",
+        "__builtin_expect",
+        "__builtin_constant_p",
+        "__builtin_alloca",
+        "__builtin_unreachable",
+        "__builtin_trap",
+        "__builtin_debugtrap",
+        "__builtin_clz",
+        "__builtin_clzll",
+        "__builtin_ctz",
+        "__builtin_ctzll",
+        "__builtin_popcount",
+        "__builtin_popcountll",
+        "__builtin_parity",
+        "__builtin_parityll",
+        "__builtin_ffs",
+        "__builtin_ffsll",
+        "__builtin_bswap16",
+        "__builtin_bswap32",
+        "__builtin_bswap64",
+        "__builtin_add_overflow",
+        "__builtin_sub_overflow",
+        "__builtin_mul_overflow",
+        NULL,
+    };
+
+    for (int i = 0; builtins[i]; i++)
+        if (!strcmp(name, builtins[i]))
+            return true;
+    return false;
+}
+
+static bool is_has_c_attribute_supported(char *vendor, char *name) {
+    if (!vendor)
+        return !strcmp(name, "maybe_unused") || !strcmp(name, "deprecated");
+
+    if (!strcmp(vendor, "jcc"))
+        return !strcmp(name, "comptime") || !strcmp(name, "macro");
+
+    return false;
+}
+
+static int eval_has_name(JCC *vm, Token **rest, Token *tok, char *kind) {
+    tok = skip(vm, tok->next, "(");
+
+    char *vendor;
+    char *name;
+    if (!consume_pp_name(vm, &tok, tok, &vendor, &name))
+        error_tok(vm, tok, "expected identifier");
+
+    if (equal(tok, ",")) {
+        tok = tok->next;
+        if (vendor)
+            error_tok(vm, tok, "expected a single vendor qualifier");
+        if (tok->kind != TK_IDENT)
+            error_tok(vm, tok, "expected vendor identifier");
+        vendor = arena_strndup(vm, tok->loc, tok->len);
+        tok = tok->next;
+    }
+
+    tok = skip(vm, tok, ")");
+    *rest = tok;
+
+    if (!strcmp(kind, "__has_feature") || !strcmp(kind, "__has_extension"))
+        return is_has_feature_supported(vm, name);
+    if (!strcmp(kind, "__has_attribute"))
+        return is_has_attribute_supported(name);
+    if (!strcmp(kind, "__has_builtin"))
+        return is_has_builtin_supported(name);
+    if (!strcmp(kind, "__has_c_attribute"))
+        return is_has_c_attribute_supported(vendor, name);
+    return 0;
+}
+
 static Token *read_const_expr(JCC *vm, Token **rest, Token *tok) {
     tok = copy_line(vm, rest, tok);
 
@@ -710,6 +884,24 @@ static Token *read_const_expr(JCC *vm, Token **rest, Token *tok) {
             continue;
         }
 
+        if (equal(tok, "__has_include")) {
+            Token *start = tok;
+            int result = eval_has_include(vm, &tok, tok);
+            cur = cur->next = new_num_token(vm, result, start);
+            continue;
+        }
+
+        if (equal(tok, "__has_feature") || equal(tok, "__has_extension") ||
+            equal(tok, "__has_attribute") || equal(tok, "__has_builtin") ||
+            equal(tok, "__has_c_attribute") ||
+            equal(tok, "__has_cpp_attribute")) {
+            Token *start = tok;
+            char *kind = arena_strndup(vm, tok->loc, tok->len);
+            int result = eval_has_name(vm, &tok, tok, kind);
+            cur = cur->next = new_num_token(vm, result, start);
+            continue;
+        }
+
         // "__has_embed(filename)" returns 0 (not found), 1 (non-empty), or 2
         // (empty)
         if (equal(tok, "__has_embed")) {
@@ -724,23 +916,8 @@ static Token *read_const_expr(JCC *vm, Token **rest, Token *tok) {
 
             tok = skip(vm, tok, ")");
 
-            // Resolve file path
-            char *path = NULL;
-
-            if (filename[0] == '/') {
-                path = filename;
-            } else if (is_dquote) {
-                char *relative_path =
-                    format_relative_path(vm, start->file->name, filename);
-                if (file_exists(relative_path)) {
-                    path = relative_path;
-                }
-            }
-
-            if (!path) {
-                path = search_include_paths(vm, filename, filename_len,
-                                            !is_dquote);
-            }
+            char *path = resolve_include_probe(vm, start, filename,
+                                               filename_len, is_dquote);
 
             // Determine result: 0 = not found, 1 = non-empty, 2 = empty
             int result = 0;
@@ -1221,21 +1398,6 @@ static char *format_relative_path(JCC *vm, char *base_file, char *filename) {
                         filename);
 }
 
-static bool is_standard_header(const char *filename) {
-    static const char *std_headers[] = {
-        "assert.h", "complex.h",      "ctype.h",     "errno.h",  "float.h",  "inttypes.h",
-        "limits.h", "math.h",         "setjmp.h",    "stdarg.h", "stdbool.h",
-        "stddef.h", "stdint.h",       "stdio.h",     "stdlib.h", "string.h",
-        "time.h",   "Availability.h", "sys/cdefs.h", NULL};
-
-    for (int i = 0; std_headers[i]; i++) {
-        if (strlen(filename) == strlen(std_headers[i]) &&
-            strncmp(filename, std_headers[i], strlen(std_headers[i])) == 0)
-            return true;
-    }
-    return false;
-}
-
 char *search_include_paths(JCC *vm, char *filename, int filename_len,
                            bool is_system) {
     if (filename[0] == '/')
@@ -1249,30 +1411,35 @@ char *search_include_paths(JCC *vm, char *filename, int filename_len,
     // - If use_system_headers is enabled: only force for VM-required headers
     // (stdarg.h, setjmp.h)
     // - Otherwise: force for all standard C library headers
-    bool force_jcc_headers = is_standard_header(filename);
+    bool force_jcc_headers = get_std_header(filename) != NULL;
 
-    // For <...> includes:
-    //   - Standard headers: search include_paths (JCC's headers)
-    //   - Other headers: search system_include_paths (requires --isystem)
-    // For "..." includes: search include_paths
-    StringArray *paths;
-    if (force_jcc_headers || !is_system) {
-        paths = &vm->compiler.include_paths;
-    } else {
-        paths = &vm->compiler.system_include_paths;
-    }
-
-    // Search a file from the include paths.
-    for (int i = 0; i < paths->len; i++) {
-        char *path = format("%s/%s", paths->data[i], filename);
-        if (!file_exists(path)) {
-            free(path);
-            continue;
+    // For <...> includes, search -I paths first and then --isystem paths.
+    // For "..." includes, the caller handles current-file-relative lookup and
+    // this helper searches -I paths.
+    for (int i = 0; i < vm->compiler.include_paths.len; i++) {
+        char *path = format("%s/%s", vm->compiler.include_paths.data[i], filename);
+        if (file_exists(path)) {
+            hashmap_put2(&vm->compiler.include_cache, filename, filename_len, path);
+            vm->compiler.include_next_idx = i + 1;
+            return path;
         }
-        hashmap_put2(&vm->compiler.include_cache, filename, filename_len, path);
-        vm->compiler.include_next_idx = i + 1;
-        return path;
+        free(path);
     }
+
+    if (force_jcc_headers || !is_system)
+        return NULL;
+
+    for (int i = 0; i < vm->compiler.system_include_paths.len; i++) {
+        char *path = format("%s/%s", vm->compiler.system_include_paths.data[i],
+                            filename);
+        if (file_exists(path)) {
+            hashmap_put2(&vm->compiler.include_cache, filename, filename_len, path);
+            vm->compiler.include_next_idx = vm->compiler.include_paths.len + i + 1;
+            return path;
+        }
+        free(path);
+    }
+
     return NULL;
 }
 
@@ -2552,6 +2719,14 @@ void init_macros(JCC *vm) {
     define_macro(vm, "__typeof__", "typeof");
     define_macro(vm, "__volatile__", "volatile");
     define_macro(vm, "__JCC__", "1");
+
+    define_macro(vm, "__has_include(x)", "0");
+    define_macro(vm, "__has_feature(x)", "0");
+    define_macro(vm, "__has_extension(x)", "0");
+    define_macro(vm, "__has_attribute(x)", "0");
+    define_macro(vm, "__has_builtin(x)", "0");
+    define_macro(vm, "__has_c_attribute(x)", "0");
+    define_macro(vm, "__has_cpp_attribute(x)", "0");
 
     // GCC compatibility macros for system headers
     // Claim GCC 4.2.1 compatibility (minimum version for modern headers)

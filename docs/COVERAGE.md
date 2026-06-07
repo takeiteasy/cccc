@@ -137,7 +137,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `snprintf`, `vsnprintf` | ✓ | |
 | `strtof`, `strtold`, `strtoll`, `strtoull` | ✓ | |
 | `llabs`, `lldiv` | ✓ | |
-| `__has_include` | ✗ | |
+| `__has_include` | ✓ | Checks JCC, `-I`, and `--isystem` include paths |
 
 ---
 
@@ -215,8 +215,8 @@ C17 is a bug-fix release — no new language features or library functions were 
 | `#warning` | ✓ | |
 | `#embed` | ✓ | Supports `limit()`, `prefix()`, `suffix()`, `if_empty()`, `__has_embed()` |
 | `__VA_OPT__` | ✓ | |
-| `__has_c_attribute` | ✗ | |
-| `__has_include` | ✗ | |
+| `__has_c_attribute` | ✓ | Returns `1` for C/JCC attributes with semantic support |
+| `__has_include` | ✓ | Checks JCC, `-I`, and `--isystem` include paths |
 
 ### Standard Library
 
@@ -431,6 +431,21 @@ if (__builtin_mul_overflow(a, b, &r))
 JCC supports GNU `__attribute__((...))` and C23 `[[...]]` attribute syntaxes.
 The most common diagnostic and layout attributes are fully implemented; the
 rest are **parsed and silently ignored** by the attribute consumer.
+
+### Feature-Test Preprocessor Operators
+
+JCC provides the common `__has_*` operators in preprocessor conditionals:
+`__has_include`, `__has_feature`, `__has_extension`, `__has_attribute`,
+`__has_builtin`, `__has_c_attribute`, and `__has_cpp_attribute`.
+
+`__has_feature` and `__has_extension` report selected-standard support for
+`c99`, `c11`, `c23`, `c_alignas`, `c_alignof`, `c_generic_selections`, and
+`c_static_assert`. Parsed-but-incomplete features such as `_Atomic` and
+`_Thread_local` intentionally return `0`.
+
+`__has_attribute`, `__has_builtin`, and `__has_c_attribute` return `1` only for
+attributes and builtins with compiler semantics. Parsed-but-ignored attributes
+return `0`. `__has_cpp_attribute` returns `0`.
 
 ### Quick Reference
 

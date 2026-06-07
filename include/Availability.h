@@ -12,7 +12,10 @@
 #ifndef __AVAILABILITY__
 #define __AVAILABILITY__
 
-/* __has_* feature testing macros - define as returning 0 if not already defined */
+/*
+ * __has_* feature testing macros are provided by JCC's preprocessor.  The
+ * guarded fallbacks below are only for non-JCC preprocessing environments.
+ */
 #ifndef __has_feature
 #define __has_feature(x) 0
 #endif
@@ -27,6 +30,9 @@
 #endif
 #ifndef __has_builtin
 #define __has_builtin(x) 0
+#endif
+#ifndef __has_c_attribute
+#define __has_c_attribute(x) 0
 #endif
 #ifndef __has_cpp_attribute
 #define __has_cpp_attribute(x) 0
