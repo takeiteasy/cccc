@@ -57,7 +57,101 @@ static char __jcc_std_unistd_h[1560] = "/* unistd.h - core POSIX declarations fo
 static char __jcc_std_utime_h[330] = "/* utime.h - file access and modification times for JCC */\n\n#ifndef __UTIME_H\n#define __UTIME_H\n\n#ifdef _WIN32\n#error \"<utime.h> is only available on POSIX targets in JCC\"\n#endif\n\nstruct utimbuf {\n    long actime;\n    long modtime;\n};\n\nextern int utime(const char *filename, const struct utimbuf *times);\n\n#endif /* __UTIME_H */\n";
 static char __jcc_std_wchar_h[1925] = "/* wchar.h - wide-character declarations for JCC */\n\n#ifndef __WCHAR_H\n#define __WCHAR_H\n\n#include \"stddef.h\"\n#include \"stdarg.h\"\n#include \"time.h\"\n\n#ifndef WEOF\n#define WEOF ((wint_t)-1)\n#endif\n\ntypedef unsigned int wint_t;\ntypedef struct {\n    unsigned long long __opaque[16];\n} mbstate_t;\n\nextern int mbsinit(const mbstate_t *ps);\nextern size_t mbrlen(const char *s, size_t n, mbstate_t *ps);\nextern size_t mbrtowc(wchar_t *pwc, const char *s, size_t n, mbstate_t *ps);\nextern size_t wcrtomb(char *s, wchar_t wc, mbstate_t *ps);\nextern size_t mbsrtowcs(wchar_t *dst, const char **src, size_t len, mbstate_t *ps);\nextern size_t wcsrtombs(char *dst, const wchar_t **src, size_t len, mbstate_t *ps);\n\nextern wchar_t *wcscpy(wchar_t *s1, const wchar_t *s2);\nextern wchar_t *wcsncpy(wchar_t *s1, const wchar_t *s2, size_t n);\nextern wchar_t *wcscat(wchar_t *s1, const wchar_t *s2);\nextern wchar_t *wcsncat(wchar_t *s1, const wchar_t *s2, size_t n);\nextern int wcscmp(const wchar_t *s1, const wchar_t *s2);\nextern int wcsncmp(const wchar_t *s1, const wchar_t *s2, size_t n);\nextern size_t wcslen(const wchar_t *s);\nextern wchar_t *wcschr(const wchar_t *s, wchar_t c);\nextern wchar_t *wcsrchr(const wchar_t *s, wchar_t c);\nextern wchar_t *wcsstr(const wchar_t *s1, const wchar_t *s2);\nextern size_t wcsxfrm(wchar_t *s1, const wchar_t *s2, size_t n);\n\nextern double wcstod(const wchar_t *nptr, wchar_t **endptr);\nextern float wcstof(const wchar_t *nptr, wchar_t **endptr);\nextern long double wcstold(const wchar_t *nptr, wchar_t **endptr);\nextern long wcstol(const wchar_t *nptr, wchar_t **endptr, int base);\nextern long long wcstoll(const wchar_t *nptr, wchar_t **endptr, int base);\nextern unsigned long wcstoul(const wchar_t *nptr, wchar_t **endptr, int base);\nextern unsigned long long wcstoull(const wchar_t *nptr, wchar_t **endptr, int base);\n\nextern int wctob(wint_t c);\nextern wint_t btowc(int c);\n\n#endif /* __WCHAR_H */\n";
 static char __jcc_std_wctype_h[868] = "/* wctype.h - wide-character classification declarations for JCC */\n\n#ifndef __WCTYPE_H\n#define __WCTYPE_H\n\n#include \"wchar.h\"\n\ntypedef unsigned long wctype_t;\ntypedef unsigned long wctrans_t;\n\nextern int iswalnum(wint_t wc);\nextern int iswalpha(wint_t wc);\nextern int iswblank(wint_t wc);\nextern int iswcntrl(wint_t wc);\nextern int iswdigit(wint_t wc);\nextern int iswgraph(wint_t wc);\nextern int iswlower(wint_t wc);\nextern int iswprint(wint_t wc);\nextern int iswpunct(wint_t wc);\nextern int iswspace(wint_t wc);\nextern int iswupper(wint_t wc);\nextern int iswxdigit(wint_t wc);\nextern int iswctype(wint_t wc, wctype_t desc);\nextern wint_t towlower(wint_t wc);\nextern wint_t towupper(wint_t wc);\nextern wint_t towctrans(wint_t wc, wctrans_t desc);\nextern wctype_t wctype(const char *property);\nextern wctrans_t wctrans(const char *property);\n\n#endif /* __WCTYPE_H */\n";
+char *get_stdlib_reg_fn_name(char *header);
+
 char *get_std_header(char *filename);
+
+char *get_stdlib_reg_fn_name(char *header) {
+    switch (*header) {
+    case 119:
+        {
+            if (strcmp(header, "wchar.h") == 0)
+                return "register_wide_functions";
+            if (strcmp(header, "wctype.h") == 0)
+                return "register_wide_functions";
+            return 0;
+        }
+    case 115:
+        {
+            if (strcmp(header, "signal.h") == 0)
+                return "register_signal_functions";
+            if (strcmp(header, "stdio.h") == 0)
+                return "register_stdio_functions";
+            if (strcmp(header, "stdlib.h") == 0)
+                return "register_stdlib_functions";
+            if (strcmp(header, "string.h") == 0)
+                return "register_string_functions";
+            if (strcmp(header, "strings.h") == 0)
+                return "register_posix_functions";
+            if (strcmp(header, "sys/mman.h") == 0)
+                return "register_posix_functions";
+            if (strcmp(header, "sys/socket.h") == 0)
+                return "register_posix_functions";
+            if (strcmp(header, "sys/stat.h") == 0)
+                return "register_posix_functions";
+            if (strcmp(header, "sys/time.h") == 0)
+                return "register_posix_functions";
+            if (strcmp(header, "sys/wait.h") == 0)
+                return "register_posix_functions";
+            return 0;
+        }
+    case 114:
+        {
+            if (strcmp(header, "regex.h") == 0)
+                return "register_posix_functions";
+            return 0;
+        }
+    case 112:
+        {
+            if (strcmp(header, "poll.h") == 0)
+                return "register_posix_functions";
+            if (strcmp(header, "pwd.h") == 0)
+                return "register_posix_functions";
+            return 0;
+        }
+    case 103:
+        {
+            if (strcmp(header, "getopt.h") == 0)
+                return "register_posix_functions";
+            if (strcmp(header, "glob.h") == 0)
+                return "register_posix_functions";
+            if (strcmp(header, "grp.h") == 0)
+                return "register_posix_functions";
+            return 0;
+        }
+    case 102:
+        {
+            if (strcmp(header, "fcntl.h") == 0)
+                return "register_posix_functions";
+            if (strcmp(header, "fenv.h") == 0)
+                return "register_fenv_functions";
+            if (strcmp(header, "fnmatch.h") == 0)
+                return "register_posix_functions";
+            return 0;
+        }
+    case 100:
+        {
+            if (strcmp(header, "dirent.h") == 0)
+                return "register_posix_functions";
+            if (strcmp(header, "dlfcn.h") == 0)
+                return "register_posix_functions";
+            return 0;
+        }
+    case 99:
+        {
+            if (strcmp(header, "ctype.h") == 0)
+                return "register_ctype_functions";
+            return 0;
+        }
+    case 97:
+        {
+            if (strcmp(header, "arpa/inet.h") == 0)
+                return "register_posix_functions";
+            return 0;
+        }
+    }
+    return 0;
+}
 
 char *get_std_header(char *filename) {
     switch (*filename) {

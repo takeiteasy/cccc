@@ -1557,96 +1557,37 @@ static char *detect_include_guard(JCC *vm, Token *tok) {
 // Register stdlib functions for a specific header
 // Called automatically when a standard header is #include'd
 static void register_stdlib_for_header(JCC *vm, const char *header_name) {
-    // Check if already registered
-    if (hashmap_get(&vm->compiler.included_headers, header_name)) {
-        return; // Already registered
-    }
-
-    // Mark as registered
+    if (hashmap_get(&vm->compiler.included_headers, header_name))
+        return;
     hashmap_put(&vm->compiler.included_headers, header_name, (void *)1);
 
-    // Dispatch to appropriate registration function
-    if (strncmp(header_name, "ctype.h", sizeof("ctype.h")) == 0) {
-        register_ctype_functions(vm);
-    } else if (strncmp(header_name, "dlfcn.h", sizeof("dlfcn.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "fcntl.h", sizeof("fcntl.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "fenv.h", sizeof("fenv.h")) == 0) {
-        register_fenv_functions(vm);
-    } else if (strncmp(header_name, "locale.h", sizeof("locale.h")) == 0) {
-        register_locale_functions(vm);
-    } else if (strncmp(header_name, "math.h", sizeof("math.h")) == 0) {
-        register_math_functions(vm);
-    } else if (strncmp(header_name, "signal.h", sizeof("signal.h")) == 0) {
-        register_signal_functions(vm);
-    } else if (strncmp(header_name, "stdio.h", sizeof("stdio.h")) == 0) {
-        register_stdio_functions(vm);
-    } else if (strncmp(header_name, "stdlib.h", sizeof("stdlib.h")) == 0) {
-        register_stdlib_functions(vm);
-    } else if (strncmp(header_name, "string.h", sizeof("string.h")) == 0) {
-        register_string_functions(vm);
-    } else if (strncmp(header_name, "time.h", sizeof("time.h")) == 0) {
-        register_time_functions(vm);
-    } else if (strncmp(header_name, "uchar.h", sizeof("uchar.h")) == 0) {
-        register_wide_functions(vm);
-    } else if (strncmp(header_name, "unistd.h", sizeof("unistd.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "wchar.h", sizeof("wchar.h")) == 0) {
-        register_wide_functions(vm);
-    } else if (strncmp(header_name, "wctype.h", sizeof("wctype.h")) == 0) {
-        register_wide_functions(vm);
-    } else if (strncmp(header_name, "strings.h", sizeof("strings.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "libgen.h", sizeof("libgen.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "fnmatch.h", sizeof("fnmatch.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "getopt.h", sizeof("getopt.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "poll.h", sizeof("poll.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "sys/wait.h", sizeof("sys/wait.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "sys/time.h", sizeof("sys/time.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "sys/mman.h", sizeof("sys/mman.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "sys/stat.h", sizeof("sys/stat.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "utime.h", sizeof("utime.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "arpa/inet.h", sizeof("arpa/inet.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "dirent.h", sizeof("dirent.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "glob.h", sizeof("glob.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "grp.h", sizeof("grp.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "netdb.h", sizeof("netdb.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "netinet/in.h", sizeof("netinet/in.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "in.h", sizeof("in.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "pwd.h", sizeof("pwd.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "regex.h", sizeof("regex.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "sys/socket.h", sizeof("sys/socket.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "socket.h", sizeof("socket.h")) == 0) {
-        register_posix_functions(vm);
-    } else if (strncmp(header_name, "termios.h", sizeof("termios.h")) == 0) {
-        register_posix_functions(vm);
+    const char *fn_name = get_stdlib_reg_fn_name(header_name);
+    if (!fn_name)
+        return;
+
+    static const struct { const char *name; void (*fn)(JCC *); } fns[] = {
+        {"register_ctype_functions", register_ctype_functions},
+        {"register_fenv_functions", register_fenv_functions},
+        {"register_locale_functions", register_locale_functions},
+        {"register_math_functions", register_math_functions},
+        {"register_posix_functions", register_posix_functions},
+        {"register_signal_functions", register_signal_functions},
+        {"register_stdio_functions", register_stdio_functions},
+        {"register_stdlib_functions", register_stdlib_functions},
+        {"register_string_functions", register_string_functions},
+        {"register_time_functions", register_time_functions},
+        {"register_wide_functions", register_wide_functions},
+    };
+    for (int i = 0; i < (int)(sizeof(fns) / sizeof(fns[0])); i++) {
+        if (strcmp(fn_name, fns[i].name) == 0) {
+            fns[i].fn(vm);
+            return;
+        }
     }
-    // Note: Other headers (like stddef.h, stdbool.h, sys/types.h, etc.) don't have runtime
-    // functions
 }
 
 static Token *include_file(JCC *vm, Token *tok, char *path,
-                           Token *filename_tok) {
+                           Token *filename_tok, const char *include_name) {
     // Check for "#pragma once"
     if (hashmap_get(&vm->compiler.pragma_once, path))
         return tok;
@@ -1665,9 +1606,7 @@ static Token *include_file(JCC *vm, Token *tok, char *path,
 
     // Register stdlib functions for standard headers (header-based lazy
     // loading)
-    char *basename = strrchr(path, '/');
-    basename = basename ? basename + 1 : path;
-    register_stdlib_for_header(vm, basename);
+    register_stdlib_for_header(vm, include_name);
 
     guard_name = detect_include_guard(vm, tok2);
     if (guard_name)
@@ -2431,7 +2370,7 @@ static Token *preprocess2(JCC *vm, Token *tok) {
                 char *path =
                     format_relative_path(vm, start->file->name, filename);
                 if (file_exists(path)) {
-                    tok = include_file(vm, tok, path, start->next->next);
+                    tok = include_file(vm, tok, path, start->next->next, filename);
                     break;
                 }
             }
@@ -2448,7 +2387,7 @@ static Token *preprocess2(JCC *vm, Token *tok) {
                 path = search_include_paths(vm, filename, filename_len, true);
 
             tok = include_file(vm, tok, path ? path : filename,
-                               start->next->next);
+                               start->next->next, filename);
             break;
         }
         case PP_INCLUDE_NEXT: {
@@ -2459,7 +2398,7 @@ static Token *preprocess2(JCC *vm, Token *tok) {
             tok = skip_line(vm, tok);
             char *path = search_include_next(vm, filename);
             tok = include_file(vm, tok, path ? path : filename,
-                               start->next->next);
+                               start->next->next, filename);
             break;
         }
         case PP_INCLUDE_COMPTIME: {

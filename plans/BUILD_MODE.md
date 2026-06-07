@@ -520,7 +520,7 @@ The eventual `build.c` for the JCC project replaces the existing
 | `make test` | Depends on `jcc`; runs `./jcc --testing tests.c` (see [TESTING_FRAMEWORK.md](TESTING_FRAMEWORK.md)) |
 | `make clean` | Runner subcommand (e.g. `./jcc --build --clean`) or a `clean` target that `rm -rf build/` |
 | `make docs` | `docs` target, runs `headerdoc2html` via FFI |
-| `make generate-std` | `generate-std` target, runs `./jcc -G ...` |
+| `make stdlib` | `stdlib` target, runs `./jcc -G ...` |
 | `make bench` | `bench` target, runs `hyperfine` via FFI |
 | `make profile-cpu` | `profile-cpu` target, runs a gperftools-instrumented binary |
 | `make profile-mem` | `profile-mem` target, runs `leaks` / `valgrind` |

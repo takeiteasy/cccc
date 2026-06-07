@@ -193,8 +193,8 @@ STD_TEMPLATE := tools/gen_std.c
 # Regenerate src/std.c from the template.
 # src/std.c is committed so the normal build never needs this; run it
 # explicitly after editing tools/gen_std.c or include/*.h.
-.PHONY: generate-std
-generate-std: $(EXE_OUT)
+.PHONY: stdlib
+stdlib: $(EXE_OUT)
 	@set -e; \
 	tmp=$$(mktemp src/std.c.tmp.XXXXXX); \
 	trap 'rm -f "$$tmp"' EXIT; \
@@ -287,7 +287,7 @@ clean:
 	@$(RM) -rf profile/*.prof profile/*.txt profile/*.json profile/*.massif
 	@$(RM) -rf fuzz/corpus fuzz/out
 
-.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info generate-std bench-compare bench-compare-quick bench-compare-json
+.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json
 ifeq ($(UNAME_S),Linux)
 .PHONY: msan
 endif

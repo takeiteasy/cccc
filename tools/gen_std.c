@@ -1,5 +1,5 @@
 // std_template_test.c - builds get_std_header as AST; use -G to emit C.
-// Usage: make generate-std
+// Usage: make stdlib
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -117,6 +117,128 @@ $node_t *make_strcmp_return($obj_t *fn, $type_t *char_ptr_ty, const char *header
     return $if(cond, ret, NULL);
 }
 
+struct reg_entry { char *header; char *fn; };
+
+// Map header name to its stdlib registration function name.
+// Returns NULL for headers that don't need runtime registration.
+[[jcc::comptime]]
+const char *reg_fn_for_header(const char *header) {
+    static struct reg_entry *map = NULL;
+    static int n = 0;
+    if (!map) {
+        static const char raw[] = {
+            #embed "stdlib.tsv"
+            , 0
+        };
+        const char *p = raw;
+        while (*p) {
+            const char *nl = strchr(p, '\n');
+            if (!nl) break;
+            const char *tab = strchr(p, '\t');
+            if (tab && tab < nl) {
+                int hlen = (int)(tab - p);
+                int flen = (int)(nl - tab - 1);
+                map = realloc(map, (n + 1) * sizeof(struct reg_entry));
+                map[n].header = malloc(hlen + 1);
+                memcpy(map[n].header, p, hlen);
+                map[n].header[hlen] = 0;
+                map[n].fn = malloc(flen + 1);
+                memcpy(map[n].fn, tab + 1, flen);
+                map[n].fn[flen] = 0;
+                n++;
+            }
+            p = nl + 1;
+        }
+    }
+    int lo = 0, hi = n - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        int cmp = strcmp(header, map[mid].header);
+        if (cmp == 0)
+            return map[mid].fn;
+        else if (cmp < 0)
+            hi = mid - 1;
+        else
+            lo = mid + 1;
+    }
+    return NULL;
+}
+
+// Build: if (strcmp(header, name) == 0) return "register_XXX";
+[[jcc::comptime]]
+$node_t *make_strcmp_return_fn_name($obj_t *fn, const char *header, const char *fn_name) {
+    $node_t *args[2] = {
+        $param_ref(fn, "header"),
+        $string_literal(header)
+    };
+    $node_t *cmp  = $funcall($var_ref("strcmp"), args, 2);
+    $node_t *cond = $binary(nk_eq, cmp, $int_literal(0));
+    return $if(cond, $return($string_literal(fn_name)), NULL);
+}
+
+[[jcc::macro]]
+void generate_stdlib_reg_fn(void) {
+    $forward_include("<string.h>");
+
+    char **headers = discover_headers();
+    if (!headers) return;
+
+    $type_t *char_ptr_ty = $make_pointer($get_type("char"));
+    $obj_t  *fn          = $function("get_stdlib_reg_fn_name", char_ptr_ty);
+    $function_add_param(fn, "header", char_ptr_ty);
+
+    $with_fn(fn) {
+        // Filter to only headers that have a registration function
+        int total = 0;
+        for (int i = 0; headers[i]; i++) {
+            if (reg_fn_for_header(headers[i])) total++;
+        }
+        if (!total) {
+            $function_set_body(fn, $return($int_literal(0)));
+            $publish(fn);
+            return;
+        }
+
+        $node_t *first_char = $unary(nk_deref, $param_ref(fn, "header"));
+        $node_t *sw = $switch(first_char);
+
+        unsigned char seen[256] = {0};
+        for (int i = 0; headers[i]; i++) {
+            unsigned char c = (unsigned char)headers[i][0];
+            if (seen[c]) continue;
+            seen[c] = 1;
+
+            int bucket_size = 0;
+            for (int j = 0; headers[j]; j++) {
+                if ((unsigned char)headers[j][0] == c && reg_fn_for_header(headers[j]))
+                    bucket_size++;
+            }
+            if (!bucket_size) continue;
+
+            $node_t **case_stmts = malloc((bucket_size + 1) * sizeof($node_t *));
+            int cn = 0;
+            for (int j = 0; headers[j]; j++) {
+                if ((unsigned char)headers[j][0] != c) continue;
+                const char *fn_name = reg_fn_for_header(headers[j]);
+                if (!fn_name) continue;
+                case_stmts[cn++] = make_strcmp_return_fn_name(fn, headers[j], fn_name);
+            }
+            case_stmts[cn++] = $return($int_literal(0));
+
+            $node_t *case_body = $block(case_stmts, cn);
+            $switch_add_case(sw, $int_literal(c), case_body);
+        }
+
+        $node_t **stmts = malloc(3 * sizeof($node_t *));
+        int n = 0;
+        stmts[n++] = sw;
+        stmts[n++] = $return($int_literal(0));
+        $function_set_body(fn, $block(stmts, n));
+    }
+
+    $publish(fn);
+}
+
 [[jcc::macro]]
 void generate_std_header(void) {
     $forward_include("<string.h>");
@@ -195,3 +317,4 @@ void generate_std_header(void) {
 }
 
 generate_std_header();
+generate_stdlib_reg_fn();

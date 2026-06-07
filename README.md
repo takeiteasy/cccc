@@ -163,7 +163,7 @@ JCC ships embedded standard library headers compiled directly into the binary â€
 Headers are embedded by `tools/gen_std.c`, which generates `src/std.c`. To regenerate after modifying files in `include/`:
 
 ```bash
-make generate-std && make
+make stdlib && make
 ```
 
 Dynamic libraries can be opened with `--library` and searched with
