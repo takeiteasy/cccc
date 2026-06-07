@@ -1,4 +1,5 @@
-// EXPECT_RUNTIME_ERROR - Test signed division overflow detection
+// EXPECT_RUNTIME_ERROR JCC_FLAGS: --overflow-checks
+// Test signed division overflow detection
 // This test should trigger an overflow error when run with --overflow-checks flag
 // Expected: Program aborts with overflow error message (LLONG_MIN / -1)
 

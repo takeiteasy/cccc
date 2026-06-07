@@ -267,23 +267,38 @@ static bool mul_overflows(long long a, long long b) {
 static bool eval_binary_const(int op, long long a, long long b,
                               bool preserve_overflow_traps,
                               long long *out) {
+    (void)preserve_overflow_traps;
     switch (op) {
         case ADD3:
-            if (preserve_overflow_traps && add_overflows(a, b))
-                return false;
             *out = (long long)((unsigned long long)a + (unsigned long long)b);
             return true;
-        case SUB3:
-            if (preserve_overflow_traps && sub_overflows(a, b))
+        case ADDC:
+            if (add_overflows(a, b))
                 return false;
+            *out = a + b;
+            return true;
+        case SUB3:
             *out = (long long)((unsigned long long)a - (unsigned long long)b);
             return true;
-        case MUL3:
-            if (preserve_overflow_traps && mul_overflows(a, b))
+        case SUBC:
+            if (sub_overflows(a, b))
                 return false;
+            *out = a - b;
+            return true;
+        case MUL3:
             *out = (long long)((unsigned long long)a * (unsigned long long)b);
             return true;
+        case MULC:
+            if (mul_overflows(a, b))
+                return false;
+            *out = a * b;
+            return true;
         case DIV3:
+            if (b == 0)
+                return false;
+            *out = (a == LLONG_MIN && b == -1) ? LLONG_MIN : a / b;
+            return true;
+        case DIVC:
             if (b == 0 || (a == LLONG_MIN && b == -1))
                 return false;
             *out = a / b;
@@ -440,9 +455,13 @@ static void opt_constant_fold(JCC *vm, OptReplacement *repls) {
             }
 
             case ADD3:
+            case ADDC:
             case SUB3:
+            case SUBC:
             case MUL3:
+            case MULC:
             case DIV3:
+            case DIVC:
             case UDIV3:
             case MOD3:
             case UMOD3:

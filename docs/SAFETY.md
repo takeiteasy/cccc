@@ -186,9 +186,9 @@ All features listed below can be enabled individually or through the safety leve
   - HashMap key: BP address + offset for per-function-call tracking
 - `--overflow-checks` **Signed integer overflow detection**
   - Detects arithmetic overflow for addition, subtraction, multiplication, and division
-  - Uses checked opcodes (ADDC, SUBC, MULC, DIVC) when enabled
+  - Emits checked opcodes (ADDC, SUBC, MULC, DIVC) when enabled
   - ADDC/SUBC: Validates result stays within LLONG_MIN to LLONG_MAX range
-  - MULC: Special handling for LLONG_MIN edge cases, division-based overflow detection
+  - MULC: Uses `__builtin_mul_overflow` to detect multiplication overflow
   - DIVC: Detects division by zero and signed overflow (LLONG_MIN / -1)
   - Reports overflow with operands, operation type, and PC offset
   - Zero overhead when disabled (uses regular ADD/SUB/MUL/DIV opcodes)
@@ -584,7 +584,7 @@ $ echo $?
 42
 ```
 
-**Note:** Overflow detection is **disabled by default** for zero overhead. When enabled with `--overflow-checks`, it uses specialized checked arithmetic opcodes (ADDC, SUBC, MULC, DIVC) that validate operations before completing them. Floating-point operations are not affected by this flag.
+**Note:** Overflow detection is **disabled by default** for zero overhead. When enabled with `--overflow-checks`, codegen emits specialized checked arithmetic opcodes (ADDC, SUBC, MULC, DIVC) that validate operations before completing them. Floating-point operations are not affected by this flag.
 
 ### Stack Overflow Detection
 

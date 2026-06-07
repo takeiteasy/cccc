@@ -24,6 +24,9 @@ from pathlib import Path
 
 
 JBC_SKIP_TESTS = {
+    "test_ffi_fatal_error.c",
+    "test_ffi_type_check_arity.c",
+    "test_stack_overflow_large_frame.c",
 }
 
 # Tests that hang under leaks --atExit due to fork()/wait() interactions
@@ -269,8 +272,6 @@ def run_jbc_roundtrip(idx, test_file, test_name, jcc, script_dir, jcc_args,
     skip_reason = None
     if is_negative_test:
         skip_reason = "negative test"
-    elif expects_runtime_error:
-        skip_reason = "negative test"
     elif test_file.name in JBC_SKIP_TESTS:
         skip_reason = "jbc-incompatible"
     if skip_reason:
@@ -292,7 +293,7 @@ def run_jbc_roundtrip(idx, test_file, test_name, jcc, script_dir, jcc_args,
         jbc_path = Path(tmp) / (test_file.stem + ".jbc")
         save_cmd = [
             str(jcc), "-I./include", *jcc_args, *per_test_flags,
-            "-o", str(jbc_path), str(test_file),
+            "-c", "-o", str(jbc_path), str(test_file),
         ]
         save = subprocess.run(save_cmd, capture_output=True, text=True, cwd=script_dir)
         if save.returncode != 0:
@@ -316,7 +317,12 @@ def run_jbc_roundtrip(idx, test_file, test_name, jcc, script_dir, jcc_args,
         run = subprocess.run(run_cmd, capture_output=True, text=True, cwd=script_dir)
         elapsed = (time.perf_counter() - start) if bench else None
         output = run.stdout + run.stderr
-        status = "jbc_passed" if run.returncode == 42 else "jbc_failed"
+        if expects_runtime_error and run.returncode == 255:
+            status = "jbc_passed"
+        elif not expects_runtime_error and run.returncode == 42:
+            status = "jbc_passed"
+        else:
+            status = "jbc_failed"
         return {
             "idx": idx,
             "test_name": test_name,

@@ -1433,18 +1433,21 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             }
 
             int op;
+            bool checked_arith = (vm->flags & JCC_OVERFLOW_CHECKS) &&
+                                 !node->ty->is_unsigned &&
+                                 !(node->lhs->ty && node->lhs->ty->base);
             switch (node->kind) {
             case ND_ADD:
-                op = ADD3;
+                op = checked_arith ? ADDC : ADD3;
                 break;
             case ND_SUB:
-                op = SUB3;
+                op = checked_arith ? SUBC : SUB3;
                 break;
             case ND_MUL:
-                op = MUL3;
+                op = checked_arith ? MULC : MUL3;
                 break;
             case ND_DIV:
-                op = node->ty->is_unsigned ? UDIV3 : DIV3;
+                op = node->ty->is_unsigned ? UDIV3 : (checked_arith ? DIVC : DIV3);
                 break;
             case ND_MOD:
                 op = node->ty->is_unsigned ? UMOD3 : MOD3;

@@ -110,10 +110,14 @@ Opcodes are grouped by function.  Operands are shown as `rd = destination`, `rs 
 
 | Opcode | Description |
 |--------|-------------|
-| `ADD3` | `rd = rs1 + rs2` (overflow-check when `JCC_OVERFLOW_CHECKS`) |
+| `ADD3` | `rd = rs1 + rs2` |
 | `SUB3` | `rd = rs1 - rs2` |
 | `MUL3` | `rd = rs1 * rs2` |
 | `DIV3` | `rd = rs1 / rs2` (signed; traps on divide-by-zero) |
+| `ADDC` | Checked signed addition; traps on overflow |
+| `SUBC` | Checked signed subtraction; traps on overflow |
+| `MULC` | Checked signed multiplication; traps on overflow |
+| `DIVC` | Checked signed division; traps on divide-by-zero or `LLONG_MIN / -1` |
 | `UDIV3` | Unsigned division |
 | `MOD3` | Signed remainder (traps on modulo-by-zero) |
 | `UMOD3` | Unsigned remainder |
@@ -280,6 +284,7 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 
 | Opcode | Description |
 |--------|-------------|
+| `ADDC` / `SUBC` / `MULC` / `DIVC` | Trapping signed arithmetic emitted for standard `+`, `-`, `*`, and `/` when `--overflow-checks` is enabled. |
 | `IOVFL` | Overflow-checked `add`/`sub`/`mul`.  Inputs in `REG_A0`/`REG_A1`, result pointer in `REG_A2`; overflow boolean returned in `REG_A0`.  Operand encodes `op_type`, width, and signedness. |
 
 ### Struct Return Buffers

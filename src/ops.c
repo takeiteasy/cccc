@@ -37,21 +37,9 @@ static inline int op_ADD3_fn(JCC *vm) {
     long long a = vm->regs[rs1];
     long long b = vm->regs[rs2];
 
-    // Check for signed addition overflow (only if overflow checks enabled)
-    if (vm->flags & JCC_OVERFLOW_CHECKS) {
-        if ((b > 0 && a > LLONG_MAX - b) || (b < 0 && a < LLONG_MIN - b)) {
-            printf("\n========== INTEGER OVERFLOW ==========\n");
-            printf("Addition overflow detected\n");
-            printf("Operands: %lld + %lld\n", a, b);
-            printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
-                   (long long)vm->pc);
-            printf("======================================\n");
-            return -1;
-        }
-    }
-
     if (rd != REG_ZERO)
-        vm->regs[rd] = a + b;
+        vm->regs[rd] =
+            (long long)((unsigned long long)a + (unsigned long long)b);
     return 0;
 }
 
@@ -62,21 +50,9 @@ static inline int op_SUB3_fn(JCC *vm) {
     long long a = vm->regs[rs1];
     long long b = vm->regs[rs2];
 
-    // Check for signed subtraction overflow (only if overflow checks enabled)
-    if (vm->flags & JCC_OVERFLOW_CHECKS) {
-        if ((b < 0 && a > LLONG_MAX + b) || (b > 0 && a < LLONG_MIN + b)) {
-            printf("\n========== INTEGER OVERFLOW ==========\n");
-            printf("Subtraction overflow detected\n");
-            printf("Operands: %lld - %lld\n", a, b);
-            printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
-                   (long long)vm->pc);
-            printf("======================================\n");
-            return -1;
-        }
-    }
-
     if (rd != REG_ZERO)
-        vm->regs[rd] = a - b;
+        vm->regs[rd] =
+            (long long)((unsigned long long)a - (unsigned long long)b);
     return 0;
 }
 
@@ -87,37 +63,9 @@ static inline int op_MUL3_fn(JCC *vm) {
     long long a = vm->regs[rs1];
     long long b = vm->regs[rs2];
 
-    // Check for signed multiplication overflow (only if overflow checks
-    // enabled)
-    if ((vm->flags & JCC_OVERFLOW_CHECKS) && a != 0 && b != 0) {
-        if (a == LLONG_MIN || b == LLONG_MIN) {
-            // LLONG_MIN * anything except 0, 1, -1 overflows
-            if ((a == LLONG_MIN && (b != 0 && b != 1 && b != -1)) ||
-                (b == LLONG_MIN && (a != 0 && a != 1 && a != -1))) {
-                printf("\n========== INTEGER OVERFLOW ==========\n");
-                printf("Multiplication overflow detected\n");
-                printf("Operands: %lld * %lld\n", a, b);
-                printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
-                       (long long)vm->pc);
-                printf("======================================\n");
-                return -1;
-            }
-        } else {
-            long long result = a * b;
-            if (result / a != b) {
-                printf("\n========== INTEGER OVERFLOW ==========\n");
-                printf("Multiplication overflow detected\n");
-                printf("Operands: %lld * %lld\n", a, b);
-                printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
-                       (long long)vm->pc);
-                printf("======================================\n");
-                return -1;
-            }
-        }
-    }
-
     if (rd != REG_ZERO)
-        vm->regs[rd] = a * b;
+        vm->regs[rd] =
+            (long long)((unsigned long long)a * (unsigned long long)b);
     return 0;
 }
 
@@ -139,7 +87,95 @@ static inline int op_DIV3_fn(JCC *vm) {
         return -1;
     }
 
-    // Check for signed division overflow (LLONG_MIN / -1)
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (a == LLONG_MIN && b == -1) ? LLONG_MIN : a / b;
+    return 0;
+}
+
+static inline int op_ADDC_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    long long a = vm->regs[rs1];
+    long long b = vm->regs[rs2];
+
+    if ((b > 0 && a > LLONG_MAX - b) || (b < 0 && a < LLONG_MIN - b)) {
+        printf("\n========== INTEGER OVERFLOW ==========\n");
+        printf("Addition overflow detected\n");
+        printf("Operands: %lld + %lld\n", a, b);
+        printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
+               (long long)vm->pc);
+        printf("======================================\n");
+        return -1;
+    }
+
+    if (rd != REG_ZERO)
+        vm->regs[rd] = a + b;
+    return 0;
+}
+
+static inline int op_SUBC_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    long long a = vm->regs[rs1];
+    long long b = vm->regs[rs2];
+
+    if ((b < 0 && a > LLONG_MAX + b) || (b > 0 && a < LLONG_MIN + b)) {
+        printf("\n========== INTEGER OVERFLOW ==========\n");
+        printf("Subtraction overflow detected\n");
+        printf("Operands: %lld - %lld\n", a, b);
+        printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
+               (long long)vm->pc);
+        printf("======================================\n");
+        return -1;
+    }
+
+    if (rd != REG_ZERO)
+        vm->regs[rd] = a - b;
+    return 0;
+}
+
+static inline int op_MULC_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    long long a = vm->regs[rs1];
+    long long b = vm->regs[rs2];
+    long long result;
+
+    if (__builtin_mul_overflow(a, b, &result)) {
+        printf("\n========== INTEGER OVERFLOW ==========\n");
+        printf("Multiplication overflow detected\n");
+        printf("Operands: %lld * %lld\n", a, b);
+        printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
+               (long long)vm->pc);
+        printf("======================================\n");
+        return -1;
+    }
+
+    if (rd != REG_ZERO)
+        vm->regs[rd] = result;
+    return 0;
+}
+
+static inline int op_DIVC_fn(JCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    long long a = vm->regs[rs1];
+    long long b = vm->regs[rs2];
+
+    if (b == 0) {
+        printf("\n========== DIVISION BY ZERO ==========\n");
+        printf("Attempted division by zero\n");
+        printf("Operands: %lld / 0\n", a);
+        printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
+               (long long)vm->pc);
+        printf("======================================\n");
+        return -1;
+    }
+
     if (a == LLONG_MIN && b == -1) {
         printf("\n========== INTEGER OVERFLOW ==========\n");
         printf("Division overflow detected\n");

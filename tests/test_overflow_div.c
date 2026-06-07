@@ -1,4 +1,5 @@
-// EXPECT_RUNTIME_ERROR - Test integer overflow detection for division
+// EXPECT_RUNTIME_ERROR JCC_FLAGS: --overflow-checks
+// Test integer overflow detection for division
 // This test should trigger a division by zero error when run with --overflow-checks flag
 // Expected: Program aborts with division by zero error message
 

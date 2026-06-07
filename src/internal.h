@@ -39,7 +39,7 @@
 #endif
 
 #define JCC_MAGIC "JCC\0"
-#define JCC_VERSION 7 // Version 7: typed f32/f64 floating-register opcodes
+#define JCC_VERSION 8 // Version 8: explicit checked arithmetic opcodes
 
 // Stack canary constant for detecting stack overflows (used when random
 // canaries disabled)
