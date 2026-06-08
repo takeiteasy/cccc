@@ -1,6 +1,8 @@
+// JCC_FLAGS: -F
+// JCC_EXPECT_STDERR: format expects 1, call provides 2
 /*
  * Test format string validation - extra arguments
- * This test should FAIL with -F/--format-string-checks enabled
+ * This test should emit a warning with -F/--format-string-checks enabled
  * It should detect too many arguments for the format string
  */
 

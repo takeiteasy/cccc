@@ -1,3 +1,4 @@
+// JCC_FLAGS: -F
 /*
  * Test format string validation - valid format strings
  * This test should pass with -F/--format-string-checks enabled

@@ -233,18 +233,21 @@ All features listed below can be enabled individually or through the safety leve
   - Use `--stack-errors` flag to enable runtime errors (vs logging only)
   - Use `cc_print_stack_report()` API to print access statistics
 - `--format-string-checks` **Format string validation**
-  - Validates format strings in printf-family functions at runtime
+  - Validates format strings at compile time via `__attribute__((format(printf/scanf, …)))`
+  - Gated by `-F` / `--format-string-checks` or included in safety presets `-S1` / `-S2`
+  - Annotates printf/scanf-family functions in the bundled standard library headers
+  - Works with any function annotated with the GNU `format` attribute
   - Counts format specifiers (%d, %s, %f, %x, %p, %c, etc.) and compares with argument count
-  - Detects mismatches before function execution to prevent undefined behavior
+  - Detects mismatches before runtime to prevent undefined behavior
   - Supports all standard format specifiers: d, i, u, o, x, X, f, F, e, E, g, G, a, A, c, s, p, n
   - Handles %% (literal percent sign, not a specifier)
   - Handles width (*) and precision (.*) specifiers that consume arguments
   - Handles length modifiers: hh, h, l, ll, L, z, j, t (don't affect specifier count)
   - Works with: printf, fprintf, sprintf, snprintf, scanf, sscanf, fscanf
   - Detects both missing arguments (undefined behavior) and extra arguments (logic error)
-  - Prints detailed error message showing expected vs. actual argument counts
-  - Zero overhead when disabled (simple flag check at runtime)
-  - Prevents format string vulnerabilities and crashes from argument mismatches
+  - Performs basic type checking: %d expects int, %s expects char*, %f expects double, etc.
+  - Prints detailed warning message showing expected vs. actual argument counts
+  - Zero overhead when disabled (simple flag check at compile time)
 - `--memory-tagging` **Temporal memory tagging**
   - Tracks generation counter for each heap allocation
   - Records pointer-to-generation mapping at allocation time (MALC opcode)

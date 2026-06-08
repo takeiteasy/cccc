@@ -599,6 +599,11 @@ struct Type {
     bool is_maybe_unused;
     bool is_deprecated;
     char *deprecated_msg;
+
+    // Format string validation (__attribute__((format(...))))
+    int format_style;          // 0=none, 1=printf, 2=scanf
+    int format_string_index;   // 1-based index of format string arg
+    int format_fmt_first_arg;  // 1-based index of first variadic arg to check
 };
 
 /*!

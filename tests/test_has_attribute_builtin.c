@@ -13,7 +13,10 @@ int main(void) {
 #if __has_attribute(comptime) && __has_attribute(macro)
     result += 4;
 #endif
-#if __has_attribute(format) || __has_attribute(noreturn)
+#if __has_attribute(format)
+    result += 4;
+#endif
+#if __has_attribute(noreturn)
     return 1;
 #endif
 
@@ -46,5 +49,7 @@ int main(void) {
     return 4;
 #endif
 
-    return result + 2;
+    // result was 40 before adding format (10 checks × 4)
+    // now 44 with format (11 × 4); subtract 2 to keep exit code 42
+    return result - 2;
 }

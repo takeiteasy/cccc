@@ -74,6 +74,11 @@ typedef struct {
     char *deprecated_msg;
     Token *attribute_tok;
     int align;
+
+    // Format string validation
+    int format_style;          // 0=none, 1=printf, 2=scanf
+    int format_string_index;   // 1-based index of format string arg
+    int format_fmt_first_arg;  // 1-based index of first variadic arg to check
 } VarAttr;
 
 // This struct represents a variable initializer. Since initializers
@@ -4108,11 +4113,17 @@ static void apply_semantic_attr(Type *ty, VarAttr *attr, Token *tok,
 }
 
 static Type *apply_var_attrs_to_type(JCC *vm, Type *ty, VarAttr *attr) {
-    if (!attr || (!attr->is_maybe_unused && !attr->is_deprecated))
+    if (!attr || (!attr->is_maybe_unused && !attr->is_deprecated &&
+                  !attr->format_style))
         return ty;
     ty = copy_type(vm, ty);
     apply_semantic_attr(ty, NULL, attr->attribute_tok, attr->is_maybe_unused,
                         attr->is_deprecated, attr->deprecated_msg);
+    if (attr->format_style && ty->kind == TY_FUNC) {
+        ty->format_style = attr->format_style;
+        ty->format_string_index = attr->format_string_index;
+        ty->format_fmt_first_arg = attr->format_fmt_first_arg;
+    }
     return ty;
 }
 
@@ -4123,6 +4134,11 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
     dst->is_deprecated |= src->is_deprecated;
     if (!dst->deprecated_msg)
         dst->deprecated_msg = src->deprecated_msg;
+    if (src->format_style) {
+        dst->format_style = src->format_style;
+        dst->format_string_index = src->format_string_index;
+        dst->format_fmt_first_arg = src->format_fmt_first_arg;
+    }
 }
 
 // attribute = ("__attribute__" "(" "(" attribute-list ")" ")")*
@@ -4177,8 +4193,41 @@ static Token *attribute_list(JCC *vm, Token *tok, Type *ty, VarAttr *attr) {
                         tok = tok->next;
                     }
                 }
-                apply_semantic_attr(ty, attr, attr_tok, unused, deprecated,
-                                    message);
+            apply_semantic_attr(ty, attr, attr_tok, unused, deprecated,
+                                message);
+                continue;
+            }
+
+            // Handle format attribute: __attribute__((format(printf, fmt_idx, first_arg)))
+            if (is_attr_name(tok, "format")) {
+                tok = tok->next;
+                if (equal(tok, "(")) {
+                    tok = tok->next;
+                    int style = 0;
+                    if (equal(tok, "printf"))
+                        style = 1;
+                    else if (equal(tok, "scanf"))
+                        style = 2;
+                    else
+                        error_tok(vm, tok,
+                                  "expected 'printf' or 'scanf' in format attribute");
+                    tok = tok->next;
+                    tok = skip(vm, tok, ",");
+                    int fmt_idx = const_expr(vm, &tok, tok);
+                    tok = skip(vm, tok, ",");
+                    int first_arg = const_expr(vm, &tok, tok);
+                    tok = skip(vm, tok, ")");
+                    if (ty && ty->kind == TY_FUNC) {
+                        ty->format_style = style;
+                        ty->format_string_index = fmt_idx;
+                        ty->format_fmt_first_arg = first_arg;
+                    }
+                    if (attr) {
+                        attr->format_style = style;
+                        attr->format_string_index = fmt_idx;
+                        attr->format_fmt_first_arg = first_arg;
+                    }
+                }
                 continue;
             }
 
@@ -4605,6 +4654,243 @@ static Node *postfix(JCC *vm, Token **rest, Token *tok) {
     }
 }
 
+// Expected argument types for format string validation
+enum {
+    FMT_EXPECT_INT,
+    FMT_EXPECT_UINT,
+    FMT_EXPECT_DOUBLE,
+    FMT_EXPECT_STRING,  // char*
+    FMT_EXPECT_POINTER, // void*
+    FMT_EXPECT_INT_PTR, // int* (for %n, scanf %d)
+    FMT_EXPECT_UINT_PTR, // unsigned int* (scanf %u, %x)
+    FMT_EXPECT_FLOAT_PTR, // float* (scanf %f)
+};
+
+#define MAX_FMT_ARGS 64
+
+static const char *fmt_type_names[] = {
+    "int", "unsigned int", "double", "char *", "void *",
+    "int *", "unsigned int *", "float *"
+};
+
+// Validate format string arguments for __attribute__((format(...)))
+static void validate_format_call(JCC *vm, Token *tok, Type *func_ty,
+                                  Node *args) {
+    if (!func_ty->format_style)
+        return;
+
+    // Walk to the format string argument (0-based index)
+    Node *fmt_arg = args;
+    int idx = 0;
+    while (fmt_arg && idx < func_ty->format_string_index - 1) {
+        fmt_arg = fmt_arg->next;
+        idx++;
+    }
+
+    if (!fmt_arg)
+        return;
+
+    // String literals may be wrapped in ND_CAST for array-to-pointer decay
+    if (fmt_arg->kind == ND_CAST)
+        fmt_arg = fmt_arg->lhs;
+
+    if (fmt_arg->kind != ND_VAR || !fmt_arg->var || !fmt_arg->var->init_data)
+        return;
+
+    const char *fmt = fmt_arg->var->init_data;
+    int style = func_ty->format_style;
+
+    // Count variadic args
+    Node *vararg = args;
+    int vararg_idx = 0;
+    int num_varargs = 0;
+    while (vararg) {
+        vararg_idx++;
+        if (vararg_idx >= func_ty->format_fmt_first_arg)
+            num_varargs++;
+        vararg = vararg->next;
+    }
+
+    // Parse format string and collect expected types
+    int fmt_count = 0;
+    int expected[MAX_FMT_ARGS];
+    int num_expected = 0;
+
+    const char *p = fmt;
+    while (*p && num_expected < MAX_FMT_ARGS) {
+        if (*p == '%') {
+            p++;
+            if (*p == '%') { p++; continue; }
+
+            if (*p == '*') {
+                expected[num_expected++] = FMT_EXPECT_INT;
+                fmt_count++;
+                p++;
+            }
+            while (*p >= '0' && *p <= '9') p++;
+            if (*p == '.') {
+                p++;
+                if (*p == '*') {
+                    expected[num_expected++] = FMT_EXPECT_INT;
+                    fmt_count++;
+                    p++;
+                } else {
+                    while (*p >= '0' && *p <= '9') p++;
+                }
+            }
+            while (*p == 'h' || *p == 'l' || *p == 'L' ||
+                   *p == 'z' || *p == 'j' || *p == 't')
+                p++;
+
+            if (*p) {
+                char c = *p;
+                if (style == 1) {
+                    switch (c) {
+                        case 'd': case 'i': case 'c':
+                            expected[num_expected++] = FMT_EXPECT_INT; break;
+                        case 'u': case 'o': case 'x': case 'X':
+                            expected[num_expected++] = FMT_EXPECT_UINT; break;
+                        case 'f': case 'F': case 'e': case 'E':
+                        case 'g': case 'G': case 'a': case 'A':
+                            expected[num_expected++] = FMT_EXPECT_DOUBLE; break;
+                        case 's':
+                            expected[num_expected++] = FMT_EXPECT_STRING; break;
+                        case 'p':
+                            expected[num_expected++] = FMT_EXPECT_POINTER; break;
+                        case 'n':
+                            expected[num_expected++] = FMT_EXPECT_INT_PTR; break;
+                        default:
+                            expected[num_expected++] = FMT_EXPECT_INT; break;
+                    }
+                } else if (style == 2) {
+                    switch (c) {
+                        case 'd': case 'i':
+                            expected[num_expected++] = FMT_EXPECT_INT_PTR; break;
+                        case 'u': case 'o': case 'x': case 'X':
+                            expected[num_expected++] = FMT_EXPECT_UINT_PTR; break;
+                        case 'f': case 'F': case 'e': case 'E':
+                        case 'g': case 'G': case 'a': case 'A':
+                            expected[num_expected++] = FMT_EXPECT_FLOAT_PTR; break;
+                        case 's': case 'c':
+                            expected[num_expected++] = FMT_EXPECT_STRING; break;
+                        case 'p':
+                            expected[num_expected++] = FMT_EXPECT_POINTER; break;
+                        case 'n':
+                            expected[num_expected++] = FMT_EXPECT_INT_PTR; break;
+                        default:
+                            expected[num_expected++] = FMT_EXPECT_INT_PTR; break;
+                    }
+                }
+                fmt_count++;
+                p++;
+            }
+        } else {
+            p++;
+        }
+    }
+
+    // Count remaining specifiers beyond MAX_FMT_ARGS
+    while (*p) {
+        if (*p == '%') {
+            p++;
+            if (*p == '%') { p++; continue; }
+            if (*p == '*') { fmt_count++; p++; }
+            while (*p >= '0' && *p <= '9') p++;
+            if (*p == '.') {
+                p++;
+                if (*p == '*') { fmt_count++; p++; }
+                else while (*p >= '0' && *p <= '9') p++;
+            }
+            while (*p == 'h' || *p == 'l' || *p == 'L' ||
+                   *p == 'z' || *p == 'j' || *p == 't')
+                p++;
+            if (*p) { fmt_count++; p++; }
+        } else {
+            p++;
+        }
+    }
+
+    // Check arg count
+    if (fmt_count != num_varargs) {
+        if (fmt_count < num_varargs)
+            warn_tok(vm, tok, JCC_WARN_FORMAT,
+                     "too many arguments for format string "
+                     "(format expects %d, call provides %d)",
+                     fmt_count, num_varargs);
+        else
+            warn_tok(vm, tok, JCC_WARN_FORMAT,
+                     "too few arguments for format string "
+                     "(format expects %d, call provides %d)",
+                     fmt_count, num_varargs);
+        return;
+    }
+
+    // Type-check each variadic argument
+    int check_idx = 0;
+    vararg = args;
+    vararg_idx = 0;
+    while (vararg && check_idx < num_expected) {
+        vararg_idx++;
+        if (vararg_idx >= func_ty->format_fmt_first_arg) {
+            int exp = expected[check_idx];
+            Type *arg_ty = vararg->ty;
+            bool ok = true;
+            switch (exp) {
+                case FMT_EXPECT_INT:
+                    ok = (arg_ty->kind == TY_INT || arg_ty->kind == TY_CHAR ||
+                          arg_ty->kind == TY_SHORT || arg_ty->kind == TY_LONG);
+                    break;
+                case FMT_EXPECT_UINT:
+                    ok = arg_ty->is_unsigned &&
+                         (arg_ty->kind == TY_INT || arg_ty->kind == TY_CHAR ||
+                          arg_ty->kind == TY_SHORT || arg_ty->kind == TY_LONG);
+                    break;
+                case FMT_EXPECT_DOUBLE:
+                    ok = (arg_ty->kind == TY_DOUBLE || arg_ty->kind == TY_FLOAT ||
+                          arg_ty->kind == TY_LDOUBLE);
+                    break;
+                case FMT_EXPECT_STRING:
+                    ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
+                          arg_ty->base->kind == TY_CHAR);
+                    break;
+                case FMT_EXPECT_POINTER:
+                    ok = (arg_ty->kind == TY_PTR);
+                    break;
+                case FMT_EXPECT_INT_PTR:
+                    ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
+                          (arg_ty->base->kind == TY_INT ||
+                           arg_ty->base->kind == TY_CHAR ||
+                           arg_ty->base->kind == TY_SHORT ||
+                           arg_ty->base->kind == TY_LONG));
+                    break;
+                case FMT_EXPECT_UINT_PTR:
+                    ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
+                          arg_ty->base->is_unsigned &&
+                          (arg_ty->base->kind == TY_INT ||
+                           arg_ty->base->kind == TY_CHAR ||
+                           arg_ty->base->kind == TY_SHORT ||
+                           arg_ty->base->kind == TY_LONG));
+                    break;
+                case FMT_EXPECT_FLOAT_PTR:
+                    ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
+                          (arg_ty->base->kind == TY_FLOAT ||
+                           arg_ty->base->kind == TY_DOUBLE ||
+                           arg_ty->base->kind == TY_LDOUBLE));
+                    break;
+            }
+            if (!ok)
+                warn_tok(vm, tok, JCC_WARN_FORMAT,
+                         "format argument %d expected type '%s' "
+                         "but argument has incompatible type",
+                         check_idx + 1, fmt_type_names[exp]);
+            check_idx++;
+        }
+        vararg = vararg->next;
+    }
+}
+
+#undef MAX_FMT_ARGS
+
 // funcall = (assign ("," assign)*)? ")"
 static Node *funcall(JCC *vm, Token **rest, Token *tok, Node *fn) {
     add_type(vm, fn);
@@ -4673,6 +4959,10 @@ static Node *funcall(JCC *vm, Token **rest, Token *tok, Node *fn) {
             error_tok(vm, tok, "too few arguments");
         }
     }
+
+    // Validate format string arguments when -F is active
+    if (!deferred_splice && (vm->flags & JCC_FORMAT_STR_CHECKS))
+        validate_format_call(vm, tok, ty, head.next);
 
     *rest = skip(vm, tok, ")");
 
@@ -5530,6 +5820,11 @@ static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->is_deprecated |= ty->is_deprecated;
         if (ty->deprecated_msg)
             fn->deprecated_msg = ty->deprecated_msg;
+        if (ty->format_style && fn->ty) {
+            fn->ty->format_style = ty->format_style;
+            fn->ty->format_string_index = ty->format_string_index;
+            fn->ty->format_fmt_first_arg = ty->format_fmt_first_arg;
+        }
     } else {
         fn = new_gvar(vm, name_str, ty->name->len, ty);
         fn->is_function = true;

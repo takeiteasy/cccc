@@ -766,7 +766,8 @@ static bool is_has_attribute_supported(char *name) {
     return !strcmp(name, "aligned") || !strcmp(name, "packed") ||
            !strcmp(name, "unused") || !strcmp(name, "__unused__") ||
            !strcmp(name, "deprecated") || !strcmp(name, "__deprecated__") ||
-           !strcmp(name, "macro") || !strcmp(name, "comptime");
+           !strcmp(name, "macro") || !strcmp(name, "comptime") ||
+           !strcmp(name, "format");
 }
 
 static bool is_has_builtin_supported(char *name) {

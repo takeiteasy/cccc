@@ -461,6 +461,7 @@ return `0`. `__has_cpp_attribute` returns `0`.
 | `deprecated("msg")` | C23 | ✓ | Emits `-Wdeprecated` with custom message |
 | `macro` | GNU | ✓ | JCC-specific; compile-time macro (see [MACROS.md](MACROS.md)) |
 | `comptime` | GNU | ✓ | JCC-specific; compile-time variable evaluation (see [MACROS.md](MACROS.md)) |
+| `format(printf/scanf, …)` | GNU | ✓ | Type-check printf/scanf format strings at compile time; gated by `-F` |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
 ### Supported Attributes
@@ -580,7 +581,7 @@ Ignored attributes include (but are not limited to):
 | `pure` | GNU | [#217](https://todo.sr.ht/~takeiteasy/jcc/217) |
 | `const` | GNU | [#217](https://todo.sr.ht/~takeiteasy/jcc/217) |
 | `cleanup` | GNU | [#218](https://todo.sr.ht/~takeiteasy/jcc/218) |
-| `format(printf,...)` | GNU | [#214](https://todo.sr.ht/~takeiteasy/jcc/214) |
+| `format(printf,...)` | GNU | ✓ |
 | `visibility` | GNU | |
 | `section` | GNU | |
 | `weak` | GNU | |
@@ -602,7 +603,6 @@ Ignored attributes include (but are not limited to):
 
 | # | Attribute | Priority | Description |
 |---|-----------|----------|-------------|
-| [#214](https://todo.sr.ht/~takeiteasy/jcc/214) | `format(printf, fmt, args)` | medium-high | Type-check printf/scanf format strings at compile time |
 | [#215](https://todo.sr.ht/~takeiteasy/jcc/215) | Catch-all | medium | Remaining GNU builtins and attributes |
 | [#216](https://todo.sr.ht/~takeiteasy/jcc/216) | `noreturn` / `[[noreturn]]` | high | Mark functions that never return; integrate with control-flow analysis |
 | [#217](https://todo.sr.ht/~takeiteasy/jcc/217) | `pure` / `const` | medium | Side-effect-free function annotations for optimisation |

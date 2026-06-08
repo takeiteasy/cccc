@@ -998,6 +998,7 @@ int main(int argc, const char *argv[]) {
             break;
         case 'F':
             flags |= JCC_FORMAT_STR_CHECKS;
+            warnings |= JCC_WARN_FORMAT;
             break;
         case 1006:
             flags |= JCC_RANDOM_CANARIES;

@@ -67,15 +67,22 @@ typedef long fpos_t;
 // Supported via platform inline assembly
 
 // Printf family
-extern int printf(const char *fmt, ...);
-extern int fprintf(FILE *stream, const char *fmt, ...);
-extern int sprintf(char *str, const char *fmt, ...);
-extern int snprintf(char *str, size_t size, const char *fmt, ...);
+extern int printf(const char *fmt, ...)
+    __attribute__((format(printf, 1, 2)));
+extern int fprintf(FILE *stream, const char *fmt, ...)
+    __attribute__((format(printf, 2, 3)));
+extern int sprintf(char *str, const char *fmt, ...)
+    __attribute__((format(printf, 2, 3)));
+extern int snprintf(char *str, size_t size, const char *fmt, ...)
+    __attribute__((format(printf, 3, 4)));
 
 // Scanf family
-extern int scanf(const char *fmt, ...);
-extern int sscanf(const char *str, const char *fmt, ...);
-extern int fscanf(FILE *stream, const char *fmt, ...);
+extern int scanf(const char *fmt, ...)
+    __attribute__((format(scanf, 1, 2)));
+extern int sscanf(const char *str, const char *fmt, ...)
+    __attribute__((format(scanf, 2, 3)));
+extern int fscanf(FILE *stream, const char *fmt, ...)
+    __attribute__((format(scanf, 2, 3)));
 
 // V* variants (take va_list) - Note: va_list manipulation not fully supported in VM
 // These are provided for completeness but may not work as expected
