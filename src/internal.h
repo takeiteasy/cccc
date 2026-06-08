@@ -311,6 +311,7 @@ char *jcc_path_find_executable(const char *name);
 char *jcc_find_native_cc(void);
 char *get_std_header(char *filename);
 const char *get_stdlib_reg_fn_name(const char *header);
+const char *get_std_header_name(int i);
 char *search_include_paths(JCC *vm, char *filename, int filename_len,
                            bool is_system);
 void init_macros(JCC *vm);

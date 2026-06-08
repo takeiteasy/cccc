@@ -314,5 +314,48 @@ void generate_std_header(void) {
     $publish(fn);
 }
 
+[[jcc::macro]]
+void generate_stdlib_mark_headers(void) {
+    $forward_include("<string.h>");
+
+    char **headers = discover_headers();
+    if (!headers) return;
+
+    $type_t *int_ty       = $get_type("int");
+    $type_t *char_ptr_ty  = $make_pointer($get_type("char"));
+    $obj_t  *fn           = $function("get_std_header_name", char_ptr_ty);
+    $function_add_param(fn, "i", int_ty);
+
+    $with_fn(fn) {
+        int total = 0;
+        for (int n = 0; headers[n]; n++) {
+            if (read_header_file(header_source_path(headers[n]))) total++;
+        }
+        if (!total) {
+            $function_set_body(fn, $return($int_literal(0)));
+            $publish(fn);
+            return;
+        }
+
+        $node_t *sw = $switch($param_ref(fn, "i"));
+
+        int idx = 0;
+        for (int n = 0; headers[n]; n++) {
+            if (!read_header_file(header_source_path(headers[n]))) continue;
+            $switch_add_case(sw, $int_literal(idx), $return($string_literal(headers[n])));
+            idx++;
+        }
+        $switch_set_default(sw, $return($int_literal(0)));
+
+        $node_t **stmts = malloc(2 * sizeof($node_t *));
+        int n = 0;
+        stmts[n++] = sw;
+        $function_set_body(fn, $block(stmts, n));
+    }
+
+    $publish(fn);
+}
+
 generate_std_header();
 generate_stdlib_reg_fn();
+generate_stdlib_mark_headers();
