@@ -232,6 +232,91 @@ static bool contains_funcall(Node *node) {
     return false;
 }
 
+static bool contains_self_call(Node *node, Obj *fn) {
+    if (!node)
+        return false;
+    if (node->kind == ND_FUNCALL && node->lhs->kind == ND_VAR &&
+        node->lhs->var == fn)
+        return true;
+    if (contains_self_call(node->lhs, fn))
+        return true;
+    if (contains_self_call(node->rhs, fn))
+        return true;
+    if (contains_self_call(node->cond, fn))
+        return true;
+    if (contains_self_call(node->then, fn))
+        return true;
+    if (contains_self_call(node->els, fn))
+        return true;
+    for (Node *arg = node->args; arg; arg = arg->next) {
+        if (contains_self_call(arg, fn))
+            return true;
+    }
+    return false;
+}
+
+static Node *clone_expr(JCC *vm, Node *src) {
+    if (!src)
+        return NULL;
+    Node *n = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+    *n = *src;
+    n->next = clone_expr(vm, src->next);
+    n->lhs = clone_expr(vm, src->lhs);
+    n->rhs = clone_expr(vm, src->rhs);
+    n->cond = clone_expr(vm, src->cond);
+    n->then = clone_expr(vm, src->then);
+    n->els = clone_expr(vm, src->els);
+    n->init = clone_expr(vm, src->init);
+    n->inc = clone_expr(vm, src->inc);
+    n->body = clone_expr(vm, src->body);
+    n->args = clone_expr(vm, src->args);
+    n->cas_addr = clone_expr(vm, src->cas_addr);
+    n->cas_old = clone_expr(vm, src->cas_old);
+    n->cas_new = clone_expr(vm, src->cas_new);
+    n->atomic_expr = clone_expr(vm, src->atomic_expr);
+    n->goto_next = NULL;
+    n->case_next = NULL;
+    n->default_case = NULL;
+    n->init_tail = NULL;
+    return n;
+}
+
+static Node *clone_subst(JCC *vm, Node *src, Obj *params, Node *args) {
+    if (!src)
+        return NULL;
+    if (src->kind == ND_VAR && src->var) {
+        Obj *p = params;
+        Node *a = args;
+        while (p && a) {
+            if (src->var == p)
+                return clone_expr(vm, a);
+            p = p->next;
+            a = a->next;
+        }
+    }
+    Node *n = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+    *n = *src;
+    n->next = clone_subst(vm, src->next, params, args);
+    n->lhs = clone_subst(vm, src->lhs, params, args);
+    n->rhs = clone_subst(vm, src->rhs, params, args);
+    n->cond = clone_subst(vm, src->cond, params, args);
+    n->then = clone_subst(vm, src->then, params, args);
+    n->els = clone_subst(vm, src->els, params, args);
+    n->init = clone_subst(vm, src->init, params, args);
+    n->inc = clone_subst(vm, src->inc, params, args);
+    n->body = clone_subst(vm, src->body, params, args);
+    n->args = clone_subst(vm, src->args, params, args);
+    n->cas_addr = clone_subst(vm, src->cas_addr, params, args);
+    n->cas_old = clone_subst(vm, src->cas_old, params, args);
+    n->cas_new = clone_subst(vm, src->cas_new, params, args);
+    n->atomic_expr = clone_subst(vm, src->atomic_expr, params, args);
+    n->goto_next = NULL;
+    n->case_next = NULL;
+    n->default_case = NULL;
+    n->init_tail = NULL;
+    return n;
+}
+
 #define MAX_LABELS 256
 #define MAX_LABEL_PATCHES 1024
 
@@ -1999,6 +2084,28 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             return;
         }
 
+        // Single-return static inline inlining opportunity
+        if (node->lhs->kind == ND_VAR && node->lhs->var->is_function) {
+            Obj *callee = node->lhs->var;
+            if (callee->is_inline && callee->is_static &&
+                callee->body && callee->body->kind == ND_BLOCK) {
+                Node *body_stmt = callee->body->body;
+                if (body_stmt && !body_stmt->next &&
+                    body_stmt->kind == ND_RETURN && body_stmt->lhs &&
+                    !contains_self_call(body_stmt->lhs, callee)) {
+                    Type *ret_ty = body_stmt->lhs->ty;
+                    if (!(ret_ty && (ret_ty->kind == TY_STRUCT ||
+                                     ret_ty->kind == TY_UNION))) {
+                        reset_temp_regs();
+                        Node *inlined = clone_subst(vm, body_stmt->lhs,
+                                                    callee->params, node->args);
+                        gen_expr(vm, inlined, dest_reg);
+                        return;
+                    }
+                }
+            }
+        }
+
         // Internal function call: evaluate arguments
         // For variadic functions, varargs (including doubles) go to integer
         // registers so ENT3 can spill them to stack for va_arg to read
@@ -3146,9 +3253,11 @@ void gen(JCC *vm, Obj *prog) {
         }
     }
 
-    // First pass: Generate code for all functions
+    // First pass: Generate code for all live functions
     for (Obj *fn = prog; fn; fn = fn->next) {
         if (fn->is_function && fn->body) {
+            if (fn->is_inline && fn->is_static && !fn->is_live)
+                continue;
             gen_function(vm, fn);
         }
     }
