@@ -659,6 +659,42 @@ static void parse_warning_option(const char *arg, uint64_t *warnings,
     }
 }
 
+static char **build_source_argv(int *prog_argc, int argc, const char *argv[],
+                                int optind, int dashdash) {
+    int prog_start;
+    if (dashdash >= 0) {
+        prog_start = dashdash + 1;
+        *prog_argc = argc - dashdash; // argv[0] + everything after "--"
+    } else {
+        prog_start = optind;
+        *prog_argc = argc - optind + 1;
+    }
+
+    char **prog_argv = malloc(sizeof(char *) * (size_t)*prog_argc);
+    if (!prog_argv)
+        error("out of memory");
+    prog_argv[0] = (char *)argv[0];
+    for (int i = 1; i < *prog_argc; i++)
+        prog_argv[i] = (char *)argv[prog_start + i - 1];
+    return prog_argv;
+}
+
+static char **build_jbc_argv(int *prog_argc, const char *input_file, int argc,
+                             const char *argv[], int dashdash) {
+    if (dashdash >= 0)
+        *prog_argc = argc - dashdash; // input_file + everything after "--"
+    else
+        *prog_argc = 1;
+
+    char **prog_argv = malloc(sizeof(char *) * (size_t)*prog_argc);
+    if (!prog_argv)
+        error("out of memory");
+    prog_argv[0] = (char *)input_file;
+    for (int i = 1; i < *prog_argc; i++)
+        prog_argv[i] = (char *)argv[dashdash + i];
+    return prog_argv;
+}
+
 int main(int argc, const char *argv[]) {
     int exit_code = 0;
     const char **input_files = NULL;
@@ -1421,11 +1457,16 @@ int main(int argc, const char *argv[]) {
                 goto BAIL;
             }
 
-            // Run the loaded bytecode
-            exit_code = cc_run(&vm, argc, (char **)argv);
+            // Run the loaded bytecode. The loaded program sees its own .jbc
+            // path as argv[0], plus explicit args after "--" if present.
+            int prog_argc = 0;
+            char **prog_argv =
+                build_jbc_argv(&prog_argc, input_file, argc, argv, dashdash);
+            exit_code = cc_run(&vm, prog_argc, prog_argv);
             vm_profile_mode = "jbc";
             vm_profile_input = input_file;
             vm_profile_ran = 1;
+            free(prog_argv);
             goto BAIL;
         }
     }
@@ -1799,18 +1840,9 @@ int main(int argc, const char *argv[]) {
 
     // Run the program. If "--" was given, forward only args after it; otherwise
     // fall back to the old behaviour of passing all positional args.
-    int prog_argc, prog_start;
-    if (dashdash >= 0) {
-        prog_start = dashdash + 1;
-        prog_argc  = argc - dashdash; // argv[0] + everything after "--"
-    } else {
-        prog_start = optind;
-        prog_argc  = argc - optind + 1;
-    }
-    char **prog_argv = malloc(sizeof(char *) * (size_t)prog_argc);
-    prog_argv[0] = (char *)argv[0];
-    for (int i = 1; i < prog_argc; i++)
-        prog_argv[i] = (char *)argv[prog_start + i - 1];
+    int prog_argc = 0;
+    char **prog_argv =
+        build_source_argv(&prog_argc, argc, argv, optind, dashdash);
     exit_code = cc_run(&vm, prog_argc, prog_argv);
     vm_profile_mode = "source";
     vm_profile_input = input_files_count == 1 ? input_files[0] : "multiple";

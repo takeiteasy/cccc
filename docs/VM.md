@@ -385,7 +385,7 @@ The central loop reads the next opcode, increments the cycle counter, optionally
 
 ### Exit Detection
 
-`main()` is invoked with a synthetic return address of `0`.  When `LEV3` pops this sentinel, it sets `vm->pc = JCC_INVALID_PC` and the dispatch loop returns `(int)vm->regs[REG_A0]` as the process exit code.
+`main()` is invoked with a synthetic return address of `0`.  `cc_run()` passes `argc` in `REG_A0` and `argv` in `REG_A1`; for loaded `.jbc` files, `argv[0]` is the `.jbc` path and arguments after `--` are forwarded to the program.  When `LEV3` pops this sentinel, it sets `vm->pc = JCC_INVALID_PC` and the dispatch loop returns `(int)vm->regs[REG_A0]` as the process exit code.
 
 ### Debugger Integration
 

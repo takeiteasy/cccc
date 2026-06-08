@@ -6004,6 +6004,22 @@ static void append_implicit_return(JCC *vm, Obj *fn, Token *tok) {
     *cur = ret;
 }
 
+static bool is_plain_signed_int(Type *ty) {
+    return ty && ty->kind == TY_INT && !ty->base && !ty->is_unsigned;
+}
+
+static void validate_main_signature(JCC *vm, Obj *fn) {
+    if (!fn || !fn->name || strcmp(fn->name, "main") != 0)
+        return;
+
+    Type *params = fn->ty ? fn->ty->params : NULL;
+    if (!params)
+        return;
+    if (!is_plain_signed_int(params))
+        error_tok(vm, params->name_pos ? params->name_pos : fn->tok,
+                  "main's first parameter must be int");
+}
+
 static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr) {
     Type *ty = declarator(vm, &tok, tok, basety);
     if (!ty->name)
@@ -6122,6 +6138,7 @@ static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr) {
         tok = skip(vm, tok, ";");
     }
 
+    validate_main_signature(vm, fn);
     create_param_lvars(vm, ty->params);
 
     // For nested functions, create a hidden __static_link parameter

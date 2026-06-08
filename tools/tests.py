@@ -63,6 +63,7 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
     is_negative_test = False
     expects_runtime_error = False
     per_test_flags = []
+    per_test_run_args = []
     expect_stderr = None
     reject_stderr = None
     try:
@@ -77,6 +78,9 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
                 if "JCC_FLAGS:" in line:
                     flags_str = line.split("JCC_FLAGS:", 1)[1].strip().rstrip("*/").strip()
                     per_test_flags = flags_str.split()
+                if "JCC_RUN_ARGS:" in line:
+                    args_str = line.split("JCC_RUN_ARGS:", 1)[1].strip().rstrip("*/").strip()
+                    per_test_run_args = args_str.split()
                 if "JCC_EXPECT_STDERR:" in line:
                     expect_stderr = line.split("JCC_EXPECT_STDERR:", 1)[1].strip().rstrip("*/").strip()
                 if "JCC_REJECT_STDERR:" in line:
@@ -87,8 +91,11 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
     if jbc_mode:
         return run_jbc_roundtrip(
             idx, test_file, test_name, jcc, script_dir, jcc_args, per_test_flags,
-            is_negative_test, expects_runtime_error, bench, profile_dir,
+            per_test_run_args, is_negative_test, expects_runtime_error, bench,
+            profile_dir,
         )
+
+    run_args = ["--", *per_test_run_args] if per_test_run_args else []
 
     if use_leaks:
         if platform == "macos":
@@ -96,7 +103,7 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
             profile_args = ["--vm-profile", "--json"] if profile_json else []
             normal_cmd = [
                 str(jcc), "-I./include", *jcc_args, *per_test_flags,
-                *profile_args, str(test_file),
+                *profile_args, str(test_file), *run_args,
             ]
             normal_result = subprocess.run(
                 normal_cmd, capture_output=True, text=True, cwd=script_dir
@@ -113,6 +120,7 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
                     *per_test_flags,
                     *profile_args,
                     str(test_file),
+                    *run_args,
                 ]
                 try:
                     leak_result = subprocess.run(
@@ -146,6 +154,7 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
                 *per_test_flags,
                 *profile_args,
                 str(test_file),
+                *run_args,
             ]
         elif platform == "windows":
             profile_json = vm_profile_path(profile_dir, test_name, "source")
@@ -161,20 +170,21 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
                 *per_test_flags,
                 *profile_args,
                 str(test_file),
+                *run_args,
             ]
         else:
             profile_json = vm_profile_path(profile_dir, test_name, "source")
             profile_args = ["--vm-profile", "--json"] if profile_json else []
             cmd = [
                 str(jcc), "-I./include", *jcc_args, *per_test_flags,
-                *profile_args, str(test_file),
+                *profile_args, str(test_file), *run_args,
             ]
     else:
         profile_json = vm_profile_path(profile_dir, test_name, "source")
         profile_args = ["--vm-profile", "--json"] if profile_json else []
         cmd = [
             str(jcc), "-I./include", *jcc_args, *per_test_flags,
-            *profile_args, str(test_file),
+            *profile_args, str(test_file), *run_args,
         ]
 
     elapsed = None
@@ -261,8 +271,8 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
 
 
 def run_jbc_roundtrip(idx, test_file, test_name, jcc, script_dir, jcc_args,
-                      per_test_flags, is_negative_test, expects_runtime_error,
-                      bench, profile_dir=None):
+                      per_test_flags, per_test_run_args, is_negative_test,
+                      expects_runtime_error, bench, profile_dir=None):
     """Compile a test to .jbc, then run it. Returns a result dict.
 
     Skips negative tests (EXPECT_COMPILE_ERROR / EXPECT_RUNTIME_ERROR) and
@@ -312,7 +322,8 @@ def run_jbc_roundtrip(idx, test_file, test_name, jcc, script_dir, jcc_args,
 
         profile_json = vm_profile_path(profile_dir, test_name, "jbc")
         profile_args = ["--vm-profile", "--json"] if profile_json else []
-        run_cmd = [str(jcc), *profile_args, str(jbc_path)]
+        run_args = ["--", *per_test_run_args] if per_test_run_args else []
+        run_cmd = [str(jcc), *profile_args, str(jbc_path), *run_args]
         start = time.perf_counter() if bench else None
         run = subprocess.run(run_cmd, capture_output=True, text=True, cwd=script_dir)
         elapsed = (time.perf_counter() - start) if bench else None
