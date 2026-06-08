@@ -107,7 +107,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | Flexible array members (`struct { int n; int arr[]; }`) | ✓ | |
 | Designated initialisers — structs and arrays | ✓ | |
 | Compound literals | ✓ | |
-| `inline` functions | ~ | Parsed; behaves like `static` — no inlining optimisation ([#205](https://todo.sr.ht/~takeiteasy/jcc/205)) |
+| `inline` functions | ✓ | Dead-function elimination + single-return inlining (unconditional); full AST inlining at `-O2`/`-O3` (`--inline-limit=N` controls size threshold) |
 | `restrict` pointers | ~ | Parsed and accepted; aliasing not tracked ([#262](https://todo.sr.ht/~takeiteasy/jcc/262)) |
 | `static` array-parameter indices (`void f(int a[static 10])`) | ~ | Parsed and accepted; minimum-size constraint+not enforced |
 | `__func__` predefined identifier | ✓ | |
@@ -269,7 +269,7 @@ groups from that ticket.
 | `__declspec(thread)` | ✗ | TLS via VM per-thread storage — pending |
 | `__cdecl` / `__stdcall` / `__fastcall` / `__thiscall` / `__vectorcall` | ✗ | Calling-convention keywords, no-op (JCC has a single VM ABI) — pending |
 | `__ptr32` / `__ptr64` / `__sptr` / `__uptr` / `__unaligned` / `__w64` | ✗ | Pointer modifiers, no-op — pending |
-| `__forceinline` / `__inline` | ✗ | Fold to existing `inline` — pending |
+| `__forceinline` / `__inline` | ~ | Fold to existing `inline` (dead-elim + inlining applies) — pending `__declspec` alias |
 | `__assume(expr)` | ✗ | Optimizer hint — pending |
 | `__noop` | ✗ | Variable-arg no-op builtin — pending |
 | `__debugbreak` | ✗ | Trap opcode — pending |
@@ -588,7 +588,7 @@ Ignored attributes include (but are not limited to):
 | `alias` | GNU | |
 | `constructor` / `destructor` | GNU | |
 | `hot` / `cold` | GNU | |
-| `always_inline` / `flatten` / `noinline` | GNU | |
+| `always_inline` / `flatten` / `noinline` | ~ | `always_inline`/`flatten` fold to inline hint; `noinline` parsed — semantics pending `__attribute__` integration with inline pass |
 | `returns_nonnull` / `nonnull` | GNU | |
 | `malloc` | GNU | |
 | `alloc_size` / `alloc_align` | GNU | |

@@ -248,11 +248,118 @@ static bool contains_self_call(Node *node, Obj *fn) {
         return true;
     if (contains_self_call(node->els, fn))
         return true;
+    if (contains_self_call(node->init, fn))
+        return true;
+    if (contains_self_call(node->inc, fn))
+        return true;
+    if (contains_self_call(node->body, fn))
+        return true;
     for (Node *arg = node->args; arg; arg = arg->next) {
         if (contains_self_call(arg, fn))
             return true;
     }
+    // Walk the statement sibling chain (for ND_BLOCK and similar)
+    if (node->kind == ND_BLOCK) {
+        for (Node *s = node->body; s; s = s->next)
+            if (contains_self_call(s, fn))
+                return true;
+    }
     return false;
+}
+
+// Count total AST nodes (statements + expressions) in a subtree.
+// Used by the inliner to enforce the node-count threshold.
+static int count_ast_nodes(Node *node) {
+    if (!node)
+        return 0;
+    int count = 1; // this node
+    count += count_ast_nodes(node->next);
+    count += count_ast_nodes(node->lhs);
+    count += count_ast_nodes(node->rhs);
+    count += count_ast_nodes(node->cond);
+    count += count_ast_nodes(node->then);
+    count += count_ast_nodes(node->els);
+    count += count_ast_nodes(node->init);
+    count += count_ast_nodes(node->inc);
+    count += count_ast_nodes(node->body);
+    count += count_ast_nodes(node->args);
+    count += count_ast_nodes(node->cas_addr);
+    count += count_ast_nodes(node->cas_old);
+    count += count_ast_nodes(node->cas_new);
+    count += count_ast_nodes(node->atomic_expr);
+    // Don't follow goto_next/case_next/default_case/init_tail — they are
+    // chain pointers within switch/label structures, not tree children.
+    return count;
+}
+
+// Check if a subtree contains switch, goto, or label nodes — these have
+// chain pointers (goto_next, case_next, default_case, init_tail) that
+// clone_subst zeroes, so inlining them would produce broken code.
+static bool contains_unsupported_control_flow(Node *node) {
+    if (!node)
+        return false;
+    if (node->kind == ND_SWITCH || node->kind == ND_CASE ||
+        node->kind == ND_GOTO || node->kind == ND_LABEL ||
+        node->kind == ND_GOTO_EXPR)
+        return true;
+    if (contains_unsupported_control_flow(node->lhs))
+        return true;
+    if (contains_unsupported_control_flow(node->rhs))
+        return true;
+    if (contains_unsupported_control_flow(node->cond))
+        return true;
+    if (contains_unsupported_control_flow(node->then))
+        return true;
+    if (contains_unsupported_control_flow(node->els))
+        return true;
+    if (contains_unsupported_control_flow(node->init))
+        return true;
+    if (contains_unsupported_control_flow(node->inc))
+        return true;
+    if (contains_unsupported_control_flow(node->body))
+        return true;
+    if (contains_unsupported_control_flow(node->args))
+        return true;
+    return false;
+}
+
+// Walk a cloned AST and replace ND_VAR pointers from the original local
+// array with corresponding entries in the remapped array.
+static void replace_locals_in_ast(Node *node, Obj **orig, Obj **map, int count) {
+    if (!node)
+        return;
+    if (node->kind == ND_VAR && node->var) {
+        for (int i = 0; i < count; i++) {
+            if (node->var == orig[i]) {
+                node->var = map[i];
+                break;
+            }
+        }
+    }
+    replace_locals_in_ast(node->next, orig, map, count);
+    replace_locals_in_ast(node->lhs, orig, map, count);
+    replace_locals_in_ast(node->rhs, orig, map, count);
+    replace_locals_in_ast(node->cond, orig, map, count);
+    replace_locals_in_ast(node->then, orig, map, count);
+    replace_locals_in_ast(node->els, orig, map, count);
+    replace_locals_in_ast(node->init, orig, map, count);
+    replace_locals_in_ast(node->inc, orig, map, count);
+    replace_locals_in_ast(node->body, orig, map, count);
+    replace_locals_in_ast(node->args, orig, map, count);
+    replace_locals_in_ast(node->cas_addr, orig, map, count);
+    replace_locals_in_ast(node->cas_old, orig, map, count);
+    replace_locals_in_ast(node->cas_new, orig, map, count);
+    replace_locals_in_ast(node->atomic_expr, orig, map, count);
+}
+
+// Count how many stack slots a local variable needs.
+static int var_stack_slots(Obj *var) {
+    if (var->ty->kind == TY_ARRAY)
+        return (var->ty->size + 7) / 8;
+    if (var->ty->kind == TY_STRUCT || var->ty->kind == TY_UNION ||
+        var->ty->kind == TY_COMPLEX)
+        return (var->ty->size + 7) / 8;
+    return 1;
 }
 
 static Node *clone_expr(JCC *vm, Node *src) {
@@ -2084,12 +2191,14 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             return;
         }
 
-        // Single-return static inline inlining opportunity
+        // Static inline inlining opportunity
         if (node->lhs->kind == ND_VAR && node->lhs->var->is_function) {
             Obj *callee = node->lhs->var;
             if (callee->is_inline && callee->is_static &&
                 callee->body && callee->body->kind == ND_BLOCK) {
                 Node *body_stmt = callee->body->body;
+
+                // Fast path: single-return inlining (no exit label)
                 if (body_stmt && !body_stmt->next &&
                     body_stmt->kind == ND_RETURN && body_stmt->lhs &&
                     !contains_self_call(body_stmt->lhs, callee)) {
@@ -2100,6 +2209,87 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                         Node *inlined = clone_subst(vm, body_stmt->lhs,
                                                     callee->params, node->args);
                         gen_expr(vm, inlined, dest_reg);
+                        return;
+                    }
+                }
+
+                // Multi-statement inlining (gated by opt_level >= 2)
+                if (vm->compiler.opt_level >= 2 &&
+                    vm->compiler.inline_node_limit > 0 &&
+                    !contains_self_call(callee->body, callee) &&
+                    !contains_unsupported_control_flow(callee->body)) {
+                    Type *ret_ty = callee->ty->return_ty;
+                    bool void_ret = !ret_ty || ret_ty->kind == TY_VOID;
+                    if ((void_ret || !(ret_ty->kind == TY_STRUCT ||
+                                       ret_ty->kind == TY_UNION)) &&
+                        count_ast_nodes(callee->body) <=
+                        vm->compiler.inline_node_limit) {
+                        reset_temp_regs();
+
+                        // Clone entire function body with parameter substitution
+                        Node *inlined_body = clone_subst(vm, callee->body,
+                                                         callee->params,
+                                                         node->args);
+
+                        // Remap callee locals into caller's frame
+                        int nlocals = 0;
+                        Obj **orig_locals = NULL;
+                        Obj **new_locals = NULL;
+                        for (Obj *v = callee->locals; v; v = v->next) {
+                            if (v->is_param || v == callee->va_area ||
+                                v == callee->alloca_bottom)
+                                continue;
+                            nlocals++;
+                        }
+                        if (nlocals > 0) {
+                            orig_locals = calloc(nlocals, sizeof(Obj *));
+                            new_locals = calloc(nlocals, sizeof(Obj *));
+                            int idx = 0;
+                            for (Obj *v = callee->locals; v; v = v->next) {
+                                if (v->is_param || v == callee->va_area ||
+                                    v == callee->alloca_bottom)
+                                    continue;
+                                orig_locals[idx] = v;
+                                Obj *nv = arena_alloc(&vm->compiler.parser_arena,
+                                                       sizeof(Obj));
+                                memset(nv, 0, sizeof(Obj));
+                                *nv = *v;
+                                char *name = arena_format(vm, "%s_inline%d",
+                                                          v->name,
+                                                          vm->compiler.unique_name_counter++);
+                                nv->name = name;
+                                nv->display_name = name;
+                                int slots = var_stack_slots(v);
+                                vm->compiler.ent3_extra_stack += slots;
+                                nv->offset = -(vm->compiler.ent3_base_stack +
+                                               vm->compiler.ent3_extra_stack);
+                                new_locals[idx++] = nv;
+                            }
+                            replace_locals_in_ast(inlined_body, orig_locals,
+                                                  new_locals, nlocals);
+                        }
+
+                        // Generate unique exit label name
+                        char *exit_name = arena_format(vm, ".Linline_exit_%d",
+                                                       vm->compiler.unique_name_counter++);
+
+                        // Set inlining context
+                        vm->compiler.inline_exit_name = exit_name;
+                        vm->compiler.inline_result_reg = void_ret ? REG_ZERO : dest_reg;
+
+                        // Generate inlined body
+                        gen_stmt(vm, inlined_body);
+
+                        // Define exit label (JMP targets from inlined returns)
+                        define_label(vm, exit_name);
+
+                        // Clear inlining context
+                        vm->compiler.inline_exit_name = NULL;
+
+                        // Free temporary arrays
+                        if (orig_locals) free(orig_locals);
+                        if (new_locals) free(new_locals);
+
                         return;
                     }
                 }
@@ -2684,6 +2874,22 @@ static void gen_stmt(JCC *vm, Node *node) {
 
     case ND_RETURN:
         reset_temp_regs();
+        if (vm->compiler.inline_exit_name) {
+            // Inlining mode: store result to the inline result register,
+            // then jump to the shared exit label. Skip LEV3.
+            if (node->lhs) {
+                if (is_flonum(node->lhs->ty)) {
+                    gen_expr(vm, node->lhs, FREG_A0);
+                    emit_fmov3(vm, vm->compiler.inline_result_reg, FREG_A0);
+                } else {
+                    gen_expr(vm, node->lhs, vm->compiler.inline_result_reg);
+                }
+            }
+            emit(vm, JMP);
+            add_label_patch(vm->compiler.inline_exit_name,
+                            emit_word_ptr(vm), false);
+            return;
+        }
         if (node->lhs) {
             // If returning struct/union, copy to return buffer at runtime
             if (node->lhs->ty && (node->lhs->ty->kind == TY_STRUCT ||
@@ -3091,6 +3297,10 @@ void gen_function(JCC *vm, Obj *fn) {
     // gen_addr)
     vm->compiler.current_fn = fn;
 
+    // Reset inlining context for this function
+    vm->compiler.inline_exit_name = NULL;
+    vm->compiler.ent3_extra_stack = 0;
+
     // Reset label tracking for this function
     reset_labels();
 
@@ -3147,8 +3357,10 @@ void gen_function(JCC *vm, Obj *fn) {
     long long ent3_masks =
         (long long)float_param_mask | ((long long)f32_param_mask << 32);
     emit(vm, ENT3);
-    emit_i64(vm, ent3_operand);
+    vm->compiler.ent3_stack_loc = emit_i64(vm, ent3_operand);
     emit_i64(vm, ent3_masks);
+    vm->compiler.ent3_base_stack = stack_size;
+    vm->compiler.ent3_extra_stack = 0;
 
     // Activate function-level scope (marks params/locals as alive).
     if (vm->flags & JCC_STACK_INSTR)
@@ -3179,6 +3391,18 @@ void gen_function(JCC *vm, Obj *fn) {
 
     // Generate function body
     gen_stmt(vm, fn->body);
+
+    // Patch ENT3 stack size if inlining added local variables
+    if (vm->compiler.ent3_extra_stack > 0) {
+        int new_stack = vm->compiler.ent3_base_stack +
+                        vm->compiler.ent3_extra_stack;
+        if (new_stack % 2 != 0)
+            new_stack++;
+        long long new_operand =
+            ((long long)new_stack) | (((long long)spill_param_count) << 32);
+        vm->text_seg[vm->compiler.ent3_stack_loc] = cc_i64_lo(new_operand);
+        vm->text_seg[vm->compiler.ent3_stack_loc + 1] = cc_i64_hi(new_operand);
+    }
 
     // Patch all forward jumps (break/continue/goto)
     patch_labels(vm);

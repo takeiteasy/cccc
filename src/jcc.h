@@ -1599,6 +1599,16 @@ typedef struct Compiler {
     // Optimization settings
     int opt_level; // Optimization level (0=none, 1=basic, 2=standard,
                    // 3=aggressive)
+    int inline_node_limit; // Max AST nodes for full inlining (0=disable)
+
+    // Inlining context (used during codegen when expanding inline bodies)
+    char *inline_exit_name; // Exit label name for inlined returns (NULL = not inlining)
+    int inline_result_reg;  // Register for inlined return values
+
+    // ENT3 stack patching for inlined locals
+    JCCPc ent3_stack_loc;   // PC of ENT3 stack_size low word (for patching)
+    int ent3_base_stack;    // Original stack_size before inlining additions
+    int ent3_extra_stack;   // Additional stack slots from inlined locals
 
     // C language standard selection
     CStdVersion c_std;  // Selected standard version (default: JCC_STD_C17)

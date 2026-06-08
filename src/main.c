@@ -753,6 +753,7 @@ int main(int argc, const char *argv[]) {
     int embed_hard_error = 0;   // --embed-hard-limit
     int macro_recursion_limit = -1; // --macro-recursion-limit
     int opt_level = 0; // -O0/-O1/-O2/-O3 (default: 0 = no optimization)
+    int inline_node_limit = 20; // --inline-limit (default 20, 0=disable)
     const char *std_arg = NULL; // --std=<standard>
     const char **ffi_allow_args = NULL;
     int ffi_allow_args_count = 0;
@@ -842,6 +843,7 @@ int main(int argc, const char *argv[]) {
         {"ngrams-per-file", no_argument, 0, 1031},
         {"fusion-candidates", optional_argument, 0, 'B'},
         {"strict-comptime-includes", no_argument, 0, 1050},
+        {"inline-limit", required_argument, 0, 1051},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1172,6 +1174,17 @@ int main(int argc, const char *argv[]) {
         case 1050: // --strict-comptime-includes
             strict_comptime_includes = 1;
             break;
+        case 1051: { // --inline-limit
+            char *end = NULL;
+            long val = strtol(optarg, &end, 10);
+            if (!optarg[0] || *end != '\0' || val < 0 || val > INT32_MAX) {
+                fprintf(stderr,
+                        "error: --inline-limit must be a non-negative integer\n");
+                usage(argv[0], 1);
+            }
+            inline_node_limit = (int)val;
+            break;
+        }
         case 'B': { // --fusion-candidates[=N]
             if (optarg == NULL) {
                 run_fusion = 1;
@@ -1473,6 +1486,7 @@ int main(int argc, const char *argv[]) {
 
     // Set optimization level
     vm.compiler.opt_level = opt_level;
+    vm.compiler.inline_node_limit = inline_node_limit;
     if (macro_recursion_limit >= 0)
         vm.compiler.macro_recursion_limit = macro_recursion_limit;
 
