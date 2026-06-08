@@ -6,7 +6,7 @@
 
 The VM is what lets macros actually run at compile time, and it doubles as a self-contained runtime for prototyping, sandboxing, debugging, and the memory-safety / profiling tools. For production code, use `-c=native` and let `cc` / `clang` / `gcc` do the heavy lifting — JCC is positioned as a frontend drop-in, not a replacement for a system toolchain. The VM is here when you need a toolchain-free, introspectable, or sandboxed execution environment.
 
-JCC supports C11 as the baseline, with selected C23 and GNU extensions. See [COVERAGE.md](docs/COVERAGE.md) for detailed tables of C99, C11, C23, and GNU extension support. For an real world example see [gen_std.c](tools/gen_std.c). This generated and embed the standard library wrapper for JCC.
+JCC supports C11 as the baseline, with selected C23 and GNU extensions. See [COVERAGE.md](docs/COVERAGE.md) for detailed tables of C99, C11, C23, and GNU extension support. For an real world example see [stdlib.c](tools/stdlib.c). This generated and embed the standard library wrapper for JCC.
 
 ## Features
 
@@ -59,18 +59,21 @@ Options:
 	-a/--ast            Dump AST
 	-P/--print-tokens   Print preprocessed tokens to stdout
 	-E/--preprocess     Output preprocessed source code (traditional C -E)
-	-M/--macro-expand   Output macro-expanded source code (for gcc compatibility)
+	-M/--dump-expanded  Output macro-expanded source code (for gcc compatibility)
 	-G/--emit-generated Serialize only comptime macro-generated objects (no header noise)
 	-j/--json           Emit JSON for all eligible output (diagnostics, header declarations, --fusion-candidates, etc.)
 	-K/--ffi-decls      Emit parsed function/struct/enum declarations as JSON (for FFI wrapper generation)
 	-X/--no-preprocess  Disable preprocessing step
 	-S/--no-stdlib      Do not link standard library
 	-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: bytecode (default), native
-	                         bytecode: write .jbc (to -o file, or stdout if -o omitted)
+	                         bytecode: write .jbc (to -o file, or stdout if -o omitted
+	                                  and stdout is not a TTY)
 	                         native:   require -o file; build a native executable via
-	                                   JCC_NATIVE_CC (cc, clang, or gcc)
-	-o/--out <file>     Output file. Required for -c=native; for -c=bytecode, writes the
-	                     .jbc (or sends it to stdout if -o is omitted)
+	                                  JCC_NATIVE_CC (cc, clang, or gcc)
+	                         Use -cnative or --compile=native (short form must be
+	                         attached; long form may use '=' or separate arg).
+	-o/--out <file>     Output file. Required for -c=native. For -c=bytecode, writes
+	                     bytecode to <file>; if omitted, writes to stdout
 	-d/--disassemble    Disassemble bytecode to stdout
 	-v/--verbose        Enable debug logging
 	-g/--debug          Enable interactive debugger
@@ -122,7 +125,7 @@ FFI Safety Options:
 	   --ffi-type-checking       Validate registered FFI call arity at runtime
 
 Language Standard:
-	-Q/--std=<std>       Select C language standard (default: gnu23)
+	-Q/--std=<std>       Select C language standard (default: gnu17)
 	                     Supported: c99, c11, c17/c18, c23/c2x
 	                     GNU variants: gnu99, gnu11, gnu17/gnu18, gnu23/gnu2x
 	                     Note: -Q/--std currently affects predefined macros only
@@ -132,6 +135,9 @@ Preprocessor Options:
 	-w/--embed-hard-limit        Make #embed limit a hard error instead of warning
 	-n/--macro-recursion-limit=N Limit recursive pragma macro expansion (default: 256, 0=unlimited)
 	-x/--max-errors=N            Cap diagnostics at N (default: 20)
+	   --strict-comptime-includes Only forward the main source file's own
+	                             declarations to the comptime pass (skip
+	                             declarations from regular #includes)
 
 Optimization Levels:
 	-O/--optimize[=LEVEL]        Enable bytecode optimization (default: disabled)
@@ -141,15 +147,20 @@ Optimization Levels:
 	                             2: Constant folding + peephole
 	                             3: All optimizations (including dead code elimination)
 
+Static Bytecode Analysis (compile or load input, walk text segment, exit):
+	-A/--ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, default 2)
+	   --ngrams-top=N          Show top N sequences (default 25)
+	   --ngrams-per-file       Print a per-input section in addition to the aggregate
+	-B/--fusion-candidates[=N] Use-def fusion candidate analysis (top N, default 50)
+	                          JSON output via -j/--json
+
 Inline Assembly:
 	   --asm-passthru    Compile asm("...") statements via native C compiler
 	                    and execute them via FFI (default: no-op)
 
 Example:
-	./jcc -c=native -o hello hello.c             # native build via cc/clang/gcc
-	./jcc -c=native -I ./include -D DEBUG -o prog prog.c
-	./jcc -o hello hello.c                       # bytecode + run on the VM
-	./jcc -c -o hello.jbc hello.c                # bytecode only (no run); -c=native requires -o
+	./jcc -o hello hello.c
+	./jcc -I ./include -D DEBUG -o prog prog.c
 	echo 'int main() { return 42; }' | ./jcc -
 ```
 
@@ -164,7 +175,7 @@ JCC ships embedded standard library headers compiled directly into the binary �
 - `stdarg.h`, `setjmp.h` — JCC-specific implementations for the VM calling convention
 - `stddef.h`, `stdbool.h`, `stdint.h`, `limits.h`, `float.h`, `iso646.h`
 
-Headers are embedded by `tools/gen_std.c`, which generates `src/std.c`. To regenerate after modifying files in `include/`:
+Headers are embedded by `tools/stdlib.c`, which generates `src/std.c`. To regenerate after modifying files in `include/`:
 
 ```bash
 make stdlib && make
