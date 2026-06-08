@@ -793,7 +793,13 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
             }
             else if (dk == DK_CONSTEXPR) attr->is_constexpr = true;
             else if (dk == DK_BLOCK_VAR) attr->is_block_var = true;
-            else                         attr->is_tls       = true;
+            else {
+                warn_tok(vm, tok, JCC_WARN_IGNORED_FEATURES,
+                         "'%.*s' is parsed but ignored — "
+                         "no thread-local storage is provided",
+                         tok->len, tok->loc);
+                attr->is_tls = true;
+            }
             if (attr->is_typedef && attr->is_static + attr->is_extern +
                                         attr->is_inline + attr->is_tls > 1)
                 error_tok(vm, tok,
@@ -817,6 +823,9 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
             tok = tok->next;
             continue;
         case DK_ATOMIC:
+            warn_tok(vm, tok, JCC_WARN_IGNORED_FEATURES,
+                     "'_Atomic' is parsed but non-atomic — "
+                     "loads and stores are not atomic");
             tok = tok->next;
             if (equal(tok, "(")) {
                 ty = typename(vm, &tok, tok->next);
@@ -4175,7 +4184,11 @@ static Token *attribute_list(JCC *vm, Token *tok, Type *ty, VarAttr *attr) {
 
             // Handle all other attributes - just consume and ignore them
             if (tok->kind == TK_IDENT) {
+                Token *name_tok = tok;
                 tok = tok->next;
+                warn_tok(vm, name_tok, JCC_WARN_ATTRIBUTES,
+                         "unknown attribute '%.*s' ignored",
+                         name_tok->len, name_tok->loc);
 
                 // Handle attributes with parameters: attr(args...)
                 if (equal(tok, "(")) {
@@ -4243,6 +4256,10 @@ static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty,
                     tok = tok->next;
                 }
             }
+            if (!unused && !deprecated)
+                warn_tok(vm, attr_tok, JCC_WARN_ATTRIBUTES,
+                         "unknown attribute '%.*s' ignored",
+                         attr_tok->len, attr_tok->loc);
             apply_semantic_attr(ty, attr, attr_tok, unused, deprecated,
                                 message);
         }

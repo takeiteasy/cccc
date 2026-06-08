@@ -63,6 +63,8 @@ static const WarningInfo warning_infos[] = {
     {"extra-tokens", JCC_WARN_EXTRA_TOKENS, false},
     {"large-file-embed", JCC_WARN_LARGE_FILE_EMBED, false},
     {"jcc-macro", JCC_WARN_JCC_MACRO, false},
+    {"ignored-features", JCC_WARN_IGNORED_FEATURES, false},
+    {"attributes", JCC_WARN_ATTRIBUTES, false},
     {"all", JCC_WARN_ALL, true},
     {"extra", JCC_WARN_EXTRA, true},
 };
@@ -740,7 +742,9 @@ static Token *read_string_literal(JCC *vm, char *start, char *quote) {
     }
 
     Token *tok = new_token(vm, TK_STR, start, end + 1);
-    tok->ty = array_of(vm, ty_char, len + 1);
+    Type *elem = copy_type(vm, ty_char);
+    elem->is_const = true;
+    tok->ty = array_of(vm, elem, len + 1);
     tok->str = buf;
     return tok;
 }

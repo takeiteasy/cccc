@@ -2248,6 +2248,7 @@ static Token *handle_pragma_body(JCC *vm, Token *tok) {
                equal(tok->next, "diagnostic")) {
         return handle_gcc_diagnostic(vm, tok->next->next);
     } else {
+        warn_tok(vm, tok, JCC_WARN_CPP, "unknown pragma ignored");
         do { tok = tok->next; } while (!tok->at_bol && tok->kind != TK_EOF);
     }
     return tok;

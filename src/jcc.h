@@ -329,6 +329,8 @@ typedef enum {
     // Conversion sub-categories (JCC_WARN_CONVERSION is integer narrowing)
     JCC_WARN_SIGN_CONVERSION = (1ULL << 16),  // signed/unsigned mismatch on assign/arg/return
     JCC_WARN_FLOAT_CONVERSION = (1ULL << 17), // float<->int or float narrowing
+    JCC_WARN_IGNORED_FEATURES = (1ULL << 18), // parsed-but-ignored features (_Atomic, TLS, etc.)
+    JCC_WARN_ATTRIBUTES       = (1ULL << 19), // unknown attributes
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
     JCC_WARN_CONVERSION_GROUP = JCC_WARN_CONVERSION |
@@ -349,7 +351,9 @@ typedef enum {
                    JCC_WARN_CPP |
                    JCC_WARN_EXTRA_TOKENS |
                    JCC_WARN_LARGE_FILE_EMBED |
-                   JCC_WARN_JCC_MACRO,
+                   JCC_WARN_JCC_MACRO |
+                   JCC_WARN_IGNORED_FEATURES |
+                   JCC_WARN_ATTRIBUTES,
     JCC_WARN_EXTRA = JCC_WARN_SHADOW |
                      JCC_WARN_SIGN_COMPARE |
                      JCC_WARN_CONVERSION |

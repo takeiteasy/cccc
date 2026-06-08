@@ -82,6 +82,8 @@ The warning infrastructure recognizes these category names:
 - `extra-tokens`
 - `large-file-embed`
 - `jcc-macro`
+- `ignored-features`
+- `attributes`
 
 `conversion` is an umbrella name: `-Wconversion` enables `sign-conversion` and
 `float-conversion` as well as the integer-narrowing check.
@@ -165,3 +167,8 @@ and `(void)symbol`. Set-but-not-used analysis is not currently performed.
 - Arithmetic on `void *` or function pointers (a GNU extension) uses
   `-Wpointer-arith`.  The operation is still performed; only the diagnostic
   is added.
+- Use of features that are parsed but have no semantic effect uses
+  `-Wignored-features`: `_Atomic` (loads and stores are not atomic),
+  `_Thread_local` / `__thread` (no thread-local storage is provided).
+- Unknown `__attribute__((...))` and `[[...]]` attributes use `-Wattributes`.
+- Unknown `#pragma` directives use `-Wcpp`.

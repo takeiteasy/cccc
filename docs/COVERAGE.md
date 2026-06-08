@@ -47,7 +47,7 @@ honoured.
 | `extern` linkage | ✓ | |
 | `static` — locals, globals, functions | ✓ | |
 | `const` | ✓ | |
-| `volatile` | ✓ | Tracked; prevents optimisation of accesses |
+| `volatile` | ✓ | Tracked; no codegen effect ([#311](https://todo.sr.ht/~takeiteasy/jcc/311)) |
 | `register` | ~ | Parsed and accepted; ignored |
 | `auto` (storage class) | ~ | Parsed and accepted; ignored |
 | String literals and concatenation | ✓ | |
@@ -109,7 +109,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | Compound literals | ✓ | |
 | `inline` functions | ✓ | Dead-function elimination + single-return inlining (unconditional); full AST inlining at `-O2`/`-O3` (`--inline-limit=N` controls size threshold) |
 | `restrict` pointers | ~ | Parsed and accepted; aliasing not tracked ([#262](https://todo.sr.ht/~takeiteasy/jcc/262)) |
-| `static` array-parameter indices (`void f(int a[static 10])`) | ~ | Parsed and accepted; minimum-size constraint+not enforced |
+| `static` array-parameter indices (`void f(int a[static 10])`) | ~ | Parsed and accepted; minimum-size constraint not enforced ([#310](https://todo.sr.ht/~takeiteasy/jcc/310)) |
 | `__func__` predefined identifier | ✓ | |
 | Variadic macros `__VA_ARGS__` | ✓ | |
 `_Pragma(...)` operator | ✓ | |
@@ -152,8 +152,8 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `_Alignas` | ✓ | |
 | `_Static_assert` (and `static_assert` via `<assert.h>`) | ✓ | |
 | `_Noreturn` | ~ | Parsed and accepted; no code-generation effect |
-| `_Thread_local` | ~ | Parsed and accepted; no thread-local storage |
-| `_Atomic` types | ~ | Parsed; non-atomic load/store emitted |
+| `_Thread_local` | ~ | Emits `-Wignored-features`; no thread-local storage |
+| `_Atomic` types | ~ | Emits `-Wignored-features`; non-atomic load/store emitted |
 | Anonymous structs and unions | ✓ | |
 | `char16_t` / `char32_t` types | ✓ | Provided by `<uchar.h>` |
 | `u8`, `u`, `U` string and character literal prefixes | ✓ | See C99 row; support predates formal C11 adoption |
@@ -241,7 +241,7 @@ C17 is a bug-fix release — no new language features or library functions were 
 | Zero-length arrays `int arr[0]` | ✓ | |
 | Nested functions | ✓ | Access to parent-scope variables via static link |
 | `__builtin_*` | ✓ | Lowered by the compiler; see [Built-in Functions](#built-in-functions) for the full list |
-| `__thread` storage class | ~ | Parsed; treated as `static` |
+| `__thread` storage class | ~ | Emits `-Wignored-features`; treated as `static` |
 | `__restrict` / `__restrict__` | ~ | Parsed; aliasing not tracked ([#262](https://todo.sr.ht/~takeiteasy/jcc/262)) |
 | `__typeof__` | ✓ | Synonym for `typeof` |
 | `__asm__` / `asm(...)` inline assembly | ~ | Accepted; executed as a no-op unless a callback emits custom bytecode |
@@ -561,13 +561,13 @@ See [MACROS.md — Forward includes in generated output](MACROS.md) for full doc
 
 ### Parsed but Ignored
 
-Any GNU `__attribute__` identifier that is not explicitly handled (i.e., not `packed`, `aligned`, `unused`/`__unused__`, or `deprecated`/`__deprecated__`) is **consumed and silently ignored**. The parser skips the attribute name and any parenthesised argument list, then continues.
+Any GNU `__attribute__` identifier that is not explicitly handled (i.e., not `packed`, `aligned`, `unused`/`__unused__`, or `deprecated`/`__deprecated__`) is **consumed and emits a `-Wattributes` warning**. The parser skips the attribute name and any parenthesised argument list, then continues.
 
-**Source:** `src/parse.c:3979-3997`
+**Source:** `src/parse.c:4185-4209`
 
-Similarly, any C23 `[[...]]` attribute other than `maybe_unused` or `deprecated` is **consumed and silently ignored** by the C23 attribute parser.
+Similarly, any C23 `[[...]]` attribute other than `maybe_unused` or `deprecated` is **consumed and emits a `-Wattributes` warning**.
 
-**Source:** `src/parse.c:4010-4058`
+**Source:** `src/parse.c:4242-4263`
 
 Ignored attributes include (but are not limited to):
 
