@@ -151,7 +151,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `_Alignof` | ✓ | |
 | `_Alignas` | ✓ | |
 | `_Static_assert` (and `static_assert` via `<assert.h>`) | ✓ | |
-| `_Noreturn` | ~ | Parsed and accepted; no code-generation effect |
+| `_Noreturn` | ✓ | Accepted via keyword, `__attribute__((noreturn))`, and `[[noreturn]]`; emits BTRAP after calls; warns on returns |
 | `_Thread_local` | ~ | Emits `-Wignored-features`; no thread-local storage |
 | `_Atomic` types | ~ | Emits `-Wignored-features`; non-atomic load/store emitted |
 | Anonymous structs and unions | ✓ | |
@@ -577,7 +577,7 @@ Ignored attributes include (but are not limited to):
 | `nodiscard` | C23 | [#219](https://todo.sr.ht/~takeiteasy/jcc/219) |
 | `fallthrough` | C23 | Statement-level attribute support pending; [#219](https://todo.sr.ht/~takeiteasy/jcc/219) |
 | `no_unique_address` | C23 | [#219](https://todo.sr.ht/~takeiteasy/jcc/219) |
-| `noreturn` | C23/GNU | [#216](https://todo.sr.ht/~takeiteasy/jcc/216) |
+| `noreturn` | C23/GNU | ✓ |
 | `pure` | GNU | [#217](https://todo.sr.ht/~takeiteasy/jcc/217) |
 | `const` | GNU | [#217](https://todo.sr.ht/~takeiteasy/jcc/217) |
 | `cleanup` | GNU | [#218](https://todo.sr.ht/~takeiteasy/jcc/218) |
@@ -604,7 +604,7 @@ Ignored attributes include (but are not limited to):
 | # | Attribute | Priority | Description |
 |---|-----------|----------|-------------|
 | [#215](https://todo.sr.ht/~takeiteasy/jcc/215) | Catch-all | medium | Remaining GNU builtins and attributes |
-| [#216](https://todo.sr.ht/~takeiteasy/jcc/216) | `noreturn` / `[[noreturn]]` | high | Mark functions that never return; integrate with control-flow analysis |
+| [#216](https://todo.sr.ht/~takeiteasy/jcc/216) | `noreturn` / `[[noreturn]]` | high | ✓ Implemented |
 | [#217](https://todo.sr.ht/~takeiteasy/jcc/217) | `pure` / `const` | medium | Side-effect-free function annotations for optimisation |
 | [#218](https://todo.sr.ht/~takeiteasy/jcc/218) | `cleanup(func)` | medium | Scope-based cleanup callbacks (RAII-style) |
 | [#219](https://todo.sr.ht/~takeiteasy/jcc/219) | `nodiscard`, `fallthrough`, `no_unique_address` | medium | Remaining standard C23 attributes |

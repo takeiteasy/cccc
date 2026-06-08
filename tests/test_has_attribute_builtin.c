@@ -17,7 +17,7 @@ int main(void) {
     result += 4;
 #endif
 #if __has_attribute(noreturn)
-    return 1;
+    result += 4;
 #endif
 
 #if __has_builtin(__builtin_mul_overflow)
@@ -42,6 +42,9 @@ int main(void) {
 #if __has_c_attribute(macro, jcc)
     result += 4;
 #endif
+#if __has_c_attribute(noreturn)
+    result += 4;
+#endif
 #if __has_c_attribute(fallthrough) || __has_c_attribute(nodiscard)
     return 3;
 #endif
@@ -50,6 +53,7 @@ int main(void) {
 #endif
 
     // result was 40 before adding format (10 checks × 4)
-    // now 44 with format (11 × 4); subtract 2 to keep exit code 42
-    return result - 2;
+    // now 44 with format (11 × 4); then 48 with noreturn attribute (12 × 4);
+    // now 52 with noreturn c_attribute (13 × 4); subtract 10 to keep exit code 42
+    return result - 10;
 }

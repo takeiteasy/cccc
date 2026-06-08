@@ -17,8 +17,8 @@ static int [[maybe_unused]] helper(void) {
 }
 
 void [[noreturn]] exit_program(void) {
-    // Would normally exit, but for testing we won't
-    return;  // This is just for testing
+    // Would normally exit; empty body is valid for syntax testing
+    for (;;) {}
 }
 
 // Test attributes on variables

@@ -2175,6 +2175,12 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
                 emit_with_arg(vm, ADJ, num_stack_args);
             }
 
+            // Noreturn functions never return — trap if execution continues
+            if (node->func_ty->is_noreturn) {
+                emit(vm, BTRAP);
+                return;
+            }
+
             // Reset temp regs after call
             reset_temp_regs();
 
@@ -2530,6 +2536,12 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
         // Clean up stack args pushed before the call
         if (num_stack_args > 0) {
             emit_with_arg(vm, ADJ, num_stack_args);
+        }
+
+        // Noreturn functions never return — trap if execution continues
+        if (node->func_ty->is_noreturn) {
+            emit(vm, BTRAP);
+            return;
         }
 
         // Function calls clobber all temp registers (caller-saved)

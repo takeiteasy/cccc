@@ -1007,7 +1007,7 @@ static bool keyword_std_ok(JCC *vm, Token *t) {
         if (KW("_Alignof") || KW("_Alignas"))
             error_tok(vm, t, "'%.*s' is not available before C11", len, kw);
         if (KW("_Noreturn"))
-            error_tok(vm, t, "'_Noreturn' is not available before C11");
+            warn_tok(vm, t, JCC_WARN_PEDANTIC, "'_Noreturn' is not available before C11");
         if (KW("_Thread_local") || KW("__thread"))
             error_tok(vm, t, "'%.*s' is not available before C11", len, kw);
         if (KW("_Atomic"))

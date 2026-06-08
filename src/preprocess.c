@@ -767,7 +767,7 @@ static bool is_has_attribute_supported(char *name) {
            !strcmp(name, "unused") || !strcmp(name, "__unused__") ||
            !strcmp(name, "deprecated") || !strcmp(name, "__deprecated__") ||
            !strcmp(name, "macro") || !strcmp(name, "comptime") ||
-           !strcmp(name, "format");
+           !strcmp(name, "format") || !strcmp(name, "noreturn");
 }
 
 static bool is_has_builtin_supported(char *name) {
@@ -820,7 +820,8 @@ static bool is_has_builtin_supported(char *name) {
 
 static bool is_has_c_attribute_supported(char *vendor, char *name) {
     if (!vendor)
-        return !strcmp(name, "maybe_unused") || !strcmp(name, "deprecated");
+        return !strcmp(name, "maybe_unused") || !strcmp(name, "deprecated") ||
+               !strcmp(name, "noreturn");
 
     if (!strcmp(vendor, "jcc"))
         return !strcmp(name, "comptime") || !strcmp(name, "macro");

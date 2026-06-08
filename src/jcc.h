@@ -598,6 +598,7 @@ struct Type {
     // Declaration attributes used by semantic warnings
     bool is_maybe_unused;
     bool is_deprecated;
+    bool is_noreturn;
     char *deprecated_msg;
 
     // Format string validation (__attribute__((format(...))))
@@ -807,6 +808,7 @@ struct Obj {
     bool is_used;
     bool is_maybe_unused;
     bool is_deprecated;
+    bool is_noreturn;
     bool is_local_symbol;
     char *deprecated_msg;
 

@@ -71,6 +71,7 @@ typedef struct {
     bool is_block_var; // __block storage qualifier (Apple blocks)
     bool is_maybe_unused;
     bool is_deprecated;
+    bool is_noreturn;
     char *deprecated_msg;
     Token *attribute_tok;
     int align;
@@ -476,6 +477,7 @@ static Obj *new_var(JCC *vm, char *name, int name_len, Type *ty) {
         ty->name ? arena_strndup(vm, ty->name->loc, ty->name->len) : name;
     var->is_maybe_unused = ty->is_maybe_unused;
     var->is_deprecated = ty->is_deprecated;
+    var->is_noreturn = ty->is_noreturn;
     var->deprecated_msg = ty->deprecated_msg;
     push_scope(vm, name, name_len)->var = var;
     return var;
@@ -824,7 +826,11 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
             is_volatile = true;
             tok = tok->next;
             continue;
-        case DK_AUTO: case DK_REGISTER: case DK_RESTRICT: case DK_NORETURN:
+        case DK_AUTO: case DK_REGISTER: case DK_RESTRICT:
+            tok = tok->next;
+            continue;
+        case DK_NORETURN:
+            attr->is_noreturn = true;
             tok = tok->next;
             continue;
         case DK_ATOMIC:
@@ -1179,6 +1185,10 @@ static Type *declarator(JCC *vm, Token **rest, Token *tok, Type *ty) {
     Type *inner_ty = ty;
     ty = type_suffix(vm, rest, tok, ty);
     inherit_semantic_attrs(ty, inner_ty);
+
+    // Propagate noreturn from prefix __attribute__ to function type
+    if (prefix_attr.is_noreturn && ty->kind == TY_FUNC)
+        ty->is_noreturn = true;
 
     // Handle __attribute__ after declarator
     VarAttr suffix_attr = {};
@@ -2523,6 +2533,12 @@ static Node *stmt(JCC *vm, Token **rest, Token *tok) {
 
     if (equal(tok, "return")) {
         Node *node = new_node(vm, ND_RETURN, tok);
+
+        // Warn if this is a noreturn function attempting to return
+        if (vm->compiler.current_fn && vm->compiler.current_fn->is_noreturn)
+            warn_tok(vm, tok, JCC_WARN_RETURN_TYPE,
+                     "noreturn function should not return a value");
+
         if (consume(vm, rest, tok->next, ";")) {
             if (vm->compiler.current_fn) {
                 Type *ty = vm->compiler.current_fn->ty->return_ty;
@@ -4114,11 +4130,13 @@ static void apply_semantic_attr(Type *ty, VarAttr *attr, Token *tok,
 
 static Type *apply_var_attrs_to_type(JCC *vm, Type *ty, VarAttr *attr) {
     if (!attr || (!attr->is_maybe_unused && !attr->is_deprecated &&
-                  !attr->format_style))
+                  !attr->is_noreturn && !attr->format_style))
         return ty;
     ty = copy_type(vm, ty);
     apply_semantic_attr(ty, NULL, attr->attribute_tok, attr->is_maybe_unused,
                         attr->is_deprecated, attr->deprecated_msg);
+    if (attr->is_noreturn && ty->kind == TY_FUNC)
+        ty->is_noreturn = true;
     if (attr->format_style && ty->kind == TY_FUNC) {
         ty->format_style = attr->format_style;
         ty->format_string_index = attr->format_string_index;
@@ -4231,6 +4249,14 @@ static Token *attribute_list(JCC *vm, Token *tok, Type *ty, VarAttr *attr) {
                 continue;
             }
 
+            // Handle noreturn attribute
+            if (is_attr_name(tok, "noreturn")) {
+                tok = tok->next;
+                if (ty) ty->is_noreturn = true;
+                if (attr) attr->is_noreturn = true;
+                continue;
+            }
+
             // Handle all other attributes - just consume and ignore them
             if (tok->kind == TK_IDENT) {
                 Token *name_tok = tok;
@@ -4289,6 +4315,7 @@ static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty,
             Token *attr_tok = tok;
             bool unused = equal(tok, "maybe_unused");
             bool deprecated = equal(tok, "deprecated");
+            bool is_noreturn_attr = equal(tok, "noreturn");
             tok = tok->next;
 
             char *message = NULL;
@@ -4305,12 +4332,19 @@ static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty,
                     tok = tok->next;
                 }
             }
-            if (!unused && !deprecated)
+            if (is_noreturn_attr) {
+                if (ty) ty->is_noreturn = true;
+                if (attr) attr->is_noreturn = true;
+            } else if (!unused && !deprecated) {
                 warn_tok(vm, attr_tok, JCC_WARN_ATTRIBUTES,
                          "unknown attribute '%.*s' ignored",
                          attr_tok->len, attr_tok->loc);
-            apply_semantic_attr(ty, attr, attr_tok, unused, deprecated,
-                                message);
+                apply_semantic_attr(ty, attr, attr_tok, unused, deprecated,
+                                    message);
+            } else {
+                apply_semantic_attr(ty, attr, attr_tok, unused, deprecated,
+                                    message);
+            }
         }
 
         tok = skip(vm, tok, "]");
@@ -5762,6 +5796,15 @@ static bool statement_terminates(Node *node) {
 
 static void append_implicit_return(JCC *vm, Obj *fn, Token *tok) {
     Type *ty = fn->ty->return_ty;
+
+    // Noreturn functions must not fall off the end
+    if (fn->is_noreturn) {
+        if (ty->kind != TY_VOID)
+            warn_tok(vm, tok, JCC_WARN_RETURN_TYPE,
+                     "noreturn function should not return a value");
+        return;
+    }
+
     if (ty->kind == TY_VOID || strcmp(fn->name, "main") == 0 ||
         statement_terminates(fn->body))
         return;
@@ -5786,6 +5829,10 @@ static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr) {
     if (!ty->name)
         error_tok(vm, ty->name_pos, "function name omitted");
     char *name_str = get_ident(vm, ty->name);
+
+    // Propagate noreturn from attribute to function type
+    if (attr->is_noreturn && ty->kind == TY_FUNC)
+        ty->is_noreturn = true;
 
     // Check if this is a nested function (defined inside another function)
     Obj *parent_fn = vm->compiler.current_fn;
@@ -5818,6 +5865,7 @@ static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->is_definition = fn->is_definition || equal(tok, "{");
         fn->is_maybe_unused |= ty->is_maybe_unused;
         fn->is_deprecated |= ty->is_deprecated;
+        fn->is_noreturn |= ty->is_noreturn;
         if (ty->deprecated_msg)
             fn->deprecated_msg = ty->deprecated_msg;
         if (ty->format_style && fn->ty) {
