@@ -232,7 +232,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("Options:\n");
     printf("\t-h/--help           Show this message\n");
     printf("\t-I <path>           Add <path> to include search paths\n");
-    printf("\t-J/--isystem <path> Add <path> to system include paths (for "
+    printf("\t-i/--isystem <path> Add <path> to system include paths (for "
            "non-standard headers)\n");
     printf("\t-L/--library-path <path> Add <path> to dynamic library search paths\n");
     printf("\t-l/--library <name> Link dynamic library by name or path\n");
@@ -293,7 +293,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-k/--heap-canaries           Heap overflow protection\n");
     printf("\t-m/--memory-leak-detection   Track allocations and report leaks "
            "at exit\n");
-    printf("\t-i/--stack-instrumentation   Track stack variable lifetimes and "
+    printf("\t-J/--stack-instrumentation   Track stack variable lifetimes and "
            "accesses\n");
     printf("\t   --stack-errors            Enable runtime errors for stack "
            "instrumentation\n");
@@ -756,7 +756,7 @@ int main(int argc, const char *argv[]) {
         {"heap-canaries", no_argument, 0, 'k'},
         {"pointer-sanitizer", no_argument, 0, 'p'},
         {"memory-leak-detection", no_argument, 0, 'm'},
-        {"stack-instrumentation", no_argument, 0, 'i'},
+        {"stack-instrumentation", no_argument, 0, 'J'},
         {"stack-errors", no_argument, 0, 1005},
         {"dangling-pointers", no_argument, 0, 1001},
         {"alignment-checks", no_argument, 0, 1002},
@@ -769,7 +769,7 @@ int main(int argc, const char *argv[]) {
         {"vm-heap", no_argument, 0, 'V'},
         {"control-flow-integrity", no_argument, 0, 'C'},
         {"include", required_argument, 0, 'I'},
-        {"isystem", required_argument, 0, 'J'},
+        {"isystem", required_argument, 0, 'i'},
         {"library-path", required_argument, 0, 'L'},
         {"library", required_argument, 0, 'l'},
         {"define", required_argument, 0, 'D'},
@@ -883,7 +883,7 @@ int main(int argc, const char *argv[]) {
                 realloc(lib_paths, sizeof(*lib_paths) * (lib_paths_count + 1));
             lib_paths[lib_paths_count++] = strdup(optarg);
             break;
-        case 'J': // --isystem
+        case 'i': // --isystem
             sys_inc_paths =
                 realloc(sys_inc_paths,
                         sizeof(*sys_inc_paths) * (sys_inc_paths_count + 1));
@@ -929,7 +929,7 @@ int main(int argc, const char *argv[]) {
         case 'm':
             flags |= JCC_MEMORY_LEAK_DETECT;
             break;
-        case 'i':
+        case 'J':
             flags |= JCC_STACK_INSTR;
             break;
         case 1001:

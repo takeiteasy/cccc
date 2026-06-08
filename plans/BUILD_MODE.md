@@ -81,7 +81,7 @@ helpers.
 
 Existing flags are forwarded to the per-target compile:
 
-- `-I`, `-isystem`, `-D`, `-U` apply to every target the build script
+- `-I`, `-i`, `-D`, `-U` apply to every target the build script
   does not explicitly override.
 - `--std=` is forwarded to the underlying compiler.
 - `-l`, `-L`, `--library`, `--library-path` are forwarded as link flags.

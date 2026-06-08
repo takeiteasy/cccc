@@ -137,7 +137,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `snprintf`, `vsnprintf` | ✓ | |
 | `strtof`, `strtold`, `strtoll`, `strtoull` | ✓ | |
 | `llabs`, `lldiv` | ✓ | |
-| `__has_include` | ✓ | Checks JCC, `-I`, and `--isystem` include paths |
+| `__has_include` | ✓ | Checks JCC, `-I`, and `-i` include paths |
 
 ---
 
@@ -216,7 +216,7 @@ C17 is a bug-fix release — no new language features or library functions were 
 | `#embed` | ✓ | Supports `limit()`, `prefix()`, `suffix()`, `if_empty()`, `__has_embed()` |
 | `__VA_OPT__` | ✓ | |
 | `__has_c_attribute` | ✓ | Returns `1` for C/JCC attributes with semantic support |
-| `__has_include` | ✓ | Checks JCC, `-I`, and `--isystem` include paths |
+| `__has_include` | ✓ | Checks JCC, `-I`, and `-i` include paths |
 
 ### Standard Library
 

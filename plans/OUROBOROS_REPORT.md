@@ -19,7 +19,7 @@ The attempt did **not** reach a link / run stage because of the `ffi.h` dependen
 
 1. Start with the existing `./jcc` binary (built from the repo's Makefile).
 2. Try to compile individual `src/*.c` files and, later, the full source set.
-3. Use `-I./include` for JCC's embedded standard library and `-isystem` for the macOS SDK when system headers are needed.
+3. Use `-I./include` for JCC's embedded standard library and `-i` for the macOS SDK when system headers are needed.
 4. Record the first error for each file, categorise it, and create minimal reproducers.
 5. Where a temporary workaround was needed (e.g. a local `Availability.h` stub), the workaround is noted so the finding is reproducible.
 

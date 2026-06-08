@@ -18,7 +18,7 @@ JCC supports C11 as the baseline, with selected C23 and GNU extensions. See [COV
 - **Native compilation pipeline** — `-c=native` runs the JCC frontend (preprocessor, compile-time macros) and hands the resulting C to `JCC_NATIVE_CC` (or `cc` / `clang` / `gcc`) for an actual native build
   - This is the production path: full toolchain performance, system libraries, no VM overhead
   - `-o <file>` is required to name the produced executable; the temporary C source is removed after the build
-  - `-I`, `-isystem`, `-D`, `-U`, `-L`, `-l`, and `--std=` are forwarded to the underlying compiler
+  - `-I`, `-i`, `-D`, `-U`, `-L`, `-l`, and `--std=` are forwarded to the underlying compiler
 - **Register-based bytecode VM** — compiles C to a portable instruction set with 32 integer and 32 floating-point registers, then executes it in a built-in interpreter (see [VM.md](docs/VM.md))
   - Powers compile-time macro execution
   - Serves as a toolchain-free, introspectable runtime for the safety suite, debugger, and profiler
@@ -51,7 +51,7 @@ Usage: ./jcc [options] file...
 Options:
 	-h/--help           Show this message
 	-I <path>           Add <path> to include search paths
-	-J/--isystem <path> Add <path> to system include paths (for non-standard headers)
+	-i/--isystem <path> Add <path> to system include paths (for non-standard headers)
 	-L/--library-path <path> Add <path> to dynamic library search paths
 	-l/--library <name> Link dynamic library by name or path
 	-D <macro>[=def]    Define a macro
@@ -104,7 +104,7 @@ Memory Safety Options (can be combined with safety levels):
 	-s/--stack-canaries          Stack overflow protection
 	-k/--heap-canaries           Heap overflow protection
 	-m/--memory-leak-detection   Track allocations and report leaks at exit
-	-i/--stack-instrumentation   Track stack variable lifetimes and accesses
+	-J/--stack-instrumentation   Track stack variable lifetimes and accesses
 	   --stack-errors            Enable runtime errors for stack instrumentation
 	-p/--pointer-sanitizer       Enable all pointer checks (bounds, UAF, type)
 	   --dangling-pointers       Detect use of stack pointers after function return
@@ -241,7 +241,7 @@ JCC_NATIVE_CC=clang ./jcc -c=native -o program program.c
 ./jcc -c=native -I./include -DDEBUG -L./lib -lz -o app app.c
 ```
 
-Native mode runs JCC's preprocessing and compile-time macro stages first, then passes serialized C to `JCC_NATIVE_CC` when set, otherwise `cc`, `clang`, or `gcc`. `-I`, `-isystem`, `-D`, `-U`, `-L`, `-l`, and `--std=` are forwarded; VM-only options (bytecode output, disassembler, `--optimize`, debugger, profiler, `-0`…`-3` safety levels) are rejected in this mode. To run the binary afterwards, invoke it directly: `./program`. See [LLVM.md](docs/LLVM.md) for the planned bytecode-to-LLVM backend, which will provide a second native path.
+Native mode runs JCC's preprocessing and compile-time macro stages first, then passes serialized C to `JCC_NATIVE_CC` when set, otherwise `cc`, `clang`, or `gcc`. `-I`, `-i`, `-D`, `-U`, `-L`, `-l`, and `--std=` are forwarded; VM-only options (bytecode output, disassembler, `--optimize`, debugger, profiler, `-0`…`-3` safety levels) are rejected in this mode. To run the binary afterwards, invoke it directly: `./program`. See [LLVM.md](docs/LLVM.md) for the planned bytecode-to-LLVM backend, which will provide a second native path.
 
 ### Run in the VM
 
