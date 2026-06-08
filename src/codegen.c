@@ -887,6 +887,160 @@ static void gen_complex_expr(JCC *vm, Node *node, int real_reg, int imag_reg);
 static void gen_stmt(JCC *vm, Node *node);
 static void gen_addr(JCC *vm, Node *node, int dest_reg);
 
+// ========== Inline Assembly Passthru ==========
+
+static void jcc_default_asm_passthru(JCC *vm, const char *asm_str) {
+#if !defined(_WIN32)
+    static int asm_counter = 0;
+    char sym_name[128];
+    int n = asm_counter++;
+    snprintf(sym_name, sizeof(sym_name), "__jcc_asm_passthru_%d", n);
+
+    // Create temp source file path (use mkstemp + rename to get .c extension)
+    char src_template[] = "/tmp/jcc-asm-XXXXXX";
+    int src_fd = mkstemp(src_template);
+    if (src_fd < 0)
+        error("--asm-passthru: failed to create temp source file");
+    close(src_fd);
+    size_t src_len = strlen(src_template) + 3;
+    char *src_path = malloc(src_len);
+    if (!src_path)
+        error("--asm-passthru: malloc failed");
+    snprintf(src_path, src_len, "%s.c", src_template);
+    if (rename(src_template, src_path) != 0) {
+        unlink(src_template);
+        free(src_path);
+        error("--asm-passthru: failed to rename temp source file");
+    }
+
+    // Write C wrapper file with escaped asm string
+    FILE *f = fopen(src_path, "w");
+    if (!f) {
+        unlink(src_path);
+        free(src_path);
+        error("--asm-passthru: failed to write temp source file");
+    }
+    fprintf(f, "void %s() { asm(\"", sym_name);
+    for (const char *p = asm_str; *p; p++) {
+        if (*p == '\\')
+            fputs("\\\\", f);
+        else if (*p == '"')
+            fputs("\\\"", f);
+        else if (*p == '\n')
+            fputs("\\n", f);
+        else
+            fputc(*p, f);
+    }
+    fprintf(f, "\"); }\n");
+    fclose(f);
+
+    // Find system C compiler
+    char *cc = jcc_find_native_cc();
+    if (!cc) {
+        unlink(src_path);
+        free(src_path);
+        error("--asm-passthru: no native C compiler found");
+    }
+
+    // Create temp output path for shared library
+    char so_template[] = "/tmp/jcc-asm-XXXXXX";
+    int so_fd = mkstemp(so_template);
+    if (so_fd < 0) {
+        unlink(src_path);
+        free(src_path);
+        free(cc);
+        error("--asm-passthru: failed to create temp output file");
+    }
+    close(so_fd);
+    size_t so_len = strlen(so_template) + 7;
+    char *so_path = malloc(so_len);
+    if (!so_path) {
+        unlink(src_path);
+        free(src_path);
+        free(cc);
+        unlink(so_template);
+        error("--asm-passthru: malloc failed");
+    }
+#if defined(__APPLE__)
+    snprintf(so_path, so_len, "%s.dylib", so_template);
+#else
+    snprintf(so_path, so_len, "%s.so", so_template);
+#endif
+    if (rename(so_template, so_path) != 0) {
+        unlink(src_path); unlink(so_template);
+        free(src_path); free(so_path); free(cc);
+        error("--asm-passthru: failed to rename temp output file");
+    }
+
+    // Compile source to shared library
+    pid_t pid = fork();
+    if (pid < 0) {
+        unlink(src_path); unlink(so_path);
+        free(src_path); free(so_path); free(cc);
+        error("--asm-passthru: fork failed");
+    }
+    if (pid == 0) {
+#if defined(__APPLE__)
+        execlp(cc, cc, "-shared", "-o", so_path, src_path, (char *)NULL);
+#else
+        execlp(cc, cc, "-shared", "-fPIC", "-o", so_path, src_path, (char *)NULL);
+#endif
+        _exit(127);
+    }
+    int status;
+    waitpid(pid, &status, 0);
+    unlink(src_path);
+    free(src_path);
+    free(cc);
+
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        unlink(so_path);
+        free(so_path);
+        error("--asm-passthru: native compilation failed");
+    }
+
+    // dlopen the shared library
+    void *handle = dlopen(so_path, RTLD_NOW | RTLD_LOCAL);
+    if (!handle) {
+        unlink(so_path);
+        free(so_path);
+        error("--asm-passthru: dlopen failed: %s", dlerror());
+    }
+
+    // dlsym the function
+    void *func_ptr = dlsym(handle, sym_name);
+    if (!func_ptr) {
+        dlclose(handle);
+        unlink(so_path);
+        free(so_path);
+        error("--asm-passthru: dlsym failed: %s", dlerror());
+    }
+
+    // Unlink the .so now that it's loaded
+    unlink(so_path);
+    free(so_path);
+
+    // Register as FFI function (0 args, no double return)
+    cc_register_cfunc(vm, sym_name, func_ptr, 0, 0);
+
+    // Find FFI index
+    int ffi_idx = find_ffi_function(vm, sym_name);
+    if (ffi_idx < 0) {
+        dlclose(handle);
+        error("--asm-passthru: FFI registration failed");
+    }
+
+    // Emit CALLF with 0 args
+    emit(vm, CALLF);
+    emit_word(vm, ffi_idx);
+    emit_word(vm, 0);
+    emit_i64(vm, 0);
+#else
+    (void)asm_str;
+    error("--asm-passthru is not supported on Windows");
+#endif
+}
+
 // ========== Nested Function Helpers ==========
 
 // Find the __static_link local variable in a nested function's locals
@@ -3209,7 +3363,11 @@ static void gen_stmt(JCC *vm, Node *node) {
         return;
 
     case ND_ASM:
-        // Inline assembly - not supported in VM, skip
+        if (vm->compiler.asm_callback)
+            vm->compiler.asm_callback(vm, node->asm_str, vm->compiler.asm_user_data);
+        else if (vm->compiler.asm_passthru)
+            jcc_default_asm_passthru(vm, node->asm_str);
+        // else: no-op (default behavior)
         return;
 
     case ND_GOTO_EXPR: {

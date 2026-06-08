@@ -1581,6 +1581,7 @@ typedef struct Compiler {
     // Inline assembly callback
     JCCAsmCallback asm_callback; // User-provided callback for asm statements
     void *asm_user_data;         // User-provided context for callback
+    bool asm_passthru;           // --asm-passthru flag: compile asm via native CC
 
     // Foreign Function Interface (FFI)
     ForeignFunc *ffi_table; // Registry of foreign C functions

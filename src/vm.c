@@ -1581,3 +1581,57 @@ void jcc_vm_release(void *base, size_t bytes) {
     munmap(base, bytes);
 }
 #endif
+
+char *jcc_path_find_executable(const char *name) {
+    if (!name || !*name)
+        return NULL;
+    if (strchr(name, '/'))
+        return access(name, X_OK) == 0 ? strdup(name) : NULL;
+
+    const char *path_env = getenv("PATH");
+    if (!path_env)
+        return NULL;
+    char *paths = strdup(path_env);
+    if (!paths)
+        return NULL;
+
+    char *saveptr = NULL;
+    for (char *dir = strtok_r(paths, ":", &saveptr); dir;
+         dir = strtok_r(NULL, ":", &saveptr)) {
+        size_t len = strlen(dir) + 1 + strlen(name) + 1;
+        char *candidate = malloc(len);
+        if (!candidate)
+            continue;
+        snprintf(candidate, len, "%s/%s", dir, name);
+        if (access(candidate, X_OK) == 0) {
+            free(paths);
+            return candidate;
+        }
+        free(candidate);
+    }
+    free(paths);
+    return NULL;
+}
+
+char *jcc_find_native_cc(void) {
+    const char *env_cc = getenv("JCC_NATIVE_CC");
+    if (env_cc && *env_cc) {
+        char *found = jcc_path_find_executable(env_cc);
+        if (found)
+            return found;
+        fprintf(stderr, "error: JCC_NATIVE_CC compiler '%s' not found\n",
+                env_cc);
+        return NULL;
+    }
+
+    const char *candidates[] = {"cc", "clang", "gcc"};
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+        char *found = jcc_path_find_executable(candidates[i]);
+        if (found)
+            return found;
+    }
+
+    fprintf(stderr,
+            "error: no native C compiler found (tried cc, clang, gcc)\n");
+    return NULL;
+}

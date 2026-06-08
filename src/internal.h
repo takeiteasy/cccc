@@ -307,6 +307,8 @@ void cc_output_preprocessed(FILE *f, Token *tok);
 // preprocess.c
 //
 
+char *jcc_path_find_executable(const char *name);
+char *jcc_find_native_cc(void);
 char *get_std_header(char *filename);
 const char *get_stdlib_reg_fn_name(const char *header);
 char *search_include_paths(JCC *vm, char *filename, int filename_len,

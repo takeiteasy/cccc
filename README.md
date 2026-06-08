@@ -141,6 +141,10 @@ Optimization Levels:
 	                             2: Constant folding + peephole
 	                             3: All optimizations (including dead code elimination)
 
+Inline Assembly:
+	   --asm-passthru    Compile asm("...") statements via native C compiler
+	                    and execute them via FFI (default: no-op)
+
 Example:
 	./jcc -c=native -o hello hello.c             # native build via cc/clang/gcc
 	./jcc -c=native -I ./include -D DEBUG -o prog prog.c

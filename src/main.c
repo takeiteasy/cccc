@@ -77,60 +77,6 @@ static char *make_tmp_path(const char *suffix) {
 #endif
 }
 
-static char *path_find_executable(const char *name) {
-    if (!name || !*name)
-        return NULL;
-    if (strchr(name, '/'))
-        return access(name, X_OK) == 0 ? strdup(name) : NULL;
-
-    const char *path_env = getenv("PATH");
-    if (!path_env)
-        return NULL;
-    char *paths = strdup(path_env);
-    if (!paths)
-        return NULL;
-
-    char *saveptr = NULL;
-    for (char *dir = strtok_r(paths, ":", &saveptr); dir;
-         dir = strtok_r(NULL, ":", &saveptr)) {
-        size_t len = strlen(dir) + 1 + strlen(name) + 1;
-        char *candidate = malloc(len);
-        if (!candidate)
-            continue;
-        snprintf(candidate, len, "%s/%s", dir, name);
-        if (access(candidate, X_OK) == 0) {
-            free(paths);
-            return candidate;
-        }
-        free(candidate);
-    }
-    free(paths);
-    return NULL;
-}
-
-static char *select_native_compiler(void) {
-    const char *env_cc = getenv("JCC_NATIVE_CC");
-    if (env_cc && *env_cc) {
-        char *found = path_find_executable(env_cc);
-        if (found)
-            return found;
-        fprintf(stderr, "error: JCC_NATIVE_CC compiler '%s' not found\n",
-                env_cc);
-        return NULL;
-    }
-
-    const char *candidates[] = {"cc", "clang", "gcc"};
-    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
-        char *found = path_find_executable(candidates[i]);
-        if (found)
-            return found;
-    }
-
-    fprintf(stderr,
-            "error: no native C compiler found (tried cc, clang, gcc)\n");
-    return NULL;
-}
-
 static int run_argv(char *const argv[]) {
 #if defined(_WIN32)
     (void)argv;
@@ -178,7 +124,7 @@ static int run_native_backend(JCC *vm, Obj *prog, const char *out_file,
         return 1;
     }
 
-    char *cc = select_native_compiler();
+    char *cc = jcc_find_native_cc();
     if (!cc)
         return 1;
 
@@ -413,6 +359,9 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-B/--fusion-candidates[=N] Use-def fusion candidate analysis (top "
            "N, default 50)\n");
     printf("\t                          JSON output via -j/--json\n");
+    printf("\nInline Assembly:\n");
+    printf("\t   --asm-passthru    Compile asm(\"...\") statements via native C compiler\n");
+    printf("\t                    and execute them via FFI (default: no-op)\n");
     printf("\nExample:\n");
     printf("\t%s -o hello hello.c\n", argv0);
     printf("\t%s -I ./include -D DEBUG -o prog prog.c\n", argv0);
@@ -754,6 +703,7 @@ int main(int argc, const char *argv[]) {
     int macro_recursion_limit = -1; // --macro-recursion-limit
     int opt_level = 0; // -O0/-O1/-O2/-O3 (default: 0 = no optimization)
     int inline_node_limit = 20; // --inline-limit (default 20, 0=disable)
+    int asm_passthru = 0;       // --asm-passthru
     const char *std_arg = NULL; // --std=<standard>
     const char **ffi_allow_args = NULL;
     int ffi_allow_args_count = 0;
@@ -844,6 +794,7 @@ int main(int argc, const char *argv[]) {
         {"fusion-candidates", optional_argument, 0, 'B'},
         {"strict-comptime-includes", no_argument, 0, 1050},
         {"inline-limit", required_argument, 0, 1051},
+        {"asm-passthru", no_argument, 0, 1060},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1186,6 +1137,9 @@ int main(int argc, const char *argv[]) {
             inline_node_limit = (int)val;
             break;
         }
+        case 1060: // --asm-passthru
+            asm_passthru = 1;
+            break;
         case 'B': { // --fusion-candidates[=N]
             if (optarg == NULL) {
                 run_fusion = 1;
@@ -1330,6 +1284,7 @@ int main(int argc, const char *argv[]) {
     JCC vm;
     cc_init(&vm, flags);
     vm.compiler.compile_only = compile_only;
+    vm.compiler.asm_passthru = asm_passthru;
     vm.compiler.strict_comptime_includes = strict_comptime_includes;
     vm.compiler.entry_name = (char *)entry_name;
     vm.compiler.diagnostic_json = output_json;

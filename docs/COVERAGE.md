@@ -244,7 +244,7 @@ C17 is a bug-fix release — no new language features or library functions were 
 | `__thread` storage class | ~ | Emits `-Wignored-features`; treated as `static` |
 | `__restrict` / `__restrict__` | ~ | Parsed; aliasing not tracked ([#262](https://todo.sr.ht/~takeiteasy/jcc/262)) |
 | `__typeof__` | ✓ | Synonym for `typeof` |
-| `__asm__` / `asm(...)` inline assembly | ~ | Accepted; executed as a no-op unless a callback emits custom bytecode |
+| `__asm__` / `asm(...)` inline assembly | ✓ | No-op by default; `--asm-passthru` compiles via native CC and executes via FFI; custom callback via `cc_set_asm_callback` |
 
 ---
 
