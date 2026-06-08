@@ -89,6 +89,7 @@ Opcodes are grouped by function.  Operands are shown as `rd = destination`, `rs 
 |--------|----------|-------------|
 | `JMP` | 1 | Unconditional jump to absolute PC (`target`) |
 | `CALL` | 1 | Direct call: push return address, jump to `target` |
+| `CALLT` | 1 | Tail call: unwind current frame, jump to `target` (direct) |
 | `CALLI` | 1 | Indirect call through register (`rs`) |
 | `CALLN` | 4 | Native-aware indirect call: tries dynamic symbol first, falls back to VM call |
 | `JMPT` | 3 | Jump table: `table_pc`, `count`, `default_pc`; index in `REG_A0` |
@@ -398,7 +399,7 @@ The VM does not rely on external sanitizer libraries.  Instead, the compiler inj
 * **UAF detection** — `CHKP3` consults `AllocHeader` metadata (magic `0xDEADBEEF`, `freed` bit, generation counter).
 * **Uninitialised reads** — `CHKI` / `MARKI` maintain a per-address hash map of initialised stack slots.
 * **Stack canaries** — `ENT3` writes a canary word; `LEV3` validates it before returning.
-* **CFI** — A shadow stack mirrors the real stack; `CALL` pushes to both, `LEV3` compares before trusting the return address.
+* **CFI** — A shadow stack mirrors the real stack; `CALL` pushes to both, `CALLT` pops the current frame's entry (consuming one shadow-slot but not pushing a new one), and `LEV3` compares before trusting the return address.
 * **Provenance tracking** — `MARKP` records `(origin, base, size)`; `CHKPA` rejects arithmetic that leaves the object.
 * **Dangling pointers** — `MARKA` records stack addresses; `SCOPEOUT` detects live pointers to variables that are going out of scope.
 

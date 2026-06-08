@@ -166,7 +166,7 @@ static bool *build_control_flow_targets(JCC *vm, JCCPc start,
         if (size <= 0)
             break;
 
-        if (op == JMP || op == CALL) {
+        if (op == JMP || op == CALL || op == CALLT) {
             mark_text_target(vm, targets, start, end, vm->text_seg[pc + 1]);
         } else if (op == JZ3 || op == JNZ3) {
             mark_text_target(vm, targets, start, end, vm->text_seg[pc + 2]);
@@ -594,6 +594,7 @@ static void opt_constant_fold(JCC *vm, OptReplacement *repls) {
             case JMPT:
             case JMPI:
             case CALL:
+            case CALLT:
             case CALLI:
             case CALLN:
             case ENT3:

@@ -54,6 +54,7 @@ extern "C" {
     /* Control flow */                                                         \
     X(JMP, 1)   /* Unconditional jump */                                       \
     X(CALL, 1)  /* Call function (direct) */                                   \
+    X(CALLT, 1) /* Tail call (direct): reuse current frame */                  \
     X(CALLI, 1) /* Call function (indirect via register) */                    \
     X(CALLN, 4) /* Native-aware indirect call */                               \
     X(JMPT, 3)  /* Jump table */                                               \

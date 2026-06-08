@@ -432,7 +432,7 @@ void cc_debug_repl(JCC *vm) {
             vm->dbg.step_over = 1;
             vm->dbg.step_out = 0;
             int op = (int)vm->text_seg[vm->pc];
-            if (op == CALL || op == CALLI) {
+            if (op == CALL || op == CALLT || op == CALLI) {
                 // CALL/CALLI: return address is two words after the opcode.
                 // (op word + one operand word). Stop there after the call
                 // returns instead of stepping into the callee.

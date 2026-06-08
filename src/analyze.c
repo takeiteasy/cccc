@@ -491,6 +491,7 @@ static bool fusion_is_killing_op(int op) {
     case JMPT:
     case JMPI:
     case CALL:
+    case CALLT:
     case CALLI:
     case CALLN:
     case CALLF:
@@ -544,7 +545,7 @@ static void fusion_scan_text(CcFusionState *st, const JCCInstrWord *text,
             // Invalidate all def state. For CALL/CALLF also keep
             // callee-saved registers live (they survive the call).
             for (int i = 0; i < NUM_REGS; i++) {
-                if ((op == CALL || op == CALLI || op == CALLN || op == CALLF) &&
+                if ((op == CALL || op == CALLT || op == CALLI || op == CALLN || op == CALLF) &&
                     !fusion_is_caller_saved(i))
                     continue;
                 defs[i].pc = -1;

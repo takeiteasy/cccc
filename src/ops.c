@@ -1329,6 +1329,41 @@ static inline int op_CALL_fn(JCC *vm) {
     return 0;
 }
 
+static inline int op_CALLT_fn(JCC *vm) {
+    // Tail call: unwind current frame without popping return address.
+    // The return address from the original CALL remains on the stack,
+    // so the callee's LEV3 returns directly to our caller.
+    JCCPc target = cc_read_word(vm);
+
+    vm->sp = vm->bp;
+
+    if (vm->flags & JCC_STACK_CANARIES) {
+        long long canary = vm->sp[-1];
+        if (canary != vm->stack_canary) {
+            printf("\n========== STACK OVERFLOW DETECTED ==========\n");
+            printf("Stack canary corrupted!\n");
+            printf("Expected: 0x%llx\n", vm->stack_canary);
+            printf("Found:    0x%llx\n", canary);
+            printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
+                   (long long)vm->pc);
+            printf("This indicates a stack buffer overflow.\n");
+            printf("=============================================\n");
+            return -1;
+        }
+    }
+
+    vm->bp = (long long *)*vm->sp++;
+
+    // sp now points at the return address — leave it in place
+
+    if (vm->flags & JCC_CFI) {
+        vm->shadow_sp++;
+    }
+
+    vm->pc = target;
+    return 0;
+}
+
 static inline int op_CALLI_fn(JCC *vm) {
     // Call indirect: function address in register (read from operand)
     long long operands = cc_read_word(vm);
