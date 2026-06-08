@@ -49,7 +49,7 @@ int test_fallthrough(int x) {
     switch (x) {
         case 1:
             result = 1;
-            // [[fallthrough]]; - statement attributes not yet supported
+            [[fallthrough]];
         case 2:
             result = 2;
             break;
@@ -93,16 +93,22 @@ int main() {
     struct TestStruct s = {1, 2, 3};
     if (s.x != 1 || s.y != 2 || s.z != 3) return 6;
 
-    // Test fallthrough (skip - switch fallthrough logic is tricky to test)
-    // int f = test_fallthrough(1);
-    // if (f != 2) return 7;
+    // Test fallthrough with [[fallthrough]] annotation
+    int f = test_fallthrough(1);
+    if (f != 2) return 7;
+    f = test_fallthrough(2);
+    if (f != 2) return 8;
+    f = test_fallthrough(3);
+    if (f != 3) return 9;
+    f = test_fallthrough(9);
+    if (f != -1) return 10;
 
     // Test pure and reproducible functions
     int p = pure_func(5);
-    if (p != 10) return 8;
+    if (p != 10) return 11;
 
     int r = repro_func(5);
-    if (r != 6) return 9;
+    if (r != 6) return 12;
 
     return 42;  // Success
 }

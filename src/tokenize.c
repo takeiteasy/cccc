@@ -65,6 +65,8 @@ static const WarningInfo warning_infos[] = {
     {"jcc-macro", JCC_WARN_JCC_MACRO, false},
     {"ignored-features", JCC_WARN_IGNORED_FEATURES, false},
     {"attributes", JCC_WARN_ATTRIBUTES, false},
+    {"nodiscard", JCC_WARN_NODISCARD, false},
+    {"fallthrough", JCC_WARN_FALLTHROUGH, false},
     {"all", JCC_WARN_ALL, true},
     {"extra", JCC_WARN_EXTRA, true},
 };

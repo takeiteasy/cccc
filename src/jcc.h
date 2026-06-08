@@ -331,13 +331,15 @@ typedef enum {
     JCC_WARN_FLOAT_CONVERSION = (1ULL << 17), // float<->int or float narrowing
     JCC_WARN_IGNORED_FEATURES = (1ULL << 18), // parsed-but-ignored features (_Atomic, TLS, etc.)
     JCC_WARN_ATTRIBUTES       = (1ULL << 19), // unknown attributes
+    JCC_WARN_NODISCARD        = (1ULL << 20), // [[nodiscard]] return value discarded
+    JCC_WARN_FALLTHROUGH      = (1ULL << 21), // switch case falls through without [[fallthrough]]
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
     JCC_WARN_CONVERSION_GROUP = JCC_WARN_CONVERSION |
                                 JCC_WARN_SIGN_CONVERSION |
                                 JCC_WARN_FLOAT_CONVERSION,
 
-    JCC_WARN_ALL = JCC_WARN_UNUSED |
+JCC_WARN_ALL = JCC_WARN_UNUSED |
                    JCC_WARN_IMPLICIT_FUNCTION_DECLARATION |
                    JCC_WARN_IMPLICIT_INT |
                    JCC_WARN_RETURN_TYPE |
@@ -353,11 +355,13 @@ typedef enum {
                    JCC_WARN_LARGE_FILE_EMBED |
                    JCC_WARN_JCC_MACRO |
                    JCC_WARN_IGNORED_FEATURES |
-                   JCC_WARN_ATTRIBUTES,
+                   JCC_WARN_ATTRIBUTES |
+                   JCC_WARN_NODISCARD,
     JCC_WARN_EXTRA = JCC_WARN_SHADOW |
-                     JCC_WARN_SIGN_COMPARE |
-                     JCC_WARN_CONVERSION |
-                     JCC_WARN_POINTER_ARITH,
+                      JCC_WARN_SIGN_COMPARE |
+                      JCC_WARN_CONVERSION |
+                      JCC_WARN_POINTER_ARITH |
+                      JCC_WARN_FALLTHROUGH,
 } JCCWarning;
 
 /*!
@@ -599,7 +603,9 @@ struct Type {
     bool is_maybe_unused;
     bool is_deprecated;
     bool is_noreturn;
+    bool is_nodiscard;
     char *deprecated_msg;
+    char *nodiscard_msg;
 
     // Format string validation (__attribute__((format(...))))
     int format_style;          // 0=none, 1=printf, 2=scanf
@@ -741,6 +747,7 @@ struct Node {
     struct Node *goto_next;
     bool label_used;
     bool label_maybe_unused;
+    bool is_fallthrough; // [[fallthrough]] on a null statement
 
     // Switch
     struct Node *case_next;
@@ -809,8 +816,10 @@ struct Obj {
     bool is_maybe_unused;
     bool is_deprecated;
     bool is_noreturn;
+    bool is_nodiscard;
     bool is_local_symbol;
     char *deprecated_msg;
+    char *nodiscard_msg;
 
     // Local variable
     int offset;

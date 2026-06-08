@@ -72,7 +72,10 @@ typedef struct {
     bool is_maybe_unused;
     bool is_deprecated;
     bool is_noreturn;
+    bool is_nodiscard;
+    bool is_fallthrough;
     char *deprecated_msg;
+    char *nodiscard_msg;
     Token *attribute_tok;
     int align;
 
@@ -179,6 +182,8 @@ static Node *funcall(JCC *vm, Token **rest, Token *tok, Node *node);
 static Node *unary(JCC *vm, Token **rest, Token *tok);
 static Node *primary(JCC *vm, Token **rest, Token *tok);
 static Token *parse_typedef(JCC *vm, Token *tok, Type *basety);
+static bool falls_through(Node *n);
+static void warn_switch_fallthrough(JCC *vm, Node *sw);
 static bool is_function(JCC *vm, Token *tok);
 static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr);
 static Token *global_variable(JCC *vm, Token *tok, Type *basety, VarAttr *attr);
@@ -1189,6 +1194,13 @@ static Type *declarator(JCC *vm, Token **rest, Token *tok, Type *ty) {
     // Propagate noreturn from prefix __attribute__ to function type
     if (prefix_attr.is_noreturn && ty->kind == TY_FUNC)
         ty->is_noreturn = true;
+
+    // Propagate nodiscard from prefix [[nodiscard]] to function type
+    if (prefix_attr.is_nodiscard && ty->kind == TY_FUNC) {
+        ty->is_nodiscard = true;
+        if (prefix_attr.nodiscard_msg)
+            ty->nodiscard_msg = prefix_attr.nodiscard_msg;
+    }
 
     // Handle __attribute__ after declarator
     VarAttr suffix_attr = {};
@@ -2603,6 +2615,8 @@ static Node *stmt(JCC *vm, Token **rest, Token *tok) {
 
         node->then = stmt(vm, rest, tok);
 
+        warn_switch_fallthrough(vm, node);
+
         vm->compiler.current_switch = sw;
         vm->compiler.brk_label = brk;
         return node;
@@ -2794,6 +2808,15 @@ static Node *stmt(JCC *vm, Token **rest, Token *tok) {
     tok = attribute_list(vm, tok, NULL, &label_attr);
     tok = c23_attribute_list(vm, tok, NULL, &label_attr);
 
+    if (label_attr.is_fallthrough) {
+        if (equal(tok, ";")) {
+            *rest = tok->next;
+            Node *node = new_node(vm, ND_BLOCK, tok);
+            node->is_fallthrough = true;
+            return node;
+        }
+    }
+
     if (tok->kind == TK_IDENT && equal(tok->next, ":")) {
         Node *node = new_node(vm, ND_LABEL, tok);
         node->label = arena_strndup(vm, tok->loc, tok->len);
@@ -2880,7 +2903,134 @@ static Node *expr_stmt(JCC *vm, Token **rest, Token *tok) {
     Node *node = new_node(vm, ND_EXPR_STMT, tok);
     node->lhs = expr(vm, &tok, tok);
     *rest = skip(vm, tok, ";");
+
+    add_type(vm, node->lhs);
+    if (node->lhs && !(node->lhs->kind == ND_CAST &&
+                       node->lhs->ty && node->lhs->ty->kind == TY_VOID)) {
+        bool nodiscard = false;
+        const char *what = NULL;
+        if (node->lhs->kind == ND_FUNCALL && node->lhs->func_ty &&
+            node->lhs->func_ty->is_nodiscard) {
+            nodiscard = true;
+            what = "function";
+        } else if (node->lhs->ty && node->lhs->ty->is_nodiscard) {
+            nodiscard = true;
+            what = "type";
+        }
+        if (nodiscard) {
+            if (node->lhs->func_ty && node->lhs->func_ty->nodiscard_msg)
+                warn_tok(vm, node->tok, JCC_WARN_NODISCARD,
+                         "ignoring return value of %s declared with 'nodiscard': %s",
+                         what, node->lhs->func_ty->nodiscard_msg);
+            else if (node->lhs->ty && node->lhs->ty->nodiscard_msg)
+                warn_tok(vm, node->tok, JCC_WARN_NODISCARD,
+                         "ignoring return value of %s declared with 'nodiscard': %s",
+                         what, node->lhs->ty->nodiscard_msg);
+            else
+                warn_tok(vm, node->tok, JCC_WARN_NODISCARD,
+                         "ignoring return value of %s declared with 'nodiscard'",
+                         what);
+        }
+    }
+
     return node;
+}
+
+// Returns true if control can fall through to the statement after `n`.
+static bool falls_through(Node *n) {
+    if (!n) return true;
+    switch (n->kind) {
+    case ND_RETURN:
+    case ND_GOTO:
+    case ND_GOTO_EXPR:
+    case ND_UNREACHABLE:
+        return false;
+    case ND_IF:
+        if (!n->els) return true;
+        return falls_through(n->then) || falls_through(n->els);
+    case ND_BLOCK:
+    case ND_STMT_EXPR:
+        if (!n->body) return true;
+        { Node *last = n->body;
+          while (last->next) last = last->next;
+          return falls_through(last); }
+    default:
+        return true;
+    }
+}
+
+static void warn_switch_fallthrough(JCC *vm, Node *sw) {
+    if (!sw || sw->kind != ND_SWITCH || !sw->then) return;
+    if (sw->then->kind != ND_BLOCK || !sw->then->body) return;
+
+    Node *body = sw->then->body;
+    Node *group_case = NULL; // current case group's label node
+    Node *annotated = NULL; // last annotated [[fallthrough]] node in group
+
+    for (Node *cur = body; cur; cur = cur->next) {
+        if (cur->kind == ND_CASE) {
+            if (group_case && annotated != (Node *)1) {
+                // Check if the previous case group reaches the end
+                // (annotated == non-NULL and also NOT sentinel-1 means fallthrough annotated)
+            }
+            group_case = cur;
+            annotated = NULL;
+
+            // Unwind nested case labels to find first real statement
+            Node *c = cur;
+            while (c && c->kind == ND_CASE && c->lhs && c->lhs->kind == ND_CASE)
+                c = c->lhs;
+            if (c && c->kind == ND_CASE && c->lhs) {
+                if (c->lhs->is_fallthrough)
+                    annotated = c->lhs;
+            }
+        } else {
+            if (!group_case) continue;
+            if (cur->is_fallthrough)
+                annotated = cur;
+        }
+    }
+
+    // Reset and redo properly with group_reaches_end tracking
+    annotated = NULL;
+    group_case = NULL;
+    bool group_reaches_end = true;
+
+    for (Node *cur = body; cur; cur = cur->next) {
+        if (cur->kind == ND_CASE) {
+            if (group_case && group_reaches_end && !annotated) {
+                // The previous case group reaches the end (falls through to this label)
+                // and it's not annotated with [[fallthrough]]
+                warn_tok(vm, group_case->tok, JCC_WARN_FALLTHROUGH,
+                         "unannotated fallthrough between case labels");
+            }
+            group_case = cur;
+            annotated = NULL;
+            group_reaches_end = true;
+
+            // Unwind nested case labels to find the first real statement
+            Node *c = cur;
+            while (c && c->kind == ND_CASE && c->lhs && c->lhs->kind == ND_CASE)
+                c = c->lhs;
+            if (c && c->kind == ND_CASE && c->lhs) {
+                if (falls_through(c->lhs)) {
+                    if (c->lhs->is_fallthrough)
+                        annotated = c->lhs;
+                } else {
+                    group_reaches_end = false;
+                }
+            }
+        } else {
+            if (!group_case) continue;
+            if (!group_reaches_end) continue;
+
+            if (cur->is_fallthrough) {
+                annotated = cur;
+            }
+            if (!falls_through(cur))
+                group_reaches_end = false;
+        }
+    }
 }
 
 // expr = assign ("," expr)?
@@ -4111,30 +4261,44 @@ static bool is_attr_name(Token *tok, char *name) {
 }
 
 static void apply_semantic_attr(Type *ty, VarAttr *attr, Token *tok,
-                                bool unused, bool deprecated, char *message) {
+                                bool unused, bool deprecated, bool nodiscard,
+                                char *message) {
     if (ty) {
         ty->is_maybe_unused |= unused;
         ty->is_deprecated |= deprecated;
-        if (message)
-            ty->deprecated_msg = message;
+        ty->is_nodiscard |= nodiscard;
+        if (message) {
+            if (deprecated)
+                ty->deprecated_msg = message;
+            if (nodiscard)
+                ty->nodiscard_msg = message;
+        }
     }
     if (attr) {
         attr->is_maybe_unused |= unused;
         attr->is_deprecated |= deprecated;
-        if (message)
-            attr->deprecated_msg = message;
-        if (unused || deprecated)
+        attr->is_nodiscard |= nodiscard;
+        if (message) {
+            if (deprecated)
+                attr->deprecated_msg = message;
+            if (nodiscard)
+                attr->nodiscard_msg = message;
+        }
+        if (unused || deprecated || nodiscard)
             attr->attribute_tok = tok;
     }
 }
 
 static Type *apply_var_attrs_to_type(JCC *vm, Type *ty, VarAttr *attr) {
     if (!attr || (!attr->is_maybe_unused && !attr->is_deprecated &&
-                  !attr->is_noreturn && !attr->format_style))
+                  !attr->is_noreturn && !attr->is_nodiscard &&
+                  !attr->format_style))
         return ty;
     ty = copy_type(vm, ty);
     apply_semantic_attr(ty, NULL, attr->attribute_tok, attr->is_maybe_unused,
-                        attr->is_deprecated, attr->deprecated_msg);
+                        attr->is_deprecated, attr->is_nodiscard,
+                        attr->deprecated_msg ? attr->deprecated_msg
+                                             : attr->nodiscard_msg);
     if (attr->is_noreturn && ty->kind == TY_FUNC)
         ty->is_noreturn = true;
     if (attr->format_style && ty->kind == TY_FUNC) {
@@ -4211,7 +4375,7 @@ static Token *attribute_list(JCC *vm, Token *tok, Type *ty, VarAttr *attr) {
                         tok = tok->next;
                     }
                 }
-            apply_semantic_attr(ty, attr, attr_tok, unused, deprecated,
+            apply_semantic_attr(ty, attr, attr_tok, unused, deprecated, false,
                                 message);
                 continue;
             }
@@ -4316,13 +4480,16 @@ static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty,
             bool unused = equal(tok, "maybe_unused");
             bool deprecated = equal(tok, "deprecated");
             bool is_noreturn_attr = equal(tok, "noreturn");
+            bool is_nodiscard_attr = equal(tok, "nodiscard");
+            bool is_fallthrough_attr = equal(tok, "fallthrough");
+            bool is_no_unique_address_attr = equal(tok, "no_unique_address");
             tok = tok->next;
 
             char *message = NULL;
             if (equal(tok, "(")) {
                 int depth = 1;
                 tok = tok->next;
-                if (deprecated && tok->kind == TK_STR)
+                if ((deprecated || is_nodiscard_attr) && tok->kind == TK_STR)
                     message = tok->str;
                 while (depth > 0) {
                     if (equal(tok, "("))
@@ -4335,15 +4502,28 @@ static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty,
             if (is_noreturn_attr) {
                 if (ty) ty->is_noreturn = true;
                 if (attr) attr->is_noreturn = true;
+            } else if (is_nodiscard_attr) {
+                if (ty) ty->is_nodiscard = true;
+                if (attr) {
+                    attr->is_nodiscard = true;
+                    if (message)
+                        attr->nodiscard_msg = message;
+                    attr->attribute_tok = attr_tok;
+                }
+            } else if (is_fallthrough_attr) {
+                if (attr)
+                    attr->is_fallthrough = true;
+            } else if (is_no_unique_address_attr) {
+                // Parsed but VM optimisations deferred to a future ticket
             } else if (!unused && !deprecated) {
                 warn_tok(vm, attr_tok, JCC_WARN_ATTRIBUTES,
                          "unknown attribute '%.*s' ignored",
                          attr_tok->len, attr_tok->loc);
                 apply_semantic_attr(ty, attr, attr_tok, unused, deprecated,
-                                    message);
+                                    false, NULL);
             } else {
                 apply_semantic_attr(ty, attr, attr_tok, unused, deprecated,
-                                    message);
+                                    false, message);
             }
         }
 

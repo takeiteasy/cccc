@@ -821,7 +821,8 @@ static bool is_has_builtin_supported(char *name) {
 static bool is_has_c_attribute_supported(char *vendor, char *name) {
     if (!vendor)
         return !strcmp(name, "maybe_unused") || !strcmp(name, "deprecated") ||
-               !strcmp(name, "noreturn");
+               !strcmp(name, "noreturn") || !strcmp(name, "nodiscard") ||
+               !strcmp(name, "fallthrough") || !strcmp(name, "no_unique_address");
 
     if (!strcmp(vendor, "jcc"))
         return !strcmp(name, "comptime") || !strcmp(name, "macro");

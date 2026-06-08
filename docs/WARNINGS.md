@@ -84,6 +84,8 @@ The warning infrastructure recognizes these category names:
 - `jcc-macro`
 - `ignored-features`
 - `attributes`
+- `nodiscard`
+- `fallthrough`
 
 `conversion` is an umbrella name: `-Wconversion` enables `sign-conversion` and
 `float-conversion` as well as the integer-narrowing check.
@@ -171,4 +173,12 @@ and `(void)symbol`. Set-but-not-used analysis is not currently performed.
   `-Wignored-features`: `_Atomic` (loads and stores are not atomic),
   `_Thread_local` / `__thread` (no thread-local storage is provided).
 - Unknown `__attribute__((...))` and `[[...]]` attributes use `-Wattributes`.
+- Discarded return values of functions or types declared with `[[nodiscard]]`
+  use `-Wnodiscard`.  An optional message string from `[[nodiscard("...")]]`
+  is included in the diagnostic.  Casting to `(void)` suppresses the warning.
+  `-Wnodiscard` is part of `-Wall`.
+- Unannotated fallthrough between switch case labels uses `-Wfallthrough`.
+  The `[[fallthrough]]` null statement attribute marks an intentional fallthrough
+  and suppresses the warning for that case group.  `-Wfallthrough` is part of
+  `-Wextra`.
 - Unknown `#pragma` directives use `-Wcpp`.

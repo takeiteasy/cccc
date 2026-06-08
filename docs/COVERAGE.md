@@ -198,7 +198,7 @@ C17 is a bug-fix release — no new language features or library functions were 
 | `_BitInt(N)` arbitrary-precision integers | ✗ | |
 | Binary integer literals `0b10101010` | ✓ | |
 | Digit separators `1'000'000` | ✓ | |
-| `[[...]]` attributes | ~ | Parsed; `[[maybe_unused]]` and `[[deprecated]]` supported (see [Attributes](#attributes)) |
+| `[[...]]` attributes | ~ | Parsed; `[[maybe_unused]]`, `[[deprecated]]`, `[[nodiscard]]`, and `[[fallthrough]]` supported; `[[no_unique_address]]` parsed only (see [Attributes](#attributes)) |
 | `bool`, `true`, `false` as keywords (not just macros) | ~ | Available via `<stdbool.h>`; not reserved keywords at the tokeniser level |
 | `u8` character literals (`u8'x'`) | ✗ | |
 | Unnamed function parameters (`void f(int, double)`) | ✓ | |
@@ -462,6 +462,8 @@ return `0`. `__has_cpp_attribute` returns `0`.
 | `macro` | GNU | ✓ | JCC-specific; compile-time macro (see [MACROS.md](MACROS.md)) |
 | `comptime` | GNU | ✓ | JCC-specific; compile-time variable evaluation (see [MACROS.md](MACROS.md)) |
 | `format(printf/scanf, …)` | GNU | ✓ | Type-check printf/scanf format strings at compile time; gated by `-F` |
+| `nodiscard` | C23 | ✓ | Warns on discarded return values (`-Wnodiscard`, part of `-Wall`) |
+| `fallthrough` | C23 | ✓ | Suppresses fallthrough warning in switch cases (`-Wfallthrough`, part of `-Wextra`) |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
 ### Supported Attributes
@@ -574,9 +576,9 @@ Ignored attributes include (but are not limited to):
 
 | Attribute | Syntax | Tracking |
 |-----------|--------|----------|
-| `nodiscard` | C23 | [#219](https://todo.sr.ht/~takeiteasy/jcc/219) |
-| `fallthrough` | C23 | Statement-level attribute support pending; [#219](https://todo.sr.ht/~takeiteasy/jcc/219) |
-| `no_unique_address` | C23 | [#219](https://todo.sr.ht/~takeiteasy/jcc/219) |
+| `nodiscard` | C23 | ✓ |
+| `fallthrough` | C23 | ✓ |
+| `no_unique_address` | C23 | Parsed but ignored — see ticket |
 | `noreturn` | C23/GNU | ✓ |
 | `pure` | GNU | [#217](https://todo.sr.ht/~takeiteasy/jcc/217) |
 | `const` | GNU | [#217](https://todo.sr.ht/~takeiteasy/jcc/217) |
@@ -607,7 +609,7 @@ Ignored attributes include (but are not limited to):
 | [#216](https://todo.sr.ht/~takeiteasy/jcc/216) | `noreturn` / `[[noreturn]]` | high | ✓ Implemented |
 | [#217](https://todo.sr.ht/~takeiteasy/jcc/217) | `pure` / `const` | medium | Side-effect-free function annotations for optimisation |
 | [#218](https://todo.sr.ht/~takeiteasy/jcc/218) | `cleanup(func)` | medium | Scope-based cleanup callbacks (RAII-style) |
-| [#219](https://todo.sr.ht/~takeiteasy/jcc/219) | `nodiscard`, `fallthrough`, `no_unique_address` | medium | Remaining standard C23 attributes |
+| [#219](https://todo.sr.ht/~takeiteasy/jcc/219) | `no_unique_address` | low | Parsed but not semantically honoured; VM optimisation deferred |
 
 The JCC-specific `@`-prefix attribute syntax is tracked separately in
 [#234](https://todo.sr.ht/~takeiteasy/jcc/234).

@@ -45,8 +45,11 @@ int main(void) {
 #if __has_c_attribute(noreturn)
     result += 4;
 #endif
-#if __has_c_attribute(fallthrough) || __has_c_attribute(nodiscard)
-    return 3;
+#if __has_c_attribute(fallthrough)
+    result += 4;
+#endif
+#if __has_c_attribute(nodiscard)
+    result += 4;
 #endif
 #if __has_cpp_attribute(deprecated)
     return 4;
@@ -54,6 +57,7 @@ int main(void) {
 
     // result was 40 before adding format (10 checks × 4)
     // now 44 with format (11 × 4); then 48 with noreturn attribute (12 × 4);
-    // now 52 with noreturn c_attribute (13 × 4); subtract 10 to keep exit code 42
-    return result - 10;
+    // now 52 with noreturn c_attribute (13 × 4); plus fallthrough/nodiscard
+    // gives 60 (15 × 4); subtract 18 to keep exit code 42
+    return result - 18;
 }
