@@ -497,7 +497,6 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 - Teardown hooks are skipped on test timeout (VM state is unknown after `SIGALRM`). They run in all other cases, including after test or setup failure.
 - Calling `exit()` directly in a test terminates the entire process rather than failing just that test. Use `$assert*` macros instead.
 - `--testing` cannot be combined with `-c`, `-o`, or other output flags.
-- `--test-format` requires `--testing` (or a flag that implies it, like `--test`).
 - Suite blocks (`#pragma cccc suite begin/end`) cannot be nested.
 - **Negative test bodies are matched against error substrings.** Use a substring that is specific enough to avoid false matches but not so specific that it breaks with minor message wording changes.
 - `--test-timeout` uses `SIGALRM`; test code that also uses `alarm()` or installs a `SIGALRM` handler will interfere with the timeout mechanism.

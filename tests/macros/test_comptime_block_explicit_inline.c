@@ -13,7 +13,7 @@ $node_t *make_answer(void) {
     return $int_literal(helper(41));
 }
 
-#pragma cccc end
+#pragma cccc comptime end
 
 int main(void) {
     if (make_answer() != 42)

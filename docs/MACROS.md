@@ -347,7 +347,7 @@ The GNU-attribute equivalent is `__attribute__((comptime))`.
 
 ### Comptime block
 
-`#pragma cccc comptime begin` / `#pragma cccc end` opens a block where every
+`#pragma cccc comptime begin` / `#pragma cccc comptime end` opens a block where every
 declaration is implicitly `[[cccc::comptime]]` — no per-declaration attribute
 required.
 
@@ -362,7 +362,7 @@ int glob_count(const char *pat, int flags) {
     return n;
 }
 int helper = 7;                // comptime variable
-#pragma cccc end
+#pragma cccc comptime end
 
 // Back to normal runtime code
 int main(void) { ... }
@@ -378,20 +378,20 @@ Blocks cannot be nested. A second `#pragma cccc comptime begin` while one is
 already open is a hard error.
 
 **Bare form** — omit `begin` to activate without a keyword; close with
-`#pragma cccc end` as usual. Useful at the top of a dedicated comptime helper
+`#pragma cccc comptime end` (or bare `#pragma cccc end` for backwards compatibility). Useful at the top of a dedicated comptime helper
 file where the whole file is comptime:
 
 ```c
 #pragma cccc comptime
 int double_it(int n) { return n * 2; }
 int scale = 3;
-#pragma cccc end
+#pragma cccc comptime end
 
 int main(void) { return double_it(scale * 7); }
 ```
 
 **Auto-close in headers** — if a header opens a comptime block but omits
-`#pragma cccc end`, the block is closed automatically when the header ends
+`#pragma cccc comptime end` (or bare `#pragma cccc end`), the block is closed automatically when the header ends
 and a `[-Wcomptime-block-leak]` warning is emitted.
 
 ### Comptime-only includes

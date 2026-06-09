@@ -3,7 +3,7 @@
 
 #pragma cccc comptime begin
 int answer = 42;
-#pragma cccc end
+#pragma cccc comptime end
 
 [[cccc::comptime(inline)]]
 $node_t *get_answer(void) {

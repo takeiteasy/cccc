@@ -2361,6 +2361,13 @@ static Token *handle_pragma_body(CCCC *vm, Token *tok) {
         Token *sub = tok->next;
         if (equal(sub, "comptime")) {
             Token *after = sub->next;
+            if (after && equal(after, "end")) {
+                if (!vm->compiler.in_comptime_block)
+                    error_tok(vm, tok, "stray #pragma cccc comptime end without matching begin");
+                vm->compiler.in_comptime_block = false;
+                vm->compiler.comptime_block_file = NULL;
+                return skip_line(vm, after->next);
+            }
             bool is_begin = after && equal(after, "begin");
             if (vm->compiler.in_comptime_block)
                 error_tok(vm, tok, "#pragma cccc comptime: blocks cannot be nested");
@@ -2368,10 +2375,15 @@ static Token *handle_pragma_body(CCCC *vm, Token *tok) {
             vm->compiler.comptime_block_file = tok->file;
             return skip_line(vm, is_begin ? after->next : after);
         } else if (equal(sub, "end")) {
-            if (!vm->compiler.in_comptime_block)
-                error_tok(vm, tok, "stray #pragma cccc end without matching #pragma cccc comptime");
-            vm->compiler.in_comptime_block = false;
-            vm->compiler.comptime_block_file = NULL;
+            if (vm->compiler.in_comptime_block) {
+                vm->compiler.in_comptime_block = false;
+                vm->compiler.comptime_block_file = NULL;
+            } else if (vm->compiler.current_suite) {
+                free(vm->compiler.current_suite);
+                vm->compiler.current_suite = NULL;
+            } else {
+                error_tok(vm, tok, "stray #pragma cccc end without matching begin");
+            }
             return skip_line(vm, sub->next);
         } else if (equal(sub, "suite")) {
             Token *after = sub->next;

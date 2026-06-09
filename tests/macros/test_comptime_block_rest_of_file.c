@@ -1,5 +1,5 @@
 // Ticket #292: bare #pragma cccc comptime (no 'begin' keyword) is sugar for
-// #pragma cccc comptime begin — the block can still be closed with #pragma cccc end.
+// #pragma cccc comptime begin — the block can be closed with #pragma cccc comptime end.
 
 #pragma cccc comptime
 
@@ -14,7 +14,7 @@ $node_t *make_answer(void) {
     return $int_literal(triple($get_comptime_int("base")));
 }
 
-#pragma cccc end
+#pragma cccc comptime end
 
 int main(void) {
     if (make_answer() != 42)

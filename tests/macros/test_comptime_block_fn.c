@@ -5,7 +5,7 @@
 int double_it(int n) {
     return n * 2;
 }
-#pragma cccc end
+#pragma cccc comptime end
 
 [[cccc::comptime(inline)]]
 $node_t *make_doubled(void) {
