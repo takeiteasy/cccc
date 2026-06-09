@@ -652,6 +652,43 @@ void register_signal_functions(CCCC *vm);
 /* VM-managed signal pending flags (set only by async-safe native shims) */
 extern volatile sig_atomic_t _cccc_pending[CCCC_NSIG];
 extern volatile sig_atomic_t _cccc_any_pending;
+/* Comparison helpers for test attribute assertions (CmpOp). */
+static inline const char *cmp_op_str(CmpOp op) {
+    switch (op) {
+    case CMP_EQ: return "=";
+    case CMP_NE: return "!=";
+    case CMP_LT: return "<";
+    case CMP_LE: return "<=";
+    case CMP_GT: return ">";
+    case CMP_GE: return ">=";
+    default:     return "?";
+    }
+}
+
+static inline bool apply_cmp_op_i64(CmpOp op, int64_t a, int64_t b) {
+    switch (op) {
+    case CMP_EQ: return a == b;
+    case CMP_NE: return a != b;
+    case CMP_LT: return a <  b;
+    case CMP_LE: return a <= b;
+    case CMP_GT: return a >  b;
+    case CMP_GE: return a >= b;
+    default:     return false;
+    }
+}
+
+static inline bool apply_cmp_op_f64(CmpOp op, double a, double b, double eps) {
+    switch (op) {
+    case CMP_EQ: { double d = a - b; return d < eps && d > -eps; }
+    case CMP_NE: { double d = a - b; return !(d < eps && d > -eps); }
+    case CMP_LT: return a <  b;
+    case CMP_LE: return a <= b;
+    case CMP_GT: return a >  b;
+    case CMP_GE: return a >= b;
+    default:     return false;
+    }
+}
+
 /* Async-safe native shim installed for user-registered VM signal handlers */
 void _cccc_sig_shim(int sig);
 void register_stdio_functions(CCCC *vm);

@@ -928,6 +928,25 @@ typedef struct ComptimeVarMember {
     struct ComptimeVarMember *next;
 } ComptimeVarMember;
 
+// Comparison operator for test attribute assertions (error_count, return).
+typedef enum {
+    CMP_NONE = 0, // field not specified
+    CMP_EQ,       // = or ==
+    CMP_NE,       // !=
+    CMP_LT,       // <
+    CMP_LE,       // <=
+    CMP_GT,       // >
+    CMP_GE,       // >=
+} CmpOp;
+
+// Discriminator for the return= assertion type.
+typedef enum {
+    RET_NONE  = 0, // return= not specified
+    RET_INT,       // integer / char / enum (via vm->regs[REG_A0])
+    RET_FLOAT,     // float / double (via vm->fregs[FREG_A0])
+    RET_STR,       // char* compared with strcmp (pointer via vm->regs[REG_A0])
+} RetKind;
+
 // A test function registered via [[cccc::test]].
 typedef struct TestFnRecord TestFnRecord;
 struct TestFnRecord {
@@ -935,12 +954,19 @@ struct TestFnRecord {
     char *display_name; // human-readable name from name = "..."; NULL = use name
     char *suite;        // NULL if no suite assigned
     char *error_pat;    // expected error substring; NULL = normal test
+    bool  error_pat_negate; // true = error must NOT contain error_pat
     int   neg_passed;   // 1=passed, 0=no error produced, -1=wrong error
     char  neg_actual[256]; // first actual error for failure diagnostics
     long  timeout_ms;   // per-test timeout in ms (0 = use global --test-timeout)
-    int   expect_errors;// for negative tests: expected error count (0 = any)
-    bool  has_expect_return; // true if return= was specified
-    long  expect_return;     // expected int return value (only if has_expect_return)
+    int   expect_errors;   // operand for error_count assertion (0 if unset)
+    CmpOp error_count_op;  // CMP_NONE = not set; otherwise the comparison operator
+    RetKind ret_kind;      // RET_NONE = no return assertion
+    CmpOp   ret_op;        // comparison operator for return (default CMP_EQ)
+    union {
+        int64_t  ret_int;  // for RET_INT
+        double   ret_float;// for RET_FLOAT
+        char    *ret_str;  // for RET_STR
+    } ret_expect;
     TestFnRecord *next;
 };
 

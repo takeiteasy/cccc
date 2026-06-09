@@ -4,7 +4,7 @@ CCCC includes a built-in test framework for writing tests directly in C, using t
 
 ## Writing Tests
 
-Mark a function as a test with `[[cccc::test]]`. Test functions must take no arguments; they may return `void` or `int`:
+Mark a function as a test with `[[cccc::test]]`. Test functions must take no arguments; they may return `void`, `int`, `double`, `float`, or `char *`:
 
 ```c
 [[cccc::test]]
@@ -111,39 +111,106 @@ Negative test bodies are compiled in error-collection mode; their errors are abs
 
 ### Expected error count
 
-Add `error_count = N` to assert that exactly `N` compilation errors are produced, rather than
-just one matching the pattern:
+Add `error_count` with a comparison operator to assert something about the number of compilation errors produced. The supported operators are `=` (or `==`), `!=`, `<`, `<=`, `>`, and `>=`. When no operator is written, `=` is assumed:
 
 ```c
 [[cccc::test(error = "undefined variable", error_count = 1)]]
 void test_exactly_one_error(void) {
     int x = not_declared;
 }
-```
 
-The test passes only if: (1) at least one error matches the `error` pattern, and
-(2) the total number of compilation errors in the test body equals `N` (when
-`N > 0`).  A count mismatch is reported as a failed negative test with a
-descriptive message.
+[[cccc::test(error = "undefined", error_count > 1)]]
+void test_more_than_one_error(void) {
+    int a = x + y;  // two undeclared variables
+}
 
-### Return value assertion
-
-Use `return = N` to assert that a test function returns a specific integer value. The test function must have an `int` return type:
-
-```c
-[[cccc::test(return = 1)]]
-int test_fn(void) {
-    int x = 0;
-    if (x > 0)
-        return 0; // fail — expected 1
-    return 1;     // pass
+[[cccc::test(error = "undefined", error_count != 1)]]
+void test_not_exactly_one(void) {
+    int a = x + y;  // two errors, so != 1 passes
 }
 ```
 
-If the function returns a value other than `N`, the test is reported as failed with a message showing the expected and actual values:
+The test passes only if: (1) at least one error matches the `error` pattern, and
+(2) the `error_count` assertion holds.  A count mismatch is reported as a failed
+negative test with a descriptive message.
+
+### Negated pattern matching
+
+Use `error != "pattern"` to assert that no compilation error contains the given substring. The function body must still produce at least one error (it is still a negative test):
+
+```c
+[[cccc::test(error != "cannot convert")]]
+void test_no_type_error(void) {
+    int x = undefined_var;  // undeclared error, but no type conversion error
+}
+```
+
+The test passes if at least one error is produced and none of them contain the pattern. It fails if any error matches the pattern.
+
+### Return value assertion
+
+Use `return = value` to assert that a test function returns a specific value. The comparison type is inferred from the literal:
+
+**Integer** (and `char`/`enum`): the function's return value is compared as a 64-bit integer. `char` and `enum` values must be written as their numeric equivalent — enum *names* (`return = GREEN`) are not resolved and will silently skip the assertion.
+
+```c
+[[cccc::test(return = 42)]]
+int test_the_answer(void) {
+    return 6 * 7;
+}
+
+[[cccc::test(return = -1)]]
+int test_neg(void) {
+    return -1;
+}
+
+[[cccc::test(return = 65)]]
+int test_char_a(void) {
+    return (int)'A';  // 'A' == 65; use the integer value, not the char literal
+}
+
+// enum: write the integer value, not the enum name
+// [[cccc::test(return = 1)]]  ← correct
+// [[cccc::test(return = GREEN)]]  ← silently ignored (enum names not supported)
+```
+
+**Float/double**: the return value is compared within an absolute tolerance of `1e-9` for `=`/`!=`. For ordered comparisons (`<`, `>`, etc.) no tolerance is applied.
+
+```c
+[[cccc::test(return = 3.14)]]
+double test_pi(void) {
+    return 3.14;
+}
+```
+
+**String** (`char *`): the returned pointer is compared to the literal using `strcmp`.
+
+```c
+[[cccc::test(return = "ok")]]
+const char *test_status(void) {
+    return "ok";
+}
+```
+
+**Comparison operators** (`=`, `!=`, `<`, `<=`, `>`, `>=`): use a comparison operator instead of equality. The default (no operator) is `=`.
+
+```c
+[[cccc::test(return > 0)]]
+int test_positive(void) {
+    return 42;
+}
+
+[[cccc::test(return != 0)]]
+int test_nonzero(void) {
+    return -1;
+}
+```
+
+If the assertion fails, the test is reported as failed with a message showing the expected and actual values:
 
 ```
-expected return value 1, got 0
+expected return value = 42, got 7
+expected return string = "ok", got "err"
 ```
 
 `return` may be combined with other options:
@@ -523,7 +590,8 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 
 ## Limitations
 
-- Test functions must take no arguments and return either `void` or `int`. Use `return = N` to assert on the return value.
+- Test functions must take no arguments and return `void`, `int`, `double`, `float`, or `char *`. Use `return = value` to assert on the return value.
+- `return =` assertions support integer literals, float literals, and string literals. Enum names (`return = GREEN`) and character literals (`return = 'A'`) are not resolved — use the integer value instead (`return = 1`, `return = 65`).
 - Setup and teardown hook functions must also have signature `void name(void)`.
 - Teardown hooks are skipped on test timeout (VM state is unknown after `SIGALRM`). They run in all other cases, including after test or setup failure.
 - Calling `exit()` directly in a test terminates the entire process rather than failing just that test. Use `$assert*` macros instead.

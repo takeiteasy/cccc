@@ -1945,13 +1945,18 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
     bool is_teardown_kind  = false;
     bool is_inline         = false;
     Token *attr_end        = NULL;
-    const char *suite_name = NULL; // extracted from [[cccc::test(suite = "...")]]
-    const char *error_pat  = NULL; // extracted from [[cccc::test(error = "...")]]
-    const char *test_name  = NULL; // extracted from [[cccc::test(name = "...")]]
-    long test_timeout_ms   = 0;    // extracted from [[cccc::test(timeout = ...)]]
-    int  test_error_count  = 0;    // extracted from [[cccc::test(error_count = ...)]]
-    bool has_expect_return = false;
-    long expect_return_val = 0;    // extracted from [[cccc::test(return = ...)]]
+    const char *suite_name    = NULL; // extracted from [[cccc::test(suite = "...")]]
+    const char *error_pat     = NULL; // extracted from [[cccc::test(error = "...")]]
+    bool  error_pat_negate    = false;// true = error != "pat"
+    const char *test_name     = NULL; // extracted from [[cccc::test(name = "...")]]
+    long  test_timeout_ms     = 0;    // extracted from [[cccc::test(timeout = ...)]]
+    int   test_error_count    = 0;    // extracted from [[cccc::test(error_count OP ...)]]
+    CmpOp test_error_count_op = CMP_NONE;
+    RetKind ret_kind          = RET_NONE;
+    CmpOp   ret_op            = CMP_EQ;
+    int64_t ret_int_val       = 0;
+    double  ret_float_val     = 0.0;
+    const char *ret_str_val   = NULL;
     // For [[cccc::test_setup/teardown]]:
     const char *hook_name_pat = NULL;
     const char *hook_suite    = NULL;
@@ -2036,11 +2041,16 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                             p->next->next && p->next->next->kind == TK_STR) {
                             suite_name = p->next->next->str;
                             p = p->next->next->next;
-                        } else if (equal(p, "error") &&
-                                   p->next && equal(p->next, "=") &&
-                                   p->next->next && p->next->next->kind == TK_STR) {
-                            error_pat = p->next->next->str;
-                            p = p->next->next->next;
+                        } else if (equal(p, "error")) {
+                            // error = "pat"  or  error != "pat"
+                            p = p->next;
+                            bool neg = p && equal(p, "!=");
+                            if (neg || (p && equal(p, "="))) p = p->next;
+                            if (p && p->kind == TK_STR) {
+                                error_pat = p->str;
+                                error_pat_negate = neg;
+                                p = p->next;
+                            }
                         } else if (equal(p, "name") &&
                                    p->next && equal(p->next, "=") &&
                                    p->next->next && p->next->next->kind == TK_STR) {
@@ -2051,17 +2061,92 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                                    p->next->next && p->next->next->kind == TK_NUM) {
                             test_timeout_ms = p->next->next->val;
                             p = p->next->next->next;
-                        } else if (equal(p, "error_count") &&
-                                   p->next && equal(p->next, "=") &&
-                                   p->next->next && p->next->next->kind == TK_NUM) {
-                            test_error_count = p->next->next->val;
-                            p = p->next->next->next;
-                        } else if (equal(p, "return") &&
-                                   p->next && equal(p->next, "=") &&
-                                   p->next->next && p->next->next->kind == TK_NUM) {
-                            has_expect_return = true;
-                            expect_return_val = p->next->next->val;
-                            p = p->next->next->next;
+                        } else if (equal(p, "error_count")) {
+                            // error_count [op] N  (op defaults to =)
+                            p = p->next;
+                            CmpOp op = CMP_EQ;
+                            if (p && (equal(p, "=") || equal(p, "==") ||
+                                      equal(p, "!=") || equal(p, "<") ||
+                                      equal(p, "<=") || equal(p, ">") ||
+                                      equal(p, ">="))) {
+                                if      (equal(p, "!=")) op = CMP_NE;
+                                else if (equal(p, "<=")) op = CMP_LE;
+                                else if (equal(p, "<"))  op = CMP_LT;
+                                else if (equal(p, ">=")) op = CMP_GE;
+                                else if (equal(p, ">"))  op = CMP_GT;
+                                p = p->next;
+                            }
+                            if (p && p->kind == TK_NUM) {
+                                test_error_count    = (int)p->val;
+                                test_error_count_op = op;
+                                p = p->next;
+                            }
+                        } else if (equal(p, "return")) {
+                            // return [op] (string | float | signed-int)
+                            // Note: numbers inside [[...]] attributes are TK_PP_NUM
+                            // (preprocessing numbers, not yet converted to TK_NUM).
+                            // We parse their text directly with strtod/strtoll.
+                            p = p->next;
+                            CmpOp op = CMP_EQ;
+                            if (p && (equal(p, "=") || equal(p, "==") ||
+                                      equal(p, "!=") || equal(p, "<") ||
+                                      equal(p, "<=") || equal(p, ">") ||
+                                      equal(p, ">="))) {
+                                if      (equal(p, "!=")) op = CMP_NE;
+                                else if (equal(p, "<=")) op = CMP_LE;
+                                else if (equal(p, "<"))  op = CMP_LT;
+                                else if (equal(p, ">=")) op = CMP_GE;
+                                else if (equal(p, ">"))  op = CMP_GT;
+                                p = p->next;
+                            }
+                            if (p && p->kind == TK_STR) {
+                                ret_kind    = RET_STR;
+                                ret_op      = op;
+                                ret_str_val = p->str;
+                                p = p->next;
+                            } else if (p && (p->kind == TK_NUM || p->kind == TK_PP_NUM)) {
+                                // Check if the literal looks like a float (contains '.', 'e', 'E',
+                                // or ends with 'f'/'F') to distinguish float from integer.
+                                bool is_float = false;
+                                for (int _i = 0; _i < (int)p->len; _i++) {
+                                    char _c = p->loc[_i];
+                                    if (_c == '.' || _c == 'e' || _c == 'E') { is_float = true; break; }
+                                }
+                                if (!is_float && p->len > 0 &&
+                                    (p->loc[p->len-1] == 'f' || p->loc[p->len-1] == 'F'))
+                                    is_float = true;
+                                if (is_float) {
+                                    char _buf[64];
+                                    int _n = p->len < 63 ? (int)p->len : 63;
+                                    memcpy(_buf, p->loc, _n); _buf[_n] = '\0';
+                                    ret_kind      = RET_FLOAT;
+                                    ret_op        = op;
+                                    ret_float_val = strtod(_buf, NULL);
+                                } else {
+                                    char _buf[64];
+                                    int _n = p->len < 63 ? (int)p->len : 63;
+                                    memcpy(_buf, p->loc, _n); _buf[_n] = '\0';
+                                    ret_kind    = RET_INT;
+                                    ret_op      = op;
+                                    ret_int_val = (int64_t)strtoll(_buf, NULL, 0);
+                                }
+                                p = p->next;
+                            } else {
+                                // Signed integer: optional '-' then number token
+                                bool neg_num = p && equal(p, "-") &&
+                                              p->next &&
+                                              (p->next->kind == TK_NUM ||
+                                               p->next->kind == TK_PP_NUM);
+                                if (neg_num) {
+                                    char _buf[64];
+                                    int _n = p->next->len < 63 ? (int)p->next->len : 63;
+                                    memcpy(_buf, p->next->loc, _n); _buf[_n] = '\0';
+                                    ret_int_val = -(int64_t)strtoll(_buf, NULL, 0);
+                                    p = p->next->next;
+                                    ret_kind = RET_INT;
+                                    ret_op   = op;
+                                }
+                            }
                         } else {
                             p = p->next;
                         }
@@ -2147,12 +2232,22 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                 // Suite: explicit attribute arg takes priority, then active pragma suite
                 const char *s = suite_name ? suite_name : vm->compiler.current_suite;
                 rec->suite      = s ? strdup(s) : NULL;
-                rec->error_pat  = error_pat ? strdup(error_pat) : NULL;
-                rec->timeout_ms = test_timeout_ms;
-                if (error_pat)
-                    rec->expect_errors = test_error_count;
-                rec->has_expect_return = has_expect_return;
-                rec->expect_return     = expect_return_val;
+                rec->error_pat        = error_pat ? strdup(error_pat) : NULL;
+                rec->error_pat_negate = error_pat_negate;
+                rec->timeout_ms       = test_timeout_ms;
+                if (error_pat && test_error_count_op != CMP_NONE) {
+                    rec->expect_errors    = test_error_count;
+                    rec->error_count_op   = test_error_count_op;
+                } else if (error_pat && test_error_count > 0) {
+                    // backwards compat: error_count = N without explicit operator
+                    rec->expect_errors    = test_error_count;
+                    rec->error_count_op   = CMP_EQ;
+                }
+                rec->ret_kind = ret_kind;
+                rec->ret_op   = (ret_kind != RET_NONE) ? ret_op : CMP_EQ;
+                if (ret_kind == RET_INT)        rec->ret_expect.ret_int   = ret_int_val;
+                else if (ret_kind == RET_FLOAT) rec->ret_expect.ret_float = ret_float_val;
+                else if (ret_kind == RET_STR)   rec->ret_expect.ret_str   = ret_str_val ? strdup(ret_str_val) : NULL;
                 rec->next = vm->compiler.test_fns;
                 vm->compiler.test_fns = rec;
                 break;

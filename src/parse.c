@@ -6217,18 +6217,37 @@ static Token *function(CCCC *vm, Token *tok, Type *basety, VarAttr *attr) {
             if (new_errors && new_errors->message)
                 strncpy(neg_rec->neg_actual, new_errors->message,
                         sizeof(neg_rec->neg_actual) - 1);
-            // First check: if expect_errors is set, error count must match
-            if (neg_rec->expect_errors > 0 && err_count != neg_rec->expect_errors) {
+            // First check: if error_count operator is set, apply it
+            if (neg_rec->error_count_op != CMP_NONE &&
+                !apply_cmp_op_i64(neg_rec->error_count_op, err_count, neg_rec->expect_errors)) {
                 snprintf(neg_rec->neg_actual, sizeof(neg_rec->neg_actual),
-                         "expected %d errors, got %d", neg_rec->expect_errors, err_count);
+                         "expected error_count %s %d, got %d",
+                         cmp_op_str(neg_rec->error_count_op),
+                         neg_rec->expect_errors, err_count);
             } else {
-                // Second check: error message must match error_pat
-                for (CompileError *e = new_errors; e; e = e->next) {
-                    if (e->message && strstr(e->message, neg_rec->error_pat)) {
+                // Second check: error message pattern
+                if (neg_rec->error_pat_negate) {
+                    // error != "pat": passes if NO error contains the pattern
+                    bool matched = false;
+                    for (CompileError *e = new_errors; e; e = e->next) {
+                        if (e->message && strstr(e->message, neg_rec->error_pat)) {
+                            matched = true;
+                            snprintf(neg_rec->neg_actual, sizeof(neg_rec->neg_actual),
+                                     "error unexpectedly matched \"%s\": %s",
+                                     neg_rec->error_pat, e->message);
+                            break;
+                        }
+                    }
+                    if (!matched)
                         neg_rec->neg_passed = 1;
-                        strncpy(neg_rec->neg_actual, e->message,
-                                sizeof(neg_rec->neg_actual) - 1);
-                        break;
+                } else {
+                    for (CompileError *e = new_errors; e; e = e->next) {
+                        if (e->message && strstr(e->message, neg_rec->error_pat)) {
+                            neg_rec->neg_passed = 1;
+                            strncpy(neg_rec->neg_actual, e->message,
+                                    sizeof(neg_rec->neg_actual) - 1);
+                            break;
+                        }
                     }
                 }
             }

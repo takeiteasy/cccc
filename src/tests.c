@@ -20,6 +20,7 @@
 #include "cccc.h"
 #include "internal.h"
 #include <fnmatch.h>
+#include <inttypes.h>
 #include <signal.h>
 #include <string.h>
 #include <sys/time.h>
@@ -911,7 +912,8 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
         run.timed_out = 0;
         run.fail_msg[0] = '\0';
         s_alarm_fired   = 0;
-        int ret_val = 0;
+        int64_t ret_int   = 0;
+        double  ret_float = 0.0;
 
         // Per-test timeout: individual timeout_ms overrides the global value.
         long effective_ms = r->timeout_ms > 0 ? r->timeout_ms : global_timeout_ms;
@@ -940,7 +942,10 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
         int jval = setjmp(run.jmp);
         if (jval == 0) {
             run_hooks(vm, prog, setups, false, false, cur_suite, disp);
-            ret_val = cc_run_at(vm, (CCCCPc)fn->code_addr, 0, NULL);
+            cc_run_at(vm, (CCCCPc)fn->code_addr, 0, NULL);
+            // Capture return values before teardown hooks clobber the registers.
+            ret_int   = (int64_t)vm->regs[REG_A0];
+            ret_float = cccc_freg_get_f64(vm, FREG_A0);
         } else if (jval == 2) {
             run.timed_out = 1;
         }
@@ -955,10 +960,44 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
                 run.failed = 1;
                 strncpy(run.fail_msg, td_fail, sizeof(run.fail_msg) - 1);
             }
-            if (!run.failed && r->has_expect_return && ret_val != (int)r->expect_return) {
-                run.failed = 1;
-                snprintf(run.fail_msg, sizeof(run.fail_msg),
-                         "expected return value %ld, got %d", r->expect_return, ret_val);
+            if (!run.failed && r->ret_kind != RET_NONE) {
+                bool ret_ok = false;
+                switch (r->ret_kind) {
+                case RET_INT:
+                    ret_ok = apply_cmp_op_i64(r->ret_op, ret_int, r->ret_expect.ret_int);
+                    if (!ret_ok)
+                        snprintf(run.fail_msg, sizeof(run.fail_msg),
+                                 "expected return value %s %" PRId64 ", got %" PRId64,
+                                 cmp_op_str(r->ret_op),
+                                 r->ret_expect.ret_int, ret_int);
+                    break;
+                case RET_FLOAT:
+                    ret_ok = apply_cmp_op_f64(r->ret_op, ret_float,
+                                              r->ret_expect.ret_float, 1e-9);
+                    if (!ret_ok)
+                        snprintf(run.fail_msg, sizeof(run.fail_msg),
+                                 "expected return value %s %g, got %g",
+                                 cmp_op_str(r->ret_op),
+                                 r->ret_expect.ret_float, ret_float);
+                    break;
+                case RET_STR: {
+                    char *got = (char *)(intptr_t)ret_int;
+                    const char *exp = r->ret_expect.ret_str;
+                    int cmp = (got && exp) ? strcmp(got, exp)
+                                          : (got ? 1 : (exp ? -1 : 0));
+                    ret_ok = apply_cmp_op_i64(r->ret_op, (int64_t)cmp, 0);
+                    if (!ret_ok)
+                        snprintf(run.fail_msg, sizeof(run.fail_msg),
+                                 "expected return string %s \"%s\", got \"%s\"",
+                                 cmp_op_str(r->ret_op),
+                                 exp ? exp : "(null)", got ? got : "(null)");
+                    break;
+                }
+                default:
+                    ret_ok = true;
+                    break;
+                }
+                if (!ret_ok) run.failed = 1;
             }
         }
 
