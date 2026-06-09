@@ -171,11 +171,8 @@ static int run_native_backend(JCC *vm, Obj *prog, const char *out_file,
     argv_push(&cc_args, "-o");
     argv_push(&cc_args, exe_path);
     if (std_arg) {
-        size_t len = strlen(std_arg) + 6;
-        char *std_flag = malloc(len);
-        if (!std_flag)
-            error("failed to allocate -std flag");
-        snprintf(std_flag, len, "-std=%s", std_arg);
+        char std_flag[256];
+        snprintf(std_flag, sizeof(std_flag), "-std=%s", std_arg);
         argv_push(&cc_args, std_flag);
     }
     for (int i = 0; i < inc_paths_count; i++) {
@@ -187,19 +184,13 @@ static int run_native_backend(JCC *vm, Obj *prog, const char *out_file,
         argv_push(&cc_args, sys_inc_paths[i]);
     }
     for (int i = 0; i < defines_count; i++) {
-        size_t len = strlen(defines[i]) + 3;
-        char *flag = malloc(len);
-        if (!flag)
-            error("failed to allocate -D flag");
-        snprintf(flag, len, "-D%s", defines[i]);
+        char flag[256];
+        snprintf(flag, sizeof(flag), "-D%s", defines[i]);
         argv_push(&cc_args, flag);
     }
     for (int i = 0; i < undefs_count; i++) {
-        size_t len = strlen(undefs[i]) + 3;
-        char *flag = malloc(len);
-        if (!flag)
-            error("failed to allocate -U flag");
-        snprintf(flag, len, "-U%s", undefs[i]);
+        char flag[256];
+        snprintf(flag, sizeof(flag), "-U%s", undefs[i]);
         argv_push(&cc_args, flag);
     }
     for (int i = 0; i < lib_paths_count; i++) {
@@ -207,11 +198,8 @@ static int run_native_backend(JCC *vm, Obj *prog, const char *out_file,
         argv_push(&cc_args, lib_paths[i]);
     }
     for (int i = 0; i < libs_count; i++) {
-        size_t len = strlen(libs[i]) + 3;
-        char *flag = malloc(len);
-        if (!flag)
-            error("failed to allocate -l flag");
-        snprintf(flag, len, "-l%s", libs[i]);
+        char flag[256];
+        snprintf(flag, sizeof(flag), "-l%s", libs[i]);
         argv_push(&cc_args, flag);
     }
 

@@ -1065,6 +1065,22 @@ void cc_destroy(JCC *vm) {
         free(vm->compiler.file_buffers.data);
     }
 
+    // Free forward_includes (strdup'd strings + data array)
+    if (vm->compiler.forward_includes.data) {
+        for (int i = 0; i < vm->compiler.forward_includes.len; i++)
+            free(vm->compiler.forward_includes.data[i]);
+        free(vm->compiler.forward_includes.data);
+    }
+
+    // Free comptime_pending_includes data array (strings are arena-allocated)
+    free(vm->compiler.comptime_pending_includes.data);
+
+    // Free linked programs array
+    free(vm->compiler.link_progs);
+
+    // Free source map (debugger)
+    free(vm->dbg.source_map);
+
     // Free watchpoint expressions
     for (int i = 0; i < MAX_WATCHPOINTS; i++) {
         if (vm->dbg.watchpoints[i].expr) {
@@ -1077,6 +1093,16 @@ void cc_destroy(JCC *vm) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
         hashmap_deinit_borrowed(&sc->var_map);
         hashmap_deinit_borrowed(&sc->tag_map);
+    }
+
+    // Free macro_context_scope HashMap buckets — this scope was entered by
+    // parse() and stashed by compile_macro_program, then temporarily spliced
+    // into the scope chain during macro execution.  After cc_expand_macros
+    // restores scope_before->next it is no longer reachable from the head of
+    // the chain, so the main loop above misses it.
+    if (vm->compiler.macro_context_scope) {
+        hashmap_deinit_borrowed(&vm->compiler.macro_context_scope->var_map);
+        hashmap_deinit_borrowed(&vm->compiler.macro_context_scope->tag_map);
     }
 
     // Destroy parser arena (frees all tokens, AST nodes, preprocessor state)

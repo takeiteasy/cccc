@@ -2195,11 +2195,7 @@ int jcc_call_native_function(JCC *vm, void *func_ptr, const char *name,
         returns_double ? &ffi_type_double : &ffi_type_sint64;
 
     if (actual_nargs > 0) {
-        arg_types = malloc((size_t)actual_nargs * sizeof(ffi_type *));
-        if (!arg_types) {
-            printf("error: failed to allocate arg types for FFI\n");
-            return -1;
-        }
+        arg_types = alloca((size_t)actual_nargs * sizeof(ffi_type *));
         for (int i = 0; i < actual_nargs; i++)
             arg_types[i] = (i < 64 && (double_arg_mask & (1ULL << i)))
                                ? &ffi_type_double
@@ -2220,17 +2216,11 @@ int jcc_call_native_function(JCC *vm, void *func_ptr, const char *name,
 
     if (status != FFI_OK) {
         printf("error: failed to prepare FFI cif (status=%d)\n", status);
-        free(arg_types);
         return -1;
     }
 
     void **arg_ptrs =
-        malloc((size_t)(actual_nargs > 0 ? actual_nargs : 1) * sizeof(void *));
-    if (!arg_ptrs) {
-        printf("error: failed to allocate arg pointers for FFI\n");
-        free(arg_types);
-        return -1;
-    }
+        alloca((size_t)(actual_nargs > 0 ? actual_nargs : 1) * sizeof(void *));
     for (int i = 0; i < actual_nargs; i++)
         arg_ptrs[i] = &args[i];
 
@@ -2244,8 +2234,6 @@ int jcc_call_native_function(JCC *vm, void *func_ptr, const char *name,
         vm->regs[REG_A0] = result;
     }
 
-    free(arg_ptrs);
-    free(arg_types);
     return 0;
 }
 
