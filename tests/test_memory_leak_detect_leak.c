@@ -1,4 +1,4 @@
-// JCC_FLAGS: -m -V
+// JCC_FLAGS: --memory-leak-detection -V
 // JCC_EXPECT_STDERR: MEMORY LEAK DETECTED
 // Leak detection test — malloc without free triggers leak report on shutdown
 

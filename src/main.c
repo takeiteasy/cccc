@@ -218,49 +218,50 @@ static void usage(const char *argv0, int exit_code) {
     printf("https://git.sr.ht/~takeiteasy/jcc\n\n");
     printf("Usage: %s [options] file...\n\n", argv0);
     printf("Options:\n");
-    printf("\t-h/--help           Show this message\n");
-    printf("\t-I <path>           Add <path> to include search paths\n");
-    printf("\t-i/--isystem <path> Add <path> to system include paths (for "
+    printf("\t-h/--help                Show this message\n");
+    printf("\t-I <path>                Add <path> to include search paths\n");
+    printf("\t-i/--isystem <path>      Add <path> to system include paths (for "
            "non-standard headers)\n");
     printf("\t-L/--library-path <path> Add <path> to dynamic library search paths\n");
-    printf("\t-l/--library <name> Link dynamic library by name or path\n");
-    printf("\t-D <macro>[=def]    Define a macro\n");
-    printf("\t-U <macro>          Undefine a macro\n");
-    printf("\t-a/--ast            Dump AST\n");
-    printf("\t-P/--print-tokens   Print preprocessed tokens to stdout\n");
-    printf("\t-E/--preprocess     Output preprocessed source code (traditional "
+    printf("\t-l/--library <name>      Link dynamic library by name or path\n");
+    printf("\t-D <macro>[=def]         Define a macro\n");
+    printf("\t-U <macro>               Undefine a macro\n");
+    printf("\t-a/--ast                 Dump AST\n");
+    printf("\t-P/--print-tokens        Print preprocessed tokens to stdout\n");
+    printf("\t-E/--preprocess          Output preprocessed source code (traditional "
            "C -E)\n");
-    printf("\t-M/--dump-expanded  Output macro-expanded source code (for gcc "
+    printf("\t-M/--dump-expanded       Output macro-expanded source code (for gcc "
            "compatibility)\n");
-    printf("\t-G/--emit-generated Serialize only comptime macro-generated objects "
+    printf("\t-G/--emit-generated      Serialize only comptime macro-generated objects "
            "(no header noise)\n");
-    printf("\t-j/--json           Emit JSON for all eligible output "
+    printf("\t-j/--json                Emit JSON for all eligible output "
            "(diagnostics, header declarations, --fusion-candidates, etc.)\n");
-    printf("\t-K/--ffi-decls      Emit parsed function/struct/enum declarations "
-           "as JSON (for FFI wrapper generation)\n");
-    printf("\t-X/--no-preprocess  Disable preprocessing step\n");
-    printf("\t-S/--no-stdlib      Do not link standard library\n");
+    printf("\t   --ffi-decls           Emit parsed function/struct/enum declarations "
+            "as JSON (for FFI wrapper generation)\n");
+    printf("\t-X/--no-preprocess       Disable preprocessing step\n");
+    printf("\t-S/--no-stdlib           Do not link standard library\n");
     printf("\t-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: bytecode (default), native\n");
     printf("\t                         bytecode: write .jbc (to -o file, or stdout if -o omitted\n");
-    printf("\t                                  and stdout is not a TTY)\n");
-    printf("\t                         native:   require -o file; build a native executable via\n");
-    printf("\t                                  JCC_NATIVE_CC (cc, clang, or gcc)\n");
+    printf("\t                                   and stdout is not a TTY)\n");
+    printf("\t                         native: require -o file; build a native executable via\n");
+    printf("\t                                 JCC_NATIVE_CC (cc, clang, or gcc)\n");
     printf("\t                         Use -cnative or --compile=native (short form must be\n");
     printf("\t                         attached; long form may use '=' or separate arg).\n");
-    printf("\t-o/--out <file>     Output file. Required for -c=native. For -c=bytecode, writes\n");
-    printf("\t                     bytecode to <file>; if omitted, writes to stdout\n");
-    printf("\t-d/--disassemble    Disassemble bytecode to stdout\n");
-    printf("\t--testing           Discover and run [[jcc::test]] functions; output TAP\n");
-    printf("\t-v/--verbose        Enable debug logging\n");
-    printf("\t-g/--debug          Enable interactive debugger\n");
-    printf("\t-Y/--vm-profile     Count executed VM opcodes and print a report\n");
-    printf("\t                    Combine with --json to also dump the profile as JSON to stdout\n");
+    printf("\t-o/--out <file>          Output file. Required for -c=native. For -c=bytecode, writes\n");
+    printf("\t                         bytecode to <file>; if omitted, writes to stdout\n");
+    printf("\t-d/--disassemble         Disassemble bytecode to stdout\n");
+    printf("\t-t/--testing             Discover and run [[jcc::test]] functions; output TAP\n");
+    printf("\t-v/--verbose             Enable debug logging\n");
+    printf("\t-g/--debug               Enable interactive debugger\n");
+    printf("\t-e/--entry <name>        Set the entry-point function (default: main)\n");
+    printf("\t   --vm-profile          Count executed VM opcodes and print a report\n");
+    printf("\t                         Combine with --json to also dump the profile as JSON to stdout\n");
     printf("\nWarning Options:\n");
     printf("\t-Wall               Enable common warning categories\n");
     printf("\t-Wextra             Enable extra warning categories\n");
     printf("\t-W<name>            Enable a warning category\n");
     printf("\t-Wno-<name>         Disable a warning category\n");
-    printf("\t-q/--Werror         Treat enabled warnings as errors\n");
+    printf("\t-x/--Werror         Treat enabled warnings as errors\n");
     printf("\t-Werror=<name>      Treat one warning category as an error\n");
     printf("\t-Wno-error=<name>   Do not promote one warning category\n");
     printf("\nSafety Levels (preset flag combinations):\n");
@@ -273,21 +274,23 @@ static void usage(const char *argv0, int exit_code) {
            "(~60-100%%+ overhead)\n");
     printf("\nMemory Safety Options (can be combined with safety levels):\n");
     printf("\t-b/--bounds-checks           Runtime array bounds checking\n");
-    printf("\t-f/--uaf-detection           Use-after-free detection\n");
-    printf("\t-t/--type-checks             Runtime type checking on pointer "
-           "dereferences\n");
-    printf("\t-z/--uninitialized-detection Uninitialized variable detection\n");
+    printf("\t-u/--uaf-detection           Use-after-free detection\n");
+    printf("\t-C/--control-flow-integrity  Control-flow integrity (indirect call "
+            "validation)\n");
+    printf("\t-T/--type-checks             Runtime type checking on pointer "
+            "dereferences\n");
+    printf("\t   --uninitialized-detection Uninitialized variable detection\n");
     printf("\t   --overflow-checks         Detect signed integer overflow\n");
-    printf("\t-s/--stack-canaries          Stack overflow protection\n");
-    printf("\t-k/--heap-canaries           Heap overflow protection\n");
+    printf("\t   --stack-canaries          Stack overflow protection\n");
+    printf("\t-H/--heap-canaries           Heap overflow protection\n");
     printf("\t-m/--memory-leak-detection   Track allocations and report leaks "
-           "at exit\n");
-    printf("\t-J/--stack-instrumentation   Track stack variable lifetimes and "
-           "accesses\n");
+            "at exit\n");
+    printf("\t   --stack-instrumentation   Track stack variable lifetimes and "
+            "accesses\n");
     printf("\t   --stack-errors            Enable runtime errors for stack "
            "instrumentation\n");
     printf("\t-p/--pointer-sanitizer       Enable all pointer checks (bounds, "
-           "UAF, type)\n");
+            "UAF, type)\n");
     printf("\t   --dangling-pointers       Detect use of stack pointers after "
            "function return\n");
     printf(
@@ -296,38 +299,38 @@ static void usage(const char *argv0, int exit_code) {
            "operations\n");
     printf("\t   --invalid-arithmetic      Detect pointer arithmetic outside "
            "object bounds\n");
-    printf("\t-F/--format-string-checks    Validate format strings in "
-           "printf-family functions\n");
-    printf("\t   --random-canaries         Use random stack canaries (prevents "
-           "predictable bypass)\n");
+    printf("\t   --format-string-checks    Validate format strings in "
+            "printf-family functions\n");
+    printf("\t-R/--random-canaries         Use random stack canaries (prevents "
+            "predictable bypass)\n");
     printf("\t   --memory-poisoning        Poison allocated/freed memory "
            "(0xCD/0xDD patterns)\n");
-    printf("\t-T/--memory-tagging          Temporal memory tagging (track "
-           "pointer generation tags)\n");
+    printf("\t   --memory-tagging          Temporal memory tagging (track "
+            "pointer generation tags)\n");
     printf("\t-V/--vm-heap                 Route all malloc/free through VM "
            "heap (enables memory safety)\n");
     printf("\nFFI Safety Options:\n");
-    printf("\t-H/--ffi-allow=list          Allow only comma-separated native function names\n");
-    printf("\t-u/--ffi-deny=list           Deny comma-separated native function names\n");
-    printf("\t-R/--disable-ffi             Block all registered and dynamic native calls\n");
-    printf("\t-y/--ffi-errors-fatal        Abort execution on FFI policy violations\n");
-    printf("\t   --ffi-type-checking       Validate registered FFI call arity at runtime\n");
+    printf("\t   --ffi-allow=list       Allow only comma-separated native function names\n");
+    printf("\t   --ffi-deny=list        Deny comma-separated native function names\n");
+    printf("\t-F/--disable-ffi          Block all registered and dynamic native calls\n");
+    printf("\t   --ffi-errors-fatal     Abort execution on FFI policy violations\n");
+    printf("\t   --ffi-type-checking    Validate registered FFI call arity at runtime\n");
     printf("\nLanguage Standard:\n");
-    printf("\t-Q/--std=<std>       Select C language standard (default: gnu17)\n");
+    printf("\t-s/--std=<std>       Select C language standard (default: gnu17)\n");
     printf("\t                     Supported: c99, c11, c17/c18, c23/c2x\n");
     printf("\t                     GNU variants: gnu99, gnu11, gnu17/gnu18, gnu23/gnu2x\n");
-    printf("\t                     Note: -Q/--std currently affects predefined macros only\n");
+    printf("\t                     Note: -s/--std currently affects predefined macros only\n");
     printf("\nPreprocessor Options:\n");
-    printf("\t-r/--embed-limit=SIZE        Set #embed file size warning limit "
-           "(e.g., 50MB, 100mb, default: 10MB)\n");
-    printf("\t-w/--embed-hard-limit        Make #embed limit a hard error "
-           "instead of warning\n");
-    printf("\t-n/--macro-recursion-limit=N Limit recursive pragma macro "
-           "expansion (default: 256, 0=unlimited)\n");
-    printf("\t-x/--max-errors=N            Cap diagnostics at N (default: 20)\n");
+    printf("\t   --embed-limit=SIZE         Set #embed file size warning limit "
+            "(e.g., 50MB, 100mb, default: 10MB)\n");
+    printf("\t   --embed-hard-limit         Make #embed limit a hard error "
+            "instead of warning\n");
+    printf("\t-r/--macro-recursion-limit=N  Limit recursive pragma macro "
+            "expansion (default: 256, 0=unlimited)\n");
+    printf("\t-n/--max-errors=N             Cap diagnostics at N (default: 20)\n");
     printf("\t   --strict-comptime-includes Only forward the main source file's own\n");
-    printf("\t                             declarations to the comptime pass (skip\n");
-    printf("\t                             declarations from regular #includes)\n");
+    printf("\t                              declarations to the comptime pass (skip\n");
+    printf("\t                              declarations from regular #includes)\n");
     printf("\nOptimization Levels:\n");
     printf("\t-O/--optimize[=LEVEL]        Enable bytecode optimization "
            "(default: disabled)\n");
@@ -337,19 +340,21 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                             1: Constant folding only\n");
     printf("\t                             2: Constant folding + peephole\n");
     printf("\t                             3: All optimizations (including "
-           "dead code elimination)\n");
+            "dead code elimination)\n");
+    printf("\t   --inline-limit=N        Limit inlining to N AST nodes "
+            "(default: 256)\n");
     printf("\nStatic Bytecode Analysis (compile or load input, walk text "
            "segment, exit):\n");
-    printf("\t-A/--ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, "
-           "default 2)\n");
+    printf("\t   --ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, "
+            "default 2)\n");
     printf("\t   --ngrams-top=N          Show top N sequences (default 25)\n");
     printf("\t   --ngrams-per-file       Print a per-input section in addition "
            "to the aggregate\n");
-    printf("\t-B/--fusion-candidates[=N] Use-def fusion candidate analysis (top "
-           "N, default 50)\n");
+    printf("\t   --fusion-candidates[=N] Use-def fusion candidate analysis (top "
+            "N, default 50)\n");
     printf("\t                          JSON output via -j/--json\n");
     printf("\nInline Assembly:\n");
-    printf("\t   --asm-passthru    Compile asm(\"...\") statements via native C compiler\n");
+    printf("\t-A/--asm-passthru   Compile asm(\"...\") statements via native C compiler\n");
     printf("\t                    and execute them via FFI (default: no-op)\n");
     printf("\nExample:\n");
     printf("\t%s -o hello hello.c\n", argv0);
@@ -769,29 +774,29 @@ int main(int argc, const char *argv[]) {
         {"no-preprocess", no_argument, 0, 'X'},
         {"no-stdlib", no_argument, 0, 'S'},
         {"json", no_argument, 0, 'j'},
-        {"ffi-decls", no_argument, 0, 'K'},
+        {"ffi-decls", no_argument, 0, 1059},
         {"compile", optional_argument, 0, 'c'},
         {"debug", no_argument, 0, 'g'},
         {"safety", required_argument, 0, 1012},
         {"bounds-checks", no_argument, 0, 'b'},
-        {"uaf-detection", no_argument, 0, 'f'},
-        {"type-checks", no_argument, 0, 't'},
-        {"uninitialized-detection", no_argument, 0, 'z'},
+        {"uaf-detection", no_argument, 0, 'u'},
+        {"type-checks", no_argument, 0, 'T'},
+        {"uninitialized-detection", no_argument, 0, 1038},
         {"overflow-checks", no_argument, 0, 1034},
-        {"stack-canaries", no_argument, 0, 's'},
-        {"heap-canaries", no_argument, 0, 'k'},
+        {"stack-canaries", no_argument, 0, 1039},
+        {"heap-canaries", no_argument, 0, 'H'},
         {"pointer-sanitizer", no_argument, 0, 'p'},
         {"memory-leak-detection", no_argument, 0, 'm'},
-        {"stack-instrumentation", no_argument, 0, 'J'},
+        {"stack-instrumentation", no_argument, 0, 1043},
         {"stack-errors", no_argument, 0, 1005},
         {"dangling-pointers", no_argument, 0, 1001},
         {"alignment-checks", no_argument, 0, 1002},
         {"provenance-tracking", no_argument, 0, 1003},
         {"invalid-arithmetic", no_argument, 0, 1004},
-        {"format-string-checks", no_argument, 0, 'F'},
-        {"random-canaries", no_argument, 0, 1006},
+        {"format-string-checks", no_argument, 0, 1044},
+        {"random-canaries", no_argument, 0, 'R'},
         {"memory-poisoning", no_argument, 0, 1007},
-        {"memory-tagging", no_argument, 0, 'T'},
+        {"memory-tagging", no_argument, 0, 1045},
         {"vm-heap", no_argument, 0, 'V'},
         {"control-flow-integrity", no_argument, 0, 'C'},
         {"include", required_argument, 0, 'I'},
@@ -800,28 +805,28 @@ int main(int argc, const char *argv[]) {
         {"library", required_argument, 0, 'l'},
         {"define", required_argument, 0, 'D'},
         {"undef", required_argument, 0, 'U'},
-        {"max-errors", required_argument, 0, 'x'},
-        {"Werror", no_argument, 0, 'q'},
-        {"embed-limit", required_argument, 0, 'r'},
-        {"embed-hard-limit", no_argument, 0, 'w'},
+        {"max-errors", required_argument, 0, 'n'},
+        {"Werror", no_argument, 0, 'x'},
+        {"embed-limit", required_argument, 0, 1048},
+        {"embed-hard-limit", no_argument, 0, 1060},
         {"optimize", optional_argument, 0, 'O'},
-        {"macro-recursion-limit", required_argument, 0, 'n'},
-        {"std", required_argument, 0, 'Q'},
-        {"ffi-allow", required_argument, 0, 'H'},
-        {"ffi-deny", required_argument, 0, 'u'},
-        {"disable-ffi", no_argument, 0, 'R'},
-        {"ffi-errors-fatal", no_argument, 0, 'y'},
+        {"macro-recursion-limit", required_argument, 0, 'r'},
+        {"std", required_argument, 0, 's'},
+        {"ffi-allow", required_argument, 0, 1052},
+        {"ffi-deny", required_argument, 0, 1053},
+        {"disable-ffi", no_argument, 0, 'F'},
+        {"ffi-errors-fatal", no_argument, 0, 1055},
         {"ffi-type-checking", no_argument, 0, 1024},
-        {"vm-profile", no_argument, 0, 'Y'},
+        {"vm-profile", no_argument, 0, 1056},
         {"entry", required_argument, 0, 'e'},
-        {"ngrams", optional_argument, 0, 'A'},
+        {"ngrams", optional_argument, 0, 1057},
         {"ngrams-top", required_argument, 0, 1030},
         {"ngrams-per-file", no_argument, 0, 1031},
-        {"fusion-candidates", optional_argument, 0, 'B'},
+        {"fusion-candidates", optional_argument, 0, 1058},
         {"strict-comptime-includes", no_argument, 0, 1050},
         {"inline-limit", required_argument, 0, 1051},
-        {"asm-passthru", no_argument, 0, 1060},
-        {"testing", no_argument, 0, 1100},
+        {"asm-passthru", no_argument, 0, 'A'},
+        {"testing", no_argument, 0, 't'},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -831,7 +836,7 @@ int main(int argc, const char *argv[]) {
     }
     int getopt_argc = (dashdash >= 0) ? dashdash : argc;
 
-    const char *optstring = "0123haI:L:D:U:o:c::dvgbftzskpmiPEMGXSjFTVCl:W:e:O::J:Y:A::B::KQ:Rx:q:n:r:wH:u:y";
+    const char *optstring = "0123haI:L:D:U:o:c::dvgiPEMGXSjVCl:W:e:O::FbTuRmpHxtn:r:s:A";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(getopt_argc, (char *const *)argv, optstring,
@@ -928,35 +933,35 @@ int main(int argc, const char *argv[]) {
             undefs = realloc(undefs, sizeof(*undefs) * (undefs_count + 1));
             undefs[undefs_count++] = strdup(optarg);
             break;
-        case 'b':
+        case 'b': // --bounds-checks
             flags |= JCC_BOUNDS_CHECKS;
             break;
-        case 'f':
+        case 'u': // --uaf-detection
             flags |= JCC_UAF_DETECTION;
             break;
-        case 't':
+        case 'T': // --type-checks
             flags |= JCC_TYPE_CHECKS;
             break;
-        case 'z':
+        case 1038: // --uninitialized-detection
             flags |= JCC_UNINIT_DETECTION;
             break;
         case 1034: // --overflow-checks
             flags |= JCC_OVERFLOW_CHECKS;
             break;
 
-        case 's':
+        case 1039: // --stack-canaries
             flags |= JCC_STACK_CANARIES;
             break;
-        case 'k':
+        case 'H': // --heap-canaries
             flags |= JCC_HEAP_CANARIES;
             break;
-        case 'p':
+        case 'p': // --pointer-sanitizer
             flags |= JCC_POINTER_SANITIZER;
             break;
-        case 'm':
+        case 'm': // --memory-leak-detection
             flags |= JCC_MEMORY_LEAK_DETECT;
             break;
-        case 'J':
+        case 1043: // --stack-instrumentation
             flags |= JCC_STACK_INSTR;
             break;
         case 1001:
@@ -974,17 +979,17 @@ int main(int argc, const char *argv[]) {
         case 1005:
             flags |= JCC_STACK_INSTR_ERRORS;
             break;
-        case 'F':
+        case 1044: // --format-string-checks
             flags |= JCC_FORMAT_STR_CHECKS;
             warnings |= JCC_WARN_FORMAT;
             break;
-        case 1006:
+        case 'R': // --random-canaries
             flags |= JCC_RANDOM_CANARIES;
             break;
         case 1007:
             flags |= JCC_MEMORY_POISONING;
             break;
-        case 'T':
+        case 1045: // --memory-tagging
             flags |= JCC_MEMORY_TAGGING;
             break;
         case 'V':
@@ -1043,7 +1048,7 @@ int main(int argc, const char *argv[]) {
             }
             break;
         }
-        case 'x': // --max-errors
+        case 'n': // --max-errors
             max_errors = atoi(optarg);
             if (max_errors <= 0) {
                 fprintf(stderr,
@@ -1051,7 +1056,7 @@ int main(int argc, const char *argv[]) {
                 usage(argv[0], 1);
             }
             break;
-        case 'q': // --Werror
+        case 'x': // --Werror
             warnings_as_errors = 1;
             warning_no_errors = 0;
             break;
@@ -1059,10 +1064,10 @@ int main(int argc, const char *argv[]) {
             parse_warning_option(optarg, &warnings, &warning_errors,
                                  &warning_no_errors, &warnings_as_errors);
             break;
-        case 'r': // --embed-limit
+        case 1048: // --embed-limit
             embed_limit = parse_size(optarg, "--embed-limit");
             break;
-        case 'w': // --embed-hard-limit
+        case 1060: // --embed-hard-limit
             embed_hard_error = 1;
             break;
         case 'O': // --optimize / -O (also matches --optimize via long_options)
@@ -1080,7 +1085,7 @@ int main(int argc, const char *argv[]) {
                 usage(argv[0], 1);
             }
             break;
-        case 'n': { // --macro-recursion-limit
+        case 'r': { // --macro-recursion-limit
             char *end = NULL;
             long val = strtol(optarg, &end, 10);
             if (!optarg[0] || *end != '\0' || val < 0 || val > INT32_MAX) {
@@ -1092,33 +1097,33 @@ int main(int argc, const char *argv[]) {
             macro_recursion_limit = (int)val;
             break;
         }
-        case 'Q': // --std=<standard>
+        case 's': // --std=<standard>
             std_arg = optarg;
             break;
-        case 'H':
+        case 1052: // --ffi-allow
             ffi_allow_args = realloc(ffi_allow_args, sizeof(*ffi_allow_args) *
                                                          (ffi_allow_args_count + 1));
             ffi_allow_args[ffi_allow_args_count++] = strdup(optarg);
             break;
-        case 'u':
+        case 1053: // --ffi-deny
             ffi_deny_args = realloc(ffi_deny_args, sizeof(*ffi_deny_args) *
                                                      (ffi_deny_args_count + 1));
             ffi_deny_args[ffi_deny_args_count++] = strdup(optarg);
             break;
-        case 'R':
+        case 'F': // --disable-ffi
             disable_all_ffi = 1;
             break;
-        case 'y':
+        case 1055: // --ffi-errors-fatal
             ffi_errors_fatal = 1;
             break;
         case 1024:
             enable_ffi_type_checking = 1;
             break;
-        case 'Y':
+        case 1056: // --vm-profile
             vm_profile = 1;
             vm_profile_text = 1;
             break;
-        case 'A': { // --ngrams[=N]
+        case 1057: { // --ngrams[=N]
             if (optarg == NULL) {
                 run_ngrams = 2;
             } else if (optarg[0] >= '0' && optarg[0] <= '9' && optarg[1] == '\0') {
@@ -1164,13 +1169,13 @@ int main(int argc, const char *argv[]) {
             inline_node_limit = (int)val;
             break;
         }
-        case 1060: // --asm-passthru
+        case 'A': // --asm-passthru
             asm_passthru = 1;
             break;
-        case 1100: // --testing
+        case 't': // --testing
             testing_mode = 1;
             break;
-        case 'B': { // --fusion-candidates[=N]
+        case 1058: { // --fusion-candidates[=N]
             if (optarg == NULL) {
                 run_fusion = 1;
             } else {
@@ -1186,7 +1191,7 @@ int main(int argc, const char *argv[]) {
             }
             break;
         }
-        case 'K': // --ffi-decls
+        case 1059: // --ffi-decls
             output_ffi_decls = 1;
             break;
         case '?':

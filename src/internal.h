@@ -513,7 +513,7 @@ void hashmap_foreach(HashMap *map, HashMapIterator iter, void *user_data);
 int hashmap_count_if(HashMap *map, HashMapIterator predicate, void *user_data);
 
 //
-// stdlib.c
+// generate_stdlib.c
 //
 
 long long wrap_strlen(long long s);

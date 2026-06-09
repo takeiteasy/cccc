@@ -13,6 +13,7 @@ profile/*.prof
 profile/*.json
 profile/*.txt
 profile/*.massif
+profile/vm-opcodes/
 build/bench-*
 benchmarks/results/
 benchmarks/results/*.json

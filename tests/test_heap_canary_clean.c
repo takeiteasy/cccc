@@ -1,4 +1,4 @@
-// JCC_FLAGS: -k -V
+// JCC_FLAGS: --heap-canaries -V
 // Clean heap canary test — alloc/free with no overflow should succeed
 #include <stdlib.h>
 
