@@ -637,6 +637,11 @@ long long generate_random_canary(void);
 // stdlib
 //
 
+// testing.c
+void   cc_load_test_runtime(JCC *vm);
+Token *cc_inject_test_header(JCC *vm);
+int    cc_run_tests(JCC *vm, Obj *prog);
+
 void register_ctype_functions(JCC *vm);
 void register_fenv_functions(JCC *vm);
 void register_locale_functions(JCC *vm);

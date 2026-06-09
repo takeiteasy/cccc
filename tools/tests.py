@@ -62,6 +62,7 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
 
     is_negative_test = False
     expects_runtime_error = False
+    is_testing_mode = False
     per_test_flags = []
     per_test_run_args = []
     expect_stderr = None
@@ -78,6 +79,8 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
                 if "JCC_FLAGS:" in line:
                     flags_str = line.split("JCC_FLAGS:", 1)[1].strip().rstrip("*/").strip()
                     per_test_flags = flags_str.split()
+                    if "--testing" in per_test_flags:
+                        is_testing_mode = True
                 if "JCC_RUN_ARGS:" in line:
                     args_str = line.split("JCC_RUN_ARGS:", 1)[1].strip().rstrip("*/").strip()
                     per_test_run_args = args_str.split()
@@ -245,6 +248,8 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
         else:
             status = "compile_error"
     elif exit_code == 42:
+        status = "passed"
+    elif is_testing_mode and exit_code == 0:
         status = "passed"
     elif expects_runtime_error and exit_code == 255:
         status = "negative_pass"

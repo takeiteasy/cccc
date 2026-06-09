@@ -928,6 +928,13 @@ typedef struct ComptimeVarMember {
     struct ComptimeVarMember *next;
 } ComptimeVarMember;
 
+// A test function registered via [[jcc::test]].
+typedef struct TestFnRecord TestFnRecord;
+struct TestFnRecord {
+    char *name;
+    TestFnRecord *next;
+};
+
 // A variable or struct instance declared with #pragma comptime.
 // Values are read from the macro VM's data segment after compilation and
 // cached here so macro FFI callbacks can return them without VM access.
@@ -1471,6 +1478,8 @@ typedef struct Compiler {
     // Compile-time macro state
     MacroFn *macro_fns;              // Linked list of captured macro functions
     ComptimeVar *comptime_vars;      // Linked list of [[jcc::comptime]] variable decls
+    TestFnRecord *test_fns;          // Linked list of [[jcc::test]] function names
+    bool testing_mode;               // True when running under --testing (no main required)
     bool in_macro_mode;              // True when compiling/executing a macro function
     bool in_macro_expansion;         // True during macro AST expansion pass
     bool in_comptime_block;          // True inside #pragma jcc comptime begin...end

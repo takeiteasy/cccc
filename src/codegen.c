@@ -3766,6 +3766,6 @@ void gen(JCC *vm, Obj *prog) {
         }
     }
 
-    if (!vm->compiler.compile_only)
+    if (!vm->compiler.compile_only && !vm->compiler.testing_mode)
         error("%s() function not found", entry);
 }

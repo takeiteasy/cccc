@@ -250,6 +250,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-o/--out <file>     Output file. Required for -c=native. For -c=bytecode, writes\n");
     printf("\t                     bytecode to <file>; if omitted, writes to stdout\n");
     printf("\t-d/--disassemble    Disassemble bytecode to stdout\n");
+    printf("\t--testing           Discover and run [[jcc::test]] functions; output TAP\n");
     printf("\t-v/--verbose        Enable debug logging\n");
     printf("\t-g/--debug          Enable interactive debugger\n");
     printf("\t-Y/--vm-profile     Count executed VM opcodes and print a report\n");
@@ -750,6 +751,7 @@ int main(int argc, const char *argv[]) {
     int run_fusion = 0;            // 0 = off; >0 = enabled, value is top-N
     CcNgramState *ngram_state = NULL;
     CcFusionState *fusion_state = NULL;
+    int testing_mode = 0;          // --testing
 
     if (argc <= 1)
         usage(argv[0], 1);
@@ -819,6 +821,7 @@ int main(int argc, const char *argv[]) {
         {"strict-comptime-includes", no_argument, 0, 1050},
         {"inline-limit", required_argument, 0, 1051},
         {"asm-passthru", no_argument, 0, 1060},
+        {"testing", no_argument, 0, 1100},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1164,6 +1167,9 @@ int main(int argc, const char *argv[]) {
         case 1060: // --asm-passthru
             asm_passthru = 1;
             break;
+        case 1100: // --testing
+            testing_mode = 1;
+            break;
         case 'B': { // --fusion-candidates[=N]
             if (optarg == NULL) {
                 run_fusion = 1;
@@ -1311,6 +1317,7 @@ int main(int argc, const char *argv[]) {
     vm.compiler.asm_passthru = asm_passthru;
     vm.compiler.strict_comptime_includes = strict_comptime_includes;
     vm.compiler.entry_name = (char *)entry_name;
+    vm.compiler.testing_mode = (bool)testing_mode;
     vm.compiler.diagnostic_json = output_json;
     vm.disable_all_ffi = disable_all_ffi;
     vm.ffi_errors_fatal = ffi_errors_fatal;
@@ -1537,6 +1544,9 @@ int main(int argc, const char *argv[]) {
     if (!skip_stdlib)
         cc_load_stdlib(&vm);
 
+    if (testing_mode)
+        cc_load_test_runtime(&vm);
+
     // Add JCC's standard library header directory
     cc_include(&vm, "./include");
 
@@ -1554,6 +1564,14 @@ int main(int argc, const char *argv[]) {
         cc_undef(&vm, (char *)undefs[i]);
 
     vm.compiler.skip_preprocess = skip_preprocess;
+
+    // In testing mode, inject jcc_test.h before any source is preprocessed so
+    // JCC_ASSERT* macros are in scope. Save the returned declaration tokens for
+    // prepending to the parse stream after preprocessing.
+    Token *test_decls = NULL;
+    if (testing_mode)
+        test_decls = cc_inject_test_header(&vm);
+
     input_tokens = calloc(input_files_count, sizeof(Token *));
     for (int i = 0; i < input_files_count; i++) {
         input_tokens[i] = cc_preprocess(&vm, input_files[i]);
@@ -1570,6 +1588,15 @@ int main(int argc, const char *argv[]) {
             exit_code = 1;
             goto BAIL;
         }
+    }
+
+    // Prepend __jcc_assert* declarations into the first file's parse stream.
+    if (testing_mode && test_decls && input_files_count > 0) {
+        Token *last = test_decls;
+        while (last->next && last->next->kind != TK_EOF)
+            last = last->next;
+        last->next = input_tokens[0];
+        input_tokens[0] = test_decls;
     }
 
     // If -E flag is set, output preprocessed source and exit
@@ -1778,6 +1805,11 @@ int main(int argc, const char *argv[]) {
 
     if (disassemble) {
         cc_disassemble(&vm);
+        goto BAIL;
+    }
+
+    if (testing_mode) {
+        exit_code = cc_run_tests(&vm, merged_prog);
         goto BAIL;
     }
 

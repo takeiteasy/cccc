@@ -1937,9 +1937,10 @@ static bool try_extract_attr_macro(JCC *vm, Token **tok_ptr) {
     if (!is_gnu_attr && !is_c23_attr)
         return false;
 
-    // Scan inside the attribute argument list for macro/comptime/inline markers.
+    // Scan inside the attribute argument list for macro/comptime/test/inline markers.
     bool is_macro_kind    = false;
     bool is_comptime_kind = false;
+    bool is_test_kind     = false;
     bool is_inline        = false;
     Token *attr_end       = NULL;
 
@@ -2010,12 +2011,14 @@ static bool try_extract_attr_macro(JCC *vm, Token **tok_ptr) {
                     after_scope->next->next->next &&
                     equal(after_scope->next->next->next, ")"))
                     is_inline = true;
+            } else if (equal(after_scope, "test")) {
+                is_test_kind = true;
             }
         }
     }
 
-    // Only act on a positive macro/comptime match.
-    if ((!is_macro_kind && !is_comptime_kind) || !attr_end)
+    // Only act on a positive macro/comptime/test match.
+    if ((!is_macro_kind && !is_comptime_kind && !is_test_kind) || !attr_end)
         return false;
 
     // Support [[jcc::comptime]] inline fn() — detect the inline keyword
@@ -2044,6 +2047,25 @@ static bool try_extract_attr_macro(JCC *vm, Token **tok_ptr) {
             }
             probe = probe->next;
         }
+    }
+
+    // [[jcc::test]]: record the function name, strip the attribute, keep the
+    // function definition in the normal compilation token stream.
+    if (is_test_kind) {
+        Token *probe = attr_end;
+        while (probe && probe->kind != TK_EOF) {
+            if (equal(probe, ";") || equal(probe, "=")) break;
+            if (probe->kind == TK_IDENT && probe->next && equal(probe->next, "(")) {
+                TestFnRecord *rec = calloc(1, sizeof(TestFnRecord));
+                rec->name = strndup(probe->loc, probe->len);
+                rec->next = vm->compiler.test_fns;
+                vm->compiler.test_fns = rec;
+                break;
+            }
+            probe = probe->next;
+        }
+        *tok_ptr = attr_end;
+        return true;
     }
 
     // Route to function or variable extraction. Use is_macro_kind (not a
