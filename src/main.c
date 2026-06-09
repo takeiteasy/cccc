@@ -1565,7 +1565,7 @@ int main(int argc, const char *argv[]) {
 
     vm.compiler.skip_preprocess = skip_preprocess;
 
-    // In testing mode, inject jcc_test.h before any source is preprocessed so
+    // In testing mode, inject tests.h before any source is preprocessed so
     // JCC_ASSERT* macros are in scope. Save the returned declaration tokens for
     // prepending to the parse stream after preprocessing.
     Token *test_decls = NULL;

@@ -20,31 +20,6 @@
 #include "jcc.h"
 #include "internal.h"
 
-// Content of the embedded jcc_test.h header, injected in --testing mode.
-// Declares the native assertion helpers and defines the JCC_ASSERT* macros.
-static const char jcc_test_h_src[] =
-    "void __jcc_assert(int cond, const char *expr, const char *file, int line);\n"
-    "void __jcc_assert_eq(long long a, long long b, const char *as, const char *bs,"
-    " const char *file, int line);\n"
-    "void __jcc_assert_neq(long long a, long long b, const char *as, const char *bs,"
-    " const char *file, int line);\n"
-    "void __jcc_assert_null(const void *p, const char *ps, const char *file, int line);\n"
-    "void __jcc_assert_not_null(const void *p, const char *ps,"
-    " const char *file, int line);\n"
-    "void __jcc_assert_streq(const char *a, const char *b, const char *as,"
-    " const char *bs, const char *file, int line);\n"
-    "#define JCC_ASSERT(cond)"
-    " __jcc_assert(!!(cond),#cond,__FILE__,__LINE__)\n"
-    "#define JCC_ASSERT_EQ(a,b)"
-    " __jcc_assert_eq((long long)(a),(long long)(b),#a,#b,__FILE__,__LINE__)\n"
-    "#define JCC_ASSERT_NEQ(a,b)"
-    " __jcc_assert_neq((long long)(a),(long long)(b),#a,#b,__FILE__,__LINE__)\n"
-    "#define JCC_ASSERT_NULL(p)"
-    " __jcc_assert_null((const void*)(p),#p,__FILE__,__LINE__)\n"
-    "#define JCC_ASSERT_NOT_NULL(p)"
-    " __jcc_assert_not_null((const void*)(p),#p,__FILE__,__LINE__)\n"
-    "#define JCC_ASSERT_STREQ(a,b)"
-    " __jcc_assert_streq((a),(b),#a,#b,__FILE__,__LINE__)\n";
 
 // Per-test failure state; longjmp target lives in cc_run_tests.
 static jmp_buf s_test_jmp;
@@ -128,12 +103,13 @@ void cc_load_test_runtime(JCC *vm) {
     cc_register_cfunc(vm, "__jcc_assert_streq",   (void *)impl_assert_streq,   6, 0);
 }
 
-// Preprocess the embedded jcc_test.h content. As a side effect, registers
-// all JCC_ASSERT* macros in vm->compiler.macros so they expand correctly
-// when the test file is preprocessed. Returns the processed declaration
-// tokens (the void __jcc_assert* declarations) to prepend to the parse stream.
+// Preprocess src/tests.h (loaded via the embedded std registry). As a
+// side effect, registers all JCC_ASSERT* macros in vm->compiler.macros so
+// they expand correctly when the test file is preprocessed. Returns the
+// processed declaration tokens to prepend to the parse stream.
 Token *cc_inject_test_header(JCC *vm) {
-    Token *toks = tokenize_string(vm, "<jcc_test.h>", (char *)jcc_test_h_src);
+    char *src = get_std_header("tests.h");
+    Token *toks = tokenize_string(vm, "<tests.h>", src);
     return preprocess(vm, toks);
 }
 

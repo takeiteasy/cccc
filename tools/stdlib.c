@@ -33,12 +33,14 @@ char *make_global_name(const char *header) {
     return buf;
 }
 
-// reflection.h is private to pragma macros. Keep embedding it, but do not
-// keep it under include/ where user source can find it as a JCC header.
+// reflection.h and tests.h are private headers. Keep embedding them,
+// but do not place them under include/ where user source can find them.
 [[jcc::comptime]]
 const char *header_source_path(const char *header) {
     if (strcmp(header, "reflection.h") == 0)
         return "src/reflection.h";
+    if (strcmp(header, "tests.h") == 0)
+        return "src/tests.h";
     static char path[256];
     snprintf(path, sizeof(path), "include/%s", header);
     return path;
@@ -90,10 +92,11 @@ char **discover_headers(void) {
         return NULL;
     }
 
-    int count = (int)g.gl_pathc + 1; // plus reflection.h
+    int count = (int)g.gl_pathc + 2; // plus reflection.h and tests.h
     char **headers = malloc((count + 1) * sizeof(char *));
     int n = 0;
     headers[n++] = copy_header_name("reflection.h");
+    headers[n++] = copy_header_name("tests.h");
     for (int i = 0; i < (int)g.gl_pathc; i++)
         headers[n++] = copy_header_name(g.gl_pathv[i]);
     headers[n] = NULL;

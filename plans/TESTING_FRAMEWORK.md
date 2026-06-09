@@ -328,7 +328,7 @@ int test_main(jcc_test_ctx_t *ctx) {
 
 ## Assertion API
 
-`jcc_test.h` is a private header auto-injected into every
+`tests.h` is a private header auto-injected into every
 `[[jcc::test]]` and `[[jcc::test_main]]` translation unit the same
 way `reflection.h` is auto-injected into `[[jcc::comptime]]` code.
 It is not on the public include path.
@@ -739,7 +739,7 @@ This doc is for tests, not for the build system.
 - Test functions are plain C and run in the JCC VM (or a child
   process for negatives). The C surface available to them is the
   same as any other JCC program (see [COVERAGE.md](../docs/COVERAGE.md)).
-- `jcc_test.h` is private. It is injected into test code automatically
+- `tests.h` is private. It is injected into test code automatically
   the way `reflection.h` is injected into macro code. It is not on
   the public include path.
 - The `JCC_ASSERT` macros abort the *current* test only; they do not
@@ -804,7 +804,7 @@ Roughly in order of dependency:
    `[[jcc::test_main]]` attribute parsing** — same machinery as
    `[[jcc::comptime]]`. The preprocessor intercepts them and tags
    declarations in the symbol table.
-2. **`jcc_test.h` private header** — prototypes for
+2. **`tests.h` private header** — prototypes for
    `jcc_test_ctx_t`, `jcc_test_t`, the assertion macros, the runner
    API (`jcc_run_all_tests`, `jcc_run_suite`, `jcc_run_matching`,
    `JCC_RUN_TEST`), and the `mode` argument parsing.
