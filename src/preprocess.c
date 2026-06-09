@@ -1950,6 +1950,8 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
     const char *test_name  = NULL; // extracted from [[cccc::test(name = "...")]]
     long test_timeout_ms   = 0;    // extracted from [[cccc::test(timeout = ...)]]
     int  test_error_count  = 0;    // extracted from [[cccc::test(error_count = ...)]]
+    bool has_expect_return = false;
+    long expect_return_val = 0;    // extracted from [[cccc::test(return = ...)]]
     // For [[cccc::test_setup/teardown]]:
     const char *hook_name_pat = NULL;
     const char *hook_suite    = NULL;
@@ -2054,6 +2056,12 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                                    p->next->next && p->next->next->kind == TK_NUM) {
                             test_error_count = p->next->next->val;
                             p = p->next->next->next;
+                        } else if (equal(p, "return") &&
+                                   p->next && equal(p->next, "=") &&
+                                   p->next->next && p->next->next->kind == TK_NUM) {
+                            has_expect_return = true;
+                            expect_return_val = p->next->next->val;
+                            p = p->next->next->next;
                         } else {
                             p = p->next;
                         }
@@ -2143,6 +2151,8 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                 rec->timeout_ms = test_timeout_ms;
                 if (error_pat)
                     rec->expect_errors = test_error_count;
+                rec->has_expect_return = has_expect_return;
+                rec->expect_return     = expect_return_val;
                 rec->next = vm->compiler.test_fns;
                 vm->compiler.test_fns = rec;
                 break;

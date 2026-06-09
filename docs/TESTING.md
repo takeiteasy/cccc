@@ -4,7 +4,7 @@ CCCC includes a built-in test framework for writing tests directly in C, using t
 
 ## Writing Tests
 
-Mark a function as a test with `[[cccc::test]]`. Test functions must take no arguments and have a `void` return type:
+Mark a function as a test with `[[cccc::test]]`. Test functions must take no arguments; they may return `void` or `int`:
 
 ```c
 [[cccc::test]]
@@ -41,7 +41,7 @@ void test_add_commutative(void) {
 }
 ```
 
-`name`, `suite`, `error`, `timeout`, and `error_count` may all be combined in one attribute.
+`name`, `suite`, `error`, `timeout`, `error_count`, and `return` may all be combined in one attribute.
 
 ## Test Suites
 
@@ -125,6 +125,37 @@ The test passes only if: (1) at least one error matches the `error` pattern, and
 (2) the total number of compilation errors in the test body equals `N` (when
 `N > 0`).  A count mismatch is reported as a failed negative test with a
 descriptive message.
+
+### Return value assertion
+
+Use `return = N` to assert that a test function returns a specific integer value. The test function must have an `int` return type:
+
+```c
+[[cccc::test(return = 1)]]
+int test_fn(void) {
+    int x = 0;
+    if (x > 0)
+        return 0; // fail — expected 1
+    return 1;     // pass
+}
+```
+
+If the function returns a value other than `N`, the test is reported as failed with a message showing the expected and actual values:
+
+```
+expected return value 1, got 0
+```
+
+`return` may be combined with other options:
+
+```c
+[[cccc::test(return = 42, name = "answer is correct", suite = "math")]]
+int test_the_answer(void) {
+    return 6 * 7;
+}
+```
+
+`$assert*` macros and the `return` assertion are independent — both must pass for the test to pass.
 
 ## Setup and Teardown
 
@@ -492,7 +523,7 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 
 ## Limitations
 
-- Test functions must have signature `void name(void)` — no parameters, void return.
+- Test functions must take no arguments and return either `void` or `int`. Use `return = N` to assert on the return value.
 - Setup and teardown hook functions must also have signature `void name(void)`.
 - Teardown hooks are skipped on test timeout (VM state is unknown after `SIGALRM`). They run in all other cases, including after test or setup failure.
 - Calling `exit()` directly in a test terminates the entire process rather than failing just that test. Use `$assert*` macros instead.

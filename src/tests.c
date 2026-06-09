@@ -911,6 +911,7 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
         run.timed_out = 0;
         run.fail_msg[0] = '\0';
         s_alarm_fired   = 0;
+        int ret_val = 0;
 
         // Per-test timeout: individual timeout_ms overrides the global value.
         long effective_ms = r->timeout_ms > 0 ? r->timeout_ms : global_timeout_ms;
@@ -939,7 +940,7 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
         int jval = setjmp(run.jmp);
         if (jval == 0) {
             run_hooks(vm, prog, setups, false, false, cur_suite, disp);
-            cc_run_at(vm, (CCCCPc)fn->code_addr, 0, NULL);
+            ret_val = cc_run_at(vm, (CCCCPc)fn->code_addr, 0, NULL);
         } else if (jval == 2) {
             run.timed_out = 1;
         }
@@ -953,6 +954,11 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
             if (!td_ok && !run.failed) {
                 run.failed = 1;
                 strncpy(run.fail_msg, td_fail, sizeof(run.fail_msg) - 1);
+            }
+            if (!run.failed && r->has_expect_return && ret_val != (int)r->expect_return) {
+                run.failed = 1;
+                snprintf(run.fail_msg, sizeof(run.fail_msg),
+                         "expected return value %ld, got %d", r->expect_return, ret_val);
             }
         }
 

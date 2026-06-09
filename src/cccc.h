@@ -939,6 +939,8 @@ struct TestFnRecord {
     char  neg_actual[256]; // first actual error for failure diagnostics
     long  timeout_ms;   // per-test timeout in ms (0 = use global --test-timeout)
     int   expect_errors;// for negative tests: expected error count (0 = any)
+    bool  has_expect_return; // true if return= was specified
+    long  expect_return;     // expected int return value (only if has_expect_return)
     TestFnRecord *next;
 };
 
