@@ -47,7 +47,7 @@ static void handle_alarm(int sig) {
 static void impl_assert(long long cond, long long expr, long long file, long long line) {
     if (!cond) {
         if (!s_run) {
-            fprintf(stderr, "CCCC_ASSERT called outside a test run at %s:%lld\n",
+            fprintf(stderr, "$assert called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -63,7 +63,7 @@ static void impl_assert_eq(long long a, long long b,
                            long long file, long long line) {
     if (a != b) {
         if (!s_run) {
-            fprintf(stderr, "CCCC_ASSERT_EQ called outside a test run at %s:%lld\n",
+            fprintf(stderr, "$assert_eq called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -80,7 +80,7 @@ static void impl_assert_neq(long long a, long long b,
                             long long file, long long line) {
     if (a == b) {
         if (!s_run) {
-            fprintf(stderr, "CCCC_ASSERT_NEQ called outside a test run at %s:%lld\n",
+            fprintf(stderr, "$assert_neq called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -96,7 +96,7 @@ static void impl_assert_null(long long p, long long ps,
                              long long file, long long line) {
     if (p != 0) {
         if (!s_run) {
-            fprintf(stderr, "CCCC_ASSERT_NULL called outside a test run at %s:%lld\n",
+            fprintf(stderr, "$assert_null called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -111,7 +111,7 @@ static void impl_assert_not_null(long long p, long long ps,
                                  long long file, long long line) {
     if (p == 0) {
         if (!s_run) {
-            fprintf(stderr, "CCCC_ASSERT_NOT_NULL called outside a test run at %s:%lld\n",
+            fprintf(stderr, "$assert_not_null called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -127,7 +127,7 @@ static void impl_assert_streq(long long a, long long b,
                               long long file, long long line) {
     if (strcmp((char *)a, (char *)b) != 0) {
         if (!s_run) {
-            fprintf(stderr, "CCCC_ASSERT_STREQ called outside a test run at %s:%lld\n",
+            fprintf(stderr, "$assert_streq called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -140,16 +140,402 @@ static void impl_assert_streq(long long a, long long b,
     }
 }
 
+static void impl_assert_false(long long cond, long long expr,
+                              long long file, long long line) {
+    if (cond) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_false called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "!%s (%s:%lld)", (char *)expr, (char *)file, line);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+static void impl_assert_fail(long long file, long long line) {
+    if (!s_run) {
+        fprintf(stderr, "$assert_fail called outside a test run at %s:%lld\n",
+                (char *)file, line);
+        return;
+    }
+    snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+             "forced failure (%s:%lld)", (char *)file, line);
+    s_run->failed = 1;
+    longjmp(s_run->jmp, 1);
+}
+
+static void impl_assert_fail_msg(long long msg, long long file, long long line) {
+    if (!s_run) {
+        fprintf(stderr, "$assert_fail_msg called outside a test run at %s:%lld\n",
+                (char *)file, line);
+        return;
+    }
+    snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+             "%s (%s:%lld)", (char *)msg, (char *)file, line);
+    s_run->failed = 1;
+    longjmp(s_run->jmp, 1);
+}
+
+static void impl_assert_gt(long long a, long long b,
+                           long long as, long long bs,
+                           long long file, long long line) {
+    if (!(a > b)) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_gt called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s <= %s (%lld <= %lld) (%s:%lld)",
+                 (char *)as, (char *)bs, a, b, (char *)file, line);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+static void impl_assert_lt(long long a, long long b,
+                           long long as, long long bs,
+                           long long file, long long line) {
+    if (!(a < b)) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_lt called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s >= %s (%lld >= %lld) (%s:%lld)",
+                 (char *)as, (char *)bs, a, b, (char *)file, line);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+static void impl_assert_ge(long long a, long long b,
+                           long long as, long long bs,
+                           long long file, long long line) {
+    if (!(a >= b)) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_ge called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s < %s (%lld < %lld) (%s:%lld)",
+                 (char *)as, (char *)bs, a, b, (char *)file, line);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+static void impl_assert_le(long long a, long long b,
+                           long long as, long long bs,
+                           long long file, long long line) {
+    if (!(a <= b)) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_le called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s > %s (%lld > %lld) (%s:%lld)",
+                 (char *)as, (char *)bs, a, b, (char *)file, line);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+static void impl_assert_within(long long delta, long long expected, long long actual,
+                               long long ds, long long es, long long as,
+                               long long file, long long line) {
+    long long diff = expected - actual;
+    if (diff < 0) diff = -diff;
+    if (diff > delta) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_within called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s |%s - %s| = %lld > %s (%lld) (%s:%lld)",
+                 (char *)as, (char *)es, (char *)as, diff, (char *)ds, delta,
+                 (char *)file, line);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+static void impl_assert_streq_len(long long a, long long b, long long len,
+                                  long long as, long long bs,
+                                  long long file, long long line) {
+    if (strncmp((char *)a, (char *)b, (size_t)len) != 0) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_streq_len called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s != %s (first %lld chars differ) (%s:%lld)",
+                 (char *)as, (char *)bs, len, (char *)file, line);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+static void impl_assert_mem_eq(long long expected, long long actual, long long len,
+                               long long es, long long as,
+                               long long file, long long line) {
+    if (memcmp((void *)expected, (void *)actual, (size_t)len) != 0) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_mem_eq called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s != %s (%lld bytes differ) (%s:%lld)",
+                 (char *)es, (char *)as, len, (char *)file, line);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+static void impl_assert_float_within(double delta, double expected, double actual,
+                                     long long ds, long long es, long long as,
+                                     long long file, long long line) {
+    double diff = expected - actual;
+    if (diff < 0) diff = -diff;
+    if (diff > delta) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_float_within called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s |%s - %s| = %g > %s (%g) (%s:%lld)",
+                 (char *)as, (char *)es, (char *)as, diff,
+                 (char *)ds, delta, (char *)file, line);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+static void impl_assert_double_within(double delta, double expected, double actual,
+                                      long long ds, long long es, long long as,
+                                      long long file, long long line) {
+    // Identical to impl_assert_float_within — the C ABI for doubles is the same.
+    impl_assert_float_within(delta, expected, actual, ds, es, as, file, line);
+}
+
+static void impl_assert_bits(long long mask, long long expected, long long actual,
+                             long long ms, long long es, long long as,
+                             long long file, long long line) {
+    if ((actual & mask) != (expected & mask)) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_bits called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s & %s = 0x%llx != %s & %s = 0x%llx (%s:%lld)",
+                 (char *)as, (char *)ms, (unsigned long long)(actual & mask),
+                 (char *)es, (char *)ms, (unsigned long long)(expected & mask),
+                 (char *)file, line);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+static void impl_assert_bit_high(long long bit, long long actual,
+                                 long long bs, long long as,
+                                 long long file, long long line) {
+    if (!(actual & (1LL << bit))) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_bit_high called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s bit %lld of %s is low (%s:%lld)",
+                 (char *)bs, bit, (char *)as, (char *)file, line);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+static void impl_assert_bit_low(long long bit, long long actual,
+                                long long bs, long long as,
+                                long long file, long long line) {
+    if (actual & (1LL << bit)) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_bit_low called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s bit %lld of %s is high (%s:%lld)",
+                 (char *)bs, bit, (char *)as, (char *)file, line);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+static void impl_assert_eq_array(long long expected, long long actual,
+                                 long long elem_size, long long count,
+                                 long long es, long long as,
+                                 long long file, long long line) {
+    size_t total = (size_t)elem_size * (size_t)count;
+    if (memcmp((void *)expected, (void *)actual, total) != 0) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_eq_array called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s[0..%lld] != %s[0..%lld] (%lld bytes differ) (%s:%lld)",
+                 (char *)es, count - 1, (char *)as, count - 1,
+                 (long long)total, (char *)file, line);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+// Message-appending variants — append msg to the fail message after the main diagnostic.
+
+static void impl_assert_msg(long long cond, long long expr, long long msg,
+                            long long file, long long line) {
+    if (!cond) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_msg called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s (%s:%lld) - %s", (char *)expr, (char *)file, line, (char *)msg);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+static void impl_assert_eq_msg(long long a, long long b,
+                               long long as, long long bs, long long msg,
+                               long long file, long long line) {
+    if (a != b) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_eq_msg called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s != %s (%lld != %lld) (%s:%lld) - %s",
+                 (char *)as, (char *)bs, a, b, (char *)file, line, (char *)msg);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+static void impl_assert_streq_msg(long long a, long long b,
+                                  long long as, long long bs, long long msg,
+                                  long long file, long long line) {
+    if (strcmp((char *)a, (char *)b) != 0) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_streq_msg called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s != %s (\"%s\" != \"%s\") (%s:%lld) - %s",
+                 (char *)as, (char *)bs, (char *)a, (char *)b,
+                 (char *)file, line, (char *)msg);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+static void impl_assert_null_msg(long long p, long long ps, long long msg,
+                                 long long file, long long line) {
+    if (p != 0) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_null_msg called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s is not null (%s:%lld) - %s",
+                 (char *)ps, (char *)file, line, (char *)msg);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+static void impl_assert_not_null_msg(long long p, long long ps, long long msg,
+                                     long long file, long long line) {
+    if (p == 0) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_not_null_msg called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s is null (%s:%lld) - %s",
+                 (char *)ps, (char *)file, line, (char *)msg);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
+static void impl_assert_bits_msg(long long mask, long long expected, long long actual,
+                                 long long ms, long long es, long long as, long long msg,
+                                 long long file, long long line) {
+    if ((actual & mask) != (expected & mask)) {
+        if (!s_run) {
+            fprintf(stderr, "$assert_bits_msg called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+                 "%s & %s = 0x%llx != %s & %s = 0x%llx (%s:%lld) - %s",
+                 (char *)as, (char *)ms, (unsigned long long)(actual & mask),
+                 (char *)es, (char *)ms, (unsigned long long)(expected & mask),
+                 (char *)file, line, (char *)msg);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
+    }
+}
+
 // Register native assertion functions so the compiler can emit FFI calls to
 // them. Must be called before cc_compile (but after cc_execute_inline_macros
 // to avoid registering these symbols during the comptime pass -- ticket #334).
 void cc_load_test_runtime(CCCC *vm) {
-    cc_register_cfunc(vm, "__cccc_assert",         (void *)impl_assert,         4, 0);
-    cc_register_cfunc(vm, "__cccc_assert_eq",      (void *)impl_assert_eq,      6, 0);
-    cc_register_cfunc(vm, "__cccc_assert_neq",     (void *)impl_assert_neq,     6, 0);
-    cc_register_cfunc(vm, "__cccc_assert_null",    (void *)impl_assert_null,    4, 0);
-    cc_register_cfunc(vm, "__cccc_assert_not_null",(void *)impl_assert_not_null,4, 0);
-    cc_register_cfunc(vm, "__cccc_assert_streq",   (void *)impl_assert_streq,   6, 0);
+    cc_register_cfunc(vm, "__cccc_assert",             (void *)impl_assert,              4, 0);
+    cc_register_cfunc(vm, "__cccc_assert_false",       (void *)impl_assert_false,         4, 0);
+    cc_register_cfunc(vm, "__cccc_assert_fail",        (void *)impl_assert_fail,          2, 0);
+    cc_register_cfunc(vm, "__cccc_assert_fail_msg",    (void *)impl_assert_fail_msg,      3, 0);
+    cc_register_cfunc(vm, "__cccc_assert_eq",          (void *)impl_assert_eq,            6, 0);
+    cc_register_cfunc(vm, "__cccc_assert_neq",         (void *)impl_assert_neq,           6, 0);
+    cc_register_cfunc(vm, "__cccc_assert_gt",          (void *)impl_assert_gt,            6, 0);
+    cc_register_cfunc(vm, "__cccc_assert_lt",          (void *)impl_assert_lt,            6, 0);
+    cc_register_cfunc(vm, "__cccc_assert_ge",          (void *)impl_assert_ge,            6, 0);
+    cc_register_cfunc(vm, "__cccc_assert_le",          (void *)impl_assert_le,            6, 0);
+    cc_register_cfunc(vm, "__cccc_assert_within",      (void *)impl_assert_within,        8, 0);
+    cc_register_cfunc(vm, "__cccc_assert_null",        (void *)impl_assert_null,          4, 0);
+    cc_register_cfunc(vm, "__cccc_assert_not_null",    (void *)impl_assert_not_null,      4, 0);
+    cc_register_cfunc(vm, "__cccc_assert_streq",       (void *)impl_assert_streq,         6, 0);
+    cc_register_cfunc(vm, "__cccc_assert_streq_len",   (void *)impl_assert_streq_len,     7, 0);
+    cc_register_cfunc(vm, "__cccc_assert_mem_eq",      (void *)impl_assert_mem_eq,        7, 0);
+    cc_register_cfunc(vm, "__cccc_assert_float_within",(void *)impl_assert_float_within,  8, 0);
+    cc_register_cfunc(vm, "__cccc_assert_double_within",(void *)impl_assert_double_within,8, 0);
+    cc_register_cfunc(vm, "__cccc_assert_bits",        (void *)impl_assert_bits,          8, 0);
+    cc_register_cfunc(vm, "__cccc_assert_bit_high",    (void *)impl_assert_bit_high,      6, 0);
+    cc_register_cfunc(vm, "__cccc_assert_bit_low",     (void *)impl_assert_bit_low,       6, 0);
+    cc_register_cfunc(vm, "__cccc_assert_eq_array",    (void *)impl_assert_eq_array,      8, 0);
+    cc_register_cfunc(vm, "__cccc_assert_msg",         (void *)impl_assert_msg,           5, 0);
+    cc_register_cfunc(vm, "__cccc_assert_eq_msg",      (void *)impl_assert_eq_msg,        7, 0);
+    cc_register_cfunc(vm, "__cccc_assert_streq_msg",   (void *)impl_assert_streq_msg,     7, 0);
+    cc_register_cfunc(vm, "__cccc_assert_null_msg",    (void *)impl_assert_null_msg,      5, 0);
+    cc_register_cfunc(vm, "__cccc_assert_not_null_msg",(void *)impl_assert_not_null_msg,  5, 0);
+    cc_register_cfunc(vm, "__cccc_assert_bits_msg",    (void *)impl_assert_bits_msg,      9, 0);
 }
 
 // Preprocess src/tests.h (loaded via the embedded std registry). As a

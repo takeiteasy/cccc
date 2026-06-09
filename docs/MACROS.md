@@ -8,7 +8,7 @@ A macro function is declared by annotating it with `[[cccc::comptime]]` (C23
 attribute syntax) or the equivalent `__attribute__((comptime))` (GNU attribute
 syntax). Either form is accepted everywhere.
 
-The macro API is private to macro compilation. CCCC embeds its own `reflection.h`
+The macro API is private to macro compilation. CCCC embeds its own `jcc/reflection.h`
 and injects it automatically while macro and comptime helper functions are
 compiled, but that bundled header is not on the public include path. Macro code
 can use the `$*`, `$quote*`, `$macro_error_at`, `$gensym`, and `$dump_*`

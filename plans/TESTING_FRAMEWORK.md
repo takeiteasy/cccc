@@ -241,7 +241,7 @@ CLI flag it mirrors.
 [[cccc::test]]
 int test_bounds_check(void) {
     int arr[3] = {1, 2, 3};
-    CCCC_ASSERT_EQ(arr[0], 1);
+    $assert_eq(arr[0], 1);
     return 0;
 }
 ```
@@ -294,7 +294,7 @@ implicit in the toolchain's defaults (optimisation).
 // Positive test
 [[cccc::test]]
 int test_simple(void) {
-    CCCC_ASSERT(1 + 1 == 2);
+    $assert(1 + 1 == 2);
     return 0;
 }
 
@@ -335,15 +335,15 @@ It is not on the public include path.
 
 ```c
 // Hard assertion — record failure and abort the current test
-CCCC_ASSERT(cond)
-CCCC_ASSERT_EQ(a, b)
-CCCC_ASSERT_NE(a, b)
-CCCC_ASSERT_LT(a, b)
-CCCC_ASSERT_LE(a, b)
-CCCC_ASSERT_GT(a, b)
-CCCC_ASSERT_GE(a, b)
-CCCC_ASSERT_STREQ(a, b)
-CCCC_ASSERT_NOT_NULL(p)
+$assert(cond)
+$assert_eq(a, b)
+$assert_ne(a, b)
+$assert_lt(a, b)
+$assert_le(a, b)
+$assert_gt(a, b)
+$assert_ge(a, b)
+$assert_streq(a, b)
+$assert_not_null(p)
 
 // Soft assertion — record failure, continue
 CCCC_EXPECT(cond)
@@ -361,13 +361,13 @@ CCCC_RUN_TEST(ctx, test_fn)
 
 The macros expand to bookkeeping calls plus, on failure, a
 `goto`-based early return out of the *current test function only* — a
-test that calls `CCCC_ASSERT` does not abort its sibling tests.
+test that calls `$assert` does not abort its sibling tests.
 
 Implementation sketch:
 
 ```c
 // generated prologue for every test function
-#define CCCC_ASSERT(cond) \
+#define $assert(cond) \
     do { \
         if (!(cond)) { \
             __cccc_test_record_failure(__FILE__, __LINE__, #cond); \
@@ -585,7 +585,7 @@ A test file declares its own tests and a test main:
 int test_pointer_basic(void) {
     int x = 42;
     int *p = &x;
-    CCCC_ASSERT_EQ(*p, 42);
+    $assert_eq(*p, 42);
     return 0;
 }
 
@@ -742,7 +742,7 @@ This doc is for tests, not for the build system.
 - `tests.h` is private. It is injected into test code automatically
   the way `reflection.h` is injected into macro code. It is not on
   the public include path.
-- The `CCCC_ASSERT` macros abort the *current* test only; they do not
+- The `$assert` macros abort the *current* test only; they do not
   halt the runner. The runner always continues to the next test
   unless `--fail-fast` is set.
 - A test that returns non-zero without recording an assertion is
@@ -767,7 +767,7 @@ This doc is for tests, not for the build system.
 based naming for stability when the function gets renamed. My
 recommendation: filename-based, with `name = "..."` override.
 
-**[Q:2]** Should `CCCC_ASSERT` early-return from the *test* or from
+**[Q:2]** Should `$assert` early-return from the *test* or from
 the *whole test_main*? v1 wants test-local early return. This is
 implemented as `return 1` from the test function, which means
 asserts work in tests but **not** in `test_main` (which is fine —

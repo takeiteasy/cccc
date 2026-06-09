@@ -38,9 +38,9 @@ char *make_global_name(const char *header) {
 [[cccc::comptime]]
 const char *header_source_path(const char *header) {
     if (strcmp(header, "reflection.h") == 0)
-        return "src/reflection.h";
+        return "include/jcc/reflection.h";
     if (strcmp(header, "tests.h") == 0)
-        return "src/tests.h";
+        return "include/jcc/tests.h";
     static char path[256];
     snprintf(path, sizeof(path), "include/%s", header);
     return path;
@@ -92,13 +92,28 @@ char **discover_headers(void) {
         return NULL;
     }
 
-    int count = (int)g.gl_pathc + 2; // plus reflection.h and tests.h
+    // Count non-jcc results first (jcc/ private headers are added manually).
+    int public_count = 0;
+    for (int i = 0; i < (int)g.gl_pathc; i++) {
+        const char *name = copy_header_name(g.gl_pathv[i]);
+        int skip = (strncmp(name, "jcc/", 4) == 0);
+        free((void *)name);
+        if (!skip) public_count++;
+    }
+
+    int count = public_count + 2; // plus reflection.h and tests.h
     char **headers = malloc((count + 1) * sizeof(char *));
     int n = 0;
     headers[n++] = copy_header_name("reflection.h");
     headers[n++] = copy_header_name("tests.h");
-    for (int i = 0; i < (int)g.gl_pathc; i++)
-        headers[n++] = copy_header_name(g.gl_pathv[i]);
+    for (int i = 0; i < (int)g.gl_pathc; i++) {
+        char *name = copy_header_name(g.gl_pathv[i]);
+        if (strncmp(name, "jcc/", 4) == 0) {
+            free(name);
+            continue;
+        }
+        headers[n++] = name;
+    }
     headers[n] = NULL;
 
     sort_headers(headers, n);

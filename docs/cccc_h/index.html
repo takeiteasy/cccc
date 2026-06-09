@@ -443,6 +443,9 @@ FFI.
 <dt><tt><a href="index.html#//apple_ref/c/func/cc_run" target="_top">cc_run</a></tt></dt>
 <dd><p>Execute the compiled program within the VM.
 </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/cc_run_at" target="_top">cc_run_at</a></tt></dt>
+<dd><p>Execute the compiled program starting at a specific bytecode address.
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/cc_save_bytecode" target="_top">cc_save_bytecode</a></tt></dt>
 <dd><p>Save compiled bytecode to a file for later execution.
 </p></dd>
@@ -2261,6 +2264,55 @@ format).
 
 <!-- end return value --></p>
 <hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/cc_run_at;   name=cc_run_at -->
+<a name="//apple_ref/c/func/cc_run_at"></a>
+<h3><a name="cc_run_at">cc_run_at</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/cc_run_at;name=start --><!-- begin abstract --></p>
+<p>Execute the compiled program starting at a specific bytecode address.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/cc_run_at;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/cc_run_at;name=start --><!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/cc_run_at" logicalPath="//apple_ref/c/instm/cc_run_at //apple_ref/c/clm/cc_run_at //apple_ref/c/intfcm/cc_run_at //apple_ref/c/intfm/cc_run_at //apple_ref/c/func/cc_run_at" target="_top"><span class="function">cc_run_at</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tag/CCCC" logicalPath="//apple_ref/c/cl/CCCC //apple_ref/c/tdef/CCCC //apple_ref/c/tag/CCCC" target="_top"><span class="type">CCCC</span></a> <span class="type">*</span><span class="param">vm</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/CCCCPc //apple_ref/c/tdef/CCCCPc //apple_ref/c/tag/CCCCPc //apple_ref/c/struct/CCCCPc //apple_ref/c/intf/CCCCPc //apple_ref/doc/anysymbol/CCCCPc" machineGenerated="true" --><span class="type">CCCCPc</span><!-- /a --> <span class="param">entry</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <span class="param">argc</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="type">*</span><span class="param">argv</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/cc_run_at;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/cc_run_at/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/cc_run_at/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The CCCC instance containing compiled bytecode.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/cc_run_at/entry;   name=entry -->
+<a name="//apple_ref/doc/functionparam/cc_run_at/entry"></a>
+<code>entry</code>
+</dt>
+<dd><p>Program counter (instruction index) to start execution from.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/cc_run_at/argc;   name=argc -->
+<a name="//apple_ref/doc/functionparam/cc_run_at/argc"></a>
+<code>argc</code>
+</dt>
+<dd><p>Argument count to pass to the program.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/cc_run_at/argv;   name=argv -->
+<a name="//apple_ref/doc/functionparam/cc_run_at/argv"></a>
+<code>argv</code>
+</dt>
+<dd><p>Argument vector.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>Program exit code.
+
+<!-- end return value --></p>
+<hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/cc_save_bytecode;   name=cc_save_bytecode -->
 <a name="//apple_ref/c/func/cc_save_bytecode"></a>
 <h3><a name="cc_save_bytecode">cc_save_bytecode</a></h3>
@@ -3137,7 +3189,9 @@ compilation.
     <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/MacroFn" logicalPath="//apple_ref/c/cl/MacroFn //apple_ref/c/tdef/MacroFn" target="_top"><span class="type">MacroFn</span></a> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/macro_fns //apple_ref/c/data/macro_fns //apple_ref/c/clconst/macro_fns " machineGenerated="true" --><span class="var">macro_fns</span><!-- /a -->; <span class="comment">// Linked list of captured macro functions</span> 
     <!-- a logicalPath="//apple_ref/c/cl/ComptimeVar //apple_ref/c/tdef/ComptimeVar //apple_ref/c/tag/ComptimeVar //apple_ref/c/struct/ComptimeVar //apple_ref/c/intf/ComptimeVar //apple_ref/doc/anysymbol/ComptimeVar" machineGenerated="true" --><span class="type">ComptimeVar</span><!-- /a --> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/comptime_vars //apple_ref/c/data/comptime_vars //apple_ref/c/clconst/comptime_vars " machineGenerated="true" --><span class="var">comptime_vars</span><!-- /a -->; <span class="comment">// Linked list of [[cccc::comptime]] variable decls</span> 
     <!-- a logicalPath="//apple_ref/c/cl/TestFnRecord //apple_ref/c/tdef/TestFnRecord //apple_ref/c/tag/TestFnRecord //apple_ref/c/struct/TestFnRecord //apple_ref/c/intf/TestFnRecord //apple_ref/doc/anysymbol/TestFnRecord" machineGenerated="true" --><span class="type">TestFnRecord</span><!-- /a --> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/test_fns //apple_ref/c/data/test_fns //apple_ref/c/clconst/test_fns " machineGenerated="true" --><span class="var">test_fns</span><!-- /a -->; <span class="comment">// Linked list of [[cccc::test]] function names</span> 
+    <!-- a logicalPath="//apple_ref/c/cl/TestSetupRecord //apple_ref/c/tdef/TestSetupRecord //apple_ref/c/tag/TestSetupRecord //apple_ref/c/struct/TestSetupRecord //apple_ref/c/intf/TestSetupRecord //apple_ref/doc/anysymbol/TestSetupRecord" machineGenerated="true" --><span class="type">TestSetupRecord</span><!-- /a --> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/test_setups //apple_ref/c/data/test_setups //apple_ref/c/clconst/test_setups " machineGenerated="true" --><span class="var">test_setups</span><!-- /a -->; <span class="comment">// Linked list of [[cccc::test_setup/teardown]] records</span> 
     <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/testing_mode //apple_ref/c/data/testing_mode //apple_ref/c/clconst/testing_mode " machineGenerated="true" --><span class="var">testing_mode</span><!-- /a -->; <span class="comment">// True when running under --testing (no main required)</span> 
+    <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/current_suite //apple_ref/c/data/current_suite //apple_ref/c/clconst/current_suite " machineGenerated="true" --><span class="var">current_suite</span><!-- /a -->; <span class="comment">// Active suite name set by #pragma cccc suite begin</span> 
     <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/in_macro_mode //apple_ref/c/data/in_macro_mode //apple_ref/c/clconst/in_macro_mode " machineGenerated="true" --><span class="var">in_macro_mode</span><!-- /a -->; <span class="comment">// True when compiling/executing a macro function</span> 
     <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/in_macro_expansion //apple_ref/c/data/in_macro_expansion //apple_ref/c/clconst/in_macro_expansion " machineGenerated="true" --><span class="var">in_macro_expansion</span><!-- /a -->; <span class="comment">// True during macro AST expansion pass</span> 
     <!-- a logicalPath="//apple_ref/c/cl/bool //apple_ref/c/tdef/bool //apple_ref/c/tag/bool //apple_ref/c/struct/bool //apple_ref/c/intf/bool //apple_ref/doc/anysymbol/bool" machineGenerated="true" --><span class="type">bool</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/in_comptime_block //apple_ref/c/data/in_comptime_block //apple_ref/c/clconst/in_comptime_block " machineGenerated="true" --><span class="var">in_comptime_block</span><!-- /a -->; <span class="comment">// True inside #pragma cccc comptime begin...end</span> 
