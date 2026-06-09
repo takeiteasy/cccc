@@ -1128,6 +1128,29 @@ void cc_destroy(CCCC *vm) {
         hashmap_deinit_borrowed(&vm->compiler.macro_context_scope->tag_map);
     }
 
+    // Free test function records (test_fns linked list)
+    for (TestFnRecord *r = vm->compiler.test_fns, *nr; r; r = nr) {
+        nr = r->next;
+        free(r->name);
+        free(r->display_name);
+        free(r->suite);
+        free(r->error_pat);
+        if (r->ret_kind == RET_STR)
+            free(r->ret_expect.ret_str);
+        free(r);
+    }
+    vm->compiler.test_fns = NULL;
+
+    // Free test setup/teardown records (test_setups linked list)
+    for (TestSetupRecord *s = vm->compiler.test_setups, *ns; s; s = ns) {
+        ns = s->next;
+        free(s->fn_name);
+        free(s->name_pat);
+        free(s->suite);
+        free(s);
+    }
+    vm->compiler.test_setups = NULL;
+
     // Destroy parser arena (frees all tokens, AST nodes, preprocessor state)
     arena_destroy(&vm->compiler.parser_arena);
 }
