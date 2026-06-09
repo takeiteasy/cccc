@@ -21,17 +21,30 @@
 #include "internal.h"
 
 
-// Per-test failure state; longjmp target lives in cc_run_tests.
-static jmp_buf s_test_jmp;
-static int     s_test_failed;
-static char    s_fail_msg[512];
+// Per-run failure state allocated on the stack inside cc_run_tests.
+// s_run is set to point at the current run's state before each test loop and
+// cleared afterward.  A NULL check in the impl_assert* functions guards against
+// calls that arrive outside a test run (e.g. from a [[cccc::macro]] during the
+// comptime pass) -- ticket #334.
+typedef struct {
+    jmp_buf jmp;
+    int     failed;
+    char    fail_msg[512];
+} CCCCTestRunState;
+
+static CCCCTestRunState *s_run = NULL;
 
 static void impl_assert(long long cond, long long expr, long long file, long long line) {
     if (!cond) {
-        snprintf(s_fail_msg, sizeof(s_fail_msg), "%s (%s:%lld)",
+        if (!s_run) {
+            fprintf(stderr, "CCCC_ASSERT called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg), "%s (%s:%lld)",
                  (char *)expr, (char *)file, line);
-        s_test_failed = 1;
-        longjmp(s_test_jmp, 1);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
     }
 }
 
@@ -39,11 +52,16 @@ static void impl_assert_eq(long long a, long long b,
                            long long as, long long bs,
                            long long file, long long line) {
     if (a != b) {
-        snprintf(s_fail_msg, sizeof(s_fail_msg),
+        if (!s_run) {
+            fprintf(stderr, "CCCC_ASSERT_EQ called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
                  "%s != %s (%lld != %lld) (%s:%lld)",
                  (char *)as, (char *)bs, a, b, (char *)file, line);
-        s_test_failed = 1;
-        longjmp(s_test_jmp, 1);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
     }
 }
 
@@ -51,31 +69,46 @@ static void impl_assert_neq(long long a, long long b,
                             long long as, long long bs,
                             long long file, long long line) {
     if (a == b) {
-        snprintf(s_fail_msg, sizeof(s_fail_msg),
+        if (!s_run) {
+            fprintf(stderr, "CCCC_ASSERT_NEQ called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
                  "%s == %s (both %lld) (%s:%lld)",
                  (char *)as, (char *)bs, a, (char *)file, line);
-        s_test_failed = 1;
-        longjmp(s_test_jmp, 1);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
     }
 }
 
 static void impl_assert_null(long long p, long long ps,
                              long long file, long long line) {
     if (p != 0) {
-        snprintf(s_fail_msg, sizeof(s_fail_msg), "%s is not null (%s:%lld)",
+        if (!s_run) {
+            fprintf(stderr, "CCCC_ASSERT_NULL called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg), "%s is not null (%s:%lld)",
                  (char *)ps, (char *)file, line);
-        s_test_failed = 1;
-        longjmp(s_test_jmp, 1);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
     }
 }
 
 static void impl_assert_not_null(long long p, long long ps,
                                  long long file, long long line) {
     if (p == 0) {
-        snprintf(s_fail_msg, sizeof(s_fail_msg), "%s is null (%s:%lld)",
+        if (!s_run) {
+            fprintf(stderr, "CCCC_ASSERT_NOT_NULL called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg), "%s is null (%s:%lld)",
                  (char *)ps, (char *)file, line);
-        s_test_failed = 1;
-        longjmp(s_test_jmp, 1);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
     }
 }
 
@@ -83,17 +116,23 @@ static void impl_assert_streq(long long a, long long b,
                               long long as, long long bs,
                               long long file, long long line) {
     if (strcmp((char *)a, (char *)b) != 0) {
-        snprintf(s_fail_msg, sizeof(s_fail_msg),
+        if (!s_run) {
+            fprintf(stderr, "CCCC_ASSERT_STREQ called outside a test run at %s:%lld\n",
+                    (char *)file, line);
+            return;
+        }
+        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
                  "%s != %s (\"%s\" != \"%s\") (%s:%lld)",
                  (char *)as, (char *)bs, (char *)a, (char *)b,
                  (char *)file, line);
-        s_test_failed = 1;
-        longjmp(s_test_jmp, 1);
+        s_run->failed = 1;
+        longjmp(s_run->jmp, 1);
     }
 }
 
 // Register native assertion functions so the compiler can emit FFI calls to
-// them. Must be called before cc_compile.
+// them. Must be called before cc_compile (but after cc_execute_inline_macros
+// to avoid registering these symbols during the comptime pass -- ticket #334).
 void cc_load_test_runtime(CCCC *vm) {
     cc_register_cfunc(vm, "__cccc_assert",         (void *)impl_assert,         4, 0);
     cc_register_cfunc(vm, "__cccc_assert_eq",      (void *)impl_assert_eq,      6, 0);
@@ -133,6 +172,12 @@ int cc_run_tests(CCCC *vm, Obj *prog) {
     int passed = 0;
     int test_num = 0;
 
+    // Stack-allocate state for this run and expose it to the FFI callbacks via
+    // the module-level pointer.  Cleared on exit so stray post-run calls are
+    // caught by the NULL guard in impl_assert* (ticket #333, #334).
+    CCCCTestRunState run;
+    s_run = &run;
+
     for (TestFnRecord *r = ordered; r; r = r->next) {
         test_num++;
 
@@ -150,22 +195,24 @@ int cc_run_tests(CCCC *vm, Obj *prog) {
             continue;
         }
 
-        s_test_failed = 0;
-        s_fail_msg[0] = '\0';
-        vm->text_seg[0] = fn->code_addr;
+        run.failed = 0;
+        run.fail_msg[0] = '\0';
 
-        if (setjmp(s_test_jmp) == 0)
-            cc_run(vm, 0, NULL);
+        // Use cc_run_at to avoid mutating text_seg[0] (ticket #332).
+        if (setjmp(run.jmp) == 0)
+            cc_run_at(vm, (CCCCPc)fn->code_addr, 0, NULL);
 
-        if (!s_test_failed) {
+        if (!run.failed) {
             printf("ok %d - %s\n", test_num, r->name);
             passed++;
         } else {
             printf("not ok %d - %s\n", test_num, r->name);
-            if (s_fail_msg[0])
-                printf("  ---\n  message: %s\n  ...\n", s_fail_msg);
+            if (run.fail_msg[0])
+                printf("  ---\n  message: %s\n  ...\n", run.fail_msg);
         }
     }
+
+    s_run = NULL;
 
     for (TestFnRecord *r = ordered, *next; r; r = next) {
         next = r->next;

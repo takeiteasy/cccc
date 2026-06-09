@@ -1549,9 +1549,6 @@ int main(int argc, const char *argv[]) {
     if (!skip_stdlib)
         cc_load_stdlib(&vm);
 
-    if (testing_mode)
-        cc_load_test_runtime(&vm);
-
     // Add CCCC's standard library header directory
     cc_include(&vm, "./include");
 
@@ -1627,6 +1624,12 @@ int main(int argc, const char *argv[]) {
     // input token stream so the parser can resolve calls without manual
     // forward declarations.
     cc_execute_inline_macros(&vm, input_tokens, input_files_count);
+
+    // Register test-runtime FFI symbols after the comptime pass so that any
+    // [[cccc::macro]] calling CCCC_ASSERT produces an unresolved-symbol error
+    // instead of longjmp-ing through an uninitialised jmp_buf (ticket #334).
+    if (testing_mode)
+        cc_load_test_runtime(&vm);
 
     input_progs = calloc(input_files_count, sizeof(Obj *));
     for (int i = 0; i < input_files_count; i++) {

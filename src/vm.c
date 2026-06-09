@@ -1514,15 +1514,13 @@ void cc_load_stdlib(CCCC *vm) {
     }
 }
 
-int cc_run(CCCC *vm, int argc, char **argv) {
+int cc_run_at(CCCC *vm, CCCCPc entry, int argc, char **argv) {
     if (!vm || !vm->text_seg) {
         error("VM not initialized - call cc_compile first");
     }
     cc_vm_profile_reset(vm);
 
-    // Get entry point (main function) from text_seg[0]
-    CCCCPc main_addr = vm->text_seg[0];
-    vm->pc = main_addr;
+    vm->pc = entry;
 
     // Setup stack — use poolsize_max so sp/bp sit at top of full reservation
     {
@@ -1554,6 +1552,10 @@ int cc_run(CCCC *vm, int argc, char **argv) {
     *--vm->sp = 0;
 
     return (vm->flags & CCCC_ENABLE_DEBUGGER) ? debugger_run(vm, argc, argv) : vm_eval(vm);
+}
+
+int cc_run(CCCC *vm, int argc, char **argv) {
+    return cc_run_at(vm, vm->text_seg[0], argc, argv);
 }
 
 #if defined(_WIN32) || defined(_WIN64)

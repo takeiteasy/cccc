@@ -2230,6 +2230,17 @@ void cc_compile(CCCC *vm, Obj *prog);
 int cc_run(CCCC *vm, int argc, char **argv);
 
 /*!
+ @function cc_run_at
+ @abstract Execute the compiled program starting at a specific bytecode address.
+ @param vm The CCCC instance containing compiled bytecode.
+ @param entry Program counter (instruction index) to start execution from.
+ @param argc Argument count to pass to the program.
+ @param argv Argument vector.
+ @return Program exit code.
+*/
+int cc_run_at(CCCC *vm, CCCCPc entry, int argc, char **argv);
+
+/*!
  @function cc_print_tokens
  @abstract Print a token stream to stdout (useful for debugging the
            preprocessor and tokenizer).
