@@ -21,6 +21,7 @@
 #include "internal.h"
 #include <fnmatch.h>
 #include <signal.h>
+#include <string.h>
 
 
 // Per-run failure state allocated on the stack inside cc_run_tests.
@@ -632,6 +633,68 @@ static bool run_once_hooks(CCCC *vm, Obj *prog, TestSetupRecord *setups,
                              suite, NULL, NULL);
 }
 
+// Escapes a string for JSON output (writes to buf, returns buf).
+static const char *json_esc(const char *s, char *buf, size_t size) {
+    size_t i = 0, j = 0;
+    while (s[i] && j + 6 < size) {
+        if (s[i] == '\\') { buf[j++] = '\\'; buf[j++] = '\\'; i++; }
+        else if (s[i] == '"') { buf[j++] = '\\'; buf[j++] = '"'; i++; }
+        else if (s[i] == '\n') { buf[j++] = '\\'; buf[j++] = 'n'; i++; }
+        else if (s[i] == '\r') { buf[j++] = '\\'; buf[j++] = 'r'; i++; }
+        else if (s[i] == '\t') { buf[j++] = '\\'; buf[j++] = 't'; i++; }
+        else { buf[j++] = s[i]; i++; }
+    }
+    buf[j] = '\0';
+    return buf;
+}
+
+static void emit_test_result(CcTestFormat fmt, const char *name,
+                              const char *suite, const char *status,
+                              const char *message, bool *json_first,
+                              int test_num) {
+    char ebuf[4096];
+    switch (fmt) {
+    case TEST_FORMAT_TAP:
+        if (strcmp(status, "skip") == 0) {
+            printf("not ok %d - %s # SKIP (not found in compiled output)\n",
+                   test_num, name);
+        } else if (strcmp(status, "timeout") == 0) {
+            printf("not ok %d - %s # TIMEOUT\n", test_num, name);
+        } else if (message) {
+            printf("not ok %d - %s\n", test_num, name);
+            printf("  ---\n  message: %s\n  ...\n", message);
+        } else {
+            printf("ok %d - %s\n", test_num, name);
+        }
+        break;
+    case TEST_FORMAT_PLAIN: {
+        const char *prefix;
+        if (strcmp(status, "pass") == 0)       prefix = "  \xe2\x9c\x93";
+        else if (strcmp(status, "neg_pass") == 0) prefix = "  \xe2\x9c\x93";
+        else if (strcmp(status, "skip") == 0)  prefix = "  -";
+        else                                   prefix = "  \xe2\x9c\x97";
+        if (message)
+            printf("%s %s (%s)\n", prefix, name, message);
+        else if (strcmp(status, "neg_pass") == 0)
+            printf("%s %s (correctly rejected)\n", prefix, name);
+        else
+            printf("%s %s\n", prefix, name);
+        break;
+    }
+    case TEST_FORMAT_JSON:
+        if (!*json_first) printf(",\n");
+        *json_first = false;
+        printf("  {\"name\":\"%s\"", json_esc(name, ebuf, sizeof(ebuf)));
+        if (suite)
+            printf(",\"suite\":\"%s\"", json_esc(suite, ebuf, sizeof(ebuf)));
+        printf(",\"status\":\"%s\"", status);
+        if (message)
+            printf(",\"message\":\"%s\"", json_esc(message, ebuf, sizeof(ebuf)));
+        printf("}");
+        break;
+    }
+}
+
 // Thin wrapper used inside cc_run_tests to build ordered/filtered lists without
 // copying TestFnRecord.  Pointing at the original record means new fields are
 // always visible — no manual sync required (ticket #337).
@@ -702,16 +765,35 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
         return 0;
     }
 
-    printf("TAP version 13\n");
-    printf("1..%d\n", n);
+    CcTestFormat fmt = opts ? opts->format : TEST_FORMAT_TAP;
+
+    switch (fmt) {
+    case TEST_FORMAT_TAP:
+        printf("TAP version 13\n");
+        printf("1..%d\n", n);
+        break;
+    case TEST_FORMAT_PLAIN:
+        if (n == 0)
+            printf("No tests found.\n");
+        else
+            printf("Running %d test%s...\n", n, n == 1 ? "" : "s");
+        break;
+    case TEST_FORMAT_JSON:
+        printf("[\n");
+        break;
+    }
 
     int passed = 0;
     int test_num = 0;
-    const char *prev_suite = NULL;  // tracks suite changes for TAP comments
+    int total_failures = 0;
+    int total_skipped = 0;
+    int total_timeouts = 0;
+    int total_neg_pass = 0;
+    int total_neg_fail = 0;
+    int total_neg = 0;
+    const char *prev_suite = NULL;
+    bool json_first = true;
 
-    // Stack-allocate state for this run and expose it to the FFI callbacks via
-    // the module-level pointer.  Cleared on exit so stray post-run calls are
-    // caught by the NULL guard in impl_assert* (ticket #333, #334).
     CCCCTestRunState run;
     s_run = &run;
 
@@ -719,13 +801,9 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
     if (use_timeout)
         signal(SIGALRM, handle_alarm);
 
-    // Snapshot the data segment so global state can be restored between tests
-    // (ticket #329).  data_ptr only advances during compilation, never during
-    // test execution, so one snapshot covers the full segment.
     size_t snap_size  = (size_t)(vm->data_ptr - vm->data_seg);
     char  *base_snap  = malloc(snap_size);
     memcpy(base_snap, vm->data_seg, snap_size);
-    // cur_snap is what each test restores to; may be updated by once-setups.
     char  *cur_snap   = base_snap;
 
     bool stop_early = false;
@@ -735,53 +813,59 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
         const char *disp      = test_display_name(r);
         const char *cur_suite = r->suite;
 
-        // Detect suite transitions.
         bool suite_changed = (cur_suite != prev_suite) &&
                              (cur_suite == NULL || prev_suite == NULL ||
                               strcmp(cur_suite, prev_suite) != 0);
 
         if (suite_changed) {
-            // Once-teardown for the suite we are leaving.
             if (prev_suite) {
-                if (!run_once_hooks(vm, prog, setups, true, prev_suite))
-                    printf("# once-teardown for suite \"%s\" failed\n", prev_suite);
+                if (!run_once_hooks(vm, prog, setups, true, prev_suite)) {
+                    if (fmt == TEST_FORMAT_TAP)
+                        printf("# once-teardown for suite \"%s\" failed\n", prev_suite);
+                    else if (fmt == TEST_FORMAT_PLAIN)
+                        printf("  ! once-teardown for suite \"%s\" failed\n", prev_suite);
+                }
             }
-
-            // Discard any suite-specific snapshot taken by once-setup.
             if (cur_snap != base_snap) {
                 free(cur_snap);
                 cur_snap = base_snap;
             }
-
-            // Emit TAP suite comment.
-            if (cur_suite)
-                printf("# Suite: %s\n", cur_suite);
-            else
-                printf("# Suite: (none)\n");
+            if (fmt == TEST_FORMAT_TAP) {
+                if (cur_suite)
+                    printf("# Suite: %s\n", cur_suite);
+                else
+                    printf("# Suite: (none)\n");
+            } else if (fmt == TEST_FORMAT_PLAIN) {
+                printf("── %s ──\n", cur_suite ? cur_suite : "(no suite)");
+            }
             prev_suite = cur_suite;
 
-            // Once-setup for the suite we are entering.
             if (cur_suite && has_once_setups_for(setups, cur_suite)) {
                 memcpy(vm->data_seg, base_snap, snap_size);
-                if (!run_once_hooks(vm, prog, setups, false, cur_suite))
-                    printf("# once-setup for suite \"%s\" failed\n", cur_suite);
-                // Snapshot the post-once-setup state so it persists across tests.
+                if (!run_once_hooks(vm, prog, setups, false, cur_suite)) {
+                    if (fmt == TEST_FORMAT_TAP)
+                        printf("# once-setup for suite \"%s\" failed\n", cur_suite);
+                    else if (fmt == TEST_FORMAT_PLAIN)
+                        printf("  ! once-setup for suite \"%s\" failed\n", cur_suite);
+                }
                 cur_snap = malloc(snap_size);
                 memcpy(cur_snap, vm->data_seg, snap_size);
             }
         }
 
-        // Negative test: result is precomputed at compile time, no execution.
         if (r->error_pat) {
             if (r->neg_passed == 1) {
-                printf("ok %d - %s\n", test_num, disp);
+                emit_test_result(fmt, disp, cur_suite, "neg_pass", NULL, &json_first, test_num);
                 passed++;
+                total_neg_pass++;
+                total_neg++;
             } else {
                 const char *reason = (r->neg_passed == 0)
                     ? "expected compilation error but code compiled successfully"
                     : r->neg_actual;
-                printf("not ok %d - %s\n", test_num, disp);
-                printf("  ---\n  message: %s\n  ...\n", reason);
+                emit_test_result(fmt, disp, cur_suite, "neg_fail", reason, &json_first, test_num);
+                total_neg_fail++;
+                total_neg++;
                 if (opts && opts->fail_fast) stop_early = true;
             }
             continue;
@@ -789,13 +873,12 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
 
         Obj *fn = find_fn(prog, r->name);
         if (!fn) {
-            printf("not ok %d - %s # SKIP (not found in compiled output)\n",
-                   test_num, disp);
+            emit_test_result(fmt, disp, cur_suite, "skip", NULL, &json_first, test_num);
+            total_skipped++;
             if (opts && opts->fail_fast) stop_early = true;
             continue;
         }
 
-        // Restore global state before each positive test (ticket #329).
         memcpy(vm->data_seg, cur_snap, snap_size);
 
         run.failed    = 0;
@@ -805,9 +888,6 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
 
         if (use_timeout) alarm((unsigned)opts->test_timeout);
 
-        // Use cc_run_at to avoid mutating text_seg[0] (ticket #332).
-        // Setup and test share one setjmp context: if setup fails the test is
-        // skipped but teardown still runs below (ticket #331).
         int jval = setjmp(run.jmp);
         if (jval == 0) {
             run_hooks(vm, prog, setups, false, false, cur_suite, disp);
@@ -816,10 +896,8 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
             run.timed_out = 1;
         }
 
-        if (use_timeout) alarm(0); // cancel pending alarm
+        if (use_timeout) alarm(0);
 
-        // Teardown always runs after setup+test, even on failure.  Skip only
-        // on timeout because the VM state is unknown after SIGALRM.
         if (!run.timed_out) {
             char td_fail[512] = {0};
             bool td_ok = run_hooks_guarded(vm, prog, setups, true, false,
@@ -831,23 +909,53 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
         }
 
         if (run.timed_out) {
-            printf("not ok %d - %s # TIMEOUT\n", test_num, disp);
+            emit_test_result(fmt, disp, cur_suite, "timeout", NULL, &json_first, test_num);
+            total_timeouts++;
             if (opts && opts->fail_fast) stop_early = true;
         } else if (!run.failed) {
-            printf("ok %d - %s\n", test_num, disp);
+            emit_test_result(fmt, disp, cur_suite, "pass", NULL, &json_first, test_num);
             passed++;
         } else {
-            printf("not ok %d - %s\n", test_num, disp);
-            if (run.fail_msg[0])
-                printf("  ---\n  message: %s\n  ...\n", run.fail_msg);
+            const char *msg = run.fail_msg[0] ? run.fail_msg : "unknown error";
+            emit_test_result(fmt, disp, cur_suite, "fail", msg, &json_first, test_num);
+            total_failures++;
             if (opts && opts->fail_fast) stop_early = true;
         }
     }
 
-    // Once-teardown for the final active suite.
     if (prev_suite && !stop_early) {
-        if (!run_once_hooks(vm, prog, setups, true, prev_suite))
-            printf("# once-teardown for suite \"%s\" failed\n", prev_suite);
+        if (!run_once_hooks(vm, prog, setups, true, prev_suite)) {
+            if (fmt == TEST_FORMAT_TAP)
+                printf("# once-teardown for suite \"%s\" failed\n", prev_suite);
+            else if (fmt == TEST_FORMAT_PLAIN)
+                printf("  ! once-teardown for suite \"%s\" failed\n", prev_suite);
+        }
+    }
+
+    switch (fmt) {
+    case TEST_FORMAT_TAP:
+        break;
+    case TEST_FORMAT_PLAIN:
+        if (n > 0)
+            printf("\n");
+        printf("=======================\n");
+        printf("Test Results Summary\n");
+        printf("=======================\n");
+        printf("Total:          %d\n", n);
+        printf("Passed:         %d\n", passed);
+        if (total_neg > 0)
+            printf("Negative tests: %d (correctly rejected: %d, failed: %d)\n",
+                   total_neg, total_neg_pass, total_neg_fail);
+        if (total_failures > 0)
+            printf("Failed:         %d\n", total_failures);
+        if (total_skipped > 0)
+            printf("Skipped:        %d\n", total_skipped);
+        if (total_timeouts > 0)
+            printf("Timed out:      %d\n", total_timeouts);
+        break;
+    case TEST_FORMAT_JSON:
+        printf("\n]\n");
+        break;
     }
 
     if (cur_snap != base_snap) free(cur_snap);

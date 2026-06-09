@@ -218,7 +218,17 @@ For suites with `once` setup hooks, each test in the suite restores the post-onc
 ./cccc --testing myfile.c
 ```
 
-Output is in [TAP version 13](https://testanything.org/) format. Suite changes are emitted as TAP comments:
+Select the output format with `--test-format`:
+
+| Format   | Flag                        | Use case              |
+|----------|-----------------------------|-----------------------|
+| TAP      | `--test-format=tap` (default) | CI systems, `prove` |
+| Plain    | `--test-format=plain`       | Human-readable terminal |
+| JSON     | `--test-format=json`        | Machine-readable, CI integration |
+
+### TAP format
+
+[TAP version 13](https://testanything.org/) output. Suite changes are emitted as comments:
 
 ```
 TAP version 13
@@ -233,6 +243,42 @@ not ok 5 - test_empty
   ---
   message: "foo" != "" ("foo" != "") (myfile.c:30)
   ...
+```
+
+### Plain format
+
+Human-readable output that mimics the Python test runner's style, with check/cross prefixes and a summary block:
+
+```
+Running 5 tests...
+  ✓ test_assert_true
+── math ──
+  ✓ test_add
+  ✓ test_mul
+── strings ──
+  ✓ test_equality
+  ✗ test_empty ("foo" != "" ("foo" != "") (myfile.c:30))
+
+=======================
+Test Results Summary
+=======================
+Total:          5
+Passed:         4
+Failed:         1
+```
+
+### JSON format
+
+Line-delimited JSON objects, one per test, wrapped in an array:
+
+```json
+[
+  {"name":"test_assert_true","status":"pass"},
+  {"name":"test_add","suite":"math","status":"pass"},
+  {"name":"test_mul","suite":"math","status":"pass"},
+  {"name":"test_equality","suite":"strings","status":"pass"},
+  {"name":"test_empty","suite":"strings","status":"fail","message":"\"foo\" != \"\" (\"foo\" != \"\") (myfile.c:30)"}
+]
 ```
 
 The process exits with code `0` if all tests pass, `1` if any fail.
@@ -274,7 +320,7 @@ test_equality                            [suite: strings]
 test_empty                               [suite: strings]
 ```
 
-`--test`, `--test-suite`, and `--list-tests` all imply `--testing`, so the flag can be omitted when using them.
+`--test`, `--test-suite`, `--list-tests`, and `--test-format` all imply `--testing`, so the flag can be omitted when using them.
 
 ### Stop after first failure
 
@@ -290,13 +336,7 @@ Stops after the first failing test. Passes and failures already emitted remain i
 ./cccc --testing --test-timeout=5 myfile.c
 ```
 
-Kills any test that runs longer than 5 seconds. Timed-out tests are reported as:
-
-```
-not ok N - test_name # TIMEOUT
-```
-
-Remaining tests continue to run. Uses `SIGALRM` internally; test code that also installs `SIGALRM` handlers may interfere.
+Kills any test that runs longer than 5 seconds. Timed-out tests are reported in the selected format (e.g. `not ok N # TIMEOUT` in TAP, `✗ name (TIMEOUT)` in plain, `"status":"timeout"` in JSON). Remaining tests continue to run. Uses `SIGALRM` internally; test code that also installs `SIGALRM` handlers may interfere.
 
 ## Assertion Macros
 
@@ -392,6 +432,7 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 - Teardown hooks are skipped on test timeout (VM state is unknown after `SIGALRM`). They run in all other cases, including after test or setup failure.
 - Calling `exit()` directly in a test terminates the entire process rather than failing just that test. Use `$assert*` macros instead.
 - `--testing` cannot be combined with `-c`, `-o`, or other output flags.
+- `--test-format` requires `--testing` (or a flag that implies it, like `--test`).
 - Suite blocks (`#pragma cccc suite begin/end`) cannot be nested.
 - **Negative test bodies are matched against error substrings.** Use a substring that is specific enough to avoid false matches but not so specific that it breaks with minor message wording changes.
 - `--test-timeout` uses `SIGALRM`; test code that also uses `alarm()` or installs a `SIGALRM` handler will interfere with the timeout mechanism.

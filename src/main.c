@@ -250,12 +250,13 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-o/--out <file>          Output file. Required for -c=native. For -c=bytecode, writes\n");
     printf("\t                         bytecode to <file>; if omitted, writes to stdout\n");
     printf("\t-d/--disassemble         Disassemble bytecode to stdout\n");
-    printf("\t-t/--testing             Discover and run [[cccc::test]] functions; output TAP\n");
+    printf("\t-t/--testing             Discover and run [[cccc::test]] functions\n");
     printf("\t   --test=GLOB           Run only tests whose name matches GLOB (implies --testing)\n");
     printf("\t   --test-suite=NAME     Run only tests in the named suite (implies --testing)\n");
     printf("\t   --list-tests          List test names without running (implies --testing)\n");
     printf("\t   --fail-fast           Stop after the first failing test\n");
     printf("\t   --test-timeout=N      Per-test timeout in seconds (0 = no timeout)\n");
+    printf("\t   --test-format=FMT     Output format for test results: tap (default), plain, json\n");
     printf("\t-v/--verbose             Enable debug logging\n");
     printf("\t-g/--debug               Enable interactive debugger\n");
     printf("\t-e/--entry <name>        Set the entry-point function (default: main)\n");
@@ -767,6 +768,7 @@ int main(int argc, const char *argv[]) {
     int list_tests = 0;            // --list-tests
     int fail_fast = 0;             // --fail-fast
     int test_timeout = 0;          // --test-timeout=N
+    CcTestFormat test_format = TEST_FORMAT_TAP; // --test-format=FORMAT
 
     if (argc <= 1)
         usage(argv[0], 1);
@@ -842,6 +844,7 @@ int main(int argc, const char *argv[]) {
         {"list-tests", no_argument, 0, 1063},
         {"fail-fast", no_argument, 0, 1064},
         {"test-timeout", required_argument, 0, 1065},
+        {"test-format", required_argument, 0, 1066},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1208,6 +1211,20 @@ int main(int argc, const char *argv[]) {
             break;
         case 1065: // --test-timeout=N
             test_timeout = atoi(optarg);
+            testing_mode = 1;
+            break;
+        case 1066: // --test-format=FORMAT
+            if (strcmp(optarg, "tap") == 0) {
+                test_format = TEST_FORMAT_TAP;
+            } else if (strcmp(optarg, "plain") == 0) {
+                test_format = TEST_FORMAT_PLAIN;
+            } else if (strcmp(optarg, "json") == 0) {
+                test_format = TEST_FORMAT_JSON;
+            } else {
+                fprintf(stderr, "error: invalid --test-format '%s' "
+                        "(use 'tap', 'plain', or 'json')\n", optarg);
+                usage(argv[0], 1);
+            }
             testing_mode = 1;
             break;
         case 1058: { // --fusion-candidates[=N]
@@ -1858,6 +1875,7 @@ int main(int argc, const char *argv[]) {
             .list_only    = (bool)list_tests,
             .fail_fast    = (bool)fail_fast,
             .test_timeout = test_timeout,
+            .format       = test_format,
         };
         exit_code = cc_run_tests(&vm, merged_prog, &test_opts);
         goto BAIL;

@@ -951,6 +951,13 @@ struct TestSetupRecord {
     TestSetupRecord *next;
 };
 
+// Test output format selector.
+typedef enum {
+    TEST_FORMAT_TAP,    // TAP version 13 (default)
+    TEST_FORMAT_PLAIN,  // Human-readable plain text
+    TEST_FORMAT_JSON,   // JSON machine-readable output
+} CcTestFormat;
+
 // Options controlling which tests are run and how output is formatted.
 typedef struct {
     const char *test_glob;    // --test=GLOB pattern, or NULL to run all
@@ -958,6 +965,7 @@ typedef struct {
     bool list_only;           // --list-tests: enumerate without running
     bool fail_fast;           // --fail-fast: stop after first failure
     int  test_timeout;        // --test-timeout=N: per-test timeout in seconds (0=off)
+    CcTestFormat format;      // --test-format=tap|plain|json
 } CcTestOptions;
 
 // A variable or struct instance declared with #pragma comptime.
