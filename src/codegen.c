@@ -644,8 +644,9 @@ static int fop_for_type(Type *ty, int f64_op) {
 }
 
 // Load operations based on type
-// Load operations based on type
 static void emit_load(JCC *vm, Type *ty, int rd, int rs_addr) {
+    if (vm->flags & JCC_POINTER_CHECKS)
+        emit_rr(vm, CHKP3, rs_addr, 0);
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
         emit_rr(vm, LDR_B, rd, rs_addr);
         if (ty->is_unsigned || ty->kind == TY_BOOL)
@@ -707,6 +708,8 @@ static void emit_local_store(JCC *vm, Type *ty, int rd_val, long long offset) {
 
 // Store operations based on type
 static void emit_store(JCC *vm, Type *ty, int rd_val, int rs_addr) {
+    if (vm->flags & JCC_POINTER_CHECKS)
+        emit_rr(vm, CHKP3, rs_addr, 0);
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
         emit_rr(vm, STR_B, rd_val, rs_addr);
     } else if (ty->kind == TY_SHORT) {

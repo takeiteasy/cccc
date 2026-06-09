@@ -130,10 +130,12 @@ All features listed below can be enabled individually or through the safety leve
   - Zero overhead when stack is within bounds (single pointer comparison)
   - Prevents memory corruption from stack overflow
 - `--heap-canaries` **Heap overflow protection**
-  - Front canary in AllocHeader (before user data)
-  - Rear canary after user data
-  - Both canaries (0xCAFEBABEDEADBEEF) validated on free()
-  - Detects heap buffer over/underflows with allocation site information
+  - Front canary written into AllocHeader.canary (before user data)
+  - Rear canary (`sizeof(long long)`) written after the end of the aligned allocation
+  - Both canaries use the current stack canary value (0xDEADBEEFCAFEBABE, or random if `--random-canaries`)
+  - Both validated on free(); mismatch triggers HEAP CANARY CORRUPTED error with address and size
+  - Detects heap buffer overflows (rear canary) and header corruption (front canary)
+  - Requires VM heap mode (`-V` or any heap safety flag)
 - `--random-canaries` **Random stack canaries**
   - Generates cryptographically random canary value on VM initialization
   - Uses /dev/urandom on Unix-like systems for strong randomness
@@ -142,20 +144,20 @@ All features listed below can be enabled individually or through the safety leve
   - Works with `--stack-canaries` flag (canaries are fixed by default)
   - Minimal performance overhead (one-time generation at startup)
   - Canary value stored in `vm->stack_canary` field
-- `--memory-poisoning` **Uninitialized memory poisoning**
-  - Fills newly allocated memory with 0xCD pattern (clean/allocated)
-  - Fills freed memory with 0xDD pattern (dead/freed)
-  - Makes uninitialized reads return consistent bad values (0xCDCDCDCD...)
-  - Makes use-after-free reads return dead memory pattern (0xDDDDDDDD...)
+- `--memory-poisoning` **Allocated/freed memory poisoning**
+  - Fills newly allocated memory with 0xCD pattern ("clean memory")
+  - Fills freed memory with 0xDD pattern ("dead memory")
+  - Makes uninitialized reads return consistent bad values (0xCDCDCDCD…)
+  - Makes use-after-free reads return dead memory pattern (0xDDDDDDDD…)
   - Helps detect uninitialized variable bugs and UAF issues
-  - Works independently of other safety features
+  - Requires VM heap mode (`-V` or any heap safety flag)
   - Performance overhead proportional to allocation size (memset on alloc/free)
-  - Compatible with both VM heap and regular malloc/free
 - `--memory-leak-detection` **Memory leak detection**
-  - Tracks all VM heap allocations in a linked list
-  - Removes from list on free()
-  - Reports all unfreed allocations at program exit
+  - Tracks all VM heap allocations in a host-memory linked list (AllocRecord)
+  - Removes the record on free() and realloc()
+  - Reports all unfreed allocations at program exit (in cc_destroy)
   - Shows address, size, and PC offset of allocation site for each leak
+  - The report is printed to stdout after the program exits; exit code is unchanged
 - `--uaf-detection` **Use-after-free detection**
   - Marks freed blocks instead of reusing them
   - Increments generation counter on each free
@@ -249,16 +251,17 @@ All features listed below can be enabled individually or through the safety leve
   - Prints detailed warning message showing expected vs. actual argument counts
   - Zero overhead when disabled (simple flag check at compile time)
 - `--memory-tagging` **Temporal memory tagging**
-  - Tracks generation counter for each heap allocation
-  - Records pointer-to-generation mapping at allocation time (MALC opcode)
-  - Increments generation counter when memory is freed
-  - CHKP opcode validates pointer's creation generation matches current memory generation
-  - Detects use-after-free even when memory is freed and reallocated (cross-generation UAF)
-  - Requires memory quarantine (freed memory is not reused, similar to UAF detection)
-  - Uses HashMap with integer keys for O(1) pointer tag lookup
-  - Generation stored as generation+1 to avoid HashMap NULL ambiguity
-  - Works with `--vm-heap` flag to intercept malloc/free calls
-  - Provides stronger temporal safety than UAF detection alone
+  - Tracks generation counter for each heap allocation in AllocHeader
+  - Records pointer→creation_generation in a host-memory side table (HashMap) at malloc time
+  - Increments generation counter when memory is freed (MFRE opcode)
+  - CHKP3 opcode validates pointer's stored generation matches current header generation
+  - Detects use-after-free with generation detail: shows which generation the pointer was born at
+  - Requires `-V` / `--vm-heap` to intercept malloc/free
+  - Uses `hashmap_put_int` / `hashmap_get_int` for O(1) pointer tag lookup
+  - **Limitation:** side table is keyed by address; if freed memory is reallocated at the same
+    address (free-list path), the old entry is overwritten and stale pointers to that address
+    are not detected. The current bump allocator never reuses addresses, so this is not a
+    practical concern unless the free list is activated.
 - `--control-flow-integrity` **Control flow integrity (CFI)**
   - Implements shadow stack to detect ROP attacks and stack corruption
   - On CALL/CALLI: pushes return address to both main stack and shadow stack
@@ -733,21 +736,22 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --memory-tagging test_temporal_tagging.c
+$ ./jcc --memory-tagging -V test_temporal_tagging.c
 
 ========== TEMPORAL SAFETY VIOLATION ==========
-Pointer references memory from a different allocation generation
-Address:            0x8c4a40038
-Pointer tag:        0 (creation generation)
-Current generation: 1 (memory was freed and reallocated)
-Size:               40 bytes
-Allocated at PC offset: 15
-Current PC:         0x8c48001f0 (offset: 62)
-This indicates use-after-free where memory was freed and reallocated
+Stale pointer access detected
+Address:            0x137210040
+Pointer generation: 0
+Current generation: 1
+Allocated at PC offset: 17
+Current PC:         0x57 (offset: 87)
 ================================================
 ```
 
-**Note:** Temporal memory tagging requires memory quarantine to work correctly. When `-T/--memory-tagging` is enabled, freed memory is not returned to the free list for reuse. This prevents address collisions that would make it impossible to distinguish between stale and valid pointers to the same address. The memory overhead is similar to `--uaf-detection`.
+**Note:** Memory tagging uses a host-side HashMap keyed by pointer address. Because the current
+VM heap is a bump allocator that never reuses freed addresses, the stored generation at the old
+address will always diverge after a free, giving correct temporal violation reports. Always
+combine with `-V` / `--vm-heap` when using programs that call `malloc`/`free` directly.
 
 **Combining with VM Heap Mode:**
 ```bash

@@ -1697,8 +1697,7 @@ struct JCC {
                         // {origin_type, base, size})
     HashMap stack_var_meta; // Unified stack variable metadata (bp+offset ->
                             // StackVarMeta)
-    // Note: alloc_map and ptr_tags removed - now using sorted_allocs for heap
-    // tracking
+    HashMap ptr_tags; // ptr address → creation_generation (JCC_MEMORY_TAGGING)
 
     // Sorted allocation array for O(log n) range queries (CHKP/CHKT performance
     // and heap provenance)

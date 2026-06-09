@@ -893,6 +893,27 @@ void cc_destroy(JCC *vm) {
     if (!vm)
         return;
 
+    // Report memory leaks before releasing segments
+    if ((vm->flags & JCC_MEMORY_LEAK_DETECT) && vm->alloc_list) {
+        int count = 0;
+        for (AllocRecord *r = vm->alloc_list; r; r = r->next)
+            count++;
+        printf("\n========== MEMORY LEAK DETECTED ==========\n");
+        printf("%d allocation(s) not freed:\n", count);
+        for (AllocRecord *r = vm->alloc_list; r; r = r->next) {
+            printf("  0x%llx  %zu bytes  (alloc PC: %lld)\n",
+                   (long long)r->address, r->size, r->alloc_pc);
+        }
+        printf("==========================================\n");
+        AllocRecord *r = vm->alloc_list;
+        while (r) {
+            AllocRecord *next = r->next;
+            free(r);
+            r = next;
+        }
+        vm->alloc_list = NULL;
+    }
+
     // Release reserved virtual ranges (base pointers never moved)
     if (vm->text_seg)
         jcc_vm_release(vm->text_seg,
@@ -917,6 +938,8 @@ void cc_destroy(JCC *vm) {
     // hashmap_deinit. Heap-allocated values must be freed first.
     // Free init_state HashMap (integer keys, no values to free)
     hashmap_deinit(&vm->init_state);
+    // Free ptr_tags HashMap (integer keys, integer values cast to void*)
+    hashmap_deinit(&vm->ptr_tags);
 
     // Free stack_ptrs HashMap (integer keys + StackPtrInfo values)
     if (vm->stack_ptrs.buckets) {

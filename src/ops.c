@@ -1193,19 +1193,38 @@ static inline int op_CHKP3_fn(JCC *vm) {
         // Find allocation header - need to search backwards
         AllocHeader *header = ((AllocHeader *)ptr) - 1;
 
-        // Check if freed (UAF detection)
-        if ((vm->flags & JCC_UAF_DETECTION) && header->magic == 0xDEADBEEF &&
-            header->freed) {
-            printf("\n========== USE-AFTER-FREE DETECTED ==========\n");
-            printf("Attempted to access freed memory\n");
-            printf("Address:     0x%llx\n", ptr);
-            printf("Size:        %zu bytes\n", header->size);
-            printf("Allocated at PC offset: %lld\n", header->alloc_pc);
-            printf("Generation:  %d (freed)\n", header->generation);
-            printf("Current PC:  0x%llx (offset: %lld)\n", (long long)vm->pc,
-                   (long long)vm->pc);
-            printf("============================================\n");
-            return -1;
+        if (header->magic == 0xDEADBEEF) {
+            // Temporal memory tagging: detect stale pointers via side table
+            if (vm->flags & JCC_MEMORY_TAGGING) {
+                intptr_t stored_gen =
+                    (intptr_t)hashmap_get_int(&vm->ptr_tags, ptr);
+                if (stored_gen != (intptr_t)header->generation) {
+                    printf("\n========== TEMPORAL SAFETY VIOLATION ==========\n");
+                    printf("Stale pointer access detected\n");
+                    printf("Address:           0x%llx\n", ptr);
+                    printf("Pointer generation: %ld\n", (long)stored_gen);
+                    printf("Current generation: %d\n", header->generation);
+                    printf("Allocated at PC offset: %lld\n", header->alloc_pc);
+                    printf("Current PC:        0x%llx (offset: %lld)\n",
+                           (long long)vm->pc, (long long)vm->pc);
+                    printf("================================================\n");
+                    return -1;
+                }
+            }
+
+            // Check if freed (UAF detection)
+            if ((vm->flags & JCC_UAF_DETECTION) && header->freed) {
+                printf("\n========== USE-AFTER-FREE DETECTED ==========\n");
+                printf("Attempted to access freed memory\n");
+                printf("Address:     0x%llx\n", ptr);
+                printf("Size:        %zu bytes\n", header->size);
+                printf("Allocated at PC offset: %lld\n", header->alloc_pc);
+                printf("Generation:  %d (freed)\n", header->generation);
+                printf("Current PC:  0x%llx (offset: %lld)\n", (long long)vm->pc,
+                       (long long)vm->pc);
+                printf("============================================\n");
+                return -1;
+            }
         }
     }
 
@@ -1573,6 +1592,10 @@ static inline int op_MALC_fn(JCC *vm) {
     size_t size = (requested_size + 7) & ~7;
     size_t total_size = size + sizeof(AllocHeader);
 
+    // Reserve space for rear heap canary when enabled
+    if (vm->flags & JCC_HEAP_CANARIES)
+        total_size += sizeof(long long);
+
     // Check for OOM — try to grow the heap before giving up
     size_t available = (size_t)(vm->heap_end - vm->heap_ptr);
     if (total_size > available) {
@@ -1594,11 +1617,40 @@ static inline int op_MALC_fn(JCC *vm) {
     header->magic = 0xDEADBEEF;
     header->freed = 0;
     header->generation = 0;
+    header->creation_generation = 0;
+    header->canary = 0;
     header->alloc_pc = vm->text_seg ? (long long)vm->pc : 0;
     header->type_kind = TY_VOID;
 
     vm->heap_ptr = vm->heap_ptr + total_size;
-    vm->regs[REG_A0] = (long long)(header + 1); // Return pointer after header
+    void *user_ptr = (void *)(header + 1);
+    vm->regs[REG_A0] = (long long)user_ptr;
+
+    // Heap canaries: write front + rear guard values
+    if (vm->flags & JCC_HEAP_CANARIES) {
+        header->canary = vm->stack_canary;
+        *(long long *)((char *)user_ptr + size) = vm->stack_canary;
+    }
+
+    // Memory poisoning: fill with 0xCD ("clean memory") pattern
+    if (vm->flags & JCC_MEMORY_POISONING)
+        memset(user_ptr, 0xCD, size);
+
+    // Leak detection: track active allocation
+    if (vm->flags & JCC_MEMORY_LEAK_DETECT) {
+        AllocRecord *rec = (AllocRecord *)malloc(sizeof(AllocRecord));
+        if (rec) {
+            rec->address = user_ptr;
+            rec->size = requested_size;
+            rec->alloc_pc = header->alloc_pc;
+            rec->next = vm->alloc_list;
+            vm->alloc_list = rec;
+        }
+    }
+
+    // Memory tagging: register pointer→generation in side table
+    if (vm->flags & JCC_MEMORY_TAGGING)
+        hashmap_put_int(&vm->ptr_tags, (long long)user_ptr, (void *)(intptr_t)0);
 
     if (vm->debug_vm) {
         printf("MALC: allocated %zu bytes at 0x%llx\n", size, vm->regs[REG_A0]);
@@ -1630,8 +1682,55 @@ static inline int op_MFRE_fn(JCC *vm) {
         return -1;
     }
 
+    // Heap canary check: verify front and rear guard values
+    if (vm->flags & JCC_HEAP_CANARIES) {
+        if (header->canary != vm->stack_canary) {
+            printf("\n========== HEAP CANARY CORRUPTED ==========\n");
+            printf("Front canary overwritten at 0x%llx\n", (long long)ptr);
+            printf("Expected: 0x%llx\n", vm->stack_canary);
+            printf("Found:    0x%llx\n", header->canary);
+            printf("===========================================\n");
+            return -1;
+        }
+        long long rear = *(long long *)((char *)ptr + header->size);
+        if (rear != vm->stack_canary) {
+            printf("\n========== HEAP CANARY CORRUPTED ==========\n");
+            printf("Rear canary overwritten: heap overflow past allocation at 0x%llx\n", (long long)ptr);
+            printf("Allocation size: %zu bytes\n", header->size);
+            printf("Expected: 0x%llx\n", vm->stack_canary);
+            printf("Found:    0x%llx\n", rear);
+            printf("===========================================\n");
+            return -1;
+        }
+    }
+
     header->freed = 1;
     header->generation++;
+
+    // Memory poisoning: fill with 0xDD ("dead memory") pattern
+    if (vm->flags & JCC_MEMORY_POISONING)
+        memset(ptr, 0xDD, header->size);
+
+    // Memory tagging: side table is NOT updated on free — the stored generation
+    // (set at malloc time) stays so stale pointers still fail the CHKP3 check.
+
+    // Leak detection: remove from active allocation list
+    if (vm->flags & JCC_MEMORY_LEAK_DETECT) {
+        AllocRecord *prev = NULL;
+        AllocRecord *cur = vm->alloc_list;
+        while (cur) {
+            if (cur->address == ptr) {
+                if (prev)
+                    prev->next = cur->next;
+                else
+                    vm->alloc_list = cur->next;
+                free(cur);
+                break;
+            }
+            prev = cur;
+            cur = cur->next;
+        }
+    }
 
     if (vm->debug_vm) {
         printf("MFRE: freed pointer 0x%llx\n", (long long)ptr);
@@ -1690,11 +1789,13 @@ static inline int op_REALC_fn(JCC *vm) {
         old_size < (size_t)new_size ? old_size : (size_t)new_size;
     memcpy(new_ptr, ptr, copy_size);
 
-    // Free old block
-    old_header->freed = 1;
-    old_header->generation++;
+    // Free old block through op_MFRE_fn so all free-path checks run
+    vm->regs[REG_A0] = (long long)ptr;
+    int free_result = op_MFRE_fn(vm);
+    vm->regs[REG_A0] = (long long)new_ptr;
+    if (free_result != 0)
+        return free_result;
 
-    // Result already in REG_A0
     return 0;
 }
 
