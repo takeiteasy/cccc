@@ -255,7 +255,9 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --test-suite=NAME     Run only tests in the named suite (implies --testing)\n");
     printf("\t   --list-tests          List test names without running (implies --testing)\n");
     printf("\t   --fail-fast           Stop after the first failing test\n");
-    printf("\t   --test-timeout=N      Per-test timeout in seconds (0 = no timeout)\n");
+    printf("\t   --test-timeout=N      Per-test timeout in seconds (0 = no timeout;\n");
+    printf("\t                         individual tests may override via\n");
+    printf("\t                         [[cccc::test(timeout = ms)]])\n");
     printf("\t   --test-format=FMT     Output format for test results: tap (default), plain, json\n");
     printf("\t-v/--verbose             Enable debug logging\n");
     printf("\t-g/--debug               Enable interactive debugger\n");

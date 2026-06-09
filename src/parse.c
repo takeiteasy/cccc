@@ -6207,7 +6207,8 @@ static Token *function(CCCC *vm, Token *tok, Type *basety, VarAttr *attr) {
         resolve_goto_labels(vm);
 
         CompileError *new_errors = pre_tail ? pre_tail->next : vm->errors;
-        if (vm->error_count == pre_count) {
+        int err_count = vm->error_count - pre_count;
+        if (err_count == 0) {
             neg_rec->neg_passed = 0;
             strncpy(neg_rec->neg_actual, "no error produced",
                     sizeof(neg_rec->neg_actual) - 1);
@@ -6216,12 +6217,19 @@ static Token *function(CCCC *vm, Token *tok, Type *basety, VarAttr *attr) {
             if (new_errors && new_errors->message)
                 strncpy(neg_rec->neg_actual, new_errors->message,
                         sizeof(neg_rec->neg_actual) - 1);
-            for (CompileError *e = new_errors; e; e = e->next) {
-                if (e->message && strstr(e->message, neg_rec->error_pat)) {
-                    neg_rec->neg_passed = 1;
-                    strncpy(neg_rec->neg_actual, e->message,
-                            sizeof(neg_rec->neg_actual) - 1);
-                    break;
+            // First check: if expect_errors is set, error count must match
+            if (neg_rec->expect_errors > 0 && err_count != neg_rec->expect_errors) {
+                snprintf(neg_rec->neg_actual, sizeof(neg_rec->neg_actual),
+                         "expected %d errors, got %d", neg_rec->expect_errors, err_count);
+            } else {
+                // Second check: error message must match error_pat
+                for (CompileError *e = new_errors; e; e = e->next) {
+                    if (e->message && strstr(e->message, neg_rec->error_pat)) {
+                        neg_rec->neg_passed = 1;
+                        strncpy(neg_rec->neg_actual, e->message,
+                                sizeof(neg_rec->neg_actual) - 1);
+                        break;
+                    }
                 }
             }
         }

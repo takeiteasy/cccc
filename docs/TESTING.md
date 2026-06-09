@@ -41,7 +41,7 @@ void test_add_commutative(void) {
 }
 ```
 
-`name`, `suite`, and `error` may all be combined in one attribute.
+`name`, `suite`, `error`, `timeout`, and `error_count` may all be combined in one attribute.
 
 ## Test Suites
 
@@ -109,6 +109,23 @@ void test_combined(void) {
 
 Negative test bodies are compiled in error-collection mode; their errors are absorbed and never propagate to the rest of the compilation. The test result is computed at compile time.
 
+### Expected error count
+
+Add `error_count = N` to assert that exactly `N` compilation errors are produced, rather than
+just one matching the pattern:
+
+```c
+[[cccc::test(error = "undefined variable", error_count = 1)]]
+void test_exactly_one_error(void) {
+    int x = not_declared;
+}
+```
+
+The test passes only if: (1) at least one error matches the `error` pattern, and
+(2) the total number of compilation errors in the test body equals `N` (when
+`N > 0`).  A count mismatch is reported as a failed negative test with a
+descriptive message.
+
 ## Setup and Teardown
 
 The framework supports lifecycle hooks that run before and/or after tests. Use `[[cccc::test_setup]]` and `[[cccc::test_teardown]]` to mark hook functions. Hook functions must have signature `void name(void)`.
@@ -170,6 +187,37 @@ void close_db(void) {
 ```
 
 The global state modified by a `once` setup persists across all tests in the suite — each test restores the post-once-setup snapshot rather than the initial compiled state.
+
+### Name-pattern once-hooks
+
+The `once` keyword can also be combined with `name = "glob"` to run a hook
+exactly once before the first test matching the glob, or after all tests
+complete (for teardown):
+
+```c
+static int g_initialised = 0;
+
+[[cccc::test_setup(name = "needs_init_*", once)]]
+void lazy_init(void) {
+    g_initialised = 1;
+}
+
+[[cccc::test(name = "needs_init_a")]]
+void test_a(void) {
+    $assert_eq(g_initialised, 1); // lazy_init fired before this test
+}
+
+[[cccc::test(name = "needs_init_b")]]
+void test_b(void) {
+    // g_initialised is still 1 — the data snapshot was taken after
+    // lazy_init, so its state is visible to all subsequent tests.
+    $assert_eq(g_initialised, 1);
+}
+```
+
+The data segment is snapshotted after the once-setup runs, so its state is
+visible to all subsequent tests — not just those matching the glob.  This
+behaviour mirrors suite-level once-hooks.
 
 ### Execution order
 
@@ -332,11 +380,28 @@ Stops after the first failing test. Passes and failures already emitted remain i
 
 ### Per-test timeout
 
+Set a global timeout for all tests:
+
 ```
 ./cccc --testing --test-timeout=5 myfile.c
 ```
 
 Kills any test that runs longer than 5 seconds. Timed-out tests are reported in the selected format (e.g. `not ok N # TIMEOUT` in TAP, `✗ name (TIMEOUT)` in plain, `"status":"timeout"` in JSON). Remaining tests continue to run. Uses `SIGALRM` internally; test code that also installs `SIGALRM` handlers may interfere.
+
+### Per-function timeout
+
+Override the global timeout for a specific test with `timeout = <ms>`:
+
+```c
+[[cccc::test(timeout = 200)]]
+void test_fast_operation(void) {
+    // fails if this runs longer than 200ms
+}
+```
+
+The timeout value is in milliseconds. When set, it takes precedence over the
+global `--test-timeout` for that test.  Uses `setitimer(ITIMER_REAL)` for
+sub-second precision.
 
 ## Assertion Macros
 

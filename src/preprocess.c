@@ -1948,6 +1948,8 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
     const char *suite_name = NULL; // extracted from [[cccc::test(suite = "...")]]
     const char *error_pat  = NULL; // extracted from [[cccc::test(error = "...")]]
     const char *test_name  = NULL; // extracted from [[cccc::test(name = "...")]]
+    long test_timeout_ms   = 0;    // extracted from [[cccc::test(timeout = ...)]]
+    int  test_error_count  = 0;    // extracted from [[cccc::test(error_count = ...)]]
     // For [[cccc::test_setup/teardown]]:
     const char *hook_name_pat = NULL;
     const char *hook_suite    = NULL;
@@ -2022,7 +2024,8 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                     is_inline = true;
             } else if (equal(after_scope, "test")) {
                 is_test_kind = true;
-                // [[cccc::test(suite = "name", error = "pattern", name = "label")]]
+                // [[cccc::test(suite = "name", error = "pattern", name = "label",
+                //              timeout = 1000, error_count = 1)]]
                 if (after_scope->next && equal(after_scope->next, "(")) {
                     Token *p = after_scope->next->next;
                     while (p && !equal(p, ")") && p->kind != TK_EOF) {
@@ -2040,6 +2043,16 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                                    p->next && equal(p->next, "=") &&
                                    p->next->next && p->next->next->kind == TK_STR) {
                             test_name = p->next->next->str;
+                            p = p->next->next->next;
+                        } else if (equal(p, "timeout") &&
+                                   p->next && equal(p->next, "=") &&
+                                   p->next->next && p->next->next->kind == TK_NUM) {
+                            test_timeout_ms = p->next->next->val;
+                            p = p->next->next->next;
+                        } else if (equal(p, "error_count") &&
+                                   p->next && equal(p->next, "=") &&
+                                   p->next->next && p->next->next->kind == TK_NUM) {
+                            test_error_count = p->next->next->val;
                             p = p->next->next->next;
                         } else {
                             p = p->next;
@@ -2127,6 +2140,9 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                 const char *s = suite_name ? suite_name : vm->compiler.current_suite;
                 rec->suite      = s ? strdup(s) : NULL;
                 rec->error_pat  = error_pat ? strdup(error_pat) : NULL;
+                rec->timeout_ms = test_timeout_ms;
+                if (error_pat)
+                    rec->expect_errors = test_error_count;
                 rec->next = vm->compiler.test_fns;
                 vm->compiler.test_fns = rec;
                 break;

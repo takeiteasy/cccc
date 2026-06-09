@@ -22,6 +22,7 @@
 #include <fnmatch.h>
 #include <signal.h>
 #include <string.h>
+#include <sys/time.h>
 
 
 // Per-run failure state allocated on the stack inside cc_run_tests.
@@ -582,8 +583,13 @@ static void run_hooks(CCCC *vm, Obj *prog, TestSetupRecord *setups,
         if (s->suite) {
             if (!suite || strcmp(s->suite, suite) != 0) continue;
         }
-        // Name-pattern filter (per-test only).
-        if (!once_only && s->name_pat) {
+        // Name-pattern filter.
+        // For per-test (once_only=false): run if name_pat matches or no name_pat.
+        // For once-only (once_only=true): name_pat-only hooks are handled
+        // separately by the first-match / end-of-tests logic in cc_run_tests,
+        // so skip them here (they have already fired or will fire later).
+        if (s->name_pat) {
+            if (once_only) continue; // handled separately for once-hooks
             if (!disp || fnmatch(s->name_pat, disp, 0) != 0) continue;
         }
         run_hook(vm, prog, s->fn_name);
@@ -793,13 +799,33 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
     int total_neg = 0;
     const char *prev_suite = NULL;
     bool json_first = true;
+    bool any_timeout_possible = false;
 
     CCCCTestRunState run;
     s_run = &run;
 
-    bool use_timeout = opts && opts->test_timeout > 0;
-    if (use_timeout)
-        signal(SIGALRM, handle_alarm);
+    // Register SIGALRM handler for timeouts (always, since per-test timeouts
+    // may be set on individual [[cccc::test]] attributes).
+    signal(SIGALRM, handle_alarm);
+
+    // Helper: arm/cancel timer with millisecond precision via setitimer.
+    // Called with ms <= 0 to cancel, ms > 0 to set a one-shot timer.
+    // Defined here (C89-compatible) so the lambda-like usage reads inline.
+    long global_timeout_ms = (opts && opts->test_timeout > 0) ? opts->test_timeout * 1000L : 0;
+    #define SET_TIMEOUT(ms) do {                                    \
+        long _t = (ms);                                             \
+        if (_t > 0) {                                               \
+            struct itimerval _itv;                                  \
+            _itv.it_interval.tv_sec  = 0;                           \
+            _itv.it_interval.tv_usec = 0;                           \
+            _itv.it_value.tv_sec     = _t / 1000;                   \
+            _itv.it_value.tv_usec    = (_t % 1000) * 1000;          \
+            setitimer(ITIMER_REAL, &_itv, NULL);                    \
+        } else {                                                    \
+            struct itimerval _zero = {{0,0},{0,0}};                 \
+            setitimer(ITIMER_REAL, &_zero, NULL);                   \
+        }                                                           \
+    } while (0)
 
     size_t snap_size  = (size_t)(vm->data_ptr - vm->data_seg);
     char  *base_snap  = malloc(snap_size);
@@ -886,7 +912,29 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
         run.fail_msg[0] = '\0';
         s_alarm_fired   = 0;
 
-        if (use_timeout) alarm((unsigned)opts->test_timeout);
+        // Per-test timeout: individual timeout_ms overrides the global value.
+        long effective_ms = r->timeout_ms > 0 ? r->timeout_ms : global_timeout_ms;
+        SET_TIMEOUT(effective_ms);
+        if (effective_ms > 0) any_timeout_possible = true;
+
+        // Fire once-setup hooks with name_pat on first match (before setjmp,
+        // since they need to update the data segment snapshot).
+        bool namepat_once_fired = false;
+        for (TestSetupRecord *s = setups; s; s = s->next) {
+            if (s->is_teardown || !s->once || s->once_fired) continue;
+            if (s->name_pat && disp && fnmatch(s->name_pat, disp, 0) == 0) {
+                run_hook(vm, prog, s->fn_name);
+                s->once_fired = true;
+                namepat_once_fired = true;
+            }
+        }
+        if (namepat_once_fired) {
+            // Snapshot after once-setup so subsequent tests see its state
+            if (cur_snap == base_snap) {
+                cur_snap = malloc(snap_size);
+            }
+            memcpy(cur_snap, vm->data_seg, snap_size);
+        }
 
         int jval = setjmp(run.jmp);
         if (jval == 0) {
@@ -896,7 +944,7 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
             run.timed_out = 1;
         }
 
-        if (use_timeout) alarm(0);
+        SET_TIMEOUT(0);
 
         if (!run.timed_out) {
             char td_fail[512] = {0};
@@ -932,6 +980,14 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
         }
     }
 
+    // Fire once-teardown hooks with name_pat after all tests complete
+    for (TestSetupRecord *s = setups; s; s = s->next) {
+        if (!s->is_teardown || !s->once || s->once_fired || !s->name_pat)
+            continue;
+        run_hook(vm, prog, s->fn_name);
+        s->once_fired = true;
+    }
+
     switch (fmt) {
     case TEST_FORMAT_TAP:
         break;
@@ -961,7 +1017,7 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
     if (cur_snap != base_snap) free(cur_snap);
     free(base_snap);
 
-    if (use_timeout)
+    if (any_timeout_possible)
         signal(SIGALRM, SIG_DFL);
 
     s_run = NULL;
@@ -970,5 +1026,6 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
     for (TestListNode *n2 = filtered, *nx; n2; n2 = nx) { nx = n2->next; free(n2); }
     for (TestSetupRecord *s = setups, *nx; s; s = nx) { nx = s->next; free(s); }
 
+    #undef SET_TIMEOUT
     return (passed == n) ? 0 : 1;
 }

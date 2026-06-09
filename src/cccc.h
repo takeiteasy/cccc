@@ -937,6 +937,8 @@ struct TestFnRecord {
     char *error_pat;    // expected error substring; NULL = normal test
     int   neg_passed;   // 1=passed, 0=no error produced, -1=wrong error
     char  neg_actual[256]; // first actual error for failure diagnostics
+    long  timeout_ms;   // per-test timeout in ms (0 = use global --test-timeout)
+    int   expect_errors;// for negative tests: expected error count (0 = any)
     TestFnRecord *next;
 };
 
@@ -946,7 +948,8 @@ struct TestSetupRecord {
     char *fn_name;      // C function name (address lookup in prog)
     char *name_pat;     // NULL = all tests; fnmatch glob on test display name
     char *suite;        // NULL = all suites; exact suite name to match
-    bool  once;         // suite scope: run once at suite boundary vs per-test
+    bool  once;         // run once at suite boundary (suite) or first/last match (name_pat)
+    bool  once_fired;   // true after the once-hook has been executed
     bool  is_teardown;  // false = setup, true = teardown
     TestSetupRecord *next;
 };

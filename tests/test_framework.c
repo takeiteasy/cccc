@@ -343,3 +343,55 @@ void test_assert_streq_msg_works(void) {
 }
 
 #pragma cccc suite end
+
+// ==========================================================================
+// Ticket #339: per-test timeout via [[cccc::test(timeout = ...)]]
+// ==========================================================================
+
+[[cccc::test(timeout = 5000)]]
+void test_per_test_timeout(void) {
+    $assert_eq(1 + 1, 2);
+}
+
+// ==========================================================================
+// Ticket #340: code = N for negative tests (expected error count)
+// ==========================================================================
+
+#pragma cccc suite begin "error_count"
+
+// Produces exactly 1 error (one undefined variable).
+[[cccc::test(error = "undefined variable", error_count = 1)]]
+void test_neg_one_error(void) {
+    int x = totally_not_defined;
+}
+
+#pragma cccc suite end
+
+// ==========================================================================
+// Ticket #341: once + name_pat for setup/teardown
+// ==========================================================================
+
+static int g_once_namepat_count = 0;
+
+[[cccc::test_setup(name = "once_namepat_*", once)]]
+void once_namepat_setup(void) {
+    g_once_namepat_count++;
+}
+
+[[cccc::test]]
+void test_once_namepat_not_matched(void) {
+    // Does NOT match "once_namepat_*", so once-namepat-setup should not fire here.
+    $assert_eq(g_once_namepat_count, 0);
+}
+
+[[cccc::test(name = "once_namepat_first")]]
+void test_once_namepat_matched_first(void) {
+    // First matching test: once-namepat-setup should have fired once.
+    $assert_eq(g_once_namepat_count, 1);
+}
+
+[[cccc::test(name = "once_namepat_second")]]
+void test_once_namepat_matched_second(void) {
+    // Second matching test: once-namepat-setup should still be 1 (did not re-fire).
+    $assert_eq(g_once_namepat_count, 1);
+}
