@@ -931,12 +931,24 @@ typedef struct ComptimeVarMember {
 // A test function registered via [[cccc::test]].
 typedef struct TestFnRecord TestFnRecord;
 struct TestFnRecord {
-    char *name;
-    char *suite;       // NULL if no suite assigned
-    char *error_pat;   // expected error substring; NULL = normal test
-    int   neg_passed;  // 1=passed, 0=no error produced, -1=wrong error
+    char *name;         // C function name (used for address lookup)
+    char *display_name; // human-readable name from name = "..."; NULL = use name
+    char *suite;        // NULL if no suite assigned
+    char *error_pat;    // expected error substring; NULL = normal test
+    int   neg_passed;   // 1=passed, 0=no error produced, -1=wrong error
     char  neg_actual[256]; // first actual error for failure diagnostics
     TestFnRecord *next;
+};
+
+// A setup or teardown function registered via [[cccc::test_setup]] / [[cccc::test_teardown]].
+typedef struct TestSetupRecord TestSetupRecord;
+struct TestSetupRecord {
+    char *fn_name;      // C function name (address lookup in prog)
+    char *name_pat;     // NULL = all tests; fnmatch glob on test display name
+    char *suite;        // NULL = all suites; exact suite name to match
+    bool  once;         // suite scope: run once at suite boundary vs per-test
+    bool  is_teardown;  // false = setup, true = teardown
+    TestSetupRecord *next;
 };
 
 // Options controlling which tests are run and how output is formatted.
@@ -1492,6 +1504,7 @@ typedef struct Compiler {
     MacroFn *macro_fns;              // Linked list of captured macro functions
     ComptimeVar *comptime_vars;      // Linked list of [[cccc::comptime]] variable decls
     TestFnRecord *test_fns;          // Linked list of [[cccc::test]] function names
+    TestSetupRecord *test_setups;    // Linked list of [[cccc::test_setup/teardown]] records
     bool testing_mode;               // True when running under --testing (no main required)
     char *current_suite;             // Active suite name set by #pragma cccc suite begin
     bool in_macro_mode;              // True when compiling/executing a macro function

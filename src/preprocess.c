@@ -1938,13 +1938,20 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
         return false;
 
     // Scan inside the attribute argument list for macro/comptime/test/inline markers.
-    bool is_macro_kind    = false;
-    bool is_comptime_kind = false;
-    bool is_test_kind     = false;
-    bool is_inline        = false;
-    Token *attr_end       = NULL;
+    bool is_macro_kind     = false;
+    bool is_comptime_kind  = false;
+    bool is_test_kind      = false;
+    bool is_setup_kind     = false;
+    bool is_teardown_kind  = false;
+    bool is_inline         = false;
+    Token *attr_end        = NULL;
     const char *suite_name = NULL; // extracted from [[cccc::test(suite = "...")]]
     const char *error_pat  = NULL; // extracted from [[cccc::test(error = "...")]]
+    const char *test_name  = NULL; // extracted from [[cccc::test(name = "...")]]
+    // For [[cccc::test_setup/teardown]]:
+    const char *hook_name_pat = NULL;
+    const char *hook_suite    = NULL;
+    bool        hook_once     = false;
 
     Token *scan = is_gnu_attr ? tok->next->next->next  // skip __attribute__ ( (
                               : tok->next->next;        // skip [ [
@@ -2015,7 +2022,7 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                     is_inline = true;
             } else if (equal(after_scope, "test")) {
                 is_test_kind = true;
-                // [[cccc::test(suite = "name", error = "pattern")]]
+                // [[cccc::test(suite = "name", error = "pattern", name = "label")]]
                 if (after_scope->next && equal(after_scope->next, "(")) {
                     Token *p = after_scope->next->next;
                     while (p && !equal(p, ")") && p->kind != TK_EOF) {
@@ -2029,6 +2036,40 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                                    p->next->next && p->next->next->kind == TK_STR) {
                             error_pat = p->next->next->str;
                             p = p->next->next->next;
+                        } else if (equal(p, "name") &&
+                                   p->next && equal(p->next, "=") &&
+                                   p->next->next && p->next->next->kind == TK_STR) {
+                            test_name = p->next->next->str;
+                            p = p->next->next->next;
+                        } else {
+                            p = p->next;
+                        }
+                        if (p && equal(p, ",")) p = p->next;
+                    }
+                }
+            } else if (equal(after_scope, "test_setup") ||
+                       equal(after_scope, "test_teardown")) {
+                if (equal(after_scope, "test_teardown"))
+                    is_teardown_kind = true;
+                else
+                    is_setup_kind = true;
+                // [[cccc::test_setup(name = "glob", suite = "s", once)]]
+                if (after_scope->next && equal(after_scope->next, "(")) {
+                    Token *p = after_scope->next->next;
+                    while (p && !equal(p, ")") && p->kind != TK_EOF) {
+                        if (equal(p, "name") &&
+                            p->next && equal(p->next, "=") &&
+                            p->next->next && p->next->next->kind == TK_STR) {
+                            hook_name_pat = p->next->next->str;
+                            p = p->next->next->next;
+                        } else if (equal(p, "suite") &&
+                                   p->next && equal(p->next, "=") &&
+                                   p->next->next && p->next->next->kind == TK_STR) {
+                            hook_suite = p->next->next->str;
+                            p = p->next->next->next;
+                        } else if (equal(p, "once")) {
+                            hook_once = true;
+                            p = p->next;
                         } else {
                             p = p->next;
                         }
@@ -2039,8 +2080,9 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
         }
     }
 
-    // Only act on a positive macro/comptime/test match.
-    if ((!is_macro_kind && !is_comptime_kind && !is_test_kind) || !attr_end)
+    // Only act on a positive macro/comptime/test/setup/teardown match.
+    if ((!is_macro_kind && !is_comptime_kind && !is_test_kind &&
+         !is_setup_kind && !is_teardown_kind) || !attr_end)
         return false;
 
     // Support [[cccc::comptime]] inline fn() — detect the inline keyword
@@ -2079,13 +2121,37 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
             if (equal(probe, ";") || equal(probe, "=")) break;
             if (probe->kind == TK_IDENT && probe->next && equal(probe->next, "(")) {
                 TestFnRecord *rec = calloc(1, sizeof(TestFnRecord));
-                rec->name = strndup(probe->loc, probe->len);
+                rec->name         = strndup(probe->loc, probe->len);
+                rec->display_name = test_name ? strdup(test_name) : NULL;
                 // Suite: explicit attribute arg takes priority, then active pragma suite
                 const char *s = suite_name ? suite_name : vm->compiler.current_suite;
                 rec->suite      = s ? strdup(s) : NULL;
                 rec->error_pat  = error_pat ? strdup(error_pat) : NULL;
                 rec->next = vm->compiler.test_fns;
                 vm->compiler.test_fns = rec;
+                break;
+            }
+            probe = probe->next;
+        }
+        *tok_ptr = attr_end;
+        return true;
+    }
+
+    // [[cccc::test_setup]] / [[cccc::test_teardown]]: record the hook, keep
+    // the function in the normal compilation token stream.
+    if (is_setup_kind || is_teardown_kind) {
+        Token *probe = attr_end;
+        while (probe && probe->kind != TK_EOF) {
+            if (equal(probe, ";") || equal(probe, "=")) break;
+            if (probe->kind == TK_IDENT && probe->next && equal(probe->next, "(")) {
+                TestSetupRecord *rec = calloc(1, sizeof(TestSetupRecord));
+                rec->fn_name     = strndup(probe->loc, probe->len);
+                rec->name_pat    = hook_name_pat ? strdup(hook_name_pat) : NULL;
+                rec->suite       = hook_suite    ? strdup(hook_suite)    : NULL;
+                rec->once        = hook_once;
+                rec->is_teardown = is_teardown_kind;
+                rec->next = vm->compiler.test_setups;
+                vm->compiler.test_setups = rec;
                 break;
             }
             probe = probe->next;

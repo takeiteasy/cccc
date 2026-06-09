@@ -30,6 +30,19 @@ void test_pointers(void) {
 
 No `#include` is required — the assertion macros and their backing declarations are injected automatically when running with `--testing`.
 
+### Custom display names
+
+Give a test a human-readable name with the `name` option. The display name appears in TAP output and is used for glob filtering; the C function name is unchanged:
+
+```c
+[[cccc::test(name = "addition is commutative")]]
+void test_add_commutative(void) {
+    CCCC_ASSERT_EQ(1 + 2, 2 + 1);
+}
+```
+
+`name`, `suite`, and `error` may all be combined in one attribute.
+
 ## Test Suites
 
 Tests can be grouped into named suites. Two syntaxes are supported.
@@ -96,6 +109,109 @@ void test_combined(void) {
 
 Negative test bodies are compiled in error-collection mode; their errors are absorbed and never propagate to the rest of the compilation. The test result is computed at compile time.
 
+## Setup and Teardown
+
+The framework supports lifecycle hooks that run before and/or after tests. Use `[[cccc::test_setup]]` and `[[cccc::test_teardown]]` to mark hook functions. Hook functions must have signature `void name(void)`.
+
+### Global hooks (run around every test)
+
+A hook with no arguments runs before (or after) every test in the file:
+
+```c
+[[cccc::test_setup]]
+void global_setup(void) {
+    // runs before each test
+}
+
+[[cccc::test_teardown]]
+void global_teardown(void) {
+    // runs after each test
+}
+```
+
+### Name-pattern hooks
+
+Use `name = "glob"` to run a hook only around tests whose display name matches the glob pattern:
+
+```c
+[[cccc::test_setup(name = "db_*")]]
+void db_setup(void) {
+    // runs before tests whose display name starts with "db_"
+}
+```
+
+Standard glob wildcards (`*`, `?`, `[...]`) are supported. The pattern is matched against the display name (set via `name = "..."` on `[[cccc::test]]`) or the C function name if no display name is set.
+
+### Suite per-test hooks
+
+Use `suite = "name"` to run a hook before (or after) every test in the named suite:
+
+```c
+[[cccc::test_setup(suite = "network")]]
+void network_setup(void) {
+    // runs before each test in the "network" suite
+}
+```
+
+### Suite once-hooks
+
+Add `once` to run a hook exactly once at the start (or end) of a suite, rather than around each individual test. This is useful for expensive shared fixtures:
+
+```c
+[[cccc::test_setup(suite = "db", once)]]
+void open_db(void) {
+    // runs once before the first test in the "db" suite
+}
+
+[[cccc::test_teardown(suite = "db", once)]]
+void close_db(void) {
+    // runs once after the last test in the "db" suite
+}
+```
+
+The global state modified by a `once` setup persists across all tests in the suite — each test restores the post-once-setup snapshot rather than the initial compiled state.
+
+### Execution order
+
+For each positive test, hooks run in this order:
+
+1. Per-test setup hooks (global, suite, and name-pattern that match, in declaration order)
+2. The test itself
+3. Per-test teardown hooks (global, suite, and name-pattern that match, in declaration order)
+
+Suite `once` hooks run at suite boundaries:
+
+- `once` setup: before the first test in the suite (before per-test hooks for that test)
+- `once` teardown: after the last test in the suite (after per-test hooks for that test)
+
+If a setup hook fails (via `CCCC_ASSERT`), the test is skipped and the test is marked as failed. Teardown hooks still run after the failed setup.
+
+If the test itself fails, teardown hooks still run. Teardown is only skipped on timeout, because the VM state is unknown after `SIGALRM`.
+
+## Global State Reset
+
+Global variables are automatically reset to their initial (compile-time) values before each positive test runs. This means tests can safely modify global state without affecting each other:
+
+```c
+static int g_count = 0;
+
+[[cccc::test]]
+void test_a(void) {
+    g_count = 99;   // modifies g_count
+    CCCC_ASSERT_EQ(g_count, 99);
+}
+
+[[cccc::test]]
+void test_b(void) {
+    // g_count is reset to 0 before this test; test_a's modification is gone
+    CCCC_ASSERT_EQ(g_count, 0);
+}
+```
+
+The reset happens after per-test setup hooks are scheduled but before they run — each test (including its setup hooks) sees the initial snapshot.
+
+For suites with `once` setup hooks, each test in the suite restores the post-once-setup snapshot rather than the original initial snapshot, so the shared state established by `once` setup persists across the suite's tests.
+
 ## Running Tests
 
 ```
@@ -131,7 +247,7 @@ Run a subset of tests without modifying the source file.
 ./cccc --testing --test='test_assert_*' myfile.c
 ```
 
-Standard glob wildcards (`*`, `?`, `[...]`) are supported.
+Standard glob wildcards (`*`, `?`, `[...]`) are supported. The pattern matches against the display name (or C function name if no display name is set).
 
 ### By suite
 
@@ -197,8 +313,9 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 
 ## Limitations
 
-- **Global state is not reset between tests.** Global variables keep their values from previous tests. Tests must be self-contained and must not rely on initial global state being clean.
 - Test functions must have signature `void name(void)` — no parameters, void return.
+- Setup and teardown hook functions must also have signature `void name(void)`.
+- Teardown hooks are skipped on test timeout (VM state is unknown after `SIGALRM`). They run in all other cases, including after test or setup failure.
 - Calling `exit()` directly in a test terminates the entire process rather than failing just that test. Use `CCCC_ASSERT` macros instead.
 - `--testing` cannot be combined with `-c`, `-o`, or other output flags.
 - Suite blocks (`#pragma cccc suite begin/end`) cannot be nested.

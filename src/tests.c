@@ -162,6 +162,90 @@ Token *cc_inject_test_header(CCCC *vm) {
     return preprocess(vm, toks);
 }
 
+// Returns the display name for a test (name = "..." or C function name).
+static const char *test_display_name(const TestFnRecord *r) {
+    return r->display_name ? r->display_name : r->name;
+}
+
+// Find a compiled function object by C name.
+static Obj *find_fn(Obj *prog, const char *name) {
+    for (Obj *o = prog; o; o = o->next)
+        if (o->is_function && o->name && strcmp(o->name, name) == 0)
+            return o;
+    return NULL;
+}
+
+// Run a single hook function by name (no-op if not found).
+static void run_hook(CCCC *vm, Obj *prog, const char *fn_name) {
+    Obj *fn = find_fn(prog, fn_name);
+    if (fn)
+        cc_run_at(vm, (CCCCPc)fn->code_addr, 0, NULL);
+}
+
+// Run all matching setup or teardown hooks.
+// suite and disp are the current test's context; NULL suite means no active suite.
+// once_only=true selects once-per-suite hooks; false selects per-test hooks.
+static void run_hooks(CCCC *vm, Obj *prog, TestSetupRecord *setups,
+                      bool is_teardown, bool once_only,
+                      const char *suite, const char *disp) {
+    for (TestSetupRecord *s = setups; s; s = s->next) {
+        if (s->is_teardown != is_teardown) continue;
+        if (s->once       != once_only)   continue;
+        // Suite filter: if the hook targets a specific suite, it must match.
+        if (s->suite) {
+            if (!suite || strcmp(s->suite, suite) != 0) continue;
+        }
+        // Name-pattern filter (per-test only).
+        if (!once_only && s->name_pat) {
+            if (!disp || fnmatch(s->name_pat, disp, 0) != 0) continue;
+        }
+        run_hook(vm, prog, s->fn_name);
+    }
+}
+
+// Returns true if any once-setup exists for the given suite.
+static bool has_once_setups_for(TestSetupRecord *setups, const char *suite) {
+    for (TestSetupRecord *s = setups; s; s = s->next)
+        if (!s->is_teardown && s->once && s->suite && strcmp(s->suite, suite) == 0)
+            return true;
+    return false;
+}
+
+// Run hooks in an isolated setjmp context so that CCCC_ASSERT failures are
+// caught safely regardless of whether s_run is currently live.  Returns true
+// if all hooks completed without failure.  If fail_msg_out is non-NULL and a
+// failure occurs, the message (up to 511 chars) is written there.
+static bool run_hooks_guarded(CCCC *vm, Obj *prog, TestSetupRecord *setups,
+                              bool is_teardown, bool once_only,
+                              const char *suite, const char *disp,
+                              char fail_msg_out[512]) {
+    CCCCTestRunState guard;
+    guard.failed    = 0;
+    guard.timed_out = 0;
+    guard.fail_msg[0] = '\0';
+
+    CCCCTestRunState *saved = s_run;
+    s_run = &guard;
+    int jval = setjmp(guard.jmp);
+    if (jval == 0)
+        run_hooks(vm, prog, setups, is_teardown, once_only, suite, disp);
+    else
+        guard.failed = 1;
+    s_run = saved;
+
+    if (guard.failed && fail_msg_out)
+        strncpy(fail_msg_out, guard.fail_msg, 511);
+
+    return !guard.failed;
+}
+
+// Convenience wrapper for suite-boundary once-hooks.
+static bool run_once_hooks(CCCC *vm, Obj *prog, TestSetupRecord *setups,
+                           bool is_teardown, const char *suite) {
+    return run_hooks_guarded(vm, prog, setups, is_teardown, true,
+                             suite, NULL, NULL);
+}
+
 // Thin wrapper used inside cc_run_tests to build ordered/filtered lists without
 // copying TestFnRecord.  Pointing at the original record means new fields are
 // always visible — no manual sync required (ticket #337).
@@ -172,7 +256,16 @@ typedef struct TestListNode {
 
 int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
 
-    // Reverse the list to run in declaration order (test_fns is built by prepending).
+    // Reverse setup records to declaration order (built by prepending).
+    TestSetupRecord *setups = NULL;
+    for (TestSetupRecord *s = vm->compiler.test_setups; s; s = s->next) {
+        TestSetupRecord *copy = malloc(sizeof(TestSetupRecord));
+        *copy      = *s;
+        copy->next = setups;
+        setups     = copy;
+    }
+
+    // Reverse test records to run in declaration order (test_fns is built by prepending).
     TestListNode *ordered = NULL;
     for (TestFnRecord *r = vm->compiler.test_fns; r; r = r->next) {
         TestListNode *node = malloc(sizeof(TestListNode));
@@ -187,13 +280,15 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
     int n = 0;
     for (TestListNode *n2 = ordered; n2; n2 = n2->next) {
         TestFnRecord *r = n2->rec;
+        const char *disp = test_display_name(r);
         if (opts && opts->suite_filter) {
             const char *s = r->suite ? r->suite : "";
             if (strcmp(s, opts->suite_filter) != 0)
                 continue;
         }
         if (opts && opts->test_glob) {
-            if (fnmatch(opts->test_glob, r->name, 0) != 0)
+            // Match against the display name so name = "..." aliases are filterable.
+            if (fnmatch(opts->test_glob, disp, 0) != 0)
                 continue;
         }
         TestListNode *node = malloc(sizeof(TestListNode));
@@ -209,13 +304,15 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
         printf("# Tests (%d total):\n", n);
         for (TestListNode *n2 = filtered; n2; n2 = n2->next) {
             TestFnRecord *r = n2->rec;
+            const char *disp = test_display_name(r);
             if (r->suite)
-                printf("%-40s [suite: %s]\n", r->name, r->suite);
+                printf("%-40s [suite: %s]\n", disp, r->suite);
             else
-                printf("%s\n", r->name);
+                printf("%s\n", disp);
         }
         for (TestListNode *n2 = ordered,  *nx; n2; n2 = nx) { nx = n2->next; free(n2); }
         for (TestListNode *n2 = filtered, *nx; n2; n2 = nx) { nx = n2->next; free(n2); }
+        for (TestSetupRecord *s = setups, *nx; s; s = nx) { nx = s->next; free(s); }
         return 0;
     }
 
@@ -236,54 +333,84 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
     if (use_timeout)
         signal(SIGALRM, handle_alarm);
 
+    // Snapshot the data segment so global state can be restored between tests
+    // (ticket #329).  data_ptr only advances during compilation, never during
+    // test execution, so one snapshot covers the full segment.
+    size_t snap_size  = (size_t)(vm->data_ptr - vm->data_seg);
+    char  *base_snap  = malloc(snap_size);
+    memcpy(base_snap, vm->data_seg, snap_size);
+    // cur_snap is what each test restores to; may be updated by once-setups.
+    char  *cur_snap   = base_snap;
+
     bool stop_early = false;
     for (TestListNode *n2 = filtered; n2 && !stop_early; n2 = n2->next) {
         TestFnRecord *r = n2->rec;
         test_num++;
-
-        // Emit a suite comment when the active suite changes.
+        const char *disp      = test_display_name(r);
         const char *cur_suite = r->suite;
+
+        // Detect suite transitions.
         bool suite_changed = (cur_suite != prev_suite) &&
                              (cur_suite == NULL || prev_suite == NULL ||
                               strcmp(cur_suite, prev_suite) != 0);
+
         if (suite_changed) {
+            // Once-teardown for the suite we are leaving.
+            if (prev_suite) {
+                if (!run_once_hooks(vm, prog, setups, true, prev_suite))
+                    printf("# once-teardown for suite \"%s\" failed\n", prev_suite);
+            }
+
+            // Discard any suite-specific snapshot taken by once-setup.
+            if (cur_snap != base_snap) {
+                free(cur_snap);
+                cur_snap = base_snap;
+            }
+
+            // Emit TAP suite comment.
             if (cur_suite)
                 printf("# Suite: %s\n", cur_suite);
             else
                 printf("# Suite: (none)\n");
             prev_suite = cur_suite;
+
+            // Once-setup for the suite we are entering.
+            if (cur_suite && has_once_setups_for(setups, cur_suite)) {
+                memcpy(vm->data_seg, base_snap, snap_size);
+                if (!run_once_hooks(vm, prog, setups, false, cur_suite))
+                    printf("# once-setup for suite \"%s\" failed\n", cur_suite);
+                // Snapshot the post-once-setup state so it persists across tests.
+                cur_snap = malloc(snap_size);
+                memcpy(cur_snap, vm->data_seg, snap_size);
+            }
         }
 
-        // Negative test: result is precomputed at compile time.
+        // Negative test: result is precomputed at compile time, no execution.
         if (r->error_pat) {
             if (r->neg_passed == 1) {
-                printf("ok %d - %s\n", test_num, r->name);
+                printf("ok %d - %s\n", test_num, disp);
                 passed++;
             } else {
                 const char *reason = (r->neg_passed == 0)
                     ? "expected compilation error but code compiled successfully"
                     : r->neg_actual;
-                printf("not ok %d - %s\n", test_num, r->name);
+                printf("not ok %d - %s\n", test_num, disp);
                 printf("  ---\n  message: %s\n  ...\n", reason);
                 if (opts && opts->fail_fast) stop_early = true;
             }
             continue;
         }
 
-        Obj *fn = NULL;
-        for (Obj *o = prog; o; o = o->next) {
-            if (o->is_function && o->name && strcmp(o->name, r->name) == 0) {
-                fn = o;
-                break;
-            }
-        }
-
+        Obj *fn = find_fn(prog, r->name);
         if (!fn) {
             printf("not ok %d - %s # SKIP (not found in compiled output)\n",
-                   test_num, r->name);
+                   test_num, disp);
             if (opts && opts->fail_fast) stop_early = true;
             continue;
         }
+
+        // Restore global state before each positive test (ticket #329).
+        memcpy(vm->data_seg, cur_snap, snap_size);
 
         run.failed    = 0;
         run.timed_out = 0;
@@ -293,8 +420,11 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
         if (use_timeout) alarm((unsigned)opts->test_timeout);
 
         // Use cc_run_at to avoid mutating text_seg[0] (ticket #332).
+        // Setup and test share one setjmp context: if setup fails the test is
+        // skipped but teardown still runs below (ticket #331).
         int jval = setjmp(run.jmp);
         if (jval == 0) {
+            run_hooks(vm, prog, setups, false, false, cur_suite, disp);
             cc_run_at(vm, (CCCCPc)fn->code_addr, 0, NULL);
         } else if (jval == 2) {
             run.timed_out = 1;
@@ -302,19 +432,40 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
 
         if (use_timeout) alarm(0); // cancel pending alarm
 
+        // Teardown always runs after setup+test, even on failure.  Skip only
+        // on timeout because the VM state is unknown after SIGALRM.
+        if (!run.timed_out) {
+            char td_fail[512] = {0};
+            bool td_ok = run_hooks_guarded(vm, prog, setups, true, false,
+                                           cur_suite, disp, td_fail);
+            if (!td_ok && !run.failed) {
+                run.failed = 1;
+                strncpy(run.fail_msg, td_fail, sizeof(run.fail_msg) - 1);
+            }
+        }
+
         if (run.timed_out) {
-            printf("not ok %d - %s # TIMEOUT\n", test_num, r->name);
+            printf("not ok %d - %s # TIMEOUT\n", test_num, disp);
             if (opts && opts->fail_fast) stop_early = true;
         } else if (!run.failed) {
-            printf("ok %d - %s\n", test_num, r->name);
+            printf("ok %d - %s\n", test_num, disp);
             passed++;
         } else {
-            printf("not ok %d - %s\n", test_num, r->name);
+            printf("not ok %d - %s\n", test_num, disp);
             if (run.fail_msg[0])
                 printf("  ---\n  message: %s\n  ...\n", run.fail_msg);
             if (opts && opts->fail_fast) stop_early = true;
         }
     }
+
+    // Once-teardown for the final active suite.
+    if (prev_suite && !stop_early) {
+        if (!run_once_hooks(vm, prog, setups, true, prev_suite))
+            printf("# once-teardown for suite \"%s\" failed\n", prev_suite);
+    }
+
+    if (cur_snap != base_snap) free(cur_snap);
+    free(base_snap);
 
     if (use_timeout)
         signal(SIGALRM, SIG_DFL);
@@ -323,6 +474,7 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
 
     for (TestListNode *n2 = ordered,  *nx; n2; n2 = nx) { nx = n2->next; free(n2); }
     for (TestListNode *n2 = filtered, *nx; n2; n2 = nx) { nx = n2->next; free(n2); }
+    for (TestSetupRecord *s = setups, *nx; s; s = nx) { nx = s->next; free(s); }
 
     return (passed == n) ? 0 : 1;
 }
