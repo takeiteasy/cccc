@@ -38,9 +38,9 @@ char *make_global_name(const char *header) {
 [[cccc::comptime]]
 const char *header_source_path(const char *header) {
     if (strcmp(header, "reflection.h") == 0)
-        return "include/jcc/reflection.h";
+        return "include/cccc/reflection.h";
     if (strcmp(header, "tests.h") == 0)
-        return "include/jcc/tests.h";
+        return "include/cccc/tests.h";
     static char path[256];
     snprintf(path, sizeof(path), "include/%s", header);
     return path;
@@ -92,11 +92,11 @@ char **discover_headers(void) {
         return NULL;
     }
 
-    // Count non-jcc results first (jcc/ private headers are added manually).
+    // Count non-cccc results first (cccc/ private headers are added manually).
     int public_count = 0;
     for (int i = 0; i < (int)g.gl_pathc; i++) {
         const char *name = copy_header_name(g.gl_pathv[i]);
-        int skip = (strncmp(name, "jcc/", 4) == 0);
+        int skip = (strncmp(name, "cccc/", 4) == 0);
         free((void *)name);
         if (!skip) public_count++;
     }
@@ -108,7 +108,7 @@ char **discover_headers(void) {
     headers[n++] = copy_header_name("tests.h");
     for (int i = 0; i < (int)g.gl_pathc; i++) {
         char *name = copy_header_name(g.gl_pathv[i]);
-        if (strncmp(name, "jcc/", 4) == 0) {
+        if (strncmp(name, "cccc/", 4) == 0) {
             free(name);
             continue;
         }
