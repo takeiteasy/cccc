@@ -162,22 +162,31 @@ Token *cc_inject_test_header(CCCC *vm) {
     return preprocess(vm, toks);
 }
 
+// Thin wrapper used inside cc_run_tests to build ordered/filtered lists without
+// copying TestFnRecord.  Pointing at the original record means new fields are
+// always visible — no manual sync required (ticket #337).
+typedef struct TestListNode {
+    TestFnRecord    *rec;
+    struct TestListNode *next;
+} TestListNode;
+
 int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
 
     // Reverse the list to run in declaration order (test_fns is built by prepending).
-    TestFnRecord *ordered = NULL;
+    TestListNode *ordered = NULL;
     for (TestFnRecord *r = vm->compiler.test_fns; r; r = r->next) {
-        TestFnRecord *copy = malloc(sizeof(TestFnRecord));
-        *copy = *r;   // copy all fields including error_pat/neg_passed/neg_actual
-        copy->next  = ordered;
-        ordered = copy;
+        TestListNode *node = malloc(sizeof(TestListNode));
+        node->rec  = r;
+        node->next = ordered;
+        ordered    = node;
     }
 
     // Apply filters to build the active list.
-    TestFnRecord *filtered = NULL;
-    TestFnRecord **tail = &filtered;
+    TestListNode *filtered = NULL;
+    TestListNode **tail = &filtered;
     int n = 0;
-    for (TestFnRecord *r = ordered; r; r = r->next) {
+    for (TestListNode *n2 = ordered; n2; n2 = n2->next) {
+        TestFnRecord *r = n2->rec;
         if (opts && opts->suite_filter) {
             const char *s = r->suite ? r->suite : "";
             if (strcmp(s, opts->suite_filter) != 0)
@@ -187,25 +196,26 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
             if (fnmatch(opts->test_glob, r->name, 0) != 0)
                 continue;
         }
-        TestFnRecord *node = malloc(sizeof(TestFnRecord));
-        *node = *r;   // copy all fields
-        node->next  = NULL;
+        TestListNode *node = malloc(sizeof(TestListNode));
+        node->rec  = r;
+        node->next = NULL;
         *tail = node;
-        tail = &node->next;
+        tail  = &node->next;
         n++;
     }
 
     // --list-tests: enumerate without running.
     if (opts && opts->list_only) {
         printf("# Tests (%d total):\n", n);
-        for (TestFnRecord *r = filtered; r; r = r->next) {
+        for (TestListNode *n2 = filtered; n2; n2 = n2->next) {
+            TestFnRecord *r = n2->rec;
             if (r->suite)
                 printf("%-40s [suite: %s]\n", r->name, r->suite);
             else
                 printf("%s\n", r->name);
         }
-        for (TestFnRecord *r = ordered, *next; r; r = next) { next = r->next; free(r); }
-        for (TestFnRecord *r = filtered, *next; r; r = next) { next = r->next; free(r); }
+        for (TestListNode *n2 = ordered,  *nx; n2; n2 = nx) { nx = n2->next; free(n2); }
+        for (TestListNode *n2 = filtered, *nx; n2; n2 = nx) { nx = n2->next; free(n2); }
         return 0;
     }
 
@@ -227,7 +237,8 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
         signal(SIGALRM, handle_alarm);
 
     bool stop_early = false;
-    for (TestFnRecord *r = filtered; r && !stop_early; r = r->next) {
+    for (TestListNode *n2 = filtered; n2 && !stop_early; n2 = n2->next) {
+        TestFnRecord *r = n2->rec;
         test_num++;
 
         // Emit a suite comment when the active suite changes.
@@ -310,8 +321,8 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
 
     s_run = NULL;
 
-    for (TestFnRecord *r = ordered, *next; r; r = next) { next = r->next; free(r); }
-    for (TestFnRecord *r = filtered, *next; r; r = next) { next = r->next; free(r); }
+    for (TestListNode *n2 = ordered,  *nx; n2; n2 = nx) { nx = n2->next; free(n2); }
+    for (TestListNode *n2 = filtered, *nx; n2; n2 = nx) { nx = n2->next; free(n2); }
 
     return (passed == n) ? 0 : 1;
 }
