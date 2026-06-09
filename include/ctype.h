@@ -1,4 +1,4 @@
-/* ctype.h - character classification for JCC C compiler */
+/* ctype.h - character classification for CCCC C compiler */
 
 #ifndef __CTYPE_H
 #define __CTYPE_H

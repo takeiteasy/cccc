@@ -1,4 +1,4 @@
-/* locale.h - localization declarations for JCC */
+/* locale.h - localization declarations for CCCC */
 
 #ifndef __LOCALE_H
 #define __LOCALE_H

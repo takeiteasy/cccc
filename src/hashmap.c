@@ -1,5 +1,5 @@
 /*
- JCC: JIT C Compiler
+ CCCC: Comprehensiev C Compensation Compiler
 
  Copyright (C) 2025 George Watson
 
@@ -21,7 +21,7 @@
 
 // This is an implementation of the open-addressing hash table.
 
-#include "jcc.h"
+#include "cccc.h"
 #include "./internal.h"
 
 // Initial hash bucket size
@@ -334,14 +334,14 @@ void hashmap_deinit_borrowed(HashMap *map) {
 void hashmap_foreach(HashMap *map, HashMapIterator iter, void *user_data) {
     if (!map || !map->buckets || !iter)
         return;
-    
+
     for (int i = 0; i < map->capacity; i++) {
         HashEntry *ent = &map->buckets[i];
-        
+
         // Skip empty and deleted entries
         if (!ent->key || ent->key == TOMBSTONE)
             continue;
-        
+
         // Call user callback
         int result = iter(ent->key, ent->keylen, ent->val, user_data);
         if (result != 0)
@@ -354,15 +354,15 @@ void hashmap_foreach(HashMap *map, HashMapIterator iter, void *user_data) {
 int hashmap_count_if(HashMap *map, HashMapIterator predicate, void *user_data) {
     if (!map || !map->buckets || !predicate)
         return 0;
-    
+
     int count = 0;
     for (int i = 0; i < map->capacity; i++) {
         HashEntry *ent = &map->buckets[i];
-        
+
         // Skip empty and deleted entries
         if (!ent->key || ent->key == TOMBSTONE)
             continue;
-        
+
         // Call predicate and count if it returns non-zero
         if (predicate(ent->key, ent->keylen, ent->val, user_data) != 0)
             count++;

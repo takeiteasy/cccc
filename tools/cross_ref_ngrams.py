@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Cross-reference static and dynamic opcode n-gram counts.
 
-Reads the text output of `jcc --ngrams` (static .jbc analysis) and
-the JSON output of `jcc --vm-profile --json` (runtime bigram/trigram counts)
+Reads the text output of `cccc --ngrams` (static .jbc analysis) and
+the JSON output of `cccc --vm-profile --json` (runtime bigram/trigram counts)
 and prints a unified ranking. The score is `static_count * dynamic_count`,
 so sequences that are both common in the bytecode AND executed many
 times rise to the top — these are the strongest fusion candidates
@@ -16,7 +16,7 @@ passed to the compiled program so you can profile non-default inputs
 (e.g. a larger benchmark size).
 
 Environment variables:
-    JCC          path to the jcc binary     (default: ./jcc)
+    CCCC          path to the cccc binary     (default: ./cccc)
 """
 import argparse
 import json
@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-JCC = os.environ.get("JCC", os.path.join(ROOT, "jcc"))
+CCCC = os.environ.get("CCCC", os.path.join(ROOT, "cccc"))
 
 STATIC_RE = re.compile(
     r"^\s*(?P<count>\d+)\s+(?P<ops>(?:[A-Z0-9_]+(?:\s+[A-Z0-9_]+)+))"
@@ -70,7 +70,7 @@ def main():
     ap.add_argument("source", help="Path to .c source to compile and run")
     ap.add_argument("run_args", nargs=argparse.REMAINDER,
                     help="Extra arguments passed to the compiled program")
-    ap.add_argument("--jcc", default=JCC, help="Path to jcc binary")
+    ap.add_argument("--cccc", default=CCCC, help="Path to cccc binary")
     ap.add_argument("--top", type=int, default=25,
                     help="Show only top N rows (default 25)")
     ap.add_argument("-n", "--ngram-size", type=int, default=2,
@@ -78,14 +78,14 @@ def main():
     args = ap.parse_args()
 
     result = subprocess.run(
-        [args.jcc, f"--ngrams={args.ngram_size}", "--ngrams-top=9999", args.jbc],
+        [args.cccc, f"--ngrams={args.ngram_size}", "--ngrams-top=9999", args.jbc],
         capture_output=True, text=True, check=True,
     )
     static_text = result.stdout
 
-    profile_path = "/tmp/_jcc_xref_profile.json"
+    profile_path = "/tmp/_cccc_xref_profile.json"
     profile_proc = subprocess.run(
-        [args.jcc, "--vm-profile", "--json",
+        [args.cccc, "--vm-profile", "--json",
          "-I", "include", args.source] + args.run_args,
         capture_output=True, text=True,
     )
@@ -100,7 +100,7 @@ def main():
 
     if args.ngram_size == 3 and not trigrams:
         print("warning: VM profile contains no trigram data; "
-              "rebuild with a JCC that supports trigram profiling",
+              "rebuild with a CCCC that supports trigram profiling",
               file=sys.stderr)
 
     print(f"{'static':>8s}  {'dynamic':>10s}  {'score':>12s}  sequence")

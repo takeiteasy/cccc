@@ -1,15 +1,15 @@
-// JCC_FLAGS: --std=c23
+// CCCC_FLAGS: --std=c23
 // Ticket #189: integer constexpr variable readable from a macro.
 
 constexpr int LIMIT = 100;
 constexpr int NEG   = -7;
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *get_limit(void) {
     return $get_constexpr_value("LIMIT");
 }
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *get_neg(void) {
     return $get_constexpr_value("NEG");
 }

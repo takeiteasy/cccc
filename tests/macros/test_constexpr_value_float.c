@@ -1,15 +1,15 @@
-// JCC_FLAGS: --std=c23
+// CCCC_FLAGS: --std=c23
 // Ticket #189: float constexpr variable readable from a macro.
 
 constexpr double SCALE = 3.5;
 constexpr float  HALF  = 0.5f;
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *get_scale(void) {
     return $get_constexpr_value("SCALE");
 }
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *get_half(void) {
     return $get_constexpr_value("HALF");
 }

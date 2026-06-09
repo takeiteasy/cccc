@@ -1,7 +1,7 @@
 // EXPECT_COMPILE_ERROR
-// [[jcc::comptime]] helpers are not callable from runtime program code.
+// [[cccc::comptime]] helpers are not callable from runtime program code.
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 int comptime_helper(void) {
     return 42;
 }

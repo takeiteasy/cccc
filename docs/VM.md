@@ -1,10 +1,10 @@
-# JCC Virtual Machine
+# CCCC Virtual Machine
 
-> Reference documentation for the JCC bytecode interpreter, instruction set, ABI, and execution model.
+> Reference documentation for the CCCC bytecode interpreter, instruction set, ABI, and execution model.
 
 ## Overview
 
-JCC's C frontend produces a portable, register-based bytecode that runs on a built-in interpreter (the **VM**).  The VM is the runtime that powers `[[jcc::macro]]` execution and doubles as a self-contained, introspectable runtime for the memory-safety suite, the debugger, the profiler, and any program run without `-c=native`.  It is intentionally not a JIT-to-machine-code backend: every opcode is interpreted, which keeps the same binary that parses C also able to execute it (or to hand macro-expanded C off to `cc` / `clang` / `gcc` via `-c=native` — see the [README](../README.md)).  This design trades raw execution speed for portability, deep runtime instrumentation, and the ability to run untrusted or sandboxed code in a single self-contained binary.
+CCCC's C frontend produces a portable, register-based bytecode that runs on a built-in interpreter (the **VM**).  The VM is the runtime that powers `[[cccc::macro]]` execution and doubles as a self-contained, introspectable runtime for the memory-safety suite, the debugger, the profiler, and any program run without `-c=native`.  It is intentionally not a JIT-to-machine-code backend: every opcode is interpreted, which keeps the same binary that parses C also able to execute it (or to hand macro-expanded C off to `cc` / `clang` / `gcc` via `-c=native` — see the [README](../README.md)).  This design trades raw execution speed for portability, deep runtime instrumentation, and the ability to run untrusted or sandboxed code in a single self-contained binary.
 
 Key properties:
 
@@ -29,13 +29,13 @@ Key properties:
 | `r18–r25` | `REG_S0` … `REG_S7` | Callee-saved registers |
 | `r26–r31` | `REG_T5` … `REG_T10` | Caller-saved temporaries |
 
-The floating-point register file (`fregs[32]`) uses the **same indices** but stores a tagged union (`JCCFReg`).  Each slot carries a tag (`JCC_FREG_F64`, `JCC_FREG_F32`, `JCC_FREG_V4F32`, `JCC_FREG_V2F64`) so mixed-precision code is handled without silent reinterpretation.
+The floating-point register file (`fregs[32]`) uses the **same indices** but stores a tagged union (`CCCCFReg`).  Each slot carries a tag (`CCCC_FREG_F64`, `CCCC_FREG_F32`, `CCCC_FREG_V4F32`, `CCCC_FREG_V2F64`) so mixed-precision code is handled without silent reinterpretation.
 
 ### Memory Segments
 
 | Segment | Grows | Purpose |
 |---------|-------|---------|
-| **Text** | Upward | Bytecode instructions (`JCCInstrWord`, 32-bit words) |
+| **Text** | Upward | Bytecode instructions (`CCCCInstrWord`, 32-bit words) |
 | **Data** | Upward | Global variables, string literals, static initialisers |
 | **Stack** | Downward | Activation records, locals, spilled arguments |
 | **Heap** | Upward | `malloc` / `free` when `--vm-heap` is active |
@@ -58,7 +58,7 @@ Every instruction is one or more 32-bit words:
 
 | Field | Size | Description |
 |-------|------|-------------|
-| Opcode | 32 bits | `JCC_OP` enum value |
+| Opcode | 32 bits | `CCCC_OP` enum value |
 | Operand words | 0–4 (or 6) | Defined per opcode by `OPS_X` |
 
 Wide immediates (64-bit) are stored little-endian across **two consecutive** 32-bit words.
@@ -77,7 +77,7 @@ Wide immediates (64-bit) are stored little-endian across **two consecutive** 32-
 * **R** — `[opcode] [rd:8 | unused:56]`  
   Used by single-register operations such as `PSH3`, `POP3`, `JZ3`, `JNZ3`.
 
-The `OPS_X` macro in `src/jcc.h` declares every opcode together with its operand-word count, which is used by the bytecode serialiser, disassembler, and profiler.
+The `OPS_X` macro in `src/cccc.h` declares every opcode together with its operand-word count, which is used by the bytecode serialiser, disassembler, and profiler.
 
 ## Opcode Reference
 
@@ -228,15 +228,15 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 
 | Opcode | Description | Controlled by |
 |--------|-------------|---------------|
-| `CHKB` | Array bounds check on `base + scaled_offset` | `JCC_BOUNDS_CHECKS` |
-| `CHKI` | Uninitialised-variable read check (`bp+offset`) | `JCC_UNINIT_DETECTION` |
-| `MARKI` | Mark variable at `bp+offset` as initialised | `JCC_UNINIT_DETECTION` |
-| `MARKA` | Record stack address for dangling-pointer tracking | `JCC_DANGLING_DETECT` / `JCC_STACK_INSTR` |
-| `CHKPA` | Validate pointer arithmetic against provenance | `JCC_INVALID_ARITH` + `JCC_PROVENANCE_TRACK` |
-| `MARKP` | Record pointer provenance (`origin`, `base`, `size`) | `JCC_PROVENANCE_TRACK` |
-| `CHKP3` | Pointer validity (NULL, UAF, heap range) | `JCC_POINTER_CHECKS` |
-| `CHKA3` | Pointer alignment check | `JCC_ALIGNMENT_CHECKS` |
-| `CHKT3` | Heap type-tag check on dereference | `JCC_TYPE_CHECKS` |
+| `CHKB` | Array bounds check on `base + scaled_offset` | `CCCC_BOUNDS_CHECKS` |
+| `CHKI` | Uninitialised-variable read check (`bp+offset`) | `CCCC_UNINIT_DETECTION` |
+| `MARKI` | Mark variable at `bp+offset` as initialised | `CCCC_UNINIT_DETECTION` |
+| `MARKA` | Record stack address for dangling-pointer tracking | `CCCC_DANGLING_DETECT` / `CCCC_STACK_INSTR` |
+| `CHKPA` | Validate pointer arithmetic against provenance | `CCCC_INVALID_ARITH` + `CCCC_PROVENANCE_TRACK` |
+| `MARKP` | Record pointer provenance (`origin`, `base`, `size`) | `CCCC_PROVENANCE_TRACK` |
+| `CHKP3` | Pointer validity (NULL, UAF, heap range) | `CCCC_POINTER_CHECKS` |
+| `CHKA3` | Pointer alignment check | `CCCC_ALIGNMENT_CHECKS` |
+| `CHKT3` | Heap type-tag check on dereference | `CCCC_TYPE_CHECKS` |
 
 ### Stack Instrumentation Opcodes
 
@@ -327,11 +327,11 @@ Saved bytecode files are self-contained and can be loaded into a fresh VM instan
 
 ```
 +---------------+  offset 0
-| Magic "JCC\0" |  4 bytes
+| Magic "CCCC\0" |  4 bytes
 +---------------+
 | Version       |  4 bytes (int)
 +---------------+
-| Flags         |  4 bytes (JCCFlags bitfield)
+| Flags         |  4 bytes (CCCCFlags bitfield)
 +---------------+
 | Text size     |  8 bytes (bytes, not words)
 +---------------+
@@ -385,11 +385,11 @@ The central loop reads the next opcode, increments the cycle counter, optionally
 
 ### Exit Detection
 
-`main()` is invoked with a synthetic return address of `0`.  `cc_run()` passes `argc` in `REG_A0` and `argv` in `REG_A1`; for loaded `.jbc` files, `argv[0]` is the `.jbc` path and arguments after `--` are forwarded to the program.  When `LEV3` pops this sentinel, it sets `vm->pc = JCC_INVALID_PC` and the dispatch loop returns `(int)vm->regs[REG_A0]` as the process exit code.
+`main()` is invoked with a synthetic return address of `0`.  `cc_run()` passes `argc` in `REG_A0` and `argv` in `REG_A1`; for loaded `.jbc` files, `argv[0]` is the `.jbc` path and arguments after `--` are forwarded to the program.  When `LEV3` pops this sentinel, it sets `vm->pc = CCCC_INVALID_PC` and the dispatch loop returns `(int)vm->regs[REG_A0]` as the process exit code.
 
 ### Debugger Integration
 
-When `JCC_ENABLE_DEBUGGER` is set, every dispatch checks breakpoints, single-step flags, and step-over / step-out conditions before executing the opcode.  `BTRAP` can also force entry into the interactive REPL.
+When `CCCC_ENABLE_DEBUGGER` is set, every dispatch checks breakpoints, single-step flags, and step-over / step-out conditions before executing the opcode.  `BTRAP` can also force entry into the interactive REPL.
 
 ## Safety Integration
 
@@ -403,7 +403,7 @@ The VM does not rely on external sanitizer libraries.  Instead, the compiler inj
 * **Provenance tracking** — `MARKP` records `(origin, base, size)`; `CHKPA` rejects arithmetic that leaves the object.
 * **Dangling pointers** — `MARKA` records stack addresses; `SCOPEOUT` detects live pointers to variables that are going out of scope.
 
-Because every check is guarded by a runtime flag, the same bytecode can run with full safety or with zero overhead simply by changing the active `JCCFlags` mask.
+Because every check is guarded by a runtime flag, the same bytecode can run with full safety or with zero overhead simply by changing the active `CCCCFlags` mask.
 
 ## Opcode Profiling
 
@@ -415,7 +415,7 @@ The VM can collect dynamic execution statistics:
 
 Enable profiling with `--vm-profile` (text report to stderr). Combine it with `--json` to also write the same data as JSON to stdout.  The JSON schema includes `total_opcodes`, `total_bigrams`, per-opcode arrays, and per-bigram arrays with percentages.
 
-Static n-gram mining (`jcc --ngrams`) and use-def fusion analysis (`jcc --fusion-candidates`) complement the dynamic data by showing which sequences are common in the bytecode *and* hot at runtime — the strongest candidates for new fused opcodes.
+Static n-gram mining (`cccc --ngrams`) and use-def fusion analysis (`cccc --fusion-candidates`) complement the dynamic data by showing which sequences are common in the bytecode *and* hot at runtime — the strongest candidates for new fused opcodes.
 
 ## Performance Notes
 

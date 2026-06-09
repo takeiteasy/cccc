@@ -1,10 +1,10 @@
 // wchar.h, wctype.h, and uchar.h stdlib function registration
-#include "../jcc.h"
+#include "../cccc.h"
 #include <wchar.h>
 #include <wctype.h>
 
-typedef uint16_t jcc_char16_t;
-typedef uint32_t jcc_char32_t;
+typedef uint16_t cccc_char16_t;
+typedef uint32_t cccc_char32_t;
 
 static long long wrap_wctob(long long c) { return (long long)wctob((wint_t)c); }
 static long long wrap_mbsinit(long long ps) { return (long long)mbsinit((const mbstate_t *)ps); }
@@ -24,35 +24,35 @@ static long long wrap_iswupper(long long c) { return (long long)iswupper((wint_t
 static long long wrap_iswxdigit(long long c) { return (long long)iswxdigit((wint_t)c); }
 static long long wrap_iswctype(long long c, long long desc) { return (long long)iswctype((wint_t)c, (wctype_t)desc); }
 
-static size_t jcc_mbrtoc16(jcc_char16_t *pc16, const char *s, size_t n, mbstate_t *ps) {
+static size_t cccc_mbrtoc16(cccc_char16_t *pc16, const char *s, size_t n, mbstate_t *ps) {
     wchar_t wc;
     size_t rc = mbrtowc(&wc, s, n, ps);
     if (rc == (size_t)-1 || rc == (size_t)-2 || rc == 0)
         return rc;
     if (pc16)
-        *pc16 = (jcc_char16_t)wc;
+        *pc16 = (cccc_char16_t)wc;
     return rc;
 }
 
-static size_t jcc_c16rtomb(char *s, jcc_char16_t c16, mbstate_t *ps) {
+static size_t cccc_c16rtomb(char *s, cccc_char16_t c16, mbstate_t *ps) {
     return wcrtomb(s, (wchar_t)c16, ps);
 }
 
-static size_t jcc_mbrtoc32(jcc_char32_t *pc32, const char *s, size_t n, mbstate_t *ps) {
+static size_t cccc_mbrtoc32(cccc_char32_t *pc32, const char *s, size_t n, mbstate_t *ps) {
     wchar_t wc;
     size_t rc = mbrtowc(&wc, s, n, ps);
     if (rc == (size_t)-1 || rc == (size_t)-2 || rc == 0)
         return rc;
     if (pc32)
-        *pc32 = (jcc_char32_t)wc;
+        *pc32 = (cccc_char32_t)wc;
     return rc;
 }
 
-static size_t jcc_c32rtomb(char *s, jcc_char32_t c32, mbstate_t *ps) {
+static size_t cccc_c32rtomb(char *s, cccc_char32_t c32, mbstate_t *ps) {
     return wcrtomb(s, (wchar_t)c32, ps);
 }
 
-void register_wide_functions(JCC *vm) {
+void register_wide_functions(CCCC *vm) {
     cc_register_cfunc(vm, "mbsinit", (void*)wrap_mbsinit, 1, 0);
     cc_register_cfunc(vm, "mbrlen", (void*)mbrlen, 3, 0);
     cc_register_cfunc(vm, "mbrtowc", (void*)mbrtowc, 4, 0);
@@ -99,8 +99,8 @@ void register_wide_functions(JCC *vm) {
     cc_register_cfunc(vm, "wctype", (void*)wctype, 1, 0);
     cc_register_cfunc(vm, "wctrans", (void*)wctrans, 1, 0);
 
-    cc_register_cfunc(vm, "mbrtoc16", (void*)jcc_mbrtoc16, 4, 0);
-    cc_register_cfunc(vm, "c16rtomb", (void*)jcc_c16rtomb, 3, 0);
-    cc_register_cfunc(vm, "mbrtoc32", (void*)jcc_mbrtoc32, 4, 0);
-    cc_register_cfunc(vm, "c32rtomb", (void*)jcc_c32rtomb, 3, 0);
+    cc_register_cfunc(vm, "mbrtoc16", (void*)cccc_mbrtoc16, 4, 0);
+    cc_register_cfunc(vm, "c16rtomb", (void*)cccc_c16rtomb, 3, 0);
+    cc_register_cfunc(vm, "mbrtoc32", (void*)cccc_mbrtoc32, 4, 0);
+    cc_register_cfunc(vm, "c32rtomb", (void*)cccc_c32rtomb, 3, 0);
 }

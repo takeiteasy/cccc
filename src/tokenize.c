@@ -1,5 +1,5 @@
 /*
- JCC: JIT C Compiler
+ CCCC: Comprehensiev C Compensation Compiler
 
  Copyright (C) 2025 George Watson
 
@@ -19,7 +19,7 @@
  This file was original part of chibicc by Rui Ueyama (MIT) https://github.com/rui314/chibicc
 */
 
-#include "jcc.h"
+#include "cccc.h"
 #include "./internal.h"
 
 // Reports an error and exit (or longjmp if error handling is enabled).
@@ -39,39 +39,39 @@ typedef struct {
 } WarningInfo;
 
 static const WarningInfo warning_infos[] = {
-    {"unused", JCC_WARN_UNUSED, false},
-    {"implicit-function-declaration", JCC_WARN_IMPLICIT_FUNCTION_DECLARATION, false},
-    {"implicit-int", JCC_WARN_IMPLICIT_INT, false},
-    {"return-type", JCC_WARN_RETURN_TYPE, false},
-    {"shadow", JCC_WARN_SHADOW, false},
-    {"format", JCC_WARN_FORMAT, false},
+    {"unused", CCCC_WARN_UNUSED, false},
+    {"implicit-function-declaration", CCCC_WARN_IMPLICIT_FUNCTION_DECLARATION, false},
+    {"implicit-int", CCCC_WARN_IMPLICIT_INT, false},
+    {"return-type", CCCC_WARN_RETURN_TYPE, false},
+    {"shadow", CCCC_WARN_SHADOW, false},
+    {"format", CCCC_WARN_FORMAT, false},
     // -Wconversion is the umbrella: enables integer narrowing, sign-conversion,
     // and float-conversion.  The first entry maps the name to the full group
     // mask so -Wconversion / -Wno-conversion / -Werror=conversion all cover all
     // three sub-categories.  The second (non-group) entry exists only so that
-    // jcc_warning_name(JCC_WARN_CONVERSION) (exact-bit match) still returns
+    // cccc_warning_name(CCCC_WARN_CONVERSION) (exact-bit match) still returns
     // "conversion" for the [-Wconversion] tag in integer-narrowing diagnostics.
-    {"conversion", JCC_WARN_CONVERSION_GROUP, false},
-    {"conversion", JCC_WARN_CONVERSION, false},
-    {"sign-conversion", JCC_WARN_SIGN_CONVERSION, false},
-    {"float-conversion", JCC_WARN_FLOAT_CONVERSION, false},
-    {"sign-compare", JCC_WARN_SIGN_COMPARE, false},
-    {"pointer-arith", JCC_WARN_POINTER_ARITH, false},
-    {"pedantic", JCC_WARN_PEDANTIC, false},
-    {"deprecated", JCC_WARN_DEPRECATED, false},
-    {"cpp", JCC_WARN_CPP, false},
-    {"extra-tokens", JCC_WARN_EXTRA_TOKENS, false},
-    {"large-file-embed", JCC_WARN_LARGE_FILE_EMBED, false},
-    {"jcc-macro", JCC_WARN_JCC_MACRO, false},
-    {"ignored-features", JCC_WARN_IGNORED_FEATURES, false},
-    {"attributes", JCC_WARN_ATTRIBUTES, false},
-    {"nodiscard", JCC_WARN_NODISCARD, false},
-    {"fallthrough", JCC_WARN_FALLTHROUGH, false},
-    {"all", JCC_WARN_ALL, true},
-    {"extra", JCC_WARN_EXTRA, true},
+    {"conversion", CCCC_WARN_CONVERSION_GROUP, false},
+    {"conversion", CCCC_WARN_CONVERSION, false},
+    {"sign-conversion", CCCC_WARN_SIGN_CONVERSION, false},
+    {"float-conversion", CCCC_WARN_FLOAT_CONVERSION, false},
+    {"sign-compare", CCCC_WARN_SIGN_COMPARE, false},
+    {"pointer-arith", CCCC_WARN_POINTER_ARITH, false},
+    {"pedantic", CCCC_WARN_PEDANTIC, false},
+    {"deprecated", CCCC_WARN_DEPRECATED, false},
+    {"cpp", CCCC_WARN_CPP, false},
+    {"extra-tokens", CCCC_WARN_EXTRA_TOKENS, false},
+    {"large-file-embed", CCCC_WARN_LARGE_FILE_EMBED, false},
+    {"cccc-macro", CCCC_WARN_CCCC_MACRO, false},
+    {"ignored-features", CCCC_WARN_IGNORED_FEATURES, false},
+    {"attributes", CCCC_WARN_ATTRIBUTES, false},
+    {"nodiscard", CCCC_WARN_NODISCARD, false},
+    {"fallthrough", CCCC_WARN_FALLTHROUGH, false},
+    {"all", CCCC_WARN_ALL, true},
+    {"extra", CCCC_WARN_EXTRA, true},
 };
 
-const char *jcc_warning_name(JCCWarning warning) {
+const char *cccc_warning_name(CCCCWarning warning) {
     uint64_t mask = (uint64_t)warning;
     for (size_t i = 0; i < sizeof(warning_infos) / sizeof(*warning_infos); i++)
         if (!warning_infos[i].is_group && warning_infos[i].mask == mask)
@@ -79,14 +79,14 @@ const char *jcc_warning_name(JCCWarning warning) {
     return NULL;
 }
 
-uint64_t jcc_warning_mask_for_name(const char *name) {
+uint64_t cccc_warning_mask_for_name(const char *name) {
     for (size_t i = 0; i < sizeof(warning_infos) / sizeof(*warning_infos); i++)
         if (strcmp(warning_infos[i].name, name) == 0)
             return warning_infos[i].mask;
     return 0;
 }
 
-bool jcc_warning_is_group_name(const char *name) {
+bool cccc_warning_is_group_name(const char *name) {
     for (size_t i = 0; i < sizeof(warning_infos) / sizeof(*warning_infos); i++)
         if (strcmp(warning_infos[i].name, name) == 0)
             return warning_infos[i].is_group;
@@ -114,7 +114,7 @@ static void print_escaped_string_fp(FILE *f, const char *s) {
 }
 
 //               ^ error: <message here>
-static void vdiagnostic_at(JCC *vm, char *filename, char *input, int line_no,
+static void vdiagnostic_at(CCCC *vm, char *filename, char *input, int line_no,
                            char *loc, const char *kind,
                            const char *warn_name, char *fmt, va_list ap) {
     // Guard: loc must be within the file's contents buffer.
@@ -212,7 +212,7 @@ static void vdiagnostic_at(JCC *vm, char *filename, char *input, int line_no,
     fprintf(stderr, "\n");
 }
 
-static void verror_at(JCC *vm, char *filename, char *input, int line_no,
+static void verror_at(CCCC *vm, char *filename, char *input, int line_no,
                        char *loc, char *fmt, va_list ap) {
     vdiagnostic_at(vm, filename, input, line_no, loc, "error", NULL, fmt, ap);
 }
@@ -243,7 +243,7 @@ static int tok_col_no(Token *tok) {
     return (int)(tok->loc - line_start) + 1;
 }
 
-void error_at(JCC *vm, char *loc, char *fmt, ...) {
+void error_at(CCCC *vm, char *loc, char *fmt, ...) {
     int line_no = 1;
     for (char *p = vm->compiler.current_file->contents; p < loc; p++)
         if (*p == '\n')
@@ -291,7 +291,7 @@ void error_at(JCC *vm, char *loc, char *fmt, ...) {
     exit(1);
 }
 
-void error_tok(JCC *vm, Token *tok, char *fmt, ...) {
+void error_tok(CCCC *vm, Token *tok, char *fmt, ...) {
     int line_no = tok_line_no(tok);
     int col_no = tok_col_no(tok);
 
@@ -331,7 +331,7 @@ void error_tok(JCC *vm, Token *tok, char *fmt, ...) {
 
 // Error reporting with recovery support (Level 2)
 // Returns true if parsing should continue with recovery, false if max errors hit
-bool error_tok_recover(JCC *vm, Token *tok, char *fmt, ...) {
+bool error_tok_recover(CCCC *vm, Token *tok, char *fmt, ...) {
     int line_no = tok_line_no(tok);
     int col_no = tok_col_no(tok);
 
@@ -380,7 +380,7 @@ bool error_tok_recover(JCC *vm, Token *tok, char *fmt, ...) {
     exit(1);
 }
 
-void warn_tok(JCC *vm, Token *tok, JCCWarning category, char *fmt, ...) {
+void warn_tok(CCCC *vm, Token *tok, CCCCWarning category, char *fmt, ...) {
     uint64_t mask = (uint64_t)category;
 
     // Use per-token effective state if the preprocessor stamped it; otherwise
@@ -398,7 +398,7 @@ void warn_tok(JCC *vm, Token *tok, JCCWarning category, char *fmt, ...) {
     int line_no = tok_line_no(tok);
     int col_no = tok_col_no(tok);
 
-    const char *warn_name = jcc_warning_name(category);
+    const char *warn_name = cccc_warning_name(category);
     bool is_error = (vm->warnings_as_errors &&
                      !(vm->compiler.warning_no_errors & mask)) ||
                     (eff_werror & mask);
@@ -469,7 +469,7 @@ void warn_tok(JCC *vm, Token *tok, JCCWarning category, char *fmt, ...) {
     }
 }
 
-void warn_at(JCC *vm, char *loc, JCCWarning category, char *fmt, ...) {
+void warn_at(CCCC *vm, char *loc, CCCCWarning category, char *fmt, ...) {
     uint64_t mask = (uint64_t)category;
 
     if (!vm || !(vm->compiler.warnings & mask))
@@ -488,7 +488,7 @@ void warn_at(JCC *vm, char *loc, JCCWarning category, char *fmt, ...) {
         col_no++;
     }
 
-    const char *warn_name = jcc_warning_name(category);
+    const char *warn_name = cccc_warning_name(category);
     bool is_error = (vm->warnings_as_errors &&
                      !(vm->compiler.warning_no_errors & mask)) ||
                     (vm->compiler.warning_errors & mask);
@@ -561,7 +561,7 @@ bool equal(Token *tok, char *op) {
 }
 
 // Ensure that the current token is `op`.
-Token *skip(JCC *vm, Token *tok, char *op) {
+Token *skip(CCCC *vm, Token *tok, char *op) {
     if (!tok)
         error("expected '%s'", op);
     if (!equal(tok, op))
@@ -569,7 +569,7 @@ Token *skip(JCC *vm, Token *tok, char *op) {
     return tok->next;
 }
 
-bool consume(JCC *vm, Token **rest, Token *tok, char *str) {
+bool consume(CCCC *vm, Token **rest, Token *tok, char *str) {
     if (!tok) {
         *rest = NULL;
         return false;
@@ -583,7 +583,7 @@ bool consume(JCC *vm, Token **rest, Token *tok, char *str) {
 }
 
 // Create a new token.
-static Token *new_token(JCC *vm, TokenKind kind, char *start, char *end) {
+static Token *new_token(CCCC *vm, TokenKind kind, char *start, char *end) {
     Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     memset(tok, 0, sizeof(Token));
     tok->kind = kind;
@@ -598,13 +598,13 @@ static Token *new_token(JCC *vm, TokenKind kind, char *start, char *end) {
     return tok;
 }
 
-static bool startswith(JCC *vm, char *p, char *q) {
+static bool startswith(CCCC *vm, char *p, char *q) {
     return strncmp(p, q, strlen(q)) == 0;
 }
 
 // Read an identifier and returns the length of it.
 // If p does not point to a valid identifier, 0 is returned.
-static int read_ident(JCC *vm, char *start) {
+static int read_ident(CCCC *vm, char *start) {
     char *p = start;
     uint32_t c = decode_utf8(vm, &p, p);
     if (!is_ident1(c))
@@ -628,7 +628,7 @@ static int from_hex(char c) {
 }
 
 // Read a punctuator token from p and returns its length.
-static int read_punct(JCC *vm, char *p) {
+static int read_punct(CCCC *vm, char *p) {
     static char *kw[] = {
         "<<=", ">>=", "...", "==", "!=", "<=", ">=", "->", "+=",
         "-=", "*=", "/=", "++", "--", "%=", "&=", "|=", "^=", "&&",
@@ -665,7 +665,7 @@ static bool is_keyword(Token *tok) {
     return hashmap_get2(&map, tok->loc, tok->len);
 }
 
-static int read_escaped_char(JCC *vm, char **new_pos, char *p) {
+static int read_escaped_char(CCCC *vm, char **new_pos, char *p) {
     if ('0' <= *p && *p <= '7') {
         // Read an octal number.
         int c = *p++ - '0';
@@ -719,7 +719,7 @@ static int read_escaped_char(JCC *vm, char **new_pos, char *p) {
 }
 
 // Find a closing double-quote.
-static char *string_literal_end(JCC *vm, char *p) {
+static char *string_literal_end(CCCC *vm, char *p) {
     char *start = p;
     for (; *p != '"'; p++) {
         if (*p == '\n' || *p == '\0')
@@ -730,7 +730,7 @@ static char *string_literal_end(JCC *vm, char *p) {
     return p;
 }
 
-static Token *read_string_literal(JCC *vm, char *start, char *quote) {
+static Token *read_string_literal(CCCC *vm, char *start, char *quote) {
     char *end = string_literal_end(vm, quote + 1);
     char *buf = arena_alloc(&vm->compiler.parser_arena, end - quote);
     memset(buf, 0, end - quote);
@@ -758,7 +758,7 @@ static Token *read_string_literal(JCC *vm, char *start, char *quote) {
 // equal to or larger than that are encoded in 4 bytes. Each 2 bytes
 // in the 4 byte sequence is called "surrogate", and a 4 byte sequence
 // is called a "surrogate pair".
-static Token *read_utf16_string_literal(JCC *vm, char *start, char *quote) {
+static Token *read_utf16_string_literal(CCCC *vm, char *start, char *quote) {
     char *end = string_literal_end(vm, quote + 1);
     uint16_t *buf = arena_alloc(&vm->compiler.parser_arena, 2 * (end - start));
     memset(buf, 0, 2 * (end - start));
@@ -792,7 +792,7 @@ static Token *read_utf16_string_literal(JCC *vm, char *start, char *quote) {
 //
 // UTF-32 is a fixed-width encoding for Unicode. Each code point is
 // encoded in 4 bytes.
-static Token *read_utf32_string_literal(JCC *vm, char *start, char *quote, Type *ty) {
+static Token *read_utf32_string_literal(CCCC *vm, char *start, char *quote, Type *ty) {
     char *end = string_literal_end(vm, quote + 1);
     uint32_t *buf = arena_alloc(&vm->compiler.parser_arena, 4 * (end - quote));
     memset(buf, 0, 4 * (end - quote));
@@ -811,7 +811,7 @@ static Token *read_utf32_string_literal(JCC *vm, char *start, char *quote, Type 
     return tok;
 }
 
-static Token *read_char_literal(JCC *vm, char *start, char *quote, Type *ty) {
+static Token *read_char_literal(CCCC *vm, char *start, char *quote, Type *ty) {
     char *p = quote + 1;
     if (*p == '\0')
         error_at(vm, start, "unclosed char literal");
@@ -832,7 +832,7 @@ static Token *read_char_literal(JCC *vm, char *start, char *quote, Type *ty) {
     return tok;
 }
 
-static bool convert_pp_int(JCC *vm, Token *tok) {
+static bool convert_pp_int(CCCC *vm, Token *tok) {
     char *p = tok->loc;
 
     // Read a binary, octal, decimal or hexadecimal number.
@@ -841,8 +841,8 @@ static bool convert_pp_int(JCC *vm, Token *tok) {
         p += 2;
         base = 16;
     } else if (!strncasecmp(p, "0b", 2) && (p[2] == '0' || p[2] == '1')) {
-        if (vm->compiler.c_std < JCC_STD_C23)
-            warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+        if (vm->compiler.c_std < CCCC_STD_C23)
+            warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
                      "binary integer literals are a C23 extension");
         p += 2;
         base = 2;
@@ -856,7 +856,7 @@ static bool convert_pp_int(JCC *vm, Token *tok) {
     int j = 0;
     for (char *s = p; *s && j < 255; s++) {
         if (*s == '\'') {
-            if (vm->compiler.c_std < JCC_STD_C23)
+            if (vm->compiler.c_std < CCCC_STD_C23)
                 error_tok(vm, tok, "digit separators are not available before C23");
             continue;
         }
@@ -952,7 +952,7 @@ static bool convert_pp_int(JCC *vm, Token *tok) {
 // token after preprocessing.
 //
 // This function converts a pp-number token to a regular number token.
-static void convert_pp_number(JCC *vm, Token *tok) {
+static void convert_pp_number(CCCC *vm, Token *tok) {
     // Try to parse as an integer constant.
     if (convert_pp_int(vm, tok))
         return;
@@ -985,7 +985,7 @@ static void convert_pp_number(JCC *vm, Token *tok) {
 // the token to TK_IDENT.  Emits an error_tok for reserved-name violations.
 // Tokens from macro expansion (t->origin != NULL) are exempt — those come from
 // header macros that abstract over standard versions.
-static bool keyword_std_ok(JCC *vm, Token *t) {
+static bool keyword_std_ok(CCCC *vm, Token *t) {
     if (t->origin)
         return true;
     CStdVersion s = vm->compiler.c_std;
@@ -995,7 +995,7 @@ static bool keyword_std_ok(JCC *vm, Token *t) {
 #define KW(str) (len == (int)sizeof(str)-1 && memcmp(kw, str, len) == 0)
 
     // C99 reserved names — illegal below C99 (fire when --std=c89 is selected)
-    if (s < JCC_STD_C99) {
+    if (s < CCCC_STD_C99) {
         if (KW("restrict") || KW("__restrict") || KW("__restrict__"))
             error_tok(vm, t, "'%.*s' is not available before C99", len, kw);
         if (KW("_Bool"))
@@ -1005,11 +1005,11 @@ static bool keyword_std_ok(JCC *vm, Token *t) {
     }
 
     // C11 reserved names — illegal below C11
-    if (s < JCC_STD_C11) {
+    if (s < CCCC_STD_C11) {
         if (KW("_Alignof") || KW("_Alignas"))
             error_tok(vm, t, "'%.*s' is not available before C11", len, kw);
         if (KW("_Noreturn"))
-            warn_tok(vm, t, JCC_WARN_PEDANTIC, "'_Noreturn' is not available before C11");
+            warn_tok(vm, t, CCCC_WARN_PEDANTIC, "'_Noreturn' is not available before C11");
         if (KW("_Thread_local") || KW("__thread"))
             error_tok(vm, t, "'%.*s' is not available before C11", len, kw);
         if (KW("_Atomic"))
@@ -1019,7 +1019,7 @@ static bool keyword_std_ok(JCC *vm, Token *t) {
     }
 
     // C23 keywords that were valid identifiers in earlier standards — downgrade
-    if (s < JCC_STD_C23) {
+    if (s < CCCC_STD_C23) {
         if (KW("constexpr") || KW("static_assert"))
             return false;
     }
@@ -1028,7 +1028,7 @@ static bool keyword_std_ok(JCC *vm, Token *t) {
     return true;
 }
 
-void convert_pp_tokens(JCC *vm, Token *tok) {
+void convert_pp_tokens(CCCC *vm, Token *tok) {
     for (Token *t = tok; t->kind != TK_EOF; t = t->next) {
         if (is_keyword(t)) {
             t->kind = TK_KEYWORD;
@@ -1040,7 +1040,7 @@ void convert_pp_tokens(JCC *vm, Token *tok) {
 }
 
 // Initialize line info for all tokens.
-static void add_line_numbers(JCC *vm, Token *tok) {
+static void add_line_numbers(CCCC *vm, Token *tok) {
     char *p = vm->compiler.current_file->contents;
     char *line_start = p;
     int n = 1;
@@ -1060,7 +1060,7 @@ static void add_line_numbers(JCC *vm, Token *tok) {
     }
 }
 
-Token *tokenize_string_literal(JCC *vm, Token *tok, Type *basety) {
+Token *tokenize_string_literal(CCCC *vm, Token *tok, Type *basety) {
     Token *t;
     if (basety->size == 2)
         t = read_utf16_string_literal(vm, tok->loc, tok->loc);
@@ -1071,7 +1071,7 @@ Token *tokenize_string_literal(JCC *vm, Token *tok, Type *basety) {
 }
 
 // Tokenize a given string and returns new tokens.
-Token *tokenize(JCC *vm, File *file) {
+Token *tokenize(CCCC *vm, File *file) {
     vm->compiler.current_file = file;
 
     char *p = file->contents;
@@ -1088,8 +1088,8 @@ Token *tokenize(JCC *vm, File *file) {
     while (*p) {
         // Skip line comments (but NOT inside #include paths where URLs may contain //)
         if (startswith(vm, p, "//") && !in_include_path) {
-            if (vm->compiler.c_std < JCC_STD_C99)
-                warn_at(vm, p, JCC_WARN_PEDANTIC,
+            if (vm->compiler.c_std < CCCC_STD_C99)
+                warn_at(vm, p, CCCC_WARN_PEDANTIC,
                         "'//' comments are a C99 extension");
             p += 2;
             while (*p != '\n')
@@ -1260,7 +1260,7 @@ Token *tokenize(JCC *vm, File *file) {
 }
 
 // Returns the contents of a given file.
-static char *read_file(JCC *vm, char *path) {
+static char *read_file(CCCC *vm, char *path) {
     FILE *fp;
 
     if (strncmp(path, "-", sizeof("-")) == 0) {
@@ -1302,7 +1302,7 @@ static char *read_file(JCC *vm, char *path) {
 }
 
 // Read binary file without text processing (for #embed directive)
-unsigned char *read_binary_file(JCC *vm, char *path, size_t *out_size) {
+unsigned char *read_binary_file(CCCC *vm, char *path, size_t *out_size) {
     FILE *fp = fopen(path, "rb");
     if (!fp)
         return NULL;
@@ -1342,7 +1342,7 @@ unsigned char *read_binary_file(JCC *vm, char *path, size_t *out_size) {
     return buffer;
 }
 
-File *new_file(JCC *vm, char *name, int file_no, char *contents) {
+File *new_file(CCCC *vm, char *name, int file_no, char *contents) {
     File *file = arena_alloc(&vm->compiler.parser_arena, sizeof(File));
     memset(file, 0, sizeof(File));
     file->name = name;
@@ -1409,7 +1409,7 @@ static uint32_t read_universal_char(char *p, int len) {
 }
 
 // Replace \u or \U escape sequences with corresponding UTF-8 bytes.
-static void convert_universal_chars(JCC *vm, char *p) {
+static void convert_universal_chars(CCCC *vm, char *p) {
     char *q = p;
 
     while (*p) {
@@ -1440,7 +1440,7 @@ static void convert_universal_chars(JCC *vm, char *p) {
     *q = '\0';
 }
 
-Token *tokenize_file(JCC *vm, char *path) {
+Token *tokenize_file(CCCC *vm, char *path) {
     char *p = read_file(vm, path);
     if (!p)
         return NULL;
@@ -1470,7 +1470,7 @@ Token *tokenize_file(JCC *vm, char *path) {
 }
 
 // Tokenize an in-memory string (for embedded headers)
-Token *tokenize_string(JCC *vm, char *name, char *contents) {
+Token *tokenize_string(CCCC *vm, char *name, char *contents) {
     // Duplicate contents because tokenize may modify it
     char *p = arena_alloc(&vm->compiler.parser_arena, strlen(contents) + 1);
     strcpy(p, contents);
@@ -1490,9 +1490,9 @@ Token *tokenize_string(JCC *vm, char *name, char *contents) {
 void cc_output_preprocessed(FILE *f, Token *tok) {
     if (!f || !tok)
         return;
-    
+
     int at_bol = 1;
-    
+
     for (Token *t = tok; t && t->kind != TK_EOF; t = t->next) {
         // Handle line breaks
         if (at_bol && !t->at_bol) {
@@ -1501,18 +1501,18 @@ void cc_output_preprocessed(FILE *f, Token *tok) {
             fprintf(f, "\n");
         }
         at_bol = t->at_bol;
-        
+
         // Handle spacing
         if (t->has_space && !at_bol)
             fprintf(f, " ");
-        
+
         // Output token based on kind
         switch (t->kind) {
             case TK_IDENT:
             case TK_PP_NUM:
                 fprintf(f, "%.*s", t->len, t->loc);
                 break;
-                
+
             case TK_NUM:
                 // For numeric literals, output the original text
                 if (t->ty && is_flonum(t->ty)) {
@@ -1521,25 +1521,25 @@ void cc_output_preprocessed(FILE *f, Token *tok) {
                     fprintf(f, "%.*s", t->len, t->loc);
                 }
                 break;
-                
+
             case TK_STR:
                 // String literals: output with quotes
                 fprintf(f, "%.*s", t->len, t->loc);
                 break;
-                
+
             case TK_KEYWORD:
                 fprintf(f, "%.*s", t->len, t->loc);
                 break;
-                
+
             case TK_EOF:
                 break;
-                
+
             default:
                 // For all other tokens (operators, punctuation, etc.)
                 fprintf(f, "%.*s", t->len, t->loc);
                 break;
         }
-        
+
         at_bol = 0;
     }
 
@@ -1548,19 +1548,19 @@ void cc_output_preprocessed(FILE *f, Token *tok) {
 
 // Error collection helper functions
 
-int cc_get_error_count(JCC *vm) {
+int cc_get_error_count(CCCC *vm) {
     return vm ? vm->error_count : 0;
 }
 
-int cc_get_warning_count(JCC *vm) {
+int cc_get_warning_count(CCCC *vm) {
     return vm ? vm->warning_count : 0;
 }
 
-bool cc_has_errors(JCC *vm) {
+bool cc_has_errors(CCCC *vm) {
     return vm && vm->error_count > 0;
 }
 
-void cc_clear_errors(JCC *vm) {
+void cc_clear_errors(CCCC *vm) {
     if (!vm) return;
 
     vm->errors = NULL;
@@ -1570,7 +1570,7 @@ void cc_clear_errors(JCC *vm) {
     vm->error_message = NULL;
 }
 
-void cc_print_all_errors(JCC *vm) {
+void cc_print_all_errors(CCCC *vm) {
     if (!vm || !vm->errors) return;
 
     // Print all collected errors and warnings

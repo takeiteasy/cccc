@@ -1,6 +1,6 @@
 // EXPECT_RUNTIME_ERROR
-// JCC_FLAGS: --memory-tagging -V
-// JCC_EXPECT_STDERR: TEMPORAL SAFETY VIOLATION
+// CCCC_FLAGS: --memory-tagging -V
+// CCCC_EXPECT_STDERR: TEMPORAL SAFETY VIOLATION
 // Test basic temporal memory tagging - UAF with memory reuse
 // This should FAIL when run with --memory-tagging flag
 

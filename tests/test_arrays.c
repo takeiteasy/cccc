@@ -1,4 +1,4 @@
-// Test array operations in JCC
+// Test array operations in CCCC
 // Expected return: 42
 
 int main() {

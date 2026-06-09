@@ -1,5 +1,5 @@
 /*
- JCC: JIT C Compiler
+ CCCC: Comprehensiev C Compensation Compiler
 
  Copyright (C) 2025 George Watson
 
@@ -18,17 +18,17 @@
 */
 
 #include "./internal.h"
-#include "jcc.h"
+#include "cccc.h"
 #include <getopt.h>
 #if defined(_WIN32)
 #include <io.h>
-#define JCC_ISATTY _isatty
-#define JCC_FILENO _fileno
+#define CCCC_ISATTY _isatty
+#define CCCC_FILENO _fileno
 #else
 #include <sys/wait.h>
 #include <unistd.h>
-#define JCC_ISATTY isatty
-#define JCC_FILENO fileno
+#define CCCC_ISATTY isatty
+#define CCCC_FILENO fileno
 #endif
 
 typedef struct {
@@ -55,7 +55,7 @@ static char *make_tmp_path(const char *suffix) {
     (void)suffix;
     return NULL;
 #else
-    char template[] = "/tmp/jcc-native-XXXXXX";
+    char template[] = "/tmp/cccc-native-XXXXXX";
     int fd = mkstemp(template);
     if (fd < 0)
         return NULL;
@@ -110,7 +110,7 @@ static int run_argv(char *const argv[]) {
 #endif
 }
 
-static int run_native_backend(JCC *vm, Obj *prog, const char *out_file,
+static int run_native_backend(CCCC *vm, Obj *prog, const char *out_file,
                               const char **inc_paths, int inc_paths_count,
                               const char **sys_inc_paths,
                               int sys_inc_paths_count, const char **lib_paths,
@@ -124,7 +124,7 @@ static int run_native_backend(JCC *vm, Obj *prog, const char *out_file,
         return 1;
     }
 
-    char *cc = jcc_find_native_cc();
+    char *cc = cccc_find_native_cc();
     if (!cc)
         return 1;
 
@@ -214,8 +214,8 @@ static int run_native_backend(JCC *vm, Obj *prog, const char *out_file,
 }
 
 static void usage(const char *argv0, int exit_code) {
-    printf("JCC: JIT C Compiler\n");
-    printf("https://git.sr.ht/~takeiteasy/jcc\n\n");
+    printf("CCCC: Comprehensiev C Compensation Compiler\n");
+    printf("https://git.sr.ht/~takeiteasy/cccc\n\n");
     printf("Usage: %s [options] file...\n\n", argv0);
     printf("Options:\n");
     printf("\t-h/--help                Show this message\n");
@@ -244,13 +244,13 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                         bytecode: write .jbc (to -o file, or stdout if -o omitted\n");
     printf("\t                                   and stdout is not a TTY)\n");
     printf("\t                         native: require -o file; build a native executable via\n");
-    printf("\t                                 JCC_NATIVE_CC (cc, clang, or gcc)\n");
+    printf("\t                                 CCCC_NATIVE_CC (cc, clang, or gcc)\n");
     printf("\t                         Use -cnative or --compile=native (short form must be\n");
     printf("\t                         attached; long form may use '=' or separate arg).\n");
     printf("\t-o/--out <file>          Output file. Required for -c=native. For -c=bytecode, writes\n");
     printf("\t                         bytecode to <file>; if omitted, writes to stdout\n");
     printf("\t-d/--disassemble         Disassemble bytecode to stdout\n");
-    printf("\t-t/--testing             Discover and run [[jcc::test]] functions; output TAP\n");
+    printf("\t-t/--testing             Discover and run [[cccc::test]] functions; output TAP\n");
     printf("\t-v/--verbose             Enable debug logging\n");
     printf("\t-g/--debug               Enable interactive debugger\n");
     printf("\t-e/--entry <name>        Set the entry-point function (default: main)\n");
@@ -364,8 +364,8 @@ static void usage(const char *argv0, int exit_code) {
     exit(exit_code);
 }
 
-static void configure_ffi_name_list(JCC *vm, const char *list,
-                                    void (*add)(JCC *, const char *)) {
+static void configure_ffi_name_list(CCCC *vm, const char *list,
+                                    void (*add)(CCCC *, const char *)) {
     const char *p = list;
     while (p && *p) {
         while (*p == ',' || isspace((unsigned char)*p))
@@ -424,7 +424,7 @@ static char *find_requested_library(const char *name, const char **paths,
     return strdup(libname);
 }
 
-static int load_requested_libraries(JCC *vm, const char **libs, int libs_count,
+static int load_requested_libraries(CCCC *vm, const char **libs, int libs_count,
                                     const char **paths, int paths_count) {
     for (int i = 0; i < libs_count; i++) {
         char *path = find_requested_library(libs[i], paths, paths_count);
@@ -438,7 +438,7 @@ static int load_requested_libraries(JCC *vm, const char **libs, int libs_count,
     return 0;
 }
 
-static int ffi_index_by_name(JCC *vm, const char *name) {
+static int ffi_index_by_name(CCCC *vm, const char *name) {
     size_t len = strlen(name);
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
         if (vm->compiler.ffi_table[i].name &&
@@ -456,7 +456,7 @@ static int count_params(Type *ty) {
     return n;
 }
 
-static void register_dynamic_externs(JCC *vm, Obj *prog) {
+static void register_dynamic_externs(CCCC *vm, Obj *prog) {
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (!obj->is_function || obj->is_definition || !obj->name ||
             ffi_index_by_name(vm, obj->name) >= 0)
@@ -474,7 +474,7 @@ static void register_dynamic_externs(JCC *vm, Obj *prog) {
     }
 }
 
-static int verify_dynamic_externs(JCC *vm) {
+static int verify_dynamic_externs(CCCC *vm) {
     int ok = 1;
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
         ForeignFunc *ff = &vm->compiler.ffi_table[i];
@@ -522,7 +522,7 @@ static char *read_stdin_to_tmp(void) {
     CloseHandle(h);
     return _strdup(tmpFile);
 #else
-    char template[] = "/tmp/jcc-stdin-XXXXXX";
+    char template[] = "/tmp/cccc-stdin-XXXXXX";
     int fd = mkstemp(template);
     if (fd < 0)
         return NULL;
@@ -553,7 +553,7 @@ static char *read_stdin_to_tmp(void) {
 #endif
 }
 
-static void parse_define(JCC *vm, char *arg) {
+static void parse_define(CCCC *vm, char *arg) {
     char *eq = strchr(arg, '=');
     if (eq) {
         *eq = '\0';
@@ -608,8 +608,8 @@ static void parse_warning_option(const char *arg, uint64_t *warnings,
 
     if (strncmp(arg, "error=", 6) == 0) {
         const char *name = arg + 6;
-        uint64_t mask = jcc_warning_mask_for_name(name);
-        if (!mask || jcc_warning_is_group_name(name)) {
+        uint64_t mask = cccc_warning_mask_for_name(name);
+        if (!mask || cccc_warning_is_group_name(name)) {
             fprintf(stderr, "error: unknown warning option '-Werror=%s'\n", name);
             exit(1);
         }
@@ -621,8 +621,8 @@ static void parse_warning_option(const char *arg, uint64_t *warnings,
 
     if (strncmp(arg, "no-error=", 9) == 0) {
         const char *name = arg + 9;
-        uint64_t mask = jcc_warning_mask_for_name(name);
-        if (!mask || jcc_warning_is_group_name(name)) {
+        uint64_t mask = cccc_warning_mask_for_name(name);
+        if (!mask || cccc_warning_is_group_name(name)) {
             fprintf(stderr, "error: unknown warning option '-Wno-error=%s'\n", name);
             exit(1);
         }
@@ -638,7 +638,7 @@ static void parse_warning_option(const char *arg, uint64_t *warnings,
         name = arg + 3;
     }
 
-    uint64_t mask = jcc_warning_mask_for_name(name);
+    uint64_t mask = cccc_warning_mask_for_name(name);
     if (!mask) {
         fprintf(stderr, "error: unknown warning option '-W%s'\n", arg);
         exit(1);
@@ -711,7 +711,7 @@ int main(int argc, const char *argv[]) {
     int dump_ast = 0;          // -a
     int disassemble = 0;       // -d
     int verbose = 0;           // -v
-    uint32_t flags = 0;        // JCCFlags bitfield for runtime features
+    uint32_t flags = 0;        // CCCCFlags bitfield for runtime features
     int print_tokens = 0;      // -P
     int preprocess_only = 0;   // -E
     int dump_expanded_only = 0; // -M
@@ -851,15 +851,15 @@ int main(int argc, const char *argv[]) {
             break;
         case '1':
             // Safety level 1: Basic - essential low-overhead checks
-            flags |= JCC_SAFETY_BASIC;
+            flags |= CCCC_SAFETY_BASIC;
             break;
         case '2':
             // Safety level 2: Standard - comprehensive development safety
-            flags |= JCC_SAFETY_STANDARD;
+            flags |= CCCC_SAFETY_STANDARD;
             break;
         case '3':
             // Safety level 3: Maximum - all safety features
-            flags |= JCC_SAFETY_MAX;
+            flags |= CCCC_SAFETY_MAX;
             break;
         case 1012:
             // --safety=<level> flag
@@ -868,13 +868,13 @@ int main(int argc, const char *argv[]) {
                 flags = 0;
             } else if (strncmp(optarg, "basic", sizeof("basic")) == 0 ||
                        strncmp(optarg, "1", sizeof("1")) == 0) {
-                flags |= JCC_SAFETY_BASIC;
+                flags |= CCCC_SAFETY_BASIC;
             } else if (strncmp(optarg, "standard", sizeof("standard")) == 0 ||
                        strncmp(optarg, "2", sizeof("2")) == 0) {
-                flags |= JCC_SAFETY_STANDARD;
+                flags |= CCCC_SAFETY_STANDARD;
             } else if (strncmp(optarg, "max", sizeof("max")) == 0 ||
                        strncmp(optarg, "3", sizeof("3")) == 0) {
-                flags |= JCC_SAFETY_MAX;
+                flags |= CCCC_SAFETY_MAX;
             } else {
                 fprintf(stderr,
                         "error: invalid safety level '%s' (use "
@@ -903,7 +903,7 @@ int main(int argc, const char *argv[]) {
             dump_ast = 1;
             break;
         case 'g':
-            flags |= JCC_ENABLE_DEBUGGER;
+            flags |= CCCC_ENABLE_DEBUGGER;
             break;
         case 'I':
             inc_paths =
@@ -934,69 +934,69 @@ int main(int argc, const char *argv[]) {
             undefs[undefs_count++] = strdup(optarg);
             break;
         case 'b': // --bounds-checks
-            flags |= JCC_BOUNDS_CHECKS;
+            flags |= CCCC_BOUNDS_CHECKS;
             break;
         case 'u': // --uaf-detection
-            flags |= JCC_UAF_DETECTION;
+            flags |= CCCC_UAF_DETECTION;
             break;
         case 'T': // --type-checks
-            flags |= JCC_TYPE_CHECKS;
+            flags |= CCCC_TYPE_CHECKS;
             break;
         case 1038: // --uninitialized-detection
-            flags |= JCC_UNINIT_DETECTION;
+            flags |= CCCC_UNINIT_DETECTION;
             break;
         case 1034: // --overflow-checks
-            flags |= JCC_OVERFLOW_CHECKS;
+            flags |= CCCC_OVERFLOW_CHECKS;
             break;
 
         case 1039: // --stack-canaries
-            flags |= JCC_STACK_CANARIES;
+            flags |= CCCC_STACK_CANARIES;
             break;
         case 'H': // --heap-canaries
-            flags |= JCC_HEAP_CANARIES;
+            flags |= CCCC_HEAP_CANARIES;
             break;
         case 'p': // --pointer-sanitizer
-            flags |= JCC_POINTER_SANITIZER;
+            flags |= CCCC_POINTER_SANITIZER;
             break;
         case 'm': // --memory-leak-detection
-            flags |= JCC_MEMORY_LEAK_DETECT;
+            flags |= CCCC_MEMORY_LEAK_DETECT;
             break;
         case 1043: // --stack-instrumentation
-            flags |= JCC_STACK_INSTR;
+            flags |= CCCC_STACK_INSTR;
             break;
         case 1001:
-            flags |= JCC_DANGLING_DETECT;
+            flags |= CCCC_DANGLING_DETECT;
             break;
         case 1002:
-            flags |= JCC_ALIGNMENT_CHECKS;
+            flags |= CCCC_ALIGNMENT_CHECKS;
             break;
         case 1003:
-            flags |= JCC_PROVENANCE_TRACK;
+            flags |= CCCC_PROVENANCE_TRACK;
             break;
         case 1004:
-            flags |= JCC_INVALID_ARITH;
+            flags |= CCCC_INVALID_ARITH;
             break;
         case 1005:
-            flags |= JCC_STACK_INSTR_ERRORS;
+            flags |= CCCC_STACK_INSTR_ERRORS;
             break;
         case 1044: // --format-string-checks
-            flags |= JCC_FORMAT_STR_CHECKS;
-            warnings |= JCC_WARN_FORMAT;
+            flags |= CCCC_FORMAT_STR_CHECKS;
+            warnings |= CCCC_WARN_FORMAT;
             break;
         case 'R': // --random-canaries
-            flags |= JCC_RANDOM_CANARIES;
+            flags |= CCCC_RANDOM_CANARIES;
             break;
         case 1007:
-            flags |= JCC_MEMORY_POISONING;
+            flags |= CCCC_MEMORY_POISONING;
             break;
         case 1045: // --memory-tagging
-            flags |= JCC_MEMORY_TAGGING;
+            flags |= CCCC_MEMORY_TAGGING;
             break;
         case 'V':
-            flags |= JCC_VM_HEAP;
+            flags |= CCCC_VM_HEAP;
             break;
         case 'C':
-            flags |= JCC_CFI;
+            flags |= CCCC_CFI;
             break;
         case 'P':
             print_tokens = 1;
@@ -1250,7 +1250,7 @@ int main(int argc, const char *argv[]) {
         if (ffi_allow_args_count || ffi_deny_args_count || disable_all_ffi ||
             ffi_errors_fatal || enable_ffi_type_checking) {
             fprintf(stderr,
-                    "error: -c=native cannot be combined with JCC FFI policy options\n");
+                    "error: -c=native cannot be combined with CCCC FFI policy options\n");
             usage(argv[0], 1);
         }
         for (int i = 0; i < input_files_count; i++) {
@@ -1296,7 +1296,7 @@ int main(int argc, const char *argv[]) {
                     "with --vm-profile\n");
             usage(argv[0], 1);
         }
-        if (flags & JCC_ENABLE_DEBUGGER) {
+        if (flags & CCCC_ENABLE_DEBUGGER) {
             fprintf(stderr,
                     "error: --ngrams/--fusion-candidates cannot be combined "
                     "with -g/--debug\n");
@@ -1316,7 +1316,7 @@ int main(int argc, const char *argv[]) {
         }
     }
 
-    JCC vm;
+    CCCC vm;
     cc_init(&vm, flags);
     vm.compiler.compile_only = compile_only;
     vm.compiler.asm_passthru = asm_passthru;
@@ -1489,7 +1489,7 @@ int main(int argc, const char *argv[]) {
 
     // Apply --std=<standard> if specified, then re-emit std macros
     if (std_arg) {
-        CStdVersion ver = JCC_STD_C17;
+        CStdVersion ver = CCCC_STD_C17;
         bool is_gnu = true;
         const char *s = std_arg;
         // Consume optional "gnu" / "c" prefix
@@ -1505,15 +1505,15 @@ int main(int argc, const char *argv[]) {
         }
         // Map suffix to version
         if (strcmp(s, "89") == 0 || strcmp(s, "90") == 0) {
-            ver = JCC_STD_C89;
+            ver = CCCC_STD_C89;
         } else if (strcmp(s, "99") == 0) {
-            ver = JCC_STD_C99;
+            ver = CCCC_STD_C99;
         } else if (strcmp(s, "11") == 0) {
-            ver = JCC_STD_C11;
+            ver = CCCC_STD_C11;
         } else if (strcmp(s, "17") == 0 || strcmp(s, "18") == 0) {
-            ver = JCC_STD_C17;
+            ver = CCCC_STD_C17;
         } else if (strcmp(s, "23") == 0 || strcmp(s, "2x") == 0) {
-            ver = JCC_STD_C23;
+            ver = CCCC_STD_C23;
         } else {
             fprintf(stderr, "error: unknown C standard '%s'\n", std_arg);
             usage(argv[0], 1);
@@ -1524,7 +1524,7 @@ int main(int argc, const char *argv[]) {
     }
 
     // If random canaries are enabled, regenerate the stack canary
-    if (vm.flags & JCC_RANDOM_CANARIES) {
+    if (vm.flags & CCCC_RANDOM_CANARIES) {
         vm.stack_canary = generate_random_canary();
     }
 
@@ -1552,7 +1552,7 @@ int main(int argc, const char *argv[]) {
     if (testing_mode)
         cc_load_test_runtime(&vm);
 
-    // Add JCC's standard library header directory
+    // Add CCCC's standard library header directory
     cc_include(&vm, "./include");
 
     // Add user-specified include paths (these take precedence via search order)
@@ -1571,7 +1571,7 @@ int main(int argc, const char *argv[]) {
     vm.compiler.skip_preprocess = skip_preprocess;
 
     // In testing mode, inject tests.h before any source is preprocessed so
-    // JCC_ASSERT* macros are in scope. Save the returned declaration tokens for
+    // CCCC_ASSERT* macros are in scope. Save the returned declaration tokens for
     // prepending to the parse stream after preprocessing.
     Token *test_decls = NULL;
     if (testing_mode)
@@ -1595,7 +1595,7 @@ int main(int argc, const char *argv[]) {
         }
     }
 
-    // Prepend __jcc_assert* declarations into the first file's parse stream.
+    // Prepend __cccc_assert* declarations into the first file's parse stream.
     if (testing_mode && test_decls && input_files_count > 0) {
         Token *last = test_decls;
         while (last->next && last->next->kind != TK_EOF)
@@ -1678,7 +1678,7 @@ int main(int argc, const char *argv[]) {
     }
 
     // Inject inline-macro-generated function definitions into the program.
-    // These Objs were created by __jcc_ast_function during pre-parse inline
+    // These Objs were created by __cccc_ast_function during pre-parse inline
     // macro execution and stashed in vm.compiler.macro_globals. They must be
     // in the prog list so cc_compile calls gen_function on them and the
     // call-patcher can resolve calls to them by name.
@@ -1770,7 +1770,7 @@ int main(int argc, const char *argv[]) {
             }
             fprintf(stderr, "Bytecode saved to %s\n", out_file);
         } else {
-            if (JCC_ISATTY(JCC_FILENO(stdout))) {
+            if (CCCC_ISATTY(CCCC_FILENO(stdout))) {
                 fprintf(stderr,
                         "error: refusing to write bytecode to a terminal; "
                         "use -o <file> or redirect stdout\n");

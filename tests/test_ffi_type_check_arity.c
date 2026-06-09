@@ -1,4 +1,4 @@
-// EXPECT_RUNTIME_ERROR JCC_FLAGS: --ffi-type-checking
+// EXPECT_RUNTIME_ERROR CCCC_FLAGS: --ffi-type-checking
 
 int strcmp(const char *s);
 

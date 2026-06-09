@@ -1,6 +1,6 @@
 // EXPECT_COMPILE_ERROR
-// JCC_FLAGS: -Werror=shadow
-// JCC_EXPECT_STDERR: error: declaration of 'value' shadows an outer variable \[-Wshadow\]
+// CCCC_FLAGS: -Werror=shadow
+// CCCC_EXPECT_STDERR: error: declaration of 'value' shadows an outer variable \[-Wshadow\]
 
 int value;
 

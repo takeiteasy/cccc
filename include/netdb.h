@@ -1,10 +1,10 @@
-/* netdb.h - network database declarations for JCC */
+/* netdb.h - network database declarations for CCCC */
 
 #ifndef __NETDB_H
 #define __NETDB_H
 
 #ifdef _WIN32
-#error "<netdb.h> is only available on POSIX targets in JCC"
+#error "<netdb.h> is only available on POSIX targets in CCCC"
 #endif
 
 #include "sys/socket.h"

@@ -1,7 +1,7 @@
 // json.c - AST to JSON serialization for header declarations
 // Outputs functions, structs, unions, enums as JSON for FFI wrapper generation
 
-#include "jcc.h"
+#include "cccc.h"
 #include "internal.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -619,7 +619,7 @@ void cc_output_json(FILE *f, Obj *prog) {
     free(enums.data);
 }
 
-void cc_output_source_map_json(JCC *vm, FILE *f) {
+void cc_output_source_map_json(CCCC *vm, FILE *f) {
     if (!vm || !f) {
         return;
     }

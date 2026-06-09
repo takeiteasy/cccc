@@ -1,6 +1,6 @@
-// JCC_FLAGS: -Wunused
-// JCC_EXPECT_STDERR: unused variable 'y'
-// JCC_REJECT_STDERR: unused variable 'x'
+// CCCC_FLAGS: -Wunused
+// CCCC_EXPECT_STDERR: unused variable 'y'
+// CCCC_REJECT_STDERR: unused variable 'x'
 
 int check(void) {
 #pragma GCC diagnostic push

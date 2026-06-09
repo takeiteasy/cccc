@@ -1,4 +1,4 @@
-// JCC_FLAGS: -C
+// CCCC_FLAGS: -C
 // CFI regression: longjmp must restore shadow_sp so the caller of the setjmp
 // function can return without consuming orphaned shadow entries.
 #include "setjmp.h"

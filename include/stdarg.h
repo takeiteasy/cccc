@@ -1,8 +1,8 @@
 /*
  * stdarg.h - Variable Argument Lists
- * JCC C Compiler - Standard C Library Header
+ * CCCC C Compiler - Standard C Library Header
  * 
- * Implements C99/C11 variable argument list support for the JCC VM.
+ * Implements C99/C11 variable argument list support for the CCCC VM.
  * 
  * Stack Layout for Variadic Functions (after ENT3):
  *   Stack Args      (call args 8+, caller's frame)
@@ -70,7 +70,7 @@ typedef struct {
  * The number of fixed params = (&(bp[-1]) - &last) / 8 + 1.
  *
  * Since we can't easily find bp from &last alone, we use
- * __builtin_frame_address. JCC compiles this to LEA 0 which gives bp. When the
+ * __builtin_frame_address. CCCC compiles this to LEA 0 which gives bp. When the
  * last fixed parameter itself was stack-passed, ENT3 has copied it into a local
  * slot, so the first stack variadic argument is after those stack-passed fixed
  * arguments in the caller's frame.

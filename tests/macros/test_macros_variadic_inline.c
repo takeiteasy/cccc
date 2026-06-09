@@ -1,6 +1,6 @@
 // Test ticket #284: variadic inline macros receive an unbounded AST tail.
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *sum_nodes(...) {
     int count = _AST_VARARG_COUNT();
     if (count == 0)
@@ -12,7 +12,7 @@ $node_t *sum_nodes(...) {
     return acc;
 }
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *add_tail($node_t *base, ...) {
     $node_t *acc = base;
     for (int i = 0; i < _AST_VARARG_COUNT(); i = i + 1)

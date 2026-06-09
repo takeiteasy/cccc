@@ -1,5 +1,5 @@
-// Test that multiple JCC instances have isolated state
-// This verifies the fix for global static variables moved to JCC struct
+// Test that multiple CCCC instances have isolated state
+// This verifies the fix for global static variables moved to CCCC struct
 
 int main() {
     // Test 1: __COUNTER__ isolation

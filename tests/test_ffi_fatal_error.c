@@ -1,4 +1,4 @@
-// EXPECT_RUNTIME_ERROR JCC_FLAGS: --ffi-deny=strlen --ffi-errors-fatal
+// EXPECT_RUNTIME_ERROR CCCC_FLAGS: --ffi-deny=strlen --ffi-errors-fatal
 #include <string.h>
 
 int main(void) {

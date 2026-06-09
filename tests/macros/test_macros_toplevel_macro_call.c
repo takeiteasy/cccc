@@ -1,6 +1,6 @@
 // Test ticket #122: explicit pragma macro calls at file scope.
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *generate_answer(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("generated_answer", int_ty);

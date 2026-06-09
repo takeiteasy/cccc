@@ -1,5 +1,5 @@
 /*
- JCC: JIT C Compiler
+ CCCC: Comprehensiev C Compensation Compiler
 
  Copyright (C) 2025 George Watson
 
@@ -16,7 +16,7 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
- src/analyze.c - Static bytecode analysis passes for the jcc binary.
+ src/analyze.c - Static bytecode analysis passes for the cccc binary.
 
  Provides two in-process analyses that used to live in the standalone
  tools/bytecode_ngrams and tools/fusion_candidates executables:
@@ -29,13 +29,13 @@
      def->use pairs where the defining instruction has a single
      reader. The strongest candidates for new fused opcodes.
 
- Both analyses work on a JCCInstrWord* text segment, which the caller
+ Both analyses work on a CCCCInstrWord* text segment, which the caller
  has already loaded (via cc_load_bytecode for .jbc input or
  cc_compile for .c source). See the public functions below.
 */
 
 #include "./internal.h"
-#include "jcc.h"
+#include "cccc.h"
 
 #include <ctype.h>
 #include <inttypes.h>
@@ -81,7 +81,7 @@ static void ngram_map_init(NGramMap *m) {
     m->size = 0;
     m->entries = (NGramEntry *)calloc(m->capacity, sizeof(NGramEntry));
     if (!m->entries) {
-        fprintf(stderr, "jcc: out of memory\n");
+        fprintf(stderr, "cccc: out of memory\n");
         exit(1);
     }
 }
@@ -99,7 +99,7 @@ static void ngram_map_grow(NGramMap *m) {
     m->capacity = old_cap * 2;
     m->entries = (NGramEntry *)calloc(m->capacity, sizeof(NGramEntry));
     if (!m->entries) {
-        fprintf(stderr, "jcc: out of memory\n");
+        fprintf(stderr, "cccc: out of memory\n");
         exit(1);
     }
     m->size = 0;
@@ -153,7 +153,7 @@ static int ngram_entry_cmp_desc(const void *a, const void *b) {
 static NGramEntry *ngram_map_collect_sorted(const NGramMap *m, size_t *out_n) {
     NGramEntry *arr = (NGramEntry *)malloc(m->size * sizeof(NGramEntry));
     if (!arr) {
-        fprintf(stderr, "jcc: out of memory\n");
+        fprintf(stderr, "cccc: out of memory\n");
         exit(1);
     }
     size_t n = 0;
@@ -181,12 +181,12 @@ static void ngram_unpack(uint64_t key, int *ops, int n) {
     }
 }
 
-static int ngram_extract_stream(const JCCInstrWord *text, long long num_words,
+static int ngram_extract_stream(const CCCCInstrWord *text, long long num_words,
                                 int *out, int max_out) {
     int count = 0;
     long long pc = 1;  // text[0] is the entry point
     while (pc < num_words && count < max_out) {
-        JCCInstrWord op = text[pc];
+        CCCCInstrWord op = text[pc];
         int words = cc_instr_words((int)op);
         if (words <= 0)
             break;
@@ -253,7 +253,7 @@ static void ngram_print_section(FILE *f, const char *title, int n,
 CcNgramState *cc_analyze_ngram_begin(const CcAnalyzeNgramOptions *opts) {
     CcNgramState *st = (CcNgramState *)calloc(1, sizeof(CcNgramState));
     if (!st) {
-        fprintf(stderr, "jcc: out of memory\n");
+        fprintf(stderr, "cccc: out of memory\n");
         exit(1);
     }
     st->opts = *opts;
@@ -261,14 +261,14 @@ CcNgramState *cc_analyze_ngram_begin(const CcAnalyzeNgramOptions *opts) {
     return st;
 }
 
-void cc_analyze_ngram_feed(CcNgramState *st, const JCCInstrWord *text,
+void cc_analyze_ngram_feed(CcNgramState *st, const CCCCInstrWord *text,
                            long long num_words, const char *label, FILE *out) {
     if (!st || !text || num_words <= 1)
         return;
     int max_out = (int)num_words;
     int *stream = (int *)malloc((size_t)max_out * sizeof(int));
     if (!stream) {
-        fprintf(stderr, "jcc: out of memory\n");
+        fprintf(stderr, "cccc: out of memory\n");
         exit(1);
     }
     int len = ngram_extract_stream(text, num_words, stream, max_out);
@@ -448,7 +448,7 @@ static inline bool fusion_is_caller_saved(int reg) {
     return false;
 }
 
-static int fusion_extract_reg(JCCInstrWord operands_word, int byte_pos) {
+static int fusion_extract_reg(CCCCInstrWord operands_word, int byte_pos) {
     if (byte_pos < 0) return INVALID_REG;
     return (int)((operands_word >> (byte_pos * 8)) & 0xFF);
 }
@@ -511,7 +511,7 @@ static void fusion_cand_push(CandidateList *list, Candidate c) {
         Candidate *p =
             (Candidate *)realloc(list->items, (size_t)new_cap * sizeof(Candidate));
         if (!p) {
-            fprintf(stderr, "jcc: out of memory\n");
+            fprintf(stderr, "cccc: out of memory\n");
             exit(1);
         }
         list->items = p;
@@ -529,7 +529,7 @@ static int fusion_cand_cmp(const void *a, const void *b) {
     return ca->use_pc - cb->use_pc;
 }
 
-static void fusion_scan_text(CcFusionState *st, const JCCInstrWord *text,
+static void fusion_scan_text(CcFusionState *st, const CCCCInstrWord *text,
                               long long num_words) {
     DefState defs[NUM_REGS];
     for (int i = 0; i < NUM_REGS; i++)
@@ -551,7 +551,7 @@ static void fusion_scan_text(CcFusionState *st, const JCCInstrWord *text,
                 defs[i].pc = -1;
             }
             DefUseEntry info = defuse_table[op];
-            JCCInstrWord op_word = (size > 1) ? text[pc + 1] : 0;
+            CCCCInstrWord op_word = (size > 1) ? text[pc + 1] : 0;
             for (int i = 0; i < info.n_defs; i++) {
                 int r = fusion_extract_reg(op_word, info.def_pos[i]);
                 if (r >= 0 && r < NUM_REGS)
@@ -563,7 +563,7 @@ static void fusion_scan_text(CcFusionState *st, const JCCInstrWord *text,
 
         const DefUseEntry *info_p = &defuse_table[op];
         DefUseEntry info = *info_p;
-        JCCInstrWord op_word = (size > 1) ? text[pc + 1] : 0;
+        CCCCInstrWord op_word = (size > 1) ? text[pc + 1] : 0;
 
         // Phase 1: process uses -- detect adjacent def->use
         for (int i = 0; i < info.n_uses; i++) {
@@ -618,7 +618,7 @@ static void fusion_print_text(FILE *f, const CandidateList *list, int show) {
 }
 
 static void fusion_print_json(FILE *f, const CandidateList *list, int show) {
-    fprintf(f, "{\n  \"tool\": \"jcc-fusion-candidates\",\n");
+    fprintf(f, "{\n  \"tool\": \"cccc-fusion-candidates\",\n");
     fprintf(f, "  \"candidates\": [\n");
     for (int i = 0; i < show; i++) {
         const Candidate *c = &list->items[i];
@@ -637,14 +637,14 @@ static void fusion_print_json(FILE *f, const CandidateList *list, int show) {
 CcFusionState *cc_analyze_fusion_begin(const CcAnalyzeFusionOptions *opts) {
     CcFusionState *st = (CcFusionState *)calloc(1, sizeof(CcFusionState));
     if (!st) {
-        fprintf(stderr, "jcc: out of memory\n");
+        fprintf(stderr, "cccc: out of memory\n");
         exit(1);
     }
     st->opts = *opts;
     return st;
 }
 
-void cc_analyze_fusion_feed(CcFusionState *st, const JCCInstrWord *text,
+void cc_analyze_fusion_feed(CcFusionState *st, const CCCCInstrWord *text,
                             long long num_words, const char *label,
                             FILE *out) {
     (void)label;
@@ -659,7 +659,7 @@ void cc_analyze_fusion_finish(CcFusionState *st, FILE *out) {
     if (!st)
         return;
     if (st->files_loaded == 0) {
-        fprintf(stderr, "jcc: no input files loaded\n");
+        fprintf(stderr, "cccc: no input files loaded\n");
         free(st->list.items);
         free(st);
         return;

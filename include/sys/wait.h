@@ -1,10 +1,10 @@
-/* sys/wait.h - process wait declarations for JCC */
+/* sys/wait.h - process wait declarations for CCCC */
 
 #ifndef __SYS_WAIT_H
 #define __SYS_WAIT_H
 
 #ifdef _WIN32
-#error "<sys/wait.h> is only available on POSIX targets in JCC"
+#error "<sys/wait.h> is only available on POSIX targets in CCCC"
 #endif
 
 #include "unistd.h"

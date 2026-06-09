@@ -1,10 +1,10 @@
-/* sys/types.h - basic system types for JCC */
+/* sys/types.h - basic system types for CCCC */
 
 #ifndef __SYS_TYPES_H
 #define __SYS_TYPES_H
 
 #ifdef _WIN32
-#error "<sys/types.h> is only available on POSIX targets in JCC"
+#error "<sys/types.h> is only available on POSIX targets in CCCC"
 #endif
 
 #ifdef __APPLE__

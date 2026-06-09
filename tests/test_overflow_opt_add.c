@@ -1,4 +1,4 @@
-// EXPECT_RUNTIME_ERROR JCC_FLAGS: --overflow-checks --optimize=3
+// EXPECT_RUNTIME_ERROR CCCC_FLAGS: --overflow-checks --optimize=3
 // Checked arithmetic traps must survive constant folding.
 
 #include "limits.h"

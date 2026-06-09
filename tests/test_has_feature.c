@@ -1,4 +1,4 @@
-// JCC_FLAGS: --std=c23
+// CCCC_FLAGS: --std=c23
 int main(void) {
     int result = 0;
 
@@ -23,7 +23,7 @@ int main(void) {
 #if __has_feature(c_atomic) || __has_feature(c_thread_local)
     return 1;
 #endif
-#if __has_feature(unknown_jcc_feature_280)
+#if __has_feature(unknown_cccc_feature_280)
     return 2;
 #endif
 

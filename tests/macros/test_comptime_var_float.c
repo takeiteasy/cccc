@@ -1,14 +1,14 @@
 // Ticket #188: float comptime variable readable from a macro.
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 double scale = 2.5;
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *get_scale(void) {
     return $get_comptime_var("scale");
 }
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *check_scale(void) {
     double s = $get_comptime_float("scale");
     // scale * 4 == 10 — check via int cast to avoid float equality issues

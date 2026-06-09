@@ -1,5 +1,5 @@
-// JCC_FLAGS: -Wextra --std=c23
-// JCC_EXPECT_STDERR: warning: unannotated fallthrough between case labels
+// CCCC_FLAGS: -Wextra --std=c23
+// CCCC_EXPECT_STDERR: warning: unannotated fallthrough between case labels
 int test_fallthrough(int x) {
     int result = 0;
     switch (x) {

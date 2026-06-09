@@ -1,13 +1,13 @@
 // Ticket #287: compile-time macros can receive fixed parameters beyond 8.
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *ninth_arg($node_t *a0, $node_t *a1, $node_t *a2, $node_t *a3,
                    $node_t *a4, $node_t *a5, $node_t *a6, $node_t *a7,
                    $node_t *a8) {
     return a8;
 }
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *fixed9_plus_tail($node_t *a0, $node_t *a1, $node_t *a2,
                           $node_t *a3, $node_t *a4, $node_t *a5,
                           $node_t *a6, $node_t *a7, $node_t *a8, ...) {

@@ -6,7 +6,7 @@
 #include <string.h>
 #include_comptime <glob.h>
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 char *read_header_file(const char *path) {
     void *f = fopen(path, "rb");
     if (!f) return NULL;
@@ -21,11 +21,11 @@ char *read_header_file(const char *path) {
 }
 
 // Sanitize a header filename into a valid C identifier, e.g.
-// "sys/cdefs.h" -> "__jcc_std_sys_cdefs_h"
-[[jcc::comptime]]
+// "sys/cdefs.h" -> "__cccc_std_sys_cdefs_h"
+[[cccc::comptime]]
 char *make_global_name(const char *header) {
     char *buf = malloc(strlen(header) + 12);
-    memcpy(buf, "__jcc_std_", 10);
+    memcpy(buf, "__cccc_std_", 10);
     char *dst = buf + 10;
     for (const char *src = header; *src; src++, dst++)
         *dst = (*src == '.' || *src == '/') ? '_' : *src;
@@ -35,7 +35,7 @@ char *make_global_name(const char *header) {
 
 // reflection.h and tests.h are private headers. Keep embedding them,
 // but do not place them under include/ where user source can find them.
-[[jcc::comptime]]
+[[cccc::comptime]]
 const char *header_source_path(const char *header) {
     if (strcmp(header, "reflection.h") == 0)
         return "src/reflection.h";
@@ -46,7 +46,7 @@ const char *header_source_path(const char *header) {
     return path;
 }
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 char *copy_header_name(const char *path) {
     const char *prefix = "include/";
     int prefix_len = (int)strlen(prefix);
@@ -59,12 +59,12 @@ char *copy_header_name(const char *path) {
     return copy;
 }
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 int header_name_less(const char *a, const char *b) {
     return strcmp(a, b) < 0;
 }
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 void sort_headers(char **headers, int count) {
     for (int i = 0; i < count; i++) {
         for (int j = i + 1; j < count; j++) {
@@ -77,7 +77,7 @@ void sort_headers(char **headers, int count) {
     }
 }
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 char **discover_headers(void) {
     glob_t g;
     memset(&g, 0, sizeof(g));
@@ -106,8 +106,8 @@ char **discover_headers(void) {
     return headers;
 }
 
-// Build: if (strcmp(filename, header) == 0) return __jcc_std_XXX;
-[[jcc::comptime]]
+// Build: if (strcmp(filename, header) == 0) return __cccc_std_XXX;
+[[cccc::comptime]]
 $node_t *make_strcmp_return($obj_t *fn, $type_t *char_ptr_ty, const char *header) {
     char *gname = make_global_name(header);
     $node_t *args[2] = {
@@ -124,7 +124,7 @@ struct reg_entry { char *header; char *fn; };
 
 // Map header name to its stdlib registration function name.
 // Returns NULL for headers that don't need runtime registration.
-[[jcc::comptime]]
+[[cccc::comptime]]
 const char *reg_fn_for_header(const char *header) {
     static struct reg_entry *map = NULL;
     static int n = 0;
@@ -168,7 +168,7 @@ const char *reg_fn_for_header(const char *header) {
 }
 
 // Build: if (strcmp(header, name) == 0) return "register_XXX";
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *make_strcmp_return_fn_name($obj_t *fn, const char *header, const char *fn_name) {
     $node_t *args[2] = {
         $param_ref(fn, "header"),
@@ -179,7 +179,7 @@ $node_t *make_strcmp_return_fn_name($obj_t *fn, const char *header, const char *
     return $if(cond, $return($string_literal(fn_name)), NULL);
 }
 
-[[jcc::macro]]
+[[cccc::macro]]
 void generate_stdlib_reg_fn(void) {
     $forward_include("<string.h>");
 
@@ -242,7 +242,7 @@ void generate_stdlib_reg_fn(void) {
     $publish(fn);
 }
 
-[[jcc::macro]]
+[[cccc::macro]]
 void generate_std_header(void) {
     char **headers = discover_headers();
     if (!headers)
@@ -317,7 +317,7 @@ void generate_std_header(void) {
     $publish(fn);
 }
 
-[[jcc::macro]]
+[[cccc::macro]]
 void generate_stdlib_mark_headers(void) {
     $forward_include("<string.h>");
 

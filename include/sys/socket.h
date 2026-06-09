@@ -1,10 +1,10 @@
-/* sys/socket.h - socket declarations for JCC */
+/* sys/socket.h - socket declarations for CCCC */
 
 #ifndef __SYS_SOCKET_H
 #define __SYS_SOCKET_H
 
 #ifdef _WIN32
-#error "<sys/socket.h> is only available on POSIX targets in JCC"
+#error "<sys/socket.h> is only available on POSIX targets in CCCC"
 #endif
 
 #include "sys/types.h"

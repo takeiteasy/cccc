@@ -1,4 +1,4 @@
-// EXPECT_COMPILE_ERROR JCC_FLAGS: -Werror -Wreturn-type
+// EXPECT_COMPILE_ERROR CCCC_FLAGS: -Werror -Wreturn-type
 _Noreturn void test(void) {
     return;
 }

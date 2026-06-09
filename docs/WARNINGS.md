@@ -1,6 +1,6 @@
 # Warning Options
 
-JCC supports gcc/clang-style warning category controls for suppressible
+CCCC supports gcc/clang-style warning category controls for suppressible
 compiler diagnostics. Warnings are disabled by default; enable categories with
 `-W<name>`, `-Wall`, or `-Wextra`.
 
@@ -20,7 +20,7 @@ Options are processed left to right, so later flags override earlier flags.
 ## Pragma-Based Suppression
 
 Within source files, `#pragma GCC diagnostic` (also accepted as `#pragma clang
-diagnostic` or `#pragma JCC diagnostic`) controls warning state inline:
+diagnostic` or `#pragma CCCC diagnostic`) controls warning state inline:
 
 ```c
 #pragma GCC diagnostic push           // save current warning state
@@ -81,7 +81,7 @@ The warning infrastructure recognizes these category names:
 - `cpp`
 - `extra-tokens`
 - `large-file-embed`
-- `jcc-macro`
+- `cccc-macro`
 - `ignored-features`
 - `attributes`
 - `nodiscard`
@@ -104,7 +104,7 @@ system:
   an external `int`-returning placeholder until an explicit declaration or
   definition is parsed.
 - Invalid scalar returns and reachable ends of non-void functions use
-  `-Wreturn-type`. JCC inserts a correctly typed zero return where needed.
+  `-Wreturn-type`. CCCC inserts a correctly typed zero return where needed.
   Returning a value from a void function preserves the expression's side
   effects.
 - Unused named local variables, parameters, labels, internal-linkage
@@ -118,7 +118,7 @@ system:
 - `#warning` uses `-Wcpp`.
 - Extra preprocessor tokens use `-Wextra-tokens`.
 - Large `#embed` files use `-Wlarge-file-embed`.
-- `__jcc_macro_warning_at` uses `-Wjcc-macro`.
+- `__cccc_macro_warning_at` uses `-Wcccc-macro`.
 - Pre-standard use of supported language extensions uses `-Wpedantic`:
   `//` comments before C99, `long long` before C99, variable-length arrays
   before C99, compound literals before C99, designated initializers before
@@ -129,7 +129,7 @@ system:
 
 Implicit functions that remain unresolved are hard errors during code
 generation. Missing return values for struct and union functions are also hard
-errors because JCC cannot synthesize a safe aggregate value.
+errors because CCCC cannot synthesize a safe aggregate value.
 
 C23 digit separators remain hard errors before C23 rather than pedantic
 warnings.

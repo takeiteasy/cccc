@@ -1,11 +1,11 @@
 // stdio.h stdlib function registration
-#include "../jcc.h"
+#include "../cccc.h"
 #include <stdarg.h>
 
 // Standard stream getters (since we can't easily register global pointers)
-static FILE* __jcc_stdin(void) { return stdin; }
-static FILE* __jcc_stdout(void) { return stdout; }
-static FILE* __jcc_stderr(void) { return stderr; }
+static FILE* __cccc_stdin(void) { return stdin; }
+static FILE* __cccc_stdout(void) { return stdout; }
+static FILE* __cccc_stderr(void) { return stderr; }
 
 // Wrappers for functions returning int that can be negative (sign-extend into long long)
 static long long wrap_fgetc(long long stream)                        { return (long long)fgetc((FILE *)stream); }
@@ -56,11 +56,11 @@ static long long wrap_vfscanf(FILE *stream, const char *fmt, long long va_ptr) {
 }
 
 // Register all stdio.h functions
-void register_stdio_functions(JCC *vm) {
+void register_stdio_functions(CCCC *vm) {
     // Standard streams
-    cc_register_cfunc(vm, "__jcc_stdin", (void*)__jcc_stdin, 0, 0);
-    cc_register_cfunc(vm, "__jcc_stdout", (void*)__jcc_stdout, 0, 0);
-    cc_register_cfunc(vm, "__jcc_stderr", (void*)__jcc_stderr, 0, 0);
+    cc_register_cfunc(vm, "__cccc_stdin", (void*)__cccc_stdin, 0, 0);
+    cc_register_cfunc(vm, "__cccc_stdout", (void*)__cccc_stdout, 0, 0);
+    cc_register_cfunc(vm, "__cccc_stderr", (void*)__cccc_stderr, 0, 0);
 
     // Variadic printf/scanf family
     cc_register_variadic_cfunc(vm, "printf", (void*)printf, 1, 0);

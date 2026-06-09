@@ -1,5 +1,5 @@
-// JCC_FLAGS: -Wconversion
-// JCC_EXPECT_STDERR: \[-Wconversion\]
+// CCCC_FLAGS: -Wconversion
+// CCCC_EXPECT_STDERR: \[-Wconversion\]
 
 int narrow(int x) {
     char c = x;  // int -> char: narrowing

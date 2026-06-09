@@ -1,10 +1,10 @@
-/* fcntl.h - core POSIX file-control declarations for JCC */
+/* fcntl.h - core POSIX file-control declarations for CCCC */
 
 #ifndef __FCNTL_H
 #define __FCNTL_H
 
 #ifdef _WIN32
-#error "<fcntl.h> is only available on POSIX targets in JCC"
+#error "<fcntl.h> is only available on POSIX targets in CCCC"
 #endif
 
 #include "unistd.h"

@@ -1,5 +1,5 @@
 /*
- * Test summary for designated initializers support in JCC
+ * Test summary for designated initializers support in CCCC
  * 
  * FULLY WORKING:
  * - Array designated initializers: [index] = value

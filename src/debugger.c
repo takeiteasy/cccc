@@ -1,5 +1,5 @@
 /*
- JCC Debugger Implementation
+ CCCC Debugger Implementation
 
  Copyright (C) 2025 George Watson
 
@@ -9,12 +9,12 @@
  (at your option) any later version.
 */
 
-#include "jcc.h"
+#include "cccc.h"
 #include "./internal.h"
 
 #define STREQ_LIT(s, lit) (strncmp((s), (lit), sizeof(lit)) == 0)
 
-static int is_valid_vm_address(JCC *vm, void *addr) {
+static int is_valid_vm_address(CCCC *vm, void *addr) {
     long long ptr = (long long)addr;
     // Text segment
     if (ptr >= (long long)vm->text_seg &&
@@ -28,8 +28,8 @@ static int is_valid_vm_address(JCC *vm, void *addr) {
     return 0;
 }
 
-static Obj *debugger_current_function(JCC *vm) {
-    if (!vm || vm->pc == JCC_INVALID_PC)
+static Obj *debugger_current_function(CCCC *vm) {
+    if (!vm || vm->pc == CCCC_INVALID_PC)
         return NULL;
 
     long long pc_offset = vm->pc;
@@ -42,19 +42,19 @@ static Obj *debugger_current_function(JCC *vm) {
     return NULL;
 }
 
-static void *debugger_symbol_address(JCC *vm, DebugSymbol *sym) {
+static void *debugger_symbol_address(CCCC *vm, DebugSymbol *sym) {
     if (!sym)
         return NULL;
     if (sym->is_local) {
         long long offset = sym->offset;
-        if ((vm->flags & JCC_STACK_CANARIES) && offset < 0)
+        if ((vm->flags & CCCC_STACK_CANARIES) && offset < 0)
             offset -= 1;
         return (void *)(vm->bp + offset);
     }
     return (void *)(vm->data_seg + sym->offset);
 }
 
-static int debugger_resolve_watch_expr(JCC *vm, const char *expr, void **addr,
+static int debugger_resolve_watch_expr(CCCC *vm, const char *expr, void **addr,
                                        int *size) {
     long long raw_addr;
     if (sscanf(expr, "%llx", &raw_addr) == 1) {
@@ -72,20 +72,20 @@ static int debugger_resolve_watch_expr(JCC *vm, const char *expr, void **addr,
     return is_valid_vm_address(vm, *addr);
 }
 
-void debugger_init(JCC *vm) {
-    vm->flags |= JCC_ENABLE_DEBUGGER;  // Make sure it's enabled
+void debugger_init(CCCC *vm) {
+    vm->flags |= CCCC_ENABLE_DEBUGGER;  // Make sure it's enabled
     vm->dbg.num_breakpoints = 0;
     vm->dbg.num_watchpoints = 0;  // Initialize watchpoint counter
     vm->dbg.single_step = 0;
     vm->dbg.step_over = 0;
     vm->dbg.step_out = 0;
-    vm->dbg.step_over_return_addr = JCC_INVALID_PC;
+    vm->dbg.step_over_return_addr = CCCC_INVALID_PC;
     vm->dbg.step_out_bp = NULL;
     vm->dbg.debugger_attached = 0;
 
     // Initialize all breakpoints
     for (int i = 0; i < MAX_BREAKPOINTS; i++) {
-        vm->dbg.breakpoints[i].pc = JCC_INVALID_PC;
+        vm->dbg.breakpoints[i].pc = CCCC_INVALID_PC;
         vm->dbg.breakpoints[i].enabled = 0;
         vm->dbg.breakpoints[i].hit_count = 0;
         vm->dbg.breakpoints[i].condition = NULL;
@@ -103,7 +103,7 @@ void debugger_init(JCC *vm) {
     }
 }
 
-int cc_add_breakpoint(JCC *vm, JCCPc pc) {
+int cc_add_breakpoint(CCCC *vm, CCCCPc pc) {
     if (vm->dbg.num_breakpoints >= MAX_BREAKPOINTS) {
         printf("Error: Maximum number of breakpoints (%d) reached\n", MAX_BREAKPOINTS);
         return -1;
@@ -135,7 +135,7 @@ int cc_add_breakpoint(JCC *vm, JCCPc pc) {
     return -1;
 }
 
-void cc_remove_breakpoint(JCC *vm, int index) {
+void cc_remove_breakpoint(CCCC *vm, int index) {
     if (index < 0 || index >= MAX_BREAKPOINTS) {
         printf("Error: Invalid breakpoint index %d\n", index);
         return;
@@ -147,7 +147,7 @@ void cc_remove_breakpoint(JCC *vm, int index) {
     }
 
     vm->dbg.breakpoints[index].enabled = 0;
-    vm->dbg.breakpoints[index].pc = JCC_INVALID_PC;
+    vm->dbg.breakpoints[index].pc = CCCC_INVALID_PC;
     vm->dbg.breakpoints[index].hit_count = 0;
     if (vm->dbg.breakpoints[index].condition) {
         free(vm->dbg.breakpoints[index].condition);
@@ -158,9 +158,9 @@ void cc_remove_breakpoint(JCC *vm, int index) {
     printf("Breakpoint #%d removed\n", index);
 }
 
-static int debugger_eval_condition(JCC *vm, const char *condition_str);
+static int debugger_eval_condition(CCCC *vm, const char *condition_str);
 
-int debugger_check_breakpoint(JCC *vm) {
+int debugger_check_breakpoint(CCCC *vm) {
     // Safety check
     if (!vm) {
         return 0;
@@ -184,7 +184,7 @@ int debugger_check_breakpoint(JCC *vm) {
     return 0;
 }
 
-void debugger_list_breakpoints(JCC *vm) {
+void debugger_list_breakpoints(CCCC *vm) {
     if (vm->dbg.num_breakpoints == 0) {
         printf("No breakpoints set.\n");
         return;
@@ -211,13 +211,13 @@ void debugger_list_breakpoints(JCC *vm) {
     printf("\n");
 }
 
-void debugger_print_registers(JCC *vm) {
+void debugger_print_registers(CCCC *vm) {
     printf("\n=== Registers ===\n");
     printf("  A0 (return):  0x%016llx (%lld)\n", vm->regs[REG_A0], vm->regs[REG_A0]);
-    if (vm->fregs[FREG_A0].tag == JCC_FREG_F32) {
-        printf("  FA0 (f32):    %f\n", (double)jcc_freg_get_f32(vm, FREG_A0));
+    if (vm->fregs[FREG_A0].tag == CCCC_FREG_F32) {
+        printf("  FA0 (f32):    %f\n", (double)cccc_freg_get_f32(vm, FREG_A0));
     } else {
-        printf("  FA0 (f64):    %f\n", jcc_freg_get_f64(vm, FREG_A0));
+        printf("  FA0 (f64):    %f\n", cccc_freg_get_f64(vm, FREG_A0));
     }
     printf("  pc:           %u\n", vm->pc);
     printf("  bp:           %p\n", (void*)vm->bp);
@@ -229,7 +229,7 @@ void debugger_print_registers(JCC *vm) {
     printf("\n");
 }
 
-void debugger_print_stack(JCC *vm, int count) {
+void debugger_print_stack(CCCC *vm, int count) {
     printf("\n=== Stack (top %d entries) ===\n", count);
 
     long long *sp = vm->sp;
@@ -253,7 +253,7 @@ static const char* opcode_name(int op) {
 }
 
 // Returns the number of words consumed by the instruction (including opcode)
-static int disassemble_instruction(JCC *vm, JCCPc pc) {
+static int disassemble_instruction(CCCC *vm, CCCCPc pc) {
     if (pc > vm->text_ptr) return 0;
 
     int op = (int)vm->text_seg[pc];
@@ -265,27 +265,27 @@ static int disassemble_instruction(JCC *vm, JCCPc pc) {
     if (size <= 0)
         size = 1;
 
-    for (int i = 1; i < size && pc + (JCCPc)i <= vm->text_ptr; i++) {
-        printf(" %u", vm->text_seg[pc + (JCCPc)i]);
+    for (int i = 1; i < size && pc + (CCCCPc)i <= vm->text_ptr; i++) {
+        printf(" %u", vm->text_seg[pc + (CCCCPc)i]);
     }
     if (op == JMPT && pc + 3 <= vm->text_ptr) {
-        JCCPc table_pc = vm->text_seg[pc + 1];
-        JCCInstrWord count = vm->text_seg[pc + 2];
-        if (table_pc == pc + 4 && table_pc + (JCCPc)count <= vm->text_ptr + 1)
+        CCCCPc table_pc = vm->text_seg[pc + 1];
+        CCCCInstrWord count = vm->text_seg[pc + 2];
+        if (table_pc == pc + 4 && table_pc + (CCCCPc)count <= vm->text_ptr + 1)
             size += (int)count;
     }
     printf("\n");
     return size;
 }
 
-void cc_disassemble(JCC *vm) {
+void cc_disassemble(CCCC *vm) {
     if (!vm || !vm->text_seg) return;
 
     printf("=== Disassembly ===\n");
     // text_seg[0] is the entry point offset, not an instruction
     printf("Entry point: %u\n", vm->text_seg[0]);
 
-    JCCPc pc = 1;
+    CCCCPc pc = 1;
     while (pc <= vm->text_ptr) {
         int size = disassemble_instruction(vm, pc);
         if (size == 0) break;
@@ -294,8 +294,8 @@ void cc_disassemble(JCC *vm) {
     printf("===================\n");
 }
 
-void debugger_disassemble_current(JCC *vm) {
-    if (vm->pc == JCC_INVALID_PC || vm->pc > vm->text_ptr) {
+void debugger_disassemble_current(CCCC *vm) {
+    if (vm->pc == CCCC_INVALID_PC || vm->pc > vm->text_ptr) {
         printf("PC out of text segment range\n");
         return;
     }
@@ -333,7 +333,7 @@ static void print_help(void) {
     printf("\n");
 }
 
-static void debugger_print_source_location(JCC *vm) {
+static void debugger_print_source_location(CCCC *vm) {
     File *file = NULL;
     int line_no = 0;
     int col_no = 0;
@@ -372,14 +372,14 @@ static void debugger_print_source_location(JCC *vm) {
     }
 }
 
-void cc_debug_repl(JCC *vm) {
+void cc_debug_repl(CCCC *vm) {
     char line[256];
     char cmd[64];
 
     vm->dbg.debugger_attached = 1;
 
     printf("\n========================================\n");
-    printf("    JCC Debugger\n");
+    printf("    CCCC Debugger\n");
     printf("========================================\n");
     printf("Type 'help' or '?' for command list\n\n");
 
@@ -388,7 +388,7 @@ void cc_debug_repl(JCC *vm) {
     debugger_disassemble_current(vm);
 
     while (1) {
-        printf("(jcc-dbg) ");
+        printf("(cccc-dbg) ");
         fflush(stdout);
 
         if (!fgets(line, sizeof(line), stdin)) {
@@ -437,7 +437,7 @@ void cc_debug_repl(JCC *vm) {
                 // (op word + one operand word). Stop there after the call
                 // returns instead of stepping into the callee.
                 vm->dbg.step_over_return_addr =
-                    vm->pc + (JCCPc)cc_instr_words(op);
+                    vm->pc + (CCCCPc)cc_instr_words(op);
             } else {
                 // Not a call instruction: nothing to skip, just single-step.
                 vm->dbg.step_over = 0;
@@ -471,7 +471,7 @@ void cc_debug_repl(JCC *vm) {
         else if (STREQ_LIT(cmd, "break") || STREQ_LIT(cmd, "b")) {
             char arg[128];
             char *condition = NULL;
-            JCCPc bp_pc = JCC_INVALID_PC;
+            CCCCPc bp_pc = CCCC_INVALID_PC;
 
             // Try to parse arguments and extract condition if present
             // Format: break <location> [if <condition>]
@@ -507,7 +507,7 @@ void cc_debug_repl(JCC *vm) {
                     }
 
                     bp_pc = cc_find_pc_for_source(vm, target_file, line_num);
-                    if (bp_pc == JCC_INVALID_PC) {
+                    if (bp_pc == CCCC_INVALID_PC) {
                         printf("Error: Could not find code for %s:%d\n", filename, line_num);
                     }
                 }
@@ -520,15 +520,15 @@ void cc_debug_repl(JCC *vm) {
                         File *current_file = NULL;
                         cc_get_source_location(vm, vm->pc, &current_file, NULL, NULL);
                         bp_pc = cc_find_pc_for_source(vm, current_file, num);
-                        if (bp_pc == JCC_INVALID_PC) {
+                        if (bp_pc == CCCC_INVALID_PC) {
                             printf("Error: Could not find code for line %lld\n", num);
                         }
                     } else {
                         // Large number, treat as bytecode instruction index.
                         bp_pc = (num >= 0 && num <= vm->text_ptr)
-                                    ? (JCCPc)num
-                                    : JCC_INVALID_PC;
-                        if (bp_pc == JCC_INVALID_PC) {
+                                    ? (CCCCPc)num
+                                    : CCCC_INVALID_PC;
+                        if (bp_pc == CCCC_INVALID_PC) {
                             printf("Error: Offset %lld is out of range\n", num);
                         }
                     }
@@ -536,12 +536,12 @@ void cc_debug_repl(JCC *vm) {
                 // Otherwise treat as function name
                 else {
                     bp_pc = cc_find_function_entry(vm, arg);
-                    if (bp_pc == JCC_INVALID_PC) {
+                    if (bp_pc == CCCC_INVALID_PC) {
                         printf("Error: Function '%s' not found\n", arg);
                     }
                 }
 
-                if (bp_pc != JCC_INVALID_PC) {
+                if (bp_pc != CCCC_INVALID_PC) {
                     int bp_idx = cc_add_breakpoint(vm, bp_pc);
                     // Set condition if provided
                     if (bp_idx >= 0 && condition) {
@@ -681,7 +681,7 @@ void cc_debug_repl(JCC *vm) {
     vm->dbg.debugger_attached = 0;
 }
 
-int debugger_run(JCC *vm, int argc, char **argv) {
+int debugger_run(CCCC *vm, int argc, char **argv) {
     // Find main function
     Obj *main_fn = NULL;
     for (Obj *obj = vm->compiler.globals; obj; obj = obj->next) {
@@ -698,13 +698,13 @@ int debugger_run(JCC *vm, int argc, char **argv) {
     }
 
     printf("\n========================================\n");
-    printf("    JCC Debugger\n");
+    printf("    CCCC Debugger\n");
     printf("========================================\n");
     printf("Starting at entry point (PC: %u)\n", vm->pc);
     printf("Type 'help' for commands, 'c' to continue\n\n");
 
     // Set PC to main (code_addr is an offset from text_seg)
-    vm->pc = (JCCPc)main_fn->code_addr;
+    vm->pc = (CCCCPc)main_fn->code_addr;
 
     // Setup stack for main(argc, argv), matching cc_run().
     vm->stack_base = vm->stack_seg;
@@ -715,7 +715,7 @@ int debugger_run(JCC *vm, int argc, char **argv) {
     vm->initial_bp = vm->bp;
 
     // Setup shadow stack for CFI if enabled
-    if (vm->flags & JCC_CFI) {
+    if (vm->flags & CCCC_CFI) {
         vm->shadow_sp = (long long *)((char *)vm->shadow_stack +
                                       vm->poolsize * sizeof(long long));
     }
@@ -742,8 +742,8 @@ int debugger_run(JCC *vm, int argc, char **argv) {
 // Source Mapping Functions (for source-level debugging)
 // ============================================================================
 
-int cc_get_source_location(JCC *vm, JCCPc pc, File **out_file, int *out_line, int *out_col) {
-    if (!(vm->flags & JCC_ENABLE_DEBUGGER) || !vm->dbg.source_map || vm->dbg.source_map_count == 0) {
+int cc_get_source_location(CCCC *vm, CCCCPc pc, File **out_file, int *out_line, int *out_col) {
+    if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !vm->dbg.source_map || vm->dbg.source_map_count == 0) {
         return 0;
     }
 
@@ -783,9 +783,9 @@ int cc_get_source_location(JCC *vm, JCCPc pc, File **out_file, int *out_line, in
     return 1;
 }
 
-JCCPc cc_find_pc_for_source(JCC *vm, File *file, int line) {
-    if (!(vm->flags & JCC_ENABLE_DEBUGGER) || !vm->dbg.source_map || vm->dbg.source_map_count == 0) {
-        return JCC_INVALID_PC;
+CCCCPc cc_find_pc_for_source(CCCC *vm, File *file, int line) {
+    if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !vm->dbg.source_map || vm->dbg.source_map_count == 0) {
+        return CCCC_INVALID_PC;
     }
 
     // PLACEHOLDER: Linear search for the first matching source location.
@@ -793,17 +793,17 @@ JCCPc cc_find_pc_for_source(JCC *vm, File *file, int line) {
     for (int i = 0; i < vm->dbg.source_map_count; i++) {
         if (vm->dbg.source_map[i].line_no == line) {
             if (!file || vm->dbg.source_map[i].file == file) {
-                return (JCCPc)vm->dbg.source_map[i].pc_offset;
+                return (CCCCPc)vm->dbg.source_map[i].pc_offset;
             }
         }
     }
 
-    return JCC_INVALID_PC;
+    return CCCC_INVALID_PC;
 }
 
-JCCPc cc_find_function_entry(JCC *vm, const char *name) {
+CCCCPc cc_find_function_entry(CCCC *vm, const char *name) {
     if (!name) {
-        return JCC_INVALID_PC;
+        return CCCC_INVALID_PC;
     }
 
     // Search through global symbols for function
@@ -811,16 +811,16 @@ JCCPc cc_find_function_entry(JCC *vm, const char *name) {
         if (fn->is_function && fn->name && strlen(fn->name) == strlen(name) &&
             strncmp(fn->name, name, strlen(name)) == 0) {
             if (fn->code_addr >= 0) {
-                return (JCCPc)fn->code_addr;
+                return (CCCCPc)fn->code_addr;
             }
         }
     }
 
-    return JCC_INVALID_PC;
+    return CCCC_INVALID_PC;
 }
 
-DebugSymbol *cc_lookup_symbol(JCC *vm, const char *name) {
-    if (!(vm->flags & JCC_ENABLE_DEBUGGER) || !name) {
+DebugSymbol *cc_lookup_symbol(CCCC *vm, const char *name) {
+    if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !name) {
         return NULL;
     }
 
@@ -854,9 +854,9 @@ DebugSymbol *cc_lookup_symbol(JCC *vm, const char *name) {
 // Condition Evaluator for Conditional Breakpoints
 // ============================================================================
 
-static long long eval_ast_node(JCC *vm, Node *node, int *error);
+static long long eval_ast_node(CCCC *vm, Node *node, int *error);
 
-static int debugger_find_ffi_function(JCC *vm, const char *name) {
+static int debugger_find_ffi_function(CCCC *vm, const char *name) {
     if (!vm || !name)
         return -1;
 
@@ -967,7 +967,7 @@ static void debugger_write_scalar(void *addr, Type *ty, long long val) {
     }
 }
 
-static long long eval_ast_addr(JCC *vm, Node *node, int *error) {
+static long long eval_ast_addr(CCCC *vm, Node *node, int *error) {
     if (!node) {
         *error = 1;
         return 0;
@@ -982,7 +982,7 @@ static long long eval_ast_addr(JCC *vm, Node *node, int *error) {
         }
 
         if (node->var->is_function)
-            return cc_pc_to_byte_offset((JCCPc)node->var->code_addr);
+            return cc_pc_to_byte_offset((CCCCPc)node->var->code_addr);
 
         DebugSymbol *sym = cc_lookup_symbol(vm, node->var->name);
         if (sym)
@@ -1037,11 +1037,11 @@ static void debugger_write_bitfield(Node *node, void *addr, long long val) {
     debugger_write_scalar(addr, mem->ty, (long long)raw);
 }
 
-static long long debugger_eval_direct_call(JCC *vm, Node *node, int *error) {
+static long long debugger_eval_direct_call(CCCC *vm, Node *node, int *error) {
     // PLACEHOLDER: support full debugger condition call ABI including floats,
     // structs/unions, variadics, indirect calls, nested static links, and
     // stack-passed arguments.
-    // Ticket: https://todo.sr.ht/~takeiteasy/jcc/113
+    // Ticket: https://todo.sr.ht/~takeiteasy/cccc/113
     if (!node->func_ty || node->func_ty->is_variadic) {
         printf("Error: Variadic function calls in conditions are not supported\n");
         *error = 1;
@@ -1110,10 +1110,10 @@ static long long debugger_eval_direct_call(JCC *vm, Node *node, int *error) {
         }
 
         long long saved_regs[32];
-        JCCFReg saved_fregs[32];
+        CCCCFReg saved_fregs[32];
         memcpy(saved_regs, vm->regs, sizeof(saved_regs));
         memcpy(saved_fregs, vm->fregs, sizeof(saved_fregs));
-        JCCPc saved_pc = vm->pc;
+        CCCCPc saved_pc = vm->pc;
         long long *saved_bp = vm->bp;
         long long *saved_sp = vm->sp;
         long long *saved_shadow_sp = vm->shadow_sp;
@@ -1121,7 +1121,7 @@ static long long debugger_eval_direct_call(JCC *vm, Node *node, int *error) {
         int saved_single_step = vm->dbg.single_step;
         int saved_step_over = vm->dbg.step_over;
         int saved_step_out = vm->dbg.step_out;
-        JCCPc saved_step_over_return_addr = vm->dbg.step_over_return_addr;
+        CCCCPc saved_step_over_return_addr = vm->dbg.step_over_return_addr;
         long long *saved_step_out_bp = vm->dbg.step_out_bp;
         int saved_debugger_attached = vm->dbg.debugger_attached;
 
@@ -1130,15 +1130,15 @@ static long long debugger_eval_direct_call(JCC *vm, Node *node, int *error) {
         for (int i = 0; i < nargs && i < 8; i++)
             vm->regs[REG_A0 + i] = args[i];
 
-        vm->flags &= ~JCC_ENABLE_DEBUGGER;
+        vm->flags &= ~CCCC_ENABLE_DEBUGGER;
         vm->dbg.single_step = 0;
         vm->dbg.step_over = 0;
         vm->dbg.step_out = 0;
         vm->dbg.debugger_attached = 0;
-        if (vm->flags & JCC_CFI)
+        if (vm->flags & CCCC_CFI)
             *--vm->shadow_sp = 0;
         *--vm->sp = 0;
-        vm->pc = (JCCPc)fn->code_addr;
+        vm->pc = (CCCCPc)fn->code_addr;
         int rc = vm_eval(vm);
         long long result = vm->regs[REG_A0];
 
@@ -1170,7 +1170,7 @@ static long long debugger_eval_direct_call(JCC *vm, Node *node, int *error) {
 }
 
 // Evaluate an AST node in the current debugger context.
-static long long eval_ast_node(JCC *vm, Node *node, int *error) {
+static long long eval_ast_node(CCCC *vm, Node *node, int *error) {
     if (!node) {
         *error = 1;
         return 0;
@@ -1429,7 +1429,7 @@ static long long eval_ast_node(JCC *vm, Node *node, int *error) {
 
 // Evaluate a condition string and return true/false
 // Returns: 1 if condition is true, 0 if false or error
-static int debugger_eval_condition(JCC *vm, const char *condition_str) {
+static int debugger_eval_condition(CCCC *vm, const char *condition_str) {
     if (!condition_str || !*condition_str) {
         return 1;  // Empty condition is always true
     }
@@ -1492,7 +1492,7 @@ static int debugger_eval_condition(JCC *vm, const char *condition_str) {
 // Watchpoint Management Functions
 // ============================================================================
 
-int cc_add_watchpoint(JCC *vm, void *address, int size, int type, const char *expr) {
+int cc_add_watchpoint(CCCC *vm, void *address, int size, int type, const char *expr) {
     if (vm->dbg.num_watchpoints >= MAX_WATCHPOINTS) {
         printf("Error: Maximum number of watchpoints (%d) reached\n", MAX_WATCHPOINTS);
         return -1;
@@ -1538,7 +1538,7 @@ int cc_add_watchpoint(JCC *vm, void *address, int size, int type, const char *ex
     return -1;
 }
 
-void cc_remove_watchpoint(JCC *vm, int index) {
+void cc_remove_watchpoint(CCCC *vm, int index) {
     if (index < 0 || index >= MAX_WATCHPOINTS) {
         printf("Error: Invalid watchpoint index %d\n", index);
         return;
@@ -1562,9 +1562,9 @@ void cc_remove_watchpoint(JCC *vm, int index) {
 
 // Check if a memory access triggers any watchpoints
 // Returns: watchpoint index if triggered, -1 otherwise
-int debugger_check_watchpoint(JCC *vm, void *addr, int size, int access_type) {
+int debugger_check_watchpoint(CCCC *vm, void *addr, int size, int access_type) {
     // Safety checks
-    if (!vm || !(vm->flags & JCC_ENABLE_DEBUGGER) || vm->dbg.num_watchpoints == 0 || !addr) {
+    if (!vm || !(vm->flags & CCCC_ENABLE_DEBUGGER) || vm->dbg.num_watchpoints == 0 || !addr) {
         return -1;
     }
 
@@ -1574,7 +1574,7 @@ int debugger_check_watchpoint(JCC *vm, void *addr, int size, int access_type) {
     }
 
     // Don't check if VM isn't fully initialized (pc, bp, sp should be valid)
-    if (vm->pc == JCC_INVALID_PC || !vm->bp || !vm->sp || !vm->text_seg) {
+    if (vm->pc == CCCC_INVALID_PC || !vm->bp || !vm->sp || !vm->text_seg) {
         return -1;
     }
 

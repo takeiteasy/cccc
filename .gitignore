@@ -1,7 +1,7 @@
-jcc
-jcc.exe
-jcc-*
-libjcc*
+cccc
+cccc.exe
+cccc-*
+libcccc*
 *.dSYM
 *~
 *.bak

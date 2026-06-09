@@ -1,11 +1,11 @@
 /*
- * JCC stub for Apple's Availability.h
+ * CCCC stub for Apple's Availability.h
  * 
  * This header provides empty definitions for Apple's availability macros.
  * These macros are used in macOS/iOS SDK headers to mark API availability
  * but are not needed for actual compilation - they just add metadata.
  * 
- * Since JCC doesn't support the __attribute__((availability(...))) syntax,
+ * Since CCCC doesn't support the __attribute__((availability(...))) syntax,
  * we define all the macros as empty.
  */
 
@@ -13,8 +13,8 @@
 #define __AVAILABILITY__
 
 /*
- * __has_* feature testing macros are provided by JCC's preprocessor.  The
- * guarded fallbacks below are only for non-JCC preprocessing environments.
+ * __has_* feature testing macros are provided by CCCC's preprocessor.  The
+ * guarded fallbacks below are only for non-CCCC preprocessing environments.
  */
 #ifndef __has_feature
 #define __has_feature(x) 0
@@ -46,7 +46,7 @@
 #define __header_always_inline static inline
 #endif
 
-/* Strip __attribute__ specifications - JCC doesn't parse all attribute positions.
+/* Strip __attribute__ specifications - CCCC doesn't parse all attribute positions.
  * These are optimizer hints and not required for correct compilation. */
 #ifndef __attribute__
 #define __attribute__(x)

@@ -1,5 +1,5 @@
 // POSIX and dlfcn stdlib function registration
-#include "../jcc.h"
+#include "../cccc.h"
 
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <arpa/inet.h>
@@ -68,7 +68,7 @@ static long long wrap_freeaddrinfo(long long res) { freeaddrinfo((struct addrinf
 static long long wrap_globfree(long long pglob) { globfree((glob_t *)pglob); return 0; }
 static long long wrap_regfree(long long preg) { regfree((regex_t *)preg); return 0; }
 
-void register_posix_functions(JCC *vm) {
+void register_posix_functions(CCCC *vm) {
     cc_register_cfunc(vm, "read", (void*)wrap_read, 3, 0);
     cc_register_cfunc(vm, "write", (void*)wrap_write, 3, 0);
     cc_register_cfunc(vm, "close", (void*)wrap_close, 1, 0);
@@ -163,7 +163,7 @@ void register_posix_functions(JCC *vm) {
     cc_register_cfunc(vm, "globfree", (void*)wrap_globfree, 1, 0);
 }
 #else
-void register_posix_functions(JCC *vm) {
+void register_posix_functions(CCCC *vm) {
     (void)vm;
 }
 #endif

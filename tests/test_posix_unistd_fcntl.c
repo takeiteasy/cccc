@@ -2,7 +2,7 @@
 #include <unistd.h>
 
 int main(void) {
-    char path[] = "/tmp/jcc-posix-test-XXXXXX";
+    char path[] = "/tmp/cccc-posix-test-XXXXXX";
     int fd = open(path, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
     if (fd < 0) return 1;
 

@@ -1,4 +1,4 @@
-// JCC_FLAGS: --ffi-allow=strlen
+// CCCC_FLAGS: --ffi-allow=strlen
 #include <stdio.h>
 #include <string.h>
 

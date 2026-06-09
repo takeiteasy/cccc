@@ -1,4 +1,4 @@
-/* assert.h - assertion macro for JCC C compiler */
+/* assert.h - assertion macro for CCCC C compiler */
 
 #ifndef __ASSERT_H
 #define __ASSERT_H

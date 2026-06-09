@@ -1,13 +1,13 @@
-// Ticket #292: #pragma jcc comptime begin...end makes enclosed functions
-// implicitly [[jcc::comptime]] without requiring the attribute.
+// Ticket #292: #pragma cccc comptime begin...end makes enclosed functions
+// implicitly [[cccc::comptime]] without requiring the attribute.
 
-#pragma jcc comptime begin
+#pragma cccc comptime begin
 int double_it(int n) {
     return n * 2;
 }
-#pragma jcc end
+#pragma cccc end
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *make_doubled(void) {
     return $int_literal(double_it(21));
 }

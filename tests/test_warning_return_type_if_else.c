@@ -1,6 +1,6 @@
-// JCC_FLAGS: -Wreturn-type
-// JCC_EXPECT_STDERR: 1 warning generated.
-// JCC_REJECT_STDERR: 2 warnings generated.
+// CCCC_FLAGS: -Wreturn-type
+// CCCC_EXPECT_STDERR: 1 warning generated.
+// CCCC_REJECT_STDERR: 2 warnings generated.
 int complete(int value) {
     if (value)
         return 20;

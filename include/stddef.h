@@ -1,4 +1,4 @@
-/* stddef.h - standard definitions for JCC C compiler */
+/* stddef.h - standard definitions for CCCC C compiler */
 
 #ifndef __STDDEF_H
 #define __STDDEF_H

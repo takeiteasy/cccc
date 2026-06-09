@@ -1,6 +1,6 @@
-// JCC_FLAGS: -Wsign-conversion
-// JCC_EXPECT_STDERR: \[-Wsign-conversion\]
-// JCC_REJECT_STDERR: \[-Wconversion\]
+// CCCC_FLAGS: -Wsign-conversion
+// CCCC_EXPECT_STDERR: \[-Wsign-conversion\]
+// CCCC_REJECT_STDERR: \[-Wconversion\]
 
 // When only -Wsign-conversion is requested (not -Wconversion), only the
 // sign-conversion sub-category fires; integer narrowing stays quiet.

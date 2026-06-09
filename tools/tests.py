@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test runner for JCC.
+"""Test runner for CCCC.
 
 Runs all test_*.c files in tests/ directory and reports results.
 Supports parallel execution with -j/--jobs.
@@ -55,7 +55,7 @@ def vm_profile_path(profile_dir, test_name, mode):
     return Path(profile_dir) / f"{safe}.{mode}.json"
 
 
-def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_args,
+def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_args,
                     bench=False, jbc_mode=False, profile_dir=None):
     tests_dir = Path(script_dir) / "tests"
     test_name = str(test_file.relative_to(tests_dir))
@@ -76,24 +76,24 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
             if "EXPECT_RUNTIME_ERROR" in header:
                 expects_runtime_error = True
             for line in header_lines:
-                if "JCC_FLAGS:" in line:
-                    flags_str = line.split("JCC_FLAGS:", 1)[1].strip().rstrip("*/").strip()
+                if "CCCC_FLAGS:" in line:
+                    flags_str = line.split("CCCC_FLAGS:", 1)[1].strip().rstrip("*/").strip()
                     per_test_flags = flags_str.split()
                     if "--testing" in per_test_flags:
                         is_testing_mode = True
-                if "JCC_RUN_ARGS:" in line:
-                    args_str = line.split("JCC_RUN_ARGS:", 1)[1].strip().rstrip("*/").strip()
+                if "CCCC_RUN_ARGS:" in line:
+                    args_str = line.split("CCCC_RUN_ARGS:", 1)[1].strip().rstrip("*/").strip()
                     per_test_run_args = args_str.split()
-                if "JCC_EXPECT_STDERR:" in line:
-                    expect_stderr = line.split("JCC_EXPECT_STDERR:", 1)[1].strip().rstrip("*/").strip()
-                if "JCC_REJECT_STDERR:" in line:
-                    reject_stderr = line.split("JCC_REJECT_STDERR:", 1)[1].strip().rstrip("*/").strip()
+                if "CCCC_EXPECT_STDERR:" in line:
+                    expect_stderr = line.split("CCCC_EXPECT_STDERR:", 1)[1].strip().rstrip("*/").strip()
+                if "CCCC_REJECT_STDERR:" in line:
+                    reject_stderr = line.split("CCCC_REJECT_STDERR:", 1)[1].strip().rstrip("*/").strip()
     except Exception:
         pass
 
     if jbc_mode:
         return run_jbc_roundtrip(
-            idx, test_file, test_name, jcc, script_dir, jcc_args, per_test_flags,
+            idx, test_file, test_name, cccc, script_dir, cccc_args, per_test_flags,
             per_test_run_args, is_negative_test, expects_runtime_error, bench,
             profile_dir,
         )
@@ -105,7 +105,7 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
             profile_json = vm_profile_path(profile_dir, test_name, "source")
             profile_args = ["--vm-profile", "--json"] if profile_json else []
             normal_cmd = [
-                str(jcc), "-I./include", *jcc_args, *per_test_flags,
+                str(cccc), "-I./include", *cccc_args, *per_test_flags,
                 *profile_args, str(test_file), *run_args,
             ]
             normal_result = subprocess.run(
@@ -117,10 +117,10 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
                     "leaks",
                     "-atExit",
                     "--",
-                    str(jcc),
+                    str(cccc),
                     "-V",
                     "-I./include",
-                    *jcc_args,
+                    *cccc_args,
                     *per_test_flags,
                     *profile_args,
                     str(test_file),
@@ -152,10 +152,10 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
                 "--leak-check=full",
                 "--error-exitcode=1",
                 "--quiet",
-                str(jcc),
+                str(cccc),
                 "-V",
                 "-I./include",
-                *jcc_args,
+                *cccc_args,
                 *per_test_flags,
                 *profile_args,
                 str(test_file),
@@ -169,10 +169,10 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
                 "-batch",
                 "-quiet",
                 "--",
-                str(jcc),
+                str(cccc),
                 "-V",
                 "-I./include",
-                *jcc_args,
+                *cccc_args,
                 *per_test_flags,
                 *profile_args,
                 str(test_file),
@@ -182,14 +182,14 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
             profile_json = vm_profile_path(profile_dir, test_name, "source")
             profile_args = ["--vm-profile", "--json"] if profile_json else []
             cmd = [
-                str(jcc), "-I./include", *jcc_args, *per_test_flags,
+                str(cccc), "-I./include", *cccc_args, *per_test_flags,
                 *profile_args, str(test_file), *run_args,
             ]
     else:
         profile_json = vm_profile_path(profile_dir, test_name, "source")
         profile_args = ["--vm-profile", "--json"] if profile_json else []
         cmd = [
-            str(jcc), "-I./include", *jcc_args, *per_test_flags,
+            str(cccc), "-I./include", *cccc_args, *per_test_flags,
             *profile_args, str(test_file), *run_args,
         ]
 
@@ -278,7 +278,7 @@ def run_single_test(idx, test_file, jcc, script_dir, use_leaks, platform, jcc_ar
     }
 
 
-def run_jbc_roundtrip(idx, test_file, test_name, jcc, script_dir, jcc_args,
+def run_jbc_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
                       per_test_flags, per_test_run_args, is_negative_test,
                       expects_runtime_error, bench, profile_dir=None):
     """Compile a test to .jbc, then run it. Returns a result dict.
@@ -310,7 +310,7 @@ def run_jbc_roundtrip(idx, test_file, test_name, jcc, script_dir, jcc_args,
     with tempfile.TemporaryDirectory() as tmp:
         jbc_path = Path(tmp) / (test_file.stem + ".jbc")
         save_cmd = [
-            str(jcc), "-I./include", *jcc_args, *per_test_flags,
+            str(cccc), "-I./include", *cccc_args, *per_test_flags,
             "-c", "-o", str(jbc_path), str(test_file),
         ]
         save = subprocess.run(save_cmd, capture_output=True, text=True, cwd=script_dir)
@@ -331,7 +331,7 @@ def run_jbc_roundtrip(idx, test_file, test_name, jcc, script_dir, jcc_args,
         profile_json = vm_profile_path(profile_dir, test_name, "jbc")
         profile_args = ["--vm-profile", "--json"] if profile_json else []
         run_args = ["--", *per_test_run_args] if per_test_run_args else []
-        run_cmd = [str(jcc), *profile_args, str(jbc_path), *run_args]
+        run_cmd = [str(cccc), *profile_args, str(jbc_path), *run_args]
         start = time.perf_counter() if bench else None
         run = subprocess.run(run_cmd, capture_output=True, text=True, cwd=script_dir)
         elapsed = (time.perf_counter() - start) if bench else None
@@ -357,7 +357,7 @@ def run_jbc_roundtrip(idx, test_file, test_name, jcc, script_dir, jcc_args,
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Test runner for JCC")
+    parser = argparse.ArgumentParser(description="Test runner for CCCC")
     parser.add_argument(
         "--leaks", action="store_true", help="Enable memory leak detection"
     )
@@ -366,25 +366,25 @@ def main():
         "-j", "--jobs", type=int, default=8, help="Number of parallel jobs"
     )
     parser.add_argument(
-        "--asan", action="store_true", help="Use jcc-asan binary (AddressSanitizer + UBSan)"
+        "--asan", action="store_true", help="Use cccc-asan binary (AddressSanitizer + UBSan)"
     )
     parser.add_argument(
-        "--ubsan", action="store_true", help="Use jcc-ubsan binary (UndefinedBehaviorSanitizer)"
+        "--ubsan", action="store_true", help="Use cccc-ubsan binary (UndefinedBehaviorSanitizer)"
     )
     parser.add_argument(
-        "--tsan", action="store_true", help="Use jcc-tsan binary (ThreadSanitizer)"
+        "--tsan", action="store_true", help="Use cccc-tsan binary (ThreadSanitizer)"
     )
     parser.add_argument(
-        "--msan", action="store_true", help="Use jcc-msan binary (MemorySanitizer, Linux-only)"
+        "--msan", action="store_true", help="Use cccc-msan binary (MemorySanitizer, Linux-only)"
     )
     parser.add_argument(
-        "--binary", help="Path to jcc binary (overrides all other binary options)"
+        "--binary", help="Path to cccc binary (overrides all other binary options)"
     )
     parser.add_argument(
         "--bench", action="store_true", help="Report per-test execution time"
     )
     parser.add_argument(
-        "--profile-cpu", action="store_true", help="Run tests under gperftools CPU profiler (builds jcc-prof if needed)"
+        "--profile-cpu", action="store_true", help="Run tests under gperftools CPU profiler (builds cccc-prof if needed)"
     )
     parser.add_argument(
         "--profile-mem", action="store_true", help="Run tests with enhanced memory profiling (macOS: leaks+heap, Linux: valgrind)"
@@ -398,26 +398,26 @@ def main():
         help="Run the .jbc bytecode round-trip: compile each positive test to a .jbc, then run it. "
              "Negative tests and a small set of FFI tests that cannot survive rehydration are skipped."
     )
-    args, jcc_args = parser.parse_known_args()
+    args, cccc_args = parser.parse_known_args()
 
     script_dir = Path(__file__).parent.parent.resolve()
 
     if args.binary:
-        jcc = Path(args.binary)
+        cccc = Path(args.binary)
     elif args.asan:
-        jcc = script_dir / "jcc-asan"
+        cccc = script_dir / "cccc-asan"
     elif args.ubsan:
-        jcc = script_dir / "jcc-ubsan"
+        cccc = script_dir / "cccc-ubsan"
     elif args.tsan:
-        jcc = script_dir / "jcc-tsan"
+        cccc = script_dir / "cccc-tsan"
     elif args.msan:
-        jcc = script_dir / "jcc-msan"
+        cccc = script_dir / "cccc-msan"
     else:
-        jcc = script_dir / "jcc"
+        cccc = script_dir / "cccc"
     tests_dir = script_dir / "tests"
 
-    if not jcc.exists():
-        binary_name = jcc.name
+    if not cccc.exists():
+        binary_name = cccc.name
         print(f"Error: {binary_name} not found.")
         if args.binary or args.asan or args.ubsan or args.tsan or args.msan:
             print("Please build the requested target first (e.g., 'make asan').")
@@ -460,21 +460,21 @@ def main():
             print("Warning: --profile-cpu is not supported in --jbc mode and will be ignored.")
             args.profile_cpu = False
 
-    # CPU profiling: use jcc-prof if available/requested
+    # CPU profiling: use cccc-prof if available/requested
     if args.profile_cpu:
-        jcc_prof = script_dir / "jcc-prof"
-        if not jcc_prof.exists():
-            print("jcc-prof not found. Building it now...")
+        cccc_prof = script_dir / "cccc-prof"
+        if not cccc_prof.exists():
+            print("cccc-prof not found. Building it now...")
             build_result = subprocess.run(
                 ["make", "profile-cpu-build"], capture_output=True, text=True, cwd=script_dir
             )
-            if build_result.returncode != 0 or not jcc_prof.exists():
-                print("Error: failed to build jcc-prof. Run 'make profile-cpu-build' manually.")
+            if build_result.returncode != 0 or not cccc_prof.exists():
+                print("Error: failed to build cccc-prof. Run 'make profile-cpu-build' manually.")
                 sys.exit(1)
-        jcc = jcc_prof
-        print("CPU profiling enabled (using jcc-prof)")
+        cccc = cccc_prof
+        print("CPU profiling enabled (using cccc-prof)")
 
-    print(f"Running JCC tests using: {jcc.name}")
+    print(f"Running CCCC tests using: {cccc.name}")
     if use_leaks:
         leak_tools = {"macos": "leaks", "linux": "valgrind", "windows": "drmemory"}
         print(
@@ -499,7 +499,7 @@ def main():
 
     test_args = [
         (
-            i, test_file, jcc, str(script_dir), use_leaks, platform, jcc_args,
+            i, test_file, cccc, str(script_dir), use_leaks, platform, cccc_args,
             args.bench, args.jbc, str(profile_dir) if profile_dir else None,
         )
         for i, test_file in enumerate(test_files)

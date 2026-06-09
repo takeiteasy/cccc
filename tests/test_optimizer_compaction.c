@@ -1,4 +1,4 @@
-// JCC_FLAGS: --optimize=3
+// CCCC_FLAGS: --optimize=3
 
 int plus7(int x) {
     return x + 7;

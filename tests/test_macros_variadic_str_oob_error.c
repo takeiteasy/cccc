@@ -1,7 +1,7 @@
 // EXPECT_COMPILE_ERROR
 // Ticket #284: string vararg access is bounds checked.
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 void bad_str(...) {
     _AST_VARARG_STR_AT(_AST_VARARG_COUNT());
 }

@@ -1,5 +1,5 @@
-// JCC_FLAGS: -Wsign-compare -Wno-sign-compare
-// JCC_REJECT_STDERR: warning:
+// CCCC_FLAGS: -Wsign-compare -Wno-sign-compare
+// CCCC_REJECT_STDERR: warning:
 
 int main(void) {
     int x = -1;

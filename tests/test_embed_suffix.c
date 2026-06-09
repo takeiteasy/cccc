@@ -1,4 +1,4 @@
-// JCC_FLAGS: --std=c23
+// CCCC_FLAGS: --std=c23
 // Test #embed with suffix parameter
 int main() {
     // test_data.bin contains 3 bytes

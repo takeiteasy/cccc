@@ -1,6 +1,6 @@
-# JCC Fuzzing
+# CCCC Fuzzing
 
-Fuzzing harnesses and scripts for JCC using AFL++ and libFuzzer.
+Fuzzing harnesses and scripts for CCCC using AFL++ and libFuzzer.
 
 ## Quick Start
 
@@ -10,7 +10,7 @@ Fuzzing harnesses and scripts for JCC using AFL++ and libFuzzer.
 make afl
 ```
 
-This produces `jcc-afl` in the project root, compiled with `afl-clang-fast`.
+This produces `cccc-afl` in the project root, compiled with `afl-clang-fast`.
 
 ### 2. Seed the corpus
 
@@ -48,14 +48,14 @@ make fuzz-minimize   # minimize all crashes with afl-tmin
 cp tests/test_*.c fuzz/corpus/
 
 # Run AFL++ (single instance)
-afl-fuzz -i fuzz/corpus -o fuzz/out -m none -t 1000 -- ./jcc-afl -I./include -c @@
+afl-fuzz -i fuzz/corpus -o fuzz/out -m none -t 1000 -- ./cccc-afl -I./include -c @@
 
 # Run with ASan + AFL++ (slower but catches more bugs)
 make afl-asan
-afl-fuzz -i fuzz/corpus -o fuzz/out -m none -t 1000 -- ./jcc-afl-asan -I./include -c @@
+afl-fuzz -i fuzz/corpus -o fuzz/out -m none -t 1000 -- ./cccc-afl-asan -I./include -c @@
 
 # Resume a stopped session
-afl-fuzz -i - -o fuzz/out -m none -t 1000 -- ./jcc-afl -I./include -c @@
+afl-fuzz -i - -o fuzz/out -m none -t 1000 -- ./cccc-afl -I./include -c @@
 ```
 
 ## Corpus Tips

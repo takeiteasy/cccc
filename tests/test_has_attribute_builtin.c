@@ -36,10 +36,10 @@ int main(void) {
 #if __has_c_attribute(deprecated)
     result += 4;
 #endif
-#if __has_c_attribute(jcc::comptime)
+#if __has_c_attribute(cccc::comptime)
     result += 4;
 #endif
-#if __has_c_attribute(macro, jcc)
+#if __has_c_attribute(macro, cccc)
     result += 4;
 #endif
 #if __has_c_attribute(noreturn)

@@ -1,11 +1,11 @@
 // Ticket #292: variable declarations inside a comptime block are implicitly
-// [[jcc::comptime]] without requiring the attribute.
+// [[cccc::comptime]] without requiring the attribute.
 
-#pragma jcc comptime begin
+#pragma cccc comptime begin
 int answer = 42;
-#pragma jcc end
+#pragma cccc end
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *get_answer(void) {
     return $get_comptime_var("answer");
 }

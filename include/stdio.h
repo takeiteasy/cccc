@@ -1,5 +1,5 @@
 /*
- * stdio.h - Standard I/O functions for JCC VM
+ * stdio.h - Standard I/O functions for CCCC VM
  */
 
 #ifndef __STDIO_H
@@ -12,12 +12,12 @@
 typedef void FILE;
 
 // Standard streams (accessed via getter functions)
-extern FILE* __jcc_stdin(void);
-extern FILE* __jcc_stdout(void);
-extern FILE* __jcc_stderr(void);
-#define stdin __jcc_stdin()
-#define stdout __jcc_stdout()
-#define stderr __jcc_stderr()
+extern FILE* __cccc_stdin(void);
+extern FILE* __cccc_stdout(void);
+extern FILE* __cccc_stderr(void);
+#define stdin __cccc_stdin()
+#define stdout __cccc_stdout()
+#define stderr __cccc_stderr()
 
 /* Types and macros from the C standard */
 typedef long fpos_t;

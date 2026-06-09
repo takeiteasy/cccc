@@ -1,11 +1,11 @@
 /*
  * setjmp.h - Non-local Jumps
- * JCC C Compiler - Standard C Library Header
+ * CCCC C Compiler - Standard C Library Header
  *
- * Implements C11 setjmp/longjmp for the JCC VM.
+ * Implements C11 setjmp/longjmp for the CCCC VM.
  *
  * VM Context:
- * The JCC VM uses the following registers for execution state:
+ * The CCCC VM uses the following registers for execution state:
  * - pc (program counter): Points to the current instruction
  * - sp (stack pointer): Points to the top of the stack
  * - bp (base pointer): Points to the current stack frame

@@ -1,36 +1,36 @@
-// Test ticket #51: __jcc_ast_assign, __jcc_ast_member, __jcc_ast_funcall builders
+// Test ticket #51: __cccc_ast_assign, __cccc_ast_member, __cccc_ast_funcall builders
 
-// ---- __jcc_ast_assign test -----------------------------------------------
+// ---- __cccc_ast_assign test -----------------------------------------------
 // Macro that returns an assignment expression (target = value).
 // Used as: int x; int y = set_var(x, 99);
 // After expansion: int y = (x = 99);  => y == 99, x == 99
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *set_var($node_t *target, $node_t *value) {
-    $vm_t *vm = __jcc_get_vm();
-    return __jcc_ast_assign(vm, target, value);
+    $vm_t *vm = __cccc_get_vm();
+    return __cccc_ast_assign(vm, target, value);
 }
 
-// ---- __jcc_ast_member test -----------------------------------------------
+// ---- __cccc_ast_member test -----------------------------------------------
 // Macro that returns obj.field (struct member access).
 struct Point { int x; int y; };
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *get_x($node_t *pt) {
-    $vm_t *vm = __jcc_get_vm();
-    return __jcc_ast_member(vm, pt, "x");
+    $vm_t *vm = __cccc_get_vm();
+    return __cccc_ast_member(vm, pt, "x");
 }
 
-// ---- __jcc_ast_funcall test ----------------------------------------------
+// ---- __cccc_ast_funcall test ----------------------------------------------
 // Helper function called by the generated funcall node
 int triple(int n) { return n * 3; }
 
 // Macro that generates: triple(arg)
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *call_triple($node_t *arg) {
-    $vm_t *vm = __jcc_get_vm();
-    $node_t *callee = __jcc_ast_var_ref(vm, "triple");
+    $vm_t *vm = __cccc_get_vm();
+    $node_t *callee = __cccc_ast_var_ref(vm, "triple");
     $node_t *args[1] = { arg };
-    return __jcc_ast_funcall(vm, callee, args, 1);
+    return __cccc_ast_funcall(vm, callee, args, 1);
 }
 
 int main(void) {

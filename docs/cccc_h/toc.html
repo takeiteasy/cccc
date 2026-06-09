@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="ROBOTS" content="NOINDEX">
-<title>Documentation for jcc.h</title>
+<title>Documentation for cccc.h</title>
 <meta http-equiv="Content-Type" content="text/html; charset=utf8">
 
 	<meta name="generator" content="HeaderDoc">
@@ -21,7 +21,7 @@
 <tr>
 <td class="toc_leadspace"> </td>
 <td class="disclosure_triangle_td"> </td>
-<td class="toc_contents_text"><b><font size="+1">jcc.h</font></b></td>
+<td class="toc_contents_text"><b><font size="+1">cccc.h</font></b></td>
 </tr>
 <tr>
 <td></td>
@@ -59,10 +59,10 @@
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/func/cc_define" target="_top">cc_define</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/func/cc_destroy" target="_top">cc_destroy</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/func/cc_disassemble" target="_top">cc_disassemble</a></li>
-<li class="tocSubEntry"><a href="index.html#//apple_ref/c/func/cc_dlopen" target="_top">cc_dlopen(JCC *, const char *)</a></li>
-<li class="tocSubEntry"><a href="index.html#//apple_ref/c/func/cc_dlopen_DONTLINK_1" target="_top">cc_dlopen(JCC *, const char *)</a></li>
-<li class="tocSubEntry"><a href="index.html#//apple_ref/c/func/cc_dlsym" target="_top">cc_dlsym(JCC *, const char *, void *, int, int)</a></li>
-<li class="tocSubEntry"><a href="index.html#//apple_ref/c/func/cc_dlsym_DONTLINK_1" target="_top">cc_dlsym(JCC *, const char *, void *, int, int)</a></li>
+<li class="tocSubEntry"><a href="index.html#//apple_ref/c/func/cc_dlopen" target="_top">cc_dlopen(CCCC *, const char *)</a></li>
+<li class="tocSubEntry"><a href="index.html#//apple_ref/c/func/cc_dlopen_DONTLINK_1" target="_top">cc_dlopen(CCCC *, const char *)</a></li>
+<li class="tocSubEntry"><a href="index.html#//apple_ref/c/func/cc_dlsym" target="_top">cc_dlsym(CCCC *, const char *, void *, int, int)</a></li>
+<li class="tocSubEntry"><a href="index.html#//apple_ref/c/func/cc_dlsym_DONTLINK_1" target="_top">cc_dlsym(CCCC *, const char *, void *, int, int)</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/func/cc_execute_inline_macros" target="_top">cc_execute_inline_macros</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/func/cc_expand_macros" target="_top">cc_expand_macros</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/func/cc_ffi_allow" target="_top">cc_ffi_allow</a></li>
@@ -127,6 +127,10 @@
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/AllocRecord" target="_top">AllocRecord</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/Arena" target="_top">Arena</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/ArenaBlock" target="_top">ArenaBlock</a></li>
+<li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/CCCC_OP" target="_top">CCCC_OP</a></li>
+<li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/CCCCAsmCallback" target="_top">CCCCAsmCallback</a></li>
+<li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/CCCCFlags" target="_top">CCCCFlags</a></li>
+<li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/CCCCWarning" target="_top">CCCCWarning</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/CompileError" target="_top">CompileError</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/Compiler" target="_top">Compiler</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/CondIncl" target="_top">CondIncl</a></li>
@@ -140,10 +144,6 @@
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/HashEntry" target="_top">HashEntry</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/HashMap" target="_top">HashMap</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/Hideset" target="_top">Hideset</a></li>
-<li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/JCC_OP" target="_top">JCC_OP</a></li>
-<li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/JCCAsmCallback" target="_top">JCCAsmCallback</a></li>
-<li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/JCCFlags" target="_top">JCCFlags</a></li>
-<li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/JCCWarning" target="_top">JCCWarning</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/LabelEntry" target="_top">LabelEntry</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/MacroFn" target="_top">MacroFn</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/tdef/Member" target="_top">Member</a></li>
@@ -180,7 +180,7 @@
 <div toc="collapsible" class="collapsible">
 
 <ul class="tocSubEntryList">
-<!-- public --><li class="tocSubEntry"><a href="index.html#//apple_ref/c/tag/JCC" target="_top">JCC</a></li>
+<!-- public --><li class="tocSubEntry"><a href="index.html#//apple_ref/c/tag/CCCC" target="_top">CCCC</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/tag/Node" target="_top">Node</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/tag/Obj" target="_top">Obj</a></li>
 <li class="tocSubEntry"><a href="index.html#//apple_ref/c/tag/Type" target="_top">Type</a></li>

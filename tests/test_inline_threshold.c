@@ -1,4 +1,4 @@
-// JCC_FLAGS: -O2
+// CCCC_FLAGS: -O2
 // Functions above the inline limit (default 20) fall back to normal CALL.
 // This function has ~25 AST nodes, exceeding the default threshold.
 static inline int big_add(int a, int b, int c, int d) {

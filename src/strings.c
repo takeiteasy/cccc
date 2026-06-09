@@ -1,5 +1,5 @@
 /*
- JCC: JIT C Compiler
+ CCCC: Comprehensiev C Compensation Compiler
 
  Copyright (C) 2025 George Watson
 
@@ -19,7 +19,7 @@
  This file was original part of chibicc by Rui Ueyama (MIT) https://github.com/rui314/chibicc
 */
 
-#include "jcc.h"
+#include "cccc.h"
 #include "./internal.h"
 
 void strarray_push(StringArray *arr, char *s) {
@@ -38,7 +38,7 @@ void strarray_push(StringArray *arr, char *s) {
     arr->data[arr->len++] = s;
 }
 
-void arena_strarray_push(JCC *vm, StringArray *arr, char *s) {
+void arena_strarray_push(CCCC *vm, StringArray *arr, char *s) {
     if (!arr->data) {
         arr->data = arena_alloc(&vm->compiler.parser_arena, 8 * sizeof(char *));
         memset(arr->data, 0, 8 * sizeof(char *));
@@ -73,20 +73,20 @@ char *format(char *fmt, ...) {
     return buf;
 }
 
-char *arena_strdup(JCC *vm, const char *str) {
+char *arena_strdup(CCCC *vm, const char *str) {
     if (!str)
         return NULL;
     return arena_strndup(vm, str, strlen(str));
 }
 
-char *arena_strndup(JCC *vm, const char *str, int len) {
+char *arena_strndup(CCCC *vm, const char *str, int len) {
     char *buf = arena_alloc(&vm->compiler.parser_arena, len + 1);
     memcpy(buf, str, len);
     buf[len] = '\0';
     return buf;
 }
 
-char *arena_format(JCC *vm, char *fmt, ...) {
+char *arena_format(CCCC *vm, char *fmt, ...) {
     char *heap_buf;
     size_t buflen;
     FILE *out = open_memstream(&heap_buf, &buflen);

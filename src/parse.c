@@ -1,5 +1,5 @@
 /*
- JCC: JIT C Compiler
+ CCCC: Comprehensiev C Compensation Compiler
 
  Copyright (C) 2025 George Watson
 
@@ -39,7 +39,7 @@
 // parser.
 
 #include "./internal.h"
-#include "jcc.h"
+#include "cccc.h"
 #include <limits.h>
 
 #ifndef MAX
@@ -125,68 +125,68 @@ static Obj error_var_obj = {
 };
 static Obj *error_var = &error_var_obj;
 
-static bool is_typename(JCC *vm, Token *tok);
-static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr);
-static Type *typename(JCC *vm, Token **rest, Token *tok);
-static Type *enum_specifier(JCC *vm, Token **rest, Token *tok);
-static Type *typeof_specifier(JCC *vm, Token **rest, Token *tok);
-static Type *typeof_unqual_specifier(JCC *vm, Token **rest, Token *tok);
-static Type *type_suffix(JCC *vm, Token **rest, Token *tok, Type *ty);
-static Type *declarator(JCC *vm, Token **rest, Token *tok, Type *ty);
-static Token *attribute_list(JCC *vm, Token *tok, Type *ty, VarAttr *attr);
-static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty, VarAttr *attr);
+static bool is_typename(CCCC *vm, Token *tok);
+static Type *declspec(CCCC *vm, Token **rest, Token *tok, VarAttr *attr);
+static Type *typename(CCCC *vm, Token **rest, Token *tok);
+static Type *enum_specifier(CCCC *vm, Token **rest, Token *tok);
+static Type *typeof_specifier(CCCC *vm, Token **rest, Token *tok);
+static Type *typeof_unqual_specifier(CCCC *vm, Token **rest, Token *tok);
+static Type *type_suffix(CCCC *vm, Token **rest, Token *tok, Type *ty);
+static Type *declarator(CCCC *vm, Token **rest, Token *tok, Type *ty);
+static Token *attribute_list(CCCC *vm, Token *tok, Type *ty, VarAttr *attr);
+static Token *c23_attribute_list(CCCC *vm, Token *tok, Type *ty, VarAttr *attr);
 static void inherit_semantic_attrs(Type *dst, Type *src);
-static Type *apply_var_attrs_to_type(JCC *vm, Type *ty, VarAttr *attr);
-static Node *declaration(JCC *vm, Token **rest, Token *tok, Type *basety,
+static Type *apply_var_attrs_to_type(CCCC *vm, Type *ty, VarAttr *attr);
+static Node *declaration(CCCC *vm, Token **rest, Token *tok, Type *basety,
                          VarAttr *attr);
-static void array_initializer2(JCC *vm, Token **rest, Token *tok,
+static void array_initializer2(CCCC *vm, Token **rest, Token *tok,
                                Initializer *init, int i);
-static void struct_initializer2(JCC *vm, Token **rest, Token *tok,
+static void struct_initializer2(CCCC *vm, Token **rest, Token *tok,
                                 Initializer *init, Member *mem);
-static void initializer2(JCC *vm, Token **rest, Token *tok, Initializer *init);
-static Initializer *initializer(JCC *vm, Token **rest, Token *tok, Type *ty,
+static void initializer2(CCCC *vm, Token **rest, Token *tok, Initializer *init);
+static Initializer *initializer(CCCC *vm, Token **rest, Token *tok, Type *ty,
                                 Type **new_ty);
-static Node *lvar_initializer(JCC *vm, Token **rest, Token *tok, Obj *var);
-static void gvar_initializer(JCC *vm, Token **rest, Token *tok, Obj *var);
-static Node *create_vla_init(JCC *vm, Initializer *init, Type *ty, Obj *var,
+static Node *lvar_initializer(CCCC *vm, Token **rest, Token *tok, Obj *var);
+static void gvar_initializer(CCCC *vm, Token **rest, Token *tok, Obj *var);
+static Node *create_vla_init(CCCC *vm, Initializer *init, Type *ty, Obj *var,
                              Token *tok);
-static Node *compound_stmt(JCC *vm, Token **rest, Token *tok, Token **close_tok);
-static Node *stmt(JCC *vm, Token **rest, Token *tok);
-static Node *expr_stmt(JCC *vm, Token **rest, Token *tok);
-static Node *expr(JCC *vm, Token **rest, Token *tok);
-static int64_t eval(JCC *vm, Node *node);
-static int64_t eval2(JCC *vm, Node *node, char ***label);
-static int64_t eval_rval(JCC *vm, Node *node, char ***label);
-static bool is_const_expr(JCC *vm, Node *node);
-static Node *assign(JCC *vm, Token **rest, Token *tok);
-static Node *logor(JCC *vm, Token **rest, Token *tok);
-static double eval_double(JCC *vm, Node *node);
-static Node *conditional(JCC *vm, Token **rest, Token *tok);
-static Node *logand(JCC *vm, Token **rest, Token *tok);
-static Node *bitor(JCC *vm, Token **rest, Token *tok);
-static Node *bitxor(JCC *vm, Token **rest, Token *tok);
-static Node *bitand(JCC *vm, Token **rest, Token *tok);
-static Node *equality(JCC *vm, Token **rest, Token *tok);
-static Node *relational(JCC *vm, Token **rest, Token *tok);
-static Node *shift(JCC *vm, Token **rest, Token *tok);
-static Node *add(JCC *vm, Token **rest, Token *tok);
-static Node *new_add(JCC *vm, Node *lhs, Node *rhs, Token *tok);
-static Node *new_sub(JCC *vm, Node *lhs, Node *rhs, Token *tok);
-static Node *mul(JCC *vm, Token **rest, Token *tok);
-static Node *cast(JCC *vm, Token **rest, Token *tok);
+static Node *compound_stmt(CCCC *vm, Token **rest, Token *tok, Token **close_tok);
+static Node *stmt(CCCC *vm, Token **rest, Token *tok);
+static Node *expr_stmt(CCCC *vm, Token **rest, Token *tok);
+static Node *expr(CCCC *vm, Token **rest, Token *tok);
+static int64_t eval(CCCC *vm, Node *node);
+static int64_t eval2(CCCC *vm, Node *node, char ***label);
+static int64_t eval_rval(CCCC *vm, Node *node, char ***label);
+static bool is_const_expr(CCCC *vm, Node *node);
+static Node *assign(CCCC *vm, Token **rest, Token *tok);
+static Node *logor(CCCC *vm, Token **rest, Token *tok);
+static double eval_double(CCCC *vm, Node *node);
+static Node *conditional(CCCC *vm, Token **rest, Token *tok);
+static Node *logand(CCCC *vm, Token **rest, Token *tok);
+static Node *bitor(CCCC *vm, Token **rest, Token *tok);
+static Node *bitxor(CCCC *vm, Token **rest, Token *tok);
+static Node *bitand(CCCC *vm, Token **rest, Token *tok);
+static Node *equality(CCCC *vm, Token **rest, Token *tok);
+static Node *relational(CCCC *vm, Token **rest, Token *tok);
+static Node *shift(CCCC *vm, Token **rest, Token *tok);
+static Node *add(CCCC *vm, Token **rest, Token *tok);
+static Node *new_add(CCCC *vm, Node *lhs, Node *rhs, Token *tok);
+static Node *new_sub(CCCC *vm, Node *lhs, Node *rhs, Token *tok);
+static Node *mul(CCCC *vm, Token **rest, Token *tok);
+static Node *cast(CCCC *vm, Token **rest, Token *tok);
 static Member *get_struct_member(Type *ty, Token *tok);
-static Type *struct_decl(JCC *vm, Token **rest, Token *tok);
-static Type *union_decl(JCC *vm, Token **rest, Token *tok);
-static Node *postfix(JCC *vm, Token **rest, Token *tok);
-static Node *funcall(JCC *vm, Token **rest, Token *tok, Node *node);
-static Node *unary(JCC *vm, Token **rest, Token *tok);
-static Node *primary(JCC *vm, Token **rest, Token *tok);
-static Token *parse_typedef(JCC *vm, Token *tok, Type *basety);
+static Type *struct_decl(CCCC *vm, Token **rest, Token *tok);
+static Type *union_decl(CCCC *vm, Token **rest, Token *tok);
+static Node *postfix(CCCC *vm, Token **rest, Token *tok);
+static Node *funcall(CCCC *vm, Token **rest, Token *tok, Node *node);
+static Node *unary(CCCC *vm, Token **rest, Token *tok);
+static Node *primary(CCCC *vm, Token **rest, Token *tok);
+static Token *parse_typedef(CCCC *vm, Token *tok, Type *basety);
 static bool falls_through(Node *n);
-static void warn_switch_fallthrough(JCC *vm, Node *sw);
-static bool is_function(JCC *vm, Token *tok);
-static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr);
-static Token *global_variable(JCC *vm, Token *tok, Type *basety, VarAttr *attr);
+static void warn_switch_fallthrough(CCCC *vm, Node *sw);
+static bool is_function(CCCC *vm, Token *tok);
+static Token *function(CCCC *vm, Token *tok, Type *basety, VarAttr *attr);
+static Token *global_variable(CCCC *vm, Token *tok, Type *basety, VarAttr *attr);
 
 static int align_to(int n, int align) {
     return (int)(((long long)n + align - 1) / align * align);
@@ -196,7 +196,7 @@ static int align_down(int n, int align) {
     return align_to(n - align + 1, align);
 }
 
-static void enter_scope(JCC *vm) {
+static void enter_scope(CCCC *vm) {
     Scope *sc = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
     memset(sc, 0, sizeof(Scope));
     sc->next = vm->compiler.scope;
@@ -207,35 +207,35 @@ static char *obj_display_name(Obj *var) {
     return var->display_name ? var->display_name : var->name;
 }
 
-static void warn_deprecated_use(JCC *vm, Token *tok, char *name,
+static void warn_deprecated_use(CCCC *vm, Token *tok, char *name,
                                 char *message) {
     if (message)
-        warn_tok(vm, tok, JCC_WARN_DEPRECATED, "'%s' is deprecated: %s", name,
+        warn_tok(vm, tok, CCCC_WARN_DEPRECATED, "'%s' is deprecated: %s", name,
                  message);
     else
-        warn_tok(vm, tok, JCC_WARN_DEPRECATED, "'%s' is deprecated", name);
+        warn_tok(vm, tok, CCCC_WARN_DEPRECATED, "'%s' is deprecated", name);
 }
 
-static Type *type_after_deprecated_use(JCC *vm, Type *ty) {
+static Type *type_after_deprecated_use(CCCC *vm, Type *ty) {
     Type *copy = copy_type(vm, ty);
     copy->is_deprecated = false;
     copy->deprecated_msg = NULL;
     return copy;
 }
 
-static void warn_unused_scope(JCC *vm, Scope *sc) {
+static void warn_unused_scope(CCCC *vm, Scope *sc) {
     for (VarScopeNode *node = sc->vars; node; node = node->next) {
         Obj *var = node->var;
         if (!var || !var->is_local_symbol || !var->tok || var->is_used ||
             var->is_maybe_unused)
             continue;
-        warn_tok(vm, var->tok, JCC_WARN_UNUSED, "unused %s '%s'",
+        warn_tok(vm, var->tok, CCCC_WARN_UNUSED, "unused %s '%s'",
                  var->is_param ? "parameter" : "variable",
                  obj_display_name(var));
     }
 }
 
-static void leave_scope(JCC *vm) {
+static void leave_scope(CCCC *vm) {
     warn_unused_scope(vm, vm->compiler.scope);
     hashmap_deinit_borrowed(&vm->compiler.scope->var_map);
     hashmap_deinit_borrowed(&vm->compiler.scope->tag_map);
@@ -243,7 +243,7 @@ static void leave_scope(JCC *vm) {
 }
 
 // Find a variable by name.
-static VarScope *find_var(JCC *vm, Token *tok) {
+static VarScope *find_var(CCCC *vm, Token *tok) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
         if (sc->var_map.buckets) {
             VarScopeNode *node = hashmap_get2(&sc->var_map, tok->loc, tok->len);
@@ -260,7 +260,7 @@ static VarScope *find_var(JCC *vm, Token *tok) {
     return NULL;
 }
 
-static void warn_if_shadowing(JCC *vm, Token *tok) {
+static void warn_if_shadowing(CCCC *vm, Token *tok) {
     if (!tok || !vm->compiler.current_fn || !vm->compiler.scope)
         return;
 
@@ -277,7 +277,7 @@ static void warn_if_shadowing(JCC *vm, Token *tok) {
         if (!node)
             continue;
         if (node->var && !node->var->is_function)
-            warn_tok(vm, tok, JCC_WARN_SHADOW,
+            warn_tok(vm, tok, CCCC_WARN_SHADOW,
                      "declaration of '%.*s' shadows an outer variable",
                      tok->len, tok->loc);
         return;
@@ -285,7 +285,7 @@ static void warn_if_shadowing(JCC *vm, Token *tok) {
 }
 
 // Find a macro function by name
-static MacroFn *find_macro_fn(JCC *vm, Token *tok) {
+static MacroFn *find_macro_fn(CCCC *vm, Token *tok) {
     for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next) {
         if (pm->is_macro_entry && strlen(pm->name) == tok->len &&
             strncmp(pm->name, tok->loc, tok->len) == 0) {
@@ -295,7 +295,7 @@ static MacroFn *find_macro_fn(JCC *vm, Token *tok) {
     return NULL;
 }
 
-static Type *find_tag(JCC *vm, Token *tok) {
+static Type *find_tag(CCCC *vm, Token *tok) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
         if (sc->tag_map.buckets) {
             TagScopeNode *node = hashmap_get2(&sc->tag_map, tok->loc, tok->len);
@@ -312,7 +312,7 @@ static Type *find_tag(JCC *vm, Token *tok) {
     return NULL;
 }
 
-static Node *new_node(JCC *vm, NodeKind kind, Token *tok) {
+static Node *new_node(CCCC *vm, NodeKind kind, Token *tok) {
     Node *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     memset(node, 0, sizeof(Node));
     node->kind = kind;
@@ -320,7 +320,7 @@ static Node *new_node(JCC *vm, NodeKind kind, Token *tok) {
     return node;
 }
 
-static Node *new_binary(JCC *vm, NodeKind kind, Node *lhs, Node *rhs,
+static Node *new_binary(CCCC *vm, NodeKind kind, Node *lhs, Node *rhs,
                         Token *tok) {
     Node *node = new_node(vm, kind, tok);
     node->lhs = lhs;
@@ -328,34 +328,34 @@ static Node *new_binary(JCC *vm, NodeKind kind, Node *lhs, Node *rhs,
     return node;
 }
 
-static Node *new_unary(JCC *vm, NodeKind kind, Node *expr, Token *tok) {
+static Node *new_unary(CCCC *vm, NodeKind kind, Node *expr, Token *tok) {
     Node *node = new_node(vm, kind, tok);
     node->lhs = expr;
     return node;
 }
 
-static Node *new_num(JCC *vm, int64_t val, Token *tok) {
+static Node *new_num(CCCC *vm, int64_t val, Token *tok) {
     Node *node = new_node(vm, ND_NUM, tok);
     node->val = val;
     node->ty = ty_int;
     return node;
 }
 
-static Node *new_long(JCC *vm, int64_t val, Token *tok) {
+static Node *new_long(CCCC *vm, int64_t val, Token *tok) {
     Node *node = new_node(vm, ND_NUM, tok);
     node->val = val;
     node->ty = ty_long;
     return node;
 }
 
-static Node *new_ulong(JCC *vm, long val, Token *tok) {
+static Node *new_ulong(CCCC *vm, long val, Token *tok) {
     Node *node = new_node(vm, ND_NUM, tok);
     node->val = val;
     node->ty = ty_ulong;
     return node;
 }
 
-static Node *new_complex_node(JCC *vm, Node *real, Node *imag, Type *ty,
+static Node *new_complex_node(CCCC *vm, Node *real, Node *imag, Type *ty,
                               Token *tok) {
     Node *node = new_node(vm, ND_COMPLEX, tok);
     node->lhs = real;
@@ -364,19 +364,19 @@ static Node *new_complex_node(JCC *vm, Node *real, Node *imag, Type *ty,
     return node;
 }
 
-static Node *new_var_node(JCC *vm, Obj *var, Token *tok) {
+static Node *new_var_node(CCCC *vm, Obj *var, Token *tok) {
     Node *node = new_node(vm, ND_VAR, tok);
     node->var = var;
     return node;
 }
 
-static Node *new_vla_ptr(JCC *vm, Obj *var, Token *tok) {
+static Node *new_vla_ptr(CCCC *vm, Obj *var, Token *tok) {
     Node *node = new_node(vm, ND_VLA_PTR, tok);
     node->var = var;
     return node;
 }
 
-Node *new_cast(JCC *vm, Node *expr, Type *ty) {
+Node *new_cast(CCCC *vm, Node *expr, Type *ty) {
     add_type(vm, expr);
     Node *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     memset(node, 0, sizeof(Node));
@@ -387,7 +387,7 @@ Node *new_cast(JCC *vm, Node *expr, Type *ty) {
     return node;
 }
 
-static VarScope *push_scope(JCC *vm, char *name, int name_len) {
+static VarScope *push_scope(CCCC *vm, char *name, int name_len) {
     VarScopeNode *node =
         arena_alloc(&vm->compiler.parser_arena, sizeof(VarScopeNode));
     memset(node, 0, sizeof(VarScopeNode));
@@ -399,7 +399,7 @@ static VarScope *push_scope(JCC *vm, char *name, int name_len) {
     return (VarScope *)node;
 }
 
-static void record_type_name(JCC *vm, Type *ty, char *name, int name_len,
+static void record_type_name(CCCC *vm, Type *ty, char *name, int name_len,
                              bool is_tag) {
     if (!ty || !name || name_len <= 0)
         return;
@@ -416,7 +416,7 @@ static void record_type_name(JCC *vm, Type *ty, char *name, int name_len,
     vm->compiler.type_names = rec;
 }
 
-static Initializer *new_initializer(JCC *vm, Type *ty, bool is_flexible) {
+static Initializer *new_initializer(CCCC *vm, Type *ty, bool is_flexible) {
     Initializer *init =
         arena_alloc(&vm->compiler.parser_arena, sizeof(Initializer));
     memset(init, 0, sizeof(Initializer));
@@ -471,7 +471,7 @@ static Initializer *new_initializer(JCC *vm, Type *ty, bool is_flexible) {
     return init;
 }
 
-static Obj *new_var(JCC *vm, char *name, int name_len, Type *ty) {
+static Obj *new_var(CCCC *vm, char *name, int name_len, Type *ty) {
     Obj *var = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
     memset(var, 0, sizeof(Obj));
     var->name = name;
@@ -488,7 +488,7 @@ static Obj *new_var(JCC *vm, char *name, int name_len, Type *ty) {
     return var;
 }
 
-static Obj *new_lvar(JCC *vm, char *name, int name_len, Type *ty) {
+static Obj *new_lvar(CCCC *vm, char *name, int name_len, Type *ty) {
     warn_if_shadowing(vm, ty->name);
     Obj *var = new_var(vm, name, name_len, ty);
     var->is_local = true;
@@ -498,7 +498,7 @@ static Obj *new_lvar(JCC *vm, char *name, int name_len, Type *ty) {
     return var;
 }
 
-static Obj *new_gvar(JCC *vm, char *name, int name_len, Type *ty) {
+static Obj *new_gvar(CCCC *vm, char *name, int name_len, Type *ty) {
     Obj *var = new_var(vm, name, name_len, ty);
     var->next = vm->compiler.globals;
     var->is_static = true;
@@ -507,7 +507,7 @@ static Obj *new_gvar(JCC *vm, char *name, int name_len, Type *ty) {
     return var;
 }
 
-static Obj *new_implicit_function(JCC *vm, Token *tok) {
+static Obj *new_implicit_function(CCCC *vm, Token *tok) {
     Type *ty = func_type(vm, ty_int);
     ty->is_variadic = true;
 
@@ -524,22 +524,22 @@ static Obj *new_implicit_function(JCC *vm, Token *tok) {
     return fn;
 }
 
-static char *new_unique_name(JCC *vm) {
+static char *new_unique_name(CCCC *vm) {
     return arena_format(vm, ".L..%d", vm->compiler.unique_name_counter++);
 }
 
-static Obj *new_anon_gvar(JCC *vm, Type *ty) {
+static Obj *new_anon_gvar(CCCC *vm, Type *ty) {
     char *name = new_unique_name(vm);
     return new_gvar(vm, name, strlen(name), ty);
 }
 
-static Obj *new_string_literal(JCC *vm, char *p, Type *ty) {
+static Obj *new_string_literal(CCCC *vm, char *p, Type *ty) {
     Obj *var = new_anon_gvar(vm, ty);
     var->init_data = p;
     return var;
 }
 
-static char *get_ident(JCC *vm, Token *tok) {
+static char *get_ident(CCCC *vm, Token *tok) {
     if (tok->kind != TK_IDENT)
         error_tok(vm, tok, "expected an identifier, found '%.*s'", tok->len,
                   tok->loc);
@@ -550,7 +550,7 @@ static char *get_ident(JCC *vm, Token *tok) {
 }
 
 // Error recovery helper: Skip to end of statement (semicolon or closing brace)
-static Token *skip_to_stmt_end(JCC *vm, Token *tok) {
+static Token *skip_to_stmt_end(CCCC *vm, Token *tok) {
     int paren_depth = 0, brace_depth = 0;
 
     while (tok->kind != TK_EOF) {
@@ -578,7 +578,7 @@ static Token *skip_to_stmt_end(JCC *vm, Token *tok) {
 }
 
 // Error recovery helper: Skip to next declarator boundary
-static Token *skip_to_decl_boundary(JCC *vm, Token *tok) {
+static Token *skip_to_decl_boundary(CCCC *vm, Token *tok) {
     int paren_depth = 0;
 
     while (tok->kind != TK_EOF) {
@@ -601,7 +601,7 @@ static Token *skip_to_decl_boundary(JCC *vm, Token *tok) {
     return tok;
 }
 
-static Type *find_typedef(JCC *vm, Token *tok) {
+static Type *find_typedef(CCCC *vm, Token *tok) {
     if (tok->kind == TK_IDENT) {
         VarScope *sc = find_var(vm, tok);
         if (sc)
@@ -610,7 +610,7 @@ static Type *find_typedef(JCC *vm, Token *tok) {
     return NULL;
 }
 
-static void push_tag_scope(JCC *vm, Token *tok, Type *ty) {
+static void push_tag_scope(CCCC *vm, Token *tok, Type *ty) {
     TagScopeNode *node =
         arena_alloc(&vm->compiler.parser_arena, sizeof(TagScopeNode));
     node->name = tok->loc;
@@ -749,7 +749,7 @@ static DeclKw declspec_kw(Token *tok) {
 // while keeping the "current" type object that the typenames up
 // until that point represent. When we reach a non-typename token,
 // we returns the current type object.
-static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
+static Type *declspec(CCCC *vm, Token **rest, Token *tok, VarAttr *attr) {
     Token *start = tok;
 
     // We use a single integer as counters for all typenames.
@@ -799,14 +799,14 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
             else if (dk == DK_STATIC)    attr->is_static    = true;
             else if (dk == DK_EXTERN)    attr->is_extern    = true;
             else if (dk == DK_INLINE) {
-                if (vm->compiler.c_std < JCC_STD_C99)
+                if (vm->compiler.c_std < CCCC_STD_C99)
                     error_tok(vm, tok, "'inline' is not available before C99");
                 attr->is_inline = true;
             }
             else if (dk == DK_CONSTEXPR) attr->is_constexpr = true;
             else if (dk == DK_BLOCK_VAR) attr->is_block_var = true;
             else {
-                warn_tok(vm, tok, JCC_WARN_IGNORED_FEATURES,
+                warn_tok(vm, tok, CCCC_WARN_IGNORED_FEATURES,
                          "'%.*s' is parsed but ignored — "
                          "no thread-local storage is provided",
                          tok->len, tok->loc);
@@ -839,7 +839,7 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
             tok = tok->next;
             continue;
         case DK_ATOMIC:
-            warn_tok(vm, tok, JCC_WARN_IGNORED_FEATURES,
+            warn_tok(vm, tok, CCCC_WARN_IGNORED_FEATURES,
                      "'_Atomic' is parsed but non-atomic — "
                      "loads and stores are not atomic");
             tok = tok->next;
@@ -890,9 +890,9 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
         case DK_SHORT:     counter += SHORT;     break;
         case DK_INT:       counter += INT;       break;
         case DK_LONG:
-            if ((counter & LONG) && vm->compiler.c_std < JCC_STD_C99 &&
+            if ((counter & LONG) && vm->compiler.c_std < CCCC_STD_C99 &&
                 !vm->compiler.in_type_lookahead)
-                warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+                warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
                          "'long long' is a C99 extension");
             counter += LONG;
             break;
@@ -985,7 +985,7 @@ static Type *declspec(JCC *vm, Token **rest, Token *tok, VarAttr *attr) {
     }
 declspec_done:
     if (counter == 0 && !vm->compiler.in_type_lookahead)
-        warn_tok(vm, start, JCC_WARN_IMPLICIT_INT,
+        warn_tok(vm, start, CCCC_WARN_IMPLICIT_INT,
                  "type specifier missing, defaults to 'int'");
 
     if (attr && (attr->is_maybe_unused || attr->is_deprecated)) {
@@ -1016,7 +1016,7 @@ declspec_done:
 
 // func-params = ("void" | param ("," param)* ("," "...")?)? ")"
 // param       = declspec declarator
-static Type *func_params(JCC *vm, Token **rest, Token *tok, Type *ty) {
+static Type *func_params(CCCC *vm, Token **rest, Token *tok, Type *ty) {
     if (equal(tok, "void") && equal(tok->next, ")")) {
         *rest = tok->next->next;
         return func_type(vm, ty);
@@ -1068,7 +1068,7 @@ static Type *func_params(JCC *vm, Token **rest, Token *tok, Type *ty) {
 }
 
 // array-dimensions = ("static" | "restrict" | "const" | "volatile" | "_Atomic")* const-expr? "]" type-suffix
-static Type *array_dimensions(JCC *vm, Token **rest, Token *tok, Type *ty) {
+static Type *array_dimensions(CCCC *vm, Token **rest, Token *tok, Type *ty) {
     while (equal(tok, "static") || equal(tok, "restrict") ||
            equal(tok, "const")  || equal(tok, "volatile") || equal(tok, "_Atomic"))
         tok = tok->next;
@@ -1084,8 +1084,8 @@ static Type *array_dimensions(JCC *vm, Token **rest, Token *tok, Type *ty) {
     ty = type_suffix(vm, rest, tok, ty);
 
     if (ty->kind == TY_VLA || !is_const_expr(vm, expr)) {
-        if (vm->compiler.c_std < JCC_STD_C99)
-            warn_tok(vm, expr_tok, JCC_WARN_PEDANTIC,
+        if (vm->compiler.c_std < CCCC_STD_C99)
+            warn_tok(vm, expr_tok, CCCC_WARN_PEDANTIC,
                      "variable-length arrays are a C99 extension");
         return vla_of(vm, ty, expr);
     }
@@ -1095,7 +1095,7 @@ static Type *array_dimensions(JCC *vm, Token **rest, Token *tok, Type *ty) {
 // type-suffix = "(" func-params
 //             | "[" array-dimensions
 //             | ε
-static Type *type_suffix(JCC *vm, Token **rest, Token *tok, Type *ty) {
+static Type *type_suffix(CCCC *vm, Token **rest, Token *tok, Type *ty) {
     if (equal(tok, "("))
         return func_params(vm, rest, tok->next, ty);
 
@@ -1107,7 +1107,7 @@ static Type *type_suffix(JCC *vm, Token **rest, Token *tok, Type *ty) {
 }
 
 // pointers = ("*" ("const" | "volatile" | "restrict")*)*
-static Type *pointers(JCC *vm, Token **rest, Token *tok, Type *ty) {
+static Type *pointers(CCCC *vm, Token **rest, Token *tok, Type *ty) {
     while (consume(vm, &tok, tok, "*")) {
         ty = pointer_to(vm, ty);
         // Handle const/volatile qualification on the pointer itself
@@ -1132,7 +1132,7 @@ static Type *pointers(JCC *vm, Token **rest, Token *tok, Type *ty) {
 
 // declarator = attribute? pointers ("(" ident ")" | "(" declarator ")" | ident)
 // type-suffix attribute?
-static Type *declarator(JCC *vm, Token **rest, Token *tok, Type *ty) {
+static Type *declarator(CCCC *vm, Token **rest, Token *tok, Type *ty) {
     // Handle __attribute__ before declarator
     VarAttr prefix_attr = {};
     tok = attribute_list(vm, tok, NULL, &prefix_attr);
@@ -1216,7 +1216,7 @@ static Type *declarator(JCC *vm, Token **rest, Token *tok, Type *ty) {
 
 // abstract-declarator = attribute? pointers ("(" abstract-declarator ")")?
 // type-suffix attribute?
-static Type *abstract_declarator(JCC *vm, Token **rest, Token *tok, Type *ty) {
+static Type *abstract_declarator(CCCC *vm, Token **rest, Token *tok, Type *ty) {
     // Handle __attribute__ before abstract declarator
     VarAttr prefix_attr = {};
     tok = attribute_list(vm, tok, NULL, &prefix_attr);
@@ -1250,7 +1250,7 @@ static Type *abstract_declarator(JCC *vm, Token **rest, Token *tok, Type *ty) {
 }
 
 // type-name = declspec abstract-declarator
-static Type *typename(JCC *vm, Token **rest, Token *tok) {
+static Type *typename(CCCC *vm, Token **rest, Token *tok) {
     Type *ty = declspec(vm, &tok, tok, NULL);
     return abstract_declarator(vm, rest, tok, ty);
 }
@@ -1277,7 +1277,7 @@ static bool consume_end(Token **rest, Token *tok) {
 //                | ident ("{" enum-list? "}")?
 //
 // enum-list      = ident ("=" num)? ("," ident ("=" num)?)* ","?
-static Type *enum_specifier(JCC *vm, Token **rest, Token *tok) {
+static Type *enum_specifier(CCCC *vm, Token **rest, Token *tok) {
     Type *ty = enum_type(vm);
 
     // Read a struct tag.
@@ -1351,7 +1351,7 @@ static Type *enum_specifier(JCC *vm, Token **rest, Token *tok) {
 }
 
 // typeof-specifier = "(" (expr | typename) ")"
-static Type *typeof_specifier(JCC *vm, Token **rest, Token *tok) {
+static Type *typeof_specifier(CCCC *vm, Token **rest, Token *tok) {
     tok = skip(vm, tok, "(");
 
     Type *ty;
@@ -1367,7 +1367,7 @@ static Type *typeof_specifier(JCC *vm, Token **rest, Token *tok) {
 }
 
 // typeof_unqual - C23 version of typeof that removes qualifiers
-static Type *typeof_unqual_specifier(JCC *vm, Token **rest, Token *tok) {
+static Type *typeof_unqual_specifier(CCCC *vm, Token **rest, Token *tok) {
     Type *ty = typeof_specifier(vm, rest, tok);
     // Copy the type to avoid mutating the original
     ty = copy_type(vm, ty);
@@ -1381,7 +1381,7 @@ static Type *typeof_unqual_specifier(JCC *vm, Token **rest, Token *tok) {
 static int get_vm_size(Type *ty) { return ty->size; }
 
 // Generate code for computing a VLA size.
-static Node *compute_vla_size(JCC *vm, Type *ty, Token *tok) {
+static Node *compute_vla_size(CCCC *vm, Type *ty, Token *tok) {
     Node *node = new_node(vm, ND_NULL_EXPR, tok);
     if (ty->base)
         node = new_binary(vm, ND_COMMA, node,
@@ -1404,7 +1404,7 @@ static Node *compute_vla_size(JCC *vm, Type *ty, Token *tok) {
     return new_binary(vm, ND_COMMA, node, expr, tok);
 }
 
-static Node *new_alloca(JCC *vm, Node *sz) {
+static Node *new_alloca(CCCC *vm, Node *sz) {
     Node *node = new_unary(
         vm, ND_FUNCALL, new_var_node(vm, vm->compiler.builtin_alloca, sz->tok),
         sz->tok);
@@ -1417,7 +1417,7 @@ static Node *new_alloca(JCC *vm, Node *sz) {
 
 // declaration = declspec (declarator ("=" expr)? ("," declarator ("="
 // expr)?)*)? ";"
-static Node *declaration(JCC *vm, Token **rest, Token *tok, Type *basety,
+static Node *declaration(CCCC *vm, Token **rest, Token *tok, Type *basety,
                          VarAttr *attr) {
     Node head = {};
     Node *cur = &head;
@@ -1552,7 +1552,7 @@ static Node *declaration(JCC *vm, Token **rest, Token *tok, Type *basety,
     return node;
 }
 
-static Token *skip_excess_element(JCC *vm, Token *tok) {
+static Token *skip_excess_element(CCCC *vm, Token *tok) {
     if (equal(tok, "{")) {
         tok = skip_excess_element(vm, tok->next);
         return skip(vm, tok, "}");
@@ -1563,7 +1563,7 @@ static Token *skip_excess_element(JCC *vm, Token *tok) {
 }
 
 // string-initializer = string-literal
-static void string_initializer(JCC *vm, Token **rest, Token *tok,
+static void string_initializer(CCCC *vm, Token **rest, Token *tok,
                                Initializer *init) {
     if (init->is_flexible)
         *init = *new_initializer(
@@ -1622,7 +1622,7 @@ static void string_initializer(JCC *vm, Token **rest, Token *tok,
 //   struct { int a, b, c; } x = { .c=5 };
 //
 // The above initializer sets x.c to 5.
-static void array_designator(JCC *vm, Token **rest, Token *tok, Type *ty,
+static void array_designator(CCCC *vm, Token **rest, Token *tok, Type *ty,
                              int *begin, int *end) {
     *begin = const_expr(vm, &tok, tok->next);
     if (*begin >= ty->array_len)
@@ -1643,7 +1643,7 @@ static void array_designator(JCC *vm, Token **rest, Token *tok, Type *ty,
 }
 
 // struct-designator = "." ident
-static Member *struct_designator(JCC *vm, Token **rest, Token *tok, Type *ty) {
+static Member *struct_designator(CCCC *vm, Token **rest, Token *tok, Type *ty) {
     Token *start = tok;
     tok = skip(vm, tok, ".");
     if (tok->kind != TK_IDENT)
@@ -1672,10 +1672,10 @@ static Member *struct_designator(JCC *vm, Token **rest, Token *tok, Type *ty) {
 }
 
 // designation = ("[" const-expr "]" | "." ident)* "="? initializer
-static void designation(JCC *vm, Token **rest, Token *tok, Initializer *init) {
+static void designation(CCCC *vm, Token **rest, Token *tok, Initializer *init) {
     if (equal(tok, "[")) {
-        if (vm->compiler.c_std < JCC_STD_C99)
-            warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+        if (vm->compiler.c_std < CCCC_STD_C99)
+            warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
                      "designated initializers are a C99 extension");
         if (init->ty->kind != TY_ARRAY)
             error_tok(vm, tok, "array index in non-array initializer");
@@ -1691,8 +1691,8 @@ static void designation(JCC *vm, Token **rest, Token *tok, Initializer *init) {
     }
 
     if (equal(tok, ".") && init->ty->kind == TY_STRUCT) {
-        if (vm->compiler.c_std < JCC_STD_C99)
-            warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+        if (vm->compiler.c_std < CCCC_STD_C99)
+            warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
                      "designated initializers are a C99 extension");
         Member *mem = struct_designator(vm, &tok, tok, init->ty);
         designation(vm, &tok, tok, init->children[mem->idx]);
@@ -1710,8 +1710,8 @@ static void designation(JCC *vm, Token **rest, Token *tok, Initializer *init) {
     }
 
     if (equal(tok, ".") && init->ty->kind == TY_UNION) {
-        if (vm->compiler.c_std < JCC_STD_C99)
-            warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+        if (vm->compiler.c_std < CCCC_STD_C99)
+            warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
                      "designated initializers are a C99 extension");
         Member *mem = struct_designator(vm, &tok, tok, init->ty);
         init->mem = mem;
@@ -1730,7 +1730,7 @@ static void designation(JCC *vm, Token **rest, Token *tok, Initializer *init) {
 // An array length can be omitted if an array has an initializer
 // (e.g. `int x[] = {1,2,3}`). If it's omitted, count the number
 // of initializer elements.
-static int count_array_init_elements(JCC *vm, Token *tok, Type *ty) {
+static int count_array_init_elements(CCCC *vm, Token *tok, Type *ty) {
     bool first = true;
     Initializer *dummy = new_initializer(vm, ty->base, true);
 
@@ -1758,7 +1758,7 @@ static int count_array_init_elements(JCC *vm, Token *tok, Type *ty) {
 }
 
 // array-initializer1 = "{" initializer ("," initializer)* ","? "}"
-static void array_initializer1(JCC *vm, Token **rest, Token *tok,
+static void array_initializer1(CCCC *vm, Token **rest, Token *tok,
                                Initializer *init) {
     tok = skip(vm, tok, "{");
 
@@ -1788,8 +1788,8 @@ static void array_initializer1(JCC *vm, Token **rest, Token *tok,
         first = false;
 
         if (equal(tok, "[")) {
-            if (vm->compiler.c_std < JCC_STD_C99)
-                warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+            if (vm->compiler.c_std < CCCC_STD_C99)
+                warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
                          "designated initializers are a C99 extension");
             int begin, end;
             array_designator(vm, &tok, tok, init->ty, &begin, &end);
@@ -1819,7 +1819,7 @@ static void array_initializer1(JCC *vm, Token **rest, Token *tok,
 }
 
 // array-initializer2 = initializer ("," initializer)*
-static void array_initializer2(JCC *vm, Token **rest, Token *tok,
+static void array_initializer2(CCCC *vm, Token **rest, Token *tok,
                                Initializer *init, int i) {
     if (init->is_flexible) {
         int len = count_array_init_elements(vm, tok, init->ty);
@@ -1857,7 +1857,7 @@ static void array_initializer2(JCC *vm, Token **rest, Token *tok,
 }
 
 // struct-initializer1 = "{" initializer ("," initializer)* ","? "}"
-static void struct_initializer1(JCC *vm, Token **rest, Token *tok,
+static void struct_initializer1(CCCC *vm, Token **rest, Token *tok,
                                 Initializer *init) {
     tok = skip(vm, tok, "{");
 
@@ -1870,8 +1870,8 @@ static void struct_initializer1(JCC *vm, Token **rest, Token *tok,
         first = false;
 
         if (equal(tok, ".")) {
-            if (vm->compiler.c_std < JCC_STD_C99)
-                warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+            if (vm->compiler.c_std < CCCC_STD_C99)
+                warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
                          "designated initializers are a C99 extension");
             mem = struct_designator(vm, &tok, tok, init->ty);
             designation(vm, &tok, tok, init->children[mem->idx]);
@@ -1889,7 +1889,7 @@ static void struct_initializer1(JCC *vm, Token **rest, Token *tok,
 }
 
 // struct-initializer2 = initializer ("," initializer)*
-static void struct_initializer2(JCC *vm, Token **rest, Token *tok,
+static void struct_initializer2(CCCC *vm, Token **rest, Token *tok,
                                 Initializer *init, Member *mem) {
     bool first = true;
 
@@ -1910,7 +1910,7 @@ static void struct_initializer2(JCC *vm, Token **rest, Token *tok,
     *rest = tok;
 }
 
-static void union_initializer(JCC *vm, Token **rest, Token *tok,
+static void union_initializer(CCCC *vm, Token **rest, Token *tok,
                               Initializer *init) {
     // Unlike structs, union initializers take only one initializer,
     // and that initializes the first union member by default.
@@ -1937,7 +1937,7 @@ static void union_initializer(JCC *vm, Token **rest, Token *tok,
 // initializer = string-initializer | array-initializer
 //             | struct-initializer | union-initializer
 //             | assign
-static void initializer2(JCC *vm, Token **rest, Token *tok, Initializer *init) {
+static void initializer2(CCCC *vm, Token **rest, Token *tok, Initializer *init) {
     if (init->ty->kind == TY_ARRAY && tok->kind == TK_STR) {
         string_initializer(vm, rest, tok, init);
         return;
@@ -2012,7 +2012,7 @@ static void initializer2(JCC *vm, Token **rest, Token *tok, Initializer *init) {
     init->expr = assign(vm, rest, tok);
 }
 
-static Type *copy_struct_type(JCC *vm, Type *ty) {
+static Type *copy_struct_type(CCCC *vm, Type *ty) {
     ty = copy_type(vm, ty);
 
     Member head = {};
@@ -2028,7 +2028,7 @@ static Type *copy_struct_type(JCC *vm, Type *ty) {
     return ty;
 }
 
-static Initializer *initializer(JCC *vm, Token **rest, Token *tok, Type *ty,
+static Initializer *initializer(CCCC *vm, Token **rest, Token *tok, Type *ty,
                                 Type **new_ty) {
     Initializer *init = new_initializer(vm, ty, true);
     initializer2(vm, rest, tok, init);
@@ -2050,7 +2050,7 @@ static Initializer *initializer(JCC *vm, Token **rest, Token *tok, Type *ty,
     return init;
 }
 
-static Node *init_desg_expr(JCC *vm, InitDesg *desg, Token *tok) {
+static Node *init_desg_expr(CCCC *vm, InitDesg *desg, Token *tok) {
     if (desg->var)
         return new_var_node(vm, desg->var, tok);
 
@@ -2066,7 +2066,7 @@ static Node *init_desg_expr(JCC *vm, InitDesg *desg, Token *tok) {
     return new_unary(vm, ND_DEREF, new_add(vm, lhs, rhs, tok), tok);
 }
 
-static Node *create_lvar_init(JCC *vm, Initializer *init, Type *ty,
+static Node *create_lvar_init(CCCC *vm, Initializer *init, Type *ty,
                               InitDesg *desg, Token *tok) {
     if (ty->kind == TY_ARRAY) {
         Node *node = new_node(vm, ND_NULL_EXPR, tok);
@@ -2124,7 +2124,7 @@ static Member *member_at_index(Type *ty, int idx) {
     return NULL;
 }
 
-static Node *init_lhs_at(JCC *vm, Obj *var, Type *ty, int idx, Token *tok) {
+static Node *init_lhs_at(CCCC *vm, Obj *var, Type *ty, int idx, Token *tok) {
     InitDesg base_desg = {NULL, 0, NULL, var};
     if (ty->kind == TY_STRUCT) {
         Member *mem = member_at_index(ty, idx);
@@ -2142,7 +2142,7 @@ static Node *init_lhs_at(JCC *vm, Obj *var, Type *ty, int idx, Token *tok) {
     return NULL;
 }
 
-static Node *append_init_assignment(JCC *vm, Node *result, Obj *var, Type *ty,
+static Node *append_init_assignment(CCCC *vm, Node *result, Obj *var, Type *ty,
                                     int idx, Node *rhs, Token *tok) {
     Node *lhs = init_lhs_at(vm, var, ty, idx, tok);
     if (!lhs)
@@ -2155,7 +2155,7 @@ static Node *append_init_assignment(JCC *vm, Node *result, Obj *var, Type *ty,
 // Called from reflection.c quote_substitute to expand ND_INIT_SPLICE nodes.
 // Builds positional ND_ASSIGN chains for a splice chain plus any ordinary
 // initializer tail that followed the $@k placeholder in the source template.
-Node *node_expand_init_splice(JCC *vm, Node *splice, Node *chain) {
+Node *node_expand_init_splice(CCCC *vm, Node *splice, Node *chain) {
     Obj *var = splice->var;
     Type *ty = var->ty;
     Token *tok = splice->tok;
@@ -2214,7 +2214,7 @@ Node *node_expand_init_splice(JCC *vm, Node *splice, Node *chain) {
 // Unlike create_lvar_init which uses ty->array_len, VLAs have
 // runtime-determined size We generate assignments based on the number of
 // initializer elements (known at parse time)
-static Node *create_vla_init(JCC *vm, Initializer *init, Type *ty, Obj *var,
+static Node *create_vla_init(CCCC *vm, Initializer *init, Type *ty, Obj *var,
                              Token *tok) {
     if (!init || ty->kind != TY_VLA)
         return NULL;
@@ -2270,7 +2270,7 @@ static Node *append_init_tail(Node *tail, Node *expr) {
     return tail;
 }
 
-static bool build_deferred_init_splice(JCC *vm, Initializer *init, Obj *var,
+static bool build_deferred_init_splice(CCCC *vm, Initializer *init, Obj *var,
                                        bool inferred_array, Token *tok,
                                        Node **out) {
     Type *ty = var->ty;
@@ -2332,7 +2332,7 @@ static bool build_deferred_init_splice(JCC *vm, Initializer *init, Obj *var,
     return true;
 }
 
-static Node *lvar_initializer(JCC *vm, Token **rest, Token *tok, Obj *var) {
+static Node *lvar_initializer(CCCC *vm, Token **rest, Token *tok, Obj *var) {
     bool inferred_array = var->ty->kind == TY_ARRAY && var->ty->size < 0;
     Initializer *init = initializer(vm, rest, tok, var->ty, &var->ty);
 
@@ -2381,7 +2381,7 @@ static void write_buf(char *buf, uint64_t val, int sz) {
         unreachable();
 }
 
-static Relocation *write_gvar_data(JCC *vm, Relocation *cur, Initializer *init,
+static Relocation *write_gvar_data(CCCC *vm, Relocation *cur, Initializer *init,
                                    Type *ty, char *buf, int offset) {
     if (ty->kind == TY_ARRAY) {
         int sz = ty->base->size;
@@ -2455,7 +2455,7 @@ static Relocation *write_gvar_data(JCC *vm, Relocation *cur, Initializer *init,
 // embedded to .data section. This function serializes Initializer
 // objects to a flat byte array. It is a compile error if an
 // initializer list contains a non-constant expression.
-static void gvar_initializer(JCC *vm, Token **rest, Token *tok, Obj *var) {
+static void gvar_initializer(CCCC *vm, Token **rest, Token *tok, Obj *var) {
     Initializer *init = initializer(vm, rest, tok, var->ty, &var->ty);
 
     // For constexpr variables, save the initializer expression for compile-time
@@ -2473,7 +2473,7 @@ static void gvar_initializer(JCC *vm, Token **rest, Token *tok, Obj *var) {
 }
 
 // Returns true if a given token represents a type.
-static bool is_typename(JCC *vm, Token *tok) {
+static bool is_typename(CCCC *vm, Token *tok) {
     static HashMap map;
 
     if (map.capacity == 0) {
@@ -2497,7 +2497,7 @@ static bool is_typename(JCC *vm, Token *tok) {
 }
 
 // asm-stmt = "asm" ("volatile" | "inline")* "(" string-literal ")"
-static Node *asm_stmt(JCC *vm, Token **rest, Token *tok) {
+static Node *asm_stmt(CCCC *vm, Token **rest, Token *tok) {
     Node *node = new_node(vm, ND_ASM, tok);
     tok = tok->next;
 
@@ -2528,7 +2528,7 @@ static Node *asm_stmt(JCC *vm, Token **rest, Token *tok) {
 //      | ident ":" stmt
 //      | "{" compound-stmt
 //      | expr-stmt
-static Node *stmt(JCC *vm, Token **rest, Token *tok) {
+static Node *stmt(CCCC *vm, Token **rest, Token *tok) {
     if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
         tok = skip(vm, tok->next, "(");
         long long val = const_expr(vm, &tok, tok);
@@ -2548,7 +2548,7 @@ static Node *stmt(JCC *vm, Token **rest, Token *tok) {
 
         // Warn if this is a noreturn function attempting to return
         if (vm->compiler.current_fn && vm->compiler.current_fn->is_noreturn)
-            warn_tok(vm, tok, JCC_WARN_RETURN_TYPE,
+            warn_tok(vm, tok, CCCC_WARN_RETURN_TYPE,
                      "noreturn function should not return a value");
 
         if (consume(vm, rest, tok->next, ";")) {
@@ -2558,7 +2558,7 @@ static Node *stmt(JCC *vm, Token **rest, Token *tok) {
                     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
                         error_tok(vm, tok,
                                   "non-void aggregate function should return a value");
-                    warn_tok(vm, tok, JCC_WARN_RETURN_TYPE,
+                    warn_tok(vm, tok, CCCC_WARN_RETURN_TYPE,
                              "non-void function should return a value");
                     node->lhs = new_cast(vm, new_num(vm, 0, tok), ty);
                 }
@@ -2577,7 +2577,7 @@ static Node *stmt(JCC *vm, Token **rest, Token *tok) {
         if (vm->compiler.current_fn) {
             Type *ty = vm->compiler.current_fn->ty->return_ty;
             if (ty->kind == TY_VOID) {
-                warn_tok(vm, node->tok, JCC_WARN_RETURN_TYPE,
+                warn_tok(vm, node->tok, CCCC_WARN_RETURN_TYPE,
                          "void function should not return a value");
             } else if (ty->kind != TY_STRUCT && ty->kind != TY_UNION) {
                 warn_implicit_conversion(vm, exp, ty, node->tok);
@@ -2838,7 +2838,7 @@ static Node *stmt(JCC *vm, Token **rest, Token *tok) {
 }
 
 // compound-stmt = (typedef | declaration | stmt)* "}"
-static Node *compound_stmt(JCC *vm, Token **rest, Token *tok, Token **close_tok) {
+static Node *compound_stmt(CCCC *vm, Token **rest, Token *tok, Token **close_tok) {
     Node *node = new_node(vm, ND_BLOCK, tok);
     Node head = {};
     Node *cur = &head;
@@ -2848,8 +2848,8 @@ static Node *compound_stmt(JCC *vm, Token **rest, Token *tok, Token **close_tok)
     bool seen_stmt = false;
     while (!equal(tok, "}")) {
         if (is_typename(vm, tok) && !equal(tok->next, ":")) {
-            if (seen_stmt && vm->compiler.c_std < JCC_STD_C99)
-                warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+            if (seen_stmt && vm->compiler.c_std < CCCC_STD_C99)
+                warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
                          "mixing declarations and code is a C99 extension");
             VarAttr attr = {};
             Type *basety = declspec(vm, &tok, tok, &attr);
@@ -2894,7 +2894,7 @@ static Node *compound_stmt(JCC *vm, Token **rest, Token *tok, Token **close_tok)
 }
 
 // expr-stmt = expr? ";"
-static Node *expr_stmt(JCC *vm, Token **rest, Token *tok) {
+static Node *expr_stmt(CCCC *vm, Token **rest, Token *tok) {
     if (equal(tok, ";")) {
         *rest = tok->next;
         return new_node(vm, ND_BLOCK, tok);
@@ -2919,15 +2919,15 @@ static Node *expr_stmt(JCC *vm, Token **rest, Token *tok) {
         }
         if (nodiscard) {
             if (node->lhs->func_ty && node->lhs->func_ty->nodiscard_msg)
-                warn_tok(vm, node->tok, JCC_WARN_NODISCARD,
+                warn_tok(vm, node->tok, CCCC_WARN_NODISCARD,
                          "ignoring return value of %s declared with 'nodiscard': %s",
                          what, node->lhs->func_ty->nodiscard_msg);
             else if (node->lhs->ty && node->lhs->ty->nodiscard_msg)
-                warn_tok(vm, node->tok, JCC_WARN_NODISCARD,
+                warn_tok(vm, node->tok, CCCC_WARN_NODISCARD,
                          "ignoring return value of %s declared with 'nodiscard': %s",
                          what, node->lhs->ty->nodiscard_msg);
             else
-                warn_tok(vm, node->tok, JCC_WARN_NODISCARD,
+                warn_tok(vm, node->tok, CCCC_WARN_NODISCARD,
                          "ignoring return value of %s declared with 'nodiscard'",
                          what);
         }
@@ -2959,7 +2959,7 @@ static bool falls_through(Node *n) {
     }
 }
 
-static void warn_switch_fallthrough(JCC *vm, Node *sw) {
+static void warn_switch_fallthrough(CCCC *vm, Node *sw) {
     if (!sw || sw->kind != ND_SWITCH || !sw->then) return;
     if (sw->then->kind != ND_BLOCK || !sw->then->body) return;
 
@@ -3001,7 +3001,7 @@ static void warn_switch_fallthrough(JCC *vm, Node *sw) {
             if (group_case && group_reaches_end && !annotated) {
                 // The previous case group reaches the end (falls through to this label)
                 // and it's not annotated with [[fallthrough]]
-                warn_tok(vm, group_case->tok, JCC_WARN_FALLTHROUGH,
+                warn_tok(vm, group_case->tok, CCCC_WARN_FALLTHROUGH,
                          "unannotated fallthrough between case labels");
             }
             group_case = cur;
@@ -3034,7 +3034,7 @@ static void warn_switch_fallthrough(JCC *vm, Node *sw) {
 }
 
 // expr = assign ("," expr)?
-static Node *expr(JCC *vm, Token **rest, Token *tok) {
+static Node *expr(CCCC *vm, Token **rest, Token *tok) {
     Node *node = assign(vm, &tok, tok);
 
     if (equal(tok, ","))
@@ -3044,7 +3044,7 @@ static Node *expr(JCC *vm, Token **rest, Token *tok) {
     return node;
 }
 
-static int64_t eval(JCC *vm, Node *node) { return eval2(vm, node, NULL); }
+static int64_t eval(CCCC *vm, Node *node) { return eval2(vm, node, NULL); }
 
 // Evaluate a given node as a constant expression.
 //
@@ -3052,7 +3052,7 @@ static int64_t eval(JCC *vm, Node *node) { return eval2(vm, node, NULL); }
 // is a pointer to a global variable and n is a postiive/negative
 // number. The latter form is accepted only as an initialization
 // expression for a global variable.
-static int64_t eval2(JCC *vm, Node *node, char ***label) {
+static int64_t eval2(CCCC *vm, Node *node, char ***label) {
     add_type(vm, node);
 
     if (is_flonum(node->ty))
@@ -3165,7 +3165,7 @@ static int64_t eval2(JCC *vm, Node *node, char ***label) {
     }
 }
 
-static int64_t eval_rval(JCC *vm, Node *node, char ***label) {
+static int64_t eval_rval(CCCC *vm, Node *node, char ***label) {
     switch (node->kind) {
     case ND_VAR:
         if (node->var->is_local)
@@ -3183,7 +3183,7 @@ static int64_t eval_rval(JCC *vm, Node *node, char ***label) {
     }
 }
 
-static bool is_const_expr(JCC *vm, Node *node) {
+static bool is_const_expr(CCCC *vm, Node *node) {
     add_type(vm, node);
 
     switch (node->kind) {
@@ -3221,7 +3221,7 @@ static bool is_const_expr(JCC *vm, Node *node) {
     }
 }
 
-int64_t const_expr(JCC *vm, Token **rest, Token *tok) {
+int64_t const_expr(CCCC *vm, Token **rest, Token *tok) {
     Node *node = conditional(vm, rest, tok);
     return eval(vm, node);
 }
@@ -3229,7 +3229,7 @@ int64_t const_expr(JCC *vm, Token **rest, Token *tok) {
 // Returns true when `expr` is an integer constant expression whose value fits
 // within the range of `to` without truncation.  Used to suppress -Wconversion
 // false positives such as `char c = 0;` or `char c = 1 + 1;`.
-bool node_int_const_fits(JCC *vm, Node *expr, Type *to) {
+bool node_int_const_fits(CCCC *vm, Node *expr, Type *to) {
     if (!expr || !to || !is_integer(to))
         return false;
     if (!is_const_expr(vm, expr))
@@ -3247,7 +3247,7 @@ bool node_int_const_fits(JCC *vm, Node *expr, Type *to) {
     }
 }
 
-static double eval_double(JCC *vm, Node *node) {
+static double eval_double(CCCC *vm, Node *node) {
     add_type(vm, node);
 
     if (is_integer(node->ty)) {
@@ -3290,7 +3290,7 @@ static double eval_double(JCC *vm, Node *node) {
 // However, if a given expression is of form `A.x op= C`, the input is
 // converted to `tmp = &A, (*tmp).x = (*tmp).x op C` to handle assignments
 // to bitfields.
-static Node *to_assign(JCC *vm, Node *binary) {
+static Node *to_assign(CCCC *vm, Node *binary) {
     add_type(vm, binary->lhs);
     add_type(vm, binary->rhs);
     Token *tok = binary->tok;
@@ -3404,7 +3404,7 @@ static Node *to_assign(JCC *vm, Node *binary) {
 // assign    = conditional (assign-op assign)?
 // assign-op = "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^="
 //           | "<<=" | ">>="
-static Node *assign(JCC *vm, Token **rest, Token *tok) {
+static Node *assign(CCCC *vm, Token **rest, Token *tok) {
     Node *node = conditional(vm, &tok, tok);
 
     if (equal(tok, "="))
@@ -3456,7 +3456,7 @@ static Node *assign(JCC *vm, Token **rest, Token *tok) {
 }
 
 // conditional = logor ("?" expr? ":" conditional)?
-static Node *conditional(JCC *vm, Token **rest, Token *tok) {
+static Node *conditional(CCCC *vm, Token **rest, Token *tok) {
     Node *cond = logor(vm, &tok, tok);
 
     if (!equal(tok, "?")) {
@@ -3500,7 +3500,7 @@ static Node *conditional(JCC *vm, Token **rest, Token *tok) {
 }
 
 // logor = logand ("||" logand)*
-static Node *logor(JCC *vm, Token **rest, Token *tok) {
+static Node *logor(CCCC *vm, Token **rest, Token *tok) {
     Node *node = logand(vm, &tok, tok);
     while (equal(tok, "||")) {
         Token *start = tok;
@@ -3512,7 +3512,7 @@ static Node *logor(JCC *vm, Token **rest, Token *tok) {
 }
 
 // logand = bitor ("&&" bitor)*
-static Node *logand(JCC *vm, Token **rest, Token *tok) {
+static Node *logand(CCCC *vm, Token **rest, Token *tok) {
     Node *node = bitor(vm, &tok, tok);
     while (equal(tok, "&&")) {
         Token *start = tok;
@@ -3524,7 +3524,7 @@ static Node *logand(JCC *vm, Token **rest, Token *tok) {
 }
 
 // bitor = bitxor ("|" bitxor)*
-static Node *bitor(JCC *vm, Token **rest, Token *tok) {
+static Node *bitor(CCCC *vm, Token **rest, Token *tok) {
     Node *node = bitxor(vm, &tok, tok);
     while (equal(tok, "|")) {
         Token *start = tok;
@@ -3536,7 +3536,7 @@ static Node *bitor(JCC *vm, Token **rest, Token *tok) {
 }
 
 // bitxor = bitand ("^" bitand)*
-static Node *bitxor(JCC *vm, Token **rest, Token *tok) {
+static Node *bitxor(CCCC *vm, Token **rest, Token *tok) {
     Node *node = bitand(vm, &tok, tok);
     while (equal(tok, "^")) {
         Token *start = tok;
@@ -3548,7 +3548,7 @@ static Node *bitxor(JCC *vm, Token **rest, Token *tok) {
 }
 
 // bitand = equality ("&" equality)*
-static Node *bitand(JCC *vm, Token **rest, Token *tok) {
+static Node *bitand(CCCC *vm, Token **rest, Token *tok) {
     Node *node = equality(vm, &tok, tok);
     while (equal(tok, "&")) {
         Token *start = tok;
@@ -3560,7 +3560,7 @@ static Node *bitand(JCC *vm, Token **rest, Token *tok) {
 }
 
 // equality = relational ("==" relational | "!=" relational)*
-static Node *equality(JCC *vm, Token **rest, Token *tok) {
+static Node *equality(CCCC *vm, Token **rest, Token *tok) {
     Node *node = relational(vm, &tok, tok);
 
     for (;;) {
@@ -3584,7 +3584,7 @@ static Node *equality(JCC *vm, Token **rest, Token *tok) {
 }
 
 // relational = shift ("<" shift | "<=" shift | ">" shift | ">=" shift)*
-static Node *relational(JCC *vm, Token **rest, Token *tok) {
+static Node *relational(CCCC *vm, Token **rest, Token *tok) {
     Node *node = shift(vm, &tok, tok);
 
     for (;;) {
@@ -3620,7 +3620,7 @@ static Node *relational(JCC *vm, Token **rest, Token *tok) {
 }
 
 // shift = add ("<<" add | ">>" add)*
-static Node *shift(JCC *vm, Token **rest, Token *tok) {
+static Node *shift(CCCC *vm, Token **rest, Token *tok) {
     Node *node = add(vm, &tok, tok);
 
     for (;;) {
@@ -3664,7 +3664,7 @@ static Node *shift(JCC *vm, Token **rest, Token *tok) {
 // so that p+n points to the location n elements (not bytes) ahead of p.
 // In other words, we need to scale an integer value before adding to a
 // pointer value. This function takes care of the scaling.
-static Node *new_add(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
+static Node *new_add(CCCC *vm, Node *lhs, Node *rhs, Token *tok) {
     add_type(vm, lhs);
     add_type(vm, rhs);
 
@@ -3694,7 +3694,7 @@ static Node *new_add(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
 
     // void* arithmetic is a GNU extension; we allow it for compatibility
     if (lhs->ty->base->kind == TY_VOID) {
-        warn_tok(vm, tok, JCC_WARN_POINTER_ARITH,
+        warn_tok(vm, tok, CCCC_WARN_POINTER_ARITH,
                  "pointer of type 'void *' used in arithmetic");
         rhs = new_binary(vm, ND_MUL, rhs,
                          new_long(vm, get_vm_size(lhs->ty->base), tok), tok);
@@ -3710,7 +3710,7 @@ static Node *new_add(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
 
     // Function pointer arithmetic is a GNU extension
     if (lhs->ty->base->kind == TY_FUNC)
-        warn_tok(vm, tok, JCC_WARN_POINTER_ARITH,
+        warn_tok(vm, tok, CCCC_WARN_POINTER_ARITH,
                  "pointer to a function used in arithmetic");
 
     // ptr + num
@@ -3720,7 +3720,7 @@ static Node *new_add(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
 }
 
 // Like `+`, `-` is overloaded for the pointer type.
-static Node *new_sub(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
+static Node *new_sub(CCCC *vm, Node *lhs, Node *rhs, Token *tok) {
     add_type(vm, lhs);
     add_type(vm, rhs);
 
@@ -3751,10 +3751,10 @@ static Node *new_sub(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
     // ptr - num
     if (lhs->ty->base && is_integer(rhs->ty)) {
         if (lhs->ty->base->kind == TY_VOID)
-            warn_tok(vm, tok, JCC_WARN_POINTER_ARITH,
+            warn_tok(vm, tok, CCCC_WARN_POINTER_ARITH,
                      "pointer of type 'void *' used in arithmetic");
         else if (lhs->ty->base->kind == TY_FUNC)
-            warn_tok(vm, tok, JCC_WARN_POINTER_ARITH,
+            warn_tok(vm, tok, CCCC_WARN_POINTER_ARITH,
                      "pointer to a function used in arithmetic");
         rhs = new_binary(vm, ND_MUL, rhs,
                          new_long(vm, get_vm_size(lhs->ty->base), tok), tok);
@@ -3767,10 +3767,10 @@ static Node *new_sub(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
     // ptr - ptr, which returns how many elements are between the two.
     if (lhs->ty->base && rhs->ty->base) {
         if (lhs->ty->base->kind == TY_VOID || rhs->ty->base->kind == TY_VOID)
-            warn_tok(vm, tok, JCC_WARN_POINTER_ARITH,
+            warn_tok(vm, tok, CCCC_WARN_POINTER_ARITH,
                      "pointer of type 'void *' used in arithmetic");
         else if (lhs->ty->base->kind == TY_FUNC || rhs->ty->base->kind == TY_FUNC)
-            warn_tok(vm, tok, JCC_WARN_POINTER_ARITH,
+            warn_tok(vm, tok, CCCC_WARN_POINTER_ARITH,
                      "pointer to a function used in arithmetic");
         Node *node = new_binary(vm, ND_SUB, lhs, rhs, tok);
         node->ty = ty_long;
@@ -3783,7 +3783,7 @@ static Node *new_sub(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
 }
 
 // add = mul ("+" mul | "-" mul)*
-static Node *add(JCC *vm, Token **rest, Token *tok) {
+static Node *add(CCCC *vm, Token **rest, Token *tok) {
     Node *node = mul(vm, &tok, tok);
 
     for (;;) {
@@ -3805,7 +3805,7 @@ static Node *add(JCC *vm, Token **rest, Token *tok) {
 }
 
 // mul = cast ("*" cast | "/" cast | "%" cast)*
-static Node *mul(JCC *vm, Token **rest, Token *tok) {
+static Node *mul(CCCC *vm, Token **rest, Token *tok) {
     Node *node = cast(vm, &tok, tok);
 
     for (;;) {
@@ -3859,7 +3859,7 @@ static Node *mul(JCC *vm, Token **rest, Token *tok) {
 }
 
 // cast = "(" type-name ")" cast | unary
-static Node *cast(JCC *vm, Token **rest, Token *tok) {
+static Node *cast(CCCC *vm, Token **rest, Token *tok) {
     if (equal(tok, "(") && is_typename(vm, tok->next)) {
         Token *start = tok;
         Type *ty = typename(vm, &tok, tok->next);
@@ -3883,7 +3883,7 @@ static Node *cast(JCC *vm, Token **rest, Token *tok) {
 
 // Recursively collect variables from outer scopes that are referenced in an
 // expression
-static void collect_captures_in_node(JCC *vm, Node *node, Obj *outer_locals,
+static void collect_captures_in_node(CCCC *vm, Node *node, Obj *outer_locals,
                                      Obj ***captures, int *num_captures,
                                      int *cap_capacity) {
     if (!node)
@@ -3947,7 +3947,7 @@ static void collect_captures_in_node(JCC *vm, Node *node, Obj *outer_locals,
 
 // Parse a block literal: ^{ ... } or ^(params){ ... } or ^returntype(params){
 // ... }
-static Node *block_literal(JCC *vm, Token **rest, Token *tok) {
+static Node *block_literal(CCCC *vm, Token **rest, Token *tok) {
     Token *start = tok;
     tok = tok->next; // Skip ^
 
@@ -4112,7 +4112,7 @@ static Node *block_literal(JCC *vm, Token **rest, Token *tok) {
 //       | "&&" ident
 //       | "^" block-literal  (Apple blocks extension)
 //       | postfix
-static Node *unary(JCC *vm, Token **rest, Token *tok) {
+static Node *unary(CCCC *vm, Token **rest, Token *tok) {
     // Apple blocks: ^{ ... } or ^(params){ ... } or ^returntype(params){ ... }
     if (equal(tok, "^") && tok->next &&
         (equal(tok->next, "{") || equal(tok->next, "(") ||
@@ -4182,7 +4182,7 @@ static Node *unary(JCC *vm, Token **rest, Token *tok) {
 }
 
 // struct-members = (declspec declarator (","  declarator)* ";")*
-static void struct_members(JCC *vm, Token **rest, Token *tok, Type *ty) {
+static void struct_members(CCCC *vm, Token **rest, Token *tok, Type *ty) {
     Member head = {};
     Member *cur = &head;
     int idx = 0;
@@ -4196,8 +4196,8 @@ static void struct_members(JCC *vm, Token **rest, Token *tok, Type *ty) {
         Token *anon_tok = tok;
         if ((basety->kind == TY_STRUCT || basety->kind == TY_UNION) &&
             consume(vm, &tok, tok, ";")) {
-            if (vm->compiler.c_std < JCC_STD_C11)
-                warn_tok(vm, anon_tok, JCC_WARN_PEDANTIC,
+            if (vm->compiler.c_std < CCCC_STD_C11)
+                warn_tok(vm, anon_tok, CCCC_WARN_PEDANTIC,
                          "anonymous structs/unions are a C11 extension");
             Member *mem =
                 arena_alloc(&vm->compiler.parser_arena, sizeof(Member));
@@ -4240,7 +4240,7 @@ static void struct_members(JCC *vm, Token **rest, Token *tok, Type *ty) {
     // called a "flexible array member". It should behave as if
     // if were a zero-sized array.
     if (cur != &head && cur->ty->kind == TY_ARRAY && cur->ty->array_len < 0) {
-        if (vm->compiler.c_std < JCC_STD_C99)
+        if (vm->compiler.c_std < CCCC_STD_C99)
             error_tok(vm, cur->name ? cur->name : *rest,
                       "flexible array members are not available before C99");
         cur->ty = array_of(vm, cur->ty->base, 0);
@@ -4289,7 +4289,7 @@ static void apply_semantic_attr(Type *ty, VarAttr *attr, Token *tok,
     }
 }
 
-static Type *apply_var_attrs_to_type(JCC *vm, Type *ty, VarAttr *attr) {
+static Type *apply_var_attrs_to_type(CCCC *vm, Type *ty, VarAttr *attr) {
     if (!attr || (!attr->is_maybe_unused && !attr->is_deprecated &&
                   !attr->is_noreturn && !attr->is_nodiscard &&
                   !attr->format_style))
@@ -4324,7 +4324,7 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
 }
 
 // attribute = ("__attribute__" "(" "(" attribute-list ")" ")")*
-static Token *attribute_list(JCC *vm, Token *tok, Type *ty, VarAttr *attr) {
+static Token *attribute_list(CCCC *vm, Token *tok, Type *ty, VarAttr *attr) {
     while (consume(vm, &tok, tok, "__attribute__")) {
         tok = skip(vm, tok, "(");
         tok = skip(vm, tok, "(");
@@ -4425,7 +4425,7 @@ static Token *attribute_list(JCC *vm, Token *tok, Type *ty, VarAttr *attr) {
             if (tok->kind == TK_IDENT) {
                 Token *name_tok = tok;
                 tok = tok->next;
-                warn_tok(vm, name_tok, JCC_WARN_ATTRIBUTES,
+                warn_tok(vm, name_tok, CCCC_WARN_ATTRIBUTES,
                          "unknown attribute '%.*s' ignored",
                          name_tok->len, name_tok->loc);
 
@@ -4456,12 +4456,12 @@ static Token *attribute_list(JCC *vm, Token *tok, Type *ty, VarAttr *attr) {
 }
 
 // c23-attribute = ("[[" attribute-list "]]")*
-static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty,
+static Token *c23_attribute_list(CCCC *vm, Token *tok, Type *ty,
                                  VarAttr *attr) {
     while (equal(tok, "[") && equal(tok->next, "[")) {
-        if (vm->compiler.c_std < JCC_STD_C23 &&
+        if (vm->compiler.c_std < CCCC_STD_C23 &&
             !vm->compiler.in_type_lookahead)
-            warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+            warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
                      "'[[...]]' attributes are a C23 extension");
         tok = tok->next->next; // Skip [[
 
@@ -4516,7 +4516,7 @@ static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty,
             } else if (is_no_unique_address_attr) {
                 // Parsed but VM optimisations deferred to a future ticket
             } else if (!unused && !deprecated) {
-                warn_tok(vm, attr_tok, JCC_WARN_ATTRIBUTES,
+                warn_tok(vm, attr_tok, CCCC_WARN_ATTRIBUTES,
                          "unknown attribute '%.*s' ignored",
                          attr_tok->len, attr_tok->loc);
                 apply_semantic_attr(ty, attr, attr_tok, unused, deprecated,
@@ -4535,7 +4535,7 @@ static Token *c23_attribute_list(JCC *vm, Token *tok, Type *ty,
 }
 
 // struct-union-decl = attribute? ident? ("{" struct-members)?
-static Type *struct_union_decl(JCC *vm, Token **rest, Token *tok) {
+static Type *struct_union_decl(CCCC *vm, Token **rest, Token *tok) {
     Type *ty = struct_type(vm);
     tok = attribute_list(vm, tok, ty, NULL);
     tok = c23_attribute_list(vm, tok, ty, NULL);
@@ -4596,7 +4596,7 @@ static Type *struct_union_decl(JCC *vm, Token **rest, Token *tok) {
 }
 
 // struct-decl = struct-union-decl
-static Type *struct_decl(JCC *vm, Token **rest, Token *tok) {
+static Type *struct_decl(CCCC *vm, Token **rest, Token *tok) {
     Type *ty = struct_union_decl(vm, rest, tok);
     ty->kind = TY_STRUCT;
 
@@ -4642,7 +4642,7 @@ static Type *struct_decl(JCC *vm, Token **rest, Token *tok) {
 }
 
 // union-decl = struct-union-decl
-static Type *union_decl(JCC *vm, Token **rest, Token *tok) {
+static Type *union_decl(CCCC *vm, Token **rest, Token *tok) {
     Type *ty = struct_union_decl(vm, rest, tok);
     ty->kind = TY_UNION;
 
@@ -4694,7 +4694,7 @@ static Member *get_struct_member(Type *ty, Token *tok) {
 // member "a" of the anonymous struct as "x.a".
 //
 // This function takes care of anonymous structs.
-static Node *struct_ref(JCC *vm, Node *node, Token *tok) {
+static Node *struct_ref(CCCC *vm, Node *node, Token *tok) {
     add_type(vm, node);
 
     // If the base expression has error type, propagate it
@@ -4739,7 +4739,7 @@ static Node *struct_ref(JCC *vm, Node *node, Token *tok) {
 }
 
 // Convert A++ to `(typeof A)((A += 1) - 1)`
-static Node *new_inc_dec(JCC *vm, Node *node, Token *tok, int addend) {
+static Node *new_inc_dec(CCCC *vm, Node *node, Token *tok, int addend) {
     add_type(vm, node);
     return new_cast(
         vm,
@@ -4759,12 +4759,12 @@ static Node *new_inc_dec(JCC *vm, Node *node, Token *tok, int addend) {
 //              | "->" ident
 //              | "++"
 //              | "--"
-static Node *postfix(JCC *vm, Token **rest, Token *tok) {
+static Node *postfix(CCCC *vm, Token **rest, Token *tok) {
     if (equal(tok, "(") && is_typename(vm, tok->next)) {
         // Compound literal
         Token *start = tok;
-        if (vm->compiler.c_std < JCC_STD_C99)
-            warn_tok(vm, start, JCC_WARN_PEDANTIC,
+        if (vm->compiler.c_std < CCCC_STD_C99)
+            warn_tok(vm, start, CCCC_WARN_PEDANTIC,
                      "compound literals are a C99 extension");
         Type *ty = typename(vm, &tok, tok->next);
         tok = skip(vm, tok, ")");
@@ -4888,7 +4888,7 @@ static const char *fmt_type_names[] = {
 };
 
 // Validate format string arguments for __attribute__((format(...)))
-static void validate_format_call(JCC *vm, Token *tok, Type *func_ty,
+static void validate_format_call(CCCC *vm, Token *tok, Type *func_ty,
                                   Node *args) {
     if (!func_ty->format_style)
         return;
@@ -5027,12 +5027,12 @@ static void validate_format_call(JCC *vm, Token *tok, Type *func_ty,
     // Check arg count
     if (fmt_count != num_varargs) {
         if (fmt_count < num_varargs)
-            warn_tok(vm, tok, JCC_WARN_FORMAT,
+            warn_tok(vm, tok, CCCC_WARN_FORMAT,
                      "too many arguments for format string "
                      "(format expects %d, call provides %d)",
                      fmt_count, num_varargs);
         else
-            warn_tok(vm, tok, JCC_WARN_FORMAT,
+            warn_tok(vm, tok, CCCC_WARN_FORMAT,
                      "too few arguments for format string "
                      "(format expects %d, call provides %d)",
                      fmt_count, num_varargs);
@@ -5093,7 +5093,7 @@ static void validate_format_call(JCC *vm, Token *tok, Type *func_ty,
                     break;
             }
             if (!ok)
-                warn_tok(vm, tok, JCC_WARN_FORMAT,
+                warn_tok(vm, tok, CCCC_WARN_FORMAT,
                          "format argument %d expected type '%s' "
                          "but argument has incompatible type",
                          check_idx + 1, fmt_type_names[exp]);
@@ -5106,7 +5106,7 @@ static void validate_format_call(JCC *vm, Token *tok, Type *func_ty,
 #undef MAX_FMT_ARGS
 
 // funcall = (assign ("," assign)*)? ")"
-static Node *funcall(JCC *vm, Token **rest, Token *tok, Node *fn) {
+static Node *funcall(CCCC *vm, Token **rest, Token *tok, Node *fn) {
     add_type(vm, fn);
 
     if (fn->ty->kind != TY_FUNC &&
@@ -5175,7 +5175,7 @@ static Node *funcall(JCC *vm, Token **rest, Token *tok, Node *fn) {
     }
 
     // Validate format string arguments when -F is active
-    if (!deferred_splice && (vm->flags & JCC_FORMAT_STR_CHECKS))
+    if (!deferred_splice && (vm->flags & CCCC_FORMAT_STR_CHECKS))
         validate_format_call(vm, tok, ty, head.next);
 
     *rest = skip(vm, tok, ")");
@@ -5197,7 +5197,7 @@ static Node *funcall(JCC *vm, Token **rest, Token *tok, Node *fn) {
 //
 // generic-assoc = type-name ":" assign
 //               | "default" ":" assign
-static Node *generic_selection(JCC *vm, Token **rest, Token *tok) {
+static Node *generic_selection(CCCC *vm, Token **rest, Token *tok) {
     Token *start = tok;
     tok = skip(vm, tok, "(");
 
@@ -5255,7 +5255,7 @@ static Node *generic_selection(JCC *vm, Token **rest, Token *tok) {
 //         | ident
 //         | str
 //         | num
-static Node *primary(JCC *vm, Token **rest, Token *tok) {
+static Node *primary(CCCC *vm, Token **rest, Token *tok) {
     Token *start = tok;
 
     if (equal(tok, "(") && equal(tok->next, "{")) {
@@ -5311,8 +5311,8 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
     }
 
     if (equal(tok, "_Generic")) {
-        if (vm->compiler.c_std < JCC_STD_C11)
-            warn_tok(vm, tok, JCC_WARN_PEDANTIC,
+        if (vm->compiler.c_std < CCCC_STD_C11)
+            warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
                      "'_Generic' is a C11 extension");
         return generic_selection(vm, rest, tok->next);
     }
@@ -5623,10 +5623,10 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
         return node;
     }
 
-    if (equal(tok, "__jcc_cmplx") || equal(tok, "__jcc_cmplxf") ||
-        equal(tok, "__jcc_cmplxl")) {
-        Type *ty = equal(tok, "__jcc_cmplxf") ? ty_fcomplex :
-                   equal(tok, "__jcc_cmplxl") ? ty_ldcomplex : ty_dcomplex;
+    if (equal(tok, "__cccc_cmplx") || equal(tok, "__cccc_cmplxf") ||
+        equal(tok, "__cccc_cmplxl")) {
+        Type *ty = equal(tok, "__cccc_cmplxf") ? ty_fcomplex :
+                   equal(tok, "__cccc_cmplxl") ? ty_ldcomplex : ty_dcomplex;
         tok = skip(vm, tok->next, "(");
         Node *real = assign(vm, &tok, tok);
         tok = skip(vm, tok, ",");
@@ -5635,13 +5635,13 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
         return new_complex_node(vm, real, imag, ty, start);
     }
 
-    if (equal(tok, "__jcc_creal") || equal(tok, "__jcc_crealf") ||
-        equal(tok, "__jcc_creall") || equal(tok, "__jcc_cimag") ||
-        equal(tok, "__jcc_cimagf") || equal(tok, "__jcc_cimagl")) {
-        bool imag_part = equal(tok, "__jcc_cimag") || equal(tok, "__jcc_cimagf") ||
-                         equal(tok, "__jcc_cimagl");
-        Type *ret_ty = (equal(tok, "__jcc_crealf") || equal(tok, "__jcc_cimagf")) ? ty_float :
-                       (equal(tok, "__jcc_creall") || equal(tok, "__jcc_cimagl")) ? ty_ldouble :
+    if (equal(tok, "__cccc_creal") || equal(tok, "__cccc_crealf") ||
+        equal(tok, "__cccc_creall") || equal(tok, "__cccc_cimag") ||
+        equal(tok, "__cccc_cimagf") || equal(tok, "__cccc_cimagl")) {
+        bool imag_part = equal(tok, "__cccc_cimag") || equal(tok, "__cccc_cimagf") ||
+                         equal(tok, "__cccc_cimagl");
+        Type *ret_ty = (equal(tok, "__cccc_crealf") || equal(tok, "__cccc_cimagf")) ? ty_float :
+                       (equal(tok, "__cccc_creall") || equal(tok, "__cccc_cimagl")) ? ty_ldouble :
                        ty_double;
         tok = skip(vm, tok->next, "(");
         Node *arg = assign(vm, &tok, tok);
@@ -5652,10 +5652,10 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
         return node;
     }
 
-    if (equal(tok, "__jcc_conj") || equal(tok, "__jcc_conjf") ||
-        equal(tok, "__jcc_conjl")) {
-        Type *ty = equal(tok, "__jcc_conjf") ? ty_fcomplex :
-                   equal(tok, "__jcc_conjl") ? ty_ldcomplex : ty_dcomplex;
+    if (equal(tok, "__cccc_conj") || equal(tok, "__cccc_conjf") ||
+        equal(tok, "__cccc_conjl")) {
+        Type *ty = equal(tok, "__cccc_conjf") ? ty_fcomplex :
+                   equal(tok, "__cccc_conjl") ? ty_ldcomplex : ty_dcomplex;
         tok = skip(vm, tok->next, "(");
         Node *arg = assign(vm, &tok, tok);
         *rest = skip(vm, tok, ")");
@@ -5666,7 +5666,7 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
     }
 
     // Block_copy(block) - Apple Blocks extension
-    // In JCC's simplified model, blocks are already heap-allocated, so this
+    // In CCCC's simplified model, blocks are already heap-allocated, so this
     // just returns the block
     if (equal(tok, "Block_copy")) {
         tok = skip(vm, tok->next, "(");
@@ -5679,7 +5679,7 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
     }
 
     // Block_release(block) - Apple Blocks extension
-    // In JCC's simplified model, this is a no-op (VM teardown handles cleanup)
+    // In CCCC's simplified model, this is a no-op (VM teardown handles cleanup)
     if (equal(tok, "Block_release")) {
         tok = skip(vm, tok->next, "(");
         Node *block_expr = assign(vm, &tok, tok); // Evaluate but discard
@@ -5734,7 +5734,7 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
                 if (!pm->is_inline) {
                     error_tok(vm, tok,
                               "macro '%.*s' is not marked inline; use "
-                              "[[jcc::comptime(inline)]] for expression-position "
+                              "[[cccc::comptime(inline)]] for expression-position "
                               "calls",
                               tok->len, tok->loc);
                 }
@@ -5770,7 +5770,7 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
         }
 
         if (equal(tok->next, "(")) {
-            warn_tok(vm, tok, JCC_WARN_IMPLICIT_FUNCTION_DECLARATION,
+            warn_tok(vm, tok, CCCC_WARN_IMPLICIT_FUNCTION_DECLARATION,
                      "implicit declaration of function '%.*s'", tok->len,
                      tok->loc);
 
@@ -5847,7 +5847,7 @@ static Node *primary(JCC *vm, Token **rest, Token *tok) {
     return NULL;
 }
 
-static Token *parse_typedef(JCC *vm, Token *tok, Type *basety) {
+static Token *parse_typedef(CCCC *vm, Token *tok, Type *basety) {
     bool first = true;
 
     while (!consume(vm, &tok, tok, ";")) {
@@ -5868,7 +5868,7 @@ static Token *parse_typedef(JCC *vm, Token *tok, Type *basety) {
     return tok;
 }
 
-static void create_param_lvars(JCC *vm, Type *param) {
+static void create_param_lvars(CCCC *vm, Type *param) {
     if (param) {
         create_param_lvars(vm, param->next);
         if (!param->name)
@@ -5884,7 +5884,7 @@ static void create_param_lvars(JCC *vm, Type *param) {
 // We cannot resolve gotos as we parse a function because gotos
 // can refer a label that appears later in the function.
 // So, we need to do this after we parse the entire function.
-static void resolve_goto_labels(JCC *vm) {
+static void resolve_goto_labels(CCCC *vm) {
     for (Node *x = vm->compiler.gotos; x; x = x->goto_next) {
         for (Node *y = vm->compiler.labels; y; y = y->goto_next) {
             if (strlen(x->label) == strlen(y->label) &&
@@ -5901,13 +5901,13 @@ static void resolve_goto_labels(JCC *vm) {
 
     for (Node *label = vm->compiler.labels; label; label = label->goto_next)
         if (!label->label_used && !label->label_maybe_unused)
-            warn_tok(vm, label->tok, JCC_WARN_UNUSED, "unused label '%s'",
+            warn_tok(vm, label->tok, CCCC_WARN_UNUSED, "unused label '%s'",
                      label->label);
 
     vm->compiler.gotos = vm->compiler.labels = NULL;
 }
 
-static Obj *find_func(JCC *vm, char *name, int name_len) {
+static Obj *find_func(CCCC *vm, char *name, int name_len) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
         for (VarScopeNode *node = sc->vars; node; node = node->next) {
             if (node->name_len == name_len &&
@@ -5922,7 +5922,7 @@ static Obj *find_func(JCC *vm, char *name, int name_len) {
     return NULL;
 }
 
-static Obj *find_func_in_current_scope(JCC *vm, char *name, int name_len) {
+static Obj *find_func_in_current_scope(CCCC *vm, char *name, int name_len) {
     Scope *sc = vm->compiler.scope;
     if (!sc)
         return NULL;
@@ -5939,7 +5939,7 @@ static Obj *find_func_in_current_scope(JCC *vm, char *name, int name_len) {
     return NULL;
 }
 
-static void mark_live(JCC *vm, Obj *var) {
+static void mark_live(CCCC *vm, Obj *var) {
     if (!var->is_function || var->is_live)
         return;
     var->is_live = true;
@@ -5974,13 +5974,13 @@ static bool statement_terminates(Node *node) {
     }
 }
 
-static void append_implicit_return(JCC *vm, Obj *fn, Token *tok) {
+static void append_implicit_return(CCCC *vm, Obj *fn, Token *tok) {
     Type *ty = fn->ty->return_ty;
 
     // Noreturn functions must not fall off the end
     if (fn->is_noreturn) {
         if (ty->kind != TY_VOID)
-            warn_tok(vm, tok, JCC_WARN_RETURN_TYPE,
+            warn_tok(vm, tok, CCCC_WARN_RETURN_TYPE,
                      "noreturn function should not return a value");
         return;
     }
@@ -5992,7 +5992,7 @@ static void append_implicit_return(JCC *vm, Obj *fn, Token *tok) {
     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
         error_tok(vm, tok, "control reaches end of non-void aggregate function");
 
-    warn_tok(vm, tok, JCC_WARN_RETURN_TYPE,
+    warn_tok(vm, tok, CCCC_WARN_RETURN_TYPE,
              "control reaches end of non-void function");
 
     Node *ret = new_node(vm, ND_RETURN, tok);
@@ -6008,7 +6008,7 @@ static bool is_plain_signed_int(Type *ty) {
     return ty && ty->kind == TY_INT && !ty->base && !ty->is_unsigned;
 }
 
-static void validate_main_signature(JCC *vm, Obj *fn) {
+static void validate_main_signature(CCCC *vm, Obj *fn) {
     if (!fn || !fn->name || strcmp(fn->name, "main") != 0)
         return;
 
@@ -6020,7 +6020,7 @@ static void validate_main_signature(JCC *vm, Obj *fn) {
                   "main's first parameter must be int");
 }
 
-static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr) {
+static Token *function(CCCC *vm, Token *tok, Type *basety, VarAttr *attr) {
     Type *ty = declarator(vm, &tok, tok, basety);
     if (!ty->name)
         error_tok(vm, ty->name_pos, "function name omitted");
@@ -6171,7 +6171,7 @@ static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr) {
     // defined as a local variable containing the current function name.
     // Not available before C99 — omitting it causes a natural undeclared-
     // identifier error if used in C89 mode.
-    if (vm->compiler.c_std >= JCC_STD_C99) {
+    if (vm->compiler.c_std >= CCCC_STD_C99) {
         push_scope(vm, "__func__", 8)->var = new_string_literal(
             vm, fn->name, array_of(vm, ty_char, strlen(fn->name) + 1));
 
@@ -6202,7 +6202,7 @@ static Token *function(JCC *vm, Token *tok, Type *basety, VarAttr *attr) {
     return tok;
 }
 
-static Token *global_variable(JCC *vm, Token *tok, Type *basety,
+static Token *global_variable(CCCC *vm, Token *tok, Type *basety,
                               VarAttr *attr) {
     bool first = true;
 
@@ -6272,7 +6272,7 @@ static Token *global_variable(JCC *vm, Token *tok, Type *basety,
 
 // Lookahead tokens and returns true if a given token is a start
 // of a function definition or declaration.
-static bool is_function(JCC *vm, Token *tok) {
+static bool is_function(CCCC *vm, Token *tok) {
     if (equal(tok, ";"))
         return false;
 
@@ -6285,7 +6285,7 @@ static bool is_function(JCC *vm, Token *tok) {
 }
 
 // Remove redundant tentative definitions.
-static void scan_globals(JCC *vm) {
+static void scan_globals(CCCC *vm) {
     Obj head;
     Obj *cur = &head;
 
@@ -6313,7 +6313,7 @@ static void scan_globals(JCC *vm) {
     vm->compiler.globals = head.next;
 }
 
-static void warn_unused_globals(JCC *vm) {
+static void warn_unused_globals(CCCC *vm) {
     for (Obj *var = vm->compiler.globals; var; var = var->next) {
         if (!var->is_static || !var->is_definition || var->is_local_symbol ||
             var->is_macro_generated || !var->tok || var->is_used ||
@@ -6336,13 +6336,13 @@ static void warn_unused_globals(JCC *vm) {
         if (redeclaration_used)
             continue;
 
-        warn_tok(vm, var->tok, JCC_WARN_UNUSED, "unused %s '%s'",
+        warn_tok(vm, var->tok, CCCC_WARN_UNUSED, "unused %s '%s'",
                  var->is_function ? "function" : "variable",
                  obj_display_name(var));
     }
 }
 
-static void declare_builtin_functions(JCC *vm) {
+static void declare_builtin_functions(CCCC *vm) {
     // alloca(size) -> void*
     Type *ty = func_type(vm, pointer_to(vm, ty_void));
     ty->params = copy_type(vm, ty_int);
@@ -6401,7 +6401,7 @@ static void declare_builtin_functions(JCC *vm) {
 }
 
 // program = (typedef | function-definition | global-variable)*
-Obj *parse(JCC *vm, Token *tok) {
+Obj *parse(CCCC *vm, Token *tok) {
     // Initialize error recovery placeholder
     error_var->ty = ty_error;
 
@@ -6490,23 +6490,23 @@ Obj *parse(JCC *vm, Token *tok) {
 }
 
 // Exposed parsing functions for K's ast_parse API
-Node *cc_parse_expr(JCC *vm, Token **rest, Token *tok) {
+Node *cc_parse_expr(CCCC *vm, Token **rest, Token *tok) {
     return expr(vm, rest, tok);
 }
 
-Node *cc_parse_assign(JCC *vm, Token **rest, Token *tok) {
+Node *cc_parse_assign(CCCC *vm, Token **rest, Token *tok) {
     return assign(vm, rest, tok);
 }
 
-Node *cc_parse_stmt(JCC *vm, Token **rest, Token *tok) {
+Node *cc_parse_stmt(CCCC *vm, Token **rest, Token *tok) {
     return stmt(vm, rest, tok);
 }
 
-Node *cc_parse_compound_stmt(JCC *vm, Token **rest, Token *tok) {
+Node *cc_parse_compound_stmt(CCCC *vm, Token **rest, Token *tok) {
     return compound_stmt(vm, rest, tok, NULL);
 }
 
-int64_t cc_eval(JCC *vm, Node *node) { return eval(vm, node); }
-double  cc_eval_double(JCC *vm, Node *node) { return eval_double(vm, node); }
+int64_t cc_eval(CCCC *vm, Node *node) { return eval(vm, node); }
+double  cc_eval_double(CCCC *vm, Node *node) { return eval_double(vm, node); }
 
-void cc_init_parser(JCC *vm) { error_var->ty = ty_error; }
+void cc_init_parser(CCCC *vm) { error_var->ty = ty_error; }

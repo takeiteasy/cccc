@@ -1,6 +1,6 @@
 /*
  * Test: Block definition, type syntax, and actual invocation
- * Tests the Apple Blocks extension for JCC
+ * Tests the Apple Blocks extension for CCCC
  */
 
 int main() {

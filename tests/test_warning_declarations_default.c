@@ -1,4 +1,4 @@
-// JCC_REJECT_STDERR: warning:
+// CCCC_REJECT_STDERR: warning:
 global_value;
 
 int zero(void) {

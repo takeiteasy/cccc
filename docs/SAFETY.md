@@ -1,10 +1,10 @@
-# JCC Memory Safety Features
+# CCCC Memory Safety Features
 
-JCC includes a suite of powerful memory safety features designed to detect common C programming errors at runtime. These features can be enabled individually or together to provide comprehensive protection against bugs like buffer overflows, use-after-free, and type confusion.
+CCCC includes a suite of powerful memory safety features designed to detect common C programming errors at runtime. These features can be enabled individually or together to provide comprehensive protection against bugs like buffer overflows, use-after-free, and type confusion.
 
 ## Safety Levels (Quick Start)
 
-JCC provides preset safety levels that make it easy to choose the right combination of features without needing to understand every individual flag. Each level builds on the previous one, adding more comprehensive checks with increasing performance overhead.
+CCCC provides preset safety levels that make it easy to choose the right combination of features without needing to understand every individual flag. Each level builds on the previous one, adding more comprehensive checks with increasing performance overhead.
 
 ### Level 0: None (`-0` or `--safety=none`)
 **Purpose:** Maximum performance, zero safety overhead
@@ -12,8 +12,8 @@ JCC provides preset safety levels that make it easy to choose the right combinat
 **Use when:** You've thoroughly tested your code and need maximum speed, or when running in a trusted/controlled environment
 
 ```bash
-./jcc -0 program.c
-./jcc --safety=none program.c
+./cccc -0 program.c
+./cccc --safety=none program.c
 ```
 
 **Enabled features:** None
@@ -26,8 +26,8 @@ JCC provides preset safety levels that make it easy to choose the right combinat
 **Use when:** Running production code where you want essential safety without significant performance impact
 
 ```bash
-./jcc -1 program.c
-./jcc --safety=basic program.c
+./cccc -1 program.c
+./cccc --safety=basic program.c
 ```
 
 **Enabled features:**
@@ -48,8 +48,8 @@ JCC provides preset safety levels that make it easy to choose the right combinat
 **Use when:** Developing, testing, or running code where safety is more important than raw performance
 
 ```bash
-./jcc -2 program.c
-./jcc --safety=standard program.c
+./cccc -2 program.c
+./cccc --safety=standard program.c
 ```
 
 **Enabled features:**
@@ -68,8 +68,8 @@ JCC provides preset safety levels that make it easy to choose the right combinat
 **Use when:** Debugging mysterious crashes, memory corruption, or security-critical code
 
 ```bash
-./jcc -3 program.c
-./jcc --safety=max program.c
+./cccc -3 program.c
+./cccc --safety=max program.c
 ```
 
 **Enabled features:**
@@ -83,7 +83,7 @@ JCC provides preset safety levels that make it easy to choose the right combinat
   - Stack variable instrumentation with runtime errors
   - Random canaries (unpredictable stack protection)
 
-**Detects:** Everything possible - every memory safety bug JCC can catch
+**Detects:** Everything possible - every memory safety bug CCCC can catch
 
 ---
 
@@ -93,13 +93,13 @@ Safety levels are **additive** - you can combine a preset level with individual 
 
 ```bash
 # Level 2 + temporal tagging (not in Level 2 by default)
-./jcc -2 --memory-tagging program.c
+./cccc -2 --memory-tagging program.c
 
 # Level 1 + control flow integrity
-./jcc -1 --control-flow-integrity program.c
+./cccc -1 --control-flow-integrity program.c
 
 # Level 3 is already maximum, so additional flags are redundant
-./jcc -3 program.c  # Already includes everything
+./cccc -3 program.c  # Already includes everything
 ```
 
 ### Quick Reference
@@ -331,7 +331,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --uaf-detection test_uaf.c
+$ ./cccc --uaf-detection test_uaf.c
 
 ========== USE-AFTER-FREE DETECTED ==========
 Attempted to access freed memory
@@ -358,7 +358,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc -f test_double_free.c
+$ ./cccc -f test_double_free.c
 
 ========== DOUBLE-FREE DETECTED ==========
 Attempted to free already-freed memory
@@ -384,7 +384,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --bounds-checks test_bounds.c
+$ ./cccc --bounds-checks test_bounds.c
 
 ========== ARRAY BOUNDS ERROR ==========
 Pointer is outside allocated region
@@ -415,7 +415,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --type-checks test_type_check.c
+$ ./cccc --type-checks test_type_check.c
 
 ========== TYPE MISMATCH DETECTED ==========
 Pointer type mismatch on dereference
@@ -440,7 +440,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --uninitialized-detection test_uninit.c
+$ ./cccc --uninitialized-detection test_uninit.c
 
 ========== UNINITIALIZED VARIABLE READ ==========
 Attempted to read uninitialized variable
@@ -467,7 +467,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --overflow-checks -I./include test_overflow_add.c
+$ ./cccc --overflow-checks -I./include test_overflow_add.c
 
 ========== INTEGER OVERFLOW ==========
 Addition overflow detected
@@ -490,7 +490,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --overflow-checks -I./include test_overflow_sub.c
+$ ./cccc --overflow-checks -I./include test_overflow_sub.c
 
 ========== INTEGER OVERFLOW ==========
 Subtraction overflow detected
@@ -513,7 +513,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --overflow-checks -I./include test_overflow_mul.c
+$ ./cccc --overflow-checks -I./include test_overflow_mul.c
 
 ========== INTEGER OVERFLOW ==========
 Multiplication overflow detected
@@ -535,7 +535,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --overflow-checks test_overflow_div.c
+$ ./cccc --overflow-checks test_overflow_div.c
 
 ========== DIVISION BY ZERO ==========
 Attempted division by zero
@@ -558,7 +558,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --overflow-checks -I./include test_overflow_div_signed.c
+$ ./cccc --overflow-checks -I./include test_overflow_div_signed.c
 
 ========== INTEGER OVERFLOW ==========
 Division overflow detected
@@ -585,7 +585,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --overflow-checks test_overflow_none.c
+$ ./cccc --overflow-checks test_overflow_none.c
 $ echo $?
 42
 ```
@@ -608,7 +608,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc test_stack_overflow_recursion.c
+$ ./cccc test_stack_overflow_recursion.c
 
 ========== STACK OVERFLOW ==========
 Stack space exhausted
@@ -633,7 +633,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc test_stack_overflow_large_frame.c
+$ ./cccc test_stack_overflow_large_frame.c
 
 ========== STACK OVERFLOW ==========
 Stack space exhausted
@@ -662,7 +662,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --dangling-pointers test_dangling_pointer.c
+$ ./cccc --dangling-pointers test_dangling_pointer.c
 
 ========== DANGLING STACK POINTER ==========
 Attempted to dereference invalidated stack pointer
@@ -692,7 +692,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --alignment-checks test_alignment.c
+$ ./cccc --alignment-checks test_alignment.c
 
 ========== ALIGNMENT ERROR ==========
 Pointer is misaligned for type
@@ -736,7 +736,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --memory-tagging -V test_temporal_tagging.c
+$ ./cccc --memory-tagging -V test_temporal_tagging.c
 
 ========== TEMPORAL SAFETY VIOLATION ==========
 Stale pointer access detected
@@ -756,10 +756,10 @@ combine with `-V` / `--vm-heap` when using programs that call `malloc`/`free` di
 **Combining with VM Heap Mode:**
 ```bash
 # For code using malloc/free, combine with --vm-heap
-$ ./jcc --memory-tagging --vm-heap my_program.c
+$ ./cccc --memory-tagging --vm-heap my_program.c
 
 # Or use short flags
-$ ./jcc -TV my_program.c
+$ ./cccc -TV my_program.c
 ```
 
 ### Control Flow Integrity
@@ -776,7 +776,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --control-flow-integrity test_cfi_normal.c
+$ ./cccc --control-flow-integrity test_cfi_normal.c
 $ echo $?
 42
 ```
@@ -801,7 +801,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc -C test_cfi_recursion.c
+$ ./cccc -C test_cfi_recursion.c
 $ echo $?
 42
 ```
@@ -815,7 +815,7 @@ $ echo $?
 
 **Using the short flag:**
 ```bash
-$ ./jcc -C my_program.c
+$ ./cccc -C my_program.c
 ```
 
 ### FFI Deny List
@@ -831,7 +831,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --ffi-deny=printf0 test_ffi_deny.c
+$ ./cccc --ffi-deny=printf0 test_ffi_deny.c
 
 ========== FFI SAFETY ERROR ==========
 Error type: FFI Access Denied
@@ -856,7 +856,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --ffi-allow=printf0 test_ffi_allow.c
+$ ./cccc --ffi-allow=printf0 test_ffi_allow.c
 
 This call is allowed
 
@@ -881,7 +881,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --disable-ffi test_disable_ffi.c
+$ ./cccc --disable-ffi test_disable_ffi.c
 
 ========== FFI SAFETY ERROR ==========
 Error type: FFI Disabled
@@ -894,11 +894,11 @@ PC offset:  12
 ### Fatal FFI Errors
 ```bash
 # Default behavior: warnings only
-$ ./jcc --ffi-deny=printf0 test.c
+$ ./cccc --ffi-deny=printf0 test.c
 <FFI error printed, program continues, returns 0>
 
 # Fatal mode: abort on error
-$ ./jcc --ffi-deny=printf0 --ffi-errors-fatal test.c
+$ ./cccc --ffi-deny=printf0 --ffi-errors-fatal test.c
 <FFI error printed, program aborts as a runtime error>
 ```
 
@@ -915,7 +915,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --ffi-type-checking test_ffi_arg_count.c
+$ ./cccc --ffi-type-checking test_ffi_arg_count.c
 
 error: FFI function 'strcmp': argument count mismatch (requires 2, called with 1)
 ```
@@ -934,7 +934,7 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --ffi-type-checking test_ffi_type_mismatch.c
+$ ./cccc --ffi-type-checking test_ffi_type_mismatch.c
 
 test_ffi_type_mismatch.c:7: FFI function 'strlen': argument 1 type mismatch
   Expected: char*
@@ -959,19 +959,19 @@ int main() {
 ```
 
 ```bash
-$ ./jcc --ffi-type-checking test_ffi_valid.c
+$ ./cccc --ffi-type-checking test_ffi_valid.c
 <Program compiles and runs successfully>
 ```
 
 ## API Usage
 
-The FFI safety features can also be controlled programmatically using the JCC API:
+The FFI safety features can also be controlled programmatically using the CCCC API:
 
 ```c
-#include "jcc.h"
+#include "cccc.h"
 
 int main() {
-    JCC vm;
+    CCCC vm;
     cc_init(&vm, 0);  // Initialize without debugger
 
     // Configure FFI safety

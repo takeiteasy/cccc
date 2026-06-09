@@ -1,9 +1,9 @@
-// Test __jcc_gensym and $gensym for collision-safe generated names.
+// Test __cccc_gensym and $gensym for collision-safe generated names.
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *gensym_test(void) {
     const char *a = $gensym("helper");
-    const char *b = __jcc_gensym(_VM, "helper");
+    const char *b = __cccc_gensym(_VM, "helper");
 
     int same = 1;
     for (int i = 0; a[i] || b[i]; i++) {

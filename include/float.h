@@ -1,4 +1,4 @@
-/* float.h - floating point characteristics for JCC C compiler */
+/* float.h - floating point characteristics for CCCC C compiler */
 
 #ifndef __FLOAT_H
 #define __FLOAT_H

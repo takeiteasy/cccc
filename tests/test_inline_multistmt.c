@@ -1,4 +1,4 @@
-// JCC_FLAGS: -O2
+// CCCC_FLAGS: -O2
 // Multi-statement static inline functions expand inline
 static inline int clamp(int x, int lo, int hi) {
     if (x < lo) return lo;

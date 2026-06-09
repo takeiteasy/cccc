@@ -1,5 +1,5 @@
-// JCC_FLAGS: -Wconversion
-// JCC_EXPECT_STDERR: \[-Wsign-conversion\]
+// CCCC_FLAGS: -Wconversion
+// CCCC_EXPECT_STDERR: \[-Wsign-conversion\]
 
 int main(void) {
     int x = -1;

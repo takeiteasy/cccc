@@ -1,5 +1,5 @@
 /*
- JCC: JIT C Compiler
+ CCCC: Comprehensiev C Compensation Compiler
 
  Copyright (C) 2025 George Watson
 
@@ -17,13 +17,13 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "jcc.h"
+#include "cccc.h"
 #include "./internal.h"
 
 // Bytecode file format (V5 - 32-bit text words):
-//   Magic: "JCC\0" (4 bytes)
-//   Version: JCC_VERSION (4 bytes)
-//   Flags: JCCFlags bitfield (4 bytes)
+//   Magic: "CCCC\0" (4 bytes)
+//   Version: CCCC_VERSION (4 bytes)
+//   Flags: CCCCFlags bitfield (4 bytes)
 //   Text size: size in bytes (8 bytes)
 //   Data size: size in bytes (8 bytes)
 //   Main offset: instruction index of main() (8 bytes)
@@ -43,7 +43,7 @@ static int get_opcode_operand_count(int op) {
     return cc_opcode_operand_words(op);
 }
 
-static int get_instruction_word_count(JCCInstrWord *text, long long pc,
+static int get_instruction_word_count(CCCCInstrWord *text, long long pc,
                                       long long num_instructions) {
     int op = (int)text[pc];
     int operand_count = get_opcode_operand_count(op);
@@ -54,10 +54,10 @@ static int get_instruction_word_count(JCCInstrWord *text, long long pc,
 
     int word_count = operand_count + 1;
     if (op == JMPT) {
-        JCCPc table_pc = text[pc + 1];
-        JCCInstrWord count = text[pc + 2];
+        CCCCPc table_pc = text[pc + 1];
+        CCCCInstrWord count = text[pc + 2];
         if (table_pc == pc + 4) {
-            if (table_pc + (JCCPc)count > (JCCPc)num_instructions)
+            if (table_pc + (CCCCPc)count > (CCCCPc)num_instructions)
                 return -2;
             word_count += (int)count;
         }
@@ -65,7 +65,7 @@ static int get_instruction_word_count(JCCInstrWord *text, long long pc,
     return word_count;
 }
 
-int cc_write_bytecode(JCC *vm, FILE *f) {
+int cc_write_bytecode(CCCC *vm, FILE *f) {
     if (!vm || !f) {
         fprintf(stderr, "error: invalid arguments to cc_write_bytecode\n");
         return -1;
@@ -77,10 +77,10 @@ int cc_write_bytecode(JCC *vm, FILE *f) {
     }
 
     // Calculate sizes
-    long long text_size = ((long long)vm->text_ptr + 1) * (long long)sizeof(JCCInstrWord);
+    long long text_size = ((long long)vm->text_ptr + 1) * (long long)sizeof(CCCCInstrWord);
     long long data_size = vm->data_ptr - vm->data_seg;
     long long main_offset = vm->text_seg[0];  // main() instruction index
-    long long num_instructions = text_size / (long long)sizeof(JCCInstrWord);
+    long long num_instructions = text_size / (long long)sizeof(CCCCInstrWord);
     long long data_reloc_count = vm->compiler.num_data_relocs;
     long long return_buffer_count = vm->compiler.return_buffer_count;
     long long return_buffer_size = vm->compiler.return_buffer_size;
@@ -99,7 +99,7 @@ int cc_write_bytecode(JCC *vm, FILE *f) {
         }
     }
 
-    JCCInstrWord *text_copy = malloc(text_size);
+    CCCCInstrWord *text_copy = malloc(text_size);
     if (!text_copy) {
         fprintf(stderr, "error: failed to allocate temporary buffer\n");
         return -1;
@@ -163,9 +163,9 @@ int cc_write_bytecode(JCC *vm, FILE *f) {
     free(is_operand);
 
     // Write header
-    if (fwrite(JCC_MAGIC, 1, 4, f) != 4) goto write_error;
+    if (fwrite(CCCC_MAGIC, 1, 4, f) != 4) goto write_error;
 
-    int version = JCC_VERSION;
+    int version = CCCC_VERSION;
     if (fwrite(&version, sizeof(int), 1, f) != 1) goto write_error;
 
     uint32_t flags = vm->flags;
@@ -273,7 +273,7 @@ write_error:
     return -1;
 }
 
-int cc_save_bytecode(JCC *vm, const char *path) {
+int cc_save_bytecode(CCCC *vm, const char *path) {
     if (!vm || !path) {
         fprintf(stderr, "error: invalid arguments to cc_save_bytecode\n");
         return -1;
@@ -302,7 +302,7 @@ int cc_save_bytecode(JCC *vm, const char *path) {
     return 0;
 }
 
-static int load_bytecode(JCC *vm, const char *data, size_t size) {
+static int load_bytecode(CCCC *vm, const char *data, size_t size) {
     const char *cursor = data;
     const char *end = data + size;
 
@@ -315,7 +315,7 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
     cursor += sizeof(TYPE);
 
     // Read magic
-    if (cursor + 4 > end || memcmp(cursor, JCC_MAGIC, 4) != 0) {
+    if (cursor + 4 > end || memcmp(cursor, CCCC_MAGIC, 4) != 0) {
         fprintf(stderr, "error: invalid bytecode file (bad magic)\n");
         return -1;
     }
@@ -323,9 +323,9 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
 
     // Read version - only accept the current 32-bit instruction format.
     READ_AND_INCR(version, int);
-    if (version != JCC_VERSION) {
+    if (version != CCCC_VERSION) {
         fprintf(stderr, "error: unsupported bytecode version %d (expected %d)\n",
-                version, JCC_VERSION);
+                version, CCCC_VERSION);
         return -1;
     }
 
@@ -343,8 +343,8 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
         data_reloc_count > MAX_CALLS ||
         cursor + text_size + data_size +
             data_reloc_count * 4 * (long long)sizeof(long long) > end ||
-        text_size > vm->poolsize_max * (long long)sizeof(JCCInstrWord) ||
-        text_size % (long long)sizeof(JCCInstrWord) != 0 ||
+        text_size > vm->poolsize_max * (long long)sizeof(CCCCInstrWord) ||
+        text_size % (long long)sizeof(CCCCInstrWord) != 0 ||
         data_size > vm->poolsize_max) {
         fprintf(stderr, "error: invalid bytecode sizes\n");
         return -1;
@@ -354,7 +354,7 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
     vm_alloc_segments(vm);
 
     // Ensure enough committed space for the bytecode being loaded
-    JCCPc num_text_words = (JCCPc)(text_size / (long long)sizeof(JCCInstrWord));
+    CCCCPc num_text_words = (CCCCPc)(text_size / (long long)sizeof(CCCCInstrWord));
     if (vm_text_ensure_count(vm, num_text_words) != 0) {
         fprintf(stderr, "error: could not commit text segment for bytecode\n");
         return -1;
@@ -535,7 +535,7 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
         }
     }
 
-    long long num_instructions = text_size / (long long)sizeof(JCCInstrWord);
+    long long num_instructions = text_size / (long long)sizeof(CCCCInstrWord);
 
     // Mark operand positions
     char *is_operand = calloc(num_instructions, 1);
@@ -568,7 +568,7 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
     free(is_operand);
 
     // Set up pointers (heap_ptr/heap_end/free_list already set by vm_alloc_segments)
-    vm->text_ptr = (JCCPc)(text_size / (long long)sizeof(JCCInstrWord)) - 1;
+    vm->text_ptr = (CCCCPc)(text_size / (long long)sizeof(CCCCInstrWord)) - 1;
     vm->data_ptr = vm->data_seg + data_size;
     vm->text_seg[0] = main_offset;  // Restore main offset
 
@@ -602,7 +602,7 @@ static int load_bytecode(JCC *vm, const char *data, size_t size) {
 #undef READ_AND_INCR
 }
 
-int cc_load_bytecode(JCC *vm, const char *path) {
+int cc_load_bytecode(CCCC *vm, const char *path) {
     if (!vm || !path) {
         fprintf(stderr, "error: invalid arguments to cc_load_bytecode\n");
         return -1;
@@ -638,7 +638,7 @@ int cc_load_bytecode(JCC *vm, const char *path) {
     return result;
 }
 
-void cc_compile(JCC *vm, Obj *prog) {
+void cc_compile(CCCC *vm, Obj *prog) {
     if (!vm) {
         error("VM instance is NULL");
     }
@@ -652,7 +652,7 @@ void cc_compile(JCC *vm, Obj *prog) {
         vm->compiler.current_codegen_fn = NULL;
 
         // Initialize source map for debugger (if enabled)
-        if (vm->flags & JCC_ENABLE_DEBUGGER) {
+        if (vm->flags & CCCC_ENABLE_DEBUGGER) {
             vm->dbg.source_map_capacity = 1024;
             vm->dbg.source_map = malloc(vm->dbg.source_map_capacity * sizeof(SourceMap));
             if (!vm->dbg.source_map) {

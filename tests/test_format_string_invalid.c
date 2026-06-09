@@ -1,5 +1,5 @@
-// JCC_FLAGS: --format-string-checks
-// JCC_EXPECT_STDERR: format expects 2, call provides 1
+// CCCC_FLAGS: --format-string-checks
+// CCCC_EXPECT_STDERR: format expects 2, call provides 1
 /*
  * Test format string validation - invalid format strings
  * This test should emit a warning with -F/--format-string-checks enabled

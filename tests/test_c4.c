@@ -1,5 +1,5 @@
 // c4.c - C in four functions
-// JCC_RUN_ARGS: tests/test_fortytwo.c
+// CCCC_RUN_ARGS: tests/test_fortytwo.c
 
 // char, int, and pointer types
 // if, while, return, and expression statements

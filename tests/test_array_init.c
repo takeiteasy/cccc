@@ -1,4 +1,4 @@
-// Test array initialization in JCC
+// Test array initialization in CCCC
 // Expected return: 42
 
 int main() {

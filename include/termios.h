@@ -1,10 +1,10 @@
-/* termios.h - terminal I/O declarations for JCC */
+/* termios.h - terminal I/O declarations for CCCC */
 
 #ifndef __TERMIOS_H
 #define __TERMIOS_H
 
 #ifdef _WIN32
-#error "<termios.h> is only available on POSIX targets in JCC"
+#error "<termios.h> is only available on POSIX targets in CCCC"
 #endif
 
 #ifdef __APPLE__

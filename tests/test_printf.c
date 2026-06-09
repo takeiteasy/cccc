@@ -6,7 +6,7 @@
 int main() {
     int x = 10;
     int y = 20;
-    char *name = "JCC";
+    char *name = "CCCC";
     
     printf("Hello from %s!\n", name);
     printf("x = %d, y = %d\n", x, y);

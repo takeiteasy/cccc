@@ -1,4 +1,4 @@
-/* limits.h - integer type limits for JCC C compiler */
+/* limits.h - integer type limits for CCCC C compiler */
 
 #ifndef __LIMITS_H
 #define __LIMITS_H

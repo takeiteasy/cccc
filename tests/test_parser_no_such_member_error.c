@@ -1,5 +1,5 @@
 // EXPECT_COMPILE_ERROR
-// JCC_EXPECT_STDERR: no such member 'bar'
+// CCCC_EXPECT_STDERR: no such member 'bar'
 struct Foo { int x; };
 int main(void) {
     struct Foo f;

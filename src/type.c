@@ -1,5 +1,5 @@
 /*
- JCC: JIT C Compiler
+ CCCC: Comprehensiev C Compensation Compiler
 
  Copyright (C) 2025 George Watson
 
@@ -19,7 +19,7 @@
  This file was original part of chibicc by Rui Ueyama (MIT) https://github.com/rui314/chibicc
 */
 
-#include "jcc.h"
+#include "cccc.h"
 #include "./internal.h"
 
 // Type sizes now match standard C sizes with proper VM instruction support:
@@ -48,7 +48,7 @@ Type *ty_ldcomplex = &(Type){TY_COMPLEX, 32, 16, false, false, false, false, NUL
 static Type ty_error_obj = {TY_ERROR, 0, 1};
 Type *ty_error = &ty_error_obj;
 
-static Type *new_type(JCC *vm, TypeKind kind, int size, int align) {
+static Type *new_type(CCCC *vm, TypeKind kind, int size, int align) {
     Type *ty = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
     memset(ty, 0, sizeof(Type));
     ty->kind = kind;
@@ -134,7 +134,7 @@ bool is_compatible(Type *t1, Type *t2) {
     }
 }
 
-Type *copy_type(JCC *vm, Type *ty) {
+Type *copy_type(CCCC *vm, Type *ty) {
     Type *ret = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
     *ret = *ty;
     ret->origin = ty;
@@ -142,14 +142,14 @@ Type *copy_type(JCC *vm, Type *ty) {
     return ret;
 }
 
-Type *pointer_to(JCC *vm, Type *base) {
+Type *pointer_to(CCCC *vm, Type *base) {
     Type *ty = new_type(vm, TY_PTR, 8, 8);
     ty->base = base;
     ty->is_unsigned = true;
     return ty;
 }
 
-Type *func_type(JCC *vm, Type *return_ty) {
+Type *func_type(CCCC *vm, Type *return_ty) {
     // The C spec disallows sizeof(<function type>), but
     // GCC allows that and the expression is evaluated to 1.
     Type *ty = new_type(vm, TY_FUNC, 1, 1);
@@ -157,7 +157,7 @@ Type *func_type(JCC *vm, Type *return_ty) {
     return ty;
 }
 
-Type *array_of(JCC *vm, Type *base, int len) {
+Type *array_of(CCCC *vm, Type *base, int len) {
     int sz;
     if (len > 0 && __builtin_mul_overflow(base->size, len, &sz))
         error("array size overflow: element size %d times length %d exceeds INT_MAX", base->size, len);
@@ -169,33 +169,33 @@ Type *array_of(JCC *vm, Type *base, int len) {
     return ty;
 }
 
-Type *vla_of(JCC *vm, Type *base, Node *len) {
+Type *vla_of(CCCC *vm, Type *base, Node *len) {
     Type *ty = new_type(vm, TY_VLA, 8, 8);
     ty->base = base;
     ty->vla_len = len;
     return ty;
 }
 
-Type *enum_type(JCC *vm) {
+Type *enum_type(CCCC *vm) {
     return new_type(vm, TY_ENUM, 4, 4);  // enums are int-sized (4 bytes)
 }
 
-Type *struct_type(JCC *vm) {
+Type *struct_type(CCCC *vm) {
     return new_type(vm, TY_STRUCT, 0, 1);
 }
 
-Type *union_type(JCC *vm) {
+Type *union_type(CCCC *vm) {
     return new_type(vm, TY_UNION, 0, 1);
 }
 
-Type *block_type(JCC *vm, Type *return_ty, Type *params) {
+Type *block_type(CCCC *vm, Type *return_ty, Type *params) {
     Type *ty = new_type(vm, TY_BLOCK, 8, 8);  // Block pointers are 8 bytes
     ty->return_ty = return_ty;
     ty->params = params;
     return ty;
 }
 
-Type *complex_type_for(JCC *vm, Type *base) {
+Type *complex_type_for(CCCC *vm, Type *base) {
     (void)vm;
     if (!base || base->kind == TY_DOUBLE)
         return ty_dcomplex;
@@ -242,7 +242,7 @@ static int get_integer_rank(Type *ty) {
 }
 
 // Usual arithmetic conversions (C99 6.3.1.8)
-static Type *get_common_type(JCC *vm, Type *ty1, Type *ty2) {
+static Type *get_common_type(CCCC *vm, Type *ty1, Type *ty2) {
     // Handle error types - propagate error
     if (!ty1 || !ty2 || ty1->kind == TY_ERROR || ty2->kind == TY_ERROR)
         return ty_error;
@@ -266,11 +266,11 @@ static Type *get_common_type(JCC *vm, Type *ty1, Type *ty2) {
     // Step 1: If either operand has type long double, the other is converted to long double
     if (ty1->kind == TY_LDOUBLE || ty2->kind == TY_LDOUBLE)
         return ty_ldouble;
-    
+
     // Step 2: Otherwise, if either operand has type double, the other is converted to double
     if (ty1->kind == TY_DOUBLE || ty2->kind == TY_DOUBLE)
         return ty_double;
-    
+
     // Step 3: Otherwise, if either operand has type float, the other is converted to float
     if (ty1->kind == TY_FLOAT || ty2->kind == TY_FLOAT)
         return ty_float;
@@ -294,7 +294,7 @@ static Type *get_common_type(JCC *vm, Type *ty1, Type *ty2) {
     // is converted to the type of the operand with unsigned integer type
     Type *unsigned_ty = ty1->is_unsigned ? ty1 : ty2;
     Type *signed_ty = ty1->is_unsigned ? ty2 : ty1;
-    
+
     if (get_integer_rank(unsigned_ty) >= get_integer_rank(signed_ty))
         return unsigned_ty;
 
@@ -318,7 +318,7 @@ static Type *get_common_type(JCC *vm, Type *ty1, Type *ty2) {
 // be promoted to match with the other.
 //
 // This operation is called the "usual arithmetic conversion".
-static void usual_arith_conv(JCC *vm, Node **lhs, Node **rhs) {
+static void usual_arith_conv(CCCC *vm, Node **lhs, Node **rhs) {
     Type *ty = get_common_type(vm, (*lhs)->ty, (*rhs)->ty);
     // Skip casting if we have error types - they propagate automatically
     if (ty->kind == TY_ERROR)
@@ -338,7 +338,7 @@ static void usual_arith_conv(JCC *vm, Node **lhs, Node **rhs) {
 //
 // Integer cases are suppressed when the source is a constant that fits in the
 // destination type (e.g. `char c = 0;` is silent).
-void warn_implicit_conversion(JCC *vm, Node *expr, Type *to, Token *tok) {
+void warn_implicit_conversion(CCCC *vm, Node *expr, Type *to, Token *tok) {
     if (!vm || !expr || !to || !expr->ty)
         return;
     Type *from = expr->ty;
@@ -354,7 +354,7 @@ void warn_implicit_conversion(JCC *vm, Node *expr, Type *to, Token *tok) {
             return;
         if (from->size > to->size) {
             // Narrowing: integer -> smaller integer.
-            warn_tok(vm, tok, JCC_WARN_CONVERSION,
+            warn_tok(vm, tok, CCCC_WARN_CONVERSION,
                      "implicit conversion loses integer precision: %s%s to %s%s",
                      from->is_unsigned ? "unsigned " : "",
                      (from->kind == TY_LONG) ? "long" :
@@ -366,7 +366,7 @@ void warn_implicit_conversion(JCC *vm, Node *expr, Type *to, Token *tok) {
                      (to->kind == TY_SHORT) ? "short" : "char");
         } else if (from->is_unsigned != to->is_unsigned) {
             // Same-size (or widening) but signedness change.
-            warn_tok(vm, tok, JCC_WARN_SIGN_CONVERSION,
+            warn_tok(vm, tok, CCCC_WARN_SIGN_CONVERSION,
                      "implicit conversion changes signedness");
         }
         return;
@@ -375,15 +375,15 @@ void warn_implicit_conversion(JCC *vm, Node *expr, Type *to, Token *tok) {
     if (is_flonum(from) || is_flonum(to)) {
         if (is_integer(to)) {
             // float -> integer (value always truncated).
-            warn_tok(vm, tok, JCC_WARN_FLOAT_CONVERSION,
+            warn_tok(vm, tok, CCCC_WARN_FLOAT_CONVERSION,
                      "implicit conversion from floating-point to integer");
         } else if (is_integer(from)) {
             // integer -> float (may lose precision for large integers).
-            warn_tok(vm, tok, JCC_WARN_FLOAT_CONVERSION,
+            warn_tok(vm, tok, CCCC_WARN_FLOAT_CONVERSION,
                      "implicit conversion from integer to floating-point");
         } else if (is_flonum(from) && is_flonum(to) && from->size > to->size) {
             // float narrowing: double -> float, long double -> double/float.
-            warn_tok(vm, tok, JCC_WARN_FLOAT_CONVERSION,
+            warn_tok(vm, tok, CCCC_WARN_FLOAT_CONVERSION,
                      "implicit conversion loses floating-point precision");
         }
     }
@@ -392,7 +392,7 @@ void warn_implicit_conversion(JCC *vm, Node *expr, Type *to, Token *tok) {
 // Check for a signed/unsigned comparison mismatch BEFORE usual_arith_conv
 // normalises signedness away.  Both operands must be integers after promotion.
 // Constant non-negative operands are exempted (e.g. `x < 5` is quiet).
-static void check_sign_compare(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
+static void check_sign_compare(CCCC *vm, Node *lhs, Node *rhs, Token *tok) {
     if (!is_integer(lhs->ty) || !is_integer(rhs->ty))
         return;
     // Apply integer promotion to reflect what the comparison actually uses.
@@ -405,11 +405,11 @@ static void check_sign_compare(JCC *vm, Node *lhs, Node *rhs, Token *tok) {
         return;
     if (rhs->kind == ND_NUM && rhs->val >= 0)
         return;
-    warn_tok(vm, tok, JCC_WARN_SIGN_COMPARE,
+    warn_tok(vm, tok, CCCC_WARN_SIGN_COMPARE,
              "comparison of integers with different signs");
 }
 
-void add_type(JCC *vm, Node *node) {
+void add_type(CCCC *vm, Node *node) {
     if (!node || (node->ty && node->kind != ND_COMPLEX))
         return;
 
@@ -624,7 +624,7 @@ void add_type(JCC *vm, Node *node) {
             // Block literal type is already set during parsing (TY_BLOCK)
             // If not set, infer from block_fn
             if (!node->ty && node->block_fn && node->block_fn->ty) {
-                node->ty = block_type(vm, node->block_fn->ty->return_ty, 
+                node->ty = block_type(vm, node->block_fn->ty->return_ty,
                                       node->block_fn->ty->params);
             }
             return;

@@ -1,4 +1,4 @@
-// JCC_FLAGS: --memory-poisoning -V
+// CCCC_FLAGS: --memory-poisoning -V
 // Memory poisoning test — malloc/free with poisoning enabled should not crash
 #include <stdlib.h>
 #include <string.h>

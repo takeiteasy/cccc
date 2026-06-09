@@ -1,5 +1,5 @@
 /*
- JCC: JIT C Compiler
+ CCCC: Comprehensiev C Compensation Compiler
 
  Copyright (C) 2025 George Watson
 
@@ -19,12 +19,12 @@
 
 #include "./internal.h"
 
-#ifdef JCC_HAS_LLVM
+#ifdef CCCC_HAS_LLVM
 #include <llvm/Config/llvm-config.h>
 #endif
 
 bool cc_llvm_backend_enabled(void) {
-#ifdef JCC_HAS_LLVM
+#ifdef CCCC_HAS_LLVM
     return true;
 #else
     return false;
@@ -32,7 +32,7 @@ bool cc_llvm_backend_enabled(void) {
 }
 
 const char *cc_llvm_backend_version(void) {
-#ifdef JCC_HAS_LLVM
+#ifdef CCCC_HAS_LLVM
     return LLVM_VERSION_STRING;
 #else
     return "disabled";

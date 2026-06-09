@@ -1,6 +1,6 @@
 /*
  * Simple demonstration that volatile, restrict, register, and inline
- * keywords are now accepted by the JCC compiler
+ * keywords are now accepted by the CCCC compiler
  */
 
 // Inline function example

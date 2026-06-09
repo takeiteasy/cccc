@@ -1,9 +1,9 @@
 // math.h stdlib function registration
-#include "../jcc.h"
+#include "../cccc.h"
 #include <math.h>
 
 // Register all math.h functions
-void register_math_functions(JCC *vm) {
+void register_math_functions(CCCC *vm) {
     // Basic operations
     cc_register_cfunc(vm, "fabs", (void*)fabs, 1, 1);
     cc_register_cfunc(vm, "fabsf", (void*)fabsf, 1, 1);

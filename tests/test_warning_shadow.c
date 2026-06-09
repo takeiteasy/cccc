@@ -1,5 +1,5 @@
-// JCC_FLAGS: -Wshadow
-// JCC_EXPECT_STDERR: 3 warnings generated.
+// CCCC_FLAGS: -Wshadow
+// CCCC_EXPECT_STDERR: 3 warnings generated.
 
 int value;
 

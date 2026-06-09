@@ -1,4 +1,4 @@
-/* wctype.h - wide-character classification declarations for JCC */
+/* wctype.h - wide-character classification declarations for CCCC */
 
 #ifndef __WCTYPE_H
 #define __WCTYPE_H

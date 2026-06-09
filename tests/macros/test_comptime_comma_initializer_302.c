@@ -1,6 +1,6 @@
 // Ticket #302: comptime functions handle comma increments and zero initializers.
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 void comma_increment_repro(void) {
     char src_buf[2] = "a";
     char dst_buf[2];
@@ -15,7 +15,7 @@ void comma_increment_repro(void) {
 }
 comma_increment_repro();
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 void zero_initializer_repro(void) {
     unsigned char seen[256] = {0};
     if (seen[0] || seen[255])

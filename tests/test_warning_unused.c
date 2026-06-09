@@ -1,5 +1,5 @@
-// JCC_FLAGS: -Wunused
-// JCC_EXPECT_STDERR: 5 warnings generated.
+// CCCC_FLAGS: -Wunused
+// CCCC_EXPECT_STDERR: 5 warnings generated.
 
 static int unused_global;
 

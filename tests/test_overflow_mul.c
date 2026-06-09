@@ -1,4 +1,4 @@
-// EXPECT_RUNTIME_ERROR JCC_FLAGS: --overflow-checks
+// EXPECT_RUNTIME_ERROR CCCC_FLAGS: --overflow-checks
 // Test integer overflow detection for multiplication
 // This test should trigger an overflow error when run with --overflow-checks flag
 // Expected: Program aborts with overflow error message

@@ -6,10 +6,10 @@ struct Triple { int a; int b; int c; };
 
 // ---- Test 1: splice into a struct compound literal --------------------------
 // Builds a two-element chain and splices it as positional initializers for Point.
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *make_point($node_t *px, $node_t *py) {
-    $vm_t *vm = __jcc_get_vm();
-    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ px, py }, 2);
+    $vm_t *vm = __cccc_get_vm();
+    $node_t *chain = __cccc_node_list(vm, ($node_t*[]){ px, py }, 2);
     return $quote("(struct Point){ $@1 }", chain);
 }
 
@@ -21,10 +21,10 @@ int test_struct_splice(void) {
 // ---- Test 2: splice into an array compound literal --------------------------
 // Builds a three-element chain and splices it into int[3].
 // The compound literal decays to a pointer; sum all elements.
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *make_arr3($node_t *a, $node_t *b, $node_t *c) {
-    $vm_t *vm = __jcc_get_vm();
-    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ a, b, c }, 3);
+    $vm_t *vm = __cccc_get_vm();
+    $node_t *chain = __cccc_node_list(vm, ($node_t*[]){ a, b, c }, 3);
     return $quote("(int[3]){ $@1 }", chain);
 }
 
@@ -35,10 +35,10 @@ int test_array_splice(void) {
 
 // ---- Test 3: struct splice with expression arguments (not just literals) -----
 // Verifies that non-trivial caller expressions are correctly substituted.
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *make_triple($node_t *a, $node_t *b, $node_t *c) {
-    $vm_t *vm = __jcc_get_vm();
-    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ a, b, c }, 3);
+    $vm_t *vm = __cccc_get_vm();
+    $node_t *chain = __cccc_node_list(vm, ($node_t*[]){ a, b, c }, 3);
     return $quote("(struct Triple){ $@1 }", chain);
 }
 
@@ -50,10 +50,10 @@ int test_struct_triple(void) {
 
 // ---- Test 4: scalar $1 combined with a separate splice $@2 ------------------
 // Verifies that scalar and splice placeholders coexist in one template.
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *scale_and_make_point($node_t *scale, $node_t *px, $node_t *py) {
-    $vm_t *vm = __jcc_get_vm();
-    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ px, py }, 2);
+    $vm_t *vm = __cccc_get_vm();
+    $node_t *chain = __cccc_node_list(vm, ($node_t*[]){ px, py }, 2);
     return $quote("(struct Point){ $@2 }", scale, chain);
 }
 

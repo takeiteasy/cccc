@@ -2,25 +2,25 @@
 // Forward declare the function we'll generate
 int add_numbers(int a, int b);
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *gen_add_func(void) {
-    $vm_t *vm = __jcc_get_vm();
+    $vm_t *vm = __cccc_get_vm();
 
-    $type_t *int_type = __jcc_ast_get_type(vm, "int");
-    $obj_t *fn = __jcc_ast_function(vm, "add_numbers", int_type);
+    $type_t *int_type = __cccc_ast_get_type(vm, "int");
+    $obj_t *fn = __cccc_ast_function(vm, "add_numbers", int_type);
 
     // Add parameters
-    __jcc_ast_function_add_param(vm, fn, "a", int_type);
-    __jcc_ast_function_add_param(vm, fn, "b", int_type);
+    __cccc_ast_function_add_param(vm, fn, "a", int_type);
+    __cccc_ast_function_add_param(vm, fn, "b", int_type);
 
     // Body: return a + b;
-    $node_t *a_ref = __jcc_ast_param_ref(vm, fn, "a");
-    $node_t *b_ref = __jcc_ast_param_ref(vm, fn, "b");
-    $node_t *sum = __jcc_ast_binary(vm, nk_add, a_ref, b_ref);
-    $node_t *body = __jcc_ast_return(vm, sum);
-    __jcc_ast_function_set_body(vm, fn, body);
+    $node_t *a_ref = __cccc_ast_param_ref(vm, fn, "a");
+    $node_t *b_ref = __cccc_ast_param_ref(vm, fn, "b");
+    $node_t *sum = __cccc_ast_binary(vm, nk_add, a_ref, b_ref);
+    $node_t *body = __cccc_ast_return(vm, sum);
+    __cccc_ast_function_set_body(vm, fn, body);
 
-    return __jcc_ast_int_literal(vm, 0);
+    return __cccc_ast_int_literal(vm, 0);
 }
 
 int main(void) {

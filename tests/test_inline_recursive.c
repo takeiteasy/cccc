@@ -1,4 +1,4 @@
-// JCC_FLAGS: -O2 --inline-limit=100
+// CCCC_FLAGS: -O2 --inline-limit=100
 // Recursive static inline functions fall back to normal CALL
 static inline int fact(int n) {
     if (n <= 1) return 1;

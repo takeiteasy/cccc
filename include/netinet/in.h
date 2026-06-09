@@ -1,10 +1,10 @@
-/* netinet/in.h - Internet address declarations for JCC */
+/* netinet/in.h - Internet address declarations for CCCC */
 
 #ifndef __NETINET_IN_H
 #define __NETINET_IN_H
 
 #ifdef _WIN32
-#error "<netinet/in.h> is only available on POSIX targets in JCC"
+#error "<netinet/in.h> is only available on POSIX targets in CCCC"
 #endif
 
 #include "stdint.h"

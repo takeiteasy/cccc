@@ -1,5 +1,5 @@
-// JCC_FLAGS: -Wconversion
-// JCC_EXPECT_STDERR: \[-Wfloat-conversion\]
+// CCCC_FLAGS: -Wconversion
+// CCCC_EXPECT_STDERR: \[-Wfloat-conversion\]
 
 int main(void) {
     double d = 3.7;

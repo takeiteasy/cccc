@@ -1,4 +1,4 @@
-// Comprehensive arithmetic and operator test for JCC
+// Comprehensive arithmetic and operator test for CCCC
 int main() {
     int passed = 0;
     int failed = 0;

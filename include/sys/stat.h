@@ -1,10 +1,10 @@
-/* sys/stat.h - file status for JCC */
+/* sys/stat.h - file status for CCCC */
 
 #ifndef __SYS_STAT_H
 #define __SYS_STAT_H
 
 #ifdef _WIN32
-#error "<sys/stat.h> is only available on POSIX targets in JCC"
+#error "<sys/stat.h> is only available on POSIX targets in CCCC"
 #endif
 
 #include "sys/types.h"

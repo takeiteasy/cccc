@@ -1,6 +1,6 @@
 // EXPECT_COMPILE_ERROR
-// JCC_FLAGS: -Werror=sign-compare
-// JCC_EXPECT_STDERR: error: comparison of integers with different signs.*\[-Wsign-compare\]
+// CCCC_FLAGS: -Werror=sign-compare
+// CCCC_EXPECT_STDERR: error: comparison of integers with different signs.*\[-Wsign-compare\]
 
 int main(void) {
     int x = -1;

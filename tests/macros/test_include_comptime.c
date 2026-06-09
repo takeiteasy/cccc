@@ -4,13 +4,13 @@
 
 #include_comptime <glob.h>
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 int glob_type_size(void) {
     glob_t g;
     return sizeof(g) > 0;
 }
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 void generate_result(void) {
     $obj_t *fn = $function("result", $get_type("int"));
     $function_set_body(fn, $return($int_literal(glob_type_size() ? 42 : 1)));

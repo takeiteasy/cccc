@@ -1,29 +1,29 @@
 // Ticket #193: anonymous aggregate comptime vars with non-constant
 // initializers use a typeof(var) compound-literal assignment.
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 int compute_width(void) { return 1024; }
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 int compute_value(void) { return 0x1234; }
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 struct { int width; int height; } dims = { compute_width(), 768 };
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 union { int i; unsigned char bytes[4]; } data = { compute_value() };
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *get_width(void) {
     return $get_comptime_member("dims", "width");
 }
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *get_height(void) {
     return $get_comptime_member("dims", "height");
 }
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *get_value(void) {
     return $get_comptime_member("data", "i");
 }

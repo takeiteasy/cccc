@@ -4,7 +4,7 @@
 #include <unistd.h>
 
 int main(void) {
-    char path[] = "/tmp/jcc-utime-test-XXXXXX";
+    char path[] = "/tmp/cccc-utime-test-XXXXXX";
     int fd = open(path, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
     if (fd < 0) return 1;
     close(fd);

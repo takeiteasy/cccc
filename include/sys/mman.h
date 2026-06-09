@@ -1,10 +1,10 @@
-/* sys/mman.h - memory management declarations for JCC */
+/* sys/mman.h - memory management declarations for CCCC */
 
 #ifndef __SYS_MMAN_H
 #define __SYS_MMAN_H
 
 #ifdef _WIN32
-#error "<sys/mman.h> is only available on POSIX targets in JCC"
+#error "<sys/mman.h> is only available on POSIX targets in CCCC"
 #endif
 
 #include "unistd.h"

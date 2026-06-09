@@ -1,4 +1,4 @@
-// JCC_FLAGS: --std=c11
+// CCCC_FLAGS: --std=c11
 struct Outer {
     int x;
     struct { int a; int b; };

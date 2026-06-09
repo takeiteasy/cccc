@@ -1,4 +1,4 @@
-// JCC_FLAGS: --std=c23
+// CCCC_FLAGS: --std=c23
 // Test #embed with if_empty parameter on empty file
 int main() {
     // empty_file.bin is empty (0 bytes)

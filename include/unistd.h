@@ -1,10 +1,10 @@
-/* unistd.h - core POSIX declarations for JCC */
+/* unistd.h - core POSIX declarations for CCCC */
 
 #ifndef __UNISTD_H
 #define __UNISTD_H
 
 #ifdef _WIN32
-#error "<unistd.h> is only available on POSIX targets in JCC"
+#error "<unistd.h> is only available on POSIX targets in CCCC"
 #endif
 
 #include "stddef.h"

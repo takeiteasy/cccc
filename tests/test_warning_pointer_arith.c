@@ -1,5 +1,5 @@
-// JCC_FLAGS: -Wpointer-arith
-// JCC_EXPECT_STDERR: \[-Wpointer-arith\]
+// CCCC_FLAGS: -Wpointer-arith
+// CCCC_EXPECT_STDERR: \[-Wpointer-arith\]
 
 int main(void) {
     char buf[8] = {1,2,3,4,5,6,7,8};

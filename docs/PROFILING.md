@@ -1,7 +1,7 @@
-# JCC Profiling Scripts
+# CCCC Profiling Scripts
 
 Helper scripts and Makefile targets for CPU, memory, and VM opcode profiling
-of JCC.
+of CCCC.
 
 ## Prerequisites
 
@@ -31,9 +31,9 @@ On macOS you can also open the result in `pprof` (Go tool) or Instruments.
 ### VM Opcode Profiling
 
 ```bash
-./jcc --vm-profile -I./include tests/test_comprehensive.c
-./jcc --vm-profile --json -I./include tests/test_comprehensive.c > profile/vm-opcodes/comprehensive.json
-./jcc -Y build/fib.jbc
+./cccc --vm-profile -I./include tests/test_comprehensive.c
+./cccc --vm-profile --json -I./include tests/test_comprehensive.c > profile/vm-opcodes/comprehensive.json
+./cccc -Y build/fib.jbc
 ```
 
 `--vm-profile` prints a compact dynamic opcode count table to stderr after the
@@ -45,21 +45,21 @@ and percentages.
 ### Static Bytecode Analysis
 
 For understanding *static* instruction patterns in `.jbc` files (independent of
-any execution), jcc has two in-process analyses:
+any execution), cccc has two in-process analyses:
 
 ```bash
 # Static n-gram mining on a pre-compiled .jbc
-./jcc -o /tmp/sieve.jbc -I./include benchmarks/sieve.c
-./jcc --ngrams=2 --ngrams-top=15 /tmp/sieve.jbc
-./jcc --ngrams=3 --ngrams-top=15 /tmp/sieve.jbc
-./jcc --ngrams=2 --ngrams-per-file /tmp/sieve.jbc
+./cccc -o /tmp/sieve.jbc -I./include benchmarks/sieve.c
+./cccc --ngrams=2 --ngrams-top=15 /tmp/sieve.jbc
+./cccc --ngrams=3 --ngrams-top=15 /tmp/sieve.jbc
+./cccc --ngrams=2 --ngrams-per-file /tmp/sieve.jbc
 
 # Same analysis directly on .c source — compiles in-process first
-./jcc --ngrams=2 --ngrams-top=15 -I./include benchmarks/sieve.c
+./cccc --ngrams=2 --ngrams-top=15 -I./include benchmarks/sieve.c
 
 # Use-def fusion candidate detection
-./jcc --fusion-candidates=50 /tmp/sieve.jbc
-./jcc --fusion-candidates=50 --json /tmp/sieve.jbc
+./cccc --fusion-candidates=50 /tmp/sieve.jbc
+./cccc --fusion-candidates=50 --json /tmp/sieve.jbc
 ```
 
 `--ngrams[=N]` walks the text segment of one or more `.jbc` files and ranks
@@ -93,19 +93,19 @@ On Linux this uses `valgrind --tool=massif`.
 
 ```bash
 # Single test
-hyperfine --warmup 3 './jcc -I./include tests/test_comprehensive.c'
+hyperfine --warmup 3 './cccc -I./include tests/test_comprehensive.c'
 
 # Compare two versions
 hyperfine --warmup 3 \
-  -n 'main' './jcc -I./include tests/test_comprehensive.c' \
-  -n 'branch' './jcc-branch -I./include tests/test_comprehensive.c'
+  -n 'main' './cccc -I./include tests/test_comprehensive.c' \
+  -n 'branch' './cccc-branch -I./include tests/test_comprehensive.c'
 ```
 
 ### macOS `sample` (built-in CPU profiler, no install needed)
 
 ```bash
 # Run compiler and sample it
-./jcc -I./include tests/test_comprehensive.c &
+./cccc -I./include tests/test_comprehensive.c &
 PID=$!
 sample $PID -mayDie -file profile/sample.txt
 ```
@@ -114,7 +114,7 @@ sample $PID -mayDie -file profile/sample.txt
 
 ```bash
 # Requires Xcode command-line tools
-heap -s -guessNonObjects ./jcc -I./include tests/test_comprehensive.c
+heap -s -guessNonObjects ./cccc -I./include tests/test_comprehensive.c
 ```
 
 ### gperftools CPU profiler (cross-platform)
@@ -124,10 +124,10 @@ heap -s -guessNonObjects ./jcc -I./include tests/test_comprehensive.c
 make profile-cpu-build
 
 # Run with profiling enabled
-CPUPROFILE=profile/out.prof ./jcc-prof -I./include tests/test_comprehensive.c
+CPUPROFILE=profile/out.prof ./cccc-prof -I./include tests/test_comprehensive.c
 
 # View raw profile (symbolized)
-CPUPROFILE_FREQUENCY=1000 ./jcc-prof -I./include tests/test_comprehensive.c
+CPUPROFILE_FREQUENCY=1000 ./cccc-prof -I./include tests/test_comprehensive.c
 ```
 
 ## tools/tests.py Integration
@@ -145,9 +145,9 @@ python3 tools/tests.py --jbc --vm-profile --match "*profile*"  # Profile .jbc ex
 `profile/vm-opcodes/`. In `--jbc` mode it profiles the bytecode execution phase,
 not the source-to-bytecode save step.
 
-## Cross-Compiler Benchmarks (JCC vs GCC)
+## Cross-Compiler Benchmarks (CCCC vs GCC)
 
-For a higher-level view — comparing JCC to a real C compiler on the same portable workloads — see [BENCHMARKS.md](BENCHMARKS.md). The benchmark suite runs each workload under JCC × {none,O1,O2,O3} and GCC × {O0,O1,O2,O3}, verifies identical output, and reports per-config wall-clock timings plus speedup ratios.
+For a higher-level view — comparing CCCC to a real C compiler on the same portable workloads — see [BENCHMARKS.md](BENCHMARKS.md). The benchmark suite runs each workload under CCCC × {none,O1,O2,O3} and GCC × {O0,O1,O2,O3}, verifies identical output, and reports per-config wall-clock timings plus speedup ratios.
 
 ```bash
 make bench-compare            # full run
@@ -156,9 +156,9 @@ python3 tools/bench.py --filter fib.c   # one benchmark
 python3 tools/bench.py --filter fib.c --vm-profile   # include opcode profile JSON
 ```
 
-The hyperfine-based `make bench` and the cross-compiler `make bench-compare` are complementary: `make bench` profiles a single workload in depth (with shell-startup variation), while `make bench-compare` produces a side-by-side matrix of how JCC stacks up against GCC.
+The hyperfine-based `make bench` and the cross-compiler `make bench-compare` are complementary: `make bench` profiles a single workload in depth (with shell-startup variation), while `make bench-compare` produces a side-by-side matrix of how CCCC stacks up against GCC.
 
-When `tools/bench.py --vm-profile` is enabled, JCC and JCC-JBC configs write per
+When `tools/bench.py --vm-profile` is enabled, CCCC and CCCC-JBC configs write per
 benchmark/config opcode profiles under `benchmarks/results/vm-profile-<UTC>/`.
 Each timing record in the benchmark JSON includes its `vm_profile_json` path.
 
@@ -172,5 +172,5 @@ All profiling output is written to `profile/`:
 | `profile/cpu.prof` | gperftools | Raw CPU profile |
 | `profile/cpu.txt` | gperftools | Text CPU profile summary |
 | `profile/mem.massif` | valgrind | Memory allocation timeline (Linux) |
-| `profile/vm-opcodes/*.json` | JCC VM profiler | Dynamic opcode counts per test |
-| `benchmarks/results/vm-profile-*/` | JCC VM profiler | Opcode profiles for benchmark configs |
+| `profile/vm-opcodes/*.json` | CCCC VM profiler | Dynamic opcode counts per test |
+| `benchmarks/results/vm-profile-*/` | CCCC VM profiler | Opcode profiles for benchmark configs |

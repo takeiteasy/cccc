@@ -1,4 +1,4 @@
 // EXPECT_COMPILE_ERROR
-// JCC_EXPECT_STDERR: error: this is an expected failure
+// CCCC_EXPECT_STDERR: error: this is an expected failure
 #error this is an expected failure
 int main(void) { return 0; }

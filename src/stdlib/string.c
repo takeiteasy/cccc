@@ -1,5 +1,5 @@
 // string.h stdlib function registration
-#include "../jcc.h"
+#include "../cccc.h"
 
 // Wrapper functions for string.h to sign-extend int return values
 long long wrap_strcmp(long long s1, long long s2) {
@@ -15,7 +15,7 @@ long long wrap_memcmp(long long s1, long long s2, long long n) {
 }
 
 // Register all string.h functions
-void register_string_functions(JCC *vm) {
+void register_string_functions(CCCC *vm) {
     // Memory operations
     cc_register_cfunc(vm, "memcpy", (void*)memcpy, 3, 0);
     cc_register_cfunc(vm, "memmove", (void*)memmove, 3, 0);

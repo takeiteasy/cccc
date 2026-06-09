@@ -1,5 +1,5 @@
-// JCC_FLAGS: -Wconversion -Wno-conversion
-// JCC_REJECT_STDERR: warning:
+// CCCC_FLAGS: -Wconversion -Wno-conversion
+// CCCC_REJECT_STDERR: warning:
 
 int narrow(int x) {
     char c = x;

@@ -1,4 +1,4 @@
-/* stdint.h - fixed-width integer types for JCC C compiler */
+/* stdint.h - fixed-width integer types for CCCC C compiler */
 
 #ifndef __STDINT_H
 #define __STDINT_H

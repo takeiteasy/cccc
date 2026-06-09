@@ -1,10 +1,10 @@
-/* arpa/inet.h - Internet address manipulation for JCC */
+/* arpa/inet.h - Internet address manipulation for CCCC */
 
 #ifndef __ARPA_INET_H
 #define __ARPA_INET_H
 
 #ifdef _WIN32
-#error "<arpa/inet.h> is only available on POSIX targets in JCC"
+#error "<arpa/inet.h> is only available on POSIX targets in CCCC"
 #endif
 
 #include "stddef.h"

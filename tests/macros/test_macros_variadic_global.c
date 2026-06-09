@@ -1,6 +1,6 @@
 // Test ticket #284: variadic global-generation macros receive string tails.
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 void gen_funcs(...) {
     for (int i = 0; i < _AST_VARARG_COUNT(); i = i + 1) {
         const char *name = _AST_VARARG_STR_AT(i);
@@ -9,7 +9,7 @@ void gen_funcs(...) {
     }
 }
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 void gen_fixed_and_tail(char *first, ...) {
     $obj_t *fixed = $function(first, $get_type("int"));
     $function_set_body(fixed, $return($int_literal(_AST_VARARG_COUNT())));

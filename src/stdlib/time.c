@@ -1,5 +1,5 @@
 // time.h stdlib function registration
-#include "../jcc.h"
+#include "../cccc.h"
 
 static long long wrap_timespec_get(long long ts, long long base) {
     if ((int)base != TIME_UTC)
@@ -15,7 +15,7 @@ static long long wrap_timespec_get(long long ts, long long base) {
 }
 
 // Register all time.h functions
-void register_time_functions(JCC *vm) {
+void register_time_functions(CCCC *vm) {
     // Time retrieval
     cc_register_cfunc(vm, "clock", (void*)clock, 0, 0);
     cc_register_cfunc(vm, "time", (void*)time, 1, 0);

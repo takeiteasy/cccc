@@ -5,15 +5,15 @@ LDFLAGS :=
 LLVM_CONFIG ?= llvm-config
 PKG_CONFIG ?= pkg-config
 
-ifeq ($(JCC_HAS_LLVM),1)
+ifeq ($(CCCC_HAS_LLVM),1)
 	LLVM_CONFIG_FOUND := $(shell command -v $(LLVM_CONFIG) 2>/dev/null)
 ifeq ($(LLVM_CONFIG_FOUND),)
-	$(error JCC_HAS_LLVM=1 requires llvm-config; set LLVM_CONFIG=/path/to/llvm-config)
+	$(error CCCC_HAS_LLVM=1 requires llvm-config; set LLVM_CONFIG=/path/to/llvm-config)
 endif
 	LLVM_CFLAGS := $(shell $(LLVM_CONFIG) --cflags)
 	LLVM_LDFLAGS := $(shell $(LLVM_CONFIG) --ldflags)
 	LLVM_LIBS := $(shell $(LLVM_CONFIG) --libs core native analysis) $(shell $(LLVM_CONFIG) --system-libs)
-	CFLAGS += -DJCC_HAS_LLVM=1 $(LLVM_CFLAGS)
+	CFLAGS += -DCCCC_HAS_LLVM=1 $(LLVM_CFLAGS)
 	LDFLAGS += $(LLVM_LDFLAGS) $(LLVM_LIBS)
 endif
 
@@ -46,12 +46,12 @@ else
 		DYLIB := .so
 	endif
 endif
-EXE_OUT := jcc$(EXE)
-LIB_OUT := libjcc$(DYLIB)
-SAN_OUT := jcc-asan jcc-ubsan jcc-tsan
+EXE_OUT := cccc$(EXE)
+LIB_OUT := libcccc$(DYLIB)
+SAN_OUT := cccc-asan cccc-ubsan cccc-tsan
 
 ifeq ($(UNAME_S),Linux)
-	SAN_OUT += jcc-msan
+	SAN_OUT += cccc-msan
 endif
 
 default: $(EXE_OUT)
@@ -63,25 +63,25 @@ $(EXE_OUT): $(SRCS)
 $(LIB_OUT): $(SRCS)
 	$(CC) -fpic -shared $(CFLAGS) -o $@ $(filter-out src/main.c, $^) $(LDFLAGS)
 
-jcc-asan: $(SRCS)
+cccc-asan: $(SRCS)
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -o $@ $^ $(LDFLAGS)
 
-jcc-ubsan: $(SRCS)
+cccc-ubsan: $(SRCS)
 	$(CC) $(CFLAGS) -fsanitize=undefined -o $@ $^ $(LDFLAGS)
 
-jcc-tsan: $(SRCS)
+cccc-tsan: $(SRCS)
 	$(CC) $(CFLAGS) -fsanitize=thread -o $@ $^ $(LDFLAGS)
 
 ifeq ($(UNAME_S),Linux)
-jcc-msan: $(SRCS)
+cccc-msan: $(SRCS)
 	$(CC) $(CFLAGS) -fsanitize=memory -o $@ $^ $(LDFLAGS)
 endif
 
-asan: jcc-asan
-ubsan: jcc-ubsan
-tsan: jcc-tsan
+asan: cccc-asan
+ubsan: cccc-ubsan
+tsan: cccc-tsan
 ifeq ($(UNAME_S),Linux)
-msan: jcc-msan
+msan: cccc-msan
 endif
 
 sanitizers: asan ubsan tsan
@@ -93,7 +93,7 @@ endif
 # Detect available AFL compiler wrapper (afl-clang-fast preferred, fallback to afl-clang)
 AFL_CC := $(shell which afl-clang-fast 2>/dev/null || which afl-clang 2>/dev/null || echo "")
 
-jcc-afl: $(SRCS)
+cccc-afl: $(SRCS)
 ifeq ($(AFL_CC),)
 	@echo "Error: AFL++ compiler wrapper not found. Install AFL++ first."
 	@exit 1
@@ -101,10 +101,10 @@ else
 	$(AFL_CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 endif
 
-afl: jcc-afl
+afl: cccc-afl
 
 # AFL++ + AddressSanitizer combo (slower but catches memory errors immediately)
-jcc-afl-asan: $(SRCS)
+cccc-afl-asan: $(SRCS)
 ifeq ($(AFL_CC),)
 	@echo "Error: AFL++ compiler wrapper not found. Install AFL++ first."
 	@exit 1
@@ -112,7 +112,7 @@ else
 	AFL_USE_ASAN=1 $(AFL_CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 endif
 
-afl-asan: jcc-afl-asan
+afl-asan: cccc-afl-asan
 
 # libFuzzer harness (optional)
 fuzz_harness: src/fuzzing.c $(SRCS)
@@ -136,9 +136,9 @@ fuzz-seed:
 	@cp tests/macros/test_macros_*.c $(FUZZ_CORPUS)/ 2>/dev/null || true
 	@echo "Corpus seeded with $$(ls $(FUZZ_CORPUS) | wc -l) files"
 
-fuzz-run: jcc-afl
-	@if [ ! -f "jcc-afl" ]; then \
-		echo "Error: jcc-afl not found. Run 'make afl' first."; \
+fuzz-run: cccc-afl
+	@if [ ! -f "cccc-afl" ]; then \
+		echo "Error: cccc-afl not found. Run 'make afl' first."; \
 		exit 1; \
 	fi
 	@mkdir -p $(FUZZ_OUT)
@@ -146,7 +146,7 @@ fuzz-run: jcc-afl
 	@echo "  input:  $(FUZZ_CORPUS)"
 	@echo "  output: $(FUZZ_OUT)"
 	afl-fuzz -i $(FUZZ_CORPUS) -o $(FUZZ_OUT) -m $(FUZZ_MEMORY) -t $(FUZZ_TIMEOUT) \
-		-- ./jcc-afl $(FUZZ_FLAGS) @@
+		-- ./cccc-afl $(FUZZ_FLAGS) @@
 
 fuzz-crashes:
 	@if [ -d "$(FUZZ_CRASHES)" ]; then \
@@ -160,7 +160,7 @@ fuzz-triage:
 	@if [ -d "$(FUZZ_CRASHES)" ]; then \
 		for f in $(FUZZ_CRASHES)/id*; do \
 			echo "=== $$f ==="; \
-			./jcc-afl $(FUZZ_FLAGS) "$$f" 2>&1 | head -n 20; \
+			./cccc-afl $(FUZZ_FLAGS) "$$f" 2>&1 | head -n 20; \
 			echo; \
 		done \
 	else \
@@ -172,14 +172,14 @@ fuzz-minimize:
 		for f in $(FUZZ_CRASHES)/id*; do \
 			base=$$(basename "$$f"); \
 			echo "Minimizing $$base..."; \
-			afl-tmin -i "$$f" -o "$(FUZZ_CRASHES)/$${base}.min" -- ./jcc-afl $(FUZZ_FLAGS) @@; \
+			afl-tmin -i "$$f" -o "$(FUZZ_CRASHES)/$${base}.min" -- ./cccc-afl $(FUZZ_FLAGS) @@; \
 		done \
 	else \
 		echo "No crash directory yet."; \
 	fi
 
 fuzz-info:
-	@echo "AFL++ binary built: ./jcc-afl"
+	@echo "AFL++ binary built: ./cccc-afl"
 	@echo "Run fuzzing with:"
 	@echo "  make fuzz-seed && make fuzz-run"
 	@echo ""
@@ -188,11 +188,11 @@ fuzz-info:
 
 fuzz: fuzz-info
 
-STD_TEMPLATE := tools/generate_stdlib.c
+STD_TEMPLATE := tools/stdlib.c
 
 # Regenerate src/std.c from the template.
 # src/std.c is committed so the normal build never needs this; run it
-# explicitly after editing tools/generate_stdlib.c or include/*.h.
+# explicitly after editing tools/stdlib.c or include/*.h.
 .PHONY: stdlib
 stdlib: $(EXE_OUT)
 	@set -e; \
@@ -211,7 +211,7 @@ test: clean $(EXE_OUT)
 all: clean $(EXE_OUT) $(LIB_OUT) test docs
 
 docs:
-	@headerdoc2html src/jcc.h src/reflection.h -o docs/; \
+	@headerdoc2html src/cccc.h src/reflection.h -o docs/; \
 	gatherheaderdoc docs/; \
 	mv docs/masterTOC.html docs/index.html
 
@@ -229,22 +229,22 @@ ifeq ($(HAS_HYPERFINE),)
 else
 	@mkdir -p profile
 	hyperfine --warmup 3 --ignore-failure --export-json profile/bench.json \
-		'./jcc -I./include $(PROFILE_TEST)'
+		'./cccc -I./include $(PROFILE_TEST)'
 endif
 
-# Cross-compiler benchmark suite: JCC vs GCC.
-# Runs every benchmark under JCC × {none,O1,O2,O3} and GCC × {O0,O1,O2,O3},
+# Cross-compiler benchmark suite: CCCC vs GCC.
+# Runs every benchmark under CCCC × {none,O1,O2,O3} and GCC × {O0,O1,O2,O3},
 # verifies identical output, and emits a table + JSON report.
 BENCH_RUNS ?= 3
 BENCH_WARMUP ?= 1
 
-bench-compare: jcc
+bench-compare: cccc
 	@python3 tools/bench.py --runs $(BENCH_RUNS) --warmup $(BENCH_WARMUP)
 
-bench-compare-quick: jcc
+bench-compare-quick: cccc
 	@python3 tools/bench.py --runs 2 --warmup 1
 
-bench-compare-json: jcc
+bench-compare-json: cccc
 	@python3 tools/bench.py --format json --runs $(BENCH_RUNS) --warmup $(BENCH_WARMUP)
 
 profile-cpu-build: $(SRCS)
@@ -253,29 +253,29 @@ ifeq ($(HAS_GPROFILER),)
 	@exit 1
 else
 ifeq ($(UNAME_S),Darwin)
-	$(CC) $(CFLAGS) -o jcc-prof $^ $(LDFLAGS) -L/opt/homebrew/lib -lprofiler
+	$(CC) $(CFLAGS) -o cccc-prof $^ $(LDFLAGS) -L/opt/homebrew/lib -lprofiler
 else
-	$(CC) $(CFLAGS) -o jcc-prof $^ $(LDFLAGS) -lprofiler
+	$(CC) $(CFLAGS) -o cccc-prof $^ $(LDFLAGS) -lprofiler
 endif
 endif
 
 profile-cpu: profile-cpu-build
 	@mkdir -p profile
-	CPUPROFILE=profile/cpu.prof ./jcc-prof -I./include $(PROFILE_TEST) || true
+	CPUPROFILE=profile/cpu.prof ./cccc-prof -I./include $(PROFILE_TEST) || true
 	@echo "CPU profile saved to profile/cpu.prof"
 	@echo "To view: install Go pprof (go install github.com/google/pprof@latest)"
-	@echo "  pprof -text jcc-prof profile/cpu.prof"
+	@echo "  pprof -text cccc-prof profile/cpu.prof"
 
 profile-mem:
 ifeq ($(UNAME_S),Darwin)
 	@mkdir -p profile
 	@echo "Running with leaks tool..."
-	leaks -atExit -- ./jcc -I./include $(PROFILE_TEST) > profile/mem-leaks.txt 2>&1 || true
+	leaks -atExit -- ./cccc -I./include $(PROFILE_TEST) > profile/mem-leaks.txt 2>&1 || true
 	@echo "Memory leak report: profile/mem-leaks.txt"
 else ifeq ($(UNAME_S),Linux)
 	@mkdir -p profile
 	valgrind --tool=massif --massif-out-file=profile/mem.massif \
-		./jcc -I./include $(PROFILE_TEST)
+		./cccc -I./include $(PROFILE_TEST)
 	@echo "Massif output: profile/mem.massif"
 else
 	@echo "Memory profiling not supported on this platform."
@@ -283,7 +283,7 @@ else
 endif
 
 clean:
-	@$(RM) -f $(EXE_OUT) $(LIB_OUT) $(SAN_OUT) jcc-afl jcc-afl-asan jcc-prof fuzz_harness
+	@$(RM) -f $(EXE_OUT) $(LIB_OUT) $(SAN_OUT) cccc-afl cccc-afl-asan cccc-prof fuzz_harness
 	@$(RM) -rf profile/*.prof profile/*.txt profile/*.json profile/*.massif
 	@$(RM) -rf fuzz/corpus fuzz/out
 

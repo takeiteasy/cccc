@@ -1,27 +1,27 @@
-// Test ticket #1: __jcc_quote / __jcc_quote_n quasi-quoting
+// Test ticket #1: __cccc_quote / __cccc_quote_n quasi-quoting
 
 // ---- Expression splice: positional $N ------------------------------------
 // Produces: a + b * a  (reuses $1)
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *add_mul($node_t *a, $node_t *b) {
-    $vm_t *vm = __jcc_get_vm();
-    return __jcc_quote(vm, "$1 + $2 * $1", a, b);
+    $vm_t *vm = __cccc_get_vm();
+    return __cccc_quote(vm, "$1 + $2 * $1", a, b);
 }
 
 // ---- Expression splice: reorder ($2 * $1 + $2) ---------------------------
 // Produces: y*x + y
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *quad($node_t *x, $node_t *y) {
-    $vm_t *vm = __jcc_get_vm();
-    return __jcc_quote(vm, "$2 * $1 + $2", x, y);
+    $vm_t *vm = __cccc_get_vm();
+    return __cccc_quote(vm, "$2 * $1 + $2", x, y);
 }
 
 // ---- Statement splice: return $1; ----------------------------------------
 // Must be called in statement position (not as an expression).
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *ret_val($node_t *v) {
-    $vm_t *vm = __jcc_get_vm();
-    return __jcc_quote(vm, "return $1;", v);
+    $vm_t *vm = __cccc_get_vm();
+    return __cccc_quote(vm, "return $1;", v);
 }
 
 int get_99(void) {
@@ -31,34 +31,34 @@ int get_99(void) {
 // ---- $$ incremental sugar ------------------------------------------------
 // $$ maps to $1, $2, ... sequentially (left-to-right).
 // Produces: a + b
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *sum_incr($node_t *a, $node_t *b) {
-    $vm_t *vm = __jcc_get_vm();
-    return __jcc_quote(vm, "$$ + $$", a, b);
+    $vm_t *vm = __cccc_get_vm();
+    return __cccc_quote(vm, "$$ + $$", a, b);
 }
 
-// ---- __jcc_quote_n: array form ---------------------------------------------
+// ---- __cccc_quote_n: array form ---------------------------------------------
 // Produces: a + b + c
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *add3($node_t *a, $node_t *b, $node_t *c) {
-    $vm_t *vm = __jcc_get_vm();
+    $vm_t *vm = __cccc_get_vm();
     $node_t *args[3] = { a, b, c };
-    return __jcc_quote_n(vm, "$1 + $2 + $3", args, 3);
+    return __cccc_quote_n(vm, "$1 + $2 + $3", args, 3);
 }
 
 // ---- No splice points (plain expression) ---------------------------------
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *const_expr(void) {
-    $vm_t *vm = __jcc_get_vm();
-    return __jcc_quote(vm, "6 * 7");
+    $vm_t *vm = __cccc_get_vm();
+    return __cccc_quote(vm, "6 * 7");
 }
 
 // ---- If-statement template -----------------------------------------------
 // Returns one of two values based on sign; invoked as statement in function body.
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *clamp_zero($node_t *val) {
-    $vm_t *vm = __jcc_get_vm();
-    return __jcc_quote(vm, "if ($1 < 0) return 0; else return $1;", val);
+    $vm_t *vm = __cccc_get_vm();
+    return __cccc_quote(vm, "if ($1 < 0) return 0; else return $1;", val);
 }
 
 int clamp(int x) {

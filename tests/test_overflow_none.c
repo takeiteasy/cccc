@@ -1,4 +1,4 @@
-// JCC_FLAGS: --overflow-checks
+// CCCC_FLAGS: --overflow-checks
 // Test that normal arithmetic works correctly with overflow checks enabled
 // This test should complete successfully and return 42
 // Expected: Returns 42 (no overflow detected)

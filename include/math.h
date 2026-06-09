@@ -1,4 +1,4 @@
-/* math.h - math functions for JCC C compiler */
+/* math.h - math functions for CCCC C compiler */
 
 #ifndef __MATH_H
 #define __MATH_H

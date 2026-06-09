@@ -1,5 +1,5 @@
-// JCC_FLAGS: -Wunused --std=c23
-// JCC_REJECT_STDERR: warning:
+// CCCC_FLAGS: -Wunused --std=c23
+// CCCC_REJECT_STDERR: warning:
 
 static int c23_global [[maybe_unused]];
 

@@ -1,5 +1,5 @@
-// JCC_FLAGS: --memory-leak-detection -V
-// JCC_EXPECT_STDERR: MEMORY LEAK DETECTED
+// CCCC_FLAGS: --memory-leak-detection -V
+// CCCC_EXPECT_STDERR: MEMORY LEAK DETECTED
 // Leak detection test — malloc without free triggers leak report on shutdown
 
 void *malloc(long size);

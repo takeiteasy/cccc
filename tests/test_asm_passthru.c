@@ -1,5 +1,5 @@
 // Test inline assembly passthru with --asm-passthru flag
-// JCC_FLAGS: --asm-passthru
+// CCCC_FLAGS: --asm-passthru
 // Expected return: 42
 
 int main() {

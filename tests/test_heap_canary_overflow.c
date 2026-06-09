@@ -1,6 +1,6 @@
 // EXPECT_RUNTIME_ERROR
-// JCC_FLAGS: --heap-canaries -V
-// JCC_EXPECT_STDERR: HEAP CANARY CORRUPTED
+// CCCC_FLAGS: --heap-canaries -V
+// CCCC_EXPECT_STDERR: HEAP CANARY CORRUPTED
 // Heap overflow: write one byte past the allocation end corrupts rear canary
 
 void *malloc(long size);

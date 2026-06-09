@@ -7,7 +7,7 @@ int main(void) {
     return 1;
 #endif
 
-#if __has_include(<missing_jcc_header_280.h>)
+#if __has_include(<missing_cccc_header_280.h>)
     return 2;
 #else
     result += 10;

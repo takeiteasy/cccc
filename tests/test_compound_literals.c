@@ -1,4 +1,4 @@
-// Test compound literals in JCC
+// Test compound literals in CCCC
 // Expected return: 42
 
 int main() {

@@ -1,10 +1,10 @@
-/* strings.h - POSIX string functions supplement for JCC */
+/* strings.h - POSIX string functions supplement for CCCC */
 
 #ifndef __STRINGS_H
 #define __STRINGS_H
 
 #ifdef _WIN32
-#error "<strings.h> is only available on POSIX targets in JCC"
+#error "<strings.h> is only available on POSIX targets in CCCC"
 #endif
 
 #include "stddef.h"

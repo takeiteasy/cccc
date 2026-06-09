@@ -1,4 +1,4 @@
-// JCC_FLAGS: -O2
+// CCCC_FLAGS: -O2
 // Static inline functions with local variables are inlined
 static inline int sum_to(int n) {
     int total = 0;

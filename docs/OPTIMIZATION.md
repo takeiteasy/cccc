@@ -1,22 +1,22 @@
-# JCC Bytecode Optimization
+# CCCC Bytecode Optimization
 
-JCC includes optional bytecode optimization passes that can improve execution performance. These are disabled by default and can be enabled with the `--optimize` flag.
+CCCC includes optional bytecode optimization passes that can improve execution performance. These are disabled by default and can be enabled with the `--optimize` flag.
 
 ## Quick Start
 
 ```bash
 # No optimization (default)
-./jcc program.c
+./cccc program.c
 
 # Enable optimization (level 1 = basic)
-./jcc --optimize program.c
-./jcc --optimize=1 program.c
+./cccc --optimize program.c
+./cccc --optimize=1 program.c
 
 # Standard optimization
-./jcc --optimize=2 program.c
+./cccc --optimize=2 program.c
 
 # Aggressive optimization
-./jcc --optimize=3 program.c
+./cccc --optimize=3 program.c
 ```
 
 ## Optimization Levels
@@ -31,7 +31,7 @@ JCC includes optional bytecode optimization passes that can improve execution pe
 ## Optimization Passes
 
 Optimizer bytecode walks use the shared instruction-size metadata generated
-from `OPS_X` in `src/jcc.h`. Each opcode declares its operand-word count beside
+from `OPS_X` in `src/cccc.h`. Each opcode declares its operand-word count beside
 the opcode name, so optimizer passes, bytecode serialization, and debugger
 disassembly stay aligned when instructions are added.
 
@@ -123,7 +123,7 @@ serialized text relocations so PC-index targets remain valid after compaction.
 1. **Development (VM)**: Use the default (no `--optimize` flag) for predictable debugging
 2. **Testing**: Run the test suite with `--optimize=3` to catch optimization bugs
 3. **VM-only workflows** (debugger, safety suite, `--vm-profile`): Use `--optimize=2` for a good balance of speed and safety
-4. **Production builds**: Use `-c=native` — the system compiler handles optimisation, and the JCC frontend cost is the only JCC-specific overhead in the loop
+4. **Production builds**: Use `-c=native` — the system compiler handles optimisation, and the CCCC frontend cost is the only CCCC-specific overhead in the loop
 
 ## Combining with Safety Features
 
@@ -134,13 +134,13 @@ below are for the VM path:
 
 ```bash
 # Maximum safety, no optimization
-./jcc -3 program.c
+./cccc -3 program.c
 
 # No safety, maximum optimization
-./jcc -0 --optimize=3 program.c
+./cccc -0 --optimize=3 program.c
 
 # Standard safety with standard optimization
-./jcc -2 --optimize=2 program.c
+./cccc -2 --optimize=2 program.c
 ```
 
 ## Verbose Output
@@ -148,7 +148,7 @@ below are for the VM path:
 Enable verbose mode to see optimization statistics:
 
 ```bash
-./jcc -v --optimize=3 program.c
+./cccc -v --optimize=3 program.c
 ```
 
 With verbose enabled, the optimizer reports:

@@ -1,5 +1,5 @@
-// JCC_FLAGS: -Wreturn-type
-// JCC_EXPECT_STDERR: 3 warnings generated.
+// CCCC_FLAGS: -Wreturn-type
+// CCCC_EXPECT_STDERR: 3 warnings generated.
 int zero(void) {
     return;
 }

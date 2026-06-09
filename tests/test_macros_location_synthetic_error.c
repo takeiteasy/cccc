@@ -1,7 +1,7 @@
 // EXPECT_COMPILE_ERROR
-// JCC_EXPECT_STDERR: <jcc macro: generated expression>:1: generated expression
+// CCCC_EXPECT_STDERR: <cccc macro: generated expression>:1: generated expression
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *synthetic_loc(void) {
     $node_t *node = $int_literal(0);
     $set_token(node, $synthetic_token("generated expression"));

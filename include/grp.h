@@ -1,10 +1,10 @@
-/* grp.h - group database declarations for JCC */
+/* grp.h - group database declarations for CCCC */
 
 #ifndef __GRP_H
 #define __GRP_H
 
 #ifdef _WIN32
-#error "<grp.h> is only available on POSIX targets in JCC"
+#error "<grp.h> is only available on POSIX targets in CCCC"
 #endif
 
 #include "sys/types.h"

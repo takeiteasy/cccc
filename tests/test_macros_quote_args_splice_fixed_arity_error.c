@@ -11,11 +11,11 @@ int add2(int a, int b) {
 }
 
 // Too few: splice 2 nodes into a 3-parameter callee.
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *too_few_splice($node_t *a, $node_t *b) {
-    $vm_t *vm = __jcc_get_vm();
-    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ a, b }, 2);
-    return __jcc_quote(vm, "add3($@1)", chain);
+    $vm_t *vm = __cccc_get_vm();
+    $node_t *chain = __cccc_node_list(vm, ($node_t*[]){ a, b }, 2);
+    return __cccc_quote(vm, "add3($@1)", chain);
 }
 
 int main(void) {

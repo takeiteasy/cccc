@@ -2,13 +2,13 @@
 // is defined AFTER the variable (forward reference). All comptime functions
 // are compiled before any initializers run, so forward refs are supported.
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 int items = get_item_count();   // forward ref — get_item_count defined below
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 int get_item_count(void) { return 6; }
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *get_items(void) {
     return $int_literal($get_comptime_int("items"));
 }

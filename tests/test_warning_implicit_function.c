@@ -1,5 +1,5 @@
-// JCC_FLAGS: -Wimplicit-function-declaration
-// JCC_EXPECT_STDERR: 1 warning generated.
+// CCCC_FLAGS: -Wimplicit-function-declaration
+// CCCC_EXPECT_STDERR: 1 warning generated.
 int first(void) {
     return later();
 }

@@ -1,7 +1,7 @@
 # C Language Coverage
 
 Conformance status for each C standard, plus the GNU built-in functions and
-attribute syntaxes that JCC accepts. Intended as a reference for `--std` flag
+attribute syntaxes that CCCC accepts. Intended as a reference for `--std` flag
 work and as a checklist of what is currently parsed vs. what is semantically
 honoured.
 
@@ -47,7 +47,7 @@ honoured.
 | `extern` linkage | ✓ | |
 | `static` — locals, globals, functions | ✓ | |
 | `const` | ✓ | |
-| `volatile` | ✓ | Tracked; no codegen effect ([#311](https://todo.sr.ht/~takeiteasy/jcc/311)) |
+| `volatile` | ✓ | Tracked; no codegen effect ([#311](https://todo.sr.ht/~takeiteasy/cccc/311)) |
 | `register` | ~ | Parsed and accepted; ignored |
 | `auto` (storage class) | ~ | Parsed and accepted; ignored |
 | String literals and concatenation | ✓ | |
@@ -75,9 +75,9 @@ honoured.
 | `<limits.h>` | ✓ | |
 | `<locale.h>` | ✓ | Host locale APIs registered |
 | `<math.h>` | ✓ | Full C99 function set registered |
-| `<setjmp.h>` | ✓ | JCC-specific implementation for VM calling convention |
+| `<setjmp.h>` | ✓ | CCCC-specific implementation for VM calling convention |
 | `<signal.h>` | ✓ | Full POSIX signal set (Darwin/macOS values); `signal` and `raise` are VM-managed — handlers are called synchronously from the dispatch loop, never from within a native signal context.  `SIGTRAP` with `-g` breaks into the debugger. |
-| `<stdarg.h>` | ✓ | JCC-specific implementation |
+| `<stdarg.h>` | ✓ | CCCC-specific implementation |
 | `<stddef.h>` | ✓ | |
 | `<stdio.h>` | ✓ | |
 | `<stdlib.h>` | ✓ | |
@@ -100,7 +100,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `long long int` and `unsigned long long int` | ✓ | |
 | `_Bool` | ✓ | |
 | `_Complex` | ✓ | Native scalar representation with arithmetic, casts, assignment, and equality |
-| `_Imaginary` | ~ | Accepted as compatibility spelling for the corresponding complex type. Tracked on [#278](https://todo.sr.ht/~takeiteasy/jcc/278) and [#279](https://todo.sr.ht/~takeiteasy/jcc/279) |
+| `_Imaginary` | ~ | Accepted as compatibility spelling for the corresponding complex type. Tracked on [#278](https://todo.sr.ht/~takeiteasy/cccc/278) and [#279](https://todo.sr.ht/~takeiteasy/cccc/279) |
 | Mixed declarations and statements | ✓ | |
 | Variable declaration in `for` initialiser | ✓ | |
 | Variable-length arrays (VLA) | ✓ | Allocated via VM heap |
@@ -108,8 +108,8 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | Designated initialisers — structs and arrays | ✓ | |
 | Compound literals | ✓ | |
 | `inline` functions | ✓ | Dead-function elimination + single-return inlining (unconditional); full AST inlining at `-O2`/`-O3` (`--inline-limit=N` controls size threshold) |
-| `restrict` pointers | ~ | Parsed and accepted; aliasing not tracked ([#262](https://todo.sr.ht/~takeiteasy/jcc/262)) |
-| `static` array-parameter indices (`void f(int a[static 10])`) | ~ | Parsed and accepted; minimum-size constraint not enforced ([#310](https://todo.sr.ht/~takeiteasy/jcc/310)) |
+| `restrict` pointers | ~ | Parsed and accepted; aliasing not tracked ([#262](https://todo.sr.ht/~takeiteasy/cccc/262)) |
+| `static` array-parameter indices (`void f(int a[static 10])`) | ~ | Parsed and accepted; minimum-size constraint not enforced ([#310](https://todo.sr.ht/~takeiteasy/cccc/310)) |
 | `__func__` predefined identifier | ✓ | |
 | Variadic macros `__VA_ARGS__` | ✓ | |
 `_Pragma(...)` operator | ✓ | |
@@ -137,7 +137,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `snprintf`, `vsnprintf` | ✓ | |
 | `strtof`, `strtold`, `strtoll`, `strtoull` | ✓ | |
 | `llabs`, `lldiv` | ✓ | |
-| `__has_include` | ✓ | Checks JCC, `-I`, and `-i` include paths |
+| `__has_include` | ✓ | Checks CCCC, `-I`, and `-i` include paths |
 
 ---
 
@@ -165,7 +165,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `<stdalign.h>` | ✓ | |
 | `<stdatomic.h>` | ~ | Header present; operations are non-atomic |
 | `<stdnoreturn.h>` | ✓ | |
-| `<threads.h>` | ✗ | JCC is single-threaded |
+| `<threads.h>` | ✗ | CCCC is single-threaded |
 | `<uchar.h>` | ~ | Types and basic conversion APIs |
 | `aligned_alloc` | ✓ | Backed by host aligned allocation |
 | `quick_exit` / `at_quick_exit` | ✓ | |
@@ -179,7 +179,7 @@ C17 is a bug-fix release — no new language features or library functions were 
 
 | Change | Status | Notes |
 |---|---|---|
-| Removes `gets` | ✓ | `gets` is not registered in JCC's stdlib |
+| Removes `gets` | ✓ | `gets` is not registered in CCCC's stdlib |
 | Deprecates `ATOMIC_VAR_INIT` | N/A | Atomics not supported |
 | Clarifies undefined behaviour | N/A | Semantic, not syntactic |
 
@@ -215,8 +215,8 @@ C17 is a bug-fix release — no new language features or library functions were 
 | `#warning` | ✓ | |
 | `#embed` | ✓ | Supports `limit()`, `prefix()`, `suffix()`, `if_empty()`, `__has_embed()` |
 | `__VA_OPT__` | ✓ | |
-| `__has_c_attribute` | ✓ | Returns `1` for C/JCC attributes with semantic support |
-| `__has_include` | ✓ | Checks JCC, `-I`, and `-i` include paths |
+| `__has_c_attribute` | ✓ | Returns `1` for C/CCCC attributes with semantic support |
+| `__has_include` | ✓ | Checks CCCC, `-I`, and `-i` include paths |
 
 ### Standard Library
 
@@ -242,7 +242,7 @@ C17 is a bug-fix release — no new language features or library functions were 
 | Nested functions | ✓ | Access to parent-scope variables via static link |
 | `__builtin_*` | ✓ | Lowered by the compiler; see [Built-in Functions](#built-in-functions) for the full list |
 | `__thread` storage class | ~ | Emits `-Wignored-features`; treated as `static` |
-| `__restrict` / `__restrict__` | ~ | Parsed; aliasing not tracked ([#262](https://todo.sr.ht/~takeiteasy/jcc/262)) |
+| `__restrict` / `__restrict__` | ~ | Parsed; aliasing not tracked ([#262](https://todo.sr.ht/~takeiteasy/cccc/262)) |
 | `__typeof__` | ✓ | Synonym for `typeof` |
 | `__asm__` / `asm(...)` inline assembly | ✓ | No-op by default; `--asm-passthru` compiles via native CC and executes via FFI; custom callback via `cc_set_asm_callback` |
 
@@ -250,33 +250,33 @@ C17 is a bug-fix release — no new language features or library functions were 
 
 ## Microsoft Extensions
 
-A subset of MSVC's compiler extensions is recognised by JCC. The feasibility,
+A subset of MSVC's compiler extensions is recognised by CCCC. The feasibility,
 no-op policy, and the question of which extensions to support versus reject
 are open design questions tracked in
-[#289](https://todo.sr.ht/~takeiteasy/jcc/289). The table below mirrors the
+[#289](https://todo.sr.ht/~takeiteasy/cccc/289). The table below mirrors the
 groups from that ticket.
 
 | Feature | Status | Notes |
 |---|---|---|
 | `__declspec(align(n))` | ✗ | Spelling alias of `__attribute__((aligned(n)))` — pending |
 | `__declspec(deprecated)` | ✗ | Maps to existing `-Wdeprecated` — pending |
-| `__declspec(dllimport)` / `dllexport` | ✗ | JCC module export — pending |
+| `__declspec(dllimport)` / `dllexport` | ✗ | CCCC module export — pending |
 | `__declspec(naked)` | ✗ | No-op in the VM — pending |
 | `__declspec(noalias)` / `noinline` / `inline` | ✗ | Hint-only — pending |
 | `__declspec(noreturn)` / `nothrow` | ✗ | C11 equivalents exist — pending |
-| `__declspec(restrict)` | ✗ | Lands with [#267](https://todo.sr.ht/~takeiteasy/jcc/267)–[#269](https://todo.sr.ht/~takeiteasy/jcc/269) restrict work |
+| `__declspec(restrict)` | ✗ | Lands with [#267](https://todo.sr.ht/~takeiteasy/cccc/267)–[#269](https://todo.sr.ht/~takeiteasy/cccc/269) restrict work |
 | `__declspec(safebuffers)` / `selectany` / `code_seg` / `allocate` | ✗ | No-op shims — pending |
 | `__declspec(thread)` | ✗ | TLS via VM per-thread storage — pending |
-| `__cdecl` / `__stdcall` / `__fastcall` / `__thiscall` / `__vectorcall` | ✗ | Calling-convention keywords, no-op (JCC has a single VM ABI) — pending |
+| `__cdecl` / `__stdcall` / `__fastcall` / `__thiscall` / `__vectorcall` | ✗ | Calling-convention keywords, no-op (CCCC has a single VM ABI) — pending |
 | `__ptr32` / `__ptr64` / `__sptr` / `__uptr` / `__unaligned` / `__w64` | ✗ | Pointer modifiers, no-op — pending |
 | `__forceinline` / `__inline` | ~ | Fold to existing `inline` (dead-elim + inlining applies) — pending `__declspec` alias |
 | `__assume(expr)` | ✗ | Optimizer hint — pending |
 | `__noop` | ✗ | Variable-arg no-op builtin — pending |
 | `__debugbreak` | ✗ | Trap opcode — pending |
 | `__int8` / `__int16` / `__int32` / `__int64` | ✗ | Spelling aliases of `<stdint.h>` types — pending |
-| `__try` / `__except` / `__finally` / `__leave` | ✗ | SEH; parsing is non-trivial and tied to the Windows kernel unwinder — see [#289](https://todo.sr.ht/~takeiteasy/jcc/289) |
-| `__declspec(uuid)` / `__uuidof` | ✗ | COM-specific; not applicable to C — see [#289](https://todo.sr.ht/~takeiteasy/jcc/289) |
-| `__clrcall` / `__interface` / `__if_exists` / `#pragma managed` | ✗ | C++/CLI-specific; rejected — see [#289](https://todo.sr.ht/~takeiteasy/jcc/289) |
+| `__try` / `__except` / `__finally` / `__leave` | ✗ | SEH; parsing is non-trivial and tied to the Windows kernel unwinder — see [#289](https://todo.sr.ht/~takeiteasy/cccc/289) |
+| `__declspec(uuid)` / `__uuidof` | ✗ | COM-specific; not applicable to C — see [#289](https://todo.sr.ht/~takeiteasy/cccc/289) |
+| `__clrcall` / `__interface` / `__if_exists` / `#pragma managed` | ✗ | C++/CLI-specific; rejected — see [#289](https://todo.sr.ht/~takeiteasy/cccc/289) |
 | `__readfsbyte` / `__readgsbyte` / `__readcr*` | ✗ | Segment-prefix intrinsics — pending |
 | `_ReturnAddress` / `_AddressOfReturnAddress` | ✗ | VM frame inspection opcode — pending |
 | `_InterlockedCompareExchange*` / `_InterlockedExchange*` / `_InterlockedIncrement*` / `_InterlockedAdd*` | ✗ | Layered on existing `__atomic_*` opcodes — pending |
@@ -286,9 +286,9 @@ groups from that ticket.
 | `__cpuid` / `__cpuidex` | ✗ | Host CPU info — pending |
 | `__emul` / `__emulu` / `_umul128` / `__umulh` | ✗ | 64-bit multiplication helpers — pending |
 | `#pragma once` | ✓ | |
-| `#pragma jcc comptime [begin]` / `#pragma jcc end` | ✓ | Comptime block — see [MACROS.md](MACROS.md#comptime-block) |
+| `#pragma cccc comptime [begin]` / `#pragma cccc end` | ✓ | Comptime block — see [MACROS.md](MACROS.md#comptime-block) |
 | `#pragma comment(lib, "x")` | ✗ | Link hint, no-op — pending |
-| `#pragma warning(push/pop/disable/default)` / `suppress:` | ✗ | Maps to JCC's `-W` system — pending |
+| `#pragma warning(push/pop/disable/default)` / `suppress:` | ✗ | Maps to CCCC's `-W` system — pending |
 | `#pragma pack(...)` | ✓ | |
 | `#pragma message("...")` | ✓ | |
 | `#pragma region` / `#pragma endregion` | ✗ | IDE-only, no-op — pending |
@@ -300,7 +300,7 @@ groups from that ticket.
 | `#pragma init_seg("lib")` | ✗ | No-op — pending |
 | `#pragma runtime_checks(...)` / `strict_gs_check` | ✗ | No-op — pending |
 | `__pragma(...)` | ✗ | In-macro pragma wrapper — pending |
-| `_MSC_VER` / `_MSC_FULL_VER` / `_MSC_BUILD` | ✗ | JCC-specific value in compat header — pending |
+| `_MSC_VER` / `_MSC_FULL_VER` / `_MSC_BUILD` | ✗ | CCCC-specific value in compat header — pending |
 | `_MSVC_LANG` / `_MSC_EXTENSIONS` | ✗ | `201710L` / `1` in compat header — pending |
 | `_MSC_WARNING_DURATION` | ✗ | `0` in compat header — pending |
 | `__FUNCSIG__` / `__FUNCDNAME__` / `__FUNCTION__` | ✗ | Implementable via reflection — pending |
@@ -310,10 +310,10 @@ groups from that ticket.
 
 ## Built-in Functions
 
-JCC supports a subset of GCC's `__builtin_*` functions. These are parsed and
+CCCC supports a subset of GCC's `__builtin_*` functions. These are parsed and
 lowered directly in the compiler — they do not require any header include and
 do not link against host libc. A catch-all ticket
-([#215](https://todo.sr.ht/~takeiteasy/jcc/215)) tracks remaining GNU builtins
+([#215](https://todo.sr.ht/~takeiteasy/cccc/215)) tracks remaining GNU builtins
 not yet implemented.
 
 ### Math Constants
@@ -428,13 +428,13 @@ if (__builtin_mul_overflow(a, b, &r))
 
 ## Attributes
 
-JCC supports GNU `__attribute__((...))` and C23 `[[...]]` attribute syntaxes.
+CCCC supports GNU `__attribute__((...))` and C23 `[[...]]` attribute syntaxes.
 The most common diagnostic and layout attributes are fully implemented; the
 rest are **parsed and silently ignored** by the attribute consumer.
 
 ### Feature-Test Preprocessor Operators
 
-JCC provides the common `__has_*` operators in preprocessor conditionals:
+CCCC provides the common `__has_*` operators in preprocessor conditionals:
 `__has_include`, `__has_feature`, `__has_extension`, `__has_attribute`,
 `__has_builtin`, `__has_c_attribute`, and `__has_cpp_attribute`.
 
@@ -459,8 +459,8 @@ return `0`. `__has_cpp_attribute` returns `0`.
 | `maybe_unused` | C23 | ✓ | Suppresses `-Wunused` warnings |
 | `deprecated` | C23 | ✓ | Emits `-Wdeprecated` warnings |
 | `deprecated("msg")` | C23 | ✓ | Emits `-Wdeprecated` with custom message |
-| `macro` | GNU | ✓ | JCC-specific; compile-time macro (see [MACROS.md](MACROS.md)) |
-| `comptime` | GNU | ✓ | JCC-specific; compile-time variable evaluation (see [MACROS.md](MACROS.md)) |
+| `macro` | GNU | ✓ | CCCC-specific; compile-time macro (see [MACROS.md](MACROS.md)) |
+| `comptime` | GNU | ✓ | CCCC-specific; compile-time variable evaluation (see [MACROS.md](MACROS.md)) |
 | `format(printf/scanf, …)` | GNU | ✓ | Type-check printf/scanf format strings at compile time; gated by `-F` |
 | `nodiscard` | C23 | ✓ | Warns on discarded return values (`-Wnodiscard`, part of `-Wall`) |
 | `fallthrough` | C23 | ✓ | Suppresses fallthrough warning in switch cases (`-Wfallthrough`, part of `-Wextra`) |
@@ -515,22 +515,22 @@ int __attribute__((deprecated("use bar instead"))) old_func(void);
 int [[deprecated]] legacy_var;
 ```
 
-#### `__attribute__((comptime))` / `__attribute__((comptime))` (JCC-specific)
+#### `__attribute__((comptime))` / `__attribute__((comptime))` (CCCC-specific)
 
-These are JCC's own extensions for compile-time metaprogramming. They are intercepted by the preprocessor and do not reach the general attribute parser. See [MACROS.md](MACROS.md) for details.
+These are CCCC's own extensions for compile-time metaprogramming. They are intercepted by the preprocessor and do not reach the general attribute parser. See [MACROS.md](MACROS.md) for details.
 
 **Source:** `src/preprocess.c:1737-1796`
 
 ```c
-[[jcc::comptime]] int square(int x) { return x * x; }
+[[cccc::comptime]] int square(int x) { return x * x; }
 __attribute__((comptime)) const int version = 42;
 ```
 
-#### `#include_comptime` (JCC-specific)
+#### `#include_comptime` (CCCC-specific)
 
 Includes a header only during the comptime compilation pass. The header and
 any macros or types it defines are invisible to the runtime translation unit.
-Use this when a `[[jcc::comptime]]` helper needs a dependency (e.g.
+Use this when a `[[cccc::comptime]]` helper needs a dependency (e.g.
 `<glob.h>`, `<dirent.h>`) that must not bleed into runtime code.
 
 **Source:** `src/preprocess.c` (`PP_INCLUDE_COMPTIME` case), `src/macros.c` (`build_combined_macro_tokens`)
@@ -538,22 +538,22 @@ Use this when a `[[jcc::comptime]]` helper needs a dependency (e.g.
 ```c
 #include_comptime <glob.h>
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 int glob_struct_size(void) { return (int)sizeof(glob_t); }
 ```
 
 See [MACROS.md — Comptime-only includes](MACROS.md) for full documentation.
 
-#### `__jcc_forward_include` (JCC-specific)
+#### `__cccc_forward_include` (CCCC-specific)
 
 Reflection API function callable from macro bodies. Registers a header to be
 prepended as an `#include` directive in the serialized C output. Duplicate
 registrations for the same header are deduplicated.
 
-**Source:** `src/relfection.c` (`__jcc_forward_include`), `src/serialize.c` (`cc_serialize_program`)
+**Source:** `src/relfection.c` (`__cccc_forward_include`), `src/serialize.c` (`cc_serialize_program`)
 
 ```c
-[[jcc::comptime]]
+[[cccc::comptime]]
 void gen_helpers(void) {
     $forward_include("<string.h>");
     // ... generate functions that call strlen() ...
@@ -580,9 +580,9 @@ Ignored attributes include (but are not limited to):
 | `fallthrough` | C23 | ✓ |
 | `no_unique_address` | C23 | Parsed but ignored — see ticket |
 | `noreturn` | C23/GNU | ✓ |
-| `pure` | GNU | [#217](https://todo.sr.ht/~takeiteasy/jcc/217) |
-| `const` | GNU | [#217](https://todo.sr.ht/~takeiteasy/jcc/217) |
-| `cleanup` | GNU | [#218](https://todo.sr.ht/~takeiteasy/jcc/218) |
+| `pure` | GNU | [#217](https://todo.sr.ht/~takeiteasy/cccc/217) |
+| `const` | GNU | [#217](https://todo.sr.ht/~takeiteasy/cccc/217) |
+| `cleanup` | GNU | [#218](https://todo.sr.ht/~takeiteasy/cccc/218) |
 | `format(printf,...)` | GNU | ✓ |
 | `visibility` | GNU | |
 | `section` | GNU | |
@@ -605,14 +605,14 @@ Ignored attributes include (but are not limited to):
 
 | # | Attribute | Priority | Description |
 |---|-----------|----------|-------------|
-| [#215](https://todo.sr.ht/~takeiteasy/jcc/215) | Catch-all | medium | Remaining GNU builtins and attributes |
-| [#216](https://todo.sr.ht/~takeiteasy/jcc/216) | `noreturn` / `[[noreturn]]` | high | ✓ Implemented |
-| [#217](https://todo.sr.ht/~takeiteasy/jcc/217) | `pure` / `const` | medium | Side-effect-free function annotations for optimisation |
-| [#218](https://todo.sr.ht/~takeiteasy/jcc/218) | `cleanup(func)` | medium | Scope-based cleanup callbacks (RAII-style) |
-| [#219](https://todo.sr.ht/~takeiteasy/jcc/219) | `no_unique_address` | low | Parsed but not semantically honoured; VM optimisation deferred |
+| [#215](https://todo.sr.ht/~takeiteasy/cccc/215) | Catch-all | medium | Remaining GNU builtins and attributes |
+| [#216](https://todo.sr.ht/~takeiteasy/cccc/216) | `noreturn` / `[[noreturn]]` | high | ✓ Implemented |
+| [#217](https://todo.sr.ht/~takeiteasy/cccc/217) | `pure` / `const` | medium | Side-effect-free function annotations for optimisation |
+| [#218](https://todo.sr.ht/~takeiteasy/cccc/218) | `cleanup(func)` | medium | Scope-based cleanup callbacks (RAII-style) |
+| [#219](https://todo.sr.ht/~takeiteasy/cccc/219) | `no_unique_address` | low | Parsed but not semantically honoured; VM optimisation deferred |
 
-The JCC-specific `@`-prefix attribute syntax is tracked separately in
-[#234](https://todo.sr.ht/~takeiteasy/jcc/234).
+The CCCC-specific `@`-prefix attribute syntax is tracked separately in
+[#234](https://todo.sr.ht/~takeiteasy/cccc/234).
 
 ### Position in Grammar
 
@@ -669,9 +669,9 @@ POSIX headers are embedded and backed by host OS calls. They are only available 
 
 | Feature | Notes |
 |---|---|
-| Threading (`<threads.h>`, `pthread`) | JCC is single-threaded |
+| Threading (`<threads.h>`, `pthread`) | CCCC is single-threaded |
 | Atomic operations (`<stdatomic.h>` operations) | Headers present; operations are non-atomic |
 | Complex function call ABI | Passing or returning complex values by function call is not implemented |
 | Full native ABI for runtime `dlsym` calls | Runtime dynamic function calls support scalar/pointer signatures through libffi using the current scalar/double metadata. Aggregate by-value arguments/returns, callbacks, variadic function-pointer calls, and full platform ABI descriptors are not implemented |
-| Native code generation | JCC produces VM bytecode only |
+| Native code generation | CCCC produces VM bytecode only |
 | Shared-library auto-linking for arbitrary undeclared symbols | `dlfcn.h` calls are available; `--library` opens requested libraries for registered FFI symbols |

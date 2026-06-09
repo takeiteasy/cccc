@@ -5,7 +5,7 @@ struct CLPoint { int x; int y; };
 
 // ---- $compound_literal (inline) ----------------------------------------
 // Inline macro: current_fn is the caller, so local var allocation works directly.
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *cl_point_x(void) {
     $type_t *pt = $get_type("CLPoint");
     // positional: {10, 20} — x=10, y=20
@@ -13,7 +13,7 @@ $node_t *cl_point_x(void) {
     return $member(lit, "x");
 }
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *cl_point_y(void) {
     $type_t *pt = $get_type("CLPoint");
     $node_t *lit = $compound_literal(pt, $int_literal(10), $int_literal(20));
@@ -21,7 +21,7 @@ $node_t *cl_point_y(void) {
 }
 
 // ---- $init_array (non-inline, via $with_fn) ----------------------------
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *gen_array_fn(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("array_elem1", int_ty);
@@ -37,7 +37,7 @@ gen_array_fn();
 
 // ---- $init_struct (designated, partial) --------------------------------
 // Only .x is set; .y should be zero from the ND_MEMZERO.
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *is_partial_y(void) {
     $type_t *pt = $get_type("CLPoint");
     $node_t *s = $init_struct(pt,
@@ -48,7 +48,7 @@ $node_t *is_partial_y(void) {
 }
 
 // Both fields designated: use local arrays to avoid preprocessor comma confusion.
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *is_both_sum(void) {
     $type_t *pt = $get_type("CLPoint");
     const char *fields[] = {"x", "y"};

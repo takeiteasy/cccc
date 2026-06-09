@@ -2,7 +2,7 @@
 
 int generated_answer(void);
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *generate_answer(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("generated_answer", int_ty);

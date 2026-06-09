@@ -1,5 +1,5 @@
-// JCC_FLAGS: -Wsign-compare
-// JCC_EXPECT_STDERR: \[-Wsign-compare\]
+// CCCC_FLAGS: -Wsign-compare
+// CCCC_EXPECT_STDERR: \[-Wsign-compare\]
 
 int main(void) {
     int x = -1;

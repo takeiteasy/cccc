@@ -32,7 +32,7 @@ void fill_array(int *arr, int len) {
 }
 
 // CORRECT: Return pointer to dynamically allocated array (conceptual)
-// Note: In JCC, we'd use malloc via MALC instruction
+// Note: In CCCC, we'd use malloc via MALC instruction
 // For this test, we'll use static storage
 int *create_array(int size) {
     static int buffer[10];

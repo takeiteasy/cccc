@@ -1,4 +1,4 @@
-/* errno.h - error codes for JCC C compiler */
+/* errno.h - error codes for CCCC C compiler */
 
 #ifndef __ERRNO_H
 #define __ERRNO_H

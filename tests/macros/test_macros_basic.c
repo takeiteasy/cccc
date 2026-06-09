@@ -2,8 +2,8 @@
 // A macro that returns a constant integer literal
 
 // Define a pragma macro that generates an integer literal
-[[jcc::comptime(inline)]]
-$node_t *make_five(void) { return __jcc_ast_int_literal(__jcc_get_vm(), 5); }
+[[cccc::comptime(inline)]]
+$node_t *make_five(void) { return __cccc_ast_int_literal(__cccc_get_vm(), 5); }
 
 // Use the macro in code
 int main(void) {

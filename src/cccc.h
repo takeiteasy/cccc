@@ -1,5 +1,5 @@
 /*
- JCC: JIT C Compiler
+ CCCC: Comprehensiev C Compensation Compiler
 
  Copyright (C) 2025 George Watson
 
@@ -17,8 +17,8 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef JCC_H
-#define JCC_H
+#ifndef CCCC_H
+#define CCCC_H
 
 #include <assert.h>
 #include <ctype.h>
@@ -218,13 +218,13 @@ extern "C" {
     X(FLDR_LOCAL_F32, 3) /* fregs[rd] = *(float*)(bp+offset) */           \
     X(FSTR_LOCAL_F32, 3) /* *(float*)(bp+offset) = (float)fregs[rd] */
 
-typedef uint32_t JCCInstrWord;
-typedef uint32_t JCCPc;
-#define JCC_INVALID_PC UINT32_MAX
+typedef uint32_t CCCCInstrWord;
+typedef uint32_t CCCCPc;
+#define CCCC_INVALID_PC UINT32_MAX
 
 /*!
- @enum JCC_OP
- @abstract VM instruction opcodes for the JCC bytecode.
+ @enum CCCC_OP
+ @abstract VM instruction opcodes for the CCCC bytecode.
  @discussion
  The VM is stack-based with an accumulator `ax`. These opcodes are
  emitted by the code generator and interpreted by the VM executor.
@@ -234,11 +234,11 @@ typedef enum {
     OPS_X
 #undef X
     OP_COUNT,
-} JCC_OP;
+} CCCC_OP;
 
 /*!
- @enum JCCFlags
- @abstract Bitwise flags for JCC runtime features and safety checks.
+ @enum CCCCFlags
+ @abstract Bitwise flags for CCCC runtime features and safety checks.
  @discussion
  These flags control memory safety features, debugging, and runtime behavior.
  Flags can be combined with bitwise OR. Some flags are convenience constants
@@ -246,123 +246,123 @@ typedef enum {
 */
 typedef enum {
     // Memory safety flags (bits 0-19)
-    JCC_BOUNDS_CHECKS = (1 << 0), // 0x00000001 - Array bounds checking
-    JCC_UAF_DETECTION = (1 << 1), // 0x00000002 - Use-after-free detection
-    JCC_TYPE_CHECKS = (1 << 2),   // 0x00000004 - Runtime type checking
-    JCC_UNINIT_DETECTION =
+    CCCC_BOUNDS_CHECKS = (1 << 0), // 0x00000001 - Array bounds checking
+    CCCC_UAF_DETECTION = (1 << 1), // 0x00000002 - Use-after-free detection
+    CCCC_TYPE_CHECKS = (1 << 2),   // 0x00000004 - Runtime type checking
+    CCCC_UNINIT_DETECTION =
         (1 << 3), // 0x00000008 - Uninitialized variable detection
-    JCC_OVERFLOW_CHECKS = (1 << 4), // 0x00000010 - Integer overflow detection
-    JCC_STACK_CANARIES = (1 << 5),  // 0x00000020 - Stack canary protection
-    JCC_HEAP_CANARIES = (1 << 6),   // 0x00000040 - Heap canary protection
-    JCC_MEMORY_LEAK_DETECT = (1 << 7), // 0x00000080 - Memory leak detection
-    JCC_STACK_INSTR = (1 << 8), // 0x00000100 - Stack variable instrumentation
-    JCC_DANGLING_DETECT = (1 << 9),   // 0x00000200 - Dangling pointer detection
-    JCC_ALIGNMENT_CHECKS = (1 << 10), // 0x00000400 - Pointer alignment checking
-    JCC_PROVENANCE_TRACK =
+    CCCC_OVERFLOW_CHECKS = (1 << 4), // 0x00000010 - Integer overflow detection
+    CCCC_STACK_CANARIES = (1 << 5),  // 0x00000020 - Stack canary protection
+    CCCC_HEAP_CANARIES = (1 << 6),   // 0x00000040 - Heap canary protection
+    CCCC_MEMORY_LEAK_DETECT = (1 << 7), // 0x00000080 - Memory leak detection
+    CCCC_STACK_INSTR = (1 << 8), // 0x00000100 - Stack variable instrumentation
+    CCCC_DANGLING_DETECT = (1 << 9),   // 0x00000200 - Dangling pointer detection
+    CCCC_ALIGNMENT_CHECKS = (1 << 10), // 0x00000400 - Pointer alignment checking
+    CCCC_PROVENANCE_TRACK =
         (1 << 11), // 0x00000800 - Pointer provenance tracking
-    JCC_INVALID_ARITH =
+    CCCC_INVALID_ARITH =
         (1 << 12), // 0x00001000 - Invalid pointer arithmetic detection
-    JCC_FORMAT_STR_CHECKS = (1 << 13), // 0x00002000 - Format string validation
-    JCC_RANDOM_CANARIES = (1 << 14),   // 0x00004000 - Random canary values
-    JCC_MEMORY_POISONING =
+    CCCC_FORMAT_STR_CHECKS = (1 << 13), // 0x00002000 - Format string validation
+    CCCC_RANDOM_CANARIES = (1 << 14),   // 0x00004000 - Random canary values
+    CCCC_MEMORY_POISONING =
         (1 << 15), // 0x00008000 - Poison allocated/freed memory
-    JCC_MEMORY_TAGGING = (1 << 16), // 0x00010000 - Temporal memory tagging
-    JCC_VM_HEAP = (1 << 17),        // 0x00020000 - Force VM-managed heap
-    JCC_CFI = (1 << 18),            // 0x00040000 - Control flow integrity
-    JCC_STACK_INSTR_ERRORS =
+    CCCC_MEMORY_TAGGING = (1 << 16), // 0x00010000 - Temporal memory tagging
+    CCCC_VM_HEAP = (1 << 17),        // 0x00020000 - Force VM-managed heap
+    CCCC_CFI = (1 << 18),            // 0x00040000 - Control flow integrity
+    CCCC_STACK_INSTR_ERRORS =
         (1 << 19), // 0x00080000 - Stack instrumentation errors
-    JCC_ENABLE_DEBUGGER = (1 << 20), // 0x00100000 - Interactive debugger
+    CCCC_ENABLE_DEBUGGER = (1 << 20), // 0x00100000 - Interactive debugger
 
     // Convenience flag combinations
-    JCC_POINTER_SANITIZER =
-        (JCC_BOUNDS_CHECKS | JCC_UAF_DETECTION | JCC_TYPE_CHECKS),
-    JCC_ALL_SAFETY = 0x000FFFFF, // All safety features (bits 0-19)
+    CCCC_POINTER_SANITIZER =
+        (CCCC_BOUNDS_CHECKS | CCCC_UAF_DETECTION | CCCC_TYPE_CHECKS),
+    CCCC_ALL_SAFETY = 0x000FFFFF, // All safety features (bits 0-19)
 
     // Preset safety levels (use with -S0/-S1/-S2/-S3 or
     // --safety=none/basic/standard/max)
-    JCC_SAFETY_BASIC =
-        (JCC_STACK_CANARIES | JCC_HEAP_CANARIES | JCC_MEMORY_LEAK_DETECT |
-         JCC_OVERFLOW_CHECKS | JCC_FORMAT_STR_CHECKS | JCC_VM_HEAP),
-    JCC_SAFETY_STANDARD =
-        (JCC_POINTER_SANITIZER | JCC_STACK_CANARIES | JCC_HEAP_CANARIES |
-         JCC_MEMORY_LEAK_DETECT | JCC_OVERFLOW_CHECKS | JCC_UNINIT_DETECTION |
-         JCC_FORMAT_STR_CHECKS | JCC_MEMORY_POISONING | JCC_VM_HEAP),
-    JCC_SAFETY_MAX =
-        (JCC_ALL_SAFETY | JCC_RANDOM_CANARIES | JCC_STACK_INSTR_ERRORS),
+    CCCC_SAFETY_BASIC =
+        (CCCC_STACK_CANARIES | CCCC_HEAP_CANARIES | CCCC_MEMORY_LEAK_DETECT |
+         CCCC_OVERFLOW_CHECKS | CCCC_FORMAT_STR_CHECKS | CCCC_VM_HEAP),
+    CCCC_SAFETY_STANDARD =
+        (CCCC_POINTER_SANITIZER | CCCC_STACK_CANARIES | CCCC_HEAP_CANARIES |
+         CCCC_MEMORY_LEAK_DETECT | CCCC_OVERFLOW_CHECKS | CCCC_UNINIT_DETECTION |
+         CCCC_FORMAT_STR_CHECKS | CCCC_MEMORY_POISONING | CCCC_VM_HEAP),
+    CCCC_SAFETY_MAX =
+        (CCCC_ALL_SAFETY | CCCC_RANDOM_CANARIES | CCCC_STACK_INSTR_ERRORS),
 
     // VM heap is auto-enabled when any of these flags are set
-    JCC_VM_HEAP_TRIGGERS =
-        (JCC_VM_HEAP | JCC_HEAP_CANARIES | JCC_MEMORY_LEAK_DETECT |
-         JCC_UAF_DETECTION | JCC_POINTER_SANITIZER | JCC_BOUNDS_CHECKS |
-         JCC_MEMORY_TAGGING),
+    CCCC_VM_HEAP_TRIGGERS =
+        (CCCC_VM_HEAP | CCCC_HEAP_CANARIES | CCCC_MEMORY_LEAK_DETECT |
+         CCCC_UAF_DETECTION | CCCC_POINTER_SANITIZER | CCCC_BOUNDS_CHECKS |
+         CCCC_MEMORY_TAGGING),
 
     // Pointer validity checks
-    JCC_POINTER_CHECKS = (JCC_UAF_DETECTION | JCC_BOUNDS_CHECKS |
-                          JCC_DANGLING_DETECT | JCC_MEMORY_TAGGING),
-} JCCFlags;
+    CCCC_POINTER_CHECKS = (CCCC_UAF_DETECTION | CCCC_BOUNDS_CHECKS |
+                          CCCC_DANGLING_DETECT | CCCC_MEMORY_TAGGING),
+} CCCCFlags;
 
 /*!
- @enum JCCWarning
+ @enum CCCCWarning
  @abstract Bitwise flags for compiler warning categories.
  @discussion
  These flags control suppressible compiler diagnostics. They are separate from
- JCCFlags because the warning set can grow independently of runtime safety
+ CCCCFlags because the warning set can grow independently of runtime safety
  flags and uses a 64-bit mask.
 */
 typedef enum {
-    JCC_WARN_UNUSED = (1ULL << 0),
-    JCC_WARN_IMPLICIT_FUNCTION_DECLARATION = (1ULL << 1),
-    JCC_WARN_IMPLICIT_INT = (1ULL << 2),
-    JCC_WARN_RETURN_TYPE = (1ULL << 3),
-    JCC_WARN_SHADOW = (1ULL << 4),
-    JCC_WARN_FORMAT = (1ULL << 5),
-    JCC_WARN_CONVERSION = (1ULL << 6),
-    JCC_WARN_SIGN_COMPARE = (1ULL << 7),
-    JCC_WARN_POINTER_ARITH = (1ULL << 8),
-    JCC_WARN_PEDANTIC = (1ULL << 9),
-    JCC_WARN_DEPRECATED = (1ULL << 10),
-    JCC_WARN_CPP = (1ULL << 11),
-    JCC_WARN_EXTRA_TOKENS = (1ULL << 12),
-    JCC_WARN_LARGE_FILE_EMBED = (1ULL << 13),
-    JCC_WARN_JCC_MACRO = (1ULL << 14),
-    JCC_WARN_COMPTIME_BLOCK_LEAK = (1ULL << 15), // unclosed #pragma jcc comptime begin in included file
-    // Conversion sub-categories (JCC_WARN_CONVERSION is integer narrowing)
-    JCC_WARN_SIGN_CONVERSION = (1ULL << 16),  // signed/unsigned mismatch on assign/arg/return
-    JCC_WARN_FLOAT_CONVERSION = (1ULL << 17), // float<->int or float narrowing
-    JCC_WARN_IGNORED_FEATURES = (1ULL << 18), // parsed-but-ignored features (_Atomic, TLS, etc.)
-    JCC_WARN_ATTRIBUTES       = (1ULL << 19), // unknown attributes
-    JCC_WARN_NODISCARD        = (1ULL << 20), // [[nodiscard]] return value discarded
-    JCC_WARN_FALLTHROUGH      = (1ULL << 21), // switch case falls through without [[fallthrough]]
+    CCCC_WARN_UNUSED = (1ULL << 0),
+    CCCC_WARN_IMPLICIT_FUNCTION_DECLARATION = (1ULL << 1),
+    CCCC_WARN_IMPLICIT_INT = (1ULL << 2),
+    CCCC_WARN_RETURN_TYPE = (1ULL << 3),
+    CCCC_WARN_SHADOW = (1ULL << 4),
+    CCCC_WARN_FORMAT = (1ULL << 5),
+    CCCC_WARN_CONVERSION = (1ULL << 6),
+    CCCC_WARN_SIGN_COMPARE = (1ULL << 7),
+    CCCC_WARN_POINTER_ARITH = (1ULL << 8),
+    CCCC_WARN_PEDANTIC = (1ULL << 9),
+    CCCC_WARN_DEPRECATED = (1ULL << 10),
+    CCCC_WARN_CPP = (1ULL << 11),
+    CCCC_WARN_EXTRA_TOKENS = (1ULL << 12),
+    CCCC_WARN_LARGE_FILE_EMBED = (1ULL << 13),
+    CCCC_WARN_CCCC_MACRO = (1ULL << 14),
+    CCCC_WARN_COMPTIME_BLOCK_LEAK = (1ULL << 15), // unclosed #pragma cccc comptime begin in included file
+    // Conversion sub-categories (CCCC_WARN_CONVERSION is integer narrowing)
+    CCCC_WARN_SIGN_CONVERSION = (1ULL << 16),  // signed/unsigned mismatch on assign/arg/return
+    CCCC_WARN_FLOAT_CONVERSION = (1ULL << 17), // float<->int or float narrowing
+    CCCC_WARN_IGNORED_FEATURES = (1ULL << 18), // parsed-but-ignored features (_Atomic, TLS, etc.)
+    CCCC_WARN_ATTRIBUTES       = (1ULL << 19), // unknown attributes
+    CCCC_WARN_NODISCARD        = (1ULL << 20), // [[nodiscard]] return value discarded
+    CCCC_WARN_FALLTHROUGH      = (1ULL << 21), // switch case falls through without [[fallthrough]]
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
-    JCC_WARN_CONVERSION_GROUP = JCC_WARN_CONVERSION |
-                                JCC_WARN_SIGN_CONVERSION |
-                                JCC_WARN_FLOAT_CONVERSION,
+    CCCC_WARN_CONVERSION_GROUP = CCCC_WARN_CONVERSION |
+                                CCCC_WARN_SIGN_CONVERSION |
+                                CCCC_WARN_FLOAT_CONVERSION,
 
-JCC_WARN_ALL = JCC_WARN_UNUSED |
-                   JCC_WARN_IMPLICIT_FUNCTION_DECLARATION |
-                   JCC_WARN_IMPLICIT_INT |
-                   JCC_WARN_RETURN_TYPE |
-                   JCC_WARN_SHADOW |
-                   JCC_WARN_FORMAT |
-                   JCC_WARN_CONVERSION |
-                   JCC_WARN_SIGN_COMPARE |
-                   JCC_WARN_POINTER_ARITH |
-                   JCC_WARN_PEDANTIC |
-                   JCC_WARN_DEPRECATED |
-                   JCC_WARN_CPP |
-                   JCC_WARN_EXTRA_TOKENS |
-                   JCC_WARN_LARGE_FILE_EMBED |
-                   JCC_WARN_JCC_MACRO |
-                   JCC_WARN_IGNORED_FEATURES |
-                   JCC_WARN_ATTRIBUTES |
-                   JCC_WARN_NODISCARD,
-    JCC_WARN_EXTRA = JCC_WARN_SHADOW |
-                      JCC_WARN_SIGN_COMPARE |
-                      JCC_WARN_CONVERSION |
-                      JCC_WARN_POINTER_ARITH |
-                      JCC_WARN_FALLTHROUGH,
-} JCCWarning;
+CCCC_WARN_ALL = CCCC_WARN_UNUSED |
+                   CCCC_WARN_IMPLICIT_FUNCTION_DECLARATION |
+                   CCCC_WARN_IMPLICIT_INT |
+                   CCCC_WARN_RETURN_TYPE |
+                   CCCC_WARN_SHADOW |
+                   CCCC_WARN_FORMAT |
+                   CCCC_WARN_CONVERSION |
+                   CCCC_WARN_SIGN_COMPARE |
+                   CCCC_WARN_POINTER_ARITH |
+                   CCCC_WARN_PEDANTIC |
+                   CCCC_WARN_DEPRECATED |
+                   CCCC_WARN_CPP |
+                   CCCC_WARN_EXTRA_TOKENS |
+                   CCCC_WARN_LARGE_FILE_EMBED |
+                   CCCC_WARN_CCCC_MACRO |
+                   CCCC_WARN_IGNORED_FEATURES |
+                   CCCC_WARN_ATTRIBUTES |
+                   CCCC_WARN_NODISCARD,
+    CCCC_WARN_EXTRA = CCCC_WARN_SHADOW |
+                      CCCC_WARN_SIGN_COMPARE |
+                      CCCC_WARN_CONVERSION |
+                      CCCC_WARN_POINTER_ARITH |
+                      CCCC_WARN_FALLTHROUGH,
+} CCCCWarning;
 
 /*!
  @struct HashEntry
@@ -512,7 +512,7 @@ typedef struct Token {
     // Effective diagnostic state stamped by the preprocessor.
     // Bit 63 is a sentinel: if set, bits 0-62 are the active warning mask
     // at the point this token was emitted (overrides vm->compiler.warnings).
-    uint64_t diag_warnings; // effective JCCWarning mask (bit63 = stamped)
+    uint64_t diag_warnings; // effective CCCCWarning mask (bit63 = stamped)
     uint64_t diag_werror;   // effective warning_errors mask (bit63 = stamped)
 } Token;
 
@@ -895,14 +895,14 @@ typedef struct CondIncl {
 /*!
  @struct MacroFn
  @abstract Represents a compile-time macro function.
- @discussion Macro functions are functions marked with [[jcc::macro]] or
+ @discussion Macro functions are functions marked with [[cccc::macro]] or
              __attribute__((macro)) that execute during compilation to generate
              or transform AST nodes.
  @field name Function name.
  @field body_tokens Original token stream for function body (from preprocessor).
  @field compiled_fn Compiled function object (NULL until compiled).
  @field is_compiled True after successful compilation.
- @field is_macro_entry True if callable from user program macro call sites (always true for [[jcc::comptime]] functions).
+ @field is_macro_entry True if callable from user program macro call sites (always true for [[cccc::comptime]] functions).
  @field is_void_macro True if declared with void return type (definition-only).
  @field next Pointer to next macro in linked list.
 */
@@ -928,7 +928,7 @@ typedef struct ComptimeVarMember {
     struct ComptimeVarMember *next;
 } ComptimeVarMember;
 
-// A test function registered via [[jcc::test]].
+// A test function registered via [[cccc::test]].
 typedef struct TestFnRecord TestFnRecord;
 struct TestFnRecord {
     char *name;
@@ -1016,7 +1016,7 @@ struct Scope {
 typedef struct LabelEntry {
     char *name;         // Label name (for named labels)
     char *unique_label; // Unique label identifier (for break/continue)
-    JCCPc address;      // Instruction index where label is defined
+    CCCCPc address;      // Instruction index where label is defined
 } LabelEntry;
 
 /*!
@@ -1027,39 +1027,39 @@ typedef struct LabelEntry {
 typedef struct GotoPatch {
     char *name;          // Label name to jump to
     char *unique_label;  // Or unique label identifier
-    JCCPc location;      // Instruction index of JMP target operand
+    CCCCPc location;      // Instruction index of JMP target operand
 } GotoPatch;
 
-typedef struct JCC JCC;
-typedef struct JCC $vm_t;
+typedef struct CCCC CCCC;
+typedef struct CCCC $vm_t;
 
 /* Per-signal action slot for VM-managed signal handling */
-#define JCC_NSIG 32
+#define CCCC_NSIG 32
 
 typedef struct {
     int      action;      /* 0=DFL, 1=IGN, 2=VM handler */
     long long handler_fn; /* VM function pointer when action==2 */
-} JCCSigSlot;
+} CCCCSigSlot;
 
 typedef enum {
-    JCC_FREG_F64 = 0,
-    JCC_FREG_F32,
-    JCC_FREG_V4F32,
-    JCC_FREG_V2F64,
-} JCCFRegTag;
+    CCCC_FREG_F64 = 0,
+    CCCC_FREG_F32,
+    CCCC_FREG_V4F32,
+    CCCC_FREG_V2F64,
+} CCCCFRegTag;
 
 typedef struct {
-    JCCFRegTag tag;
+    CCCCFRegTag tag;
     union {
         float f32;
         double f64;
         float v4f32[4];
         double v2f64[2];
     } value;
-} JCCFReg;
+} CCCCFReg;
 
 /*!
- @typedef JCCAsmCallback
+ @typedef CCCCAsmCallback
  @abstract Callback invoked when an `asm("...")` statement is encountered
            during code generation.
  @param vm The VM/compiler instance.
@@ -1068,7 +1068,7 @@ typedef struct {
  @discussion The callback may emit custom bytecode into the VM's text
              segment, perform logging, or otherwise handle the asm string.
 */
-typedef void (*JCCAsmCallback)(JCC *vm, const char *asm_str, void *user_data);
+typedef void (*CCCCAsmCallback)(CCCC *vm, const char *asm_str, void *user_data);
 
 /*!
  @struct ForeignFunc
@@ -1327,7 +1327,7 @@ typedef struct Watchpoint {
 #endif
 
 typedef struct Breakpoint {
-    JCCPc pc;        // Instruction index of breakpoint
+    CCCCPc pc;        // Instruction index of breakpoint
     int enabled;     // 1 if enabled, 0 if disabled
     int hit_count;   // Number of times hit
     char *condition; // Optional condition expression (NULL if unconditional)
@@ -1389,9 +1389,9 @@ typedef struct Arena {
 
 /*!
  @struct Debugger
- @abstract Encapsulates all debugger state for the JCC VM.
+ @abstract Encapsulates all debugger state for the CCCC VM.
  @discussion Contains breakpoints, stepping control, source mapping,
-             debug symbols, and watchpoints. Enabled via JCC_ENABLE_DEBUGGER
+             debug symbols, and watchpoints. Enabled via CCCC_ENABLE_DEBUGGER
  flag.
 */
 #ifndef MAX_DEBUG_SYMBOLS
@@ -1406,7 +1406,7 @@ typedef struct Debugger {
     int single_step; // Single-step mode (stop after each instruction)
     int step_over;   // Step over mode (skip function calls)
     int step_out;    // Step out mode (run until function returns)
-    JCCPc step_over_return_addr;      // Return PC for step over
+    CCCCPc step_over_return_addr;      // Return PC for step over
     long long *step_out_bp;           // Base pointer for step out
     int debugger_attached;            // Debugger REPL is active
 
@@ -1458,11 +1458,11 @@ typedef struct Debugger {
  in Compiler.c_std_gnu.
 */
 typedef enum {
-    JCC_STD_C89,  // C89/C90 / GNU89/GNU90 — __STDC_VERSION__ not defined
-    JCC_STD_C99,  // C99  / GNU99  — __STDC_VERSION__ 199901L
-    JCC_STD_C11,  // C11  / GNU11  — __STDC_VERSION__ 201112L
-    JCC_STD_C17,  // C17/C18 / GNU17/GNU18 — __STDC_VERSION__ 201710L (default)
-    JCC_STD_C23,  // C23/C2x / GNU23/GNU2x — __STDC_VERSION__ 202311L
+    CCCC_STD_C89,  // C89/C90 / GNU89/GNU90 — __STDC_VERSION__ not defined
+    CCCC_STD_C99,  // C99  / GNU99  — __STDC_VERSION__ 199901L
+    CCCC_STD_C11,  // C11  / GNU11  — __STDC_VERSION__ 201112L
+    CCCC_STD_C17,  // C17/C18 / GNU17/GNU18 — __STDC_VERSION__ 201710L (default)
+    CCCC_STD_C23,  // C23/C2x / GNU23/GNU2x — __STDC_VERSION__ 202311L
 } CStdVersion;
 
 typedef struct Compiler {
@@ -1477,12 +1477,12 @@ typedef struct Compiler {
 
     // Compile-time macro state
     MacroFn *macro_fns;              // Linked list of captured macro functions
-    ComptimeVar *comptime_vars;      // Linked list of [[jcc::comptime]] variable decls
-    TestFnRecord *test_fns;          // Linked list of [[jcc::test]] function names
+    ComptimeVar *comptime_vars;      // Linked list of [[cccc::comptime]] variable decls
+    TestFnRecord *test_fns;          // Linked list of [[cccc::test]] function names
     bool testing_mode;               // True when running under --testing (no main required)
     bool in_macro_mode;              // True when compiling/executing a macro function
     bool in_macro_expansion;         // True during macro AST expansion pass
-    bool in_comptime_block;          // True inside #pragma jcc comptime begin...end
+    bool in_comptime_block;          // True inside #pragma cccc comptime begin...end
     File *comptime_block_file;       // File that opened the comptime block (for auto-close)
     bool macro_fns_compiled;         // True after compile_all_macros has run
     bool strict_comptime_includes;   // --strict-comptime-includes: don't forward regular #include decls to comptime pass
@@ -1503,7 +1503,7 @@ typedef struct Compiler {
     bool embed_hard_error;   // If true, exceeding limit is a hard error
 
     // Warning configuration
-    uint64_t warnings;        // Enabled JCCWarning categories
+    uint64_t warnings;        // Enabled CCCCWarning categories
     uint64_t warning_errors;  // Categories promoted by -Werror=<name>
     uint64_t warning_no_errors; // Categories demoted after global -Werror
 
@@ -1562,14 +1562,14 @@ typedef struct Compiler {
     int local_offset;  // Current local variable offset
 
     struct {
-        JCCPc location;      // Location in text segment to patch
+        CCCCPc location;      // Location in text segment to patch
         Obj *function;       // Function to call
     } call_patches[MAX_CALLS];
     int num_call_patches;
 
     // Function address patches for function pointers
     struct {
-        JCCPc location;      // Location of IMM operand to patch
+        CCCCPc location;      // Location of IMM operand to patch
         Obj *function;       // Function whose address to use
     } func_addr_patches[MAX_CALLS];
     int num_func_addr_patches;
@@ -1590,14 +1590,14 @@ typedef struct Compiler {
     // Switch statement code generation
     void *current_switch_cases;       // Codegen-owned SwitchCasePatch array
     int current_switch_num;           // Number of case entries
-    JCCPc current_switch_table_start; // Dense jump table start, or invalid
+    CCCCPc current_switch_table_start; // Dense jump table start, or invalid
     long current_switch_min;          // Minimum case value for dense switches
     long current_switch_size;         // Jump table size for dense switches
     Node *current_switch_default;     // Default case node
-    JCCPc current_default_patch;      // Patch location for default case jump
+    CCCCPc current_default_patch;      // Patch location for default case jump
 
     // Inline assembly callback
-    JCCAsmCallback asm_callback; // User-provided callback for asm statements
+    CCCCAsmCallback asm_callback; // User-provided callback for asm statements
     void *asm_user_data;         // User-provided context for callback
     bool asm_passthru;           // --asm-passthru flag: compile asm via native CC
 
@@ -1623,7 +1623,7 @@ typedef struct Compiler {
 
     // Per-instance state (moved from static globals for thread-safety)
     int unique_name_counter; // Counter for new_unique_name()
-    int macro_gensym_counter; // Counter for __jcc_gensym()
+    int macro_gensym_counter; // Counter for __cccc_gensym()
     int counter_macro_value; // __COUNTER__ macro value
 
     // Optimization settings
@@ -1636,12 +1636,12 @@ typedef struct Compiler {
     int inline_result_reg;  // Register for inlined return values
 
     // ENT3 stack patching for inlined locals
-    JCCPc ent3_stack_loc;   // PC of ENT3 stack_size low word (for patching)
+    CCCCPc ent3_stack_loc;   // PC of ENT3 stack_size low word (for patching)
     int ent3_base_stack;    // Original stack_size before inlining additions
     int ent3_extra_stack;   // Additional stack slots from inlined locals
 
     // C language standard selection
-    CStdVersion c_std;  // Selected standard version (default: JCC_STD_C17)
+    CStdVersion c_std;  // Selected standard version (default: CCCC_STD_C17)
     bool c_std_gnu;     // True for gnuXX variants (gnu17, gnu11, …)
 
     // Custom entry point name (NULL means "main")
@@ -1653,19 +1653,19 @@ typedef struct Compiler {
 } Compiler;
 
 /*!
- @struct JCC
- @abstract Encapsulates all state for the JCC compiler and virtual
+ @struct CCCC
+ @abstract Encapsulates all state for the CCCC compiler and virtual
            machine. Instances are independent and support embedding.
  @discussion The structure contains registers, memory segments, frontend
              state (preprocessor, tokenizer, parser) and codegen/VM
              bookkeeping. All public API functions accept an
-             `JCC *` as the first parameter.
+             `CCCC *` as the first parameter.
 */
-struct JCC {
+struct CCCC {
     // VM Registers (pure register-based architecture)
     long long regs[32]; // General-purpose register file (NUM_REGS)
-    JCCFReg fregs[32];  // Tagged floating-point register file
-    JCCPc pc;           // Program counter (instruction index)
+    CCCCFReg fregs[32];  // Tagged floating-point register file
+    CCCCPc pc;           // Program counter (instruction index)
     long long *bp;      // Base pointer (frame pointer)
     long long *sp;      // Stack pointer
     long long cycle;    // Instruction cycle counter
@@ -1678,10 +1678,10 @@ struct JCC {
     long long *stack_base; // Lower bound of stack (stack_seg start)
 
     // Memory Segments
-    JCCInstrWord *text_seg;  // Text segment (32-bit bytecode words)
-    JCCPc text_ptr;          // Current write position (for code generation)
+    CCCCInstrWord *text_seg;  // Text segment (32-bit bytecode words)
+    CCCCPc text_ptr;          // Current write position (for code generation)
     long long *stack_seg;    // Stack segment
-    JCCInstrWord *old_text_seg; // Backup of original text segment pointer
+    CCCCInstrWord *old_text_seg; // Backup of original text segment pointer
     char *data_seg;          // Data segment (global variables/constants)
     char *data_ptr;          // Current write position in data segment
     char *heap_seg;          // Heap segment (for VM malloc/free)
@@ -1706,7 +1706,7 @@ struct JCC {
                         // {origin_type, base, size})
     HashMap stack_var_meta; // Unified stack variable metadata (bp+offset ->
                             // StackVarMeta)
-    HashMap ptr_tags; // ptr address → creation_generation (JCC_MEMORY_TAGGING)
+    HashMap ptr_tags; // ptr address → creation_generation (CCCC_MEMORY_TAGGING)
 
     // Sorted allocation array for O(log n) range queries (CHKP/CHKT performance
     // and heap provenance)
@@ -1728,9 +1728,9 @@ struct JCC {
     int poolsize_max; // Maximum element count for the reserved virtual range
     int debug_vm; // Enable debug output during execution
 
-    // Runtime flags (bitwise combination of JCCFlags)
-    uint32_t flags; // JCCFlags bitfield for all safety and runtime features
-    long long stack_canary; // Stack canary value (random if JCC_RANDOM_CANARIES
+    // Runtime flags (bitwise combination of CCCCFlags)
+    uint32_t flags; // CCCCFlags bitfield for all safety and runtime features
+    long long stack_canary; // Stack canary value (random if CCCC_RANDOM_CANARIES
                             // set, else fixed)
     int in_vm_alloc; // Reentrancy guard: prevents HashMap from triggering VM
                      // heap recursion
@@ -1781,7 +1781,7 @@ struct JCC {
     int vm_profile_prev2_op;
     bool vm_profile_trigram_started;
 
-    // Debugger state (enable via JCC_ENABLE_DEBUGGER flag)
+    // Debugger state (enable via CCCC_ENABLE_DEBUGGER flag)
     Debugger dbg;
 
     DynamicLibrary *dynlibs;
@@ -1797,7 +1797,7 @@ struct JCC {
     Compiler compiler;
 
     // VM-managed signal table
-    JCCSigSlot vm_sigslots[JCC_NSIG];
+    CCCCSigSlot vm_sigslots[CCCC_NSIG];
 
     // Error handling (setjmp/longjmp for exception-like behavior)
     jmp_buf
@@ -1816,64 +1816,64 @@ struct JCC {
 
 /*!
  @function cc_init
- @abstract Initialize an JCC instance.
- @discussion The caller should allocate an `JCC` struct (usually on the
+ @abstract Initialize an CCCC instance.
+ @discussion The caller should allocate an `CCCC` struct (usually on the
              stack) and pass its pointer to this function. This sets up
              memory segments, default include paths, and other runtime
              defaults.
- @param vm Pointer to an uninitialized JCC struct to initialize.
- @param flags Bitwise combination of JCCFlags to enable features (0 for none).
+ @param vm Pointer to an uninitialized CCCC struct to initialize.
+ @param flags Bitwise combination of CCCCFlags to enable features (0 for none).
 */
-void cc_init(JCC *vm, uint32_t flags);
+void cc_init(CCCC *vm, uint32_t flags);
 
 /*!
  @function cc_destroy
- @abstract Free resources owned by an JCC instance.
- @discussion Does not free the `JCC` struct itself; the caller is
+ @abstract Free resources owned by an CCCC instance.
+ @discussion Does not free the `CCCC` struct itself; the caller is
              responsible for the memory of the struct if it was
              dynamically allocated.
- @param vm The JCC instance to destroy.
+ @param vm The CCCC instance to destroy.
 */
-void cc_destroy(JCC *vm);
+void cc_destroy(CCCC *vm);
 
 /*!
  @function cc_get_error_count
  @abstract Get the number of errors collected during compilation.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @result The number of errors collected.
 */
-int cc_get_error_count(JCC *vm);
+int cc_get_error_count(CCCC *vm);
 
 /*!
  @function cc_get_warning_count
  @abstract Get the number of warnings collected during compilation.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @result The number of warnings collected.
 */
-int cc_get_warning_count(JCC *vm);
+int cc_get_warning_count(CCCC *vm);
 
 /*!
  @function cc_has_errors
  @abstract Check if any errors have been collected.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @result True if errors exist, false otherwise.
 */
-bool cc_has_errors(JCC *vm);
+bool cc_has_errors(CCCC *vm);
 
 /*!
  @function cc_clear_errors
  @abstract Clear all collected errors and warnings.
  @discussion Useful for reusing a VM instance across multiple compilations.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
 */
-void cc_clear_errors(JCC *vm);
+void cc_clear_errors(CCCC *vm);
 
 /*!
  @function cc_print_all_errors
  @abstract Print all collected errors and warnings to stderr.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
 */
-void cc_print_all_errors(JCC *vm);
+void cc_print_all_errors(CCCC *vm);
 
 /*!
  @function cc_print_stack_report
@@ -1881,19 +1881,19 @@ void cc_print_all_errors(JCC *vm);
  @discussion Outputs stack usage statistics including high water mark,
              variable access counts, and scope information. Only useful
              when stack instrumentation is enabled.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
 */
-void cc_print_stack_report(JCC *vm);
+void cc_print_stack_report(CCCC *vm);
 
 /*!
  @function cc_include
  @abstract Add a directory to the compiler's header search paths.
  @discussion This adds the path to the list of directories searched for
              "..." includes (quote includes).
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param path Filesystem path to add to include search.
 */
-void cc_include(JCC *vm, const char *path);
+void cc_include(CCCC *vm, const char *path);
 
 /*!
  @function cc_system_include
@@ -1901,36 +1901,36 @@ void cc_include(JCC *vm, const char *path);
  @discussion This adds the path to the list of directories searched for
              <...> includes (angle bracket includes). System include paths
              are searched after regular include paths for "..." includes.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param path Filesystem path to add to system include search.
 */
-void cc_system_include(JCC *vm, const char *path);
+void cc_system_include(CCCC *vm, const char *path);
 
 /*!
  @function cc_define
  @abstract Define or override a preprocessor macro for the given VM.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param name Macro identifier (NUL-terminated).
  @param buf Macro replacement text (NUL-terminated).
 */
-void cc_define(JCC *vm, char *name, char *buf);
+void cc_define(CCCC *vm, char *name, char *buf);
 
 /*!
  @function cc_undef
  @abstract Remove a preprocessor macro definition from the VM.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param name Macro identifier to remove.
 */
-void cc_undef(JCC *vm, char *name);
+void cc_undef(CCCC *vm, char *name);
 
 /*!
  @function cc_set_asm_callback
  @abstract Register a callback invoked for `asm("...")` statements.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param callback Callback function pointer, or NULL to unregister.
  @param user_data Optional user context pointer passed to the callback.
 */
-void cc_set_asm_callback(JCC *vm, JCCAsmCallback callback, void *user_data);
+void cc_set_asm_callback(CCCC *vm, CCCCAsmCallback callback, void *user_data);
 
 /*!
  @function cc_ffi_allow
@@ -1938,31 +1938,31 @@ void cc_set_asm_callback(JCC *vm, JCCAsmCallback callback, void *user_data);
  @discussion When the allow list is non-empty, only listed names may be called
              through registered FFI or runtime dynamic symbols.
 */
-void cc_ffi_allow(JCC *vm, const char *name);
+void cc_ffi_allow(CCCC *vm, const char *name);
 
 /*!
  @function cc_ffi_deny
  @abstract Add a native function name to the FFI deny list.
  @discussion The deny list is checked only when the allow list is empty.
 */
-void cc_ffi_deny(JCC *vm, const char *name);
+void cc_ffi_deny(CCCC *vm, const char *name);
 
 /*!
  @function cc_ffi_clear_allow_list
  @abstract Remove all names from the FFI allow list.
 */
-void cc_ffi_clear_allow_list(JCC *vm);
+void cc_ffi_clear_allow_list(CCCC *vm);
 
 /*!
  @function cc_ffi_clear_deny_list
  @abstract Remove all names from the FFI deny list.
 */
-void cc_ffi_clear_deny_list(JCC *vm);
+void cc_ffi_clear_deny_list(CCCC *vm);
 
 /*!
  @function cc_register_cfunc
  @abstract Register a native C function to be callable from VM code via FFI.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param name Function name (must match declarations in C source).
  @param func_ptr Pointer to the native C function.
  @param num_args Number of arguments the function expects.
@@ -1972,14 +1972,14 @@ void cc_ffi_clear_deny_list(JCC *vm);
              All integer types are passed/returned as long long, floats as
  double.
 */
-void cc_register_cfunc(JCC *vm, const char *name, void *func_ptr, int num_args,
+void cc_register_cfunc(CCCC *vm, const char *name, void *func_ptr, int num_args,
                        int returns_double);
 
 /*!
  @function cc_register_cfunc_ex
  @abstract Register a C function with detailed argument type information for
  correct FFI calling conventions.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param name Function name (must match declarations in C source).
  @param func_ptr Pointer to the native C function.
  @param num_args Total number of arguments.
@@ -1994,7 +1994,7 @@ void cc_register_cfunc(JCC *vm, const char *name, void *func_ptr, int num_args,
  integer arguments or single double arguments, cc_register_cfunc() is
  sufficient.
 */
-void cc_register_cfunc_ex(JCC *vm, const char *name, void *func_ptr,
+void cc_register_cfunc_ex(CCCC *vm, const char *name, void *func_ptr,
                           int num_args, int returns_double,
                           uint64_t double_arg_mask);
 
@@ -2002,24 +2002,24 @@ void cc_register_cfunc_ex(JCC *vm, const char *name, void *func_ptr,
  @function cc_register_variadic_cfunc
  @abstract Register a variadic native C function to be callable from VM code via
  FFI.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param name Function name (must match declarations in C source).
  @param func_ptr Pointer to the native C variadic function.
  @param num_fixed_args Number of fixed arguments before the ... (e.g., printf
  has 1: format string).
  @param returns_double 1 if function returns double, 0 if returns long long.
  @discussion Variadic functions accept a variable number of arguments after the
- fixed arguments. JCC uses platform native inline-assembly to call variadic
+ fixed arguments. CCCC uses platform native inline-assembly to call variadic
  functions. Example: printf has 1 fixed arg (format), fprintf has 2 (stream,
  format).
 */
-void cc_register_variadic_cfunc(JCC *vm, const char *name, void *func_ptr,
+void cc_register_variadic_cfunc(CCCC *vm, const char *name, void *func_ptr,
                                 int num_fixed_args, int returns_double);
 
 /*!
  @function cc_load_stdlib
  @abstract Register all standard library functions available via FFI.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @discussion Automatically registers 50+ standard library functions including:
              - Memory: malloc, free, calloc, realloc, memcpy, memmove, memset,
  memcmp
@@ -2035,12 +2035,12 @@ void cc_register_variadic_cfunc(JCC *vm, const char *name, void *func_ptr,
  called manually if you want to reset the FFI registry or initialize it
  separately.
 */
-void cc_load_stdlib(JCC *vm);
+void cc_load_stdlib(CCCC *vm);
 
 /*!
  @function cc_dlsym
  @abstract Update an existing registered FFI function's pointer by name.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param name Function name to update.
  @param func_ptr New function pointer to assign.
  @param num_args Expected number of arguments (must match registered function).
@@ -2051,13 +2051,13 @@ void cc_load_stdlib(JCC *vm);
  implementations. The function must already be registered via cc_register_cfunc
  or cc_register_variadic_cfunc.
 */
-int cc_dlsym(JCC *vm, const char *name, void *func_ptr, int num_args,
+int cc_dlsym(CCCC *vm, const char *name, void *func_ptr, int num_args,
              int returns_double);
 
 /*!
  @function cc_dlopen
  @abstract Load a dynamic library and resolve all registered FFI functions.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param lib_path Path to the dynamic library (.so, .dylib, .dll) or NULL for
  default libraries.
  @return 0 on success, -1 on error.
@@ -2073,12 +2073,12 @@ int cc_dlsym(JCC *vm, const char *name, void *func_ptr, int num_args,
              The library handle is not closed after loading to keep function
  pointers valid.
 */
-int cc_dlopen(JCC *vm, const char *lib_path);
+int cc_dlopen(CCCC *vm, const char *lib_path);
 
 /*!
  @function cc_load_libc
  @abstract Load the platform's standard C library and resolve FFI functions.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @return 0 on success, -1 on error.
  @discussion This function automatically detects and loads the correct C library
  for the current platform:
@@ -2089,76 +2089,76 @@ int cc_dlopen(JCC *vm, const char *lib_path);
              This is useful when you want to load stdlib functions dynamically
  instead of registering them with explicit function pointers.
 */
-int cc_load_libc(JCC *vm);
+int cc_load_libc(CCCC *vm);
 
 /*!
  @function cc_preprocess
  @abstract Run the preprocessor on a C source file and return a token stream.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param path Path to the source file to preprocess.
  @return Head of the token stream (linked Token list). Caller owns tokens.
 */
-Token *cc_preprocess(JCC *vm, const char *path);
+Token *cc_preprocess(CCCC *vm, const char *path);
 
 /*!
  @function cc_parse
  @abstract Parse a preprocessed token stream into an AST and produce
            a linked list of top-level Obj declarations.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param tok Head of the preprocessed token stream.
  @return Linked list of top-level Obj representing globals and functions.
 */
-Obj *cc_parse(JCC *vm, Token *tok);
+Obj *cc_parse(CCCC *vm, Token *tok);
 
 /*!
  @function cc_parse_expr
  @abstract Parse a single C expression from token stream.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param rest Pointer to receive the remaining tokens after parsing.
  @param tok Head of the token stream to parse.
  @return AST node representing the parsed expression.
 */
-Node *cc_parse_expr(JCC *vm, Token **rest, Token *tok);
+Node *cc_parse_expr(CCCC *vm, Token **rest, Token *tok);
 
 /*!
  @function cc_parse_assign
  @abstract Parse an assignment expression from token stream (stops at commas).
  @discussion Used for parsing function arguments and other contexts where commas
              are separators rather than operators.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param rest Pointer to receive the remaining tokens after parsing.
  @param tok Head of the token stream to parse.
  @return AST node representing the parsed assignment expression.
 */
-Node *cc_parse_assign(JCC *vm, Token **rest, Token *tok);
+Node *cc_parse_assign(CCCC *vm, Token **rest, Token *tok);
 
 /*!
  @function cc_parse_stmt
  @abstract Parse a single C statement from token stream.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param rest Pointer to receive the remaining tokens after parsing.
  @param tok Head of the token stream to parse.
  @return AST node representing the parsed statement.
 */
-Node *cc_parse_stmt(JCC *vm, Token **rest, Token *tok);
+Node *cc_parse_stmt(CCCC *vm, Token **rest, Token *tok);
 
 /*!
  @function cc_parse_compound_stmt
  @abstract Parse a compound statement (block) from token stream.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param rest Pointer to receive the remaining tokens after parsing.
  @param tok Head of the token stream to parse (should be opening brace).
  @return AST node representing the parsed compound statement.
 */
-Node *cc_parse_compound_stmt(JCC *vm, Token **rest, Token *tok);
-int64_t cc_eval(JCC *vm, Node *node);
-double  cc_eval_double(JCC *vm, Node *node);
-void cc_init_parser(JCC *vm);
+Node *cc_parse_compound_stmt(CCCC *vm, Token **rest, Token *tok);
+int64_t cc_eval(CCCC *vm, Node *node);
+double  cc_eval_double(CCCC *vm, Node *node);
+void cc_init_parser(CCCC *vm);
 
 /*!
  @function cc_execute_inline_macros
  @abstract Execute all inline macros before parsing.
- @discussion Compiles and executes every [[jcc::macro(inline)]] (or
+ @discussion Compiles and executes every [[cccc::macro(inline)]] (or
              __attribute__((macro(inline)))) macro. Each inline macro runs
              automatically at its declaration point (no explicit call needed).
              Generated functions are stored in vm->compiler.macro_globals and
@@ -2166,11 +2166,11 @@ void cc_init_parser(JCC *vm);
              stream so the parser can resolve calls to generated functions
              without manual forward declarations. Must be called after all
              preprocessing and before cc_parse.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param input_tokens Array of preprocessed token streams (one per source file).
  @param count Number of token streams in the array.
 */
-void cc_execute_inline_macros(JCC *vm, Token **input_tokens, int count);
+void cc_execute_inline_macros(CCCC *vm, Token **input_tokens, int count);
 
 /*!
  @function cc_expand_macros
@@ -2178,10 +2178,10 @@ void cc_execute_inline_macros(JCC *vm, Token **input_tokens, int count);
  @discussion Walks the AST and replaces ND_MACRO_CALL nodes with the
              generated AST from executing the corresponding macro function.
              Must be called after cc_parse and before cc_compile.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param prog Linked list of top-level Obj returned by cc_parse.
 */
-void cc_expand_macros(JCC *vm, Obj *prog);
+void cc_expand_macros(CCCC *vm, Obj *prog);
 
 /*!
  @function cc_serialize_program
@@ -2190,12 +2190,12 @@ void cc_expand_macros(JCC *vm, Obj *prog);
              macro-expanded source that can be compiled with gcc or other
              C compilers.
  @param f Output file stream.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param prog Program AST to serialize.
  @param generated_only If true, only serialize objects created by pragma macros
                        (those with is_macro_generated set). Used with -G flag.
 */
-void cc_serialize_program(FILE *f, JCC *vm, Obj *prog, bool generated_only);
+void cc_serialize_program(FILE *f, CCCC *vm, Obj *prog, bool generated_only);
 
 /*!
  @function cc_link_progs
@@ -2204,30 +2204,30 @@ void cc_serialize_program(FILE *f, JCC *vm, Obj *prog, bool generated_only);
              linked list. This allows multiple source files to be compiled
              together into a single program. The function handles duplicate
              definitions by preferring definitions over declarations.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param progs Array of Obj* programs (linked lists from cc_parse).
  @param count Number of programs in the array.
  @return A single merged Obj* linked list containing all objects.
 */
-Obj *cc_link_progs(JCC *vm, Obj **progs, int count);
+Obj *cc_link_progs(CCCC *vm, Obj **progs, int count);
 
 /*!
  @function cc_compile
  @abstract Compile the parsed program (Obj list) into VM bytecode.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param prog Linked list of top-level Obj returned by cc_parse.
 */
-void cc_compile(JCC *vm, Obj *prog);
+void cc_compile(CCCC *vm, Obj *prog);
 
 /*!
  @function cc_run
  @abstract Execute the compiled program within the VM.
- @param vm The JCC instance containing compiled bytecode.
+ @param vm The CCCC instance containing compiled bytecode.
  @param argc Argument count to pass to the program's main().
  @param argv Argument vector (NUL-terminated array of strings).
  @return Program exit code returned by main().
 */
-int cc_run(JCC *vm, int argc, char **argv);
+int cc_run(CCCC *vm, int argc, char **argv);
 
 /*!
  @function cc_print_tokens
@@ -2240,9 +2240,9 @@ void cc_print_tokens(Token *tok);
 /*!
  @function cc_disassemble
  @abstract Disassemble the compiled bytecode to stdout.
- @param vm The JCC instance containing compiled bytecode.
+ @param vm The CCCC instance containing compiled bytecode.
 */
-void cc_disassemble(JCC *vm);
+void cc_disassemble(CCCC *vm);
 
 /*!
  @function cc_output_json
@@ -2272,10 +2272,10 @@ void cc_output_json(FILE *f, Obj *prog);
  @abstract Output source map as JSON to a file for debugging tools.
  @discussion Outputs source maps in JSON format, mapping bytecode PC offsets
              to source locations with file, line, and column information.
- @param vm The JCC instance with source map data.
+ @param vm The CCCC instance with source map data.
  @param f Output file stream.
 */
-void cc_output_source_map_json(JCC *vm, FILE *f);
+void cc_output_source_map_json(CCCC *vm, FILE *f);
 
 /*!
  @function cc_save_bytecode
@@ -2283,11 +2283,11 @@ void cc_output_source_map_json(JCC *vm, FILE *f);
  @discussion Serializes the text segment, data segment, and necessary
              metadata to a binary file. The file can be loaded and executed
              by cc_load_bytecode().
- @param vm The JCC instance containing compiled bytecode.
+ @param vm The CCCC instance containing compiled bytecode.
  @param path Output file path.
  @return 0 on success, -1 on error.
 */
-int cc_save_bytecode(JCC *vm, const char *path);
+int cc_save_bytecode(CCCC *vm, const char *path);
 
 /*!
  @function cc_write_bytecode
@@ -2296,45 +2296,45 @@ int cc_save_bytecode(JCC *vm, const char *path);
              metadata as a binary blob to @c f. The output is the same
              format as cc_save_bytecode(), so it can be loaded with
              cc_load_bytecode() after being written to a file.
- @param vm The JCC instance containing compiled bytecode.
+ @param vm The CCCC instance containing compiled bytecode.
  @param f Output stream opened in binary mode (e.g. stdout via
           @c freopen with "wb", or a file returned by fopen("wb")).
  @return 0 on success, -1 on error.
 */
-int cc_write_bytecode(JCC *vm, FILE *f);
+int cc_write_bytecode(CCCC *vm, FILE *f);
 
 /*!
  @function cc_load_bytecode
  @abstract Load compiled bytecode from a file.
  @discussion Deserializes bytecode previously saved with cc_save_bytecode()
              and prepares the VM for execution with cc_run().
- @param vm The JCC instance to load bytecode into.
+ @param vm The CCCC instance to load bytecode into.
  @param path Input file path.
  @return 0 on success, -1 on error.
 */
-int cc_load_bytecode(JCC *vm, const char *path);
+int cc_load_bytecode(CCCC *vm, const char *path);
 
 /*!
  @function cc_add_breakpoint
  @abstract Add a breakpoint at a specific program counter.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param pc Instruction-word index where breakpoint should be set.
  @return Breakpoint index, or -1 if failed (too many breakpoints).
 */
-int cc_add_breakpoint(JCC *vm, JCCPc pc);
+int cc_add_breakpoint(CCCC *vm, CCCCPc pc);
 
 /*!
  @function cc_remove_breakpoint
  @abstract Remove a breakpoint by index.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param index Breakpoint index to remove.
 */
-void cc_remove_breakpoint(JCC *vm, int index);
+void cc_remove_breakpoint(CCCC *vm, int index);
 
 /*!
  @function cc_debug_repl
  @abstract Enter interactive debugger REPL (Read-Eval-Print Loop).
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @discussion Provides an interactive shell for debugging with commands like:
              - break/b: Set breakpoint
              - continue/c: Continue execution
@@ -2345,89 +2345,89 @@ void cc_remove_breakpoint(JCC *vm, int index);
              - stack/st: Print stack
              - help/h: Show help
 */
-void cc_debug_repl(JCC *vm);
+void cc_debug_repl(CCCC *vm);
 
 /*!
  @function cc_add_watchpoint
  @abstract Add a watchpoint at a specific memory address.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param address Memory address to watch.
  @param size Size of memory region to watch (in bytes).
  @param type Watchpoint type flags (WATCH_READ | WATCH_WRITE | WATCH_CHANGE).
  @param expr Original expression string (for display purposes).
  @return Watchpoint index, or -1 if failed (too many watchpoints).
 */
-int cc_add_watchpoint(JCC *vm, void *address, int size, int type,
+int cc_add_watchpoint(CCCC *vm, void *address, int size, int type,
                       const char *expr);
 
 /*!
  @function cc_remove_watchpoint
  @abstract Remove a watchpoint by index.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param index Watchpoint index to remove.
 */
-void cc_remove_watchpoint(JCC *vm, int index);
+void cc_remove_watchpoint(CCCC *vm, int index);
 
 /*!
  @function cc_get_source_location
  @abstract Get source file location for a given program counter.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param pc Instruction-word index.
  @param out_file Pointer to receive the source File pointer (can be NULL).
  @param out_line Pointer to receive the line number (can be NULL).
  @return 1 if location found, 0 if not found.
 */
-int cc_get_source_location(JCC *vm, JCCPc pc, File **out_file,
+int cc_get_source_location(CCCC *vm, CCCCPc pc, File **out_file,
                            int *out_line, int *out_col);
 
 /*!
  @function cc_find_pc_for_source
  @abstract Find program counter index for a given source location.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param file Source file (NULL to search in any file).
  @param line Line number to find.
- @return Program counter index, or JCC_INVALID_PC if not found.
+ @return Program counter index, or CCCC_INVALID_PC if not found.
 */
-JCCPc cc_find_pc_for_source(JCC *vm, File *file, int line);
+CCCCPc cc_find_pc_for_source(CCCC *vm, File *file, int line);
 
 /*!
  @function cc_find_function_entry
  @abstract Find program counter index for a function entry point by name.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param name Function name to find.
- @return Program counter index, or JCC_INVALID_PC if not found.
+ @return Program counter index, or CCCC_INVALID_PC if not found.
 */
-JCCPc cc_find_function_entry(JCC *vm, const char *name);
+CCCCPc cc_find_function_entry(CCCC *vm, const char *name);
 
 /*!
  @function cc_lookup_symbol
  @abstract Look up a debug symbol by name in current scope.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param name Symbol name to look up.
  @return Pointer to DebugSymbol if found, NULL otherwise.
 */
-DebugSymbol *cc_lookup_symbol(JCC *vm, const char *name);
+DebugSymbol *cc_lookup_symbol(CCCC *vm, const char *name);
 
 /*!
  @function cc_dlopen
  @abstract Open a dynamic library.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param lib_path Path to the dynamic library to open.
  @return 0 on success, -1 on failure.
 */
-int cc_dlopen(JCC *vm, const char *lib_path);
+int cc_dlopen(CCCC *vm, const char *lib_path);
 
 /*!
  @function cc_dlsym
  @abstract Resolve a symbol in a dynamic library.
- @param vm The JCC instance.
+ @param vm The CCCC instance.
  @param name Name of the symbol to resolve.
  @param func_ptr Pointer to the function to resolve.
  @param num_args Number of arguments the function expects.
  @param returns_double 1 if function returns double, 0 if returns long long.
  @return 0 on success, -1 on failure.
 */
-int cc_dlsym(JCC *vm, const char *name, void *func_ptr, int num_args,
+int cc_dlsym(CCCC *vm, const char *name, void *func_ptr, int num_args,
              int returns_double);
 
 #ifdef __cplusplus

@@ -3,38 +3,38 @@
 
 struct Triple { int a; int b; int c; };
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *make_triple_tail($node_t *b, $node_t *c) {
-    $vm_t *vm = __jcc_get_vm();
-    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ b, c }, 2);
+    $vm_t *vm = __cccc_get_vm();
+    $node_t *chain = __cccc_node_list(vm, ($node_t*[]){ b, c }, 2);
     return $quote("(struct Triple){ 1, $@1 }", chain);
 }
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *make_triple_middle($node_t *a, $node_t *b) {
-    $vm_t *vm = __jcc_get_vm();
-    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ a, b }, 2);
+    $vm_t *vm = __cccc_get_vm();
+    $node_t *chain = __cccc_node_list(vm, ($node_t*[]){ a, b }, 2);
     return $quote("(struct Triple){ $@1, 30 }", chain);
 }
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *make_arr4($node_t *b, $node_t *c) {
-    $vm_t *vm = __jcc_get_vm();
-    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ b, c }, 2);
+    $vm_t *vm = __cccc_get_vm();
+    $node_t *chain = __cccc_node_list(vm, ($node_t*[]){ b, c }, 2);
     return $quote("(int[4]){ 1, $@1, 4 }", chain);
 }
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *make_arr_inferred($node_t *a, $node_t *b, $node_t *c) {
-    $vm_t *vm = __jcc_get_vm();
-    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ a, b, c }, 3);
+    $vm_t *vm = __cccc_get_vm();
+    $node_t *chain = __cccc_node_list(vm, ($node_t*[]){ a, b, c }, 3);
     return $quote("(int[]){ $@1 }", chain);
 }
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *make_arr_mixed_inferred($node_t *b, $node_t *c) {
-    $vm_t *vm = __jcc_get_vm();
-    $node_t *chain = __jcc_node_list(vm, ($node_t*[]){ b, c }, 2);
+    $vm_t *vm = __cccc_get_vm();
+    $node_t *chain = __cccc_node_list(vm, ($node_t*[]){ b, c }, 2);
     return $quote("(int[]){ 1, $@1, 4 }", chain);
 }
 

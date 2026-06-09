@@ -1,5 +1,5 @@
 // EXPECT_COMPILE_ERROR
-// JCC_EXPECT_STDERR: non-void aggregate function should return a value
+// CCCC_EXPECT_STDERR: non-void aggregate function should return a value
 struct Value {
     int value;
 };

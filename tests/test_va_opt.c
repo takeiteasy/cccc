@@ -94,6 +94,6 @@ int main() {
     printf("Tests failed: %d\n", tests_failed);
     printf("=================================\n");
 
-    // Return 42 for success (JCC test convention)
+    // Return 42 for success (CCCC test convention)
     return tests_failed == 0 ? 42 : 1;
 }

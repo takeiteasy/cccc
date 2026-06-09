@@ -3,7 +3,7 @@
 #include <unistd.h>
 
 int main(void) {
-    char path[] = "/tmp/jcc-stat-test-XXXXXX";
+    char path[] = "/tmp/cccc-stat-test-XXXXXX";
     int fd = open(path, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
     if (fd < 0) return 1;
 
@@ -22,10 +22,10 @@ int main(void) {
 
     unlink(path);
 
-    if (mkdir("/tmp/jcc-stat-dir-test", S_IRWXU) != 0) return 10;
-    if (stat("/tmp/jcc-stat-dir-test", &st) != 0) return 11;
+    if (mkdir("/tmp/cccc-stat-dir-test", S_IRWXU) != 0) return 10;
+    if (stat("/tmp/cccc-stat-dir-test", &st) != 0) return 11;
     if (!S_ISDIR(st.st_mode)) return 12;
-    rmdir("/tmp/jcc-stat-dir-test");
+    rmdir("/tmp/cccc-stat-dir-test");
 
     return 42;
 }

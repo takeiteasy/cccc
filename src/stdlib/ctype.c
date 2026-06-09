@@ -1,9 +1,9 @@
 // ctype.h stdlib function registration
-#include "../jcc.h"
+#include "../cccc.h"
 #include <ctype.h>
 
 // Register all ctype.h functions
-void register_ctype_functions(JCC *vm) {
+void register_ctype_functions(CCCC *vm) {
     // Character classification functions
     cc_register_cfunc(vm, "isalnum", (void*)isalnum, 1, 0);
     cc_register_cfunc(vm, "isalpha", (void*)isalpha, 1, 0);

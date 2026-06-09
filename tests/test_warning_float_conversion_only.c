@@ -1,6 +1,6 @@
-// JCC_FLAGS: -Wfloat-conversion
-// JCC_EXPECT_STDERR: \[-Wfloat-conversion\]
-// JCC_REJECT_STDERR: \[-Wconversion\]
+// CCCC_FLAGS: -Wfloat-conversion
+// CCCC_EXPECT_STDERR: \[-Wfloat-conversion\]
+// CCCC_REJECT_STDERR: \[-Wconversion\]
 
 // When only -Wfloat-conversion is requested, float->int fires but integer
 // narrowing stays quiet.

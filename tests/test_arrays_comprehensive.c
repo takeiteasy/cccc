@@ -1,4 +1,4 @@
-// Comprehensive array test for JCC
+// Comprehensive array test for CCCC
 // Expected return: 42
 
 int main() {

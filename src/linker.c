@@ -1,5 +1,5 @@
 /*
- JCC: JIT C Compiler
+ CCCC: Comprehensiev C Compensation Compiler
 
  Copyright (C) 2025 George Watson
 
@@ -17,10 +17,10 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "jcc.h"
+#include "cccc.h"
 #include "./internal.h"
 
-static Token *must_tokenize_file(JCC *vm, char *path) {
+static Token *must_tokenize_file(CCCC *vm, char *path) {
     Token *tok = tokenize_file(vm, path);
     if (!tok)
         error("%s: %s", path, strerror(errno));
@@ -38,7 +38,7 @@ static Token *append_tokens(Token *tok1, Token *tok2) {
     return tok1;
 }
 
-Token *cc_preprocess(JCC *vm, const char *path) {
+Token *cc_preprocess(CCCC *vm, const char *path) {
     Token *tok = NULL;
 
     // Process -include option
@@ -68,7 +68,7 @@ Token *cc_preprocess(JCC *vm, const char *path) {
     return tok;
 }
 
-Obj *cc_parse(JCC *vm, Token *tok) {
+Obj *cc_parse(CCCC *vm, Token *tok) {
     return parse(vm, tok);
 }
 
@@ -87,19 +87,19 @@ void cc_print_tokens(Token *tok) {
     fprintf(out, "\n");
 }
 
-Obj *cc_link_progs(JCC *vm, Obj **progs, int count) {
+Obj *cc_link_progs(CCCC *vm, Obj **progs, int count) {
     if (!vm || !progs || count <= 0)
         error("cc_link_progs: invalid arguments");
     if (count == 1)
         return progs[0];
-    
+
     // Store progs for later offset propagation
     vm->compiler.link_prog_count = count;
     vm->compiler.link_progs = malloc(sizeof(Obj*) * count);
     for (int i = 0; i < count; i++) {
         vm->compiler.link_progs[i] = progs[i];
     }
-    
+
     // Build a hashmap to detect duplicate external-linkage symbols.
     // Internal-linkage objects are file-local and must not be canonicalized by
     // name across translation units.
@@ -111,11 +111,11 @@ Obj *cc_link_progs(JCC *vm, Obj **progs, int count) {
                 continue;
 
             Obj *existing = hashmap_get(&symbol_map, obj->name);
-            
-            bool obj_is_def = obj->is_definition || 
+
+            bool obj_is_def = obj->is_definition ||
                              (obj->is_function && obj->body) ||
                              (!obj->is_function && obj->init_data);
-            
+
             if (!existing) {
                 // New symbol, add it
                 hashmap_put(&symbol_map, obj->name, obj);
@@ -124,7 +124,7 @@ Obj *cc_link_progs(JCC *vm, Obj **progs, int count) {
                 bool existing_is_def = existing->is_definition ||
                                       (existing->is_function && existing->body) ||
                                       (!existing->is_function && existing->init_data);
-                
+
                 if (obj_is_def && existing_is_def) {
                     // Both are definitions - error
                     error_tok(vm, obj->tok, "redefinition of '%s'", obj->name);
@@ -147,7 +147,7 @@ Obj *cc_link_progs(JCC *vm, Obj **progs, int count) {
             }
         }
     }
-    
+
     // Second pass: build the merged linked list and propagate definition info
     Obj *merged = NULL;
     Obj *tail = NULL;
@@ -155,9 +155,9 @@ Obj *cc_link_progs(JCC *vm, Obj **progs, int count) {
         for (Obj *obj = progs[i]; obj;) {
             // Save next pointer before potentially modifying obj
             Obj *next_obj = obj->next;
-            
+
             Obj *canonical = obj->is_static ? obj : hashmap_get(&symbol_map, obj->name);
-            
+
             // If this is not the canonical version, update it to reference the canonical one
             if (canonical && canonical != obj) {
                 // This is a declaration - copy properties from the definition
@@ -168,12 +168,12 @@ Obj *cc_link_progs(JCC *vm, Obj **progs, int count) {
                 obj->rel = canonical->rel;
                 obj->ty = canonical->ty;
             }
-            
+
             // Only add canonical objects to the merged list
             if (canonical == obj) {
                 // Clear the next pointer to avoid dangling references
                 obj->next = NULL;
-                
+
                 if (!merged) {
                     merged = obj;
                     tail = obj;
@@ -182,11 +182,11 @@ Obj *cc_link_progs(JCC *vm, Obj **progs, int count) {
                     tail = obj;
                 }
             }
-            
+
             obj = next_obj;  // Move to next using saved pointer
         }
     }
-    
+
     hashmap_deinit(&symbol_map);
     return merged;
 }

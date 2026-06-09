@@ -1,18 +1,18 @@
 // Ticket #188: multiple comptime variables of different types, declared in any
 // order relative to macros that use them.
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 int base = 20;
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *doubled(void) {
     return $int_literal($get_comptime_int("base") * 2);
 }
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 int bonus = 2;
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *total(void) {
     int64_t b = $get_comptime_int("base");
     int64_t n = $get_comptime_int("bonus");

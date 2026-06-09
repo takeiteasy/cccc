@@ -4,7 +4,7 @@ enum Color { RED, GREEN, BLUE };
 int main() {
     enum Color c = RED;
     
-    // In JCC, sizeof(int) = 4, so sizeof(enum) should also be 4
+    // In CCCC, sizeof(int) = 4, so sizeof(enum) should also be 4
     // since enums are treated as integers
     int s = sizeof(enum Color);
     

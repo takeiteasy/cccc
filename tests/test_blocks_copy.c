@@ -1,6 +1,6 @@
 /*
  * Test: Block_copy and Block_release functions
- * Tests block lifecycle management (simplified for JCC VM)
+ * Tests block lifecycle management (simplified for CCCC VM)
  */
 
 int main() {

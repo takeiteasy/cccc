@@ -1,5 +1,5 @@
 /*
- JCC: JIT C Compiler
+ CCCC: Comprehensiev C Compensation Compiler
 
  Copyright (C) 2025 George Watson
 
@@ -17,7 +17,7 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "jcc.h"
+#include "cccc.h"
 #include "internal.h"
 
 
@@ -94,26 +94,26 @@ static void impl_assert_streq(long long a, long long b,
 
 // Register native assertion functions so the compiler can emit FFI calls to
 // them. Must be called before cc_compile.
-void cc_load_test_runtime(JCC *vm) {
-    cc_register_cfunc(vm, "__jcc_assert",         (void *)impl_assert,         4, 0);
-    cc_register_cfunc(vm, "__jcc_assert_eq",      (void *)impl_assert_eq,      6, 0);
-    cc_register_cfunc(vm, "__jcc_assert_neq",     (void *)impl_assert_neq,     6, 0);
-    cc_register_cfunc(vm, "__jcc_assert_null",    (void *)impl_assert_null,    4, 0);
-    cc_register_cfunc(vm, "__jcc_assert_not_null",(void *)impl_assert_not_null,4, 0);
-    cc_register_cfunc(vm, "__jcc_assert_streq",   (void *)impl_assert_streq,   6, 0);
+void cc_load_test_runtime(CCCC *vm) {
+    cc_register_cfunc(vm, "__cccc_assert",         (void *)impl_assert,         4, 0);
+    cc_register_cfunc(vm, "__cccc_assert_eq",      (void *)impl_assert_eq,      6, 0);
+    cc_register_cfunc(vm, "__cccc_assert_neq",     (void *)impl_assert_neq,     6, 0);
+    cc_register_cfunc(vm, "__cccc_assert_null",    (void *)impl_assert_null,    4, 0);
+    cc_register_cfunc(vm, "__cccc_assert_not_null",(void *)impl_assert_not_null,4, 0);
+    cc_register_cfunc(vm, "__cccc_assert_streq",   (void *)impl_assert_streq,   6, 0);
 }
 
 // Preprocess src/tests.h (loaded via the embedded std registry). As a
-// side effect, registers all JCC_ASSERT* macros in vm->compiler.macros so
+// side effect, registers all CCCC_ASSERT* macros in vm->compiler.macros so
 // they expand correctly when the test file is preprocessed. Returns the
 // processed declaration tokens to prepend to the parse stream.
-Token *cc_inject_test_header(JCC *vm) {
+Token *cc_inject_test_header(CCCC *vm) {
     char *src = get_std_header("tests.h");
     Token *toks = tokenize_string(vm, "<tests.h>", src);
     return preprocess(vm, toks);
 }
 
-int cc_run_tests(JCC *vm, Obj *prog) {
+int cc_run_tests(CCCC *vm, Obj *prog) {
 
     // Count tests and reverse the list to run in declaration order.
     // test_fns is built by prepending, so it is in reverse order.

@@ -1,14 +1,14 @@
 // Ticket #188: integer comptime variable readable from a macro.
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 int magic = 42;
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *get_magic(void) {
     return $get_comptime_var("magic");
 }
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *get_magic_int(void) {
     return $int_literal($get_comptime_int("magic"));
 }

@@ -1,4 +1,4 @@
-/* uchar.h - Unicode character conversion declarations for JCC */
+/* uchar.h - Unicode character conversion declarations for CCCC */
 
 #ifndef __UCHAR_H
 #define __UCHAR_H

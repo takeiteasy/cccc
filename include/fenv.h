@@ -1,4 +1,4 @@
-/* fenv.h - floating-point environment declarations for JCC */
+/* fenv.h - floating-point environment declarations for CCCC */
 
 #ifndef __FENV_H
 #define __FENV_H

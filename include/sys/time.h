@@ -1,10 +1,10 @@
-/* sys/time.h - time types for JCC */
+/* sys/time.h - time types for CCCC */
 
 #ifndef __SYS_TIME_H
 #define __SYS_TIME_H
 
 #ifdef _WIN32
-#error "<sys/time.h> is only available on POSIX targets in JCC"
+#error "<sys/time.h> is only available on POSIX targets in CCCC"
 #endif
 
 #include "time.h"

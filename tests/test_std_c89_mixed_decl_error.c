@@ -1,5 +1,5 @@
-/* JCC_FLAGS: --std=c89 -Wpedantic */
-/* JCC_EXPECT_STDERR: warning: mixing declarations and code is a C99 extension \[-Wpedantic\] */
+/* CCCC_FLAGS: --std=c89 -Wpedantic */
+/* CCCC_EXPECT_STDERR: warning: mixing declarations and code is a C99 extension \[-Wpedantic\] */
 int f(void) {
     int x = 1;
     x = 2;

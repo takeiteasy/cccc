@@ -1,4 +1,4 @@
-/* wchar.h - wide-character declarations for JCC */
+/* wchar.h - wide-character declarations for CCCC */
 
 #ifndef __WCHAR_H
 #define __WCHAR_H

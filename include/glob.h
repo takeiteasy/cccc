@@ -1,10 +1,10 @@
-/* glob.h - pathname pattern matching for JCC */
+/* glob.h - pathname pattern matching for CCCC */
 
 #ifndef __GLOB_H
 #define __GLOB_H
 
 #ifdef _WIN32
-#error "<glob.h> is only available on POSIX targets in JCC"
+#error "<glob.h> is only available on POSIX targets in CCCC"
 #endif
 
 #include "stddef.h"

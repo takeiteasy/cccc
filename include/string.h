@@ -1,4 +1,4 @@
-/* string.h - string manipulation functions for JCC C compiler */
+/* string.h - string manipulation functions for CCCC C compiler */
 
 #ifndef __STRING_H
 #define __STRING_H

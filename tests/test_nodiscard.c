@@ -1,4 +1,4 @@
-// JCC_FLAGS: --std=c23 -Wnodiscard
+// CCCC_FLAGS: --std=c23 -Wnodiscard
 // Test [[nodiscard]] attribute
 // Expected return: 42
 

@@ -1,8 +1,8 @@
 // stdlib.h stdlib function registration
-#include "../jcc.h"
+#include "../cccc.h"
 #include <wchar.h>
 
-static void *jcc_aligned_alloc(size_t alignment, size_t size) {
+static void *cccc_aligned_alloc(size_t alignment, size_t size) {
     void *ptr = NULL;
     if (alignment == 0 || (alignment & (alignment - 1)) != 0)
         return NULL;
@@ -12,7 +12,7 @@ static void *jcc_aligned_alloc(size_t alignment, size_t size) {
 }
 
 // Wrapper for realloc that matches C11 semantics
-static void *jcc_realloc(void *ptr, size_t size) {
+static void *cccc_realloc(void *ptr, size_t size) {
     if (size == 0) {
         free(ptr);
         return NULL;
@@ -28,7 +28,7 @@ static long long wrap_mbtowc(long long pwc, long long s, long long n) { return (
 static long long wrap_wctomb(long long s, long long wc)      { return (long long)wctomb((char *)s, (wchar_t)wc); }
 
 // Register all stdlib.h functions
-void register_stdlib_functions(JCC *vm) {
+void register_stdlib_functions(CCCC *vm) {
     // Conversion functions
     cc_register_cfunc(vm, "atof", (void*)atof, 1, 1);       // returns double
     cc_register_cfunc(vm, "atoi", (void*)wrap_atoi, 1, 0);
@@ -47,11 +47,11 @@ void register_stdlib_functions(JCC *vm) {
     cc_register_cfunc(vm, "srand", (void*)srand, 1, 0);
 
     // Memory allocation functions
-    cc_register_cfunc(vm, "aligned_alloc", (void*)jcc_aligned_alloc, 2, 0);
+    cc_register_cfunc(vm, "aligned_alloc", (void*)cccc_aligned_alloc, 2, 0);
     cc_register_cfunc(vm, "calloc", (void*)calloc, 2, 0);
     cc_register_cfunc(vm, "free", (void*)free, 1, 0);
     cc_register_cfunc(vm, "malloc", (void*)malloc, 1, 0);
-    cc_register_cfunc(vm, "realloc", (void*)jcc_realloc, 2, 0);  // Use wrapper for C11 semantics
+    cc_register_cfunc(vm, "realloc", (void*)cccc_realloc, 2, 0);  // Use wrapper for C11 semantics
     cc_register_cfunc(vm, "posix_memalign", (void*)posix_memalign, 3, 0);
 
     // Process control

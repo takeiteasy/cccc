@@ -1,6 +1,6 @@
-# JCC Benchmark Suite
+# CCCC Benchmark Suite
 
-Cross-compiler micro-benchmarks for comparing **JCC** (across all `--optimize` levels, in both parse+exec and precompiled-bytecode modes) against **GCC** (across `-O0..-O3`).
+Cross-compiler micro-benchmarks for comparing **CCCC** (across all `--optimize` levels, in both parse+exec and precompiled-bytecode modes) against **GCC** (across `-O0..-O3`).
 
 Each program is plain C99/C11, prints a single `result: …` line on stdout, and exits with code `42`. They are auto-discovered by `tools/bench.py` and the standard `tools/tests.py` smoke-runs them.
 
@@ -24,7 +24,7 @@ Each program is plain C99/C11, prints a single `result: …` line on stdout, and
 make bench-compare            # full run (~10 min)
 make bench-compare-quick      # 2 iterations (~5 min)
 python3 tools/bench.py --filter fib.c             # one benchmark only
-python3 tools/bench.py --no-jbc --filter fib.c    # skip the jcc-jbc* (precompiled bytecode) columns
+python3 tools/bench.py --no-jbc --filter fib.c    # skip the cccc-jbc* (precompiled bytecode) columns
 python3 tools/bench.py --filter fib.c --vm-profile # write VM opcode profiles too
 ```
 
@@ -32,9 +32,9 @@ See [docs/BENCHMARKS.md](../docs/BENCHMARKS.md) for the full guide — how the r
 
 ## Results
 
-Each run writes a JSON report to `results/run-<UTC>.json` with raw timings, compiler versions, host info, and per-`jcc-jbc*` `compile_ms` (the one-time cost of producing the bytecode file). All of this is included so results are reproducible and comparable across machines.
+Each run writes a JSON report to `results/run-<UTC>.json` with raw timings, compiler versions, host info, and per-`cccc-jbc*` `compile_ms` (the one-time cost of producing the bytecode file). All of this is included so results are reproducible and comparable across machines.
 
-With `--vm-profile`, JCC and JCC-JBC configs also write dynamic opcode count
+With `--vm-profile`, CCCC and CCCC-JBC configs also write dynamic opcode count
 profiles under `results/vm-profile-<UTC>/`, and each profiled timing record
 contains its `vm_profile_json` path.
 

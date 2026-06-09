@@ -1,4 +1,4 @@
-// JCC_FLAGS: --format-string-checks
+// CCCC_FLAGS: --format-string-checks
 /*
  * Test format string validation - valid format strings
  * This test should pass with -F/--format-string-checks enabled

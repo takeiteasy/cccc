@@ -1,4 +1,4 @@
-// JCC_FLAGS: --disable-ffi
+// CCCC_FLAGS: --disable-ffi
 #include <dlfcn.h>
 #include <string.h>
 

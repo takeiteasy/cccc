@@ -1,4 +1,4 @@
-// JCC_FLAGS: -O2
+// CCCC_FLAGS: -O2
 // Void static inline functions with side effects are inlined
 static int counter = 0;
 static inline void incr(int n) {

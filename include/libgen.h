@@ -1,10 +1,10 @@
-/* libgen.h - pathname manipulation for JCC */
+/* libgen.h - pathname manipulation for CCCC */
 
 #ifndef __LIBGEN_H
 #define __LIBGEN_H
 
 #ifdef _WIN32
-#error "<libgen.h> is only available on POSIX targets in JCC"
+#error "<libgen.h> is only available on POSIX targets in CCCC"
 #endif
 
 extern char *basename(char *path);

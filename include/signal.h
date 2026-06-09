@@ -1,4 +1,4 @@
-/* signal.h - signal handling declarations for JCC */
+/* signal.h - signal handling declarations for CCCC */
 
 #ifndef __SIGNAL_H
 #define __SIGNAL_H

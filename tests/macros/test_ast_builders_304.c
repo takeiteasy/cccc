@@ -7,7 +7,7 @@ struct FPt { int x; int y; };
 
 // ---- $compound_literal outside $with_fn (current_fn == NULL) ---------------
 // The global_pt literal lives in static storage; the function captures it.
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *gen_gvar_cl(void) {
     $type_t *pt_ty = $get_type("FPt");
     $type_t *int_ty = $get_type("int");
@@ -23,7 +23,7 @@ $node_t *gen_gvar_cl(void) {
 gen_gvar_cl();
 
 // ---- $init_array outside $with_fn ------------------------------------------
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *gen_gvar_arr(void) {
     $type_t *int_ty = $get_type("int");
 
@@ -39,7 +39,7 @@ $node_t *gen_gvar_arr(void) {
 gen_gvar_arr();
 
 // ---- $init_struct outside $with_fn, partial (y should be zero) --------------
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *gen_gvar_struct(void) {
     $type_t *pt_ty = $get_type("FPt");
     $type_t *int_ty = $get_type("int");

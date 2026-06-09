@@ -1,4 +1,4 @@
-// JCC_FLAGS: --std=c23
+// CCCC_FLAGS: --std=c23
 // Test [[fallthrough]] attribute
 // Expected return: 42
 

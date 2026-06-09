@@ -1,10 +1,10 @@
-// JCC libFuzzer harness
+// CCCC libFuzzer harness
 // Compiles C source from memory to catch frontend crashes.
 // Build: clang -g -O1 -fsanitize=fuzzer,address -o fuzz_harness \
 //           src/fuzzing.c src/*.c src/stdlib/*.c -I./include
 // Run:   ./fuzz_harness corpus/
 
-#include "jcc.h"
+#include "cccc.h"
 #include "internal.h"
 #include <stdlib.h>
 #include <string.h>
@@ -12,7 +12,7 @@
 // Compile C source without requiring main() or executing.
 // Returns 0 on success, 1 on compile error (expected for malformed input).
 static int compile_only_from_string(const char *src, size_t len) {
-    JCC vm;
+    CCCC vm;
     cc_init(&vm, 0);
     vm.compiler.compile_only = true;
     vm.collect_errors = true;

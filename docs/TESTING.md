@@ -1,30 +1,30 @@
-# JCC Testing Framework
+# CCCC Testing Framework
 
-JCC includes a built-in test framework for writing tests directly in C, using the `[[jcc::test]]` attribute to mark test functions and `JCC_ASSERT*` macros for assertions.
+CCCC includes a built-in test framework for writing tests directly in C, using the `[[cccc::test]]` attribute to mark test functions and `CCCC_ASSERT*` macros for assertions.
 
 ## Writing Tests
 
-Mark a function as a test with `[[jcc::test]]`. Test functions must take no arguments and have a `void` return type:
+Mark a function as a test with `[[cccc::test]]`. Test functions must take no arguments and have a `void` return type:
 
 ```c
-[[jcc::test]]
+[[cccc::test]]
 void test_addition(void) {
-    JCC_ASSERT_EQ(1 + 1, 2);
+    CCCC_ASSERT_EQ(1 + 1, 2);
 }
 ```
 
 Multiple test functions can coexist in the same file:
 
 ```c
-[[jcc::test]]
+[[cccc::test]]
 void test_strings(void) {
-    JCC_ASSERT_STREQ("hello", "hello");
+    CCCC_ASSERT_STREQ("hello", "hello");
 }
 
-[[jcc::test]]
+[[cccc::test]]
 void test_pointers(void) {
     int x = 42;
-    JCC_ASSERT_NOT_NULL(&x);
+    CCCC_ASSERT_NOT_NULL(&x);
 }
 ```
 
@@ -33,7 +33,7 @@ No `#include` is required — the assertion macros and their backing declaration
 ## Running Tests
 
 ```
-./jcc --testing myfile.c
+./cccc --testing myfile.c
 ```
 
 Output is in [TAP version 13](https://testanything.org/) format:
@@ -55,12 +55,12 @@ The process exits with code `0` if all tests pass, `1` if any fail.
 
 | Macro | Description |
 |-------|-------------|
-| `JCC_ASSERT(cond)` | Fails if `cond` is false |
-| `JCC_ASSERT_EQ(a, b)` | Fails if `a != b` (integer comparison) |
-| `JCC_ASSERT_NEQ(a, b)` | Fails if `a == b` (integer comparison) |
-| `JCC_ASSERT_NULL(p)` | Fails if `p` is not null |
-| `JCC_ASSERT_NOT_NULL(p)` | Fails if `p` is null |
-| `JCC_ASSERT_STREQ(a, b)` | Fails if strings `a` and `b` differ |
+| `CCCC_ASSERT(cond)` | Fails if `cond` is false |
+| `CCCC_ASSERT_EQ(a, b)` | Fails if `a != b` (integer comparison) |
+| `CCCC_ASSERT_NEQ(a, b)` | Fails if `a == b` (integer comparison) |
+| `CCCC_ASSERT_NULL(p)` | Fails if `p` is not null |
+| `CCCC_ASSERT_NOT_NULL(p)` | Fails if `p` is null |
+| `CCCC_ASSERT_STREQ(a, b)` | Fails if strings `a` and `b` differ |
 
 When an assertion fails, the test is marked `not ok` and a diagnostic block is printed with the condition and source location. The remaining tests continue to run.
 
@@ -68,5 +68,5 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 
 - **Global state is not reset between tests.** Global variables keep their values from previous tests. Tests must be self-contained and must not rely on initial global state being clean.
 - Test functions must have signature `void name(void)` — no parameters, void return.
-- Calling `exit()` directly in a test terminates the entire process rather than failing just that test. Use `JCC_ASSERT` macros instead.
+- Calling `exit()` directly in a test terminates the entire process rather than failing just that test. Use `CCCC_ASSERT` macros instead.
 - `--testing` cannot be combined with `-c`, `-o`, or other output flags.

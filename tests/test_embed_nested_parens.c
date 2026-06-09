@@ -1,4 +1,4 @@
-// JCC_FLAGS: --std=c23
+// CCCC_FLAGS: --std=c23
 // Test #embed with nested parentheses in parameters
 // This tests that the parameter parser correctly handles depth tracking
 

@@ -1,6 +1,6 @@
-# JCC Interactive Debugger
+# CCCC Interactive Debugger
 
-The JCC VM includes an interactive, source-level debugger for step-by-step program execution and inspection.
+The CCCC VM includes an interactive, source-level debugger for step-by-step program execution and inspection.
 
 **Enable with:** `-g` or `--debug` flags
 
@@ -51,39 +51,39 @@ When enabled, the debugger provides a powerful GDB-like interface for controllin
 ## Example Debugging Session
 
 ```bash
-$ ./jcc -g test_debugger_enhanced.c
+$ ./cccc -g test_debugger_enhanced.c
 
 ========================================
-    JCC Debugger
+    CCCC Debugger
 ========================================
 Starting at entry point...
 Type 'help' for commands, 'c' to continue
 
-(jcc-dbg) break 20            # Set breakpoint at line 20
+(cccc-dbg) break 20            # Set breakpoint at line 20
 Breakpoint #0 set at test_debugger_enhanced.c:20
 
-(jcc-dbg) continue            # Run to breakpoint
+(cccc-dbg) continue            # Run to breakpoint
 Breakpoint #0 hit at test_debugger_enhanced.c:20
 At test_debugger_enhanced.c:20:5
     20:     int x = 10;
 0xc33400018 (offset 24): LEA -4
 
-(jcc-dbg) watch x             # Watch for writes to variable 'x'
+(cccc-dbg) watch x             # Watch for writes to variable 'x'
 Watchpoint #0: watch x
 
-(jcc-dbg) step                # Execute one instruction (the assignment to x)
+(cccc-dbg) step                # Execute one instruction (the assignment to x)
 Watchpoint #0 hit: write to x at 0x7ffeea28d3f8
 Old value: 0
 New value: 10
 At test_debugger_enhanced.c:21:5
     21:     int y = factorial(4);
 
-(jcc-dbg) stack 3             # Check the stack
+(cccc-dbg) stack 3             # Check the stack
 === Stack (top 3 entries) ===
   sp[0] = 0x000000000000000a  (10)
   ...
 
-(jcc-dbg) continue            # Run to completion
+(cccc-dbg) continue            # Run to completion
 ```
 
 ## Programmatic Break-in
@@ -126,7 +126,7 @@ int main(void) {
 
 ## Source Map API
 
-JCC provides a programmatic API for accessing source location information, which is useful for building custom debugging tools or IDE integrations.
+CCCC provides a programmatic API for accessing source location information, which is useful for building custom debugging tools or IDE integrations.
 
 ### Getting Source Location
 
@@ -174,9 +174,9 @@ Example output:
 
 Binary format (little-endian):
 ```
-[Magic: "JCC\0" (4 bytes)]
+[Magic: "CCCC\0" (4 bytes)]
 [Version: 4 (4 bytes)]
-[Flags: JCCFlags bitfield (4 bytes)]
+[Flags: CCCCFlags bitfield (4 bytes)]
 [Text size: bytes (8 bytes)]
 [Data size: bytes (8 bytes)]
 [Main offset: instruction offset (8 bytes)]

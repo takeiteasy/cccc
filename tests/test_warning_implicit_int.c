@@ -1,5 +1,5 @@
-// JCC_FLAGS: -Wimplicit-int
-// JCC_EXPECT_STDERR: 4 warnings generated.
+// CCCC_FLAGS: -Wimplicit-int
+// CCCC_EXPECT_STDERR: 4 warnings generated.
 global_value;
 
 identity(value) {

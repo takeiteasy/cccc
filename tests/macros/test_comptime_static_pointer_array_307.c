@@ -7,7 +7,7 @@ struct entry {
     const char *fn;
 };
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 const char *lookup_reg_fn(const char *header) {
     static const struct entry map[] = {
         {"ctype.h", "register_ctype"},
@@ -30,7 +30,7 @@ const char *lookup_reg_fn(const char *header) {
     return 0;
 }
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *reg_lookup_ok(void) {
     static const char *headers[] = {"ctype.h", "stdio.h", "string.h"};
 

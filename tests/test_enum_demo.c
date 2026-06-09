@@ -1,4 +1,4 @@
-// Comprehensive enum demonstration for JCC
+// Comprehensive enum demonstration for CCCC
 // Shows all supported enum features
 
 // Basic enum with implicit values

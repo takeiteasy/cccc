@@ -1,7 +1,7 @@
 // arena.c - Cross-platform arena allocator for parser frontend
 // Uses mmap (POSIX) and VirtualAlloc (Windows) for large memory regions
 
-#include "jcc.h"
+#include "cccc.h"
 #include "internal.h"
 #include <string.h>
 

@@ -1,4 +1,4 @@
-// JCC_FLAGS: --format-string-checks
+// CCCC_FLAGS: --format-string-checks
 /*
  * Test __attribute__((format(printf, ...))) on custom functions
  */

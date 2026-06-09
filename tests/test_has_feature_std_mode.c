@@ -1,4 +1,4 @@
-// JCC_FLAGS: --std=c99
+// CCCC_FLAGS: --std=c99
 int main(void) {
 #if !__has_feature(c99)
     return 1;

@@ -1,15 +1,15 @@
-/* dirent.h - directory entry iteration for JCC */
+/* dirent.h - directory entry iteration for CCCC */
 
 #ifndef __DIRENT_H
 #define __DIRENT_H
 
 #ifdef _WIN32
-#error "<dirent.h> is only available on POSIX targets in JCC"
+#error "<dirent.h> is only available on POSIX targets in CCCC"
 #endif
 
 #include "sys/types.h"
 
-typedef struct __jcc_DIR DIR;
+typedef struct __cccc_DIR DIR;
 
 #define DT_UNKNOWN 0
 #define DT_FIFO    1

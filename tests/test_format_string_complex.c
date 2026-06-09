@@ -1,4 +1,4 @@
-// JCC_FLAGS: --format-string-checks
+// CCCC_FLAGS: --format-string-checks
 /*
  * Test format string validation - complex format strings
  * Tests edge cases like width specifiers with *, length modifiers, etc.

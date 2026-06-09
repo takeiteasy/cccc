@@ -1,10 +1,10 @@
-/* poll.h - event polling for JCC */
+/* poll.h - event polling for CCCC */
 
 #ifndef __POLL_H
 #define __POLL_H
 
 #ifdef _WIN32
-#error "<poll.h> is only available on POSIX targets in JCC"
+#error "<poll.h> is only available on POSIX targets in CCCC"
 #endif
 
 #define POLLIN   0x0001

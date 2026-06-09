@@ -1,6 +1,6 @@
 EXPECT_COMPILE_ERROR
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 void bad(...) {
     _AST_VARARGS_AS_ARRAY();
 }

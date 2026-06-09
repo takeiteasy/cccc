@@ -1,10 +1,10 @@
-/* fnmatch.h - filename pattern matching for JCC */
+/* fnmatch.h - filename pattern matching for CCCC */
 
 #ifndef __FNMATCH_H
 #define __FNMATCH_H
 
 #ifdef _WIN32
-#error "<fnmatch.h> is only available on POSIX targets in JCC"
+#error "<fnmatch.h> is only available on POSIX targets in CCCC"
 #endif
 
 #define FNM_NOMATCH 1

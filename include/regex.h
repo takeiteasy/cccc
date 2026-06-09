@@ -1,10 +1,10 @@
-/* regex.h - regular expression declarations for JCC */
+/* regex.h - regular expression declarations for CCCC */
 
 #ifndef __REGEX_H
 #define __REGEX_H
 
 #ifdef _WIN32
-#error "<regex.h> is only available on POSIX targets in JCC"
+#error "<regex.h> is only available on POSIX targets in CCCC"
 #endif
 
 #include "stddef.h"

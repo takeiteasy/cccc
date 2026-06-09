@@ -1,5 +1,5 @@
 /*
- JCC: JIT C Compiler
+ CCCC: Comprehensiev C Compensation Compiler
 
  Copyright (C) 2025 George Watson
 
@@ -20,12 +20,12 @@
  write-a-C-interpreter tutorial by Jinzhou Zhang (lotabout/write-a-C-interpreter)
 */
 
-#include "jcc.h"
+#include "cccc.h"
 #include "./internal.h"
 
-#define JCC_DYN_TOKEN_BASE (-0x4a434300LL)
+#define CCCC_DYN_TOKEN_BASE (-0x4a434300LL)
 
-static void jcc_set_dyn_error(JCC *vm, const char *fmt, ...) {
+static void cccc_set_dyn_error(CCCC *vm, const char *fmt, ...) {
     if (!vm)
         return;
     free(vm->dyn_error);
@@ -45,14 +45,14 @@ static void jcc_set_dyn_error(JCC *vm, const char *fmt, ...) {
     va_end(ap2);
 }
 
-static void jcc_clear_dyn_error(JCC *vm) {
+static void cccc_clear_dyn_error(CCCC *vm) {
     if (!vm)
         return;
     free(vm->dyn_error);
     vm->dyn_error = NULL;
 }
 
-static DynamicLibrary *jcc_find_dynamic_library(JCC *vm, long long token,
+static DynamicLibrary *cccc_find_dynamic_library(CCCC *vm, long long token,
                                                 int *idx_out) {
     if (!vm)
         return NULL;
@@ -66,7 +66,7 @@ static DynamicLibrary *jcc_find_dynamic_library(JCC *vm, long long token,
     return NULL;
 }
 
-DynamicSymbol *jcc_find_dynamic_symbol(JCC *vm, long long token) {
+DynamicSymbol *cccc_find_dynamic_symbol(CCCC *vm, long long token) {
     if (!vm)
         return NULL;
     for (int i = 0; i < vm->dynsym_count; i++) {
@@ -77,20 +77,20 @@ DynamicSymbol *jcc_find_dynamic_symbol(JCC *vm, long long token) {
     return NULL;
 }
 
-static int jcc_add_dynamic_library(JCC *vm, void *handle, const char *path) {
+static int cccc_add_dynamic_library(CCCC *vm, void *handle, const char *path) {
     if (vm->dynlib_count >= vm->dynlib_capacity) {
         int new_cap = vm->dynlib_capacity ? vm->dynlib_capacity * 2 : 16;
         DynamicLibrary *new_libs =
             realloc(vm->dynlibs, (size_t)new_cap * sizeof(DynamicLibrary));
         if (!new_libs) {
-            jcc_set_dyn_error(vm, "dynamic library registry allocation failed");
+            cccc_set_dyn_error(vm, "dynamic library registry allocation failed");
             return 0;
         }
         vm->dynlibs = new_libs;
         vm->dynlib_capacity = new_cap;
     }
 
-    int token = JCC_DYN_TOKEN_BASE - vm->dyn_next_token++;
+    int token = CCCC_DYN_TOKEN_BASE - vm->dyn_next_token++;
     vm->dynlibs[vm->dynlib_count++] = (DynamicLibrary){
         .handle = handle,
         .path = path ? strdup(path) : NULL,
@@ -101,21 +101,21 @@ static int jcc_add_dynamic_library(JCC *vm, void *handle, const char *path) {
     return token;
 }
 
-static int jcc_add_dynamic_symbol(JCC *vm, int lib_idx, void *func_ptr,
+static int cccc_add_dynamic_symbol(CCCC *vm, int lib_idx, void *func_ptr,
                                   const char *name) {
     if (vm->dynsym_count >= vm->dynsym_capacity) {
         int new_cap = vm->dynsym_capacity ? vm->dynsym_capacity * 2 : 32;
         DynamicSymbol *new_syms =
             realloc(vm->dynsyms, (size_t)new_cap * sizeof(DynamicSymbol));
         if (!new_syms) {
-            jcc_set_dyn_error(vm, "dynamic symbol registry allocation failed");
+            cccc_set_dyn_error(vm, "dynamic symbol registry allocation failed");
             return 0;
         }
         vm->dynsyms = new_syms;
         vm->dynsym_capacity = new_cap;
     }
 
-    int token = JCC_DYN_TOKEN_BASE - vm->dyn_next_token++;
+    int token = CCCC_DYN_TOKEN_BASE - vm->dyn_next_token++;
     vm->dynsyms[vm->dynsym_count++] = (DynamicSymbol){
         .func_ptr = func_ptr,
         .name = name ? strdup(name) : NULL,
@@ -127,49 +127,49 @@ static int jcc_add_dynamic_symbol(JCC *vm, int lib_idx, void *func_ptr,
     return token;
 }
 
-long long jcc_rt_dlopen(JCC *vm, const char *path, int mode) {
+long long cccc_rt_dlopen(CCCC *vm, const char *path, int mode) {
     if (!vm)
         return 0;
-    jcc_clear_dyn_error(vm);
+    cccc_clear_dyn_error(vm);
 
 #if defined(_WIN32) || defined(_WIN64)
     (void)mode;
     HMODULE handle = path ? LoadLibraryA(path) : GetModuleHandleA(NULL);
     if (!handle) {
-        jcc_set_dyn_error(vm, "dlopen failed: error code %lu",
+        cccc_set_dyn_error(vm, "dlopen failed: error code %lu",
                           (unsigned long)GetLastError());
         return 0;
     }
-    return jcc_add_dynamic_library(vm, (void *)handle, path);
+    return cccc_add_dynamic_library(vm, (void *)handle, path);
 #else
     void *handle = dlopen(path, mode ? mode : RTLD_LAZY);
     if (!handle) {
         const char *err = dlerror();
-        jcc_set_dyn_error(vm, "%s", err ? err : "dlopen failed");
+        cccc_set_dyn_error(vm, "%s", err ? err : "dlopen failed");
         return 0;
     }
-    return jcc_add_dynamic_library(vm, handle, path);
+    return cccc_add_dynamic_library(vm, handle, path);
 #endif
 }
 
-long long jcc_rt_dlsym(JCC *vm, long long handle_token, const char *symbol) {
+long long cccc_rt_dlsym(CCCC *vm, long long handle_token, const char *symbol) {
     if (!vm || !symbol) {
-        jcc_set_dyn_error(vm, "dlsym requires a symbol name");
+        cccc_set_dyn_error(vm, "dlsym requires a symbol name");
         return 0;
     }
-    jcc_clear_dyn_error(vm);
+    cccc_clear_dyn_error(vm);
 
     int lib_idx = -1;
-    DynamicLibrary *lib = jcc_find_dynamic_library(vm, handle_token, &lib_idx);
+    DynamicLibrary *lib = cccc_find_dynamic_library(vm, handle_token, &lib_idx);
     if (!lib) {
-        jcc_set_dyn_error(vm, "invalid dynamic library handle");
+        cccc_set_dyn_error(vm, "invalid dynamic library handle");
         return 0;
     }
 
 #if defined(_WIN32) || defined(_WIN64)
     void *ptr = (void *)GetProcAddress((HMODULE)lib->handle, symbol);
     if (!ptr) {
-        jcc_set_dyn_error(vm, "dlsym failed for '%s': error code %lu", symbol,
+        cccc_set_dyn_error(vm, "dlsym failed for '%s': error code %lu", symbol,
                           (unsigned long)GetLastError());
         return 0;
     }
@@ -178,7 +178,7 @@ long long jcc_rt_dlsym(JCC *vm, long long handle_token, const char *symbol) {
     void *ptr = dlsym(lib->handle, symbol);
     const char *err = dlerror();
     if (err) {
-        jcc_set_dyn_error(vm, "%s", err);
+        cccc_set_dyn_error(vm, "%s", err);
         return 0;
     }
 #endif
@@ -186,52 +186,52 @@ long long jcc_rt_dlsym(JCC *vm, long long handle_token, const char *symbol) {
     // Apply FFI policy checks at lookup time so denied symbols cannot be
     // obtained as callable function pointers.
     if (vm->disable_all_ffi) {
-        jcc_set_dyn_error(vm, "dlsym blocked: all FFI calls are disabled");
+        cccc_set_dyn_error(vm, "dlsym blocked: all FFI calls are disabled");
         return 0;
     }
     if (vm->ffi_allow_count > 0 &&
-        !jcc_ffi_name_in_list(vm->ffi_allow_list, vm->ffi_allow_count, symbol)) {
-        jcc_set_dyn_error(vm, "dlsym blocked: '%s' not in --ffi-allow list",
+        !cccc_ffi_name_in_list(vm->ffi_allow_list, vm->ffi_allow_count, symbol)) {
+        cccc_set_dyn_error(vm, "dlsym blocked: '%s' not in --ffi-allow list",
                           symbol);
         return 0;
     }
     if (vm->ffi_allow_count == 0 &&
-        jcc_ffi_name_in_list(vm->ffi_deny_list, vm->ffi_deny_count, symbol)) {
-        jcc_set_dyn_error(vm, "dlsym blocked: '%s' is in --ffi-deny list",
+        cccc_ffi_name_in_list(vm->ffi_deny_list, vm->ffi_deny_count, symbol)) {
+        cccc_set_dyn_error(vm, "dlsym blocked: '%s' is in --ffi-deny list",
                           symbol);
         return 0;
     }
 
-    return jcc_add_dynamic_symbol(vm, lib_idx, ptr, symbol);
+    return cccc_add_dynamic_symbol(vm, lib_idx, ptr, symbol);
 }
 
-long long jcc_rt_dlclose(JCC *vm, long long handle_token) {
+long long cccc_rt_dlclose(CCCC *vm, long long handle_token) {
     if (!vm)
         return -1;
-    jcc_clear_dyn_error(vm);
+    cccc_clear_dyn_error(vm);
 
     int lib_idx = -1;
-    DynamicLibrary *lib = jcc_find_dynamic_library(vm, handle_token, &lib_idx);
+    DynamicLibrary *lib = cccc_find_dynamic_library(vm, handle_token, &lib_idx);
     (void)lib_idx;
     if (!lib) {
-        jcc_set_dyn_error(vm, "invalid dynamic library handle");
+        cccc_set_dyn_error(vm, "invalid dynamic library handle");
         return -1;
     }
     if (lib->live_symbol_count > 0) {
-        jcc_set_dyn_error(vm, "cannot dlclose handle with live callable symbols");
+        cccc_set_dyn_error(vm, "cannot dlclose handle with live callable symbols");
         return -1;
     }
 
 #if defined(_WIN32) || defined(_WIN64)
     if (lib->path && !FreeLibrary((HMODULE)lib->handle)) {
-        jcc_set_dyn_error(vm, "dlclose failed: error code %lu",
+        cccc_set_dyn_error(vm, "dlclose failed: error code %lu",
                           (unsigned long)GetLastError());
         return -1;
     }
 #else
     if (dlclose(lib->handle) != 0) {
         const char *err = dlerror();
-        jcc_set_dyn_error(vm, "%s", err ? err : "dlclose failed");
+        cccc_set_dyn_error(vm, "%s", err ? err : "dlclose failed");
         return -1;
     }
 #endif
@@ -239,7 +239,7 @@ long long jcc_rt_dlclose(JCC *vm, long long handle_token) {
     return 0;
 }
 
-long long jcc_rt_dlerror(JCC *vm) {
+long long cccc_rt_dlerror(CCCC *vm) {
     if (!vm || !vm->dyn_error)
         return 0;
     return (long long)vm->dyn_error;
@@ -247,7 +247,7 @@ long long jcc_rt_dlerror(JCC *vm) {
 
 #include "ops.c"
 
-void cc_vm_profile_reset(JCC *vm) {
+void cc_vm_profile_reset(CCCC *vm) {
     if (!vm)
         return;
     memset(vm->vm_profile_counts, 0, sizeof(vm->vm_profile_counts));
@@ -265,7 +265,7 @@ void cc_vm_profile_reset(JCC *vm) {
     vm->vm_profile_trigram_started = false;
 }
 
-void cc_vm_profile_print(JCC *vm, FILE *f) {
+void cc_vm_profile_print(CCCC *vm, FILE *f) {
     if (!vm || !f || !vm->vm_profile_enabled)
         return;
 
@@ -359,13 +359,13 @@ static void json_escape(FILE *f, const char *s) {
     }
 }
 
-int cc_vm_profile_write_json(JCC *vm, FILE *f, const char *mode,
+int cc_vm_profile_write_json(CCCC *vm, FILE *f, const char *mode,
                              const char *input_name) {
     if (!vm || !f)
         return -1;
 
     fprintf(f, "{\n");
-    fprintf(f, "  \"tool\": \"jcc-vm-profile\",\n");
+    fprintf(f, "  \"tool\": \"cccc-vm-profile\",\n");
     fprintf(f, "  \"version\": \"1\",\n");
     fprintf(f, "  \"mode\": \"");
     json_escape(f, mode ? mode : "unknown");
@@ -484,7 +484,7 @@ int cc_vm_profile_write_json(JCC *vm, FILE *f, const char *mode,
     return ferror(f) ? -1 : 0;
 }
 
-int vm_eval(JCC *vm) {
+int vm_eval(CCCC *vm) {
     static void *op_table[] = {
 #define X(NAME, OPERANDS) [NAME] = &&op_##NAME,
         OPS_X
@@ -497,23 +497,23 @@ dispatch:
     vm->cycle++;
 
     /* Poll pending signals (fast path: branch predicted not-taken) */
-    if (__builtin_expect(_jcc_any_pending != 0, 0)) {
-        _jcc_any_pending = 0;
-        for (int _sig = 1; _sig < JCC_NSIG; _sig++) {
-            if (!_jcc_pending[_sig]) continue;
-            _jcc_pending[_sig] = 0;
-            JCCSigSlot *_slot = &vm->vm_sigslots[_sig];
+    if (__builtin_expect(_cccc_any_pending != 0, 0)) {
+        _cccc_any_pending = 0;
+        for (int _sig = 1; _sig < CCCC_NSIG; _sig++) {
+            if (!_cccc_pending[_sig]) continue;
+            _cccc_pending[_sig] = 0;
+            CCCCSigSlot *_slot = &vm->vm_sigslots[_sig];
             if (_slot->action == 1) continue; /* IGN */
             if (_slot->action == 2) {
                 /* VM handler: push return address and jump to handler */
-                JCCPc _target = cc_byte_offset_to_pc(_slot->handler_fn);
-                if (_target == JCC_INVALID_PC || _target > vm->text_ptr) {
+                CCCCPc _target = cc_byte_offset_to_pc(_slot->handler_fn);
+                if (_target == CCCC_INVALID_PC || _target > vm->text_ptr) {
                     fprintf(stderr, "error: invalid signal handler for sig %d\n", _sig);
                     return -1;
                 }
                 if (check_stack_overflow(vm, 1)) return -1;
                 *--vm->sp = (long long)vm->pc;
-                if (vm->flags & JCC_CFI) *--vm->shadow_sp = (long long)vm->pc;
+                if (vm->flags & CCCC_CFI) *--vm->shadow_sp = (long long)vm->pc;
                 vm->regs[REG_A0] = (long long)_sig;
                 vm->pc = _target;
                 goto dispatch; /* resume at handler; delivers one signal per re-entry */
@@ -523,7 +523,7 @@ dispatch:
         }
     }
 
-    if (vm->flags & JCC_ENABLE_DEBUGGER) {
+    if (vm->flags & CCCC_ENABLE_DEBUGGER) {
         if (debugger_check_breakpoint(vm)) {
             printf("\nBreakpoint hit at PC %u\n", vm->pc);
             cc_debug_repl(vm);
@@ -541,7 +541,7 @@ dispatch:
     }
 
     {
-        if (__builtin_expect(vm->pc == JCC_INVALID_PC, 0))
+        if (__builtin_expect(vm->pc == CCCC_INVALID_PC, 0))
             return (int)vm->regs[REG_A0];
         int op = (int)cc_read_word(vm);
         if (__builtin_expect(op < 0 || op >= (int)(sizeof(op_table) / sizeof(op_table[0])) || !op_table[op], 0)) {
@@ -584,7 +584,7 @@ dispatch:
     op_##NAME: {                                                 \
         int _r = op_##NAME##_fn(vm);                             \
         if (__builtin_expect(_r != 0, 0)) return _r;             \
-        if (__builtin_expect(vm->pc == JCC_INVALID_PC, 0))       \
+        if (__builtin_expect(vm->pc == CCCC_INVALID_PC, 0))       \
             return (int)vm->regs[REG_A0];                        \
         goto dispatch;                                           \
     }
@@ -596,22 +596,22 @@ dispatch:
 
 // ========== Segment reserve-and-commit helpers ==========
 
-void vm_alloc_segments(JCC *vm) {
-    size_t initial_text   = (size_t)vm->poolsize * sizeof(JCCInstrWord);
+void vm_alloc_segments(CCCC *vm) {
+    size_t initial_text   = (size_t)vm->poolsize * sizeof(CCCCInstrWord);
     size_t initial_data   = (size_t)vm->poolsize;
     size_t initial_stack  = (size_t)vm->poolsize * sizeof(long long);
     size_t initial_heap   = (size_t)vm->poolsize;
 
-    size_t reserved_text  = (size_t)vm->poolsize_max * sizeof(JCCInstrWord);
+    size_t reserved_text  = (size_t)vm->poolsize_max * sizeof(CCCCInstrWord);
     size_t reserved_data  = (size_t)vm->poolsize_max;
     size_t reserved_stack = (size_t)vm->poolsize_max * sizeof(long long);
     size_t reserved_heap  = (size_t)vm->poolsize_max;
 
     // Reserve virtual ranges (base pointers will never move)
-    vm->text_seg  = (JCCInstrWord *)jcc_vm_reserve(reserved_text);
-    vm->data_seg  = (char *)jcc_vm_reserve(reserved_data);
-    vm->stack_seg = (long long *)jcc_vm_reserve(reserved_stack);
-    vm->heap_seg  = (char *)jcc_vm_reserve(reserved_heap);
+    vm->text_seg  = (CCCCInstrWord *)cccc_vm_reserve(reserved_text);
+    vm->data_seg  = (char *)cccc_vm_reserve(reserved_data);
+    vm->stack_seg = (long long *)cccc_vm_reserve(reserved_stack);
+    vm->heap_seg  = (char *)cccc_vm_reserve(reserved_heap);
     if (!vm->text_seg || !vm->data_seg || !vm->stack_seg || !vm->heap_seg)
         error("could not reserve VM memory segments");
 
@@ -620,10 +620,10 @@ void vm_alloc_segments(JCC *vm) {
     // the bottom of the initially-committed slice.
     size_t stack_top_off = reserved_stack - initial_stack;
 
-    if (jcc_vm_commit(vm->text_seg,  0,             initial_text)  != 0 ||
-        jcc_vm_commit(vm->data_seg,  0,             initial_data)  != 0 ||
-        jcc_vm_commit(vm->stack_seg, stack_top_off, initial_stack) != 0 ||
-        jcc_vm_commit(vm->heap_seg,  0,             initial_heap)  != 0)
+    if (cccc_vm_commit(vm->text_seg,  0,             initial_text)  != 0 ||
+        cccc_vm_commit(vm->data_seg,  0,             initial_data)  != 0 ||
+        cccc_vm_commit(vm->stack_seg, stack_top_off, initial_stack) != 0 ||
+        cccc_vm_commit(vm->heap_seg,  0,             initial_heap)  != 0)
         error("could not commit VM memory segments");
 
     vm->text_committed  = initial_text;
@@ -647,36 +647,36 @@ void vm_alloc_segments(JCC *vm) {
     vm->initial_bp = vm->bp;
 
     // CFI shadow stack mirrors the main stack layout
-    if (vm->flags & JCC_CFI) {
-        vm->shadow_stack = (long long *)jcc_vm_reserve(reserved_stack);
+    if (vm->flags & CCCC_CFI) {
+        vm->shadow_stack = (long long *)cccc_vm_reserve(reserved_stack);
         if (!vm->shadow_stack)
             error("could not reserve shadow stack");
-        if (jcc_vm_commit(vm->shadow_stack, stack_top_off, initial_stack) != 0)
+        if (cccc_vm_commit(vm->shadow_stack, stack_top_off, initial_stack) != 0)
             error("could not commit shadow stack");
         vm->shadow_sp = (long long *)((char *)vm->shadow_stack + reserved_stack);
     }
 }
 
-int vm_text_ensure_count(JCC *vm, JCCPc num_words) {
-    size_t needed_bytes = (size_t)num_words * sizeof(JCCInstrWord);
+int vm_text_ensure_count(CCCC *vm, CCCCPc num_words) {
+    size_t needed_bytes = (size_t)num_words * sizeof(CCCCInstrWord);
     if (needed_bytes <= vm->text_committed)
         return 0;
-    size_t reserved = (size_t)vm->poolsize_max * sizeof(JCCInstrWord);
+    size_t reserved = (size_t)vm->poolsize_max * sizeof(CCCCInstrWord);
     if (needed_bytes > reserved)
         return -1;
     // Round up to next poolsize-element chunk
-    size_t chunk = (size_t)vm->poolsize * sizeof(JCCInstrWord);
+    size_t chunk = (size_t)vm->poolsize * sizeof(CCCCInstrWord);
     size_t new_committed = ((needed_bytes + chunk - 1) / chunk) * chunk;
     if (new_committed > reserved)
         new_committed = reserved;
-    if (jcc_vm_commit(vm->text_seg, vm->text_committed,
+    if (cccc_vm_commit(vm->text_seg, vm->text_committed,
                       new_committed - vm->text_committed) != 0)
         return -1;
     vm->text_committed = new_committed;
     return 0;
 }
 
-int vm_data_ensure(JCC *vm, long long needed) {
+int vm_data_ensure(CCCC *vm, long long needed) {
     long long current_used = vm->data_ptr - vm->data_seg;
     long long committed    = (long long)vm->data_committed;
     if (current_used + needed <= committed)
@@ -689,14 +689,14 @@ int vm_data_ensure(JCC *vm, long long needed) {
     long long new_committed = ((want + chunk - 1) / chunk) * chunk;
     if (new_committed > reserved)
         new_committed = reserved;
-    if (jcc_vm_commit(vm->data_seg, (size_t)committed,
+    if (cccc_vm_commit(vm->data_seg, (size_t)committed,
                       (size_t)(new_committed - committed)) != 0)
         return -1;
     vm->data_committed = (size_t)new_committed;
     return 0;
 }
 
-int vm_heap_grow(JCC *vm, size_t need) {
+int vm_heap_grow(CCCC *vm, size_t need) {
     size_t current  = vm->heap_committed;
     size_t reserved = (size_t)vm->poolsize_max;
     if (current >= reserved)
@@ -710,14 +710,14 @@ int vm_heap_grow(JCC *vm, size_t need) {
         chunk = reserved - current;
     if (chunk < need)
         return -1; // Can't satisfy even after using all remaining space
-    if (jcc_vm_commit(vm->heap_seg, current, chunk) != 0)
+    if (cccc_vm_commit(vm->heap_seg, current, chunk) != 0)
         return -1;
     vm->heap_committed += chunk;
     vm->heap_end = vm->heap_seg + vm->heap_committed;
     return 0;
 }
 
-int vm_stack_grow(JCC *vm, int slots_needed) {
+int vm_stack_grow(CCCC *vm, int slots_needed) {
     char *seg_start      = (char *)vm->stack_seg;
     char *current_base   = (char *)vm->stack_base;
     size_t need_bytes    = (size_t)slots_needed * sizeof(long long);
@@ -739,7 +739,7 @@ int vm_stack_grow(JCC *vm, int slots_needed) {
     char *new_base = current_base - chunk;
     size_t off = (size_t)(new_base - seg_start);
 
-    if (jcc_vm_commit(seg_start, off, chunk) != 0)
+    if (cccc_vm_commit(seg_start, off, chunk) != 0)
         return -1;
 
     vm->stack_base = (long long *)new_base;
@@ -749,9 +749,9 @@ int vm_stack_grow(JCC *vm, int slots_needed) {
 
 // ========== End segment helpers ==========
 
-void cc_init(JCC *vm, uint32_t flags) {
+void cc_init(CCCC *vm, uint32_t flags) {
     // Zero-initialize the VM struct
-    memset(vm, 0, sizeof(JCC));
+    memset(vm, 0, sizeof(CCCC));
 
     // Set runtime flags
     vm->flags = flags;
@@ -827,7 +827,7 @@ void cc_init(JCC *vm, uint32_t flags) {
     vm->compiler.file_buffers.capacity = 0;
 
     // Default to GNU C17 (matches modern gcc/clang defaults)
-    vm->compiler.c_std = JCC_STD_C23;
+    vm->compiler.c_std = CCCC_STD_C23;
     vm->compiler.c_std_gnu = true;
 
     init_macros(vm);
@@ -857,7 +857,7 @@ void cc_init(JCC *vm, uint32_t flags) {
     vm->scope_vars_capacity = 0;
 
     // Initialize stack canary (will be set to random or fixed value based on flag)
-    // The flag JCC_RANDOM_CANARIES will trigger regeneration in main.c
+    // The flag CCCC_RANDOM_CANARIES will trigger regeneration in main.c
     // For now, initialize to fixed value; it will be regenerated if random canaries enabled
     vm->stack_canary = STACK_CANARY;
 
@@ -873,7 +873,7 @@ void cc_init(JCC *vm, uint32_t flags) {
     // Add default system include path for <...> includes
     cc_system_include(vm, "./include");
 
-    cc_define(vm, "JCC_HAS_FFI", "1");
+    cc_define(vm, "CCCC_HAS_FFI", "1");
 
     // Initialize error collection fields
     vm->errors = NULL;
@@ -884,17 +884,17 @@ void cc_init(JCC *vm, uint32_t flags) {
     vm->collect_errors = false;  // Disabled by default (opt-in)
     vm->warnings_as_errors = false;  // Disabled by default
 
-    if (vm->flags & JCC_ENABLE_DEBUGGER) {
+    if (vm->flags & CCCC_ENABLE_DEBUGGER) {
         debugger_init(vm);
     }
 }
 
-void cc_destroy(JCC *vm) {
+void cc_destroy(CCCC *vm) {
     if (!vm)
         return;
 
     // Report memory leaks before releasing segments
-    if ((vm->flags & JCC_MEMORY_LEAK_DETECT) && vm->alloc_list) {
+    if ((vm->flags & CCCC_MEMORY_LEAK_DETECT) && vm->alloc_list) {
         int count = 0;
         for (AllocRecord *r = vm->alloc_list; r; r = r->next)
             count++;
@@ -916,17 +916,17 @@ void cc_destroy(JCC *vm) {
 
     // Release reserved virtual ranges (base pointers never moved)
     if (vm->text_seg)
-        jcc_vm_release(vm->text_seg,
-                       (size_t)vm->poolsize_max * sizeof(JCCInstrWord));
+        cccc_vm_release(vm->text_seg,
+                       (size_t)vm->poolsize_max * sizeof(CCCCInstrWord));
     if (vm->data_seg)
-        jcc_vm_release(vm->data_seg,  (size_t)vm->poolsize_max);
+        cccc_vm_release(vm->data_seg,  (size_t)vm->poolsize_max);
     if (vm->stack_seg)
-        jcc_vm_release(vm->stack_seg,
+        cccc_vm_release(vm->stack_seg,
                        (size_t)vm->poolsize_max * sizeof(long long));
     if (vm->heap_seg)
-        jcc_vm_release(vm->heap_seg,  (size_t)vm->poolsize_max);
+        cccc_vm_release(vm->heap_seg,  (size_t)vm->poolsize_max);
     if (vm->shadow_stack)
-        jcc_vm_release(vm->shadow_stack,
+        cccc_vm_release(vm->shadow_stack,
                        (size_t)vm->poolsize_max * sizeof(long long));
     // return_buffer is part of data_seg, no need to free separately
     if (vm->vm_profile_trigram_counts) {
@@ -1132,8 +1132,8 @@ void cc_destroy(JCC *vm) {
     arena_destroy(&vm->compiler.parser_arena);
 }
 
-void cc_print_stack_report(JCC *vm) {
-    if (!vm || !(vm->flags & JCC_STACK_INSTR)) {
+void cc_print_stack_report(CCCC *vm) {
+    if (!vm || !(vm->flags & CCCC_STACK_INSTR)) {
         printf("Stack instrumentation not enabled.\n");
         return;
     }
@@ -1166,23 +1166,23 @@ void cc_print_stack_report(JCC *vm) {
     printf("=================================================\n\n");
 }
 
-void cc_include(JCC *vm, const char *path) {
+void cc_include(CCCC *vm, const char *path) {
     strarray_push(&vm->compiler.include_paths, strdup(path));
 }
 
-void cc_system_include(JCC *vm, const char *path) {
+void cc_system_include(CCCC *vm, const char *path) {
     strarray_push(&vm->compiler.system_include_paths, strdup(path));
 }
 
-void cc_define(JCC *vm, char *name, char *buf) {
+void cc_define(CCCC *vm, char *name, char *buf) {
     define_macro(vm, name, buf);
 }
 
-void cc_undef(JCC *vm, char *name) {
+void cc_undef(CCCC *vm, char *name) {
     undef_macro(vm, name);
 }
 
-void cc_set_asm_callback(JCC *vm, JCCAsmCallback callback, void *user_data) {
+void cc_set_asm_callback(CCCC *vm, CCCCAsmCallback callback, void *user_data) {
     vm->compiler.asm_callback = callback;
     vm->compiler.asm_user_data = user_data;
 }
@@ -1205,21 +1205,21 @@ static void cc_ffi_list_add(char ***list, int *count, int *capacity,
     (*list)[(*count)++] = strdup(name);
 }
 
-void cc_ffi_allow(JCC *vm, const char *name) {
+void cc_ffi_allow(CCCC *vm, const char *name) {
     if (!vm)
         error("cc_ffi_allow: vm is NULL");
     cc_ffi_list_add(&vm->ffi_allow_list, &vm->ffi_allow_count,
                     &vm->ffi_allow_capacity, name);
 }
 
-void cc_ffi_deny(JCC *vm, const char *name) {
+void cc_ffi_deny(CCCC *vm, const char *name) {
     if (!vm)
         error("cc_ffi_deny: vm is NULL");
     cc_ffi_list_add(&vm->ffi_deny_list, &vm->ffi_deny_count,
                     &vm->ffi_deny_capacity, name);
 }
 
-void cc_ffi_clear_allow_list(JCC *vm) {
+void cc_ffi_clear_allow_list(CCCC *vm) {
     if (!vm)
         return;
     for (int i = 0; i < vm->ffi_allow_count; i++)
@@ -1227,7 +1227,7 @@ void cc_ffi_clear_allow_list(JCC *vm) {
     vm->ffi_allow_count = 0;
 }
 
-void cc_ffi_clear_deny_list(JCC *vm) {
+void cc_ffi_clear_deny_list(CCCC *vm) {
     if (!vm)
         return;
     for (int i = 0; i < vm->ffi_deny_count; i++)
@@ -1235,11 +1235,11 @@ void cc_ffi_clear_deny_list(JCC *vm) {
     vm->ffi_deny_count = 0;
 }
 
-void cc_register_cfunc(JCC *vm, const char *name, void *func_ptr, int num_args, int returns_double) {
+void cc_register_cfunc(CCCC *vm, const char *name, void *func_ptr, int num_args, int returns_double) {
     cc_register_cfunc_ex(vm, name, func_ptr, num_args, returns_double, 0);
 }
 
-static ForeignFunc *find_registered_ffi(JCC *vm, const char *name) {
+static ForeignFunc *find_registered_ffi(CCCC *vm, const char *name) {
     size_t name_len = strlen(name);
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
         ForeignFunc *ff = &vm->compiler.ffi_table[i];
@@ -1250,7 +1250,7 @@ static ForeignFunc *find_registered_ffi(JCC *vm, const char *name) {
     return NULL;
 }
 
-static void ensure_ffi_capacity(JCC *vm, const char *caller) {
+static void ensure_ffi_capacity(CCCC *vm, const char *caller) {
     if (vm->compiler.ffi_count < vm->compiler.ffi_capacity)
         return;
 
@@ -1263,7 +1263,7 @@ static void ensure_ffi_capacity(JCC *vm, const char *caller) {
         error("%s: realloc failed", caller);
 }
 
-void cc_register_cfunc_ex(JCC *vm, const char *name, void *func_ptr, int num_args, int returns_double, uint64_t double_arg_mask) {
+void cc_register_cfunc_ex(CCCC *vm, const char *name, void *func_ptr, int num_args, int returns_double, uint64_t double_arg_mask) {
     if (!vm)
         error("cc_register_cfunc_ex: vm is NULL");
     if (!name || !func_ptr)
@@ -1296,7 +1296,7 @@ void cc_register_cfunc_ex(JCC *vm, const char *name, void *func_ptr, int num_arg
     };
 }
 
-void cc_register_variadic_cfunc(JCC *vm, const char *name, void *func_ptr, int num_fixed_args, int returns_double) {
+void cc_register_variadic_cfunc(CCCC *vm, const char *name, void *func_ptr, int num_fixed_args, int returns_double) {
     if (!vm)
         error("cc_register_variadic_cfunc: vm is NULL");
     if (!name || !func_ptr)
@@ -1331,7 +1331,7 @@ void cc_register_variadic_cfunc(JCC *vm, const char *name, void *func_ptr, int n
     };
 }
 
-int cc_dlsym(JCC *vm, const char *name, void *func_ptr, int num_args, int returns_double) {
+int cc_dlsym(CCCC *vm, const char *name, void *func_ptr, int num_args, int returns_double) {
     if (!vm || !name || !func_ptr)
         return -1;
 
@@ -1352,7 +1352,7 @@ int cc_dlsym(JCC *vm, const char *name, void *func_ptr, int num_args, int return
     return -1;
 }
 
-int cc_dlopen(JCC *vm, const char *lib_path) {
+int cc_dlopen(CCCC *vm, const char *lib_path) {
     if (!vm)
         return -1;
 
@@ -1482,7 +1482,7 @@ static const char* find_libc() {
 #endif
 }
 
-int cc_load_libc(JCC *vm) {
+int cc_load_libc(CCCC *vm) {
     const char *libc_path = find_libc();
     if (vm->debug_vm)
         printf("Loading standard C library: %s\n", libc_path);
@@ -1492,7 +1492,7 @@ int cc_load_libc(JCC *vm) {
 // Load standard library (for backward compatibility)
 // This function is kept for programs that don't use #include,
 // or want all stdlib functions available regardless of includes
-void cc_load_stdlib(JCC *vm) {
+void cc_load_stdlib(CCCC *vm) {
     // Register all standard library functions regardless of includes
     register_ctype_functions(vm);
     register_fenv_functions(vm);
@@ -1514,14 +1514,14 @@ void cc_load_stdlib(JCC *vm) {
     }
 }
 
-int cc_run(JCC *vm, int argc, char **argv) {
+int cc_run(CCCC *vm, int argc, char **argv) {
     if (!vm || !vm->text_seg) {
         error("VM not initialized - call cc_compile first");
     }
     cc_vm_profile_reset(vm);
 
     // Get entry point (main function) from text_seg[0]
-    JCCPc main_addr = vm->text_seg[0];
+    CCCCPc main_addr = vm->text_seg[0];
     vm->pc = main_addr;
 
     // Setup stack — use poolsize_max so sp/bp sit at top of full reservation
@@ -1534,7 +1534,7 @@ int cc_run(JCC *vm, int argc, char **argv) {
                                        reserved_stack - initial_stack);
 
         // Shadow stack for CFI
-        if (vm->flags & JCC_CFI) {
+        if (vm->flags & CCCC_CFI) {
             vm->shadow_sp = (long long *)((char *)vm->shadow_stack + reserved_stack);
         }
     }
@@ -1553,23 +1553,23 @@ int cc_run(JCC *vm, int argc, char **argv) {
     // ENT will push old_bp and set bp=sp; ret_addr sits at bp[+1] after ENT.
     *--vm->sp = 0;
 
-    return (vm->flags & JCC_ENABLE_DEBUGGER) ? debugger_run(vm, argc, argv) : vm_eval(vm);
+    return (vm->flags & CCCC_ENABLE_DEBUGGER) ? debugger_run(vm, argc, argv) : vm_eval(vm);
 }
 
 #if defined(_WIN32) || defined(_WIN64)
-static size_t jcc_vm_page_size(void) {
+static size_t cccc_vm_page_size(void) {
     SYSTEM_INFO si;
     GetSystemInfo(&si);
     return (size_t)si.dwPageSize;
 }
 
-void *jcc_vm_reserve(size_t bytes) {
+void *cccc_vm_reserve(size_t bytes) {
     void *p = VirtualAlloc(NULL, bytes, MEM_RESERVE, PAGE_NOACCESS);
     return p; // NULL on failure
 }
 
-int jcc_vm_commit(void *base, size_t off, size_t len) {
-    size_t pgsz = jcc_vm_page_size();
+int cccc_vm_commit(void *base, size_t off, size_t len) {
+    size_t pgsz = cccc_vm_page_size();
     // Align offset down, extend length to cover full pages
     size_t aligned_off = off & ~(pgsz - 1);
     size_t aligned_end = (off + len + pgsz - 1) & ~(pgsz - 1);
@@ -1579,23 +1579,23 @@ int jcc_vm_commit(void *base, size_t off, size_t len) {
     return (p == NULL) ? -1 : 0;
 }
 
-void jcc_vm_release(void *base, size_t bytes) {
+void cccc_vm_release(void *base, size_t bytes) {
     (void)bytes;
     VirtualFree(base, 0, MEM_RELEASE);
 }
 #else // POSIX
-static size_t jcc_vm_page_size(void) {
+static size_t cccc_vm_page_size(void) {
     return (size_t)sysconf(_SC_PAGESIZE);
 }
 
-void *jcc_vm_reserve(size_t bytes) {
+void *cccc_vm_reserve(size_t bytes) {
     void *p = mmap(NULL, bytes, PROT_NONE,
                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     return (p == MAP_FAILED) ? NULL : p;
 }
 
-int jcc_vm_commit(void *base, size_t off, size_t len) {
-    size_t pgsz = jcc_vm_page_size();
+int cccc_vm_commit(void *base, size_t off, size_t len) {
+    size_t pgsz = cccc_vm_page_size();
     // Align offset down, extend length to cover full pages
     size_t aligned_off = off & ~(pgsz - 1);
     size_t aligned_end = (off + len + pgsz - 1) & ~(pgsz - 1);
@@ -1604,12 +1604,12 @@ int jcc_vm_commit(void *base, size_t off, size_t len) {
                     PROT_READ | PROT_WRITE);
 }
 
-void jcc_vm_release(void *base, size_t bytes) {
+void cccc_vm_release(void *base, size_t bytes) {
     munmap(base, bytes);
 }
 #endif
 
-char *jcc_path_find_executable(const char *name) {
+char *cccc_path_find_executable(const char *name) {
     if (!name || !*name)
         return NULL;
     if (strchr(name, '/'))
@@ -1640,20 +1640,20 @@ char *jcc_path_find_executable(const char *name) {
     return NULL;
 }
 
-char *jcc_find_native_cc(void) {
-    const char *env_cc = getenv("JCC_NATIVE_CC");
+char *cccc_find_native_cc(void) {
+    const char *env_cc = getenv("CCCC_NATIVE_CC");
     if (env_cc && *env_cc) {
-        char *found = jcc_path_find_executable(env_cc);
+        char *found = cccc_path_find_executable(env_cc);
         if (found)
             return found;
-        fprintf(stderr, "error: JCC_NATIVE_CC compiler '%s' not found\n",
+        fprintf(stderr, "error: CCCC_NATIVE_CC compiler '%s' not found\n",
                 env_cc);
         return NULL;
     }
 
     const char *candidates[] = {"cc", "clang", "gcc"};
     for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
-        char *found = jcc_path_find_executable(candidates[i]);
+        char *found = cccc_path_find_executable(candidates[i]);
         if (found)
             return found;
     }

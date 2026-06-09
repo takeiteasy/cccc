@@ -1,4 +1,4 @@
-// JCC_FLAGS: --ffi-deny=strlen
+// CCCC_FLAGS: --ffi-deny=strlen
 #include <string.h>
 
 int main(void) {

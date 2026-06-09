@@ -1,5 +1,5 @@
-// JCC_FLAGS: -Wpointer-arith -Wno-pointer-arith
-// JCC_REJECT_STDERR: warning:
+// CCCC_FLAGS: -Wpointer-arith -Wno-pointer-arith
+// CCCC_REJECT_STDERR: warning:
 
 int main(void) {
     char buf[8] = {1,2,3,4,5,6,7,8};

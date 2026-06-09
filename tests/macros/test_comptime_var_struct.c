@@ -1,9 +1,9 @@
 // Ticket #188: struct comptime variable with readable members.
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 struct Dims { int width; int height; int depth; } dims = { 640, 480, 3 };
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *get_area(void) {
     // width * height at compile time
     $node_t *w = $get_comptime_member("dims", "width");
@@ -11,7 +11,7 @@ $node_t *get_area(void) {
     return $binary(nk_mul, w, h);
 }
 
-[[jcc::comptime(inline)]]
+[[cccc::comptime(inline)]]
 $node_t *get_depth(void) {
     return $get_comptime_member("dims", "depth");
 }

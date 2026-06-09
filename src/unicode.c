@@ -1,5 +1,5 @@
 /*
- JCC: JIT C Compiler
+ CCCC: Comprehensiev C Compensation Compiler
 
  Copyright (C) 2025 George Watson
 
@@ -19,7 +19,7 @@
  This file was original part of chibicc by Rui Ueyama (MIT) https://github.com/rui314/chibicc
 */
 
-#include "jcc.h"
+#include "cccc.h"
 #include "./internal.h"
 
 // Encode a given character in UTF-8.
@@ -56,7 +56,7 @@ int encode_utf8(char *buf, uint32_t c) {
 // encoded in one to four bytes. One byte UTF-8 code points are
 // identical to ASCII. Non-ASCII characters are encoded using more
 // than one byte.
-uint32_t decode_utf8(JCC *vm, char **new_pos, char *p) {
+uint32_t decode_utf8(CCCC *vm, char **new_pos, char *p) {
     if ((unsigned char)*p < 128) {
         *new_pos = p + 1;
         return *p;
@@ -201,7 +201,7 @@ static int char_width(uint32_t c) {
 
 // Returns the number of columns needed to display a given
 // string in a fixed-width font.
-int display_width(JCC *vm, char *p, int len) {
+int display_width(CCCC *vm, char *p, int len) {
     char *start = p;
     int w = 0;
     while (p - start < len) {

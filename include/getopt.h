@@ -1,10 +1,10 @@
-/* getopt.h - command-line option parsing for JCC */
+/* getopt.h - command-line option parsing for CCCC */
 
 #ifndef __GETOPT_H
 #define __GETOPT_H
 
 #ifdef _WIN32
-#error "<getopt.h> is only available on POSIX targets in JCC"
+#error "<getopt.h> is only available on POSIX targets in CCCC"
 #endif
 
 extern char *optarg;

@@ -1,6 +1,6 @@
 // Tickets #232 and #297: scoped AST builder helpers and generated switch cases.
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *make_scoped_switch(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("scoped_switch", int_ty);
@@ -20,7 +20,7 @@ $node_t *make_scoped_switch(void) {
 }
 make_scoped_switch();
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *make_explicit_switch(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("explicit_switch", int_ty);
@@ -37,7 +37,7 @@ $node_t *make_explicit_switch(void) {
 }
 make_explicit_switch();
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *make_scoped_struct(void) {
     $type_t *int_ty = $get_type("int");
     $type_t *point = $make_struct("ScopedPoint");
@@ -57,7 +57,7 @@ $node_t *make_scoped_struct(void) {
 }
 make_scoped_struct();
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *make_scoped_enum(void) {
     $type_t *tag = $make_enum("ScopedTag");
     $with_enum(tag) {
@@ -68,7 +68,7 @@ $node_t *make_scoped_enum(void) {
 }
 make_scoped_enum();
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *make_scoped_block(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("scoped_block_value", int_ty);

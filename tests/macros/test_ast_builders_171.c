@@ -7,7 +7,7 @@
 
 // ---- $cond --------------------------------------------------------
 // Returns 1 if cond is true, else 2.
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *choose(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("choose_impl", int_ty);
@@ -22,7 +22,7 @@ choose();
 
 // ---- $null --------------------------------------------------------
 // Returns a null pointer cast to int (0 == 0 check).
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *get_null_ptr(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("null_ptr_as_int", int_ty);
@@ -36,7 +36,7 @@ $node_t *get_null_ptr(void) {
 get_null_ptr();
 
 // ---- $sizeof_type / $alignof_type ----------------------------
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *size_of_int(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("macro_sizeof_int", int_ty);
@@ -46,7 +46,7 @@ $node_t *size_of_int(void) {
 }
 size_of_int();
 
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *align_of_double(void) {
     $type_t *int_ty = $get_type("int");
     $type_t *dbl_ty = $get_type("double");
@@ -58,7 +58,7 @@ $node_t *align_of_double(void) {
 align_of_double();
 
 // ---- $sizeof_expr ------------------------------------------------
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *sizeof_expr_test(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("macro_sizeof_expr", int_ty);
@@ -73,7 +73,7 @@ sizeof_expr_test();
 
 // ---- $subscript --------------------------------------------------
 // Returns arr[2].
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *subscript_test(void) {
     $type_t *int_ty = $get_type("int");
     $type_t *ptr_ty = $make_pointer(int_ty);
@@ -88,7 +88,7 @@ subscript_test();
 
 // ---- $comma ------------------------------------------------------
 // Returns rhs (42) after evaluating lhs (side effect via assignment).
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *comma_test(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("macro_comma", int_ty);
@@ -102,7 +102,7 @@ comma_test();
 
 // ---- $make_const / $make_volatile ----------------------------
 // (type introspection; confirmed via $type_is_const)
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *const_type_test(void) {
     $type_t *int_ty = $get_type("int");
     $type_t *cint = $make_const(int_ty);
@@ -117,7 +117,7 @@ const_type_test();
 
 // ---- $function_prototype -----------------------------------------
 // Declare a prototype, then provide definition separately; call it.
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *proto_test(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *proto = $function_prototype("proto_fn", int_ty);
@@ -129,7 +129,7 @@ proto_test();
 
 // Provide definition via $function — returns the same Obj (params already set).
 // Do NOT re-add parameters; just set the body.
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *proto_define(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *fn = $function("proto_fn", int_ty);
@@ -142,7 +142,7 @@ proto_define();
 
 // ---- $make_struct / $struct_add_field ------------------------
 // Generate struct Vec2 { int x; int y; } and emit a function using it.
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *make_struct_test(void) {
     $type_t *int_ty = $get_type("int");
     $type_t *vec2 = $make_struct("Vec2");
@@ -163,7 +163,7 @@ $node_t *make_struct_test(void) {
 make_struct_test();
 
 // ---- $make_union -------------------------------------------------
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *make_union_test(void) {
     $type_t *int_ty = $get_type("int");
     $type_t *float_ty = $get_type("float");
@@ -179,7 +179,7 @@ $node_t *make_union_test(void) {
 make_union_test();
 
 // ---- $make_enum / $enum_add_constant -------------------------
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *make_enum_test(void) {
     $type_t *e = $make_enum("Color");
     $enum_add_constant(e, "RED",   0);
@@ -193,7 +193,7 @@ $node_t *make_enum_test(void) {
 make_enum_test();
 
 // ---- $make_typedef -----------------------------------------------
-[[jcc::comptime]]
+[[cccc::comptime]]
 $node_t *make_typedef_test(void) {
     $type_t *long_ty = $get_type("long");
     $make_typedef("MyLong", long_ty);

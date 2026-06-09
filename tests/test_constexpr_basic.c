@@ -1,5 +1,5 @@
-// JCC_FLAGS: --std=c23
-// Test constexpr parsing in JCC
+// CCCC_FLAGS: --std=c23
+// Test constexpr parsing in CCCC
 constexpr int MAX_SIZE = 100;
 
 constexpr int factorial(int n) {

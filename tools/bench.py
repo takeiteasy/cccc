@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Cross-compiler benchmark runner for JCC.
+"""Cross-compiler benchmark runner for CCCC.
 
-Compiles and runs a set of portable C99/C11 benchmark programs under JCC
+Compiles and runs a set of portable C99/C11 benchmark programs under CCCC
 (across all --optimize levels) and under GCC (across -O0..-O3), verifies that
 the programs produce identical output under each compiler, and reports wall
 clock timings as a human-readable table and as a machine-readable JSON file.
@@ -13,15 +13,15 @@ Options:
     --benchmarks DIR    benchmark source directory (default: ./benchmarks)
     --runs N            timed iterations per (bench, config) (default: 3)
     --warmup N          warmup iterations discarded (default: 1)
-    --jcc PATH          path to jcc binary (default: ./jcc)
+    --cccc PATH          path to cccc binary (default: ./cccc)
     --gcc PATH          path to gcc binary (default: gcc)
-    --include PATH      include flag for jcc (default: -I./include)
+    --include PATH      include flag for cccc (default: -I./include)
     --format FMT        output: table, json, both (default: both)
     --json-out PATH     json output file (default: benchmarks/results/run-<utc>.json)
     --filter PATTERN    glob filter on benchmark source names
     --no-correctness    skip the stdout-equality check
-    --no-jbc            skip the jcc-jbc* (precompiled bytecode) configs
-    --vm-profile        collect VM opcode profile JSON for JCC/JBC configs
+    --no-jbc            skip the cccc-jbc* (precompiled bytecode) configs
+    --vm-profile        collect VM opcode profile JSON for CCCC/JBC configs
     --keep-builds       keep compiled gcc binaries in build/ (default: clean)
     --quiet             suppress per-benchmark progress output
 """
@@ -39,18 +39,18 @@ import time
 from pathlib import Path
 
 
-JCC_CONFIGS = [
-    ("jcc",    []),
-    ("jcc-O1", ["--optimize=1"]),
-    ("jcc-O2", ["--optimize=2"]),
-    ("jcc-O3", ["--optimize=3"]),
+CCCC_CONFIGS = [
+    ("cccc",    []),
+    ("cccc-O1", ["--optimize=1"]),
+    ("cccc-O2", ["--optimize=2"]),
+    ("cccc-O3", ["--optimize=3"]),
 ]
 
 JBC_CONFIGS = [
-    ("jcc-jbc",    []),
-    ("jcc-jbc-O1", ["--optimize=1"]),
-    ("jcc-jbc-O2", ["--optimize=2"]),
-    ("jcc-jbc-O3", ["--optimize=3"]),
+    ("cccc-jbc",    []),
+    ("cccc-jbc-O1", ["--optimize=1"]),
+    ("cccc-jbc-O2", ["--optimize=2"]),
+    ("cccc-jbc-O3", ["--optimize=3"]),
 ]
 
 GCC_CONFIGS = [
@@ -143,11 +143,11 @@ def jbc_out_path(build_dir, stem, extra):
     return build_dir / f"{stem}{suffix}.jbc"
 
 
-def build_jbc(src, out, jcc, opt_flags, include_flag, root, log):
-    cmd = [jcc, include_flag, *opt_flags, "-o", str(out), str(src)]
+def build_jbc(src, out, cccc, opt_flags, include_flag, root, log):
+    cmd = [cccc, include_flag, *opt_flags, "-o", str(out), str(src)]
     r = subprocess.run(cmd, capture_output=True, text=True, cwd=root)
     if r.returncode != 0:
-        log(f"  jcc {opt_flags or 'no-opt'} build failed for {src.name}:\n{r.stderr.strip()}")
+        log(f"  cccc {opt_flags or 'no-opt'} build failed for {src.name}:\n{r.stderr.strip()}")
         return False
     return True
 
@@ -164,27 +164,27 @@ def run_benchmark(src, args, root, build_dir, log):
 
     jbc_paths = {}
     if not args.no_jbc:
-        log("  compiling jcc-jbc variants...")
+        log("  compiling cccc-jbc variants...")
         for label, extra in JBC_CONFIGS:
             out = jbc_out_path(build_dir, src.stem, extra)
-            if not build_jbc(src, out, args.jcc, extra, args.include, root, log):
+            if not build_jbc(src, out, args.cccc, extra, args.include, root, log):
                 continue
             jbc_paths[label] = out
 
     results = {}
 
-    log("  running jcc variants...")
-    for label, extra in JCC_CONFIGS:
+    log("  running cccc variants...")
+    for label, extra in CCCC_CONFIGS:
         profile_path = None
         if args.vm_profile:
             profile_path = args.vm_profile_dir / f"{src.stem}-{label}.json"
-        def make_jcc():
+        def make_cccc():
             profile_args = (
                 ["--vm-profile", "--json"] if profile_path else []
             )
-            cmd = [args.jcc, args.include, *extra, *profile_args, str(src)]
+            cmd = [args.cccc, args.include, *extra, *profile_args, str(src)]
             return run_cmd(cmd, root)
-        r = time_runs(make_jcc, args.runs, args.warmup)
+        r = time_runs(make_cccc, args.runs, args.warmup)
         if profile_path and r.get("stdout"):
             profile_path.write_text(r["stdout"])
             r["vm_profile_json"] = str(profile_path)
@@ -192,12 +192,12 @@ def run_benchmark(src, args, root, build_dir, log):
         log(f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms")
 
     if not args.no_jbc:
-        log("  running jcc-jbc variants...")
+        log("  running cccc-jbc variants...")
         for label, extra in JBC_CONFIGS:
             if label not in jbc_paths:
                 continue
             jbc = jbc_paths[label]
-            _, compile_ms = run_cmd([args.jcc, args.include, *extra, "-o", str(jbc), str(src)], root)
+            _, compile_ms = run_cmd([args.cccc, args.include, *extra, "-o", str(jbc), str(src)], root)
             profile_path = None
             if args.vm_profile:
                 profile_path = args.vm_profile_dir / f"{src.stem}-{label}.json"
@@ -205,7 +205,7 @@ def run_benchmark(src, args, root, build_dir, log):
                 profile_args = (
                     ["--vm-profile", "--json"] if profile_path else []
                 )
-                return run_cmd([args.jcc, *profile_args, str(jbc)], root)
+                return run_cmd([args.cccc, *profile_args, str(jbc)], root)
             r = time_runs(make_jbc, args.runs, args.warmup)
             r["compile_ms"] = compile_ms * 1000.0
             if profile_path and r.get("stdout"):
@@ -225,21 +225,21 @@ def run_benchmark(src, args, root, build_dir, log):
         results[label] = r
         log(f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms")
 
-    correctness = {"status": "ok", "matches": {}, "ref": "jcc"}
-    if not args.no_correctness and "jcc" in results:
-        ref = results["jcc"]["stdout"]
+    correctness = {"status": "ok", "matches": {}, "ref": "cccc"}
+    if not args.no_correctness and "cccc" in results:
+        ref = results["cccc"]["stdout"]
         for label, r in results.items():
-            if label == "jcc":
+            if label == "cccc":
                 continue
             match = r["stdout"] == ref
             correctness["matches"][label] = match
             if not match:
                 correctness["status"] = "mismatch"
-    if not args.no_correctness and "jcc" not in results:
+    if not args.no_correctness and "cccc" not in results:
         correctness["status"] = "no_reference"
 
     if correctness["status"] == "ok":
-        log("  correctness: all configs match jcc")
+        log("  correctness: all configs match cccc")
     elif correctness["status"] == "mismatch":
         bad = [l for l, m in correctness["matches"].items() if not m]
         log(f"  correctness: MISMATCH with {bad}")
@@ -276,9 +276,9 @@ def detect_platform_info():
     return info
 
 
-def render_table(records, jcc_configs, jbc_configs, gcc_configs):
+def render_table(records, cccc_configs, jbc_configs, gcc_configs):
     all_configs = (
-        [c[0] for c in jcc_configs]
+        [c[0] for c in cccc_configs]
         + [c[0] for c in jbc_configs]
         + [c[0] for c in gcc_configs]
     )
@@ -312,10 +312,10 @@ def render_table(records, jcc_configs, jbc_configs, gcc_configs):
     return "\n".join(lines)
 
 
-def render_speedup_table(records, jcc_configs, jbc_configs, gcc_configs):
+def render_speedup_table(records, cccc_configs, jbc_configs, gcc_configs):
     lines = []
     all_configs = (
-        [c[0] for c in jcc_configs]
+        [c[0] for c in cccc_configs]
         + [c[0] for c in jbc_configs]
         + [c[0] for c in gcc_configs]
     )
@@ -371,11 +371,11 @@ def make_run_id():
 
 
 def main():
-    p = argparse.ArgumentParser(description="Cross-compiler benchmark runner for JCC")
+    p = argparse.ArgumentParser(description="Cross-compiler benchmark runner for CCCC")
     p.add_argument("--benchmarks", default="benchmarks")
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--warmup", type=int, default=1)
-    p.add_argument("--jcc", default="./jcc")
+    p.add_argument("--cccc", default="./cccc")
     p.add_argument("--gcc", default="gcc")
     p.add_argument("--include", default="-I./include")
     p.add_argument("--format", choices=["table", "json", "both"], default="both")
@@ -383,9 +383,9 @@ def main():
     p.add_argument("--filter", default=None)
     p.add_argument("--no-correctness", action="store_true")
     p.add_argument("--no-jbc", action="store_true",
-                   help="skip the jcc-jbc* (precompiled bytecode) configs")
+                   help="skip the cccc-jbc* (precompiled bytecode) configs")
     p.add_argument("--vm-profile", action="store_true",
-                   help="write VM opcode profile JSON for JCC/JBC configs")
+                   help="write VM opcode profile JSON for CCCC/JBC configs")
     p.add_argument("--keep-builds", action="store_true")
     p.add_argument("--quiet", action="store_true")
     args = p.parse_args()
@@ -404,11 +404,11 @@ def main():
     else:
         args.vm_profile_dir = None
 
-    jcc_path = (root / args.jcc).resolve() if not os.path.isabs(args.jcc) else Path(args.jcc)
-    if not jcc_path.exists():
-        print(f"error: jcc binary not found: {jcc_path}", file=sys.stderr)
+    cccc_path = (root / args.cccc).resolve() if not os.path.isabs(args.cccc) else Path(args.cccc)
+    if not cccc_path.exists():
+        print(f"error: cccc binary not found: {cccc_path}", file=sys.stderr)
         sys.exit(1)
-    args.jcc = str(jcc_path)
+    args.cccc = str(cccc_path)
 
     if is_clang_disguised_as_gcc(args.gcc):
         real = find_real_gcc()
@@ -434,10 +434,10 @@ def main():
 
     log(f"Benchmarks: {[s.name for s in sources]}")
     log(f"Runs: {args.runs} (warmup: {args.warmup})")
-    log(f"JCC: {args.jcc}    GCC: {args.gcc}")
-    jcc_cfg_str = " × {none,O1,O2,O3}"
-    jbc_cfg_str = "" if args.no_jbc else "    jcc-jbc × {none,O1,O2,O3}"
-    log(f"Configs: jcc{jcc_cfg_str}{jbc_cfg_str}    gcc × {{O0,O1,O2,O3}}")
+    log(f"CCCC: {args.cccc}    GCC: {args.gcc}")
+    cccc_cfg_str = " × {none,O1,O2,O3}"
+    jbc_cfg_str = "" if args.no_jbc else "    cccc-jbc × {none,O1,O2,O3}"
+    log(f"Configs: cccc{cccc_cfg_str}{jbc_cfg_str}    gcc × {{O0,O1,O2,O3}}")
     if args.vm_profile:
         log(f"VM opcode profiles: {args.vm_profile_dir}")
 
@@ -470,11 +470,11 @@ def main():
     if args.format in ("table", "both"):
         print()
         print("=" * 100)
-        print(" JCC vs GCC benchmark results (median ms, lower is better)")
+        print(" CCCC vs GCC benchmark results (median ms, lower is better)")
         print("=" * 100)
-        print(render_table(records, JCC_CONFIGS, JBC_CONFIGS if not args.no_jbc else [], GCC_CONFIGS))
+        print(render_table(records, CCCC_CONFIGS, JBC_CONFIGS if not args.no_jbc else [], GCC_CONFIGS))
         print()
-        print(render_speedup_table(records, JCC_CONFIGS, JBC_CONFIGS if not args.no_jbc else [], GCC_CONFIGS))
+        print(render_speedup_table(records, CCCC_CONFIGS, JBC_CONFIGS if not args.no_jbc else [], GCC_CONFIGS))
         print()
         bad = [r for r in records if r["correctness"]["status"] != "ok"]
         if bad:
@@ -494,12 +494,12 @@ def main():
             out_path = results_dir / f"run-{run_id}.json"
 
         payload = {
-            "tool": "jcc-bench",
+            "tool": "cccc-bench",
             "version": "1",
             "run_id": run_id,
             "host": detect_platform_info(),
             "compilers": {
-                "jcc": compiler_version(args.jcc),
+                "cccc": compiler_version(args.cccc),
                 "gcc": compiler_version(args.gcc),
             },
             "config": {
@@ -508,7 +508,7 @@ def main():
                 "include": args.include,
                 "gcc_extra_flags": GCC_EXTRA_FLAGS,
             },
-            "jcc_configs": [c[0] for c in JCC_CONFIGS],
+            "cccc_configs": [c[0] for c in CCCC_CONFIGS],
             "jbc_configs": [c[0] for c in JBC_CONFIGS] if not args.no_jbc else [],
             "gcc_configs": [c[0] for c in GCC_CONFIGS],
             "benchmarks": [

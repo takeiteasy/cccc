@@ -1,10 +1,10 @@
-/* pwd.h - password database declarations for JCC */
+/* pwd.h - password database declarations for CCCC */
 
 #ifndef __PWD_H
 #define __PWD_H
 
 #ifdef _WIN32
-#error "<pwd.h> is only available on POSIX targets in JCC"
+#error "<pwd.h> is only available on POSIX targets in CCCC"
 #endif
 
 #include "sys/types.h"

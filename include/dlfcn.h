@@ -1,10 +1,10 @@
-/* dlfcn.h - dynamic loading declarations for POSIX JCC targets */
+/* dlfcn.h - dynamic loading declarations for POSIX CCCC targets */
 
 #ifndef __DLFCN_H
 #define __DLFCN_H
 
 #ifdef _WIN32
-#error "<dlfcn.h> is only available on POSIX targets in JCC"
+#error "<dlfcn.h> is only available on POSIX targets in CCCC"
 #endif
 
 #define RTLD_LAZY 0x1

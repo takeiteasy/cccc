@@ -1,4 +1,4 @@
-/* time.h - time functions for JCC C compiler */
+/* time.h - time functions for CCCC C compiler */
 
 #ifndef __TIME_H
 #define __TIME_H

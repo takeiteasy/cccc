@@ -1,4 +1,4 @@
-// JCC_FLAGS: --memory-leak-detection -V
+// CCCC_FLAGS: --memory-leak-detection -V
 // Clean leak detection test — all allocations freed, no leak reported
 #include <stdlib.h>
 
