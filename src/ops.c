@@ -1615,13 +1615,12 @@ static inline int op_MFRE_fn(JCC *vm) {
 
     AllocHeader *header = ((AllocHeader *)ptr) - 1;
 
-    // Validate header
+    // Validate header — if magic is wrong the pointer came from a non-VM
+    // allocator (e.g. strdup, aligned_alloc). Fall back to system free so
+    // mixed-allocator programs work correctly under -V.
     if (header->magic != 0xDEADBEEF) {
-        printf("\n========== INVALID FREE ==========\n");
-        printf("Pointer does not appear to be from malloc: 0x%llx\n",
-               (long long)ptr);
-        printf("===================================\n");
-        return -1;
+        free(ptr);
+        return 0;
     }
 
     if (header->freed) {
@@ -1668,6 +1667,14 @@ static inline int op_REALC_fn(JCC *vm) {
     }
 
     AllocHeader *old_header = ((AllocHeader *)ptr) - 1;
+
+    // If the pointer didn't come from the VM heap, fall back to system realloc.
+    if (old_header->magic != 0xDEADBEEF) {
+        void *new_ptr = realloc(ptr, (size_t)new_size);
+        vm->regs[REG_A0] = (long long)new_ptr;
+        return 0;
+    }
+
     size_t old_size = old_header->size;
 
     // Allocate new block

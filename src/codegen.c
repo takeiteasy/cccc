@@ -2220,6 +2220,51 @@ static void gen_expr(JCC *vm, Node *node, int dest_reg) {
             return;
         }
 
+        // When JCC_VM_HEAP is set, route malloc/free/calloc/realloc through VM
+        // heap opcodes instead of system allocators via FFI.
+        if (vm->flags & JCC_VM_HEAP) {
+            if (is_extern_func_name(node->lhs, "malloc")) {
+                if (!node->args)
+                    error_tok(vm, node->tok, "malloc requires a size argument");
+                reset_temp_regs();
+                gen_expr(vm, node->args, REG_A0);
+                emit(vm, MALC);
+                if (dest_reg != REG_A0)
+                    emit_mov3(vm, dest_reg, REG_A0);
+                return;
+            }
+            if (is_extern_func_name(node->lhs, "free")) {
+                if (!node->args)
+                    error_tok(vm, node->tok, "free requires a pointer argument");
+                reset_temp_regs();
+                gen_expr(vm, node->args, REG_A0);
+                emit(vm, MFRE);
+                return;
+            }
+            if (is_extern_func_name(node->lhs, "calloc")) {
+                if (!node->args || !node->args->next)
+                    error_tok(vm, node->tok, "calloc requires nmemb and size arguments");
+                reset_temp_regs();
+                gen_expr(vm, node->args, REG_A0);
+                gen_expr(vm, node->args->next, REG_A1);
+                emit(vm, CALC);
+                if (dest_reg != REG_A0)
+                    emit_mov3(vm, dest_reg, REG_A0);
+                return;
+            }
+            if (is_extern_func_name(node->lhs, "realloc")) {
+                if (!node->args || !node->args->next)
+                    error_tok(vm, node->tok, "realloc requires ptr and size arguments");
+                reset_temp_regs();
+                gen_expr(vm, node->args, REG_A0);
+                gen_expr(vm, node->args->next, REG_A1);
+                emit(vm, REALC);
+                if (dest_reg != REG_A0)
+                    emit_mov3(vm, dest_reg, REG_A0);
+                return;
+            }
+        }
+
         // Check for FFI call - foreign functions use register-based calling
         // convention with operand-based metadata (ffi_idx, nargs,
         // double_arg_mask)
