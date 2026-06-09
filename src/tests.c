@@ -19,6 +19,7 @@
 
 #include "cccc.h"
 #include "internal.h"
+#include <fnmatch.h>
 
 
 // Per-run failure state allocated on the stack inside cc_run_tests.
@@ -152,18 +153,53 @@ Token *cc_inject_test_header(CCCC *vm) {
     return preprocess(vm, toks);
 }
 
-int cc_run_tests(CCCC *vm, Obj *prog) {
+int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
 
-    // Count tests and reverse the list to run in declaration order.
-    // test_fns is built by prepending, so it is in reverse order.
-    int n = 0;
+    // Reverse the list to run in declaration order (test_fns is built by prepending).
     TestFnRecord *ordered = NULL;
     for (TestFnRecord *r = vm->compiler.test_fns; r; r = r->next) {
         TestFnRecord *copy = malloc(sizeof(TestFnRecord));
-        copy->name = r->name;
-        copy->next = ordered;
+        copy->name  = r->name;
+        copy->suite = r->suite;
+        copy->next  = ordered;
         ordered = copy;
+    }
+
+    // Apply filters to build the active list.
+    TestFnRecord *filtered = NULL;
+    TestFnRecord **tail = &filtered;
+    int n = 0;
+    for (TestFnRecord *r = ordered; r; r = r->next) {
+        if (opts && opts->suite_filter) {
+            const char *s = r->suite ? r->suite : "";
+            if (strcmp(s, opts->suite_filter) != 0)
+                continue;
+        }
+        if (opts && opts->test_glob) {
+            if (fnmatch(opts->test_glob, r->name, 0) != 0)
+                continue;
+        }
+        TestFnRecord *node = malloc(sizeof(TestFnRecord));
+        node->name  = r->name;
+        node->suite = r->suite;
+        node->next  = NULL;
+        *tail = node;
+        tail = &node->next;
         n++;
+    }
+
+    // --list-tests: enumerate without running.
+    if (opts && opts->list_only) {
+        printf("# Tests (%d total):\n", n);
+        for (TestFnRecord *r = filtered; r; r = r->next) {
+            if (r->suite)
+                printf("%-40s [suite: %s]\n", r->name, r->suite);
+            else
+                printf("%s\n", r->name);
+        }
+        for (TestFnRecord *r = ordered, *next; r; r = next) { next = r->next; free(r); }
+        for (TestFnRecord *r = filtered, *next; r; r = next) { next = r->next; free(r); }
+        return 0;
     }
 
     printf("TAP version 13\n");
@@ -171,6 +207,7 @@ int cc_run_tests(CCCC *vm, Obj *prog) {
 
     int passed = 0;
     int test_num = 0;
+    const char *prev_suite = NULL;  // tracks suite changes for TAP comments
 
     // Stack-allocate state for this run and expose it to the FFI callbacks via
     // the module-level pointer.  Cleared on exit so stray post-run calls are
@@ -178,8 +215,21 @@ int cc_run_tests(CCCC *vm, Obj *prog) {
     CCCCTestRunState run;
     s_run = &run;
 
-    for (TestFnRecord *r = ordered; r; r = r->next) {
+    for (TestFnRecord *r = filtered; r; r = r->next) {
         test_num++;
+
+        // Emit a suite comment when the active suite changes.
+        const char *cur_suite = r->suite;
+        bool suite_changed = (cur_suite != prev_suite) &&
+                             (cur_suite == NULL || prev_suite == NULL ||
+                              strcmp(cur_suite, prev_suite) != 0);
+        if (suite_changed) {
+            if (cur_suite)
+                printf("# Suite: %s\n", cur_suite);
+            else
+                printf("# Suite: (none)\n");
+            prev_suite = cur_suite;
+        }
 
         Obj *fn = NULL;
         for (Obj *o = prog; o; o = o->next) {
@@ -214,10 +264,8 @@ int cc_run_tests(CCCC *vm, Obj *prog) {
 
     s_run = NULL;
 
-    for (TestFnRecord *r = ordered, *next; r; r = next) {
-        next = r->next;
-        free(r);
-    }
+    for (TestFnRecord *r = ordered, *next; r; r = next) { next = r->next; free(r); }
+    for (TestFnRecord *r = filtered, *next; r; r = next) { next = r->next; free(r); }
 
     return (passed == n) ? 0 : 1;
 }

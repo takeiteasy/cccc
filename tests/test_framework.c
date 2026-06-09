@@ -36,3 +36,31 @@ void test_assert_streq(void) {
     CCCC_ASSERT_STREQ("hello", "hello");
     CCCC_ASSERT_STREQ("", "");
 }
+
+// Suite via attribute argument.
+[[cccc::test(suite = "math")]]
+void test_addition(void) {
+    CCCC_ASSERT_EQ(1 + 1, 2);
+    CCCC_ASSERT_EQ(10 + 32, 42);
+}
+
+[[cccc::test(suite = "math")]]
+void test_subtraction(void) {
+    CCCC_ASSERT_EQ(5 - 3, 2);
+    CCCC_ASSERT_EQ(100 - 58, 42);
+}
+
+// Suite via pragma block.
+#pragma cccc suite begin "strings"
+
+[[cccc::test]]
+void test_string_equality(void) {
+    CCCC_ASSERT_STREQ("foo", "foo");
+}
+
+[[cccc::test]]
+void test_string_empty(void) {
+    CCCC_ASSERT_STREQ("", "");
+}
+
+#pragma cccc suite end

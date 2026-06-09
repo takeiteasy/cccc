@@ -757,6 +757,9 @@ int main(int argc, const char *argv[]) {
     CcNgramState *ngram_state = NULL;
     CcFusionState *fusion_state = NULL;
     int testing_mode = 0;          // --testing
+    const char *test_glob = NULL;  // --test=GLOB
+    const char *suite_filter = NULL; // --test-suite=NAME
+    int list_tests = 0;            // --list-tests
 
     if (argc <= 1)
         usage(argv[0], 1);
@@ -827,6 +830,9 @@ int main(int argc, const char *argv[]) {
         {"inline-limit", required_argument, 0, 1051},
         {"asm-passthru", no_argument, 0, 'A'},
         {"testing", no_argument, 0, 't'},
+        {"test", required_argument, 0, 1061},
+        {"test-suite", required_argument, 0, 1062},
+        {"list-tests", no_argument, 0, 1063},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1173,6 +1179,18 @@ int main(int argc, const char *argv[]) {
             asm_passthru = 1;
             break;
         case 't': // --testing
+            testing_mode = 1;
+            break;
+        case 1061: // --test=GLOB
+            test_glob = optarg;
+            testing_mode = 1;
+            break;
+        case 1062: // --test-suite=NAME
+            suite_filter = optarg;
+            testing_mode = 1;
+            break;
+        case 1063: // --list-tests
+            list_tests = 1;
             testing_mode = 1;
             break;
         case 1058: { // --fusion-candidates[=N]
@@ -1817,7 +1835,12 @@ int main(int argc, const char *argv[]) {
     }
 
     if (testing_mode) {
-        exit_code = cc_run_tests(&vm, merged_prog);
+        CcTestOptions test_opts = {
+            .test_glob    = test_glob,
+            .suite_filter = suite_filter,
+            .list_only    = (bool)list_tests,
+        };
+        exit_code = cc_run_tests(&vm, merged_prog, &test_opts);
         goto BAIL;
     }
 

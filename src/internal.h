@@ -640,7 +640,7 @@ long long generate_random_canary(void);
 // testing.c
 void   cc_load_test_runtime(CCCC *vm);
 Token *cc_inject_test_header(CCCC *vm);
-int    cc_run_tests(CCCC *vm, Obj *prog);
+int    cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts);
 
 void register_ctype_functions(CCCC *vm);
 void register_fenv_functions(CCCC *vm);

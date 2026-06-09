@@ -932,8 +932,16 @@ typedef struct ComptimeVarMember {
 typedef struct TestFnRecord TestFnRecord;
 struct TestFnRecord {
     char *name;
+    char *suite;   // NULL if no suite assigned
     TestFnRecord *next;
 };
+
+// Options controlling which tests are run and how output is formatted.
+typedef struct {
+    const char *test_glob;    // --test=GLOB pattern, or NULL to run all
+    const char *suite_filter; // --test-suite=NAME, or NULL to run all suites
+    bool list_only;           // --list-tests: enumerate without running
+} CcTestOptions;
 
 // A variable or struct instance declared with #pragma comptime.
 // Values are read from the macro VM's data segment after compilation and
@@ -1480,6 +1488,7 @@ typedef struct Compiler {
     ComptimeVar *comptime_vars;      // Linked list of [[cccc::comptime]] variable decls
     TestFnRecord *test_fns;          // Linked list of [[cccc::test]] function names
     bool testing_mode;               // True when running under --testing (no main required)
+    char *current_suite;             // Active suite name set by #pragma cccc suite begin
     bool in_macro_mode;              // True when compiling/executing a macro function
     bool in_macro_expansion;         // True during macro AST expansion pass
     bool in_comptime_block;          // True inside #pragma cccc comptime begin...end

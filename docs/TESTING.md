@@ -30,26 +30,111 @@ void test_pointers(void) {
 
 No `#include` is required — the assertion macros and their backing declarations are injected automatically when running with `--testing`.
 
+## Test Suites
+
+Tests can be grouped into named suites. Two syntaxes are supported.
+
+### Attribute argument
+
+Specify the suite directly on the test attribute:
+
+```c
+[[cccc::test(suite = "math")]]
+void test_add(void) {
+    CCCC_ASSERT_EQ(1 + 1, 2);
+}
+
+[[cccc::test(suite = "math")]]
+void test_mul(void) {
+    CCCC_ASSERT_EQ(6 * 7, 42);
+}
+```
+
+### Pragma block
+
+Wrap a run of test functions in a pragma block to assign them all to the same suite:
+
+```c
+#pragma cccc suite begin "strings"
+
+[[cccc::test]]
+void test_equality(void) {
+    CCCC_ASSERT_STREQ("foo", "foo");
+}
+
+[[cccc::test]]
+void test_empty(void) {
+    CCCC_ASSERT_STREQ("", "");
+}
+
+#pragma cccc suite end
+```
+
+Suite blocks cannot be nested. Tests outside any block or attribute have no suite.
+
 ## Running Tests
 
 ```
 ./cccc --testing myfile.c
 ```
 
-Output is in [TAP version 13](https://testanything.org/) format:
+Output is in [TAP version 13](https://testanything.org/) format. Suite changes are emitted as TAP comments:
 
 ```
 TAP version 13
-1..3
-ok 1 - test_addition
-ok 2 - test_strings
-not ok 3 - test_pointers
+1..5
+ok 1 - test_assert_true
+# Suite: math
+ok 2 - test_add
+ok 3 - test_mul
+# Suite: strings
+ok 4 - test_equality
+not ok 5 - test_empty
   ---
-  message: &x is null (myfile.c:15)
+  message: "foo" != "" ("foo" != "") (myfile.c:30)
   ...
 ```
 
 The process exits with code `0` if all tests pass, `1` if any fail.
+
+## Filtering Tests
+
+Run a subset of tests without modifying the source file.
+
+### By name (glob pattern)
+
+```
+./cccc --testing --test='test_assert_*' myfile.c
+```
+
+Standard glob wildcards (`*`, `?`, `[...]`) are supported.
+
+### By suite
+
+```
+./cccc --testing --test-suite=math myfile.c
+```
+
+Only tests belonging to the named suite are run.
+
+### List without running
+
+```
+./cccc --testing --list-tests myfile.c
+```
+
+Prints all test names (and their suites) without executing them:
+
+```
+# Tests (5 total):
+test_assert_true
+test_add                                 [suite: math]
+test_mul                                 [suite: math]
+test_equality                            [suite: strings]
+test_empty                               [suite: strings]
+```
+
+`--test` and `--test-suite` imply `--testing`, so the flag can be omitted when using them.
 
 ## Assertion Macros
 
@@ -70,3 +155,4 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 - Test functions must have signature `void name(void)` — no parameters, void return.
 - Calling `exit()` directly in a test terminates the entire process rather than failing just that test. Use `CCCC_ASSERT` macros instead.
 - `--testing` cannot be combined with `-c`, `-o`, or other output flags.
+- Suite blocks (`#pragma cccc suite begin/end`) cannot be nested.

@@ -1943,6 +1943,7 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
     bool is_test_kind     = false;
     bool is_inline        = false;
     Token *attr_end       = NULL;
+    const char *suite_name = NULL; // extracted from [[cccc::test(suite = "...")]]
 
     Token *scan = is_gnu_attr ? tok->next->next->next  // skip __attribute__ ( (
                               : tok->next->next;        // skip [ [
@@ -2013,6 +2014,14 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                     is_inline = true;
             } else if (equal(after_scope, "test")) {
                 is_test_kind = true;
+                // [[cccc::test(suite = "name")]]
+                if (after_scope->next && equal(after_scope->next, "(")) {
+                    Token *p = after_scope->next->next;
+                    if (p && equal(p, "suite") &&
+                        p->next && equal(p->next, "=") &&
+                        p->next->next && p->next->next->kind == TK_STR)
+                        suite_name = p->next->next->str;
+                }
             }
         }
     }
@@ -2058,6 +2067,9 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
             if (probe->kind == TK_IDENT && probe->next && equal(probe->next, "(")) {
                 TestFnRecord *rec = calloc(1, sizeof(TestFnRecord));
                 rec->name = strndup(probe->loc, probe->len);
+                // Suite: explicit attribute arg takes priority, then active pragma suite
+                const char *s = suite_name ? suite_name : vm->compiler.current_suite;
+                rec->suite = s ? strdup(s) : NULL;
                 rec->next = vm->compiler.test_fns;
                 vm->compiler.test_fns = rec;
                 break;
@@ -2265,6 +2277,26 @@ static Token *handle_pragma_body(CCCC *vm, Token *tok) {
             vm->compiler.in_comptime_block = false;
             vm->compiler.comptime_block_file = NULL;
             return skip_line(vm, sub->next);
+        } else if (equal(sub, "suite")) {
+            Token *after = sub->next;
+            if (equal(after, "begin")) {
+                Token *name_tok = after->next;
+                if (!name_tok || name_tok->kind != TK_STR || name_tok->at_bol)
+                    error_tok(vm, after, "#pragma cccc suite begin requires a string name");
+                if (vm->compiler.current_suite)
+                    error_tok(vm, tok, "#pragma cccc suite: suites cannot be nested");
+                vm->compiler.current_suite = strdup(name_tok->str);
+                return skip_line(vm, name_tok->next);
+            } else if (equal(after, "end")) {
+                if (!vm->compiler.current_suite)
+                    error_tok(vm, tok, "stray #pragma cccc suite end without matching begin");
+                free(vm->compiler.current_suite);
+                vm->compiler.current_suite = NULL;
+                return skip_line(vm, after->next);
+            } else {
+                error_tok(vm, after && after->kind != TK_EOF ? after : sub,
+                          "expected 'begin' or 'end' after '#pragma cccc suite'");
+            }
         } else {
             error_tok(vm, sub && sub->kind != TK_EOF ? sub : tok,
                       "unknown #pragma cccc directive");
