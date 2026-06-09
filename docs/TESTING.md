@@ -72,6 +72,30 @@ void test_empty(void) {
 
 Suite blocks cannot be nested. Tests outside any block or attribute have no suite.
 
+## Negative Tests
+
+Mark a test with `error = "pattern"` to assert that the function body fails to compile with a diagnostic matching the given substring:
+
+```c
+[[cccc::test(error = "undefined variable")]]
+void test_undefined_var(void) {
+    int x = not_declared;
+}
+```
+
+The test passes if compilation of the body produces at least one error whose message contains `pattern`. It fails if the code compiles without error, or if no error matches the pattern.
+
+Both `suite` and `error` may be combined:
+
+```c
+[[cccc::test(suite = "negative", error = "undefined variable")]]
+void test_combined(void) {
+    int x = also_not_declared;
+}
+```
+
+Negative test bodies are compiled in error-collection mode; their errors are absorbed and never propagate to the rest of the compilation. The test result is computed at compile time.
+
 ## Running Tests
 
 ```
@@ -134,7 +158,29 @@ test_equality                            [suite: strings]
 test_empty                               [suite: strings]
 ```
 
-`--test` and `--test-suite` imply `--testing`, so the flag can be omitted when using them.
+`--test`, `--test-suite`, and `--list-tests` all imply `--testing`, so the flag can be omitted when using them.
+
+### Stop after first failure
+
+```
+./cccc --testing --fail-fast myfile.c
+```
+
+Stops after the first failing test. Passes and failures already emitted remain in the TAP output; subsequent tests are not run.
+
+### Per-test timeout
+
+```
+./cccc --testing --test-timeout=5 myfile.c
+```
+
+Kills any test that runs longer than 5 seconds. Timed-out tests are reported as:
+
+```
+not ok N - test_name # TIMEOUT
+```
+
+Remaining tests continue to run. Uses `SIGALRM` internally; test code that also installs `SIGALRM` handlers may interfere.
 
 ## Assertion Macros
 
@@ -156,3 +202,5 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 - Calling `exit()` directly in a test terminates the entire process rather than failing just that test. Use `CCCC_ASSERT` macros instead.
 - `--testing` cannot be combined with `-c`, `-o`, or other output flags.
 - Suite blocks (`#pragma cccc suite begin/end`) cannot be nested.
+- **Negative test bodies are matched against error substrings.** Use a substring that is specific enough to avoid false matches but not so specific that it breaks with minor message wording changes.
+- `--test-timeout` uses `SIGALRM`; test code that also uses `alarm()` or installs a `SIGALRM` handler will interfere with the timeout mechanism.

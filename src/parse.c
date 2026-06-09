@@ -192,6 +192,15 @@ static int align_to(int n, int align) {
     return (int)(((long long)n + align - 1) / align * align);
 }
 
+// Return the TestFnRecord for this name if it is a negative test (has error_pat), else NULL.
+static TestFnRecord *find_neg_test_record(CCCC *vm, const char *name) {
+    if (!name) return NULL;
+    for (TestFnRecord *r = vm->compiler.test_fns; r; r = r->next)
+        if (r->error_pat && strcmp(r->name, name) == 0)
+            return r;
+    return NULL;
+}
+
 static int align_down(int n, int align) {
     return align_to(n - align + 1, align);
 }
@@ -6181,11 +6190,56 @@ static Token *function(CCCC *vm, Token *tok, Type *basety, VarAttr *attr) {
     }
 
     Token *close_brace = NULL;
-    fn->body = compound_stmt(vm, &tok, tok, &close_brace);
-    append_implicit_return(vm, fn, close_brace ? close_brace : ty->name);
-    fn->locals = vm->compiler.locals;
-    leave_scope(vm);
-    resolve_goto_labels(vm);
+
+    // Negative test: body is expected to fail compilation with a specific error.
+    // Compile in error-collection mode and absorb all errors regardless of match.
+    TestFnRecord *neg_rec = find_neg_test_record(vm, fn->name);
+    if (neg_rec) {
+        bool old_collect       = vm->collect_errors;
+        int  pre_count         = vm->error_count;
+        CompileError *pre_tail = vm->errors_tail;
+        vm->collect_errors     = true;
+
+        fn->body = compound_stmt(vm, &tok, tok, &close_brace);
+        append_implicit_return(vm, fn, close_brace ? close_brace : ty->name);
+        fn->locals = vm->compiler.locals;
+        leave_scope(vm);
+        resolve_goto_labels(vm);
+
+        CompileError *new_errors = pre_tail ? pre_tail->next : vm->errors;
+        if (vm->error_count == pre_count) {
+            neg_rec->neg_passed = 0;
+            strncpy(neg_rec->neg_actual, "no error produced",
+                    sizeof(neg_rec->neg_actual) - 1);
+        } else {
+            neg_rec->neg_passed = -1;
+            if (new_errors && new_errors->message)
+                strncpy(neg_rec->neg_actual, new_errors->message,
+                        sizeof(neg_rec->neg_actual) - 1);
+            for (CompileError *e = new_errors; e; e = e->next) {
+                if (e->message && strstr(e->message, neg_rec->error_pat)) {
+                    neg_rec->neg_passed = 1;
+                    strncpy(neg_rec->neg_actual, e->message,
+                            sizeof(neg_rec->neg_actual) - 1);
+                    break;
+                }
+            }
+        }
+
+        if (pre_tail) pre_tail->next = NULL;
+        else          vm->errors = NULL;
+        vm->errors_tail  = pre_tail;
+        vm->error_count  = pre_count;
+        vm->collect_errors = old_collect;
+
+        fn->body = NULL; // suppress codegen — test result is precomputed
+    } else {
+        fn->body = compound_stmt(vm, &tok, tok, &close_brace);
+        append_implicit_return(vm, fn, close_brace ? close_brace : ty->name);
+        fn->locals = vm->compiler.locals;
+        leave_scope(vm);
+        resolve_goto_labels(vm);
+    }
 
     // Restore parent function context if this was a nested function
     if (is_nested) {

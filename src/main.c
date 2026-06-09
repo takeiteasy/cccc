@@ -251,6 +251,11 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                         bytecode to <file>; if omitted, writes to stdout\n");
     printf("\t-d/--disassemble         Disassemble bytecode to stdout\n");
     printf("\t-t/--testing             Discover and run [[cccc::test]] functions; output TAP\n");
+    printf("\t   --test=GLOB           Run only tests whose name matches GLOB (implies --testing)\n");
+    printf("\t   --test-suite=NAME     Run only tests in the named suite (implies --testing)\n");
+    printf("\t   --list-tests          List test names without running (implies --testing)\n");
+    printf("\t   --fail-fast           Stop after the first failing test\n");
+    printf("\t   --test-timeout=N      Per-test timeout in seconds (0 = no timeout)\n");
     printf("\t-v/--verbose             Enable debug logging\n");
     printf("\t-g/--debug               Enable interactive debugger\n");
     printf("\t-e/--entry <name>        Set the entry-point function (default: main)\n");
@@ -760,6 +765,8 @@ int main(int argc, const char *argv[]) {
     const char *test_glob = NULL;  // --test=GLOB
     const char *suite_filter = NULL; // --test-suite=NAME
     int list_tests = 0;            // --list-tests
+    int fail_fast = 0;             // --fail-fast
+    int test_timeout = 0;          // --test-timeout=N
 
     if (argc <= 1)
         usage(argv[0], 1);
@@ -833,6 +840,8 @@ int main(int argc, const char *argv[]) {
         {"test", required_argument, 0, 1061},
         {"test-suite", required_argument, 0, 1062},
         {"list-tests", no_argument, 0, 1063},
+        {"fail-fast", no_argument, 0, 1064},
+        {"test-timeout", required_argument, 0, 1065},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1191,6 +1200,14 @@ int main(int argc, const char *argv[]) {
             break;
         case 1063: // --list-tests
             list_tests = 1;
+            testing_mode = 1;
+            break;
+        case 1064: // --fail-fast
+            fail_fast = 1;
+            testing_mode = 1;
+            break;
+        case 1065: // --test-timeout=N
+            test_timeout = atoi(optarg);
             testing_mode = 1;
             break;
         case 1058: { // --fusion-candidates[=N]
@@ -1839,6 +1856,8 @@ int main(int argc, const char *argv[]) {
             .test_glob    = test_glob,
             .suite_filter = suite_filter,
             .list_only    = (bool)list_tests,
+            .fail_fast    = (bool)fail_fast,
+            .test_timeout = test_timeout,
         };
         exit_code = cc_run_tests(&vm, merged_prog, &test_opts);
         goto BAIL;

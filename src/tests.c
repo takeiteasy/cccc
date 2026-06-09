@@ -20,6 +20,7 @@
 #include "cccc.h"
 #include "internal.h"
 #include <fnmatch.h>
+#include <signal.h>
 
 
 // Per-run failure state allocated on the stack inside cc_run_tests.
@@ -30,10 +31,18 @@
 typedef struct {
     jmp_buf jmp;
     int     failed;
+    int     timed_out;
     char    fail_msg[512];
 } CCCCTestRunState;
 
 static CCCCTestRunState *s_run = NULL;
+
+static volatile sig_atomic_t s_alarm_fired = 0;
+static void handle_alarm(int sig) {
+    (void)sig;
+    s_alarm_fired = 1;
+    if (s_run) longjmp(s_run->jmp, 2); // 2 = timeout sentinel
+}
 
 static void impl_assert(long long cond, long long expr, long long file, long long line) {
     if (!cond) {
@@ -159,8 +168,7 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
     TestFnRecord *ordered = NULL;
     for (TestFnRecord *r = vm->compiler.test_fns; r; r = r->next) {
         TestFnRecord *copy = malloc(sizeof(TestFnRecord));
-        copy->name  = r->name;
-        copy->suite = r->suite;
+        *copy = *r;   // copy all fields including error_pat/neg_passed/neg_actual
         copy->next  = ordered;
         ordered = copy;
     }
@@ -180,8 +188,7 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
                 continue;
         }
         TestFnRecord *node = malloc(sizeof(TestFnRecord));
-        node->name  = r->name;
-        node->suite = r->suite;
+        *node = *r;   // copy all fields
         node->next  = NULL;
         *tail = node;
         tail = &node->next;
@@ -215,7 +222,12 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
     CCCCTestRunState run;
     s_run = &run;
 
-    for (TestFnRecord *r = filtered; r; r = r->next) {
+    bool use_timeout = opts && opts->test_timeout > 0;
+    if (use_timeout)
+        signal(SIGALRM, handle_alarm);
+
+    bool stop_early = false;
+    for (TestFnRecord *r = filtered; r && !stop_early; r = r->next) {
         test_num++;
 
         // Emit a suite comment when the active suite changes.
@@ -231,6 +243,22 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
             prev_suite = cur_suite;
         }
 
+        // Negative test: result is precomputed at compile time.
+        if (r->error_pat) {
+            if (r->neg_passed == 1) {
+                printf("ok %d - %s\n", test_num, r->name);
+                passed++;
+            } else {
+                const char *reason = (r->neg_passed == 0)
+                    ? "expected compilation error but code compiled successfully"
+                    : r->neg_actual;
+                printf("not ok %d - %s\n", test_num, r->name);
+                printf("  ---\n  message: %s\n  ...\n", reason);
+                if (opts && opts->fail_fast) stop_early = true;
+            }
+            continue;
+        }
+
         Obj *fn = NULL;
         for (Obj *o = prog; o; o = o->next) {
             if (o->is_function && o->name && strcmp(o->name, r->name) == 0) {
@@ -242,25 +270,43 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
         if (!fn) {
             printf("not ok %d - %s # SKIP (not found in compiled output)\n",
                    test_num, r->name);
+            if (opts && opts->fail_fast) stop_early = true;
             continue;
         }
 
-        run.failed = 0;
+        run.failed    = 0;
+        run.timed_out = 0;
         run.fail_msg[0] = '\0';
+        s_alarm_fired   = 0;
+
+        if (use_timeout) alarm((unsigned)opts->test_timeout);
 
         // Use cc_run_at to avoid mutating text_seg[0] (ticket #332).
-        if (setjmp(run.jmp) == 0)
+        int jval = setjmp(run.jmp);
+        if (jval == 0) {
             cc_run_at(vm, (CCCCPc)fn->code_addr, 0, NULL);
+        } else if (jval == 2) {
+            run.timed_out = 1;
+        }
 
-        if (!run.failed) {
+        if (use_timeout) alarm(0); // cancel pending alarm
+
+        if (run.timed_out) {
+            printf("not ok %d - %s # TIMEOUT\n", test_num, r->name);
+            if (opts && opts->fail_fast) stop_early = true;
+        } else if (!run.failed) {
             printf("ok %d - %s\n", test_num, r->name);
             passed++;
         } else {
             printf("not ok %d - %s\n", test_num, r->name);
             if (run.fail_msg[0])
                 printf("  ---\n  message: %s\n  ...\n", run.fail_msg);
+            if (opts && opts->fail_fast) stop_early = true;
         }
     }
+
+    if (use_timeout)
+        signal(SIGALRM, SIG_DFL);
 
     s_run = NULL;
 

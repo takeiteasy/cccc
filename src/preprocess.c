@@ -1944,6 +1944,7 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
     bool is_inline        = false;
     Token *attr_end       = NULL;
     const char *suite_name = NULL; // extracted from [[cccc::test(suite = "...")]]
+    const char *error_pat  = NULL; // extracted from [[cccc::test(error = "...")]]
 
     Token *scan = is_gnu_attr ? tok->next->next->next  // skip __attribute__ ( (
                               : tok->next->next;        // skip [ [
@@ -2014,13 +2015,25 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                     is_inline = true;
             } else if (equal(after_scope, "test")) {
                 is_test_kind = true;
-                // [[cccc::test(suite = "name")]]
+                // [[cccc::test(suite = "name", error = "pattern")]]
                 if (after_scope->next && equal(after_scope->next, "(")) {
                     Token *p = after_scope->next->next;
-                    if (p && equal(p, "suite") &&
-                        p->next && equal(p->next, "=") &&
-                        p->next->next && p->next->next->kind == TK_STR)
-                        suite_name = p->next->next->str;
+                    while (p && !equal(p, ")") && p->kind != TK_EOF) {
+                        if (equal(p, "suite") &&
+                            p->next && equal(p->next, "=") &&
+                            p->next->next && p->next->next->kind == TK_STR) {
+                            suite_name = p->next->next->str;
+                            p = p->next->next->next;
+                        } else if (equal(p, "error") &&
+                                   p->next && equal(p->next, "=") &&
+                                   p->next->next && p->next->next->kind == TK_STR) {
+                            error_pat = p->next->next->str;
+                            p = p->next->next->next;
+                        } else {
+                            p = p->next;
+                        }
+                        if (p && equal(p, ",")) p = p->next;
+                    }
                 }
             }
         }
@@ -2069,7 +2082,8 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                 rec->name = strndup(probe->loc, probe->len);
                 // Suite: explicit attribute arg takes priority, then active pragma suite
                 const char *s = suite_name ? suite_name : vm->compiler.current_suite;
-                rec->suite = s ? strdup(s) : NULL;
+                rec->suite      = s ? strdup(s) : NULL;
+                rec->error_pat  = error_pat ? strdup(error_pat) : NULL;
                 rec->next = vm->compiler.test_fns;
                 vm->compiler.test_fns = rec;
                 break;

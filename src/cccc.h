@@ -932,7 +932,10 @@ typedef struct ComptimeVarMember {
 typedef struct TestFnRecord TestFnRecord;
 struct TestFnRecord {
     char *name;
-    char *suite;   // NULL if no suite assigned
+    char *suite;       // NULL if no suite assigned
+    char *error_pat;   // expected error substring; NULL = normal test
+    int   neg_passed;  // 1=passed, 0=no error produced, -1=wrong error
+    char  neg_actual[256]; // first actual error for failure diagnostics
     TestFnRecord *next;
 };
 
@@ -941,6 +944,8 @@ typedef struct {
     const char *test_glob;    // --test=GLOB pattern, or NULL to run all
     const char *suite_filter; // --test-suite=NAME, or NULL to run all suites
     bool list_only;           // --list-tests: enumerate without running
+    bool fail_fast;           // --fail-fast: stop after first failure
+    int  test_timeout;        // --test-timeout=N: per-test timeout in seconds (0=off)
 } CcTestOptions;
 
 // A variable or struct instance declared with #pragma comptime.
