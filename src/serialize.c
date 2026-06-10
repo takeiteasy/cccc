@@ -454,6 +454,29 @@ static void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
         fprintf(f, " %s", name);
 }
 
+// Serialize the body of a struct/union with no tag and no typedef alias
+// (e.g. `struct { int x; int y; } pt;`) inline at its point of use, since
+// there is no name to refer back to it by elsewhere.
+static void serialize_anon_aggregate(FILE *f, SerializeContext *ctx, Type *ty) {
+    fprintf(f, "%s {\n", ty->kind == TY_UNION ? "union" : "struct");
+    for (Member *m = ty->members; m; m = m->next) {
+        fprintf(f, "    ");
+        char name[256] = "";
+        if (m->name) {
+            int len = m->name->len;
+            if (len >= (int)sizeof(name))
+                len = sizeof(name) - 1;
+            memcpy(name, m->name->loc, len);
+            name[len] = '\0';
+        }
+        serialize_type_decl(f, ctx, m->ty, name);
+        if (m->is_bitfield)
+            fprintf(f, " : %d", m->bit_width);
+        fprintf(f, ";\n");
+    }
+    fprintf(f, "}");
+}
+
 // Serialize type to string
 static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
     if (!ty) {
@@ -508,7 +531,7 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
         else if ((alias = find_anonymous_typedef_name(ctx, ty)))
             fprintf(f, "%.*s", alias->name_len, alias->name);
         else
-            fprintf(f, "struct /* anonymous */");
+            serialize_anon_aggregate(f, ctx, ty);
         break;
     }
     case TY_UNION: {
@@ -521,7 +544,7 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
         else if ((alias = find_anonymous_typedef_name(ctx, ty)))
             fprintf(f, "%.*s", alias->name_len, alias->name);
         else
-            fprintf(f, "union /* anonymous */");
+            serialize_anon_aggregate(f, ctx, ty);
         break;
     }
     case TY_ENUM: {
@@ -1138,6 +1161,12 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
         Type *ty = ctx->defs.data[i];
         if (type_decl_owner(ctx, ty) != owner_fn)
             continue;
+        // Types with no tag and no typedef alias have nothing to refer back
+        // to them by, so they're serialized inline at their point of use
+        // (e.g. `struct { int x; } pt;`) instead of as a standalone def.
+        if (!find_tag_name(ctx, ty) && !find_typedef_name(ctx, ty) &&
+            !find_anonymous_typedef_name(ctx, ty))
+            continue;
         if (ty->kind == TY_ENUM)
             serialize_enum_def(f, ctx, ty);
         else
@@ -1255,7 +1284,7 @@ char *serialize_node_to_source(CCCC *vm, Node *node) {
 // Runtime C source emitted verbatim at the top of the generated harness file.
 // Implements all __cccc_assert_* functions using native C signatures.
 static const char s_native_runtime[] = {
-#embed "native_harness_runtime.inc" suffix(, 0)
+#embed "native_tests_harness.inc" suffix(, 0)
 };
 
 // $assert* macros — embed the canonical header directly so the macro

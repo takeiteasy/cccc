@@ -692,3 +692,9 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
   single sequential stream and is unaffected.
 - `--list-tests` does not currently merge native and VM test listings into a
   single combined view.
+- `[[cccc::test_setup]]` / `[[cccc::test_teardown]]` hooks (including `once`
+  and name-pattern hooks) are not run for tests executed natively — they are
+  silently skipped (tracked as
+  [#362](https://todo.sr.ht/~takeiteasy/cccc/362)). Avoid relying on
+  setup/teardown hooks for `mode = "native"` tests, or for any test under
+  `--testing -c=native`, until this is implemented.

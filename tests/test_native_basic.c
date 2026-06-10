@@ -73,3 +73,15 @@ void test_native_incdec(void) {
     g_counter -= 1;
     $assert_eq(g_counter, 1);
 }
+
+[[cccc::test(mode = "native")]]
+void test_native_anon_struct(void) {
+    struct { int x; int y; } pt;
+    pt.x = 3;
+    pt.y = 4;
+    $assert_eq(pt.x + pt.y, 7);
+
+    union { int i; float f; } u;
+    u.i = 42;
+    $assert_eq(u.i, 42);
+}
