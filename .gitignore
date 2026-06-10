@@ -15,5 +15,5 @@ profile/*.txt
 profile/*.massif
 profile/vm-opcodes/
 build/bench-*
-benchmarks/results/
-benchmarks/results/*.json
+profile/benchmarks/results/
+profile/benchmarks/results/*.json

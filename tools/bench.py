@@ -17,7 +17,7 @@ Options:
     --gcc PATH          path to gcc binary (default: gcc)
     --include PATH      include flag for cccc (default: -I./include)
     --format FMT        output: table, json, both (default: both)
-    --json-out PATH     json output file (default: benchmarks/results/run-<utc>.json)
+    --json-out PATH     json output file (default: profile/benchmarks/results/run-<utc>.json)
     --filter PATTERN    glob filter on benchmark source names
     --no-correctness    skip the stdout-equality check
     --no-jbc            skip the cccc-jbc* (precompiled bytecode) configs
@@ -38,16 +38,15 @@ import sys
 import time
 from pathlib import Path
 
-
 CCCC_CONFIGS = [
-    ("cccc",    []),
+    ("cccc", []),
     ("cccc-O1", ["--optimize=1"]),
     ("cccc-O2", ["--optimize=2"]),
     ("cccc-O3", ["--optimize=3"]),
 ]
 
 JBC_CONFIGS = [
-    ("cccc-jbc",    []),
+    ("cccc-jbc", []),
     ("cccc-jbc-O1", ["--optimize=1"]),
     ("cccc-jbc-O2", ["--optimize=2"]),
     ("cccc-jbc-O3", ["--optimize=3"]),
@@ -72,7 +71,9 @@ def run_cmd(cmd, cwd, env=None):
 
 def compiler_version(cmd):
     try:
-        r = subprocess.run([cmd, "--version"], capture_output=True, text=True, timeout=10)
+        r = subprocess.run(
+            [cmd, "--version"], capture_output=True, text=True, timeout=10
+        )
         return r.stdout.splitlines()[0].strip() if r.stdout else "unknown"
     except Exception:
         return "unknown"
@@ -80,7 +81,9 @@ def compiler_version(cmd):
 
 def is_clang_disguised_as_gcc(gcc_path):
     try:
-        r = subprocess.run([gcc_path, "--version"], capture_output=True, text=True, timeout=10)
+        r = subprocess.run(
+            [gcc_path, "--version"], capture_output=True, text=True, timeout=10
+        )
         first = (r.stdout.splitlines() or [""])[0].lower()
         return "clang" in first
     except Exception:
@@ -147,7 +150,9 @@ def build_jbc(src, out, cccc, opt_flags, include_flag, root, log):
     cmd = [cccc, include_flag, *opt_flags, "-o", str(out), str(src)]
     r = subprocess.run(cmd, capture_output=True, text=True, cwd=root)
     if r.returncode != 0:
-        log(f"  cccc {opt_flags or 'no-opt'} build failed for {src.name}:\n{r.stderr.strip()}")
+        log(
+            f"  cccc {opt_flags or 'no-opt'} build failed for {src.name}:\n{r.stderr.strip()}"
+        )
         return False
     return True
 
@@ -178,18 +183,20 @@ def run_benchmark(src, args, root, build_dir, log):
         profile_path = None
         if args.vm_profile:
             profile_path = args.vm_profile_dir / f"{src.stem}-{label}.json"
+
         def make_cccc():
-            profile_args = (
-                ["--vm-profile", "--json"] if profile_path else []
-            )
+            profile_args = ["--vm-profile", "--json"] if profile_path else []
             cmd = [args.cccc, args.include, *extra, *profile_args, str(src)]
             return run_cmd(cmd, root)
+
         r = time_runs(make_cccc, args.runs, args.warmup)
         if profile_path and r.get("stdout"):
             profile_path.write_text(r["stdout"])
             r["vm_profile_json"] = str(profile_path)
         results[label] = r
-        log(f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms")
+        log(
+            f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms"
+        )
 
     if not args.no_jbc:
         log("  running cccc-jbc variants...")
@@ -197,33 +204,41 @@ def run_benchmark(src, args, root, build_dir, log):
             if label not in jbc_paths:
                 continue
             jbc = jbc_paths[label]
-            _, compile_ms = run_cmd([args.cccc, args.include, *extra, "-o", str(jbc), str(src)], root)
+            _, compile_ms = run_cmd(
+                [args.cccc, args.include, *extra, "-o", str(jbc), str(src)], root
+            )
             profile_path = None
             if args.vm_profile:
                 profile_path = args.vm_profile_dir / f"{src.stem}-{label}.json"
+
             def make_jbc():
-                profile_args = (
-                    ["--vm-profile", "--json"] if profile_path else []
-                )
+                profile_args = ["--vm-profile", "--json"] if profile_path else []
                 return run_cmd([args.cccc, *profile_args, str(jbc)], root)
+
             r = time_runs(make_jbc, args.runs, args.warmup)
             r["compile_ms"] = compile_ms * 1000.0
             if profile_path and r.get("stdout"):
                 profile_path.write_text(r["stdout"])
                 r["vm_profile_json"] = str(profile_path)
             results[label] = r
-            log(f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms  compile={r['compile_ms']:>8.1f}ms")
+            log(
+                f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms  compile={r['compile_ms']:>8.1f}ms"
+            )
 
     log("  running gcc variants...")
     for label, opt in GCC_CONFIGS:
         if label not in binaries:
             continue
         binp = binaries[label]
+
         def make_gcc():
             return run_cmd([str(binp)], root)
+
         r = time_runs(make_gcc, args.runs, args.warmup)
         results[label] = r
-        log(f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms")
+        log(
+            f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms"
+        )
 
     correctness = {"status": "ok", "matches": {}, "ref": "cccc"}
     if not args.no_correctness and "cccc" in results:
@@ -302,7 +317,10 @@ def render_table(records, cccc_configs, jbc_configs, gcc_configs):
             row.append(status)
         rows.append(row)
 
-    widths = [max(len(h), max((len(r[i]) for r in rows), default=0)) for i, h in enumerate(headers)]
+    widths = [
+        max(len(h), max((len(r[i]) for r in rows), default=0))
+        for i, h in enumerate(headers)
+    ]
     lines = []
     sep = "  "
     lines.append(sep.join(h.ljust(widths[i]) for i, h in enumerate(headers)))
@@ -352,7 +370,10 @@ def render_speedup_table(records, cccc_configs, jbc_configs, gcc_configs):
                 gm *= r
             geomeans[cfg] = gm ** (1.0 / len(ratios))
 
-    widths = [max(len(h), max((len(r[i]) for r in rows), default=0)) for i, h in enumerate(header)]
+    widths = [
+        max(len(h), max((len(r[i]) for r in rows), default=0))
+        for i, h in enumerate(header)
+    ]
     geo_row = ["geomean"] + [f"{geomeans.get(c, 0):.2f}x" for c in all_configs]
     widths = [max(widths[i], len(geo_row[i])) for i in range(len(header))]
 
@@ -382,10 +403,16 @@ def main():
     p.add_argument("--json-out", default=None)
     p.add_argument("--filter", default=None)
     p.add_argument("--no-correctness", action="store_true")
-    p.add_argument("--no-jbc", action="store_true",
-                   help="skip the cccc-jbc* (precompiled bytecode) configs")
-    p.add_argument("--vm-profile", action="store_true",
-                   help="write VM opcode profile JSON for CCCC/JBC configs")
+    p.add_argument(
+        "--no-jbc",
+        action="store_true",
+        help="skip the cccc-jbc* (precompiled bytecode) configs",
+    )
+    p.add_argument(
+        "--vm-profile",
+        action="store_true",
+        help="write VM opcode profile JSON for CCCC/JBC configs",
+    )
     p.add_argument("--keep-builds", action="store_true")
     p.add_argument("--quiet", action="store_true")
     args = p.parse_args()
@@ -404,7 +431,11 @@ def main():
     else:
         args.vm_profile_dir = None
 
-    cccc_path = (root / args.cccc).resolve() if not os.path.isabs(args.cccc) else Path(args.cccc)
+    cccc_path = (
+        (root / args.cccc).resolve()
+        if not os.path.isabs(args.cccc)
+        else Path(args.cccc)
+    )
     if not cccc_path.exists():
         print(f"error: cccc binary not found: {cccc_path}", file=sys.stderr)
         sys.exit(1)
@@ -448,12 +479,14 @@ def main():
             records.append(rec)
         except Exception as e:
             log(f"  ERROR: {e}")
-            records.append({
-                "name": src.name,
-                "stem": src.stem,
-                "configs": {},
-                "correctness": {"status": "error", "error": str(e)},
-            })
+            records.append(
+                {
+                    "name": src.name,
+                    "stem": src.stem,
+                    "configs": {},
+                    "correctness": {"status": "error", "error": str(e)},
+                }
+            )
 
     if not args.keep_builds:
         for f in build_dir.glob("*-O?"):
@@ -472,9 +505,23 @@ def main():
         print("=" * 100)
         print(" CCCC vs GCC benchmark results (median ms, lower is better)")
         print("=" * 100)
-        print(render_table(records, CCCC_CONFIGS, JBC_CONFIGS if not args.no_jbc else [], GCC_CONFIGS))
+        print(
+            render_table(
+                records,
+                CCCC_CONFIGS,
+                JBC_CONFIGS if not args.no_jbc else [],
+                GCC_CONFIGS,
+            )
+        )
         print()
-        print(render_speedup_table(records, CCCC_CONFIGS, JBC_CONFIGS if not args.no_jbc else [], GCC_CONFIGS))
+        print(
+            render_speedup_table(
+                records,
+                CCCC_CONFIGS,
+                JBC_CONFIGS if not args.no_jbc else [],
+                GCC_CONFIGS,
+            )
+        )
         print()
         bad = [r for r in records if r["correctness"]["status"] != "ok"]
         if bad:
@@ -482,7 +529,9 @@ def main():
             for r in bad:
                 print(f"  - {r['name']}: {r['correctness']['status']}")
         else:
-            print("Correctness: all benchmarks produce identical output across all configs")
+            print(
+                "Correctness: all benchmarks produce identical output across all configs"
+            )
 
     if args.format in ("json", "both"):
         run_id = args.run_id
@@ -516,9 +565,7 @@ def main():
                     "name": r["name"],
                     "correctness": r["correctness"],
                     "configs": {
-                        cfg: {
-                            k: v for k, v in data.items() if k != "stdout"
-                        }
+                        cfg: {k: v for k, v in data.items() if k != "stdout"}
                         for cfg, data in r["configs"].items()
                     },
                 }
@@ -531,7 +578,9 @@ def main():
         if not args.quiet:
             print(f"\nJSON results written to {out_path}")
 
-    bad = [r for r in records if r["correctness"]["status"] not in ("ok", "no_reference")]
+    bad = [
+        r for r in records if r["correctness"]["status"] not in ("ok", "no_reference")
+    ]
     sys.exit(1 if bad else 0)
 
 

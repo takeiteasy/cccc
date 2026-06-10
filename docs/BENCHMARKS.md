@@ -53,7 +53,7 @@ Two significant VM improvements are reflected in these numbers:
 
 Re-run `make bench-compare` to get updated numbers for your machine.
 
-JSON output is also written to `benchmarks/results/run-<UTC>.json` for tracking over time. Each `cccc-jbc*` row includes a `compile_ms` field showing the one-time cost of producing the bytecode file (this cost is paid once, not in the timed median).
+JSON output is also written to `profile/benchmarks/results/run-<UTC>.json` for tracking over time. Each `cccc-jbc*` row includes a `compile_ms` field showing the one-time cost of producing the bytecode file (this cost is paid once, not in the timed median).
 
 ## The benchmark suite
 
@@ -84,7 +84,7 @@ All programs are portable C99/C11, exit with code `42` (so the standard `tools/t
 8. **Report** as a human-readable table + a JSON file.
 
 With `--vm-profile`, CCCC and CCCC-JBC configs also write dynamic opcode count
-profiles to `benchmarks/results/vm-profile-<UTC>/`. The benchmark JSON records
+profiles to `profile/benchmarks/results/vm-profile-<UTC>/`. The benchmark JSON records
 the `vm_profile_json` path for each profiled config.
 
 ## What's being measured
@@ -97,7 +97,7 @@ There are three different timings per benchmark:
 
 The `cccc-jbc*` columns are the cleanest apples-to-apples comparison with GCC: both are "compile once, run many times" measurements. The `cccc*` columns show what you'd actually pay as an end user of the `cccc` CLI.
 
-`-c=native` is not in the matrix above: it would be redundant with `gcc*` because it just hands the same C to a system compiler. If you want to add a `-c=native` column, run `./cccc -c=native -o build/<bench>.bin benchmarks/<bench>.c` and time `[build/<bench>.bin]` — the numbers should match `gcc-O2`/`gcc-O3` (plus a fixed CCCC frontend cost, which is the same for every column and not what this doc is measuring).
+`-c=native` is not in the matrix above: it would be redundant with `gcc*` because it just hands the same C to a system compiler. If you want to add a `-c=native` column, run `./cccc -c=native -o build/<bench>.bin profile/benchmarks/<bench>.c` and time `[build/<bench>.bin]` — the numbers should match `gcc-O2`/`gcc-O3` (plus a fixed CCCC frontend cost, which is the same for every column and not what this doc is measuring).
 
 If you want to break out compile time vs execution time for CCCC, see `make bench` (hyperfine) and `make profile-cpu` in the existing [PROFILING.md](PROFILING.md).
 If you want to see where VM execution is concentrated, use `tools/bench.py --vm-profile`
@@ -109,7 +109,7 @@ and compare dynamic counts for opcodes such as `LDR_LOCAL_D`, `STR_LOCAL_D`,
 The `cccc-jbc*` configs use CCCC's precompiled-bytecode mode:
 
 ```bash
-./cccc --optimize=N -o build/fib.jbc benchmarks/fib.c   # compile once
+./cccc --optimize=N -o build/fib.jbc profile/benchmarks/fib.c   # compile once
 ./cccc build/fib.jbc                                    # run many times
 ```
 
@@ -130,11 +130,11 @@ If you see a `MISMATCH` in the output, the CCCC output differs from at least one
 - **Use `--filter`** to iterate on a single benchmark while tuning it.
 - **Use `--no-jbc`** when iterating on parse/compile performance — it cuts the bench in half by skipping the bytecode-execution columns.
 - **Use `--vm-profile`** when optimizing bytecode generation or VM dispatch — it shows dynamic opcode mix for each CCCC config.
-- **Compare JSON files over time** — `benchmarks/results/run-*.json` includes the compiler versions, host info, and run settings so results are reproducible.
+- **Compare JSON files over time** — `profile/benchmarks/results/run-*.json` includes the compiler versions, host info, and run settings so results are reproducible.
 
 ## Adding a new benchmark
 
-1. Drop a `<name>.c` in `benchmarks/`.
+1. Drop a `<name>.c` in `profile/benchmarks/`.
 2. The contract:
    - Plain C99/C11 (no cccc extensions, no GLIBC-only headers).
    - Optionally `#define BENCH_N <default>` so size is tunable.

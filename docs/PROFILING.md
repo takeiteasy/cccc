@@ -49,13 +49,13 @@ any execution), cccc has two in-process analyses:
 
 ```bash
 # Static n-gram mining on a pre-compiled .jbc
-./cccc -o /tmp/sieve.jbc -I./include benchmarks/sieve.c
+./cccc -o /tmp/sieve.jbc -I./include profile/benchmarks/sieve.c
 ./cccc --ngrams=2 --ngrams-top=15 /tmp/sieve.jbc
 ./cccc --ngrams=3 --ngrams-top=15 /tmp/sieve.jbc
 ./cccc --ngrams=2 --ngrams-per-file /tmp/sieve.jbc
 
 # Same analysis directly on .c source — compiles in-process first
-./cccc --ngrams=2 --ngrams-top=15 -I./include benchmarks/sieve.c
+./cccc --ngrams=2 --ngrams-top=15 -I./include profile/benchmarks/sieve.c
 
 # Use-def fusion candidate detection
 ./cccc --fusion-candidates=50 /tmp/sieve.jbc
@@ -159,7 +159,7 @@ python3 tools/bench.py --filter fib.c --vm-profile   # include opcode profile JS
 The hyperfine-based `make bench` and the cross-compiler `make bench-compare` are complementary: `make bench` profiles a single workload in depth (with shell-startup variation), while `make bench-compare` produces a side-by-side matrix of how CCCC stacks up against GCC.
 
 When `tools/bench.py --vm-profile` is enabled, CCCC and CCCC-JBC configs write per
-benchmark/config opcode profiles under `benchmarks/results/vm-profile-<UTC>/`.
+benchmark/config opcode profiles under `profile/benchmarks/results/vm-profile-<UTC>/`.
 Each timing record in the benchmark JSON includes its `vm_profile_json` path.
 
 ## Output Files
@@ -173,4 +173,4 @@ All profiling output is written to `profile/`:
 | `profile/cpu.txt` | gperftools | Text CPU profile summary |
 | `profile/mem.massif` | valgrind | Memory allocation timeline (Linux) |
 | `profile/vm-opcodes/*.json` | CCCC VM profiler | Dynamic opcode counts per test |
-| `benchmarks/results/vm-profile-*/` | CCCC VM profiler | Opcode profiles for benchmark configs |
+| `profile/benchmarks/results/vm-profile-*/` | CCCC VM profiler | Opcode profiles for benchmark configs |

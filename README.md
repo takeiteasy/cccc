@@ -33,7 +33,7 @@ CCCC supports C11 as the baseline, with selected C23 and GNU extensions. See [CO
   - `--optimize[=N]` with levels 1–3: constant folding, peephole, dead code elimination
 - **Built-in test framework** — `[[cccc::test]]`, `__attribute__((test))`, or `@test` attribute and `$assert*` macros for writing tests in C (see [TESTING.md](docs/TESTING.md))
   - Run with `--testing`; outputs TAP 13 format; no external dependencies or includes needed
-- **Attribute support** — GNU `__attribute__((...))`, C23 `[[...]]`, and `@name` shorthand with partial semantic support (see [COVERAGE.md](docs/COVERAGE.md#attributes))
+- **Attribute support** — GNU `__attribute__((...))`, C23 `[[...]]`, and `@name` shorthand with partial semantic support (see [ATTRIBUTES.md](docs/ATTRIBUTES.md))
   - Covers `packed`, `aligned`, `unused`/`maybe_unused`, `deprecated`, and CCCC-specific `macro`/`comptime`/`test`
   - `@comptime`, `@test`, `@packed`, `@nodiscard`, etc. are sugar for the longer attribute forms
 - **Warning controls** — gcc/clang-style `-W` categories and `-Werror` promotion (see [WARNINGS.md](docs/WARNINGS.md))
@@ -353,11 +353,11 @@ actually executed at runtime, complementing the static n-gram tool below.
 **Opcode n-gram mining (discover fusion candidates):**
 
 ```bash
-./cccc -I./include -o /tmp/sieve.jbc benchmarks/sieve.c
+./cccc -I./include -o /tmp/sieve.jbc profile/benchmarks/sieve.c
 ./cccc --ngrams=2 --ngrams-top=15 /tmp/sieve.jbc      # top 15 opcode pairs
 ./cccc --ngrams=3 --ngrams-top=15 /tmp/sieve.jbc      # top 15 opcode triples
 ./cccc --ngrams=2 --ngrams-per-file /tmp/sieve.jbc    # per-file + aggregate
-./cccc --ngrams=2 benchmarks/sieve.c                  # compile-then-analyze
+./cccc --ngrams=2 profile/benchmarks/sieve.c                  # compile-then-analyze
 ```
 
 Ranks 2-grams and 3-grams by static occurrence across one or more `.jbc`
@@ -368,8 +368,8 @@ new opcodes (see ticket #250).
 **Cross-referencing static and dynamic counts:**
 
 ```bash
-./cccc --vm-profile --json -I./include benchmarks/sieve.c > /tmp/sieve.json
-python3 tools/cross_ref_ngrams.py /tmp/sieve.jbc benchmarks/sieve.c
+./cccc --vm-profile --json -I./include profile/benchmarks/sieve.c > /tmp/sieve.json
+python3 tools/cross_ref_ngrams.py /tmp/sieve.jbc profile/benchmarks/sieve.c
 ```
 
 Combines the static n-gram analysis (per-`.jbc`) with the runtime bigram
@@ -382,7 +382,7 @@ are the strongest fusion candidates.
 ```bash
 ./cccc --fusion-candidates=50 /tmp/sieve.jbc                       # top 50 def->use pairs
 ./cccc --fusion-candidates=50 --json /tmp/sieve.jbc                # JSON output
-./cccc --fusion-candidates=50 benchmarks/sieve.c                   # compile-then-analyze
+./cccc --fusion-candidates=50 profile/benchmarks/sieve.c                   # compile-then-analyze
 ```
 
 Walks the text segment, tracks register defs and use counts, and reports
