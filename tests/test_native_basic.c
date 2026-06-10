@@ -52,3 +52,24 @@ void test_native_bits(void) {
     $assert_bit_low(7, 0x0F);
     $assert_bits(0xF0, 0xA0, 0xAB);
 }
+
+int g_counter = 0;
+
+[[cccc::test(mode = "native")]]
+void test_native_incdec(void) {
+    int local = 0;
+    local++;
+    ++local;
+    $assert_eq(local, 2);
+
+    local--;
+    --local;
+    $assert_eq(local, 0);
+
+    g_counter++;
+    ++g_counter;
+    $assert_eq(g_counter, 2);
+
+    g_counter -= 1;
+    $assert_eq(g_counter, 1);
+}

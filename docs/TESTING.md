@@ -684,11 +684,6 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 
 ### Native execution (`-c=native` / `mode = "native"`)
 
-- `++`/`--` (pre- and post-increment/decrement) on any variable are not yet
-  supported by `-c=native`'s C serializer and produce a compile error
-  (tracked as [#360](https://todo.sr.ht/~takeiteasy/cccc/360)). Use
-  `x = x + 1` / `x += 1` instead in native-mode test bodies and any
-  setup/teardown hooks they call.
 - Struct/union global initializers serialize as `/* init data */` and will
   fail native compilation — use scalar globals (int, float, `char *`) only
   in files with native-mode tests.

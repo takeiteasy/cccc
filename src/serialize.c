@@ -161,6 +161,7 @@ typedef struct {
     int typedefs_cap;
     Obj *current_fn;
     bool generated_only; // skip header typedefs; output is consumed alongside normal headers
+    int anon_local_counter; // names compiler-synthesized temps (e.g. ++/-- desugaring)
 } SerializeContext;
 
 // Forward declaration
@@ -930,6 +931,12 @@ static void serialize_function(FILE *f, CCCC *vm, SerializeContext *ctx,
         for (Obj *var = fn->locals; var; var = var->next) {
             if (var->is_param)
                 continue;
+            // Compiler-synthesized temporaries (e.g. from ++/--/op=
+            // desugaring) have an empty name; give them one so they can
+            // be declared and referenced as valid C identifiers.
+            if (var->name[0] == '\0')
+                var->name = arena_format(vm, "__cccc_tmp%d",
+                                          ctx->anon_local_counter++);
             print_indent_level(f, 1);
             serialize_type_decl(f, ctx, var->ty, var->name);
             fprintf(f, ";\n");
