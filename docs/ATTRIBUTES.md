@@ -89,7 +89,7 @@ These are CCCC's own extensions for compile-time metaprogramming. They are inter
 __attribute__((comptime)) const int version = 42;
 ```
 
-### `#include_comptime` (CCCC-specific)
+### `@include` / `#include @comptime` (CCCC-specific)
 
 Includes a header only during the comptime compilation pass. The header and
 any macros or types it defines are invisible to the runtime translation unit.
@@ -97,7 +97,8 @@ Use this when a `[[cccc::comptime]]` helper needs a dependency (e.g.
 `<glob.h>`, `<dirent.h>`) that must not bleed into runtime code.
 
 ```c
-#include_comptime <glob.h>
+@include <glob.h>
+// Equivalent: #include @comptime <glob.h>
 
 [[cccc::comptime]]
 int glob_struct_size(void) { return (int)sizeof(glob_t); }

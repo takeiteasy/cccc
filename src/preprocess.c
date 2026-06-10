@@ -1875,7 +1875,7 @@ typedef enum {
     PP_IF, PP_IFDEF, PP_IFNDEF,
     PP_ELIF, PP_ELIFDEF, PP_ELIFNDEF,
     PP_ELSE, PP_ENDIF,
-    PP_INCLUDE, PP_INCLUDE_NEXT, PP_INCLUDE_COMPTIME,
+    PP_INCLUDE, PP_INCLUDE_NEXT,
     PP_DEFINE, PP_UNDEF,
     PP_LINE, PP_PRAGMA, PP_EMBED,
     PP_ERROR, PP_WARNING,
@@ -1930,9 +1930,6 @@ static PPDir pp_directive(Token *tok) {
         break;
     case 12:
         if (memcmp(s,"include_next",12)==0) return PP_INCLUDE_NEXT;
-        break;
-    case 16:
-        if (memcmp(s,"include_comptime",16)==0) return PP_INCLUDE_COMPTIME;
         break;
     }
     return PP_NONE;
@@ -2732,6 +2729,11 @@ static Token *handle_pragma_body(CCCC *vm, Token *tok) {
     return tok;
 }
 
+static void queue_comptime_include(CCCC *vm, const char *filename, bool is_dquote) {
+    char *bracketed = arena_format(vm, is_dquote ? "\"%s\"" : "<%s>", filename);
+    strarray_push(&vm->compiler.comptime_pending_includes, bracketed);
+}
+
 // Visit all tokens in `tok` while evaluating preprocessing
 // macros and directives.
 static Token *preprocess2(CCCC *vm, Token *tok) {
@@ -2745,6 +2747,19 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
 
         // Pass through if it is not a "#".
         if (!is_hash(tok)) {
+            // @include <header.h> / @include "header.h" — comptime-only include.
+            // Must be intercepted before try_rewrite_at_attr so "include" is not
+            // treated as a GNU attribute name.
+            if (equal(tok, "@") && tok->next && equal(tok->next, "include")) {
+                bool is_dquote;
+                int filename_len;
+                Token *fn_tok = tok->next->next;
+                char *filename = read_include_filename(vm, &tok, fn_tok,
+                                                       &is_dquote, &filename_len);
+                tok = skip_line(vm, tok);
+                queue_comptime_include(vm, filename, is_dquote);
+                continue;
+            }
             // Intercept [[cccc::macro]] / __attribute__((macro)) and comptime
             // attribute blocks before they reach the parser. On a match,
             // the definition is extracted into the MacroFn/ComptimeVar list
@@ -2825,13 +2840,21 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
         case PP_INCLUDE: {
             bool is_dquote;
             int filename_len;
-            char *filename = read_include_filename(vm, &tok, tok->next,
+            // Detect #include @comptime <header.h> / #include @comptime "header.h"
+            Token *filename_start = tok->next;
+            bool is_comptime_include = false;
+            if (equal(filename_start, "@") && filename_start->next &&
+                equal(filename_start->next, "comptime")) {
+                is_comptime_include = true;
+                filename_start = filename_start->next->next;
+            }
+            char *filename = read_include_filename(vm, &tok, filename_start,
                                                    &is_dquote, &filename_len);
-            // Inside a comptime block, treat as #include_comptime.
-            if (vm->compiler.in_comptime_block) {
+            // #include @comptime and includes inside a comptime block are
+            // queued for the comptime pass only; they never reach the runtime TU.
+            if (is_comptime_include || vm->compiler.in_comptime_block) {
                 tok = skip_line(vm, tok);
-                char *bracketed = arena_format(vm, is_dquote ? "\"%s\"" : "<%s>", filename);
-                strarray_push(&vm->compiler.comptime_pending_includes, bracketed);
+                queue_comptime_include(vm, filename, is_dquote);
                 break;
             }
             // Gate standard headers that require a minimum C version.
@@ -2899,20 +2922,6 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
             char *path = search_include_next(vm, filename);
             tok = include_file(vm, tok, path ? path : filename,
                                start->next->next, filename);
-            break;
-        }
-        case PP_INCLUDE_COMPTIME: {
-            bool is_dquote;
-            int filename_len;
-            char *filename = read_include_filename(vm, &tok, tok->next,
-                                                   &is_dquote, &filename_len);
-            tok = skip_line(vm, tok);
-            // Queue for the comptime compilation pass; skip in runtime TU.
-            // build_combined_macro_tokens injects these as plain #include
-            // directives processed when in_macro_mode is true.
-            char *bracketed = arena_format(vm, is_dquote ? "\"%s\"" : "<%s>",
-                                           filename);
-            strarray_push(&vm->compiler.comptime_pending_includes, bracketed);
             break;
         }
         case PP_DEFINE:

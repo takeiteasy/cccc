@@ -922,8 +922,8 @@ static Token *build_combined_macro_tokens(CCCC *vm, Token *reflection_tokens,
 
     cur = append_token_list(vm, cur, reflection_tokens);
 
-    // Inject #include_comptime requests as plain #include directives so they
-    // are processed by the comptime preprocessing pass (#196).
+    // Inject @include / #include @comptime requests as plain #include directives
+    // so they are processed by the comptime preprocessing pass (#196).
     for (int i = 0; i < vm->compiler.comptime_pending_includes.len; i++) {
         char *src = arena_format(vm, "#include %s\n",
                                  vm->compiler.comptime_pending_includes.data[i]);

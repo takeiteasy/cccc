@@ -81,7 +81,7 @@ and initialized global definitions are skipped.
 
 To prevent declarations from regular `#include`d headers from leaking into the
 comptime pass, pass `--strict-comptime-includes`. Only the main source file's own
-file-scope declarations are forwarded; `#include_comptime` and
+file-scope declarations are forwarded; `@include` / `#include @comptime` and
 `#pragma cccc comptime begin...end` blocks are unaffected.
 
 ## Global Generation
@@ -206,9 +206,9 @@ The `header` argument must include angle-bracket or quote delimiters:
 `"<stdio.h>"` for system headers, `"\"myheader.h\""` for user headers.
 
 `__cccc_forward_include` is the runtime-output counterpart to
-`#include_comptime` (see [Comptime-only includes](#comptime-only-includes)):
+`@include` (see [Comptime-only includes](#comptime-only-includes)):
 `__cccc_forward_include` injects into the runtime output only;
-`#include_comptime` feeds a header into the comptime unit only.
+`@include` feeds a header into the comptime unit only.
 
 ## Call-Site Expansion
 
@@ -368,7 +368,7 @@ required.
 
 ```c
 #pragma cccc comptime begin
-#include <glob.h>              // treated as #include_comptime
+#include <glob.h>              // treated as @include (comptime-only)
 int glob_count(const char *pat, int flags) {
     glob_t g;
     glob(pat, flags, NULL, &g);
@@ -384,7 +384,7 @@ int main(void) { ... }
 ```
 
 Inside a comptime block:
-- `#include` directives are queued as `#include_comptime` — invisible to the runtime translation unit.
+- `#include` directives are queued as comptime-only includes — invisible to the runtime translation unit.
 - Function definitions are treated as `[[cccc::comptime]]`.
 - Variable and struct declarations are treated as comptime variables.
 - Existing `[[cccc::comptime(inline)]]` annotations are respected; explicit attributes always take precedence.
@@ -400,7 +400,7 @@ still processed as normal compilation includes:
 ```c
 #include <stdio.h>
 #include <string.h>
-#include_comptime <glob.h>  // only in comptime unit
+@include <glob.h>           // only in comptime unit
 
 #pragma cccc comptime       // everything below is comptime; no 'end' needed
 
@@ -426,12 +426,13 @@ whole-file form never triggers this warning.
 
 ### Comptime-only includes
 
-Use `#include_comptime` to include a header only during the comptime
-compilation pass. The header and any macros or types it defines are invisible
-to the runtime translation unit.
+Use `@include` (or `#include @comptime`) to include a header only during the
+comptime compilation pass. The header and any macros or types it defines are
+invisible to the runtime translation unit.
 
 ```c
-#include_comptime <glob.h>   // only visible to comptime helpers
+@include <glob.h>   // only visible to comptime helpers
+// Equivalent: #include @comptime <glob.h>
 
 [[cccc::comptime]]
 int glob_struct_nonempty(void) {
@@ -446,7 +447,7 @@ int main(void) {
 
 This is the comptime counterpart to `__cccc_forward_include` (see
 [Forward includes in generated output](#forward-includes-in-generated-output)):
-`#include_comptime` feeds a header into the comptime unit only;
+`@include` feeds a header into the comptime unit only;
 `__cccc_forward_include` emits an `#include` into the runtime output only.
 
 ## Comptime Variables

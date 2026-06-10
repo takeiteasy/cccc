@@ -1,8 +1,8 @@
-// Test #include_comptime: glob.h is visible only during the comptime pass.
+// Test #include @comptime: glob.h is visible only during the comptime pass.
 // The runtime translation unit never sees glob_t or glob().
-// Mirrors test_macro_context_glob.c but uses #include_comptime instead of #include.
+// Mirrors test_macro_context_glob.c but uses #include @comptime instead of #include.
 
-#include_comptime <glob.h>
+#include @comptime <glob.h>
 
 [[cccc::comptime]]
 int glob_type_size(void) {

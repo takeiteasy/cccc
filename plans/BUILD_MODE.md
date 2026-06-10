@@ -429,7 +429,7 @@ int main(int argc, char **argv) {
 `build.c`:
 
 ```c
-#include_comptime <glob.h>   // POSIX glob, only visible to the build entry
+@include <glob.h>            // POSIX glob, only visible to the build entry
 
 [[cccc::build_target]]
 cccc_target_t *libcore(void) {
