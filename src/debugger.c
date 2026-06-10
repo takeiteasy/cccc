@@ -700,35 +700,13 @@ int debugger_run(CCCC *vm, int argc, char **argv) {
     printf("\n========================================\n");
     printf("    CCCC Debugger\n");
     printf("========================================\n");
-    printf("Starting at entry point (PC: %u)\n", vm->pc);
     printf("Type 'help' for commands, 'c' to continue\n\n");
 
-    // Set PC to main (code_addr is an offset from text_seg)
+    // Override PC to main; cc_run_at already set up the stack, registers,
+    // and sentinel return address correctly using poolsize_max.
     vm->pc = (CCCCPc)main_fn->code_addr;
 
-    // Setup stack for main(argc, argv), matching cc_run().
-    vm->stack_base = vm->stack_seg;
-    vm->sp = (long long *)((char *)vm->stack_seg +
-                           vm->poolsize * sizeof(long long));
-    vm->bp = vm->sp;
-    vm->initial_sp = vm->sp;
-    vm->initial_bp = vm->bp;
-
-    // Setup shadow stack for CFI if enabled
-    if (vm->flags & CCCC_CFI) {
-        vm->shadow_sp = (long long *)((char *)vm->shadow_stack +
-                                      vm->poolsize * sizeof(long long));
-    }
-
-    // Push argv (pointer to array of strings)
-    *--vm->sp = (long long)argv;
-    // Push argc
-    *--vm->sp = argc;
-    // Push dummy return address (NULL to detect exit)
-    *--vm->sp = 0;
-
     printf("Starting debugger at main (PC: %u)\n", vm->pc);
-    printf("Type 'help' for debugger commands\n\n");
 
     // Enter debugger at start
     cc_debug_repl(vm);
