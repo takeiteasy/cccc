@@ -668,6 +668,7 @@ typedef struct {
 void cc_serialize_program(FILE *f, CCCC *vm, Obj *prog, bool generated_only);
 void cc_serialize_test_harness(FILE *f, CCCC *vm, Obj *prog,
                                TestFnRecord *list,
+                               TestSetupRecord *setups,
                                const CcTestOptions *opts,
                                int start_at);
 

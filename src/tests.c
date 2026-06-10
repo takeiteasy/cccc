@@ -1132,9 +1132,24 @@ int cc_run_tests_native(CCCC *vm, Obj *prog,
     if (out_count) *out_count = count;
     if (count == 0) return 0;
 
+    // Reverse setup records to declaration order (built by prepending),
+    // mirroring cc_run_tests. Mutating once_fired on this copy is safe since
+    // it is local to this run.
+    TestSetupRecord *setups = NULL;
+    for (TestSetupRecord *s = vm->compiler.test_setups; s; s = s->next) {
+        TestSetupRecord *copy = malloc(sizeof(TestSetupRecord));
+        *copy      = *s;
+        copy->next = setups;
+        setups     = copy;
+    }
+
 #define FREE_COPY_LIST(head) do { \
         TestFnRecord *_n; \
         for (TestFnRecord *_c = (head); _c; _c = _n) { _n = _c->next; free(_c); } \
+    } while (0)
+#define FREE_SETUPS_LIST(head) do { \
+        TestSetupRecord *_n; \
+        for (TestSetupRecord *_c = (head); _c; _c = _n) { _n = _c->next; free(_c); } \
     } while (0)
 
     // Create temp source and binary paths.
@@ -1143,6 +1158,7 @@ int cc_run_tests_native(CCCC *vm, Obj *prog,
     if (!src_path || !bin_path) {
         fprintf(stderr, "error: failed to create temp paths for native test harness\n");
         FREE_COPY_LIST(list);
+        FREE_SETUPS_LIST(setups);
         free(src_path);
         free(bin_path);
         return 1;
@@ -1152,12 +1168,12 @@ int cc_run_tests_native(CCCC *vm, Obj *prog,
     FILE *f = fopen(src_path, "w");
     if (!f) {
         fprintf(stderr, "error: failed to open %s: %s\n", src_path, strerror(errno));
-        FREE_COPY_LIST(list); free(src_path); free(bin_path); return 1;
+        FREE_COPY_LIST(list); FREE_SETUPS_LIST(setups); free(src_path); free(bin_path); return 1;
     }
-    cc_serialize_test_harness(f, vm, prog, list, opts, start_at);
+    cc_serialize_test_harness(f, vm, prog, list, setups, opts, start_at);
     if (fclose(f) != 0) {
         fprintf(stderr, "error: failed to write %s: %s\n", src_path, strerror(errno));
-        FREE_COPY_LIST(list); unlink(src_path); free(src_path); free(bin_path); return 1;
+        FREE_COPY_LIST(list); FREE_SETUPS_LIST(setups); unlink(src_path); free(src_path); free(bin_path); return 1;
     }
 
     // Compile harness.
@@ -1217,11 +1233,13 @@ int cc_run_tests_native(CCCC *vm, Obj *prog,
                 printf("  FAIL     %s (compile failed)\n", disp);
         }
         FREE_COPY_LIST(list);
+        FREE_SETUPS_LIST(setups);
         free(bin_path);
         return 1;
     }
 
     FREE_COPY_LIST(list);
+    FREE_SETUPS_LIST(setups);
     // Flush buffered output before the child writes directly to fd 1.
     fflush(stdout);
     // Run the compiled harness (inherits our stdout).

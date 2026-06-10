@@ -512,6 +512,31 @@ combination is rejected with a parse-time error.
 - `timeout = <ms>` (per-test) and `--test-timeout=<seconds>` (global) both
   work in native mode via `SIGALRM`/`setitimer`, same as in the VM.
 
+### Setup/teardown hooks in native mode
+
+All hook types described in [Setup and Teardown](#setup-and-teardown) — global,
+name-pattern, suite per-test, suite `once`, and name-pattern `once` — also run
+under `-c=native`. Per-test setup/teardown hooks run inside each test's forked
+child process, in declaration order, following the same
+[execution order](#execution-order) as the VM backend. `once` hooks run in the
+parent process before the relevant test's `fork()`, so any global state they
+set up is inherited by that test and all subsequent tests via copy-on-write —
+this mirrors the VM's snapshot-persistence behavior for `once` hooks.
+
+Two behaviors differ from the VM backend:
+
+- **Cross-suite persistence**: the VM resets global state to a per-suite
+  snapshot at each suite boundary, so a suite's `once`-setup effects don't
+  leak into later suites. Native mode has no equivalent reset — global state
+  mutated by a `once` hook (or by any test, via the parent/COW model) persists
+  for the remainder of the run. Avoid relying on suite isolation for global
+  state shared via `once` hooks when using `-c=native`.
+- **Mixed VM+native runs**: when `-c=native` is *not* used but some tests use
+  `mode = "native"`, a suite whose tests are split across the VM pass and the
+  native pass could have its suite-`once` hooks fire once per pass (twice
+  total). Using `--testing -c=native` (which forces every test native) avoids
+  this, since only the native pass runs.
+
 ## Filtering Tests
 
 Run a subset of tests without modifying the source file.

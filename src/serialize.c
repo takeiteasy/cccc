@@ -1395,8 +1395,45 @@ static void emit_child_ret_check(FILE *f, const TestFnRecord *r) {
     }
 }
 
+// Returns true if per-test (non-once) hook `s` should run for the given test
+// (suite/name_pat filters mirror run_hooks() in tests.c). `disp` is the raw
+// display name (no "[native]" suffix), used for fnmatch matching.
+static bool hook_matches_test(const TestSetupRecord *s, bool is_teardown,
+                              const char *suite, const char *disp) {
+    if (s->is_teardown != is_teardown) return false;
+    if (s->once) return false;
+    if (s->suite && (!suite || strcmp(s->suite, suite) != 0)) return false;
+    if (s->name_pat && (!disp || fnmatch(s->name_pat, disp, 0) != 0)) return false;
+    return true;
+}
+
+// Emit a guarded call to a "once" hook function in the parent/main() context.
+// On failure, prints a TAP/PLAIN diagnostic similar to run_once_hooks() in
+// tests.c (e.g. "# once-setup for suite \"db\" failed").
+static void emit_guarded_hook(FILE *f, const char *fn_name,
+                              const char *kind, const char *ctx_label) {
+    fprintf(f,
+        "    {\n"
+        "        __cccc_run_t __honce={0};\n"
+        "        __s_run=&__honce;\n"
+        "        if(setjmp(__honce.jmp)==0){ %s(); }\n"
+        "        else {\n",
+        fn_name);
+    fprintf(f, "            if(_fmt==0) printf(\"# %s for %%s failed\\n\",", kind);
+    emit_cstr(f, ctx_label);
+    fprintf(f, ");\n");
+    fprintf(f, "            else if(_fmt==1) printf(\"  ! %s for %%s failed\\n\",", kind);
+    emit_cstr(f, ctx_label);
+    fprintf(f,
+        ");\n"
+        "        }\n"
+        "        __s_run=NULL;\n"
+        "    }\n");
+}
+
 void cc_serialize_test_harness(FILE *f, CCCC *vm, Obj *prog,
                                TestFnRecord *list,
+                               TestSetupRecord *setups,
                                const CcTestOptions *opts,
                                int start_at) {
     // ── Native runtime + assert macros ───────────────────────────────────────
@@ -1449,6 +1486,8 @@ void cc_serialize_test_harness(FILE *f, CCCC *vm, Obj *prog,
             total, total);
     }
 
+    const char *prev_suite = NULL;
+
     for (TestFnRecord *r = list; r; r = r->next) {
         if (r->error_pat) continue;
 
@@ -1456,6 +1495,11 @@ void cc_serialize_test_harness(FILE *f, CCCC *vm, Obj *prog,
         // display name gets "[native]" suffix
         char disp[640];
         snprintf(disp, sizeof(disp), "%s [native]", raw);
+
+        const char *cur_suite = r->suite;
+        bool suite_changed = (cur_suite != prev_suite) &&
+                             (cur_suite == NULL || prev_suite == NULL ||
+                              strcmp(cur_suite, prev_suite) != 0);
 
         long eff_ms = r->timeout_ms > 0 ? r->timeout_ms
                     : (global_timeout > 0 ? (long)global_timeout * 1000L : 0L);
@@ -1466,15 +1510,73 @@ void cc_serialize_test_harness(FILE *f, CCCC *vm, Obj *prog,
         // since we already counted matching tests). But we still need it if the user
         // wants to re-run with --test flag at binary level. For v1, filters are baked.
 
-        // Suite header for PLAIN output
-        if (r->suite) {
-            fprintf(f, "    if(_fmt==1&&(_suite_cur==NULL||strcmp(_suite_cur,");
-            emit_cstr(f, r->suite);
-            fprintf(f, ")!=0)){printf(\"\\n-- %%s --\\n\",");
-            emit_cstr(f, r->suite);
-            fprintf(f, ");_suite_cur=");
-            emit_cstr(f, r->suite);
-            fprintf(f, ";}\n");
+        if (suite_changed) {
+            // Suite-once teardown for the suite we're leaving.
+            if (prev_suite) {
+                char label[320];
+                snprintf(label, sizeof(label), "suite \"%s\"", prev_suite);
+                for (TestSetupRecord *s = setups; s; s = s->next) {
+                    if (s->is_teardown && s->once && s->suite && !s->name_pat &&
+                        strcmp(s->suite, prev_suite) == 0)
+                        emit_guarded_hook(f, s->fn_name, "once-teardown", label);
+                }
+            }
+
+            // TAP suite header.
+            if (cur_suite) {
+                fprintf(f, "    if(_fmt==0) printf(\"# Suite: %%s\\n\",");
+                emit_cstr(f, cur_suite);
+                fprintf(f, ");\n");
+            } else {
+                fprintf(f, "    if(_fmt==0) printf(\"# Suite: (none)\\n\");\n");
+            }
+
+            // Suite header for PLAIN output (unchanged).
+            if (cur_suite) {
+                fprintf(f, "    if(_fmt==1&&(_suite_cur==NULL||strcmp(_suite_cur,");
+                emit_cstr(f, cur_suite);
+                fprintf(f, ")!=0)){printf(\"\\n-- %%s --\\n\",");
+                emit_cstr(f, cur_suite);
+                fprintf(f, ");_suite_cur=");
+                emit_cstr(f, cur_suite);
+                fprintf(f, ";}\n");
+            }
+
+            // Suite-once setup for the suite we're entering.
+            if (cur_suite) {
+                char label[320];
+                snprintf(label, sizeof(label), "suite \"%s\"", cur_suite);
+                for (TestSetupRecord *s = setups; s; s = s->next) {
+                    if (!s->is_teardown && s->once && s->suite && !s->name_pat &&
+                        strcmp(s->suite, cur_suite) == 0)
+                        emit_guarded_hook(f, s->fn_name, "once-setup", label);
+                }
+            }
+
+            prev_suite = cur_suite;
+        }
+
+        // Name-pattern / global once-setup hooks: fire on first match (or
+        // unconditionally before the first test for global once hooks with
+        // no suite/name_pat), in the parent so COW propagates the effect to
+        // this and all subsequent children.
+        for (TestSetupRecord *s = setups; s; s = s->next) {
+            if (s->is_teardown || !s->once || s->suite || s->once_fired) continue;
+            bool fires = s->name_pat ? (fnmatch(s->name_pat, raw, 0) == 0) : true;
+            if (!fires) continue;
+            char label[320];
+            if (s->name_pat)
+                snprintf(label, sizeof(label), "pattern \"%s\"", s->name_pat);
+            else
+                snprintf(label, sizeof(label), "%s", "global setup");
+            emit_guarded_hook(f, s->fn_name, "once-setup", label);
+            s->once_fired = true;
+        }
+
+        // Determine whether this test has any matching per-test teardown hooks.
+        bool has_teardown = false;
+        for (TestSetupRecord *s = setups; s; s = s->next) {
+            if (hook_matches_test(s, true, cur_suite, raw)) { has_teardown = true; break; }
         }
 
         // Fork
@@ -1503,9 +1605,15 @@ void cc_serialize_test_harness(FILE *f, CCCC *vm, Obj *prog,
             "            __cccc_result __res={0};\n"
             "            int64_t _ri=0;double _rf=0.0;const char *_rs=NULL;\n"
             "            int __jv=setjmp(__run.jmp);\n"
-            "            if(__jv==0){\n"
-            "                __wrap_%s(&_ri,&_rf,&_rs);\n",
-            r->name);
+            "            if(__jv==0){\n");
+
+        // Per-test setup hooks, in declaration order.
+        for (TestSetupRecord *s = setups; s; s = s->next) {
+            if (hook_matches_test(s, false, cur_suite, raw))
+                fprintf(f, "                %s();\n", s->fn_name);
+        }
+
+        fprintf(f, "                __wrap_%s(&_ri,&_rf,&_rs);\n", r->name);
 
         // Capture return value
         if (r->ret_kind == RET_INT)   fprintf(f, "                /* ret captured in _ri */\n");
@@ -1528,6 +1636,30 @@ void cc_serialize_test_harness(FILE *f, CCCC *vm, Obj *prog,
             "            } else {\n"
             "                snprintf(__res.fail_msg,sizeof(__res.fail_msg),\"%%s\",__run.fail_msg);\n"
             "            }\n");
+
+        // Per-test teardown hooks, in declaration order. Run even if the test
+        // failed (but not if it timed out). A teardown failure overrides a
+        // passing result; if the test had already failed, its message wins.
+        if (has_teardown) {
+            fprintf(f,
+                "            if(!__res.timed_out){\n"
+                "                int __jvt=setjmp(__run.jmp);\n"
+                "                if(__jvt==0){\n");
+            for (TestSetupRecord *s = setups; s; s = s->next) {
+                if (hook_matches_test(s, true, cur_suite, raw))
+                    fprintf(f, "                    %s();\n", s->fn_name);
+            }
+            fprintf(f,
+                "                } else if(__jvt==2){\n"
+                "                    __res.timed_out=1;\n"
+                "                } else {\n"
+                "                    if(__res.passed){\n"
+                "                        __res.passed=0;\n"
+                "                        snprintf(__res.fail_msg,sizeof(__res.fail_msg),\"%%s\",__run.fail_msg);\n"
+                "                    }\n"
+                "                }\n"
+                "            }\n");
+        }
 
         if (eff_ms > 0) {
             fprintf(f,
@@ -1559,6 +1691,28 @@ void cc_serialize_test_harness(FILE *f, CCCC *vm, Obj *prog,
             "        if(_fail_fast&&(_failed+_timeouts)>0) return 1;\n"
             "    }\n"
             "    }\n\n");
+    }
+
+    // Final suite-once teardown for the last suite, and any name-pattern /
+    // global once-teardown hooks that haven't fired yet.
+    if (prev_suite) {
+        char label[320];
+        snprintf(label, sizeof(label), "suite \"%s\"", prev_suite);
+        for (TestSetupRecord *s = setups; s; s = s->next) {
+            if (s->is_teardown && s->once && s->suite && !s->name_pat &&
+                strcmp(s->suite, prev_suite) == 0)
+                emit_guarded_hook(f, s->fn_name, "once-teardown", label);
+        }
+    }
+    for (TestSetupRecord *s = setups; s; s = s->next) {
+        if (!s->is_teardown || !s->once || s->suite || s->once_fired) continue;
+        char label[320];
+        if (s->name_pat)
+            snprintf(label, sizeof(label), "pattern \"%s\"", s->name_pat);
+        else
+            snprintf(label, sizeof(label), "%s", "global teardown");
+        emit_guarded_hook(f, s->fn_name, "once-teardown", label);
+        s->once_fired = true;
     }
 
     // Footer / summary (only for pure-native; mixed mode parent owns the summary)
