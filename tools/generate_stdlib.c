@@ -1,11 +1,10 @@
 // generate_stdlib.c - builds get_std_header as AST; use -G to emit C.
 // Usage: make stdlib
 
+#pragma cccc comptime
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#pragma cccc comptime
 #include <glob.h>
 
 char *read_header_file(const char *path) {

@@ -1684,8 +1684,15 @@ int main(int argc, const char *argv[]) {
     for (int i = 0; i < input_files_count; i++) {
         input_progs[i] = cc_parse(&vm, input_tokens[i]);
         if (!input_progs[i]) {
-            fprintf(stderr, "error: failed to parse %s\n", input_files[i]);
-            goto BAIL;
+            // parse() returns NULL when no new globals were created
+            // (all declarations mapped to macro_globals). If macro
+            // globals exist, use those as the program instead.
+            if (vm.compiler.macro_globals) {
+                input_progs[i] = vm.compiler.macro_globals;
+            } else {
+                fprintf(stderr, "error: failed to parse %s\n", input_files[i]);
+                goto BAIL;
+            }
         }
     }
 
@@ -1734,7 +1741,9 @@ int main(int argc, const char *argv[]) {
     // macro execution and stashed in vm.compiler.macro_globals. They must be
     // in the prog list so cc_compile calls gen_function on them and the
     // call-patcher can resolve calls to them by name.
-    if (vm.compiler.macro_globals) {
+    // If macro_globals IS the main program (parse() returned it because no
+    // new globals were created), don't double-prepend it.
+    if (vm.compiler.macro_globals && merged_prog != vm.compiler.macro_globals) {
         Obj *tail = vm.compiler.macro_globals;
         while (tail->next)
             tail = tail->next;
