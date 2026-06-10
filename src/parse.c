@@ -4882,18 +4882,30 @@ enum {
     FMT_EXPECT_INT,
     FMT_EXPECT_UINT,
     FMT_EXPECT_DOUBLE,
-    FMT_EXPECT_STRING,  // char*
-    FMT_EXPECT_POINTER, // void*
-    FMT_EXPECT_INT_PTR, // int* (for %n, scanf %d)
-    FMT_EXPECT_UINT_PTR, // unsigned int* (scanf %u, %x)
-    FMT_EXPECT_FLOAT_PTR, // float* (scanf %f)
+    FMT_EXPECT_STRING,       // char*
+    FMT_EXPECT_POINTER,      // void*
+    FMT_EXPECT_INT_PTR,      // int* (for %n, scanf %d)
+    FMT_EXPECT_UINT_PTR,     // unsigned int* (scanf %u, %x)
+    FMT_EXPECT_FLOAT_PTR,    // float* (scanf %f)
+    // length-modifier-aware printf variants
+    FMT_EXPECT_LONG,         // %ld, %lld, %jd, %td
+    FMT_EXPECT_ULONG,        // %lu, %llu, %zu, %ju
+    FMT_EXPECT_LDOUBLE,      // %Lf, %Le, %Lg, %La
+    // length-modifier-aware scanf pointer variants
+    FMT_EXPECT_LONG_PTR,     // scanf %ld → long *
+    FMT_EXPECT_ULONG_PTR,    // scanf %lu, %zu → unsigned long *
+    FMT_EXPECT_SHORT_PTR,    // scanf %hd → short *
+    FMT_EXPECT_SCHAR_PTR,    // scanf %hhd → char *
+    FMT_EXPECT_LDOUBLE_PTR,  // scanf %Lf → long double *
 };
 
 #define MAX_FMT_ARGS 64
 
 static const char *fmt_type_names[] = {
     "int", "unsigned int", "double", "char *", "void *",
-    "int *", "unsigned int *", "float *"
+    "int *", "unsigned int *", "float *",
+    "long", "unsigned long", "long double",
+    "long *", "unsigned long *", "short *", "char *", "long double *"
 };
 
 // Validate format string arguments for __attribute__((format(...)))
@@ -4961,21 +4973,52 @@ static void validate_format_call(CCCC *vm, Token *tok, Type *func_ty,
                     while (*p >= '0' && *p <= '9') p++;
                 }
             }
+            // Capture length modifier (h, hh, l, ll, L, z, j, t)
+            const char *mod_start = p;
             while (*p == 'h' || *p == 'l' || *p == 'L' ||
                    *p == 'z' || *p == 'j' || *p == 't')
                 p++;
+            int mod_len = (int)(p - mod_start);
+            char mod0 = mod_len > 0 ? mod_start[0] : 0;
+            char mod1 = mod_len > 1 ? mod_start[1] : 0;
+            // mod: 0=none,1=hh,2=h,3=l,4=ll,5=L,6=z,7=j,8=t
+            int mod = 0;
+            if (mod_len == 0)                      mod = 0;
+            else if (mod0 == 'h' && mod1 == 'h')   mod = 1;
+            else if (mod0 == 'h')                   mod = 2;
+            else if (mod0 == 'l' && mod1 == 'l')   mod = 4;
+            else if (mod0 == 'l')                   mod = 3;
+            else if (mod0 == 'L')                   mod = 5;
+            else if (mod0 == 'z')                   mod = 6;
+            else if (mod0 == 'j')                   mod = 7;
+            else if (mod0 == 't')                   mod = 8;
 
             if (*p) {
                 char c = *p;
                 if (style == 1) {
                     switch (c) {
                         case 'd': case 'i': case 'c':
-                            expected[num_expected++] = FMT_EXPECT_INT; break;
+                            // l/ll/j/t → long; h/hh/none → int (promoted)
+                            if (mod == 3 || mod == 4 || mod == 7 || mod == 8)
+                                expected[num_expected++] = FMT_EXPECT_LONG;
+                            else
+                                expected[num_expected++] = FMT_EXPECT_INT;
+                            break;
                         case 'u': case 'o': case 'x': case 'X':
-                            expected[num_expected++] = FMT_EXPECT_UINT; break;
+                            // l/ll/z/j → unsigned long; h/hh/none → unsigned int (promoted)
+                            if (mod == 3 || mod == 4 || mod == 6 || mod == 7)
+                                expected[num_expected++] = FMT_EXPECT_ULONG;
+                            else
+                                expected[num_expected++] = FMT_EXPECT_UINT;
+                            break;
                         case 'f': case 'F': case 'e': case 'E':
                         case 'g': case 'G': case 'a': case 'A':
-                            expected[num_expected++] = FMT_EXPECT_DOUBLE; break;
+                            // L → long double; none → double (float promoted)
+                            if (mod == 5)
+                                expected[num_expected++] = FMT_EXPECT_LDOUBLE;
+                            else
+                                expected[num_expected++] = FMT_EXPECT_DOUBLE;
+                            break;
                         case 's':
                             expected[num_expected++] = FMT_EXPECT_STRING; break;
                         case 'p':
@@ -4988,12 +5031,28 @@ static void validate_format_call(CCCC *vm, Token *tok, Type *func_ty,
                 } else if (style == 2) {
                     switch (c) {
                         case 'd': case 'i':
-                            expected[num_expected++] = FMT_EXPECT_INT_PTR; break;
+                            if (mod == 3 || mod == 4 || mod == 7 || mod == 8)
+                                expected[num_expected++] = FMT_EXPECT_LONG_PTR;
+                            else if (mod == 2)
+                                expected[num_expected++] = FMT_EXPECT_SHORT_PTR;
+                            else if (mod == 1)
+                                expected[num_expected++] = FMT_EXPECT_SCHAR_PTR;
+                            else
+                                expected[num_expected++] = FMT_EXPECT_INT_PTR;
+                            break;
                         case 'u': case 'o': case 'x': case 'X':
-                            expected[num_expected++] = FMT_EXPECT_UINT_PTR; break;
+                            if (mod == 3 || mod == 4 || mod == 6 || mod == 7)
+                                expected[num_expected++] = FMT_EXPECT_ULONG_PTR;
+                            else
+                                expected[num_expected++] = FMT_EXPECT_UINT_PTR;
+                            break;
                         case 'f': case 'F': case 'e': case 'E':
                         case 'g': case 'G': case 'a': case 'A':
-                            expected[num_expected++] = FMT_EXPECT_FLOAT_PTR; break;
+                            if (mod == 5)
+                                expected[num_expected++] = FMT_EXPECT_LDOUBLE_PTR;
+                            else
+                                expected[num_expected++] = FMT_EXPECT_FLOAT_PTR;
+                            break;
                         case 's': case 'c':
                             expected[num_expected++] = FMT_EXPECT_STRING; break;
                         case 'p':
@@ -5099,6 +5158,35 @@ static void validate_format_call(CCCC *vm, Token *tok, Type *func_ty,
                           (arg_ty->base->kind == TY_FLOAT ||
                            arg_ty->base->kind == TY_DOUBLE ||
                            arg_ty->base->kind == TY_LDOUBLE));
+                    break;
+                case FMT_EXPECT_LONG:
+                    ok = (arg_ty->kind == TY_LONG);
+                    break;
+                case FMT_EXPECT_ULONG:
+                    ok = (arg_ty->kind == TY_LONG && arg_ty->is_unsigned);
+                    break;
+                case FMT_EXPECT_LDOUBLE:
+                    ok = (arg_ty->kind == TY_LDOUBLE);
+                    break;
+                case FMT_EXPECT_LONG_PTR:
+                    ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
+                          arg_ty->base->kind == TY_LONG && !arg_ty->base->is_unsigned);
+                    break;
+                case FMT_EXPECT_ULONG_PTR:
+                    ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
+                          arg_ty->base->kind == TY_LONG && arg_ty->base->is_unsigned);
+                    break;
+                case FMT_EXPECT_SHORT_PTR:
+                    ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
+                          arg_ty->base->kind == TY_SHORT);
+                    break;
+                case FMT_EXPECT_SCHAR_PTR:
+                    ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
+                          arg_ty->base->kind == TY_CHAR);
+                    break;
+                case FMT_EXPECT_LDOUBLE_PTR:
+                    ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
+                          arg_ty->base->kind == TY_LDOUBLE);
                     break;
             }
             if (!ok)

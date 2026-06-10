@@ -70,7 +70,7 @@ The warning infrastructure recognizes these category names:
 - `implicit-int`
 - `return-type`
 - `shadow`
-- `format`
+- `format` (see also `-F` / `--format-string-checks`)
 - `conversion` (umbrella; enables `sign-conversion` and `float-conversion` too)
 - `sign-conversion`
 - `float-conversion`
@@ -115,6 +115,15 @@ system:
 - Uses of deprecated functions, variables, typedefs, struct/union/enum tags,
   and enumerators use `-Wdeprecated`. Attribute messages are included when
   present.
+- Format string mismatches in calls to functions annotated with
+  `__attribute__((format(printf/scanf, …)))` use `-Wformat`. Checking is
+  gated by `-F` / `--format-string-checks`, which also enables `-Wformat`.
+  The checker validates argument count and type against each format specifier,
+  including length modifiers: `%ld` requires `long`, `%lu`/`%llu`/`%zu`/`%ju`
+  require `unsigned long`, and `%Lf` requires `long double`. Short modifiers
+  (`%hd`, `%hhd`) accept their promoted integer types since variadic arguments
+  undergo default argument promotion. Standard library functions in `stdio.h`
+  carry the appropriate annotations.
 - `#warning` uses `-Wcpp`.
 - Extra preprocessor tokens use `-Wextra-tokens`.
 - Large `#embed` files use `-Wlarge-file-embed`.
