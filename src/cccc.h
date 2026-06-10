@@ -968,6 +968,7 @@ struct TestFnRecord {
         char    *ret_str;  // for RET_STR
     } ret_expect;
     double ret_epsilon;    // 0.0 = use default 1e-9; set by return_epsilon=
+    int    expect_exit_code; // -1 = disabled; >=0 = expected shell-convention exit code
     TestFnRecord *next;
 };
 

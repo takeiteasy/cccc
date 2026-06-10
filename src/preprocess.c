@@ -2022,6 +2022,7 @@ typedef struct {
     double ret_float_val;
     const char *ret_str_val;
     double ret_epsilon_val;
+    int exit_code_val; // -1 = not set
 } TestArgs;
 
 // Parsed arguments from [[cccc::test_setup(...)]] / __attribute__((test_setup(...)))
@@ -2152,6 +2153,17 @@ static void parse_test_args(CCCC *vm, Token **p_ptr, TestArgs *out) {
                     p = p->next;
                 }
             }
+        } else if (equal(p, "exit_code") &&
+                   p->next && equal(p->next, "=") &&
+                   p->next->next &&
+                   (p->next->next->kind == TK_NUM ||
+                    p->next->next->kind == TK_PP_NUM)) {
+            Token *vt = p->next->next;
+            char _buf[64];
+            int _n = vt->len < 63 ? (int)vt->len : 63;
+            memcpy(_buf, vt->loc, _n); _buf[_n] = '\0';
+            out->exit_code_val = (int)strtoll(_buf, NULL, 0);
+            p = p->next->next->next;
         } else if (equal(p, "return_epsilon") &&
                    p->next && equal(p->next, "=") &&
                    p->next->next &&
@@ -2234,6 +2246,7 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
     TestArgs ta            = {0};
     ta.error_count_op      = CMP_NONE;
     ta.ret_op              = CMP_EQ;
+    ta.exit_code_val       = -1;
     TestSetupArgs tsa      = {0};
 
     Token *scan = is_gnu_attr ? tok->next->next->next  // skip __attribute__ ( (
@@ -2402,6 +2415,17 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                 if (ta.ret_kind == RET_INT)        rec->ret_expect.ret_int   = ta.ret_int_val;
                 else if (ta.ret_kind == RET_FLOAT) rec->ret_expect.ret_float = ta.ret_float_val;
                 else if (ta.ret_kind == RET_STR)   rec->ret_expect.ret_str   = ta.ret_str_val ? strdup(ta.ret_str_val) : NULL;
+                rec->expect_exit_code = ta.exit_code_val;
+                if (ta.exit_code_val >= 0 && ta.error_pat) {
+                    warn_tok(vm, probe, CCCC_WARN_ATTRIBUTES,
+                             "exit_code= and error= are mutually exclusive; error= ignored");
+                    rec->error_pat = NULL;
+                }
+                if (ta.exit_code_val >= 0 && ta.ret_kind != RET_NONE) {
+                    warn_tok(vm, probe, CCCC_WARN_ATTRIBUTES,
+                             "exit_code= and return= are mutually exclusive; return= ignored");
+                    rec->ret_kind = RET_NONE;
+                }
                 rec->next = vm->compiler.test_fns;
                 vm->compiler.test_fns = rec;
                 break;

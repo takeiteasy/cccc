@@ -64,7 +64,7 @@ void test_add_commutative(void) {
 }
 ```
 
-`name`, `suite`, `error`, `timeout`, `error_count`, `return`, and `return_epsilon` may all be combined in one attribute.
+`name`, `suite`, `error`, `exit_code`, `timeout`, `error_count`, `return`, and `return_epsilon` may all be combined in one attribute (with the exception that `exit_code` is mutually exclusive with `error` and `return`).
 
 ## Test Suites
 
@@ -263,6 +263,59 @@ int test_the_answer(void) {
 ```
 
 `$assert*` macros and the `return` assertion are independent — both must pass for the test to pass.
+
+## Exit Code Tests
+
+Mark a test with `exit_code = N` to assert that the function produces a specific process exit code when run. This covers both explicit `exit()` calls and crash-induced signal deaths:
+
+```c
+// Test passes when the function exits with code 0 (normal return)
+[[cccc::test(exit_code = 0)]]
+int test_clean_exit(void) {
+    return 0;
+}
+
+// Test passes when the function calls exit(42)
+[[cccc::test(exit_code = 42)]]
+void test_explicit_exit(void) {
+    exit(42);
+}
+
+// Test passes when the function segfaults (SIGSEGV = signal 11 → exit code 139)
+[[cccc::test(exit_code = 139)]]
+int test_segfault(void) {
+    volatile int *p = (volatile int *)0;
+    return *p;
+}
+```
+
+Exit codes follow the shell convention: a normal exit via `return` or `exit(N)` produces exit code `N` (0–127); a process killed by signal `S` produces exit code `128 + S`. Common signal exit codes:
+
+| Signal | Number | Exit code |
+|--------|--------|-----------|
+| SIGSEGV | 11 | 139 |
+| SIGABRT | 6 | 134 |
+| SIGBUS | 10 | 138 |
+| SIGFPE | 8 | 136 |
+| SIGILL | 4 | 132 |
+
+`exit_code` may be combined with `suite`, `name`, and `timeout`. It is **mutually exclusive** with `error =` (compile-time) and `return =` (can't read a crashed child's return register); combining them emits a `-Wattributes` warning and the conflicting argument is ignored.
+
+When a test does not produce the expected exit code, the failure message shows both the expected and actual values:
+
+```
+expected exit_code 139, got 0
+```
+
+### Timeout interaction
+
+`exit_code` tests respect the per-test `timeout =` and global `--test-timeout` settings. A test that hangs beyond its timeout is killed with `SIGKILL` and reported as `TIMEOUT`.
+
+### Limitations
+
+- `exit_code` tests are run in a forked subprocess. Setup hooks run in the parent (before the fork) so their state is visible to the child; teardown hooks run in the parent (after the child exits).
+- Global state changes made inside an `exit_code` test are not visible to subsequent tests (the child process exits and the parent restores its own snapshot as usual).
+- `exit_code` tests are skipped on non-POSIX platforms where `fork` is unavailable.
 
 ## Setup and Teardown
 
@@ -647,7 +700,8 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 - `return =` assertions support integer literals, float literals, and string literals. Enum names (`return = GREEN`) and character literals (`return = 'A'`) are not resolved — use the integer value instead (`return = 1`, `return = 65`). Unrecognized operands produce a `-Wattributes` warning and skip the assertion.
 - Setup and teardown hook functions must also have signature `void name(void)`.
 - Teardown hooks are skipped on test timeout (VM state is unknown after `SIGALRM`). They run in all other cases, including after test or setup failure.
-- Calling `exit()` directly in a test terminates the entire process rather than failing just that test. Use `$assert*` macros instead.
+- Calling `exit()` directly in a normal test terminates the entire process rather than failing just that test. Use `$assert*` macros instead, or use `exit_code =` if testing that the function exits with a specific code.
 - Suite blocks (`#pragma cccc suite begin/end`) cannot be nested.
 - **Negative test bodies are matched against error substrings.** Use a substring that is specific enough to avoid false matches but not so specific that it breaks with minor message wording changes.
+- **`exit_code =` tests are skipped on non-POSIX platforms** where `fork(2)` is not available.
 - `--test-timeout` uses `SIGALRM`; test code that also uses `alarm()` or installs a `SIGALRM` handler will interfere with the timeout mechanism.

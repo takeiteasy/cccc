@@ -19,11 +19,16 @@
 
 #include "cccc.h"
 #include "internal.h"
+#include <errno.h>
 #include <fnmatch.h>
 #include <inttypes.h>
 #include <signal.h>
 #include <string.h>
 #include <sys/time.h>
+#ifdef _POSIX_VERSION
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 
 // Per-run failure state allocated on the stack inside cc_run_tests.
@@ -41,9 +46,18 @@ typedef struct {
 static CCCCTestRunState *s_run = NULL;
 
 static volatile sig_atomic_t s_alarm_fired = 0;
+#ifdef _POSIX_VERSION
+static volatile pid_t s_fork_child_pid = 0;
+#endif
 static void handle_alarm(int sig) {
     (void)sig;
     s_alarm_fired = 1;
+#ifdef _POSIX_VERSION
+    if (s_fork_child_pid > 0) {
+        kill(s_fork_child_pid, SIGKILL);
+        return; // waitpid in parent will get EINTR
+    }
+#endif
     if (s_run) longjmp(s_run->jmp, 2); // 2 = timeout sentinel
 }
 
@@ -897,6 +911,84 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
             }
             continue;
         }
+
+#ifdef _POSIX_VERSION
+        if (r->expect_exit_code >= 0) {
+            Obj *fn = find_fn(prog, r->name);
+            if (!fn) {
+                emit_test_result(fmt, disp, cur_suite, "skip", NULL, &json_first, test_num);
+                total_skipped++;
+                continue;
+            }
+
+            memcpy(vm->data_seg, cur_snap, snap_size);
+            run_hooks(vm, prog, setups, false, false, cur_suite, disp);
+
+            fflush(stdout);
+            fflush(stderr);
+            s_alarm_fired = 0;
+
+            pid_t pid = fork();
+            if (pid == 0) {
+                signal(SIGALRM, SIG_DFL);
+                s_fork_child_pid = 0;
+                cc_run_at(vm, (CCCCPc)fn->code_addr, 0, NULL);
+                _exit(0);
+            }
+
+            s_fork_child_pid = pid;
+            long effective_ms = r->timeout_ms > 0 ? r->timeout_ms : global_timeout_ms;
+            SET_TIMEOUT(effective_ms);
+            if (effective_ms > 0) any_timeout_possible = true;
+
+            int wstatus = 0;
+            pid_t waited;
+            do {
+                waited = waitpid(pid, &wstatus, 0);
+            } while (waited < 0 && errno == EINTR && !s_alarm_fired);
+
+            SET_TIMEOUT(0);
+            s_fork_child_pid = 0;
+
+            bool fork_timed_out = (waited < 0 && s_alarm_fired);
+            if (fork_timed_out) {
+                waitpid(pid, NULL, 0);
+                emit_test_result(fmt, disp, cur_suite, "timeout", NULL, &json_first, test_num);
+                total_timeouts++;
+                if (opts && opts->fail_fast) stop_early = true;
+            } else {
+                int actual_code = -1;
+                if (WIFEXITED(wstatus))        actual_code = WEXITSTATUS(wstatus);
+                else if (WIFSIGNALED(wstatus)) actual_code = 128 + WTERMSIG(wstatus);
+
+                if (actual_code == r->expect_exit_code) {
+                    emit_test_result(fmt, disp, cur_suite, "pass", NULL, &json_first, test_num);
+                    passed++;
+                } else {
+                    char fail_msg[128];
+                    snprintf(fail_msg, sizeof(fail_msg),
+                             "expected exit_code %d, got %d",
+                             r->expect_exit_code, actual_code);
+                    emit_test_result(fmt, disp, cur_suite, "fail", fail_msg, &json_first, test_num);
+                    total_failures++;
+                    if (opts && opts->fail_fast) stop_early = true;
+                }
+
+                if (!fork_timed_out) {
+                    char td_fail[512] = {0};
+                    run_hooks_guarded(vm, prog, setups, true, false, cur_suite, disp, td_fail);
+                }
+            }
+            continue;
+        }
+#else
+        if (r->expect_exit_code >= 0) {
+            emit_test_result(fmt, disp, cur_suite, "skip",
+                             "exit_code= requires POSIX fork", &json_first, test_num);
+            total_skipped++;
+            continue;
+        }
+#endif
 
         Obj *fn = find_fn(prog, r->name);
         if (!fn) {
