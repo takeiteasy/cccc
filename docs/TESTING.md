@@ -41,7 +41,7 @@ void test_add_commutative(void) {
 }
 ```
 
-`name`, `suite`, `error`, `timeout`, `error_count`, and `return` may all be combined in one attribute.
+`name`, `suite`, `error`, `timeout`, `error_count`, `return`, and `return_epsilon` may all be combined in one attribute.
 
 ## Test Suites
 
@@ -171,7 +171,13 @@ int test_char_a(void) {
 
 // enum: write the integer value, not the enum name
 // [[cccc::test(return = 1)]]  ← correct
-// [[cccc::test(return = GREEN)]]  ← silently ignored (enum names not supported)
+// [[cccc::test(return = GREEN)]]  ← warns and skips assertion (enum names not supported)
+```
+
+Passing an unrecognized operand (such as an enum name) emits a `-Wattributes` warning and skips the assertion rather than silently passing:
+
+```
+warning: unrecognized return= operand 'GREEN'; assertion skipped (enum names not supported, use the integer value)
 ```
 
 **Float/double**: the return value is compared within an absolute tolerance of `1e-9` for `=`/`!=`. For ordered comparisons (`<`, `>`, etc.) no tolerance is applied.
@@ -182,6 +188,17 @@ double test_pi(void) {
     return 3.14;
 }
 ```
+
+Use `return_epsilon` to override the tolerance for a specific test:
+
+```c
+[[cccc::test(return = 3.14159, return_epsilon = 1e-5)]]
+double test_approx_pi(void) {
+    return compute_pi();  // passes if within 1e-5 of 3.14159
+}
+```
+
+`return_epsilon` only applies to `=` and `!=`; ordered comparisons use exact values regardless.
 
 **String** (`char *`): the returned pointer is compared to the literal using `strcmp`.
 
@@ -429,6 +446,16 @@ Line-delimited JSON objects, one per test, wrapped in an array:
 
 The process exits with code `0` if all tests pass, `1` if any fail.
 
+### Combining with `-c` (compile pre-pass)
+
+`--testing` can be combined with `-c=bytecode` or `-c=native` to run tests as a pre-pass before compilation. If all tests pass the compile step proceeds; if any test fails the compile step is skipped and the process exits non-zero.
+
+```
+./cccc --testing -c=bytecode -o out.jbc myfile.c
+```
+
+This is useful in build scripts that want to guard bytecode or native compilation behind a passing test run.
+
 ## Filtering Tests
 
 Run a subset of tests without modifying the source file.
@@ -591,11 +618,10 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 ## Limitations
 
 - Test functions must take no arguments and return `void`, `int`, `double`, `float`, or `char *`. Use `return = value` to assert on the return value.
-- `return =` assertions support integer literals, float literals, and string literals. Enum names (`return = GREEN`) and character literals (`return = 'A'`) are not resolved — use the integer value instead (`return = 1`, `return = 65`).
+- `return =` assertions support integer literals, float literals, and string literals. Enum names (`return = GREEN`) and character literals (`return = 'A'`) are not resolved — use the integer value instead (`return = 1`, `return = 65`). Unrecognized operands produce a `-Wattributes` warning and skip the assertion.
 - Setup and teardown hook functions must also have signature `void name(void)`.
 - Teardown hooks are skipped on test timeout (VM state is unknown after `SIGALRM`). They run in all other cases, including after test or setup failure.
 - Calling `exit()` directly in a test terminates the entire process rather than failing just that test. Use `$assert*` macros instead.
-- `--testing` cannot be combined with `-c`, `-o`, or other output flags.
 - Suite blocks (`#pragma cccc suite begin/end`) cannot be nested.
 - **Negative test bodies are matched against error substrings.** Use a substring that is specific enough to avoid false matches but not so specific that it breaks with minor message wording changes.
 - `--test-timeout` uses `SIGALRM`; test code that also uses `alarm()` or installs a `SIGALRM` handler will interfere with the timeout mechanism.

@@ -1957,6 +1957,7 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
     int64_t ret_int_val       = 0;
     double  ret_float_val     = 0.0;
     const char *ret_str_val   = NULL;
+    double  ret_epsilon_val   = 0.0;
     // For [[cccc::test_setup/teardown]]:
     const char *hook_name_pat = NULL;
     const char *hook_suite    = NULL;
@@ -2145,8 +2146,27 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                                     p = p->next->next;
                                     ret_kind = RET_INT;
                                     ret_op   = op;
+                                } else if (p && p->kind != TK_EOF &&
+                                           !equal(p, ")") && !equal(p, ",")) {
+                                    warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
+                                             "unrecognized return= operand '%.*s';"
+                                             " assertion skipped (enum names not"
+                                             " supported, use the integer value)",
+                                             (int)p->len, p->loc);
+                                    p = p->next;
                                 }
                             }
+                        } else if (equal(p, "return_epsilon") &&
+                                   p->next && equal(p->next, "=") &&
+                                   p->next->next &&
+                                   (p->next->next->kind == TK_NUM ||
+                                    p->next->next->kind == TK_PP_NUM)) {
+                            Token *vt = p->next->next;
+                            char _buf[64];
+                            int _n = vt->len < 63 ? (int)vt->len : 63;
+                            memcpy(_buf, vt->loc, _n); _buf[_n] = '\0';
+                            ret_epsilon_val = strtod(_buf, NULL);
+                            p = p->next->next->next;
                         } else {
                             p = p->next;
                         }
@@ -2243,8 +2263,9 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                     rec->expect_errors    = test_error_count;
                     rec->error_count_op   = CMP_EQ;
                 }
-                rec->ret_kind = ret_kind;
-                rec->ret_op   = (ret_kind != RET_NONE) ? ret_op : CMP_EQ;
+                rec->ret_kind    = ret_kind;
+                rec->ret_op      = (ret_kind != RET_NONE) ? ret_op : CMP_EQ;
+                rec->ret_epsilon = ret_epsilon_val;
                 if (ret_kind == RET_INT)        rec->ret_expect.ret_int   = ret_int_val;
                 else if (ret_kind == RET_FLOAT) rec->ret_expect.ret_float = ret_float_val;
                 else if (ret_kind == RET_STR)   rec->ret_expect.ret_str   = ret_str_val ? strdup(ret_str_val) : NULL;

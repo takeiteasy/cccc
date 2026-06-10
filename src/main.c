@@ -1817,6 +1817,21 @@ int main(int argc, const char *argv[]) {
     // for ticket #300: previously `compile_only` short-circuited at
     // `goto BAIL;` before the legacy `out_file` save block, silently
     // swallowing `-c -o foo.jbc`.
+    if (testing_mode) {
+        CcTestOptions test_opts = {
+            .test_glob    = test_glob,
+            .suite_filter = suite_filter,
+            .list_only    = (bool)list_tests,
+            .fail_fast    = (bool)fail_fast,
+            .test_timeout = test_timeout,
+            .format       = test_format,
+        };
+        exit_code = cc_run_tests(&vm, merged_prog, &test_opts);
+        if (exit_code != 0 || compile_format == COMPILE_NONE)
+            goto BAIL;
+        // tests passed and a compile target was also requested — fall through
+    }
+
     if (compile_format == COMPILE_BYTECODE) {
         if (out_file) {
             if (cc_save_bytecode(&vm, out_file) != 0) {
@@ -1867,19 +1882,6 @@ int main(int argc, const char *argv[]) {
 
     if (disassemble) {
         cc_disassemble(&vm);
-        goto BAIL;
-    }
-
-    if (testing_mode) {
-        CcTestOptions test_opts = {
-            .test_glob    = test_glob,
-            .suite_filter = suite_filter,
-            .list_only    = (bool)list_tests,
-            .fail_fast    = (bool)fail_fast,
-            .test_timeout = test_timeout,
-            .format       = test_format,
-        };
-        exit_code = cc_run_tests(&vm, merged_prog, &test_opts);
         goto BAIL;
     }
 

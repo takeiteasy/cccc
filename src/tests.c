@@ -971,15 +971,17 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
                                  cmp_op_str(r->ret_op),
                                  r->ret_expect.ret_int, ret_int);
                     break;
-                case RET_FLOAT:
+                case RET_FLOAT: {
+                    double eps = (r->ret_epsilon > 0.0) ? r->ret_epsilon : 1e-9;
                     ret_ok = apply_cmp_op_f64(r->ret_op, ret_float,
-                                              r->ret_expect.ret_float, 1e-9);
+                                              r->ret_expect.ret_float, eps);
                     if (!ret_ok)
                         snprintf(run.fail_msg, sizeof(run.fail_msg),
                                  "expected return value %s %g, got %g",
                                  cmp_op_str(r->ret_op),
                                  r->ret_expect.ret_float, ret_float);
                     break;
+                }
                 case RET_STR: {
                     char *got = (char *)(intptr_t)ret_int;
                     const char *exp = r->ret_expect.ret_str;

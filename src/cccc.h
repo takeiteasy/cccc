@@ -967,6 +967,7 @@ struct TestFnRecord {
         double   ret_float;// for RET_FLOAT
         char    *ret_str;  // for RET_STR
     } ret_expect;
+    double ret_epsilon;    // 0.0 = use default 1e-9; set by return_epsilon=
     TestFnRecord *next;
 };
 
