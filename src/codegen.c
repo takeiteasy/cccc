@@ -3062,9 +3062,37 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
 
 // ========== Statement Generation ==========
 
+static void emit_source_location(CCCC *vm, Node *node) {
+    if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !node || !node->tok)
+        return;
+    if (node->tok->file == vm->dbg.last_debug_file &&
+        node->tok->line_no == vm->dbg.last_debug_line &&
+        node->tok->col_no == vm->dbg.last_debug_col)
+        return;
+
+    if (vm->dbg.source_map_count >= vm->dbg.source_map_capacity) {
+        vm->dbg.source_map_capacity *= 2;
+        vm->dbg.source_map = realloc(vm->dbg.source_map,
+            vm->dbg.source_map_capacity * sizeof(SourceMap));
+    }
+
+    SourceMap *entry = &vm->dbg.source_map[vm->dbg.source_map_count++];
+    entry->pc_offset = vm->text_ptr + 1;
+    entry->file = node->tok->file;
+    entry->line_no = node->tok->line_no;
+    entry->col_no = node->tok->col_no;
+    entry->end_col_no = node->tok->col_no + node->tok->len;
+
+    vm->dbg.last_debug_file = node->tok->file;
+    vm->dbg.last_debug_line = node->tok->line_no;
+    vm->dbg.last_debug_col = node->tok->col_no;
+}
+
 static void gen_stmt(CCCC *vm, Node *node) {
     if (!node)
         return;
+
+    emit_source_location(vm, node);
 
     switch (node->kind) {
     case ND_BLOCK: {
@@ -3532,6 +3560,9 @@ void gen_function(CCCC *vm, Obj *fn) {
         param_count++;
     bool is_variadic = fn->ty && fn->ty->is_variadic;
     int spill_param_count = is_variadic && param_count < 8 ? 8 : param_count;
+
+    // Record source location for function entry
+    emit_source_location(vm, fn->body);
 
     // Record function address (offset from text_seg start)
     fn->code_addr = vm->text_ptr + 1;

@@ -1101,8 +1101,9 @@ void cc_destroy(CCCC *vm) {
     // Free linked programs array
     free(vm->compiler.link_progs);
 
-    // Free source map (debugger)
+    // Free source map and index (debugger)
     free(vm->dbg.source_map);
+    free(vm->dbg.source_index);
 
     // Free watchpoint expressions
     for (int i = 0; i < MAX_WATCHPOINTS; i++) {

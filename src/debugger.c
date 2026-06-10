@@ -784,17 +784,37 @@ int cc_get_source_location(CCCC *vm, CCCCPc pc, File **out_file, int *out_line, 
 }
 
 CCCCPc cc_find_pc_for_source(CCCC *vm, File *file, int line) {
-    if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !vm->dbg.source_map || vm->dbg.source_map_count == 0) {
+    if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !vm->dbg.source_index || vm->dbg.source_index_count == 0) {
         return CCCC_INVALID_PC;
     }
 
-    // PLACEHOLDER: Linear search for the first matching source location.
-    // TODO: Could optimize with secondary index
-    for (int i = 0; i < vm->dbg.source_map_count; i++) {
-        if (vm->dbg.source_map[i].line_no == line) {
-            if (!file || vm->dbg.source_map[i].file == file) {
-                return (CCCCPc)vm->dbg.source_map[i].pc_offset;
-            }
+    // When file is NULL (search any file), linear scan through the deduplicated
+    // index — still faster than scanning the full source_map.
+    if (!file) {
+        for (int i = 0; i < vm->dbg.source_index_count; i++) {
+            if (vm->dbg.source_index[i].line_no == line)
+                return vm->dbg.source_index[i].first_pc;
+        }
+        return CCCC_INVALID_PC;
+    }
+
+    // Binary search by (file, line_no) in the sorted source_index
+    uintptr_t ufile = (uintptr_t)file;
+    int left = 0;
+    int right = vm->dbg.source_index_count - 1;
+
+    while (left <= right) {
+        int mid = left + (right - left) / 2;
+        SourceIndex *entry = &vm->dbg.source_index[mid];
+
+        if (entry->file == file && entry->line_no == line)
+            return entry->first_pc;
+
+        if ((uintptr_t)entry->file < ufile ||
+            ((uintptr_t)entry->file == ufile && entry->line_no < line)) {
+            left = mid + 1;
+        } else {
+            right = mid - 1;
         }
     }
 

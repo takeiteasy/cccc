@@ -1323,6 +1323,19 @@ typedef struct SourceMap {
 } SourceMap;
 
 /*!
+ @struct SourceIndex
+ @abstract Secondary index keyed by (file, line_no) for O(log n) breakpoint lookups.
+ @field file Source file.
+ @field line_no Line number in source.
+ @field first_pc First bytecode PC offset for this source location.
+*/
+typedef struct SourceIndex {
+    File *file;
+    int line_no;
+    CCCCPc first_pc;
+} SourceIndex;
+
+/*!
  @struct DebugSymbol
  @abstract Represents a variable's debug information for expression evaluation.
  @field name Variable name (for lookup).
@@ -1483,6 +1496,10 @@ typedef struct Debugger {
     File *last_debug_file;   // Last file during debug info emission
     int last_debug_line;     // Last line number during debug info emission
     int last_debug_col;      // Last column number during debug info emission
+
+    // Secondary source index for O(log n) line→PC lookups
+    SourceIndex *source_index;   // Sorted by (file, line_no)
+    int source_index_count;      // Number of entries in source_index
 
     // Debug symbols for expression evaluation
     DebugSymbol debug_symbols[MAX_DEBUG_SYMBOLS];

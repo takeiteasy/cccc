@@ -638,6 +638,14 @@ int cc_load_bytecode(CCCC *vm, const char *path) {
     return result;
 }
 
+static int source_index_cmp(const void *a, const void *b) {
+    const SourceIndex *sa = (const SourceIndex *)a;
+    const SourceIndex *sb = (const SourceIndex *)b;
+    if (sa->file != sb->file)
+        return ((uintptr_t)sa->file < (uintptr_t)sb->file) ? -1 : 1;
+    return (sa->line_no < sb->line_no) ? -1 : (sa->line_no > sb->line_no) ? 1 : 0;
+}
+
 void cc_compile(CCCC *vm, Obj *prog) {
     if (!vm) {
         error("VM instance is NULL");
@@ -661,6 +669,8 @@ void cc_compile(CCCC *vm, Obj *prog) {
             vm->dbg.source_map_count = 0;
             vm->dbg.last_debug_file = NULL;
             vm->dbg.last_debug_line = -1;
+            vm->dbg.source_index = NULL;
+            vm->dbg.source_index_count = 0;
             vm->dbg.num_debug_symbols = 0;
             vm->dbg.num_watchpoints = 0;
         }
@@ -675,5 +685,47 @@ void cc_compile(CCCC *vm, Obj *prog) {
     // Run optimizer if enabled
     if (vm->compiler.opt_level > 0) {
         cc_optimize(vm, vm->compiler.opt_level);
+    }
+
+    // Build source index for O(log n) line→PC lookups
+    if (vm->flags & CCCC_ENABLE_DEBUGGER && vm->dbg.source_map_count > 0) {
+        vm->dbg.source_index_count = 0;
+
+        // First pass: count unique (file, line) pairs
+        File *last_file = NULL;
+        int last_line = -1;
+        for (int i = 0; i < vm->dbg.source_map_count; i++) {
+            SourceMap *m = &vm->dbg.source_map[i];
+            if (m->file != last_file || m->line_no != last_line) {
+                vm->dbg.source_index_count++;
+                last_file = m->file;
+                last_line = m->line_no;
+            }
+        }
+
+        vm->dbg.source_index = malloc(vm->dbg.source_index_count * sizeof(SourceIndex));
+        if (!vm->dbg.source_index) {
+            error("could not malloc for source index");
+        }
+
+        // Fill with first PC for each unique (file, line)
+        int idx = 0;
+        last_file = NULL;
+        last_line = -1;
+        for (int i = 0; i < vm->dbg.source_map_count; i++) {
+            SourceMap *m = &vm->dbg.source_map[i];
+            if (m->file != last_file || m->line_no != last_line) {
+                vm->dbg.source_index[idx].file = m->file;
+                vm->dbg.source_index[idx].line_no = m->line_no;
+                vm->dbg.source_index[idx].first_pc = (CCCCPc)m->pc_offset;
+                idx++;
+                last_file = m->file;
+                last_line = m->line_no;
+            }
+        }
+
+        // Sort by (file, line_no) for binary search
+        qsort(vm->dbg.source_index, vm->dbg.source_index_count, sizeof(SourceIndex),
+              source_index_cmp);
     }
 }
