@@ -1958,7 +1958,6 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
     double  ret_float_val     = 0.0;
     const char *ret_str_val   = NULL;
     double  ret_epsilon_val   = 0.0;
-    TestMode test_mode        = TEST_MODE_VM;
     // For [[cccc::test_setup/teardown]]:
     const char *hook_name_pat = NULL;
     const char *hook_suite    = NULL;
@@ -2177,19 +2176,6 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                             memcpy(_buf, vt->loc, _n); _buf[_n] = '\0';
                             ret_epsilon_val = strtod(_buf, NULL);
                             p = p->next->next->next;
-                        } else if (equal(p, "mode") &&
-                                   p->next && equal(p->next, "=") &&
-                                   p->next->next && p->next->next->kind == TK_STR) {
-                            const char *mstr = p->next->next->str;
-                            if (strcmp(mstr, "native") == 0)
-                                test_mode = TEST_MODE_NATIVE;
-                            else if (strcmp(mstr, "vm") == 0)
-                                test_mode = TEST_MODE_VM;
-                            else
-                                warn_tok(vm, p->next->next, CCCC_WARN_ATTRIBUTES,
-                                    "unknown mode \"%s\"; expected \"native\" or \"vm\"",
-                                    mstr);
-                            p = p->next->next->next;
                         } else {
                             p = p->next;
                         }
@@ -2292,12 +2278,6 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                 if (ret_kind == RET_INT)        rec->ret_expect.ret_int   = ret_int_val;
                 else if (ret_kind == RET_FLOAT) rec->ret_expect.ret_float = ret_float_val;
                 else if (ret_kind == RET_STR)   rec->ret_expect.ret_str   = ret_str_val ? strdup(ret_str_val) : NULL;
-                rec->mode = test_mode;
-                if (rec->mode == TEST_MODE_NATIVE && rec->error_pat)
-                    error_tok(vm, probe,
-                        "[[cccc::test]] mode=\"native\" cannot be combined with "
-                        "error=\"...\": negative tests are evaluated at compile "
-                        "time, not at native runtime");
                 rec->next = vm->compiler.test_fns;
                 vm->compiler.test_fns = rec;
                 break;

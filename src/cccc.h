@@ -939,12 +939,6 @@ typedef enum {
     CMP_GE,       // >=
 } CmpOp;
 
-// Execution backend for a [[cccc::test]] function.
-typedef enum {
-    TEST_MODE_VM     = 0, // run in the CCCC VM (default)
-    TEST_MODE_NATIVE = 1, // compile to native binary and run as a child process
-} TestMode;
-
 // Discriminator for the return= assertion type.
 typedef enum {
     RET_NONE  = 0, // return= not specified
@@ -974,7 +968,6 @@ struct TestFnRecord {
         char    *ret_str;  // for RET_STR
     } ret_expect;
     double ret_epsilon;    // 0.0 = use default 1e-9; set by return_epsilon=
-    TestMode mode;         // TEST_MODE_VM (default) or TEST_MODE_NATIVE
     TestFnRecord *next;
 };
 
@@ -1005,8 +998,6 @@ typedef struct {
     bool fail_fast;           // --fail-fast: stop after first failure
     int  test_timeout;        // --test-timeout=N: per-test timeout in seconds (0=off)
     CcTestFormat format;      // --test-format=tap|plain|json
-    bool force_native;        // --testing -c=native: treat all positive tests as native
-    int  total_tap_count;     // if > 0, override the "1..N" plan count (for mixed mode)
 } CcTestOptions;
 
 // A variable or struct instance declared with #pragma comptime.

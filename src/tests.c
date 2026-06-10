@@ -747,11 +747,6 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
             if (fnmatch(opts->test_glob, disp, 0) != 0)
                 continue;
         }
-        // Native-mode positive tests (or all positive tests under -c=native)
-        // run in the native pass; exclude from the VM pass.
-        if (!r->error_pat && opts &&
-            (opts->force_native || r->mode == TEST_MODE_NATIVE))
-            continue;
         TestListNode *node = malloc(sizeof(TestListNode));
         node->rec  = r;
         node->next = NULL;
@@ -779,16 +774,10 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
 
     CcTestFormat fmt = opts ? opts->format : TEST_FORMAT_TAP;
 
-    // In mixed mode (VM + native), total_tap_count covers all tests globally.
-    int tap_total = (opts && opts->total_tap_count > 0) ? opts->total_tap_count : n;
-    // In mixed mode, the native pass starts at n+1; the VM pass owns the header.
-    // When all tests are native (n==0) the native binary emits its own header.
-    bool vm_owns_header = (n > 0 || tap_total == 0);
-
-    if (vm_owns_header) switch (fmt) {
+    switch (fmt) {
     case TEST_FORMAT_TAP:
         printf("TAP version 13\n");
-        printf("1..%d\n", tap_total);
+        printf("1..%d\n", n);
         break;
     case TEST_FORMAT_PLAIN:
         if (n == 0)
@@ -1046,7 +1035,7 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
         s->once_fired = true;
     }
 
-    if (vm_owns_header) switch (fmt) {
+    switch (fmt) {
     case TEST_FORMAT_TAP:
         break;
     case TEST_FORMAT_PLAIN:
@@ -1088,163 +1077,3 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
     return (passed == n) ? 0 : 1;
 }
 
-int cc_run_tests_native(CCCC *vm, Obj *prog,
-                        const CcTestOptions *opts,
-                        int start_at,
-                        int *out_count,
-                        const char *cc_path,
-                        const CcNativeCompileArgs *cc_args) {
-    if (!cc_path) {
-        fprintf(stderr, "error: no native C compiler found for --testing -c=native\n");
-        return 1;
-    }
-
-    // Build declaration-order list of matching native positive tests.
-    // vm->compiler.test_fns is in reverse declaration order; collect into an
-    // array, iterate backwards, and build a list of shallow copies so we never
-    // write through the real records' next pointers.
-    int cap = 64;
-    TestFnRecord **arr = malloc(cap * sizeof(TestFnRecord *));
-    int arr_len = 0;
-    for (TestFnRecord *r = vm->compiler.test_fns; r; r = r->next) {
-        if (arr_len == cap) { cap *= 2; arr = realloc(arr, cap * sizeof(TestFnRecord *)); }
-        arr[arr_len++] = r;
-    }
-    TestFnRecord *list = NULL;
-    TestFnRecord **tail = &list;
-    int count = 0;
-    for (int i = arr_len - 1; i >= 0; i--) {
-        TestFnRecord *r = arr[i];
-        if (r->error_pat) continue;
-        if (!opts->force_native && r->mode != TEST_MODE_NATIVE) continue;
-        const char *disp = r->display_name ? r->display_name : r->name;
-        if (opts->test_glob && fnmatch(opts->test_glob, disp, 0) != 0) continue;
-        if (opts->suite_filter && (!r->suite || strcmp(r->suite, opts->suite_filter) != 0)) continue;
-        TestFnRecord *copy = malloc(sizeof(TestFnRecord));
-        *copy = *r;
-        copy->next = NULL;
-        *tail = copy;
-        tail  = &copy->next;
-        count++;
-    }
-    free(arr);
-
-    if (out_count) *out_count = count;
-    if (count == 0) return 0;
-
-    // Reverse setup records to declaration order (built by prepending),
-    // mirroring cc_run_tests. Mutating once_fired on this copy is safe since
-    // it is local to this run.
-    TestSetupRecord *setups = NULL;
-    for (TestSetupRecord *s = vm->compiler.test_setups; s; s = s->next) {
-        TestSetupRecord *copy = malloc(sizeof(TestSetupRecord));
-        *copy      = *s;
-        copy->next = setups;
-        setups     = copy;
-    }
-
-#define FREE_COPY_LIST(head) do { \
-        TestFnRecord *_n; \
-        for (TestFnRecord *_c = (head); _c; _c = _n) { _n = _c->next; free(_c); } \
-    } while (0)
-#define FREE_SETUPS_LIST(head) do { \
-        TestSetupRecord *_n; \
-        for (TestSetupRecord *_c = (head); _c; _c = _n) { _n = _c->next; free(_c); } \
-    } while (0)
-
-    // Create temp source and binary paths.
-    char *src_path = make_tmp_path(".c");
-    char *bin_path = make_tmp_path("");
-    if (!src_path || !bin_path) {
-        fprintf(stderr, "error: failed to create temp paths for native test harness\n");
-        FREE_COPY_LIST(list);
-        FREE_SETUPS_LIST(setups);
-        free(src_path);
-        free(bin_path);
-        return 1;
-    }
-
-    // Write harness source.
-    FILE *f = fopen(src_path, "w");
-    if (!f) {
-        fprintf(stderr, "error: failed to open %s: %s\n", src_path, strerror(errno));
-        FREE_COPY_LIST(list); FREE_SETUPS_LIST(setups); free(src_path); free(bin_path); return 1;
-    }
-    cc_serialize_test_harness(f, vm, prog, list, setups, opts, start_at);
-    if (fclose(f) != 0) {
-        fprintf(stderr, "error: failed to write %s: %s\n", src_path, strerror(errno));
-        FREE_COPY_LIST(list); FREE_SETUPS_LIST(setups); unlink(src_path); free(src_path); free(bin_path); return 1;
-    }
-
-    // Compile harness.
-    // NOTE: We do NOT pass user -I/-isystem paths here. The generated harness
-    // uses only system includes (angle-bracket form). User include paths often
-    // contain cccc-specific header overrides (e.g., ./include/stdio.h) that
-    // conflict with the system headers that the harness depends on.
-    ArgVec build = {0};
-    argv_push(&build, cc_path);
-    argv_push(&build, src_path);
-    argv_push(&build, "-o");
-    argv_push(&build, bin_path);
-    // Suppress warnings from the harness — they come from the serialized user
-    // code whose ABI may differ slightly from the native compiler's expectations.
-    argv_push(&build, "-w");
-    if (cc_args->std_arg) {
-        char flag[256];
-        snprintf(flag, sizeof(flag), "-std=%s", cc_args->std_arg);
-        argv_push(&build, flag);
-    }
-    for (int i = 0; i < cc_args->defines_count; i++) {
-        char flag[256];
-        snprintf(flag, sizeof(flag), "-D%s", cc_args->defines[i]);
-        argv_push(&build, flag);
-    }
-    for (int i = 0; i < cc_args->undefs_count; i++) {
-        char flag[256];
-        snprintf(flag, sizeof(flag), "-U%s", cc_args->undefs[i]);
-        argv_push(&build, flag);
-    }
-    for (int i = 0; i < cc_args->lib_paths_count; i++) {
-        argv_push(&build, "-L");
-        argv_push(&build, cc_args->lib_paths[i]);
-    }
-    for (int i = 0; i < cc_args->libs_count; i++) {
-        char flag[256];
-        snprintf(flag, sizeof(flag), "-l%s", cc_args->libs[i]);
-        argv_push(&build, flag);
-    }
-
-    int compile_rc = run_argv((char *const *)build.data);
-    free(build.data);
-    if (compile_rc == 0)
-        unlink(src_path);
-    free(src_path);
-
-    if (compile_rc != 0) {
-        // Emit TAP not-ok lines for each test so the plan numbers are satisfied.
-        int tn = start_at;
-        for (TestFnRecord *r = list; r; r = r->next) {
-            const char *raw  = r->display_name ? r->display_name : r->name;
-            char disp[640];
-            snprintf(disp, sizeof(disp), "%s [native]", raw);
-            if (opts->format == TEST_FORMAT_TAP)
-                printf("not ok %d - %s # COMPILE FAILED\n", tn++, disp);
-            else if (opts->format == TEST_FORMAT_PLAIN)
-                printf("  FAIL     %s (compile failed)\n", disp);
-        }
-        FREE_COPY_LIST(list);
-        FREE_SETUPS_LIST(setups);
-        free(bin_path);
-        return 1;
-    }
-
-    FREE_COPY_LIST(list);
-    FREE_SETUPS_LIST(setups);
-    // Flush buffered output before the child writes directly to fd 1.
-    fflush(stdout);
-    // Run the compiled harness (inherits our stdout).
-    int run_rc = run_argv((char *const []){bin_path, NULL});
-    unlink(bin_path);
-    free(bin_path);
-    return run_rc;
-}

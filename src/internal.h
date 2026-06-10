@@ -666,19 +666,6 @@ typedef struct {
 
 // serialize.c
 void cc_serialize_program(FILE *f, CCCC *vm, Obj *prog, bool generated_only);
-void cc_serialize_test_harness(FILE *f, CCCC *vm, Obj *prog,
-                               TestFnRecord *list,
-                               TestSetupRecord *setups,
-                               const CcTestOptions *opts,
-                               int start_at);
-
-// Native test runner — implemented in tests.c, called from main.c.
-int cc_run_tests_native(CCCC *vm, Obj *prog,
-                        const CcTestOptions *opts,
-                        int start_at,
-                        int *out_count,
-                        const char *cc_path,
-                        const CcNativeCompileArgs *cc_args);
 
 void register_ctype_functions(CCCC *vm);
 void register_fenv_functions(CCCC *vm);
