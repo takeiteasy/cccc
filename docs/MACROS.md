@@ -392,22 +392,37 @@ Inside a comptime block:
 Blocks cannot be nested. A second `#pragma cccc comptime begin` while one is
 already open is a hard error.
 
-**Bare form** — omit `begin` to activate without a keyword; close with
-`#pragma cccc comptime end` (or bare `#pragma cccc end` for backwards compatibility). Useful at the top of a dedicated comptime helper
-file where the whole file is comptime:
+**Bare (whole-file) form** — omit `begin` to mark the rest of the file as
+comptime. No closing `end` is needed; the block closes silently at EOF.
+Place the pragma after any `#include` directives so that standard headers are
+still processed as normal compilation includes:
 
 ```c
-#pragma cccc comptime
-int double_it(int n) { return n * 2; }
-int scale = 3;
-#pragma cccc comptime end
+#include <stdio.h>
+#include <string.h>
+#include_comptime <glob.h>  // only in comptime unit
 
-int main(void) { return double_it(scale * 7); }
+#pragma cccc comptime       // everything below is comptime; no 'end' needed
+
+int glob_count(const char *pat, int flags) {
+    glob_t g;
+    glob(pat, flags, NULL, &g);
+    int n = (int)g.gl_pathc;
+    globfree(&g);
+    return n;
+}
+int scale = 3;
+
+glob_count("include/*.h", 0);  // file-scope macro call
 ```
 
-**Auto-close in headers** — if a header opens a comptime block but omits
-`#pragma cccc comptime end` (or bare `#pragma cccc end`), the block is closed automatically when the header ends
-and a `[-Wcomptime-block-leak]` warning is emitted.
+An explicit `#pragma cccc comptime end` (or `#pragma cccc end`) is still
+accepted to close the block early.
+
+**Auto-close in headers** — if a `#pragma cccc comptime begin` block in a header
+omits `#pragma cccc comptime end`, the block is closed automatically when the
+header ends and a `[-Wcomptime-block-leak]` warning is emitted. The bare
+whole-file form never triggers this warning.
 
 ### Comptime-only includes
 

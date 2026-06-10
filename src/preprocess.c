@@ -2501,6 +2501,10 @@ static bool probe_function_definition(Token *tok) {
 // Returns true if tok starts a plain variable/struct declaration (has an
 // identifier before = or ; and no function-body brace at depth 0).
 static bool probe_var_declaration(Token *tok) {
+    // A file-scope call like foo(); starts with IDENT immediately followed by
+    // '('. That is an expression statement, not a declaration — reject it.
+    if (tok && tok->kind == TK_IDENT && tok->next && equal(tok->next, "("))
+        return false;
     Token *probe = tok;
     bool found_ident = false;
     int depth = 0;
@@ -2516,13 +2520,36 @@ static bool probe_var_declaration(Token *tok) {
     return false;
 }
 
+// If tok starts a struct/union/enum type definition (no variable after '}'),
+// return the token AFTER the closing ';'.  Return NULL otherwise.
+// Used to bulk-pass struct type definitions through the comptime block
+// handler so individual body tokens never trigger false extractions.
+static Token *probe_struct_type_def_end(Token *tok) {
+    if (!equal(tok, "struct") && !equal(tok, "union") && !equal(tok, "enum"))
+        return NULL;
+    Token *p = tok->next;
+    if (p && p->kind == TK_IDENT) p = p->next;   // optional tag name
+    if (!p || !equal(p, "{")) return NULL;
+    int d = 0;
+    while (p && p->kind != TK_EOF) {
+        if (equal(p, "{"))        d++;
+        else if (equal(p, "}")) { if (--d == 0) { p = p->next; break; } }
+        p = p->next;
+    }
+    if (!p || !equal(p, ";")) return NULL;        // must end with ';' (no var name)
+    return p->next;                               // token after ';'
+}
+
 // Inside a #pragma cccc comptime begin...end block, try to intercept an
 // unannotated function definition or variable declaration and extract it
 // as an implicit [[cccc::comptime]] entity.  Called from preprocess2 AFTER
 // the _Pragma check so _Pragma tokens are never mis-routed.
 // Returns true and advances *tok_ptr past the extracted definition on match.
+// NOTE: struct/union/enum type definitions are handled by the caller via
+// probe_struct_type_def_end; this function will never see them.
 static bool try_extract_comptime_block_decl(CCCC *vm, Token **tok_ptr) {
     Token *tok = *tok_ptr;
+
     if (probe_function_definition(tok)) {
         *tok_ptr = extract_macro_function(vm, tok, true, false);
         return true;
@@ -2647,20 +2674,23 @@ static Token *handle_pragma_body(CCCC *vm, Token *tok) {
             if (after && equal(after, "end")) {
                 if (!vm->compiler.in_comptime_block)
                     error_tok(vm, tok, "stray #pragma cccc comptime end without matching begin");
-                vm->compiler.in_comptime_block = false;
-                vm->compiler.comptime_block_file = NULL;
+                vm->compiler.in_comptime_block      = false;
+                vm->compiler.comptime_block_file    = NULL;
+                vm->compiler.comptime_block_needs_end = false;
                 return skip_line(vm, after->next);
             }
             bool is_begin = after && equal(after, "begin");
             if (vm->compiler.in_comptime_block)
                 error_tok(vm, tok, "#pragma cccc comptime: blocks cannot be nested");
-            vm->compiler.in_comptime_block = true;
-            vm->compiler.comptime_block_file = tok->file;
+            vm->compiler.in_comptime_block        = true;
+            vm->compiler.comptime_block_file      = tok->file;
+            vm->compiler.comptime_block_needs_end = is_begin;
             return skip_line(vm, is_begin ? after->next : after);
         } else if (equal(sub, "end")) {
             if (vm->compiler.in_comptime_block) {
-                vm->compiler.in_comptime_block = false;
-                vm->compiler.comptime_block_file = NULL;
+                vm->compiler.in_comptime_block      = false;
+                vm->compiler.comptime_block_file    = NULL;
+                vm->compiler.comptime_block_needs_end = false;
             } else if (vm->compiler.current_suite) {
                 free(vm->compiler.current_suite);
                 vm->compiler.current_suite = NULL;
@@ -2746,13 +2776,30 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
             if (vm->compiler.in_comptime_block) {
                 // Auto-close if the file that opened the block has ended.
                 if (tok->file != vm->compiler.comptime_block_file) {
-                    warn_tok(vm, tok, CCCC_WARN_COMPTIME_BLOCK_LEAK,
-                             "unclosed #pragma cccc comptime begin in included file; "
-                             "block closed automatically");
-                    vm->compiler.in_comptime_block = false;
-                    vm->compiler.comptime_block_file = NULL;
-                } else if (try_extract_comptime_block_decl(vm, &tok)) {
-                    continue;
+                    if (vm->compiler.comptime_block_needs_end)
+                        warn_tok(vm, tok, CCCC_WARN_COMPTIME_BLOCK_LEAK,
+                                 "unclosed #pragma cccc comptime begin in included file; "
+                                 "block closed automatically");
+                    vm->compiler.in_comptime_block      = false;
+                    vm->compiler.comptime_block_file    = NULL;
+                    vm->compiler.comptime_block_needs_end = false;
+                } else {
+                    // struct/union/enum type definitions must pass through
+                    // en-bloc so body tokens don't trigger false extractions.
+                    Token *struct_end = probe_struct_type_def_end(tok);
+                    if (struct_end) {
+                        while (tok != struct_end) {
+                            tok->line_delta = tok->file->line_delta;
+                            tok->filename = tok->file->display_name;
+                            tok->diag_warnings = (1ULL << 63) | vm->compiler.warnings;
+                            tok->diag_werror   = (1ULL << 63) | vm->compiler.warning_errors;
+                            cur = cur->next = tok;
+                            tok = tok->next;
+                        }
+                        continue;
+                    }
+                    if (try_extract_comptime_block_decl(vm, &tok))
+                        continue;
                 }
             }
 
@@ -3348,6 +3395,14 @@ static void join_adjacent_string_literals(CCCC *vm, Token *tok) {
 // Entry point function of the preprocessor.
 Token *preprocess(CCCC *vm, Token *tok) {
     tok = preprocess2(vm, tok);
+    // Bare '#pragma cccc comptime' (whole-file form): silently close at EOF.
+    // The begin/end form is handled by explicit 'end'; its unclosed-block
+    // warning fires in preprocess2 when tokens from a different file appear.
+    if (vm->compiler.in_comptime_block && !vm->compiler.comptime_block_needs_end) {
+        vm->compiler.in_comptime_block      = false;
+        vm->compiler.comptime_block_file    = NULL;
+        vm->compiler.comptime_block_needs_end = false;
+    }
     if (vm->compiler.cond_incl)
         error_tok(vm, vm->compiler.cond_incl->tok,
                   "unterminated conditional directive (started with #%.*s)",
