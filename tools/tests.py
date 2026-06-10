@@ -31,8 +31,12 @@ JBC_SKIP_TESTS = {
 
 # Tests that hang under leaks --atExit due to fork()/wait() interactions
 # with the leaks instrumentation (child inherits MallocStackLogging hooks).
+# The child inherits the leak-tracking library injected by leaks -atExit,
+# so if the test calls exit() or triggers a signal, the library's atexit
+# handler in the child hangs.
 LEAKS_SKIP_TESTS = {
     "test_posix_sys_wait.c",
+    "test_exit_code.c",
 }
 
 

@@ -932,6 +932,12 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
             if (pid == 0) {
                 signal(SIGALRM, SIG_DFL);
                 s_fork_child_pid = 0;
+                // Prevent leaks -atExit instrumentation (handed down via
+                // MallocStackLogging / DYLD_INSERT_LIBRARIES) from hanging
+                // in the child when the test calls exit(2) or crashes.
+                unsetenv("MallocStackLogging");
+                unsetenv("MallocStackLoggingNoCompact");
+                unsetenv("DYLD_INSERT_LIBRARIES");
                 cc_run_at(vm, (CCCCPc)fn->code_addr, 0, NULL);
                 _exit(0);
             }

@@ -188,11 +188,11 @@ fuzz-info:
 
 fuzz: fuzz-info
 
-STD_TEMPLATE := tools/stdlib.c
+STD_TEMPLATE := tools/generate_stdlib.c
 
 # Regenerate src/std.c from the template.
 # src/std.c is committed so the normal build never needs this; run it
-# explicitly after editing tools/stdlib.c or include/*.h.
+# explicitly after editing tools/generate_stdlib.c or include/*.h.
 .PHONY: stdlib
 stdlib: $(EXE_OUT)
 	@set -e; \
