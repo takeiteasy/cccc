@@ -456,6 +456,62 @@ The process exits with code `0` if all tests pass, `1` if any fail.
 
 This is useful in build scripts that want to guard bytecode or native compilation behind a passing test run.
 
+## Native Execution
+
+By default, `--testing` runs every test inside the CCCC VM. Tests can instead
+run as **compiled native code** for speed, either for the whole file or on a
+per-test basis.
+
+### Run everything natively: `--testing -c=native`
+
+```
+./cccc --testing -c=native myfile.c
+```
+
+All non-negative (`error = "..."` is unaffected) tests in the file are
+serialized to a single C source file, compiled with the system C compiler,
+and run as a native binary. Each test runs in its own forked child process,
+so global/static state mutated by one test does not leak into the next
+(mirroring the VM's data-segment snapshot/reset behavior). Native test names
+are suffixed `[native]` in the output:
+
+```
+TAP version 13
+1..2
+ok 1 - test_add [native]
+ok 2 - test_mul [native]
+```
+
+### Per-test native mode: `mode = "native"`
+
+```c
+[[cccc::test(mode = "native")]]
+void test_hot_path(void) {
+    $assert_eq(compute(40, 2), 42);
+}
+```
+
+Only tests with `mode = "native"` run natively; all other tests in the file
+continue to run in the VM. TAP/PLAIN/JSON numbering is sequential across both
+passes — VM tests are numbered first, followed by native tests, in a single
+combined plan (`1..N`).
+
+`mode = "native"` cannot be combined with `error = "..."` — negative tests
+are evaluated at compile time, not by running native code, so this
+combination is rejected with a parse-time error.
+
+### How it works
+
+- All `$assert*` macros work identically in native mode — they call into a
+  small embedded native runtime (real C signatures, not VM FFI) that mirrors
+  `include/cccc/tests.h`.
+- `return = value` / `return_epsilon = ...` assertions are checked inline in
+  the generated native harness.
+- Each test forks; the child reports pass/fail/timeout back to the parent
+  over a pipe. A crashing or signaled child is reported as a failure.
+- `timeout = <ms>` (per-test) and `--test-timeout=<seconds>` (global) both
+  work in native mode via `SIGALRM`/`setitimer`, same as in the VM.
+
 ## Filtering Tests
 
 Run a subset of tests without modifying the source file.
@@ -625,3 +681,19 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 - Suite blocks (`#pragma cccc suite begin/end`) cannot be nested.
 - **Negative test bodies are matched against error substrings.** Use a substring that is specific enough to avoid false matches but not so specific that it breaks with minor message wording changes.
 - `--test-timeout` uses `SIGALRM`; test code that also uses `alarm()` or installs a `SIGALRM` handler will interfere with the timeout mechanism.
+
+### Native execution (`-c=native` / `mode = "native"`)
+
+- `++`/`--` (pre- and post-increment/decrement) on any variable are not yet
+  supported by `-c=native`'s C serializer and produce a compile error
+  (tracked as [#360](https://todo.sr.ht/~takeiteasy/cccc/360)). Use
+  `x = x + 1` / `x += 1` instead in native-mode test bodies and any
+  setup/teardown hooks they call.
+- Struct/union global initializers serialize as `/* init data */` and will
+  fail native compilation — use scalar globals (int, float, `char *`) only
+  in files with native-mode tests.
+- In mixed mode (some tests `mode = "native"`, others VM), PLAIN and JSON
+  output produce two separate summary blocks (one per pass). TAP output is a
+  single sequential stream and is unaffected.
+- `--list-tests` does not currently merge native and VM test listings into a
+  single combined view.

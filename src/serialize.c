@@ -21,6 +21,9 @@
 // Converts AST nodes back to C source text for -M pragma macro expansion output
 
 #include "./internal.h"
+#ifndef _WIN32
+#include <fnmatch.h>
+#endif
 
 // Operator precedence (higher = binds tighter)
 static int get_precedence(NodeKind kind) {
@@ -165,6 +168,15 @@ static void serialize_expr(FILE *f, CCCC *vm, SerializeContext *ctx, Node *node,
                            int parent_prec);
 static void serialize_stmt(FILE *f, CCCC *vm, SerializeContext *ctx, Node *node,
                            int indent);
+
+// Returns true if the node produces no output (effectively a no-op expression).
+static bool is_noop_expr(Node *node) {
+    if (!node) return true;
+    if (node->kind == ND_NULL_EXPR) return true;
+    if (node->kind == ND_COMMA)
+        return is_noop_expr(node->lhs) && is_noop_expr(node->rhs);
+    return false;
+}
 static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
                                           Obj *owner_fn);
 static bool type_has_tag_for_owner(SerializeContext *ctx, Type *ty,
@@ -628,10 +640,24 @@ static void serialize_expr(FILE *f, CCCC *vm, SerializeContext *ctx, Node *node,
     case ND_LOGAND:
     case ND_LOGOR:
     case ND_ASSIGN:
-    case ND_COMMA:
         serialize_expr(f, vm, ctx, node->lhs, node_prec);
         fprintf(f, " %s ", get_binary_op_str(node->kind));
         serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
+        break;
+
+    case ND_COMMA:
+        // Skip null sides — ND_NULL_EXPR , X is not valid C.
+        if (is_noop_expr(node->lhs) && is_noop_expr(node->rhs))
+            break;
+        if (is_noop_expr(node->lhs)) {
+            serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
+        } else if (is_noop_expr(node->rhs)) {
+            serialize_expr(f, vm, ctx, node->lhs, node_prec);
+        } else {
+            serialize_expr(f, vm, ctx, node->lhs, node_prec);
+            fprintf(f, " , ");
+            serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
+        }
         break;
 
     case ND_NEG:
@@ -746,6 +772,7 @@ static void serialize_stmt(FILE *f, CCCC *vm, SerializeContext *ctx, Node *node,
         break;
 
     case ND_EXPR_STMT:
+        if (is_noop_expr(node->lhs)) break;
         print_indent_level(f, indent);
         serialize_expr(f, vm, ctx, node->lhs, 0);
         fprintf(f, ";\n");
@@ -947,6 +974,22 @@ static void serialize_global_var(FILE *f, CCCC *vm, SerializeContext *ctx,
         fprintf(f, " = ");
         if (var->ty->kind == TY_ARRAY && var->ty->base->kind == TY_CHAR) {
             serialize_string(f, var->init_data);
+        } else if (var->ty->kind == TY_FLOAT) {
+            float fv; memcpy(&fv, var->init_data, 4);
+            fprintf(f, "%.9gf", (double)fv);
+        } else if (var->ty->kind == TY_DOUBLE || var->ty->kind == TY_LDOUBLE) {
+            double dv; memcpy(&dv, var->init_data, 8);
+            fprintf(f, "%.17g", dv);
+        } else if (var->ty->kind == TY_BOOL || var->ty->kind == TY_CHAR ||
+                   var->ty->kind == TY_SHORT || var->ty->kind == TY_INT ||
+                   var->ty->kind == TY_LONG || var->ty->kind == TY_ENUM ||
+                   var->ty->kind == TY_PTR) {
+            int64_t iv = 0;
+            int sz = var->ty->size < 8 ? var->ty->size : 8;
+            memcpy(&iv, var->init_data, sz);
+            if (sz < 8 && (iv >> (sz * 8 - 1)) & 1)
+                iv |= (-1LL << (sz * 8));
+            fprintf(f, "%lld", (long long)iv);
         } else {
             fprintf(f, "/* init data */");
         }
@@ -1193,4 +1236,310 @@ char *serialize_node_to_source(CCCC *vm, Node *node) {
     free(ctx.typedefs);
 
     return buffer;
+}
+
+// ============================================================================
+
+// ============================================================================
+// Native test harness serialization (--testing -c=native)
+// ============================================================================
+
+
+// Runtime C source emitted verbatim at the top of the generated harness file.
+// Implements all __cccc_assert_* functions using native C signatures.
+static const char s_native_runtime[] = {
+#embed "native_harness_runtime.inc" suffix(, 0)
+};
+
+// $assert* macros — embed the canonical header directly so the macro
+// definitions never drift out of sync with include/cccc/tests.h.
+static const char s_native_macros[] = {
+#embed "../include/cccc/tests.h" suffix(, 0)
+};
+
+// Emit a C string literal with proper escaping into f.
+static void emit_cstr(FILE *f, const char *s) {
+    if (!s) { fputs("NULL", f); return; }
+    fputc('"', f);
+    for (const char *p = s; *p; p++) {
+        if      (*p == '"')  fputs("\\\"", f);
+        else if (*p == '\\') fputs("\\\\", f);
+        else if (*p == '\n') fputs("\\n",  f);
+        else if (*p == '\r') fputs("\\r",  f);
+        else if (*p == '\t') fputs("\\t",  f);
+        else                 fputc(*p, f);
+    }
+    fputc('"', f);
+}
+
+// Count positive (non-error_pat) native tests matching the filter options.
+static int count_matching_native(TestFnRecord *list, const CcTestOptions *opts) {
+    int n = 0;
+    for (TestFnRecord *r = list; r; r = r->next) {
+        if (r->error_pat) continue;
+        const char *disp = r->display_name ? r->display_name : r->name;
+        if (opts->test_glob && fnmatch(opts->test_glob, disp, 0) != 0)
+            continue;
+        if (opts->suite_filter && (!r->suite || strcmp(r->suite, opts->suite_filter) != 0))
+            continue;
+        n++;
+    }
+    return n;
+}
+
+// Emit the return-value check for one test into the generated child code.
+// On entry: __res.passed == 1, _ri/_rf/_rs hold the captured return value.
+static void emit_child_ret_check(FILE *f, const TestFnRecord *r) {
+    if (r->ret_kind == RET_NONE) return;
+
+    double eps = r->ret_epsilon > 0.0 ? r->ret_epsilon : 1e-9;
+    // CmpOp values: NONE=0 EQ=1 NE=2 LT=3 LE=4 GT=5 GE=6
+    int op = (int)r->ret_op;
+
+    if (r->ret_kind == RET_INT) {
+        fprintf(f,
+            "                    {\n"
+            "                    int64_t _got=_ri,_exp=%lldLL;\n"
+            "                    int _ok;\n"
+            "                    switch(%d){\n"
+            "                    case 1:_ok=(_got==_exp);break;\n"
+            "                    case 2:_ok=(_got!=_exp);break;\n"
+            "                    case 3:_ok=(_got< _exp);break;\n"
+            "                    case 4:_ok=(_got<=_exp);break;\n"
+            "                    case 5:_ok=(_got> _exp);break;\n"
+            "                    case 6:_ok=(_got>=_exp);break;\n"
+            "                    default:_ok=1;break;}\n"
+            "                    if(!_ok){__res.passed=0;"
+            "snprintf(__res.fail_msg,sizeof(__res.fail_msg),"
+            "\"expected return %s %%lld, got %%lld\",_exp,_got);}\n"
+            "                    }\n",
+            (long long)r->ret_expect.ret_int, op, cmp_op_str(r->ret_op));
+    } else if (r->ret_kind == RET_FLOAT) {
+        fprintf(f,
+            "                    {\n"
+            "                    double _got=_rf,_exp=%.17g,_eps=%.17g;\n"
+            "                    int _ok;\n"
+            "                    switch(%d){\n"
+            "                    case 1:{double _d=_got-_exp;if(_d<0)_d=-_d;_ok=(_d<_eps);break;}\n"
+            "                    case 2:{double _d=_got-_exp;if(_d<0)_d=-_d;_ok=!(_d<_eps);break;}\n"
+            "                    case 3:_ok=(_got< _exp);break;\n"
+            "                    case 4:_ok=(_got<=_exp);break;\n"
+            "                    case 5:_ok=(_got> _exp);break;\n"
+            "                    case 6:_ok=(_got>=_exp);break;\n"
+            "                    default:_ok=1;break;}\n"
+            "                    if(!_ok){__res.passed=0;"
+            "snprintf(__res.fail_msg,sizeof(__res.fail_msg),"
+            "\"expected return %s %%g, got %%g\",_exp,_got);}\n"
+            "                    }\n",
+            r->ret_expect.ret_float, eps, op, cmp_op_str(r->ret_op));
+    } else if (r->ret_kind == RET_STR) {
+        const char *exp_str = r->ret_expect.ret_str ? r->ret_expect.ret_str : "";
+        fprintf(f,
+            "                    {\n"
+            "                    const char *_got=_rs,*_exp=");
+        emit_cstr(f, exp_str);
+        fprintf(f,
+            ";\n"
+            "                    int _cmp=(_got&&_exp)?strcmp(_got,_exp):(_got!=_exp);\n"
+            "                    int _ok;\n"
+            "                    switch(%d){\n"
+            "                    case 1:_ok=(_cmp==0);break;\n"
+            "                    case 2:_ok=(_cmp!=0);break;\n"
+            "                    case 3:_ok=(_cmp< 0);break;\n"
+            "                    case 4:_ok=(_cmp<=0);break;\n"
+            "                    case 5:_ok=(_cmp> 0);break;\n"
+            "                    case 6:_ok=(_cmp>=0);break;\n"
+            "                    default:_ok=1;break;}\n"
+            "                    if(!_ok){__res.passed=0;"
+            "snprintf(__res.fail_msg,sizeof(__res.fail_msg),"
+            "\"expected return %s \\\"%%s\\\", got \\\"%%s\\\"\","
+            "_exp?_exp:\"(null)\",_got?_got:\"(null)\");}\n"
+            "                    }\n",
+            op, cmp_op_str(r->ret_op));
+    }
+}
+
+void cc_serialize_test_harness(FILE *f, CCCC *vm, Obj *prog,
+                               TestFnRecord *list,
+                               const CcTestOptions *opts,
+                               int start_at) {
+    // ── Native runtime + assert macros ───────────────────────────────────────
+    fputs(s_native_runtime, f);
+    fputs(s_native_macros,  f);
+
+    // ── User code ─────────────────────────────────────────────────────────────
+    cc_serialize_program(f, vm, prog, false);
+
+    // ── Typed wrappers (avoids UB with void-fn pointers) ─────────────────────
+    fprintf(f, "\n/* --- test wrappers --- */\n");
+    for (TestFnRecord *r = list; r; r = r->next) {
+        if (r->error_pat) continue;
+        fprintf(f,
+            "static void __wrap_%s(int64_t *_ri,double *_rf,const char **_rs){\n",
+            r->name);
+        switch (r->ret_kind) {
+        case RET_INT:
+            fprintf(f, "    *_ri=(int64_t)%s();\n", r->name); break;
+        case RET_FLOAT:
+            fprintf(f, "    *_rf=(double)%s();\n",  r->name); break;
+        case RET_STR:
+            fprintf(f, "    *_rs=(const char*)%s();\n", r->name); break;
+        default:
+            fprintf(f, "    (void)_ri;(void)_rf;(void)_rs;%s();\n", r->name); break;
+        }
+        fprintf(f, "}\n");
+    }
+
+    // ── main() ───────────────────────────────────────────────────────────────
+    int total          = count_matching_native(list, opts);
+    int global_timeout = opts->test_timeout; // seconds
+
+    fprintf(f,
+        "\nint main(void){\n"
+        "    int _fmt=%d,_fail_fast=%d,_gtimeout=%d;\n"
+        "    int _tn=%d,_passed=0,_failed=0,_timeouts=0;\n"
+        "    const char *_suite_cur=NULL;\n",
+        (int)opts->format,
+        opts->fail_fast ? 1 : 0,
+        global_timeout,
+        start_at);
+
+    // Header (only for pure-native mode where start_at==1)
+    if (start_at == 1) {
+        fprintf(f,
+            "    if(_fmt==0) printf(\"TAP version 13\\n1..%d\\n\");\n"
+            "    else if(_fmt==1) printf(\"Running %d test(s)...\\n\");\n"
+            "    else printf(\"[\\n\");\n",
+            total, total);
+    }
+
+    for (TestFnRecord *r = list; r; r = r->next) {
+        if (r->error_pat) continue;
+
+        const char *raw = r->display_name ? r->display_name : r->name;
+        // display name gets "[native]" suffix
+        char disp[640];
+        snprintf(disp, sizeof(disp), "%s [native]", raw);
+
+        long eff_ms = r->timeout_ms > 0 ? r->timeout_ms
+                    : (global_timeout > 0 ? (long)global_timeout * 1000L : 0L);
+
+        fprintf(f, "    /* test: %s */\n    {\n", r->name);
+
+        // Filter: test_glob (baked at serialization time — no runtime filtering needed
+        // since we already counted matching tests). But we still need it if the user
+        // wants to re-run with --test flag at binary level. For v1, filters are baked.
+
+        // Suite header for PLAIN output
+        if (r->suite) {
+            fprintf(f, "    if(_fmt==1&&(_suite_cur==NULL||strcmp(_suite_cur,");
+            emit_cstr(f, r->suite);
+            fprintf(f, ")!=0)){printf(\"\\n-- %%s --\\n\",");
+            emit_cstr(f, r->suite);
+            fprintf(f, ");_suite_cur=");
+            emit_cstr(f, r->suite);
+            fprintf(f, ";}\n");
+        }
+
+        // Fork
+        fprintf(f,
+            "    {\n"
+            "        int __pfd[2];\n"
+            "        if(pipe(__pfd)!=0){perror(\"pipe\");return 1;}\n"
+            "        fflush(stdout);\n"
+            "        pid_t __pid=fork();\n"
+            "        if(__pid<0){perror(\"fork\");return 1;}\n"
+            "        if(__pid==0){\n"
+            "            close(__pfd[0]);\n"
+            "            __cccc_run_t __run={0};\n"
+            "            __s_run=&__run;\n"
+            "            __s_alarm_fired=0;\n"
+            "            signal(SIGALRM,__cccc_alarm_hdl);\n");
+
+        if (eff_ms > 0) {
+            fprintf(f,
+                "            {struct itimerval __tv={{0,0},{%ldL,%ldL}};"
+                "setitimer(ITIMER_REAL,&__tv,NULL);}\n",
+                eff_ms / 1000L, (eff_ms % 1000L) * 1000L);
+        }
+
+        fprintf(f,
+            "            __cccc_result __res={0};\n"
+            "            int64_t _ri=0;double _rf=0.0;const char *_rs=NULL;\n"
+            "            int __jv=setjmp(__run.jmp);\n"
+            "            if(__jv==0){\n"
+            "                __wrap_%s(&_ri,&_rf,&_rs);\n",
+            r->name);
+
+        // Capture return value
+        if (r->ret_kind == RET_INT)   fprintf(f, "                /* ret captured in _ri */\n");
+        if (r->ret_kind == RET_FLOAT) fprintf(f, "                /* ret captured in _rf */\n");
+        if (r->ret_kind == RET_STR) {
+            fprintf(f,
+                "                if(_rs)strncpy(__res.ret_str,_rs,sizeof(__res.ret_str)-1);\n");
+        }
+
+        fprintf(f, "                __res.passed=1;\n");
+
+        // Return-value assertion (while still in passed branch, before the jmp escapes)
+        if (r->ret_kind != RET_NONE) {
+            emit_child_ret_check(f, r);
+        }
+
+        fprintf(f,
+            "            } else if(__jv==2){\n"
+            "                __res.timed_out=1;\n"
+            "            } else {\n"
+            "                snprintf(__res.fail_msg,sizeof(__res.fail_msg),\"%%s\",__run.fail_msg);\n"
+            "            }\n");
+
+        if (eff_ms > 0) {
+            fprintf(f,
+                "            {struct itimerval __z={{0,0},{0,0}};setitimer(ITIMER_REAL,&__z,NULL);}\n");
+        }
+
+        fprintf(f,
+            "            write(__pfd[1],&__res,sizeof(__res));\n"
+            "            _exit(0);\n"
+            "        }\n"
+            "        /* parent */\n"
+            "        close(__pfd[1]);\n"
+            "        __cccc_result __res={0};\n"
+            "        ssize_t __nr=read(__pfd[0],&__res,sizeof(__res));\n"
+            "        close(__pfd[0]);\n"
+            "        int __st=0;waitpid(__pid,&__st,0);\n"
+            "        if(__nr<(ssize_t)sizeof(__res)){\n"
+            "            __res.passed=0;\n"
+            "            if(__nr==0&&WIFSIGNALED(__st))\n"
+            "                snprintf(__res.fail_msg,sizeof(__res.fail_msg),\n"
+            "                    \"child killed by signal %%d\",WTERMSIG(__st));\n"
+            "            else\n"
+            "                snprintf(__res.fail_msg,sizeof(__res.fail_msg),\"child exited unexpectedly\");\n"
+            "        }\n"
+            "        __cccc_report(_tn++,");
+        emit_cstr(f, disp);
+        fprintf(f,
+            ",_fmt,&__res,&_passed,&_failed,&_timeouts);\n"
+            "        if(_fail_fast&&(_failed+_timeouts)>0) return 1;\n"
+            "    }\n"
+            "    }\n\n");
+    }
+
+    // Footer / summary (only for pure-native; mixed mode parent owns the summary)
+    if (start_at == 1) {
+        fprintf(f,
+            "    if(_fmt==1){\n"
+            "        printf(\"\\n\");\n"
+            "        printf(\"Total:   %%8d\\n\",_passed+_failed+_timeouts);\n"
+            "        printf(\"Passed:  %%8d\\n\",_passed);\n"
+            "        printf(\"Failed:  %%8d\\n\",_failed+_timeouts);\n"
+            "    } else if(_fmt==2) printf(\"]\\n\");\n");
+    } else {
+        // Mixed mode: just close JSON array if needed (parent opened it)
+        fprintf(f,
+            "    /* mixed mode: parent owns header/footer */\n"
+            "    (void)_passed;(void)_failed;(void)_timeouts;\n");
+    }
+
+    fprintf(f, "    return (_failed+_timeouts)>0?1:0;\n}\n");
 }

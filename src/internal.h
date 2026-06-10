@@ -642,6 +642,43 @@ void   cc_load_test_runtime(CCCC *vm);
 Token *cc_inject_test_header(CCCC *vm);
 int    cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts);
 
+// native.c / main.c shared infrastructure
+typedef struct {
+    const char **data;
+    int          len;
+    int          cap;
+} ArgVec;
+
+void   argv_push(ArgVec *args, const char *arg);
+char  *make_tmp_path(const char *suffix);
+int    run_argv(char *const argv[]);
+
+// Native compile flags extracted from a CCCC vm instance.
+typedef struct {
+    const char **inc_paths;       int inc_paths_count;
+    const char **sys_inc_paths;   int sys_inc_paths_count;
+    const char **lib_paths;       int lib_paths_count;
+    const char **libs;            int libs_count;
+    const char **defines;         int defines_count;
+    const char **undefs;          int undefs_count;
+    const char  *std_arg;
+} CcNativeCompileArgs;
+
+// serialize.c
+void cc_serialize_program(FILE *f, CCCC *vm, Obj *prog, bool generated_only);
+void cc_serialize_test_harness(FILE *f, CCCC *vm, Obj *prog,
+                               TestFnRecord *list,
+                               const CcTestOptions *opts,
+                               int start_at);
+
+// Native test runner — implemented in tests.c, called from main.c.
+int cc_run_tests_native(CCCC *vm, Obj *prog,
+                        const CcTestOptions *opts,
+                        int start_at,
+                        int *out_count,
+                        const char *cc_path,
+                        const CcNativeCompileArgs *cc_args);
+
 void register_ctype_functions(CCCC *vm);
 void register_fenv_functions(CCCC *vm);
 void register_locale_functions(CCCC *vm);

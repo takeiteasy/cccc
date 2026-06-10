@@ -1,6 +1,6 @@
-cccc
-cccc.exe
-cccc-*
+/cccc
+/cccc.exe
+/cccc-*
 libcccc*
 *.dSYM
 *~

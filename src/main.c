@@ -25,19 +25,14 @@
 #define CCCC_ISATTY _isatty
 #define CCCC_FILENO _fileno
 #else
+#include <fnmatch.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #define CCCC_ISATTY isatty
 #define CCCC_FILENO fileno
 #endif
 
-typedef struct {
-    const char **data;
-    int len;
-    int cap;
-} ArgVec;
-
-static void argv_push(ArgVec *args, const char *arg) {
+void argv_push(ArgVec *args, const char *arg) {
     if (args->len + 1 >= args->cap) {
         int new_cap = args->cap ? args->cap * 2 : 16;
         const char **new_data = realloc(args->data, sizeof(char *) * new_cap);
@@ -50,7 +45,7 @@ static void argv_push(ArgVec *args, const char *arg) {
     args->data[args->len] = NULL;
 }
 
-static char *make_tmp_path(const char *suffix) {
+char *make_tmp_path(const char *suffix) {
 #if defined(_WIN32)
     (void)suffix;
     return NULL;
@@ -77,7 +72,7 @@ static char *make_tmp_path(const char *suffix) {
 #endif
 }
 
-static int run_argv(char *const argv[]) {
+int run_argv(char *const argv[]) {
 #if defined(_WIN32)
     (void)argv;
     fprintf(stderr, "error: -c=native is not supported on Windows yet\n");
@@ -1317,7 +1312,7 @@ int main(int argc, const char *argv[]) {
                 usage(argv[0], 1);
             }
         }
-        if (!out_file) {
+        if (!out_file && !testing_mode) {
             fprintf(stderr,
                     "error: -c=native requires -o <file>\n");
             usage(argv[0], 1);
@@ -1818,18 +1813,64 @@ int main(int argc, const char *argv[]) {
     // `goto BAIL;` before the legacy `out_file` save block, silently
     // swallowing `-c -o foo.jbc`.
     if (testing_mode) {
+        bool force_native_all = (compile_format == COMPILE_NATIVE);
+
+        // Pre-count VM-pass tests and native tests for the TAP plan line.
+        int n_vm_and_neg = 0, n_native_pos = 0;
+        for (TestFnRecord *r = vm.compiler.test_fns; r; r = r->next) {
+            if (test_glob && fnmatch(test_glob,
+                    r->display_name ? r->display_name : r->name, 0) != 0)
+                continue;
+            if (suite_filter && (!r->suite || strcmp(r->suite, suite_filter) != 0))
+                continue;
+            if (!r->error_pat && (r->mode == TEST_MODE_NATIVE || force_native_all))
+                n_native_pos++;
+            else
+                n_vm_and_neg++;
+        }
+
         CcTestOptions test_opts = {
-            .test_glob    = test_glob,
-            .suite_filter = suite_filter,
-            .list_only    = (bool)list_tests,
-            .fail_fast    = (bool)fail_fast,
-            .test_timeout = test_timeout,
-            .format       = test_format,
+            .test_glob       = test_glob,
+            .suite_filter    = suite_filter,
+            .list_only       = (bool)list_tests,
+            .fail_fast       = (bool)fail_fast,
+            .test_timeout    = test_timeout,
+            .format          = test_format,
+            .force_native    = force_native_all,
+            .total_tap_count = n_vm_and_neg + n_native_pos,
         };
+
+        // VM pass: negative tests + vm-mode positives
         exit_code = cc_run_tests(&vm, merged_prog, &test_opts);
-        if (exit_code != 0 || compile_format == COMPILE_NONE)
-            goto BAIL;
-        // tests passed and a compile target was also requested — fall through
+
+        // Native pass (if any native tests, unless fail_fast already triggered)
+        if (n_native_pos > 0 && !(exit_code != 0 && fail_fast)) {
+            char *cc_path = cccc_find_native_cc();
+            CcNativeCompileArgs cc_args = {
+                .inc_paths          = inc_paths,
+                .inc_paths_count    = inc_paths_count,
+                .sys_inc_paths      = sys_inc_paths,
+                .sys_inc_paths_count = sys_inc_paths_count,
+                .lib_paths          = lib_paths,
+                .lib_paths_count    = lib_paths_count,
+                .libs               = libs,
+                .libs_count         = libs_count,
+                .defines            = defines,
+                .defines_count      = defines_count,
+                .undefs             = undefs,
+                .undefs_count       = undefs_count,
+                .std_arg            = std_arg,
+            };
+            int n_ran = 0;
+            int native_rc = cc_run_tests_native(&vm, merged_prog, &test_opts,
+                                                n_vm_and_neg + 1, &n_ran,
+                                                cc_path, &cc_args);
+            if (native_rc != 0)
+                exit_code = native_rc;
+            free(cc_path);
+        }
+
+        goto BAIL;   // never fall through to the compile block
     }
 
     if (compile_format == COMPILE_BYTECODE) {
