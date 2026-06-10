@@ -1,16 +1,39 @@
 # CCCC Testing Framework
 
-CCCC includes a built-in test framework for writing tests directly in C, using the `[[cccc::test]]` attribute to mark test functions and `$assert*` macros for assertions.
+CCCC includes a built-in test framework for writing tests directly in C, using
+the `[[cccc::test]]` attribute to mark test functions and `$assert*` macros for
+assertions.
+
+## Attribute syntax variants
+
+Three equivalent syntaxes are supported for all test attributes:
+
+| Syntax | Example |
+|--------|---------|
+| C23 `[[cccc::...]]` | `[[cccc::test]]`, `[[cccc::test_setup(once)]]` |
+| GNU `__attribute__((...))` | `__attribute__((test))`, `__attribute__((test_setup(once)))` |
+| `@`-prefix shorthand | `@test`, `@test_setup(once)` |
+
+All three are identical at the preprocessor level and can be mixed freely.
 
 ## Writing Tests
 
-Mark a function as a test with `[[cccc::test]]`. Test functions must take no arguments; they may return `void`, `int`, `double`, `float`, or `char *`:
+Mark a function as a test with `[[cccc::test]]`, `__attribute__((test))`, or
+`@test`. Test functions must take no arguments; they may return `void`, `int`,
+`double`, `float`, or `char *`:
 
 ```c
 [[cccc::test]]
 void test_addition(void) {
     $assert_eq(1 + 1, 2);
 }
+
+// Equivalent shorthands:
+__attribute__((test))
+void test_with_gnu_attr(void) { $assert_eq(2 * 3, 6); }
+
+@test
+void test_with_at_prefix(void) { $assert_eq(10 - 8, 2); }
 ```
 
 Multiple test functions can coexist in the same file:
@@ -243,7 +266,10 @@ int test_the_answer(void) {
 
 ## Setup and Teardown
 
-The framework supports lifecycle hooks that run before and/or after tests. Use `[[cccc::test_setup]]` and `[[cccc::test_teardown]]` to mark hook functions. Hook functions must have signature `void name(void)`.
+The framework supports lifecycle hooks that run before and/or after tests. Use
+`[[cccc::test_setup]]`, `__attribute__((test_setup))`, or `@test_setup` to mark
+setup hooks (and the equivalent `test_teardown` forms for teardown). Hook
+functions must have signature `void name(void)`.
 
 ### Global hooks (run around every test)
 

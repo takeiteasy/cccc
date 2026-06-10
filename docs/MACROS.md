@@ -5,8 +5,23 @@ compilation. They can inspect compile-time types, build AST nodes, generate
 functions and global variables, and replace macro call sites with generated code.
 
 A macro function is declared by annotating it with `[[cccc::comptime]]` (C23
-attribute syntax) or the equivalent `__attribute__((comptime))` (GNU attribute
-syntax). Either form is accepted everywhere.
+attribute syntax), `__attribute__((comptime))` (GNU attribute syntax), or the
+concise `@comptime` shorthand. All three forms are equivalent and accepted
+everywhere:
+
+```c
+// All three are identical:
+[[cccc::comptime]]       int helper(int n) { return n * 2; }
+__attribute__((comptime)) int helper(int n) { return n * 2; }
+@comptime                int helper(int n) { return n * 2; }
+
+// Inline variant (usable in expression position):
+[[cccc::comptime(inline)]]  $node_t *make_val(void) { return $int_literal(42); }
+@comptime(inline)           $node_t *make_val(void) { return $int_literal(42); }
+```
+
+The `@macro(inline)` shorthand also works for the deprecated `[[cccc::macro]]`
+alias.
 
 The macro API is private to macro compilation. CCCC embeds its own `cccc/reflection.h`
 and injects it automatically while macro and comptime helper functions are

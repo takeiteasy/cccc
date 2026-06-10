@@ -762,12 +762,43 @@ static bool is_has_feature_supported(CCCC *vm, char *name) {
     return false;
 }
 
+typedef enum { ATTR_CCCC, ATTR_STD, ATTR_GNU } AttrCategory;
+typedef struct { const char *name; AttrCategory cat; bool has_attr; } AttrInfo;
+
+static const AttrInfo known_attrs[] = {
+    // CCCC-specific (cccc:: scoped)
+    {"comptime",      ATTR_CCCC, true},
+    {"macro",         ATTR_CCCC, true},
+    {"test",          ATTR_CCCC, true},
+    {"test_setup",    ATTR_CCCC, true},
+    {"test_teardown", ATTR_CCCC, true},
+    // Standard C23 ([[name]]) — not in GNU __has_attribute
+    {"maybe_unused",      ATTR_STD, false},
+    {"deprecated",        ATTR_STD, true},
+    {"noreturn",          ATTR_STD, true},
+    {"nodiscard",         ATTR_STD, false},
+    {"fallthrough",       ATTR_STD, false},
+    {"no_unique_address", ATTR_STD, false},
+    // GNU-only (__attribute__((name)))
+    {"aligned",          ATTR_GNU, true},
+    {"packed",           ATTR_GNU, true},
+    {"unused",           ATTR_GNU, true},
+    {"__unused__",       ATTR_GNU, true},
+    {"__deprecated__",   ATTR_GNU, true},
+    {"format",           ATTR_GNU, true},
+    {NULL, 0, false},
+};
+
+static const AttrInfo *find_attr_info(char *name) {
+    for (int i = 0; known_attrs[i].name; i++)
+        if (!strcmp(name, known_attrs[i].name))
+            return &known_attrs[i];
+    return NULL;
+}
+
 static bool is_has_attribute_supported(char *name) {
-    return !strcmp(name, "aligned") || !strcmp(name, "packed") ||
-           !strcmp(name, "unused") || !strcmp(name, "__unused__") ||
-           !strcmp(name, "deprecated") || !strcmp(name, "__deprecated__") ||
-           !strcmp(name, "macro") || !strcmp(name, "comptime") ||
-           !strcmp(name, "format") || !strcmp(name, "noreturn");
+    const AttrInfo *a = find_attr_info(name);
+    return a && a->has_attr;
 }
 
 static bool is_has_builtin_supported(char *name) {
@@ -819,14 +850,10 @@ static bool is_has_builtin_supported(char *name) {
 }
 
 static bool is_has_c_attribute_supported(char *vendor, char *name) {
-    if (!vendor)
-        return !strcmp(name, "maybe_unused") || !strcmp(name, "deprecated") ||
-               !strcmp(name, "noreturn") || !strcmp(name, "nodiscard") ||
-               !strcmp(name, "fallthrough") || !strcmp(name, "no_unique_address");
-
-    if (!strcmp(vendor, "cccc"))
-        return !strcmp(name, "comptime") || !strcmp(name, "macro");
-
+    const AttrInfo *a = find_attr_info(name);
+    if (!a) return false;
+    if (!vendor) return a->cat == ATTR_STD;
+    if (!strcmp(vendor, "cccc")) return a->cat == ATTR_CCCC;
     return false;
 }
 
@@ -1911,6 +1938,265 @@ static PPDir pp_directive(Token *tok) {
     return PP_NONE;
 }
 
+// Rewrite @identifier or @identifier(args) into the equivalent attribute form
+// before try_extract_attr_macro runs. The target form depends on the attribute
+// registry: ATTR_CCCC -> [[cccc::name(args)]], ATTR_STD -> [[name(args)]],
+// ATTR_GNU / unknown -> __attribute__((name(args))). Returns false (tok
+// unchanged) if tok is not "@" or is not followed by an identifier.
+static bool try_rewrite_at_attr(CCCC *vm, Token **tok_ptr) {
+    Token *tok = *tok_ptr;
+    if (!equal(tok, "@") || !tok->next || tok->next->kind != TK_IDENT)
+        return false;
+
+    Token *name_tok = tok->next;
+    char *name = arena_strndup(vm, name_tok->loc, name_tok->len);
+    Token *after = name_tok->next;
+
+    // Build the args text "(arg1, arg2, ...)" by re-emitting raw source text
+    // for each token inside the parens, separated by spaces.
+    char *args_text = "";
+    if (after && equal(after, "(")) {
+        int depth = 0;
+        char *buf = arena_format(vm, "(");
+        Token *p = after->next; // first token inside "("
+        while (p && p->kind != TK_EOF) {
+            if (equal(p, "(")) {
+                depth++;
+                buf = arena_format(vm, "%s(", buf);
+                p = p->next;
+                continue;
+            }
+            if (equal(p, ")")) {
+                if (depth == 0) {
+                    after = p->next; // advance past closing ")"
+                    break;
+                }
+                depth--;
+                buf = arena_format(vm, "%s)", buf);
+                p = p->next;
+                continue;
+            }
+            buf = arena_format(vm, "%s%.*s", buf, (int)p->len, p->loc);
+            p = p->next;
+            if (p && !equal(p, ")") && !equal(p, "("))
+                buf = arena_format(vm, "%s ", buf);
+        }
+        if (!p || p->kind == TK_EOF)
+            error_tok(vm, tok, "unterminated '@%s(' attribute", name);
+        args_text = arena_format(vm, "%s)", buf);
+    }
+
+    const AttrInfo *info = find_attr_info(name);
+    AttrCategory cat = info ? info->cat : ATTR_GNU;
+
+    char *src;
+    switch (cat) {
+    case ATTR_CCCC: src = arena_format(vm, "[[cccc::%s%s]]\n", name, args_text); break;
+    case ATTR_STD:  src = arena_format(vm, "[[%s%s]]\n",       name, args_text); break;
+    default:        src = arena_format(vm, "__attribute__((%s%s))\n", name, args_text); break;
+    }
+
+    Token *new_toks = tokenize(vm, new_file(vm, tok->file->name, tok->file->file_no, src));
+    // Strip trailing TK_EOF and splice new tokens before `after`.
+    Token *last = new_toks;
+    while (last->next && last->next->kind != TK_EOF)
+        last = last->next;
+    last->next = after;
+
+    *tok_ptr = new_toks;
+    return true;
+}
+
+// Parsed arguments from [[cccc::test(...)]] / __attribute__((test(...)))
+typedef struct {
+    const char *suite_name;
+    const char *error_pat;
+    bool error_pat_negate;
+    const char *test_name;
+    long timeout_ms;
+    int error_count;
+    CmpOp error_count_op;
+    RetKind ret_kind;
+    CmpOp ret_op;
+    int64_t ret_int_val;
+    double ret_float_val;
+    const char *ret_str_val;
+    double ret_epsilon_val;
+} TestArgs;
+
+// Parsed arguments from [[cccc::test_setup(...)]] / __attribute__((test_setup(...)))
+typedef struct {
+    const char *name_pat;
+    const char *suite;
+    bool once;
+} TestSetupArgs;
+
+// Parse test(...) argument list. *p_ptr must point to the first token inside
+// the opening "("; on return it points to the closing ")".
+static void parse_test_args(CCCC *vm, Token **p_ptr, TestArgs *out) {
+    Token *p = *p_ptr;
+    while (p && !equal(p, ")") && p->kind != TK_EOF) {
+        if (equal(p, "suite") &&
+            p->next && equal(p->next, "=") &&
+            p->next->next && p->next->next->kind == TK_STR) {
+            out->suite_name = p->next->next->str;
+            p = p->next->next->next;
+        } else if (equal(p, "error")) {
+            p = p->next;
+            bool neg = p && equal(p, "!=");
+            if (neg || (p && equal(p, "="))) p = p->next;
+            if (p && p->kind == TK_STR) {
+                out->error_pat = p->str;
+                out->error_pat_negate = neg;
+                p = p->next;
+            }
+        } else if (equal(p, "name") &&
+                   p->next && equal(p->next, "=") &&
+                   p->next->next && p->next->next->kind == TK_STR) {
+            out->test_name = p->next->next->str;
+            p = p->next->next->next;
+        } else if (equal(p, "timeout") &&
+                   p->next && equal(p->next, "=") &&
+                   p->next->next &&
+                   (p->next->next->kind == TK_NUM ||
+                    p->next->next->kind == TK_PP_NUM)) {
+            Token *vt = p->next->next;
+            char _buf[64];
+            int _n = vt->len < 63 ? (int)vt->len : 63;
+            memcpy(_buf, vt->loc, _n); _buf[_n] = '\0';
+            out->timeout_ms = strtoll(_buf, NULL, 0);
+            p = p->next->next->next;
+        } else if (equal(p, "error_count")) {
+            p = p->next;
+            CmpOp op = CMP_EQ;
+            if (p && (equal(p, "=") || equal(p, "==") ||
+                      equal(p, "!=") || equal(p, "<") ||
+                      equal(p, "<=") || equal(p, ">") ||
+                      equal(p, ">="))) {
+                if      (equal(p, "!=")) op = CMP_NE;
+                else if (equal(p, "<=")) op = CMP_LE;
+                else if (equal(p, "<"))  op = CMP_LT;
+                else if (equal(p, ">=")) op = CMP_GE;
+                else if (equal(p, ">"))  op = CMP_GT;
+                p = p->next;
+            }
+            if (p && p->kind == TK_NUM) {
+                out->error_count    = (int)p->val;
+                out->error_count_op = op;
+                p = p->next;
+            }
+        } else if (equal(p, "return")) {
+            p = p->next;
+            CmpOp op = CMP_EQ;
+            if (p && (equal(p, "=") || equal(p, "==") ||
+                      equal(p, "!=") || equal(p, "<") ||
+                      equal(p, "<=") || equal(p, ">") ||
+                      equal(p, ">="))) {
+                if      (equal(p, "!=")) op = CMP_NE;
+                else if (equal(p, "<=")) op = CMP_LE;
+                else if (equal(p, "<"))  op = CMP_LT;
+                else if (equal(p, ">=")) op = CMP_GE;
+                else if (equal(p, ">"))  op = CMP_GT;
+                p = p->next;
+            }
+            if (p && p->kind == TK_STR) {
+                out->ret_kind    = RET_STR;
+                out->ret_op      = op;
+                out->ret_str_val = p->str;
+                p = p->next;
+            } else if (p && (p->kind == TK_NUM || p->kind == TK_PP_NUM)) {
+                bool is_float = false;
+                for (int _i = 0; _i < (int)p->len; _i++) {
+                    char _c = p->loc[_i];
+                    if (_c == '.' || _c == 'e' || _c == 'E') { is_float = true; break; }
+                }
+                if (!is_float && p->len > 0 &&
+                    (p->loc[p->len-1] == 'f' || p->loc[p->len-1] == 'F'))
+                    is_float = true;
+                if (is_float) {
+                    char _buf[64];
+                    int _n = p->len < 63 ? (int)p->len : 63;
+                    memcpy(_buf, p->loc, _n); _buf[_n] = '\0';
+                    out->ret_kind      = RET_FLOAT;
+                    out->ret_op        = op;
+                    out->ret_float_val = strtod(_buf, NULL);
+                } else {
+                    char _buf[64];
+                    int _n = p->len < 63 ? (int)p->len : 63;
+                    memcpy(_buf, p->loc, _n); _buf[_n] = '\0';
+                    out->ret_kind    = RET_INT;
+                    out->ret_op      = op;
+                    out->ret_int_val = (int64_t)strtoll(_buf, NULL, 0);
+                }
+                p = p->next;
+            } else {
+                bool neg_num = p && equal(p, "-") &&
+                              p->next &&
+                              (p->next->kind == TK_NUM ||
+                               p->next->kind == TK_PP_NUM);
+                if (neg_num) {
+                    char _buf[64];
+                    int _n = p->next->len < 63 ? (int)p->next->len : 63;
+                    memcpy(_buf, p->next->loc, _n); _buf[_n] = '\0';
+                    out->ret_int_val = -(int64_t)strtoll(_buf, NULL, 0);
+                    p = p->next->next;
+                    out->ret_kind = RET_INT;
+                    out->ret_op   = op;
+                } else if (p && p->kind != TK_EOF &&
+                           !equal(p, ")") && !equal(p, ",")) {
+                    warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
+                             "unrecognized return= operand '%.*s';"
+                             " assertion skipped (enum names not"
+                             " supported, use the integer value)",
+                             (int)p->len, p->loc);
+                    p = p->next;
+                }
+            }
+        } else if (equal(p, "return_epsilon") &&
+                   p->next && equal(p->next, "=") &&
+                   p->next->next &&
+                   (p->next->next->kind == TK_NUM ||
+                    p->next->next->kind == TK_PP_NUM)) {
+            Token *vt = p->next->next;
+            char _buf[64];
+            int _n = vt->len < 63 ? (int)vt->len : 63;
+            memcpy(_buf, vt->loc, _n); _buf[_n] = '\0';
+            out->ret_epsilon_val = strtod(_buf, NULL);
+            p = p->next->next->next;
+        } else {
+            p = p->next;
+        }
+        if (p && equal(p, ",")) p = p->next;
+    }
+    *p_ptr = p;
+}
+
+// Parse test_setup/teardown(...) argument list. *p_ptr must point to the first
+// token inside the opening "("; on return it points to the closing ")".
+static void parse_test_setup_args(Token **p_ptr, TestSetupArgs *out) {
+    Token *p = *p_ptr;
+    while (p && !equal(p, ")") && p->kind != TK_EOF) {
+        if (equal(p, "name") &&
+            p->next && equal(p->next, "=") &&
+            p->next->next && p->next->next->kind == TK_STR) {
+            out->name_pat = p->next->next->str;
+            p = p->next->next->next;
+        } else if (equal(p, "suite") &&
+                   p->next && equal(p->next, "=") &&
+                   p->next->next && p->next->next->kind == TK_STR) {
+            out->suite = p->next->next->str;
+            p = p->next->next->next;
+        } else if (equal(p, "once")) {
+            out->once = true;
+            p = p->next;
+        } else {
+            p = p->next;
+        }
+        if (p && equal(p, ",")) p = p->next;
+    }
+    *p_ptr = p;
+}
+
 // Scan the attribute argument list of a GNU __attribute__(( ... )) or C23
 // [[ ... ]] block for [[cccc::comptime]], __attribute__((comptime)), and the
 // inline modifier. [[cccc::macro]] / __attribute__((macro)) are deprecated aliases
@@ -1945,23 +2231,10 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
     bool is_teardown_kind  = false;
     bool is_inline         = false;
     Token *attr_end        = NULL;
-    const char *suite_name    = NULL; // extracted from [[cccc::test(suite = "...")]]
-    const char *error_pat     = NULL; // extracted from [[cccc::test(error = "...")]]
-    bool  error_pat_negate    = false;// true = error != "pat"
-    const char *test_name     = NULL; // extracted from [[cccc::test(name = "...")]]
-    long  test_timeout_ms     = 0;    // extracted from [[cccc::test(timeout = ...)]]
-    int   test_error_count    = 0;    // extracted from [[cccc::test(error_count OP ...)]]
-    CmpOp test_error_count_op = CMP_NONE;
-    RetKind ret_kind          = RET_NONE;
-    CmpOp   ret_op            = CMP_EQ;
-    int64_t ret_int_val       = 0;
-    double  ret_float_val     = 0.0;
-    const char *ret_str_val   = NULL;
-    double  ret_epsilon_val   = 0.0;
-    // For [[cccc::test_setup/teardown]]:
-    const char *hook_name_pat = NULL;
-    const char *hook_suite    = NULL;
-    bool        hook_once     = false;
+    TestArgs ta            = {0};
+    ta.error_count_op      = CMP_NONE;
+    ta.ret_op              = CMP_EQ;
+    TestSetupArgs tsa      = {0};
 
     Token *scan = is_gnu_attr ? tok->next->next->next  // skip __attribute__ ( (
                               : tok->next->next;        // skip [ [
@@ -2032,155 +2305,9 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                     is_inline = true;
             } else if (equal(after_scope, "test")) {
                 is_test_kind = true;
-                // [[cccc::test(suite = "name", error = "pattern", name = "label",
-                //              timeout = 1000, error_count = 1)]]
                 if (after_scope->next && equal(after_scope->next, "(")) {
                     Token *p = after_scope->next->next;
-                    while (p && !equal(p, ")") && p->kind != TK_EOF) {
-                        if (equal(p, "suite") &&
-                            p->next && equal(p->next, "=") &&
-                            p->next->next && p->next->next->kind == TK_STR) {
-                            suite_name = p->next->next->str;
-                            p = p->next->next->next;
-                        } else if (equal(p, "error")) {
-                            // error = "pat"  or  error != "pat"
-                            p = p->next;
-                            bool neg = p && equal(p, "!=");
-                            if (neg || (p && equal(p, "="))) p = p->next;
-                            if (p && p->kind == TK_STR) {
-                                error_pat = p->str;
-                                error_pat_negate = neg;
-                                p = p->next;
-                            }
-                        } else if (equal(p, "name") &&
-                                   p->next && equal(p->next, "=") &&
-                                   p->next->next && p->next->next->kind == TK_STR) {
-                            test_name = p->next->next->str;
-                            p = p->next->next->next;
-                        } else if (equal(p, "timeout") &&
-                                   p->next && equal(p->next, "=") &&
-                                   p->next->next &&
-                                   (p->next->next->kind == TK_NUM ||
-                                    p->next->next->kind == TK_PP_NUM)) {
-                            // Numbers inside [[...]] attributes are TK_PP_NUM
-                            // (preprocessing numbers), not yet converted to
-                            // TK_NUM — parse the raw text directly.
-                            Token *vt = p->next->next;
-                            char _buf[64];
-                            int _n = vt->len < 63 ? (int)vt->len : 63;
-                            memcpy(_buf, vt->loc, _n); _buf[_n] = '\0';
-                            test_timeout_ms = strtoll(_buf, NULL, 0);
-                            p = p->next->next->next;
-                        } else if (equal(p, "error_count")) {
-                            // error_count [op] N  (op defaults to =)
-                            p = p->next;
-                            CmpOp op = CMP_EQ;
-                            if (p && (equal(p, "=") || equal(p, "==") ||
-                                      equal(p, "!=") || equal(p, "<") ||
-                                      equal(p, "<=") || equal(p, ">") ||
-                                      equal(p, ">="))) {
-                                if      (equal(p, "!=")) op = CMP_NE;
-                                else if (equal(p, "<=")) op = CMP_LE;
-                                else if (equal(p, "<"))  op = CMP_LT;
-                                else if (equal(p, ">=")) op = CMP_GE;
-                                else if (equal(p, ">"))  op = CMP_GT;
-                                p = p->next;
-                            }
-                            if (p && p->kind == TK_NUM) {
-                                test_error_count    = (int)p->val;
-                                test_error_count_op = op;
-                                p = p->next;
-                            }
-                        } else if (equal(p, "return")) {
-                            // return [op] (string | float | signed-int)
-                            // Note: numbers inside [[...]] attributes are TK_PP_NUM
-                            // (preprocessing numbers, not yet converted to TK_NUM).
-                            // We parse their text directly with strtod/strtoll.
-                            p = p->next;
-                            CmpOp op = CMP_EQ;
-                            if (p && (equal(p, "=") || equal(p, "==") ||
-                                      equal(p, "!=") || equal(p, "<") ||
-                                      equal(p, "<=") || equal(p, ">") ||
-                                      equal(p, ">="))) {
-                                if      (equal(p, "!=")) op = CMP_NE;
-                                else if (equal(p, "<=")) op = CMP_LE;
-                                else if (equal(p, "<"))  op = CMP_LT;
-                                else if (equal(p, ">=")) op = CMP_GE;
-                                else if (equal(p, ">"))  op = CMP_GT;
-                                p = p->next;
-                            }
-                            if (p && p->kind == TK_STR) {
-                                ret_kind    = RET_STR;
-                                ret_op      = op;
-                                ret_str_val = p->str;
-                                p = p->next;
-                            } else if (p && (p->kind == TK_NUM || p->kind == TK_PP_NUM)) {
-                                // Check if the literal looks like a float (contains '.', 'e', 'E',
-                                // or ends with 'f'/'F') to distinguish float from integer.
-                                bool is_float = false;
-                                for (int _i = 0; _i < (int)p->len; _i++) {
-                                    char _c = p->loc[_i];
-                                    if (_c == '.' || _c == 'e' || _c == 'E') { is_float = true; break; }
-                                }
-                                if (!is_float && p->len > 0 &&
-                                    (p->loc[p->len-1] == 'f' || p->loc[p->len-1] == 'F'))
-                                    is_float = true;
-                                if (is_float) {
-                                    char _buf[64];
-                                    int _n = p->len < 63 ? (int)p->len : 63;
-                                    memcpy(_buf, p->loc, _n); _buf[_n] = '\0';
-                                    ret_kind      = RET_FLOAT;
-                                    ret_op        = op;
-                                    ret_float_val = strtod(_buf, NULL);
-                                } else {
-                                    char _buf[64];
-                                    int _n = p->len < 63 ? (int)p->len : 63;
-                                    memcpy(_buf, p->loc, _n); _buf[_n] = '\0';
-                                    ret_kind    = RET_INT;
-                                    ret_op      = op;
-                                    ret_int_val = (int64_t)strtoll(_buf, NULL, 0);
-                                }
-                                p = p->next;
-                            } else {
-                                // Signed integer: optional '-' then number token
-                                bool neg_num = p && equal(p, "-") &&
-                                              p->next &&
-                                              (p->next->kind == TK_NUM ||
-                                               p->next->kind == TK_PP_NUM);
-                                if (neg_num) {
-                                    char _buf[64];
-                                    int _n = p->next->len < 63 ? (int)p->next->len : 63;
-                                    memcpy(_buf, p->next->loc, _n); _buf[_n] = '\0';
-                                    ret_int_val = -(int64_t)strtoll(_buf, NULL, 0);
-                                    p = p->next->next;
-                                    ret_kind = RET_INT;
-                                    ret_op   = op;
-                                } else if (p && p->kind != TK_EOF &&
-                                           !equal(p, ")") && !equal(p, ",")) {
-                                    warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
-                                             "unrecognized return= operand '%.*s';"
-                                             " assertion skipped (enum names not"
-                                             " supported, use the integer value)",
-                                             (int)p->len, p->loc);
-                                    p = p->next;
-                                }
-                            }
-                        } else if (equal(p, "return_epsilon") &&
-                                   p->next && equal(p->next, "=") &&
-                                   p->next->next &&
-                                   (p->next->next->kind == TK_NUM ||
-                                    p->next->next->kind == TK_PP_NUM)) {
-                            Token *vt = p->next->next;
-                            char _buf[64];
-                            int _n = vt->len < 63 ? (int)vt->len : 63;
-                            memcpy(_buf, vt->loc, _n); _buf[_n] = '\0';
-                            ret_epsilon_val = strtod(_buf, NULL);
-                            p = p->next->next->next;
-                        } else {
-                            p = p->next;
-                        }
-                        if (p && equal(p, ",")) p = p->next;
-                    }
+                    parse_test_args(vm, &p, &ta);
                 }
             } else if (equal(after_scope, "test_setup") ||
                        equal(after_scope, "test_teardown")) {
@@ -2188,29 +2315,27 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
                     is_teardown_kind = true;
                 else
                     is_setup_kind = true;
-                // [[cccc::test_setup(name = "glob", suite = "s", once)]]
                 if (after_scope->next && equal(after_scope->next, "(")) {
                     Token *p = after_scope->next->next;
-                    while (p && !equal(p, ")") && p->kind != TK_EOF) {
-                        if (equal(p, "name") &&
-                            p->next && equal(p->next, "=") &&
-                            p->next->next && p->next->next->kind == TK_STR) {
-                            hook_name_pat = p->next->next->str;
-                            p = p->next->next->next;
-                        } else if (equal(p, "suite") &&
-                                   p->next && equal(p->next, "=") &&
-                                   p->next->next && p->next->next->kind == TK_STR) {
-                            hook_suite = p->next->next->str;
-                            p = p->next->next->next;
-                        } else if (equal(p, "once")) {
-                            hook_once = true;
-                            p = p->next;
-                        } else {
-                            p = p->next;
-                        }
-                        if (p && equal(p, ",")) p = p->next;
-                    }
+                    parse_test_setup_args(&p, &tsa);
                 }
+            }
+        } else if (equal(t, "test")) {
+            // bare: __attribute__((test)) or __attribute__((test(...)))
+            is_test_kind = true;
+            if (t->next && equal(t->next, "(")) {
+                Token *p = t->next->next;
+                parse_test_args(vm, &p, &ta);
+            }
+        } else if (equal(t, "test_setup") || equal(t, "test_teardown")) {
+            // bare: __attribute__((test_setup)) or __attribute__((test_teardown))
+            if (equal(t, "test_teardown"))
+                is_teardown_kind = true;
+            else
+                is_setup_kind = true;
+            if (t->next && equal(t->next, "(")) {
+                Token *p = t->next->next;
+                parse_test_setup_args(&p, &tsa);
             }
         }
     }
@@ -2248,8 +2373,8 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
         }
     }
 
-    // [[cccc::test]]: record the function name, strip the attribute, keep the
-    // function definition in the normal compilation token stream.
+    // [[cccc::test]] / __attribute__((test)): record the function name, strip
+    // the attribute, keep the function definition in the normal compilation stream.
     if (is_test_kind) {
         Token *probe = attr_end;
         while (probe && probe->kind != TK_EOF) {
@@ -2257,27 +2382,26 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
             if (probe->kind == TK_IDENT && probe->next && equal(probe->next, "(")) {
                 TestFnRecord *rec = calloc(1, sizeof(TestFnRecord));
                 rec->name         = strndup(probe->loc, probe->len);
-                rec->display_name = test_name ? strdup(test_name) : NULL;
+                rec->display_name = ta.test_name ? strdup(ta.test_name) : NULL;
                 // Suite: explicit attribute arg takes priority, then active pragma suite
-                const char *s = suite_name ? suite_name : vm->compiler.current_suite;
-                rec->suite      = s ? strdup(s) : NULL;
-                rec->error_pat        = error_pat ? strdup(error_pat) : NULL;
-                rec->error_pat_negate = error_pat_negate;
-                rec->timeout_ms       = test_timeout_ms;
-                if (error_pat && test_error_count_op != CMP_NONE) {
-                    rec->expect_errors    = test_error_count;
-                    rec->error_count_op   = test_error_count_op;
-                } else if (error_pat && test_error_count > 0) {
-                    // backwards compat: error_count = N without explicit operator
-                    rec->expect_errors    = test_error_count;
-                    rec->error_count_op   = CMP_EQ;
+                const char *s = ta.suite_name ? ta.suite_name : vm->compiler.current_suite;
+                rec->suite            = s ? strdup(s) : NULL;
+                rec->error_pat        = ta.error_pat ? strdup(ta.error_pat) : NULL;
+                rec->error_pat_negate = ta.error_pat_negate;
+                rec->timeout_ms       = ta.timeout_ms;
+                if (ta.error_pat && ta.error_count_op != CMP_NONE) {
+                    rec->expect_errors  = ta.error_count;
+                    rec->error_count_op = ta.error_count_op;
+                } else if (ta.error_pat && ta.error_count > 0) {
+                    rec->expect_errors  = ta.error_count;
+                    rec->error_count_op = CMP_EQ;
                 }
-                rec->ret_kind    = ret_kind;
-                rec->ret_op      = (ret_kind != RET_NONE) ? ret_op : CMP_EQ;
-                rec->ret_epsilon = ret_epsilon_val;
-                if (ret_kind == RET_INT)        rec->ret_expect.ret_int   = ret_int_val;
-                else if (ret_kind == RET_FLOAT) rec->ret_expect.ret_float = ret_float_val;
-                else if (ret_kind == RET_STR)   rec->ret_expect.ret_str   = ret_str_val ? strdup(ret_str_val) : NULL;
+                rec->ret_kind    = ta.ret_kind;
+                rec->ret_op      = (ta.ret_kind != RET_NONE) ? ta.ret_op : CMP_EQ;
+                rec->ret_epsilon = ta.ret_epsilon_val;
+                if (ta.ret_kind == RET_INT)        rec->ret_expect.ret_int   = ta.ret_int_val;
+                else if (ta.ret_kind == RET_FLOAT) rec->ret_expect.ret_float = ta.ret_float_val;
+                else if (ta.ret_kind == RET_STR)   rec->ret_expect.ret_str   = ta.ret_str_val ? strdup(ta.ret_str_val) : NULL;
                 rec->next = vm->compiler.test_fns;
                 vm->compiler.test_fns = rec;
                 break;
@@ -2288,8 +2412,8 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
         return true;
     }
 
-    // [[cccc::test_setup]] / [[cccc::test_teardown]]: record the hook, keep
-    // the function in the normal compilation token stream.
+    // [[cccc::test_setup]] / [[cccc::test_teardown]] / __attribute__ bare forms:
+    // record the hook, keep the function in the normal compilation token stream.
     if (is_setup_kind || is_teardown_kind) {
         Token *probe = attr_end;
         while (probe && probe->kind != TK_EOF) {
@@ -2297,9 +2421,9 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
             if (probe->kind == TK_IDENT && probe->next && equal(probe->next, "(")) {
                 TestSetupRecord *rec = calloc(1, sizeof(TestSetupRecord));
                 rec->fn_name     = strndup(probe->loc, probe->len);
-                rec->name_pat    = hook_name_pat ? strdup(hook_name_pat) : NULL;
-                rec->suite       = hook_suite    ? strdup(hook_suite)    : NULL;
-                rec->once        = hook_once;
+                rec->name_pat    = tsa.name_pat ? strdup(tsa.name_pat) : NULL;
+                rec->suite       = tsa.suite    ? strdup(tsa.suite)    : NULL;
+                rec->once        = tsa.once;
                 rec->is_teardown = is_teardown_kind;
                 rec->next = vm->compiler.test_setups;
                 vm->compiler.test_setups = rec;
@@ -2571,6 +2695,10 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
             // attribute blocks before they reach the parser. On a match,
             // the definition is extracted into the MacroFn/ComptimeVar list
             // and tok is advanced past it; nothing is added to the output.
+            // @name / @name(args) is first rewritten to the canonical form so
+            // that try_extract_attr_macro sees [[cccc::name(...)]] as usual.
+            if (try_rewrite_at_attr(vm, &tok))
+                continue;
             if (try_extract_attr_macro(vm, &tok))
                 continue;
 

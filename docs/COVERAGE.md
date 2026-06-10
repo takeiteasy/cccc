@@ -611,8 +611,34 @@ Ignored attributes include (but are not limited to):
 | [#218](https://todo.sr.ht/~takeiteasy/cccc/218) | `cleanup(func)` | medium | Scope-based cleanup callbacks (RAII-style) |
 | [#219](https://todo.sr.ht/~takeiteasy/cccc/219) | `no_unique_address` | low | Parsed but not semantically honoured; VM optimisation deferred |
 
-The CCCC-specific `@`-prefix attribute syntax is tracked separately in
-[#234](https://todo.sr.ht/~takeiteasy/cccc/234).
+### `@`-prefix attribute syntax
+
+CCCC supports a concise `@name` / `@name(args)` shorthand that rewrites to
+the canonical attribute form before parsing:
+
+| Usage | Rewrites to | Example |
+|-------|-------------|---------|
+| `@name` (CCCC-specific) | `[[cccc::name]]` | `@comptime`, `@test`, `@test_setup` |
+| `@name` (standard C23) | `[[name]]` | `@nodiscard`, `@maybe_unused` |
+| `@name` (GNU / unknown) | `__attribute__((name))` | `@packed`, `@aligned(16)` |
+
+Resolution order: CCCC-specific attributes are checked first (they become
+`[[cccc::name(...)]]`), then standard C23 attributes (they become
+`[[name(...)]]`), then GNU attributes (they become
+`__attribute__((name(...)))`). Unrecognised names fall back to the GNU form.
+
+```c
+@comptime(inline)
+$node_t *make_answer(void) { return $int_literal(42); }
+
+@test(suite = "math")
+void test_add(void) { $assert_eq(1 + 1, 2); }
+
+struct @packed point { char x; int y; };
+```
+
+The `@` prefix is accepted wherever the corresponding canonical form is valid.
+`__declspec` (Windows) is reserved as a future fourth fallback category.
 
 ### Position in Grammar
 
