@@ -1560,6 +1560,15 @@ typedef enum {
     CCCC_STD_C23,  // C23/C2x / GNU23/GNU2x — __STDC_VERSION__ 202311L
 } CStdVersion;
 
+typedef enum { CTX_COMPTIME, CTX_EMIT } ComptimeCtxType;
+
+typedef struct {
+    ComptimeCtxType type;
+    bool            needs_end;  // false = bare whole-file form, true = begin/end
+    File           *file;       // for comptime auto-close on file boundary
+    Token          *open_tok;   // for unclosed-block diagnostics
+} ComptimeCtxEntry;
+
 typedef struct Compiler {
     // Preprocessor state
     bool skip_preprocess;     // Skip preprocessing step
@@ -1579,12 +1588,9 @@ typedef struct Compiler {
     char *current_suite;             // Active suite name set by #pragma cccc suite begin
     bool in_macro_mode;              // True when compiling/executing a macro function
     bool in_macro_expansion;         // True during macro AST expansion pass
-    bool in_comptime_block;          // True inside #pragma cccc comptime begin...end
-    File *comptime_block_file;       // File that opened the comptime block (for auto-close)
-    bool comptime_block_needs_end;   // true for begin/end form; false for bare whole-file pragma
-    bool in_emit_block;              // True inside #pragma cccc emit begin...end
-    bool emit_block_in_comptime;      // True when emit block is a comptime runtime escape hatch
-    Token *emit_block_tok;           // Opening token for unclosed emit-block diagnostics
+    ComptimeCtxEntry *ctx_stack;     // Stack of active comptime/emit contexts
+    int               ctx_stack_len; // Number of entries in ctx_stack
+    int               ctx_stack_cap; // Allocated capacity of ctx_stack
     bool macro_fns_compiled;         // True after compile_all_macros has run
     bool strict_comptime_includes;   // --strict-comptime-includes: don't forward regular #include decls to comptime pass
     int macro_recursion_limit;       // 0 = unlimited, default = 256

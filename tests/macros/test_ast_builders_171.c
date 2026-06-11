@@ -122,7 +122,7 @@ $node_t *proto_test(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *proto = $function_prototype("proto_fn", int_ty);
     $function_add_param(proto, "x", int_ty);
-    $forward_declare(proto);
+    $publish(proto);
     return $int_literal(0);
 }
 proto_test();

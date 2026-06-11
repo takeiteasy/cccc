@@ -202,20 +202,40 @@ Multiple emit includes with the same emitted `#include` line are deduplicated.
 Other emitted directives keep source order and are not deduplicated, so they can
 wrap file-scope macro calls and the declarations those calls generate.
 
-For several raw preprocessor directives, use an emit block:
+For several raw preprocessor directives, use an emit block. Emit blocks require
+an enclosing comptime context and act as a runtime escape hatch: ordinary C
+declarations in the block are compiled into the runtime translation unit and
+are also copied into generated output.
 
 ```c
+#pragma cccc comptime begin
 #pragma cccc emit begin
 #ifdef _WIN32
 #define CCCC_PLATFORM_WINDOWS 1
 #endif
+int win_init(void);            // compiled into runtime TU and emitted
 #pragma cccc emit end
+#pragma cccc comptime end
 ```
 
-Outside comptime regions, emit blocks accept preprocessor directive lines only.
-Inside a `#pragma cccc comptime` region, an emit block is a runtime escape hatch:
-ordinary C declarations in the block are compiled into the runtime translation
-unit and are also copied into generated output.
+**Bare (whole-file) emit** — inside a bare `#pragma cccc comptime` block, use
+bare `#pragma cccc emit` (no `begin`) to switch the rest of the file to emit
+mode. The context closes silently at EOF, just like the enclosing bare comptime
+block:
+
+```c
+#pragma cccc comptime
+
+int comptime_helper(void) { return 1; }  // comptime function
+
+#pragma cccc emit                         // rest of file is emit (runtime escape)
+
+int runtime_fn(void) { return 42; }      // goes into runtime TU and emitted
+```
+
+Multiple `#pragma cccc emit begin...end` sub-blocks can appear inside a single
+comptime block. Same-type nesting (emit inside emit, comptime inside comptime)
+is a hard error.
 
 Macros can emit source-order directives while they run:
 
@@ -417,13 +437,16 @@ int main(void) { ... }
 Inside a comptime block:
 - `#include` directives are queued as comptime-only includes — invisible to the runtime translation unit.
 - preprocessor directives marked `@emit` are copied to generated output.
-- `#pragma cccc emit begin...end` opens a runtime escape block.
+- `#pragma cccc emit begin...end` opens a runtime escape sub-block; multiple sub-blocks are allowed.
+- Bare `#pragma cccc emit` (no `begin`) opens a whole-file runtime escape for the rest of the file.
 - Function definitions are treated as `[[cccc::comptime]]`.
 - Variable and struct declarations are treated as comptime variables.
 - Existing `[[cccc::comptime(inline)]]` annotations are respected; explicit attributes always take precedence.
 
-Blocks cannot be nested. A second `#pragma cccc comptime begin` while one is
-already open is a hard error.
+Nesting rules: alternation between comptime and emit contexts is allowed. A
+second `#pragma cccc comptime begin` while a comptime context is active, or a
+second `#pragma cccc emit begin` while an emit context is active, is a hard
+error. Emit contexts always require an enclosing comptime context.
 
 **Bare (whole-file) form** — omit `begin` to mark the rest of the file as
 comptime. No closing `end` is needed; the block closes silently at EOF.

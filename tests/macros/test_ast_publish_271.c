@@ -45,7 +45,7 @@ publish_global_and_types();
 void forward_alias_still_works(void) {
     $type_t *int_ty = $get_type("int");
     $obj_t *proto = $function_prototype("published_alias_fn", int_ty);
-    $forward_declare(proto);
+    $publish(proto);
 }
 forward_alias_still_works();
 

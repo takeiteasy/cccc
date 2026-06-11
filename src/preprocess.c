@@ -87,6 +87,26 @@ static long eval_const_expr(CCCC *vm, Token **rest, Token *tok);
 
 static bool is_hash(Token *tok) { return tok->at_bol && equal(tok, "#"); }
 
+static ComptimeCtxEntry *ctx_top(CCCC *vm) {
+    return vm->compiler.ctx_stack_len
+        ? &vm->compiler.ctx_stack[vm->compiler.ctx_stack_len - 1] : NULL;
+}
+
+static void ctx_push(CCCC *vm, ComptimeCtxType type, bool needs_end,
+                     File *file, Token *open_tok) {
+    if (vm->compiler.ctx_stack_len == vm->compiler.ctx_stack_cap) {
+        vm->compiler.ctx_stack_cap = vm->compiler.ctx_stack_cap ? vm->compiler.ctx_stack_cap * 2 : 4;
+        vm->compiler.ctx_stack = realloc(vm->compiler.ctx_stack,
+            vm->compiler.ctx_stack_cap * sizeof(ComptimeCtxEntry));
+    }
+    vm->compiler.ctx_stack[vm->compiler.ctx_stack_len++] =
+        (ComptimeCtxEntry){type, needs_end, file, open_tok};
+}
+
+static void ctx_pop(CCCC *vm) {
+    vm->compiler.ctx_stack_len--;
+}
+
 typedef enum {
     INCLUDE_ROUTE_NORMAL,
     INCLUDE_ROUTE_COMPTIME,
@@ -228,12 +248,11 @@ static IncludeRoute read_include_route(Token **tok_ptr) {
     return route;
 }
 
-static bool is_pragma_cccc_emit_end(Token *hash) {
+// Returns true for any #pragma cccc directive. Used to route context-control
+// pragmas through handle_pragma_body even when inside an emit block.
+static bool is_pragma_cccc(Token *hash) {
     Token *tok = hash->next;
-    return tok && equal(tok, "pragma") &&
-           equal(tok->next, "cccc") &&
-           equal(tok->next->next, "emit") &&
-           equal(tok->next->next->next, "end");
+    return tok && equal(tok, "pragma") && equal(tok->next, "cccc");
 }
 
 static Token *copy_token(CCCC *vm, Token *tok) {
@@ -2838,44 +2857,41 @@ static Token *handle_pragma_body(CCCC *vm, Token *tok) {
         if (equal(sub, "comptime")) {
             Token *after = sub->next;
             if (after && equal(after, "end")) {
-                if (!vm->compiler.in_comptime_block)
+                ComptimeCtxEntry *top = ctx_top(vm);
+                if (!top || top->type != CTX_COMPTIME)
                     error_tok(vm, tok, "stray #pragma cccc comptime end without matching begin");
-                vm->compiler.in_comptime_block      = false;
-                vm->compiler.comptime_block_file    = NULL;
-                vm->compiler.comptime_block_needs_end = false;
+                ctx_pop(vm);
                 return skip_line(vm, after->next);
             }
             bool is_begin = after && equal(after, "begin");
-            if (vm->compiler.in_comptime_block)
+            ComptimeCtxEntry *top = ctx_top(vm);
+            if (top && top->type == CTX_COMPTIME)
                 error_tok(vm, tok, "#pragma cccc comptime: blocks cannot be nested");
-            vm->compiler.in_comptime_block        = true;
-            vm->compiler.comptime_block_file      = tok->file;
-            vm->compiler.comptime_block_needs_end = is_begin;
+            ctx_push(vm, CTX_COMPTIME, is_begin, tok->file, tok);
             return skip_line(vm, is_begin ? after->next : after);
         } else if (equal(sub, "emit")) {
             Token *after = sub->next;
             if (after && equal(after, "end")) {
-                if (!vm->compiler.in_emit_block)
+                ComptimeCtxEntry *top = ctx_top(vm);
+                if (!top || top->type != CTX_EMIT)
                     error_tok(vm, tok, "stray #pragma cccc emit end without matching begin");
-                vm->compiler.in_emit_block = false;
-                vm->compiler.emit_block_in_comptime = false;
-                vm->compiler.emit_block_tok = NULL;
+                ctx_pop(vm);
                 return skip_line(vm, after->next);
             }
-            if (!after || !equal(after, "begin"))
-                error_tok(vm, after && after->kind != TK_EOF ? after : sub,
-                          "expected 'begin' or 'end' after '#pragma cccc emit'");
-            if (vm->compiler.in_emit_block)
+            bool is_begin = after && equal(after, "begin");
+            if (!is_begin && after && after->kind != TK_EOF && !after->at_bol)
+                error_tok(vm, after, "expected 'begin' or 'end' after '#pragma cccc emit'");
+            ComptimeCtxEntry *top = ctx_top(vm);
+            if (top && top->type == CTX_EMIT)
                 error_tok(vm, tok, "#pragma cccc emit: blocks cannot be nested");
-            vm->compiler.in_emit_block = true;
-            vm->compiler.emit_block_in_comptime = vm->compiler.in_comptime_block;
-            vm->compiler.emit_block_tok = tok;
-            return skip_line(vm, after->next);
+            if (!top || top->type != CTX_COMPTIME)
+                error_tok(vm, tok, "#pragma cccc emit requires an active comptime context");
+            ctx_push(vm, CTX_EMIT, is_begin, tok->file, tok);
+            return skip_line(vm, is_begin ? after->next : after);
         } else if (equal(sub, "end")) {
-            if (vm->compiler.in_comptime_block) {
-                vm->compiler.in_comptime_block      = false;
-                vm->compiler.comptime_block_file    = NULL;
-                vm->compiler.comptime_block_needs_end = false;
+            ComptimeCtxEntry *top = ctx_top(vm);
+            if (top && top->type == CTX_COMPTIME) {
+                ctx_pop(vm);
             } else if (vm->compiler.current_suite) {
                 free(vm->compiler.current_suite);
                 vm->compiler.current_suite = NULL;
@@ -2935,15 +2951,10 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
     Token *cur = &head;
 
     while (tok->kind != TK_EOF) {
-        if (vm->compiler.in_emit_block) {
-            if (!is_hash(tok))
-                if (!vm->compiler.emit_block_in_comptime)
-                    error_tok(vm, tok,
-                              "only preprocessor directives are allowed inside "
-                              "#pragma cccc emit blocks");
+        if (ctx_top(vm) && ctx_top(vm)->type == CTX_EMIT) {
             Token *start = tok;
             if (is_hash(start)) {
-                if (is_pragma_cccc_emit_end(start)) {
+                if (is_pragma_cccc(start)) {
                     tok = handle_pragma_body(vm, tok->next->next);
                     continue;
                 }
@@ -3001,16 +3012,15 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
 
             // Inside a #pragma cccc comptime begin...end block: intercept
             // unannotated function definitions and variable declarations.
-            if (vm->compiler.in_comptime_block) {
+            ComptimeCtxEntry *comptime_top = ctx_top(vm);
+            if (comptime_top && comptime_top->type == CTX_COMPTIME) {
                 // Auto-close if the file that opened the block has ended.
-                if (tok->file != vm->compiler.comptime_block_file) {
-                    if (vm->compiler.comptime_block_needs_end)
+                if (tok->file != comptime_top->file) {
+                    if (comptime_top->needs_end)
                         warn_tok(vm, tok, CCCC_WARN_COMPTIME_BLOCK_LEAK,
                                  "unclosed #pragma cccc comptime begin in included file; "
                                  "block closed automatically");
-                    vm->compiler.in_comptime_block      = false;
-                    vm->compiler.comptime_block_file    = NULL;
-                    vm->compiler.comptime_block_needs_end = false;
+                    ctx_pop(vm);
                 } else {
                     // struct/union/enum type definitions must pass through
                     // en-bloc so body tokens don't trigger false extractions.
@@ -3080,7 +3090,7 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
             // queued for the comptime pass only; they never reach the runtime TU.
             if (include_route == INCLUDE_ROUTE_COMPTIME ||
                 (include_route == INCLUDE_ROUTE_NORMAL &&
-                 vm->compiler.in_comptime_block)) {
+                 ctx_top(vm) && ctx_top(vm)->type == CTX_COMPTIME)) {
                 tok = skip_line(vm, tok);
                 queue_comptime_include(vm, filename, is_dquote);
                 break;
@@ -3640,17 +3650,16 @@ static void join_adjacent_string_literals(CCCC *vm, Token *tok) {
 // Entry point function of the preprocessor.
 Token *preprocess(CCCC *vm, Token *tok) {
     tok = preprocess2(vm, tok);
-    // Bare '#pragma cccc comptime' (whole-file form): silently close at EOF.
-    // The begin/end form is handled by explicit 'end'; its unclosed-block
-    // warning fires in preprocess2 when tokens from a different file appear.
-    if (vm->compiler.in_comptime_block && !vm->compiler.comptime_block_needs_end) {
-        vm->compiler.in_comptime_block      = false;
-        vm->compiler.comptime_block_file    = NULL;
-        vm->compiler.comptime_block_needs_end = false;
+    // Bare (whole-file) comptime/emit entries are silently closed at EOF.
+    // begin/end entries that reach EOF without an explicit close are errors.
+    while (vm->compiler.ctx_stack_len > 0 && !ctx_top(vm)->needs_end)
+        ctx_pop(vm);
+    if (vm->compiler.ctx_stack_len > 0) {
+        ComptimeCtxEntry *top = ctx_top(vm);
+        error_tok(vm, top->open_tok,
+                  top->type == CTX_EMIT ? "unclosed #pragma cccc emit begin"
+                                        : "unclosed #pragma cccc comptime begin");
     }
-    if (vm->compiler.in_emit_block)
-        error_tok(vm, vm->compiler.emit_block_tok,
-                  "unclosed #pragma cccc emit begin");
     if (vm->compiler.cond_incl)
         error_tok(vm, vm->compiler.cond_incl->tok,
                   "unterminated conditional directive (started with #%.*s)",

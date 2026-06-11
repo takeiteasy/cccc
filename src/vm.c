@@ -1006,6 +1006,10 @@ void cc_destroy(CCCC *vm) {
     if (vm->compiler.diag_stack_werror)
         free(vm->compiler.diag_stack_werror);
 
+    // Free comptime/emit context stack
+    if (vm->compiler.ctx_stack)
+        free(vm->compiler.ctx_stack);
+
     // Free pragma_once HashMap
     hashmap_deinit(&vm->compiler.pragma_once);
 
