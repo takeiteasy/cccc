@@ -185,17 +185,24 @@ This approach complements the side-effect style (calling `$function` etc.):
 
 When a macro generates code that uses standard-library functions or
 platform-specific types, the serialized output needs matching preprocessor
-directives at the top of the file. Use `#include [[cccc::emit]]` for
-unconditional header dependencies:
+directives. Use `[[cccc::emit]]`, `@emit`, or `__attribute__((emit))`
+immediately after a preprocessor directive keyword to copy that directive into
+generated output instead of evaluating it in the current translation unit:
 
 ```c
 #include [[cccc::emit]] <string.h>
 #include @emit <stdint.h>
 #include __attribute__((emit)) <stddef.h>
+#ifdef @emit _WIN32
+gen_windows_helpers();
+#endif @emit
 ```
 
 Multiple emit includes with the same emitted `#include` line are deduplicated.
-For raw preprocessor preamble directives, use an emit block:
+Other emitted directives keep source order and are not deduplicated, so they can
+wrap file-scope macro calls and the declarations those calls generate.
+
+For several raw preprocessor directives, use an emit block:
 
 ```c
 #pragma cccc emit begin
@@ -205,10 +212,34 @@ For raw preprocessor preamble directives, use an emit block:
 #pragma cccc emit end
 ```
 
-Emit blocks accept preprocessor directive lines only. The lines are copied
-verbatim into the serialized output preamble and are not deduplicated. They do
-not wrap generated declarations; ordered interleaving with generated code is a
-future feature.
+Outside comptime regions, emit blocks accept preprocessor directive lines only.
+Inside a `#pragma cccc comptime` region, an emit block is a runtime escape hatch:
+ordinary C declarations in the block are compiled into the runtime translation
+unit and are also copied into generated output.
+
+Macros can emit source-order directives while they run:
+
+```c
+[[cccc::comptime]]
+void gen(void) {
+    $emit_directive("#ifdef _WIN32");
+    $obj_t *fn = $function("win_helper", $get_type("int"));
+    $function_set_body(fn, $quote("return 42;"));
+    $publish(fn);
+    $emit_directive("#endif");
+}
+```
+
+Use `@comptime`, `[[cccc::comptime]]`, or `__attribute__((comptime))` after a
+preprocessor directive keyword to route that directive to the comptime
+compilation stream instead of runtime source:
+
+```c
+#define @comptime CT_VALUE 42
+#ifdef @comptime CT_VALUE
+#define @comptime CT_SEEN 1
+#endif @comptime
+```
 
 ## Call-Site Expansion
 
@@ -385,6 +416,8 @@ int main(void) { ... }
 
 Inside a comptime block:
 - `#include` directives are queued as comptime-only includes — invisible to the runtime translation unit.
+- preprocessor directives marked `@emit` are copied to generated output.
+- `#pragma cccc emit begin...end` opens a runtime escape block.
 - Function definitions are treated as `[[cccc::comptime]]`.
 - Variable and struct declarations are treated as comptime variables.
 - Existing `[[cccc::comptime(inline)]]` annotations are respected; explicit attributes always take precedence.

@@ -1291,15 +1291,14 @@ $node_t *__cccc_ast_publish(CCCC *vm, $obj_t *obj, $token_t *tok);
 $node_t *__cccc_ast_publish_type(CCCC *vm, $type_t *ty, $token_t *tok);
 
 /*!
- * @function __cccc_ast_forward_declare
- * @abstract Deprecated alias for publishing a generated function.
+ * @function __cccc_emit_directive
+ * @abstract Emit one raw preprocessor directive line into generated output.
  * @param vm The VM context.
- * @param fn A function object created with __cccc_ast_function().
- * @return A no-op $node_t on success, or NULL on invalid arguments.
- * @discussion Use __cccc_ast_publish(vm, fn, NULL) or $publish(fn).
- *             Convenience wrapper: $forward_declare(fn).
+ * @param line Complete directive text, for example "#ifdef _WIN32".
+ * @discussion Convenience wrapper: $emit_directive(line).
  */
-$node_t *__cccc_ast_forward_declare(CCCC *vm, $obj_t *fn);
+void __cccc_emit_directive(CCCC *vm, const char *line);
+
 
 /*!
  * @function __cccc_ast_function_add_param
@@ -1778,7 +1777,7 @@ const char *__cccc_dump_ast_gen_to_string(CCCC *vm, $node_t *node);
         $obj_t *: __cccc_ast_publish,                                          \
         $type_t *: __cccc_ast_publish_type                                     \
     )(_VM, (decl), (tok))
-#define $forward_declare(fn) __cccc_ast_publish(_VM, fn, 0)
+#define $emit_directive(line) __cccc_emit_directive(_VM, line)
 #define $function_add_param(fn, name, type)                             \
     __cccc_ast_function_add_param(_VM, fn, name, type)
 #define $function_set_body(fn, body)                                    \

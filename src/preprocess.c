@@ -113,6 +113,39 @@ static char *copy_raw_directive_line(CCCC *vm, Token *start) {
     return arena_strndup(vm, start->loc, end - start->loc);
 }
 
+static char *copy_routed_directive_line(CCCC *vm, Token *hash, Token *route_start,
+                                        Token *route_end) {
+    (void)route_start;
+    Token *directive = hash->next;
+    size_t cap = 64;
+    size_t len = 0;
+    char *line = arena_alloc(&vm->compiler.parser_arena, cap);
+#define APPEND_BYTES(ptr, n) do {                                      \
+        size_t need = len + (size_t)(n) + 1;                            \
+        if (need > cap) {                                               \
+            char *next = arena_alloc(&vm->compiler.parser_arena, need * 2); \
+            memcpy(next, line, len);                                    \
+            line = next;                                                \
+            cap = need * 2;                                             \
+        }                                                               \
+        memcpy(line + len, (ptr), (size_t)(n));                         \
+        len += (size_t)(n);                                             \
+        line[len] = '\0';                                               \
+    } while (0)
+    APPEND_BYTES("#", 1);
+    APPEND_BYTES(directive->loc, directive->len);
+    bool wrote_space = false;
+    for (Token *t = route_end; t && t->kind != TK_EOF && !t->at_bol;
+         t = t->next) {
+        if (!wrote_space || t->has_space)
+            APPEND_BYTES(" ", 1);
+        APPEND_BYTES(t->loc, t->len);
+        wrote_space = true;
+    }
+#undef APPEND_BYTES
+    return line;
+}
+
 static void push_emit_directive(CCCC *vm, char *line, bool dedup) {
     if (!line)
         return;
@@ -727,6 +760,36 @@ static Token *append_tokens(CCCC *vm, Token *cur, Token *tokens, Token *tmpl) {
             copy->file = tmpl->file;
             copy->line_no = tmpl->line_no;
         }
+        copy->next = NULL;
+        cur = cur->next = copy;
+    }
+    return cur;
+}
+
+static char *escape_c_string(CCCC *vm, const char *s) {
+    size_t len = 0;
+    for (const char *p = s; *p; p++)
+        len += (*p == '\\' || *p == '"') ? 2 : 1;
+    char *out = arena_alloc(&vm->compiler.parser_arena, len + 1);
+    char *q = out;
+    for (const char *p = s; *p; p++) {
+        if (*p == '\\' || *p == '"')
+            *q++ = '\\';
+        *q++ = *p;
+    }
+    *q = '\0';
+    return out;
+}
+
+static Token *append_emit_marker_tokens(CCCC *vm, Token *cur, Token *tmpl,
+                                        char *line) {
+    char *escaped = escape_c_string(vm, line);
+    char *src = arena_format(vm, "__cccc_emit_line__(\"%s\");\n", escaped);
+    Token *tokens = tokenize_string(vm, "<cccc-emit>", src);
+    for (Token *t = tokens; t && t->kind != TK_EOF; t = t->next) {
+        Token *copy = copy_token(vm, t);
+        copy->file = tmpl->file;
+        copy->line_no = tmpl->line_no;
         copy->next = NULL;
         cur = cur->next = copy;
     }
@@ -2795,6 +2858,7 @@ static Token *handle_pragma_body(CCCC *vm, Token *tok) {
                 if (!vm->compiler.in_emit_block)
                     error_tok(vm, tok, "stray #pragma cccc emit end without matching begin");
                 vm->compiler.in_emit_block = false;
+                vm->compiler.emit_block_in_comptime = false;
                 vm->compiler.emit_block_tok = NULL;
                 return skip_line(vm, after->next);
             }
@@ -2804,6 +2868,7 @@ static Token *handle_pragma_body(CCCC *vm, Token *tok) {
             if (vm->compiler.in_emit_block)
                 error_tok(vm, tok, "#pragma cccc emit: blocks cannot be nested");
             vm->compiler.in_emit_block = true;
+            vm->compiler.emit_block_in_comptime = vm->compiler.in_comptime_block;
             vm->compiler.emit_block_tok = tok;
             return skip_line(vm, after->next);
         } else if (equal(sub, "end")) {
@@ -2853,8 +2918,14 @@ static Token *handle_pragma_body(CCCC *vm, Token *tok) {
 }
 
 static void queue_comptime_include(CCCC *vm, const char *filename, bool is_dquote) {
-    char *bracketed = arena_format(vm, is_dquote ? "\"%s\"" : "<%s>", filename);
-    strarray_push(&vm->compiler.comptime_pending_includes, bracketed);
+    char *line = arena_format(vm, is_dquote ? "#include \"%s\"" : "#include <%s>",
+                              filename);
+    strarray_push(&vm->compiler.comptime_pending_includes, line);
+}
+
+static void queue_comptime_directive(CCCC *vm, char *line) {
+    if (line && *line)
+        strarray_push(&vm->compiler.comptime_pending_includes, line);
 }
 
 // Visit all tokens in `tok` while evaluating preprocessing
@@ -2866,16 +2937,33 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
     while (tok->kind != TK_EOF) {
         if (vm->compiler.in_emit_block) {
             if (!is_hash(tok))
-                error_tok(vm, tok,
-                          "only preprocessor directives are allowed inside "
-                          "#pragma cccc emit blocks");
+                if (!vm->compiler.emit_block_in_comptime)
+                    error_tok(vm, tok,
+                              "only preprocessor directives are allowed inside "
+                              "#pragma cccc emit blocks");
             Token *start = tok;
-            if (is_pragma_cccc_emit_end(start)) {
-                tok = handle_pragma_body(vm, tok->next->next);
+            if (is_hash(start)) {
+                if (is_pragma_cccc_emit_end(start)) {
+                    tok = handle_pragma_body(vm, tok->next->next);
+                    continue;
+                }
+                char *line = copy_raw_directive_line(vm, start);
+                push_emit_directive(vm, line, false);
+                cur = append_emit_marker_tokens(vm, cur, start, line);
+                tok = skip_line(vm, tok->next);
                 continue;
             }
-            push_emit_directive(vm, copy_raw_directive_line(vm, start), false);
-            tok = skip_line(vm, tok->next);
+            cc_record_emit_source(vm, copy_raw_directive_line(vm, start));
+            bool first_token = true;
+            while (tok->kind != TK_EOF && (first_token || !tok->at_bol)) {
+                first_token = false;
+                tok->line_delta = tok->file->line_delta;
+                tok->filename = tok->file->display_name;
+                tok->diag_warnings = (1ULL << 63) | vm->compiler.warnings;
+                tok->diag_werror   = (1ULL << 63) | vm->compiler.warning_errors;
+                cur = cur->next = tok;
+                tok = tok->next;
+            }
             continue;
         }
 
@@ -2958,6 +3046,25 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
 
         if (tok->kind == TK_PP_NUM) {
             read_line_marker(vm, &tok, tok);
+            continue;
+        }
+
+        Token *route_start = tok->next;
+        Token *route_after = route_start;
+        IncludeRoute directive_route = read_include_route(&route_after);
+        if (directive_route == INCLUDE_ROUTE_EMIT) {
+            char *line =
+                copy_routed_directive_line(vm, start, route_start, route_after);
+            push_emit_directive(vm, line, pp_directive(tok) == PP_INCLUDE);
+            cur = append_emit_marker_tokens(vm, cur, start, line);
+            tok = skip_line(vm, route_after);
+            continue;
+        }
+        if (directive_route == INCLUDE_ROUTE_COMPTIME) {
+            char *line =
+                copy_routed_directive_line(vm, start, route_start, route_after);
+            queue_comptime_directive(vm, line);
+            tok = skip_line(vm, route_after);
             continue;
         }
 

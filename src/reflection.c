@@ -1393,8 +1393,14 @@ $node_t *__cccc_ast_publish(CCCC *vm, $obj_t *obj, $token_t *tok) {
     decl->next = vm->compiler.scope->vars;
     vm->compiler.scope->vars = decl;
     hashmap_put2_borrowed(&vm->compiler.scope->var_map, decl->name, decl->name_len, decl);
+    if (vm->compiler.macro_emit_recording)
+        cc_record_emit_object(vm, obj);
 
     return reflect_noop_node(vm);
+}
+
+void __cccc_emit_directive(CCCC *vm, const char *line) {
+    cc_record_emit_source(vm, line);
 }
 
 $node_t *__cccc_ast_publish_type(CCCC *vm, $type_t *ty, $token_t *tok) {
@@ -1403,12 +1409,6 @@ $node_t *__cccc_ast_publish_type(CCCC *vm, $type_t *ty, $token_t *tok) {
     if (!vm)
         return NULL;
     return reflect_noop_node(vm);
-}
-
-$node_t *__cccc_ast_forward_declare(CCCC *vm, $obj_t *fn) {
-    if (!vm || !fn || !fn->is_function || !fn->ty || fn->ty->kind != TY_FUNC)
-        return NULL;
-    return __cccc_ast_publish(vm, fn, NULL);
 }
 
 void __cccc_ast_function_add_param(CCCC *vm, $obj_t *fn, const char *name,
@@ -1558,6 +1558,8 @@ $obj_t *__cccc_ast_global_var(CCCC *vm, const char *name, $type_t *ty) {
             obj->is_macro_generated = true;
             obj->ty = ty;
             obj->align = ty->align;
+            if (vm->compiler.macro_emit_recording)
+                cc_record_emit_object(vm, obj);
             return obj;
         }
     }
@@ -1574,6 +1576,8 @@ $obj_t *__cccc_ast_global_var(CCCC *vm, const char *name, $type_t *ty) {
 
     var->next = vm->compiler.globals;
     vm->compiler.globals = var;
+    if (vm->compiler.macro_emit_recording)
+        cc_record_emit_object(vm, var);
     return var;
 }
 

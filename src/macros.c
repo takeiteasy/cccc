@@ -83,8 +83,8 @@ extern void __cccc_ast_function_set_inline(Obj *fn, bool is_inline);
 extern void __cccc_ast_function_set_variadic(Obj *fn, bool is_variadic);
 extern Node *__cccc_ast_publish(CCCC *vm, Obj *obj, Token *tok);
 extern Node *__cccc_ast_publish_type(CCCC *vm, Type *ty, Token *tok);
-extern Node *__cccc_ast_forward_declare(CCCC *vm, Obj *fn);
 extern Node *__cccc_ast_param_ref(CCCC *vm, Obj *fn, const char *name);
+extern void __cccc_emit_directive(CCCC *vm, const char *line);
 
 // Ticket #152: global variable generation
 extern Obj  *__cccc_ast_global_var(CCCC *vm, const char *name, Type *ty);
@@ -109,6 +109,37 @@ extern void __cccc_dump_tree(CCCC *vm, Node *node);
 extern const char *__cccc_dump_tree_to_string(CCCC *vm, Node *node);
 extern void __cccc_dump_ast_gen(CCCC *vm, Node *node);
 extern const char *__cccc_dump_ast_gen_to_string(CCCC *vm, Node *node);
+
+void cc_record_emit_source(CCCC *vm, const char *source) {
+    if (!vm || !source || !*source)
+        return;
+    CCCCEmitEvent *ev = arena_alloc(&vm->compiler.parser_arena, sizeof(*ev));
+    memset(ev, 0, sizeof(*ev));
+    ev->kind = CCCC_EMIT_SOURCE;
+    ev->source = arena_strdup(vm, source);
+    if (vm->compiler.emit_events_tail)
+        vm->compiler.emit_events_tail->next = ev;
+    else
+        vm->compiler.emit_events_head = ev;
+    vm->compiler.emit_events_tail = ev;
+}
+
+void cc_record_emit_object(CCCC *vm, Obj *obj) {
+    if (!vm || !obj || !obj->is_macro_generated)
+        return;
+    for (CCCCEmitEvent *ev = vm->compiler.emit_events_head; ev; ev = ev->next)
+        if (ev->kind == CCCC_EMIT_OBJECT && ev->obj == obj)
+            return;
+    CCCCEmitEvent *ev = arena_alloc(&vm->compiler.parser_arena, sizeof(*ev));
+    memset(ev, 0, sizeof(*ev));
+    ev->kind = CCCC_EMIT_OBJECT;
+    ev->obj = obj;
+    if (vm->compiler.emit_events_tail)
+        vm->compiler.emit_events_tail->next = ev;
+    else
+        vm->compiler.emit_events_head = ev;
+    vm->compiler.emit_events_tail = ev;
+}
 
 // Ticket #78: source-located macro diagnostics
 extern void __cccc_macro_error_at(CCCC *vm, Node *node, const char *fmt, ...);
@@ -324,6 +355,8 @@ static void register_reflection_ffi(CCCC *vm) {
     cc_register_cfunc(vm, "__cccc_dump_tree_to_string",    (void *)__cccc_dump_tree_to_string,    2, 0);
     cc_register_cfunc(vm, "__cccc_dump_ast_gen",           (void *)__cccc_dump_ast_gen,           2, 0);
     cc_register_cfunc(vm, "__cccc_dump_ast_gen_to_string", (void *)__cccc_dump_ast_gen_to_string, 2, 0);
+    cc_register_cfunc(vm, "__cccc_emit_directive",
+                      (void *)__cccc_emit_directive, 2, 0);
 
     // Ticket #78: source-located macro diagnostics (variadic)
     cc_register_variadic_cfunc(vm, "__cccc_macro_error_at",   (void *)__cccc_macro_error_at,   3, 0);
@@ -373,8 +406,6 @@ static void register_reflection_ffi(CCCC *vm) {
                       (void *)__cccc_ast_publish, 3, 0);
     cc_register_cfunc(vm, "__cccc_ast_publish_type",
                       (void *)__cccc_ast_publish_type, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_forward_declare",
-                      (void *)__cccc_ast_forward_declare, 2, 0);
     cc_register_cfunc(vm, "__cccc_ast_param_ref", (void *)__cccc_ast_param_ref, 3, 0);
 
     // Ticket #152: global variable generation
@@ -920,10 +951,10 @@ static Token *build_combined_macro_tokens(CCCC *vm, Token *reflection_tokens,
 
     cur = append_token_list(vm, cur, reflection_tokens);
 
-    // Inject #include [[cccc::comptime]] requests as plain #include directives
-    // so they are processed by the comptime preprocessing pass (#196).
+    // Inject routed comptime directives so they are processed by the comptime
+    // preprocessing pass (#196/#368).
     for (int i = 0; i < vm->compiler.comptime_pending_includes.len; i++) {
-        char *src = arena_format(vm, "#include %s\n",
+        char *src = arena_format(vm, "%s\n",
                                  vm->compiler.comptime_pending_includes.data[i]);
         Token *inc_toks = tokenize_string(vm, "<comptime-include>", src);
         cur = append_token_list(vm, cur, inc_toks);
@@ -1989,6 +2020,24 @@ static void scan_and_execute_global_calls(CCCC *vm, Token **tokens_ptr) {
         else if (equal(tok, "(")) paren_depth++;
         else if (equal(tok, ")")) paren_depth--;
 
+        if (brace_depth == 0 && paren_depth == 0 &&
+            tok->kind == TK_IDENT && tok->len == 18 &&
+            strncmp(tok->loc, "__cccc_emit_line__", 18) == 0 &&
+            tok->next && equal(tok->next, "(") &&
+            tok->next->next && tok->next->next->kind == TK_STR &&
+            tok->next->next->next && equal(tok->next->next->next, ")") &&
+            tok->next->next->next->next &&
+            equal(tok->next->next->next->next, ";")) {
+            Token *next_tok = tok->next->next->next->next->next;
+            cc_record_emit_source(vm, tok->next->next->str);
+            if (prev)
+                prev->next = next_tok;
+            else
+                *tokens_ptr = next_tok;
+            tok = next_tok;
+            continue;
+        }
+
         // Only match at file scope (outside braces and parens)
         if (brace_depth == 0 && paren_depth == 0 &&
             tok->kind == TK_IDENT && tok->next && equal(tok->next, "(")) {
@@ -2140,9 +2189,14 @@ static void scan_and_execute_global_calls(CCCC *vm, Token **tokens_ptr) {
                             vm->compiler.macro_vararg_string_mode = true;
                         }
 
+                        bool saved_emit_recording =
+                            vm->compiler.macro_emit_recording;
+                        vm->compiler.macro_emit_recording = true;
                         Node *block_result =
                             execute_macro_fn(vm, pm, tok, NULL, arg_count,
                                              fixed_args, fixed_count);
+                        vm->compiler.macro_emit_recording =
+                            saved_emit_recording;
                         vm->compiler.macro_vararg_nodes = saved_vararg_nodes;
                         vm->compiler.macro_vararg_strs = saved_vararg_strs;
                         vm->compiler.macro_vararg_count = saved_vararg_count;
@@ -2158,6 +2212,7 @@ static void scan_and_execute_global_calls(CCCC *vm, Token **tokens_ptr) {
                         Obj *o = vm->compiler.globals;
                         while (o && o != globals_before) {
                             Obj *next_obj = o->next;
+                            cc_record_emit_object(vm, o);
                             o->next = vm->compiler.macro_globals;
                             vm->compiler.macro_globals = o;
                             o = next_obj;
@@ -2237,8 +2292,15 @@ static void scan_and_execute_global_calls(CCCC *vm, Token **tokens_ptr) {
 // After this runs, vm->compiler.macro_globals contains the generated
 // definitions. main.c appends them to the merged program before codegen.
 void cc_execute_inline_macros(CCCC *vm, Token **input_tokens, int count) {
-    if (!vm || !vm->compiler.macro_fns)
+    if (!vm)
         return;
+
+    if (!vm->compiler.macro_fns) {
+        for (int fi = 0; fi < count; fi++)
+            if (input_tokens[fi])
+                scan_and_execute_global_calls(vm, &input_tokens[fi]);
+        return;
+    }
 
     if (!vm->compiler.macro_context_tokens)
         vm->compiler.macro_context_tokens =
@@ -2248,8 +2310,12 @@ void cc_execute_inline_macros(CCCC *vm, Token **input_tokens, int count) {
     bool any_global = false;
     for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next)
         if (!pm->is_inline) { any_global = true; break; }
-    if (!any_global)
+    if (!any_global) {
+        for (int fi = 0; fi < count; fi++)
+            if (input_tokens[fi])
+                scan_and_execute_global_calls(vm, &input_tokens[fi]);
         return;
+    }
 
     if (vm->debug_vm)
         printf("Pre-parse: executing global macro calls...\n");

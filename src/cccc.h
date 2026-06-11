@@ -546,6 +546,18 @@ typedef struct Node Node;
 typedef struct Obj Obj;
 typedef struct Scope Scope;
 
+typedef enum {
+    CCCC_EMIT_SOURCE,
+    CCCC_EMIT_OBJECT,
+} CCCCEmitEventKind;
+
+typedef struct CCCCEmitEvent {
+    struct CCCCEmitEvent *next;
+    CCCCEmitEventKind kind;
+    char *source;
+    Obj *obj;
+} CCCCEmitEvent;
+
 /*!
  @struct Type
  @abstract Central representation of a C type in the compiler.
@@ -1571,6 +1583,7 @@ typedef struct Compiler {
     File *comptime_block_file;       // File that opened the comptime block (for auto-close)
     bool comptime_block_needs_end;   // true for begin/end form; false for bare whole-file pragma
     bool in_emit_block;              // True inside #pragma cccc emit begin...end
+    bool emit_block_in_comptime;      // True when emit block is a comptime runtime escape hatch
     Token *emit_block_tok;           // Opening token for unclosed emit-block diagnostics
     bool macro_fns_compiled;         // True after compile_all_macros has run
     bool strict_comptime_includes;   // --strict-comptime-includes: don't forward regular #include decls to comptime pass
@@ -1584,6 +1597,9 @@ typedef struct Compiler {
     Scope *macro_context_scope;       // Parser scope produced from macro_context_tokens
     Obj *macro_globals; // Globals defined by inline macros (injected into
                         // the final program before codegen)
+    CCCCEmitEvent *emit_events_head;  // Ordered generated-output events
+    CCCCEmitEvent *emit_events_tail;
+    bool macro_emit_recording;        // True while a macro call records generated output
 
     // #embed directive limits
     size_t embed_limit;      // Soft limit for #embed size (default: 10MB)
@@ -1642,7 +1658,7 @@ typedef struct Compiler {
     StringArray system_include_paths; // System header search paths for <...>
     HashMap include_cache;            // Cache for search_include_paths
     StringArray file_buffers;         // Track allocated file buffers for cleanup
-    StringArray emit_directives;           // Preprocessor directives to prepend to serialized output
+    StringArray emit_directives;           // Legacy preprocessor directives to prepend to serialized output
     StringArray comptime_pending_includes; // #include [[cccc::comptime]] filenames queued for comptime pass
 
     // Code generation state
@@ -2259,6 +2275,8 @@ void cc_init_parser(CCCC *vm);
  @param count Number of token streams in the array.
 */
 void cc_execute_inline_macros(CCCC *vm, Token **input_tokens, int count);
+void cc_record_emit_source(CCCC *vm, const char *source);
+void cc_record_emit_object(CCCC *vm, Obj *obj);
 
 /*!
  @function cc_expand_macros

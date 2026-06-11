@@ -71,6 +71,8 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
     per_test_run_args = []
     expect_stderr = None
     reject_stderr = None
+    expect_stdout = None
+    reject_stdout = None
     try:
         with open(test_file, "r") as f:
             header_lines = [f.readline() for _ in range(5)]
@@ -92,6 +94,10 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
                     expect_stderr = line.split("CCCC_EXPECT_STDERR:", 1)[1].strip().rstrip("*/").strip()
                 if "CCCC_REJECT_STDERR:" in line:
                     reject_stderr = line.split("CCCC_REJECT_STDERR:", 1)[1].strip().rstrip("*/").strip()
+                if "CCCC_EXPECT_STDOUT:" in line:
+                    expect_stdout = line.split("CCCC_EXPECT_STDOUT:", 1)[1].strip().rstrip("*/").strip()
+                if "CCCC_REJECT_STDOUT:" in line:
+                    reject_stdout = line.split("CCCC_REJECT_STDOUT:", 1)[1].strip().rstrip("*/").strip()
     except Exception:
         pass
 
@@ -198,12 +204,16 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
         ]
 
     elapsed = None
+    stdout = ""
+    stderr = ""
     if cmd is not None:
         start = time.perf_counter()
         result = subprocess.run(cmd, capture_output=True, text=True, cwd=script_dir)
         elapsed = time.perf_counter() - start
         if profile_json and result.stdout:
             Path(profile_json).write_text(result.stdout)
+        stdout = result.stdout
+        stderr = result.stderr
         output = result.stdout + result.stderr
         exit_code = result.returncode
 
@@ -255,6 +265,8 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
         status = "passed"
     elif is_testing_mode and exit_code == 0:
         status = "passed"
+    elif expect_stdout and exit_code == 0:
+        status = "passed"
     elif expects_runtime_error and exit_code == 255:
         status = "negative_pass"
     else:
@@ -267,6 +279,12 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
         elif reject_stderr and re.search(reject_stderr, output, re.MULTILINE):
             status = "stderr_mismatch"
             stderr_mismatch = f"expected stderr not to match: {reject_stderr}"
+        elif expect_stdout and not re.search(expect_stdout, stdout, re.MULTILINE | re.DOTALL):
+            status = "stderr_mismatch"
+            stderr_mismatch = f"expected stdout to match: {expect_stdout}"
+        elif reject_stdout and re.search(reject_stdout, stdout, re.MULTILINE | re.DOTALL):
+            status = "stderr_mismatch"
+            stderr_mismatch = f"expected stdout not to match: {reject_stdout}"
 
     return {
         "idx": idx,

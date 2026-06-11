@@ -62,6 +62,7 @@ syntax details have their own documents:
 | Trigraphs | ✗ | Removed in C23; intentionally not supported |
 | `#include`, `#define`, `#undef` | ✓ | |
 | `#ifdef`, `#ifndef`, `#if`, `#elif`, `#else`, `#endif` | ✓ | |
+| CCCC-routed preprocessor directives | ✓ | `@emit` routes directives to generated output; `@comptime` routes directives to the comptime stream |
 | `#error` | ✓ | |
 | `#line` | ~ | Directive parsed; line tracking updated |
 | Object-like and function-like macros | ✓ | |
