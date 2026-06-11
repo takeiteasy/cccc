@@ -241,6 +241,13 @@ static IncludeRoute read_include_route(Token **tok_ptr) {
     IncludeRoute route = INCLUDE_ROUTE_NORMAL;
     Token *rest = NULL;
     Token *tok = *tok_ptr;
+    // Route attributes must appear on the same line as the directive. A token
+    // with at_bol=true starts a new line and cannot be part of the current
+    // directive — so it is never a route attribute. Without this guard,
+    // [[cccc::comptime]] at the start of the next line after a #endif would
+    // be misidentified as a routing attribute, leaving cond_incl unpopped.
+    if (tok->at_bol)
+        return INCLUDE_ROUTE_NORMAL;
     if (is_c23_route_attr(tok, &route, &rest) ||
         is_at_route_attr(tok, &route, &rest) ||
         is_gnu_route_attr(tok, &route, &rest))
