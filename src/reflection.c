@@ -63,16 +63,6 @@ const char *__cccc_gensym(CCCC *vm, const char *prefix) {
                         vm->compiler.macro_gensym_counter++);
 }
 
-void __cccc_forward_include(CCCC *vm, const char *header) {
-    if (!vm || !header)
-        return;
-    StringArray *arr = &vm->compiler.forward_includes;
-    for (int i = 0; i < arr->len; i++)
-        if (strcmp(arr->data[i], header) == 0)
-            return;
-    strarray_push(arr, strdup(header));
-}
-
 $token_t *__cccc_ast_current_token(CCCC *vm) {
     return vm ? vm->compiler.macro_call_tok : NULL;
 }

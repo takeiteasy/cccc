@@ -87,6 +87,12 @@ static long eval_const_expr(CCCC *vm, Token **rest, Token *tok);
 
 static bool is_hash(Token *tok) { return tok->at_bol && equal(tok, "#"); }
 
+typedef enum {
+    INCLUDE_ROUTE_NORMAL,
+    INCLUDE_ROUTE_COMPTIME,
+    INCLUDE_ROUTE_EMIT,
+} IncludeRoute;
+
 // Some preprocessor directives such as #include allow extraneous
 // tokens before newline. This function skips such tokens.
 static Token *skip_line(CCCC *vm, Token *tok) {
@@ -96,6 +102,105 @@ static Token *skip_line(CCCC *vm, Token *tok) {
     while (!tok->at_bol)
         tok = tok->next;
     return tok;
+}
+
+static char *copy_raw_directive_line(CCCC *vm, Token *start) {
+    char *end = start->loc;
+    while (*end && *end != '\n')
+        end++;
+    if (end > start->loc && end[-1] == '\r')
+        end--;
+    return arena_strndup(vm, start->loc, end - start->loc);
+}
+
+static void push_emit_directive(CCCC *vm, char *line, bool dedup) {
+    if (!line)
+        return;
+    StringArray *arr = &vm->compiler.emit_directives;
+    if (dedup) {
+        for (int i = 0; i < arr->len; i++)
+            if (strcmp(arr->data[i], line) == 0)
+                return;
+    }
+    strarray_push(arr, strdup(line));
+}
+
+static bool is_c23_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
+    if (!equal(tok, "[") || !tok->next || !equal(tok->next, "["))
+        return false;
+    Token *p = tok->next->next;
+    if (!equal(p, "cccc") || !p->next || !equal(p->next, ":") ||
+        !p->next->next || !equal(p->next->next, ":") ||
+        !p->next->next->next)
+        return false;
+    p = p->next->next->next;
+    IncludeRoute r;
+    if (equal(p, "comptime"))
+        r = INCLUDE_ROUTE_COMPTIME;
+    else if (equal(p, "emit"))
+        r = INCLUDE_ROUTE_EMIT;
+    else
+        return false;
+    if (!p->next || !equal(p->next, "]") ||
+        !p->next->next || !equal(p->next->next, "]"))
+        return false;
+    *route = r;
+    *rest = p->next->next->next;
+    return true;
+}
+
+static bool is_at_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
+    if (!equal(tok, "@") || !tok->next)
+        return false;
+    if (equal(tok->next, "comptime"))
+        *route = INCLUDE_ROUTE_COMPTIME;
+    else if (equal(tok->next, "emit"))
+        *route = INCLUDE_ROUTE_EMIT;
+    else
+        return false;
+    *rest = tok->next->next;
+    return true;
+}
+
+static bool is_gnu_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
+    if (!equal(tok, "__attribute__") ||
+        !tok->next || !equal(tok->next, "(") ||
+        !tok->next->next || !equal(tok->next->next, "(") ||
+        !tok->next->next->next)
+        return false;
+    Token *p = tok->next->next->next;
+    IncludeRoute r;
+    if (equal(p, "comptime"))
+        r = INCLUDE_ROUTE_COMPTIME;
+    else if (equal(p, "emit"))
+        r = INCLUDE_ROUTE_EMIT;
+    else
+        return false;
+    if (!p->next || !equal(p->next, ")") ||
+        !p->next->next || !equal(p->next->next, ")"))
+        return false;
+    *route = r;
+    *rest = p->next->next->next;
+    return true;
+}
+
+static IncludeRoute read_include_route(Token **tok_ptr) {
+    IncludeRoute route = INCLUDE_ROUTE_NORMAL;
+    Token *rest = NULL;
+    Token *tok = *tok_ptr;
+    if (is_c23_route_attr(tok, &route, &rest) ||
+        is_at_route_attr(tok, &route, &rest) ||
+        is_gnu_route_attr(tok, &route, &rest))
+        *tok_ptr = rest;
+    return route;
+}
+
+static bool is_pragma_cccc_emit_end(Token *hash) {
+    Token *tok = hash->next;
+    return tok && equal(tok, "pragma") &&
+           equal(tok->next, "cccc") &&
+           equal(tok->next->next, "emit") &&
+           equal(tok->next->next->next, "end");
 }
 
 static Token *copy_token(CCCC *vm, Token *tok) {
@@ -768,6 +873,7 @@ typedef struct { const char *name; AttrCategory cat; bool has_attr; } AttrInfo;
 static const AttrInfo known_attrs[] = {
     // CCCC-specific (cccc:: scoped)
     {"comptime",      ATTR_CCCC, true},
+    {"emit",          ATTR_CCCC, true},
     {"macro",         ATTR_CCCC, true},
     {"test",          ATTR_CCCC, true},
     {"test_setup",    ATTR_CCCC, true},
@@ -2683,6 +2789,23 @@ static Token *handle_pragma_body(CCCC *vm, Token *tok) {
             vm->compiler.comptime_block_file      = tok->file;
             vm->compiler.comptime_block_needs_end = is_begin;
             return skip_line(vm, is_begin ? after->next : after);
+        } else if (equal(sub, "emit")) {
+            Token *after = sub->next;
+            if (after && equal(after, "end")) {
+                if (!vm->compiler.in_emit_block)
+                    error_tok(vm, tok, "stray #pragma cccc emit end without matching begin");
+                vm->compiler.in_emit_block = false;
+                vm->compiler.emit_block_tok = NULL;
+                return skip_line(vm, after->next);
+            }
+            if (!after || !equal(after, "begin"))
+                error_tok(vm, after && after->kind != TK_EOF ? after : sub,
+                          "expected 'begin' or 'end' after '#pragma cccc emit'");
+            if (vm->compiler.in_emit_block)
+                error_tok(vm, tok, "#pragma cccc emit: blocks cannot be nested");
+            vm->compiler.in_emit_block = true;
+            vm->compiler.emit_block_tok = tok;
+            return skip_line(vm, after->next);
         } else if (equal(sub, "end")) {
             if (vm->compiler.in_comptime_block) {
                 vm->compiler.in_comptime_block      = false;
@@ -2741,25 +2864,27 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
     Token *cur = &head;
 
     while (tok->kind != TK_EOF) {
+        if (vm->compiler.in_emit_block) {
+            if (!is_hash(tok))
+                error_tok(vm, tok,
+                          "only preprocessor directives are allowed inside "
+                          "#pragma cccc emit blocks");
+            Token *start = tok;
+            if (is_pragma_cccc_emit_end(start)) {
+                tok = handle_pragma_body(vm, tok->next->next);
+                continue;
+            }
+            push_emit_directive(vm, copy_raw_directive_line(vm, start), false);
+            tok = skip_line(vm, tok->next);
+            continue;
+        }
+
         // If it is a macro, expand it.
         if (expand_macro(vm, &tok, tok))
             continue;
 
         // Pass through if it is not a "#".
         if (!is_hash(tok)) {
-            // @include <header.h> / @include "header.h" — comptime-only include.
-            // Must be intercepted before try_rewrite_at_attr so "include" is not
-            // treated as a GNU attribute name.
-            if (equal(tok, "@") && tok->next && equal(tok->next, "include")) {
-                bool is_dquote;
-                int filename_len;
-                Token *fn_tok = tok->next->next;
-                char *filename = read_include_filename(vm, &tok, fn_tok,
-                                                       &is_dquote, &filename_len);
-                tok = skip_line(vm, tok);
-                queue_comptime_include(vm, filename, is_dquote);
-                continue;
-            }
             // Intercept [[cccc::macro]] / __attribute__((macro)) and comptime
             // attribute blocks before they reach the parser. On a match,
             // the definition is extracted into the MacroFn/ComptimeVar list
@@ -2840,21 +2965,25 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
         case PP_INCLUDE: {
             bool is_dquote;
             int filename_len;
-            // Detect #include @comptime <header.h> / #include @comptime "header.h"
             Token *filename_start = tok->next;
-            bool is_comptime_include = false;
-            if (equal(filename_start, "@") && filename_start->next &&
-                equal(filename_start->next, "comptime")) {
-                is_comptime_include = true;
-                filename_start = filename_start->next->next;
-            }
+            IncludeRoute include_route = read_include_route(&filename_start);
             char *filename = read_include_filename(vm, &tok, filename_start,
                                                    &is_dquote, &filename_len);
-            // #include @comptime and includes inside a comptime block are
+            // Comptime includes and ordinary includes inside a comptime block are
             // queued for the comptime pass only; they never reach the runtime TU.
-            if (is_comptime_include || vm->compiler.in_comptime_block) {
+            if (include_route == INCLUDE_ROUTE_COMPTIME ||
+                (include_route == INCLUDE_ROUTE_NORMAL &&
+                 vm->compiler.in_comptime_block)) {
                 tok = skip_line(vm, tok);
                 queue_comptime_include(vm, filename, is_dquote);
+                break;
+            }
+            if (include_route == INCLUDE_ROUTE_EMIT) {
+                char *line = arena_format(vm, is_dquote ? "#include \"%s\""
+                                                        : "#include <%s>",
+                                          filename);
+                tok = skip_line(vm, tok);
+                push_emit_directive(vm, line, true);
                 break;
             }
             // Gate standard headers that require a minimum C version.
@@ -3412,6 +3541,9 @@ Token *preprocess(CCCC *vm, Token *tok) {
         vm->compiler.comptime_block_file    = NULL;
         vm->compiler.comptime_block_needs_end = false;
     }
+    if (vm->compiler.in_emit_block)
+        error_tok(vm, vm->compiler.emit_block_tok,
+                  "unclosed #pragma cccc emit begin");
     if (vm->compiler.cond_incl)
         error_tok(vm, vm->compiler.cond_incl->tok,
                   "unterminated conditional directive (started with #%.*s)",

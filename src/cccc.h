@@ -1570,6 +1570,8 @@ typedef struct Compiler {
     bool in_comptime_block;          // True inside #pragma cccc comptime begin...end
     File *comptime_block_file;       // File that opened the comptime block (for auto-close)
     bool comptime_block_needs_end;   // true for begin/end form; false for bare whole-file pragma
+    bool in_emit_block;              // True inside #pragma cccc emit begin...end
+    Token *emit_block_tok;           // Opening token for unclosed emit-block diagnostics
     bool macro_fns_compiled;         // True after compile_all_macros has run
     bool strict_comptime_includes;   // --strict-comptime-includes: don't forward regular #include decls to comptime pass
     int macro_recursion_limit;       // 0 = unlimited, default = 256
@@ -1640,8 +1642,8 @@ typedef struct Compiler {
     StringArray system_include_paths; // System header search paths for <...>
     HashMap include_cache;            // Cache for search_include_paths
     StringArray file_buffers;         // Track allocated file buffers for cleanup
-    StringArray forward_includes;          // Headers to prepend to serialized output (#276)
-    StringArray comptime_pending_includes; // @include / #include @comptime filenames queued for comptime pass (#196)
+    StringArray emit_directives;           // Preprocessor directives to prepend to serialized output
+    StringArray comptime_pending_includes; // #include [[cccc::comptime]] filenames queued for comptime pass
 
     // Code generation state
     int label_counter; // For generating unique labels

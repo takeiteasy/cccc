@@ -89,7 +89,7 @@ These are CCCC's own extensions for compile-time metaprogramming. They are inter
 __attribute__((comptime)) const int version = 42;
 ```
 
-### `@include` / `#include @comptime` (CCCC-specific)
+### `#include [[cccc::comptime]]` / `#include @comptime` (CCCC-specific)
 
 Includes a header only during the comptime compilation pass. The header and
 any macros or types it defines are invisible to the runtime translation unit.
@@ -97,8 +97,9 @@ Use this when a `[[cccc::comptime]]` helper needs a dependency (e.g.
 `<glob.h>`, `<dirent.h>`) that must not bleed into runtime code.
 
 ```c
-@include <glob.h>
-// Equivalent: #include @comptime <glob.h>
+#include [[cccc::comptime]] <glob.h>
+#include @comptime <glob.h>
+#include __attribute__((comptime)) <glob.h>
 
 [[cccc::comptime]]
 int glob_struct_size(void) { return (int)sizeof(glob_t); }
@@ -106,21 +107,29 @@ int glob_struct_size(void) { return (int)sizeof(glob_t); }
 
 See [MACROS.md — Comptime-only includes](MACROS.md) for full documentation.
 
-### `__cccc_forward_include` (CCCC-specific)
+### `#include [[cccc::emit]]` / `#pragma cccc emit` (CCCC-specific)
 
-Reflection API function callable from macro bodies. Registers a header to be
-prepended as an `#include` directive in the serialized C output. Duplicate
-registrations for the same header are deduplicated.
+Routes preprocessor directives to the serialized generated-output preamble.
+Use emit includes for generated code that depends on runtime headers:
 
 ```c
-[[cccc::comptime]]
-void gen_helpers(void) {
-    $forward_include("<string.h>");
-    // ... generate functions that call strlen() ...
-}
+#include [[cccc::emit]] <string.h>
+#include @emit <stdint.h>
+#include __attribute__((emit)) <stddef.h>
 ```
 
-See [MACROS.md — Forward includes in generated output](MACROS.md) for full documentation.
+Use an emit block for raw preprocessor directives. Emit-block lines are copied
+verbatim and are not deduplicated:
+
+```c
+#pragma cccc emit begin
+#ifdef _WIN32
+#define CCCC_PLATFORM_WINDOWS 1
+#endif
+#pragma cccc emit end
+```
+
+See [MACROS.md — Emit directives and includes in generated output](MACROS.md) for full documentation.
 
 ## Parsed but Ignored
 

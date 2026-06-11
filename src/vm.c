@@ -1088,11 +1088,11 @@ void cc_destroy(CCCC *vm) {
         free(vm->compiler.file_buffers.data);
     }
 
-    // Free forward_includes (strdup'd strings + data array)
-    if (vm->compiler.forward_includes.data) {
-        for (int i = 0; i < vm->compiler.forward_includes.len; i++)
-            free(vm->compiler.forward_includes.data[i]);
-        free(vm->compiler.forward_includes.data);
+    // Free emit_directives (strdup'd strings + data array)
+    if (vm->compiler.emit_directives.data) {
+        for (int i = 0; i < vm->compiler.emit_directives.len; i++)
+            free(vm->compiler.emit_directives.data[i]);
+        free(vm->compiler.emit_directives.data);
     }
 
     // Free comptime_pending_includes data array (strings are arena-allocated)

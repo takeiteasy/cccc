@@ -197,19 +197,6 @@ extern CCCC *__cccc_get_vm(void);
 const char *__cccc_gensym(CCCC *vm, const char *prefix);
 
 /*!
- * @function __cccc_forward_include
- * @abstract Register a header to be prepended as an #include in serialized output.
- * @discussion Called from a macro body to declare that the generated runtime code
- *             depends on @a header. The header string must include delimiters,
- *             e.g. @c "<string.h>" or @c "\"myheader.h\"". Duplicate registrations
- *             for the same header are silently ignored.
- *             Convenience wrapper: $forward_include(header).
- * @param vm     The VM context.
- * @param header The header string including angle-brackets or quotes.
- */
-void __cccc_forward_include(CCCC *vm, const char *header);
-
-/*!
  * @function __cccc_macroexpand_1
  * @abstract Lisp-style single-step macro expansion (macroexpand-1 semantics).
  * @discussion If @a node is an @c ND_MACRO_CALL node, execute the macro once
@@ -1649,7 +1636,6 @@ const char *__cccc_dump_ast_gen_to_string(CCCC *vm, $node_t *node);
 #define $dump_ast_gen(node) __cccc_dump_ast_gen(_VM, node)
 #define $dump_ast_gen_to_string(node) __cccc_dump_ast_gen_to_string(_VM, node)
 #define $gensym(prefix) __cccc_gensym(_VM, prefix)
-#define $forward_include(header) __cccc_forward_include(_VM, header)
 #define $macroexpand_1(node) __cccc_macroexpand_1(_VM, node)
 #define $macroexpand(node) __cccc_macroexpand(_VM, node)
 #define _AST_VARARG_COUNT() __cccc_ast_vararg_count(_VM)

@@ -29,7 +29,6 @@ extern CCCC *__cccc_current_vm;
 // Forward declarations for reflection API functions (to register as FFI)
 extern CCCC *__cccc_get_vm(void);
 extern const char *__cccc_gensym(CCCC *vm, const char *prefix);
-extern void __cccc_forward_include(CCCC *vm, const char *header);
 extern Token *__cccc_ast_current_token(CCCC *vm);
 extern Token *__cccc_ast_synthetic_token(CCCC *vm, const char *label);
 extern Token *__cccc_ast_token_from_node(Node *node);
@@ -254,7 +253,6 @@ static void register_reflection_ffi(CCCC *vm) {
     // VM accessor
     cc_register_cfunc(vm, "__cccc_get_vm", (void *)__cccc_get_vm, 0, 0);
     cc_register_cfunc(vm, "__cccc_gensym", (void *)__cccc_gensym, 2, 0);
-    cc_register_cfunc(vm, "__cccc_forward_include", (void *)__cccc_forward_include, 2, 0);
 
     // Source location helpers
     cc_register_cfunc(vm, "__cccc_ast_current_token",
@@ -922,7 +920,7 @@ static Token *build_combined_macro_tokens(CCCC *vm, Token *reflection_tokens,
 
     cur = append_token_list(vm, cur, reflection_tokens);
 
-    // Inject @include / #include @comptime requests as plain #include directives
+    // Inject #include [[cccc::comptime]] requests as plain #include directives
     // so they are processed by the comptime preprocessing pass (#196).
     for (int i = 0; i < vm->compiler.comptime_pending_includes.len; i++) {
         char *src = arena_format(vm, "#include %s\n",

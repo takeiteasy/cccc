@@ -81,7 +81,7 @@ and initialized global definitions are skipped.
 
 To prevent declarations from regular `#include`d headers from leaking into the
 comptime pass, pass `--strict-comptime-includes`. Only the main source file's own
-file-scope declarations are forwarded; `@include` / `#include @comptime` and
+file-scope declarations are forwarded; `#include [[cccc::comptime]]` and
 `#pragma cccc comptime begin...end` blocks are unaffected.
 
 ## Global Generation
@@ -181,34 +181,34 @@ This approach complements the side-effect style (calling `$function` etc.):
 - **Block-return style** — better when the declarations can be expressed as
   literal C source and returned from one place.
 
-### Forward includes in generated output
+### Emit directives and includes in generated output
 
-When a macro generates code that calls a standard-library function, its
-serialized C output needs a matching `#include`. Use
-`__cccc_forward_include(vm, header)` (or the `$forward_include(header)`
-convenience macro) to register a header; CCCC prepends it to the emitted file.
+When a macro generates code that uses standard-library functions or
+platform-specific types, the serialized output needs matching preprocessor
+directives at the top of the file. Use `#include [[cccc::emit]]` for
+unconditional header dependencies:
 
 ```c
-[[cccc::comptime]]
-void gen_string_helpers(void) {
-    $forward_include("<string.h>");   // emitted at top of generated output
-    $obj_t *fn = $function("str_len", $get_type("int"));
-    // ... build body calling strlen() ...
-}
-
-gen_string_helpers();
+#include [[cccc::emit]] <string.h>
+#include @emit <stdint.h>
+#include __attribute__((emit)) <stddef.h>
 ```
 
-Multiple calls with the same header are deduplicated — only one `#include`
-line appears in the output regardless of how many macros request it.
+Multiple emit includes with the same emitted `#include` line are deduplicated.
+For raw preprocessor preamble directives, use an emit block:
 
-The `header` argument must include angle-bracket or quote delimiters:
-`"<stdio.h>"` for system headers, `"\"myheader.h\""` for user headers.
+```c
+#pragma cccc emit begin
+#ifdef _WIN32
+#define CCCC_PLATFORM_WINDOWS 1
+#endif
+#pragma cccc emit end
+```
 
-`__cccc_forward_include` is the runtime-output counterpart to
-`@include` (see [Comptime-only includes](#comptime-only-includes)):
-`__cccc_forward_include` injects into the runtime output only;
-`@include` feeds a header into the comptime unit only.
+Emit blocks accept preprocessor directive lines only. The lines are copied
+verbatim into the serialized output preamble and are not deduplicated. They do
+not wrap generated declarations; ordered interleaving with generated code is a
+future feature.
 
 ## Call-Site Expansion
 
@@ -368,7 +368,7 @@ required.
 
 ```c
 #pragma cccc comptime begin
-#include <glob.h>              // treated as @include (comptime-only)
+#include <glob.h>              // treated as comptime-only inside the block
 int glob_count(const char *pat, int flags) {
     glob_t g;
     glob(pat, flags, NULL, &g);
@@ -400,7 +400,7 @@ still processed as normal compilation includes:
 ```c
 #include <stdio.h>
 #include <string.h>
-@include <glob.h>           // only in comptime unit
+#include [[cccc::comptime]] <glob.h>
 
 #pragma cccc comptime       // everything below is comptime; no 'end' needed
 
@@ -426,13 +426,15 @@ whole-file form never triggers this warning.
 
 ### Comptime-only includes
 
-Use `@include` (or `#include @comptime`) to include a header only during the
-comptime compilation pass. The header and any macros or types it defines are
-invisible to the runtime translation unit.
+Use `#include [[cccc::comptime]]` to include a header only during the comptime
+compilation pass. The `@comptime` and `__attribute__((comptime))` spellings are
+also accepted after `#include`. The header and any macros or types it defines
+are invisible to the runtime translation unit.
 
 ```c
-@include <glob.h>   // only visible to comptime helpers
+#include [[cccc::comptime]] <glob.h>
 // Equivalent: #include @comptime <glob.h>
+// Equivalent: #include __attribute__((comptime)) <glob.h>
 
 [[cccc::comptime]]
 int glob_struct_nonempty(void) {
@@ -445,10 +447,10 @@ int main(void) {
 }
 ```
 
-This is the comptime counterpart to `__cccc_forward_include` (see
-[Forward includes in generated output](#forward-includes-in-generated-output)):
-`@include` feeds a header into the comptime unit only;
-`__cccc_forward_include` emits an `#include` into the runtime output only.
+This is the comptime counterpart to `#include [[cccc::emit]]` (see
+[Emit directives and includes in generated output](#emit-directives-and-includes-in-generated-output)):
+`[[cccc::comptime]]` feeds a header into the comptime unit only;
+`[[cccc::emit]]` emits an `#include` into the generated output only.
 
 ## Comptime Variables
 

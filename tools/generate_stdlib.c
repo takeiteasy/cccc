@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <glob.h>
+#include [[cccc::emit]] <string.h>
 
 char *read_header_file(const char *path) {
     void *f = fopen(path, "rb");
@@ -186,8 +187,6 @@ $node_t *make_strcmp_return_fn_name($obj_t *fn, const char *header, const char *
 }
 
 void generate_stdlib_reg_fn(void) {
-    $forward_include("<string.h>");
-
     char **headers = discover_headers();
     if (!headers) return;
 
@@ -322,8 +321,6 @@ void generate_std_header(void) {
 }
 
 void generate_stdlib_mark_headers(void) {
-    $forward_include("<string.h>");
-
     char **headers = discover_headers();
     if (!headers) return;
 

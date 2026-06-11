@@ -222,6 +222,8 @@ groups from that ticket.
 | `__emul` / `__emulu` / `_umul128` / `__umulh` | ✗ | 64-bit multiplication helpers — pending |
 | `#pragma once` | ✓ | |
 | `#pragma cccc comptime [begin]` / `#pragma cccc comptime end` | ✓ | Comptime block — see [MACROS.md](MACROS.md#comptime-block) |
+| `#include [[cccc::comptime]]` / `#include [[cccc::emit]]` | ✓ | Route includes to the comptime unit or generated-output preamble |
+| `#pragma cccc emit begin` / `#pragma cccc emit end` | ✓ | Emit raw preprocessor directives to the generated-output preamble |
 | `#pragma comment(lib, "x")` | ✗ | Link hint, no-op — pending |
 | `#pragma warning(push/pop/disable/default)` / `suppress:` | ✗ | Maps to CCCC's `-W` system — pending |
 | `#pragma pack(...)` | ✓ | |

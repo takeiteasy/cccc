@@ -1,7 +1,7 @@
 // CCCC_FLAGS: --strict-comptime-includes
-// With --strict-comptime-includes, @include still works.
+// With --strict-comptime-includes, #include @comptime still works.
 
-@include <glob.h>
+#include @comptime <glob.h>
 
 [[cccc::comptime]]
 int glob_type_size(void) {
