@@ -1440,10 +1440,15 @@ static bool compile_macro_program(CCCC *vm) {
             vm->compiler.locals = saved_locals;
             vm->compiler.current_fn = saved_current_fn;
             vm->compiler.globals = saved_globals;
+            for (Scope *sc = vm->compiler.scope; sc != saved_scope; sc = sc->next) {
+                hashmap_deinit_borrowed(&sc->var_map);
+                hashmap_deinit_borrowed(&sc->tag_map);
+            }
             vm->compiler.scope = saved_scope;
             vm->compiler.in_macro_mode = false;
             vm->compiler.num_call_patches = saved_num_call_patches;
             vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
+            hashmap_restore(&vm->compiler.macros, saved_macros);
             return false;
         }
         macros[i]->compiled_fn = func;
