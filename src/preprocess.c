@@ -2865,7 +2865,7 @@ static Token *handle_pragma_body(CCCC *vm, Token *tok) {
             Token *after = sub->next;
             if (after && equal(after, "end")) {
                 ComptimeCtxEntry *top = ctx_top(vm);
-                if (!top || top->type != CTX_COMPTIME)
+                if (!top || top->type != CTX_COMPTIME || !top->needs_end)
                     error_tok(vm, tok, "stray #pragma cccc comptime end without matching begin");
                 ctx_pop(vm);
                 return skip_line(vm, after->next);
@@ -2885,19 +2885,21 @@ static Token *handle_pragma_body(CCCC *vm, Token *tok) {
                 ctx_pop(vm);
                 return skip_line(vm, after->next);
             }
-            bool is_begin = after && equal(after, "begin");
-            if (!is_begin && after && after->kind != TK_EOF && !after->at_bol)
-                error_tok(vm, after, "expected 'begin' or 'end' after '#pragma cccc emit'");
+            if (!after || after->kind == TK_EOF || after->at_bol ||
+                !equal(after, "begin"))
+                error_tok(vm, after && !after->at_bol && after->kind != TK_EOF
+                              ? after : tok,
+                          "expected 'begin' or 'end' after '#pragma cccc emit'");
             ComptimeCtxEntry *top = ctx_top(vm);
             if (top && top->type == CTX_EMIT)
                 error_tok(vm, tok, "#pragma cccc emit: blocks cannot be nested");
             if (!top || top->type != CTX_COMPTIME)
                 error_tok(vm, tok, "#pragma cccc emit requires an active comptime context");
-            ctx_push(vm, CTX_EMIT, is_begin, tok->file, tok);
-            return skip_line(vm, is_begin ? after->next : after);
+            ctx_push(vm, CTX_EMIT, true, tok->file, tok);
+            return skip_line(vm, after->next);
         } else if (equal(sub, "end")) {
             ComptimeCtxEntry *top = ctx_top(vm);
-            if (top && top->type == CTX_COMPTIME) {
+            if (top && top->type == CTX_COMPTIME && top->needs_end) {
                 ctx_pop(vm);
             } else if (vm->compiler.current_suite) {
                 free(vm->compiler.current_suite);
@@ -3657,7 +3659,7 @@ static void join_adjacent_string_literals(CCCC *vm, Token *tok) {
 // Entry point function of the preprocessor.
 Token *preprocess(CCCC *vm, Token *tok) {
     tok = preprocess2(vm, tok);
-    // Bare (whole-file) comptime/emit entries are silently closed at EOF.
+    // Bare comptime entries (no begin/end, runs to EOF) are silently closed.
     // begin/end entries that reach EOF without an explicit close are errors.
     while (vm->compiler.ctx_stack_len > 0 && !ctx_top(vm)->needs_end)
         ctx_pop(vm);

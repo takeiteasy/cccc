@@ -139,9 +139,6 @@ int win_helper(void);    // compiled into runtime TU and emitted
 #pragma cccc comptime end
 ```
 
-Inside a bare `#pragma cccc comptime` (whole-file form), bare `#pragma cccc emit`
-(no `begin`) switches the rest of the file to emit mode, closing silently at EOF.
-
 See [MACROS.md — Emit directives and includes in generated output](MACROS.md) for full documentation.
 
 ### Preprocessor `[[cccc::comptime]]` / `@comptime` / `__attribute__((comptime))` (CCCC-specific)

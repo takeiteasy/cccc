@@ -218,21 +218,6 @@ int win_init(void);            // compiled into runtime TU and emitted
 #pragma cccc comptime end
 ```
 
-**Bare (whole-file) emit** — inside a bare `#pragma cccc comptime` block, use
-bare `#pragma cccc emit` (no `begin`) to switch the rest of the file to emit
-mode. The context closes silently at EOF, just like the enclosing bare comptime
-block:
-
-```c
-#pragma cccc comptime
-
-int comptime_helper(void) { return 1; }  // comptime function
-
-#pragma cccc emit                         // rest of file is emit (runtime escape)
-
-int runtime_fn(void) { return 42; }      // goes into runtime TU and emitted
-```
-
 Multiple `#pragma cccc emit begin...end` sub-blocks can appear inside a single
 comptime block. Same-type nesting (emit inside emit, comptime inside comptime)
 is a hard error.
@@ -438,7 +423,6 @@ Inside a comptime block:
 - `#include` directives are queued as comptime-only includes — invisible to the runtime translation unit.
 - preprocessor directives marked `@emit` are copied to generated output.
 - `#pragma cccc emit begin...end` opens a runtime escape sub-block; multiple sub-blocks are allowed.
-- Bare `#pragma cccc emit` (no `begin`) opens a whole-file runtime escape for the rest of the file.
 - Function definitions are treated as `[[cccc::comptime]]`.
 - Variable and struct declarations are treated as comptime variables.
 - Existing `[[cccc::comptime(inline)]]` annotations are respected; explicit attributes always take precedence.
@@ -448,17 +432,16 @@ second `#pragma cccc comptime begin` while a comptime context is active, or a
 second `#pragma cccc emit begin` while an emit context is active, is a hard
 error. Emit contexts always require an enclosing comptime context.
 
-**Bare (whole-file) form** — omit `begin` to mark the rest of the file as
-comptime. No closing `end` is needed; the block closes silently at EOF.
-Place the pragma after any `#include` directives so that standard headers are
-still processed as normal compilation includes:
+**Bare form** — omit `begin` to mark everything from the pragma to EOF as
+comptime. No closing `end` is needed or accepted; the bare form always runs to
+the end of the file:
 
 ```c
 #include <stdio.h>
 #include <string.h>
 #include [[cccc::comptime]] <glob.h>
 
-#pragma cccc comptime       // everything below is comptime; no 'end' needed
+#pragma cccc comptime       // everything from here to EOF is comptime
 
 int glob_count(const char *pat, int flags) {
     glob_t g;
@@ -472,13 +455,10 @@ int scale = 3;
 glob_count("include/*.h", 0);  // file-scope macro call
 ```
 
-An explicit `#pragma cccc comptime end` (or `#pragma cccc end`) is still
-accepted to close the block early.
-
 **Auto-close in headers** — if a `#pragma cccc comptime begin` block in a header
 omits `#pragma cccc comptime end`, the block is closed automatically when the
-header ends and a `[-Wcomptime-block-leak]` warning is emitted. The bare
-whole-file form never triggers this warning.
+header ends and a `[-Wcomptime-block-leak]` warning is emitted. The bare form
+never triggers this warning.
 
 ### Comptime-only includes
 

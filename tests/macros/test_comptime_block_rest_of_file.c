@@ -1,7 +1,7 @@
-// Ticket #292: bare #pragma cccc comptime (no 'begin' keyword) is sugar for
-// #pragma cccc comptime begin — the block can be closed with #pragma cccc comptime end.
+// Bare #pragma cccc comptime (no 'begin') marks everything from the pragma to
+// EOF as comptime; it runs to the end of the file without a closing 'end'.
 
-#pragma cccc comptime
+#pragma cccc comptime begin
 
 int triple(int n) {
     return n * 3;
