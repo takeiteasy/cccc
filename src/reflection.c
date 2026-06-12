@@ -1029,6 +1029,7 @@ $node_t *__cccc_ast_subscript(CCCC *vm, $node_t *arr, $node_t *idx) {
         $node_t *scaled = alloc_node(vm, ND_MUL);
         scaled->lhs = num;
         scaled->rhs = scale;
+        scaled->ty = num->ty ? num->ty : ty_long;
         // Build: ptr + scaled
         $node_t *add = alloc_node(vm, ND_ADD);
         add->lhs = ptr;
