@@ -1234,8 +1234,10 @@ static Type *func_params(CCCC *vm, Token **rest, Token *tok, Type *ty) {
         if (ty2->kind == TY_ARRAY) {
             // "array of T" is converted to "pointer to T" only in the parameter
             // context. For example, *argv[] is converted to **argv by this.
+            int saved_static_min = ty2->static_min;
             ty2 = pointer_to(vm, ty2->base);
             ty2->name = name;
+            ty2->static_min = saved_static_min;
         } else if (ty2->kind == TY_FUNC) {
             // Likewise, a function is converted to a pointer to a function
             // only in the parameter context.
@@ -1258,9 +1260,13 @@ static Type *func_params(CCCC *vm, Token **rest, Token *tok, Type *ty) {
 
 // array-dimensions = ("static" | "restrict" | "const" | "volatile" | "_Atomic")* const-expr? "]" type-suffix
 static Type *array_dimensions(CCCC *vm, Token **rest, Token *tok, Type *ty) {
+    bool saw_static = false;
     while (equal(tok, "static") || equal(tok, "restrict") ||
-           equal(tok, "const")  || equal(tok, "volatile") || equal(tok, "_Atomic"))
+           equal(tok, "const")  || equal(tok, "volatile") || equal(tok, "_Atomic")) {
+        if (equal(tok, "static"))
+            saw_static = true;
         tok = tok->next;
+    }
 
     if (equal(tok, "]")) {
         ty = type_suffix(vm, rest, tok->next, ty);
@@ -1278,7 +1284,10 @@ static Type *array_dimensions(CCCC *vm, Token **rest, Token *tok, Type *ty) {
                      "variable-length arrays are a C99 extension");
         return vla_of(vm, ty, expr);
     }
-    return array_of(vm, ty, eval(vm, expr));
+    Type *arr = array_of(vm, ty, eval(vm, expr));
+    if (saw_static)
+        arr->static_min = arr->array_len;
+    return arr;
 }
 
 // type-suffix = "(" func-params
@@ -5515,6 +5524,19 @@ static Node *funcall(CCCC *vm, Token **rest, Token *tok, Node *fn) {
             }
 
             if (param_ty) {
+                // [static N] minimum-size check: only enforceable when the argument
+                // is a compile-time-sized array; bare pointers are best-effort.
+                if (param_ty->static_min > 0 &&
+                    arg->ty->kind == TY_ARRAY &&
+                    arg->ty->array_len >= 0 &&
+                    arg->ty->array_len < param_ty->static_min) {
+                    warn_tok(vm, tok, CCCC_WARN_STATIC_ARRAY_SIZE,
+                             "array argument has %d element%s but parameter requires at least %d",
+                             arg->ty->array_len,
+                             arg->ty->array_len == 1 ? "" : "s",
+                             param_ty->static_min);
+                }
+
                 if (param_ty->kind != TY_STRUCT && param_ty->kind != TY_UNION) {
                     warn_implicit_conversion(vm, arg, param_ty, tok);
                     arg = new_cast(vm, arg, param_ty);

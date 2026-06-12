@@ -93,7 +93,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | Compound literals | ✓ | |
 | `inline` functions | ✓ | Dead-function elimination + single-return inlining (unconditional); full AST inlining at `-O2`/`-O3` (`--inline-limit=N` controls size threshold) |
 | `restrict` pointers | ~ | Parsed and accepted; aliasing not tracked ([#267](https://todo.sr.ht/~takeiteasy/cccc/267)) |
-| `static` array-parameter indices (`void f(int a[static 10])`) | ~ | Parsed and accepted; minimum-size constraint not enforced ([#310](https://todo.sr.ht/~takeiteasy/cccc/310)) |
+| `static` array-parameter indices (`void f(int a[static 10])`) | ✓ | Minimum-size constraint enforced; emits `-Wstatic-array-size` when a constant-size array argument is too small (best-effort: bare pointer args are not checked) |
 | `__func__` predefined identifier | ✓ | |
 | Variadic macros `__VA_ARGS__` | ✓ | |
 | `_Pragma(...)` operator | ✓ | |
