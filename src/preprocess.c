@@ -1920,7 +1920,7 @@ static long eval_embed_limit_expr(CCCC *vm, Token *start, Token *expr,
 
 // Main #embed directive handler
 static Token *handle_embed_directive(CCCC *vm, Token *tok,
-                                     Token *directive_start) {
+                                     Token *directive_start, bool is_inline) {
     // Parse filename (quoted string or <angle brackets>)
     bool is_dquote;
     int filename_len;
@@ -1991,7 +1991,8 @@ static Token *handle_embed_directive(CCCC *vm, Token *tok,
     }
 
     // Skip to next line (check for extraneous tokens)
-    tok = skip_line(vm, tok);
+    if (!is_inline)
+        tok = skip_line(vm, tok);
 
     // Resolve file path
     char *path = NULL;
@@ -3052,6 +3053,14 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
                 continue;
             }
 
+            // Extension: inline #embed — '#' not at beginning of line
+            if (equal(tok, "#") && equal(tok->next, "embed")) {
+                if (vm->compiler.c_std < CCCC_STD_C23)
+                    error_tok(vm, tok, "'#embed' is not available before C23");
+                tok = handle_embed_directive(vm, tok->next->next, tok, true);
+                continue;
+            }
+
             // Inside a #pragma cccc comptime begin...end block: intercept
             // unannotated function definitions and variable declarations.
             ComptimeCtxEntry *comptime_top = ctx_top(vm);
@@ -3330,7 +3339,7 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
         case PP_EMBED:
             if (vm->compiler.c_std < CCCC_STD_C23)
                 error_tok(vm, tok, "'#embed' is not available before C23");
-            tok = handle_embed_directive(vm, tok->next, start);
+            tok = handle_embed_directive(vm, tok->next, start, false);
             break;
         case PP_ERROR: {
             Token *msg_end;

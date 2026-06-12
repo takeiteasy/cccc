@@ -727,5 +727,22 @@ void cc_compile(CCCC *vm, Obj *prog) {
         // Sort by (file, line_no) for binary search
         qsort(vm->dbg.source_index, vm->dbg.source_index_count, sizeof(SourceIndex),
               source_index_cmp);
+
+        // Dedup: after sorting, identical (file, line) pairs are adjacent.
+        // Keep only the entry with the lowest first_pc per pair.
+        int dedup_count = 0;
+        for (int i = 0; i < vm->dbg.source_index_count; i++) {
+            SourceIndex *cur = &vm->dbg.source_index[i];
+            if (dedup_count > 0) {
+                SourceIndex *last = &vm->dbg.source_index[dedup_count - 1];
+                if (last->file == cur->file && last->line_no == cur->line_no) {
+                    if (cur->first_pc < last->first_pc)
+                        last->first_pc = cur->first_pc;
+                    continue;
+                }
+            }
+            vm->dbg.source_index[dedup_count++] = *cur;
+        }
+        vm->dbg.source_index_count = dedup_count;
     }
 }
