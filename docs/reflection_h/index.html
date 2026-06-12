@@ -666,6 +666,21 @@ $quote("return x;") applies the correct implicit return-type cast.
 <dt><tt><a href="index.html#//apple_ref/c/func/__cccc_ast_while" target="_top">__cccc_ast_while</a></tt></dt>
 <dd><p>Create a while loop node.
 </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__cccc_attr_target_kind" target="_top">__cccc_attr_target_kind</a></tt></dt>
+<dd><p>Return the kind of declaration decorated by a custom attribute.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__cccc_attr_target_name" target="_top">__cccc_attr_target_name</a></tt></dt>
+<dd><p>Return the decorated declaration's source name, when available.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__cccc_attr_target_obj" target="_top">__cccc_attr_target_obj</a></tt></dt>
+<dd><p>Return the decorated function or global object, or NULL for type targets.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__cccc_attr_target_token" target="_top">__cccc_attr_target_token</a></tt></dt>
+<dd><p>Return a source token for the decorated declaration.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__cccc_attr_target_type" target="_top">__cccc_attr_target_type</a></tt></dt>
+<dd><p>Return the decorated declaration's type.
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__cccc_dump_ast_gen" target="_top">__cccc_dump_ast_gen</a></tt></dt>
 <dd><p>Print __cccc_ast_*() builder calls that would reconstruct the node.
 </p></dd>
@@ -5037,6 +5052,66 @@ or NULL on error.
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_while;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_attr_target_kind;   name=__cccc_attr_target_kind -->
+<a name="//apple_ref/c/func/__cccc_attr_target_kind"></a>
+<h3><a name="__cccc_attr_target_kind">__cccc_attr_target_kind</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_attr_target_kind;name=start --><!-- begin abstract --></p>
+<p>Return the kind of declaration decorated by a custom attribute.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_attr_target_kind;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_attr_target_kind;name=start --><!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_attr_target_kind" logicalPath="//apple_ref/c/instm/__cccc_attr_target_kind //apple_ref/c/clm/__cccc_attr_target_kind //apple_ref/c/intfcm/__cccc_attr_target_kind //apple_ref/c/intfm/__cccc_attr_target_kind //apple_ref/c/func/__cccc_attr_target_kind" target="_top"><span class="function">__cccc_attr_target_kind</span></a>(
+    $<!-- a logicalPath="//apple_ref/c/cl/attr_target_t //apple_ref/c/tdef/attr_target_t //apple_ref/c/tag/attr_target_t //apple_ref/c/struct/attr_target_t //apple_ref/c/intf/attr_target_t //apple_ref/doc/anysymbol/attr_target_t" machineGenerated="true" --><span class="type">attr_target_t</span><!-- /a --> <span class="type">*</span><span class="param">target</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_attr_target_kind;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_attr_target_name;   name=__cccc_attr_target_name -->
+<a name="//apple_ref/c/func/__cccc_attr_target_name"></a>
+<h3><a name="__cccc_attr_target_name">__cccc_attr_target_name</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_attr_target_name;name=start --><!-- begin abstract --></p>
+<p>Return the decorated declaration's source name, when available.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_attr_target_name;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_attr_target_name;name=start --><span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_attr_target_name" logicalPath="//apple_ref/c/instm/__cccc_attr_target_name //apple_ref/c/clm/__cccc_attr_target_name //apple_ref/c/intfcm/__cccc_attr_target_name //apple_ref/c/intfm/__cccc_attr_target_name //apple_ref/c/func/__cccc_attr_target_name" target="_top"><span class="function">__cccc_attr_target_name</span></a>(
+    $<!-- a logicalPath="//apple_ref/c/cl/attr_target_t //apple_ref/c/tdef/attr_target_t //apple_ref/c/tag/attr_target_t //apple_ref/c/struct/attr_target_t //apple_ref/c/intf/attr_target_t //apple_ref/doc/anysymbol/attr_target_t" machineGenerated="true" --><span class="type">attr_target_t</span><!-- /a --> <span class="type">*</span><span class="param">target</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_attr_target_name;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_attr_target_obj;   name=__cccc_attr_target_obj -->
+<a name="//apple_ref/c/func/__cccc_attr_target_obj"></a>
+<h3><a name="__cccc_attr_target_obj">__cccc_attr_target_obj</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_attr_target_obj;name=start --><!-- begin abstract --></p>
+<p>Return the decorated function or global object, or NULL for type targets.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_attr_target_obj;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_attr_target_obj;name=start -->$<!-- a logicalPath="//apple_ref/c/cl/obj_t //apple_ref/c/tdef/obj_t //apple_ref/c/tag/obj_t //apple_ref/c/struct/obj_t //apple_ref/c/intf/obj_t //apple_ref/doc/anysymbol/obj_t" machineGenerated="true" --><span class="type">obj_t</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_attr_target_obj" logicalPath="//apple_ref/c/instm/__cccc_attr_target_obj //apple_ref/c/clm/__cccc_attr_target_obj //apple_ref/c/intfcm/__cccc_attr_target_obj //apple_ref/c/intfm/__cccc_attr_target_obj //apple_ref/c/func/__cccc_attr_target_obj" target="_top"><span class="function">__cccc_attr_target_obj</span></a>(
+    $<!-- a logicalPath="//apple_ref/c/cl/attr_target_t //apple_ref/c/tdef/attr_target_t //apple_ref/c/tag/attr_target_t //apple_ref/c/struct/attr_target_t //apple_ref/c/intf/attr_target_t //apple_ref/doc/anysymbol/attr_target_t" machineGenerated="true" --><span class="type">attr_target_t</span><!-- /a --> <span class="type">*</span><span class="param">target</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_attr_target_obj;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_attr_target_token;   name=__cccc_attr_target_token -->
+<a name="//apple_ref/c/func/__cccc_attr_target_token"></a>
+<h3><a name="__cccc_attr_target_token">__cccc_attr_target_token</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_attr_target_token;name=start --><!-- begin abstract --></p>
+<p>Return a source token for the decorated declaration.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_attr_target_token;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_attr_target_token;name=start -->$<!-- a logicalPath="//apple_ref/c/cl/token_t //apple_ref/c/tdef/token_t //apple_ref/c/tag/token_t //apple_ref/c/struct/token_t //apple_ref/c/intf/token_t //apple_ref/doc/anysymbol/token_t" machineGenerated="true" --><span class="type">token_t</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_attr_target_token" logicalPath="//apple_ref/c/instm/__cccc_attr_target_token //apple_ref/c/clm/__cccc_attr_target_token //apple_ref/c/intfcm/__cccc_attr_target_token //apple_ref/c/intfm/__cccc_attr_target_token //apple_ref/c/func/__cccc_attr_target_token" target="_top"><span class="function">__cccc_attr_target_token</span></a>(
+    $<!-- a logicalPath="//apple_ref/c/cl/attr_target_t //apple_ref/c/tdef/attr_target_t //apple_ref/c/tag/attr_target_t //apple_ref/c/struct/attr_target_t //apple_ref/c/intf/attr_target_t //apple_ref/doc/anysymbol/attr_target_t" machineGenerated="true" --><span class="type">attr_target_t</span><!-- /a --> <span class="type">*</span><span class="param">target</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_attr_target_token;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_attr_target_type;   name=__cccc_attr_target_type -->
+<a name="//apple_ref/c/func/__cccc_attr_target_type"></a>
+<h3><a name="__cccc_attr_target_type">__cccc_attr_target_type</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_attr_target_type;name=start --><!-- begin abstract --></p>
+<p>Return the decorated declaration's type.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_attr_target_type;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_attr_target_type;name=start -->$<!-- a logicalPath="//apple_ref/c/cl/type_t //apple_ref/c/tdef/type_t //apple_ref/c/tag/type_t //apple_ref/c/struct/type_t //apple_ref/c/intf/type_t //apple_ref/doc/anysymbol/type_t" machineGenerated="true" --><span class="type">type_t</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_attr_target_type" logicalPath="//apple_ref/c/instm/__cccc_attr_target_type //apple_ref/c/clm/__cccc_attr_target_type //apple_ref/c/intfcm/__cccc_attr_target_type //apple_ref/c/intfm/__cccc_attr_target_type //apple_ref/c/func/__cccc_attr_target_type" target="_top"><span class="function">__cccc_attr_target_type</span></a>(
+    $<!-- a logicalPath="//apple_ref/c/cl/attr_target_t //apple_ref/c/tdef/attr_target_t //apple_ref/c/tag/attr_target_t //apple_ref/c/struct/attr_target_t //apple_ref/c/intf/attr_target_t //apple_ref/doc/anysymbol/attr_target_t" machineGenerated="true" --><span class="type">attr_target_t</span><!-- /a --> <span class="type">*</span><span class="param">target</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_attr_target_type;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_dump_ast_gen;   name=__cccc_dump_ast_gen -->
 <a name="//apple_ref/c/func/__cccc_dump_ast_gen"></a>
 <h3><a name="__cccc_dump_ast_gen">__cccc_dump_ast_gen</a></h3>
@@ -5907,7 +5982,7 @@ count, a compile-time error is emitted.</p></dd>
 <p class="gapBeforeFooter"> </p>
 <hr class="afterFooter">
 <div class="hd_copyright_and_timestamp">
-<p class="hd_timestamp">Last Updated: Thursday, June 11, 2026
+<p class="hd_timestamp">Last Updated: Friday, June 12, 2026
 </p>
 </div>
 </td>

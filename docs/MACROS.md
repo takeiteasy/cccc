@@ -65,6 +65,7 @@ CCCC supports two macro execution forms:
 |------|--------------|--------------|-----------------------------|
 | Global generation | `[[cccc::comptime]] void gen(char *a1, ...)` called at file scope | Before the main parse | `NULL` / `void` return means side-effects only. An `ND_BLOCK` return splices its body declarations directly into file scope (see [Block return](#block-return-from-file-scope-macros)). Args are stringified into `char *` parameters. |
 | Call-site expansion | `[[cccc::comptime(inline)]] $node_t *gen($node_t *a1, ...)` called inside code | During macro expansion after parsing | Replaces the call expression or statement |
+| Custom attribute | `@macro(attribute("name")) void gen($attr_target_t *target, ...)` used by `@name` on a file-scope declaration | During the main parse, after the target declaration is built | Return value is ignored; generated declarations are side effects. Attribute arguments are passed as `$node_t *` expression nodes. |
 
 ### Pre-parse macro declaration context
 
@@ -83,6 +84,51 @@ To prevent declarations from regular `#include`d headers from leaking into the
 comptime pass, pass `--strict-comptime-includes`. Only the main source file's own
 file-scope declarations are forwarded; `#include [[cccc::comptime]]` and
 `#pragma cccc comptime begin...end` blocks are unaffected.
+
+### Custom Attributes
+
+Comptime macros can register declaration attributes for file-scope declarations:
+
+```c
+@macro(attribute("serialize"))
+void define_serializer($attr_target_t *target) {
+    $type_t *ty = $attr_target_type(target);
+    const char *name = $attr_target_name(target);
+
+    $obj_t *fn = $function("serialize_Point", $get_type("int"));
+    $function_add_param(fn, "p", $make_pointer(ty));
+    $with_fn(fn) {
+        $function_set_body(fn, $quote("return sizeof(struct Point);"));
+    }
+    $publish(fn);
+}
+
+@serialize
+struct Point { int x; int y; };
+```
+
+The handler's first parameter is always `$attr_target_t *`. Fixed parameters
+after that receive attribute arguments as `$node_t *` expression nodes, so
+`@answer(123)` calls a handler shaped like:
+
+```c
+@macro(attribute("answer"))
+void answer_attr($attr_target_t *target, $node_t *value) { ... }
+```
+
+Variadic attribute handlers use the same `$ast_vararg_*` helpers as inline
+macros. The target helpers are:
+
+| Helper | Description |
+|---|---|
+| `$attr_target_kind(target)` | `attr_target_type`, `attr_target_function`, `attr_target_global`, or `attr_target_typedef` |
+| `$attr_target_name(target)` | Source name when available |
+| `$attr_target_type(target)` | Target type |
+| `$attr_target_obj(target)` | Function/global object, or `NULL` for type/typedef targets |
+| `$attr_target_token(target)` | Source token for diagnostics |
+
+Custom attributes are v1 file-scope features. Applying one to a local variable
+or struct member is a compile error.
 
 ## Global Generation
 

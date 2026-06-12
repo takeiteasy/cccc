@@ -70,6 +70,18 @@ extern int __cccc_ast_enum_count(CCCC *vm, Type *enum_type);
 extern EnumConstant *__cccc_ast_enum_at(CCCC *vm, Type *enum_type, int index);
 extern const char *__cccc_ast_enum_constant_name(EnumConstant *ec);
 extern int __cccc_ast_enum_constant_value(EnumConstant *ec);
+extern int __cccc_ast_global_count(CCCC *vm);
+extern Obj *__cccc_ast_global_at(CCCC *vm, int index);
+extern const char *__cccc_ast_obj_name(Obj *obj);
+extern Type *__cccc_ast_obj_type(Obj *obj);
+extern bool __cccc_ast_obj_is_function(Obj *obj);
+extern bool __cccc_ast_obj_is_definition(Obj *obj);
+extern bool __cccc_ast_obj_is_static(Obj *obj);
+extern int __cccc_attr_target_kind(AttrTarget *target);
+extern const char *__cccc_attr_target_name(AttrTarget *target);
+extern Type *__cccc_attr_target_type(AttrTarget *target);
+extern Obj *__cccc_attr_target_obj(AttrTarget *target);
+extern Token *__cccc_attr_target_token(AttrTarget *target);
 extern Type *__cccc_ast_make_pointer(CCCC *vm, Type *base);
 extern Type *__cccc_ast_make_array(CCCC *vm, Type *base, int len);
 
@@ -389,6 +401,32 @@ static void register_reflection_ffi(CCCC *vm) {
                       (void *)__cccc_ast_enum_constant_name, 1, 0);
     cc_register_cfunc(vm, "__cccc_ast_enum_constant_value",
                       (void *)__cccc_ast_enum_constant_value, 1, 0);
+
+    // Global/object and custom-attribute target introspection
+    cc_register_cfunc(vm, "__cccc_ast_global_count",
+                      (void *)__cccc_ast_global_count, 1, 0);
+    cc_register_cfunc(vm, "__cccc_ast_global_at",
+                      (void *)__cccc_ast_global_at, 2, 0);
+    cc_register_cfunc(vm, "__cccc_ast_obj_name",
+                      (void *)__cccc_ast_obj_name, 1, 0);
+    cc_register_cfunc(vm, "__cccc_ast_obj_type",
+                      (void *)__cccc_ast_obj_type, 1, 0);
+    cc_register_cfunc(vm, "__cccc_ast_obj_is_function",
+                      (void *)__cccc_ast_obj_is_function, 1, 0);
+    cc_register_cfunc(vm, "__cccc_ast_obj_is_definition",
+                      (void *)__cccc_ast_obj_is_definition, 1, 0);
+    cc_register_cfunc(vm, "__cccc_ast_obj_is_static",
+                      (void *)__cccc_ast_obj_is_static, 1, 0);
+    cc_register_cfunc(vm, "__cccc_attr_target_kind",
+                      (void *)__cccc_attr_target_kind, 1, 0);
+    cc_register_cfunc(vm, "__cccc_attr_target_name",
+                      (void *)__cccc_attr_target_name, 1, 0);
+    cc_register_cfunc(vm, "__cccc_attr_target_type",
+                      (void *)__cccc_attr_target_type, 1, 0);
+    cc_register_cfunc(vm, "__cccc_attr_target_obj",
+                      (void *)__cccc_attr_target_obj, 1, 0);
+    cc_register_cfunc(vm, "__cccc_attr_target_token",
+                      (void *)__cccc_attr_target_token, 1, 0);
 
     // Function generation
     cc_register_cfunc(vm, "__cccc_ast_function", (void *)__cccc_ast_function, 3, 0);
@@ -1573,6 +1611,84 @@ static Node *execute_macro_fn(CCCC *vm, MacroFn *pm, Token *call_tok,
                result->kind);
 
     return result;
+}
+
+void cc_execute_attribute_macro(CCCC *vm, MacroFn *pm, Token *tok,
+                                AttrTarget *target, Node *args,
+                                int arg_count) {
+    if (!vm || !pm || !target)
+        return;
+    if (!pm->is_attribute_handler) {
+        error_tok(vm, tok, "macro '%s' is not a custom attribute handler",
+                  pm->name);
+        return;
+    }
+
+    init_vm_segments_for_macros(vm);
+    compile_all_macros(vm);
+
+    if (!pm->is_compiled) {
+        error_tok(vm, tok, "attribute macro '%s' failed to compile",
+                  pm->name);
+        return;
+    }
+
+    int total_args = arg_count + 1;
+    if (!pm->is_variadic && pm->fixed_param_count != total_args)
+        error_tok(vm, tok,
+                  "attribute macro '%s' called with %d arguments; expected %d",
+                  pm->name, total_args, pm->fixed_param_count);
+    if (pm->is_variadic && total_args < pm->fixed_param_count)
+        error_tok(vm, tok,
+                  "attribute macro '%s' called with %d arguments; expected at least %d",
+                  pm->name, total_args, pm->fixed_param_count);
+
+    int fixed_count = pm->is_variadic ? pm->fixed_param_count : total_args;
+    long long *fixed_values =
+        fixed_count > 0 ? alloca((size_t)fixed_count * sizeof(long long)) : NULL;
+    if (fixed_count > 0)
+        fixed_values[0] = (long long)target;
+
+    Node *arg = args;
+    for (int i = 1; i < fixed_count; i++) {
+        fixed_values[i] = (long long)arg;
+        if (arg)
+            arg = arg->next;
+    }
+
+    Node **saved_vararg_nodes = vm->compiler.macro_vararg_nodes;
+    char **saved_vararg_strs = vm->compiler.macro_vararg_strs;
+    int saved_vararg_count = vm->compiler.macro_vararg_count;
+    bool saved_vararg_string_mode = vm->compiler.macro_vararg_string_mode;
+
+    if (pm->is_variadic) {
+        int var_count = total_args - pm->fixed_param_count;
+        Node **var_nodes =
+            var_count > 0 ? alloca((size_t)var_count * sizeof(Node *)) : NULL;
+        for (int i = 0; i < var_count; i++) {
+            var_nodes[i] = arg;
+            if (arg)
+                arg = arg->next;
+        }
+        vm->compiler.macro_vararg_nodes = var_nodes;
+        vm->compiler.macro_vararg_strs = NULL;
+        vm->compiler.macro_vararg_count = var_count;
+        vm->compiler.macro_vararg_string_mode = false;
+    } else {
+        vm->compiler.macro_vararg_nodes = NULL;
+        vm->compiler.macro_vararg_strs = NULL;
+        vm->compiler.macro_vararg_count = 0;
+        vm->compiler.macro_vararg_string_mode = false;
+    }
+
+    Node *result = execute_macro_fn(vm, pm, tok, NULL, total_args,
+                                    fixed_values, fixed_count);
+    (void)result;
+
+    vm->compiler.macro_vararg_nodes = saved_vararg_nodes;
+    vm->compiler.macro_vararg_strs = saved_vararg_strs;
+    vm->compiler.macro_vararg_count = saved_vararg_count;
+    vm->compiler.macro_vararg_string_mode = saved_vararg_string_mode;
 }
 
 // Find macro function by name

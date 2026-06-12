@@ -102,6 +102,7 @@ typedef struct Obj $obj_t;
 typedef struct Member $member_t;
 typedef struct EnumConstant $enum_constant_t;
 typedef struct Token $token_t;
+typedef struct AttrTarget $attr_target_t;
 
 // Type kind enumeration (matches cccc.h)
 typedef enum {
@@ -165,6 +166,13 @@ typedef enum {
     nk_cast = 43,
     nk_macro_call = 51,
 } $node_kind_t;
+
+typedef enum {
+    attr_target_typedef = 1,
+    attr_target_type = 2,
+    attr_target_function = 3,
+    attr_target_global = 4,
+} $attr_target_kind_t;
 
 // ============================================================================
 // Magic _VM Builtin
@@ -864,6 +872,36 @@ bool __cccc_ast_obj_is_definition($obj_t *obj);
  * @discussion Convenience wrapper: $obj_is_static(obj).
  */
 bool __cccc_ast_obj_is_static($obj_t *obj);
+
+/*!
+ * @function __cccc_attr_target_kind
+ * @abstract Return the kind of declaration decorated by a custom attribute.
+ */
+int __cccc_attr_target_kind($attr_target_t *target);
+
+/*!
+ * @function __cccc_attr_target_name
+ * @abstract Return the decorated declaration's source name, when available.
+ */
+const char *__cccc_attr_target_name($attr_target_t *target);
+
+/*!
+ * @function __cccc_attr_target_type
+ * @abstract Return the decorated declaration's type.
+ */
+$type_t *__cccc_attr_target_type($attr_target_t *target);
+
+/*!
+ * @function __cccc_attr_target_obj
+ * @abstract Return the decorated function or global object, or NULL for type targets.
+ */
+$obj_t *__cccc_attr_target_obj($attr_target_t *target);
+
+/*!
+ * @function __cccc_attr_target_token
+ * @abstract Return a source token for the decorated declaration.
+ */
+$token_t *__cccc_attr_target_token($attr_target_t *target);
 
 // ============================================================================
 // AST Node Construction - Literals
@@ -1764,6 +1802,11 @@ const char *__cccc_dump_ast_gen_to_string(CCCC *vm, $node_t *node);
 #define $obj_is_function(obj)     __cccc_ast_obj_is_function(obj)
 #define $obj_is_definition(obj)   __cccc_ast_obj_is_definition(obj)
 #define $obj_is_static(obj)       __cccc_ast_obj_is_static(obj)
+#define $attr_target_kind(target)  __cccc_attr_target_kind(target)
+#define $attr_target_name(target)  __cccc_attr_target_name(target)
+#define $attr_target_type(target)  __cccc_attr_target_type(target)
+#define $attr_target_obj(target)   __cccc_attr_target_obj(target)
+#define $attr_target_token(target) __cccc_attr_target_token(target)
 
 #define $function(name, ret_type)                                       \
     __cccc_ast_function(_VM, name, ret_type)

@@ -618,6 +618,7 @@ struct Type {
     bool is_nodiscard;
     char *deprecated_msg;
     char *nodiscard_msg;
+    struct CustomAttrUse *custom_attrs;
 
     // Format string validation (__attribute__((format(...))))
     int format_style;          // 0=none, 1=printf, 2=scanf
@@ -904,6 +905,23 @@ typedef struct CondIncl {
     bool included;
 } CondIncl;
 
+typedef struct CustomAttrUse CustomAttrUse;
+
+typedef enum {
+    ATTR_TARGET_TYPEDEF = 1,
+    ATTR_TARGET_TYPE = 2,
+    ATTR_TARGET_FUNCTION = 3,
+    ATTR_TARGET_GLOBAL = 4,
+} AttrTargetKind;
+
+typedef struct AttrTarget {
+    AttrTargetKind kind;
+    char *name;
+    Type *ty;
+    Obj *obj;
+    Token *tok;
+} AttrTarget;
+
 /*!
  @struct MacroFn
  @abstract Represents a compile-time macro function.
@@ -927,6 +945,8 @@ typedef struct MacroFn {
     bool is_inline;           // True for inline macros (auto-execute at declaration)
     bool is_void_macro;       // True if declared void — definition-only, no splice node
     bool is_variadic;         // True if declaration has a trailing ...
+    bool is_attribute_handler; // True for @macro(attribute("name")) handlers
+    char *attribute_name;      // Registered custom attribute name
     int fixed_param_count;    // Number of named parameters before ...
     struct MacroFn *next;     // Next macro in linked list
 } MacroFn;

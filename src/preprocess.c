@@ -281,7 +281,8 @@ static Token *new_eof(CCCC *vm, Token *tok) {
 // Returns the token after the function definition (or original token on failure).
 static Token *extract_macro_function(CCCC *vm, Token *tok,
                                      bool is_macro_entry,
-                                     bool is_inline) {
+                                     bool is_inline,
+                                     char *attribute_name) {
     // Expected format: <return_type> <function_name>(<params>) { <body> }
     // tok should be the first token of the function definition
 
@@ -456,12 +457,19 @@ static Token *extract_macro_function(CCCC *vm, Token *tok,
     pm->is_inline = is_inline;
     pm->is_void_macro = is_void_macro;
     pm->is_variadic = is_variadic;
+    pm->is_attribute_handler = attribute_name != NULL;
+    pm->attribute_name = attribute_name;
     pm->fixed_param_count = fixed_param_count;
     pm->next = vm->compiler.macro_fns;
     vm->compiler.macro_fns = pm;
 
-    if (vm->debug_vm)
-        printf("Captured comptime function '%s'\n", name);
+    if (vm->debug_vm) {
+        if (pm->is_attribute_handler)
+            printf("Captured comptime function '%s' for attribute '%s'\n",
+                   name, pm->attribute_name);
+        else
+            printf("Captured comptime function '%s'\n", name);
+    }
 
     // Return token after the function
     return body_end ? body_end : tok;
@@ -2412,6 +2420,37 @@ static void parse_test_setup_args(Token **p_ptr, TestSetupArgs *out) {
 // If the attribute block contains no macro/comptime marker (e.g. [[nodiscard]],
 // __attribute__((unused))), *tok_ptr is left unchanged and the function returns
 // false so the token flows to the parser as normal.
+static void read_macro_attr_options(CCCC *vm, Token *macro_tok,
+                                    bool *is_inline,
+                                    char **attribute_name) {
+    if (!macro_tok || !macro_tok->next || !equal(macro_tok->next, "("))
+        return;
+
+    Token *p = macro_tok->next->next;
+    while (p && p->kind != TK_EOF && !equal(p, ")")) {
+        if (equal(p, ",")) {
+            p = p->next;
+            continue;
+        }
+        if (equal(p, "inline")) {
+            *is_inline = true;
+            p = p->next;
+            continue;
+        }
+        if (equal(p, "attribute")) {
+            p = skip(vm, p->next, "(");
+            if (p->kind != TK_STR)
+                error_tok(vm, p,
+                          "macro(attribute(...)) expects a string literal attribute name");
+            *attribute_name = arena_strdup(vm, p->str);
+            p = skip(vm, p->next, ")");
+            continue;
+        }
+        error_tok(vm, p, "unknown macro attribute option '%.*s'",
+                  p->len, p->loc);
+    }
+}
+
 static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
     Token *tok = *tok_ptr;
     bool is_gnu_attr = false;
@@ -2434,6 +2473,7 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
     bool is_setup_kind     = false;
     bool is_teardown_kind  = false;
     bool is_inline         = false;
+    char *attribute_name   = NULL;
     Token *attr_end        = NULL;
     TestArgs ta            = {0};
     ta.error_count_op      = CMP_NONE;
@@ -2475,11 +2515,7 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
 
         if (equal(t, "macro")) {
             is_macro_kind = true;
-            // macro(inline) — deprecated alias; inline argument still honoured
-            if (t->next && equal(t->next, "(") &&
-                t->next->next && equal(t->next->next, "inline") &&
-                t->next->next->next && equal(t->next->next->next, ")"))
-                is_inline = true;
+            read_macro_attr_options(vm, t, &is_inline, &attribute_name);
         } else if (equal(t, "comptime")) {
             is_comptime_kind = true;
             // comptime(inline)
@@ -2494,12 +2530,8 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
             Token *after_scope = t->next->next->next;
             if (equal(after_scope, "macro")) {
                 is_macro_kind = true;
-                // cccc::macro(inline) — deprecated alias; inline still honoured
-                if (after_scope->next && equal(after_scope->next, "(") &&
-                    after_scope->next->next && equal(after_scope->next->next, "inline") &&
-                    after_scope->next->next->next &&
-                    equal(after_scope->next->next->next, ")"))
-                    is_inline = true;
+                read_macro_attr_options(vm, after_scope, &is_inline,
+                                        &attribute_name);
             } else if (equal(after_scope, "comptime")) {
                 is_comptime_kind = true;
                 // cccc::comptime(inline)
@@ -2656,7 +2688,8 @@ static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
     // All annotated functions — both [[cccc::macro]] and [[cccc::comptime]] —
     // are entry-callable from user code (is_macro_entry=true).
     if (is_macro_kind || looks_like_function) {
-        *tok_ptr = extract_macro_function(vm, attr_end, true, is_inline);
+        *tok_ptr = extract_macro_function(vm, attr_end, true, is_inline,
+                                          attribute_name);
     } else {
         *tok_ptr = extract_comptime_var(vm, attr_end);
     }
@@ -2743,7 +2776,7 @@ static bool try_extract_comptime_block_decl(CCCC *vm, Token **tok_ptr) {
     Token *tok = *tok_ptr;
 
     if (probe_function_definition(tok)) {
-        *tok_ptr = extract_macro_function(vm, tok, true, false);
+        *tok_ptr = extract_macro_function(vm, tok, true, false, NULL);
         return true;
     }
     if (probe_var_declaration(tok)) {

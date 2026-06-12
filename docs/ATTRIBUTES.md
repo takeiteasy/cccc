@@ -202,11 +202,13 @@ the canonical attribute form before parsing:
 | `@name` (CCCC-specific) | `[[cccc::name]]` | `@comptime`, `@test`, `@test_setup` |
 | `@name` (standard C23) | `[[name]]` | `@nodiscard`, `@maybe_unused` |
 | `@name` (GNU / unknown) | `__attribute__((name))` | `@packed`, `@aligned(16)` |
+| `@name` (custom comptime) | handler registered by `@macro(attribute("name"))` | `@serialize struct Point { ... };` |
 
 Resolution order: CCCC-specific attributes are checked first (they become
 `[[cccc::name(...)]]`), then standard C23 attributes (they become
-`[[name(...)]]`), then GNU attributes (they become
-`__attribute__((name(...)))`). Unrecognised names fall back to the GNU form.
+`[[name(...)]]`), then registered custom comptime attributes, then GNU
+attributes (they become `__attribute__((name(...)))`). Unrecognised names fall
+back to the GNU form.
 
 ```c
 @comptime(inline)
@@ -219,6 +221,10 @@ struct @packed point { char x; int y; };
 ```
 
 The `@` prefix is accepted wherever the corresponding canonical form is valid.
+Custom comptime attributes currently run only on file-scope declarations
+(types, typedefs, functions, and globals). Their arguments are parsed as
+expression AST nodes and passed to the registered handler after the decorated
+target has been built.
 `__declspec` (Windows) is reserved as a future fourth fallback category.
 
 ## Position in Grammar

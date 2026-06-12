@@ -31,6 +31,7 @@ typedef EnumConstant $enum_constant_t;
 typedef Token $token_t;
 typedef TypeKind $type_kind_t;
 typedef NodeKind $node_kind_t;
+typedef AttrTarget $attr_target_t;
 
 // Global VM pointer for __cccc_get_vm() builtin
 // Set during pragma macro execution, cleared after
@@ -456,6 +457,26 @@ bool __cccc_ast_obj_is_definition($obj_t *obj) {
 }
 
 bool __cccc_ast_obj_is_static($obj_t *obj) { return obj ? obj->is_static : false; }
+
+int __cccc_attr_target_kind($attr_target_t *target) {
+    return target ? target->kind : 0;
+}
+
+const char *__cccc_attr_target_name($attr_target_t *target) {
+    return target ? target->name : NULL;
+}
+
+$type_t *__cccc_attr_target_type($attr_target_t *target) {
+    return target ? target->ty : NULL;
+}
+
+$obj_t *__cccc_attr_target_obj($attr_target_t *target) {
+    return target ? target->obj : NULL;
+}
+
+$token_t *__cccc_attr_target_token($attr_target_t *target) {
+    return target ? target->tok : NULL;
+}
 
 // ============================================================================
 // AST Node Construction - Helper

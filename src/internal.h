@@ -330,6 +330,9 @@ bool node_int_const_fits(CCCC *vm, Node *expr, Type *to);
 Obj *parse(CCCC *vm, Token *tok);
 void cc_execute_top_level_macro(CCCC *vm, char *name, Token *tok,
                                 Node *args, int arg_count);
+void cc_execute_attribute_macro(CCCC *vm, MacroFn *pm, Token *tok,
+                                AttrTarget *target, Node *args,
+                                int arg_count);
 // Expand a deferred ND_INIT_SPLICE node into positional ND_ASSIGN chains.
 // Called by quote_substitute in relfection.c after the splice chain is resolved.
 Node *node_expand_init_splice(CCCC *vm, Node *splice, Node *chain);

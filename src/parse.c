@@ -77,6 +77,7 @@ typedef struct {
     char *deprecated_msg;
     char *nodiscard_msg;
     Token *attribute_tok;
+    CustomAttrUse *custom_attrs;
     int align;
 
     // Format string validation
@@ -84,6 +85,14 @@ typedef struct {
     int format_string_index;   // 1-based index of format string arg
     int format_fmt_first_arg;  // 1-based index of first variadic arg to check
 } VarAttr;
+
+struct CustomAttrUse {
+    char *name;
+    Token *tok;
+    Node *args;
+    int arg_count;
+    CustomAttrUse *next;
+};
 
 // This struct represents a variable initializer. Since initializers
 // can be nested (e.g. `int x[2][2] = {{1, 2}, {3, 4}}`), this struct
@@ -181,7 +190,7 @@ static Node *postfix(CCCC *vm, Token **rest, Token *tok);
 static Node *funcall(CCCC *vm, Token **rest, Token *tok, Node *node);
 static Node *unary(CCCC *vm, Token **rest, Token *tok);
 static Node *primary(CCCC *vm, Token **rest, Token *tok);
-static Token *parse_typedef(CCCC *vm, Token *tok, Type *basety);
+static Token *parse_typedef(CCCC *vm, Token *tok, Type *basety, VarAttr *attr);
 static bool falls_through(Node *n);
 static void warn_switch_fallthrough(CCCC *vm, Node *sw);
 static bool is_function(CCCC *vm, Token *tok);
@@ -302,6 +311,171 @@ static MacroFn *find_macro_fn(CCCC *vm, Token *tok) {
         }
     }
     return NULL;
+}
+
+static MacroFn *find_attribute_macro(CCCC *vm, Token *tok) {
+    if (vm->compiler.in_macro_mode)
+        return NULL;
+    if (!tok || tok->kind != TK_IDENT)
+        return NULL;
+    for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next) {
+        if (!pm->is_attribute_handler || !pm->attribute_name)
+            continue;
+        if (strlen(pm->attribute_name) == tok->len &&
+            strncmp(pm->attribute_name, tok->loc, tok->len) == 0)
+            return pm;
+    }
+    return NULL;
+}
+
+static void append_custom_attr(CCCC *vm, CustomAttrUse **list, Token *name_tok,
+                               Node *args, int arg_count) {
+    if (!list || !name_tok)
+        return;
+    CustomAttrUse *use =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(CustomAttrUse));
+    memset(use, 0, sizeof(CustomAttrUse));
+    use->name = arena_strndup(vm, name_tok->loc, name_tok->len);
+    use->tok = name_tok;
+    use->args = args;
+    use->arg_count = arg_count;
+
+    if (!*list) {
+        *list = use;
+        return;
+    }
+    CustomAttrUse *tail = *list;
+    while (tail->next)
+        tail = tail->next;
+    tail->next = use;
+}
+
+static Token *skip_paren_group(CCCC *vm, Token *tok) {
+    tok = skip(vm, tok, "(");
+    int depth = 1;
+    while (tok && tok->kind != TK_EOF && depth > 0) {
+        if (equal(tok, "("))
+            depth++;
+        else if (equal(tok, ")"))
+            depth--;
+        tok = tok->next;
+    }
+    return tok;
+}
+
+static Token *skip_c23_attr_group(Token *tok) {
+    if (!equal(tok, "[") || !tok->next || !equal(tok->next, "["))
+        return tok;
+    tok = tok->next->next;
+    while (tok && tok->kind != TK_EOF) {
+        if (equal(tok, "]") && tok->next && equal(tok->next, "]"))
+            return tok->next->next;
+        tok = tok->next;
+    }
+    return tok;
+}
+
+static bool is_decl_start(CCCC *vm, Token *tok) {
+    for (;;) {
+        if (equal(tok, "__attribute__")) {
+            Token *p = tok->next;
+            if (!p || !equal(p, "(") || !p->next || !equal(p->next, "("))
+                return false;
+            p = skip_paren_group(vm, p);
+            if (!p)
+                return false;
+            tok = p;
+            continue;
+        }
+        if (equal(tok, "[") && tok->next && equal(tok->next, "[")) {
+            tok = skip_c23_attr_group(tok);
+            continue;
+        }
+        if (tok && tok->kind == TK_IDENT && tok->next && equal(tok->next, ":"))
+            return false;
+        return is_typename(vm, tok);
+    }
+}
+
+static Token *parse_custom_attr_args(CCCC *vm, Token *tok, Node **args,
+                                     int *arg_count) {
+    *args = NULL;
+    *arg_count = 0;
+    if (!equal(tok, "("))
+        return tok;
+
+    if (vm->compiler.in_type_lookahead)
+        return skip_paren_group(vm, tok);
+
+    tok = tok->next;
+    Node head = {};
+    Node *cur = &head;
+    while (!equal(tok, ")")) {
+        if (cur != &head)
+            tok = skip(vm, tok, ",");
+        Node *arg = assign(vm, &tok, tok);
+        cur = cur->next = arg;
+        (*arg_count)++;
+    }
+    *args = head.next;
+    return tok->next;
+}
+
+static void run_custom_attrs(CCCC *vm, CustomAttrUse *attrs,
+                             AttrTargetKind kind, char *name, Type *ty,
+                             Obj *obj, Token *tok) {
+    for (CustomAttrUse *use = attrs; use; use = use->next) {
+        MacroFn *pm = NULL;
+        for (MacroFn *m = vm->compiler.macro_fns; m; m = m->next) {
+            if (m->is_attribute_handler && m->attribute_name &&
+                !strcmp(m->attribute_name, use->name)) {
+                pm = m;
+                break;
+            }
+        }
+        if (!pm)
+            error_tok(vm, use->tok, "undefined custom attribute '%s'",
+                      use->name);
+
+        AttrTarget *target =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(AttrTarget));
+        memset(target, 0, sizeof(AttrTarget));
+        target->kind = kind;
+        target->name = name;
+        target->ty = ty;
+        target->obj = obj;
+        target->tok = tok ? tok : use->tok;
+        cc_execute_attribute_macro(vm, pm, use->tok, target, use->args,
+                                   use->arg_count);
+    }
+}
+
+static bool has_custom_attrs(Type *ty, VarAttr *attr) {
+    return (ty && ty->custom_attrs) || (attr && attr->custom_attrs);
+}
+
+static void run_decl_custom_attrs(CCCC *vm, Type *ty, VarAttr *attr,
+                                  AttrTargetKind kind, char *name,
+                                  Type *target_ty, Obj *obj, Token *tok) {
+    if (attr && attr->custom_attrs)
+        run_custom_attrs(vm, attr->custom_attrs, kind, name, target_ty, obj,
+                         tok);
+    if (ty && ty->custom_attrs)
+        run_custom_attrs(vm, ty->custom_attrs, kind, name, target_ty, obj,
+                         tok);
+}
+
+static void append_custom_attr_list(CustomAttrUse **dst, CustomAttrUse *src) {
+    if (!dst || !src)
+        return;
+    if (!*dst) {
+        *dst = src;
+        return;
+    }
+    CustomAttrUse *tail = *dst;
+    while (tail->next)
+        tail = tail->next;
+    tail->next = src;
 }
 
 static Type *find_tag(CCCC *vm, Token *tok) {
@@ -787,7 +961,8 @@ static Type *declspec(CCCC *vm, Token **rest, Token *tok, VarAttr *attr) {
     bool is_const = false;
     bool is_volatile = false;
 
-    while (is_typename(vm, tok)) {
+    while (is_typename(vm, tok) || equal(tok, "__attribute__") ||
+           (equal(tok, "[") && equal(tok->next, "["))) {
         if (equal(tok, "__attribute__")) {
             tok = attribute_list(vm, tok, NULL, attr);
             continue;
@@ -1046,8 +1221,13 @@ static Type *func_params(CCCC *vm, Token **rest, Token *tok, Type *ty) {
             break;
         }
 
-        Type *ty2 = declspec(vm, &tok, tok, NULL);
+        VarAttr attr = {};
+        Type *ty2 = declspec(vm, &tok, tok, &attr);
         ty2 = declarator(vm, &tok, tok, ty2);
+        ty2 = apply_var_attrs_to_type(vm, ty2, &attr);
+        if (has_custom_attrs(ty2, &attr))
+            error_tok(vm, ty2->name ? ty2->name : tok,
+                      "custom attributes are only supported on file-scope declarations");
 
         Token *name = ty2->name;
 
@@ -1146,6 +1326,7 @@ static Type *declarator(CCCC *vm, Token **rest, Token *tok, Type *ty) {
     VarAttr prefix_attr = {};
     tok = attribute_list(vm, tok, NULL, &prefix_attr);
     tok = c23_attribute_list(vm, tok, NULL, &prefix_attr);
+    append_custom_attr_list(&ty->custom_attrs, prefix_attr.custom_attrs);
     ty = apply_var_attrs_to_type(vm, ty, &prefix_attr);
 
     ty = pointers(vm, &tok, tok, ty);
@@ -1215,6 +1396,7 @@ static Type *declarator(CCCC *vm, Token **rest, Token *tok, Type *ty) {
     VarAttr suffix_attr = {};
     tok = attribute_list(vm, *rest, NULL, &suffix_attr);
     tok = c23_attribute_list(vm, tok, NULL, &suffix_attr);
+    append_custom_attr_list(&ty->custom_attrs, suffix_attr.custom_attrs);
     ty = apply_var_attrs_to_type(vm, ty, &suffix_attr);
 
     ty->name = name;
@@ -1293,6 +1475,8 @@ static Type *enum_specifier(CCCC *vm, Token **rest, Token *tok) {
     Token *tag = NULL;
     if (tok->kind == TK_IDENT) {
         tag = tok;
+        ty->name = tag;
+        ty->name_pos = tag;
         tok = tok->next;
     }
 
@@ -1437,6 +1621,10 @@ static Node *declaration(CCCC *vm, Token **rest, Token *tok, Type *basety,
             tok = skip(vm, tok, ",");
 
         Type *ty = declarator(vm, &tok, tok, basety);
+
+        if (has_custom_attrs(ty, attr) || (basety && basety->custom_attrs))
+            error_tok(vm, ty->name ? ty->name : tok,
+                      "custom attributes are only supported on file-scope declarations");
 
         if (ty->kind == TY_VOID) {
             if (vm->collect_errors &&
@@ -2697,7 +2885,7 @@ static Node *stmt(CCCC *vm, Token **rest, Token *tok) {
         vm->compiler.brk_label = node->brk_label = new_unique_name(vm);
         vm->compiler.cont_label = node->cont_label = new_unique_name(vm);
 
-        if (is_typename(vm, tok)) {
+        if (is_decl_start(vm, tok)) {
             Type *basety = declspec(vm, &tok, tok, NULL);
             node->init = declaration(vm, &tok, tok, basety, NULL);
         } else {
@@ -2856,7 +3044,7 @@ static Node *compound_stmt(CCCC *vm, Token **rest, Token *tok, Token **close_tok
 
     bool seen_stmt = false;
     while (!equal(tok, "}")) {
-        if (is_typename(vm, tok) && !equal(tok->next, ":")) {
+        if (is_decl_start(vm, tok) && !equal(tok->next, ":")) {
             if (seen_stmt && vm->compiler.c_std < CCCC_STD_C99)
                 warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
                          "mixing declarations and code is a C99 extension");
@@ -2864,7 +3052,10 @@ static Node *compound_stmt(CCCC *vm, Token **rest, Token *tok, Token **close_tok
             Type *basety = declspec(vm, &tok, tok, &attr);
 
             if (attr.is_typedef) {
-                tok = parse_typedef(vm, tok, basety);
+                if (has_custom_attrs(basety, &attr))
+                    error_tok(vm, tok,
+                              "custom attributes are only supported on file-scope declarations");
+                tok = parse_typedef(vm, tok, basety, &attr);
                 continue;
             }
 
@@ -3983,8 +4174,13 @@ static Node *block_literal(CCCC *vm, Token **rest, Token *tok) {
                 if (cur != &head)
                     tok = skip(vm, tok, ",");
 
-                Type *param_ty = declspec(vm, &tok, tok, NULL);
+                VarAttr attr = {};
+                Type *param_ty = declspec(vm, &tok, tok, &attr);
                 param_ty = declarator(vm, &tok, tok, param_ty);
+                param_ty = apply_var_attrs_to_type(vm, param_ty, &attr);
+                if (has_custom_attrs(param_ty, &attr))
+                    error_tok(vm, param_ty->name ? param_ty->name : tok,
+                              "custom attributes are only supported on file-scope declarations");
 
                 // Convert array and function parameters to pointers
                 if (param_ty->kind == TY_ARRAY) {
@@ -4199,6 +4395,9 @@ static void struct_members(CCCC *vm, Token **rest, Token *tok, Type *ty) {
     while (!equal(tok, "}")) {
         VarAttr attr = {};
         Type *basety = declspec(vm, &tok, tok, &attr);
+        if (has_custom_attrs(basety, &attr))
+            error_tok(vm, tok,
+                      "custom attributes are only supported on file-scope declarations");
         bool first = true;
 
         // Anonymous struct member
@@ -4228,6 +4427,9 @@ static void struct_members(CCCC *vm, Token **rest, Token *tok, Type *ty) {
                 arena_alloc(&vm->compiler.parser_arena, sizeof(Member));
             memset(mem, 0, sizeof(Member));
             mem->ty = declarator(vm, &tok, tok, basety);
+            if (has_custom_attrs(mem->ty, NULL))
+                error_tok(vm, mem->name ? mem->name : tok,
+                          "custom attributes are only supported on file-scope declarations");
             mem->name = mem->ty->name;
             mem->idx = idx++;
             mem->align = attr.align ? attr.align : mem->ty->align;
@@ -4323,8 +4525,12 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
         return;
     dst->is_maybe_unused |= src->is_maybe_unused;
     dst->is_deprecated |= src->is_deprecated;
+    dst->is_nodiscard |= src->is_nodiscard;
+    dst->is_noreturn |= src->is_noreturn;
     if (!dst->deprecated_msg)
         dst->deprecated_msg = src->deprecated_msg;
+    if (!dst->nodiscard_msg)
+        dst->nodiscard_msg = src->nodiscard_msg;
     if (src->format_style) {
         dst->format_style = src->format_style;
         dst->format_string_index = src->format_string_index;
@@ -4430,6 +4636,27 @@ static Token *attribute_list(CCCC *vm, Token *tok, Type *ty, VarAttr *attr) {
                 continue;
             }
 
+            if (find_attribute_macro(vm, tok)) {
+                Token *name_tok = tok;
+                tok = tok->next;
+                Node *args = NULL;
+                int arg_count = 0;
+                tok = parse_custom_attr_args(vm, tok, &args, &arg_count);
+                if (!vm->compiler.in_type_lookahead) {
+                    if (attr)
+                        append_custom_attr(vm, &attr->custom_attrs, name_tok,
+                                           args, arg_count);
+                    else if (ty)
+                        append_custom_attr(vm, &ty->custom_attrs, name_tok,
+                                           args, arg_count);
+                    else
+                        error_tok(vm, name_tok,
+                                  "custom attribute '%.*s' is not valid here",
+                                  name_tok->len, name_tok->loc);
+                }
+                continue;
+            }
+
             // Handle all other attributes - just consume and ignore them
             if (tok->kind == TK_IDENT) {
                 Token *name_tok = tok;
@@ -4486,27 +4713,72 @@ static Token *c23_attribute_list(CCCC *vm, Token *tok, Type *ty,
                 error_tok(vm, tok, "expected attribute name");
 
             Token *attr_tok = tok;
-            bool unused = equal(tok, "maybe_unused");
-            bool deprecated = equal(tok, "deprecated");
-            bool is_noreturn_attr = equal(tok, "noreturn");
-            bool is_nodiscard_attr = equal(tok, "nodiscard");
-            bool is_fallthrough_attr = equal(tok, "fallthrough");
-            bool is_no_unique_address_attr = equal(tok, "no_unique_address");
+            Token *name_tok = tok;
+            bool cccc_scoped = false;
+            if (equal(tok, "cccc") && tok->next && equal(tok->next, ":") &&
+                tok->next->next && equal(tok->next->next, ":") &&
+                tok->next->next->next &&
+                tok->next->next->next->kind == TK_IDENT) {
+                cccc_scoped = true;
+                name_tok = tok->next->next->next;
+                tok = name_tok;
+            }
+
+            bool unused = equal(name_tok, "maybe_unused");
+            bool deprecated = equal(name_tok, "deprecated");
+            bool is_noreturn_attr = equal(name_tok, "noreturn");
+            bool is_nodiscard_attr = equal(name_tok, "nodiscard");
+            bool is_fallthrough_attr = equal(name_tok, "fallthrough");
+            bool is_no_unique_address_attr = equal(name_tok, "no_unique_address");
             tok = tok->next;
 
             char *message = NULL;
             if (equal(tok, "(")) {
-                int depth = 1;
-                tok = tok->next;
-                if ((deprecated || is_nodiscard_attr) && tok->kind == TK_STR)
-                    message = tok->str;
-                while (depth > 0) {
-                    if (equal(tok, "("))
-                        depth++;
-                    else if (equal(tok, ")"))
-                        depth--;
+                if (find_attribute_macro(vm, name_tok)) {
+                    Node *args = NULL;
+                    int arg_count = 0;
+                    tok = parse_custom_attr_args(vm, tok, &args, &arg_count);
+                    if (!vm->compiler.in_type_lookahead) {
+                        if (attr)
+                            append_custom_attr(vm, &attr->custom_attrs,
+                                               name_tok, args, arg_count);
+                        else if (ty)
+                            append_custom_attr(vm, &ty->custom_attrs,
+                                               name_tok, args, arg_count);
+                        else
+                            error_tok(vm, name_tok,
+                                      "custom attribute '%.*s' is not valid here",
+                                      name_tok->len, name_tok->loc);
+                    }
+                    continue;
+                } else {
+                    int depth = 1;
                     tok = tok->next;
+                    if ((deprecated || is_nodiscard_attr) && tok->kind == TK_STR)
+                        message = tok->str;
+                    while (depth > 0) {
+                        if (equal(tok, "("))
+                            depth++;
+                        else if (equal(tok, ")"))
+                            depth--;
+                        tok = tok->next;
+                    }
                 }
+            }
+            if (find_attribute_macro(vm, name_tok)) {
+                if (!vm->compiler.in_type_lookahead) {
+                    if (attr)
+                        append_custom_attr(vm, &attr->custom_attrs, name_tok,
+                                           NULL, 0);
+                    else if (ty)
+                        append_custom_attr(vm, &ty->custom_attrs, name_tok,
+                                           NULL, 0);
+                    else
+                        error_tok(vm, name_tok,
+                                  "custom attribute '%.*s' is not valid here",
+                                  name_tok->len, name_tok->loc);
+                }
+                continue;
             }
             if (is_noreturn_attr) {
                 if (ty) ty->is_noreturn = true;
@@ -4527,7 +4799,8 @@ static Token *c23_attribute_list(CCCC *vm, Token *tok, Type *ty,
             } else if (!unused && !deprecated) {
                 warn_tok(vm, attr_tok, CCCC_WARN_ATTRIBUTES,
                          "unknown attribute '%.*s' ignored",
-                         attr_tok->len, attr_tok->loc);
+                         cccc_scoped ? name_tok->len : attr_tok->len,
+                         cccc_scoped ? name_tok->loc : attr_tok->loc);
                 apply_semantic_attr(ty, attr, attr_tok, unused, deprecated,
                                     false, NULL);
             } else {
@@ -4553,6 +4826,8 @@ static Type *struct_union_decl(CCCC *vm, Token **rest, Token *tok) {
     Token *tag = NULL;
     if (tok->kind == TK_IDENT) {
         tag = tok;
+        ty->name = tag;
+        ty->name_pos = tag;
         tok = tok->next;
     }
 
@@ -5944,7 +6219,7 @@ static Node *primary(CCCC *vm, Token **rest, Token *tok) {
     return NULL;
 }
 
-static Token *parse_typedef(CCCC *vm, Token *tok, Type *basety) {
+static Token *parse_typedef(CCCC *vm, Token *tok, Type *basety, VarAttr *attr) {
     bool first = true;
 
     while (!consume(vm, &tok, tok, ";")) {
@@ -5961,6 +6236,8 @@ static Token *parse_typedef(CCCC *vm, Token *tok, Type *basety) {
         sc->is_deprecated = ty->is_deprecated;
         sc->deprecated_msg = ty->deprecated_msg;
         record_type_name(vm, ty, name, ty->name->len, false);
+        run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_TYPEDEF, name, ty,
+                              NULL, ty->name);
     }
     return tok;
 }
@@ -6119,6 +6396,7 @@ static void validate_main_signature(CCCC *vm, Obj *fn) {
 
 static Token *function(CCCC *vm, Token *tok, Type *basety, VarAttr *attr) {
     Type *ty = declarator(vm, &tok, tok, basety);
+    ty = apply_var_attrs_to_type(vm, ty, attr);
     if (!ty->name)
         error_tok(vm, ty->name_pos, "function name omitted");
     char *name_str = get_ident(vm, ty->name);
@@ -6191,8 +6469,11 @@ static Token *function(CCCC *vm, Token *tok, Type *basety, VarAttr *attr) {
 
     fn->is_root = !(fn->is_static && fn->is_inline);
 
-    if (consume(vm, &tok, tok, ";"))
+    if (consume(vm, &tok, tok, ";")) {
+        run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name,
+                              fn->ty, fn, fn->tok);
         return tok;
+    }
 
     vm->compiler.current_fn = fn;
     vm->compiler.locals = NULL;
@@ -6368,6 +6649,9 @@ static Token *function(CCCC *vm, Token *tok, Type *basety, VarAttr *attr) {
         vm->compiler.current_fn = NULL;
     }
 
+    run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name,
+                          fn->ty, fn, fn->tok);
+
     return tok;
 }
 
@@ -6408,6 +6692,8 @@ static Token *global_variable(CCCC *vm, Token *tok, Type *basety,
                 push_scope(vm, var_name, var_name_len)->var = mg;
                 if (equal(tok, "="))
                     gvar_initializer(vm, &tok, tok->next, mg);
+                run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_GLOBAL,
+                                      mg->name, mg->ty, mg, mg->tok);
                 continue;
             }
         }
@@ -6435,6 +6721,9 @@ static Token *global_variable(CCCC *vm, Token *tok, Type *basety,
             gvar_initializer(vm, &tok, tok->next, var);
         else if (!attr->is_extern && !attr->is_tls)
             var->is_tentative = true;
+
+        run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_GLOBAL, var->name,
+                              var->ty, var, var->tok);
     }
     return tok;
 }
@@ -6634,13 +6923,26 @@ Obj *parse(CCCC *vm, Token *tok) {
 
         // Typedef
         if (attr.is_typedef) {
-            tok = parse_typedef(vm, tok, basety);
+            tok = parse_typedef(vm, tok, basety, &attr);
             continue;
         }
 
         // Function
         if (is_function(vm, tok)) {
             tok = function(vm, tok, basety, &attr);
+            continue;
+        }
+
+        // File-scope type declaration such as @serialize struct Point { ... };
+        if (equal(tok, ";")) {
+            if (has_custom_attrs(basety, &attr)) {
+                char *name = NULL;
+                if (basety->name)
+                    name = arena_strndup(vm, basety->name->loc, basety->name->len);
+                run_decl_custom_attrs(vm, basety, &attr, ATTR_TARGET_TYPE, name,
+                                      basety, NULL, basety->name);
+            }
+            tok = tok->next;
             continue;
         }
 
