@@ -139,12 +139,12 @@ language coverage figures apply.
 | `typeof` / `typeof_unqual` | ✓ | |
 | `constexpr` for objects | ~ | Parsed; constant propagation only — not a full compile-time guarantee |
 | `auto` type inference | ✗ | `auto` is parsed as a storage class; C23 type-deduction form not supported |
-| `nullptr` keyword | ✗ | |
+| `nullptr` keyword / `nullptr_t` | ✓ | `nullptr_t` is defined in `<stddef.h>` via `typeof(nullptr)` |
 | `_BitInt(N)` arbitrary-precision integers | ✗ | |
 | Binary integer literals `0b10101010` | ✓ | |
 | Digit separators `1'000'000` | ✓ | |
 | `[[...]]` attributes | ~ | Parsed; see [ATTRIBUTES.md](ATTRIBUTES.md) for per-attribute status |
-| `bool`, `true`, `false` as keywords (not just macros) | ~ | Available via `<stdbool.h>`; not reserved keywords at the tokeniser level |
+| `bool`, `true`, `false` as keywords (not just macros) | ✓ | Real keywords in `--std=c23`/`gnu23`; downgraded to ordinary identifiers below C23. `<stdbool.h>` still works (its macros are gated to pre-C23) |
 | `u8` character literals (`u8'x'`) | ✗ | |
 | Unnamed function parameters (`void f(int, double)`) | ✓ | |
 | `static_assert` without message | ✗ | |

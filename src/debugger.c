@@ -892,7 +892,8 @@ static void debugger_free_condition_scope(VarScopeNode *vars) {
 }
 
 static int debugger_type_is_scalar_integer(Type *ty) {
-    return ty && (is_integer(ty) || ty->kind == TY_PTR || ty->kind == TY_FUNC);
+    return ty && (is_integer(ty) || ty->kind == TY_PTR || ty->kind == TY_FUNC ||
+                  ty->kind == TY_NULLPTR_T);
 }
 
 static long long debugger_cast_integer(long long val, Type *ty) {

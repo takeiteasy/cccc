@@ -1,12 +1,14 @@
-/* stdbool.h - C99/C11 Boolean type support */
+/* stdbool.h - Boolean type support */
 
 #ifndef __STDBOOL_H
 #define __STDBOOL_H
 
-/* Define _Bool as a built-in type (compiler intrinsic) */
+#if __STDC_VERSION__ < 202311L
+/* Before C23, bool/true/false are macros aliasing _Bool/1/0 */
 #define bool _Bool
 #define true 1
 #define false 0
+#endif
 
 /* Standard conformance macro */
 #define __bool_true_false_are_defined 1

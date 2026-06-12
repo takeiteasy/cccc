@@ -347,6 +347,7 @@ double  cc_eval_double(CCCC *vm, Node *node);
 
 extern Type *ty_void;
 extern Type *ty_bool;
+extern Type *ty_nullptr_t;
 
 extern Type *ty_char;
 extern Type *ty_short;

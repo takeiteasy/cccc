@@ -7,6 +7,10 @@ typedef long ptrdiff_t;
 typedef long size_t;
 typedef int wchar_t;
 
+#if __STDC_VERSION__ >= 202311L
+typedef typeof(nullptr) nullptr_t;
+#endif
+
 #define NULL ((void*)0)
 
 /* offsetof macro - works with standard layout structs */

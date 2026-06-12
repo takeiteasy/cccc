@@ -657,6 +657,7 @@ static bool is_keyword(Token *tok) {
             "typeof", "typeof_unqual", "asm", "_Thread_local", "__thread", "_Atomic",
             "__attribute__", "_Static_assert", "static_assert", "constexpr",
             "__block", "_Complex", "_Imaginary",  // Apple Blocks extension and C99 complex
+            "bool", "true", "false", "nullptr",  // C23 keywords
         };
 
         for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
@@ -1022,6 +1023,8 @@ static bool keyword_std_ok(CCCC *vm, Token *t) {
     // C23 keywords that were valid identifiers in earlier standards — downgrade
     if (s < CCCC_STD_C23) {
         if (KW("constexpr") || KW("static_assert"))
+            return false;
+        if (KW("bool") || KW("true") || KW("false") || KW("nullptr"))
             return false;
     }
 

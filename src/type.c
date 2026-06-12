@@ -26,6 +26,7 @@
 // char=1, short=2, int=4, long=8
 Type *ty_void = &(Type){TY_VOID, 1, 1};
 Type *ty_bool = &(Type){TY_BOOL, 1, 1};
+Type *ty_nullptr_t = &(Type){TY_NULLPTR_T, 8, 8, true};
 
 Type *ty_char = &(Type){TY_CHAR, 1, 1};
 Type *ty_short = &(Type){TY_SHORT, 2, 2};
@@ -129,6 +130,8 @@ bool is_compatible(Type *t1, Type *t2) {
                 return false;
             return t1->array_len < 0 && t2->array_len < 0 &&
             t1->array_len == t2->array_len;
+        case TY_NULLPTR_T:
+            return true;
         default:
             return false;
     }
@@ -252,6 +255,13 @@ static Type *get_common_type(CCCC *vm, Type *ty1, Type *ty2) {
         Type *base2 = is_complex(ty2) ? ty2->base : ty2;
         return complex_type_for(vm, get_common_type(vm, base1, base2));
     }
+
+    // C23 nullptr_t vs. pointer (or function, which decays to a pointer):
+    // the result is the pointer type, e.g. `ptr == nullptr`.
+    if (ty1->kind == TY_NULLPTR_T && (ty2->base || ty2->kind == TY_FUNC))
+        return ty2->base ? pointer_to(vm, ty2->base) : pointer_to(vm, ty2);
+    if (ty2->kind == TY_NULLPTR_T && (ty1->base || ty1->kind == TY_FUNC))
+        return ty1->base ? pointer_to(vm, ty1->base) : pointer_to(vm, ty1);
 
     // Handle pointer arithmetic
     if (ty1->base)

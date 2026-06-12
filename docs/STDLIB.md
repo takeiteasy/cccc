@@ -200,6 +200,8 @@ C17 is a bug-fix release — no new language features or library functions were 
 | `<stdckdint.h>` — checked integer arithmetic | ✗ | |
 | `memset_explicit` | ✗ | |
 | `unreachable()` macro | ✗ | |
+| `nullptr_t` (`<stddef.h>`) | ✓ | Defined as `typeof(nullptr)` |
+| `bool`/`true`/`false` (`<stdbool.h>`) | ✓ | Real keywords in C23; `<stdbool.h>`'s macros are gated to pre-C23 modes, `__bool_true_false_are_defined` still set |
 
 ---
 

@@ -544,6 +544,7 @@ typedef enum {
     TY_ERROR = 16, // error type for recovery
     TY_BLOCK = 17, // Apple blocks (closures)
     TY_COMPLEX = 18, // C99 complex scalar, base is float/double/long double
+    TY_NULLPTR_T = 19, // C23 nullptr_t
 } TypeKind;
 
 typedef struct Node Node;

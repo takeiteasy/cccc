@@ -828,9 +828,13 @@ static DeclKw declspec_kw(Token *tok) {
     case 3:  // int
         if (s[0]=='i' && s[1]=='n' && s[2]=='t') return DK_INT;
         break;
-    case 4:  // auto, char, enum, long, void
+    case 4:  // auto, bool, char, enum, long, void
         switch (s[0]) {
         case 'a': if (s[1]=='u' && s[2]=='t' && s[3]=='o') return DK_AUTO;  break;
+        // bool is only a keyword in C23; below C23 it is downgraded to
+        // TK_IDENT in convert_pp_tokens so it can be used as an identifier.
+        case 'b': if (s[1]=='o' && s[2]=='o' && s[3]=='l')
+            return tok->kind == TK_KEYWORD ? DK_BOOL : DK_NONE; break;
         case 'c': if (s[1]=='h' && s[2]=='a' && s[3]=='r') return DK_CHAR;  break;
         case 'e': if (s[1]=='n' && s[2]=='u' && s[3]=='m') return DK_ENUM;  break;
         case 'l': if (s[1]=='o' && s[2]=='n' && s[3]=='g') return DK_LONG;  break;
@@ -2699,7 +2703,13 @@ static bool is_typename(CCCC *vm, Token *tok) {
             hashmap_put_borrowed(&map, kw[i], (void *)1);
     }
 
-    return hashmap_get2(&map, tok->loc, tok->len) || find_typedef(vm, tok);
+    // "bool" is only a typename when it was actually classified as a C23
+    // keyword; in pre-C23 modes it is downgraded to TK_IDENT and may be
+    // used as an ordinary identifier (e.g. without <stdbool.h>), so it is
+    // deliberately not added to the hashmap above (which matches by text
+    // regardless of token kind).
+    return hashmap_get2(&map, tok->loc, tok->len) || find_typedef(vm, tok) ||
+           (tok->kind == TK_KEYWORD && equal(tok, "bool"));
 }
 
 // asm-stmt = "asm" ("volatile" | "inline")* "(" string-literal ")"
@@ -5651,6 +5661,30 @@ static Node *generic_selection(CCCC *vm, Token **rest, Token *tok) {
 //         | num
 static Node *primary(CCCC *vm, Token **rest, Token *tok) {
     Token *start = tok;
+
+    // C23 true/false/nullptr - only when actually classified as keywords
+    // (pre-C23 these are downgraded to TK_IDENT and may be used as
+    // ordinary identifiers).
+    if (tok->kind == TK_KEYWORD && equal(tok, "true")) {
+        *rest = tok->next;
+        Node *node = new_num(vm, 1, start);
+        node->ty = ty_bool;
+        return node;
+    }
+
+    if (tok->kind == TK_KEYWORD && equal(tok, "false")) {
+        *rest = tok->next;
+        Node *node = new_num(vm, 0, start);
+        node->ty = ty_bool;
+        return node;
+    }
+
+    if (tok->kind == TK_KEYWORD && equal(tok, "nullptr")) {
+        *rest = tok->next;
+        Node *node = new_num(vm, 0, start);
+        node->ty = ty_nullptr_t;
+        return node;
+    }
 
     if (equal(tok, "(") && equal(tok->next, "{")) {
         // This is a GNU statement expresssion.

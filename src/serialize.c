@@ -560,6 +560,11 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
     case TY_FUNC:
         serialize_type_decl(f, ctx, ty, "");
         break;
+    case TY_NULLPTR_T:
+        // nullptr_t has the same size/representation as a pointer; emit a
+        // type that is valid without requiring <stddef.h> in the output.
+        fprintf(f, "void *");
+        break;
     default:
         fprintf(f, "/* unknown type */");
         break;
@@ -1010,7 +1015,7 @@ static void serialize_global_var(FILE *f, CCCC *vm, SerializeContext *ctx,
         } else if (var->ty->kind == TY_BOOL || var->ty->kind == TY_CHAR ||
                    var->ty->kind == TY_SHORT || var->ty->kind == TY_INT ||
                    var->ty->kind == TY_LONG || var->ty->kind == TY_ENUM ||
-                   var->ty->kind == TY_PTR) {
+                   var->ty->kind == TY_PTR || var->ty->kind == TY_NULLPTR_T) {
             int64_t iv = 0;
             int sz = var->ty->size < 8 ? var->ty->size : 8;
             memcpy(&iv, var->init_data, sz);

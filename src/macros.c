@@ -2031,6 +2031,10 @@ static int write_type_str(Type *ty, char *buf, int bufsize) {
         n += write_type_str(ty->base, buf + n, bufsize - n);
         n += snprintf(buf + n, bufsize - n, " *");
         break;
+    case TY_NULLPTR_T:
+        // nullptr_t has the same size/representation as a pointer.
+        n += snprintf(buf + n, bufsize - n, "void *");
+        break;
     case TY_STRUCT:
         if (ty->name)
             n += snprintf(buf + n, bufsize - n, "struct %.*s",
