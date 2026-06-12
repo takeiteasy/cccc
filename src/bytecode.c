@@ -222,12 +222,21 @@ int cc_write_bytecode(CCCC *vm, FILE *f) {
         int num_fixed_args = ff->num_fixed_args;
         uint64_t double_arg_mask = ff->double_arg_mask;
         int is_dynamic_placeholder = ff->is_dynamic_placeholder;
+        int is_asm_passthru = ff->is_asm_passthru;
+        int asm_src_len = (is_asm_passthru && ff->asm_src)
+                          ? (int)strlen(ff->asm_src) : 0;
         if (fwrite(&num_args, sizeof(int), 1, f) != 1) goto write_error;
         if (fwrite(&returns_double, sizeof(int), 1, f) != 1) goto write_error;
         if (fwrite(&is_variadic, sizeof(int), 1, f) != 1) goto write_error;
         if (fwrite(&num_fixed_args, sizeof(int), 1, f) != 1) goto write_error;
         if (fwrite(&double_arg_mask, sizeof(uint64_t), 1, f) != 1) goto write_error;
         if (fwrite(&is_dynamic_placeholder, sizeof(int), 1, f) != 1) goto write_error;
+        if (fwrite(&is_asm_passthru, sizeof(int), 1, f) != 1) goto write_error;
+        if (fwrite(&asm_src_len, sizeof(int), 1, f) != 1) goto write_error;
+        if (asm_src_len > 0) {
+            if (fwrite(ff->asm_src, 1, asm_src_len, f) != (size_t)asm_src_len)
+                goto write_error;
+        }
     }
 
     // Write FFI policy (allow list, deny list, disable flag)
@@ -445,8 +454,9 @@ static int load_bytecode(CCCC *vm, const char *data, size_t size) {
     }
     for (long long i = 0; i < ffi_count; i++) {
         READ_AND_INCR(name_len, int);
+        // Fixed-width fields: 7 ints + 1 uint64_t (plus optional asm_src bytes)
         if (name_len < 0 || name_len > 4096 ||
-            cursor + name_len + 5 * (long long)sizeof(int) + (long long)sizeof(uint64_t) > end) {
+            cursor + name_len + 7 * (long long)sizeof(int) + (long long)sizeof(uint64_t) > end) {
             fprintf(stderr, "error: invalid FFI entry header at index %lld\n", i);
             return -1;
         }
@@ -469,6 +479,27 @@ static int load_bytecode(CCCC *vm, const char *data, size_t size) {
         READ_AND_INCR(num_fixed_args_i, int);
         READ_AND_INCR(double_arg_mask, uint64_t);
         READ_AND_INCR(is_dynamic_placeholder_i, int);
+        READ_AND_INCR(is_asm_passthru_i, int);
+        READ_AND_INCR(asm_src_len_i, int);
+        char *asm_src = NULL;
+        if (asm_src_len_i < 0 || asm_src_len_i > 65536 ||
+            cursor + asm_src_len_i > end) {
+            fprintf(stderr, "error: invalid asm_src length %d at FFI index %lld\n",
+                    asm_src_len_i, i);
+            free(name);
+            return -1;
+        }
+        if (asm_src_len_i > 0) {
+            asm_src = malloc((size_t)asm_src_len_i + 1);
+            if (!asm_src) {
+                fprintf(stderr, "error: failed to allocate FFI asm_src\n");
+                free(name);
+                return -1;
+            }
+            memcpy(asm_src, cursor, (size_t)asm_src_len_i);
+            asm_src[asm_src_len_i] = '\0';
+            cursor += asm_src_len_i;
+        }
 
         ForeignFunc *ff = &vm->compiler.ffi_table[i];
         ff->name = name;
@@ -480,6 +511,8 @@ static int load_bytecode(CCCC *vm, const char *data, size_t size) {
         ff->num_fixed_args = num_fixed_args_i;
         ff->double_arg_mask = double_arg_mask;
         ff->is_dynamic_placeholder = is_dynamic_placeholder_i;
+        ff->is_asm_passthru = is_asm_passthru_i;
+        ff->asm_src = asm_src;
     }
     vm->compiler.ffi_count = (int)ffi_count;
 

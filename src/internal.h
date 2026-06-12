@@ -39,7 +39,7 @@
 #endif
 
 #define CCCC_MAGIC "CCCC\0"
-#define CCCC_VERSION 8 // Version 8: explicit checked arithmetic opcodes
+#define CCCC_VERSION 9 // Version 9: asm-passthru FFI rehydration (is_asm_passthru + asm_src)
 
 // Stack canary constant for detecting stack overflows (used when random
 // canaries disabled)
@@ -309,6 +309,7 @@ void cc_output_preprocessed(FILE *f, Token *tok);
 
 char *cccc_path_find_executable(const char *name);
 char *cccc_find_native_cc(void);
+int cc_rehydrate_asm_passthru(CCCC *vm);
 char *get_std_header(char *filename);
 const char *get_stdlib_reg_fn_name(const char *header);
 const char *get_std_header_name(int i);

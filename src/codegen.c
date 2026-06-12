@@ -892,13 +892,11 @@ static void gen_addr(CCCC *vm, Node *node, int dest_reg);
 
 // ========== Inline Assembly Passthru ==========
 
-static void cccc_default_asm_passthru(CCCC *vm, const char *asm_str) {
+// Compile `asm_str` into a shared library exporting `sym_name` and return the
+// resolved function pointer.  The .so file is unlinked immediately after
+// dlopen so the library lives only in memory.  Calls error() on failure.
 #if !defined(_WIN32)
-    static int asm_counter = 0;
-    char sym_name[128];
-    int n = asm_counter++;
-    snprintf(sym_name, sizeof(sym_name), "__cccc_asm_passthru_%d", n);
-
+static void *compile_asm_to_funcptr(const char *sym_name, const char *asm_str) {
     // Create temp source file path (use mkstemp + rename to get .c extension)
     char src_template[] = "/tmp/cccc-asm-XXXXXX";
     int src_fd = mkstemp(src_template);
@@ -1019,19 +1017,31 @@ static void cccc_default_asm_passthru(CCCC *vm, const char *asm_str) {
         error("--asm-passthru: dlsym failed: %s", dlerror());
     }
 
-    // Unlink the .so now that it's loaded
+    // Unlink the .so now that it's loaded in memory
     unlink(so_path);
     free(so_path);
+    return func_ptr;
+}
+#endif // !_WIN32
+
+static void cccc_default_asm_passthru(CCCC *vm, const char *asm_str) {
+#if !defined(_WIN32)
+    static int asm_counter = 0;
+    char sym_name[128];
+    int n = asm_counter++;
+    snprintf(sym_name, sizeof(sym_name), "__cccc_asm_passthru_%d", n);
+
+    void *func_ptr = compile_asm_to_funcptr(sym_name, asm_str);
 
     // Register as FFI function (0 args, no double return)
     cc_register_cfunc(vm, sym_name, func_ptr, 0, 0);
 
-    // Find FFI index
+    // Find FFI index and annotate for JBC rehydration
     int ffi_idx = find_ffi_function(vm, sym_name);
-    if (ffi_idx < 0) {
-        dlclose(handle);
+    if (ffi_idx < 0)
         error("--asm-passthru: FFI registration failed");
-    }
+    vm->compiler.ffi_table[ffi_idx].is_asm_passthru = 1;
+    vm->compiler.ffi_table[ffi_idx].asm_src = strdup(asm_str);
 
     // Emit CALLF with 0 args
     emit(vm, CALLF);
@@ -1041,6 +1051,51 @@ static void cccc_default_asm_passthru(CCCC *vm, const char *asm_str) {
 #else
     (void)asm_str;
     error("--asm-passthru is not supported on Windows");
+#endif
+}
+
+// Recompile any asm-passthru FFI entries whose func_ptr was lost during JBC
+// serialization.  Called from the JBC load path after stdlib/library resolution.
+// Respects the FFI allow/deny policy; denied entries are left with func_ptr=NULL
+// (CALLF will emit the "not resolved" error at execution time).
+// Returns 0 on success, -1 on hard failure.
+int cc_rehydrate_asm_passthru(CCCC *vm) {
+#if !defined(_WIN32)
+    for (int i = 0; i < vm->compiler.ffi_count; i++) {
+        ForeignFunc *ff = &vm->compiler.ffi_table[i];
+        if (!ff->is_asm_passthru || ff->func_ptr)
+            continue;
+
+        // Respect disable_all_ffi
+        if (vm->disable_all_ffi)
+            continue;
+
+        // Respect allow list: if set, symbol must appear in it
+        if (vm->ffi_allow_count > 0 &&
+            !cccc_ffi_name_in_list(vm->ffi_allow_list, vm->ffi_allow_count,
+                                   ff->name))
+            continue;
+
+        // Respect deny list: if no allow list and symbol is denied, skip
+        if (vm->ffi_allow_count == 0 &&
+            cccc_ffi_name_in_list(vm->ffi_deny_list, vm->ffi_deny_count,
+                                  ff->name))
+            continue;
+
+        if (!ff->asm_src) {
+            fprintf(stderr,
+                    "error: asm-passthru FFI entry '%s' has no source to "
+                    "rehydrate\n",
+                    ff->name ? ff->name : "(null)");
+            return -1;
+        }
+
+        ff->func_ptr = compile_asm_to_funcptr(ff->name, ff->asm_src);
+    }
+    return 0;
+#else
+    (void)vm;
+    return 0;
 #endif
 }
 

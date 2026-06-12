@@ -1508,6 +1508,10 @@ int main(int argc, const char *argv[]) {
                 exit_code = 1;
                 goto BAIL;
             }
+            if (cc_rehydrate_asm_passthru(&vm) != 0) {
+                exit_code = 1;
+                goto BAIL;
+            }
             if (verify_dynamic_externs(&vm) != 0) {
                 exit_code = 1;
                 goto BAIL;

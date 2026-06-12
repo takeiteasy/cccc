@@ -323,7 +323,7 @@ These replace the common `LEA3 + LDR/STR` two-opcode sequence for local variable
 
 ## Bytecode File Format (`.jbc`)
 
-Saved bytecode files are self-contained and can be loaded into a fresh VM instance without recompilation.  The format is versioned (current version **7**).
+Saved bytecode files are self-contained and can be loaded into a fresh VM instance without recompilation.  The format is versioned (current version **9**).
 
 ```
 +---------------+  offset 0
@@ -357,7 +357,8 @@ Saved bytecode files are self-contained and can be loaded into a fresh VM instan
 +---------------+
 | FFI entries   |  name_len, name, num_args, returns_double,
 |               |  is_variadic, num_fixed_args, double_arg_mask,
-|               |  is_dynamic_placeholder
+|               |  is_dynamic_placeholder, is_asm_passthru,
+|               |  asm_src_len, asm_src (asm_src_len bytes)
 +---------------+
 | FFI policy    |  disable_all_ffi (int),
 |               |  allow_count, allow_list strings,
@@ -366,6 +367,14 @@ Saved bytecode files are self-contained and can be loaded into a fresh VM instan
 ```
 
 On load, the loader re-anchors global pointers, function-pointer offsets, FFI entries, and return-buffer addresses to the new VM’s segment bases.
+
+### Asm-Passthru Rehydration
+
+FFI entries created by `--asm-passthru` cannot survive serialisation as raw function pointers because the compiled shared library is unlinked immediately after `dlopen`.  Version 9 of the `.jbc` format stores the original assembly source string (`asm_src`) alongside each such entry (flagged `is_asm_passthru = 1`).  On load, `cc_rehydrate_asm_passthru()` recompiles each `asm_src` string into a fresh temporary shared library, `dlopen`s it, and resolves the function pointer — making the round-trip transparent to the program.
+
+Rehydration applies the same FFI allow/deny policy as other symbol lookups: if `--disable-ffi` is active, or the symbol is on the deny list, the entry is left unresolved and a `CALLF` targeting it will fail at execution time with `error: FFI function … not resolved`.
+
+Because recompilation uses the host’s native C compiler at `.jbc` run time, the resulting bytecode file is architecture-portable but requires a C compiler to be available when it is executed.
 
 ## Execution Model
 
