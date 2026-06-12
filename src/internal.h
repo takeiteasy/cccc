@@ -366,6 +366,10 @@ extern Type *ty_fcomplex;
 extern Type *ty_dcomplex;
 extern Type *ty_ldcomplex;
 
+extern Type *ty_decimal32;
+extern Type *ty_decimal64;
+extern Type *ty_decimal128;
+
 extern Type *ty_error;
 
 bool is_integer(Type *ty);
@@ -384,6 +388,7 @@ Type *struct_type(CCCC *vm);
 Type *union_type(CCCC *vm);
 Type *block_type(CCCC *vm, Type *return_ty, Type *params);
 Type *complex_type_for(CCCC *vm, Type *base);
+Type *bitint_type(CCCC *vm, Token *tok, int width, bool is_unsigned);
 void add_type(CCCC *vm, Node *node);
 void warn_implicit_conversion(CCCC *vm, Node *expr, Type *to, Token *tok);
 

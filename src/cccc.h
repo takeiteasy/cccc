@@ -545,6 +545,7 @@ typedef enum {
     TY_BLOCK = 17, // Apple blocks (closures)
     TY_COMPLEX = 18, // C99 complex scalar, base is float/double/long double
     TY_NULLPTR_T = 19, // C23 nullptr_t
+    TY_BITINT = 20,    // C23 _BitInt(N), N in [1,64]
 } TypeKind;
 
 typedef struct Node Node;
@@ -625,6 +626,12 @@ struct Type {
     char *deprecated_msg;
     char *nodiscard_msg;
     struct CustomAttrUse *custom_attrs;
+
+    // _BitInt(N): bit width for TY_BITINT types
+    int bit_width;
+
+    // _Decimal32/64/128: binary float placeholder (not real decimal encoding)
+    bool is_decimal;
 
     // Format string validation (__attribute__((format(...))))
     int format_style;          // 0=none, 1=printf, 2=scanf

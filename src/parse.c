@@ -820,6 +820,8 @@ typedef enum {
     // Built-in types
     DK_VOID, DK_BOOL, DK_CHAR, DK_SHORT, DK_INT, DK_LONG,
     DK_FLOAT, DK_DOUBLE, DK_COMPLEX, DK_IMAGINARY, DK_SIGNED, DK_UNSIGNED,
+    // C23 types
+    DK_BITINT, DK_DECIMAL32, DK_DECIMAL64, DK_DECIMAL128,
 } DeclKw;
 
 static DeclKw declspec_kw(Token *tok) {
@@ -863,10 +865,11 @@ static DeclKw declspec_kw(Token *tok) {
         case 't': if (memcmp(s+1,"ypeof",5)==0) return DK_TYPEOF;  break;
         }
         break;
-    case 7:  // _Atomic, __block, typedef
+    case 7:  // _Atomic, __block, _BitInt, typedef
         if (s[0] == '_') {
             if (s[1]=='A' && memcmp(s+2,"tomic",5)==0) return DK_ATOMIC;
             if (s[1]=='_' && memcmp(s+2,"block",5)==0) return DK_BLOCK_VAR;
+            if (s[1]=='B' && memcmp(s+2,"itInt",5)==0) return DK_BITINT;
         } else if (s[0]=='t' && memcmp(s+1,"ypedef",6)==0) {
             return DK_TYPEDEF;
         }
@@ -897,11 +900,16 @@ static DeclKw declspec_kw(Token *tok) {
             return tok->kind == TK_KEYWORD ? DK_CONSTEXPR : DK_NONE; break;
         }
         break;
-    case 10:  // __restrict, _Imaginary
+    case 10:  // __restrict, _Imaginary, _Decimal32, _Decimal64
         if (s[0]=='_') {
             if (s[1]=='_' && memcmp(s+2,"restrict",8)==0) return DK_RESTRICT;
             if (s[1]=='I' && memcmp(s+2,"maginary",8)==0) return DK_IMAGINARY;
+            if (s[1]=='D' && memcmp(s+2,"ecimal32",8)==0) return DK_DECIMAL32;
+            if (s[1]=='D' && memcmp(s+2,"ecimal64",8)==0) return DK_DECIMAL64;
         }
+        break;
+    case 11:  // _Decimal128
+        if (s[0]=='_' && s[1]=='D' && memcmp(s+2,"ecimal128",9)==0) return DK_DECIMAL128;
         break;
     case 12:  // __restrict__
         if (memcmp(s,"__restrict__",12)==0) return DK_RESTRICT;
@@ -961,6 +969,7 @@ static Type *declspec(CCCC *vm, Token **rest, Token *tok, VarAttr *attr) {
 
     Type *ty = ty_int;
     int counter = 0;
+    int bitint_width = 0;
     bool is_atomic = false;
     bool is_const = false;
     bool is_volatile = false;
@@ -1048,8 +1057,20 @@ static Type *declspec(CCCC *vm, Token **rest, Token *tok, VarAttr *attr) {
                 attr->align = const_expr(vm, &tok, tok);
             tok = skip(vm, tok, ")");
             continue;
+        case DK_BITINT: {
+            // _BitInt(N) — must be C23; unsigned/signed must precede _BitInt
+            Token *bitint_tok = tok;
+            tok = tok->next;  // consume _BitInt
+            tok = skip(vm, tok, "(");
+            bitint_width = const_expr(vm, &tok, tok);
+            tok = skip(vm, tok, ")");
+            ty = bitint_type(vm, bitint_tok, bitint_width, (bool)(counter & UNSIGNED));
+            counter = OTHER;
+            continue;
+        }
         case DK_STRUCT: case DK_UNION: case DK_ENUM:
-        case DK_TYPEOF: case DK_TYPEOF_UNQUAL: case DK_NONE: {
+        case DK_TYPEOF: case DK_TYPEOF_UNQUAL: case DK_NONE:
+        case DK_DECIMAL32: case DK_DECIMAL64: case DK_DECIMAL128: {
             Type *ty2 = (dk == DK_NONE) ? find_typedef(vm, tok) : NULL;
             if (counter) goto declspec_done;
             if      (dk == DK_STRUCT)        ty = struct_decl(vm, &tok, tok->next);
@@ -1057,6 +1078,9 @@ static Type *declspec(CCCC *vm, Token **rest, Token *tok, VarAttr *attr) {
             else if (dk == DK_ENUM)          ty = enum_specifier(vm, &tok, tok->next);
             else if (dk == DK_TYPEOF)        ty = typeof_specifier(vm, &tok, tok->next);
             else if (dk == DK_TYPEOF_UNQUAL) ty = typeof_unqual_specifier(vm, &tok, tok->next);
+            else if (dk == DK_DECIMAL32)  { ty = ty_decimal32;  tok = tok->next; }
+            else if (dk == DK_DECIMAL64)  { ty = ty_decimal64;  tok = tok->next; }
+            else if (dk == DK_DECIMAL128) { ty = ty_decimal128; tok = tok->next; }
             else {
                 VarScope *sc = find_var(vm, tok);
                 if (!vm->compiler.in_type_lookahead && sc &&
@@ -2697,6 +2721,7 @@ static bool is_typename(CCCC *vm, Token *tok) {
             "double",        "typeof",       "typeof_unqual", "inline",
             "_Thread_local", "__thread",     "_Atomic",       "constexpr",
             "__block",       "_Complex",     "_Imaginary",
+            "_BitInt",       "_Decimal32",   "_Decimal64",   "_Decimal128",
         };
 
         for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)

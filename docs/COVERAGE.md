@@ -140,17 +140,17 @@ language coverage figures apply.
 | `constexpr` for objects | ~ | Parsed; constant propagation only — not a full compile-time guarantee |
 | `auto` type inference | ✗ | `auto` is parsed as a storage class; C23 type-deduction form not supported |
 | `nullptr` keyword / `nullptr_t` | ✓ | `nullptr_t` is defined in `<stddef.h>` via `typeof(nullptr)` |
-| `_BitInt(N)` arbitrary-precision integers | ✗ | |
+| `_BitInt(N)` arbitrary-precision integers | ~ | `N` in `[1,64]` — bit-precise value semantics via mask/shift truncation; `N > 64` (true bignum) tracked in a follow-up ticket |
 | Binary integer literals `0b10101010` | ✓ | |
 | Digit separators `1'000'000` | ✓ | |
 | `[[...]]` attributes | ~ | Parsed; see [ATTRIBUTES.md](ATTRIBUTES.md) for per-attribute status |
 | `bool`, `true`, `false` as keywords (not just macros) | ✓ | Real keywords in `--std=c23`/`gnu23`; downgraded to ordinary identifiers below C23. `<stdbool.h>` still works (its macros are gated to pre-C23) |
-| `u8` character literals (`u8'x'`) | ✗ | |
+| `u8` character literals (`u8'x'`) | ✓ | |
 | Unnamed function parameters (`void f(int, double)`) | ✓ | |
 | `static_assert` without message | ✗ | |
 | Improved `enum` — underlying type and forward declaration | ✗ | |
-| Decimal floating-point (`_Decimal32`, etc.) | ✗ | |
-| `char8_t` | ✗ | |
+| Decimal floating-point (`_Decimal32`, etc.) | ~ | `_Decimal32/64/128` accepted with correct sizes (4/8/16 bytes) but implemented as aliases of `float`/`double`/`long double` (binary, not decimal, encoding); real IEEE-754-2008 decimal arithmetic tracked in a follow-up ticket |
+| `char8_t` | ✓ | Defined in `<uchar.h>`; `u8'x'` literals have type `unsigned char` and value `char8_t` |
 
 ### Preprocessor
 

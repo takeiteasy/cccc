@@ -6,6 +6,7 @@
 #include "stddef.h"
 #include "wchar.h"
 
+typedef unsigned char  char8_t;   // C23 7.28
 typedef unsigned short char16_t;
 typedef unsigned int char32_t;
 

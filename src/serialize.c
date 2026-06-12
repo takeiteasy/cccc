@@ -565,6 +565,13 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
         // type that is valid without requiring <stddef.h> in the output.
         fprintf(f, "void *");
         break;
+    case TY_BITINT:
+        // Emit as the underlying container integer type
+        if (ty->size == 1) fprintf(f, ty->is_unsigned ? "unsigned char" : "signed char");
+        else if (ty->size == 2) fprintf(f, ty->is_unsigned ? "unsigned short" : "short");
+        else if (ty->size == 4) fprintf(f, ty->is_unsigned ? "unsigned int" : "int");
+        else fprintf(f, ty->is_unsigned ? "unsigned long" : "long");
+        break;
     default:
         fprintf(f, "/* unknown type */");
         break;

@@ -102,6 +102,7 @@ static const char *type_kind_name(TypeKind kind) {
     case TY_UNION:   return "union";
     case TY_BLOCK:   return "block";
     case TY_NULLPTR_T: return "nullptr_t";
+    case TY_BITINT:  return "_BitInt";
     case TY_ERROR:   return "error";
     default:         return "unknown";
     }

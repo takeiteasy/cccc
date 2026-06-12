@@ -46,6 +46,16 @@ Type *ty_fcomplex = &(Type){TY_COMPLEX, 8, 4, false, false, false, false, NULL, 
 Type *ty_dcomplex = &(Type){TY_COMPLEX, 16, 8, false, false, false, false, NULL, &(Type){TY_DOUBLE, 8, 8}};
 Type *ty_ldcomplex = &(Type){TY_COMPLEX, 32, 16, false, false, false, false, NULL, &(Type){TY_LDOUBLE, 16, 16}};
 
+// C23 decimal floating-point: correct sizes (4/8/16 bytes) but implemented as
+// aliases of float/double/long double — not IEEE-754-2008 decimal encoding.
+// Placeholder until a real decimal arithmetic library is available.
+Type *ty_decimal32  = &(Type){TY_FLOAT,   4,  4,  false, false, false, false, NULL, NULL,
+                               .is_decimal = true};
+Type *ty_decimal64  = &(Type){TY_DOUBLE,  8,  8,  false, false, false, false, NULL, NULL,
+                               .is_decimal = true};
+Type *ty_decimal128 = &(Type){TY_LDOUBLE, 16, 16, false, false, false, false, NULL, NULL,
+                               .is_decimal = true};
+
 static Type ty_error_obj = {TY_ERROR, 0, 1};
 Type *ty_error = &ty_error_obj;
 
@@ -58,11 +68,30 @@ static Type *new_type(CCCC *vm, TypeKind kind, int size, int align) {
     return ty;
 }
 
+// C23 _BitInt(N): bit-precise integer type, N in [1,64].
+// Container is the smallest of {1,2,4,8} bytes covering N bits.
+// Values are truncated to N bits after arithmetic via mask/shift.
+// N > 64 (true bignum) is not yet supported.
+Type *bitint_type(CCCC *vm, Token *tok, int width, bool is_unsigned) {
+    if (width < 1)
+        error_tok(vm, tok, "_BitInt width must be at least 1, got %d", width);
+    if (!is_unsigned && width < 2)
+        error_tok(vm, tok, "signed _BitInt requires at least 2 bits (sign + value), got %d", width);
+    if (width > 64)
+        error_tok(vm, tok, "_BitInt width %d exceeds maximum 64 (N>64 not yet supported)", width);
+
+    int sz = width <= 8 ? 1 : width <= 16 ? 2 : width <= 32 ? 4 : 8;
+    Type *ty = new_type(vm, TY_BITINT, sz, sz);
+    ty->is_unsigned = is_unsigned;
+    ty->bit_width = width;
+    return ty;
+}
+
 bool is_integer(Type *ty) {
     if (!ty) return false;
     TypeKind k = ty->kind;
     return k == TY_BOOL || k == TY_CHAR || k == TY_SHORT ||
-    k == TY_INT  || k == TY_LONG || k == TY_ENUM;
+    k == TY_INT  || k == TY_LONG || k == TY_ENUM || k == TY_BITINT;
 }
 
 bool is_flonum(Type *ty) {
@@ -130,6 +159,9 @@ bool is_compatible(Type *t1, Type *t2) {
                 return false;
             return t1->array_len < 0 && t2->array_len < 0 &&
             t1->array_len == t2->array_len;
+        case TY_BITINT:
+            return t1->is_unsigned == t2->is_unsigned &&
+                   t1->bit_width == t2->bit_width;
         case TY_NULLPTR_T:
             return true;
         default:
@@ -219,6 +251,10 @@ static Type *integer_promotion(Type *ty) {
     if (!is_integer(ty))
         return ty;
 
+    // C23: _BitInt types are exempt from integer promotion (C23 6.3.1.1p2)
+    if (ty->kind == TY_BITINT)
+        return ty;
+
     // Types smaller than int promote to int
     if (ty->size < 4) {
         // If it's unsigned and all values don't fit in int, promote to unsigned int
@@ -232,14 +268,16 @@ static Type *integer_promotion(Type *ty) {
 }
 
 // Integer conversion rank (C99 6.3.1.1): long > int > short > char
+// Approximation for C23 _BitInt: rank = bit_width, sufficient for N<=64.
 static int get_integer_rank(Type *ty) {
     switch (ty->kind) {
-        case TY_LONG: return 4;
-        case TY_INT:  return 3;
-        case TY_SHORT: return 2;
-        case TY_CHAR: return 1;
-        case TY_BOOL: return 0;
-        case TY_ENUM: return 3;  // enums have same rank as int
+        case TY_LONG:  return 64;
+        case TY_INT:   return 32;
+        case TY_SHORT: return 16;
+        case TY_CHAR:  return 8;
+        case TY_BOOL:  return 1;
+        case TY_ENUM:  return 32;  // enums have same rank as int
+        case TY_BITINT: return ty->bit_width;
         default: return -1;
     }
 }
@@ -289,8 +327,10 @@ static Type *get_common_type(CCCC *vm, Type *ty1, Type *ty2) {
     ty1 = integer_promotion(ty1);
     ty2 = integer_promotion(ty2);
 
-    // Step 5: If both operands have the same type, no further conversion is needed
-    if (ty1->kind == ty2->kind && ty1->is_unsigned == ty2->is_unsigned)
+    // Step 5: If both operands have the same type, no further conversion is needed.
+    // For _BitInt, also require matching bit_width (different widths go to step 6).
+    if (ty1->kind == ty2->kind && ty1->is_unsigned == ty2->is_unsigned &&
+        (ty1->kind != TY_BITINT || ty1->bit_width == ty2->bit_width))
         return ty1;
 
     // Step 6: If both operands have signed integer types or both have unsigned integer types,

@@ -54,7 +54,8 @@ static const char *type_kind_name(TypeKind kind) {
         case TY_STRUCT:  return "struct";
         case TY_UNION:   return "union";
         case TY_NULLPTR_T: return "nullptr_t";
-        default:         return "unknown";
+        case TY_BITINT:    return "_BitInt";
+        default:           return "unknown";
     }
 }
 

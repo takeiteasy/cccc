@@ -177,7 +177,7 @@ if (__builtin_mul_overflow(a, b, &r))
 | `<stdatomic.h>` | ~ | Header present; operations are non-atomic |
 | `<stdnoreturn.h>` | ✓ | |
 | `<threads.h>` | ✗ | CCCC is single-threaded |
-| `<uchar.h>` | ~ | Types and basic conversion APIs |
+| `<uchar.h>` | ~ | `char8_t`, `char16_t`, `char32_t` defined; conversion APIs (`mbrtoc16` etc.) present as extern declarations |
 | `aligned_alloc` | ✓ | Backed by host aligned allocation |
 | `quick_exit` / `at_quick_exit` | ✓ | |
 | `timespec_get` | ✓ | `TIME_UTC` |

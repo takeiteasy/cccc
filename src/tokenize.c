@@ -658,6 +658,7 @@ static bool is_keyword(Token *tok) {
             "__attribute__", "_Static_assert", "static_assert", "constexpr",
             "__block", "_Complex", "_Imaginary",  // Apple Blocks extension and C99 complex
             "bool", "true", "false", "nullptr",  // C23 keywords
+            "_BitInt", "_Decimal32", "_Decimal64", "_Decimal128",  // C23 types
         };
 
         for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
@@ -1026,6 +1027,8 @@ static bool keyword_std_ok(CCCC *vm, Token *t) {
             return false;
         if (KW("bool") || KW("true") || KW("false") || KW("nullptr"))
             return false;
+        if (KW("_BitInt") || KW("_Decimal32") || KW("_Decimal64") || KW("_Decimal128"))
+            error_tok(vm, t, "'%.*s' is not available before C23", len, kw);
     }
 
 #undef KW
@@ -1184,6 +1187,17 @@ Token *tokenize(CCCC *vm, File *file) {
         if (*p == '\'') {
             cur = cur->next = read_char_literal(vm, p, p, ty_int);
             cur->val = (char)cur->val;
+            p += cur->len;
+            continue;
+        }
+
+        // UTF-8 character literal (C23 u8'x')
+        if (startswith(vm, p, "u8'")) {
+            if (vm->compiler.c_std < CCCC_STD_C23)
+                warn_tok(vm, new_token(vm, TK_PUNCT, p, p + 3), CCCC_WARN_PEDANTIC,
+                         "u8 character literals are a C23 extension");
+            cur = cur->next = read_char_literal(vm, p, p + 2, ty_uchar);
+            cur->val &= 0xff;
             p += cur->len;
             continue;
         }

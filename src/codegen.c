@@ -644,6 +644,8 @@ static int fop_for_type(Type *ty, int f64_op) {
 }
 
 // Load operations based on type
+static void emit_bitint_trunc(CCCC *vm, Type *ty, int reg);
+
 static void emit_load(CCCC *vm, Type *ty, int rd, int rs_addr) {
     if (vm->flags & CCCC_POINTER_CHECKS)
         emit_rr(vm, CHKP3, rs_addr, 0);
@@ -659,6 +661,20 @@ static void emit_load(CCCC *vm, Type *ty, int rd, int rs_addr) {
         emit_rr(vm, LDR_W, rd, rs_addr);
         if (ty->is_unsigned)
             emit_rr(vm, ZX4, rd, rd);
+    } else if (ty->kind == TY_BITINT) {
+        if (ty->size == 1) {
+            emit_rr(vm, LDR_B, rd, rs_addr);
+            emit_rr(vm, ty->is_unsigned ? ZX1 : SX1, rd, rd);
+        } else if (ty->size == 2) {
+            emit_rr(vm, LDR_H, rd, rs_addr);
+            emit_rr(vm, ty->is_unsigned ? ZX2 : SX2, rd, rd);
+        } else if (ty->size == 4) {
+            emit_rr(vm, LDR_W, rd, rs_addr);
+            emit_rr(vm, ty->is_unsigned ? ZX4 : SX4, rd, rd);
+        } else {
+            emit_rr(vm, LDR_D, rd, rs_addr);
+        }
+        emit_bitint_trunc(vm, ty, rd);
     } else if (is_flonum(ty)) {
         emit_rr(vm, ty->kind == TY_FLOAT ? FLDR_F32 : FLDR, rd, rs_addr);
     } else {
@@ -680,6 +696,20 @@ static void emit_local_load(CCCC *vm, Type *ty, int rd, long long offset) {
         emit_ri(vm, LDR_LOCAL_W, rd, offset);
         if (ty->is_unsigned)
             emit_rr(vm, ZX4, rd, rd);
+    } else if (ty->kind == TY_BITINT) {
+        if (ty->size == 1) {
+            emit_ri(vm, LDR_LOCAL_B, rd, offset);
+            emit_rr(vm, ty->is_unsigned ? ZX1 : SX1, rd, rd);
+        } else if (ty->size == 2) {
+            emit_ri(vm, LDR_LOCAL_H, rd, offset);
+            emit_rr(vm, ty->is_unsigned ? ZX2 : SX2, rd, rd);
+        } else if (ty->size == 4) {
+            emit_ri(vm, LDR_LOCAL_W, rd, offset);
+            emit_rr(vm, ty->is_unsigned ? ZX4 : SX4, rd, rd);
+        } else {
+            emit_ri(vm, LDR_LOCAL_D, rd, offset);
+        }
+        emit_bitint_trunc(vm, ty, rd);
     } else if (ty->kind == TY_FLOAT) {
         emit_ri(vm, FLDR_LOCAL_F32, rd, offset);
     } else if (ty->kind == TY_DOUBLE || ty->kind == TY_LDOUBLE) {
@@ -697,6 +727,11 @@ static void emit_local_store(CCCC *vm, Type *ty, int rd_val, long long offset) {
         emit_ri(vm, STR_LOCAL_H, rd_val, offset);
     } else if (ty->kind == TY_INT || ty->kind == TY_ENUM) {
         emit_ri(vm, STR_LOCAL_W, rd_val, offset);
+    } else if (ty->kind == TY_BITINT) {
+        if (ty->size == 1)       emit_ri(vm, STR_LOCAL_B, rd_val, offset);
+        else if (ty->size == 2)  emit_ri(vm, STR_LOCAL_H, rd_val, offset);
+        else if (ty->size == 4)  emit_ri(vm, STR_LOCAL_W, rd_val, offset);
+        else                     emit_ri(vm, STR_LOCAL_D, rd_val, offset);
     } else if (ty->kind == TY_FLOAT) {
         emit_ri(vm, FSTR_LOCAL_F32, rd_val, offset);
     } else if (ty->kind == TY_DOUBLE || ty->kind == TY_LDOUBLE) {
@@ -716,11 +751,30 @@ static void emit_store(CCCC *vm, Type *ty, int rd_val, int rs_addr) {
         emit_rr(vm, STR_H, rd_val, rs_addr);
     } else if (ty->kind == TY_INT || ty->kind == TY_ENUM) {
         emit_rr(vm, STR_W, rd_val, rs_addr);
+    } else if (ty->kind == TY_BITINT) {
+        if (ty->size == 1)       emit_rr(vm, STR_B, rd_val, rs_addr);
+        else if (ty->size == 2)  emit_rr(vm, STR_H, rd_val, rs_addr);
+        else if (ty->size == 4)  emit_rr(vm, STR_W, rd_val, rs_addr);
+        else                     emit_rr(vm, STR_D, rd_val, rs_addr);
     } else if (is_flonum(ty)) {
         emit_rr(vm, ty->kind == TY_FLOAT ? FSTR_F32 : FSTR, rd_val, rs_addr);
     } else {
         emit_rr(vm, STR_D, rd_val, rs_addr);
     }
+}
+
+// Truncate register to _BitInt(N) value semantics via shift pair.
+// Uses 64-bit shifts: SHL by (64-N) then SHR by (64-N) to mask to N bits.
+// For N==64 the shift is 0 and ops are no-ops.
+static void emit_bitint_trunc(CCCC *vm, Type *ty, int reg) {
+    if (ty->bit_width >= 64)
+        return;
+    int shift = 64 - ty->bit_width;
+    int tmp = alloc_temp_reg();
+    emit_li3(vm, tmp, shift);
+    emit_rrr(vm, SHL3, reg, reg, tmp);
+    emit_rrr(vm, ty->is_unsigned ? USHR3 : SHR3, reg, reg, tmp);
+    free_temp_reg(tmp);
 }
 
 // JZ3: if rs == 0, jump (returns patch location)
@@ -1899,6 +1953,9 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
 
             emit_rrr(vm, op, dest_reg, dest_reg, r_rhs);
 
+            if (node->ty->kind == TY_BITINT)
+                emit_bitint_trunc(vm, node->ty, dest_reg);
+
             if (is_ptr_arith && (vm->flags & (CCCC_INVALID_ARITH | CCCC_PROVENANCE_TRACK))) {
                 emit(vm, CHKPA);
                 emit_word(vm, ENCODE_R(dest_reg));
@@ -2144,6 +2201,15 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
             } else if (node->ty->kind == TY_BOOL) {
                 emit_rrr(vm, SNE3, dest_reg, dest_reg,
                          REG_ZERO); // dest_reg = (dest_reg != 0)
+            } else if (node->ty->kind == TY_BITINT) {
+                // Container sign/zero-extend then bit-precise truncate
+                if (node->ty->size == 1)
+                    emit_rr(vm, node->ty->is_unsigned ? ZX1 : SX1, dest_reg, dest_reg);
+                else if (node->ty->size == 2)
+                    emit_rr(vm, node->ty->is_unsigned ? ZX2 : SX2, dest_reg, dest_reg);
+                else if (node->ty->size == 4)
+                    emit_rr(vm, node->ty->is_unsigned ? ZX4 : SX4, dest_reg, dest_reg);
+                emit_bitint_trunc(vm, node->ty, dest_reg);
             }
         }
         return;
