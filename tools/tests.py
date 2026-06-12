@@ -73,6 +73,8 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
     reject_stderr = None
     expect_stdout = None
     reject_stdout = None
+    stdout = ""
+    stderr = ""
     try:
         with open(test_file, "r") as f:
             header_lines = [f.readline() for _ in range(5)]
@@ -146,6 +148,8 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
                     leak_output = "leaks timed out"
             else:
                 leak_output = "0 leaks (skipped)"
+            stdout = normal_result.stdout
+            stderr = normal_result.stderr
             output = (
                 normal_result.stdout
                 + normal_result.stderr
@@ -204,8 +208,6 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
         ]
 
     elapsed = None
-    stdout = ""
-    stderr = ""
     if cmd is not None:
         start = time.perf_counter()
         result = subprocess.run(cmd, capture_output=True, text=True, cwd=script_dir)
