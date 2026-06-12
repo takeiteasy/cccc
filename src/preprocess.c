@@ -107,6 +107,24 @@ static void ctx_pop(CCCC *vm) {
     vm->compiler.ctx_stack_len--;
 }
 
+// Stack of vm->compiler.macros snapshots used to isolate #define/#undef
+// directives inside individual [[cccc::comptime]] function bodies from each
+// other (#283). Pushed/popped by TK_MACRO_SCOPE_PUSH/POP marker tokens
+// synthesized in build_combined_macro_tokens.
+static void macro_scope_push(CCCC *vm, HashMap snap) {
+    if (vm->compiler.macro_scope_stack_len == vm->compiler.macro_scope_stack_cap) {
+        vm->compiler.macro_scope_stack_cap =
+            vm->compiler.macro_scope_stack_cap ? vm->compiler.macro_scope_stack_cap * 2 : 4;
+        vm->compiler.macro_scope_stack = realloc(vm->compiler.macro_scope_stack,
+            vm->compiler.macro_scope_stack_cap * sizeof(HashMap));
+    }
+    vm->compiler.macro_scope_stack[vm->compiler.macro_scope_stack_len++] = snap;
+}
+
+static HashMap macro_scope_pop(CCCC *vm) {
+    return vm->compiler.macro_scope_stack[--vm->compiler.macro_scope_stack_len];
+}
+
 typedef enum {
     INCLUDE_ROUTE_NORMAL,
     INCLUDE_ROUTE_COMPTIME,
@@ -2994,6 +3012,17 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
     Token *cur = &head;
 
     while (tok->kind != TK_EOF) {
+        if (tok->kind == TK_MACRO_SCOPE_PUSH) {
+            macro_scope_push(vm, hashmap_snapshot(&vm->compiler.macros));
+            tok = tok->next;
+            continue;
+        }
+        if (tok->kind == TK_MACRO_SCOPE_POP) {
+            hashmap_restore(&vm->compiler.macros, macro_scope_pop(vm));
+            tok = tok->next;
+            continue;
+        }
+
         if (ctx_top(vm) && ctx_top(vm)->type == CTX_EMIT) {
             Token *start = tok;
             if (is_hash(start)) {

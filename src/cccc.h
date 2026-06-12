@@ -477,6 +477,8 @@ typedef enum {
     TK_STR,     // String literals
     TK_NUM,     // Numeric literals
     TK_PP_NUM,  // Preprocessing numbers
+    TK_MACRO_SCOPE_PUSH, // Synthetic: push macro-table snapshot (#283); never from lexer
+    TK_MACRO_SCOPE_POP,  // Synthetic: pop/restore macro-table snapshot (#283)
     TK_EOF,     // End-of-file markers
 } TokenKind;
 
@@ -1618,6 +1620,10 @@ typedef struct Compiler {
     int               ctx_stack_cap; // Allocated capacity of ctx_stack
     bool macro_fns_compiled;         // True after compile_all_macros has run
     bool strict_comptime_includes;   // --strict-comptime-includes: don't forward regular #include decls to comptime pass
+    HashMap *macro_scope_stack;       // Snapshot stack for per-comptime-fn macro isolation (#283)
+    int      macro_scope_stack_len;
+    int      macro_scope_stack_cap;
+    bool     allow_comptime_pp_bleed; // --allow-comptime-pp-bleed: restore pre-#283 shared macro table across comptime fn bodies
     int macro_recursion_limit;       // 0 = unlimited, default = 256
     Token *macro_call_tok;           // Active macro invocation token
     Node **macro_vararg_nodes;        // Active inline macro variadic AST args

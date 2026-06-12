@@ -335,6 +335,10 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --strict-comptime-includes Only forward the main source file's own\n");
     printf("\t                              declarations to the comptime pass (skip\n");
     printf("\t                              declarations from regular #includes)\n");
+    printf("\t   --allow-comptime-pp-bleed  Allow #define/#undef inside one\n");
+    printf("\t                              [[cccc::comptime]] function body to remain\n");
+    printf("\t                              visible to other comptime function bodies\n");
+    printf("\t                              (pre-#283 behavior; default is isolated)\n");
     printf("\nOptimization Levels:\n");
     printf("\t-O/--optimize[=LEVEL]        Enable bytecode optimization "
            "(default: disabled)\n");
@@ -755,6 +759,7 @@ int main(int argc, const char *argv[]) {
     const char *entry_name = NULL; // -e / --entry
     enum { COMPILE_NONE, COMPILE_BYTECODE, COMPILE_NATIVE } compile_format = COMPILE_NONE;
     int strict_comptime_includes = 0; // --strict-comptime-includes
+    int allow_comptime_pp_bleed = 0; // --allow-comptime-pp-bleed
     int run_ngrams = 0;            // 0 = off; 2 or 3 = enabled with n-gram size
     int ngrams_top = 25;
     int ngrams_per_file = 0;
@@ -835,6 +840,7 @@ int main(int argc, const char *argv[]) {
         {"ngrams-per-file", no_argument, 0, 1031},
         {"fusion-candidates", optional_argument, 0, 1058},
         {"strict-comptime-includes", no_argument, 0, 1050},
+        {"allow-comptime-pp-bleed", no_argument, 0, 1068},
         {"inline-limit", required_argument, 0, 1051},
         {"asm-passthru", no_argument, 0, 'A'},
         {"testing", no_argument, 0, 't'},
@@ -1216,6 +1222,9 @@ int main(int argc, const char *argv[]) {
         case 1067: // --emit-only
             emit_only = 1;
             break;
+        case 1068: // --allow-comptime-pp-bleed
+            allow_comptime_pp_bleed = 1;
+            break;
         case 1066: // --test-format=FORMAT
             if (strcmp(optarg, "tap") == 0) {
                 test_format = TEST_FORMAT_TAP;
@@ -1376,6 +1385,7 @@ int main(int argc, const char *argv[]) {
     vm.compiler.compile_only = compile_only;
     vm.compiler.asm_passthru = asm_passthru;
     vm.compiler.strict_comptime_includes = strict_comptime_includes;
+    vm.compiler.allow_comptime_pp_bleed = allow_comptime_pp_bleed;
     vm.compiler.emit_strict = emit_only;
     vm.compiler.entry_name = (char *)entry_name;
     vm.compiler.testing_mode = (bool)testing_mode;

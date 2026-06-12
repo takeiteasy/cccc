@@ -605,6 +605,24 @@ static Token *new_macro_eof(CCCC *vm, Token *tmpl) {
     return tok;
 }
 
+// Synthesize a marker token consumed by preprocess2 to snapshot/restore
+// vm->compiler.macros around a single comptime function body's tokens,
+// isolating its #define/#undef from sibling comptime functions (#283).
+static Token *new_macro_scope_marker(CCCC *vm, TokenKind kind, Token *tmpl) {
+    Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
+    memset(tok, 0, sizeof(Token));
+    tok->kind = kind;
+    tok->loc = "";
+    tok->len = 0;
+    if (tmpl) {
+        tok->file = tmpl->file;
+        tok->filename = tmpl->filename;
+        tok->line_no = tmpl->line_no;
+        tok->col_no = tmpl->col_no;
+    }
+    return tok;
+}
+
 static Token *append_macro_prototype(CCCC *vm, Token *cur, MacroFn *pm) {
     Token *last = pm->body_tokens;
     for (Token *tok = pm->body_tokens; tok && tok->kind != TK_EOF;
@@ -1033,8 +1051,13 @@ static Token *build_combined_macro_tokens(CCCC *vm, Token *reflection_tokens,
 
     for (int i = 0; i < count; i++)
         cur = append_macro_prototype(vm, cur, macros[i]);
-    for (int i = 0; i < count; i++)
+    for (int i = 0; i < count; i++) {
+        if (!vm->compiler.allow_comptime_pp_bleed)
+            cur = cur->next = new_macro_scope_marker(vm, TK_MACRO_SCOPE_PUSH, macros[i]->body_tokens);
         cur = append_macro_definition(vm, cur, macros[i]);
+        if (!vm->compiler.allow_comptime_pp_bleed)
+            cur = cur->next = new_macro_scope_marker(vm, TK_MACRO_SCOPE_POP, macros[i]->body_tokens);
+    }
 
     // Synthesized init function: runs after bytecode is compiled to evaluate
     // scalar comptime var initializers that call comptime functions.
@@ -1372,6 +1395,12 @@ static bool compile_macro_program(CCCC *vm) {
     Scope *saved_scope = vm->compiler.scope;
     int saved_num_call_patches = vm->compiler.num_call_patches;
     int saved_num_func_addr_patches = vm->compiler.num_func_addr_patches;
+    // Snapshot the preprocessor macro table so that #define directives emitted
+    // by reflection.h, comptime-only includes, or comptime function bodies do
+    // not persist into the runtime translation unit after this pass completes.
+    // Main-file defines remain visible inside comptime bodies because the
+    // snapshot is taken after the main preprocessing pass has run (ticket #283).
+    HashMap saved_macros = hashmap_snapshot(&vm->compiler.macros);
 
     vm->compiler.in_macro_mode = true;
     vm->compiler.locals = NULL;
@@ -1396,6 +1425,7 @@ static bool compile_macro_program(CCCC *vm) {
         vm->compiler.in_macro_mode = false;
         vm->compiler.num_call_patches = saved_num_call_patches;
         vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
+        hashmap_restore(&vm->compiler.macros, saved_macros);
         return false;
     }
     vm->compiler.macro_context_scope = vm->compiler.scope;
@@ -1449,6 +1479,7 @@ static bool compile_macro_program(CCCC *vm) {
     vm->compiler.in_macro_mode = false;
     vm->compiler.num_call_patches = saved_num_call_patches;
     vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
+    hashmap_restore(&vm->compiler.macros, saved_macros);
     link_comptime_shadow_objs(vm);
 
     if (vm->debug_vm) {

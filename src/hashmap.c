@@ -328,6 +328,49 @@ void hashmap_deinit_borrowed(HashMap *map) {
     map->used = 0;
 }
 
+// Clone a HashMap for snapshot/restore around a preprocessor sub-pass.
+// The bucket array and owned string keys are deep-copied so the snapshot is
+// fully independent of the live map; values (arena-allocated) are shared.
+// Restore with hashmap_restore().
+HashMap hashmap_snapshot(const HashMap *map) {
+    HashMap snap = *map;
+    if (map->capacity > 0) {
+        snap.buckets = malloc(map->capacity * sizeof(HashEntry));
+        if (!snap.buckets) {
+            fprintf(stderr, "FATAL: out of memory in hashmap_snapshot\n");
+            exit(1);
+        }
+        memcpy(snap.buckets, map->buckets, map->capacity * sizeof(HashEntry));
+        for (int i = 0; i < map->capacity; i++) {
+            HashEntry *ent = &snap.buckets[i];
+            if (ent->key && ent->key != TOMBSTONE && ent->keylen != -1) {
+                char *k = malloc(ent->keylen + 1);
+                if (!k) {
+                    fprintf(stderr, "FATAL: out of memory in hashmap_snapshot\n");
+                    exit(1);
+                }
+                memcpy(k, ent->key, ent->keylen + 1);
+                ent->key = k;
+            }
+        }
+    }
+    return snap;
+}
+
+// Restore a HashMap from a snapshot taken with hashmap_snapshot.
+// Frees the live map's bucket array and owned string keys (values are
+// arena-allocated and shared, so not freed) before installing the snapshot,
+// which owns its own independent copies.
+void hashmap_restore(HashMap *map, HashMap snapshot) {
+    for (int i = 0; i < map->capacity; i++) {
+        HashEntry *ent = &map->buckets[i];
+        if (ent->key && ent->key != TOMBSTONE && ent->keylen != -1)
+            free(ent->key);
+    }
+    free(map->buckets);
+    *map = snapshot;
+}
+
 // Iterate over all entries in the map, calling the iterator function
 // for each valid entry. The iterator receives the key, keylen, value,
 // and user_data. If the iterator returns non-zero, iteration stops.

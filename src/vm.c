@@ -1010,6 +1010,10 @@ void cc_destroy(CCCC *vm) {
     if (vm->compiler.ctx_stack)
         free(vm->compiler.ctx_stack);
 
+    // Free macro-scope snapshot stack (#283)
+    if (vm->compiler.macro_scope_stack)
+        free(vm->compiler.macro_scope_stack);
+
     // Free pragma_once HashMap
     hashmap_deinit(&vm->compiler.pragma_once);
 

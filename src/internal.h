@@ -503,6 +503,13 @@ void hashmap_put_borrowed(HashMap *map, const char *key, void *val);
 void hashmap_deinit(HashMap *map);
 void hashmap_deinit_borrowed(HashMap *map);
 
+// Snapshot/restore: deep-clone a HashMap's bucket array and owned string
+// keys so it can be rolled back after a sub-pass that must not leak #define
+// changes. Values are shared with the original (arena-allocated). Restore
+// (and discard the pass's additions) with hashmap_restore().
+HashMap hashmap_snapshot(const HashMap *map);
+void hashmap_restore(HashMap *map, HashMap snapshot);
+
 // Integer key HashMap functions (avoid overhead of snprintf/strdup)
 void *hashmap_get_int(HashMap *map, long long key);
 void hashmap_put_int(HashMap *map, long long key, void *val);

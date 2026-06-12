@@ -85,6 +85,34 @@ comptime pass, pass `--strict-comptime-includes`. Only the main source file's ow
 file-scope declarations are forwarded; `#include [[cccc::comptime]]` and
 `#pragma cccc comptime begin...end` blocks are unaffected.
 
+### Macro isolation between comptime functions
+
+All `[[cccc::comptime]]` function bodies are assembled into a single
+compilation unit and preprocessed together. By default, each function body is
+preprocessed in its own macro-table scope: a `#define`/`#undef` inside one
+comptime function body is not visible to any other comptime function body.
+
+```c
+[[cccc::comptime]] int helper(void) {
+#define LOCAL 1
+    return LOCAL;
+}
+
+[[cccc::comptime]]
+void generate(void) {
+    // LOCAL is not visible here — isolated to helper()'s body.
+}
+```
+
+`#define`s from the main source file, `reflection.h`, `#include [[cccc::comptime]]`
+/ `#pragma cccc comptime begin...end` blocks, and comptime variable declarations
+are all part of the macro table *before* any comptime function body begins, so
+they remain visible to every comptime function body.
+
+Pass `--allow-comptime-pp-bleed` to restore the pre-isolation behavior, where
+all comptime function bodies share a single macro table and `#define`/`#undef`
+in one body affects the others.
+
 ### Custom Attributes
 
 Comptime macros can register declaration attributes for file-scope declarations:
