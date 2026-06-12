@@ -60,6 +60,8 @@ Token *cc_preprocess(CCCC *vm, const char *path) {
 
     // Tokenize and parse.
     Token *tok2 = must_tokenize_file(vm, (char*)path);
+    if (!vm->compiler.primary_file && tok2)
+        vm->compiler.primary_file = tok2->file;
     tok = append_tokens(tok, tok2);
     if (!vm->compiler.skip_preprocess) {
         tok = preprocess(vm, tok);

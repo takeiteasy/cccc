@@ -183,11 +183,25 @@ This approach complements the side-effect style (calling `$function` etc.):
 
 ### Emit directives and includes in generated output
 
-When a macro generates code that uses standard-library functions or
-platform-specific types, the serialized output needs matching preprocessor
-directives. Use `[[cccc::emit]]`, `@emit`, or `__attribute__((emit))`
-immediately after a preprocessor directive keyword to copy that directive into
-generated output instead of evaluating it in the current translation unit:
+When using `-G` to serialize a file, any preprocessor directives in the
+**runtime translation unit** (outside comptime blocks) are automatically
+captured verbatim and appear at the top of the generated output. This means
+the common case requires no special annotation:
+
+```c
+#include <string.h>   // outside comptime — auto-captured into -G output
+
+#pragma cccc comptime
+// ... generated functions that use strcmp ...
+```
+
+This auto-capture applies to any directive from the primary source file that
+is not inside a `#pragma cccc comptime` block: `#include`, `#define`,
+`#ifdef`/`#endif`, and others.
+
+If you need the old behavior (emit only explicitly tagged content), pass
+`--emit-only` alongside `-G`. In that mode you must annotate each directive
+with `[[cccc::emit]]`, `@emit`, or `__attribute__((emit))` to include it:
 
 ```c
 #include [[cccc::emit]] <string.h>
@@ -196,6 +210,16 @@ generated output instead of evaluating it in the current translation unit:
 #ifdef @emit _WIN32
 gen_windows_helpers();
 #endif @emit
+```
+
+`[[cccc::emit]]` is still useful inside comptime blocks, where auto-capture
+does not apply:
+
+```c
+#pragma cccc comptime begin
+#include [[cccc::emit]] <platform.h>   // escapes from comptime into output
+$publish(fn);
+#pragma cccc comptime end
 ```
 
 Multiple emit includes with the same emitted `#include` line are deduplicated.

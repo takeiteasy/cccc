@@ -227,8 +227,9 @@ static void usage(const char *argv0, int exit_code) {
            "C -E)\n");
     printf("\t-M/--dump-expanded       Output macro-expanded source code (for gcc "
            "compatibility)\n");
-    printf("\t-G/--emit-generated      Serialize only comptime macro-generated objects "
-           "(no header noise)\n");
+    printf("\t-G/--emit-generated      Serialize runtime TU + macro-generated objects to C\n");
+    printf("\t   --emit-only           With -G: only emit explicitly tagged content "
+           "([[cccc::emit]], $publish)\n");
     printf("\t-j/--json                Emit JSON for all eligible output "
            "(diagnostics, header declarations, --fusion-candidates, etc.)\n");
     printf("\t   --ffi-decls           Emit parsed function/struct/enum declarations "
@@ -719,6 +720,7 @@ int main(int argc, const char *argv[]) {
     int preprocess_only = 0;   // -E
     int dump_expanded_only = 0; // -M
     int emit_generated_only = 0; // -G
+    int emit_only = 0;           // --emit-only
     int skip_preprocess = 0;   // -X
     int skip_stdlib = 0;       // -S
     int output_json = 0;       // -j (general "emit JSON" flag)
@@ -842,6 +844,7 @@ int main(int argc, const char *argv[]) {
         {"fail-fast", no_argument, 0, 1064},
         {"test-timeout", required_argument, 0, 1065},
         {"test-format", required_argument, 0, 1066},
+        {"emit-only", no_argument, 0, 1067},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1210,6 +1213,9 @@ int main(int argc, const char *argv[]) {
             test_timeout = atoi(optarg);
             testing_mode = 1;
             break;
+        case 1067: // --emit-only
+            emit_only = 1;
+            break;
         case 1066: // --test-format=FORMAT
             if (strcmp(optarg, "tap") == 0) {
                 test_format = TEST_FORMAT_TAP;
@@ -1370,6 +1376,7 @@ int main(int argc, const char *argv[]) {
     vm.compiler.compile_only = compile_only;
     vm.compiler.asm_passthru = asm_passthru;
     vm.compiler.strict_comptime_includes = strict_comptime_includes;
+    vm.compiler.emit_strict = emit_only;
     vm.compiler.entry_name = (char *)entry_name;
     vm.compiler.testing_mode = (bool)testing_mode;
     vm.compiler.diagnostic_json = output_json;

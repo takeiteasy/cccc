@@ -3087,6 +3087,26 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
             continue;
         }
 
+        // Auto-capture: when not using --emit-only, record directives from the
+        // primary source file that are outside comptime blocks verbatim, so
+        // they appear in -G output without needing [[cccc::emit]] annotations.
+        // Skip during the macro-compilation preprocessing pass (in_macro_mode)
+        // since those token streams re-use primary_file pointers but are not
+        // part of the user-visible source.
+        {
+            ComptimeCtxEntry *_ac = ctx_top(vm);
+            if (!vm->compiler.emit_strict &&
+                !vm->compiler.in_macro_mode &&
+                vm->compiler.primary_file &&
+                start->file == vm->compiler.primary_file &&
+                !(_ac && _ac->type == CTX_COMPTIME) &&
+                !is_pragma_cccc(start)) {
+                char *_ac_line = copy_raw_directive_line(vm, start);
+                push_emit_directive(vm, _ac_line, pp_directive(tok) == PP_INCLUDE);
+                cc_record_emit_source(vm, _ac_line);
+            }
+        }
+
         switch (pp_directive(tok)) {
         case PP_INCLUDE: {
             bool is_dquote;

@@ -1627,10 +1627,11 @@ typedef struct Compiler {
     bool diagnostic_json; // --json (general JSON output flag)
 
     // Tokenization state
-    File *current_file; // Input file
-    File **input_files; // A list of all input files
-    bool at_bol;        // True if at beginning of line
-    bool has_space;     // True if follows a space character
+    File *current_file;  // Input file
+    File **input_files;  // A list of all input files
+    File *primary_file;  // Top-level source file (set in cc_preprocess; used for auto-emit capture)
+    bool at_bol;         // True if at beginning of line
+    bool has_space;      // True if follows a space character
 
     // Parser state
     Obj *locals;           // All local variable instances during parsing
@@ -1664,7 +1665,8 @@ typedef struct Compiler {
     StringArray system_include_paths; // System header search paths for <...>
     HashMap include_cache;            // Cache for search_include_paths
     StringArray file_buffers;         // Track allocated file buffers for cleanup
-    StringArray emit_directives;           // Legacy preprocessor directives to prepend to serialized output
+    StringArray emit_directives; // Preprocessor directives to prepend to serialized output
+    int emit_strict;             // --emit-only: suppress auto-capture; only explicitly tagged content appears in -G output
     StringArray comptime_pending_includes; // #include [[cccc::comptime]] filenames queued for comptime pass
 
     // Code generation state
