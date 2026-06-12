@@ -24,6 +24,7 @@ void register_time_functions(CCCC *vm) {
     // Time manipulation
     cc_register_cfunc(vm, "difftime", (void*)difftime, 2, 1);
     cc_register_cfunc(vm, "mktime", (void*)mktime, 1, 0);
+    cc_register_cfunc(vm, "timegm", (void*)timegm, 1, 0);
 
     // Time conversion
     cc_register_cfunc(vm, "asctime", (void*)asctime, 1, 0);

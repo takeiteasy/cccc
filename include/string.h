@@ -7,6 +7,7 @@ extern void *memcpy(void *dest, const void *src, long n);
 extern void *memmove(void *dest, const void *src, long n);
 extern void *memset(void *s, int c, long n);
 extern int memcmp(const void *s1, const void *s2, long n);
+extern void *memchr(const void *s, int c, long n);
 
 extern long strlen(const char *s);
 extern char *strcpy(char *dest, const char *src);
@@ -29,7 +30,7 @@ extern char* strdup(const char *s);
 extern char* strndup(const char *s, long n);
 // extern long strnlen_s(const char *s, long maxsize);
 // extern char* strtok_s(char *str, const char *delim, char **context);
-// extern void* memset_explicit(void *s, int c, long n);
+extern void* memset_explicit(void *s, int c, long n);
 // extern int memset_s(void *s, long smax, int c, long n);
 // extern void* memcpy_s(void *dest, long destsz, const void *src, long n);
 // extern void* memmove_s(void *dest, long destsz, const void *src, long n);

@@ -25,12 +25,14 @@ struct tm {
     int tm_wday;
     int tm_yday;
     int tm_isdst;
+    long tm_gmtoff;
+    char *tm_zone;
 };
 
 extern clock_t clock(void);
 extern double difftime(time_t time1, time_t time0);
 extern time_t mktime(struct tm *timeptr);
-// extern time_t timegm(const struct tm *timeptr);
+extern time_t timegm(struct tm *timeptr);
 extern time_t time(time_t *t);
 extern int timespec_get(struct timespec *ts, int base);
 // extern int timespec_getres(struct timespec *ts, int base);

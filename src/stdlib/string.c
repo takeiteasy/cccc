@@ -14,6 +14,14 @@ long long wrap_memcmp(long long s1, long long s2, long long n) {
     return (long long)memcmp((const void *)s1, (const void *)s2, (size_t)n);
 }
 
+// C23 memset_explicit: like memset, but guaranteed not to be optimized away.
+static void *cccc_memset_explicit(void *s, int c, size_t n) {
+    volatile unsigned char *p = (volatile unsigned char *)s;
+    for (size_t i = 0; i < n; i++)
+        p[i] = (unsigned char)c;
+    return s;
+}
+
 // Register all string.h functions
 void register_string_functions(CCCC *vm) {
     // Memory operations
@@ -22,6 +30,8 @@ void register_string_functions(CCCC *vm) {
     cc_register_cfunc(vm, "memset", (void*)memset, 3, 0);
     cc_register_cfunc(vm, "memcmp", (void*)wrap_memcmp, 3, 0);
     cc_register_cfunc(vm, "memccpy", (void*)memccpy, 4, 0);
+    cc_register_cfunc(vm, "memchr", (void*)memchr, 3, 0);
+    cc_register_cfunc(vm, "memset_explicit", (void*)cccc_memset_explicit, 3, 0);
 
     // String length
     cc_register_cfunc(vm, "strlen", (void*)strlen, 1, 0);

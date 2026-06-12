@@ -196,10 +196,15 @@ C17 is a bug-fix release — no new language features or library functions were 
 
 | Header / Function | Status | Notes |
 |---|---|---|
-| `<stdbit.h>` | ✗ | |
-| `<stdckdint.h>` — checked integer arithmetic | ✗ | |
-| `memset_explicit` | ✗ | |
-| `unreachable()` macro | ✗ | |
+| `<stdbit.h>` | ~ | Core `stdc_leading_zeros`/`trailing_zeros`/`count_ones`/`bit_width`/`bit_floor`/`bit_ceil`/`has_single_bit` for `_ui`/`_ul`/`_ull`; `uint8_t`/`uint16_t` variants and `_Generic` dispatch macros tracked separately |
+| `<stdckdint.h>` — checked integer arithmetic | ✓ | `ckd_add`/`ckd_sub`/`ckd_mul` via `__builtin_*_overflow` |
+| `memset_explicit` | ✓ | |
+| `memchr` | ✓ | |
+| `memalignment` | ✓ | |
+| `free_sized` / `free_aligned_sized` | ✓ | Conforming thin wrappers over `free` |
+| `timegm` | ✓ | |
+| `unreachable()` macro | ✓ | `<stddef.h>`, expands to `__builtin_unreachable()` |
+| `strtol`/`strtoll`/`strtoul`/`strtoull` `0b`/`0B` binary prefix | ✓ | Accepted with base `0` or base `2` |
 | `nullptr_t` (`<stddef.h>`) | ✓ | Defined as `typeof(nullptr)` |
 | `bool`/`true`/`false` (`<stdbool.h>`) | ✓ | Real keywords in C23; `<stdbool.h>`'s macros are gated to pre-C23 modes, `__bool_true_false_are_defined` still set |
 

@@ -27,6 +27,84 @@ static long long wrap_mblen(long long s, long long n)        { return (long long
 static long long wrap_mbtowc(long long pwc, long long s, long long n) { return (long long)mbtowc((wchar_t *)pwc, (const char *)s, (size_t)n); }
 static long long wrap_wctomb(long long s, long long wc)      { return (long long)wctomb((char *)s, (wchar_t)wc); }
 
+// C23: free_sized/free_aligned_sized - a conforming implementation may
+// simply call free(), ignoring the size/alignment hints.
+static void cccc_free_sized(void *ptr, size_t size) {
+    (void)size;
+    free(ptr);
+}
+
+static void cccc_free_aligned_sized(void *ptr, size_t alignment, size_t size) {
+    (void)alignment;
+    (void)size;
+    free(ptr);
+}
+
+// C23: memalignment - the largest power-of-two alignment satisfied by p.
+static size_t cccc_memalignment(const void *p) {
+    if (!p)
+        return 0;
+    return (size_t)1 << __builtin_ctzll((unsigned long long)(uintptr_t)p);
+}
+
+// C23: strtol/strtoll/strtoul/strtoull accept an optional "0b"/"0B" prefix
+// when base is 0 or 2.
+static long long cccc_strtoll(const char *nptr, char **endptr, int base) {
+    if (base == 0 || base == 2) {
+        const char *p = nptr;
+        while (isspace((unsigned char)*p)) p++;
+        const char *digits = p;
+        if (*digits == '+' || *digits == '-') digits++;
+        if (digits[0] == '0' && (digits[1] == 'b' || digits[1] == 'B') &&
+            (digits[2] == '0' || digits[2] == '1')) {
+            size_t prefix_len = (size_t)(digits - p);
+            size_t rest_len = strlen(digits + 2);
+            char *tmp = malloc(prefix_len + rest_len + 1);
+            memcpy(tmp, p, prefix_len);
+            memcpy(tmp + prefix_len, digits + 2, rest_len + 1);
+            char *tmp_end;
+            long long result = strtoll(tmp, &tmp_end, 2);
+            if (endptr)
+                *endptr = (char *)p + (size_t)(tmp_end - tmp) + 2;
+            free(tmp);
+            return result;
+        }
+    }
+    return strtoll(nptr, endptr, base);
+}
+
+static unsigned long long cccc_strtoull(const char *nptr, char **endptr, int base) {
+    if (base == 0 || base == 2) {
+        const char *p = nptr;
+        while (isspace((unsigned char)*p)) p++;
+        const char *digits = p;
+        if (*digits == '+' || *digits == '-') digits++;
+        if (digits[0] == '0' && (digits[1] == 'b' || digits[1] == 'B') &&
+            (digits[2] == '0' || digits[2] == '1')) {
+            size_t prefix_len = (size_t)(digits - p);
+            size_t rest_len = strlen(digits + 2);
+            char *tmp = malloc(prefix_len + rest_len + 1);
+            memcpy(tmp, p, prefix_len);
+            memcpy(tmp + prefix_len, digits + 2, rest_len + 1);
+            char *tmp_end;
+            unsigned long long result = strtoull(tmp, &tmp_end, 2);
+            if (endptr)
+                *endptr = (char *)p + (size_t)(tmp_end - tmp) + 2;
+            free(tmp);
+            return result;
+        }
+    }
+    return strtoull(nptr, endptr, base);
+}
+
+static long cccc_strtol(const char *nptr, char **endptr, int base) {
+    return (long)cccc_strtoll(nptr, endptr, base);
+}
+
+static unsigned long cccc_strtoul(const char *nptr, char **endptr, int base) {
+    return (unsigned long)cccc_strtoull(nptr, endptr, base);
+}
+
 // Register all stdlib.h functions
 void register_stdlib_functions(CCCC *vm) {
     // Conversion functions
@@ -37,10 +115,10 @@ void register_stdlib_functions(CCCC *vm) {
     cc_register_cfunc(vm, "strtod", (void*)strtod, 2, 1);   // returns double
     cc_register_cfunc(vm, "strtof", (void*)strtof, 2, 1);   // returns float (was incorrectly 0)
     cc_register_cfunc(vm, "strtold", (void*)strtold, 2, 1); // returns long double
-    cc_register_cfunc(vm, "strtol", (void*)strtol, 3, 0);
-    cc_register_cfunc(vm, "strtoll", (void*)strtoll, 3, 0);
-    cc_register_cfunc(vm, "strtoul", (void*)strtoul, 3, 0);
-    cc_register_cfunc(vm, "strtoull", (void*)strtoull, 3, 0);
+    cc_register_cfunc(vm, "strtol", (void*)cccc_strtol, 3, 0);
+    cc_register_cfunc(vm, "strtoll", (void*)cccc_strtoll, 3, 0);
+    cc_register_cfunc(vm, "strtoul", (void*)cccc_strtoul, 3, 0);
+    cc_register_cfunc(vm, "strtoull", (void*)cccc_strtoull, 3, 0);
 
     // Random number generation
     cc_register_cfunc(vm, "rand", (void*)rand, 0, 0);
@@ -50,9 +128,12 @@ void register_stdlib_functions(CCCC *vm) {
     cc_register_cfunc(vm, "aligned_alloc", (void*)cccc_aligned_alloc, 2, 0);
     cc_register_cfunc(vm, "calloc", (void*)calloc, 2, 0);
     cc_register_cfunc(vm, "free", (void*)free, 1, 0);
+    cc_register_cfunc(vm, "free_sized", (void*)cccc_free_sized, 2, 0);
+    cc_register_cfunc(vm, "free_aligned_sized", (void*)cccc_free_aligned_sized, 3, 0);
     cc_register_cfunc(vm, "malloc", (void*)malloc, 1, 0);
     cc_register_cfunc(vm, "realloc", (void*)cccc_realloc, 2, 0);  // Use wrapper for C11 semantics
     cc_register_cfunc(vm, "posix_memalign", (void*)posix_memalign, 3, 0);
+    cc_register_cfunc(vm, "memalignment", (void*)cccc_memalignment, 1, 0);
 
     // Process control
     cc_register_cfunc(vm, "abort", (void*)abort, 0, 0);
