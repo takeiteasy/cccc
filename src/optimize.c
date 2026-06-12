@@ -421,6 +421,11 @@ static void emit_li_nop(CCCC *vm, CCCCPc pc) {
 
 
 
+// Volatile semantics note: all three optimization passes below are safe for
+// volatile-qualified accesses. Memory loads always call invalidate_reg() so
+// their results are never constant-folded; stores are never removed by the
+// DCE pass; and the peephole pass only combines sign/zero-extension ops with
+// loads, which preserves the underlying memory access.
 static void opt_constant_fold(CCCC *vm, OptReplacement *repls) {
     if (!vm || !vm->text_seg || !vm->text_ptr) {
         return;

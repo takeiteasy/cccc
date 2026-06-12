@@ -52,7 +52,7 @@ syntax details have their own documents:
 | `extern` linkage | ✓ | |
 | `static` — locals, globals, functions | ✓ | |
 | `const` | ✓ | |
-| `volatile` | ✓ | Tracked; no codegen effect ([#311](https://todo.sr.ht/~takeiteasy/cccc/311)) |
+| `volatile` | ✓ | Volatile locals routed via generic LDR/STR (watchpoint-safe, C11 §6.7.3p7) |
 | `register` | ~ | Parsed and accepted; ignored |
 | `auto` (storage class) | ~ | Parsed and accepted; ignored |
 | String literals and concatenation | ✓ | |

@@ -1104,6 +1104,10 @@ static bool is_simple_local_scalar(CCCC *vm, Node *node) {
         return false;
     if (belongs_to_outer_function(vm->compiler.current_fn, node->var))
         return false;
+    // Volatile locals must go through the generic LEA3+LDR/STR path so that
+    // watchpoint checks fire on every access (C11 §6.7.3p7).
+    if (node->ty->is_volatile)
+        return false;
     if (node->var->is_param &&
         (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION))
         return false;
