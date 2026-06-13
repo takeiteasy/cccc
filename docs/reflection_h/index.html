@@ -1257,7 +1257,7 @@ execution.
     <a machinegenerated="true" href="../cccc_h/index.html#//apple_ref/c/tag/CCCC" logicalPath="//apple_ref/c/cl/CCCC //apple_ref/c/tdef/CCCC //apple_ref/c/tag/CCCC" target="_top"><span class="type">CCCC</span></a> <span class="type">*</span><span class="param">vm</span>,
     $<!-- a logicalPath="//apple_ref/c/cl/type_t //apple_ref/c/tdef/type_t //apple_ref/c/tag/type_t //apple_ref/c/struct/type_t //apple_ref/c/intf/type_t //apple_ref/doc/anysymbol/type_t" machineGenerated="true" --><span class="type">type_t</span><!-- /a --> <span class="type">*</span><span class="param">ty</span>,
     <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">name</span>, 
-    <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <span class="param">value</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_enum_add_constant;name=end --></pre>
+    <!-- a logicalPath="//apple_ref/c/cl/int64_t //apple_ref/c/tdef/int64_t //apple_ref/c/tag/int64_t //apple_ref/c/struct/int64_t //apple_ref/c/intf/int64_t //apple_ref/doc/anysymbol/int64_t" machineGenerated="true" --><span class="type">int64_t</span><!-- /a --> <span class="param">value</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_enum_add_constant;name=end --></pre>
 </div>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
 <div class="param_indent">
@@ -1382,7 +1382,7 @@ $enum_add_constant(ty, name, value).
 <p>Return the integer value of an enum constant.
 <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_ast_enum_constant_value;name=end --></p>
 <div class="declaration_indent">
-<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_enum_constant_value;name=start --><!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_ast_enum_constant_value" logicalPath="//apple_ref/c/instm/__cccc_ast_enum_constant_value //apple_ref/c/clm/__cccc_ast_enum_constant_value //apple_ref/c/intfcm/__cccc_ast_enum_constant_value //apple_ref/c/intfm/__cccc_ast_enum_constant_value //apple_ref/c/func/__cccc_ast_enum_constant_value" target="_top"><span class="function">__cccc_ast_enum_constant_value</span></a>(
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_enum_constant_value;name=start --><!-- a logicalPath="//apple_ref/c/cl/int64_t //apple_ref/c/tdef/int64_t //apple_ref/c/tag/int64_t //apple_ref/c/struct/int64_t //apple_ref/c/intf/int64_t //apple_ref/doc/anysymbol/int64_t" machineGenerated="true" --><span class="type">int64_t</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_ast_enum_constant_value" logicalPath="//apple_ref/c/instm/__cccc_ast_enum_constant_value //apple_ref/c/clm/__cccc_ast_enum_constant_value //apple_ref/c/intfcm/__cccc_ast_enum_constant_value //apple_ref/c/intfm/__cccc_ast_enum_constant_value //apple_ref/c/func/__cccc_ast_enum_constant_value" target="_top"><span class="function">__cccc_ast_enum_constant_value</span></a>(
     $<!-- a logicalPath="//apple_ref/c/cl/enum_constant_t //apple_ref/c/tdef/enum_constant_t //apple_ref/c/tag/enum_constant_t //apple_ref/c/struct/enum_constant_t //apple_ref/c/intf/enum_constant_t //apple_ref/doc/anysymbol/enum_constant_t" machineGenerated="true" --><span class="type">enum_constant_t</span><!-- /a --> <span class="type">*</span><span class="param">ec</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_enum_constant_value;name=end --></pre>
 </div>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
@@ -1398,7 +1398,7 @@ $enum_add_constant(ty, name, value).
 </div>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
 <p><!-- begin return value --></p>
-<p>The constant's integer value.
+<p>The constant's integer value (int64_t to support C23 wide underlying types).
 
 <!-- end return value --></p>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
@@ -1531,7 +1531,7 @@ $enum_add_constant(ty, name, value).
 <p>Return the integer value of the enum constant at the given index.
 <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_ast_enum_value;name=end --></p>
 <div class="declaration_indent">
-<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_enum_value;name=start --><!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_ast_enum_value" logicalPath="//apple_ref/c/instm/__cccc_ast_enum_value //apple_ref/c/clm/__cccc_ast_enum_value //apple_ref/c/intfcm/__cccc_ast_enum_value //apple_ref/c/intfm/__cccc_ast_enum_value //apple_ref/c/func/__cccc_ast_enum_value" target="_top"><span class="function">__cccc_ast_enum_value</span></a>(
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_enum_value;name=start --><!-- a logicalPath="//apple_ref/c/cl/int64_t //apple_ref/c/tdef/int64_t //apple_ref/c/tag/int64_t //apple_ref/c/struct/int64_t //apple_ref/c/intf/int64_t //apple_ref/doc/anysymbol/int64_t" machineGenerated="true" --><span class="type">int64_t</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_ast_enum_value" logicalPath="//apple_ref/c/instm/__cccc_ast_enum_value //apple_ref/c/clm/__cccc_ast_enum_value //apple_ref/c/intfcm/__cccc_ast_enum_value //apple_ref/c/intfm/__cccc_ast_enum_value //apple_ref/c/func/__cccc_ast_enum_value" target="_top"><span class="function">__cccc_ast_enum_value</span></a>(
     $<!-- a logicalPath="//apple_ref/c/cl/type_t //apple_ref/c/tdef/type_t //apple_ref/c/tag/type_t //apple_ref/c/struct/type_t //apple_ref/c/intf/type_t //apple_ref/doc/anysymbol/type_t" machineGenerated="true" --><span class="type">type_t</span><!-- /a --> <span class="type">*</span><span class="param">e</span>,
     <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <span class="param">index</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_enum_value;name=end --></pre>
 </div>
@@ -1554,7 +1554,7 @@ $enum_add_constant(ty, name, value).
 </div>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
 <p><!-- begin return value --></p>
-<p>The constant's integer value, or -1 on out-of-range.
+<p>The constant's integer value (int64_t), or -1 on out-of-range.
 
 <!-- end return value --></p>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
@@ -5982,7 +5982,7 @@ count, a compile-time error is emitted.</p></dd>
 <p class="gapBeforeFooter"> </p>
 <hr class="afterFooter">
 <div class="hd_copyright_and_timestamp">
-<p class="hd_timestamp">Last Updated: Friday, June 12, 2026
+<p class="hd_timestamp">Last Updated: Saturday, June 13, 2026
 </p>
 </div>
 </td>

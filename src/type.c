@@ -42,18 +42,21 @@ Type *ty_float = &(Type){TY_FLOAT, 4, 4};
 Type *ty_double = &(Type){TY_DOUBLE, 8, 8};
 Type *ty_ldouble = &(Type){TY_LDOUBLE, 16, 16};
 
-Type *ty_fcomplex = &(Type){TY_COMPLEX, 8, 4, false, false, false, false, NULL, &(Type){TY_FLOAT, 4, 4}};
-Type *ty_dcomplex = &(Type){TY_COMPLEX, 16, 8, false, false, false, false, NULL, &(Type){TY_DOUBLE, 8, 8}};
-Type *ty_ldcomplex = &(Type){TY_COMPLEX, 32, 16, false, false, false, false, NULL, &(Type){TY_LDOUBLE, 16, 16}};
+Type *ty_fcomplex = &(Type){.kind = TY_COMPLEX, .size = 8, .align = 4,
+                             .base = &(Type){TY_FLOAT, 4, 4}};
+Type *ty_dcomplex = &(Type){.kind = TY_COMPLEX, .size = 16, .align = 8,
+                             .base = &(Type){TY_DOUBLE, 8, 8}};
+Type *ty_ldcomplex = &(Type){.kind = TY_COMPLEX, .size = 32, .align = 16,
+                              .base = &(Type){TY_LDOUBLE, 16, 16}};
 
 // C23 decimal floating-point: correct sizes (4/8/16 bytes) but implemented as
 // aliases of float/double/long double — not IEEE-754-2008 decimal encoding.
 // Placeholder until a real decimal arithmetic library is available.
-Type *ty_decimal32  = &(Type){TY_FLOAT,   4,  4,  false, false, false, false, NULL, NULL,
+Type *ty_decimal32  = &(Type){.kind = TY_FLOAT,   .size = 4,  .align = 4,
                                .is_decimal = true};
-Type *ty_decimal64  = &(Type){TY_DOUBLE,  8,  8,  false, false, false, false, NULL, NULL,
+Type *ty_decimal64  = &(Type){.kind = TY_DOUBLE,  .size = 8,  .align = 8,
                                .is_decimal = true};
-Type *ty_decimal128 = &(Type){TY_LDOUBLE, 16, 16, false, false, false, false, NULL, NULL,
+Type *ty_decimal128 = &(Type){.kind = TY_LDOUBLE, .size = 16, .align = 16,
                                .is_decimal = true};
 
 static Type ty_error_obj = {TY_ERROR, 0, 1};
@@ -462,6 +465,27 @@ static void check_sign_compare(CCCC *vm, Node *lhs, Node *rhs, Token *tok) {
              "comparison of integers with different signs");
 }
 
+static bool lhs_targets_initializing_var(Node *node, Obj *var) {
+    if (!node || !var)
+        return false;
+    switch (node->kind) {
+        case ND_VAR:
+        case ND_VLA_PTR:
+            return node->var == var;
+        case ND_MEMBER:
+        case ND_DEREF:
+            return lhs_targets_initializing_var(node->lhs, var);
+        case ND_ADD:
+        case ND_SUB:
+            return lhs_targets_initializing_var(node->lhs, var) ||
+                   lhs_targets_initializing_var(node->rhs, var);
+        case ND_CAST:
+            return lhs_targets_initializing_var(node->lhs, var);
+        default:
+            return false;
+    }
+}
+
 void add_type(CCCC *vm, Node *node) {
     if (!node || (node->ty && node->kind != ND_COMPLEX))
         return;
@@ -535,9 +559,8 @@ void add_type(CCCC *vm, Node *node) {
             }
             // Check for const-correctness
             // Allow initialization (when initializing_var is set and matches)
-            bool is_initialization = false;
-            if (node->lhs->kind == ND_VAR && node->lhs->var == vm->compiler.initializing_var)
-                is_initialization = true;
+            bool is_initialization =
+                lhs_targets_initializing_var(node->lhs, vm->compiler.initializing_var);
 
             if (node->lhs->ty->is_const && !is_initialization) {
                 if (vm->collect_errors && error_tok_recover(vm, node->lhs->tok,

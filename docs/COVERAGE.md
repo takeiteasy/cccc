@@ -137,7 +137,7 @@ language coverage figures apply.
 | Feature | Status | Notes |
 |---|---|---|
 | `typeof` / `typeof_unqual` | ✓ | |
-| `constexpr` for objects | ~ | Parsed; constant propagation only — not a full compile-time guarantee |
+| `constexpr` for objects | ✓ | Object definitions require constant initializers and may be used in constant-expression contexts; constexpr functions are not supported |
 | `auto` type inference | ✗ | `auto` is parsed as a storage class; C23 type-deduction form not supported |
 | `nullptr` keyword / `nullptr_t` | ✓ | `nullptr_t` is defined in `<stddef.h>` via `typeof(nullptr)` |
 | `_BitInt(N)` arbitrary-precision integers | ~ | `N` in `[1,64]` — bit-precise value semantics via mask/shift truncation; `N > 64` (true bignum) tracked in a follow-up ticket |
@@ -147,7 +147,7 @@ language coverage figures apply.
 | `bool`, `true`, `false` as keywords (not just macros) | ✓ | Real keywords in `--std=c23`/`gnu23`; downgraded to ordinary identifiers below C23. `<stdbool.h>` still works (its macros are gated to pre-C23) |
 | `u8` character literals (`u8'x'`) | ✓ | |
 | Unnamed function parameters (`void f(int, double)`) | ✓ | |
-| `static_assert` without message | ✗ | |
+| `static_assert` without message | ✓ | C23 one-argument form |
 | Improved `enum` — underlying type, forward declaration, wide values | ✓ | `enum E : unsigned char { … }` sets size/align/signedness; `enum E : int;` forward-declares; values stored as `int64_t` (C23 §6.7.2.2) |
 | Decimal floating-point (`_Decimal32`, etc.) | ~ | `_Decimal32/64/128` accepted with correct sizes (4/8/16 bytes) but implemented as aliases of `float`/`double`/`long double` (binary, not decimal, encoding); real IEEE-754-2008 decimal arithmetic tracked in a follow-up ticket |
 | `char8_t` | ✓ | Defined in `<uchar.h>`; `u8'x'` literals have type `unsigned char` and value `char8_t` |

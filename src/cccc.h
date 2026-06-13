@@ -582,6 +582,7 @@ struct Type {
     bool is_atomic;      // true if _Atomic
     bool is_const;       // true if const-qualified
     bool is_volatile;    // true if volatile-qualified
+    bool is_restrict;    // true if restrict-qualified
     struct Type *origin; // for type compatibility check
 
     // Pointer-to or array-of type. We intentionally use the same member
@@ -871,6 +872,7 @@ struct Obj {
     char *init_data;
     Relocation *rel;
     Node *init_expr; // For constexpr: AST of initializer expression
+    void *constexpr_init; // For constexpr: private Initializer tree
 
     // Function
     bool is_inline;

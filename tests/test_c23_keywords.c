@@ -3,12 +3,14 @@
 // Test static_assert (C23 keyword alias for _Static_assert)
 static_assert(1, "static_assert should work");
 static_assert(sizeof(int) >= 4, "int size check");
+static_assert(sizeof(char) == 1);
 
 // Test typeof_unqual (removes qualifiers)
 int main() {
     // Test static_assert in function scope
     static_assert(1 + 1 == 2, "basic math");
     static_assert(10 > 5, "comparison");
+    static_assert(sizeof(long) == 8);
 
     // Test typeof_unqual removes const
     const int x = 42;

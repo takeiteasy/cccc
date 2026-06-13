@@ -167,6 +167,11 @@ static int64_t eval(CCCC *vm, Node *node);
 static int64_t eval2(CCCC *vm, Node *node, char ***label);
 static int64_t eval_rval(CCCC *vm, Node *node, char ***label);
 static bool is_const_expr(CCCC *vm, Node *node);
+static bool is_constexpr_object_type(Type *ty);
+static void validate_constexpr_object_type(CCCC *vm, Token *tok, Type *ty);
+static void validate_constexpr_initializer(CCCC *vm, Obj *var, Initializer *init,
+                                           Token *tok);
+static Token *static_assert_decl(CCCC *vm, Token *tok);
 static Node *assign(CCCC *vm, Token **rest, Token *tok);
 static Node *logor(CCCC *vm, Token **rest, Token *tok);
 static double eval_double(CCCC *vm, Node *node);
@@ -219,6 +224,14 @@ static void enter_scope(CCCC *vm) {
     memset(sc, 0, sizeof(Scope));
     sc->next = vm->compiler.scope;
     vm->compiler.scope = sc;
+}
+
+static bool type_has_restrict(Type *ty) {
+    for (; ty; ty = ty->base) {
+        if (ty->is_restrict)
+            return true;
+    }
+    return false;
 }
 
 static char *obj_display_name(Obj *var) {
@@ -1014,6 +1027,9 @@ static Type *declspec(CCCC *vm, Token **rest, Token *tok, VarAttr *attr) {
                 error_tok(vm, tok,
                           "typedef may not be used together with static,"
                           " extern, inline, __thread or _Thread_local");
+            if (attr->is_typedef && attr->is_constexpr)
+                error_tok(vm, tok,
+                          "typedef may not be used together with constexpr");
             if (attr->is_block_var && (attr->is_static || attr->is_extern || attr->is_tls))
                 error_tok(vm, tok,
                           "__block may not be used together with static,"
@@ -1222,6 +1238,11 @@ declspec_done:
         ty->is_volatile = true;
     }
 
+    if (attr && attr->is_constexpr) {
+        ty = copy_type(vm, ty);
+        ty->is_const = true;
+    }
+
     *rest = tok;
     return ty;
 }
@@ -1355,6 +1376,9 @@ static Type *pointers(CCCC *vm, Token **rest, Token *tok, Type *ty) {
             } else if (equal(tok, "volatile")) {
                 ty = copy_type(vm, ty);
                 ty->is_volatile = true;
+            } else {
+                ty = copy_type(vm, ty);
+                ty->is_restrict = true;
             }
             tok = tok->next;
         }
@@ -1735,6 +1759,9 @@ static Node *declaration(CCCC *vm, Token **rest, Token *tok, Type *basety,
             error_tok(vm, ty->name_pos, "variable name omitted");
         }
 
+        if (attr && attr->is_constexpr && ty->kind == TY_VLA)
+            error_tok(vm, ty->name, "constexpr object may not have variable length array type");
+
         if (attr && attr->is_static) {
             // static local variable
             warn_if_shadowing(vm, ty->name);
@@ -1742,12 +1769,15 @@ static Node *declaration(CCCC *vm, Token **rest, Token *tok, Type *basety,
             var->tok = ty->name;
             var->display_name = get_ident(vm, ty->name);
             var->is_local_symbol = true;
+            var->is_constexpr = attr->is_constexpr;
             var->is_maybe_unused = ty->is_maybe_unused;
             var->is_deprecated = ty->is_deprecated;
             var->deprecated_msg = ty->deprecated_msg;
             push_scope(vm, get_ident(vm, ty->name), ty->name->len)->var = var;
             if (equal(tok, "="))
                 gvar_initializer(vm, &tok, tok->next, var);
+            else if (attr->is_constexpr)
+                error_tok(vm, ty->name, "constexpr object requires an initializer");
             continue;
         }
 
@@ -1785,6 +1815,9 @@ static Node *declaration(CCCC *vm, Token **rest, Token *tok, Type *basety,
         }
 
         Obj *var = new_lvar(vm, get_ident(vm, ty->name), ty->name->len, ty);
+        if (attr && attr->is_constexpr) {
+            var->is_constexpr = true;
+        }
         if (attr && attr->align)
             var->align = attr->align;
         if (attr && attr->is_block_var)
@@ -1801,6 +1834,8 @@ static Node *declaration(CCCC *vm, Token **rest, Token *tok, Type *basety,
             cur = cur->next = new_unary(vm, ND_EXPR_STMT, expr, tok);
             // Don't clear here - will be cleared by next init or at end of
             // parsing
+        } else if (var->is_constexpr) {
+            error_tok(vm, ty->name, "constexpr object requires an initializer");
         }
 
         if (var->ty->size < 0) {
@@ -2328,6 +2363,63 @@ static Initializer *initializer(CCCC *vm, Token **rest, Token *tok, Type *ty,
     return init;
 }
 
+static bool is_constexpr_object_type(Type *ty) {
+    if (!ty)
+        return false;
+    if (ty->kind == TY_FUNC || ty->kind == TY_VLA || ty->is_atomic ||
+        ty->is_volatile || ty->is_restrict)
+        return false;
+    if (ty->kind == TY_ARRAY)
+        return ty->size >= 0 && is_constexpr_object_type(ty->base);
+    if (ty->kind == TY_PTR)
+        return !type_has_restrict(ty);
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
+        for (Member *mem = ty->members; mem; mem = mem->next)
+            if (!is_constexpr_object_type(mem->ty))
+                return false;
+    }
+    return true;
+}
+
+static void validate_constexpr_object_type(CCCC *vm, Token *tok, Type *ty) {
+    if (!is_constexpr_object_type(ty))
+        error_tok(vm, tok, "constexpr object has unsupported type or qualifiers");
+}
+
+static bool initializer_is_constexpr(CCCC *vm, Initializer *init, Type *ty) {
+    if (!init)
+        return true;
+    if (init->expr)
+        return is_const_expr(vm, init->expr);
+    if (ty->kind == TY_ARRAY) {
+        for (int i = 0; i < ty->array_len; i++)
+            if (!initializer_is_constexpr(vm, init->children[i], ty->base))
+                return false;
+        return true;
+    }
+    if (ty->kind == TY_STRUCT) {
+        for (Member *mem = ty->members; mem; mem = mem->next)
+            if (!initializer_is_constexpr(vm, init->children[mem->idx], mem->ty))
+                return false;
+        return true;
+    }
+    if (ty->kind == TY_UNION)
+        return !init->mem ||
+               initializer_is_constexpr(vm, init->children[init->mem->idx],
+                                        init->mem->ty);
+    return true;
+}
+
+static void validate_constexpr_initializer(CCCC *vm, Obj *var, Initializer *init,
+                                           Token *tok) {
+    validate_constexpr_object_type(vm, var->tok ? var->tok : tok, var->ty);
+    if (!initializer_is_constexpr(vm, init, var->ty))
+        error_tok(vm, tok, "constexpr initializer is not a constant expression");
+    var->constexpr_init = init;
+    if (init && init->expr)
+        var->init_expr = init->expr;
+}
+
 static Node *init_desg_expr(CCCC *vm, InitDesg *desg, Token *tok) {
     if (desg->var)
         return new_var_node(vm, desg->var, tok);
@@ -2614,6 +2706,9 @@ static Node *lvar_initializer(CCCC *vm, Token **rest, Token *tok, Obj *var) {
     bool inferred_array = var->ty->kind == TY_ARRAY && var->ty->size < 0;
     Initializer *init = initializer(vm, rest, tok, var->ty, &var->ty);
 
+    if (var->is_constexpr)
+        validate_constexpr_initializer(vm, var, init, tok);
+
     // $@k splice in compound-literal context: defer final positional lowering
     // until quote_substitute knows the caller-provided chain length.
     Node *deferred = NULL;
@@ -2738,9 +2833,8 @@ static void gvar_initializer(CCCC *vm, Token **rest, Token *tok, Obj *var) {
 
     // For constexpr variables, save the initializer expression for compile-time
     // evaluation
-    if (var->is_constexpr && init && init->expr) {
-        var->init_expr = init->expr;
-    }
+    if (var->is_constexpr)
+        validate_constexpr_initializer(vm, var, init, tok);
 
     Relocation head = {};
     char *buf = arena_alloc(&vm->compiler.parser_arena, var->ty->size);
@@ -2832,18 +2926,31 @@ static Node *stmt_or_decl(CCCC *vm, Token **rest, Token *tok) {
     return stmt(vm, rest, tok);
 }
 
-static Node *stmt(CCCC *vm, Token **rest, Token *tok) {
-    if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
-        tok = skip(vm, tok->next, "(");
-        long long val = const_expr(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
+static Token *static_assert_decl(CCCC *vm, Token *tok) {
+    bool c23_static_assert = equal(tok, "static_assert");
+    tok = skip(vm, tok->next, "(");
+    long long val = const_expr(vm, &tok, tok);
+    char *message = "static assertion failed";
+
+    if (consume(vm, &tok, tok, ",")) {
         if (tok->kind != TK_STR)
             error_tok(vm, tok, "expected string literal, found '%.*s'",
                       tok->len, tok->loc);
-        if (!val)
-            error_tok(vm, tok, "%s", tok->str);
-        tok = skip(vm, tok->next, ")");
-        *rest = skip(vm, tok, ";");
+        message = tok->str;
+        tok = tok->next;
+    } else if (!c23_static_assert || vm->compiler.c_std < CCCC_STD_C23) {
+        error_tok(vm, tok, "expected ','");
+    }
+
+    if (!val)
+        error_tok(vm, tok, "%s", message);
+    tok = skip(vm, tok, ")");
+    return skip(vm, tok, ";");
+}
+
+static Node *stmt(CCCC *vm, Token **rest, Token *tok) {
+    if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
+        *rest = static_assert_decl(vm, tok);
         return new_node(vm, ND_BLOCK, tok);
     }
 
@@ -3353,6 +3460,32 @@ static Node *expr(CCCC *vm, Token **rest, Token *tok) {
 
 static int64_t eval(CCCC *vm, Node *node) { return eval2(vm, node, NULL); }
 
+static Initializer *constexpr_init_for_node(Node *node) {
+    if (!node)
+        return NULL;
+    if (node->kind == ND_VAR && node->var && node->var->is_constexpr)
+        return (Initializer *)node->var->constexpr_init;
+    if (node->kind == ND_MEMBER) {
+        Initializer *base = constexpr_init_for_node(node->lhs);
+        if (!base || !node->member)
+            return NULL;
+        if (base->ty->kind == TY_UNION) {
+            if (base->mem != node->member)
+                return NULL;
+            return base->children[node->member->idx];
+        }
+        if (base->ty->kind != TY_STRUCT)
+            return NULL;
+        return base->children[node->member->idx];
+    }
+    return NULL;
+}
+
+static Node *constexpr_expr_for_node(Node *node) {
+    Initializer *init = constexpr_init_for_node(node);
+    return init ? init->expr : NULL;
+}
+
 // Evaluate a given node as a constant expression.
 //
 // A constant expression is either just a number or ptr+n where ptr
@@ -3447,6 +3580,11 @@ static int64_t eval2(CCCC *vm, Node *node, char ***label) {
         *label = &node->unique_label;
         return 0;
     case ND_MEMBER:
+        {
+            Initializer *init = constexpr_init_for_node(node);
+            if (init)
+                return init->expr ? eval(vm, init->expr) : 0;
+        }
         if (!label)
             error_tok(vm, node->tok,
                       "not a compile-time constant (member access)");
@@ -3455,6 +3593,13 @@ static int64_t eval2(CCCC *vm, Node *node, char ***label) {
                       "invalid initializer (member is not an array)");
         return eval_rval(vm, node->lhs, label) + node->member->offset;
     case ND_VAR:
+        if (node->var->is_constexpr) {
+            Node *expr = constexpr_expr_for_node(node);
+            if (!expr)
+                error_tok(vm, node->tok,
+                          "not a scalar compile-time constant");
+            return eval(vm, expr);
+        }
         if (!label)
             error_tok(vm, node->tok,
                       "not a compile-time constant (variable reference)");
@@ -3523,6 +3668,9 @@ static bool is_const_expr(CCCC *vm, Node *node) {
         return is_const_expr(vm, node->lhs);
     case ND_NUM:
         return true;
+    case ND_VAR:
+    case ND_MEMBER:
+        return constexpr_init_for_node(node) != NULL;
     default:
         return false;
     }
@@ -3583,6 +3731,13 @@ static double eval_double(CCCC *vm, Node *node) {
         if (is_flonum(node->lhs->ty))
             return eval_double(vm, node->lhs);
         return eval(vm, node->lhs);
+    case ND_VAR:
+    case ND_MEMBER: {
+        Node *expr = constexpr_expr_for_node(node);
+        if (!expr)
+            error_tok(vm, node->tok, "not a compile-time constant");
+        return eval_double(vm, expr);
+    }
     case ND_NUM:
         return node->fval;
     default:
@@ -6543,6 +6698,9 @@ static void validate_main_signature(CCCC *vm, Obj *fn) {
 }
 
 static Token *function(CCCC *vm, Token *tok, Type *basety, VarAttr *attr) {
+    if (attr->is_constexpr)
+        error_tok(vm, tok, "constexpr is only supported for object definitions");
+
     Type *ty = declarator(vm, &tok, tok, basety);
     ty = apply_var_attrs_to_type(vm, ty, attr);
     if (!ty->name)
@@ -6599,7 +6757,6 @@ static Token *function(CCCC *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->is_static =
             attr->is_static || (attr->is_inline && !attr->is_extern);
         fn->is_inline = attr->is_inline;
-        fn->is_constexpr = attr->is_constexpr;
     }
 
     // Set up nested function tracking
@@ -6865,8 +7022,17 @@ static Token *global_variable(CCCC *vm, Token *tok, Type *basety,
         if (attr->align)
             var->align = attr->align;
 
+        if (var->is_constexpr) {
+            if (attr->is_extern || attr->is_tls)
+                error_tok(vm, ty->name,
+                          "constexpr object must be a definition with internal storage");
+            var->is_static = true;
+        }
+
         if (equal(tok, "="))
             gvar_initializer(vm, &tok, tok->next, var);
+        else if (var->is_constexpr)
+            error_tok(vm, ty->name, "constexpr object requires an initializer");
         else if (!attr->is_extern && !attr->is_tls)
             var->is_tentative = true;
 
@@ -7020,16 +7186,7 @@ Obj *parse(CCCC *vm, Token *tok) {
     while (tok->kind != TK_EOF) {
         // _Static_assert or static_assert (C23) - check before declspec
         if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
-            tok = skip(vm, tok->next, "(");
-            long long val = const_expr(vm, &tok, tok);
-            tok = skip(vm, tok, ",");
-            if (tok->kind != TK_STR)
-                error_tok(vm, tok, "expected string literal, found '%.*s'",
-                          tok->len, tok->loc);
-            if (!val)
-                error_tok(vm, tok, "%s", tok->str);
-            tok = skip(vm, tok->next, ")");
-            tok = skip(vm, tok, ";");
+            tok = static_assert_decl(vm, tok);
             continue;
         }
 
