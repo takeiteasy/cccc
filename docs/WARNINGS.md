@@ -86,6 +86,7 @@ The warning infrastructure recognizes these category names:
 - `attributes`
 - `nodiscard`
 - `fallthrough`
+- `strict-prototypes`
 
 `conversion` is an umbrella name: `-Wconversion` enables `sign-conversion` and
 `float-conversion` as well as the integer-narrowing check.
@@ -135,6 +136,9 @@ system:
   before C11, `_Generic` before C11, `[[...]]` attributes before C23, and
   binary integer literals before C23. These extensions compile unless
   `-Wpedantic` is promoted with `-Werror=pedantic` or `-Werror`.
+- Function declarations and definitions with an empty parameter list `()` in
+  pre-C23 modes use `-Wstrict-prototypes`. In C23, `()` is a full prototype
+  equivalent to `(void)` and no warning is emitted. Enabled by `-Wextra`.
 
 Implicit functions that remain unresolved are hard errors during code
 generation. Missing return values for struct and union functions are also hard

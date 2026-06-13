@@ -334,6 +334,7 @@ typedef enum {
     CCCC_WARN_NODISCARD        = (1ULL << 20), // [[nodiscard]] return value discarded
     CCCC_WARN_FALLTHROUGH      = (1ULL << 21), // switch case falls through without [[fallthrough]]
     CCCC_WARN_STATIC_ARRAY_SIZE = (1ULL << 22), // [static N] array param: argument too small
+    CCCC_WARN_STRICT_PROTOTYPES = (1ULL << 23), // () without void in pre-C23
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
     CCCC_WARN_CONVERSION_GROUP = CCCC_WARN_CONVERSION |
@@ -363,7 +364,8 @@ CCCC_WARN_ALL = CCCC_WARN_UNUSED |
                       CCCC_WARN_SIGN_COMPARE |
                       CCCC_WARN_CONVERSION |
                       CCCC_WARN_POINTER_ARITH |
-                      CCCC_WARN_FALLTHROUGH,
+                      CCCC_WARN_FALLTHROUGH |
+                      CCCC_WARN_STRICT_PROTOTYPES,
 } CCCCWarning;
 
 /*!
@@ -1793,7 +1795,7 @@ typedef struct Compiler {
     int ent3_extra_stack;   // Additional stack slots from inlined locals
 
     // C language standard selection
-    CStdVersion c_std;  // Selected standard version (default: CCCC_STD_C17)
+    CStdVersion c_std;  // Selected standard version (default: CCCC_STD_C23)
     bool c_std_gnu;     // True for gnuXX variants (gnu17, gnu11, …)
 
     // Custom entry point name (NULL means "main")

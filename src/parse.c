@@ -1276,8 +1276,15 @@ static Type *func_params(CCCC *vm, Token **rest, Token *tok, Type *ty) {
         cur = cur->next = copy_type(vm, ty2);
     }
 
-    if (cur == &head)
-        is_variadic = true;
+    if (cur == &head) {
+        if (vm->compiler.c_std < CCCC_STD_C23) {
+            is_variadic = true;
+            if (!vm->compiler.in_type_lookahead)
+                warn_tok(vm, tok, CCCC_WARN_STRICT_PROTOTYPES,
+                         "function declaration is not a prototype");
+        }
+        // C23: empty () is a prototype accepting no args, identical to (void).
+    }
 
     ty = func_type(vm, ty);
     ty->params = head.next;
