@@ -43,34 +43,81 @@ static long long wrap_fgetpos(long long stream, long long pos)       { return (l
 static long long wrap_fsetpos(long long stream, long long pos)       { return (long long)fsetpos((FILE *)stream, (const fpos_t *)pos); }
 static long long wrap_setvbuf(long long stream, long long buf, long long mode, long long size) { return (long long)setvbuf((FILE *)stream, (char *)buf, (int)mode, (size_t)size); }
 
-// V* variants (format functions that take va_list) - wrappers needed for va_list pointer dereference
+// V* variants (format functions that take va_list).
+// Extract args from cccc's va_list and re-dispatch via ffi_prep_cif_var to
+// the matching non-v* variadic function so all arguments arrive correctly,
+// not just the first. (#407)
 #ifdef CCCC_HAVE_NATIVE_PCT_B
+#include "va_ffi_helper.h"
+
 static long long wrap_vprintf(const char *fmt, long long va_ptr) {
-    return (long long)vprintf(fmt, *(va_list*)va_ptr);
+    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
+    int types[CCCC_VA_MAX_ARGS];
+    int n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int64_t vals[CCCC_VA_MAX_ARGS];
+    cccc_va_extract(va, types, n, vals);
+    int64_t fixed[] = { (int64_t)fmt };
+    return cccc_ffi_call_variadic((void *)printf, 1, fixed, n, types, vals);
 }
 
 static long long wrap_vsprintf(char *str, const char *fmt, long long va_ptr) {
-    return (long long)vsprintf(str, fmt, *(va_list*)va_ptr);
+    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
+    int types[CCCC_VA_MAX_ARGS];
+    int n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int64_t vals[CCCC_VA_MAX_ARGS];
+    cccc_va_extract(va, types, n, vals);
+    int64_t fixed[] = { (int64_t)str, (int64_t)fmt };
+    return cccc_ffi_call_variadic((void *)sprintf, 2, fixed, n, types, vals);
 }
 
 static long long wrap_vsnprintf(char *str, long long size, const char *fmt, long long va_ptr) {
-    return (long long)vsnprintf(str, (size_t)size, fmt, *(va_list*)va_ptr);
+    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
+    int types[CCCC_VA_MAX_ARGS];
+    int n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int64_t vals[CCCC_VA_MAX_ARGS];
+    cccc_va_extract(va, types, n, vals);
+    int64_t fixed[] = { (int64_t)str, (int64_t)size, (int64_t)fmt };
+    return cccc_ffi_call_variadic((void *)snprintf, 3, fixed, n, types, vals);
 }
 
 static long long wrap_vfprintf(FILE *stream, const char *fmt, long long va_ptr) {
-    return (long long)vfprintf(stream, fmt, *(va_list*)va_ptr);
+    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
+    int types[CCCC_VA_MAX_ARGS];
+    int n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int64_t vals[CCCC_VA_MAX_ARGS];
+    cccc_va_extract(va, types, n, vals);
+    int64_t fixed[] = { (int64_t)stream, (int64_t)fmt };
+    return cccc_ffi_call_variadic((void *)fprintf, 2, fixed, n, types, vals);
 }
 
 static long long wrap_vscanf(const char *fmt, long long va_ptr) {
-    return (long long)vscanf(fmt, *(va_list*)va_ptr);
+    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
+    int types[CCCC_VA_MAX_ARGS];
+    int n = cccc_parse_scanf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int64_t vals[CCCC_VA_MAX_ARGS];
+    cccc_va_extract(va, types, n, vals);
+    int64_t fixed[] = { (int64_t)fmt };
+    return cccc_ffi_call_variadic((void *)scanf, 1, fixed, n, types, vals);
 }
 
 static long long wrap_vsscanf(const char *str, const char *fmt, long long va_ptr) {
-    return (long long)vsscanf(str, fmt, *(va_list*)va_ptr);
+    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
+    int types[CCCC_VA_MAX_ARGS];
+    int n = cccc_parse_scanf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int64_t vals[CCCC_VA_MAX_ARGS];
+    cccc_va_extract(va, types, n, vals);
+    int64_t fixed[] = { (int64_t)str, (int64_t)fmt };
+    return cccc_ffi_call_variadic((void *)sscanf, 2, fixed, n, types, vals);
 }
 
 static long long wrap_vfscanf(FILE *stream, const char *fmt, long long va_ptr) {
-    return (long long)vfscanf(stream, fmt, *(va_list*)va_ptr);
+    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
+    int types[CCCC_VA_MAX_ARGS];
+    int n = cccc_parse_scanf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int64_t vals[CCCC_VA_MAX_ARGS];
+    cccc_va_extract(va, types, n, vals);
+    int64_t fixed[] = { (int64_t)stream, (int64_t)fmt };
+    return cccc_ffi_call_variadic((void *)fscanf, 2, fixed, n, types, vals);
 }
 #endif // CCCC_HAVE_NATIVE_PCT_B
 

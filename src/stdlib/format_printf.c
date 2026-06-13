@@ -66,20 +66,48 @@ int cccc_snprintf(char *buf, size_t count, const char *fmt, ...) {
     return r;
 }
 
-// V* variant wrappers - the VM passes a pointer to a va_list (see wrap_v*
-// in stdio.c for the host-libc equivalents).
+// V* variant wrappers — extract args from cccc's va_list and re-dispatch
+// via ffi_prep_cif_var to the matching non-v* variadic function. This builds
+// a genuine host variadic frame so the callee's own va_start/va_arg work
+// correctly for all arguments, not just the first. (#407)
+#include "va_ffi_helper.h"
+
 long long wrap_cccc_vprintf(const char *fmt, long long va_ptr) {
-    return (long long)cccc_vfprintf(stdout, fmt, *(va_list *)va_ptr);
+    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
+    int types[CCCC_VA_MAX_ARGS];
+    int n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int64_t vals[CCCC_VA_MAX_ARGS];
+    cccc_va_extract(va, types, n, vals);
+    int64_t fixed[] = { (int64_t)fmt };
+    return cccc_ffi_call_variadic((void *)cccc_printf, 1, fixed, n, types, vals);
 }
 
 long long wrap_cccc_vsprintf(char *str, const char *fmt, long long va_ptr) {
-    return (long long)cccc_vsprintf(str, fmt, *(va_list *)va_ptr);
+    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
+    int types[CCCC_VA_MAX_ARGS];
+    int n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int64_t vals[CCCC_VA_MAX_ARGS];
+    cccc_va_extract(va, types, n, vals);
+    int64_t fixed[] = { (int64_t)str, (int64_t)fmt };
+    return cccc_ffi_call_variadic((void *)cccc_sprintf, 2, fixed, n, types, vals);
 }
 
 long long wrap_cccc_vsnprintf(char *str, long long size, const char *fmt, long long va_ptr) {
-    return (long long)cccc_vsnprintf(str, (size_t)size, fmt, *(va_list *)va_ptr);
+    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
+    int types[CCCC_VA_MAX_ARGS];
+    int n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int64_t vals[CCCC_VA_MAX_ARGS];
+    cccc_va_extract(va, types, n, vals);
+    int64_t fixed[] = { (int64_t)str, (int64_t)size, (int64_t)fmt };
+    return cccc_ffi_call_variadic((void *)cccc_snprintf, 3, fixed, n, types, vals);
 }
 
 long long wrap_cccc_vfprintf(FILE *stream, const char *fmt, long long va_ptr) {
-    return (long long)cccc_vfprintf(stream, fmt, *(va_list *)va_ptr);
+    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
+    int types[CCCC_VA_MAX_ARGS];
+    int n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int64_t vals[CCCC_VA_MAX_ARGS];
+    cccc_va_extract(va, types, n, vals);
+    int64_t fixed[] = { (int64_t)stream, (int64_t)fmt };
+    return cccc_ffi_call_variadic((void *)cccc_fprintf, 2, fixed, n, types, vals);
 }
