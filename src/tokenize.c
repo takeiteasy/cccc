@@ -867,8 +867,9 @@ static bool convert_pp_int(CCCC *vm, Token *tok) {
         // Stop at suffix (L, U, l, u) or non-alphanumeric
         if (!isalnum(*s))
             break;
-        // Stop at suffix letters
-        if ((*s == 'L' || *s == 'l' || *s == 'U' || *s == 'u') && j > 0)
+        // Stop at suffix letters (L/U for existing suffixes; W for C23 wb/uwb)
+        if ((*s == 'L' || *s == 'l' || *s == 'U' || *s == 'u' ||
+             *s == 'W' || *s == 'w') && j > 0)
             break;
         cleaned[j++] = *s;
     }
@@ -888,11 +889,22 @@ static bool convert_pp_int(CCCC *vm, Token *tok) {
         }
     }
 
-    // Read U, L or LL suffixes.
+    // Read U, L or LL suffixes, plus C23 wb/uwb (_BitInt) suffixes.
     bool l = false;
     bool u = false;
+    bool wb = false;
 
-    if (startswith(vm, p, "LLU") || startswith(vm, p, "LLu") ||
+    // wb/uwb must be checked before the single-u branch to avoid misparse.
+    if ((p[0] == 'u' || p[0] == 'U') &&
+        (p[1] == 'w' || p[1] == 'W') &&
+        (p[2] == 'b' || p[2] == 'B')) {
+        p += 3;
+        wb = true;
+        u = true;
+    } else if ((p[0] == 'w' || p[0] == 'W') && (p[1] == 'b' || p[1] == 'B')) {
+        p += 2;
+        wb = true;
+    } else if (startswith(vm, p, "LLU") || startswith(vm, p, "LLu") ||
         startswith(vm, p, "llU") || startswith(vm, p, "llu") ||
         startswith(vm, p, "ULL") || startswith(vm, p, "Ull") ||
         startswith(vm, p, "uLL") || startswith(vm, p, "ull")) {
@@ -914,6 +926,24 @@ static bool convert_pp_int(CCCC *vm, Token *tok) {
 
     if (p != tok->loc + tok->len)
         return false;
+
+    // C23 wb/uwb: produce the smallest _BitInt(N) that can hold the value.
+    if (wb) {
+        uint64_t uval = (uint64_t)val;
+        int width;
+        if (u) {
+            // unsigned _BitInt(N): minimum bits needed (at least 1)
+            width = (uval == 0) ? 1 : (int)(64 - __builtin_clzll(uval));
+        } else {
+            // signed _BitInt(N): value bits + 1 sign bit (minimum 2)
+            int vbits = (uval == 0) ? 0 : (int)(64 - __builtin_clzll(uval));
+            width = (vbits + 1 < 2) ? 2 : vbits + 1;
+        }
+        tok->kind = TK_NUM;
+        tok->val = val;
+        tok->ty = bitint_type(vm, tok, width, u);
+        return true;
+    }
 
     // Infer a type.
     Type *ty;

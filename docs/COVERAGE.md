@@ -142,7 +142,7 @@ language coverage figures apply.
 | Compound literal storage classes | ✓ | C23 `(static T){...}`, `(constexpr T){...}`, `(register T){...}`, and TLS spellings are parsed; static/constexpr/TLS literals use anonymous static storage, while register keeps automatic storage |
 | `auto` type inference | ✓ | Deduces type as `typeof_unqual(initializer)` with array-to-pointer and function-to-pointer decay; pointer declarators (`auto *p = &x`) validated; initializer required |
 | `nullptr` keyword / `nullptr_t` | ✓ | `nullptr_t` is defined in `<stddef.h>` via `typeof(nullptr)` |
-| `_BitInt(N)` arbitrary-precision integers | ~ | `N` in `[1,64]` — bit-precise value semantics via mask/shift truncation; `N > 64` (true bignum) tracked in a follow-up ticket |
+| `_BitInt(N)` arbitrary-precision integers | ~ | `N` in `[1,64]` — bit-precise value semantics via mask/shift truncation; `wb`/`uwb` literal suffixes supported; `N > 64` (true bignum) tracked in a follow-up ticket |
 | Binary integer literals `0b10101010` | ✓ | |
 | Digit separators `1'000'000` | ✓ | |
 | `[[...]]` attributes | ~ | Parsed; see [ATTRIBUTES.md](ATTRIBUTES.md) for per-attribute status |
@@ -166,7 +166,7 @@ language coverage figures apply.
 | `#warning` | ✓ | |
 | `#embed` | ✓ | Supports `limit()`, `prefix()`, `suffix()`, `if_empty()`, `__has_embed()` |
 | `__VA_OPT__` | ✓ | |
-| `__has_c_attribute` | ✓ | Returns `1` for C/CCCC attributes with semantic support |
+| `__has_c_attribute` | ✓ | Returns C23 version date (`202311L`) for standard C23 attributes; `1` for CCCC vendor attributes |
 | `__has_include` | ✓ | Checks CCCC, `-I`, and `-i` include paths |
 
 ---

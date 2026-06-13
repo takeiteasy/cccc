@@ -983,31 +983,31 @@ static bool is_has_feature_supported(CCCC *vm, char *name) {
 }
 
 typedef enum { ATTR_CCCC, ATTR_STD, ATTR_GNU } AttrCategory;
-typedef struct { const char *name; AttrCategory cat; bool has_attr; } AttrInfo;
+typedef struct { const char *name; AttrCategory cat; bool has_attr; long date; } AttrInfo;
 
 static const AttrInfo known_attrs[] = {
-    // CCCC-specific (cccc:: scoped)
-    {"comptime",      ATTR_CCCC, true},
-    {"emit",          ATTR_CCCC, true},
-    {"macro",         ATTR_CCCC, true},
-    {"test",          ATTR_CCCC, true},
-    {"test_setup",    ATTR_CCCC, true},
-    {"test_teardown", ATTR_CCCC, true},
-    // Standard C23 ([[name]]) — not in GNU __has_attribute
-    {"maybe_unused",      ATTR_STD, false},
-    {"deprecated",        ATTR_STD, true},
-    {"noreturn",          ATTR_STD, true},
-    {"nodiscard",         ATTR_STD, false},
-    {"fallthrough",       ATTR_STD, false},
-    {"no_unique_address", ATTR_STD, false},
+    // CCCC-specific (cccc:: scoped) — vendor attrs report 1, not a date
+    {"comptime",      ATTR_CCCC, true,  1},
+    {"emit",          ATTR_CCCC, true,  1},
+    {"macro",         ATTR_CCCC, true,  1},
+    {"test",          ATTR_CCCC, true,  1},
+    {"test_setup",    ATTR_CCCC, true,  1},
+    {"test_teardown", ATTR_CCCC, true,  1},
+    // Standard C23 ([[name]]) — return C23 version date per N3220 §6.10.10.2
+    {"maybe_unused",      ATTR_STD, false, 202311L},
+    {"deprecated",        ATTR_STD, true,  202311L},
+    {"noreturn",          ATTR_STD, true,  202311L},
+    {"nodiscard",         ATTR_STD, false, 202311L},
+    {"fallthrough",       ATTR_STD, false, 202311L},
+    {"no_unique_address", ATTR_STD, false, 202311L},
     // GNU-only (__attribute__((name)))
-    {"aligned",          ATTR_GNU, true},
-    {"packed",           ATTR_GNU, true},
-    {"unused",           ATTR_GNU, true},
-    {"__unused__",       ATTR_GNU, true},
-    {"__deprecated__",   ATTR_GNU, true},
-    {"format",           ATTR_GNU, true},
-    {NULL, 0, false},
+    {"aligned",          ATTR_GNU, true,  0},
+    {"packed",           ATTR_GNU, true,  0},
+    {"unused",           ATTR_GNU, true,  0},
+    {"__unused__",       ATTR_GNU, true,  0},
+    {"__deprecated__",   ATTR_GNU, true,  0},
+    {"format",           ATTR_GNU, true,  0},
+    {NULL, 0, false, 0},
 };
 
 static const AttrInfo *find_attr_info(char *name) {
@@ -1070,12 +1070,12 @@ static bool is_has_builtin_supported(char *name) {
     return false;
 }
 
-static bool is_has_c_attribute_supported(char *vendor, char *name) {
+static long is_has_c_attribute_supported(char *vendor, char *name) {
     const AttrInfo *a = find_attr_info(name);
-    if (!a) return false;
-    if (!vendor) return a->cat == ATTR_STD;
-    if (!strcmp(vendor, "cccc")) return a->cat == ATTR_CCCC;
-    return false;
+    if (!a) return 0;
+    if (!vendor) return (a->cat == ATTR_STD) ? a->date : 0;
+    if (!strcmp(vendor, "cccc")) return (a->cat == ATTR_CCCC) ? a->date : 0;
+    return 0;
 }
 
 static int eval_has_name(CCCC *vm, Token **rest, Token *tok, char *kind) {

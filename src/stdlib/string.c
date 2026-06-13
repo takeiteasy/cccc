@@ -68,6 +68,7 @@ void register_string_functions(CCCC *vm) {
     cc_register_cfunc(vm, "strchr", (void*)strchr, 2, 0);
     cc_register_cfunc(vm, "strrchr", (void*)strrchr, 2, 0);
     cc_register_cfunc(vm, "strstr", (void*)strstr, 2, 0);
+    cc_register_cfunc(vm, "strpbrk", (void*)strpbrk, 2, 0);
 
     // Other string functions
     cc_register_cfunc(vm, "strxfrm", (void*)strxfrm, 3, 0);

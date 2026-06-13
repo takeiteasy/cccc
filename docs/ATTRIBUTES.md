@@ -15,9 +15,11 @@ CCCC provides the common `__has_*` operators in preprocessor conditionals:
 `c_static_assert`. Parsed-but-incomplete features such as `_Atomic` and
 `_Thread_local` intentionally return `0`.
 
-`__has_attribute`, `__has_builtin`, and `__has_c_attribute` return `1` only for
-attributes and builtins with compiler semantics. Parsed-but-ignored attributes
-return `0`. `__has_cpp_attribute` returns `0`.
+`__has_attribute` and `__has_builtin` return `1` only for attributes and builtins
+with compiler semantics; parsed-but-ignored attributes return `0`.
+`__has_c_attribute` returns the C23 version date (`202311L`) for standard C23
+attributes (C23 N3220 §6.10.10.2) and `1` for CCCC vendor attributes;
+unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 
 ## Quick Reference
 

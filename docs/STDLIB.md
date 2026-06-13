@@ -150,7 +150,7 @@ if (__builtin_mul_overflow(a, b, &r))
 | `<stddef.h>` | ✓ | |
 | `<stdio.h>` | ✓ | |
 | `<stdlib.h>` | ✓ | |
-| `<string.h>` | ✓ | |
+| `<string.h>` | ✓ | `strchr`, `strrchr`, `strstr`, `strpbrk` are const-correct via `_Generic` dispatch macros: return type matches const-ness of the input pointer. `strpbrk` added in C23. `memchr` returns `void *` (no const dispatch — accepts any pointer type). |
 | `<time.h>` | ✓ | |
 
 ### C99
@@ -196,7 +196,7 @@ C17 is a bug-fix release — no new language features or library functions were 
 
 | Header / Function | Status | Notes |
 |---|---|---|
-| `<stdbit.h>` | ~ | Core `stdc_leading_zeros`/`trailing_zeros`/`count_ones`/`bit_width`/`bit_floor`/`bit_ceil`/`has_single_bit` for `_ui`/`_ul`/`_ull`; `uint8_t`/`uint16_t` variants and `_Generic` dispatch macros tracked separately |
+| `<stdbit.h>` | ✓ | All 14 operations (`leading/trailing zeros/ones`, `count ones/zeros`, `bit_width`, `has_single_bit`, `bit_floor`, `bit_ceil`, `first_leading/trailing one/zero`) for all 5 width suffixes (`_uc`/`_us`/`_ui`/`_ul`/`_ull`); `_Generic` dispatch macros; `__STDC_ENDIAN_*` macros |
 | `<stdckdint.h>` — checked integer arithmetic | ✓ | `ckd_add`/`ckd_sub`/`ckd_mul` via `__builtin_*_overflow` |
 | `memset_explicit` | ✓ | |
 | `memchr` | ✓ | |
