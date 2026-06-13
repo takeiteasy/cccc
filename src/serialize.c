@@ -605,7 +605,7 @@ static void serialize_string(FILE *f, const char *str) {
             if (*p >= 32 && *p < 127)
                 fputc(*p, f);
             else
-                fprintf(f, "\\x%02x", (unsigned char)*p);
+                fprintf(f, "\\%03o", (unsigned char)*p);
             break;
         }
     }
