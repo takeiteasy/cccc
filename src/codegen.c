@@ -1130,6 +1130,7 @@ static void cccc_default_asm_passthru(CCCC *vm, const char *asm_str) {
     emit_word(vm, ffi_idx);
     emit_word(vm, 0);
     emit_i64(vm, 0);
+    emit_i64(vm, 0);
 #else
     (void)asm_str;
     error("--asm-passthru is not supported on Windows");
@@ -2434,15 +2435,19 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
             // Slots 0-7 use REG_A0-A7; slots 8+ are pushed on the VM stack.
             reset_temp_regs();
 
-            // Count arguments and compute double_arg_mask
+            // Count arguments and compute double_arg_mask/float_arg_mask
             int nargs = 0;
             uint64_t double_arg_mask = 0;
+            uint64_t float_arg_mask = 0;
             for (Node *arg = node->args; arg; arg = arg->next) {
                 if (is_flonum(arg->ty)) {
                     if (nargs >= 64)
                         error_tok(vm, arg->tok,
                                   "too many floating-point FFI arguments");
-                    double_arg_mask |= (1ULL << nargs);
+                    if (arg->ty->kind == TY_FLOAT)
+                        float_arg_mask |= (1ULL << nargs);
+                    else
+                        double_arg_mask |= (1ULL << nargs);
                 }
                 nargs++;
             }
@@ -2466,7 +2471,7 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
                 Node *arg = arg_array[i];
                 if (is_flonum(arg->ty)) {
                     gen_expr(vm, arg, FREG_A0);
-                    emit_rr(vm, FR2R, REG_T0, FREG_A0);
+                    emit_rr(vm, fop_for_type(arg->ty, FR2R), REG_T0, FREG_A0);
                 } else {
                     gen_expr(vm, arg, REG_T0);
                 }
@@ -2501,7 +2506,7 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
 
                 if (is_flonum(arg->ty)) {
                     gen_expr(vm, arg, FREG_A0);
-                    emit_rr(vm, FR2R, REG_A0 + i, FREG_A0);
+                    emit_rr(vm, fop_for_type(arg->ty, FR2R), REG_A0 + i, FREG_A0);
                 } else {
                     gen_expr(vm, arg, REG_A0 + i);
                 }
@@ -2520,11 +2525,12 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
             if (arg_array)
                 free(arg_array);
 
-            // Emit CALLF with 3 operands: ffi_idx, nargs, double_arg_mask
+            // Emit CALLF with operands: ffi_idx, nargs, double_arg_mask, float_arg_mask
             emit(vm, CALLF);
             emit_word(vm, ffi_idx);
             emit_word(vm, nargs);
             emit_i64(vm, (long long)double_arg_mask);
+            emit_i64(vm, (long long)float_arg_mask);
 
             if (num_stack_args > 0) {
                 emit_with_arg(vm, ADJ, num_stack_args);
@@ -2679,12 +2685,18 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
         // Count total args and collect into array for indexed access
         int nargs = 0;
         uint64_t call_double_arg_mask = 0;
+        uint64_t call_float_arg_mask = 0;
         for (Node *a = node->args; a; a = a->next) {
             if (is_flonum(a->ty)) {
                 if (nargs >= 64)
                     error_tok(vm, a->tok,
                               "too many floating-point native-call arguments");
-                call_double_arg_mask |= (1ULL << nargs);
+                // Variadic tail args are promoted float->double by the parser,
+                // so a TY_FLOAT arg here is always a fixed parameter.
+                if (a->ty->kind == TY_FLOAT)
+                    call_float_arg_mask |= (1ULL << nargs);
+                else
+                    call_double_arg_mask |= (1ULL << nargs);
             }
             nargs++;
         }
@@ -2882,9 +2894,12 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
             gen_expr(vm, node->lhs, r_fn);
             emit(vm, CALLN);
             emit_word(vm, ENCODE_R(r_fn));
-            emit_word(vm, ((CCCCInstrWord)(is_flonum(node->ty) ? 1 : 0) << 16) |
+            emit_word(vm, ((CCCCInstrWord)(node->ty->kind == TY_FLOAT ? 0
+                                            : is_flonum(node->ty) ? 1 : 0) << 16) |
+                              ((CCCCInstrWord)(node->ty->kind == TY_FLOAT ? 1 : 0) << 17) |
                               (CCCCInstrWord)(nargs & 0xFFFF));
             emit_i64(vm, (long long)call_double_arg_mask);
+            emit_i64(vm, (long long)call_float_arg_mask);
             free_temp_reg(r_fn);
         }
 

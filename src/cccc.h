@@ -56,7 +56,7 @@ extern "C" {
     X(CALL, 1)  /* Call function (direct) */                                   \
     X(CALLT, 1) /* Tail call (direct): reuse current frame */                  \
     X(CALLI, 1) /* Call function (indirect via register) */                    \
-    X(CALLN, 4) /* Native-aware indirect call */                               \
+    X(CALLN, 6) /* Native-aware indirect call */                               \
     X(JMPT, 3)  /* Jump table */                                               \
     X(JMPI, 1)  /* Indirect jump */                                            \
     /* VM memory operations (self-contained, no system calls) */               \
@@ -72,7 +72,7 @@ extern "C" {
     X(ZX1, 1)   /* Zero extend 1 byte to 8 bytes */                            \
     X(ZX2, 1)   /* Zero extend 2 bytes to 8 bytes */                           \
     X(ZX4, 1)   /* Zero extend 4 bytes to 8 bytes */                           \
-    X(CALLF, 4) /* Foreign function interface */                               \
+    X(CALLF, 6) /* Foreign function interface */                               \
     X(DLOPEN, 0)                                                                \
     X(DLSYM, 0)                                                                 \
     X(DLCLOSE, 0)                                                               \
@@ -1197,6 +1197,8 @@ typedef void (*CCCCAsmCallback)(CCCC *vm, const char *asm_str, void *user_data);
  non-variadic, fixed args for variadic).
  @field returns_double True if function returns double, false if returns long
  long.
+ @field returns_float True if function returns a single-precision float
+ (mutually exclusive with returns_double).
  @field is_variadic True if function is variadic (accepts ... arguments).
  @field num_fixed_args For variadic functions: number of fixed args before ...
  (e.g., printf has 1: format string).
@@ -1207,6 +1209,7 @@ typedef struct ForeignFunc {
     void *func_ptr;
     int num_args;
     int returns_double;
+    int returns_float; // 1 if function returns float (32-bit), 0 otherwise (#406)
     int is_variadic;    // 1 if function is variadic (e.g., printf), 0 otherwise
     int num_fixed_args; // For variadic functions, number of fixed args (rest
                         // are variable)
@@ -2123,11 +2126,11 @@ void cc_ffi_clear_deny_list(CCCC *vm);
  @param name Function name (must match declarations in C source).
  @param func_ptr Pointer to the native C function.
  @param num_args Number of arguments the function expects.
- @param returns_double 1 if function returns double, 0 if returns long long.
+ @param returns_double Return type: 0 = long long, 1 = double, 2 = float (#406).
  @discussion Registered functions can be called from C code compiled to VM
              bytecode. The CALLF instruction handles argument marshalling.
-             All integer types are passed/returned as long long, floats as
- double.
+             All integer types are passed/returned as long long, doubles as
+ double, and `float`-returning functions use returns_double=2.
 */
 void cc_register_cfunc(CCCC *vm, const char *name, void *func_ptr, int num_args,
                        int returns_double);
@@ -2140,7 +2143,7 @@ void cc_register_cfunc(CCCC *vm, const char *name, void *func_ptr, int num_args,
  @param name Function name (must match declarations in C source).
  @param func_ptr Pointer to the native C function.
  @param num_args Total number of arguments.
- @param returns_double 1 if function returns double, 0 if returns long long.
+ @param returns_double Return type: 0 = long long, 1 = double, 2 = float (#406).
  @param double_arg_mask Bitmask indicating which arguments are doubles. Bit N
  corresponds to argument N (0-indexed). For example: 0b11 = both args 0 and 1
  are doubles (e.g., pow(double, double)). 0b01 = only arg 0 is double (e.g.,
@@ -2149,7 +2152,9 @@ void cc_register_cfunc(CCCC *vm, const char *name, void *func_ptr, int num_args,
  take multiple double arguments or mix double and integer arguments. The bitmask
  ensures correct calling conventions on all platforms. For functions with only
  integer arguments or single double arguments, cc_register_cfunc() is
- sufficient.
+ sufficient. Note: float-typed arguments are tracked separately via
+ the per-call-site float_arg_mask computed in codegen; this registration-time
+ mask only needs to flag double-typed arguments.
 */
 void cc_register_cfunc_ex(CCCC *vm, const char *name, void *func_ptr,
                           int num_args, int returns_double,
@@ -2164,7 +2169,7 @@ void cc_register_cfunc_ex(CCCC *vm, const char *name, void *func_ptr,
  @param func_ptr Pointer to the native C variadic function.
  @param num_fixed_args Number of fixed arguments before the ... (e.g., printf
  has 1: format string).
- @param returns_double 1 if function returns double, 0 if returns long long.
+ @param returns_double Return type: 0 = long long, 1 = double, 2 = float (#406).
  @discussion Variadic functions accept a variable number of arguments after the
  fixed arguments. CCCC uses platform native inline-assembly to call variadic
  functions. Example: printf has 1 fixed arg (format), fprintf has 2 (stream,
@@ -2201,7 +2206,8 @@ void cc_load_stdlib(CCCC *vm);
  @param name Function name to update.
  @param func_ptr New function pointer to assign.
  @param num_args Expected number of arguments (must match registered function).
- @param returns_double Expected return type (must match registered function).
+ @param returns_double Expected return type (must match registered function);
+ 0 = long long, 1 = double, 2 = float (#406).
  @return 0 on success, -1 on error (function not found or signature mismatch).
  @discussion This function is useful for updating function pointers after
  loading a dynamic library, or for redirecting calls to different

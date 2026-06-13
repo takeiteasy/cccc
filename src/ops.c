@@ -1408,7 +1408,9 @@ static inline int op_CALLN_fn(CCCC *vm) {
     CCCCInstrWord meta = cc_read_word(vm);
     int actual_nargs = (int)(meta & 0xFFFF);
     int returns_double = (int)((meta >> 16) & 1);
+    int returns_float = (int)((meta >> 17) & 1);
     uint64_t double_arg_mask = (uint64_t)cc_read_i64(vm);
+    uint64_t float_arg_mask = (uint64_t)cc_read_i64(vm);
 
     long long target_value = vm->regs[rs];
     DynamicSymbol *sym = cccc_find_dynamic_symbol(vm, target_value);
@@ -1431,6 +1433,9 @@ static inline int op_CALLN_fn(CCCC *vm) {
         for (int i = 0; i < actual_nargs; i++) {
             if (i >= 8) {
                 args[i] = vm->sp[i - 8];
+            } else if (i < 64 && (float_arg_mask & (1ULL << i))) {
+                args[i] = (long long)(unsigned int)cccc_freg_raw_f32(
+                    vm, FREG_A0 + fp_reg_idx++);
             } else if (i < 64 && (double_arg_mask & (1ULL << i))) {
                 args[i] = cccc_freg_raw_f64(vm, FREG_A0 + fp_reg_idx++);
             } else {
@@ -1440,7 +1445,8 @@ static inline int op_CALLN_fn(CCCC *vm) {
 
         int rc = cccc_call_native_function(vm, sym->func_ptr, sym->name, args,
                                           actual_nargs, double_arg_mask,
-                                          returns_double, 0, actual_nargs);
+                                          float_arg_mask, returns_double,
+                                          returns_float, 0, actual_nargs);
         free(heap_args);
         return rc;
     }
@@ -2284,7 +2290,8 @@ static int cccc_check_ffi_policy(CCCC *vm, const char *name, int actual_nargs,
 
 int cccc_call_native_function(CCCC *vm, void *func_ptr, const char *name,
                              long long *args, int actual_nargs,
-                             uint64_t double_arg_mask, int returns_double,
+                             uint64_t double_arg_mask, uint64_t float_arg_mask,
+                             int returns_double, int returns_float,
                              int is_variadic, int num_fixed_args) {
     if (!func_ptr) {
         printf("error: native function '%s' not resolved\n",
@@ -2299,15 +2306,20 @@ int cccc_call_native_function(CCCC *vm, void *func_ptr, const char *name,
 
     ffi_cif cif;
     ffi_type **arg_types = NULL;
-    ffi_type *return_type =
-        returns_double ? &ffi_type_double : &ffi_type_sint64;
+    ffi_type *return_type = returns_float    ? &ffi_type_float
+                             : returns_double ? &ffi_type_double
+                                              : &ffi_type_sint64;
 
     if (actual_nargs > 0) {
         arg_types = alloca((size_t)actual_nargs * sizeof(ffi_type *));
-        for (int i = 0; i < actual_nargs; i++)
-            arg_types[i] = (i < 64 && (double_arg_mask & (1ULL << i)))
-                               ? &ffi_type_double
-                               : &ffi_type_sint64;
+        for (int i = 0; i < actual_nargs; i++) {
+            if (i < 64 && (float_arg_mask & (1ULL << i)))
+                arg_types[i] = &ffi_type_float;
+            else if (i < 64 && (double_arg_mask & (1ULL << i)))
+                arg_types[i] = &ffi_type_double;
+            else
+                arg_types[i] = &ffi_type_sint64;
+        }
     }
 
     ffi_status status;
@@ -2327,12 +2339,18 @@ int cccc_call_native_function(CCCC *vm, void *func_ptr, const char *name,
         return -1;
     }
 
+    // Float args are stored in the low 32 bits of each 64-bit slot (host is
+    // little-endian), so &args[i] is also a valid ffi_type_float source.
     void **arg_ptrs =
         alloca((size_t)(actual_nargs > 0 ? actual_nargs : 1) * sizeof(void *));
     for (int i = 0; i < actual_nargs; i++)
         arg_ptrs[i] = &args[i];
 
-    if (returns_double) {
+    if (returns_float) {
+        float result;
+        ffi_call(&cif, FFI_FN(func_ptr), &result, arg_ptrs);
+        cccc_freg_set_f32(vm, FREG_A0, result);
+    } else if (returns_double) {
         double result;
         ffi_call(&cif, FFI_FN(func_ptr), &result, arg_ptrs);
         cccc_freg_set_f64(vm, FREG_A0, result);
@@ -2347,10 +2365,11 @@ int cccc_call_native_function(CCCC *vm, void *func_ptr, const char *name,
 
 static inline int op_CALLF_fn(CCCC *vm) {
     // Foreign function call using register-based calling convention
-    // Operands: [ffi_idx, nargs, double_arg_mask]
+    // Operands: [ffi_idx, nargs, double_arg_mask, float_arg_mask]
     int func_idx = (int)cc_read_word(vm);
     int actual_nargs = (int)cc_read_word(vm);
     uint64_t double_arg_mask = (uint64_t)cc_read_i64(vm);
+    uint64_t float_arg_mask = (uint64_t)cc_read_i64(vm);
 
     if (func_idx < 0 || func_idx >= vm->compiler.ffi_count) {
         printf("error: invalid FFI function index: %d\n", func_idx);
@@ -2365,9 +2384,10 @@ static inline int op_CALLF_fn(CCCC *vm) {
 
     if (vm->debug_vm)
         printf("CALLF: calling %s with %d args (fixed: %d, variadic: %d, "
-               "double_mask: 0x%llx)\n",
+               "double_mask: 0x%llx, float_mask: 0x%llx)\n",
                ff->name, actual_nargs, ff->num_fixed_args, ff->is_variadic,
-               (unsigned long long)double_arg_mask);
+               (unsigned long long)double_arg_mask,
+               (unsigned long long)float_arg_mask);
 
     enum { CALLF_STACK_ARG_SLOTS = 32 };
     long long stack_args_buf[CALLF_STACK_ARG_SLOTS];
@@ -2390,13 +2410,15 @@ static inline int op_CALLF_fn(CCCC *vm) {
 
         if (vm->debug_vm)
             printf("  arg[%d] = 0x%llx (%lld) [%s]\n", i, args[i], args[i],
-                   (i < 64 && (double_arg_mask & (1ULL << i))) ? "double"
+                   (i < 64 && (float_arg_mask & (1ULL << i)))  ? "float"
+                   : (i < 64 && (double_arg_mask & (1ULL << i))) ? "double"
                                                                 : "int");
     }
 
     int rc = cccc_call_native_function(vm, ff->func_ptr, ff->name, args,
                                       actual_nargs, double_arg_mask,
-                                      ff->returns_double, ff->is_variadic,
+                                      float_arg_mask, ff->returns_double,
+                                      ff->returns_float, ff->is_variadic,
                                       ff->num_fixed_args);
     free(heap_args);
     return rc;

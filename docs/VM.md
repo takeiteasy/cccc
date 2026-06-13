@@ -268,8 +268,8 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 
 | Opcode | Description |
 |--------|-------------|
-| `CALLF` | Registered foreign-function call via `libffi`.  Operands: `ffi_idx`, `nargs`, `double_arg_mask` |
-| `CALLN` | Native-aware indirect call (dynamic symbol or VM function).  Operands: `rs`, `meta`, `double_arg_mask` |
+| `CALLF` | Registered foreign-function call via `libffi`.  Operands: `ffi_idx`, `nargs`, `double_arg_mask` (2 words), `float_arg_mask` (2 words) — total 6 operand words |
+| `CALLN` | Native-aware indirect call (dynamic symbol or VM function).  Operands: `rs`, `meta` (bits 0-15 = nargs, bit 16 = returns_double, bit 17 = returns_float), `double_arg_mask` (2 words), `float_arg_mask` (2 words) — total 6 operand words |
 
 ### Bit-Manipulation Builtins
 
@@ -355,7 +355,7 @@ Saved bytecode files are self-contained and can be loaded into a fresh VM instan
 +---------------+
 | FFI count     |  8 bytes
 +---------------+
-| FFI entries   |  name_len, name, num_args, returns_double,
+| FFI entries   |  name_len, name, num_args, returns_double, returns_float,
 |               |  is_variadic, num_fixed_args, double_arg_mask,
 |               |  is_dynamic_placeholder, is_asm_passthru,
 |               |  asm_src_len, asm_src (asm_src_len bytes)

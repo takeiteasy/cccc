@@ -870,7 +870,8 @@ pointers valid.
 <a name="//apple_ref/doc/functionparam/cc_dlsym/returns_double"></a>
 <code>returns_double</code>
 </dt>
-<dd><p>Expected return type (must match registered function).</p></dd>
+<dd><p>Expected return type (must match registered function);
+0 = long long, 1 = double, 2 = float (#406).</p></dd>
 </dl>
 </div>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
@@ -2021,14 +2022,14 @@ preprocessor and tokenizer).
 <a name="//apple_ref/doc/functionparam/cc_register_cfunc/returns_double"></a>
 <code>returns_double</code>
 </dt>
-<dd><p>1 if function returns double, 0 if returns long long.</p></dd>
+<dd><p>Return type: 0 = long long, 1 = double, 2 = float (#406).</p></dd>
 </dl>
 </div>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
 <!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/cc_register_cfunc;name=start --><p>Registered functions can be called from C code compiled to VM
 bytecode. The CALLF instruction handles argument marshalling.
-All integer types are passed/returned as long long, floats as
-double.
+All integer types are passed/returned as long long, doubles as
+double, and `float`-returning functions use returns_double=2.
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/cc_register_cfunc;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
@@ -2081,7 +2082,7 @@ correct FFI calling conventions.
 <a name="//apple_ref/doc/functionparam/cc_register_cfunc_ex/returns_double"></a>
 <code>returns_double</code>
 </dt>
-<dd><p>1 if function returns double, 0 if returns long long.</p></dd>
+<dd><p>Return type: 0 = long long, 1 = double, 2 = float (#406).</p></dd>
 <dt>
 <!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/cc_register_cfunc_ex/double_arg_mask;   name=double_arg_mask -->
 <a name="//apple_ref/doc/functionparam/cc_register_cfunc_ex/double_arg_mask"></a>
@@ -2098,7 +2099,9 @@ ldexp(double, int)).</p></dd>
 take multiple double arguments or mix double and integer arguments. The bitmask
 ensures correct calling conventions on all platforms. For functions with only
 integer arguments or single double arguments, cc_register_cfunc() is
-sufficient.
+sufficient. Note: float-typed arguments are tracked separately via
+the per-call-site float_arg_mask computed in codegen; this registration-time
+mask only needs to flag double-typed arguments.
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/cc_register_cfunc_ex;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
@@ -2151,7 +2154,7 @@ has 1: format string).</p></dd>
 <a name="//apple_ref/doc/functionparam/cc_register_variadic_cfunc/returns_double"></a>
 <code>returns_double</code>
 </dt>
-<dd><p>1 if function returns double, 0 if returns long long.</p></dd>
+<dd><p>Return type: 0 = long long, 1 = double, 2 = float (#406).</p></dd>
 </dl>
 </div>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
@@ -3483,6 +3486,7 @@ code.
     <!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <span class="type">*</span><!-- a logicalPath="//apple_ref/c/econst/func_ptr //apple_ref/c/data/func_ptr //apple_ref/c/clconst/func_ptr " machineGenerated="true" --><span class="var">func_ptr</span><!-- /a -->; 
     <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/num_args //apple_ref/c/data/num_args //apple_ref/c/clconst/num_args " machineGenerated="true" --><span class="var">num_args</span><!-- /a -->; 
     <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/returns_double //apple_ref/c/data/returns_double //apple_ref/c/clconst/returns_double " machineGenerated="true" --><span class="var">returns_double</span><!-- /a -->; 
+    <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/returns_float //apple_ref/c/data/returns_float //apple_ref/c/clconst/returns_float " machineGenerated="true" --><span class="var">returns_float</span><!-- /a -->; <span class="comment">// 1 if function returns float (32-bit), 0 otherwise (#406)</span> 
     <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/is_variadic //apple_ref/c/data/is_variadic //apple_ref/c/clconst/is_variadic " machineGenerated="true" --><span class="var">is_variadic</span><!-- /a -->; <span class="comment">// 1 if function is variadic (e.g., printf), 0 otherwise</span> 
     <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <!-- a logicalPath="//apple_ref/c/econst/num_fixed_args //apple_ref/c/data/num_fixed_args //apple_ref/c/clconst/num_fixed_args " machineGenerated="true" --><span class="var">num_fixed_args</span><!-- /a -->; <span class="comment">// For variadic functions, number of fixed args (rest</span> 
     <span class="comment">// are variable)</span> 
@@ -3522,6 +3526,13 @@ non-variadic, fixed args for variadic).</p></dd>
 </dt>
 <dd><p>True if function returns double, false if returns long
 long.</p></dd>
+<dt>
+<!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/ForeignFunc/returns_float;   name=returns_float -->
+<a name="//apple_ref/doc/structfield/ForeignFunc/returns_float"></a>
+<code>returns_float</code>
+</dt>
+<dd><p>True if function returns a single-precision float
+(mutually exclusive with returns_double).</p></dd>
 <dt>
 <!-- headerDoc=structfield;  uid=//apple_ref/doc/structfield/ForeignFunc/is_variadic;   name=is_variadic -->
 <a name="//apple_ref/doc/structfield/ForeignFunc/is_variadic"></a>

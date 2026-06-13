@@ -36,7 +36,7 @@
 //   Return buffer offsets: data-segment byte offset for each buffer
 //   FFI table count (8 bytes)
 //   FFI entries: name_len (4 bytes), name (name_len bytes),
-//                num_args (4), returns_double (4), is_variadic (4),
+//                num_args (4), returns_double (4), returns_float (4), is_variadic (4),
 //                num_fixed_args (4), double_arg_mask (8), is_dynamic_placeholder (4)
 
 static int get_opcode_operand_count(int op) {
@@ -218,6 +218,7 @@ int cc_write_bytecode(CCCC *vm, FILE *f) {
         }
         int num_args = ff->num_args;
         int returns_double = ff->returns_double;
+        int returns_float = ff->returns_float;
         int is_variadic = ff->is_variadic;
         int num_fixed_args = ff->num_fixed_args;
         uint64_t double_arg_mask = ff->double_arg_mask;
@@ -227,6 +228,7 @@ int cc_write_bytecode(CCCC *vm, FILE *f) {
                           ? (int)strlen(ff->asm_src) : 0;
         if (fwrite(&num_args, sizeof(int), 1, f) != 1) goto write_error;
         if (fwrite(&returns_double, sizeof(int), 1, f) != 1) goto write_error;
+        if (fwrite(&returns_float, sizeof(int), 1, f) != 1) goto write_error;
         if (fwrite(&is_variadic, sizeof(int), 1, f) != 1) goto write_error;
         if (fwrite(&num_fixed_args, sizeof(int), 1, f) != 1) goto write_error;
         if (fwrite(&double_arg_mask, sizeof(uint64_t), 1, f) != 1) goto write_error;
@@ -475,6 +477,7 @@ static int load_bytecode(CCCC *vm, const char *data, size_t size) {
         }
         READ_AND_INCR(num_args_i, int);
         READ_AND_INCR(returns_double_i, int);
+        READ_AND_INCR(returns_float_i, int);
         READ_AND_INCR(is_variadic_i, int);
         READ_AND_INCR(num_fixed_args_i, int);
         READ_AND_INCR(double_arg_mask, uint64_t);
@@ -507,6 +510,7 @@ static int load_bytecode(CCCC *vm, const char *data, size_t size) {
         ff->func_ptr = NULL;
         ff->num_args = num_args_i;
         ff->returns_double = returns_double_i;
+        ff->returns_float = returns_float_i;
         ff->is_variadic = is_variadic_i;
         ff->num_fixed_args = num_fixed_args_i;
         ff->double_arg_mask = double_arg_mask;

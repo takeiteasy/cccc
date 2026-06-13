@@ -39,7 +39,7 @@
 #endif
 
 #define CCCC_MAGIC "CCCC\0"
-#define CCCC_VERSION 9 // Version 9: asm-passthru FFI rehydration (is_asm_passthru + asm_src)
+#define CCCC_VERSION 10 // Version 10: float FFI args/returns (returns_float, CALLF/CALLN float_arg_mask) (#406)
 
 // Stack canary constant for detecting stack overflows (used when random
 // canaries disabled)
@@ -488,7 +488,8 @@ int cccc_ffi_name_in_list(char **list, int count, const char *name);
 DynamicSymbol *cccc_find_dynamic_symbol(CCCC *vm, long long token);
 int cccc_call_native_function(CCCC *vm, void *func_ptr, const char *name,
                              long long *args, int actual_nargs,
-                             uint64_t double_arg_mask, int returns_double,
+                             uint64_t double_arg_mask, uint64_t float_arg_mask,
+                             int returns_double, int returns_float,
                              int is_variadic, int num_fixed_args);
 
 //

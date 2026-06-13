@@ -1271,6 +1271,17 @@ void cc_register_cfunc(CCCC *vm, const char *name, void *func_ptr, int num_args,
     cc_register_cfunc_ex(vm, name, func_ptr, num_args, returns_double, 0);
 }
 
+// Tri-state return-type encoding used by cc_register_cfunc[_ex|_variadic]
+// and cc_dlsym: 0 = long long, 1 = double, 2 = float (#406).
+static void set_return_kind(ForeignFunc *ff, int returns_double_param) {
+    ff->returns_double = (returns_double_param == 1);
+    ff->returns_float = (returns_double_param == 2);
+}
+
+static int get_return_kind(ForeignFunc *ff) {
+    return ff->returns_float ? 2 : ff->returns_double ? 1 : 0;
+}
+
 static ForeignFunc *find_registered_ffi(CCCC *vm, const char *name) {
     size_t name_len = strlen(name);
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
@@ -1305,7 +1316,7 @@ void cc_register_cfunc_ex(CCCC *vm, const char *name, void *func_ptr, int num_ar
     if (existing) {
         existing->func_ptr = func_ptr;
         existing->num_args = num_args;
-        existing->returns_double = returns_double;
+        set_return_kind(existing, returns_double);
         existing->is_variadic = 0;
         existing->num_fixed_args = num_args;
         existing->double_arg_mask = double_arg_mask;
@@ -1321,7 +1332,8 @@ void cc_register_cfunc_ex(CCCC *vm, const char *name, void *func_ptr, int num_ar
         .name_len = strlen(name),
         .func_ptr = func_ptr,
         .num_args = num_args,
-        .returns_double = returns_double,
+        .returns_double = (returns_double == 1),
+        .returns_float = (returns_double == 2),
         .is_variadic = 0,
         .num_fixed_args = num_args,
         .double_arg_mask = double_arg_mask
@@ -1338,7 +1350,7 @@ void cc_register_variadic_cfunc(CCCC *vm, const char *name, void *func_ptr, int 
     if (existing) {
         existing->func_ptr = func_ptr;
         existing->num_args = num_fixed_args;
-        existing->returns_double = returns_double;
+        set_return_kind(existing, returns_double);
         existing->is_variadic = 1;
         existing->num_fixed_args = num_fixed_args;
         existing->double_arg_mask = 0;
@@ -1356,7 +1368,8 @@ void cc_register_variadic_cfunc(CCCC *vm, const char *name, void *func_ptr, int 
         .name_len = strlen(name),
         .func_ptr = func_ptr,
         .num_args = num_fixed_args,  // Will be updated during CALLF
-        .returns_double = returns_double,
+        .returns_double = (returns_double == 1),
+        .returns_float = (returns_double == 2),
         .is_variadic = 1,
         .num_fixed_args = num_fixed_args,
         .double_arg_mask = 0  // Variadic functions don't use mask - doubles passed as bits
@@ -1371,7 +1384,7 @@ int cc_dlsym(CCCC *vm, const char *name, void *func_ptr, int num_args, int retur
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
         if (vm->compiler.ffi_table[i].name_len == name_len &&
             memcmp(vm->compiler.ffi_table[i].name, name, name_len) == 0) {
-            if (vm->compiler.ffi_table[i].num_args != num_args || vm->compiler.ffi_table[i].returns_double != returns_double) {
+            if (vm->compiler.ffi_table[i].num_args != num_args || get_return_kind(&vm->compiler.ffi_table[i]) != returns_double) {
                 fprintf(stderr, "error: FFI function '%s' signature mismatch\n", name);
                 return -1;
             }
