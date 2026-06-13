@@ -50,6 +50,9 @@ Correctness: all benchmarks produce identical output across all configs
 Two significant VM improvements are reflected in these numbers:
 - **#227 — inlined threaded dispatch**: opcode logic is embedded directly at each computed-goto label rather than dispatched through a C function call per instruction (1.2–1.7× improvement on VM-bound workloads).
 - **#250 — fused local load/store opcodes**: the ubiquitous `LEA3+LDR/STR` two-opcode address+dereference sequence for local variables is replaced by a single `LDR_LOCAL_*`/`STR_LOCAL_*` opcode (~23% geomean improvement over the pre-#250 baseline).
+- **#249 — scalar local promotion**: at `--optimize=2` and `--optimize=3`, hot eligible integer/pointer locals are held in VM saved registers and flushed at function exits, cutting repeated local load/store traffic in tight loops.
+
+Recent #249 validation on 2026-06-13 used single-run, no-JBC timing for the four targeted hot-loop benchmarks (`python3 tools/bench.py --benchmarks profile/benchmarks --filter ... --runs 1 --warmup 0 --no-jbc`). Correctness matched across all CCCC and GCC configs. The clearest wins were in local-heavy loops: sieve improved from 70.2× to 65.1× slower than `gcc -O2` at `--optimize=2`, nqueens from 10.2× to 9.3×, and matrix multiplication from 38.2× to 33.9×. Quicksort was neutral-to-slightly slower in this run, from 13.6× to 14.0× at `--optimize=2`, so it remains a target for address-calculation work.
 
 Re-run `make bench-compare` to get updated numbers for your machine.
 

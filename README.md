@@ -210,6 +210,7 @@ When code does run on the VM (macro bodies, `--vm-heap` allocations, the debugge
 VM work focuses on what matters for macro expansion cost and VM-only workflows (debugger, safety suite, profiling). Recent improvements that have driven the gap down from an earlier ~21× baseline:
 - **Inlined threaded dispatch (#227)**: opcode logic is embedded at each computed-goto label rather than dispatched through a C function call per instruction.
 - **Fused local load/store opcodes (#250)**: the common `LEA3+LDR/STR` two-opcode address+dereference sequence for local variables is replaced by single `LDR_LOCAL_*`/`STR_LOCAL_*` opcodes, eliminating one dispatch and one register-pressure hop per scalar local access.
+- **Scalar local promotion (#249)**: under `--optimize=2` and `--optimize=3`, hot eligible integer/pointer locals are kept in VM saved registers across straight-line code and simple loops, reducing repeated local load/store traffic.
 
 ## Building
 

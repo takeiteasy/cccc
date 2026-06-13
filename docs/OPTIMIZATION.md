@@ -25,7 +25,7 @@ CCCC includes optional bytecode optimization passes that can improve execution p
 |-------|------|-------------|--------|
 | 0 | (default) | No optimization | None |
 | 1 | `--optimize` or `--optimize=1` | Basic | Constant folding |
-| 2 | `--optimize=2` | Standard | Constant folding + Peephole |
+| 2 | `--optimize=2` | Standard | Constant folding + Peephole + scalar local promotion |
 | 3 | `--optimize=3` | Aggressive | All passes |
 
 ## Optimization Passes
@@ -40,6 +40,12 @@ runs. Dense `switch` statements use the VM's `JMPT` jump-table instruction, whil
 sparse switches use a balanced compare/jump tree. Label and function-call patch
 resolution uses hash maps during codegen so large functions and multi-file
 programs avoid quadratic patch scans.
+
+At `--optimize=2` and above, code generation also promotes hot eligible
+integer/pointer locals to VM saved registers. Promoted locals exclude volatile,
+address-escaping, aggregate, array, captured, block, VLA, floating, complex, and
+debugger-visible cases; dirty values are flushed back to their stack slots at
+function exits.
 
 ### Phase 1: Constant Folding (`--optimize=1`)
 

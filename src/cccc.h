@@ -1816,6 +1816,16 @@ typedef struct Compiler {
     int ent3_base_stack;    // Original stack_size before inlining additions
     int ent3_extra_stack;   // Additional stack slots from inlined locals
 
+    // Scalar local promotion (#249). Active only while generating one function.
+    Obj *promoted_locals[8];
+    int promoted_regs[8];
+    int promoted_save_offsets[8];
+    bool promoted_dirty[8];
+    int promoted_count;
+    Obj *promotion_alias_vars[16];
+    Obj *promotion_alias_targets[16];
+    int promotion_alias_count;
+
     // C language standard selection
     CStdVersion c_std;  // Selected standard version (default: CCCC_STD_C23)
     bool c_std_gnu;     // True for gnuXX variants (gnu17, gnu11, …)

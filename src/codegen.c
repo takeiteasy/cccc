@@ -168,6 +168,8 @@ static const int temp_reg_map[] = {REG_T0, REG_T1, REG_T2, REG_T3,
                                    REG_T8, REG_T9, REG_T10};
 #define NUM_TEMP_REGS 11
 
+static Obj *belongs_to_outer_function(Obj *current_fn, Obj *var);
+
 static int alloc_temp_reg(void) {
     for (int i = 0; i < NUM_TEMP_REGS; i++) {
         if (!(temp_reg_in_use & (1 << i))) {
@@ -199,6 +201,210 @@ static void mark_temp_reg_used(int reg) {
 }
 
 static void reset_temp_regs(void) { temp_reg_in_use = 0; }
+
+// ========== Scalar Local Promotion (#249) ==========
+
+typedef struct {
+    Obj *var;
+    int score;
+    bool address_escapes;
+} PromotionCandidate;
+
+static int promoted_local_index(CCCC *vm, Obj *var) {
+    for (int i = 0; i < vm->compiler.promoted_count; i++)
+        if (vm->compiler.promoted_locals[i] == var)
+            return i;
+    return -1;
+}
+
+static bool is_promoted_local(CCCC *vm, Obj *var) {
+    return promoted_local_index(vm, var) >= 0;
+}
+
+static int promoted_local_reg(CCCC *vm, Obj *var) {
+    int idx = promoted_local_index(vm, var);
+    return idx >= 0 ? vm->compiler.promoted_regs[idx] : -1;
+}
+
+static void promotion_alias_reset(CCCC *vm) {
+    vm->compiler.promotion_alias_count = 0;
+}
+
+static void promotion_alias_add(CCCC *vm, Obj *alias, Obj *target) {
+    if (!alias || !target || vm->compiler.promotion_alias_count >= 16)
+        return;
+    for (int i = 0; i < vm->compiler.promotion_alias_count; i++) {
+        if (vm->compiler.promotion_alias_vars[i] == alias) {
+            vm->compiler.promotion_alias_targets[i] = target;
+            return;
+        }
+    }
+    int idx = vm->compiler.promotion_alias_count++;
+    vm->compiler.promotion_alias_vars[idx] = alias;
+    vm->compiler.promotion_alias_targets[idx] = target;
+}
+
+static Obj *promotion_alias_target(CCCC *vm, Obj *alias) {
+    for (int i = 0; i < vm->compiler.promotion_alias_count; i++)
+        if (vm->compiler.promotion_alias_vars[i] == alias)
+            return vm->compiler.promotion_alias_targets[i];
+    return NULL;
+}
+
+static Obj *promoted_deref_target(CCCC *vm, Node *node) {
+    if (!node || node->kind != ND_DEREF || !node->lhs ||
+        node->lhs->kind != ND_VAR)
+        return NULL;
+    return promotion_alias_target(vm, node->lhs->var);
+}
+
+static bool is_scalar_promotion_type(Type *ty) {
+    if (!ty || ty->is_volatile || ty->size > 8)
+        return false;
+    switch (ty->kind) {
+    case TY_BOOL:
+    case TY_CHAR:
+    case TY_SHORT:
+    case TY_INT:
+    case TY_LONG:
+    case TY_ENUM:
+    case TY_PTR:
+    case TY_BITINT:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool promotion_candidate_ok(CCCC *vm, Obj *fn, Obj *var) {
+    if (!var || !var->is_local || var->is_block_var || var->is_captured ||
+        var->is_static || var == fn->va_area || var == fn->alloca_bottom)
+        return false;
+    if (!is_scalar_promotion_type(var->ty))
+        return false;
+    if (belongs_to_outer_function(fn, var))
+        return false;
+    if (var->name && strncmp(var->name, "__static_link", 14) == 0)
+        return false;
+    return true;
+}
+
+static PromotionCandidate *promotion_find_candidate(PromotionCandidate *cands,
+                                                     int count, Obj *var) {
+    for (int i = 0; i < count; i++)
+        if (cands[i].var == var)
+            return &cands[i];
+    return NULL;
+}
+
+static bool is_synthetic_addr_assignment(Node *parent, Node *addr_node) {
+    if (!parent || parent->kind != ND_ASSIGN || parent->rhs != addr_node)
+        return false;
+    if (!parent->lhs || parent->lhs->kind != ND_VAR || !parent->lhs->var)
+        return false;
+    Obj *lhs = parent->lhs->var;
+    return lhs->is_local && (!lhs->name || lhs->name[0] == '\0');
+}
+
+static void collect_promotion_candidates(CCCC *vm, Obj *fn, Node *node,
+                                         Node *parent,
+                                         PromotionCandidate *cands, int count,
+                                         int loop_depth) {
+    if (!node)
+        return;
+
+    if (node->kind == ND_VAR && node->var) {
+        PromotionCandidate *cand =
+            promotion_find_candidate(cands, count, node->var);
+        if (cand)
+            cand->score += 1 + loop_depth * 4;
+    }
+
+    if (node->kind == ND_ADDR && node->lhs && node->lhs->kind == ND_VAR &&
+        node->lhs->var) {
+        PromotionCandidate *cand =
+            promotion_find_candidate(cands, count, node->lhs->var);
+        if (cand && !is_synthetic_addr_assignment(parent, node))
+            cand->address_escapes = true;
+    }
+
+    int child_loop_depth = loop_depth + (node->kind == ND_FOR || node->kind == ND_DO);
+    collect_promotion_candidates(vm, fn, node->lhs, node, cands, count,
+                                 child_loop_depth);
+    collect_promotion_candidates(vm, fn, node->rhs, node, cands, count,
+                                 child_loop_depth);
+    collect_promotion_candidates(vm, fn, node->cond, node, cands, count,
+                                 child_loop_depth);
+    collect_promotion_candidates(vm, fn, node->then, node, cands, count,
+                                 child_loop_depth);
+    collect_promotion_candidates(vm, fn, node->els, node, cands, count,
+                                 child_loop_depth);
+    collect_promotion_candidates(vm, fn, node->init, node, cands, count,
+                                 child_loop_depth);
+    collect_promotion_candidates(vm, fn, node->inc, node, cands, count,
+                                 child_loop_depth);
+    collect_promotion_candidates(vm, fn, node->body, node, cands, count,
+                                 child_loop_depth);
+    for (Node *arg = node->args; arg; arg = arg->next)
+        collect_promotion_candidates(vm, fn, arg, node, cands, count,
+                                     child_loop_depth);
+    for (Node *n = node->next; n; n = n->next)
+        collect_promotion_candidates(vm, fn, n, parent, cands, count,
+                                     loop_depth);
+}
+
+static int promotion_candidate_cmp(const void *a, const void *b) {
+    const PromotionCandidate *ca = (const PromotionCandidate *)a;
+    const PromotionCandidate *cb = (const PromotionCandidate *)b;
+    if (ca->address_escapes != cb->address_escapes)
+        return ca->address_escapes ? 1 : -1;
+    return cb->score - ca->score;
+}
+
+static void prepare_local_promotion(CCCC *vm, Obj *fn, int base_stack_size) {
+    vm->compiler.promoted_count = 0;
+    promotion_alias_reset(vm);
+    memset(vm->compiler.promoted_locals, 0, sizeof(vm->compiler.promoted_locals));
+    memset(vm->compiler.promoted_regs, 0, sizeof(vm->compiler.promoted_regs));
+    memset(vm->compiler.promoted_save_offsets, 0,
+           sizeof(vm->compiler.promoted_save_offsets));
+    memset(vm->compiler.promoted_dirty, 0, sizeof(vm->compiler.promoted_dirty));
+
+    if (vm->compiler.opt_level < 2 || (vm->flags & CCCC_ENABLE_DEBUGGER))
+        return;
+
+    int local_count = 0;
+    for (Obj *var = fn->locals; var; var = var->next)
+        if (promotion_candidate_ok(vm, fn, var))
+            local_count++;
+    if (local_count == 0)
+        return;
+
+    PromotionCandidate *cands =
+        calloc((size_t)local_count, sizeof(PromotionCandidate));
+    if (!cands)
+        error("out of memory");
+    int idx = 0;
+    for (Obj *var = fn->locals; var; var = var->next)
+        if (promotion_candidate_ok(vm, fn, var))
+            cands[idx++].var = var;
+
+    collect_promotion_candidates(vm, fn, fn->body, NULL, cands, local_count, 0);
+    qsort(cands, (size_t)local_count, sizeof(PromotionCandidate),
+          promotion_candidate_cmp);
+
+    static const int sregs[] = {REG_S0, REG_S1, REG_S2, REG_S3,
+                                REG_S4, REG_S5, REG_S6, REG_S7};
+    for (int i = 0; i < local_count && vm->compiler.promoted_count < 8; i++) {
+        if (cands[i].address_escapes || cands[i].score < 3)
+            continue;
+        int p = vm->compiler.promoted_count++;
+        vm->compiler.promoted_locals[p] = cands[i].var;
+        vm->compiler.promoted_regs[p] = sregs[p];
+        vm->compiler.promoted_save_offsets[p] = -(base_stack_size + p + 1);
+    }
+    free(cands);
+}
 
 // ========== Function Call Detection ==========
 // Check if expression tree contains a function call (recursively)
@@ -762,6 +968,77 @@ static void emit_local_store(CCCC *vm, Type *ty, int rd_val, long long offset) {
         emit_ri(vm, FSTR_LOCAL, rd_val, offset);
     } else {
         emit_ri(vm, STR_LOCAL_D, rd_val, offset);
+    }
+}
+
+static void emit_normalize_promoted_scalar(CCCC *vm, Type *ty, int reg) {
+    if (!ty)
+        return;
+    if (ty->kind == TY_BOOL || ty->kind == TY_CHAR) {
+        emit_rr(vm, ty->is_unsigned || ty->kind == TY_BOOL ? ZX1 : SX1, reg, reg);
+    } else if (ty->kind == TY_SHORT) {
+        emit_rr(vm, ty->is_unsigned ? ZX2 : SX2, reg, reg);
+    } else if (ty->kind == TY_INT ||
+               (ty->kind == TY_ENUM && ty->size == 4)) {
+        emit_rr(vm, ty->is_unsigned ? ZX4 : SX4, reg, reg);
+    } else if (ty->kind == TY_BITINT) {
+        if (ty->size == 1)
+            emit_rr(vm, ty->is_unsigned ? ZX1 : SX1, reg, reg);
+        else if (ty->size == 2)
+            emit_rr(vm, ty->is_unsigned ? ZX2 : SX2, reg, reg);
+        else if (ty->size == 4)
+            emit_rr(vm, ty->is_unsigned ? ZX4 : SX4, reg, reg);
+        emit_bitint_trunc(vm, ty, reg);
+    }
+}
+
+static void emit_promoted_read(CCCC *vm, Obj *var, int dest_reg) {
+    int preg = promoted_local_reg(vm, var);
+    if (preg < 0 || dest_reg == REG_ZERO)
+        return;
+    emit_mov3(vm, dest_reg, preg);
+}
+
+static void emit_promoted_write(CCCC *vm, Obj *var, int value_reg) {
+    int idx = promoted_local_index(vm, var);
+    if (idx < 0)
+        return;
+    int preg = vm->compiler.promoted_regs[idx];
+    if (preg != value_reg)
+        emit_mov3(vm, preg, value_reg);
+    emit_normalize_promoted_scalar(vm, var->ty, preg);
+    vm->compiler.promoted_dirty[idx] = true;
+}
+
+static void emit_flush_promoted_locals(CCCC *vm) {
+    for (int i = 0; i < vm->compiler.promoted_count; i++) {
+        if (!vm->compiler.promoted_dirty[i])
+            continue;
+        Obj *var = vm->compiler.promoted_locals[i];
+        emit_local_store(vm, var->ty, vm->compiler.promoted_regs[i],
+                         var->offset);
+        vm->compiler.promoted_dirty[i] = false;
+    }
+}
+
+static void emit_save_promoted_registers(CCCC *vm) {
+    for (int i = 0; i < vm->compiler.promoted_count; i++)
+        emit_local_store(vm, ty_long, vm->compiler.promoted_regs[i],
+                         vm->compiler.promoted_save_offsets[i]);
+}
+
+static void emit_restore_promoted_registers(CCCC *vm) {
+    for (int i = vm->compiler.promoted_count - 1; i >= 0; i--)
+        emit_local_load(vm, ty_long, vm->compiler.promoted_regs[i],
+                        vm->compiler.promoted_save_offsets[i]);
+}
+
+static void emit_init_promoted_params(CCCC *vm) {
+    for (int i = 0; i < vm->compiler.promoted_count; i++) {
+        Obj *var = vm->compiler.promoted_locals[i];
+        if (var->is_param)
+            emit_local_load(vm, var->ty, vm->compiler.promoted_regs[i],
+                            var->offset);
     }
 }
 
@@ -1734,6 +2011,10 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
                 if (vm->flags & CCCC_STACK_INSTR)
                     emit_markr(vm, node->var->offset);
             }
+            if (is_promoted_local(vm, node->var)) {
+                emit_promoted_read(vm, node->var, dest_reg);
+                return;
+            }
             // Fused local load: skip the LEA3+LDR two-step for simple locals
             if (is_simple_local_scalar(vm, node)) {
                 emit_local_load(vm, node->ty, dest_reg, node->var->offset);
@@ -1756,6 +2037,10 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
         return;
 
     case ND_DEREF:
+        if (promoted_deref_target(vm, node)) {
+            emit_promoted_read(vm, promoted_deref_target(vm, node), dest_reg);
+            return;
+        }
         gen_expr(vm, node->lhs, dest_reg);
         if (node->ty->kind != TY_ARRAY && node->ty->kind != TY_STRUCT &&
             node->ty->kind != TY_UNION) {
@@ -1996,6 +2281,27 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
     }
 
     case ND_ASSIGN: {
+        Obj *lhs_promoted_deref = promoted_deref_target(vm, node->lhs);
+        if (lhs_promoted_deref) {
+            int r_val = dest_reg == REG_ZERO ? alloc_temp_reg() : dest_reg;
+            bool need_free = dest_reg == REG_ZERO;
+            gen_expr(vm, node->rhs, r_val);
+            emit_promoted_write(vm, lhs_promoted_deref, r_val);
+            if (!lhs_promoted_deref->is_param &&
+                lhs_promoted_deref->ty &&
+                lhs_promoted_deref->ty->kind != TY_ARRAY &&
+                lhs_promoted_deref->ty->kind != TY_STRUCT &&
+                lhs_promoted_deref->ty->kind != TY_UNION) {
+                if (vm->flags & CCCC_STACK_INSTR)
+                    emit_markw(vm, lhs_promoted_deref->offset);
+                if (vm->flags & CCCC_UNINIT_DETECTION)
+                    emit_marki(vm, lhs_promoted_deref->offset);
+            }
+            if (need_free)
+                free_temp_reg(r_val);
+            return;
+        }
+
         // IMPORTANT: Evaluate RHS *before* computing LHS address!
         // If RHS is a function call, it will clobber temp registers.
         // Computing LHS address after ensures we get a fresh temp reg.
@@ -2045,6 +2351,16 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
         // called. We need to re-mark r_val as in-use before allocating r_addr!
         mark_temp_reg_used(r_val);
 
+        bool rhs_promoted_addr = node->lhs->kind == ND_VAR &&
+                                 node->lhs->var->is_local &&
+                                 node->lhs->var->name &&
+                                 node->lhs->var->name[0] == '\0' &&
+                                 node->rhs &&
+                                 node->rhs->kind == ND_ADDR &&
+                                 node->rhs->lhs &&
+                                 node->rhs->lhs->kind == ND_VAR &&
+                                 is_promoted_local(vm, node->rhs->lhs->var);
+
         // Fused local store: skip LEA3+STR for simple locals
         bool lhs_fused = node->lhs->kind == ND_VAR &&
                          is_simple_local_scalar(vm, node->lhs);
@@ -2093,6 +2409,9 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
             free_temp_reg(r_new);
             free_temp_reg(r_mask);
             free_temp_reg(r_container);
+        } else if (node->lhs->kind == ND_VAR &&
+                   is_promoted_local(vm, node->lhs->var)) {
+            emit_promoted_write(vm, node->lhs->var, r_val);
         } else if (lhs_fused) {
             emit_local_store(vm, node->ty, r_val, node->lhs->var->offset);
         } else {
@@ -2124,6 +2443,8 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
         if (need_free) {
             free_temp_reg(r_val);
         }
+        if (rhs_promoted_addr)
+            promotion_alias_add(vm, node->lhs->var, node->rhs->lhs->var);
         return;
     }
 
@@ -3333,9 +3654,11 @@ static void gen_stmt(CCCC *vm, Node *node) {
                 gen_expr(vm, node->lhs, REG_A0);
             }
         }
+        emit_flush_promoted_locals(vm);
         // Deactivate function-level scope before returning.
         if (vm->flags & CCCC_STACK_INSTR)
             emit_scopeout(vm, vm->current_function_scope_id);
+        emit_restore_promoted_registers(vm);
         emit(vm, LEV3);
         return;
 
@@ -3721,6 +4044,11 @@ void gen_function(CCCC *vm, Obj *fn) {
     // Count parameters first
     // Assign stack offsets early
     int stack_size = assign_stack_offsets(fn);
+    int base_stack_size = stack_size;
+    prepare_local_promotion(vm, fn, base_stack_size);
+    stack_size += vm->compiler.promoted_count;
+    if (stack_size % 2 != 0)
+        stack_size++;
 
     // Helper vars needed for ENT3 emission
     int param_count = 0;
@@ -3783,6 +4111,9 @@ void gen_function(CCCC *vm, Obj *fn) {
     if (vm->flags & CCCC_STACK_INSTR)
         emit_scopein(vm, fn_scope_id);
 
+    emit_save_promoted_registers(vm);
+    emit_init_promoted_params(vm);
+
     // Mark parameters initialized (they arrive via registers).
     if (vm->flags & CCCC_UNINIT_DETECTION) {
         for (Obj *param = fn->params; param; param = param->next)
@@ -3829,9 +4160,11 @@ void gen_function(CCCC *vm, Obj *fn) {
     if (strncmp(fn->name, entry_fn, strlen(entry_fn) + 1) == 0) {
         emit_li3(vm, REG_A0, 0);
     }
+    emit_flush_promoted_locals(vm);
     // Deactivate function scope (for fall-through returns).
     if (vm->flags & CCCC_STACK_INSTR)
         emit_scopeout(vm, fn_scope_id);
+    emit_restore_promoted_registers(vm);
     emit(vm, LEV3);
     fn->code_end_addr = vm->text_ptr + 1;
 }
