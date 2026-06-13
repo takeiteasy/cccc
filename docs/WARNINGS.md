@@ -184,7 +184,8 @@ and `(void)symbol`. Set-but-not-used analysis is not currently performed.
   is added.
 - Use of features that are parsed but have no semantic effect uses
   `-Wignored-features`: `_Atomic` (loads and stores are not atomic),
-  `_Thread_local` / `__thread` (no thread-local storage is provided).
+  `_Thread_local` / `__thread` / `thread_local` (no thread-local storage is
+  provided).
 - Unknown `__attribute__((...))` and `[[...]]` attributes use `-Wattributes`.
 - Discarded return values of functions or types declared with `[[nodiscard]]`
   use `-Wnodiscard`.  An optional message string from `[[nodiscard("...")]]`

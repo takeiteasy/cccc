@@ -658,7 +658,7 @@ static bool is_keyword(Token *tok) {
             "typeof", "typeof_unqual", "asm", "_Thread_local", "__thread", "_Atomic",
             "__attribute__", "_Static_assert", "static_assert", "constexpr",
             "__block", "_Complex", "_Imaginary",  // Apple Blocks extension and C99 complex
-            "bool", "true", "false", "nullptr",  // C23 keywords
+            "bool", "true", "false", "nullptr", "thread_local",  // C23 keywords
             "_BitInt", "_Decimal32", "_Decimal64", "_Decimal128",  // C23 types
         };
 
@@ -1026,7 +1026,8 @@ static bool keyword_std_ok(CCCC *vm, Token *t) {
     if (s < CCCC_STD_C23) {
         if (KW("constexpr") || KW("static_assert"))
             return false;
-        if (KW("bool") || KW("true") || KW("false") || KW("nullptr"))
+        if (KW("bool") || KW("true") || KW("false") || KW("nullptr") ||
+            KW("thread_local"))
             return false;
         if (KW("_BitInt") || KW("_Decimal32") || KW("_Decimal64") || KW("_Decimal128"))
             error_tok(vm, t, "'%.*s' is not available before C23", len, kw);

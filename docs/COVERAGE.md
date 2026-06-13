@@ -138,6 +138,8 @@ language coverage figures apply.
 |---|---|---|
 | `typeof` / `typeof_unqual` | ✓ | |
 | `constexpr` for objects | ✓ | Object definitions require constant initializers and may be used in constant-expression contexts; constexpr functions are not supported |
+| `thread_local` storage-class spelling | ~ | C23 spelling is accepted as a keyword; emits `-Wignored-features`; no thread-local storage |
+| Compound literal storage classes | ✓ | C23 `(static T){...}`, `(constexpr T){...}`, `(register T){...}`, and TLS spellings are parsed; static/constexpr/TLS literals use anonymous static storage, while register keeps automatic storage |
 | `auto` type inference | ✗ | `auto` is parsed as a storage class; C23 type-deduction form not supported |
 | `nullptr` keyword / `nullptr_t` | ✓ | `nullptr_t` is defined in `<stddef.h>` via `typeof(nullptr)` |
 | `_BitInt(N)` arbitrary-precision integers | ~ | `N` in `[1,64]` — bit-precise value semantics via mask/shift truncation; `N > 64` (true bignum) tracked in a follow-up ticket |
@@ -149,6 +151,7 @@ language coverage figures apply.
 | Unnamed function parameters (`void f(int, double)`) | ✓ | |
 | `static_assert` without message | ✓ | C23 one-argument form |
 | Improved `enum` — underlying type, forward declaration, wide values | ✓ | `enum E : unsigned char { … }` sets size/align/signedness; `enum E : int;` forward-declares; values stored as `int64_t` (C23 §6.7.2.2) |
+| Compatible tag redeclarations | ✓ | C23 same-scope compatible `struct`, `union`, and `enum` redeclarations are accepted; incompatible redeclarations are diagnosed |
 | Decimal floating-point (`_Decimal32`, etc.) | ~ | `_Decimal32/64/128` accepted with correct sizes (4/8/16 bytes) but implemented as aliases of `float`/`double`/`long double` (binary, not decimal, encoding); real IEEE-754-2008 decimal arithmetic tracked in a follow-up ticket |
 | `char8_t` | ✓ | Defined in `<uchar.h>`; `u8'x'` literals have type `unsigned char` and value `char8_t` |
 | Labels before declarations (at block scope) | ✓ | `case`, `default`, and goto-labels may directly precede object declarations; pre-C23 bare declaration after label is a hard error |
@@ -224,9 +227,6 @@ groups from that ticket.
 | `__cpuid` / `__cpuidex` | ✗ | Host CPU info — pending |
 | `__emul` / `__emulu` / `_umul128` / `__umulh` | ✗ | 64-bit multiplication helpers — pending |
 | `#pragma once` | ✓ | |
-| `#pragma cccc comptime` / `#pragma cccc comptime begin` / `#pragma cccc comptime end` | ✓ | Comptime block — see [MACROS.md](MACROS.md#comptime-block) |
-| `#include [[cccc::comptime]]` / `#include [[cccc::emit]]` | ✓ | Route includes to the comptime unit or generated-output preamble |
-| `#pragma cccc emit begin` / `#pragma cccc emit end` | ✓ | Emit raw preprocessor directives to the generated-output preamble |
 | `#pragma comment(lib, "x")` | ✗ | Link hint, no-op — pending |
 | `#pragma warning(push/pop/disable/default)` / `suppress:` | ✗ | Maps to CCCC's `-W` system — pending |
 | `#pragma pack(...)` | ✓ | |

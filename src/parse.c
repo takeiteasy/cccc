@@ -191,6 +191,7 @@ static Node *cast(CCCC *vm, Token **rest, Token *tok);
 static Member *get_struct_member(Type *ty, Token *tok);
 static Type *struct_decl(CCCC *vm, Token **rest, Token *tok);
 static Type *union_decl(CCCC *vm, Token **rest, Token *tok);
+static bool is_compound_literal_head(CCCC *vm, Token *tok);
 static Node *postfix(CCCC *vm, Token **rest, Token *tok);
 static Node *funcall(CCCC *vm, Token **rest, Token *tok, Node *node);
 static Node *unary(CCCC *vm, Token **rest, Token *tok);
@@ -505,6 +506,36 @@ static Type *find_tag(CCCC *vm, Token *tok) {
             }
         }
     }
+    return NULL;
+}
+
+static Type *find_tag_in_current_scope(CCCC *vm, Token *tok) {
+    Scope *sc = vm->compiler.scope;
+    if (!sc)
+        return NULL;
+    if (sc->tag_map.buckets) {
+        TagScopeNode *node = hashmap_get2(&sc->tag_map, tok->loc, tok->len);
+        return node ? node->ty : NULL;
+    }
+    for (TagScopeNode *node = sc->tags; node; node = node->next)
+        if (node->name_len == tok->len &&
+            strncmp(node->name, tok->loc, tok->len) == 0)
+            return node->ty;
+    return NULL;
+}
+
+static VarScope *find_var_in_current_scope(CCCC *vm, char *name, int name_len) {
+    Scope *sc = vm->compiler.scope;
+    if (!sc)
+        return NULL;
+    if (sc->var_map.buckets) {
+        VarScopeNode *node = hashmap_get2(&sc->var_map, name, name_len);
+        return node ? (VarScope *)node : NULL;
+    }
+    for (VarScopeNode *node = sc->vars; node; node = node->next)
+        if (node->name_len == name_len &&
+            strncmp(node->name, name, name_len) == 0)
+            return (VarScope *)node;
     return NULL;
 }
 
@@ -924,8 +955,10 @@ static DeclKw declspec_kw(Token *tok) {
     case 11:  // _Decimal128
         if (s[0]=='_' && s[1]=='D' && memcmp(s+2,"ecimal128",9)==0) return DK_DECIMAL128;
         break;
-    case 12:  // __restrict__
+    case 12:  // __restrict__, thread_local
         if (memcmp(s,"__restrict__",12)==0) return DK_RESTRICT;
+        if (memcmp(s, "thread_local", 12) == 0)
+            return tok->kind == TK_KEYWORD ? DK_TLS : DK_NONE;
         break;
     case 13:  // _Thread_local, typeof_unqual
         switch (s[0]) {
@@ -1532,6 +1565,168 @@ static bool consume_end(Token **rest, Token *tok) {
     return false;
 }
 
+static bool same_optional_name(Token *a, Token *b) {
+    if (!a || !b)
+        return a == b;
+    return a->len == b->len && strncmp(a->loc, b->loc, a->len) == 0;
+}
+
+static bool same_type_exact(Type *a, Type *b) {
+    if (a == b)
+        return true;
+    if (!a || !b || a->kind != b->kind ||
+        a->is_unsigned != b->is_unsigned ||
+        a->is_atomic != b->is_atomic ||
+        a->is_const != b->is_const ||
+        a->is_volatile != b->is_volatile ||
+        a->is_restrict != b->is_restrict)
+        return false;
+
+    switch (a->kind) {
+    case TY_PTR:
+        return same_type_exact(a->base, b->base);
+    case TY_ARRAY:
+        return a->array_len == b->array_len &&
+               same_type_exact(a->base, b->base);
+    case TY_FUNC: {
+        if (!same_type_exact(a->return_ty, b->return_ty) ||
+            a->is_variadic != b->is_variadic)
+            return false;
+        Type *pa = a->params;
+        Type *pb = b->params;
+        for (; pa && pb; pa = pa->next, pb = pb->next)
+            if (!same_type_exact(pa, pb))
+                return false;
+        return !pa && !pb;
+    }
+    case TY_STRUCT:
+    case TY_UNION:
+    case TY_ENUM:
+        return a == b || (a->name && b->name &&
+                          same_optional_name(a->name, b->name));
+    case TY_COMPLEX:
+        return same_type_exact(a->base, b->base);
+    case TY_BITINT:
+        return a->bit_width == b->bit_width;
+    default:
+        return true;
+    }
+}
+
+static bool same_member_shape(Member *a, Member *b) {
+    if (!same_optional_name(a->name, b->name) ||
+        a->align != b->align ||
+        a->is_bitfield != b->is_bitfield ||
+        a->bit_width != b->bit_width ||
+        !same_type_exact(a->ty, b->ty))
+        return false;
+    return true;
+}
+
+static bool same_struct_members(Type *a, Type *b) {
+    Member *ma = a->members;
+    Member *mb = b->members;
+    for (; ma && mb; ma = ma->next, mb = mb->next)
+        if (!same_member_shape(ma, mb))
+            return false;
+    return !ma && !mb;
+}
+
+static Member *find_union_member_by_name(Type *ty, Member *needle) {
+    for (Member *mem = ty->members; mem; mem = mem->next) {
+        if (!needle->name || !mem->name) {
+            if (needle->name == mem->name)
+                return mem;
+            continue;
+        }
+        if (same_optional_name(needle->name, mem->name))
+            return mem;
+    }
+    return NULL;
+}
+
+static bool same_union_members(Type *a, Type *b) {
+    int count_a = 0;
+    int count_b = 0;
+    for (Member *ma = a->members; ma; ma = ma->next) {
+        count_a++;
+        Member *mb = find_union_member_by_name(b, ma);
+        if (!mb || !same_member_shape(ma, mb))
+            return false;
+    }
+    for (Member *mb = b->members; mb; mb = mb->next)
+        count_b++;
+    return count_a == count_b;
+}
+
+static EnumConstant *find_enum_constant(Type *ty, char *name) {
+    for (EnumConstant *ec = ty->enum_constants; ec; ec = ec->next)
+        if (!strcmp(ec->name, name))
+            return ec;
+    return NULL;
+}
+
+static bool same_enum_constants(Type *a, Type *b) {
+    int count_a = 0;
+    int count_b = 0;
+    for (EnumConstant *ea = a->enum_constants; ea; ea = ea->next) {
+        count_a++;
+        EnumConstant *eb = find_enum_constant(b, ea->name);
+        if (!eb || eb->value != ea->value)
+            return false;
+    }
+    for (EnumConstant *eb = b->enum_constants; eb; eb = eb->next)
+        count_b++;
+    return count_a == count_b;
+}
+
+static bool compatible_tag_redeclaration(Type *old, Type *new) {
+    if (!old || !new || old->kind != new->kind)
+        return false;
+    if (old->kind == TY_ENUM) {
+        if (!same_type_exact(old->enum_base_type, new->enum_base_type))
+            return false;
+        return same_enum_constants(old, new);
+    }
+    if (old->kind == TY_STRUCT)
+        return same_struct_members(old, new);
+    if (old->kind == TY_UNION)
+        return same_union_members(old, new);
+    return false;
+}
+
+static Type *install_tag_definition(CCCC *vm, Token *tag, Type *ty,
+                                    char *kind_name) {
+    if (!tag)
+        return ty;
+
+    Type *existing = find_tag_in_current_scope(vm, tag);
+    if (!existing) {
+        push_tag_scope(vm, tag, ty);
+        return ty;
+    }
+
+    if (existing->kind != ty->kind)
+        error_tok(vm, tag, "tag redeclared as different kind");
+
+    if (existing->size < 0 ||
+        (existing->kind == TY_ENUM && !existing->enum_constants &&
+         ty->enum_constants)) {
+        *existing = *ty;
+        return existing;
+    }
+
+    if (vm->compiler.c_std < CCCC_STD_C23)
+        error_tok(vm, tag, "redefinition of %s '%.*s'",
+                  kind_name, tag->len, tag->loc);
+
+    if (!compatible_tag_redeclaration(existing, ty))
+        error_tok(vm, tag, "incompatible redeclaration of %s '%.*s'",
+                  kind_name, tag->len, tag->loc);
+
+    return existing;
+}
+
 // enum-specifier = ident? (":" typename)? "{" enum-list? "}"
 //                | ident (":" typename)?
 //
@@ -1587,6 +1782,10 @@ static Type *enum_specifier(CCCC *vm, Token **rest, Token *tok) {
         return ty;
     }
 
+    Type *existing_tag = tag ? find_tag_in_current_scope(vm, tag) : NULL;
+    if (existing_tag && existing_tag->kind != TY_ENUM)
+        error_tok(vm, tag, "not an enum tag");
+
     tok = skip(vm, tok, "{");
 
     // Read an enum-list.
@@ -1608,11 +1807,24 @@ static Type *enum_specifier(CCCC *vm, Token **rest, Token *tok) {
         if (equal(tok, "="))
             val = const_expr(vm, &tok, tok->next);
 
-        VarScope *sc = push_scope(vm, name, name_len);
-        sc->enum_ty = ty;
-        sc->enum_val = val;
-        sc->is_deprecated = enum_attr.is_deprecated;
-        sc->deprecated_msg = enum_attr.deprecated_msg;
+        bool duplicate_from_same_enum = false;
+        VarScope *old_sc = find_var_in_current_scope(vm, name, name_len);
+        if (old_sc && old_sc->enum_ty) {
+            EnumConstant *old_ec =
+                existing_tag ? find_enum_constant(existing_tag, name) : NULL;
+            duplicate_from_same_enum = old_ec && old_ec->value == val &&
+                                       old_sc->enum_ty == existing_tag;
+            if (!duplicate_from_same_enum)
+                error_tok(vm, tok, "redeclaration of enumerator '%s'", name);
+        }
+
+        if (!duplicate_from_same_enum) {
+            VarScope *sc = push_scope(vm, name, name_len);
+            sc->enum_ty = ty;
+            sc->enum_val = val;
+            sc->is_deprecated = enum_attr.is_deprecated;
+            sc->deprecated_msg = enum_attr.deprecated_msg;
+        }
 
         // Store enum constant in Type structure for code emission
         struct EnumConstant *ec = arena_alloc(&vm->compiler.parser_arena,
@@ -1632,20 +1844,7 @@ static Type *enum_specifier(CCCC *vm, Token **rest, Token *tok) {
         val++;
     }
 
-    if (tag) {
-        // If this is a completion of a forward-declared enum, overwrite the
-        // existing type in-place so all existing pointers remain valid.
-        for (TagScopeNode *node = vm->compiler.scope->tags; node;
-             node = node->next) {
-            if (node->name_len == tag->len &&
-                strncmp(node->name, tag->loc, tag->len) == 0) {
-                *node->ty = *ty;
-                return node->ty;
-            }
-        }
-        push_tag_scope(vm, tag, ty);
-    }
-    return ty;
+    return install_tag_definition(vm, tag, ty, "enum");
 }
 
 // typeof-specifier = "(" (expr | typename) ")"
@@ -2872,7 +3071,8 @@ static bool is_typename(CCCC *vm, Token *tok) {
     // deliberately not added to the hashmap above (which matches by text
     // regardless of token kind).
     return hashmap_get2(&map, tok->loc, tok->len) || find_typedef(vm, tok) ||
-           (tok->kind == TK_KEYWORD && equal(tok, "bool"));
+           (tok->kind == TK_KEYWORD &&
+            (equal(tok, "bool") || equal(tok, "thread_local")));
 }
 
 // asm-stmt = "asm" ("volatile" | "inline")* "(" string-literal ")"
@@ -4322,14 +4522,13 @@ static Node *mul(CCCC *vm, Token **rest, Token *tok) {
 
 // cast = "(" type-name ")" cast | unary
 static Node *cast(CCCC *vm, Token **rest, Token *tok) {
+    if (is_compound_literal_head(vm, tok))
+        return unary(vm, rest, tok);
+
     if (equal(tok, "(") && is_typename(vm, tok->next)) {
         Token *start = tok;
         Type *ty = typename(vm, &tok, tok->next);
         tok = skip(vm, tok, ")");
-
-        // compound literal
-        if (equal(tok, "{"))
-            return unary(vm, rest, start);
 
         // type cast
         Node *node = new_cast(vm, cast(vm, &tok, tok), ty);
@@ -5079,8 +5278,10 @@ static Token *c23_attribute_list(CCCC *vm, Token *tok, Type *ty,
 }
 
 // struct-union-decl = attribute? ident? ("{" struct-members)?
-static Type *struct_union_decl(CCCC *vm, Token **rest, Token *tok) {
+static Type *struct_union_decl(CCCC *vm, Token **rest, Token *tok,
+                               TypeKind kind) {
     Type *ty = struct_type(vm);
+    ty->kind = kind;
     tok = attribute_list(vm, tok, ty, NULL);
     tok = c23_attribute_list(vm, tok, ty, NULL);
 
@@ -5098,6 +5299,8 @@ static Type *struct_union_decl(CCCC *vm, Token **rest, Token *tok) {
 
         Type *ty2 = find_tag(vm, tag);
         if (ty2) {
+            if (ty2->kind != kind)
+                error_tok(vm, tag, "tag redeclared as different kind");
             if (ty2->is_deprecated)
                 warn_deprecated_use(vm, tag, get_ident(vm, tag),
                                     ty2->deprecated_msg);
@@ -5116,35 +5319,12 @@ static Type *struct_union_decl(CCCC *vm, Token **rest, Token *tok) {
     struct_members(vm, &tok, tok, ty);
     tok = attribute_list(vm, tok, ty, NULL);
     *rest = c23_attribute_list(vm, tok, ty, NULL);
-
-    if (tag) {
-        // If this is a redefinition, overwrite a previous type.
-        // Otherwise, register the struct type.
-        // Linear search in current scope only
-        Type *ty2 = NULL;
-        for (TagScopeNode *node = vm->compiler.scope->tags; node;
-             node = node->next) {
-            if (node->name_len == tag->len &&
-                strncmp(node->name, tag->loc, tag->len) == 0) {
-                ty2 = node->ty;
-                break;
-            }
-        }
-        if (ty2) {
-            *ty2 = *ty;
-            return ty2;
-        }
-
-        push_tag_scope(vm, tag, ty);
-    }
-
     return ty;
 }
 
 // struct-decl = struct-union-decl
 static Type *struct_decl(CCCC *vm, Token **rest, Token *tok) {
-    Type *ty = struct_union_decl(vm, rest, tok);
-    ty->kind = TY_STRUCT;
+    Type *ty = struct_union_decl(vm, rest, tok, TY_STRUCT);
 
     if (ty->size < 0)
         return ty;
@@ -5184,13 +5364,12 @@ static Type *struct_decl(CCCC *vm, Token **rest, Token *tok) {
     }
 
     ty->size = align_to(bits, ty->align * 8) / 8;
-    return ty;
+    return install_tag_definition(vm, ty->name, ty, "struct");
 }
 
 // union-decl = struct-union-decl
 static Type *union_decl(CCCC *vm, Token **rest, Token *tok) {
-    Type *ty = struct_union_decl(vm, rest, tok);
-    ty->kind = TY_UNION;
+    Type *ty = struct_union_decl(vm, rest, tok, TY_UNION);
 
     if (ty->size < 0)
         return ty;
@@ -5205,7 +5384,7 @@ static Type *union_decl(CCCC *vm, Token **rest, Token *tok) {
             ty->size = mem->ty->size;
     }
     ty->size = align_to(ty->size, ty->align);
-    return ty;
+    return install_tag_definition(vm, ty->name, ty, "union");
 }
 
 // Find a struct member by name.
@@ -5295,6 +5474,54 @@ static Node *new_inc_dec(CCCC *vm, Node *node, Token *tok, int addend) {
         node->ty);
 }
 
+static Type *compound_literal_type(CCCC *vm, Token **rest, Token *tok,
+                                   VarAttr *attr) {
+    bool saw_register = false;
+    bool saw_auto = false;
+    for (Token *p = tok; !equal(p, ")") && p->kind != TK_EOF; p = p->next) {
+        DeclKw dk = declspec_kw(p);
+        if (dk == DK_REGISTER)
+            saw_register = true;
+        else if (dk == DK_AUTO)
+            saw_auto = true;
+    }
+
+    Type *ty = declspec(vm, &tok, tok, attr);
+
+    if (saw_auto || attr->is_typedef || attr->is_extern || attr->is_inline ||
+        attr->is_block_var)
+        error_tok(vm, tok, "invalid storage class in compound literal");
+    if ((saw_register || attr->is_static || attr->is_tls ||
+         attr->is_constexpr) &&
+        vm->compiler.c_std < CCCC_STD_C23)
+        error_tok(vm, tok,
+                  "compound literal storage classes are only available in C23");
+
+    ty = abstract_declarator(vm, rest, tok, ty);
+    if (attr->is_constexpr) {
+        ty = copy_type(vm, ty);
+        ty->is_const = true;
+    }
+    return ty;
+}
+
+static bool is_compound_literal_head(CCCC *vm, Token *tok) {
+    if (!equal(tok, "(") || !is_typename(vm, tok->next))
+        return false;
+
+    int depth = 1;
+    for (Token *p = tok->next; p && p->kind != TK_EOF; p = p->next) {
+        if (equal(p, "("))
+            depth++;
+        else if (equal(p, ")")) {
+            depth--;
+            if (depth == 0)
+                return equal(p->next, "{");
+        }
+    }
+    return false;
+}
+
 // postfix = "(" type-name ")" "{" initializer-list "}"
 //         = ident "(" func-args ")" postfix-tail*
 //         | primary postfix-tail*
@@ -5306,17 +5533,23 @@ static Node *new_inc_dec(CCCC *vm, Node *node, Token *tok, int addend) {
 //              | "++"
 //              | "--"
 static Node *postfix(CCCC *vm, Token **rest, Token *tok) {
-    if (equal(tok, "(") && is_typename(vm, tok->next)) {
+    if (is_compound_literal_head(vm, tok)) {
         // Compound literal
         Token *start = tok;
         if (vm->compiler.c_std < CCCC_STD_C99)
             warn_tok(vm, start, CCCC_WARN_PEDANTIC,
                      "compound literals are a C99 extension");
-        Type *ty = typename(vm, &tok, tok->next);
+        VarAttr attr = {};
+        Type *ty = compound_literal_type(vm, &tok, tok->next, &attr);
         tok = skip(vm, tok, ")");
 
-        if (vm->compiler.scope->next == NULL) {
+        if (vm->compiler.scope->next == NULL || attr.is_static ||
+            attr.is_constexpr || attr.is_tls) {
             Obj *var = new_anon_gvar(vm, ty);
+            var->is_constexpr = attr.is_constexpr;
+            var->is_static = attr.is_static || attr.is_constexpr;
+            var->is_tls = attr.is_tls;
+            var->is_local_symbol = vm->compiler.scope->next != NULL;
             gvar_initializer(vm, rest, tok, var);
             return new_var_node(vm, var, start);
         }
