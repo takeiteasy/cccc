@@ -75,6 +75,8 @@ typedef struct {
     bool is_noreturn;
     bool is_nodiscard;
     bool is_fallthrough;
+    bool is_pure;
+    bool is_func_const;
     char *deprecated_msg;
     char *nodiscard_msg;
     Token *attribute_tok;
@@ -711,6 +713,8 @@ static Obj *new_var(CCCC *vm, char *name, int name_len, Type *ty) {
     var->is_maybe_unused = ty->is_maybe_unused;
     var->is_deprecated = ty->is_deprecated;
     var->is_noreturn = ty->is_noreturn;
+    var->is_pure = ty->is_pure;
+    var->is_func_const = ty->is_func_const;
     var->deprecated_msg = ty->deprecated_msg;
     push_scope(vm, name, name_len)->var = var;
     return var;
@@ -5124,6 +5128,7 @@ static void apply_semantic_attr(Type *ty, VarAttr *attr, Token *tok,
 static Type *apply_var_attrs_to_type(CCCC *vm, Type *ty, VarAttr *attr) {
     if (!attr || (!attr->is_maybe_unused && !attr->is_deprecated &&
                   !attr->is_noreturn && !attr->is_nodiscard &&
+                  !attr->is_pure && !attr->is_func_const &&
                   !attr->format_style))
         return ty;
     ty = copy_type(vm, ty);
@@ -5133,6 +5138,10 @@ static Type *apply_var_attrs_to_type(CCCC *vm, Type *ty, VarAttr *attr) {
                                              : attr->nodiscard_msg);
     if (attr->is_noreturn && ty->kind == TY_FUNC)
         ty->is_noreturn = true;
+    if (attr->is_pure && ty->kind == TY_FUNC)
+        ty->is_pure = true;
+    if (attr->is_func_const && ty->kind == TY_FUNC)
+        ty->is_func_const = true;
     if (attr->format_style && ty->kind == TY_FUNC) {
         ty->format_style = attr->format_style;
         ty->format_string_index = attr->format_string_index;
@@ -5148,6 +5157,8 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
     dst->is_deprecated |= src->is_deprecated;
     dst->is_nodiscard |= src->is_nodiscard;
     dst->is_noreturn |= src->is_noreturn;
+    dst->is_pure |= src->is_pure;
+    dst->is_func_const |= src->is_func_const;
     if (!dst->deprecated_msg)
         dst->deprecated_msg = src->deprecated_msg;
     if (!dst->nodiscard_msg)
@@ -5257,6 +5268,20 @@ static Token *attribute_list(CCCC *vm, Token *tok, Type *ty, VarAttr *attr) {
                 continue;
             }
 
+            if (is_attr_name(tok, "pure")) {
+                tok = tok->next;
+                if (ty) ty->is_pure = true;
+                if (attr) attr->is_pure = true;
+                continue;
+            }
+
+            if (is_attr_name(tok, "const")) {
+                tok = tok->next;
+                if (ty) ty->is_func_const = true;
+                if (attr) attr->is_func_const = true;
+                continue;
+            }
+
             if (find_attribute_macro(vm, tok)) {
                 Token *name_tok = tok;
                 tok = tok->next;
@@ -5336,13 +5361,21 @@ static Token *c23_attribute_list(CCCC *vm, Token *tok, Type *ty,
             Token *attr_tok = tok;
             Token *name_tok = tok;
             bool cccc_scoped = false;
-            if (equal(tok, "cccc") && tok->next && equal(tok->next, ":") &&
+            bool gnu_scoped = false;
+            if (tok->next && equal(tok->next, ":") &&
                 tok->next->next && equal(tok->next->next, ":") &&
                 tok->next->next->next &&
-                tok->next->next->next->kind == TK_IDENT) {
-                cccc_scoped = true;
-                name_tok = tok->next->next->next;
-                tok = name_tok;
+                (tok->next->next->next->kind == TK_IDENT ||
+                 tok->next->next->next->kind == TK_KEYWORD)) {
+                if (equal(tok, "cccc")) {
+                    cccc_scoped = true;
+                } else if (equal(tok, "gnu")) {
+                    gnu_scoped = true;
+                }
+                if (cccc_scoped || gnu_scoped) {
+                    name_tok = tok->next->next->next;
+                    tok = name_tok;
+                }
             }
 
             bool unused = equal(name_tok, "maybe_unused");
@@ -5351,6 +5384,8 @@ static Token *c23_attribute_list(CCCC *vm, Token *tok, Type *ty,
             bool is_nodiscard_attr = equal(name_tok, "nodiscard");
             bool is_fallthrough_attr = equal(name_tok, "fallthrough");
             bool is_no_unique_address_attr = equal(name_tok, "no_unique_address");
+            bool is_pure_attr = equal(name_tok, "pure");
+            bool is_func_const_attr = equal(name_tok, "const");
             tok = tok->next;
 
             char *message = NULL;
@@ -5417,11 +5452,17 @@ static Token *c23_attribute_list(CCCC *vm, Token *tok, Type *ty,
                     attr->is_fallthrough = true;
             } else if (is_no_unique_address_attr) {
                 // Parsed but VM optimisations deferred to a future ticket
+            } else if (is_pure_attr) {
+                if (ty) ty->is_pure = true;
+                if (attr) attr->is_pure = true;
+            } else if (is_func_const_attr) {
+                if (ty) ty->is_func_const = true;
+                if (attr) attr->is_func_const = true;
             } else if (!unused && !deprecated) {
                 warn_tok(vm, attr_tok, CCCC_WARN_ATTRIBUTES,
                          "unknown attribute '%.*s' ignored",
-                         cccc_scoped ? name_tok->len : attr_tok->len,
-                         cccc_scoped ? name_tok->loc : attr_tok->loc);
+                         (cccc_scoped || gnu_scoped) ? name_tok->len : attr_tok->len,
+                         (cccc_scoped || gnu_scoped) ? name_tok->loc : attr_tok->loc);
                 apply_semantic_attr(ty, attr, attr_tok, unused, deprecated,
                                     false, NULL);
             } else {
@@ -7136,6 +7177,8 @@ static Token *function(CCCC *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->is_maybe_unused |= ty->is_maybe_unused;
         fn->is_deprecated |= ty->is_deprecated;
         fn->is_noreturn |= ty->is_noreturn;
+        fn->is_pure |= ty->is_pure;
+        fn->is_func_const |= ty->is_func_const;
         if (ty->deprecated_msg)
             fn->deprecated_msg = ty->deprecated_msg;
         if (ty->format_style && fn->ty) {

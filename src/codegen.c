@@ -3394,19 +3394,26 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
         // Call function
         if (node->lhs->kind == ND_VAR && node->lhs->var->is_function) {
             Obj *fn = node->lhs->var;
-            emit(vm, CALL);
-            CCCCPc patch = emit_word_ptr(vm);
-            vm->text_seg[patch] = 0; // Will be patched later
+            // Dead-call elimination: skip pure/const calls whose result is unused.
+            // Arguments were already evaluated above, so their side effects still run.
+            bool skip_dead_call = vm->compiler.opt_level >= 1 &&
+                                  dest_reg == REG_ZERO &&
+                                  (fn->is_pure || fn->is_func_const);
+            if (!skip_dead_call) {
+                emit(vm, CALL);
+                CCCCPc patch = emit_word_ptr(vm);
+                vm->text_seg[patch] = 0; // Will be patched later
 
-            // Record call patch location for later resolution
-            if (vm->compiler.num_call_patches >= MAX_CALLS) {
-                error("too many function calls");
+                // Record call patch location for later resolution
+                if (vm->compiler.num_call_patches >= MAX_CALLS) {
+                    error("too many function calls");
+                }
+                vm->compiler.call_patches[vm->compiler.num_call_patches].location =
+                    patch;
+                vm->compiler.call_patches[vm->compiler.num_call_patches].function =
+                    fn;
+                vm->compiler.num_call_patches++;
             }
-            vm->compiler.call_patches[vm->compiler.num_call_patches].location =
-                patch;
-            vm->compiler.call_patches[vm->compiler.num_call_patches].function =
-                fn;
-            vm->compiler.num_call_patches++;
         } else {
             // Indirect call - function pointer in register
             int r_fn = alloc_temp_reg();

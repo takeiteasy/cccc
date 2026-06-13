@@ -643,6 +643,8 @@ struct Type {
     bool is_deprecated;
     bool is_noreturn;
     bool is_nodiscard;
+    bool is_pure;       // __attribute__((pure)): no side effects, may read globals
+    bool is_func_const; // __attribute__((const)): no side effects, no global reads
     char *deprecated_msg;
     char *nodiscard_msg;
     struct CustomAttrUse *custom_attrs;
@@ -863,6 +865,8 @@ struct Obj {
     bool is_deprecated;
     bool is_noreturn;
     bool is_nodiscard;
+    bool is_pure;
+    bool is_func_const;
     bool is_local_symbol;
     char *deprecated_msg;
     char *nodiscard_msg;
