@@ -3,7 +3,7 @@
 
 [[cccc::comptime(inline)]]
 $node_t *bad_mode(...) {
-    return $string_literal(_AST_VARARG_STR_AT(0));
+    return $string_literal($vararg_str_at(0));
 }
 
 int main(void) {

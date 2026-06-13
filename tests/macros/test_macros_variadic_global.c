@@ -2,8 +2,8 @@
 
 [[cccc::comptime]]
 void gen_funcs(...) {
-    for (int i = 0; i < _AST_VARARG_COUNT(); i = i + 1) {
-        const char *name = _AST_VARARG_STR_AT(i);
+    for (int i = 0; i < $vararg_count(); i = i + 1) {
+        const char *name = $vararg_str_at(i);
         $obj_t *fn = $function(name, $get_type("int"));
         $function_set_body(fn, $return($int_literal(42 + i)));
     }
@@ -12,10 +12,10 @@ void gen_funcs(...) {
 [[cccc::comptime]]
 void gen_fixed_and_tail(char *first, ...) {
     $obj_t *fixed = $function(first, $get_type("int"));
-    $function_set_body(fixed, $return($int_literal(_AST_VARARG_COUNT())));
+    $function_set_body(fixed, $return($int_literal($vararg_count())));
 
-    for (int i = 0; i < _AST_VARARG_COUNT(); i = i + 1) {
-        const char *name = _AST_VARARG_STR_AT(i);
+    for (int i = 0; i < $vararg_count(); i = i + 1) {
+        const char *name = $vararg_str_at(i);
         $obj_t *fn = $function(name, $get_type("int"));
         $function_set_body(fn, $return($int_literal(20 + i)));
     }

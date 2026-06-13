@@ -187,14 +187,14 @@ Global-generation macros accept fixed parameters plus an unbounded trailing
 `...` tail. Each fixed argument's token sequence is stringified and delivered
 as a `char *` to the matching parameter: string literals pass their raw value,
 while keywords, identifiers, and numbers pass their spelling. The variadic tail
-is available through `_AST_VARARG_COUNT()` and
-`_AST_VARARG_STR_AT(i)`.
+is available through `$vararg_count()` and
+`$vararg_str_at(i)`.
 
 ```c
 [[cccc::comptime]]
 void gen_types(...) {
-    for (int i = 0; i < _AST_VARARG_COUNT(); i++) {
-        const char *name = _AST_VARARG_STR_AT(i);
+    for (int i = 0; i < $vararg_count(); i++) {
+        const char *name = $vararg_str_at(i);
         $obj_t *fn = $function(name, $get_type("int"));
         $function_set_body(fn, $quote("return 42;"));
     }
@@ -210,8 +210,8 @@ ordinary C parameter names:
 ```c
 [[cccc::comptime]]
 void gen_prefixed(char *prefix, ...) {
-    for (int i = 0; i < _AST_VARARG_COUNT(); i++) {
-        const char *name = _AST_VARARG_STR_AT(i);
+    for (int i = 0; i < $vararg_count(); i++) {
+        const char *name = $vararg_str_at(i);
         // prefix is the fixed string argument; name is each tail argument.
     }
 }
@@ -383,42 +383,42 @@ can reuse, inspect, wrap, or replace those nodes.
 
 Inline macros also support a trailing `...` parameter. Fixed arguments are
 passed as normal `$node_t *` parameters, and the variadic tail is available
-through `_AST_VARARG_COUNT()`, `_AST_VARARG_AT(i)`, and
-`_AST_VARARGS_AS_ARRAY()`. A macro with only `...` is valid:
+through `$vararg_count()`, `$vararg_at(i)`, and
+`$vararg_as_array()`. A macro with only `...` is valid:
 
 ```c
 [[cccc::comptime(inline)]]
 $node_t *sum_all(...) {
-    $node_t *acc = _AST_VARARG_AT(0);
-    for (int i = 1; i < _AST_VARARG_COUNT(); i++)
-        acc = $binary(nk_add, acc, _AST_VARARG_AT(i));
+    $node_t *acc = $vararg_at(0);
+    for (int i = 1; i < $vararg_count(); i++)
+        acc = $binary(nk_add, acc, $vararg_at(i));
     return acc;
 }
 
 int x = sum_all(1, 2, 3, 4);
 ```
 
-Use `_AST_VARARGS_AS_ARRAY()` when forwarding the tail to an array-form builder
+Use `$vararg_as_array()` when forwarding the tail to an array-form builder
 such as `$funcall(callee, args, n)`:
 
 ```c
 [[cccc::comptime(inline)]]
 $node_t *forward_call($node_t *fn_node, ...) {
     return $funcall(fn_node,
-                    _AST_VARARGS_AS_ARRAY(),
-                    _AST_VARARG_COUNT());
+                    $vararg_as_array(),
+                    $vararg_count());
 }
 
 int x = forward_call(target_fn, 1, 2, 3);
 ```
 
-`_AST_VARARGS_AS_ARRAY()` returns a borrowed read-only `$node_t **` slice that
+`$vararg_as_array()` returns a borrowed read-only `$node_t **` slice that
 is valid only for the current macro call. It returns `NULL` when the variadic
 tail is empty. Forwarding shares AST nodes; it does not consume or clone them.
 Static macro-to-macro forwarding is handled with `$quote` and splice syntax.
 Dynamic macro-call construction is not part of this API.
 
-`_AST_VARARG_AT(i)` and `_AST_VARARG_STR_AT(i)` use zero-based indexes.
+`$vararg_at(i)` and `$vararg_str_at(i)` use zero-based indexes.
 Variadic helpers report a compile-time error when an index is negative, out of
 range, or the helper is used with the wrong macro execution form.
 
@@ -1320,7 +1320,7 @@ Underlying functions: `__cccc_macroexpand_1(CCCC *vm, $node_t *node)` and
 | `$init_array(elem_ty, ...)` | Array compound literal with explicit element type; length inferred from argument count |
 | `$init_struct(ty, fields, values, n)` | Designated struct/union init; unspecified members are zero |
 | `$funcall(callee, args, n)` | Function call expression |
-| `_AST_VARARGS_AS_ARRAY()` | Borrowed inline variadic argument array for forwarding |
+| `$vararg_as_array()` | Borrowed inline variadic argument array for forwarding |
 | `$return(expr)` | Return statement |
 | `$block(stmts, count)` | Compound statement |
 | `$block_add_stmt(block, stmt)` / `$block_add_stmt(stmt)` | Append a statement to a block; shorthand form uses `$with_block` |

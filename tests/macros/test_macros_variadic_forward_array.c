@@ -14,12 +14,12 @@ int add2(int base, int a, int b) {
 
 [[cccc::comptime(inline)]]
 $node_t *forward_all($node_t *fn_node, ...) {
-    return $funcall(fn_node, _AST_VARARGS_AS_ARRAY(), _AST_VARARG_COUNT());
+    return $funcall(fn_node, $vararg_as_array(), $vararg_count());
 }
 
 [[cccc::comptime(inline)]]
 $node_t *forward_tail($node_t *fn_node, $node_t *base, ...) {
-    $node_t **tail = _AST_VARARGS_AS_ARRAY();
+    $node_t **tail = $vararg_as_array();
     $node_t *args[3] = { base, tail[0], tail[1] };
     return $funcall(fn_node, args, 3);
 }

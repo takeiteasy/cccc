@@ -2,21 +2,21 @@
 
 [[cccc::comptime(inline)]]
 $node_t *sum_nodes(...) {
-    int count = _AST_VARARG_COUNT();
+    int count = $vararg_count();
     if (count == 0)
         return $int_literal(0);
 
-    $node_t *acc = _AST_VARARG_AT(0);
+    $node_t *acc = $vararg_at(0);
     for (int i = 1; i < count; i = i + 1)
-        acc = $binary(nk_add, acc, _AST_VARARG_AT(i));
+        acc = $binary(nk_add, acc, $vararg_at(i));
     return acc;
 }
 
 [[cccc::comptime(inline)]]
 $node_t *add_tail($node_t *base, ...) {
     $node_t *acc = base;
-    for (int i = 0; i < _AST_VARARG_COUNT(); i = i + 1)
-        acc = $binary(nk_add, acc, _AST_VARARG_AT(i));
+    for (int i = 0; i < $vararg_count(); i = i + 1)
+        acc = $binary(nk_add, acc, $vararg_at(i));
     return acc;
 }
 

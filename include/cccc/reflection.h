@@ -275,10 +275,10 @@ $node_t **__cccc_ast_varargs_as_array(CCCC *vm);
  */
 const char *__cccc_ast_vararg_str_at(CCCC *vm, int index);
 
-int _AST_VARARG_COUNT();
-$node_t *_AST_VARARG_AT(int index);
-$node_t **_AST_VARARGS_AS_ARRAY();
-const char *_AST_VARARG_STR_AT(int index);
+int $vararg_count();
+$node_t *$vararg_at(int index);
+$node_t **$vararg_as_array();
+const char *$vararg_str_at(int index);
 
 // ============================================================================
 // Generated Node Source Locations (ticket #173)
@@ -1675,10 +1675,10 @@ const char *__cccc_dump_ast_gen_to_string(CCCC *vm, $node_t *node);
 #define $gensym(prefix) __cccc_gensym(_VM, prefix)
 #define $macroexpand_1(node) __cccc_macroexpand_1(_VM, node)
 #define $macroexpand(node) __cccc_macroexpand(_VM, node)
-#define _AST_VARARG_COUNT() __cccc_ast_vararg_count(_VM)
-#define _AST_VARARG_AT(i) __cccc_ast_vararg_at(_VM, i)
-#define _AST_VARARGS_AS_ARRAY() __cccc_ast_varargs_as_array(_VM)
-#define _AST_VARARG_STR_AT(i) __cccc_ast_vararg_str_at(_VM, i)
+#define $vararg_count() __cccc_ast_vararg_count(_VM)
+#define $vararg_at(i) __cccc_ast_vararg_at(_VM, i)
+#define $vararg_as_array() __cccc_ast_varargs_as_array(_VM)
+#define $vararg_str_at(i) __cccc_ast_vararg_str_at(_VM, i)
 
 #define __cccc_dispatch_2(_1, _2, which, ...) which(_1, _2)
 #define __cccc_dispatch_3(_1, _2, _3, which, ...) which(_1, _2, _3)

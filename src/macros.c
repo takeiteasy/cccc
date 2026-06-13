@@ -238,7 +238,7 @@ int __cccc_ast_vararg_count(CCCC *vm) {
     return vm ? vm->compiler.macro_vararg_count : 0;
 }
 
-int _AST_VARARG_COUNT(void) {
+int $vararg_count(void) {
     return __cccc_ast_vararg_count(__cccc_get_vm());
 }
 
@@ -247,15 +247,15 @@ Node *__cccc_ast_vararg_at(CCCC *vm, int index) {
         return NULL;
     if (vm->compiler.macro_vararg_string_mode)
         error_tok(vm, vm->compiler.macro_call_tok,
-                  "_AST_VARARG_AT is only valid for inline AST macros");
+                  "$vararg_at is only valid for inline AST macros");
     if (index < 0 || index >= vm->compiler.macro_vararg_count)
         error_tok(vm, vm->compiler.macro_call_tok,
-                  "_AST_VARARG_AT index %d out of range (count %d)",
+                  "$vararg_at index %d out of range (count %d)",
                   index, vm->compiler.macro_vararg_count);
     return vm->compiler.macro_vararg_nodes[index];
 }
 
-Node *_AST_VARARG_AT(int index) {
+Node *$vararg_at(int index) {
     return __cccc_ast_vararg_at(__cccc_get_vm(), index);
 }
 
@@ -264,13 +264,13 @@ Node **__cccc_ast_varargs_as_array(CCCC *vm) {
         return NULL;
     if (vm->compiler.macro_vararg_string_mode)
         error_tok(vm, vm->compiler.macro_call_tok,
-                  "_AST_VARARGS_AS_ARRAY is only valid for inline AST macros");
+                  "$vararg_as_array is only valid for inline AST macros");
     if (vm->compiler.macro_vararg_count == 0)
         return NULL;
     return vm->compiler.macro_vararg_nodes;
 }
 
-Node **_AST_VARARGS_AS_ARRAY(void) {
+Node **$vararg_as_array(void) {
     return __cccc_ast_varargs_as_array(__cccc_get_vm());
 }
 
@@ -279,15 +279,15 @@ const char *__cccc_ast_vararg_str_at(CCCC *vm, int index) {
         return NULL;
     if (!vm->compiler.macro_vararg_string_mode)
         error_tok(vm, vm->compiler.macro_call_tok,
-                  "_AST_VARARG_STR_AT is only valid for global-generation string macros");
+                  "$vararg_str_at is only valid for global-generation string macros");
     if (index < 0 || index >= vm->compiler.macro_vararg_count)
         error_tok(vm, vm->compiler.macro_call_tok,
-                  "_AST_VARARG_STR_AT index %d out of range (count %d)",
+                  "$vararg_str_at index %d out of range (count %d)",
                   index, vm->compiler.macro_vararg_count);
     return vm->compiler.macro_vararg_strs[index];
 }
 
-const char *_AST_VARARG_STR_AT(int index) {
+const char *$vararg_str_at(int index) {
     return __cccc_ast_vararg_str_at(__cccc_get_vm(), index);
 }
 
@@ -555,14 +555,14 @@ static void register_reflection_ffi(CCCC *vm) {
                       (void *)__cccc_ast_varargs_as_array, 1, 0);
     cc_register_cfunc(vm, "__cccc_ast_vararg_str_at",
                       (void *)__cccc_ast_vararg_str_at, 2, 0);
-    cc_register_cfunc(vm, "_AST_VARARG_COUNT",
-                      (void *)_AST_VARARG_COUNT, 0, 0);
-    cc_register_cfunc(vm, "_AST_VARARG_AT",
-                      (void *)_AST_VARARG_AT, 1, 0);
-    cc_register_cfunc(vm, "_AST_VARARGS_AS_ARRAY",
-                      (void *)_AST_VARARGS_AS_ARRAY, 0, 0);
-    cc_register_cfunc(vm, "_AST_VARARG_STR_AT",
-                      (void *)_AST_VARARG_STR_AT, 1, 0);
+    cc_register_cfunc(vm, "$vararg_count",
+                      (void *)$vararg_count, 0, 0);
+    cc_register_cfunc(vm, "$vararg_at",
+                      (void *)$vararg_at, 1, 0);
+    cc_register_cfunc(vm, "$vararg_as_array",
+                      (void *)$vararg_as_array, 0, 0);
+    cc_register_cfunc(vm, "$vararg_str_at",
+                      (void *)$vararg_str_at, 1, 0);
 }
 
 static void init_vm_segments_for_macros(CCCC *vm);

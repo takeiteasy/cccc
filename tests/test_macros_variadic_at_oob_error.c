@@ -3,7 +3,7 @@
 
 [[cccc::comptime(inline)]]
 $node_t *bad_at(...) {
-    return _AST_VARARG_AT(_AST_VARARG_COUNT());
+    return $vararg_at($vararg_count());
 }
 
 int main(void) {
