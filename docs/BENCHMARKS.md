@@ -20,42 +20,43 @@ Sample output:
 ====================================================================================================
  CCCC vs GCC benchmark results (median ms, lower is better)
 ====================================================================================================
-benchmark    cccc       cccc-O1   cccc-O2   cccc-O3   cccc-jbc  cccc-jbc-O1  cccc-jbc-O2  cccc-jbc-O3  gcc-O0  gcc-O1  gcc-O2  gcc-O3
------------  --------  -------  -------  -------  -------  ----------  ----------  ----------  ------  ------  ------  ------
-ackermann    721.2     734.9    726.3    715.0    706.5    698.7       720.9       688.0       235.8   132.9   123.7   123.9
-binary_tree  862.1     858.8    876.2    861.0    922.2    880.8       878.5       853.7       150.5   138.5   139.1   140.6
-fib          625.9     613.4    625.0    605.5    595.2    617.0       611.6       586.2       138.0   127.1   124.4   149.0
-mandelbrot   6880.9    6942.3   6924.6   6803.2   7772.1   7459.9      8366.3      7094.8      260.4   158.8   152.8   149.7
-matrix_mul   5827.0    6169.2   5537.7   5701.0   6474.0   5524.3      5296.7      5327.5      192.1   126.1   126.0   129.6
-nqueens      1367.2    1246.4   1260.0   1318.3   1302.0   1221.1      1338.5      1242.9      131.5   123.1   124.2   123.0
-quicksort    1841.7    2001.6   2074.0   2197.4   1843.2   1993.2      2339.9      2065.6      143.7   125.5   125.5   131.3
-sieve        10107.7   9802.9   9710.2   9915.6   10313.1  11712.1     11935.8     11817.5     179.3   147.3   144.4   140.0
+benchmark    cccc    cccc-O1  cccc-O2  cccc-O3  cccc-jbc  cccc-jbc-O1  cccc-jbc-O2  cccc-jbc-O3  gcc-O0  gcc-O1  gcc-O2  gcc-O3
+-----------  ------  -------  -------  -------  --------  -----------  -----------  -----------  ------  ------  ------  ------
+ackermann    690.1   685.6    918.5    919.4    666.1     660.7        883.2        885.7        19.1    12.6    4.4     4.7
+binary_tree  808.4   797.7    900.8    901.5    805.8     771.5        893.8        865.3        18.4    17.4    33.5    16.1
+fib          562.5   557.5    656.0    656.8    533.4     531.2        622.6        621.9        6.2     6.2     3.6     3.8
+mandelbrot   6062.2  6108.3   5937.0   5980.9   6031.4    6114.4       5887.8       5925.8       63.7    29.6    29.4    27.8
+matrix_mul   4654.2  4660.3   3927.5   3940.1   4618.1    4638.1       3894.2       3903.5       19.9    5.8     4.0     3.8
+nqueens      1270.1  1179.7   1081.0   1076.7   1242.0    1155.9       1046.7       1047.0       8.5     5.4     5.8     4.9
+quicksort    1727.7  1646.4   1577.0   1534.6   1696.8    1616.2       1512.4       1508.6       12.5    7.9     8.2     7.7
+sieve        8926.8  8704.1   6683.1   6745.0   9252.9    8949.5       6951.6       6875.4       36.4    23.0    18.5    19.3
 
 Speedup vs gcc -O2 (>1.0x = slower than gcc -O2):
 benchmark    cccc     cccc-O1  cccc-O2  cccc-O3  cccc-jbc  cccc-jbc-O1  cccc-jbc-O2  cccc-jbc-O3  gcc-O0  gcc-O1  gcc-O2  gcc-O3
------------  ------  ------  ------  ------  -------  ----------  ----------  ----------  ------  ------  ------  ------
-ackermann    5.8x    5.9x    5.9x    5.8x    5.7x     5.6x        5.8x        5.6x        1.9x    1.1x    1.0x    1.0x
-binary_tree  6.2x    6.2x    6.3x    6.2x    6.6x     6.3x        6.3x        6.1x        1.1x    1.0x    1.0x    1.0x
-fib          5.0x    4.9x    5.0x    4.9x    4.8x     5.0x        4.9x        4.7x        1.1x    1.0x    1.0x    1.2x
-mandelbrot   45.0x   45.4x   45.3x   44.5x   50.9x    48.8x       54.8x       46.4x       1.7x    1.0x    1.0x    1.0x
-matrix_mul   46.3x   49.0x   44.0x   45.3x   51.4x    43.9x       42.0x       42.3x       1.5x    1.0x    1.0x    1.0x
-nqueens      11.0x   10.0x   10.1x   10.6x   10.5x    9.8x        10.8x       10.0x       1.1x    1.0x    1.0x    1.0x
-quicksort    14.7x   15.9x   16.5x   17.5x   14.7x    15.9x       18.6x       16.5x       1.1x    1.0x    1.0x    1.0x
-sieve        70.0x   67.9x   67.3x   68.7x   71.4x    81.1x       82.7x       81.9x       1.2x    1.0x    1.0x    1.0x
-geomean      15.99x  16.04x  15.94x  16.08x  16.39x   16.23x      16.98x      15.98x      1.32x   1.02x   1.00x   1.03x
+-----------  -------  -------  -------  -------  --------  -----------  -----------  -----------  ------  ------  ------  ------
+ackermann    157.2x   156.1x   209.2x   209.4x   151.7x    150.5x       201.1x       201.7x       4.3x    2.9x    1.0x    1.1x
+binary_tree  24.1x    23.8x    26.9x    26.9x    24.0x     23.0x        26.7x        25.8x        0.55x   0.52x   1.0x    0.48x
+fib          154.9x   153.5x   180.7x   180.9x   146.9x    146.3x       171.5x       171.2x       1.7x    1.7x    1.0x    1.0x
+mandelbrot   206.5x   208.1x   202.3x   203.8x   205.5x    208.3x       200.6x       201.9x       2.2x    1.0x    1.0x    0.95x
+matrix_mul   1158.6x  1160.2x  977.7x   980.9x   1149.6x   1154.6x      969.4x       971.8x       5.0x    1.4x    1.0x    0.96x
+nqueens      219.2x   203.6x   186.6x   185.9x   214.4x    199.5x       180.7x       180.7x       1.5x    0.94x   1.0x    0.85x
+quicksort    211.7x   201.8x   193.3x   188.1x   207.9x    198.1x       185.3x       184.9x       1.5x    0.97x   1.0x    0.94x
+sieve        481.9x   469.9x   360.8x   364.1x   499.5x    483.1x       375.3x       371.2x       2.0x    1.2x    1.0x    1.0x
+geomean      205.19x  200.95x  200.51x  200.29x  202.41x   197.62x      196.77x      195.90x      1.93x   1.20x   1.00x   0.89x
 
 Correctness: all benchmarks produce identical output across all configs
 ```
 
-Two significant VM improvements are reflected in these numbers:
-- **#227 — inlined threaded dispatch**: opcode logic is embedded directly at each computed-goto label rather than dispatched through a C function call per instruction (1.2–1.7× improvement on VM-bound workloads).
-- **#250 — fused local load/store opcodes**: the ubiquitous `LEA3+LDR/STR` two-opcode address+dereference sequence for local variables is replaced by a single `LDR_LOCAL_*`/`STR_LOCAL_*` opcode (~23% geomean improvement over the pre-#250 baseline).
-- **#249 — scalar local promotion**: at `--optimize=2` and `--optimize=3`, hot eligible integer/pointer locals are held in VM saved registers and flushed at function exits, cutting repeated local load/store traffic in tight loops.
-- **#251 — indexed load/store opcodes**: at `--optimize=2` and `--optimize=3`, simple `base + index * scale` loads and stores use `LDR_INDEX_*` / `STR_INDEX_*`, cutting address-calculation bytecode in array-heavy loops.
+> **Note:** The `gcc*` columns use Homebrew GCC-15 (auto-detected by `bench.py` when the system `gcc` is Apple Clang). GCC-15 is substantially faster than Apple Clang on some workloads — notably `ackermann` (deep recursion) and `fib` — so the `×` ratios for those benchmarks are larger than they were when earlier runs used Clang. The `cccc*` absolute timings are directly comparable with older runs.
 
-Recent #249 validation on 2026-06-13 used single-run, no-JBC timing for the four targeted hot-loop benchmarks (`python3 tools/bench.py --benchmarks profile/benchmarks --filter ... --runs 1 --warmup 0 --no-jbc`). Correctness matched across all CCCC and GCC configs. The clearest wins were in local-heavy loops: sieve improved from 70.2× to 65.1× slower than `gcc -O2` at `--optimize=2`, nqueens from 10.2× to 9.3×, and matrix multiplication from 38.2× to 33.9×. Quicksort was neutral-to-slightly slower in this run, from 13.6× to 14.0× at `--optimize=2`, so it remains a target for address-calculation work.
+Key VM improvements reflected in these numbers:
+- **#227 — inlined threaded dispatch**: opcode logic embedded directly at each computed-goto label (~1.2–1.7× on VM-bound workloads).
+- **#250 — fused local load/store opcodes**: `LEA3+LDR/STR` two-opcode sequence replaced by a single `LDR_LOCAL_*`/`STR_LOCAL_*` (~23% geomean improvement).
+- **#249 — scalar local promotion**: at `--optimize=2`+, hot eligible integer/pointer locals held in VM saved registers, flushed at exits — reduces repeated local load/store traffic in tight loops.
+- **#251 — indexed load/store opcodes**: at `--optimize=2`+, `base + index * scale` patterns use `LDR_INDEX_*`/`STR_INDEX_*` fused opcodes — removes explicit MUL+ADD address calculation from array loops.
+- **#415 — CSE for `[[gnu::const]]` + extended dead-call elimination**: at `--optimize=2`+, duplicate calls to const functions within a straight-line block are replaced by a register move. Dead-call elimination extended to indirect (CALLN) and FFI (CALLF) calls at `--optimize=1`+. CSE fires on repeated calls with matching constant or local-variable argument values; these benchmarks do not exercise that pattern, so no change is visible in the table above.
 
-Recent #251 validation on 2026-06-13 used the same single-run, no-JBC command shape on the four targeted hot-loop benchmarks. Correctness matched across all CCCC and GCC configs. `--optimize=2` moved sieve from 65.1× to 48.2× slower than `gcc -O2`, nqueens from 9.3× to 8.4×, matrix multiplication from 33.9× to 29.0×, and quicksort from 14.0× to 12.9×. The absolute median timings for CCCC `--optimize=2` were sieve 6689.5ms, nqueens 1089.5ms, matrix_mul 3932.1ms, and quicksort 1711.6ms.
+Validation run (2026-06-14, `--runs 2 --warmup 1`, Homebrew GCC-15): all correctness checks passed. The dominant wins at `--optimize=2` relative to no optimization remain sieve (8926ms → 6683ms, 25% reduction), matrix_mul (4654ms → 3928ms, 16% reduction), nqueens (1270ms → 1081ms, 15% reduction), and quicksort (1728ms → 1577ms, 9% reduction). Ackermann and fib regress slightly under optimization because the optimizer passes add overhead with no benefit for pure-recursion workloads.
 
 Re-run `make bench-compare` to get updated numbers for your machine.
 

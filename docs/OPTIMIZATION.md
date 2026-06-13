@@ -24,8 +24,8 @@ CCCC includes optional bytecode optimization passes that can improve execution p
 | Level | Flag | Description | Passes |
 |-------|------|-------------|--------|
 | 0 | (default) | No optimization | None |
-| 1 | `--optimize` or `--optimize=1` | Basic | Constant folding |
-| 2 | `--optimize=2` | Standard | Constant folding + Peephole + scalar local promotion + indexed load/store lowering |
+| 1 | `--optimize` or `--optimize=1` | Basic | Constant folding + dead-call elimination |
+| 2 | `--optimize=2` | Standard | All level-1 passes + peephole + CSE for const functions + scalar local promotion + indexed load/store lowering |
 | 3 | `--optimize=3` | Aggressive | All passes |
 
 ## Optimization Passes
@@ -65,6 +65,7 @@ when replacements change instruction width.
 - `ADDI3` (add immediate) becomes a same-width `LI3` when the source is constant
 - Arithmetic operations (`ADD3`, `SUB3`, `MUL3`, `DIV3`, etc.) are evaluated when both operands are constants and rewritten to `LI3`
 - Unary operations (`NEG3`, `NOT3`, `BNOT3`) on constants are rewritten to `LI3`
+- Dead-call elimination: direct, indirect (CALLN), and FFI (CALLF) calls to `[[gnu::pure]]` or `[[gnu::const]]` functions whose result is discarded are omitted; argument expressions are still evaluated so their side effects run
 
 **Example:**
 ```c
@@ -76,6 +77,38 @@ int x = 42 + 0;  // Rewritten to load the folded constant directly
 - Constants are invalidated at known branch targets to avoid folding across control-flow joins
 - Memory loads reset constant tracking for the destination register
 - Division by zero, signed division overflow, invalid shifts, and overflow-checked signed arithmetic are not folded
+
+---
+
+### CSE for `[[gnu::const]]` Functions (`--optimize=2`)
+
+Common-subexpression elimination for functions marked `[[gnu::const]]`
+(or `__attribute__((const))`).  After the compaction pass, the optimizer
+scans for duplicate calls to the same const function within a straight-line
+basic block and replaces the second call with a register move reusing the
+first result.
+
+**Value numbering tracks:**
+- Compile-time constants loaded by `LI3`
+- Local-variable loads from specific stack slots via `LDR_LOCAL_*`
+- Register copies via `MOV3`
+
+CSE fires when all argument registers carry known value numbers that match
+a previously seen call to the same function.  It does **not** fire:
+- Across control-flow boundaries (branch targets reset the cache)
+- For `[[gnu::pure]]` functions (which may read globals that change between calls)
+- When any argument register holds a float/double value (float args use separate FREG registers not tracked by the integer VN state)
+
+**Example:**
+```c
+[[gnu::const]] int square(int x) { return x * x; }
+
+int a = square(5);  // first call — executes normally
+int b = square(5);  // same constant arg — replaced by MOV at -O2+
+```
+
+Because `CALL` and `MOV3` both encode in 2 bytecode words, the replacement
+is done in-place — no second compaction pass is required.
 
 ---
 

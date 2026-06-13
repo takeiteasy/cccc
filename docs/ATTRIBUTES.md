@@ -156,6 +156,66 @@ runtime source:
 #endif @comptime
 ```
 
+## Side-Effect Annotations
+
+### `__attribute__((pure))` / `[[gnu::pure]]`
+
+Marks a function as *pure*: it may read global state but has no side effects
+and always returns the same result for the same arguments given unchanged
+global state.
+
+**Optimizer effect:**
+
+- **`--optimize=1` and above**: Dead-call elimination — calls whose return
+  value is discarded are omitted entirely.  Argument expressions are still
+  evaluated so their side effects run.
+
+Pure functions are **not** eligible for common-subexpression elimination
+because their result may change if a global is modified between two calls.
+
+```c
+__attribute__((pure)) int strlen_pure(const char *s) { /* ... */ }
+
+// Dead call at -O1+: result discarded, but side effects of ++n still run.
+strlen_pure(buf);  // result unused — call omitted
+```
+
+Accepted spellings: `__attribute__((pure))`, `__attribute__((__pure__))`,
+`[[gnu::pure]]`, `[[cccc::pure]]`.
+
+---
+
+### `__attribute__((const))` / `[[gnu::const]]`
+
+Marks a function as *const*: it has no side effects and its return value
+depends only on its arguments (no global reads).  Stronger than `pure`.
+
+**Optimizer effect:**
+
+- **`--optimize=1` and above**: Dead-call elimination (same as `pure`).
+- **`--optimize=2` and above**: Common-subexpression elimination (CSE) — if
+  the same const function is called more than once with the same argument
+  values within a straight-line block, the second call is replaced by a
+  register move reusing the first result.  CSE fires when all argument
+  registers hold known value numbers (compile-time constants or unmodified
+  local-variable loads).
+
+```c
+[[gnu::const]] int square(int x) { return x * x; }
+
+int a = square(5);  // called normally
+int b = square(5);  // same constant arg — second call eliminated at -O2+
+```
+
+Accepted spellings: `__attribute__((const))`, `__attribute__((__const__))`,
+`[[gnu::const]]`, `[[cccc::const]]`.
+
+> **Note:** `gnu::const` would collide with the C keyword `const` if written
+> as `[[const]]` — the `gnu::` namespace qualifier is required for the C23
+> spelling.
+
+---
+
 ## Parsed but Ignored
 
 Any GNU `__attribute__` identifier that is not explicitly handled (i.e., not `packed`, `aligned`, `unused`/`__unused__`, or `deprecated`/`__deprecated__`) is **consumed and emits a `-Wattributes` warning**. The parser skips the attribute name and any parenthesised argument list, then continues.
@@ -167,8 +227,6 @@ Ignored attributes include (but are not limited to):
 | Attribute | Syntax | Tracking |
 |-----------|--------|----------|
 | `no_unique_address` | C23 | Parsed but ignored — VM optimisation deferred |
-| `pure` | GNU | [#217](https://todo.sr.ht/~takeiteasy/cccc/217) |
-| `const` | GNU | [#217](https://todo.sr.ht/~takeiteasy/cccc/217) |
 | `cleanup` | GNU | [#218](https://todo.sr.ht/~takeiteasy/cccc/218) |
 | `visibility` | GNU | |
 | `section` | GNU | |
@@ -192,7 +250,6 @@ Ignored attributes include (but are not limited to):
 | # | Attribute | Priority | Description |
 |---|-----------|----------|-------------|
 | [#215](https://todo.sr.ht/~takeiteasy/cccc/215) | Catch-all | medium | Remaining GNU builtins and attributes |
-| [#217](https://todo.sr.ht/~takeiteasy/cccc/217) | `pure` / `const` | medium | Side-effect-free function annotations for optimisation |
 | [#218](https://todo.sr.ht/~takeiteasy/cccc/218) | `cleanup(func)` | medium | Scope-based cleanup callbacks (RAII-style) |
 
 ## `@`-prefix attribute syntax

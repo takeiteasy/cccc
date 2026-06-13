@@ -3044,12 +3044,19 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
             if (arg_array)
                 free(arg_array);
 
-            // Emit CALLF with operands: ffi_idx, nargs, double_arg_mask, float_arg_mask
-            emit(vm, CALLF);
-            emit_word(vm, ffi_idx);
-            emit_word(vm, nargs);
-            emit_i64(vm, (long long)double_arg_mask);
-            emit_i64(vm, (long long)float_arg_mask);
+            // Emit CALLF (or skip if pure/const and result unused).
+            Obj *ffi_fn = (node->lhs->kind == ND_VAR) ? node->lhs->var : NULL;
+            bool skip_dead_callf = vm->compiler.opt_level >= 1 &&
+                                   dest_reg == REG_ZERO &&
+                                   ffi_fn &&
+                                   (ffi_fn->is_pure || ffi_fn->is_func_const);
+            if (!skip_dead_callf) {
+                emit(vm, CALLF);
+                emit_word(vm, ffi_idx);
+                emit_word(vm, nargs);
+                emit_i64(vm, (long long)double_arg_mask);
+                emit_i64(vm, (long long)float_arg_mask);
+            }
 
             if (num_stack_args > 0) {
                 emit_with_arg(vm, ADJ, num_stack_args);
@@ -3415,17 +3422,28 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
                 vm->compiler.num_call_patches++;
             }
         } else {
-            // Indirect call - function pointer in register
+            // Indirect call - function pointer in register.
+            // Evaluate the fn-ptr expression unconditionally (it may have
+            // side effects, e.g. table[i++]).  Only skip the dispatch when
+            // the callee's function type is annotated pure/const and the
+            // result is unused.
             int r_fn = alloc_temp_reg();
             gen_expr(vm, node->lhs, r_fn);
-            emit(vm, CALLN);
-            emit_word(vm, ENCODE_R(r_fn));
-            emit_word(vm, ((CCCCInstrWord)(node->ty->kind == TY_FLOAT ? 0
-                                            : is_flonum(node->ty) ? 1 : 0) << 16) |
-                              ((CCCCInstrWord)(node->ty->kind == TY_FLOAT ? 1 : 0) << 17) |
-                              (CCCCInstrWord)(nargs & 0xFFFF));
-            emit_i64(vm, (long long)call_double_arg_mask);
-            emit_i64(vm, (long long)call_float_arg_mask);
+            bool skip_dead_calln = vm->compiler.opt_level >= 1 &&
+                                   dest_reg == REG_ZERO &&
+                                   node->func_ty &&
+                                   (node->func_ty->is_pure ||
+                                    node->func_ty->is_func_const);
+            if (!skip_dead_calln) {
+                emit(vm, CALLN);
+                emit_word(vm, ENCODE_R(r_fn));
+                emit_word(vm, ((CCCCInstrWord)(node->ty->kind == TY_FLOAT ? 0
+                                                : is_flonum(node->ty) ? 1 : 0) << 16) |
+                                  ((CCCCInstrWord)(node->ty->kind == TY_FLOAT ? 1 : 0) << 17) |
+                                  (CCCCInstrWord)(nargs & 0xFFFF));
+                emit_i64(vm, (long long)call_double_arg_mask);
+                emit_i64(vm, (long long)call_float_arg_mask);
+            }
             free_temp_reg(r_fn);
         }
 

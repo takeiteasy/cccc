@@ -1023,6 +1023,332 @@ static void opt_compact_bytecode(CCCC *vm, OptReplacement *repls) {
     free(pc_map);
 }
 
+// ========== Pass 5: CSE for [[gnu::const]] Functions ==========
+//
+// Common-subexpression elimination for const functions.
+// If f(x) is called twice with the same argument value numbers and f is
+// marked [[gnu::const]], the second call is replaced with a MOV3 from the
+// register that holds the first result.
+//
+// Runs after compaction on the final bytecode.  CALL (2 words) and MOV3
+// (2 words) are the same size, so replacement is in-place — no second
+// compaction pass is needed.
+//
+// Value numbering tracks:
+//   VN_CONST      — register holds a known compile-time constant
+//   VN_LOCAL_SLOT — register was loaded from a specific bp-relative slot
+//
+// CSE fires when all args of a const function have the same VNumbers across
+// two call sites within the same basic block.  It does NOT fire for float/
+// double arguments (which use FREG_A* instead of REG_A*), or after any
+// intervening control-flow boundary or CALL (conservative).
+
+#define MAX_CSE_ENTRIES 32
+
+typedef enum { VN_UNKNOWN = 0, VN_CONST, VN_LOCAL_SLOT } VNKind;
+
+typedef struct {
+    VNKind kind;
+    long long const_val;    // VN_CONST: the constant value
+    long long local_offset; // VN_LOCAL_SLOT: bp-relative byte offset
+} VNumber;
+
+typedef struct {
+    bool      active;
+    bool      valid;        // false if saved_reg was clobbered after the call
+    CCCCPc    target_addr;
+    int       nargs;
+    VNumber   arg_vns[8];
+    int       saved_reg;    // register that caches the first result (-1 = not yet found)
+} CseEntry;
+
+static bool vn_equal(const VNumber *a, const VNumber *b) {
+    if (a->kind != b->kind || a->kind == VN_UNKNOWN)
+        return false;
+    if (a->kind == VN_CONST)
+        return a->const_val == b->const_val;
+    return a->local_offset == b->local_offset;
+}
+
+static Obj *cse_lookup_const_fn(CCCC *vm, CCCCPc addr) {
+    for (Obj *fn = vm->compiler.globals; fn; fn = fn->next)
+        if (fn->is_function && fn->is_func_const && (CCCCPc)fn->code_addr == addr)
+            return fn;
+    return NULL;
+}
+
+static int cse_count_params(Obj *fn) {
+    int n = 0;
+    for (Obj *p = fn->params; p; p = p->next)
+        n++;
+    return n;
+}
+
+static bool cse_has_float_params(Obj *fn) {
+    for (Obj *p = fn->params; p; p = p->next)
+        if (p->ty && is_flonum(p->ty))
+            return true;
+    return false;
+}
+
+static CseEntry *cse_find(CseEntry *cache, int ncache,
+                          CCCCPc addr, int nargs, VNumber *arg_vns) {
+    for (int i = 0; i < ncache; i++) {
+        CseEntry *e = &cache[i];
+        if (!e->active || e->target_addr != addr || e->nargs != nargs)
+            continue;
+        bool match = true;
+        for (int j = 0; j < nargs; j++) {
+            if (!vn_equal(&e->arg_vns[j], &arg_vns[j])) {
+                match = false;
+                break;
+            }
+        }
+        if (match)
+            return e;
+    }
+    return NULL;
+}
+
+static void cse_reset_vn(VNumber *vn) {
+    for (int i = 0; i < MAX_TRACKED_REGS; i++)
+        vn[i].kind = VN_UNKNOWN;
+    vn[REG_ZERO].kind = VN_CONST;
+    vn[REG_ZERO].const_val = 0;
+}
+
+static void cse_invalidate_slot(VNumber *vn, long long offset) {
+    for (int i = 1; i < MAX_TRACKED_REGS; i++)
+        if (vn[i].kind == VN_LOCAL_SLOT && vn[i].local_offset == offset)
+            vn[i].kind = VN_UNKNOWN;
+}
+
+static void cse_invalidate_reg(CseEntry *cache, int ncache, int rd) {
+    for (int i = 0; i < ncache; i++)
+        if (cache[i].active && cache[i].saved_reg == rd)
+            cache[i].valid = false;
+}
+
+static void opt_cse_const_calls(CCCC *vm) {
+    if (!vm || !vm->text_seg || !vm->text_ptr)
+        return;
+    if (!vm->compiler.globals)
+        return;
+
+    CCCCPc start = 1;
+    CCCCPc end = vm->text_ptr + 1;
+
+    bool *cf_targets = build_control_flow_targets(vm, start, end);
+
+    VNumber vn[MAX_TRACKED_REGS];
+    CseEntry cache[MAX_CSE_ENTRIES];
+    int ncache = 0;
+    int pending = -1;
+    int cse_count = 0;
+    // After CSE replaces a CALL with MOV3 REG_A0, saved_reg, the very next
+    // MOV3 that writes saved_reg back from REG_A0 is an idempotent re-save
+    // (same value returned to the same register).  Track it here so the
+    // MOV3 case can skip invalidating the cache entry for saved_reg.
+    int cse_re_save_reg = -1;
+
+    cse_reset_vn(vn);
+    memset(cache, 0, sizeof(cache));
+
+    for (CCCCPc pc = start; pc < end; ) {
+        int op = get_opcode(vm, pc);
+        int size = get_instr_size_at(vm, pc, end);
+        if (size <= 0)
+            break;
+
+        // At control-flow targets reset all tracking (conservative).
+        if (pc != start && cf_targets[pc - start]) {
+            cse_reset_vn(vn);
+            for (int i = 0; i < ncache; i++)
+                cache[i].valid = false;
+            pending = -1;
+            cse_re_save_reg = -1;
+        }
+
+        switch (op) {
+
+        // ---- Value number tracking ----
+        case LI3: {
+            int rd = vm->text_seg[pc + 1] & 0xFF;
+            if (rd > REG_ZERO && rd < MAX_TRACKED_REGS) {
+                vn[rd].kind      = VN_CONST;
+                vn[rd].const_val = cc_read_i64_at(vm, pc + 2);
+                cse_invalidate_reg(cache, ncache, rd);
+            }
+            break;
+        }
+        case MOV3: {
+            int rd = vm->text_seg[pc + 1] & 0xFF;
+            int rs = (vm->text_seg[pc + 1] >> 8) & 0xFF;
+            if (rd > REG_ZERO && rd < MAX_TRACKED_REGS) {
+                // Check for the idempotent re-save that codegen emits right
+                // after a call: MOV3 saved_reg, REG_A0.  When this follows a
+                // CSE'd CALL (replaced with MOV3 REG_A0, saved_reg), REG_A0
+                // already holds saved_reg's value, so the write is a no-op
+                // and the cache entry for saved_reg must NOT be invalidated.
+                bool is_cse_re_save = (rs == REG_A0 &&
+                                       rd == cse_re_save_reg &&
+                                       cse_re_save_reg >= 0);
+                cse_re_save_reg = -1; // consume the flag
+
+                if (!is_cse_re_save)
+                    cse_invalidate_reg(cache, ncache, rd);
+
+                // Capture result of a pending const call: the very first
+                // MOV3 that copies REG_A0 into another register after a
+                // const CALL is the canonical result-save.
+                if (pending >= 0 && rs == REG_A0 && rd != REG_A0) {
+                    if (cache[pending].saved_reg < 0)
+                        cache[pending].saved_reg = rd;
+                    pending = -1;
+                }
+                // Propagate value number
+                if (rs < MAX_TRACKED_REGS)
+                    vn[rd] = vn[rs];
+                else
+                    vn[rd].kind = VN_UNKNOWN;
+            }
+            break;
+        }
+        case LDR_LOCAL_B:
+        case LDR_LOCAL_H:
+        case LDR_LOCAL_W:
+        case LDR_LOCAL_D: {
+            int rd = vm->text_seg[pc + 1] & 0xFF;
+            if (rd > REG_ZERO && rd < MAX_TRACKED_REGS) {
+                vn[rd].kind         = VN_LOCAL_SLOT;
+                vn[rd].local_offset = cc_read_i64_at(vm, pc + 2);
+                cse_invalidate_reg(cache, ncache, rd);
+            }
+            break;
+        }
+        case STR_LOCAL_B:
+        case STR_LOCAL_H:
+        case STR_LOCAL_W:
+        case STR_LOCAL_D: {
+            long long off = cc_read_i64_at(vm, pc + 2);
+            cse_invalidate_slot(vn, off);
+            // A store to a local slot doesn't modify the register file,
+            // so saved_reg cache entries remain valid.
+            break;
+        }
+
+        // ---- CSE: direct call to const function ----
+        case CALL: {
+            CCCCPc target = vm->text_seg[pc + 1];
+            Obj *fn = cse_lookup_const_fn(vm, target);
+            if (fn && !cse_has_float_params(fn)) {
+                int nargs = cse_count_params(fn);
+                if (nargs <= 8) {
+                    VNumber arg_vns[8] = {{0}};
+                    bool all_known = true;
+                    for (int i = 0; i < nargs; i++) {
+                        int ar = REG_A0 + i;
+                        if (ar < MAX_TRACKED_REGS &&
+                            vn[ar].kind != VN_UNKNOWN) {
+                            arg_vns[i] = vn[ar];
+                        } else {
+                            all_known = false;
+                            break;
+                        }
+                    }
+                    if (all_known) {
+                        CseEntry *e = cse_find(cache, ncache,
+                                               target, nargs, arg_vns);
+                        if (e && e->valid && e->saved_reg >= 0) {
+                            // Replace CALL with MOV3 REG_A0, saved_reg.
+                            // Both are 2 words — safe in-place replacement.
+                            vm->text_seg[pc]     = MOV3;
+                            vm->text_seg[pc + 1] = (CCCCInstrWord)REG_A0 |
+                                ((CCCCInstrWord)e->saved_reg << 8);
+                            cse_count++;
+                            // The codegen always emits a MOV3 dest, REG_A0
+                            // right after the CALL to save the result.  After
+                            // CSE, REG_A0 already holds saved_reg's value, so
+                            // the next MOV3 saved_reg, REG_A0 is idempotent —
+                            // don't invalidate the cache entry for saved_reg.
+                            cse_re_save_reg = e->saved_reg;
+                        } else if (!e && ncache < MAX_CSE_ENTRIES) {
+                            CseEntry *ne = &cache[ncache++];
+                            ne->active     = true;
+                            ne->valid      = true;
+                            ne->target_addr = target;
+                            ne->nargs      = nargs;
+                            ne->saved_reg  = -1;
+                            memcpy(ne->arg_vns, arg_vns,
+                                   (size_t)nargs * sizeof(VNumber));
+                            pending = ncache - 1;
+                        }
+                    }
+                }
+            }
+            // CALL clobbers all tracked VN state.
+            cse_reset_vn(vn);
+            // pending is either already set (first call) or has just been cleared
+            // by the CSE replacement above.  Reset it if we didn't just set it.
+            if (pending >= 0 && cache[pending].saved_reg >= 0)
+                pending = -1; // already resolved from a previous iteration
+            break;
+        }
+
+        // Any other CALL-like opcode — reset VN and pending.
+        case CALLT:
+        case CALLI:
+        case CALLN:
+        case CALLF:
+        case ENT3:
+        case LEV3: {
+            cse_reset_vn(vn);
+            pending = -1;
+            cse_re_save_reg = -1;
+            break;
+        }
+
+        default: {
+            // For any instruction that writes a destination register,
+            // update VN and invalidate matching cache entries.
+            if (size >= 2) {
+                int rd = vm->text_seg[pc + 1] & 0xFF;
+                if (rd > REG_ZERO && rd < MAX_TRACKED_REGS) {
+                    // If this is a non-MOV3 instruction and pending is set,
+                    // give up tracking the save register (something unusual
+                    // intervened between the CALL and the expected MOV3).
+                    if (pending >= 0)
+                        pending = -1;
+                    vn[rd].kind = VN_UNKNOWN;
+                    // In-place sign/zero extension (rd == rs) upgrades the
+                    // value already in rd but does not replace it with an
+                    // unrelated value.  Cache entries keyed on rd remain
+                    // valid — the extended result is still the const call's
+                    // output.
+                    bool is_inplace_extend = false;
+                    if (op == SX1 || op == SX2 || op == SX4 ||
+                        op == ZX1 || op == ZX2 || op == ZX4) {
+                        int rs = (vm->text_seg[pc + 1] >> 8) & 0xFF;
+                        is_inplace_extend = (rs == rd);
+                    }
+                    if (!is_inplace_extend)
+                        cse_invalidate_reg(cache, ncache, rd);
+                }
+            }
+            break;
+        }
+        } // end switch
+
+        pc += size;
+    }
+
+    free(cf_targets);
+
+    if (vm->debug_vm && cse_count > 0)
+        printf("[opt] CSE const-calls: eliminated %d call%s\n",
+               cse_count, cse_count == 1 ? "" : "s");
+}
+
 // ========== Main Entry Point ==========
 
 void cc_optimize(CCCC *vm, int level) {
@@ -1052,4 +1378,11 @@ void cc_optimize(CCCC *vm, int level) {
 
     opt_compact_bytecode(vm, repls);
     free(repls);
+
+    // Level 2+: CSE for [[gnu::const]] functions.  Runs after compaction so
+    // it sees the final, folded bytecode.  Replaces CALL in-place with MOV3
+    // (same 2-word encoding) — no second compaction pass is needed.
+    if (level >= 2) {
+        opt_cse_const_calls(vm);
+    }
 }
