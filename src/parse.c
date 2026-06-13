@@ -1329,10 +1329,17 @@ static Type *func_params(CCCC *vm, Token **rest, Token *tok, Type *ty) {
         if (ty2->kind == TY_ARRAY) {
             // "array of T" is converted to "pointer to T" only in the parameter
             // context. For example, *argv[] is converted to **argv by this.
-            int saved_static_min = ty2->static_min;
+            // Qualifiers inside [...] apply to the resulting pointer per C99 §6.7.6.3p7.
+            int  saved_static_min  = ty2->static_min;
+            bool saved_is_const    = ty2->is_const;
+            bool saved_is_volatile = ty2->is_volatile;
+            bool saved_is_restrict = ty2->is_restrict;
             ty2 = pointer_to(vm, ty2->base);
-            ty2->name = name;
-            ty2->static_min = saved_static_min;
+            ty2->name        = name;
+            ty2->static_min  = saved_static_min;
+            ty2->is_const    = saved_is_const;
+            ty2->is_volatile = saved_is_volatile;
+            ty2->is_restrict = saved_is_restrict;
         } else if (ty2->kind == TY_FUNC) {
             // Likewise, a function is converted to a pointer to a function
             // only in the parameter context.
@@ -1362,17 +1369,26 @@ static Type *func_params(CCCC *vm, Token **rest, Token *tok, Type *ty) {
 
 // array-dimensions = ("static" | "restrict" | "const" | "volatile" | "_Atomic")* const-expr? "]" type-suffix
 static Type *array_dimensions(CCCC *vm, Token **rest, Token *tok, Type *ty) {
-    bool saw_static = false;
+    bool saw_static   = false;
+    bool saw_const    = false;
+    bool saw_volatile = false;
+    bool saw_restrict = false;
     while (equal(tok, "static") || equal(tok, "restrict") ||
            equal(tok, "const")  || equal(tok, "volatile") || equal(tok, "_Atomic")) {
-        if (equal(tok, "static"))
-            saw_static = true;
+        if (equal(tok, "static"))   saw_static   = true;
+        if (equal(tok, "const"))    saw_const    = true;
+        if (equal(tok, "volatile")) saw_volatile = true;
+        if (equal(tok, "restrict")) saw_restrict = true;
         tok = tok->next;
     }
 
     if (equal(tok, "]")) {
         ty = type_suffix(vm, rest, tok->next, ty);
-        return array_of(vm, ty, -1);
+        Type *arr = array_of(vm, ty, -1);
+        if (saw_const)    arr->is_const    = true;
+        if (saw_volatile) arr->is_volatile = true;
+        if (saw_restrict) arr->is_restrict = true;
+        return arr;
     }
 
     Token *expr_tok = tok;
@@ -1387,8 +1403,10 @@ static Type *array_dimensions(CCCC *vm, Token **rest, Token *tok, Type *ty) {
         return vla_of(vm, ty, expr);
     }
     Type *arr = array_of(vm, ty, eval(vm, expr));
-    if (saw_static)
-        arr->static_min = arr->array_len;
+    if (saw_static)   arr->static_min  = arr->array_len;
+    if (saw_const)    arr->is_const    = true;
+    if (saw_volatile) arr->is_volatile = true;
+    if (saw_restrict) arr->is_restrict = true;
     return arr;
 }
 

@@ -4,5 +4,7 @@ void f2(int a[const static 10]) {}
 void f3(int a[restrict 5]) {}
 void f4(int a[volatile 3]) {}
 void f5(int a[static restrict 4]) {}
+void f6(int a[const restrict 5]) {}
+void f7(int a[const]) {}
 
 int main(void) { return 42; }
