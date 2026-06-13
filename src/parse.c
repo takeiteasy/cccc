@@ -1305,6 +1305,11 @@ static Type *func_params(CCCC *vm, Token **rest, Token *tok, Type *ty) {
     Type *cur = &head;
     bool is_variadic = false;
 
+    // Open a temporary prototype scope so that each parameter is visible to
+    // subsequent parameters' VLA size expressions (C99 §6.7.6.3p12).
+    // e.g. void f(int n, int a[n]) — 'n' must be in scope when parsing a[n].
+    enter_scope(vm);
+
     while (!equal(tok, ")")) {
         if (cur != &head)
             tok = skip(vm, tok, ",");
@@ -1340,6 +1345,17 @@ static Type *func_params(CCCC *vm, Token **rest, Token *tok, Type *ty) {
             ty2->is_const    = saved_is_const;
             ty2->is_volatile = saved_is_volatile;
             ty2->is_restrict = saved_is_restrict;
+        } else if (ty2->kind == TY_VLA) {
+            // VLA parameters also adjust to pointer-to-element (C99 §6.7.6.3p7).
+            // Qualifiers from the brackets transfer to the resulting pointer.
+            bool saved_is_const    = ty2->is_const;
+            bool saved_is_volatile = ty2->is_volatile;
+            bool saved_is_restrict = ty2->is_restrict;
+            ty2 = pointer_to(vm, ty2->base);
+            ty2->name        = name;
+            ty2->is_const    = saved_is_const;
+            ty2->is_volatile = saved_is_volatile;
+            ty2->is_restrict = saved_is_restrict;
         } else if (ty2->kind == TY_FUNC) {
             // Likewise, a function is converted to a pointer to a function
             // only in the parameter context.
@@ -1347,8 +1363,21 @@ static Type *func_params(CCCC *vm, Token **rest, Token *tok, Type *ty) {
             ty2->name = name;
         }
 
+        // Register this parameter in the prototype scope so subsequent
+        // parameters can reference it in VLA dimension expressions.
+        if (name) {
+            Obj *dummy = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
+            memset(dummy, 0, sizeof(Obj));
+            dummy->ty    = ty2;
+            dummy->align = ty2->align;
+            dummy->is_local = true;
+            push_scope(vm, name->loc, name->len)->var = dummy;
+        }
+
         cur = cur->next = copy_type(vm, ty2);
     }
+
+    leave_scope(vm);
 
     if (cur == &head) {
         if (vm->compiler.c_std < CCCC_STD_C23) {
