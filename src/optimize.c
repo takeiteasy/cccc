@@ -612,7 +612,19 @@ static void opt_constant_fold(CCCC *vm, OptReplacement *repls) {
             case LDR_H:
             case LDR_W:
             case LDR_D:
-            case FLDR: {
+            case FLDR:
+            case LDR_LOCAL_B:
+            case LDR_LOCAL_H:
+            case LDR_LOCAL_W:
+            case LDR_LOCAL_D:
+            case FLDR_LOCAL:
+            case FLDR_LOCAL_F32:
+            case LDR_INDEX_B:
+            case LDR_INDEX_H:
+            case LDR_INDEX_W:
+            case LDR_INDEX_D:
+            case FLDR_INDEX:
+            case FLDR_INDEX_F32: {
                 int rd = vm->text_seg[pc + 1] & 0xFF;
                 invalidate_reg(&state, rd);
                 break;
