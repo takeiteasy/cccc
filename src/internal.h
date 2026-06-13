@@ -370,6 +370,8 @@ extern Type *ty_decimal32;
 extern Type *ty_decimal64;
 extern Type *ty_decimal128;
 
+extern Type *ty_auto;  // C23 type-inference sentinel
+
 extern Type *ty_error;
 
 bool is_integer(Type *ty);

@@ -54,7 +54,7 @@ syntax details have their own documents:
 | `const` | ✓ | |
 | `volatile` | ✓ | Volatile locals routed via generic LDR/STR (watchpoint-safe, C11 §6.7.3p7) |
 | `register` | ~ | Parsed and accepted; ignored |
-| `auto` (storage class) | ~ | Parsed and accepted; ignored |
+| `auto` (storage class) | ~ | Parsed and accepted; ignored — deprecated in C23 (use `auto` type inference instead) |
 | String literals and concatenation | ✓ | |
 | `L"..."` wide string literals | ✓ | Parsed; stored as UTF-32 |
 | `L'...'` wide character literals | ✓ | |
@@ -140,7 +140,7 @@ language coverage figures apply.
 | `constexpr` for objects | ✓ | Object definitions require constant initializers and may be used in constant-expression contexts; constexpr functions are not supported |
 | `thread_local` storage-class spelling | ~ | C23 spelling is accepted as a keyword; emits `-Wignored-features`; no thread-local storage |
 | Compound literal storage classes | ✓ | C23 `(static T){...}`, `(constexpr T){...}`, `(register T){...}`, and TLS spellings are parsed; static/constexpr/TLS literals use anonymous static storage, while register keeps automatic storage |
-| `auto` type inference | ✗ | `auto` is parsed as a storage class; C23 type-deduction form not supported |
+| `auto` type inference | ✓ | Deduces type as `typeof_unqual(initializer)` with array-to-pointer and function-to-pointer decay; pointer declarators (`auto *p = &x`) validated; initializer required |
 | `nullptr` keyword / `nullptr_t` | ✓ | `nullptr_t` is defined in `<stddef.h>` via `typeof(nullptr)` |
 | `_BitInt(N)` arbitrary-precision integers | ~ | `N` in `[1,64]` — bit-precise value semantics via mask/shift truncation; `N > 64` (true bignum) tracked in a follow-up ticket |
 | Binary integer literals `0b10101010` | ✓ | |

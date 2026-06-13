@@ -62,6 +62,10 @@ Type *ty_decimal128 = &(Type){.kind = TY_LDOUBLE, .size = 16, .align = 16,
 static Type ty_error_obj = {TY_ERROR, 0, 1};
 Type *ty_error = &ty_error_obj;
 
+// C23 auto type-inference sentinel; never reaches codegen
+static Type ty_auto_obj = {TY_AUTO, 0, 0};
+Type *ty_auto = &ty_auto_obj;
+
 static Type *new_type(CCCC *vm, TypeKind kind, int size, int align) {
     Type *ty = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
     memset(ty, 0, sizeof(Type));

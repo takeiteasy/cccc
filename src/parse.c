@@ -69,6 +69,7 @@ typedef struct {
     bool is_tls;
     bool is_constexpr;
     bool is_block_var; // __block storage qualifier (Apple blocks)
+    bool is_auto;      // C23 type inference (auto without explicit type)
     bool is_maybe_unused;
     bool is_deprecated;
     bool is_noreturn;
@@ -1077,7 +1078,19 @@ static Type *declspec(CCCC *vm, Token **rest, Token *tok, VarAttr *attr) {
             is_volatile = true;
             tok = tok->next;
             continue;
-        case DK_AUTO: case DK_REGISTER: case DK_RESTRICT:
+        case DK_AUTO:
+            if (vm->compiler.c_std >= CCCC_STD_C23) {
+                if (counter != 0)
+                    error_tok(vm, tok,
+                              "cannot combine 'auto' with other type specifiers");
+                if (attr)
+                    attr->is_auto = true;
+                ty = ty_auto;
+                counter = OTHER;
+            }
+            tok = tok->next;
+            continue;
+        case DK_REGISTER: case DK_RESTRICT:
             tok = tok->next;
             continue;
         case DK_NORETURN:
@@ -1874,6 +1887,45 @@ static Type *typeof_unqual_specifier(CCCC *vm, Token **rest, Token *tok) {
     return ty;
 }
 
+// C23 auto type inference: given an initializer expression type, return the
+// deduced type (array-to-pointer decay, function-to-pointer decay already done
+// by add_type for ND_VAR, then strip top-level qualifiers like typeof_unqual).
+static Type *auto_deduced_type(CCCC *vm, Type *ty) {
+    if (ty->kind == TY_ARRAY)
+        ty = pointer_to(vm, ty->base);
+    if (ty->is_const || ty->is_volatile || ty->is_restrict) {
+        ty = copy_type(vm, ty);
+        ty->is_const = false;
+        ty->is_volatile = false;
+        ty->is_restrict = false;
+    }
+    return ty;
+}
+
+// Walk the declarator result type down to the ty_auto sentinel counting TY_PTR
+// hops.  Returns the depth (0 for plain `auto x`), or -1 if a non-PTR type
+// other than ty_auto is encountered (e.g. array declarator).
+static int count_auto_ptr_depth(Type *ty) {
+    int depth = 0;
+    while (ty != ty_auto) {
+        if (ty->kind != TY_PTR)
+            return -1;
+        depth++;
+        ty = ty->base;
+    }
+    return depth;
+}
+
+// Count how many TY_PTR layers are at the top of a type.
+static int count_ptr_depth(Type *ty) {
+    int depth = 0;
+    while (ty->kind == TY_PTR) {
+        depth++;
+        ty = ty->base;
+    }
+    return depth;
+}
+
 // Get size for a type (no adjustment needed - types are already correct)
 static int get_vm_size(Type *ty) { return ty->size; }
 
@@ -1960,6 +2012,67 @@ static Node *declaration(CCCC *vm, Token **rest, Token *tok, Type *basety,
 
         if (attr && attr->is_constexpr && ty->kind == TY_VLA)
             error_tok(vm, ty->name, "constexpr object may not have variable length array type");
+
+        // C23 auto type inference
+        if (attr && attr->is_auto) {
+            Token *name_tok = ty->name;
+            int decl_depth = count_auto_ptr_depth(ty);
+            if (decl_depth < 0)
+                error_tok(vm, name_tok,
+                          "cannot use 'auto' with array or function declarator");
+            if (!equal(tok, "="))
+                error_tok(vm, name_tok,
+                          "declaration of variable '%.*s' with deduced type 'auto' requires an initializer",
+                          (int)name_tok->len, name_tok->loc);
+            if (equal(tok->next, "{"))
+                error_tok(vm, tok->next, "cannot use 'auto' with array in C");
+
+            // Parse initializer expression to infer type
+            Token *eq_tok = tok;
+            Node *init_expr = assign(vm, &tok, tok->next);
+            add_type(vm, init_expr);
+            Type *deduced = auto_deduced_type(vm, init_expr->ty);
+
+            // Validate pointer depth: declarator stars must not exceed inferred type depth
+            if (count_ptr_depth(deduced) < decl_depth) {
+                char stars[16] = "";
+                for (int i = 0; i < decl_depth && i < 15; i++)
+                    stars[i] = '*';
+                error_tok(vm, name_tok,
+                          "variable '%.*s' with type 'auto%s%s' has incompatible initializer",
+                          (int)name_tok->len, name_tok->loc,
+                          decl_depth > 0 ? " " : "", stars);
+            }
+
+            if (attr->is_static) {
+                warn_if_shadowing(vm, name_tok);
+                Obj *var = new_anon_gvar(vm, deduced);
+                var->tok = name_tok;
+                var->display_name = get_ident(vm, name_tok);
+                var->is_local_symbol = true;
+                var->is_maybe_unused = ty->is_maybe_unused;
+                var->is_deprecated = ty->is_deprecated;
+                var->deprecated_msg = ty->deprecated_msg;
+                push_scope(vm, get_ident(vm, name_tok), name_tok->len)->var = var;
+                Token *tmp = eq_tok;
+                gvar_initializer(vm, &tmp, eq_tok->next, var);
+                continue;
+            }
+
+            Obj *var = new_lvar(vm, get_ident(vm, name_tok), name_tok->len, deduced);
+            if (attr->align)
+                var->align = attr->align;
+            if (attr->is_block_var)
+                var->is_block_var = true;
+
+            vm->compiler.initializing_var = var;
+            Node *lhs = new_var_node(vm, var, name_tok);
+            add_type(vm, lhs);
+            Node *asgn = new_binary(vm, ND_ASSIGN, lhs, init_expr, name_tok);
+            add_type(vm, asgn);
+            cur = cur->next = new_unary(vm, ND_EXPR_STMT, asgn, name_tok);
+            continue;
+        }
 
         if (attr && attr->is_static) {
             // static local variable
@@ -7208,6 +7321,52 @@ static Token *global_variable(CCCC *vm, Token *tok, Type *basety,
 
         char *var_name     = get_ident(vm, ty->name);
         int   var_name_len = (int)ty->name->len;
+
+        // C23 auto type inference for global variables
+        if (attr->is_auto) {
+            if (attr->is_extern)
+                error_tok(vm, ty->name, "cannot use 'auto' with 'extern'");
+            int decl_depth = count_auto_ptr_depth(ty);
+            if (decl_depth < 0)
+                error_tok(vm, ty->name,
+                          "cannot use 'auto' with array or function declarator");
+            if (!equal(tok, "="))
+                error_tok(vm, ty->name,
+                          "declaration of variable '%.*s' with deduced type 'auto' requires an initializer",
+                          (int)ty->name->len, ty->name->loc);
+            if (equal(tok->next, "{"))
+                error_tok(vm, tok->next, "cannot use 'auto' with array in C");
+
+            // Probe: parse the initializer expression to infer the type
+            Token *eq_tok = tok;
+            Token *probe_tok = tok->next;
+            Node *probe = assign(vm, &probe_tok, probe_tok);
+            add_type(vm, probe);
+            Type *deduced = auto_deduced_type(vm, probe->ty);
+
+            if (count_ptr_depth(deduced) != decl_depth) {
+                char stars[16] = "";
+                for (int i = 0; i < decl_depth && i < 15; i++)
+                    stars[i] = '*';
+                error_tok(vm, ty->name,
+                          "variable '%.*s' with type 'auto%s%s' has incompatible initializer",
+                          (int)ty->name->len, ty->name->loc,
+                          decl_depth > 0 ? " " : "", stars);
+            }
+
+            Obj *var = new_gvar(vm, var_name, var_name_len, deduced);
+            var->is_definition = true;
+            var->is_static = attr->is_static;
+            if (attr->align)
+                var->align = attr->align;
+
+            // Re-parse from eq_tok to write init_data correctly
+            gvar_initializer(vm, &tok, eq_tok->next, var);
+
+            run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_GLOBAL, var->name,
+                                  var->ty, var, var->tok);
+            continue;
+        }
 
         // For extern declarations, check whether a macro-generated global
         // already exists in macro_globals.  If so, push the macro Obj into

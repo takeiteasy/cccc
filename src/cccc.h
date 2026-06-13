@@ -548,6 +548,7 @@ typedef enum {
     TY_COMPLEX = 18, // C99 complex scalar, base is float/double/long double
     TY_NULLPTR_T = 19, // C23 nullptr_t
     TY_BITINT = 20,    // C23 _BitInt(N), N in [1,64]
+    TY_AUTO = 21,      // C23 auto type-inference sentinel (never reaches codegen)
 } TypeKind;
 
 typedef struct Node Node;

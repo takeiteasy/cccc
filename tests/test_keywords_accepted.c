@@ -79,9 +79,9 @@ void test_array_restrict(int arr[restrict static 10]) {
     arr[0] = 1;
 }
 
-// Test auto (should be accepted even though it's the default)
+// Test auto (C23 type inference)
 int test_auto() {
-    auto int x = 5;
+    auto x = 5;
     return x;
 }
 
