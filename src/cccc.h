@@ -446,12 +446,12 @@ typedef struct StringArray {
  @struct EnumConstant
  @abstract Represents an enumerator constant within an enum type.
  @field name Name of the enumerator.
- @field value Integer value of the enumerator.
+ @field value Integer value of the enumerator (int64_t to support C23 wide underlying types).
  @field next Pointer to the next enumerator in the linked list.
 */
 typedef struct EnumConstant {
     char *name;
-    int value;
+    int64_t value;
     struct EnumConstant *next;
 } EnumConstant;
 
@@ -609,8 +609,9 @@ struct Type {
     bool is_flexible;
     bool is_packed;
 
-    // Enum (tracks enum constants for code generation)
+    // Enum
     EnumConstant *enum_constants;
+    struct Type *enum_base_type;  // C23: underlying type (NULL = default int)
 
     // Function type
     struct Type *return_ty;
@@ -1073,7 +1074,7 @@ typedef struct ComptimeVar {
  @field var Pointer to variable object (if variable).
  @field type_def Pointer to typedef type (if typedef).
  @field enum_ty Pointer to enum type (if enum constant).
- @field enum_val Enum constant value.
+ @field enum_val Enum constant value (int64_t to support C23 wide underlying types).
  @field name Variable or typedef name.
  @field name_len Length of name.
  @field next Pointer to next node in list.
@@ -1085,7 +1086,7 @@ typedef struct VarScopeNode {
     Obj *var;
     Type *type_def;
     Type *enum_ty;
-    int enum_val;
+    int64_t enum_val;
     bool is_deprecated;
     char *deprecated_msg;
     // Additional fields for linked list

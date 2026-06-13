@@ -313,7 +313,7 @@ const char *__cccc_ast_enum_constant_name($enum_constant_t *ec) {
     return ec ? ec->name : NULL;
 }
 
-int __cccc_ast_enum_constant_value($enum_constant_t *ec) {
+int64_t __cccc_ast_enum_constant_value($enum_constant_t *ec) {
     return ec ? ec->value : 0;
 }
 
@@ -329,7 +329,7 @@ const char *__cccc_ast_enum_value_name($type_t *e, int index) {
     return __cccc_ast_enum_constant_name(ec);
 }
 
-int __cccc_ast_enum_value($type_t *e, int index) {
+int64_t __cccc_ast_enum_value($type_t *e, int index) {
     $enum_constant_t *ec = __cccc_ast_enum_at(NULL, e, index);
     return __cccc_ast_enum_constant_value(ec);
 }
@@ -1688,7 +1688,7 @@ static int _enum_context_depth = 0;
 $type_t *__cccc_ast_struct_add_field(CCCC *vm, $type_t *ty, const char *name,
                                     $type_t *field_type);
 void __cccc_ast_enum_add_constant(CCCC *vm, $type_t *ty, const char *name,
-                                  int value);
+                                  int64_t value);
 
 void __cccc_ast_push_block(CCCC *vm, $node_t *block) {
     (void)vm;
@@ -2813,7 +2813,7 @@ $type_t *__cccc_ast_make_enum(CCCC *vm, const char *name) {
 // $enum_add_constant(ty, name, value) — add a named constant to an enum
 // type and expose it as an integer constant in current scope.
 void __cccc_ast_enum_add_constant(CCCC *vm, $type_t *ty, const char *name,
-                                  int value) {
+                                  int64_t value) {
     if (!vm || !ty || !name || ty->kind != TY_ENUM)
         return;
 

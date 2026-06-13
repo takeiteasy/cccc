@@ -419,7 +419,7 @@ static void serialize_enum_json(FILE *f, Type *ty, int indent) {
             fprintf(f, ",\n");
 
             print_indent(f, indent + 3);
-            fprintf(f, "\"value\": %d", ec->value);
+            fprintf(f, "\"value\": %lld", (long long)ec->value);
 
             fprintf(f, "\n");
             print_indent(f, indent + 2);

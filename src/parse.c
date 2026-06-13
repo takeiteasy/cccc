@@ -55,7 +55,7 @@ typedef struct {
     Obj *var;
     Type *type_def;
     Type *enum_ty;
-    int enum_val;
+    int64_t enum_val;
     bool is_deprecated;
     char *deprecated_msg;
 } VarScope;
@@ -1501,14 +1501,17 @@ static bool consume_end(Token **rest, Token *tok) {
     return false;
 }
 
-// enum-specifier = ident? "{" enum-list? "}"
-//                | ident ("{" enum-list? "}")?
+// enum-specifier = ident? (":" typename)? "{" enum-list? "}"
+//                | ident (":" typename)?
 //
 // enum-list      = ident ("=" num)? ("," ident ("=" num)?)* ","?
+//
+// C23: optional ": integer-type" specifies the underlying type.
+// C23: "enum tag : underlying-type ;" is a forward declaration (complete type).
 static Type *enum_specifier(CCCC *vm, Token **rest, Token *tok) {
     Type *ty = enum_type(vm);
 
-    // Read a struct tag.
+    // Read a tag.
     Token *tag = NULL;
     if (tok->kind == TK_IDENT) {
         tag = tok;
@@ -1517,24 +1520,47 @@ static Type *enum_specifier(CCCC *vm, Token **rest, Token *tok) {
         tok = tok->next;
     }
 
+    // C23: optional underlying type `: integer-type`
+    if (equal(tok, ":")) {
+        tok = tok->next;
+        Token *base_tok = tok;
+        Type *base_ty = typename(vm, &tok, tok);
+        if (!is_integer(base_ty) || base_ty->kind == TY_BOOL || base_ty->kind == TY_ENUM)
+            error_tok(vm, base_tok,
+                      "enum underlying type must be a non-bool integer type");
+        ty->enum_base_type = base_ty;
+        ty->size  = base_ty->size;
+        ty->align = base_ty->align;
+        ty->is_unsigned = base_ty->is_unsigned;
+    }
+
     if (tag && !equal(tok, "{")) {
-        Type *ty = find_tag(vm, tag);
-        if (!ty)
-            error_tok(vm, tag, "unknown enum type");
-        if (ty->kind != TY_ENUM)
-            error_tok(vm, tag, "not an enum tag");
-        if (ty->is_deprecated)
-            warn_deprecated_use(vm, tag, get_ident(vm, tag),
-                                ty->deprecated_msg);
+        Type *existing = find_tag(vm, tag);
+        if (existing) {
+            if (existing->kind != TY_ENUM)
+                error_tok(vm, tag, "not an enum tag");
+            if (existing->is_deprecated)
+                warn_deprecated_use(vm, tag, get_ident(vm, tag),
+                                    existing->deprecated_msg);
+            *rest = tok;
+            return existing->is_deprecated
+                       ? type_after_deprecated_use(vm, existing)
+                       : existing;
+        }
+        // Forward declaration requires an underlying type (C23 §6.7.2.2)
+        if (!ty->enum_base_type)
+            error_tok(vm, tag,
+                      "enum forward declaration requires an underlying type");
+        push_tag_scope(vm, tag, ty);
         *rest = tok;
-        return ty->is_deprecated ? type_after_deprecated_use(vm, ty) : ty;
+        return ty;
     }
 
     tok = skip(vm, tok, "{");
 
     // Read an enum-list.
     int i = 0;
-    int val = 0;
+    int64_t val = 0;
     struct EnumConstant *enum_tail = NULL;
     while (!consume_end(rest, tok)) {
         if (i++ > 0)
@@ -1575,8 +1601,19 @@ static Type *enum_specifier(CCCC *vm, Token **rest, Token *tok) {
         val++;
     }
 
-    if (tag)
+    if (tag) {
+        // If this is a completion of a forward-declared enum, overwrite the
+        // existing type in-place so all existing pointers remain valid.
+        for (TagScopeNode *node = vm->compiler.scope->tags; node;
+             node = node->next) {
+            if (node->name_len == tag->len &&
+                strncmp(node->name, tag->loc, tag->len) == 0) {
+                *node->ty = *ty;
+                return node->ty;
+            }
+        }
         push_tag_scope(vm, tag, ty);
+    }
     return ty;
 }
 
@@ -6171,7 +6208,11 @@ static Node *primary(CCCC *vm, Token **rest, Token *tok) {
                     warn_deprecated_use(
                         vm, tok, arena_strndup(vm, tok->loc, tok->len),
                         sc->deprecated_msg);
-                return new_num(vm, sc->enum_val, tok);
+                Node *num = new_num(vm, sc->enum_val, tok);
+                // Use the enum's own type so size/signedness are correct for
+                // enums with a C23 underlying type (e.g. unsigned long).
+                num->ty = sc->enum_ty;
+                return num;
             }
         }
 

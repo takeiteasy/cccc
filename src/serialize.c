@@ -1105,6 +1105,12 @@ static void serialize_enum_def(FILE *f, SerializeContext *ctx, Type *ty) {
     if (tag)
         fprintf(f, " %.*s", tag->name_len, tag->name);
 
+    // C23 underlying type
+    if (ty->enum_base_type) {
+        fprintf(f, " : ");
+        serialize_type(f, ctx, ty->enum_base_type);
+    }
+
     if (!ty->enum_constants) {
         if (tag)
             fprintf(f, ";\n\n");
@@ -1113,7 +1119,7 @@ static void serialize_enum_def(FILE *f, SerializeContext *ctx, Type *ty) {
 
     fprintf(f, " {\n");
     for (EnumConstant *ec = ty->enum_constants; ec; ec = ec->next) {
-        fprintf(f, "    %s = %d", ec->name, ec->value);
+        fprintf(f, "    %s = %lld", ec->name, (long long)ec->value);
         if (ec->next)
             fprintf(f, ",");
         fprintf(f, "\n");

@@ -657,10 +657,20 @@ static void emit_load(CCCC *vm, Type *ty, int rd, int rs_addr) {
         emit_rr(vm, LDR_H, rd, rs_addr);
         if (ty->is_unsigned)
             emit_rr(vm, ZX2, rd, rd);
-    } else if (ty->kind == TY_INT || ty->kind == TY_ENUM) {
+    } else if (ty->kind == TY_INT || (ty->kind == TY_ENUM && ty->size == 4)) {
         emit_rr(vm, LDR_W, rd, rs_addr);
         if (ty->is_unsigned)
             emit_rr(vm, ZX4, rd, rd);
+    } else if (ty->kind == TY_ENUM) {
+        if (ty->size == 1) {
+            emit_rr(vm, LDR_B, rd, rs_addr);
+            if (ty->is_unsigned) emit_rr(vm, ZX1, rd, rd);
+        } else if (ty->size == 2) {
+            emit_rr(vm, LDR_H, rd, rs_addr);
+            if (ty->is_unsigned) emit_rr(vm, ZX2, rd, rd);
+        } else {
+            emit_rr(vm, LDR_D, rd, rs_addr);
+        }
     } else if (ty->kind == TY_BITINT) {
         if (ty->size == 1) {
             emit_rr(vm, LDR_B, rd, rs_addr);
@@ -692,10 +702,20 @@ static void emit_local_load(CCCC *vm, Type *ty, int rd, long long offset) {
         emit_ri(vm, LDR_LOCAL_H, rd, offset);
         if (ty->is_unsigned)
             emit_rr(vm, ZX2, rd, rd);
-    } else if (ty->kind == TY_INT || ty->kind == TY_ENUM) {
+    } else if (ty->kind == TY_INT || (ty->kind == TY_ENUM && ty->size == 4)) {
         emit_ri(vm, LDR_LOCAL_W, rd, offset);
         if (ty->is_unsigned)
             emit_rr(vm, ZX4, rd, rd);
+    } else if (ty->kind == TY_ENUM) {
+        if (ty->size == 1) {
+            emit_ri(vm, LDR_LOCAL_B, rd, offset);
+            if (ty->is_unsigned) emit_rr(vm, ZX1, rd, rd);
+        } else if (ty->size == 2) {
+            emit_ri(vm, LDR_LOCAL_H, rd, offset);
+            if (ty->is_unsigned) emit_rr(vm, ZX2, rd, rd);
+        } else {
+            emit_ri(vm, LDR_LOCAL_D, rd, offset);
+        }
     } else if (ty->kind == TY_BITINT) {
         if (ty->size == 1) {
             emit_ri(vm, LDR_LOCAL_B, rd, offset);
@@ -725,8 +745,12 @@ static void emit_local_store(CCCC *vm, Type *ty, int rd_val, long long offset) {
         emit_ri(vm, STR_LOCAL_B, rd_val, offset);
     } else if (ty->kind == TY_SHORT) {
         emit_ri(vm, STR_LOCAL_H, rd_val, offset);
-    } else if (ty->kind == TY_INT || ty->kind == TY_ENUM) {
+    } else if (ty->kind == TY_INT || (ty->kind == TY_ENUM && ty->size == 4)) {
         emit_ri(vm, STR_LOCAL_W, rd_val, offset);
+    } else if (ty->kind == TY_ENUM) {
+        if (ty->size == 1)       emit_ri(vm, STR_LOCAL_B, rd_val, offset);
+        else if (ty->size == 2)  emit_ri(vm, STR_LOCAL_H, rd_val, offset);
+        else                     emit_ri(vm, STR_LOCAL_D, rd_val, offset);
     } else if (ty->kind == TY_BITINT) {
         if (ty->size == 1)       emit_ri(vm, STR_LOCAL_B, rd_val, offset);
         else if (ty->size == 2)  emit_ri(vm, STR_LOCAL_H, rd_val, offset);
@@ -749,8 +773,12 @@ static void emit_store(CCCC *vm, Type *ty, int rd_val, int rs_addr) {
         emit_rr(vm, STR_B, rd_val, rs_addr);
     } else if (ty->kind == TY_SHORT) {
         emit_rr(vm, STR_H, rd_val, rs_addr);
-    } else if (ty->kind == TY_INT || ty->kind == TY_ENUM) {
+    } else if (ty->kind == TY_INT || (ty->kind == TY_ENUM && ty->size == 4)) {
         emit_rr(vm, STR_W, rd_val, rs_addr);
+    } else if (ty->kind == TY_ENUM) {
+        if (ty->size == 1)       emit_rr(vm, STR_B, rd_val, rs_addr);
+        else if (ty->size == 2)  emit_rr(vm, STR_H, rd_val, rs_addr);
+        else                     emit_rr(vm, STR_D, rd_val, rs_addr);
     } else if (ty->kind == TY_BITINT) {
         if (ty->size == 1)       emit_rr(vm, STR_B, rd_val, rs_addr);
         else if (ty->size == 2)  emit_rr(vm, STR_H, rd_val, rs_addr);

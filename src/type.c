@@ -276,7 +276,10 @@ static int get_integer_rank(Type *ty) {
         case TY_SHORT: return 16;
         case TY_CHAR:  return 8;
         case TY_BOOL:  return 1;
-        case TY_ENUM:  return 32;  // enums have same rank as int
+        case TY_ENUM:
+            if (ty->enum_base_type)
+                return get_integer_rank(ty->enum_base_type);
+            return 32;  // default: int rank
         case TY_BITINT: return ty->bit_width;
         default: return -1;
     }

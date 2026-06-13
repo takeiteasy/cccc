@@ -669,10 +669,10 @@ const char *__cccc_ast_enum_constant_name($enum_constant_t *ec);
  * @function __cccc_ast_enum_constant_value
  * @abstract Return the integer value of an enum constant.
  * @param ec The enum constant.
- * @return The constant's integer value.
+ * @return The constant's integer value (int64_t to support C23 wide underlying types).
  * @discussion Convenience wrapper: $enum_constant_value(ec).
  */
-int __cccc_ast_enum_constant_value($enum_constant_t *ec);
+int64_t __cccc_ast_enum_constant_value($enum_constant_t *ec);
 
 /*!
  * @function __cccc_ast_enum_name
@@ -707,10 +707,10 @@ const char *__cccc_ast_enum_value_name($type_t *e, int index);
  * @abstract Return the integer value of the enum constant at the given index.
  * @param e The enum type to inspect.
  * @param index Zero-based index.
- * @return The constant's integer value, or -1 on out-of-range.
+ * @return The constant's integer value (int64_t), or -1 on out-of-range.
  * @discussion Convenience wrapper: $enum_value(ty, index).
  */
-int __cccc_ast_enum_value($type_t *e, int index);
+int64_t __cccc_ast_enum_value($type_t *e, int index);
 
 // ============================================================================
 // Struct/Union Member Introspection
@@ -1470,7 +1470,7 @@ $type_t *__cccc_ast_make_enum(CCCC *vm, const char *name);
  *             $enum_add_constant(ty, name, value).
  */
 void __cccc_ast_enum_add_constant(CCCC *vm, $type_t *ty, const char *name,
-                                  int value);
+                                  int64_t value);
 
 /*!
  * @function __cccc_ast_make_typedef

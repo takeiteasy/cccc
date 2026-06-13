@@ -148,7 +148,7 @@ language coverage figures apply.
 | `u8` character literals (`u8'x'`) | ✓ | |
 | Unnamed function parameters (`void f(int, double)`) | ✓ | |
 | `static_assert` without message | ✗ | |
-| Improved `enum` — underlying type and forward declaration | ✗ | |
+| Improved `enum` — underlying type, forward declaration, wide values | ✓ | `enum E : unsigned char { … }` sets size/align/signedness; `enum E : int;` forward-declares; values stored as `int64_t` (C23 §6.7.2.2) |
 | Decimal floating-point (`_Decimal32`, etc.) | ~ | `_Decimal32/64/128` accepted with correct sizes (4/8/16 bytes) but implemented as aliases of `float`/`double`/`long double` (binary, not decimal, encoding); real IEEE-754-2008 decimal arithmetic tracked in a follow-up ticket |
 | `char8_t` | ✓ | Defined in `<uchar.h>`; `u8'x'` literals have type `unsigned char` and value `char8_t` |
 
