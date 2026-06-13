@@ -2,6 +2,23 @@
 #include "../cccc.h"
 #include <stdarg.h>
 
+// C23 adds the %b/%B (binary integer) conversion specifier to the
+// printf/scanf families. It's natively supported by glibc >= 2.35, but
+// absent on macOS and older glibc, where printf("%b", ...) prints a
+// literal 'b' and sscanf(..., "%b", ...) fails to match. On those
+// platforms, register the custom engines from format_printf.c/
+// format_scanf.c instead of the host libc functions (#394).
+#if defined(__GLIBC__)
+#include <features.h>
+#if __GLIBC_PREREQ(2, 35)
+#define CCCC_HAVE_NATIVE_PCT_B 1
+#endif
+#endif
+
+#ifndef CCCC_HAVE_NATIVE_PCT_B
+#include "format.h"
+#endif
+
 // Standard stream getters (since we can't easily register global pointers)
 static FILE* __cccc_stdin(void) { return stdin; }
 static FILE* __cccc_stdout(void) { return stdout; }
@@ -27,6 +44,7 @@ static long long wrap_fsetpos(long long stream, long long pos)       { return (l
 static long long wrap_setvbuf(long long stream, long long buf, long long mode, long long size) { return (long long)setvbuf((FILE *)stream, (char *)buf, (int)mode, (size_t)size); }
 
 // V* variants (format functions that take va_list) - wrappers needed for va_list pointer dereference
+#ifdef CCCC_HAVE_NATIVE_PCT_B
 static long long wrap_vprintf(const char *fmt, long long va_ptr) {
     return (long long)vprintf(fmt, *(va_list*)va_ptr);
 }
@@ -54,6 +72,7 @@ static long long wrap_vsscanf(const char *str, const char *fmt, long long va_ptr
 static long long wrap_vfscanf(FILE *stream, const char *fmt, long long va_ptr) {
     return (long long)vfscanf(stream, fmt, *(va_list*)va_ptr);
 }
+#endif // CCCC_HAVE_NATIVE_PCT_B
 
 // Register all stdio.h functions
 void register_stdio_functions(CCCC *vm) {
@@ -63,6 +82,7 @@ void register_stdio_functions(CCCC *vm) {
     cc_register_cfunc(vm, "__cccc_stderr", (void*)__cccc_stderr, 0, 0);
 
     // Variadic printf/scanf family
+#ifdef CCCC_HAVE_NATIVE_PCT_B
     cc_register_variadic_cfunc(vm, "printf", (void*)printf, 1, 0);
     cc_register_variadic_cfunc(vm, "fprintf", (void*)fprintf, 2, 0);
     cc_register_variadic_cfunc(vm, "sprintf", (void*)sprintf, 2, 0);
@@ -70,7 +90,7 @@ void register_stdio_functions(CCCC *vm) {
     cc_register_variadic_cfunc(vm, "scanf", (void*)scanf, 1, 0);
     cc_register_variadic_cfunc(vm, "sscanf", (void*)sscanf, 2, 0);
     cc_register_variadic_cfunc(vm, "fscanf", (void*)fscanf, 2, 0);
-    
+
     // V* variants still need wrappers to handle va_list pointer conversion
     cc_register_cfunc(vm, "vprintf", (void*)wrap_vprintf, 2, 0);
     cc_register_cfunc(vm, "vsprintf", (void*)wrap_vsprintf, 3, 0);
@@ -79,6 +99,25 @@ void register_stdio_functions(CCCC *vm) {
     cc_register_cfunc(vm, "vscanf", (void*)wrap_vscanf, 2, 0);
     cc_register_cfunc(vm, "vsscanf", (void*)wrap_vsscanf, 3, 0);
     cc_register_cfunc(vm, "vfscanf", (void*)wrap_vfscanf, 3, 0);
+#else
+    // Custom %b/%B-capable engines (format_printf.c / format_scanf.c)
+    cc_register_variadic_cfunc(vm, "printf", (void*)cccc_printf, 1, 0);
+    cc_register_variadic_cfunc(vm, "fprintf", (void*)cccc_fprintf, 2, 0);
+    cc_register_variadic_cfunc(vm, "sprintf", (void*)cccc_sprintf, 2, 0);
+    cc_register_variadic_cfunc(vm, "snprintf", (void*)cccc_snprintf, 3, 0);
+    cc_register_variadic_cfunc(vm, "scanf", (void*)cccc_scanf, 1, 0);
+    cc_register_variadic_cfunc(vm, "sscanf", (void*)cccc_sscanf, 2, 0);
+    cc_register_variadic_cfunc(vm, "fscanf", (void*)cccc_fscanf, 2, 0);
+
+    // V* variants still need wrappers to handle va_list pointer conversion
+    cc_register_cfunc(vm, "vprintf", (void*)wrap_cccc_vprintf, 2, 0);
+    cc_register_cfunc(vm, "vsprintf", (void*)wrap_cccc_vsprintf, 3, 0);
+    cc_register_cfunc(vm, "vsnprintf", (void*)wrap_cccc_vsnprintf, 4, 0);
+    cc_register_cfunc(vm, "vfprintf", (void*)wrap_cccc_vfprintf, 3, 0);
+    cc_register_cfunc(vm, "vscanf", (void*)wrap_cccc_vscanf, 2, 0);
+    cc_register_cfunc(vm, "vsscanf", (void*)wrap_cccc_vsscanf, 3, 0);
+    cc_register_cfunc(vm, "vfscanf", (void*)wrap_cccc_vfscanf, 3, 0);
+#endif
 
 
     // File operations
