@@ -2,6 +2,144 @@
 #include "../cccc.h"
 #include <math.h>
 
+#if defined(__APPLE__)
+// Private Apple libm symbols backing the C23 exp10/pi-trig family,
+// available since macOS 10.9 (no public declarations exist).
+extern double __exp10(double);
+extern float __exp10f(float);
+extern double __sinpi(double);
+extern float __sinpif(float);
+extern double __cospi(double);
+extern float __cospif(float);
+extern double __tanpi(double);
+extern float __tanpif(float);
+#endif
+
+#if defined(__GLIBC__)
+// exp10/exp10f/exp10l are GNU extensions present in libm but only declared
+// by glibc's math.h under _GNU_SOURCE, which this build does not define.
+extern double exp10(double);
+extern float exp10f(float);
+extern long double exp10l(long double);
+#endif
+
+// pi constants (math.h does not define M_PI)
+#define CCCC_PIl 3.14159265358979323846264338327950288419716939937510582097494L
+#define CCCC_PI  ((double)CCCC_PIl)
+#define CCCC_PIf ((float)CCCC_PIl)
+
+// ---- exp10 family (C23) ----
+#if defined(__APPLE__)
+static double cccc_exp10(double x)  { return __exp10(x); }
+static float  cccc_exp10f(float x)  { return __exp10f(x); }
+#elif defined(__GLIBC__)
+static double cccc_exp10(double x)  { return exp10(x); }
+static float  cccc_exp10f(float x)  { return exp10f(x); }
+#else
+static double cccc_exp10(double x)  { return pow(10.0, x); }
+static float  cccc_exp10f(float x)  { return powf(10.0f, x); }
+#endif
+
+#if defined(__GLIBC__)
+static long double cccc_exp10l(long double x) { return exp10l(x); }
+#else
+static long double cccc_exp10l(long double x) { return powl(10.0L, x); }
+#endif
+
+// ---- sinpi/cospi/tanpi family (C23) ----
+// On non-Apple platforms, integer/half-integer arguments are special-cased
+// so results are exact (matching Apple's __sinpi/__cospi/__tanpi), since a
+// naive sin(x * pi)-style computation loses precision from the imprecision
+// of pi itself (e.g. sin(M_PI) != 0.0).
+#if defined(__APPLE__)
+static double cccc_sinpi(double x) { return __sinpi(x); }
+static float  cccc_sinpif(float x) { return __sinpif(x); }
+static double cccc_cospi(double x) { return __cospi(x); }
+static float  cccc_cospif(float x) { return __cospif(x); }
+static double cccc_tanpi(double x) { return __tanpi(x); }
+static float  cccc_tanpif(float x) { return __tanpif(x); }
+#else
+static double cccc_sinpi(double x) {
+    double r = fmod(x, 2.0);
+    if (r == 0.0 || r == 1.0 || r == -1.0) return copysign(0.0, x);
+    if (r == 0.5 || r == -1.5) return 1.0;
+    if (r == -0.5 || r == 1.5) return -1.0;
+    return sin(x * CCCC_PI);
+}
+static float cccc_sinpif(float x) {
+    float r = fmodf(x, 2.0f);
+    if (r == 0.0f || r == 1.0f || r == -1.0f) return copysignf(0.0f, x);
+    if (r == 0.5f || r == -1.5f) return 1.0f;
+    if (r == -0.5f || r == 1.5f) return -1.0f;
+    return sinf(x * CCCC_PIf);
+}
+static double cccc_cospi(double x) {
+    double r = fmod(x, 2.0);
+    if (r < 0.0) r += 2.0;
+    if (r == 0.0) return 1.0;
+    if (r == 1.0) return -1.0;
+    if (r == 0.5 || r == 1.5) return 0.0;
+    return cos(x * CCCC_PI);
+}
+static float cccc_cospif(float x) {
+    float r = fmodf(x, 2.0f);
+    if (r < 0.0f) r += 2.0f;
+    if (r == 0.0f) return 1.0f;
+    if (r == 1.0f) return -1.0f;
+    if (r == 0.5f || r == 1.5f) return 0.0f;
+    return cosf(x * CCCC_PIf);
+}
+static double cccc_tanpi(double x) {
+    if (fmod(x, 1.0) == 0.0) return copysign(0.0, x);
+    return tan(x * CCCC_PI);
+}
+static float cccc_tanpif(float x) {
+    if (fmodf(x, 1.0f) == 0.0f) return copysignf(0.0f, x);
+    return tanf(x * CCCC_PIf);
+}
+#endif
+
+// Long double variants are absent everywhere, so always shimmed.
+static long double cccc_sinpil(long double x) {
+    long double r = fmodl(x, 2.0L);
+    if (r == 0.0L || r == 1.0L || r == -1.0L) return copysignl(0.0L, x);
+    if (r == 0.5L || r == -1.5L) return 1.0L;
+    if (r == -0.5L || r == 1.5L) return -1.0L;
+    return sinl(x * CCCC_PIl);
+}
+static long double cccc_cospil(long double x) {
+    long double r = fmodl(x, 2.0L);
+    if (r < 0.0L) r += 2.0L;
+    if (r == 0.0L) return 1.0L;
+    if (r == 1.0L) return -1.0L;
+    if (r == 0.5L || r == 1.5L) return 0.0L;
+    return cosl(x * CCCC_PIl);
+}
+static long double cccc_tanpil(long double x) {
+    if (fmodl(x, 1.0L) == 0.0L) return copysignl(0.0L, x);
+    return tanl(x * CCCC_PIl);
+}
+
+// ---- asinpi/acospi/atanpi/atan2pi family (C23) ----
+// Absent everywhere; shimmed via division by pi. Precision loss from the
+// division is negligible for inverse trig (unlike the sin/cos/tan case
+// above, there are no exact poles/zeros that need preserving).
+static double cccc_asinpi(double x)  { return asin(x) / CCCC_PI; }
+static float  cccc_asinpif(float x)  { return asinf(x) / CCCC_PIf; }
+static long double cccc_asinpil(long double x) { return asinl(x) / CCCC_PIl; }
+
+static double cccc_acospi(double x)  { return acos(x) / CCCC_PI; }
+static float  cccc_acospif(float x)  { return acosf(x) / CCCC_PIf; }
+static long double cccc_acospil(long double x) { return acosl(x) / CCCC_PIl; }
+
+static double cccc_atanpi(double x)  { return atan(x) / CCCC_PI; }
+static float  cccc_atanpif(float x)  { return atanf(x) / CCCC_PIf; }
+static long double cccc_atanpil(long double x) { return atanl(x) / CCCC_PIl; }
+
+static double cccc_atan2pi(double y, double x)  { return atan2(y, x) / CCCC_PI; }
+static float  cccc_atan2pif(float y, float x)  { return atan2f(y, x) / CCCC_PIf; }
+static long double cccc_atan2pil(long double y, long double x) { return atan2l(y, x) / CCCC_PIl; }
+
 // Register all math.h functions
 void register_math_functions(CCCC *vm) {
     // Basic operations
@@ -182,4 +320,34 @@ void register_math_functions(CCCC *vm) {
     cc_register_cfunc_ex(vm, "copysign", (void*)copysign, 2, 1, 0b11);  // double, double
     cc_register_cfunc_ex(vm, "copysignf", (void*)copysignf, 2, 0, 0b11);
     cc_register_cfunc_ex(vm, "copysignl", (void*)copysignl, 2, 1, 0b11);
+
+    // C23 exp10 family - single double arg needs mask 0b1
+    cc_register_cfunc_ex(vm, "exp10", (void*)cccc_exp10, 1, 1, 0b1);
+    cc_register_cfunc_ex(vm, "exp10f", (void*)cccc_exp10f, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "exp10l", (void*)cccc_exp10l, 1, 1, 0b1);
+
+    // C23 sinpi/cospi/tanpi family - single double arg needs mask 0b1
+    cc_register_cfunc_ex(vm, "sinpi", (void*)cccc_sinpi, 1, 1, 0b1);
+    cc_register_cfunc_ex(vm, "sinpif", (void*)cccc_sinpif, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "sinpil", (void*)cccc_sinpil, 1, 1, 0b1);
+    cc_register_cfunc_ex(vm, "cospi", (void*)cccc_cospi, 1, 1, 0b1);
+    cc_register_cfunc_ex(vm, "cospif", (void*)cccc_cospif, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "cospil", (void*)cccc_cospil, 1, 1, 0b1);
+    cc_register_cfunc_ex(vm, "tanpi", (void*)cccc_tanpi, 1, 1, 0b1);
+    cc_register_cfunc_ex(vm, "tanpif", (void*)cccc_tanpif, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "tanpil", (void*)cccc_tanpil, 1, 1, 0b1);
+
+    // C23 asinpi/acospi/atanpi/atan2pi family
+    cc_register_cfunc_ex(vm, "asinpi", (void*)cccc_asinpi, 1, 1, 0b1);
+    cc_register_cfunc_ex(vm, "asinpif", (void*)cccc_asinpif, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "asinpil", (void*)cccc_asinpil, 1, 1, 0b1);
+    cc_register_cfunc_ex(vm, "acospi", (void*)cccc_acospi, 1, 1, 0b1);
+    cc_register_cfunc_ex(vm, "acospif", (void*)cccc_acospif, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "acospil", (void*)cccc_acospil, 1, 1, 0b1);
+    cc_register_cfunc_ex(vm, "atanpi", (void*)cccc_atanpi, 1, 1, 0b1);
+    cc_register_cfunc_ex(vm, "atanpif", (void*)cccc_atanpif, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "atanpil", (void*)cccc_atanpil, 1, 1, 0b1);
+    cc_register_cfunc_ex(vm, "atan2pi", (void*)cccc_atan2pi, 2, 1, 0b11);  // double, double
+    cc_register_cfunc_ex(vm, "atan2pif", (void*)cccc_atan2pif, 2, 0, 0b11);
+    cc_register_cfunc_ex(vm, "atan2pil", (void*)cccc_atan2pil, 2, 1, 0b11);
 }

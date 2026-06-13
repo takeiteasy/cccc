@@ -2,6 +2,22 @@
 #include "../cccc.h"
 #include <wchar.h>
 
+#if defined(__APPLE__)
+#include <Availability.h>
+#endif
+
+// aligned_alloc native availability: macOS 10.15+ or glibc 2.16+
+#if defined(__APPLE__) && defined(__MAC_OS_X_VERSION_MIN_REQUIRED) && \
+    __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_15
+#define CCCC_HAVE_NATIVE_ALIGNED_ALLOC 1
+#elif defined(__GLIBC__)
+#include <features.h>
+#if __GLIBC_PREREQ(2, 16)
+#define CCCC_HAVE_NATIVE_ALIGNED_ALLOC 1
+#endif
+#endif
+
+#ifndef CCCC_HAVE_NATIVE_ALIGNED_ALLOC
 static void *cccc_aligned_alloc(size_t alignment, size_t size) {
     void *ptr = NULL;
     if (alignment == 0 || (alignment & (alignment - 1)) != 0)
@@ -10,6 +26,7 @@ static void *cccc_aligned_alloc(size_t alignment, size_t size) {
         return NULL;
     return ptr;
 }
+#endif
 
 // Wrapper for realloc that matches C11 semantics
 static void *cccc_realloc(void *ptr, size_t size) {
@@ -125,7 +142,11 @@ void register_stdlib_functions(CCCC *vm) {
     cc_register_cfunc(vm, "srand", (void*)srand, 1, 0);
 
     // Memory allocation functions
+#ifdef CCCC_HAVE_NATIVE_ALIGNED_ALLOC
+    cc_register_cfunc(vm, "aligned_alloc", (void*)aligned_alloc, 2, 0);
+#else
     cc_register_cfunc(vm, "aligned_alloc", (void*)cccc_aligned_alloc, 2, 0);
+#endif
     cc_register_cfunc(vm, "calloc", (void*)calloc, 2, 0);
     cc_register_cfunc(vm, "free", (void*)free, 1, 0);
     cc_register_cfunc(vm, "free_sized", (void*)cccc_free_sized, 2, 0);

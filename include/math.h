@@ -164,6 +164,41 @@ double atan2(double, double);
 float atan2f(float, float);
 long double atan2l(long double, long double);
 
+/* exp10 (C23) */
+double exp10(double);
+float exp10f(float);
+long double exp10l(long double);
+
+/* sinpi/cospi/tanpi (C23) */
+double sinpi(double);
+float sinpif(float);
+long double sinpil(long double);
+
+double cospi(double);
+float cospif(float);
+long double cospil(long double);
+
+double tanpi(double);
+float tanpif(float);
+long double tanpil(long double);
+
+/* asinpi/acospi/atanpi/atan2pi (C23) */
+double asinpi(double);
+float asinpif(float);
+long double asinpil(long double);
+
+double acospi(double);
+float acospif(float);
+long double acospil(long double);
+
+double atanpi(double);
+float atanpif(float);
+long double atanpil(long double);
+
+double atan2pi(double, double);
+float atan2pif(float, float);
+long double atan2pil(long double, long double);
+
 /* Hyperbolic */
 double sinh(double);
 float sinhf(float);

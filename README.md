@@ -6,7 +6,7 @@
 
 The VM is what lets macros actually run at compile time, and it doubles as a self-contained runtime for prototyping, sandboxing, debugging, and the memory-safety / profiling tools. For production code, use `-c=native` and let `cc` / `clang` / `gcc` do the heavy lifting — CCCC is positioned as a frontend drop-in, not a replacement for a system toolchain. The VM is here when you need a toolchain-free, introspectable, or sandboxed execution environment.
 
-CCCC supports C11 as the baseline, with selected C23 and GNU extensions. See [COVERAGE.md](docs/COVERAGE.md) for detailed tables of C99, C11, C23, and GNU extension support. For an real world example see [generate_stdlib.c](tools/generate_stdlib.c). This generated and embed the standard library wrapper for CCCC.
+CCCC targets C23 (and below), and support for a wide-array of Clang/GNU extensions. See [COVERAGE.md](docs/COVERAGE.md) for detailed tables of C89, C99, C11, C23, and extension support. For an real world example see [generate_stdlib.c](tools/generate_stdlib.c). This generated and embed the standard library wrapper for CCCC.
 
 ## Features
 
