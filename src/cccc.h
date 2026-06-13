@@ -216,7 +216,20 @@ extern "C" {
     X(FLDR_LOCAL,     3) /* fregs[rd] = *(double*)(bp+offset) */          \
     X(FSTR_LOCAL,     3) /* *(double*)(bp+offset) = fregs[rd] */          \
     X(FLDR_LOCAL_F32, 3) /* fregs[rd] = *(float*)(bp+offset) */           \
-    X(FSTR_LOCAL_F32, 3) /* *(float*)(bp+offset) = (float)fregs[rd] */
+    X(FSTR_LOCAL_F32, 3) /* *(float*)(bp+offset) = (float)fregs[rd] */    \
+    /* Fused indexed load/store: base + index * scale + byte offset */    \
+    X(LDR_INDEX_B, 3) /* regs[rd] = *(char*)(base+idx*scale+off) */       \
+    X(LDR_INDEX_H, 3) /* regs[rd] = *(short*)(base+idx*scale+off) */      \
+    X(LDR_INDEX_W, 3) /* regs[rd] = *(int*)(base+idx*scale+off) */        \
+    X(LDR_INDEX_D, 3) /* regs[rd] = *(long long*)(base+idx*scale+off) */  \
+    X(STR_INDEX_B, 3) /* *(char*)(base+idx*scale+off) = regs[rd] */       \
+    X(STR_INDEX_H, 3) /* *(short*)(base+idx*scale+off) = regs[rd] */      \
+    X(STR_INDEX_W, 3) /* *(int*)(base+idx*scale+off) = regs[rd] */        \
+    X(STR_INDEX_D, 3) /* *(long long*)(base+idx*scale+off) = regs[rd] */  \
+    X(FLDR_INDEX,     3) /* fregs[rd] = *(double*)(base+idx*scale+off) */ \
+    X(FSTR_INDEX,     3) /* *(double*)(base+idx*scale+off) = fregs[rd] */ \
+    X(FLDR_INDEX_F32, 3) /* fregs[rd] = *(float*)(base+idx*scale+off) */  \
+    X(FSTR_INDEX_F32, 3) /* *(float*)(base+idx*scale+off) = fregs[rd] */
 
 typedef uint32_t CCCCInstrWord;
 typedef uint32_t CCCCPc;

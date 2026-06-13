@@ -2820,3 +2820,147 @@ static inline int op_FSTR_LOCAL_F32_fn(CCCC *vm) {
     *(float *)(vm->bp + offset) = cccc_freg_get_f32(vm, rd);
     return 0;
 }
+
+// ========== Fused indexed load/store ==========
+// Effective address is (char *)regs[base] + regs[index] * scale + byte offset.
+
+static inline char *op_index_addr(CCCC *vm, int base, int index, int scale,
+                                  long long offset) {
+    return (char *)vm->regs[base] + vm->regs[index] * (long long)scale + offset;
+}
+
+static inline int op_LDR_INDEX_B_fn(CCCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, base, index, scale;
+    DECODE_RRRS(operands, rd, base, index, scale);
+    long long offset = cc_read_i64(vm);
+    char *addr = op_index_addr(vm, base, index, scale, offset);
+    WATCHPOINT_CHECK(vm, addr, 1, WATCH_READ);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = *(char *)addr;
+    return 0;
+}
+
+static inline int op_LDR_INDEX_H_fn(CCCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, base, index, scale;
+    DECODE_RRRS(operands, rd, base, index, scale);
+    long long offset = cc_read_i64(vm);
+    char *addr = op_index_addr(vm, base, index, scale, offset);
+    WATCHPOINT_CHECK(vm, addr, 2, WATCH_READ);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = *(short *)addr;
+    return 0;
+}
+
+static inline int op_LDR_INDEX_W_fn(CCCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, base, index, scale;
+    DECODE_RRRS(operands, rd, base, index, scale);
+    long long offset = cc_read_i64(vm);
+    char *addr = op_index_addr(vm, base, index, scale, offset);
+    WATCHPOINT_CHECK(vm, addr, 4, WATCH_READ);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = *(int *)addr;
+    return 0;
+}
+
+static inline int op_LDR_INDEX_D_fn(CCCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, base, index, scale;
+    DECODE_RRRS(operands, rd, base, index, scale);
+    long long offset = cc_read_i64(vm);
+    char *addr = op_index_addr(vm, base, index, scale, offset);
+    WATCHPOINT_CHECK(vm, addr, 8, WATCH_READ);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = *(long long *)addr;
+    return 0;
+}
+
+static inline int op_STR_INDEX_B_fn(CCCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, base, index, scale;
+    DECODE_RRRS(operands, rd, base, index, scale);
+    long long offset = cc_read_i64(vm);
+    char *addr = op_index_addr(vm, base, index, scale, offset);
+    *(char *)addr = (char)vm->regs[rd];
+    WATCHPOINT_CHECK(vm, addr, 1, WATCH_WRITE);
+    return 0;
+}
+
+static inline int op_STR_INDEX_H_fn(CCCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, base, index, scale;
+    DECODE_RRRS(operands, rd, base, index, scale);
+    long long offset = cc_read_i64(vm);
+    char *addr = op_index_addr(vm, base, index, scale, offset);
+    *(short *)addr = (short)vm->regs[rd];
+    WATCHPOINT_CHECK(vm, addr, 2, WATCH_WRITE);
+    return 0;
+}
+
+static inline int op_STR_INDEX_W_fn(CCCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, base, index, scale;
+    DECODE_RRRS(operands, rd, base, index, scale);
+    long long offset = cc_read_i64(vm);
+    char *addr = op_index_addr(vm, base, index, scale, offset);
+    *(int *)addr = (int)vm->regs[rd];
+    WATCHPOINT_CHECK(vm, addr, 4, WATCH_WRITE);
+    return 0;
+}
+
+static inline int op_STR_INDEX_D_fn(CCCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, base, index, scale;
+    DECODE_RRRS(operands, rd, base, index, scale);
+    long long offset = cc_read_i64(vm);
+    char *addr = op_index_addr(vm, base, index, scale, offset);
+    *(long long *)addr = vm->regs[rd];
+    WATCHPOINT_CHECK(vm, addr, 8, WATCH_WRITE);
+    return 0;
+}
+
+static inline int op_FLDR_INDEX_fn(CCCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, base, index, scale;
+    DECODE_RRRS(operands, rd, base, index, scale);
+    long long offset = cc_read_i64(vm);
+    char *addr = op_index_addr(vm, base, index, scale, offset);
+    WATCHPOINT_CHECK(vm, addr, 8, WATCH_READ);
+    cccc_freg_set_f64(vm, rd, *(double *)addr);
+    return 0;
+}
+
+static inline int op_FSTR_INDEX_fn(CCCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, base, index, scale;
+    DECODE_RRRS(operands, rd, base, index, scale);
+    long long offset = cc_read_i64(vm);
+    char *addr = op_index_addr(vm, base, index, scale, offset);
+    *(double *)addr = cccc_freg_get_f64(vm, rd);
+    WATCHPOINT_CHECK(vm, addr, 8, WATCH_WRITE);
+    return 0;
+}
+
+static inline int op_FLDR_INDEX_F32_fn(CCCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, base, index, scale;
+    DECODE_RRRS(operands, rd, base, index, scale);
+    long long offset = cc_read_i64(vm);
+    char *addr = op_index_addr(vm, base, index, scale, offset);
+    WATCHPOINT_CHECK(vm, addr, 4, WATCH_READ);
+    cccc_freg_set_f32(vm, rd, *(float *)addr);
+    return 0;
+}
+
+static inline int op_FSTR_INDEX_F32_fn(CCCC *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, base, index, scale;
+    DECODE_RRRS(operands, rd, base, index, scale);
+    long long offset = cc_read_i64(vm);
+    char *addr = op_index_addr(vm, base, index, scale, offset);
+    *(float *)addr = cccc_freg_get_f32(vm, rd);
+    WATCHPOINT_CHECK(vm, addr, 4, WATCH_WRITE);
+    return 0;
+}

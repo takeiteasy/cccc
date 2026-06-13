@@ -68,6 +68,9 @@ Wide immediates (64-bit) are stored little-endian across **two consecutive** 32-
 * **RRR** — `[opcode] [rd:8 | rs1:8 | rs2:8 | unused:8]`  
   Used by three-register arithmetic, comparisons, and FP ops.
 
+* **RRRS** — `[opcode] [rd:8 | base:8 | index:8 | scale:8] [offset:64]`
+  Used by fused indexed load/store opcodes.
+
 * **RR** — `[opcode] [rd:8 | rs1:8 | unused:16]`  
   Used by moves, negations, loads, stores, and conversions.
 
@@ -321,9 +324,32 @@ These replace the common `LEA3 + LDR/STR` two-opcode sequence for local variable
 | `FLDR_LOCAL_F32` | `fregs[rd] = *(float*)(bp + offset)` |
 | `FSTR_LOCAL_F32` | `*(float*)(bp + offset) = fregs[rd]` |
 
+### Fused Indexed Load / Store
+
+These replace simple `base + index * scale + offset` address sequences for
+scalar array and pointer accesses. The integer operand word stores `rd`, `base`,
+`index`, and an 8-bit byte scale; the following 64-bit immediate stores the byte
+offset. Codegen emits these opcodes at `--optimize=2` and above when pointer
+safety instrumentation is not active.
+
+| Opcode | Description |
+|--------|-------------|
+| `LDR_INDEX_B` | `regs[rd] = *(char*)(regs[base] + regs[index] * scale + offset)` |
+| `LDR_INDEX_H` | `regs[rd] = *(short*)(regs[base] + regs[index] * scale + offset)` |
+| `LDR_INDEX_W` | `regs[rd] = *(int*)(regs[base] + regs[index] * scale + offset)` |
+| `LDR_INDEX_D` | `regs[rd] = *(long long*)(regs[base] + regs[index] * scale + offset)` |
+| `STR_INDEX_B` | `*(char*)(regs[base] + regs[index] * scale + offset) = regs[rd]` |
+| `STR_INDEX_H` | `*(short*)(regs[base] + regs[index] * scale + offset) = regs[rd]` |
+| `STR_INDEX_W` | `*(int*)(regs[base] + regs[index] * scale + offset) = regs[rd]` |
+| `STR_INDEX_D` | `*(long long*)(regs[base] + regs[index] * scale + offset) = regs[rd]` |
+| `FLDR_INDEX` | `fregs[rd] = *(double*)(regs[base] + regs[index] * scale + offset)` |
+| `FSTR_INDEX` | `*(double*)(regs[base] + regs[index] * scale + offset) = fregs[rd]` |
+| `FLDR_INDEX_F32` | `fregs[rd] = *(float*)(regs[base] + regs[index] * scale + offset)` |
+| `FSTR_INDEX_F32` | `*(float*)(regs[base] + regs[index] * scale + offset) = fregs[rd]` |
+
 ## Bytecode File Format (`.jbc`)
 
-Saved bytecode files are self-contained and can be loaded into a fresh VM instance without recompilation.  The format is versioned (current version **9**).
+Saved bytecode files are self-contained and can be loaded into a fresh VM instance without recompilation.  The format is versioned (current version **11**).
 
 ```
 +---------------+  offset 0
@@ -370,7 +396,7 @@ On load, the loader re-anchors global pointers, function-pointer offsets, FFI en
 
 ### Asm-Passthru Rehydration
 
-FFI entries created by `--asm-passthru` cannot survive serialisation as raw function pointers because the compiled shared library is unlinked immediately after `dlopen`.  Version 9 of the `.jbc` format stores the original assembly source string (`asm_src`) alongside each such entry (flagged `is_asm_passthru = 1`).  On load, `cc_rehydrate_asm_passthru()` recompiles each `asm_src` string into a fresh temporary shared library, `dlopen`s it, and resolves the function pointer — making the round-trip transparent to the program.
+FFI entries created by `--asm-passthru` cannot survive serialisation as raw function pointers because the compiled shared library is unlinked immediately after `dlopen`.  The `.jbc` format stores the original assembly source string (`asm_src`) alongside each such entry (flagged `is_asm_passthru = 1`).  On load, `cc_rehydrate_asm_passthru()` recompiles each `asm_src` string into a fresh temporary shared library, `dlopen`s it, and resolves the function pointer — making the round-trip transparent to the program.
 
 Rehydration applies the same FFI allow/deny policy as other symbol lookups: if `--disable-ffi` is active, or the symbol is on the deny list, the entry is left unresolved and a `CALLF` targeting it will fail at execution time with `error: FFI function … not resolved`.
 
@@ -430,9 +456,11 @@ Static n-gram mining (`cccc --ngrams`) and use-def fusion analysis (`cccc --fusi
 
 The VM is the runtime for compile-time macro bodies and for VM-only workflows (the safety suite, the debugger, the profiler, quick iteration without a system compiler).  For production code, `-c=native` hands macro-expanded C to `cc` / `clang` / `gcc` and skips the VM entirely, so the interpreter cost only matters for the things that *run on it*.
 
-Two optimisations have significantly reduced interpreter overhead:
+Four optimisations have significantly reduced interpreter overhead:
 
 1. **Inlined threaded dispatch** — Opcode logic lives at computed-goto labels; there is no function call per instruction.
 2. **Fused local load/store** — The common `LEA3 + LDR/STR` pair for local variables is collapsed into a single `LDR_LOCAL_*` / `STR_LOCAL_*` opcode, saving one dispatch and one register-pressure hop per access.
+3. **Scalar local promotion** — Hot eligible integer and pointer locals are held in callee-saved VM registers at `--optimize=2` and above.
+4. **Fused indexed load/store** — Simple array and pointer accesses use `LDR_INDEX_*` / `STR_INDEX_*`, removing separate index multiply and address-add opcodes in hot loops.
 
 The dominant cost remains the interpreter itself (as opposed to compile time); see [BENCHMARKS.md](BENCHMARKS.md) for full numbers and [PROFILING.md](PROFILING.md) for analysis tooling.

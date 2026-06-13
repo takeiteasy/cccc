@@ -382,18 +382,30 @@ static const DefUseEntry defuse_table[OP_COUNT] = {
     [LDR_H] = {{P_RD}, {P_RS1}, 1, 1},
     [LDR_W] = {{P_RD}, {P_RS1}, 1, 1},
     [LDR_D] = {{P_RD}, {P_RS1}, 1, 1},
+    [LDR_INDEX_B] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
+    [LDR_INDEX_H] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
+    [LDR_INDEX_W] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
+    [LDR_INDEX_D] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
 
     // Stores: *(T*)regs[rs] = regs[rd] -- both rd and rs are uses
     [STR_B] = {{}, {P_RD, P_RS1}, 0, 2},
     [STR_H] = {{}, {P_RD, P_RS1}, 0, 2},
     [STR_W] = {{}, {P_RD, P_RS1}, 0, 2},
     [STR_D] = {{}, {P_RD, P_RS1}, 0, 2},
+    [STR_INDEX_B] = {{}, {P_RD, P_RS1, P_RS2}, 0, 3},
+    [STR_INDEX_H] = {{}, {P_RD, P_RS1, P_RS2}, 0, 3},
+    [STR_INDEX_W] = {{}, {P_RD, P_RS1, P_RS2}, 0, 3},
+    [STR_INDEX_D] = {{}, {P_RD, P_RS1, P_RS2}, 0, 3},
 
     // Float loads/stores
     [FLDR] = {{P_RD}, {P_RS1}, 1, 1},
     [FSTR] = {{}, {P_RD, P_RS1}, 0, 2},
     [FLDR_F32] = {{P_RD}, {P_RS1}, 1, 1},
     [FSTR_F32] = {{}, {P_RD, P_RS1}, 0, 2},
+    [FLDR_INDEX] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
+    [FSTR_INDEX] = {{}, {P_RD, P_RS1, P_RS2}, 0, 3},
+    [FLDR_INDEX_F32] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
+    [FSTR_INDEX_F32] = {{}, {P_RD, P_RS1, P_RS2}, 0, 3},
 
     // Float binary: fregs[rd] = fregs[rs1] (op) fregs[rs2]
     [FADD3] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},

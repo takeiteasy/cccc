@@ -776,6 +776,13 @@ static CCCCPc emit_rri(CCCC *vm, int op, int rd, int rs, long long imm) {
     return emit_i64(vm, imm);
 }
 
+static CCCCPc emit_rrrs_i(CCCC *vm, int op, int rd, int base, int index,
+                          int scale, long long offset) {
+    emit_word(vm, op);
+    emit_word(vm, ENCODE_RRRS(rd, base, index, scale));
+    return emit_i64(vm, offset);
+}
+
 // Float 3-register ops
 static void emit_frrr(CCCC *vm, int op, int rd, int rs1, int rs2) {
     emit_word(vm, op);
@@ -851,6 +858,7 @@ static int fop_for_type(Type *ty, int f64_op) {
 
 // Load operations based on type
 static void emit_bitint_trunc(CCCC *vm, Type *ty, int reg);
+static void gen_expr(CCCC *vm, Node *node, int dest_reg);
 
 static void emit_load(CCCC *vm, Type *ty, int rd, int rs_addr) {
     if (vm->flags & CCCC_POINTER_CHECKS)
@@ -896,6 +904,187 @@ static void emit_load(CCCC *vm, Type *ty, int rd, int rs_addr) {
     } else {
         emit_rr(vm, LDR_D, rd, rs_addr);
     }
+}
+
+typedef struct {
+    Node *base;
+    Node *index;
+    int scale;
+    long long offset;
+} IndexedAddr;
+
+static Node *strip_index_casts(Node *node) {
+    while (node && node->kind == ND_CAST)
+        node = node->lhs;
+    return node;
+}
+
+static bool is_index_scale(Node *node, Node **index, int *scale) {
+    node = strip_index_casts(node);
+    if (!node || node->kind != ND_MUL)
+        return false;
+    Node *lhs = strip_index_casts(node->lhs);
+    Node *rhs = strip_index_casts(node->rhs);
+    if (rhs && rhs->kind == ND_NUM && rhs->val > 0 && rhs->val <= 255) {
+        *index = strip_index_casts(lhs);
+        if (!*index)
+            return false;
+        *scale = (int)rhs->val;
+        return true;
+    }
+    if (lhs && lhs->kind == ND_NUM && lhs->val > 0 && lhs->val <= 255) {
+        *index = strip_index_casts(rhs);
+        if (!*index)
+            return false;
+        *scale = (int)lhs->val;
+        return true;
+    }
+    return false;
+}
+
+static bool match_indexed_addr(CCCC *vm, Node *addr, IndexedAddr *out) {
+    addr = strip_index_casts(addr);
+    if (!addr || addr->kind != ND_ADD || vm->compiler.opt_level < 2)
+        return false;
+    if (vm->flags & (CCCC_POINTER_CHECKS | CCCC_INVALID_ARITH |
+                     CCCC_PROVENANCE_TRACK))
+        return false;
+
+    Node *lhs = strip_index_casts(addr->lhs);
+    Node *rhs = strip_index_casts(addr->rhs);
+    if (!lhs || !rhs)
+        return false;
+    Node *index = NULL;
+    int scale = 0;
+    if (is_index_scale(rhs, &index, &scale)) {
+        out->base = lhs;
+        out->index = index;
+        out->scale = scale;
+        out->offset = 0;
+        return true;
+    }
+    if (is_index_scale(lhs, &index, &scale)) {
+        out->base = rhs;
+        out->index = index;
+        out->scale = scale;
+        out->offset = 0;
+        return true;
+    }
+    return false;
+}
+
+static int indexed_load_op(Type *ty) {
+    if (ty->kind == TY_CHAR || ty->kind == TY_BOOL)
+        return LDR_INDEX_B;
+    if (ty->kind == TY_SHORT)
+        return LDR_INDEX_H;
+    if (ty->kind == TY_INT || (ty->kind == TY_ENUM && ty->size == 4))
+        return LDR_INDEX_W;
+    if (ty->kind == TY_ENUM) {
+        if (ty->size == 1) return LDR_INDEX_B;
+        if (ty->size == 2) return LDR_INDEX_H;
+        return LDR_INDEX_D;
+    }
+    if (ty->kind == TY_BITINT) {
+        if (ty->size == 1) return LDR_INDEX_B;
+        if (ty->size == 2) return LDR_INDEX_H;
+        if (ty->size == 4) return LDR_INDEX_W;
+        return LDR_INDEX_D;
+    }
+    if (ty->kind == TY_FLOAT)
+        return FLDR_INDEX_F32;
+    if (ty->kind == TY_DOUBLE || ty->kind == TY_LDOUBLE)
+        return FLDR_INDEX;
+    return LDR_INDEX_D;
+}
+
+static int indexed_store_op(Type *ty) {
+    if (ty->kind == TY_CHAR || ty->kind == TY_BOOL)
+        return STR_INDEX_B;
+    if (ty->kind == TY_SHORT)
+        return STR_INDEX_H;
+    if (ty->kind == TY_INT || (ty->kind == TY_ENUM && ty->size == 4))
+        return STR_INDEX_W;
+    if (ty->kind == TY_ENUM) {
+        if (ty->size == 1) return STR_INDEX_B;
+        if (ty->size == 2) return STR_INDEX_H;
+        return STR_INDEX_D;
+    }
+    if (ty->kind == TY_BITINT) {
+        if (ty->size == 1) return STR_INDEX_B;
+        if (ty->size == 2) return STR_INDEX_H;
+        if (ty->size == 4) return STR_INDEX_W;
+        return STR_INDEX_D;
+    }
+    if (ty->kind == TY_FLOAT)
+        return FSTR_INDEX_F32;
+    if (ty->kind == TY_DOUBLE || ty->kind == TY_LDOUBLE)
+        return FSTR_INDEX;
+    return STR_INDEX_D;
+}
+
+static bool emit_indexed_load_if_possible(CCCC *vm, Node *node, int dest_reg) {
+    if (!node || node->kind != ND_DEREF || !node->lhs ||
+        node->ty->kind == TY_ARRAY || node->ty->kind == TY_STRUCT ||
+        node->ty->kind == TY_UNION || node->ty->kind == TY_COMPLEX)
+        return false;
+    IndexedAddr idx = {};
+    if (!match_indexed_addr(vm, node->lhs, &idx))
+        return false;
+    int r_base = alloc_temp_reg();
+    gen_expr(vm, idx.base, r_base);
+    mark_temp_reg_used(r_base);
+    int r_index = alloc_temp_reg();
+    gen_expr(vm, idx.index, r_index);
+    emit_rrrs_i(vm, indexed_load_op(node->ty), dest_reg, r_base, r_index,
+                idx.scale, idx.offset);
+    if (!is_flonum(node->ty)) {
+        if (node->ty->kind == TY_BOOL || node->ty->kind == TY_CHAR) {
+            if (node->ty->is_unsigned || node->ty->kind == TY_BOOL)
+                emit_rr(vm, ZX1, dest_reg, dest_reg);
+        } else if (node->ty->kind == TY_SHORT) {
+            if (node->ty->is_unsigned)
+                emit_rr(vm, ZX2, dest_reg, dest_reg);
+        } else if (node->ty->kind == TY_INT ||
+                   (node->ty->kind == TY_ENUM && node->ty->size == 4)) {
+            if (node->ty->is_unsigned)
+                emit_rr(vm, ZX4, dest_reg, dest_reg);
+        } else if (node->ty->kind == TY_BITINT) {
+            if (node->ty->is_unsigned) {
+                if (node->ty->size == 1) emit_rr(vm, ZX1, dest_reg, dest_reg);
+                else if (node->ty->size == 2) emit_rr(vm, ZX2, dest_reg, dest_reg);
+                else if (node->ty->size == 4) emit_rr(vm, ZX4, dest_reg, dest_reg);
+            } else {
+                if (node->ty->size == 1) emit_rr(vm, SX1, dest_reg, dest_reg);
+                else if (node->ty->size == 2) emit_rr(vm, SX2, dest_reg, dest_reg);
+                else if (node->ty->size == 4) emit_rr(vm, SX4, dest_reg, dest_reg);
+            }
+            emit_bitint_trunc(vm, node->ty, dest_reg);
+        }
+    }
+    free_temp_reg(r_index);
+    free_temp_reg(r_base);
+    return true;
+}
+
+static bool emit_indexed_store_if_possible(CCCC *vm, Node *lhs, Type *ty,
+                                           int value_reg) {
+    if (!lhs || lhs->kind != ND_DEREF || !lhs->lhs ||
+        ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_COMPLEX)
+        return false;
+    IndexedAddr idx = {};
+    if (!match_indexed_addr(vm, lhs->lhs, &idx))
+        return false;
+    int r_base = alloc_temp_reg();
+    gen_expr(vm, idx.base, r_base);
+    mark_temp_reg_used(r_base);
+    int r_index = alloc_temp_reg();
+    gen_expr(vm, idx.index, r_index);
+    emit_rrrs_i(vm, indexed_store_op(ty), value_reg, r_base, r_index,
+                idx.scale, idx.offset);
+    free_temp_reg(r_index);
+    free_temp_reg(r_base);
+    return true;
 }
 
 // Fused load from bp-relative local slot — replaces LEA3+LDR
@@ -2041,6 +2230,8 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
             emit_promoted_read(vm, promoted_deref_target(vm, node), dest_reg);
             return;
         }
+        if (emit_indexed_load_if_possible(vm, node, dest_reg))
+            return;
         gen_expr(vm, node->lhs, dest_reg);
         if (node->ty->kind != TY_ARRAY && node->ty->kind != TY_STRUCT &&
             node->ty->kind != TY_UNION) {
@@ -2364,8 +2555,11 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
         // Fused local store: skip LEA3+STR for simple locals
         bool lhs_fused = node->lhs->kind == ND_VAR &&
                          is_simple_local_scalar(vm, node->lhs);
+        bool lhs_indexed = node->lhs->kind == ND_DEREF &&
+                           match_indexed_addr(vm, node->lhs->lhs,
+                                              &(IndexedAddr){});
         int r_addr = -1;
-        if (!lhs_fused) {
+        if (!lhs_fused && !lhs_indexed) {
             // Now compute LHS address (after any function calls in RHS are done)
             r_addr = alloc_temp_reg();
             gen_addr(vm, node->lhs, r_addr);
@@ -2412,6 +2606,10 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
         } else if (node->lhs->kind == ND_VAR &&
                    is_promoted_local(vm, node->lhs->var)) {
             emit_promoted_write(vm, node->lhs->var, r_val);
+        } else if (lhs_indexed &&
+                   emit_indexed_store_if_possible(vm, node->lhs, node->ty,
+                                                  r_val)) {
+            // stored by fused indexed opcode
         } else if (lhs_fused) {
             emit_local_store(vm, node->ty, r_val, node->lhs->var->offset);
         } else {

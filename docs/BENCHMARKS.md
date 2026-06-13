@@ -51,8 +51,11 @@ Two significant VM improvements are reflected in these numbers:
 - **#227 — inlined threaded dispatch**: opcode logic is embedded directly at each computed-goto label rather than dispatched through a C function call per instruction (1.2–1.7× improvement on VM-bound workloads).
 - **#250 — fused local load/store opcodes**: the ubiquitous `LEA3+LDR/STR` two-opcode address+dereference sequence for local variables is replaced by a single `LDR_LOCAL_*`/`STR_LOCAL_*` opcode (~23% geomean improvement over the pre-#250 baseline).
 - **#249 — scalar local promotion**: at `--optimize=2` and `--optimize=3`, hot eligible integer/pointer locals are held in VM saved registers and flushed at function exits, cutting repeated local load/store traffic in tight loops.
+- **#251 — indexed load/store opcodes**: at `--optimize=2` and `--optimize=3`, simple `base + index * scale` loads and stores use `LDR_INDEX_*` / `STR_INDEX_*`, cutting address-calculation bytecode in array-heavy loops.
 
 Recent #249 validation on 2026-06-13 used single-run, no-JBC timing for the four targeted hot-loop benchmarks (`python3 tools/bench.py --benchmarks profile/benchmarks --filter ... --runs 1 --warmup 0 --no-jbc`). Correctness matched across all CCCC and GCC configs. The clearest wins were in local-heavy loops: sieve improved from 70.2× to 65.1× slower than `gcc -O2` at `--optimize=2`, nqueens from 10.2× to 9.3×, and matrix multiplication from 38.2× to 33.9×. Quicksort was neutral-to-slightly slower in this run, from 13.6× to 14.0× at `--optimize=2`, so it remains a target for address-calculation work.
+
+Recent #251 validation on 2026-06-13 used the same single-run, no-JBC command shape on the four targeted hot-loop benchmarks. Correctness matched across all CCCC and GCC configs. `--optimize=2` moved sieve from 65.1× to 48.2× slower than `gcc -O2`, nqueens from 9.3× to 8.4×, matrix multiplication from 33.9× to 29.0×, and quicksort from 14.0× to 12.9×. The absolute median timings for CCCC `--optimize=2` were sieve 6689.5ms, nqueens 1089.5ms, matrix_mul 3932.1ms, and quicksort 1711.6ms.
 
 Re-run `make bench-compare` to get updated numbers for your machine.
 
@@ -105,7 +108,7 @@ The `cccc-jbc*` columns are the cleanest apples-to-apples comparison with GCC: b
 If you want to break out compile time vs execution time for CCCC, see `make bench` (hyperfine) and `make profile-cpu` in the existing [PROFILING.md](PROFILING.md).
 If you want to see where VM execution is concentrated, use `tools/bench.py --vm-profile`
 and compare dynamic counts for opcodes such as `LDR_LOCAL_D`, `STR_LOCAL_D`,
-`ADD3`, and `MUL3` across optimization levels.
+`LDR_INDEX_W`, `STR_INDEX_W`, `ADD3`, and `MUL3` across optimization levels.
 
 ## Bytecode (.jbc) configs
 

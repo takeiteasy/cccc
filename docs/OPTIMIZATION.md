@@ -25,7 +25,7 @@ CCCC includes optional bytecode optimization passes that can improve execution p
 |-------|------|-------------|--------|
 | 0 | (default) | No optimization | None |
 | 1 | `--optimize` or `--optimize=1` | Basic | Constant folding |
-| 2 | `--optimize=2` | Standard | Constant folding + Peephole + scalar local promotion |
+| 2 | `--optimize=2` | Standard | Constant folding + Peephole + scalar local promotion + indexed load/store lowering |
 | 3 | `--optimize=3` | Aggressive | All passes |
 
 ## Optimization Passes
@@ -46,6 +46,11 @@ integer/pointer locals to VM saved registers. Promoted locals exclude volatile,
 address-escaping, aggregate, array, captured, block, VLA, floating, complex, and
 debugger-visible cases; dirty values are flushed back to their stack slots at
 function exits.
+
+The same levels also lower simple array and pointer dereferences of the form
+`base + index * scale` to fused indexed VM opcodes. This removes the explicit
+`MUL3 + ADD3 + LDR/STR` address sequence for scalar integer and floating-point
+loads/stores when pointer-safety instrumentation is not active.
 
 ### Phase 1: Constant Folding (`--optimize=1`)
 
@@ -76,7 +81,8 @@ int x = 42 + 0;  // Rewritten to load the folded constant directly
 
 ### Phase 2: Peephole Optimization (`--optimize=2`)
 
-Pattern-matches small instruction sequences and removes redundancies.
+Pattern-matches small instruction sequences, removes redundancies, and enables
+code-generation lowerings that reduce hot-loop bytecode dispatch.
 
 **Patterns optimized:**
 | Pattern | Replacement | Description |
@@ -85,6 +91,7 @@ Pattern-matches small instruction sequences and removes redundancies.
 | `LI3 rx, A; LI3 rx, B` | `LI3 rx, B` | Dead store (first overwritten) |
 | `PSH3 rx; POP3 rx` | NOP | Push/pop same register |
 | `JMP next_instr` | NOP | Jump to fall-through when the `JMP` is not itself a control-flow target |
+| `base + index * scale; LDR/STR` | `LDR_INDEX_*` / `STR_INDEX_*` | Fused indexed load/store for simple scalar array and pointer accesses |
 
 ---
 

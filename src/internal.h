@@ -39,7 +39,7 @@
 #endif
 
 #define CCCC_MAGIC "CCCC\0"
-#define CCCC_VERSION 10 // Version 10: float FFI args/returns (returns_float, CALLF/CALLN float_arg_mask) (#406)
+#define CCCC_VERSION 11 // Version 11: indexed load/store opcodes (#251)
 
 // Stack canary constant for detecting stack overflows (used when random
 // canaries disabled)
@@ -107,11 +107,18 @@
 #define ENCODE_RRR(rd, rs1, rs2)                                               \
     ((CCCCInstrWord)(rd) | ((CCCCInstrWord)(rs1) << 8) |                         \
      ((CCCCInstrWord)(rs2) << 16))
+#define ENCODE_RRRS(rd, rs1, rs2, scale)                                      \
+    (ENCODE_RRR((rd), (rs1), (rs2)) | ((CCCCInstrWord)(scale) << 24))
 #define DECODE_RRR(operands, rd, rs1, rs2)                                     \
     do {                                                                       \
         rd = (operands) & 0xFF;                                                \
         rs1 = ((operands) >> 8) & 0xFF;                                        \
         rs2 = ((operands) >> 16) & 0xFF;                                       \
+    } while (0)
+#define DECODE_RRRS(operands, rd, rs1, rs2, scale)                            \
+    do {                                                                       \
+        DECODE_RRR((operands), rd, rs1, rs2);                                  \
+        scale = ((operands) >> 24) & 0xFF;                                     \
     } while (0)
 
 // RR format: [rd:8|rs1:8|unused:16]
