@@ -2806,6 +2806,25 @@ static Node *asm_stmt(CCCC *vm, Token **rest, Token *tok) {
 //      | ident ":" stmt
 //      | "{" compound-stmt
 //      | expr-stmt
+static Node *stmt(CCCC *vm, Token **rest, Token *tok);
+
+// C23 §6.8.1: a label may precede a declaration at block scope.
+// Pre-C23 bare declarations after labels are a hard error.
+// Limitation: only handles object declarations; typedef/function-def after a
+// label are not routed here.
+static Node *stmt_or_decl(CCCC *vm, Token **rest, Token *tok) {
+    if (is_decl_start(vm, tok) && !equal(tok->next, ":")) {
+        if (vm->compiler.c_std < CCCC_STD_C23)
+            error_tok(vm, tok,
+                      "a declaration may not appear directly after a label "
+                      "(use --std=c23 or later)");
+        VarAttr attr = {};
+        Type *basety = declspec(vm, &tok, tok, &attr);
+        return declaration(vm, rest, tok, basety, &attr);
+    }
+    return stmt(vm, rest, tok);
+}
+
 static Node *stmt(CCCC *vm, Token **rest, Token *tok) {
     if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
         tok = skip(vm, tok->next, "(");
@@ -2927,7 +2946,7 @@ static Node *stmt(CCCC *vm, Token **rest, Token *tok) {
 
         tok = skip(vm, tok, ":");
         node->label = new_unique_name(vm);
-        node->lhs = stmt(vm, rest, tok);
+        node->lhs = stmt_or_decl(vm, rest, tok);
         node->begin = begin;
         node->end = end;
         node->case_next = vm->compiler.current_switch->case_next;
@@ -2950,7 +2969,7 @@ static Node *stmt(CCCC *vm, Token **rest, Token *tok) {
         Node *node = new_node(vm, ND_CASE, tok);
         tok = skip(vm, tok->next, ":");
         node->label = new_unique_name(vm);
-        node->lhs = stmt(vm, rest, tok);
+        node->lhs = stmt_or_decl(vm, rest, tok);
         vm->compiler.current_switch->default_case = node;
         return node;
     }
@@ -3103,7 +3122,7 @@ static Node *stmt(CCCC *vm, Token **rest, Token *tok) {
         body_tok = attribute_list(vm, body_tok, NULL, &label_attr);
         body_tok = c23_attribute_list(vm, body_tok, NULL, &label_attr);
         node->label_maybe_unused = label_attr.is_maybe_unused;
-        node->lhs = stmt(vm, rest, body_tok);
+        node->lhs = stmt_or_decl(vm, rest, body_tok);
         node->goto_next = vm->compiler.labels;
         vm->compiler.labels = node;
         return node;
