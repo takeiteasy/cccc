@@ -2226,6 +2226,71 @@ static bool try_rewrite_at_attr(CCCC *vm, Token **tok_ptr) {
     return true;
 }
 
+static const char *cccc_keyword_alias_name(Token *tok) {
+    if (equal(tok, "__comptime") || equal(tok, "__comptime__"))
+        return "comptime";
+    if (equal(tok, "__macro") || equal(tok, "__macro__"))
+        return "macro";
+    if (equal(tok, "__test") || equal(tok, "__test__"))
+        return "test";
+    if (equal(tok, "__test_setup") || equal(tok, "__test_setup__"))
+        return "test_setup";
+    if (equal(tok, "__test_teardown") || equal(tok, "__test_teardown__"))
+        return "test_teardown";
+    return NULL;
+}
+
+static bool try_rewrite_cccc_keyword_attr(CCCC *vm, Token **tok_ptr) {
+    Token *tok = *tok_ptr;
+    const char *name = cccc_keyword_alias_name(tok);
+    if (!name)
+        return false;
+
+    Token *after = tok->next;
+    char *args_text = "";
+    if (after && equal(after, "(")) {
+        int depth = 0;
+        char *buf = arena_format(vm, "(");
+        Token *p = after->next;
+        while (p && p->kind != TK_EOF) {
+            if (equal(p, "(")) {
+                depth++;
+                buf = arena_format(vm, "%s(", buf);
+                p = p->next;
+                continue;
+            }
+            if (equal(p, ")")) {
+                if (depth == 0) {
+                    after = p->next;
+                    break;
+                }
+                depth--;
+                buf = arena_format(vm, "%s)", buf);
+                p = p->next;
+                continue;
+            }
+            buf = arena_format(vm, "%s%.*s", buf, (int)p->len, p->loc);
+            p = p->next;
+            if (p && !equal(p, ")") && !equal(p, "("))
+                buf = arena_format(vm, "%s ", buf);
+        }
+        if (!p || p->kind == TK_EOF)
+            error_tok(vm, tok, "unterminated '%s(' attribute", name);
+        args_text = arena_format(vm, "%s)", buf);
+    }
+
+    char *src = arena_format(vm, "[[cccc::%s%s]]\n", name, args_text);
+    Token *new_toks = tokenize(vm, new_file(vm, tok->file->name,
+                                            tok->file->file_no, src));
+    Token *last = new_toks;
+    while (last->next && last->next->kind != TK_EOF)
+        last = last->next;
+    last->next = after;
+
+    *tok_ptr = new_toks;
+    return true;
+}
+
 // Parsed arguments from [[cccc::test(...)]] / __attribute__((test(...)))
 typedef struct {
     const char *suite_name;
@@ -3063,6 +3128,8 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
             // @name / @name(args) is first rewritten to the canonical form so
             // that try_extract_attr_macro sees [[cccc::name(...)]] as usual.
             if (try_rewrite_at_attr(vm, &tok))
+                continue;
+            if (try_rewrite_cccc_keyword_attr(vm, &tok))
                 continue;
             if (try_extract_attr_macro(vm, &tok))
                 continue;

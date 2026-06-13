@@ -13,13 +13,14 @@ Three equivalent syntaxes are supported for all test attributes:
 | C23 `[[cccc::...]]` | `[[cccc::test]]`, `[[cccc::test_setup(once)]]` |
 | GNU `__attribute__((...))` | `__attribute__((test))`, `__attribute__((test_setup(once)))` |
 | `@`-prefix shorthand | `@test`, `@test_setup(once)` |
+| Double-underscore aliases | `__test`, `__test__`, `__test_setup__` |
 
-All three are identical at the preprocessor level and can be mixed freely.
+All forms are identical at the preprocessor level and can be mixed freely.
 
 ## Writing Tests
 
-Mark a function as a test with `[[cccc::test]]`, `__attribute__((test))`, or
-`@test`. Test functions must take no arguments; they may return `void`, `int`,
+Mark a function as a test with `[[cccc::test]]`, `__attribute__((test))`,
+`@test`, `__test`, or `__test__`. Test functions must take no arguments; they may return `void`, `int`,
 `double`, `float`, or `char *`:
 
 ```c

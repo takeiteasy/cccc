@@ -1606,6 +1606,20 @@ typedef enum {
     CCCC_STD_C23,  // C23/C2x / GNU23/GNU2x — __STDC_VERSION__ 202311L
 } CStdVersion;
 
+/*!
+ @enum CCCCAttrTarget
+ @abstract Attribute spelling used when CCCC emits generated C source.
+ @discussion Controls how non-CCCC attributes are printed for frontend output
+ modes such as -E, -M, -G, and native compilation.
+*/
+typedef enum {
+    CCCC_ATTR_TARGET_AUTO,
+    CCCC_ATTR_TARGET_C23,
+    CCCC_ATTR_TARGET_GNU,
+    CCCC_ATTR_TARGET_MSVC,
+    CCCC_ATTR_TARGET_STRIP,
+} CCCCAttrTarget;
+
 typedef enum { CTX_COMPTIME, CTX_EMIT } ComptimeCtxType;
 
 typedef struct {
@@ -1805,6 +1819,7 @@ typedef struct Compiler {
     // C language standard selection
     CStdVersion c_std;  // Selected standard version (default: CCCC_STD_C23)
     bool c_std_gnu;     // True for gnuXX variants (gnu17, gnu11, …)
+    CCCCAttrTarget attr_target; // Generated/preprocessed attribute spelling
 
     // Custom entry point name (NULL means "main")
     char *entry_name;

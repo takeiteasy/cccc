@@ -298,7 +298,7 @@ Token *tokenize(CCCC *vm, File *file);
 Token *tokenize_file(CCCC *vm, char *filename);
 Token *tokenize_string(CCCC *vm, char *name, char *contents);
 unsigned char *read_binary_file(CCCC *vm, char *path, size_t *out_size);
-void cc_output_preprocessed(FILE *f, Token *tok);
+void cc_output_preprocessed(FILE *f, CCCC *vm, Token *tok);
 
 #undef unreachable
 #define unreachable() error("internal error at %s:%d", __FILE__, __LINE__)

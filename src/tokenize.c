@@ -1537,14 +1537,152 @@ Token *tokenize_string(CCCC *vm, char *name, char *contents) {
     return tokenize(vm, file);
 }
 
+static bool token_is_c23_attr_start(Token *tok) {
+    return tok && equal(tok, "[") && tok->next && equal(tok->next, "[");
+}
+
+static bool token_is_gnu_attr_start(Token *tok) {
+    return tok && equal(tok, "__attribute__") && tok->next &&
+           equal(tok->next, "(") && tok->next->next &&
+           equal(tok->next->next, "(");
+}
+
+static bool attr_name_is_cccc(char *name) {
+    return !strcmp(name, "comptime") || !strcmp(name, "emit") ||
+           !strcmp(name, "macro") || !strcmp(name, "test") ||
+           !strcmp(name, "test_setup") || !strcmp(name, "test_teardown");
+}
+
+static bool attr_name_is_std(char *name) {
+    return !strcmp(name, "maybe_unused") || !strcmp(name, "deprecated") ||
+           !strcmp(name, "noreturn") || !strcmp(name, "nodiscard") ||
+           !strcmp(name, "fallthrough") || !strcmp(name, "no_unique_address");
+}
+
+static void copy_attr_name(Token *tok, char *buf, size_t cap) {
+    if (!tok || cap == 0) {
+        return;
+    }
+    size_t len = tok->len < (int)cap - 1 ? (size_t)tok->len : cap - 1;
+    memcpy(buf, tok->loc, len);
+    buf[len] = '\0';
+}
+
+static CCCCAttrTarget effective_attr_target(CCCC *vm, char *name) {
+    CCCCAttrTarget target = vm ? vm->compiler.attr_target : CCCC_ATTR_TARGET_AUTO;
+    if (target != CCCC_ATTR_TARGET_AUTO)
+        return target;
+    if (vm && vm->compiler.c_std >= CCCC_STD_C23 && attr_name_is_std(name))
+        return CCCC_ATTR_TARGET_C23;
+    return CCCC_ATTR_TARGET_GNU;
+}
+
+static Token *find_c23_attr_close(Token *tok) {
+    if (!token_is_c23_attr_start(tok))
+        return NULL;
+    int depth = 0;
+    for (Token *p = tok->next->next; p && p->kind != TK_EOF; p = p->next) {
+        if (equal(p, "["))
+            depth++;
+        else if (equal(p, "]")) {
+            if (depth == 0 && p->next && equal(p->next, "]"))
+                return p;
+            depth--;
+        }
+    }
+    return NULL;
+}
+
+static Token *find_gnu_attr_close(Token *tok) {
+    if (!token_is_gnu_attr_start(tok))
+        return NULL;
+    int depth = 0;
+    for (Token *p = tok->next->next->next; p && p->kind != TK_EOF; p = p->next) {
+        if (equal(p, "("))
+            depth++;
+        else if (equal(p, ")")) {
+            if (depth == 0 && p->next && equal(p->next, ")"))
+                return p;
+            depth--;
+        }
+    }
+    return NULL;
+}
+
+static void print_attr_payload(FILE *f, Token *start, Token *end) {
+    bool need_space = false;
+    for (Token *p = start; p && p != end; p = p->next) {
+        bool punct = p->len == 1 && strchr("()[]{}.,:;", *p->loc);
+        if (need_space && !punct && !(p->len == 1 && *p->loc == ')'))
+            fputc(' ', f);
+        fprintf(f, "%.*s", p->len, p->loc);
+        need_space = !(p->len == 1 && strchr("([{:.", *p->loc));
+    }
+}
+
+static bool output_attr(FILE *f, CCCC *vm, Token **tok_ptr) {
+    Token *tok = *tok_ptr;
+    bool c23 = token_is_c23_attr_start(tok);
+    bool gnu = token_is_gnu_attr_start(tok);
+    if (!c23 && !gnu)
+        return false;
+
+    Token *payload = c23 ? tok->next->next : tok->next->next->next;
+    Token *close = c23 ? find_c23_attr_close(tok) : find_gnu_attr_close(tok);
+    if (!close)
+        return false;
+    Token *end = c23 ? close->next->next : close->next->next;
+
+    Token *name_tok = payload;
+    bool cccc_scoped = false;
+    if (c23 && equal(name_tok, "cccc") && name_tok->next &&
+        equal(name_tok->next, ":") && name_tok->next->next &&
+        equal(name_tok->next->next, ":") && name_tok->next->next->next) {
+        cccc_scoped = true;
+        name_tok = name_tok->next->next->next;
+    }
+
+    char name[128] = "";
+    copy_attr_name(name_tok, name, sizeof(name));
+    if (cccc_scoped || attr_name_is_cccc(name) ||
+        (vm && vm->compiler.attr_target == CCCC_ATTR_TARGET_STRIP)) {
+        *tok_ptr = end;
+        return true;
+    }
+
+    CCCCAttrTarget target = effective_attr_target(vm, name);
+    switch (target) {
+    case CCCC_ATTR_TARGET_C23:
+        fprintf(f, "[[");
+        print_attr_payload(f, payload, close);
+        fprintf(f, "]]");
+        break;
+    case CCCC_ATTR_TARGET_MSVC:
+        fprintf(f, "__declspec(");
+        print_attr_payload(f, payload, close);
+        fprintf(f, ")");
+        break;
+    case CCCC_ATTR_TARGET_GNU:
+    case CCCC_ATTR_TARGET_AUTO:
+    default:
+        fprintf(f, "__attribute__((");
+        print_attr_payload(f, payload, close);
+        fprintf(f, "))");
+        break;
+    }
+
+    *tok_ptr = end;
+    return true;
+}
+
 // Output preprocessed tokens as source code (for -E flag)
-void cc_output_preprocessed(FILE *f, Token *tok) {
+void cc_output_preprocessed(FILE *f, CCCC *vm, Token *tok) {
     if (!f || !tok)
         return;
 
     int at_bol = 1;
 
-    for (Token *t = tok; t && t->kind != TK_EOF; t = t->next) {
+    for (Token *t = tok; t && t->kind != TK_EOF;) {
         // Handle line breaks
         if (at_bol && !t->at_bol) {
             // Continue on same line
@@ -1556,6 +1694,11 @@ void cc_output_preprocessed(FILE *f, Token *tok) {
         // Handle spacing
         if (t->has_space && !at_bol)
             fprintf(f, " ");
+
+        if (output_attr(f, vm, &t)) {
+            at_bol = 0;
+            continue;
+        }
 
         // Output token based on kind
         switch (t->kind) {
@@ -1592,6 +1735,7 @@ void cc_output_preprocessed(FILE *f, Token *tok) {
         }
 
         at_bol = 0;
+        t = t->next;
     }
 
     fprintf(f, "\n");

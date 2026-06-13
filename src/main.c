@@ -230,6 +230,8 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-G/--emit-generated      Serialize runtime TU + macro-generated objects to C\n");
     printf("\t   --emit-only           With -G: only emit explicitly tagged content "
            "([[cccc::emit]], $publish)\n");
+    printf("\t   --attr-target=TARGET  Attribute spelling in generated output: "
+           "auto, c23, gnu, msvc, strip\n");
     printf("\t-j/--json                Emit JSON for all eligible output "
            "(diagnostics, header declarations, --fusion-candidates, etc.)\n");
     printf("\t   --ffi-decls           Emit parsed function/struct/enum declarations "
@@ -729,6 +731,7 @@ int main(int argc, const char *argv[]) {
     int skip_stdlib = 0;       // -S
     int output_json = 0;       // -j (general "emit JSON" flag)
     int output_ffi_decls = 0;  // --ffi-decls
+    CCCCAttrTarget attr_target = CCCC_ATTR_TARGET_AUTO; // --attr-target
     int compile_only = 0;      // -c (set whenever -c/--compile is given; semantics:
                                 //   "compile, do not execute". -c=bytecode writes bytecode,
                                 //   -c=native hands off to the system compiler.)
@@ -851,6 +854,7 @@ int main(int argc, const char *argv[]) {
         {"test-timeout", required_argument, 0, 1065},
         {"test-format", required_argument, 0, 1066},
         {"emit-only", no_argument, 0, 1067},
+        {"attr-target", required_argument, 0, 1069},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1225,6 +1229,25 @@ int main(int argc, const char *argv[]) {
         case 1068: // --allow-comptime-pp-bleed
             allow_comptime_pp_bleed = 1;
             break;
+        case 1069: // --attr-target=auto|c23|gnu|msvc|strip
+            if (strcmp(optarg, "auto") == 0) {
+                attr_target = CCCC_ATTR_TARGET_AUTO;
+            } else if (strcmp(optarg, "c23") == 0) {
+                attr_target = CCCC_ATTR_TARGET_C23;
+            } else if (strcmp(optarg, "gnu") == 0) {
+                attr_target = CCCC_ATTR_TARGET_GNU;
+            } else if (strcmp(optarg, "msvc") == 0) {
+                attr_target = CCCC_ATTR_TARGET_MSVC;
+            } else if (strcmp(optarg, "strip") == 0) {
+                attr_target = CCCC_ATTR_TARGET_STRIP;
+            } else {
+                fprintf(stderr,
+                        "error: invalid --attr-target '%s' "
+                        "(use 'auto', 'c23', 'gnu', 'msvc', or 'strip')\n",
+                        optarg);
+                usage(argv[0], 1);
+            }
+            break;
         case 1066: // --test-format=FORMAT
             if (strcmp(optarg, "tap") == 0) {
                 test_format = TEST_FORMAT_TAP;
@@ -1387,6 +1410,7 @@ int main(int argc, const char *argv[]) {
     vm.compiler.strict_comptime_includes = strict_comptime_includes;
     vm.compiler.allow_comptime_pp_bleed = allow_comptime_pp_bleed;
     vm.compiler.emit_strict = emit_only;
+    vm.compiler.attr_target = attr_target;
     vm.compiler.entry_name = (char *)entry_name;
     vm.compiler.testing_mode = (bool)testing_mode;
     vm.compiler.diagnostic_json = output_json;
@@ -1681,7 +1705,7 @@ int main(int argc, const char *argv[]) {
                 goto BAIL;
             }
 
-            cc_output_preprocessed(f, input_tokens[i]);
+            cc_output_preprocessed(f, &vm, input_tokens[i]);
             if (f != stdout)
                 fclose(f);
         }

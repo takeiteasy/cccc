@@ -89,6 +89,7 @@ These are CCCC's own extensions for compile-time metaprogramming. They are inter
 ```c
 [[cccc::comptime]] int square(int x) { return x * x; }
 __attribute__((comptime)) const int version = 42;
+__comptime int helper(void) { return 42; }
 ```
 
 ### `#include [[cccc::comptime]]` / `#include @comptime` (CCCC-specific)
@@ -211,6 +212,19 @@ Resolution order: CCCC-specific attributes are checked first (they become
 `[[name(...)]]`), then registered custom comptime attributes, then GNU
 attributes (they become `__attribute__((name(...)))`). Unrecognised names fall
 back to the GNU form.
+
+CCCC-specific attributes also accept double-underscore keyword aliases:
+`__comptime`, `__comptime__`, `__macro`, `__macro__`, `__test`, `__test__`,
+`__test_setup`, `__test_setup__`, `__test_teardown`, and
+`__test_teardown__`. Plain names such as `comptime`, `macro`, and `test`
+remain ordinary identifiers.
+
+Generated and preprocessed output never includes CCCC-specific syntax. `-E`,
+`-M`, `-G`, and `-c=native` strip CCCC-only attributes and route markers before
+emitting C for another compiler. Use `--attr-target=auto|c23|gnu|msvc|strip`
+to select how remaining attributes are printed. `auto` emits standard C23
+attributes as `[[...]]` in C23 mode and uses GNU `__attribute__((...))`
+otherwise; GNU-only attributes such as `packed` stay GNU in `auto` mode.
 
 ```c
 @comptime(inline)

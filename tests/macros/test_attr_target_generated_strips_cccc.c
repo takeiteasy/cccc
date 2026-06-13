@@ -1,0 +1,15 @@
+// CCCC_FLAGS: -M -G
+// CCCC_EXPECT_STDOUT: #include <stddef.h>
+// CCCC_EXPECT_STDOUT: int generated_attr_target\(void\);
+// CCCC_REJECT_STDOUT: @emit
+// CCCC_REJECT_STDOUT: @comptime
+#include @emit <stddef.h>
+
+@comptime
+void gen(void) {
+    $publish($function("generated_attr_target", $get_type("int")));
+}
+
+gen();
+
+int main(void) { return 42; }

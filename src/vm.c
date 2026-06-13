@@ -829,6 +829,7 @@ void cc_init(CCCC *vm, uint32_t flags) {
     // Default to GNU C17 (matches modern gcc/clang defaults)
     vm->compiler.c_std = CCCC_STD_C23;
     vm->compiler.c_std_gnu = true;
+    vm->compiler.attr_target = CCCC_ATTR_TARGET_AUTO;
 
     init_macros(vm);
     cc_init_parser(vm);

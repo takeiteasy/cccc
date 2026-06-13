@@ -64,6 +64,7 @@ Options:
 	-E/--preprocess          Output preprocessed source code (traditional C -E)
 	-M/--dump-expanded       Output macro-expanded source code (for gcc compatibility)
 	-G/--emit-generated      Serialize only comptime macro-generated objects (no header noise)
+	   --attr-target=TARGET  Attribute spelling in generated output: auto, c23, gnu, msvc, strip
 	-j/--json                Emit JSON for all eligible output (diagnostics, header declarations, --fusion-candidates, etc.)
 	   --ffi-decls           Emit parsed function/struct/enum declarations as JSON (for FFI wrapper generation)
 	-X/--no-preprocess       Disable preprocessing step
@@ -248,7 +249,7 @@ CCCC_NATIVE_CC=clang ./cccc -c=native -o program program.c
 ./cccc -c=native -I./include -DDEBUG -L./lib -lz -o app app.c
 ```
 
-Native mode runs CCCC's preprocessing and compile-time macro stages first, then passes serialized C to `CCCC_NATIVE_CC` when set, otherwise `cc`, `clang`, or `gcc`. `-I`, `-i`, `-D`, `-U`, `-L`, `-l`, and `--std=` are forwarded; VM-only options (bytecode output, disassembler, `--optimize`, debugger, profiler, `-0`…`-3` safety levels) are rejected in this mode. To run the binary afterwards, invoke it directly: `./program`. See [LLVM.md](docs/LLVM.md) for the planned bytecode-to-LLVM backend, which will provide a second native path.
+Native mode runs CCCC's preprocessing and compile-time macro stages first, then passes serialized C to `CCCC_NATIVE_CC` when set, otherwise `cc`, `clang`, or `gcc`. `-I`, `-i`, `-D`, `-U`, `-L`, `-l`, `--std=`, and generated-output attribute policy from `--attr-target=` are forwarded through the frontend; VM-only options (bytecode output, disassembler, `--optimize`, debugger, profiler, `-0`…`-3` safety levels) are rejected in this mode. To run the binary afterwards, invoke it directly: `./program`. See [LLVM.md](docs/LLVM.md) for the planned bytecode-to-LLVM backend, which will provide a second native path.
 
 ### Run in the VM
 
