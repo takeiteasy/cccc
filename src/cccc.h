@@ -335,6 +335,7 @@ typedef enum {
     CCCC_WARN_FALLTHROUGH      = (1ULL << 21), // switch case falls through without [[fallthrough]]
     CCCC_WARN_STATIC_ARRAY_SIZE = (1ULL << 22), // [static N] array param: argument too small
     CCCC_WARN_STRICT_PROTOTYPES = (1ULL << 23), // () without void in pre-C23
+    CCCC_WARN_DISCARDED_QUALIFIERS = (1ULL << 24), // const/volatile/restrict discarded in pointer assignment
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
     CCCC_WARN_CONVERSION_GROUP = CCCC_WARN_CONVERSION |
@@ -359,7 +360,8 @@ CCCC_WARN_ALL = CCCC_WARN_UNUSED |
                    CCCC_WARN_IGNORED_FEATURES |
                    CCCC_WARN_ATTRIBUTES |
                    CCCC_WARN_NODISCARD |
-                   CCCC_WARN_STATIC_ARRAY_SIZE,
+                   CCCC_WARN_STATIC_ARRAY_SIZE |
+                   CCCC_WARN_DISCARDED_QUALIFIERS,
     CCCC_WARN_EXTRA = CCCC_WARN_SHADOW |
                       CCCC_WARN_SIGN_COMPARE |
                       CCCC_WARN_CONVERSION |

@@ -87,6 +87,7 @@ The warning infrastructure recognizes these category names:
 - `nodiscard`
 - `fallthrough`
 - `strict-prototypes`
+- `discarded-qualifiers`
 
 `conversion` is an umbrella name: `-Wconversion` enables `sign-conversion` and
 `float-conversion` as well as the integer-narrowing check.
@@ -179,6 +180,10 @@ and `(void)symbol`. Set-but-not-used analysis is not currently performed.
 - Comparisons between signed and unsigned integers use `-Wsign-compare`.
   Comparisons where one operand is a non-negative integer constant are exempt
   (e.g. `x < 5` and `x == 0` stay quiet).
+- Pointer assignments that discard `const`, `volatile`, or `restrict` qualifiers
+  from the pointee type use `-Wdiscarded-qualifiers`.  For example, assigning a
+  `const char *` to a `char *` triggers the warning.  Multiple missing qualifiers
+  are listed in a single diagnostic.  This warning is part of `-Wall`.
 - Arithmetic on `void *` or function pointers (a GNU extension) uses
   `-Wpointer-arith`.  The operation is still performed; only the diagnostic
   is added.

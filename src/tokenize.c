@@ -69,6 +69,7 @@ static const WarningInfo warning_infos[] = {
     {"fallthrough", CCCC_WARN_FALLTHROUGH, false},
     {"static-array-size", CCCC_WARN_STATIC_ARRAY_SIZE, false},
     {"strict-prototypes", CCCC_WARN_STRICT_PROTOTYPES, false},
+    {"discarded-qualifiers", CCCC_WARN_DISCARDED_QUALIFIERS, false},
     {"all", CCCC_WARN_ALL, true},
     {"extra", CCCC_WARN_EXTRA, true},
 };

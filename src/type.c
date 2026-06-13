@@ -405,6 +405,37 @@ void warn_implicit_conversion(CCCC *vm, Node *expr, Type *to, Token *tok) {
     // Skip error types and identical types.
     if (from->kind == TY_ERROR || to->kind == TY_ERROR)
         return;
+
+    // Check for discarded qualifiers in pointer assignments (e.g. const char* -> char*).
+    // This must come before the early return for same-kind types below.
+    if (from->kind == TY_PTR && to->kind == TY_PTR) {
+        Type *from_base = from->base;
+        Type *to_base = to->base;
+        if (from_base && to_base) {
+            char buf[128];
+            buf[0] = '\0';
+            if (from_base->is_const && !to_base->is_const)
+                strcat(buf, "'const'");
+            if (from_base->is_volatile && !to_base->is_volatile) {
+                if (buf[0]) strcat(buf, ", ");
+                strcat(buf, "'volatile'");
+            }
+            if (from_base->is_restrict && !to_base->is_restrict) {
+                if (buf[0]) strcat(buf, ", ");
+                strcat(buf, "'restrict'");
+            }
+            if (buf[0]) {
+                int count = (from_base->is_const && !to_base->is_const) +
+                            (from_base->is_volatile && !to_base->is_volatile) +
+                            (from_base->is_restrict && !to_base->is_restrict);
+                warn_tok(vm, tok, CCCC_WARN_DISCARDED_QUALIFIERS,
+                         "assignment discards %s qualifier%s from pointer target type",
+                         buf, count > 1 ? "s" : "");
+            }
+        }
+        return;
+    }
+
     if (from->kind == to->kind && from->is_unsigned == to->is_unsigned)
         return;
 
