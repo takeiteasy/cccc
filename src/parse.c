@@ -4768,6 +4768,12 @@ static void collect_captures_in_node(VirtualMachine *vm, Node *node, Obj *outer_
     for (Node *n = node->args; n; n = n->next)
         collect_captures_in_node(vm, n, outer_locals, captures, num_captures,
                                  cap_capacity);
+
+    // Recurse into nested block literals so intermediate blocks pick up
+    // transitive captures (e.g. outer block sees x used inside inner block).
+    if (node->kind == ND_BLOCK_LITERAL && node->block_fn)
+        collect_captures_in_node(vm, node->block_fn->body, outer_locals, captures,
+                                 num_captures, cap_capacity);
 }
 
 // Parse a block literal: ^{ ... } or ^(params){ ... } or ^returntype(params){
@@ -4847,6 +4853,9 @@ static Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     block_fn->is_nested =
         true; // Treat blocks like nested functions for codegen
     block_fn->nesting_depth = outer_fn ? outer_fn->nesting_depth + 1 : 1;
+    // Store parent's locals snapshot before entering our own scope so nested
+    // blocks can walk the ancestry chain during transitive capture collection.
+    block_fn->block_outer_locals = saved_locals;
 
     // Set up block function context
     vm->compiler.current_fn = block_fn;
@@ -4899,25 +4908,26 @@ static Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
 
     leave_scope(vm);
 
-    // Collect captured variables from the parsed body
-    // Use saved_locals (the outer function's locals list at the time we
-    // started)
+    // Collect captured variables from the parsed body.
+    // Walk all ancestor scopes so that variables from grandparent+ scopes are
+    // captured transitively (inner block gets x from outer block's descriptor).
     Obj **captures = NULL;
     int num_captures = 0, cap_capacity = 0;
 
-    if (saved_locals) {
+    // Level 0: immediate parent's locals
+    if (saved_locals)
         collect_captures_in_node(vm, block_fn->body, saved_locals, &captures,
                                  &num_captures, &cap_capacity);
-    }
+    // Levels 1+: walk block ancestor chain via block_outer_locals snapshots
+    for (Obj *anc = outer_fn; anc && anc->is_block && anc->block_outer_locals;
+         anc = anc->parent_fn)
+        collect_captures_in_node(vm, block_fn->body, anc->block_outer_locals,
+                                 &captures, &num_captures, &cap_capacity);
 
     block_fn->captures = captures;
     block_fn->num_captures = num_captures;
-
-    // Store capture offsets - each captured variable will be at a known offset
-    // in descriptor Descriptor layout: [0]=invoke_ptr, [8]=cap0, [16]=cap1, ...
-    for (int i = 0; i < num_captures; i++) {
-        captures[i]->block_capture_offset = (i + 1) * 8; // offset in descriptor
-    }
+    // Descriptor offsets are computed per-block at codegen time via
+    // find_capture_index so no per-Obj offset field is needed.
 
     // Restore outer function context
     vm->compiler.current_fn = outer_fn;

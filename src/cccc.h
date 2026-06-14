@@ -915,7 +915,7 @@ struct Obj {
     bool is_block;            // True if this is a block's synthetic function
     Obj **captures;           // Array of captured outer variables
     int num_captures;         // Number of captured variables
-    int block_capture_offset; // For captured vars: offset in block descriptor
+    struct Obj *block_outer_locals; // Parent scope's locals at block creation time (for transitive capture)
     bool is_block_var;        // True if declared with __block storage qualifier
 
     // Static inline function

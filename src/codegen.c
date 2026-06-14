@@ -2178,6 +2178,14 @@ static Obj *find_static_link_var(Obj *fn) {
     return NULL;
 }
 
+// Return the index of var in block_fn->captures (0-based), or -1 if not captured.
+// Descriptor slot = (index + 1) * 8 so that slot 0 (offset 0) stays the invoke ptr.
+static int find_capture_index(Obj *block_fn, Obj *var) {
+    for (int i = 0; i < block_fn->num_captures; i++)
+        if (block_fn->captures[i] == var) return i;
+    return -1;
+}
+
 // Ensure parent->local_set is populated with all its locals and params.
 // Keyed by (long long)(intptr_t)var so membership is O(1). (#165)
 static void ensure_local_set(Obj *parent) {
@@ -2342,28 +2350,21 @@ static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
             // Check if this is a captured variable accessed from within a block
             Obj *current_fn = vm->compiler.current_fn;
 
-            if (current_fn && current_fn->is_block &&
-                node->var->block_capture_offset > 0) {
-                // Access captured variable from block descriptor via
-                // __static_link
-                // __static_link points to descriptor, capture is at descriptor
-                // + offset
+            int cap_idx = (current_fn && current_fn->is_block)
+                          ? find_capture_index(current_fn, node->var) : -1;
+            if (cap_idx >= 0) {
+                // Access captured variable from block descriptor via __static_link.
+                // Offset is computed per-block to avoid collisions when the same
+                // variable is captured at different positions in nested descriptors.
                 Obj *static_link = find_static_link_var(current_fn);
-                if (!static_link) {
+                if (!static_link)
                     error("block function missing __static_link");
-                }
+                int cap_offset = (cap_idx + 1) * 8;
                 emit_lea3(vm, dest_reg, static_link->offset); // &__static_link
-                emit_rr(vm, LDR_D, dest_reg,
-                        dest_reg); // Load descriptor address
-                emit_addi3(vm, dest_reg, dest_reg,
-                           node->var->block_capture_offset); // + capture offset
-                // For __block captured variables, the descriptor slot contains
-                // a heap pointer We need to dereference it to get the actual
-                // storage address
-                if (node->var->is_block_var) {
-                    emit_rr(vm, LDR_D, dest_reg,
-                            dest_reg); // Load heap pointer from descriptor slot
-                }
+                emit_rr(vm, LDR_D, dest_reg, dest_reg);       // Load descriptor ptr
+                emit_addi3(vm, dest_reg, dest_reg, cap_offset);
+                if (node->var->is_block_var)
+                    emit_rr(vm, LDR_D, dest_reg, dest_reg); // heap ptr from slot
             } else {
                 // Check if this variable belongs to an outer function (nested
                 // function access)
@@ -4207,24 +4208,41 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         emit_rr(vm, STR_D, r_invoke, r_desc);
         free_temp_reg(r_invoke);
 
-        // Copy captured variable values into descriptor
-        // For __block variables, store the heap pointer (by reference)
-        // For regular captures, copy the value (by copy)
+        // Copy captured variable values into descriptor.
+        // A capture may come from the enclosing block's own stack frame (direct
+        // local) or from the enclosing block's descriptor (transitive capture
+        // from a grandparent scope).  Check the enclosing function's capture
+        // list first so we read from the right source.
+        Obj *enc_fn = vm->compiler.current_fn;
         for (int i = 0; i < num_captures; i++) {
             Obj *cap = node->block_captures[i];
             int r_val = alloc_temp_reg();
 
-            if (cap->is_block_var) {
-                // __block variable: store the heap pointer from its stack slot
-                // (not the value - the block will dereference through this
-                // pointer)
-                emit_lea3(vm, r_val, cap->offset); // Address of stack slot
-                emit_rr(vm, LDR_D, r_val, r_val); // Load heap pointer from slot
+            int enc_cap_idx = (enc_fn && enc_fn->is_block)
+                              ? find_capture_index(enc_fn, cap) : -1;
+
+            if (enc_cap_idx >= 0) {
+                // Variable lives in the enclosing block's descriptor: read via
+                // __static_link so we don't use a stale stack offset from an
+                // outer function's frame.
+                Obj *static_link = find_static_link_var(enc_fn);
+                emit_lea3(vm, r_val, static_link->offset);
+                emit_rr(vm, LDR_D, r_val, r_val);                    // descriptor ptr
+                emit_addi3(vm, r_val, r_val, (enc_cap_idx + 1) * 8); // slot addr
+                if (cap->is_block_var)
+                    emit_rr(vm, LDR_D, r_val, r_val); // heap ptr from descriptor slot
+                else
+                    emit_load(vm, cap->ty, r_val, r_val); // value from descriptor slot
+            } else if (cap->is_block_var) {
+                // __block var directly in enclosing stack: copy heap pointer
+                emit_lea3(vm, r_val, cap->offset);
+                emit_rr(vm, LDR_D, r_val, r_val);
             } else if (cap->is_local) {
-                // Regular capture: load the current value
+                // Regular local directly in enclosing stack: copy value
                 emit_lea3(vm, r_val, cap->offset);
                 emit_load(vm, cap->ty, r_val, r_val);
             } else {
+                // Global
                 emit_lda3(vm, r_val, cap->offset);
                 emit_load(vm, cap->ty, r_val, r_val);
             }
