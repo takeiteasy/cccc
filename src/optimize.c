@@ -21,6 +21,10 @@
 #include "./internal.h"
 #include <limits.h>
 
+#define OPT_P_RS1 1
+#define OPT_P_RS2 2
+#define OPT_P_RS3 3
+
 //
 // Bytecode Optimizer
 //
@@ -33,6 +37,7 @@
 //   -O1: Basic - constant folding
 //   -O2: Standard - constant folding + peephole
 //   -O3: Aggressive - all passes including dead code elimination
+//   -O4: Aggressive + automatic opcode fusion
 //
 
 // ========== Helper Functions ==========
@@ -83,6 +88,34 @@ static void set_li_replacement(OptReplacement *repls, Pc pc, int rd,
     repls[pc].words[1] = ENCODE_R(rd);
     repls[pc].words[2] = cc_i64_lo(imm);
     repls[pc].words[3] = cc_i64_hi(imm);
+}
+
+static void set_rri_replacement(OptReplacement *repls, Pc pc, int op, int rd,
+                                int rs, long long imm) {
+    repls[pc].active = true;
+    repls[pc].nwords = 4;
+    repls[pc].words[0] = (InstrWord)op;
+    repls[pc].words[1] = ENCODE_RR(rd, rs);
+    repls[pc].words[2] = cc_i64_lo(imm);
+    repls[pc].words[3] = cc_i64_hi(imm);
+}
+
+static void set_rrri_replacement(OptReplacement *repls, Pc pc, int op, int rd,
+                                 int rs1, int rs2, long long imm) {
+    repls[pc].active = true;
+    repls[pc].nwords = 4;
+    repls[pc].words[0] = (InstrWord)op;
+    repls[pc].words[1] = ENCODE_RRR(rd, rs1, rs2);
+    repls[pc].words[2] = cc_i64_lo(imm);
+    repls[pc].words[3] = cc_i64_hi(imm);
+}
+
+static void set_rrrr_replacement(OptReplacement *repls, Pc pc, int op, int rd,
+                                 int rs1, int rs2, int rs3) {
+    repls[pc].active = true;
+    repls[pc].nwords = 2;
+    repls[pc].words[0] = (InstrWord)op;
+    repls[pc].words[1] = ENCODE_RRRR(rd, rs1, rs2, rs3);
 }
 
 static bool is_nop_at(VirtualMachine *vm, Pc pc) {
@@ -1349,10 +1382,213 @@ static void opt_cse_const_calls(VirtualMachine *vm) {
                cse_count, cse_count == 1 ? "" : "s");
 }
 
+// ========== Pass 6: Automatic opcode fusion ==========
+
+static bool opt_pc_is_target(const bool *targets, Pc start, Pc end, Pc pc) {
+    return pc >= start && pc < end && targets[pc - start];
+}
+
+static bool opt_fuse_li3_arith(VirtualMachine *vm, const CcFusionCandidate *c,
+                               OptReplacement *repls, bool *consumed,
+                               Pc start, Pc end, const bool *targets) {
+    (void)start;
+    if (c->def_op != LI3 || (c->use_op != ADD3 && c->use_op != MUL3))
+        return false;
+    Pc def_pc = (Pc)c->def_pc;
+    Pc use_pc = (Pc)c->use_pc;
+    if (def_pc >= end || use_pc >= end || consumed[def_pc] || consumed[use_pc])
+        return false;
+    if (opt_pc_is_target(targets, 1, end, def_pc) ||
+        opt_pc_is_target(targets, 1, end, use_pc))
+        return false;
+
+    int imm_reg = vm->text_seg[def_pc + 1] & 0xFF;
+    if (imm_reg != c->reg || imm_reg == REG_ZERO)
+        return false;
+    long long imm = cc_read_i64_at(vm, def_pc + 2);
+
+    int rd, rs1, rs2;
+    DECODE_RRR(vm->text_seg[use_pc + 1], rd, rs1, rs2);
+    if (c->use_byte != OPT_P_RS1 && c->use_byte != OPT_P_RS2)
+        return false;
+    int other = (c->use_byte == OPT_P_RS1) ? rs2 : rs1;
+    if (other == imm_reg)
+        return false;
+
+    set_rri_replacement(repls, def_pc, c->use_op == ADD3 ? ADDI3 : MULI3,
+                        rd, other, imm);
+    emit_mov_nop(vm, use_pc);
+    consumed[def_pc] = true;
+    consumed[use_pc] = true;
+    return true;
+}
+
+static bool opt_fuse_mul3_add3(VirtualMachine *vm, const CcFusionCandidate *c,
+                               OptReplacement *repls, bool *consumed,
+                               Pc end, const bool *targets) {
+    if (c->def_op != MUL3 || c->use_op != ADD3)
+        return false;
+    Pc def_pc = (Pc)c->def_pc;
+    Pc use_pc = (Pc)c->use_pc;
+    if (def_pc >= end || use_pc >= end || consumed[def_pc] || consumed[use_pc])
+        return false;
+    if (opt_pc_is_target(targets, 1, end, def_pc) ||
+        opt_pc_is_target(targets, 1, end, use_pc))
+        return false;
+
+    int mul_rd, mul_rs1, mul_rs2;
+    DECODE_RRR(vm->text_seg[def_pc + 1], mul_rd, mul_rs1, mul_rs2);
+    if (mul_rd != c->reg || mul_rd == REG_ZERO)
+        return false;
+
+    int add_rd, add_rs1, add_rs2;
+    DECODE_RRR(vm->text_seg[use_pc + 1], add_rd, add_rs1, add_rs2);
+    if (c->use_byte != OPT_P_RS1 && c->use_byte != OPT_P_RS2)
+        return false;
+    int addend = (c->use_byte == OPT_P_RS1) ? add_rs2 : add_rs1;
+
+    set_rrrr_replacement(repls, def_pc, MULADD3, add_rd, addend, mul_rs1,
+                         mul_rs2);
+    emit_mov_nop(vm, use_pc);
+    consumed[def_pc] = true;
+    consumed[use_pc] = true;
+    return true;
+}
+
+static bool opt_fuse_muli3_add3(VirtualMachine *vm, const CcFusionCandidate *c,
+                                OptReplacement *repls, bool *consumed,
+                                Pc end, const bool *targets) {
+    if (c->def_op != MULI3 || c->use_op != ADD3)
+        return false;
+    Pc def_pc = (Pc)c->def_pc;
+    Pc use_pc = (Pc)c->use_pc;
+    if (def_pc >= end || use_pc >= end || consumed[def_pc] || consumed[use_pc])
+        return false;
+    if (opt_pc_is_target(targets, 1, end, def_pc) ||
+        opt_pc_is_target(targets, 1, end, use_pc))
+        return false;
+
+    int mul_rd, mul_rs;
+    DECODE_RR(vm->text_seg[def_pc + 1], mul_rd, mul_rs);
+    if (mul_rd != c->reg || mul_rd == REG_ZERO)
+        return false;
+    long long imm = cc_read_i64_at(vm, def_pc + 2);
+
+    int add_rd, add_rs1, add_rs2;
+    DECODE_RRR(vm->text_seg[use_pc + 1], add_rd, add_rs1, add_rs2);
+    if (c->use_byte != OPT_P_RS1 && c->use_byte != OPT_P_RS2)
+        return false;
+    int base = (c->use_byte == OPT_P_RS1) ? add_rs2 : add_rs1;
+
+    set_rrri_replacement(repls, def_pc, MULADDI3, add_rd, base, mul_rs, imm);
+    emit_mov_nop(vm, use_pc);
+    consumed[def_pc] = true;
+    consumed[use_pc] = true;
+    return true;
+}
+
+static bool opt_fuse_li3_muladd3(VirtualMachine *vm,
+                                 const CcFusionCandidate *c,
+                                 OptReplacement *repls, bool *consumed,
+                                 Pc end, const bool *targets) {
+    if (c->def_op != LI3 || c->use_op != MULADD3)
+        return false;
+    Pc def_pc = (Pc)c->def_pc;
+    Pc use_pc = (Pc)c->use_pc;
+    if (def_pc >= end || use_pc >= end || consumed[def_pc] || consumed[use_pc])
+        return false;
+    if (opt_pc_is_target(targets, 1, end, def_pc) ||
+        opt_pc_is_target(targets, 1, end, use_pc))
+        return false;
+
+    int imm_reg = vm->text_seg[def_pc + 1] & 0xFF;
+    if (imm_reg != c->reg || imm_reg == REG_ZERO)
+        return false;
+    long long imm = cc_read_i64_at(vm, def_pc + 2);
+
+    int rd, addend, mul_lhs, mul_rhs;
+    DECODE_RRRR(vm->text_seg[use_pc + 1], rd, addend, mul_lhs, mul_rhs);
+    if (c->use_byte != OPT_P_RS2 && c->use_byte != OPT_P_RS3)
+        return false;
+    int index = (c->use_byte == OPT_P_RS2) ? mul_rhs : mul_lhs;
+    if (index == imm_reg)
+        return false;
+
+    set_rrri_replacement(repls, def_pc, MULADDI3, rd, addend, index, imm);
+    emit_mov_nop(vm, use_pc);
+    consumed[def_pc] = true;
+    consumed[use_pc] = true;
+    return true;
+}
+
+static bool opt_fuse_round(VirtualMachine *vm, int *out_count) {
+    if (out_count)
+        *out_count = 0;
+    if (!vm || !vm->text_seg || !vm->text_ptr)
+        return false;
+
+    Pc start = 1;
+    Pc end = vm->text_ptr + 1;
+    CcAnalyzeFusionOptions opts = {.top_n = INT_MAX, .json = false};
+    CcFusionState *st = cc_analyze_fusion_begin(&opts);
+    cc_analyze_fusion_feed(st, vm->text_seg, (long long)end, "<optimizer>",
+                           NULL);
+    int ncands = 0;
+    CcFusionCandidate *cands = cc_analyze_fusion_collect(st, &ncands);
+    cc_analyze_fusion_finish(st, NULL);
+
+    if (!cands || ncands <= 0) {
+        free(cands);
+        return false;
+    }
+
+    OptReplacement *repls = calloc((size_t)end + 1, sizeof(OptReplacement));
+    bool *consumed = calloc((size_t)end + 1, sizeof(bool));
+    bool *targets = build_control_flow_targets(vm, start, end);
+    if (!repls || !consumed || !targets)
+        error("out of memory");
+
+    int fused = 0;
+    for (int i = 0; i < ncands; i++) {
+        const CcFusionCandidate *c = &cands[i];
+        bool ok = opt_fuse_li3_arith(vm, c, repls, consumed, start, end,
+                                     targets) ||
+                  opt_fuse_li3_muladd3(vm, c, repls, consumed, end, targets) ||
+                  opt_fuse_mul3_add3(vm, c, repls, consumed, end, targets) ||
+                  opt_fuse_muli3_add3(vm, c, repls, consumed, end, targets);
+        if (ok)
+            fused++;
+    }
+
+    if (fused > 0)
+        opt_compact_bytecode(vm, repls);
+
+    free(targets);
+    free(consumed);
+    free(repls);
+    free(cands);
+    if (out_count)
+        *out_count = fused;
+    return fused > 0;
+}
+
+static void opt_fuse_ops(VirtualMachine *vm) {
+    int total = 0;
+    for (;;) {
+        int fused = 0;
+        if (!opt_fuse_round(vm, &fused))
+            break;
+        total += fused;
+    }
+    if (vm->debug_vm && total > 0)
+        printf("[opt] fused ops: rewrote %d adjacent def-use pair%s\n",
+               total, total == 1 ? "" : "s");
+}
+
 // ========== Main Entry Point ==========
 
-void cc_optimize(VirtualMachine *vm, int level) {
-    if (!vm || !vm->text_seg || level <= 0) {
+void cc_optimize(VirtualMachine *vm, int level, bool fuse_ops) {
+    if (!vm || !vm->text_seg || (level <= 0 && !fuse_ops)) {
         return;
     }
 
@@ -1384,5 +1620,9 @@ void cc_optimize(VirtualMachine *vm, int level) {
     // (same 2-word encoding) — no second compaction pass is needed.
     if (level >= 2) {
         opt_cse_const_calls(vm);
+    }
+
+    if (fuse_ops || level >= 4) {
+        opt_fuse_ops(vm);
     }
 }

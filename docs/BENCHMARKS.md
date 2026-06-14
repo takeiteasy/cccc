@@ -20,29 +20,29 @@ Sample output:
 ====================================================================================================
  CCCC vs GCC benchmark results (median ms, lower is better)
 ====================================================================================================
-benchmark    cccc    cccc-O1  cccc-O2  cccc-O3  cccc-jbc  cccc-jbc-O1  cccc-jbc-O2  cccc-jbc-O3  gcc-O0  gcc-O1  gcc-O2  gcc-O3
------------  ------  -------  -------  -------  --------  -----------  -----------  -----------  ------  ------  ------  ------
-ackermann    690.1   685.6    918.5    919.4    666.1     660.7        883.2        885.7        19.1    12.6    4.4     4.7
-binary_tree  808.4   797.7    900.8    901.5    805.8     771.5        893.8        865.3        18.4    17.4    33.5    16.1
-fib          562.5   557.5    656.0    656.8    533.4     531.2        622.6        621.9        6.2     6.2     3.6     3.8
-mandelbrot   6062.2  6108.3   5937.0   5980.9   6031.4    6114.4       5887.8       5925.8       63.7    29.6    29.4    27.8
-matrix_mul   4654.2  4660.3   3927.5   3940.1   4618.1    4638.1       3894.2       3903.5       19.9    5.8     4.0     3.8
-nqueens      1270.1  1179.7   1081.0   1076.7   1242.0    1155.9       1046.7       1047.0       8.5     5.4     5.8     4.9
-quicksort    1727.7  1646.4   1577.0   1534.6   1696.8    1616.2       1512.4       1508.6       12.5    7.9     8.2     7.7
-sieve        8926.8  8704.1   6683.1   6745.0   9252.9    8949.5       6951.6       6875.4       36.4    23.0    18.5    19.3
+benchmark    cccc    cccc-O1  cccc-O2  cccc-O3  cccc-O4  cccc-jbc  cccc-jbc-O1  cccc-jbc-O2  cccc-jbc-O3  cccc-jbc-O4  gcc-O0  gcc-O1  gcc-O2  gcc-O3
+-----------  ------  -------  -------  -------  -------  --------  -----------  -----------  -----------  -----------  ------  ------  ------  ------
+ackermann    694.2   747.0    927.6    927.9    890.6    664.9     670.8        896.5        898.4        865.0        14.4    12.6    4.0     4.0
+binary_tree  851.9   856.9    961.0    960.5    954.1    819.6     819.8        927.1        940.1        939.8        18.0    17.2    16.9    17.1
+fib          577.7   587.1    676.4    680.0    681.5    549.6     548.6        648.7        652.6        648.8        6.2     5.9     3.2     4.2
+mandelbrot   6515.9  6509.9   6438.1   6412.2   6231.2   6515.4    6821.4       6402.3       6533.0       6179.3       64.0    29.5    29.4    27.9
+matrix_mul   5174.2  5060.7   4410.0   4573.6   4286.4   5049.3    5264.3       4405.7       4587.3       4198.2       19.5    5.5     3.9     3.6
+nqueens      1331.6  1270.5   1429.0   1172.5   1193.4   1252.9    1191.9       1144.2       1191.6       1204.4       9.0     6.9     6.5     5.8
+quicksort    2024.5  1800.1   1750.3   1764.3   1533.9   1850.7    1818.6       1722.7       1641.0       1509.4       12.3    7.7     7.7     7.6
+sieve        9711.1  9531.2   7423.8   7329.7   7071.0   9516.0    9285.7       7406.0       7316.5       7110.6       35.0    21.5    17.8    18.2
 
 Speedup vs gcc -O2 (>1.0x = slower than gcc -O2):
-benchmark    cccc     cccc-O1  cccc-O2  cccc-O3  cccc-jbc  cccc-jbc-O1  cccc-jbc-O2  cccc-jbc-O3  gcc-O0  gcc-O1  gcc-O2  gcc-O3
------------  -------  -------  -------  -------  --------  -----------  -----------  -----------  ------  ------  ------  ------
-ackermann    157.2x   156.1x   209.2x   209.4x   151.7x    150.5x       201.1x       201.7x       4.3x    2.9x    1.0x    1.1x
-binary_tree  24.1x    23.8x    26.9x    26.9x    24.0x     23.0x        26.7x        25.8x        0.55x   0.52x   1.0x    0.48x
-fib          154.9x   153.5x   180.7x   180.9x   146.9x    146.3x       171.5x       171.2x       1.7x    1.7x    1.0x    1.0x
-mandelbrot   206.5x   208.1x   202.3x   203.8x   205.5x    208.3x       200.6x       201.9x       2.2x    1.0x    1.0x    0.95x
-matrix_mul   1158.6x  1160.2x  977.7x   980.9x   1149.6x   1154.6x      969.4x       971.8x       5.0x    1.4x    1.0x    0.96x
-nqueens      219.2x   203.6x   186.6x   185.9x   214.4x    199.5x       180.7x       180.7x       1.5x    0.94x   1.0x    0.85x
-quicksort    211.7x   201.8x   193.3x   188.1x   207.9x    198.1x       185.3x       184.9x       1.5x    0.97x   1.0x    0.94x
-sieve        481.9x   469.9x   360.8x   364.1x   499.5x    483.1x       375.3x       371.2x       2.0x    1.2x    1.0x    1.0x
-geomean      205.19x  200.95x  200.51x  200.29x  202.41x   197.62x      196.77x      195.90x      1.93x   1.20x   1.00x   0.89x
+benchmark    cccc     cccc-O1  cccc-O2  cccc-O3  cccc-O4  cccc-jbc  cccc-jbc-O1  cccc-jbc-O2  cccc-jbc-O3  cccc-jbc-O4  gcc-O0  gcc-O1  gcc-O2  gcc-O3
+-----------  -------  -------  -------  -------  -------  --------  -----------  -----------  -----------  -----------  ------  ------  ------  ------
+ackermann    175.7x   189.0x   234.8x   234.8x   225.4x   168.3x    169.8x       226.9x       227.4x       218.9x       3.6x    3.2x    1.0x    1.0x
+binary_tree  50.5x    50.8x    57.0x    56.9x    56.6x    48.6x     48.6x        55.0x        55.7x        55.7x        1.1x    1.0x    1.0x    1.0x
+fib          179.5x   182.4x   210.2x   211.3x   211.8x   170.8x    170.5x       201.6x       202.8x       201.6x       1.9x    1.8x    1.0x    1.3x
+mandelbrot   221.8x   221.6x   219.1x   218.3x   212.1x   221.8x    232.2x       217.9x       222.4x       210.3x       2.2x    1.0x    1.0x    0.95x
+matrix_mul   1326.9x  1297.8x  1130.9x  1172.9x  1099.3x  1294.9x   1350.0x      1129.8x      1176.4x      1076.6x      5.0x    1.4x    1.0x    0.94x
+nqueens      205.1x   195.7x   220.1x   180.6x   183.8x   193.0x    183.6x       176.2x       183.6x       185.5x       1.4x    1.1x    1.0x    0.90x
+quicksort    262.5x   233.4x   227.0x   228.8x   198.9x   240.0x    235.8x       223.4x       212.8x       195.7x       1.6x    0.99x   1.0x    0.98x
+sieve        545.7x   535.6x   417.2x   411.9x   397.4x   534.8x    521.8x       416.2x       411.2x       399.6x       2.0x    1.2x    1.0x    1.0x
+geomean      246.82x  243.42x  248.46x  243.38x  234.50x  236.93x   237.02x      237.55x      239.42x      230.90x      2.08x   1.34x   1.00x   1.01x
 
 Correctness: all benchmarks produce identical output across all configs
 ```
@@ -54,13 +54,14 @@ Key VM improvements reflected in these numbers:
 - **#250 — fused local load/store opcodes**: `LEA3+LDR/STR` two-opcode sequence replaced by a single `LDR_LOCAL_*`/`STR_LOCAL_*` (~23% geomean improvement).
 - **#249 — scalar local promotion**: at `--optimize=2`+, hot eligible integer/pointer locals held in VM saved registers, flushed at exits — reduces repeated local load/store traffic in tight loops.
 - **#251 — indexed load/store opcodes**: at `--optimize=2`+, `base + index * scale` patterns use `LDR_INDEX_*`/`STR_INDEX_*` fused opcodes — removes explicit MUL+ADD address calculation from array loops.
+- **#261 — automatic opcode fusion**: at `--optimize=4` or with `--fuse-ops`, adjacent single-def/single-use arithmetic chains are rewritten to fused opcodes (`MULI3`, `MULADD3`, `MULADDI3`). The largest wins in this run are quicksort (1764ms → 1534ms vs `--optimize=3`), sieve (7330ms → 7071ms), matrix_mul (4574ms → 4286ms), and mandelbrot (6412ms → 6231ms).
 - **#415 — CSE for `[[gnu::const]]` + extended dead-call elimination**: at `--optimize=2`+, duplicate calls to const functions within a straight-line block are replaced by a register move. Dead-call elimination extended to indirect (CALLN) and FFI (CALLF) calls at `--optimize=1`+. CSE fires on repeated calls with matching constant or local-variable argument values; these benchmarks do not exercise that pattern, so no change is visible in the table above.
 
-Validation run (2026-06-14, `--runs 2 --warmup 1`, Homebrew GCC-15): all correctness checks passed. The dominant wins at `--optimize=2` relative to no optimization remain sieve (8926ms → 6683ms, 25% reduction), matrix_mul (4654ms → 3928ms, 16% reduction), nqueens (1270ms → 1081ms, 15% reduction), and quicksort (1728ms → 1577ms, 9% reduction). Ackermann and fib regress slightly under optimization because the optimizer passes add overhead with no benefit for pure-recursion workloads.
+Validation run (2026-06-14, `--runs 3 --warmup 1`, Homebrew GCC-15): all correctness checks passed. `--optimize=4` improves the geomean from `--optimize=3`'s 243.38× slower-than-GCC-O2 ratio to 234.50×. The fused pass helps array/loop-heavy workloads and can regress or barely move pure-recursion/control-flow workloads where there are few profitable adjacent arithmetic chains.
 
 Re-run `make bench-compare` to get updated numbers for your machine.
 
-JSON output is also written to `profile/benchmarks/results/run-<UTC>.json` for tracking over time. Each `cccc-jbc*` row includes a `compile_ms` field showing the one-time cost of producing the bytecode file (this cost is paid once, not in the timed median).
+JSON output is also written to `profile/benchmarks/results/run-<UTC>.json` for tracking over time. The validation run above is saved as `profile/benchmarks/results/run-20260614T171315Z.json`. Each `cccc-jbc*` row includes a `compile_ms` field showing the one-time cost of producing the bytecode file (this cost is paid once, not in the timed median).
 
 ## The benchmark suite
 

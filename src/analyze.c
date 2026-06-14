@@ -325,16 +325,21 @@ typedef struct {
 //   P_RD  = byte 0 (rd)
 //   P_RS1 = byte 1 (rs1)
 //   P_RS2 = byte 2 (rs2)
+//   P_RS3 = byte 3 (rs3)
 //   -1    = unused slot
 #define P_RD 0
 #define P_RS1 1
 #define P_RS2 2
+#define P_RS3 3
 
 static const DefUseEntry defuse_table[OP_COUNT] = {
     // Register arithmetic: rd = f(rs1, rs2)
     [ADD3] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
     [SUB3] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
     [MUL3] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
+    [MULI3] = {{P_RD}, {P_RS1}, 1, 1},
+    [MULADD3] = {{P_RD}, {P_RS1, P_RS2, P_RS3}, 1, 3},
+    [MULADDI3] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
     [DIV3] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
     [ADDC] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
     [SUBC] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
@@ -470,21 +475,13 @@ typedef struct {
     int def_op;
     int def_size;
     int use_count;
+    int first_use_op;
+    int first_use_pc;
+    int first_use_byte;
 } DefState;
 
 typedef struct {
-    int def_op;
-    int def_pc;
-    int def_size;
-    int use_op;
-    int use_pc;
-    int reg;
-    int def_rd;
-    int use_byte;
-} Candidate;
-
-typedef struct {
-    Candidate *items;
+    CcFusionCandidate *items;
     int count;
     int capacity;
 } CandidateList;
@@ -517,11 +514,12 @@ static bool fusion_is_killing_op(int op) {
     }
 }
 
-static void fusion_cand_push(CandidateList *list, Candidate c) {
+static void fusion_cand_push(CandidateList *list, CcFusionCandidate c) {
     if (list->count == list->capacity) {
         int new_cap = list->capacity ? list->capacity * 2 : 64;
-        Candidate *p =
-            (Candidate *)realloc(list->items, (size_t)new_cap * sizeof(Candidate));
+        CcFusionCandidate *p =
+            (CcFusionCandidate *)realloc(
+                list->items, (size_t)new_cap * sizeof(CcFusionCandidate));
         if (!p) {
             fprintf(stderr, "cccc: out of memory\n");
             exit(1);
@@ -533,12 +531,31 @@ static void fusion_cand_push(CandidateList *list, Candidate c) {
 }
 
 static int fusion_cand_cmp(const void *a, const void *b) {
-    const Candidate *ca = (const Candidate *)a;
-    const Candidate *cb = (const Candidate *)b;
+    const CcFusionCandidate *ca = (const CcFusionCandidate *)a;
+    const CcFusionCandidate *cb = (const CcFusionCandidate *)b;
     if (ca->def_op != cb->def_op) return ca->def_op - cb->def_op;
     if (ca->use_op != cb->use_op) return ca->use_op - cb->use_op;
     if (ca->def_pc != cb->def_pc) return ca->def_pc - cb->def_pc;
     return ca->use_pc - cb->use_pc;
+}
+
+static void fusion_maybe_push_final(CcFusionState *st, const DefState *ds,
+                                    int reg) {
+    if (!st || !ds || ds->pc < 0 || ds->use_count != 1)
+        return;
+    if (ds->pc + ds->def_size != ds->first_use_pc)
+        return;
+    CcFusionCandidate c = {
+        .def_op = ds->def_op,
+        .def_pc = ds->pc,
+        .def_size = ds->def_size,
+        .use_op = ds->first_use_op,
+        .use_pc = ds->first_use_pc,
+        .reg = reg,
+        .def_rd = reg,
+        .use_byte = ds->first_use_byte,
+    };
+    fusion_cand_push(&st->list, c);
 }
 
 static void fusion_scan_text(CcFusionState *st, const InstrWord *text,
@@ -560,6 +577,7 @@ static void fusion_scan_text(CcFusionState *st, const InstrWord *text,
                 if ((op == CALL || op == CALLT || op == CALLI || op == CALLN || op == CALLF) &&
                     !fusion_is_caller_saved(i))
                     continue;
+                fusion_maybe_push_final(st, &defs[i], i);
                 defs[i].pc = -1;
             }
             DefUseEntry info = defuse_table[op];
@@ -583,19 +601,10 @@ static void fusion_scan_text(CcFusionState *st, const InstrWord *text,
             if (r <= 0 || r >= NUM_REGS) continue;  // skip REG_ZERO
             DefState *ds = &defs[r];
             if (ds->pc >= 0) {
-                if (ds->use_count == 0 &&
-                    ds->pc + ds->def_size == (int)pc) {
-                    Candidate c = {
-                        .def_op = ds->def_op,
-                        .def_pc = ds->pc,
-                        .def_size = ds->def_size,
-                        .use_op = op,
-                        .use_pc = (int)pc,
-                        .reg = r,
-                        .def_rd = r,
-                        .use_byte = info.use_pos[i],
-                    };
-                    fusion_cand_push(&st->list, c);
+                if (ds->use_count == 0) {
+                    ds->first_use_op = op;
+                    ds->first_use_pc = (int)pc;
+                    ds->first_use_byte = info.use_pos[i];
                 }
                 ds->use_count++;
             }
@@ -605,14 +614,21 @@ static void fusion_scan_text(CcFusionState *st, const InstrWord *text,
         for (int i = 0; i < info.n_defs; i++) {
             int r = fusion_extract_reg(op_word, info.def_pos[i]);
             if (r < 0 || r >= NUM_REGS) continue;
+            fusion_maybe_push_final(st, &defs[r], r);
             defs[r].pc = (int)pc;
             defs[r].def_op = op;
             defs[r].def_size = size;
             defs[r].use_count = 0;
+            defs[r].first_use_op = 0;
+            defs[r].first_use_pc = -1;
+            defs[r].first_use_byte = -1;
         }
 
         pc += size;
     }
+
+    for (int i = 0; i < NUM_REGS; i++)
+        fusion_maybe_push_final(st, &defs[i], i);
 }
 
 static void fusion_print_text(FILE *f, const CandidateList *list, int show) {
@@ -621,7 +637,7 @@ static void fusion_print_text(FILE *f, const CandidateList *list, int show) {
     fprintf(f, "  showing:         %d\n", show);
     fprintf(f, "  top %d:\n", show);
     for (int i = 0; i < show; i++) {
-        const Candidate *c = &list->items[i];
+        const CcFusionCandidate *c = &list->items[i];
         fprintf(f, "  pc=%-5d  %-12s pc=%-5d  %-12s  reg=r%d  use_byte=%d\n",
                 c->def_pc, safe_opcode_name(c->def_op),
                 c->use_pc, safe_opcode_name(c->use_op),
@@ -633,7 +649,7 @@ static void fusion_print_json(FILE *f, const CandidateList *list, int show) {
     fprintf(f, "{\n  \"tool\": \"cccc-fusion-candidates\",\n");
     fprintf(f, "  \"candidates\": [\n");
     for (int i = 0; i < show; i++) {
-        const Candidate *c = &list->items[i];
+        const CcFusionCandidate *c = &list->items[i];
         fprintf(f, "%s    {\"def_op\": \"%s\", \"def_pc\": %d, "
                    "\"use_op\": \"%s\", \"use_pc\": %d, "
                    "\"reg\": %d}",
@@ -667,6 +683,26 @@ void cc_analyze_fusion_feed(CcFusionState *st, const InstrWord *text,
     st->files_loaded++;
 }
 
+CcFusionCandidate *cc_analyze_fusion_collect(CcFusionState *st, int *out_count) {
+    if (out_count)
+        *out_count = 0;
+    if (!st || st->files_loaded == 0 || st->list.count <= 0)
+        return NULL;
+    qsort(st->list.items, (size_t)st->list.count, sizeof(CcFusionCandidate),
+          fusion_cand_cmp);
+    CcFusionCandidate *items =
+        malloc((size_t)st->list.count * sizeof(CcFusionCandidate));
+    if (!items) {
+        fprintf(stderr, "cccc: out of memory\n");
+        exit(1);
+    }
+    memcpy(items, st->list.items,
+           (size_t)st->list.count * sizeof(CcFusionCandidate));
+    if (out_count)
+        *out_count = st->list.count;
+    return items;
+}
+
 void cc_analyze_fusion_finish(CcFusionState *st, FILE *out) {
     if (!st)
         return;
@@ -676,14 +712,16 @@ void cc_analyze_fusion_finish(CcFusionState *st, FILE *out) {
         free(st);
         return;
     }
-    qsort(st->list.items, (size_t)st->list.count, sizeof(Candidate),
+    qsort(st->list.items, (size_t)st->list.count, sizeof(CcFusionCandidate),
           fusion_cand_cmp);
     int show = st->list.count < st->opts.top_n ? st->list.count
                                                 : st->opts.top_n;
-    if (st->opts.json) {
-        fusion_print_json(out, &st->list, show);
-    } else {
-        fusion_print_text(out, &st->list, show);
+    if (out) {
+        if (st->opts.json) {
+            fusion_print_json(out, &st->list, show);
+        } else {
+            fusion_print_text(out, &st->list, show);
+        }
     }
     free(st->list.items);
     free(st);

@@ -10,7 +10,7 @@ Usage:
     python3 bench.py [options]
 
 Options:
-    --benchmarks DIR    benchmark source directory (default: ./benchmarks)
+    --benchmarks DIR    benchmark source directory (default: profile/benchmarks)
     --runs N            timed iterations per (bench, config) (default: 3)
     --warmup N          warmup iterations discarded (default: 1)
     --cccc PATH          path to cccc binary (default: ./cccc)
@@ -43,6 +43,7 @@ CCCC_CONFIGS = [
     ("cccc-O1", ["--optimize=1"]),
     ("cccc-O2", ["--optimize=2"]),
     ("cccc-O3", ["--optimize=3"]),
+    ("cccc-O4", ["--optimize=4"]),
 ]
 
 JBC_CONFIGS = [
@@ -50,6 +51,7 @@ JBC_CONFIGS = [
     ("cccc-jbc-O1", ["--optimize=1"]),
     ("cccc-jbc-O2", ["--optimize=2"]),
     ("cccc-jbc-O3", ["--optimize=3"]),
+    ("cccc-jbc-O4", ["--optimize=4"]),
 ]
 
 GCC_CONFIGS = [
@@ -393,7 +395,7 @@ def make_run_id():
 
 def main():
     p = argparse.ArgumentParser(description="Cross-compiler benchmark runner for CCCC")
-    p.add_argument("--benchmarks", default="benchmarks")
+    p.add_argument("--benchmarks", default="profile/benchmarks")
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--warmup", type=int, default=1)
     p.add_argument("--cccc", default="./cccc")
@@ -466,8 +468,8 @@ def main():
     log(f"Benchmarks: {[s.name for s in sources]}")
     log(f"Runs: {args.runs} (warmup: {args.warmup})")
     log(f"CCCC: {args.cccc}    GCC: {args.gcc}")
-    cccc_cfg_str = " × {none,O1,O2,O3}"
-    jbc_cfg_str = "" if args.no_jbc else "    cccc-jbc × {none,O1,O2,O3}"
+    cccc_cfg_str = " × {none,O1,O2,O3,O4}"
+    jbc_cfg_str = "" if args.no_jbc else "    cccc-jbc × {none,O1,O2,O3,O4}"
     log(f"Configs: cccc{cccc_cfg_str}{jbc_cfg_str}    gcc × {{O0,O1,O2,O3}}")
     if args.vm_profile:
         log(f"VM opcode profiles: {args.vm_profile_dir}")

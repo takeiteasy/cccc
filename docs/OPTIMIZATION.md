@@ -17,6 +17,10 @@ CCCC includes optional bytecode optimization passes that can improve execution p
 
 # Aggressive optimization
 ./cccc --optimize=3 program.c
+
+# Aggressive optimization plus automatic opcode fusion
+./cccc --optimize=4 program.c
+./cccc --fuse-ops program.c
 ```
 
 ## Optimization Levels
@@ -27,6 +31,7 @@ CCCC includes optional bytecode optimization passes that can improve execution p
 | 1 | `--optimize` or `--optimize=1` | Basic | Constant folding + dead-call elimination |
 | 2 | `--optimize=2` | Standard | All level-1 passes + peephole + CSE for const functions + scalar local promotion + indexed load/store lowering |
 | 3 | `--optimize=3` | Aggressive | All passes |
+| 4 | `--optimize=4` | Fused | All level-3 passes + automatic opcode fusion |
 
 ## Optimization Passes
 
@@ -51,6 +56,12 @@ The same levels also lower simple array and pointer dereferences of the form
 `base + index * scale` to fused indexed VM opcodes. This removes the explicit
 `MUL3 + ADD3 + LDR/STR` address sequence for scalar integer and floating-point
 loads/stores when pointer-safety instrumentation is not active.
+
+At `--optimize=4`, or whenever `--fuse-ops` is specified, a post-codegen
+fusion pass scans the emitted bytecode for adjacent single-def/single-use
+opcode pairs with a registered fused form. The pass keeps the existing codegen
+lowerings above; it only rewrites remaining eligible arithmetic chains such as
+`LI3 + MUL3 + ADD3` into `MULADDI3`.
 
 At `--optimize=2` and above, `restrict`-qualified scalar pointer parameters are
 cached in callee-saved registers (S4–S7). Loads of `*p` or `p[const]` for a
@@ -152,6 +163,25 @@ Removes demonstrably dead code using conservative analysis.
 
 ---
 
+### Phase 4: Automatic Opcode Fusion (`--optimize=4`, `--fuse-ops`)
+
+Runs use-def fusion analysis in-process on the generated text segment and
+rewrites registered adjacent single-use chains to fused opcodes. Current
+rewrites include:
+
+| Pattern | Replacement |
+|---------|-------------|
+| `LI3 imm; ADD3` | `ADDI3` |
+| `LI3 imm; MUL3` | `MULI3` |
+| `MUL3; ADD3` | `MULADD3` |
+| `LI3 imm; MUL3; ADD3` | `MULADDI3` |
+
+The pass skips branch targets and uses the normal bytecode compactor afterward,
+so branches, jump tables, source maps, function ranges, and serialized text
+relocations remain valid.
+
+---
+
 ## How It Works
 
 The optimizer operates on the generated 32-bit bytecode words in `text_seg[]`
@@ -180,7 +210,7 @@ serialized text relocations so PC-index targets remain valid after compaction.
 
 1. **Development (VM)**: Use the default (no `--optimize` flag) for predictable debugging
 2. **Testing**: Run the test suite with `--optimize=3` to catch optimization bugs
-3. **VM-only workflows** (debugger, safety suite, `--vm-profile`): Use `--optimize=2` for a good balance of speed and safety
+3. **VM-only workflows** (debugger, safety suite, `--vm-profile`): Use `--optimize=2` for a good balance of speed and safety; use `--optimize=4` when measuring maximum VM throughput
 4. **Production builds**: Use `-c=native` — the system compiler handles optimisation, and the CCCC frontend cost is the only CCCC-specific overhead in the loop
 
 ## Combining with Safety Features
@@ -196,6 +226,9 @@ below are for the VM path:
 
 # No safety, maximum optimization
 ./cccc -0 --optimize=3 program.c
+
+# No safety, maximum VM optimization
+./cccc -0 --optimize=4 program.c
 
 # Standard safety with standard optimization
 ./cccc -2 --optimize=2 program.c
@@ -213,3 +246,4 @@ With verbose enabled, the optimizer reports:
 - `[opt] constant folding: tracked N constant expressions`
 - `[opt] peephole: removed N redundant instructions`
 - `[opt] dead code: N instructions removed, M NOPs present`
+- `[opt] fused ops: rewrote N adjacent def-use pairs`

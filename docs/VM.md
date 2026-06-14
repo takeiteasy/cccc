@@ -142,6 +142,9 @@ Opcodes are grouped by function.  Operands are shown as `rd = destination`, `rs 
 | `ADD3` | `rd = rs1 + rs2` |
 | `SUB3` | `rd = rs1 - rs2` |
 | `MUL3` | `rd = rs1 * rs2` |
+| `MULI3` | `rd = rs1 * immediate` |
+| `MULADD3` | `rd = rs1 + rs2 * rs3` |
+| `MULADDI3` | `rd = rs1 + rs2 * immediate` |
 | `DIV3` | `rd = rs1 / rs2` (signed; traps on divide-by-zero) |
 | `ADDC` | Checked signed addition; traps on overflow |
 | `SUBC` | Checked signed subtraction; traps on overflow |
@@ -475,18 +478,19 @@ The VM can collect dynamic execution statistics:
 
 Enable profiling with `--vm-profile` (text report to stderr). Combine it with `--json` to also write the same data as JSON to stdout.  The JSON schema includes `total_opcodes`, `total_bigrams`, per-opcode arrays, and per-bigram arrays with percentages.
 
-Static n-gram mining (`cccc --ngrams`) and use-def fusion analysis (`cccc --fusion-candidates`) complement the dynamic data by showing which sequences are common in the bytecode *and* hot at runtime — the strongest candidates for new fused opcodes.
+Static n-gram mining (`cccc --ngrams`) and use-def fusion analysis (`cccc --fusion-candidates`) complement the dynamic data by showing which sequences are common in the bytecode *and* hot at runtime. `--optimize=4` / `--fuse-ops` uses the same in-process use-def analysis to apply registered fused-op rewrites automatically.
 
 ## Performance Notes
 
 The VM is the runtime for compile-time macro bodies and for VM-only workflows (the safety suite, the debugger, the profiler, quick iteration without a system compiler).  For production code, `-c=native` hands macro-expanded C to `cc` / `clang` / `gcc` and skips the VM entirely, so the interpreter cost only matters for the things that *run on it*.
 
-Five optimisations have significantly reduced interpreter overhead:
+Six optimisations have significantly reduced interpreter overhead:
 
 1. **Inlined threaded dispatch** — Opcode logic lives at computed-goto labels; there is no function call per instruction.
 2. **Fused local load/store** — The common `LEA3 + LDR/STR` pair for local variables is collapsed into a single `LDR_LOCAL_*` / `STR_LOCAL_*` opcode, saving one dispatch and one register-pressure hop per access.
 3. **Scalar local promotion** — Hot eligible integer and pointer locals are held in callee-saved VM registers at `--optimize=2` and above.
 4. **Fused indexed load/store** — Simple array and pointer accesses use `LDR_INDEX_*` / `STR_INDEX_*`, removing separate index multiply and address-add opcodes in hot loops.
-5. **Tail-call optimisation** — `return f(args)` patterns that meet eligibility criteria emit `CALLT` instead of `CALL + LEV3`, reducing tail-recursive calls to O(1) stack depth (see [Tail-Call Optimisation](#tail-call-optimisation) above).
+5. **Automatic opcode fusion** — `--optimize=4` / `--fuse-ops` rewrites adjacent single-def/single-use arithmetic chains to fused opcodes such as `MULI3`, `MULADD3`, and `MULADDI3`.
+6. **Tail-call optimisation** — `return f(args)` patterns that meet eligibility criteria emit `CALLT` instead of `CALL + LEV3`, reducing tail-recursive calls to O(1) stack depth (see [Tail-Call Optimisation](#tail-call-optimisation) above).
 
 The dominant cost remains the interpreter itself (as opposed to compile time); see [BENCHMARKS.md](BENCHMARKS.md) for full numbers and [PROFILING.md](PROFILING.md) for analysis tooling.

@@ -222,7 +222,7 @@ else
 endif
 
 # Cross-compiler benchmark suite: CCCC vs GCC.
-# Runs every benchmark under CCCC × {none,O1,O2,O3} and GCC × {O0,O1,O2,O3},
+# Runs every benchmark under CCCC × {none,O1,O2,O3,O4} and GCC × {O0,O1,O2,O3},
 # verifies identical output, and emits a table + JSON report.
 BENCH_RUNS ?= 3
 BENCH_WARMUP ?= 1

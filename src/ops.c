@@ -69,6 +69,44 @@ static inline int op_MUL3_fn(VirtualMachine *vm) {
     return 0;
 }
 
+static inline int op_MULI3_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1;
+    DECODE_RR(operands, rd, rs1);
+    unsigned long long a = (unsigned long long)vm->regs[rs1];
+    unsigned long long imm = (unsigned long long)cc_read_i64(vm);
+
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (long long)(a * imm);
+    return 0;
+}
+
+static inline int op_MULADD3_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2, rs3;
+    DECODE_RRRR(operands, rd, rs1, rs2, rs3);
+    unsigned long long addend = (unsigned long long)vm->regs[rs1];
+    unsigned long long lhs = (unsigned long long)vm->regs[rs2];
+    unsigned long long rhs = (unsigned long long)vm->regs[rs3];
+
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (long long)(addend + lhs * rhs);
+    return 0;
+}
+
+static inline int op_MULADDI3_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    unsigned long long base = (unsigned long long)vm->regs[rs1];
+    unsigned long long index = (unsigned long long)vm->regs[rs2];
+    unsigned long long imm = (unsigned long long)cc_read_i64(vm);
+
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (long long)(base + index * imm);
+    return 0;
+}
+
 static inline int op_DIV3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
@@ -833,7 +871,9 @@ static inline int op_ADDI3_fn(VirtualMachine *vm) {
     long long imm = cc_read_i64(vm);
 
     if (rd != REG_ZERO)
-        vm->regs[rd] = vm->regs[rs1] + imm;
+        vm->regs[rd] =
+            (long long)((unsigned long long)vm->regs[rs1] +
+                        (unsigned long long)imm);
     return 0;
 }
 

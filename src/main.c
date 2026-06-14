@@ -345,12 +345,14 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-O/--optimize[=LEVEL]        Enable bytecode optimization "
            "(default: disabled)\n");
     printf("\t                             LEVEL: 0=none, 1=basic, 2=standard, "
-           "3=aggressive\n");
+           "3=aggressive, 4=fused\n");
     printf("\t                             0: No optimization\n");
     printf("\t                             1: Constant folding only\n");
     printf("\t                             2: Constant folding + peephole\n");
     printf("\t                             3: All optimizations (including "
             "dead code elimination)\n");
+    printf("\t                             4: Level 3 + automatic fused-op pass\n");
+    printf("\t   --fuse-ops              Run automatic opcode fusion pass\n");
     printf("\t   --inline-limit=N        Limit inlining to N AST nodes "
             "(default: 256)\n");
     printf("\nStatic Bytecode Analysis (compile or load input, walk text "
@@ -743,7 +745,8 @@ int main(int argc, const char *argv[]) {
     size_t embed_limit = 0;     // --embed-limit (0 = use default)
     int embed_hard_error = 0;   // --embed-hard-limit
     int macro_recursion_limit = -1; // --macro-recursion-limit
-    int opt_level = 0; // -O0/-O1/-O2/-O3 (default: 0 = no optimization)
+    int opt_level = 0; // -O0/-O1/-O2/-O3/-O4 (default: 0 = no optimization)
+    int fuse_ops = 0;  // --fuse-ops
     int inline_node_limit = 20; // --inline-limit (default 20, 0=disable)
     int asm_passthru = 0;       // --asm-passthru
     const char *std_arg = NULL; // --std=<standard>
@@ -829,6 +832,7 @@ int main(int argc, const char *argv[]) {
         {"embed-limit", required_argument, 0, 1048},
         {"embed-hard-limit", no_argument, 0, 1060},
         {"optimize", optional_argument, 0, 'O'},
+        {"fuse-ops", no_argument, 0, 1070},
         {"macro-recursion-limit", required_argument, 0, 'r'},
         {"std", required_argument, 0, 's'},
         {"ffi-allow", required_argument, 0, 1052},
@@ -1102,16 +1106,21 @@ int main(int argc, const char *argv[]) {
             if (optarg == NULL) {
                 // Just -O or --optimize without argument means -O1
                 opt_level = 1;
-            } else if (optarg[0] >= '0' && optarg[0] <= '3' &&
+            } else if (optarg[0] >= '0' && optarg[0] <= '4' &&
                        optarg[1] == '\0') {
                 opt_level = optarg[0] - '0';
+                if (opt_level >= 4)
+                    fuse_ops = 1;
             } else {
                 fprintf(stderr,
                         "error: invalid optimization level '%s' (use 0, 1, 2, "
-                        "or 3)\n",
+                        "3, or 4)\n",
                         optarg);
                 usage(argv[0], 1);
             }
+            break;
+        case 1070:
+            fuse_ops = 1;
             break;
         case 'r': { // --macro-recursion-limit
             char *end = NULL;
@@ -1323,7 +1332,7 @@ int main(int argc, const char *argv[]) {
                     "error: -c=native cannot be combined with frontend output modes\n");
             usage(argv[0], 1);
         }
-        if (disassemble || entry_name || opt_level != 0 ||
+        if (disassemble || entry_name || opt_level != 0 || fuse_ops ||
             vm_profile) {
             fprintf(stderr,
                     "error: -c=native cannot be combined with VM bytecode options\n");
@@ -1577,6 +1586,7 @@ int main(int argc, const char *argv[]) {
 
     // Set optimization level
     vm.compiler.opt_level = opt_level;
+    vm.compiler.fuse_ops = fuse_ops;
     vm.compiler.inline_node_limit = inline_node_limit;
     if (macro_recursion_limit >= 0)
         vm.compiler.macro_recursion_limit = macro_recursion_limit;

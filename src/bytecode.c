@@ -720,8 +720,8 @@ void cc_compile(VirtualMachine *vm, Obj *prog) {
     gen(vm, prog);
 
     // Run optimizer if enabled
-    if (vm->compiler.opt_level > 0) {
-        cc_optimize(vm, vm->compiler.opt_level);
+    if (vm->compiler.opt_level > 0 || vm->compiler.fuse_ops) {
+        cc_optimize(vm, vm->compiler.opt_level, vm->compiler.fuse_ops);
     }
 
     // Build source index for O(log n) line→PC lookups

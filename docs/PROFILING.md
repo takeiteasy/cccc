@@ -147,7 +147,7 @@ not the source-to-bytecode save step.
 
 ## Cross-Compiler Benchmarks (CCCC vs GCC)
 
-For a higher-level view — comparing CCCC to a real C compiler on the same portable workloads — see [BENCHMARKS.md](BENCHMARKS.md). The benchmark suite runs each workload under CCCC × {none,O1,O2,O3} and GCC × {O0,O1,O2,O3}, verifies identical output, and reports per-config wall-clock timings plus speedup ratios.
+For a higher-level view — comparing CCCC to a real C compiler on the same portable workloads — see [BENCHMARKS.md](BENCHMARKS.md). The benchmark suite runs each workload under CCCC × {none,O1,O2,O3,O4} and GCC × {O0,O1,O2,O3}, verifies identical output, and reports per-config wall-clock timings plus speedup ratios.
 
 ```bash
 make bench-compare            # full run

@@ -98,6 +98,9 @@ extern "C" {
     X(ADD3, 1) /* rd = rs1 + rs2 */                                            \
     X(SUB3, 1) /* rd = rs1 - rs2 */                                            \
     X(MUL3, 1) /* rd = rs1 * rs2 */                                            \
+    X(MULI3, 3) /* rd = rs1 * immediate */                                     \
+    X(MULADD3, 1) /* rd = rs1 + rs2 * rs3 */                                   \
+    X(MULADDI3, 3) /* rd = rs1 + rs2 * immediate */                            \
     X(DIV3, 1) /* rd = rs1 / rs2 (signed) */                                   \
     X(ADDC, 1) /* checked signed add: rd = rs1 + rs2 */                        \
     X(SUBC, 1) /* checked signed sub: rd = rs1 - rs2 */                        \
@@ -1823,7 +1826,8 @@ typedef struct Compiler {
 
     // Optimization settings
     int opt_level; // Optimization level (0=none, 1=basic, 2=standard,
-                   // 3=aggressive)
+                   // 3=aggressive; 4 enables fused-op pass)
+    bool fuse_ops; // Enable post-codegen opcode fusion pass
     int inline_node_limit; // Max AST nodes for full inlining (0=disable)
 
     // Inlining context (used during codegen when expanding inline bodies)

@@ -120,6 +120,13 @@
         DECODE_RRR((operands), rd, rs1, rs2);                                  \
         scale = ((operands) >> 24) & 0xFF;                                     \
     } while (0)
+#define ENCODE_RRRR(rd, rs1, rs2, rs3)                                        \
+    (ENCODE_RRR((rd), (rs1), (rs2)) | ((InstrWord)(rs3) << 24))
+#define DECODE_RRRR(operands, rd, rs1, rs2, rs3)                              \
+    do {                                                                       \
+        DECODE_RRR((operands), rd, rs1, rs2);                                  \
+        rs3 = ((operands) >> 24) & 0xFF;                                       \
+    } while (0)
 
 // RR format: [rd:8|rs1:8|unused:16]
 #define ENCODE_RR(rd, rs1)                                                     \
@@ -607,7 +614,7 @@ void cccc_gil_release(VirtualMachine *vm);
 // optimize.c
 //
 
-void cc_optimize(VirtualMachine *vm, int level);
+void cc_optimize(VirtualMachine *vm, int level, bool fuse_ops);
 
 //
 // analyze.c
@@ -624,6 +631,17 @@ typedef struct {
     bool json;    // emit JSON instead of text
 } CcAnalyzeFusionOptions;
 
+typedef struct {
+    int def_op;
+    int def_pc;
+    int def_size;
+    int use_op;
+    int use_pc;
+    int reg;
+    int def_rd;
+    int use_byte;
+} CcFusionCandidate;
+
 typedef struct CcNgramState CcNgramState;
 typedef struct CcFusionState CcFusionState;
 
@@ -636,6 +654,7 @@ CcFusionState *cc_analyze_fusion_begin(const CcAnalyzeFusionOptions *opts);
 void cc_analyze_fusion_feed(CcFusionState *st, const InstrWord *text,
                             long long num_words, const char *label,
                             FILE *out);
+CcFusionCandidate *cc_analyze_fusion_collect(CcFusionState *st, int *out_count);
 void cc_analyze_fusion_finish(CcFusionState *st, FILE *out);
 
 //
