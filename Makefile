@@ -2,20 +2,7 @@ SRCS := $(filter-out src/ops.c, $(wildcard src/*.c src/stdlib/*.c))
 BASE_CFLAGS := -Wall -O0 -g -std=c23 -Wno-deprecated-declarations -Wno-switch
 CFLAGS := $(BASE_CFLAGS)
 LDFLAGS :=
-LLVM_CONFIG ?= llvm-config
 PKG_CONFIG ?= pkg-config
-
-ifeq ($(CCCC_HAS_LLVM),1)
-	LLVM_CONFIG_FOUND := $(shell command -v $(LLVM_CONFIG) 2>/dev/null)
-ifeq ($(LLVM_CONFIG_FOUND),)
-	$(error CCCC_HAS_LLVM=1 requires llvm-config; set LLVM_CONFIG=/path/to/llvm-config)
-endif
-	LLVM_CFLAGS := $(shell $(LLVM_CONFIG) --cflags)
-	LLVM_LDFLAGS := $(shell $(LLVM_CONFIG) --ldflags)
-	LLVM_LIBS := $(shell $(LLVM_CONFIG) --libs core native analysis) $(shell $(LLVM_CONFIG) --system-libs)
-	CFLAGS += -DCCCC_HAS_LLVM=1 $(LLVM_CFLAGS)
-	LDFLAGS += $(LLVM_LDFLAGS) $(LLVM_LIBS)
-endif
 
 # libffi is required for native FFI calls.
 LIBFFI_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags libffi 2>/dev/null)

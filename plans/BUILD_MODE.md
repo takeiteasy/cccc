@@ -27,10 +27,9 @@ helpers.
   `cc`/`ar`/`ld` can only be invoked through registered FFI entries. The
   toolchain allow-list is part of the FFI policy (`--ffi-allow=cc,ar,ld`).
 - **Native-only targets** — every target is a native executable or
-  library handed off to the system toolchain (`cc` / `clang` / `gcc`),
-  or, in a future version, to the planned bytecode-to-LLVM IR backend
-  (see [LLVM.md](../docs/LLVM.md)). Bytecode / VM targets are out of
-  scope for the build system — they're the testing framework's domain
+  library handed off to the system toolchain (`cc` / `clang` / `gcc`).
+  Bytecode / VM targets are out of scope for the build system —
+  they're the testing framework's domain
   (see [TESTING_FRAMEWORK.md](TESTING_FRAMEWORK.md)).
 - **CCCC options live in source** — VM-specific options (optimisation
   level, safety levels, debug, profiling) are declared from inside C
@@ -255,7 +254,7 @@ why the build system produces only native output.
 
 | Kind | Function | Default output | Backend |
 |------|----------|----------------|---------|
-| Executable | `cccc_executable(ctx, name)` | `bin/<name>` | system toolchain (`cc` / `clang` / `gcc`); v2 plans LLVM IR |
+| Executable | `cccc_executable(ctx, name)` | `bin/<name>` | system toolchain (`cc` / `clang` / `gcc`) |
 | Static library | `cccc_static_lib(ctx, name)` | `lib<name>.a` | `ar` (or `cc -static`) |
 | Dynamic library | `cccc_dynamic_lib(ctx, name)` | `lib<name>.{so,dylib}` | `cc -shared` |
 
@@ -263,13 +262,9 @@ why the build system produces only native output.
 
 The build system is for native output only. v1's backend is the
 system toolchain (`CCCC_NATIVE_CC` or `cc` / `clang` / `gcc`); see
-[README.md](../README.md) for the production native path. The
-planned v2 backend is the bytecode-to-LLVM IR lowering (see
-[LLVM.md](../docs/LLVM.md)) — it would let the build system emit
-native code without going through an external compiler, while
-keeping the same target API. Adding a new backend is a new
-`cccc_backend_t` registration against `cccc_target_t`; the build
-entry does not change.
+[README.md](../README.md) for the production native path. Adding a
+new backend is a new `cccc_backend_t` registration against
+`cccc_target_t`; the build entry does not change.
 
 **Bytecode / VM targets are out of scope for the build system.**
 A `.jbc` file is just `-c=bytecode -o file.jbc source.c`; you
@@ -582,9 +577,8 @@ int build_main(cccc_build_ctx_t *ctx) {
 
 ### Toolchain selection
 
-The Makefile currently detects libffi and (optionally) LLVM via
-`pkg-config` / `llvm-config`. The build script does the same with
-a small block at the top:
+The Makefile currently detects libffi via `pkg-config`. The build
+script does the same with a small block at the top:
 
 ```c
 [[cccc::comptime]]
@@ -683,7 +677,7 @@ still need a decision. The short list:
 5. Do we want `--build-graph` / `--build-dry-run` to print the
    resolved command lines without executing? (My recommendation: yes,
    it's almost free since the runner already topo-sorts.)
-6. Do we want a `cccc_probe_toolchain()` helper for libffi / LLVM
+6. Do we want a `cccc_probe_toolchain()` helper for libffi
    detection, or should each build script roll its own? (My
    recommendation: helper, so all projects share the same detection.)
 7. Should `#pragma cccc push` / `#pragma cccc pop` for block-scope
@@ -729,9 +723,6 @@ Roughly in order of dependency:
   the existing `tools/tests.py` test suite.
 - [MACROS.md](../docs/MACROS.md) — the `[[cccc::comptime]]` system
   the build runner reuses for entry compilation and execution.
-- [LLVM.md](../docs/LLVM.md) — the planned bytecode-to-LLVM IR
-  backend, which is the v2 native backend for the build system
-  (v1 uses the system toolchain).
 - [COVERAGE.md](../docs/COVERAGE.md) — what C surface area a build
   script has access to.
 - [SAFETY.md](../docs/SAFETY.md) — the safety levels (`-0` ... `-3`)

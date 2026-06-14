@@ -227,15 +227,6 @@ Produces:
 CCCC requires libffi for native FFI calls. The Makefile uses `pkg-config
 libffi` when available, with Homebrew and common Unix fallbacks.
 
-Optional LLVM support is available for internal bytecode-to-LLVM IR backend
-work. It is disabled by default. For native executables without LLVM,
-`-c=native` serializes the post-macro C program and compiles it with `cc`,
-`clang`, or `gcc`. See [LLVM.md](docs/LLVM.md).
-
-```bash
-make CCCC_HAS_LLVM=1 LLVM_CONFIG=/opt/homebrew/opt/llvm/bin/llvm-config
-```
-
 ### Compile Natively (production)
 
 `-c=native` is the production path: CCCC preprocesses, expands compile-time macros, then hands the resulting C to a real system compiler. `-o <file>` is **required** to name the output executable; the temporary C source is removed after the build.
@@ -251,7 +242,7 @@ CCCC_NATIVE_CC=clang ./cccc -c=native -o program program.c
 ./cccc -c=native -I./include -DDEBUG -L./lib -lz -o app app.c
 ```
 
-Native mode runs CCCC's preprocessing and compile-time macro stages first, then passes serialized C to `CCCC_NATIVE_CC` when set, otherwise `cc`, `clang`, or `gcc`. `-I`, `-i`, `-D`, `-U`, `-L`, `-l`, `--std=`, and generated-output attribute policy from `--attr-target=` are forwarded through the frontend; VM-only options (bytecode output, disassembler, `--optimize`, debugger, profiler, `-0`…`-3` safety levels) are rejected in this mode. To run the binary afterwards, invoke it directly: `./program`. See [LLVM.md](docs/LLVM.md) for the planned bytecode-to-LLVM backend, which will provide a second native path.
+Native mode runs CCCC's preprocessing and compile-time macro stages first, then passes serialized C to `CCCC_NATIVE_CC` when set, otherwise `cc`, `clang`, or `gcc`. `-I`, `-i`, `-D`, `-U`, `-L`, `-l`, `--std=`, and generated-output attribute policy from `--attr-target=` are forwarded through the frontend; VM-only options (bytecode output, disassembler, `--optimize`, debugger, profiler, `-0`…`-3` safety levels) are rejected in this mode. To run the binary afterwards, invoke it directly: `./program`.
 
 ### Run in the VM
 

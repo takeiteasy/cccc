@@ -610,13 +610,6 @@ void cc_analyze_fusion_feed(CcFusionState *st, const CCCCInstrWord *text,
 void cc_analyze_fusion_finish(CcFusionState *st, FILE *out);
 
 //
-// llvm_backend.c
-//
-
-bool cc_llvm_backend_enabled(void);
-const char *cc_llvm_backend_version(void);
-
-//
 // debugger.c
 //
 
