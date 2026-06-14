@@ -1229,8 +1229,8 @@ If `node` is not a macro call, both functions return `node` unchanged
 (identity). If the named macro is not found or has not compiled, `node` is
 returned unchanged.
 
-Underlying functions: `__cccc_macroexpand_1(CCCC *vm, $node_t *node)` and
-`__cccc_macroexpand(CCCC *vm, $node_t *node)`.
+Underlying functions: `__cccc_macroexpand_1(VirtualMachine *vm, $node_t *node)` and
+`__cccc_macroexpand(VirtualMachine *vm, $node_t *node)`.
 
 ## API Reference
 

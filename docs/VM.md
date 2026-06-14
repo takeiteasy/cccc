@@ -30,13 +30,13 @@ Key properties:
 | `r18–r25` | `REG_S0` … `REG_S7` | Callee-saved registers |
 | `r26–r31` | `REG_T5` … `REG_T10` | Caller-saved temporaries |
 
-The floating-point register file (`fregs[32]`) uses the **same indices** but stores a tagged union (`CCCCFReg`).  Each slot carries a tag (`CCCC_FREG_F64`, `CCCC_FREG_F32`, `CCCC_FREG_V4F32`, `CCCC_FREG_V2F64`) so mixed-precision code is handled without silent reinterpretation.
+The floating-point register file (`fregs[32]`) uses the **same indices** but stores a tagged union (`FReg`).  Each slot carries a tag (`CCCC_FREG_F64`, `CCCC_FREG_F32`, `CCCC_FREG_V4F32`, `CCCC_FREG_V2F64`) so mixed-precision code is handled without silent reinterpretation.
 
 ### Memory Segments
 
 | Segment | Grows | Purpose |
 |---------|-------|---------|
-| **Text** | Upward | Bytecode instructions (`CCCCInstrWord`, 32-bit words) |
+| **Text** | Upward | Bytecode instructions (`InstrWord`, 32-bit words) |
 | **Data** | Upward | Global variables, string literals, static initialisers |
 | **Stack** | Downward | Activation records, locals, spilled arguments |
 | **Heap** | Upward | `malloc` / `free` when `--vm-heap` is active |

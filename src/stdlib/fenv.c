@@ -14,7 +14,7 @@ static long long wrap_feholdexcept(long long envp) { return (long long)feholdexc
 static long long wrap_fesetenv(long long envp) { return (long long)fesetenv((const fenv_t *)envp); }
 static long long wrap_feupdateenv(long long envp) { return (long long)feupdateenv((const fenv_t *)envp); }
 
-void register_fenv_functions(CCCC *vm) {
+void register_fenv_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "feclearexcept", (void*)wrap_feclearexcept, 1, 0);
     cc_register_cfunc(vm, "fegetexceptflag", (void*)wrap_fegetexceptflag, 2, 0);
     cc_register_cfunc(vm, "feraiseexcept", (void*)wrap_feraiseexcept, 1, 0);

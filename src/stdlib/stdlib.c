@@ -123,7 +123,7 @@ static unsigned long cccc_strtoul(const char *nptr, char **endptr, int base) {
 }
 
 // Register all stdlib.h functions
-void register_stdlib_functions(CCCC *vm) {
+void register_stdlib_functions(VirtualMachine *vm) {
     // Conversion functions
     cc_register_cfunc(vm, "atof", (void*)atof, 1, 1);       // returns double
     cc_register_cfunc(vm, "atoi", (void*)wrap_atoi, 1, 0);

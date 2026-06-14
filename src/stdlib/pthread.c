@@ -28,17 +28,17 @@ typedef struct CCCCPthreadValue {
     struct CCCCPthreadValue *next;
 } CCCCPthreadValue;
 
-struct CCCCPthreadKeyRecord {
+struct PthreadKeyRecord {
     int key;
     void (*destructor)(void *);
     int deleted;
-    struct CCCCPthreadKeyRecord *next;
+    struct PthreadKeyRecord *next;
 };
 
-struct CCCCThreadRecord {
+struct ThreadRecord {
     pthread_t host_thread;
-    CCCC *vm;
-    CCCCExecState exec;
+    VirtualMachine *vm;
+    ExecState exec;
     long long start_fn;
     void *arg;
     void *retval;
@@ -47,18 +47,18 @@ struct CCCCThreadRecord {
     int detached;
     int joined;
     CCCCPthreadValue *values;
-    struct CCCCThreadRecord *next;
+    struct ThreadRecord *next;
 };
 
-struct CCCCPthreadState {
-    CCCCThreadRecord main_thread;
+struct PthreadState {
+    ThreadRecord main_thread;
 };
 
-static CCCC *current_vm(void) {
+static VirtualMachine *current_vm(void) {
     return cccc_current_ffi_vm();
 }
 
-static void enable_pthread_runtime(CCCC *vm) {
+static void enable_pthread_runtime(VirtualMachine *vm) {
     if (!vm)
         return;
     // Current stack-canary checks assume one VM stack context. Pthread entry
@@ -67,9 +67,9 @@ static void enable_pthread_runtime(CCCC *vm) {
     vm->flags &= ~CCCC_STACK_CANARIES;
 }
 
-static CCCCPthreadState *pthread_state(CCCC *vm) {
+static PthreadState *pthread_state(VirtualMachine *vm) {
     if (!vm->pthread_state) {
-        vm->pthread_state = calloc(1, sizeof(CCCCPthreadState));
+        vm->pthread_state = calloc(1, sizeof(PthreadState));
         if (!vm->pthread_state)
             return NULL;
         vm->pthread_state->main_thread.vm = vm;
@@ -79,30 +79,30 @@ static CCCCPthreadState *pthread_state(CCCC *vm) {
     return vm->pthread_state;
 }
 
-static CCCCThreadRecord *current_thread(CCCC *vm) {
-    CCCCPthreadState *state = pthread_state(vm);
+static ThreadRecord *current_thread(VirtualMachine *vm) {
+    PthreadState *state = pthread_state(vm);
     if (!state)
         return NULL;
     return vm->active_thread ? vm->active_thread : &state->main_thread;
 }
 
-static void save_and_release_gil(CCCC *vm, CCCCExecState *state) {
+static void save_and_release_gil(VirtualMachine *vm, ExecState *state) {
     cccc_exec_state_save(vm, state);
     cccc_gil_release(vm);
 }
 
-static void acquire_and_restore_gil(CCCC *vm, const CCCCExecState *state) {
+static void acquire_and_restore_gil(VirtualMachine *vm, const ExecState *state) {
     cccc_gil_acquire(vm);
     cccc_exec_state_restore(vm, state);
 }
 
-static void link_thread(CCCC *vm, CCCCThreadRecord *rec) {
+static void link_thread(VirtualMachine *vm, ThreadRecord *rec) {
     rec->next = vm->thread_records;
     vm->thread_records = rec;
 }
 
-static void unlink_thread(CCCC *vm, CCCCThreadRecord *rec) {
-    CCCCThreadRecord **cur = &vm->thread_records;
+static void unlink_thread(VirtualMachine *vm, ThreadRecord *rec) {
+    ThreadRecord **cur = &vm->thread_records;
     while (*cur) {
         if (*cur == rec) {
             *cur = rec->next;
@@ -113,7 +113,7 @@ static void unlink_thread(CCCC *vm, CCCCThreadRecord *rec) {
     }
 }
 
-static void free_thread_record(CCCCThreadRecord *rec) {
+static void free_thread_record(ThreadRecord *rec) {
     if (!rec)
         return;
     CCCCPthreadValue *value = rec->values;
@@ -127,11 +127,11 @@ static void free_thread_record(CCCCThreadRecord *rec) {
 }
 
 static void *vm_thread_start(void *arg) {
-    CCCCThreadRecord *rec = arg;
-    CCCC *vm = rec->vm;
+    ThreadRecord *rec = arg;
+    VirtualMachine *vm = rec->vm;
 
     cccc_gil_acquire(vm);
-    CCCCThreadRecord *saved_active = vm->active_thread;
+    ThreadRecord *saved_active = vm->active_thread;
     vm->active_thread = rec;
     cccc_exec_state_restore(vm, &rec->exec);
     uint32_t saved_flags = vm->flags;
@@ -156,17 +156,17 @@ static void *vm_thread_start(void *arg) {
 
 static long long wrap_pthread_create(long long threadp, long long attrp,
                                      long long start_fn, long long arg) {
-    CCCC *vm = current_vm();
+    VirtualMachine *vm = current_vm();
     if (!vm || !threadp || !start_fn)
         return EINVAL;
 
-    CCCCPc entry = cc_byte_offset_to_pc(start_fn);
+    Pc entry = cc_byte_offset_to_pc(start_fn);
     if (entry == CCCC_INVALID_PC || entry > vm->text_ptr)
         return EINVAL;
 
     enable_pthread_runtime(vm);
 
-    CCCCThreadRecord *rec = calloc(1, sizeof(*rec));
+    ThreadRecord *rec = calloc(1, sizeof(*rec));
     if (!rec)
         return EAGAIN;
     rec->vm = vm;
@@ -189,7 +189,7 @@ static long long wrap_pthread_create(long long threadp, long long attrp,
         }
     }
 
-    CCCCExecState caller_state;
+    ExecState caller_state;
     save_and_release_gil(vm, &caller_state);
     int rc = pthread_create(&rec->host_thread, host_attr_ptr, vm_thread_start, rec);
     acquire_and_restore_gil(vm, &caller_state);
@@ -208,12 +208,12 @@ static long long wrap_pthread_create(long long threadp, long long attrp,
 }
 
 static long long wrap_pthread_join(long long thread, long long retvalp) {
-    CCCC *vm = current_vm();
-    CCCCThreadRecord *rec = (CCCCThreadRecord *)thread;
+    VirtualMachine *vm = current_vm();
+    ThreadRecord *rec = (ThreadRecord *)thread;
     if (!vm || !rec || rec->joined || rec->detached)
         return EINVAL;
 
-    CCCCExecState caller_state;
+    ExecState caller_state;
     save_and_release_gil(vm, &caller_state);
     void *retval = NULL;
     int rc = pthread_join(rec->host_thread, &retval);
@@ -232,14 +232,14 @@ static long long wrap_pthread_join(long long thread, long long retvalp) {
 }
 
 static long long wrap_pthread_detach(long long thread) {
-    CCCCThreadRecord *rec = (CCCCThreadRecord *)thread;
+    ThreadRecord *rec = (ThreadRecord *)thread;
     if (!rec || rec->joined)
         return EINVAL;
     int rc = pthread_detach(rec->host_thread);
     if (rc == 0) {
         rec->detached = 1;
         if (rec->exited) {
-            CCCC *vm = current_vm();
+            VirtualMachine *vm = current_vm();
             if (vm)
                 unlink_thread(vm, rec);
             free_thread_record(rec);
@@ -249,10 +249,10 @@ static long long wrap_pthread_detach(long long thread) {
 }
 
 static long long wrap_pthread_exit(long long retval) {
-    CCCC *vm = current_vm();
+    VirtualMachine *vm = current_vm();
     if (!vm)
         return 0;
-    CCCCThreadRecord *rec = current_thread(vm);
+    ThreadRecord *rec = current_thread(vm);
     if (rec)
         rec->retval = (void *)retval;
     vm->regs[REG_A0] = retval;
@@ -261,8 +261,8 @@ static long long wrap_pthread_exit(long long retval) {
 }
 
 static long long wrap_pthread_self(void) {
-    CCCC *vm = current_vm();
-    CCCCThreadRecord *rec = vm ? current_thread(vm) : NULL;
+    VirtualMachine *vm = current_vm();
+    ThreadRecord *rec = vm ? current_thread(vm) : NULL;
     return (long long)rec;
 }
 
@@ -329,11 +329,11 @@ static long long wrap_pthread_mutex_destroy(long long mutexp) {
 }
 
 static long long wrap_pthread_mutex_lock(long long mutexp) {
-    CCCC *vm = current_vm();
+    VirtualMachine *vm = current_vm();
     pthread_mutex_t *host = ensure_mutex((CCCCUserMutex *)mutexp);
     if (!vm || !host)
         return EINVAL;
-    CCCCExecState caller_state;
+    ExecState caller_state;
     save_and_release_gil(vm, &caller_state);
     int rc = pthread_mutex_lock(host);
     acquire_and_restore_gil(vm, &caller_state);
@@ -377,12 +377,12 @@ static long long wrap_pthread_cond_destroy(long long condp) {
 }
 
 static long long wrap_pthread_cond_wait(long long condp, long long mutexp) {
-    CCCC *vm = current_vm();
+    VirtualMachine *vm = current_vm();
     pthread_cond_t *cond = ensure_cond((CCCCUserCond *)condp);
     pthread_mutex_t *mutex = ensure_mutex((CCCCUserMutex *)mutexp);
     if (!vm || !cond || !mutex)
         return EINVAL;
-    CCCCExecState caller_state;
+    ExecState caller_state;
     save_and_release_gil(vm, &caller_state);
     int rc = pthread_cond_wait(cond, mutex);
     acquire_and_restore_gil(vm, &caller_state);
@@ -391,12 +391,12 @@ static long long wrap_pthread_cond_wait(long long condp, long long mutexp) {
 
 static long long wrap_pthread_cond_timedwait(long long condp, long long mutexp,
                                              long long abstimep) {
-    CCCC *vm = current_vm();
+    VirtualMachine *vm = current_vm();
     pthread_cond_t *cond = ensure_cond((CCCCUserCond *)condp);
     pthread_mutex_t *mutex = ensure_mutex((CCCCUserMutex *)mutexp);
     if (!vm || !cond || !mutex || !abstimep)
         return EINVAL;
-    CCCCExecState caller_state;
+    ExecState caller_state;
     save_and_release_gil(vm, &caller_state);
     int rc = pthread_cond_timedwait(cond, mutex, (const struct timespec *)abstimep);
     acquire_and_restore_gil(vm, &caller_state);
@@ -413,18 +413,18 @@ static long long wrap_pthread_cond_broadcast(long long condp) {
     return cond ? pthread_cond_broadcast(cond) : EINVAL;
 }
 
-static CCCCPthreadKeyRecord *find_key(CCCC *vm, int key) {
-    for (CCCCPthreadKeyRecord *rec = vm->pthread_keys; rec; rec = rec->next)
+static PthreadKeyRecord *find_key(VirtualMachine *vm, int key) {
+    for (PthreadKeyRecord *rec = vm->pthread_keys; rec; rec = rec->next)
         if (rec->key == key)
             return rec;
     return NULL;
 }
 
 static long long wrap_pthread_key_create(long long keyp, long long destructor) {
-    CCCC *vm = current_vm();
+    VirtualMachine *vm = current_vm();
     if (!vm || !keyp)
         return EINVAL;
-    CCCCPthreadKeyRecord *rec = calloc(1, sizeof(*rec));
+    PthreadKeyRecord *rec = calloc(1, sizeof(*rec));
     if (!rec)
         return EAGAIN;
     rec->key = ++vm->pthread_next_key;
@@ -437,8 +437,8 @@ static long long wrap_pthread_key_create(long long keyp, long long destructor) {
 }
 
 static long long wrap_pthread_key_delete(long long key) {
-    CCCC *vm = current_vm();
-    CCCCPthreadKeyRecord *rec = vm ? find_key(vm, (int)key) : NULL;
+    VirtualMachine *vm = current_vm();
+    PthreadKeyRecord *rec = vm ? find_key(vm, (int)key) : NULL;
     if (!rec || rec->deleted)
         return EINVAL;
     rec->deleted = 1;
@@ -446,11 +446,11 @@ static long long wrap_pthread_key_delete(long long key) {
 }
 
 static long long wrap_pthread_getspecific(long long key) {
-    CCCC *vm = current_vm();
-    CCCCThreadRecord *thread = vm ? current_thread(vm) : NULL;
+    VirtualMachine *vm = current_vm();
+    ThreadRecord *thread = vm ? current_thread(vm) : NULL;
     if (!vm || !thread)
         return 0;
-    CCCCPthreadKeyRecord *keyrec = find_key(vm, (int)key);
+    PthreadKeyRecord *keyrec = find_key(vm, (int)key);
     if (!keyrec || keyrec->deleted)
         return 0;
     for (CCCCPthreadValue *value = thread->values; value; value = value->next)
@@ -460,9 +460,9 @@ static long long wrap_pthread_getspecific(long long key) {
 }
 
 static long long wrap_pthread_setspecific(long long key, long long value) {
-    CCCC *vm = current_vm();
-    CCCCThreadRecord *thread = vm ? current_thread(vm) : NULL;
-    CCCCPthreadKeyRecord *keyrec = vm ? find_key(vm, (int)key) : NULL;
+    VirtualMachine *vm = current_vm();
+    ThreadRecord *thread = vm ? current_thread(vm) : NULL;
+    PthreadKeyRecord *keyrec = vm ? find_key(vm, (int)key) : NULL;
     if (!thread || !keyrec || keyrec->deleted)
         return EINVAL;
     for (CCCCPthreadValue *cur = thread->values; cur; cur = cur->next) {
@@ -501,7 +501,7 @@ static long long wrap_pthread_attr_setstacksize(long long attrp, long long stack
 
 static long long wrap_pthread_attr_getstack(long long attrp, long long stackaddrp,
                                             long long stacksizep) {
-    CCCC *vm = current_vm();
+    VirtualMachine *vm = current_vm();
     CCCCUserAttr *attr = (CCCCUserAttr *)attrp;
     if (!vm || !attr)
         return EINVAL;
@@ -516,7 +516,7 @@ static long long wrap_pthread_attr_getstack(long long attrp, long long stackaddr
     return 0;
 }
 
-void register_pthread_functions(CCCC *vm) {
+void register_pthread_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "pthread_create", (void *)wrap_pthread_create, 4, 0);
     cc_register_cfunc(vm, "pthread_join", (void *)wrap_pthread_join, 2, 0);
     cc_register_cfunc(vm, "pthread_detach", (void *)wrap_pthread_detach, 1, 0);
@@ -544,14 +544,14 @@ void register_pthread_functions(CCCC *vm) {
     cc_register_cfunc(vm, "pthread_attr_getstack", (void *)wrap_pthread_attr_getstack, 3, 0);
 }
 
-void cccc_pthread_cleanup(CCCC *vm) {
+void cccc_pthread_cleanup(VirtualMachine *vm) {
     if (!vm)
         return;
-    CCCCThreadRecord *main_thread =
+    ThreadRecord *main_thread =
         vm->pthread_state ? &vm->pthread_state->main_thread : NULL;
-    CCCCThreadRecord *rec = vm->thread_records;
+    ThreadRecord *rec = vm->thread_records;
     while (rec) {
-        CCCCThreadRecord *next = rec->next;
+        ThreadRecord *next = rec->next;
         if (rec != main_thread) {
             if (!rec->joined && !rec->detached)
                 pthread_detach(rec->host_thread);
@@ -570,9 +570,9 @@ void cccc_pthread_cleanup(CCCC *vm) {
     }
     vm->thread_records = NULL;
 
-    CCCCPthreadKeyRecord *key = vm->pthread_keys;
+    PthreadKeyRecord *key = vm->pthread_keys;
     while (key) {
-        CCCCPthreadKeyRecord *next = key->next;
+        PthreadKeyRecord *next = key->next;
         free(key);
         key = next;
     }
@@ -582,11 +582,11 @@ void cccc_pthread_cleanup(CCCC *vm) {
     vm->pthread_state = NULL;
 }
 #else
-void register_pthread_functions(CCCC *vm) {
+void register_pthread_functions(VirtualMachine *vm) {
     (void)vm;
 }
 
-void cccc_pthread_cleanup(CCCC *vm) {
+void cccc_pthread_cleanup(VirtualMachine *vm) {
     (void)vm;
 }
 #endif

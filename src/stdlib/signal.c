@@ -14,7 +14,7 @@ void _cccc_sig_shim(int sig) {
     }
 }
 
-void register_signal_functions(CCCC *vm) {
+void register_signal_functions(VirtualMachine *vm) {
     /* signal() and raise() are handled via VSIGNAL/VRAISE opcodes;
        no FFI registration is needed */
     (void)vm;

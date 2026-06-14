@@ -24,19 +24,19 @@
 #include "./internal.h"
 
 // External declaration from relfection.c
-extern CCCC *__cccc_current_vm;
+extern VirtualMachine *__cccc_current_vm;
 
 // Forward declarations for reflection API functions (to register as FFI)
-extern CCCC *__cccc_get_vm(void);
-extern const char *__cccc_gensym(CCCC *vm, const char *prefix);
-extern Token *__cccc_ast_current_token(CCCC *vm);
-extern Token *__cccc_ast_synthetic_token(CCCC *vm, const char *label);
+extern VirtualMachine *__cccc_get_vm(void);
+extern const char *__cccc_gensym(VirtualMachine *vm, const char *prefix);
+extern Token *__cccc_ast_current_token(VirtualMachine *vm);
+extern Token *__cccc_ast_synthetic_token(VirtualMachine *vm, const char *label);
 extern Token *__cccc_ast_token_from_node(Node *node);
 extern Node *__cccc_ast_set_token(Node *node, Token *tok);
 extern Node *__cccc_ast_copy_location(Node *dst, Node *src);
-extern Type *__cccc_ast_find_type(CCCC *vm, const char *name);
-extern bool __cccc_ast_type_exists(CCCC *vm, const char *name);
-extern Type *__cccc_ast_get_type(CCCC *vm, const char *name);
+extern Type *__cccc_ast_find_type(VirtualMachine *vm, const char *name);
+extern bool __cccc_ast_type_exists(VirtualMachine *vm, const char *name);
+extern Type *__cccc_ast_get_type(VirtualMachine *vm, const char *name);
 extern TypeKind __cccc_ast_type_kind(Type *ty);
 extern int __cccc_ast_type_size(Type *ty);
 extern int __cccc_ast_type_align(Type *ty);
@@ -49,29 +49,29 @@ extern int __cccc_ast_type_param_count(Type *ty);
 extern Type *__cccc_ast_type_param_at(Type *ty, int index);
 extern bool __cccc_ast_type_is_variadic(Type *ty);
 extern const char *__cccc_ast_type_name(Type *ty);
-extern Node *__cccc_ast_int_literal(CCCC *vm, int64_t value);
-extern Node *__cccc_ast_float_literal(CCCC *vm, double value);
-extern Node *__cccc_ast_string_literal(CCCC *vm, const char *str);
-extern Node *__cccc_ast_var_ref(CCCC *vm, const char *name);
-extern Node *__cccc_ast_binary(CCCC *vm, NodeKind op, Node *left, Node *right);
-extern Node *__cccc_ast_unary(CCCC *vm, NodeKind op, Node *operand);
-extern Node *__cccc_ast_cast(CCCC *vm, Node *expr, Type *target_type);
-extern Node *__cccc_ast_return(CCCC *vm, Node *expr);
-extern Node *__cccc_ast_if(CCCC *vm, Node *cond, Node *then_body, Node *else_body);
-extern Node *__cccc_ast_switch(CCCC *vm, Node *cond);
-extern void __cccc_ast_switch_add_case(CCCC *vm, Node *switch_node, Node *value,
+extern Node *__cccc_ast_int_literal(VirtualMachine *vm, int64_t value);
+extern Node *__cccc_ast_float_literal(VirtualMachine *vm, double value);
+extern Node *__cccc_ast_string_literal(VirtualMachine *vm, const char *str);
+extern Node *__cccc_ast_var_ref(VirtualMachine *vm, const char *name);
+extern Node *__cccc_ast_binary(VirtualMachine *vm, NodeKind op, Node *left, Node *right);
+extern Node *__cccc_ast_unary(VirtualMachine *vm, NodeKind op, Node *operand);
+extern Node *__cccc_ast_cast(VirtualMachine *vm, Node *expr, Type *target_type);
+extern Node *__cccc_ast_return(VirtualMachine *vm, Node *expr);
+extern Node *__cccc_ast_if(VirtualMachine *vm, Node *cond, Node *then_body, Node *else_body);
+extern Node *__cccc_ast_switch(VirtualMachine *vm, Node *cond);
+extern void __cccc_ast_switch_add_case(VirtualMachine *vm, Node *switch_node, Node *value,
                                 Node *body);
-extern void __cccc_ast_switch_set_default(CCCC *vm, Node *switch_node, Node *body);
-extern Node *__cccc_ast_block_add_stmt(CCCC *vm, Node *block, Node *stmt);
-extern Node *__cccc_ast_block_add_current_stmt(CCCC *vm, Node *stmt);
-extern void __cccc_ast_switch_add_current_case(CCCC *vm, Node *value, Node *body);
-extern void __cccc_ast_switch_set_current_default(CCCC *vm, Node *body);
-extern int __cccc_ast_enum_count(CCCC *vm, Type *enum_type);
-extern EnumConstant *__cccc_ast_enum_at(CCCC *vm, Type *enum_type, int index);
+extern void __cccc_ast_switch_set_default(VirtualMachine *vm, Node *switch_node, Node *body);
+extern Node *__cccc_ast_block_add_stmt(VirtualMachine *vm, Node *block, Node *stmt);
+extern Node *__cccc_ast_block_add_current_stmt(VirtualMachine *vm, Node *stmt);
+extern void __cccc_ast_switch_add_current_case(VirtualMachine *vm, Node *value, Node *body);
+extern void __cccc_ast_switch_set_current_default(VirtualMachine *vm, Node *body);
+extern int __cccc_ast_enum_count(VirtualMachine *vm, Type *enum_type);
+extern EnumConstant *__cccc_ast_enum_at(VirtualMachine *vm, Type *enum_type, int index);
 extern const char *__cccc_ast_enum_constant_name(EnumConstant *ec);
 extern int __cccc_ast_enum_constant_value(EnumConstant *ec);
-extern int __cccc_ast_global_count(CCCC *vm);
-extern Obj *__cccc_ast_global_at(CCCC *vm, int index);
+extern int __cccc_ast_global_count(VirtualMachine *vm);
+extern Obj *__cccc_ast_global_at(VirtualMachine *vm, int index);
 extern const char *__cccc_ast_obj_name(Obj *obj);
 extern Type *__cccc_ast_obj_type(Obj *obj);
 extern bool __cccc_ast_obj_is_function(Obj *obj);
@@ -82,50 +82,50 @@ extern const char *__cccc_attr_target_name(AttrTarget *target);
 extern Type *__cccc_attr_target_type(AttrTarget *target);
 extern Obj *__cccc_attr_target_obj(AttrTarget *target);
 extern Token *__cccc_attr_target_token(AttrTarget *target);
-extern Type *__cccc_ast_make_pointer(CCCC *vm, Type *base);
-extern Type *__cccc_ast_make_array(CCCC *vm, Type *base, int len);
+extern Type *__cccc_ast_make_pointer(VirtualMachine *vm, Type *base);
+extern Type *__cccc_ast_make_array(VirtualMachine *vm, Type *base, int len);
 
 // Function generation
-extern Obj *__cccc_ast_function(CCCC *vm, const char *name, Type *return_type);
-extern void __cccc_ast_function_add_param(CCCC *vm, Obj *fn, const char *name,
+extern Obj *__cccc_ast_function(VirtualMachine *vm, const char *name, Type *return_type);
+extern void __cccc_ast_function_add_param(VirtualMachine *vm, Obj *fn, const char *name,
                                     Type *type);
-extern void __cccc_ast_function_set_body(CCCC *vm, Obj *fn, Node *body);
+extern void __cccc_ast_function_set_body(VirtualMachine *vm, Obj *fn, Node *body);
 extern void __cccc_ast_function_set_static(Obj *fn, bool is_static);
 extern void __cccc_ast_function_set_inline(Obj *fn, bool is_inline);
 extern void __cccc_ast_function_set_variadic(Obj *fn, bool is_variadic);
-extern Node *__cccc_ast_publish(CCCC *vm, Obj *obj, Token *tok);
-extern Node *__cccc_ast_publish_type(CCCC *vm, Type *ty, Token *tok);
-extern Node *__cccc_ast_param_ref(CCCC *vm, Obj *fn, const char *name);
-extern void __cccc_emit_directive(CCCC *vm, const char *line);
+extern Node *__cccc_ast_publish(VirtualMachine *vm, Obj *obj, Token *tok);
+extern Node *__cccc_ast_publish_type(VirtualMachine *vm, Type *ty, Token *tok);
+extern Node *__cccc_ast_param_ref(VirtualMachine *vm, Obj *fn, const char *name);
+extern void __cccc_emit_directive(VirtualMachine *vm, const char *line);
 
 // Ticket #152: global variable generation
-extern Obj  *__cccc_ast_global_var(CCCC *vm, const char *name, Type *ty);
-extern void  __cccc_ast_global_var_set_init_data(CCCC *vm, Obj *var,
+extern Obj  *__cccc_ast_global_var(VirtualMachine *vm, const char *name, Type *ty);
+extern void  __cccc_ast_global_var_set_init_data(VirtualMachine *vm, Obj *var,
                                                 const char *data, int len);
 extern void  __cccc_ast_global_var_set_static(Obj *var, bool is_static);
 
 // Ticket #148: function-building context (push/pop current_fn for $quote)
-extern void __cccc_ast_push_fn(CCCC *vm, Obj *fn);
-extern void __cccc_ast_pop_fn(CCCC *vm);
-extern void __cccc_ast_push_block(CCCC *vm, Node *block);
-extern void __cccc_ast_pop_block(CCCC *vm);
-extern void __cccc_ast_push_struct(CCCC *vm, Type *ty);
-extern void __cccc_ast_pop_struct(CCCC *vm);
-extern void __cccc_ast_push_switch(CCCC *vm, Node *switch_node);
-extern void __cccc_ast_pop_switch(CCCC *vm);
-extern void __cccc_ast_push_enum(CCCC *vm, Type *ty);
-extern void __cccc_ast_pop_enum(CCCC *vm);
+extern void __cccc_ast_push_fn(VirtualMachine *vm, Obj *fn);
+extern void __cccc_ast_pop_fn(VirtualMachine *vm);
+extern void __cccc_ast_push_block(VirtualMachine *vm, Node *block);
+extern void __cccc_ast_pop_block(VirtualMachine *vm);
+extern void __cccc_ast_push_struct(VirtualMachine *vm, Type *ty);
+extern void __cccc_ast_pop_struct(VirtualMachine *vm);
+extern void __cccc_ast_push_switch(VirtualMachine *vm, Node *switch_node);
+extern void __cccc_ast_pop_switch(VirtualMachine *vm);
+extern void __cccc_ast_push_enum(VirtualMachine *vm, Type *ty);
+extern void __cccc_ast_pop_enum(VirtualMachine *vm);
 
 // Ticket #58: AST dump
-extern void __cccc_dump_tree(CCCC *vm, Node *node);
-extern const char *__cccc_dump_tree_to_string(CCCC *vm, Node *node);
-extern void __cccc_dump_ast_gen(CCCC *vm, Node *node);
-extern const char *__cccc_dump_ast_gen_to_string(CCCC *vm, Node *node);
+extern void __cccc_dump_tree(VirtualMachine *vm, Node *node);
+extern const char *__cccc_dump_tree_to_string(VirtualMachine *vm, Node *node);
+extern void __cccc_dump_ast_gen(VirtualMachine *vm, Node *node);
+extern const char *__cccc_dump_ast_gen_to_string(VirtualMachine *vm, Node *node);
 
-void cc_record_emit_source(CCCC *vm, const char *source) {
+void cc_record_emit_source(VirtualMachine *vm, const char *source) {
     if (!vm || !source || !*source)
         return;
-    CCCCEmitEvent *ev = arena_alloc(&vm->compiler.parser_arena, sizeof(*ev));
+    EmitEvent *ev = arena_alloc(&vm->compiler.parser_arena, sizeof(*ev));
     memset(ev, 0, sizeof(*ev));
     ev->kind = CCCC_EMIT_SOURCE;
     ev->source = arena_strdup(vm, source);
@@ -136,13 +136,13 @@ void cc_record_emit_source(CCCC *vm, const char *source) {
     vm->compiler.emit_events_tail = ev;
 }
 
-void cc_record_emit_object(CCCC *vm, Obj *obj) {
+void cc_record_emit_object(VirtualMachine *vm, Obj *obj) {
     if (!vm || !obj || !obj->is_macro_generated)
         return;
-    for (CCCCEmitEvent *ev = vm->compiler.emit_events_head; ev; ev = ev->next)
+    for (EmitEvent *ev = vm->compiler.emit_events_head; ev; ev = ev->next)
         if (ev->kind == CCCC_EMIT_OBJECT && ev->obj == obj)
             return;
-    CCCCEmitEvent *ev = arena_alloc(&vm->compiler.parser_arena, sizeof(*ev));
+    EmitEvent *ev = arena_alloc(&vm->compiler.parser_arena, sizeof(*ev));
     memset(ev, 0, sizeof(*ev));
     ev->kind = CCCC_EMIT_OBJECT;
     ev->obj = obj;
@@ -154,87 +154,87 @@ void cc_record_emit_object(CCCC *vm, Obj *obj) {
 }
 
 // Ticket #78: source-located macro diagnostics
-extern void __cccc_macro_error_at(CCCC *vm, Node *node, const char *fmt, ...);
-extern void __cccc_macro_warning_at(CCCC *vm, Node *node, const char *fmt, ...);
+extern void __cccc_macro_error_at(VirtualMachine *vm, Node *node, const char *fmt, ...);
+extern void __cccc_macro_warning_at(VirtualMachine *vm, Node *node, const char *fmt, ...);
 
 // Previously unregistered statement builders (existing functions, now exposed)
-extern Node *__cccc_ast_block(CCCC *vm, Node **stmts, int count);
-extern Node *__cccc_ast_expr_stmt(CCCC *vm, Node *expr);
+extern Node *__cccc_ast_block(VirtualMachine *vm, Node **stmts, int count);
+extern Node *__cccc_ast_expr_stmt(VirtualMachine *vm, Node *expr);
 
 // Ticket #77: hygienic local variable injection
-extern Node *__cccc_ast_local_var(CCCC *vm, const char *name, Type *ty);
-extern Node *__cccc_ast_local_var_unique(CCCC *vm, Type *ty);
+extern Node *__cccc_ast_local_var(VirtualMachine *vm, const char *name, Type *ty);
+extern Node *__cccc_ast_local_var_unique(VirtualMachine *vm, Type *ty);
 
 // Ticket #51: new expression/statement builders
-extern Node *__cccc_ast_assign(CCCC *vm, Node *target, Node *value);
-extern Node *__cccc_ast_member(CCCC *vm, Node *obj, const char *name);
-extern Node *__cccc_ast_funcall(CCCC *vm, Node *callee, Node **args, int n);
-extern Node *__cccc_ast_while(CCCC *vm, Node *cond, Node *body);
-extern Node *__cccc_ast_for(CCCC *vm, Node *init, Node *cond, Node *inc, Node *body);
-extern Node *__cccc_ast_do_while(CCCC *vm, Node *body, Node *cond);
+extern Node *__cccc_ast_assign(VirtualMachine *vm, Node *target, Node *value);
+extern Node *__cccc_ast_member(VirtualMachine *vm, Node *obj, const char *name);
+extern Node *__cccc_ast_funcall(VirtualMachine *vm, Node *callee, Node **args, int n);
+extern Node *__cccc_ast_while(VirtualMachine *vm, Node *cond, Node *body);
+extern Node *__cccc_ast_for(VirtualMachine *vm, Node *init, Node *cond, Node *inc, Node *body);
+extern Node *__cccc_ast_do_while(VirtualMachine *vm, Node *body, Node *cond);
 
 // Ticket #1: quasi-quoting; Ticket #172: list splice helper
-extern Node *__cccc_quote(CCCC *vm, const char *tmpl, ...);
-extern Node *__cccc_quote_n(CCCC *vm, const char *tmpl, Node **nodes, int count);
-extern Node *__cccc_node_list(CCCC *vm, Node **nodes, int count);
+extern Node *__cccc_quote(VirtualMachine *vm, const char *tmpl, ...);
+extern Node *__cccc_quote_n(VirtualMachine *vm, const char *tmpl, Node **nodes, int count);
+extern Node *__cccc_node_list(VirtualMachine *vm, Node **nodes, int count);
 
 // Ticket #171: new expression builders
-extern Node  *__cccc_ast_cond(CCCC *vm, Node *cond, Node *then_expr, Node *else_expr);
-extern Node  *__cccc_ast_null(CCCC *vm);
-extern Node  *__cccc_ast_sizeof_type(CCCC *vm, Type *ty);
-extern Node  *__cccc_ast_alignof_type(CCCC *vm, Type *ty);
-extern Node  *__cccc_ast_sizeof_expr(CCCC *vm, Node *expr);
-extern Node  *__cccc_ast_subscript(CCCC *vm, Node *arr, Node *idx);
-extern Node  *__cccc_ast_comma(CCCC *vm, Node *lhs, Node *rhs);
+extern Node  *__cccc_ast_cond(VirtualMachine *vm, Node *cond, Node *then_expr, Node *else_expr);
+extern Node  *__cccc_ast_null(VirtualMachine *vm);
+extern Node  *__cccc_ast_sizeof_type(VirtualMachine *vm, Type *ty);
+extern Node  *__cccc_ast_alignof_type(VirtualMachine *vm, Type *ty);
+extern Node  *__cccc_ast_sizeof_expr(VirtualMachine *vm, Node *expr);
+extern Node  *__cccc_ast_subscript(VirtualMachine *vm, Node *arr, Node *idx);
+extern Node  *__cccc_ast_comma(VirtualMachine *vm, Node *lhs, Node *rhs);
 
 // Ticket #171: qualified type builders
-extern Type  *__cccc_ast_make_const(CCCC *vm, Type *ty);
-extern Type  *__cccc_ast_make_volatile(CCCC *vm, Type *ty);
+extern Type  *__cccc_ast_make_const(VirtualMachine *vm, Type *ty);
+extern Type  *__cccc_ast_make_volatile(VirtualMachine *vm, Type *ty);
 
 // Ticket #171: function prototype builder
-extern Obj   *__cccc_ast_function_prototype(CCCC *vm, const char *name,
+extern Obj   *__cccc_ast_function_prototype(VirtualMachine *vm, const char *name,
                                             Type *return_type);
 
 // Ticket #171: struct/union/enum/typedef type builders
-extern Type  *__cccc_ast_make_struct(CCCC *vm, const char *name);
-extern Type  *__cccc_ast_make_union(CCCC *vm, const char *name);
-extern Type  *__cccc_ast_struct_add_field(CCCC *vm, Type *ty, const char *name,
+extern Type  *__cccc_ast_make_struct(VirtualMachine *vm, const char *name);
+extern Type  *__cccc_ast_make_union(VirtualMachine *vm, const char *name);
+extern Type  *__cccc_ast_struct_add_field(VirtualMachine *vm, Type *ty, const char *name,
                                           Type *field_type);
-extern Type  *__cccc_ast_struct_add_current_field(CCCC *vm, const char *name,
+extern Type  *__cccc_ast_struct_add_current_field(VirtualMachine *vm, const char *name,
                                                   Type *field_type);
-extern Type  *__cccc_ast_make_enum(CCCC *vm, const char *name);
-extern void   __cccc_ast_enum_add_constant(CCCC *vm, Type *ty, const char *name,
+extern Type  *__cccc_ast_make_enum(VirtualMachine *vm, const char *name);
+extern void   __cccc_ast_enum_add_constant(VirtualMachine *vm, Type *ty, const char *name,
                                            int value);
-extern void   __cccc_ast_enum_add_current_constant(CCCC *vm, const char *name,
+extern void   __cccc_ast_enum_add_current_constant(VirtualMachine *vm, const char *name,
                                                    int value);
-extern Type  *__cccc_ast_make_typedef(CCCC *vm, const char *name, Type *underlying);
+extern Type  *__cccc_ast_make_typedef(VirtualMachine *vm, const char *name, Type *underlying);
 
 // Ticket #188: comptime variable access
-extern int64_t __cccc_get_comptime_int(CCCC *vm, const char *name);
-extern double  __cccc_get_comptime_float(CCCC *vm, const char *name);
-extern Node   *__cccc_get_comptime_var(CCCC *vm, const char *name);
-extern Node   *__cccc_get_comptime_ptr(CCCC *vm, const char *name);
-extern Node   *__cccc_get_comptime_member(CCCC *vm, const char *var_name,
+extern int64_t __cccc_get_comptime_int(VirtualMachine *vm, const char *name);
+extern double  __cccc_get_comptime_float(VirtualMachine *vm, const char *name);
+extern Node   *__cccc_get_comptime_var(VirtualMachine *vm, const char *name);
+extern Node   *__cccc_get_comptime_ptr(VirtualMachine *vm, const char *name);
+extern Node   *__cccc_get_comptime_member(VirtualMachine *vm, const char *var_name,
                                          const char *field);
 
 // Ticket #189: constexpr variable access
-extern Node   *__cccc_get_constexpr_value(CCCC *vm, const char *name);
+extern Node   *__cccc_get_constexpr_value(VirtualMachine *vm, const char *name);
 
 // Ticket #296: initializer builders
-extern Node   *__cccc_ast_compound_literal(CCCC *vm, Type *ty, Node **inits, int n);
-extern Node   *__cccc_ast_init_array(CCCC *vm, Type *elem_ty, Node **elems, int n);
-extern Node   *__cccc_ast_init_struct(CCCC *vm, Type *ty, const char **fields,
+extern Node   *__cccc_ast_compound_literal(VirtualMachine *vm, Type *ty, Node **inits, int n);
+extern Node   *__cccc_ast_init_array(VirtualMachine *vm, Type *elem_ty, Node **elems, int n);
+extern Node   *__cccc_ast_init_struct(VirtualMachine *vm, Type *ty, const char **fields,
                                      Node **values, int n);
 
 // Ticket #277: Lisp-style single-macro expansion
-extern Node   *__cccc_macroexpand_1(CCCC *vm, Node *node);
-extern Node   *__cccc_macroexpand(CCCC *vm, Node *node);
-extern int     __cccc_ast_vararg_count(CCCC *vm);
-extern Node   *__cccc_ast_vararg_at(CCCC *vm, int index);
-extern Node   **__cccc_ast_varargs_as_array(CCCC *vm);
-extern const char *__cccc_ast_vararg_str_at(CCCC *vm, int index);
+extern Node   *__cccc_macroexpand_1(VirtualMachine *vm, Node *node);
+extern Node   *__cccc_macroexpand(VirtualMachine *vm, Node *node);
+extern int     __cccc_ast_vararg_count(VirtualMachine *vm);
+extern Node   *__cccc_ast_vararg_at(VirtualMachine *vm, int index);
+extern Node   **__cccc_ast_varargs_as_array(VirtualMachine *vm);
+extern const char *__cccc_ast_vararg_str_at(VirtualMachine *vm, int index);
 
-int __cccc_ast_vararg_count(CCCC *vm) {
+int __cccc_ast_vararg_count(VirtualMachine *vm) {
     return vm ? vm->compiler.macro_vararg_count : 0;
 }
 
@@ -242,7 +242,7 @@ int $vararg_count(void) {
     return __cccc_ast_vararg_count(__cccc_get_vm());
 }
 
-Node *__cccc_ast_vararg_at(CCCC *vm, int index) {
+Node *__cccc_ast_vararg_at(VirtualMachine *vm, int index) {
     if (!vm)
         return NULL;
     if (vm->compiler.macro_vararg_string_mode)
@@ -259,7 +259,7 @@ Node *$vararg_at(int index) {
     return __cccc_ast_vararg_at(__cccc_get_vm(), index);
 }
 
-Node **__cccc_ast_varargs_as_array(CCCC *vm) {
+Node **__cccc_ast_varargs_as_array(VirtualMachine *vm) {
     if (!vm)
         return NULL;
     if (vm->compiler.macro_vararg_string_mode)
@@ -274,7 +274,7 @@ Node **$vararg_as_array(void) {
     return __cccc_ast_varargs_as_array(__cccc_get_vm());
 }
 
-const char *__cccc_ast_vararg_str_at(CCCC *vm, int index) {
+const char *__cccc_ast_vararg_str_at(VirtualMachine *vm, int index) {
     if (!vm)
         return NULL;
     if (!vm->compiler.macro_vararg_string_mode)
@@ -292,7 +292,7 @@ const char *$vararg_str_at(int index) {
 }
 
 // Register reflection API functions as FFI
-static void register_reflection_ffi(CCCC *vm) {
+static void register_reflection_ffi(VirtualMachine *vm) {
     // VM accessor
     cc_register_cfunc(vm, "__cccc_get_vm", (void *)__cccc_get_vm, 0, 0);
     cc_register_cfunc(vm, "__cccc_gensym", (void *)__cccc_gensym, 2, 0);
@@ -565,9 +565,9 @@ static void register_reflection_ffi(CCCC *vm) {
                       (void *)$vararg_str_at, 1, 0);
 }
 
-static void init_vm_segments_for_macros(CCCC *vm);
+static void init_vm_segments_for_macros(VirtualMachine *vm);
 
-static Token *copy_macro_token(CCCC *vm, Token *tok) {
+static Token *copy_macro_token(VirtualMachine *vm, Token *tok) {
     Token *copy = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     *copy = *tok;
     copy->next = NULL;
@@ -575,7 +575,7 @@ static Token *copy_macro_token(CCCC *vm, Token *tok) {
     return copy;
 }
 
-static Token *new_macro_punct(CCCC *vm, char *str, Token *tmpl) {
+static Token *new_macro_punct(VirtualMachine *vm, char *str, Token *tmpl) {
     Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     memset(tok, 0, sizeof(Token));
     tok->kind = TK_PUNCT;
@@ -590,7 +590,7 @@ static Token *new_macro_punct(CCCC *vm, char *str, Token *tmpl) {
     return tok;
 }
 
-static Token *new_macro_eof(CCCC *vm, Token *tmpl) {
+static Token *new_macro_eof(VirtualMachine *vm, Token *tmpl) {
     Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     memset(tok, 0, sizeof(Token));
     tok->kind = TK_EOF;
@@ -608,7 +608,7 @@ static Token *new_macro_eof(CCCC *vm, Token *tmpl) {
 // Synthesize a marker token consumed by preprocess2 to snapshot/restore
 // vm->compiler.macros around a single comptime function body's tokens,
 // isolating its #define/#undef from sibling comptime functions (#283).
-static Token *new_macro_scope_marker(CCCC *vm, TokenKind kind, Token *tmpl) {
+static Token *new_macro_scope_marker(VirtualMachine *vm, TokenKind kind, Token *tmpl) {
     Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     memset(tok, 0, sizeof(Token));
     tok->kind = kind;
@@ -623,7 +623,7 @@ static Token *new_macro_scope_marker(CCCC *vm, TokenKind kind, Token *tmpl) {
     return tok;
 }
 
-static Token *append_macro_prototype(CCCC *vm, Token *cur, MacroFn *pm) {
+static Token *append_macro_prototype(VirtualMachine *vm, Token *cur, MacroFn *pm) {
     Token *last = pm->body_tokens;
     for (Token *tok = pm->body_tokens; tok && tok->kind != TK_EOF;
          tok = tok->next) {
@@ -636,7 +636,7 @@ static Token *append_macro_prototype(CCCC *vm, Token *cur, MacroFn *pm) {
     return cur;
 }
 
-static Token *append_macro_definition(CCCC *vm, Token *cur, MacroFn *pm) {
+static Token *append_macro_definition(VirtualMachine *vm, Token *cur, MacroFn *pm) {
     Token *last = pm->body_tokens;
     for (Token *tok = pm->body_tokens; tok && tok->kind != TK_EOF;
          tok = tok->next) {
@@ -647,7 +647,7 @@ static Token *append_macro_definition(CCCC *vm, Token *cur, MacroFn *pm) {
     return cur;
 }
 
-static Token *append_token_list(CCCC *vm, Token *cur, Token *tokens) {
+static Token *append_token_list(VirtualMachine *vm, Token *cur, Token *tokens) {
     for (Token *tok = tokens; tok && tok->kind != TK_EOF; tok = tok->next)
         cur = cur->next = copy_macro_token(vm, tok);
     return cur;
@@ -676,7 +676,7 @@ static bool starts_file_scope_call(Token *tok) {
 // declarations without top-level initializers. Function bodies and file-scope
 // macro calls are skipped so ordinary program code is not compiled into the
 // macro VM.
-static Token *build_macro_context_tokens(CCCC *vm, Token **input_tokens,
+static Token *build_macro_context_tokens(VirtualMachine *vm, Token **input_tokens,
                                          int count) {
     Token head = {};
     Token *cur = &head;
@@ -874,7 +874,7 @@ static bool comptime_var_uses_init_fn(ComptimeVar *cv) {
 
 // Inject decl_tokens up to (not including) eq_tok, then emit ';'.
 // Produces a declaration without its initializer, e.g. "int buf_size ;"
-static Token *append_decl_stripped(CCCC *vm, Token *cur, Token *decl_tokens,
+static Token *append_decl_stripped(VirtualMachine *vm, Token *cur, Token *decl_tokens,
                                    Token *eq_tok) {
     for (Token *t = decl_tokens; t && t->kind != TK_EOF && t != eq_tok;
          t = t->next)
@@ -889,7 +889,7 @@ static Token *append_decl_stripped(CCCC *vm, Token *cur, Token *decl_tokens,
 //   - aggregate inits:          name = (<aggregate type>){ ... } ;
 // Returns a token list via tokenize_string, or NULL when there are no vars
 // routed through the init fn.
-static Token *build_comptime_init_fn_tokens(CCCC *vm,
+static Token *build_comptime_init_fn_tokens(VirtualMachine *vm,
                                              ComptimeVar **vars, int count) {
     bool has_any = false;
     for (int i = 0; i < count; i++) {
@@ -970,10 +970,18 @@ static Token *build_comptime_init_fn_tokens(CCCC *vm,
     return toks;
 }
 
-static Token *implicit_reflection_tokens(CCCC *vm) {
+static Token *implicit_reflection_tokens(VirtualMachine *vm) {
     char *header = get_std_header("reflection.h");
     if (!header)
         error("could not load embedded reflection.h");
+
+    // Sanity-check that the embedded string wasn't truncated (e.g. by a
+    // C array that was too small in std.c after reflection.h grew).
+    // A truncated string silently drops the closing #endif, producing the
+    // cryptic "unterminated conditional directive" error.  Run `make stdlib`
+    // to re-embed the header after editing it.
+    if (!strstr(header, "#endif // CCCC_REFLECTION_H"))
+        error("embedded reflection.h appears truncated — run `make stdlib` to regenerate src/std.c");
 
     // The user's translation unit may already have included stdbool.h,
     // stddef.h, or stdint.h. Temporarily clear those guards so reflection.h's
@@ -1000,7 +1008,7 @@ static Token *implicit_reflection_tokens(CCCC *vm) {
     return result;
 }
 
-static Token *build_combined_macro_tokens(CCCC *vm, Token *reflection_tokens,
+static Token *build_combined_macro_tokens(VirtualMachine *vm, Token *reflection_tokens,
                                           MacroFn **macros, int count) {
     Token head = {};
     Token *cur = &head;
@@ -1104,7 +1112,7 @@ static Obj *find_macro_obj(Obj *prog, const char *name) {
 // Valid after init_macro_globals has allocated storage; the value may have
 // been written by a constant-initializer memcpy, by __cccc_comptime_init, or
 // left as zero (no initializer).
-static bool read_comptime_scalar(CCCC *vm, Obj *obj, bool *is_float_out,
+static bool read_comptime_scalar(VirtualMachine *vm, Obj *obj, bool *is_float_out,
                                  int64_t *int_out, double *float_out) {
     if (!obj)
         return false;
@@ -1130,7 +1138,7 @@ static bool read_comptime_scalar(CCCC *vm, Obj *obj, bool *is_float_out,
     }
 }
 
-static Obj *make_comptime_shadow_obj(CCCC *vm, Obj *src) {
+static Obj *make_comptime_shadow_obj(VirtualMachine *vm, Obj *src) {
     if (!vm || !src || !src->ty || src->ty->size <= 0)
         return NULL;
 
@@ -1150,7 +1158,7 @@ static Obj *make_comptime_shadow_obj(CCCC *vm, Obj *src) {
     return dst;
 }
 
-static void link_comptime_shadow_objs(CCCC *vm) {
+static void link_comptime_shadow_objs(VirtualMachine *vm) {
     for (ComptimeVar *cv = vm->compiler.comptime_vars; cv; cv = cv->next) {
         Obj *obj = cv->ptr_obj;
         if (!obj || obj->next)
@@ -1164,7 +1172,7 @@ static void link_comptime_shadow_objs(CCCC *vm) {
 // evaluate scalar comptime variable initializers that call comptime
 // functions. Must be called after gen_function + patch_macro_call_addresses
 // so all bytecode and call targets are resolved.
-static void run_comptime_var_initializers(CCCC *vm, Obj *macro_prog) {
+static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
     Obj *init_fn = find_macro_function(macro_prog, "__cccc_comptime_init");
     if (!init_fn)
         return;
@@ -1174,7 +1182,7 @@ static void run_comptime_var_initializers(CCCC *vm, Obj *macro_prog) {
 
     __cccc_current_vm = vm;
 
-    CCCCPc      saved_pc   = vm->pc;
+    Pc      saved_pc   = vm->pc;
     long long *saved_sp   = vm->sp;
     long long *saved_bp   = vm->bp;
     long long  saved_regs[NUM_REGS];
@@ -1185,7 +1193,7 @@ static void run_comptime_var_initializers(CCCC *vm, Obj *macro_prog) {
     vm->bp = vm->initial_bp;
     *(--vm->sp) = 0; // sentinel return address
 
-    vm->pc = (CCCCPc)init_fn->code_addr;
+    vm->pc = (Pc)init_fn->code_addr;
 
     int saved_debug = vm->debug_vm;
     vm->debug_vm = 0;
@@ -1204,7 +1212,7 @@ static void run_comptime_var_initializers(CCCC *vm, Obj *macro_prog) {
         printf("__cccc_comptime_init completed.\n");
 }
 
-static void evaluate_comptime_vars(CCCC *vm, Obj *macro_prog) {
+static void evaluate_comptime_vars(VirtualMachine *vm, Obj *macro_prog) {
     for (ComptimeVar *cv = vm->compiler.comptime_vars; cv; cv = cv->next) {
         if (cv->is_evaluated)
             continue;
@@ -1301,7 +1309,7 @@ static void evaluate_comptime_vars(CCCC *vm, Obj *macro_prog) {
     }
 }
 
-static void init_macro_globals(CCCC *vm, Obj *macro_prog) {
+static void init_macro_globals(VirtualMachine *vm, Obj *macro_prog) {
     int num_globals = 0;
     for (Obj *var = macro_prog; var; var = var->next) {
         if (!var->is_function)
@@ -1354,30 +1362,30 @@ static void init_macro_globals(CCCC *vm, Obj *macro_prog) {
     }
 }
 
-static void patch_macro_call_addresses(CCCC *vm, Obj *macro_prog) {
+static void patch_macro_call_addresses(VirtualMachine *vm, Obj *macro_prog) {
     for (int i = 0; i < vm->compiler.num_call_patches; i++) {
         Obj *fn = vm->compiler.call_patches[i].function;
-        CCCCPc loc = vm->compiler.call_patches[i].location;
+        Pc loc = vm->compiler.call_patches[i].location;
         Obj *fn_def = find_macro_function(macro_prog, fn->name);
         if (!fn_def)
             error("undefined function in macro bytecode: %s", fn->name);
-        vm->text_seg[loc] = (CCCCPc)fn_def->code_addr;
+        vm->text_seg[loc] = (Pc)fn_def->code_addr;
     }
 
     for (int i = 0; i < vm->compiler.num_func_addr_patches; i++) {
         Obj *fn = vm->compiler.func_addr_patches[i].function;
-        CCCCPc loc = vm->compiler.func_addr_patches[i].location;
+        Pc loc = vm->compiler.func_addr_patches[i].location;
         Obj *fn_def = find_macro_function(macro_prog, fn->name);
         if (!fn_def)
             error("undefined function address in macro bytecode: %s",
                   fn->name);
-        cc_write_i64_at(vm, loc, cc_pc_to_byte_offset((CCCCPc)fn_def->code_addr));
+        cc_write_i64_at(vm, loc, cc_pc_to_byte_offset((Pc)fn_def->code_addr));
     }
 }
 
 // Compile all macro functions and comptime helpers as one compile-time program so
 // macro bytecode can make ordinary function calls across the whole set.
-static bool compile_macro_program(CCCC *vm) {
+static bool compile_macro_program(VirtualMachine *vm) {
     int count = 0;
     for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next)
         count++;
@@ -1498,7 +1506,7 @@ static bool compile_macro_program(CCCC *vm) {
 }
 
 // Compile all macro functions and comptime helpers (idempotent)
-static void compile_all_macros(CCCC *vm) {
+static void compile_all_macros(VirtualMachine *vm) {
     if (!vm->compiler.macro_fns)
         return;
     // Guard: compile once even if called from both the pre-parse inline phase
@@ -1523,7 +1531,7 @@ static void compile_all_macros(CCCC *vm) {
         fprintf(stderr, "Warning: Failed to compile macro functions\n");
 }
 
-static void setup_macro_call_slots(CCCC *vm, long long *fixed_args,
+static void setup_macro_call_slots(VirtualMachine *vm, long long *fixed_args,
                                    int fixed_count) {
     for (int i = fixed_count - 1; i >= 8; i--)
         *(--vm->sp) = fixed_args[i];
@@ -1532,7 +1540,7 @@ static void setup_macro_call_slots(CCCC *vm, long long *fixed_args,
 }
 
 // Execute a macro function and return the generated AST node
-static Node *execute_macro_fn(CCCC *vm, MacroFn *pm, Token *call_tok,
+static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
                               Node *args, int arg_count,
                               long long *fixed_arg_values,
                               int fixed_arg_count) {
@@ -1553,7 +1561,7 @@ static Node *execute_macro_fn(CCCC *vm, MacroFn *pm, Token *call_tok,
 
     // Save VM execution state (including current_fn so a macro that calls
     // __cccc_ast_push_fn without a matching pop cannot leak context).
-    CCCCPc saved_pc = vm->pc;
+    Pc saved_pc = vm->pc;
     long long *saved_sp = vm->sp;
     long long *saved_bp = vm->bp;
     long long saved_regs[NUM_REGS];
@@ -1614,7 +1622,7 @@ static Node *execute_macro_fn(CCCC *vm, MacroFn *pm, Token *call_tok,
     *(--vm->sp) = 0;
 
     // Set PC to function entry point
-    vm->pc = (CCCCPc)pm->compiled_fn->code_addr;
+    vm->pc = (Pc)pm->compiled_fn->code_addr;
 
     // Execute the macro function
     int saved_debug = vm->debug_vm;
@@ -1649,7 +1657,7 @@ static Node *execute_macro_fn(CCCC *vm, MacroFn *pm, Token *call_tok,
     return result;
 }
 
-void cc_execute_attribute_macro(CCCC *vm, MacroFn *pm, Token *tok,
+void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
                                 AttrTarget *target, Node *args,
                                 int arg_count) {
     if (!vm || !pm || !target)
@@ -1728,7 +1736,7 @@ void cc_execute_attribute_macro(CCCC *vm, MacroFn *pm, Token *tok,
 }
 
 // Find macro function by name
-static MacroFn *find_macro_fn_by_name(CCCC *vm, const char *name) {
+static MacroFn *find_macro_fn_by_name(VirtualMachine *vm, const char *name) {
     for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next) {
         if (pm->is_macro_entry && strlen(pm->name) == strlen(name) &&
             strncmp(pm->name, name, strlen(name)) == 0)
@@ -1739,7 +1747,7 @@ static MacroFn *find_macro_fn_by_name(CCCC *vm, const char *name) {
 
 // Ticket #277: Lisp-style single-step macro expansion (macroexpand-1).
 // Expands the outermost ND_MACRO_CALL exactly once; identity for anything else.
-Node *__cccc_macroexpand_1(CCCC *vm, Node *node) {
+Node *__cccc_macroexpand_1(VirtualMachine *vm, Node *node) {
     if (!vm || !node)
         return node;
     if (node->kind != ND_MACRO_CALL)
@@ -1760,7 +1768,7 @@ Node *__cccc_macroexpand_1(CCCC *vm, Node *node) {
 // Repeatedly expands the outermost node via macroexpand_1 until it is no
 // longer an ND_MACRO_CALL (i.e. until the form is stable at the top level).
 // Does not recurse into child nodes — only the top-level call is expanded.
-Node *__cccc_macroexpand(CCCC *vm, Node *node) {
+Node *__cccc_macroexpand(VirtualMachine *vm, Node *node) {
     if (!vm || !node)
         return node;
     int limit = vm->compiler.macro_recursion_limit;
@@ -1783,7 +1791,7 @@ Node *__cccc_macroexpand(CCCC *vm, Node *node) {
     return current;
 }
 
-void cc_execute_top_level_macro(CCCC *vm, char *name, Token *tok,
+void cc_execute_top_level_macro(VirtualMachine *vm, char *name, Token *tok,
                                        Node *args, int arg_count) {
     if (!vm || !name)
         return;
@@ -1815,9 +1823,9 @@ void cc_execute_top_level_macro(CCCC *vm, char *name, Token *tok,
 }
 
 // Recursively transform macro calls in an AST node
-static Node *transform_node(CCCC *vm, Node *node, int depth);
+static Node *transform_node(VirtualMachine *vm, Node *node, int depth);
 
-static Node *transform_node(CCCC *vm, Node *node, int depth) {
+static Node *transform_node(VirtualMachine *vm, Node *node, int depth) {
     if (!node)
         return NULL;
 
@@ -1968,7 +1976,7 @@ static Node *transform_node(CCCC *vm, Node *node, int depth) {
 }
 
 // Initialize VM segments for macro compilation (extracted from cc_compile)
-static void init_vm_segments_for_macros(CCCC *vm) {
+static void init_vm_segments_for_macros(VirtualMachine *vm) {
     if (vm->text_seg)
         return; // Already initialized
 
@@ -2069,7 +2077,7 @@ static int write_type_str(Type *ty, char *buf, int bufsize) {
 //   int generated_func(void);
 // Prepend these tokens to a file's token stream to give the parser a
 // forward declaration without requiring the user to write one.
-static Token *synthesize_forward_decl_tokens(CCCC *vm, Obj *fn) {
+static Token *synthesize_forward_decl_tokens(VirtualMachine *vm, Obj *fn) {
     if (!fn || !fn->ty || fn->ty->kind != TY_FUNC)
         return NULL;
 
@@ -2116,7 +2124,7 @@ static Token *synthesize_forward_decl_tokens(CCCC *vm, Obj *fn) {
 //   extern char banner_data[6];
 // rather than the incorrect  extern int banner_data;  that write_type_str's
 // TY_ARRAY fallback would produce.
-static Token *synthesize_global_decl_tokens(CCCC *vm, Obj *var) {
+static Token *synthesize_global_decl_tokens(VirtualMachine *vm, Obj *var) {
     if (!var || var->is_function)
         return NULL;
 
@@ -2163,7 +2171,7 @@ static Token *synthesize_global_decl_tokens(CCCC *vm, Obj *var) {
 // Newly generated Obj definitions are drained into vm->compiler.macro_globals
 // immediately after each execution using a saved-next walk, so globals is
 // always restored to its pre-call state and no cycle can form.
-static void scan_and_execute_global_calls(CCCC *vm, Token **tokens_ptr) {
+static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr) {
     Token *prev = NULL;
     Token *tok = *tokens_ptr;
     int brace_depth = 0;
@@ -2447,7 +2455,7 @@ static void scan_and_execute_global_calls(CCCC *vm, Token **tokens_ptr) {
 //
 // After this runs, vm->compiler.macro_globals contains the generated
 // definitions. main.c appends them to the merged program before codegen.
-void cc_execute_inline_macros(CCCC *vm, Token **input_tokens, int count) {
+void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens, int count) {
     if (!vm)
         return;
 
@@ -2533,7 +2541,7 @@ void cc_execute_inline_macros(CCCC *vm, Token **input_tokens, int count) {
 }
 
 // Expand all macro calls in the program
-void cc_expand_macros(CCCC *vm, Obj *prog) {
+void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
     if (!vm || !prog)
         return;
 

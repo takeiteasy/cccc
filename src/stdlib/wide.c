@@ -285,7 +285,7 @@ static size_t cccc_c8rtomb(char *s, cccc_char8_t c8, mbstate_t *ps) {
 }
 #endif /* !CCCC_HAVE_NATIVE_MBRTOC8 */
 
-void register_wide_functions(CCCC *vm) {
+void register_wide_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "mbsinit", (void*)wrap_mbsinit, 1, 0);
     cc_register_cfunc(vm, "mbrlen", (void*)mbrlen, 3, 0);
     cc_register_cfunc(vm, "mbrtowc", (void*)mbrtowc, 4, 0);

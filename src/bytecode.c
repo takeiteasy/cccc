@@ -43,7 +43,7 @@ static int get_opcode_operand_count(int op) {
     return cc_opcode_operand_words(op);
 }
 
-static int get_instruction_word_count(CCCCInstrWord *text, long long pc,
+static int get_instruction_word_count(InstrWord *text, long long pc,
                                       long long num_instructions) {
     int op = (int)text[pc];
     int operand_count = get_opcode_operand_count(op);
@@ -54,10 +54,10 @@ static int get_instruction_word_count(CCCCInstrWord *text, long long pc,
 
     int word_count = operand_count + 1;
     if (op == JMPT) {
-        CCCCPc table_pc = text[pc + 1];
-        CCCCInstrWord count = text[pc + 2];
+        Pc table_pc = text[pc + 1];
+        InstrWord count = text[pc + 2];
         if (table_pc == pc + 4) {
-            if (table_pc + (CCCCPc)count > (CCCCPc)num_instructions)
+            if (table_pc + (Pc)count > (Pc)num_instructions)
                 return -2;
             word_count += (int)count;
         }
@@ -65,7 +65,7 @@ static int get_instruction_word_count(CCCCInstrWord *text, long long pc,
     return word_count;
 }
 
-int cc_write_bytecode(CCCC *vm, FILE *f) {
+int cc_write_bytecode(VirtualMachine *vm, FILE *f) {
     if (!vm || !f) {
         fprintf(stderr, "error: invalid arguments to cc_write_bytecode\n");
         return -1;
@@ -77,10 +77,10 @@ int cc_write_bytecode(CCCC *vm, FILE *f) {
     }
 
     // Calculate sizes
-    long long text_size = ((long long)vm->text_ptr + 1) * (long long)sizeof(CCCCInstrWord);
+    long long text_size = ((long long)vm->text_ptr + 1) * (long long)sizeof(InstrWord);
     long long data_size = vm->data_ptr - vm->data_seg;
     long long main_offset = vm->text_seg[0];  // main() instruction index
-    long long num_instructions = text_size / (long long)sizeof(CCCCInstrWord);
+    long long num_instructions = text_size / (long long)sizeof(InstrWord);
     long long data_reloc_count = vm->compiler.num_data_relocs;
     long long return_buffer_count = vm->compiler.return_buffer_count;
     long long return_buffer_size = vm->compiler.return_buffer_size;
@@ -99,7 +99,7 @@ int cc_write_bytecode(CCCC *vm, FILE *f) {
         }
     }
 
-    CCCCInstrWord *text_copy = malloc(text_size);
+    InstrWord *text_copy = malloc(text_size);
     if (!text_copy) {
         fprintf(stderr, "error: failed to allocate temporary buffer\n");
         return -1;
@@ -284,7 +284,7 @@ write_error:
     return -1;
 }
 
-int cc_save_bytecode(CCCC *vm, const char *path) {
+int cc_save_bytecode(VirtualMachine *vm, const char *path) {
     if (!vm || !path) {
         fprintf(stderr, "error: invalid arguments to cc_save_bytecode\n");
         return -1;
@@ -313,7 +313,7 @@ int cc_save_bytecode(CCCC *vm, const char *path) {
     return 0;
 }
 
-static int load_bytecode(CCCC *vm, const char *data, size_t size) {
+static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
     const char *cursor = data;
     const char *end = data + size;
 
@@ -354,8 +354,8 @@ static int load_bytecode(CCCC *vm, const char *data, size_t size) {
         data_reloc_count > MAX_CALLS ||
         cursor + text_size + data_size +
             data_reloc_count * 4 * (long long)sizeof(long long) > end ||
-        text_size > vm->poolsize_max * (long long)sizeof(CCCCInstrWord) ||
-        text_size % (long long)sizeof(CCCCInstrWord) != 0 ||
+        text_size > vm->poolsize_max * (long long)sizeof(InstrWord) ||
+        text_size % (long long)sizeof(InstrWord) != 0 ||
         data_size > vm->poolsize_max) {
         fprintf(stderr, "error: invalid bytecode sizes\n");
         return -1;
@@ -365,7 +365,7 @@ static int load_bytecode(CCCC *vm, const char *data, size_t size) {
     vm_alloc_segments(vm);
 
     // Ensure enough committed space for the bytecode being loaded
-    CCCCPc num_text_words = (CCCCPc)(text_size / (long long)sizeof(CCCCInstrWord));
+    Pc num_text_words = (Pc)(text_size / (long long)sizeof(InstrWord));
     if (vm_text_ensure_count(vm, num_text_words) != 0) {
         fprintf(stderr, "error: could not commit text segment for bytecode\n");
         return -1;
@@ -572,7 +572,7 @@ static int load_bytecode(CCCC *vm, const char *data, size_t size) {
         }
     }
 
-    long long num_instructions = text_size / (long long)sizeof(CCCCInstrWord);
+    long long num_instructions = text_size / (long long)sizeof(InstrWord);
 
     // Mark operand positions
     char *is_operand = calloc(num_instructions, 1);
@@ -605,7 +605,7 @@ static int load_bytecode(CCCC *vm, const char *data, size_t size) {
     free(is_operand);
 
     // Set up pointers (heap_ptr/heap_end/free_list already set by vm_alloc_segments)
-    vm->text_ptr = (CCCCPc)(text_size / (long long)sizeof(CCCCInstrWord)) - 1;
+    vm->text_ptr = (Pc)(text_size / (long long)sizeof(InstrWord)) - 1;
     vm->data_ptr = vm->data_seg + data_size;
     vm->text_seg[0] = main_offset;  // Restore main offset
 
@@ -639,7 +639,7 @@ static int load_bytecode(CCCC *vm, const char *data, size_t size) {
 #undef READ_AND_INCR
 }
 
-int cc_load_bytecode(CCCC *vm, const char *path) {
+int cc_load_bytecode(VirtualMachine *vm, const char *path) {
     if (!vm || !path) {
         fprintf(stderr, "error: invalid arguments to cc_load_bytecode\n");
         return -1;
@@ -683,7 +683,7 @@ static int source_index_cmp(const void *a, const void *b) {
     return (sa->line_no < sb->line_no) ? -1 : (sa->line_no > sb->line_no) ? 1 : 0;
 }
 
-void cc_compile(CCCC *vm, Obj *prog) {
+void cc_compile(VirtualMachine *vm, Obj *prog) {
     if (!vm) {
         error("VM instance is NULL");
     }
@@ -754,7 +754,7 @@ void cc_compile(CCCC *vm, Obj *prog) {
             if (m->file != last_file || m->line_no != last_line) {
                 vm->dbg.source_index[idx].file = m->file;
                 vm->dbg.source_index[idx].line_no = m->line_no;
-                vm->dbg.source_index[idx].first_pc = (CCCCPc)m->pc_offset;
+                vm->dbg.source_index[idx].first_pc = (Pc)m->pc_offset;
                 idx++;
                 last_file = m->file;
                 last_line = m->line_no;

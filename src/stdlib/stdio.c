@@ -122,7 +122,7 @@ static long long wrap_vfscanf(FILE *stream, const char *fmt, long long va_ptr) {
 #endif // CCCC_HAVE_NATIVE_PCT_B
 
 // Register all stdio.h functions
-void register_stdio_functions(CCCC *vm) {
+void register_stdio_functions(VirtualMachine *vm) {
     // Standard streams
     cc_register_cfunc(vm, "__cccc_stdin", (void*)__cccc_stdin, 0, 0);
     cc_register_cfunc(vm, "__cccc_stdout", (void*)__cccc_stdout, 0, 0);

@@ -30,7 +30,7 @@
 
 // ========== Arithmetic Operations ==========
 
-static inline int op_ADD3_fn(CCCC *vm) {
+static inline int op_ADD3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -43,7 +43,7 @@ static inline int op_ADD3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_SUB3_fn(CCCC *vm) {
+static inline int op_SUB3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -56,7 +56,7 @@ static inline int op_SUB3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_MUL3_fn(CCCC *vm) {
+static inline int op_MUL3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -69,7 +69,7 @@ static inline int op_MUL3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_DIV3_fn(CCCC *vm) {
+static inline int op_DIV3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -92,7 +92,7 @@ static inline int op_DIV3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_ADDC_fn(CCCC *vm) {
+static inline int op_ADDC_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -114,7 +114,7 @@ static inline int op_ADDC_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_SUBC_fn(CCCC *vm) {
+static inline int op_SUBC_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -136,7 +136,7 @@ static inline int op_SUBC_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_MULC_fn(CCCC *vm) {
+static inline int op_MULC_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -159,7 +159,7 @@ static inline int op_MULC_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_DIVC_fn(CCCC *vm) {
+static inline int op_DIVC_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -192,7 +192,7 @@ static inline int op_DIVC_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_MOD3_fn(CCCC *vm) {
+static inline int op_MOD3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -217,7 +217,7 @@ static inline int op_MOD3_fn(CCCC *vm) {
 
 // ========== Bitwise Operations ==========
 
-static inline int op_AND3_fn(CCCC *vm) {
+static inline int op_AND3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -227,7 +227,7 @@ static inline int op_AND3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_OR3_fn(CCCC *vm) {
+static inline int op_OR3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -237,7 +237,7 @@ static inline int op_OR3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_XOR3_fn(CCCC *vm) {
+static inline int op_XOR3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -247,7 +247,7 @@ static inline int op_XOR3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_SHL3_fn(CCCC *vm) {
+static inline int op_SHL3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -257,7 +257,7 @@ static inline int op_SHL3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_SHR3_fn(CCCC *vm) {
+static inline int op_SHR3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -267,7 +267,7 @@ static inline int op_SHR3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_UDIV3_fn(CCCC *vm) {
+static inline int op_UDIV3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -289,7 +289,7 @@ static inline int op_UDIV3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_UMOD3_fn(CCCC *vm) {
+static inline int op_UMOD3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -311,7 +311,7 @@ static inline int op_UMOD3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_USHR3_fn(CCCC *vm) {
+static inline int op_USHR3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -323,7 +323,7 @@ static inline int op_USHR3_fn(CCCC *vm) {
 
 // ========== Comparison Operations ==========
 
-static inline int op_SEQ3_fn(CCCC *vm) {
+static inline int op_SEQ3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -333,7 +333,7 @@ static inline int op_SEQ3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_SNE3_fn(CCCC *vm) {
+static inline int op_SNE3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -343,7 +343,7 @@ static inline int op_SNE3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_SLT3_fn(CCCC *vm) {
+static inline int op_SLT3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -353,7 +353,7 @@ static inline int op_SLT3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_SGE3_fn(CCCC *vm) {
+static inline int op_SGE3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -363,7 +363,7 @@ static inline int op_SGE3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_SGT3_fn(CCCC *vm) {
+static inline int op_SGT3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -373,7 +373,7 @@ static inline int op_SGT3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_SLE3_fn(CCCC *vm) {
+static inline int op_SLE3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -385,7 +385,7 @@ static inline int op_SLE3_fn(CCCC *vm) {
 
 // ========== Data Movement ==========
 
-static inline int op_LI3_fn(CCCC *vm) {
+static inline int op_LI3_fn(VirtualMachine *vm) {
     // Load immediate: [LI3] [rd:8] [immediate:64]
     long long operands = cc_read_word(vm);
     int rd;
@@ -396,7 +396,7 @@ static inline int op_LI3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_LDA3_fn(CCCC *vm) {
+static inline int op_LDA3_fn(VirtualMachine *vm) {
     // Load data-relative address: [LDA3] [rd:8] [byte_offset:64]
     long long operands = cc_read_word(vm);
     int rd;
@@ -407,7 +407,7 @@ static inline int op_LDA3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_LTA3_fn(CCCC *vm) {
+static inline int op_LTA3_fn(VirtualMachine *vm) {
     // Load text-relative address: [LTA3] [rd:8] [byte_offset:64]
     long long operands = cc_read_word(vm);
     int rd;
@@ -418,7 +418,7 @@ static inline int op_LTA3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_MOV3_fn(CCCC *vm) {
+static inline int op_MOV3_fn(VirtualMachine *vm) {
     // Move register: [MOV3] [rd:8|rs1:8|unused:48]
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
@@ -431,7 +431,7 @@ static inline int op_MOV3_fn(CCCC *vm) {
 
 // ========== Register-Based Calling Convention ==========
 
-static inline int op_ENT3_fn(CCCC *vm) {
+static inline int op_ENT3_fn(VirtualMachine *vm) {
     // Enter function: [ENT3] [stack_size:32|spill_param_count:32]
     // [f32_param_mask:32|float_param_mask:32]
     // Creates new stack frame and copies register and stack-passed arguments to
@@ -514,7 +514,7 @@ static inline int op_ENT3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_LEV3_fn(CCCC *vm) {
+static inline int op_LEV3_fn(VirtualMachine *vm) {
     // Leave function: return value already in REG_A0/FREG_A0, restore frame
     // (Caller placed return value in REG_A0 before LEV3)
 
@@ -566,13 +566,13 @@ static inline int op_LEV3_fn(CCCC *vm) {
         }
     }
 
-    vm->pc = (CCCCPc)ret_addr;
+    vm->pc = (Pc)ret_addr;
     return 0;
 }
 
 // ========== 3-Register Floating-Point Arithmetic ==========
 
-static inline int op_FADD3_fn(CCCC *vm) {
+static inline int op_FADD3_fn(VirtualMachine *vm) {
     // fregs[rd] = fregs[rs1] + fregs[rs2]
     // Format: [FADD3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -584,7 +584,7 @@ static inline int op_FADD3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FSUB3_fn(CCCC *vm) {
+static inline int op_FSUB3_fn(VirtualMachine *vm) {
     // fregs[rd] = fregs[rs1] - fregs[rs2]
     // Format: [FSUB3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -596,7 +596,7 @@ static inline int op_FSUB3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FMUL3_fn(CCCC *vm) {
+static inline int op_FMUL3_fn(VirtualMachine *vm) {
     // fregs[rd] = fregs[rs1] * fregs[rs2]
     // Format: [FMUL3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -608,7 +608,7 @@ static inline int op_FMUL3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FDIV3_fn(CCCC *vm) {
+static inline int op_FDIV3_fn(VirtualMachine *vm) {
     // fregs[rd] = fregs[rs1] / fregs[rs2]
     // Format: [FDIV3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -629,7 +629,7 @@ static inline int op_FDIV3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FMOV3_fn(CCCC *vm) {
+static inline int op_FMOV3_fn(VirtualMachine *vm) {
     // fregs[rd] = fregs[rs1]
     // Format: [FMOV3] [rd:8|rs1:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -640,7 +640,7 @@ static inline int op_FMOV3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FNEG3_fn(CCCC *vm) {
+static inline int op_FNEG3_fn(VirtualMachine *vm) {
     // fregs[rd] = -fregs[rs1]
     // Format: [FNEG3] [rd:8|rs1:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -651,7 +651,7 @@ static inline int op_FNEG3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FADD3_F32_fn(CCCC *vm) {
+static inline int op_FADD3_F32_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -660,7 +660,7 @@ static inline int op_FADD3_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FSUB3_F32_fn(CCCC *vm) {
+static inline int op_FSUB3_F32_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -669,7 +669,7 @@ static inline int op_FSUB3_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FMUL3_F32_fn(CCCC *vm) {
+static inline int op_FMUL3_F32_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -678,7 +678,7 @@ static inline int op_FMUL3_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FDIV3_F32_fn(CCCC *vm) {
+static inline int op_FDIV3_F32_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -696,7 +696,7 @@ static inline int op_FDIV3_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FNEG3_F32_fn(CCCC *vm) {
+static inline int op_FNEG3_F32_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1;
     DECODE_RR(operands, rd, rs1);
@@ -707,7 +707,7 @@ static inline int op_FNEG3_F32_fn(CCCC *vm) {
 
 // ========== 3-Register Floating-Point Comparisons ==========
 
-static inline int op_FEQ3_fn(CCCC *vm) {
+static inline int op_FEQ3_fn(VirtualMachine *vm) {
     // regs[rd] = (fregs[rs1] == fregs[rs2])
     // Format: [FEQ3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -718,7 +718,7 @@ static inline int op_FEQ3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FNE3_fn(CCCC *vm) {
+static inline int op_FNE3_fn(VirtualMachine *vm) {
     // regs[rd] = (fregs[rs1] != fregs[rs2])
     // Format: [FNE3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -729,7 +729,7 @@ static inline int op_FNE3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FLT3_fn(CCCC *vm) {
+static inline int op_FLT3_fn(VirtualMachine *vm) {
     // regs[rd] = (fregs[rs1] < fregs[rs2])
     // Format: [FLT3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -740,7 +740,7 @@ static inline int op_FLT3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FLE3_fn(CCCC *vm) {
+static inline int op_FLE3_fn(VirtualMachine *vm) {
     // regs[rd] = (fregs[rs1] <= fregs[rs2])
     // Format: [FLE3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -751,7 +751,7 @@ static inline int op_FLE3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FGT3_fn(CCCC *vm) {
+static inline int op_FGT3_fn(VirtualMachine *vm) {
     // regs[rd] = (fregs[rs1] > fregs[rs2])
     // Format: [FGT3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -762,7 +762,7 @@ static inline int op_FGT3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FGE3_fn(CCCC *vm) {
+static inline int op_FGE3_fn(VirtualMachine *vm) {
     // regs[rd] = (fregs[rs1] >= fregs[rs2])
     // Format: [FGE3] [rd:8|rs1:8|rs2:8|unused:40]
     long long operands = cc_read_word(vm);
@@ -773,7 +773,7 @@ static inline int op_FGE3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FEQ3_F32_fn(CCCC *vm) {
+static inline int op_FEQ3_F32_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -781,7 +781,7 @@ static inline int op_FEQ3_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FNE3_F32_fn(CCCC *vm) {
+static inline int op_FNE3_F32_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -789,7 +789,7 @@ static inline int op_FNE3_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FLT3_F32_fn(CCCC *vm) {
+static inline int op_FLT3_F32_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -797,7 +797,7 @@ static inline int op_FLT3_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FLE3_F32_fn(CCCC *vm) {
+static inline int op_FLE3_F32_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -805,7 +805,7 @@ static inline int op_FLE3_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FGT3_F32_fn(CCCC *vm) {
+static inline int op_FGT3_F32_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -813,7 +813,7 @@ static inline int op_FGT3_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FGE3_F32_fn(CCCC *vm) {
+static inline int op_FGE3_F32_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
@@ -823,7 +823,7 @@ static inline int op_FGE3_F32_fn(CCCC *vm) {
 
 // ========== Internal Operations ==========
 
-static inline int op_ADDI3_fn(CCCC *vm) {
+static inline int op_ADDI3_fn(VirtualMachine *vm) {
     // Add immediate: regs[rd] = regs[rs1] + immediate
     // Format: [ADDI3] [rd:8|rs1:8|unused:48] [immediate:64]
     // Used for struct offset calculations: struct_addr + offset
@@ -837,7 +837,7 @@ static inline int op_ADDI3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_NEG3_fn(CCCC *vm) {
+static inline int op_NEG3_fn(VirtualMachine *vm) {
     // Integer negation: regs[rd] = -regs[rs1]
     // Format: [NEG3] [rd:8|rs1:8|unused:48]
     // Replaces PUSH/-1/MUL pattern for ND_NEG
@@ -852,7 +852,7 @@ static inline int op_NEG3_fn(CCCC *vm) {
 
 // ========== Register-Based Load/Store ==========
 
-static inline int op_LDR_B_fn(CCCC *vm) {
+static inline int op_LDR_B_fn(VirtualMachine *vm) {
     // Load byte (sign-extend): regs[rd] = *(char*)regs[rs]
     // Format: [LDR_B] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -865,7 +865,7 @@ static inline int op_LDR_B_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_LDR_H_fn(CCCC *vm) {
+static inline int op_LDR_H_fn(VirtualMachine *vm) {
     // Load halfword (sign-extend): regs[rd] = *(short*)regs[rs]
     // Format: [LDR_H] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -878,7 +878,7 @@ static inline int op_LDR_H_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_LDR_W_fn(CCCC *vm) {
+static inline int op_LDR_W_fn(VirtualMachine *vm) {
     // Load word (sign-extend): regs[rd] = *(int*)regs[rs]
     // Format: [LDR_W] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -891,7 +891,7 @@ static inline int op_LDR_W_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_LDR_D_fn(CCCC *vm) {
+static inline int op_LDR_D_fn(VirtualMachine *vm) {
     // Load dword: regs[rd] = *(long long*)regs[rs]
     // Format: [LDR_D] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -904,7 +904,7 @@ static inline int op_LDR_D_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_STR_B_fn(CCCC *vm) {
+static inline int op_STR_B_fn(VirtualMachine *vm) {
     // Store byte: *(char*)regs[rs] = regs[rd]
     // Format: [STR_B] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -916,7 +916,7 @@ static inline int op_STR_B_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_STR_H_fn(CCCC *vm) {
+static inline int op_STR_H_fn(VirtualMachine *vm) {
     // Store halfword: *(short*)regs[rs] = regs[rd]
     // Format: [STR_H] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -928,7 +928,7 @@ static inline int op_STR_H_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_STR_W_fn(CCCC *vm) {
+static inline int op_STR_W_fn(VirtualMachine *vm) {
     // Store word: *(int*)regs[rs] = regs[rd]
     // Format: [STR_W] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -940,7 +940,7 @@ static inline int op_STR_W_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_STR_D_fn(CCCC *vm) {
+static inline int op_STR_D_fn(VirtualMachine *vm) {
     // Store dword: *(long long*)regs[rs] = regs[rd]
     // Format: [STR_D] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -952,7 +952,7 @@ static inline int op_STR_D_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FLDR_fn(CCCC *vm) {
+static inline int op_FLDR_fn(VirtualMachine *vm) {
     // Float load: fregs[rd] = *(double*)regs[rs]
     // Format: [FLDR] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -964,7 +964,7 @@ static inline int op_FLDR_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FSTR_fn(CCCC *vm) {
+static inline int op_FSTR_fn(VirtualMachine *vm) {
     // Float store: *(double*)regs[rs] = fregs[rd]
     // Format: [FSTR] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -976,7 +976,7 @@ static inline int op_FSTR_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FLDR_F32_fn(CCCC *vm) {
+static inline int op_FLDR_F32_fn(VirtualMachine *vm) {
     // Float32 load: fregs[rd] = *(float*)regs[rs]
     // Format: [FLDR_F32] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -988,7 +988,7 @@ static inline int op_FLDR_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FSTR_F32_fn(CCCC *vm) {
+static inline int op_FSTR_F32_fn(VirtualMachine *vm) {
     // Float32 store: *(float*)regs[rs] = (float)fregs[rd]
     // Format: [FSTR_F32] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1000,7 +1000,7 @@ static inline int op_FSTR_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FROUND_F32_fn(CCCC *vm) {
+static inline int op_FROUND_F32_fn(VirtualMachine *vm) {
     // Float32 round: fregs[rd] = (float)fregs[rs]
     // Format: [FROUND_F32] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1011,7 +1011,7 @@ static inline int op_FROUND_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_LEA3_fn(CCCC *vm) {
+static inline int op_LEA3_fn(VirtualMachine *vm) {
     // Load effective address: regs[rd] = bp + immediate
     // Format: [LEA3] [rd:8|unused:56] [immediate:64]
     long long operands = cc_read_word(vm);
@@ -1024,7 +1024,7 @@ static inline int op_LEA3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_I2F3_fn(CCCC *vm) {
+static inline int op_I2F3_fn(VirtualMachine *vm) {
     // Int to float: fregs[rd] = (double)regs[rs]
     // Format: [I2F3] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1035,7 +1035,7 @@ static inline int op_I2F3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_I2F3_F32_fn(CCCC *vm) {
+static inline int op_I2F3_F32_fn(VirtualMachine *vm) {
     // Int to float: fregs[rd] = (float)regs[rs]
     long long operands = cc_read_word(vm);
     int rd, rs;
@@ -1045,7 +1045,7 @@ static inline int op_I2F3_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_F2I3_fn(CCCC *vm) {
+static inline int op_F2I3_fn(VirtualMachine *vm) {
     // Float to int: regs[rd] = (long long)fregs[rs]
     // Format: [F2I3] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1057,7 +1057,7 @@ static inline int op_F2I3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_F2I3_F32_fn(CCCC *vm) {
+static inline int op_F2I3_F32_fn(VirtualMachine *vm) {
     // Float to int: regs[rd] = (long long)fregs[rs]
     long long operands = cc_read_word(vm);
     int rd, rs;
@@ -1068,7 +1068,7 @@ static inline int op_F2I3_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FR2R_fn(CCCC *vm) {
+static inline int op_FR2R_fn(VirtualMachine *vm) {
     // Float register to integer register (bit-pattern transfer, no conversion)
     // Format: [FR2R] [rd:8|rs:8|unused:48]
     // Copies the raw IEEE 754 bits of the double to an integer register
@@ -1082,7 +1082,7 @@ static inline int op_FR2R_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FR2R_F32_fn(CCCC *vm) {
+static inline int op_FR2R_F32_fn(VirtualMachine *vm) {
     // Float register to integer register (raw f32 payload bits)
     long long operands = cc_read_word(vm);
     int rd, rs;
@@ -1093,7 +1093,7 @@ static inline int op_FR2R_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_R2FR_fn(CCCC *vm) {
+static inline int op_R2FR_fn(VirtualMachine *vm) {
     // Integer register to float register (bit-pattern transfer, no conversion)
     // Format: [R2FR] [rd:8|rs:8|unused:48]
     // Copies the raw bits from integer register to a double (reverse of FR2R)
@@ -1105,7 +1105,7 @@ static inline int op_R2FR_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_R2FR_F32_fn(CCCC *vm) {
+static inline int op_R2FR_F32_fn(VirtualMachine *vm) {
     // Integer register to float register (raw f32 payload bits)
     long long operands = cc_read_word(vm);
     int rd, rs;
@@ -1115,33 +1115,33 @@ static inline int op_R2FR_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_JZ3_fn(CCCC *vm) {
+static inline int op_JZ3_fn(VirtualMachine *vm) {
     // Branch if zero: if (regs[rs] == 0) pc = target
     // Format: [JZ3] [rs:8|unused:56] [target:64]
     long long operands = cc_read_word(vm);
     int rs;
     DECODE_R(operands, rs);
-    CCCCPc target = cc_read_word(vm);
+    Pc target = cc_read_word(vm);
 
     if (vm->regs[rs] == 0)
         vm->pc = target;
     return 0;
 }
 
-static inline int op_JNZ3_fn(CCCC *vm) {
+static inline int op_JNZ3_fn(VirtualMachine *vm) {
     // Branch if non-zero: if (regs[rs] != 0) pc = target
     // Format: [JNZ3] [rs:8|unused:56] [target:64]
     long long operands = cc_read_word(vm);
     int rs;
     DECODE_R(operands, rs);
-    CCCCPc target = cc_read_word(vm);
+    Pc target = cc_read_word(vm);
 
     if (vm->regs[rs] != 0)
         vm->pc = target;
     return 0;
 }
 
-static inline int op_NOT3_fn(CCCC *vm) {
+static inline int op_NOT3_fn(VirtualMachine *vm) {
     // Logical not: regs[rd] = !regs[rs]
     // Format: [NOT3] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1153,7 +1153,7 @@ static inline int op_NOT3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_BNOT3_fn(CCCC *vm) {
+static inline int op_BNOT3_fn(VirtualMachine *vm) {
     // Bitwise not: regs[rd] = ~regs[rs]
     // Format: [BNOT3] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1167,7 +1167,7 @@ static inline int op_BNOT3_fn(CCCC *vm) {
 
 // ========== Register-Based Safety Opcodes ==========
 
-static inline int op_CHKP3_fn(CCCC *vm) {
+static inline int op_CHKP3_fn(VirtualMachine *vm) {
     // Check pointer validity (register-based version of CHKP)
     // Format: [CHKP3] [rs:8|unused:56]
     long long operands = cc_read_word(vm);
@@ -1231,7 +1231,7 @@ static inline int op_CHKP3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_CHKA3_fn(CCCC *vm) {
+static inline int op_CHKA3_fn(VirtualMachine *vm) {
     // Check pointer alignment (register-based version of CHKA)
     // Format: [CHKA3] [rs:8|unused:56] [alignment:64]
     long long operands = cc_read_word(vm);
@@ -1262,7 +1262,7 @@ static inline int op_CHKA3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_CHKT3_fn(CCCC *vm) {
+static inline int op_CHKT3_fn(VirtualMachine *vm) {
     // Check type on dereference (register-based version of CHKT)
     // Format: [CHKT3] [rs:8|unused:56] [expected_type:64]
     long long operands = cc_read_word(vm);
@@ -1329,14 +1329,14 @@ static inline int op_CHKT3_fn(CCCC *vm) {
 
 // ========== Control Flow Opcodes ==========
 
-static inline int op_JMP_fn(CCCC *vm) {
+static inline int op_JMP_fn(VirtualMachine *vm) {
     vm->pc = cc_read_word(vm);
     return 0;
 }
 
-static inline int op_CALL_fn(CCCC *vm) {
+static inline int op_CALL_fn(VirtualMachine *vm) {
     // Call subroutine: push return address to main stack and shadow stack
-    CCCCPc target = cc_read_word(vm);
+    Pc target = cc_read_word(vm);
     long long ret_addr = (long long)vm->pc;
 
     if (check_stack_overflow(vm, 1)) return -1;
@@ -1348,11 +1348,11 @@ static inline int op_CALL_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_CALLT_fn(CCCC *vm) {
+static inline int op_CALLT_fn(VirtualMachine *vm) {
     // Tail call: unwind current frame without popping return address.
     // The return address from the original CALL remains on the stack,
     // so the callee's LEV3 returns directly to our caller.
-    CCCCPc target = cc_read_word(vm);
+    Pc target = cc_read_word(vm);
 
     vm->sp = vm->bp;
 
@@ -1383,7 +1383,7 @@ static inline int op_CALLT_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_CALLI_fn(CCCC *vm) {
+static inline int op_CALLI_fn(VirtualMachine *vm) {
     // Call indirect: function address in register (read from operand)
     long long operands = cc_read_word(vm);
     int rs = (int)(operands & 0xFF);
@@ -1393,7 +1393,7 @@ static inline int op_CALLI_fn(CCCC *vm) {
     if (vm->flags & CCCC_CFI) {
         *--vm->shadow_sp = ret_addr;
     }
-    CCCCPc target = cc_byte_offset_to_pc(vm->regs[rs]);
+    Pc target = cc_byte_offset_to_pc(vm->regs[rs]);
     if (target == CCCC_INVALID_PC || target > vm->text_ptr) {
         printf("error: invalid indirect call target: %lld\n", vm->regs[rs]);
         return -1;
@@ -1402,10 +1402,10 @@ static inline int op_CALLI_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_CALLN_fn(CCCC *vm) {
+static inline int op_CALLN_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rs = (int)(operands & 0xFF);
-    CCCCInstrWord meta = cc_read_word(vm);
+    InstrWord meta = cc_read_word(vm);
     int actual_nargs = (int)(meta & 0xFFFF);
     int returns_double = (int)((meta >> 16) & 1);
     int returns_float = (int)((meta >> 17) & 1);
@@ -1457,7 +1457,7 @@ static inline int op_CALLN_fn(CCCC *vm) {
     if (vm->flags & CCCC_CFI) {
         *--vm->shadow_sp = ret_addr;
     }
-    CCCCPc target = cc_byte_offset_to_pc(target_value);
+    Pc target = cc_byte_offset_to_pc(target_value);
     if (target == CCCC_INVALID_PC || target > vm->text_ptr) {
         printf("error: invalid indirect call target: %lld\n", target_value);
         return -1;
@@ -1466,26 +1466,26 @@ static inline int op_CALLN_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_JMPT_fn(CCCC *vm) {
-    CCCCPc table_pc = cc_read_word(vm);
-    CCCCInstrWord count = cc_read_word(vm);
-    CCCCPc default_pc = cc_read_word(vm);
+static inline int op_JMPT_fn(VirtualMachine *vm) {
+    Pc table_pc = cc_read_word(vm);
+    InstrWord count = cc_read_word(vm);
+    Pc default_pc = cc_read_word(vm);
     long long index = vm->regs[REG_A0];
     if (index < 0 || index >= (long long)count) {
         vm->pc = default_pc;
         return 0;
     }
-    vm->pc = vm->text_seg[table_pc + (CCCCPc)index];
+    vm->pc = vm->text_seg[table_pc + (Pc)index];
     return 0;
 }
 
-static inline int op_JMPI_fn(CCCC *vm) {
+static inline int op_JMPI_fn(VirtualMachine *vm) {
     // Jump indirect - address in register specified by operand
     // Format: [JMPI] [rs:8|unused:56]
     long long operands = cc_read_word(vm);
     int rs;
     DECODE_R(operands, rs);
-    CCCCPc target = cc_byte_offset_to_pc(vm->regs[rs]);
+    Pc target = cc_byte_offset_to_pc(vm->regs[rs]);
     if (target == CCCC_INVALID_PC || target > vm->text_ptr) {
         printf("error: invalid indirect jump target: %lld\n", vm->regs[rs]);
         return -1;
@@ -1494,12 +1494,12 @@ static inline int op_JMPI_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_ADJ_fn(CCCC *vm) {
+static inline int op_ADJ_fn(VirtualMachine *vm) {
     vm->sp = vm->sp + cc_read_i64(vm);
     return 0;
 }
 
-static inline int op_PSH3_fn(CCCC *vm) {
+static inline int op_PSH3_fn(VirtualMachine *vm) {
     // Push register value onto stack: *--sp = regs[rs]
     // Format: [PSH3] [rs:8|unused:56]
     long long operands = cc_read_word(vm);
@@ -1512,7 +1512,7 @@ static inline int op_PSH3_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_POP3_fn(CCCC *vm) {
+static inline int op_POP3_fn(VirtualMachine *vm) {
     // Pop from stack into register: regs[rd] = *sp++
     // Format: [POP3] [rd:8|unused:56]
     long long operands = cc_read_word(vm);
@@ -1524,7 +1524,7 @@ static inline int op_POP3_fn(CCCC *vm) {
 
 // ========== Type Conversion Opcodes ==========
 
-static inline int op_SX1_fn(CCCC *vm) {
+static inline int op_SX1_fn(VirtualMachine *vm) {
     // Sign extend 1 byte to 8 bytes: regs[rd] = (long long)(char)regs[rs]
     // Format: [SX1] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1534,7 +1534,7 @@ static inline int op_SX1_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_SX2_fn(CCCC *vm) {
+static inline int op_SX2_fn(VirtualMachine *vm) {
     // Sign extend 2 bytes to 8 bytes: regs[rd] = (long long)(short)regs[rs]
     // Format: [SX2] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1544,7 +1544,7 @@ static inline int op_SX2_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_SX4_fn(CCCC *vm) {
+static inline int op_SX4_fn(VirtualMachine *vm) {
     // Sign extend 4 bytes to 8 bytes: regs[rd] = (long long)(int)regs[rs]
     // Format: [SX4] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1554,7 +1554,7 @@ static inline int op_SX4_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_ZX1_fn(CCCC *vm) {
+static inline int op_ZX1_fn(VirtualMachine *vm) {
     // Zero extend 1 byte to 8 bytes: regs[rd] = (long long)(unsigned
     // char)regs[rs] Format: [ZX1] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1564,7 +1564,7 @@ static inline int op_ZX1_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_ZX2_fn(CCCC *vm) {
+static inline int op_ZX2_fn(VirtualMachine *vm) {
     // Zero extend 2 bytes to 8 bytes: regs[rd] = (long long)(unsigned
     // short)regs[rs] Format: [ZX2] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1574,7 +1574,7 @@ static inline int op_ZX2_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_ZX4_fn(CCCC *vm) {
+static inline int op_ZX4_fn(VirtualMachine *vm) {
     // Zero extend 4 bytes to 8 bytes: regs[rd] = (long long)(unsigned
     // int)regs[rs] Format: [ZX4] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
@@ -1586,7 +1586,7 @@ static inline int op_ZX4_fn(CCCC *vm) {
 
 // ========== Memory Allocation Opcodes ==========
 
-static inline int op_MALC_fn(CCCC *vm) {
+static inline int op_MALC_fn(VirtualMachine *vm) {
     // malloc: size in REG_A0, return pointer in REG_A0
     long long requested_size = vm->regs[REG_A0];
     if (requested_size <= 0) {
@@ -1664,7 +1664,7 @@ static inline int op_MALC_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_MFRE_fn(CCCC *vm) {
+static inline int op_MFRE_fn(VirtualMachine *vm) {
     // free: pointer in REG_A0
     void *ptr = (void *)vm->regs[REG_A0];
     if (!ptr) {
@@ -1744,7 +1744,7 @@ static inline int op_MFRE_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_MCPY_fn(CCCC *vm) {
+static inline int op_MCPY_fn(VirtualMachine *vm) {
     // memcpy: dest in REG_A0, src in REG_A1, count in REG_A2
     void *dest = (void *)vm->regs[REG_A0];
     void *src = (void *)vm->regs[REG_A1];
@@ -1753,7 +1753,7 @@ static inline int op_MCPY_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_REALC_fn(CCCC *vm) {
+static inline int op_REALC_fn(VirtualMachine *vm) {
     // realloc: ptr in REG_A0, new_size in REG_A1, return in REG_A0
     void *ptr = (void *)vm->regs[REG_A0];
     long long new_size = vm->regs[REG_A1];
@@ -1805,7 +1805,7 @@ static inline int op_REALC_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_CALC_fn(CCCC *vm) {
+static inline int op_CALC_fn(VirtualMachine *vm) {
     // calloc: nmemb in REG_A0, size in REG_A1, return in REG_A0
     long long nmemb = vm->regs[REG_A0];
     long long size = vm->regs[REG_A1];
@@ -1824,7 +1824,7 @@ static inline int op_CALC_fn(CCCC *vm) {
 
 // ========== Safety Opcodes ==========
 
-static inline int op_CHKB_fn(CCCC *vm) {
+static inline int op_CHKB_fn(VirtualMachine *vm) {
     // Check array bounds.
     // Format: [CHKB] [rs1:base, rs2:scaled_offset] (RR operand word)
     // rs1 = base pointer, rs2 = scaled byte offset (index * element_size)
@@ -1868,7 +1868,7 @@ static inline int op_CHKB_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_CHKI_fn(CCCC *vm) {
+static inline int op_CHKI_fn(VirtualMachine *vm) {
     // Check initialization: fail if variable at bp+offset has not been written.
     // Format: [CHKI] [offset:i64]
     long long offset = cc_read_i64(vm);
@@ -1891,7 +1891,7 @@ static inline int op_CHKI_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_MARKI_fn(CCCC *vm) {
+static inline int op_MARKI_fn(VirtualMachine *vm) {
     // Mark variable at bp+offset as initialized.
     // Format: [MARKI] [offset:i64]
     long long offset = cc_read_i64(vm);
@@ -1904,7 +1904,7 @@ static inline int op_MARKI_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_MARKA_fn(CCCC *vm) {
+static inline int op_MARKA_fn(VirtualMachine *vm) {
     // Mark a stack address for dangling-pointer detection.
     // Format: [MARKA] [rs:ptr] [offset:i64] [size:i64] [scope_id:i64]
     long long operands = cc_read_word(vm);
@@ -1937,7 +1937,7 @@ static inline int op_MARKA_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_CHKPA_fn(CCCC *vm) {
+static inline int op_CHKPA_fn(VirtualMachine *vm) {
     // Check pointer arithmetic result against its recorded provenance.
     // Format: [CHKPA] [rs:ptr_result]
     long long operands = cc_read_word(vm);
@@ -1972,7 +1972,7 @@ static inline int op_CHKPA_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_MARKP_fn(CCCC *vm) {
+static inline int op_MARKP_fn(VirtualMachine *vm) {
     // Record provenance for a pointer (origin, base, size).
     // Format: [MARKP] [rs_ptr:8 | rs_base:8] [origin_type:i64] [size:i64]
     long long operands = cc_read_word(vm);
@@ -1997,7 +1997,7 @@ static inline int op_MARKP_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_SCOPEIN_fn(CCCC *vm) {
+static inline int op_SCOPEIN_fn(VirtualMachine *vm) {
     // Activate all stack variables belonging to scope_id.
     // Format: [SCOPEIN] [scope_id:i64]
     int scope_id = (int)cc_read_word(vm);
@@ -2028,7 +2028,7 @@ static inline int op_SCOPEIN_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_SCOPEOUT_fn(CCCC *vm) {
+static inline int op_SCOPEOUT_fn(VirtualMachine *vm) {
     // Deactivate variables in scope_id and detect dangling pointers.
     // Format: [SCOPEOUT] [scope_id:i64]
     int scope_id = (int)cc_read_word(vm);
@@ -2081,7 +2081,7 @@ static inline int op_SCOPEOUT_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_CHKL_fn(CCCC *vm) {
+static inline int op_CHKL_fn(VirtualMachine *vm) {
     // Check variable liveness before access (use-after-scope / use-after-return).
     // Format: [CHKL] [offset:i64]
     long long offset = cc_read_i64(vm);
@@ -2125,7 +2125,7 @@ static inline int op_CHKL_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_MARKR_fn(CCCC *vm) {
+static inline int op_MARKR_fn(VirtualMachine *vm) {
     // Record a read access to the variable at bp+offset.
     // Format: [MARKR] [offset:i64]
     long long offset = cc_read_i64(vm);
@@ -2143,7 +2143,7 @@ static inline int op_MARKR_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_MARKW_fn(CCCC *vm) {
+static inline int op_MARKW_fn(VirtualMachine *vm) {
     // Record a write access to the variable at bp+offset; marks it initialized.
     // Format: [MARKW] [offset:i64]
     long long offset = cc_read_i64(vm);
@@ -2165,7 +2165,7 @@ static inline int op_MARKW_fn(CCCC *vm) {
 
 // ========== Setjmp/Longjmp ==========
 
-static inline int op_SETJMP_fn(CCCC *vm) {
+static inline int op_SETJMP_fn(VirtualMachine *vm) {
     // setjmp: jmp_buf address in REG_A0, return 0 in REG_A0
     long long *jmp_buf = (long long *)vm->regs[REG_A0];
     jmp_buf[0] = (long long)vm->pc;
@@ -2179,11 +2179,11 @@ static inline int op_SETJMP_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_LONGJMP_fn(CCCC *vm) {
+static inline int op_LONGJMP_fn(VirtualMachine *vm) {
     // longjmp: jmp_buf address in REG_A0, value in REG_A1
     long long *jmp_buf = (long long *)vm->regs[REG_A0];
     long long val = vm->regs[REG_A1];
-    vm->pc = (CCCCPc)jmp_buf[0];
+    vm->pc = (Pc)jmp_buf[0];
     vm->sp = (long long *)jmp_buf[1];
     vm->bp = (long long *)jmp_buf[2];
     if (vm->flags & CCCC_CFI) {
@@ -2198,35 +2198,35 @@ static inline int op_LONGJMP_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_DLOPEN_fn(CCCC *vm) {
+static inline int op_DLOPEN_fn(VirtualMachine *vm) {
     const char *path = (const char *)vm->regs[REG_A0];
     int mode = (int)vm->regs[REG_A1];
     vm->regs[REG_A0] = cccc_rt_dlopen(vm, path, mode);
     return 0;
 }
 
-static inline int op_DLSYM_fn(CCCC *vm) {
+static inline int op_DLSYM_fn(VirtualMachine *vm) {
     long long handle = vm->regs[REG_A0];
     const char *symbol = (const char *)vm->regs[REG_A1];
     vm->regs[REG_A0] = cccc_rt_dlsym(vm, handle, symbol);
     return 0;
 }
 
-static inline int op_DLCLOSE_fn(CCCC *vm) {
+static inline int op_DLCLOSE_fn(VirtualMachine *vm) {
     vm->regs[REG_A0] = cccc_rt_dlclose(vm, vm->regs[REG_A0]);
     return 0;
 }
 
-static inline int op_DLERROR_fn(CCCC *vm) {
+static inline int op_DLERROR_fn(VirtualMachine *vm) {
     vm->regs[REG_A0] = cccc_rt_dlerror(vm);
     return 0;
 }
 
 // ========== FFI ==========
 
-static _Thread_local CCCC *cccc_tls_ffi_vm;
+static _Thread_local VirtualMachine *cccc_tls_ffi_vm;
 
-CCCC *cccc_current_ffi_vm(void) {
+VirtualMachine *cccc_current_ffi_vm(void) {
     return cccc_tls_ffi_vm;
 }
 
@@ -2241,7 +2241,7 @@ int cccc_ffi_name_in_list(char **list, int count, const char *name) {
     return 0;
 }
 
-static int cccc_handle_ffi_policy_error(CCCC *vm, const char *kind,
+static int cccc_handle_ffi_policy_error(VirtualMachine *vm, const char *kind,
                                        const char *name,
                                        const char *details) {
     if (!name)
@@ -2257,7 +2257,7 @@ static int cccc_handle_ffi_policy_error(CCCC *vm, const char *kind,
     return vm->ffi_errors_fatal ? -1 : 0;
 }
 
-static int cccc_check_ffi_policy(CCCC *vm, const char *name, int actual_nargs,
+static int cccc_check_ffi_policy(VirtualMachine *vm, const char *name, int actual_nargs,
                                 int is_variadic, int num_fixed_args) {
     if (vm->disable_all_ffi)
         return cccc_handle_ffi_policy_error(
@@ -2294,7 +2294,7 @@ static int cccc_check_ffi_policy(CCCC *vm, const char *name, int actual_nargs,
     return 1;
 }
 
-int cccc_call_native_function(CCCC *vm, void *func_ptr, const char *name,
+int cccc_call_native_function(VirtualMachine *vm, void *func_ptr, const char *name,
                              long long *args, int actual_nargs,
                              uint64_t double_arg_mask, uint64_t float_arg_mask,
                              int returns_double, int returns_float,
@@ -2352,7 +2352,7 @@ int cccc_call_native_function(CCCC *vm, void *func_ptr, const char *name,
     for (int i = 0; i < actual_nargs; i++)
         arg_ptrs[i] = &args[i];
 
-    CCCC *saved_ffi_vm = cccc_tls_ffi_vm;
+    VirtualMachine *saved_ffi_vm = cccc_tls_ffi_vm;
     cccc_tls_ffi_vm = vm;
 
     if (returns_float) {
@@ -2374,7 +2374,7 @@ int cccc_call_native_function(CCCC *vm, void *func_ptr, const char *name,
     return 0;
 }
 
-static inline int op_CALLF_fn(CCCC *vm) {
+static inline int op_CALLF_fn(VirtualMachine *vm) {
     // Foreign function call using register-based calling convention
     // Operands: [ffi_idx, nargs, double_arg_mask, float_arg_mask]
     int func_idx = (int)cc_read_word(vm);
@@ -2437,7 +2437,7 @@ static inline int op_CALLF_fn(CCCC *vm) {
 
 // ========== Struct Return Buffer Support ==========
 
-static inline int op_RETBUF_fn(CCCC *vm) {
+static inline int op_RETBUF_fn(VirtualMachine *vm) {
     // Get next return buffer from rotating pool at runtime
     // This ensures chained struct-returning calls (e.g., f(g(), h()))
     // get different buffers automatically
@@ -2456,7 +2456,7 @@ static inline int op_RETBUF_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_BTRAP_fn(CCCC *vm) {
+static inline int op_BTRAP_fn(VirtualMachine *vm) {
     if (vm->flags & CCCC_ENABLE_DEBUGGER) {
         printf("\nBTRAP: debugger break-in at PC %u\n", vm->pc);
         cc_debug_repl(vm);
@@ -2479,7 +2479,7 @@ static inline bool sig_is_uncatchable(int sig) {
 #endif
 }
 
-static inline int op_VSIGNAL_fn(CCCC *vm) {
+static inline int op_VSIGNAL_fn(VirtualMachine *vm) {
     int  sig  = (int)vm->regs[REG_A0];
     long long func = vm->regs[REG_A1];
 
@@ -2488,7 +2488,7 @@ static inline int op_VSIGNAL_fn(CCCC *vm) {
         return 0;
     }
 
-    CCCCSigSlot *slot = &vm->vm_sigslots[sig];
+    SigSlot *slot = &vm->vm_sigslots[sig];
 
     /* Return old handler representation */
     long long old;
@@ -2516,7 +2516,7 @@ static inline int op_VSIGNAL_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_VRAISE_fn(CCCC *vm) {
+static inline int op_VRAISE_fn(VirtualMachine *vm) {
     int sig = (int)vm->regs[REG_A0];
 
     if (sig <= 0 || sig >= CCCC_NSIG) {
@@ -2534,13 +2534,13 @@ static inline int op_VRAISE_fn(CCCC *vm) {
     }
 #endif
 
-    CCCCSigSlot *slot = &vm->vm_sigslots[sig];
+    SigSlot *slot = &vm->vm_sigslots[sig];
     switch (slot->action) {
     case 1: /* IGN */
         vm->regs[REG_A0] = 0;
         return 0;
     case 2: { /* VM handler: push return address and jump to handler */
-        CCCCPc target = cc_byte_offset_to_pc(slot->handler_fn);
+        Pc target = cc_byte_offset_to_pc(slot->handler_fn);
         if (target == CCCC_INVALID_PC || target > vm->text_ptr) {
             fprintf(stderr, "error: invalid signal handler address for sig %d\n", sig);
             return -1;
@@ -2560,7 +2560,7 @@ static inline int op_VRAISE_fn(CCCC *vm) {
 
 // ========== Bit-Manipulation Builtins ==========
 
-static inline int op_CLZ_fn(CCCC *vm) {
+static inline int op_CLZ_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
@@ -2576,7 +2576,7 @@ static inline int op_CLZ_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_CTZ_fn(CCCC *vm) {
+static inline int op_CTZ_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
@@ -2592,7 +2592,7 @@ static inline int op_CTZ_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_POPCOUNT_fn(CCCC *vm) {
+static inline int op_POPCOUNT_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
@@ -2602,7 +2602,7 @@ static inline int op_POPCOUNT_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FFS_fn(CCCC *vm) {
+static inline int op_FFS_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
@@ -2618,7 +2618,7 @@ static inline int op_FFS_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_BSWAP_fn(CCCC *vm) {
+static inline int op_BSWAP_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
@@ -2638,7 +2638,7 @@ static inline int op_BSWAP_fn(CCCC *vm) {
 
 // ========== Checked Arithmetic Builtins ==========
 
-static inline int op_IOVFL_fn(CCCC *vm) {
+static inline int op_IOVFL_fn(VirtualMachine *vm) {
     // Operand: (op_type << 8) | (size_bytes << 1) | is_unsigned
     // op_type: 0=add, 1=sub, 2=mul
     // Inputs: a=regs[REG_A0], b=regs[REG_A1], ptr=regs[REG_A2]
@@ -2720,7 +2720,7 @@ static inline int op_IOVFL_fn(CCCC *vm) {
 // ========== Fused bp-relative (local) load/store ==========
 // These replace the common LEA3+LDR/STR two-opcode sequence for local vars.
 
-static inline int op_LDR_LOCAL_B_fn(CCCC *vm) {
+static inline int op_LDR_LOCAL_B_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd;
     DECODE_R(operands, rd);
@@ -2730,7 +2730,7 @@ static inline int op_LDR_LOCAL_B_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_LDR_LOCAL_H_fn(CCCC *vm) {
+static inline int op_LDR_LOCAL_H_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd;
     DECODE_R(operands, rd);
@@ -2740,7 +2740,7 @@ static inline int op_LDR_LOCAL_H_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_LDR_LOCAL_W_fn(CCCC *vm) {
+static inline int op_LDR_LOCAL_W_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd;
     DECODE_R(operands, rd);
@@ -2750,7 +2750,7 @@ static inline int op_LDR_LOCAL_W_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_LDR_LOCAL_D_fn(CCCC *vm) {
+static inline int op_LDR_LOCAL_D_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd;
     DECODE_R(operands, rd);
@@ -2760,7 +2760,7 @@ static inline int op_LDR_LOCAL_D_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_STR_LOCAL_B_fn(CCCC *vm) {
+static inline int op_STR_LOCAL_B_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd;
     DECODE_R(operands, rd);
@@ -2769,7 +2769,7 @@ static inline int op_STR_LOCAL_B_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_STR_LOCAL_H_fn(CCCC *vm) {
+static inline int op_STR_LOCAL_H_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd;
     DECODE_R(operands, rd);
@@ -2778,7 +2778,7 @@ static inline int op_STR_LOCAL_H_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_STR_LOCAL_W_fn(CCCC *vm) {
+static inline int op_STR_LOCAL_W_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd;
     DECODE_R(operands, rd);
@@ -2787,7 +2787,7 @@ static inline int op_STR_LOCAL_W_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_STR_LOCAL_D_fn(CCCC *vm) {
+static inline int op_STR_LOCAL_D_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd;
     DECODE_R(operands, rd);
@@ -2796,7 +2796,7 @@ static inline int op_STR_LOCAL_D_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FLDR_LOCAL_fn(CCCC *vm) {
+static inline int op_FLDR_LOCAL_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd;
     DECODE_R(operands, rd);
@@ -2805,7 +2805,7 @@ static inline int op_FLDR_LOCAL_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FSTR_LOCAL_fn(CCCC *vm) {
+static inline int op_FSTR_LOCAL_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd;
     DECODE_R(operands, rd);
@@ -2814,7 +2814,7 @@ static inline int op_FSTR_LOCAL_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FLDR_LOCAL_F32_fn(CCCC *vm) {
+static inline int op_FLDR_LOCAL_F32_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd;
     DECODE_R(operands, rd);
@@ -2823,7 +2823,7 @@ static inline int op_FLDR_LOCAL_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FSTR_LOCAL_F32_fn(CCCC *vm) {
+static inline int op_FSTR_LOCAL_F32_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd;
     DECODE_R(operands, rd);
@@ -2835,12 +2835,12 @@ static inline int op_FSTR_LOCAL_F32_fn(CCCC *vm) {
 // ========== Fused indexed load/store ==========
 // Effective address is (char *)regs[base] + regs[index] * scale + byte offset.
 
-static inline char *op_index_addr(CCCC *vm, int base, int index, int scale,
+static inline char *op_index_addr(VirtualMachine *vm, int base, int index, int scale,
                                   long long offset) {
     return (char *)vm->regs[base] + vm->regs[index] * (long long)scale + offset;
 }
 
-static inline int op_LDR_INDEX_B_fn(CCCC *vm) {
+static inline int op_LDR_INDEX_B_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, base, index, scale;
     DECODE_RRRS(operands, rd, base, index, scale);
@@ -2852,7 +2852,7 @@ static inline int op_LDR_INDEX_B_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_LDR_INDEX_H_fn(CCCC *vm) {
+static inline int op_LDR_INDEX_H_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, base, index, scale;
     DECODE_RRRS(operands, rd, base, index, scale);
@@ -2864,7 +2864,7 @@ static inline int op_LDR_INDEX_H_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_LDR_INDEX_W_fn(CCCC *vm) {
+static inline int op_LDR_INDEX_W_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, base, index, scale;
     DECODE_RRRS(operands, rd, base, index, scale);
@@ -2876,7 +2876,7 @@ static inline int op_LDR_INDEX_W_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_LDR_INDEX_D_fn(CCCC *vm) {
+static inline int op_LDR_INDEX_D_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, base, index, scale;
     DECODE_RRRS(operands, rd, base, index, scale);
@@ -2888,7 +2888,7 @@ static inline int op_LDR_INDEX_D_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_STR_INDEX_B_fn(CCCC *vm) {
+static inline int op_STR_INDEX_B_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, base, index, scale;
     DECODE_RRRS(operands, rd, base, index, scale);
@@ -2899,7 +2899,7 @@ static inline int op_STR_INDEX_B_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_STR_INDEX_H_fn(CCCC *vm) {
+static inline int op_STR_INDEX_H_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, base, index, scale;
     DECODE_RRRS(operands, rd, base, index, scale);
@@ -2910,7 +2910,7 @@ static inline int op_STR_INDEX_H_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_STR_INDEX_W_fn(CCCC *vm) {
+static inline int op_STR_INDEX_W_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, base, index, scale;
     DECODE_RRRS(operands, rd, base, index, scale);
@@ -2921,7 +2921,7 @@ static inline int op_STR_INDEX_W_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_STR_INDEX_D_fn(CCCC *vm) {
+static inline int op_STR_INDEX_D_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, base, index, scale;
     DECODE_RRRS(operands, rd, base, index, scale);
@@ -2932,7 +2932,7 @@ static inline int op_STR_INDEX_D_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FLDR_INDEX_fn(CCCC *vm) {
+static inline int op_FLDR_INDEX_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, base, index, scale;
     DECODE_RRRS(operands, rd, base, index, scale);
@@ -2943,7 +2943,7 @@ static inline int op_FLDR_INDEX_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FSTR_INDEX_fn(CCCC *vm) {
+static inline int op_FSTR_INDEX_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, base, index, scale;
     DECODE_RRRS(operands, rd, base, index, scale);
@@ -2954,7 +2954,7 @@ static inline int op_FSTR_INDEX_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FLDR_INDEX_F32_fn(CCCC *vm) {
+static inline int op_FLDR_INDEX_F32_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, base, index, scale;
     DECODE_RRRS(operands, rd, base, index, scale);
@@ -2965,7 +2965,7 @@ static inline int op_FLDR_INDEX_F32_fn(CCCC *vm) {
     return 0;
 }
 
-static inline int op_FSTR_INDEX_F32_fn(CCCC *vm) {
+static inline int op_FSTR_INDEX_F32_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, base, index, scale;
     DECODE_RRRS(operands, rd, base, index, scale);

@@ -105,7 +105,7 @@ int run_argv(char *const argv[]) {
 #endif
 }
 
-static int run_native_backend(CCCC *vm, Obj *prog, const char *out_file,
+static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_file,
                               const char **inc_paths, int inc_paths_count,
                               const char **sys_inc_paths,
                               int sys_inc_paths_count, const char **lib_paths,
@@ -374,8 +374,8 @@ static void usage(const char *argv0, int exit_code) {
     exit(exit_code);
 }
 
-static void configure_ffi_name_list(CCCC *vm, const char *list,
-                                    void (*add)(CCCC *, const char *)) {
+static void configure_ffi_name_list(VirtualMachine *vm, const char *list,
+                                    void (*add)(VirtualMachine *, const char *)) {
     const char *p = list;
     while (p && *p) {
         while (*p == ',' || isspace((unsigned char)*p))
@@ -434,7 +434,7 @@ static char *find_requested_library(const char *name, const char **paths,
     return strdup(libname);
 }
 
-static int load_requested_libraries(CCCC *vm, const char **libs, int libs_count,
+static int load_requested_libraries(VirtualMachine *vm, const char **libs, int libs_count,
                                     const char **paths, int paths_count) {
     for (int i = 0; i < libs_count; i++) {
         char *path = find_requested_library(libs[i], paths, paths_count);
@@ -448,7 +448,7 @@ static int load_requested_libraries(CCCC *vm, const char **libs, int libs_count,
     return 0;
 }
 
-static int ffi_index_by_name(CCCC *vm, const char *name) {
+static int ffi_index_by_name(VirtualMachine *vm, const char *name) {
     size_t len = strlen(name);
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
         if (vm->compiler.ffi_table[i].name &&
@@ -466,7 +466,7 @@ static int count_params(Type *ty) {
     return n;
 }
 
-static void register_dynamic_externs(CCCC *vm, Obj *prog) {
+static void register_dynamic_externs(VirtualMachine *vm, Obj *prog) {
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (!obj->is_function || obj->is_definition || !obj->name ||
             ffi_index_by_name(vm, obj->name) >= 0)
@@ -484,7 +484,7 @@ static void register_dynamic_externs(CCCC *vm, Obj *prog) {
     }
 }
 
-static int verify_dynamic_externs(CCCC *vm) {
+static int verify_dynamic_externs(VirtualMachine *vm) {
     int ok = 1;
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
         ForeignFunc *ff = &vm->compiler.ffi_table[i];
@@ -563,7 +563,7 @@ static char *read_stdin_to_tmp(void) {
 #endif
 }
 
-static void parse_define(CCCC *vm, char *arg) {
+static void parse_define(VirtualMachine *vm, char *arg) {
     char *eq = strchr(arg, '=');
     if (eq) {
         *eq = '\0';
@@ -1403,7 +1403,7 @@ int main(int argc, const char *argv[]) {
         }
     }
 
-    CCCC vm;
+    VirtualMachine vm;
     cc_init(&vm, flags);
     vm.compiler.compile_only = compile_only;
     vm.compiler.asm_passthru = asm_passthru;

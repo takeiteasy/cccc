@@ -38,7 +38,7 @@
 // ========== Helper Functions ==========
 
 // Get opcode from instruction at pc
-static int get_opcode(CCCC *vm, CCCCPc pc) {
+static int get_opcode(VirtualMachine *vm, Pc pc) {
     return (int)vm->text_seg[pc];
 }
 
@@ -46,24 +46,24 @@ static int get_instr_size(int op) {
     return cc_instr_words(op);
 }
 
-static int get_instr_size_at(CCCC *vm, CCCCPc pc, CCCCPc end) {
+static int get_instr_size_at(VirtualMachine *vm, Pc pc, Pc end) {
     int op = get_opcode(vm, pc);
     int size = get_instr_size(op);
     if (op == JMPT && pc + 3 < end) {
-        CCCCPc table_pc = vm->text_seg[pc + 1];
-        CCCCInstrWord count = vm->text_seg[pc + 2];
-        if (table_pc == pc + 4 && table_pc + (CCCCPc)count <= end)
+        Pc table_pc = vm->text_seg[pc + 1];
+        InstrWord count = vm->text_seg[pc + 2];
+        if (table_pc == pc + 4 && table_pc + (Pc)count <= end)
             size += (int)count;
     }
     return size;
 }
 
-static int get_compacted_instr_size_at(CCCC *vm, CCCCPc pc, CCCCPc end) {
+static int get_compacted_instr_size_at(VirtualMachine *vm, Pc pc, Pc end) {
     int op = get_opcode(vm, pc);
     int size = get_instr_size(op);
     if (op == JMPT && pc + 3 < end) {
-        CCCCInstrWord count = vm->text_seg[pc + 2];
-        if (pc + 4 + (CCCCPc)count <= end)
+        InstrWord count = vm->text_seg[pc + 2];
+        if (pc + 4 + (Pc)count <= end)
             size += (int)count;
     }
     return size;
@@ -72,10 +72,10 @@ static int get_compacted_instr_size_at(CCCC *vm, CCCCPc pc, CCCCPc end) {
 typedef struct {
     bool active;
     int nwords;
-    CCCCInstrWord words[4];
+    InstrWord words[4];
 } OptReplacement;
 
-static void set_li_replacement(OptReplacement *repls, CCCCPc pc, int rd,
+static void set_li_replacement(OptReplacement *repls, Pc pc, int rd,
                                long long imm) {
     repls[pc].active = true;
     repls[pc].nwords = 4;
@@ -85,7 +85,7 @@ static void set_li_replacement(OptReplacement *repls, CCCCPc pc, int rd,
     repls[pc].words[3] = cc_i64_hi(imm);
 }
 
-static bool is_nop_at(CCCC *vm, CCCCPc pc) {
+static bool is_nop_at(VirtualMachine *vm, Pc pc) {
     int op = get_opcode(vm, pc);
     if (op == MOV3) {
         int rd = vm->text_seg[pc + 1] & 0xFF;
@@ -99,7 +99,7 @@ static bool is_nop_at(CCCC *vm, CCCCPc pc) {
     return false;
 }
 
-static bool li_matches_replacement(CCCC *vm, CCCCPc pc,
+static bool li_matches_replacement(VirtualMachine *vm, Pc pc,
                                    const OptReplacement *repl) {
     if (!repl->active || repl->nwords != 4 || repl->words[0] != LI3)
         return false;
@@ -110,7 +110,7 @@ static bool li_matches_replacement(CCCC *vm, CCCCPc pc,
            vm->text_seg[pc + 3] == repl->words[3];
 }
 
-static CCCCPc remap_pc(CCCCPc *pc_map, CCCCPc old_end, CCCCPc target) {
+static Pc remap_pc(Pc *pc_map, Pc old_end, Pc target) {
     if (target == CCCC_INVALID_PC)
         return target;
     if (target <= old_end)
@@ -118,27 +118,27 @@ static CCCCPc remap_pc(CCCCPc *pc_map, CCCCPc old_end, CCCCPc target) {
     return target;
 }
 
-static void remap_text_byte_offset_at(CCCC *vm, CCCCPc operand_pc,
-                                      CCCCPc *pc_map, CCCCPc old_end) {
+static void remap_text_byte_offset_at(VirtualMachine *vm, Pc operand_pc,
+                                      Pc *pc_map, Pc old_end) {
     long long old_offset = cc_read_i64_at(vm, operand_pc);
-    CCCCPc old_target = cc_byte_offset_to_pc(old_offset);
+    Pc old_target = cc_byte_offset_to_pc(old_offset);
     if (old_target == CCCC_INVALID_PC)
         return;
-    CCCCPc new_target = remap_pc(pc_map, old_end, old_target);
+    Pc new_target = remap_pc(pc_map, old_end, old_target);
     if (new_target != CCCC_INVALID_PC)
         cc_write_i64_at(vm, operand_pc, cc_pc_to_byte_offset(new_target));
 }
 
-static void remap_function_metadata(Obj *obj, CCCCPc *pc_map, CCCCPc old_end) {
+static void remap_function_metadata(Obj *obj, Pc *pc_map, Pc old_end) {
     for (; obj; obj = obj->next) {
         if (obj->is_function) {
             if (obj->code_addr >= 0) {
-                CCCCPc pc = (CCCCPc)obj->code_addr;
+                Pc pc = (Pc)obj->code_addr;
                 if (pc <= old_end)
                     obj->code_addr = remap_pc(pc_map, old_end, pc);
             }
             if (obj->code_end_addr >= 0) {
-                CCCCPc pc = (CCCCPc)obj->code_end_addr;
+                Pc pc = (Pc)obj->code_end_addr;
                 if (pc <= old_end)
                     obj->code_end_addr = remap_pc(pc_map, old_end, pc);
             }
@@ -146,21 +146,21 @@ static void remap_function_metadata(Obj *obj, CCCCPc *pc_map, CCCCPc old_end) {
     }
 }
 
-static void mark_text_target(CCCC *vm, bool *targets, CCCCPc start,
-                             CCCCPc end, CCCCPc target) {
+static void mark_text_target(VirtualMachine *vm, bool *targets, Pc start,
+                             Pc end, Pc target) {
     (void)vm;
     if (target >= start && target < end)
         targets[target - start] = true;
 }
 
-static bool *build_control_flow_targets(CCCC *vm, CCCCPc start,
-                                        CCCCPc end) {
+static bool *build_control_flow_targets(VirtualMachine *vm, Pc start,
+                                        Pc end) {
     size_t count = (size_t)(end - start + 1);
     bool *targets = calloc(count, sizeof(bool));
     if (!targets)
         error("out of memory");
 
-    for (CCCCPc pc = start; pc < end; ) {
+    for (Pc pc = start; pc < end; ) {
         int op = get_opcode(vm, pc);
         int size = get_instr_size_at(vm, pc, end);
         if (size <= 0)
@@ -171,16 +171,16 @@ static bool *build_control_flow_targets(CCCC *vm, CCCCPc start,
         } else if (op == JZ3 || op == JNZ3) {
             mark_text_target(vm, targets, start, end, vm->text_seg[pc + 2]);
         } else if (op == JMPT && pc + 3 < end) {
-            CCCCPc table_pc = vm->text_seg[pc + 1];
-            CCCCInstrWord count = vm->text_seg[pc + 2];
+            Pc table_pc = vm->text_seg[pc + 1];
+            InstrWord count = vm->text_seg[pc + 2];
             mark_text_target(vm, targets, start, end, vm->text_seg[pc + 3]);
-            if (table_pc + (CCCCPc)count <= end) {
-                for (CCCCInstrWord i = 0; i < count; i++)
+            if (table_pc + (Pc)count <= end) {
+                for (InstrWord i = 0; i < count; i++)
                     mark_text_target(vm, targets, start, end,
-                                     vm->text_seg[table_pc + (CCCCPc)i]);
+                                     vm->text_seg[table_pc + (Pc)i]);
             }
         } else if (op == LTA3) {
-            CCCCPc target = cc_byte_offset_to_pc(cc_read_i64_at(vm, pc + 2));
+            Pc target = cc_byte_offset_to_pc(cc_read_i64_at(vm, pc + 2));
             mark_text_target(vm, targets, start, end, target);
         }
 
@@ -408,12 +408,12 @@ static bool eval_extend_const(int op, long long value, long long *out) {
     }
 }
 
-static void emit_mov_nop(CCCC *vm, CCCCPc pc) {
+static void emit_mov_nop(VirtualMachine *vm, Pc pc) {
     vm->text_seg[pc + 0] = MOV3;
     vm->text_seg[pc + 1] = ENCODE_RR(REG_ZERO, REG_ZERO);
 }
 
-static void emit_li_nop(CCCC *vm, CCCCPc pc) {
+static void emit_li_nop(VirtualMachine *vm, Pc pc) {
     vm->text_seg[pc + 0] = LI3;
     vm->text_seg[pc + 1] = ENCODE_R(REG_ZERO);
     cc_write_i64_at(vm, pc + 2, 0);
@@ -426,7 +426,7 @@ static void emit_li_nop(CCCC *vm, CCCCPc pc) {
 // their results are never constant-folded; stores are never removed by the
 // DCE pass; and the peephole pass only combines sign/zero-extension ops with
 // loads, which preserves the underlying memory access.
-static void opt_constant_fold(CCCC *vm, OptReplacement *repls) {
+static void opt_constant_fold(VirtualMachine *vm, OptReplacement *repls) {
     if (!vm || !vm->text_seg || !vm->text_ptr) {
         return;
     }
@@ -434,9 +434,9 @@ static void opt_constant_fold(CCCC *vm, OptReplacement *repls) {
     RegState state;
     reset_reg_state(&state);
 
-    CCCCPc start = 1;  // Skip entry point at text_seg[0]
-    CCCCPc end = vm->text_ptr + 1;
-    CCCCPc pc = start;
+    Pc start = 1;  // Skip entry point at text_seg[0]
+    Pc end = vm->text_ptr + 1;
+    Pc pc = start;
 
     int folded_count = 0;
     bool *control_flow_targets = build_control_flow_targets(vm, start, end);
@@ -664,18 +664,18 @@ static void opt_constant_fold(CCCC *vm, OptReplacement *repls) {
 // 5. LDR_W rd, rs; SX4 rd, rd -> LDR_W rd, rs (SX4 is redundant)
 //
 
-static void opt_peephole(CCCC *vm) {
+static void opt_peephole(VirtualMachine *vm) {
     if (!vm || !vm->text_seg || !vm->text_ptr) {
         return;
     }
 
-    CCCCPc start = 1;  // Skip entry point
-    CCCCPc end = vm->text_ptr + 1;
+    Pc start = 1;  // Skip entry point
+    Pc end = vm->text_ptr + 1;
     int opt_count = 0;
     bool *control_flow_targets = build_control_flow_targets(vm, start, end);
 
     // Pattern 1: MOV3/FMOV3 ra, ra -> NOP (self-move)
-    for (CCCCPc pc = start; pc < end; ) {
+    for (Pc pc = start; pc < end; ) {
         int op = get_opcode(vm, pc);
         int size = get_instr_size_at(vm, pc, end);
 
@@ -692,12 +692,12 @@ static void opt_peephole(CCCC *vm) {
     }
 
     // Pattern 2: LI3 rx, A; LI3 rx, B -> NOP; LI3 rx, B
-    for (CCCCPc pc = start; pc < end; ) {
+    for (Pc pc = start; pc < end; ) {
         int op = get_opcode(vm, pc);
         int size = get_instr_size_at(vm, pc, end);
 
         if (op == LI3 && pc + size < end) {
-            CCCCPc next = pc + size;
+            Pc next = pc + size;
             int next_op = get_opcode(vm, next);
             if (next_op == LI3 && !control_flow_targets[next - start]) {
                 int rd1 = vm->text_seg[pc + 1] & 0xFF;
@@ -712,12 +712,12 @@ static void opt_peephole(CCCC *vm) {
     }
 
     // Pattern 3: PSH3 rx; POP3 rx -> NOP; NOP (useless push/pop)
-    for (CCCCPc pc = start; pc < end; ) {
+    for (Pc pc = start; pc < end; ) {
         int op = get_opcode(vm, pc);
         int size = get_instr_size_at(vm, pc, end);
 
         if (op == PSH3 && pc + size < end) {
-            CCCCPc next = pc + size;
+            Pc next = pc + size;
             int next_op = get_opcode(vm, next);
             if (next_op == POP3) {
                 int rs_push = vm->text_seg[pc + 1] & 0xFF;
@@ -734,13 +734,13 @@ static void opt_peephole(CCCC *vm) {
     }
 
     // Pattern 4: JMP to next instruction -> NOP
-    for (CCCCPc pc = start; pc < end; ) {
+    for (Pc pc = start; pc < end; ) {
         int op = get_opcode(vm, pc);
         int size = get_instr_size_at(vm, pc, end);
 
         if (op == JMP) {
             long long target = vm->text_seg[pc + 1];
-            CCCCPc next = pc + size;
+            Pc next = pc + size;
             if (!control_flow_targets[pc - start] &&
                 target == (long long)next) {
                 // Jump to the very next instruction - useless
@@ -754,12 +754,12 @@ static void opt_peephole(CCCC *vm) {
     // Pattern 5: LDR_W rd, rs; SX4 rd, rd -> LDR_W rd, rs (SX4 is redundant)
     // LDR_W already sign-extends to 64 bits, so a self-extending SX4 on the same register is a no-op.
     // Do NOT apply to ZX4 — unsigned loads need the zero-extension.
-    for (CCCCPc pc = start; pc < end; ) {
+    for (Pc pc = start; pc < end; ) {
         int op = get_opcode(vm, pc);
         int size = get_instr_size_at(vm, pc, end);
 
         if (op == LDR_W && pc + size < end) {
-            CCCCPc next = pc + size;
+            Pc next = pc + size;
             if (!control_flow_targets[next - start]) {
                 int next_op = get_opcode(vm, next);
                 if (next_op == SX4) {
@@ -796,18 +796,18 @@ static void opt_peephole(CCCC *vm) {
 // 2. Store followed immediately by another store to same address
 //
 
-static void opt_dead_code(CCCC *vm) {
+static void opt_dead_code(VirtualMachine *vm) {
     if (!vm || !vm->text_seg || !vm->text_ptr) {
         return;
     }
 
-    CCCCPc start = 1;  // Skip entry point
-    CCCCPc end = vm->text_ptr + 1;
+    Pc start = 1;  // Skip entry point
+    Pc end = vm->text_ptr + 1;
     int dce_count = 0;
 
     // Count NOPs created by previous passes (informational only)
     int nop_count = 0;
-    for (CCCCPc pc = start; pc < end; ) {
+    for (Pc pc = start; pc < end; ) {
         int op = get_opcode(vm, pc);
         int size = get_instr_size_at(vm, pc, end);
 
@@ -825,13 +825,13 @@ static void opt_dead_code(CCCC *vm) {
 
     // Pattern: MOV3 rd, rs followed by another MOV3 rd, rx -> first is dead
     // (if rd is overwritten before being read)
-    for (CCCCPc pc = start; pc < end; ) {
+    for (Pc pc = start; pc < end; ) {
         int op = get_opcode(vm, pc);
         int size = get_instr_size_at(vm, pc, end);
 
         if (op == MOV3 && pc + size < end) {
             int rd1 = vm->text_seg[pc + 1] & 0xFF;
-            CCCCPc next = pc + size;
+            Pc next = pc + size;
             int next_op = get_opcode(vm, next);
 
             if (next_op == MOV3) {
@@ -854,35 +854,35 @@ static void opt_dead_code(CCCC *vm) {
 
 // ========== Pass 4: Bytecode Compaction ==========
 
-static void retarget_compacted_bytecode(CCCC *vm, CCCCPc *pc_map,
-                                        CCCCPc *new_to_old,
-                                        CCCCPc old_end,
-                                        CCCCPc new_end) {
+static void retarget_compacted_bytecode(VirtualMachine *vm, Pc *pc_map,
+                                        Pc *new_to_old,
+                                        Pc old_end,
+                                        Pc new_end) {
     vm->text_seg[0] = remap_pc(pc_map, old_end, vm->text_seg[0]);
 
-    for (CCCCPc pc = 1; pc < new_end; ) {
-        CCCCPc old_pc = new_to_old[pc];
+    for (Pc pc = 1; pc < new_end; ) {
+        Pc old_pc = new_to_old[pc];
         int op = get_opcode(vm, pc);
         int size = get_compacted_instr_size_at(vm, pc, new_end);
         if (size <= 0)
             break;
 
         if (op == JMP || op == CALL) {
-            CCCCPc old_target = vm->text_seg[pc + 1];
+            Pc old_target = vm->text_seg[pc + 1];
             vm->text_seg[pc + 1] = remap_pc(pc_map, old_end, old_target);
         } else if (op == JZ3 || op == JNZ3) {
-            CCCCPc old_target = vm->text_seg[pc + 2];
+            Pc old_target = vm->text_seg[pc + 2];
             vm->text_seg[pc + 2] = remap_pc(pc_map, old_end, old_target);
         } else if (op == JMPT && pc + 3 < new_end && old_pc <= old_end) {
-            CCCCPc old_table = vm->text_seg[pc + 1];
-            CCCCInstrWord count = vm->text_seg[pc + 2];
-            CCCCPc old_default = vm->text_seg[pc + 3];
-            CCCCPc new_table = remap_pc(pc_map, old_end, old_table);
+            Pc old_table = vm->text_seg[pc + 1];
+            InstrWord count = vm->text_seg[pc + 2];
+            Pc old_default = vm->text_seg[pc + 3];
+            Pc new_table = remap_pc(pc_map, old_end, old_table);
             vm->text_seg[pc + 1] = new_table;
             vm->text_seg[pc + 3] = remap_pc(pc_map, old_end, old_default);
-            if (new_table + (CCCCPc)count <= new_end) {
-                for (CCCCInstrWord i = 0; i < count; i++) {
-                    CCCCPc entry = new_table + (CCCCPc)i;
+            if (new_table + (Pc)count <= new_end) {
+                for (InstrWord i = 0; i < count; i++) {
+                    Pc entry = new_table + (Pc)i;
                     vm->text_seg[entry] =
                         remap_pc(pc_map, old_end, vm->text_seg[entry]);
                 }
@@ -899,20 +899,20 @@ static void retarget_compacted_bytecode(CCCC *vm, CCCCPc *pc_map,
     if (vm->dbg.source_map) {
         for (int i = 0; i < vm->dbg.source_map_count; i++) {
             long long pc = vm->dbg.source_map[i].pc_offset;
-            if (pc >= 0 && (CCCCPc)pc <= old_end)
+            if (pc >= 0 && (Pc)pc <= old_end)
                 vm->dbg.source_map[i].pc_offset =
-                    remap_pc(pc_map, old_end, (CCCCPc)pc);
+                    remap_pc(pc_map, old_end, (Pc)pc);
         }
     }
 
     for (int i = 0; i < vm->compiler.num_data_relocs; i++) {
         if (vm->compiler.data_relocs[i].target_segment != 1)
             continue;
-        CCCCPc old_pc = cc_byte_offset_to_pc(
+        Pc old_pc = cc_byte_offset_to_pc(
             vm->compiler.data_relocs[i].target_offset);
         if (old_pc == CCCC_INVALID_PC || old_pc > old_end)
             continue;
-        CCCCPc new_pc = remap_pc(pc_map, old_end, old_pc);
+        Pc new_pc = remap_pc(pc_map, old_end, old_pc);
         long long new_offset = cc_pc_to_byte_offset(new_pc);
         vm->compiler.data_relocs[i].target_offset = new_offset;
         long long value = new_offset + vm->compiler.data_relocs[i].addend;
@@ -921,52 +921,52 @@ static void retarget_compacted_bytecode(CCCC *vm, CCCCPc *pc_map,
     }
 }
 
-static void opt_compact_bytecode(CCCC *vm, OptReplacement *repls) {
+static void opt_compact_bytecode(VirtualMachine *vm, OptReplacement *repls) {
     if (!vm || !vm->text_seg || !vm->text_ptr)
         return;
 
-    CCCCPc old_end = vm->text_ptr + 1;
-    CCCCPc *pc_map = calloc((size_t)old_end + 1, sizeof(CCCCPc));
-    CCCCPc *new_to_old = calloc((size_t)old_end + 8, sizeof(CCCCPc));
+    Pc old_end = vm->text_ptr + 1;
+    Pc *pc_map = calloc((size_t)old_end + 1, sizeof(Pc));
+    Pc *new_to_old = calloc((size_t)old_end + 8, sizeof(Pc));
     if (!pc_map || !new_to_old)
         error("out of memory");
 
-    CCCCInstrWord *new_text = malloc(((size_t)old_end + 8) *
-                                    sizeof(CCCCInstrWord));
+    InstrWord *new_text = malloc(((size_t)old_end + 8) *
+                                    sizeof(InstrWord));
     if (!new_text)
         error("out of memory");
 
     size_t cap = (size_t)old_end + 8;
-    CCCCPc out = 1;
+    Pc out = 1;
     new_text[0] = vm->text_seg[0];
     new_to_old[0] = 0;
 
     int removed = 0;
     int expanded = 0;
 
-    for (CCCCPc pc = 1; pc < old_end; ) {
+    for (Pc pc = 1; pc < old_end; ) {
         int op = get_opcode(vm, pc);
         int old_size = get_instr_size_at(vm, pc, old_end);
         if (old_size <= 0)
             break;
 
-        CCCCPc next = pc + (CCCCPc)old_size;
+        Pc next = pc + (Pc)old_size;
         bool remove = !repls[pc].active && is_nop_at(vm, pc);
         if (!remove && !repls[pc].active && next < old_end)
             remove = li_matches_replacement(vm, pc, &repls[next]);
         int new_size = remove ? 0 : (repls[pc].active ? repls[pc].nwords
                                                        : old_size);
         pc_map[pc] = out;
-        for (int i = 1; i < old_size && pc + (CCCCPc)i <= old_end; i++)
-            pc_map[pc + (CCCCPc)i] = out;
+        for (int i = 1; i < old_size && pc + (Pc)i <= old_end; i++)
+            pc_map[pc + (Pc)i] = out;
         if (op == JMPT && pc + 3 < old_end) {
-            CCCCPc table_pc = vm->text_seg[pc + 1];
-            CCCCInstrWord count = vm->text_seg[pc + 2];
+            Pc table_pc = vm->text_seg[pc + 1];
+            InstrWord count = vm->text_seg[pc + 2];
             if (table_pc == pc + 4 &&
-                table_pc + (CCCCPc)count <= old_end) {
-                for (CCCCInstrWord i = 0; i < count; i++)
-                    pc_map[table_pc + (CCCCPc)i] =
-                        out + 4 + (CCCCPc)i;
+                table_pc + (Pc)count <= old_end) {
+                for (InstrWord i = 0; i < count; i++)
+                    pc_map[table_pc + (Pc)i] =
+                        out + 4 + (Pc)i;
             }
         }
 
@@ -978,9 +978,9 @@ static void opt_compact_bytecode(CCCC *vm, OptReplacement *repls) {
 
         if ((size_t)out + (size_t)new_size + 1 > cap) {
             cap = (cap * 2) + (size_t)new_size + 8;
-            CCCCInstrWord *grown =
-                realloc(new_text, cap * sizeof(CCCCInstrWord));
-            CCCCPc *grown_old = realloc(new_to_old, cap * sizeof(CCCCPc));
+            InstrWord *grown =
+                realloc(new_text, cap * sizeof(InstrWord));
+            Pc *grown_old = realloc(new_to_old, cap * sizeof(Pc));
             if (!grown || !grown_old)
                 error("out of memory");
             new_text = grown;
@@ -989,17 +989,17 @@ static void opt_compact_bytecode(CCCC *vm, OptReplacement *repls) {
 
         if (repls[pc].active) {
             memcpy(&new_text[out], repls[pc].words,
-                   (size_t)new_size * sizeof(CCCCInstrWord));
+                   (size_t)new_size * sizeof(InstrWord));
             if (new_size != old_size)
                 expanded++;
         } else {
             memcpy(&new_text[out], &vm->text_seg[pc],
-                   (size_t)old_size * sizeof(CCCCInstrWord));
+                   (size_t)old_size * sizeof(InstrWord));
         }
         for (int i = 0; i < new_size; i++)
-            new_to_old[out + (CCCCPc)i] = pc;
+            new_to_old[out + (Pc)i] = pc;
 
-        out += (CCCCPc)new_size;
+        out += (Pc)new_size;
         pc += old_size;
     }
     pc_map[old_end] = out;
@@ -1008,7 +1008,7 @@ static void opt_compact_bytecode(CCCC *vm, OptReplacement *repls) {
         if (vm_text_ensure_count(vm, out + 1) != 0)
             error("optimizer: text segment overflow during compaction");
         memcpy(&vm->text_seg[1], &new_text[1],
-               ((size_t)out - 1) * sizeof(CCCCInstrWord));
+               ((size_t)out - 1) * sizeof(InstrWord));
         vm->text_ptr = out - 1;
         retarget_compacted_bytecode(vm, pc_map, new_to_old, old_end, out);
         if (vm->debug_vm) {
@@ -1056,7 +1056,7 @@ typedef struct {
 typedef struct {
     bool      active;
     bool      valid;        // false if saved_reg was clobbered after the call
-    CCCCPc    target_addr;
+    Pc    target_addr;
     int       nargs;
     VNumber   arg_vns[8];
     int       saved_reg;    // register that caches the first result (-1 = not yet found)
@@ -1070,9 +1070,9 @@ static bool vn_equal(const VNumber *a, const VNumber *b) {
     return a->local_offset == b->local_offset;
 }
 
-static Obj *cse_lookup_const_fn(CCCC *vm, CCCCPc addr) {
+static Obj *cse_lookup_const_fn(VirtualMachine *vm, Pc addr) {
     for (Obj *fn = vm->compiler.globals; fn; fn = fn->next)
-        if (fn->is_function && fn->is_func_const && (CCCCPc)fn->code_addr == addr)
+        if (fn->is_function && fn->is_func_const && (Pc)fn->code_addr == addr)
             return fn;
     return NULL;
 }
@@ -1092,7 +1092,7 @@ static bool cse_has_float_params(Obj *fn) {
 }
 
 static CseEntry *cse_find(CseEntry *cache, int ncache,
-                          CCCCPc addr, int nargs, VNumber *arg_vns) {
+                          Pc addr, int nargs, VNumber *arg_vns) {
     for (int i = 0; i < ncache; i++) {
         CseEntry *e = &cache[i];
         if (!e->active || e->target_addr != addr || e->nargs != nargs)
@@ -1129,14 +1129,14 @@ static void cse_invalidate_reg(CseEntry *cache, int ncache, int rd) {
             cache[i].valid = false;
 }
 
-static void opt_cse_const_calls(CCCC *vm) {
+static void opt_cse_const_calls(VirtualMachine *vm) {
     if (!vm || !vm->text_seg || !vm->text_ptr)
         return;
     if (!vm->compiler.globals)
         return;
 
-    CCCCPc start = 1;
-    CCCCPc end = vm->text_ptr + 1;
+    Pc start = 1;
+    Pc end = vm->text_ptr + 1;
 
     bool *cf_targets = build_control_flow_targets(vm, start, end);
 
@@ -1154,7 +1154,7 @@ static void opt_cse_const_calls(CCCC *vm) {
     cse_reset_vn(vn);
     memset(cache, 0, sizeof(cache));
 
-    for (CCCCPc pc = start; pc < end; ) {
+    for (Pc pc = start; pc < end; ) {
         int op = get_opcode(vm, pc);
         int size = get_instr_size_at(vm, pc, end);
         if (size <= 0)
@@ -1239,7 +1239,7 @@ static void opt_cse_const_calls(CCCC *vm) {
 
         // ---- CSE: direct call to const function ----
         case CALL: {
-            CCCCPc target = vm->text_seg[pc + 1];
+            Pc target = vm->text_seg[pc + 1];
             Obj *fn = cse_lookup_const_fn(vm, target);
             if (fn && !cse_has_float_params(fn)) {
                 int nargs = cse_count_params(fn);
@@ -1263,8 +1263,8 @@ static void opt_cse_const_calls(CCCC *vm) {
                             // Replace CALL with MOV3 REG_A0, saved_reg.
                             // Both are 2 words — safe in-place replacement.
                             vm->text_seg[pc]     = MOV3;
-                            vm->text_seg[pc + 1] = (CCCCInstrWord)REG_A0 |
-                                ((CCCCInstrWord)e->saved_reg << 8);
+                            vm->text_seg[pc + 1] = (InstrWord)REG_A0 |
+                                ((InstrWord)e->saved_reg << 8);
                             cse_count++;
                             // The codegen always emits a MOV3 dest, REG_A0
                             // right after the CALL to save the result.  After
@@ -1351,12 +1351,12 @@ static void opt_cse_const_calls(CCCC *vm) {
 
 // ========== Main Entry Point ==========
 
-void cc_optimize(CCCC *vm, int level) {
+void cc_optimize(VirtualMachine *vm, int level) {
     if (!vm || !vm->text_seg || level <= 0) {
         return;
     }
 
-    CCCCPc end = vm->text_ptr + 1;
+    Pc end = vm->text_ptr + 1;
     OptReplacement *repls = calloc((size_t)end + 1, sizeof(OptReplacement));
     if (!repls)
         error("out of memory");

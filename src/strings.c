@@ -38,7 +38,7 @@ void strarray_push(StringArray *arr, char *s) {
     arr->data[arr->len++] = s;
 }
 
-void arena_strarray_push(CCCC *vm, StringArray *arr, char *s) {
+void arena_strarray_push(VirtualMachine *vm, StringArray *arr, char *s) {
     if (!arr->data) {
         arr->data = arena_alloc(&vm->compiler.parser_arena, 8 * sizeof(char *));
         memset(arr->data, 0, 8 * sizeof(char *));
@@ -73,20 +73,20 @@ char *format(char *fmt, ...) {
     return buf;
 }
 
-char *arena_strdup(CCCC *vm, const char *str) {
+char *arena_strdup(VirtualMachine *vm, const char *str) {
     if (!str)
         return NULL;
     return arena_strndup(vm, str, strlen(str));
 }
 
-char *arena_strndup(CCCC *vm, const char *str, int len) {
+char *arena_strndup(VirtualMachine *vm, const char *str, int len) {
     char *buf = arena_alloc(&vm->compiler.parser_arena, len + 1);
     memcpy(buf, str, len);
     buf[len] = '\0';
     return buf;
 }
 
-char *arena_format(CCCC *vm, char *fmt, ...) {
+char *arena_format(VirtualMachine *vm, char *fmt, ...) {
     char *heap_buf;
     size_t buflen;
     FILE *out = open_memstream(&heap_buf, &buflen);

@@ -35,16 +35,16 @@ typedef AttrTarget $attr_target_t;
 
 // Global VM pointer for __cccc_get_vm() builtin
 // Set during pragma macro execution, cleared after
-CCCC *__cccc_current_vm = NULL;
+VirtualMachine *__cccc_current_vm = NULL;
 
 // Builtin function to get the current VM context
-CCCC *__cccc_get_vm(void) { return __cccc_current_vm; }
+VirtualMachine *__cccc_get_vm(void) { return __cccc_current_vm; }
 
 // ============================================================================
 // Internal Helpers (replicate static functions from parse.c)
 // ============================================================================
 
-static Obj *reflect_new_var(CCCC *vm, char *name, int name_len, Type *ty) {
+static Obj *reflect_new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     Obj *var = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
     memset(var, 0, sizeof(Obj));
     var->name = name;
@@ -53,22 +53,22 @@ static Obj *reflect_new_var(CCCC *vm, char *name, int name_len, Type *ty) {
     return var;
 }
 
-static char *reflect_unique_name(CCCC *vm) {
+static char *reflect_unique_name(VirtualMachine *vm) {
     return arena_format(vm, ".L..%d", vm->compiler.unique_name_counter++);
 }
 
-const char *__cccc_gensym(CCCC *vm, const char *prefix) {
+const char *__cccc_gensym(VirtualMachine *vm, const char *prefix) {
     if (!vm || !prefix)
         return NULL;
     return arena_format(vm, "%s__%d", prefix,
                         vm->compiler.macro_gensym_counter++);
 }
 
-$token_t *__cccc_ast_current_token(CCCC *vm) {
+$token_t *__cccc_ast_current_token(VirtualMachine *vm) {
     return vm ? vm->compiler.macro_call_tok : NULL;
 }
 
-$token_t *__cccc_ast_synthetic_token(CCCC *vm, const char *label) {
+$token_t *__cccc_ast_synthetic_token(VirtualMachine *vm, const char *label) {
     if (!vm)
         return NULL;
 
@@ -107,7 +107,7 @@ $node_t *__cccc_ast_copy_location($node_t *dst, $node_t *src) {
     return dst;
 }
 
-static Obj *reflect_new_gvar(CCCC *vm, char *name, int name_len, Type *ty) {
+static Obj *reflect_new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     Obj *var = reflect_new_var(vm, name, name_len, ty);
     var->next = vm->compiler.globals;
     var->is_static = true;
@@ -116,7 +116,7 @@ static Obj *reflect_new_gvar(CCCC *vm, char *name, int name_len, Type *ty) {
     return var;
 }
 
-static Obj *reflect_new_anon_gvar(CCCC *vm, Type *ty) {
+static Obj *reflect_new_anon_gvar(VirtualMachine *vm, Type *ty) {
     char *name = reflect_unique_name(vm);
     return reflect_new_gvar(vm, name, strlen(name), ty);
 }
@@ -125,7 +125,7 @@ static Obj *reflect_new_anon_gvar(CCCC *vm, Type *ty) {
 // Type Lookup and Introspection
 // ============================================================================
 
-$type_t *__cccc_ast_find_type(CCCC *vm, const char *name) {
+$type_t *__cccc_ast_find_type(VirtualMachine *vm, const char *name) {
     if (!vm || !name)
         return NULL;
 
@@ -152,11 +152,11 @@ $type_t *__cccc_ast_find_type(CCCC *vm, const char *name) {
     return NULL;
 }
 
-bool __cccc_ast_type_exists(CCCC *vm, const char *name) {
+bool __cccc_ast_type_exists(VirtualMachine *vm, const char *name) {
     return __cccc_ast_find_type(vm, name) != NULL;
 }
 
-$type_t *__cccc_ast_get_type(CCCC *vm, const char *name) {
+$type_t *__cccc_ast_get_type(VirtualMachine *vm, const char *name) {
     if (!name)
         return NULL;
 
@@ -258,13 +258,13 @@ const char *__cccc_ast_type_name($type_t *ty) {
     return buffer;
 }
 
-$type_t *__cccc_ast_make_pointer(CCCC *vm, $type_t *base) {
+$type_t *__cccc_ast_make_pointer(VirtualMachine *vm, $type_t *base) {
     if (!vm || !base)
         return NULL;
     return pointer_to(vm, base);
 }
 
-$type_t *__cccc_ast_make_array(CCCC *vm, $type_t *base, int len) {
+$type_t *__cccc_ast_make_array(VirtualMachine *vm, $type_t *base, int len) {
     if (!vm || !base || len < 0)
         return NULL;
     return array_of(vm, base, len);
@@ -274,7 +274,7 @@ $type_t *__cccc_ast_make_array(CCCC *vm, $type_t *base, int len) {
 // Enum Reflection
 // ============================================================================
 
-int __cccc_ast_enum_count(CCCC *vm, $type_t *enum_type) {
+int __cccc_ast_enum_count(VirtualMachine *vm, $type_t *enum_type) {
     (void)vm; // Unused but kept for API consistency
     if (!enum_type || enum_type->kind != TY_ENUM)
         return -1;
@@ -285,7 +285,7 @@ int __cccc_ast_enum_count(CCCC *vm, $type_t *enum_type) {
     return count;
 }
 
-$enum_constant_t *__cccc_ast_enum_at(CCCC *vm, $type_t *enum_type, int index) {
+$enum_constant_t *__cccc_ast_enum_at(VirtualMachine *vm, $type_t *enum_type, int index) {
     (void)vm;
     if (!enum_type || enum_type->kind != TY_ENUM || index < 0)
         return NULL;
@@ -296,7 +296,7 @@ $enum_constant_t *__cccc_ast_enum_at(CCCC *vm, $type_t *enum_type, int index) {
     return ec;
 }
 
-$enum_constant_t *__cccc_ast_enum_find(CCCC *vm, $type_t *enum_type,
+$enum_constant_t *__cccc_ast_enum_find(VirtualMachine *vm, $type_t *enum_type,
                                     const char *name) {
     (void)vm;
     if (!enum_type || enum_type->kind != TY_ENUM || !name)
@@ -338,7 +338,7 @@ int64_t __cccc_ast_enum_value($type_t *e, int index) {
 // Struct/Union Member Introspection
 // ============================================================================
 
-int __cccc_ast_struct_member_count(CCCC *vm, $type_t *struct_type) {
+int __cccc_ast_struct_member_count(VirtualMachine *vm, $type_t *struct_type) {
     (void)vm;
     if (!struct_type)
         return -1;
@@ -351,7 +351,7 @@ int __cccc_ast_struct_member_count(CCCC *vm, $type_t *struct_type) {
     return count;
 }
 
-$member_t *__cccc_ast_struct_member_at(CCCC *vm, $type_t *struct_type,
+$member_t *__cccc_ast_struct_member_at(VirtualMachine *vm, $type_t *struct_type,
                                         int index) {
     (void)vm;
     if (!struct_type || index < 0)
@@ -365,7 +365,7 @@ $member_t *__cccc_ast_struct_member_at(CCCC *vm, $type_t *struct_type,
     return m;
 }
 
-$member_t *__cccc_ast_struct_member_find(CCCC *vm, $type_t *struct_type,
+$member_t *__cccc_ast_struct_member_find(VirtualMachine *vm, $type_t *struct_type,
                                         const char *name) {
     (void)vm;
     if (!struct_type || !name)
@@ -411,7 +411,7 @@ int __cccc_ast_member_bitfield_width($member_t *m) {
 // Global Symbol Introspection
 // ============================================================================
 
-$obj_t *__cccc_ast_find_global(CCCC *vm, const char *name) {
+$obj_t *__cccc_ast_find_global(VirtualMachine *vm, const char *name) {
     if (!vm || !name)
         return NULL;
 
@@ -424,7 +424,7 @@ $obj_t *__cccc_ast_find_global(CCCC *vm, const char *name) {
     return NULL;
 }
 
-int __cccc_ast_global_count(CCCC *vm) {
+int __cccc_ast_global_count(VirtualMachine *vm) {
     if (!vm)
         return 0;
 
@@ -434,7 +434,7 @@ int __cccc_ast_global_count(CCCC *vm) {
     return count;
 }
 
-$obj_t *__cccc_ast_global_at(CCCC *vm, int index) {
+$obj_t *__cccc_ast_global_at(VirtualMachine *vm, int index) {
     if (!vm || index < 0)
         return NULL;
 
@@ -482,7 +482,7 @@ $token_t *__cccc_attr_target_token($attr_target_t *target) {
 // AST Node Construction - Helper
 // ============================================================================
 
-static $node_t *alloc_node(CCCC *vm, $node_kind_t kind) {
+static $node_t *alloc_node(VirtualMachine *vm, $node_kind_t kind) {
     $node_t *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     memset(node, 0, sizeof(Node));
     node->kind = kind;
@@ -494,7 +494,7 @@ static $node_t *alloc_node(CCCC *vm, $node_kind_t kind) {
 // AST Node Construction - Literals
 // ============================================================================
 
-$node_t *__cccc_ast_int_literal(CCCC *vm, int64_t value) {
+$node_t *__cccc_ast_int_literal(VirtualMachine *vm, int64_t value) {
     if (!vm)
         return NULL;
 
@@ -504,7 +504,7 @@ $node_t *__cccc_ast_int_literal(CCCC *vm, int64_t value) {
     return node;
 }
 
-$node_t *__cccc_ast_float_literal(CCCC *vm, double value) {
+$node_t *__cccc_ast_float_literal(VirtualMachine *vm, double value) {
     if (!vm)
         return NULL;
 
@@ -514,7 +514,7 @@ $node_t *__cccc_ast_float_literal(CCCC *vm, double value) {
     return node;
 }
 
-$node_t *__cccc_ast_string_literal(CCCC *vm, const char *str) {
+$node_t *__cccc_ast_string_literal(VirtualMachine *vm, const char *str) {
     if (!vm || !str)
         return NULL;
 
@@ -549,7 +549,7 @@ $node_t *__cccc_ast_string_literal(CCCC *vm, const char *str) {
     return node;
 }
 
-$node_t *__cccc_ast_var_ref(CCCC *vm, const char *name) {
+$node_t *__cccc_ast_var_ref(VirtualMachine *vm, const char *name) {
     if (!vm || !name)
         return NULL;
 
@@ -584,7 +584,7 @@ $node_t *__cccc_ast_var_ref(CCCC *vm, const char *name) {
     return NULL;
 }
 
-$node_t *__cccc_ast_param_ref(CCCC *vm, $obj_t *fn, const char *name) {
+$node_t *__cccc_ast_param_ref(VirtualMachine *vm, $obj_t *fn, const char *name) {
     if (!vm || !fn || !name)
         return NULL;
 
@@ -608,7 +608,7 @@ $node_t *__cccc_ast_param_ref(CCCC *vm, $obj_t *fn, const char *name) {
 // AST Node Construction - Expressions
 // ============================================================================
 
-$node_t *__cccc_ast_binary(CCCC *vm, $node_kind_t op, $node_t *left,
+$node_t *__cccc_ast_binary(VirtualMachine *vm, $node_kind_t op, $node_t *left,
                             $node_t *right) {
     if (!vm || !left || !right)
         return NULL;
@@ -620,7 +620,7 @@ $node_t *__cccc_ast_binary(CCCC *vm, $node_kind_t op, $node_t *left,
     return node;
 }
 
-$node_t *__cccc_ast_unary(CCCC *vm, $node_kind_t op, $node_t *operand) {
+$node_t *__cccc_ast_unary(VirtualMachine *vm, $node_kind_t op, $node_t *operand) {
     if (!vm || !operand)
         return NULL;
 
@@ -629,7 +629,7 @@ $node_t *__cccc_ast_unary(CCCC *vm, $node_kind_t op, $node_t *operand) {
     return node;
 }
 
-$node_t *__cccc_ast_cast(CCCC *vm, $node_t *expr, $type_t *target_type) {
+$node_t *__cccc_ast_cast(VirtualMachine *vm, $node_t *expr, $type_t *target_type) {
     if (!vm || !expr || !target_type)
         return NULL;
 
@@ -643,7 +643,7 @@ $node_t *__cccc_ast_cast(CCCC *vm, $node_t *expr, $type_t *target_type) {
 // AST Node Construction - Statements
 // ============================================================================
 
-$node_t *__cccc_ast_return(CCCC *vm, $node_t *expr) {
+$node_t *__cccc_ast_return(VirtualMachine *vm, $node_t *expr) {
     if (!vm)
         return NULL;
 
@@ -652,7 +652,7 @@ $node_t *__cccc_ast_return(CCCC *vm, $node_t *expr) {
     return node;
 }
 
-$node_t *__cccc_ast_block(CCCC *vm, $node_t **stmts, int count) {
+$node_t *__cccc_ast_block(VirtualMachine *vm, $node_t **stmts, int count) {
     if (!vm)
         return NULL;
 
@@ -668,7 +668,7 @@ $node_t *__cccc_ast_block(CCCC *vm, $node_t **stmts, int count) {
     return node;
 }
 
-$node_t *__cccc_ast_block_add_stmt(CCCC *vm, $node_t *block, $node_t *stmt) {
+$node_t *__cccc_ast_block_add_stmt(VirtualMachine *vm, $node_t *block, $node_t *stmt) {
     if (!vm || !block || !stmt || block->kind != ND_BLOCK)
         return NULL;
 
@@ -684,7 +684,7 @@ $node_t *__cccc_ast_block_add_stmt(CCCC *vm, $node_t *block, $node_t *stmt) {
     return block;
 }
 
-$node_t *__cccc_ast_if(CCCC *vm, $node_t *cond, $node_t *then_body,
+$node_t *__cccc_ast_if(VirtualMachine *vm, $node_t *cond, $node_t *then_body,
                         $node_t *else_body) {
     if (!vm || !cond)
         return NULL;
@@ -696,7 +696,7 @@ $node_t *__cccc_ast_if(CCCC *vm, $node_t *cond, $node_t *then_body,
     return node;
 }
 
-$node_t *__cccc_ast_switch(CCCC *vm, $node_t *cond) {
+$node_t *__cccc_ast_switch(VirtualMachine *vm, $node_t *cond) {
     if (!vm || !cond)
         return NULL;
 
@@ -708,7 +708,7 @@ $node_t *__cccc_ast_switch(CCCC *vm, $node_t *cond) {
     return node;
 }
 
-void __cccc_ast_switch_add_case(CCCC *vm, $node_t *switch_node, $node_t *value,
+void __cccc_ast_switch_add_case(VirtualMachine *vm, $node_t *switch_node, $node_t *value,
                                 $node_t *body) {
     if (!vm || !switch_node || !value || !body)
         return;
@@ -728,7 +728,7 @@ void __cccc_ast_switch_add_case(CCCC *vm, $node_t *switch_node, $node_t *value,
     __cccc_ast_block_add_stmt(vm, switch_node->then, case_node);
 }
 
-void __cccc_ast_switch_set_default(CCCC *vm, $node_t *switch_node,
+void __cccc_ast_switch_set_default(VirtualMachine *vm, $node_t *switch_node,
                                     $node_t *body) {
     if (!vm || !switch_node || !body)
         return;
@@ -746,7 +746,7 @@ void __cccc_ast_switch_set_default(CCCC *vm, $node_t *switch_node,
 // AST Node Construction - Declarations
 // ============================================================================
 
-$node_t *__cccc_ast_expr_stmt(CCCC *vm, $node_t *expr) {
+$node_t *__cccc_ast_expr_stmt(VirtualMachine *vm, $node_t *expr) {
     if (!vm)
         return NULL;
 
@@ -759,7 +759,7 @@ $node_t *__cccc_ast_expr_stmt(CCCC *vm, $node_t *expr) {
 // Macro Diagnostics (ticket #78)
 // ============================================================================
 
-void __cccc_macro_error_at(CCCC *vm, $node_t *node, const char *fmt, ...) {
+void __cccc_macro_error_at(VirtualMachine *vm, $node_t *node, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     char buf[4096];
@@ -772,7 +772,7 @@ void __cccc_macro_error_at(CCCC *vm, $node_t *node, const char *fmt, ...) {
         error("%s", buf); // no source location available
 }
 
-void __cccc_macro_warning_at(CCCC *vm, $node_t *node, const char *fmt, ...) {
+void __cccc_macro_warning_at(VirtualMachine *vm, $node_t *node, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     char buf[4096];
@@ -798,7 +798,7 @@ void __cccc_macro_warning_at(CCCC *vm, $node_t *node, const char *fmt, ...) {
 
 // Allocate a local Obj and prepend it to the current function's locals list.
 // Injected variables receive stack offsets later when cc_compile runs.
-static $node_t *make_local_var_node(CCCC *vm, char *name, $type_t *ty) {
+static $node_t *make_local_var_node(VirtualMachine *vm, char *name, $type_t *ty) {
     if (!vm || !ty)
         return NULL;
 
@@ -821,7 +821,7 @@ static $node_t *make_local_var_node(CCCC *vm, char *name, $type_t *ty) {
     return node;
 }
 
-$node_t *__cccc_ast_local_var(CCCC *vm, const char *name, $type_t *ty) {
+$node_t *__cccc_ast_local_var(VirtualMachine *vm, const char *name, $type_t *ty) {
     if (!vm || !name || !ty)
         return NULL;
 
@@ -829,7 +829,7 @@ $node_t *__cccc_ast_local_var(CCCC *vm, const char *name, $type_t *ty) {
     return make_local_var_node(vm, arena_name, ty);
 }
 
-$node_t *__cccc_ast_local_var_unique(CCCC *vm, $type_t *ty) {
+$node_t *__cccc_ast_local_var_unique(VirtualMachine *vm, $type_t *ty) {
     if (!vm || !ty)
         return NULL;
 
@@ -843,7 +843,7 @@ $node_t *__cccc_ast_local_var_unique(CCCC *vm, $type_t *ty) {
 // AST Node Construction - New Expressions (ticket #51)
 // ============================================================================
 
-$node_t *__cccc_ast_assign(CCCC *vm, $node_t *target, $node_t *value) {
+$node_t *__cccc_ast_assign(VirtualMachine *vm, $node_t *target, $node_t *value) {
     if (!vm || !target || !value)
         return NULL;
 
@@ -853,7 +853,7 @@ $node_t *__cccc_ast_assign(CCCC *vm, $node_t *target, $node_t *value) {
     return node;
 }
 
-$node_t *__cccc_ast_member(CCCC *vm, $node_t *obj, const char *name) {
+$node_t *__cccc_ast_member(VirtualMachine *vm, $node_t *obj, const char *name) {
     if (!vm || !obj || !name)
         return NULL;
 
@@ -874,7 +874,7 @@ $node_t *__cccc_ast_member(CCCC *vm, $node_t *obj, const char *name) {
     return node;
 }
 
-$node_t *__cccc_ast_funcall(CCCC *vm, $node_t *callee, $node_t **args, int n) {
+$node_t *__cccc_ast_funcall(VirtualMachine *vm, $node_t *callee, $node_t **args, int n) {
     if (!vm || !callee)
         return NULL;
 
@@ -907,7 +907,7 @@ $node_t *__cccc_ast_funcall(CCCC *vm, $node_t *callee, $node_t **args, int n) {
 }
 
 // __cccc_ast_while: while(cond) body — represented as ND_FOR with init/inc NULL
-$node_t *__cccc_ast_while(CCCC *vm, $node_t *cond, $node_t *body) {
+$node_t *__cccc_ast_while(VirtualMachine *vm, $node_t *cond, $node_t *body) {
     if (!vm || !cond)
         return NULL;
 
@@ -918,7 +918,7 @@ $node_t *__cccc_ast_while(CCCC *vm, $node_t *cond, $node_t *body) {
     return node;
 }
 
-$node_t *__cccc_ast_for(CCCC *vm, $node_t *init, $node_t *cond,
+$node_t *__cccc_ast_for(VirtualMachine *vm, $node_t *init, $node_t *cond,
                        $node_t *inc, $node_t *body) {
     if (!vm)
         return NULL;
@@ -931,7 +931,7 @@ $node_t *__cccc_ast_for(CCCC *vm, $node_t *init, $node_t *cond,
     return node;
 }
 
-$node_t *__cccc_ast_do_while(CCCC *vm, $node_t *body, $node_t *cond) {
+$node_t *__cccc_ast_do_while(VirtualMachine *vm, $node_t *body, $node_t *cond) {
     if (!vm || !cond)
         return NULL;
 
@@ -951,7 +951,7 @@ static inline int reflect_align_to(int n, int align) {
 }
 
 // $cond(cond, then, else) — ternary ?: expression
-$node_t *__cccc_ast_cond(CCCC *vm, $node_t *cond, $node_t *then_expr,
+$node_t *__cccc_ast_cond(VirtualMachine *vm, $node_t *cond, $node_t *then_expr,
                           $node_t *else_expr) {
     if (!vm || !cond || !then_expr || !else_expr)
         return NULL;
@@ -964,7 +964,7 @@ $node_t *__cccc_ast_cond(CCCC *vm, $node_t *cond, $node_t *then_expr,
 }
 
 // $null() — typed null pointer: (void *)0
-$node_t *__cccc_ast_null(CCCC *vm) {
+$node_t *__cccc_ast_null(VirtualMachine *vm) {
     if (!vm)
         return NULL;
     $node_t *zero = __cccc_ast_int_literal(vm, 0);
@@ -977,21 +977,21 @@ $node_t *__cccc_ast_null(CCCC *vm) {
 }
 
 // $sizeof_type(ty) — sizeof(ty) as a compile-time integer literal
-$node_t *__cccc_ast_sizeof_type(CCCC *vm, $type_t *ty) {
+$node_t *__cccc_ast_sizeof_type(VirtualMachine *vm, $type_t *ty) {
     if (!vm || !ty)
         return NULL;
     return __cccc_ast_int_literal(vm, ty->size);
 }
 
 // $alignof_type(ty) — _Alignof(ty) as a compile-time integer literal
-$node_t *__cccc_ast_alignof_type(CCCC *vm, $type_t *ty) {
+$node_t *__cccc_ast_alignof_type(VirtualMachine *vm, $type_t *ty) {
     if (!vm || !ty)
         return NULL;
     return __cccc_ast_int_literal(vm, ty->align);
 }
 
 // $sizeof_expr(expr) — sizeof(expr): run add_type then return the size
-$node_t *__cccc_ast_sizeof_expr(CCCC *vm, $node_t *expr) {
+$node_t *__cccc_ast_sizeof_expr(VirtualMachine *vm, $node_t *expr) {
     if (!vm || !expr)
         return NULL;
     add_type(vm, expr);
@@ -1003,7 +1003,7 @@ $node_t *__cccc_ast_sizeof_expr(CCCC *vm, $node_t *expr) {
 // $subscript(arr, idx) — arr[idx], desugared as *(arr + idx * sizeof(*arr))
 // Mirrors new_add() in parse.c: the index must be pre-scaled by the element
 // size so that codegen emits a plain integer ADD (it does not scale internally).
-$node_t *__cccc_ast_subscript(CCCC *vm, $node_t *arr, $node_t *idx) {
+$node_t *__cccc_ast_subscript(VirtualMachine *vm, $node_t *arr, $node_t *idx) {
     if (!vm || !arr || !idx)
         return NULL;
 
@@ -1051,7 +1051,7 @@ $node_t *__cccc_ast_subscript(CCCC *vm, $node_t *arr, $node_t *idx) {
 }
 
 // $comma(lhs, rhs) — comma expression: evaluate lhs, discard, yield rhs
-$node_t *__cccc_ast_comma(CCCC *vm, $node_t *lhs, $node_t *rhs) {
+$node_t *__cccc_ast_comma(VirtualMachine *vm, $node_t *lhs, $node_t *rhs) {
     return __cccc_ast_binary(vm, ND_COMMA, lhs, rhs);
 }
 
@@ -1061,7 +1061,7 @@ $node_t *__cccc_ast_comma(CCCC *vm, $node_t *lhs, $node_t *rhs) {
 
 // Write a single constant scalar value to buf[0..ty->size-1].
 // Calls cc_eval / cc_eval_double which error() on non-constant expressions.
-static void reflect_write_constexpr(CCCC *vm, char *buf, Type *ty, Node *node) {
+static void reflect_write_constexpr(VirtualMachine *vm, char *buf, Type *ty, Node *node) {
     if (is_flonum(ty)) {
         double v = cc_eval_double(vm, node);
         if (ty->kind == TY_FLOAT)
@@ -1084,7 +1084,7 @@ static void reflect_write_constexpr(CCCC *vm, char *buf, Type *ty, Node *node) {
 
 // Create an anonymous static global var for a file-scope compound literal.
 // Returns ND_VAR(anon_gvar); gen() will copy init_data into the data segment.
-static Node *make_gvar_compound_literal(CCCC *vm, Type *ty, Node **inits, int n) {
+static Node *make_gvar_compound_literal(VirtualMachine *vm, Type *ty, Node **inits, int n) {
     Obj *var = reflect_new_anon_gvar(vm, ty);
     var->is_static = true;
 
@@ -1120,7 +1120,7 @@ static Node *make_gvar_compound_literal(CCCC *vm, Type *ty, Node **inits, int n)
 // Mirrors parse.c:4375 compound literal lowering.
 // At function scope: emits stack-var + ND_ASSIGN chain (supports non-constant values).
 // At file scope: emits static anon gvar with constant init_data (ticket #304).
-$node_t *__cccc_ast_compound_literal(CCCC *vm, $type_t *ty, $node_t **inits, int n) {
+$node_t *__cccc_ast_compound_literal(VirtualMachine *vm, $type_t *ty, $node_t **inits, int n) {
     if (!vm || !ty)
         return NULL;
     Token *tok = vm->compiler.macro_call_tok;
@@ -1171,7 +1171,7 @@ $node_t *__cccc_ast_compound_literal(CCCC *vm, $type_t *ty, $node_t **inits, int
 }
 
 // $init_array(elem_ty, ...) — array compound literal with explicit element type
-$node_t *__cccc_ast_init_array(CCCC *vm, $type_t *elem_ty, $node_t **elems, int n) {
+$node_t *__cccc_ast_init_array(VirtualMachine *vm, $type_t *elem_ty, $node_t **elems, int n) {
     if (!vm || !elem_ty || !elems || n <= 0)
         return NULL;
     Type *arr_ty = array_of(vm, elem_ty, n);
@@ -1181,7 +1181,7 @@ $node_t *__cccc_ast_init_array(CCCC *vm, $type_t *elem_ty, $node_t **elems, int 
 // $init_struct(ty, fields, values, n) — designated struct/union init
 // Partial init is fine: unmentioned fields remain zero.
 // At file scope: emits static anon gvar with constant init_data (ticket #304).
-$node_t *__cccc_ast_init_struct(CCCC *vm, $type_t *ty, const char **fields,
+$node_t *__cccc_ast_init_struct(VirtualMachine *vm, $type_t *ty, const char **fields,
                                 $node_t **values, int n) {
     if (!vm || !ty || n <= 0)
         return NULL;
@@ -1276,7 +1276,7 @@ $node_t *__cccc_ast_init_struct(CCCC *vm, $type_t *ty, const char **fields,
 // ============================================================================
 
 // $make_const(ty) — return a const-qualified copy of ty
-$type_t *__cccc_ast_make_const(CCCC *vm, $type_t *ty) {
+$type_t *__cccc_ast_make_const(VirtualMachine *vm, $type_t *ty) {
     if (!vm || !ty)
         return NULL;
     Type *result = copy_type(vm, ty);
@@ -1285,7 +1285,7 @@ $type_t *__cccc_ast_make_const(CCCC *vm, $type_t *ty) {
 }
 
 // $make_volatile(ty) — return a volatile-qualified copy of ty
-$type_t *__cccc_ast_make_volatile(CCCC *vm, $type_t *ty) {
+$type_t *__cccc_ast_make_volatile(VirtualMachine *vm, $type_t *ty) {
     if (!vm || !ty)
         return NULL;
     Type *result = copy_type(vm, ty);
@@ -1298,7 +1298,7 @@ $type_t *__cccc_ast_make_volatile(CCCC *vm, $type_t *ty) {
 // ============================================================================
 
 // Helper to create a function type
-static Type *make_func_type(CCCC *vm, Type *return_type) {
+static Type *make_func_type(VirtualMachine *vm, Type *return_type) {
     Type *ty = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
     memset(ty, 0, sizeof(Type));
     ty->kind = TY_FUNC;
@@ -1308,7 +1308,7 @@ static Type *make_func_type(CCCC *vm, Type *return_type) {
     return ty;
 }
 
-$obj_t *__cccc_ast_function(CCCC *vm, const char *name,
+$obj_t *__cccc_ast_function(VirtualMachine *vm, const char *name,
                             $type_t *return_type) {
     if (!vm || !name || !return_type)
         return NULL;
@@ -1367,13 +1367,13 @@ $obj_t *__cccc_ast_function(CCCC *vm, const char *name,
     return fn;
 }
 
-static $node_t *reflect_noop_node(CCCC *vm) {
+static $node_t *reflect_noop_node(VirtualMachine *vm) {
     $node_t *noop = alloc_node(vm, ND_NULL_EXPR);
     noop->ty = ty_void;
     return noop;
 }
 
-$node_t *__cccc_ast_publish(CCCC *vm, $obj_t *obj, $token_t *tok) {
+$node_t *__cccc_ast_publish(VirtualMachine *vm, $obj_t *obj, $token_t *tok) {
     if (!vm || !obj || !obj->ty)
         return NULL;
     if (!vm->compiler.scope)
@@ -1421,11 +1421,11 @@ $node_t *__cccc_ast_publish(CCCC *vm, $obj_t *obj, $token_t *tok) {
     return reflect_noop_node(vm);
 }
 
-void __cccc_emit_directive(CCCC *vm, const char *line) {
+void __cccc_emit_directive(VirtualMachine *vm, const char *line) {
     cc_record_emit_source(vm, line);
 }
 
-$node_t *__cccc_ast_publish_type(CCCC *vm, $type_t *ty, $token_t *tok) {
+$node_t *__cccc_ast_publish_type(VirtualMachine *vm, $type_t *ty, $token_t *tok) {
     (void)ty;
     (void)tok;
     if (!vm)
@@ -1433,7 +1433,7 @@ $node_t *__cccc_ast_publish_type(CCCC *vm, $type_t *ty, $token_t *tok) {
     return reflect_noop_node(vm);
 }
 
-void __cccc_ast_function_add_param(CCCC *vm, $obj_t *fn, const char *name,
+void __cccc_ast_function_add_param(VirtualMachine *vm, $obj_t *fn, const char *name,
                                 $type_t *type) {
     if (!vm || !fn || !name || !type)
         return;
@@ -1481,7 +1481,7 @@ void __cccc_ast_function_add_param(CCCC *vm, $obj_t *fn, const char *name,
     }
 }
 
-void __cccc_ast_function_set_body(CCCC *vm, $obj_t *fn, $node_t *body) {
+void __cccc_ast_function_set_body(VirtualMachine *vm, $obj_t *fn, $node_t *body) {
     if (!vm || !fn || !body)
         return;
 
@@ -1520,7 +1520,7 @@ void __cccc_ast_function_set_variadic($obj_t *fn, bool is_variadic) {
 // $function_prototype(name, ret) — create a forward declaration (no body).
 // The same params API ($function_add_param) applies; use
 // $publish to make it visible in scope.
-$obj_t *__cccc_ast_function_prototype(CCCC *vm, const char *name,
+$obj_t *__cccc_ast_function_prototype(VirtualMachine *vm, const char *name,
                                     $type_t *return_type) {
     if (!vm || !name || !return_type)
         return NULL;
@@ -1562,7 +1562,7 @@ $obj_t *__cccc_ast_function_prototype(CCCC *vm, const char *name,
 // Create a new named global variable.  The type determines layout; use
 // __cccc_ast_make_array(vm, char_ty, len) to get a char[len] type so that
 // the codegen init_data copy (codegen.c) copies the right number of bytes.
-$obj_t *__cccc_ast_global_var(CCCC *vm, const char *name, $type_t *ty) {
+$obj_t *__cccc_ast_global_var(VirtualMachine *vm, const char *name, $type_t *ty) {
     if (!vm || !name || !ty)
         return NULL;
 
@@ -1606,7 +1606,7 @@ $obj_t *__cccc_ast_global_var(CCCC *vm, const char *name, $type_t *ty) {
 // Set the initial data for a global variable.  data[0..len-1] is copied into
 // the arena.  The variable's type must have ty->size == len; use
 // $make_array(char_ty, len) to ensure the sizes match.
-void __cccc_ast_global_var_set_init_data(CCCC *vm, $obj_t *var,
+void __cccc_ast_global_var_set_init_data(VirtualMachine *vm, $obj_t *var,
                                         const char *data, int len) {
     if (!vm || !var || !data || len <= 0)
         return;
@@ -1636,7 +1636,7 @@ static int  _fn_context_depth = 0;
 // switches both to fn.  Any vars allocated inside the $with_fn block (e.g. from
 // $compound_literal) go into fn->locals via vm->compiler.locals; they are flushed
 // back to fn->locals on pop so assign_stack_offsets sees them correctly.
-void __cccc_ast_push_fn(CCCC *vm, $obj_t *fn) {
+void __cccc_ast_push_fn(VirtualMachine *vm, $obj_t *fn) {
     if (!vm)
         return;
     if (_fn_context_depth >= CCCC_FN_CONTEXT_STACK_DEPTH) {
@@ -1654,7 +1654,7 @@ void __cccc_ast_push_fn(CCCC *vm, $obj_t *fn) {
 // Pop the most recently pushed function context.  Flushes any vars that were
 // added to vm->compiler.locals during the $with_fn block into fn->locals, then
 // restores the outer current_fn and locals.
-void __cccc_ast_pop_fn(CCCC *vm) {
+void __cccc_ast_pop_fn(VirtualMachine *vm) {
     if (!vm)
         return;
     if (_fn_context_depth <= 0) {
@@ -1685,12 +1685,12 @@ static int _switch_context_depth = 0;
 static Type *_enum_context_stack[CCCC_AST_CONTEXT_STACK_DEPTH];
 static int _enum_context_depth = 0;
 
-$type_t *__cccc_ast_struct_add_field(CCCC *vm, $type_t *ty, const char *name,
+$type_t *__cccc_ast_struct_add_field(VirtualMachine *vm, $type_t *ty, const char *name,
                                     $type_t *field_type);
-void __cccc_ast_enum_add_constant(CCCC *vm, $type_t *ty, const char *name,
+void __cccc_ast_enum_add_constant(VirtualMachine *vm, $type_t *ty, const char *name,
                                   int64_t value);
 
-void __cccc_ast_push_block(CCCC *vm, $node_t *block) {
+void __cccc_ast_push_block(VirtualMachine *vm, $node_t *block) {
     (void)vm;
     if (_block_context_depth >= CCCC_AST_CONTEXT_STACK_DEPTH) {
         error("__cccc_ast_push_block: block context stack overflow (max %d)",
@@ -1700,13 +1700,13 @@ void __cccc_ast_push_block(CCCC *vm, $node_t *block) {
     _block_context_stack[_block_context_depth++] = block;
 }
 
-void __cccc_ast_pop_block(CCCC *vm) {
+void __cccc_ast_pop_block(VirtualMachine *vm) {
     (void)vm;
     if (_block_context_depth > 0)
         _block_context_depth--;
 }
 
-void __cccc_ast_push_struct(CCCC *vm, $type_t *ty) {
+void __cccc_ast_push_struct(VirtualMachine *vm, $type_t *ty) {
     (void)vm;
     if (_struct_context_depth >= CCCC_AST_CONTEXT_STACK_DEPTH) {
         error("__cccc_ast_push_struct: struct context stack overflow (max %d)",
@@ -1716,13 +1716,13 @@ void __cccc_ast_push_struct(CCCC *vm, $type_t *ty) {
     _struct_context_stack[_struct_context_depth++] = ty;
 }
 
-void __cccc_ast_pop_struct(CCCC *vm) {
+void __cccc_ast_pop_struct(VirtualMachine *vm) {
     (void)vm;
     if (_struct_context_depth > 0)
         _struct_context_depth--;
 }
 
-void __cccc_ast_push_switch(CCCC *vm, $node_t *switch_node) {
+void __cccc_ast_push_switch(VirtualMachine *vm, $node_t *switch_node) {
     (void)vm;
     if (_switch_context_depth >= CCCC_AST_CONTEXT_STACK_DEPTH) {
         error("__cccc_ast_push_switch: switch context stack overflow (max %d)",
@@ -1732,13 +1732,13 @@ void __cccc_ast_push_switch(CCCC *vm, $node_t *switch_node) {
     _switch_context_stack[_switch_context_depth++] = switch_node;
 }
 
-void __cccc_ast_pop_switch(CCCC *vm) {
+void __cccc_ast_pop_switch(VirtualMachine *vm) {
     (void)vm;
     if (_switch_context_depth > 0)
         _switch_context_depth--;
 }
 
-void __cccc_ast_push_enum(CCCC *vm, $type_t *ty) {
+void __cccc_ast_push_enum(VirtualMachine *vm, $type_t *ty) {
     (void)vm;
     if (_enum_context_depth >= CCCC_AST_CONTEXT_STACK_DEPTH) {
         error("__cccc_ast_push_enum: enum context stack overflow (max %d)",
@@ -1748,20 +1748,20 @@ void __cccc_ast_push_enum(CCCC *vm, $type_t *ty) {
     _enum_context_stack[_enum_context_depth++] = ty;
 }
 
-void __cccc_ast_pop_enum(CCCC *vm) {
+void __cccc_ast_pop_enum(VirtualMachine *vm) {
     (void)vm;
     if (_enum_context_depth > 0)
         _enum_context_depth--;
 }
 
-$node_t *__cccc_ast_block_add_current_stmt(CCCC *vm, $node_t *stmt) {
+$node_t *__cccc_ast_block_add_current_stmt(VirtualMachine *vm, $node_t *stmt) {
     if (_block_context_depth <= 0)
         return NULL;
     return __cccc_ast_block_add_stmt(
         vm, _block_context_stack[_block_context_depth - 1], stmt);
 }
 
-$type_t *__cccc_ast_struct_add_current_field(CCCC *vm, const char *name,
+$type_t *__cccc_ast_struct_add_current_field(VirtualMachine *vm, const char *name,
                                             $type_t *field_type) {
     if (_struct_context_depth <= 0)
         return NULL;
@@ -1770,7 +1770,7 @@ $type_t *__cccc_ast_struct_add_current_field(CCCC *vm, const char *name,
         field_type);
 }
 
-void __cccc_ast_switch_add_current_case(CCCC *vm, $node_t *value,
+void __cccc_ast_switch_add_current_case(VirtualMachine *vm, $node_t *value,
                                        $node_t *body) {
     if (_switch_context_depth <= 0)
         return;
@@ -1778,14 +1778,14 @@ void __cccc_ast_switch_add_current_case(CCCC *vm, $node_t *value,
                               value, body);
 }
 
-void __cccc_ast_switch_set_current_default(CCCC *vm, $node_t *body) {
+void __cccc_ast_switch_set_current_default(VirtualMachine *vm, $node_t *body) {
     if (_switch_context_depth <= 0)
         return;
     __cccc_ast_switch_set_default(
         vm, _switch_context_stack[_switch_context_depth - 1], body);
 }
 
-void __cccc_ast_enum_add_current_constant(CCCC *vm, const char *name,
+void __cccc_ast_enum_add_current_constant(VirtualMachine *vm, const char *name,
                                          int value) {
     if (_enum_context_depth <= 0)
         return;
@@ -1801,7 +1801,7 @@ void __cccc_ast_enum_add_current_constant(CCCC *vm, const char *name,
 // dumpTree: reuse the existing cc_dump_node text renderer
 // ---------------------------------------------------------------------------
 
-void __cccc_dump_tree(CCCC *vm, $node_t *node) {
+void __cccc_dump_tree(VirtualMachine *vm, $node_t *node) {
     (void)vm;
     if (!node)
         return;
@@ -1809,7 +1809,7 @@ void __cccc_dump_tree(CCCC *vm, $node_t *node) {
     fflush(stdout);
 }
 
-const char *__cccc_dump_tree_to_string(CCCC *vm, $node_t *node) {
+const char *__cccc_dump_tree_to_string(VirtualMachine *vm, $node_t *node) {
     if (!vm || !node)
         return NULL;
 
@@ -1984,7 +1984,7 @@ static void emit_ast_gen(FILE *f, Node *node) {
     }
 }
 
-void __cccc_dump_ast_gen(CCCC *vm, $node_t *node) {
+void __cccc_dump_ast_gen(VirtualMachine *vm, $node_t *node) {
     (void)vm;
     if (!node)
         return;
@@ -1993,7 +1993,7 @@ void __cccc_dump_ast_gen(CCCC *vm, $node_t *node) {
     fflush(stdout);
 }
 
-const char *__cccc_dump_ast_gen_to_string(CCCC *vm, $node_t *node) {
+const char *__cccc_dump_ast_gen_to_string(VirtualMachine *vm, $node_t *node) {
     if (!vm || !node)
         return NULL;
 
@@ -2047,7 +2047,7 @@ static int quote_splice_kind(Token *tok) {
 //   - sets *splice_mask (bit k-1) for each $@k splice index seen
 //   - returns the maximum index referenced (0 if no splice points)
 //   - returns -1 on mixing error
-static int quote_scan_and_rewrite(CCCC *vm, Token *toks, uint64_t *splice_mask) {
+static int quote_scan_and_rewrite(VirtualMachine *vm, Token *toks, uint64_t *splice_mask) {
     bool has_positional = false;
     bool has_incremental = false;
     int max_index = 0;
@@ -2151,7 +2151,7 @@ static int quote_scan_and_rewrite(CCCC *vm, Token *toks, uint64_t *splice_mask) 
 // Push a placeholder variable with the given name into a Scope's var list
 // (arena-allocated).  Typed from the corresponding argument node if
 // available, else ty_long.
-static Obj *quote_push_placeholder(CCCC *vm, Scope *sc, char *name,
+static Obj *quote_push_placeholder(VirtualMachine *vm, Scope *sc, char *name,
                                     $node_t *arg_node) {
     int name_len = (int)strlen(name);
 
@@ -2188,11 +2188,11 @@ static Obj *quote_push_placeholder(CCCC *vm, Scope *sc, char *name,
 
 // Substitution walk state
 typedef struct {
-    CCCC      *vm;                   // compiler context (needed for ND_INIT_SPLICE expansion)
-    Obj      *placeholder_vars[64]; // placeholder_vars[i] = Obj for $(i+1)
-    Obj      *splice_vars[64];      // splice_vars[i]      = Obj for $@(i+1)
-    $node_t   **arg_nodes;
-    int       n_args;
+    VirtualMachine *vm;                   // compiler context (needed for ND_INIT_SPLICE expansion)
+    Obj *placeholder_vars[64]; // placeholder_vars[i] = Obj for $(i+1)
+    Obj *splice_vars[64];      // splice_vars[i]      = Obj for $@(i+1)
+    $node_t **arg_nodes;
+    int n_args;
 } QuoteSubstState;
 
 // If stmt is an ND_EXPR_STMT whose sole expression is a reference to a splice
@@ -2415,7 +2415,7 @@ static bool quote_is_stmt(Token *tok) {
 // After quote_substitute, walk the AST and re-apply parameter casts + arity
 // validation for any ND_FUNCALL nodes that had $@k splice placeholders (which
 // bypassed parse-time checking in funcall()).
-static void recheck_spliced_funcalls(CCCC *vm, $node_t *node) {
+static void recheck_spliced_funcalls(VirtualMachine *vm, $node_t *node) {
     if (!node)
         return;
     recheck_spliced_funcalls(vm, node->lhs);
@@ -2458,7 +2458,7 @@ static void recheck_spliced_funcalls(CCCC *vm, $node_t *node) {
 }
 
 // Shared implementation for both public entry points.
-static $node_t *quote_core(CCCC *vm, const char *tmpl,
+static $node_t *quote_core(VirtualMachine *vm, const char *tmpl,
                              $node_t **nodes, int n) {
     if (!vm || !tmpl)
         return NULL;
@@ -2548,13 +2548,13 @@ static $node_t *quote_core(CCCC *vm, const char *tmpl,
     return result;
 }
 
-$node_t *__cccc_quote_n(CCCC *vm, const char *tmpl, $node_t **nodes, int count) {
+$node_t *__cccc_quote_n(VirtualMachine *vm, const char *tmpl, $node_t **nodes, int count) {
     if (!vm || !tmpl || (!nodes && count > 0))
         return NULL;
     return quote_core(vm, tmpl, nodes, count);
 }
 
-$node_t *__cccc_quote(CCCC *vm, const char *tmpl, ...) {
+$node_t *__cccc_quote(VirtualMachine *vm, const char *tmpl, ...) {
     if (!vm || !tmpl)
         return NULL;
 
@@ -2620,7 +2620,7 @@ $node_t *__cccc_quote(CCCC *vm, const char *tmpl, ...) {
 // Build a ->next-linked chain from an array of nodes and return the head.
 // Useful for constructing the list argument to a $@k splice.
 // A single node is a chain of length 1; passing count==0 returns NULL.
-$node_t *__cccc_node_list(CCCC *vm, $node_t **nodes, int count) {
+$node_t *__cccc_node_list(VirtualMachine *vm, $node_t **nodes, int count) {
     if (!vm || !nodes || count <= 0)
         return NULL;
 
@@ -2641,7 +2641,7 @@ $node_t *__cccc_node_list(CCCC *vm, $node_t **nodes, int count) {
 
 // Helper: synthesize a Token for use as a name field in Type/Member.
 // The token's loc is an arena-allocated copy of name so it outlives the call.
-static Token *reflect_make_name_token(CCCC *vm, const char *name, int name_len) {
+static Token *reflect_make_name_token(VirtualMachine *vm, const char *name, int name_len) {
     Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     memset(tok, 0, sizeof(Token));
     tok->kind = TK_IDENT;
@@ -2652,7 +2652,7 @@ static Token *reflect_make_name_token(CCCC *vm, const char *name, int name_len) 
 
 // Helper: expose a struct/union/enum type by tag name so $find_type(name)
 // resolves it. Mirrors push_tag_scope + record_type_name in parse.c.
-static void reflect_push_tag_scope(CCCC *vm, const char *name, int name_len,
+static void reflect_push_tag_scope(VirtualMachine *vm, const char *name, int name_len,
                                    Type *ty) {
     if (!vm || !vm->compiler.scope)
         return;
@@ -2684,7 +2684,7 @@ static void reflect_push_tag_scope(CCCC *vm, const char *name, int name_len,
 
 // Helper: expose a typedef by name so $find_type(name) resolves it.
 // Mirrors push_scope(...)->type_def = ty + record_type_name in parse.c.
-static void reflect_push_typedef_scope(CCCC *vm, const char *name, int name_len,
+static void reflect_push_typedef_scope(VirtualMachine *vm, const char *name, int name_len,
                                        Type *ty) {
     if (!vm || !vm->compiler.scope)
         return;
@@ -2715,7 +2715,7 @@ static void reflect_push_typedef_scope(CCCC *vm, const char *name, int name_len,
 
 // $make_struct(name) — create and expose a new struct type.
 // Fields are added with $struct_add_field.
-$type_t *__cccc_ast_make_struct(CCCC *vm, const char *name) {
+$type_t *__cccc_ast_make_struct(VirtualMachine *vm, const char *name) {
     if (!vm || !name)
         return NULL;
     Type *ty = struct_type(vm);
@@ -2728,7 +2728,7 @@ $type_t *__cccc_ast_make_struct(CCCC *vm, const char *name) {
 }
 
 // $make_union(name) — create and expose a new union type.
-$type_t *__cccc_ast_make_union(CCCC *vm, const char *name) {
+$type_t *__cccc_ast_make_union(VirtualMachine *vm, const char *name) {
     if (!vm || !name)
         return NULL;
     Type *ty = union_type(vm);
@@ -2742,7 +2742,7 @@ $type_t *__cccc_ast_make_union(CCCC *vm, const char *name) {
 
 // $struct_add_field(ty, name, field_type) — append a field to a struct or
 // union type and recompute the aggregate size/alignment.
-$type_t *__cccc_ast_struct_add_field(CCCC *vm, $type_t *ty, const char *name,
+$type_t *__cccc_ast_struct_add_field(VirtualMachine *vm, $type_t *ty, const char *name,
                                    $type_t *field_type) {
     if (!vm || !ty || !name || !field_type)
         return NULL;
@@ -2800,7 +2800,7 @@ $type_t *__cccc_ast_struct_add_field(CCCC *vm, $type_t *ty, const char *name,
 
 // $make_enum(name) — create and expose a new enum type.
 // Constants are added with $enum_add_constant.
-$type_t *__cccc_ast_make_enum(CCCC *vm, const char *name) {
+$type_t *__cccc_ast_make_enum(VirtualMachine *vm, const char *name) {
     if (!vm || !name)
         return NULL;
     Type *ty = enum_type(vm);
@@ -2812,7 +2812,7 @@ $type_t *__cccc_ast_make_enum(CCCC *vm, const char *name) {
 
 // $enum_add_constant(ty, name, value) — add a named constant to an enum
 // type and expose it as an integer constant in current scope.
-void __cccc_ast_enum_add_constant(CCCC *vm, $type_t *ty, const char *name,
+void __cccc_ast_enum_add_constant(VirtualMachine *vm, $type_t *ty, const char *name,
                                   int64_t value) {
     if (!vm || !ty || !name || ty->kind != TY_ENUM)
         return;
@@ -2853,7 +2853,7 @@ void __cccc_ast_enum_add_constant(CCCC *vm, $type_t *ty, const char *name,
 
 // $make_typedef(name, underlying) — register name as a typedef alias for
 // underlying so that $find_type(name) and C code can use it.
-$type_t *__cccc_ast_make_typedef(CCCC *vm, const char *name, $type_t *underlying) {
+$type_t *__cccc_ast_make_typedef(VirtualMachine *vm, const char *name, $type_t *underlying) {
     if (!vm || !name || !underlying)
         return NULL;
     int name_len = (int)strlen(name);
@@ -2868,7 +2868,7 @@ $type_t *__cccc_ast_make_typedef(CCCC *vm, const char *name, $type_t *underlying
 // Ticket #188: Comptime Variable Access
 // ============================================================================
 
-static ComptimeVar *find_comptime_var(CCCC *vm, const char *name) {
+static ComptimeVar *find_comptime_var(VirtualMachine *vm, const char *name) {
     size_t len = strlen(name);
     for (ComptimeVar *cv = vm->compiler.comptime_vars; cv; cv = cv->next) {
         if (strlen(cv->name) == len && strncmp(cv->name, name, len) == 0)
@@ -2877,21 +2877,21 @@ static ComptimeVar *find_comptime_var(CCCC *vm, const char *name) {
     return NULL;
 }
 
-int64_t __cccc_get_comptime_int(CCCC *vm, const char *name) {
+int64_t __cccc_get_comptime_int(VirtualMachine *vm, const char *name) {
     if (!vm || !name) return 0;
     ComptimeVar *cv = find_comptime_var(vm, name);
     if (!cv || !cv->is_evaluated || cv->is_struct) return 0;
     return cv->is_float ? (int64_t)cv->float_val : cv->int_val;
 }
 
-double __cccc_get_comptime_float(CCCC *vm, const char *name) {
+double __cccc_get_comptime_float(VirtualMachine *vm, const char *name) {
     if (!vm || !name) return 0.0;
     ComptimeVar *cv = find_comptime_var(vm, name);
     if (!cv || !cv->is_evaluated || cv->is_struct) return 0.0;
     return cv->is_float ? cv->float_val : (double)cv->int_val;
 }
 
-$node_t *__cccc_get_comptime_var(CCCC *vm, const char *name) {
+$node_t *__cccc_get_comptime_var(VirtualMachine *vm, const char *name) {
     if (!vm || !name) return NULL;
     ComptimeVar *cv = find_comptime_var(vm, name);
     if (!cv || !cv->is_evaluated || cv->is_struct) return NULL;
@@ -2900,7 +2900,7 @@ $node_t *__cccc_get_comptime_var(CCCC *vm, const char *name) {
     return __cccc_ast_int_literal(vm, cv->int_val);
 }
 
-$node_t *__cccc_get_comptime_ptr(CCCC *vm, const char *name) {
+$node_t *__cccc_get_comptime_ptr(VirtualMachine *vm, const char *name) {
     if (!vm || !name) return NULL;
     ComptimeVar *cv = find_comptime_var(vm, name);
     if (!cv || !cv->is_evaluated || !cv->ptr_obj) return NULL;
@@ -2915,7 +2915,7 @@ $node_t *__cccc_get_comptime_ptr(CCCC *vm, const char *name) {
     return addr;
 }
 
-$node_t *__cccc_get_comptime_member(CCCC *vm, const char *var_name,
+$node_t *__cccc_get_comptime_member(VirtualMachine *vm, const char *var_name,
                                   const char *field) {
     if (!vm || !var_name || !field) return NULL;
     ComptimeVar *cv = find_comptime_var(vm, var_name);
@@ -2932,7 +2932,7 @@ $node_t *__cccc_get_comptime_member(CCCC *vm, const char *var_name,
     return NULL;
 }
 
-$node_t *__cccc_get_constexpr_value(CCCC *vm, const char *name) {
+$node_t *__cccc_get_constexpr_value(VirtualMachine *vm, const char *name) {
     if (!vm || !name) return NULL;
     Obj *obj = (Obj *)__cccc_ast_find_global(vm, name);
     if (!obj || !obj->is_constexpr || !obj->init_expr) return NULL;

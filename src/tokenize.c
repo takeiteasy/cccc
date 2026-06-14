@@ -117,7 +117,7 @@ static void print_escaped_string_fp(FILE *f, const char *s) {
 }
 
 //               ^ error: <message here>
-static void vdiagnostic_at(CCCC *vm, char *filename, char *input, int line_no,
+static void vdiagnostic_at(VirtualMachine *vm, char *filename, char *input, int line_no,
                            char *loc, const char *kind,
                            const char *warn_name, char *fmt, va_list ap) {
     // Guard: loc must be within the file's contents buffer.
@@ -215,7 +215,7 @@ static void vdiagnostic_at(CCCC *vm, char *filename, char *input, int line_no,
     fprintf(stderr, "\n");
 }
 
-static void verror_at(CCCC *vm, char *filename, char *input, int line_no,
+static void verror_at(VirtualMachine *vm, char *filename, char *input, int line_no,
                        char *loc, char *fmt, va_list ap) {
     vdiagnostic_at(vm, filename, input, line_no, loc, "error", NULL, fmt, ap);
 }
@@ -246,7 +246,7 @@ static int tok_col_no(Token *tok) {
     return (int)(tok->loc - line_start) + 1;
 }
 
-void error_at(CCCC *vm, char *loc, char *fmt, ...) {
+void error_at(VirtualMachine *vm, char *loc, char *fmt, ...) {
     int line_no = 1;
     for (char *p = vm->compiler.current_file->contents; p < loc; p++)
         if (*p == '\n')
@@ -294,7 +294,7 @@ void error_at(CCCC *vm, char *loc, char *fmt, ...) {
     exit(1);
 }
 
-void error_tok(CCCC *vm, Token *tok, char *fmt, ...) {
+void error_tok(VirtualMachine *vm, Token *tok, char *fmt, ...) {
     int line_no = tok_line_no(tok);
     int col_no = tok_col_no(tok);
 
@@ -334,7 +334,7 @@ void error_tok(CCCC *vm, Token *tok, char *fmt, ...) {
 
 // Error reporting with recovery support (Level 2)
 // Returns true if parsing should continue with recovery, false if max errors hit
-bool error_tok_recover(CCCC *vm, Token *tok, char *fmt, ...) {
+bool error_tok_recover(VirtualMachine *vm, Token *tok, char *fmt, ...) {
     int line_no = tok_line_no(tok);
     int col_no = tok_col_no(tok);
 
@@ -383,7 +383,7 @@ bool error_tok_recover(CCCC *vm, Token *tok, char *fmt, ...) {
     exit(1);
 }
 
-void warn_tok(CCCC *vm, Token *tok, CCCCWarning category, char *fmt, ...) {
+void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt, ...) {
     uint64_t mask = (uint64_t)category;
 
     // Use per-token effective state if the preprocessor stamped it; otherwise
@@ -472,7 +472,7 @@ void warn_tok(CCCC *vm, Token *tok, CCCCWarning category, char *fmt, ...) {
     }
 }
 
-void warn_at(CCCC *vm, char *loc, CCCCWarning category, char *fmt, ...) {
+void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt, ...) {
     uint64_t mask = (uint64_t)category;
 
     if (!vm || !(vm->compiler.warnings & mask))
@@ -564,7 +564,7 @@ bool equal(Token *tok, char *op) {
 }
 
 // Ensure that the current token is `op`.
-Token *skip(CCCC *vm, Token *tok, char *op) {
+Token *skip(VirtualMachine *vm, Token *tok, char *op) {
     if (!tok)
         error("expected '%s'", op);
     if (!equal(tok, op))
@@ -572,7 +572,7 @@ Token *skip(CCCC *vm, Token *tok, char *op) {
     return tok->next;
 }
 
-bool consume(CCCC *vm, Token **rest, Token *tok, char *str) {
+bool consume(VirtualMachine *vm, Token **rest, Token *tok, char *str) {
     if (!tok) {
         *rest = NULL;
         return false;
@@ -586,7 +586,7 @@ bool consume(CCCC *vm, Token **rest, Token *tok, char *str) {
 }
 
 // Create a new token.
-static Token *new_token(CCCC *vm, TokenKind kind, char *start, char *end) {
+static Token *new_token(VirtualMachine *vm, TokenKind kind, char *start, char *end) {
     Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     memset(tok, 0, sizeof(Token));
     tok->kind = kind;
@@ -601,13 +601,13 @@ static Token *new_token(CCCC *vm, TokenKind kind, char *start, char *end) {
     return tok;
 }
 
-static bool startswith(CCCC *vm, char *p, char *q) {
+static bool startswith(VirtualMachine *vm, char *p, char *q) {
     return strncmp(p, q, strlen(q)) == 0;
 }
 
 // Read an identifier and returns the length of it.
 // If p does not point to a valid identifier, 0 is returned.
-static int read_ident(CCCC *vm, char *start) {
+static int read_ident(VirtualMachine *vm, char *start) {
     char *p = start;
     uint32_t c = decode_utf8(vm, &p, p);
     if (!is_ident1(c))
@@ -631,7 +631,7 @@ static int from_hex(char c) {
 }
 
 // Read a punctuator token from p and returns its length.
-static int read_punct(CCCC *vm, char *p) {
+static int read_punct(VirtualMachine *vm, char *p) {
     static char *kw[] = {
         "<<=", ">>=", "...", "==", "!=", "<=", ">=", "->", "+=",
         "-=", "*=", "/=", "++", "--", "%=", "&=", "|=", "^=", "&&",
@@ -670,7 +670,7 @@ static bool is_keyword(Token *tok) {
     return hashmap_get2(&map, tok->loc, tok->len);
 }
 
-static int read_escaped_char(CCCC *vm, char **new_pos, char *p) {
+static int read_escaped_char(VirtualMachine *vm, char **new_pos, char *p) {
     if ('0' <= *p && *p <= '7') {
         // Read an octal number.
         int c = *p++ - '0';
@@ -724,7 +724,7 @@ static int read_escaped_char(CCCC *vm, char **new_pos, char *p) {
 }
 
 // Find a closing double-quote.
-static char *string_literal_end(CCCC *vm, char *p) {
+static char *string_literal_end(VirtualMachine *vm, char *p) {
     char *start = p;
     for (; *p != '"'; p++) {
         if (*p == '\n' || *p == '\0')
@@ -735,7 +735,7 @@ static char *string_literal_end(CCCC *vm, char *p) {
     return p;
 }
 
-static Token *read_string_literal(CCCC *vm, char *start, char *quote) {
+static Token *read_string_literal(VirtualMachine *vm, char *start, char *quote) {
     char *end = string_literal_end(vm, quote + 1);
     char *buf = arena_alloc(&vm->compiler.parser_arena, end - quote);
     memset(buf, 0, end - quote);
@@ -763,7 +763,7 @@ static Token *read_string_literal(CCCC *vm, char *start, char *quote) {
 // equal to or larger than that are encoded in 4 bytes. Each 2 bytes
 // in the 4 byte sequence is called "surrogate", and a 4 byte sequence
 // is called a "surrogate pair".
-static Token *read_utf16_string_literal(CCCC *vm, char *start, char *quote) {
+static Token *read_utf16_string_literal(VirtualMachine *vm, char *start, char *quote) {
     char *end = string_literal_end(vm, quote + 1);
     uint16_t *buf = arena_alloc(&vm->compiler.parser_arena, 2 * (end - start));
     memset(buf, 0, 2 * (end - start));
@@ -797,7 +797,7 @@ static Token *read_utf16_string_literal(CCCC *vm, char *start, char *quote) {
 //
 // UTF-32 is a fixed-width encoding for Unicode. Each code point is
 // encoded in 4 bytes.
-static Token *read_utf32_string_literal(CCCC *vm, char *start, char *quote, Type *ty) {
+static Token *read_utf32_string_literal(VirtualMachine *vm, char *start, char *quote, Type *ty) {
     char *end = string_literal_end(vm, quote + 1);
     uint32_t *buf = arena_alloc(&vm->compiler.parser_arena, 4 * (end - quote));
     memset(buf, 0, 4 * (end - quote));
@@ -816,7 +816,7 @@ static Token *read_utf32_string_literal(CCCC *vm, char *start, char *quote, Type
     return tok;
 }
 
-static Token *read_char_literal(CCCC *vm, char *start, char *quote, Type *ty) {
+static Token *read_char_literal(VirtualMachine *vm, char *start, char *quote, Type *ty) {
     char *p = quote + 1;
     if (*p == '\0')
         error_at(vm, start, "unclosed char literal");
@@ -837,7 +837,7 @@ static Token *read_char_literal(CCCC *vm, char *start, char *quote, Type *ty) {
     return tok;
 }
 
-static bool convert_pp_int(CCCC *vm, Token *tok) {
+static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
     char *p = tok->loc;
 
     // Read a binary, octal, decimal or hexadecimal number.
@@ -987,7 +987,7 @@ static bool convert_pp_int(CCCC *vm, Token *tok) {
 // token after preprocessing.
 //
 // This function converts a pp-number token to a regular number token.
-static void convert_pp_number(CCCC *vm, Token *tok) {
+static void convert_pp_number(VirtualMachine *vm, Token *tok) {
     // Try to parse as an integer constant.
     if (convert_pp_int(vm, tok))
         return;
@@ -1020,7 +1020,7 @@ static void convert_pp_number(CCCC *vm, Token *tok) {
 // the token to TK_IDENT.  Emits an error_tok for reserved-name violations.
 // Tokens from macro expansion (t->origin != NULL) are exempt — those come from
 // header macros that abstract over standard versions.
-static bool keyword_std_ok(CCCC *vm, Token *t) {
+static bool keyword_std_ok(VirtualMachine *vm, Token *t) {
     if (t->origin)
         return true;
     CStdVersion s = vm->compiler.c_std;
@@ -1068,7 +1068,7 @@ static bool keyword_std_ok(CCCC *vm, Token *t) {
     return true;
 }
 
-void convert_pp_tokens(CCCC *vm, Token *tok) {
+void convert_pp_tokens(VirtualMachine *vm, Token *tok) {
     for (Token *t = tok; t->kind != TK_EOF; t = t->next) {
         if (is_keyword(t)) {
             t->kind = TK_KEYWORD;
@@ -1080,7 +1080,7 @@ void convert_pp_tokens(CCCC *vm, Token *tok) {
 }
 
 // Initialize line info for all tokens.
-static void add_line_numbers(CCCC *vm, Token *tok) {
+static void add_line_numbers(VirtualMachine *vm, Token *tok) {
     char *p = vm->compiler.current_file->contents;
     char *line_start = p;
     int n = 1;
@@ -1100,7 +1100,7 @@ static void add_line_numbers(CCCC *vm, Token *tok) {
     }
 }
 
-Token *tokenize_string_literal(CCCC *vm, Token *tok, Type *basety) {
+Token *tokenize_string_literal(VirtualMachine *vm, Token *tok, Type *basety) {
     Token *t;
     if (basety->size == 2)
         t = read_utf16_string_literal(vm, tok->loc, tok->loc);
@@ -1111,7 +1111,7 @@ Token *tokenize_string_literal(CCCC *vm, Token *tok, Type *basety) {
 }
 
 // Tokenize a given string and returns new tokens.
-Token *tokenize(CCCC *vm, File *file) {
+Token *tokenize(VirtualMachine *vm, File *file) {
     vm->compiler.current_file = file;
 
     char *p = file->contents;
@@ -1311,7 +1311,7 @@ Token *tokenize(CCCC *vm, File *file) {
 }
 
 // Returns the contents of a given file.
-static char *read_file(CCCC *vm, char *path) {
+static char *read_file(VirtualMachine *vm, char *path) {
     FILE *fp;
 
     if (strncmp(path, "-", sizeof("-")) == 0) {
@@ -1353,7 +1353,7 @@ static char *read_file(CCCC *vm, char *path) {
 }
 
 // Read binary file without text processing (for #embed directive)
-unsigned char *read_binary_file(CCCC *vm, char *path, size_t *out_size) {
+unsigned char *read_binary_file(VirtualMachine *vm, char *path, size_t *out_size) {
     FILE *fp = fopen(path, "rb");
     if (!fp)
         return NULL;
@@ -1393,7 +1393,7 @@ unsigned char *read_binary_file(CCCC *vm, char *path, size_t *out_size) {
     return buffer;
 }
 
-File *new_file(CCCC *vm, char *name, int file_no, char *contents) {
+File *new_file(VirtualMachine *vm, char *name, int file_no, char *contents) {
     File *file = arena_alloc(&vm->compiler.parser_arena, sizeof(File));
     memset(file, 0, sizeof(File));
     file->name = name;
@@ -1460,7 +1460,7 @@ static uint32_t read_universal_char(char *p, int len) {
 }
 
 // Replace \u or \U escape sequences with corresponding UTF-8 bytes.
-static void convert_universal_chars(CCCC *vm, char *p) {
+static void convert_universal_chars(VirtualMachine *vm, char *p) {
     char *q = p;
 
     while (*p) {
@@ -1491,7 +1491,7 @@ static void convert_universal_chars(CCCC *vm, char *p) {
     *q = '\0';
 }
 
-Token *tokenize_file(CCCC *vm, char *path) {
+Token *tokenize_file(VirtualMachine *vm, char *path) {
     char *p = read_file(vm, path);
     if (!p)
         return NULL;
@@ -1521,7 +1521,7 @@ Token *tokenize_file(CCCC *vm, char *path) {
 }
 
 // Tokenize an in-memory string (for embedded headers)
-Token *tokenize_string(CCCC *vm, char *name, char *contents) {
+Token *tokenize_string(VirtualMachine *vm, char *name, char *contents) {
     // Duplicate contents because tokenize may modify it
     char *p = arena_alloc(&vm->compiler.parser_arena, strlen(contents) + 1);
     strcpy(p, contents);
@@ -1568,7 +1568,7 @@ static void copy_attr_name(Token *tok, char *buf, size_t cap) {
     buf[len] = '\0';
 }
 
-static CCCCAttrTarget effective_attr_target(CCCC *vm, char *name) {
+static CCCCAttrTarget effective_attr_target(VirtualMachine *vm, char *name) {
     CCCCAttrTarget target = vm ? vm->compiler.attr_target : CCCC_ATTR_TARGET_AUTO;
     if (target != CCCC_ATTR_TARGET_AUTO)
         return target;
@@ -1620,7 +1620,7 @@ static void print_attr_payload(FILE *f, Token *start, Token *end) {
     }
 }
 
-static bool output_attr(FILE *f, CCCC *vm, Token **tok_ptr) {
+static bool output_attr(FILE *f, VirtualMachine *vm, Token **tok_ptr) {
     Token *tok = *tok_ptr;
     bool c23 = token_is_c23_attr_start(tok);
     bool gnu = token_is_gnu_attr_start(tok);
@@ -1676,7 +1676,7 @@ static bool output_attr(FILE *f, CCCC *vm, Token **tok_ptr) {
 }
 
 // Output preprocessed tokens as source code (for -E flag)
-void cc_output_preprocessed(FILE *f, CCCC *vm, Token *tok) {
+void cc_output_preprocessed(FILE *f, VirtualMachine *vm, Token *tok) {
     if (!f || !tok)
         return;
 
@@ -1743,19 +1743,19 @@ void cc_output_preprocessed(FILE *f, CCCC *vm, Token *tok) {
 
 // Error collection helper functions
 
-int cc_get_error_count(CCCC *vm) {
+int cc_get_error_count(VirtualMachine *vm) {
     return vm ? vm->error_count : 0;
 }
 
-int cc_get_warning_count(CCCC *vm) {
+int cc_get_warning_count(VirtualMachine *vm) {
     return vm ? vm->warning_count : 0;
 }
 
-bool cc_has_errors(CCCC *vm) {
+bool cc_has_errors(VirtualMachine *vm) {
     return vm && vm->error_count > 0;
 }
 
-void cc_clear_errors(CCCC *vm) {
+void cc_clear_errors(VirtualMachine *vm) {
     if (!vm) return;
 
     vm->errors = NULL;
@@ -1765,7 +1765,7 @@ void cc_clear_errors(CCCC *vm) {
     vm->error_message = NULL;
 }
 
-void cc_print_all_errors(CCCC *vm) {
+void cc_print_all_errors(VirtualMachine *vm) {
     if (!vm || !vm->errors) return;
 
     // Print all collected errors and warnings

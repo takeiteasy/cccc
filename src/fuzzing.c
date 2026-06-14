@@ -12,7 +12,7 @@
 // Compile C source without requiring main() or executing.
 // Returns 0 on success, 1 on compile error (expected for malformed input).
 static int compile_only_from_string(const char *src, size_t len) {
-    CCCC vm;
+    VirtualMachine vm;
     cc_init(&vm, 0);
     vm.compiler.compile_only = true;
     vm.collect_errors = true;

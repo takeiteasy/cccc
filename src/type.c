@@ -66,7 +66,7 @@ Type *ty_error = &ty_error_obj;
 static Type ty_auto_obj = {TY_AUTO, 0, 0};
 Type *ty_auto = &ty_auto_obj;
 
-static Type *new_type(CCCC *vm, TypeKind kind, int size, int align) {
+static Type *new_type(VirtualMachine *vm, TypeKind kind, int size, int align) {
     Type *ty = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
     memset(ty, 0, sizeof(Type));
     ty->kind = kind;
@@ -79,7 +79,7 @@ static Type *new_type(CCCC *vm, TypeKind kind, int size, int align) {
 // Container is the smallest of {1,2,4,8} bytes covering N bits.
 // Values are truncated to N bits after arithmetic via mask/shift.
 // N > 64 (true bignum) is not yet supported.
-Type *bitint_type(CCCC *vm, Token *tok, int width, bool is_unsigned) {
+Type *bitint_type(VirtualMachine *vm, Token *tok, int width, bool is_unsigned) {
     if (width < 1)
         error_tok(vm, tok, "_BitInt width must be at least 1, got %d", width);
     if (!is_unsigned && width < 2)
@@ -176,7 +176,7 @@ bool is_compatible(Type *t1, Type *t2) {
     }
 }
 
-Type *copy_type(CCCC *vm, Type *ty) {
+Type *copy_type(VirtualMachine *vm, Type *ty) {
     Type *ret = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
     *ret = *ty;
     ret->origin = ty;
@@ -184,14 +184,14 @@ Type *copy_type(CCCC *vm, Type *ty) {
     return ret;
 }
 
-Type *pointer_to(CCCC *vm, Type *base) {
+Type *pointer_to(VirtualMachine *vm, Type *base) {
     Type *ty = new_type(vm, TY_PTR, 8, 8);
     ty->base = base;
     ty->is_unsigned = true;
     return ty;
 }
 
-Type *func_type(CCCC *vm, Type *return_ty) {
+Type *func_type(VirtualMachine *vm, Type *return_ty) {
     // The C spec disallows sizeof(<function type>), but
     // GCC allows that and the expression is evaluated to 1.
     Type *ty = new_type(vm, TY_FUNC, 1, 1);
@@ -199,7 +199,7 @@ Type *func_type(CCCC *vm, Type *return_ty) {
     return ty;
 }
 
-Type *array_of(CCCC *vm, Type *base, int len) {
+Type *array_of(VirtualMachine *vm, Type *base, int len) {
     int sz;
     if (len > 0 && __builtin_mul_overflow(base->size, len, &sz))
         error("array size overflow: element size %d times length %d exceeds INT_MAX", base->size, len);
@@ -211,33 +211,33 @@ Type *array_of(CCCC *vm, Type *base, int len) {
     return ty;
 }
 
-Type *vla_of(CCCC *vm, Type *base, Node *len) {
+Type *vla_of(VirtualMachine *vm, Type *base, Node *len) {
     Type *ty = new_type(vm, TY_VLA, 8, 8);
     ty->base = base;
     ty->vla_len = len;
     return ty;
 }
 
-Type *enum_type(CCCC *vm) {
+Type *enum_type(VirtualMachine *vm) {
     return new_type(vm, TY_ENUM, 4, 4);  // enums are int-sized (4 bytes)
 }
 
-Type *struct_type(CCCC *vm) {
+Type *struct_type(VirtualMachine *vm) {
     return new_type(vm, TY_STRUCT, 0, 1);
 }
 
-Type *union_type(CCCC *vm) {
+Type *union_type(VirtualMachine *vm) {
     return new_type(vm, TY_UNION, 0, 1);
 }
 
-Type *block_type(CCCC *vm, Type *return_ty, Type *params) {
+Type *block_type(VirtualMachine *vm, Type *return_ty, Type *params) {
     Type *ty = new_type(vm, TY_BLOCK, 8, 8);  // Block pointers are 8 bytes
     ty->return_ty = return_ty;
     ty->params = params;
     return ty;
 }
 
-Type *complex_type_for(CCCC *vm, Type *base) {
+Type *complex_type_for(VirtualMachine *vm, Type *base) {
     (void)vm;
     if (!base || base->kind == TY_DOUBLE)
         return ty_dcomplex;
@@ -293,7 +293,7 @@ static int get_integer_rank(Type *ty) {
 }
 
 // Usual arithmetic conversions (C99 6.3.1.8)
-static Type *get_common_type(CCCC *vm, Type *ty1, Type *ty2) {
+static Type *get_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
     // Handle error types - propagate error
     if (!ty1 || !ty2 || ty1->kind == TY_ERROR || ty2->kind == TY_ERROR)
         return ty_error;
@@ -378,7 +378,7 @@ static Type *get_common_type(CCCC *vm, Type *ty1, Type *ty2) {
 // be promoted to match with the other.
 //
 // This operation is called the "usual arithmetic conversion".
-static void usual_arith_conv(CCCC *vm, Node **lhs, Node **rhs) {
+static void usual_arith_conv(VirtualMachine *vm, Node **lhs, Node **rhs) {
     Type *ty = get_common_type(vm, (*lhs)->ty, (*rhs)->ty);
     // Skip casting if we have error types - they propagate automatically
     if (ty->kind == TY_ERROR)
@@ -398,7 +398,7 @@ static void usual_arith_conv(CCCC *vm, Node **lhs, Node **rhs) {
 //
 // Integer cases are suppressed when the source is a constant that fits in the
 // destination type (e.g. `char c = 0;` is silent).
-void warn_implicit_conversion(CCCC *vm, Node *expr, Type *to, Token *tok) {
+void warn_implicit_conversion(VirtualMachine *vm, Node *expr, Type *to, Token *tok) {
     if (!vm || !expr || !to || !expr->ty)
         return;
     Type *from = expr->ty;
@@ -483,7 +483,7 @@ void warn_implicit_conversion(CCCC *vm, Node *expr, Type *to, Token *tok) {
 // Check for a signed/unsigned comparison mismatch BEFORE usual_arith_conv
 // normalises signedness away.  Both operands must be integers after promotion.
 // Constant non-negative operands are exempted (e.g. `x < 5` is quiet).
-static void check_sign_compare(CCCC *vm, Node *lhs, Node *rhs, Token *tok) {
+static void check_sign_compare(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
     if (!is_integer(lhs->ty) || !is_integer(rhs->ty))
         return;
     // Apply integer promotion to reflect what the comparison actually uses.
@@ -521,7 +521,7 @@ static bool lhs_targets_initializing_var(Node *node, Obj *var) {
     }
 }
 
-void add_type(CCCC *vm, Node *node) {
+void add_type(VirtualMachine *vm, Node *node) {
     if (!node || (node->ty && node->kind != ND_COMPLEX))
         return;
 

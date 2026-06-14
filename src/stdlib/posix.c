@@ -68,7 +68,7 @@ static long long wrap_freeaddrinfo(long long res) { freeaddrinfo((struct addrinf
 static long long wrap_globfree(long long pglob) { globfree((glob_t *)pglob); return 0; }
 static long long wrap_regfree(long long preg) { regfree((regex_t *)preg); return 0; }
 
-void register_posix_functions(CCCC *vm) {
+void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "read", (void*)wrap_read, 3, 0);
     cc_register_cfunc(vm, "write", (void*)wrap_write, 3, 0);
     cc_register_cfunc(vm, "close", (void*)wrap_close, 1, 0);
@@ -163,7 +163,7 @@ void register_posix_functions(CCCC *vm) {
     cc_register_cfunc(vm, "globfree", (void*)wrap_globfree, 1, 0);
 }
 #else
-void register_posix_functions(CCCC *vm) {
+void register_posix_functions(VirtualMachine *vm) {
     (void)vm;
 }
 #endif

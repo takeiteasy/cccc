@@ -141,7 +141,7 @@ static float  cccc_atan2pif(float y, float x)  { return atan2f(y, x) / CCCC_PIf;
 static long double cccc_atan2pil(long double y, long double x) { return atan2l(y, x) / CCCC_PIl; }
 
 // Register all math.h functions
-void register_math_functions(CCCC *vm) {
+void register_math_functions(VirtualMachine *vm) {
     // Basic operations
     cc_register_cfunc(vm, "fabs", (void*)fabs, 1, 1);
     cc_register_cfunc(vm, "fabsf", (void*)fabsf, 1, 2);

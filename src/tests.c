@@ -524,7 +524,7 @@ static void impl_assert_bits_msg(long long mask, long long expected, long long a
 // Register native assertion functions so the compiler can emit FFI calls to
 // them. Must be called before cc_compile (but after cc_execute_inline_macros
 // to avoid registering these symbols during the comptime pass -- ticket #334).
-void cc_load_test_runtime(CCCC *vm) {
+void cc_load_test_runtime(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__cccc_assert",             (void *)impl_assert,              4, 0);
     cc_register_cfunc(vm, "__cccc_assert_false",       (void *)impl_assert_false,         4, 0);
     cc_register_cfunc(vm, "__cccc_assert_fail",        (void *)impl_assert_fail,          2, 0);
@@ -559,7 +559,7 @@ void cc_load_test_runtime(CCCC *vm) {
 // side effect, registers all CCCC_ASSERT* macros in vm->compiler.macros so
 // they expand correctly when the test file is preprocessed. Returns the
 // processed declaration tokens to prepend to the parse stream.
-Token *cc_inject_test_header(CCCC *vm) {
+Token *cc_inject_test_header(VirtualMachine *vm) {
     char *src = get_std_header("tests.h");
     Token *toks = tokenize_string(vm, "<tests.h>", src);
     return preprocess(vm, toks);
@@ -579,16 +579,16 @@ static Obj *find_fn(Obj *prog, const char *name) {
 }
 
 // Run a single hook function by name (no-op if not found).
-static void run_hook(CCCC *vm, Obj *prog, const char *fn_name) {
+static void run_hook(VirtualMachine *vm, Obj *prog, const char *fn_name) {
     Obj *fn = find_fn(prog, fn_name);
     if (fn)
-        cc_run_at(vm, (CCCCPc)fn->code_addr, 0, NULL);
+        cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
 }
 
 // Run all matching setup or teardown hooks.
 // suite and disp are the current test's context; NULL suite means no active suite.
 // once_only=true selects once-per-suite hooks; false selects per-test hooks.
-static void run_hooks(CCCC *vm, Obj *prog, TestSetupRecord *setups,
+static void run_hooks(VirtualMachine *vm, Obj *prog, TestSetupRecord *setups,
                       bool is_teardown, bool once_only,
                       const char *suite, const char *disp) {
     for (TestSetupRecord *s = setups; s; s = s->next) {
@@ -623,7 +623,7 @@ static bool has_once_setups_for(TestSetupRecord *setups, const char *suite) {
 // caught safely regardless of whether s_run is currently live.  Returns true
 // if all hooks completed without failure.  If fail_msg_out is non-NULL and a
 // failure occurs, the message (up to 511 chars) is written there.
-static bool run_hooks_guarded(CCCC *vm, Obj *prog, TestSetupRecord *setups,
+static bool run_hooks_guarded(VirtualMachine *vm, Obj *prog, TestSetupRecord *setups,
                               bool is_teardown, bool once_only,
                               const char *suite, const char *disp,
                               char fail_msg_out[512]) {
@@ -648,7 +648,7 @@ static bool run_hooks_guarded(CCCC *vm, Obj *prog, TestSetupRecord *setups,
 }
 
 // Convenience wrapper for suite-boundary once-hooks.
-static bool run_once_hooks(CCCC *vm, Obj *prog, TestSetupRecord *setups,
+static bool run_once_hooks(VirtualMachine *vm, Obj *prog, TestSetupRecord *setups,
                            bool is_teardown, const char *suite) {
     return run_hooks_guarded(vm, prog, setups, is_teardown, true,
                              suite, NULL, NULL);
@@ -724,7 +724,7 @@ typedef struct TestListNode {
     struct TestListNode *next;
 } TestListNode;
 
-int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
+int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
 
     // Reverse setup records to declaration order (built by prepending).
     TestSetupRecord *setups = NULL;
@@ -938,7 +938,7 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
                 unsetenv("MallocStackLogging");
                 unsetenv("MallocStackLoggingNoCompact");
                 unsetenv("DYLD_INSERT_LIBRARIES");
-                cc_run_at(vm, (CCCCPc)fn->code_addr, 0, NULL);
+                cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
                 _exit(0);
             }
 
@@ -1040,7 +1040,7 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
         int jval = setjmp(run.jmp);
         if (jval == 0) {
             run_hooks(vm, prog, setups, false, false, cur_suite, disp);
-            cc_run_at(vm, (CCCCPc)fn->code_addr, 0, NULL);
+            cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
             // Capture return values before teardown hooks clobber the registers.
             ret_int   = (int64_t)vm->regs[REG_A0];
             ret_float = cccc_freg_get_f64(vm, FREG_A0);
@@ -1174,4 +1174,3 @@ int cc_run_tests(CCCC *vm, Obj *prog, const CcTestOptions *opts) {
     #undef SET_TIMEOUT
     return (passed == n) ? 0 : 1;
 }
-

@@ -29,7 +29,7 @@
      def->use pairs where the defining instruction has a single
      reader. The strongest candidates for new fused opcodes.
 
- Both analyses work on a CCCCInstrWord* text segment, which the caller
+ Both analyses work on a InstrWord* text segment, which the caller
  has already loaded (via cc_load_bytecode for .jbc input or
  cc_compile for .c source). See the public functions below.
 */
@@ -181,12 +181,12 @@ static void ngram_unpack(uint64_t key, int *ops, int n) {
     }
 }
 
-static int ngram_extract_stream(const CCCCInstrWord *text, long long num_words,
+static int ngram_extract_stream(const InstrWord *text, long long num_words,
                                 int *out, int max_out) {
     int count = 0;
     long long pc = 1;  // text[0] is the entry point
     while (pc < num_words && count < max_out) {
-        CCCCInstrWord op = text[pc];
+        InstrWord op = text[pc];
         int words = cc_instr_words((int)op);
         if (words <= 0)
             break;
@@ -261,7 +261,7 @@ CcNgramState *cc_analyze_ngram_begin(const CcAnalyzeNgramOptions *opts) {
     return st;
 }
 
-void cc_analyze_ngram_feed(CcNgramState *st, const CCCCInstrWord *text,
+void cc_analyze_ngram_feed(CcNgramState *st, const InstrWord *text,
                            long long num_words, const char *label, FILE *out) {
     if (!st || !text || num_words <= 1)
         return;
@@ -460,7 +460,7 @@ static inline bool fusion_is_caller_saved(int reg) {
     return false;
 }
 
-static int fusion_extract_reg(CCCCInstrWord operands_word, int byte_pos) {
+static int fusion_extract_reg(InstrWord operands_word, int byte_pos) {
     if (byte_pos < 0) return INVALID_REG;
     return (int)((operands_word >> (byte_pos * 8)) & 0xFF);
 }
@@ -541,7 +541,7 @@ static int fusion_cand_cmp(const void *a, const void *b) {
     return ca->use_pc - cb->use_pc;
 }
 
-static void fusion_scan_text(CcFusionState *st, const CCCCInstrWord *text,
+static void fusion_scan_text(CcFusionState *st, const InstrWord *text,
                               long long num_words) {
     DefState defs[NUM_REGS];
     for (int i = 0; i < NUM_REGS; i++)
@@ -563,7 +563,7 @@ static void fusion_scan_text(CcFusionState *st, const CCCCInstrWord *text,
                 defs[i].pc = -1;
             }
             DefUseEntry info = defuse_table[op];
-            CCCCInstrWord op_word = (size > 1) ? text[pc + 1] : 0;
+            InstrWord op_word = (size > 1) ? text[pc + 1] : 0;
             for (int i = 0; i < info.n_defs; i++) {
                 int r = fusion_extract_reg(op_word, info.def_pos[i]);
                 if (r >= 0 && r < NUM_REGS)
@@ -575,7 +575,7 @@ static void fusion_scan_text(CcFusionState *st, const CCCCInstrWord *text,
 
         const DefUseEntry *info_p = &defuse_table[op];
         DefUseEntry info = *info_p;
-        CCCCInstrWord op_word = (size > 1) ? text[pc + 1] : 0;
+        InstrWord op_word = (size > 1) ? text[pc + 1] : 0;
 
         // Phase 1: process uses -- detect adjacent def->use
         for (int i = 0; i < info.n_uses; i++) {
@@ -656,7 +656,7 @@ CcFusionState *cc_analyze_fusion_begin(const CcAnalyzeFusionOptions *opts) {
     return st;
 }
 
-void cc_analyze_fusion_feed(CcFusionState *st, const CCCCInstrWord *text,
+void cc_analyze_fusion_feed(CcFusionState *st, const InstrWord *text,
                             long long num_words, const char *label,
                             FILE *out) {
     (void)label;

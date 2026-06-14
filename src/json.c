@@ -10,7 +10,7 @@
 
 // Print indentation
 void print_indent(FILE *f, int indent) {
-    for (int i = 0; i < indent; i++) 
+    for (int i = 0; i < indent; i++)
         fprintf(f, "  ");
 }
 
@@ -127,7 +127,7 @@ void serialize_type_json(FILE *f, Type *ty, int indent) {
 
             bool first_member = true;
             for (Member *m = ty->members; m; m = m->next) {
-                if (!first_member) 
+                if (!first_member)
                     fprintf(f, ",\n");
                 first_member = false;
 
@@ -144,7 +144,7 @@ void serialize_type_json(FILE *f, Type *ty, int indent) {
                     m_name[m_name_len] = '\0';
                     print_escaped_string(f, m_name);
                     free(m_name);
-                } else 
+                } else
                     fprintf(f, "null");
                 fprintf(f, ",\n");
 
@@ -209,7 +209,7 @@ void serialize_type_json(FILE *f, Type *ty, int indent) {
 
             bool first_param = true;
             for (Type *p = ty->params; p; p = p->next) {
-                if (!first_param) 
+                if (!first_param)
                     fprintf(f, ",\n");
                 first_param = false;
 
@@ -226,7 +226,7 @@ void serialize_type_json(FILE *f, Type *ty, int indent) {
                     p_name[p_name_len] = '\0';
                     print_escaped_string(f, p_name);
                     free(p_name);
-                } else 
+                } else
                     fprintf(f, "null");
                 fprintf(f, ",\n");
 
@@ -300,7 +300,7 @@ static void serialize_aggregate_json(FILE *f, Type *ty, int indent, const char *
         name[name_len] = '\0';
         print_escaped_string(f, name);
         free(name);
-    } else 
+    } else
         fprintf(f, "null");
     fprintf(f, ",\n");
 
@@ -318,7 +318,7 @@ static void serialize_aggregate_json(FILE *f, Type *ty, int indent, const char *
 
         bool first_member = true;
         for (Member *m = ty->members; m; m = m->next) {
-            if (!first_member) 
+            if (!first_member)
                 fprintf(f, ",\n");
             first_member = false;
 
@@ -335,7 +335,7 @@ static void serialize_aggregate_json(FILE *f, Type *ty, int indent, const char *
                 m_name[m_name_len] = '\0';
                 print_escaped_string(f, m_name);
                 free(m_name);
-            } else 
+            } else
                 fprintf(f, "null");
             fprintf(f, ",\n");
 
@@ -390,7 +390,7 @@ static void serialize_enum_json(FILE *f, Type *ty, int indent) {
         name[name_len] = '\0';
         print_escaped_string(f, name);
         free(name);
-    } else 
+    } else
         fprintf(f, "null");
     fprintf(f, ",\n");
 
@@ -406,7 +406,7 @@ static void serialize_enum_json(FILE *f, Type *ty, int indent) {
 
         bool first_const = true;
         for (EnumConstant *ec = ty->enum_constants; ec; ec = ec->next) {
-            if (!first_const) 
+            if (!first_const)
                 fprintf(f, ",\n");
             first_const = false;
 
@@ -506,25 +506,25 @@ static void collect_type_recursive(Type *ty, TypeVec *seen_types,
     }
 
     // Recursively collect from base type (pointers, arrays)
-    if (ty->base) 
+    if (ty->base)
         collect_type_recursive(ty->base, seen_types, structs, unions, enums);
 
     // Recursively collect from struct/union members
     if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) && ty->members)
-        for (Member *m = ty->members; m; m = m->next) 
+        for (Member *m = ty->members; m; m = m->next)
             collect_type_recursive(m->ty, seen_types, structs, unions, enums);
 
     // Recursively collect from function return type and parameters
     if (ty->kind == TY_FUNC) {
         collect_type_recursive(ty->return_ty, seen_types, structs, unions, enums);
-        for (Type *p = ty->params; p; p = p->next) 
+        for (Type *p = ty->params; p; p = p->next)
             collect_type_recursive(p, seen_types, structs, unions, enums);
     }
 }
 
 // Main function: Output JSON for all declarations
 void cc_output_json(FILE *f, Obj *prog) {
-    if (!f || !prog) 
+    if (!f || !prog)
         return;
 
     TypeVec seen_types = {};
@@ -535,7 +535,7 @@ void cc_output_json(FILE *f, Obj *prog) {
     // Start JSON output
     fprintf(f, "{\n");
 
-    for (Obj *obj = prog; obj; obj = obj->next) 
+    for (Obj *obj = prog; obj; obj = obj->next)
         collect_type_recursive(obj->ty, &seen_types, &structs, &unions, &enums);
 
     // Output functions
@@ -544,7 +544,7 @@ void cc_output_json(FILE *f, Obj *prog) {
     bool first = true;
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (obj->is_function) {
-            if (!first) 
+            if (!first)
                 fprintf(f, ",\n");
             first = false;
             serialize_function_json(f, obj, 2);
@@ -559,7 +559,7 @@ void cc_output_json(FILE *f, Obj *prog) {
     fprintf(f, "\"structs\": [\n");
     first = true;
     for (int i = 0; i < structs.len; i++) {
-        if (!first) 
+        if (!first)
             fprintf(f, ",\n");
         first = false;
         serialize_aggregate_json(f, structs.data[i], 2, "struct");
@@ -573,7 +573,7 @@ void cc_output_json(FILE *f, Obj *prog) {
     fprintf(f, "\"unions\": [\n");
     first = true;
     for (int i = 0; i < unions.len; i++) {
-        if (!first) 
+        if (!first)
             fprintf(f, ",\n");
         first = false;
         serialize_aggregate_json(f, unions.data[i], 2, "union");
@@ -587,7 +587,7 @@ void cc_output_json(FILE *f, Obj *prog) {
     fprintf(f, "\"enums\": [\n");
     first = true;
     for (int i = 0; i < enums.len; i++) {
-        if (!first) 
+        if (!first)
             fprintf(f, ",\n");
         first = false;
         serialize_enum_json(f, enums.data[i], 2);
@@ -602,7 +602,7 @@ void cc_output_json(FILE *f, Obj *prog) {
     first = true;
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (!obj->is_function) {
-            if (!first) 
+            if (!first)
                 fprintf(f, ",\n");
             first = false;
             serialize_global_var_json(f, obj, 2);
@@ -621,7 +621,7 @@ void cc_output_json(FILE *f, Obj *prog) {
     free(enums.data);
 }
 
-void cc_output_source_map_json(CCCC *vm, FILE *f) {
+void cc_output_source_map_json(VirtualMachine *vm, FILE *f) {
     if (!vm || !f) {
         return;
     }

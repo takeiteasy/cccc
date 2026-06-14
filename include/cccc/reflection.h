@@ -94,8 +94,8 @@ extern "C" {
 #endif
 
 // Forward declarations (opaque types for pragma macros)
-typedef struct CCCC CCCC;
-typedef struct CCCC $vm_t;
+typedef struct VirtualMachine VirtualMachine;
+typedef struct VirtualMachine $vm_t;
 typedef struct Type $type_t;
 typedef struct Node $node_t;
 typedef struct Obj $obj_t;
@@ -186,7 +186,7 @@ typedef enum {
  *             to the active VM instance.
  * @return Pointer to the current CCCC VM instance.
  */
-extern CCCC *__cccc_get_vm(void);
+extern VirtualMachine *__cccc_get_vm(void);
 
 /*!
  * @define _VM
@@ -202,7 +202,7 @@ extern CCCC *__cccc_get_vm(void);
  * @return An arena-allocated string of the form "<prefix>__<n>".
  * @discussion Convenience wrapper: $gensym(prefix).
  */
-const char *__cccc_gensym(CCCC *vm, const char *prefix);
+const char *__cccc_gensym(VirtualMachine *vm, const char *prefix);
 
 /*!
  * @function __cccc_macroexpand_1
@@ -216,7 +216,7 @@ const char *__cccc_gensym(CCCC *vm, const char *prefix);
  * @param node The node to (possibly) expand.
  * @return The expanded node, or @a node itself if it is not a macro call.
  */
-$node_t *__cccc_macroexpand_1(CCCC *vm, $node_t *node);
+$node_t *__cccc_macroexpand_1(VirtualMachine *vm, $node_t *node);
 
 /*!
  * @function __cccc_macroexpand
@@ -229,7 +229,7 @@ $node_t *__cccc_macroexpand_1(CCCC *vm, $node_t *node);
  * @param node The node to fully expand.
  * @return The fully expanded node, or @a node itself if it is not a macro call.
  */
-$node_t *__cccc_macroexpand(CCCC *vm, $node_t *node);
+$node_t *__cccc_macroexpand(VirtualMachine *vm, $node_t *node);
 
 /*!
  * @function __cccc_ast_vararg_count
@@ -237,7 +237,7 @@ $node_t *__cccc_macroexpand(CCCC *vm, $node_t *node);
  * @param vm The VM context.
  * @return Number of arguments after the fixed parameters.
  */
-int __cccc_ast_vararg_count(CCCC *vm);
+int __cccc_ast_vararg_count(VirtualMachine *vm);
 
 /*!
  * @function __cccc_ast_vararg_at
@@ -248,7 +248,7 @@ int __cccc_ast_vararg_count(CCCC *vm);
  * @discussion Emits a compile-time error if @a index is out of range or the
  *             active macro call is a global-generation string macro.
  */
-$node_t *__cccc_ast_vararg_at(CCCC *vm, int index);
+$node_t *__cccc_ast_vararg_at(VirtualMachine *vm, int index);
 
 /*!
  * @function __cccc_ast_varargs_as_array
@@ -262,7 +262,7 @@ $node_t *__cccc_ast_vararg_at(CCCC *vm, int index);
  *             compile-time error if the active macro call is a
  *             global-generation string macro.
  */
-$node_t **__cccc_ast_varargs_as_array(CCCC *vm);
+$node_t **__cccc_ast_varargs_as_array(VirtualMachine *vm);
 
 /*!
  * @function __cccc_ast_vararg_str_at
@@ -273,7 +273,7 @@ $node_t **__cccc_ast_varargs_as_array(CCCC *vm);
  * @discussion Emits a compile-time error if @a index is out of range or the
  *             active macro call is an inline AST macro.
  */
-const char *__cccc_ast_vararg_str_at(CCCC *vm, int index);
+const char *__cccc_ast_vararg_str_at(VirtualMachine *vm, int index);
 
 int $vararg_count();
 $node_t *$vararg_at(int index);
@@ -292,7 +292,7 @@ const char *$vararg_str_at(int index);
  *         execution.
  * @discussion Convenience wrapper: $current_token().
  */
-$token_t *__cccc_ast_current_token(CCCC *vm);
+$token_t *__cccc_ast_current_token(VirtualMachine *vm);
 
 /*!
  * @function __cccc_ast_synthetic_token
@@ -304,7 +304,7 @@ $token_t *__cccc_ast_current_token(CCCC *vm);
  *             generated location instead of the macro call or an input node.
  *             Convenience wrapper: $synthetic_token(label).
  */
-$token_t *__cccc_ast_synthetic_token(CCCC *vm, const char *label);
+$token_t *__cccc_ast_synthetic_token(VirtualMachine *vm, const char *label);
 
 /*!
  * @function __cccc_ast_token_from_node
@@ -353,7 +353,7 @@ $node_t *__cccc_ast_copy_location($node_t *dst, $node_t *src);
  *             it records the error and compilation may continue.
  *             Convenience wrapper: $macro_error_at(node, ...).
  */
-void __cccc_macro_error_at(CCCC *vm, $node_t *node, const char *fmt, ...)
+void __cccc_macro_error_at(VirtualMachine *vm, $node_t *node, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 
 /*!
@@ -366,7 +366,7 @@ void __cccc_macro_error_at(CCCC *vm, $node_t *node, const char *fmt, ...)
  *             promoted with -Werror or -Werror=cccc-macro.
  *             Convenience wrapper: $macro_warning_at(node, ...).
  */
-void __cccc_macro_warning_at(CCCC *vm, $node_t *node, const char *fmt, ...)
+void __cccc_macro_warning_at(VirtualMachine *vm, $node_t *node, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 
 /*!
@@ -402,7 +402,7 @@ void __cccc_macro_warning_at(CCCC *vm, $node_t *node, const char *fmt, ...)
  *             register FFI limit; use __cccc_quote_n for more.
  *             Convenience wrapper: $quote(tmpl, ...).
  */
-$node_t *__cccc_quote(CCCC *vm, const char *tmpl, ...);
+$node_t *__cccc_quote(VirtualMachine *vm, const char *tmpl, ...);
 
 /*!
  * @function __cccc_quote_n
@@ -417,7 +417,7 @@ $node_t *__cccc_quote(CCCC *vm, const char *tmpl, ...);
  * @return The parsed and substituted AST node, or NULL on error.
  * @discussion Convenience wrapper: $quote_n(tmpl, nodes, count).
  */
-$node_t *__cccc_quote_n(CCCC *vm, const char *tmpl, $node_t **nodes, int count);
+$node_t *__cccc_quote_n(VirtualMachine *vm, const char *tmpl, $node_t **nodes, int count);
 
 /*!
  * @function __cccc_node_list
@@ -433,7 +433,7 @@ $node_t *__cccc_quote_n(CCCC *vm, const char *tmpl, $node_t **nodes, int count);
  *             passed directly as the splice argument without going through
  *             this helper.  Convenience wrapper: $node_list(nodes, count).
  */
-$node_t *__cccc_node_list(CCCC *vm, $node_t **nodes, int count);
+$node_t *__cccc_node_list(VirtualMachine *vm, $node_t **nodes, int count);
 
 // ============================================================================
 // Type Lookup and Introspection
@@ -447,7 +447,7 @@ $node_t *__cccc_node_list(CCCC *vm, $node_t **nodes, int count);
  * @return The matching $type_t*, or NULL if not found.
  * @discussion Convenience wrapper: $find_type(name).
  */
-$type_t *__cccc_ast_find_type(CCCC *vm, const char *name);
+$type_t *__cccc_ast_find_type(VirtualMachine *vm, const char *name);
 
 /*!
  * @function __cccc_ast_type_exists
@@ -457,7 +457,7 @@ $type_t *__cccc_ast_find_type(CCCC *vm, const char *name);
  * @return True if the name resolves to a type, false otherwise.
  * @discussion Convenience wrapper: $type_exists(name).
  */
-bool __cccc_ast_type_exists(CCCC *vm, const char *name);
+bool __cccc_ast_type_exists(VirtualMachine *vm, const char *name);
 
 /*!
  * @function __cccc_ast_get_type
@@ -467,7 +467,7 @@ bool __cccc_ast_type_exists(CCCC *vm, const char *name);
  * @return The matching $type_t*, or NULL if not found.
  * @discussion Convenience wrapper: $get_type(name).
  */
-$type_t *__cccc_ast_get_type(CCCC *vm, const char *name);
+$type_t *__cccc_ast_get_type(VirtualMachine *vm, const char *name);
 
 /*!
  * @function __cccc_ast_type_kind
@@ -586,7 +586,7 @@ const char *__cccc_ast_type_name($type_t *ty);
  * @return A $type_t* representing "base *", or NULL on error.
  * @discussion Convenience wrapper: $make_pointer(base).
  */
-$type_t *__cccc_ast_make_pointer(CCCC *vm, $type_t *base);
+$type_t *__cccc_ast_make_pointer(VirtualMachine *vm, $type_t *base);
 
 /*!
  * @function __cccc_ast_make_array
@@ -597,7 +597,7 @@ $type_t *__cccc_ast_make_pointer(CCCC *vm, $type_t *base);
  * @return A $type_t* representing "base[length]", or NULL on error.
  * @discussion Convenience wrapper: $make_array(base, length).
  */
-$type_t *__cccc_ast_make_array(CCCC *vm, $type_t *base, int length);
+$type_t *__cccc_ast_make_array(VirtualMachine *vm, $type_t *base, int length);
 
 // Ticket #171: qualified type constructors
 /*!
@@ -608,7 +608,7 @@ $type_t *__cccc_ast_make_array(CCCC *vm, $type_t *base, int length);
  * @return A const-qualified $type_t*, or NULL on error.
  * @discussion Convenience wrapper: $make_const(ty).
  */
-$type_t *__cccc_ast_make_const(CCCC *vm, $type_t *ty);
+$type_t *__cccc_ast_make_const(VirtualMachine *vm, $type_t *ty);
 /*!
  * @function __cccc_ast_make_volatile
  * @abstract Return a volatile-qualified copy of ty.
@@ -617,7 +617,7 @@ $type_t *__cccc_ast_make_const(CCCC *vm, $type_t *ty);
  * @return A volatile-qualified $type_t*, or NULL on error.
  * @discussion Convenience wrapper: $make_volatile(ty).
  */
-$type_t *__cccc_ast_make_volatile(CCCC *vm, $type_t *ty);
+$type_t *__cccc_ast_make_volatile(VirtualMachine *vm, $type_t *ty);
 
 // ============================================================================
 // Enum Reflection
@@ -631,7 +631,7 @@ $type_t *__cccc_ast_make_volatile(CCCC *vm, $type_t *ty);
  * @return The constant count, or -1 if enum_type is not an enum.
  * @discussion Convenience wrapper: $enum_count(ty).
  */
-int __cccc_ast_enum_count(CCCC *vm, $type_t *enum_type);
+int __cccc_ast_enum_count(VirtualMachine *vm, $type_t *enum_type);
 
 /*!
  * @function __cccc_ast_enum_at
@@ -642,7 +642,7 @@ int __cccc_ast_enum_count(CCCC *vm, $type_t *enum_type);
  * @return The $enum_constant_t*, or NULL on out-of-range or non-enum.
  * @discussion Convenience wrapper: $enum_at(ty, index).
  */
-$enum_constant_t *__cccc_ast_enum_at(CCCC *vm, $type_t *enum_type, int index);
+$enum_constant_t *__cccc_ast_enum_at(VirtualMachine *vm, $type_t *enum_type, int index);
 
 /*!
  * @function __cccc_ast_enum_find
@@ -653,7 +653,7 @@ $enum_constant_t *__cccc_ast_enum_at(CCCC *vm, $type_t *enum_type, int index);
  * @return The matching $enum_constant_t*, or NULL if not found.
  * @discussion Convenience wrapper: $enum_find(ty, name).
  */
-$enum_constant_t *__cccc_ast_enum_find(CCCC *vm, $type_t *enum_type,
+$enum_constant_t *__cccc_ast_enum_find(VirtualMachine *vm, $type_t *enum_type,
                                     const char *name);
 
 /*!
@@ -724,7 +724,7 @@ int64_t __cccc_ast_enum_value($type_t *e, int index);
  * @return The member count, or -1 if struct_type is not a struct/union.
  * @discussion Convenience wrapper: $struct_member_count(ty).
  */
-int __cccc_ast_struct_member_count(CCCC *vm, $type_t *struct_type);
+int __cccc_ast_struct_member_count(VirtualMachine *vm, $type_t *struct_type);
 
 /*!
  * @function __cccc_ast_struct_member_at
@@ -735,7 +735,7 @@ int __cccc_ast_struct_member_count(CCCC *vm, $type_t *struct_type);
  * @return The $member_t*, or NULL on out-of-range or non-aggregate.
  * @discussion Convenience wrapper: $struct_member_at(ty, index).
  */
-$member_t *__cccc_ast_struct_member_at(CCCC *vm, $type_t *struct_type,
+$member_t *__cccc_ast_struct_member_at(VirtualMachine *vm, $type_t *struct_type,
                                         int index);
 
 /*!
@@ -747,7 +747,7 @@ $member_t *__cccc_ast_struct_member_at(CCCC *vm, $type_t *struct_type,
  * @return The matching $member_t*, or NULL if not found.
  * @discussion Convenience wrapper: $struct_member_find(ty, name).
  */
-$member_t *__cccc_ast_struct_member_find(CCCC *vm, $type_t *struct_type,
+$member_t *__cccc_ast_struct_member_find(VirtualMachine *vm, $type_t *struct_type,
                                         const char *name);
 
 /*!
@@ -807,7 +807,7 @@ int __cccc_ast_member_bitfield_width($member_t *m);
  * @return The matching $obj_t*, or NULL if not found.
  * @discussion Convenience wrapper: $find_global(name).
  */
-$obj_t *__cccc_ast_find_global(CCCC *vm, const char *name);
+$obj_t *__cccc_ast_find_global(VirtualMachine *vm, const char *name);
 
 /*!
  * @function __cccc_ast_global_count
@@ -816,7 +816,7 @@ $obj_t *__cccc_ast_find_global(CCCC *vm, const char *name);
  * @return The count of globals.
  * @discussion Convenience wrapper: $global_count().
  */
-int __cccc_ast_global_count(CCCC *vm);
+int __cccc_ast_global_count(VirtualMachine *vm);
 
 /*!
  * @function __cccc_ast_global_at
@@ -826,7 +826,7 @@ int __cccc_ast_global_count(CCCC *vm);
  * @return The $obj_t* at the given slot, or NULL on out-of-range.
  * @discussion Convenience wrapper: $global_at(index).
  */
-$obj_t *__cccc_ast_global_at(CCCC *vm, int index);
+$obj_t *__cccc_ast_global_at(VirtualMachine *vm, int index);
 
 /*!
  * @function __cccc_ast_obj_name
@@ -915,7 +915,7 @@ $token_t *__cccc_attr_target_token($attr_target_t *target);
  * @return An nk_num node for value.
  * @discussion Convenience wrapper: $int_literal(value).
  */
-$node_t *__cccc_ast_int_literal(CCCC *vm, int64_t value);
+$node_t *__cccc_ast_int_literal(VirtualMachine *vm, int64_t value);
 
 /*!
  * @function __cccc_ast_float_literal
@@ -925,7 +925,7 @@ $node_t *__cccc_ast_int_literal(CCCC *vm, int64_t value);
  * @return An nk_num node for value.
  * @discussion Convenience wrapper: $float_literal(value).
  */
-$node_t *__cccc_ast_float_literal(CCCC *vm, double value);
+$node_t *__cccc_ast_float_literal(VirtualMachine *vm, double value);
 
 /*!
  * @function __cccc_ast_string_literal
@@ -935,7 +935,7 @@ $node_t *__cccc_ast_float_literal(CCCC *vm, double value);
  * @return An nk_num string-literal node.
  * @discussion Convenience wrapper: $string_literal(str).
  */
-$node_t *__cccc_ast_string_literal(CCCC *vm, const char *str);
+$node_t *__cccc_ast_string_literal(VirtualMachine *vm, const char *str);
 
 /*!
  * @function __cccc_ast_var_ref
@@ -945,7 +945,7 @@ $node_t *__cccc_ast_string_literal(CCCC *vm, const char *str);
  * @return An nk_var node referencing name.
  * @discussion Convenience wrapper: $var_ref(name).
  */
-$node_t *__cccc_ast_var_ref(CCCC *vm, const char *name);
+$node_t *__cccc_ast_var_ref(VirtualMachine *vm, const char *name);
 
 /*!
  * @function __cccc_ast_param_ref
@@ -957,7 +957,7 @@ $node_t *__cccc_ast_var_ref(CCCC *vm, const char *name);
  * @discussion Use this when building function bodies to reference parameters
  *             by name.  Convenience wrapper: $param_ref(fn, name).
  */
-$node_t *__cccc_ast_param_ref(CCCC *vm, $obj_t *fn, const char *name);
+$node_t *__cccc_ast_param_ref(VirtualMachine *vm, $obj_t *fn, const char *name);
 
 // ============================================================================
 // AST Node Construction - Expressions
@@ -973,7 +973,7 @@ $node_t *__cccc_ast_param_ref(CCCC *vm, $obj_t *fn, const char *name);
  * @return The binary expression node.
  * @discussion Convenience wrapper: $binary(op, left, right).
  */
-$node_t *__cccc_ast_binary(CCCC *vm, $node_kind_t op, $node_t *left,
+$node_t *__cccc_ast_binary(VirtualMachine *vm, $node_kind_t op, $node_t *left,
                             $node_t *right);
 
 /*!
@@ -985,7 +985,7 @@ $node_t *__cccc_ast_binary(CCCC *vm, $node_kind_t op, $node_t *left,
  * @return The unary expression node.
  * @discussion Convenience wrapper: $unary(op, operand).
  */
-$node_t *__cccc_ast_unary(CCCC *vm, $node_kind_t op, $node_t *operand);
+$node_t *__cccc_ast_unary(VirtualMachine *vm, $node_kind_t op, $node_t *operand);
 
 /*!
  * @function __cccc_ast_cast
@@ -996,7 +996,7 @@ $node_t *__cccc_ast_unary(CCCC *vm, $node_kind_t op, $node_t *operand);
  * @return An nk_cast node.
  * @discussion Convenience wrapper: $cast(expr, target_type).
  */
-$node_t *__cccc_ast_cast(CCCC *vm, $node_t *expr, $type_t *target_type);
+$node_t *__cccc_ast_cast(VirtualMachine *vm, $node_t *expr, $type_t *target_type);
 
 // Ticket #171: new expression builders
 
@@ -1010,7 +1010,7 @@ $node_t *__cccc_ast_cast(CCCC *vm, $node_t *expr, $type_t *target_type);
  * @return An nk_cond node.
  * @discussion Convenience wrapper: $cond(cond, then_expr, else_expr).
  */
-$node_t *__cccc_ast_cond(CCCC *vm, $node_t *cond, $node_t *then_expr,
+$node_t *__cccc_ast_cond(VirtualMachine *vm, $node_t *cond, $node_t *then_expr,
                           $node_t *else_expr);
 
 /*!
@@ -1020,7 +1020,7 @@ $node_t *__cccc_ast_cond(CCCC *vm, $node_t *cond, $node_t *then_expr,
  * @return An nk_num node representing a typed NULL.
  * @discussion Convenience wrapper: $null().
  */
-$node_t *__cccc_ast_null(CCCC *vm);
+$node_t *__cccc_ast_null(VirtualMachine *vm);
 
 /*!
  * @function __cccc_ast_sizeof_type
@@ -1030,7 +1030,7 @@ $node_t *__cccc_ast_null(CCCC *vm);
  * @return An nk_num node holding sizeof(ty).
  * @discussion Convenience wrapper: $sizeof_type(ty).
  */
-$node_t *__cccc_ast_sizeof_type(CCCC *vm, $type_t *ty);
+$node_t *__cccc_ast_sizeof_type(VirtualMachine *vm, $type_t *ty);
 
 /*!
  * @function __cccc_ast_alignof_type
@@ -1040,7 +1040,7 @@ $node_t *__cccc_ast_sizeof_type(CCCC *vm, $type_t *ty);
  * @return An nk_num node holding _Alignof(ty).
  * @discussion Convenience wrapper: $alignof_type(ty).
  */
-$node_t *__cccc_ast_alignof_type(CCCC *vm, $type_t *ty);
+$node_t *__cccc_ast_alignof_type(VirtualMachine *vm, $type_t *ty);
 
 /*!
  * @function __cccc_ast_sizeof_expr
@@ -1050,7 +1050,7 @@ $node_t *__cccc_ast_alignof_type(CCCC *vm, $type_t *ty);
  * @return An nk_num node holding sizeof(expr).
  * @discussion Convenience wrapper: $sizeof_expr(expr).
  */
-$node_t *__cccc_ast_sizeof_expr(CCCC *vm, $node_t *expr);
+$node_t *__cccc_ast_sizeof_expr(VirtualMachine *vm, $node_t *expr);
 
 /*!
  * @function __cccc_ast_subscript
@@ -1061,7 +1061,7 @@ $node_t *__cccc_ast_sizeof_expr(CCCC *vm, $node_t *expr);
  * @return An nk_add / nk_deref node pair representing the subscript.
  * @discussion Convenience wrapper: $subscript(arr, idx).
  */
-$node_t *__cccc_ast_subscript(CCCC *vm, $node_t *arr, $node_t *idx);
+$node_t *__cccc_ast_subscript(VirtualMachine *vm, $node_t *arr, $node_t *idx);
 
 /*!
  * @function __cccc_ast_comma
@@ -1072,7 +1072,7 @@ $node_t *__cccc_ast_subscript(CCCC *vm, $node_t *arr, $node_t *idx);
  * @return An nk_comma node.
  * @discussion Convenience wrapper: $comma(lhs, rhs).
  */
-$node_t *__cccc_ast_comma(CCCC *vm, $node_t *lhs, $node_t *rhs);
+$node_t *__cccc_ast_comma(VirtualMachine *vm, $node_t *lhs, $node_t *rhs);
 
 // ============================================================================
 // AST Node Construction - Statements
@@ -1086,7 +1086,7 @@ $node_t *__cccc_ast_comma(CCCC *vm, $node_t *lhs, $node_t *rhs);
  * @return An nk_return node.
  * @discussion Convenience wrapper: $return(expr).
  */
-$node_t *__cccc_ast_return(CCCC *vm, $node_t *expr);
+$node_t *__cccc_ast_return(VirtualMachine *vm, $node_t *expr);
 
 /*!
  * @function __cccc_ast_block
@@ -1097,7 +1097,7 @@ $node_t *__cccc_ast_return(CCCC *vm, $node_t *expr);
  * @return An nk_block node.
  * @discussion Convenience wrapper: $block(stmts, count).
  */
-$node_t *__cccc_ast_block(CCCC *vm, $node_t **stmts, int count);
+$node_t *__cccc_ast_block(VirtualMachine *vm, $node_t **stmts, int count);
 
 /*!
  * @function __cccc_ast_block_add_stmt
@@ -1109,7 +1109,7 @@ $node_t *__cccc_ast_block(CCCC *vm, $node_t **stmts, int count);
  * @discussion Convenience wrapper: $block_add_stmt(block, stmt), or
  *             $block_add_stmt(stmt) inside $with_block(block).
  */
-$node_t *__cccc_ast_block_add_stmt(CCCC *vm, $node_t *block, $node_t *stmt);
+$node_t *__cccc_ast_block_add_stmt(VirtualMachine *vm, $node_t *block, $node_t *stmt);
 
 /*!
  * @function __cccc_ast_if
@@ -1121,7 +1121,7 @@ $node_t *__cccc_ast_block_add_stmt(CCCC *vm, $node_t *block, $node_t *stmt);
  * @return An nk_if node.
  * @discussion Convenience wrapper: $if(cond, then_body, else_body).
  */
-$node_t *__cccc_ast_if(CCCC *vm, $node_t *cond, $node_t *then_body,
+$node_t *__cccc_ast_if(VirtualMachine *vm, $node_t *cond, $node_t *then_body,
                         $node_t *else_body);
 
 /*!
@@ -1133,7 +1133,7 @@ $node_t *__cccc_ast_if(CCCC *vm, $node_t *cond, $node_t *then_body,
  *         __cccc_ast_switch_set_default to populate it.
  * @discussion Convenience wrapper: $switch(cond).
  */
-$node_t *__cccc_ast_switch(CCCC *vm, $node_t *cond);
+$node_t *__cccc_ast_switch(VirtualMachine *vm, $node_t *cond);
 
 /*!
  * @function __cccc_ast_switch_add_case
@@ -1145,7 +1145,7 @@ $node_t *__cccc_ast_switch(CCCC *vm, $node_t *cond);
  * @discussion Convenience wrapper: $switch_add_case(sw, value, body), or
  *             $switch_add_case(value, body) inside $with_switch(sw).
  */
-void __cccc_ast_switch_add_case(CCCC *vm, $node_t *switch_node,
+void __cccc_ast_switch_add_case(VirtualMachine *vm, $node_t *switch_node,
                                 $node_t *value, $node_t *body);
 
 /*!
@@ -1157,7 +1157,7 @@ void __cccc_ast_switch_add_case(CCCC *vm, $node_t *switch_node,
  * @discussion Convenience wrapper: $switch_set_default(sw, body), or
  *             $switch_set_default(body) inside $with_switch(sw).
  */
-void __cccc_ast_switch_set_default(CCCC *vm, $node_t *switch_node,
+void __cccc_ast_switch_set_default(VirtualMachine *vm, $node_t *switch_node,
                                     $node_t *body);
 
 /*!
@@ -1168,7 +1168,7 @@ void __cccc_ast_switch_set_default(CCCC *vm, $node_t *switch_node,
  * @return An nk_expr_stmt node.
  * @discussion Convenience wrapper: $expr_stmt(expr).
  */
-$node_t *__cccc_ast_expr_stmt(CCCC *vm, $node_t *expr);
+$node_t *__cccc_ast_expr_stmt(VirtualMachine *vm, $node_t *expr);
 
 // ============================================================================
 // AST Node Construction - Local Variable Injection (ticket #77)
@@ -1189,7 +1189,7 @@ $node_t *__cccc_ast_expr_stmt(CCCC *vm, $node_t *expr);
  *        __cccc_ast_local_var_unique().
  * @discussion Convenience wrapper: $local_var(name, ty).
  */
-$node_t *__cccc_ast_local_var(CCCC *vm, const char *name, $type_t *ty);
+$node_t *__cccc_ast_local_var(VirtualMachine *vm, const char *name, $type_t *ty);
 
 /*!
  * @function __cccc_ast_local_var_unique
@@ -1203,7 +1203,7 @@ $node_t *__cccc_ast_local_var(CCCC *vm, const char *name, $type_t *ty);
  *        This is the safe default for macro temporaries.
  * @discussion Convenience wrapper: $local_var_unique(ty).
  */
-$node_t *__cccc_ast_local_var_unique(CCCC *vm, $type_t *ty);
+$node_t *__cccc_ast_local_var_unique(VirtualMachine *vm, $type_t *ty);
 
 /*!
  * @function __cccc_ast_assign
@@ -1214,7 +1214,7 @@ $node_t *__cccc_ast_local_var_unique(CCCC *vm, $type_t *ty);
  * @return An nk_assign node, or NULL on error.
  * @discussion Convenience wrapper: $assign(target, value).
  */
-$node_t *__cccc_ast_assign(CCCC *vm, $node_t *target, $node_t *value);
+$node_t *__cccc_ast_assign(VirtualMachine *vm, $node_t *target, $node_t *value);
 
 /*!
  * @function __cccc_ast_member
@@ -1229,7 +1229,7 @@ $node_t *__cccc_ast_assign(CCCC *vm, $node_t *target, $node_t *value);
  *       for pointer-to-struct access).
  * @discussion Convenience wrapper: $member(obj, name).
  */
-$node_t *__cccc_ast_member(CCCC *vm, $node_t *obj, const char *name);
+$node_t *__cccc_ast_member(VirtualMachine *vm, $node_t *obj, const char *name);
 
 /*!
  * @function __cccc_ast_funcall
@@ -1242,7 +1242,7 @@ $node_t *__cccc_ast_member(CCCC *vm, $node_t *obj, const char *name);
  * @return A nk_funcall node, or NULL on error.
  * @discussion Convenience wrapper: $funcall(callee, args, n).
  */
-$node_t *__cccc_ast_funcall(CCCC *vm, $node_t *callee, $node_t **args, int n);
+$node_t *__cccc_ast_funcall(VirtualMachine *vm, $node_t *callee, $node_t **args, int n);
 
 /*!
  * @function __cccc_ast_while
@@ -1254,7 +1254,7 @@ $node_t *__cccc_ast_funcall(CCCC *vm, $node_t *callee, $node_t **args, int n);
  *         or NULL on error.
  * @discussion Convenience wrapper: $while(cond, body).
  */
-$node_t *__cccc_ast_while(CCCC *vm, $node_t *cond, $node_t *body);
+$node_t *__cccc_ast_while(VirtualMachine *vm, $node_t *cond, $node_t *body);
 
 /*!
  * @function __cccc_ast_for
@@ -1267,7 +1267,7 @@ $node_t *__cccc_ast_while(CCCC *vm, $node_t *cond, $node_t *body);
  * @return A nk_for node, or NULL on error.
  * @discussion Convenience wrapper: $for(init, cond, inc, body).
  */
-$node_t *__cccc_ast_for(CCCC *vm, $node_t *init, $node_t *cond,
+$node_t *__cccc_ast_for(VirtualMachine *vm, $node_t *init, $node_t *cond,
                        $node_t *inc, $node_t *body);
 
 /*!
@@ -1279,7 +1279,7 @@ $node_t *__cccc_ast_for(CCCC *vm, $node_t *init, $node_t *cond,
  * @return A nk_do node, or NULL on error.
  * @discussion Convenience wrapper: $do_while(body, cond).
  */
-$node_t *__cccc_ast_do_while(CCCC *vm, $node_t *body, $node_t *cond);
+$node_t *__cccc_ast_do_while(VirtualMachine *vm, $node_t *body, $node_t *cond);
 
 // ============================================================================
 // Function Generation
@@ -1296,7 +1296,7 @@ $node_t *__cccc_ast_do_while(CCCC *vm, $node_t *body, $node_t *cond);
  *             and will be compiled when the main program is compiled.
  *             Convenience wrapper: $function(name, return_type).
  */
-$obj_t *__cccc_ast_function(CCCC *vm, const char *name,
+$obj_t *__cccc_ast_function(VirtualMachine *vm, const char *name,
                             $type_t *return_type);
 
 /*!
@@ -1312,7 +1312,7 @@ $obj_t *__cccc_ast_function(CCCC *vm, const char *name,
  *             able to reference it without a handwritten declaration.
  *             Convenience wrapper: $publish(obj) / $publish_at(obj, tok).
  */
-$node_t *__cccc_ast_publish(CCCC *vm, $obj_t *obj, $token_t *tok);
+$node_t *__cccc_ast_publish(VirtualMachine *vm, $obj_t *obj, $token_t *tok);
 
 /*!
  * @function __cccc_ast_publish_type
@@ -1326,7 +1326,7 @@ $node_t *__cccc_ast_publish(CCCC *vm, $obj_t *obj, $token_t *tok);
  *             This function lets $publish(type) be used uniformly; there
  *             is no separate convenience macro for this entry point.
  */
-$node_t *__cccc_ast_publish_type(CCCC *vm, $type_t *ty, $token_t *tok);
+$node_t *__cccc_ast_publish_type(VirtualMachine *vm, $type_t *ty, $token_t *tok);
 
 /*!
  * @function __cccc_emit_directive
@@ -1335,7 +1335,7 @@ $node_t *__cccc_ast_publish_type(CCCC *vm, $type_t *ty, $token_t *tok);
  * @param line Complete directive text, for example "#ifdef _WIN32".
  * @discussion Convenience wrapper: $emit_directive(line).
  */
-void __cccc_emit_directive(CCCC *vm, const char *line);
+void __cccc_emit_directive(VirtualMachine *vm, const char *line);
 
 
 /*!
@@ -1349,7 +1349,7 @@ void __cccc_emit_directive(CCCC *vm, const char *line);
  *             for multiple parameters.  Convenience wrapper:
  *             $function_add_param(fn, name, type).
  */
-void __cccc_ast_function_add_param(CCCC *vm, $obj_t *fn, const char *name,
+void __cccc_ast_function_add_param(VirtualMachine *vm, $obj_t *fn, const char *name,
                                 $type_t *type);
 
 /*!
@@ -1361,7 +1361,7 @@ void __cccc_ast_function_add_param(CCCC *vm, $obj_t *fn, const char *name,
  * @discussion If body is not already a nk_block, it will be wrapped in one.
  *             Convenience wrapper: $function_set_body(fn, body).
  */
-void __cccc_ast_function_set_body(CCCC *vm, $obj_t *fn, $node_t *body);
+void __cccc_ast_function_set_body(VirtualMachine *vm, $obj_t *fn, $node_t *body);
 
 /*!
  * @function __cccc_ast_function_set_static
@@ -1403,7 +1403,7 @@ void __cccc_ast_function_set_variadic($obj_t *fn, bool is_variadic);
  *             $function call with the same name will reuse this Obj and
  *             fill in the body.  Convenience wrapper: $function_prototype(name, return_type).
  */
-$obj_t *__cccc_ast_function_prototype(CCCC *vm, const char *name,
+$obj_t *__cccc_ast_function_prototype(VirtualMachine *vm, const char *name,
                                     $type_t *return_type);
 
 // Ticket #171: struct/union/enum/typedef type builders
@@ -1418,7 +1418,7 @@ $obj_t *__cccc_ast_function_prototype(CCCC *vm, const char *name,
  *             The type is immediately visible via $find_type(name).
  *             Convenience wrapper: $make_struct(name).
  */
-$type_t *__cccc_ast_make_struct(CCCC *vm, const char *name);
+$type_t *__cccc_ast_make_struct(VirtualMachine *vm, const char *name);
 
 /*!
  * @function __cccc_ast_make_union
@@ -1428,7 +1428,7 @@ $type_t *__cccc_ast_make_struct(CCCC *vm, const char *name);
  * @return The new union $type_t*, or NULL on error.
  * @discussion Convenience wrapper: $make_union(name).
  */
-$type_t *__cccc_ast_make_union(CCCC *vm, const char *name);
+$type_t *__cccc_ast_make_union(VirtualMachine *vm, const char *name);
 
 /*!
  * @function __cccc_ast_struct_add_field
@@ -1443,7 +1443,7 @@ $type_t *__cccc_ast_make_union(CCCC *vm, const char *name);
  *             and the union size is updated to the maximum field size.
  *             Convenience wrapper: $struct_add_field(ty, name, field_type).
  */
-$type_t *__cccc_ast_struct_add_field(CCCC *vm, $type_t *ty, const char *name,
+$type_t *__cccc_ast_struct_add_field(VirtualMachine *vm, $type_t *ty, const char *name,
                                    $type_t *field_type);
 
 /*!
@@ -1455,7 +1455,7 @@ $type_t *__cccc_ast_struct_add_field(CCCC *vm, $type_t *ty, const char *name,
  * @discussion Use $enum_add_constant to add constants after creation.
  *             Convenience wrapper: $make_enum(name).
  */
-$type_t *__cccc_ast_make_enum(CCCC *vm, const char *name);
+$type_t *__cccc_ast_make_enum(VirtualMachine *vm, const char *name);
 
 /*!
  * @function __cccc_ast_enum_add_constant
@@ -1469,7 +1469,7 @@ $type_t *__cccc_ast_make_enum(CCCC *vm, const char *name);
  *             subsequently compiled code.  Convenience wrapper:
  *             $enum_add_constant(ty, name, value).
  */
-void __cccc_ast_enum_add_constant(CCCC *vm, $type_t *ty, const char *name,
+void __cccc_ast_enum_add_constant(VirtualMachine *vm, $type_t *ty, const char *name,
                                   int64_t value);
 
 /*!
@@ -1483,7 +1483,7 @@ void __cccc_ast_enum_add_constant(CCCC *vm, $type_t *ty, const char *name,
  *             subsequently compiled code can use name as a type name.
  *             Convenience wrapper: $make_typedef(name, underlying).
  */
-$type_t *__cccc_ast_make_typedef(CCCC *vm, const char *name, $type_t *underlying);
+$type_t *__cccc_ast_make_typedef(VirtualMachine *vm, const char *name, $type_t *underlying);
 
 // ============================================================================
 // Global Variable Generation (ticket #152)
@@ -1503,7 +1503,7 @@ $type_t *__cccc_ast_make_typedef(CCCC *vm, const char *name, $type_t *underlying
  *             the parser can resolve references.
  *             Convenience wrapper: $global_var(name, ty).
  */
-$obj_t *__cccc_ast_global_var(CCCC *vm, const char *name, $type_t *ty);
+$obj_t *__cccc_ast_global_var(VirtualMachine *vm, const char *name, $type_t *ty);
 
 /*!
  * @function __cccc_ast_global_var_set_init_data
@@ -1514,7 +1514,7 @@ $obj_t *__cccc_ast_global_var(CCCC *vm, const char *name, $type_t *ty);
  * @param len  Number of bytes to copy.  Must equal var->ty->size.
  * @discussion Convenience wrapper: $global_var_set_init_data(var, data, len).
  */
-void __cccc_ast_global_var_set_init_data(CCCC *vm, $obj_t *var,
+void __cccc_ast_global_var_set_init_data(VirtualMachine *vm, $obj_t *var,
                                         const char *data, int len);
 
 /*!
@@ -1543,7 +1543,7 @@ void __cccc_ast_global_var_set_static($obj_t *var, bool is_static);
  *             1:1 convenience macro; use the @c $with_fn(fn) { ... } block
  *             helper to bracket push/pop pairs in a macro body.
  */
-void __cccc_ast_push_fn(CCCC *vm, $obj_t *fn);
+void __cccc_ast_push_fn(VirtualMachine *vm, $obj_t *fn);
 
 /*!
  * @function __cccc_ast_pop_fn
@@ -1553,7 +1553,7 @@ void __cccc_ast_push_fn(CCCC *vm, $obj_t *fn);
  *             @c $with_fn(fn) { ... } block helper, which performs the
  *             matching pop even on early exit.
  */
-void __cccc_ast_pop_fn(CCCC *vm);
+void __cccc_ast_pop_fn(VirtualMachine *vm);
 
 /*!
  * @function __cccc_ast_push_block
@@ -1563,9 +1563,9 @@ void __cccc_ast_pop_fn(CCCC *vm);
  * @discussion Use with $with_block(block) so $block_add_stmt(stmt) appends to
  *             block without repeating the block pointer.
  */
-void __cccc_ast_push_block(CCCC *vm, $node_t *block);
-void __cccc_ast_pop_block(CCCC *vm);
-$node_t *__cccc_ast_block_add_current_stmt(CCCC *vm, $node_t *stmt);
+void __cccc_ast_push_block(VirtualMachine *vm, $node_t *block);
+void __cccc_ast_pop_block(VirtualMachine *vm);
+$node_t *__cccc_ast_block_add_current_stmt(VirtualMachine *vm, $node_t *stmt);
 
 /*!
  * @function __cccc_ast_push_struct
@@ -1575,9 +1575,9 @@ $node_t *__cccc_ast_block_add_current_stmt(CCCC *vm, $node_t *stmt);
  * @discussion Use with $with_struct(ty) so $struct_add_field(name, ty) appends
  *             to the current aggregate.
  */
-void __cccc_ast_push_struct(CCCC *vm, $type_t *ty);
-void __cccc_ast_pop_struct(CCCC *vm);
-$type_t *__cccc_ast_struct_add_current_field(CCCC *vm, const char *name,
+void __cccc_ast_push_struct(VirtualMachine *vm, $type_t *ty);
+void __cccc_ast_pop_struct(VirtualMachine *vm);
+$type_t *__cccc_ast_struct_add_current_field(VirtualMachine *vm, const char *name,
                                             $type_t *field_type);
 
 /*!
@@ -1588,11 +1588,11 @@ $type_t *__cccc_ast_struct_add_current_field(CCCC *vm, const char *name,
  * @discussion Use with $with_switch(sw) so $switch_add_case(value, body) and
  *             $switch_set_default(body) append to the current switch.
  */
-void __cccc_ast_push_switch(CCCC *vm, $node_t *switch_node);
-void __cccc_ast_pop_switch(CCCC *vm);
-void __cccc_ast_switch_add_current_case(CCCC *vm, $node_t *value,
+void __cccc_ast_push_switch(VirtualMachine *vm, $node_t *switch_node);
+void __cccc_ast_pop_switch(VirtualMachine *vm);
+void __cccc_ast_switch_add_current_case(VirtualMachine *vm, $node_t *value,
                                        $node_t *body);
-void __cccc_ast_switch_set_current_default(CCCC *vm, $node_t *body);
+void __cccc_ast_switch_set_current_default(VirtualMachine *vm, $node_t *body);
 
 /*!
  * @function __cccc_ast_push_enum
@@ -1602,9 +1602,9 @@ void __cccc_ast_switch_set_current_default(CCCC *vm, $node_t *body);
  * @discussion Use with $with_enum(ty) so $enum_add_constant(name, value)
  *             appends to the current enum.
  */
-void __cccc_ast_push_enum(CCCC *vm, $type_t *ty);
-void __cccc_ast_pop_enum(CCCC *vm);
-void __cccc_ast_enum_add_current_constant(CCCC *vm, const char *name,
+void __cccc_ast_push_enum(VirtualMachine *vm, $type_t *ty);
+void __cccc_ast_pop_enum(VirtualMachine *vm);
+void __cccc_ast_enum_add_current_constant(VirtualMachine *vm, const char *name,
                                          int value);
 
 // ============================================================================
@@ -1619,7 +1619,7 @@ void __cccc_ast_enum_add_current_constant(CCCC *vm, const char *name,
  * @discussion Reuses the compiler's internal cc_dump_ast text renderer.
  *             Convenience wrapper: $dump_tree(node).
  */
-void __cccc_dump_tree(CCCC *vm, $node_t *node);
+void __cccc_dump_tree(VirtualMachine *vm, $node_t *node);
 
 /*!
  * @function __cccc_dump_tree_to_string
@@ -1629,7 +1629,7 @@ void __cccc_dump_tree(CCCC *vm, $node_t *node);
  * @return An arena-allocated NUL-terminated string, or NULL on error.
  * @discussion Convenience wrapper: $dump_tree_to_string(node).
  */
-const char *__cccc_dump_tree_to_string(CCCC *vm, $node_t *node);
+const char *__cccc_dump_tree_to_string(VirtualMachine *vm, $node_t *node);
 
 /*!
  * @function __cccc_dump_ast_gen
@@ -1640,7 +1640,7 @@ const char *__cccc_dump_tree_to_string(CCCC *vm, $node_t *node);
  *             Unsupported kinds are emitted as C comments.
  *             Convenience wrapper: $dump_ast_gen(node).
  */
-void __cccc_dump_ast_gen(CCCC *vm, $node_t *node);
+void __cccc_dump_ast_gen(VirtualMachine *vm, $node_t *node);
 
 /*!
  * @function __cccc_dump_ast_gen_to_string
@@ -1650,7 +1650,7 @@ void __cccc_dump_ast_gen(CCCC *vm, $node_t *node);
  * @return An arena-allocated NUL-terminated string, or NULL on error.
  * @discussion Convenience wrapper: $dump_ast_gen_to_string(node).
  */
-const char *__cccc_dump_ast_gen_to_string(CCCC *vm, $node_t *node);
+const char *__cccc_dump_ast_gen_to_string(VirtualMachine *vm, $node_t *node);
 
 // ============================================================================
 // Convenience Macros (automatically pass _VM)
@@ -1878,7 +1878,7 @@ const char *__cccc_dump_ast_gen_to_string(CCCC *vm, $node_t *node);
  * @return The 64-bit integer value, or 0 if the variable is not defined.
  * @discussion Convenience wrapper: $get_comptime_int(name).
  */
-int64_t __cccc_get_comptime_int(CCCC *vm, const char *name);
+int64_t __cccc_get_comptime_int(VirtualMachine *vm, const char *name);
 /*!
  * @function __cccc_get_comptime_float
  * @abstract Read a float/double-typed @c #pragma comptime variable's value
@@ -1888,7 +1888,7 @@ int64_t __cccc_get_comptime_int(CCCC *vm, const char *name);
  * @return The double value, or 0.0 if the variable is not defined.
  * @discussion Convenience wrapper: $get_comptime_float(name).
  */
-double __cccc_get_comptime_float(CCCC *vm, const char *name);
+double __cccc_get_comptime_float(VirtualMachine *vm, const char *name);
 /*!
  * @function __cccc_get_comptime_var
  * @abstract Read a comptime scalar variable as an AST literal node.
@@ -1897,7 +1897,7 @@ double __cccc_get_comptime_float(CCCC *vm, const char *name);
  * @return A nk_num node representing the variable's value, or NULL on error.
  * @discussion Convenience wrapper: $get_comptime_var(name).
  */
-$node_t *__cccc_get_comptime_var(CCCC *vm, const char *name);
+$node_t *__cccc_get_comptime_var(VirtualMachine *vm, const char *name);
 /*!
  * @function __cccc_get_comptime_ptr
  * @abstract Return the address of a comptime variable as a generated-code AST
@@ -1908,7 +1908,7 @@ $node_t *__cccc_get_comptime_var(CCCC *vm, const char *name);
  *         comptime variable, or NULL on error.
  * @discussion Convenience wrapper: $get_comptime_ptr(name).
  */
-$node_t *__cccc_get_comptime_ptr(CCCC *vm, const char *name);
+$node_t *__cccc_get_comptime_ptr(VirtualMachine *vm, const char *name);
 /*!
  * @function __cccc_get_comptime_member
  * @abstract Read a named field from a comptime struct variable as an AST
@@ -1919,7 +1919,7 @@ $node_t *__cccc_get_comptime_ptr(CCCC *vm, const char *name);
  * @return A nk_num node for the field's value, or NULL on error.
  * @discussion Convenience wrapper: $get_comptime_member(var_name, field).
  */
-$node_t *__cccc_get_comptime_member(CCCC *vm, const char *var_name,
+$node_t *__cccc_get_comptime_member(VirtualMachine *vm, const char *var_name,
                                   const char *field);
 
 #define $get_comptime_int(name)           __cccc_get_comptime_int(_VM, name)
@@ -1941,7 +1941,7 @@ $node_t *__cccc_get_comptime_member(CCCC *vm, const char *var_name,
  *             @c constexpr variable.  Convenience wrapper:
  *             $get_constexpr_value(name).
  */
-$node_t *__cccc_get_constexpr_value(CCCC *vm, const char *name);
+$node_t *__cccc_get_constexpr_value(VirtualMachine *vm, const char *name);
 
 #define $get_constexpr_value(name)  __cccc_get_constexpr_value(_VM, name)
 
@@ -1954,19 +1954,19 @@ $node_t *__cccc_get_constexpr_value(CCCC *vm, const char *name);
  *           local var then positionally assign @a inits via node_expand_init_splice.
  * @note Requires function scope (file-scope not supported in V1).
  */
-$node_t *__cccc_ast_compound_literal(CCCC *vm, $type_t *ty, $node_t **inits, int n);
+$node_t *__cccc_ast_compound_literal(VirtualMachine *vm, $type_t *ty, $node_t **inits, int n);
 
 /**
  * @abstract Build an array compound literal.  Element type is explicit to avoid
  *           long-inference surprises with $int_literal.
  */
-$node_t *__cccc_ast_init_array(CCCC *vm, $type_t *elem_ty, $node_t **elems, int n);
+$node_t *__cccc_ast_init_array(VirtualMachine *vm, $type_t *elem_ty, $node_t **elems, int n);
 
 /**
  * @abstract Build a designated struct/union initializer.  Unmentioned fields
  *           are zero-initialised.  Partial init (n < member count) is allowed.
  */
-$node_t *__cccc_ast_init_struct(CCCC *vm, $type_t *ty, const char **fields,
+$node_t *__cccc_ast_init_struct(VirtualMachine *vm, $type_t *ty, const char **fields,
                                 $node_t **values, int n);
 
 /** Positional compound literal — element count inferred from __VA_ARGS__. */

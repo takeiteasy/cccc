@@ -162,9 +162,9 @@ typedef struct {
 } SerializeContext;
 
 // Forward declaration
-static void serialize_expr(FILE *f, CCCC *vm, SerializeContext *ctx, Node *node,
+static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, Node *node,
                            int parent_prec);
-static void serialize_stmt(FILE *f, CCCC *vm, SerializeContext *ctx, Node *node,
+static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, Node *node,
                            int indent);
 
 // Returns true if the node produces no output (effectively a no-op expression).
@@ -241,7 +241,7 @@ static void type_name_push(TypeName **items, int *len, int *cap, Type *ty,
     (*len)++;
 }
 
-static void collect_scope_names(SerializeContext *ctx, CCCC *vm) {
+static void collect_scope_names(SerializeContext *ctx, VirtualMachine *vm) {
     for (TypeNameRecord *rec = vm->compiler.type_names; rec; rec = rec->next) {
         if (rec->is_tag)
             type_name_push(&ctx->tags, &ctx->tags_len, &ctx->tags_cap, rec->ty,
@@ -619,7 +619,7 @@ static void print_indent_level(FILE *f, int indent) {
 }
 
 // Serialize an expression
-static void serialize_expr(FILE *f, CCCC *vm, SerializeContext *ctx, Node *node,
+static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, Node *node,
                            int parent_prec) {
     (void)vm; // May be used later
 
@@ -788,7 +788,7 @@ static void serialize_expr(FILE *f, CCCC *vm, SerializeContext *ctx, Node *node,
 }
 
 // Serialize a statement
-static void serialize_stmt(FILE *f, CCCC *vm, SerializeContext *ctx, Node *node,
+static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, Node *node,
                            int indent) {
     if (!node)
         return;
@@ -938,7 +938,7 @@ static void serialize_function_signature(FILE *f, SerializeContext *ctx,
 }
 
 // Serialize a function
-static void serialize_function(FILE *f, CCCC *vm, SerializeContext *ctx,
+static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                                Obj *fn) {
     if (!fn->is_function)
         return;
@@ -993,7 +993,7 @@ static void serialize_function(FILE *f, CCCC *vm, SerializeContext *ctx,
 }
 
 // Serialize global variable
-static void serialize_global_var(FILE *f, CCCC *vm, SerializeContext *ctx,
+static void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                                  Obj *var) {
     (void)vm;
 
@@ -1201,7 +1201,7 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
 }
 
 // Public API: Serialize entire program to C source
-void cc_serialize_program(FILE *f, CCCC *vm, Obj *prog, bool generated_only) {
+void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated_only) {
     if (!f || !prog)
         return;
 
@@ -1222,7 +1222,7 @@ void cc_serialize_program(FILE *f, CCCC *vm, Obj *prog, bool generated_only) {
 
     if (generated_only && vm->compiler.emit_events_head) {
         serialize_type_defs_for_owner(f, &ctx, NULL);
-        for (CCCCEmitEvent *ev = vm->compiler.emit_events_head; ev; ev = ev->next) {
+        for (EmitEvent *ev = vm->compiler.emit_events_head; ev; ev = ev->next) {
             if (ev->kind == CCCC_EMIT_SOURCE) {
                 fprintf(f, "%s\n", ev->source);
                 continue;
@@ -1291,7 +1291,7 @@ void cc_serialize_program(FILE *f, CCCC *vm, Obj *prog, bool generated_only) {
 }
 
 // Serialize a single node to a string (for debugging)
-char *serialize_node_to_source(CCCC *vm, Node *node) {
+char *serialize_node_to_source(VirtualMachine *vm, Node *node) {
     if (!node)
         return strdup("");
 

@@ -35,7 +35,7 @@ static void *cccc_memset_explicit(void *s, int c, size_t n) {
 #endif
 
 // Register all string.h functions
-void register_string_functions(CCCC *vm) {
+void register_string_functions(VirtualMachine *vm) {
     // Memory operations
     cc_register_cfunc(vm, "memcpy", (void*)memcpy, 3, 0);
     cc_register_cfunc(vm, "memmove", (void*)memmove, 3, 0);

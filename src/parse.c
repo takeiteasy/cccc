@@ -137,81 +137,81 @@ static Obj error_var_obj = {
 };
 static Obj *error_var = &error_var_obj;
 
-static bool is_typename(CCCC *vm, Token *tok);
-static Type *declspec(CCCC *vm, Token **rest, Token *tok, VarAttr *attr);
-static Type *typename(CCCC *vm, Token **rest, Token *tok);
-static Type *enum_specifier(CCCC *vm, Token **rest, Token *tok);
-static Type *typeof_specifier(CCCC *vm, Token **rest, Token *tok);
-static Type *typeof_unqual_specifier(CCCC *vm, Token **rest, Token *tok);
-static Type *type_suffix(CCCC *vm, Token **rest, Token *tok, Type *ty);
-static Type *declarator(CCCC *vm, Token **rest, Token *tok, Type *ty);
-static Token *attribute_list(CCCC *vm, Token *tok, Type *ty, VarAttr *attr);
-static Token *c23_attribute_list(CCCC *vm, Token *tok, Type *ty, VarAttr *attr);
+static bool is_typename(VirtualMachine *vm, Token *tok);
+static Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr);
+static Type *typename(VirtualMachine *vm, Token **rest, Token *tok);
+static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok);
+static Type *typeof_specifier(VirtualMachine *vm, Token **rest, Token *tok);
+static Type *typeof_unqual_specifier(VirtualMachine *vm, Token **rest, Token *tok);
+static Type *type_suffix(VirtualMachine *vm, Token **rest, Token *tok, Type *ty);
+static Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty);
+static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr);
+static Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr);
 static void inherit_semantic_attrs(Type *dst, Type *src);
-static Type *apply_var_attrs_to_type(CCCC *vm, Type *ty, VarAttr *attr);
-static Node *declaration(CCCC *vm, Token **rest, Token *tok, Type *basety,
+static Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr);
+static Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                          VarAttr *attr);
-static void array_initializer2(CCCC *vm, Token **rest, Token *tok,
+static void array_initializer2(VirtualMachine *vm, Token **rest, Token *tok,
                                Initializer *init, int i);
-static void struct_initializer2(CCCC *vm, Token **rest, Token *tok,
+static void struct_initializer2(VirtualMachine *vm, Token **rest, Token *tok,
                                 Initializer *init, Member *mem);
-static void initializer2(CCCC *vm, Token **rest, Token *tok, Initializer *init);
-static Initializer *initializer(CCCC *vm, Token **rest, Token *tok, Type *ty,
+static void initializer2(VirtualMachine *vm, Token **rest, Token *tok, Initializer *init);
+static Initializer *initializer(VirtualMachine *vm, Token **rest, Token *tok, Type *ty,
                                 Type **new_ty);
-static Node *lvar_initializer(CCCC *vm, Token **rest, Token *tok, Obj *var);
-static void gvar_initializer(CCCC *vm, Token **rest, Token *tok, Obj *var);
-static Node *create_vla_init(CCCC *vm, Initializer *init, Type *ty, Obj *var,
+static Node *lvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var);
+static void gvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var);
+static Node *create_vla_init(VirtualMachine *vm, Initializer *init, Type *ty, Obj *var,
                              Token *tok);
-static Node *compound_stmt(CCCC *vm, Token **rest, Token *tok, Token **close_tok);
-static Node *stmt(CCCC *vm, Token **rest, Token *tok);
-static Node *expr_stmt(CCCC *vm, Token **rest, Token *tok);
-static Node *expr(CCCC *vm, Token **rest, Token *tok);
-static int64_t eval(CCCC *vm, Node *node);
-static int64_t eval2(CCCC *vm, Node *node, char ***label);
-static int64_t eval_rval(CCCC *vm, Node *node, char ***label);
-static bool is_const_expr(CCCC *vm, Node *node);
+static Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok, Token **close_tok);
+static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok);
+static Node *expr_stmt(VirtualMachine *vm, Token **rest, Token *tok);
+static Node *expr(VirtualMachine *vm, Token **rest, Token *tok);
+static int64_t eval(VirtualMachine *vm, Node *node);
+static int64_t eval2(VirtualMachine *vm, Node *node, char ***label);
+static int64_t eval_rval(VirtualMachine *vm, Node *node, char ***label);
+static bool is_const_expr(VirtualMachine *vm, Node *node);
 static bool is_constexpr_object_type(Type *ty);
-static void validate_constexpr_object_type(CCCC *vm, Token *tok, Type *ty);
-static void validate_constexpr_initializer(CCCC *vm, Obj *var, Initializer *init,
+static void validate_constexpr_object_type(VirtualMachine *vm, Token *tok, Type *ty);
+static void validate_constexpr_initializer(VirtualMachine *vm, Obj *var, Initializer *init,
                                            Token *tok);
-static Token *static_assert_decl(CCCC *vm, Token *tok);
-static Node *assign(CCCC *vm, Token **rest, Token *tok);
-static Node *logor(CCCC *vm, Token **rest, Token *tok);
-static double eval_double(CCCC *vm, Node *node);
-static Node *conditional(CCCC *vm, Token **rest, Token *tok);
-static Node *logand(CCCC *vm, Token **rest, Token *tok);
-static Node *bitor(CCCC *vm, Token **rest, Token *tok);
-static Node *bitxor(CCCC *vm, Token **rest, Token *tok);
-static Node *bitand(CCCC *vm, Token **rest, Token *tok);
-static Node *equality(CCCC *vm, Token **rest, Token *tok);
-static Node *relational(CCCC *vm, Token **rest, Token *tok);
-static Node *shift(CCCC *vm, Token **rest, Token *tok);
-static Node *add(CCCC *vm, Token **rest, Token *tok);
-static Node *new_add(CCCC *vm, Node *lhs, Node *rhs, Token *tok);
-static Node *new_sub(CCCC *vm, Node *lhs, Node *rhs, Token *tok);
-static Node *mul(CCCC *vm, Token **rest, Token *tok);
-static Node *cast(CCCC *vm, Token **rest, Token *tok);
+static Token *static_assert_decl(VirtualMachine *vm, Token *tok);
+static Node *assign(VirtualMachine *vm, Token **rest, Token *tok);
+static Node *logor(VirtualMachine *vm, Token **rest, Token *tok);
+static double eval_double(VirtualMachine *vm, Node *node);
+static Node *conditional(VirtualMachine *vm, Token **rest, Token *tok);
+static Node *logand(VirtualMachine *vm, Token **rest, Token *tok);
+static Node *bitor(VirtualMachine *vm, Token **rest, Token *tok);
+static Node *bitxor(VirtualMachine *vm, Token **rest, Token *tok);
+static Node *bitand(VirtualMachine *vm, Token **rest, Token *tok);
+static Node *equality(VirtualMachine *vm, Token **rest, Token *tok);
+static Node *relational(VirtualMachine *vm, Token **rest, Token *tok);
+static Node *shift(VirtualMachine *vm, Token **rest, Token *tok);
+static Node *add(VirtualMachine *vm, Token **rest, Token *tok);
+static Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok);
+static Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok);
+static Node *mul(VirtualMachine *vm, Token **rest, Token *tok);
+static Node *cast(VirtualMachine *vm, Token **rest, Token *tok);
 static Member *get_struct_member(Type *ty, Token *tok);
-static Type *struct_decl(CCCC *vm, Token **rest, Token *tok);
-static Type *union_decl(CCCC *vm, Token **rest, Token *tok);
-static bool is_compound_literal_head(CCCC *vm, Token *tok);
-static Node *postfix(CCCC *vm, Token **rest, Token *tok);
-static Node *funcall(CCCC *vm, Token **rest, Token *tok, Node *node);
-static Node *unary(CCCC *vm, Token **rest, Token *tok);
-static Node *primary(CCCC *vm, Token **rest, Token *tok);
-static Token *parse_typedef(CCCC *vm, Token *tok, Type *basety, VarAttr *attr);
+static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok);
+static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok);
+static bool is_compound_literal_head(VirtualMachine *vm, Token *tok);
+static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok);
+static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *node);
+static Node *unary(VirtualMachine *vm, Token **rest, Token *tok);
+static Node *primary(VirtualMachine *vm, Token **rest, Token *tok);
+static Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr);
 static bool falls_through(Node *n);
-static void warn_switch_fallthrough(CCCC *vm, Node *sw);
-static bool is_function(CCCC *vm, Token *tok);
-static Token *function(CCCC *vm, Token *tok, Type *basety, VarAttr *attr);
-static Token *global_variable(CCCC *vm, Token *tok, Type *basety, VarAttr *attr);
+static void warn_switch_fallthrough(VirtualMachine *vm, Node *sw);
+static bool is_function(VirtualMachine *vm, Token *tok);
+static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr);
+static Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr);
 
 static int align_to(int n, int align) {
     return (int)(((long long)n + align - 1) / align * align);
 }
 
 // Return the TestFnRecord for this name if it is a negative test (has error_pat), else NULL.
-static TestFnRecord *find_neg_test_record(CCCC *vm, const char *name) {
+static TestFnRecord *find_neg_test_record(VirtualMachine *vm, const char *name) {
     if (!name) return NULL;
     for (TestFnRecord *r = vm->compiler.test_fns; r; r = r->next)
         if (r->error_pat && strcmp(r->name, name) == 0)
@@ -223,7 +223,7 @@ static int align_down(int n, int align) {
     return align_to(n - align + 1, align);
 }
 
-static void enter_scope(CCCC *vm) {
+static void enter_scope(VirtualMachine *vm) {
     Scope *sc = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
     memset(sc, 0, sizeof(Scope));
     sc->next = vm->compiler.scope;
@@ -242,7 +242,7 @@ static char *obj_display_name(Obj *var) {
     return var->display_name ? var->display_name : var->name;
 }
 
-static void warn_deprecated_use(CCCC *vm, Token *tok, char *name,
+static void warn_deprecated_use(VirtualMachine *vm, Token *tok, char *name,
                                 char *message) {
     if (message)
         warn_tok(vm, tok, CCCC_WARN_DEPRECATED, "'%s' is deprecated: %s", name,
@@ -251,14 +251,14 @@ static void warn_deprecated_use(CCCC *vm, Token *tok, char *name,
         warn_tok(vm, tok, CCCC_WARN_DEPRECATED, "'%s' is deprecated", name);
 }
 
-static Type *type_after_deprecated_use(CCCC *vm, Type *ty) {
+static Type *type_after_deprecated_use(VirtualMachine *vm, Type *ty) {
     Type *copy = copy_type(vm, ty);
     copy->is_deprecated = false;
     copy->deprecated_msg = NULL;
     return copy;
 }
 
-static void warn_unused_scope(CCCC *vm, Scope *sc) {
+static void warn_unused_scope(VirtualMachine *vm, Scope *sc) {
     for (VarScopeNode *node = sc->vars; node; node = node->next) {
         Obj *var = node->var;
         if (!var || !var->is_local_symbol || !var->tok || var->is_used ||
@@ -270,7 +270,7 @@ static void warn_unused_scope(CCCC *vm, Scope *sc) {
     }
 }
 
-static void leave_scope(CCCC *vm) {
+static void leave_scope(VirtualMachine *vm) {
     warn_unused_scope(vm, vm->compiler.scope);
     hashmap_deinit_borrowed(&vm->compiler.scope->var_map);
     hashmap_deinit_borrowed(&vm->compiler.scope->tag_map);
@@ -278,7 +278,7 @@ static void leave_scope(CCCC *vm) {
 }
 
 // Find a variable by name.
-static VarScope *find_var(CCCC *vm, Token *tok) {
+static VarScope *find_var(VirtualMachine *vm, Token *tok) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
         if (sc->var_map.buckets) {
             VarScopeNode *node = hashmap_get2(&sc->var_map, tok->loc, tok->len);
@@ -295,7 +295,7 @@ static VarScope *find_var(CCCC *vm, Token *tok) {
     return NULL;
 }
 
-static void warn_if_shadowing(CCCC *vm, Token *tok) {
+static void warn_if_shadowing(VirtualMachine *vm, Token *tok) {
     if (!tok || !vm->compiler.current_fn || !vm->compiler.scope)
         return;
 
@@ -320,7 +320,7 @@ static void warn_if_shadowing(CCCC *vm, Token *tok) {
 }
 
 // Find a macro function by name
-static MacroFn *find_macro_fn(CCCC *vm, Token *tok) {
+static MacroFn *find_macro_fn(VirtualMachine *vm, Token *tok) {
     for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next) {
         if (pm->is_macro_entry && strlen(pm->name) == tok->len &&
             strncmp(pm->name, tok->loc, tok->len) == 0) {
@@ -330,7 +330,7 @@ static MacroFn *find_macro_fn(CCCC *vm, Token *tok) {
     return NULL;
 }
 
-static MacroFn *find_attribute_macro(CCCC *vm, Token *tok) {
+static MacroFn *find_attribute_macro(VirtualMachine *vm, Token *tok) {
     if (vm->compiler.in_macro_mode)
         return NULL;
     if (!tok || tok->kind != TK_IDENT)
@@ -345,7 +345,7 @@ static MacroFn *find_attribute_macro(CCCC *vm, Token *tok) {
     return NULL;
 }
 
-static void append_custom_attr(CCCC *vm, CustomAttrUse **list, Token *name_tok,
+static void append_custom_attr(VirtualMachine *vm, CustomAttrUse **list, Token *name_tok,
                                Node *args, int arg_count) {
     if (!list || !name_tok)
         return;
@@ -367,7 +367,7 @@ static void append_custom_attr(CCCC *vm, CustomAttrUse **list, Token *name_tok,
     tail->next = use;
 }
 
-static Token *skip_paren_group(CCCC *vm, Token *tok) {
+static Token *skip_paren_group(VirtualMachine *vm, Token *tok) {
     tok = skip(vm, tok, "(");
     int depth = 1;
     while (tok && tok->kind != TK_EOF && depth > 0) {
@@ -392,7 +392,7 @@ static Token *skip_c23_attr_group(Token *tok) {
     return tok;
 }
 
-static bool is_decl_start(CCCC *vm, Token *tok) {
+static bool is_decl_start(VirtualMachine *vm, Token *tok) {
     for (;;) {
         if (equal(tok, "__attribute__")) {
             Token *p = tok->next;
@@ -414,7 +414,7 @@ static bool is_decl_start(CCCC *vm, Token *tok) {
     }
 }
 
-static Token *parse_custom_attr_args(CCCC *vm, Token *tok, Node **args,
+static Token *parse_custom_attr_args(VirtualMachine *vm, Token *tok, Node **args,
                                      int *arg_count) {
     *args = NULL;
     *arg_count = 0;
@@ -438,7 +438,7 @@ static Token *parse_custom_attr_args(CCCC *vm, Token *tok, Node **args,
     return tok->next;
 }
 
-static void run_custom_attrs(CCCC *vm, CustomAttrUse *attrs,
+static void run_custom_attrs(VirtualMachine *vm, CustomAttrUse *attrs,
                              AttrTargetKind kind, char *name, Type *ty,
                              Obj *obj, Token *tok) {
     for (CustomAttrUse *use = attrs; use; use = use->next) {
@@ -471,7 +471,7 @@ static bool has_custom_attrs(Type *ty, VarAttr *attr) {
     return (ty && ty->custom_attrs) || (attr && attr->custom_attrs);
 }
 
-static void run_decl_custom_attrs(CCCC *vm, Type *ty, VarAttr *attr,
+static void run_decl_custom_attrs(VirtualMachine *vm, Type *ty, VarAttr *attr,
                                   AttrTargetKind kind, char *name,
                                   Type *target_ty, Obj *obj, Token *tok) {
     if (attr && attr->custom_attrs)
@@ -495,7 +495,7 @@ static void append_custom_attr_list(CustomAttrUse **dst, CustomAttrUse *src) {
     tail->next = src;
 }
 
-static Type *find_tag(CCCC *vm, Token *tok) {
+static Type *find_tag(VirtualMachine *vm, Token *tok) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
         if (sc->tag_map.buckets) {
             TagScopeNode *node = hashmap_get2(&sc->tag_map, tok->loc, tok->len);
@@ -512,7 +512,7 @@ static Type *find_tag(CCCC *vm, Token *tok) {
     return NULL;
 }
 
-static Type *find_tag_in_current_scope(CCCC *vm, Token *tok) {
+static Type *find_tag_in_current_scope(VirtualMachine *vm, Token *tok) {
     Scope *sc = vm->compiler.scope;
     if (!sc)
         return NULL;
@@ -527,7 +527,7 @@ static Type *find_tag_in_current_scope(CCCC *vm, Token *tok) {
     return NULL;
 }
 
-static VarScope *find_var_in_current_scope(CCCC *vm, char *name, int name_len) {
+static VarScope *find_var_in_current_scope(VirtualMachine *vm, char *name, int name_len) {
     Scope *sc = vm->compiler.scope;
     if (!sc)
         return NULL;
@@ -542,7 +542,7 @@ static VarScope *find_var_in_current_scope(CCCC *vm, char *name, int name_len) {
     return NULL;
 }
 
-static Node *new_node(CCCC *vm, NodeKind kind, Token *tok) {
+static Node *new_node(VirtualMachine *vm, NodeKind kind, Token *tok) {
     Node *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     memset(node, 0, sizeof(Node));
     node->kind = kind;
@@ -550,7 +550,7 @@ static Node *new_node(CCCC *vm, NodeKind kind, Token *tok) {
     return node;
 }
 
-static Node *new_binary(CCCC *vm, NodeKind kind, Node *lhs, Node *rhs,
+static Node *new_binary(VirtualMachine *vm, NodeKind kind, Node *lhs, Node *rhs,
                         Token *tok) {
     Node *node = new_node(vm, kind, tok);
     node->lhs = lhs;
@@ -558,34 +558,34 @@ static Node *new_binary(CCCC *vm, NodeKind kind, Node *lhs, Node *rhs,
     return node;
 }
 
-static Node *new_unary(CCCC *vm, NodeKind kind, Node *expr, Token *tok) {
+static Node *new_unary(VirtualMachine *vm, NodeKind kind, Node *expr, Token *tok) {
     Node *node = new_node(vm, kind, tok);
     node->lhs = expr;
     return node;
 }
 
-static Node *new_num(CCCC *vm, int64_t val, Token *tok) {
+static Node *new_num(VirtualMachine *vm, int64_t val, Token *tok) {
     Node *node = new_node(vm, ND_NUM, tok);
     node->val = val;
     node->ty = ty_int;
     return node;
 }
 
-static Node *new_long(CCCC *vm, int64_t val, Token *tok) {
+static Node *new_long(VirtualMachine *vm, int64_t val, Token *tok) {
     Node *node = new_node(vm, ND_NUM, tok);
     node->val = val;
     node->ty = ty_long;
     return node;
 }
 
-static Node *new_ulong(CCCC *vm, long val, Token *tok) {
+static Node *new_ulong(VirtualMachine *vm, long val, Token *tok) {
     Node *node = new_node(vm, ND_NUM, tok);
     node->val = val;
     node->ty = ty_ulong;
     return node;
 }
 
-static Node *new_complex_node(CCCC *vm, Node *real, Node *imag, Type *ty,
+static Node *new_complex_node(VirtualMachine *vm, Node *real, Node *imag, Type *ty,
                               Token *tok) {
     Node *node = new_node(vm, ND_COMPLEX, tok);
     node->lhs = real;
@@ -594,19 +594,19 @@ static Node *new_complex_node(CCCC *vm, Node *real, Node *imag, Type *ty,
     return node;
 }
 
-static Node *new_var_node(CCCC *vm, Obj *var, Token *tok) {
+static Node *new_var_node(VirtualMachine *vm, Obj *var, Token *tok) {
     Node *node = new_node(vm, ND_VAR, tok);
     node->var = var;
     return node;
 }
 
-static Node *new_vla_ptr(CCCC *vm, Obj *var, Token *tok) {
+static Node *new_vla_ptr(VirtualMachine *vm, Obj *var, Token *tok) {
     Node *node = new_node(vm, ND_VLA_PTR, tok);
     node->var = var;
     return node;
 }
 
-Node *new_cast(CCCC *vm, Node *expr, Type *ty) {
+Node *new_cast(VirtualMachine *vm, Node *expr, Type *ty) {
     add_type(vm, expr);
     Node *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     memset(node, 0, sizeof(Node));
@@ -617,7 +617,7 @@ Node *new_cast(CCCC *vm, Node *expr, Type *ty) {
     return node;
 }
 
-static VarScope *push_scope(CCCC *vm, char *name, int name_len) {
+static VarScope *push_scope(VirtualMachine *vm, char *name, int name_len) {
     VarScopeNode *node =
         arena_alloc(&vm->compiler.parser_arena, sizeof(VarScopeNode));
     memset(node, 0, sizeof(VarScopeNode));
@@ -629,7 +629,7 @@ static VarScope *push_scope(CCCC *vm, char *name, int name_len) {
     return (VarScope *)node;
 }
 
-static void record_type_name(CCCC *vm, Type *ty, char *name, int name_len,
+static void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_len,
                              bool is_tag) {
     if (!ty || !name || name_len <= 0)
         return;
@@ -646,7 +646,7 @@ static void record_type_name(CCCC *vm, Type *ty, char *name, int name_len,
     vm->compiler.type_names = rec;
 }
 
-static Initializer *new_initializer(CCCC *vm, Type *ty, bool is_flexible) {
+static Initializer *new_initializer(VirtualMachine *vm, Type *ty, bool is_flexible) {
     Initializer *init =
         arena_alloc(&vm->compiler.parser_arena, sizeof(Initializer));
     memset(init, 0, sizeof(Initializer));
@@ -701,7 +701,7 @@ static Initializer *new_initializer(CCCC *vm, Type *ty, bool is_flexible) {
     return init;
 }
 
-static Obj *new_var(CCCC *vm, char *name, int name_len, Type *ty) {
+static Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     Obj *var = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
     memset(var, 0, sizeof(Obj));
     var->name = name;
@@ -720,7 +720,7 @@ static Obj *new_var(CCCC *vm, char *name, int name_len, Type *ty) {
     return var;
 }
 
-static Obj *new_lvar(CCCC *vm, char *name, int name_len, Type *ty) {
+static Obj *new_lvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     warn_if_shadowing(vm, ty->name);
     Obj *var = new_var(vm, name, name_len, ty);
     var->is_local = true;
@@ -730,7 +730,7 @@ static Obj *new_lvar(CCCC *vm, char *name, int name_len, Type *ty) {
     return var;
 }
 
-static Obj *new_gvar(CCCC *vm, char *name, int name_len, Type *ty) {
+static Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     Obj *var = new_var(vm, name, name_len, ty);
     var->next = vm->compiler.globals;
     var->is_static = true;
@@ -739,7 +739,7 @@ static Obj *new_gvar(CCCC *vm, char *name, int name_len, Type *ty) {
     return var;
 }
 
-static Obj *new_implicit_function(CCCC *vm, Token *tok) {
+static Obj *new_implicit_function(VirtualMachine *vm, Token *tok) {
     Type *ty = func_type(vm, ty_int);
     ty->is_variadic = true;
 
@@ -756,22 +756,22 @@ static Obj *new_implicit_function(CCCC *vm, Token *tok) {
     return fn;
 }
 
-static char *new_unique_name(CCCC *vm) {
+static char *new_unique_name(VirtualMachine *vm) {
     return arena_format(vm, ".L..%d", vm->compiler.unique_name_counter++);
 }
 
-static Obj *new_anon_gvar(CCCC *vm, Type *ty) {
+static Obj *new_anon_gvar(VirtualMachine *vm, Type *ty) {
     char *name = new_unique_name(vm);
     return new_gvar(vm, name, strlen(name), ty);
 }
 
-static Obj *new_string_literal(CCCC *vm, char *p, Type *ty) {
+static Obj *new_string_literal(VirtualMachine *vm, char *p, Type *ty) {
     Obj *var = new_anon_gvar(vm, ty);
     var->init_data = p;
     return var;
 }
 
-static char *get_ident(CCCC *vm, Token *tok) {
+static char *get_ident(VirtualMachine *vm, Token *tok) {
     if (tok->kind != TK_IDENT)
         error_tok(vm, tok, "expected an identifier, found '%.*s'", tok->len,
                   tok->loc);
@@ -782,7 +782,7 @@ static char *get_ident(CCCC *vm, Token *tok) {
 }
 
 // Error recovery helper: Skip to end of statement (semicolon or closing brace)
-static Token *skip_to_stmt_end(CCCC *vm, Token *tok) {
+static Token *skip_to_stmt_end(VirtualMachine *vm, Token *tok) {
     int paren_depth = 0, brace_depth = 0;
 
     while (tok->kind != TK_EOF) {
@@ -810,7 +810,7 @@ static Token *skip_to_stmt_end(CCCC *vm, Token *tok) {
 }
 
 // Error recovery helper: Skip to next declarator boundary
-static Token *skip_to_decl_boundary(CCCC *vm, Token *tok) {
+static Token *skip_to_decl_boundary(VirtualMachine *vm, Token *tok) {
     int paren_depth = 0;
 
     while (tok->kind != TK_EOF) {
@@ -833,7 +833,7 @@ static Token *skip_to_decl_boundary(CCCC *vm, Token *tok) {
     return tok;
 }
 
-static Type *find_typedef(CCCC *vm, Token *tok) {
+static Type *find_typedef(VirtualMachine *vm, Token *tok) {
     if (tok->kind == TK_IDENT) {
         VarScope *sc = find_var(vm, tok);
         if (sc)
@@ -842,7 +842,7 @@ static Type *find_typedef(CCCC *vm, Token *tok) {
     return NULL;
 }
 
-static void push_tag_scope(CCCC *vm, Token *tok, Type *ty) {
+static void push_tag_scope(VirtualMachine *vm, Token *tok, Type *ty) {
     TagScopeNode *node =
         arena_alloc(&vm->compiler.parser_arena, sizeof(TagScopeNode));
     node->name = tok->loc;
@@ -995,7 +995,7 @@ static DeclKw declspec_kw(Token *tok) {
 // while keeping the "current" type object that the typenames up
 // until that point represent. When we reach a non-typename token,
 // we returns the current type object.
-static Type *declspec(CCCC *vm, Token **rest, Token *tok, VarAttr *attr) {
+static Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
     Token *start = tok;
 
     // We use a single integer as counters for all typenames.
@@ -1299,7 +1299,7 @@ declspec_done:
 
 // func-params = ("void" | param ("," param)* ("," "...")?)? ")"
 // param       = declspec declarator
-static Type *func_params(CCCC *vm, Token **rest, Token *tok, Type *ty) {
+static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     if (equal(tok, "void") && equal(tok->next, ")")) {
         *rest = tok->next->next;
         return func_type(vm, ty);
@@ -1401,7 +1401,7 @@ static Type *func_params(CCCC *vm, Token **rest, Token *tok, Type *ty) {
 }
 
 // array-dimensions = ("static" | "restrict" | "const" | "volatile" | "_Atomic")* const-expr? "]" type-suffix
-static Type *array_dimensions(CCCC *vm, Token **rest, Token *tok, Type *ty) {
+static Type *array_dimensions(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     bool saw_static   = false;
     bool saw_const    = false;
     bool saw_volatile = false;
@@ -1446,7 +1446,7 @@ static Type *array_dimensions(CCCC *vm, Token **rest, Token *tok, Type *ty) {
 // type-suffix = "(" func-params
 //             | "[" array-dimensions
 //             | ε
-static Type *type_suffix(CCCC *vm, Token **rest, Token *tok, Type *ty) {
+static Type *type_suffix(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     if (equal(tok, "("))
         return func_params(vm, rest, tok->next, ty);
 
@@ -1458,7 +1458,7 @@ static Type *type_suffix(CCCC *vm, Token **rest, Token *tok, Type *ty) {
 }
 
 // pointers = ("*" ("const" | "volatile" | "restrict")*)*
-static Type *pointers(CCCC *vm, Token **rest, Token *tok, Type *ty) {
+static Type *pointers(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     while (consume(vm, &tok, tok, "*")) {
         ty = pointer_to(vm, ty);
         // Handle const/volatile qualification on the pointer itself
@@ -1486,7 +1486,7 @@ static Type *pointers(CCCC *vm, Token **rest, Token *tok, Type *ty) {
 
 // declarator = attribute? pointers ("(" ident ")" | "(" declarator ")" | ident)
 // type-suffix attribute?
-static Type *declarator(CCCC *vm, Token **rest, Token *tok, Type *ty) {
+static Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     // Handle __attribute__ before declarator
     VarAttr prefix_attr = {};
     tok = attribute_list(vm, tok, NULL, &prefix_attr);
@@ -1572,7 +1572,7 @@ static Type *declarator(CCCC *vm, Token **rest, Token *tok, Type *ty) {
 
 // abstract-declarator = attribute? pointers ("(" abstract-declarator ")")?
 // type-suffix attribute?
-static Type *abstract_declarator(CCCC *vm, Token **rest, Token *tok, Type *ty) {
+static Type *abstract_declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     // Handle __attribute__ before abstract declarator
     VarAttr prefix_attr = {};
     tok = attribute_list(vm, tok, NULL, &prefix_attr);
@@ -1606,7 +1606,7 @@ static Type *abstract_declarator(CCCC *vm, Token **rest, Token *tok, Type *ty) {
 }
 
 // type-name = declspec abstract-declarator
-static Type *typename(CCCC *vm, Token **rest, Token *tok) {
+static Type *typename(VirtualMachine *vm, Token **rest, Token *tok) {
     Type *ty = declspec(vm, &tok, tok, NULL);
     return abstract_declarator(vm, rest, tok, ty);
 }
@@ -1759,7 +1759,7 @@ static bool compatible_tag_redeclaration(Type *old, Type *new) {
     return false;
 }
 
-static Type *install_tag_definition(CCCC *vm, Token *tag, Type *ty,
+static Type *install_tag_definition(VirtualMachine *vm, Token *tag, Type *ty,
                                     char *kind_name) {
     if (!tag)
         return ty;
@@ -1798,7 +1798,7 @@ static Type *install_tag_definition(CCCC *vm, Token *tag, Type *ty,
 //
 // C23: optional ": integer-type" specifies the underlying type.
 // C23: "enum tag : underlying-type ;" is a forward declaration (complete type).
-static Type *enum_specifier(CCCC *vm, Token **rest, Token *tok) {
+static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
     Type *ty = enum_type(vm);
 
     // Read a tag.
@@ -1912,7 +1912,7 @@ static Type *enum_specifier(CCCC *vm, Token **rest, Token *tok) {
 }
 
 // typeof-specifier = "(" (expr | typename) ")"
-static Type *typeof_specifier(CCCC *vm, Token **rest, Token *tok) {
+static Type *typeof_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
     tok = skip(vm, tok, "(");
 
     Type *ty;
@@ -1928,7 +1928,7 @@ static Type *typeof_specifier(CCCC *vm, Token **rest, Token *tok) {
 }
 
 // typeof_unqual - C23 version of typeof that removes qualifiers
-static Type *typeof_unqual_specifier(CCCC *vm, Token **rest, Token *tok) {
+static Type *typeof_unqual_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
     Type *ty = typeof_specifier(vm, rest, tok);
     // Copy the type to avoid mutating the original
     ty = copy_type(vm, ty);
@@ -1941,7 +1941,7 @@ static Type *typeof_unqual_specifier(CCCC *vm, Token **rest, Token *tok) {
 // C23 auto type inference: given an initializer expression type, return the
 // deduced type (array-to-pointer decay, function-to-pointer decay already done
 // by add_type for ND_VAR, then strip top-level qualifiers like typeof_unqual).
-static Type *auto_deduced_type(CCCC *vm, Type *ty) {
+static Type *auto_deduced_type(VirtualMachine *vm, Type *ty) {
     if (ty->kind == TY_ARRAY)
         ty = pointer_to(vm, ty->base);
     if (ty->is_const || ty->is_volatile || ty->is_restrict) {
@@ -1981,7 +1981,7 @@ static int count_ptr_depth(Type *ty) {
 static int get_vm_size(Type *ty) { return ty->size; }
 
 // Generate code for computing a VLA size.
-static Node *compute_vla_size(CCCC *vm, Type *ty, Token *tok) {
+static Node *compute_vla_size(VirtualMachine *vm, Type *ty, Token *tok) {
     Node *node = new_node(vm, ND_NULL_EXPR, tok);
     if (ty->base)
         node = new_binary(vm, ND_COMMA, node,
@@ -2004,7 +2004,7 @@ static Node *compute_vla_size(CCCC *vm, Type *ty, Token *tok) {
     return new_binary(vm, ND_COMMA, node, expr, tok);
 }
 
-static Node *new_alloca(CCCC *vm, Node *sz) {
+static Node *new_alloca(VirtualMachine *vm, Node *sz) {
     Node *node = new_unary(
         vm, ND_FUNCALL, new_var_node(vm, vm->compiler.builtin_alloca, sz->tok),
         sz->tok);
@@ -2017,7 +2017,7 @@ static Node *new_alloca(CCCC *vm, Node *sz) {
 
 // declaration = declspec (declarator ("=" expr)? ("," declarator ("="
 // expr)?)*)? ";"
-static Node *declaration(CCCC *vm, Token **rest, Token *tok, Type *basety,
+static Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                          VarAttr *attr) {
     Node head = {};
     Node *cur = &head;
@@ -2228,7 +2228,7 @@ static Node *declaration(CCCC *vm, Token **rest, Token *tok, Type *basety,
     return node;
 }
 
-static Token *skip_excess_element(CCCC *vm, Token *tok) {
+static Token *skip_excess_element(VirtualMachine *vm, Token *tok) {
     if (equal(tok, "{")) {
         tok = skip_excess_element(vm, tok->next);
         return skip(vm, tok, "}");
@@ -2239,7 +2239,7 @@ static Token *skip_excess_element(CCCC *vm, Token *tok) {
 }
 
 // string-initializer = string-literal
-static void string_initializer(CCCC *vm, Token **rest, Token *tok,
+static void string_initializer(VirtualMachine *vm, Token **rest, Token *tok,
                                Initializer *init) {
     if (init->is_flexible)
         *init = *new_initializer(
@@ -2298,7 +2298,7 @@ static void string_initializer(CCCC *vm, Token **rest, Token *tok,
 //   struct { int a, b, c; } x = { .c=5 };
 //
 // The above initializer sets x.c to 5.
-static void array_designator(CCCC *vm, Token **rest, Token *tok, Type *ty,
+static void array_designator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty,
                              int *begin, int *end) {
     *begin = const_expr(vm, &tok, tok->next);
     if (*begin >= ty->array_len)
@@ -2319,7 +2319,7 @@ static void array_designator(CCCC *vm, Token **rest, Token *tok, Type *ty,
 }
 
 // struct-designator = "." ident
-static Member *struct_designator(CCCC *vm, Token **rest, Token *tok, Type *ty) {
+static Member *struct_designator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     Token *start = tok;
     tok = skip(vm, tok, ".");
     if (tok->kind != TK_IDENT)
@@ -2348,7 +2348,7 @@ static Member *struct_designator(CCCC *vm, Token **rest, Token *tok, Type *ty) {
 }
 
 // designation = ("[" const-expr "]" | "." ident)* "="? initializer
-static void designation(CCCC *vm, Token **rest, Token *tok, Initializer *init) {
+static void designation(VirtualMachine *vm, Token **rest, Token *tok, Initializer *init) {
     if (equal(tok, "[")) {
         if (vm->compiler.c_std < CCCC_STD_C99)
             warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
@@ -2406,7 +2406,7 @@ static void designation(CCCC *vm, Token **rest, Token *tok, Initializer *init) {
 // An array length can be omitted if an array has an initializer
 // (e.g. `int x[] = {1,2,3}`). If it's omitted, count the number
 // of initializer elements.
-static int count_array_init_elements(CCCC *vm, Token *tok, Type *ty) {
+static int count_array_init_elements(VirtualMachine *vm, Token *tok, Type *ty) {
     bool first = true;
     Initializer *dummy = new_initializer(vm, ty->base, true);
 
@@ -2434,7 +2434,7 @@ static int count_array_init_elements(CCCC *vm, Token *tok, Type *ty) {
 }
 
 // array-initializer1 = "{" initializer ("," initializer)* ","? "}"
-static void array_initializer1(CCCC *vm, Token **rest, Token *tok,
+static void array_initializer1(VirtualMachine *vm, Token **rest, Token *tok,
                                Initializer *init) {
     tok = skip(vm, tok, "{");
 
@@ -2495,7 +2495,7 @@ static void array_initializer1(CCCC *vm, Token **rest, Token *tok,
 }
 
 // array-initializer2 = initializer ("," initializer)*
-static void array_initializer2(CCCC *vm, Token **rest, Token *tok,
+static void array_initializer2(VirtualMachine *vm, Token **rest, Token *tok,
                                Initializer *init, int i) {
     if (init->is_flexible) {
         int len = count_array_init_elements(vm, tok, init->ty);
@@ -2533,7 +2533,7 @@ static void array_initializer2(CCCC *vm, Token **rest, Token *tok,
 }
 
 // struct-initializer1 = "{" initializer ("," initializer)* ","? "}"
-static void struct_initializer1(CCCC *vm, Token **rest, Token *tok,
+static void struct_initializer1(VirtualMachine *vm, Token **rest, Token *tok,
                                 Initializer *init) {
     tok = skip(vm, tok, "{");
 
@@ -2565,7 +2565,7 @@ static void struct_initializer1(CCCC *vm, Token **rest, Token *tok,
 }
 
 // struct-initializer2 = initializer ("," initializer)*
-static void struct_initializer2(CCCC *vm, Token **rest, Token *tok,
+static void struct_initializer2(VirtualMachine *vm, Token **rest, Token *tok,
                                 Initializer *init, Member *mem) {
     bool first = true;
 
@@ -2586,7 +2586,7 @@ static void struct_initializer2(CCCC *vm, Token **rest, Token *tok,
     *rest = tok;
 }
 
-static void union_initializer(CCCC *vm, Token **rest, Token *tok,
+static void union_initializer(VirtualMachine *vm, Token **rest, Token *tok,
                               Initializer *init) {
     // Unlike structs, union initializers take only one initializer,
     // and that initializes the first union member by default.
@@ -2613,7 +2613,7 @@ static void union_initializer(CCCC *vm, Token **rest, Token *tok,
 // initializer = string-initializer | array-initializer
 //             | struct-initializer | union-initializer
 //             | assign
-static void initializer2(CCCC *vm, Token **rest, Token *tok, Initializer *init) {
+static void initializer2(VirtualMachine *vm, Token **rest, Token *tok, Initializer *init) {
     if (init->ty->kind == TY_ARRAY && tok->kind == TK_STR) {
         string_initializer(vm, rest, tok, init);
         return;
@@ -2688,7 +2688,7 @@ static void initializer2(CCCC *vm, Token **rest, Token *tok, Initializer *init) 
     init->expr = assign(vm, rest, tok);
 }
 
-static Type *copy_struct_type(CCCC *vm, Type *ty) {
+static Type *copy_struct_type(VirtualMachine *vm, Type *ty) {
     ty = copy_type(vm, ty);
 
     Member head = {};
@@ -2704,7 +2704,7 @@ static Type *copy_struct_type(CCCC *vm, Type *ty) {
     return ty;
 }
 
-static Initializer *initializer(CCCC *vm, Token **rest, Token *tok, Type *ty,
+static Initializer *initializer(VirtualMachine *vm, Token **rest, Token *tok, Type *ty,
                                 Type **new_ty) {
     Initializer *init = new_initializer(vm, ty, true);
     initializer2(vm, rest, tok, init);
@@ -2744,12 +2744,12 @@ static bool is_constexpr_object_type(Type *ty) {
     return true;
 }
 
-static void validate_constexpr_object_type(CCCC *vm, Token *tok, Type *ty) {
+static void validate_constexpr_object_type(VirtualMachine *vm, Token *tok, Type *ty) {
     if (!is_constexpr_object_type(ty))
         error_tok(vm, tok, "constexpr object has unsupported type or qualifiers");
 }
 
-static bool initializer_is_constexpr(CCCC *vm, Initializer *init, Type *ty) {
+static bool initializer_is_constexpr(VirtualMachine *vm, Initializer *init, Type *ty) {
     if (!init)
         return true;
     if (init->expr)
@@ -2773,7 +2773,7 @@ static bool initializer_is_constexpr(CCCC *vm, Initializer *init, Type *ty) {
     return true;
 }
 
-static void validate_constexpr_initializer(CCCC *vm, Obj *var, Initializer *init,
+static void validate_constexpr_initializer(VirtualMachine *vm, Obj *var, Initializer *init,
                                            Token *tok) {
     validate_constexpr_object_type(vm, var->tok ? var->tok : tok, var->ty);
     if (!initializer_is_constexpr(vm, init, var->ty))
@@ -2783,7 +2783,7 @@ static void validate_constexpr_initializer(CCCC *vm, Obj *var, Initializer *init
         var->init_expr = init->expr;
 }
 
-static Node *init_desg_expr(CCCC *vm, InitDesg *desg, Token *tok) {
+static Node *init_desg_expr(VirtualMachine *vm, InitDesg *desg, Token *tok) {
     if (desg->var)
         return new_var_node(vm, desg->var, tok);
 
@@ -2799,7 +2799,7 @@ static Node *init_desg_expr(CCCC *vm, InitDesg *desg, Token *tok) {
     return new_unary(vm, ND_DEREF, new_add(vm, lhs, rhs, tok), tok);
 }
 
-static Node *create_lvar_init(CCCC *vm, Initializer *init, Type *ty,
+static Node *create_lvar_init(VirtualMachine *vm, Initializer *init, Type *ty,
                               InitDesg *desg, Token *tok) {
     if (ty->kind == TY_ARRAY) {
         Node *node = new_node(vm, ND_NULL_EXPR, tok);
@@ -2857,7 +2857,7 @@ static Member *member_at_index(Type *ty, int idx) {
     return NULL;
 }
 
-static Node *init_lhs_at(CCCC *vm, Obj *var, Type *ty, int idx, Token *tok) {
+static Node *init_lhs_at(VirtualMachine *vm, Obj *var, Type *ty, int idx, Token *tok) {
     InitDesg base_desg = {NULL, 0, NULL, var};
     if (ty->kind == TY_STRUCT) {
         Member *mem = member_at_index(ty, idx);
@@ -2875,7 +2875,7 @@ static Node *init_lhs_at(CCCC *vm, Obj *var, Type *ty, int idx, Token *tok) {
     return NULL;
 }
 
-static Node *append_init_assignment(CCCC *vm, Node *result, Obj *var, Type *ty,
+static Node *append_init_assignment(VirtualMachine *vm, Node *result, Obj *var, Type *ty,
                                     int idx, Node *rhs, Token *tok) {
     Node *lhs = init_lhs_at(vm, var, ty, idx, tok);
     if (!lhs)
@@ -2888,7 +2888,7 @@ static Node *append_init_assignment(CCCC *vm, Node *result, Obj *var, Type *ty,
 // Called from reflection.c quote_substitute to expand ND_INIT_SPLICE nodes.
 // Builds positional ND_ASSIGN chains for a splice chain plus any ordinary
 // initializer tail that followed the $@k placeholder in the source template.
-Node *node_expand_init_splice(CCCC *vm, Node *splice, Node *chain) {
+Node *node_expand_init_splice(VirtualMachine *vm, Node *splice, Node *chain) {
     Obj *var = splice->var;
     Type *ty = var->ty;
     Token *tok = splice->tok;
@@ -2947,7 +2947,7 @@ Node *node_expand_init_splice(CCCC *vm, Node *splice, Node *chain) {
 // Unlike create_lvar_init which uses ty->array_len, VLAs have
 // runtime-determined size We generate assignments based on the number of
 // initializer elements (known at parse time)
-static Node *create_vla_init(CCCC *vm, Initializer *init, Type *ty, Obj *var,
+static Node *create_vla_init(VirtualMachine *vm, Initializer *init, Type *ty, Obj *var,
                              Token *tok) {
     if (!init || ty->kind != TY_VLA)
         return NULL;
@@ -3003,7 +3003,7 @@ static Node *append_init_tail(Node *tail, Node *expr) {
     return tail;
 }
 
-static bool build_deferred_init_splice(CCCC *vm, Initializer *init, Obj *var,
+static bool build_deferred_init_splice(VirtualMachine *vm, Initializer *init, Obj *var,
                                        bool inferred_array, Token *tok,
                                        Node **out) {
     Type *ty = var->ty;
@@ -3065,7 +3065,7 @@ static bool build_deferred_init_splice(CCCC *vm, Initializer *init, Obj *var,
     return true;
 }
 
-static Node *lvar_initializer(CCCC *vm, Token **rest, Token *tok, Obj *var) {
+static Node *lvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var) {
     bool inferred_array = var->ty->kind == TY_ARRAY && var->ty->size < 0;
     Initializer *init = initializer(vm, rest, tok, var->ty, &var->ty);
 
@@ -3117,7 +3117,7 @@ static void write_buf(char *buf, uint64_t val, int sz) {
         unreachable();
 }
 
-static Relocation *write_gvar_data(CCCC *vm, Relocation *cur, Initializer *init,
+static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur, Initializer *init,
                                    Type *ty, char *buf, int offset) {
     if (ty->kind == TY_ARRAY) {
         int sz = ty->base->size;
@@ -3191,7 +3191,7 @@ static Relocation *write_gvar_data(CCCC *vm, Relocation *cur, Initializer *init,
 // embedded to .data section. This function serializes Initializer
 // objects to a flat byte array. It is a compile error if an
 // initializer list contains a non-constant expression.
-static void gvar_initializer(CCCC *vm, Token **rest, Token *tok, Obj *var) {
+static void gvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var) {
     Initializer *init = initializer(vm, rest, tok, var->ty, &var->ty);
 
     // For constexpr variables, save the initializer expression for compile-time
@@ -3208,7 +3208,7 @@ static void gvar_initializer(CCCC *vm, Token **rest, Token *tok, Obj *var) {
 }
 
 // Returns true if a given token represents a type.
-static bool is_typename(CCCC *vm, Token *tok) {
+static bool is_typename(VirtualMachine *vm, Token *tok) {
     static HashMap map;
 
     if (map.capacity == 0) {
@@ -3240,7 +3240,7 @@ static bool is_typename(CCCC *vm, Token *tok) {
 }
 
 // asm-stmt = "asm" ("volatile" | "inline")* "(" string-literal ")"
-static Node *asm_stmt(CCCC *vm, Token **rest, Token *tok) {
+static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = new_node(vm, ND_ASM, tok);
     tok = tok->next;
 
@@ -3271,13 +3271,13 @@ static Node *asm_stmt(CCCC *vm, Token **rest, Token *tok) {
 //      | ident ":" stmt
 //      | "{" compound-stmt
 //      | expr-stmt
-static Node *stmt(CCCC *vm, Token **rest, Token *tok);
+static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok);
 
 // C23 §6.8.1: a label may precede a declaration at block scope.
 // Pre-C23 bare declarations after labels are a hard error.
 // Limitation: only handles object declarations; typedef/function-def after a
 // label are not routed here.
-static Node *stmt_or_decl(CCCC *vm, Token **rest, Token *tok) {
+static Node *stmt_or_decl(VirtualMachine *vm, Token **rest, Token *tok) {
     if (is_decl_start(vm, tok) && !equal(tok->next, ":")) {
         if (vm->compiler.c_std < CCCC_STD_C23)
             error_tok(vm, tok,
@@ -3290,7 +3290,7 @@ static Node *stmt_or_decl(CCCC *vm, Token **rest, Token *tok) {
     return stmt(vm, rest, tok);
 }
 
-static Token *static_assert_decl(CCCC *vm, Token *tok) {
+static Token *static_assert_decl(VirtualMachine *vm, Token *tok) {
     bool c23_static_assert = equal(tok, "static_assert");
     tok = skip(vm, tok->next, "(");
     long long val = const_expr(vm, &tok, tok);
@@ -3312,7 +3312,7 @@ static Token *static_assert_decl(CCCC *vm, Token *tok) {
     return skip(vm, tok, ";");
 }
 
-static Node *stmt(CCCC *vm, Token **rest, Token *tok) {
+static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
         *rest = static_assert_decl(vm, tok);
         return new_node(vm, ND_BLOCK, tok);
@@ -3613,7 +3613,7 @@ static Node *stmt(CCCC *vm, Token **rest, Token *tok) {
 }
 
 // compound-stmt = (typedef | declaration | stmt)* "}"
-static Node *compound_stmt(CCCC *vm, Token **rest, Token *tok, Token **close_tok) {
+static Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok, Token **close_tok) {
     Node *node = new_node(vm, ND_BLOCK, tok);
     Node head = {};
     Node *cur = &head;
@@ -3672,7 +3672,7 @@ static Node *compound_stmt(CCCC *vm, Token **rest, Token *tok, Token **close_tok
 }
 
 // expr-stmt = expr? ";"
-static Node *expr_stmt(CCCC *vm, Token **rest, Token *tok) {
+static Node *expr_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, ";")) {
         *rest = tok->next;
         return new_node(vm, ND_BLOCK, tok);
@@ -3737,7 +3737,7 @@ static bool falls_through(Node *n) {
     }
 }
 
-static void warn_switch_fallthrough(CCCC *vm, Node *sw) {
+static void warn_switch_fallthrough(VirtualMachine *vm, Node *sw) {
     if (!sw || sw->kind != ND_SWITCH || !sw->then) return;
     if (sw->then->kind != ND_BLOCK || !sw->then->body) return;
 
@@ -3812,7 +3812,7 @@ static void warn_switch_fallthrough(CCCC *vm, Node *sw) {
 }
 
 // expr = assign ("," expr)?
-static Node *expr(CCCC *vm, Token **rest, Token *tok) {
+static Node *expr(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = assign(vm, &tok, tok);
 
     if (equal(tok, ","))
@@ -3822,7 +3822,7 @@ static Node *expr(CCCC *vm, Token **rest, Token *tok) {
     return node;
 }
 
-static int64_t eval(CCCC *vm, Node *node) { return eval2(vm, node, NULL); }
+static int64_t eval(VirtualMachine *vm, Node *node) { return eval2(vm, node, NULL); }
 
 static Initializer *constexpr_init_for_node(Node *node) {
     if (!node)
@@ -3856,7 +3856,7 @@ static Node *constexpr_expr_for_node(Node *node) {
 // is a pointer to a global variable and n is a postiive/negative
 // number. The latter form is accepted only as an initialization
 // expression for a global variable.
-static int64_t eval2(CCCC *vm, Node *node, char ***label) {
+static int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
     add_type(vm, node);
 
     if (is_flonum(node->ty))
@@ -3981,7 +3981,7 @@ static int64_t eval2(CCCC *vm, Node *node, char ***label) {
     }
 }
 
-static int64_t eval_rval(CCCC *vm, Node *node, char ***label) {
+static int64_t eval_rval(VirtualMachine *vm, Node *node, char ***label) {
     switch (node->kind) {
     case ND_VAR:
         if (node->var->is_local)
@@ -3999,7 +3999,7 @@ static int64_t eval_rval(CCCC *vm, Node *node, char ***label) {
     }
 }
 
-static bool is_const_expr(CCCC *vm, Node *node) {
+static bool is_const_expr(VirtualMachine *vm, Node *node) {
     add_type(vm, node);
 
     switch (node->kind) {
@@ -4040,7 +4040,7 @@ static bool is_const_expr(CCCC *vm, Node *node) {
     }
 }
 
-int64_t const_expr(CCCC *vm, Token **rest, Token *tok) {
+int64_t const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = conditional(vm, rest, tok);
     return eval(vm, node);
 }
@@ -4048,7 +4048,7 @@ int64_t const_expr(CCCC *vm, Token **rest, Token *tok) {
 // Returns true when `expr` is an integer constant expression whose value fits
 // within the range of `to` without truncation.  Used to suppress -Wconversion
 // false positives such as `char c = 0;` or `char c = 1 + 1;`.
-bool node_int_const_fits(CCCC *vm, Node *expr, Type *to) {
+bool node_int_const_fits(VirtualMachine *vm, Node *expr, Type *to) {
     if (!expr || !to || !is_integer(to))
         return false;
     if (!is_const_expr(vm, expr))
@@ -4066,7 +4066,7 @@ bool node_int_const_fits(CCCC *vm, Node *expr, Type *to) {
     }
 }
 
-static double eval_double(CCCC *vm, Node *node) {
+static double eval_double(VirtualMachine *vm, Node *node) {
     add_type(vm, node);
 
     if (is_integer(node->ty)) {
@@ -4116,7 +4116,7 @@ static double eval_double(CCCC *vm, Node *node) {
 // However, if a given expression is of form `A.x op= C`, the input is
 // converted to `tmp = &A, (*tmp).x = (*tmp).x op C` to handle assignments
 // to bitfields.
-static Node *to_assign(CCCC *vm, Node *binary) {
+static Node *to_assign(VirtualMachine *vm, Node *binary) {
     add_type(vm, binary->lhs);
     add_type(vm, binary->rhs);
     Token *tok = binary->tok;
@@ -4230,7 +4230,7 @@ static Node *to_assign(CCCC *vm, Node *binary) {
 // assign    = conditional (assign-op assign)?
 // assign-op = "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^="
 //           | "<<=" | ">>="
-static Node *assign(CCCC *vm, Token **rest, Token *tok) {
+static Node *assign(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = conditional(vm, &tok, tok);
 
     if (equal(tok, "="))
@@ -4282,7 +4282,7 @@ static Node *assign(CCCC *vm, Token **rest, Token *tok) {
 }
 
 // conditional = logor ("?" expr? ":" conditional)?
-static Node *conditional(CCCC *vm, Token **rest, Token *tok) {
+static Node *conditional(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *cond = logor(vm, &tok, tok);
 
     if (!equal(tok, "?")) {
@@ -4326,7 +4326,7 @@ static Node *conditional(CCCC *vm, Token **rest, Token *tok) {
 }
 
 // logor = logand ("||" logand)*
-static Node *logor(CCCC *vm, Token **rest, Token *tok) {
+static Node *logor(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = logand(vm, &tok, tok);
     while (equal(tok, "||")) {
         Token *start = tok;
@@ -4338,7 +4338,7 @@ static Node *logor(CCCC *vm, Token **rest, Token *tok) {
 }
 
 // logand = bitor ("&&" bitor)*
-static Node *logand(CCCC *vm, Token **rest, Token *tok) {
+static Node *logand(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = bitor(vm, &tok, tok);
     while (equal(tok, "&&")) {
         Token *start = tok;
@@ -4350,7 +4350,7 @@ static Node *logand(CCCC *vm, Token **rest, Token *tok) {
 }
 
 // bitor = bitxor ("|" bitxor)*
-static Node *bitor(CCCC *vm, Token **rest, Token *tok) {
+static Node *bitor(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = bitxor(vm, &tok, tok);
     while (equal(tok, "|")) {
         Token *start = tok;
@@ -4362,7 +4362,7 @@ static Node *bitor(CCCC *vm, Token **rest, Token *tok) {
 }
 
 // bitxor = bitand ("^" bitand)*
-static Node *bitxor(CCCC *vm, Token **rest, Token *tok) {
+static Node *bitxor(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = bitand(vm, &tok, tok);
     while (equal(tok, "^")) {
         Token *start = tok;
@@ -4374,7 +4374,7 @@ static Node *bitxor(CCCC *vm, Token **rest, Token *tok) {
 }
 
 // bitand = equality ("&" equality)*
-static Node *bitand(CCCC *vm, Token **rest, Token *tok) {
+static Node *bitand(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = equality(vm, &tok, tok);
     while (equal(tok, "&")) {
         Token *start = tok;
@@ -4386,7 +4386,7 @@ static Node *bitand(CCCC *vm, Token **rest, Token *tok) {
 }
 
 // equality = relational ("==" relational | "!=" relational)*
-static Node *equality(CCCC *vm, Token **rest, Token *tok) {
+static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = relational(vm, &tok, tok);
 
     for (;;) {
@@ -4410,7 +4410,7 @@ static Node *equality(CCCC *vm, Token **rest, Token *tok) {
 }
 
 // relational = shift ("<" shift | "<=" shift | ">" shift | ">=" shift)*
-static Node *relational(CCCC *vm, Token **rest, Token *tok) {
+static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = shift(vm, &tok, tok);
 
     for (;;) {
@@ -4446,7 +4446,7 @@ static Node *relational(CCCC *vm, Token **rest, Token *tok) {
 }
 
 // shift = add ("<<" add | ">>" add)*
-static Node *shift(CCCC *vm, Token **rest, Token *tok) {
+static Node *shift(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = add(vm, &tok, tok);
 
     for (;;) {
@@ -4490,7 +4490,7 @@ static Node *shift(CCCC *vm, Token **rest, Token *tok) {
 // so that p+n points to the location n elements (not bytes) ahead of p.
 // In other words, we need to scale an integer value before adding to a
 // pointer value. This function takes care of the scaling.
-static Node *new_add(CCCC *vm, Node *lhs, Node *rhs, Token *tok) {
+static Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
     add_type(vm, lhs);
     add_type(vm, rhs);
 
@@ -4546,7 +4546,7 @@ static Node *new_add(CCCC *vm, Node *lhs, Node *rhs, Token *tok) {
 }
 
 // Like `+`, `-` is overloaded for the pointer type.
-static Node *new_sub(CCCC *vm, Node *lhs, Node *rhs, Token *tok) {
+static Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
     add_type(vm, lhs);
     add_type(vm, rhs);
 
@@ -4609,7 +4609,7 @@ static Node *new_sub(CCCC *vm, Node *lhs, Node *rhs, Token *tok) {
 }
 
 // add = mul ("+" mul | "-" mul)*
-static Node *add(CCCC *vm, Token **rest, Token *tok) {
+static Node *add(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = mul(vm, &tok, tok);
 
     for (;;) {
@@ -4631,7 +4631,7 @@ static Node *add(CCCC *vm, Token **rest, Token *tok) {
 }
 
 // mul = cast ("*" cast | "/" cast | "%" cast)*
-static Node *mul(CCCC *vm, Token **rest, Token *tok) {
+static Node *mul(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = cast(vm, &tok, tok);
 
     for (;;) {
@@ -4685,7 +4685,7 @@ static Node *mul(CCCC *vm, Token **rest, Token *tok) {
 }
 
 // cast = "(" type-name ")" cast | unary
-static Node *cast(CCCC *vm, Token **rest, Token *tok) {
+static Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
     if (is_compound_literal_head(vm, tok))
         return unary(vm, rest, tok);
 
@@ -4708,7 +4708,7 @@ static Node *cast(CCCC *vm, Token **rest, Token *tok) {
 
 // Recursively collect variables from outer scopes that are referenced in an
 // expression
-static void collect_captures_in_node(CCCC *vm, Node *node, Obj *outer_locals,
+static void collect_captures_in_node(VirtualMachine *vm, Node *node, Obj *outer_locals,
                                      Obj ***captures, int *num_captures,
                                      int *cap_capacity) {
     if (!node)
@@ -4772,7 +4772,7 @@ static void collect_captures_in_node(CCCC *vm, Node *node, Obj *outer_locals,
 
 // Parse a block literal: ^{ ... } or ^(params){ ... } or ^returntype(params){
 // ... }
-static Node *block_literal(CCCC *vm, Token **rest, Token *tok) {
+static Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
     tok = tok->next; // Skip ^
 
@@ -4942,7 +4942,7 @@ static Node *block_literal(CCCC *vm, Token **rest, Token *tok) {
 //       | "&&" ident
 //       | "^" block-literal  (Apple blocks extension)
 //       | postfix
-static Node *unary(CCCC *vm, Token **rest, Token *tok) {
+static Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
     // Apple blocks: ^{ ... } or ^(params){ ... } or ^returntype(params){ ... }
     if (equal(tok, "^") && tok->next &&
         (equal(tok->next, "{") || equal(tok->next, "(") ||
@@ -5012,7 +5012,7 @@ static Node *unary(CCCC *vm, Token **rest, Token *tok) {
 }
 
 // struct-members = (declspec declarator (","  declarator)* ";")*
-static void struct_members(CCCC *vm, Token **rest, Token *tok, Type *ty) {
+static void struct_members(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     Member head = {};
     Member *cur = &head;
     int idx = 0;
@@ -5125,7 +5125,7 @@ static void apply_semantic_attr(Type *ty, VarAttr *attr, Token *tok,
     }
 }
 
-static Type *apply_var_attrs_to_type(CCCC *vm, Type *ty, VarAttr *attr) {
+static Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
     if (!attr || (!attr->is_maybe_unused && !attr->is_deprecated &&
                   !attr->is_noreturn && !attr->is_nodiscard &&
                   !attr->is_pure && !attr->is_func_const &&
@@ -5171,7 +5171,7 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
 }
 
 // attribute = ("__attribute__" "(" "(" attribute-list ")" ")")*
-static Token *attribute_list(CCCC *vm, Token *tok, Type *ty, VarAttr *attr) {
+static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
     while (consume(vm, &tok, tok, "__attribute__")) {
         tok = skip(vm, tok, "(");
         tok = skip(vm, tok, "(");
@@ -5338,7 +5338,7 @@ static Token *attribute_list(CCCC *vm, Token *tok, Type *ty, VarAttr *attr) {
 }
 
 // c23-attribute = ("[[" attribute-list "]]")*
-static Token *c23_attribute_list(CCCC *vm, Token *tok, Type *ty,
+static Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
                                  VarAttr *attr) {
     while (equal(tok, "[") && equal(tok->next, "[")) {
         if (vm->compiler.c_std < CCCC_STD_C23 &&
@@ -5479,7 +5479,7 @@ static Token *c23_attribute_list(CCCC *vm, Token *tok, Type *ty,
 }
 
 // struct-union-decl = attribute? ident? ("{" struct-members)?
-static Type *struct_union_decl(CCCC *vm, Token **rest, Token *tok,
+static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
                                TypeKind kind) {
     Type *ty = struct_type(vm);
     ty->kind = kind;
@@ -5524,7 +5524,7 @@ static Type *struct_union_decl(CCCC *vm, Token **rest, Token *tok,
 }
 
 // struct-decl = struct-union-decl
-static Type *struct_decl(CCCC *vm, Token **rest, Token *tok) {
+static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
     Type *ty = struct_union_decl(vm, rest, tok, TY_STRUCT);
 
     if (ty->size < 0)
@@ -5569,7 +5569,7 @@ static Type *struct_decl(CCCC *vm, Token **rest, Token *tok) {
 }
 
 // union-decl = struct-union-decl
-static Type *union_decl(CCCC *vm, Token **rest, Token *tok) {
+static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok) {
     Type *ty = struct_union_decl(vm, rest, tok, TY_UNION);
 
     if (ty->size < 0)
@@ -5620,7 +5620,7 @@ static Member *get_struct_member(Type *ty, Token *tok) {
 // member "a" of the anonymous struct as "x.a".
 //
 // This function takes care of anonymous structs.
-static Node *struct_ref(CCCC *vm, Node *node, Token *tok) {
+static Node *struct_ref(VirtualMachine *vm, Node *node, Token *tok) {
     add_type(vm, node);
 
     // If the base expression has error type, propagate it
@@ -5665,7 +5665,7 @@ static Node *struct_ref(CCCC *vm, Node *node, Token *tok) {
 }
 
 // Convert A++ to `(typeof A)((A += 1) - 1)`
-static Node *new_inc_dec(CCCC *vm, Node *node, Token *tok, int addend) {
+static Node *new_inc_dec(VirtualMachine *vm, Node *node, Token *tok, int addend) {
     add_type(vm, node);
     return new_cast(
         vm,
@@ -5675,7 +5675,7 @@ static Node *new_inc_dec(CCCC *vm, Node *node, Token *tok, int addend) {
         node->ty);
 }
 
-static Type *compound_literal_type(CCCC *vm, Token **rest, Token *tok,
+static Type *compound_literal_type(VirtualMachine *vm, Token **rest, Token *tok,
                                    VarAttr *attr) {
     bool saw_register = false;
     bool saw_auto = false;
@@ -5706,7 +5706,7 @@ static Type *compound_literal_type(CCCC *vm, Token **rest, Token *tok,
     return ty;
 }
 
-static bool is_compound_literal_head(CCCC *vm, Token *tok) {
+static bool is_compound_literal_head(VirtualMachine *vm, Token *tok) {
     if (!equal(tok, "(") || !is_typename(vm, tok->next))
         return false;
 
@@ -5733,7 +5733,7 @@ static bool is_compound_literal_head(CCCC *vm, Token *tok) {
 //              | "->" ident
 //              | "++"
 //              | "--"
-static Node *postfix(CCCC *vm, Token **rest, Token *tok) {
+static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
     if (is_compound_literal_head(vm, tok)) {
         // Compound literal
         Token *start = tok;
@@ -5880,7 +5880,7 @@ static const char *fmt_type_names[] = {
 };
 
 // Validate format string arguments for __attribute__((format(...)))
-static void validate_format_call(CCCC *vm, Token *tok, Type *func_ty,
+static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                                   Node *args) {
     if (!func_ty->format_style)
         return;
@@ -6174,7 +6174,7 @@ static void validate_format_call(CCCC *vm, Token *tok, Type *func_ty,
 #undef MAX_FMT_ARGS
 
 // funcall = (assign ("," assign)*)? ")"
-static Node *funcall(CCCC *vm, Token **rest, Token *tok, Node *fn) {
+static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
     add_type(vm, fn);
 
     if (fn->ty->kind != TY_FUNC &&
@@ -6278,7 +6278,7 @@ static Node *funcall(CCCC *vm, Token **rest, Token *tok, Node *fn) {
 //
 // generic-assoc = type-name ":" assign
 //               | "default" ":" assign
-static Node *generic_selection(CCCC *vm, Token **rest, Token *tok) {
+static Node *generic_selection(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
     tok = skip(vm, tok, "(");
 
@@ -6336,7 +6336,7 @@ static Node *generic_selection(CCCC *vm, Token **rest, Token *tok) {
 //         | ident
 //         | str
 //         | num
-static Node *primary(CCCC *vm, Token **rest, Token *tok) {
+static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
 
     // C23 true/false/nullptr - only when actually classified as keywords
@@ -6956,7 +6956,7 @@ static Node *primary(CCCC *vm, Token **rest, Token *tok) {
     return NULL;
 }
 
-static Token *parse_typedef(CCCC *vm, Token *tok, Type *basety, VarAttr *attr) {
+static Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     bool first = true;
 
     while (!consume(vm, &tok, tok, ";")) {
@@ -6979,7 +6979,7 @@ static Token *parse_typedef(CCCC *vm, Token *tok, Type *basety, VarAttr *attr) {
     return tok;
 }
 
-static void create_param_lvars(CCCC *vm, Type *param) {
+static void create_param_lvars(VirtualMachine *vm, Type *param) {
     if (param) {
         create_param_lvars(vm, param->next);
         if (!param->name)
@@ -6995,7 +6995,7 @@ static void create_param_lvars(CCCC *vm, Type *param) {
 // We cannot resolve gotos as we parse a function because gotos
 // can refer a label that appears later in the function.
 // So, we need to do this after we parse the entire function.
-static void resolve_goto_labels(CCCC *vm) {
+static void resolve_goto_labels(VirtualMachine *vm) {
     for (Node *x = vm->compiler.gotos; x; x = x->goto_next) {
         for (Node *y = vm->compiler.labels; y; y = y->goto_next) {
             if (strlen(x->label) == strlen(y->label) &&
@@ -7018,7 +7018,7 @@ static void resolve_goto_labels(CCCC *vm) {
     vm->compiler.gotos = vm->compiler.labels = NULL;
 }
 
-static Obj *find_func(CCCC *vm, char *name, int name_len) {
+static Obj *find_func(VirtualMachine *vm, char *name, int name_len) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
         for (VarScopeNode *node = sc->vars; node; node = node->next) {
             if (node->name_len == name_len &&
@@ -7033,7 +7033,7 @@ static Obj *find_func(CCCC *vm, char *name, int name_len) {
     return NULL;
 }
 
-static Obj *find_func_in_current_scope(CCCC *vm, char *name, int name_len) {
+static Obj *find_func_in_current_scope(VirtualMachine *vm, char *name, int name_len) {
     Scope *sc = vm->compiler.scope;
     if (!sc)
         return NULL;
@@ -7050,7 +7050,7 @@ static Obj *find_func_in_current_scope(CCCC *vm, char *name, int name_len) {
     return NULL;
 }
 
-static void mark_live(CCCC *vm, Obj *var) {
+static void mark_live(VirtualMachine *vm, Obj *var) {
     if (!var->is_function || var->is_live)
         return;
     var->is_live = true;
@@ -7085,7 +7085,7 @@ static bool statement_terminates(Node *node) {
     }
 }
 
-static void append_implicit_return(CCCC *vm, Obj *fn, Token *tok) {
+static void append_implicit_return(VirtualMachine *vm, Obj *fn, Token *tok) {
     Type *ty = fn->ty->return_ty;
 
     // Noreturn functions must not fall off the end
@@ -7119,7 +7119,7 @@ static bool is_plain_signed_int(Type *ty) {
     return ty && ty->kind == TY_INT && !ty->base && !ty->is_unsigned;
 }
 
-static void validate_main_signature(CCCC *vm, Obj *fn) {
+static void validate_main_signature(VirtualMachine *vm, Obj *fn) {
     if (!fn || !fn->name || strcmp(fn->name, "main") != 0)
         return;
 
@@ -7131,7 +7131,7 @@ static void validate_main_signature(CCCC *vm, Obj *fn) {
                   "main's first parameter must be int");
 }
 
-static Token *function(CCCC *vm, Token *tok, Type *basety, VarAttr *attr) {
+static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     if (attr->is_constexpr)
         error_tok(vm, tok, "constexpr is only supported for object definitions");
 
@@ -7396,7 +7396,7 @@ static Token *function(CCCC *vm, Token *tok, Type *basety, VarAttr *attr) {
     return tok;
 }
 
-static Token *global_variable(CCCC *vm, Token *tok, Type *basety,
+static Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
                               VarAttr *attr) {
     bool first = true;
 
@@ -7526,7 +7526,7 @@ static Token *global_variable(CCCC *vm, Token *tok, Type *basety,
 
 // Lookahead tokens and returns true if a given token is a start
 // of a function definition or declaration.
-static bool is_function(CCCC *vm, Token *tok) {
+static bool is_function(VirtualMachine *vm, Token *tok) {
     if (equal(tok, ";"))
         return false;
 
@@ -7539,7 +7539,7 @@ static bool is_function(CCCC *vm, Token *tok) {
 }
 
 // Remove redundant tentative definitions.
-static void scan_globals(CCCC *vm) {
+static void scan_globals(VirtualMachine *vm) {
     Obj head;
     Obj *cur = &head;
 
@@ -7567,7 +7567,7 @@ static void scan_globals(CCCC *vm) {
     vm->compiler.globals = head.next;
 }
 
-static void warn_unused_globals(CCCC *vm) {
+static void warn_unused_globals(VirtualMachine *vm) {
     for (Obj *var = vm->compiler.globals; var; var = var->next) {
         if (!var->is_static || !var->is_definition || var->is_local_symbol ||
             var->is_macro_generated || !var->tok || var->is_used ||
@@ -7596,7 +7596,7 @@ static void warn_unused_globals(CCCC *vm) {
     }
 }
 
-static void declare_builtin_functions(CCCC *vm) {
+static void declare_builtin_functions(VirtualMachine *vm) {
     // alloca(size) -> void*
     Type *ty = func_type(vm, pointer_to(vm, ty_void));
     ty->params = copy_type(vm, ty_int);
@@ -7655,7 +7655,7 @@ static void declare_builtin_functions(CCCC *vm) {
 }
 
 // program = (typedef | function-definition | global-variable)*
-Obj *parse(CCCC *vm, Token *tok) {
+Obj *parse(VirtualMachine *vm, Token *tok) {
     // Initialize error recovery placeholder
     error_var->ty = ty_error;
 
@@ -7748,23 +7748,23 @@ Obj *parse(CCCC *vm, Token *tok) {
 }
 
 // Exposed parsing functions for K's ast_parse API
-Node *cc_parse_expr(CCCC *vm, Token **rest, Token *tok) {
+Node *cc_parse_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     return expr(vm, rest, tok);
 }
 
-Node *cc_parse_assign(CCCC *vm, Token **rest, Token *tok) {
+Node *cc_parse_assign(VirtualMachine *vm, Token **rest, Token *tok) {
     return assign(vm, rest, tok);
 }
 
-Node *cc_parse_stmt(CCCC *vm, Token **rest, Token *tok) {
+Node *cc_parse_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     return stmt(vm, rest, tok);
 }
 
-Node *cc_parse_compound_stmt(CCCC *vm, Token **rest, Token *tok) {
+Node *cc_parse_compound_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     return compound_stmt(vm, rest, tok, NULL);
 }
 
-int64_t cc_eval(CCCC *vm, Node *node) { return eval(vm, node); }
-double  cc_eval_double(CCCC *vm, Node *node) { return eval_double(vm, node); }
+int64_t cc_eval(VirtualMachine *vm, Node *node) { return eval(vm, node); }
+double  cc_eval_double(VirtualMachine *vm, Node *node) { return eval_double(vm, node); }
 
-void cc_init_parser(CCCC *vm) { error_var->ty = ty_error; }
+void cc_init_parser(VirtualMachine *vm) { error_var->ty = ty_error; }

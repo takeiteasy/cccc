@@ -231,8 +231,8 @@ extern "C" {
     X(FLDR_INDEX_F32, 3) /* fregs[rd] = *(float*)(base+idx*scale+off) */  \
     X(FSTR_INDEX_F32, 3) /* *(float*)(base+idx*scale+off) = fregs[rd] */
 
-typedef uint32_t CCCCInstrWord;
-typedef uint32_t CCCCPc;
+typedef uint32_t InstrWord;
+typedef uint32_t Pc;
 #define CCCC_INVALID_PC UINT32_MAX
 
 /*!
@@ -569,21 +569,21 @@ typedef enum {
 typedef struct Node Node;
 typedef struct Obj Obj;
 typedef struct Scope Scope;
-typedef struct CCCCThreadRecord CCCCThreadRecord;
-typedef struct CCCCPthreadKeyRecord CCCCPthreadKeyRecord;
-typedef struct CCCCPthreadState CCCCPthreadState;
+typedef struct ThreadRecord ThreadRecord;
+typedef struct PthreadKeyRecord PthreadKeyRecord;
+typedef struct PthreadState PthreadState;
 
 typedef enum {
     CCCC_EMIT_SOURCE,
     CCCC_EMIT_OBJECT,
-} CCCCEmitEventKind;
+} EmitEventKind;
 
-typedef struct CCCCEmitEvent {
-    struct CCCCEmitEvent *next;
-    CCCCEmitEventKind kind;
+typedef struct EmitEvent {
+    struct EmitEvent *next;
+    EmitEventKind kind;
     char *source;
     Obj *obj;
-} CCCCEmitEvent;
+} EmitEvent;
 
 /*!
  @struct Type
@@ -1155,7 +1155,7 @@ struct Scope {
 typedef struct LabelEntry {
     char *name;         // Label name (for named labels)
     char *unique_label; // Unique label identifier (for break/continue)
-    CCCCPc address;      // Instruction index where label is defined
+    Pc address;      // Instruction index where label is defined
 } LabelEntry;
 
 /*!
@@ -1166,11 +1166,10 @@ typedef struct LabelEntry {
 typedef struct GotoPatch {
     char *name;          // Label name to jump to
     char *unique_label;  // Or unique label identifier
-    CCCCPc location;      // Instruction index of JMP target operand
+    Pc location;      // Instruction index of JMP target operand
 } GotoPatch;
 
-typedef struct CCCC CCCC;
-typedef struct CCCC $vm_t;
+typedef struct VirtualMachine VirtualMachine;
 
 /* Per-signal action slot for VM-managed signal handling */
 #define CCCC_NSIG 32
@@ -1178,27 +1177,27 @@ typedef struct CCCC $vm_t;
 typedef struct {
     int      action;      /* 0=DFL, 1=IGN, 2=VM handler */
     long long handler_fn; /* VM function pointer when action==2 */
-} CCCCSigSlot;
+} SigSlot;
 
 typedef enum {
     CCCC_FREG_F64 = 0,
     CCCC_FREG_F32,
     CCCC_FREG_V4F32,
     CCCC_FREG_V2F64,
-} CCCCFRegTag;
+} FRegTag;
 
 typedef struct {
-    CCCCFRegTag tag;
+    FRegTag tag;
     union {
         float f32;
         double f64;
         float v4f32[4];
         double v2f64[2];
     } value;
-} CCCCFReg;
+} FReg;
 
 /*!
- @typedef CCCCAsmCallback
+ @typedef AsmCallback
  @abstract Callback invoked when an `asm("...")` statement is encountered
            during code generation.
  @param vm The VM/compiler instance.
@@ -1207,7 +1206,7 @@ typedef struct {
  @discussion The callback may emit custom bytecode into the VM's text
              segment, perform logging, or otherwise handle the asm string.
 */
-typedef void (*CCCCAsmCallback)(CCCC *vm, const char *asm_str, void *user_data);
+typedef void (*AsmCallback)(VirtualMachine *vm, const char *asm_str, void *user_data);
 
 /*!
  @struct ForeignFunc
@@ -1410,7 +1409,7 @@ typedef struct SourceMap {
 typedef struct SourceIndex {
     File *file;
     int line_no;
-    CCCCPc first_pc;
+    Pc first_pc;
 } SourceIndex;
 
 /*!
@@ -1484,7 +1483,7 @@ typedef struct Watchpoint {
 #endif
 
 typedef struct Breakpoint {
-    CCCCPc pc;        // Instruction index of breakpoint
+    Pc pc;        // Instruction index of breakpoint
     int enabled;     // 1 if enabled, 0 if disabled
     int hit_count;   // Number of times hit
     char *condition; // Optional condition expression (NULL if unconditional)
@@ -1563,7 +1562,7 @@ typedef struct Debugger {
     int single_step; // Single-step mode (stop after each instruction)
     int step_over;   // Step over mode (skip function calls)
     int step_out;    // Step out mode (run until function returns)
-    CCCCPc step_over_return_addr;      // Return PC for step over
+    Pc step_over_return_addr;      // Return PC for step over
     long long *step_out_bp;           // Base pointer for step out
     int debugger_attached;            // Debugger REPL is active
 
@@ -1687,8 +1686,8 @@ typedef struct Compiler {
     Scope *macro_context_scope;       // Parser scope produced from macro_context_tokens
     Obj *macro_globals; // Globals defined by inline macros (injected into
                         // the final program before codegen)
-    CCCCEmitEvent *emit_events_head;  // Ordered generated-output events
-    CCCCEmitEvent *emit_events_tail;
+    EmitEvent *emit_events_head;  // Ordered generated-output events
+    EmitEvent *emit_events_tail;
     bool macro_emit_recording;        // True while a macro call records generated output
 
     // #embed directive limits
@@ -1758,14 +1757,14 @@ typedef struct Compiler {
     int local_offset;  // Current local variable offset
 
     struct {
-        CCCCPc location;      // Location in text segment to patch
+        Pc location;      // Location in text segment to patch
         Obj *function;       // Function to call
     } call_patches[MAX_CALLS];
     int num_call_patches;
 
     // Function address patches for function pointers
     struct {
-        CCCCPc location;      // Location of IMM operand to patch
+        Pc location;      // Location of IMM operand to patch
         Obj *function;       // Function whose address to use
     } func_addr_patches[MAX_CALLS];
     int num_func_addr_patches;
@@ -1786,14 +1785,14 @@ typedef struct Compiler {
     // Switch statement code generation
     void *current_switch_cases;       // Codegen-owned SwitchCasePatch array
     int current_switch_num;           // Number of case entries
-    CCCCPc current_switch_table_start; // Dense jump table start, or invalid
+    Pc current_switch_table_start; // Dense jump table start, or invalid
     long current_switch_min;          // Minimum case value for dense switches
     long current_switch_size;         // Jump table size for dense switches
     Node *current_switch_default;     // Default case node
-    CCCCPc current_default_patch;      // Patch location for default case jump
+    Pc current_default_patch;      // Patch location for default case jump
 
     // Inline assembly callback
-    CCCCAsmCallback asm_callback; // User-provided callback for asm statements
+    AsmCallback asm_callback; // User-provided callback for asm statements
     void *asm_user_data;         // User-provided context for callback
     bool asm_passthru;           // --asm-passthru flag: compile asm via native CC
 
@@ -1832,7 +1831,7 @@ typedef struct Compiler {
     int inline_result_reg;  // Register for inlined return values
 
     // ENT3 stack patching for inlined locals
-    CCCCPc ent3_stack_loc;   // PC of ENT3 stack_size low word (for patching)
+    Pc ent3_stack_loc;   // PC of ENT3 stack_size low word (for patching)
     int ent3_base_stack;    // Original stack_size before inlining additions
     int ent3_extra_stack;   // Additional stack slots from inlined locals
 
@@ -1868,11 +1867,11 @@ typedef struct Compiler {
              bookkeeping. All public API functions accept an
              `CCCC *` as the first parameter.
 */
-struct CCCC {
+struct VirtualMachine {
     // VM Registers (pure register-based architecture)
     long long regs[32]; // General-purpose register file (NUM_REGS)
-    CCCCFReg fregs[32];  // Tagged floating-point register file
-    CCCCPc pc;           // Program counter (instruction index)
+    FReg fregs[32];  // Tagged floating-point register file
+    Pc pc;           // Program counter (instruction index)
     long long *bp;      // Base pointer (frame pointer)
     long long *sp;      // Stack pointer
     long long cycle;    // Instruction cycle counter
@@ -1885,10 +1884,10 @@ struct CCCC {
     long long *stack_base; // Lower bound of stack (stack_seg start)
 
     // Memory Segments
-    CCCCInstrWord *text_seg;  // Text segment (32-bit bytecode words)
-    CCCCPc text_ptr;          // Current write position (for code generation)
+    InstrWord *text_seg;  // Text segment (32-bit bytecode words)
+    Pc text_ptr;          // Current write position (for code generation)
     long long *stack_seg;    // Stack segment
-    CCCCInstrWord *old_text_seg; // Backup of original text segment pointer
+    InstrWord *old_text_seg; // Backup of original text segment pointer
     char *data_seg;          // Data segment (global variables/constants)
     char *data_ptr;          // Current write position in data segment
     char *heap_seg;          // Heap segment (for VM malloc/free)
@@ -2004,17 +2003,17 @@ struct CCCC {
     Compiler compiler;
 
     // VM-managed signal table
-    CCCCSigSlot vm_sigslots[CCCC_NSIG];
+    SigSlot vm_sigslots[CCCC_NSIG];
 
     // GIL-backed pthread runtime state. Concrete pthread objects are kept
     // internal so the public CCCC struct does not expose host pthread ABI types.
     void *gil_mutex;
     int gil_initialized;
-    CCCCThreadRecord *active_thread;
-    CCCCThreadRecord *thread_records;
-    CCCCPthreadKeyRecord *pthread_keys;
+    ThreadRecord *active_thread;
+    ThreadRecord *thread_records;
+    PthreadKeyRecord *pthread_keys;
     int pthread_next_key;
-    CCCCPthreadState *pthread_state;
+    PthreadState *pthread_state;
 
     // Error handling (setjmp/longjmp for exception-like behavior)
     jmp_buf
@@ -2041,7 +2040,7 @@ struct CCCC {
  @param vm Pointer to an uninitialized CCCC struct to initialize.
  @param flags Bitwise combination of CCCCFlags to enable features (0 for none).
 */
-void cc_init(CCCC *vm, uint32_t flags);
+void cc_init(VirtualMachine *vm, uint32_t flags);
 
 /*!
  @function cc_destroy
@@ -2051,7 +2050,7 @@ void cc_init(CCCC *vm, uint32_t flags);
              dynamically allocated.
  @param vm The CCCC instance to destroy.
 */
-void cc_destroy(CCCC *vm);
+void cc_destroy(VirtualMachine *vm);
 
 /*!
  @function cc_get_error_count
@@ -2059,7 +2058,7 @@ void cc_destroy(CCCC *vm);
  @param vm The CCCC instance.
  @result The number of errors collected.
 */
-int cc_get_error_count(CCCC *vm);
+int cc_get_error_count(VirtualMachine *vm);
 
 /*!
  @function cc_get_warning_count
@@ -2067,7 +2066,7 @@ int cc_get_error_count(CCCC *vm);
  @param vm The CCCC instance.
  @result The number of warnings collected.
 */
-int cc_get_warning_count(CCCC *vm);
+int cc_get_warning_count(VirtualMachine *vm);
 
 /*!
  @function cc_has_errors
@@ -2075,7 +2074,7 @@ int cc_get_warning_count(CCCC *vm);
  @param vm The CCCC instance.
  @result True if errors exist, false otherwise.
 */
-bool cc_has_errors(CCCC *vm);
+bool cc_has_errors(VirtualMachine *vm);
 
 /*!
  @function cc_clear_errors
@@ -2083,14 +2082,14 @@ bool cc_has_errors(CCCC *vm);
  @discussion Useful for reusing a VM instance across multiple compilations.
  @param vm The CCCC instance.
 */
-void cc_clear_errors(CCCC *vm);
+void cc_clear_errors(VirtualMachine *vm);
 
 /*!
  @function cc_print_all_errors
  @abstract Print all collected errors and warnings to stderr.
  @param vm The CCCC instance.
 */
-void cc_print_all_errors(CCCC *vm);
+void cc_print_all_errors(VirtualMachine *vm);
 
 /*!
  @function cc_print_stack_report
@@ -2100,7 +2099,7 @@ void cc_print_all_errors(CCCC *vm);
              when stack instrumentation is enabled.
  @param vm The CCCC instance.
 */
-void cc_print_stack_report(CCCC *vm);
+void cc_print_stack_report(VirtualMachine *vm);
 
 /*!
  @function cc_include
@@ -2110,7 +2109,7 @@ void cc_print_stack_report(CCCC *vm);
  @param vm The CCCC instance.
  @param path Filesystem path to add to include search.
 */
-void cc_include(CCCC *vm, const char *path);
+void cc_include(VirtualMachine *vm, const char *path);
 
 /*!
  @function cc_system_include
@@ -2121,7 +2120,7 @@ void cc_include(CCCC *vm, const char *path);
  @param vm The CCCC instance.
  @param path Filesystem path to add to system include search.
 */
-void cc_system_include(CCCC *vm, const char *path);
+void cc_system_include(VirtualMachine *vm, const char *path);
 
 /*!
  @function cc_define
@@ -2130,7 +2129,7 @@ void cc_system_include(CCCC *vm, const char *path);
  @param name Macro identifier (NUL-terminated).
  @param buf Macro replacement text (NUL-terminated).
 */
-void cc_define(CCCC *vm, char *name, char *buf);
+void cc_define(VirtualMachine *vm, char *name, char *buf);
 
 /*!
  @function cc_undef
@@ -2138,7 +2137,7 @@ void cc_define(CCCC *vm, char *name, char *buf);
  @param vm The CCCC instance.
  @param name Macro identifier to remove.
 */
-void cc_undef(CCCC *vm, char *name);
+void cc_undef(VirtualMachine *vm, char *name);
 
 /*!
  @function cc_set_asm_callback
@@ -2147,7 +2146,7 @@ void cc_undef(CCCC *vm, char *name);
  @param callback Callback function pointer, or NULL to unregister.
  @param user_data Optional user context pointer passed to the callback.
 */
-void cc_set_asm_callback(CCCC *vm, CCCCAsmCallback callback, void *user_data);
+void cc_set_asm_callback(VirtualMachine *vm, AsmCallback callback, void *user_data);
 
 /*!
  @function cc_ffi_allow
@@ -2155,26 +2154,26 @@ void cc_set_asm_callback(CCCC *vm, CCCCAsmCallback callback, void *user_data);
  @discussion When the allow list is non-empty, only listed names may be called
              through registered FFI or runtime dynamic symbols.
 */
-void cc_ffi_allow(CCCC *vm, const char *name);
+void cc_ffi_allow(VirtualMachine *vm, const char *name);
 
 /*!
  @function cc_ffi_deny
  @abstract Add a native function name to the FFI deny list.
  @discussion The deny list is checked only when the allow list is empty.
 */
-void cc_ffi_deny(CCCC *vm, const char *name);
+void cc_ffi_deny(VirtualMachine *vm, const char *name);
 
 /*!
  @function cc_ffi_clear_allow_list
  @abstract Remove all names from the FFI allow list.
 */
-void cc_ffi_clear_allow_list(CCCC *vm);
+void cc_ffi_clear_allow_list(VirtualMachine *vm);
 
 /*!
  @function cc_ffi_clear_deny_list
  @abstract Remove all names from the FFI deny list.
 */
-void cc_ffi_clear_deny_list(CCCC *vm);
+void cc_ffi_clear_deny_list(VirtualMachine *vm);
 
 /*!
  @function cc_register_cfunc
@@ -2189,7 +2188,7 @@ void cc_ffi_clear_deny_list(CCCC *vm);
              All integer types are passed/returned as long long, doubles as
  double, and `float`-returning functions use returns_double=2.
 */
-void cc_register_cfunc(CCCC *vm, const char *name, void *func_ptr, int num_args,
+void cc_register_cfunc(VirtualMachine *vm, const char *name, void *func_ptr, int num_args,
                        int returns_double);
 
 /*!
@@ -2213,7 +2212,7 @@ void cc_register_cfunc(CCCC *vm, const char *name, void *func_ptr, int num_args,
  the per-call-site float_arg_mask computed in codegen; this registration-time
  mask only needs to flag double-typed arguments.
 */
-void cc_register_cfunc_ex(CCCC *vm, const char *name, void *func_ptr,
+void cc_register_cfunc_ex(VirtualMachine *vm, const char *name, void *func_ptr,
                           int num_args, int returns_double,
                           uint64_t double_arg_mask);
 
@@ -2232,7 +2231,7 @@ void cc_register_cfunc_ex(CCCC *vm, const char *name, void *func_ptr,
  functions. Example: printf has 1 fixed arg (format), fprintf has 2 (stream,
  format).
 */
-void cc_register_variadic_cfunc(CCCC *vm, const char *name, void *func_ptr,
+void cc_register_variadic_cfunc(VirtualMachine *vm, const char *name, void *func_ptr,
                                 int num_fixed_args, int returns_double);
 
 /*!
@@ -2254,7 +2253,7 @@ void cc_register_variadic_cfunc(CCCC *vm, const char *name, void *func_ptr,
  called manually if you want to reset the FFI registry or initialize it
  separately.
 */
-void cc_load_stdlib(CCCC *vm);
+void cc_load_stdlib(VirtualMachine *vm);
 
 /*!
  @function cc_dlsym
@@ -2271,7 +2270,7 @@ void cc_load_stdlib(CCCC *vm);
  implementations. The function must already be registered via cc_register_cfunc
  or cc_register_variadic_cfunc.
 */
-int cc_dlsym(CCCC *vm, const char *name, void *func_ptr, int num_args,
+int cc_dlsym(VirtualMachine *vm, const char *name, void *func_ptr, int num_args,
              int returns_double);
 
 /*!
@@ -2293,7 +2292,7 @@ int cc_dlsym(CCCC *vm, const char *name, void *func_ptr, int num_args,
              The library handle is not closed after loading to keep function
  pointers valid.
 */
-int cc_dlopen(CCCC *vm, const char *lib_path);
+int cc_dlopen(VirtualMachine *vm, const char *lib_path);
 
 /*!
  @function cc_load_libc
@@ -2309,7 +2308,7 @@ int cc_dlopen(CCCC *vm, const char *lib_path);
              This is useful when you want to load stdlib functions dynamically
  instead of registering them with explicit function pointers.
 */
-int cc_load_libc(CCCC *vm);
+int cc_load_libc(VirtualMachine *vm);
 
 /*!
  @function cc_preprocess
@@ -2318,7 +2317,7 @@ int cc_load_libc(CCCC *vm);
  @param path Path to the source file to preprocess.
  @return Head of the token stream (linked Token list). Caller owns tokens.
 */
-Token *cc_preprocess(CCCC *vm, const char *path);
+Token *cc_preprocess(VirtualMachine *vm, const char *path);
 
 /*!
  @function cc_parse
@@ -2328,7 +2327,7 @@ Token *cc_preprocess(CCCC *vm, const char *path);
  @param tok Head of the preprocessed token stream.
  @return Linked list of top-level Obj representing globals and functions.
 */
-Obj *cc_parse(CCCC *vm, Token *tok);
+Obj *cc_parse(VirtualMachine *vm, Token *tok);
 
 /*!
  @function cc_parse_expr
@@ -2338,7 +2337,7 @@ Obj *cc_parse(CCCC *vm, Token *tok);
  @param tok Head of the token stream to parse.
  @return AST node representing the parsed expression.
 */
-Node *cc_parse_expr(CCCC *vm, Token **rest, Token *tok);
+Node *cc_parse_expr(VirtualMachine *vm, Token **rest, Token *tok);
 
 /*!
  @function cc_parse_assign
@@ -2350,7 +2349,7 @@ Node *cc_parse_expr(CCCC *vm, Token **rest, Token *tok);
  @param tok Head of the token stream to parse.
  @return AST node representing the parsed assignment expression.
 */
-Node *cc_parse_assign(CCCC *vm, Token **rest, Token *tok);
+Node *cc_parse_assign(VirtualMachine *vm, Token **rest, Token *tok);
 
 /*!
  @function cc_parse_stmt
@@ -2360,7 +2359,7 @@ Node *cc_parse_assign(CCCC *vm, Token **rest, Token *tok);
  @param tok Head of the token stream to parse.
  @return AST node representing the parsed statement.
 */
-Node *cc_parse_stmt(CCCC *vm, Token **rest, Token *tok);
+Node *cc_parse_stmt(VirtualMachine *vm, Token **rest, Token *tok);
 
 /*!
  @function cc_parse_compound_stmt
@@ -2370,10 +2369,10 @@ Node *cc_parse_stmt(CCCC *vm, Token **rest, Token *tok);
  @param tok Head of the token stream to parse (should be opening brace).
  @return AST node representing the parsed compound statement.
 */
-Node *cc_parse_compound_stmt(CCCC *vm, Token **rest, Token *tok);
-int64_t cc_eval(CCCC *vm, Node *node);
-double  cc_eval_double(CCCC *vm, Node *node);
-void cc_init_parser(CCCC *vm);
+Node *cc_parse_compound_stmt(VirtualMachine *vm, Token **rest, Token *tok);
+int64_t cc_eval(VirtualMachine *vm, Node *node);
+double  cc_eval_double(VirtualMachine *vm, Node *node);
+void cc_init_parser(VirtualMachine *vm);
 
 /*!
  @function cc_execute_inline_macros
@@ -2390,9 +2389,9 @@ void cc_init_parser(CCCC *vm);
  @param input_tokens Array of preprocessed token streams (one per source file).
  @param count Number of token streams in the array.
 */
-void cc_execute_inline_macros(CCCC *vm, Token **input_tokens, int count);
-void cc_record_emit_source(CCCC *vm, const char *source);
-void cc_record_emit_object(CCCC *vm, Obj *obj);
+void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens, int count);
+void cc_record_emit_source(VirtualMachine *vm, const char *source);
+void cc_record_emit_object(VirtualMachine *vm, Obj *obj);
 
 /*!
  @function cc_expand_macros
@@ -2403,7 +2402,7 @@ void cc_record_emit_object(CCCC *vm, Obj *obj);
  @param vm The CCCC instance.
  @param prog Linked list of top-level Obj returned by cc_parse.
 */
-void cc_expand_macros(CCCC *vm, Obj *prog);
+void cc_expand_macros(VirtualMachine *vm, Obj *prog);
 
 /*!
  @function cc_serialize_program
@@ -2417,7 +2416,7 @@ void cc_expand_macros(CCCC *vm, Obj *prog);
  @param generated_only If true, only serialize objects created by pragma macros
                        (those with is_macro_generated set). Used with -G flag.
 */
-void cc_serialize_program(FILE *f, CCCC *vm, Obj *prog, bool generated_only);
+void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated_only);
 
 /*!
  @function cc_link_progs
@@ -2431,7 +2430,7 @@ void cc_serialize_program(FILE *f, CCCC *vm, Obj *prog, bool generated_only);
  @param count Number of programs in the array.
  @return A single merged Obj* linked list containing all objects.
 */
-Obj *cc_link_progs(CCCC *vm, Obj **progs, int count);
+Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count);
 
 /*!
  @function cc_compile
@@ -2439,7 +2438,7 @@ Obj *cc_link_progs(CCCC *vm, Obj **progs, int count);
  @param vm The CCCC instance.
  @param prog Linked list of top-level Obj returned by cc_parse.
 */
-void cc_compile(CCCC *vm, Obj *prog);
+void cc_compile(VirtualMachine *vm, Obj *prog);
 
 /*!
  @function cc_run
@@ -2449,7 +2448,7 @@ void cc_compile(CCCC *vm, Obj *prog);
  @param argv Argument vector (NUL-terminated array of strings).
  @return Program exit code returned by main().
 */
-int cc_run(CCCC *vm, int argc, char **argv);
+int cc_run(VirtualMachine *vm, int argc, char **argv);
 
 /*!
  @function cc_run_at
@@ -2460,7 +2459,7 @@ int cc_run(CCCC *vm, int argc, char **argv);
  @param argv Argument vector.
  @return Program exit code.
 */
-int cc_run_at(CCCC *vm, CCCCPc entry, int argc, char **argv);
+int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv);
 
 /*!
  @function cc_print_tokens
@@ -2475,7 +2474,7 @@ void cc_print_tokens(Token *tok);
  @abstract Disassemble the compiled bytecode to stdout.
  @param vm The CCCC instance containing compiled bytecode.
 */
-void cc_disassemble(CCCC *vm);
+void cc_disassemble(VirtualMachine *vm);
 
 /*!
  @function cc_output_json
@@ -2508,7 +2507,7 @@ void cc_output_json(FILE *f, Obj *prog);
  @param vm The CCCC instance with source map data.
  @param f Output file stream.
 */
-void cc_output_source_map_json(CCCC *vm, FILE *f);
+void cc_output_source_map_json(VirtualMachine *vm, FILE *f);
 
 /*!
  @function cc_save_bytecode
@@ -2520,7 +2519,7 @@ void cc_output_source_map_json(CCCC *vm, FILE *f);
  @param path Output file path.
  @return 0 on success, -1 on error.
 */
-int cc_save_bytecode(CCCC *vm, const char *path);
+int cc_save_bytecode(VirtualMachine *vm, const char *path);
 
 /*!
  @function cc_write_bytecode
@@ -2534,7 +2533,7 @@ int cc_save_bytecode(CCCC *vm, const char *path);
           @c freopen with "wb", or a file returned by fopen("wb")).
  @return 0 on success, -1 on error.
 */
-int cc_write_bytecode(CCCC *vm, FILE *f);
+int cc_write_bytecode(VirtualMachine *vm, FILE *f);
 
 /*!
  @function cc_load_bytecode
@@ -2545,7 +2544,7 @@ int cc_write_bytecode(CCCC *vm, FILE *f);
  @param path Input file path.
  @return 0 on success, -1 on error.
 */
-int cc_load_bytecode(CCCC *vm, const char *path);
+int cc_load_bytecode(VirtualMachine *vm, const char *path);
 
 /*!
  @function cc_add_breakpoint
@@ -2554,7 +2553,7 @@ int cc_load_bytecode(CCCC *vm, const char *path);
  @param pc Instruction-word index where breakpoint should be set.
  @return Breakpoint index, or -1 if failed (too many breakpoints).
 */
-int cc_add_breakpoint(CCCC *vm, CCCCPc pc);
+int cc_add_breakpoint(VirtualMachine *vm, Pc pc);
 
 /*!
  @function cc_remove_breakpoint
@@ -2562,7 +2561,7 @@ int cc_add_breakpoint(CCCC *vm, CCCCPc pc);
  @param vm The CCCC instance.
  @param index Breakpoint index to remove.
 */
-void cc_remove_breakpoint(CCCC *vm, int index);
+void cc_remove_breakpoint(VirtualMachine *vm, int index);
 
 /*!
  @function cc_debug_repl
@@ -2578,7 +2577,7 @@ void cc_remove_breakpoint(CCCC *vm, int index);
              - stack/st: Print stack
              - help/h: Show help
 */
-void cc_debug_repl(CCCC *vm);
+void cc_debug_repl(VirtualMachine *vm);
 
 /*!
  @function cc_add_watchpoint
@@ -2590,7 +2589,7 @@ void cc_debug_repl(CCCC *vm);
  @param expr Original expression string (for display purposes).
  @return Watchpoint index, or -1 if failed (too many watchpoints).
 */
-int cc_add_watchpoint(CCCC *vm, void *address, int size, int type,
+int cc_add_watchpoint(VirtualMachine *vm, void *address, int size, int type,
                       const char *expr);
 
 /*!
@@ -2599,7 +2598,7 @@ int cc_add_watchpoint(CCCC *vm, void *address, int size, int type,
  @param vm The CCCC instance.
  @param index Watchpoint index to remove.
 */
-void cc_remove_watchpoint(CCCC *vm, int index);
+void cc_remove_watchpoint(VirtualMachine *vm, int index);
 
 /*!
  @function cc_get_source_location
@@ -2610,7 +2609,7 @@ void cc_remove_watchpoint(CCCC *vm, int index);
  @param out_line Pointer to receive the line number (can be NULL).
  @return 1 if location found, 0 if not found.
 */
-int cc_get_source_location(CCCC *vm, CCCCPc pc, File **out_file,
+int cc_get_source_location(VirtualMachine *vm, Pc pc, File **out_file,
                            int *out_line, int *out_col);
 
 /*!
@@ -2621,7 +2620,7 @@ int cc_get_source_location(CCCC *vm, CCCCPc pc, File **out_file,
  @param line Line number to find.
  @return Program counter index, or CCCC_INVALID_PC if not found.
 */
-CCCCPc cc_find_pc_for_source(CCCC *vm, File *file, int line);
+Pc cc_find_pc_for_source(VirtualMachine *vm, File *file, int line);
 
 /*!
  @function cc_find_function_entry
@@ -2630,7 +2629,7 @@ CCCCPc cc_find_pc_for_source(CCCC *vm, File *file, int line);
  @param name Function name to find.
  @return Program counter index, or CCCC_INVALID_PC if not found.
 */
-CCCCPc cc_find_function_entry(CCCC *vm, const char *name);
+Pc cc_find_function_entry(VirtualMachine *vm, const char *name);
 
 /*!
  @function cc_lookup_symbol
@@ -2639,7 +2638,7 @@ CCCCPc cc_find_function_entry(CCCC *vm, const char *name);
  @param name Symbol name to look up.
  @return Pointer to DebugSymbol if found, NULL otherwise.
 */
-DebugSymbol *cc_lookup_symbol(CCCC *vm, const char *name);
+DebugSymbol *cc_lookup_symbol(VirtualMachine *vm, const char *name);
 
 /*!
  @function cc_dlopen
@@ -2648,7 +2647,7 @@ DebugSymbol *cc_lookup_symbol(CCCC *vm, const char *name);
  @param lib_path Path to the dynamic library to open.
  @return 0 on success, -1 on failure.
 */
-int cc_dlopen(CCCC *vm, const char *lib_path);
+int cc_dlopen(VirtualMachine *vm, const char *lib_path);
 
 /*!
  @function cc_dlsym
@@ -2660,7 +2659,7 @@ int cc_dlopen(CCCC *vm, const char *lib_path);
  @param returns_double 1 if function returns double, 0 if returns long long.
  @return 0 on success, -1 on failure.
 */
-int cc_dlsym(CCCC *vm, const char *name, void *func_ptr, int num_args,
+int cc_dlsym(VirtualMachine *vm, const char *name, void *func_ptr, int num_args,
              int returns_double);
 
 #ifdef __cplusplus

@@ -20,7 +20,7 @@
 #include "cccc.h"
 #include "./internal.h"
 
-static Token *must_tokenize_file(CCCC *vm, char *path) {
+static Token *must_tokenize_file(VirtualMachine *vm, char *path) {
     Token *tok = tokenize_file(vm, path);
     if (!tok)
         error("%s: %s", path, strerror(errno));
@@ -38,7 +38,7 @@ static Token *append_tokens(Token *tok1, Token *tok2) {
     return tok1;
 }
 
-Token *cc_preprocess(CCCC *vm, const char *path) {
+Token *cc_preprocess(VirtualMachine *vm, const char *path) {
     Token *tok = NULL;
 
     // Process -include option
@@ -70,7 +70,7 @@ Token *cc_preprocess(CCCC *vm, const char *path) {
     return tok;
 }
 
-Obj *cc_parse(CCCC *vm, Token *tok) {
+Obj *cc_parse(VirtualMachine *vm, Token *tok) {
     return parse(vm, tok);
 }
 
@@ -89,7 +89,7 @@ void cc_print_tokens(Token *tok) {
     fprintf(out, "\n");
 }
 
-Obj *cc_link_progs(CCCC *vm, Obj **progs, int count) {
+Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
     if (!vm || !progs || count <= 0)
         error("cc_link_progs: invalid arguments");
     if (count == 1)

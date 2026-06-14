@@ -14,7 +14,7 @@
 
 #define STREQ_LIT(s, lit) (strncmp((s), (lit), sizeof(lit)) == 0)
 
-static int is_valid_vm_address(CCCC *vm, void *addr) {
+static int is_valid_vm_address(VirtualMachine *vm, void *addr) {
     long long ptr = (long long)addr;
     // Text segment
     if (ptr >= (long long)vm->text_seg &&
@@ -28,7 +28,7 @@ static int is_valid_vm_address(CCCC *vm, void *addr) {
     return 0;
 }
 
-static Obj *debugger_current_function(CCCC *vm) {
+static Obj *debugger_current_function(VirtualMachine *vm) {
     if (!vm || vm->pc == CCCC_INVALID_PC)
         return NULL;
 
@@ -42,7 +42,7 @@ static Obj *debugger_current_function(CCCC *vm) {
     return NULL;
 }
 
-static void *debugger_symbol_address(CCCC *vm, DebugSymbol *sym) {
+static void *debugger_symbol_address(VirtualMachine *vm, DebugSymbol *sym) {
     if (!sym)
         return NULL;
     if (sym->is_local) {
@@ -54,7 +54,7 @@ static void *debugger_symbol_address(CCCC *vm, DebugSymbol *sym) {
     return (void *)(vm->data_seg + sym->offset);
 }
 
-static int debugger_resolve_watch_expr(CCCC *vm, const char *expr, void **addr,
+static int debugger_resolve_watch_expr(VirtualMachine *vm, const char *expr, void **addr,
                                        int *size) {
     long long raw_addr;
     if (sscanf(expr, "%llx", &raw_addr) == 1) {
@@ -72,7 +72,7 @@ static int debugger_resolve_watch_expr(CCCC *vm, const char *expr, void **addr,
     return is_valid_vm_address(vm, *addr);
 }
 
-void debugger_init(CCCC *vm) {
+void debugger_init(VirtualMachine *vm) {
     vm->flags |= CCCC_ENABLE_DEBUGGER;  // Make sure it's enabled
     vm->dbg.num_breakpoints = 0;
     vm->dbg.num_watchpoints = 0;  // Initialize watchpoint counter
@@ -103,7 +103,7 @@ void debugger_init(CCCC *vm) {
     }
 }
 
-int cc_add_breakpoint(CCCC *vm, CCCCPc pc) {
+int cc_add_breakpoint(VirtualMachine *vm, Pc pc) {
     if (vm->dbg.num_breakpoints >= MAX_BREAKPOINTS) {
         printf("Error: Maximum number of breakpoints (%d) reached\n", MAX_BREAKPOINTS);
         return -1;
@@ -135,7 +135,7 @@ int cc_add_breakpoint(CCCC *vm, CCCCPc pc) {
     return -1;
 }
 
-void cc_remove_breakpoint(CCCC *vm, int index) {
+void cc_remove_breakpoint(VirtualMachine *vm, int index) {
     if (index < 0 || index >= MAX_BREAKPOINTS) {
         printf("Error: Invalid breakpoint index %d\n", index);
         return;
@@ -158,9 +158,9 @@ void cc_remove_breakpoint(CCCC *vm, int index) {
     printf("Breakpoint #%d removed\n", index);
 }
 
-static int debugger_eval_condition(CCCC *vm, const char *condition_str);
+static int debugger_eval_condition(VirtualMachine *vm, const char *condition_str);
 
-int debugger_check_breakpoint(CCCC *vm) {
+int debugger_check_breakpoint(VirtualMachine *vm) {
     // Safety check
     if (!vm) {
         return 0;
@@ -184,7 +184,7 @@ int debugger_check_breakpoint(CCCC *vm) {
     return 0;
 }
 
-void debugger_list_breakpoints(CCCC *vm) {
+void debugger_list_breakpoints(VirtualMachine *vm) {
     if (vm->dbg.num_breakpoints == 0) {
         printf("No breakpoints set.\n");
         return;
@@ -211,7 +211,7 @@ void debugger_list_breakpoints(CCCC *vm) {
     printf("\n");
 }
 
-void debugger_print_registers(CCCC *vm) {
+void debugger_print_registers(VirtualMachine *vm) {
     printf("\n=== Registers ===\n");
     printf("  A0 (return):  0x%016llx (%lld)\n", vm->regs[REG_A0], vm->regs[REG_A0]);
     if (vm->fregs[FREG_A0].tag == CCCC_FREG_F32) {
@@ -229,7 +229,7 @@ void debugger_print_registers(CCCC *vm) {
     printf("\n");
 }
 
-void debugger_print_stack(CCCC *vm, int count) {
+void debugger_print_stack(VirtualMachine *vm, int count) {
     printf("\n=== Stack (top %d entries) ===\n", count);
 
     long long *sp = vm->sp;
@@ -253,7 +253,7 @@ static const char* opcode_name(int op) {
 }
 
 // Returns the number of words consumed by the instruction (including opcode)
-static int disassemble_instruction(CCCC *vm, CCCCPc pc) {
+static int disassemble_instruction(VirtualMachine *vm, Pc pc) {
     if (pc > vm->text_ptr) return 0;
 
     int op = (int)vm->text_seg[pc];
@@ -265,27 +265,27 @@ static int disassemble_instruction(CCCC *vm, CCCCPc pc) {
     if (size <= 0)
         size = 1;
 
-    for (int i = 1; i < size && pc + (CCCCPc)i <= vm->text_ptr; i++) {
-        printf(" %u", vm->text_seg[pc + (CCCCPc)i]);
+    for (int i = 1; i < size && pc + (Pc)i <= vm->text_ptr; i++) {
+        printf(" %u", vm->text_seg[pc + (Pc)i]);
     }
     if (op == JMPT && pc + 3 <= vm->text_ptr) {
-        CCCCPc table_pc = vm->text_seg[pc + 1];
-        CCCCInstrWord count = vm->text_seg[pc + 2];
-        if (table_pc == pc + 4 && table_pc + (CCCCPc)count <= vm->text_ptr + 1)
+        Pc table_pc = vm->text_seg[pc + 1];
+        InstrWord count = vm->text_seg[pc + 2];
+        if (table_pc == pc + 4 && table_pc + (Pc)count <= vm->text_ptr + 1)
             size += (int)count;
     }
     printf("\n");
     return size;
 }
 
-void cc_disassemble(CCCC *vm) {
+void cc_disassemble(VirtualMachine *vm) {
     if (!vm || !vm->text_seg) return;
 
     printf("=== Disassembly ===\n");
     // text_seg[0] is the entry point offset, not an instruction
     printf("Entry point: %u\n", vm->text_seg[0]);
 
-    CCCCPc pc = 1;
+    Pc pc = 1;
     while (pc <= vm->text_ptr) {
         int size = disassemble_instruction(vm, pc);
         if (size == 0) break;
@@ -294,7 +294,7 @@ void cc_disassemble(CCCC *vm) {
     printf("===================\n");
 }
 
-void debugger_disassemble_current(CCCC *vm) {
+void debugger_disassemble_current(VirtualMachine *vm) {
     if (vm->pc == CCCC_INVALID_PC || vm->pc > vm->text_ptr) {
         printf("PC out of text segment range\n");
         return;
@@ -333,7 +333,7 @@ static void print_help(void) {
     printf("\n");
 }
 
-static void debugger_print_source_location(CCCC *vm) {
+static void debugger_print_source_location(VirtualMachine *vm) {
     File *file = NULL;
     int line_no = 0;
     int col_no = 0;
@@ -372,7 +372,7 @@ static void debugger_print_source_location(CCCC *vm) {
     }
 }
 
-void cc_debug_repl(CCCC *vm) {
+void cc_debug_repl(VirtualMachine *vm) {
     char line[256];
     char cmd[64];
 
@@ -437,7 +437,7 @@ void cc_debug_repl(CCCC *vm) {
                 // (op word + one operand word). Stop there after the call
                 // returns instead of stepping into the callee.
                 vm->dbg.step_over_return_addr =
-                    vm->pc + (CCCCPc)cc_instr_words(op);
+                    vm->pc + (Pc)cc_instr_words(op);
             } else {
                 // Not a call instruction: nothing to skip, just single-step.
                 vm->dbg.step_over = 0;
@@ -471,7 +471,7 @@ void cc_debug_repl(CCCC *vm) {
         else if (STREQ_LIT(cmd, "break") || STREQ_LIT(cmd, "b")) {
             char arg[128];
             char *condition = NULL;
-            CCCCPc bp_pc = CCCC_INVALID_PC;
+            Pc bp_pc = CCCC_INVALID_PC;
 
             // Try to parse arguments and extract condition if present
             // Format: break <location> [if <condition>]
@@ -526,7 +526,7 @@ void cc_debug_repl(CCCC *vm) {
                     } else {
                         // Large number, treat as bytecode instruction index.
                         bp_pc = (num >= 0 && num <= vm->text_ptr)
-                                    ? (CCCCPc)num
+                                    ? (Pc)num
                                     : CCCC_INVALID_PC;
                         if (bp_pc == CCCC_INVALID_PC) {
                             printf("Error: Offset %lld is out of range\n", num);
@@ -681,7 +681,7 @@ void cc_debug_repl(CCCC *vm) {
     vm->dbg.debugger_attached = 0;
 }
 
-int debugger_run(CCCC *vm, int argc, char **argv) {
+int debugger_run(VirtualMachine *vm, int argc, char **argv) {
     // Find main function
     Obj *main_fn = NULL;
     for (Obj *obj = vm->compiler.globals; obj; obj = obj->next) {
@@ -704,7 +704,7 @@ int debugger_run(CCCC *vm, int argc, char **argv) {
 
     // Override PC to main; cc_run_at already set up the stack, registers,
     // and sentinel return address correctly using poolsize_max.
-    vm->pc = (CCCCPc)main_fn->code_addr;
+    vm->pc = (Pc)main_fn->code_addr;
 
     printf("Starting debugger at main (PC: %u)\n", vm->pc);
 
@@ -720,7 +720,7 @@ int debugger_run(CCCC *vm, int argc, char **argv) {
 // Source Mapping Functions (for source-level debugging)
 // ============================================================================
 
-int cc_get_source_location(CCCC *vm, CCCCPc pc, File **out_file, int *out_line, int *out_col) {
+int cc_get_source_location(VirtualMachine *vm, Pc pc, File **out_file, int *out_line, int *out_col) {
     if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !vm->dbg.source_map || vm->dbg.source_map_count == 0) {
         return 0;
     }
@@ -761,7 +761,7 @@ int cc_get_source_location(CCCC *vm, CCCCPc pc, File **out_file, int *out_line, 
     return 1;
 }
 
-CCCCPc cc_find_pc_for_source(CCCC *vm, File *file, int line) {
+Pc cc_find_pc_for_source(VirtualMachine *vm, File *file, int line) {
     if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !vm->dbg.source_index || vm->dbg.source_index_count == 0) {
         return CCCC_INVALID_PC;
     }
@@ -799,7 +799,7 @@ CCCCPc cc_find_pc_for_source(CCCC *vm, File *file, int line) {
     return CCCC_INVALID_PC;
 }
 
-CCCCPc cc_find_function_entry(CCCC *vm, const char *name) {
+Pc cc_find_function_entry(VirtualMachine *vm, const char *name) {
     if (!name) {
         return CCCC_INVALID_PC;
     }
@@ -809,7 +809,7 @@ CCCCPc cc_find_function_entry(CCCC *vm, const char *name) {
         if (fn->is_function && fn->name && strlen(fn->name) == strlen(name) &&
             strncmp(fn->name, name, strlen(name)) == 0) {
             if (fn->code_addr >= 0) {
-                return (CCCCPc)fn->code_addr;
+                return (Pc)fn->code_addr;
             }
         }
     }
@@ -817,7 +817,7 @@ CCCCPc cc_find_function_entry(CCCC *vm, const char *name) {
     return CCCC_INVALID_PC;
 }
 
-DebugSymbol *cc_lookup_symbol(CCCC *vm, const char *name) {
+DebugSymbol *cc_lookup_symbol(VirtualMachine *vm, const char *name) {
     if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !name) {
         return NULL;
     }
@@ -852,9 +852,9 @@ DebugSymbol *cc_lookup_symbol(CCCC *vm, const char *name) {
 // Condition Evaluator for Conditional Breakpoints
 // ============================================================================
 
-static long long eval_ast_node(CCCC *vm, Node *node, int *error);
+static long long eval_ast_node(VirtualMachine *vm, Node *node, int *error);
 
-static int debugger_find_ffi_function(CCCC *vm, const char *name) {
+static int debugger_find_ffi_function(VirtualMachine *vm, const char *name) {
     if (!vm || !name)
         return -1;
 
@@ -966,7 +966,7 @@ static void debugger_write_scalar(void *addr, Type *ty, long long val) {
     }
 }
 
-static long long eval_ast_addr(CCCC *vm, Node *node, int *error) {
+static long long eval_ast_addr(VirtualMachine *vm, Node *node, int *error) {
     if (!node) {
         *error = 1;
         return 0;
@@ -981,7 +981,7 @@ static long long eval_ast_addr(CCCC *vm, Node *node, int *error) {
         }
 
         if (node->var->is_function)
-            return cc_pc_to_byte_offset((CCCCPc)node->var->code_addr);
+            return cc_pc_to_byte_offset((Pc)node->var->code_addr);
 
         DebugSymbol *sym = cc_lookup_symbol(vm, node->var->name);
         if (sym)
@@ -1036,7 +1036,7 @@ static void debugger_write_bitfield(Node *node, void *addr, long long val) {
     debugger_write_scalar(addr, mem->ty, (long long)raw);
 }
 
-static long long debugger_eval_direct_call(CCCC *vm, Node *node, int *error) {
+static long long debugger_eval_direct_call(VirtualMachine *vm, Node *node, int *error) {
     // PLACEHOLDER: support full debugger condition call ABI including floats,
     // structs/unions, variadics, indirect calls, nested static links, and
     // stack-passed arguments.
@@ -1109,10 +1109,10 @@ static long long debugger_eval_direct_call(CCCC *vm, Node *node, int *error) {
         }
 
         long long saved_regs[32];
-        CCCCFReg saved_fregs[32];
+        FReg saved_fregs[32];
         memcpy(saved_regs, vm->regs, sizeof(saved_regs));
         memcpy(saved_fregs, vm->fregs, sizeof(saved_fregs));
-        CCCCPc saved_pc = vm->pc;
+        Pc saved_pc = vm->pc;
         long long *saved_bp = vm->bp;
         long long *saved_sp = vm->sp;
         long long *saved_shadow_sp = vm->shadow_sp;
@@ -1120,7 +1120,7 @@ static long long debugger_eval_direct_call(CCCC *vm, Node *node, int *error) {
         int saved_single_step = vm->dbg.single_step;
         int saved_step_over = vm->dbg.step_over;
         int saved_step_out = vm->dbg.step_out;
-        CCCCPc saved_step_over_return_addr = vm->dbg.step_over_return_addr;
+        Pc saved_step_over_return_addr = vm->dbg.step_over_return_addr;
         long long *saved_step_out_bp = vm->dbg.step_out_bp;
         int saved_debugger_attached = vm->dbg.debugger_attached;
 
@@ -1137,7 +1137,7 @@ static long long debugger_eval_direct_call(CCCC *vm, Node *node, int *error) {
         if (vm->flags & CCCC_CFI)
             *--vm->shadow_sp = 0;
         *--vm->sp = 0;
-        vm->pc = (CCCCPc)fn->code_addr;
+        vm->pc = (Pc)fn->code_addr;
         int rc = vm_eval(vm);
         long long result = vm->regs[REG_A0];
 
@@ -1169,7 +1169,7 @@ static long long debugger_eval_direct_call(CCCC *vm, Node *node, int *error) {
 }
 
 // Evaluate an AST node in the current debugger context.
-static long long eval_ast_node(CCCC *vm, Node *node, int *error) {
+static long long eval_ast_node(VirtualMachine *vm, Node *node, int *error) {
     if (!node) {
         *error = 1;
         return 0;
@@ -1428,7 +1428,7 @@ static long long eval_ast_node(CCCC *vm, Node *node, int *error) {
 
 // Evaluate a condition string and return true/false
 // Returns: 1 if condition is true, 0 if false or error
-static int debugger_eval_condition(CCCC *vm, const char *condition_str) {
+static int debugger_eval_condition(VirtualMachine *vm, const char *condition_str) {
     if (!condition_str || !*condition_str) {
         return 1;  // Empty condition is always true
     }
@@ -1491,7 +1491,7 @@ static int debugger_eval_condition(CCCC *vm, const char *condition_str) {
 // Watchpoint Management Functions
 // ============================================================================
 
-int cc_add_watchpoint(CCCC *vm, void *address, int size, int type, const char *expr) {
+int cc_add_watchpoint(VirtualMachine *vm, void *address, int size, int type, const char *expr) {
     if (vm->dbg.num_watchpoints >= MAX_WATCHPOINTS) {
         printf("Error: Maximum number of watchpoints (%d) reached\n", MAX_WATCHPOINTS);
         return -1;
@@ -1537,7 +1537,7 @@ int cc_add_watchpoint(CCCC *vm, void *address, int size, int type, const char *e
     return -1;
 }
 
-void cc_remove_watchpoint(CCCC *vm, int index) {
+void cc_remove_watchpoint(VirtualMachine *vm, int index) {
     if (index < 0 || index >= MAX_WATCHPOINTS) {
         printf("Error: Invalid watchpoint index %d\n", index);
         return;
@@ -1561,7 +1561,7 @@ void cc_remove_watchpoint(CCCC *vm, int index) {
 
 // Check if a memory access triggers any watchpoints
 // Returns: watchpoint index if triggered, -1 otherwise
-int debugger_check_watchpoint(CCCC *vm, void *addr, int size, int access_type) {
+int debugger_check_watchpoint(VirtualMachine *vm, void *addr, int size, int access_type) {
     // Safety checks
     if (!vm || !(vm->flags & CCCC_ENABLE_DEBUGGER) || vm->dbg.num_watchpoints == 0 || !addr) {
         return -1;

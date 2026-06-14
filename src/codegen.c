@@ -23,7 +23,7 @@
 
 // ========== FFI Helper ==========
 
-static int find_ffi_function(CCCC *vm, const char *name) {
+static int find_ffi_function(VirtualMachine *vm, const char *name) {
     if (!vm || !name)
         return -1;
 
@@ -79,7 +79,7 @@ static bool is_extern_func_name(Node *node, const char *name) {
            memcmp(node->var->name, name, strlen(name)) == 0;
 }
 
-static void add_data_reloc(CCCC *vm, long long data_offset, int target_segment,
+static void add_data_reloc(VirtualMachine *vm, long long data_offset, int target_segment,
                            long long target_offset, long long addend) {
     if (vm->compiler.num_data_relocs >= MAX_CALLS)
         error("too many data relocations");
@@ -93,7 +93,7 @@ static void add_data_reloc(CCCC *vm, long long data_offset, int target_segment,
     vm->compiler.num_data_relocs++;
 }
 
-static void apply_global_relocations(CCCC *vm, Obj *prog) {
+static void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
     for (Obj *var = prog; var; var = var->next) {
         if (var->is_function)
             continue;
@@ -115,7 +115,7 @@ static void apply_global_relocations(CCCC *vm, Obj *prog) {
                     error("unsupported relocation to undefined function: %s",
                           target->name);
                 segment = 1;
-                target_offset = cc_pc_to_byte_offset((CCCCPc)target->code_addr);
+                target_offset = cc_pc_to_byte_offset((Pc)target->code_addr);
                 value = target_offset + rel->addend;
             } else {
                 segment = 0;
@@ -137,7 +137,7 @@ static Obj *find_function_definition_for_patch(HashMap *fn_defs, Obj *target) {
     return hashmap_get(fn_defs, target->name);
 }
 
-static void add_debug_symbol(CCCC *vm, char *name, long long offset, Type *ty,
+static void add_debug_symbol(VirtualMachine *vm, char *name, long long offset, Type *ty,
                              int is_local, Obj *owner_fn) {
     if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !name || !*name)
         return;
@@ -210,27 +210,27 @@ typedef struct {
     bool address_escapes;
 } PromotionCandidate;
 
-static int promoted_local_index(CCCC *vm, Obj *var) {
+static int promoted_local_index(VirtualMachine *vm, Obj *var) {
     for (int i = 0; i < vm->compiler.promoted_count; i++)
         if (vm->compiler.promoted_locals[i] == var)
             return i;
     return -1;
 }
 
-static bool is_promoted_local(CCCC *vm, Obj *var) {
+static bool is_promoted_local(VirtualMachine *vm, Obj *var) {
     return promoted_local_index(vm, var) >= 0;
 }
 
-static int promoted_local_reg(CCCC *vm, Obj *var) {
+static int promoted_local_reg(VirtualMachine *vm, Obj *var) {
     int idx = promoted_local_index(vm, var);
     return idx >= 0 ? vm->compiler.promoted_regs[idx] : -1;
 }
 
-static void promotion_alias_reset(CCCC *vm) {
+static void promotion_alias_reset(VirtualMachine *vm) {
     vm->compiler.promotion_alias_count = 0;
 }
 
-static void promotion_alias_add(CCCC *vm, Obj *alias, Obj *target) {
+static void promotion_alias_add(VirtualMachine *vm, Obj *alias, Obj *target) {
     if (!alias || !target || vm->compiler.promotion_alias_count >= 16)
         return;
     for (int i = 0; i < vm->compiler.promotion_alias_count; i++) {
@@ -244,14 +244,14 @@ static void promotion_alias_add(CCCC *vm, Obj *alias, Obj *target) {
     vm->compiler.promotion_alias_targets[idx] = target;
 }
 
-static Obj *promotion_alias_target(CCCC *vm, Obj *alias) {
+static Obj *promotion_alias_target(VirtualMachine *vm, Obj *alias) {
     for (int i = 0; i < vm->compiler.promotion_alias_count; i++)
         if (vm->compiler.promotion_alias_vars[i] == alias)
             return vm->compiler.promotion_alias_targets[i];
     return NULL;
 }
 
-static Obj *promoted_deref_target(CCCC *vm, Node *node) {
+static Obj *promoted_deref_target(VirtualMachine *vm, Node *node) {
     if (!node || node->kind != ND_DEREF || !node->lhs ||
         node->lhs->kind != ND_VAR)
         return NULL;
@@ -276,7 +276,7 @@ static bool is_scalar_promotion_type(Type *ty) {
     }
 }
 
-static bool promotion_candidate_ok(CCCC *vm, Obj *fn, Obj *var) {
+static bool promotion_candidate_ok(VirtualMachine *vm, Obj *fn, Obj *var) {
     if (!var || !var->is_local || var->is_block_var || var->is_captured ||
         var->is_static || var == fn->va_area || var == fn->alloca_bottom)
         return false;
@@ -306,7 +306,7 @@ static bool is_synthetic_addr_assignment(Node *parent, Node *addr_node) {
     return lhs->is_local && (!lhs->name || lhs->name[0] == '\0');
 }
 
-static void collect_promotion_candidates(CCCC *vm, Obj *fn, Node *node,
+static void collect_promotion_candidates(VirtualMachine *vm, Obj *fn, Node *node,
                                          Node *parent,
                                          PromotionCandidate *cands, int count,
                                          int loop_depth) {
@@ -361,7 +361,7 @@ static int promotion_candidate_cmp(const void *a, const void *b) {
     return cb->score - ca->score;
 }
 
-static void prepare_local_promotion(CCCC *vm, Obj *fn, int base_stack_size) {
+static void prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size) {
     vm->compiler.promoted_count = 0;
     promotion_alias_reset(vm);
     memset(vm->compiler.promoted_locals, 0, sizeof(vm->compiler.promoted_locals));
@@ -568,7 +568,7 @@ static int var_stack_slots(Obj *var) {
     return 1;
 }
 
-static Node *clone_expr(CCCC *vm, Node *src) {
+static Node *clone_expr(VirtualMachine *vm, Node *src) {
     if (!src)
         return NULL;
     Node *n = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
@@ -594,7 +594,7 @@ static Node *clone_expr(CCCC *vm, Node *src) {
     return n;
 }
 
-static Node *clone_subst(CCCC *vm, Node *src, Obj *params, Node *args) {
+static Node *clone_subst(VirtualMachine *vm, Node *src, Obj *params, Node *args) {
     if (!src)
         return NULL;
     if (src->kind == ND_VAR && src->var) {
@@ -635,12 +635,12 @@ static Node *clone_subst(CCCC *vm, Node *src, Obj *params, Node *args) {
 
 typedef struct {
     char *name;
-    CCCCPc offset;
+    Pc offset;
 } LabelDef;
 
 typedef struct {
     char *name;
-    CCCCPc patch_location;
+    Pc patch_location;
     bool text_relative;
 } LabelPatch;
 
@@ -656,7 +656,7 @@ static void reset_labels(void) {
 }
 
 // Define a label at the current position
-static void define_label(CCCC *vm, char *name) {
+static void define_label(VirtualMachine *vm, char *name) {
     if (!name)
         return;
     if (num_label_defs >= MAX_LABELS) {
@@ -668,7 +668,7 @@ static void define_label(CCCC *vm, char *name) {
 }
 
 // Record a jump that needs to be patched later
-static void add_label_patch(char *name, CCCCPc patch_location,
+static void add_label_patch(char *name, Pc patch_location,
                             bool text_relative) {
     if (!name)
         return;
@@ -682,7 +682,7 @@ static void add_label_patch(char *name, CCCCPc patch_location,
 }
 
 // Patch all forward references to labels
-static void patch_labels(CCCC *vm) {
+static void patch_labels(VirtualMachine *vm) {
     HashMap label_map = {};
     for (int i = 0; i < num_label_defs; i++)
         hashmap_put(&label_map, label_defs[i].name,
@@ -690,8 +690,8 @@ static void patch_labels(CCCC *vm) {
 
     for (int i = 0; i < num_label_patches; i++) {
         char *name = label_patches[i].name;
-        CCCCPc patch = label_patches[i].patch_location;
-        CCCCPc offset = (CCCCPc)(uintptr_t)hashmap_get(&label_map, name);
+        Pc patch = label_patches[i].patch_location;
+        Pc offset = (Pc)(uintptr_t)hashmap_get(&label_map, name);
         if (!offset)
             continue;
 
@@ -707,10 +707,10 @@ static void patch_labels(CCCC *vm) {
 
 // ========== Emit Helpers ==========
 
-static void emit_word(CCCC *vm, CCCCInstrWord word) {
+static void emit_word(VirtualMachine *vm, InstrWord word) {
     if (!vm || !vm->text_seg)
         error("codegen: text segment not initialized");
-    if (vm->text_ptr + 1 >= (CCCCPc)(vm->text_committed / sizeof(CCCCInstrWord))) {
+    if (vm->text_ptr + 1 >= (Pc)(vm->text_committed / sizeof(InstrWord))) {
         if (vm_text_ensure_count(vm, vm->text_ptr + 2) != 0)
             error("codegen: text segment overflow (limit: %d instructions)",
                   vm->poolsize_max);
@@ -718,10 +718,10 @@ static void emit_word(CCCC *vm, CCCCInstrWord word) {
     vm->text_seg[++vm->text_ptr] = word;
 }
 
-static CCCCPc emit_word_ptr(CCCC *vm) {
+static Pc emit_word_ptr(VirtualMachine *vm) {
     if (!vm || !vm->text_seg)
         error("codegen: text segment not initialized");
-    if (vm->text_ptr + 1 >= (CCCCPc)(vm->text_committed / sizeof(CCCCInstrWord))) {
+    if (vm->text_ptr + 1 >= (Pc)(vm->text_committed / sizeof(InstrWord))) {
         if (vm_text_ensure_count(vm, vm->text_ptr + 2) != 0)
             error("codegen: text segment overflow (limit: %d instructions)",
                   vm->poolsize_max);
@@ -729,54 +729,54 @@ static CCCCPc emit_word_ptr(CCCC *vm) {
     return ++vm->text_ptr;
 }
 
-static CCCCPc emit_i64(CCCC *vm, long long val) {
-    CCCCPc loc = emit_word_ptr(vm);
+static Pc emit_i64(VirtualMachine *vm, long long val) {
+    Pc loc = emit_word_ptr(vm);
     vm->text_seg[loc] = cc_i64_lo(val);
     emit_word(vm, cc_i64_hi(val));
     return loc;
 }
 
-static void check_data_capacity(CCCC *vm, long long needed) {
+static void check_data_capacity(VirtualMachine *vm, long long needed) {
     if (vm_data_ensure(vm, needed) != 0)
         error("codegen: data segment overflow (limit: %d bytes)", vm->poolsize_max);
 }
 
-static void emit(CCCC *vm, int instruction) {
+static void emit(VirtualMachine *vm, int instruction) {
     emit_word(vm, instruction);
 }
 
-static void emit_with_arg(CCCC *vm, int instruction, long long arg) {
+static void emit_with_arg(VirtualMachine *vm, int instruction, long long arg) {
     emit_word(vm, instruction);
     emit_i64(vm, arg);
 }
 
 // 3-register ops: [OP] [rd:8|rs1:8|rs2:8|unused:40]
-static void emit_rrr(CCCC *vm, int op, int rd, int rs1, int rs2) {
+static void emit_rrr(VirtualMachine *vm, int op, int rd, int rs1, int rs2) {
     emit_word(vm, op);
     emit_word(vm, ENCODE_RRR(rd, rs1, rs2));
 }
 
 // 2-register ops: [OP] [rd:8|rs1:8|unused:48]
-static void emit_rr(CCCC *vm, int op, int rd, int rs1) {
+static void emit_rr(VirtualMachine *vm, int op, int rd, int rs1) {
     emit_word(vm, op);
     emit_word(vm, ENCODE_RR(rd, rs1));
 }
 
 // 1-register + immediate: [OP] [rd:8|unused:24] [imm:64]
-static CCCCPc emit_ri(CCCC *vm, int op, int rd, long long imm) {
+static Pc emit_ri(VirtualMachine *vm, int op, int rd, long long imm) {
     emit_word(vm, op);
     emit_word(vm, ENCODE_R(rd));
     return emit_i64(vm, imm);
 }
 
 // Register + register + immediate: [OP] [rd:8|rs:8|unused:16] [imm:64]
-static CCCCPc emit_rri(CCCC *vm, int op, int rd, int rs, long long imm) {
+static Pc emit_rri(VirtualMachine *vm, int op, int rd, int rs, long long imm) {
     emit_word(vm, op);
     emit_word(vm, ENCODE_RR(rd, rs));
     return emit_i64(vm, imm);
 }
 
-static CCCCPc emit_rrrs_i(CCCC *vm, int op, int rd, int base, int index,
+static Pc emit_rrrs_i(VirtualMachine *vm, int op, int rd, int base, int index,
                           int scale, long long offset) {
     emit_word(vm, op);
     emit_word(vm, ENCODE_RRRS(rd, base, index, scale));
@@ -784,13 +784,13 @@ static CCCCPc emit_rrrs_i(CCCC *vm, int op, int rd, int base, int index,
 }
 
 // Float 3-register ops
-static void emit_frrr(CCCC *vm, int op, int rd, int rs1, int rs2) {
+static void emit_frrr(VirtualMachine *vm, int op, int rd, int rs1, int rs2) {
     emit_word(vm, op);
     emit_word(vm, ENCODE_RRR(rd, rs1, rs2));
 }
 
 // Float 2-register ops
-static void emit_frr(CCCC *vm, int op, int rd, int rs1) {
+static void emit_frr(VirtualMachine *vm, int op, int rd, int rs1) {
     emit_word(vm, op);
     emit_word(vm, ENCODE_RR(rd, rs1));
 }
@@ -798,38 +798,38 @@ static void emit_frr(CCCC *vm, int op, int rd, int rs1) {
 // ========== Specific Emit Helpers ==========
 
 // LI3: rd = immediate
-static CCCCPc emit_li3(CCCC *vm, int rd, long long imm) {
+static Pc emit_li3(VirtualMachine *vm, int rd, long long imm) {
     return emit_ri(vm, LI3, rd, imm);
 }
 
-static CCCCPc emit_lda3(CCCC *vm, int rd, long long offset) {
+static Pc emit_lda3(VirtualMachine *vm, int rd, long long offset) {
     return emit_ri(vm, LDA3, rd, offset);
 }
 
-static CCCCPc emit_lta3(CCCC *vm, int rd, long long offset) {
+static Pc emit_lta3(VirtualMachine *vm, int rd, long long offset) {
     return emit_ri(vm, LTA3, rd, offset);
 }
 
 // LEA3: rd = bp + offset
-static CCCCPc emit_lea3(CCCC *vm, int rd, long long offset) {
+static Pc emit_lea3(VirtualMachine *vm, int rd, long long offset) {
     return emit_ri(vm, LEA3, rd, offset);
 }
 
 // ADDI3: rd = rs + immediate
-static CCCCPc emit_addi3(CCCC *vm, int rd, int rs, long long imm) {
+static Pc emit_addi3(VirtualMachine *vm, int rd, int rs, long long imm) {
     return emit_rri(vm, ADDI3, rd, rs, imm);
 }
 
 // MOV3: rd = rs
-static void emit_mov3(CCCC *vm, int rd, int rs) {
+static void emit_mov3(VirtualMachine *vm, int rd, int rs) {
     emit_rrr(vm, MOV3, rd, rs, 0);
 }
 
-static void emit_fmov3(CCCC *vm, int rd, int rs) {
+static void emit_fmov3(VirtualMachine *vm, int rd, int rs) {
     emit_frr(vm, FMOV3, rd, rs);
 }
 
-static void emit_fround_f32(CCCC *vm, int rd, int rs) {
+static void emit_fround_f32(VirtualMachine *vm, int rd, int rs) {
     emit_frr(vm, FROUND_F32, rd, rs);
 }
 
@@ -857,10 +857,10 @@ static int fop_for_type(Type *ty, int f64_op) {
 }
 
 // Load operations based on type
-static void emit_bitint_trunc(CCCC *vm, Type *ty, int reg);
-static void gen_expr(CCCC *vm, Node *node, int dest_reg);
+static void emit_bitint_trunc(VirtualMachine *vm, Type *ty, int reg);
+static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg);
 
-static void emit_load(CCCC *vm, Type *ty, int rd, int rs_addr) {
+static void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr) {
     if (vm->flags & CCCC_POINTER_CHECKS)
         emit_rr(vm, CHKP3, rs_addr, 0);
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
@@ -942,7 +942,7 @@ static bool is_index_scale(Node *node, Node **index, int *scale) {
     return false;
 }
 
-static bool match_indexed_addr(CCCC *vm, Node *addr, IndexedAddr *out) {
+static bool match_indexed_addr(VirtualMachine *vm, Node *addr, IndexedAddr *out) {
     addr = strip_index_casts(addr);
     if (!addr || addr->kind != ND_ADD || vm->compiler.opt_level < 2)
         return false;
@@ -1023,7 +1023,7 @@ static int indexed_store_op(Type *ty) {
     return STR_INDEX_D;
 }
 
-static bool emit_indexed_load_if_possible(CCCC *vm, Node *node, int dest_reg) {
+static bool emit_indexed_load_if_possible(VirtualMachine *vm, Node *node, int dest_reg) {
     if (!node || node->kind != ND_DEREF || !node->lhs ||
         node->ty->kind == TY_ARRAY || node->ty->kind == TY_STRUCT ||
         node->ty->kind == TY_UNION || node->ty->kind == TY_COMPLEX)
@@ -1067,7 +1067,7 @@ static bool emit_indexed_load_if_possible(CCCC *vm, Node *node, int dest_reg) {
     return true;
 }
 
-static bool emit_indexed_store_if_possible(CCCC *vm, Node *lhs, Type *ty,
+static bool emit_indexed_store_if_possible(VirtualMachine *vm, Node *lhs, Type *ty,
                                            int value_reg) {
     if (!lhs || lhs->kind != ND_DEREF || !lhs->lhs ||
         ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_COMPLEX)
@@ -1088,7 +1088,7 @@ static bool emit_indexed_store_if_possible(CCCC *vm, Node *lhs, Type *ty,
 }
 
 // Fused load from bp-relative local slot — replaces LEA3+LDR
-static void emit_local_load(CCCC *vm, Type *ty, int rd, long long offset) {
+static void emit_local_load(VirtualMachine *vm, Type *ty, int rd, long long offset) {
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
         emit_ri(vm, LDR_LOCAL_B, rd, offset);
         if (ty->is_unsigned || ty->kind == TY_BOOL)
@@ -1135,7 +1135,7 @@ static void emit_local_load(CCCC *vm, Type *ty, int rd, long long offset) {
 }
 
 // Fused store to bp-relative local slot — replaces LEA3+STR
-static void emit_local_store(CCCC *vm, Type *ty, int rd_val, long long offset) {
+static void emit_local_store(VirtualMachine *vm, Type *ty, int rd_val, long long offset) {
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
         emit_ri(vm, STR_LOCAL_B, rd_val, offset);
     } else if (ty->kind == TY_SHORT) {
@@ -1160,7 +1160,7 @@ static void emit_local_store(CCCC *vm, Type *ty, int rd_val, long long offset) {
     }
 }
 
-static void emit_normalize_promoted_scalar(CCCC *vm, Type *ty, int reg) {
+static void emit_normalize_promoted_scalar(VirtualMachine *vm, Type *ty, int reg) {
     if (!ty)
         return;
     if (ty->kind == TY_BOOL || ty->kind == TY_CHAR) {
@@ -1181,14 +1181,14 @@ static void emit_normalize_promoted_scalar(CCCC *vm, Type *ty, int reg) {
     }
 }
 
-static void emit_promoted_read(CCCC *vm, Obj *var, int dest_reg) {
+static void emit_promoted_read(VirtualMachine *vm, Obj *var, int dest_reg) {
     int preg = promoted_local_reg(vm, var);
     if (preg < 0 || dest_reg == REG_ZERO)
         return;
     emit_mov3(vm, dest_reg, preg);
 }
 
-static void emit_promoted_write(CCCC *vm, Obj *var, int value_reg) {
+static void emit_promoted_write(VirtualMachine *vm, Obj *var, int value_reg) {
     int idx = promoted_local_index(vm, var);
     if (idx < 0)
         return;
@@ -1199,7 +1199,7 @@ static void emit_promoted_write(CCCC *vm, Obj *var, int value_reg) {
     vm->compiler.promoted_dirty[idx] = true;
 }
 
-static void emit_flush_promoted_locals(CCCC *vm) {
+static void emit_flush_promoted_locals(VirtualMachine *vm) {
     for (int i = 0; i < vm->compiler.promoted_count; i++) {
         if (!vm->compiler.promoted_dirty[i])
             continue;
@@ -1210,19 +1210,19 @@ static void emit_flush_promoted_locals(CCCC *vm) {
     }
 }
 
-static void emit_save_promoted_registers(CCCC *vm) {
+static void emit_save_promoted_registers(VirtualMachine *vm) {
     for (int i = 0; i < vm->compiler.promoted_count; i++)
         emit_local_store(vm, ty_long, vm->compiler.promoted_regs[i],
                          vm->compiler.promoted_save_offsets[i]);
 }
 
-static void emit_restore_promoted_registers(CCCC *vm) {
+static void emit_restore_promoted_registers(VirtualMachine *vm) {
     for (int i = vm->compiler.promoted_count - 1; i >= 0; i--)
         emit_local_load(vm, ty_long, vm->compiler.promoted_regs[i],
                         vm->compiler.promoted_save_offsets[i]);
 }
 
-static void emit_init_promoted_params(CCCC *vm) {
+static void emit_init_promoted_params(VirtualMachine *vm) {
     for (int i = 0; i < vm->compiler.promoted_count; i++) {
         Obj *var = vm->compiler.promoted_locals[i];
         if (var->is_param)
@@ -1232,7 +1232,7 @@ static void emit_init_promoted_params(CCCC *vm) {
 }
 
 // Store operations based on type
-static void emit_store(CCCC *vm, Type *ty, int rd_val, int rs_addr) {
+static void emit_store(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr) {
     if (vm->flags & CCCC_POINTER_CHECKS)
         emit_rr(vm, CHKP3, rs_addr, 0);
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
@@ -1260,7 +1260,7 @@ static void emit_store(CCCC *vm, Type *ty, int rd_val, int rs_addr) {
 // Truncate register to _BitInt(N) value semantics via shift pair.
 // Uses 64-bit shifts: SHL by (64-N) then SHR by (64-N) to mask to N bits.
 // For N==64 the shift is 0 and ops are no-ops.
-static void emit_bitint_trunc(CCCC *vm, Type *ty, int reg) {
+static void emit_bitint_trunc(VirtualMachine *vm, Type *ty, int reg) {
     if (ty->bit_width >= 64)
         return;
     int shift = 64 - ty->bit_width;
@@ -1272,19 +1272,19 @@ static void emit_bitint_trunc(CCCC *vm, Type *ty, int reg) {
 }
 
 // JZ3: if rs == 0, jump (returns patch location)
-static CCCCPc emit_jz3(CCCC *vm, int rs) {
+static Pc emit_jz3(VirtualMachine *vm, int rs) {
     emit(vm, JZ3);
     emit_word(vm, ENCODE_R(rs));
-    CCCCPc patch = emit_word_ptr(vm);
+    Pc patch = emit_word_ptr(vm);
     vm->text_seg[patch] = 0;
     return patch;
 }
 
 // JNZ3: if rs != 0, jump (returns patch location)
-static CCCCPc emit_jnz3(CCCC *vm, int rs) {
+static Pc emit_jnz3(VirtualMachine *vm, int rs) {
     emit(vm, JNZ3);
     emit_word(vm, ENCODE_R(rs));
-    CCCCPc patch = emit_word_ptr(vm);
+    Pc patch = emit_word_ptr(vm);
     vm->text_seg[patch] = 0;
     return patch;
 }
@@ -1293,22 +1293,22 @@ typedef struct {
     Node *node;
     long begin;
     long end;
-    CCCCPc table_entry;
-    CCCCPc *patches;
+    Pc table_entry;
+    Pc *patches;
     int num_patches;
     int cap_patches;
 } SwitchCasePatch;
 
 typedef struct {
-    CCCCPc *items;
+    Pc *items;
     int len;
     int cap;
 } PatchList;
 
-static void add_patch_to_list(PatchList *list, CCCCPc patch) {
+static void add_patch_to_list(PatchList *list, Pc patch) {
     if (list->len == list->cap) {
         int new_cap = list->cap ? list->cap * 2 : 16;
-        CCCCPc *items = realloc(list->items, sizeof(CCCCPc) * new_cap);
+        Pc *items = realloc(list->items, sizeof(Pc) * new_cap);
         if (!items)
             error("out of memory");
         list->items = items;
@@ -1317,10 +1317,10 @@ static void add_patch_to_list(PatchList *list, CCCCPc patch) {
     list->items[list->len++] = patch;
 }
 
-static void add_case_patch(SwitchCasePatch *entry, CCCCPc patch) {
+static void add_case_patch(SwitchCasePatch *entry, Pc patch) {
     if (entry->num_patches == entry->cap_patches) {
         int new_cap = entry->cap_patches ? entry->cap_patches * 2 : 2;
-        CCCCPc *patches = realloc(entry->patches, sizeof(CCCCPc) * new_cap);
+        Pc *patches = realloc(entry->patches, sizeof(Pc) * new_cap);
         if (!patches)
             error("out of memory");
         entry->patches = patches;
@@ -1396,7 +1396,7 @@ static void free_switch_cases(SwitchCasePatch *cases, int num_cases) {
     free(cases);
 }
 
-static void emit_sparse_switch_tree(CCCC *vm, SwitchCasePatch *cases, int lo,
+static void emit_sparse_switch_tree(VirtualMachine *vm, SwitchCasePatch *cases, int lo,
                                     int hi, int r_val, int r_cmp,
                                     PatchList *fail_patches) {
     if (lo > hi) {
@@ -1408,7 +1408,7 @@ static void emit_sparse_switch_tree(CCCC *vm, SwitchCasePatch *cases, int lo,
     int mid = lo + (hi - lo) / 2;
     emit_li3(vm, r_cmp, cases[mid].begin);
     emit_rrr(vm, SLT3, r_cmp, r_val, r_cmp);
-    CCCCPc left_patch = emit_jnz3(vm, r_cmp);
+    Pc left_patch = emit_jnz3(vm, r_cmp);
 
     emit_li3(vm, r_cmp, cases[mid].end);
     emit_rrr(vm, SGT3, r_cmp, r_val, r_cmp);
@@ -1420,23 +1420,23 @@ static void emit_sparse_switch_tree(CCCC *vm, SwitchCasePatch *cases, int lo,
 }
 
 // PSH3: push register value onto stack
-static void emit_psh3(CCCC *vm, int rs) {
+static void emit_psh3(VirtualMachine *vm, int rs) {
     emit(vm, PSH3);
     emit_word(vm, ENCODE_R(rs));
 }
 
 // POP3: pop stack value into register
-static void emit_pop3(CCCC *vm, int rd) {
+static void emit_pop3(VirtualMachine *vm, int rd) {
     emit(vm, POP3);
     emit_word(vm, ENCODE_R(rd));
 }
 
 // ========== Forward Declarations ==========
 
-static void gen_expr(CCCC *vm, Node *node, int dest_reg);
-static void gen_complex_expr(CCCC *vm, Node *node, int real_reg, int imag_reg);
-static void gen_stmt(CCCC *vm, Node *node);
-static void gen_addr(CCCC *vm, Node *node, int dest_reg);
+static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg);
+static void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg, int imag_reg);
+static void gen_stmt(VirtualMachine *vm, Node *node);
+static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg);
 
 // ========== Inline Assembly Passthru ==========
 
@@ -1572,7 +1572,7 @@ static void *compile_asm_to_funcptr(const char *sym_name, const char *asm_str) {
 }
 #endif // !_WIN32
 
-static void cccc_default_asm_passthru(CCCC *vm, const char *asm_str) {
+static void cccc_default_asm_passthru(VirtualMachine *vm, const char *asm_str) {
 #if !defined(_WIN32)
     static int asm_counter = 0;
     char sym_name[128];
@@ -1608,7 +1608,7 @@ static void cccc_default_asm_passthru(CCCC *vm, const char *asm_str) {
 // Respects the FFI allow/deny policy; denied entries are left with func_ptr=NULL
 // (CALLF will emit the "not resolved" error at execution time).
 // Returns 0 on success, -1 on hard failure.
-int cc_rehydrate_asm_passthru(CCCC *vm) {
+int cc_rehydrate_asm_passthru(VirtualMachine *vm) {
 #if !defined(_WIN32)
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
         ForeignFunc *ff = &vm->compiler.ffi_table[i];
@@ -1701,7 +1701,7 @@ static int calculate_chain_depth(Obj *current_fn, Obj *owner_fn) {
 // Returns true when a ND_VAR node can be loaded/stored with a fused
 // LDR_LOCAL/STR_LOCAL opcode instead of a LEA3+LDR/STR pair.
 // Requires: node->kind == ND_VAR.
-static bool is_simple_local_scalar(CCCC *vm, Node *node) {
+static bool is_simple_local_scalar(VirtualMachine *vm, Node *node) {
     if (!node->var->is_local)
         return false;
     if (node->var->is_block_var)
@@ -1725,7 +1725,7 @@ static bool is_simple_local_scalar(CCCC *vm, Node *node) {
 
 // Register stack variable metadata for runtime instrumentation.
 // Uses integer key (var->offset) so ops can look it up with hashmap_get_int.
-static void add_stack_var_meta(CCCC *vm, const char *name, long long offset,
+static void add_stack_var_meta(VirtualMachine *vm, const char *name, long long offset,
                                Type *ty, int scope_id) {
     if (!(vm->flags & CCCC_STACK_INSTR))
         return;
@@ -1741,50 +1741,50 @@ static void add_stack_var_meta(CCCC *vm, const char *name, long long offset,
 }
 
 // Emit SCOPEIN for scope_id.
-static void emit_scopein(CCCC *vm, int scope_id) {
+static void emit_scopein(VirtualMachine *vm, int scope_id) {
     emit(vm, SCOPEIN);
     emit_word(vm, scope_id);
 }
 
 // Emit SCOPEOUT for scope_id.
-static void emit_scopeout(CCCC *vm, int scope_id) {
+static void emit_scopeout(VirtualMachine *vm, int scope_id) {
     emit(vm, SCOPEOUT);
     emit_word(vm, scope_id);
 }
 
 // Emit CHKI (check initialized) for local at bp+offset.
-static void emit_chki(CCCC *vm, long long offset) {
+static void emit_chki(VirtualMachine *vm, long long offset) {
     emit(vm, CHKI);
     emit_i64(vm, offset);
 }
 
 // Emit MARKI (mark initialized) for local at bp+offset.
-static void emit_marki(CCCC *vm, long long offset) {
+static void emit_marki(VirtualMachine *vm, long long offset) {
     emit(vm, MARKI);
     emit_i64(vm, offset);
 }
 
 // Emit CHKL (check liveness) for local at bp+offset.
-static void emit_chkl(CCCC *vm, long long offset) {
+static void emit_chkl(VirtualMachine *vm, long long offset) {
     emit(vm, CHKL);
     emit_i64(vm, offset);
 }
 
 // Emit MARKR (mark read) for local at bp+offset.
-static void emit_markr(CCCC *vm, long long offset) {
+static void emit_markr(VirtualMachine *vm, long long offset) {
     emit(vm, MARKR);
     emit_i64(vm, offset);
 }
 
 // Emit MARKW (mark write) for local at bp+offset.
-static void emit_markw(CCCC *vm, long long offset) {
+static void emit_markw(VirtualMachine *vm, long long offset) {
     emit(vm, MARKW);
     emit_i64(vm, offset);
 }
 
 // Emit MARKA (mark address for dangling detection).
 // rs holds the pointer; offset/size/scope_id are compile-time immediates.
-static void emit_marka(CCCC *vm, int rs, long long offset, size_t size,
+static void emit_marka(VirtualMachine *vm, int rs, long long offset, size_t size,
                        int scope_id) {
     emit(vm, MARKA);
     emit_word(vm, ENCODE_R(rs));
@@ -1795,7 +1795,7 @@ static void emit_marka(CCCC *vm, int rs, long long offset, size_t size,
 
 // Emit MARKP (mark provenance).
 // rs_ptr and rs_base hold the pointer and its allocation base.
-static void emit_markp(CCCC *vm, int rs_ptr, int rs_base, int origin_type,
+static void emit_markp(VirtualMachine *vm, int rs_ptr, int rs_base, int origin_type,
                        size_t size) {
     emit(vm, MARKP);
     emit_word(vm, ENCODE_RR(rs_ptr, rs_base));
@@ -1806,12 +1806,12 @@ static void emit_markp(CCCC *vm, int rs_ptr, int rs_base, int origin_type,
 // ========== Address Generation ==========
 
 // Generate address of an lvalue into dest_reg
-static void gen_addr(CCCC *vm, Node *node, int dest_reg) {
+static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
     switch (node->kind) {
     case ND_VAR:
         if (node->var->is_function) {
             // Function address - emit placeholder and record patch
-            CCCCPc addr_loc = emit_lta3(vm, dest_reg, 0); // Placeholder
+            Pc addr_loc = emit_lta3(vm, dest_reg, 0); // Placeholder
 
             if (vm->compiler.num_func_addr_patches >= MAX_CALLS) {
                 error("too many function address references");
@@ -1961,14 +1961,14 @@ static int complex_store_op(Type *ty) {
            ty->base->kind == TY_FLOAT ? FSTR_F32 : FSTR;
 }
 
-static void emit_float_zero(CCCC *vm, int freg) {
+static void emit_float_zero(VirtualMachine *vm, int freg) {
     int r_zero = alloc_temp_reg();
     emit_li3(vm, r_zero, 0);
     emit_rr(vm, I2F3, freg, r_zero);
     free_temp_reg(r_zero);
 }
 
-static void emit_complex_load(CCCC *vm, Type *ty, int real_reg, int imag_reg,
+static void emit_complex_load(VirtualMachine *vm, Type *ty, int real_reg, int imag_reg,
                               int addr_reg) {
     int op = complex_load_op(ty);
     emit_rr(vm, op, real_reg, addr_reg);
@@ -1978,7 +1978,7 @@ static void emit_complex_load(CCCC *vm, Type *ty, int real_reg, int imag_reg,
     free_temp_reg(r_imag_addr);
 }
 
-static void emit_complex_store(CCCC *vm, Type *ty, int real_reg, int imag_reg,
+static void emit_complex_store(VirtualMachine *vm, Type *ty, int real_reg, int imag_reg,
                                int addr_reg) {
     int op = complex_store_op(ty);
     emit_rr(vm, op, real_reg, addr_reg);
@@ -1988,7 +1988,7 @@ static void emit_complex_store(CCCC *vm, Type *ty, int real_reg, int imag_reg,
     free_temp_reg(r_imag_addr);
 }
 
-static void gen_complex_expr(CCCC *vm, Node *node, int real_reg, int imag_reg) {
+static void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg, int imag_reg) {
     if (!node)
         error("codegen: null complex expression node");
 
@@ -2116,7 +2116,7 @@ static void gen_complex_expr(CCCC *vm, Node *node, int real_reg, int imag_reg) {
 
 // Generate code for expression, result in dest_reg (integer) or dest_freg
 // (float)
-static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
+static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
     if (!node) {
         error("codegen: null expression node");
     }
@@ -2176,7 +2176,7 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
         if (node->var->is_function) {
             // Function name used as value - function-to-pointer decay
             // Emit LTA3 with placeholder, patch later
-            CCCCPc addr_loc = emit_lta3(vm, dest_reg, 0); // Placeholder
+            Pc addr_loc = emit_lta3(vm, dest_reg, 0); // Placeholder
 
             // Record patch location for later resolution
             if (vm->compiler.num_func_addr_patches >= MAX_CALLS) {
@@ -2650,12 +2650,12 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
         // Ternary: cond ? then : else
         int r_cond = alloc_temp_reg();
         gen_expr(vm, node->cond, r_cond);
-        CCCCPc jz_else = emit_jz3(vm, r_cond);
+        Pc jz_else = emit_jz3(vm, r_cond);
         free_temp_reg(r_cond);
 
         gen_expr(vm, node->then, dest_reg);
         emit(vm, JMP);
-        CCCCPc jmp_end = emit_word_ptr(vm);
+        Pc jmp_end = emit_word_ptr(vm);
 
         vm->text_seg[jz_else] = vm->text_ptr + 1;
         gen_expr(vm, node->els, dest_reg);
@@ -3408,7 +3408,7 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
                                   (fn->is_pure || fn->is_func_const);
             if (!skip_dead_call) {
                 emit(vm, CALL);
-                CCCCPc patch = emit_word_ptr(vm);
+                Pc patch = emit_word_ptr(vm);
                 vm->text_seg[patch] = 0; // Will be patched later
 
                 // Record call patch location for later resolution
@@ -3437,10 +3437,10 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
             if (!skip_dead_calln) {
                 emit(vm, CALLN);
                 emit_word(vm, ENCODE_R(r_fn));
-                emit_word(vm, ((CCCCInstrWord)(node->ty->kind == TY_FLOAT ? 0
+                emit_word(vm, ((InstrWord)(node->ty->kind == TY_FLOAT ? 0
                                                 : is_flonum(node->ty) ? 1 : 0) << 16) |
-                                  ((CCCCInstrWord)(node->ty->kind == TY_FLOAT ? 1 : 0) << 17) |
-                                  (CCCCInstrWord)(nargs & 0xFFFF));
+                                  ((InstrWord)(node->ty->kind == TY_FLOAT ? 1 : 0) << 17) |
+                                  (InstrWord)(nargs & 0xFFFF));
                 emit_i64(vm, (long long)call_double_arg_mask);
                 emit_i64(vm, (long long)call_float_arg_mask);
             }
@@ -3489,15 +3489,15 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
         // Logical AND with short-circuit evaluation
         int r_cond = alloc_temp_reg();
         gen_expr(vm, node->lhs, r_cond);
-        CCCCPc jz_false = emit_jz3(vm, r_cond);
+        Pc jz_false = emit_jz3(vm, r_cond);
 
         gen_expr(vm, node->rhs, r_cond);
-        CCCCPc jz_false2 = emit_jz3(vm, r_cond);
+        Pc jz_false2 = emit_jz3(vm, r_cond);
 
         // Both true
         emit_li3(vm, dest_reg, 1);
         emit(vm, JMP);
-        CCCCPc jmp_end = emit_word_ptr(vm);
+        Pc jmp_end = emit_word_ptr(vm);
 
         // At least one false
         vm->text_seg[jz_false] = vm->text_ptr + 1;
@@ -3512,15 +3512,15 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
         // Logical OR with short-circuit evaluation
         int r_cond = alloc_temp_reg();
         gen_expr(vm, node->lhs, r_cond);
-        CCCCPc jnz_true = emit_jnz3(vm, r_cond);
+        Pc jnz_true = emit_jnz3(vm, r_cond);
 
         gen_expr(vm, node->rhs, r_cond);
-        CCCCPc jnz_true2 = emit_jnz3(vm, r_cond);
+        Pc jnz_true2 = emit_jnz3(vm, r_cond);
 
         // Both false
         emit_li3(vm, dest_reg, 0);
         emit(vm, JMP);
-        CCCCPc jmp_end = emit_word_ptr(vm);
+        Pc jmp_end = emit_word_ptr(vm);
 
         // At least one true
         vm->text_seg[jnz_true] = vm->text_ptr + 1;
@@ -3621,7 +3621,7 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
     case ND_LABEL_VAL: {
         // Label address: &&label (GCC extension for computed goto)
         // Emit LTA3 with placeholder offset that will be patched later
-        CCCCPc label_addr_loc = emit_lta3(vm, dest_reg, 0);
+        Pc label_addr_loc = emit_lta3(vm, dest_reg, 0);
         // Record patch location so it gets resolved when label is defined
         add_label_patch(node->unique_label ? node->unique_label : node->label,
                         label_addr_loc, true);
@@ -3655,7 +3655,7 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
 
         // Load function address (will be patched later)
         int r_invoke = alloc_temp_reg();
-        CCCCPc invoke_addr_loc = emit_lta3(vm, r_invoke, 0); // Placeholder
+        Pc invoke_addr_loc = emit_lta3(vm, r_invoke, 0); // Placeholder
 
         // Record patch for block function address
         if (vm->compiler.num_func_addr_patches >= MAX_CALLS)
@@ -3774,7 +3774,7 @@ static void gen_expr(CCCC *vm, Node *node, int dest_reg) {
 
 // ========== Statement Generation ==========
 
-static void emit_source_location(CCCC *vm, Node *node) {
+static void emit_source_location(VirtualMachine *vm, Node *node) {
     if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !node || !node->tok)
         return;
     if (node->tok->file == vm->dbg.last_debug_file &&
@@ -3800,7 +3800,7 @@ static void emit_source_location(CCCC *vm, Node *node) {
     vm->dbg.last_debug_col = node->tok->col_no;
 }
 
-static void gen_stmt(CCCC *vm, Node *node) {
+static void gen_stmt(VirtualMachine *vm, Node *node) {
     if (!node)
         return;
 
@@ -3889,14 +3889,14 @@ static void gen_stmt(CCCC *vm, Node *node) {
         reset_temp_regs();
         int r_cond = alloc_temp_reg();
         gen_expr(vm, node->cond, r_cond);
-        CCCCPc jz_else = emit_jz3(vm, r_cond);
+        Pc jz_else = emit_jz3(vm, r_cond);
         free_temp_reg(r_cond);
 
         gen_stmt(vm, node->then);
 
         if (node->els) {
             emit(vm, JMP);
-            CCCCPc jmp_end = emit_word_ptr(vm);
+            Pc jmp_end = emit_word_ptr(vm);
             vm->text_seg[jz_else] = vm->text_ptr + 1;
             gen_stmt(vm, node->els);
             vm->text_seg[jmp_end] = vm->text_ptr + 1;
@@ -3912,10 +3912,10 @@ static void gen_stmt(CCCC *vm, Node *node) {
             gen_stmt(vm, node->init);
         }
 
-        CCCCPc loop_start = vm->text_ptr + 1;
+        Pc loop_start = vm->text_ptr + 1;
 
         // Condition
-        CCCCPc jz_end = CCCC_INVALID_PC;
+        Pc jz_end = CCCC_INVALID_PC;
         if (node->cond) {
             reset_temp_regs();
             int r_cond = alloc_temp_reg();
@@ -3955,7 +3955,7 @@ static void gen_stmt(CCCC *vm, Node *node) {
     }
 
     case ND_DO: {
-        CCCCPc loop_start = vm->text_ptr + 1;
+        Pc loop_start = vm->text_ptr + 1;
 
         gen_stmt(vm, node->then);
 
@@ -3967,7 +3967,7 @@ static void gen_stmt(CCCC *vm, Node *node) {
         reset_temp_regs();
         int r_cond = alloc_temp_reg();
         gen_expr(vm, node->cond, r_cond);
-        CCCCPc jnz_start = emit_jnz3(vm, r_cond);
+        Pc jnz_start = emit_jnz3(vm, r_cond);
         vm->text_seg[jnz_start] = loop_start;
         free_temp_reg(r_cond);
 
@@ -3994,9 +3994,9 @@ static void gen_stmt(CCCC *vm, Node *node) {
         bool use_jump_table =
             num_cases > 0 && covered_values >= 4 && span <= covered_values * 2;
 
-        CCCCPc default_patch = CCCC_INVALID_PC;
-        CCCCPc end_patch = CCCC_INVALID_PC;
-        CCCCPc table_start = CCCC_INVALID_PC;
+        Pc default_patch = CCCC_INVALID_PC;
+        Pc end_patch = CCCC_INVALID_PC;
+        Pc table_start = CCCC_INVALID_PC;
         PatchList fail_patches = {};
 
         if (num_cases == 0) {
@@ -4008,8 +4008,8 @@ static void gen_stmt(CCCC *vm, Node *node) {
         } else if (use_jump_table) {
             emit_addi3(vm, REG_A0, r_val, -min_case);
             emit(vm, JMPT);
-            CCCCPc table_operand = emit_word_ptr(vm);
-            emit_word(vm, (CCCCInstrWord)span);
+            Pc table_operand = emit_word_ptr(vm);
+            emit_word(vm, (InstrWord)span);
             default_patch = emit_word_ptr(vm);
             table_start = vm->text_ptr + 1;
             vm->text_seg[table_operand] = table_start;
@@ -4018,7 +4018,7 @@ static void gen_stmt(CCCC *vm, Node *node) {
 
             for (int i = 0; i < num_cases; i++) {
                 for (long value = cases[i].begin; value <= cases[i].end; value++) {
-                    CCCCPc entry = table_start + (CCCCPc)(value - min_case);
+                    Pc entry = table_start + (Pc)(value - min_case);
                     vm->text_seg[entry] = CCCC_INVALID_PC;
                     cases[i].table_entry = entry;
                 }
@@ -4036,11 +4036,11 @@ static void gen_stmt(CCCC *vm, Node *node) {
 
         void *saved_cases = vm->compiler.current_switch_cases;
         int saved_num_cases = vm->compiler.current_switch_num;
-        CCCCPc saved_table_start = vm->compiler.current_switch_table_start;
+        Pc saved_table_start = vm->compiler.current_switch_table_start;
         long saved_switch_min = vm->compiler.current_switch_min;
         long saved_switch_size = vm->compiler.current_switch_size;
         Node *saved_default = vm->compiler.current_switch_default;
-        CCCCPc saved_default_patch = vm->compiler.current_default_patch;
+        Pc saved_default_patch = vm->compiler.current_default_patch;
 
         vm->compiler.current_switch_cases = cases;
         vm->compiler.current_switch_num = num_cases;
@@ -4063,7 +4063,7 @@ static void gen_stmt(CCCC *vm, Node *node) {
         if (node->brk_label) {
             define_label(vm, node->brk_label);
         }
-        CCCCPc end_target = vm->text_ptr + 1;
+        Pc end_target = vm->text_ptr + 1;
         if (end_patch != CCCC_INVALID_PC) {
             vm->text_seg[end_patch] = end_target;
         }
@@ -4076,10 +4076,10 @@ static void gen_stmt(CCCC *vm, Node *node) {
                 : end_target;
         }
         if (use_jump_table) {
-            CCCCPc default_target = node->default_case ? vm->text_seg[default_patch]
+            Pc default_target = node->default_case ? vm->text_seg[default_patch]
                                                       : end_target;
             for (long i = 0; i < span; i++) {
-                CCCCPc entry = table_start + (CCCCPc)i;
+                Pc entry = table_start + (Pc)i;
                 if (vm->text_seg[entry] == 0)
                     vm->text_seg[entry] = default_target;
             }
@@ -4093,7 +4093,7 @@ static void gen_stmt(CCCC *vm, Node *node) {
 
     case ND_CASE: {
         // Case within switch - patch jump address and generate body
-        CCCCPc target = vm->text_ptr + 1;
+        Pc target = vm->text_ptr + 1;
 
         // Check if this is the default case
         if (node == vm->compiler.current_switch_default) {
@@ -4108,9 +4108,9 @@ static void gen_stmt(CCCC *vm, Node *node) {
             if (entry) {
                 if (vm->compiler.current_switch_table_start != CCCC_INVALID_PC) {
                     for (long value = entry->begin; value <= entry->end; value++) {
-                        CCCCPc table_entry =
+                        Pc table_entry =
                             vm->compiler.current_switch_table_start +
-                            (CCCCPc)(value - vm->compiler.current_switch_min);
+                            (Pc)(value - vm->compiler.current_switch_min);
                         vm->text_seg[table_entry] = target;
                     }
                 }
@@ -4130,13 +4130,13 @@ static void gen_stmt(CCCC *vm, Node *node) {
         if (node->unique_label) {
             // This is a break or continue statement
             emit(vm, JMP);
-            CCCCPc patch = emit_word_ptr(vm);
+            Pc patch = emit_word_ptr(vm);
             vm->text_seg[patch] = 0; // Placeholder
             add_label_patch(node->unique_label, patch, false);
         } else if (node->label) {
             // Named goto - also needs patching
             emit(vm, JMP);
-            CCCCPc patch = emit_word_ptr(vm);
+            Pc patch = emit_word_ptr(vm);
             vm->text_seg[patch] = 0; // Placeholder
             add_label_patch(node->label, patch, false);
         }
@@ -4249,7 +4249,7 @@ static int assign_stack_offsets(Obj *fn) {
 
 // ========== Function Generation ==========
 
-void gen_function(CCCC *vm, Obj *fn) {
+void gen_function(VirtualMachine *vm, Obj *fn) {
     if (!fn->is_function || !fn->body)
         return;
 
@@ -4394,7 +4394,7 @@ void gen_function(CCCC *vm, Obj *fn) {
 
 // ========== Top-Level Code Generation ==========
 
-void gen(CCCC *vm, Obj *prog) {
+void gen(VirtualMachine *vm, Obj *prog) {
     // Reset patch counters
     vm->compiler.num_call_patches = 0;
     vm->compiler.num_func_addr_patches = 0;
@@ -4478,7 +4478,7 @@ void gen(CCCC *vm, Obj *prog) {
     for (int i = 0; i < vm->compiler.num_call_patches; i++) {
         Obj *target = vm->compiler.call_patches[i].function;
         char *fn_name = target->name;
-        CCCCPc loc = vm->compiler.call_patches[i].location;
+        Pc loc = vm->compiler.call_patches[i].location;
 
         Obj *fn_def = find_function_definition_for_patch(&fn_defs, target);
 
@@ -4492,18 +4492,18 @@ void gen(CCCC *vm, Obj *prog) {
             error("undefined function: %s", fn_name);
         }
 
-        vm->text_seg[loc] = (CCCCPc)fn_def->code_addr;
+        vm->text_seg[loc] = (Pc)fn_def->code_addr;
     }
 
     // Third pass: Patch function address references (for function pointers)
     for (int i = 0; i < vm->compiler.num_func_addr_patches; i++) {
         Obj *target = vm->compiler.func_addr_patches[i].function;
-        CCCCPc loc = vm->compiler.func_addr_patches[i].location;
+        Pc loc = vm->compiler.func_addr_patches[i].location;
 
         Obj *fn_def = find_function_definition_for_patch(&fn_defs, target);
 
         if (fn_def) {
-            cc_write_i64_at(vm, loc, cc_pc_to_byte_offset((CCCCPc)fn_def->code_addr));
+            cc_write_i64_at(vm, loc, cc_pc_to_byte_offset((Pc)fn_def->code_addr));
         }
     }
 

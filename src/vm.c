@@ -28,7 +28,7 @@
 
 #define CCCC_DYN_TOKEN_BASE (-0x4a434300LL)
 
-static void cccc_set_dyn_error(CCCC *vm, const char *fmt, ...) {
+static void cccc_set_dyn_error(VirtualMachine *vm, const char *fmt, ...) {
     if (!vm)
         return;
     free(vm->dyn_error);
@@ -48,14 +48,14 @@ static void cccc_set_dyn_error(CCCC *vm, const char *fmt, ...) {
     va_end(ap2);
 }
 
-static void cccc_clear_dyn_error(CCCC *vm) {
+static void cccc_clear_dyn_error(VirtualMachine *vm) {
     if (!vm)
         return;
     free(vm->dyn_error);
     vm->dyn_error = NULL;
 }
 
-static DynamicLibrary *cccc_find_dynamic_library(CCCC *vm, long long token,
+static DynamicLibrary *cccc_find_dynamic_library(VirtualMachine *vm, long long token,
                                                 int *idx_out) {
     if (!vm)
         return NULL;
@@ -69,7 +69,7 @@ static DynamicLibrary *cccc_find_dynamic_library(CCCC *vm, long long token,
     return NULL;
 }
 
-DynamicSymbol *cccc_find_dynamic_symbol(CCCC *vm, long long token) {
+DynamicSymbol *cccc_find_dynamic_symbol(VirtualMachine *vm, long long token) {
     if (!vm)
         return NULL;
     for (int i = 0; i < vm->dynsym_count; i++) {
@@ -80,7 +80,7 @@ DynamicSymbol *cccc_find_dynamic_symbol(CCCC *vm, long long token) {
     return NULL;
 }
 
-static int cccc_add_dynamic_library(CCCC *vm, void *handle, const char *path) {
+static int cccc_add_dynamic_library(VirtualMachine *vm, void *handle, const char *path) {
     if (vm->dynlib_count >= vm->dynlib_capacity) {
         int new_cap = vm->dynlib_capacity ? vm->dynlib_capacity * 2 : 16;
         DynamicLibrary *new_libs =
@@ -104,7 +104,7 @@ static int cccc_add_dynamic_library(CCCC *vm, void *handle, const char *path) {
     return token;
 }
 
-static int cccc_add_dynamic_symbol(CCCC *vm, int lib_idx, void *func_ptr,
+static int cccc_add_dynamic_symbol(VirtualMachine *vm, int lib_idx, void *func_ptr,
                                   const char *name) {
     if (vm->dynsym_count >= vm->dynsym_capacity) {
         int new_cap = vm->dynsym_capacity ? vm->dynsym_capacity * 2 : 32;
@@ -130,7 +130,7 @@ static int cccc_add_dynamic_symbol(CCCC *vm, int lib_idx, void *func_ptr,
     return token;
 }
 
-long long cccc_rt_dlopen(CCCC *vm, const char *path, int mode) {
+long long cccc_rt_dlopen(VirtualMachine *vm, const char *path, int mode) {
     if (!vm)
         return 0;
     cccc_clear_dyn_error(vm);
@@ -155,7 +155,7 @@ long long cccc_rt_dlopen(CCCC *vm, const char *path, int mode) {
 #endif
 }
 
-long long cccc_rt_dlsym(CCCC *vm, long long handle_token, const char *symbol) {
+long long cccc_rt_dlsym(VirtualMachine *vm, long long handle_token, const char *symbol) {
     if (!vm || !symbol) {
         cccc_set_dyn_error(vm, "dlsym requires a symbol name");
         return 0;
@@ -208,7 +208,7 @@ long long cccc_rt_dlsym(CCCC *vm, long long handle_token, const char *symbol) {
     return cccc_add_dynamic_symbol(vm, lib_idx, ptr, symbol);
 }
 
-long long cccc_rt_dlclose(CCCC *vm, long long handle_token) {
+long long cccc_rt_dlclose(VirtualMachine *vm, long long handle_token) {
     if (!vm)
         return -1;
     cccc_clear_dyn_error(vm);
@@ -242,7 +242,7 @@ long long cccc_rt_dlclose(CCCC *vm, long long handle_token) {
     return 0;
 }
 
-long long cccc_rt_dlerror(CCCC *vm) {
+long long cccc_rt_dlerror(VirtualMachine *vm) {
     if (!vm || !vm->dyn_error)
         return 0;
     return (long long)vm->dyn_error;
@@ -250,7 +250,7 @@ long long cccc_rt_dlerror(CCCC *vm) {
 
 #include "ops.c"
 
-void cc_vm_profile_reset(CCCC *vm) {
+void cc_vm_profile_reset(VirtualMachine *vm) {
     if (!vm)
         return;
     memset(vm->vm_profile_counts, 0, sizeof(vm->vm_profile_counts));
@@ -268,7 +268,7 @@ void cc_vm_profile_reset(CCCC *vm) {
     vm->vm_profile_trigram_started = false;
 }
 
-void cc_vm_profile_print(CCCC *vm, FILE *f) {
+void cc_vm_profile_print(VirtualMachine *vm, FILE *f) {
     if (!vm || !f || !vm->vm_profile_enabled)
         return;
 
@@ -362,7 +362,7 @@ static void json_escape(FILE *f, const char *s) {
     }
 }
 
-int cc_vm_profile_write_json(CCCC *vm, FILE *f, const char *mode,
+int cc_vm_profile_write_json(VirtualMachine *vm, FILE *f, const char *mode,
                              const char *input_name) {
     if (!vm || !f)
         return -1;
@@ -487,7 +487,7 @@ int cc_vm_profile_write_json(CCCC *vm, FILE *f, const char *mode,
     return ferror(f) ? -1 : 0;
 }
 
-int vm_eval(CCCC *vm) {
+int vm_eval(VirtualMachine *vm) {
     static void *op_table[] = {
 #define X(NAME, OPERANDS) [NAME] = &&op_##NAME,
         OPS_X
@@ -505,11 +505,11 @@ dispatch:
         for (int _sig = 1; _sig < CCCC_NSIG; _sig++) {
             if (!_cccc_pending[_sig]) continue;
             _cccc_pending[_sig] = 0;
-            CCCCSigSlot *_slot = &vm->vm_sigslots[_sig];
+            SigSlot *_slot = &vm->vm_sigslots[_sig];
             if (_slot->action == 1) continue; /* IGN */
             if (_slot->action == 2) {
                 /* VM handler: push return address and jump to handler */
-                CCCCPc _target = cc_byte_offset_to_pc(_slot->handler_fn);
+                Pc _target = cc_byte_offset_to_pc(_slot->handler_fn);
                 if (_target == CCCC_INVALID_PC || _target > vm->text_ptr) {
                     fprintf(stderr, "error: invalid signal handler for sig %d\n", _sig);
                     return -1;
@@ -599,19 +599,19 @@ dispatch:
 
 // ========== Segment reserve-and-commit helpers ==========
 
-void vm_alloc_segments(CCCC *vm) {
-    size_t initial_text   = (size_t)vm->poolsize * sizeof(CCCCInstrWord);
+void vm_alloc_segments(VirtualMachine *vm) {
+    size_t initial_text   = (size_t)vm->poolsize * sizeof(InstrWord);
     size_t initial_data   = (size_t)vm->poolsize;
     size_t initial_stack  = (size_t)vm->poolsize * sizeof(long long);
     size_t initial_heap   = (size_t)vm->poolsize;
 
-    size_t reserved_text  = (size_t)vm->poolsize_max * sizeof(CCCCInstrWord);
+    size_t reserved_text  = (size_t)vm->poolsize_max * sizeof(InstrWord);
     size_t reserved_data  = (size_t)vm->poolsize_max;
     size_t reserved_stack = (size_t)vm->poolsize_max * sizeof(long long);
     size_t reserved_heap  = (size_t)vm->poolsize_max;
 
     // Reserve virtual ranges (base pointers will never move)
-    vm->text_seg  = (CCCCInstrWord *)cccc_vm_reserve(reserved_text);
+    vm->text_seg  = (InstrWord *)cccc_vm_reserve(reserved_text);
     vm->data_seg  = (char *)cccc_vm_reserve(reserved_data);
     vm->stack_seg = (long long *)cccc_vm_reserve(reserved_stack);
     vm->heap_seg  = (char *)cccc_vm_reserve(reserved_heap);
@@ -660,7 +660,7 @@ void vm_alloc_segments(CCCC *vm) {
     }
 }
 
-void cccc_exec_state_save(CCCC *vm, CCCCExecState *state) {
+void cccc_exec_state_save(VirtualMachine *vm, ExecState *state) {
     memcpy(state->regs, vm->regs, sizeof(state->regs));
     memcpy(state->fregs, vm->fregs, sizeof(state->fregs));
     state->pc = vm->pc;
@@ -677,7 +677,7 @@ void cccc_exec_state_save(CCCC *vm, CCCCExecState *state) {
     state->init_state = vm->init_state;
 }
 
-void cccc_exec_state_restore(CCCC *vm, const CCCCExecState *state) {
+void cccc_exec_state_restore(VirtualMachine *vm, const ExecState *state) {
     memcpy(vm->regs, state->regs, sizeof(state->regs));
     memcpy(vm->fregs, state->fregs, sizeof(state->fregs));
     vm->pc = state->pc;
@@ -694,7 +694,7 @@ void cccc_exec_state_restore(CCCC *vm, const CCCCExecState *state) {
     vm->init_state = state->init_state;
 }
 
-int cccc_exec_state_alloc_stack(CCCC *vm, CCCCExecState *state) {
+int cccc_exec_state_alloc_stack(VirtualMachine *vm, ExecState *state) {
     memset(state, 0, sizeof(*state));
 
     size_t initial_stack = (size_t)vm->poolsize * sizeof(long long);
@@ -733,7 +733,7 @@ int cccc_exec_state_alloc_stack(CCCC *vm, CCCCExecState *state) {
     return 0;
 }
 
-void cccc_exec_state_release_stack(CCCC *vm, CCCCExecState *state) {
+void cccc_exec_state_release_stack(VirtualMachine *vm, ExecState *state) {
     if (!state)
         return;
     size_t reserved_stack = (size_t)vm->poolsize_max * sizeof(long long);
@@ -746,7 +746,7 @@ void cccc_exec_state_release_stack(CCCC *vm, CCCCExecState *state) {
     state->shadow_stack = NULL;
 }
 
-void cccc_exec_state_prepare_call(CCCC *vm, CCCCExecState *state, CCCCPc entry,
+void cccc_exec_state_prepare_call(VirtualMachine *vm, ExecState *state, Pc entry,
                                   long long arg) {
     size_t reserved_stack = (size_t)vm->poolsize_max * sizeof(long long);
     size_t initial_stack = (size_t)vm->poolsize * sizeof(long long);
@@ -767,15 +767,15 @@ void cccc_exec_state_prepare_call(CCCC *vm, CCCCExecState *state, CCCCPc entry,
     *--state->sp = 0;
 }
 
-int vm_text_ensure_count(CCCC *vm, CCCCPc num_words) {
-    size_t needed_bytes = (size_t)num_words * sizeof(CCCCInstrWord);
+int vm_text_ensure_count(VirtualMachine *vm, Pc num_words) {
+    size_t needed_bytes = (size_t)num_words * sizeof(InstrWord);
     if (needed_bytes <= vm->text_committed)
         return 0;
-    size_t reserved = (size_t)vm->poolsize_max * sizeof(CCCCInstrWord);
+    size_t reserved = (size_t)vm->poolsize_max * sizeof(InstrWord);
     if (needed_bytes > reserved)
         return -1;
     // Round up to next poolsize-element chunk
-    size_t chunk = (size_t)vm->poolsize * sizeof(CCCCInstrWord);
+    size_t chunk = (size_t)vm->poolsize * sizeof(InstrWord);
     size_t new_committed = ((needed_bytes + chunk - 1) / chunk) * chunk;
     if (new_committed > reserved)
         new_committed = reserved;
@@ -786,7 +786,7 @@ int vm_text_ensure_count(CCCC *vm, CCCCPc num_words) {
     return 0;
 }
 
-int vm_data_ensure(CCCC *vm, long long needed) {
+int vm_data_ensure(VirtualMachine *vm, long long needed) {
     long long current_used = vm->data_ptr - vm->data_seg;
     long long committed    = (long long)vm->data_committed;
     if (current_used + needed <= committed)
@@ -806,7 +806,7 @@ int vm_data_ensure(CCCC *vm, long long needed) {
     return 0;
 }
 
-int vm_heap_grow(CCCC *vm, size_t need) {
+int vm_heap_grow(VirtualMachine *vm, size_t need) {
     size_t current  = vm->heap_committed;
     size_t reserved = (size_t)vm->poolsize_max;
     if (current >= reserved)
@@ -827,7 +827,7 @@ int vm_heap_grow(CCCC *vm, size_t need) {
     return 0;
 }
 
-int vm_stack_grow(CCCC *vm, int slots_needed) {
+int vm_stack_grow(VirtualMachine *vm, int slots_needed) {
     char *seg_start      = (char *)vm->stack_seg;
     char *current_base   = (char *)vm->stack_base;
     size_t need_bytes    = (size_t)slots_needed * sizeof(long long);
@@ -859,9 +859,9 @@ int vm_stack_grow(CCCC *vm, int slots_needed) {
 
 // ========== End segment helpers ==========
 
-void cc_init(CCCC *vm, uint32_t flags) {
+void cc_init(VirtualMachine *vm, uint32_t flags) {
     // Zero-initialize the VM struct
-    memset(vm, 0, sizeof(CCCC));
+    memset(vm, 0, sizeof(VirtualMachine));
 
     // Set runtime flags
     vm->flags = flags;
@@ -1002,7 +1002,7 @@ void cc_init(CCCC *vm, uint32_t flags) {
     cccc_gil_init(vm);
 }
 
-void cccc_gil_init(CCCC *vm) {
+void cccc_gil_init(VirtualMachine *vm) {
     if (!vm || vm->gil_initialized)
         return;
 #if !defined(_WIN32) && !defined(_WIN64)
@@ -1022,7 +1022,7 @@ void cccc_gil_init(CCCC *vm) {
     vm->gil_initialized = 1;
 }
 
-void cccc_gil_destroy(CCCC *vm) {
+void cccc_gil_destroy(VirtualMachine *vm) {
     if (!vm || !vm->gil_initialized)
         return;
 #if !defined(_WIN32) && !defined(_WIN64)
@@ -1036,7 +1036,7 @@ void cccc_gil_destroy(CCCC *vm) {
     vm->gil_initialized = 0;
 }
 
-void cccc_gil_acquire(CCCC *vm) {
+void cccc_gil_acquire(VirtualMachine *vm) {
     if (!vm)
         return;
     if (!vm->gil_initialized)
@@ -1046,7 +1046,7 @@ void cccc_gil_acquire(CCCC *vm) {
 #endif
 }
 
-void cccc_gil_release(CCCC *vm) {
+void cccc_gil_release(VirtualMachine *vm) {
     if (!vm || !vm->gil_initialized)
         return;
 #if !defined(_WIN32) && !defined(_WIN64)
@@ -1054,7 +1054,7 @@ void cccc_gil_release(CCCC *vm) {
 #endif
 }
 
-void cc_destroy(CCCC *vm) {
+void cc_destroy(VirtualMachine *vm) {
     if (!vm)
         return;
 
@@ -1085,7 +1085,7 @@ void cc_destroy(CCCC *vm) {
     // Release reserved virtual ranges (base pointers never moved)
     if (vm->text_seg)
         cccc_vm_release(vm->text_seg,
-                       (size_t)vm->poolsize_max * sizeof(CCCCInstrWord));
+                       (size_t)vm->poolsize_max * sizeof(InstrWord));
     if (vm->data_seg)
         cccc_vm_release(vm->data_seg,  (size_t)vm->poolsize_max);
     if (vm->stack_seg)
@@ -1332,7 +1332,7 @@ void cc_destroy(CCCC *vm) {
     arena_destroy(&vm->compiler.parser_arena);
 }
 
-void cc_print_stack_report(CCCC *vm) {
+void cc_print_stack_report(VirtualMachine *vm) {
     if (!vm || !(vm->flags & CCCC_STACK_INSTR)) {
         printf("Stack instrumentation not enabled.\n");
         return;
@@ -1366,23 +1366,23 @@ void cc_print_stack_report(CCCC *vm) {
     printf("=================================================\n\n");
 }
 
-void cc_include(CCCC *vm, const char *path) {
+void cc_include(VirtualMachine *vm, const char *path) {
     strarray_push(&vm->compiler.include_paths, strdup(path));
 }
 
-void cc_system_include(CCCC *vm, const char *path) {
+void cc_system_include(VirtualMachine *vm, const char *path) {
     strarray_push(&vm->compiler.system_include_paths, strdup(path));
 }
 
-void cc_define(CCCC *vm, char *name, char *buf) {
+void cc_define(VirtualMachine *vm, char *name, char *buf) {
     define_macro(vm, name, buf);
 }
 
-void cc_undef(CCCC *vm, char *name) {
+void cc_undef(VirtualMachine *vm, char *name) {
     undef_macro(vm, name);
 }
 
-void cc_set_asm_callback(CCCC *vm, CCCCAsmCallback callback, void *user_data) {
+void cc_set_asm_callback(VirtualMachine *vm, AsmCallback callback, void *user_data) {
     vm->compiler.asm_callback = callback;
     vm->compiler.asm_user_data = user_data;
 }
@@ -1405,21 +1405,21 @@ static void cc_ffi_list_add(char ***list, int *count, int *capacity,
     (*list)[(*count)++] = strdup(name);
 }
 
-void cc_ffi_allow(CCCC *vm, const char *name) {
+void cc_ffi_allow(VirtualMachine *vm, const char *name) {
     if (!vm)
         error("cc_ffi_allow: vm is NULL");
     cc_ffi_list_add(&vm->ffi_allow_list, &vm->ffi_allow_count,
                     &vm->ffi_allow_capacity, name);
 }
 
-void cc_ffi_deny(CCCC *vm, const char *name) {
+void cc_ffi_deny(VirtualMachine *vm, const char *name) {
     if (!vm)
         error("cc_ffi_deny: vm is NULL");
     cc_ffi_list_add(&vm->ffi_deny_list, &vm->ffi_deny_count,
                     &vm->ffi_deny_capacity, name);
 }
 
-void cc_ffi_clear_allow_list(CCCC *vm) {
+void cc_ffi_clear_allow_list(VirtualMachine *vm) {
     if (!vm)
         return;
     for (int i = 0; i < vm->ffi_allow_count; i++)
@@ -1427,7 +1427,7 @@ void cc_ffi_clear_allow_list(CCCC *vm) {
     vm->ffi_allow_count = 0;
 }
 
-void cc_ffi_clear_deny_list(CCCC *vm) {
+void cc_ffi_clear_deny_list(VirtualMachine *vm) {
     if (!vm)
         return;
     for (int i = 0; i < vm->ffi_deny_count; i++)
@@ -1435,7 +1435,7 @@ void cc_ffi_clear_deny_list(CCCC *vm) {
     vm->ffi_deny_count = 0;
 }
 
-void cc_register_cfunc(CCCC *vm, const char *name, void *func_ptr, int num_args, int returns_double) {
+void cc_register_cfunc(VirtualMachine *vm, const char *name, void *func_ptr, int num_args, int returns_double) {
     cc_register_cfunc_ex(vm, name, func_ptr, num_args, returns_double, 0);
 }
 
@@ -1450,7 +1450,7 @@ static int get_return_kind(ForeignFunc *ff) {
     return ff->returns_float ? 2 : ff->returns_double ? 1 : 0;
 }
 
-static ForeignFunc *find_registered_ffi(CCCC *vm, const char *name) {
+static ForeignFunc *find_registered_ffi(VirtualMachine *vm, const char *name) {
     size_t name_len = strlen(name);
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
         ForeignFunc *ff = &vm->compiler.ffi_table[i];
@@ -1461,7 +1461,7 @@ static ForeignFunc *find_registered_ffi(CCCC *vm, const char *name) {
     return NULL;
 }
 
-static void ensure_ffi_capacity(CCCC *vm, const char *caller) {
+static void ensure_ffi_capacity(VirtualMachine *vm, const char *caller) {
     if (vm->compiler.ffi_count < vm->compiler.ffi_capacity)
         return;
 
@@ -1474,7 +1474,7 @@ static void ensure_ffi_capacity(CCCC *vm, const char *caller) {
         error("%s: realloc failed", caller);
 }
 
-void cc_register_cfunc_ex(CCCC *vm, const char *name, void *func_ptr, int num_args, int returns_double, uint64_t double_arg_mask) {
+void cc_register_cfunc_ex(VirtualMachine *vm, const char *name, void *func_ptr, int num_args, int returns_double, uint64_t double_arg_mask) {
     if (!vm)
         error("cc_register_cfunc_ex: vm is NULL");
     if (!name || !func_ptr)
@@ -1508,7 +1508,7 @@ void cc_register_cfunc_ex(CCCC *vm, const char *name, void *func_ptr, int num_ar
     };
 }
 
-void cc_register_variadic_cfunc(CCCC *vm, const char *name, void *func_ptr, int num_fixed_args, int returns_double) {
+void cc_register_variadic_cfunc(VirtualMachine *vm, const char *name, void *func_ptr, int num_fixed_args, int returns_double) {
     if (!vm)
         error("cc_register_variadic_cfunc: vm is NULL");
     if (!name || !func_ptr)
@@ -1544,7 +1544,7 @@ void cc_register_variadic_cfunc(CCCC *vm, const char *name, void *func_ptr, int 
     };
 }
 
-int cc_dlsym(CCCC *vm, const char *name, void *func_ptr, int num_args, int returns_double) {
+int cc_dlsym(VirtualMachine *vm, const char *name, void *func_ptr, int num_args, int returns_double) {
     if (!vm || !name || !func_ptr)
         return -1;
 
@@ -1565,7 +1565,7 @@ int cc_dlsym(CCCC *vm, const char *name, void *func_ptr, int num_args, int retur
     return -1;
 }
 
-int cc_dlopen(CCCC *vm, const char *lib_path) {
+int cc_dlopen(VirtualMachine *vm, const char *lib_path) {
     if (!vm)
         return -1;
 
@@ -1695,7 +1695,7 @@ static const char* find_libc() {
 #endif
 }
 
-int cc_load_libc(CCCC *vm) {
+int cc_load_libc(VirtualMachine *vm) {
     const char *libc_path = find_libc();
     if (vm->debug_vm)
         printf("Loading standard C library: %s\n", libc_path);
@@ -1705,7 +1705,7 @@ int cc_load_libc(CCCC *vm) {
 // Load standard library (for backward compatibility)
 // This function is kept for programs that don't use #include,
 // or want all stdlib functions available regardless of includes
-void cc_load_stdlib(CCCC *vm) {
+void cc_load_stdlib(VirtualMachine *vm) {
     // Register all standard library functions regardless of includes
     register_ctype_functions(vm);
     register_fenv_functions(vm);
@@ -1728,7 +1728,7 @@ void cc_load_stdlib(CCCC *vm) {
     }
 }
 
-int cc_run_at(CCCC *vm, CCCCPc entry, int argc, char **argv) {
+int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv) {
     if (!vm || !vm->text_seg) {
         error("VM not initialized - call cc_compile first");
     }
@@ -1771,7 +1771,7 @@ int cc_run_at(CCCC *vm, CCCCPc entry, int argc, char **argv) {
     return rc;
 }
 
-int cc_run(CCCC *vm, int argc, char **argv) {
+int cc_run(VirtualMachine *vm, int argc, char **argv) {
     return cc_run_at(vm, vm->text_seg[0], argc, argv);
 }
 

@@ -63,7 +63,7 @@ struct MacroArg {
     Token *tok;
 };
 
-typedef Token *macro_handler_fn(CCCC *, Token *);
+typedef Token *macro_handler_fn(VirtualMachine *, Token *);
 
 typedef struct Macro Macro;
 struct Macro {
@@ -75,24 +75,24 @@ struct Macro {
     macro_handler_fn *handler;
 };
 
-static Token *preprocess2(CCCC *vm, Token *tok);
-static Macro *find_macro(CCCC *vm, Token *tok);
+static Token *preprocess2(VirtualMachine *vm, Token *tok);
+static Macro *find_macro(VirtualMachine *vm, Token *tok);
 static bool file_exists(char *path);
-static char *format_relative_path(CCCC *vm, char *base_file, char *filename);
-static char *read_include_filename(CCCC *vm, Token **rest, Token *tok,
+static char *format_relative_path(VirtualMachine *vm, char *base_file, char *filename);
+static char *read_include_filename(VirtualMachine *vm, Token **rest, Token *tok,
                                    bool *is_dquote, int *out_len);
-char *search_include_paths(CCCC *vm, char *filename, int filename_len,
+char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
                            bool is_system);
-static long eval_const_expr(CCCC *vm, Token **rest, Token *tok);
+static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok);
 
 static bool is_hash(Token *tok) { return tok->at_bol && equal(tok, "#"); }
 
-static ComptimeCtxEntry *ctx_top(CCCC *vm) {
+static ComptimeCtxEntry *ctx_top(VirtualMachine *vm) {
     return vm->compiler.ctx_stack_len
         ? &vm->compiler.ctx_stack[vm->compiler.ctx_stack_len - 1] : NULL;
 }
 
-static void ctx_push(CCCC *vm, ComptimeCtxType type, bool needs_end,
+static void ctx_push(VirtualMachine *vm, ComptimeCtxType type, bool needs_end,
                      File *file, Token *open_tok) {
     if (vm->compiler.ctx_stack_len == vm->compiler.ctx_stack_cap) {
         vm->compiler.ctx_stack_cap = vm->compiler.ctx_stack_cap ? vm->compiler.ctx_stack_cap * 2 : 4;
@@ -103,7 +103,7 @@ static void ctx_push(CCCC *vm, ComptimeCtxType type, bool needs_end,
         (ComptimeCtxEntry){type, needs_end, file, open_tok};
 }
 
-static void ctx_pop(CCCC *vm) {
+static void ctx_pop(VirtualMachine *vm) {
     vm->compiler.ctx_stack_len--;
 }
 
@@ -111,7 +111,7 @@ static void ctx_pop(CCCC *vm) {
 // directives inside individual [[cccc::comptime]] function bodies from each
 // other (#283). Pushed/popped by TK_MACRO_SCOPE_PUSH/POP marker tokens
 // synthesized in build_combined_macro_tokens.
-static void macro_scope_push(CCCC *vm, HashMap snap) {
+static void macro_scope_push(VirtualMachine *vm, HashMap snap) {
     if (vm->compiler.macro_scope_stack_len == vm->compiler.macro_scope_stack_cap) {
         vm->compiler.macro_scope_stack_cap =
             vm->compiler.macro_scope_stack_cap ? vm->compiler.macro_scope_stack_cap * 2 : 4;
@@ -121,7 +121,7 @@ static void macro_scope_push(CCCC *vm, HashMap snap) {
     vm->compiler.macro_scope_stack[vm->compiler.macro_scope_stack_len++] = snap;
 }
 
-static HashMap macro_scope_pop(CCCC *vm) {
+static HashMap macro_scope_pop(VirtualMachine *vm) {
     return vm->compiler.macro_scope_stack[--vm->compiler.macro_scope_stack_len];
 }
 
@@ -133,7 +133,7 @@ typedef enum {
 
 // Some preprocessor directives such as #include allow extraneous
 // tokens before newline. This function skips such tokens.
-static Token *skip_line(CCCC *vm, Token *tok) {
+static Token *skip_line(VirtualMachine *vm, Token *tok) {
     if (tok->at_bol)
         return tok;
     warn_tok(vm, tok, CCCC_WARN_EXTRA_TOKENS, "extra tokens after directive");
@@ -142,7 +142,7 @@ static Token *skip_line(CCCC *vm, Token *tok) {
     return tok;
 }
 
-static char *copy_raw_directive_line(CCCC *vm, Token *start) {
+static char *copy_raw_directive_line(VirtualMachine *vm, Token *start) {
     char *end = start->loc;
     while (*end && *end != '\n')
         end++;
@@ -151,7 +151,7 @@ static char *copy_raw_directive_line(CCCC *vm, Token *start) {
     return arena_strndup(vm, start->loc, end - start->loc);
 }
 
-static char *copy_routed_directive_line(CCCC *vm, Token *hash, Token *route_start,
+static char *copy_routed_directive_line(VirtualMachine *vm, Token *hash, Token *route_start,
                                         Token *route_end) {
     (void)route_start;
     Token *directive = hash->next;
@@ -184,7 +184,7 @@ static char *copy_routed_directive_line(CCCC *vm, Token *hash, Token *route_star
     return line;
 }
 
-static void push_emit_directive(CCCC *vm, char *line, bool dedup) {
+static void push_emit_directive(VirtualMachine *vm, char *line, bool dedup) {
     if (!line)
         return;
     StringArray *arr = &vm->compiler.emit_directives;
@@ -280,14 +280,14 @@ static bool is_pragma_cccc(Token *hash) {
     return tok && equal(tok, "pragma") && equal(tok->next, "cccc");
 }
 
-static Token *copy_token(CCCC *vm, Token *tok) {
+static Token *copy_token(VirtualMachine *vm, Token *tok) {
     Token *t = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     *t = *tok;
     t->next = NULL;
     return t;
 }
 
-static Token *new_eof(CCCC *vm, Token *tok) {
+static Token *new_eof(VirtualMachine *vm, Token *tok) {
     Token *t = copy_token(vm, tok);
     t->kind = TK_EOF;
     t->len = 0;
@@ -297,7 +297,7 @@ static Token *new_eof(CCCC *vm, Token *tok) {
 // Extract a [[cccc::comptime]] / __attribute__((comptime)) function definition
 // and store it. [[cccc::macro]] / __attribute__((macro)) are deprecated aliases.
 // Returns the token after the function definition (or original token on failure).
-static Token *extract_macro_function(CCCC *vm, Token *tok,
+static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
                                      bool is_macro_entry,
                                      bool is_inline,
                                      char *attribute_name) {
@@ -496,7 +496,7 @@ static Token *extract_macro_function(CCCC *vm, Token *tok,
 // Extract a [[cccc::comptime]] variable declaration (not a function).
 // Extracts tokens up to and including the terminating ';', creates a
 // ComptimeVar entry, and returns the token after the ';'.
-static Token *extract_comptime_var(CCCC *vm, Token *tok) {
+static Token *extract_comptime_var(VirtualMachine *vm, Token *tok) {
     Token *start = tok;
 
     // Find the variable name: the last identifier before '=' or ';' at depth 0.
@@ -589,7 +589,7 @@ static Token *extract_comptime_var(CCCC *vm, Token *tok) {
     return body_end;
 }
 
-static Hideset *new_hideset(CCCC *vm, char *name) {
+static Hideset *new_hideset(VirtualMachine *vm, char *name) {
     Hideset *hs = arena_alloc(&vm->compiler.parser_arena, sizeof(Hideset));
     memset(hs, 0, sizeof(Hideset));
     hs->name = name;
@@ -598,7 +598,7 @@ static Hideset *new_hideset(CCCC *vm, char *name) {
 
 static bool hideset_contains(Hideset *hs, char *s, int len);
 
-static Hideset *hideset_union(CCCC *vm, Hideset *hs1, Hideset *hs2) {
+static Hideset *hideset_union(VirtualMachine *vm, Hideset *hs1, Hideset *hs2) {
     Hideset head = {};
     Hideset *cur = &head;
 
@@ -618,7 +618,7 @@ static bool hideset_contains(Hideset *hs, char *s, int len) {
     return false;
 }
 
-static Hideset *hideset_intersection(CCCC *vm, Hideset *hs1, Hideset *hs2) {
+static Hideset *hideset_intersection(VirtualMachine *vm, Hideset *hs1, Hideset *hs2) {
     Hideset head = {};
     Hideset *cur = &head;
 
@@ -628,7 +628,7 @@ static Hideset *hideset_intersection(CCCC *vm, Hideset *hs1, Hideset *hs2) {
     return head.next;
 }
 
-static Token *add_hideset(CCCC *vm, Token *tok, Hideset *hs) {
+static Token *add_hideset(VirtualMachine *vm, Token *tok, Hideset *hs) {
     Token head = {};
     Token *cur = &head;
 
@@ -641,7 +641,7 @@ static Token *add_hideset(CCCC *vm, Token *tok, Hideset *hs) {
 }
 
 // Append tok2 to the end of tok1.
-static Token *append(CCCC *vm, Token *tok1, Token *tok2) {
+static Token *append(VirtualMachine *vm, Token *tok1, Token *tok2) {
     if (tok1->kind == TK_EOF)
         return tok2;
 
@@ -654,7 +654,7 @@ static Token *append(CCCC *vm, Token *tok1, Token *tok2) {
     return head.next;
 }
 
-static Token *skip_cond_incl2(CCCC *vm, Token *tok, int depth) {
+static Token *skip_cond_incl2(VirtualMachine *vm, Token *tok, int depth) {
     if (depth > MAX_PP_NESTING)
         error_tok(vm, tok, "too many nested conditional includes");
 
@@ -674,7 +674,7 @@ static Token *skip_cond_incl2(CCCC *vm, Token *tok, int depth) {
 
 // Skip until next `#else`, `#elif` or `#endif`.
 // Nested `#if` and `#endif` are skipped.
-static Token *skip_cond_incl(CCCC *vm, Token *tok) {
+static Token *skip_cond_incl(VirtualMachine *vm, Token *tok) {
     while (tok->kind != TK_EOF) {
         if (is_hash(tok) &&
             (equal(tok->next, "if") || equal(tok->next, "ifdef") ||
@@ -694,7 +694,7 @@ static Token *skip_cond_incl(CCCC *vm, Token *tok) {
 }
 
 // Double-quote a given string and returns it.
-static char *quote_string(CCCC *vm, char *str) {
+static char *quote_string(VirtualMachine *vm, char *str) {
     int bufsize = 3;
     for (int i = 0; str[i]; i++) {
         if (str[i] == '\\' || str[i] == '"')
@@ -716,7 +716,7 @@ static char *quote_string(CCCC *vm, char *str) {
     return buf;
 }
 
-static Token *new_str_token(CCCC *vm, char *str, Token *tmpl) {
+static Token *new_str_token(VirtualMachine *vm, char *str, Token *tmpl) {
     char *buf = quote_string(vm, str);
     return tokenize(vm,
                     new_file(vm, tmpl->file->name, tmpl->file->file_no, buf));
@@ -725,7 +725,7 @@ static Token *new_str_token(CCCC *vm, char *str, Token *tmpl) {
 // Copy all tokens until the next newline, terminate them with
 // an EOF token and then returns them. This function is used to
 // create a new list of tokens for `#if` arguments.
-static Token *copy_line(CCCC *vm, Token **rest, Token *tok) {
+static Token *copy_line(VirtualMachine *vm, Token **rest, Token *tok) {
     Token head = {};
     Token *cur = &head;
 
@@ -737,14 +737,14 @@ static Token *copy_line(CCCC *vm, Token **rest, Token *tok) {
     return head.next;
 }
 
-static Token *new_num_token(CCCC *vm, int val, Token *tmpl) {
+static Token *new_num_token(VirtualMachine *vm, int val, Token *tmpl) {
     char *buf = arena_format(vm, "%d\n", val);
     return tokenize(vm,
                     new_file(vm, tmpl->file->name, tmpl->file->file_no, buf));
 }
 
 // Generate comma-separated token sequence from binary data
-static Token *generate_embed_tokens(CCCC *vm, unsigned char *data, size_t size,
+static Token *generate_embed_tokens(VirtualMachine *vm, unsigned char *data, size_t size,
                                     Token *tmpl) {
     if (size == 0)
         return NULL;
@@ -795,7 +795,7 @@ static bool starts_with_comma(Token *tok) {
 }
 
 // Helper: Create a comma token
-static Token *make_comma_token(CCCC *vm, Token *tmpl) {
+static Token *make_comma_token(VirtualMachine *vm, Token *tmpl) {
     Token *comma = copy_token(vm, tmpl);
     comma->kind = TK_PUNCT;
     comma->len = 1;
@@ -805,7 +805,7 @@ static Token *make_comma_token(CCCC *vm, Token *tmpl) {
 }
 
 // Helper: Append tokens to current position, updating file/line info
-static Token *append_tokens(CCCC *vm, Token *cur, Token *tokens, Token *tmpl) {
+static Token *append_tokens(VirtualMachine *vm, Token *cur, Token *tokens, Token *tmpl) {
     for (Token *t = tokens; t; t = t->next) {
         Token *copy = copy_token(vm, t);
         if (tmpl) {
@@ -818,7 +818,7 @@ static Token *append_tokens(CCCC *vm, Token *cur, Token *tokens, Token *tmpl) {
     return cur;
 }
 
-static char *escape_c_string(CCCC *vm, const char *s) {
+static char *escape_c_string(VirtualMachine *vm, const char *s) {
     size_t len = 0;
     for (const char *p = s; *p; p++)
         len += (*p == '\\' || *p == '"') ? 2 : 1;
@@ -833,7 +833,7 @@ static char *escape_c_string(CCCC *vm, const char *s) {
     return out;
 }
 
-static Token *append_emit_marker_tokens(CCCC *vm, Token *cur, Token *tmpl,
+static Token *append_emit_marker_tokens(VirtualMachine *vm, Token *cur, Token *tmpl,
                                         char *line) {
     char *escaped = escape_c_string(vm, line);
     char *src = arena_format(vm, "__cccc_emit_line__(\"%s\");\n", escaped);
@@ -849,7 +849,7 @@ static Token *append_emit_marker_tokens(CCCC *vm, Token *cur, Token *tmpl,
 }
 
 // Helper: Copy entire token list with updated source location
-static Token *copy_token_list(CCCC *vm, Token *tokens, Token *tmpl) {
+static Token *copy_token_list(VirtualMachine *vm, Token *tokens, Token *tmpl) {
     if (!tokens)
         return NULL;
 
@@ -863,7 +863,7 @@ static Token *copy_token_list(CCCC *vm, Token *tokens, Token *tmpl) {
 
 // Generate #embed tokens with prefix, suffix, and if_empty support
 static Token *
-generate_embed_tokens_with_params(CCCC *vm, unsigned char *data, size_t size,
+generate_embed_tokens_with_params(VirtualMachine *vm, unsigned char *data, size_t size,
                                   Token *prefix_tokens, Token *suffix_tokens,
                                   Token *if_empty_tokens, Token *tmpl) {
     // If empty, use if_empty tokens (ignore prefix/suffix)
@@ -907,7 +907,7 @@ generate_embed_tokens_with_params(CCCC *vm, unsigned char *data, size_t size,
     return head.next;
 }
 
-static bool consume_pp_name(CCCC *vm, Token **rest, Token *tok,
+static bool consume_pp_name(VirtualMachine *vm, Token **rest, Token *tok,
                             char **vendor, char **name) {
     if (tok->kind != TK_IDENT)
         return false;
@@ -931,7 +931,7 @@ static bool consume_pp_name(CCCC *vm, Token **rest, Token *tok,
     return true;
 }
 
-static char *resolve_include_probe(CCCC *vm, Token *start, char *filename,
+static char *resolve_include_probe(VirtualMachine *vm, Token *start, char *filename,
                                    int filename_len, bool is_dquote) {
     if (filename[0] == '/')
         return filename;
@@ -950,7 +950,7 @@ static char *resolve_include_probe(CCCC *vm, Token *start, char *filename,
     return path;
 }
 
-static int eval_has_include(CCCC *vm, Token **rest, Token *tok) {
+static int eval_has_include(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
     tok = skip(vm, tok->next, "(");
 
@@ -966,7 +966,7 @@ static int eval_has_include(CCCC *vm, Token **rest, Token *tok) {
     return path && file_exists(path);
 }
 
-static bool is_has_feature_supported(CCCC *vm, char *name) {
+static bool is_has_feature_supported(VirtualMachine *vm, char *name) {
     if (!strcmp(name, "c99"))
         return vm->compiler.c_std >= CCCC_STD_C99;
     if (!strcmp(name, "c11"))
@@ -1078,7 +1078,7 @@ static long is_has_c_attribute_supported(char *vendor, char *name) {
     return 0;
 }
 
-static int eval_has_name(CCCC *vm, Token **rest, Token *tok, char *kind) {
+static int eval_has_name(VirtualMachine *vm, Token **rest, Token *tok, char *kind) {
     tok = skip(vm, tok->next, "(");
 
     char *vendor;
@@ -1110,7 +1110,7 @@ static int eval_has_name(CCCC *vm, Token **rest, Token *tok, char *kind) {
     return 0;
 }
 
-static Token *read_const_expr(CCCC *vm, Token **rest, Token *tok) {
+static Token *read_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     tok = copy_line(vm, rest, tok);
 
     Token head = {};
@@ -1193,7 +1193,7 @@ static Token *read_const_expr(CCCC *vm, Token **rest, Token *tok) {
 }
 
 // Read and evaluate a constant expression.
-static long eval_const_expr(CCCC *vm, Token **rest, Token *tok) {
+static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
     Token *expr = read_const_expr(vm, rest, tok->next);
     expr = preprocess2(vm, expr);
@@ -1223,7 +1223,7 @@ static long eval_const_expr(CCCC *vm, Token **rest, Token *tok) {
     return val;
 }
 
-static CondIncl *push_cond_incl(CCCC *vm, Token *tok, bool included) {
+static CondIncl *push_cond_incl(VirtualMachine *vm, Token *tok, bool included) {
     CondIncl *ci = arena_alloc(&vm->compiler.parser_arena, sizeof(CondIncl));
     memset(ci, 0, sizeof(CondIncl));
     ci->next = vm->compiler.cond_incl;
@@ -1234,13 +1234,13 @@ static CondIncl *push_cond_incl(CCCC *vm, Token *tok, bool included) {
     return ci;
 }
 
-static Macro *find_macro(CCCC *vm, Token *tok) {
+static Macro *find_macro(VirtualMachine *vm, Token *tok) {
     if (tok->kind != TK_IDENT)
         return NULL;
     return hashmap_get2(&vm->compiler.macros, tok->loc, tok->len);
 }
 
-static Macro *add_macro(CCCC *vm, char *name, int name_len, bool is_objlike,
+static Macro *add_macro(VirtualMachine *vm, char *name, int name_len, bool is_objlike,
                         Token *body) {
     Macro *m = arena_alloc(&vm->compiler.parser_arena, sizeof(Macro));
     memset(m, 0, sizeof(Macro));
@@ -1251,7 +1251,7 @@ static Macro *add_macro(CCCC *vm, char *name, int name_len, bool is_objlike,
     return m;
 }
 
-static MacroParam *read_macro_params(CCCC *vm, Token **rest, Token *tok,
+static MacroParam *read_macro_params(VirtualMachine *vm, Token **rest, Token *tok,
                                      char **va_args_name) {
     MacroParam head = {};
     MacroParam *cur = &head;
@@ -1287,7 +1287,7 @@ static MacroParam *read_macro_params(CCCC *vm, Token **rest, Token *tok,
     return head.next;
 }
 
-static void read_macro_definition(CCCC *vm, Token **rest, Token *tok) {
+static void read_macro_definition(VirtualMachine *vm, Token **rest, Token *tok) {
     if (tok->kind != TK_IDENT)
         error_tok(vm, tok, "macro name must be an identifier");
     char *name = arena_strndup(vm, tok->loc, tok->len);
@@ -1310,7 +1310,7 @@ static void read_macro_definition(CCCC *vm, Token **rest, Token *tok) {
     }
 }
 
-static MacroArg *read_macro_arg_one(CCCC *vm, Token **rest, Token *tok,
+static MacroArg *read_macro_arg_one(VirtualMachine *vm, Token **rest, Token *tok,
                                     bool read_rest) {
     Token head = {};
     Token *cur = &head;
@@ -1343,7 +1343,7 @@ static MacroArg *read_macro_arg_one(CCCC *vm, Token **rest, Token *tok,
     return arg;
 }
 
-static MacroArg *read_macro_args(CCCC *vm, Token **rest, Token *tok,
+static MacroArg *read_macro_args(VirtualMachine *vm, Token **rest, Token *tok,
                                  MacroParam *params, char *va_args_name) {
     Token *start = tok;
     tok = tok->next->next;
@@ -1393,7 +1393,7 @@ static MacroArg *find_arg(MacroArg *args, Token *tok) {
 }
 
 // Concatenates all tokens in `tok` and returns a new string.
-static char *join_tokens(CCCC *vm, Token *tok, Token *end, int *out_len) {
+static char *join_tokens(VirtualMachine *vm, Token *tok, Token *end, int *out_len) {
     // Compute the length of the resulting token.
     int len = 1;
     for (Token *t = tok; t != end && t->kind != TK_EOF; t = t->next) {
@@ -1421,7 +1421,7 @@ static char *join_tokens(CCCC *vm, Token *tok, Token *end, int *out_len) {
 
 // Concatenates all tokens in `arg` and returns a new string token.
 // This function is used for the stringizing operator (#).
-static Token *stringize(CCCC *vm, Token *hash, Token *arg) {
+static Token *stringize(VirtualMachine *vm, Token *hash, Token *arg) {
     // Create a new string token. We need to set some value to its
     // source location for error reporting function, so we use a macro
     // name token as a template.
@@ -1430,7 +1430,7 @@ static Token *stringize(CCCC *vm, Token *hash, Token *arg) {
 }
 
 // Concatenate two tokens to create a new token.
-static Token *paste(CCCC *vm, Token *lhs, Token *rhs) {
+static Token *paste(VirtualMachine *vm, Token *lhs, Token *rhs) {
     // Paste the two tokens.
     char *buf =
         arena_format(vm, "%.*s%.*s", lhs->len, lhs->loc, rhs->len, rhs->loc);
@@ -1451,7 +1451,7 @@ static bool has_varargs(MacroArg *args) {
 }
 
 // Replace func-like macro parameters with given arguments.
-static Token *subst(CCCC *vm, Token *tok, MacroArg *args) {
+static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
     Token head = {};
     Token *cur = &head;
 
@@ -1580,7 +1580,7 @@ static Token *subst(CCCC *vm, Token *tok, MacroArg *args) {
 
 // If tok is a macro, expand it and return true.
 // Otherwise, do nothing and return false.
-static bool expand_macro(CCCC *vm, Token **rest, Token *tok) {
+static bool expand_macro(VirtualMachine *vm, Token **rest, Token *tok) {
     if (hideset_contains(tok->hideset, tok->loc, tok->len))
         return false;
 
@@ -1641,7 +1641,7 @@ static bool file_exists(char *path) {
     return !stat(path, &st);
 }
 
-static char *format_relative_path(CCCC *vm, char *base_file, char *filename) {
+static char *format_relative_path(VirtualMachine *vm, char *base_file, char *filename) {
     char *slash = strrchr(base_file, '/');
     if (!slash)
         return arena_format(vm, "./%s", filename);
@@ -1649,7 +1649,7 @@ static char *format_relative_path(CCCC *vm, char *base_file, char *filename) {
                         filename);
 }
 
-char *search_include_paths(CCCC *vm, char *filename, int filename_len,
+char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
                            bool is_system) {
     if (filename[0] == '/')
         return filename;
@@ -1694,7 +1694,7 @@ char *search_include_paths(CCCC *vm, char *filename, int filename_len,
     return NULL;
 }
 
-static char *search_include_next(CCCC *vm, char *filename) {
+static char *search_include_next(VirtualMachine *vm, char *filename) {
     // First search include_paths
     for (; vm->compiler.include_next_idx < vm->compiler.include_paths.len;
          vm->compiler.include_next_idx++) {
@@ -1721,7 +1721,7 @@ static char *search_include_next(CCCC *vm, char *filename) {
 }
 
 // Read an #include argument.
-static char *read_include_filename(CCCC *vm, Token **rest, Token *tok,
+static char *read_include_filename(VirtualMachine *vm, Token **rest, Token *tok,
                                    bool *is_dquote, int *out_len) {
     // Pattern 1: #include "foo.h" or __has_embed("foo")
     if (tok->kind == TK_STR) {
@@ -1771,7 +1771,7 @@ static char *read_include_filename(CCCC *vm, Token **rest, Token *tok,
 //   #define FOO_H
 //   ...
 //   #endif
-static char *detect_include_guard(CCCC *vm, Token *tok) {
+static char *detect_include_guard(VirtualMachine *vm, Token *tok) {
     // Detect the first two lines.
     if (!is_hash(tok) || !equal(tok->next, "ifndef"))
         return NULL;
@@ -1807,7 +1807,7 @@ static char *detect_include_guard(CCCC *vm, Token *tok) {
 
 // Register stdlib functions for a specific header
 // Called automatically when a standard header is #include'd
-static void register_stdlib_for_header(CCCC *vm, const char *header_name) {
+static void register_stdlib_for_header(VirtualMachine *vm, const char *header_name) {
     if (hashmap_get(&vm->compiler.included_headers, header_name))
         return;
     hashmap_put(&vm->compiler.included_headers, header_name, (void *)1);
@@ -1816,7 +1816,7 @@ static void register_stdlib_for_header(CCCC *vm, const char *header_name) {
     if (!fn_name)
         return;
 
-    static const struct { const char *name; void (*fn)(CCCC *); } fns[] = {
+    static const struct { const char *name; void (*fn)(VirtualMachine *); } fns[] = {
         {"register_ctype_functions", register_ctype_functions},
         {"register_fenv_functions", register_fenv_functions},
         {"register_locale_functions", register_locale_functions},
@@ -1838,7 +1838,7 @@ static void register_stdlib_for_header(CCCC *vm, const char *header_name) {
     }
 }
 
-static Token *include_file(CCCC *vm, Token *tok, char *path,
+static Token *include_file(VirtualMachine *vm, Token *tok, char *path,
                            Token *filename_tok, const char *include_name) {
     // Check for "#pragma once"
     if (hashmap_get(&vm->compiler.pragma_once, path))
@@ -1868,7 +1868,7 @@ static Token *include_file(CCCC *vm, Token *tok, char *path,
 }
 
 // Read #line arguments
-static void read_line_marker(CCCC *vm, Token **rest, Token *tok) {
+static void read_line_marker(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
     tok = preprocess(vm, copy_line(vm, rest, tok));
 
@@ -1887,7 +1887,7 @@ static void read_line_marker(CCCC *vm, Token **rest, Token *tok) {
 
 // Read a token sequence for #embed parameters (prefix, suffix, if_empty)
 // Similar to read_macro_arg_one but simplified for #embed use case
-static Token *read_embed_parameter(CCCC *vm, Token **rest, Token *tok) {
+static Token *read_embed_parameter(VirtualMachine *vm, Token **rest, Token *tok) {
     Token head = {};
     Token *cur = &head;
     int level = 0;
@@ -1912,7 +1912,7 @@ static Token *read_embed_parameter(CCCC *vm, Token **rest, Token *tok) {
     return head.next; // NULL if empty parameter
 }
 
-static long eval_embed_limit_expr(CCCC *vm, Token *start, Token *expr,
+static long eval_embed_limit_expr(VirtualMachine *vm, Token *start, Token *expr,
                                   Token *end) {
     if (!expr)
         error_tok(vm, start, "no expression");
@@ -1938,7 +1938,7 @@ static long eval_embed_limit_expr(CCCC *vm, Token *start, Token *expr,
 }
 
 // Main #embed directive handler
-static Token *handle_embed_directive(CCCC *vm, Token *tok,
+static Token *handle_embed_directive(VirtualMachine *vm, Token *tok,
                                      Token *directive_start, bool is_inline) {
     // Parse filename (quoted string or <angle brackets>)
     bool is_dquote;
@@ -2163,7 +2163,7 @@ static PPDir pp_directive(Token *tok) {
 // registry: ATTR_CCCC -> [[cccc::name(args)]], ATTR_STD -> [[name(args)]],
 // ATTR_GNU / unknown -> __attribute__((name(args))). Returns false (tok
 // unchanged) if tok is not "@" or is not followed by an identifier.
-static bool try_rewrite_at_attr(CCCC *vm, Token **tok_ptr) {
+static bool try_rewrite_at_attr(VirtualMachine *vm, Token **tok_ptr) {
     Token *tok = *tok_ptr;
     if (!equal(tok, "@") || !tok->next || tok->next->kind != TK_IDENT)
         return false;
@@ -2241,7 +2241,7 @@ static const char *cccc_keyword_alias_name(Token *tok) {
     return NULL;
 }
 
-static bool try_rewrite_cccc_keyword_attr(CCCC *vm, Token **tok_ptr) {
+static bool try_rewrite_cccc_keyword_attr(VirtualMachine *vm, Token **tok_ptr) {
     Token *tok = *tok_ptr;
     const char *name = cccc_keyword_alias_name(tok);
     if (!name)
@@ -2319,7 +2319,7 @@ typedef struct {
 
 // Parse test(...) argument list. *p_ptr must point to the first token inside
 // the opening "("; on return it points to the closing ")".
-static void parse_test_args(CCCC *vm, Token **p_ptr, TestArgs *out) {
+static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
     Token *p = *p_ptr;
     while (p && !equal(p, ")") && p->kind != TK_EOF) {
         if (equal(p, "suite") &&
@@ -2505,7 +2505,7 @@ static void parse_test_setup_args(Token **p_ptr, TestSetupArgs *out) {
 // If the attribute block contains no macro/comptime marker (e.g. [[nodiscard]],
 // __attribute__((unused))), *tok_ptr is left unchanged and the function returns
 // false so the token flows to the parser as normal.
-static void read_macro_attr_options(CCCC *vm, Token *macro_tok,
+static void read_macro_attr_options(VirtualMachine *vm, Token *macro_tok,
                                     bool *is_inline,
                                     char **attribute_name) {
     if (!macro_tok || !macro_tok->next || !equal(macro_tok->next, "("))
@@ -2536,7 +2536,7 @@ static void read_macro_attr_options(CCCC *vm, Token *macro_tok,
     }
 }
 
-static bool try_extract_attr_macro(CCCC *vm, Token **tok_ptr) {
+static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
     Token *tok = *tok_ptr;
     bool is_gnu_attr = false;
     bool is_c23_attr = false;
@@ -2857,7 +2857,7 @@ static Token *probe_struct_type_def_end(Token *tok) {
 // Returns true and advances *tok_ptr past the extracted definition on match.
 // NOTE: struct/union/enum type definitions are handled by the caller via
 // probe_struct_type_def_end; this function will never see them.
-static bool try_extract_comptime_block_decl(CCCC *vm, Token **tok_ptr) {
+static bool try_extract_comptime_block_decl(VirtualMachine *vm, Token **tok_ptr) {
     Token *tok = *tok_ptr;
 
     if (probe_function_definition(tok)) {
@@ -2873,7 +2873,7 @@ static bool try_extract_comptime_block_decl(CCCC *vm, Token **tok_ptr) {
 
 // Handle #pragma GCC diagnostic <action> ["-Wname"]
 // Returns the token after the consumed pragma line.
-static Token *handle_gcc_diagnostic(CCCC *vm, Token *tok) {
+static Token *handle_gcc_diagnostic(VirtualMachine *vm, Token *tok) {
     if (equal(tok, "push")) {
         // Grow the stack if needed
         if (vm->compiler.diag_stack_depth >= vm->compiler.diag_stack_cap) {
@@ -2965,7 +2965,7 @@ static Token *handle_gcc_diagnostic(CCCC *vm, Token *tok) {
 
 // Dispatch the body of a #pragma directive or a _Pragma() operator.
 // tok is the first content token (after "#pragma" / after the destringized string).
-static Token *handle_pragma_body(CCCC *vm, Token *tok) {
+static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
     if (equal(tok, "once")) {
         hashmap_put(&vm->compiler.pragma_once, tok->file->name, (void *)1);
         return skip_line(vm, tok->next);
@@ -3060,20 +3060,20 @@ static Token *handle_pragma_body(CCCC *vm, Token *tok) {
     return tok;
 }
 
-static void queue_comptime_include(CCCC *vm, const char *filename, bool is_dquote) {
+static void queue_comptime_include(VirtualMachine *vm, const char *filename, bool is_dquote) {
     char *line = arena_format(vm, is_dquote ? "#include \"%s\"" : "#include <%s>",
                               filename);
     strarray_push(&vm->compiler.comptime_pending_includes, line);
 }
 
-static void queue_comptime_directive(CCCC *vm, char *line) {
+static void queue_comptime_directive(VirtualMachine *vm, char *line) {
     if (line && *line)
         strarray_push(&vm->compiler.comptime_pending_includes, line);
 }
 
 // Visit all tokens in `tok` while evaluating preprocessing
 // macros and directives.
-static Token *preprocess2(CCCC *vm, Token *tok) {
+static Token *preprocess2(VirtualMachine *vm, Token *tok) {
     Token head = {};
     Token *cur = &head;
 
@@ -3475,7 +3475,7 @@ static Token *preprocess2(CCCC *vm, Token *tok) {
 // This function is authoritative and idempotent — it can be called more than
 // once (e.g. first with the default inside cc_init, then again after the user's
 // -std= flag (long form: --std=) is parsed) and always produces the complete correct state.
-void define_std_macros(CCCC *vm) {
+void define_std_macros(VirtualMachine *vm) {
     const char *v;
     switch (vm->compiler.c_std) {
     case CCCC_STD_C89:
@@ -3489,28 +3489,28 @@ void define_std_macros(CCCC *vm) {
     define_macro(vm, "__STDC_VERSION__", (char *)v);
 }
 
-void define_macro(CCCC *vm, char *name, char *buf) {
+void define_macro(VirtualMachine *vm, char *name, char *buf) {
     Token *tok = tokenize(vm, new_file(vm, "<built-in>", 1, buf));
     add_macro(vm, name, strlen(name), true, tok);
 }
 
-void undef_macro(CCCC *vm, char *name) {
+void undef_macro(VirtualMachine *vm, char *name) {
     hashmap_delete(&vm->compiler.macros, name);
 }
 
-static Macro *add_builtin(CCCC *vm, char *name, macro_handler_fn *fn) {
+static Macro *add_builtin(VirtualMachine *vm, char *name, macro_handler_fn *fn) {
     Macro *m = add_macro(vm, name, strlen(name), true, NULL);
     m->handler = fn;
     return m;
 }
 
-static Token *file_macro(CCCC *vm, Token *tmpl) {
+static Token *file_macro(VirtualMachine *vm, Token *tmpl) {
     while (tmpl->origin)
         tmpl = tmpl->origin;
     return new_str_token(vm, tmpl->file->display_name, tmpl);
 }
 
-static Token *line_macro(CCCC *vm, Token *tmpl) {
+static Token *line_macro(VirtualMachine *vm, Token *tmpl) {
     while (tmpl->origin)
         tmpl = tmpl->origin;
     int i = tmpl->line_no + tmpl->file->line_delta;
@@ -3518,14 +3518,14 @@ static Token *line_macro(CCCC *vm, Token *tmpl) {
 }
 
 // __COUNTER__ is expanded to serial values starting from 0.
-static Token *counter_macro(CCCC *vm, Token *tmpl) {
+static Token *counter_macro(VirtualMachine *vm, Token *tmpl) {
     return new_num_token(vm, vm->compiler.counter_macro_value++, tmpl);
 }
 
 // __TIMESTAMP__ is expanded to a string describing the last
 // modification time of the current file. E.g.
 // "Fri Jul 24 01:32:50 2020"
-static Token *timestamp_macro(CCCC *vm, Token *tmpl) {
+static Token *timestamp_macro(VirtualMachine *vm, Token *tmpl) {
     struct stat st;
     if (stat(tmpl->file->name, &st) != 0)
         return new_str_token(vm, "??? ??? ?? ??:??:?? ????", tmpl);
@@ -3537,7 +3537,7 @@ static Token *timestamp_macro(CCCC *vm, Token *tmpl) {
 }
 
 // __DATE__ is expanded to the current date, e.g. "May 17 2020".
-static char *format_date(CCCC *vm, struct tm *tm) {
+static char *format_date(VirtualMachine *vm, struct tm *tm) {
     static char mon[][4] = {
         "Jan", "Feb", "Mar", "Apr", "May", "Jun",
         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -3548,12 +3548,12 @@ static char *format_date(CCCC *vm, struct tm *tm) {
 }
 
 // __TIME__ is expanded to the current time, e.g. "13:34:03".
-static char *format_time(CCCC *vm, struct tm *tm) {
+static char *format_time(VirtualMachine *vm, struct tm *tm) {
     return arena_format(vm, "\"%02d:%02d:%02d\"", tm->tm_hour, tm->tm_min,
                         tm->tm_sec);
 }
 
-void init_macros(CCCC *vm) {
+void init_macros(VirtualMachine *vm) {
     // Define predefined macros
     define_macro(vm, "__C99_MACRO_WITH_VA_ARGS", "1");
     define_macro(vm, "__SIZEOF_DOUBLE__", "8");
@@ -3748,7 +3748,7 @@ static StringKind getStringKind(Token *tok) {
 
 // Concatenate adjacent string literals into a single string literal
 // as per the C spec.
-static void join_adjacent_string_literals(CCCC *vm, Token *tok) {
+static void join_adjacent_string_literals(VirtualMachine *vm, Token *tok) {
     // First pass: If regular string literals are adjacent to wide
     // string literals, regular string literals are converted to a wide
     // type before concatenation. In this pass, we do the conversion.
@@ -3816,7 +3816,7 @@ static void join_adjacent_string_literals(CCCC *vm, Token *tok) {
 }
 
 // Entry point function of the preprocessor.
-Token *preprocess(CCCC *vm, Token *tok) {
+Token *preprocess(VirtualMachine *vm, Token *tok) {
     tok = preprocess2(vm, tok);
     // Bare comptime entries (no begin/end, runs to EOF) are silently closed.
     // begin/end entries that reach EOF without an explicit close are errors.
@@ -3828,11 +3828,16 @@ Token *preprocess(CCCC *vm, Token *tok) {
                   top->type == CTX_EMIT ? "unclosed #pragma cccc emit begin"
                                         : "unclosed #pragma cccc comptime begin");
     }
-    if (vm->compiler.cond_incl)
-        error_tok(vm, vm->compiler.cond_incl->tok,
-                  "unterminated conditional directive (started with #%.*s)",
-                  vm->compiler.cond_incl->tok->len,
-                  vm->compiler.cond_incl->tok->loc);
+    if (vm->compiler.cond_incl) {
+        Token *ci_tok = vm->compiler.cond_incl->tok;
+        const char *hint = "";
+        if (ci_tok->file && ci_tok->file->name &&
+            strstr(ci_tok->file->name, "implicit-reflection.h"))
+            hint = "\n  hint: embedded reflection.h may be truncated — run `make stdlib`";
+        error_tok(vm, ci_tok,
+                  "unterminated conditional directive (started with #%.*s)%s",
+                  ci_tok->len, ci_tok->loc, hint);
+    }
     convert_pp_tokens(vm, tok);
     join_adjacent_string_literals(vm, tok);
 
