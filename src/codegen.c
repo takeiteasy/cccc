@@ -406,7 +406,7 @@ static void prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_
     free(cands);
 }
 
-// ========== Restrict-param Deref Cache (#267) ==========
+// ========== Restrict-param Deref Cache (#267) and Derived-Local Analysis (#269) ==========
 
 // Forward declarations for helpers used by the restrict cache
 static void emit_mov3(VirtualMachine *vm, int rd, int rs);
@@ -415,6 +415,206 @@ static void emit_local_load(VirtualMachine *vm, Type *ty, int rd, long long offs
 static void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr);
 static void emit_normalize_promoted_scalar(VirtualMachine *vm, Type *ty, int reg);
 static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg);
+
+// Evaluate a constant byte offset from a node (ND_NUM or ND_MUL(ND_NUM, ND_NUM)).
+// Returns true and sets *out on success. Strips ND_CAST wrappers.
+static bool eval_const_byte_offset(Node *n, long *out) {
+    while (n && n->kind == ND_CAST) n = n->lhs;
+    if (!n) return false;
+    if (n->kind == ND_NUM) { *out = (long)n->val; return true; }
+    if (n->kind == ND_MUL) {
+        Node *ml = n->lhs, *mr = n->rhs;
+        while (ml && ml->kind == ND_CAST) ml = ml->lhs;
+        while (mr && mr->kind == ND_CAST) mr = mr->lhs;
+        if (ml && mr && ml->kind == ND_NUM && mr->kind == ND_NUM) {
+            *out = (long)(ml->val * mr->val);
+            return true;
+        }
+    }
+    return false;
+}
+
+// Extract (restrict_param, byte_offset) from a raw pointer expression.
+// Used by the pre-pass to detect `int *q = p ± const` assignments.
+// Sets *out_var_offset=true when the offset is non-constant (derivation known
+// only for invalidation purposes, not for cache slot keying).
+// Only resolves direct restrict params (single-hop; derived locals not yet mapped).
+static bool restrict_extract_base_offset(Node *expr, Obj **out_param,
+                                          long *out_byte_offset,
+                                          bool *out_var_offset) {
+    while (expr && expr->kind == ND_CAST) expr = expr->lhs;
+    if (!expr) return false;
+
+    // Pattern: plain param
+    if (expr->kind == ND_VAR) {
+        Obj *var = expr->var;
+        if (!var || !var->is_param || !var->ty || var->ty->kind != TY_PTR ||
+            !var->ty->is_restrict || !var->ty->base ||
+            !is_scalar_promotion_type(var->ty->base))
+            return false;
+        *out_param = var;
+        *out_byte_offset = 0;
+        *out_var_offset = false;
+        return true;
+    }
+
+    // Pattern: param +/- offset
+    if (expr->kind != ND_ADD && expr->kind != ND_SUB) return false;
+    bool is_sub = (expr->kind == ND_SUB);
+
+    // For ADD try both orderings; for SUB only (ptr - off)
+    Node *sides[2][2] = {{expr->lhs, expr->rhs}, {expr->rhs, expr->lhs}};
+    int n_sides = is_sub ? 1 : 2;
+    for (int s = 0; s < n_sides; s++) {
+        Node *ptr_node = sides[s][0], *off_node = sides[s][1];
+        while (ptr_node && ptr_node->kind == ND_CAST) ptr_node = ptr_node->lhs;
+        while (off_node && off_node->kind == ND_CAST) off_node = off_node->lhs;
+        if (!ptr_node || !off_node || ptr_node->kind != ND_VAR) continue;
+        Obj *var = ptr_node->var;
+        if (!var || !var->is_param || !var->ty || var->ty->kind != TY_PTR ||
+            !var->ty->is_restrict || !var->ty->base ||
+            !is_scalar_promotion_type(var->ty->base))
+            continue;
+        long byte_off = 0;
+        bool is_var = !eval_const_byte_offset(off_node, &byte_off);
+        if (is_sub && !is_var) byte_off = -byte_off;
+        *out_param = var;
+        *out_byte_offset = is_var ? 0 : byte_off;
+        *out_var_offset = is_var;
+        return true;
+    }
+    return false;
+}
+
+// ---- Pre-pass: collect derived locals (#269) ----
+
+// Per-candidate state collected during the pre-pass AST walk.
+#define MAX_DERIVED_CANDS 24
+typedef struct {
+    Obj  *var;
+    Obj  *base_param;
+    long  byte_offset;
+    bool  var_offset;
+    int   assign_count;
+    bool  addr_taken;
+} DerivedCand;
+
+static DerivedCand *derived_cand_find_or_create(DerivedCand *cands, int *nc, Obj *var) {
+    for (int i = 0; i < *nc; i++)
+        if (cands[i].var == var) return &cands[i];
+    if (*nc >= MAX_DERIVED_CANDS) return NULL;
+    DerivedCand *c = &cands[(*nc)++];
+    c->var = var;
+    c->base_param = NULL;
+    c->byte_offset = 0;
+    c->var_offset = false;
+    c->assign_count = 0;
+    c->addr_taken = false;
+    return c;
+}
+
+static void restrict_derived_walk(Node *node,
+                                   DerivedCand *cands, int *nc,
+                                   bool *param_reassigned,
+                                   Obj **rparams, int np) {
+    if (!node) return;
+
+    // Detect &q (address-of a local pointer → mark addr_taken)
+    if (node->kind == ND_ADDR && node->lhs && node->lhs->kind == ND_VAR) {
+        Obj *v = node->lhs->var;
+        if (v && v->is_local && !v->is_param) {
+            DerivedCand *c = derived_cand_find_or_create(cands, nc, v);
+            if (c) c->addr_taken = true;
+        }
+    }
+
+    // Detect assignments: lhs = rhs
+    if (node->kind == ND_ASSIGN && node->lhs && node->lhs->kind == ND_VAR) {
+        Obj *lv = node->lhs->var;
+        if (lv) {
+            // Restrict param being reassigned → mark it
+            for (int i = 0; i < np; i++)
+                if (rparams[i] == lv) { param_reassigned[i] = true; break; }
+
+            // Local pointer-to-scalar candidate
+            if (lv->is_local && !lv->is_param && lv->ty &&
+                lv->ty->kind == TY_PTR && lv->ty->base &&
+                is_scalar_promotion_type(lv->ty->base)) {
+                DerivedCand *c = derived_cand_find_or_create(cands, nc, lv);
+                if (c) {
+                    if (c->assign_count == 0)
+                        restrict_extract_base_offset(node->rhs, &c->base_param,
+                                                     &c->byte_offset, &c->var_offset);
+                    c->assign_count++;
+                }
+            }
+        }
+    }
+
+    restrict_derived_walk(node->lhs, cands, nc, param_reassigned, rparams, np);
+    restrict_derived_walk(node->rhs, cands, nc, param_reassigned, rparams, np);
+    restrict_derived_walk(node->cond, cands, nc, param_reassigned, rparams, np);
+    restrict_derived_walk(node->then, cands, nc, param_reassigned, rparams, np);
+    restrict_derived_walk(node->els, cands, nc, param_reassigned, rparams, np);
+    restrict_derived_walk(node->init, cands, nc, param_reassigned, rparams, np);
+    restrict_derived_walk(node->inc, cands, nc, param_reassigned, rparams, np);
+    restrict_derived_walk(node->body, cands, nc, param_reassigned, rparams, np);
+    for (Node *arg = node->args; arg; arg = arg->next)
+        restrict_derived_walk(arg, cands, nc, param_reassigned, rparams, np);
+    for (Node *n = node->next; n; n = n->next)
+        restrict_derived_walk(n, cands, nc, param_reassigned, rparams, np);
+}
+
+static void collect_restrict_derived_locals(VirtualMachine *vm, Obj *fn) {
+    vm->compiler.restrict_derived_count = 0;
+    memset(vm->compiler.restrict_derived_vars, 0,
+           sizeof(vm->compiler.restrict_derived_vars));
+
+    // Gather all restrict pointer params (at most 8 in CCCC's ABI)
+    Obj *rparams[8];
+    bool param_reassigned[8];
+    int np = 0;
+    for (Obj *p = fn->params; p && np < 8; p = p->next)
+        if (p->ty && p->ty->kind == TY_PTR && p->ty->is_restrict) {
+            rparams[np] = p;
+            param_reassigned[np] = false;
+            np++;
+        }
+    if (np == 0) return;
+
+    DerivedCand cands[MAX_DERIVED_CANDS];
+    int nc = 0;
+    restrict_derived_walk(fn->body, cands, &nc, param_reassigned, rparams, np);
+
+    for (int i = 0; i < nc; i++) {
+        DerivedCand *c = &cands[i];
+        if (c->assign_count != 1) continue;
+        if (c->addr_taken) continue;
+        if (!c->base_param) continue;
+        // Bail if the base restrict param was reassigned anywhere in the function
+        bool base_bad = false;
+        for (int j = 0; j < np; j++)
+            if (rparams[j] == c->base_param && param_reassigned[j]) {
+                base_bad = true; break;
+            }
+        if (base_bad) continue;
+        if (vm->compiler.restrict_derived_count >= MAX_RESTRICT_DERIVED) break;
+        int idx = vm->compiler.restrict_derived_count++;
+        vm->compiler.restrict_derived_vars[idx]       = c->var;
+        vm->compiler.restrict_derived_params[idx]     = c->base_param;
+        vm->compiler.restrict_derived_offsets[idx]    = c->byte_offset;
+        vm->compiler.restrict_derived_var_offset[idx] = c->var_offset;
+    }
+}
+
+// Look up a variable in the restrict derivation map. Returns index or -1.
+static int restrict_derived_find(VirtualMachine *vm, Obj *var) {
+    for (int i = 0; i < vm->compiler.restrict_derived_count; i++)
+        if (vm->compiler.restrict_derived_vars[i] == var) return i;
+    return -1;
+}
+
+// ---- Cache setup ----
 
 static void prepare_restrict_cache(VirtualMachine *vm, Obj *fn, int base_stack_size) {
     vm->compiler.restrict_cache_count = 0;
@@ -429,6 +629,9 @@ static void prepare_restrict_cache(VirtualMachine *vm, Obj *fn, int base_stack_s
            sizeof(vm->compiler.restrict_cache_save_offsets));
     memset(vm->compiler.restrict_cache_valid, 0,
            sizeof(vm->compiler.restrict_cache_valid));
+    vm->compiler.restrict_derived_count = 0;
+    memset(vm->compiler.restrict_derived_vars, 0,
+           sizeof(vm->compiler.restrict_derived_vars));
 
     if (vm->compiler.opt_level < 2 || (vm->flags & CCCC_ENABLE_DEBUGGER))
         return;
@@ -444,6 +647,8 @@ static void prepare_restrict_cache(VirtualMachine *vm, Obj *fn, int base_stack_s
     }
     if (!has_restrict)
         return;
+
+    collect_restrict_derived_locals(vm, fn);
 
     // Pre-reserve all MAX_RESTRICT_CACHE slots (S4-S7 and their stack save slots)
     // so lazy binding can claim any slot without growing the frame mid-function.
@@ -492,6 +697,7 @@ static int restrict_cache_alloc(VirtualMachine *vm, Obj *param, long byte_offset
 
 // Extract (restrict_param, byte_offset) from a ND_DEREF node.
 // Handles *p (offset 0) and p[const] (constant element index).
+// Also handles *q and q[const] where q is a derived local (see #269).
 // Returns true and sets out_param/out_byte_offset on success.
 static bool restrict_const_deref_extract(VirtualMachine *vm, Node *node,
                                          Obj **out_param, long *out_byte_offset) {
@@ -503,19 +709,28 @@ static bool restrict_const_deref_extract(VirtualMachine *vm, Node *node,
     if (!addr)
         return false;
 
-    // Pattern 1: plain *p
+    // Pattern 1: *p or *q where q is a derived local
     if (addr->kind == ND_VAR) {
         Obj *var = addr->var;
-        if (!var || !var->is_param || !var->ty || var->ty->kind != TY_PTR ||
-            !var->ty->is_restrict || !var->ty->base ||
-            !is_scalar_promotion_type(var->ty->base))
-            return false;
-        *out_param = var;
-        *out_byte_offset = 0;
-        return true;
+        if (var && var->is_param && var->ty && var->ty->kind == TY_PTR &&
+            var->ty->is_restrict && var->ty->base &&
+            is_scalar_promotion_type(var->ty->base)) {
+            *out_param = var;
+            *out_byte_offset = 0;
+            return true;
+        }
+        // Derived local: *q where q = p + const
+        int di = restrict_derived_find(vm, var);
+        if (di >= 0 && !vm->compiler.restrict_derived_var_offset[di]) {
+            *out_param = vm->compiler.restrict_derived_params[di];
+            *out_byte_offset = vm->compiler.restrict_derived_offsets[di];
+            return true;
+        }
+        return false;
     }
 
     // Pattern 2: p[const] → *(p + k*elem_size) or *(p + byte_off)
+    // Also handles q[const] where q is a derived local.
     // Requires opt_level >= 2 and no safety flags (same guards as indexed load).
     if (addr->kind != ND_ADD || vm->compiler.opt_level < 2)
         return false;
@@ -529,39 +744,40 @@ static bool restrict_const_deref_extract(VirtualMachine *vm, Node *node,
         Node *off_node = sides[s][1];
         while (ptr_node && ptr_node->kind == ND_CAST) ptr_node = ptr_node->lhs;
         while (off_node && off_node->kind == ND_CAST) off_node = off_node->lhs;
-        if (!ptr_node || !off_node)
-            continue;
-        if (ptr_node->kind != ND_VAR)
+        if (!ptr_node || !off_node || ptr_node->kind != ND_VAR)
             continue;
         Obj *var = ptr_node->var;
-        if (!var || !var->is_param || !var->ty || var->ty->kind != TY_PTR ||
-            !var->ty->is_restrict || !var->ty->base ||
-            !is_scalar_promotion_type(var->ty->base))
-            continue;
-        // Evaluate the constant offset: ND_NUM or ND_MUL(ND_NUM, ND_NUM)
-        long byte_off = 0;
-        if (off_node->kind == ND_NUM) {
-            byte_off = (long)off_node->val;
-        } else if (off_node->kind == ND_MUL) {
-            Node *ml = off_node->lhs, *mr = off_node->rhs;
-            while (ml && ml->kind == ND_CAST) ml = ml->lhs;
-            while (mr && mr->kind == ND_CAST) mr = mr->lhs;
-            if (!ml || !mr || ml->kind != ND_NUM || mr->kind != ND_NUM)
-                continue;
-            byte_off = (long)(ml->val * mr->val);
+
+        // Resolve: is var a restrict param or a derived local?
+        Obj *base_param = NULL;
+        long base_off = 0;
+        if (var && var->is_param && var->ty && var->ty->kind == TY_PTR &&
+            var->ty->is_restrict && var->ty->base &&
+            is_scalar_promotion_type(var->ty->base)) {
+            base_param = var;
+            base_off = 0;
         } else {
-            continue;
+            int di = restrict_derived_find(vm, var);
+            if (di < 0 || vm->compiler.restrict_derived_var_offset[di]) continue;
+            base_param = vm->compiler.restrict_derived_params[di];
+            base_off = vm->compiler.restrict_derived_offsets[di];
         }
-        *out_param = var;
-        *out_byte_offset = byte_off;
+
+        // Evaluate the constant element offset
+        long elem_off = 0;
+        if (!eval_const_byte_offset(off_node, &elem_off))
+            continue;
+        *out_param = base_param;
+        *out_byte_offset = base_off + elem_off;
         return true;
     }
     return false;
 }
 
 // Walk a pointer expression to find its restrict-param root (for indexed stores).
+// Also resolves derived locals (q = p + k maps q → p).
 // Returns the restrict param Obj if found, NULL otherwise.
-static Obj *restrict_root_param_of_ptr(Node *ptr) {
+static Obj *restrict_root_param_of_ptr(VirtualMachine *vm, Node *ptr) {
     while (ptr) {
         if (ptr->kind == ND_CAST) { ptr = ptr->lhs; continue; }
         if (ptr->kind == ND_VAR) {
@@ -569,13 +785,15 @@ static Obj *restrict_root_param_of_ptr(Node *ptr) {
             if (var && var->is_param && var->ty && var->ty->kind == TY_PTR &&
                 var->ty->is_restrict)
                 return var;
+            // Derived local: *q where q = p + k → root is p
+            int di = restrict_derived_find(vm, var);
+            if (di >= 0) return vm->compiler.restrict_derived_params[di];
             return NULL;
         }
         if (ptr->kind == ND_ADD || ptr->kind == ND_SUB) {
-            // Try the LHS first (usually the base pointer)
-            Obj *r = restrict_root_param_of_ptr(ptr->lhs);
+            Obj *r = restrict_root_param_of_ptr(vm, ptr->lhs);
             if (r) return r;
-            return restrict_root_param_of_ptr(ptr->rhs);
+            return restrict_root_param_of_ptr(vm, ptr->rhs);
         }
         return NULL;
     }
@@ -650,7 +868,7 @@ static void restrict_cache_handle_store(VirtualMachine *vm, Node *lhs, int val_r
 
     // p[var] or derived pointer store: find the restrict param root and invalidate
     // all of its cached offsets (we don't know which byte_offset was hit).
-    Obj *base = restrict_root_param_of_ptr(lhs->lhs);
+    Obj *base = restrict_root_param_of_ptr(vm, lhs->lhs);
     if (base) {
         restrict_cache_invalidate_param(vm, base);
         return;

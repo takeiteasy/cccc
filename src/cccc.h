@@ -1863,6 +1863,17 @@ typedef struct Compiler {
     int restrict_cache_save_offsets[MAX_RESTRICT_CACHE];
     bool restrict_cache_valid[MAX_RESTRICT_CACHE];
 
+    // Restrict derived-local map (#269). Populated by a pre-pass AST walk before
+    // codegen; maps local pointer variables provably derived from restrict params
+    // to their (param, byte_offset) pair so the deref cache can treat *q like *p.
+    // var_offset[i]=true means the offset is non-constant (used for invalidation only).
+#define MAX_RESTRICT_DERIVED 16
+    int restrict_derived_count;
+    Obj  *restrict_derived_vars[MAX_RESTRICT_DERIVED];
+    Obj  *restrict_derived_params[MAX_RESTRICT_DERIVED];
+    long  restrict_derived_offsets[MAX_RESTRICT_DERIVED];
+    bool  restrict_derived_var_offset[MAX_RESTRICT_DERIVED];
+
     // C language standard selection
     CStdVersion c_std;  // Selected standard version (default: CCCC_STD_C23)
     bool c_std_gnu;     // True for gnuXX variants (gnu17, gnu11, …)

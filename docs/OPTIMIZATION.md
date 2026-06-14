@@ -52,6 +52,18 @@ The same levels also lower simple array and pointer dereferences of the form
 `MUL3 + ADD3 + LDR/STR` address sequence for scalar integer and floating-point
 loads/stores when pointer-safety instrumentation is not active.
 
+At `--optimize=2` and above, `restrict`-qualified scalar pointer parameters are
+cached in callee-saved registers (S4–S7). Loads of `*p` or `p[const]` for a
+restrict param `p` hit the register directly on subsequent accesses within a
+straight-line block; stores write through, and control-flow joins invalidate.
+A pre-pass AST walk also identifies locals provably derived from restrict params
+(`int *q = p + k`) and extends the same cache to `*q` and `q[const]` accesses —
+a store through `*q` updates the `(p, byte_offset)` slot rather than triggering a
+global invalidate. Variable-offset derivations (`q = p + n`) still benefit from
+targeted invalidation of only `p`'s slots. `for` loops of the form
+`for (T i=0; i<n; i++) dst[i]=src[i]` where both pointers are restrict-qualified
+are lowered to a single `MCPY` opcode (libc memcpy) at `--optimize=2`+.
+
 ### Phase 1: Constant Folding (`--optimize=1`)
 
 Tracks constant values through register operations and records foldable integer
