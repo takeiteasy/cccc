@@ -310,47 +310,49 @@ static void collect_promotion_candidates(VirtualMachine *vm, Obj *fn, Node *node
                                          Node *parent,
                                          PromotionCandidate *cands, int count,
                                          int loop_depth) {
-    if (!node)
-        return;
+    // Walk the sibling chain iteratively.  Recursing into node->next here
+    // would re-process the remainder of the chain once per sibling, since
+    // every recursive call repeats the same node->next traversal — that is
+    // O(2^N) in the number of statements.  Iterating the chain and recursing
+    // only into children keeps this linear.
+    for (; node; node = node->next) {
+        if (node->kind == ND_VAR && node->var) {
+            PromotionCandidate *cand =
+                promotion_find_candidate(cands, count, node->var);
+            if (cand)
+                cand->score += 1 + loop_depth * 4;
+        }
 
-    if (node->kind == ND_VAR && node->var) {
-        PromotionCandidate *cand =
-            promotion_find_candidate(cands, count, node->var);
-        if (cand)
-            cand->score += 1 + loop_depth * 4;
-    }
+        if (node->kind == ND_ADDR && node->lhs && node->lhs->kind == ND_VAR &&
+            node->lhs->var) {
+            PromotionCandidate *cand =
+                promotion_find_candidate(cands, count, node->lhs->var);
+            if (cand && !is_synthetic_addr_assignment(parent, node))
+                cand->address_escapes = true;
+        }
 
-    if (node->kind == ND_ADDR && node->lhs && node->lhs->kind == ND_VAR &&
-        node->lhs->var) {
-        PromotionCandidate *cand =
-            promotion_find_candidate(cands, count, node->lhs->var);
-        if (cand && !is_synthetic_addr_assignment(parent, node))
-            cand->address_escapes = true;
-    }
-
-    int child_loop_depth = loop_depth + (node->kind == ND_FOR || node->kind == ND_DO);
-    collect_promotion_candidates(vm, fn, node->lhs, node, cands, count,
-                                 child_loop_depth);
-    collect_promotion_candidates(vm, fn, node->rhs, node, cands, count,
-                                 child_loop_depth);
-    collect_promotion_candidates(vm, fn, node->cond, node, cands, count,
-                                 child_loop_depth);
-    collect_promotion_candidates(vm, fn, node->then, node, cands, count,
-                                 child_loop_depth);
-    collect_promotion_candidates(vm, fn, node->els, node, cands, count,
-                                 child_loop_depth);
-    collect_promotion_candidates(vm, fn, node->init, node, cands, count,
-                                 child_loop_depth);
-    collect_promotion_candidates(vm, fn, node->inc, node, cands, count,
-                                 child_loop_depth);
-    collect_promotion_candidates(vm, fn, node->body, node, cands, count,
-                                 child_loop_depth);
-    for (Node *arg = node->args; arg; arg = arg->next)
-        collect_promotion_candidates(vm, fn, arg, node, cands, count,
+        int child_loop_depth =
+            loop_depth + (node->kind == ND_FOR || node->kind == ND_DO);
+        collect_promotion_candidates(vm, fn, node->lhs, node, cands, count,
                                      child_loop_depth);
-    for (Node *n = node->next; n; n = n->next)
-        collect_promotion_candidates(vm, fn, n, parent, cands, count,
-                                     loop_depth);
+        collect_promotion_candidates(vm, fn, node->rhs, node, cands, count,
+                                     child_loop_depth);
+        collect_promotion_candidates(vm, fn, node->cond, node, cands, count,
+                                     child_loop_depth);
+        collect_promotion_candidates(vm, fn, node->then, node, cands, count,
+                                     child_loop_depth);
+        collect_promotion_candidates(vm, fn, node->els, node, cands, count,
+                                     child_loop_depth);
+        collect_promotion_candidates(vm, fn, node->init, node, cands, count,
+                                     child_loop_depth);
+        collect_promotion_candidates(vm, fn, node->inc, node, cands, count,
+                                     child_loop_depth);
+        collect_promotion_candidates(vm, fn, node->body, node, cands, count,
+                                     child_loop_depth);
+        for (Node *arg = node->args; arg; arg = arg->next)
+            collect_promotion_candidates(vm, fn, arg, node, cands, count,
+                                         child_loop_depth);
+    }
 }
 
 static int promotion_candidate_cmp(const void *a, const void *b) {
@@ -517,52 +519,54 @@ static void restrict_derived_walk(Node *node,
                                    DerivedCand *cands, int *nc,
                                    bool *param_reassigned,
                                    Obj **rparams, int np) {
-    if (!node) return;
-
-    // Detect &q (address-of a local pointer → mark addr_taken)
-    if (node->kind == ND_ADDR && node->lhs && node->lhs->kind == ND_VAR) {
-        Obj *v = node->lhs->var;
-        if (v && v->is_local && !v->is_param) {
-            DerivedCand *c = derived_cand_find_or_create(cands, nc, v);
-            if (c) c->addr_taken = true;
+    // Walk the sibling chain iteratively — recursing into node->next while
+    // also recursing into children would re-process the chain remainder once
+    // per sibling, i.e. O(2^N) in statement count.  Iterate siblings and
+    // recurse only into children to stay linear.
+    for (; node; node = node->next) {
+        // Detect &q (address-of a local pointer → mark addr_taken)
+        if (node->kind == ND_ADDR && node->lhs && node->lhs->kind == ND_VAR) {
+            Obj *v = node->lhs->var;
+            if (v && v->is_local && !v->is_param) {
+                DerivedCand *c = derived_cand_find_or_create(cands, nc, v);
+                if (c) c->addr_taken = true;
+            }
         }
-    }
 
-    // Detect assignments: lhs = rhs
-    if (node->kind == ND_ASSIGN && node->lhs && node->lhs->kind == ND_VAR) {
-        Obj *lv = node->lhs->var;
-        if (lv) {
-            // Restrict param being reassigned → mark it
-            for (int i = 0; i < np; i++)
-                if (rparams[i] == lv) { param_reassigned[i] = true; break; }
+        // Detect assignments: lhs = rhs
+        if (node->kind == ND_ASSIGN && node->lhs && node->lhs->kind == ND_VAR) {
+            Obj *lv = node->lhs->var;
+            if (lv) {
+                // Restrict param being reassigned → mark it
+                for (int i = 0; i < np; i++)
+                    if (rparams[i] == lv) { param_reassigned[i] = true; break; }
 
-            // Local pointer-to-scalar candidate
-            if (lv->is_local && !lv->is_param && lv->ty &&
-                lv->ty->kind == TY_PTR && lv->ty->base &&
-                is_scalar_promotion_type(lv->ty->base)) {
-                DerivedCand *c = derived_cand_find_or_create(cands, nc, lv);
-                if (c) {
-                    if (c->assign_count == 0)
-                        restrict_extract_base_offset(node->rhs, &c->base_param,
-                                                     &c->byte_offset, &c->var_offset);
-                    c->assign_count++;
+                // Local pointer-to-scalar candidate
+                if (lv->is_local && !lv->is_param && lv->ty &&
+                    lv->ty->kind == TY_PTR && lv->ty->base &&
+                    is_scalar_promotion_type(lv->ty->base)) {
+                    DerivedCand *c = derived_cand_find_or_create(cands, nc, lv);
+                    if (c) {
+                        if (c->assign_count == 0)
+                            restrict_extract_base_offset(node->rhs, &c->base_param,
+                                                         &c->byte_offset, &c->var_offset);
+                        c->assign_count++;
+                    }
                 }
             }
         }
-    }
 
-    restrict_derived_walk(node->lhs, cands, nc, param_reassigned, rparams, np);
-    restrict_derived_walk(node->rhs, cands, nc, param_reassigned, rparams, np);
-    restrict_derived_walk(node->cond, cands, nc, param_reassigned, rparams, np);
-    restrict_derived_walk(node->then, cands, nc, param_reassigned, rparams, np);
-    restrict_derived_walk(node->els, cands, nc, param_reassigned, rparams, np);
-    restrict_derived_walk(node->init, cands, nc, param_reassigned, rparams, np);
-    restrict_derived_walk(node->inc, cands, nc, param_reassigned, rparams, np);
-    restrict_derived_walk(node->body, cands, nc, param_reassigned, rparams, np);
-    for (Node *arg = node->args; arg; arg = arg->next)
-        restrict_derived_walk(arg, cands, nc, param_reassigned, rparams, np);
-    for (Node *n = node->next; n; n = n->next)
-        restrict_derived_walk(n, cands, nc, param_reassigned, rparams, np);
+        restrict_derived_walk(node->lhs, cands, nc, param_reassigned, rparams, np);
+        restrict_derived_walk(node->rhs, cands, nc, param_reassigned, rparams, np);
+        restrict_derived_walk(node->cond, cands, nc, param_reassigned, rparams, np);
+        restrict_derived_walk(node->then, cands, nc, param_reassigned, rparams, np);
+        restrict_derived_walk(node->els, cands, nc, param_reassigned, rparams, np);
+        restrict_derived_walk(node->init, cands, nc, param_reassigned, rparams, np);
+        restrict_derived_walk(node->inc, cands, nc, param_reassigned, rparams, np);
+        restrict_derived_walk(node->body, cands, nc, param_reassigned, rparams, np);
+        for (Node *arg = node->args; arg; arg = arg->next)
+            restrict_derived_walk(arg, cands, nc, param_reassigned, rparams, np);
+    }
 }
 
 static void collect_restrict_derived_locals(VirtualMachine *vm, Obj *fn) {
