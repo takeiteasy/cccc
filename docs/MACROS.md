@@ -444,8 +444,22 @@ const char *lookup(const char *name) {
 }
 ```
 
-Static initializer tables that store function pointers are not supported in the
-comptime VM yet.
+Static initializer tables can also store pointers to other comptime functions.
+Entries resolve to callable macro VM function addresses:
+
+```c
+[[cccc::comptime]]
+int handler_a(void) { return 10; }
+
+[[cccc::comptime]]
+int handler_b(void) { return 20; }
+
+[[cccc::comptime]]
+int dispatch(int i) {
+    static int (*const table[])(void) = {handler_a, handler_b};
+    return table[i]();
+}
+```
 
 Macro expansion is bounded by `--macro-recursion-limit=N` to catch accidental
 self-recursive expansions. The default is 256. Set the limit to 0 to disable

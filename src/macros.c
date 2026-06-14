@@ -1341,9 +1341,19 @@ static void init_macro_globals(VirtualMachine *vm, Obj *macro_prog) {
 
         vm->data_ptr += var->ty->size;
     }
+}
 
-    for (int i = 0; i < num_globals; i++) {
-        Obj *var = globals_arr[i];
+// Apply relocations for macro global initializers that reference other
+// globals or comptime functions. Must run after gen_function has assigned
+// code_addr to every macro function (Step 2), since function-pointer table
+// entries resolve to text-segment addresses. Patches vm->data_seg directly
+// and never touches vm->compiler.data_relocs — these relocations are
+// VM-internal and must not pollute the runtime bytecode relocation table.
+static void apply_macro_global_relocations(VirtualMachine *vm, Obj *macro_prog) {
+    for (Obj *var = macro_prog; var; var = var->next) {
+        if (var->is_function)
+            continue;
+
         for (Relocation *rel = var->rel; rel; rel = rel->next) {
             if (!rel->label || !*rel->label)
                 error("invalid macro function global relocation");
@@ -1352,12 +1362,18 @@ static void init_macro_globals(VirtualMachine *vm, Obj *macro_prog) {
             if (!target)
                 error("undefined macro function global relocation target: %s",
                       *rel->label);
-            if (target->is_function)
-                error("macro function global text relocations are not supported");
 
             long long data_offset = var->offset + rel->offset;
-            *(long long *)(vm->data_seg + data_offset) =
-                (long long)(vm->data_seg + target->offset + rel->addend);
+            if (target->is_function) {
+                if (!target->body)
+                    error("unsupported macro relocation to undefined function: %s",
+                          target->name);
+                *(long long *)(vm->data_seg + data_offset) =
+                    cc_pc_to_byte_offset((Pc)target->code_addr) + rel->addend;
+            } else {
+                *(long long *)(vm->data_seg + data_offset) =
+                    (long long)(vm->data_seg + target->offset + rel->addend);
+            }
         }
     }
 }
@@ -1474,15 +1490,20 @@ static bool compile_macro_program(VirtualMachine *vm) {
             gen_function(vm, fn);
     }
 
-    // Step 3: patch call addresses so __cccc_comptime_init can call comptime fns.
+    // Step 3: apply global relocations now that every macro function has a
+    //         code_addr, so static initializer tables can reference comptime
+    //         function addresses (ticket #309).
+    apply_macro_global_relocations(vm, macro_prog);
+
+    // Step 4: patch call addresses so __cccc_comptime_init can call comptime fns.
     patch_macro_call_addresses(vm, macro_prog);
 
-    // Step 4: run __cccc_comptime_init to evaluate scalar comptime var
+    // Step 5: run __cccc_comptime_init to evaluate scalar comptime var
     //         initializers (ticket #191). This writes results into the data
     //         segment via normal VM store instructions.
     run_comptime_var_initializers(vm, macro_prog);
 
-    // Step 5: read comptime var values out of the data segment.
+    // Step 6: read comptime var values out of the data segment.
     evaluate_comptime_vars(vm, macro_prog);
 
     vm->compiler.locals = saved_locals;
