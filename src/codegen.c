@@ -897,7 +897,7 @@ static bool contains_funcall(Node *node) {
     if (!node)
         return false;
 
-    if (node->kind == ND_FUNCALL)
+    if (node->kind == ND_FUNCALL || node->kind == ND_BLOCK_CALL)
         return true;
 
     // Check children
