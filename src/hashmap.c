@@ -98,8 +98,15 @@ static void rehash(HashMap *map) {
 }
 
 static bool match(HashEntry *ent, char *key, int keylen) {
-    return ent->key && ent->key != TOMBSTONE &&
-    ent->keylen == keylen && memcmp(ent->key, key, keylen) == 0;
+    if (!ent->key || ent->key == TOMBSTONE || ent->keylen != keylen)
+        return false;
+    // Integer keys (keylen == -1) store the value in the pointer itself, so
+    // compare pointer values directly. This path is hit when rehash() re-inserts
+    // int-keyed entries via the raw string path; memcmp(key, key, -1) would
+    // otherwise read with a negative size and corrupt/crash.
+    if (keylen == -1)
+        return ent->key == key;
+    return memcmp(ent->key, key, keylen) == 0;
 }
 
 static HashEntry *get_entry(HashMap *map, char *key, int keylen) {
