@@ -22,6 +22,9 @@
 
 #include "cccc.h"
 #include "./internal.h"
+#if !defined(_WIN32) && !defined(_WIN64)
+#include <pthread.h>
+#endif
 
 #define CCCC_DYN_TOKEN_BASE (-0x4a434300LL)
 
@@ -657,6 +660,113 @@ void vm_alloc_segments(CCCC *vm) {
     }
 }
 
+void cccc_exec_state_save(CCCC *vm, CCCCExecState *state) {
+    memcpy(state->regs, vm->regs, sizeof(state->regs));
+    memcpy(state->fregs, vm->fregs, sizeof(state->fregs));
+    state->pc = vm->pc;
+    state->bp = vm->bp;
+    state->sp = vm->sp;
+    state->cycle = vm->cycle;
+    state->initial_sp = vm->initial_sp;
+    state->initial_bp = vm->initial_bp;
+    state->stack_seg = vm->stack_seg;
+    state->stack_base = vm->stack_base;
+    state->stack_committed = vm->stack_committed;
+    state->shadow_stack = vm->shadow_stack;
+    state->shadow_sp = vm->shadow_sp;
+    state->init_state = vm->init_state;
+}
+
+void cccc_exec_state_restore(CCCC *vm, const CCCCExecState *state) {
+    memcpy(vm->regs, state->regs, sizeof(state->regs));
+    memcpy(vm->fregs, state->fregs, sizeof(state->fregs));
+    vm->pc = state->pc;
+    vm->bp = state->bp;
+    vm->sp = state->sp;
+    vm->cycle = state->cycle;
+    vm->initial_sp = state->initial_sp;
+    vm->initial_bp = state->initial_bp;
+    vm->stack_seg = state->stack_seg;
+    vm->stack_base = state->stack_base;
+    vm->stack_committed = state->stack_committed;
+    vm->shadow_stack = state->shadow_stack;
+    vm->shadow_sp = state->shadow_sp;
+    vm->init_state = state->init_state;
+}
+
+int cccc_exec_state_alloc_stack(CCCC *vm, CCCCExecState *state) {
+    memset(state, 0, sizeof(*state));
+
+    size_t initial_stack = (size_t)vm->poolsize * sizeof(long long);
+    size_t reserved_stack = (size_t)vm->poolsize_max * sizeof(long long);
+    size_t stack_top_off = reserved_stack - initial_stack;
+
+    state->stack_seg = (long long *)cccc_vm_reserve(reserved_stack);
+    if (!state->stack_seg)
+        return -1;
+    if (cccc_vm_commit(state->stack_seg, stack_top_off, initial_stack) != 0) {
+        cccc_vm_release(state->stack_seg, reserved_stack);
+        memset(state, 0, sizeof(*state));
+        return -1;
+    }
+
+    state->stack_committed = initial_stack;
+    state->sp = (long long *)((char *)state->stack_seg + reserved_stack);
+    state->bp = state->sp;
+    state->stack_base = (long long *)((char *)state->stack_seg + stack_top_off);
+    state->initial_sp = state->sp;
+    state->initial_bp = state->bp;
+
+    if (vm->flags & CCCC_CFI) {
+        state->shadow_stack = (long long *)cccc_vm_reserve(reserved_stack);
+        if (!state->shadow_stack) {
+            cccc_exec_state_release_stack(vm, state);
+            return -1;
+        }
+        if (cccc_vm_commit(state->shadow_stack, stack_top_off, initial_stack) != 0) {
+            cccc_exec_state_release_stack(vm, state);
+            return -1;
+        }
+        state->shadow_sp = (long long *)((char *)state->shadow_stack + reserved_stack);
+    }
+
+    return 0;
+}
+
+void cccc_exec_state_release_stack(CCCC *vm, CCCCExecState *state) {
+    if (!state)
+        return;
+    size_t reserved_stack = (size_t)vm->poolsize_max * sizeof(long long);
+    if (state->stack_seg)
+        cccc_vm_release(state->stack_seg, reserved_stack);
+    if (state->shadow_stack)
+        cccc_vm_release(state->shadow_stack, reserved_stack);
+    hashmap_deinit(&state->init_state);
+    state->stack_seg = NULL;
+    state->shadow_stack = NULL;
+}
+
+void cccc_exec_state_prepare_call(CCCC *vm, CCCCExecState *state, CCCCPc entry,
+                                  long long arg) {
+    size_t reserved_stack = (size_t)vm->poolsize_max * sizeof(long long);
+    size_t initial_stack = (size_t)vm->poolsize * sizeof(long long);
+
+    memset(state->regs, 0, sizeof(state->regs));
+    memset(state->fregs, 0, sizeof(state->fregs));
+    state->pc = entry;
+    state->cycle = 0;
+    state->sp = (long long *)((char *)state->stack_seg + reserved_stack);
+    state->bp = state->sp;
+    state->stack_base = (long long *)((char *)state->stack_seg +
+                                      reserved_stack - initial_stack);
+    state->initial_sp = state->sp;
+    state->initial_bp = state->bp;
+    if (vm->flags & CCCC_CFI)
+        state->shadow_sp = (long long *)((char *)state->shadow_stack + reserved_stack);
+    state->regs[REG_A0] = arg;
+    *--state->sp = 0;
+}
+
 int vm_text_ensure_count(CCCC *vm, CCCCPc num_words) {
     size_t needed_bytes = (size_t)num_words * sizeof(CCCCInstrWord);
     if (needed_bytes <= vm->text_committed)
@@ -888,11 +998,68 @@ void cc_init(CCCC *vm, uint32_t flags) {
     if (vm->flags & CCCC_ENABLE_DEBUGGER) {
         debugger_init(vm);
     }
+
+    cccc_gil_init(vm);
+}
+
+void cccc_gil_init(CCCC *vm) {
+    if (!vm || vm->gil_initialized)
+        return;
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_t *mutex = malloc(sizeof(*mutex));
+    if (!mutex)
+        error("could not allocate VM GIL");
+    pthread_mutexattr_t attr;
+    if (pthread_mutexattr_init(&attr) != 0)
+        error("could not initialize VM GIL attributes");
+    if (pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE) != 0)
+        error("could not make VM GIL recursive");
+    if (pthread_mutex_init(mutex, &attr) != 0)
+        error("could not initialize VM GIL");
+    pthread_mutexattr_destroy(&attr);
+    vm->gil_mutex = mutex;
+#endif
+    vm->gil_initialized = 1;
+}
+
+void cccc_gil_destroy(CCCC *vm) {
+    if (!vm || !vm->gil_initialized)
+        return;
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_t *mutex = (pthread_mutex_t *)vm->gil_mutex;
+    if (mutex) {
+        pthread_mutex_destroy(mutex);
+        free(mutex);
+    }
+#endif
+    vm->gil_mutex = NULL;
+    vm->gil_initialized = 0;
+}
+
+void cccc_gil_acquire(CCCC *vm) {
+    if (!vm)
+        return;
+    if (!vm->gil_initialized)
+        cccc_gil_init(vm);
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_lock((pthread_mutex_t *)vm->gil_mutex);
+#endif
+}
+
+void cccc_gil_release(CCCC *vm) {
+    if (!vm || !vm->gil_initialized)
+        return;
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_unlock((pthread_mutex_t *)vm->gil_mutex);
+#endif
 }
 
 void cc_destroy(CCCC *vm) {
     if (!vm)
         return;
+
+    cccc_pthread_cleanup(vm);
+    cccc_gil_destroy(vm);
 
     // Report memory leaks before releasing segments
     if ((vm->flags & CCCC_MEMORY_LEAK_DETECT) && vm->alloc_list) {
@@ -1545,6 +1712,7 @@ void cc_load_stdlib(CCCC *vm) {
     register_locale_functions(vm);
     register_math_functions(vm);
     register_posix_functions(vm);
+    register_pthread_functions(vm);
     register_signal_functions(vm);
     register_stdio_functions(vm);
     register_stdlib_functions(vm);
@@ -1564,6 +1732,7 @@ int cc_run_at(CCCC *vm, CCCCPc entry, int argc, char **argv) {
     if (!vm || !vm->text_seg) {
         error("VM not initialized - call cc_compile first");
     }
+    cccc_gil_acquire(vm);
     cc_vm_profile_reset(vm);
 
     vm->pc = entry;
@@ -1597,7 +1766,9 @@ int cc_run_at(CCCC *vm, CCCCPc entry, int argc, char **argv) {
     // ENT will push old_bp and set bp=sp; ret_addr sits at bp[+1] after ENT.
     *--vm->sp = 0;
 
-    return (vm->flags & CCCC_ENABLE_DEBUGGER) ? debugger_run(vm, argc, argv) : vm_eval(vm);
+    int rc = (vm->flags & CCCC_ENABLE_DEBUGGER) ? debugger_run(vm, argc, argv) : vm_eval(vm);
+    cccc_gil_release(vm);
+    return rc;
 }
 
 int cc_run(CCCC *vm, int argc, char **argv) {

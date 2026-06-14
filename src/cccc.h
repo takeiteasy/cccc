@@ -569,6 +569,9 @@ typedef enum {
 typedef struct Node Node;
 typedef struct Obj Obj;
 typedef struct Scope Scope;
+typedef struct CCCCThreadRecord CCCCThreadRecord;
+typedef struct CCCCPthreadKeyRecord CCCCPthreadKeyRecord;
+typedef struct CCCCPthreadState CCCCPthreadState;
 
 typedef enum {
     CCCC_EMIT_SOURCE,
@@ -2002,6 +2005,16 @@ struct CCCC {
 
     // VM-managed signal table
     CCCCSigSlot vm_sigslots[CCCC_NSIG];
+
+    // GIL-backed pthread runtime state. Concrete pthread objects are kept
+    // internal so the public CCCC struct does not expose host pthread ABI types.
+    void *gil_mutex;
+    int gil_initialized;
+    CCCCThreadRecord *active_thread;
+    CCCCThreadRecord *thread_records;
+    CCCCPthreadKeyRecord *pthread_keys;
+    int pthread_next_key;
+    CCCCPthreadState *pthread_state;
 
     // Error handling (setjmp/longjmp for exception-like behavior)
     jmp_buf

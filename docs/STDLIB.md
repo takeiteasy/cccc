@@ -176,7 +176,7 @@ if (__builtin_mul_overflow(a, b, &r))
 | `<stdalign.h>` | ✓ | |
 | `<stdatomic.h>` | ~ | Header present; operations are non-atomic |
 | `<stdnoreturn.h>` | ✓ | |
-| `<threads.h>` | ✗ | CCCC is single-threaded |
+| `<threads.h>` | ✗ | C11 thread API is tracked separately; POSIX `<pthread.h>` is available |
 | `<uchar.h>` | ✓ | `char8_t`, `char16_t`, `char32_t` defined; `mbrtoc16`/`c16rtomb`/`mbrtoc32`/`c32rtomb`/`mbrtoc8`/`c8rtomb` registered (native on glibc where available, shimmed via `mbrtowc`/`wcrtomb` elsewhere) |
 | `aligned_alloc` | ✓ | Backed by host aligned allocation |
 | `quick_exit` / `at_quick_exit` | ✓ | |
@@ -231,6 +231,7 @@ POSIX headers are embedded and backed by host OS calls. They are only available 
 | `<netdb.h>` | ✓ | Network database (`gethostbyname`, `getaddrinfo`, `freeaddrinfo`, `struct hostent`, `struct addrinfo`) |
 | `<netinet/in.h>` | ✓ | Internet address family (`struct sockaddr_in`, `struct in_addr`, `in_port_t`, `in_addr_t`, `INADDR_*`, `IPPROTO_*`) |
 | `<poll.h>` | ✓ | Event polling (`poll`, `struct pollfd`, `nfds_t`, `POLL_*` constants) |
+| `<pthread.h>` | ~ | POSIX pthread lifecycle, mutex, condition-variable, TLS key, and basic attr APIs are backed by host pthreads. VM bytecode execution is serialized by a recursive GIL, so pthreads provide correctness and blocking/wakeup semantics, not parallel VM execution. |
 | `<pwd.h>` | ✓ | Password database (`getpwuid`, `getpwnam`, `struct passwd`) |
 | `<regex.h>` | ✓ | Regular expression matching (`regcomp`, `regexec`, `regerror`, `regfree`, `regex_t`, `regmatch_t`) |
 | `<strings.h>` | ✓ | BSD string functions (`strcasecmp`, `strncasecmp`, `bzero`, `bcopy`, `bcmp`, `index`, `rindex`) |
@@ -276,7 +277,7 @@ This table tracks shims that **reimplement** a standard function — not ABI-com
 
 | Feature | Notes |
 |---|---|
-| Threading (`<threads.h>`, `pthread`) | CCCC is single-threaded |
+| C11 threading (`<threads.h>`) and language TLS | POSIX `<pthread.h>` is available; `<threads.h>`, `_Thread_local`, `__thread`, and `thread_local` storage are tracked separately |
 | Atomic operations (`<stdatomic.h>` operations) | Headers present; operations are non-atomic |
 | Complex function call ABI | Passing or returning complex values by function call is not implemented |
 | Full native ABI for runtime `dlsym` calls | Runtime dynamic function calls support scalar/pointer signatures through libffi using the current scalar/double metadata. Aggregate by-value arguments/returns, callbacks, variadic function-pointer calls, and full platform ABI descriptors are not implemented |

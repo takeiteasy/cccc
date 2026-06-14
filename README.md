@@ -23,6 +23,7 @@ CCCC targets C23 (and below), and support for a wide-array of Clang/GNU extensio
   - Powers compile-time macro execution
   - Serves as a toolchain-free, introspectable runtime for the safety suite, debugger, and profiler
   - Use it for portability, sandboxing, and quick iteration without a system compiler
+  - Supports POSIX `pthread` programs through a correctness-first VM GIL; bytecode execution is serialized, while blocking pthread calls release the GIL
 - **Memory safety suite** — runtime detection of common C bugs (see [SAFETY.md](docs/SAFETY.md))
   - Four preset levels (`-0` through `-3`): zero overhead to paranoid mode
   - Covers use-after-free, buffer overflows, dangling pointers, uninitialized reads, integer overflow, CFI, and more
@@ -178,7 +179,7 @@ CCCC ships embedded standard library headers compiled directly into the binary �
 
 - `stdio.h`, `stdlib.h`, `string.h`, `math.h`, `time.h`, `ctype.h`
 - `locale.h`, `signal.h`, `wchar.h`, `wctype.h`, `uchar.h`, `fenv.h`, `complex.h`, `tgmath.h`
-- POSIX headers on macOS/Linux: `dlfcn.h`, `fcntl.h`, `unistd.h`, `strings.h`, `libgen.h`, `fnmatch.h`, `getopt.h`, `poll.h`, `utime.h`, `arpa/inet.h`, `netdb.h`, `netinet/in.h`, `dirent.h`, `termios.h`, `pwd.h`, `grp.h`, `regex.h`, `glob.h`
+- POSIX headers on macOS/Linux: `dlfcn.h`, `fcntl.h`, `unistd.h`, `strings.h`, `libgen.h`, `fnmatch.h`, `getopt.h`, `poll.h`, `pthread.h`, `utime.h`, `arpa/inet.h`, `netdb.h`, `netinet/in.h`, `dirent.h`, `termios.h`, `pwd.h`, `grp.h`, `regex.h`, `glob.h`
 - POSIX `sys/*` headers on macOS/Linux: `sys/cdefs.h`, `sys/mman.h`, `sys/socket.h`, `sys/stat.h`, `sys/time.h`, `sys/types.h`, `sys/wait.h`
 - `stdarg.h`, `setjmp.h` — CCCC-specific implementations for the VM calling convention
 - `stddef.h`, `stdbool.h`, `stdint.h`, `limits.h`, `float.h`, `iso646.h`

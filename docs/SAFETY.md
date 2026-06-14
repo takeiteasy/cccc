@@ -200,6 +200,12 @@ All features listed below can be enabled individually or through the safety leve
   - Provides comprehensive pointer safety in a single flag
   - Recommended for development and testing
 
+### Threading Limitations
+
+The POSIX `<pthread.h>` VM runtime is correctness-first and serializes bytecode execution with the VM GIL. Blocking pthread wrappers release the GIL while waiting, but the safety suite does not yet implement race detection, deadlock detection, atomic-safety checks, or thread-aware stack canary validation.
+
+Starting a VM thread with `pthread_create` disables stack-canary checks for the current VM run because the existing canary runtime is tied to a single stack context. Other enabled checks continue to run where applicable, including heap checks, pointer checks, uninitialized-variable checks, and integer overflow checks.
+
 ## Advanced Pointer Tracking Features
 
 - `--dangling-pointers` **Dangling stack pointer detection**

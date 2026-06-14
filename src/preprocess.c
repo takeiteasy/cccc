@@ -1822,6 +1822,7 @@ static void register_stdlib_for_header(CCCC *vm, const char *header_name) {
         {"register_locale_functions", register_locale_functions},
         {"register_math_functions", register_math_functions},
         {"register_posix_functions", register_posix_functions},
+        {"register_pthread_functions", register_pthread_functions},
         {"register_signal_functions", register_signal_functions},
         {"register_stdio_functions", register_stdio_functions},
         {"register_stdlib_functions", register_stdlib_functions},

@@ -14,6 +14,7 @@ math.h	register_math_functions
 netdb.h	register_posix_functions
 netinet/in.h	register_posix_functions
 poll.h	register_posix_functions
+pthread.h	register_pthread_functions
 pwd.h	register_posix_functions
 regex.h	register_posix_functions
 signal.h	register_signal_functions

@@ -2224,6 +2224,12 @@ static inline int op_DLERROR_fn(CCCC *vm) {
 
 // ========== FFI ==========
 
+static _Thread_local CCCC *cccc_tls_ffi_vm;
+
+CCCC *cccc_current_ffi_vm(void) {
+    return cccc_tls_ffi_vm;
+}
+
 int cccc_ffi_name_in_list(char **list, int count, const char *name) {
     if (!name)
         name = "<anonymous>";
@@ -2346,6 +2352,9 @@ int cccc_call_native_function(CCCC *vm, void *func_ptr, const char *name,
     for (int i = 0; i < actual_nargs; i++)
         arg_ptrs[i] = &args[i];
 
+    CCCC *saved_ffi_vm = cccc_tls_ffi_vm;
+    cccc_tls_ffi_vm = vm;
+
     if (returns_float) {
         float result;
         ffi_call(&cif, FFI_FN(func_ptr), &result, arg_ptrs);
@@ -2359,6 +2368,8 @@ int cccc_call_native_function(CCCC *vm, void *func_ptr, const char *name,
         ffi_call(&cif, FFI_FN(func_ptr), &result, arg_ptrs);
         vm->regs[REG_A0] = result;
     }
+
+    cccc_tls_ffi_vm = saved_ffi_vm;
 
     return 0;
 }

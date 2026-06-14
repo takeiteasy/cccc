@@ -13,6 +13,7 @@ Key properties:
 * **32-bit instruction words** — Opcodes and operands are stored as 32-bit little-endian words.  64-bit immediates consume two consecutive words.
 * **Segmented memory** — Text, data, stack, and heap live in separate reserved virtual ranges that grow on demand.
 * **Safety-aware opcodes** — Bounds checks, UAF detection, CFI, stack instrumentation, and provenance tracking are implemented as first-class instructions rather than external hooks.
+* **GIL-serialized VM threads** — POSIX `pthread` wrappers can run VM entry functions on host pthreads, but bytecode execution is serialized by a recursive VM global interpreter lock. Blocking pthread calls release the GIL while waiting.
 
 ## Architecture
 
@@ -51,6 +52,14 @@ All segments are reserved upfront as large virtual ranges and committed in `pool
 * **Spilled arguments** (more than 8) are pushed onto the stack before the call.
 
 The `ENT3` opcode builds the stack frame, copies register arguments and stack-passed fixed arguments to their callee-local parameter slots, and optionally writes a stack canary. For variadic functions, `ENT3` still reserves and spills the first 8 argument slots so `va_arg` can consume any register-passed variadic tail; variadic arguments beyond those slots remain in the caller's stack area. `LEV3` restores `bp`, checks the canary, pops the return address, and resumes at the caller.
+
+### VM Threads
+
+The POSIX `<pthread.h>` layer maps `pthread_create` to host pthreads while keeping VM execution correctness-first. Each VM thread receives an independent VM stack/register snapshot and enters the requested VM function with the `void *` argument in `REG_A0`. The VM's text, data, heap, globals, FFI registrations, and safety metadata remain shared by the `CCCC` instance.
+
+A recursive global interpreter lock protects the interpreter state. The lock is held while bytecode executes and is released around blocking pthread wrappers such as `pthread_join`, `pthread_mutex_lock`, and `pthread_cond_wait`. This gives C code real blocking/wakeup semantics and prevents the interpreter state from racing, but it does not provide parallel bytecode execution.
+
+`pthread_t` and related pthread objects are VM-managed handles, not host ABI layouts. The public header intentionally exposes small VM-facing structs so CCCC bytecode does not depend on platform-specific pthread object sizes.
 
 ## Instruction Encoding
 

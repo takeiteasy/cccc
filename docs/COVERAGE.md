@@ -20,6 +20,20 @@ syntax details have their own documents:
 
 ---
 
+## Runtime Threading
+
+POSIX `<pthread.h>` is partially supported on POSIX hosts through VM-managed
+pthread handles backed by host pthreads. VM bytecode execution is serialized by
+a recursive global interpreter lock, while blocking pthread calls such as
+`pthread_join`, `pthread_mutex_lock`, and `pthread_cond_wait` release the GIL.
+This provides pthread correctness and blocking/wakeup semantics, not parallel
+bytecode execution.
+
+C11 `<threads.h>`, language thread-local storage, and real atomic operations
+are tracked separately from the POSIX pthread layer.
+
+---
+
 ## C89 / C90
 
 | Feature | Status | Notes |

@@ -25,6 +25,8 @@ ifeq ($(OS),Windows_NT)
 	EXE := .EXE
 	DYLIB := .dll
 else
+	CFLAGS += -pthread
+	LDFLAGS += -pthread
 	EXE :=
 	UNAME_S := $(shell uname -s)
 	ifeq ($(UNAME_S),Darwin)

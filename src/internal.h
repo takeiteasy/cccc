@@ -498,6 +498,7 @@ int cccc_call_native_function(CCCC *vm, void *func_ptr, const char *name,
                              uint64_t double_arg_mask, uint64_t float_arg_mask,
                              int returns_double, int returns_float,
                              int is_variadic, int num_fixed_args);
+CCCC *cccc_current_ffi_vm(void);
 
 //
 // hashmap.c
@@ -573,6 +574,34 @@ void cc_vm_profile_reset(CCCC *vm);
 void cc_vm_profile_print(CCCC *vm, FILE *f);
 int cc_vm_profile_write_json(CCCC *vm, FILE *f, const char *mode,
                              const char *input_name);
+
+typedef struct CCCCExecState {
+    long long regs[32];
+    CCCCFReg fregs[32];
+    CCCCPc pc;
+    long long *bp;
+    long long *sp;
+    long long cycle;
+    long long *initial_sp;
+    long long *initial_bp;
+    long long *stack_seg;
+    long long *stack_base;
+    size_t stack_committed;
+    long long *shadow_stack;
+    long long *shadow_sp;
+    HashMap init_state;
+} CCCCExecState;
+
+void cccc_exec_state_save(CCCC *vm, CCCCExecState *state);
+void cccc_exec_state_restore(CCCC *vm, const CCCCExecState *state);
+int cccc_exec_state_alloc_stack(CCCC *vm, CCCCExecState *state);
+void cccc_exec_state_release_stack(CCCC *vm, CCCCExecState *state);
+void cccc_exec_state_prepare_call(CCCC *vm, CCCCExecState *state, CCCCPc entry,
+                                  long long arg);
+void cccc_gil_init(CCCC *vm);
+void cccc_gil_destroy(CCCC *vm);
+void cccc_gil_acquire(CCCC *vm);
+void cccc_gil_release(CCCC *vm);
 
 //
 // optimize.c
@@ -692,6 +721,8 @@ void register_fenv_functions(CCCC *vm);
 void register_locale_functions(CCCC *vm);
 void register_math_functions(CCCC *vm);
 void register_posix_functions(CCCC *vm);
+void register_pthread_functions(CCCC *vm);
+void cccc_pthread_cleanup(CCCC *vm);
 void register_signal_functions(CCCC *vm);
 
 /* VM-managed signal pending flags (set only by async-safe native shims) */
