@@ -418,8 +418,11 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg);
 
 static void prepare_restrict_cache(VirtualMachine *vm, Obj *fn, int base_stack_size) {
     vm->compiler.restrict_cache_count = 0;
+    vm->compiler.restrict_cache_capacity = 0;
     memset(vm->compiler.restrict_cache_params, 0,
            sizeof(vm->compiler.restrict_cache_params));
+    memset(vm->compiler.restrict_cache_offsets, 0,
+           sizeof(vm->compiler.restrict_cache_offsets));
     memset(vm->compiler.restrict_cache_regs, 0,
            sizeof(vm->compiler.restrict_cache_regs));
     memset(vm->compiler.restrict_cache_save_offsets, 0,
@@ -430,28 +433,35 @@ static void prepare_restrict_cache(VirtualMachine *vm, Obj *fn, int base_stack_s
     if (vm->compiler.opt_level < 2 || (vm->flags & CCCC_ENABLE_DEBUGGER))
         return;
 
-    // REG_S4-S7 are reserved for the restrict cache (S0-S3 used by scalar promotion).
+    // Only activate when there is at least one restrict scalar pointer param.
+    bool has_restrict = false;
+    for (Obj *param = fn->params; param; param = param->next) {
+        if (param->ty && param->ty->kind == TY_PTR && param->ty->is_restrict &&
+            param->ty->base && is_scalar_promotion_type(param->ty->base)) {
+            has_restrict = true;
+            break;
+        }
+    }
+    if (!has_restrict)
+        return;
+
+    // Pre-reserve all MAX_RESTRICT_CACHE slots (S4-S7 and their stack save slots)
+    // so lazy binding can claim any slot without growing the frame mid-function.
+    // Cache entries are bound on first deref access (count starts at 0).
     static const int rcregs[] = {REG_S4, REG_S5, REG_S6, REG_S7};
-    for (Obj *param = fn->params;
-         param && vm->compiler.restrict_cache_count < MAX_RESTRICT_CACHE;
-         param = param->next) {
-        if (!param->ty || param->ty->kind != TY_PTR || !param->ty->is_restrict)
-            continue;
-        if (!param->ty->base || !is_scalar_promotion_type(param->ty->base))
-            continue;
-        int q = vm->compiler.restrict_cache_count++;
-        vm->compiler.restrict_cache_params[q] = param;
+    for (int q = 0; q < MAX_RESTRICT_CACHE; q++) {
         vm->compiler.restrict_cache_regs[q] = rcregs[q];
         // Save slots are placed after the promoted-local save slots.
         vm->compiler.restrict_cache_save_offsets[q] =
             -(base_stack_size + vm->compiler.promoted_count + q + 1);
-        // valid starts false; populated lazily on first deref access.
     }
+    vm->compiler.restrict_cache_capacity = MAX_RESTRICT_CACHE;
 }
 
-static int restrict_cache_find(VirtualMachine *vm, Obj *param) {
+static int restrict_cache_find(VirtualMachine *vm, Obj *param, long byte_offset) {
     for (int i = 0; i < vm->compiler.restrict_cache_count; i++)
-        if (vm->compiler.restrict_cache_params[i] == param)
+        if (vm->compiler.restrict_cache_params[i] == param &&
+            vm->compiler.restrict_cache_offsets[i] == byte_offset)
             return i;
     return -1;
 }
@@ -462,22 +472,91 @@ static void restrict_cache_invalidate_all(VirtualMachine *vm) {
         vm->compiler.restrict_cache_valid[i] = false;
 }
 
-// Invalidate a single restrict param's cache entry (after indexed store through it).
+// Invalidate all cache entries for a restrict param (all cached offsets for it).
 static void restrict_cache_invalidate_param(VirtualMachine *vm, Obj *param) {
-    int idx = restrict_cache_find(vm, param);
-    if (idx >= 0)
-        vm->compiler.restrict_cache_valid[idx] = false;
+    for (int i = 0; i < vm->compiler.restrict_cache_count; i++)
+        if (vm->compiler.restrict_cache_params[i] == param)
+            vm->compiler.restrict_cache_valid[i] = false;
 }
 
-// Returns the restrict param if lhs is *restrict_param (plain deref, no offset/index).
-static Obj *restrict_plain_deref_param(Node *lhs) {
-    if (!lhs || lhs->kind != ND_DEREF || !lhs->lhs || lhs->lhs->kind != ND_VAR)
-        return NULL;
-    Obj *var = lhs->lhs->var;
-    if (!var || !var->is_param || !var->ty || var->ty->kind != TY_PTR ||
-        !var->ty->is_restrict)
-        return NULL;
-    return var;
+// Bind next free cache slot to (param, byte_offset). Returns index or -1 if full.
+static int restrict_cache_alloc(VirtualMachine *vm, Obj *param, long byte_offset) {
+    if (vm->compiler.restrict_cache_count >= MAX_RESTRICT_CACHE)
+        return -1;
+    int idx = vm->compiler.restrict_cache_count++;
+    vm->compiler.restrict_cache_params[idx] = param;
+    vm->compiler.restrict_cache_offsets[idx] = byte_offset;
+    vm->compiler.restrict_cache_valid[idx] = false;
+    return idx;
+}
+
+// Extract (restrict_param, byte_offset) from a ND_DEREF node.
+// Handles *p (offset 0) and p[const] (constant element index).
+// Returns true and sets out_param/out_byte_offset on success.
+static bool restrict_const_deref_extract(VirtualMachine *vm, Node *node,
+                                         Obj **out_param, long *out_byte_offset) {
+    if (!node || node->kind != ND_DEREF || !node->lhs)
+        return false;
+    Node *addr = node->lhs;
+    while (addr && addr->kind == ND_CAST)
+        addr = addr->lhs;
+    if (!addr)
+        return false;
+
+    // Pattern 1: plain *p
+    if (addr->kind == ND_VAR) {
+        Obj *var = addr->var;
+        if (!var || !var->is_param || !var->ty || var->ty->kind != TY_PTR ||
+            !var->ty->is_restrict || !var->ty->base ||
+            !is_scalar_promotion_type(var->ty->base))
+            return false;
+        *out_param = var;
+        *out_byte_offset = 0;
+        return true;
+    }
+
+    // Pattern 2: p[const] → *(p + k*elem_size) or *(p + byte_off)
+    // Requires opt_level >= 2 and no safety flags (same guards as indexed load).
+    if (addr->kind != ND_ADD || vm->compiler.opt_level < 2)
+        return false;
+    if (vm->flags & (CCCC_POINTER_CHECKS | CCCC_INVALID_ARITH | CCCC_PROVENANCE_TRACK))
+        return false;
+
+    // Try both orderings: (ptr + const) and (const + ptr)
+    Node *sides[2][2] = {{addr->lhs, addr->rhs}, {addr->rhs, addr->lhs}};
+    for (int s = 0; s < 2; s++) {
+        Node *ptr_node = sides[s][0];
+        Node *off_node = sides[s][1];
+        while (ptr_node && ptr_node->kind == ND_CAST) ptr_node = ptr_node->lhs;
+        while (off_node && off_node->kind == ND_CAST) off_node = off_node->lhs;
+        if (!ptr_node || !off_node)
+            continue;
+        if (ptr_node->kind != ND_VAR)
+            continue;
+        Obj *var = ptr_node->var;
+        if (!var || !var->is_param || !var->ty || var->ty->kind != TY_PTR ||
+            !var->ty->is_restrict || !var->ty->base ||
+            !is_scalar_promotion_type(var->ty->base))
+            continue;
+        // Evaluate the constant offset: ND_NUM or ND_MUL(ND_NUM, ND_NUM)
+        long byte_off = 0;
+        if (off_node->kind == ND_NUM) {
+            byte_off = (long)off_node->val;
+        } else if (off_node->kind == ND_MUL) {
+            Node *ml = off_node->lhs, *mr = off_node->rhs;
+            while (ml && ml->kind == ND_CAST) ml = ml->lhs;
+            while (mr && mr->kind == ND_CAST) mr = mr->lhs;
+            if (!ml || !mr || ml->kind != ND_NUM || mr->kind != ND_NUM)
+                continue;
+            byte_off = (long)(ml->val * mr->val);
+        } else {
+            continue;
+        }
+        *out_param = var;
+        *out_byte_offset = byte_off;
+        return true;
+    }
+    return false;
 }
 
 // Walk a pointer expression to find its restrict-param root (for indexed stores).
@@ -504,25 +583,24 @@ static Obj *restrict_root_param_of_ptr(Node *ptr) {
 }
 
 // Called on ND_DEREF to check/populate the restrict cache.
-// Returns true and emits a MOV (or load+cache-fill) if the node is a plain
-// dereference of a restrict-qualified parameter scalar in the cache.
+// Handles *restrict_param and restrict_param[const] patterns.
+// Returns true and emits a register copy or a load+cache-fill on hit/miss.
 static bool restrict_cache_handle_deref(VirtualMachine *vm, Node *node,
                                         int dest_reg) {
-    if (vm->compiler.restrict_cache_count == 0)
-        return false;
-    // Only handle *restrict_param (no indexing)
-    if (!node || node->kind != ND_DEREF || !node->lhs ||
-        node->lhs->kind != ND_VAR || !node->lhs->var)
-        return false;
-    Obj *param = node->lhs->var;
-    if (!param->is_param || !param->ty || param->ty->kind != TY_PTR ||
-        !param->ty->is_restrict || !param->ty->base ||
-        !is_scalar_promotion_type(param->ty->base))
+    if (vm->compiler.restrict_cache_capacity == 0)
         return false;
 
-    int idx = restrict_cache_find(vm, param);
-    if (idx < 0)
-        return false; // Not in the cache (e.g., ran out of S-regs)
+    Obj *param;
+    long byte_off;
+    if (!restrict_const_deref_extract(vm, node, &param, &byte_off))
+        return false;
+
+    int idx = restrict_cache_find(vm, param, byte_off);
+    if (idx < 0) {
+        idx = restrict_cache_alloc(vm, param, byte_off);
+        if (idx < 0)
+            return false; // all slots bound to other (param,offset) pairs
+    }
 
     int cache_reg = vm->compiler.restrict_cache_regs[idx];
 
@@ -530,14 +608,12 @@ static bool restrict_cache_handle_deref(VirtualMachine *vm, Node *node,
         // Cache hit: use the S-reg directly
         if (dest_reg != REG_ZERO && dest_reg != cache_reg)
             emit_mov3(vm, dest_reg, cache_reg);
-        else if (dest_reg == cache_reg)
-            ; // already there
         return true;
     }
 
-    // Cache miss: load *param into cache_reg, mark valid
+    // Cache miss: load the value at (param + byte_off) into cache_reg, mark valid
     int r_addr = alloc_temp_reg();
-    gen_expr(vm, node->lhs, r_addr); // load the pointer value (param itself)
+    gen_expr(vm, node->lhs, r_addr); // evaluates the full address (p or p+offset)
     emit_load(vm, node->ty, cache_reg, r_addr);
     free_temp_reg(r_addr);
     vm->compiler.restrict_cache_valid[idx] = true;
@@ -548,38 +624,38 @@ static bool restrict_cache_handle_deref(VirtualMachine *vm, Node *node,
 }
 
 // Called after a store through a pointer expression.
-// If the store goes through a restrict param, update or invalidate its cache entry.
+// If the store goes through a restrict param, update or invalidate cache entries.
 // If the store goes through a non-restrict pointer, do nothing (restrict contract).
 static void restrict_cache_handle_store(VirtualMachine *vm, Node *lhs, int val_reg) {
-    if (vm->compiler.restrict_cache_count == 0)
+    if (vm->compiler.restrict_cache_capacity == 0)
         return;
     if (!lhs || lhs->kind != ND_DEREF || !lhs->lhs)
         return;
 
-    // Plain deref: *p = val → update cache for p
-    Obj *plain = restrict_plain_deref_param(lhs);
-    if (plain) {
-        int idx = restrict_cache_find(vm, plain);
+    // *p = val or p[const] = val: write-through the specific (param, offset) entry.
+    Obj *param;
+    long byte_off;
+    if (restrict_const_deref_extract(vm, lhs, &param, &byte_off)) {
+        int idx = restrict_cache_find(vm, param, byte_off);
         if (idx >= 0) {
             int cache_reg = vm->compiler.restrict_cache_regs[idx];
             if (cache_reg != val_reg)
                 emit_mov3(vm, cache_reg, val_reg);
-            // Truncate to the pointee width (e.g. char *restrict: cache must hold
-            // sign/zero-extended byte, not the full register value after STR_B).
-            emit_normalize_promoted_scalar(vm, plain->ty->base, cache_reg);
+            // Truncate to pointee width (e.g. char *restrict: cache holds byte).
+            emit_normalize_promoted_scalar(vm, param->ty->base, cache_reg);
             vm->compiler.restrict_cache_valid[idx] = true;
         }
         return;
     }
 
-    // Indexed/derived store: p[i] = val → invalidate p's entry (offset unknown)
+    // p[var] or derived pointer store: find the restrict param root and invalidate
+    // all of its cached offsets (we don't know which byte_offset was hit).
     Obj *base = restrict_root_param_of_ptr(lhs->lhs);
     if (base) {
         restrict_cache_invalidate_param(vm, base);
         return;
     }
-    // base == NULL: pointer is not directly a restrict param but could be derived
-    // from one (e.g. int *r = p; *r = x). Conservatively invalidate all entries.
+    // Unknown base (e.g. int *r = p; *r = x): conservatively invalidate everything.
     restrict_cache_invalidate_all(vm);
 }
 
@@ -4797,7 +4873,7 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     int base_stack_size = stack_size;
     prepare_local_promotion(vm, fn, base_stack_size);
     prepare_restrict_cache(vm, fn, base_stack_size);
-    stack_size += vm->compiler.promoted_count + vm->compiler.restrict_cache_count;
+    stack_size += vm->compiler.promoted_count + vm->compiler.restrict_cache_capacity;
     if (stack_size % 2 != 0)
         stack_size++;
 

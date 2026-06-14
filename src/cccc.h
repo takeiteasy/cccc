@@ -1851,10 +1851,14 @@ typedef struct Compiler {
     int promotion_alias_count;
 
     // Restrict-param deref cache (#267). Active only while generating one function.
-    // Caches *restrict_param values in REG_S4-S7 for straight-line sections.
+    // Cache key is (param, byte_offset); up to MAX_RESTRICT_CACHE distinct pairs.
+    // Slots are lazily bound on first access; restrict_cache_capacity tracks the
+    // number of stack/register slots pre-reserved in the frame for sizing purposes.
 #define MAX_RESTRICT_CACHE 4
-    int restrict_cache_count;
+    int restrict_cache_count;    // number of lazily-bound entries so far
+    int restrict_cache_capacity; // slots pre-reserved (0 or MAX_RESTRICT_CACHE)
     Obj *restrict_cache_params[MAX_RESTRICT_CACHE];
+    long restrict_cache_offsets[MAX_RESTRICT_CACHE]; // byte offset per entry
     int restrict_cache_regs[MAX_RESTRICT_CACHE];
     int restrict_cache_save_offsets[MAX_RESTRICT_CACHE];
     bool restrict_cache_valid[MAX_RESTRICT_CACHE];
