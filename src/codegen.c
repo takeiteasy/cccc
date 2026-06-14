@@ -473,6 +473,34 @@ static bool contains_self_call(Node *node, Obj *fn) {
     return false;
 }
 
+// Return true when `expr` is a tail-call candidate: a direct, in-VM,
+// non-variadic, non-nested, non-noreturn, non-struct-returning call with ≤8 args.
+// The caller is responsible for the opt_level >= 1 and inline_exit_name guards.
+static bool can_emit_tail_call(VirtualMachine *vm, Node *expr) {
+    if (!expr || expr->kind != ND_FUNCALL)
+        return false;
+    Node *lhs = expr->lhs;
+    if (!lhs || lhs->kind != ND_VAR || !lhs->var->is_function)
+        return false;
+    Obj *callee = lhs->var;
+    if (find_ffi_function(vm, callee->name) >= 0)
+        return false; // FFI — goes through CALLF, not CALL
+    if (callee->is_nested)
+        return false; // needs static link in REG_A0
+    if (expr->func_ty && expr->func_ty->is_variadic)
+        return false; // va_area is part of the frame
+    if (callee->is_noreturn)
+        return false; // BTRAP emitted after CALL; can't compose with CALLT
+    if (expr->ty && (expr->ty->kind == TY_STRUCT || expr->ty->kind == TY_UNION))
+        return false; // RETBUF machinery — incompatible with frame reuse
+    int nargs = 0;
+    for (Node *a = expr->args; a; a = a->next)
+        nargs++;
+    if (nargs > 8)
+        return false; // stack-spill args would be below the unwound frame
+    return true;
+}
+
 // Count total AST nodes (statements + expressions) in a subtree.
 // Used by the inliner to enforce the node-count threshold.
 static int count_ast_nodes(Node *node) {
@@ -3398,28 +3426,40 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             }
         }
 
+        // Capture and immediately clear the tail-call flag so that argument
+        // sub-calls (e.g. return f(g(x))) never see it and suppress g's CALL.
+        bool is_tail = vm->compiler.emitting_tail_call;
+        vm->compiler.emitting_tail_call = false;
+
         // Call function
         if (node->lhs->kind == ND_VAR && node->lhs->var->is_function) {
             Obj *fn = node->lhs->var;
-            // Dead-call elimination: skip pure/const calls whose result is unused.
-            // Arguments were already evaluated above, so their side effects still run.
-            bool skip_dead_call = vm->compiler.opt_level >= 1 &&
-                                  dest_reg == REG_ZERO &&
-                                  (fn->is_pure || fn->is_func_const);
-            if (!skip_dead_call) {
-                emit(vm, CALL);
-                Pc patch = emit_word_ptr(vm);
-                vm->text_seg[patch] = 0; // Will be patched later
+            if (is_tail) {
+                // Record callee; ND_RETURN emits CALLT + patch after cleanup.
+                // If inlining/builtins fired earlier and we never reach here,
+                // pending_tail_callee stays NULL and ND_RETURN falls back to LEV3.
+                vm->compiler.pending_tail_callee = fn;
+            } else {
+                // Dead-call elimination: skip pure/const calls whose result is unused.
+                // Arguments were already evaluated above, so their side effects still run.
+                bool skip_dead_call = vm->compiler.opt_level >= 1 &&
+                                      dest_reg == REG_ZERO &&
+                                      (fn->is_pure || fn->is_func_const);
+                if (!skip_dead_call) {
+                    emit(vm, CALL);
+                    Pc patch = emit_word_ptr(vm);
+                    vm->text_seg[patch] = 0; // Will be patched later
 
-                // Record call patch location for later resolution
-                if (vm->compiler.num_call_patches >= MAX_CALLS) {
-                    error("too many function calls");
+                    // Record call patch location for later resolution
+                    if (vm->compiler.num_call_patches >= MAX_CALLS) {
+                        error("too many function calls");
+                    }
+                    vm->compiler.call_patches[vm->compiler.num_call_patches].location =
+                        patch;
+                    vm->compiler.call_patches[vm->compiler.num_call_patches].function =
+                        fn;
+                    vm->compiler.num_call_patches++;
                 }
-                vm->compiler.call_patches[vm->compiler.num_call_patches].location =
-                    patch;
-                vm->compiler.call_patches[vm->compiler.num_call_patches].function =
-                    fn;
-                vm->compiler.num_call_patches++;
             }
         } else {
             // Indirect call - function pointer in register.
@@ -3844,7 +3884,45 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
                             emit_word_ptr(vm), false);
             return;
         }
-        if (node->lhs) {
+
+        // Tail-call optimisation: return f(args) → CALLT instead of CALL+LEV3.
+        // Guards: opt >= 1, not inlining, predicate checks FFI/variadic/nested/etc.
+        // After gen_expr, pending_tail_callee is set only if CALL was reached;
+        // inlining/builtins leave it NULL and we fall through to the LEV3 path.
+        // expr_already_eval prevents re-evaluating node->lhs in the LEV3 path below.
+        bool expr_already_eval = false;
+        if (node->lhs && vm->compiler.opt_level >= 1 &&
+            can_emit_tail_call(vm, node->lhs)) {
+            int tco_dest = is_flonum(node->lhs->ty) ? FREG_A0 : REG_A0;
+            vm->compiler.emitting_tail_call = true;
+            vm->compiler.pending_tail_callee = NULL;
+            gen_expr(vm, node->lhs, tco_dest);
+            vm->compiler.emitting_tail_call = false; // belt-and-suspenders; cleared in ND_FUNCALL
+            if (vm->compiler.pending_tail_callee) {
+                Obj *tco_fn = vm->compiler.pending_tail_callee;
+                vm->compiler.pending_tail_callee = NULL;
+                emit_flush_promoted_locals(vm);
+                if (vm->flags & CCCC_STACK_INSTR)
+                    emit_scopeout(vm, vm->current_function_scope_id);
+                emit_restore_promoted_registers(vm);
+                emit(vm, CALLT);
+                Pc tco_patch = emit_word_ptr(vm);
+                vm->text_seg[tco_patch] = 0;
+                if (vm->compiler.num_call_patches >= MAX_CALLS)
+                    error("too many function calls");
+                vm->compiler.call_patches[vm->compiler.num_call_patches].location =
+                    tco_patch;
+                vm->compiler.call_patches[vm->compiler.num_call_patches].function =
+                    tco_fn;
+                vm->compiler.num_call_patches++;
+                return;
+            }
+            // Inlining/builtin handled the call; result already in tco_dest.
+            // Fall through to flush/restore/LEV3, but skip re-evaluating node->lhs.
+            expr_already_eval = true;
+        }
+
+        if (node->lhs && !expr_already_eval) {
             // If returning struct/union, copy to return buffer at runtime
             if (node->lhs->ty && (node->lhs->ty->kind == TY_STRUCT ||
                                   node->lhs->ty->kind == TY_UNION)) {

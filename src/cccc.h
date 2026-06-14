@@ -1830,6 +1830,10 @@ typedef struct Compiler {
     char *inline_exit_name; // Exit label name for inlined returns (NULL = not inlining)
     int inline_result_reg;  // Register for inlined return values
 
+    // Tail-call context (used during codegen for return f(args) TCO)
+    bool emitting_tail_call;  // Set in ND_RETURN; cleared immediately in ND_FUNCALL
+    Obj *pending_tail_callee; // Callee recorded by ND_FUNCALL; NULL if inlined/elided
+
     // ENT3 stack patching for inlined locals
     Pc ent3_stack_loc;   // PC of ENT3 stack_size low word (for patching)
     int ent3_base_stack;    // Original stack_size before inlining additions

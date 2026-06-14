@@ -53,6 +53,22 @@ All segments are reserved upfront as large virtual ranges and committed in `pool
 
 The `ENT3` opcode builds the stack frame, copies register arguments and stack-passed fixed arguments to their callee-local parameter slots, and optionally writes a stack canary. For variadic functions, `ENT3` still reserves and spills the first 8 argument slots so `va_arg` can consume any register-passed variadic tail; variadic arguments beyond those slots remain in the caller's stack area. `LEV3` restores `bp`, checks the canary, pops the return address, and resumes at the caller.
 
+### Tail-Call Optimisation
+
+When codegen detects that a `return` statement's outermost expression is a direct call to a statically-known, in-VM, non-variadic, non-nested function whose return type is not a struct/union and whose argument count does not exceed 8, it emits `CALLT` instead of `CALL` followed by `LEV3`.
+
+`CALLT` unwinds the current frame (`sp = bp`, restores saved `bp`) without consuming the return address already on the stack. The callee's subsequent `LEV3` therefore returns directly to the *original* caller, so deeply-recursive helpers and mutually-recursive function pairs execute in O(1) stack space regardless of recursion depth.
+
+**Eligibility** (all must hold, checked at `-O1` and above):
+
+* The call is the sole, outermost expression of the `return` — `return f() + 1` is not a tail call.
+* The callee is a directly-addressed in-VM function (not FFI, not a function pointer).
+* The callee is not variadic and not a nested function (nested functions require a static-link argument in `REG_A0`).
+* The callee does not return a struct or union (struct returns use `RETBUF` and are incompatible with frame reuse).
+* The call uses 8 or fewer arguments (stack-spilled arguments would fall below the unwound frame).
+
+Mutually-recursive pairs (`A → B → A`) are handled correctly because `CALLT` leaves the caller's return address in place; `B`'s `CALLT` back to `A` reuses `B`'s frame, and so on.
+
 ### VM Threads
 
 The POSIX `<pthread.h>` layer maps `pthread_create` to host pthreads while keeping VM execution correctness-first. Each VM thread receives an independent VM stack/register snapshot and enters the requested VM function with the `void *` argument in `REG_A0`. The VM's text, data, heap, globals, FFI registrations, and safety metadata remain shared by the `CCCC` instance.
@@ -465,11 +481,12 @@ Static n-gram mining (`cccc --ngrams`) and use-def fusion analysis (`cccc --fusi
 
 The VM is the runtime for compile-time macro bodies and for VM-only workflows (the safety suite, the debugger, the profiler, quick iteration without a system compiler).  For production code, `-c=native` hands macro-expanded C to `cc` / `clang` / `gcc` and skips the VM entirely, so the interpreter cost only matters for the things that *run on it*.
 
-Four optimisations have significantly reduced interpreter overhead:
+Five optimisations have significantly reduced interpreter overhead:
 
 1. **Inlined threaded dispatch** — Opcode logic lives at computed-goto labels; there is no function call per instruction.
 2. **Fused local load/store** — The common `LEA3 + LDR/STR` pair for local variables is collapsed into a single `LDR_LOCAL_*` / `STR_LOCAL_*` opcode, saving one dispatch and one register-pressure hop per access.
 3. **Scalar local promotion** — Hot eligible integer and pointer locals are held in callee-saved VM registers at `--optimize=2` and above.
 4. **Fused indexed load/store** — Simple array and pointer accesses use `LDR_INDEX_*` / `STR_INDEX_*`, removing separate index multiply and address-add opcodes in hot loops.
+5. **Tail-call optimisation** — `return f(args)` patterns that meet eligibility criteria emit `CALLT` instead of `CALL + LEV3`, reducing tail-recursive calls to O(1) stack depth (see [Tail-Call Optimisation](#tail-call-optimisation) above).
 
 The dominant cost remains the interpreter itself (as opposed to compile time); see [BENCHMARKS.md](BENCHMARKS.md) for full numbers and [PROFILING.md](PROFILING.md) for analysis tooling.
