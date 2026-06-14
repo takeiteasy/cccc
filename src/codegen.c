@@ -393,9 +393,9 @@ static void prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_
     qsort(cands, (size_t)local_count, sizeof(PromotionCandidate),
           promotion_candidate_cmp);
 
-    static const int sregs[] = {REG_S0, REG_S1, REG_S2, REG_S3,
-                                REG_S4, REG_S5, REG_S6, REG_S7};
-    for (int i = 0; i < local_count && vm->compiler.promoted_count < 8; i++) {
+    // Only use S0-S3 for scalar promotion; S4-S7 are reserved for the restrict cache.
+    static const int sregs[] = {REG_S0, REG_S1, REG_S2, REG_S3};
+    for (int i = 0; i < local_count && vm->compiler.promoted_count < 4; i++) {
         if (cands[i].address_escapes || cands[i].score < 3)
             continue;
         int p = vm->compiler.promoted_count++;
@@ -404,6 +404,195 @@ static void prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_
         vm->compiler.promoted_save_offsets[p] = -(base_stack_size + p + 1);
     }
     free(cands);
+}
+
+// ========== Restrict-param Deref Cache (#267) ==========
+
+// Forward declarations for helpers used by the restrict cache
+static void emit_mov3(VirtualMachine *vm, int rd, int rs);
+static void emit_local_store(VirtualMachine *vm, Type *ty, int rd_val, long long offset);
+static void emit_local_load(VirtualMachine *vm, Type *ty, int rd, long long offset);
+static void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr);
+static void emit_normalize_promoted_scalar(VirtualMachine *vm, Type *ty, int reg);
+static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg);
+
+static void prepare_restrict_cache(VirtualMachine *vm, Obj *fn, int base_stack_size) {
+    vm->compiler.restrict_cache_count = 0;
+    memset(vm->compiler.restrict_cache_params, 0,
+           sizeof(vm->compiler.restrict_cache_params));
+    memset(vm->compiler.restrict_cache_regs, 0,
+           sizeof(vm->compiler.restrict_cache_regs));
+    memset(vm->compiler.restrict_cache_save_offsets, 0,
+           sizeof(vm->compiler.restrict_cache_save_offsets));
+    memset(vm->compiler.restrict_cache_valid, 0,
+           sizeof(vm->compiler.restrict_cache_valid));
+
+    if (vm->compiler.opt_level < 2 || (vm->flags & CCCC_ENABLE_DEBUGGER))
+        return;
+
+    // REG_S4-S7 are reserved for the restrict cache (S0-S3 used by scalar promotion).
+    static const int rcregs[] = {REG_S4, REG_S5, REG_S6, REG_S7};
+    for (Obj *param = fn->params;
+         param && vm->compiler.restrict_cache_count < MAX_RESTRICT_CACHE;
+         param = param->next) {
+        if (!param->ty || param->ty->kind != TY_PTR || !param->ty->is_restrict)
+            continue;
+        if (!param->ty->base || !is_scalar_promotion_type(param->ty->base))
+            continue;
+        int q = vm->compiler.restrict_cache_count++;
+        vm->compiler.restrict_cache_params[q] = param;
+        vm->compiler.restrict_cache_regs[q] = rcregs[q];
+        // Save slots are placed after the promoted-local save slots.
+        vm->compiler.restrict_cache_save_offsets[q] =
+            -(base_stack_size + vm->compiler.promoted_count + q + 1);
+        // valid starts false; populated lazily on first deref access.
+    }
+}
+
+static int restrict_cache_find(VirtualMachine *vm, Obj *param) {
+    for (int i = 0; i < vm->compiler.restrict_cache_count; i++)
+        if (vm->compiler.restrict_cache_params[i] == param)
+            return i;
+    return -1;
+}
+
+// Invalidate all restrict cache entries (called at control-flow join points).
+static void restrict_cache_invalidate_all(VirtualMachine *vm) {
+    for (int i = 0; i < vm->compiler.restrict_cache_count; i++)
+        vm->compiler.restrict_cache_valid[i] = false;
+}
+
+// Invalidate a single restrict param's cache entry (after indexed store through it).
+static void restrict_cache_invalidate_param(VirtualMachine *vm, Obj *param) {
+    int idx = restrict_cache_find(vm, param);
+    if (idx >= 0)
+        vm->compiler.restrict_cache_valid[idx] = false;
+}
+
+// Returns the restrict param if lhs is *restrict_param (plain deref, no offset/index).
+static Obj *restrict_plain_deref_param(Node *lhs) {
+    if (!lhs || lhs->kind != ND_DEREF || !lhs->lhs || lhs->lhs->kind != ND_VAR)
+        return NULL;
+    Obj *var = lhs->lhs->var;
+    if (!var || !var->is_param || !var->ty || var->ty->kind != TY_PTR ||
+        !var->ty->is_restrict)
+        return NULL;
+    return var;
+}
+
+// Walk a pointer expression to find its restrict-param root (for indexed stores).
+// Returns the restrict param Obj if found, NULL otherwise.
+static Obj *restrict_root_param_of_ptr(Node *ptr) {
+    while (ptr) {
+        if (ptr->kind == ND_CAST) { ptr = ptr->lhs; continue; }
+        if (ptr->kind == ND_VAR) {
+            Obj *var = ptr->var;
+            if (var && var->is_param && var->ty && var->ty->kind == TY_PTR &&
+                var->ty->is_restrict)
+                return var;
+            return NULL;
+        }
+        if (ptr->kind == ND_ADD || ptr->kind == ND_SUB) {
+            // Try the LHS first (usually the base pointer)
+            Obj *r = restrict_root_param_of_ptr(ptr->lhs);
+            if (r) return r;
+            return restrict_root_param_of_ptr(ptr->rhs);
+        }
+        return NULL;
+    }
+    return NULL;
+}
+
+// Called on ND_DEREF to check/populate the restrict cache.
+// Returns true and emits a MOV (or load+cache-fill) if the node is a plain
+// dereference of a restrict-qualified parameter scalar in the cache.
+static bool restrict_cache_handle_deref(VirtualMachine *vm, Node *node,
+                                        int dest_reg) {
+    if (vm->compiler.restrict_cache_count == 0)
+        return false;
+    // Only handle *restrict_param (no indexing)
+    if (!node || node->kind != ND_DEREF || !node->lhs ||
+        node->lhs->kind != ND_VAR || !node->lhs->var)
+        return false;
+    Obj *param = node->lhs->var;
+    if (!param->is_param || !param->ty || param->ty->kind != TY_PTR ||
+        !param->ty->is_restrict || !param->ty->base ||
+        !is_scalar_promotion_type(param->ty->base))
+        return false;
+
+    int idx = restrict_cache_find(vm, param);
+    if (idx < 0)
+        return false; // Not in the cache (e.g., ran out of S-regs)
+
+    int cache_reg = vm->compiler.restrict_cache_regs[idx];
+
+    if (vm->compiler.restrict_cache_valid[idx]) {
+        // Cache hit: use the S-reg directly
+        if (dest_reg != REG_ZERO && dest_reg != cache_reg)
+            emit_mov3(vm, dest_reg, cache_reg);
+        else if (dest_reg == cache_reg)
+            ; // already there
+        return true;
+    }
+
+    // Cache miss: load *param into cache_reg, mark valid
+    int r_addr = alloc_temp_reg();
+    gen_expr(vm, node->lhs, r_addr); // load the pointer value (param itself)
+    emit_load(vm, node->ty, cache_reg, r_addr);
+    free_temp_reg(r_addr);
+    vm->compiler.restrict_cache_valid[idx] = true;
+
+    if (dest_reg != REG_ZERO && dest_reg != cache_reg)
+        emit_mov3(vm, dest_reg, cache_reg);
+    return true;
+}
+
+// Called after a store through a pointer expression.
+// If the store goes through a restrict param, update or invalidate its cache entry.
+// If the store goes through a non-restrict pointer, do nothing (restrict contract).
+static void restrict_cache_handle_store(VirtualMachine *vm, Node *lhs, int val_reg) {
+    if (vm->compiler.restrict_cache_count == 0)
+        return;
+    if (!lhs || lhs->kind != ND_DEREF || !lhs->lhs)
+        return;
+
+    // Plain deref: *p = val → update cache for p
+    Obj *plain = restrict_plain_deref_param(lhs);
+    if (plain) {
+        int idx = restrict_cache_find(vm, plain);
+        if (idx >= 0) {
+            int cache_reg = vm->compiler.restrict_cache_regs[idx];
+            if (cache_reg != val_reg)
+                emit_mov3(vm, cache_reg, val_reg);
+            // Truncate to the pointee width (e.g. char *restrict: cache must hold
+            // sign/zero-extended byte, not the full register value after STR_B).
+            emit_normalize_promoted_scalar(vm, plain->ty->base, cache_reg);
+            vm->compiler.restrict_cache_valid[idx] = true;
+        }
+        return;
+    }
+
+    // Indexed/derived store: p[i] = val → invalidate p's entry (offset unknown)
+    Obj *base = restrict_root_param_of_ptr(lhs->lhs);
+    if (base) {
+        restrict_cache_invalidate_param(vm, base);
+        return;
+    }
+    // base == NULL: pointer is not directly a restrict param but could be derived
+    // from one (e.g. int *r = p; *r = x). Conservatively invalidate all entries.
+    restrict_cache_invalidate_all(vm);
+}
+
+static void emit_save_restrict_cache_regs(VirtualMachine *vm) {
+    for (int i = 0; i < vm->compiler.restrict_cache_count; i++)
+        emit_local_store(vm, ty_long, vm->compiler.restrict_cache_regs[i],
+                         vm->compiler.restrict_cache_save_offsets[i]);
+}
+
+static void emit_restore_restrict_cache_regs(VirtualMachine *vm) {
+    for (int i = vm->compiler.restrict_cache_count - 1; i >= 0; i--)
+        emit_local_load(vm, ty_long, vm->compiler.restrict_cache_regs[i],
+                        vm->compiler.restrict_cache_save_offsets[i]);
 }
 
 // ========== Function Call Detection ==========
@@ -693,6 +882,8 @@ static void define_label(VirtualMachine *vm, char *name) {
     label_defs[num_label_defs].name = name;
     label_defs[num_label_defs].offset = vm->text_ptr + 1;
     num_label_defs++;
+    // A label is a control-flow join point; the restrict cache is no longer valid.
+    restrict_cache_invalidate_all(vm);
 }
 
 // Record a jump that needs to be patched later
@@ -1305,6 +1496,8 @@ static Pc emit_jz3(VirtualMachine *vm, int rs) {
     emit_word(vm, ENCODE_R(rs));
     Pc patch = emit_word_ptr(vm);
     vm->text_seg[patch] = 0;
+    // Branch creates a control-flow split; invalidate restrict cache for the fall-through path.
+    restrict_cache_invalidate_all(vm);
     return patch;
 }
 
@@ -1314,6 +1507,8 @@ static Pc emit_jnz3(VirtualMachine *vm, int rs) {
     emit_word(vm, ENCODE_R(rs));
     Pc patch = emit_word_ptr(vm);
     vm->text_seg[patch] = 0;
+    // Branch creates a control-flow split; invalidate restrict cache for the fall-through path.
+    restrict_cache_invalidate_all(vm);
     return patch;
 }
 
@@ -2254,6 +2449,8 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         return;
 
     case ND_DEREF:
+        if (restrict_cache_handle_deref(vm, node, dest_reg))
+            return;
         if (promoted_deref_target(vm, node)) {
             emit_promoted_read(vm, promoted_deref_target(vm, node), dest_reg);
             return;
@@ -2644,6 +2841,9 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // Standard store
             emit_store(vm, node->ty, r_val, r_addr);
         }
+
+        // Update or invalidate the restrict cache for this store.
+        restrict_cache_handle_store(vm, node->lhs, r_val);
 
         // Stack instrumentation: record write and mark initialized (scalars only).
         if (node->lhs->kind == ND_VAR && node->lhs->var->is_local &&
@@ -3096,7 +3296,8 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 return;
             }
 
-            // Reset temp regs after call
+            // Reset temp regs after call; function may have modified *restrict_params.
+            restrict_cache_invalidate_all(vm);
             reset_temp_regs();
 
             // Result in REG_A0/FREG_A0
@@ -3499,7 +3700,9 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         }
 
         // Function calls clobber all temp registers (caller-saved)
-        // Reset allocator so caller will recompute any addresses it needs
+        // Reset allocator so caller will recompute any addresses it needs.
+        // Also invalidate restrict cache: callee may have modified *restrict_params.
+        restrict_cache_invalidate_all(vm);
         reset_temp_regs();
 
         // Note: With runtime return buffer rotation (RETBUF opcode), chained
@@ -3840,6 +4043,240 @@ static void emit_source_location(VirtualMachine *vm, Node *node) {
     vm->dbg.last_debug_col = node->tok->col_no;
 }
 
+// ========== Restrict Memcpy Loop Lowering (#268) ==========
+//
+// Recognises: for (T i = 0; i < n; i++) dst[i] = src[i]
+// where dst and src are restrict-qualified pointers.
+// Emits a single MCPY opcode instead of the loop.
+
+// Strip casts to find the underlying node (re-uses strip_index_casts logic).
+static Node *strip_casts(Node *n) {
+    while (n && n->kind == ND_CAST)
+        n = n->lhs;
+    return n;
+}
+
+// Matches dst[i] = src[i] body: returns true and populates dst_var/src_var/ind_var/scale.
+// body must be a single ND_ASSIGN of the form: *(base + i*scale) = *(base2 + i*scale)
+static bool match_memcpy_body(Node *body, Obj **dst_var, Obj **src_var,
+                               Obj **ind_var, int *elem_scale) {
+    // Accept either bare ND_EXPR_STMT or bare ND_ASSIGN (from ND_FOR body).
+    Node *assign = body;
+    if (assign && assign->kind == ND_EXPR_STMT)
+        assign = assign->lhs;
+    // Also handle an ND_BLOCK wrapping a single ND_EXPR_STMT
+    if (assign && assign->kind == ND_BLOCK) {
+        Node *inner = assign->body;
+        if (!inner || inner->next)
+            return false;
+        assign = inner;
+        if (assign->kind == ND_EXPR_STMT)
+            assign = assign->lhs;
+    }
+    if (!assign || assign->kind != ND_ASSIGN)
+        return false;
+
+    Node *lhs = assign->lhs;
+    Node *rhs = assign->rhs;
+
+    // Both sides must be ND_DEREF of pointer arithmetic.
+    if (!lhs || lhs->kind != ND_DEREF || !rhs || rhs->kind != ND_DEREF)
+        return false;
+
+    Node *laddr = strip_casts(lhs->lhs);
+    Node *raddr = strip_casts(rhs->lhs);
+    if (!laddr || !raddr)
+        return false;
+
+    // Match: base + index*scale
+    // laddr/raddr must be ND_ADD(base_var, ND_MUL(index, scale)).
+    if (laddr->kind != ND_ADD || raddr->kind != ND_ADD)
+        return false;
+
+    Node *l_index = NULL, *r_index = NULL;
+    int l_scale = 0, r_scale = 0;
+
+    // Decompose lhs address
+    Node *ll = strip_casts(laddr->lhs);
+    Node *lr = strip_casts(laddr->rhs);
+    // Try rhs side being the index*scale
+    if (!is_index_scale(lr, &l_index, &l_scale)) {
+        // Maybe lhs side is the index*scale (commuted)
+        if (!is_index_scale(ll, &l_index, &l_scale))
+            return false;
+        Node *tmp = ll; ll = lr; lr = tmp; // swap so ll=base, lr=index*scale
+    }
+    Node *l_base = ll;
+
+    // Decompose rhs address
+    Node *rl = strip_casts(raddr->lhs);
+    Node *rr = strip_casts(raddr->rhs);
+    if (!is_index_scale(rr, &r_index, &r_scale)) {
+        if (!is_index_scale(rl, &r_index, &r_scale))
+            return false;
+        Node *tmp = rl; rl = rr; rr = tmp;
+    }
+    Node *r_base = rl;
+
+    // Scales must match.
+    if (l_scale != r_scale)
+        return false;
+
+    // Index variables must be the same.
+    l_index = strip_casts(l_index);
+    r_index = strip_casts(r_index);
+    if (!l_index || l_index->kind != ND_VAR || !r_index || r_index->kind != ND_VAR)
+        return false;
+    if (l_index->var != r_index->var)
+        return false;
+
+    // Base pointers must be restrict-qualified parameters.
+    l_base = strip_casts(l_base);
+    r_base = strip_casts(r_base);
+    if (!l_base || l_base->kind != ND_VAR || !r_base || r_base->kind != ND_VAR)
+        return false;
+    Obj *dst = l_base->var;
+    Obj *src = r_base->var;
+    if (!dst || !src || dst == src)
+        return false;
+    if (!dst->ty || dst->ty->kind != TY_PTR || !dst->ty->is_restrict)
+        return false;
+    if (!src->ty || src->ty->kind != TY_PTR || !src->ty->is_restrict)
+        return false;
+
+    *dst_var   = dst;
+    *src_var   = src;
+    *ind_var   = l_index->var;
+    *elem_scale = l_scale;
+    return true;
+}
+
+// Try to emit a restrict memcpy loop as a single MCPY opcode.
+// Returns true if the pattern matched and MCPY was emitted.
+static bool try_emit_restrict_memcpy(VirtualMachine *vm, Node *node) {
+    if (!node || node->kind != ND_FOR)
+        return false;
+    if (vm->compiler.opt_level < 2)
+        return false;
+    // Flags that disable indexed-load optimisation also make this unsafe.
+    if (vm->flags & (CCCC_POINTER_CHECKS | CCCC_INVALID_ARITH | CCCC_PROVENANCE_TRACK))
+        return false;
+
+    // 1. Init: must be a declaration/assignment of induction variable to 0.
+    //    After parsing, for-init declarations come as ND_BLOCK{ ND_EXPR_STMT{ ND_ASSIGN } }.
+    Node *init = node->init;
+    if (!init)
+        return false;
+    Node *init_assign = init;
+    if (init_assign->kind == ND_BLOCK) {
+        if (!init_assign->body || init_assign->body->next)
+            return false;
+        init_assign = init_assign->body;
+    }
+    if (init_assign->kind == ND_EXPR_STMT)
+        init_assign = init_assign->lhs;
+    if (!init_assign || init_assign->kind != ND_ASSIGN)
+        return false;
+    Node *init_lhs = strip_casts(init_assign->lhs);
+    Node *init_rhs = strip_casts(init_assign->rhs);
+    if (!init_lhs || init_lhs->kind != ND_VAR || !init_rhs || init_rhs->kind != ND_NUM)
+        return false;
+    if (init_rhs->val != 0)
+        return false;
+    Obj *ind_init = init_lhs->var;
+
+    // 2. Condition: must be ind_var < bound_expr.
+    Node *cond = node->cond;
+    if (!cond || cond->kind != ND_LT)
+        return false;
+    Node *cond_lhs = strip_casts(cond->lhs);
+    if (!cond_lhs || cond_lhs->kind != ND_VAR || cond_lhs->var != ind_init)
+        return false;
+    Node *bound_expr = cond->rhs;
+
+    // 3. Increment: must be i = i+1 (the parser desugars i++ and ++i to this).
+    Node *inc = node->inc;
+    if (!inc)
+        return false;
+    inc = strip_casts(inc);
+    if (!inc || inc->kind != ND_ASSIGN)
+        return false;
+    {
+        Node *inc_lhs = strip_casts(inc->lhs);
+        if (!inc_lhs || inc_lhs->kind != ND_VAR || inc_lhs->var != ind_init)
+            return false;
+        Node *inc_rhs = strip_casts(inc->rhs);
+        // Accept i+1 or 1+i
+        if (!inc_rhs || inc_rhs->kind != ND_ADD)
+            return false;
+        Node *add_lhs = strip_casts(inc_rhs->lhs);
+        Node *add_rhs = strip_casts(inc_rhs->rhs);
+        bool lhs_is_ind = add_lhs && add_lhs->kind == ND_VAR &&
+                          add_lhs->var == ind_init;
+        bool rhs_is_one = add_rhs && add_rhs->kind == ND_NUM &&
+                          add_rhs->val == 1;
+        bool rhs_is_ind = add_rhs && add_rhs->kind == ND_VAR &&
+                          add_rhs->var == ind_init;
+        bool lhs_is_one = add_lhs && add_lhs->kind == ND_NUM &&
+                          add_lhs->val == 1;
+        if (!((lhs_is_ind && rhs_is_one) || (rhs_is_ind && lhs_is_one)))
+            return false;
+    }
+
+    // 4. Body: must be dst[i] = src[i] with restrict pointers.
+    Obj *dst_var = NULL, *src_var = NULL, *ind_var = NULL;
+    int elem_scale = 0;
+    if (!match_memcpy_body(node->then, &dst_var, &src_var, &ind_var, &elem_scale))
+        return false;
+    if (ind_var != ind_init)
+        return false;
+
+    // All checks passed: emit MCPY.
+    reset_temp_regs();
+
+    // Compute bound (n).
+    int r_n = alloc_temp_reg();
+    gen_expr(vm, bound_expr, r_n);
+
+    // Guard: if n <= 0 the loop is a no-op; skip MCPY to avoid memcpy with
+    // a huge size_t when n is a negative signed value.
+    // emit_jnz3 also invalidates the restrict cache (control-flow split).
+    int r_guard = alloc_temp_reg();
+    emit_rrr(vm, SLE3, r_guard, r_n, REG_ZERO);
+    Pc skip_patch = emit_jnz3(vm, r_guard);
+    free_temp_reg(r_guard);
+
+    int r_dst = alloc_temp_reg();
+    // Load dst pointer value — the var is a function param (pointer type)
+    emit_local_load(vm, dst_var->ty, r_dst, dst_var->offset);
+
+    int r_src = alloc_temp_reg();
+    emit_local_load(vm, src_var->ty, r_src, src_var->offset);
+
+    if (elem_scale <= 1) {
+        emit_mov3(vm, REG_A2, r_n);
+    } else {
+        int r_scale = alloc_temp_reg();
+        emit_li3(vm, r_scale, elem_scale);
+        emit_rrr(vm, MUL3, REG_A2, r_n, r_scale);
+        free_temp_reg(r_scale);
+    }
+
+    emit_mov3(vm, REG_A0, r_dst);
+    emit_mov3(vm, REG_A1, r_src);
+    emit(vm, MCPY);
+
+    free_temp_reg(r_n);
+    free_temp_reg(r_dst);
+    free_temp_reg(r_src);
+
+    // Patch the skip-MCPY target. Cache was already invalidated by emit_jnz3 above.
+    vm->text_seg[skip_patch] = vm->text_ptr + 1;
+
+    // The induction variable is loop-scoped and dead after MCPY; no need to update it.
+    return true;
+}
+
 static void gen_stmt(VirtualMachine *vm, Node *node) {
     if (!node)
         return;
@@ -3904,6 +4341,7 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
                 emit_flush_promoted_locals(vm);
                 if (vm->flags & CCCC_STACK_INSTR)
                     emit_scopeout(vm, vm->current_function_scope_id);
+                emit_restore_restrict_cache_regs(vm);
                 emit_restore_promoted_registers(vm);
                 emit(vm, CALLT);
                 Pc tco_patch = emit_word_ptr(vm);
@@ -3959,6 +4397,7 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
         // Deactivate function-level scope before returning.
         if (vm->flags & CCCC_STACK_INSTR)
             emit_scopeout(vm, vm->current_function_scope_id);
+        emit_restore_restrict_cache_regs(vm);
         emit_restore_promoted_registers(vm);
         emit(vm, LEV3);
         return;
@@ -3985,11 +4424,17 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
     }
 
     case ND_FOR: {
+        // Try to lower restrict copy loops to MCPY before emitting loop code.
+        if (try_emit_restrict_memcpy(vm, node))
+            return;
+
         // Init
         if (node->init) {
             gen_stmt(vm, node->init);
         }
 
+        // Loop start is a join point (init falls through; back-edge arrives here).
+        restrict_cache_invalidate_all(vm);
         Pc loop_start = vm->text_ptr + 1;
 
         // Condition
@@ -4019,6 +4464,8 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
         // Jump back to start
         emit(vm, JMP);
         emit_word(vm, loop_start);
+        // After back-edge, any fall-through is from a join; invalidate.
+        restrict_cache_invalidate_all(vm);
 
         // Define break label (jumps past loop)
         if (node->brk_label) {
@@ -4033,6 +4480,8 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
     }
 
     case ND_DO: {
+        // Loop start is a join point (back-edge arrives here).
+        restrict_cache_invalidate_all(vm);
         Pc loop_start = vm->text_ptr + 1;
 
         gen_stmt(vm, node->then);
@@ -4347,7 +4796,8 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     int stack_size = assign_stack_offsets(fn);
     int base_stack_size = stack_size;
     prepare_local_promotion(vm, fn, base_stack_size);
-    stack_size += vm->compiler.promoted_count;
+    prepare_restrict_cache(vm, fn, base_stack_size);
+    stack_size += vm->compiler.promoted_count + vm->compiler.restrict_cache_count;
     if (stack_size % 2 != 0)
         stack_size++;
 
@@ -4413,6 +4863,7 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
         emit_scopein(vm, fn_scope_id);
 
     emit_save_promoted_registers(vm);
+    emit_save_restrict_cache_regs(vm);
     emit_init_promoted_params(vm);
 
     // Mark parameters initialized (they arrive via registers).
@@ -4465,6 +4916,7 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     // Deactivate function scope (for fall-through returns).
     if (vm->flags & CCCC_STACK_INSTR)
         emit_scopeout(vm, fn_scope_id);
+    emit_restore_restrict_cache_regs(vm);
     emit_restore_promoted_registers(vm);
     emit(vm, LEV3);
     fn->code_end_addr = vm->text_ptr + 1;

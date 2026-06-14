@@ -1840,14 +1840,24 @@ typedef struct Compiler {
     int ent3_extra_stack;   // Additional stack slots from inlined locals
 
     // Scalar local promotion (#249). Active only while generating one function.
-    Obj *promoted_locals[8];
-    int promoted_regs[8];
-    int promoted_save_offsets[8];
-    bool promoted_dirty[8];
+    // Capped at 4 slots (REG_S0-S3) to leave S4-S7 for the restrict cache.
+    Obj *promoted_locals[4];
+    int promoted_regs[4];
+    int promoted_save_offsets[4];
+    bool promoted_dirty[4];
     int promoted_count;
     Obj *promotion_alias_vars[16];
     Obj *promotion_alias_targets[16];
     int promotion_alias_count;
+
+    // Restrict-param deref cache (#267). Active only while generating one function.
+    // Caches *restrict_param values in REG_S4-S7 for straight-line sections.
+#define MAX_RESTRICT_CACHE 4
+    int restrict_cache_count;
+    Obj *restrict_cache_params[MAX_RESTRICT_CACHE];
+    int restrict_cache_regs[MAX_RESTRICT_CACHE];
+    int restrict_cache_save_offsets[MAX_RESTRICT_CACHE];
+    bool restrict_cache_valid[MAX_RESTRICT_CACHE];
 
     // C language standard selection
     CStdVersion c_std;  // Selected standard version (default: CCCC_STD_C23)

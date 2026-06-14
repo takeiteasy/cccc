@@ -106,7 +106,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | Designated initialisers — structs and arrays | ✓ | |
 | Compound literals | ✓ | |
 | `inline` functions | ✓ | Dead-function elimination + single-return inlining (unconditional); full AST inlining at `-O2`/`-O3` (`--inline-limit=N` controls size threshold) |
-| `restrict` pointers | ~ | Parsed and accepted; aliasing not tracked ([#267](https://todo.sr.ht/~takeiteasy/cccc/267)) |
+| `restrict` pointers | ✓ | Parsed and stored on `Type`; codegen exploits non-aliasing: straight-line loads through `*restrict_param` are cached in callee-saved registers and not invalidated by stores through other restrict or non-restrict pointers; `for (i=0;i<n;i++) dst[i]=src[i]` loops with both pointers restrict-qualified are lowered to a single `MCPY` opcode ([#267](https://todo.sr.ht/~takeiteasy/cccc/267), [#268](https://todo.sr.ht/~takeiteasy/cccc/268)) |
 | Type qualifiers in array-parameter indices (`void f(int a[const static 10])`) | ✓ | `static` enforces minimum-size, emitting `-Wstatic-array-size` when a constant-size argument is too small (best-effort: bare pointer args not checked). `const`/`volatile`/`restrict` inside `[...]` are applied to the decayed pointer (e.g. `[const N]` → `int *const`); VLA-form qualifiers (`[const n]`) not yet adjusted. |
 | `__func__` predefined identifier | ✓ | |
 | Variadic macros `__VA_ARGS__` | ✓ | |
@@ -198,7 +198,7 @@ language coverage figures apply.
 | Nested functions | ✓ | Access to parent-scope variables via static link |
 | `__builtin_*` | ✓ | Lowered by the compiler; see [STDLIB.md](STDLIB.md) for the full list |
 | `__thread` storage class | ~ | Emits `-Wignored-features`; treated as `static` |
-| `__restrict` / `__restrict__` | ~ | Parsed; aliasing not tracked ([#267](https://todo.sr.ht/~takeiteasy/cccc/267)) |
+| `__restrict` / `__restrict__` | ✓ | Spelling aliases for `restrict`; fully optimised (see `restrict` entry above) |
 | `__typeof__` | ✓ | Synonym for `typeof` |
 | `__asm__` / `asm(...)` inline assembly | ✓ | No-op by default; `--asm-passthru` compiles via native CC and executes via FFI; custom callback via `cc_set_asm_callback` |
 
