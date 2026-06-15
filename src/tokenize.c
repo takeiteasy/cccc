@@ -558,9 +558,28 @@ void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt, ...
     }
 }
 
+// Returns the canonical single/double-char spelling for a C digraph, or NULL.
+// Digraphs (C23 §6.4.6): %:%:→## <:→[ :>→] <%→{ %>→} %:→#
+static const char *digraph_canonical(char *loc, int len) {
+    if (len == 4 && memcmp(loc, "%:%:", 4) == 0) return "##";
+    if (len == 2) {
+        if (memcmp(loc, "<:", 2) == 0) return "[";
+        if (memcmp(loc, ":>", 2) == 0) return "]";
+        if (memcmp(loc, "<%", 2) == 0) return "{";
+        if (memcmp(loc, "%>", 2) == 0) return "}";
+        if (memcmp(loc, "%:", 2) == 0) return "#";
+    }
+    return NULL;
+}
+
 // Consumes the current token if it matches `op`.
 bool equal(Token *tok, char *op) {
-    return tok && strlen(op) == tok->len && memcmp(tok->loc, op, tok->len) == 0;
+    if (!tok) return false;
+    int oplen = strlen(op);
+    const char *canon = digraph_canonical(tok->loc, tok->len);
+    if (canon)
+        return oplen == (int)strlen(canon) && memcmp(canon, op, oplen) == 0;
+    return oplen == tok->len && memcmp(tok->loc, op, tok->len) == 0;
 }
 
 // Ensure that the current token is `op`.
@@ -633,6 +652,8 @@ static int from_hex(char c) {
 // Read a punctuator token from p and returns its length.
 static int read_punct(VirtualMachine *vm, char *p) {
     static char *kw[] = {
+        // Digraphs (C23 §6.4.6) — must precede any operator they overlap with
+        "%:%:", "<:", ":>", "<%", "%>", "%:",
         "<<=", ">>=", "...", "==", "!=", "<=", ">=", "->", "+=",
         "-=", "*=", "/=", "++", "--", "%=", "&=", "|=", "^=", "&&",
         "||", "<<", ">>", "##",

@@ -2876,7 +2876,7 @@ static bool quote_is_stmt(Token *tok) {
         return false;
 
     // Compound statement starting with '{'
-    if (tok->kind == TK_PUNCT && tok->len == 1 && tok->loc[0] == '{')
+    if (tok->kind == TK_PUNCT && equal(tok, "{"))
         return true;
 
     // Statement-initiating keywords

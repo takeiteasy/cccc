@@ -74,6 +74,7 @@ are tracked separately from the POSIX pthread layer.
 | `L'...'` wide character literals | ✓ | |
 | K&R-style function definitions | ✓ | |
 | Trigraphs | ✗ | Removed in C23; intentionally not supported |
+| Digraphs (`<:` `:>` `<%` `%>` `%:` `%:%:`) | ✓ | Equivalent to `[` `]` `{` `}` `#` `##` (C23 §6.4.6); original spelling preserved during stringification |
 | `#include`, `#define`, `#undef` | ✓ | |
 | `#ifdef`, `#ifndef`, `#if`, `#elif`, `#else`, `#endif` | ✓ | |
 | CCCC-routed preprocessor directives | ✓ | `@emit` routes directives to generated output; `@comptime` routes directives to the comptime stream |
