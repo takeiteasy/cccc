@@ -2992,6 +2992,215 @@ static Token *handle_gcc_diagnostic(VirtualMachine *vm, Token *tok) {
     return skip_line(vm, tok->next);
 }
 
+// Boolean-valued options accepted by #pragma cccc config(...) (#357). A bare
+// key (no "= value") is shorthand for "= true", mirroring the no-argument
+// individual pragmas these keys would otherwise correspond to.
+typedef struct {
+    const char *name;
+    uint32_t bit;
+} PragmaConfigFlag;
+
+static const PragmaConfigFlag pragma_config_flags[] = {
+    {"bounds_checks",         CCCC_BOUNDS_CHECKS},
+    {"uaf_detection",         CCCC_UAF_DETECTION},
+    {"type_checks",           CCCC_TYPE_CHECKS},
+    {"overflow_checks",       CCCC_OVERFLOW_CHECKS},
+    {"stack_canaries",        CCCC_STACK_CANARIES},
+    {"heap_canaries",         CCCC_HEAP_CANARIES},
+    {"memory_leak_detection", CCCC_MEMORY_LEAK_DETECT},
+    {"pointer_sanitizer",     CCCC_POINTER_SANITIZER},
+    {"memory_tagging",        CCCC_MEMORY_TAGGING},
+};
+
+// Reads an integer literal token's text into *out. Returns false if tok is
+// not a numeric token or contains non-digit characters.
+static bool pragma_config_read_int(Token *tok, long *out) {
+    if (!tok || (tok->kind != TK_PP_NUM && tok->kind != TK_NUM))
+        return false;
+    char buf[32];
+    size_t n = tok->len < sizeof(buf) - 1 ? tok->len : sizeof(buf) - 1;
+    memcpy(buf, tok->loc, n);
+    buf[n] = '\0';
+    char *end;
+    long v = strtol(buf, &end, 10);
+    if (end == buf || *end != '\0')
+        return false;
+    *out = v;
+    return true;
+}
+
+// Reads a boolean value: `true`/`false` identifiers or `1`/`0` literals.
+static bool pragma_config_read_bool(Token *tok, bool *out) {
+    if (!tok)
+        return false;
+    if (tok->kind == TK_IDENT) {
+        if (equal(tok, "true"))  { *out = true;  return true; }
+        if (equal(tok, "false")) { *out = false; return true; }
+        return false;
+    }
+    long v;
+    if (pragma_config_read_int(tok, &v) && (v == 0 || v == 1)) {
+        *out = (v != 0);
+        return true;
+    }
+    return false;
+}
+
+// Sets or clears a single CCCCFlags bit for `#pragma cccc config(...)`,
+// respecting CLI precedence (#357: CLI-set bits always win) and skipping
+// the change entirely in native mode (config() flags only affect VM codegen).
+static void pragma_config_set_flag(VirtualMachine *vm, uint32_t bit, bool enable) {
+    if (vm->compiler.native_mode)
+        return;
+    if (vm->compiler.cli_flags_mask & bit)
+        return;
+    if (enable)
+        vm->flags |= bit;
+    else
+        vm->flags &= ~bit;
+}
+
+// Applies `safety = N` (0..3): clears/sets exactly the bits the corresponding
+// -0/-1/-2/-3 preset would touch, except bits the CLI already pinned.
+static void pragma_config_set_safety(VirtualMachine *vm, int level) {
+    if (vm->compiler.native_mode)
+        return;
+    uint32_t preset = level == 0 ? 0u
+                     : level == 1 ? (uint32_t)CCCC_SAFETY_BASIC
+                     : level == 2 ? (uint32_t)CCCC_SAFETY_STANDARD
+                     : (uint32_t)CCCC_SAFETY_MAX;
+    uint32_t touchable = CCCC_SAFETY_PRESET_BITS & ~vm->compiler.cli_flags_mask;
+    vm->flags = (vm->flags & ~touchable) | (preset & touchable);
+}
+
+// Applies `optimisation = N` (0..3), unless -O/--optimize was given on the CLI.
+static void pragma_config_set_optimisation(VirtualMachine *vm, int level) {
+    if (vm->compiler.native_mode)
+        return;
+    if (vm->compiler.cli_opt_level_set)
+        return;
+    vm->compiler.opt_level = level;
+}
+
+// Applies a single `key [= value]` pair from #pragma cccc config(...).
+// `value` is NULL for a bare key. Unknown keys and invalid values are hard
+// errors, matching existing #pragma cccc diagnostic style.
+static void pragma_config_apply(VirtualMachine *vm, Token *key, Token *value) {
+    if (equal(key, "safety")) {
+        long level = 0;
+        if (!value || !pragma_config_read_int(value, &level) || level < 0 || level > 3)
+            error_tok(vm, value ? value : key,
+                      "#pragma cccc config: 'safety' requires an integer value 0..3");
+        pragma_config_set_safety(vm, (int)level);
+        return;
+    }
+    if (equal(key, "optimisation")) {
+        long level = 0;
+        if (!value || !pragma_config_read_int(value, &level) || level < 0 || level > 3)
+            error_tok(vm, value ? value : key,
+                      "#pragma cccc config: 'optimisation' requires an integer value 0..3");
+        pragma_config_set_optimisation(vm, (int)level);
+        return;
+    }
+    for (size_t i = 0; i < sizeof(pragma_config_flags) / sizeof(pragma_config_flags[0]); i++) {
+        if (!equal(key, (char *)pragma_config_flags[i].name))
+            continue;
+        bool enable = true; // bare key == "= true"
+        if (value && !pragma_config_read_bool(value, &enable))
+            error_tok(vm, value, "#pragma cccc config: '%.*s' requires a boolean value (true/false)",
+                      (int)key->len, key->loc);
+        pragma_config_set_flag(vm, pragma_config_flags[i].bit, enable);
+        return;
+    }
+    error_tok(vm, key, "#pragma cccc config: unknown option '%.*s'", (int)key->len, key->loc);
+}
+
+// Parses `config ( key [= value] (, key [= value])* )` and applies each
+// option via pragma_config_apply(). `sub` is the "config" token itself.
+static Token *handle_pragma_config(VirtualMachine *vm, Token *sub) {
+    Token *p = sub->next;
+    if (!p || p->at_bol || !equal(p, "("))
+        error_tok(vm, p && !p->at_bol && p->kind != TK_EOF ? p : sub,
+                  "expected '(' after '#pragma cccc config'");
+    p = p->next;
+    if (equal(p, ")"))
+        error_tok(vm, p, "#pragma cccc config requires at least one option");
+    for (;;) {
+        if (!p || p->kind != TK_IDENT)
+            error_tok(vm, p && p->kind != TK_EOF ? p : sub,
+                      "expected an option name in '#pragma cccc config'");
+        Token *key = p;
+        p = p->next;
+        Token *value = NULL;
+        if (equal(p, "=")) {
+            value = p->next;
+            p = value ? value->next : NULL;
+        }
+        pragma_config_apply(vm, key, value);
+        if (equal(p, ",")) {
+            p = p->next;
+            continue;
+        }
+        if (equal(p, ")")) {
+            p = p->next;
+            break;
+        }
+        error_tok(vm, p && p->kind != TK_EOF ? p : key,
+                  "expected ',' or ')' in '#pragma cccc config'");
+    }
+    return skip_line(vm, p);
+}
+
+// Parses `link ( "name" (, "name")* )` and queues each string for FFI
+// library resolution alongside -l/--library (#357). `sub` is the "link" token.
+static Token *handle_pragma_link(VirtualMachine *vm, Token *sub) {
+    Token *p = sub->next;
+    if (!p || p->at_bol || !equal(p, "("))
+        error_tok(vm, p && !p->at_bol && p->kind != TK_EOF ? p : sub,
+                  "expected '(' after '#pragma cccc link'");
+    p = p->next;
+    if (equal(p, ")"))
+        error_tok(vm, p, "#pragma cccc link requires at least one library name");
+    for (;;) {
+        if (!p || p->kind != TK_STR)
+            error_tok(vm, p && p->kind != TK_EOF ? p : sub,
+                      "expected a string literal library name in '#pragma cccc link'");
+        strarray_push(&vm->compiler.pragma_link_libs, strdup(p->str));
+        p = p->next;
+        if (equal(p, ",")) {
+            p = p->next;
+            continue;
+        }
+        if (equal(p, ")")) {
+            p = p->next;
+            break;
+        }
+        error_tok(vm, p && p->kind != TK_EOF ? p : sub,
+                  "expected ',' or ')' in '#pragma cccc link'");
+    }
+    return skip_line(vm, p);
+}
+
+// Parses the MSVC-style `comment(lib, "name")` pragma as an alternate spelling
+// of `#pragma cccc link("name")` (#357). `tok` is the "comment" token. Other
+// `#pragma comment(...)` kinds (compiler, user, etc.) are not recognized here
+// and fall through to the generic "unknown pragma ignored" warning.
+static Token *handle_pragma_comment(VirtualMachine *vm, Token *tok) {
+    Token *p = tok->next;
+    if (p && !p->at_bol && equal(p, "(") &&
+        p->next && equal(p->next, "lib") &&
+        p->next->next && equal(p->next->next, ",") &&
+        p->next->next->next && p->next->next->next->kind == TK_STR &&
+        p->next->next->next->next && equal(p->next->next->next->next, ")")) {
+        Token *name_tok = p->next->next->next;
+        strarray_push(&vm->compiler.pragma_link_libs, strdup(name_tok->str));
+        return skip_line(vm, name_tok->next->next);
+    }
+    warn_tok(vm, tok, CCCC_WARN_CPP, "unknown pragma ignored");
+    do { tok = tok->next; } while (!tok->at_bol && tok->kind != TK_EOF);
+    return tok;
+}
+
 // Dispatch the body of a #pragma directive or a _Pragma() operator.
 // tok is the first content token (after "#pragma" / after the destringized string).
 static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
@@ -3075,6 +3284,10 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
                 error_tok(vm, after && after->kind != TK_EOF ? after : sub,
                           "expected 'begin' or 'end' after '#pragma cccc suite'");
             }
+        } else if (equal(sub, "config")) {
+            return handle_pragma_config(vm, sub);
+        } else if (equal(sub, "link")) {
+            return handle_pragma_link(vm, sub);
         } else {
             error_tok(vm, sub && sub->kind != TK_EOF ? sub : tok,
                       "unknown #pragma cccc directive");
@@ -3082,6 +3295,8 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
     } else if ((equal(tok, "GCC") || equal(tok, "clang") || equal(tok, "CCCC")) &&
                equal(tok->next, "diagnostic")) {
         return handle_gcc_diagnostic(vm, tok->next->next);
+    } else if (equal(tok, "comment")) {
+        return handle_pragma_comment(vm, tok);
     } else {
         warn_tok(vm, tok, CCCC_WARN_CPP, "unknown pragma ignored");
         do { tok = tok->next; } while (!tok->at_bol && tok->kind != TK_EOF);

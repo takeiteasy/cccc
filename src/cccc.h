@@ -307,6 +307,12 @@ typedef enum {
     CCCC_SAFETY_MAX =
         (CCCC_ALL_SAFETY | CCCC_RANDOM_CANARIES | CCCC_STACK_INSTR_ERRORS),
 
+    // Union of every bit any safety preset (BASIC/STANDARD/MAX) can touch.
+    // Used by `#pragma cccc config(safety = N)` to know which bits it is
+    // allowed to clear/set without disturbing unrelated flags.
+    CCCC_SAFETY_PRESET_BITS =
+        (CCCC_SAFETY_BASIC | CCCC_SAFETY_STANDARD | CCCC_SAFETY_MAX),
+
     // VM heap is auto-enabled when any of these flags are set
     CCCC_VM_HEAP_TRIGGERS =
         (CCCC_VM_HEAP | CCCC_HEAP_CANARIES | CCCC_MEMORY_LEAK_DETECT |
@@ -1762,6 +1768,9 @@ typedef struct Compiler {
     StringArray emit_directives; // Preprocessor directives to prepend to serialized output
     int emit_strict;             // --emit-only: suppress auto-capture; only explicitly tagged content appears in -G output
     StringArray comptime_pending_includes; // #include [[cccc::comptime]] filenames queued for comptime pass
+    StringArray pragma_link_libs; // Library names queued by #pragma cccc link(...) /
+                                   // #pragma comment(lib, ...) (#357), merged into
+                                   // the -l/--library list before FFI resolution
 
     // Code generation state
     int label_counter; // For generating unique labels
@@ -1837,6 +1846,14 @@ typedef struct Compiler {
                    // 3=aggressive; 4 enables fused-op pass)
     bool fuse_ops; // Enable post-codegen opcode fusion pass
     int inline_node_limit; // Max AST nodes for full inlining (0=disable)
+
+    // #pragma cccc config(...) support
+    uint32_t cli_flags_mask;  // CCCCFlags bits explicitly set on the CLI; these
+                              // win over `#pragma cccc config(...)` (#357)
+    bool cli_opt_level_set;  // True if -O/--optimize was passed on the CLI;
+                              // `config(optimisation = N)` is ignored if so
+    bool native_mode;        // True when compile_format == COMPILE_NATIVE;
+                              // config()'s flag/opt_level effects are skipped
 
     // Inlining context (used during codegen when expanding inline bodies)
     char *inline_exit_name; // Exit label name for inlined returns (NULL = not inlining)

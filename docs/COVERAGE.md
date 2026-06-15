@@ -245,7 +245,7 @@ groups from that ticket.
 | `__cpuid` / `__cpuidex` | ✗ | Host CPU info — pending |
 | `__emul` / `__emulu` / `_umul128` / `__umulh` | ✗ | 64-bit multiplication helpers — pending |
 | `#pragma once` | ✓ | |
-| `#pragma comment(lib, "x")` | ✗ | Link hint, no-op — pending |
+| `#pragma comment(lib, "x")` | ✓ | Alternate form of `#pragma cccc link("x")` — queues a library for FFI resolution (and native linking) |
 | `#pragma warning(push/pop/disable/default)` / `suppress:` | ✗ | Maps to CCCC's `-W` system — pending |
 | `#pragma pack(...)` | ✓ | |
 | `#pragma message("...")` | ✓ | |

@@ -302,6 +302,32 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 | `CALLF` | Registered foreign-function call via `libffi`.  Operands: `ffi_idx`, `nargs`, `double_arg_mask` (2 words), `float_arg_mask` (2 words) — total 6 operand words |
 | `CALLN` | Native-aware indirect call (dynamic symbol or VM function).  Operands: `rs`, `meta` (bits 0-15 = nargs, bit 16 = returns_double, bit 17 = returns_float), `double_arg_mask` (2 words), `float_arg_mask` (2 words) — total 6 operand words |
 
+#### Declaring Libraries from Source
+
+`extern` declarations are normally resolved against libraries passed on the
+command line with `-l`/`--library`. `#pragma cccc link("name")` (and the
+MSVC-style alternate spelling `#pragma comment(lib, "name")`) queue an
+additional library from within the source file itself, merged into the same
+list before FFI resolution:
+
+```c
+#pragma cccc link("m")          // -> libm.{dylib,so}/m.dll via the normal search
+#pragma cccc link("libfoo.dylib") // an explicit filename is used as-is
+
+extern double sqrt(double x);
+```
+
+```c
+#pragma comment(lib, "m") // equivalent to #pragma cccc link("m")
+```
+
+Both forms accept one or more comma-separated string literals
+(`link("a", "b")`) and go through the same `find_requested_library` /
+`cc_dlopen` / `register_dynamic_externs` path as `-l`, so the requested
+libraries are also passed to the system linker when compiling with
+`-c=native`. Other `#pragma comment(...)` kinds (`compiler`, `user`, etc.)
+remain no-ops.
+
 ### Bit-Manipulation Builtins
 
 | Opcode | Description |

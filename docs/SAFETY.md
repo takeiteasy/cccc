@@ -113,6 +113,56 @@ Safety levels are **additive** - you can combine a preset level with individual 
 
 ---
 
+## Configuring Safety from Source: `#pragma cccc config(...)`
+
+`#pragma cccc config(key = value, ...)` is a file-scope pragma that sets
+safety levels, the optimisation level, and individual safety-check flags
+directly from source, without needing matching command-line flags. It is
+useful for self-contained test files and examples that must run with a
+specific safety/optimisation profile regardless of how they're invoked.
+
+```c
+#pragma cccc config(safety = 2, optimisation = 1)
+#pragma cccc config(bounds_checks = true, memory_tagging = false)
+#pragma cccc config(overflow_checks) // bare key is shorthand for "= true"
+```
+
+### Keys
+
+| Key | Values | Effect |
+|-----|--------|--------|
+| `safety` | `0`-`3` | Same as `-0`/`-1`/`-2`/`-3` (none/basic/standard/max) |
+| `optimisation` | `0`-`3` | Same as `--optimize=N` |
+| `bounds_checks` | `true`/`false` (or `1`/`0`) | `--bounds-checks` |
+| `uaf_detection` | `true`/`false` | `--uaf-detection` |
+| `type_checks` | `true`/`false` | `--type-checks` |
+| `overflow_checks` | `true`/`false` | `--overflow-checks` |
+| `stack_canaries` | `true`/`false` | `--stack-canaries` |
+| `heap_canaries` | `true`/`false` | `--heap-canaries` |
+| `memory_leak_detection` | `true`/`false` | `--memory-leak-detection` |
+| `pointer_sanitizer` | `true`/`false` | `--pointer-sanitizer` |
+| `memory_tagging` | `true`/`false` | `--memory-tagging` |
+
+A bare key with no `= value` (e.g. `config(bounds_checks)`) is shorthand for
+`= true`. Multiple keys can be set in one `config(...)`, and the pragma can
+appear multiple times in a file — later pragmas win for the same key
+("last write wins"), the same as combining individual CLI flags.
+
+### Precedence
+
+- **Command-line flags always win.** If a safety/optimisation setting was
+  explicitly passed on the command line (`-0`/`-1`/`-2`/`-3`,
+  `--safety=...`, `--optimize=...`, `--bounds-checks`, etc.), `config(...)`
+  silently has no effect on that setting — the CLI value is kept.
+- **Ignored in native mode.** When compiling with `-c=native`, `config(...)`
+  has no effect on `vm->flags`/optimisation level (native output is handed
+  to the system `cc`, which has its own optimisation/sanitizer flags).
+  Unknown keys and invalid values are still hard errors in native mode.
+- **Unknown keys and out-of-range values are hard compile errors**, e.g.
+  `config(frobnicate = 1)` or `config(safety = 9)`.
+
+---
+
 ## Individual Memory Safety Features
 
 All features listed below can be enabled individually or through the safety level presets above. This section provides detailed information about what each feature does and how it works.

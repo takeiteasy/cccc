@@ -733,6 +733,8 @@ int main(int argc, const char *argv[]) {
     int disassemble = 0;       // -d
     int verbose = 0;           // -v
     uint32_t flags = 0;        // CCCCFlags bitfield for runtime features
+    uint32_t cli_flags_mask = 0; // Bits explicitly set via CLI; wins over #pragma cccc config(...) (#357)
+    bool cli_opt_level_set = false; // True if -O/--optimize was passed on the CLI (#357)
     int print_tokens = 0;      // -P
     int preprocess_only = 0;   // -E
     int dump_expanded_only = 0; // -M
@@ -896,18 +898,22 @@ int main(int argc, const char *argv[]) {
         case '0':
             // Safety level 0: None - explicitly clear all safety flags
             flags = 0;
+            cli_flags_mask |= CCCC_SAFETY_PRESET_BITS;
             break;
         case '1':
             // Safety level 1: Basic - essential low-overhead checks
             flags |= CCCC_SAFETY_BASIC;
+            cli_flags_mask |= CCCC_SAFETY_PRESET_BITS;
             break;
         case '2':
             // Safety level 2: Standard - comprehensive development safety
             flags |= CCCC_SAFETY_STANDARD;
+            cli_flags_mask |= CCCC_SAFETY_PRESET_BITS;
             break;
         case '3':
             // Safety level 3: Maximum - all safety features
             flags |= CCCC_SAFETY_MAX;
+            cli_flags_mask |= CCCC_SAFETY_PRESET_BITS;
             break;
         case 1012:
             // --safety=<level> flag
@@ -930,6 +936,7 @@ int main(int argc, const char *argv[]) {
                         optarg);
                 usage(argv[0], 1);
             }
+            cli_flags_mask |= CCCC_SAFETY_PRESET_BITS;
             break;
         case 'o':
             if (out_file) {
@@ -983,31 +990,39 @@ int main(int argc, const char *argv[]) {
             break;
         case 'b': // --bounds-checks
             flags |= CCCC_BOUNDS_CHECKS;
+            cli_flags_mask |= CCCC_BOUNDS_CHECKS;
             break;
         case 'u': // --uaf-detection
             flags |= CCCC_UAF_DETECTION;
+            cli_flags_mask |= CCCC_UAF_DETECTION;
             break;
         case 'T': // --type-checks
             flags |= CCCC_TYPE_CHECKS;
+            cli_flags_mask |= CCCC_TYPE_CHECKS;
             break;
         case 1038: // --uninitialized-detection
             flags |= CCCC_UNINIT_DETECTION;
             break;
         case 1034: // --overflow-checks
             flags |= CCCC_OVERFLOW_CHECKS;
+            cli_flags_mask |= CCCC_OVERFLOW_CHECKS;
             break;
 
         case 1039: // --stack-canaries
             flags |= CCCC_STACK_CANARIES;
+            cli_flags_mask |= CCCC_STACK_CANARIES;
             break;
         case 'H': // --heap-canaries
             flags |= CCCC_HEAP_CANARIES;
+            cli_flags_mask |= CCCC_HEAP_CANARIES;
             break;
         case 'p': // --pointer-sanitizer
             flags |= CCCC_POINTER_SANITIZER;
+            cli_flags_mask |= CCCC_POINTER_SANITIZER;
             break;
         case 'm': // --memory-leak-detection
             flags |= CCCC_MEMORY_LEAK_DETECT;
+            cli_flags_mask |= CCCC_MEMORY_LEAK_DETECT;
             break;
         case 1043: // --stack-instrumentation
             flags |= CCCC_STACK_INSTR;
@@ -1039,6 +1054,7 @@ int main(int argc, const char *argv[]) {
             break;
         case 1045: // --memory-tagging
             flags |= CCCC_MEMORY_TAGGING;
+            cli_flags_mask |= CCCC_MEMORY_TAGGING;
             break;
         case 1046: // --thread-safety
             flags |= CCCC_THREAD_SAFETY;
@@ -1145,6 +1161,7 @@ int main(int argc, const char *argv[]) {
                         optarg);
                 usage(argv[0], 1);
             }
+            cli_opt_level_set = true;
             break;
         case 1070:
             fuse_ops = 1;
@@ -1441,6 +1458,9 @@ int main(int argc, const char *argv[]) {
 
     VirtualMachine vm;
     cc_init(&vm, flags);
+    vm.compiler.cli_flags_mask = cli_flags_mask;
+    vm.compiler.cli_opt_level_set = cli_opt_level_set;
+    vm.compiler.native_mode = (compile_format == COMPILE_NATIVE);
     vm.compiler.compile_only = compile_only;
     vm.compiler.asm_passthru = asm_passthru;
     vm.compiler.strict_comptime_includes = strict_comptime_includes;
@@ -1869,6 +1889,16 @@ int main(int argc, const char *argv[]) {
         if (f != stdout)
             fclose(f);
         goto BAIL;
+    }
+
+    // Merge libraries requested via #pragma cccc link(...) /
+    // #pragma comment(lib, ...) into the -l/--library list (#357), so they
+    // get FFI-resolved (and, for -c=native, linked) the same as -l. Copies
+    // are made so `libs[]` and vm.compiler.pragma_link_libs each own their
+    // own strings (both are freed independently at cleanup).
+    for (int i = 0; i < vm.compiler.pragma_link_libs.len; i++) {
+        libs = realloc(libs, sizeof(*libs) * (libs_count + 1));
+        libs[libs_count++] = strdup(vm.compiler.pragma_link_libs.data[i]);
     }
 
     if (libs_count > 0)

@@ -1287,6 +1287,13 @@ void cc_destroy(VirtualMachine *vm) {
     // Free comptime_pending_includes data array (strings are arena-allocated)
     free(vm->compiler.comptime_pending_includes.data);
 
+    // Free pragma_link_libs (strdup'd strings + data array; #357)
+    if (vm->compiler.pragma_link_libs.data) {
+        for (int i = 0; i < vm->compiler.pragma_link_libs.len; i++)
+            free(vm->compiler.pragma_link_libs.data[i]);
+        free(vm->compiler.pragma_link_libs.data);
+    }
+
     // Free linked programs array
     free(vm->compiler.link_progs);
 
