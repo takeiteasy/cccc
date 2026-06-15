@@ -5376,6 +5376,13 @@ void gen(VirtualMachine *vm, Obj *prog) {
 
         if (fn_def) {
             cc_write_i64_at(vm, loc, cc_pc_to_byte_offset((Pc)fn_def->code_addr));
+        } else {
+            // FFI function used as a value (function-to-pointer decay).
+            // Store an FFI token so JMPI/CALLN can call it at runtime.
+            const char *fn_name = obj_external_name(target);
+            int ffi_idx = find_ffi_function(vm, fn_name);
+            if (ffi_idx >= 0)
+                cc_write_i64_at(vm, loc, CCCC_FFI_TOKEN_BASE - ffi_idx);
         }
     }
 

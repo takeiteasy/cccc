@@ -57,6 +57,11 @@
 //   18-25 - Saved S0-S7 (callee-saved, preserved across calls)
 //   26-31 - Temporaries T5-T10 (caller-saved)
 
+// Token range for built-in FFI function pointers (goto */call via function pointer).
+// Distinct from CCCC_DYN_TOKEN_BASE (-0x4a434300) used for dlopen symbols.
+// Token for ffi_table[i] = CCCC_FFI_TOKEN_BASE - i  (all values <= CCCC_FFI_TOKEN_BASE).
+#define CCCC_FFI_TOKEN_BASE (-0x4a434380LL)
+
 #define REG_ZERO 0 // Always zero (writes discarded)
 #define REG_RA 1   // Return address
 #define REG_SP 2   // Stack pointer (unused for now - we have vm->sp)

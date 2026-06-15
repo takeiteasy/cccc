@@ -1491,6 +1491,23 @@ static inline int op_CALLN_fn(VirtualMachine *vm) {
         return rc;
     }
 
+    // Built-in FFI function pointer (registered via cc_register_cfunc etc.)
+    if (target_value <= CCCC_FFI_TOKEN_BASE) {
+        int ffi_idx = (int)(CCCC_FFI_TOKEN_BASE - target_value);
+        if (ffi_idx >= 0 && ffi_idx < vm->compiler.ffi_count) {
+            ForeignFunc *ff = &vm->compiler.ffi_table[ffi_idx];
+            long long args[8];
+            int nargs = ff->num_args < 8 ? ff->num_args : 8;
+            for (int i = 0; i < nargs; i++)
+                args[i] = vm->regs[REG_A0 + i];
+            return cccc_call_native_function(vm, ff->func_ptr, ff->name,
+                                             args, nargs,
+                                             ff->double_arg_mask, 0,
+                                             ff->returns_double, ff->returns_float,
+                                             ff->is_variadic, ff->num_fixed_args);
+        }
+    }
+
     long long ret_addr = (long long)vm->pc;
     if (check_stack_overflow(vm, 1)) return -1;
     *--vm->sp = ret_addr;
@@ -1525,9 +1542,34 @@ static inline int op_JMPI_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rs;
     DECODE_R(operands, rs);
-    Pc target = cc_byte_offset_to_pc(vm->regs[rs]);
+    long long target_value = vm->regs[rs];
+
+    // dlopen-loaded function pointer
+    DynamicSymbol *sym = cccc_find_dynamic_symbol(vm, target_value);
+    if (sym)
+        return cccc_call_native_function(vm, sym->func_ptr, sym->name,
+                                         NULL, 0, 0, 0, 0, 0, 0, 0);
+
+    // Built-in FFI function pointer (registered via cc_register_cfunc etc.)
+    if (target_value <= CCCC_FFI_TOKEN_BASE) {
+        int ffi_idx = (int)(CCCC_FFI_TOKEN_BASE - target_value);
+        if (ffi_idx >= 0 && ffi_idx < vm->compiler.ffi_count) {
+            ForeignFunc *ff = &vm->compiler.ffi_table[ffi_idx];
+            long long args[8];
+            int nargs = ff->num_args < 8 ? ff->num_args : 8;
+            for (int i = 0; i < nargs; i++)
+                args[i] = vm->regs[REG_A0 + i];
+            return cccc_call_native_function(vm, ff->func_ptr, ff->name,
+                                             args, nargs,
+                                             ff->double_arg_mask, 0,
+                                             ff->returns_double, ff->returns_float,
+                                             ff->is_variadic, ff->num_fixed_args);
+        }
+    }
+
+    Pc target = cc_byte_offset_to_pc(target_value);
     if (target == CCCC_INVALID_PC || target > vm->text_ptr) {
-        printf("error: invalid indirect jump target: %lld\n", vm->regs[rs]);
+        printf("error: invalid indirect jump target: %lld\n", target_value);
         return -1;
     }
     vm->pc = target;
