@@ -2630,6 +2630,14 @@ static void union_initializer(VirtualMachine *vm, Token **rest, Token *tok,
     }
 
     init->mem = init->ty->members;
+    if (!init->mem) {
+        if (equal(tok, "{")) {
+            tok = skip(vm, tok->next, "}");
+            *rest = tok;
+            return;
+        }
+        error_tok(vm, tok, "empty union initializer must be empty");
+    }
 
     if (equal(tok, "{")) {
         initializer2(vm, &tok, tok->next, init->children[0]);
@@ -2856,6 +2864,8 @@ static Node *create_lvar_init(VirtualMachine *vm, Initializer *init, Type *ty,
 
     if (ty->kind == TY_UNION && !init->expr) {
         Member *mem = init->mem ? init->mem : ty->members;
+        if (!mem)
+            return new_node(vm, ND_NULL_EXPR, tok);
         InitDesg desg2 = {desg, 0, mem};
         return create_lvar_init(vm, init->children[mem->idx], mem->ty, &desg2,
                                 tok);

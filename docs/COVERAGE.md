@@ -195,6 +195,7 @@ language coverage figures apply.
 | Computed goto `goto *expr` | ✓ | |
 | Switch case ranges `case 1 ... 5:` | ✓ | |
 | Zero-length arrays `int arr[0]` | ✓ | |
+| Empty structs and unions | ✓ | GNU extension; empty aggregates have size 0 |
 | Nested functions | ✓ | Access to parent-scope variables via static link |
 | `__builtin_*` | ✓ | Lowered by the compiler; see [STDLIB.md](STDLIB.md) for the full list |
 | `__thread` storage class | ~ | Emits `-Wignored-features`; treated as `static` |

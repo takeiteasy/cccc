@@ -1381,6 +1381,16 @@ static int fop_for_type(Type *ty, int f64_op) {
 static void emit_bitint_trunc(VirtualMachine *vm, Type *ty, int reg);
 static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg);
 
+static bool is_zero_size_aggregate(Type *ty) {
+    return ty && ty->size == 0 &&
+           (ty->kind == TY_STRUCT || ty->kind == TY_UNION);
+}
+
+static void gen_zero_size_arg(VirtualMachine *vm, Node *arg, int dest_reg) {
+    gen_expr(vm, arg, REG_ZERO);
+    emit_li3(vm, dest_reg, 0);
+}
+
 static void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr) {
     if (vm->flags & CCCC_POINTER_CHECKS)
         emit_rr(vm, CHKP3, rs_addr, 0);
@@ -3519,7 +3529,9 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // Push overflow args (8+) right-to-left so vm->sp[0] is arg 8.
             for (int i = nargs - 1; i >= 8; i--) {
                 Node *arg = arg_array[i];
-                if (is_flonum(arg->ty)) {
+                if (is_zero_size_aggregate(arg->ty)) {
+                    gen_zero_size_arg(vm, arg, REG_T0);
+                } else if (is_flonum(arg->ty)) {
                     gen_expr(vm, arg, FREG_A0);
                     emit_rr(vm, fop_for_type(arg->ty, FR2R), REG_T0, FREG_A0);
                 } else {
@@ -3554,7 +3566,9 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     saved_reg_count = i;
                 }
 
-                if (is_flonum(arg->ty)) {
+                if (is_zero_size_aggregate(arg->ty)) {
+                    gen_zero_size_arg(vm, arg, REG_A0 + i);
+                } else if (is_flonum(arg->ty)) {
                     gen_expr(vm, arg, FREG_A0);
                     emit_rr(vm, fop_for_type(arg->ty, FR2R), REG_A0 + i, FREG_A0);
                 } else {
@@ -3779,7 +3793,10 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         if (num_stack_args > 0) {
             for (int j = nargs - 1; j >= 8; j--) {
                 Node *arg = arg_array[j];
-                if (is_flonum(arg->ty)) {
+                if (is_zero_size_aggregate(arg->ty)) {
+                    gen_zero_size_arg(vm, arg, REG_T0);
+                    emit_psh3(vm, REG_T0);
+                } else if (is_flonum(arg->ty)) {
                     // Float arg: evaluate to float reg, move bits to int reg,
                     // push
                     int freg = FREG_A0; // Use as scratch
@@ -3838,7 +3855,12 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 saved_float_count = float_arg_idx;
             }
 
-            if (is_flonum(arg->ty)) {
+            if (is_zero_size_aggregate(arg->ty)) {
+                if (int_arg_idx < 8) {
+                    gen_zero_size_arg(vm, arg, REG_A0 + int_arg_idx);
+                    int_arg_idx++;
+                }
+            } else if (is_flonum(arg->ty)) {
                 if (is_vararg) {
                     // Variadic double: put in integer register (as bit pattern)
                     // ENT3 will spill REG_A* to stack; va_arg reads from stack
