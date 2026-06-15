@@ -353,6 +353,12 @@ static void collect_promotion_candidates(VirtualMachine *vm, Obj *fn, Node *node
                                      child_loop_depth);
         collect_promotion_candidates(vm, fn, node->body, node, cands, count,
                                      child_loop_depth);
+        // ND_OVERFLOW_ARITH stores its result pointer (&var) in cas_addr,
+        // which isn't reached via lhs/rhs/args - without this, a promoted
+        // local's address-escape via ckd_add/sub/mul goes undetected and
+        // the promoted register goes stale after IOVFL stores through it.
+        collect_promotion_candidates(vm, fn, node->cas_addr, node, cands, count,
+                                     child_loop_depth);
         for (Node *arg = node->args; arg; arg = arg->next)
             collect_promotion_candidates(vm, fn, arg, node, cands, count,
                                          child_loop_depth);

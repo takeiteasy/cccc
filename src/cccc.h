@@ -1683,6 +1683,12 @@ typedef struct Compiler {
     int               ctx_stack_len; // Number of entries in ctx_stack
     int               ctx_stack_cap; // Allocated capacity of ctx_stack
     bool macro_fns_compiled;         // True after compile_all_macros has run
+    // Holds a copy of the hashmap_snapshot taken by compile_macro_program.
+    // The snapshot is heap-allocated and must survive a longjmp exit.
+    // cc_destroy frees it when has_macro_snapshot is true; normal paths
+    // call hashmap_restore and clear the flag before returning.
+    bool has_macro_snapshot;
+    HashMap macro_snapshot_backup;
     bool reflection_attrs_registered; // True after ensure_reflection_attrs_registered has run (#235)
     bool strict_comptime_includes;   // --strict-comptime-includes: don't forward regular #include decls to comptime pass
     HashMap *macro_scope_stack;       // Snapshot stack for per-comptime-fn macro isolation (#283)

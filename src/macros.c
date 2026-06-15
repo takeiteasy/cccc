@@ -1518,7 +1518,9 @@ static bool compile_macro_program(VirtualMachine *vm) {
     // not persist into the runtime translation unit after this pass completes.
     // Main-file defines remain visible inside comptime bodies because the
     // snapshot is taken after the main preprocessing pass has run (ticket #283).
-    HashMap saved_macros = hashmap_snapshot(&vm->compiler.macros);
+    vm->compiler.macro_snapshot_backup = hashmap_snapshot(&vm->compiler.macros);
+    vm->compiler.has_macro_snapshot = true;
+    HashMap saved_macros = vm->compiler.macro_snapshot_backup;
 
     vm->compiler.in_macro_mode = true;
     vm->compiler.locals = NULL;
@@ -1555,6 +1557,7 @@ static bool compile_macro_program(VirtualMachine *vm) {
         vm->compiler.in_macro_mode = false;
         vm->compiler.num_call_patches = saved_num_call_patches;
         vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
+        vm->compiler.has_macro_snapshot = false;
         hashmap_restore(&vm->compiler.macros, saved_macros);
         return false;
     }
@@ -1578,7 +1581,8 @@ static bool compile_macro_program(VirtualMachine *vm) {
             vm->compiler.in_macro_mode = false;
             vm->compiler.num_call_patches = saved_num_call_patches;
             vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
-            hashmap_restore(&vm->compiler.macros, saved_macros);
+            vm->compiler.has_macro_snapshot = false;
+        hashmap_restore(&vm->compiler.macros, saved_macros);
             return false;
         }
         macros[i]->compiled_fn = func;
@@ -1619,6 +1623,7 @@ static bool compile_macro_program(VirtualMachine *vm) {
     vm->compiler.in_macro_mode = false;
     vm->compiler.num_call_patches = saved_num_call_patches;
     vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
+    vm->compiler.has_macro_snapshot = false;
     hashmap_restore(&vm->compiler.macros, saved_macros);
     link_comptime_shadow_objs(vm);
 

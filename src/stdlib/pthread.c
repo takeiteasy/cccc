@@ -709,6 +709,13 @@ void cccc_pthread_cleanup(VirtualMachine *vm) {
 
     free(vm->pthread_state);
     vm->pthread_state = NULL;
+
+    free(vm->lock_graph_from);
+    free(vm->lock_graph_to);
+    vm->lock_graph_from = NULL;
+    vm->lock_graph_to   = NULL;
+    vm->lock_graph_size = 0;
+    vm->lock_graph_cap  = 0;
 }
 #else
 void register_pthread_functions(VirtualMachine *vm) {

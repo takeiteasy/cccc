@@ -1064,6 +1064,16 @@ void cc_destroy(VirtualMachine *vm) {
     if (!vm)
         return;
 
+    // If compile_macro_program was interrupted by longjmp (error exit), its
+    // hashmap_snapshot is still live in macro_snapshot_backup.  Free it here
+    // so it doesn't leak.  All normal return paths clear has_macro_snapshot
+    // before calling hashmap_restore, so this branch is only reached on the
+    // longjmp error path.
+    if (vm->compiler.has_macro_snapshot) {
+        hashmap_deinit(&vm->compiler.macro_snapshot_backup);
+        vm->compiler.has_macro_snapshot = false;
+    }
+
     cccc_pthread_cleanup(vm);
     cccc_gil_destroy(vm);
 
@@ -1114,6 +1124,8 @@ void cc_destroy(VirtualMachine *vm) {
     hashmap_deinit(&vm->init_state);
     // Free ptr_tags HashMap (integer keys, integer values cast to void*)
     hashmap_deinit(&vm->ptr_tags);
+    // Free race_shadow HashMap (thread-safety write-tracking, integer keys)
+    hashmap_deinit(&vm->race_shadow);
 
     // Free stack_ptrs HashMap (integer keys + StackPtrInfo values)
     if (vm->stack_ptrs.buckets) {
@@ -1196,8 +1208,10 @@ void cc_destroy(VirtualMachine *vm) {
 
     // Free FFI table
     if (vm->compiler.ffi_table) {
-        for (int i = 0; i < vm->compiler.ffi_count; i++)
+        for (int i = 0; i < vm->compiler.ffi_count; i++) {
             free(vm->compiler.ffi_table[i].name);
+            free(vm->compiler.ffi_table[i].asm_src);
+        }
         free(vm->compiler.ffi_table);
     }
 

@@ -533,6 +533,11 @@ static void opt_constant_fold(VirtualMachine *vm, OptReplacement *repls) {
                         set_li_replacement(repls, pc, rd, result);
                         folded_count++;
                         set_const_reg(&state, rd, result);
+                    } else {
+                        // Operands are const but the op couldn't be folded
+                        // (e.g. SHL3 overflow guard, division by zero) -
+                        // rd's prior tracked value is now stale.
+                        invalidate_reg(&state, rd);
                     }
                 } else {
                     // Result is not a constant
@@ -619,7 +624,15 @@ static void opt_constant_fold(VirtualMachine *vm, OptReplacement *repls) {
 
             case LDA3:
             case LTA3:
-            case LEA3: {
+            case LEA3:
+            // CLZ/CTZ/FFS/BSWAP are 3-word ops (rd|rs, bit/byte-width) that
+            // write rd. They fall outside the `default` case's `size == 2`
+            // check, so without an explicit case rd's prior constant value
+            // was never invalidated.
+            case CLZ:
+            case CTZ:
+            case FFS:
+            case BSWAP: {
                 int rd = vm->text_seg[pc + 1] & 0xFF;
                 invalidate_reg(&state, rd);
                 break;
@@ -665,6 +678,22 @@ static void opt_constant_fold(VirtualMachine *vm, OptReplacement *repls) {
 
             // Function calls clobber return registers
             case CALLF:
+            // Builtin ops that write their result into REG_A0 - any
+            // previously tracked constant in REG_A0 (e.g. an argument
+            // just loaded via LI3) is now stale.
+            case CALC:
+            case DLOPEN:
+            case DLSYM:
+            case DLCLOSE:
+            case DLERROR:
+            case IOVFL:
+            case LONGJMP:
+            case MALC:
+            case REALC:
+            case RETBUF:
+            case SETJMP:
+            case VRAISE:
+            case VSIGNAL:
                 invalidate_reg(&state, REG_A0);
                 break;
 
