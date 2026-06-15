@@ -1,5 +1,5 @@
 /*
- JCC: JIT C Compiler
+ CCCC: Comprehensiev C Compensation Compiler
 
  Copyright (C) 2025 George Watson
 
@@ -24,7 +24,7 @@ bool is_url(const char *filename) {
            (strncmp(filename, "https://", 8) == 0);
 }
 
-#ifdef JCC_HAS_CURL
+#ifdef CCCC_HAS_CURL
 #include <sys/stat.h>
 #include <unistd.h>
 #include <dirent.h>
@@ -57,7 +57,7 @@ void init_url_cache(VirtualMachine *vm) {
             temp_dir = "/tmp";
         #endif
 
-        vm->compiler.url_cache_dir = format("%s/jcc_cache", temp_dir);
+        vm->compiler.url_cache_dir = format("%s/.cccc", temp_dir);
     }
 
     // Create cache directory if it doesn't exist
@@ -157,7 +157,7 @@ char *fetch_url_to_cache(VirtualMachine *vm, const char *url) {
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, (long)URL_TIMEOUT);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L); // Verify SSL certificates
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "jcc-compiler/1.0");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "cccc-compiler/1.0");
 
     // Perform the request
     CURLcode res = curl_easy_perform(curl);
@@ -205,4 +205,4 @@ char *fetch_url_to_cache(VirtualMachine *vm, const char *url) {
     (void)url;
     return NULL; // URL support not compiled in
 }
-#endif // JCC_HAS_CURL
+#endif // CCCC_HAS_CURL

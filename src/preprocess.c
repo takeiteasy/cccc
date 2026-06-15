@@ -3334,7 +3334,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
 
             // Check for URL includes (supported with both <...> and "...")
             if (is_url(filename)) {
-#ifdef JCC_HAS_CURL
+#ifdef CCCC_HAS_CURL
                 char *cache_path = fetch_url_to_cache(vm, filename);
                 if (!cache_path) {
                     error_tok(vm, start->next, "failed to fetch URL: %s",
@@ -3348,7 +3348,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
 #else
                 error_tok(
                     vm, start->next,
-                    "URL includes require JCC to be built with JCC_HAS_CURL=1");
+                    "URL includes require CCCC to be built with CCCC_HAS_CURL=1");
 #endif
             }
 

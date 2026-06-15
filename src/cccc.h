@@ -1756,7 +1756,7 @@ typedef struct Compiler {
     HashMap include_cache;            // Cache for search_include_paths
     StringArray file_buffers;         // Track allocated file buffers for cleanup
 
-    // URL include cache (only used when JCC_HAS_CURL is enabled)
+    // URL include cache (only used when CCCC_HAS_CURL is enabled)
     char *url_cache_dir; // Directory for caching downloaded headers
     HashMap url_to_path; // Maps URLs to cached file paths
     StringArray emit_directives; // Preprocessor directives to prepend to serialized output

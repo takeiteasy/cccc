@@ -22,10 +22,10 @@ CFLAGS += $(LIBFFI_CFLAGS)
 LDFLAGS += $(LIBFFI_LDFLAGS)
 
 # Optional libcurl support for URL-based #include directives
-# Enable with: make JCC_HAS_CURL=1 or export JCC_HAS_CURL=1
-ifdef JCC_HAS_CURL
-  ifneq ($(JCC_HAS_CURL),0)
-    CFLAGS += -DJCC_HAS_CURL=1
+# Enable with: make CCCC_HAS_CURL=1 or export CCCC_HAS_CURL=1
+ifdef CCCC_HAS_CURL
+  ifneq ($(CCCC_HAS_CURL),0)
+    CFLAGS += -DCCCC_HAS_CURL=1
     LIBCURL_CFLAGS := $(shell $(PKG_CONFIG) --cflags libcurl 2>/dev/null)
     LIBCURL_LDFLAGS := $(shell $(PKG_CONFIG) --libs libcurl 2>/dev/null)
     ifeq ($(LIBCURL_CFLAGS),)

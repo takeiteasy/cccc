@@ -742,7 +742,7 @@ int main(int argc, const char *argv[]) {
     int skip_stdlib = 0;       // -S
     int output_json = 0;       // -j (general "emit JSON" flag)
     int output_ffi_decls = 0;  // --ffi-decls
-#ifdef JCC_HAS_CURL
+#ifdef CCCC_HAS_CURL
     char *url_cache_dir = NULL; // --url-cache-dir
     int url_cache_clear = 0;    // --url-cache-clear
 #endif
@@ -1099,7 +1099,7 @@ int main(int argc, const char *argv[]) {
             }
             break;
         }
-#ifdef JCC_HAS_CURL
+#ifdef CCCC_HAS_CURL
         case 1008:
             url_cache_dir = strdup(optarg);
             break;
@@ -1660,7 +1660,7 @@ int main(int argc, const char *argv[]) {
     }
 
     // Enable error collection for better error reporting
-#ifdef JCC_HAS_CURL
+#ifdef CCCC_HAS_CURL
     if (url_cache_dir) {
         vm.compiler.url_cache_dir = url_cache_dir;
     }

@@ -1,7 +1,7 @@
 // Test basic URL include functionality
-// This test is only compiled when JCC_HAS_CURL is enabled
+// This test is only compiled when CCCC_HAS_CURL is enabled
 
-#ifdef JCC_HAS_CURL
+#ifdef CCCC_HAS_CURL
 
 // Test including a header from a URL
 // For testing purposes, we'll use a simple header from a known stable URL
