@@ -1755,6 +1755,10 @@ typedef struct Compiler {
     StringArray system_include_paths; // System header search paths for <...>
     HashMap include_cache;            // Cache for search_include_paths
     StringArray file_buffers;         // Track allocated file buffers for cleanup
+
+    // URL include cache (only used when JCC_HAS_CURL is enabled)
+    char *url_cache_dir; // Directory for caching downloaded headers
+    HashMap url_to_path; // Maps URLs to cached file paths
     StringArray emit_directives; // Preprocessor directives to prepend to serialized output
     int emit_strict;             // --emit-only: suppress auto-capture; only explicitly tagged content appears in -G output
     StringArray comptime_pending_includes; // #include [[cccc::comptime]] filenames queued for comptime pass

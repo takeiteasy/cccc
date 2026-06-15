@@ -926,6 +926,12 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     vm->compiler.include_guards.buckets = NULL;
     vm->compiler.include_guards.used = 0;
 
+    // Initialize url_to_path HashMap for URL include tracking
+    vm->compiler.url_to_path.capacity = 0;
+    vm->compiler.url_to_path.buckets = NULL;
+    vm->compiler.url_to_path.used = 0;
+    vm->compiler.url_cache_dir = NULL;  // Initialized on first URL include
+
     // Initialize include_cache HashMap
     vm->compiler.include_cache.capacity = 0;
     vm->compiler.include_cache.buckets = NULL;
@@ -1246,6 +1252,13 @@ void cc_destroy(VirtualMachine *vm) {
     // Free input files array
     if (vm->compiler.input_files)
         free(vm->compiler.input_files);
+
+    // Free URL cache directory
+    if (vm->compiler.url_cache_dir)
+        free(vm->compiler.url_cache_dir);
+
+    // Free URL to path map
+    hashmap_deinit(&vm->compiler.url_to_path);
 
     // Free include_cache HashMap (values are malloc'd path strings)
     if (vm->compiler.include_cache.buckets) {

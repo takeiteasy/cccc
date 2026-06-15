@@ -21,6 +21,27 @@ endif
 CFLAGS += $(LIBFFI_CFLAGS)
 LDFLAGS += $(LIBFFI_LDFLAGS)
 
+# Optional libcurl support for URL-based #include directives
+# Enable with: make JCC_HAS_CURL=1 or export JCC_HAS_CURL=1
+ifdef JCC_HAS_CURL
+  ifneq ($(JCC_HAS_CURL),0)
+    CFLAGS += -DJCC_HAS_CURL=1
+    LIBCURL_CFLAGS := $(shell $(PKG_CONFIG) --cflags libcurl 2>/dev/null)
+    LIBCURL_LDFLAGS := $(shell $(PKG_CONFIG) --libs libcurl 2>/dev/null)
+    ifeq ($(LIBCURL_CFLAGS),)
+      ifeq ($(shell uname -s),Darwin)
+        LIBCURL_CFLAGS := -I/opt/homebrew/opt/curl/include -I/usr/local/opt/curl/include -I/opt/homebrew/include
+        LIBCURL_LDFLAGS := -L/opt/homebrew/opt/curl/lib -L/usr/local/opt/curl/lib -L/opt/homebrew/lib -lcurl
+      else
+        LIBCURL_CFLAGS := -I/usr/include -I/usr/local/include
+        LIBCURL_LDFLAGS := -L/usr/lib -L/usr/local/lib -lcurl
+      endif
+    endif
+    CFLAGS += $(LIBCURL_CFLAGS)
+    LDFLAGS += $(LIBCURL_LDFLAGS)
+  endif
+endif
+
 ifeq ($(OS),Windows_NT)
 	EXE := .EXE
 	DYLIB := .dll

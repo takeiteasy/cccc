@@ -742,6 +742,10 @@ int main(int argc, const char *argv[]) {
     int skip_stdlib = 0;       // -S
     int output_json = 0;       // -j (general "emit JSON" flag)
     int output_ffi_decls = 0;  // --ffi-decls
+#ifdef JCC_HAS_CURL
+    char *url_cache_dir = NULL; // --url-cache-dir
+    int url_cache_clear = 0;    // --url-cache-clear
+#endif
     CCCCAttrTarget attr_target = CCCC_ATTR_TARGET_AUTO; // --attr-target
     int compile_only = 0;      // -c (set whenever -c/--compile is given; semantics:
                                 //   "compile, do not execute". -c=bytecode writes bytecode,
@@ -837,6 +841,8 @@ int main(int argc, const char *argv[]) {
         {"library", required_argument, 0, 'l'},
         {"define", required_argument, 0, 'D'},
         {"undef", required_argument, 0, 'U'},
+        {"url-cache-dir", required_argument, 0, 1008},
+        {"url-cache-clear", no_argument, 0, 1009},
         {"max-errors", required_argument, 0, 'n'},
         {"Werror", no_argument, 0, 'x'},
         {"embed-limit", required_argument, 0, 1048},
@@ -1093,6 +1099,14 @@ int main(int argc, const char *argv[]) {
             }
             break;
         }
+#ifdef JCC_HAS_CURL
+        case 1008:
+            url_cache_dir = strdup(optarg);
+            break;
+        case 1009:
+            url_cache_clear = 1;
+            break;
+#endif
         case 'n': // --max-errors
             max_errors = atoi(optarg);
             if (max_errors <= 0) {
@@ -1646,6 +1660,15 @@ int main(int argc, const char *argv[]) {
     }
 
     // Enable error collection for better error reporting
+#ifdef JCC_HAS_CURL
+    if (url_cache_dir) {
+        vm.compiler.url_cache_dir = url_cache_dir;
+    }
+    if (url_cache_clear) {
+        clear_url_cache(&vm);
+    }
+#endif
+
     vm.collect_errors = true;
     vm.max_errors = max_errors;
     vm.warnings_as_errors = warnings_as_errors;

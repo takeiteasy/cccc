@@ -3332,6 +3332,26 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             }
             tok = skip_line(vm, tok);
 
+            // Check for URL includes (supported with both <...> and "...")
+            if (is_url(filename)) {
+#ifdef JCC_HAS_CURL
+                char *cache_path = fetch_url_to_cache(vm, filename);
+                if (!cache_path) {
+                    error_tok(vm, start->next, "failed to fetch URL: %s",
+                              filename);
+                }
+                // Track URL -> cache path mapping for error reporting
+                hashmap_put(&vm->compiler.url_to_path, cache_path,
+                            (void *)filename);
+                tok = include_file(vm, tok, cache_path, start->next->next, filename);
+                continue;
+#else
+                error_tok(
+                    vm, start->next,
+                    "URL includes require JCC to be built with JCC_HAS_CURL=1");
+#endif
+            }
+
             if (filename[0] != '/' && is_dquote) {
                 char *path =
                     format_relative_path(vm, start->file->name, filename);

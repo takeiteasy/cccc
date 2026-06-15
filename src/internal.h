@@ -712,6 +712,15 @@ void print_escaped_string(FILE *f, const char *str);
 long long generate_random_canary(void);
 
 //
+// url_fetch.c
+//
+
+bool is_url(const char *filename);
+void init_url_cache(VirtualMachine *vm);
+void clear_url_cache(VirtualMachine *vm);
+char *fetch_url_to_cache(VirtualMachine *vm, const char *url);
+
+//
 // stdlib
 //
 
