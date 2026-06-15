@@ -195,7 +195,7 @@ stdlib: $(EXE_OUT)
 	fi
 
 test: clean $(EXE_OUT)
-	@python3 tools/tests.py
+	@python3 tools/tests.py -j 8
 
 all: clean $(EXE_OUT) $(LIB_OUT) test docs
 

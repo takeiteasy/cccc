@@ -434,6 +434,34 @@ static inline int op_LI3_fn(VirtualMachine *vm) {
     return 0;
 }
 
+// ---------------------------------------------------------------------------
+// Threading race detection (CCCC_THREAD_SAFETY)
+// ---------------------------------------------------------------------------
+// Thread identity: ThreadRecord* for worker threads, (void*)1 for main.
+#define CCCC_MAIN_THREAD_ID ((void *)1)
+
+static void check_race_access(VirtualMachine *vm, void *addr, int is_write) {
+    if (!(vm->flags & CCCC_THREAD_SAFETY) || !vm->gil_initialized)
+        return;
+    void *tid = vm->active_thread ? (void *)vm->active_thread : CCCC_MAIN_THREAD_ID;
+    int no_lock = cccc_thread_held_lock_count(vm) == 0;
+    void *prev = hashmap_get_int(&vm->race_shadow, (long long)(uintptr_t)addr);
+    if (no_lock && prev && prev != tid) {
+        fprintf(stderr,
+                "\n====== DATA RACE DETECTED ======\n"
+                "Address %p %s by thread %p and now %s by thread %p "
+                "without a mutex\n"
+                "================================\n",
+                addr,
+                "written",
+                prev,
+                is_write ? "written" : "read",
+                tid);
+    }
+    if (no_lock && is_write)
+        hashmap_put_int(&vm->race_shadow, (long long)(uintptr_t)addr, tid);
+}
+
 static inline int op_LDA3_fn(VirtualMachine *vm) {
     // Load data-relative address: [LDA3] [rd:8] [byte_offset:64]
     long long operands = cc_read_word(vm);
@@ -899,6 +927,7 @@ static inline int op_LDR_B_fn(VirtualMachine *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    check_race_access(vm, (void *)vm->regs[rs], 0);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 1, WATCH_READ);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(char *)vm->regs[rs];
@@ -912,6 +941,7 @@ static inline int op_LDR_H_fn(VirtualMachine *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    check_race_access(vm, (void *)vm->regs[rs], 0);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 2, WATCH_READ);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(short *)vm->regs[rs];
@@ -925,6 +955,7 @@ static inline int op_LDR_W_fn(VirtualMachine *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    check_race_access(vm, (void *)vm->regs[rs], 0);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 4, WATCH_READ);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(int *)vm->regs[rs];
@@ -938,6 +969,7 @@ static inline int op_LDR_D_fn(VirtualMachine *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    check_race_access(vm, (void *)vm->regs[rs], 0);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 8, WATCH_READ);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(long long *)vm->regs[rs];
@@ -951,6 +983,7 @@ static inline int op_STR_B_fn(VirtualMachine *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    check_race_access(vm, (void *)vm->regs[rs], 1);
     *(char *)vm->regs[rs] = (char)vm->regs[rd];
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 1, WATCH_WRITE);
     return 0;
@@ -963,6 +996,7 @@ static inline int op_STR_H_fn(VirtualMachine *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    check_race_access(vm, (void *)vm->regs[rs], 1);
     *(short *)vm->regs[rs] = (short)vm->regs[rd];
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 2, WATCH_WRITE);
     return 0;
@@ -975,6 +1009,7 @@ static inline int op_STR_W_fn(VirtualMachine *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    check_race_access(vm, (void *)vm->regs[rs], 1);
     *(int *)vm->regs[rs] = (int)vm->regs[rd];
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 4, WATCH_WRITE);
     return 0;
@@ -987,6 +1022,7 @@ static inline int op_STR_D_fn(VirtualMachine *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    check_race_access(vm, (void *)vm->regs[rs], 1);
     *(long long *)vm->regs[rs] = vm->regs[rd];
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 8, WATCH_WRITE);
     return 0;
@@ -2807,6 +2843,7 @@ static inline int op_LDR_LOCAL_B_fn(VirtualMachine *vm) {
     int rd;
     DECODE_R(operands, rd);
     long long offset = cc_read_i64(vm);
+    check_race_access(vm, (void *)(vm->bp + offset), 0);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(char *)(vm->bp + offset);
     return 0;
@@ -2817,6 +2854,7 @@ static inline int op_LDR_LOCAL_H_fn(VirtualMachine *vm) {
     int rd;
     DECODE_R(operands, rd);
     long long offset = cc_read_i64(vm);
+    check_race_access(vm, (void *)(vm->bp + offset), 0);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(short *)(vm->bp + offset);
     return 0;
@@ -2827,6 +2865,7 @@ static inline int op_LDR_LOCAL_W_fn(VirtualMachine *vm) {
     int rd;
     DECODE_R(operands, rd);
     long long offset = cc_read_i64(vm);
+    check_race_access(vm, (void *)(vm->bp + offset), 0);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(int *)(vm->bp + offset);
     return 0;
@@ -2837,6 +2876,7 @@ static inline int op_LDR_LOCAL_D_fn(VirtualMachine *vm) {
     int rd;
     DECODE_R(operands, rd);
     long long offset = cc_read_i64(vm);
+    check_race_access(vm, (void *)(vm->bp + offset), 0);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(long long *)(vm->bp + offset);
     return 0;
@@ -2847,6 +2887,7 @@ static inline int op_STR_LOCAL_B_fn(VirtualMachine *vm) {
     int rd;
     DECODE_R(operands, rd);
     long long offset = cc_read_i64(vm);
+    check_race_access(vm, (void *)(vm->bp + offset), 1);
     *(char *)(vm->bp + offset) = (char)vm->regs[rd];
     return 0;
 }
@@ -2856,6 +2897,7 @@ static inline int op_STR_LOCAL_H_fn(VirtualMachine *vm) {
     int rd;
     DECODE_R(operands, rd);
     long long offset = cc_read_i64(vm);
+    check_race_access(vm, (void *)(vm->bp + offset), 1);
     *(short *)(vm->bp + offset) = (short)vm->regs[rd];
     return 0;
 }
@@ -2865,6 +2907,7 @@ static inline int op_STR_LOCAL_W_fn(VirtualMachine *vm) {
     int rd;
     DECODE_R(operands, rd);
     long long offset = cc_read_i64(vm);
+    check_race_access(vm, (void *)(vm->bp + offset), 1);
     *(int *)(vm->bp + offset) = (int)vm->regs[rd];
     return 0;
 }
@@ -2874,6 +2917,7 @@ static inline int op_STR_LOCAL_D_fn(VirtualMachine *vm) {
     int rd;
     DECODE_R(operands, rd);
     long long offset = cc_read_i64(vm);
+    check_race_access(vm, (void *)(vm->bp + offset), 1);
     *(long long *)(vm->bp + offset) = vm->regs[rd];
     return 0;
 }
@@ -2928,6 +2972,7 @@ static inline int op_LDR_INDEX_B_fn(VirtualMachine *vm) {
     DECODE_RRRS(operands, rd, base, index, scale);
     long long offset = cc_read_i64(vm);
     char *addr = op_index_addr(vm, base, index, scale, offset);
+    check_race_access(vm, addr, 0);
     WATCHPOINT_CHECK(vm, addr, 1, WATCH_READ);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(char *)addr;
@@ -2940,6 +2985,7 @@ static inline int op_LDR_INDEX_H_fn(VirtualMachine *vm) {
     DECODE_RRRS(operands, rd, base, index, scale);
     long long offset = cc_read_i64(vm);
     char *addr = op_index_addr(vm, base, index, scale, offset);
+    check_race_access(vm, addr, 0);
     WATCHPOINT_CHECK(vm, addr, 2, WATCH_READ);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(short *)addr;
@@ -2952,6 +2998,7 @@ static inline int op_LDR_INDEX_W_fn(VirtualMachine *vm) {
     DECODE_RRRS(operands, rd, base, index, scale);
     long long offset = cc_read_i64(vm);
     char *addr = op_index_addr(vm, base, index, scale, offset);
+    check_race_access(vm, addr, 0);
     WATCHPOINT_CHECK(vm, addr, 4, WATCH_READ);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(int *)addr;
@@ -2964,6 +3011,7 @@ static inline int op_LDR_INDEX_D_fn(VirtualMachine *vm) {
     DECODE_RRRS(operands, rd, base, index, scale);
     long long offset = cc_read_i64(vm);
     char *addr = op_index_addr(vm, base, index, scale, offset);
+    check_race_access(vm, addr, 0);
     WATCHPOINT_CHECK(vm, addr, 8, WATCH_READ);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(long long *)addr;
@@ -2976,6 +3024,7 @@ static inline int op_STR_INDEX_B_fn(VirtualMachine *vm) {
     DECODE_RRRS(operands, rd, base, index, scale);
     long long offset = cc_read_i64(vm);
     char *addr = op_index_addr(vm, base, index, scale, offset);
+    check_race_access(vm, addr, 1);
     *(char *)addr = (char)vm->regs[rd];
     WATCHPOINT_CHECK(vm, addr, 1, WATCH_WRITE);
     return 0;
@@ -2987,6 +3036,7 @@ static inline int op_STR_INDEX_H_fn(VirtualMachine *vm) {
     DECODE_RRRS(operands, rd, base, index, scale);
     long long offset = cc_read_i64(vm);
     char *addr = op_index_addr(vm, base, index, scale, offset);
+    check_race_access(vm, addr, 1);
     *(short *)addr = (short)vm->regs[rd];
     WATCHPOINT_CHECK(vm, addr, 2, WATCH_WRITE);
     return 0;
@@ -2998,6 +3048,7 @@ static inline int op_STR_INDEX_W_fn(VirtualMachine *vm) {
     DECODE_RRRS(operands, rd, base, index, scale);
     long long offset = cc_read_i64(vm);
     char *addr = op_index_addr(vm, base, index, scale, offset);
+    check_race_access(vm, addr, 1);
     *(int *)addr = (int)vm->regs[rd];
     WATCHPOINT_CHECK(vm, addr, 4, WATCH_WRITE);
     return 0;
@@ -3009,6 +3060,7 @@ static inline int op_STR_INDEX_D_fn(VirtualMachine *vm) {
     DECODE_RRRS(operands, rd, base, index, scale);
     long long offset = cc_read_i64(vm);
     char *addr = op_index_addr(vm, base, index, scale, offset);
+    check_race_access(vm, addr, 1);
     *(long long *)addr = vm->regs[rd];
     WATCHPOINT_CHECK(vm, addr, 8, WATCH_WRITE);
     return 0;

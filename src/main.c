@@ -313,6 +313,10 @@ static void usage(const char *argv0, int exit_code) {
            "(0xCD/0xDD patterns)\n");
     printf("\t   --memory-tagging          Temporal memory tagging (track "
             "pointer generation tags)\n");
+    printf("\t   --thread-safety           Threading safety diagnostics: race "
+           "detection, lock-order\n"
+           "\t                             inversion, double-lock, and atomic "
+           "cast warnings\n");
     printf("\t-V/--vm-heap                 Route all malloc/free through VM "
            "heap (enables memory safety)\n");
     printf("\nFFI Safety Options:\n");
@@ -826,6 +830,7 @@ int main(int argc, const char *argv[]) {
         {"memory-tagging", no_argument, 0, 1045},
         {"vm-heap", no_argument, 0, 'V'},
         {"control-flow-integrity", no_argument, 0, 'C'},
+        {"thread-safety", no_argument, 0, 1046},
         {"include", required_argument, 0, 'I'},
         {"isystem", required_argument, 0, 'i'},
         {"library-path", required_argument, 0, 'L'},
@@ -1028,6 +1033,9 @@ int main(int argc, const char *argv[]) {
             break;
         case 1045: // --memory-tagging
             flags |= CCCC_MEMORY_TAGGING;
+            break;
+        case 1046: // --thread-safety
+            flags |= CCCC_THREAD_SAFETY;
             break;
         case 'V':
             flags |= CCCC_VM_HEAP;
@@ -1641,6 +1649,10 @@ int main(int argc, const char *argv[]) {
     vm.collect_errors = true;
     vm.max_errors = max_errors;
     vm.warnings_as_errors = warnings_as_errors;
+    // --thread-safety implicitly enables the discarded-qualifiers warning so
+    // _Atomic cast stripping is diagnosed without requiring -Wall.
+    if (flags & CCCC_THREAD_SAFETY)
+        warnings |= CCCC_WARN_DISCARDED_QUALIFIERS;
     vm.compiler.warnings = warnings;
     vm.compiler.warning_errors = warning_errors;
     vm.compiler.warning_no_errors = warning_no_errors;

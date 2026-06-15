@@ -513,6 +513,9 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr, const char *na
                              int returns_double, int returns_float,
                              int is_variadic, int num_fixed_args);
 VirtualMachine *cccc_current_ffi_vm(void);
+// Returns the number of mutexes currently held by the active VM thread.
+// Used by race detection in ops.c; implemented in stdlib/pthread.c.
+int cccc_thread_held_lock_count(VirtualMachine *vm);
 
 //
 // hashmap.c

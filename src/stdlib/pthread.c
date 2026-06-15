@@ -48,6 +48,10 @@ struct ThreadRecord {
     int joined;
     CCCCPthreadValue *values;
     struct ThreadRecord *next;
+    // Lock-order tracking (CCCC_THREAD_SAFETY)
+    void **held_locks;      // array of CCCCUserMutex* currently held
+    int    held_locks_count;
+    int    held_locks_cap;
 };
 
 struct PthreadState {
@@ -61,9 +65,10 @@ static VirtualMachine *current_vm(void) {
 static void enable_pthread_runtime(VirtualMachine *vm) {
     if (!vm)
         return;
-    // Current stack-canary checks assume one VM stack context. Pthread entry
-    // functions use independent stacks, so disable this check once code starts
-    // a VM thread. Thread-aware safety instrumentation is follow-up work.
+    // Stack canaries are broken when any function has parameters: ENT3 pushes
+    // the canary at bp[-1] which conflicts with the first param/local at offset
+    // -1 (see assign_stack_offsets). Disable them when threading starts.
+    // Follow-up: ticket #441 tracks fixing the canary frame layout.
     vm->flags &= ~CCCC_STACK_CANARIES;
 }
 
@@ -122,8 +127,106 @@ static void free_thread_record(ThreadRecord *rec) {
         free(value);
         value = next;
     }
+    free(rec->held_locks);
     cccc_exec_state_release_stack(rec->vm, &rec->exec);
     free(rec);
+}
+
+// ---------------------------------------------------------------------------
+// Thread-safety helpers (CCCC_THREAD_SAFETY)
+// ---------------------------------------------------------------------------
+
+int cccc_thread_held_lock_count(VirtualMachine *vm) {
+    if (!vm || !vm->pthread_state)
+        return 0;
+    ThreadRecord *tr = vm->active_thread
+                           ? vm->active_thread
+                           : &vm->pthread_state->main_thread;
+    return tr->held_locks_count;
+}
+
+static void thread_add_held_lock(ThreadRecord *tr, void *mutex) {
+    if (tr->held_locks_count >= tr->held_locks_cap) {
+        int new_cap = tr->held_locks_cap ? tr->held_locks_cap * 2 : 4;
+        void **new_arr = realloc(tr->held_locks, (size_t)new_cap * sizeof(void *));
+        if (!new_arr)
+            return;
+        tr->held_locks = new_arr;
+        tr->held_locks_cap = new_cap;
+    }
+    tr->held_locks[tr->held_locks_count++] = mutex;
+}
+
+static void thread_remove_held_lock(ThreadRecord *tr, void *mutex) {
+    for (int i = 0; i < tr->held_locks_count; i++) {
+        if (tr->held_locks[i] == mutex) {
+            tr->held_locks[i] = tr->held_locks[--tr->held_locks_count];
+            return;
+        }
+    }
+}
+
+// Returns 1 if the edge (from -> to) exists in the lock graph.
+static int lock_graph_has_edge(VirtualMachine *vm, void *from, void *to) {
+    for (int i = 0; i < vm->lock_graph_size; i++) {
+        if (vm->lock_graph_from[i] == from && vm->lock_graph_to[i] == to)
+            return 1;
+    }
+    return 0;
+}
+
+static void lock_graph_add_edge(VirtualMachine *vm, void *from, void *to) {
+    if (lock_graph_has_edge(vm, from, to))
+        return;
+    if (vm->lock_graph_size >= vm->lock_graph_cap) {
+        int new_cap = vm->lock_graph_cap ? vm->lock_graph_cap * 2 : 8;
+        void **new_from = realloc(vm->lock_graph_from, (size_t)new_cap * sizeof(void *));
+        void **new_to   = realloc(vm->lock_graph_to,   (size_t)new_cap * sizeof(void *));
+        if (!new_from || !new_to) {
+            free(new_from);
+            free(new_to);
+            return;
+        }
+        vm->lock_graph_from = new_from;
+        vm->lock_graph_to   = new_to;
+        vm->lock_graph_cap  = new_cap;
+    }
+    vm->lock_graph_from[vm->lock_graph_size] = from;
+    vm->lock_graph_to[vm->lock_graph_size]   = to;
+    vm->lock_graph_size++;
+}
+
+// Returns 1 if the lock attempt should be aborted (double-lock), 0 otherwise.
+static int check_lock_safety(VirtualMachine *vm, ThreadRecord *tr, void *mutex) {
+    // Double-lock check: print diagnostic and return 1 so the caller returns
+    // EDEADLK immediately instead of blocking forever on a non-recursive mutex.
+    for (int i = 0; i < tr->held_locks_count; i++) {
+        if (tr->held_locks[i] == mutex) {
+            fprintf(stderr,
+                    "\n====== DEADLOCK: double-lock detected ======\n"
+                    "Thread %p attempted to lock mutex %p a second time\n"
+                    "without an intervening unlock (non-recursive mutex).\n"
+                    "============================================\n",
+                    (void *)tr, mutex);
+            return 1;
+        }
+    }
+    // Lock-order inversion check: for each lock H currently held, see if the
+    // reverse edge (mutex -> H) already exists in the graph.
+    for (int i = 0; i < tr->held_locks_count; i++) {
+        void *held = tr->held_locks[i];
+        if (lock_graph_has_edge(vm, mutex, held)) {
+            fprintf(stderr,
+                    "\n====== LOCK ORDER INVERSION detected ======\n"
+                    "Thread %p is acquiring mutex %p while holding %p,\n"
+                    "but another thread previously acquired them in the "
+                    "opposite order.\nThis is a potential deadlock.\n"
+                    "===========================================\n",
+                    (void *)tr, mutex, held);
+        }
+        lock_graph_add_edge(vm, held, mutex);
+    }
+    return 0;
 }
 
 static void *vm_thread_start(void *arg) {
@@ -333,23 +436,49 @@ static long long wrap_pthread_mutex_lock(long long mutexp) {
     pthread_mutex_t *host = ensure_mutex((CCCCUserMutex *)mutexp);
     if (!vm || !host)
         return EINVAL;
+    if (vm->flags & CCCC_THREAD_SAFETY) {
+        ThreadRecord *tr = current_thread(vm);
+        if (tr && check_lock_safety(vm, tr, (void *)mutexp))
+            return EDEADLK;
+    }
     ExecState caller_state;
     save_and_release_gil(vm, &caller_state);
     int rc = pthread_mutex_lock(host);
     acquire_and_restore_gil(vm, &caller_state);
+    if (rc == 0 && (vm->flags & CCCC_THREAD_SAFETY)) {
+        ThreadRecord *tr = current_thread(vm);
+        if (tr)
+            thread_add_held_lock(tr, (void *)mutexp);
+    }
     return rc;
 }
 
 static long long wrap_pthread_mutex_trylock(long long mutexp) {
+    VirtualMachine *vm = current_vm();
     pthread_mutex_t *host = ensure_mutex((CCCCUserMutex *)mutexp);
-    return host ? pthread_mutex_trylock(host) : EINVAL;
+    if (!host)
+        return EINVAL;
+    int rc = pthread_mutex_trylock(host);
+    if (rc == 0 && vm && (vm->flags & CCCC_THREAD_SAFETY)) {
+        ThreadRecord *tr = current_thread(vm);
+        if (tr)
+            thread_add_held_lock(tr, (void *)mutexp);
+    }
+    return rc;
 }
 
 static long long wrap_pthread_mutex_unlock(long long mutexp) {
+    VirtualMachine *vm = current_vm();
     CCCCUserMutex *mutex = (CCCCUserMutex *)mutexp;
     if (!mutex || !mutex->handle)
         return EINVAL;
-    return pthread_mutex_unlock((pthread_mutex_t *)mutex->handle);
+    int rc = pthread_mutex_unlock((pthread_mutex_t *)mutex->handle);
+    if (rc == 0 && vm && (vm->flags & CCCC_THREAD_SAFETY)) {
+        ThreadRecord *tr = current_thread(vm);
+        if (tr)
+            thread_remove_held_lock(tr, (void *)mutexp);
+    }
+    return rc;
 }
 
 static long long wrap_pthread_cond_init(long long condp, long long attrp) {

@@ -200,11 +200,41 @@ All features listed below can be enabled individually or through the safety leve
   - Provides comprehensive pointer safety in a single flag
   - Recommended for development and testing
 
-### Threading Limitations
+### Threading Safety
 
-The POSIX `<pthread.h>` VM runtime is correctness-first and serializes bytecode execution with the VM GIL. Blocking pthread wrappers release the GIL while waiting, but the safety suite does not yet implement race detection, deadlock detection, atomic-safety checks, or thread-aware stack canary validation.
+The POSIX `<pthread.h>` VM runtime serializes bytecode execution with the VM GIL. The following threading-aware features are available:
 
-Starting a VM thread with `pthread_create` disables stack-canary checks for the current VM run because the existing canary runtime is tied to a single stack context. Other enabled checks continue to run where applicable, including heap checks, pointer checks, uninitialized-variable checks, and integer overflow checks.
+**GIL release around blocking POSIX calls**
+
+Blocking calls — `read`, `write`, `pwrite`, `poll`, `accept`, `connect`, `wait`, `waitpid`, `sleep`, `usleep` — release the GIL while blocked so other VM threads can make progress. Non-blocking calls (`close`, `lseek`, `stat`, `open`, and most control-plane socket calls) intentionally hold the GIL.
+
+**Thread-aware stack canaries**
+
+Stack canary checks work correctly under threading. Each VM thread runs with its own `bp`/`sp`/`stack_seg` via `ExecState` (saved and restored on every GIL hand-off), so canary slots are isolated per thread. Stack canary protection enabled with `-1` or `--stack-canaries` is not disabled when `pthread_create` is used.
+
+**`--thread-safety` diagnostics** _(off by default; enables the checks below)_
+
+Enable with `--thread-safety`. Intended for development and testing — not enabled by preset safety levels.
+
+- **Double-lock detection**: Diagnoses when a thread attempts to lock a non-recursive mutex it already holds.
+  ```
+  ====== DEADLOCK: double-lock detected ======
+  ```
+
+- **Lock-order inversion detection**: Builds a lock-acquisition graph at runtime. When a thread acquires locks in the opposite order seen previously, a potential deadlock is reported.
+  ```
+  ====== LOCK ORDER INVERSION detected ======
+  ```
+
+- **Data race detection**: Tracks the last thread to write each address without holding a mutex (shadow-map approach). When a second thread accesses the same address also without a mutex, a potential race is reported. Detection covers pointer-dereference and indexed array access; global-variable access tracking is planned for a future release.
+  ```
+  ====== DATA RACE DETECTED ======
+  ```
+
+- **`_Atomic` cast warning**: Warns at compile time when a cast strips the `_Atomic` qualifier from a pointer type, producing a plain pointer to an atomic object. Full runtime detection of mixed atomic/non-atomic access (via new ASTR/ALDR opcodes and stdatomic.h updates) is tracked as a follow-up.
+  ```
+  warning: cast discards '_Atomic' qualifier from pointer type; non-atomic access to atomic object may cause data races
+  ```
 
 ## Advanced Pointer Tracking Features
 

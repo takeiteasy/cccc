@@ -4736,8 +4736,24 @@ static Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
         Type *ty = typename(vm, &tok, tok->next);
         tok = skip(vm, tok, ")");
 
+        Node *expr = cast(vm, &tok, tok);
+
+        // Warn when a cast discards the _Atomic qualifier from a pointer type.
+        if ((vm->flags & CCCC_THREAD_SAFETY) &&
+            !vm->compiler.in_type_lookahead) {
+            add_type(vm, expr);
+            if (expr->ty && ty &&
+                expr->ty->kind == TY_PTR && ty->kind == TY_PTR &&
+                expr->ty->base && ty->base &&
+                expr->ty->base->is_atomic && !ty->base->is_atomic) {
+                warn_tok(vm, start, CCCC_WARN_DISCARDED_QUALIFIERS,
+                         "cast discards '_Atomic' qualifier from pointer type; "
+                         "non-atomic access to atomic object may cause data races");
+            }
+        }
+
         // type cast
-        Node *node = new_cast(vm, cast(vm, &tok, tok), ty);
+        Node *node = new_cast(vm, expr, ty);
         node->tok = start;
         *rest = tok;
         return node;

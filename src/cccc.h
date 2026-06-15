@@ -288,6 +288,7 @@ typedef enum {
     CCCC_STACK_INSTR_ERRORS =
         (1 << 19), // 0x00080000 - Stack instrumentation errors
     CCCC_ENABLE_DEBUGGER = (1 << 20), // 0x00100000 - Interactive debugger
+    CCCC_THREAD_SAFETY = (1 << 21),   // 0x00200000 - Threading safety diagnostics
 
     // Convenience flag combinations
     CCCC_POINTER_SANITIZER =
@@ -2050,6 +2051,18 @@ struct VirtualMachine {
     PthreadKeyRecord *pthread_keys;
     int pthread_next_key;
     PthreadState *pthread_state;
+
+    // Threading safety diagnostics (CCCC_THREAD_SAFETY)
+    // Lock graph for lock-order inversion detection: parallel arrays of
+    // (from_lock, to_lock) edges meaning "someone held from_lock when acquiring
+    // to_lock". Guarded by the GIL (only one VM thread runs at a time).
+    void **lock_graph_from;
+    void **lock_graph_to;
+    int    lock_graph_size;
+    int    lock_graph_cap;
+    // Race detection shadow map: address -> last thread that wrote without a lock.
+    // Value is ThreadRecord* for worker threads or (void*)1 for main thread.
+    HashMap race_shadow;
 
     // Error handling (setjmp/longjmp for exception-like behavior)
     jmp_buf
