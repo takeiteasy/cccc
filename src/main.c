@@ -461,6 +461,10 @@ static int ffi_index_by_name(VirtualMachine *vm, const char *name) {
     return -1;
 }
 
+static const char *obj_external_name(Obj *obj) {
+    return obj && obj->asm_label ? obj->asm_label : obj ? obj->name : NULL;
+}
+
 static int count_params(Type *ty) {
     int n = 0;
     for (Type *p = ty; p; p = p->next)
@@ -470,17 +474,18 @@ static int count_params(Type *ty) {
 
 static void register_dynamic_externs(VirtualMachine *vm, Obj *prog) {
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (!obj->is_function || obj->is_definition || !obj->name ||
-            ffi_index_by_name(vm, obj->name) >= 0)
+        const char *extern_name = obj_external_name(obj);
+        if (!obj->is_function || obj->is_definition || !extern_name ||
+            ffi_index_by_name(vm, extern_name) >= 0)
             continue;
 
         int nargs = count_params(obj->ty->params);
         int returns_double = is_flonum(obj->ty->return_ty);
         if (obj->ty->is_variadic)
-            cc_register_variadic_cfunc(vm, obj->name, (void *)1, nargs,
+            cc_register_variadic_cfunc(vm, extern_name, (void *)1, nargs,
                                        returns_double);
         else
-            cc_register_cfunc(vm, obj->name, (void *)1, nargs, returns_double);
+            cc_register_cfunc(vm, extern_name, (void *)1, nargs, returns_double);
         vm->compiler.ffi_table[vm->compiler.ffi_count - 1]
             .is_dynamic_placeholder = 1;
     }

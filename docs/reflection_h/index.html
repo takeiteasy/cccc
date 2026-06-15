@@ -266,7 +266,8 @@ function disclosure_triangle(elt) {
 <td><div style="margin-bottom:1px"><div class="content_text">
 <!-- a logicalPath="//apple_ref/doc/header/stdbool.h" machineGenerated="true" -->&lt;stdbool.h&gt;<!-- /a --><br>
 <!-- a logicalPath="//apple_ref/doc/header/stddef.h" machineGenerated="true" -->&lt;stddef.h&gt;<!-- /a --><br>
-<!-- a logicalPath="//apple_ref/doc/header/stdint.h" machineGenerated="true" -->&lt;stdint.h&gt;<!-- /a -->
+<!-- a logicalPath="//apple_ref/doc/header/stdint.h" machineGenerated="true" -->&lt;stdint.h&gt;<!-- /a --><br>
+<!-- a logicalPath="//apple_ref/doc/header/string.h" machineGenerated="true" -->&lt;string.h&gt;<!-- /a -->
 </div></div></td>
 </tr>
 </table></div>
@@ -390,8 +391,16 @@ return 0;
 <dt><tt><a href="index.html#//apple_ref/c/func/__cccc_ast_enum_find" target="_top">__cccc_ast_enum_find</a></tt></dt>
 <dd><p>Look up an enum constant by name.
 </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__cccc_ast_enum_from_string_chain" target="_top">__cccc_ast_enum_from_string_chain</a></tt></dt>
+<dd><p>Build a block of `if (strcmp(expr, "Name0") == 0) return V0; ...
+return -1;` over the constants of an enum type.
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__cccc_ast_enum_name" target="_top">__cccc_ast_enum_name</a></tt></dt>
 <dd><p>Return the tag name of an enum type.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__cccc_ast_enum_to_string_switch" target="_top">__cccc_ast_enum_to_string_switch</a></tt></dt>
+<dd><p>Build a `switch (expr) { case V0: return "Name0"; ...
+default: return ""; }` over the constants of an enum type.
 </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__cccc_ast_enum_value" target="_top">__cccc_ast_enum_value</a></tt></dt>
 <dd><p>Return the integer value of the enum constant at the given index.
@@ -482,6 +491,9 @@ function scope and return a variable-reference node for it.
 <dt><tt><a href="index.html#//apple_ref/c/func/__cccc_ast_make_enum" target="_top">__cccc_ast_make_enum</a></tt></dt>
 <dd><p>Create and expose a new named enum type.
 </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__cccc_ast_make_func_ptr_type" target="_top">__cccc_ast_make_func_ptr_type</a></tt></dt>
+<dd><p>Build a pointer-to-function type, e.g. "T (*)(T)".
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__cccc_ast_make_pointer" target="_top">__cccc_ast_make_pointer</a></tt></dt>
 <dd><p>Build a pointer-to-base type.
 </p></dd>
@@ -532,6 +544,9 @@ function scope and return a variable-reference node for it.
 </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__cccc_ast_obj_type" target="_top">__cccc_ast_obj_type</a></tt></dt>
 <dd><p>Return the type of a global object.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__cccc_ast_offsetof_chain" target="_top">__cccc_ast_offsetof_chain</a></tt></dt>
+<dd><p>Compute the byte offset of a (possibly nested) member chain.
 </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__cccc_ast_param_ref" target="_top">__cccc_ast_param_ref</a></tt></dt>
 <dd><p>Build a reference to a function parameter by name.
@@ -615,6 +630,9 @@ $quote("return x;") applies the correct implicit return-type cast.
 <dt><tt><a href="index.html#//apple_ref/c/func/__cccc_ast_type_base" target="_top">__cccc_ast_type_base</a></tt></dt>
 <dd><p>Return the element type of a pointer or array.
 </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__cccc_ast_type_c_name" target="_top">__cccc_ast_type_c_name</a></tt></dt>
+<dd><p>Return a valid C identifier fragment naming `ty`.
+</p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__cccc_ast_type_exists" target="_top">__cccc_ast_type_exists</a></tt></dt>
 <dd><p>Check whether a type is currently in scope by name.
 </p></dd>
@@ -695,6 +713,22 @@ $quote("return x;") applies the correct implicit return-type cast.
 </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__cccc_emit_directive" target="_top">__cccc_emit_directive</a></tt></dt>
 <dd><p>Emit one raw preprocessor directive line into generated output.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__cccc_generate_filter" target="_top">__cccc_generate_filter</a></tt></dt>
+<dd><p>Publish `void filter_T(T *arr, size_t n, T *out, size_t *out_n,
+bool (*pred)(T))`, writing elements matching `pred` into `out` and
+setting `*out_n` to the match count.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__cccc_generate_map" target="_top">__cccc_generate_map</a></tt></dt>
+<dd><p>Publish `void map_T(T *arr, size_t n, T *out, T (*f)(T))`,
+writing `f(arr[i])` into `out[i]` for each element.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__cccc_generate_reduce" target="_top">__cccc_generate_reduce</a></tt></dt>
+<dd><p>Publish `T reduce_T(T *arr, size_t n, T init, T (*f)(T, T))`,
+folding `f` over the array starting from `init`.
+</p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__cccc_generate_sum" target="_top">__cccc_generate_sum</a></tt></dt>
+<dd><p>Publish `T sum_T(T *arr, size_t n)` summing all elements.
 </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__cccc_gensym" target="_top">__cccc_gensym</a></tt></dt>
 <dd><p>Generate a unique identifier string for macro-created symbols.
@@ -1491,6 +1525,54 @@ $enum_add_constant(ty, name, value).
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_enum_find;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_ast_enum_from_string_chain;   name=__cccc_ast_enum_from_string_chain -->
+<a name="//apple_ref/c/func/__cccc_ast_enum_from_string_chain"></a>
+<h3><a name="__cccc_ast_enum_from_string_chain">__cccc_ast_enum_from_string_chain</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_ast_enum_from_string_chain;name=start --><!-- begin abstract --></p>
+<p>Build a block of `if (strcmp(expr, "Name0") == 0) return V0; ...
+return -1;` over the constants of an enum type.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_ast_enum_from_string_chain;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_enum_from_string_chain;name=start -->$<!-- a logicalPath="//apple_ref/c/cl/node_t //apple_ref/c/tdef/node_t //apple_ref/c/tag/node_t //apple_ref/c/struct/node_t //apple_ref/c/intf/node_t //apple_ref/doc/anysymbol/node_t" machineGenerated="true" --><span class="type">node_t</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_ast_enum_from_string_chain" logicalPath="//apple_ref/c/instm/__cccc_ast_enum_from_string_chain //apple_ref/c/clm/__cccc_ast_enum_from_string_chain //apple_ref/c/intfcm/__cccc_ast_enum_from_string_chain //apple_ref/c/intfm/__cccc_ast_enum_from_string_chain //apple_ref/c/func/__cccc_ast_enum_from_string_chain" target="_top"><span class="function">__cccc_ast_enum_from_string_chain</span></a>(
+    <a machinegenerated="true" href="../cccc_h/index.html#//apple_ref/c/tag/VirtualMachine" logicalPath="//apple_ref/c/cl/VirtualMachine //apple_ref/c/tdef/VirtualMachine //apple_ref/c/tag/VirtualMachine" target="_top"><span class="type">VirtualMachine</span></a> <span class="type">*</span><span class="param">vm</span>,
+    $<!-- a logicalPath="//apple_ref/c/cl/type_t //apple_ref/c/tdef/type_t //apple_ref/c/tag/type_t //apple_ref/c/struct/type_t //apple_ref/c/intf/type_t //apple_ref/doc/anysymbol/type_t" machineGenerated="true" --><span class="type">type_t</span><!-- /a --> <span class="type">*</span><span class="param">ty</span>,
+    $<!-- a logicalPath="//apple_ref/c/cl/node_t //apple_ref/c/tdef/node_t //apple_ref/c/tag/node_t //apple_ref/c/struct/node_t //apple_ref/c/intf/node_t //apple_ref/doc/anysymbol/node_t" machineGenerated="true" --><span class="type">node_t</span><!-- /a --> <span class="type">*</span><span class="param">expr</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_enum_from_string_chain;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__cccc_ast_enum_from_string_chain/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__cccc_ast_enum_from_string_chain/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The virtual machine instance.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__cccc_ast_enum_from_string_chain/ty;   name=ty -->
+<a name="//apple_ref/doc/functionparam/__cccc_ast_enum_from_string_chain/ty"></a>
+<code>ty</code>
+</dt>
+<dd><p>The enum type.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__cccc_ast_enum_from_string_chain/expr;   name=expr -->
+<a name="//apple_ref/doc/functionparam/__cccc_ast_enum_from_string_chain/expr"></a>
+<code>expr</code>
+</dt>
+<dd><p>The expression to compare (a `const char *`).</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>An nk_block node. Caller wraps it in a function returning the
+enum type (or an int).
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_enum_from_string_chain;name=start --><p>Convenience wrapper: $enum_from_string(ty, expr).
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_enum_from_string_chain;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_ast_enum_name;   name=__cccc_ast_enum_name -->
 <a name="//apple_ref/c/func/__cccc_ast_enum_name"></a>
 <h3><a name="__cccc_ast_enum_name">__cccc_ast_enum_name</a></h3>
@@ -1521,6 +1603,54 @@ $enum_add_constant(ty, name, value).
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
 <!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_enum_name;name=start --><p>Convenience wrapper: $enum_name(ty).
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_enum_name;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_ast_enum_to_string_switch;   name=__cccc_ast_enum_to_string_switch -->
+<a name="//apple_ref/c/func/__cccc_ast_enum_to_string_switch"></a>
+<h3><a name="__cccc_ast_enum_to_string_switch">__cccc_ast_enum_to_string_switch</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_ast_enum_to_string_switch;name=start --><!-- begin abstract --></p>
+<p>Build a `switch (expr) { case V0: return "Name0"; ...
+default: return ""; }` over the constants of an enum type.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_ast_enum_to_string_switch;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_enum_to_string_switch;name=start -->$<!-- a logicalPath="//apple_ref/c/cl/node_t //apple_ref/c/tdef/node_t //apple_ref/c/tag/node_t //apple_ref/c/struct/node_t //apple_ref/c/intf/node_t //apple_ref/doc/anysymbol/node_t" machineGenerated="true" --><span class="type">node_t</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_ast_enum_to_string_switch" logicalPath="//apple_ref/c/instm/__cccc_ast_enum_to_string_switch //apple_ref/c/clm/__cccc_ast_enum_to_string_switch //apple_ref/c/intfcm/__cccc_ast_enum_to_string_switch //apple_ref/c/intfm/__cccc_ast_enum_to_string_switch //apple_ref/c/func/__cccc_ast_enum_to_string_switch" target="_top"><span class="function">__cccc_ast_enum_to_string_switch</span></a>(
+    <a machinegenerated="true" href="../cccc_h/index.html#//apple_ref/c/tag/VirtualMachine" logicalPath="//apple_ref/c/cl/VirtualMachine //apple_ref/c/tdef/VirtualMachine //apple_ref/c/tag/VirtualMachine" target="_top"><span class="type">VirtualMachine</span></a> <span class="type">*</span><span class="param">vm</span>,
+    $<!-- a logicalPath="//apple_ref/c/cl/type_t //apple_ref/c/tdef/type_t //apple_ref/c/tag/type_t //apple_ref/c/struct/type_t //apple_ref/c/intf/type_t //apple_ref/doc/anysymbol/type_t" machineGenerated="true" --><span class="type">type_t</span><!-- /a --> <span class="type">*</span><span class="param">ty</span>,
+    $<!-- a logicalPath="//apple_ref/c/cl/node_t //apple_ref/c/tdef/node_t //apple_ref/c/tag/node_t //apple_ref/c/struct/node_t //apple_ref/c/intf/node_t //apple_ref/doc/anysymbol/node_t" machineGenerated="true" --><span class="type">node_t</span><!-- /a --> <span class="type">*</span><span class="param">expr</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_enum_to_string_switch;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__cccc_ast_enum_to_string_switch/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__cccc_ast_enum_to_string_switch/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The virtual machine instance.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__cccc_ast_enum_to_string_switch/ty;   name=ty -->
+<a name="//apple_ref/doc/functionparam/__cccc_ast_enum_to_string_switch/ty"></a>
+<code>ty</code>
+</dt>
+<dd><p>The enum type.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__cccc_ast_enum_to_string_switch/expr;   name=expr -->
+<a name="//apple_ref/doc/functionparam/__cccc_ast_enum_to_string_switch/expr"></a>
+<code>expr</code>
+</dt>
+<dd><p>The expression to switch on (the enum value).</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>An nk_switch node. Caller wraps it in a function returning
+`const char *`.
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_enum_to_string_switch;name=start --><p>Convenience wrapper: $enum_to_string(ty, expr).
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_enum_to_string_switch;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_ast_enum_value;   name=__cccc_ast_enum_value -->
@@ -2749,6 +2879,59 @@ Convenience wrapper: $make_enum(name).
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_make_enum;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_ast_make_func_ptr_type;   name=__cccc_ast_make_func_ptr_type -->
+<a name="//apple_ref/c/func/__cccc_ast_make_func_ptr_type"></a>
+<h3><a name="__cccc_ast_make_func_ptr_type">__cccc_ast_make_func_ptr_type</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_ast_make_func_ptr_type;name=start --><!-- begin abstract --></p>
+<p>Build a pointer-to-function type, e.g. "T (*)(T)".
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_ast_make_func_ptr_type;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_make_func_ptr_type;name=start -->$<!-- a logicalPath="//apple_ref/c/cl/type_t //apple_ref/c/tdef/type_t //apple_ref/c/tag/type_t //apple_ref/c/struct/type_t //apple_ref/c/intf/type_t //apple_ref/doc/anysymbol/type_t" machineGenerated="true" --><span class="type">type_t</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_ast_make_func_ptr_type" logicalPath="//apple_ref/c/instm/__cccc_ast_make_func_ptr_type //apple_ref/c/clm/__cccc_ast_make_func_ptr_type //apple_ref/c/intfcm/__cccc_ast_make_func_ptr_type //apple_ref/c/intfm/__cccc_ast_make_func_ptr_type //apple_ref/c/func/__cccc_ast_make_func_ptr_type" target="_top"><span class="function">__cccc_ast_make_func_ptr_type</span></a>(
+    <a machinegenerated="true" href="../cccc_h/index.html#//apple_ref/c/tag/VirtualMachine" logicalPath="//apple_ref/c/cl/VirtualMachine //apple_ref/c/tdef/VirtualMachine //apple_ref/c/tag/VirtualMachine" target="_top"><span class="type">VirtualMachine</span></a> <span class="type">*</span><span class="param">vm</span>,
+    $<!-- a logicalPath="//apple_ref/c/cl/type_t //apple_ref/c/tdef/type_t //apple_ref/c/tag/type_t //apple_ref/c/struct/type_t //apple_ref/c/intf/type_t //apple_ref/doc/anysymbol/type_t" machineGenerated="true" --><span class="type">type_t</span><!-- /a --> <span class="type">*</span><span class="param">return_ty</span>, 
+    $<!-- a logicalPath="//apple_ref/c/cl/type_t //apple_ref/c/tdef/type_t //apple_ref/c/tag/type_t //apple_ref/c/struct/type_t //apple_ref/c/intf/type_t //apple_ref/doc/anysymbol/type_t" machineGenerated="true" --><span class="type">type_t</span><!-- /a --> <span class="type">*</span><span class="type">*</span><span class="param">param_types</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <span class="param">nparams</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_make_func_ptr_type;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__cccc_ast_make_func_ptr_type/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__cccc_ast_make_func_ptr_type/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__cccc_ast_make_func_ptr_type/return_ty;   name=return_ty -->
+<a name="//apple_ref/doc/functionparam/__cccc_ast_make_func_ptr_type/return_ty"></a>
+<code>return_ty</code>
+</dt>
+<dd><p>The function's return type.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__cccc_ast_make_func_ptr_type/param_types;   name=param_types -->
+<a name="//apple_ref/doc/functionparam/__cccc_ast_make_func_ptr_type/param_types"></a>
+<code>param_types</code>
+</dt>
+<dd><p>Array of parameter types (each copy_type()'d internally).</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__cccc_ast_make_func_ptr_type/nparams;   name=nparams -->
+<a name="//apple_ref/doc/functionparam/__cccc_ast_make_func_ptr_type/nparams"></a>
+<code>nparams</code>
+</dt>
+<dd><p>Number of entries in param_types (max 16).</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>A $type_t* representing "return_ty (*)(param_types...)", or NULL on error.
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_make_func_ptr_type;name=start --><p>Convenience wrapper: $make_func_ptr_type(return_ty, param_types, nparams).
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_make_func_ptr_type;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_ast_make_pointer;   name=__cccc_ast_make_pointer -->
 <a name="//apple_ref/c/func/__cccc_ast_make_pointer"></a>
 <h3><a name="__cccc_ast_make_pointer">__cccc_ast_make_pointer</a></h3>
@@ -3355,6 +3538,59 @@ for pointer-to-struct access).
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
 <!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_obj_type;name=start --><p>Convenience wrapper: $obj_type(obj).
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_obj_type;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_ast_offsetof_chain;   name=__cccc_ast_offsetof_chain -->
+<a name="//apple_ref/c/func/__cccc_ast_offsetof_chain"></a>
+<h3><a name="__cccc_ast_offsetof_chain">__cccc_ast_offsetof_chain</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_ast_offsetof_chain;name=start --><!-- begin abstract --></p>
+<p>Compute the byte offset of a (possibly nested) member chain.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_ast_offsetof_chain;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_offsetof_chain;name=start --><!-- a logicalPath="//apple_ref/c/cl/int64_t //apple_ref/c/tdef/int64_t //apple_ref/c/tag/int64_t //apple_ref/c/struct/int64_t //apple_ref/c/intf/int64_t //apple_ref/doc/anysymbol/int64_t" machineGenerated="true" --><span class="type">int64_t</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_ast_offsetof_chain" logicalPath="//apple_ref/c/instm/__cccc_ast_offsetof_chain //apple_ref/c/clm/__cccc_ast_offsetof_chain //apple_ref/c/intfcm/__cccc_ast_offsetof_chain //apple_ref/c/intfm/__cccc_ast_offsetof_chain //apple_ref/c/func/__cccc_ast_offsetof_chain" target="_top"><span class="function">__cccc_ast_offsetof_chain</span></a>(
+    <a machinegenerated="true" href="../cccc_h/index.html#//apple_ref/c/tag/VirtualMachine" logicalPath="//apple_ref/c/cl/VirtualMachine //apple_ref/c/tdef/VirtualMachine //apple_ref/c/tag/VirtualMachine" target="_top"><span class="type">VirtualMachine</span></a> <span class="type">*</span><span class="param">vm</span>,
+    $<!-- a logicalPath="//apple_ref/c/cl/type_t //apple_ref/c/tdef/type_t //apple_ref/c/tag/type_t //apple_ref/c/struct/type_t //apple_ref/c/intf/type_t //apple_ref/doc/anysymbol/type_t" machineGenerated="true" --><span class="type">type_t</span><!-- /a --> <span class="type">*</span><span class="param">ty</span>, 
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="type">*</span><span class="param">names</span>,
+    <!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <span class="param">n</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_offsetof_chain;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__cccc_ast_offsetof_chain/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__cccc_ast_offsetof_chain/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The virtual machine instance.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__cccc_ast_offsetof_chain/ty;   name=ty -->
+<a name="//apple_ref/doc/functionparam/__cccc_ast_offsetof_chain/ty"></a>
+<code>ty</code>
+</dt>
+<dd><p>The starting struct/union type.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__cccc_ast_offsetof_chain/names;   name=names -->
+<a name="//apple_ref/doc/functionparam/__cccc_ast_offsetof_chain/names"></a>
+<code>names</code>
+</dt>
+<dd><p>An array of member names to walk, innermost last.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__cccc_ast_offsetof_chain/n;   name=n -->
+<a name="//apple_ref/doc/functionparam/__cccc_ast_offsetof_chain/n"></a>
+<code>n</code>
+</dt>
+<dd><p>The number of names in the chain.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>The summed byte offset, or -1 if any name cannot be resolved.
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_offsetof_chain;name=start --><p>Convenience wrapper: $offsetof_chain(ty, "a", "b", ...).
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_offsetof_chain;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_ast_param_ref;   name=__cccc_ast_param_ref -->
@@ -4441,6 +4677,47 @@ Convenience wrapper: $synthetic_token(label).
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_type_base;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_ast_type_c_name;   name=__cccc_ast_type_c_name -->
+<a name="//apple_ref/c/func/__cccc_ast_type_c_name"></a>
+<h3><a name="__cccc_ast_type_c_name">__cccc_ast_type_c_name</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_ast_type_c_name;name=start --><!-- begin abstract --></p>
+<p>Return a valid C identifier fragment naming `ty`.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_ast_type_c_name;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_type_c_name;name=start --><span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_ast_type_c_name" logicalPath="//apple_ref/c/instm/__cccc_ast_type_c_name //apple_ref/c/clm/__cccc_ast_type_c_name //apple_ref/c/intfcm/__cccc_ast_type_c_name //apple_ref/c/intfm/__cccc_ast_type_c_name //apple_ref/c/func/__cccc_ast_type_c_name" target="_top"><span class="function">__cccc_ast_type_c_name</span></a>(
+    <a machinegenerated="true" href="../cccc_h/index.html#//apple_ref/c/tag/VirtualMachine" logicalPath="//apple_ref/c/cl/VirtualMachine //apple_ref/c/tdef/VirtualMachine //apple_ref/c/tag/VirtualMachine" target="_top"><span class="type">VirtualMachine</span></a> <span class="type">*</span><span class="param">vm</span>,
+    $<!-- a logicalPath="//apple_ref/c/cl/type_t //apple_ref/c/tdef/type_t //apple_ref/c/tag/type_t //apple_ref/c/struct/type_t //apple_ref/c/intf/type_t //apple_ref/doc/anysymbol/type_t" machineGenerated="true" --><span class="type">type_t</span><!-- /a --> <span class="type">*</span><span class="param">ty</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_ast_type_c_name;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Parameters</font></h5>
+<div class="param_indent">
+<dl>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__cccc_ast_type_c_name/vm;   name=vm -->
+<a name="//apple_ref/doc/functionparam/__cccc_ast_type_c_name/vm"></a>
+<code>vm</code>
+</dt>
+<dd><p>The VM context.</p></dd>
+<dt>
+<!-- headerDoc=functionparam;  uid=//apple_ref/doc/functionparam/__cccc_ast_type_c_name/ty;   name=ty -->
+<a name="//apple_ref/doc/functionparam/__cccc_ast_type_c_name/ty"></a>
+<code>ty</code>
+</dt>
+<dd><p>The type to inspect.</p></dd>
+</dl>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
+<p><!-- begin return value --></p>
+<p>$type_name(ty) for named types, or a builtin spelling ("int",
+"double", "ulong", ...) for builtin scalar types, or NULL.
+
+<!-- end return value --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_type_c_name;name=start --><p>Convenience wrapper: $type_c_name(ty). Intended for naming
+generated functions, e.g. sum_&lt;T&gt; from $generate_sum(elem_type).
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_ast_type_c_name;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_ast_type_exists;   name=__cccc_ast_type_exists -->
 <a name="//apple_ref/c/func/__cccc_ast_type_exists"></a>
 <h3><a name="__cccc_ast_type_exists">__cccc_ast_type_exists</a></h3>
@@ -4632,7 +4909,7 @@ Convenience wrapper: $synthetic_token(label).
 </div>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Return Value</font></h5>
 <p><!-- begin return value --></p>
-<p>A NUL-terminated string owned by ty, or NULL for anonymous types.
+<p>A freshly-allocated NUL-terminated string, or NULL for anonymous types.
 
 <!-- end return value --></p>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
@@ -5293,6 +5570,78 @@ Convenience wrapper: $dump_tree(node).
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
 <!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_emit_directive;name=start --><p>Convenience wrapper: $emit_directive(line).
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_emit_directive;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_generate_filter;   name=__cccc_generate_filter -->
+<a name="//apple_ref/c/func/__cccc_generate_filter"></a>
+<h3><a name="__cccc_generate_filter">__cccc_generate_filter</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_generate_filter;name=start --><!-- begin abstract --></p>
+<p>Publish `void filter_T(T *arr, size_t n, T *out, size_t *out_n,
+bool (*pred)(T))`, writing elements matching `pred` into `out` and
+setting `*out_n` to the match count.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_generate_filter;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_generate_filter;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_generate_filter" logicalPath="//apple_ref/c/instm/__cccc_generate_filter //apple_ref/c/clm/__cccc_generate_filter //apple_ref/c/intfcm/__cccc_generate_filter //apple_ref/c/intfm/__cccc_generate_filter //apple_ref/c/func/__cccc_generate_filter" target="_top"><span class="function">__cccc_generate_filter</span></a>(
+    <a machinegenerated="true" href="../cccc_h/index.html#//apple_ref/c/tag/VirtualMachine" logicalPath="//apple_ref/c/cl/VirtualMachine //apple_ref/c/tdef/VirtualMachine //apple_ref/c/tag/VirtualMachine" target="_top"><span class="type">VirtualMachine</span></a> <span class="type">*</span><span class="param">vm</span>,
+    $<!-- a logicalPath="//apple_ref/c/cl/type_t //apple_ref/c/tdef/type_t //apple_ref/c/tag/type_t //apple_ref/c/struct/type_t //apple_ref/c/intf/type_t //apple_ref/doc/anysymbol/type_t" machineGenerated="true" --><span class="type">type_t</span><!-- /a --> <span class="type">*</span><span class="param">elem_ty</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_generate_filter;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_generate_filter;name=start --><p>Convenience wrapper: $generate_filter(elem_type).
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_generate_filter;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_generate_map;   name=__cccc_generate_map -->
+<a name="//apple_ref/c/func/__cccc_generate_map"></a>
+<h3><a name="__cccc_generate_map">__cccc_generate_map</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_generate_map;name=start --><!-- begin abstract --></p>
+<p>Publish `void map_T(T *arr, size_t n, T *out, T (*f)(T))`,
+writing `f(arr[i])` into `out[i]` for each element.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_generate_map;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_generate_map;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_generate_map" logicalPath="//apple_ref/c/instm/__cccc_generate_map //apple_ref/c/clm/__cccc_generate_map //apple_ref/c/intfcm/__cccc_generate_map //apple_ref/c/intfm/__cccc_generate_map //apple_ref/c/func/__cccc_generate_map" target="_top"><span class="function">__cccc_generate_map</span></a>(
+    <a machinegenerated="true" href="../cccc_h/index.html#//apple_ref/c/tag/VirtualMachine" logicalPath="//apple_ref/c/cl/VirtualMachine //apple_ref/c/tdef/VirtualMachine //apple_ref/c/tag/VirtualMachine" target="_top"><span class="type">VirtualMachine</span></a> <span class="type">*</span><span class="param">vm</span>,
+    $<!-- a logicalPath="//apple_ref/c/cl/type_t //apple_ref/c/tdef/type_t //apple_ref/c/tag/type_t //apple_ref/c/struct/type_t //apple_ref/c/intf/type_t //apple_ref/doc/anysymbol/type_t" machineGenerated="true" --><span class="type">type_t</span><!-- /a --> <span class="type">*</span><span class="param">elem_ty</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_generate_map;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_generate_map;name=start --><p>Convenience wrapper: $generate_map(elem_type).
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_generate_map;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_generate_reduce;   name=__cccc_generate_reduce -->
+<a name="//apple_ref/c/func/__cccc_generate_reduce"></a>
+<h3><a name="__cccc_generate_reduce">__cccc_generate_reduce</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_generate_reduce;name=start --><!-- begin abstract --></p>
+<p>Publish `T reduce_T(T *arr, size_t n, T init, T (*f)(T, T))`,
+folding `f` over the array starting from `init`.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_generate_reduce;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_generate_reduce;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_generate_reduce" logicalPath="//apple_ref/c/instm/__cccc_generate_reduce //apple_ref/c/clm/__cccc_generate_reduce //apple_ref/c/intfcm/__cccc_generate_reduce //apple_ref/c/intfm/__cccc_generate_reduce //apple_ref/c/func/__cccc_generate_reduce" target="_top"><span class="function">__cccc_generate_reduce</span></a>(
+    <a machinegenerated="true" href="../cccc_h/index.html#//apple_ref/c/tag/VirtualMachine" logicalPath="//apple_ref/c/cl/VirtualMachine //apple_ref/c/tdef/VirtualMachine //apple_ref/c/tag/VirtualMachine" target="_top"><span class="type">VirtualMachine</span></a> <span class="type">*</span><span class="param">vm</span>,
+    $<!-- a logicalPath="//apple_ref/c/cl/type_t //apple_ref/c/tdef/type_t //apple_ref/c/tag/type_t //apple_ref/c/struct/type_t //apple_ref/c/intf/type_t //apple_ref/doc/anysymbol/type_t" machineGenerated="true" --><span class="type">type_t</span><!-- /a --> <span class="type">*</span><span class="param">elem_ty</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_generate_reduce;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_generate_reduce;name=start --><p>Convenience wrapper: $generate_reduce(elem_type).
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_generate_reduce;name=end --><!-- end discussion -->
+</p>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_generate_sum;   name=__cccc_generate_sum -->
+<a name="//apple_ref/c/func/__cccc_generate_sum"></a>
+<h3><a name="__cccc_generate_sum">__cccc_generate_sum</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_generate_sum;name=start --><!-- begin abstract --></p>
+<p>Publish `T sum_T(T *arr, size_t n)` summing all elements.
+<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__cccc_generate_sum;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_generate_sum;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__cccc_generate_sum" logicalPath="//apple_ref/c/instm/__cccc_generate_sum //apple_ref/c/clm/__cccc_generate_sum //apple_ref/c/intfcm/__cccc_generate_sum //apple_ref/c/intfm/__cccc_generate_sum //apple_ref/c/func/__cccc_generate_sum" target="_top"><span class="function">__cccc_generate_sum</span></a>(
+    <a machinegenerated="true" href="../cccc_h/index.html#//apple_ref/c/tag/VirtualMachine" logicalPath="//apple_ref/c/cl/VirtualMachine //apple_ref/c/tdef/VirtualMachine //apple_ref/c/tag/VirtualMachine" target="_top"><span class="type">VirtualMachine</span></a> <span class="type">*</span><span class="param">vm</span>,
+    $<!-- a logicalPath="//apple_ref/c/cl/type_t //apple_ref/c/tdef/type_t //apple_ref/c/tag/type_t //apple_ref/c/struct/type_t //apple_ref/c/intf/type_t //apple_ref/doc/anysymbol/type_t" machineGenerated="true" --><span class="type">type_t</span><!-- /a --> <span class="type">*</span><span class="param">elem_ty</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__cccc_generate_sum;name=end --></pre>
+</div>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_generate_sum;name=start --><p>Convenience wrapper: $generate_sum(elem_type).
+<!-- headerDoc=discussion;uid=//apple_ref/c/func/__cccc_generate_sum;name=end --><!-- end discussion -->
 </p>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__cccc_gensym;   name=__cccc_gensym -->
@@ -5982,7 +6331,7 @@ count, a compile-time error is emitted.</p></dd>
 <p class="gapBeforeFooter"> </p>
 <hr class="afterFooter">
 <div class="hd_copyright_and_timestamp">
-<p class="hd_timestamp">Last Updated: Sunday, June 14, 2026
+<p class="hd_timestamp">Last Updated: Monday, June 15, 2026
 </p>
 </div>
 </td>

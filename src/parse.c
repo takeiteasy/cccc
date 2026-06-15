@@ -151,6 +151,8 @@ static void inherit_semantic_attrs(Type *dst, Type *src);
 static Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr);
 static Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                          VarAttr *attr);
+static Token *function_declaration_list(VirtualMachine *vm, Token *tok,
+                                        Type *basety, VarAttr *attr);
 static void array_initializer2(VirtualMachine *vm, Token **rest, Token *tok,
                                Initializer *init, int i);
 static void struct_initializer2(VirtualMachine *vm, Token **rest, Token *tok,
@@ -202,7 +204,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok);
 static Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr);
 static bool falls_through(Node *n);
 static void warn_switch_fallthrough(VirtualMachine *vm, Node *sw);
-static bool is_function(VirtualMachine *vm, Token *tok);
+static bool is_function(VirtualMachine *vm, Token *tok, Type *basety);
+static bool is_function_decl_list(VirtualMachine *vm, Token *tok, Type *basety);
 static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr);
 static Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr);
 
@@ -713,6 +716,7 @@ static Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     memset(var, 0, sizeof(Obj));
     var->name = name;
     var->ty = ty;
+    var->asm_label = ty->asm_label;
     var->align = ty->align;
     var->tok = ty->name;
     var->display_name =
@@ -1464,6 +1468,23 @@ static Type *type_suffix(VirtualMachine *vm, Token **rest, Token *tok, Type *ty)
     return ty;
 }
 
+static bool is_asm_label_tok(Token *tok) {
+    return equal(tok, "asm") || equal(tok, "__asm") || equal(tok, "__asm__");
+}
+
+static Token *asm_label(VirtualMachine *vm, Token *tok, char **label) {
+    if (!is_asm_label_tok(tok))
+        return tok;
+
+    tok = skip(vm, tok->next, "(");
+    if (tok->kind != TK_STR || !tok->ty || !tok->ty->base ||
+        tok->ty->base->kind != TY_CHAR)
+        error_tok(vm, tok, "expected string literal in asm label");
+    if (label)
+        *label = arena_strdup(vm, tok->str);
+    return skip(vm, tok->next, ")");
+}
+
 // pointers = ("*" ("const" | "volatile" | "restrict")*)*
 static Type *pointers(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     while (consume(vm, &tok, tok, "*")) {
@@ -1538,6 +1559,7 @@ static Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) 
         declarator(vm, &tok, start->next, &dummy);
         tok = skip(vm, tok, ")");
         ty = type_suffix(vm, rest, tok, ty);
+        *rest = asm_label(vm, *rest, &ty->asm_label);
         return declarator(vm, &tok, start->next, ty);
     }
 
@@ -1570,6 +1592,7 @@ static Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) 
     tok = c23_attribute_list(vm, tok, NULL, &suffix_attr);
     append_custom_attr_list(&ty->custom_attrs, suffix_attr.custom_attrs);
     ty = apply_var_attrs_to_type(vm, ty, &suffix_attr);
+    tok = asm_label(vm, tok, &ty->asm_label);
 
     ty->name = name;
     ty->name_pos = name_pos;
@@ -3644,8 +3667,10 @@ static Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok, Token *
                 continue;
             }
 
-            if (is_function(vm, tok)) {
-                tok = function(vm, tok, basety, &attr);
+            if (is_function(vm, tok, basety)) {
+                tok = is_function_decl_list(vm, tok, basety)
+                          ? function_declaration_list(vm, tok, basety, &attr)
+                          : function(vm, tok, basety, &attr);
                 continue;
             }
 
@@ -7067,6 +7092,93 @@ static Obj *find_func_in_current_scope(VirtualMachine *vm, char *name, int name_
     return NULL;
 }
 
+static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty, VarAttr *attr,
+                                       Token *tok) {
+    if (!ty->name)
+        error_tok(vm, ty->name_pos, "function name omitted");
+
+    char *name_str = get_ident(vm, ty->name);
+
+    if (attr->is_noreturn && ty->kind == TY_FUNC)
+        ty->is_noreturn = true;
+
+    Obj *parent_fn = vm->compiler.current_fn;
+    bool is_nested = (parent_fn != NULL);
+
+    Obj *fn = attr->is_static
+                  ? find_func_in_current_scope(vm, name_str, ty->name->len)
+                  : find_func(vm, name_str, ty->name->len);
+    if (fn) {
+        if (!fn->is_function)
+            error_tok(vm, tok, "redeclared as a different kind of symbol");
+        if (fn->is_implicit) {
+            fn->ty = ty;
+            fn->is_implicit = false;
+        }
+        if (!fn->is_static && attr->is_static)
+            error_tok(vm, tok,
+                      "static declaration follows a non-static declaration");
+        fn->is_maybe_unused |= ty->is_maybe_unused;
+        fn->is_deprecated |= ty->is_deprecated;
+        fn->is_noreturn |= ty->is_noreturn;
+        fn->is_pure |= ty->is_pure;
+        fn->is_func_const |= ty->is_func_const;
+        if (ty->asm_label)
+            fn->asm_label = ty->asm_label;
+        if (ty->deprecated_msg)
+            fn->deprecated_msg = ty->deprecated_msg;
+        if (ty->format_style && fn->ty) {
+            fn->ty->format_style = ty->format_style;
+            fn->ty->format_string_index = ty->format_string_index;
+            fn->ty->format_fmt_first_arg = ty->format_fmt_first_arg;
+        }
+    } else {
+        fn = new_gvar(vm, name_str, ty->name->len, ty);
+        fn->is_function = true;
+        fn->is_definition = false;
+        fn->is_static =
+            attr->is_static || (attr->is_inline && !attr->is_extern);
+        fn->is_inline = attr->is_inline;
+        fn->asm_label = ty->asm_label;
+    }
+
+    if (is_nested) {
+        fn->parent_fn = parent_fn;
+        fn->is_nested = true;
+        fn->nesting_depth = vm->compiler.fn_nesting_depth + 1;
+        fn->is_static = true;
+    } else {
+        fn->parent_fn = NULL;
+        fn->is_nested = false;
+        fn->nesting_depth = 0;
+    }
+
+    fn->is_root = !(fn->is_static && fn->is_inline);
+    run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name,
+                          fn->ty, fn, fn->tok);
+    return fn;
+}
+
+static Token *function_declaration_list(VirtualMachine *vm, Token *tok,
+                                        Type *basety, VarAttr *attr) {
+    bool first = true;
+
+    while (!consume(vm, &tok, tok, ";")) {
+        if (!first)
+            tok = skip(vm, tok, ",");
+        first = false;
+
+        Type *ty = declarator(vm, &tok, tok, basety);
+        ty = apply_var_attrs_to_type(vm, ty, attr);
+        if (ty->kind != TY_FUNC)
+            error_tok(vm, ty->name ? ty->name : tok,
+                      "expected function declaration");
+        declare_function_prototype(vm, ty, attr, tok);
+    }
+
+    return tok;
+}
+
 static void mark_live(VirtualMachine *vm, Obj *var) {
     if (!var->is_function || var->is_live)
         return;
@@ -7196,6 +7308,8 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
         fn->is_noreturn |= ty->is_noreturn;
         fn->is_pure |= ty->is_pure;
         fn->is_func_const |= ty->is_func_const;
+        if (ty->asm_label)
+            fn->asm_label = ty->asm_label;
         if (ty->deprecated_msg)
             fn->deprecated_msg = ty->deprecated_msg;
         if (ty->format_style && fn->ty) {
@@ -7210,6 +7324,7 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
         fn->is_static =
             attr->is_static || (attr->is_inline && !attr->is_extern);
         fn->is_inline = attr->is_inline;
+        fn->asm_label = ty->asm_label;
     }
 
     // Set up nested function tracking
@@ -7543,16 +7658,25 @@ static Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
 
 // Lookahead tokens and returns true if a given token is a start
 // of a function definition or declaration.
-static bool is_function(VirtualMachine *vm, Token *tok) {
+static bool is_function(VirtualMachine *vm, Token *tok, Type *basety) {
     if (equal(tok, ";"))
         return false;
 
     Type dummy = {};
     bool saved_lookahead = vm->compiler.in_type_lookahead;
     vm->compiler.in_type_lookahead = true;
-    Type *ty = declarator(vm, &tok, tok, &dummy);
+    Type *ty = declarator(vm, &tok, tok, basety ? copy_type(vm, basety) : &dummy);
     vm->compiler.in_type_lookahead = saved_lookahead;
     return ty->kind == TY_FUNC;
+}
+
+static bool is_function_decl_list(VirtualMachine *vm, Token *tok, Type *basety) {
+    Type dummy = {};
+    bool saved_lookahead = vm->compiler.in_type_lookahead;
+    vm->compiler.in_type_lookahead = true;
+    Type *ty = declarator(vm, &tok, tok, basety ? copy_type(vm, basety) : &dummy);
+    vm->compiler.in_type_lookahead = saved_lookahead;
+    return ty->kind == TY_FUNC && equal(tok, ",");
 }
 
 // Remove redundant tentative definitions.
@@ -7732,8 +7856,10 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
         }
 
         // Function
-        if (is_function(vm, tok)) {
-            tok = function(vm, tok, basety, &attr);
+        if (is_function(vm, tok, basety)) {
+            tok = is_function_decl_list(vm, tok, basety)
+                      ? function_declaration_list(vm, tok, basety, &attr)
+                      : function(vm, tok, basety, &attr);
             continue;
         }
 

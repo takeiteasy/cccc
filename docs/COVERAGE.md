@@ -200,7 +200,8 @@ language coverage figures apply.
 | `__thread` storage class | ~ | Emits `-Wignored-features`; treated as `static` |
 | `__restrict` / `__restrict__` | ✓ | Spelling aliases for `restrict`; fully optimised (see `restrict` entry above) |
 | `__typeof__` | ✓ | Synonym for `typeof` |
-| `__asm__` / `asm(...)` inline assembly | ✓ | No-op by default; `--asm-passthru` compiles via native CC and executes via FFI; custom callback via `cc_set_asm_callback` |
+| `asm(...)` inline assembly | ✓ | `asm(...)` statements are no-ops by default; `--asm-passthru` compiles via native CC and executes via FFI; custom callback via `cc_set_asm_callback`; `__asm__` statement spelling is pending |
+| GNU `asm("symbol")` declaration labels | ~ | Supported on function declarations, including typedef-based and multi-declarator declarations; the label is used as the external FFI symbol name |
 
 ---
 

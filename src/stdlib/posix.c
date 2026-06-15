@@ -44,6 +44,7 @@ static long long wrap_creat(const char *path, long long mode) {
 static long long wrap_close(long long fd) { return (long long)close((int)fd); }
 static long long wrap_read(long long fd, long long buf, long long count) { return (long long)read((int)fd, (void *)buf, (size_t)count); }
 static long long wrap_write(long long fd, long long buf, long long count) { return (long long)write((int)fd, (const void *)buf, (size_t)count); }
+static long long wrap_pwrite(long long fd, long long buf, long long count, long long offset) { return (long long)pwrite((int)fd, (const void *)buf, (size_t)count, (off_t)offset); }
 static long long wrap_lseek(long long fd, long long offset, long long whence) { return (long long)lseek((int)fd, (off_t)offset, (int)whence); }
 static long long wrap_access(long long path, long long mode) { return (long long)access((const char *)path, (int)mode); }
 static long long wrap_unlink(long long path) { return (long long)unlink((const char *)path); }
@@ -71,6 +72,7 @@ static long long wrap_regfree(long long preg) { regfree((regex_t *)preg); return
 void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "read", (void*)wrap_read, 3, 0);
     cc_register_cfunc(vm, "write", (void*)wrap_write, 3, 0);
+    cc_register_cfunc(vm, "pwrite", (void*)wrap_pwrite, 4, 0);
     cc_register_cfunc(vm, "close", (void*)wrap_close, 1, 0);
     cc_register_cfunc(vm, "lseek", (void*)wrap_lseek, 3, 0);
     cc_register_cfunc(vm, "access", (void*)wrap_access, 2, 0);

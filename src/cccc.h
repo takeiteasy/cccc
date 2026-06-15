@@ -620,6 +620,7 @@ struct Type {
     // Declaration
     Token *name;
     Token *name_pos;
+    char *asm_label; // GNU asm("symbol") label for function declarations
 
     // Array
     int array_len;
@@ -862,6 +863,7 @@ struct Obj {
     struct Obj *next;
     char *name;    // Variable name
     char *display_name; // Source identifier when storage uses a synthetic name
+    char *asm_label; // External symbol name from GNU asm("symbol") label
     Type *ty;      // Type
     Token *tok;    // representative token
     bool is_local; // local or global/function

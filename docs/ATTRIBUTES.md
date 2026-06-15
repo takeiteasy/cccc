@@ -315,3 +315,24 @@ Attributes are accepted at these positions in the grammar:
 | Enum specifier | ✓ | ✓ |
 | Labels | ✓ | ✓ |
 | Statement level | ✗ | ✗ |
+
+## GNU `asm("symbol")` Labels
+
+GNU asm labels are accepted after function declarators. CCCC keeps the C
+identifier for source lookup and uses the label as the external FFI symbol:
+
+```c
+typedef int Print(const char *);
+
+Print say asm("puts");
+
+int main(void) {
+    Print a asm("puts"), b asm("puts");
+    say("file scope");
+    a("first");
+    b("second");
+}
+```
+
+Object asm labels are parsed as declaration syntax but do not change storage
+layout or serialized output.

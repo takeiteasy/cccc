@@ -62,6 +62,10 @@ static int find_ffi_function(VirtualMachine *vm, const char *name) {
     return -1;
 }
 
+static const char *obj_external_name(Obj *obj) {
+    return obj && obj->asm_label ? obj->asm_label : obj ? obj->name : NULL;
+}
+
 static Obj *find_global_obj(Obj *prog, const char *name) {
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (obj->name && strlen(obj->name) == strlen(name) &&
@@ -970,7 +974,7 @@ static bool can_emit_tail_call(VirtualMachine *vm, Node *expr) {
     if (!lhs || lhs->kind != ND_VAR || !lhs->var->is_function)
         return false;
     Obj *callee = lhs->var;
-    if (find_ffi_function(vm, callee->name) >= 0)
+    if (find_ffi_function(vm, obj_external_name(callee)) >= 0)
         return false; // FFI — goes through CALLF, not CALL
     if (callee->is_nested)
         return false; // needs static link in REG_A0
@@ -3473,7 +3477,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // double_arg_mask)
         int ffi_idx = -1;
         if (node->lhs->kind == ND_VAR && node->lhs->var->is_function) {
-            ffi_idx = find_ffi_function(vm, node->lhs->var->name);
+            ffi_idx = find_ffi_function(vm, obj_external_name(node->lhs->var));
         }
 
         if (ffi_idx >= 0) {
@@ -5323,7 +5327,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
     // Second pass: Patch function call addresses
     for (int i = 0; i < vm->compiler.num_call_patches; i++) {
         Obj *target = vm->compiler.call_patches[i].function;
-        char *fn_name = target->name;
+        const char *fn_name = obj_external_name(target);
         Pc loc = vm->compiler.call_patches[i].location;
 
         Obj *fn_def = find_function_definition_for_patch(&fn_defs, target);
