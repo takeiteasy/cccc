@@ -267,7 +267,7 @@ new backend is a new `cccc_backend_t` registration against
 `cccc_target_t`; the build entry does not change.
 
 **Bytecode / VM targets are out of scope for the build system.**
-A `.jbc` file is just `-c=bytecode -o file.jbc source.c`; you
+A `.c4` file is just `-c=bytecode -o file.c4 source.c`; you
 don't need a build system for it. Tests that need VM execution —
 VM-only features, safety levels, debugging, profiling — belong in
 the testing framework (see [TESTING_FRAMEWORK.md](TESTING_FRAMEWORK.md)),
@@ -650,7 +650,7 @@ they don't depend on each other. The Makefile conversion is the
 | Mode | What happens to the build script |
 |------|----------------------------------|
 | `./cccc build.c` (default) | Compiles and runs the script as a normal C program. `[[cccc::build]]` and `[[cccc::build_target]]` are silently consumed; the build entry is not called. Useful for syntax-checking. |
-| `./cccc -c=bytecode -o build.c.jbc build.c` | Emits a `.jbc` containing every definition in the file except the build entry. Loading the `.jbc` and calling `main()` works as above. |
+| `./cccc -c=bytecode -o build.c.c4 build.c` | Emits a `.c4` containing every definition in the file except the build entry. Loading the `.c4` and calling `main()` works as above. |
 | `./cccc -c=native -o build.c.o build.c` | Hands the file (build entry elided) to `cc` for a normal native build. |
 | `./cccc --build build.c` | New behaviour. Calls the build entry in the VM; the rest of the file is compiled normally. |
 

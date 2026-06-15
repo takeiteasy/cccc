@@ -375,7 +375,7 @@ safety instrumentation is not active.
 | `FLDR_INDEX_F32` | `fregs[rd] = *(float*)(regs[base] + regs[index] * scale + offset)` |
 | `FSTR_INDEX_F32` | `*(float*)(regs[base] + regs[index] * scale + offset) = fregs[rd]` |
 
-## Bytecode File Format (`.jbc`)
+## Bytecode File Format (`.c4`)
 
 Saved bytecode files are self-contained and can be loaded into a fresh VM instance without recompilation.  The format is versioned (current version **11**).
 
@@ -424,11 +424,11 @@ On load, the loader re-anchors global pointers, function-pointer offsets, FFI en
 
 ### Asm-Passthru Rehydration
 
-FFI entries created by `--asm-passthru` cannot survive serialisation as raw function pointers because the compiled shared library is unlinked immediately after `dlopen`.  The `.jbc` format stores the original assembly source string (`asm_src`) alongside each such entry (flagged `is_asm_passthru = 1`).  On load, `cc_rehydrate_asm_passthru()` recompiles each `asm_src` string into a fresh temporary shared library, `dlopen`s it, and resolves the function pointer — making the round-trip transparent to the program.
+FFI entries created by `--asm-passthru` cannot survive serialisation as raw function pointers because the compiled shared library is unlinked immediately after `dlopen`.  The `.c4` format stores the original assembly source string (`asm_src`) alongside each such entry (flagged `is_asm_passthru = 1`).  On load, `cc_rehydrate_asm_passthru()` recompiles each `asm_src` string into a fresh temporary shared library, `dlopen`s it, and resolves the function pointer — making the round-trip transparent to the program.
 
 Rehydration applies the same FFI allow/deny policy as other symbol lookups: if `--disable-ffi` is active, or the symbol is on the deny list, the entry is left unresolved and a `CALLF` targeting it will fail at execution time with `error: FFI function … not resolved`.
 
-Because recompilation uses the host’s native C compiler at `.jbc` run time, the resulting bytecode file is architecture-portable but requires a C compiler to be available when it is executed.
+Because recompilation uses the host’s native C compiler at `.c4` run time, the resulting bytecode file is architecture-portable but requires a C compiler to be available when it is executed.
 
 ## Execution Model
 
@@ -448,7 +448,7 @@ The central loop reads the next opcode, increments the cycle counter, optionally
 
 ### Exit Detection
 
-`main()` is invoked with a synthetic return address of `0`.  `cc_run()` passes `argc` in `REG_A0` and `argv` in `REG_A1`; for loaded `.jbc` files, `argv[0]` is the `.jbc` path and arguments after `--` are forwarded to the program.  When `LEV3` pops this sentinel, it sets `vm->pc = CCCC_INVALID_PC` and the dispatch loop returns `(int)vm->regs[REG_A0]` as the process exit code.
+`main()` is invoked with a synthetic return address of `0`.  `cc_run()` passes `argc` in `REG_A0` and `argv` in `REG_A1`; for loaded `.c4` files, `argv[0]` is the `.c4` path and arguments after `--` are forwarded to the program.  When `LEV3` pops this sentinel, it sets `vm->pc = CCCC_INVALID_PC` and the dispatch loop returns `(int)vm->regs[REG_A0]` as the process exit code.
 
 ### Debugger Integration
 

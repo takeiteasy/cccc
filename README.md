@@ -72,7 +72,7 @@ Options:
 	-X/--no-preprocess       Disable preprocessing step
 	-S/--no-stdlib           Do not link standard library
 	-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: bytecode (default), native
-	                         bytecode: write .jbc (to -o file, or stdout if -o omitted
+	                         bytecode: write .c4 (to -o file, or stdout if -o omitted
 	                                   and stdout is not a TTY)
 	                         native: require -o file; build a native executable via
 	                                 CCCC_NATIVE_CC (cc, clang, or gcc)
@@ -209,7 +209,7 @@ symbols from that handle are live.
 
 The bytecode VM is the runtime that powers compile-time macro execution, not an execution engine competing with system toolchains. For production code, `-c=native` hands macro-expanded C to `cc` / `clang` / `gcc`, and you get the full performance of your system toolchain — CCCC's frontend cost is the only CCCC-specific overhead in the loop.
 
-When code does run on the VM (macro bodies, `--vm-heap` allocations, the debugger, the safety suite, `--vm-profile`, or any program run without `-c=native`), it pays the cost of a portable tree-walking interpreter. See [BENCHMARKS.md](docs/BENCHMARKS.md) for full numbers. On the included workload suite, CCCC's geometric mean is roughly **~16× slower than `gcc -O2`** across all `--optimize` levels: integer-loop-heavy programs like the sieve benchmark sit around 70×, FP-heavy workloads like matrix multiplication and Mandelbrot land in the 45–50× range, and control-flow-bound programs (`fib`, `ackermann`, `nqueens`, `quicksort`) run 5–15× slower. The `cccc-jbc*` columns show the interpreter itself is the dominant cost even when the one-time source-to-bytecode compile is excluded. That gap is the price of a single self-contained binary that can run untrusted or sandboxed code, expose every opcode to a profiler, and feed compile-time macros a real execution environment.
+When code does run on the VM (macro bodies, `--vm-heap` allocations, the debugger, the safety suite, `--vm-profile`, or any program run without `-c=native`), it pays the cost of a portable tree-walking interpreter. See [BENCHMARKS.md](docs/BENCHMARKS.md) for full numbers. On the included workload suite, CCCC's geometric mean is roughly **~16× slower than `gcc -O2`** across all `--optimize` levels: integer-loop-heavy programs like the sieve benchmark sit around 70×, FP-heavy workloads like matrix multiplication and Mandelbrot land in the 45–50× range, and control-flow-bound programs (`fib`, `ackermann`, `nqueens`, `quicksort`) run 5–15× slower. The `cccc-c4*` columns show the interpreter itself is the dominant cost even when the one-time source-to-bytecode compile is excluded. That gap is the price of a single self-contained binary that can run untrusted or sandboxed code, expose every opcode to a profiler, and feed compile-time macros a real execution environment.
 
 VM work focuses on what matters for macro expansion cost and VM-only workflows (debugger, safety suite, profiling). Recent improvements that have driven the gap down from an earlier ~21× baseline:
 - **Inlined threaded dispatch (#227)**: opcode logic is embedded at each computed-goto label rather than dispatched through a C function call per instruction.
@@ -269,7 +269,7 @@ Without `-c=native`, CCCC compiles C to portable bytecode and runs it in its bui
 ./cccc -I./include -DDEBUG -o debug.bin main.c
 ```
 
-Bytecode uses 32-bit instruction words; 64-bit immediates are split across two consecutive words. Saved `.jbc` files include relocation and ABI metadata so loaded programs re-anchor global pointers, function-pointer offsets, FFI entries, and aggregate return buffers to the new VM instance. See [VM.md](docs/VM.md) for the full instruction set, ABI, and file format.
+Bytecode uses 32-bit instruction words; 64-bit immediates are split across two consecutive words. Saved `.c4` files include relocation and ABI metadata so loaded programs re-anchor global pointers, function-pointer offsets, FFI entries, and aggregate return buffers to the new VM instance. See [VM.md](docs/VM.md) for the full instruction set, ABI, and file format.
 
 ## Running Tests
 
@@ -279,11 +279,11 @@ python3 tools/tests.py --match "*embed*"   # Run only tests matching a glob patt
 python3 tools/tests.py -j 4                # Run with 4 parallel workers
 python3 tools/tests.py -2                  # Run all tests under safety level 2
 python3 tools/tests.py --leaks             # Enable leak detection (leaks on macOS, valgrind on Linux)
-python3 tools/tests.py --jbc               # Bytecode round-trip: compile each positive test to .jbc, then run it
+python3 tools/tests.py --c4               # Bytecode round-trip: compile each positive test to .c4, then run it
 # I recommend running --leaks with -j (takes a long time synchronously)
 ```
 
-`make test` runs both the source-mode suite and `--jbc` round-trip.
+`make test` runs both the source-mode suite and `--c4` round-trip.
 
 ### Sanitizer Builds
 
@@ -354,14 +354,14 @@ actually executed at runtime, complementing the static n-gram tool below.
 **Opcode n-gram mining (discover fusion candidates):**
 
 ```bash
-./cccc -I./include -o /tmp/sieve.jbc profile/benchmarks/sieve.c
-./cccc --ngrams=2 --ngrams-top=15 /tmp/sieve.jbc      # top 15 opcode pairs
-./cccc --ngrams=3 --ngrams-top=15 /tmp/sieve.jbc      # top 15 opcode triples
-./cccc --ngrams=2 --ngrams-per-file /tmp/sieve.jbc    # per-file + aggregate
+./cccc -I./include -o /tmp/sieve.c4 profile/benchmarks/sieve.c
+./cccc --ngrams=2 --ngrams-top=15 /tmp/sieve.c4      # top 15 opcode pairs
+./cccc --ngrams=3 --ngrams-top=15 /tmp/sieve.c4      # top 15 opcode triples
+./cccc --ngrams=2 --ngrams-per-file /tmp/sieve.c4    # per-file + aggregate
 ./cccc --ngrams=2 profile/benchmarks/sieve.c                  # compile-then-analyze
 ```
 
-Ranks 2-grams and 3-grams by static occurrence across one or more `.jbc`
+Ranks 2-grams and 3-grams by static occurrence across one or more `.c4`
 files (or directly from `.c` source — the compiler runs in-process).
 Useful for finding common instruction sequences that could be fused into
 new opcodes (see ticket #250).
@@ -370,10 +370,10 @@ new opcodes (see ticket #250).
 
 ```bash
 ./cccc --vm-profile --json -I./include profile/benchmarks/sieve.c > /tmp/sieve.json
-python3 tools/cross_ref_ngrams.py /tmp/sieve.jbc profile/benchmarks/sieve.c
+python3 tools/cross_ref_ngrams.py /tmp/sieve.c4 profile/benchmarks/sieve.c
 ```
 
-Combines the static n-gram analysis (per-`.jbc`) with the runtime bigram
+Combines the static n-gram analysis (per-`.c4`) with the runtime bigram
 profile (per-execution) and ranks opcode pairs by `static × dynamic`
 count. Sequences that are both common in the bytecode and hot at runtime
 are the strongest fusion candidates.
@@ -381,8 +381,8 @@ are the strongest fusion candidates.
 **Use-def fusion candidate detector:**
 
 ```bash
-./cccc --fusion-candidates=50 /tmp/sieve.jbc                       # top 50 def->use pairs
-./cccc --fusion-candidates=50 --json /tmp/sieve.jbc                # JSON output
+./cccc --fusion-candidates=50 /tmp/sieve.c4                       # top 50 def->use pairs
+./cccc --fusion-candidates=50 --json /tmp/sieve.c4                # JSON output
 ./cccc --fusion-candidates=50 profile/benchmarks/sieve.c                   # compile-then-analyze
 ```
 
@@ -408,7 +408,7 @@ Profiling output is written to `profile/`. See [PROFILING.md](docs/PROFILING.md)
 make bench-compare            # run the benchmark suite (CCCC × {none,O1,O2,O3,O4} + CCCC-jbc × {none,O1,O2,O3,O4} vs GCC × {O0,O1,O2,O3})
 make bench-compare-quick      # 2-iteration quick run
 python3 tools/bench.py --filter fib.c   # run a single benchmark
-python3 tools/bench.py --no-jbc         # skip the precompiled-bytecode columns
+python3 tools/bench.py --no-c4         # skip the precompiled-bytecode columns
 python3 tools/bench.py --filter fib.c --vm-profile  # include opcode profile JSON
 ```
 

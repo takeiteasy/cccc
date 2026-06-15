@@ -19,7 +19,7 @@ static int ends_with(const char *s, const char *suffix) {
 
 int main(int argc, char **argv) {
     if (argc == 1)
-        return ends_with(argv[0], ".jbc") ? 42 : 1;
+        return ends_with(argv[0], ".c4") ? 42 : 1;
     if (argc == 2)
         return ends_with(argv[1], ".c") ? 42 : 2;
     return 3;

@@ -4,8 +4,8 @@
 Runs all test_*.c files in tests/ directory and reports results.
 Supports parallel execution with -j/--jobs.
 
-With --jbc, runs the bytecode round-trip: compile each positive test to
-a .jbc file and execute it, exercising the cc_save_bytecode / cc_load_bytecode
+With --c4, runs the bytecode round-trip: compile each positive test to
+a .c4 file and execute it, exercising the cc_save_bytecode / cc_load_bytecode
 FFI-table persistence and the cc_load_libc resolution path.
 """
 
@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 
-JBC_SKIP_TESTS = {
+C4_SKIP_TESTS = {
     "test_ffi_fatal_error.c",
     "test_ffi_type_check_arity.c",
     "test_stack_overflow_large_frame.c",
@@ -60,7 +60,7 @@ def vm_profile_path(profile_dir, test_name, mode):
 
 
 def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_args,
-                    bench=False, jbc_mode=False, profile_dir=None):
+                    bench=False, c4_mode=False, profile_dir=None):
     tests_dir = Path(script_dir) / "tests"
     test_name = str(test_file.relative_to(tests_dir))
 
@@ -103,8 +103,8 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
     except Exception:
         pass
 
-    if jbc_mode:
-        return run_jbc_roundtrip(
+    if c4_mode:
+        return run_c4_roundtrip(
             idx, test_file, test_name, cccc, script_dir, cccc_args, per_test_flags,
             per_test_run_args, is_negative_test, expects_runtime_error, bench,
             profile_dir,
@@ -302,26 +302,26 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
     }
 
 
-def run_jbc_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
-                      per_test_flags, per_test_run_args, is_negative_test,
-                      expects_runtime_error, bench, profile_dir=None):
-    """Compile a test to .jbc, then run it. Returns a result dict.
+def run_c4_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
+                     per_test_flags, per_test_run_args, is_negative_test,
+                     expects_runtime_error, bench, profile_dir=None):
+    """Compile a test to .c4, then run it. Returns a result dict.
 
     Skips negative tests (EXPECT_COMPILE_ERROR / EXPECT_RUNTIME_ERROR) and
-    tests listed in JBC_SKIP_TESTS, since the round-trip is only meaningful
+    tests listed in C4_SKIP_TESTS, since the round-trip is only meaningful
     for tests that produce a working executable.
     """
     skip_reason = None
     if is_negative_test:
         skip_reason = "negative test"
-    elif test_file.name in JBC_SKIP_TESTS:
-        skip_reason = "jbc-incompatible"
+    elif test_file.name in C4_SKIP_TESTS:
+        skip_reason = "c4-incompatible"
     if skip_reason:
         return {
             "idx": idx,
             "test_name": test_name,
             "exit_code": 0,
-            "status": "jbc_skipped",
+            "status": "c4_skipped",
             "output": "",
             "is_negative_test": is_negative_test,
             "expects_runtime_error": expects_runtime_error,
@@ -332,10 +332,10 @@ def run_jbc_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
         }
 
     with tempfile.TemporaryDirectory() as tmp:
-        jbc_path = Path(tmp) / (test_file.stem + ".jbc")
+        c4_path = Path(tmp) / (test_file.stem + ".c4")
         save_cmd = [
             str(cccc), "-I./include", *cccc_args, *per_test_flags,
-            "-c", "-o", str(jbc_path), str(test_file),
+            "-c", "-o", str(c4_path), str(test_file),
         ]
         save = subprocess.run(save_cmd, capture_output=True, text=True, cwd=script_dir)
         if save.returncode != 0:
@@ -343,7 +343,7 @@ def run_jbc_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
                 "idx": idx,
                 "test_name": test_name,
                 "exit_code": save.returncode,
-                "status": "jbc_save_failed",
+                "status": "c4_save_failed",
                 "output": save.stderr,
                 "is_negative_test": False,
                 "expects_runtime_error": False,
@@ -352,20 +352,20 @@ def run_jbc_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
                 "vm_profile": None,
             }
 
-        profile_json = vm_profile_path(profile_dir, test_name, "jbc")
+        profile_json = vm_profile_path(profile_dir, test_name, "c4")
         profile_args = ["--vm-profile", "--json"] if profile_json else []
         run_args = ["--", *per_test_run_args] if per_test_run_args else []
-        run_cmd = [str(cccc), *profile_args, str(jbc_path), *run_args]
+        run_cmd = [str(cccc), *profile_args, str(c4_path), *run_args]
         start = time.perf_counter() if bench else None
         run = subprocess.run(run_cmd, capture_output=True, text=True, cwd=script_dir)
         elapsed = (time.perf_counter() - start) if bench else None
         output = run.stdout + run.stderr
         if expects_runtime_error and run.returncode == 255:
-            status = "jbc_passed"
+            status = "c4_passed"
         elif not expects_runtime_error and run.returncode == 42:
-            status = "jbc_passed"
+            status = "c4_passed"
         else:
-            status = "jbc_failed"
+            status = "c4_failed"
         return {
             "idx": idx,
             "test_name": test_name,
@@ -418,8 +418,8 @@ def main():
         help="Collect per-test VM opcode profile JSON under profile/vm-opcodes"
     )
     parser.add_argument(
-        "--jbc", action="store_true",
-        help="Run the .jbc bytecode round-trip: compile each positive test to a .jbc, then run it. "
+        "--c4", action="store_true",
+        help="Run the .c4 bytecode round-trip: compile each positive test to a .c4, then run it. "
              "Negative tests and a small set of FFI tests that cannot survive rehydration are skipped."
     )
     args, cccc_args = parser.parse_known_args()
@@ -476,12 +476,12 @@ def main():
         print("Warning: Memory leak detection not supported on this platform")
         use_leaks = False
 
-    if args.jbc:
+    if args.c4:
         if use_leaks:
-            print("Warning: --leaks/--profile-mem are not supported in --jbc mode and will be ignored.")
+            print("Warning: --leaks/--profile-mem are not supported in --c4 mode and will be ignored.")
             use_leaks = False
         if args.profile_cpu:
-            print("Warning: --profile-cpu is not supported in --jbc mode and will be ignored.")
+            print("Warning: --profile-cpu is not supported in --c4 mode and will be ignored.")
             args.profile_cpu = False
 
     # CPU profiling: use cccc-prof if available/requested
@@ -515,8 +515,8 @@ def main():
         print(f"VM opcode profiling enabled (JSON: {profile_dir})")
     if args.match:
         print(f"Filtering tests matching: {args.match}")
-    if args.jbc:
-        print("JBC mode: compiling each positive test to .jbc, then executing the bytecode")
+    if args.c4:
+        print("C4 mode: compiling each positive test to .c4, then executing the bytecode")
     print(f"Using {n_jobs} parallel jobs")
     print("=======================")
     print()
@@ -524,7 +524,7 @@ def main():
     test_args = [
         (
             i, test_file, cccc, str(script_dir), use_leaks, platform, cccc_args,
-            args.bench, args.jbc, str(profile_dir) if profile_dir else None,
+            args.bench, args.c4, str(profile_dir) if profile_dir else None,
         )
         for i, test_file in enumerate(test_files)
     ]
@@ -538,17 +538,17 @@ def main():
     failed = 0
     crashed = 0
     negative_passed = 0
-    jbc_passed = 0
-    jbc_failed = 0
-    jbc_skipped = 0
-    jbc_save_failed = 0
+    c4_passed = 0
+    c4_failed = 0
+    c4_skipped = 0
+    c4_save_failed = 0
     failed_tests = []
     crashed_tests = []
-    jbc_skipped_tests = []
+    c4_skipped_tests = []
 
     def print_single_result(result):
         nonlocal total, passed, failed, crashed, negative_passed
-        nonlocal jbc_passed, jbc_failed, jbc_skipped, jbc_save_failed
+        nonlocal c4_passed, c4_failed, c4_skipped, c4_save_failed
         total += 1
         test_name = result["test_name"]
         status = result["status"]
@@ -597,26 +597,26 @@ def main():
             print(f"✗ {test_name} ({result['stderr_mismatch']}){timing_str}")
             for line in output.splitlines()[:5]:
                 print(f"  {line}")
-        elif status == "jbc_passed":
-            jbc_passed += 1
+        elif status == "c4_passed":
+            c4_passed += 1
             print(f"✓ {test_name}{timing_str}")
-        elif status == "jbc_skipped":
-            jbc_skipped += 1
+        elif status == "c4_skipped":
+            c4_skipped += 1
             reason = result.get("skip_reason", "")
             if reason:
-                jbc_skipped_tests.append(f"{test_name} ({reason})")
-        elif status == "jbc_save_failed":
-            jbc_save_failed += 1
+                c4_skipped_tests.append(f"{test_name} ({reason})")
+        elif status == "c4_save_failed":
+            c4_save_failed += 1
             failed += 1
-            failed_tests.append(f"{test_name} (JBC SAVE FAILED)")
-            print(f"✗ {test_name} (JBC SAVE FAILED){timing_str}")
+            failed_tests.append(f"{test_name} (C4 SAVE FAILED)")
+            print(f"✗ {test_name} (C4 SAVE FAILED){timing_str}")
             for line in output.splitlines()[:3]:
                 print(f"  {line}")
-        elif status == "jbc_failed":
-            jbc_failed += 1
+        elif status == "c4_failed":
+            c4_failed += 1
             failed += 1
-            failed_tests.append(f"{test_name} (JBC RUNTIME FAILED, exit {exit_code})")
-            print(f"✗ {test_name} (JBC RUNTIME FAILED, exit {exit_code}){timing_str}")
+            failed_tests.append(f"{test_name} (C4 RUNTIME FAILED, exit {exit_code})")
+            print(f"✗ {test_name} (C4 RUNTIME FAILED, exit {exit_code}){timing_str}")
             for line in output.splitlines()[:3]:
                 print(f"  {line}")
 
@@ -661,12 +661,12 @@ def main():
     print("=======================")
     print("Test Results Summary")
     print("=======================")
-    if args.jbc:
+    if args.c4:
         print(f"Total:          {total}")
-        print(f"JBC passed:     {jbc_passed}")
-        print(f"JBC skipped:    {jbc_skipped}")
-        print(f"JBC failed:     {jbc_failed}")
-        print(f"JBC save fail:  {jbc_save_failed}")
+        print(f"C4 passed:      {c4_passed}")
+        print(f"C4 skipped:     {c4_skipped}")
+        print(f"C4 failed:      {c4_failed}")
+        print(f"C4 save fail:   {c4_save_failed}")
     else:
         print(f"Total:          {total}")
         print(f"Passed:         {passed}")
@@ -686,10 +686,10 @@ def main():
         for test in failed_tests:
             print(f"  - {test}")
 
-    if args.jbc and jbc_skipped > 0:
+    if args.c4 and c4_skipped > 0:
         print()
-        print(f"JBC skipped tests ({jbc_skipped}):")
-        for test in jbc_skipped_tests:
+        print(f"C4 skipped tests ({c4_skipped}):")
+        for test in c4_skipped_tests:
             print(f"  - {test}")
 
     if args.bench and timings:
@@ -712,9 +712,9 @@ def main():
     if failed > 0 or crashed > 0:
         sys.exit(1)
     else:
-        if args.jbc:
+        if args.c4:
             print()
-            print(f"All {jbc_passed} jbc roundtrips passed ({jbc_skipped} skipped).")
+            print(f"All {c4_passed} c4 roundtrips passed ({c4_skipped} skipped).")
         else:
             print()
             print("All tests passed! 🎉")

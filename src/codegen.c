@@ -2119,7 +2119,7 @@ static void cccc_default_asm_passthru(VirtualMachine *vm, const char *asm_str) {
     // Register as FFI function (0 args, no double return)
     cc_register_cfunc(vm, sym_name, func_ptr, 0, 0);
 
-    // Find FFI index and annotate for JBC rehydration
+    // Find FFI index and annotate for .c4 rehydration
     int ffi_idx = find_ffi_function(vm, sym_name);
     if (ffi_idx < 0)
         error("--asm-passthru: FFI registration failed");
@@ -2138,8 +2138,8 @@ static void cccc_default_asm_passthru(VirtualMachine *vm, const char *asm_str) {
 #endif
 }
 
-// Recompile any asm-passthru FFI entries whose func_ptr was lost during JBC
-// serialization.  Called from the JBC load path after stdlib/library resolution.
+// Recompile any asm-passthru FFI entries whose func_ptr was lost during .c4
+// serialization.  Called from the .c4 load path after stdlib/library resolution.
 // Respects the FFI allow/deny policy; denied entries are left with func_ptr=NULL
 // (CALLF will emit the "not resolved" error at execution time).
 // Returns 0 on success, -1 on hard failure.

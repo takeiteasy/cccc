@@ -1,6 +1,6 @@
 # CCCC Benchmarks
 
-A focused cross-compiler benchmark suite that measures the cost of the **CCCC bytecode VM** (the runtime that powers `[[cccc::macro]]` execution, the safety suite, the debugger, and the profiler) by comparing it against **GCC** (across `-O0` through `-O3`). Every benchmark is plain C99/C11, so the comparison is apples-to-apples. The suite also times CCCC's precompiled-bytecode mode (`cccc-jbc*`) so you can separate the bytecode VM cost from the source-to-bytecode compile cost.
+A focused cross-compiler benchmark suite that measures the cost of the **CCCC bytecode VM** (the runtime that powers `[[cccc::macro]]` execution, the safety suite, the debugger, and the profiler) by comparing it against **GCC** (across `-O0` through `-O3`). Every benchmark is plain C99/C11, so the comparison is apples-to-apples. The suite also times CCCC's precompiled-bytecode mode (`cccc-c4*`) so you can separate the bytecode VM cost from the source-to-bytecode compile cost.
 
 For production builds, CCCC also offers a `-c=native` mode that hands macro-expanded C to `cc` / `clang` / `gcc` — that path bypasses the VM entirely and matches the `gcc*` columns below. The benchmarks in this document are deliberately scoped to the VM, because that is the part CCCC is responsible for.
 
@@ -10,7 +10,7 @@ For production builds, CCCC also offers a `-c=native` mode that hands macro-expa
 make bench-compare            # full run: 3 timed iterations per (bench, config), ~10 min
 make bench-compare-quick      # 2 iterations, ~5 min, good for quick checks
 python3 tools/bench.py --filter fib.c    # run a single benchmark
-python3 tools/bench.py --no-jbc --filter fib.c   # skip the cccc-jbc columns
+python3 tools/bench.py --no-c4 --filter fib.c   # skip the cccc-c4 columns
 python3 tools/bench.py --filter fib.c --vm-profile   # also write opcode profile JSON
 ```
 
@@ -20,7 +20,7 @@ Sample output:
 ====================================================================================================
  CCCC vs GCC benchmark results (median ms, lower is better)
 ====================================================================================================
-benchmark    cccc    cccc-O1  cccc-O2  cccc-O3  cccc-O4  cccc-jbc  cccc-jbc-O1  cccc-jbc-O2  cccc-jbc-O3  cccc-jbc-O4  gcc-O0  gcc-O1  gcc-O2  gcc-O3
+benchmark    cccc    cccc-O1  cccc-O2  cccc-O3  cccc-O4  cccc-c4  cccc-c4-O1  cccc-c4-O2  cccc-c4-O3  cccc-c4-O4  gcc-O0  gcc-O1  gcc-O2  gcc-O3
 -----------  ------  -------  -------  -------  -------  --------  -----------  -----------  -----------  -----------  ------  ------  ------  ------
 ackermann    694.2   747.0    927.6    927.9    890.6    664.9     670.8        896.5        898.4        865.0        14.4    12.6    4.0     4.0
 binary_tree  851.9   856.9    961.0    960.5    954.1    819.6     819.8        927.1        940.1        939.8        18.0    17.2    16.9    17.1
@@ -32,7 +32,7 @@ quicksort    2024.5  1800.1   1750.3   1764.3   1533.9   1850.7    1818.6       
 sieve        9711.1  9531.2   7423.8   7329.7   7071.0   9516.0    9285.7       7406.0       7316.5       7110.6       35.0    21.5    17.8    18.2
 
 Speedup vs gcc -O2 (>1.0x = slower than gcc -O2):
-benchmark    cccc     cccc-O1  cccc-O2  cccc-O3  cccc-O4  cccc-jbc  cccc-jbc-O1  cccc-jbc-O2  cccc-jbc-O3  cccc-jbc-O4  gcc-O0  gcc-O1  gcc-O2  gcc-O3
+benchmark    cccc     cccc-O1  cccc-O2  cccc-O3  cccc-O4  cccc-c4  cccc-c4-O1  cccc-c4-O2  cccc-c4-O3  cccc-c4-O4  gcc-O0  gcc-O1  gcc-O2  gcc-O3
 -----------  -------  -------  -------  -------  -------  --------  -----------  -----------  -----------  -----------  ------  ------  ------  ------
 ackermann    175.7x   189.0x   234.8x   234.8x   225.4x   168.3x    169.8x       226.9x       227.4x       218.9x       3.6x    3.2x    1.0x    1.0x
 binary_tree  50.5x    50.8x    57.0x    56.9x    56.6x    48.6x     48.6x        55.0x        55.7x        55.7x        1.1x    1.0x    1.0x    1.0x
@@ -61,7 +61,7 @@ Validation run (2026-06-14, `--runs 3 --warmup 1`, Homebrew GCC-15): all correct
 
 Re-run `make bench-compare` to get updated numbers for your machine.
 
-JSON output is also written to `profile/benchmarks/results/run-<UTC>.json` for tracking over time. The validation run above is saved as `profile/benchmarks/results/run-20260614T171315Z.json`. Each `cccc-jbc*` row includes a `compile_ms` field showing the one-time cost of producing the bytecode file (this cost is paid once, not in the timed median).
+JSON output is also written to `profile/benchmarks/results/run-<UTC>.json` for tracking over time. The validation run above is saved as `profile/benchmarks/results/run-20260614T171315Z.json`. Each `cccc-c4*` row includes a `compile_ms` field showing the one-time cost of producing the bytecode file (this cost is paid once, not in the timed median).
 
 ## The benchmark suite
 
@@ -83,15 +83,15 @@ All programs are portable C99/C11, exit with code `42` (so the standard `tools/t
 `tools/bench.py` does the following for each benchmark:
 
 1. **Compile** the source with GCC at every optimization level (cached in `build/`).
-2. **Compile** the source with CCCC at every `--optimize` level to a `.jbc` bytecode file (cached in `build/`, like the GCC binaries).
+2. **Compile** the source with CCCC at every `--optimize` level to a `.c4` bytecode file (cached in `build/`, like the GCC binaries).
 3. **Run** CCCC at every `--optimize` level on the source directly — this measures the full parse+execute cost, which is the user-visible cost of using CCCC.
-4. **Run** the prebuilt `.jbc` files — this measures just the bytecode VM cost (the source-to-bytecode compile step was paid once and is not in the timed median).
+4. **Run** the prebuilt `.c4` files — this measures just the bytecode VM cost (the source-to-bytecode compile step was paid once and is not in the timed median).
 5. **Run** the prebuilt GCC binaries.
 6. **Time** each run with `time.perf_counter()`; discard `N` warmup runs, time `R` runs, take min/median/mean.
 7. **Verify** that every config's stdout matches the CCCC reference. A mismatch is flagged in the report and causes a non-zero exit.
 8. **Report** as a human-readable table + a JSON file.
 
-With `--vm-profile`, CCCC and CCCC-JBC configs also write dynamic opcode count
+With `--vm-profile`, CCCC and CCCC-C4 configs also write dynamic opcode count
 profiles to `profile/benchmarks/results/vm-profile-<UTC>/`. The benchmark JSON records
 the `vm_profile_json` path for each profiled config.
 
@@ -100,10 +100,10 @@ the `vm_profile_json` path for each profiled config.
 There are three different timings per benchmark:
 
 - **`cccc*`** — end-to-end wall time: source on disk → bytecode compilation → VM startup → bytecode execution → exit. This is the user-visible cost of just running `cccc myfile.c`.
-- **`cccc-jbc*`** — bytecode execution only: load a precompiled `.jbc` from disk and run it. The source-to-bytecode compile cost was paid once (reported in the JSON's `compile_ms` field) and is not part of the timed median.
+- **`cccc-c4*`** — bytecode execution only: load a precompiled `.c4` from disk and run it. The source-to-bytecode compile cost was paid once (reported in the JSON's `compile_ms` field) and is not part of the timed median.
 - **`gcc*`** — execution time of a prebuilt native binary. Compile cost paid once, not in the timed median.
 
-The `cccc-jbc*` columns are the cleanest apples-to-apples comparison with GCC: both are "compile once, run many times" measurements. The `cccc*` columns show what you'd actually pay as an end user of the `cccc` CLI.
+The `cccc-c4*` columns are the cleanest apples-to-apples comparison with GCC: both are "compile once, run many times" measurements. The `cccc*` columns show what you'd actually pay as an end user of the `cccc` CLI.
 
 `-c=native` is not in the matrix above: it would be redundant with `gcc*` because it just hands the same C to a system compiler. If you want to add a `-c=native` column, run `./cccc -c=native -o build/<bench>.bin profile/benchmarks/<bench>.c` and time `[build/<bench>.bin]` — the numbers should match `gcc-O2`/`gcc-O3` (plus a fixed CCCC frontend cost, which is the same for every column and not what this doc is measuring).
 
@@ -112,18 +112,18 @@ If you want to see where VM execution is concentrated, use `tools/bench.py --vm-
 and compare dynamic counts for opcodes such as `LDR_LOCAL_D`, `STR_LOCAL_D`,
 `LDR_INDEX_W`, `STR_INDEX_W`, `ADD3`, and `MUL3` across optimization levels.
 
-## Bytecode (.jbc) configs
+## Bytecode (.c4) configs
 
-The `cccc-jbc*` configs use CCCC's precompiled-bytecode mode:
+The `cccc-c4*` configs use CCCC's precompiled-bytecode mode:
 
 ```bash
-./cccc --optimize=N -o build/fib.jbc profile/benchmarks/fib.c   # compile once
-./cccc build/fib.jbc                                    # run many times
+./cccc --optimize=N -o build/fib.c4 profile/benchmarks/fib.c   # compile once
+./cccc build/fib.c4                                    # run many times
 ```
 
-The `.jbc` files are cached in `build/` (alongside the GCC binaries) and rebuilt only when missing. The timed command is just `[cccc, file.jbc]` — load + execute. The JSON output includes a `compile_ms` field per `cccc-jbc*` config so you can see the upfront compile cost alongside the run-time cost.
+The `.c4` files are cached in `build/` (alongside the GCC binaries) and rebuilt only when missing. The timed command is just `[cccc, file.c4]` — load + execute. The JSON output includes a `compile_ms` field per `cccc-c4*` config so you can see the upfront compile cost alongside the run-time cost.
 
-The bytecode format self-resolves FFI symbols (libc functions like `printf`, `malloc`) via `dlsym` on load, so `.jbc` files built on one machine run on the same machine without bundling libc. Use `--no-jbc` to skip these columns for faster iteration when you only care about parse+exec numbers.
+The bytecode format self-resolves FFI symbols (libc functions like `printf`, `malloc`) via `dlsym` on load, so `.c4` files built on one machine run on the same machine without bundling libc. Use `--no-c4` to skip these columns for faster iteration when you only care about parse+exec numbers.
 
 ## Correctness across compilers
 
@@ -136,7 +136,7 @@ If you see a `MISMATCH` in the output, the CCCC output differs from at least one
 - **Close other apps** to reduce noise. These are wall-clock timings.
 - **Run multiple iterations** (`--runs 5` or more) for benchmarks under ~50ms.
 - **Use `--filter`** to iterate on a single benchmark while tuning it.
-- **Use `--no-jbc`** when iterating on parse/compile performance — it cuts the bench in half by skipping the bytecode-execution columns.
+- **Use `--no-c4`** when iterating on parse/compile performance — it cuts the bench in half by skipping the bytecode-execution columns.
 - **Use `--vm-profile`** when optimizing bytecode generation or VM dispatch — it shows dynamic opcode mix for each CCCC config.
 - **Compare JSON files over time** — `profile/benchmarks/results/run-*.json` includes the compiler versions, host info, and run settings so results are reproducible.
 
@@ -163,6 +163,6 @@ If the benchmark has a per-program result that varies by FP order of operations,
 - **`median ms`** — middle value of the timed runs. Robust against outliers.
 - **`min ms`** — fastest run. Useful as a lower bound.
 - **`stable`** — whether every run produced identical stdout.
-- **`compile_ms`** — for `cccc-jbc*` configs only, the one-time cost of producing the `.jbc` file. Not part of the timed median.
+- **`compile_ms`** — for `cccc-c4*` configs only, the one-time cost of producing the `.c4` file. Not part of the timed median.
 - **Speedup vs gcc -O2** — `median_ms / median_gcc_O2_ms`. Above 1.0× means slower than gcc -O2. Below 1.0× means faster (rare for CCCC today, but possible on specific workloads).
 - **`geomean`** — geometric mean of the per-benchmark ratios, computed across all benchmarks. The right "overall" comparison number.

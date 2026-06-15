@@ -1,4 +1,4 @@
-// Regression coverage for .jbc ABI rehydration.
+// Regression coverage for .c4 ABI rehydration.
 // Expected return: 42
 
 #include "stdarg.h"

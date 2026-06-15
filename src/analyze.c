@@ -30,7 +30,7 @@
      reader. The strongest candidates for new fused opcodes.
 
  Both analyses work on a InstrWord* text segment, which the caller
- has already loaded (via cc_load_bytecode for .jbc input or
+ has already loaded (via cc_load_bytecode for .c4 input or
  cc_compile for .c source). See the public functions below.
 */
 

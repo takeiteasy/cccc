@@ -1,4 +1,4 @@
-// Regression test: FFI deny policy must survive a .jbc save/load round-trip.
+// Regression test: FFI deny policy must survive a .c4 save/load round-trip.
 // CCCC_FLAGS: --ffi-deny=strlen
 #include <string.h>
 

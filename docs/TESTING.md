@@ -531,7 +531,7 @@ The process exits with code `0` if all tests pass, `1` if any fail.
 `--testing` can be combined with `-c=bytecode` or `-c=native` to run tests as a pre-pass before compilation. If all tests pass the compile step proceeds; if any test fails the compile step is skipped and the process exits non-zero.
 
 ```
-./cccc --testing -c=bytecode -o out.jbc myfile.c
+./cccc --testing -c=bytecode -o out.c4 myfile.c
 ```
 
 This is useful in build scripts that want to guard bytecode or native compilation behind a passing test run.

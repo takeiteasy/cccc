@@ -239,7 +239,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-X/--no-preprocess       Disable preprocessing step\n");
     printf("\t-S/--no-stdlib           Do not link standard library\n");
     printf("\t-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: bytecode (default), native\n");
-    printf("\t                         bytecode: write .jbc (to -o file, or stdout if -o omitted\n");
+    printf("\t                         bytecode: write .c4 (to -o file, or stdout if -o omitted\n");
     printf("\t                                   and stdout is not a TTY)\n");
     printf("\t                         native: require -o file; build a native executable via\n");
     printf("\t                                 CCCC_NATIVE_CC (cc, clang, or gcc)\n");
@@ -694,7 +694,7 @@ static char **build_source_argv(int *prog_argc, int argc, const char *argv[],
     return prog_argv;
 }
 
-static char **build_jbc_argv(int *prog_argc, const char *input_file, int argc,
+static char **build_c4_argv(int *prog_argc, const char *input_file, int argc,
                              const char *argv[], int dashdash) {
     if (dashdash >= 0)
         *prog_argc = argc - dashdash; // input_file + everything after "--"
@@ -1086,7 +1086,7 @@ int main(int argc, const char *argv[]) {
             if (!fmt || !*fmt) {
                 compile_format = COMPILE_BYTECODE;
             } else if (strcmp(fmt, "bytecode") == 0 || strcmp(fmt, "bc") == 0 ||
-                       strcmp(fmt, "jbc") == 0) {
+                       strcmp(fmt, "c4") == 0) {
                 compile_format = COMPILE_BYTECODE;
             } else if (strcmp(fmt, "native") == 0 || strcmp(fmt, "n") == 0) {
                 compile_format = COMPILE_NATIVE;
@@ -1378,8 +1378,8 @@ int main(int argc, const char *argv[]) {
         }
         for (int i = 0; i < input_files_count; i++) {
             size_t len = strlen(input_files[i]);
-            if (len > 4 &&
-                strncmp(input_files[i] + len - 4, ".jbc", sizeof(".jbc")) == 0) {
+            if (len > 3 &&
+                strncmp(input_files[i] + len - 3, ".c4", sizeof(".c4")) == 0) {
                 fprintf(stderr,
                         "error: -c=native expects C source input, not bytecode '%s'\n",
                         input_files[i]);
@@ -1482,22 +1482,22 @@ int main(int argc, const char *argv[]) {
         input_files[0] = tmp;
     }
 
-    // Check if input is a bytecode file (.jbc extension)
+    // Check if input is a bytecode file (.c4 extension)
     // If so, load and run it directly without compilation
     //
-    // In analysis mode we accept multiple .jbc files and walk each one in
+    // In analysis mode we accept multiple .c4 files and walk each one in
     // turn, aggregating counts across all of them.
     if (input_files_count >= 1 && (run_ngrams || run_fusion)) {
-        int all_jbc = 1;
+        int all_c4 = 1;
         for (int i = 0; i < input_files_count; i++) {
             size_t len = strlen(input_files[i]);
-            if (len <= 4 ||
-                strncmp(input_files[i] + len - 4, ".jbc", sizeof(".jbc")) != 0) {
-                all_jbc = 0;
+            if (len <= 3 ||
+                strncmp(input_files[i] + len - 3, ".c4", sizeof(".c4")) != 0) {
+                all_c4 = 0;
                 break;
             }
         }
-        if (all_jbc) {
+        if (all_c4) {
             if (run_ngrams) {
                 CcAnalyzeNgramOptions opts = {
                     .n = run_ngrams,
@@ -1547,8 +1547,8 @@ int main(int argc, const char *argv[]) {
     if (input_files_count == 1) {
         const char *input_file = input_files[0];
         size_t len = strlen(input_file);
-        if (len > 4 &&
-            strncmp(input_file + len - 4, ".jbc", sizeof(".jbc")) == 0) {
+        if (len > 3 &&
+            strncmp(input_file + len - 3, ".c4", sizeof(".c4")) == 0) {
             // Load bytecode file
             if (cc_load_bytecode(&vm, input_file) != 0) {
                 fprintf(stderr, "error: failed to load bytecode from %s\n",
@@ -1587,13 +1587,13 @@ int main(int argc, const char *argv[]) {
                 goto BAIL;
             }
 
-            // Run the loaded bytecode. The loaded program sees its own .jbc
+            // Run the loaded bytecode. The loaded program sees its own .c4
             // path as argv[0], plus explicit args after "--" if present.
             int prog_argc = 0;
             char **prog_argv =
-                build_jbc_argv(&prog_argc, input_file, argc, argv, dashdash);
+                build_c4_argv(&prog_argc, input_file, argc, argv, dashdash);
             exit_code = cc_run(&vm, prog_argc, prog_argv);
-            vm_profile_mode = "jbc";
+            vm_profile_mode = "c4";
             vm_profile_input = input_file;
             vm_profile_ran = 1;
             free(prog_argv);
@@ -1915,7 +1915,7 @@ int main(int argc, const char *argv[]) {
     // short-circuit out of the VM runtime path. The order is also the fix
     // for ticket #300: previously `compile_only` short-circuited at
     // `goto BAIL;` before the legacy `out_file` save block, silently
-    // swallowing `-c -o foo.jbc`.
+    // swallowing `-c -o foo.c4`.
     if (testing_mode) {
         CcTestOptions test_opts = {
             .test_glob    = test_glob,

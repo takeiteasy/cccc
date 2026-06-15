@@ -33,36 +33,36 @@ On macOS you can also open the result in `pprof` (Go tool) or Instruments.
 ```bash
 ./cccc --vm-profile -I./include tests/test_comprehensive.c
 ./cccc --vm-profile --json -I./include tests/test_comprehensive.c > profile/vm-opcodes/comprehensive.json
-./cccc -Y build/fib.jbc
+./cccc -Y build/fib.c4
 ```
 
 `--vm-profile` prints a compact dynamic opcode count table to stderr after the
 program exits. Combine it with `--json` to also write the same data as JSON to
-stdout. The JSON includes the execution mode (`source` or `jbc`), selected
+stdout. The JSON includes the execution mode (`source` or `c4`), selected
 `--optimize` level, total VM cycles, total profiled opcodes, and per-op counts
 and percentages.
 
 ### Static Bytecode Analysis
 
-For understanding *static* instruction patterns in `.jbc` files (independent of
+For understanding *static* instruction patterns in `.c4` files (independent of
 any execution), cccc has two in-process analyses:
 
 ```bash
-# Static n-gram mining on a pre-compiled .jbc
-./cccc -o /tmp/sieve.jbc -I./include profile/benchmarks/sieve.c
-./cccc --ngrams=2 --ngrams-top=15 /tmp/sieve.jbc
-./cccc --ngrams=3 --ngrams-top=15 /tmp/sieve.jbc
-./cccc --ngrams=2 --ngrams-per-file /tmp/sieve.jbc
+# Static n-gram mining on a pre-compiled .c4
+./cccc -o /tmp/sieve.c4 -I./include profile/benchmarks/sieve.c
+./cccc --ngrams=2 --ngrams-top=15 /tmp/sieve.c4
+./cccc --ngrams=3 --ngrams-top=15 /tmp/sieve.c4
+./cccc --ngrams=2 --ngrams-per-file /tmp/sieve.c4
 
 # Same analysis directly on .c source — compiles in-process first
 ./cccc --ngrams=2 --ngrams-top=15 -I./include profile/benchmarks/sieve.c
 
 # Use-def fusion candidate detection
-./cccc --fusion-candidates=50 /tmp/sieve.jbc
-./cccc --fusion-candidates=50 --json /tmp/sieve.jbc
+./cccc --fusion-candidates=50 /tmp/sieve.c4
+./cccc --fusion-candidates=50 --json /tmp/sieve.c4
 ```
 
-`--ngrams[=N]` walks the text segment of one or more `.jbc` files and ranks
+`--ngrams[=N]` walks the text segment of one or more `.c4` files and ranks
 2-grams (`N=2`, default) or 3-grams (`N=3`) by occurrence. `--ngrams-per-file`
 also prints a per-input section in addition to the aggregate. `--ngrams-top=N`
 limits the rows per section.
@@ -138,11 +138,11 @@ python3 tools/tests.py --bench --match "*compre*"     # Benchmark matching tests
 python3 tools/tests.py --profile-cpu --match "*compre*"  # CPU profile matching tests
 python3 tools/tests.py --profile-mem --match "*malloc*"  # Memory profile matching tests
 python3 tools/tests.py --vm-profile --match "*profile*"  # VM opcode JSON profiles
-python3 tools/tests.py --jbc --vm-profile --match "*profile*"  # Profile .jbc execution
+python3 tools/tests.py --c4 --vm-profile --match "*profile*"  # Profile .c4 execution
 ```
 
 `tools/tests.py --vm-profile` writes one JSON file per test under
-`profile/vm-opcodes/`. In `--jbc` mode it profiles the bytecode execution phase,
+`profile/vm-opcodes/`. In `--c4` mode it profiles the bytecode execution phase,
 not the source-to-bytecode save step.
 
 ## Cross-Compiler Benchmarks (CCCC vs GCC)
