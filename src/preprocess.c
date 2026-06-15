@@ -1588,8 +1588,11 @@ static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
             Token *t = preprocess2(vm, arg->tok);
             t->at_bol = tok->at_bol;
             t->has_space = tok->has_space;
-            for (; t->kind != TK_EOF; t = t->next)
-                cur = cur->next = copy_token(vm, t);
+            for (; t->kind != TK_EOF; t = t->next) {
+                Token *c = copy_token(vm, t);
+                c->hideset = NULL;
+                cur = cur->next = c;
+            }
             tok = tok->next;
             continue;
         }
