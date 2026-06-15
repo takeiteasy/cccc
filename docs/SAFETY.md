@@ -118,9 +118,11 @@ Safety levels are **additive** - you can combine a preset level with individual 
 All features listed below can be enabled individually or through the safety level presets above. This section provides detailed information about what each feature does and how it works.
 
 - `--stack-canaries` **Stack overflow protection**
-  - Places canary values (0xDEADBEEFCAFEBABE) on the stack between saved base pointer and local variables
+  - Reserves the slot just below the saved base pointer (`bp[-1]`) for a canary value (0xDEADBEEFCAFEBABE); parameters and locals are placed from `bp[-2]` downward
+  - The one-slot shift is baked into stack offsets at compile time (`assign_stack_offsets`), so it stays consistent across threads
   - Validates canary on function return (LEV instruction)
   - Detects stack buffer overflows with detailed error reporting including PC offset
+  - Works with functions that take parameters and with threading (`pthread`)
 - **Stack bounds checking** (always enabled)
   - Validates stack pointer stays within allocated stack segment before function calls and frame allocation
   - Checks at function entry (ENT3) and call instructions (CALL/CALLI) before pushing to stack

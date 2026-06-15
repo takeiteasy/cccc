@@ -81,6 +81,11 @@ typedef struct {
     /* Count remaining reg slots: last is at __bp[-(N+1)], reg area ends at __bp[-8] */ \
     /* Remaining = 8 - (N+1) = number of slots from (last-1) down to __bp[-8] */ \
     int __param_slot = (int)(__bp - (long long *)&(last)); \
+    /* Under --stack-canaries, ENT3 reserves bp[-1] for the canary and shifts \
+     * params one slot lower, inflating this bp-to-&last distance by one. The \
+     * relative reg_ptr above is unaffected; only the slot count needs the fix \
+     * (#445). __CCCC_STACK_CANARIES__ is 1 when canaries are on, else 0. */ \
+    __param_slot -= __CCCC_STACK_CANARIES__; \
     (ap).reg_count = 8 - __param_slot; \
     if ((ap).reg_count < 0) (ap).reg_count = 0; \
     int __stack_fixed = __param_slot > 8 ? __param_slot - 8 : 0; \

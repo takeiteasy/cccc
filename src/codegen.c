@@ -5050,7 +5050,7 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
 
 // Assign stack offsets for parameters and locals
 // Returns the total stack size (aligned to 16 bytes)
-static int assign_stack_offsets(Obj *fn) {
+static int assign_stack_offsets(VirtualMachine *vm, Obj *fn) {
     if (!fn->is_function)
         return 0;
 
@@ -5065,12 +5065,18 @@ static int assign_stack_offsets(Obj *fn) {
     bool is_variadic = fn->ty && fn->ty->is_variadic;
     int spill_param_count = is_variadic && param_count < 8 ? 8 : param_count;
 
-    // Stack size starts with space for parameters (at negative offsets)
-    int stack_size = spill_param_count;
+    // When stack canaries are enabled, ENT3 reserves bp[-1] for the canary and
+    // spills params/locals one slot lower (bp[-2] downward). Bake that one-slot
+    // shift into the assigned offsets so codegen reads where ENT3 wrote (#445).
+    int canary_bias = (vm->flags & CCCC_STACK_CANARIES) ? 1 : 0;
 
-    // Assign parameter offsets (negative, starting at -1)
-    // Parameters: bp[-1], bp[-2], ...
-    int param_offset = -1;
+    // Stack size starts with space for parameters (at negative offsets), plus
+    // the reserved canary slot when enabled.
+    int stack_size = spill_param_count + canary_bias;
+
+    // Assign parameter offsets (negative). Without canaries: bp[-1], bp[-2], ...
+    // With canaries: bp[-2], bp[-3], ... (bp[-1] is the canary).
+    int param_offset = -1 - canary_bias;
     for (Obj *param = fn->params; param; param = param->next) {
         param->offset = param_offset;
         param->is_local = true;
@@ -5135,7 +5141,7 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
 
     // Count parameters first
     // Assign stack offsets early
-    int stack_size = assign_stack_offsets(fn);
+    int stack_size = assign_stack_offsets(vm, fn);
     int base_stack_size = stack_size;
     prepare_local_promotion(vm, fn, base_stack_size);
     prepare_restrict_cache(vm, fn, base_stack_size);
@@ -5318,7 +5324,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
     // offsets)
     for (Obj *fn = prog; fn; fn = fn->next) {
         if (fn->is_function && fn->is_definition) {
-            assign_stack_offsets(fn);
+            assign_stack_offsets(vm, fn);
         }
     }
 

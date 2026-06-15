@@ -46,10 +46,9 @@ static void *debugger_symbol_address(VirtualMachine *vm, DebugSymbol *sym) {
     if (!sym)
         return NULL;
     if (sym->is_local) {
-        long long offset = sym->offset;
-        if ((vm->flags & CCCC_STACK_CANARIES) && offset < 0)
-            offset -= 1;
-        return (void *)(vm->bp + offset);
+        // The canary one-slot shift is already baked into sym->offset by
+        // assign_stack_offsets (#445), so no extra adjustment is needed here.
+        return (void *)(vm->bp + sym->offset);
     }
     return (void *)(vm->data_seg + sym->offset);
 }

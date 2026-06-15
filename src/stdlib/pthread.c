@@ -65,11 +65,11 @@ static VirtualMachine *current_vm(void) {
 static void enable_pthread_runtime(VirtualMachine *vm) {
     if (!vm)
         return;
-    // Stack canaries are broken when any function has parameters: ENT3 pushes
-    // the canary at bp[-1] which conflicts with the first param/local at offset
-    // -1 (see assign_stack_offsets). Disable them when threading starts.
-    // Follow-up: ticket #441 tracks fixing the canary frame layout.
-    vm->flags &= ~CCCC_STACK_CANARIES;
+    // The canary frame-layout shift is baked into stack offsets at compile time
+    // (see assign_stack_offsets, #445), so the CCCC_STACK_CANARIES flag must not
+    // be toggled at runtime — doing so would desync ENT3 from the baked offsets.
+    // Stack canaries are therefore supported during threading.
+    (void)vm;
 }
 
 static PthreadState *pthread_state(VirtualMachine *vm) {
@@ -237,10 +237,10 @@ static void *vm_thread_start(void *arg) {
     ThreadRecord *saved_active = vm->active_thread;
     vm->active_thread = rec;
     cccc_exec_state_restore(vm, &rec->exec);
-    uint32_t saved_flags = vm->flags;
-    vm->flags &= ~CCCC_STACK_CANARIES;
+    // Stack canaries stay enabled in threads: the frame-layout shift is baked
+    // into stack offsets at compile time, so the flag must match what codegen
+    // assumed (#445).
     rec->vm_rc = vm_eval(vm);
-    vm->flags = saved_flags;
     rec->retval = (void *)vm->regs[REG_A0];
     rec->exited = 1;
     cccc_exec_state_save(vm, &rec->exec);

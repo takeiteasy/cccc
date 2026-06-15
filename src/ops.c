@@ -509,24 +509,28 @@ static inline int op_ENT3_fn(VirtualMachine *vm) {
     unsigned int float_param_mask = (unsigned int)(masks & 0xFFFFFFFFu);
     unsigned int f32_param_mask = (unsigned int)(masks >> 32);
 
-    int total_slots = stack_size + 1 + ((vm->flags & CCCC_STACK_CANARIES) ? 1 : 0);
+    // The canary slot (when enabled) is already included in stack_size by
+    // assign_stack_offsets, which reserves bp[-1] for it (#445).
+    int total_slots = stack_size + 1;
     if (check_stack_overflow(vm, total_slots)) return -1;
 
     // Save old base pointer
     *--vm->sp = (long long)vm->bp;
     vm->bp = vm->sp;
 
-    // If stack canaries are enabled, write canary after old bp
-    if (vm->flags & CCCC_STACK_CANARIES) {
-        *--vm->sp = vm->stack_canary;
-    }
-
     // Allocate space for local variables AND parameters
-    // Parameters are now stored at negative offsets like locals
+    // Parameters are now stored at negative offsets like locals.
     vm->sp = vm->sp - stack_size;
+
+    // If stack canaries are enabled, write the canary into its reserved slot at
+    // bp[-1]; params/locals live at bp[-2] and below.
+    if (vm->flags & CCCC_STACK_CANARIES) {
+        vm->bp[-1] = vm->stack_canary;
+    }
 
     // Copy arguments to their stack slots.
     // Parameters are at bp[-1], bp[-2], ... bp[-spill_param_count]
+    // (shifted one slot lower to bp[-2], bp[-3], ... when canaries reserve bp[-1]).
     // Slots 0-7 come from REG_Ai/FREG_Ai depending on float_param_mask.
     // Slots 8+ were pushed by the caller and are visible at bp[+2], bp[+3], ...
     // We need separate int and float register indices

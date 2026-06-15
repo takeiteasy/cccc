@@ -3611,6 +3611,11 @@ void init_macros(VirtualMachine *vm) {
     define_macro(vm, "__volatile__", "volatile");
     define_macro(vm, "__CCCC__", "1");
 
+    // Expose whether stack canaries are enabled so stdarg.h can correct the
+    // va_start register-slot count for the reserved canary slot (#445).
+    define_macro(vm, "__CCCC_STACK_CANARIES__",
+                 (vm->flags & CCCC_STACK_CANARIES) ? "1" : "0");
+
     define_macro(vm, "__has_include(x)", "0");
     define_macro(vm, "__has_feature(x)", "0");
     define_macro(vm, "__has_extension(x)", "0");
