@@ -248,14 +248,47 @@ const char *__cccc_ast_type_name($type_t *ty) {
     if (!ty || !ty->name)
         return NULL;
 
-    // Extract string from token
-    static char buffer[256];
+    // Extract string from token into an arena-allocated buffer -- a shared
+    // static buffer would alias across calls (e.g. for callers building a
+    // name array across multiple types).
+    VirtualMachine *vm = __cccc_get_vm();
     int len = ty->name->len;
-    if (len >= (int)sizeof(buffer))
-        len = sizeof(buffer) - 1;
-    strncpy(buffer, ty->name->loc, len);
+    char *buffer = arena_alloc(&vm->compiler.parser_arena, len + 1);
+    memcpy(buffer, ty->name->loc, len);
     buffer[len] = '\0';
     return buffer;
+}
+
+// __cccc_ast_type_c_name: returns a valid C identifier fragment for a type,
+// suitable for naming generated functions like sum_<T>/map_<T>.
+// For builtin scalar types, we always use the kind-based name (e.g. "int",
+// "ulong") regardless of ty->name, because typedef aliases (e.g.
+// `typedef int wchar_t`) mutate the singleton type's name field and would
+// otherwise produce misleading names like `sum_wchar_t` for `int`.
+// For non-scalar named types (structs, enums, user typedefs), ty->name is used.
+const char *__cccc_ast_type_c_name(VirtualMachine *vm, $type_t *ty) {
+    if (!vm || !ty)
+        return NULL;
+
+    const char *base = NULL;
+    switch (ty->kind) {
+    case TY_BOOL: base = "bool"; break;
+    case TY_CHAR: base = ty->is_unsigned ? "uchar" : "char"; break;
+    case TY_SHORT: base = ty->is_unsigned ? "ushort" : "short"; break;
+    case TY_INT: base = ty->is_unsigned ? "uint" : "int"; break;
+    case TY_LONG: base = ty->is_unsigned ? "ulong" : "long"; break;
+    case TY_FLOAT: base = "float"; break;
+    case TY_DOUBLE: base = "double"; break;
+    case TY_LDOUBLE: base = "ldouble"; break;
+    default: break;
+    }
+    if (base)
+        return arena_strdup(vm, base);
+
+    if (ty->name)
+        return __cccc_ast_type_name(ty);
+
+    return NULL;
 }
 
 $type_t *__cccc_ast_make_pointer(VirtualMachine *vm, $type_t *base) {
@@ -385,12 +418,14 @@ const char *__cccc_ast_member_name($member_t *m) {
     if (!m || !m->name)
         return NULL;
 
-    // Extract string from token
-    static char buffer[256];
+    // Extract string from token into an arena-allocated buffer. Each call
+    // must return a stable, distinct pointer (e.g. for callers building a
+    // const char *fields[] array across $struct_member_at iterations) --
+    // a shared static buffer would alias across calls.
+    VirtualMachine *vm = __cccc_get_vm();
     int len = m->name->len;
-    if (len >= (int)sizeof(buffer))
-        len = sizeof(buffer) - 1;
-    strncpy(buffer, m->name->loc, len);
+    char *buffer = arena_alloc(&vm->compiler.parser_arena, len + 1);
+    memcpy(buffer, m->name->loc, len);
     buffer[len] = '\0';
     return buffer;
 }
@@ -405,6 +440,26 @@ bool __cccc_ast_member_is_bitfield($member_t *m) {
 
 int __cccc_ast_member_bitfield_width($member_t *m) {
     return (m && m->is_bitfield) ? m->bit_width : 0;
+}
+
+// Ticket #235: $offsetof_chain(ty, "a", "b", ...) — sum of member offsets
+// walking nested struct/union members, e.g. offsetof(ty, a.b). Returns -1
+// if any name in the chain cannot be resolved.
+int64_t __cccc_ast_offsetof_chain(VirtualMachine *vm, $type_t *ty,
+                                   const char **names, int n) {
+    if (!ty || !names || n <= 0)
+        return -1;
+
+    int64_t total = 0;
+    $type_t *cur_ty = ty;
+    for (int i = 0; i < n; i++) {
+        $member_t *m = __cccc_ast_struct_member_find(vm, cur_ty, names[i]);
+        if (!m)
+            return -1;
+        total += m->offset;
+        cur_ty = m->ty;
+    }
+    return total;
 }
 
 // ============================================================================
@@ -897,11 +952,29 @@ $node_t *__cccc_ast_funcall(VirtualMachine *vm, $node_t *callee, $node_t **args,
     node->func_ty = ty;
     node->ty = ty->return_ty;
 
-    // Chain argument nodes via ->next (mirrors __cccc_ast_block pattern)
+    // Chain argument nodes via ->next, resolving each argument's type and
+    // casting to the corresponding parameter type (mirrors funcall() in
+    // parse.c, including array-to-pointer decay for e.g. memcpy/strlen).
+    // CONTRACT: when param_ty is NULL (paramless/variadic callee) or a
+    // struct/union param, `arg` is chained WITHOUT a cast, so its ->next is
+    // overwritten in place -- callers must pass fresh, non-shared nodes for
+    // those argument positions (reusing the same node across multiple
+    // funcalls corrupts earlier calls' arg chains).
+    Type *param_ty = ty->params;
     Node head = {};
     Node *cur = &head;
-    for (int i = 0; i < n && args[i]; i++)
-        cur = cur->next = args[i];
+    for (int i = 0; i < n && args[i]; i++) {
+        Node *arg = args[i];
+        add_type(vm, arg);
+        if (param_ty) {
+            if (param_ty->kind != TY_STRUCT && param_ty->kind != TY_UNION)
+                arg = new_cast(vm, arg, param_ty);
+            param_ty = param_ty->next;
+        } else if (arg->ty && arg->ty->kind == TY_FLOAT) {
+            arg = new_cast(vm, arg, ty_double);
+        }
+        cur = cur->next = arg;
+    }
     node->args = head.next;
     return node;
 }
@@ -1272,6 +1345,134 @@ $node_t *__cccc_ast_init_struct(VirtualMachine *vm, $type_t *ty, const char **fi
 }
 
 // ============================================================================
+// Serialization (ticket #235)
+// ============================================================================
+
+// Recursively emit memcpy() calls copying each scalar/pointer leaf member of
+// `ty` (starting from `expr`) into `buf_char[base_offset + member->offset]`.
+// Nested struct/union members are recursed into (flat serialization).
+// Bitfields are skipped (TODO #<follow-up>: bit-packed serialization).
+static void reflect_serialize_members(VirtualMachine *vm, Node *block, Type *ty,
+                                       Node *expr, Node *buf_char, int base_offset) {
+    for (Member *m = ty->members; m; m = m->next) {
+        if (!m->name || m->is_bitfield)
+            continue;
+
+        Node *field = __cccc_ast_member(vm, expr, __cccc_ast_member_name(m));
+        int off = base_offset + m->offset;
+
+        if (m->ty->kind == TY_STRUCT || m->ty->kind == TY_UNION) {
+            reflect_serialize_members(vm, block, m->ty, field, buf_char, off);
+            continue;
+        }
+
+        Node *dst = __cccc_ast_unary(vm, ND_ADDR,
+            __cccc_ast_subscript(vm, buf_char, __cccc_ast_int_literal(vm, off)));
+        Node *src = __cccc_ast_unary(vm, ND_ADDR, field);
+        Node *call = __cccc_ast_funcall(vm, __cccc_ast_var_ref(vm, "memcpy"),
+            (Node *[]){dst, src, __cccc_ast_int_literal(vm, m->ty->size)}, 3);
+        __cccc_ast_block_add_stmt(vm, block, __cccc_ast_expr_stmt(vm, call));
+    }
+}
+
+// $serialize(ty, expr, buf) — build a block of memcpy() calls copying `expr`
+// (of type `ty`) byte-for-byte into `buf` (void*/char*). For struct/union
+// types, copies each scalar/pointer leaf member at its natural offset
+// (recursing into nested flat structs); for scalar types, copies the whole
+// value in one memcpy. V1 placeholder: pointer-typed members are copied as
+// raw pointer bytes, not followed (TODO #<follow-up>: deep/pointer-aware
+// serialization).
+$node_t *__cccc_ast_serialize(VirtualMachine *vm, $type_t *ty, $node_t *expr, $node_t *buf) {
+    if (!vm || !ty || !expr || !buf)
+        return NULL;
+
+    add_type(vm, expr);
+    add_type(vm, buf);
+
+    Node *block = __cccc_ast_block(vm, NULL, 0);
+    Node *buf_char = __cccc_ast_cast(vm, buf, pointer_to(vm, ty_char));
+
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
+        reflect_serialize_members(vm, block, ty, expr, buf_char, 0);
+    } else {
+        Node *src = __cccc_ast_unary(vm, ND_ADDR, expr);
+        Node *call = __cccc_ast_funcall(vm, __cccc_ast_var_ref(vm, "memcpy"),
+            (Node *[]){buf, src, __cccc_ast_int_literal(vm, ty->size)}, 3);
+        __cccc_ast_block_add_stmt(vm, block, __cccc_ast_expr_stmt(vm, call));
+    }
+
+    add_type(vm, block);
+    return block;
+}
+
+// $deserialize(ty, buf) — reinterpret `buf` (void*/char*) as a `ty` value:
+// *(ty*)buf. V1 placeholder: this is a cast+deref, so it inherits the host's
+// alignment requirements for `ty` (TODO #<follow-up>: field-by-field
+// reconstruction if $serialize ever produces a packed/portable layout).
+$node_t *__cccc_ast_deserialize(VirtualMachine *vm, $type_t *ty, $node_t *buf) {
+    if (!vm || !ty || !buf)
+        return NULL;
+
+    add_type(vm, buf);
+    Node *typed_ptr = __cccc_ast_cast(vm, buf, pointer_to(vm, ty));
+    return __cccc_ast_unary(vm, ND_DEREF, typed_ptr);
+}
+
+// $enum_to_string(ty, expr) — builds switch (expr) { case V0: return "Name0";
+// ... default: return ""; }. Caller wraps the result in a function returning
+// const char*.
+$node_t *__cccc_ast_enum_to_string_switch(VirtualMachine *vm, $type_t *ty, $node_t *expr) {
+    if (!vm || !ty || !expr)
+        return NULL;
+
+    add_type(vm, expr);
+
+    Node *sw = __cccc_ast_switch(vm, expr);
+    int n = __cccc_ast_enum_value_count(ty);
+    for (int i = 0; i < n; i++) {
+        const char *name = __cccc_ast_enum_value_name(ty, i);
+        int64_t val = __cccc_ast_enum_value(ty, i);
+        Node *value_node = __cccc_ast_int_literal(vm, val);
+        Node *body = __cccc_ast_return(vm, __cccc_ast_string_literal(vm, name));
+        __cccc_ast_switch_add_case(vm, sw, value_node, body);
+    }
+    __cccc_ast_switch_set_default(vm, sw,
+        __cccc_ast_return(vm, __cccc_ast_string_literal(vm, "")));
+
+    return sw;
+}
+
+// $enum_from_string(ty, expr) — builds a block of
+// `if (strcmp(expr, "Name0") == 0) return Value0; ... return -1;`. Caller
+// wraps the result in a function returning the enum type (or an int).
+$node_t *__cccc_ast_enum_from_string_chain(VirtualMachine *vm, $type_t *ty, $node_t *expr) {
+    if (!vm || !ty || !expr)
+        return NULL;
+
+    add_type(vm, expr);
+
+    Node *block = __cccc_ast_block(vm, NULL, 0);
+    int n = __cccc_ast_enum_value_count(ty);
+    for (int i = 0; i < n; i++) {
+        const char *name = __cccc_ast_enum_value_name(ty, i);
+        int64_t val = __cccc_ast_enum_value(ty, i);
+
+        Node *str_lit = __cccc_ast_string_literal(vm, name);
+        Node *cmp = __cccc_ast_funcall(vm, __cccc_ast_var_ref(vm, "strcmp"),
+            (Node *[]){expr, str_lit}, 2);
+        Node *cond = __cccc_ast_binary(vm, ND_EQ, cmp, __cccc_ast_int_literal(vm, 0));
+        Node *then = __cccc_ast_return(vm, __cccc_ast_int_literal(vm, val));
+        Node *if_node = __cccc_ast_if(vm, cond, then, NULL);
+        __cccc_ast_block_add_stmt(vm, block, if_node);
+    }
+    __cccc_ast_block_add_stmt(vm, block,
+        __cccc_ast_return(vm, __cccc_ast_int_literal(vm, -1)));
+
+    add_type(vm, block);
+    return block;
+}
+
+// ============================================================================
 // AST Type Construction - Qualified Types (ticket #171)
 // ============================================================================
 
@@ -1297,15 +1498,111 @@ $type_t *__cccc_ast_make_volatile(VirtualMachine *vm, $type_t *ty) {
 // Function Generation
 // ============================================================================
 
-// Helper to create a function type
-static Type *make_func_type(VirtualMachine *vm, Type *return_type) {
+// Helper to create a function type, optionally with a parameter list. Each
+// entry in `params` must be either a fresh/owned Type (e.g. the result of
+// pointer_to() or copy_type()) since they get chained via ->next here --
+// never pass a shared singleton (ty_int, ty_long, ...) directly.
+static Type *make_func_type_params(VirtualMachine *vm, Type *return_type,
+                                    Type **params, int nparams) {
     Type *ty = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
     memset(ty, 0, sizeof(Type));
     ty->kind = TY_FUNC;
     ty->return_ty = return_type;
     ty->size = 8;
     ty->align = 8;
+
+    Type head = {0};
+    Type *cur = &head;
+    for (int i = 0; i < nparams; i++) {
+        cur->next = params[i];
+        cur = cur->next;
+    }
+    ty->params = head.next;
     return ty;
+}
+
+static Type *make_func_type(VirtualMachine *vm, Type *return_type) {
+    return make_func_type_params(vm, return_type, NULL, 0);
+}
+
+// __cccc_ast_make_func_ptr_type: builds a pointer-to-function type, e.g.
+// `T (*)(T)`, suitable for $function_add_param (the callback parameters of
+// $generate_map/reduce/filter). Each entry in param_types is copy_type()'d
+// before being chained via ->next, so passing shared singletons (ty_int, a
+// struct's own elem_ty, ...) here never mutates them.
+$type_t *__cccc_ast_make_func_ptr_type(VirtualMachine *vm, $type_t *return_ty,
+                                        $type_t **param_types, int nparams) {
+    if (!vm || !return_ty)
+        return NULL;
+
+    Type *copies[16];
+    if (nparams > 16)
+        nparams = 16;
+    for (int i = 0; i < nparams; i++)
+        copies[i] = copy_type(vm, param_types[i]);
+
+    Type *fn_ty = make_func_type_params(vm, return_ty, copies, nparams);
+    return pointer_to(vm, fn_ty);
+}
+
+// Synthesize a minimal extern declaration for a libc function directly into
+// vm->compiler.globals, so __cccc_ast_var_ref/__cccc_ast_funcall can build
+// calls to it (e.g. for $serialize's memcpy) even when the target TU doesn't
+// #include <string.h>. The FFI registration for these functions is
+// unconditional (register_string_functions); only the AST-level Obj is
+// missing without the #include.
+//
+// A real parameter list is required (not just the return type): without it,
+// __cccc_ast_funcall() skips arg-casting (no fresh nodes), so a reused arg
+// node's ->next gets overwritten by each successive call built from it.
+static void ensure_libc_fn_decl(VirtualMachine *vm, const char *name, Type *return_ty,
+                                 Type **params, int nparams) {
+    if (__cccc_ast_find_global(vm, name))
+        return;
+
+    Obj *fn = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
+    memset(fn, 0, sizeof(Obj));
+    fn->name = arena_strdup(vm, name);
+    fn->ty = make_func_type_params(vm, return_ty, params, nparams);
+    fn->align = 8;
+    fn->is_function = true;
+    fn->next = vm->compiler.globals;
+    vm->compiler.globals = fn;
+}
+
+// Ticket #235: ensure memcpy/memmove/memcmp/strlen/strcmp are resolvable via
+// __cccc_ast_var_ref in the runtime TU's globals, for $serialize/$deserialize
+// and future $enum_to_string/$enum_from_string-style generators.
+void __cccc_ensure_string_h_decls(VirtualMachine *vm) {
+    if (!vm)
+        return;
+
+    Type *voidp_a = pointer_to(vm, ty_void);
+    Type *voidp_b = pointer_to(vm, ty_void);
+    Type *size1 = copy_type(vm, ty_ulong);
+    ensure_libc_fn_decl(vm, "memcpy", pointer_to(vm, ty_void),
+                        (Type *[]){voidp_a, voidp_b, size1}, 3);
+
+    voidp_a = pointer_to(vm, ty_void);
+    voidp_b = pointer_to(vm, ty_void);
+    size1 = copy_type(vm, ty_ulong);
+    ensure_libc_fn_decl(vm, "memmove", pointer_to(vm, ty_void),
+                        (Type *[]){voidp_a, voidp_b, size1}, 3);
+
+    voidp_a = pointer_to(vm, ty_void);
+    voidp_b = pointer_to(vm, ty_void);
+    size1 = copy_type(vm, ty_ulong);
+    ensure_libc_fn_decl(vm, "memcmp", ty_int,
+                        (Type *[]){voidp_a, voidp_b, size1}, 3);
+
+    Type *charp = pointer_to(vm, ty_char);
+    ensure_libc_fn_decl(vm, "strlen", copy_type(vm, ty_ulong),
+                        (Type *[]){charp}, 1);
+
+    charp = pointer_to(vm, ty_char);
+    Type *charp2 = pointer_to(vm, ty_char);
+    ensure_libc_fn_decl(vm, "strcmp", ty_int,
+                        (Type *[]){charp, charp2}, 2);
 }
 
 $obj_t *__cccc_ast_function(VirtualMachine *vm, const char *name,
@@ -1668,6 +1965,196 @@ void __cccc_ast_pop_fn(VirtualMachine *vm) {
     int d = --_fn_context_depth;
     vm->compiler.current_fn = _fn_context_stack[d];
     vm->compiler.locals     = _fn_locals_stack[d];  // restore outer locals
+}
+
+// ============================================================================
+// Ticket #235: FP-style array generators ($generate_sum/map/reduce/filter)
+// ============================================================================
+
+// __cccc_generate_sum(elem_ty): publishes
+//   T sum_T(T *arr, size_t n) { T total = 0; for (...) total += arr[i]; return total; }
+void __cccc_generate_sum(VirtualMachine *vm, Type *elem_ty) {
+    if (!vm || !elem_ty)
+        return;
+
+    char gname[128];
+    strcpy(gname, "sum_");
+    strcat(gname, __cccc_ast_type_c_name(vm, elem_ty));
+
+    Type *size_ty = __cccc_ast_get_type(vm, "size_t");
+    Obj *fn = __cccc_ast_function(vm, gname, elem_ty);
+    __cccc_ast_function_add_param(vm, fn, "arr", __cccc_ast_make_pointer(vm, elem_ty));
+    __cccc_ast_function_add_param(vm, fn, "n", size_ty);
+
+    __cccc_ast_push_fn(vm, fn);
+
+    Node *total = __cccc_ast_local_var(vm, "total", elem_ty);
+    Node *i = __cccc_ast_local_var(vm, "i", size_ty);
+
+    Node *block = __cccc_ast_block(vm, NULL, 0);
+    __cccc_ast_block_add_stmt(vm, block,
+        __cccc_ast_expr_stmt(vm, __cccc_ast_assign(vm, total, __cccc_ast_int_literal(vm, 0))));
+
+    Node *init = __cccc_ast_expr_stmt(vm, __cccc_ast_assign(vm, i, __cccc_ast_int_literal(vm, 0)));
+    Node *cond = __cccc_ast_binary(vm, ND_LT, i, __cccc_ast_param_ref(vm, fn, "n"));
+    Node *inc = __cccc_ast_assign(vm, i, __cccc_ast_binary(vm, ND_ADD, i, __cccc_ast_int_literal(vm, 1)));
+    Node *body = __cccc_ast_expr_stmt(vm, __cccc_ast_assign(vm, total,
+        __cccc_ast_binary(vm, ND_ADD, total,
+            __cccc_ast_subscript(vm, __cccc_ast_param_ref(vm, fn, "arr"), i))));
+
+    __cccc_ast_block_add_stmt(vm, block, __cccc_ast_for(vm, init, cond, inc, body));
+    __cccc_ast_block_add_stmt(vm, block, __cccc_ast_return(vm, total));
+
+    __cccc_ast_function_set_body(vm, fn, block);
+    __cccc_ast_pop_fn(vm);
+
+    __cccc_ast_publish(vm, fn, 0);
+}
+
+// __cccc_generate_map(elem_ty): publishes
+//   void map_T(T *arr, size_t n, T *out, T (*f)(T)) { for (...) out[i] = f(arr[i]); }
+void __cccc_generate_map(VirtualMachine *vm, Type *elem_ty) {
+    if (!vm || !elem_ty)
+        return;
+
+    char gname[128];
+    strcpy(gname, "map_");
+    strcat(gname, __cccc_ast_type_c_name(vm, elem_ty));
+
+    Type *size_ty = __cccc_ast_get_type(vm, "size_t");
+    Type *cb_ty = __cccc_ast_make_func_ptr_type(vm, elem_ty, (Type *[]){elem_ty}, 1);
+
+    Obj *fn = __cccc_ast_function(vm, gname, __cccc_ast_get_type(vm, "void"));
+    __cccc_ast_function_add_param(vm, fn, "arr", __cccc_ast_make_pointer(vm, elem_ty));
+    __cccc_ast_function_add_param(vm, fn, "n", size_ty);
+    __cccc_ast_function_add_param(vm, fn, "out", __cccc_ast_make_pointer(vm, elem_ty));
+    __cccc_ast_function_add_param(vm, fn, "f", cb_ty);
+
+    __cccc_ast_push_fn(vm, fn);
+
+    Node *i = __cccc_ast_local_var(vm, "i", size_ty);
+
+    Node *block = __cccc_ast_block(vm, NULL, 0);
+    Node *init = __cccc_ast_expr_stmt(vm, __cccc_ast_assign(vm, i, __cccc_ast_int_literal(vm, 0)));
+    Node *cond = __cccc_ast_binary(vm, ND_LT, i, __cccc_ast_param_ref(vm, fn, "n"));
+    Node *inc = __cccc_ast_assign(vm, i, __cccc_ast_binary(vm, ND_ADD, i, __cccc_ast_int_literal(vm, 1)));
+
+    Node *call = __cccc_ast_funcall(vm, __cccc_ast_param_ref(vm, fn, "f"),
+        (Node *[]){__cccc_ast_subscript(vm, __cccc_ast_param_ref(vm, fn, "arr"), i)}, 1);
+    Node *body = __cccc_ast_expr_stmt(vm, __cccc_ast_assign(vm,
+        __cccc_ast_subscript(vm, __cccc_ast_param_ref(vm, fn, "out"), i), call));
+
+    __cccc_ast_block_add_stmt(vm, block, __cccc_ast_for(vm, init, cond, inc, body));
+
+    __cccc_ast_function_set_body(vm, fn, block);
+    __cccc_ast_pop_fn(vm);
+
+    __cccc_ast_publish(vm, fn, 0);
+}
+
+// __cccc_generate_reduce(elem_ty): publishes
+//   T reduce_T(T *arr, size_t n, T init, T (*f)(T, T)) {
+//       T acc = init; for (...) acc = f(acc, arr[i]); return acc;
+//   }
+void __cccc_generate_reduce(VirtualMachine *vm, Type *elem_ty) {
+    if (!vm || !elem_ty)
+        return;
+
+    char gname[128];
+    strcpy(gname, "reduce_");
+    strcat(gname, __cccc_ast_type_c_name(vm, elem_ty));
+
+    Type *size_ty = __cccc_ast_get_type(vm, "size_t");
+    Type *cb_ty = __cccc_ast_make_func_ptr_type(vm, elem_ty, (Type *[]){elem_ty, elem_ty}, 2);
+
+    Obj *fn = __cccc_ast_function(vm, gname, elem_ty);
+    __cccc_ast_function_add_param(vm, fn, "arr", __cccc_ast_make_pointer(vm, elem_ty));
+    __cccc_ast_function_add_param(vm, fn, "n", size_ty);
+    __cccc_ast_function_add_param(vm, fn, "init", elem_ty);
+    __cccc_ast_function_add_param(vm, fn, "f", cb_ty);
+
+    __cccc_ast_push_fn(vm, fn);
+
+    Node *acc = __cccc_ast_local_var(vm, "acc", elem_ty);
+    Node *i = __cccc_ast_local_var(vm, "i", size_ty);
+
+    Node *block = __cccc_ast_block(vm, NULL, 0);
+    __cccc_ast_block_add_stmt(vm, block,
+        __cccc_ast_expr_stmt(vm, __cccc_ast_assign(vm, acc, __cccc_ast_param_ref(vm, fn, "init"))));
+
+    Node *init_stmt = __cccc_ast_expr_stmt(vm, __cccc_ast_assign(vm, i, __cccc_ast_int_literal(vm, 0)));
+    Node *cond = __cccc_ast_binary(vm, ND_LT, i, __cccc_ast_param_ref(vm, fn, "n"));
+    Node *inc = __cccc_ast_assign(vm, i, __cccc_ast_binary(vm, ND_ADD, i, __cccc_ast_int_literal(vm, 1)));
+
+    Node *call = __cccc_ast_funcall(vm, __cccc_ast_param_ref(vm, fn, "f"),
+        (Node *[]){acc, __cccc_ast_subscript(vm, __cccc_ast_param_ref(vm, fn, "arr"), i)}, 2);
+    Node *body = __cccc_ast_expr_stmt(vm, __cccc_ast_assign(vm, acc, call));
+
+    __cccc_ast_block_add_stmt(vm, block, __cccc_ast_for(vm, init_stmt, cond, inc, body));
+    __cccc_ast_block_add_stmt(vm, block, __cccc_ast_return(vm, acc));
+
+    __cccc_ast_function_set_body(vm, fn, block);
+    __cccc_ast_pop_fn(vm);
+
+    __cccc_ast_publish(vm, fn, 0);
+}
+
+// __cccc_generate_filter(elem_ty): publishes
+//   void filter_T(T *arr, size_t n, T *out, size_t *out_n, bool (*pred)(T)) {
+//       size_t count = 0;
+//       for (...) if (pred(arr[i])) out[count] = arr[i], count += 1;
+//       *out_n = count;
+//   }
+void __cccc_generate_filter(VirtualMachine *vm, Type *elem_ty) {
+    if (!vm || !elem_ty)
+        return;
+
+    char gname[128];
+    strcpy(gname, "filter_");
+    strcat(gname, __cccc_ast_type_c_name(vm, elem_ty));
+
+    Type *size_ty = __cccc_ast_get_type(vm, "size_t");
+    Type *cb_ty = __cccc_ast_make_func_ptr_type(vm, __cccc_ast_get_type(vm, "_Bool"), (Type *[]){elem_ty}, 1);
+
+    Obj *fn = __cccc_ast_function(vm, gname, __cccc_ast_get_type(vm, "void"));
+    __cccc_ast_function_add_param(vm, fn, "arr", __cccc_ast_make_pointer(vm, elem_ty));
+    __cccc_ast_function_add_param(vm, fn, "n", size_ty);
+    __cccc_ast_function_add_param(vm, fn, "out", __cccc_ast_make_pointer(vm, elem_ty));
+    __cccc_ast_function_add_param(vm, fn, "out_n", __cccc_ast_make_pointer(vm, size_ty));
+    __cccc_ast_function_add_param(vm, fn, "pred", cb_ty);
+
+    __cccc_ast_push_fn(vm, fn);
+
+    Node *i = __cccc_ast_local_var(vm, "i", size_ty);
+    Node *count = __cccc_ast_local_var(vm, "count", size_ty);
+
+    Node *block = __cccc_ast_block(vm, NULL, 0);
+    __cccc_ast_block_add_stmt(vm, block,
+        __cccc_ast_expr_stmt(vm, __cccc_ast_assign(vm, count, __cccc_ast_int_literal(vm, 0))));
+
+    Node *init = __cccc_ast_expr_stmt(vm, __cccc_ast_assign(vm, i, __cccc_ast_int_literal(vm, 0)));
+    Node *cond = __cccc_ast_binary(vm, ND_LT, i, __cccc_ast_param_ref(vm, fn, "n"));
+    Node *inc = __cccc_ast_assign(vm, i, __cccc_ast_binary(vm, ND_ADD, i, __cccc_ast_int_literal(vm, 1)));
+
+    Node *elem = __cccc_ast_subscript(vm, __cccc_ast_param_ref(vm, fn, "arr"), i);
+    Node *pred_call = __cccc_ast_funcall(vm, __cccc_ast_param_ref(vm, fn, "pred"), (Node *[]){elem}, 1);
+
+    Node *then_block = __cccc_ast_block(vm, NULL, 0);
+    __cccc_ast_block_add_stmt(vm, then_block, __cccc_ast_expr_stmt(vm, __cccc_ast_assign(vm,
+        __cccc_ast_subscript(vm, __cccc_ast_param_ref(vm, fn, "out"), count), elem)));
+    __cccc_ast_block_add_stmt(vm, then_block, __cccc_ast_expr_stmt(vm, __cccc_ast_assign(vm,
+        count, __cccc_ast_binary(vm, ND_ADD, count, __cccc_ast_int_literal(vm, 1)))));
+
+    Node *body = __cccc_ast_if(vm, pred_call, then_block, NULL);
+
+    __cccc_ast_block_add_stmt(vm, block, __cccc_ast_for(vm, init, cond, inc, body));
+    __cccc_ast_block_add_stmt(vm, block, __cccc_ast_expr_stmt(vm, __cccc_ast_assign(vm,
+        __cccc_ast_unary(vm, ND_DEREF, __cccc_ast_param_ref(vm, fn, "out_n")), count)));
+
+    __cccc_ast_function_set_body(vm, fn, block);
+    __cccc_ast_pop_fn(vm);
+
+    __cccc_ast_publish(vm, fn, 0);
 }
 
 // ============================================================================

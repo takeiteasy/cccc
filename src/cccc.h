@@ -1674,6 +1674,7 @@ typedef struct Compiler {
     int               ctx_stack_len; // Number of entries in ctx_stack
     int               ctx_stack_cap; // Allocated capacity of ctx_stack
     bool macro_fns_compiled;         // True after compile_all_macros has run
+    bool reflection_attrs_registered; // True after ensure_reflection_attrs_registered has run (#235)
     bool strict_comptime_includes;   // --strict-comptime-includes: don't forward regular #include decls to comptime pass
     HashMap *macro_scope_stack;       // Snapshot stack for per-comptime-fn macro isolation (#283)
     int      macro_scope_stack_len;

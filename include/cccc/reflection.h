@@ -88,6 +88,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -573,10 +574,22 @@ bool __cccc_ast_type_is_variadic($type_t *ty);
  * @function __cccc_ast_type_name
  * @abstract Return the user-visible name of a type, if any.
  * @param ty The type to inspect.
- * @return A NUL-terminated string owned by ty, or NULL for anonymous types.
+ * @return A freshly-allocated NUL-terminated string, or NULL for anonymous types.
  * @discussion Convenience wrapper: $type_name(ty).
  */
 const char *__cccc_ast_type_name($type_t *ty);
+
+/*!
+ * @function __cccc_ast_type_c_name
+ * @abstract Return a valid C identifier fragment naming `ty`.
+ * @param vm The VM context.
+ * @param ty The type to inspect.
+ * @return $type_name(ty) for named types, or a builtin spelling ("int",
+ *   "double", "ulong", ...) for builtin scalar types, or NULL.
+ * @discussion Convenience wrapper: $type_c_name(ty). Intended for naming
+ *   generated functions, e.g. sum_<T> from $generate_sum(elem_type).
+ */
+const char *__cccc_ast_type_c_name(VirtualMachine *vm, $type_t *ty);
 
 /*!
  * @function __cccc_ast_make_pointer
@@ -598,6 +611,19 @@ $type_t *__cccc_ast_make_pointer(VirtualMachine *vm, $type_t *base);
  * @discussion Convenience wrapper: $make_array(base, length).
  */
 $type_t *__cccc_ast_make_array(VirtualMachine *vm, $type_t *base, int length);
+
+/*!
+ * @function __cccc_ast_make_func_ptr_type
+ * @abstract Build a pointer-to-function type, e.g. "T (*)(T)".
+ * @param vm The VM context.
+ * @param return_ty The function's return type.
+ * @param param_types Array of parameter types (each copy_type()'d internally).
+ * @param nparams Number of entries in param_types (max 16).
+ * @return A $type_t* representing "return_ty (*)(param_types...)", or NULL on error.
+ * @discussion Convenience wrapper: $make_func_ptr_type(return_ty, param_types, nparams).
+ */
+$type_t *__cccc_ast_make_func_ptr_type(VirtualMachine *vm, $type_t *return_ty,
+                                        $type_t **param_types, int nparams);
 
 // Ticket #171: qualified type constructors
 /*!
@@ -712,6 +738,32 @@ const char *__cccc_ast_enum_value_name($type_t *e, int index);
  */
 int64_t __cccc_ast_enum_value($type_t *e, int index);
 
+/*!
+ * @function __cccc_ast_enum_to_string_switch
+ * @abstract Build a `switch (expr) { case V0: return "Name0"; ...
+ *           default: return ""; }` over the constants of an enum type.
+ * @param vm The virtual machine instance.
+ * @param ty The enum type.
+ * @param expr The expression to switch on (the enum value).
+ * @return An nk_switch node. Caller wraps it in a function returning
+ *         `const char *`.
+ * @discussion Convenience wrapper: $enum_to_string(ty, expr).
+ */
+$node_t *__cccc_ast_enum_to_string_switch(VirtualMachine *vm, $type_t *ty, $node_t *expr);
+
+/*!
+ * @function __cccc_ast_enum_from_string_chain
+ * @abstract Build a block of `if (strcmp(expr, "Name0") == 0) return V0; ...
+ *           return -1;` over the constants of an enum type.
+ * @param vm The virtual machine instance.
+ * @param ty The enum type.
+ * @param expr The expression to compare (a `const char *`).
+ * @return An nk_block node. Caller wraps it in a function returning the
+ *         enum type (or an int).
+ * @discussion Convenience wrapper: $enum_from_string(ty, expr).
+ */
+$node_t *__cccc_ast_enum_from_string_chain(VirtualMachine *vm, $type_t *ty, $node_t *expr);
+
 // ============================================================================
 // Struct/Union Member Introspection
 // ============================================================================
@@ -794,6 +846,19 @@ bool __cccc_ast_member_is_bitfield($member_t *m);
  * @discussion Convenience wrapper: $member_bitfield_width(m).
  */
 int __cccc_ast_member_bitfield_width($member_t *m);
+
+/*!
+ * @function __cccc_ast_offsetof_chain
+ * @abstract Compute the byte offset of a (possibly nested) member chain.
+ * @param vm The virtual machine instance.
+ * @param ty The starting struct/union type.
+ * @param names An array of member names to walk, innermost last.
+ * @param n The number of names in the chain.
+ * @return The summed byte offset, or -1 if any name cannot be resolved.
+ * @discussion Convenience wrapper: $offsetof_chain(ty, "a", "b", ...).
+ */
+int64_t __cccc_ast_offsetof_chain(VirtualMachine *vm, $type_t *ty,
+                                   const char **names, int n);
 
 // ============================================================================
 // Global Symbol Introspection
@@ -1706,6 +1771,7 @@ const char *__cccc_dump_ast_gen_to_string(VirtualMachine *vm, $node_t *node);
 #define $type_param_at(ty, i)   __cccc_ast_type_param_at(ty, i)
 #define $type_is_variadic(ty)   __cccc_ast_type_is_variadic(ty)
 #define $type_name(ty)          __cccc_ast_type_name(ty)
+#define $type_c_name(ty)        __cccc_ast_type_c_name(_VM, ty)
 
 #define $int_literal(val) __cccc_ast_int_literal(_VM, val)
 #define $float_literal(val) __cccc_ast_float_literal(_VM, val)
@@ -1763,12 +1829,26 @@ const char *__cccc_dump_ast_gen_to_string(VirtualMachine *vm, $node_t *node);
 #define $assign(target, value) __cccc_ast_assign(_VM, target, value)
 #define $member(obj, name) __cccc_ast_member(_VM, obj, name)
 #define $funcall(callee, args, n) __cccc_ast_funcall(_VM, callee, args, n)
+
+// Ticket #235: thin AST wrappers over <string.h> functions, available via
+// the implicit #include <string.h> at the top of this header.
+#define $memcpy(dst, src, n)                                              \
+    __cccc_ast_funcall(_VM, __cccc_ast_var_ref(_VM, "memcpy"),            \
+        ($node_t *[]){(dst), (src), (n)}, 3)
+#define $strlen(s)                                                        \
+    __cccc_ast_funcall(_VM, __cccc_ast_var_ref(_VM, "strlen"),            \
+        ($node_t *[]){(s)}, 1)
+#define $strcmp(a, b)                                                     \
+    __cccc_ast_funcall(_VM, __cccc_ast_var_ref(_VM, "strcmp"),            \
+        ($node_t *[]){(a), (b)}, 2)
 #define $while(cond, body) __cccc_ast_while(_VM, cond, body)
 #define $for(init, cond, inc, body) __cccc_ast_for(_VM, init, cond, inc, body)
 #define $do_while(body, cond) __cccc_ast_do_while(_VM, body, cond)
 
 #define $make_pointer(base) __cccc_ast_make_pointer(_VM, base)
 #define $make_array(base, len) __cccc_ast_make_array(_VM, base, len)
+#define $make_func_ptr_type(ret, params, n) \
+    __cccc_ast_make_func_ptr_type(_VM, ret, params, n)
 
 // Ticket #171: qualified type constructors
 #define $make_const(ty)    __cccc_ast_make_const(_VM, ty)
@@ -1784,6 +1864,10 @@ const char *__cccc_dump_ast_gen_to_string(VirtualMachine *vm, $node_t *node);
 #define $enum_value_name(ty, i)   __cccc_ast_enum_value_name(ty, i)
 #define $enum_value(ty, i)        __cccc_ast_enum_value(ty, i)
 
+// Ticket #235: $enum_to_string(ty, expr) / $enum_from_string(ty, expr)
+#define $enum_to_string(ty, expr)   __cccc_ast_enum_to_string_switch(_VM, ty, expr)
+#define $enum_from_string(ty, expr) __cccc_ast_enum_from_string_chain(_VM, ty, expr)
+
 #define $struct_member_count(ty) __cccc_ast_struct_member_count(_VM, ty)
 #define $struct_member_at(ty, i) __cccc_ast_struct_member_at(_VM, ty, i)
 #define $struct_member_find(ty, name)                                   \
@@ -1793,6 +1877,35 @@ const char *__cccc_dump_ast_gen_to_string(VirtualMachine *vm, $node_t *node);
 #define $member_offset(m)           __cccc_ast_member_offset(m)
 #define $member_is_bitfield(m)      __cccc_ast_member_is_bitfield(m)
 #define $member_bitfield_width(m)   __cccc_ast_member_bitfield_width(m)
+
+// Ticket #235: $foreach_member(type, varname, body) — host-side (comptime
+// C) loop over the members of a struct/union type. `varname` is bound to
+// each $member_t* in turn; `body` is a compound statement run once per
+// member at macro-evaluation time (typically building AST nodes via
+// $block_add_stmt etc.). Two-layer __COUNTER__ indirection gives each
+// call-site unique loop-variable names so $foreach_member can be nested.
+#define __cccc_foreach_member_body(type, varname, body, uid)              \
+    do {                                                                  \
+        $type_t *__cccc_fem_ty_##uid = (type);                           \
+        int __cccc_fem_n_##uid = $struct_member_count(__cccc_fem_ty_##uid); \
+        for (int __cccc_fem_i_##uid = 0; __cccc_fem_i_##uid < __cccc_fem_n_##uid; \
+             __cccc_fem_i_##uid++) {                                      \
+            $member_t *varname =                                         \
+                $struct_member_at(__cccc_fem_ty_##uid, __cccc_fem_i_##uid); \
+            body                                                          \
+        }                                                                 \
+    } while (0)
+#define __cccc_foreach_member_uid(type, varname, body, uid)               \
+    __cccc_foreach_member_body(type, varname, body, uid)
+#define $foreach_member(type, varname, body)                             \
+    __cccc_foreach_member_uid(type, varname, body, __COUNTER__)
+
+// Ticket #235: $offsetof_chain(ty, "a", "b", ...) — offsetof(ty, a.b) as an
+// $int_literal AST node.
+#define $offsetof_chain(type, ...)                                       \
+    $int_literal(__cccc_ast_offsetof_chain(_VM, type,                   \
+        (const char *[]){__VA_ARGS__},                                  \
+        (int)(sizeof((const char *[]){__VA_ARGS__}) / sizeof(const char *))))
 
 #define $find_global(name)        __cccc_ast_find_global(_VM, name)
 #define $global_count()           __cccc_ast_global_count(_VM)
@@ -1985,6 +2098,32 @@ $node_t *__cccc_ast_init_struct(VirtualMachine *vm, $type_t *ty, const char **fi
 #define $init_struct(ty, fields, values, n)                             \
     __cccc_ast_init_struct(_VM, ty, fields, values, n)
 
+// ============================================================================
+// Serialization (ticket #235)
+// ============================================================================
+
+/**
+ * @abstract Build a block of memcpy() calls copying expr (of type ty)
+ *           byte-for-byte into buf (a void or char pointer). Struct/union
+ *           types are copied member-by-member at their natural offsets,
+ *           recursing into nested flat structs; scalar types are copied
+ *           in one memcpy.
+ * @note V1 placeholder: pointer-typed members are copied as raw pointer
+ *       bytes, not followed.
+ */
+$node_t *__cccc_ast_serialize(VirtualMachine *vm, $type_t *ty, $node_t *expr, $node_t *buf);
+
+/**
+ * @abstract Build `*(ty*)buf` — reinterpret buf as a ty value.
+ * @note V1 placeholder: inherits the host's alignment requirements for ty;
+ *       if $serialize ever produces a packed/portable layout this must
+ *       change to field-by-field reconstruction.
+ */
+$node_t *__cccc_ast_deserialize(VirtualMachine *vm, $type_t *ty, $node_t *buf);
+
+#define $serialize(ty, expr, buf)   __cccc_ast_serialize(_VM, ty, expr, buf)
+#define $deserialize(ty, buf)       __cccc_ast_deserialize(_VM, ty, buf)
+
 // Global variable generation (ticket #152)
 #define $global_var(name, ty)                                           \
     __cccc_ast_global_var(_VM, name, ty)
@@ -2024,6 +2163,295 @@ $node_t *__cccc_ast_init_struct(VirtualMachine *vm, $type_t *ty, const char **fi
     for (int _cccc_enum_ctx_ = (__cccc_ast_push_enum(_VM, (ty)), 1);       \
          _cccc_enum_ctx_;                                                 \
          _cccc_enum_ctx_ = (__cccc_ast_pop_enum(_VM), 0))
+
+// ============================================================================
+// Macro Standard Library Attributes (ticket #235)
+// ============================================================================
+
+// @serialize struct Foo {...}; publishes
+//   int Foo_serialize(struct Foo *self, void *buf);
+// which copies *self into buf via $serialize and returns sizeof(struct Foo).
+@macro(attribute("serialize"))
+void __cccc_attr_serialize($attr_target_t *target) {
+    if ($attr_target_kind(target) != attr_target_type)
+        $macro_error_at(0, "@serialize expects a type (struct/union) target");
+
+    $type_t *ty = $attr_target_type(target);
+    const char *tname = $attr_target_name(target);
+    if (!ty || !tname)
+        $macro_error_at(0, "@serialize target has no usable type/name");
+
+    char fname[128];
+    strcpy(fname, tname);
+    strcat(fname, "_serialize");
+
+    $obj_t *fn = $function(fname, $get_type("int"));
+    $function_add_param(fn, "self", $make_pointer(ty));
+    $function_add_param(fn, "buf", $make_pointer($get_type("void")));
+    $with_fn(fn) {
+        $node_t *self = $unary(nk_deref, $param_ref(fn, "self"));
+        $node_t *buf = $param_ref(fn, "buf");
+        $node_t *block = $serialize(ty, self, buf);
+        $block_add_stmt(block, $return($int_literal($type_size(ty))));
+        $function_set_body(fn, block);
+    }
+    $publish(fn);
+}
+
+// @deserialize struct Foo {...}; publishes
+//   struct Foo Foo_deserialize(void *buf);
+// which reconstructs a struct Foo from buf via $deserialize.
+@macro(attribute("deserialize"))
+void __cccc_attr_deserialize($attr_target_t *target) {
+    if ($attr_target_kind(target) != attr_target_type)
+        $macro_error_at(0, "@deserialize expects a type (struct/union) target");
+
+    $type_t *ty = $attr_target_type(target);
+    const char *tname = $attr_target_name(target);
+    if (!ty || !tname)
+        $macro_error_at(0, "@deserialize target has no usable type/name");
+
+    char fname[128];
+    strcpy(fname, tname);
+    strcat(fname, "_deserialize");
+
+    $obj_t *fn = $function(fname, ty);
+    $function_add_param(fn, "buf", $make_pointer($get_type("void")));
+    $with_fn(fn) {
+        $node_t *buf = $param_ref(fn, "buf");
+        $function_set_body(fn, $return($deserialize(ty, buf)));
+    }
+    $publish(fn);
+}
+
+// @enum_to_string enum Color {...}; publishes
+//   const char *Color_to_string(enum Color v);
+// which switches over v and returns the matching constant's name, or "" if
+// no constant matches.
+@macro(attribute("enum_to_string"))
+void __cccc_attr_enum_to_string($attr_target_t *target) {
+    if ($attr_target_kind(target) != attr_target_type)
+        $macro_error_at(0, "@enum_to_string expects a type (enum) target");
+
+    $type_t *ty = $attr_target_type(target);
+    const char *tname = $attr_target_name(target);
+    if (!ty || !tname)
+        $macro_error_at(0, "@enum_to_string target has no usable type/name");
+    if ($type_kind(ty) != tk_enum)
+        $macro_error_at(0, "@enum_to_string expects an enum target");
+
+    char fname[128];
+    strcpy(fname, tname);
+    strcat(fname, "_to_string");
+
+    $type_t *cstr_ty = $make_pointer($make_const($get_type("char")));
+    $obj_t *fn = $function(fname, cstr_ty);
+    $function_add_param(fn, "v", ty);
+    $with_fn(fn) {
+        $node_t *v = $param_ref(fn, "v");
+        $function_set_body(fn, $enum_to_string(ty, v));
+    }
+    $publish(fn);
+}
+
+// @enum_from_string enum Color {...}; publishes
+//   enum Color Color_from_string(const char *s);
+// which compares s against each constant's name and returns the matching
+// value, or -1 if no constant matches.
+@macro(attribute("enum_from_string"))
+void __cccc_attr_enum_from_string($attr_target_t *target) {
+    if ($attr_target_kind(target) != attr_target_type)
+        $macro_error_at(0, "@enum_from_string expects a type (enum) target");
+
+    $type_t *ty = $attr_target_type(target);
+    const char *tname = $attr_target_name(target);
+    if (!ty || !tname)
+        $macro_error_at(0, "@enum_from_string target has no usable type/name");
+    if ($type_kind(ty) != tk_enum)
+        $macro_error_at(0, "@enum_from_string expects an enum target");
+
+    char fname[128];
+    strcpy(fname, tname);
+    strcat(fname, "_from_string");
+
+    $type_t *cstr_ty = $make_pointer($make_const($get_type("char")));
+    $obj_t *fn = $function(fname, ty);
+    $function_add_param(fn, "s", cstr_ty);
+    $with_fn(fn) {
+        $node_t *s = $param_ref(fn, "s");
+        $function_set_body(fn, $enum_from_string(ty, s));
+    }
+    $publish(fn);
+}
+
+// Ticket #235: $generate_getters/$generate_setters/$generate_constructor
+// helpers. These are plain @macro functions (no attribute name), compiled
+// into the same macro program as the @generate_* attribute handlers below
+// and called from them as ordinary functions.
+
+// __cccc_generate_getters(ty): for each member of struct/union `ty`,
+// publishes `<MemberType> get_<field>(<ty> *self) { return self->field; }`.
+@macro
+void __cccc_generate_getters($type_t *ty) {
+    $foreach_member(ty, m, {
+        const char *field = $member_name(m);
+        $type_t *fty = $member_type(m);
+
+        char gname[128];
+        strcpy(gname, "get_");
+        strcat(gname, field);
+
+        $obj_t *fn = $function(gname, fty);
+        $function_add_param(fn, "self", $make_pointer(ty));
+        $with_fn(fn) {
+            $node_t *self = $unary(nk_deref, $param_ref(fn, "self"));
+            $function_set_body(fn, $return($member(self, field)));
+        }
+        $publish(fn);
+    });
+}
+
+// __cccc_generate_setters(ty): for each member of struct/union `ty`,
+// publishes `void set_<field>(<ty> *self, <MemberType> value) { self->field = value; }`.
+@macro
+void __cccc_generate_setters($type_t *ty) {
+    $foreach_member(ty, m, {
+        const char *field = $member_name(m);
+        $type_t *fty = $member_type(m);
+
+        char gname[128];
+        strcpy(gname, "set_");
+        strcat(gname, field);
+
+        $obj_t *fn = $function(gname, $get_type("void"));
+        $function_add_param(fn, "self", $make_pointer(ty));
+        $function_add_param(fn, "value", fty);
+        $with_fn(fn) {
+            $node_t *self = $unary(nk_deref, $param_ref(fn, "self"));
+            $node_t *value = $param_ref(fn, "value");
+            $function_set_body(fn, $expr_stmt($assign($member(self, field), value)));
+        }
+        $publish(fn);
+    });
+}
+
+// __cccc_generate_constructor(ty, tname): publishes
+// `<ty> <tname>_create(<member1>, <member2>, ...) { return (ty){ .member1 =
+// member1, ... }; }` with one parameter per member of `ty`.
+@macro
+void __cccc_generate_constructor($type_t *ty, const char *tname) {
+    char gname[128];
+    strcpy(gname, tname);
+    strcat(gname, "_create");
+
+    $obj_t *fn = $function(gname, ty);
+
+    $foreach_member(ty, m, {
+        $function_add_param(fn, $member_name(m), $member_type(m));
+    });
+
+    $with_fn(fn) {
+        const char *fields[64];
+        $node_t *values[64];
+        int n = 0;
+        $foreach_member(ty, m, {
+            fields[n] = $member_name(m);
+            values[n] = $param_ref(fn, $member_name(m));
+            n++;
+        });
+        $function_set_body(fn, $return($init_struct(ty, fields, values, n)));
+    }
+    $publish(fn);
+}
+
+// @generate_getters struct Foo {...}; publishes get_<field>(struct Foo *self)
+// for each member, returning self->field.
+@macro(attribute("generate_getters"))
+void __cccc_attr_generate_getters($attr_target_t *target) {
+    if ($attr_target_kind(target) != attr_target_type)
+        $macro_error_at(0, "@generate_getters expects a type (struct/union) target");
+
+    $type_t *ty = $attr_target_type(target);
+    if (!ty)
+        $macro_error_at(0, "@generate_getters target has no usable type");
+
+    __cccc_generate_getters(ty);
+}
+
+// @generate_setters struct Foo {...}; publishes set_<field>(struct Foo *self,
+// <FieldType> value) for each member, assigning self->field = value.
+@macro(attribute("generate_setters"))
+void __cccc_attr_generate_setters($attr_target_t *target) {
+    if ($attr_target_kind(target) != attr_target_type)
+        $macro_error_at(0, "@generate_setters expects a type (struct/union) target");
+
+    $type_t *ty = $attr_target_type(target);
+    if (!ty)
+        $macro_error_at(0, "@generate_setters target has no usable type");
+
+    __cccc_generate_setters(ty);
+}
+
+// @generate_constructor struct Foo {...}; publishes
+//   struct Foo Foo_create(<member1>, <member2>, ...);
+// returning a struct Foo initialized from the given member values.
+@macro(attribute("generate_constructor"))
+void __cccc_attr_generate_constructor($attr_target_t *target) {
+    if ($attr_target_kind(target) != attr_target_type)
+        $macro_error_at(0, "@generate_constructor expects a type (struct/union) target");
+
+    $type_t *ty = $attr_target_type(target);
+    const char *tname = $attr_target_name(target);
+    if (!ty || !tname)
+        $macro_error_at(0, "@generate_constructor target has no usable type/name");
+
+    __cccc_generate_constructor(ty, tname);
+}
+
+// Ticket #235: $generate_sum/$generate_map/$generate_reduce/$generate_filter
+// -- FP-style array generators. Each publishes a single function named after
+// elem_ty's spelling (via $type_c_name, since builtin scalar types have no
+// $type_name): sum_<T>, map_<T>, reduce_<T>, filter_<T>. Implemented as plain
+// C functions in reflection.c (registered via cc_register_cfunc) rather than
+// @macro functions, so they're callable from any [[cccc::comptime]] context,
+// not just from within reflection.h's own macro program.
+
+/*!
+ * @function __cccc_generate_sum
+ * @abstract Publish `T sum_T(T *arr, size_t n)` summing all elements.
+ * @discussion Convenience wrapper: $generate_sum(elem_type).
+ */
+void __cccc_generate_sum(VirtualMachine *vm, $type_t *elem_ty);
+
+/*!
+ * @function __cccc_generate_map
+ * @abstract Publish `void map_T(T *arr, size_t n, T *out, T (*f)(T))`,
+ *   writing `f(arr[i])` into `out[i]` for each element.
+ * @discussion Convenience wrapper: $generate_map(elem_type).
+ */
+void __cccc_generate_map(VirtualMachine *vm, $type_t *elem_ty);
+
+/*!
+ * @function __cccc_generate_reduce
+ * @abstract Publish `T reduce_T(T *arr, size_t n, T init, T (*f)(T, T))`,
+ *   folding `f` over the array starting from `init`.
+ * @discussion Convenience wrapper: $generate_reduce(elem_type).
+ */
+void __cccc_generate_reduce(VirtualMachine *vm, $type_t *elem_ty);
+
+/*!
+ * @function __cccc_generate_filter
+ * @abstract Publish `void filter_T(T *arr, size_t n, T *out, size_t *out_n,
+ *   bool (*pred)(T))`, writing elements matching `pred` into `out` and
+ *   setting `*out_n` to the match count.
+ * @discussion Convenience wrapper: $generate_filter(elem_type).
+ */
+void __cccc_generate_filter(VirtualMachine *vm, $type_t *elem_ty);
+
+#define $generate_sum(elem_type)    __cccc_generate_sum(_VM, elem_type)
+#define $generate_map(elem_type)    __cccc_generate_map(_VM, elem_type)
+#define $generate_reduce(elem_type) __cccc_generate_reduce(_VM, elem_type)
+#define $generate_filter(elem_type) __cccc_generate_filter(_VM, elem_type)
 
 #ifdef __cplusplus
 }

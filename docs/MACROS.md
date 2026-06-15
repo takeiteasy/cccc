@@ -1150,6 +1150,197 @@ void gen_lookup(void) {
 gen_lookup();
 ```
 
+## Macro Standard Library (ticket #235)
+
+`include/cccc/reflection.h` ships a bundled set of `$`-prefixed helpers for
+common macro-author tasks. Because reflection.h is implicitly included in every
+macro/comptime TU, these are available without any extra `#include`.
+
+### String and Memory Wrappers
+
+Thin AST wrappers over `memcpy`, `strlen`, and `strcmp`:
+
+```c
+$node_t *dst, *src, *n;
+$memcpy(dst, src, n);      // memcpy(dst, src, n)
+$node_t *str;
+$strlen(str);              // strlen(str)
+$node_t *a, *b;
+$strcmp(a, b);             // strcmp(a, b)
+```
+
+`<string.h>` is always declared in the comptime TU so these work without
+additional includes.
+
+### `$foreach_member(type, varname, body)`
+
+Host-side loop over every struct/union member:
+
+```c
+[[cccc::comptime]]
+void print_offsets(void) {
+    $type_t *ty = $get_type("MyStruct");
+    $foreach_member(ty, m, {
+        // m is a $member_t* — use $member_name(m), $member_offset(m), etc.
+        int off = $member_offset(m);
+    });
+}
+```
+
+Each iteration executes `body` at compile time with `varname` bound to the
+current `$member_t *`.
+
+### `$offsetof_chain(type, ...)`
+
+Sum offsets through a chain of nested struct fields:
+
+```c
+$type_t *ty = $get_type("Outer");
+int off = $offsetof_chain(ty, "inner", "x");
+// equivalent to offsetof(Outer, inner) + offsetof(Inner, x)
+```
+
+Returns `-1` if any field name in the chain is not found.
+
+### Serialization Helpers
+
+#### `$serialize(type, expr, buf)` / `$deserialize(type, buf)`
+
+Build a block that flat-copies a struct into/out of a raw byte buffer:
+
+```c
+[[cccc::comptime(inline)]]
+$node_t *ser($node_t *val, $node_t *buf) {
+    return $serialize($get_type("Point"), val, buf);
+}
+[[cccc::comptime(inline)]]
+$node_t *deser($node_t *buf) {
+    return $deserialize($get_type("Point"), buf);
+}
+```
+
+V1 scope: scalars and flat structs (nested flat structs are recursed;
+pointer-typed members are copied as raw pointer bytes).
+
+#### `@serialize` / `@deserialize` attributes
+
+Attach directly to a struct to auto-generate `<Type>_serialize` and
+`<Type>_deserialize` functions:
+
+```c
+@serialize
+@deserialize
+struct Point { int x; int y; };
+
+// Generates:
+//   int Point_serialize(Point *self, void *buf);   // returns sizeof(Point)
+//   Point Point_deserialize(void *buf);
+```
+
+### Enum String Conversion
+
+#### `$enum_to_string(type, expr)` / `$enum_from_string(type, expr)`
+
+Build a switch or if-chain that converts between enum values and their name
+strings:
+
+```c
+[[cccc::comptime(inline)]]
+$node_t *color_name($node_t *v) {
+    return $enum_to_string($get_type("Color"), v);
+}
+```
+
+#### `@enum_to_string` / `@enum_from_string` attributes
+
+```c
+@enum_to_string
+@enum_from_string
+typedef enum { RED, GREEN, BLUE } Color;
+
+// Generates:
+//   const char *Color_to_string(Color v);
+//   Color Color_from_string(const char *s);  // returns -1 on no match
+```
+
+### Code Generators
+
+#### `@generate_getters` / `@generate_setters`
+
+Publish one `get_<field>` / `set_<field>` function per struct member:
+
+```c
+@generate_getters
+@generate_setters
+struct Point { int x; int y; };
+
+// Generates:
+//   int get_x(struct Point *self);
+//   int get_y(struct Point *self);
+//   void set_x(struct Point *self, int value);
+//   void set_y(struct Point *self, int value);
+```
+
+#### `@generate_constructor`
+
+Publish a `<Type>_create(field1, field2, ...)` constructor:
+
+```c
+@generate_constructor
+struct Point { int x; int y; };
+
+// Generates:
+//   struct Point Point_create(int x, int y);
+```
+
+V1 cap: up to 64 members per struct.
+
+#### FP-Style Array Generators
+
+`$generate_sum`, `$generate_map`, `$generate_reduce`, and `$generate_filter`
+publish typed array helpers for a given element type. Call from a comptime
+function invoked at file scope:
+
+```c
+[[cccc::comptime]]
+void setup_int_helpers(void) {
+    $type_t *int_ty = $get_type("int");
+    $generate_sum(int_ty);    // int sum_int(int *arr, size_t n)
+    $generate_map(int_ty);    // void map_int(int *arr, size_t n, int *out, int (*f)(int))
+    $generate_reduce(int_ty); // int reduce_int(int *arr, size_t n, int init, int (*f)(int, int))
+    $generate_filter(int_ty); // void filter_int(int *arr, size_t n, int *out, size_t *out_n, bool (*pred)(int))
+}
+setup_int_helpers();
+```
+
+`$generate_map` and `$generate_filter` use caller-provided output buffers
+(no `malloc`). `$generate_filter` sets `*out_n` to the number of elements
+written.
+
+| Generator | Signature |
+|---|---|
+| `$generate_sum(T)` | `T sum_T(T *arr, size_t n)` |
+| `$generate_map(T)` | `void map_T(T *arr, size_t n, T *out, T (*f)(T))` |
+| `$generate_reduce(T)` | `T reduce_T(T *arr, size_t n, T init, T (*f)(T, T))` |
+| `$generate_filter(T)` | `void filter_T(T *arr, size_t n, T *out, size_t *out_n, bool (*pred)(T))` |
+
+The function name suffix is derived from the element type's canonical C name
+(`int`, `ulong`, `double`, etc.) or its user-defined type name for struct/enum
+types.
+
+### Reflection API additions (ticket #235)
+
+New entries in the reflection table:
+
+| Task | API |
+|------|-----|
+| Iterate all struct/union members | `$foreach_member(ty, var, body)` |
+| Nested-field byte offset | `$offsetof_chain(ty, "field", ...)` |
+| Flat struct serialization | `$serialize(ty, expr, buf)`, `$deserialize(ty, buf)` |
+| Enum → string switch | `$enum_to_string(ty, expr)` |
+| String → enum if-chain | `$enum_from_string(ty, expr)` |
+| Generate typed sum/map/reduce/filter | `$generate_sum(T)`, `$generate_map(T)`, `$generate_reduce(T)`, `$generate_filter(T)` |
+
 ## Diagnostics And Debugging
 
 Use source-located diagnostics when rejecting a macro argument:

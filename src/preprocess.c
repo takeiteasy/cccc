@@ -463,6 +463,24 @@ static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
         }
     }
 
+    // Ticket #235: if another macro function has already claimed this
+    // attribute name (e.g. a user-defined handler registered earlier in the
+    // main translation unit), skip registering this one. This gives
+    // user-defined attribute handlers precedence over built-in reflection.h
+    // handlers shipped under the same attribute name, and prevents duplicate
+    // registrations when reflection.h's handlers are (re-)preprocessed.
+    if (attribute_name) {
+        for (MacroFn *existing = vm->compiler.macro_fns; existing; existing = existing->next) {
+            if (existing->is_attribute_handler && existing->attribute_name &&
+                strcmp(existing->attribute_name, attribute_name) == 0) {
+                if (vm->debug_vm)
+                    printf("Skipping comptime function '%s' for attribute '%s' (already claimed by '%s')\n",
+                           name, attribute_name, existing->name);
+                return body_end ? body_end : tok;
+            }
+        }
+    }
+
     // Create MacroFn entry
     MacroFn *pm =
         arena_alloc(&vm->compiler.parser_arena, sizeof(MacroFn));
@@ -993,6 +1011,14 @@ static const AttrInfo known_attrs[] = {
     {"test",          ATTR_CCCC, true,  1},
     {"test_setup",    ATTR_CCCC, true,  1},
     {"test_teardown", ATTR_CCCC, true,  1},
+    // Macro standard library attribute handlers (ticket #235)
+    {"serialize",            ATTR_CCCC, true,  1},
+    {"deserialize",          ATTR_CCCC, true,  1},
+    {"enum_to_string",       ATTR_CCCC, true,  1},
+    {"enum_from_string",     ATTR_CCCC, true,  1},
+    {"generate_getters",     ATTR_CCCC, true,  1},
+    {"generate_setters",     ATTR_CCCC, true,  1},
+    {"generate_constructor", ATTR_CCCC, true,  1},
     // Standard C23 ([[name]]) — return C23 version date per N3220 §6.10.10.2
     {"maybe_unused",      ATTR_STD, false, 202311L},
     {"deprecated",        ATTR_STD, true,  202311L},

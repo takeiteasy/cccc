@@ -49,6 +49,7 @@ extern int __cccc_ast_type_param_count(Type *ty);
 extern Type *__cccc_ast_type_param_at(Type *ty, int index);
 extern bool __cccc_ast_type_is_variadic(Type *ty);
 extern const char *__cccc_ast_type_name(Type *ty);
+extern const char *__cccc_ast_type_c_name(VirtualMachine *vm, Type *ty);
 extern Node *__cccc_ast_int_literal(VirtualMachine *vm, int64_t value);
 extern Node *__cccc_ast_float_literal(VirtualMachine *vm, double value);
 extern Node *__cccc_ast_string_literal(VirtualMachine *vm, const char *str);
@@ -84,6 +85,12 @@ extern Obj *__cccc_attr_target_obj(AttrTarget *target);
 extern Token *__cccc_attr_target_token(AttrTarget *target);
 extern Type *__cccc_ast_make_pointer(VirtualMachine *vm, Type *base);
 extern Type *__cccc_ast_make_array(VirtualMachine *vm, Type *base, int len);
+extern Type *__cccc_ast_make_func_ptr_type(VirtualMachine *vm, Type *return_ty,
+                                            Type **param_types, int nparams);
+extern void __cccc_generate_sum(VirtualMachine *vm, Type *elem_ty);
+extern void __cccc_generate_map(VirtualMachine *vm, Type *elem_ty);
+extern void __cccc_generate_reduce(VirtualMachine *vm, Type *elem_ty);
+extern void __cccc_generate_filter(VirtualMachine *vm, Type *elem_ty);
 
 // Function generation
 extern Obj *__cccc_ast_function(VirtualMachine *vm, const char *name, Type *return_type);
@@ -164,6 +171,27 @@ extern Node *__cccc_ast_expr_stmt(VirtualMachine *vm, Node *expr);
 // Ticket #77: hygienic local variable injection
 extern Node *__cccc_ast_local_var(VirtualMachine *vm, const char *name, Type *ty);
 extern Node *__cccc_ast_local_var_unique(VirtualMachine *vm, Type *ty);
+
+// Struct/union member introspection (previously unregistered)
+extern int     __cccc_ast_struct_member_count(VirtualMachine *vm, Type *struct_type);
+extern Member *__cccc_ast_struct_member_at(VirtualMachine *vm, Type *struct_type, int index);
+extern Member *__cccc_ast_struct_member_find(VirtualMachine *vm, Type *struct_type,
+                                              const char *name);
+extern const char *__cccc_ast_member_name(Member *m);
+extern Type    *__cccc_ast_member_type(Member *m);
+extern int      __cccc_ast_member_offset(Member *m);
+extern bool     __cccc_ast_member_is_bitfield(Member *m);
+extern int      __cccc_ast_member_bitfield_width(Member *m);
+extern int64_t  __cccc_ast_offsetof_chain(VirtualMachine *vm, Type *ty,
+                                          const char **names, int n);
+
+// Ticket #235: serialization
+extern Node *__cccc_ast_serialize(VirtualMachine *vm, Type *ty, Node *expr, Node *buf);
+extern Node *__cccc_ast_deserialize(VirtualMachine *vm, Type *ty, Node *buf);
+
+// Ticket #235: enum <-> string conversion
+extern Node *__cccc_ast_enum_to_string_switch(VirtualMachine *vm, Type *ty, Node *expr);
+extern Node *__cccc_ast_enum_from_string_chain(VirtualMachine *vm, Type *ty, Node *expr);
 
 // Ticket #51: new expression/statement builders
 extern Node *__cccc_ast_assign(VirtualMachine *vm, Node *target, Node *value);
@@ -332,10 +360,16 @@ static void register_reflection_ffi(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__cccc_ast_type_is_variadic",
                       (void *)__cccc_ast_type_is_variadic, 1, 0);
     cc_register_cfunc(vm, "__cccc_ast_type_name", (void *)__cccc_ast_type_name, 1, 0);
+    cc_register_cfunc(vm, "__cccc_ast_type_c_name", (void *)__cccc_ast_type_c_name, 2, 0);
 
     // Type construction
     cc_register_cfunc(vm, "__cccc_ast_make_pointer", (void *)__cccc_ast_make_pointer, 2, 0);
     cc_register_cfunc(vm, "__cccc_ast_make_array", (void *)__cccc_ast_make_array, 3, 0);
+    cc_register_cfunc(vm, "__cccc_ast_make_func_ptr_type", (void *)__cccc_ast_make_func_ptr_type, 4, 0);
+    cc_register_cfunc(vm, "__cccc_generate_sum", (void *)__cccc_generate_sum, 2, 0);
+    cc_register_cfunc(vm, "__cccc_generate_map", (void *)__cccc_generate_map, 2, 0);
+    cc_register_cfunc(vm, "__cccc_generate_reduce", (void *)__cccc_generate_reduce, 2, 0);
+    cc_register_cfunc(vm, "__cccc_generate_filter", (void *)__cccc_generate_filter, 2, 0);
 
     // Literal construction
     cc_register_cfunc(vm, "__cccc_ast_int_literal", (void *)__cccc_ast_int_literal, 2, 0);
@@ -389,6 +423,36 @@ static void register_reflection_ffi(VirtualMachine *vm) {
     // Ticket #51: new expression/statement builders
     cc_register_cfunc(vm, "__cccc_ast_assign",   (void *)__cccc_ast_assign,   3, 0);
     cc_register_cfunc(vm, "__cccc_ast_member",   (void *)__cccc_ast_member,   3, 0);
+
+    // Struct/union member introspection (previously unregistered)
+    cc_register_cfunc(vm, "__cccc_ast_struct_member_count",
+                      (void *)__cccc_ast_struct_member_count, 2, 0);
+    cc_register_cfunc(vm, "__cccc_ast_struct_member_at",
+                      (void *)__cccc_ast_struct_member_at, 3, 0);
+    cc_register_cfunc(vm, "__cccc_ast_struct_member_find",
+                      (void *)__cccc_ast_struct_member_find, 3, 0);
+    cc_register_cfunc(vm, "__cccc_ast_member_name",
+                      (void *)__cccc_ast_member_name, 1, 0);
+    cc_register_cfunc(vm, "__cccc_ast_member_type",
+                      (void *)__cccc_ast_member_type, 1, 0);
+    cc_register_cfunc(vm, "__cccc_ast_member_offset",
+                      (void *)__cccc_ast_member_offset, 1, 0);
+    cc_register_cfunc(vm, "__cccc_ast_member_is_bitfield",
+                      (void *)__cccc_ast_member_is_bitfield, 1, 0);
+    cc_register_cfunc(vm, "__cccc_ast_member_bitfield_width",
+                      (void *)__cccc_ast_member_bitfield_width, 1, 0);
+    cc_register_cfunc(vm, "__cccc_ast_offsetof_chain",
+                      (void *)__cccc_ast_offsetof_chain, 4, 0);
+
+    // Ticket #235: serialization
+    cc_register_cfunc(vm, "__cccc_ast_serialize",
+                      (void *)__cccc_ast_serialize, 4, 0);
+    cc_register_cfunc(vm, "__cccc_ast_deserialize",
+                      (void *)__cccc_ast_deserialize, 3, 0);
+    cc_register_cfunc(vm, "__cccc_ast_enum_to_string_switch",
+                      (void *)__cccc_ast_enum_to_string_switch, 3, 0);
+    cc_register_cfunc(vm, "__cccc_ast_enum_from_string_chain",
+                      (void *)__cccc_ast_enum_from_string_chain, 3, 0);
     cc_register_cfunc(vm, "__cccc_ast_funcall",  (void *)__cccc_ast_funcall,  4, 0);
     cc_register_cfunc(vm, "__cccc_ast_while",    (void *)__cccc_ast_while,    3, 0);
     cc_register_cfunc(vm, "__cccc_ast_for",      (void *)__cccc_ast_for,      5, 0);
@@ -989,23 +1053,53 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
     // scope. We restore the guards afterwards so subsequent compilation phases
     // are unaffected.
     static const char *guards[] = {
-        "CCCC_REFLECTION_H", "__STDBOOL_H", "__STDDEF_H", "__STDINT_H", NULL
+        "CCCC_REFLECTION_H", "__STDBOOL_H", "__STDDEF_H", "__STDINT_H", "__STRING_H", NULL
     };
-    void *saved_guards[4] = {};
+    void *saved_guards[5] = {};
     for (int i = 0; guards[i]; i++) {
         saved_guards[i] = hashmap_get(&vm->compiler.macros, (char *)guards[i]);
         if (saved_guards[i])
             hashmap_delete(&vm->compiler.macros, (char *)guards[i]);
     }
 
+    // Preprocessing reflection.h can trigger lookahead declaration-parsing
+    // (e.g. while scanning @macro bodies for locals) over expanded _VM/$...
+    // tokens, which spuriously warns about CCCC's own internal API surface.
+    // Suppress all warnings/werrors for the duration of this internal
+    // preprocess pass; restore afterwards so the user's TU is unaffected.
+    uint64_t saved_warnings = vm->compiler.warnings;
+    uint64_t saved_werror = vm->compiler.warning_errors;
+    vm->compiler.warnings = 0;
+    vm->compiler.warning_errors = 0;
+
     Token *tokens = tokenize_string(vm, "<implicit-reflection.h>", header);
     Token *result = preprocess(vm, tokens);
+
+    vm->compiler.warnings = saved_warnings;
+    vm->compiler.warning_errors = saved_werror;
 
     for (int i = 0; guards[i]; i++)
         if (saved_guards[i])
             hashmap_put(&vm->compiler.macros, (char *)guards[i], saved_guards[i]);
 
     return result;
+}
+
+// Ticket #235: idempotently preprocess reflection.h so that its built-in
+// @macro(attribute(...)) handlers (e.g. __cccc_attr_serialize) are registered
+// into vm->compiler.macro_fns before the first attribute-dispatch lookup
+// (find_attribute_macro / run_custom_attrs in parse.c). Without this, a
+// translation unit with no @macro definitions of its own never triggers
+// implicit_reflection_tokens() until compile_macro_program() — too late for
+// the very first @serialize/@deserialize/etc. dispatch to find a handler.
+// Safe to call mid-parse: implicit_reflection_tokens only tokenizes and
+// preprocesses reflection.h and temporarily toggles include-guard macros.
+void ensure_reflection_attrs_registered(VirtualMachine *vm) {
+    if (vm->compiler.reflection_attrs_registered)
+        return;
+    vm->compiler.reflection_attrs_registered = true;
+    implicit_reflection_tokens(vm);
+    __cccc_ensure_string_h_decls(vm);
 }
 
 static Token *build_combined_macro_tokens(VirtualMachine *vm, Token *reflection_tokens,
@@ -1435,8 +1529,20 @@ static bool compile_macro_program(VirtualMachine *vm) {
     Token *reflection_tokens = implicit_reflection_tokens(vm);
     Token *tokens =
         build_combined_macro_tokens(vm, reflection_tokens, macros, count);
+
+    // Re-stamping during this preprocess pass would otherwise apply the
+    // user TU's -W flags to reflection.h's internal implementation tokens
+    // (e.g. _VM expansions), producing warnings the user can't fix. Hard
+    // errors (error_tok) are unaffected since they aren't gated by
+    // vm->compiler.warnings.
+    uint64_t saved_warnings = vm->compiler.warnings;
+    uint64_t saved_werror = vm->compiler.warning_errors;
+    vm->compiler.warnings = 0;
+    vm->compiler.warning_errors = 0;
     tokens = preprocess(vm, tokens);
     Obj *macro_prog = parse(vm, tokens);
+    vm->compiler.warnings = saved_warnings;
+    vm->compiler.warning_errors = saved_werror;
     if (!macro_prog) {
         vm->compiler.locals = saved_locals;
         vm->compiler.current_fn = saved_current_fn;
