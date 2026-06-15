@@ -380,8 +380,189 @@ def run_c4_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
         }
 
 
+def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, args, test_files, header=None):
+    """Execute test files and return aggregate results dict."""
+    if header:
+        print(header)
+
+    tests_dir = script_dir / "tests"
+
+    profile_dir = None
+    if args.vm_profile:
+        profile_dir = script_dir / "profile" / "vm-opcodes"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+
+    test_args = [
+        (
+            i, test_file, cccc, str(script_dir), use_leaks, platform, cccc_args,
+            args.bench, args.c4, str(profile_dir) if profile_dir else None,
+        )
+        for i, test_file in enumerate(test_files)
+    ]
+
+    results = [None] * len(test_files)
+    next_to_print = 0
+    results_lock = threading.Lock()
+
+    total = 0
+    passed = 0
+    failed = 0
+    crashed = 0
+    negative_passed = 0
+    c4_passed = 0
+    c4_failed = 0
+    c4_skipped = 0
+    c4_save_failed = 0
+    failed_tests = []
+    crashed_tests = []
+    c4_skipped_tests = []
+    timings = []
+
+    def print_single_result(result):
+        nonlocal total, passed, failed, crashed, negative_passed
+        nonlocal c4_passed, c4_failed, c4_skipped, c4_save_failed
+        total += 1
+        test_name = result["test_name"]
+        status = result["status"]
+        exit_code = result["exit_code"]
+        output = result["output"]
+        elapsed = result.get("elapsed")
+        quiet = args.quiet
+
+        timing_str = ""
+        if args.bench and elapsed is not None:
+            timing_str = f" [{elapsed*1000:.1f}ms]"
+            timings.append((test_name, elapsed))
+
+        if status == "crashed":
+            crashed += 1
+            crashed_tests.append(f"{test_name} (exit code: {exit_code})")
+            if not quiet:
+                print(f"💥 {test_name} (CRASHED: exit code {exit_code}){timing_str}")
+        elif status == "compile_error":
+            failed += 1
+            failed_tests.append(f"{test_name} (COMPILATION ERROR)")
+            if not quiet:
+                print(f"✗ {test_name} (COMPILATION ERROR){timing_str}")
+                for line in output.splitlines()[:3]:
+                    print(f"  {line}")
+        elif status == "leak":
+            failed += 1
+            failed_tests.append(f"{test_name} (MEMORY LEAK)")
+            if not quiet:
+                print(f"💧 {test_name} (MEMORY LEAK){timing_str}")
+                leak_lines = [line for line in output.splitlines() if "Leak:" in line][:3]
+                for line in leak_lines:
+                    print(f"  {line}")
+        elif status == "negative_pass":
+            negative_passed += 1
+            if not quiet:
+                if result["is_negative_test"]:
+                    print(f"✓ {test_name} (correctly rejected invalid code){timing_str}")
+                else:
+                    print(f"✓ {test_name} (correctly detected runtime error){timing_str}")
+        elif status == "passed":
+            passed += 1
+            if not quiet:
+                print(f"✓ {test_name}{timing_str}")
+        elif status == "failed":
+            failed += 1
+            failed_tests.append(f"{test_name} (exit code: {exit_code})")
+            if not quiet:
+                print(f"✗ {test_name} (expected exit code 42, got: {exit_code}){timing_str}")
+        elif status == "stderr_mismatch":
+            failed += 1
+            failed_tests.append(f"{test_name} ({result['stderr_mismatch']})")
+            if not quiet:
+                print(f"✗ {test_name} ({result['stderr_mismatch']}){timing_str}")
+                for line in output.splitlines()[:5]:
+                    print(f"  {line}")
+        elif status == "c4_passed":
+            c4_passed += 1
+            if not quiet:
+                print(f"✓ {test_name}{timing_str}")
+        elif status == "c4_skipped":
+            c4_skipped += 1
+            reason = result.get("skip_reason", "")
+            if reason:
+                c4_skipped_tests.append(f"{test_name} ({reason})")
+        elif status == "c4_save_failed":
+            c4_save_failed += 1
+            failed += 1
+            failed_tests.append(f"{test_name} (C4 SAVE FAILED)")
+            if not quiet:
+                print(f"✗ {test_name} (C4 SAVE FAILED){timing_str}")
+                for line in output.splitlines()[:3]:
+                    print(f"  {line}")
+        elif status == "c4_failed":
+            c4_failed += 1
+            failed += 1
+            failed_tests.append(f"{test_name} (C4 RUNTIME FAILED, exit {exit_code})")
+            if not quiet:
+                print(f"✗ {test_name} (C4 RUNTIME FAILED, exit {exit_code}){timing_str}")
+                for line in output.splitlines()[:3]:
+                    print(f"  {line}")
+
+    def flush_results():
+        nonlocal next_to_print
+        while next_to_print < len(results) and results[next_to_print] is not None:
+            print_single_result(results[next_to_print])
+            next_to_print += 1
+
+    def on_done(future, idx):
+        try:
+            result = future.result()
+        except Exception as e:
+            result = {
+                "idx": idx,
+                "test_name": str(test_files[idx].relative_to(tests_dir)),
+                "exit_code": -1,
+                "status": "crashed",
+                "output": str(e),
+                "is_negative_test": False,
+                "expects_runtime_error": False,
+                "stderr_mismatch": None,
+                "elapsed": None,
+            }
+        with results_lock:
+            results[idx] = result
+            flush_results()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n_jobs) as executor:
+        futures = []
+        for arg in test_args:
+            future = executor.submit(run_single_test, *arg)
+            future.add_done_callback(lambda f, idx=arg[0]: on_done(f, idx))
+            futures.append(future)
+        concurrent.futures.wait(futures)
+
+    return {
+        "total": total,
+        "passed": passed,
+        "failed": failed,
+        "crashed": crashed,
+        "negative_passed": negative_passed,
+        "c4_passed": c4_passed,
+        "c4_failed": c4_failed,
+        "c4_skipped": c4_skipped,
+        "c4_save_failed": c4_save_failed,
+        "failed_tests": failed_tests,
+        "crashed_tests": crashed_tests,
+        "c4_skipped_tests": c4_skipped_tests,
+        "timings": timings,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description="Test runner for CCCC")
+    parser.add_argument(
+        "--full", action="store_true",
+        help="Run test suite with each optimization level (-O0..-O4) and show a combined summary"
+    )
+    parser.add_argument(
+        "--quiet", action="store_true",
+        help="Suppress per-test output; only show final summary"
+    )
     parser.add_argument(
         "--leaks", action="store_true", help="Enable memory leak detection"
     )
@@ -496,166 +677,141 @@ def main():
                 print("Error: failed to build cccc-prof. Run 'make profile-cpu-build' manually.")
                 sys.exit(1)
         cccc = cccc_prof
-        print("CPU profiling enabled (using cccc-prof)")
+        if not args.quiet:
+            print("CPU profiling enabled (using cccc-prof)")
 
-    print(f"Running CCCC tests using: {cccc.name}")
-    if use_leaks:
-        leak_tools = {"macos": "leaks", "linux": "valgrind", "windows": "drmemory"}
-        print(
-            f"Memory leak detection enabled (using '{leak_tools.get(platform, '?')}')"
-        )
-    if args.profile_mem:
-        print("Memory profiling enabled (enhanced leak + heap tracking)")
-    if args.bench:
-        print("Benchmarking mode: per-test timing enabled")
     profile_dir = None
     if args.vm_profile:
         profile_dir = script_dir / "profile" / "vm-opcodes"
         profile_dir.mkdir(parents=True, exist_ok=True)
-        print(f"VM opcode profiling enabled (JSON: {profile_dir})")
-    if args.match:
-        print(f"Filtering tests matching: {args.match}")
-    if args.c4:
-        print("C4 mode: compiling each positive test to .c4, then executing the bytecode")
-    print(f"Using {n_jobs} parallel jobs")
-    print("=======================")
-    print()
 
-    test_args = [
-        (
-            i, test_file, cccc, str(script_dir), use_leaks, platform, cccc_args,
-            args.bench, args.c4, str(profile_dir) if profile_dir else None,
-        )
-        for i, test_file in enumerate(test_files)
-    ]
+    if not args.quiet:
+        print(f"Running CCCC tests using: {cccc.name}")
+        if use_leaks:
+            leak_tools = {"macos": "leaks", "linux": "valgrind", "windows": "drmemory"}
+            print(
+                f"Memory leak detection enabled (using '{leak_tools.get(platform, '?')}')"
+            )
+        if args.profile_mem:
+            print("Memory profiling enabled (enhanced leak + heap tracking)")
+        if args.bench:
+            print("Benchmarking mode: per-test timing enabled")
+        if args.vm_profile:
+            print(f"VM opcode profiling enabled (JSON: {profile_dir})")
+        if args.match:
+            print(f"Filtering tests matching: {args.match}")
+        if args.c4:
+            print("C4 mode: compiling each positive test to .c4, then executing the bytecode")
+        print(f"Using {n_jobs} parallel jobs")
+        print("=======================")
+        print()
 
-    results = [None] * len(test_files)
-    next_to_print = 0
-    results_lock = threading.Lock()
+    if args.full:
+        # Strip any existing -O/--optimize flags from cccc_args
+        filtered = []
+        skip = False
+        for a in cccc_args:
+            if skip:
+                skip = False
+                continue
+            if a in ("-O", "--optimize"):
+                skip = True
+                continue
+            if a.startswith("-O") and len(a) > 2 and a[2].isdigit():
+                continue
+            if a.startswith("--optimize="):
+                continue
+            filtered.append(a)
 
-    total = 0
-    passed = 0
-    failed = 0
-    crashed = 0
-    negative_passed = 0
-    c4_passed = 0
-    c4_failed = 0
-    c4_skipped = 0
-    c4_save_failed = 0
-    failed_tests = []
-    crashed_tests = []
-    c4_skipped_tests = []
+        levels = [
+            (0, "none"),
+            (1, "basic"),
+            (2, "standard"),
+            (3, "aggressive"),
+            (4, "fused"),
+        ]
+        all_results = {}
+        for level, name in levels:
+            level_args = filtered + [f"-O{level}"]
+            if not args.quiet:
+                print()
+                print(f"--- Optimization Level {level} ({name}) ---")
+                print()
+            all_results[level] = _run_test_suite(
+                cccc, script_dir, use_leaks, platform, level_args,
+                n_jobs, args, test_files,
+            )
 
-    def print_single_result(result):
-        nonlocal total, passed, failed, crashed, negative_passed
-        nonlocal c4_passed, c4_failed, c4_skipped, c4_save_failed
-        total += 1
-        test_name = result["test_name"]
-        status = result["status"]
-        exit_code = result["exit_code"]
-        output = result["output"]
-        elapsed = result.get("elapsed")
+        print()
+        print("=====================================")
+        print("Full Optimization Suite Summary")
+        print("=====================================")
+        print(f"{'Level':<18} {'Total':>6} {'Passed':>6} {'Failed':>6} {'Crashed':>6}")
+        print("-" * 48)
+        grand_total = 0
+        grand_passed = 0
+        grand_failed = 0
+        grand_crashed = 0
+        for level, name in levels:
+            r = all_results[level]
+            r_total = r["total"]
+            r_passed = r["passed"] + r["negative_passed"] + r["c4_passed"]
+            r_failed = r["failed"]
+            r_crashed = r["crashed"]
+            label = f"-O{level} ({name})"
+            print(f"{label:<18} {r_total:>6} {r_passed:>6} {r_failed:>6} {r_crashed:>6}")
+            grand_total += r_total
+            grand_passed += r_passed
+            grand_failed += r_failed
+            grand_crashed += r_crashed
+        print("-" * 48)
+        print(f"{'Sum':<18} {grand_total:>6} {grand_passed:>6} {grand_failed:>6} {grand_crashed:>6}")
+        print()
 
-        timing_str = ""
-        if args.bench and elapsed is not None:
-            timing_str = f" [{elapsed*1000:.1f}ms]"
-            timings.append((test_name, elapsed))
+        # Collect per-test failures by level
+        per_test_levels = {}
+        for level, name in levels:
+            r = all_results[level]
+            label = f"-O{level}"
+            for entry in r["failed_tests"] + r["crashed_tests"]:
+                test_name = entry.split(" (")[0]
+                per_test_levels.setdefault(test_name, set()).add(label)
 
-        if status == "crashed":
-            crashed += 1
-            crashed_tests.append(f"{test_name} (exit code: {exit_code})")
-            print(f"💥 {test_name} (CRASHED: exit code {exit_code}){timing_str}")
-        elif status == "compile_error":
-            failed += 1
-            failed_tests.append(f"{test_name} (COMPILATION ERROR)")
-            print(f"✗ {test_name} (COMPILATION ERROR){timing_str}")
-            for line in output.splitlines()[:3]:
-                print(f"  {line}")
-        elif status == "leak":
-            failed += 1
-            failed_tests.append(f"{test_name} (MEMORY LEAK)")
-            print(f"💧 {test_name} (MEMORY LEAK){timing_str}")
-            leak_lines = [line for line in output.splitlines() if "Leak:" in line][:3]
-            for line in leak_lines:
-                print(f"  {line}")
-        elif status == "negative_pass":
-            negative_passed += 1
-            if result["is_negative_test"]:
-                print(f"✓ {test_name} (correctly rejected invalid code){timing_str}")
-            else:
-                print(f"✓ {test_name} (correctly detected runtime error){timing_str}")
-        elif status == "passed":
-            passed += 1
-            print(f"✓ {test_name}{timing_str}")
-        elif status == "failed":
-            failed += 1
-            failed_tests.append(f"{test_name} (exit code: {exit_code})")
-            print(f"✗ {test_name} (expected exit code 42, got: {exit_code}){timing_str}")
-        elif status == "stderr_mismatch":
-            failed += 1
-            failed_tests.append(f"{test_name} ({result['stderr_mismatch']})")
-            print(f"✗ {test_name} ({result['stderr_mismatch']}){timing_str}")
-            for line in output.splitlines()[:5]:
-                print(f"  {line}")
-        elif status == "c4_passed":
-            c4_passed += 1
-            print(f"✓ {test_name}{timing_str}")
-        elif status == "c4_skipped":
-            c4_skipped += 1
-            reason = result.get("skip_reason", "")
-            if reason:
-                c4_skipped_tests.append(f"{test_name} ({reason})")
-        elif status == "c4_save_failed":
-            c4_save_failed += 1
-            failed += 1
-            failed_tests.append(f"{test_name} (C4 SAVE FAILED)")
-            print(f"✗ {test_name} (C4 SAVE FAILED){timing_str}")
-            for line in output.splitlines()[:3]:
-                print(f"  {line}")
-        elif status == "c4_failed":
-            c4_failed += 1
-            failed += 1
-            failed_tests.append(f"{test_name} (C4 RUNTIME FAILED, exit {exit_code})")
-            print(f"✗ {test_name} (C4 RUNTIME FAILED, exit {exit_code}){timing_str}")
-            for line in output.splitlines()[:3]:
-                print(f"  {line}")
+        if per_test_levels:
+            print("Failed Tests by Level:")
+            print("-" * 48)
+            all_level_labels = {f"-O{l}" for l, _ in levels}
+            for test_name in sorted(per_test_levels):
+                levels_set = per_test_levels[test_name]
+                if levels_set == all_level_labels:
+                    level_str = "all levels"
+                else:
+                    level_str = ", ".join(sorted(levels_set))
+                print(f"  ✗ {test_name}  ({level_str})")
+            print()
 
-    def flush_results():
-        nonlocal next_to_print
-        while next_to_print < len(results) and results[next_to_print] is not None:
-            print_single_result(results[next_to_print])
-            next_to_print += 1
+        if grand_failed > 0 or grand_crashed > 0:
+            sys.exit(1)
+        print("All levels passed!")
+        sys.exit(0)
 
-    timings = []
-
-    def on_done(future, idx):
-        try:
-            result = future.result()
-        except Exception as e:
-            tests_dir = Path(script_dir) / "tests"
-            result = {
-                "idx": idx,
-                "test_name": str(test_files[idx].relative_to(tests_dir)),
-                "exit_code": -1,
-                "status": "crashed",
-                "output": str(e),
-                "is_negative_test": False,
-                "expects_runtime_error": False,
-                "stderr_mismatch": None,
-                "elapsed": None,
-            }
-
-        with results_lock:
-            results[idx] = result
-            flush_results()
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=n_jobs) as executor:
-        futures = []
-        for arg in test_args:
-            future = executor.submit(run_single_test, *arg)
-            future.add_done_callback(lambda f, idx=arg[0]: on_done(f, idx))
-            futures.append(future)
-        concurrent.futures.wait(futures)
+    r = _run_test_suite(
+        cccc, script_dir, use_leaks, platform, cccc_args,
+        n_jobs, args, test_files,
+    )
+    total = r["total"]
+    passed = r["passed"]
+    failed = r["failed"]
+    crashed = r["crashed"]
+    negative_passed = r["negative_passed"]
+    c4_passed = r["c4_passed"]
+    c4_failed = r["c4_failed"]
+    c4_skipped = r["c4_skipped"]
+    c4_save_failed = r["c4_save_failed"]
+    failed_tests = r["failed_tests"]
+    crashed_tests = r["crashed_tests"]
+    c4_skipped_tests = r["c4_skipped_tests"]
+    timings = r["timings"]
 
     print()
     print("=======================")
