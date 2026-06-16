@@ -822,3 +822,4 @@ void register_stdlib_functions(VirtualMachine *vm);
 void register_string_functions(VirtualMachine *vm);
 void register_time_functions(VirtualMachine *vm);
 void register_wide_functions(VirtualMachine *vm);
+void register_wide_bitint_functions(VirtualMachine *vm);

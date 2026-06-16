@@ -84,11 +84,17 @@ Type *bitint_type(VirtualMachine *vm, Token *tok, int width, bool is_unsigned) {
         error_tok(vm, tok, "_BitInt width must be at least 1, got %d", width);
     if (!is_unsigned && width < 2)
         error_tok(vm, tok, "signed _BitInt requires at least 2 bits (sign + value), got %d", width);
-    if (width > 64)
-        error_tok(vm, tok, "_BitInt width %d exceeds maximum 64 (N>64 not yet supported)", width);
+    if (width > 256)
+        error_tok(vm, tok, "_BitInt width %d exceeds maximum 256 (N>256 not yet supported)", width);
 
-    int sz = width <= 8 ? 1 : width <= 16 ? 2 : width <= 32 ? 4 : 8;
-    Type *ty = new_type(vm, TY_BITINT, sz, sz);
+    int sz;
+    if (width <= 8)       sz = 1;
+    else if (width <= 16) sz = 2;
+    else if (width <= 32) sz = 4;
+    else if (width <= 64) sz = 8;
+    else                  sz = (width + 63) / 64 * 8; // ceil to 8-byte word boundary
+    int al = sz > 8 ? 8 : sz;
+    Type *ty = new_type(vm, TY_BITINT, sz, al);
     ty->is_unsigned = is_unsigned;
     ty->bit_width = width;
     return ty;

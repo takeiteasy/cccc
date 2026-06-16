@@ -427,6 +427,7 @@ static void emit_local_load(VirtualMachine *vm, Type *ty, int rd, long long offs
 static void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr);
 static void emit_normalize_promoted_scalar(VirtualMachine *vm, Type *ty, int reg);
 static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg);
+static inline bool is_wide_bitint(Type *ty);
 
 // Evaluate a constant byte offset from a node (ND_NUM or ND_MUL(ND_NUM, ND_NUM)).
 // Returns true and sets *out on success. Strips ND_CAST wrappers.
@@ -907,11 +908,32 @@ static void emit_restore_restrict_cache_regs(VirtualMachine *vm) {
 // Check if expression tree contains a function call (recursively)
 // Used to determine if we need to save LHS before evaluating RHS
 
+// Wide _BitInt(N>64) arithmetic/casts/assignment lower to a hidden CALLF (or
+// a raw MCPY) that clobbers REG_A0-A7, just like a real function call — so
+// callers that decide whether to save argument registers around a
+// subexpression (contains_funcall) must treat these the same way.
+static bool is_wide_bitint_helper_op(Node *node) {
+    if (!node)
+        return false;
+    switch (node->kind) {
+    case ND_ADD: case ND_SUB: case ND_MUL: case ND_DIV: case ND_MOD:
+    case ND_BITAND: case ND_BITOR: case ND_BITXOR: case ND_SHL: case ND_SHR:
+    case ND_EQ: case ND_NE: case ND_LT: case ND_LE: case ND_CAST:
+        return node->lhs && (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->ty));
+    case ND_ASSIGN:
+        return is_wide_bitint(node->ty);
+    default:
+        return false;
+    }
+}
+
 static bool contains_funcall(Node *node) {
     if (!node)
         return false;
 
     if (node->kind == ND_FUNCALL || node->kind == ND_BLOCK_CALL)
+        return true;
+    if (is_wide_bitint_helper_op(node))
         return true;
 
     // Check children
@@ -1392,6 +1414,37 @@ static bool is_zero_size_aggregate(Type *ty) {
            (ty->kind == TY_STRUCT || ty->kind == TY_UNION);
 }
 
+// True for _BitInt(N) with N > 64 — multi-word, address-based storage.
+static inline bool is_wide_bitint(Type *ty) {
+    return ty && ty->kind == TY_BITINT && ty->bit_width > 64;
+}
+
+// Emit CALLF for a named wide-bitint helper with `nargs` integer args already
+// loaded into REG_A0..REG_A{nargs-1}.  Returns false if function not found.
+static bool emit_wide_helper(VirtualMachine *vm, const char *name, int nargs) {
+    int ffi_idx = find_ffi_function(vm, name);
+    if (ffi_idx < 0) {
+        // Should never happen if wide_bitint.c is compiled in.
+        error("wide _BitInt runtime helper '%s' not registered", name);
+        return false;
+    }
+    emit(vm, CALLF);
+    emit_word(vm, ffi_idx);
+    emit_word(vm, nargs);
+    emit_i64(vm, 0); // double_arg_mask
+    emit_i64(vm, 0); // float_arg_mask
+    restrict_cache_invalidate_all(vm);
+    reset_temp_regs();
+    return true;
+}
+
+// Allocate a fresh stack slot for a wide _BitInt intermediate result.
+// Returns the bp-relative offset (negative).  words = number of 64-bit words.
+static long long alloc_wide_bitint_temp(VirtualMachine *vm, int words) {
+    vm->compiler.ent3_extra_stack += words;
+    return -(long long)(vm->compiler.ent3_base_stack + vm->compiler.ent3_extra_stack);
+}
+
 static void gen_zero_size_arg(VirtualMachine *vm, Node *arg, int dest_reg) {
     gen_expr(vm, arg, REG_ZERO);
     emit_li3(vm, dest_reg, 0);
@@ -1423,7 +1476,11 @@ static void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr) {
             emit_rr(vm, LDR_D, rd, rs_addr);
         }
     } else if (ty->kind == TY_BITINT) {
-        if (ty->size == 1) {
+        if (is_wide_bitint(ty)) {
+            // Wide _BitInt: address-based. rd already holds the address (rs_addr).
+            // Just move address if they differ; no value load needed.
+            if (rd != rs_addr) emit_mov3(vm, rd, rs_addr);
+        } else if (ty->size == 1) {
             emit_rr(vm, LDR_B, rd, rs_addr);
             emit_rr(vm, ty->is_unsigned ? ZX1 : SX1, rd, rd);
         } else if (ty->size == 2) {
@@ -1435,7 +1492,8 @@ static void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr) {
         } else {
             emit_rr(vm, LDR_D, rd, rs_addr);
         }
-        emit_bitint_trunc(vm, ty, rd);
+        if (!is_wide_bitint(ty))
+            emit_bitint_trunc(vm, ty, rd);
     } else if (is_flonum(ty)) {
         emit_rr(vm, ty->kind == TY_FLOAT ? FLDR_F32 : FLDR, rd, rs_addr);
     } else {
@@ -1522,7 +1580,7 @@ static int indexed_load_op(Type *ty) {
         if (ty->size == 2) return LDR_INDEX_H;
         return LDR_INDEX_D;
     }
-    if (ty->kind == TY_BITINT) {
+    if (ty->kind == TY_BITINT && !is_wide_bitint(ty)) {
         if (ty->size == 1) return LDR_INDEX_B;
         if (ty->size == 2) return LDR_INDEX_H;
         if (ty->size == 4) return LDR_INDEX_W;
@@ -1547,7 +1605,7 @@ static int indexed_store_op(Type *ty) {
         if (ty->size == 2) return STR_INDEX_H;
         return STR_INDEX_D;
     }
-    if (ty->kind == TY_BITINT) {
+    if (ty->kind == TY_BITINT && !is_wide_bitint(ty)) {
         if (ty->size == 1) return STR_INDEX_B;
         if (ty->size == 2) return STR_INDEX_H;
         if (ty->size == 4) return STR_INDEX_W;
@@ -1563,7 +1621,8 @@ static int indexed_store_op(Type *ty) {
 static bool emit_indexed_load_if_possible(VirtualMachine *vm, Node *node, int dest_reg) {
     if (!node || node->kind != ND_DEREF || !node->lhs ||
         node->ty->kind == TY_ARRAY || node->ty->kind == TY_STRUCT ||
-        node->ty->kind == TY_UNION || node->ty->kind == TY_COMPLEX)
+        node->ty->kind == TY_UNION || node->ty->kind == TY_COMPLEX ||
+        is_wide_bitint(node->ty))
         return false;
     IndexedAddr idx = {};
     if (!match_indexed_addr(vm, node->lhs, &idx))
@@ -1607,7 +1666,8 @@ static bool emit_indexed_load_if_possible(VirtualMachine *vm, Node *node, int de
 static bool emit_indexed_store_if_possible(VirtualMachine *vm, Node *lhs, Type *ty,
                                            int value_reg) {
     if (!lhs || lhs->kind != ND_DEREF || !lhs->lhs ||
-        ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_COMPLEX)
+        ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_COMPLEX ||
+        is_wide_bitint(ty))
         return false;
     IndexedAddr idx = {};
     if (!match_indexed_addr(vm, lhs->lhs, &idx))
@@ -1783,10 +1843,21 @@ static void emit_store(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr) {
         else if (ty->size == 2)  emit_rr(vm, STR_H, rd_val, rs_addr);
         else                     emit_rr(vm, STR_D, rd_val, rs_addr);
     } else if (ty->kind == TY_BITINT) {
-        if (ty->size == 1)       emit_rr(vm, STR_B, rd_val, rs_addr);
-        else if (ty->size == 2)  emit_rr(vm, STR_H, rd_val, rs_addr);
-        else if (ty->size == 4)  emit_rr(vm, STR_W, rd_val, rs_addr);
-        else                     emit_rr(vm, STR_D, rd_val, rs_addr);
+        if (is_wide_bitint(ty)) {
+            // rd_val holds the source address; rs_addr is the destination.
+            emit_mov3(vm, REG_A0, rs_addr);
+            emit_mov3(vm, REG_A1, rd_val);
+            emit_li3(vm, REG_A2, ty->size);
+            emit(vm, MCPY);
+        } else if (ty->size == 1) {
+            emit_rr(vm, STR_B, rd_val, rs_addr);
+        } else if (ty->size == 2) {
+            emit_rr(vm, STR_H, rd_val, rs_addr);
+        } else if (ty->size == 4) {
+            emit_rr(vm, STR_W, rd_val, rs_addr);
+        } else {
+            emit_rr(vm, STR_D, rd_val, rs_addr);
+        }
     } else if (is_flonum(ty)) {
         emit_rr(vm, ty->kind == TY_FLOAT ? FSTR_F32 : FSTR, rd_val, rs_addr);
     } else {
@@ -2267,7 +2338,8 @@ static bool is_simple_local_scalar(VirtualMachine *vm, Node *node) {
     return node->ty->kind != TY_ARRAY &&
            node->ty->kind != TY_STRUCT &&
            node->ty->kind != TY_UNION &&
-           node->ty->kind != TY_COMPLEX;
+           node->ty->kind != TY_COMPLEX &&
+           !is_wide_bitint(node->ty);
 }
 
 // ========== Safety Instrumentation Helpers ==========
@@ -2430,7 +2502,8 @@ static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
                     // to the struct We need to load that pointer, not the slot
                     // address
                     if (node->var->is_param && (node->ty->kind == TY_STRUCT ||
-                                                node->ty->kind == TY_UNION)) {
+                                                node->ty->kind == TY_UNION ||
+                                                is_wide_bitint(node->ty))) {
                         emit_lea3(vm, dest_reg,
                                   node->var->offset); // Slot address
                         emit_rr(vm, LDR_D, dest_reg,
@@ -2758,9 +2831,9 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 free_temp_reg(r_addr);
             } else {
                 gen_addr(vm, node, dest_reg);
-                // For scalars, load the value
+                // For scalars, load the value (wide _BitInt stays as address)
                 if (node->ty->kind != TY_ARRAY && node->ty->kind != TY_STRUCT &&
-                    node->ty->kind != TY_UNION) {
+                    node->ty->kind != TY_UNION && !is_wide_bitint(node->ty)) {
                     emit_load(vm, node->ty, dest_reg, dest_reg);
                 }
             }
@@ -2778,7 +2851,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             return;
         gen_expr(vm, node->lhs, dest_reg);
         if (node->ty->kind != TY_ARRAY && node->ty->kind != TY_STRUCT &&
-            node->ty->kind != TY_UNION) {
+            node->ty->kind != TY_UNION && !is_wide_bitint(node->ty)) {
             emit_load(vm, node->ty, dest_reg, dest_reg);
         }
         return;
@@ -2924,8 +2997,96 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             emit_frrr(vm, fop_for_type(node->lhs->ty, fop), dest_reg, dest_reg,
                       r_rhs);
             free_temp_reg(r_rhs);
+        } else if (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->ty)) {
+            // Wide _BitInt operations: delegate to runtime helpers.
+            // LHS and RHS are wide → each gen_expr returns an address.
+            // Comparison result is scalar; arithmetic result is wide.
+            Type *operand_ty = node->lhs->ty;
+            bool wide_op = is_wide_bitint(operand_ty);
+
+            int r_lhs = alloc_temp_reg();
+            gen_expr(vm, node->lhs, r_lhs);
+            mark_temp_reg_used(r_lhs);
+            int r_rhs = alloc_temp_reg();
+            gen_expr(vm, node->rhs, r_rhs);
+            mark_temp_reg_used(r_rhs);
+
+            int words  = wide_op ? (operand_ty->size / 8) : 0;
+            int width  = wide_op ? operand_ty->bit_width  : 0;
+            bool is_signed = wide_op ? !operand_ty->is_unsigned : false;
+
+            // For arithmetic/bitwise ops: allocate a stack temp for the result.
+            long long dst_offset = 0;
+            bool is_cmp = (node->kind == ND_EQ || node->kind == ND_NE ||
+                           node->kind == ND_LT || node->kind == ND_LE);
+            if (!is_cmp && wide_op) {
+                if (node->ret_buffer) {
+                    dst_offset = (long long)node->ret_buffer->offset;
+                } else {
+                    dst_offset = alloc_wide_bitint_temp(vm, words);
+                }
+            }
+
+            const char *fn = NULL;
+            switch (node->kind) {
+            case ND_ADD:    fn = "__cccc_bitint_add";  break;
+            case ND_SUB:    fn = "__cccc_bitint_sub";  break;
+            case ND_MUL:    fn = "__cccc_bitint_mul";  break;
+            case ND_DIV:    fn = is_signed ? "__cccc_bitint_sdiv" : "__cccc_bitint_udiv"; break;
+            case ND_MOD:    fn = is_signed ? "__cccc_bitint_smod" : "__cccc_bitint_umod"; break;
+            case ND_BITAND: fn = "__cccc_bitint_and";  break;
+            case ND_BITOR:  fn = "__cccc_bitint_or";   break;
+            case ND_BITXOR: fn = "__cccc_bitint_xor";  break;
+            case ND_SHL:    fn = "__cccc_bitint_shl";  break;
+            case ND_SHR:    fn = is_signed ? "__cccc_bitint_sshr" : "__cccc_bitint_ushr"; break;
+            case ND_EQ: case ND_NE: case ND_LT: case ND_LE:
+                fn = "__cccc_bitint_cmp"; break;
+            default:
+                error_tok(vm, node->tok, "unsupported wide _BitInt op");
+            }
+
+            if (node->kind == ND_SHL || node->kind == ND_SHR) {
+                // Shift: dst(A0), src_addr(A1), shift_amount(A2), words(A3), width(A4)
+                emit_lea3(vm, REG_A0, dst_offset);
+                emit_mov3(vm, REG_A1, r_lhs);
+                emit_mov3(vm, REG_A2, r_rhs); // shift amount is scalar (A2)
+                emit_li3(vm, REG_A3, words);
+                emit_li3(vm, REG_A4, width);
+                emit_wide_helper(vm, fn, 5);
+                emit_lea3(vm, dest_reg, dst_offset);
+            } else if (is_cmp) {
+                // cmp(a, b, words, width, is_signed) → {-1, 0, 1} in REG_A0
+                emit_mov3(vm, REG_A0, r_lhs);
+                emit_mov3(vm, REG_A1, r_rhs);
+                emit_li3(vm, REG_A2, words);
+                emit_li3(vm, REG_A3, width);
+                emit_li3(vm, REG_A4, is_signed ? 1 : 0);
+                emit_wide_helper(vm, fn, 5);
+                // Convert cmp result to bool per operator
+                int tmp = alloc_temp_reg();
+                emit_li3(vm, tmp, 0);
+                switch (node->kind) {
+                case ND_EQ: emit_rrr(vm, SEQ3, dest_reg, REG_A0, tmp); break;
+                case ND_NE: emit_rrr(vm, SNE3, dest_reg, REG_A0, tmp); break;
+                case ND_LT: emit_rrr(vm, SLT3, dest_reg, REG_A0, tmp); break;
+                case ND_LE: emit_rrr(vm, SLE3, dest_reg, REG_A0, tmp); break;
+                default: break;
+                }
+                free_temp_reg(tmp);
+            } else {
+                // Arithmetic/bitwise: dst(A0), a(A1), b(A2), words(A3), width(A4)
+                emit_lea3(vm, REG_A0, dst_offset);
+                emit_mov3(vm, REG_A1, r_lhs);
+                emit_mov3(vm, REG_A2, r_rhs);
+                emit_li3(vm, REG_A3, words);
+                emit_li3(vm, REG_A4, width);
+                emit_wide_helper(vm, fn, 5);
+                emit_lea3(vm, dest_reg, dst_offset);
+            }
+            free_temp_reg(r_rhs);
+            free_temp_reg(r_lhs);
         } else {
-            // Integer operations
+            // Narrow integer operations (scalar _BitInt or plain int)
             gen_expr(vm, node->lhs, dest_reg); // LHS goes directly to dest
 
             // LHS might contain a function call which resets temp regs.
@@ -3044,10 +3205,11 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // For struct/union assignments, we need memcpy (both LHS and RHS are
         // addresses)
         if (node->ty &&
-            (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION)) {
-            // Struct/union assignment: memcpy from RHS address to LHS address
+            (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION ||
+             is_wide_bitint(node->ty))) {
+            // Struct/union/wide-_BitInt assignment: memcpy from RHS to LHS
             int r_src = alloc_temp_reg();
-            gen_expr(vm, node->rhs, r_src); // RHS is struct address
+            gen_expr(vm, node->rhs, r_src); // RHS is address
             mark_temp_reg_used(r_src);
 
             int r_dest = alloc_temp_reg();
@@ -3270,6 +3432,90 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             else if (node->ty->kind == TY_FLOAT)
                 emit_fround_f32(vm, dest_reg, dest_reg);
             return;
+        }
+        // Wide _BitInt conversion handling
+        if (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->ty)) {
+            Type *src = node->lhs->ty;
+            Type *dst = node->ty;
+            if (is_wide_bitint(dst) && !is_wide_bitint(src)) {
+                // Narrow int/float → wide _BitInt
+                long long dst_offset = alloc_wide_bitint_temp(vm, dst->size / 8);
+                emit_lea3(vm, REG_A0, dst_offset);
+                if (is_flonum(src)) {
+                    // float/double → wide: pass double bits as raw int64
+                    // Float regs always store as double internally, so FR2R gives
+                    // us the IEEE-754 double representation regardless of f32/f64.
+                    int r_tmp = alloc_temp_reg();
+                    gen_expr(vm, node->lhs, r_tmp); // puts float/double in float reg
+                    emit_rr(vm, FR2R, REG_A1, r_tmp); // double bits → int reg
+                    free_temp_reg(r_tmp);
+                    emit_lea3(vm, REG_A0, dst_offset);
+                    emit_li3(vm, REG_A2, dst->size / 8);  // words
+                    emit_li3(vm, REG_A3, dst->bit_width);
+                    emit_li3(vm, REG_A4, !dst->is_unsigned);
+                    emit_wide_helper(vm, "__cccc_bitint_from_double", 5);
+                } else {
+                    gen_expr(vm, node->lhs, REG_A1); // narrow int value
+                    emit_li3(vm, REG_A2, dst->size / 8);  // words
+                    emit_li3(vm, REG_A3, dst->bit_width);
+                    const char *fn = (!dst->is_unsigned || src->is_unsigned)
+                                     ? "__cccc_bitint_from_i64"
+                                     : "__cccc_bitint_from_u64";
+                    emit_wide_helper(vm, fn, 4);
+                }
+                emit_lea3(vm, dest_reg, dst_offset);
+                return;
+            } else if (!is_wide_bitint(dst) && is_wide_bitint(src)) {
+                // Wide _BitInt → narrow int/float
+                int r_src = alloc_temp_reg();
+                gen_expr(vm, node->lhs, r_src); // address of wide value
+                emit_mov3(vm, REG_A0, r_src);
+                free_temp_reg(r_src);
+                emit_li3(vm, REG_A1, src->size / 8);  // words
+                emit_li3(vm, REG_A2, src->bit_width);
+                emit_li3(vm, REG_A3, !src->is_unsigned);
+                if (is_flonum(dst)) {
+                    emit_wide_helper(vm, "__cccc_bitint_to_double", 4);
+                    // result is raw double bits in REG_A0; reinterpret as float reg
+                    emit_rr(vm, R2FR, dest_reg, REG_A0);
+                    if (dst->kind == TY_FLOAT)
+                        emit_fround_f32(vm, dest_reg, dest_reg);
+                } else {
+                    emit_wide_helper(vm, "__cccc_bitint_to_i64", 4);
+                    emit_mov3(vm, dest_reg, REG_A0);
+                    // Apply target int truncation
+                    if (dst->kind == TY_BOOL)
+                        emit_rrr(vm, SNE3, dest_reg, dest_reg, REG_ZERO);
+                    else if (dst->kind == TY_CHAR)
+                        emit_rr(vm, dst->is_unsigned ? ZX1 : SX1, dest_reg, dest_reg);
+                    else if (dst->kind == TY_SHORT)
+                        emit_rr(vm, dst->is_unsigned ? ZX2 : SX2, dest_reg, dest_reg);
+                    else if (dst->kind == TY_INT)
+                        emit_rr(vm, dst->is_unsigned ? ZX4 : SX4, dest_reg, dest_reg);
+                    else if (dst->kind == TY_BITINT)
+                        emit_bitint_trunc(vm, dst, dest_reg);
+                }
+                return;
+            } else if (is_wide_bitint(src) && is_wide_bitint(dst)) {
+                // Wide → wide: sign/zero-extend (per src signedness) when
+                // growing, or truncate when shrinking.
+                int words_src = src->size / 8;
+                int words_dst = dst->size / 8;
+                long long dst_offset = alloc_wide_bitint_temp(vm, words_dst);
+                int r_src = alloc_temp_reg();
+                gen_expr(vm, node->lhs, r_src);
+                emit_lea3(vm, REG_A0, dst_offset);
+                emit_mov3(vm, REG_A1, r_src);
+                free_temp_reg(r_src);
+                emit_li3(vm, REG_A2, words_src);
+                emit_li3(vm, REG_A3, src->bit_width);
+                emit_li3(vm, REG_A4, words_dst);
+                emit_li3(vm, REG_A5, dst->bit_width);
+                emit_li3(vm, REG_A6, !src->is_unsigned);
+                emit_wide_helper(vm, "__cccc_bitint_extend", 7);
+                emit_lea3(vm, dest_reg, dst_offset);
+                return;
+            }
         }
         gen_expr(vm, node->lhs, dest_reg);
         // Add type conversion if needed
@@ -3649,7 +3895,8 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     !contains_self_call(body_stmt->lhs, callee)) {
                     Type *ret_ty = body_stmt->lhs->ty;
                     if (!(ret_ty && (ret_ty->kind == TY_STRUCT ||
-                                     ret_ty->kind == TY_UNION))) {
+                                     ret_ty->kind == TY_UNION ||
+                                     is_wide_bitint(ret_ty)))) {
                         reset_temp_regs();
                         Node *inlined = clone_subst(vm, body_stmt->lhs,
                                                     callee->params, node->args);
@@ -3666,7 +3913,8 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     Type *ret_ty = callee->ty->return_ty;
                     bool void_ret = !ret_ty || ret_ty->kind == TY_VOID;
                     if ((void_ret || !(ret_ty->kind == TY_STRUCT ||
-                                       ret_ty->kind == TY_UNION)) &&
+                                       ret_ty->kind == TY_UNION ||
+                                       is_wide_bitint(ret_ty))) &&
                         count_ast_nodes(callee->body) <=
                         vm->compiler.inline_node_limit) {
                         reset_temp_regs();
@@ -4709,12 +4957,21 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
         }
 
         if (node->lhs && !expr_already_eval) {
-            // If returning struct/union, copy to return buffer at runtime
+            // If returning struct/union/wide-_BitInt, copy to return buffer at
+            // runtime. Wide _BitInt values are address-based (like structs),
+            // so returning the raw address would leave a dangling pointer
+            // into the callee's torn-down frame once LEV3 runs.
             if (node->lhs->ty && (node->lhs->ty->kind == TY_STRUCT ||
-                                  node->lhs->ty->kind == TY_UNION)) {
+                                  node->lhs->ty->kind == TY_UNION ||
+                                  is_wide_bitint(node->lhs->ty))) {
                 // Evaluate source (struct address) into a temp register first
                 int r_src = alloc_temp_reg();
                 gen_expr(vm, node->lhs, r_src);
+                // node->lhs may be a wide-_BitInt expression whose codegen
+                // emits a helper CALLF, which resets the temp allocator's
+                // free list. Re-mark r_src as in-use so the next
+                // alloc_temp_reg() below can't hand out the same register.
+                mark_temp_reg_used(r_src);
 
                 // Get next buffer from rotating pool at runtime
                 // RETBUF puts the buffer address in REG_A0
@@ -5113,7 +5370,8 @@ static int assign_stack_offsets(VirtualMachine *vm, Obj *fn) {
                 var_size = 1;
             } else if (var->ty->kind == TY_STRUCT ||
                        var->ty->kind == TY_UNION ||
-                       var->ty->kind == TY_COMPLEX) {
+                       var->ty->kind == TY_COMPLEX ||
+                       (var->ty->kind == TY_BITINT && var->ty->size > 8)) {
                 var_size = (var->ty->size + 7) / 8;
             }
             stack_size += var_size;

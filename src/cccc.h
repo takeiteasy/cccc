@@ -572,7 +572,7 @@ typedef enum {
     TY_BLOCK = 17, // Apple blocks (closures)
     TY_COMPLEX = 18, // C99 complex scalar, base is float/double/long double
     TY_NULLPTR_T = 19, // C23 nullptr_t
-    TY_BITINT = 20,    // C23 _BitInt(N), N in [1,64]
+    TY_BITINT = 20,    // C23 _BitInt(N), N in [1,256]; N>64 uses multi-word storage
     TY_AUTO = 21,      // C23 auto type-inference sentinel (never reaches codegen)
 } TypeKind;
 

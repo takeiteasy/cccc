@@ -1753,6 +1753,7 @@ void cc_load_stdlib(VirtualMachine *vm) {
     register_string_functions(vm);
     register_time_functions(vm);
     register_wide_functions(vm);
+    register_wide_bitint_functions(vm);
 
     // Mark all headers as included
     for (int i = 0; ; i++) {
