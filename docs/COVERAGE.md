@@ -198,6 +198,7 @@ language coverage figures apply.
 | Zero-length arrays `int arr[0]` | ✓ | |
 | Empty structs and unions | ✓ | GNU extension; empty aggregates have size 0 |
 | Nested functions | ✓ | Access to parent-scope variables via static link |
+| Blocks `^{ ... }` (Clang/Apple) | ✓ | Capture-by-value plus `__block` by-reference; nest to arbitrary depth (transitive capture through enclosing descriptors); `Block_copy` heap-duplicates the descriptor so a block can escape its frame, `Block_release` frees that copy |
 | `__builtin_*` | ✓ | Lowered by the compiler; see [STDLIB.md](STDLIB.md) for the full list |
 | `__thread` storage class | ~ | Emits `-Wignored-features`; treated as `static` |
 | `__restrict` / `__restrict__` | ✓ | Spelling aliases for `restrict`; fully optimised (see `restrict` entry above) |

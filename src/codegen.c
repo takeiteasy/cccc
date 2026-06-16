@@ -2340,6 +2340,12 @@ static bool is_simple_local_scalar(VirtualMachine *vm, Node *node) {
         return false;
     if (node->var->is_block_var)
         return false;
+    // A variable captured by the enclosing block lives in the block descriptor
+    // (reached via __static_link), not at its own frame offset.  It must go
+    // through gen_addr's capture path, never the fused direct-frame load.
+    if (vm->compiler.current_fn && vm->compiler.current_fn->is_block &&
+        find_capture_index(vm->compiler.current_fn, node->var) >= 0)
+        return false;
     if (belongs_to_outer_function(vm->compiler.current_fn, node->var))
         return false;
     // Volatile locals must go through the generic LEA3+LDR/STR path so that
@@ -2469,7 +2475,7 @@ static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
                 Obj *static_link = find_static_link_var(current_fn);
                 if (!static_link)
                     error("block function missing __static_link");
-                int cap_offset = (cap_idx + 1) * 8;
+                int cap_offset = (cap_idx + 2) * 8; // skip invoke(0) and size(1) slots
                 emit_lea3(vm, dest_reg, static_link->offset); // &__static_link
                 emit_rr(vm, LDR_D, dest_reg, dest_reg);       // Load descriptor ptr
                 emit_addi3(vm, dest_reg, dest_reg, cap_offset);
@@ -4538,28 +4544,23 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
     }
 
     case ND_BLOCK_LITERAL: {
-        // Block literal: creates a block descriptor containing:
-        // [0] = invoke pointer (function address)
-        // [8...] = captured variable values (if any)
+        // Block descriptor layout (stack-allocated in enclosing function's frame):
+        //   [0]  = invoke pointer (function address)
+        //   [8]  = descriptor byte-size (for Block_copy to know how much to malloc)
+        //   [16] = first captured value
+        //   [24] = second captured value  ...
         //
-        // Always creates a descriptor even for no-capture blocks
-        // for uniform calling convention.
+        // Stack allocation (via block_desc_var) gives each function invocation its
+        // own descriptor, so multiple calls to the same function return independent
+        // block instances without aliasing.
 
         int num_captures = node->num_block_captures;
-        int descriptor_slots = 1 + num_captures; // invoke + captures
+        int descriptor_slots = 2 + num_captures; // invoke + size + captures
         int descriptor_size = descriptor_slots * 8;
 
-        // Allocate descriptor in data segment
-        long long desc_offset = vm->data_ptr - vm->data_seg;
-        desc_offset = (desc_offset + 7) & ~7; // Align to 8 bytes
-        check_data_capacity(vm, desc_offset + descriptor_size);
-        vm->data_ptr = vm->data_seg + desc_offset;
-
-        vm->data_ptr += descriptor_size;
-
-        // Load descriptor address into temp register
+        // Load address of the pre-allocated stack descriptor slot
         int r_desc = alloc_temp_reg();
-        emit_lda3(vm, r_desc, desc_offset);
+        emit_lea3(vm, r_desc, node->block_desc_var->offset);
         mark_temp_reg_used(r_desc);
 
         // Load function address (will be patched later)
@@ -4578,6 +4579,15 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // Store invoke pointer at descriptor[0]
         emit_rr(vm, STR_D, r_invoke, r_desc);
         free_temp_reg(r_invoke);
+
+        // Store descriptor size at descriptor[1] so Block_copy knows how much to copy
+        int r_size = alloc_temp_reg();
+        emit_li3(vm, r_size, descriptor_size);
+        int r_size_slot = alloc_temp_reg();
+        emit_addi3(vm, r_size_slot, r_desc, 8);
+        emit_rr(vm, STR_D, r_size, r_size_slot);
+        free_temp_reg(r_size_slot);
+        free_temp_reg(r_size);
 
         // Copy captured variable values into descriptor.
         // A capture may come from the enclosing block's own stack frame (direct
@@ -4599,7 +4609,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 Obj *static_link = find_static_link_var(enc_fn);
                 emit_lea3(vm, r_val, static_link->offset);
                 emit_rr(vm, LDR_D, r_val, r_val);                    // descriptor ptr
-                emit_addi3(vm, r_val, r_val, (enc_cap_idx + 1) * 8); // slot addr
+                emit_addi3(vm, r_val, r_val, (enc_cap_idx + 2) * 8); // slot addr (skip invoke+size)
                 if (cap->is_block_var)
                     emit_rr(vm, LDR_D, r_val, r_val); // heap ptr from descriptor slot
                 else
@@ -4618,9 +4628,9 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 emit_load(vm, cap->ty, r_val, r_val);
             }
 
-            // Store at descriptor[(i + 1) * 8]
+            // Store at descriptor[(i + 2) * 8] (slots 0=invoke, 1=size, 2..n=captures)
             int r_cap_addr = alloc_temp_reg();
-            emit_addi3(vm, r_cap_addr, r_desc, (i + 1) * 8);
+            emit_addi3(vm, r_cap_addr, r_desc, (i + 2) * 8);
             emit_rr(vm, STR_D, r_val, r_cap_addr);
             free_temp_reg(r_cap_addr);
             free_temp_reg(r_val);

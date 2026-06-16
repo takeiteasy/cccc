@@ -4997,11 +4997,20 @@ static Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     vm->compiler.current_fn = outer_fn;
     vm->compiler.locals = saved_locals;
 
+    // Allocate descriptor storage on the enclosing function's stack frame.
+    // Layout: [invoke_ptr(0) | desc_size(8) | cap0(16) | cap1(24) | ...]
+    // Per-frame stack allocation ensures each invocation gets its own descriptor,
+    // so multiple calls to a function returning the same block literal are independent.
+    int desc_slots = 2 + num_captures;
+    Type *desc_arr_ty = array_of(vm, ty_long, desc_slots);
+    Obj *desc_var = new_lvar(vm, "", 0, desc_arr_ty);
+
     // Create the block literal node
     Node *node = new_node(vm, ND_BLOCK_LITERAL, start);
     node->block_fn = block_fn;
     node->block_captures = captures;
     node->num_block_captures = num_captures;
+    node->block_desc_var = desc_var;
 
     // Block type: pointer to function type (blocks are first-class callable
     // values)
@@ -6928,29 +6937,56 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     // Block_copy(block) - Apple Blocks extension
-    // In CCCC's simplified model, blocks are already heap-allocated, so this
-    // just returns the block
+    // Copies the descriptor to the heap so the block can safely outlive its
+    // declaring stack frame. Calls __cccc_block_copy_impl(desc) which reads
+    // desc[1] (the descriptor byte-size) and returns a malloc'd copy.
     if (equal(tok, "Block_copy")) {
         tok = skip(vm, tok->next, "(");
         Node *block_expr = assign(vm, &tok, tok);
         *rest = skip(vm, tok, ")");
-        // Simply return the block expression as-is (already has TY_BLOCK type
-        // or void*)
         add_type(vm, block_expr);
-        return block_expr;
+
+        // The __cccc_block_copy_impl prototype is declared as a builtin (its
+        // host implementation is registered in the FFI table by the stdlib).
+        Obj *copy_fn = vm->compiler.builtin_block_copy;
+        if (!copy_fn) {
+            // No stdlib loaded; fall back to returning the block as-is
+            return block_expr;
+        }
+
+        Node *fn_node = new_var_node(vm, copy_fn, start);
+        Node *call = new_unary(vm, ND_FUNCALL, fn_node, start);
+        call->func_ty = copy_fn->ty;
+        call->ty = copy_fn->ty->return_ty;
+        call->args = block_expr;
+        return call;
     }
 
     // Block_release(block) - Apple Blocks extension
-    // In CCCC's simplified model, this is a no-op (VM teardown handles cleanup)
+    // Frees a heap-allocated block descriptor previously obtained via Block_copy.
+    // Only call on blocks returned by Block_copy; calling on a stack block is UB.
     if (equal(tok, "Block_release")) {
         tok = skip(vm, tok->next, "(");
-        Node *block_expr = assign(vm, &tok, tok); // Evaluate but discard
+        Node *block_expr = assign(vm, &tok, tok);
         *rest = skip(vm, tok, ")");
-        // Return a null expression (void, no effect)
         add_type(vm, block_expr);
-        Node *node = new_node(vm, ND_NULL_EXPR, start);
-        node->ty = ty_void;
-        return node;
+
+        Obj *free_fn = NULL;
+        for (Obj *g = vm->compiler.globals; g; g = g->next)
+            if (g->name && strcmp(g->name, "free") == 0) { free_fn = g; break; }
+
+        if (!free_fn) {
+            Node *node = new_node(vm, ND_NULL_EXPR, start);
+            node->ty = ty_void;
+            return node;
+        }
+
+        Node *fn_node = new_var_node(vm, free_fn, start);
+        Node *call = new_unary(vm, ND_FUNCALL, fn_node, start);
+        call->func_ty = free_fn->ty;
+        call->ty = ty_void;
+        call->args = block_expr;
+        return call;
     }
 
     if (tok->kind == TK_IDENT) {
@@ -7910,6 +7946,17 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     raise_ty->params = copy_type(vm, ty_int);
     vm->compiler.builtin_raise = new_gvar(vm, "raise", 5, raise_ty);
     vm->compiler.builtin_raise->is_definition = false;
+
+    // __cccc_block_copy_impl(void *desc) -> void*
+    // Internal helper backing the Block_copy() extension; resolved to the
+    // host cfunc registered in the FFI table by register_stdlib_functions.
+    // Declared as a global prototype so Block_copy's parser lookup finds it.
+    Type *block_copy_ty = func_type(vm, pointer_to(vm, ty_void));
+    block_copy_ty->params = pointer_to(vm, ty_void);
+    vm->compiler.builtin_block_copy =
+        new_gvar(vm, "__cccc_block_copy_impl", 22, block_copy_ty);
+    vm->compiler.builtin_block_copy->is_function = true;
+    vm->compiler.builtin_block_copy->is_definition = false;
 }
 
 // program = (typedef | function-definition | global-variable)*

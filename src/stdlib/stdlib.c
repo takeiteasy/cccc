@@ -1,6 +1,7 @@
 // stdlib.h stdlib function registration
 #include "../cccc.h"
 #include <wchar.h>
+#include <string.h>
 
 #if defined(__APPLE__)
 #include <Availability.h>
@@ -27,6 +28,17 @@ static void *cccc_aligned_alloc(size_t alignment, size_t size) {
     return ptr;
 }
 #endif
+
+// Block_copy implementation: heap-duplicate a stack-allocated block descriptor.
+// Descriptor layout: [invoke_ptr(0) | byte_size(8) | captures...]
+// Reads byte_size from slot 1, mallocs that many bytes, and copies the descriptor.
+static void *cccc_block_copy_impl(void *desc) {
+    if (!desc) return NULL;
+    size_t size = (size_t)((long long *)desc)[1];
+    void *copy = malloc(size);
+    if (copy) memcpy(copy, desc, size);
+    return copy;
+}
 
 // Wrapper for realloc that matches C11 semantics
 static void *cccc_realloc(void *ptr, size_t size) {
@@ -140,6 +152,9 @@ void register_stdlib_functions(VirtualMachine *vm) {
     // Random number generation
     cc_register_cfunc(vm, "rand", (void*)rand, 0, 0);
     cc_register_cfunc(vm, "srand", (void*)srand, 1, 0);
+
+    // Apple Blocks extension: heap-copy a block descriptor for escape
+    cc_register_cfunc(vm, "__cccc_block_copy_impl", (void*)cccc_block_copy_impl, 1, 0);
 
     // Memory allocation functions
 #ifdef CCCC_HAVE_NATIVE_ALIGNED_ALLOC

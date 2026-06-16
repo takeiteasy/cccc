@@ -868,6 +868,7 @@ struct Node {
     Obj *block_fn;          // Synthetic function for block's body
     Obj **block_captures;   // Array of captured variables
     int num_block_captures; // Number of captured variables
+    Obj *block_desc_var;    // Stack slot in enclosing frame for descriptor storage
 
     // Pragma macro call (ND_MACRO_CALL)
     char *macro_name;    // Name of pragma macro to invoke
@@ -1794,6 +1795,7 @@ typedef struct Compiler {
     Obj *builtin_dlsym;    // VM-managed dlsym
     Obj *builtin_dlclose;  // VM-managed dlclose
     Obj *builtin_dlerror;  // VM-managed dlerror
+    Obj *builtin_block_copy; // Block_copy() heap-duplication helper (__cccc_block_copy_impl)
     TypeNameRecord *type_names; // Persistent typedef/tag declarations for -M
 
     // Arena allocator for parser frontend (tokens, AST, preprocessor state)
