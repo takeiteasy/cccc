@@ -83,6 +83,10 @@ typedef struct {
     CustomAttrUse *custom_attrs;
     int align;
 
+    // Per-function optimization level
+    int  fn_optimize_level;
+    bool fn_optimize_set;
+
     // Format string validation
     int format_style;          // 0=none, 1=printf, 2=scanf
     int format_string_index;   // 1-based index of format string arg
@@ -726,6 +730,8 @@ static Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     var->is_noreturn = ty->is_noreturn;
     var->is_pure = ty->is_pure;
     var->is_func_const = ty->is_func_const;
+    var->fn_optimize_level = ty->fn_optimize_level;
+    var->fn_optimize_set = ty->fn_optimize_set;
     var->deprecated_msg = ty->deprecated_msg;
     push_scope(vm, name, name_len)->var = var;
     return var;
@@ -5238,6 +5244,71 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
     }
 }
 
+// Parse optimize attribute argument: (N) where N is an integer 0-4, or ("ON") where
+// the string is "O0".."O4" or "-O0".."-O4" (GCC-compatible form).
+// Sets the optimize fields on ty and/or attr and marks have_fn_opt_attrs on the
+// compiler. Returns the token after the closing ')'.
+static Token *parse_optimize_attr(VirtualMachine *vm, Token *tok,
+                                  Type *ty, VarAttr *attr) {
+    tok = skip(vm, tok, "(");
+
+    int level = -1;
+
+    if (tok->kind == TK_NUM || tok->kind == TK_PP_NUM) {
+        // Integer form: [[cccc::optimize(2)]] / __attribute__((optimize(2)))
+        // Use tok->val if available (TK_NUM); fall back to strtol on raw text.
+        long long val;
+        if (tok->kind == TK_NUM) {
+            val = tok->val;
+        } else {
+            char *ep = NULL;
+            val = strtoll(tok->loc, &ep, 10);
+            if (ep == tok->loc)
+                error_tok(vm, tok,
+                          "optimize level must be an integer 0-4 (got '%.*s')",
+                          tok->len, tok->loc);
+        }
+        if (val < 0 || val > 4)
+            error_tok(vm, tok,
+                      "optimize level must be an integer 0-4 (got %lld)", val);
+        level = (int)val;
+        tok = tok->next;
+    } else if (tok->kind == TK_STR) {
+        // String form: __attribute__((optimize("O2"))) or [[cccc::optimize("-O2")]]
+        const char *s = tok->str;
+        if (*s == '-') s++;          // skip optional leading '-'
+        if (*s != 'O' && *s != 'o')
+            error_tok(vm, tok,
+                      "optimize string must be 'O0'–'O4' or '-O0'–'-O4' (got '%s')",
+                      tok->str);
+        s++;
+        if (*s < '0' || *s > '4' || *(s + 1) != '\0')
+            error_tok(vm, tok,
+                      "optimize string must be 'O0'–'O4' or '-O0'–'-O4' (got '%s')",
+                      tok->str);
+        level = (int)(*s - '0');
+        tok = tok->next;
+    } else {
+        error_tok(vm, tok,
+                  "optimize attribute expects an integer 0-4 or a string "
+                  "like \"O2\" or \"-O2\"");
+    }
+
+    if (ty) {
+        ty->fn_optimize_level = level;
+        ty->fn_optimize_set   = true;
+    }
+    if (attr) {
+        attr->fn_optimize_level = level;
+        attr->fn_optimize_set   = true;
+    }
+    if (!vm->compiler.in_type_lookahead)
+        vm->compiler.have_fn_opt_attrs = true;
+
+    tok = skip(vm, tok, ")");
+    return tok;
+}
+
 // attribute = ("__attribute__" "(" "(" attribute-list ")" ")")*
 static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
     while (consume(vm, &tok, tok, "__attribute__")) {
@@ -5350,6 +5421,13 @@ static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *
                 continue;
             }
 
+            // Handle optimize attribute: __attribute__((optimize("O2"))) or optimize(2)
+            if (is_attr_name(tok, "optimize")) {
+                tok = tok->next;
+                tok = parse_optimize_attr(vm, tok, ty, attr);
+                continue;
+            }
+
             if (find_attribute_macro(vm, tok)) {
                 Token *name_tok = tok;
                 tok = tok->next;
@@ -5454,7 +5532,18 @@ static Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
             bool is_no_unique_address_attr = equal(name_tok, "no_unique_address");
             bool is_pure_attr = equal(name_tok, "pure");
             bool is_func_const_attr = equal(name_tok, "const");
+            bool is_optimize_attr = equal(name_tok, "optimize");
             tok = tok->next;
+
+            // Optimize attribute has mandatory args: [[cccc::optimize(2)]] or ("O2")
+            if (is_optimize_attr) {
+                if (!equal(tok, "("))
+                    error_tok(vm, attr_tok,
+                              "optimize attribute requires a level argument, "
+                              "e.g. [[cccc::optimize(2)]] or [[cccc::optimize(\"O2\")]]");
+                tok = parse_optimize_attr(vm, tok, ty, attr);
+                continue;
+            }
 
             char *message = NULL;
             if (equal(tok, "(")) {

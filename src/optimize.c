@@ -459,7 +459,8 @@ static void emit_li_nop(VirtualMachine *vm, Pc pc) {
 // their results are never constant-folded; stores are never removed by the
 // DCE pass; and the peephole pass only combines sign/zero-extension ops with
 // loads, which preserves the underlying memory access.
-static void opt_constant_fold(VirtualMachine *vm, OptReplacement *repls) {
+static void opt_constant_fold(VirtualMachine *vm, OptReplacement *repls,
+                              Pc fn_start, Pc fn_end) {
     if (!vm || !vm->text_seg || !vm->text_ptr) {
         return;
     }
@@ -467,8 +468,8 @@ static void opt_constant_fold(VirtualMachine *vm, OptReplacement *repls) {
     RegState state;
     reset_reg_state(&state);
 
-    Pc start = 1;  // Skip entry point at text_seg[0]
-    Pc end = vm->text_ptr + 1;
+    Pc start = fn_start;
+    Pc end = fn_end;
     Pc pc = start;
 
     int folded_count = 0;
@@ -726,13 +727,13 @@ static void opt_constant_fold(VirtualMachine *vm, OptReplacement *repls) {
 // 5. LDR_W rd, rs; SX4 rd, rd -> LDR_W rd, rs (SX4 is redundant)
 //
 
-static void opt_peephole(VirtualMachine *vm) {
+static void opt_peephole(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
     if (!vm || !vm->text_seg || !vm->text_ptr) {
         return;
     }
 
-    Pc start = 1;  // Skip entry point
-    Pc end = vm->text_ptr + 1;
+    Pc start = fn_start;
+    Pc end = fn_end;
     int opt_count = 0;
     bool *control_flow_targets = build_control_flow_targets(vm, start, end);
 
@@ -858,13 +859,13 @@ static void opt_peephole(VirtualMachine *vm) {
 // 2. Store followed immediately by another store to same address
 //
 
-static void opt_dead_code(VirtualMachine *vm) {
+static void opt_dead_code(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
     if (!vm || !vm->text_seg || !vm->text_ptr) {
         return;
     }
 
-    Pc start = 1;  // Skip entry point
-    Pc end = vm->text_ptr + 1;
+    Pc start = fn_start;
+    Pc end = fn_end;
     int dce_count = 0;
 
     // Count NOPs created by previous passes (informational only)
@@ -1191,14 +1192,14 @@ static void cse_invalidate_reg(CseEntry *cache, int ncache, int rd) {
             cache[i].valid = false;
 }
 
-static void opt_cse_const_calls(VirtualMachine *vm) {
+static void opt_cse_const_calls(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
     if (!vm || !vm->text_seg || !vm->text_ptr)
         return;
     if (!vm->compiler.globals)
         return;
 
-    Pc start = 1;
-    Pc end = vm->text_ptr + 1;
+    Pc start = fn_start;
+    Pc end = fn_end;
 
     bool *cf_targets = build_control_flow_targets(vm, start, end);
 
@@ -1616,42 +1617,105 @@ static void opt_fuse_ops(VirtualMachine *vm) {
 
 // ========== Main Entry Point ==========
 
+// Run the NOP-marking optimisation passes (fold / peephole / DCE) on the
+// bytecode range [fn_start, fn_end) at the requested level.  Called either
+// once for the whole segment (fast path) or once per function (per-fn path).
+static void run_opt_passes(VirtualMachine *vm, OptReplacement *repls,
+                           int level, Pc fn_start, Pc fn_end) {
+    if (level >= 1)
+        opt_constant_fold(vm, repls, fn_start, fn_end);
+    if (level >= 2)
+        opt_peephole(vm, fn_start, fn_end);
+    if (level >= 3)
+        opt_dead_code(vm, fn_start, fn_end);
+}
+
+// Run the post-compaction passes (CSE, fuse) on [fn_start, fn_end).
+// fn_start/fn_end must already be updated by remap_function_metadata.
+static void run_post_compact_passes(VirtualMachine *vm, int level, bool fn_fuse,
+                                    Pc fn_start, Pc fn_end) {
+    if (level >= 2)
+        opt_cse_const_calls(vm, fn_start, fn_end);
+    (void)fn_fuse; // fuse is handled globally after all per-fn passes (see below)
+}
+
 void cc_optimize(VirtualMachine *vm, int level, bool fuse_ops) {
-    if (!vm || !vm->text_seg || (level <= 0 && !fuse_ops)) {
+    bool have_fn_attrs = vm->compiler.have_fn_opt_attrs;
+
+    if (!vm || !vm->text_seg || (level <= 0 && !fuse_ops && !have_fn_attrs)) {
         return;
     }
 
-    Pc end = vm->text_ptr + 1;
-    OptReplacement *repls = calloc((size_t)end + 1, sizeof(OptReplacement));
+    Pc seg_end = vm->text_ptr + 1;
+    OptReplacement *repls = calloc((size_t)seg_end + 1, sizeof(OptReplacement));
     if (!repls)
         error("out of memory");
 
-    // Level 1: Basic optimization (constant folding)
-    if (level >= 1) {
-        opt_constant_fold(vm, repls);
-    }
+    if (!have_fn_attrs) {
+        // ---- Fast path: whole-segment optimisation (existing behaviour) ----
 
-    // Level 2: Standard optimization (+ peephole)
-    if (level >= 2) {
-        opt_peephole(vm);
-    }
+        run_opt_passes(vm, repls, level, 1, seg_end);
+        opt_compact_bytecode(vm, repls);
+        free(repls);
 
-    // Level 3: Aggressive optimization (+ dead code elimination)
-    if (level >= 3) {
-        opt_dead_code(vm);
-    }
+        // Level 2+: CSE for [[gnu::const]] functions.  Runs after compaction so
+        // it sees the final, folded bytecode.  Replaces CALL in-place with MOV3
+        // (same 2-word encoding) — no second compaction pass is needed.
+        if (level >= 2)
+            opt_cse_const_calls(vm, 1, vm->text_ptr + 1);
 
-    opt_compact_bytecode(vm, repls);
-    free(repls);
+        if (fuse_ops || level >= 4)
+            opt_fuse_ops(vm);
 
-    // Level 2+: CSE for [[gnu::const]] functions.  Runs after compaction so
-    // it sees the final, folded bytecode.  Replaces CALL in-place with MOV3
-    // (same 2-word encoding) — no second compaction pass is needed.
-    if (level >= 2) {
-        opt_cse_const_calls(vm);
-    }
+    } else {
+        // ---- Per-function path: GCC-style — attribute level overrides global ----
+        //
+        // Phase 1: NOP-marking passes per function, then a single global
+        // compaction.  Functions without an optimize attribute use the global
+        // level.  Functions with one always use their own level regardless of
+        // the global -O flag (GCC semantics).
+        bool need_fuse = fuse_ops;
 
-    if (fuse_ops || level >= 4) {
-        opt_fuse_ops(vm);
+        for (Obj *fn = vm->compiler.globals; fn; fn = fn->next) {
+            if (!fn->is_function || !fn->body || fn->code_addr <= 0)
+                continue;
+            Pc fn_start = (Pc)fn->code_addr;
+            Pc fn_end   = (Pc)fn->code_end_addr;
+            if (fn_end <= fn_start)
+                continue;
+
+            int eff_level = fn->fn_optimize_set ? fn->fn_optimize_level : level;
+            if (eff_level >= 4 || (fn->fn_optimize_set && fn->fn_optimize_level >= 4))
+                need_fuse = true;
+
+            run_opt_passes(vm, repls, eff_level, fn_start, fn_end);
+        }
+
+        // Single global compaction — updates code_addr/code_end_addr via
+        // remap_function_metadata so Phase 2 ranges are correct.
+        opt_compact_bytecode(vm, repls);
+        free(repls);
+
+        // Phase 2: Post-compaction passes on the (now remapped) per-fn ranges.
+        for (Obj *fn = vm->compiler.globals; fn; fn = fn->next) {
+            if (!fn->is_function || !fn->body || fn->code_addr <= 0)
+                continue;
+            Pc fn_start = (Pc)fn->code_addr;
+            Pc fn_end   = (Pc)fn->code_end_addr;
+            if (fn_end <= fn_start)
+                continue;
+
+            int eff_level = fn->fn_optimize_set ? fn->fn_optimize_level : level;
+            run_post_compact_passes(vm, eff_level, false, fn_start, fn_end);
+        }
+
+        // Fuse-ops runs globally if any function requested it.  The fusion
+        // candidate analyser naturally respects function boundaries (RET
+        // instructions break def-use chains), so this is always correct.
+        // NOTE: non-attributed functions at a lower level may also be fused;
+        // this is a known approximation.  A per-function fuse pass is tracked
+        // as a potential future improvement.
+        if (need_fuse || level >= 4)
+            opt_fuse_ops(vm);
     }
 }

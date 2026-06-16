@@ -663,6 +663,10 @@ struct Type {
     char *nodiscard_msg;
     struct CustomAttrUse *custom_attrs;
 
+    // Per-function optimization level (__attribute__((optimize)) / [[cccc::optimize]])
+    int  fn_optimize_level; // requested opt level (0–4); only valid if fn_optimize_set
+    bool fn_optimize_set;   // true if an optimize attribute was present
+
     // _BitInt(N): bit width for TY_BITINT types
     int bit_width;
 
@@ -885,6 +889,10 @@ struct Obj {
     bool is_local_symbol;
     char *deprecated_msg;
     char *nodiscard_msg;
+
+    // Per-function optimization level (GCC-style: attribute overrides global -O)
+    int  fn_optimize_level; // requested opt level (0–4); only valid if fn_optimize_set
+    bool fn_optimize_set;   // true if an optimize attribute was present
 
     // Local variable
     int offset;
@@ -1858,6 +1866,8 @@ typedef struct Compiler {
                    // 3=aggressive; 4 enables fused-op pass)
     bool fuse_ops; // Enable post-codegen opcode fusion pass
     int inline_node_limit; // Max AST nodes for full inlining (0=disable)
+    bool have_fn_opt_attrs; // True if any function carries an optimize attribute;
+                            // gates the per-function optimizer path in cc_optimize
 
     // #pragma cccc config(...) support
     uint32_t cli_flags_mask;  // CCCCFlags bits explicitly set on the CLI; these

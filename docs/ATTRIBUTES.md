@@ -39,6 +39,7 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 | `nodiscard` | C23 | ✓ | Warns on discarded return values (`-Wnodiscard`, part of `-Wall`) |
 | `fallthrough` | C23 | ✓ | Suppresses fallthrough warning in switch cases (`-Wfallthrough`, part of `-Wextra`) |
 | `noreturn` | C23 / GNU | ✓ | Emits `BTRAP` after calls; warns on returns |
+| `optimize("ON")` / `optimize(N)` | GNU / CCCC | ✓ | Per-function optimization level (0–4); attribute wins over global `-O` |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
 ## Supported Attributes
@@ -213,6 +214,62 @@ Accepted spellings: `__attribute__((const))`, `__attribute__((__const__))`,
 > **Note:** `gnu::const` would collide with the C keyword `const` if written
 > as `[[const]]` — the `gnu::` namespace qualifier is required for the C23
 > spelling.
+
+---
+
+### `__attribute__((optimize(...)))` / `[[cccc::optimize(N)]]` / `@optimize(N)` (CCCC-specific)
+
+Controls the optimization level for a single function, independently of the
+global `-O` flag.  CCCC uses **GCC-style attribute precedence**: the attribute
+always overrides the global level for that function, regardless of what
+`-O`, `--optimize=N`, or `#pragma cccc config(optimisation=N)` specify.
+
+This is the inverse of CCCC's `#pragma cccc config` rule (where CLI wins) —
+for the `optimize` attribute the function's explicit annotation always takes
+priority.
+
+| Level | Behaviour |
+|-------|-----------|
+| 0 | No optimization for this function (useful for timing-stable or debug code) |
+| 1 | Constant folding + dead-call elimination |
+| 2 | Level 1 + peephole + CSE for const functions |
+| 3 | Level 2 + dead-code elimination |
+| 4 | Level 3 + opcode fusion |
+
+**Three accepted spellings:**
+
+```c
+// 1. GCC-compatible GNU attribute — string form "ON" or "-ON"
+__attribute__((optimize("O2")))
+int hot_fn(int a, int b) { return a + b; }
+
+// 2. C23 cccc-native integer
+[[cccc::optimize(3)]]
+static int aggressive_fn(int x) { return x * x; }
+
+// 3. @ shorthand (rewrites to [[cccc::optimize(...)]])
+@optimize(2)
+static long search(const long *arr, long n) { /* ... */ }
+```
+
+The string form (`"O2"` / `"-O2"`) accepts `O0` through `O4` (with an
+optional leading `-`), matching GCC's `__attribute__((optimize("O2")))`.
+The integer form accepts `0` through `4` directly.
+
+**Interaction with global optimization:**
+
+```c
+// With -O0 globally:
+//   - aggressive_fn is still optimized at level 3 (attribute wins)
+//   - plain_fn runs at level 0 (no attribute → follows global)
+[[cccc::optimize(3)]]
+int aggressive_fn(int x) { return x * x; }
+
+int plain_fn(int x) { return x * 2; }  // follows -O flag
+```
+
+**`__has_attribute` / `__has_c_attribute`:** both return `1` for `optimize`
+(as a CCCC vendor attribute).
 
 ---
 

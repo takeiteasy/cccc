@@ -1021,6 +1021,7 @@ static const AttrInfo known_attrs[] = {
     {"comptime",      ATTR_CCCC, true,  1},
     {"emit",          ATTR_CCCC, true,  1},
     {"macro",         ATTR_CCCC, true,  1},
+    {"optimize",      ATTR_CCCC, true,  1},
     {"test",          ATTR_CCCC, true,  1},
     {"test_setup",    ATTR_CCCC, true,  1},
     {"test_teardown", ATTR_CCCC, true,  1},

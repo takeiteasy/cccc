@@ -33,6 +33,49 @@ CCCC includes optional bytecode optimization passes that can improve execution p
 | 3 | `--optimize=3` | Aggressive | All passes |
 | 4 | `--optimize=4` | Fused | All level-3 passes + automatic opcode fusion |
 
+## Per-Function Optimization
+
+A single function can request its own optimization level using the `optimize`
+attribute, regardless of the global `-O` flag.  **CCCC uses GCC-style
+precedence: the attribute always wins over the global level for that function.**
+
+```c
+// This function is optimized at O3 even in a -O0 build.
+[[cccc::optimize(3)]]
+int hot_path(int a, int b) { return a * b + a; }
+
+// This function follows the global -O level.
+int cold_path(int a, int b) { return a + b; }
+```
+
+Three spellings are accepted:
+
+| Spelling | Example |
+|----------|---------|
+| `[[cccc::optimize(N)]]` (C23 integer, recommended) | `[[cccc::optimize(2)]]` |
+| `@optimize(N)` (@ shorthand) | `@optimize(2)` |
+| `__attribute__((optimize("ON")))` (GCC-compatible string) | `__attribute__((optimize("O2")))` |
+
+The string form accepts `"O0"`–`"O4"` with an optional leading `-`
+(e.g. `"-O3"`), matching GCC conventions.
+
+**How it interacts with global optimization:**
+
+- Functions *with* an `optimize` attribute use their attribute level regardless
+  of the global `-O`, `--optimize=N`, or `#pragma cccc config(optimisation=N)`.
+- Functions *without* an attribute use the global level as normal.
+- A global `-O0` build still optimizes attributed functions at their declared
+  level.  The primary use case is selectively enabling optimization on hot
+  functions in a debug (`-O0`) build.
+
+**With `tools/tests.py --full`:** because attributed functions always use their
+own level, their behaviour is identical at every global opt level swept by
+`--full`.  Attribute-based tests are therefore naturally safe to include in the
+full sweep without special casing.
+
+See [ATTRIBUTES.md — optimize](ATTRIBUTES.md#__attribute__optimize--ccccoptimizen--optimizen-cccc-specific)
+for the complete attribute reference.
+
 ## Optimization Passes
 
 Optimizer bytecode walks use the shared instruction-size metadata generated
