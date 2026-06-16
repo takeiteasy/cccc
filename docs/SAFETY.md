@@ -283,10 +283,19 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
   ====== DATA RACE DETECTED ======
   ```
 
-- **`_Atomic` cast warning**: Warns at compile time when a cast strips the `_Atomic` qualifier from a pointer type, producing a plain pointer to an atomic object. Full runtime detection of mixed atomic/non-atomic access (via new ASTR/ALDR opcodes and stdatomic.h updates) is tracked as a follow-up.
+- **`_Atomic` cast warning**: Warns at compile time when a cast strips the `_Atomic` qualifier from a pointer type, producing a plain pointer to an atomic object.
   ```
   warning: cast discards '_Atomic' qualifier from pointer type; non-atomic access to atomic object may cause data races
   ```
+
+- **Mixed atomic/non-atomic access detection**: `atomic_load`/`atomic_store` (and `atomic_load_explicit`/`atomic_store_explicit`) emit dedicated `ALDR`/`ASTR` opcodes that tag a per-address `atomic_shadow` map with the accessing thread id. If a second thread performs a plain (non-atomic) memory access to the same address without holding a mutex, a diagnostic is printed at runtime. Forward-only detection: the atomic access must occur before the non-atomic one to be detected.
+  ```
+  ====== MIXED ATOMIC/NON-ATOMIC ACCESS DETECTED ======
+  Address 0x... was accessed atomically by thread 0x... and is now read non-atomically by thread 0x... without a mutex
+  ```
+  **Known limitation:** `atomic_fetch_add`, `atomic_fetch_sub`, and similar read-modify-write operations still expand to plain load/store opcodes — they do not set the atomic tag and may be incorrectly flagged as non-atomic on an address that was previously `atomic_store`d. Avoid mixing `atomic_fetch_*` with `atomic_store`/`atomic_load` on the same address across threads when using `--thread-safety`.
+
+- **`atomic_exchange` and `atomic_compare_exchange`**: These operations compile to dedicated `AXCHG`/`ACAS` opcodes and are correctly handled as atomic accesses in the shadow map. The VM GIL ensures atomicity with respect to other VM threads.
 
 ## Advanced Pointer Tracking Features
 

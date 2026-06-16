@@ -734,7 +734,20 @@ void add_type(VirtualMachine *vm, Node *node) {
             return;
         case ND_EXCH:
             if (node->lhs->ty->kind != TY_PTR)
-                error_tok(vm, node->cas_addr->tok, "pointer expected");
+                error_tok(vm, node->lhs->tok, "pointer expected");
+            node->ty = node->lhs->ty->base;
+            return;
+        case ND_ALOAD:
+            add_type(vm, node->lhs);
+            if (node->lhs->ty->kind != TY_PTR)
+                error_tok(vm, node->lhs->tok, "__builtin_atomic_load: pointer expected");
+            node->ty = node->lhs->ty->base;
+            return;
+        case ND_ASTORE:
+            add_type(vm, node->lhs);
+            add_type(vm, node->rhs);
+            if (node->lhs->ty->kind != TY_PTR)
+                error_tok(vm, node->lhs->tok, "__builtin_atomic_store: pointer expected");
             node->ty = node->lhs->ty->base;
             return;
         case ND_BLOCK_LITERAL:

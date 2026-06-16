@@ -6631,6 +6631,26 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
+    // __builtin_atomic_load(addr) — atomic tagged load; emits ALDR opcode
+    if (equal(tok, "__builtin_atomic_load")) {
+        Node *node = new_node(vm, ND_ALOAD, tok);
+        tok = skip(vm, tok->next, "(");
+        node->lhs = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        return node;
+    }
+
+    // __builtin_atomic_store(addr, val) — atomic tagged store; emits ASTR opcode
+    if (equal(tok, "__builtin_atomic_store")) {
+        Node *node = new_node(vm, ND_ASTORE, tok);
+        tok = skip(vm, tok->next, "(");
+        node->lhs = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        node->rhs = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        return node;
+    }
+
     // __builtin_frame_address(0) - returns the current frame's base pointer
     if (equal(tok, "__builtin_frame_address")) {
         tok = skip(vm, tok->next, "(");

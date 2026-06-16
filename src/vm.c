@@ -1148,6 +1148,8 @@ void cc_destroy(VirtualMachine *vm) {
     hashmap_deinit(&vm->ptr_tags);
     // Free race_shadow HashMap (thread-safety write-tracking, integer keys)
     hashmap_deinit(&vm->race_shadow);
+    // Free atomic_shadow HashMap (mixed atomic/non-atomic detection)
+    hashmap_deinit(&vm->atomic_shadow);
 
     // Free stack_ptrs HashMap (integer keys + StackPtrInfo values)
     if (vm->stack_ptrs.buckets) {

@@ -162,6 +162,15 @@ extern "C" {
     X(STR_H, 1) /* *(short*)regs[rs] = regs[rd] (store halfword) */            \
     X(STR_W, 1) /* *(int*)regs[rs] = regs[rd] (store word) */                  \
     X(STR_D, 1) /* *(long long*)regs[rs] = regs[rd] (store dword) */           \
+    /* Atomic register-based load/store (ALDR/ASTR) and RMW (AXCHG/ACAS) */  \
+    X(ALDR, 3)  /* atomic load:  rd = *(T*)regs[rs]; width_enc in i64        \
+                   width_enc = (size<<1)|is_unsigned; tags atomic_shadow */   \
+    X(ASTR, 3)  /* atomic store: *(T*)regs[rs] = rd; width_enc in i64        \
+                   tags atomic_shadow for mixed-access detection */            \
+    X(AXCHG, 2) /* atomic exchange: old=*(T*)A0; *(T*)A0=(T)A1; A0=old      \
+                   width_enc in i64 */                                         \
+    X(ACAS, 2)  /* atomic CAS: if *(T*)A0==*(T*)A1 {*(T*)A0=(T)A2;A0=1}    \
+                   else {*(T*)A1=*(T*)A0;A0=0}; width_enc in i64 */           \
     /* Floating-point register operations */                                   \
     X(FLDR, 1)  /* fregs[rd] = *(double*)regs[rs] */                           \
     X(FSTR, 1)  /* *(double*)regs[rs] = fregs[rd] */                           \
@@ -781,6 +790,8 @@ typedef enum {
     ND_OVERFLOW_ARITH = 55, // Checked arithmetic; val = 0/1/2 (add/sub/mul), lhs=a, rhs=b, cas_addr=ptr
     ND_INIT_SPLICE = 56,    // Deferred compound-literal $@k splice; expanded by quote_substitute
                             // var=lvar, lhs=ND_VAR($@k placeholder)
+    ND_ALOAD = 57,          // Atomic load via __builtin_atomic_load; lhs=addr ptr
+    ND_ASTORE = 58,         // Atomic store via __builtin_atomic_store; lhs=addr ptr, rhs=value
 } NodeKind;
 
 /*!
@@ -2130,6 +2141,10 @@ struct VirtualMachine {
     // Race detection shadow map: address -> last thread that wrote without a lock.
     // Value is ThreadRecord* for worker threads or (void*)1 for main thread.
     HashMap race_shadow;
+    // Atomic shadow map: address -> thread id that last accessed it atomically.
+    // Used by check_race_access to detect non-atomic access to atomically-tagged
+    // addresses (mixed atomic/non-atomic access). Tags set by ALDR/ASTR/AXCHG/ACAS.
+    HashMap atomic_shadow;
 
     // Error handling (setjmp/longjmp for exception-like behavior)
     jmp_buf

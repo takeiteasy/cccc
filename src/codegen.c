@@ -4521,6 +4521,86 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         return;
     }
 
+    case ND_ALOAD: {
+        // Atomic-tagged load via ALDR: rd = *(T*)addr, tags atomic_shadow.
+        // Falls back to plain emit_load for floats or exotic sizes.
+        int r_addr = alloc_temp_reg();
+        gen_expr(vm, node->lhs, r_addr);
+        Type *base_ty = node->lhs->ty->base;
+        int sz = base_ty->size;
+        if ((sz == 1 || sz == 2 || sz == 4 || sz == 8) && !is_flonum(base_ty)) {
+            long long width_enc = ((long long)sz << 1) | (base_ty->is_unsigned ? 1 : 0);
+            emit_rri(vm, ALDR, dest_reg, r_addr, width_enc);
+        } else {
+            emit_load(vm, base_ty, dest_reg, r_addr);
+        }
+        free_temp_reg(r_addr);
+        return;
+    }
+
+    case ND_ASTORE: {
+        // Atomic-tagged store via ASTR: *(T*)addr = val, tags atomic_shadow.
+        // Falls back to plain emit_store for floats or exotic sizes.
+        // Result is the stored value (C assignment semantics).
+        int r_val  = alloc_temp_reg();
+        int r_addr = alloc_temp_reg();
+        gen_expr(vm, node->rhs, r_val);
+        gen_expr(vm, node->lhs, r_addr);
+        Type *base_ty = node->lhs->ty->base;
+        int sz = base_ty->size;
+        if ((sz == 1 || sz == 2 || sz == 4 || sz == 8) && !is_flonum(base_ty)) {
+            long long width_enc = ((long long)sz << 1) | (base_ty->is_unsigned ? 1 : 0);
+            emit_rri(vm, ASTR, r_val, r_addr, width_enc);
+        } else {
+            emit_store(vm, base_ty, r_val, r_addr);
+        }
+        if (dest_reg != r_val)
+            emit_mov3(vm, dest_reg, r_val);
+        free_temp_reg(r_val);
+        free_temp_reg(r_addr);
+        return;
+    }
+
+    case ND_EXCH: {
+        // atomic_exchange(obj_ptr, new_val) → old_val
+        // Operands in REG_A0 (addr), REG_A1 (new value); result in REG_A0.
+        Type *base_ty = node->lhs->ty->base;
+        int sz = base_ty->size;
+        if ((sz != 1 && sz != 2 && sz != 4 && sz != 8) || is_flonum(base_ty))
+            error_tok(vm, node->tok,
+                      "atomic_exchange: unsupported type (must be 1/2/4/8-byte integer or pointer)");
+        long long width_enc = ((long long)sz << 1) | (base_ty->is_unsigned ? 1 : 0);
+        reset_temp_regs();
+        gen_expr(vm, node->lhs, REG_A0); // addr (obj pointer)
+        gen_expr(vm, node->rhs, REG_A1); // new value
+        emit_with_arg(vm, AXCHG, width_enc);
+        // old value returned in REG_A0
+        if (dest_reg != REG_A0)
+            emit_mov3(vm, dest_reg, REG_A0);
+        return;
+    }
+
+    case ND_CAS: {
+        // compare_and_swap(obj_ptr, expected_ptr, desired) → bool
+        // Operands: REG_A0 = obj_ptr (T*), REG_A1 = expected_ptr (T*),
+        //           REG_A2 = desired (T); result bool in REG_A0.
+        Type *base_ty = node->cas_addr->ty->base;
+        int sz = base_ty->size;
+        if ((sz != 1 && sz != 2 && sz != 4 && sz != 8) || is_flonum(base_ty))
+            error_tok(vm, node->tok,
+                      "compare_and_swap: unsupported type (must be 1/2/4/8-byte integer or pointer)");
+        long long width_enc = ((long long)sz << 1) | (base_ty->is_unsigned ? 1 : 0);
+        reset_temp_regs();
+        gen_expr(vm, node->cas_addr, REG_A0); // T* — pointer to atomic variable
+        gen_expr(vm, node->cas_old,  REG_A1); // T* — pointer to expected value
+        gen_expr(vm, node->cas_new,  REG_A2); // T  — desired value
+        emit_with_arg(vm, ACAS, width_enc);
+        // bool result in REG_A0
+        if (dest_reg != REG_A0)
+            emit_mov3(vm, dest_reg, REG_A0);
+        return;
+    }
+
     case ND_VLA_PTR:
         // VLA pointer/designator: load the stored pointer value
         // VLAs are implemented by storing a pointer to dynamically allocated

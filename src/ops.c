@@ -460,6 +460,33 @@ static void check_race_access(VirtualMachine *vm, void *addr, int is_write) {
     }
     if (no_lock && is_write)
         hashmap_put_int(&vm->race_shadow, (long long)(uintptr_t)addr, tid);
+
+    // Mixed atomic/non-atomic access detection: warn if this non-atomic access
+    // targets an address that another thread previously accessed atomically.
+    // Gated on different-thread + no-lock to avoid false positives from plain
+    // reads of _Atomic variables on the same thread (e.g. `if (x)` compiles to
+    // a bare LDR even when x is _Atomic int).
+    void *atom_tid = hashmap_get_int(&vm->atomic_shadow, (long long)(uintptr_t)addr);
+    if (no_lock && atom_tid && atom_tid != tid) {
+        fprintf(stderr,
+                "\n====== MIXED ATOMIC/NON-ATOMIC ACCESS DETECTED ======\n"
+                "Address %p was accessed atomically by thread %p "
+                "and is now %s non-atomically by thread %p without a mutex\n"
+                "======================================================\n",
+                addr, atom_tid,
+                is_write ? "written" : "read",
+                tid);
+    }
+}
+
+// Tag an address in the atomic_shadow map as atomically accessed by this thread.
+// Called by ALDR/ASTR/AXCHG/ACAS op fns. Does not raise race warnings — atomic
+// ops are synchronization primitives.
+static void check_atomic_access(VirtualMachine *vm, void *addr) {
+    if (!(vm->flags & CCCC_THREAD_SAFETY) || !vm->gil_initialized)
+        return;
+    void *tid = vm->active_thread ? (void *)vm->active_thread : CCCC_MAIN_THREAD_ID;
+    hashmap_put_int(&vm->atomic_shadow, (long long)(uintptr_t)addr, tid);
 }
 
 static inline int op_LDA3_fn(VirtualMachine *vm) {
@@ -1029,6 +1056,125 @@ static inline int op_STR_D_fn(VirtualMachine *vm) {
     check_race_access(vm, (void *)vm->regs[rs], 1);
     *(long long *)vm->regs[rs] = vm->regs[rd];
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 8, WATCH_WRITE);
+    return 0;
+}
+
+// ========== Atomic-Tagged Load/Store (ALDR / ASTR) ==========
+// width_enc = (size_bytes << 1) | is_unsigned
+
+static inline int op_ALDR_fn(VirtualMachine *vm) {
+    // Atomic-tagged load: rd = *(T*)regs[rs]; tags atomic_shadow[addr] = tid
+    // Format: [ALDR] [rd:8|rs:8|unused:48] [width_enc:64]
+    long long operands = cc_read_word(vm);
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+    long long width_enc = cc_read_i64(vm);
+    int sz = (int)(width_enc >> 1);
+    int is_unsigned = (int)(width_enc & 1);
+
+    void *addr = (void *)vm->regs[rs];
+    check_atomic_access(vm, addr);
+    WATCHPOINT_CHECK(vm, addr, sz, WATCH_READ);
+    if (rd != REG_ZERO) {
+        switch (sz) {
+        case 1: vm->regs[rd] = is_unsigned ? (long long)*(unsigned char *)addr
+                                           : (long long)*(char *)addr; break;
+        case 2: vm->regs[rd] = is_unsigned ? (long long)*(unsigned short *)addr
+                                           : (long long)*(short *)addr; break;
+        case 4: vm->regs[rd] = is_unsigned ? (long long)*(unsigned int *)addr
+                                           : (long long)*(int *)addr; break;
+        default: /* sz == 8 */ vm->regs[rd] = *(long long *)addr; break;
+        }
+    }
+    return 0;
+}
+
+static inline int op_ASTR_fn(VirtualMachine *vm) {
+    // Atomic-tagged store: *(T*)regs[rs] = regs[rd]; tags atomic_shadow[addr]
+    // Format: [ASTR] [rd:8|rs:8|unused:48] [width_enc:64]
+    long long operands = cc_read_word(vm);
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+    long long width_enc = cc_read_i64(vm);
+    int sz = (int)(width_enc >> 1);
+
+    void *addr = (void *)vm->regs[rs];
+    check_atomic_access(vm, addr);
+    switch (sz) {
+    case 1: *(char *)addr     = (char)vm->regs[rd];      break;
+    case 2: *(short *)addr    = (short)vm->regs[rd];     break;
+    case 4: *(int *)addr      = (int)vm->regs[rd];       break;
+    default: /* sz == 8 */ *(long long *)addr = vm->regs[rd]; break;
+    }
+    WATCHPOINT_CHECK(vm, addr, sz, WATCH_WRITE);
+    return 0;
+}
+
+// ========== Atomic Exchange / CAS (AXCHG / ACAS) ==========
+// Operands pre-loaded in REG_A0..A2 by codegen (same convention as IOVFL).
+// The VM GIL guarantees atomicity w.r.t. other VM threads.
+
+static inline int op_AXCHG_fn(VirtualMachine *vm) {
+    // atomic_exchange: old = *(T*)A0; *(T*)A0 = (T)A1; A0 = old
+    // Format: [AXCHG] [width_enc:64]
+    long long width_enc = cc_read_i64(vm);
+    int sz = (int)(width_enc >> 1);
+    int is_unsigned = (int)(width_enc & 1);
+
+    void *addr = (void *)vm->regs[REG_A0];
+    long long new_val = vm->regs[REG_A1];
+    long long old_val;
+
+    check_atomic_access(vm, addr);
+    switch (sz) {
+    case 1: old_val = is_unsigned ? (long long)*(unsigned char *)addr
+                                  : (long long)*(char *)addr;
+            *(char *)addr = (char)new_val; break;
+    case 2: old_val = is_unsigned ? (long long)*(unsigned short *)addr
+                                  : (long long)*(short *)addr;
+            *(short *)addr = (short)new_val; break;
+    case 4: old_val = is_unsigned ? (long long)*(unsigned int *)addr
+                                  : (long long)*(int *)addr;
+            *(int *)addr = (int)new_val; break;
+    default: /* sz == 8 */ old_val = *(long long *)addr;
+             *(long long *)addr = new_val; break;
+    }
+    vm->regs[REG_A0] = old_val;
+    return 0;
+}
+
+static inline int op_ACAS_fn(VirtualMachine *vm) {
+    // compare_and_swap:
+    //   A0 = T*  (pointer to atomic variable)
+    //   A1 = T*  (pointer to expected value; updated on failure)
+    //   A2 = T   (desired value)
+    // If *(T*)A0 == *(T*)A1: store A2 to *A0, return 1 in A0.
+    // Else:                  store current *A0 to *A1, return 0 in A0.
+    // Format: [ACAS] [width_enc:64]
+    long long width_enc = cc_read_i64(vm);
+    int sz = (int)(width_enc >> 1);
+
+    void *obj_ptr  = (void *)vm->regs[REG_A0]; // T* — the atomic variable
+    void *exp_ptr  = (void *)vm->regs[REG_A1]; // T* — pointer to expected
+    long long desired = vm->regs[REG_A2];
+
+    check_atomic_access(vm, obj_ptr);
+    int success = 0;
+    switch (sz) {
+    case 1: { char cur = *(char *)obj_ptr;
+              if (cur == *(char *)exp_ptr) { *(char *)obj_ptr = (char)desired; success = 1; }
+              else                          *(char *)exp_ptr = cur; break; }
+    case 2: { short cur = *(short *)obj_ptr;
+              if (cur == *(short *)exp_ptr) { *(short *)obj_ptr = (short)desired; success = 1; }
+              else                           *(short *)exp_ptr = cur; break; }
+    case 4: { int cur = *(int *)obj_ptr;
+              if (cur == *(int *)exp_ptr) { *(int *)obj_ptr = (int)desired; success = 1; }
+              else                         *(int *)exp_ptr = cur; break; }
+    default: { /* sz == 8 */ long long cur = *(long long *)obj_ptr;
+                if (cur == *(long long *)exp_ptr) { *(long long *)obj_ptr = desired; success = 1; }
+                else                               *(long long *)exp_ptr = cur; break; }
+    }
+    vm->regs[REG_A0] = success;
     return 0;
 }
 

@@ -1068,6 +1068,8 @@ static bool is_has_builtin_supported(char *name) {
         "__builtin_reg_class",
         "__builtin_compare_and_swap",
         "__builtin_atomic_exchange",
+        "__builtin_atomic_load",
+        "__builtin_atomic_store",
         "__builtin_frame_address",
         "__builtin_huge_val",
         "__builtin_huge_valf",

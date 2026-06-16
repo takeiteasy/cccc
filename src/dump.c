@@ -71,6 +71,8 @@ static const char *node_kind_name(NodeKind kind) {
     case ND_ASM:           return "ASM";
     case ND_CAS:           return "CAS";
     case ND_EXCH:          return "EXCH";
+    case ND_ALOAD:         return "ALOAD";
+    case ND_ASTORE:        return "ASTORE";
     case ND_FRAME_ADDR:    return "FRAME_ADDR";
     case ND_BLOCK_LITERAL: return "BLOCK_LITERAL";
     case ND_BLOCK_CALL:    return "BLOCK_CALL";
@@ -363,6 +365,15 @@ static void dump_node(FILE *f, Node *node, int depth, int verbose) {
         if (node->atomic_addr)
             fprintf(f, " [addr=%s]", node->atomic_addr->name);
         dump_node(f, node->atomic_expr, depth + 1, verbose);
+        break;
+
+    case ND_ALOAD:
+        dump_node(f, node->lhs, depth + 1, verbose);
+        break;
+
+    case ND_ASTORE:
+        dump_node(f, node->lhs, depth + 1, verbose);
+        dump_node(f, node->rhs, depth + 1, verbose);
         break;
 
     case ND_VLA_PTR:

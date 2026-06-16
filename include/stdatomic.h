@@ -28,11 +28,11 @@ typedef enum {
 #define atomic_signal_fence(order)
 #define atomic_is_lock_free(x) 1
 
-#define atomic_load(addr) (*(addr))
-#define atomic_store(addr, val) (*(addr) = (val))
+#define atomic_load(addr) __builtin_atomic_load(addr)
+#define atomic_store(addr, val) __builtin_atomic_store((addr), (val))
 
-#define atomic_load_explicit(addr, order) (*(addr))
-#define atomic_store_explicit(addr, val, order) (*(addr) = (val))
+#define atomic_load_explicit(addr, order) __builtin_atomic_load(addr)
+#define atomic_store_explicit(addr, val, order) __builtin_atomic_store((addr), (val))
 
 #define atomic_fetch_add(obj, val) (*(obj) += (val))
 #define atomic_fetch_sub(obj, val) (*(obj) -= (val))
