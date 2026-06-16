@@ -1438,8 +1438,22 @@ static bool emit_wide_helper(VirtualMachine *vm, const char *name, int nargs) {
     return true;
 }
 
+// Emit a dedicated WIDE_* opcode (args already loaded into REG_A0..A5) for
+// the hot wide-bitint ops (#456) — same args/clobber contract as
+// emit_wide_helper's CALLF, just without the FFI marshalling overhead.
+static void emit_wide_op(VirtualMachine *vm, int op) {
+    emit(vm, op);
+    restrict_cache_invalidate_all(vm);
+    reset_temp_regs();
+}
+
 // Allocate a fresh stack slot for a wide _BitInt intermediate result.
 // Returns the bp-relative offset (negative).  words = number of 64-bit words.
+// NOTE (#457): this storage is written via a raw pointer (CALLF helper or a
+// WIDE_* opcode), never through STR_LOCAL, so no MARKW liveness mark is
+// emitted for it. Under CCCC_POINTER_CHECKS (-2/-3) this makes essentially
+// all wide _BitInt reads/writes spuriously trip the CHKL "uninitialized
+// variable" trap -- pre-existing, not introduced by #456.
 static long long alloc_wide_bitint_temp(VirtualMachine *vm, int words) {
     vm->compiler.ent3_extra_stack += words;
     return -(long long)(vm->compiler.ent3_base_stack + vm->compiler.ent3_extra_stack);
@@ -3058,20 +3072,31 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 }
             }
 
+            // ND_ADD/SUB/MUL/DIV/MOD/SHL/SHR dispatch to dedicated WIDE_*
+            // opcodes (#456) instead of a CALLF into the runtime helper —
+            // AND/OR/XOR/comparisons stay on the CALLF/emit_wide_helper path.
+            int wide_opcode = 0;
+            switch (node->kind) {
+            case ND_ADD: wide_opcode = WIDE_ADD; break;
+            case ND_SUB: wide_opcode = WIDE_SUB; break;
+            case ND_MUL: wide_opcode = WIDE_MUL; break;
+            case ND_DIV: wide_opcode = WIDE_DIV; break;
+            case ND_MOD: wide_opcode = WIDE_MOD; break;
+            case ND_SHL: wide_opcode = WIDE_SHL; break;
+            case ND_SHR: wide_opcode = is_signed ? WIDE_SHR : WIDE_USHR; break;
+            default: break;
+            }
+
             const char *fn = NULL;
             switch (node->kind) {
-            case ND_ADD:    fn = "__cccc_bitint_add";  break;
-            case ND_SUB:    fn = "__cccc_bitint_sub";  break;
-            case ND_MUL:    fn = "__cccc_bitint_mul";  break;
-            case ND_DIV:    fn = is_signed ? "__cccc_bitint_sdiv" : "__cccc_bitint_udiv"; break;
-            case ND_MOD:    fn = is_signed ? "__cccc_bitint_smod" : "__cccc_bitint_umod"; break;
             case ND_BITAND: fn = "__cccc_bitint_and";  break;
             case ND_BITOR:  fn = "__cccc_bitint_or";   break;
             case ND_BITXOR: fn = "__cccc_bitint_xor";  break;
-            case ND_SHL:    fn = "__cccc_bitint_shl";  break;
-            case ND_SHR:    fn = is_signed ? "__cccc_bitint_sshr" : "__cccc_bitint_ushr"; break;
             case ND_EQ: case ND_NE: case ND_LT: case ND_LE:
                 fn = "__cccc_bitint_cmp"; break;
+            case ND_ADD: case ND_SUB: case ND_MUL: case ND_DIV: case ND_MOD:
+            case ND_SHL: case ND_SHR:
+                break; // handled via wide_opcode above
             default:
                 error_tok(vm, node->tok, "unsupported wide _BitInt op");
             }
@@ -3083,7 +3108,11 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 emit_mov3(vm, REG_A2, r_rhs); // shift amount is scalar (A2)
                 emit_li3(vm, REG_A3, words);
                 emit_li3(vm, REG_A4, width);
-                emit_wide_helper(vm, fn, 5);
+                if (vm->flags & CCCC_POINTER_CHECKS) {
+                    emit_rr(vm, CHKP3, REG_A0, 0);
+                    emit_rr(vm, CHKP3, REG_A1, 0);
+                }
+                emit_wide_op(vm, wide_opcode);
                 emit_lea3(vm, dest_reg, dst_offset);
             } else if (is_cmp) {
                 // cmp(a, b, words, width, is_signed) → {-1, 0, 1} in REG_A0
@@ -3104,14 +3133,32 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 default: break;
                 }
                 free_temp_reg(tmp);
-            } else {
-                // Arithmetic/bitwise: dst(A0), a(A1), b(A2), words(A3), width(A4)
+            } else if (node->kind == ND_BITAND || node->kind == ND_BITOR ||
+                       node->kind == ND_BITXOR) {
+                // Bitwise: dst(A0), a(A1), b(A2), words(A3), width(A4)
                 emit_lea3(vm, REG_A0, dst_offset);
                 emit_mov3(vm, REG_A1, r_lhs);
                 emit_mov3(vm, REG_A2, r_rhs);
                 emit_li3(vm, REG_A3, words);
                 emit_li3(vm, REG_A4, width);
                 emit_wide_helper(vm, fn, 5);
+                emit_lea3(vm, dest_reg, dst_offset);
+            } else {
+                // Arithmetic: dst(A0), a(A1), b(A2), words(A3), width(A4)
+                // (DIV/MOD additionally need is_signed in A5)
+                emit_lea3(vm, REG_A0, dst_offset);
+                emit_mov3(vm, REG_A1, r_lhs);
+                emit_mov3(vm, REG_A2, r_rhs);
+                emit_li3(vm, REG_A3, words);
+                emit_li3(vm, REG_A4, width);
+                if (node->kind == ND_DIV || node->kind == ND_MOD)
+                    emit_li3(vm, REG_A5, is_signed ? 1 : 0);
+                if (vm->flags & CCCC_POINTER_CHECKS) {
+                    emit_rr(vm, CHKP3, REG_A0, 0);
+                    emit_rr(vm, CHKP3, REG_A1, 0);
+                    emit_rr(vm, CHKP3, REG_A2, 0);
+                }
+                emit_wide_op(vm, wide_opcode);
                 emit_lea3(vm, dest_reg, dst_offset);
             }
             free_temp_reg(r_rhs);

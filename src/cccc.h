@@ -115,6 +115,18 @@ extern "C" {
     X(SHL3, 1) /* rd = rs1 << rs2 */                                           \
     X(SHR3, 1) /* rd = rs1 >> rs2 (arithmetic, signed) */                      \
     X(USHR3, 1) /* rd = rs1 >> rs2 (logical, unsigned) */                      \
+    /* Wide _BitInt(N>64) multi-word arithmetic/shifts.  All operand-free   */ \
+    /* (args read from fixed REG_A0-A5, like MCPY): arithmetic ops take     */ \
+    /* dst=A0,a=A1,b=A2,words=A3,width=A4 (DIV/MOD add is_signed=A5);       */ \
+    /* shifts take dst=A0,src=A1,shift_amount=A2,words=A3,width=A4.         */ \
+    X(WIDE_ADD, 0)  /* dst[] = a[] + b[] */                                   \
+    X(WIDE_SUB, 0)  /* dst[] = a[] - b[] */                                   \
+    X(WIDE_MUL, 0)  /* dst[] = a[] * b[] */                                   \
+    X(WIDE_DIV, 0)  /* dst[] = a[] / b[] (signed per A5) */                   \
+    X(WIDE_MOD, 0)  /* dst[] = a[] % b[] (signed per A5) */                   \
+    X(WIDE_SHL, 0)  /* dst[] = src[] << shift_amount */                       \
+    X(WIDE_SHR, 0)  /* dst[] = src[] >> shift_amount (arithmetic, signed) */  \
+    X(WIDE_USHR, 0) /* dst[] = src[] >> shift_amount (logical, unsigned) */   \
     /* Register-based comparisons */                                           \
     X(SEQ3, 1) /* rd = (rs1 == rs2) */                                         \
     X(SNE3, 1) /* rd = (rs1 != rs2) */                                         \

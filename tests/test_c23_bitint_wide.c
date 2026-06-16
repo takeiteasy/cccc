@@ -178,5 +178,43 @@ int main(void) {
     unsigned _BitInt(4096) wrap4096 = pow2_4096(4096); // 2^4096 mod 2^4096 == 0
     if (wrap4096 != 0) return 55;
 
+    // --- WIDE_* opcode coverage (#456): +,-,*,/,%,<<,>>,>>> via opcodes ---
+
+    // Unsigned div/mod (selects WIDE_DIV/WIDE_MOD's is_signed=0 path)
+    unsigned _BitInt(80) ux = 17, uy = 5;
+    if (ux / uy != 3) return 56;
+    if (ux % uy != 2) return 57;
+
+    // Signed div/mod with negative operands (is_signed=1 path)
+    _BitInt(80) sx = -17, sy = 5;
+    if (sx / sy != -3) return 58;
+    if (sx % sy != -2) return 59;
+
+    // Logical (unsigned) vs arithmetic (signed) shift on the same bit
+    // pattern, to distinguish WIDE_SHR from WIDE_USHR.
+    _BitInt(96) negval = -1;
+    if ((negval >> 1) != -1) return 60; // arithmetic: sign-extends
+    unsigned _BitInt(96) unegval = (unsigned _BitInt(96))(-1);
+    if ((unegval >> 1) >= unegval) return 61; // logical: shifts in zero
+
+    // Nested wide expression: (a + b) * c — multiple chained WIDE_* opcodes
+    // with intermediate temporaries, exercising restrict-cache invalidation
+    // and temp-register reuse across consecutive wide ops.
+    _BitInt(150) na = 3, nb = 4, nc = 5;
+    _BitInt(150) nested = (na + nb) * nc;
+    if (nested != 35) return 62;
+
+    // Wide binop result passed directly as a function argument (forces the
+    // result through the same hidden-pointer ABI as add128's parameters,
+    // right after a WIDE_ADD wrote it).
+    _BitInt(128) argres = add128(a + (_BitInt(128))1, b);
+    if (argres != 301) return 63;
+
+    // Multiple simultaneously-live wide temporaries in one expression.
+    _BitInt(128) t1 = (_BitInt(128))10, t2 = (_BitInt(128))20,
+                 t3 = (_BitInt(128))30, t4 = (_BitInt(128))40;
+    _BitInt(128) multi = (t1 + t2) + (t3 + t4);
+    if (multi != 100) return 64;
+
     return 42;
 }

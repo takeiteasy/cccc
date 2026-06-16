@@ -1875,6 +1875,99 @@ static inline int op_MCPY_fn(VirtualMachine *vm) {
     return 0;
 }
 
+// ========== Wide _BitInt(N>64) multi-word arithmetic/shifts ==========
+// Thin dispatch into the existing runtime helpers in src/stdlib/wide_bitint.c
+// (still used directly by the FFI/CALLF path for AND/OR/XOR/CMP/casts) —
+// bypasses CALLF argument marshalling for the 8 hot ops in #456.
+extern void __cccc_bitint_add(uint64_t *dst, const uint64_t *a,
+                               const uint64_t *b, int words, int width);
+extern void __cccc_bitint_sub(uint64_t *dst, const uint64_t *a,
+                               const uint64_t *b, int words, int width);
+extern void __cccc_bitint_mul(uint64_t *dst, const uint64_t *a,
+                               const uint64_t *b, int words, int width);
+extern void __cccc_bitint_sdiv(uint64_t *dst, const uint64_t *a,
+                                const uint64_t *b, int words, int width);
+extern void __cccc_bitint_udiv(uint64_t *dst, const uint64_t *a,
+                                const uint64_t *b, int words, int width);
+extern void __cccc_bitint_smod(uint64_t *dst, const uint64_t *a,
+                                const uint64_t *b, int words, int width);
+extern void __cccc_bitint_umod(uint64_t *dst, const uint64_t *a,
+                                const uint64_t *b, int words, int width);
+extern void __cccc_bitint_shl(uint64_t *dst, const uint64_t *a,
+                               long long shift, int words, int width);
+extern void __cccc_bitint_sshr(uint64_t *dst, const uint64_t *a,
+                                long long shift, int words, int width);
+extern void __cccc_bitint_ushr(uint64_t *dst, const uint64_t *a,
+                                long long shift, int words, int width);
+
+static inline int op_WIDE_ADD_fn(VirtualMachine *vm) {
+    __cccc_bitint_add((uint64_t *)vm->regs[REG_A0], (uint64_t *)vm->regs[REG_A1],
+                       (uint64_t *)vm->regs[REG_A2], (int)vm->regs[REG_A3],
+                       (int)vm->regs[REG_A4]);
+    return 0;
+}
+
+static inline int op_WIDE_SUB_fn(VirtualMachine *vm) {
+    __cccc_bitint_sub((uint64_t *)vm->regs[REG_A0], (uint64_t *)vm->regs[REG_A1],
+                       (uint64_t *)vm->regs[REG_A2], (int)vm->regs[REG_A3],
+                       (int)vm->regs[REG_A4]);
+    return 0;
+}
+
+static inline int op_WIDE_MUL_fn(VirtualMachine *vm) {
+    __cccc_bitint_mul((uint64_t *)vm->regs[REG_A0], (uint64_t *)vm->regs[REG_A1],
+                       (uint64_t *)vm->regs[REG_A2], (int)vm->regs[REG_A3],
+                       (int)vm->regs[REG_A4]);
+    return 0;
+}
+
+static inline int op_WIDE_DIV_fn(VirtualMachine *vm) {
+    uint64_t *dst = (uint64_t *)vm->regs[REG_A0];
+    const uint64_t *a = (const uint64_t *)vm->regs[REG_A1];
+    const uint64_t *b = (const uint64_t *)vm->regs[REG_A2];
+    int words = (int)vm->regs[REG_A3];
+    int width = (int)vm->regs[REG_A4];
+    if (vm->regs[REG_A5])
+        __cccc_bitint_sdiv(dst, a, b, words, width);
+    else
+        __cccc_bitint_udiv(dst, a, b, words, width);
+    return 0;
+}
+
+static inline int op_WIDE_MOD_fn(VirtualMachine *vm) {
+    uint64_t *dst = (uint64_t *)vm->regs[REG_A0];
+    const uint64_t *a = (const uint64_t *)vm->regs[REG_A1];
+    const uint64_t *b = (const uint64_t *)vm->regs[REG_A2];
+    int words = (int)vm->regs[REG_A3];
+    int width = (int)vm->regs[REG_A4];
+    if (vm->regs[REG_A5])
+        __cccc_bitint_smod(dst, a, b, words, width);
+    else
+        __cccc_bitint_umod(dst, a, b, words, width);
+    return 0;
+}
+
+static inline int op_WIDE_SHL_fn(VirtualMachine *vm) {
+    __cccc_bitint_shl((uint64_t *)vm->regs[REG_A0], (uint64_t *)vm->regs[REG_A1],
+                       vm->regs[REG_A2], (int)vm->regs[REG_A3],
+                       (int)vm->regs[REG_A4]);
+    return 0;
+}
+
+static inline int op_WIDE_SHR_fn(VirtualMachine *vm) {
+    __cccc_bitint_sshr((uint64_t *)vm->regs[REG_A0], (uint64_t *)vm->regs[REG_A1],
+                        vm->regs[REG_A2], (int)vm->regs[REG_A3],
+                        (int)vm->regs[REG_A4]);
+    return 0;
+}
+
+static inline int op_WIDE_USHR_fn(VirtualMachine *vm) {
+    __cccc_bitint_ushr((uint64_t *)vm->regs[REG_A0], (uint64_t *)vm->regs[REG_A1],
+                        vm->regs[REG_A2], (int)vm->regs[REG_A3],
+                        (int)vm->regs[REG_A4]);
+    return 0;
+}
+
 static inline int op_REALC_fn(VirtualMachine *vm) {
     // realloc: ptr in REG_A0, new_size in REG_A1, return in REG_A0
     void *ptr = (void *)vm->regs[REG_A0];
