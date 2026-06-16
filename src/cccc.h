@@ -212,9 +212,9 @@ extern "C" {
     X(CHKT3, 3) /* Check type: regs[rs], immediate TypeKind */                 \
     /* Struct return buffer support */                                         \
     X(RETBUF, 0) /* Get next return buffer: REG_A0 = rotating pool buffer */    \
-    X(FLDR_F32, 1)   /* fregs[rd] = *(float*)regs[rs], tagged f32 */           \
+    X(FLDR_F32, 1)   /* fregs[rd] = *(float*)regs[rs] (widened to double) */    \
     X(FSTR_F32, 1)   /* *(float*)regs[rs] = fregs[rd] as f32 */                \
-    X(FROUND_F32, 1) /* fregs[rd] = (float)fregs[rs], tagged f32 */             \
+    X(FROUND_F32, 1) /* fregs[rd] = (float)fregs[rs] (rounded to float prec) */ \
     X(BTRAP, 0)      /* Halt execution (unreachable/builtin trap) */    \
     /* VM-managed signal handling */                                      \
     X(VSIGNAL, 0)   /* signal(sig, handler): register VM signal action */ \
@@ -1236,21 +1236,16 @@ typedef struct {
     long long handler_fn; /* VM function pointer when action==2 */
 } SigSlot;
 
-typedef enum {
-    CCCC_FREG_F64 = 0,
-    CCCC_FREG_F32,
-    CCCC_FREG_V4F32,
-    CCCC_FREG_V2F64,
-} FRegTag;
-
+/* The floating-point register file is a flat double. The frontend already
+ * emits type-specific opcodes (FADD3 vs FADD3_F32, FLDR vs FLDR_F32), so the
+ * register itself does not need to carry a precision tag. A `float` value is
+ * stored as the double that results from rounding to float precision and then
+ * widening (which is exact), so reading any register as a double is correct
+ * with no per-access branch; the F32 opcodes round their result through
+ * `(float)` before the (exact) widening store. SIMD/vector state will live in
+ * a separate wide-register file (see tracker #463), not here. */
 typedef struct {
-    FRegTag tag;
-    union {
-        float f32;
-        double f64;
-        float v4f32[4];
-        double v2f64[2];
-    } value;
+    double f64;
 } FReg;
 
 /*!

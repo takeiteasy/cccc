@@ -8,7 +8,7 @@ CCCC's C frontend produces a portable, register-based bytecode that runs on a bu
 
 Key properties:
 
-* **Register-based ISA** — 32 general-purpose integer registers and 32 tagged floating-point registers.
+* **Register-based ISA** — 32 general-purpose integer registers and 32 floating-point registers.
 * **Threaded dispatch** — The main interpreter loop uses computed-goto (`goto *op_table[op]`) with opcode bodies inlined at each label.
 * **32-bit instruction words** — Opcodes and operands are stored as 32-bit little-endian words.  64-bit immediates consume two consecutive words.
 * **Segmented memory** — Text, data, stack, and heap live in separate reserved virtual ranges that grow on demand.
@@ -30,7 +30,7 @@ Key properties:
 | `r18–r25` | `REG_S0` … `REG_S7` | Callee-saved registers |
 | `r26–r31` | `REG_T5` … `REG_T10` | Caller-saved temporaries |
 
-The floating-point register file (`fregs[32]`) uses the **same indices** but stores a tagged union (`FReg`).  Each slot carries a tag (`CCCC_FREG_F64`, `CCCC_FREG_F32`, `CCCC_FREG_V4F32`, `CCCC_FREG_V2F64`) so mixed-precision code is handled without silent reinterpretation.
+The floating-point register file (`fregs[32]`) uses the **same indices** and stores a flat `double` per slot.  The frontend already emits type-specific opcodes (`FADD3` vs `FADD3_F32`, `FLDR` vs `FLDR_F32`), so the register itself carries no precision tag.  A `float` value is held as the `double` that results from rounding to float precision and then widening — which is exact — so any register can be read as a `double` with no per-access branch, and the `*_F32` opcodes round their result through `(float)` before the (exact) widening store.  SIMD/vector register state lives in a separate wide-register file rather than in `fregs`.
 
 ### Memory Segments
 

@@ -213,11 +213,7 @@ void debugger_list_breakpoints(VirtualMachine *vm) {
 void debugger_print_registers(VirtualMachine *vm) {
     printf("\n=== Registers ===\n");
     printf("  A0 (return):  0x%016llx (%lld)\n", vm->regs[REG_A0], vm->regs[REG_A0]);
-    if (vm->fregs[FREG_A0].tag == CCCC_FREG_F32) {
-        printf("  FA0 (f32):    %f\n", (double)cccc_freg_get_f32(vm, FREG_A0));
-    } else {
-        printf("  FA0 (f64):    %f\n", cccc_freg_get_f64(vm, FREG_A0));
-    }
+    printf("  FA0 (f64):    %f\n", cccc_freg_get_f64(vm, FREG_A0));
     printf("  pc:           %u\n", vm->pc);
     printf("  bp:           %p\n", (void*)vm->bp);
     printf("  sp:           %p\n", (void*)vm->sp);

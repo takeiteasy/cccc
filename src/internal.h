@@ -195,26 +195,23 @@ static inline long long cc_pc_to_byte_offset(Pc pc) {
     return (long long)pc * (long long)sizeof(InstrWord);
 }
 
+/* The register file holds a flat double. A `float` value is stored as its
+ * exact double widening, so reads need no precision branch. F32 opcodes round
+ * their result through `(float)` before calling cccc_freg_set_f32. */
 static inline void cccc_freg_set_f64(VirtualMachine *vm, int reg, double value) {
-    vm->fregs[reg].tag = CCCC_FREG_F64;
-    vm->fregs[reg].value.f64 = value;
+    vm->fregs[reg].f64 = value;
 }
 
 static inline void cccc_freg_set_f32(VirtualMachine *vm, int reg, float value) {
-    vm->fregs[reg].tag = CCCC_FREG_F32;
-    vm->fregs[reg].value.f32 = value;
+    vm->fregs[reg].f64 = (double)value; /* exact widening */
 }
 
 static inline double cccc_freg_get_f64(VirtualMachine *vm, int reg) {
-    return vm->fregs[reg].tag == CCCC_FREG_F32
-               ? (double)vm->fregs[reg].value.f32
-               : vm->fregs[reg].value.f64;
+    return vm->fregs[reg].f64;
 }
 
 static inline float cccc_freg_get_f32(VirtualMachine *vm, int reg) {
-    return vm->fregs[reg].tag == CCCC_FREG_F32
-               ? vm->fregs[reg].value.f32
-               : (float)vm->fregs[reg].value.f64;
+    return (float)vm->fregs[reg].f64; /* narrow on read */
 }
 
 static inline long long cccc_freg_raw_f64(VirtualMachine *vm, int reg) {
