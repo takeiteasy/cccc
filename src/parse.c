@@ -7088,6 +7088,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         }
 
         node->ty = tok->ty;
+        node->wide_digits = tok->wide_digits;
+        node->wide_base = tok->wide_base;
         if (vm->debug_vm)
             printf(" primary: set node->ty to tok->ty, kind=%d\n",
                    node->ty ? node->ty->kind : -1);

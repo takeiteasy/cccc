@@ -530,6 +530,9 @@ typedef struct Token {
     int len;            // Token length
     Type *ty;           // Used if TK_NUM or TK_STR
     char *str;          // String literal contents including terminating '\0'
+    char *wide_digits;  // wb/uwb _BitInt literal: full-precision digit text
+                         // (no prefix/suffix/separators) when bit_width > 64
+    int wide_base;      // base (2/8/10/16) for wide_digits, else unused
 
     File *file;       // Source location
     char *filename;   // Filename
@@ -846,6 +849,8 @@ struct Node {
     // Numeric literal
     int64_t val;
     long double fval;
+    char *wide_digits; // wb/uwb _BitInt literal digit text, when bit_width > 64
+    int wide_base;      // base (2/8/10/16) for wide_digits, else unused
 
     // Block literal (Apple blocks extension)
     Obj *block_fn;          // Synthetic function for block's body

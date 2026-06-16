@@ -2770,6 +2770,37 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             emit_lda3(vm, temp, offset);
             emit_rr(vm, node->ty->kind == TY_FLOAT ? FLDR_F32 : FLDR, dest_reg, temp);
             free_temp_reg(temp);
+        } else if (is_wide_bitint(node->ty)) {
+            // wb/uwb literal wider than 64 bits: materialize at runtime via
+            // __cccc_bitint_from_str, reading the full-precision digit text
+            // (captured by the tokenizer) from the data segment.
+            if (!node->wide_digits)
+                error_tok(vm, node->tok,
+                          "internal error: wide _BitInt literal missing digit text");
+
+            size_t digit_len = strlen(node->wide_digits);
+            long long offset = vm->data_ptr - vm->data_seg;
+            offset = (offset + 7) & ~7; // Align
+            vm->data_ptr = vm->data_seg + offset;
+            check_data_capacity(vm, offset + (long long)digit_len + 1);
+            memcpy(vm->data_ptr, node->wide_digits, digit_len + 1);
+            vm->data_ptr += digit_len + 1;
+
+            int str_addr = alloc_temp_reg();
+            emit_lda3(vm, str_addr, offset);
+
+            int words = node->ty->size / 8;
+            long long dst_offset = alloc_wide_bitint_temp(vm, words);
+
+            emit_lea3(vm, REG_A0, dst_offset);
+            emit_mov3(vm, REG_A1, str_addr);
+            emit_li3(vm, REG_A2, node->wide_base);
+            emit_li3(vm, REG_A3, words);
+            emit_li3(vm, REG_A4, node->ty->bit_width);
+            emit_wide_helper(vm, "__cccc_bitint_from_str", 5);
+            free_temp_reg(str_addr);
+
+            emit_lea3(vm, dest_reg, dst_offset);
         } else {
             emit_li3(vm, dest_reg, node->val);
         }

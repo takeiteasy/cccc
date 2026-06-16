@@ -858,6 +858,49 @@ static Token *read_char_literal(VirtualMachine *vm, char *start, char *quote, Ty
     return tok;
 }
 
+// Compute the exact bit length (size of the minimal unsigned binary
+// representation) of a nonnegative integer given as a digit string (no
+// prefix, no suffix, no separators) in the given base. Returns 0 if the
+// value is zero. Used to infer wb/uwb _BitInt width directly from the
+// digit text, since materializing the value as an int64_t (as the rest of
+// convert_pp_int does) truncates anything wider than 64 bits.
+static int wide_digits_bit_length(const char *digits, int ndigits, int base) {
+    int start = 0;
+    while (start < ndigits && digits[start] == '0') start++;
+    if (start == ndigits) return 0; // value is zero
+
+    if (base == 2 || base == 8 || base == 16) {
+        // Exact O(ndigits) shortcut: each digit maps to a fixed bit count.
+        int bits_per_digit = (base == 2) ? 1 : (base == 8) ? 3 : 4;
+        char c = digits[start];
+        int digit_val = (c >= '0' && c <= '9') ? c - '0' :
+                         (c >= 'a' && c <= 'f') ? c - 'a' + 10 : c - 'A' + 10;
+        int leading_bits = 32 - __builtin_clz((unsigned)digit_val);
+        return leading_bits + (ndigits - start - 1) * bits_per_digit;
+    }
+
+    // base 10: no linear shortcut exists, so accumulate the full value at
+    // compile time (in the compiler's own process, not the target VM) into
+    // a word array sized to comfortably cover BITINT_MAXWIDTH, then find
+    // the highest set bit.
+    enum { MAX_WIDE_WORDS = 65535 / 64 + 4 };
+    uint64_t words[MAX_WIDE_WORDS];
+    memset(words, 0, sizeof(words));
+    for (int i = start; i < ndigits; i++) {
+        uint64_t carry = (uint64_t)(digits[i] - '0');
+        for (int w = 0; w < MAX_WIDE_WORDS; w++) {
+            __uint128_t prod = (__uint128_t)words[w] * 10 + carry;
+            words[w] = (uint64_t)prod;
+            carry = (uint64_t)(prod >> 64);
+        }
+    }
+    for (int w = MAX_WIDE_WORDS - 1; w >= 0; w--) {
+        if (words[w] != 0)
+            return w * 64 + (64 - __builtin_clzll(words[w]));
+    }
+    return 0;
+}
+
 static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
     char *p = tok->loc;
 
@@ -878,9 +921,12 @@ static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
 
     // C23: Remove digit separators (single quotes) before parsing
     // e.g., 1'000'000 becomes 1000000
-    char cleaned[256];
+    // Sized to tok->len+1 (an upper bound on digit count) rather than a
+    // fixed 256-byte buffer, so very long literals (e.g. a 65535-bit binary
+    // wb literal) aren't silently truncated.
+    char *cleaned = arena_alloc(&vm->compiler.parser_arena, (size_t)tok->len + 1);
     int j = 0;
-    for (char *s = p; *s && j < 255; s++) {
+    for (char *s = p; *s; s++) {
         if (*s == '\'') {
             if (vm->compiler.c_std < CCCC_STD_C23)
                 error_tok(vm, tok, "digit separators are not available before C23");
@@ -950,20 +996,27 @@ static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
         return false;
 
     // C23 wb/uwb: produce the smallest _BitInt(N) that can hold the value.
+    // Width is derived from the full-precision digit text (`cleaned`), not
+    // from `val` (which is truncated to 64 bits by strtoul above) — this is
+    // what lets literals like 123456789012345678901234567890wb infer a
+    // correct width beyond 64 bits instead of silently wrapping.
     if (wb) {
-        uint64_t uval = (uint64_t)val;
+        int vbits = wide_digits_bit_length(cleaned, j, base);
         int width;
         if (u) {
             // unsigned _BitInt(N): minimum bits needed (at least 1)
-            width = (uval == 0) ? 1 : (int)(64 - __builtin_clzll(uval));
+            width = (vbits == 0) ? 1 : vbits;
         } else {
             // signed _BitInt(N): value bits + 1 sign bit (minimum 2)
-            int vbits = (uval == 0) ? 0 : (int)(64 - __builtin_clzll(uval));
             width = (vbits + 1 < 2) ? 2 : vbits + 1;
         }
         tok->kind = TK_NUM;
         tok->val = val;
         tok->ty = bitint_type(vm, tok, width, u);
+        if (width > 64) {
+            tok->wide_digits = cleaned;
+            tok->wide_base = base;
+        }
         return true;
     }
 
