@@ -280,6 +280,19 @@ static bool is_pragma_cccc(Token *hash) {
     return tok && equal(tok, "pragma") && equal(tok->next, "cccc");
 }
 
+// Returns true for `#pragma comment(lib, "...")` — handled via pragma_link_libs,
+// so the auto-capture path must not also push it to emit_directives.
+static bool is_pragma_comment_lib(Token *hash) {
+    Token *p = hash->next;
+    if (!p || !equal(p, "pragma")) return false;
+    p = p->next;
+    if (!p || !equal(p, "comment")) return false;
+    p = p->next;
+    if (!p || !equal(p, "(")) return false;
+    p = p->next;
+    return p && equal(p, "lib");
+}
+
 static Token *copy_token(VirtualMachine *vm, Token *tok) {
     Token *t = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     *t = *tok;
@@ -3483,7 +3496,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 vm->compiler.primary_file &&
                 start->file == vm->compiler.primary_file &&
                 !(_ac && _ac->type == CTX_COMPTIME) &&
-                !is_pragma_cccc(start)) {
+                !is_pragma_cccc(start) &&
+                !is_pragma_comment_lib(start)) {
                 char *_ac_line = copy_raw_directive_line(vm, start);
                 push_emit_directive(vm, _ac_line, pp_directive(tok) == PP_INCLUDE);
                 cc_record_emit_source(vm, _ac_line);

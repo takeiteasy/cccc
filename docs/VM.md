@@ -328,6 +328,11 @@ libraries are also passed to the system linker when compiling with
 `-c=native`. Other `#pragma comment(...)` kinds (`compiler`, `user`, etc.)
 remain no-ops.
 
+When using `-E` (preprocessed output) or `-G` (serialized C output), any
+queued libraries are re-emitted at the top of the output as
+`#pragma comment(lib, "name")` — the most portable spelling — so downstream
+compilers can honour them.
+
 ### Bit-Manipulation Builtins
 
 | Opcode | Description |

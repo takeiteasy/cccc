@@ -1701,6 +1701,18 @@ void cc_output_preprocessed(FILE *f, VirtualMachine *vm, Token *tok) {
     if (!f || !tok)
         return;
 
+    // Re-emit any libraries queued via #pragma cccc link() or
+    // #pragma comment(lib, ...) as the portable comment(lib, ...) form.
+    // The pragmas are consumed during preprocessing so they don't appear
+    // in the token stream; emit them here before the token output.
+    if (vm) {
+        for (int i = 0; i < vm->compiler.pragma_link_libs.len; i++)
+            fprintf(f, "#pragma comment(lib, \"%s\")\n",
+                    vm->compiler.pragma_link_libs.data[i]);
+        if (vm->compiler.pragma_link_libs.len > 0)
+            fprintf(f, "\n");
+    }
+
     int at_bol = 1;
 
     for (Token *t = tok; t && t->kind != TK_EOF;) {
