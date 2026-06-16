@@ -1,4 +1,4 @@
-// Test C23 _BitInt(N) for N in (64, 256] — wide multi-word storage (#401)
+// Test C23 _BitInt(N) for N in (64, 65535] — wide multi-word storage (#401, #454)
 
 _BitInt(128) add128(_BitInt(128) a, _BitInt(128) b) {
     return a + b;
@@ -11,6 +11,12 @@ unsigned _BitInt(256) pow2_256(int n) {
 }
 
 struct Box { _BitInt(128) v; int tag; };
+
+unsigned _BitInt(4096) pow2_4096(int n) {
+    unsigned _BitInt(4096) r = 1;
+    for (int i = 0; i < n; i++) r = r * 2;
+    return r;
+}
 
 void fill_box(struct Box *b, _BitInt(128) x) {
     b->v = x;
@@ -113,6 +119,64 @@ int main(void) {
     if ((ba & bb) != 0x0F) return 29;
     if ((ba | bb) != 0xFF) return 30;
     if ((ba ^ bb) != 0xF0) return 31;
+
+    // sizeof for N > 256 (#454)
+    _BitInt(300) w300 = 0;
+    if (sizeof(w300) != 40) return 32;
+    _BitInt(512) w512 = 0;
+    if (sizeof(w512) != 64) return 33;
+    _BitInt(1000) w1000 = 0;
+    if (sizeof(w1000) != 128) return 34;
+    _BitInt(4096) w4096 = 0;
+    if (sizeof(w4096) != 512) return 35;
+    _BitInt(65535) w65535 = 0;
+    if (sizeof(w65535) != 8192) return 36;
+
+    // Arithmetic at N=300 (5 words) — exercises udivmod's variable bounds
+    _BitInt(300) x300 = 5, y300 = 3;
+    if (x300 + y300 != 8) return 37;
+    if (x300 - y300 != 2) return 38;
+    if (x300 * y300 != 15) return 39;
+    if (x300 / y300 != 1) return 40;
+    if (x300 % y300 != 2) return 41;
+
+    // Arithmetic at N=4096 (64 words)
+    _BitInt(4096) x4096 = 5, y4096 = 3;
+    if (x4096 + y4096 != 8) return 42;
+    if (x4096 - y4096 != 2) return 43;
+    if (x4096 * y4096 != 15) return 44;
+    if (x4096 / y4096 != 1) return 45;
+    if (x4096 % y4096 != 2) return 46;
+
+    // Signed/unsigned comparison at N=512 (8 words)
+    _BitInt(512) sneg512 = -1, szero512 = 0;
+    if (!(sneg512 < szero512)) return 47;
+    unsigned _BitInt(512) uneg512 = (unsigned _BitInt(512))(-1);
+    if (uneg512 < (unsigned _BitInt(512))0) return 48;
+
+    // Shift across many word boundaries at N=1000 (16 words)
+    _BitInt(1000) shifted1000 = (_BitInt(1000))1 << 900;
+    _BitInt(1000) back1000 = shifted1000 >> 900;
+    if (back1000 != 1) return 49;
+    _BitInt(1000) negshift = -1;
+    _BitInt(1000) sshifted = negshift >> 900; // arithmetic shift keeps sign
+    if (sshifted != -1) return 50;
+
+    // int/double conversions at N=65535 (1024 words, worst-case stack usage)
+    long long ll65535 = 123456;
+    _BitInt(65535) fromll65535 = (_BitInt(65535))ll65535;
+    if ((long long)fromll65535 != 123456) return 51;
+    double d65535 = 7.0;
+    _BitInt(65535) fromd65535 = (_BitInt(65535))d65535;
+    if (fromd65535 != 7) return 52;
+    if ((double)fromd65535 != 7.0) return 53;
+
+    // Multiplication overflow wraps at exact bit width (N=4096, 64 words)
+    unsigned _BitInt(4096) p4096_a = pow2_4096(4090);
+    unsigned _BitInt(4096) p4096_b = pow2_4096(4000);
+    if (!(p4096_a > p4096_b)) return 54;
+    unsigned _BitInt(4096) wrap4096 = pow2_4096(4096); // 2^4096 mod 2^4096 == 0
+    if (wrap4096 != 0) return 55;
 
     return 42;
 }

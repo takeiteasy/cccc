@@ -75,17 +75,17 @@ static Type *new_type(VirtualMachine *vm, TypeKind kind, int size, int align) {
     return ty;
 }
 
-// C23 _BitInt(N): bit-precise integer type, N in [1,64].
-// Container is the smallest of {1,2,4,8} bytes covering N bits.
+// C23 _BitInt(N): bit-precise integer type, N in [1,65535] (BITINT_MAXWIDTH).
+// Container is the smallest of {1,2,4,8} bytes covering N bits for N<=64.
+// N>64 uses multi-word (address-based) storage; see src/stdlib/wide_bitint.c.
 // Values are truncated to N bits after arithmetic via mask/shift.
-// N > 64 (true bignum) is not yet supported.
 Type *bitint_type(VirtualMachine *vm, Token *tok, int width, bool is_unsigned) {
     if (width < 1)
         error_tok(vm, tok, "_BitInt width must be at least 1, got %d", width);
     if (!is_unsigned && width < 2)
         error_tok(vm, tok, "signed _BitInt requires at least 2 bits (sign + value), got %d", width);
-    if (width > 256)
-        error_tok(vm, tok, "_BitInt width %d exceeds maximum 256 (N>256 not yet supported)", width);
+    if (width > 65535)
+        error_tok(vm, tok, "_BitInt width %d exceeds maximum 65535 (BITINT_MAXWIDTH)", width);
 
     int sz;
     if (width <= 8)       sz = 1;

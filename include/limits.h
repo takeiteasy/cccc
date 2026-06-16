@@ -25,7 +25,7 @@
 #define LLONG_MAX 9223372036854775807LL
 #define ULLONG_MAX 18446744073709551615ULL
 
-// C23: maximum supported _BitInt width (N > 64 tracked as a follow-up ticket)
-#define BITINT_MAXWIDTH 64
+// C23: maximum supported _BitInt width
+#define BITINT_MAXWIDTH 65535
 
 #endif /* __LIMITS_H */

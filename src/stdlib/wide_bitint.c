@@ -1,7 +1,7 @@
-// Wide _BitInt runtime helpers for N in (64, 256].
+// Wide _BitInt runtime helpers for N in (64, 65535].
 // All operations use little-endian word arrays: w[0] is the least-significant
 // 64-bit word.  The caller allocates dst; all pointer args are uint64_t *.
-// "words" is the number of 64-bit words (ceil(N/64), max 4).
+// "words" is the number of 64-bit words (ceil(N/64), max 1025).
 // After arithmetic ops, __cccc_bitint_trunc must be called on the result to
 // enforce the exact bit width (mask the top word).
 #include "../cccc.h"
@@ -62,7 +62,8 @@ void __cccc_bitint_sub(uint64_t *dst, const uint64_t *a, const uint64_t *b,
 
 void __cccc_bitint_mul(uint64_t *dst, const uint64_t *a, const uint64_t *b,
                        int words, int width) {
-    uint64_t tmp[4] = {0};
+    uint64_t tmp[words];
+    memset(tmp, 0, (size_t)words * 8);
     for (int i = 0; i < words; i++) {
         uint64_t carry = 0;
         for (int j = 0; j < words - i; j++) {
@@ -128,8 +129,10 @@ static void udivmod(uint64_t *dst_q, uint64_t *dst_r,
     while (!(top & ((uint64_t)1 << 63))) { top <<= 1; shift++; }
 
     // Shifted copies (need one extra word for the numerator).
-    uint64_t u[5] = {0}; // numerator (alen+1 words)
-    uint64_t v[4] = {0}; // denominator (blen words)
+    uint64_t u[words + 1]; // numerator (alen+1 words)
+    uint64_t v[words];     // denominator (blen words)
+    memset(u, 0, (size_t)(words + 1) * 8);
+    memset(v, 0, (size_t)words * 8);
 
     // Shift a left by `shift` bits into u.
     for (int i = 0; i < alen; i++) {
@@ -145,7 +148,7 @@ static void udivmod(uint64_t *dst_q, uint64_t *dst_r,
     int m = alen - blen; // number of quotient digits
     for (int j = m; j >= 0; j--) {
         // Estimate q̂ = (u[j+blen]*B + u[j+blen-1]) / v[blen-1].
-        uint64_t u_hi = (j + blen < 5) ? u[j + blen] : 0;
+        uint64_t u_hi = (j + blen < words + 1) ? u[j + blen] : 0;
         uint64_t u_lo = u[j + blen - 1];
         uint64_t rem_unused;
         uint64_t qhat = (u_hi >= v[blen - 1])
@@ -156,11 +159,11 @@ static void udivmod(uint64_t *dst_q, uint64_t *dst_r,
         // Use signed 128-bit arithmetic to detect overdraft.
         while (1) {
             __uint128_t borrow = 0;
-            uint64_t tmp[5];
+            uint64_t tmp[words + 1];
             for (int i = 0; i <= blen; i++) {
                 uint64_t vi = (i < blen) ? v[i] : 0;
                 __uint128_t p = (__uint128_t)qhat * vi + borrow;
-                uint64_t uj = (j + i < 5) ? u[j + i] : 0;
+                uint64_t uj = (j + i < words + 1) ? u[j + i] : 0;
                 if (uj >= (uint64_t)p) {
                     tmp[i] = uj - (uint64_t)p;
                     borrow = p >> 64;
@@ -172,7 +175,7 @@ static void udivmod(uint64_t *dst_q, uint64_t *dst_r,
             if (borrow == 0) {
                 // Apply the subtraction.
                 for (int i = 0; i <= blen; i++) {
-                    if (j + i < 5) u[j + i] = tmp[i];
+                    if (j + i < words + 1) u[j + i] = tmp[i];
                 }
                 break;
             }
@@ -186,21 +189,21 @@ static void udivmod(uint64_t *dst_q, uint64_t *dst_r,
         for (int i = 0; i < blen; i++) dst_r[i] = u[i];
     } else {
         for (int i = 0; i < blen; i++) {
-            dst_r[i] = (u[i] >> shift) | (i + 1 < 5 ? u[i + 1] << (64 - shift) : 0);
+            dst_r[i] = (u[i] >> shift) | (i + 1 < words + 1 ? u[i + 1] << (64 - shift) : 0);
         }
     }
 }
 
 void __cccc_bitint_udiv(uint64_t *dst, const uint64_t *a, const uint64_t *b,
                         int words, int width) {
-    uint64_t r[4];
+    uint64_t r[words];
     udivmod(dst, r, a, b, words);
     __cccc_bitint_trunc(dst, words, width);
 }
 
 void __cccc_bitint_umod(uint64_t *dst, const uint64_t *a, const uint64_t *b,
                         int words, int width) {
-    uint64_t q[4];
+    uint64_t q[words];
     udivmod(q, dst, a, b, words);
     __cccc_bitint_trunc(dst, words, width);
 }
@@ -225,7 +228,7 @@ static int is_negative(const uint64_t *a, int words, int width) {
 
 void __cccc_bitint_sdiv(uint64_t *dst, const uint64_t *a, const uint64_t *b,
                         int words, int width) {
-    uint64_t ua[4], ub[4];
+    uint64_t ua[words], ub[words];
     memcpy(ua, a, (size_t)words * 8);
     memcpy(ub, b, (size_t)words * 8);
     // Sign-extend to know the sign.
@@ -235,7 +238,7 @@ void __cccc_bitint_sdiv(uint64_t *dst, const uint64_t *a, const uint64_t *b,
     int neg_b = is_negative(ub, words, width);
     if (neg_a) negate(ua, words);
     if (neg_b) negate(ub, words);
-    uint64_t r[4];
+    uint64_t r[words];
     udivmod(dst, r, ua, ub, words);
     if (neg_a ^ neg_b) negate(dst, words);
     __cccc_bitint_trunc(dst, words, width);
@@ -243,7 +246,7 @@ void __cccc_bitint_sdiv(uint64_t *dst, const uint64_t *a, const uint64_t *b,
 
 void __cccc_bitint_smod(uint64_t *dst, const uint64_t *a, const uint64_t *b,
                         int words, int width) {
-    uint64_t ua[4], ub[4];
+    uint64_t ua[words], ub[words];
     memcpy(ua, a, (size_t)words * 8);
     memcpy(ub, b, (size_t)words * 8);
     sign_extend_top(ua, words, width);
@@ -252,7 +255,7 @@ void __cccc_bitint_smod(uint64_t *dst, const uint64_t *a, const uint64_t *b,
     int neg_b = is_negative(ub, words, width);
     if (neg_a) negate(ua, words);
     if (neg_b) negate(ub, words);
-    uint64_t q[4];
+    uint64_t q[words];
     udivmod(q, dst, ua, ub, words);
     if (neg_a) negate(dst, words); // remainder has sign of dividend
     __cccc_bitint_trunc(dst, words, width);
@@ -298,7 +301,7 @@ void __cccc_bitint_sshr(uint64_t *dst, const uint64_t *a, long long shift,
     // Start with logical shift.
     __cccc_bitint_ushr(dst, a, shift, words, width);
     // Sign-extend if the original value was negative.
-    uint64_t tmp[4];
+    uint64_t tmp[words];
     memcpy(tmp, a, (size_t)words * 8);
     sign_extend_top(tmp, words, width);
     if (is_negative(tmp, words, width)) {
@@ -321,7 +324,7 @@ void __cccc_bitint_sshr(uint64_t *dst, const uint64_t *a, long long shift,
 long long __cccc_bitint_cmp(const uint64_t *a, const uint64_t *b,
                             int words, int width, int is_signed) {
     if (is_signed) {
-        uint64_t sa[4], sb[4];
+        uint64_t sa[words], sb[words];
         memcpy(sa, a, (size_t)words * 8);
         memcpy(sb, b, (size_t)words * 8);
         sign_extend_top(sa, words, width);
@@ -395,28 +398,30 @@ long long __cccc_bitint_to_double(const uint64_t *a, int words, int width,
                                    int is_signed) {
     double d;
     if (is_signed) {
-        uint64_t tmp[4];
+        uint64_t tmp[words];
         memcpy(tmp, a, (size_t)words * 8);
         sign_extend_top(tmp, words, width);
         if (is_negative(tmp, words, width)) {
             negate(tmp, words);
             d = 0; double base = 1.0;
             for (int i = 0; i < words; i++) {
-                d += (double)tmp[i] * base;
+                // Skip zero words once `base` overflows to +inf (words > ~16,
+                // i.e. width > ~1024) — 0 * inf is NaN, not 0.
+                if (tmp[i] != 0) d += (double)tmp[i] * base;
                 base *= 18446744073709551616.0;
             }
             d = -d;
         } else {
             d = 0; double base = 1.0;
             for (int i = 0; i < words; i++) {
-                d += (double)tmp[i] * base;
+                if (tmp[i] != 0) d += (double)tmp[i] * base;
                 base *= 18446744073709551616.0;
             }
         }
     } else {
         d = 0; double base = 1.0;
         for (int i = 0; i < words; i++) {
-            d += (double)a[i] * base;
+            if (a[i] != 0) d += (double)a[i] * base;
             base *= 18446744073709551616.0;
         }
     }
@@ -434,25 +439,30 @@ void __cccc_bitint_from_double(uint64_t *dst, long long val_bits, int words,
     int neg = (is_signed && val < 0);
     if (neg) val = -val;
     double base = 18446744073709551616.0; // 2^64
-    for (int i = words - 1; i >= 0; i--) {
-        dst[i] = (uint64_t)(val / (i > 0 ? 1.0 : 1.0)); // placeholder — word loop below
-    }
-    // Proper decomposition.
     memset(dst, 0, (size_t)words * 8);
     double rem = val;
-    double word_val = 1.0;
-    double word_bases[4];
+    // word_bases[i] = base^i; this overflows to +inf once i*64 exceeds
+    // double's ~1024-bit exponent range (relevant once words > ~16, i.e.
+    // width > ~1024 bits) — guard against using a non-finite base below,
+    // since the corresponding word is always 0 for any finite double value.
+    double word_bases[words];
     word_bases[0] = 1.0;
-    for (int i = 1; i < words; i++) word_bases[i] = word_bases[i-1] * base;
+    for (int i = 1; i < words; i++)
+        word_bases[i] = word_bases[i-1] * base;
     for (int i = words - 1; i >= 0; i--) {
-        double q = rem / word_bases[i];
-        uint64_t qi = (q < 0) ? 0 : (q >= base && i < words - 1) ? ~(uint64_t)0 : (uint64_t)q;
+        double wb = word_bases[i];
+        uint64_t qi;
+        if (!(wb <= rem)) { // also catches wb being non-finite (NaN compares false)
+            qi = 0;
+        } else {
+            double q = rem / wb;
+            qi = (q >= base && i < words - 1) ? ~(uint64_t)0 : (uint64_t)q;
+        }
         dst[i] = qi;
-        rem -= (double)qi * word_bases[i];
+        if (qi != 0) rem -= (double)qi * wb;
     }
     if (neg) negate(dst, words);
     __cccc_bitint_trunc(dst, words, width);
-    (void)word_val;
 }
 
 // ---------- bitwise ops ----------
