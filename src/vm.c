@@ -1368,6 +1368,7 @@ void cc_destroy(VirtualMachine *vm) {
         free(r->display_name);
         free(r->suite);
         free(r->error_pat);
+        free(r->test_flags);
         if (r->ret_kind == RET_STR)
             free(r->ret_expect.ret_str);
         free(r);

@@ -2774,6 +2774,10 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
                 else if (ta.ret_kind == RET_FLOAT) rec->ret_expect.ret_float = ta.ret_float_val;
                 else if (ta.ret_kind == RET_STR)   rec->ret_expect.ret_str   = ta.ret_str_val ? strdup(ta.ret_str_val) : NULL;
                 rec->expect_exit_code = ta.exit_code_val;
+                // Link into the list before cc_parse_test_flags so that
+                // the VM cleanup loop frees the record if error_tok longjmps.
+                rec->next = vm->compiler.test_fns;
+                vm->compiler.test_fns = rec;
                 if (ta.flags) {
                     rec->test_flags = strdup(ta.flags);
                     cc_parse_test_flags(vm, probe, ta.flags, rec->name,
@@ -2790,8 +2794,6 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
                              "exit_code= and return= are mutually exclusive; return= ignored");
                     rec->ret_kind = RET_NONE;
                 }
-                rec->next = vm->compiler.test_fns;
-                vm->compiler.test_fns = rec;
                 break;
             }
             probe = probe->next;
