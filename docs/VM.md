@@ -119,7 +119,7 @@ Opcodes are grouped by function.  Operands are shown as `rd = destination`, `rs 
 | `CALL` | 1 | Direct call: push return address, jump to `target` |
 | `CALLT` | 1 | Tail call: unwind current frame, jump to `target` (direct) |
 | `CALLI` | 1 | Indirect call through register (`rs`) |
-| `CALLN` | 4 | Native-aware indirect call: tries dynamic symbol first, falls back to VM call |
+| `CALLN` | 6 | Native-aware indirect call: tries dynamic symbol first, falls back to VM call |
 | `JMPT` | 3 | Jump table: `table_pc`, `count`, `default_pc`; index in `REG_A0` |
 | `JMPI` | 1 | Indirect jump through register |
 | `JZ3` | 2 | Branch if `regs[rs] == 0` |
@@ -175,6 +175,25 @@ Opcodes are grouped by function.  Operands are shown as `rd = destination`, `rs 
 | `SGT3` | `rd = (rs1 >  rs2)` |
 | `SGE3` | `rd = (rs1 >= rs2)` |
 
+### Wide _BitInt Operations (N > 64)
+
+Multi-word arithmetic and shift opcodes for `_BitInt(N)` types wider than 64 bits. All are operand-free — source and destination registers are read from the fixed argument register block (REG_A0–REG_A5):
+
+- **Arithmetic:** `REG_A0` = dst, `REG_A1` = a, `REG_A2` = b, `REG_A3` = word-count, `REG_A4` = bit-width
+- **Division/remainder:** additionally `REG_A5` = is_signed flag
+- **Shifts:** `REG_A0` = dst, `REG_A1` = src, `REG_A2` = shift-amount, `REG_A3` = word-count, `REG_A4` = bit-width
+
+| Opcode | Description |
+|--------|-------------|
+| `WIDE_ADD` | `dst[i] = a[i] + b[i]` |
+| `WIDE_SUB` | `dst[i] = a[i] - b[i]` |
+| `WIDE_MUL` | `dst[i] = a[i] * b[i]` |
+| `WIDE_DIV` | `dst[i] = a[i] / b[i]` (signed per `REG_A5`) |
+| `WIDE_MOD` | `dst[i] = a[i] % b[i]` (signed per `REG_A5`) |
+| `WIDE_SHL` | `dst[i] = src[i] << shift_amount` (arithmetic) |
+| `WIDE_SHR` | `dst[i] = src[i] >> shift_amount` (arithmetic, signed) |
+| `WIDE_USHR` | `dst[i] = src[i] >> shift_amount` (logical, unsigned) |
+
 ### Data Movement
 
 | Opcode | Operands | Description |
@@ -199,6 +218,17 @@ Sizes: **B** = byte, **H** = half-word (16-bit), **W** = word (32-bit), **D** = 
 | `STR_H` | `*(short*)regs[rs] = regs[rd]` |
 | `STR_W` | `*(int*)regs[rs] = regs[rd]` |
 | `STR_D` | `*(long long*)regs[rs] = regs[rd]` |
+
+### Atomic Operations
+
+Atomic load, store, and read-modify-write opcodes for concurrency. The access width is encoded in a 64-bit operand word (`(size << 1) | is_unsigned`). All atomic opcodes tag the accessed address in the shadow metadata for mixed-access detection.
+
+| Opcode | Operands | Description |
+|--------|----------|-------------|
+| `ALDR` | 3 | `regs[rd] = *(T*)regs[rs]` — atomic load; `width_enc` in i64 |
+| `ASTR` | 3 | `*(T*)regs[rs] = regs[rd]` — atomic store; `width_enc` in i64 |
+| `AXCHG` | 2 | Atomic exchange: `old = *(T*)REG_A0; *(T*)REG_A0 = (T)REG_A1; REG_A0 = old`; `width_enc` in i64 |
+| `ACAS` | 2 | Atomic compare-and-swap: if `*(T*)REG_A0 == *(T*)REG_A1` then `*(T*)REG_A0 = (T)REG_A2; REG_A0 = 1` else `*(T*)REG_A1 = *(T*)REG_A0; REG_A0 = 0`; `width_enc` in i64 |
 
 ### Floating-Point Operations
 
