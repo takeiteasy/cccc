@@ -1449,11 +1449,11 @@ static void emit_wide_op(VirtualMachine *vm, int op) {
 
 // Allocate a fresh stack slot for a wide _BitInt intermediate result.
 // Returns the bp-relative offset (negative).  words = number of 64-bit words.
-// NOTE (#457): this storage is written via a raw pointer (CALLF helper or a
-// WIDE_* opcode), never through STR_LOCAL, so no MARKW liveness mark is
-// emitted for it. Under CCCC_POINTER_CHECKS (-2/-3) this makes essentially
-// all wide _BitInt reads/writes spuriously trip the CHKL "uninitialized
-// variable" trap -- pre-existing, not introduced by #456.
+// Wide _BitInt storage is written via a raw pointer (CALLF helper or a
+// WIDE_* opcode), never through STR_LOCAL, so no MARKI/MARKW liveness mark
+// is emitted for it. This is intentional: wide _BitInt is address-based like
+// structs/unions, so the ND_VAR read-side instrumentation guard excludes it
+// (mirroring TY_STRUCT/UNION), keeping both sides symmetric. Fixed in #457.
 static long long alloc_wide_bitint_temp(VirtualMachine *vm, int words) {
     vm->compiler.ent3_extra_stack += words;
     return -(long long)(vm->compiler.ent3_base_stack + vm->compiler.ent3_extra_stack);
@@ -2848,11 +2848,20 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 .function = node->var;
             vm->compiler.num_func_addr_patches++;
         } else {
-            // Stack instrumentation for scalar locals (not arrays/structs).
+            // Stack instrumentation for scalar locals (not arrays/structs/
+            // wide _BitInt). Wide _BitInt is address-based like structs, so
+            // writes go through a raw pointer (WIDE_* opcode or CALLF helper),
+            // never STR_LOCAL — meaning MARKI/MARKW are never emitted for those
+            // slots. Excluding wide _BitInt from the read-side checks too keeps
+            // the two sides symmetric and avoids the false "uninitialized
+            // variable read" trap under CCCC_UNINIT_DETECTION (-2/-3) that
+            // ticket #457 reported. (Consistent with structs/unions/arrays,
+            // which are already exempt here.)
             if (node->var->is_local && !node->var->is_param &&
                 node->var->ty && node->var->ty->kind != TY_ARRAY &&
                 node->var->ty->kind != TY_STRUCT &&
-                node->var->ty->kind != TY_UNION) {
+                node->var->ty->kind != TY_UNION &&
+                !is_wide_bitint(node->var->ty)) {
                 if (vm->flags & CCCC_STACK_INSTR)
                     emit_chkl(vm, node->var->offset);
                 if (vm->flags & CCCC_UNINIT_DETECTION)
