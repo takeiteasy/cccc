@@ -487,6 +487,15 @@ int cc_vm_profile_write_json(VirtualMachine *vm, FILE *f, const char *mode,
     return ferror(f) ? -1 : 0;
 }
 
+/* Whether a fatal VM error should drop into the interactive debugger instead
+ * of returning to the caller (ticket #405). Active whenever the debugger is
+ * enabled (explicit -g, or auto-enabled for an interactive TTY session) and
+ * the user hasn't opted out via --no-debug-on-crash. */
+static inline bool vm_crash_trap_active(VirtualMachine *vm) {
+    return (vm->flags & CCCC_ENABLE_DEBUGGER) &&
+           !(vm->flags & CCCC_NO_DEBUG_ON_CRASH);
+}
+
 int vm_eval(VirtualMachine *vm) {
     static void *op_table[] = {
 #define X(NAME, OPERANDS) [NAME] = &&op_##NAME,
@@ -498,6 +507,18 @@ int vm_eval(VirtualMachine *vm) {
 
 dispatch:
     vm->cycle++;
+
+/* Trap into the debugger REPL on a fatal error and retry (the user may
+ * inspect/fix state and 'continue'); otherwise propagate the error as
+ * before. Defined inside vm_eval so it can `goto dispatch`. */
+#define VM_TRAP_OR_RETURN(rc)                  \
+    do {                                       \
+        if (vm_crash_trap_active(vm)) {        \
+            cc_debug_repl(vm);                 \
+            goto dispatch;                     \
+        }                                      \
+        return (rc);                           \
+    } while (0)
 
     /* Poll pending signals (fast path: branch predicted not-taken) */
     if (__builtin_expect(_cccc_any_pending != 0, 0)) {
@@ -512,9 +533,9 @@ dispatch:
                 Pc _target = cc_byte_offset_to_pc(_slot->handler_fn);
                 if (_target == CCCC_INVALID_PC || _target > vm->text_ptr) {
                     fprintf(stderr, "error: invalid signal handler for sig %d\n", _sig);
-                    return -1;
+                    VM_TRAP_OR_RETURN(-1);
                 }
-                if (check_stack_overflow(vm, 1)) return -1;
+                if (check_stack_overflow(vm, 1)) VM_TRAP_OR_RETURN(-1);
                 *--vm->sp = (long long)vm->pc;
                 if (vm->flags & CCCC_CFI) *--vm->shadow_sp = (long long)vm->pc;
                 vm->regs[REG_A0] = (long long)_sig;
@@ -549,7 +570,7 @@ dispatch:
         int op = (int)cc_read_word(vm);
         if (__builtin_expect(op < 0 || op >= (int)(sizeof(op_table) / sizeof(op_table[0])) || !op_table[op], 0)) {
             printf("unknown instruction:%d\n", op);
-            return -1;
+            VM_TRAP_OR_RETURN(-1);
         }
         if (__builtin_expect(vm->vm_profile_enabled, 0)) {
             vm->vm_profile_counts[op]++;
@@ -586,7 +607,7 @@ dispatch:
 #define X(NAME, OPERANDS)                                        \
     op_##NAME: {                                                 \
         int _r = op_##NAME##_fn(vm);                             \
-        if (__builtin_expect(_r != 0, 0)) return _r;             \
+        if (__builtin_expect(_r != 0, 0)) VM_TRAP_OR_RETURN(_r); \
         if (__builtin_expect(vm->pc == CCCC_INVALID_PC, 0))       \
             return (int)vm->regs[REG_A0];                        \
         goto dispatch;                                           \
@@ -594,6 +615,7 @@ dispatch:
     OPS_X
 #undef X
 
+#undef VM_TRAP_OR_RETURN
     return -1;
 }
 
@@ -1801,7 +1823,8 @@ int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv) {
     // ENT will push old_bp and set bp=sp; ret_addr sits at bp[+1] after ENT.
     *--vm->sp = 0;
 
-    int rc = (vm->flags & CCCC_ENABLE_DEBUGGER) ? debugger_run(vm, argc, argv) : vm_eval(vm);
+    int rc = ((vm->flags & CCCC_ENABLE_DEBUGGER) && !vm->dbg.crash_debug_auto)
+                 ? debugger_run(vm, argc, argv) : vm_eval(vm);
     cccc_gil_release(vm);
     return rc;
 }

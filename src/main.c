@@ -259,6 +259,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --test-format=FMT     Output format for test results: tap (default), plain, json\n");
     printf("\t-v/--verbose             Enable debug logging\n");
     printf("\t-g/--debug               Enable interactive debugger\n");
+    printf("\t   --no-debug-on-crash   Disable auto-drop into debugger on crash (for test harnesses)\n");
     printf("\t-e/--entry <name>        Set the entry-point function (default: main)\n");
     printf("\t   --vm-profile          Count executed VM opcodes and print a report\n");
     printf("\t                         Combine with --json to also dump the profile as JSON to stdout\n");
@@ -877,6 +878,7 @@ int main(int argc, const char *argv[]) {
         {"test-format", required_argument, 0, 1066},
         {"emit-only", no_argument, 0, 1067},
         {"attr-target", required_argument, 0, 1069},
+        {"no-debug-on-crash", no_argument, 0, 1071},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1301,6 +1303,9 @@ int main(int argc, const char *argv[]) {
                 usage(argv[0], 1);
             }
             break;
+        case 1071: // --no-debug-on-crash
+            flags |= CCCC_NO_DEBUG_ON_CRASH;
+            break;
         case 1066: // --test-format=FORMAT
             if (strcmp(optarg, "tap") == 0) {
                 test_format = TEST_FORMAT_TAP;
@@ -1456,8 +1461,23 @@ int main(int argc, const char *argv[]) {
         }
     }
 
+    // Auto-enable the interactive debugger when running interactively, so a
+    // fatal runtime error traps into the debugger instead of just exiting
+    // (ticket #405). Excluded for --testing/--test/--test-suite since those
+    // fork child processes (src/tests.c) that inherit the parent's TTY, and
+    // an external test harness is expected to pass --no-debug-on-crash
+    // itself if it invokes cccc directly.
+    bool auto_debug_on_crash =
+        !(flags & CCCC_ENABLE_DEBUGGER) && !(flags & CCCC_NO_DEBUG_ON_CRASH) &&
+        !testing_mode &&
+        CCCC_ISATTY(CCCC_FILENO(stdin)) && CCCC_ISATTY(CCCC_FILENO(stdout));
+    if (auto_debug_on_crash)
+        flags |= CCCC_ENABLE_DEBUGGER;
+
     VirtualMachine vm;
     cc_init(&vm, flags);
+    if (auto_debug_on_crash)
+        vm.dbg.crash_debug_auto = true;
     vm.compiler.cli_flags_mask = cli_flags_mask;
     vm.compiler.cli_opt_level_set = cli_opt_level_set;
     vm.compiler.native_mode = (compile_format == COMPILE_NATIVE);

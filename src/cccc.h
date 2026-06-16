@@ -289,6 +289,8 @@ typedef enum {
         (1 << 19), // 0x00080000 - Stack instrumentation errors
     CCCC_ENABLE_DEBUGGER = (1 << 20), // 0x00100000 - Interactive debugger
     CCCC_THREAD_SAFETY = (1 << 21),   // 0x00200000 - Threading safety diagnostics
+    CCCC_NO_DEBUG_ON_CRASH =
+        (1 << 22), // 0x00400000 - Suppress auto-debugger-on-crash
 
     // Convenience flag combinations
     CCCC_POINTER_SANITIZER =
@@ -1591,6 +1593,9 @@ typedef struct Debugger {
     Pc step_over_return_addr;      // Return PC for step over
     long long *step_out_bp;           // Base pointer for step out
     int debugger_attached;            // Debugger REPL is active
+    bool crash_debug_auto;            // Debugger auto-enabled for crash-trapping
+                                       // only (not via explicit -g): run
+                                       // normally instead of stopping at entry
 
     // Source mapping (bytecode ↔ source lines)
     SourceMap *source_map;   // Array of PC to source location mappings

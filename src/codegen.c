@@ -4622,7 +4622,8 @@ static void emit_source_location(VirtualMachine *vm, Node *node) {
         return;
 
     if (vm->dbg.source_map_count >= vm->dbg.source_map_capacity) {
-        vm->dbg.source_map_capacity *= 2;
+        vm->dbg.source_map_capacity =
+            vm->dbg.source_map_capacity ? vm->dbg.source_map_capacity * 2 : 1024;
         vm->dbg.source_map = realloc(vm->dbg.source_map,
             vm->dbg.source_map_capacity * sizeof(SourceMap));
     }

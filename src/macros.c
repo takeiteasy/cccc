@@ -2118,6 +2118,26 @@ static void init_vm_segments_for_macros(VirtualMachine *vm) {
     // Initialize codegen state
     vm->compiler.current_codegen_fn = NULL;
     // sp/bp/stack_base already set correctly by vm_alloc_segments
+
+    // Initialize source map for debugger (if enabled). Mirrors the block in
+    // cc_compile() (src/bytecode.c) -- macro/comptime compilation runs
+    // before the main program's cc_compile(), so without this the first
+    // emit_source_location() call during macro codegen finds
+    // source_map_capacity == 0 and corrupts the heap (ticket #405).
+    if (vm->flags & CCCC_ENABLE_DEBUGGER) {
+        vm->dbg.source_map_capacity = 1024;
+        vm->dbg.source_map = malloc(vm->dbg.source_map_capacity * sizeof(SourceMap));
+        if (!vm->dbg.source_map) {
+            error("could not malloc for source map");
+        }
+        vm->dbg.source_map_count = 0;
+        vm->dbg.last_debug_file = NULL;
+        vm->dbg.last_debug_line = -1;
+        vm->dbg.source_index = NULL;
+        vm->dbg.source_index_count = 0;
+        vm->dbg.num_debug_symbols = 0;
+        vm->dbg.num_watchpoints = 0;
+    }
 }
 
 // ---------------------------------------------------------------------------

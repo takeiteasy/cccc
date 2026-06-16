@@ -124,6 +124,51 @@ int main(void) {
 }
 ```
 
+## Auto-Debug-on-Crash
+
+CCCC will automatically drop into the interactive debugger when a running
+program hits a fatal VM error — a bad memory access, an out-of-bounds array
+access, a stack overflow, an invalid indirect call/jump target, an unknown
+instruction, or any other condition that would otherwise just print an error
+and exit. This works the same way for normal program execution and for
+compile-time (`#pragma comptime`) evaluation, since both run through the same
+VM dispatch loop.
+
+This is analogous to debugging-on-`SIGSEGV` in a native debugger: execution
+stops with the faulting instruction still current, so registers, the call
+stack, and local/global variables can be inspected exactly as they were at
+the point of failure. Typing `continue` retries the faulting instruction (the
+same way you'd continue past a breakpoint after fixing up state by hand);
+typing `quit` exits.
+
+**This only activates when both stdin and stdout are attached to a TTY** —
+running CCCC under a pipe, redirect, or non-interactive harness always falls
+back to printing the error and exiting, so scripted/batch usage is
+unaffected.
+
+**This traps VM-detected fatal errors, not raw host signals.** With the
+default flags (no `-S`/`--safety`/`--pointer-sanitizer`/individual safety
+flags), an out-of-bounds or NULL-pointer access in the guest program is not
+checked by the VM and can fault as a genuine host `SIGSEGV`/`SIGBUS`, which
+still terminates the process rather than dropping into the debugger. Enable
+bounds/pointer safety checking (e.g. `--pointer-sanitizer`, `-S2`) to get
+clean, debugger-trappable `NULL POINTER DEREFERENCE` / `USE-AFTER-FREE` /
+`ALIGNMENT ERROR` diagnostics for those cases instead of a raw crash. Trapping
+true host-level signals is tracked separately (see ticket #455).
+
+You do not need to pass `-g`/`--debug` to get this behaviour — it is enabled
+automatically for interactive sessions. Passing `-g` explicitly still works
+as before (stop at the entry point of `main`), and additionally now also
+traps on later fatal errors during the run.
+
+**Disable with:** `--no-debug-on-crash`. Use this when invoking `cccc`
+directly from an external test harness or script that happens to run
+attached to a TTY (e.g. inside a `script`/`tmux` session) but should still
+just see a printed error and a non-zero exit code on failure. CCCC's own
+`--testing`/`--test`/`--test-suite` runners disable the auto-detection
+internally for the same reason (they fork child processes that would
+otherwise inherit the parent's TTY and hang waiting on debugger input).
+
 ## Source Map API
 
 CCCC provides a programmatic API for accessing source location information, which is useful for building custom debugging tools or IDE integrations.
