@@ -65,7 +65,7 @@ void test_add_commutative(void) {
 }
 ```
 
-`name`, `suite`, `error`, `exit_code`, `timeout`, `error_count`, `return`, and `return_epsilon` may all be combined in one attribute (with the exception that `exit_code` is mutually exclusive with `error` and `return`).
+`name`, `suite`, `error`, `exit_code`, `timeout`, `error_count`, `return`, `return_epsilon`, and `flags` may all be combined in one attribute (with the exception that `exit_code` is mutually exclusive with `error` and `return`).
 
 ## Test Suites
 
@@ -608,6 +608,60 @@ The timeout value is in milliseconds. When set, it takes precedence over the
 global `--test-timeout` for that test.  Uses `setitimer(ITIMER_REAL)` for
 sub-second precision.
 
+## Per-test compiler flags
+
+Override the compiler flags for a specific test with `flags = "..."`:
+
+```c
+[[cccc::test(flags = "--bounds-checks")]]
+void test_with_bounds(void) {
+    int arr[3] = {1, 2, 3};
+    $assert_eq(arr[0], 1);
+}
+
+[[cccc::test(flags = "--optimize=2 --safety=1")]]
+void test_optimised(void) {
+    $assert_eq(1 + 1, 2);
+}
+```
+
+The `flags` value is a whitespace-separated string of CCCC CLI flags. Any flag
+accepted by `cccc` for safety or optimisation can be used: `-b`/`--bounds-checks`,
+`--overflow-checks`, `--type-checks`, `--stack-canaries`, `--heap-canaries`,
+`--uaf-detection`, `--pointer-sanitizer`, `--memory-leak-detection`,
+`--memory-tagging`, `--uninitialized-detection`, `--stack-instrumentation`,
+`--alignment-checks`, `--provenance-tracking`, `--invalid-arithmetic`,
+`--format-string-checks`, `--random-canaries`, `--memory-poisoning`,
+`--thread-safety`, `-O<n>`/`--optimize=<n>`, and the safety presets
+`-0`/`-1`/`-2`/`-3`/`--safety=none|basic|standard|max`.
+
+Unknown flags are a hard compile error referencing the test name.
+
+### Semantics
+
+Because safety and optimisation flags are baked into bytecode generation (not
+applied at runtime), `flags=` triggers a **lazy recompile** of the whole
+program immediately before the test runs. Adjacent tests that share the same
+flag set share one compile; only tests with a `flags=` attribute pay any
+recompile cost — unflagged tests run on the initial compile.
+
+Per-test flags take precedence over everything, including CLI-level flags
+passed to `cccc` directly and file-scope `#pragma cccc config(...)` settings.
+Bits not mentioned in `flags=` inherit the base (CLI + `#pragma config`)
+configuration.
+
+### Interaction with `#pragma cccc config(...)`
+
+`flags=` is for one-off per-test overrides. `#pragma cccc config(...)` (see
+[SAFETY.md](SAFETY.md)) is the file-scope mechanism for declaring common
+options. Both can coexist: per-test `flags=` takes precedence over
+`#pragma config` for that test.
+
+### Native mode
+
+`flags=` is silently ignored when the test is compiled and run in native
+mode. It applies only to the bytecode/VM execution path.
+
 ## Assertion Macros
 
 All assertion macros use the `$` prefix and are injected automatically in `--testing` mode.
@@ -706,3 +760,5 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 - **Negative test bodies are matched against error substrings.** Use a substring that is specific enough to avoid false matches but not so specific that it breaks with minor message wording changes.
 - **`exit_code =` tests are skipped on non-POSIX platforms** where `fork(2)` is not available.
 - `--test-timeout` uses `SIGALRM`; test code that also uses `alarm()` or installs a `SIGALRM` handler will interfere with the timeout mechanism.
+- **`flags=` triggers a whole-program recompile.** The recompile is lazy (only when the required config changes), but setup/teardown hook once-snapshots taken before a recompile are discarded and re-taken under the new compile. If a once-setup hook leaves per-test state in global variables, that state may not survive across recompile boundaries.
+- **`flags=` only supports codegen and safety flags.** Flags that affect parsing, preprocessing, or output format (e.g. `--std=`, `--include`, `-D`) are not meaningful in `flags=` and will be rejected as unknown flags.

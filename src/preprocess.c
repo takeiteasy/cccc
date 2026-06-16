@@ -2350,6 +2350,7 @@ typedef struct {
     const char *ret_str_val;
     double ret_epsilon_val;
     int exit_code_val; // -1 = not set
+    const char *flags; // flags = "..." per-test CLI-flag string; NULL if unset
 } TestArgs;
 
 // Parsed arguments from [[cccc::test_setup(...)]] / __attribute__((test_setup(...)))
@@ -2501,6 +2502,11 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
             int _n = vt->len < 63 ? (int)vt->len : 63;
             memcpy(_buf, vt->loc, _n); _buf[_n] = '\0';
             out->ret_epsilon_val = strtod(_buf, NULL);
+            p = p->next->next->next;
+        } else if (equal(p, "flags") &&
+                   p->next && equal(p->next, "=") &&
+                   p->next->next && p->next->next->kind == TK_STR) {
+            out->flags = p->next->next->str;
             p = p->next->next->next;
         } else {
             p = p->next;
@@ -2767,6 +2773,12 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
                 else if (ta.ret_kind == RET_FLOAT) rec->ret_expect.ret_float = ta.ret_float_val;
                 else if (ta.ret_kind == RET_STR)   rec->ret_expect.ret_str   = ta.ret_str_val ? strdup(ta.ret_str_val) : NULL;
                 rec->expect_exit_code = ta.exit_code_val;
+                if (ta.flags) {
+                    rec->test_flags = strdup(ta.flags);
+                    cc_parse_test_flags(vm, probe, ta.flags, rec->name,
+                                        &rec->test_flags_or, &rec->test_flags_mask,
+                                        &rec->test_opt_level, &rec->test_opt_set);
+                }
                 if (ta.exit_code_val >= 0 && ta.error_pat) {
                     warn_tok(vm, probe, CCCC_WARN_ATTRIBUTES,
                              "exit_code= and error= are mutually exclusive; error= ignored");
@@ -4127,4 +4139,151 @@ Token *preprocess(VirtualMachine *vm, Token *tok) {
     for (Token *t = tok; t; t = t->next)
         t->line_no += t->line_delta;
     return tok;
+}
+
+// ---------------------------------------------------------------------------
+// cc_parse_test_flags — parse a whitespace-separated CLI-flag string from
+// [[cccc::test(flags = "...")]] into a flag delta for per-test recompilation.
+//
+// *or_bits   receives the set of CCCCFlags bits to force on.
+// *set_mask  receives all bits explicitly named (cleared or set).
+// *opt_level / *opt_set receive the opt level if -O/-Ox/--optimize=N present.
+//
+// Unknown or malformed flags are reported via error_tok() at src_tok's
+// source location and terminate compilation.
+// ---------------------------------------------------------------------------
+void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
+                         const char *flags_str, const char *test_name,
+                         uint32_t *or_bits, uint32_t *set_mask,
+                         int *opt_level, bool *opt_set)
+{
+    *or_bits   = 0;
+    *set_mask  = 0;
+    *opt_level = 0;
+    *opt_set   = false;
+
+    if (!flags_str || !*flags_str)
+        return;
+
+    char *buf = strdup(flags_str);
+    char *p   = buf;
+
+    while (*p) {
+        // Skip leading whitespace
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+            p++;
+        if (!*p) break;
+
+        // Delimit this token
+        char *tok = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
+            p++;
+        if (*p) *p++ = '\0';
+
+        // --- safety presets ---
+        if (strcmp(tok, "-0") == 0 ||
+            (strncmp(tok, "--safety=", 9) == 0 &&
+             (strcmp(tok+9, "none") == 0 || strcmp(tok+9, "0") == 0))) {
+            *or_bits  = (*or_bits) & ~(uint32_t)CCCC_SAFETY_PRESET_BITS;
+            *set_mask |= (uint32_t)CCCC_SAFETY_PRESET_BITS;
+        } else if (strcmp(tok, "-1") == 0 ||
+                   (strncmp(tok, "--safety=", 9) == 0 &&
+                    (strcmp(tok+9, "basic") == 0 || strcmp(tok+9, "1") == 0))) {
+            *or_bits  = (*or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS) |
+                        (uint32_t)CCCC_SAFETY_BASIC;
+            *set_mask |= (uint32_t)CCCC_SAFETY_PRESET_BITS;
+        } else if (strcmp(tok, "-2") == 0 ||
+                   (strncmp(tok, "--safety=", 9) == 0 &&
+                    (strcmp(tok+9, "standard") == 0 || strcmp(tok+9, "2") == 0))) {
+            *or_bits  = (*or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS) |
+                        (uint32_t)CCCC_SAFETY_STANDARD;
+            *set_mask |= (uint32_t)CCCC_SAFETY_PRESET_BITS;
+        } else if (strcmp(tok, "-3") == 0 ||
+                   (strncmp(tok, "--safety=", 9) == 0 &&
+                    (strcmp(tok+9, "max") == 0 || strcmp(tok+9, "3") == 0))) {
+            *or_bits  = (*or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS) |
+                        (uint32_t)CCCC_SAFETY_MAX;
+            *set_mask |= (uint32_t)CCCC_SAFETY_PRESET_BITS;
+
+        // --- optimisation level ---
+        } else if (strcmp(tok, "-O") == 0 || strcmp(tok, "--optimize") == 0) {
+            *opt_level = 1;
+            *opt_set   = true;
+        } else if (tok[0] == '-' && tok[1] == 'O' &&
+                   tok[2] >= '0' && tok[2] <= '4' && tok[3] == '\0') {
+            *opt_level = tok[2] - '0';
+            *opt_set   = true;
+        } else if (strncmp(tok, "--optimize=", 11) == 0) {
+            char *endp;
+            long v = strtol(tok + 11, &endp, 10);
+            if (*endp != '\0' || v < 0 || v > 4)
+                error_tok(vm, src_tok,
+                          "[[cccc::test]] flags=\"...\": invalid optimization"
+                          " level '%s' (use 0..4) in test '%s'",
+                          tok, test_name ? test_name : "?");
+            *opt_level = (int)v;
+            *opt_set   = true;
+
+        // --- individual check flags (matching long_options names in main.c) ---
+#define SET_FLAG(bit) do { *or_bits |= (uint32_t)(bit); *set_mask |= (uint32_t)(bit); } while (0)
+        } else if (strcmp(tok, "-b") == 0 || strcmp(tok, "--bounds-checks") == 0) {
+            SET_FLAG(CCCC_BOUNDS_CHECKS);
+        } else if (strcmp(tok, "-u") == 0 || strcmp(tok, "--uaf-detection") == 0) {
+            SET_FLAG(CCCC_UAF_DETECTION);
+        } else if (strcmp(tok, "-T") == 0 || strcmp(tok, "--type-checks") == 0) {
+            SET_FLAG(CCCC_TYPE_CHECKS);
+        } else if (strcmp(tok, "--overflow-checks") == 0) {
+            SET_FLAG(CCCC_OVERFLOW_CHECKS);
+        } else if (strcmp(tok, "--uninitialized-detection") == 0) {
+            SET_FLAG(CCCC_UNINIT_DETECTION);
+        } else if (strcmp(tok, "--stack-canaries") == 0) {
+            SET_FLAG(CCCC_STACK_CANARIES);
+        } else if (strcmp(tok, "-H") == 0 || strcmp(tok, "--heap-canaries") == 0) {
+            SET_FLAG(CCCC_HEAP_CANARIES);
+        } else if (strcmp(tok, "-p") == 0 || strcmp(tok, "--pointer-sanitizer") == 0) {
+            SET_FLAG(CCCC_POINTER_SANITIZER);
+        } else if (strcmp(tok, "-m") == 0 || strcmp(tok, "--memory-leak-detection") == 0) {
+            SET_FLAG(CCCC_MEMORY_LEAK_DETECT);
+        } else if (strcmp(tok, "--stack-instrumentation") == 0) {
+            SET_FLAG(CCCC_STACK_INSTR);
+        } else if (strcmp(tok, "--stack-errors") == 0) {
+            SET_FLAG(CCCC_STACK_INSTR_ERRORS);
+        } else if (strcmp(tok, "--dangling-pointers") == 0) {
+            SET_FLAG(CCCC_DANGLING_DETECT);
+        } else if (strcmp(tok, "--alignment-checks") == 0) {
+            SET_FLAG(CCCC_ALIGNMENT_CHECKS);
+        } else if (strcmp(tok, "--provenance-tracking") == 0) {
+            SET_FLAG(CCCC_PROVENANCE_TRACK);
+        } else if (strcmp(tok, "--invalid-arithmetic") == 0) {
+            SET_FLAG(CCCC_INVALID_ARITH);
+        } else if (strcmp(tok, "--format-string-checks") == 0) {
+            SET_FLAG(CCCC_FORMAT_STR_CHECKS);
+        } else if (strcmp(tok, "-R") == 0 || strcmp(tok, "--random-canaries") == 0) {
+            SET_FLAG(CCCC_RANDOM_CANARIES);
+        } else if (strcmp(tok, "--memory-poisoning") == 0) {
+            SET_FLAG(CCCC_MEMORY_POISONING);
+        } else if (strcmp(tok, "--memory-tagging") == 0) {
+            SET_FLAG(CCCC_MEMORY_TAGGING);
+        } else if (strcmp(tok, "--thread-safety") == 0) {
+            SET_FLAG(CCCC_THREAD_SAFETY);
+        } else if (strcmp(tok, "-V") == 0 || strcmp(tok, "--vm-heap") == 0) {
+            SET_FLAG(CCCC_VM_HEAP);
+        } else if (strcmp(tok, "-C") == 0 || strcmp(tok, "--control-flow-integrity") == 0) {
+            SET_FLAG(CCCC_CFI);
+        } else if (strcmp(tok, "-g") == 0 || strcmp(tok, "--debug") == 0) {
+            SET_FLAG(CCCC_ENABLE_DEBUGGER);
+#undef SET_FLAG
+        } else {
+            // Copy tok before freeing buf (tok points into buf).
+            char bad[256];
+            snprintf(bad, sizeof(bad), "%s", tok);
+            free(buf);
+            error_tok(vm, src_tok,
+                      "[[cccc::test]] flags=\"...\": unknown flag '%s'"
+                      " in test '%s'",
+                      bad, test_name ? test_name : "?");
+        }
+    }
+
+    free(buf);
 }

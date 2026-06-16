@@ -729,6 +729,18 @@ void   cc_load_test_runtime(VirtualMachine *vm);
 Token *cc_inject_test_header(VirtualMachine *vm);
 int    cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts);
 
+// preprocess.c — parse a whitespace-separated CLI-flag string (as allowed in
+// [[cccc::test(flags = "...")]]) into a flag delta that can later be applied
+// as a per-test override when recompiling.  Sets *or_bits to the bits that
+// should be forced on, *set_mask to all bits explicitly named (cleared or
+// set), and *opt_level/*opt_set if an -O/-Ox/--optimize=N was present.
+// Unknown or malformed flags are reported via error_tok() at src_tok's
+// source location and terminate compilation.
+void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
+                         const char *flags_str, const char *test_name,
+                         uint32_t *or_bits, uint32_t *set_mask,
+                         int *opt_level, bool *opt_set);
+
 // native.c / main.c shared infrastructure
 typedef struct {
     const char **data;

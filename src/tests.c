@@ -847,6 +847,14 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
     memcpy(base_snap, vm->data_seg, snap_size);
     char  *cur_snap   = base_snap;
 
+    // Per-test flags (#356): capture the base compiled config.  Safety and
+    // optimisation flags are baked into codegen, so any test that requests a
+    // different flag set triggers a lazy recompile of the whole program.
+    uint32_t base_vm_flags = vm->flags;
+    int      base_opt_lvl  = vm->compiler.opt_level;
+    uint32_t cur_vm_flags  = base_vm_flags;
+    int      cur_opt_lvl   = base_opt_lvl;
+
     bool stop_early = false;
     for (TestListNode *n2 = filtered; n2 && !stop_early; n2 = n2->next) {
         TestFnRecord *r = n2->rec;
@@ -910,6 +918,45 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                 if (opts && opts->fail_fast) stop_early = true;
             }
             continue;
+        }
+
+        // --- Lazy recompile for per-test flags (#356) ---
+        // flags= on the test attribute may specify a different codegen config
+        // (safety level, optimisation level, individual checks).  Since those
+        // are baked in at cc_compile() time, we recompile the whole program
+        // whenever the required config differs from what is currently compiled.
+        // Adjacent tests sharing the same flags share one compile; the unflagged
+        // base-config compile is also reused across consecutive unflagged tests.
+        {
+            uint32_t req_flags;
+            int      req_opt;
+            if (r->test_flags_mask || r->test_opt_set) {
+                req_flags = (base_vm_flags & ~r->test_flags_mask) | r->test_flags_or;
+                req_opt   = r->test_opt_set ? r->test_opt_level : base_opt_lvl;
+            } else {
+                req_flags = base_vm_flags;
+                req_opt   = base_opt_lvl;
+            }
+
+            if (req_flags != cur_vm_flags || req_opt != cur_opt_lvl) {
+                // Discard any per-once-hook snapshot that references the old compile.
+                if (cur_snap != base_snap) { free(cur_snap); cur_snap = base_snap; }
+                // Zero-clear and reset the data segment so gen() re-emits all
+                // globals from scratch (avoids stale bytes for zero-init globals).
+                memset(vm->data_seg, 0, snap_size);
+                vm->data_ptr = vm->data_seg;
+
+                vm->flags              = req_flags;
+                vm->compiler.opt_level = req_opt;
+                cc_compile(vm, prog);
+
+                // Refresh the base snapshot from the newly initialised data segment.
+                memcpy(base_snap, vm->data_seg, snap_size);
+                cur_snap = base_snap;
+
+                cur_vm_flags = req_flags;
+                cur_opt_lvl  = req_opt;
+            }
         }
 
 #ifdef _POSIX_VERSION
@@ -1157,6 +1204,15 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
     case TEST_FORMAT_JSON:
         printf("\n]\n");
         break;
+    }
+
+    // Restore the base compiled config if the last test used a per-test one.
+    if (cur_vm_flags != base_vm_flags || cur_opt_lvl != base_opt_lvl) {
+        memset(vm->data_seg, 0, snap_size);
+        vm->data_ptr           = vm->data_seg;
+        vm->flags              = base_vm_flags;
+        vm->compiler.opt_level = base_opt_lvl;
+        cc_compile(vm, prog);
     }
 
     if (cur_snap != base_snap) free(cur_snap);

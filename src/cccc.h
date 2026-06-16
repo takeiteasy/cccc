@@ -1054,6 +1054,12 @@ struct TestFnRecord {
     } ret_expect;
     double ret_epsilon;    // 0.0 = use default 1e-9; set by return_epsilon=
     int    expect_exit_code; // -1 = disabled; >=0 = expected shell-convention exit code
+    // Per-test flags (from flags = "..." in [[cccc::test(flags = "...")]])
+    char     *test_flags;      // raw flags string for display; NULL = no per-test flags
+    uint32_t  test_flags_or;   // bits to force on when compiling this test
+    uint32_t  test_flags_mask; // which bits the string explicitly controls (on or off)
+    int       test_opt_level;  // per-test optimisation level (0..4)
+    bool      test_opt_set;    // true if flags= specified an -O/-Ox/--optimize=N level
     TestFnRecord *next;
 };
 
