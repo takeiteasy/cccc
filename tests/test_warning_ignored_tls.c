@@ -1,4 +1,4 @@
-// CCCC_FLAGS: -Wignored-features --std=c11
-// CCCC_EXPECT_STDERR: warning: '_Thread_local' is parsed but ignored
-_Thread_local int x;
-int main(void) { return 42; }
+// CCCC_FLAGS: --std=c11
+// Test that _Thread_local is accepted without warning (TLS is now supported)
+_Thread_local int x = 0;
+int main(void) { x = 42; return x; }

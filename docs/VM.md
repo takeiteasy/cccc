@@ -40,8 +40,19 @@ The floating-point register file (`fregs[32]`) uses the **same indices** and sto
 | **Data** | Upward | Global variables, string literals, static initialisers |
 | **Stack** | Downward | Activation records, locals, spilled arguments |
 | **Heap** | Upward | `malloc` / `free` when `--vm-heap` is active |
+| **TLS** | Upward | Per-thread copy of thread-local (`_Thread_local` / `__thread`) variables |
 
 All segments are reserved upfront as large virtual ranges and committed in `poolsize` chunks (default 256 KiB elements, max 64 MiB elements).  This gives the VM stable base pointers while keeping resident memory modest.
+
+### Thread-Local Storage (TLS)
+
+Variables declared `_Thread_local`, `__thread`, or `thread_local` are placed in a dedicated TLS segment:
+
+1. **Template (`vm->tls_template`)** — built once by `gen()` alongside the data segment.  Each TLS variable is allocated a slot and its initialiser is written here.  The `LDTLS3` opcode emits the byte offset baked at compile time.
+2. **Per-thread copy (`vm->current_tls_seg`)** — allocated by `malloc` for the main thread and for each spawned `pthread_t` or `thrd_t`.  The thread inherits an `memcpy` of the template at creation time (C11 §6.2.4p4 — static initialisation).  On context switch the VM updates `vm->current_tls_seg` to point to the calling thread's copy.
+3. **Access (`LDTLS3 rd, imm24`)** — loads the effective address `vm->current_tls_seg + imm24` into `rd`.  Subsequent loads/stores through that pointer are ordinary data-segment accesses.
+
+TLS variable assignment (`vm->tls_template` write) happens in `gen()` at compile time; the per-thread copy is kept consistent via the pthreads context-switch wrappers in `src/stdlib/pthread.c`.
 
 ### Calling Convention
 
@@ -71,11 +82,11 @@ Mutually-recursive pairs (`A → B → A`) are handled correctly because `CALLT`
 
 ### VM Threads
 
-The POSIX `<pthread.h>` layer maps `pthread_create` to host pthreads while keeping VM execution correctness-first. Each VM thread receives an independent VM stack/register snapshot and enters the requested VM function with the `void *` argument in `REG_A0`. The VM's text, data, heap, globals, FFI registrations, and safety metadata remain shared by the `CCCC` instance.
+Both the POSIX `<pthread.h>` and C11 `<threads.h>` layers map thread creation to host pthreads while keeping VM execution correctness-first. Each VM thread receives an independent VM stack/register snapshot and enters the requested VM function with the `void *` argument in `REG_A0`. The VM's text, data, heap, globals, FFI registrations, and safety metadata remain shared by the `CCCC` instance.
 
-A recursive global interpreter lock protects the interpreter state. The lock is held while bytecode executes and is released around blocking pthread wrappers such as `pthread_join`, `pthread_mutex_lock`, and `pthread_cond_wait`. This gives C code real blocking/wakeup semantics and prevents the interpreter state from racing, but it does not provide parallel bytecode execution.
+A recursive global interpreter lock protects the interpreter state. The lock is held while bytecode executes and is released around blocking wrappers such as `pthread_join`, `mtx_lock`, and `cnd_wait`. This gives C code real blocking/wakeup semantics and prevents the interpreter state from racing, but it does not provide parallel bytecode execution.
 
-`pthread_t` and related pthread objects are VM-managed handles, not host ABI layouts. The public header intentionally exposes small VM-facing structs so CCCC bytecode does not depend on platform-specific pthread object sizes.
+`pthread_t`, `thrd_t`, `mtx_t`, `cnd_t`, and related thread objects are VM-managed handles, not host ABI layouts. The public headers intentionally expose small VM-facing structs so CCCC bytecode does not depend on platform-specific object sizes.
 
 ## Instruction Encoding
 

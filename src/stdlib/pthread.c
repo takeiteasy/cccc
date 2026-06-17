@@ -52,6 +52,8 @@ struct ThreadRecord {
     void **held_locks;      // array of CCCCUserMutex* currently held
     int    held_locks_count;
     int    held_locks_cap;
+    // Per-thread TLS segment (copy of vm->tls_template made at thread creation)
+    char *tls_seg;
 };
 
 struct PthreadState {
@@ -128,6 +130,8 @@ static void free_thread_record(ThreadRecord *rec) {
         value = next;
     }
     free(rec->held_locks);
+    free(rec->tls_seg);
+    rec->tls_seg = NULL;
     cccc_exec_state_release_stack(rec->vm, &rec->exec);
     free(rec);
 }
@@ -235,7 +239,11 @@ static void *vm_thread_start(void *arg) {
 
     cccc_gil_acquire(vm);
     ThreadRecord *saved_active = vm->active_thread;
+    char *saved_tls_seg = vm->current_tls_seg;
     vm->active_thread = rec;
+    // Point current_tls_seg at this thread's private TLS copy
+    if (rec->tls_seg)
+        vm->current_tls_seg = rec->tls_seg;
     cccc_exec_state_restore(vm, &rec->exec);
     // Stack canaries stay enabled in threads: the frame-layout shift is baked
     // into stack offsets at compile time, so the flag must match what codegen
@@ -245,6 +253,7 @@ static void *vm_thread_start(void *arg) {
     rec->exited = 1;
     cccc_exec_state_save(vm, &rec->exec);
     vm->active_thread = saved_active;
+    vm->current_tls_seg = saved_tls_seg;
 
     if (rec->detached) {
         unlink_thread(vm, rec);
@@ -278,6 +287,16 @@ static long long wrap_pthread_create(long long threadp, long long attrp,
     if (cccc_exec_state_alloc_stack(vm, &rec->exec) != 0) {
         free(rec);
         return EAGAIN;
+    }
+    // Allocate per-thread TLS copy initialised from the template
+    if (vm->tls_template_size > 0) {
+        rec->tls_seg = malloc(vm->tls_template_size);
+        if (!rec->tls_seg) {
+            cccc_exec_state_release_stack(vm, &rec->exec);
+            free(rec);
+            return EAGAIN;
+        }
+        memcpy(rec->tls_seg, vm->tls_template, vm->tls_template_size);
     }
     cccc_exec_state_prepare_call(vm, &rec->exec, entry, arg);
     link_thread(vm, rec);
@@ -673,6 +692,283 @@ void register_pthread_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "pthread_attr_getstack", (void *)wrap_pthread_attr_getstack, 3, 0);
 }
 
+// ---- C11 threads.h wrappers ----
+// mtx_t layout is { void *__handle; long __state; int __type; } — the first
+// two fields alias CCCCUserMutex so we can cast and reuse ensure_mutex.
+// cnd_t layout { void *__handle; long __state; } aliases CCCCUserCond.
+
+#include <sched.h>
+
+static long long wrap_thrd_create(long long thrp, long long func, long long arg) {
+    // thrd_create(thrd_t*, thrd_start_t, void*) — maps to pthread_create with no attrs
+    long long rc = wrap_pthread_create(thrp, 0, func, arg);
+    if (rc == 0) return 0; // thrd_success
+    if (rc == ENOMEM) return ENOMEM; // thrd_nomem
+    return 1; // thrd_error
+}
+
+static long long wrap_thrd_join(long long thr, long long resp) {
+    // thrd_join(thrd_t, int*res) — retval (int) stored in *res
+    void *retval_ptr = NULL;
+    long long rv_slot = (long long)&retval_ptr;
+    long long rc = wrap_pthread_join(thr, rv_slot);
+    if (rc != 0) return 1; // thrd_error
+    if (resp)
+        *(int *)resp = (int)(long long)retval_ptr;
+    return 0; // thrd_success
+}
+
+static long long wrap_thrd_exit(long long code) {
+    return wrap_pthread_exit(code);
+}
+
+static long long wrap_thrd_detach(long long thr) {
+    long long rc = wrap_pthread_detach(thr);
+    return rc == 0 ? 0 : 1;
+}
+
+static long long wrap_thrd_yield(void) {
+    sched_yield();
+    return 0;
+}
+
+static long long wrap_thrd_sleep(long long durp, long long remp) {
+    if (!durp) return -1;
+    VirtualMachine *vm = current_vm();
+    ExecState caller_state;
+    if (vm) save_and_release_gil(vm, &caller_state);
+    int rc = nanosleep((const struct timespec *)durp,
+                       remp ? (struct timespec *)remp : NULL);
+    if (vm) acquire_and_restore_gil(vm, &caller_state);
+    return rc == 0 ? 0 : (errno == EINTR ? -1 : -2);
+}
+
+static long long wrap_thrd_current(void) {
+    return wrap_pthread_self();
+}
+
+static long long wrap_thrd_equal(long long a, long long b) {
+    return wrap_pthread_equal(a, b);
+}
+
+// mtx_t: wraps CCCCUserMutex with an extra type field.
+// For mtx_recursive we need PTHREAD_MUTEX_RECURSIVE.
+typedef struct {
+    void *__handle;
+    long  __state;
+    int   __type;
+} CCCCUserMtx;
+
+static pthread_mutex_t *ensure_mtx(CCCCUserMtx *mtx) {
+    if (!mtx) return NULL;
+    if (mtx->__handle) return (pthread_mutex_t *)mtx->__handle;
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    if (mtx->__type == 1) // mtx_recursive
+        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_t *host = malloc(sizeof(*host));
+    if (!host) { pthread_mutexattr_destroy(&attr); return NULL; }
+    if (pthread_mutex_init(host, &attr) != 0) {
+        pthread_mutexattr_destroy(&attr);
+        free(host);
+        return NULL;
+    }
+    pthread_mutexattr_destroy(&attr);
+    mtx->__handle = host;
+    mtx->__state  = 1;
+    return host;
+}
+
+static long long wrap_mtx_init(long long mtxp, long long type) {
+    CCCCUserMtx *mtx = (CCCCUserMtx *)mtxp;
+    if (!mtx) return 1;
+    if (mtx->__handle) return 1;
+    mtx->__type = (int)type;
+    pthread_mutex_t *host = ensure_mtx(mtx);
+    return host ? 0 : 1;
+}
+
+static long long wrap_mtx_lock(long long mtxp) {
+    VirtualMachine *vm = current_vm();
+    CCCCUserMtx *mtx = (CCCCUserMtx *)mtxp;
+    pthread_mutex_t *host = ensure_mtx(mtx);
+    if (!vm || !host) return 1;
+    if (vm->flags & CCCC_THREAD_SAFETY) {
+        ThreadRecord *tr = current_thread(vm);
+        if (tr && check_lock_safety(vm, tr, (void *)mtxp))
+            return EDEADLK;
+    }
+    ExecState caller_state;
+    save_and_release_gil(vm, &caller_state);
+    int rc = pthread_mutex_lock(host);
+    acquire_and_restore_gil(vm, &caller_state);
+    if (rc == 0 && (vm->flags & CCCC_THREAD_SAFETY)) {
+        ThreadRecord *tr = current_thread(vm);
+        if (tr) thread_add_held_lock(tr, (void *)mtxp);
+    }
+    return rc == 0 ? 0 : 1;
+}
+
+static long long wrap_mtx_trylock(long long mtxp) {
+    VirtualMachine *vm = current_vm();
+    CCCCUserMtx *mtx = (CCCCUserMtx *)mtxp;
+    pthread_mutex_t *host = ensure_mtx(mtx);
+    if (!host) return 1;
+    int rc = pthread_mutex_trylock(host);
+    if (rc == EBUSY) return EBUSY;
+    if (rc == 0 && vm && (vm->flags & CCCC_THREAD_SAFETY)) {
+        ThreadRecord *tr = current_thread(vm);
+        if (tr) thread_add_held_lock(tr, (void *)mtxp);
+    }
+    return rc == 0 ? 0 : 1;
+}
+
+static long long wrap_mtx_timedlock(long long mtxp, long long tsp) {
+    VirtualMachine *vm = current_vm();
+    CCCCUserMtx *mtx = (CCCCUserMtx *)mtxp;
+    pthread_mutex_t *host = ensure_mtx(mtx);
+    if (!vm || !host || !tsp) return 1;
+    const struct timespec *abs_ts = (const struct timespec *)tsp;
+    ExecState caller_state;
+    save_and_release_gil(vm, &caller_state);
+    int rc;
+#if defined(__linux__)
+    rc = pthread_mutex_timedlock(host, abs_ts);
+#else
+    // macOS lacks pthread_mutex_timedlock; poll with exponential back-off.
+    for (;;) {
+        rc = pthread_mutex_trylock(host);
+        if (rc == 0) break;
+        struct timespec now;
+        clock_gettime(CLOCK_REALTIME, &now);
+        if (now.tv_sec > abs_ts->tv_sec ||
+            (now.tv_sec == abs_ts->tv_sec && now.tv_nsec >= abs_ts->tv_nsec)) {
+            rc = ETIMEDOUT;
+            break;
+        }
+        struct timespec delay = { 0, 1000000 }; // 1 ms
+        nanosleep(&delay, NULL);
+    }
+#endif
+    acquire_and_restore_gil(vm, &caller_state);
+    if (rc == ETIMEDOUT) return ETIMEDOUT;
+    if (rc == 0 && (vm->flags & CCCC_THREAD_SAFETY)) {
+        ThreadRecord *tr = current_thread(vm);
+        if (tr) thread_add_held_lock(tr, (void *)mtxp);
+    }
+    return rc == 0 ? 0 : 1;
+}
+
+static long long wrap_mtx_unlock(long long mtxp) {
+    VirtualMachine *vm = current_vm();
+    CCCCUserMtx *mtx = (CCCCUserMtx *)mtxp;
+    if (!mtx || !mtx->__handle) return 1;
+    int rc = pthread_mutex_unlock((pthread_mutex_t *)mtx->__handle);
+    if (rc == 0 && vm && (vm->flags & CCCC_THREAD_SAFETY)) {
+        ThreadRecord *tr = current_thread(vm);
+        if (tr) thread_remove_held_lock(tr, (void *)mtxp);
+    }
+    return rc == 0 ? 0 : 1;
+}
+
+static long long wrap_mtx_destroy(long long mtxp) {
+    CCCCUserMtx *mtx = (CCCCUserMtx *)mtxp;
+    if (!mtx || !mtx->__handle) return 0;
+    pthread_mutex_destroy((pthread_mutex_t *)mtx->__handle);
+    free(mtx->__handle);
+    mtx->__handle = NULL;
+    mtx->__state  = 0;
+    return 0;
+}
+
+static long long wrap_cnd_init(long long condp) {
+    return wrap_pthread_cond_init(condp, 0);
+}
+
+static long long wrap_cnd_wait(long long condp, long long mtxp) {
+    // cnd_wait(cnd_t*, mtx_t*) — mtx_t aliases CCCCUserMutex at offset 0
+    VirtualMachine *vm = current_vm();
+    CCCCUserMtx *mtx = (CCCCUserMtx *)mtxp;
+    pthread_cond_t  *cond  = ensure_cond((CCCCUserCond *)condp);
+    pthread_mutex_t *mutex = ensure_mtx(mtx);
+    if (!vm || !cond || !mutex) return 1;
+    ExecState caller_state;
+    save_and_release_gil(vm, &caller_state);
+    int rc = pthread_cond_wait(cond, mutex);
+    acquire_and_restore_gil(vm, &caller_state);
+    return rc == 0 ? 0 : 1;
+}
+
+static long long wrap_cnd_signal(long long condp) {
+    return wrap_pthread_cond_signal(condp);
+}
+
+static long long wrap_cnd_broadcast(long long condp) {
+    return wrap_pthread_cond_broadcast(condp);
+}
+
+static long long wrap_cnd_timedwait(long long condp, long long mtxp, long long tsp) {
+    VirtualMachine *vm = current_vm();
+    CCCCUserMtx *mtx = (CCCCUserMtx *)mtxp;
+    pthread_cond_t  *cond  = ensure_cond((CCCCUserCond *)condp);
+    pthread_mutex_t *mutex = ensure_mtx(mtx);
+    if (!vm || !cond || !mutex || !tsp) return 1;
+    ExecState caller_state;
+    save_and_release_gil(vm, &caller_state);
+    int rc = pthread_cond_timedwait(cond, mutex, (const struct timespec *)tsp);
+    acquire_and_restore_gil(vm, &caller_state);
+    if (rc == ETIMEDOUT) return ETIMEDOUT;
+    return rc == 0 ? 0 : 1;
+}
+
+static long long wrap_cnd_destroy(long long condp) {
+    return wrap_pthread_cond_destroy(condp);
+}
+
+static long long wrap_tss_create(long long keyp, long long dtor) {
+    return wrap_pthread_key_create(keyp, dtor);
+}
+
+static long long wrap_tss_get(long long key) {
+    return wrap_pthread_getspecific(key);
+}
+
+static long long wrap_tss_set(long long key, long long val) {
+    long long rc = wrap_pthread_setspecific(key, val);
+    return rc == 0 ? 0 : 1;
+}
+
+static long long wrap_tss_delete(long long key) {
+    return wrap_pthread_key_delete(key);
+}
+
+void register_threads_functions(VirtualMachine *vm) {
+    cc_register_cfunc(vm, "thrd_create",   (void *)wrap_thrd_create,   3, 0);
+    cc_register_cfunc(vm, "thrd_join",     (void *)wrap_thrd_join,     2, 0);
+    cc_register_cfunc(vm, "thrd_exit",     (void *)wrap_thrd_exit,     1, 0);
+    cc_register_cfunc(vm, "thrd_detach",   (void *)wrap_thrd_detach,   1, 0);
+    cc_register_cfunc(vm, "thrd_yield",    (void *)wrap_thrd_yield,    0, 0);
+    cc_register_cfunc(vm, "thrd_sleep",    (void *)wrap_thrd_sleep,    2, 0);
+    cc_register_cfunc(vm, "thrd_current",  (void *)wrap_thrd_current,  0, 0);
+    cc_register_cfunc(vm, "thrd_equal",    (void *)wrap_thrd_equal,    2, 0);
+    cc_register_cfunc(vm, "mtx_init",      (void *)wrap_mtx_init,      2, 0);
+    cc_register_cfunc(vm, "mtx_lock",      (void *)wrap_mtx_lock,      1, 0);
+    cc_register_cfunc(vm, "mtx_trylock",   (void *)wrap_mtx_trylock,   1, 0);
+    cc_register_cfunc(vm, "mtx_timedlock", (void *)wrap_mtx_timedlock, 2, 0);
+    cc_register_cfunc(vm, "mtx_unlock",    (void *)wrap_mtx_unlock,    1, 0);
+    cc_register_cfunc(vm, "mtx_destroy",   (void *)wrap_mtx_destroy,   1, 0);
+    cc_register_cfunc(vm, "cnd_init",      (void *)wrap_cnd_init,      1, 0);
+    cc_register_cfunc(vm, "cnd_wait",      (void *)wrap_cnd_wait,      2, 0);
+    cc_register_cfunc(vm, "cnd_signal",    (void *)wrap_cnd_signal,    1, 0);
+    cc_register_cfunc(vm, "cnd_broadcast", (void *)wrap_cnd_broadcast, 1, 0);
+    cc_register_cfunc(vm, "cnd_timedwait", (void *)wrap_cnd_timedwait, 3, 0);
+    cc_register_cfunc(vm, "cnd_destroy",   (void *)wrap_cnd_destroy,   1, 0);
+    cc_register_cfunc(vm, "tss_create",    (void *)wrap_tss_create,    2, 0);
+    cc_register_cfunc(vm, "tss_get",       (void *)wrap_tss_get,       1, 0);
+    cc_register_cfunc(vm, "tss_set",       (void *)wrap_tss_set,       2, 0);
+    cc_register_cfunc(vm, "tss_delete",    (void *)wrap_tss_delete,    1, 0);
+}
+
 void cccc_pthread_cleanup(VirtualMachine *vm) {
     if (!vm)
         return;
@@ -719,6 +1015,10 @@ void cccc_pthread_cleanup(VirtualMachine *vm) {
 }
 #else
 void register_pthread_functions(VirtualMachine *vm) {
+    (void)vm;
+}
+
+void register_threads_functions(VirtualMachine *vm) {
     (void)vm;
 }
 

@@ -210,7 +210,7 @@ void generate_stdlib_reg_fn(void) {
         $node_t *first_char = $unary(nk_deref, $param_ref(fn, "header"));
         $node_t *sw = $switch(first_char);
 
-        unsigned char seen[256] = {0};
+        unsigned char *seen = calloc(256, 1);
         for (int i = 0; headers[i]; i++) {
             unsigned char c = (unsigned char)headers[i][0];
             if (seen[c]) continue;

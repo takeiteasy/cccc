@@ -174,9 +174,9 @@ if (__builtin_mul_overflow(a, b, &r))
 | Header | Status | Notes |
 |---|---|---|
 | `<stdalign.h>` | ✓ | |
-| `<stdatomic.h>` | ~ | Header present; operations are non-atomic |
+| `<stdatomic.h>` | ~ | Header present; `atomic_fetch_add/sub/or/xor/and` and `atomic_load/store/exchange/compare_exchange` work correctly in single-threaded and thread-local contexts; cross-thread atomicity requires the GIL or an explicit mutex |
 | `<stdnoreturn.h>` | ✓ | |
-| `<threads.h>` | ✗ | C11 thread API is tracked separately; POSIX `<pthread.h>` is available |
+| `<threads.h>` | ✓ | Thread lifecycle (`thrd_create/join/exit/detach/yield/sleep/current/equal`), mutex (`mtx_init/lock/trylock/unlock/destroy`), condition variables (`cnd_init/wait/signal/broadcast/destroy`), and thread-specific storage (`tss_create/get/set/delete`); backed by host pthreads via POSIX `<pthread.h>` |
 | `<uchar.h>` | ✓ | `char8_t`, `char16_t`, `char32_t` defined; `mbrtoc16`/`c16rtomb`/`mbrtoc32`/`c32rtomb`/`mbrtoc8`/`c8rtomb` registered (native on glibc where available, shimmed via `mbrtowc`/`wcrtomb` elsewhere) |
 | `aligned_alloc` | ✓ | Backed by host aligned allocation |
 | `quick_exit` / `at_quick_exit` | ✓ | |
@@ -277,8 +277,7 @@ This table tracks shims that **reimplement** a standard function — not ABI-com
 
 | Feature | Notes |
 |---|---|
-| C11 threading (`<threads.h>`) and language TLS | POSIX `<pthread.h>` is available; `<threads.h>`, `_Thread_local`, `__thread`, and `thread_local` storage are tracked separately |
-| Atomic operations (`<stdatomic.h>` operations) | Headers present; operations are non-atomic |
+| True cross-thread atomics | `<stdatomic.h>` fetch/store operations are sequentially consistent within the GIL; cross-thread data races are not prevented by hardware atomics — use a mutex for shared mutable state across threads |
 | Complex function call ABI | Passing or returning complex values by function call is not implemented |
 | Full native ABI for runtime `dlsym` calls | Runtime dynamic function calls support scalar/pointer signatures through libffi using the current scalar/double metadata. Aggregate by-value arguments/returns, callbacks, variadic function-pointer calls, and full platform ABI descriptors are not implemented |
 | Native code generation | CCCC produces VM bytecode only |

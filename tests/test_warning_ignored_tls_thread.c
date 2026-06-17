@@ -1,4 +1,4 @@
-// CCCC_FLAGS: -Wignored-features --std=c11
-// CCCC_EXPECT_STDERR: warning: '__thread' is parsed but ignored
-__thread int x;
-int main(void) { return 42; }
+// CCCC_FLAGS: --std=c11
+// Test that __thread is accepted without warning (TLS is now supported)
+__thread int x = 0;
+int main(void) { x = 42; return x; }

@@ -769,6 +769,7 @@ void register_locale_functions(VirtualMachine *vm);
 void register_math_functions(VirtualMachine *vm);
 void register_posix_functions(VirtualMachine *vm);
 void register_pthread_functions(VirtualMachine *vm);
+void register_threads_functions(VirtualMachine *vm);
 void cccc_pthread_cleanup(VirtualMachine *vm);
 void register_signal_functions(VirtualMachine *vm);
 

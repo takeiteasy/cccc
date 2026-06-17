@@ -1134,6 +1134,13 @@ void cc_destroy(VirtualMachine *vm) {
     if (vm->shadow_stack)
         cccc_vm_release(vm->shadow_stack,
                        (size_t)vm->poolsize_max * sizeof(long long));
+    // TLS template and main-thread TLS copy (simple malloc, not mmap'd)
+    free(vm->tls_template);
+    vm->tls_template = NULL;
+    vm->tls_template_size = 0;
+    vm->tls_template_cap = 0;
+    free(vm->current_tls_seg);
+    vm->current_tls_seg = NULL;
     // return_buffer is part of data_seg, no need to free separately
     if (vm->vm_profile_trigram_counts) {
         free(vm->vm_profile_trigram_counts);
@@ -1772,6 +1779,7 @@ void cc_load_stdlib(VirtualMachine *vm) {
     register_math_functions(vm);
     register_posix_functions(vm);
     register_pthread_functions(vm);
+    register_threads_functions(vm);
     register_signal_functions(vm);
     register_stdio_functions(vm);
     register_stdlib_functions(vm);
@@ -1815,6 +1823,15 @@ int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv) {
     // Save initial stack/base pointers for exit detection in vm_eval
     vm->initial_sp = vm->sp;
     vm->initial_bp = vm->bp;
+
+    // Initialise main thread's TLS copy from the template built by gen()
+    if (vm->tls_template_size > 0) {
+        free(vm->current_tls_seg);
+        vm->current_tls_seg = malloc(vm->tls_template_size);
+        if (!vm->current_tls_seg)
+            error("cc_run_at: failed to allocate main-thread TLS segment");
+        memcpy(vm->current_tls_seg, vm->tls_template, vm->tls_template_size);
+    }
 
     // Pass argc/argv via integer argument registers (ENT3 spills these to the
     // stack frame at bp[-1]/bp[-2], matching the register-based calling convention).

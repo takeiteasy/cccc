@@ -500,6 +500,17 @@ static inline int op_LDA3_fn(VirtualMachine *vm) {
     return 0;
 }
 
+static inline int op_LDTLS3_fn(VirtualMachine *vm) {
+    // Load TLS-relative address: [LDTLS3] [rd:8] [byte_offset:64]
+    long long operands = cc_read_word(vm);
+    int rd;
+    DECODE_R(operands, rd);
+    long long offset = cc_read_i64(vm);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (long long)(vm->current_tls_seg + offset);
+    return 0;
+}
+
 static inline int op_LTA3_fn(VirtualMachine *vm) {
     // Load text-relative address: [LTA3] [rd:8] [byte_offset:64]
     long long operands = cc_read_word(vm);

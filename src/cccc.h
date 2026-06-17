@@ -137,6 +137,7 @@ extern "C" {
     /* Register operations */                                                  \
     X(LI3, 3)   /* rd = immediate */                                           \
     X(LDA3, 3)  /* rd = data_seg + immediate byte offset */                    \
+    X(LDTLS3, 3) /* rd = current_tls_seg + immediate byte offset */            \
     X(LTA3, 3)  /* rd = text_seg + immediate byte offset */                    \
     X(MOV3, 1)  /* rd = rs1 */                                                 \
     X(NEG3, 1)  /* rd = -rs1 (integer unary negation) */                       \
@@ -2000,6 +2001,11 @@ struct VirtualMachine {
     InstrWord *old_text_seg; // Backup of original text segment pointer
     char *data_seg;          // Data segment (global variables/constants)
     char *data_ptr;          // Current write position in data segment
+    // Thread-local storage
+    char   *tls_template;      // Canonical init image for TLS variables (written by gen())
+    size_t  tls_template_size; // Byte length of tls_template
+    size_t  tls_template_cap;  // Allocated capacity of tls_template
+    char   *current_tls_seg;   // Active thread's private TLS copy (updated on context switch)
     char *heap_seg;          // Heap segment (for VM malloc/free)
     char *heap_ptr;          // Current allocation pointer (bump allocator)
     char *heap_end;          // End of heap segment

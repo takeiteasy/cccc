@@ -28,6 +28,7 @@ sys/stat.h	register_posix_functions
 sys/time.h	register_posix_functions
 sys/wait.h	register_posix_functions
 termios.h	register_posix_functions
+threads.h	register_threads_functions
 time.h	register_time_functions
 uchar.h	register_wide_functions
 unistd.h	register_posix_functions

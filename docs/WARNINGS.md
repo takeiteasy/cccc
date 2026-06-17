@@ -188,9 +188,8 @@ and `(void)symbol`. Set-but-not-used analysis is not currently performed.
   `-Wpointer-arith`.  The operation is still performed; only the diagnostic
   is added.
 - Use of features that are parsed but have no semantic effect uses
-  `-Wignored-features`: `_Atomic` (loads and stores are not atomic),
-  `_Thread_local` / `__thread` / `thread_local` (no thread-local storage is
-  provided).
+  `-Wignored-features`: `_Atomic` (loads and stores are not guaranteed to be
+  atomic across threads — use a mutex for shared mutable state).
 - Unknown `__attribute__((...))` and `[[...]]` attributes use `-Wattributes`.
 - Discarded return values of functions or types declared with `[[nodiscard]]`
   use `-Wnodiscard`.  An optional message string from `[[nodiscard("...")]]`

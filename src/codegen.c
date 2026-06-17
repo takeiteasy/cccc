@@ -127,9 +127,15 @@ static void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
                 value = (long long)(vm->data_seg + target_offset + rel->addend);
             }
 
-            long long data_offset = var->offset + rel->offset;
-            *(long long *)(vm->data_seg + data_offset) = value;
-            add_data_reloc(vm, data_offset, segment, target_offset, rel->addend);
+            long long slot_offset = var->offset + rel->offset;
+            if (var->is_tls) {
+                // TLS pointer initialiser: patch into tls_template
+                *(long long *)(vm->tls_template + slot_offset) = value;
+                // TLS relocs are not serialised into bytecode yet (follow-up)
+            } else {
+                *(long long *)(vm->data_seg + slot_offset) = value;
+                add_data_reloc(vm, slot_offset, segment, target_offset, rel->addend);
+            }
         }
     }
 }
@@ -1290,6 +1296,22 @@ static void check_data_capacity(VirtualMachine *vm, long long needed) {
         error("codegen: data segment overflow (limit: %d bytes)", vm->poolsize_max);
 }
 
+// Grow tls_template to hold at least `needed` bytes.
+static void check_tls_capacity(VirtualMachine *vm, size_t needed) {
+    if (needed <= vm->tls_template_cap)
+        return;
+    size_t new_cap = vm->tls_template_cap ? vm->tls_template_cap * 2 : 256;
+    while (new_cap < needed)
+        new_cap *= 2;
+    char *p = realloc(vm->tls_template, new_cap);
+    if (!p)
+        error("codegen: TLS template allocation failed");
+    if (new_cap > vm->tls_template_cap)
+        memset(p + vm->tls_template_cap, 0, new_cap - vm->tls_template_cap);
+    vm->tls_template = p;
+    vm->tls_template_cap = new_cap;
+}
+
 static void emit(VirtualMachine *vm, int instruction) {
     emit_word(vm, instruction);
 }
@@ -1353,6 +1375,10 @@ static Pc emit_li3(VirtualMachine *vm, int rd, long long imm) {
 
 static Pc emit_lda3(VirtualMachine *vm, int rd, long long offset) {
     return emit_ri(vm, LDA3, rd, offset);
+}
+
+static Pc emit_ldtls3(VirtualMachine *vm, int rd, long long offset) {
+    return emit_ri(vm, LDTLS3, rd, offset);
 }
 
 static Pc emit_lta3(VirtualMachine *vm, int rd, long long offset) {
@@ -2542,8 +2568,11 @@ static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
                 }
             }
         } else {
-            // Global variable
-            emit_lda3(vm, dest_reg, node->var->offset);
+            // Global variable (TLS or shared)
+            if (node->var->is_tls)
+                emit_ldtls3(vm, dest_reg, node->var->offset);
+            else
+                emit_lda3(vm, dest_reg, node->var->offset);
         }
         return;
 
@@ -5723,25 +5752,40 @@ void gen(VirtualMachine *vm, Obj *prog) {
     // Initialize text pointer - text_seg[0] is reserved for main entry point
     vm->text_ptr = 0;
 
-    // Initialize global variables in data segment
+    // Initialize global variables in data segment (TLS vars go into tls_template)
+    // Zero the template so uninitialised TLS vars start at 0 across recompiles.
+    if (vm->tls_template_cap > 0)
+        memset(vm->tls_template, 0, vm->tls_template_cap);
+    vm->tls_template_size = 0;
     for (Obj *var = prog; var; var = var->next) {
         if (!var->is_function) {
-            // Align data pointer to 8-byte boundary
-            long long offset = vm->data_ptr - vm->data_seg;
-            offset = (offset + 7) & ~7;
-            check_data_capacity(vm, offset + var->ty->size);
-            vm->data_ptr = vm->data_seg + offset;
+            if (var->is_tls) {
+                // Thread-local variable: allocate in tls_template
+                size_t tls_offset = (vm->tls_template_size + 7) & ~(size_t)7;
+                check_tls_capacity(vm, tls_offset + (size_t)var->ty->size);
+                var->offset = (long long)tls_offset;
+                if (var->init_data)
+                    memcpy(vm->tls_template + tls_offset, var->init_data,
+                           (size_t)var->ty->size);
+                vm->tls_template_size = tls_offset + (size_t)var->ty->size;
+            } else {
+                // Align data pointer to 8-byte boundary
+                long long offset = vm->data_ptr - vm->data_seg;
+                offset = (offset + 7) & ~7;
+                check_data_capacity(vm, offset + var->ty->size);
+                vm->data_ptr = vm->data_seg + offset;
 
-            // Store the offset in the variable
-            var->offset = vm->data_ptr - vm->data_seg;
-            add_debug_symbol(vm, var->name, var->offset, var->ty, 0, NULL);
+                // Store the offset in the variable
+                var->offset = vm->data_ptr - vm->data_seg;
+                add_debug_symbol(vm, var->name, var->offset, var->ty, 0, NULL);
 
-            // Copy init_data if present
-            if (var->init_data) {
-                memcpy(vm->data_ptr, var->init_data, var->ty->size);
+                // Copy init_data if present
+                if (var->init_data) {
+                    memcpy(vm->data_ptr, var->init_data, var->ty->size);
+                }
+
+                vm->data_ptr += var->ty->size;
             }
-
-            vm->data_ptr += var->ty->size;
         }
     }
 

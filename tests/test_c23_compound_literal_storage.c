@@ -1,5 +1,4 @@
 // CCCC_FLAGS: --std=c23 -Wignored-features
-// CCCC_EXPECT_STDERR: warning: 'thread_local' is parsed but ignored
 struct Pair {
     int a;
     int b;

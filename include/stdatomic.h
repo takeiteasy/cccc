@@ -34,17 +34,19 @@ typedef enum {
 #define atomic_load_explicit(addr, order) __builtin_atomic_load(addr)
 #define atomic_store_explicit(addr, val, order) __builtin_atomic_store((addr), (val))
 
-#define atomic_fetch_add(obj, val) (*(obj) += (val))
-#define atomic_fetch_sub(obj, val) (*(obj) -= (val))
-#define atomic_fetch_or(obj, val) (*(obj) |= (val))
-#define atomic_fetch_xor(obj, val) (*(obj) ^= (val))
-#define atomic_fetch_and(obj, val) (*(obj) &= (val))
+// Under the GIL the two-step ALDR+ASTR is uninterruptible and tags
+// atomic_shadow for mixed-access detection (see #447).
+#define atomic_fetch_add(obj, val) ({ __typeof__(*(obj)) _old = __builtin_atomic_load(obj); __builtin_atomic_store((obj), _old + (val)); _old; })
+#define atomic_fetch_sub(obj, val) ({ __typeof__(*(obj)) _old = __builtin_atomic_load(obj); __builtin_atomic_store((obj), _old - (val)); _old; })
+#define atomic_fetch_or(obj, val)  ({ __typeof__(*(obj)) _old = __builtin_atomic_load(obj); __builtin_atomic_store((obj), _old | (val)); _old; })
+#define atomic_fetch_xor(obj, val) ({ __typeof__(*(obj)) _old = __builtin_atomic_load(obj); __builtin_atomic_store((obj), _old ^ (val)); _old; })
+#define atomic_fetch_and(obj, val) ({ __typeof__(*(obj)) _old = __builtin_atomic_load(obj); __builtin_atomic_store((obj), _old & (val)); _old; })
 
-#define atomic_fetch_add_explicit(obj, val, order) (*(obj) += (val))
-#define atomic_fetch_sub_explicit(obj, val, order) (*(obj) -= (val))
-#define atomic_fetch_or_explicit(obj, val, order) (*(obj) |= (val))
-#define atomic_fetch_xor_explicit(obj, val, order) (*(obj) ^= (val))
-#define atomic_fetch_and_explicit(obj, val, order) (*(obj) &= (val))
+#define atomic_fetch_add_explicit(obj, val, order) atomic_fetch_add(obj, val)
+#define atomic_fetch_sub_explicit(obj, val, order) atomic_fetch_sub(obj, val)
+#define atomic_fetch_or_explicit(obj, val, order)  atomic_fetch_or(obj, val)
+#define atomic_fetch_xor_explicit(obj, val, order) atomic_fetch_xor(obj, val)
+#define atomic_fetch_and_explicit(obj, val, order) atomic_fetch_and(obj, val)
 
 #define atomic_compare_exchange_weak(p, old, new) \
   __builtin_compare_and_swap((p), (old), (new))

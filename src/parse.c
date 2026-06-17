@@ -1071,10 +1071,6 @@ static Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *att
             else if (dk == DK_CONSTEXPR) attr->is_constexpr = true;
             else if (dk == DK_BLOCK_VAR) attr->is_block_var = true;
             else {
-                warn_tok(vm, tok, CCCC_WARN_IGNORED_FEATURES,
-                         "'%.*s' is parsed but ignored — "
-                         "no thread-local storage is provided",
-                         tok->len, tok->loc);
                 attr->is_tls = true;
             }
             if (attr->is_typedef && attr->is_static + attr->is_extern +
