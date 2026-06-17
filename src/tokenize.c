@@ -88,6 +88,10 @@ static const WarningInfo warning_infos[] = {
     {"logical-op",               CCCC_WARN_LOGICAL_OP,               false},
     {"tautological-compare",     CCCC_WARN_TAUTOLOGICAL_COMPARE,     false},
     {"sizeof-pointer-memaccess", CCCC_WARN_SIZEOF_POINTER_MEMACCESS, false},
+    {"switch",                  CCCC_WARN_SWITCH,                  false},
+    {"switch-enum",             CCCC_WARN_SWITCH_ENUM,             false},
+    {"enum-compare",            CCCC_WARN_ENUM_COMPARE,            false},
+    {"old-style-definition",    CCCC_WARN_OLD_STYLE_DEFINITION,    false},
     {"all", CCCC_WARN_ALL, true},
     {"extra", CCCC_WARN_EXTRA, true},
 };

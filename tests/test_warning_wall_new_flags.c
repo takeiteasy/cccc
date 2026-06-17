@@ -46,5 +46,19 @@ void main(void) {
     char *p = buf;
     memset(p, 0, sizeof(p));
 
+    // -Wswitch: enum switch missing a case, no default
+    typedef enum Color { R, G, B } Color;
+    Color c = R;
+    switch (c) {
+        case R: break;
+        case G: break;
+    }
+
+    // -Wenum-compare: different named enums compared
+    typedef enum Dir { UP, DOWN } Dir;
+    Color c2 = R;
+    Dir dir = UP;
+    (void)(c2 == dir);
+
     printf("done\n");
 }

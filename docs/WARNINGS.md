@@ -275,3 +275,27 @@ and `(void)symbol`. Set-but-not-used analysis is not currently performed.
   programmer writes `sizeof(ptr)` (size of the pointer itself, typically 8
   bytes) instead of `sizeof(*ptr)` or `sizeof(element_type)`.
   All five flags are part of `-Wall`.
+- `switch` statements on an enum type that are missing one or more enumerator
+  values and have no `default:` label use `-Wswitch`. The set of covered values
+  is computed by walking the case labels after the switch body is parsed; GNU
+  case ranges (`case 1 ... 5:`) are accounted for. Each missing enumerator
+  produces a separate diagnostic. When a `default:` label is present the
+  warning is suppressed, because the default arm handles the unhandled values.
+  `-Wswitch` is part of `-Wall`.
+- `-Wswitch-enum` is the stricter variant of `-Wswitch`: it warns when an enum
+  switch is missing enumerator values even when a `default:` label is present.
+  This flag is controlled separately from `-Wswitch` so it can be enabled
+  independently. It is not part of `-Wall` or `-Wextra`.
+- Comparisons (`==`, `!=`, `<`, `<=`, `>`, `>=`) between operands of two
+  different named enum types use `-Wenum-compare`. The check fires only when
+  both operands have an enum type with a tag name (anonymous enums and
+  comparisons against plain integer expressions are not flagged). Named enum
+  identity is determined by the enum tag: two uses of the same `enum Foo`
+  always refer to the same type and are not flagged. `-Wenum-compare` is part
+  of `-Wall`.
+- K&R-style (old-style) function definitions — where the parameter names are
+  listed in the closing parenthesis and their types are declared in a separate
+  list between `)` and `{` (e.g. `int f(x) int x; { }`) — use
+  `-Wold-style-definition`. K&R definitions are still accepted and compiled
+  correctly; only the diagnostic is added. `-Wold-style-definition` is part of
+  `-Wextra`.

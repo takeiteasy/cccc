@@ -1841,6 +1841,7 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
         tag = tok;
         ty->name = tag;
         ty->name_pos = tag;
+        ty->enum_tag = tag;
         tok = tok->next;
     }
 
@@ -3475,6 +3476,33 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
         warn_switch_fallthrough(vm, node);
 
+        if (vm->compiler.warnings & (CCCC_WARN_SWITCH | CCCC_WARN_SWITCH_ENUM)) {
+            add_type(vm, node->cond);
+            Type *cond_ty = node->cond->ty;
+            if (cond_ty && cond_ty->kind == TY_ENUM && cond_ty->enum_constants) {
+                bool has_default = node->default_case != NULL;
+                bool check_sw   = (vm->compiler.warnings & CCCC_WARN_SWITCH) && !has_default;
+                bool check_se   = !!(vm->compiler.warnings & CCCC_WARN_SWITCH_ENUM);
+                if (check_sw || check_se) {
+                    for (EnumConstant *ec = cond_ty->enum_constants; ec; ec = ec->next) {
+                        bool covered = false;
+                        for (Node *c = node->case_next; c; c = c->case_next) {
+                            if (ec->value >= c->begin && ec->value <= c->end) {
+                                covered = true;
+                                break;
+                            }
+                        }
+                        if (!covered) {
+                            CCCCWarning which = (check_se && has_default)
+                                               ? CCCC_WARN_SWITCH_ENUM : CCCC_WARN_SWITCH;
+                            warn_tok(vm, node->tok, which,
+                                     "enumeration value '%s' not handled in switch", ec->name);
+                        }
+                    }
+                }
+            }
+        }
+
         if ((vm->compiler.warnings & CCCC_WARN_SWITCH_DEFAULT) &&
             !node->default_case)
             warn_tok(vm, node->tok, CCCC_WARN_SWITCH_DEFAULT,
@@ -4589,6 +4617,16 @@ static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
                 nodes_structurally_equal(node, rhs))
                 warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                          "self-comparison always evaluates to true");
+            if (vm->compiler.warnings & CCCC_WARN_ENUM_COMPARE) {
+                add_type(vm, node); add_type(vm, rhs);
+                if (node->ty && rhs->ty &&
+                    node->ty->kind == TY_ENUM && rhs->ty->kind == TY_ENUM &&
+                    node->ty != rhs->ty && node->ty->enum_tag && rhs->ty->enum_tag)
+                    warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
+                             "comparison between values of different enum types '%.*s' and '%.*s'",
+                             node->ty->enum_tag->len, node->ty->enum_tag->loc,
+                             rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
+            }
             node = new_binary(vm, ND_EQ, node, rhs, start);
             continue;
         }
@@ -4606,6 +4644,16 @@ static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
                 nodes_structurally_equal(node, rhs))
                 warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                          "self-comparison always evaluates to false");
+            if (vm->compiler.warnings & CCCC_WARN_ENUM_COMPARE) {
+                add_type(vm, node); add_type(vm, rhs);
+                if (node->ty && rhs->ty &&
+                    node->ty->kind == TY_ENUM && rhs->ty->kind == TY_ENUM &&
+                    node->ty != rhs->ty && node->ty->enum_tag && rhs->ty->enum_tag)
+                    warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
+                             "comparison between values of different enum types '%.*s' and '%.*s'",
+                             node->ty->enum_tag->len, node->ty->enum_tag->loc,
+                             rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
+            }
             node = new_binary(vm, ND_NE, node, rhs, start);
             continue;
         }
@@ -4634,6 +4682,16 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
                     warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                              "comparison of unsigned expression < 0 is always false");
             }
+            if (vm->compiler.warnings & CCCC_WARN_ENUM_COMPARE) {
+                add_type(vm, node); add_type(vm, rhs);
+                if (node->ty && rhs->ty &&
+                    node->ty->kind == TY_ENUM && rhs->ty->kind == TY_ENUM &&
+                    node->ty != rhs->ty && node->ty->enum_tag && rhs->ty->enum_tag)
+                    warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
+                             "comparison between values of different enum types '%.*s' and '%.*s'",
+                             node->ty->enum_tag->len, node->ty->enum_tag->loc,
+                             rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
+            }
             node = new_binary(vm, ND_LT, node, rhs, start);
             continue;
         }
@@ -4645,6 +4703,16 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
                 if (nodes_structurally_equal(node, rhs))
                     warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                              "self-comparison always evaluates to true");
+            }
+            if (vm->compiler.warnings & CCCC_WARN_ENUM_COMPARE) {
+                add_type(vm, node); add_type(vm, rhs);
+                if (node->ty && rhs->ty &&
+                    node->ty->kind == TY_ENUM && rhs->ty->kind == TY_ENUM &&
+                    node->ty != rhs->ty && node->ty->enum_tag && rhs->ty->enum_tag)
+                    warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
+                             "comparison between values of different enum types '%.*s' and '%.*s'",
+                             node->ty->enum_tag->len, node->ty->enum_tag->loc,
+                             rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
             node = new_binary(vm, ND_LE, node, rhs, start);
             continue;
@@ -4662,6 +4730,16 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
                     warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                              "comparison of 0 > unsigned expression is always false");
             }
+            if (vm->compiler.warnings & CCCC_WARN_ENUM_COMPARE) {
+                add_type(vm, node); add_type(vm, rhs);
+                if (node->ty && rhs->ty &&
+                    node->ty->kind == TY_ENUM && rhs->ty->kind == TY_ENUM &&
+                    node->ty != rhs->ty && node->ty->enum_tag && rhs->ty->enum_tag)
+                    warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
+                             "comparison between values of different enum types '%.*s' and '%.*s'",
+                             node->ty->enum_tag->len, node->ty->enum_tag->loc,
+                             rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
+            }
             // note: a > b is stored as b < a
             node = new_binary(vm, ND_LT, rhs, node, start);
             continue;
@@ -4678,6 +4756,16 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
                          is_const_expr(vm, rhs) && eval(vm, rhs) == 0)
                     warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                              "comparison of unsigned expression >= 0 is always true");
+            }
+            if (vm->compiler.warnings & CCCC_WARN_ENUM_COMPARE) {
+                add_type(vm, node); add_type(vm, rhs);
+                if (node->ty && rhs->ty &&
+                    node->ty->kind == TY_ENUM && rhs->ty->kind == TY_ENUM &&
+                    node->ty != rhs->ty && node->ty->enum_tag && rhs->ty->enum_tag)
+                    warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
+                             "comparison between values of different enum types '%.*s' and '%.*s'",
+                             node->ty->enum_tag->len, node->ty->enum_tag->loc,
+                             rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
             // note: a >= b is stored as b <= a
             node = new_binary(vm, ND_LE, rhs, node, start);
@@ -7810,6 +7898,10 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
     // explicit types to the parameter names.  Update ty->params *before*
     // create_param_lvars so that stack-slot sizes are derived from the correct
     // types (e.g. a double param must get an 8-byte slot, not a 4-byte int slot).
+    if ((vm->compiler.warnings & CCCC_WARN_OLD_STYLE_DEFINITION) &&
+        !equal(tok, "{") && tok->kind != TK_EOF && is_typename(vm, tok))
+        warn_tok(vm, fn->tok, CCCC_WARN_OLD_STYLE_DEFINITION,
+                 "old-style (K&R) function definition");
     while (!equal(tok, "{") && tok->kind != TK_EOF && is_typename(vm, tok)) {
         VarAttr knr_attr = {};
         Type *basety = declspec(vm, &tok, tok, &knr_attr);

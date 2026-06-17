@@ -404,6 +404,10 @@ typedef enum {
     CCCC_WARN_LOGICAL_OP              = (1ULL << 40), // constant operand in && or ||
     CCCC_WARN_TAUTOLOGICAL_COMPARE    = (1ULL << 41), // comparison always true or always false
     CCCC_WARN_SIZEOF_POINTER_MEMACCESS = (1ULL << 42), // sizeof(ptr) passed as size to mem fn
+    CCCC_WARN_SWITCH                = (1ULL << 43), // missing enum case, no default
+    CCCC_WARN_SWITCH_ENUM           = (1ULL << 44), // missing enum case, even with default
+    CCCC_WARN_ENUM_COMPARE          = (1ULL << 45), // == / != / < etc. between different named enums
+    CCCC_WARN_OLD_STYLE_DEFINITION  = (1ULL << 46), // K&R-style function parameter declarations
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
     CCCC_WARN_CONVERSION_GROUP = CCCC_WARN_CONVERSION |
@@ -439,13 +443,16 @@ CCCC_WARN_ALL = CCCC_WARN_UNUSED |
                    CCCC_WARN_SHIFT_OVERFLOW |
                    CCCC_WARN_LOGICAL_OP |
                    CCCC_WARN_TAUTOLOGICAL_COMPARE |
-                   CCCC_WARN_SIZEOF_POINTER_MEMACCESS,
+                   CCCC_WARN_SIZEOF_POINTER_MEMACCESS |
+                   CCCC_WARN_SWITCH |
+                   CCCC_WARN_ENUM_COMPARE,
     CCCC_WARN_EXTRA = CCCC_WARN_SHADOW |
                       CCCC_WARN_SIGN_COMPARE |
                       CCCC_WARN_CONVERSION |
                       CCCC_WARN_POINTER_ARITH |
                       CCCC_WARN_FALLTHROUGH |
-                      CCCC_WARN_STRICT_PROTOTYPES,
+                      CCCC_WARN_STRICT_PROTOTYPES |
+                      CCCC_WARN_OLD_STYLE_DEFINITION,
 } CCCCWarning;
 
 /*!
@@ -703,6 +710,7 @@ struct Type {
     // Enum
     EnumConstant *enum_constants;
     struct Type *enum_base_type;  // C23: underlying type (NULL = default int)
+    Token *enum_tag;              // tag name token (survives declarator name-overwrite)
 
     // Function type
     struct Type *return_ty;
