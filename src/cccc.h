@@ -1814,6 +1814,7 @@ typedef struct Compiler {
     Obj *builtin_dlclose;  // VM-managed dlclose
     Obj *builtin_dlerror;  // VM-managed dlerror
     Obj *builtin_block_copy; // Block_copy() heap-duplication helper (__cccc_block_copy_impl)
+    Obj *builtin_free;       // free() prototype so Block_release always resolves (#458)
     TypeNameRecord *type_names; // Persistent typedef/tag declarations for -M
 
     // Arena allocator for parser frontend (tokens, AST, preprocessor state)

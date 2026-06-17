@@ -7099,9 +7099,14 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         *rest = skip(vm, tok, ")");
         add_type(vm, block_expr);
 
+        // Prefer a user-declared free() prototype (e.g. from <stdlib.h>);
+        // fall back to the builtin_free prototype so Block_release always
+        // works even when <stdlib.h> is not included (#458).
         Obj *free_fn = NULL;
         for (Obj *g = vm->compiler.globals; g; g = g->next)
             if (g->name && strcmp(g->name, "free") == 0) { free_fn = g; break; }
+        if (!free_fn)
+            free_fn = vm->compiler.builtin_free;
 
         if (!free_fn) {
             Node *node = new_node(vm, ND_NULL_EXPR, start);
@@ -8085,6 +8090,18 @@ static void declare_builtin_functions(VirtualMachine *vm) {
         new_gvar(vm, "__cccc_block_copy_impl", 22, block_copy_ty);
     vm->compiler.builtin_block_copy->is_function = true;
     vm->compiler.builtin_block_copy->is_definition = false;
+
+    // free(void*) -> void
+    // Ensures Block_release always resolves even when <stdlib.h> is not
+    // included (#458).  Named "free" so codegen's is_extern_func_name("free")
+    // check routes it to MFRE (CCCC_VM_HEAP) or the host free() via FFI.
+    // If the TU later declares its own free prototype the parser will find the
+    // user declaration in globals first (it's prepended), shadowing this one.
+    Type *free_ty = func_type(vm, ty_void);
+    free_ty->params = pointer_to(vm, ty_void);
+    vm->compiler.builtin_free = new_gvar(vm, "free", 4, free_ty);
+    vm->compiler.builtin_free->is_function = true;
+    vm->compiler.builtin_free->is_definition = false;
 }
 
 // program = (typedef | function-definition | global-variable)*
