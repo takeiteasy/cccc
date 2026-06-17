@@ -181,6 +181,8 @@ static void validate_constexpr_object_type(VirtualMachine *vm, Token *tok, Type 
 static void validate_constexpr_initializer(VirtualMachine *vm, Obj *var, Initializer *init,
                                            Token *tok);
 static Token *static_assert_decl(VirtualMachine *vm, Token *tok);
+static bool expr_has_no_side_effects(Node *n);
+static bool nodes_structurally_equal(Node *a, Node *b);
 static Node *assign(VirtualMachine *vm, Token **rest, Token *tok);
 static Node *logor(VirtualMachine *vm, Token **rest, Token *tok);
 static double eval_double(VirtualMachine *vm, Node *node);
@@ -3415,6 +3417,26 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         if (equal(tok, "else"))
             node->els = stmt(vm, &tok, tok->next);
         *rest = tok;
+
+        if (node->els && (vm->compiler.warnings & CCCC_WARN_DUPLICATED_BRANCHES) &&
+            nodes_structurally_equal(node->then, node->els))
+            warn_tok(vm, node->tok, CCCC_WARN_DUPLICATED_BRANCHES,
+                     "both branches of 'if' statement are identical");
+
+        if (vm->compiler.warnings & CCCC_WARN_DUPLICATED_COND) {
+            Node *conds[64]; int nconds = 0;
+            for (Node *chain = node; chain && chain->kind == ND_IF; chain = chain->els) {
+                for (int i = 0; i < nconds; i++) {
+                    if (nodes_structurally_equal(conds[i], chain->cond)) {
+                        warn_tok(vm, chain->tok, CCCC_WARN_DUPLICATED_COND,
+                                 "duplicated condition in 'if'/'else if' chain");
+                        break;
+                    }
+                }
+                if (nconds < 64) conds[nconds++] = chain->cond;
+            }
+        }
+
         return node;
     }
 
@@ -3715,6 +3737,79 @@ static Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok, Token *
     return node;
 }
 
+// Returns true if the expression has no observable side effects and its result
+// can be safely discarded. Conservative: returns false for unknown node kinds.
+static bool expr_has_no_side_effects(Node *n) {
+    if (!n) return true;
+    switch (n->kind) {
+    case ND_ADD: case ND_SUB: case ND_MUL: case ND_DIV: case ND_MOD:
+    case ND_BITAND: case ND_BITOR: case ND_BITXOR: case ND_SHL: case ND_SHR:
+    case ND_EQ: case ND_NE: case ND_LT: case ND_LE:
+    case ND_LOGAND: case ND_LOGOR:
+        return expr_has_no_side_effects(n->lhs) && expr_has_no_side_effects(n->rhs);
+    case ND_NEG: case ND_NOT: case ND_BITNOT: case ND_CAST: case ND_ADDR:
+        return expr_has_no_side_effects(n->lhs);
+    case ND_DEREF:
+        return expr_has_no_side_effects(n->lhs);
+    case ND_COND:
+        return expr_has_no_side_effects(n->cond) &&
+               expr_has_no_side_effects(n->then) &&
+               expr_has_no_side_effects(n->els);
+    case ND_COMMA:
+        return expr_has_no_side_effects(n->lhs) && expr_has_no_side_effects(n->rhs);
+    case ND_MEMBER:
+        return expr_has_no_side_effects(n->lhs);
+    case ND_NUM:
+    case ND_VAR:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Conservative structural equality for -Wduplicated-branches / -Wduplicated-cond.
+// Returns false for unrecognised node kinds to avoid false positives.
+static bool nodes_structurally_equal(Node *a, Node *b) {
+    if (a == b) return true;
+    if (!a || !b) return false;
+    if (a->kind != b->kind) return false;
+    switch (a->kind) {
+    case ND_NUM:
+        return a->val == b->val;
+    case ND_VAR:
+        return a->var == b->var;
+    case ND_MEMBER:
+        return a->member == b->member && nodes_structurally_equal(a->lhs, b->lhs);
+    case ND_ADD: case ND_SUB: case ND_MUL: case ND_DIV: case ND_MOD:
+    case ND_BITAND: case ND_BITOR: case ND_BITXOR: case ND_SHL: case ND_SHR:
+    case ND_EQ: case ND_NE: case ND_LT: case ND_LE:
+    case ND_LOGAND: case ND_LOGOR: case ND_ASSIGN: case ND_COMMA:
+        return nodes_structurally_equal(a->lhs, b->lhs) &&
+               nodes_structurally_equal(a->rhs, b->rhs);
+    case ND_NEG: case ND_NOT: case ND_BITNOT: case ND_CAST: case ND_ADDR:
+    case ND_DEREF: case ND_EXPR_STMT:
+        return nodes_structurally_equal(a->lhs, b->lhs);
+    case ND_COND:
+        return nodes_structurally_equal(a->cond, b->cond) &&
+               nodes_structurally_equal(a->then, b->then) &&
+               nodes_structurally_equal(a->els, b->els);
+    case ND_BLOCK: {
+        Node *pa = a->body, *pb = b->body;
+        while (pa && pb) {
+            if (!nodes_structurally_equal(pa, pb)) return false;
+            pa = pa->next; pb = pb->next;
+        }
+        return !pa && !pb;
+    }
+    case ND_RETURN:
+        return nodes_structurally_equal(a->lhs, b->lhs);
+    case ND_NULL_EXPR:
+        return true;
+    default:
+        return false;
+    }
+}
+
 // expr-stmt = expr? ";"
 static Node *expr_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, ";")) {
@@ -3753,6 +3848,11 @@ static Node *expr_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                          "ignoring return value of %s declared with 'nodiscard'",
                          what);
         }
+
+        if ((vm->compiler.warnings & CCCC_WARN_UNUSED_VALUE) &&
+            expr_has_no_side_effects(node->lhs))
+            warn_tok(vm, node->tok, CCCC_WARN_UNUSED_VALUE,
+                     "expression result unused");
     }
 
     return node;

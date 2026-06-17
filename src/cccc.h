@@ -384,6 +384,16 @@ typedef enum {
     CCCC_WARN_STRICT_PROTOTYPES = (1ULL << 23), // () without void in pre-C23
     CCCC_WARN_DISCARDED_QUALIFIERS = (1ULL << 24), // const/volatile/restrict discarded in pointer assignment
 
+    // Ticket #410: lower-priority / safety-overlap flags
+    CCCC_WARN_NULL_DEREFERENCE    = (1ULL << 25), // no-op; runtime safety covers at -S2/-S3
+    CCCC_WARN_RESTRICT            = (1ULL << 26), // no-op; runtime safety covers
+    CCCC_WARN_ARRAY_BOUNDS        = (1ULL << 27), // no-op; runtime safety covers at -S2/-S3
+    CCCC_WARN_STRINGOP_OVERFLOW   = (1ULL << 28), // no-op; runtime safety covers
+    CCCC_WARN_STRINGOP_TRUNCATION = (1ULL << 29), // no-op; runtime safety covers
+    CCCC_WARN_DUPLICATED_BRANCHES = (1ULL << 30), // identical then/else bodies
+    CCCC_WARN_DUPLICATED_COND     = (1ULL << 31), // same condition repeated in if/else-if chain
+    CCCC_WARN_UNUSED_VALUE        = (1ULL << 32), // expression result discarded, no side effects
+
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
     CCCC_WARN_CONVERSION_GROUP = CCCC_WARN_CONVERSION |
                                 CCCC_WARN_SIGN_CONVERSION |

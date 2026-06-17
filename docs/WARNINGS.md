@@ -16,6 +16,9 @@ compiler diagnostics. Warnings are disabled by default; enable categories with
   `-Werror`.
 
 Options are processed left to right, so later flags override earlier flags.
+Exception: `-Werror=<name>` is **sticky**. Once a category is promoted to an
+error with `-Werror=<name>`, a subsequent `-Wno-error=<name>` has no effect.
+Use `-Wno-<name>` to fully disable the category, including its error promotion.
 
 ## Pragma-Based Suppression
 
@@ -88,6 +91,14 @@ The warning infrastructure recognizes these category names:
 - `fallthrough`
 - `strict-prototypes`
 - `discarded-qualifiers`
+- `null-dereference` — registered; no compile-time diagnostic emitted (covered by `-S2`/`-S3` runtime safety)
+- `restrict` — registered; no compile-time diagnostic emitted (covered by runtime safety)
+- `array-bounds` — registered; no compile-time diagnostic emitted (covered by `-S2`/`-S3` runtime safety)
+- `stringop-overflow` — registered; no compile-time diagnostic emitted (covered by runtime safety)
+- `stringop-truncation` — registered; no compile-time diagnostic emitted (covered by runtime safety)
+- `duplicated-branches` — warns when the `then` and `else` bodies of an `if` statement are structurally identical
+- `duplicated-cond` — warns when a condition is repeated in an `if`/`else if` chain
+- `unused-value` — warns when an expression whose result is discarded has no side effects (e.g. `x + y;` as a statement)
 
 `conversion` is an umbrella name: `-Wconversion` enables `sign-conversion` and
 `float-conversion` as well as the integer-narrowing check.
@@ -200,3 +211,15 @@ and `(void)symbol`. Set-but-not-used analysis is not currently performed.
   and suppresses the warning for that case group.  `-Wfallthrough` is part of
   `-Wextra`.
 - Unknown `#pragma` directives use `-Wcpp`.
+- Expression statements whose result has no side effects and is not cast to
+  `void` use `-Wunused-value`. Arithmetic, bitwise, logical, comparison,
+  conditional, member-access, and dereference subexpressions are considered
+  pure. Assignments, function calls, and increment/decrement expressions are
+  not, and do not trigger the warning. Casting to `(void)` suppresses it.
+- `if` statements whose `then` and `else` bodies are structurally identical use
+  `-Wduplicated-branches`. The check uses conservative structural equality of
+  the AST: same operation kinds, same variables, same constants. Unrecognised
+  constructs (e.g. function calls) are never considered equal.
+- Repeated conditions in an `if`/`else if` chain use `-Wduplicated-cond`.
+  CCCC walks the full chain and reports each condition that duplicates an
+  earlier one in the same chain.

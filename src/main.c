@@ -621,6 +621,7 @@ static size_t parse_size(const char *str, const char *flag_name) {
 static void parse_warning_option(const char *arg, uint64_t *warnings,
                                  uint64_t *warning_errors,
                                  uint64_t *warning_no_errors,
+                                 uint64_t *warning_sticky_errors,
                                  int *warnings_as_errors) {
     if (strcmp(arg, "error") == 0) {
         *warnings_as_errors = 1;
@@ -638,6 +639,7 @@ static void parse_warning_option(const char *arg, uint64_t *warnings,
         *warnings |= mask;
         *warning_errors |= mask;
         *warning_no_errors &= ~mask;
+        *warning_sticky_errors |= mask;
         return;
     }
 
@@ -648,8 +650,12 @@ static void parse_warning_option(const char *arg, uint64_t *warnings,
             fprintf(stderr, "error: unknown warning option '-Wno-error=%s'\n", name);
             exit(1);
         }
-        *warning_errors &= ~mask;
-        *warning_no_errors |= mask;
+        // -Werror=<name> is sticky: a later -Wno-error=<name> cannot demote it.
+        // Use -Wno-<name> to fully disable (clearing the sticky bit too).
+        if (!(*warning_sticky_errors & mask)) {
+            *warning_errors &= ~mask;
+            *warning_no_errors |= mask;
+        }
         return;
     }
 
@@ -670,6 +676,7 @@ static void parse_warning_option(const char *arg, uint64_t *warnings,
         *warnings &= ~mask;
         *warning_errors &= ~mask;
         *warning_no_errors &= ~mask;
+        *warning_sticky_errors &= ~mask;
     } else {
         *warnings |= mask;
     }
@@ -758,6 +765,7 @@ int main(int argc, const char *argv[]) {
     uint64_t warnings = 0;
     uint64_t warning_errors = 0;
     uint64_t warning_no_errors = 0;
+    uint64_t warning_sticky_errors = 0; // bits pinned by -Werror=<name>; resist -Wno-error=<name>
     size_t embed_limit = 0;     // --embed-limit (0 = use default)
     int embed_hard_error = 0;   // --embed-hard-limit
     int macro_recursion_limit = -1; // --macro-recursion-limit
@@ -1139,7 +1147,8 @@ int main(int argc, const char *argv[]) {
             break;
         case 'W':
             parse_warning_option(optarg, &warnings, &warning_errors,
-                                 &warning_no_errors, &warnings_as_errors);
+                                 &warning_no_errors, &warning_sticky_errors,
+                                 &warnings_as_errors);
             break;
         case 1048: // --embed-limit
             embed_limit = parse_size(optarg, "--embed-limit");
