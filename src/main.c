@@ -1920,11 +1920,11 @@ int main(int argc, const char *argv[]) {
         goto BAIL;
     }
 
-    // Merge libraries requested via #pragma cccc link(...) /
-    // #pragma comment(lib, ...) into the -l/--library list (#357), so they
-    // get FFI-resolved (and, for -c=native, linked) the same as -l. Copies
-    // are made so `libs[]` and vm.compiler.pragma_link_libs each own their
-    // own strings (both are freed independently at cleanup).
+    // Merge libraries requested via #pragma cccc link(...) into the
+    // -l/--library list (#357), so they get FFI-resolved (and, for -c=native,
+    // linked) the same as -l. Copies are made so `libs[]` and
+    // vm.compiler.pragma_link_libs each own their own strings (both are freed
+    // independently at cleanup).
     for (int i = 0; i < vm.compiler.pragma_link_libs.len; i++) {
         libs = realloc(libs, sizeof(*libs) * (libs_count + 1));
         libs[libs_count++] = strdup(vm.compiler.pragma_link_libs.data[i]);

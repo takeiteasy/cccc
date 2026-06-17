@@ -347,8 +347,7 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 #### Declaring Libraries from Source
 
 `extern` declarations are normally resolved against libraries passed on the
-command line with `-l`/`--library`. `#pragma cccc link("name")` (and the
-MSVC-style alternate spelling `#pragma comment(lib, "name")`) queue an
+command line with `-l`/`--library`. `#pragma cccc link("name")` queues an
 additional library from within the source file itself, merged into the same
 list before FFI resolution:
 
@@ -359,16 +358,10 @@ list before FFI resolution:
 extern double sqrt(double x);
 ```
 
-```c
-#pragma comment(lib, "m") // equivalent to #pragma cccc link("m")
-```
-
-Both forms accept one or more comma-separated string literals
-(`link("a", "b")`) and go through the same `find_requested_library` /
-`cc_dlopen` / `register_dynamic_externs` path as `-l`, so the requested
-libraries are also passed to the system linker when compiling with
-`-c=native`. Other `#pragma comment(...)` kinds (`compiler`, `user`, etc.)
-remain no-ops.
+The pragma accepts one or more comma-separated string literals (`link("a", "b")`)
+and goes through the same `find_requested_library` / `cc_dlopen` /
+`register_dynamic_externs` path as `-l`, so the requested libraries are also
+passed to the system linker when compiling with `-c=native`.
 
 When using `-E` (preprocessed output) or `-G` (serialized C output), any
 queued libraries are re-emitted at the top of the output as

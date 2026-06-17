@@ -1,13 +1,10 @@
-// MSVC-style #pragma comment(lib, "name") is an alternate form of
-// #pragma cccc link("name") (#357).
+// #pragma comment(lib, ...) is no longer consumed as a link directive (#475).
+// It is treated as an unknown pragma — warned and passed through in -G output.
+// Use #pragma cccc link("name") to queue a library from source.
+
+// CCCC_FLAGS: -Wcpp
+// CCCC_EXPECT_STDERR: unknown pragma ignored
 
 #pragma comment(lib, "m")
 
-extern double sqrt(double x);
-
-int main(void) {
-    double r = sqrt(16.0);
-    if ((int)r != 4)
-        return 1;
-    return 42;
-}
+int main(void) { return 42; }

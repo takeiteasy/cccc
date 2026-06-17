@@ -22,19 +22,24 @@ Use `-Wno-<name>` to fully disable the category, including its error promotion.
 
 ## Pragma-Based Suppression
 
-Within source files, `#pragma GCC diagnostic` (also accepted as `#pragma clang
-diagnostic` or `#pragma CCCC diagnostic`) controls warning state inline:
+Within source files, `#pragma cccc diagnostic` controls warning state inline:
 
 ```c
-#pragma GCC diagnostic push           // save current warning state
-#pragma GCC diagnostic pop            // restore saved state
-#pragma GCC diagnostic ignored "-Wunused"   // suppress a category
-#pragma GCC diagnostic warning "-Wunused"   // enable a category as warning
-#pragma GCC diagnostic error   "-Wunused"   // promote a category to error
+#pragma cccc diagnostic push           // save current warning state
+#pragma cccc diagnostic pop            // restore saved state
+#pragma cccc diagnostic ignored "-Wunused"   // suppress a category
+#pragma cccc diagnostic warning "-Wunused"   // enable a category as warning
+#pragma cccc diagnostic error   "-Wunused"   // promote a category to error
 ```
 
 `push` and `pop` nest: each `push` saves the current state onto a stack, and
 the matching `pop` restores it. Unmatched `pop` emits a `-Wcpp` diagnostic.
+
+`#pragma GCC diagnostic` and `#pragma clang diagnostic` are also accepted and
+act identically — this allows headers that already use GCC-style pragmas to
+suppress warnings without modification. Unlike `#pragma cccc diagnostic`, the
+GCC/clang forms are passed through to `-G` output so downstream compilers also
+see them.
 
 Pragma state is per-token and takes effect immediately at the pragma's source
 position, so it correctly suppresses warnings on variables declared or used

@@ -280,18 +280,6 @@ static bool is_pragma_cccc(Token *hash) {
     return tok && equal(tok, "pragma") && equal(tok->next, "cccc");
 }
 
-// Returns true for `#pragma comment(lib, "...")` — handled via pragma_link_libs,
-// so the auto-capture path must not also push it to emit_directives.
-static bool is_pragma_comment_lib(Token *hash) {
-    Token *p = hash->next;
-    if (!p || !equal(p, "pragma")) return false;
-    p = p->next;
-    if (!p || !equal(p, "comment")) return false;
-    p = p->next;
-    if (!p || !equal(p, "(")) return false;
-    p = p->next;
-    return p && equal(p, "lib");
-}
 
 static Token *copy_token(VirtualMachine *vm, Token *tok) {
     Token *t = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
@@ -3212,25 +3200,6 @@ static Token *handle_pragma_link(VirtualMachine *vm, Token *sub) {
     return skip_line(vm, p);
 }
 
-// Parses the MSVC-style `comment(lib, "name")` pragma as an alternate spelling
-// of `#pragma cccc link("name")` (#357). `tok` is the "comment" token. Other
-// `#pragma comment(...)` kinds (compiler, user, etc.) are not recognized here
-// and fall through to the generic "unknown pragma ignored" warning.
-static Token *handle_pragma_comment(VirtualMachine *vm, Token *tok) {
-    Token *p = tok->next;
-    if (p && !p->at_bol && equal(p, "(") &&
-        p->next && equal(p->next, "lib") &&
-        p->next->next && equal(p->next->next, ",") &&
-        p->next->next->next && p->next->next->next->kind == TK_STR &&
-        p->next->next->next->next && equal(p->next->next->next->next, ")")) {
-        Token *name_tok = p->next->next->next;
-        strarray_push(&vm->compiler.pragma_link_libs, strdup(name_tok->str));
-        return skip_line(vm, name_tok->next->next);
-    }
-    warn_tok(vm, tok, CCCC_WARN_CPP, "unknown pragma ignored");
-    do { tok = tok->next; } while (!tok->at_bol && tok->kind != TK_EOF);
-    return tok;
-}
 
 // Dispatch the body of a #pragma directive or a _Pragma() operator.
 // tok is the first content token (after "#pragma" / after the destringized string).
@@ -3319,15 +3288,15 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
             return handle_pragma_config(vm, sub);
         } else if (equal(sub, "link")) {
             return handle_pragma_link(vm, sub);
+        } else if (equal(sub, "diagnostic")) {
+            return handle_gcc_diagnostic(vm, sub->next);
         } else {
             error_tok(vm, sub && sub->kind != TK_EOF ? sub : tok,
                       "unknown #pragma cccc directive");
         }
-    } else if ((equal(tok, "GCC") || equal(tok, "clang") || equal(tok, "CCCC")) &&
+    } else if ((equal(tok, "GCC") || equal(tok, "clang")) &&
                equal(tok->next, "diagnostic")) {
         return handle_gcc_diagnostic(vm, tok->next->next);
-    } else if (equal(tok, "comment")) {
-        return handle_pragma_comment(vm, tok);
     } else {
         warn_tok(vm, tok, CCCC_WARN_CPP, "unknown pragma ignored");
         do { tok = tok->next; } while (!tok->at_bol && tok->kind != TK_EOF);
@@ -3514,8 +3483,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 vm->compiler.primary_file &&
                 start->file == vm->compiler.primary_file &&
                 !(_ac && _ac->type == CTX_COMPTIME) &&
-                !is_pragma_cccc(start) &&
-                !is_pragma_comment_lib(start)) {
+                !is_pragma_cccc(start)) {
                 char *_ac_line = copy_raw_directive_line(vm, start);
                 push_emit_directive(vm, _ac_line, pp_directive(tok) == PP_INCLUDE);
                 cc_record_emit_source(vm, _ac_line);
