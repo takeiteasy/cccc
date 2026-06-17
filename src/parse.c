@@ -3124,14 +3124,26 @@ static Node *lvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj 
 
     InitDesg desg = {NULL, 0, NULL, var};
 
-    // If a partial initializer list is given, the standard requires
-    // that unspecified elements are set to 0. Here, we simply
-    // zero-initialize the entire memory region of a variable before
-    // initializing it with user-supplied values.
+    // If a partial initializer list is given, the standard requires that
+    // unspecified elements/members are set to 0. We zero-initialize the entire
+    // memory region of the variable before applying the user-supplied values.
+    //
+    // Only aggregates (struct/union/array) can be partially initialized, so the
+    // pre-zero is needed for them alone. A scalar's single initializer always
+    // fully defines its value, so create_lvar_init's assignment overwrites the
+    // whole object — a leading ND_MEMZERO would be dead. Emitting it anyway is
+    // not just wasteful: ND_MEMZERO lowers to MSET, which clobbers REG_A0/A2,
+    // so every redundant memzero widens the call-argument clobber surface (see
+    // contains_funcall in codegen.c). Restrict it to the types that need it.
+    Node *rhs = create_lvar_init(vm, init, var->ty, &desg, tok);
+    Type *t = var->ty;
+    bool is_aggregate = t->kind == TY_STRUCT || t->kind == TY_UNION ||
+                        t->kind == TY_ARRAY;
+    if (!is_aggregate)
+        return rhs;
+
     Node *lhs = new_node(vm, ND_MEMZERO, tok);
     lhs->var = var;
-
-    Node *rhs = create_lvar_init(vm, init, var->ty, &desg, tok);
     return new_binary(vm, ND_COMMA, lhs, rhs, tok);
 }
 

@@ -39,7 +39,7 @@
 #endif
 
 #define CCCC_MAGIC "CCCC\0"
-#define CCCC_VERSION 11 // Version 11: indexed load/store opcodes (#251)
+#define CCCC_VERSION 12 // Version 12: MSET opcode for ND_MEMZERO (#464)
 
 // Stack canary constant for detecting stack overflows (used when random
 // canaries disabled)

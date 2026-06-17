@@ -2032,6 +2032,15 @@ static inline int op_MCPY_fn(VirtualMachine *vm) {
     return 0;
 }
 
+static inline int op_MSET_fn(VirtualMachine *vm) {
+    // Zero-fill: dest in REG_A0, count in REG_A2 (REG_A1 unused, value is always 0)
+    // Backs ND_MEMZERO (the pre-zero step emitted for partial aggregate initialisers).
+    void *dest = (void *)vm->regs[REG_A0];
+    size_t count = (size_t)vm->regs[REG_A2];
+    memset(dest, 0, count);
+    return 0;
+}
+
 // ========== Wide _BitInt(N>64) multi-word arithmetic/shifts ==========
 // Thin dispatch into the existing runtime helpers in src/stdlib/wide_bitint.c
 // (still used directly by the FFI/CALLF path for AND/OR/XOR/CMP/casts) —

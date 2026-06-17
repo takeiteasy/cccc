@@ -941,6 +941,12 @@ static bool contains_funcall(Node *node) {
         return true;
     if (is_wide_bitint_helper_op(node))
         return true;
+    // ND_MEMZERO lowers to the MSET opcode, which clobbers REG_A0/REG_A2 (the
+    // ABI argument registers) just like a function call.  When a partial
+    // aggregate initialiser (`T x[N] = {0}`, struct `{...}`) appears as a call
+    // argument, already-staged argument registers must be saved around it.
+    if (node->kind == ND_MEMZERO)
+        return true;
 
     // Check children
     if (contains_funcall(node->lhs))
@@ -4423,10 +4429,22 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         return;
     }
 
-    // ND_MEMZERO is handled in gen_stmt, but can appear in expr context
+    // ND_MEMZERO: zero-clear a local variable's stack region.
+    // Emitted as the first operand of the ND_COMMA produced by lvar_initializer
+    // for partial aggregate initialisers (e.g. `T arr[N] = {0}`).  The MSET
+    // opcode mirrors MCPY: dest=REG_A0, count=REG_A2.
+    //
+    // __block variables: skip.  Their stack slot (bp+offset) holds an 8-byte
+    // heap pointer written by the function prologue; var->ty->size is the size
+    // of the *element* (e.g. 4 for int), so a blind memset would corrupt the
+    // pointer.  The explicit initialiser (if any) goes through gen_addr which
+    // correctly dereferences the pointer to the heap cell.
     case ND_MEMZERO:
-        // Zero-initialize memory - typically done at local var declaration
-        // For now, just return (handled via assignment)
+        if (node->var->is_block_var)
+            return;
+        emit_lea3(vm, REG_A0, node->var->offset); // bp + offset  -> A0 (dest)
+        emit_li3(vm, REG_A2, node->var->ty->size); // byte count  -> A2
+        emit(vm, MSET);
         return;
 
     case ND_LOGAND: {

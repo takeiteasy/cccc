@@ -42,6 +42,12 @@ int main(void) {
     struct Outer o = {1, {2, 3}, 4.5};
     char buf[sizeof(struct Outer)];
 
+    // $serialize writes each member individually and never touches struct
+    // padding, so the deserialized copy's padding bytes would otherwise be
+    // indeterminate. Zero buf up front so the final memcmp (which spans
+    // padding) compares like with like.
+    memset(buf, 0, sizeof buf);
+
     int n = outer_pack(&o, buf);
     if (n != (int)sizeof(struct Outer))
         return 1;
