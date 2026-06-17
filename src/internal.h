@@ -39,7 +39,7 @@
 #endif
 
 #define CCCC_MAGIC "CCCC\0"
-#define CCCC_VERSION 12 // Version 12: MSET opcode for ND_MEMZERO (#464)
+#define CCCC_VERSION 1 // Bytecode format version (pre-1.0; bump only at release)
 
 // Stack canary constant for detecting stack overflows (used when random
 // canaries disabled)

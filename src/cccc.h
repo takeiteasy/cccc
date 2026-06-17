@@ -63,7 +63,7 @@ extern "C" {
     X(MALC, 0)                                                                 \
     X(MFRE, 0)                                                                 \
     X(MCPY, 0)                                                                 \
-    X(MSET, 0)  /* memset to 0: dest=REG_A0, count=REG_A2 */                  \
+    X(MSET, 0) /* memset to 0: dest=REG_A0, count=REG_A2; backs ND_MEMZERO */   \
     X(REALC, 0)                                                                \
     X(CALC, 0)                                                                 \
     /* Type conversion instructions (in-register) */                           \

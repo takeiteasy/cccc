@@ -65,7 +65,8 @@ Options:
 	-P/--print-tokens        Print preprocessed tokens to stdout
 	-E/--preprocess          Output preprocessed source code (traditional C -E)
 	-M/--dump-expanded       Output macro-expanded source code (for gcc compatibility)
-	-G/--emit-generated      Serialize only comptime macro-generated objects (no header noise)
+	-G/--emit-generated      Serialize runtime TU + macro-generated objects to C
+	   --emit-only           With -G: only emit explicitly tagged content ([[cccc::emit]], $publish)
 	   --attr-target=TARGET  Attribute spelling in generated output: auto, c23, gnu, msvc, strip
 	-j/--json                Emit JSON for all eligible output (diagnostics, header declarations, --fusion-candidates, etc.)
 	   --ffi-decls           Emit parsed function/struct/enum declarations as JSON (for FFI wrapper generation)
@@ -81,9 +82,18 @@ Options:
 	-o/--out <file>          Output file. Required for -c=native. For -c=bytecode, writes
 	                         bytecode to <file>; if omitted, writes to stdout
 	-d/--disassemble         Disassemble bytecode to stdout
-	-t/--testing             Discover and run [[cccc::test]] functions; output TAP
+	-t/--testing             Discover and run [[cccc::test]] functions
+	   --test=GLOB           Run only tests whose name matches GLOB (implies --testing)
+	   --test-suite=NAME     Run only tests in the named suite (implies --testing)
+	   --list-tests          List test names without running (implies --testing)
+	   --fail-fast           Stop after the first failing test
+	   --test-timeout=N      Per-test timeout in seconds (0 = no timeout;
+	                         individual tests may override via
+	                         [[cccc::test(timeout = ms)]])
+	   --test-format=FMT     Output format for test results: tap (default), plain, json
 	-v/--verbose             Enable debug logging
 	-g/--debug               Enable interactive debugger
+	   --no-debug-on-crash   Disable auto-drop into debugger on crash (for test harnesses)
 	-e/--entry <name>        Set the entry-point function (default: main)
 	   --vm-profile          Count executed VM opcodes and print a report
 	                         Combine with --json to also dump the profile as JSON to stdout
@@ -124,6 +134,8 @@ Memory Safety Options (can be combined with safety levels):
 	-R/--random-canaries         Use random stack canaries (prevents predictable bypass)
 	   --memory-poisoning        Poison allocated/freed memory (0xCD/0xDD patterns)
 	   --memory-tagging          Temporal memory tagging (track pointer generation tags)
+	   --thread-safety           Threading safety diagnostics: race detection, lock-order
+	                             inversion, double-lock, and atomic cast warnings
 	-V/--vm-heap                 Route all malloc/free through VM heap (enables memory safety)
 
 FFI Safety Options:
@@ -147,6 +159,10 @@ Preprocessor Options:
 	   --strict-comptime-includes Only forward the main source file's own
 	                              declarations to the comptime pass (skip
 	                              declarations from regular #includes)
+	   --allow-comptime-pp-bleed  Allow #define/#undef inside one
+	                              [[cccc::comptime]] function body to remain
+	                              visible to other comptime function bodies
+	                              (pre-#283 behavior; default is isolated)
 
 Optimization Levels:
 	-O/--optimize[=LEVEL]        Enable bytecode optimization (default: disabled)

@@ -291,6 +291,7 @@ These opcodes implement the C standard library heap when `--vm-heap` is enabled.
 | `MALC` | `REG_A0` = size | Allocate; pointer returned in `REG_A0` |
 | `MFRE` | `REG_A0` = ptr | Free pointer (detects double-free) |
 | `MCPY` | `REG_A0` = dest, `REG_A1` = src, `REG_A2` = count | `memcpy` |
+| `MSET` | `REG_A0` = dest, `REG_A2` = count | `memset` to 0; backs `ND_MEMZERO` (pre-zero for partial aggregate initialisers) |
 | `REALC` | `REG_A0` = ptr, `REG_A1` = new_size | `realloc` |
 | `CALC` | `REG_A0` = nmemb, `REG_A1` = size | `calloc` |
 
@@ -449,7 +450,7 @@ safety instrumentation is not active.
 
 ## Bytecode File Format (`.c4`)
 
-Saved bytecode files are self-contained and can be loaded into a fresh VM instance without recompilation.  The format is versioned (current version **11**).
+Saved bytecode files are self-contained and can be loaded into a fresh VM instance without recompilation.  The format is versioned (current version **1**).
 
 ```
 +---------------+  offset 0
