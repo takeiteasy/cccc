@@ -3458,6 +3458,13 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         node->cond = expr(vm, &tok, tok);
         tok = skip(vm, tok, ")");
 
+        if (vm->compiler.warnings & CCCC_WARN_SWITCH_BOOL) {
+            add_type(vm, node->cond);
+            if (node->cond->ty && node->cond->ty->kind == TY_BOOL)
+                warn_tok(vm, node->tok, CCCC_WARN_SWITCH_BOOL,
+                         "switch condition has boolean type");
+        }
+
         Node *sw = vm->compiler.current_switch;
         vm->compiler.current_switch = node;
 
@@ -3467,6 +3474,11 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         node->then = stmt(vm, rest, tok);
 
         warn_switch_fallthrough(vm, node);
+
+        if ((vm->compiler.warnings & CCCC_WARN_SWITCH_DEFAULT) &&
+            !node->default_case)
+            warn_tok(vm, node->tok, CCCC_WARN_SWITCH_DEFAULT,
+                     "switch statement has no default case");
 
         vm->compiler.current_switch = sw;
         vm->compiler.brk_label = brk;
@@ -4549,14 +4561,28 @@ static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
         Token *start = tok;
 
         if (equal(tok, "==")) {
-            node = new_binary(vm, ND_EQ, node, relational(vm, &tok, tok->next),
-                              start);
+            Node *rhs = relational(vm, &tok, tok->next);
+            if (vm->compiler.warnings & CCCC_WARN_FLOAT_EQUAL) {
+                add_type(vm, node);
+                add_type(vm, rhs);
+                if (is_flonum(node->ty) && is_flonum(rhs->ty))
+                    warn_tok(vm, start, CCCC_WARN_FLOAT_EQUAL,
+                             "comparing floating-point values with == is unreliable");
+            }
+            node = new_binary(vm, ND_EQ, node, rhs, start);
             continue;
         }
 
         if (equal(tok, "!=")) {
-            node = new_binary(vm, ND_NE, node, relational(vm, &tok, tok->next),
-                              start);
+            Node *rhs = relational(vm, &tok, tok->next);
+            if (vm->compiler.warnings & CCCC_WARN_FLOAT_EQUAL) {
+                add_type(vm, node);
+                add_type(vm, rhs);
+                if (is_flonum(node->ty) && is_flonum(rhs->ty))
+                    warn_tok(vm, start, CCCC_WARN_FLOAT_EQUAL,
+                             "comparing floating-point values with != is unreliable");
+            }
+            node = new_binary(vm, ND_NE, node, rhs, start);
             continue;
         }
 
@@ -7534,16 +7560,46 @@ static bool is_plain_signed_int(Type *ty) {
     return ty && ty->kind == TY_INT && !ty->base && !ty->is_unsigned;
 }
 
+static bool is_char_ptr_ptr(Type *ty) {
+    return ty && ty->kind == TY_PTR &&
+           ty->base && ty->base->kind == TY_PTR &&
+           ty->base->base && ty->base->base->size == 1;
+}
+
 static void validate_main_signature(VirtualMachine *vm, Obj *fn) {
     if (!fn || !fn->name || strcmp(fn->name, "main") != 0)
         return;
 
-    Type *params = fn->ty ? fn->ty->params : NULL;
-    if (!params)
-        return;
-    if (!is_plain_signed_int(params))
-        error_tok(vm, params->name_pos ? params->name_pos : fn->tok,
-                  "main's first parameter must be int");
+    bool warn = vm->compiler.warnings & CCCC_WARN_MAIN;
+
+    // Check return type.
+    if (warn && fn->ty && fn->ty->return_ty &&
+        fn->ty->return_ty->kind != TY_INT)
+        warn_tok(vm, fn->tok, CCCC_WARN_MAIN,
+                 "return type of 'main' is not 'int'");
+
+    // Count parameters and check types.
+    int nparams = 0;
+    for (Type *p = fn->ty ? fn->ty->params : NULL; p; p = p->next)
+        nparams++;
+
+    if (nparams == 0)
+        return; // int main(void) — always fine
+
+    if (warn && nparams != 2 && nparams != 3)
+        warn_tok(vm, fn->tok, CCCC_WARN_MAIN,
+                 "suspicious number of parameters for 'main': expected 0 or 2");
+
+    Type *first = fn->ty->params;
+    if (warn && first && !is_plain_signed_int(first))
+        warn_tok(vm, first->name_pos ? first->name_pos : fn->tok,
+                 CCCC_WARN_MAIN, "first parameter of 'main' should be 'int'");
+
+    Type *second = first ? first->next : NULL;
+    if (warn && second && !is_char_ptr_ptr(second))
+        warn_tok(vm, second->name_pos ? second->name_pos : fn->tok,
+                 CCCC_WARN_MAIN,
+                 "second parameter of 'main' should be 'char **'");
 }
 
 static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {

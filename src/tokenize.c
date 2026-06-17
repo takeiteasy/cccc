@@ -78,6 +78,11 @@ static const WarningInfo warning_infos[] = {
     {"duplicated-branches",  CCCC_WARN_DUPLICATED_BRANCHES,  false},
     {"duplicated-cond",      CCCC_WARN_DUPLICATED_COND,      false},
     {"unused-value",         CCCC_WARN_UNUSED_VALUE,         false},
+    {"multichar",            CCCC_WARN_MULTICHAR,            false},
+    {"main",                 CCCC_WARN_MAIN,                 false},
+    {"switch-default",       CCCC_WARN_SWITCH_DEFAULT,       false},
+    {"switch-bool",          CCCC_WARN_SWITCH_BOOL,          false},
+    {"float-equal",          CCCC_WARN_FLOAT_EQUAL,          false},
     {"all", CCCC_WARN_ALL, true},
     {"extra", CCCC_WARN_EXTRA, true},
 };
@@ -863,6 +868,8 @@ static Token *read_char_literal(VirtualMachine *vm, char *start, char *quote, Ty
     Token *tok = new_token(vm, TK_NUM, start, end + 1);
     tok->val = c;
     tok->ty = ty;
+    if (p != end)
+        warn_tok(vm, tok, CCCC_WARN_MULTICHAR, "multi-character character constant");
     return tok;
 }
 

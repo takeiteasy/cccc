@@ -99,6 +99,11 @@ The warning infrastructure recognizes these category names:
 - `duplicated-branches` — warns when the `then` and `else` bodies of an `if` statement are structurally identical
 - `duplicated-cond` — warns when a condition is repeated in an `if`/`else if` chain
 - `unused-value` — warns when an expression whose result is discarded has no side effects (e.g. `x + y;` as a statement)
+- `multichar` — warns on multi-character character constants such as `'ab'` or `'abc'`
+- `main` — warns on suspicious `main()` signatures: non-`int` return type, wrong parameter count (not 0 or 2), wrong first parameter type, or wrong second parameter type
+- `switch-default` — warns when a `switch` statement has no `default:` label
+- `switch-bool` — warns when the controlling expression of a `switch` has boolean type (`_Bool` / `bool`)
+- `float-equal` — warns on direct `==` or `!=` comparisons between floating-point operands
 
 `conversion` is an umbrella name: `-Wconversion` enables `sign-conversion` and
 `float-conversion` as well as the integer-narrowing check.
@@ -223,3 +228,19 @@ and `(void)symbol`. Set-but-not-used analysis is not currently performed.
 - Repeated conditions in an `if`/`else if` chain use `-Wduplicated-cond`.
   CCCC walks the full chain and reports each condition that duplicates an
   earlier one in the same chain.
+- Multi-character character constants such as `'ab'` use `-Wmultichar`.
+  Only the first character contributes to the value; extra characters are
+  silently discarded. All five flags are part of `-Wall`.
+- Suspicious `main()` signatures use `-Wmain`. Checked at the closing brace
+  of the definition: non-`int` return type, parameter count other than 0 or 2,
+  first parameter not `int`, and second parameter not `char **` each produce a
+  separate diagnostic.
+- `switch` statements without a `default:` label use `-Wswitch-default`,
+  checked after the full body is parsed.
+- `switch` statements whose controlling expression has boolean type (`_Bool`
+  or `bool`) use `-Wswitch-bool`. A boolean switch has only two meaningful
+  values; an `if`/`else` is usually clearer.
+- Direct `==` or `!=` comparisons between two floating-point operands use
+  `-Wfloat-equal`. The check fires only when both sides of the operator have
+  floating-point type after parsing; mixed integer/float comparisons are not
+  flagged.

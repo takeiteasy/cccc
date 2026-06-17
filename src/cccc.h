@@ -394,6 +394,11 @@ typedef enum {
     CCCC_WARN_DUPLICATED_BRANCHES = (1ULL << 30), // identical then/else bodies
     CCCC_WARN_DUPLICATED_COND     = (1ULL << 31), // same condition repeated in if/else-if chain
     CCCC_WARN_UNUSED_VALUE        = (1ULL << 32), // expression result discarded, no side effects
+    CCCC_WARN_MULTICHAR           = (1ULL << 33), // multi-character character constant
+    CCCC_WARN_MAIN                = (1ULL << 34), // suspicious main() signature
+    CCCC_WARN_SWITCH_DEFAULT      = (1ULL << 35), // switch with no default: label
+    CCCC_WARN_SWITCH_BOOL         = (1ULL << 36), // switch on _Bool / bool expression
+    CCCC_WARN_FLOAT_EQUAL         = (1ULL << 37), // == or != on floating-point operands
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
     CCCC_WARN_CONVERSION_GROUP = CCCC_WARN_CONVERSION |
@@ -419,7 +424,12 @@ CCCC_WARN_ALL = CCCC_WARN_UNUSED |
                    CCCC_WARN_ATTRIBUTES |
                    CCCC_WARN_NODISCARD |
                    CCCC_WARN_STATIC_ARRAY_SIZE |
-                   CCCC_WARN_DISCARDED_QUALIFIERS,
+                   CCCC_WARN_DISCARDED_QUALIFIERS |
+                   CCCC_WARN_MULTICHAR |
+                   CCCC_WARN_MAIN |
+                   CCCC_WARN_SWITCH_DEFAULT |
+                   CCCC_WARN_SWITCH_BOOL |
+                   CCCC_WARN_FLOAT_EQUAL,
     CCCC_WARN_EXTRA = CCCC_WARN_SHADOW |
                       CCCC_WARN_SIGN_COMPARE |
                       CCCC_WARN_CONVERSION |

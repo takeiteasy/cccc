@@ -1,6 +1,7 @@
 // CCCC_FLAGS: -Wmain
 // CCCC_EXPECT_STDERR: first parameter of 'main' should be 'int'.*\[-Wmain\]
 
-long long main(long long argc, char **argv) {
-    return argc || argv ? 42 : 1;
+int main(float x, char **argv) {
+    (void)x; (void)argv;
+    return 42;
 }
