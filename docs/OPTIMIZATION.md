@@ -30,7 +30,7 @@ CCCC includes optional bytecode optimization passes that can improve execution p
 | 0 | (default) | No optimization | None |
 | 1 | `--optimize` or `--optimize=1` | Basic | Constant folding + dead-call elimination |
 | 2 | `--optimize=2` | Standard | All level-1 passes + peephole + CSE for const functions + scalar local promotion + indexed load/store lowering |
-| 3 | `--optimize=3` | Aggressive | All passes |
+| 3 | `--optimize=3` | Aggressive | All passes + copy propagation + dead-MOV3 elimination |
 | 4 | `--optimize=4` | Fused | All level-3 passes + automatic opcode fusion |
 
 ## Per-Function Optimization
@@ -194,6 +194,40 @@ code-generation lowerings that reduce hot-loop bytecode dispatch.
 
 ---
 
+### Copy Propagation (`--optimize=3`)
+
+Forward dataflow analysis that tracks which registers are copies of other registers and substitutes the original source register at all downstream uses. Where the substitution makes a chain redundant (e.g., `MOV3 r5, r10; MOV3 r11, r5` → `MOV3 r11, r10`), the intermediate copy is collapsed and the earlier MOV3 is eliminated if its destination has no remaining uses.
+
+**What it eliminates:**
+- Redundant register-to-register moves (`MOV3`) where the destination is overwritten before being read
+- Copy chains: `a = b; c = a` becomes `c = b` and the `a = b` move is removed when `a` has no other uses
+- Dead moves to argument/scratch registers before calls and control-flow
+
+**How it works:**
+- Sub-pass A (forward substitution): maintains a `copy_of[r]` table per basic block; when an instruction reads a register with a known copy fact, the read is redirected to the ultimate source
+- Sub-pass B (dead-MOV3 NOP): tracks the most recent MOV3 that defined each register; if the register is re-defined before its value is read, the earlier MOV3 is NOP'd for removal by compaction
+
+**Limitations:**
+- Copy facts are cleared at all control-flow join points (loop headers, branch targets) — conservative; some across-block chains are missed
+- Conditional branches (JZ3/JNZ3) flush the tracking table: the fall-through path continues correctly, but the pass cannot verify the taken-path is also dead-safe
+- Only tracks integer registers (FMOV3 and float-register copies are not propagated)
+
+**Example:**
+```c
+// Generated for: struct Point p = make_point(10, 32);
+// After call, r10 = return-buffer address, r5 = &p (local copy)
+
+// Before copy-prop (-O2):
+MOV3 r5, r10   // r5 = return buffer
+MOV3 r11, r5   // r11 = r5 (MCPY source)
+
+// After copy-prop (-O3):
+MOV3 r5, r10   // kept (r5 used elsewhere)
+MOV3 r11, r10  // r11 directly references root — r5 copy eliminated
+```
+
+---
+
 ### Phase 3: Dead Code Elimination (`--optimize=3`)
 
 Removes demonstrably dead code using conservative analysis.
@@ -288,5 +322,6 @@ Enable verbose mode to see optimization statistics:
 With verbose enabled, the optimizer reports:
 - `[opt] constant folding: tracked N constant expressions`
 - `[opt] peephole: removed N redundant instructions`
+- `[opt] copy-prop: rewrote N uses, eliminated M MOV3`
 - `[opt] dead code: N instructions removed, M NOPs present`
 - `[opt] fused ops: rewrote N adjacent def-use pairs`

@@ -1086,6 +1086,414 @@ static void opt_compact_bytecode(VirtualMachine *vm, OptReplacement *repls) {
     free(pc_map);
 }
 
+// ========== Pass 4: Copy Propagation ==========
+//
+// Eliminates register-to-register copy chains by substituting uses of a
+// copied register with the ultimate source register.  After substitution,
+// MOV3/FMOV3 instructions whose destination is no longer used are converted
+// to NOP for the subsequent compaction pass.
+//
+// Conservative at control-flow boundaries and call sites: all copy facts are
+// cleared at branch targets and after CALL-family instructions.
+//
+// Two sub-passes on the same [fn_start, fn_end) range:
+//   A: Forward — record copy facts, chain-collapse MOV3 chains, substitute
+//      source operands (rs1/rs2 — bytes 1-2 of the operand word) in all
+//      non-CF instructions.
+//   B: Use-count + NOP — count register appearances in source positions;
+//      NOP any MOV3/FMOV3 whose destination is never read.
+
+// Returns true when both source operands of op come from the float register
+// file (fregs[]).  Mixed ops (I2F3, FLDR, FSTR, …) return false so their
+// sources are substituted from the integer copy map, which is correct for
+// their integer address/index operands.
+static bool op_is_float_src(int op) {
+    switch (op) {
+    case FMOV3:
+    case FADD3: case FSUB3: case FMUL3: case FDIV3: case FNEG3:
+    case FADD3_F32: case FSUB3_F32: case FMUL3_F32: case FDIV3_F32:
+    case FNEG3_F32: case FROUND_F32:
+    case FEQ3: case FNE3: case FLT3: case FLE3: case FGT3: case FGE3:
+    case FEQ3_F32: case FNE3_F32: case FLT3_F32: case FLE3_F32:
+    case FGT3_F32: case FGE3_F32:
+    case F2I3: case F2I3_F32: case FR2R: case FR2R_F32:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Returns true for opcodes whose byte 0 of the operand word is an INTEGER
+// SOURCE register (store value or conditional-branch condition register).
+static bool op_byte0_is_int_src(int op) {
+    switch (op) {
+    case STR_B: case STR_H: case STR_W: case STR_D:
+    case STR_INDEX_B: case STR_INDEX_H: case STR_INDEX_W: case STR_INDEX_D:
+    case STR_LOCAL_B: case STR_LOCAL_H: case STR_LOCAL_W: case STR_LOCAL_D:
+    case ASTR:
+    case JZ3: case JNZ3:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Returns true for opcodes whose byte 0 of the operand word is a FLOAT
+// register (either float destination or float source value for stores).
+// Used to avoid confusing float and integer register tracking.
+static bool op_byte0_is_float(int op) {
+    switch (op) {
+    case FMOV3:
+    case FADD3: case FSUB3: case FMUL3: case FDIV3: case FNEG3:
+    case FADD3_F32: case FSUB3_F32: case FMUL3_F32: case FDIV3_F32:
+    case FNEG3_F32: case FROUND_F32:
+    case FLDR: case FLDR_F32:
+    case FLDR_INDEX: case FLDR_INDEX_F32:
+    case FLDR_LOCAL: case FLDR_LOCAL_F32:
+    case FSTR: case FSTR_F32:
+    case FSTR_INDEX: case FSTR_INDEX_F32:
+    case FSTR_LOCAL: case FSTR_LOCAL_F32:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Kept for sub-pass B use-count on stores (byte 0 is any kind of source).
+static bool op_byte0_is_src(int op) {
+    return op_byte0_is_int_src(op) || op_byte0_is_float(op);
+}
+
+static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
+    if (!vm || !vm->text_seg || !vm->text_ptr)
+        return;
+
+    Pc start = fn_start;
+    Pc end   = fn_end;
+
+    bool *cf_targets = build_control_flow_targets(vm, start, end);
+
+    // copy_of[r]  = s  —  integer register r is a copy of integer register s
+    // fcopy_of[r] = s  —  float register r is a copy of float register s
+    // -1 = no active copy fact for r
+    int copy_of[NUM_REGS];
+    int fcopy_of[NUM_REGS];
+    for (int i = 0; i < NUM_REGS; i++)
+        copy_of[i] = fcopy_of[i] = -1;
+
+    int prop_count = 0;
+    int nop_count  = 0;
+
+    // ---- Sub-pass A: Forward copy propagation ----
+    for (Pc pc = start; pc < end; ) {
+        int op   = get_opcode(vm, pc);
+        int size = get_instr_size_at(vm, pc, end);
+        if (size <= 0)
+            break;
+
+        // Clear all copy facts at control-flow join points.
+        if (pc != start && cf_targets[pc - start])
+            for (int i = 0; i < NUM_REGS; i++)
+                copy_of[i] = fcopy_of[i] = -1;
+
+        if (op == MOV3) {
+            int rd = (int)(vm->text_seg[pc + 1] & 0xFF);
+            int rs = (int)((vm->text_seg[pc + 1] >> 8) & 0xFF);
+
+            if (rd > REG_ZERO && rd != rs) {
+                // Chain-resolve: follow rs back to the ultimate source.
+                int root = (rs < NUM_REGS && copy_of[rs] >= 0) ? copy_of[rs] : rs;
+                copy_of[rd] = root;
+                // Rewrite this MOV3 to point at the root (collapses chains).
+                if (root != rs) {
+                    vm->text_seg[pc + 1] = ENCODE_RR(rd, root);
+                    prop_count++;
+                }
+                // Kill stale copy facts that pointed at rd.
+                for (int i = 1; i < NUM_REGS; i++)
+                    if (copy_of[i] == rd) copy_of[i] = -1;
+            } else if (rd > REG_ZERO) {
+                copy_of[rd] = -1;
+                for (int i = 1; i < NUM_REGS; i++)
+                    if (copy_of[i] == rd) copy_of[i] = -1;
+            }
+
+        } else if (op == FMOV3) {
+            int rd = (int)(vm->text_seg[pc + 1] & 0xFF);
+            int rs = (int)((vm->text_seg[pc + 1] >> 8) & 0xFF);
+
+            if (rd > REG_ZERO && rd != rs) {
+                int root = (rs < NUM_REGS && fcopy_of[rs] >= 0) ? fcopy_of[rs] : rs;
+                fcopy_of[rd] = root;
+                if (root != rs) {
+                    vm->text_seg[pc + 1] = ENCODE_RR(rd, root);
+                    prop_count++;
+                }
+                for (int i = 1; i < NUM_REGS; i++)
+                    if (fcopy_of[i] == rd) fcopy_of[i] = -1;
+            } else if (rd > REG_ZERO) {
+                fcopy_of[rd] = -1;
+                for (int i = 1; i < NUM_REGS; i++)
+                    if (fcopy_of[i] == rd) fcopy_of[i] = -1;
+            }
+
+        } else {
+            switch (op) {
+            // Conditional branches: fall-through retains copy facts.
+            // Substitute the condition register (byte 0) if a fact exists.
+            // The taken target is already a CF target and will be cleared there.
+            case JZ3:
+            case JNZ3:
+                if (size >= 2) {
+                    InstrWord w = vm->text_seg[pc + 1];
+                    int rs = (int)(w & 0xFF);
+                    if (rs > REG_ZERO && rs < NUM_REGS && copy_of[rs] >= 0) {
+                        vm->text_seg[pc + 1] = (w & ~(InstrWord)0xFFu)
+                                             | (InstrWord)copy_of[rs];
+                        prop_count++;
+                    }
+                }
+                break;
+
+            // Unconditional control-flow: clear all copy facts.
+            case JMP:
+            case JMPT:
+            case JMPI:
+            case CALL:
+            case CALLT:
+            case CALLI:
+            case CALLN:
+            case CALLF:
+            case ENT3:
+            case LEV3:
+                for (int i = 0; i < NUM_REGS; i++)
+                    copy_of[i] = fcopy_of[i] = -1;
+                break;
+
+            default:
+                // Substitute rs1 (byte 1) and rs2 (byte 2) of the operand word
+                // using the appropriate copy map, then kill the destination
+                // register (byte 0).  Applies to all sizes — byte 3 (scale /
+                // bitwidth) is left untouched.
+                if (size >= 2) {
+                    InstrWord w = vm->text_seg[pc + 1];
+                    int rd  = (int)(w & 0xFF);
+                    int rs1 = (int)((w >> 8) & 0xFF);
+                    int rs2 = (int)((w >> 16) & 0xFF);
+
+                    int *cop = op_is_float_src(op) ? fcopy_of : copy_of;
+
+                    bool changed = false;
+                    if (rs1 > REG_ZERO && rs1 < NUM_REGS && cop[rs1] >= 0) {
+                        rs1 = cop[rs1]; changed = true;
+                    }
+                    if (rs2 > REG_ZERO && rs2 < NUM_REGS && cop[rs2] >= 0) {
+                        rs2 = cop[rs2]; changed = true;
+                    }
+                    if (changed) {
+                        // Update bytes 1-2; preserve bytes 0 (rd) and 3 (scale).
+                        vm->text_seg[pc + 1] = (w & ~(InstrWord)0x00FFFF00u)
+                                             | ((InstrWord)rs1 << 8)
+                                             | ((InstrWord)rs2 << 16);
+                        prop_count++;
+                    }
+
+                    // Kill copy facts for rd (it is (re)defined by this instruction).
+                    if (rd > REG_ZERO && rd < NUM_REGS) {
+                        copy_of[rd]  = -1;
+                        fcopy_of[rd] = -1;
+                        for (int i = 1; i < NUM_REGS; i++) {
+                            if (copy_of[i]  == rd) copy_of[i]  = -1;
+                            if (fcopy_of[i] == rd) fcopy_of[i] = -1;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+
+        pc += size;
+    }
+
+    // ---- Sub-pass B: Forward dead-MOV3 elimination ----
+    //
+    // Tracks the most recent MOV3 that defined each integer register.
+    // When a register is re-defined (by any instruction) before its value has
+    // been read, the earlier MOV3 is dead and is NOP'd.
+    //
+    // Tracking resets conservatively at:
+    //   - CF join targets (loop headers, branch destinations)
+    //   - Conditional branches (JZ3/JNZ3): the taken path is unknown, so we
+    //     abandon tracking rather than risk an incorrect NOP.
+    //   - Unconditional CF instructions (JMP, CALL, etc.)
+    //
+    // Only integer MOV3s are tracked; FMOV3 and float instructions are handled
+    // conservatively (float ops only influence integer tracking via shared
+    // register indices, which is prevented by op_byte0_is_float guards).
+
+    Pc  last_mov_pc[NUM_REGS];
+    bool mov_r_live[NUM_REGS];
+    for (int i = 0; i < NUM_REGS; i++) {
+        last_mov_pc[i] = (Pc)-1;
+        mov_r_live[i]  = false;
+    }
+
+#define RESET_MOV_TRACKING() do { \
+    for (int _i = 0; _i < NUM_REGS; _i++) { \
+        last_mov_pc[_i] = (Pc)-1; \
+        mov_r_live[_i]  = false;  \
+    } \
+} while (0)
+
+#define MARK_INT_USE(r) do { \
+    int _r = (r); \
+    if (_r > REG_ZERO && _r < NUM_REGS && last_mov_pc[_r] != (Pc)-1) \
+        mov_r_live[_r] = true; \
+} while (0)
+
+#define KILL_INT_DEF(r) do { \
+    int _r = (r); \
+    if (_r > REG_ZERO && _r < NUM_REGS) { \
+        if (last_mov_pc[_r] != (Pc)-1 && !mov_r_live[_r]) { \
+            emit_mov_nop(vm, last_mov_pc[_r]); \
+            nop_count++; \
+        } \
+        last_mov_pc[_r] = (Pc)-1; \
+        mov_r_live[_r]  = false; \
+    } \
+} while (0)
+
+    for (Pc pc = start; pc < end; ) {
+        if (pc != start && cf_targets[pc - start])
+            RESET_MOV_TRACKING();
+
+        int op   = get_opcode(vm, pc);
+        int size = get_instr_size_at(vm, pc, end);
+        if (size <= 0) break;
+
+        if (op == JZ3 || op == JNZ3) {
+            // Conditional branch: mark condition register (byte 0) as used,
+            // then conservatively reset — the taken path is unknown.
+            if (size >= 2) {
+                int rs = (int)(vm->text_seg[pc + 1] & 0xFF);
+                MARK_INT_USE(rs);
+            }
+            RESET_MOV_TRACKING();
+
+        } else if (op == MOV3) {
+            if (size >= 2) {
+                int rd = (int)(vm->text_seg[pc + 1] & 0xFF);
+                int rs = (int)((vm->text_seg[pc + 1] >> 8) & 0xFF);
+                if (rd > REG_ZERO && rd < NUM_REGS) {
+                    // If previous MOV3 to rd was never used, it is dead.
+                    if (last_mov_pc[rd] != (Pc)-1 && !mov_r_live[rd]) {
+                        emit_mov_nop(vm, last_mov_pc[rd]);
+                        nop_count++;
+                    }
+                    last_mov_pc[rd] = pc;
+                    mov_r_live[rd]  = false;
+                }
+                MARK_INT_USE(rs);
+            }
+
+        } else {
+            if (size >= 2) {
+                InstrWord w = vm->text_seg[pc + 1];
+                int rd  = (int)(w & 0xFF);
+                int rs1 = (int)((w >> 8) & 0xFF);
+                int rs2 = (int)((w >> 16) & 0xFF);
+
+                // Mark integer register uses.
+                if (op_byte0_is_int_src(op))
+                    MARK_INT_USE(rd);
+                if (!op_is_float_src(op)) {
+                    MARK_INT_USE(rs1);
+                    MARK_INT_USE(rs2);
+                }
+
+                // Kill integer register definition at byte 0 if this instruction
+                // writes an integer result there (not a float def, not a store).
+                if (!op_byte0_is_src(op) && !op_byte0_is_float(op))
+                    KILL_INT_DEF(rd);
+            }
+
+            // Unconditional control-flow and zero-operand register-clobbering
+            // instructions: reset or conservatively mark A-register uses.
+            // Zero-operand instructions have no operand words so their implicit
+            // register reads/writes are invisible to the size>=2 scan above.
+            switch (op) {
+            case JMP: case JMPT: case JMPI:
+            case CALL: case CALLT: case CALLI: case CALLN: case CALLF:
+            case ENT3: case LEV3:
+                RESET_MOV_TRACKING();
+                break;
+
+            // MCPY(dest=A0, src=A1, count=A2): reads A0, A1, A2.
+            case MCPY:
+                MARK_INT_USE(REG_A0);
+                MARK_INT_USE(REG_A1);
+                MARK_INT_USE(REG_A2);
+                break;
+
+            // MALC/CALC(size=A0): reads A0, writes A0.
+            case MALC: case CALC:
+                MARK_INT_USE(REG_A0);
+                KILL_INT_DEF(REG_A0);
+                break;
+
+            // MFRE(ptr=A0): reads A0.
+            case MFRE:
+                MARK_INT_USE(REG_A0);
+                break;
+
+            // REALC(ptr=A0, size=A1): reads A0, A1, writes A0.
+            case REALC:
+                MARK_INT_USE(REG_A0);
+                MARK_INT_USE(REG_A1);
+                KILL_INT_DEF(REG_A0);
+                break;
+
+            // RETBUF: writes A0 (return buffer address from pool).
+            case RETBUF:
+                KILL_INT_DEF(REG_A0);
+                break;
+
+            // SETJMP(jmp_buf=A0): reads A0, writes A0.
+            case SETJMP:
+                MARK_INT_USE(REG_A0);
+                KILL_INT_DEF(REG_A0);
+                break;
+
+            // All other zero-operand instructions (LONGJMP, DLOPEN, WIDE_* etc.):
+            // reset conservatively — their A-register usage is too varied.
+            case LONGJMP:
+            case DLOPEN: case DLSYM: case DLCLOSE: case DLERROR:
+            case WIDE_ADD: case WIDE_SUB: case WIDE_MUL: case WIDE_DIV:
+            case WIDE_MOD: case WIDE_SHL: case WIDE_SHR: case WIDE_USHR:
+            case VSIGNAL:
+            case BTRAP:
+                RESET_MOV_TRACKING();
+                break;
+
+            default:
+                break;
+            }
+        }
+
+        pc += size;
+    }
+
+#undef RESET_MOV_TRACKING
+#undef MARK_INT_USE
+#undef KILL_INT_DEF
+
+    free(cf_targets);
+
+    if (vm->debug_vm && (prop_count > 0 || nop_count > 0))
+        printf("[opt] copy-prop: rewrote %d uses, eliminated %d MOV3\n",
+               prop_count, nop_count);
+}
+
 // ========== Pass 5: CSE for [[gnu::const]] Functions ==========
 //
 // Common-subexpression elimination for const functions.
@@ -1626,8 +2034,10 @@ static void run_opt_passes(VirtualMachine *vm, OptReplacement *repls,
         opt_constant_fold(vm, repls, fn_start, fn_end);
     if (level >= 2)
         opt_peephole(vm, fn_start, fn_end);
-    if (level >= 3)
+    if (level >= 3) {
+        opt_copy_prop(vm, fn_start, fn_end);
         opt_dead_code(vm, fn_start, fn_end);
+    }
 }
 
 // Run the post-compaction passes (CSE, fuse) on [fn_start, fn_end).
