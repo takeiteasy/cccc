@@ -1286,28 +1286,17 @@ $node_t *__cccc_ast_init_struct(VirtualMachine *vm, $type_t *ty, const char **fi
     var->next = vm->compiler.locals;
     vm->compiler.locals = var;
 
-    // Walk all struct members and emit explicit assignments.
-    // Specified fields use the caller-provided value; unspecified fields get 0.
-    // This avoids relying on ND_MEMZERO, which is a no-op in gen_expr context.
-    Node *assignments = alloc_node(vm, ND_NULL_EXPR);
-    for (Member *mem = ty->members; mem; mem = mem->next) {
-        if (!mem->name)
-            continue;
+    Node *zero = alloc_node(vm, ND_MEMZERO);
+    zero->var = var;
 
-        // Find caller-provided value for this member (if any)
-        int name_len = mem->name->len;
-        Node *val = NULL;
-        for (int i = 0; i < n; i++) {
-            if (!fields[i] || !values[i])
-                continue;
-            if ((int)strlen(fields[i]) == name_len &&
-                strncmp(mem->name->loc, fields[i], name_len) == 0) {
-                val = values[i];
-                break;
-            }
-        }
-        if (!val)
-            val = __cccc_ast_int_literal(vm, 0); // zero for unspecified fields
+    // Emit assignments only for the specified fields; ND_MEMZERO handles the rest.
+    Node *assignments = alloc_node(vm, ND_NULL_EXPR);
+    for (int i = 0; i < n; i++) {
+        if (!fields[i] || !values[i])
+            continue;
+        Member *mem = (Member *)__cccc_ast_struct_member_find(vm, ty, fields[i]);
+        if (!mem)
+            return NULL;
 
         Node *var_ref = alloc_node(vm, ND_VAR);
         var_ref->var = var;
@@ -1320,7 +1309,7 @@ $node_t *__cccc_ast_init_struct(VirtualMachine *vm, $type_t *ty, const char **fi
 
         Node *assign = alloc_node(vm, ND_ASSIGN);
         assign->lhs = mem_node;
-        assign->rhs = val;
+        assign->rhs = values[i];
         add_type(vm, assign);
 
         Node *comma = alloc_node(vm, ND_COMMA);
@@ -1330,7 +1319,7 @@ $node_t *__cccc_ast_init_struct(VirtualMachine *vm, $type_t *ty, const char **fi
     }
 
     Node *init_comma = alloc_node(vm, ND_COMMA);
-    init_comma->lhs = alloc_node(vm, ND_NULL_EXPR); // placeholder; memzero not needed
+    init_comma->lhs = zero;
     init_comma->rhs = assignments;
 
     Node *var_ref = alloc_node(vm, ND_VAR);
