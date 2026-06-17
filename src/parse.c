@@ -5067,6 +5067,49 @@ static Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
             }
         }
 
+        // -Wcast-qual and -Wcast-align: need expr->ty populated.
+        if (!vm->compiler.in_type_lookahead &&
+            (vm->compiler.warnings & (CCCC_WARN_CAST_QUAL | CCCC_WARN_CAST_ALIGN))) {
+            add_type(vm, expr);
+        }
+
+        // -Wcast-qual: explicit cast drops const/volatile/restrict from pointee.
+        if (!vm->compiler.in_type_lookahead &&
+            (vm->compiler.warnings & CCCC_WARN_CAST_QUAL) &&
+            expr->ty && ty &&
+            expr->ty->kind == TY_PTR && ty->kind == TY_PTR &&
+            expr->ty->base && ty->base) {
+            Type *fb = expr->ty->base, *tb = ty->base;
+            char qbuf[128]; qbuf[0] = '\0';
+            if (fb->is_const    && !tb->is_const)    strcat(qbuf, "'const'");
+            if (fb->is_volatile && !tb->is_volatile) {
+                if (qbuf[0]) strcat(qbuf, ", ");
+                strcat(qbuf, "'volatile'");
+            }
+            if (fb->is_restrict && !tb->is_restrict) {
+                if (qbuf[0]) strcat(qbuf, ", ");
+                strcat(qbuf, "'restrict'");
+            }
+            if (qbuf[0]) {
+                int qcount = (fb->is_const    && !tb->is_const) +
+                             (fb->is_volatile && !tb->is_volatile) +
+                             (fb->is_restrict && !tb->is_restrict);
+                warn_tok(vm, start, CCCC_WARN_CAST_QUAL,
+                         "cast discards %s qualifier%s from pointer target type",
+                         qbuf, qcount > 1 ? "s" : "");
+            }
+        }
+
+        // -Wcast-align: explicit cast raises pointer alignment requirement.
+        if (!vm->compiler.in_type_lookahead &&
+            (vm->compiler.warnings & CCCC_WARN_CAST_ALIGN) &&
+            expr->ty && ty &&
+            expr->ty->kind == TY_PTR && ty->kind == TY_PTR &&
+            expr->ty->base && ty->base &&
+            ty->base->align > expr->ty->base->align)
+            warn_tok(vm, start, CCCC_WARN_CAST_ALIGN,
+                     "cast increases required alignment of target type");
+
         // type cast
         Node *node = new_cast(vm, expr, ty);
         node->tok = start;
@@ -7828,6 +7871,12 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
     Obj *fn = attr->is_static
                   ? find_func_in_current_scope(vm, name_str, ty->name->len)
                   : find_func(vm, name_str, ty->name->len);
+    // Save prototype state before the if/else can mutate fn->is_implicit.
+    bool had_prior_decl = (fn != NULL) && !fn->is_implicit;
+    bool had_full_proto = had_prior_decl &&
+        (vm->compiler.c_std >= CCCC_STD_C23
+            ? !fn->ty->is_variadic       // C23: () == (void); non-variadic = full proto
+            : fn->ty->params != NULL);   // pre-C23: need an explicit params list
     if (fn) {
         // Redeclaration
         if (!fn->is_function)
@@ -7885,6 +7934,21 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
         run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name,
                               fn->ty, fn, fn->tok);
         return tok;
+    }
+
+    // -Wmissing-declarations / -Wmissing-prototypes for external function definitions.
+    if (!vm->compiler.in_type_lookahead && !fn->is_static && !fn->is_nested) {
+        bool is_main = fn->name && strlen(fn->name) == 4 &&
+                       !memcmp(fn->name, "main", 4);
+        if (!is_main) {
+            if ((vm->compiler.warnings & CCCC_WARN_MISSING_DECLARATIONS) &&
+                !had_prior_decl && !fn->is_inline)
+                warn_tok(vm, ty->name, CCCC_WARN_MISSING_DECLARATIONS,
+                         "no previous declaration for '%s'", fn->name);
+            if ((vm->compiler.warnings & CCCC_WARN_MISSING_PROTOTYPES) && !had_full_proto)
+                warn_tok(vm, ty->name, CCCC_WARN_MISSING_PROTOTYPES,
+                         "no previous prototype for '%s'", fn->name);
+        }
     }
 
     vm->compiler.current_fn = fn;

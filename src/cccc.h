@@ -409,6 +409,13 @@ typedef enum {
     CCCC_WARN_ENUM_COMPARE          = (1ULL << 45), // == / != / < etc. between different named enums
     CCCC_WARN_OLD_STYLE_DEFINITION  = (1ULL << 46), // K&R-style function parameter declarations
 
+    // Ticket #469: pointer safety, cast quality, and prototype flags
+    CCCC_WARN_INCOMPATIBLE_POINTER_TYPES = (1ULL << 47), // implicit pointer type mismatch (not void*)
+    CCCC_WARN_CAST_QUAL                  = (1ULL << 48), // explicit cast drops const/volatile/restrict
+    CCCC_WARN_CAST_ALIGN                 = (1ULL << 49), // explicit cast raises pointer alignment requirement
+    CCCC_WARN_MISSING_PROTOTYPES         = (1ULL << 50), // external fn defined without prior full prototype
+    CCCC_WARN_MISSING_DECLARATIONS       = (1ULL << 51), // external fn defined without any prior declaration
+
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
     CCCC_WARN_CONVERSION_GROUP = CCCC_WARN_CONVERSION |
                                 CCCC_WARN_SIGN_CONVERSION |
@@ -445,7 +452,8 @@ CCCC_WARN_ALL = CCCC_WARN_UNUSED |
                    CCCC_WARN_TAUTOLOGICAL_COMPARE |
                    CCCC_WARN_SIZEOF_POINTER_MEMACCESS |
                    CCCC_WARN_SWITCH |
-                   CCCC_WARN_ENUM_COMPARE,
+                   CCCC_WARN_ENUM_COMPARE |
+                   CCCC_WARN_INCOMPATIBLE_POINTER_TYPES,
     CCCC_WARN_EXTRA = CCCC_WARN_SHADOW |
                       CCCC_WARN_SIGN_COMPARE |
                       CCCC_WARN_CONVERSION |

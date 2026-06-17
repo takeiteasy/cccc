@@ -1,4 +1,4 @@
-// CCCC_FLAGS: -Wall -Wno-unused -Wno-return-type -Wno-implicit-int -Wno-shadow
+// CCCC_FLAGS: -Wall -Wno-unused -Wno-return-type -Wno-implicit-int -Wno-shadow -Wno-discarded-qualifiers
 // CCCC_EXPECT_STDERR: \[-Wmultichar\]
 // CCCC_EXPECT_STDOUT: done
 
@@ -59,6 +59,12 @@ void main(void) {
     Color c2 = R;
     Dir dir = UP;
     (void)(c2 == dir);
+
+    // -Wincompatible-pointer-types: int* assigned from char*
+    int x2 = 0;
+    char *cp = (char *)&x2;
+    int *ip2 = cp;
+    (void)ip2;
 
     printf("done\n");
 }

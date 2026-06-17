@@ -439,6 +439,13 @@ void warn_implicit_conversion(VirtualMachine *vm, Node *expr, Type *to, Token *t
                          buf, count > 1 ? "s" : "");
             }
         }
+        // -Wincompatible-pointer-types: non-void pointee type mismatch
+        if ((vm->compiler.warnings & CCCC_WARN_INCOMPATIBLE_POINTER_TYPES) &&
+            from_base && to_base &&
+            from_base->kind != TY_VOID && to_base->kind != TY_VOID &&
+            !is_compatible(from_base, to_base))
+            warn_tok(vm, tok, CCCC_WARN_INCOMPATIBLE_POINTER_TYPES,
+                     "incompatible pointer types");
         return;
     }
 

@@ -92,6 +92,11 @@ static const WarningInfo warning_infos[] = {
     {"switch-enum",             CCCC_WARN_SWITCH_ENUM,             false},
     {"enum-compare",            CCCC_WARN_ENUM_COMPARE,            false},
     {"old-style-definition",    CCCC_WARN_OLD_STYLE_DEFINITION,    false},
+    {"incompatible-pointer-types", CCCC_WARN_INCOMPATIBLE_POINTER_TYPES, false},
+    {"cast-qual",                  CCCC_WARN_CAST_QUAL,                  false},
+    {"cast-align",                 CCCC_WARN_CAST_ALIGN,                 false},
+    {"missing-prototypes",         CCCC_WARN_MISSING_PROTOTYPES,         false},
+    {"missing-declarations",       CCCC_WARN_MISSING_DECLARATIONS,       false},
     {"all", CCCC_WARN_ALL, true},
     {"extra", CCCC_WARN_EXTRA, true},
 };

@@ -114,6 +114,11 @@ The warning infrastructure recognizes these category names:
 - `logical-op` — warns when a constant expression appears as an operand of `&&` or `||`
 - `tautological-compare` — warns on self-comparisons and unsigned range checks that are always true or false
 - `sizeof-pointer-memaccess` — warns when `sizeof(pointer)` is passed as the size argument to `memset`, `memcpy`, `memmove`, or `memcmp`
+- `incompatible-pointer-types` — warns on implicit pointer assignments or argument passing where the pointee types are incompatible (excluding `void *`); part of `-Wall`
+- `cast-qual` — warns when an explicit cast removes `const`, `volatile`, or `restrict` from the pointed-to type
+- `cast-align` — warns when an explicit cast increases the alignment requirement of the pointer target type
+- `missing-prototypes` — warns when a non-static function is defined without a prior full prototype declaration
+- `missing-declarations` — warns when a non-static, non-inline function is defined without any prior declaration
 
 `conversion` is an umbrella name: `-Wconversion` enables `sign-conversion` and
 `float-conversion` as well as the integer-narrowing check.
@@ -299,3 +304,30 @@ and `(void)symbol`. Set-but-not-used analysis is not currently performed.
   `-Wold-style-definition`. K&R definitions are still accepted and compiled
   correctly; only the diagnostic is added. `-Wold-style-definition` is part of
   `-Wextra`.
+- Implicit pointer assignments or function-argument passing where the pointee
+  types are structurally incompatible use `-Wincompatible-pointer-types`.
+  `void *` on either side is always accepted (C allows implicit `void *`
+  conversion); assignments that differ only in qualifiers (e.g. `const int *` →
+  `int *`) are covered by `-Wdiscarded-qualifiers` rather than this flag.
+  `-Wincompatible-pointer-types` is part of `-Wall`.
+- Explicit casts that remove a `const`, `volatile`, or `restrict` qualifier from
+  the pointed-to type use `-Wcast-qual` (e.g. `(char *)cstr` where `cstr` is
+  `const char *`). The implicit-conversion path is covered by
+  `-Wdiscarded-qualifiers`; this flag targets explicit casts only.  Multiple
+  discarded qualifiers are listed in a single diagnostic.
+- Explicit casts that increase the alignment requirement of the pointer target
+  use `-Wcast-align` (e.g. `(int *)char_ptr` on a platform where `int`
+  requires 4-byte alignment and `char` requires only 1).  The access through
+  the resulting pointer is not necessarily invalid (e.g. when the buffer is
+  known to be aligned), but the cast is a common source of undefined behaviour
+  on strict-alignment architectures.
+- Non-static function definitions without a prior declaration that provides a
+  full prototype (explicit parameter types, or `(void)`) use
+  `-Wmissing-prototypes`.  The diagnostic fires even when the definition itself
+  supplies the prototype; the intent is to catch functions missing from a shared
+  header.  Nested functions, `static` functions, and `main` are exempt.  In
+  pre-C23 modes an empty `()` declaration does not count as a full prototype.
+- Non-static, non-inline function definitions without any prior declaration at
+  all use `-Wmissing-declarations`.  A K&R-style or empty-parameter-list
+  declaration seen before the definition suppresses this flag (but not
+  `-Wmissing-prototypes`).  Nested functions and `main` are exempt.
