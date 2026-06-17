@@ -109,6 +109,11 @@ The warning infrastructure recognizes these category names:
 - `switch-default` — warns when a `switch` statement has no `default:` label
 - `switch-bool` — warns when the controlling expression of a `switch` has boolean type (`_Bool` / `bool`)
 - `float-equal` — warns on direct `==` or `!=` comparisons between floating-point operands
+- `shift-negative-value` — warns when the shift amount is a negative integer constant
+- `shift-overflow` — warns when the shift amount equals or exceeds the promoted type's bit-width
+- `logical-op` — warns when a constant expression appears as an operand of `&&` or `||`
+- `tautological-compare` — warns on self-comparisons and unsigned range checks that are always true or false
+- `sizeof-pointer-memaccess` — warns when `sizeof(pointer)` is passed as the size argument to `memset`, `memcpy`, `memmove`, or `memcmp`
 
 `conversion` is an umbrella name: `-Wconversion` enables `sign-conversion` and
 `float-conversion` as well as the integer-narrowing check.
@@ -249,3 +254,24 @@ and `(void)symbol`. Set-but-not-used analysis is not currently performed.
   `-Wfloat-equal`. The check fires only when both sides of the operator have
   floating-point type after parsing; mixed integer/float comparisons are not
   flagged.
+- Shift expressions where the right-hand operand is a negative integer constant
+  use `-Wshift-negative-value`. Shifting by a negative amount is undefined
+  behaviour in C.
+- Shift expressions where the right-hand operand is a non-negative integer
+  constant that equals or exceeds the bit-width of the promoted left-hand type
+  use `-Wshift-overflow`. The bit-width accounts for integer promotion (types
+  smaller than `int` promote to `int`, i.e. 32 bits).
+- `&&` or `||` expressions where one operand is a compile-time constant
+  expression (e.g. `x && 1`, `0 || y`) use `-Wlogical-op`. A constant operand
+  can never affect the logical result on the side it occupies.
+- Comparisons that are always true or always false use `-Wtautological-compare`.
+  Two sub-cases are detected: self-comparisons (e.g. `x == x`, `x != x`) where
+  the result is determined solely by the operator, and unsigned range checks
+  (e.g. `unsigned x >= 0`, `unsigned x < 0`) where the type's value range
+  makes the outcome unconditional.
+- Calls to `memset`, `memcpy`, `memmove`, or `memcmp` where the size argument
+  is `sizeof` applied to a pointer variable or pointer type use
+  `-Wsizeof-pointer-memaccess`. This detects a common mistake where the
+  programmer writes `sizeof(ptr)` (size of the pointer itself, typically 8
+  bytes) instead of `sizeof(*ptr)` or `sizeof(element_type)`.
+  All five flags are part of `-Wall`.

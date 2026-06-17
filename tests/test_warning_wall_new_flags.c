@@ -4,6 +4,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 // -Wmain: void return type
 void main(void) {
@@ -26,6 +27,24 @@ void main(void) {
     // -Wfloat-equal: == on doubles
     double d1 = 1.0, d2 = 2.0;
     (void)(d1 == d2);
+
+    // -Wshift-negative-value: shift by negative constant
+    (void)(1 << -1);
+
+    // -Wshift-overflow: shift amount >= type width
+    (void)(1 << 32);
+
+    // -Wlogical-op: constant operand in &&
+    (void)(x && 1);
+
+    // -Wtautological-compare: unsigned >= 0
+    unsigned u = 5;
+    (void)(u >= 0);
+
+    // -Wsizeof-pointer-memaccess: sizeof(ptr) to memset
+    char buf[8];
+    char *p = buf;
+    memset(p, 0, sizeof(p));
 
     printf("done\n");
 }

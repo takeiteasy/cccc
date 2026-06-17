@@ -82,7 +82,12 @@ static const WarningInfo warning_infos[] = {
     {"main",                 CCCC_WARN_MAIN,                 false},
     {"switch-default",       CCCC_WARN_SWITCH_DEFAULT,       false},
     {"switch-bool",          CCCC_WARN_SWITCH_BOOL,          false},
-    {"float-equal",          CCCC_WARN_FLOAT_EQUAL,          false},
+    {"float-equal",              CCCC_WARN_FLOAT_EQUAL,              false},
+    {"shift-negative-value",     CCCC_WARN_SHIFT_NEGATIVE_VALUE,     false},
+    {"shift-overflow",           CCCC_WARN_SHIFT_OVERFLOW,           false},
+    {"logical-op",               CCCC_WARN_LOGICAL_OP,               false},
+    {"tautological-compare",     CCCC_WARN_TAUTOLOGICAL_COMPARE,     false},
+    {"sizeof-pointer-memaccess", CCCC_WARN_SIZEOF_POINTER_MEMACCESS, false},
     {"all", CCCC_WARN_ALL, true},
     {"extra", CCCC_WARN_EXTRA, true},
 };

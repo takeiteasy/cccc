@@ -4498,8 +4498,16 @@ static Node *logor(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = logand(vm, &tok, tok);
     while (equal(tok, "||")) {
         Token *start = tok;
-        node =
-            new_binary(vm, ND_LOGOR, node, logand(vm, &tok, tok->next), start);
+        Node *rhs = logand(vm, &tok, tok->next);
+        if (vm->compiler.warnings & CCCC_WARN_LOGICAL_OP) {
+            if (is_const_expr(vm, node))
+                warn_tok(vm, start, CCCC_WARN_LOGICAL_OP,
+                         "left operand of '||' is a constant expression");
+            else if (is_const_expr(vm, rhs))
+                warn_tok(vm, start, CCCC_WARN_LOGICAL_OP,
+                         "right operand of '||' is a constant expression");
+        }
+        node = new_binary(vm, ND_LOGOR, node, rhs, start);
     }
     *rest = tok;
     return node;
@@ -4510,8 +4518,16 @@ static Node *logand(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = bitor(vm, &tok, tok);
     while (equal(tok, "&&")) {
         Token *start = tok;
-        node =
-            new_binary(vm, ND_LOGAND, node, bitor(vm, &tok, tok->next), start);
+        Node *rhs = bitor(vm, &tok, tok->next);
+        if (vm->compiler.warnings & CCCC_WARN_LOGICAL_OP) {
+            if (is_const_expr(vm, node))
+                warn_tok(vm, start, CCCC_WARN_LOGICAL_OP,
+                         "left operand of '&&' is a constant expression");
+            else if (is_const_expr(vm, rhs))
+                warn_tok(vm, start, CCCC_WARN_LOGICAL_OP,
+                         "right operand of '&&' is a constant expression");
+        }
+        node = new_binary(vm, ND_LOGAND, node, rhs, start);
     }
     *rest = tok;
     return node;
@@ -4569,6 +4585,10 @@ static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
                     warn_tok(vm, start, CCCC_WARN_FLOAT_EQUAL,
                              "comparing floating-point values with == is unreliable");
             }
+            if ((vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) &&
+                nodes_structurally_equal(node, rhs))
+                warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
+                         "self-comparison always evaluates to true");
             node = new_binary(vm, ND_EQ, node, rhs, start);
             continue;
         }
@@ -4582,6 +4602,10 @@ static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
                     warn_tok(vm, start, CCCC_WARN_FLOAT_EQUAL,
                              "comparing floating-point values with != is unreliable");
             }
+            if ((vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) &&
+                nodes_structurally_equal(node, rhs))
+                warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
+                         "self-comparison always evaluates to false");
             node = new_binary(vm, ND_NE, node, rhs, start);
             continue;
         }
@@ -4599,26 +4623,64 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
         Token *start = tok;
 
         if (equal(tok, "<")) {
-            node =
-                new_binary(vm, ND_LT, node, shift(vm, &tok, tok->next), start);
+            Node *rhs = shift(vm, &tok, tok->next);
+            if (vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) {
+                add_type(vm, node); add_type(vm, rhs);
+                if (nodes_structurally_equal(node, rhs))
+                    warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
+                             "self-comparison always evaluates to false");
+                else if (is_integer(node->ty) && node->ty->is_unsigned &&
+                         is_const_expr(vm, rhs) && eval(vm, rhs) == 0)
+                    warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
+                             "comparison of unsigned expression < 0 is always false");
+            }
+            node = new_binary(vm, ND_LT, node, rhs, start);
             continue;
         }
 
         if (equal(tok, "<=")) {
-            node =
-                new_binary(vm, ND_LE, node, shift(vm, &tok, tok->next), start);
+            Node *rhs = shift(vm, &tok, tok->next);
+            if (vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) {
+                add_type(vm, node); add_type(vm, rhs);
+                if (nodes_structurally_equal(node, rhs))
+                    warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
+                             "self-comparison always evaluates to true");
+            }
+            node = new_binary(vm, ND_LE, node, rhs, start);
             continue;
         }
 
         if (equal(tok, ">")) {
-            node =
-                new_binary(vm, ND_LT, shift(vm, &tok, tok->next), node, start);
+            Node *rhs = shift(vm, &tok, tok->next);
+            if (vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) {
+                add_type(vm, node); add_type(vm, rhs);
+                if (nodes_structurally_equal(node, rhs))
+                    warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
+                             "self-comparison always evaluates to false");
+                else if (is_integer(rhs->ty) && rhs->ty->is_unsigned &&
+                         is_const_expr(vm, node) && eval(vm, node) == 0)
+                    warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
+                             "comparison of 0 > unsigned expression is always false");
+            }
+            // note: a > b is stored as b < a
+            node = new_binary(vm, ND_LT, rhs, node, start);
             continue;
         }
 
         if (equal(tok, ">=")) {
-            node =
-                new_binary(vm, ND_LE, shift(vm, &tok, tok->next), node, start);
+            Node *rhs = shift(vm, &tok, tok->next);
+            if (vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) {
+                add_type(vm, node); add_type(vm, rhs);
+                if (nodes_structurally_equal(node, rhs))
+                    warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
+                             "self-comparison always evaluates to true");
+                else if (is_integer(node->ty) && node->ty->is_unsigned &&
+                         is_const_expr(vm, rhs) && eval(vm, rhs) == 0)
+                    warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
+                             "comparison of unsigned expression >= 0 is always true");
+            }
+            // note: a >= b is stored as b <= a
+            node = new_binary(vm, ND_LE, rhs, node, start);
             continue;
         }
 
@@ -4644,6 +4706,19 @@ static Node *shift(VirtualMachine *vm, Token **rest, Token *tok) {
                 node->ty = ty_error;
                 continue;
             }
+            if (is_const_expr(vm, rhs)) {
+                int64_t rv = eval(vm, rhs);
+                if ((vm->compiler.warnings & CCCC_WARN_SHIFT_NEGATIVE_VALUE) && rv < 0)
+                    warn_tok(vm, start, CCCC_WARN_SHIFT_NEGATIVE_VALUE,
+                             "left shift by negative amount %lld is undefined behaviour", rv);
+                if ((vm->compiler.warnings & CCCC_WARN_SHIFT_OVERFLOW) && rv >= 0) {
+                    // integer promotion: types smaller than int promote to int (4 bytes)
+                    int bw = (node->ty->size < 4 ? 4 : node->ty->size) * 8;
+                    if (rv >= bw)
+                        warn_tok(vm, start, CCCC_WARN_SHIFT_OVERFLOW,
+                                 "left shift amount %lld >= width of type (%d bits)", rv, bw);
+                }
+            }
             node = new_binary(vm, ND_SHL, node, rhs, start);
             continue;
         }
@@ -4657,6 +4732,18 @@ static Node *shift(VirtualMachine *vm, Token **rest, Token *tok) {
                 node = new_binary(vm, ND_SHR, node, rhs, start);
                 node->ty = ty_error;
                 continue;
+            }
+            if (is_const_expr(vm, rhs)) {
+                int64_t rv = eval(vm, rhs);
+                if ((vm->compiler.warnings & CCCC_WARN_SHIFT_NEGATIVE_VALUE) && rv < 0)
+                    warn_tok(vm, start, CCCC_WARN_SHIFT_NEGATIVE_VALUE,
+                             "right shift by negative amount %lld is undefined behaviour", rv);
+                if ((vm->compiler.warnings & CCCC_WARN_SHIFT_OVERFLOW) && rv >= 0) {
+                    int bw = (node->ty->size < 4 ? 4 : node->ty->size) * 8;
+                    if (rv >= bw)
+                        warn_tok(vm, start, CCCC_WARN_SHIFT_OVERFLOW,
+                                 "right shift amount %lld >= width of type (%d bits)", rv, bw);
+                }
             }
             node = new_binary(vm, ND_SHR, node, rhs, start);
             continue;
@@ -6559,6 +6646,24 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
     if (!deferred_splice && (vm->flags & CCCC_FORMAT_STR_CHECKS))
         validate_format_call(vm, tok, ty, head.next);
 
+    if ((vm->compiler.warnings & CCCC_WARN_SIZEOF_POINTER_MEMACCESS) &&
+        !deferred_splice &&
+        fn->kind == ND_VAR && fn->var && fn->var->name) {
+        const char *fname = fn->var->name;
+        if (strcmp(fname, "memset") == 0 || strcmp(fname, "memcpy") == 0 ||
+            strcmp(fname, "memmove") == 0 || strcmp(fname, "memcmp") == 0) {
+            Node *a = head.next;
+            for (int i = 0; a && i < 2; i++) a = a->next;
+            // strip any implicit cast to the parameter type to reach the sizeof node
+            Node *inner = a;
+            while (inner && inner->kind == ND_CAST) inner = inner->lhs;
+            if (inner && inner->is_sizeof_ptr_expr)
+                warn_tok(vm, fn->tok, CCCC_WARN_SIZEOF_POINTER_MEMACCESS,
+                         "argument to '%s' is the size of a pointer; "
+                         "use sizeof(*ptr) or sizeof(pointed-to type) instead", fname);
+        }
+    }
+
     *rest = skip(vm, tok, ")");
 
     Node *node = new_unary(vm, ND_FUNCALL, fn, tok);
@@ -6691,7 +6796,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             return new_binary(vm, ND_COMMA, lhs, rhs, tok);
         }
 
-        return new_ulong(vm, ty->size, start);
+        Node *sn = new_ulong(vm, ty->size, start);
+        sn->is_sizeof_ptr_expr = (ty->kind == TY_PTR);
+        return sn;
     }
 
     if (equal(tok, "sizeof")) {
@@ -6699,7 +6806,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         add_type(vm, node);
         if (node->ty->kind == TY_VLA)
             return new_var_node(vm, node->ty->vla_size, tok);
-        return new_ulong(vm, node->ty->size, tok);
+        Node *sn = new_ulong(vm, node->ty->size, tok);
+        sn->is_sizeof_ptr_expr = (node->ty->kind == TY_PTR);
+        return sn;
     }
 
     if (equal(tok, "_Alignof") && equal(tok->next, "(") &&

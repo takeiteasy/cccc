@@ -399,6 +399,11 @@ typedef enum {
     CCCC_WARN_SWITCH_DEFAULT      = (1ULL << 35), // switch with no default: label
     CCCC_WARN_SWITCH_BOOL         = (1ULL << 36), // switch on _Bool / bool expression
     CCCC_WARN_FLOAT_EQUAL         = (1ULL << 37), // == or != on floating-point operands
+    CCCC_WARN_SHIFT_NEGATIVE_VALUE    = (1ULL << 38), // shift amount is a negative constant
+    CCCC_WARN_SHIFT_OVERFLOW          = (1ULL << 39), // shift amount >= promoted type bit-width
+    CCCC_WARN_LOGICAL_OP              = (1ULL << 40), // constant operand in && or ||
+    CCCC_WARN_TAUTOLOGICAL_COMPARE    = (1ULL << 41), // comparison always true or always false
+    CCCC_WARN_SIZEOF_POINTER_MEMACCESS = (1ULL << 42), // sizeof(ptr) passed as size to mem fn
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
     CCCC_WARN_CONVERSION_GROUP = CCCC_WARN_CONVERSION |
@@ -429,7 +434,12 @@ CCCC_WARN_ALL = CCCC_WARN_UNUSED |
                    CCCC_WARN_MAIN |
                    CCCC_WARN_SWITCH_DEFAULT |
                    CCCC_WARN_SWITCH_BOOL |
-                   CCCC_WARN_FLOAT_EQUAL,
+                   CCCC_WARN_FLOAT_EQUAL |
+                   CCCC_WARN_SHIFT_NEGATIVE_VALUE |
+                   CCCC_WARN_SHIFT_OVERFLOW |
+                   CCCC_WARN_LOGICAL_OP |
+                   CCCC_WARN_TAUTOLOGICAL_COMPARE |
+                   CCCC_WARN_SIZEOF_POINTER_MEMACCESS,
     CCCC_WARN_EXTRA = CCCC_WARN_SHADOW |
                       CCCC_WARN_SIGN_COMPARE |
                       CCCC_WARN_CONVERSION |
@@ -864,6 +874,7 @@ struct Node {
     bool label_used;
     bool label_maybe_unused;
     bool is_fallthrough; // [[fallthrough]] on a null statement
+    bool is_sizeof_ptr_expr; // ND_NUM from sizeof(pointer_type) — for -Wsizeof-pointer-memaccess
 
     // Switch
     struct Node *case_next;
