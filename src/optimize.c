@@ -1480,6 +1480,29 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
                 MARK_FLOAT_USE(rs);
             }
 
+        } else if (op == AXCHG || op == ACAS) {
+            // AXCHG/ACAS carry a width_enc i64 immediate in their operand words
+            // (layout: [opcode][width_enc_lo32][width_enc_hi32]), NOT a register
+            // encoding.  The generic size>=2 decode below must be skipped for
+            // these opcodes — it would misread the low word of width_enc as a
+            // register encoding and fire KILL_INT_DEF on its low byte, silently
+            // NOPing a live MOV3 if that byte coincidentally matches a pending
+            // destination register (e.g. r8/r9 for a 4-byte atomic).
+            //
+            // Precise implicit register model (verified from ops.c / codegen.c):
+            //   AXCHG: reads A0 (addr), A1 (new val); writes A0 (old val).
+            //   ACAS:  reads A0 (obj ptr), A1 (exp ptr), A2 (desired);
+            //          writes A0 (bool result).  Failure update of *A1 is a
+            //          memory write through the pointer, not a register write.
+            //
+            // Mark uses before killing the A0 def so a pending MOV3 into A0
+            // is preserved if it is still live (matches the SETJMP pattern).
+            MARK_INT_USE(REG_A0);
+            MARK_INT_USE(REG_A1);
+            if (op == ACAS)
+                MARK_INT_USE(REG_A2);
+            KILL_INT_DEF(REG_A0);
+
         } else {
             if (size >= 2) {
                 InstrWord w = vm->text_seg[pc + 1];
@@ -1561,18 +1584,6 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
             case SETJMP:
                 MARK_INT_USE(REG_A0);
                 KILL_INT_DEF(REG_A0);
-                break;
-
-            // AXCHG/ACAS use ABI registers (A0/A1/A2) implicitly and carry a
-            // 64-bit immediate (width_enc) as their 2-word operand.  The generic
-            // size>=2 branch above wrongly reads the low word of width_enc as a
-            // register encoding and fires KILL_INT_DEF on the low byte of
-            // width_enc, which can silently NOP a pending MOV3 if the byte
-            // coincidentally matches a live destination register.  Reset
-            // conservatively here and fall through the MARK_INT_USE path in sub-
-            // pass A.  (TODO #497: give these their own precise modeling.)
-            case AXCHG: case ACAS:
-                RESET_MOV_TRACKING();
                 break;
 
             // All other zero-operand instructions (LONGJMP, DLOPEN, WIDE_* etc.):
