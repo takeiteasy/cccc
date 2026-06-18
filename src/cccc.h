@@ -255,7 +255,12 @@ extern "C" {
     X(FLDR_INDEX,     3) /* fregs[rd] = *(double*)(base+idx*scale+off) */ \
     X(FSTR_INDEX,     3) /* *(double*)(base+idx*scale+off) = fregs[rd] */ \
     X(FLDR_INDEX_F32, 3) /* fregs[rd] = *(float*)(base+idx*scale+off) */  \
-    X(FSTR_INDEX_F32, 3) /* *(float*)(base+idx*scale+off) = fregs[rd] */
+    X(FSTR_INDEX_F32, 3) /* *(float*)(base+idx*scale+off) = fregs[rd] */  \
+    /* Fused floating-point multiply-add: fregs[rd] = fregs[rs1] + fregs[rs2]*fregs[rs3] */ \
+    X(FMADD3,         1) /* f64 two-rounding: product rounded to double, then added */      \
+    X(FMADD3_F32,     1) /* f32 two-rounding: product rounded to float, then added */       \
+    X(FMADD3_FMA,     1) /* f64 single-rounding: fma(rs2,rs3,rs1)  (--fma opt-in) */       \
+    X(FMADD3_F32_FMA, 1) /* f32 single-rounding: fmaf(rs2,rs3,rs1) (--fma opt-in) */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
@@ -1954,7 +1959,8 @@ typedef struct Compiler {
     // Optimization settings
     int opt_level; // Optimization level (0=none, 1=basic, 2=standard,
                    // 3=aggressive; 4 enables fused-op pass)
-    bool fuse_ops; // Enable post-codegen opcode fusion pass
+    bool fuse_ops;          // Enable post-codegen opcode fusion pass
+    bool ffp_contract_fma;  // --fma: emit FMADD3_FMA (single-rounding) instead of FMADD3
     int inline_node_limit; // Max AST nodes for full inlining (0=disable)
     bool have_fn_opt_attrs; // True if any function carries an optimize attribute;
                             // gates the per-function optimizer path in cc_optimize

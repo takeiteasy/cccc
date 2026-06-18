@@ -20,29 +20,29 @@ Sample output:
 ====================================================================================================
  CCCC vs GCC benchmark results (median ms, lower is better)
 ====================================================================================================
-benchmark    cccc    cccc-O1  cccc-O2  cccc-O3  cccc-O4  cccc-c4  cccc-c4-O1  cccc-c4-O2  cccc-c4-O3  cccc-c4-O4  gcc-O0  gcc-O1  gcc-O2  gcc-O3
------------  ------  -------  -------  -------  -------  --------  -----------  -----------  -----------  -----------  ------  ------  ------  ------
-ackermann    694.2   747.0    927.6    927.9    890.6    664.9     670.8        896.5        898.4        865.0        14.4    12.6    4.0     4.0
-binary_tree  851.9   856.9    961.0    960.5    954.1    819.6     819.8        927.1        940.1        939.8        18.0    17.2    16.9    17.1
-fib          577.7   587.1    676.4    680.0    681.5    549.6     548.6        648.7        652.6        648.8        6.2     5.9     3.2     4.2
-mandelbrot   6515.9  6509.9   6438.1   6412.2   6231.2   6515.4    6821.4       6402.3       6533.0       6179.3       64.0    29.5    29.4    27.9
-matrix_mul   5174.2  5060.7   4410.0   4573.6   4286.4   5049.3    5264.3       4405.7       4587.3       4198.2       19.5    5.5     3.9     3.6
-nqueens      1331.6  1270.5   1429.0   1172.5   1193.4   1252.9    1191.9       1144.2       1191.6       1204.4       9.0     6.9     6.5     5.8
-quicksort    2024.5  1800.1   1750.3   1764.3   1533.9   1850.7    1818.6       1722.7       1641.0       1509.4       12.3    7.7     7.7     7.6
-sieve        9711.1  9531.2   7423.8   7329.7   7071.0   9516.0    9285.7       7406.0       7316.5       7110.6       35.0    21.5    17.8    18.2
+benchmark    cccc    cccc-O1  cccc-O2  cccc-O3  cccc-O4  gcc-O0  gcc-O1  gcc-O2  gcc-O3
+-----------  ------  -------  -------  -------  -------  ------  ------  ------  ------
+ackermann    693.7   702.7    926.0    819.2    803.4    17.6    14.8    4.5     9.1
+binary_tree  864.6   881.0    956.7    818.6    838.5    24.1    18.7    18.8    15.3
+fib          589.2   576.9    687.6    598.5    603.3    6.3     8.9     3.7     9.4
+mandelbrot   6139.3  6380.0   5101.3   5034.4   4782.0   64.5    30.6    30.0    28.1
+matrix_mul   5149.9  5050.2   4187.4   4006.5   3443.5   22.6    6.8     4.7     9.7
+nqueens      1320.4  1253.4   1162.9   998.3    950.1    7.8     6.2     6.7     7.5
+quicksort    1823.0  1768.3   1549.4   1502.1   1388.1   16.3    9.7     9.5     11.7
+sieve        9749.7  9447.7   7418.1   7377.6   7418.7   66.4    22.5    19.2    27.1
 
 Speedup vs gcc -O2 (>1.0x = slower than gcc -O2):
-benchmark    cccc     cccc-O1  cccc-O2  cccc-O3  cccc-O4  cccc-c4  cccc-c4-O1  cccc-c4-O2  cccc-c4-O3  cccc-c4-O4  gcc-O0  gcc-O1  gcc-O2  gcc-O3
------------  -------  -------  -------  -------  -------  --------  -----------  -----------  -----------  -----------  ------  ------  ------  ------
-ackermann    175.7x   189.0x   234.8x   234.8x   225.4x   168.3x    169.8x       226.9x       227.4x       218.9x       3.6x    3.2x    1.0x    1.0x
-binary_tree  50.5x    50.8x    57.0x    56.9x    56.6x    48.6x     48.6x        55.0x        55.7x        55.7x        1.1x    1.0x    1.0x    1.0x
-fib          179.5x   182.4x   210.2x   211.3x   211.8x   170.8x    170.5x       201.6x       202.8x       201.6x       1.9x    1.8x    1.0x    1.3x
-mandelbrot   221.8x   221.6x   219.1x   218.3x   212.1x   221.8x    232.2x       217.9x       222.4x       210.3x       2.2x    1.0x    1.0x    0.95x
-matrix_mul   1326.9x  1297.8x  1130.9x  1172.9x  1099.3x  1294.9x   1350.0x      1129.8x      1176.4x      1076.6x      5.0x    1.4x    1.0x    0.94x
-nqueens      205.1x   195.7x   220.1x   180.6x   183.8x   193.0x    183.6x       176.2x       183.6x       185.5x       1.4x    1.1x    1.0x    0.90x
-quicksort    262.5x   233.4x   227.0x   228.8x   198.9x   240.0x    235.8x       223.4x       212.8x       195.7x       1.6x    0.99x   1.0x    0.98x
-sieve        545.7x   535.6x   417.2x   411.9x   397.4x   534.8x    521.8x       416.2x       411.2x       399.6x       2.0x    1.2x    1.0x    1.0x
-geomean      246.82x  243.42x  248.46x  243.38x  234.50x  236.93x   237.02x      237.55x      239.42x      230.90x      2.08x   1.34x   1.00x   1.01x
+benchmark    cccc     cccc-O1  cccc-O2  cccc-O3  cccc-O4  gcc-O0  gcc-O1  gcc-O2  gcc-O3
+-----------  -------  -------  -------  -------  -------  ------  ------  ------  ------
+ackermann    155.1x   157.1x   207.0x   183.1x   179.6x   3.9x    3.3x    1.0x    2.0x
+binary_tree  46.0x    46.9x    50.9x    43.6x    44.6x    1.3x    1.00x   1.0x    0.81x
+fib          160.4x   157.1x   187.2x   163.0x   164.2x   1.7x    2.4x    1.0x    2.5x
+mandelbrot   204.6x   212.6x   170.0x   167.8x   159.4x   2.2x    1.0x    1.0x    0.94x
+matrix_mul   1095.9x  1074.7x  891.1x   852.6x   732.8x   4.8x    1.4x    1.0x    2.1x
+nqueens      198.0x   187.9x   174.4x   149.7x   142.4x   1.2x    0.93x   1.0x    1.1x
+quicksort    192.0x   186.2x   163.2x   158.2x   146.2x   1.7x    1.0x    1.0x    1.2x
+sieve        507.8x   492.0x   386.3x   384.2x   386.4x   3.5x    1.2x    1.0x    1.4x
+geomean      217.20x  214.91x  206.33x  189.91x  182.61x  2.23x   1.38x   1.00x   1.41x
 
 Correctness: all benchmarks produce identical output across all configs
 ```
@@ -54,14 +54,16 @@ Key VM improvements reflected in these numbers:
 - **#250 — fused local load/store opcodes**: `LEA3+LDR/STR` two-opcode sequence replaced by a single `LDR_LOCAL_*`/`STR_LOCAL_*` (~23% geomean improvement).
 - **#249 — scalar local promotion**: at `--optimize=2`+, hot eligible integer/pointer locals held in VM saved registers, flushed at exits — reduces repeated local load/store traffic in tight loops.
 - **#251 — indexed load/store opcodes**: at `--optimize=2`+, `base + index * scale` patterns use `LDR_INDEX_*`/`STR_INDEX_*` fused opcodes — removes explicit MUL+ADD address calculation from array loops.
-- **#261 — automatic opcode fusion**: at `--optimize=4` or with `--fuse-ops`, adjacent single-def/single-use arithmetic chains are rewritten to fused opcodes (`MULI3`, `MULADD3`, `MULADDI3`). The largest wins in this run are quicksort (1764ms → 1534ms vs `--optimize=3`), sieve (7330ms → 7071ms), matrix_mul (4574ms → 4286ms), and mandelbrot (6412ms → 6231ms).
-- **#415 — CSE for `[[gnu::const]]` + extended dead-call elimination**: at `--optimize=2`+, duplicate calls to const functions within a straight-line block are replaced by a register move. Dead-call elimination extended to indirect (CALLN) and FFI (CALLF) calls at `--optimize=1`+. CSE fires on repeated calls with matching constant or local-variable argument values; these benchmarks do not exercise that pattern, so no change is visible in the table above.
+- **#261 — automatic opcode fusion**: at `--optimize=4` or with `--fuse-ops`, adjacent single-def/single-use arithmetic chains are rewritten to fused opcodes (`MULI3`, `MULADD3`, `MULADDI3`).
+- **#415 — CSE for `[[gnu::const]]` + extended dead-call elimination**: at `--optimize=2`+, duplicate calls to const functions within a straight-line block are replaced by a register move. Dead-call elimination extended to indirect (CALLN) and FFI (CALLF) calls at `--optimize=1`+.
+- **#461 — float/double local promotion**: at `--optimize=2`+, hot floating-point locals held in VM saved FP registers (`FREG_S0`–`FREG_S3`) — eliminates per-iteration `FLDR_LOCAL`/`FSTR_LOCAL` round-trips in FP-heavy loops. Notable improvement on mandelbrot (6412ms → 5034ms at `--optimize=3`).
+- **#462 — fused FP multiply-add (`FMADD3`/`FMADD3_F32`)**: at `--optimize=4` or with `--fuse-ops`, adjacent `FMUL3+FADD3` chains are rewritten to a single `FMADD3` dispatch — one less opcode per multiply-accumulate iteration. Largest visible wins are matrix_mul (4007ms → 3444ms vs `--optimize=3`) and mandelbrot (5034ms → 4782ms). Add `--fma` to additionally enable single-rounding FMA (see correctness note below).
 
-Validation run (2026-06-14, `--runs 3 --warmup 1`, Homebrew GCC-15): all correctness checks passed. `--optimize=4` improves the geomean from `--optimize=3`'s 243.38× slower-than-GCC-O2 ratio to 234.50×. The fused pass helps array/loop-heavy workloads and can regress or barely move pure-recursion/control-flow workloads where there are few profitable adjacent arithmetic chains.
+Validation run (2026-06-18, `--runs 2 --warmup 1 --no-c4`, Homebrew GCC-15): all correctness checks passed. `--optimize=4` geomean is 182.61× slower than GCC-O2 (down from 234.50× recorded before #461/#462). The fused pass helps array/loop-heavy workloads and can regress or barely move pure-recursion/control-flow workloads where there are few profitable adjacent arithmetic chains.
 
 Re-run `make bench-compare` to get updated numbers for your machine.
 
-JSON output is also written to `profile/benchmarks/results/run-<UTC>.json` for tracking over time. The validation run above is saved as `profile/benchmarks/results/run-20260614T171315Z.json`. Each `cccc-c4*` row includes a `compile_ms` field showing the one-time cost of producing the bytecode file (this cost is paid once, not in the timed median).
+JSON output is also written to `profile/benchmarks/results/run-<UTC>.json` for tracking over time. Each `cccc-c4*` row includes a `compile_ms` field showing the one-time cost of producing the bytecode file (this cost is paid once, not in the timed median).
 
 ## The benchmark suite
 
@@ -127,7 +129,9 @@ The bytecode format self-resolves FFI symbols (libc functions like `printf`, `ma
 
 ## Correctness across compilers
 
-C11 leaves some leeway for floating-point contraction (FMA), which can produce bit-different results between `-O0` and `-O2`. To keep the comparison fair, `tools/bench.py` compiles GCC with `-ffp-contract=off -std=c11`. This matches the C11 default FP semantics and matches what CCCC's bytecode interpreter does (no FMA opcodes).
+C11 leaves some leeway for floating-point contraction (FMA), which can produce bit-different results between `-O0` and `-O2`. To keep the comparison fair, `tools/bench.py` compiles GCC with `-ffp-contract=off -std=c11`. CCCC's default `FMADD3` opcode uses two separate roundings (product rounded to `double` first, then added) — semantically identical to the separate `FMUL3`+`FADD3` it replaces, so the benchmark outputs match GCC `-ffp-contract=off` exactly.
+
+The optional `--fma` flag enables true single-rounding FMA (`fma()`/`fmaf()` in the VM handler). This can yield a few percent additional speedup on multiply-accumulate loops but **will diverge from GCC `-ffp-contract=off`** on inputs where the intermediate product has rounding error. The benchmark suite does not run with `--fma` by default; it is only appropriate when your program can tolerate slightly different FP results.
 
 If you see a `MISMATCH` in the output, the CCCC output differs from at least one GCC config. That's worth investigating — either a CCCC bug, a missing `-D` define, or a benchmark that needs a tolerance check.
 

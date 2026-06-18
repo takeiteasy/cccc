@@ -425,6 +425,12 @@ static const DefUseEntry defuse_table[OP_COUNT] = {
     [FDIV3_F32] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
     [FNEG3_F32] = {{P_RD}, {P_RS1}, 1, 1},
 
+    // Fused FP multiply-add: rd = rs1 + rs2*rs3  (RRRR encoding)
+    [FMADD3]         = {{P_RD}, {P_RS1, P_RS2, P_RS3}, 1, 3},
+    [FMADD3_F32]     = {{P_RD}, {P_RS1, P_RS2, P_RS3}, 1, 3},
+    [FMADD3_FMA]     = {{P_RD}, {P_RS1, P_RS2, P_RS3}, 1, 3},
+    [FMADD3_F32_FMA] = {{P_RD}, {P_RS1, P_RS2, P_RS3}, 1, 3},
+
     // Float comparisons
     [FEQ3] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
     [FNE3] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},

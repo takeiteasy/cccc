@@ -252,10 +252,33 @@ rewrites include:
 | `LI3 imm; MUL3` | `MULI3` |
 | `MUL3; ADD3` | `MULADD3` |
 | `LI3 imm; MUL3; ADD3` | `MULADDI3` |
+| `FMUL3; FADD3` | `FMADD3` (f64 two-rounding) |
+| `FMUL3_F32; FADD3_F32` | `FMADD3_F32` (f32 two-rounding) |
 
 The pass skips branch targets and uses the normal bytecode compactor afterward,
 so branches, jump tables, source maps, function ranges, and serialized text
 relocations remain valid.
+
+### Floating-Point Fusion Semantics
+
+The `FMADD3` and `FMADD3_F32` opcodes produced by the default fusion path use
+**two separate roundings** — the product is computed and rounded to `double`
+(or `float`) first, then added to the addend. This is bit-identical to the
+unfused `FMUL3`+`FADD3` sequence and matches GCC with `-ffp-contract=off`.
+
+To enable **true single-rounding FMA** (using the hardware `fma()`/`fmaf()`
+intrinsic, a single rounding), pass `--fma`:
+
+```bash
+# Emit FMADD3_FMA / FMADD3_F32_FMA — single rounding, may change FP results
+./cccc --fma program.c
+```
+
+`--fma` implies `--fuse-ops`. The single-rounding path gives a small additional
+speedup on multiply-accumulate loops but **may produce different floating-point
+results** from the default path or from GCC `-ffp-contract=off`. Only use it if
+your program can tolerate slightly different FP values (e.g. when comparing
+against GCC with `-ffp-contract=fast`).
 
 ---
 

@@ -813,6 +813,50 @@ static inline int op_FNEG3_F32_fn(VirtualMachine *vm) {
     return 0;
 }
 
+// ========== Fused Floating-Point Multiply-Add ==========
+// fregs[rd] = fregs[rs1] + fregs[rs2] * fregs[rs3]
+// Encoding: RRRR format (same as MULADD3)
+
+static inline int op_FMADD3_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2, rs3;
+    DECODE_RRRR(operands, rd, rs1, rs2, rs3);
+    // Two separate C operations force two roundings, matching FMUL3+FADD3 semantics.
+    double product = cccc_freg_get_f64(vm, rs2) * cccc_freg_get_f64(vm, rs3);
+    cccc_freg_set_f64(vm, rd, cccc_freg_get_f64(vm, rs1) + product);
+    return 0;
+}
+
+static inline int op_FMADD3_F32_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2, rs3;
+    DECODE_RRRR(operands, rd, rs1, rs2, rs3);
+    // Product rounded to float first, then added — two roundings, matches FMUL3_F32+FADD3_F32.
+    float product = cccc_freg_get_f32(vm, rs2) * cccc_freg_get_f32(vm, rs3);
+    cccc_freg_set_f64(vm, rd, (double)((float)cccc_freg_get_f32(vm, rs1) + product));
+    return 0;
+}
+
+static inline int op_FMADD3_FMA_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2, rs3;
+    DECODE_RRRR(operands, rd, rs1, rs2, rs3);
+    cccc_freg_set_f64(vm, rd, fma(cccc_freg_get_f64(vm, rs2),
+                                  cccc_freg_get_f64(vm, rs3),
+                                  cccc_freg_get_f64(vm, rs1)));
+    return 0;
+}
+
+static inline int op_FMADD3_F32_FMA_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2, rs3;
+    DECODE_RRRR(operands, rd, rs1, rs2, rs3);
+    cccc_freg_set_f64(vm, rd, (double)fmaf(cccc_freg_get_f32(vm, rs2),
+                                           cccc_freg_get_f32(vm, rs3),
+                                           cccc_freg_get_f32(vm, rs1)));
+    return 0;
+}
+
 // ========== 3-Register Floating-Point Comparisons ==========
 
 static inline int op_FEQ3_fn(VirtualMachine *vm) {

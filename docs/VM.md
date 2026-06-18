@@ -256,6 +256,10 @@ All `F*` opcodes operate on `fregs[]`.  Comparisons write a boolean into an inte
 | `FEQ3` … `FGE3` | f64 comparisons |
 | `FADD3_F32` … `FDIV3_F32` | f32 arithmetic |
 | `FNEG3_F32` | f32 negation |
+| `FMADD3` | `fregs[rd] = fregs[rs1] + fregs[rs2] * fregs[rs3]` (f64, two roundings; emitted by fusion pass) |
+| `FMADD3_F32` | f32 two-rounding fused multiply-add |
+| `FMADD3_FMA` | f64 single-rounding fused multiply-add via `fma()` (emitted under `--fma`) |
+| `FMADD3_F32_FMA` | f32 single-rounding fused multiply-add via `fmaf()` (emitted under `--fma`) |
 | `FEQ3_F32` … `FGE3_F32` | f32 comparisons |
 | `FLDR` | `fregs[rd] = *(double*)regs[rs]` |
 | `FSTR` | `*(double*)regs[rs] = fregs[rd]` |
@@ -550,13 +554,14 @@ Static n-gram mining (`cccc --ngrams`) and use-def fusion analysis (`cccc --fusi
 
 The VM is the runtime for compile-time macro bodies and for VM-only workflows (the safety suite, the debugger, the profiler, quick iteration without a system compiler).  For production code, `-c=native` hands macro-expanded C to `cc` / `clang` / `gcc` and skips the VM entirely, so the interpreter cost only matters for the things that *run on it*.
 
-Six optimisations have significantly reduced interpreter overhead:
+Seven optimisations have significantly reduced interpreter overhead:
 
 1. **Inlined threaded dispatch** — Opcode logic lives at computed-goto labels; there is no function call per instruction.
 2. **Fused local load/store** — The common `LEA3 + LDR/STR` pair for local variables is collapsed into a single `LDR_LOCAL_*` / `STR_LOCAL_*` opcode, saving one dispatch and one register-pressure hop per access.
 3. **Scalar local promotion** — Hot eligible integer, pointer, and floating-point locals are held in callee-saved VM registers at `--optimize=2` and above. Integer/pointer locals use `REG_S0`–`S3`; `float`/`double` locals use `FREG_S0`–`S3`.
 4. **Fused indexed load/store** — Simple array and pointer accesses use `LDR_INDEX_*` / `STR_INDEX_*`, removing separate index multiply and address-add opcodes in hot loops.
-5. **Automatic opcode fusion** — `--optimize=4` / `--fuse-ops` rewrites adjacent single-def/single-use arithmetic chains to fused opcodes such as `MULI3`, `MULADD3`, and `MULADDI3`.
-6. **Tail-call optimisation** — `return f(args)` patterns that meet eligibility criteria emit `CALLT` instead of `CALL + LEV3`, reducing tail-recursive calls to O(1) stack depth (see [Tail-Call Optimisation](#tail-call-optimisation) above).
+5. **Automatic opcode fusion** — `--optimize=4` / `--fuse-ops` rewrites adjacent single-def/single-use arithmetic chains to fused opcodes such as `MULI3`, `MULADD3`, `MULADDI3`, `FMADD3`, and `FMADD3_F32`.
+6. **Fused floating-point multiply-add** — `FMUL3+FADD3` chains in FP-heavy loops (matrix multiply, mandelbrot) fuse to `FMADD3`, removing one dispatch per multiply-accumulate iteration. The default path is two-rounding (bit-identical to unfused); `--fma` opts in to single-rounding `fma()`/`fmaf()`.
+7. **Tail-call optimisation** — `return f(args)` patterns that meet eligibility criteria emit `CALLT` instead of `CALL + LEV3`, reducing tail-recursive calls to O(1) stack depth (see [Tail-Call Optimisation](#tail-call-optimisation) above).
 
 The dominant cost remains the interpreter itself (as opposed to compile time); see [BENCHMARKS.md](BENCHMARKS.md) for full numbers and [PROFILING.md](PROFILING.md) for analysis tooling.

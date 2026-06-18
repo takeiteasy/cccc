@@ -358,6 +358,7 @@ static void usage(const char *argv0, int exit_code) {
             "dead code elimination)\n");
     printf("\t                             4: Level 3 + automatic fused-op pass\n");
     printf("\t   --fuse-ops              Run automatic opcode fusion pass\n");
+    printf("\t   --fma                   Enable single-rounding FMA (implies --fuse-ops; may change FP results)\n");
     printf("\t   --inline-limit=N        Limit inlining to N AST nodes "
             "(default: 256)\n");
     printf("\nStatic Bytecode Analysis (compile or load input, walk text "
@@ -770,7 +771,8 @@ int main(int argc, const char *argv[]) {
     int embed_hard_error = 0;   // --embed-hard-limit
     int macro_recursion_limit = -1; // --macro-recursion-limit
     int opt_level = 0; // -O0/-O1/-O2/-O3/-O4 (default: 0 = no optimization)
-    int fuse_ops = 0;  // --fuse-ops
+    int fuse_ops = 0;          // --fuse-ops
+    int ffp_contract_fma = 0;  // --fma
     int inline_node_limit = 20; // --inline-limit (default 20, 0=disable)
     int asm_passthru = 0;       // --asm-passthru
     const char *std_arg = NULL; // --std=<standard>
@@ -860,6 +862,7 @@ int main(int argc, const char *argv[]) {
         {"embed-hard-limit", no_argument, 0, 1060},
         {"optimize", optional_argument, 0, 'O'},
         {"fuse-ops", no_argument, 0, 1070},
+        {"fma", no_argument, 0, 1072},
         {"macro-recursion-limit", required_argument, 0, 'r'},
         {"std", required_argument, 0, 's'},
         {"ffi-allow", required_argument, 0, 1052},
@@ -1176,6 +1179,10 @@ int main(int argc, const char *argv[]) {
             break;
         case 1070:
             fuse_ops = 1;
+            break;
+        case 1072:
+            fuse_ops = 1;
+            ffp_contract_fma = 1;
             break;
         case 'r': { // --macro-recursion-limit
             char *end = NULL;
@@ -1663,6 +1670,7 @@ int main(int argc, const char *argv[]) {
     // Set optimization level
     vm.compiler.opt_level = opt_level;
     vm.compiler.fuse_ops = fuse_ops;
+    vm.compiler.ffp_contract_fma = ffp_contract_fma;
     vm.compiler.inline_node_limit = inline_node_limit;
     if (macro_recursion_limit >= 0)
         vm.compiler.macro_recursion_limit = macro_recursion_limit;

@@ -1925,6 +1925,46 @@ static bool opt_fuse_muli3_add3(VirtualMachine *vm, const CcFusionCandidate *c,
     return true;
 }
 
+static bool opt_fuse_fmul3_fadd3(VirtualMachine *vm, const CcFusionCandidate *c,
+                                  OptReplacement *repls, bool *consumed,
+                                  Pc end, const bool *targets) {
+    bool is_f32 = (c->def_op == FMUL3_F32);
+    if ((c->def_op != FMUL3 && c->def_op != FMUL3_F32) ||
+        (c->use_op != FADD3 && c->use_op != FADD3_F32))
+        return false;
+    if ((c->def_op == FMUL3_F32) != (c->use_op == FADD3_F32))
+        return false;
+    Pc def_pc = (Pc)c->def_pc;
+    Pc use_pc = (Pc)c->use_pc;
+    if (def_pc >= end || use_pc >= end || consumed[def_pc] || consumed[use_pc])
+        return false;
+    if (opt_pc_is_target(targets, 1, end, def_pc) ||
+        opt_pc_is_target(targets, 1, end, use_pc))
+        return false;
+
+    int mul_rd, mul_rs1, mul_rs2;
+    DECODE_RRR(vm->text_seg[def_pc + 1], mul_rd, mul_rs1, mul_rs2);
+    if (mul_rd != c->reg || mul_rd == REG_ZERO)
+        return false;
+
+    int add_rd, add_rs1, add_rs2;
+    DECODE_RRR(vm->text_seg[use_pc + 1], add_rd, add_rs1, add_rs2);
+    if (c->use_byte != OPT_P_RS1 && c->use_byte != OPT_P_RS2)
+        return false;
+    int addend = (c->use_byte == OPT_P_RS1) ? add_rs2 : add_rs1;
+
+    int fused_op = vm->compiler.ffp_contract_fma
+                   ? (is_f32 ? FMADD3_F32_FMA : FMADD3_FMA)
+                   : (is_f32 ? FMADD3_F32     : FMADD3);
+
+    set_rrrr_replacement(repls, def_pc, fused_op, add_rd, addend, mul_rs1,
+                         mul_rs2);
+    emit_mov_nop(vm, use_pc);
+    consumed[def_pc] = true;
+    consumed[use_pc] = true;
+    return true;
+}
+
 static bool opt_fuse_li3_muladd3(VirtualMachine *vm,
                                  const CcFusionCandidate *c,
                                  OptReplacement *repls, bool *consumed,
@@ -1993,7 +2033,8 @@ static bool opt_fuse_round(VirtualMachine *vm, int *out_count) {
                                      targets) ||
                   opt_fuse_li3_muladd3(vm, c, repls, consumed, end, targets) ||
                   opt_fuse_mul3_add3(vm, c, repls, consumed, end, targets) ||
-                  opt_fuse_muli3_add3(vm, c, repls, consumed, end, targets);
+                  opt_fuse_muli3_add3(vm, c, repls, consumed, end, targets) ||
+                  opt_fuse_fmul3_fadd3(vm, c, repls, consumed, end, targets);
         if (ok)
             fused++;
     }
