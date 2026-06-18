@@ -254,6 +254,12 @@ rewrites include:
 | `LI3 imm; MUL3; ADD3` | `MULADDI3` |
 | `FMUL3; FADD3` | `FMADD3` (f64 two-rounding) |
 | `FMUL3_F32; FADD3_F32` | `FMADD3_F32` (f32 two-rounding) |
+| `FMUL3; FSUB3` (minuend form) | `FMSUB3` (f64 two-rounding) |
+| `FMUL3_F32; FSUB3_F32` (minuend form) | `FMSUB3_F32` (f32 two-rounding) |
+
+> **Note:** `FMSUB3` fuses when the multiply result is the **minuend** (`a*b - c`). The
+> subtrahend form (`c - a*b`) and accumulating-subtract loops (`sum -= a*b`) are not yet
+> fused — see the planned `FNMSUB3` follow-up.
 
 The pass skips branch targets and uses the normal bytecode compactor afterward,
 so branches, jump tables, source maps, function ranges, and serialized text
@@ -261,16 +267,16 @@ relocations remain valid.
 
 ### Floating-Point Fusion Semantics
 
-The `FMADD3` and `FMADD3_F32` opcodes produced by the default fusion path use
-**two separate roundings** — the product is computed and rounded to `double`
-(or `float`) first, then added to the addend. This is bit-identical to the
-unfused `FMUL3`+`FADD3` sequence and matches GCC with `-ffp-contract=off`.
+The `FMADD3`, `FMADD3_F32`, `FMSUB3`, and `FMSUB3_F32` opcodes produced by the
+default fusion path use **two separate roundings** — the product is computed and
+rounded to `double` (or `float`) first, then added or subtracted. This is
+bit-identical to the unfused sequence and matches GCC with `-ffp-contract=off`.
 
 To enable **true single-rounding FMA** (using the hardware `fma()`/`fmaf()`
 intrinsic, a single rounding), pass `--fma`:
 
 ```bash
-# Emit FMADD3_FMA / FMADD3_F32_FMA — single rounding, may change FP results
+# Emit FMADD3_FMA / FMADD3_F32_FMA / FMSUB3_FMA / FMSUB3_F32_FMA — single rounding
 ./cccc --fma program.c
 ```
 

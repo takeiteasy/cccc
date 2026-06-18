@@ -260,7 +260,12 @@ extern "C" {
     X(FMADD3,         1) /* f64 two-rounding: product rounded to double, then added */      \
     X(FMADD3_F32,     1) /* f32 two-rounding: product rounded to float, then added */       \
     X(FMADD3_FMA,     1) /* f64 single-rounding: fma(rs2,rs3,rs1)  (--fma opt-in) */       \
-    X(FMADD3_F32_FMA, 1) /* f32 single-rounding: fmaf(rs2,rs3,rs1) (--fma opt-in) */
+    X(FMADD3_F32_FMA, 1) /* f32 single-rounding: fmaf(rs2,rs3,rs1) (--fma opt-in) */  \
+    /* Fused floating-point multiply-subtract: fregs[rd] = fregs[rs2]*fregs[rs3] - fregs[rs1] */ \
+    X(FMSUB3,         1) /* f64 two-rounding: product rounded to double, then subtracted */ \
+    X(FMSUB3_F32,     1) /* f32 two-rounding: product rounded to float, then subtracted */ \
+    X(FMSUB3_FMA,     1) /* f64 single-rounding: fma(rs2,rs3,-rs1)  (--fma opt-in) */     \
+    X(FMSUB3_F32_FMA, 1) /* f32 single-rounding: fmaf(rs2,rs3,-rs1) (--fma opt-in) */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;

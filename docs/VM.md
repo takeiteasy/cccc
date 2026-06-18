@@ -260,6 +260,10 @@ All `F*` opcodes operate on `fregs[]`.  Comparisons write a boolean into an inte
 | `FMADD3_F32` | f32 two-rounding fused multiply-add |
 | `FMADD3_FMA` | f64 single-rounding fused multiply-add via `fma()` (emitted under `--fma`) |
 | `FMADD3_F32_FMA` | f32 single-rounding fused multiply-add via `fmaf()` (emitted under `--fma`) |
+| `FMSUB3` | `fregs[rd] = fregs[rs2]*fregs[rs3] - fregs[rs1]` (f64, two roundings; emitted by fusion pass) |
+| `FMSUB3_F32` | f32 two-rounding fused multiply-subtract |
+| `FMSUB3_FMA` | f64 single-rounding fused multiply-subtract via `fma(rs2,rs3,-rs1)` (emitted under `--fma`) |
+| `FMSUB3_F32_FMA` | f32 single-rounding fused multiply-subtract via `fmaf(rs2,rs3,-rs1)` (emitted under `--fma`) |
 | `FEQ3_F32` … `FGE3_F32` | f32 comparisons |
 | `FLDR` | `fregs[rd] = *(double*)regs[rs]` |
 | `FSTR` | `*(double*)regs[rs] = fregs[rd]` |

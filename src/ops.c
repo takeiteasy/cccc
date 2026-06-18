@@ -857,6 +857,49 @@ static inline int op_FMADD3_F32_FMA_fn(VirtualMachine *vm) {
     return 0;
 }
 
+// Fused floating-point multiply-subtract: fregs[rd] = fregs[rs2]*fregs[rs3] - fregs[rs1]
+// Encoding: RRRR format (same as FMADD3)
+
+static inline int op_FMSUB3_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2, rs3;
+    DECODE_RRRR(operands, rd, rs1, rs2, rs3);
+    // Two separate C operations force two roundings, matching FMUL3+FSUB3 semantics.
+    double product = cccc_freg_get_f64(vm, rs2) * cccc_freg_get_f64(vm, rs3);
+    cccc_freg_set_f64(vm, rd, product - cccc_freg_get_f64(vm, rs1));
+    return 0;
+}
+
+static inline int op_FMSUB3_F32_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2, rs3;
+    DECODE_RRRR(operands, rd, rs1, rs2, rs3);
+    // Product rounded to float first, then subtracted — two roundings, matches FMUL3_F32+FSUB3_F32.
+    float product = cccc_freg_get_f32(vm, rs2) * cccc_freg_get_f32(vm, rs3);
+    cccc_freg_set_f64(vm, rd, (double)((float)(product - cccc_freg_get_f32(vm, rs1))));
+    return 0;
+}
+
+static inline int op_FMSUB3_FMA_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2, rs3;
+    DECODE_RRRR(operands, rd, rs1, rs2, rs3);
+    cccc_freg_set_f64(vm, rd, fma(cccc_freg_get_f64(vm, rs2),
+                                  cccc_freg_get_f64(vm, rs3),
+                                  -cccc_freg_get_f64(vm, rs1)));
+    return 0;
+}
+
+static inline int op_FMSUB3_F32_FMA_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2, rs3;
+    DECODE_RRRR(operands, rd, rs1, rs2, rs3);
+    cccc_freg_set_f64(vm, rd, (double)fmaf(cccc_freg_get_f32(vm, rs2),
+                                           cccc_freg_get_f32(vm, rs3),
+                                           -cccc_freg_get_f32(vm, rs1)));
+    return 0;
+}
+
 // ========== 3-Register Floating-Point Comparisons ==========
 
 static inline int op_FEQ3_fn(VirtualMachine *vm) {

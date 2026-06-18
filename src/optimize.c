@@ -1965,6 +1965,49 @@ static bool opt_fuse_fmul3_fadd3(VirtualMachine *vm, const CcFusionCandidate *c,
     return true;
 }
 
+static bool opt_fuse_fmul3_fsub3(VirtualMachine *vm, const CcFusionCandidate *c,
+                                  OptReplacement *repls, bool *consumed,
+                                  Pc end, const bool *targets) {
+    bool is_f32 = (c->def_op == FMUL3_F32);
+    if ((c->def_op != FMUL3 && c->def_op != FMUL3_F32) ||
+        (c->use_op != FSUB3 && c->use_op != FSUB3_F32))
+        return false;
+    if ((c->def_op == FMUL3_F32) != (c->use_op == FSUB3_F32))
+        return false;
+    Pc def_pc = (Pc)c->def_pc;
+    Pc use_pc = (Pc)c->use_pc;
+    if (def_pc >= end || use_pc >= end || consumed[def_pc] || consumed[use_pc])
+        return false;
+    if (opt_pc_is_target(targets, 1, end, def_pc) ||
+        opt_pc_is_target(targets, 1, end, use_pc))
+        return false;
+
+    int mul_rd, mul_rs1, mul_rs2;
+    DECODE_RRR(vm->text_seg[def_pc + 1], mul_rd, mul_rs1, mul_rs2);
+    if (mul_rd != c->reg || mul_rd == REG_ZERO)
+        return false;
+
+    // Only fuse the form where the mul result is the minuend: sub_rd = mul_rd - subtrahend.
+    // The negated form (subtrahend - mul_rd) is skipped.
+    if (c->use_byte != OPT_P_RS1)
+        return false;
+    int sub_rd, sub_rs1, sub_rs2;
+    DECODE_RRR(vm->text_seg[use_pc + 1], sub_rd, sub_rs1, sub_rs2);
+    (void)sub_rs1; /* known to equal mul_rd; only sub_rs2 (subtrahend) is needed */
+    int subtrahend = sub_rs2;
+
+    int fused_op = vm->compiler.ffp_contract_fma
+                   ? (is_f32 ? FMSUB3_F32_FMA : FMSUB3_FMA)
+                   : (is_f32 ? FMSUB3_F32     : FMSUB3);
+
+    set_rrrr_replacement(repls, def_pc, fused_op, sub_rd, subtrahend, mul_rs1,
+                         mul_rs2);
+    emit_mov_nop(vm, use_pc);
+    consumed[def_pc] = true;
+    consumed[use_pc] = true;
+    return true;
+}
+
 static bool opt_fuse_li3_muladd3(VirtualMachine *vm,
                                  const CcFusionCandidate *c,
                                  OptReplacement *repls, bool *consumed,
@@ -2034,7 +2077,8 @@ static bool opt_fuse_round(VirtualMachine *vm, int *out_count) {
                   opt_fuse_li3_muladd3(vm, c, repls, consumed, end, targets) ||
                   opt_fuse_mul3_add3(vm, c, repls, consumed, end, targets) ||
                   opt_fuse_muli3_add3(vm, c, repls, consumed, end, targets) ||
-                  opt_fuse_fmul3_fadd3(vm, c, repls, consumed, end, targets);
+                  opt_fuse_fmul3_fadd3(vm, c, repls, consumed, end, targets) ||
+                  opt_fuse_fmul3_fsub3(vm, c, repls, consumed, end, targets);
         if (ok)
             fused++;
     }
