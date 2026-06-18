@@ -1124,14 +1124,27 @@ static bool op_is_float_src(int op) {
 }
 
 // Returns true for opcodes whose byte 0 of the operand word is an INTEGER
-// SOURCE register (store value or conditional-branch condition register).
+// SOURCE register (not a destination).  Used to prevent KILL_INT_DEF from
+// NOP-ing the MOV3 that produced the value read by these instructions.
 static bool op_byte0_is_int_src(int op) {
     switch (op) {
+    // Stores: byte 0 is the value register being written to memory.
     case STR_B: case STR_H: case STR_W: case STR_D:
     case STR_INDEX_B: case STR_INDEX_H: case STR_INDEX_W: case STR_INDEX_D:
     case STR_LOCAL_B: case STR_LOCAL_H: case STR_LOCAL_W: case STR_LOCAL_D:
+    // Atomic store: byte 0 is the value register; byte 1 is the pointer.
     case ASTR:
+    // Conditional branches: byte 0 is the condition register.
     case JZ3: case JNZ3:
+    // Indirect control-flow: byte 0 is the jump/call-target source register.
+    case JMPI:
+    case CALLN: case CALLI:
+    // Stack push: byte 0 is the register whose value is pushed.
+    case PSH3:
+    // Pointer and type safety checks: byte 0 is the pointer source register.
+    case CHKP3: case CHKA3: case CHKT3: case CHKPA:
+    // Dangling-pointer tracker: byte 0 is the base-pointer source register.
+    case MARKA:
         return true;
     default:
         return false;
@@ -1279,6 +1292,21 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
             case CALLF:
             case ENT3:
             case LEV3:
+            // Zero-operand instructions that clobber A-registers implicitly:
+            // their implicit writes are invisible to the size>=2 scan in the
+            // default case, so stale copy facts would survive and cause wrong
+            // substitutions downstream.  Clear conservatively (mirrors sub-pass B).
+            case LONGJMP:
+            case DLOPEN: case DLSYM: case DLCLOSE: case DLERROR:
+            case MALC: case CALC: case REALC:
+            case MFRE:
+            case RETBUF:
+            case SETJMP:
+            case MCPY:
+            case WIDE_ADD: case WIDE_SUB: case WIDE_MUL: case WIDE_DIV:
+            case WIDE_MOD: case WIDE_SHL: case WIDE_SHR: case WIDE_USHR:
+            case VSIGNAL:
+            case BTRAP:
                 for (int i = 0; i < NUM_REGS; i++)
                     copy_of[i] = fcopy_of[i] = -1;
                 break;
@@ -1535,6 +1563,18 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
                 KILL_INT_DEF(REG_A0);
                 break;
 
+            // AXCHG/ACAS use ABI registers (A0/A1/A2) implicitly and carry a
+            // 64-bit immediate (width_enc) as their 2-word operand.  The generic
+            // size>=2 branch above wrongly reads the low word of width_enc as a
+            // register encoding and fires KILL_INT_DEF on the low byte of
+            // width_enc, which can silently NOP a pending MOV3 if the byte
+            // coincidentally matches a live destination register.  Reset
+            // conservatively here and fall through the MARK_INT_USE path in sub-
+            // pass A.  (TODO #497: give these their own precise modeling.)
+            case AXCHG: case ACAS:
+                RESET_MOV_TRACKING();
+                break;
+
             // All other zero-operand instructions (LONGJMP, DLOPEN, WIDE_* etc.):
             // reset conservatively — their A-register usage is too varied.
             case LONGJMP:
@@ -1607,6 +1647,19 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
                         use_count[rd2]++;
                 }
             }
+
+            // CALL-family implicitly reads float argument registers FREG_A0–A7
+            // (indices 10–17).  Count them as uses so that FMOV3 instructions
+            // that set up float call arguments are never eliminated here.
+            switch (op2) {
+            case CALL: case CALLT: case CALLI: case CALLN: case CALLF:
+                for (int fa = FREG_A0; fa <= FREG_A7; fa++)
+                    use_count[fa]++;
+                break;
+            default:
+                break;
+            }
+
             pc2 += size2;
         }
 

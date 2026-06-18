@@ -305,6 +305,10 @@ static bool promotion_candidate_ok(VirtualMachine *vm, Obj *fn, Obj *var) {
         return false;
     if (var->name && strncmp(var->name, "__static_link", 14) == 0)
         return false;
+    // Variables with cleanup functions have their address taken implicitly by
+    // the cleanup call mechanism — they must not be promoted to a register.
+    if (var->cleanup_fn)
+        return false;
     return true;
 }
 
@@ -317,6 +321,10 @@ static bool is_fp_promotion_candidate_ok(VirtualMachine *vm, Obj *fn, Obj *var) 
     if (belongs_to_outer_function(fn, var))
         return false;
     if (var->name && strncmp(var->name, "__static_link", 14) == 0)
+        return false;
+    // Variables with cleanup functions have their address taken implicitly —
+    // don't promote them to a register.
+    if (var->cleanup_fn)
         return false;
     return true;
 }
@@ -386,6 +394,14 @@ static void collect_promotion_candidates(VirtualMachine *vm, Obj *fn, Node *node
         // local's address-escape via ckd_add/sub/mul goes undetected and
         // the promoted register goes stale after IOVFL stores through it.
         collect_promotion_candidates(vm, fn, node->cas_addr, node, cands, count,
+                                     child_loop_depth);
+        // ND_CAS (__builtin_compare_and_swap) passes &cas_old to ACAS, so the
+        // expected-value variable's address escapes through cas_old.  Walk
+        // cas_old and cas_new so that any ND_ADDR inside them marks the
+        // target variable as address-escaping and prevents its promotion.
+        collect_promotion_candidates(vm, fn, node->cas_old, node, cands, count,
+                                     child_loop_depth);
+        collect_promotion_candidates(vm, fn, node->cas_new, node, cands, count,
                                      child_loop_depth);
         for (Node *arg = node->args; arg; arg = arg->next)
             collect_promotion_candidates(vm, fn, arg, node, cands, count,
