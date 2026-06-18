@@ -305,3 +305,32 @@ static void test_cross_sibling_goto_cleans_source(void) {
     $assert_eq(g_log[0], 7);   // SOURCE scope cleaned — the #481 regression
     $assert_eq(g_log[1], 99);  // B's cleanup tag (value-independent)
 }
+
+// ---- Test 15: Well-formed cross-sibling goto (label before B's cleanup decl) ----
+// Companion to test 14 that is NOT a jump-into case: the goto lands at a label
+// positioned *before* block B's cleanup variable, so `b` is initialized normally
+// and its value is meaningful.  Verifies the source scope is still cleaned, that
+// `b` is cleaned with its real value, and that no -Wattributes warning is due
+// (the label is at B's top, depth 0, so the LCA is the function level).
+static void cross_sibling_goto_label_first(void) {
+    {
+        int a __attribute__((cleanup(cleanup_int))) = 7;  // depth 1, block A
+        (void)a;
+        goto M;
+    }
+    {
+    M:;                                                   // label before b's decl
+        int b __attribute__((cleanup(cleanup_int))) = 8;  // depth 1, block B
+        (void)b;
+    }
+}
+
+[[cccc::test]]
+static void test_cross_sibling_goto_label_before_decl(void) {
+    log_reset();
+    cross_sibling_goto_label_first();
+    // `a` cleaned at the goto (source scope), then `b` (real value) at B's exit.
+    $assert_eq(g_log_n, 2);
+    $assert_eq(g_log[0], 7);   // source scope cleaned
+    $assert_eq(g_log[1], 8);   // b initialized normally and cleaned with its value
+}
