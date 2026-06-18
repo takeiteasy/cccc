@@ -2,7 +2,7 @@
 
 > **Warning:** Work in progress. Tested on `aarch64` (Apple Silicon) only.
 
-`CCCC` (**C**omprehensive **C** **C**ompensation **C**ompiler) is a JIT C frontend and compile-time metaprogramming system built around a portable bytecode VM. It preprocesses C, runs `[[cccc::macro]]` / `__attribute__((macro))` functions during compilation, and then either executes the result in the VM or hands a macro-expanded C program off to a real system compiler (`-c=native`) for an actual native build.
+`CCCC` (**C**omprehensive **C** **C**ompensation **C**ompiler) is a C bytecode compiler + VM interpreter. This system enables cccc to run an in-memory, compile-time pass to manipulate ast directly. It preprocesses C, runs `[[cccc::macro]]` / `__attribute__((macro))` functions during compilation, and then either executes the result in the VM or hands a macro-expanded C program off to a real system compiler (`-c=native`) for an actual native build.
 
 The VM is what lets macros actually run at compile time, and it doubles as a self-contained runtime for prototyping, sandboxing, debugging, and the memory-safety / profiling tools. For production code, use `-c=native` and let `cc` / `clang` / `gcc` do the heavy lifting — CCCC is positioned as a frontend drop-in, not a replacement for a system toolchain. The VM is here when you need a toolchain-free, introspectable, or sandboxed execution environment.
 

@@ -104,6 +104,10 @@
 #define FREG_A5 15 // Float argument
 #define FREG_A6 16 // Float argument
 #define FREG_A7 17 // Float argument
+#define FREG_S0 18 // Float saved (callee-saved, mirrors REG_S0)
+#define FREG_S1 19 // Float saved
+#define FREG_S2 20 // Float saved
+#define FREG_S3 21 // Float saved
 
 // Instruction encoding macros for new opcodes
 // Text segment words are 32-bit. Wide immediates are stored little-endian in

@@ -1987,6 +1987,14 @@ typedef struct Compiler {
     int promoted_save_offsets[4];
     bool promoted_dirty[4];
     int promoted_count;
+
+    // FP scalar local promotion (#461). Parallel to integer promotion above.
+    Obj *fp_promoted_locals[4];
+    int fp_promoted_regs[4];         // FREG_S0–S3
+    int fp_promoted_save_offsets[4]; // stack slots (after integer promoted slots)
+    bool fp_promoted_dirty[4];
+    int fp_promoted_count;
+
     Obj *promotion_alias_vars[16];
     Obj *promotion_alias_targets[16];
     int promotion_alias_count;

@@ -286,11 +286,30 @@ static bool is_scalar_promotion_type(Type *ty) {
     }
 }
 
+static bool is_float_promotion_type(Type *ty) {
+    if (!ty || ty->is_volatile || ty->size > 8)
+        return false;
+    return ty->kind == TY_FLOAT || ty->kind == TY_DOUBLE || ty->kind == TY_LDOUBLE;
+}
+
 static bool promotion_candidate_ok(VirtualMachine *vm, Obj *fn, Obj *var) {
     if (!var || !var->is_local || var->is_block_var || var->is_captured ||
         var->is_static || var == fn->va_area || var == fn->alloca_bottom)
         return false;
     if (!is_scalar_promotion_type(var->ty))
+        return false;
+    if (belongs_to_outer_function(fn, var))
+        return false;
+    if (var->name && strncmp(var->name, "__static_link", 14) == 0)
+        return false;
+    return true;
+}
+
+static bool is_fp_promotion_candidate_ok(VirtualMachine *vm, Obj *fn, Obj *var) {
+    if (!var || !var->is_local || var->is_block_var || var->is_captured ||
+        var->is_static || var == fn->va_area || var == fn->alloca_bottom)
+        return false;
+    if (!is_float_promotion_type(var->ty))
         return false;
     if (belongs_to_outer_function(fn, var))
         return false;
@@ -420,6 +439,51 @@ static void prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_
         vm->compiler.promoted_locals[p] = cands[i].var;
         vm->compiler.promoted_regs[p] = sregs[p];
         vm->compiler.promoted_save_offsets[p] = -(base_stack_size + p + 1);
+    }
+    free(cands);
+}
+
+static void prepare_fp_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size) {
+    memset(vm->compiler.fp_promoted_locals, 0, sizeof(vm->compiler.fp_promoted_locals));
+    memset(vm->compiler.fp_promoted_regs, 0, sizeof(vm->compiler.fp_promoted_regs));
+    memset(vm->compiler.fp_promoted_save_offsets, 0,
+           sizeof(vm->compiler.fp_promoted_save_offsets));
+    memset(vm->compiler.fp_promoted_dirty, 0, sizeof(vm->compiler.fp_promoted_dirty));
+    vm->compiler.fp_promoted_count = 0;
+
+    if (vm->compiler.opt_level < 2 || (vm->flags & CCCC_ENABLE_DEBUGGER))
+        return;
+
+    int local_count = 0;
+    for (Obj *var = fn->locals; var; var = var->next)
+        if (is_fp_promotion_candidate_ok(vm, fn, var))
+            local_count++;
+    if (local_count == 0)
+        return;
+
+    PromotionCandidate *cands =
+        calloc((size_t)local_count, sizeof(PromotionCandidate));
+    if (!cands)
+        error("out of memory");
+    int idx = 0;
+    for (Obj *var = fn->locals; var; var = var->next)
+        if (is_fp_promotion_candidate_ok(vm, fn, var))
+            cands[idx++].var = var;
+
+    collect_promotion_candidates(vm, fn, fn->body, NULL, cands, local_count, 0);
+    qsort(cands, (size_t)local_count, sizeof(PromotionCandidate),
+          promotion_candidate_cmp);
+
+    static const int fsregs[] = {FREG_S0, FREG_S1, FREG_S2, FREG_S3};
+    for (int i = 0; i < local_count && vm->compiler.fp_promoted_count < 4; i++) {
+        if (cands[i].address_escapes || cands[i].score < 3)
+            continue;
+        int q = vm->compiler.fp_promoted_count++;
+        vm->compiler.fp_promoted_locals[q] = cands[i].var;
+        vm->compiler.fp_promoted_regs[q] = fsregs[q];
+        // Save slots come after the integer promoted save slots.
+        vm->compiler.fp_promoted_save_offsets[q] =
+            -(base_stack_size + vm->compiler.promoted_count + q + 1);
     }
     free(cands);
 }
@@ -677,9 +741,10 @@ static void prepare_restrict_cache(VirtualMachine *vm, Obj *fn, int base_stack_s
     static const int rcregs[] = {REG_S4, REG_S5, REG_S6, REG_S7};
     for (int q = 0; q < MAX_RESTRICT_CACHE; q++) {
         vm->compiler.restrict_cache_regs[q] = rcregs[q];
-        // Save slots are placed after the promoted-local save slots.
+        // Save slots are placed after both integer and FP promoted-local save slots.
         vm->compiler.restrict_cache_save_offsets[q] =
-            -(base_stack_size + vm->compiler.promoted_count + q + 1);
+            -(base_stack_size + vm->compiler.promoted_count
+              + vm->compiler.fp_promoted_count + q + 1);
     }
     vm->compiler.restrict_cache_capacity = MAX_RESTRICT_CACHE;
 }
@@ -1874,6 +1939,73 @@ static void emit_init_promoted_params(VirtualMachine *vm) {
     }
 }
 
+// ---- FP local promotion helpers (#461) ----
+
+static int fp_promoted_local_index(VirtualMachine *vm, Obj *var) {
+    for (int i = 0; i < vm->compiler.fp_promoted_count; i++)
+        if (vm->compiler.fp_promoted_locals[i] == var)
+            return i;
+    return -1;
+}
+
+static bool is_fp_promoted_local(VirtualMachine *vm, Obj *var) {
+    return fp_promoted_local_index(vm, var) >= 0;
+}
+
+static int fp_promoted_local_reg(VirtualMachine *vm, Obj *var) {
+    int idx = fp_promoted_local_index(vm, var);
+    return idx >= 0 ? vm->compiler.fp_promoted_regs[idx] : -1;
+}
+
+static void emit_fp_promoted_read(VirtualMachine *vm, Obj *var, int dest_reg) {
+    int preg = fp_promoted_local_reg(vm, var);
+    if (preg < 0 || dest_reg == REG_ZERO)
+        return;
+    emit_fmov3(vm, dest_reg, preg);
+}
+
+static void emit_fp_promoted_write(VirtualMachine *vm, Obj *var, int value_reg) {
+    int idx = fp_promoted_local_index(vm, var);
+    if (idx < 0)
+        return;
+    int preg = vm->compiler.fp_promoted_regs[idx];
+    if (preg != value_reg)
+        emit_fmov3(vm, preg, value_reg);
+    vm->compiler.fp_promoted_dirty[idx] = true;
+}
+
+static void emit_flush_fp_promoted_locals(VirtualMachine *vm) {
+    for (int i = 0; i < vm->compiler.fp_promoted_count; i++) {
+        if (!vm->compiler.fp_promoted_dirty[i])
+            continue;
+        Obj *var = vm->compiler.fp_promoted_locals[i];
+        emit_local_store(vm, var->ty, vm->compiler.fp_promoted_regs[i], var->offset);
+        vm->compiler.fp_promoted_dirty[i] = false;
+    }
+}
+
+static void emit_save_fp_promoted_registers(VirtualMachine *vm) {
+    // Save as flat double — fregs[] holds doubles after detag (#460).
+    for (int i = 0; i < vm->compiler.fp_promoted_count; i++)
+        emit_ri(vm, FSTR_LOCAL, vm->compiler.fp_promoted_regs[i],
+                vm->compiler.fp_promoted_save_offsets[i]);
+}
+
+static void emit_restore_fp_promoted_registers(VirtualMachine *vm) {
+    for (int i = vm->compiler.fp_promoted_count - 1; i >= 0; i--)
+        emit_ri(vm, FLDR_LOCAL, vm->compiler.fp_promoted_regs[i],
+                vm->compiler.fp_promoted_save_offsets[i]);
+}
+
+static void emit_init_fp_promoted_params(VirtualMachine *vm) {
+    for (int i = 0; i < vm->compiler.fp_promoted_count; i++) {
+        Obj *var = vm->compiler.fp_promoted_locals[i];
+        if (var->is_param)
+            emit_local_load(vm, var->ty, vm->compiler.fp_promoted_regs[i],
+                            var->offset);
+    }
+}
+
 // Store operations based on type
 static void emit_store(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr) {
     if (vm->flags & CCCC_POINTER_CHECKS)
@@ -2914,6 +3046,10 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 emit_promoted_read(vm, node->var, dest_reg);
                 return;
             }
+            if (is_fp_promoted_local(vm, node->var)) {
+                emit_fp_promoted_read(vm, node->var, dest_reg);
+                return;
+            }
             // Fused local load: skip the LEA3+LDR two-step for simple locals
             if (is_simple_local_scalar(vm, node)) {
                 emit_local_load(vm, node->ty, dest_reg, node->var->offset);
@@ -3440,6 +3576,9 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         } else if (node->lhs->kind == ND_VAR &&
                    is_promoted_local(vm, node->lhs->var)) {
             emit_promoted_write(vm, node->lhs->var, r_val);
+        } else if (node->lhs->kind == ND_VAR &&
+                   is_fp_promoted_local(vm, node->lhs->var)) {
+            emit_fp_promoted_write(vm, node->lhs->var, r_val);
         } else if (lhs_indexed &&
                    emit_indexed_store_if_possible(vm, node->lhs, node->ty,
                                                   r_val)) {
@@ -5160,9 +5299,11 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
                 Obj *tco_fn = vm->compiler.pending_tail_callee;
                 vm->compiler.pending_tail_callee = NULL;
                 emit_flush_promoted_locals(vm);
+                emit_flush_fp_promoted_locals(vm);
                 if (vm->flags & CCCC_STACK_INSTR)
                     emit_scopeout(vm, vm->current_function_scope_id);
                 emit_restore_restrict_cache_regs(vm);
+                emit_restore_fp_promoted_registers(vm);
                 emit_restore_promoted_registers(vm);
                 emit(vm, CALLT);
                 Pc tco_patch = emit_word_ptr(vm);
@@ -5224,10 +5365,12 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
             }
         }
         emit_flush_promoted_locals(vm);
+        emit_flush_fp_promoted_locals(vm);
         // Deactivate function-level scope before returning.
         if (vm->flags & CCCC_STACK_INSTR)
             emit_scopeout(vm, vm->current_function_scope_id);
         emit_restore_restrict_cache_regs(vm);
+        emit_restore_fp_promoted_registers(vm);
         emit_restore_promoted_registers(vm);
         emit(vm, LEV3);
         return;
@@ -5633,8 +5776,10 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     int stack_size = assign_stack_offsets(vm, fn);
     int base_stack_size = stack_size;
     prepare_local_promotion(vm, fn, base_stack_size);
+    prepare_fp_local_promotion(vm, fn, base_stack_size); // must follow prepare_local_promotion
     prepare_restrict_cache(vm, fn, base_stack_size);
-    stack_size += vm->compiler.promoted_count + vm->compiler.restrict_cache_capacity;
+    stack_size += vm->compiler.promoted_count + vm->compiler.fp_promoted_count
+               + vm->compiler.restrict_cache_capacity;
     if (stack_size % 2 != 0)
         stack_size++;
 
@@ -5700,8 +5845,10 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
         emit_scopein(vm, fn_scope_id);
 
     emit_save_promoted_registers(vm);
+    emit_save_fp_promoted_registers(vm);
     emit_save_restrict_cache_regs(vm);
     emit_init_promoted_params(vm);
+    emit_init_fp_promoted_params(vm);
 
     // Mark parameters initialized (they arrive via registers).
     if (vm->flags & CCCC_UNINIT_DETECTION) {
@@ -5750,10 +5897,12 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
         emit_li3(vm, REG_A0, 0);
     }
     emit_flush_promoted_locals(vm);
+    emit_flush_fp_promoted_locals(vm);
     // Deactivate function scope (for fall-through returns).
     if (vm->flags & CCCC_STACK_INSTR)
         emit_scopeout(vm, fn_scope_id);
     emit_restore_restrict_cache_regs(vm);
+    emit_restore_fp_promoted_registers(vm);
     emit_restore_promoted_registers(vm);
     emit(vm, LEV3);
     fn->code_end_addr = vm->text_ptr + 1;
