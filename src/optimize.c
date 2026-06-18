@@ -1159,6 +1159,19 @@ static bool op_byte0_is_float(int op) {
     }
 }
 
+// Returns true for opcodes that READ a float register from byte 0 (float stores).
+// These are sources, not destinations — KILL_FLOAT_DEF must not fire for them.
+static bool op_byte0_is_float_src(int op) {
+    switch (op) {
+    case FSTR: case FSTR_F32:
+    case FSTR_INDEX: case FSTR_INDEX_F32:
+    case FSTR_LOCAL: case FSTR_LOCAL_F32:
+        return true;
+    default:
+        return false;
+    }
+}
+
 // Kept for sub-pass B use-count on stores (byte 0 is any kind of source).
 static bool op_byte0_is_src(int op) {
     return op_byte0_is_int_src(op) || op_byte0_is_float(op);
@@ -1327,21 +1340,30 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
     //     abandon tracking rather than risk an incorrect NOP.
     //   - Unconditional CF instructions (JMP, CALL, etc.)
     //
-    // Only integer MOV3s are tracked; FMOV3 and float instructions are handled
-    // conservatively (float ops only influence integer tracking via shared
-    // register indices, which is prevented by op_byte0_is_float guards).
+    // Integer MOV3 and float FMOV3 dead copies are eliminated here.
+    // For integers (sub-pass B): MOV3 is dead if its destination is re-defined
+    // before being read (write-after-write within the same basic block).
+    // For floats (sub-pass B + C): FMOV3 write-after-write is caught here;
+    // FMOV3 instructions whose destination has zero global uses after sub-pass
+    // A propagation are caught by the subsequent sub-pass C use-count scan.
 
     Pc  last_mov_pc[NUM_REGS];
     bool mov_r_live[NUM_REGS];
+    Pc  last_fmov_pc[NUM_REGS];
+    bool fmov_r_live[NUM_REGS];
     for (int i = 0; i < NUM_REGS; i++) {
-        last_mov_pc[i] = (Pc)-1;
-        mov_r_live[i]  = false;
+        last_mov_pc[i]  = (Pc)-1;
+        mov_r_live[i]   = false;
+        last_fmov_pc[i] = (Pc)-1;
+        fmov_r_live[i]  = false;
     }
 
 #define RESET_MOV_TRACKING() do { \
     for (int _i = 0; _i < NUM_REGS; _i++) { \
-        last_mov_pc[_i] = (Pc)-1; \
-        mov_r_live[_i]  = false;  \
+        last_mov_pc[_i]  = (Pc)-1; \
+        mov_r_live[_i]   = false;  \
+        last_fmov_pc[_i] = (Pc)-1; \
+        fmov_r_live[_i]  = false;  \
     } \
 } while (0)
 
@@ -1360,6 +1382,24 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
         } \
         last_mov_pc[_r] = (Pc)-1; \
         mov_r_live[_r]  = false; \
+    } \
+} while (0)
+
+#define MARK_FLOAT_USE(r) do { \
+    int _r = (r); \
+    if (_r > REG_ZERO && _r < NUM_REGS && last_fmov_pc[_r] != (Pc)-1) \
+        fmov_r_live[_r] = true; \
+} while (0)
+
+#define KILL_FLOAT_DEF(r) do { \
+    int _r = (r); \
+    if (_r > REG_ZERO && _r < NUM_REGS) { \
+        if (last_fmov_pc[_r] != (Pc)-1 && !fmov_r_live[_r]) { \
+            emit_mov_nop(vm, last_fmov_pc[_r]); \
+            nop_count++; \
+        } \
+        last_fmov_pc[_r] = (Pc)-1; \
+        fmov_r_live[_r]  = false; \
     } \
 } while (0)
 
@@ -1396,6 +1436,22 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
                 MARK_INT_USE(rs);
             }
 
+        } else if (op == FMOV3) {
+            if (size >= 2) {
+                int rd = (int)(vm->text_seg[pc + 1] & 0xFF);
+                int rs = (int)((vm->text_seg[pc + 1] >> 8) & 0xFF);
+                if (rd > REG_ZERO && rd < NUM_REGS) {
+                    // If previous FMOV3 to rd was never used, it is dead.
+                    if (last_fmov_pc[rd] != (Pc)-1 && !fmov_r_live[rd]) {
+                        emit_mov_nop(vm, last_fmov_pc[rd]);
+                        nop_count++;
+                    }
+                    last_fmov_pc[rd] = pc;
+                    fmov_r_live[rd]  = false;
+                }
+                MARK_FLOAT_USE(rs);
+            }
+
         } else {
             if (size >= 2) {
                 InstrWord w = vm->text_seg[pc + 1];
@@ -1411,10 +1467,25 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
                     MARK_INT_USE(rs2);
                 }
 
+                // Mark float register uses for instructions whose rs1/rs2 are floats.
+                if (op_is_float_src(op)) {
+                    MARK_FLOAT_USE(rs1);
+                    MARK_FLOAT_USE(rs2);
+                }
+                // All float stores (FSTR/FSTR_F32/FSTR_INDEX/FSTR_INDEX_F32/
+                // FSTR_LOCAL/FSTR_LOCAL_F32): byte 0 is the float value being stored.
+                if (op_byte0_is_float_src(op))
+                    MARK_FLOAT_USE(rd);
+
                 // Kill integer register definition at byte 0 if this instruction
                 // writes an integer result there (not a float def, not a store).
                 if (!op_byte0_is_src(op) && !op_byte0_is_float(op))
                     KILL_INT_DEF(rd);
+
+                // Kill float register definition at byte 0 if this instruction
+                // writes a float result there (not a float store).
+                if (op_byte0_is_float(op) && !op_byte0_is_float_src(op))
+                    KILL_FLOAT_DEF(rd);
             }
 
             // Unconditional control-flow and zero-operand register-clobbering
@@ -1486,11 +1557,79 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
 #undef RESET_MOV_TRACKING
 #undef MARK_INT_USE
 #undef KILL_INT_DEF
+#undef MARK_FLOAT_USE
+#undef KILL_FLOAT_DEF
+
+    // ---- Sub-pass C: Global zero-use FMOV3 elimination ----
+    //
+    // After sub-pass A propagates copy facts and substitutes sources, a FMOV3
+    // whose destination register had ALL its uses rewritten (e.g. by the float
+    // local promotion read pattern) will have ZERO remaining reads in the
+    // entire function.  Sub-pass B's basic-block write-after-write tracking
+    // cannot catch this case, so we do a full-function use-count scan here.
+    //
+    // Approach:
+    //   1. Count every float register read across the entire [start, end) range.
+    //   2. NOP any FMOV3 whose destination (rd) has use_count == 0.
+    //
+    // This is safe: if use_count[rd] == 0, no instruction in the function
+    // reads rd — the FMOV3 has no live consumers and its result is garbage-
+    // collected by the next compaction pass.
+    {
+        int use_count[NUM_REGS];
+        for (int i = 0; i < NUM_REGS; i++)
+            use_count[i] = 0;
+
+        for (Pc pc2 = start; pc2 < end; ) {
+            int op2   = get_opcode(vm, pc2);
+            int size2 = get_instr_size_at(vm, pc2, end);
+            if (size2 <= 0) break;
+
+            if (size2 >= 2) {
+                InstrWord w2 = vm->text_seg[pc2 + 1];
+                int rs1_2 = (int)((w2 >> 8) & 0xFF);
+                int rs2_2 = (int)((w2 >> 16) & 0xFF);
+
+                if (op2 == FMOV3) {
+                    // rs (byte 1) is the float source.
+                    if (rs1_2 > REG_ZERO && rs1_2 < NUM_REGS)
+                        use_count[rs1_2]++;
+                } else if (op_is_float_src(op2)) {
+                    if (rs1_2 > REG_ZERO && rs1_2 < NUM_REGS)
+                        use_count[rs1_2]++;
+                    if (rs2_2 > REG_ZERO && rs2_2 < NUM_REGS)
+                        use_count[rs2_2]++;
+                }
+                // All float stores: byte 0 is the float value being stored.
+                if (op_byte0_is_float_src(op2)) {
+                    int rd2 = (int)(w2 & 0xFF);
+                    if (rd2 > REG_ZERO && rd2 < NUM_REGS)
+                        use_count[rd2]++;
+                }
+            }
+            pc2 += size2;
+        }
+
+        for (Pc pc2 = start; pc2 < end; ) {
+            int op2   = get_opcode(vm, pc2);
+            int size2 = get_instr_size_at(vm, pc2, end);
+            if (size2 <= 0) break;
+
+            if (op2 == FMOV3 && size2 >= 2) {
+                int rd2 = (int)(vm->text_seg[pc2 + 1] & 0xFF);
+                if (rd2 > REG_ZERO && rd2 < NUM_REGS && use_count[rd2] == 0) {
+                    emit_mov_nop(vm, pc2);
+                    nop_count++;
+                }
+            }
+            pc2 += size2;
+        }
+    }
 
     free(cf_targets);
 
     if (vm->debug_vm && (prop_count > 0 || nop_count > 0))
-        printf("[opt] copy-prop: rewrote %d uses, eliminated %d MOV3\n",
+        printf("[opt] copy-prop: rewrote %d uses, eliminated %d dead copies\n",
                prop_count, nop_count);
 }
 
@@ -2008,6 +2147,50 @@ static bool opt_fuse_fmul3_fsub3(VirtualMachine *vm, const CcFusionCandidate *c,
     return true;
 }
 
+static bool opt_fuse_fmul3_fnmsub3(VirtualMachine *vm, const CcFusionCandidate *c,
+                                   OptReplacement *repls, bool *consumed,
+                                   Pc end, const bool *targets) {
+    bool is_f32 = (c->def_op == FMUL3_F32);
+    if ((c->def_op != FMUL3 && c->def_op != FMUL3_F32) ||
+        (c->use_op != FSUB3 && c->use_op != FSUB3_F32))
+        return false;
+    if ((c->def_op == FMUL3_F32) != (c->use_op == FSUB3_F32))
+        return false;
+    Pc def_pc = (Pc)c->def_pc;
+    Pc use_pc = (Pc)c->use_pc;
+    if (def_pc >= end || use_pc >= end || consumed[def_pc] || consumed[use_pc])
+        return false;
+    if (opt_pc_is_target(targets, 1, end, def_pc) ||
+        opt_pc_is_target(targets, 1, end, use_pc))
+        return false;
+
+    int mul_rd, mul_rs1, mul_rs2;
+    DECODE_RRR(vm->text_seg[def_pc + 1], mul_rd, mul_rs1, mul_rs2);
+    if (mul_rd != c->reg || mul_rd == REG_ZERO)
+        return false;
+
+    // Only fuse the accumulating-subtract form: sub_rd = minuend - mul_rd.
+    // (The minuend form mul_rd - subtrahend is handled by opt_fuse_fmul3_fsub3.)
+    if (c->use_byte != OPT_P_RS2)
+        return false;
+    int sub_rd, sub_rs1, sub_rs2;
+    DECODE_RRR(vm->text_seg[use_pc + 1], sub_rd, sub_rs1, sub_rs2);
+    (void)sub_rs2; /* known to equal mul_rd; only sub_rs1 (minuend) is needed */
+    int minuend = sub_rs1;
+
+    int fused_op = vm->compiler.ffp_contract_fma
+                   ? (is_f32 ? FNMSUB3_F32_FMA : FNMSUB3_FMA)
+                   : (is_f32 ? FNMSUB3_F32     : FNMSUB3);
+
+    // FNMSUB3 encoding: rd = rs1 - rs2*rs3  →  rs1=minuend, rs2/rs3=mul factors
+    set_rrrr_replacement(repls, def_pc, fused_op, sub_rd, minuend, mul_rs1,
+                         mul_rs2);
+    emit_mov_nop(vm, use_pc);
+    consumed[def_pc] = true;
+    consumed[use_pc] = true;
+    return true;
+}
+
 static bool opt_fuse_li3_muladd3(VirtualMachine *vm,
                                  const CcFusionCandidate *c,
                                  OptReplacement *repls, bool *consumed,
@@ -2078,7 +2261,8 @@ static bool opt_fuse_round(VirtualMachine *vm, int *out_count) {
                   opt_fuse_mul3_add3(vm, c, repls, consumed, end, targets) ||
                   opt_fuse_muli3_add3(vm, c, repls, consumed, end, targets) ||
                   opt_fuse_fmul3_fadd3(vm, c, repls, consumed, end, targets) ||
-                  opt_fuse_fmul3_fsub3(vm, c, repls, consumed, end, targets);
+                  opt_fuse_fmul3_fsub3(vm, c, repls, consumed, end, targets) ||
+                  opt_fuse_fmul3_fnmsub3(vm, c, repls, consumed, end, targets);
         if (ok)
             fused++;
     }

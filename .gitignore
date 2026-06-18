@@ -17,3 +17,4 @@ profile/vm-opcodes/
 build/bench-*
 profile/benchmarks/results/
 profile/benchmarks/results/*.json
+IntelRDFPMathLib20U4.tar.gz

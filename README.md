@@ -233,7 +233,7 @@ VM work focuses on what matters for macro expansion cost and VM-only workflows (
 - **Fused local load/store opcodes (#250)**: the common `LEA3+LDR/STR` two-opcode address+dereference sequence for local variables is replaced by single `LDR_LOCAL_*`/`STR_LOCAL_*` opcodes, eliminating one dispatch and one register-pressure hop per scalar local access.
 - **Scalar local promotion (#249)**: under `--optimize=2` and higher, hot eligible integer/pointer locals are kept in VM saved registers across straight-line code and simple loops, reducing repeated local load/store traffic.
 - **Indexed load/store opcodes (#251)**: under `--optimize=2` and higher, simple `base + index * scale` array and pointer accesses lower to `LDR_INDEX_*` / `STR_INDEX_*` opcodes, removing the separate multiply/add address sequence on hot loops.
-- **Automatic opcode fusion (#261)**: under `--optimize=4` or `--fuse-ops`, adjacent single-def/single-use arithmetic pairs are rewritten to fused VM opcodes such as `MULI3`, `MULADD3`, `MULADDI3`, `FMADD3`, `FMADD3_F32`, `FMSUB3`, and `FMSUB3_F32`. Add `--fma` to opt in to single-rounding FMA (may change FP results).
+- **Automatic opcode fusion (#261)**: under `--optimize=4` or `--fuse-ops`, adjacent single-def/single-use arithmetic pairs are rewritten to fused VM opcodes such as `MULI3`, `MULADD3`, `MULADDI3`, `FMADD3`, `FMADD3_F32`, `FMSUB3`, `FMSUB3_F32`, `FNMSUB3`, and `FNMSUB3_F32`. Add `--fma` to opt in to single-rounding FMA (may change FP results).
 
 ## Building
 

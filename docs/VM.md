@@ -264,6 +264,10 @@ All `F*` opcodes operate on `fregs[]`.  Comparisons write a boolean into an inte
 | `FMSUB3_F32` | f32 two-rounding fused multiply-subtract |
 | `FMSUB3_FMA` | f64 single-rounding fused multiply-subtract via `fma(rs2,rs3,-rs1)` (emitted under `--fma`) |
 | `FMSUB3_F32_FMA` | f32 single-rounding fused multiply-subtract via `fmaf(rs2,rs3,-rs1)` (emitted under `--fma`) |
+| `FNMSUB3` | `fregs[rd] = fregs[rs1] - fregs[rs2]*fregs[rs3]` (f64, two roundings; emitted by fusion pass) |
+| `FNMSUB3_F32` | f32 two-rounding fused negated multiply-subtract |
+| `FNMSUB3_FMA` | f64 single-rounding via `fma(-rs2,rs3,rs1)` (emitted under `--fma`) |
+| `FNMSUB3_F32_FMA` | f32 single-rounding via `fmaf(-rs2,rs3,rs1)` (emitted under `--fma`) |
 | `FEQ3_F32` … `FGE3_F32` | f32 comparisons |
 | `FLDR` | `fregs[rd] = *(double*)regs[rs]` |
 | `FSTR` | `*(double*)regs[rs] = fregs[rd]` |
@@ -564,8 +568,8 @@ Seven optimisations have significantly reduced interpreter overhead:
 2. **Fused local load/store** — The common `LEA3 + LDR/STR` pair for local variables is collapsed into a single `LDR_LOCAL_*` / `STR_LOCAL_*` opcode, saving one dispatch and one register-pressure hop per access.
 3. **Scalar local promotion** — Hot eligible integer, pointer, and floating-point locals are held in callee-saved VM registers at `--optimize=2` and above. Integer/pointer locals use `REG_S0`–`S3`; `float`/`double` locals use `FREG_S0`–`S3`.
 4. **Fused indexed load/store** — Simple array and pointer accesses use `LDR_INDEX_*` / `STR_INDEX_*`, removing separate index multiply and address-add opcodes in hot loops.
-5. **Automatic opcode fusion** — `--optimize=4` / `--fuse-ops` rewrites adjacent single-def/single-use arithmetic chains to fused opcodes such as `MULI3`, `MULADD3`, `MULADDI3`, `FMADD3`, and `FMADD3_F32`.
-6. **Fused floating-point multiply-add** — `FMUL3+FADD3` chains in FP-heavy loops (matrix multiply, mandelbrot) fuse to `FMADD3`, removing one dispatch per multiply-accumulate iteration. The default path is two-rounding (bit-identical to unfused); `--fma` opts in to single-rounding `fma()`/`fmaf()`.
+5. **Automatic opcode fusion** — `--optimize=4` / `--fuse-ops` rewrites adjacent single-def/single-use arithmetic chains to fused opcodes such as `MULI3`, `MULADD3`, `MULADDI3`, `FMADD3`, `FMADD3_F32`, `FMSUB3`, `FMSUB3_F32`, `FNMSUB3`, and `FNMSUB3_F32`.
+6. **Fused floating-point multiply-add/subtract** — `FMUL3+FADD3` chains fuse to `FMADD3`; `FMUL3+FSUB3` fuses to `FMSUB3` (minuend form) or `FNMSUB3` (accumulating-subtract form). Dead-FMOV3 elimination in copy-prop restores adjacency when float local promotion inserts a register-copy between the multiply and subtract.
 7. **Tail-call optimisation** — `return f(args)` patterns that meet eligibility criteria emit `CALLT` instead of `CALL + LEV3`, reducing tail-recursive calls to O(1) stack depth (see [Tail-Call Optimisation](#tail-call-optimisation) above).
 
 The dominant cost remains the interpreter itself (as opposed to compile time); see [BENCHMARKS.md](BENCHMARKS.md) for full numbers and [PROFILING.md](PROFILING.md) for analysis tooling.

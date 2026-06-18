@@ -20,29 +20,29 @@ Sample output:
 ====================================================================================================
  CCCC vs GCC benchmark results (median ms, lower is better)
 ====================================================================================================
-benchmark    cccc    cccc-O1  cccc-O2  cccc-O3  cccc-O4  gcc-O0  gcc-O1  gcc-O2  gcc-O3
------------  ------  -------  -------  -------  -------  ------  ------  ------  ------
-ackermann    693.7   702.7    926.0    819.2    803.4    17.6    14.8    4.5     9.1
-binary_tree  864.6   881.0    956.7    818.6    838.5    24.1    18.7    18.8    15.3
-fib          589.2   576.9    687.6    598.5    603.3    6.3     8.9     3.7     9.4
-mandelbrot   6139.3  6380.0   5101.3   5034.4   4782.0   64.5    30.6    30.0    28.1
-matrix_mul   5149.9  5050.2   4187.4   4006.5   3443.5   22.6    6.8     4.7     9.7
-nqueens      1320.4  1253.4   1162.9   998.3    950.1    7.8     6.2     6.7     7.5
-quicksort    1823.0  1768.3   1549.4   1502.1   1388.1   16.3    9.7     9.5     11.7
-sieve        9749.7  9447.7   7418.1   7377.6   7418.7   66.4    22.5    19.2    27.1
+benchmark    cccc    cccc-O1  cccc-O2  cccc-O3  cccc-O4  cccc-c4  cccc-c4-O1  cccc-c4-O2  cccc-c4-O3  cccc-c4-O4  gcc-O0  gcc-O1  gcc-O2  gcc-O3
+-----------  ------  -------  -------  -------  -------  -------  ----------  ----------  ----------  ----------  ------  ------  ------  ------
+ackermann    682.9   681.9    918.5    793.8    781.7    652.3    652.2       889.8       765.9       749.6       16.6    16.4    4.3     6.0   
+binary_tree  868.6   859.5    963.1    824.1    809.9    821.1    823.5       922.9       788.2       777.2       20.6    20.3    19.4    22.9  
+fib          573.7   597.4    674.6    580.0    577.3    550.2    543.8       651.5       545.8       550.3       7.5     8.8     4.1     7.3   
+mandelbrot   6101.2  6065.3   4983.7   3970.9   3626.0   6064.4   6078.5      4992.8      3970.4      3610.3      62.0    30.4    29.4    28.4  
+matrix_mul   5014.6  4997.7   4136.5   3747.4   3309.6   4980.4   5024.9      4131.1      3741.5      3318.6      24.6    5.7     4.0     3.8   
+nqueens      1322.5  1234.3   1141.5   979.8    948.9    1297.3   1210.7      1121.7      953.7       921.3       14.4    5.1     8.1     9.2   
+quicksort    1829.9  1772.4   1565.3   1498.8   1378.8   1808.9   1745.4      1531.0      1466.5      1343.3      18.5    9.1     12.5    13.0  
+sieve        9660.6  9328.2   7331.3   7311.1   7075.3   9519.7   9295.3      7865.2      7292.1      7067.4      36.2    24.4    21.2    20.4  
 
 Speedup vs gcc -O2 (>1.0x = slower than gcc -O2):
-benchmark    cccc     cccc-O1  cccc-O2  cccc-O3  cccc-O4  gcc-O0  gcc-O1  gcc-O2  gcc-O3
------------  -------  -------  -------  -------  -------  ------  ------  ------  ------
-ackermann    155.1x   157.1x   207.0x   183.1x   179.6x   3.9x    3.3x    1.0x    2.0x
-binary_tree  46.0x    46.9x    50.9x    43.6x    44.6x    1.3x    1.00x   1.0x    0.81x
-fib          160.4x   157.1x   187.2x   163.0x   164.2x   1.7x    2.4x    1.0x    2.5x
-mandelbrot   204.6x   212.6x   170.0x   167.8x   159.4x   2.2x    1.0x    1.0x    0.94x
-matrix_mul   1095.9x  1074.7x  891.1x   852.6x   732.8x   4.8x    1.4x    1.0x    2.1x
-nqueens      198.0x   187.9x   174.4x   149.7x   142.4x   1.2x    0.93x   1.0x    1.1x
-quicksort    192.0x   186.2x   163.2x   158.2x   146.2x   1.7x    1.0x    1.0x    1.2x
-sieve        507.8x   492.0x   386.3x   384.2x   386.4x   3.5x    1.2x    1.0x    1.4x
-geomean      217.20x  214.91x  206.33x  189.91x  182.61x  2.23x   1.38x   1.00x   1.41x
+benchmark    cccc     cccc-O1  cccc-O2  cccc-O3  cccc-O4  cccc-c4  cccc-c4-O1  cccc-c4-O2  cccc-c4-O3  cccc-c4-O4  gcc-O0  gcc-O1  gcc-O2  gcc-O3
+-----------  -------  -------  -------  -------  -------  -------  ----------  ----------  ----------  ----------  ------  ------  ------  ------
+ackermann    158.4x   158.2x   213.0x   184.1x   181.3x   151.3x   151.3x      206.4x      177.6x      173.9x      3.9x    3.8x    1.0x    1.4x  
+binary_tree  44.8x    44.3x    49.6x    42.5x    41.7x    42.3x    42.4x       47.6x       40.6x       40.1x       1.1x    1.0x    1.0x    1.2x  
+fib          141.2x   147.1x   166.1x   142.8x   142.1x   135.4x   133.9x      160.4x      134.4x      135.5x      1.9x    2.2x    1.0x    1.8x  
+mandelbrot   207.3x   206.1x   169.4x   135.0x   123.2x   206.1x   206.6x      169.7x      134.9x      122.7x      2.1x    1.0x    1.0x    0.97x 
+matrix_mul   1265.2x  1260.9x  1043.6x  945.5x   835.0x   1256.6x  1267.8x     1042.3x     944.0x      837.3x      6.2x    1.4x    1.0x    0.97x 
+nqueens      162.6x   151.8x   140.4x   120.5x   116.7x   159.5x   148.9x      137.9x      117.3x      113.3x      1.8x    0.63x   1.0x    1.1x  
+quicksort    146.6x   142.0x   125.4x   120.1x   110.5x   144.9x   139.8x      122.7x      117.5x      107.6x      1.5x    0.73x   1.0x    1.0x  
+sieve        455.0x   439.4x   345.3x   344.4x   333.3x   448.4x   437.8x      370.5x      343.5x      332.9x      1.7x    1.1x    1.0x    0.96x 
+geomean      202.70x  199.76x  192.52x  170.37x  162.05x  197.64x  194.54x     190.65x     166.28x     158.25x     2.14x   1.27x   1.00x   1.15x 
 
 Correctness: all benchmarks produce identical output across all configs
 ```
@@ -58,9 +58,10 @@ Key VM improvements reflected in these numbers:
 - **#415 — CSE for `[[gnu::const]]` + extended dead-call elimination**: at `--optimize=2`+, duplicate calls to const functions within a straight-line block are replaced by a register move. Dead-call elimination extended to indirect (CALLN) and FFI (CALLF) calls at `--optimize=1`+.
 - **#461 — float/double local promotion**: at `--optimize=2`+, hot floating-point locals held in VM saved FP registers (`FREG_S0`–`FREG_S3`) — eliminates per-iteration `FLDR_LOCAL`/`FSTR_LOCAL` round-trips in FP-heavy loops. Notable improvement on mandelbrot (6412ms → 5034ms at `--optimize=3`).
 - **#462 — fused FP multiply-add (`FMADD3`/`FMADD3_F32`)**: at `--optimize=4` or with `--fuse-ops`, adjacent `FMUL3+FADD3` chains are rewritten to a single `FMADD3` dispatch — one less opcode per multiply-accumulate iteration. Largest visible wins are matrix_mul (4007ms → 3444ms vs `--optimize=3`) and mandelbrot (5034ms → 4782ms). Add `--fma` to additionally enable single-rounding FMA (see correctness note below).
-- **#478 — fused FP multiply-subtract (`FMSUB3`/`FMSUB3_F32`)**: extends the fusion pass to the minuend form (`a*b - c`) of `FMUL3+FSUB3` — emits `FMSUB3` when the multiply result is the left-hand operand of the subtraction. The accumulating-subtract form (`sum -= a*b`) and difference-of-products patterns currently fall back to unfused `FMUL3+FSUB3` due to intervening loads; see planned `FNMSUB3` follow-up (#479).
+- **#478 — fused FP multiply-subtract (`FMSUB3`/`FMSUB3_F32`)**: extends the fusion pass to the minuend form (`a*b - c`) of `FMUL3+FSUB3` — emits `FMSUB3` when the multiply result is the left-hand operand of the subtraction.
+- **#479 — fused negated multiply-subtract (`FNMSUB3`/`FNMSUB3_F32`) + dead-FMOV3 elimination**: adds the accumulating-subtract form (`sum -= a*b`, i.e. `rd = rs1 - rs2*rs3`) as `FNMSUB3`. The dead-FMOV3 elimination in copy-prop (sub-pass C global use-count scan) removes the promoted-register read copy that the float local promotion pass inserts between `FMUL3` and `FSUB3`, restoring adjacency so the fusion fires on loop patterns. Combined impact: mandelbrot `--optimize=3` 5034ms → 3990ms (−21%), `--optimize=4` 4782ms → 3643ms (−24%); matrix_mul `--optimize=4` 3444ms → 3325ms (−3%).
 
-Validation run (2026-06-18, `--runs 2 --warmup 1 --no-c4`, Homebrew GCC-15): all correctness checks passed. `--optimize=4` geomean is 182.61× slower than GCC-O2 (down from 234.50× recorded before #461/#462). The fused pass helps array/loop-heavy workloads and can regress or barely move pure-recursion/control-flow workloads where there are few profitable adjacent arithmetic chains.
+Validation run (2026-06-18, `--runs 2`, Homebrew GCC-15): all correctness checks passed. `--optimize=4` geomean is 162.05× slower than GCC-O2 (down from 182.61× before #479). The dead-FMOV3 elimination in copy-prop (#479) delivered the largest single improvement on FP-heavy workloads: mandelbrot O3 167.8× → 135.0×, O4 159.4× → 123.2×. The fused pass helps array/loop-heavy workloads and can regress or barely move pure-recursion/control-flow workloads where there are few profitable adjacent arithmetic chains.
 
 Re-run `make bench-compare` to get updated numbers for your machine.
 
