@@ -217,6 +217,7 @@ stdlib: $(EXE_OUT)
 
 test: clean $(EXE_OUT)
 	@python3 tools/tests.py -j 8
+	@python3 tools/test_host_signal_debugger.py
 
 all: clean $(EXE_OUT) $(LIB_OUT) test docs
 

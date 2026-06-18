@@ -3010,19 +3010,22 @@ static inline int op_VSIGNAL_fn(VirtualMachine *vm) {
 
     if (func == 0) {
         /* SIG_DFL: restore host default */
-        signal(sig, SIG_DFL);
         slot->action     = 0;
         slot->handler_fn = 0;
+        if (cccc_set_guest_signal_action(vm, sig, 0) != 0)
+            vm->regs[REG_A0] = -1;
     } else if (func == 1) {
         /* SIG_IGN: ignore on both VM and host */
-        signal(sig, SIG_IGN);
         slot->action     = 1;
         slot->handler_fn = 0;
+        if (cccc_set_guest_signal_action(vm, sig, 1) != 0)
+            vm->regs[REG_A0] = -1;
     } else {
         /* VM function pointer: install async-safe shim as native handler */
-        signal(sig, _cccc_sig_shim);
         slot->action     = 2;
         slot->handler_fn = func;
+        if (cccc_set_guest_signal_action(vm, sig, 2) != 0)
+            vm->regs[REG_A0] = -1;
     }
     return 0;
 }

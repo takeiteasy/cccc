@@ -1291,7 +1291,7 @@ static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
 
     int saved_debug = vm->debug_vm;
     vm->debug_vm = 0;
-    vm_eval(vm);
+    int eval_rc = vm_eval(vm);
     vm->debug_vm = saved_debug;
 
     __cccc_current_vm = NULL;
@@ -1301,6 +1301,11 @@ static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
     vm->bp            = saved_bp;
     memcpy(vm->regs, saved_regs, sizeof(saved_regs));
     vm->compiler.current_fn = saved_current_fn;
+
+    if (eval_rc == CCCC_HOST_SIGNAL_RC)
+        error_tok(vm, init_fn->tok,
+                  "compile-time execution terminated by host signal %d",
+                  vm->dbg.host_fault_signal);
 
     if (vm->debug_vm)
         printf("__cccc_comptime_init completed.\n");
@@ -1759,7 +1764,7 @@ static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
     // Execute the macro function
     int saved_debug = vm->debug_vm;
     vm->debug_vm = 0; // Disable debug output during macro execution
-    vm_eval(vm);
+    int eval_rc = vm_eval(vm);
     vm->debug_vm = saved_debug;
 
     // Get the returned Node* from regs[REG_A0]. Void macros do not produce a
@@ -1781,6 +1786,11 @@ static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
     vm->compiler.macro_vararg_strs = saved_vararg_strs;
     vm->compiler.macro_vararg_count = saved_vararg_count;
     vm->compiler.macro_vararg_string_mode = saved_vararg_string_mode;
+
+    if (eval_rc == CCCC_HOST_SIGNAL_RC)
+        error_tok(vm, call_tok,
+                  "compile-time macro execution terminated by host signal %d",
+                  vm->dbg.host_fault_signal);
 
     if (vm->debug_vm && result)
         printf("Macro function '%s' returned node of kind %d\n", pm->name,

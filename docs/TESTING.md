@@ -4,6 +4,11 @@ CCCC includes a built-in test framework for writing tests directly in C, using
 the `[[cccc::test]]` attribute to mark test functions and `$assert*` macros for
 assertions.
 
+`make test` also runs `tools/test_host_signal_debugger.py` on macOS. This PTY
+integration test verifies interactive host-signal trapping, inspection-only
+debugger behavior, TTY/testing opt-outs, compile-time faults, and guest signal
+dispositions; it is skipped on other platforms.
+
 ## Attribute syntax variants
 
 Three equivalent syntaxes are supported for all test attributes:

@@ -297,7 +297,7 @@ void debugger_disassemble_current(VirtualMachine *vm) {
     disassemble_instruction(vm, vm->pc);
 }
 
-static void print_help(void) {
+static void print_help(bool inspect_only) {
     printf("\n=== Debugger Commands ===\n");
     printf("\nBreakpoints:\n");
     printf("  break/b <line>           - Set breakpoint at line number in current file\n");
@@ -313,10 +313,14 @@ static void print_help(void) {
     printf("  awatch <addr>      - Break on read or write to address\n");
     printf("  info watch         - List all watchpoints\n");
     printf("\nExecution Control:\n");
-    printf("  continue/c         - Continue execution\n");
-    printf("  step/s             - Single step (into functions)\n");
-    printf("  next/n             - Step over (skip function calls)\n");
-    printf("  finish/f           - Step out (run until return)\n");
+    if (inspect_only) {
+        printf("  unavailable         - Host faults cannot be resumed\n");
+    } else {
+        printf("  continue/c         - Continue execution\n");
+        printf("  step/s             - Single step (into functions)\n");
+        printf("  next/n             - Step over (skip function calls)\n");
+        printf("  finish/f           - Step out (run until return)\n");
+    }
     printf("\nInspection:\n");
     printf("  registers/r        - Print register values\n");
     printf("  stack/st [count]   - Print stack (default 10 entries)\n");
@@ -367,7 +371,7 @@ static void debugger_print_source_location(VirtualMachine *vm) {
     }
 }
 
-void cc_debug_repl(VirtualMachine *vm) {
+static void debug_repl(VirtualMachine *vm, bool inspect_only) {
     char line[256];
     char cmd[64];
 
@@ -376,6 +380,8 @@ void cc_debug_repl(VirtualMachine *vm) {
     printf("\n========================================\n");
     printf("    CCCC Debugger\n");
     printf("========================================\n");
+    if (inspect_only)
+        printf("Host fault: inspection only; execution cannot continue\n");
     printf("Type 'help' or '?' for command list\n\n");
 
     debugger_print_registers(vm);
@@ -405,7 +411,14 @@ void cc_debug_repl(VirtualMachine *vm) {
 
         // Help command
         if (STREQ_LIT(cmd, "help") || STREQ_LIT(cmd, "h") || STREQ_LIT(cmd, "?")) {
-            print_help();
+            print_help(inspect_only);
+        }
+        else if (inspect_only &&
+                 (STREQ_LIT(cmd, "continue") || STREQ_LIT(cmd, "c") ||
+                  STREQ_LIT(cmd, "step") || STREQ_LIT(cmd, "s") ||
+                  STREQ_LIT(cmd, "next") || STREQ_LIT(cmd, "n") ||
+                  STREQ_LIT(cmd, "finish") || STREQ_LIT(cmd, "f"))) {
+            printf("Cannot resume after a host fault; use inspection commands or quit.\n");
         }
         // Continue
         else if (STREQ_LIT(cmd, "continue") || STREQ_LIT(cmd, "c")) {
@@ -665,6 +678,8 @@ void cc_debug_repl(VirtualMachine *vm) {
         // Quit
         else if (STREQ_LIT(cmd, "quit") || STREQ_LIT(cmd, "q")) {
             printf("Exiting debugger...\n");
+            if (inspect_only)
+                break;
             exit(0);
         }
         else {
@@ -674,6 +689,31 @@ void cc_debug_repl(VirtualMachine *vm) {
     }
 
     vm->dbg.debugger_attached = 0;
+}
+
+void cc_debug_repl(VirtualMachine *vm) {
+    debug_repl(vm, false);
+}
+
+static const char *host_signal_name(int sig) {
+    switch (sig) {
+    case SIGSEGV: return "SIGSEGV";
+#ifdef SIGBUS
+    case SIGBUS:  return "SIGBUS";
+#endif
+    case SIGFPE:  return "SIGFPE";
+    case SIGILL:  return "SIGILL";
+    case SIGABRT: return "SIGABRT";
+    default:      return "unknown signal";
+    }
+}
+
+void cc_debug_repl_host_fault(VirtualMachine *vm, int sig, void *fault_addr) {
+    fprintf(stderr, "\nHost fault: %s (%d)", host_signal_name(sig), sig);
+    fprintf(stderr, " at %p", fault_addr);
+    fprintf(stderr, "\nThe native VM frame was unwound; execution cannot continue.\n");
+    fflush(stderr);
+    debug_repl(vm, true);
 }
 
 int debugger_run(VirtualMachine *vm, int argc, char **argv) {

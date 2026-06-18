@@ -1736,6 +1736,7 @@ typedef struct Debugger {
     bool crash_debug_auto;            // Debugger auto-enabled for crash-trapping
                                        // only (not via explicit -g): run
                                        // normally instead of stopping at entry
+    volatile sig_atomic_t host_fault_signal; // Terminal native signal, if any
 
     // Source mapping (bytecode ↔ source lines)
     SourceMap *source_map;   // Array of PC to source location mappings

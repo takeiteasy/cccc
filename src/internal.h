@@ -588,6 +588,9 @@ void gen(VirtualMachine *vm, Obj *prog);
 //
 
 int vm_eval(VirtualMachine *vm);
+int cccc_vm_eval_dispatch(VirtualMachine *vm, volatile Pc *current_pc);
+#define CCCC_HOST_SIGNAL_RC (-4096)
+int cccc_set_guest_signal_action(VirtualMachine *vm, int sig, int action);
 void cc_vm_profile_reset(VirtualMachine *vm);
 void cc_vm_profile_print(VirtualMachine *vm, FILE *f);
 int cc_vm_profile_write_json(VirtualMachine *vm, FILE *f, const char *mode,
@@ -674,6 +677,7 @@ void cc_analyze_fusion_finish(CcFusionState *st, FILE *out);
 
 void debugger_init(VirtualMachine *vm);
 void cc_debug_repl(VirtualMachine *vm);
+void cc_debug_repl_host_fault(VirtualMachine *vm, int sig, void *fault_addr);
 void debugger_disassemble_current(VirtualMachine *vm);
 void debugger_print_stack(VirtualMachine *vm, int count);
 int debugger_check_breakpoint(VirtualMachine *vm);

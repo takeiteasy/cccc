@@ -126,40 +126,35 @@ int main(void) {
 
 ## Auto-Debug-on-Crash
 
-CCCC will automatically drop into the interactive debugger when a running
-program hits a fatal VM error — a bad memory access, an out-of-bounds array
-access, a stack overflow, an invalid indirect call/jump target, an unknown
-instruction, or any other condition that would otherwise just print an error
-and exit. This works the same way for normal program execution and for
-compile-time (`#pragma comptime`) evaluation, since both run through the same
-VM dispatch loop.
+CCCC automatically drops into the interactive debugger when a running program
+hits either a fatal VM error or a native host `SIGSEGV`, `SIGBUS`, `SIGFPE`,
+`SIGILL`, or `SIGABRT`. This covers unchecked NULL/out-of-bounds accesses with
+the default safety flags as well as checked memory errors, stack overflow,
+invalid control-flow targets, and unknown instructions. Runtime and compile-time
+(`[[cccc::comptime]]` / `#pragma cccc comptime`) execution use the same path.
 
-This is analogous to debugging-on-`SIGSEGV` in a native debugger: execution
-stops with the faulting instruction still current, so registers, the call
-stack, and local/global variables can be inspected exactly as they were at
-the point of failure. Typing `continue` retries the faulting instruction (the
-same way you'd continue past a breakpoint after fixing up state by hand);
-typing `quit` exits.
+For VM-detected errors, execution stops with the faulting instruction current;
+`continue` retries it after state has been inspected or changed. A true host
+signal first unwinds the faulting native interpreter frame with `siglongjmp`,
+then opens an inspection-only debugger at the recorded bytecode instruction.
+Registers, VM stack, source, disassembly, and valid memory remain inspectable,
+but `continue`, `step`, `next`, and `finish` are rejected because the native
+frame cannot be resumed safely. `quit` or EOF exits with `128 + signal`.
 
 **This only activates when both stdin and stdout are attached to a TTY** —
 running CCCC under a pipe, redirect, or non-interactive harness always falls
 back to printing the error and exiting, so scripted/batch usage is
 unaffected.
 
-**This traps VM-detected fatal errors, not raw host signals.** With the
-default flags (no `-S`/`--safety`/`--pointer-sanitizer`/individual safety
-flags), an out-of-bounds or NULL-pointer access in the guest program is not
-checked by the VM and can fault as a genuine host `SIGSEGV`/`SIGBUS`, which
-still terminates the process rather than dropping into the debugger. Enable
-bounds/pointer safety checking (e.g. `--pointer-sanitizer`, `-S2`) to get
-clean, debugger-trappable `NULL POINTER DEREFERENCE` / `USE-AFTER-FREE` /
-`ALIGNMENT ERROR` diagnostics for those cases instead of a raw crash. Trapping
-true host-level signals is tracked separately (see ticket #455).
+Guest `signal()` dispositions remain authoritative. A registered VM handler or
+`SIG_IGN` is delivered from the normal dispatch safe point and is not replaced
+by crash debugging; restoring `SIG_DFL` restores the debugger trap while it is
+active. Signal-handler code never runs directly in native signal context.
 
 You do not need to pass `-g`/`--debug` to get this behaviour — it is enabled
 automatically for interactive sessions. Passing `-g` explicitly still works
 as before (stop at the entry point of `main`), and additionally now also
-traps on later fatal errors during the run.
+traps on later fatal errors during the run when stdin and stdout are TTYs.
 
 **Disable with:** `--no-debug-on-crash`. Use this when invoking `cccc`
 directly from an external test harness or script that happens to run

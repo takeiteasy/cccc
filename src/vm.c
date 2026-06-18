@@ -496,17 +496,19 @@ static inline bool vm_crash_trap_active(VirtualMachine *vm) {
            !(vm->flags & CCCC_NO_DEBUG_ON_CRASH);
 }
 
-int vm_eval(VirtualMachine *vm) {
+int cccc_vm_eval_dispatch(VirtualMachine *vm, volatile Pc *current_pc) {
     static void *op_table[] = {
 #define X(NAME, OPERANDS) [NAME] = &&op_##NAME,
         OPS_X
 #undef X
     };
 
-    vm->cycle = 0;
-
 dispatch:
+    if (__builtin_expect(vm->dbg.host_fault_signal != 0, 0))
+        return CCCC_HOST_SIGNAL_RC;
     vm->cycle++;
+    if (current_pc)
+        *current_pc = vm->pc;
 
 /* Trap into the debugger REPL on a fatal error and retry (the user may
  * inspect/fix state and 'continue'); otherwise propagate the error as
@@ -1811,6 +1813,7 @@ int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv) {
     }
     cccc_gil_acquire(vm);
     cc_vm_profile_reset(vm);
+    vm->dbg.host_fault_signal = 0;
 
     vm->pc = entry;
 
@@ -1854,6 +1857,8 @@ int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv) {
 
     int rc = ((vm->flags & CCCC_ENABLE_DEBUGGER) && !vm->dbg.crash_debug_auto)
                  ? debugger_run(vm, argc, argv) : vm_eval(vm);
+    if (rc == CCCC_HOST_SIGNAL_RC && vm->dbg.host_fault_signal > 0)
+        rc = 128 + vm->dbg.host_fault_signal;
     cccc_gil_release(vm);
     return rc;
 }

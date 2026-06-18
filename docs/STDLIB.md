@@ -145,7 +145,7 @@ if (__builtin_mul_overflow(a, b, &r))
 | `<locale.h>` | ✓ | Host locale APIs registered |
 | `<math.h>` | ✓ | Full C99 function set registered |
 | `<setjmp.h>` | ✓ | CCCC-specific implementation for VM calling convention |
-| `<signal.h>` | ✓ | Full POSIX signal set (Darwin/macOS values); `signal` and `raise` are VM-managed — handlers are called synchronously from the dispatch loop, never from within a native signal context.  `SIGTRAP` with `-g` breaks into the debugger. |
+| `<signal.h>` | ✓ | Full POSIX signal set (Darwin/macOS values); `signal` and `raise` are VM-managed. Handlers run from the dispatch loop, never native signal context. The macOS crash dispatcher preserves guest dispositions while trapping default `SIGSEGV`/`SIGBUS`/`SIGFPE`/`SIGILL`/`SIGABRT` into an interactive debugger. `SIGTRAP` with `-g` breaks into the debugger. |
 | `<stdarg.h>` | ✓ | CCCC-specific implementation |
 | `<stddef.h>` | ✓ | |
 | `<stdio.h>` | ✓ | |

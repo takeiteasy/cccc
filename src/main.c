@@ -1743,7 +1743,9 @@ int main(int argc, const char *argv[]) {
     if (setjmp(err_buf) != 0) {
         // Error occurred during compilation
         cc_print_all_errors(&vm);
-        exit_code = 1;
+        exit_code = vm.dbg.host_fault_signal
+                        ? 128 + vm.dbg.host_fault_signal
+                        : 1;
         goto BAIL;
     }
 
