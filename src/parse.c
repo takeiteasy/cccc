@@ -91,6 +91,10 @@ typedef struct {
     int format_style;          // 0=none, 1=printf, 2=scanf
     int format_string_index;   // 1-based index of format string arg
     int format_fmt_first_arg;  // 1-based index of first variadic arg to check
+
+    // __attribute__((cleanup(fn)))
+    Obj *cleanup_fn;
+    Token *cleanup_tok;
 } VarAttr;
 
 struct CustomAttrUse {
@@ -736,6 +740,12 @@ static Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     var->fn_optimize_level = ty->fn_optimize_level;
     var->fn_optimize_set = ty->fn_optimize_set;
     var->deprecated_msg = ty->deprecated_msg;
+    if (ty->cleanup_fn) {
+        var->cleanup_fn = ty->cleanup_fn;
+        // Mark cleanup fn as reachable so the liveness pass keeps it.
+        ty->cleanup_fn->is_live = true;
+        ty->cleanup_fn->is_root = true;
+    }
     push_scope(vm, name, name_len)->var = var;
     return var;
 }
@@ -2221,6 +2231,8 @@ static Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *bas
             var->align = attr->align;
         if (attr && attr->is_block_var)
             var->is_block_var = true;
+        // Note: cleanup_fn is transferred from attr → Type → Obj via
+        // apply_var_attrs_to_type() + new_var(), no manual copy needed here.
 
         if (equal(tok, "=")) {
             // Mark this variable as being initialized (allows const
@@ -3489,6 +3501,8 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
         char *brk = vm->compiler.brk_label;
         vm->compiler.brk_label = node->brk_label = new_unique_name(vm);
+        int saved_brk_cld = vm->compiler.brk_cleanup_depth;
+        vm->compiler.brk_cleanup_depth = vm->compiler.cleanup_scope_depth;
 
         node->then = stmt(vm, rest, tok);
 
@@ -3528,6 +3542,7 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
         vm->compiler.current_switch = sw;
         vm->compiler.brk_label = brk;
+        vm->compiler.brk_cleanup_depth = saved_brk_cld;
         return node;
     }
 
@@ -3596,6 +3611,10 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         char *cont = vm->compiler.cont_label;
         vm->compiler.brk_label = node->brk_label = new_unique_name(vm);
         vm->compiler.cont_label = node->cont_label = new_unique_name(vm);
+        int saved_brk_cld_for = vm->compiler.brk_cleanup_depth;
+        int saved_cont_cld_for = vm->compiler.cont_cleanup_depth;
+        vm->compiler.brk_cleanup_depth = vm->compiler.cleanup_scope_depth;
+        vm->compiler.cont_cleanup_depth = vm->compiler.cleanup_scope_depth;
 
         if (is_decl_start(vm, tok)) {
             Type *basety = declspec(vm, &tok, tok, NULL);
@@ -3617,6 +3636,8 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         leave_scope(vm);
         vm->compiler.brk_label = brk;
         vm->compiler.cont_label = cont;
+        vm->compiler.brk_cleanup_depth = saved_brk_cld_for;
+        vm->compiler.cont_cleanup_depth = saved_cont_cld_for;
         return node;
     }
 
@@ -3630,11 +3651,17 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         char *cont = vm->compiler.cont_label;
         vm->compiler.brk_label = node->brk_label = new_unique_name(vm);
         vm->compiler.cont_label = node->cont_label = new_unique_name(vm);
+        int saved_brk_cld_whl = vm->compiler.brk_cleanup_depth;
+        int saved_cont_cld_whl = vm->compiler.cont_cleanup_depth;
+        vm->compiler.brk_cleanup_depth = vm->compiler.cleanup_scope_depth;
+        vm->compiler.cont_cleanup_depth = vm->compiler.cleanup_scope_depth;
 
         node->then = stmt(vm, rest, tok);
 
         vm->compiler.brk_label = brk;
         vm->compiler.cont_label = cont;
+        vm->compiler.brk_cleanup_depth = saved_brk_cld_whl;
+        vm->compiler.cont_cleanup_depth = saved_cont_cld_whl;
         return node;
     }
 
@@ -3645,11 +3672,17 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         char *cont = vm->compiler.cont_label;
         vm->compiler.brk_label = node->brk_label = new_unique_name(vm);
         vm->compiler.cont_label = node->cont_label = new_unique_name(vm);
+        int saved_brk_cld_do = vm->compiler.brk_cleanup_depth;
+        int saved_cont_cld_do = vm->compiler.cont_cleanup_depth;
+        vm->compiler.brk_cleanup_depth = vm->compiler.cleanup_scope_depth;
+        vm->compiler.cont_cleanup_depth = vm->compiler.cleanup_scope_depth;
 
         node->then = stmt(vm, &tok, tok->next);
 
         vm->compiler.brk_label = brk;
         vm->compiler.cont_label = cont;
+        vm->compiler.brk_cleanup_depth = saved_brk_cld_do;
+        vm->compiler.cont_cleanup_depth = saved_cont_cld_do;
 
         tok = skip(vm, tok, "while");
         tok = skip(vm, tok, "(");
@@ -3692,6 +3725,7 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         }
         Node *node = new_node(vm, ND_GOTO, tok);
         node->unique_label = vm->compiler.brk_label;
+        node->cleanup_target_depth = vm->compiler.brk_cleanup_depth;
         *rest = skip(vm, tok->next, ";");
         return node;
     }
@@ -3709,6 +3743,7 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         }
         Node *node = new_node(vm, ND_GOTO, tok);
         node->unique_label = vm->compiler.cont_label;
+        node->cleanup_target_depth = vm->compiler.cont_cleanup_depth;
         *rest = skip(vm, tok->next, ";");
         return node;
     }
@@ -3755,6 +3790,7 @@ static Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok, Token *
     enter_scope(vm);
 
     bool seen_stmt = false;
+    bool scope_has_cleanup = false; // true once first cleanup var is seen in this scope
     while (!equal(tok, "}")) {
         if (is_decl_start(vm, tok) && !equal(tok->next, ":")) {
             if (seen_stmt && vm->compiler.c_std < CCCC_STD_C99)
@@ -3783,7 +3819,21 @@ static Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok, Token *
                 continue;
             }
 
+            // Snapshot scope->vars before declaration so we can detect new cleanup vars.
+            VarScopeNode *vars_before = vm->compiler.scope->vars;
             cur = cur->next = declaration(vm, &tok, tok, basety, &attr);
+            // If any newly declared var has cleanup_fn, push a cleanup scope depth.
+            // This must happen immediately (not deferred) so that break/continue nodes
+            // parsed after this see the updated brk/cont_cleanup_depth.
+            if (!scope_has_cleanup) {
+                for (VarScopeNode *sv = vm->compiler.scope->vars; sv != vars_before; sv = sv->next) {
+                    if (sv->var && sv->var->cleanup_fn) {
+                        scope_has_cleanup = true;
+                        vm->compiler.cleanup_scope_depth++;
+                        break;
+                    }
+                }
+            }
         } else {
             // Clear initializing_var when we start parsing statements
             // (non-declarations) This ensures const variables can be
@@ -3797,6 +3847,27 @@ static Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok, Token *
 
     // Also clear at end in case there are no statements after declarations
     vm->compiler.initializing_var = NULL;
+
+    // Build CleanupVar list for this block (LIFO order = most-recently-declared first).
+    // scope->vars uses prepend so its head is the most recently declared var,
+    // which is exactly the right order for LIFO cleanup emission.
+    if (scope_has_cleanup) {
+        node->cleanup_scope_depth = vm->compiler.cleanup_scope_depth;
+        CleanupVar *cv_list = NULL;
+        CleanupVar **cv_tail = &cv_list;
+        for (VarScopeNode *sv = vm->compiler.scope->vars; sv; sv = sv->next) {
+            if (sv->var && sv->var->cleanup_fn) {
+                CleanupVar *cv = arena_alloc(&vm->compiler.parser_arena, sizeof(CleanupVar));
+                cv->var = sv->var;
+                cv->cleanup_fn = sv->var->cleanup_fn;
+                cv->next = NULL;
+                *cv_tail = cv;
+                cv_tail = &cv->next;
+            }
+        }
+        node->cleanup_vars = cv_list; // LIFO order: codegen iterates directly
+        vm->compiler.cleanup_scope_depth--;
+    }
 
     leave_scope(vm);
 
@@ -5582,7 +5653,7 @@ static Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr
     if (!attr || (!attr->is_maybe_unused && !attr->is_deprecated &&
                   !attr->is_noreturn && !attr->is_nodiscard &&
                   !attr->is_pure && !attr->is_func_const &&
-                  !attr->format_style))
+                  !attr->format_style && !attr->cleanup_fn))
         return ty;
     ty = copy_type(vm, ty);
     apply_semantic_attr(ty, NULL, attr->attribute_tok, attr->is_maybe_unused,
@@ -5600,6 +5671,10 @@ static Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr
         ty->format_string_index = attr->format_string_index;
         ty->format_fmt_first_arg = attr->format_fmt_first_arg;
     }
+    // Transport cleanup_fn through the type so new_var() can pick it up.
+    // (cleanup is a variable attribute, not a real type attribute.)
+    if (attr->cleanup_fn)
+        ty->cleanup_fn = attr->cleanup_fn;
     return ty;
 }
 
@@ -5807,6 +5882,27 @@ static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *
                 continue;
             }
 
+            // Handle __attribute__((cleanup(fn))) — scope-exit callback
+            if (is_attr_name(tok, "cleanup")) {
+                tok = tok->next;
+                tok = skip(vm, tok, "(");
+                if (tok->kind != TK_IDENT)
+                    error_tok(vm, tok, "expected function name in cleanup attribute");
+                Token *fn_tok = tok;
+                tok = tok->next;
+                tok = skip(vm, tok, ")");
+                if (!vm->compiler.in_type_lookahead && attr) {
+                    VarScope *sc = find_var(vm, fn_tok);
+                    if (!sc || !sc->var || !sc->var->is_function)
+                        error_tok(vm, fn_tok,
+                                  "cleanup argument '%.*s' is not a function",
+                                  fn_tok->len, fn_tok->loc);
+                    attr->cleanup_fn = sc->var;
+                    attr->cleanup_tok = fn_tok;
+                }
+                continue;
+            }
+
             if (find_attribute_macro(vm, tok)) {
                 Token *name_tok = tok;
                 tok = tok->next;
@@ -5921,6 +6017,26 @@ static Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
                               "optimize attribute requires a level argument, "
                               "e.g. [[cccc::optimize(2)]] or [[cccc::optimize(\"O2\")]]");
                 tok = parse_optimize_attr(vm, tok, ty, attr);
+                continue;
+            }
+
+            // [[gnu::cleanup(fn)]] — scope-exit callback
+            if (gnu_scoped && equal(name_tok, "cleanup")) {
+                tok = skip(vm, tok, "(");
+                if (tok->kind != TK_IDENT)
+                    error_tok(vm, tok, "expected function name in cleanup attribute");
+                Token *fn_tok = tok;
+                tok = tok->next;
+                tok = skip(vm, tok, ")");
+                if (!vm->compiler.in_type_lookahead && attr) {
+                    VarScope *sc = find_var(vm, fn_tok);
+                    if (!sc || !sc->var || !sc->var->is_function)
+                        error_tok(vm, fn_tok,
+                                  "cleanup argument '%.*s' is not a function",
+                                  fn_tok->len, fn_tok->loc);
+                    attr->cleanup_fn = sc->var;
+                    attr->cleanup_tok = fn_tok;
+                }
                 continue;
             }
 

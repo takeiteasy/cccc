@@ -760,6 +760,7 @@ struct Type {
     char *deprecated_msg;
     char *nodiscard_msg;
     struct CustomAttrUse *custom_attrs;
+    struct Obj *cleanup_fn; // transport: __attribute__((cleanup(fn))); copied to Obj by new_var()
 
     // Per-function optimization level (__attribute__((optimize)) / [[cccc::optimize]])
     int  fn_optimize_level; // requested opt level (0–4); only valid if fn_optimize_set
@@ -866,6 +867,14 @@ typedef enum {
     ND_ASTORE = 58,         // Atomic store via __builtin_atomic_store; lhs=addr ptr, rhs=value
 } NodeKind;
 
+// Linked list of locals with __attribute__((cleanup(fn))) in one block scope.
+// Used by ND_BLOCK (parse) and CleanupScopeEntry (codegen) to emit LIFO calls.
+typedef struct CleanupVar {
+    struct Obj *var;          // local variable with cleanup
+    struct Obj *cleanup_fn;   // void fn(T *) to call at scope exit
+    struct CleanupVar *next;
+} CleanupVar;
+
 /*!
  @struct Node
  @abstract Represents a node in the parser's abstract syntax tree.
@@ -915,6 +924,11 @@ struct Node {
     bool label_maybe_unused;
     bool is_fallthrough; // [[fallthrough]] on a null statement
     bool is_sizeof_ptr_expr; // ND_NUM from sizeof(pointer_type) — for -Wsizeof-pointer-memaccess
+    int cleanup_target_depth; // for ND_GOTO (break/continue): cleanup_scope_depth of target
+
+    // ND_BLOCK: cleanup vars declared in this scope (declaration order); codegen emits LIFO
+    CleanupVar *cleanup_vars;
+    int cleanup_scope_depth; // parse-time cleanup_scope_depth when this block was built
 
     // Switch
     struct Node *case_next;
@@ -1003,6 +1017,8 @@ struct Obj {
     bool is_param;    // true if this is a function parameter
     bool is_captured; // true if accessed by a nested function (for optimization
                       // hints)
+    struct Obj *cleanup_fn; // non-NULL: void fn(T*) called at scope exit (__attribute__((cleanup)))
+    int cleanup_fp_retval_offset; // stack offset for float retval save slot (set by assign_stack_offsets)
 
     // Global variable or function
     bool is_function;
@@ -1865,6 +1881,9 @@ typedef struct Compiler {
     Node *labels;          // Labels in current function
     char *brk_label;       // Current break jump target
     char *cont_label;      // Current continue jump target
+    int cleanup_scope_depth;   // number of active cleanup scopes (blocks with cleanup vars)
+    int brk_cleanup_depth;     // cleanup_scope_depth when current brk_label was established
+    int cont_cleanup_depth;    // cleanup_scope_depth when current cont_label was established
     Node *current_switch;  // Switch statement being parsed (NULL if none)
     Obj *builtin_alloca;   // Builtin alloca function
     Obj *builtin_setjmp;   // Builtin setjmp function

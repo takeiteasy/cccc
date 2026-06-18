@@ -40,6 +40,7 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 | `fallthrough` | C23 | ✓ | Suppresses fallthrough warning in switch cases (`-Wfallthrough`, part of `-Wextra`) |
 | `noreturn` | C23 / GNU | ✓ | Emits `BTRAP` after calls; warns on returns |
 | `optimize("ON")` / `optimize(N)` | GNU / CCCC | ✓ | Per-function optimization level (0–4); attribute wins over global `-O` |
+| `cleanup(fn)` | GNU | ✓ | Scope-exit callback: calls `fn(&var)` when the variable goes out of scope |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
 ## Supported Attributes
@@ -273,6 +274,55 @@ int plain_fn(int x) { return x * 2; }  // follows -O flag
 
 ---
 
+### `__attribute__((cleanup(fn)))` / `[[gnu::cleanup(fn)]]`
+
+Registers a scope-exit callback `fn` for a local variable. When the variable
+goes out of scope, `fn(&var)` is called automatically. `fn` must have the
+signature `void fn(T *)` where `T` is the type of the variable.
+
+**Syntax:**
+
+```c
+void cleanup_free(int **p) { free(*p); }
+
+void example(void) {
+    int *buf __attribute__((cleanup(cleanup_free))) = malloc(100 * sizeof(int));
+    // buf is automatically freed when example() returns or the block exits
+}
+```
+
+**Call order:** LIFO — the last-declared variable is cleaned up first within a
+scope.
+
+**Scope exit paths covered:**
+
+| Exit kind | Cleanup fires? |
+|-----------|---------------|
+| Natural block end (`}`) | ✓ |
+| `return` | ✓ |
+| `break` | ✓ |
+| `continue` | ✓ |
+| Named `goto` out of scope | ✗ (deferred, see ticket) |
+| `longjmp` | ✗ (matches GCC C-mode behavior) |
+
+**Return value preservation:** when a non-void return is combined with cleanup
+calls, the return value is preserved across cleanup invocations. For integer or
+pointer returns, the value is saved via a stack push; for float/double returns,
+a dedicated stack slot is used.
+
+**Static inline cleanup functions** referenced only through the attribute are
+kept alive (not dead-stripped) by the liveness pass.
+
+**Limitations:**
+
+- Named `goto` jumping out of a cleanup scope does **not** trigger cleanup.
+  Tracked in [#480](https://todo.sr.ht/~takeiteasy/cccc/480).
+- `longjmp` does not trigger cleanup, matching GCC C-mode behavior.
+
+**`__has_attribute`:** returns `1` for `cleanup`.
+
+---
+
 ## Parsed but Ignored
 
 Any GNU `__attribute__` identifier that is not explicitly handled (i.e., not `packed`, `aligned`, `unused`/`__unused__`, or `deprecated`/`__deprecated__`) is **consumed and emits a `-Wattributes` warning**. The parser skips the attribute name and any parenthesised argument list, then continues.
@@ -284,7 +334,6 @@ Ignored attributes include (but are not limited to):
 | Attribute | Syntax | Tracking |
 |-----------|--------|----------|
 | `no_unique_address` | C23 | Parsed but ignored — VM optimisation deferred |
-| `cleanup` | GNU | [#218](https://todo.sr.ht/~takeiteasy/cccc/218) |
 | `visibility` | GNU | |
 | `section` | GNU | |
 | `weak` | GNU | |
@@ -307,7 +356,7 @@ Ignored attributes include (but are not limited to):
 | # | Attribute | Priority | Description |
 |---|-----------|----------|-------------|
 | [#215](https://todo.sr.ht/~takeiteasy/cccc/215) | Catch-all | medium | Remaining GNU builtins and attributes |
-| [#218](https://todo.sr.ht/~takeiteasy/cccc/218) | `cleanup(func)` | medium | Scope-based cleanup callbacks (RAII-style) |
+| [#480](https://todo.sr.ht/~takeiteasy/cccc/480) | `cleanup(fn)` goto | low | Named goto out of cleanup scope does not trigger cleanup |
 
 ## `@`-prefix attribute syntax
 

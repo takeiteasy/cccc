@@ -2221,6 +2221,54 @@ static void emit_pop3(VirtualMachine *vm, int rd) {
     emit_word(vm, ENCODE_R(rd));
 }
 
+// ========== Cleanup Scope Stack ==========
+// Per-block stack tracking vars with __attribute__((cleanup(fn))).
+// Parallels the parse-time cleanup_scope_depth. Shared file-scope state
+// (see ticket #139 note above about thread safety).
+
+typedef struct CleanupScopeEntry {
+    CleanupVar *vars;              // LIFO-ordered cleanup vars for this scope
+    int depth;                     // parse-time cleanup_scope_depth of this scope
+    struct CleanupScopeEntry *outer;
+} CleanupScopeEntry;
+
+static CleanupScopeEntry *g_cleanup_scope = NULL;
+
+// Emit address-of a local variable into dest_reg.
+static void emit_local_addr(VirtualMachine *vm, Obj *var, int dest_reg) {
+    emit_lea3(vm, dest_reg, var->offset);
+}
+
+// Call cv->cleanup_fn(&cv->var). The cleanup fn returns void so REG_A0 is clobbered.
+// Uses the standard CALL+patch mechanism (same as ND_FUNCALL for CCCC functions).
+static void emit_one_cleanup(VirtualMachine *vm, CleanupVar *cv) {
+    int r_addr = alloc_temp_reg();
+    emit_local_addr(vm, cv->var, r_addr);
+    emit_mov3(vm, REG_A0, r_addr);
+    free_temp_reg(r_addr);
+    emit(vm, CALL);
+    Pc patch = emit_word_ptr(vm);
+    vm->text_seg[patch] = 0;
+    if (vm->compiler.num_call_patches >= MAX_CALLS)
+        error("too many function calls");
+    vm->compiler.call_patches[vm->compiler.num_call_patches].location = patch;
+    vm->compiler.call_patches[vm->compiler.num_call_patches].function = cv->cleanup_fn;
+    vm->compiler.num_call_patches++;
+    reset_temp_regs();
+}
+
+// Emit cleanup calls for one scope's vars (iterate in stored order = LIFO).
+static void emit_scope_cleanups(VirtualMachine *vm, CleanupScopeEntry *scope) {
+    for (CleanupVar *cv = scope->vars; cv; cv = cv->next)
+        emit_one_cleanup(vm, cv);
+}
+
+// Emit cleanup calls for all active scopes with depth > target_depth (innermost first).
+static void emit_cleanups_to_depth(VirtualMachine *vm, int target_depth) {
+    for (CleanupScopeEntry *s = g_cleanup_scope; s && s->depth > target_depth; s = s->outer)
+        emit_scope_cleanups(vm, s);
+}
+
 // ========== Forward Declarations ==========
 
 static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg);
@@ -5250,9 +5298,27 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
             block_scope_id = vm->current_scope_id++;
             emit_scopein(vm, block_scope_id);
         }
+
+        // Push a cleanup scope entry if this block declared cleanup vars.
+        CleanupScopeEntry cleanup_entry = {};
+        CleanupScopeEntry *saved_cleanup = g_cleanup_scope;
+        if (node->cleanup_vars) {
+            cleanup_entry.vars = node->cleanup_vars;
+            cleanup_entry.depth = node->cleanup_scope_depth;
+            cleanup_entry.outer = g_cleanup_scope;
+            g_cleanup_scope = &cleanup_entry;
+        }
+
         for (Node *n = node->body; n; n = n->next) {
             gen_stmt(vm, n);
         }
+
+        // Emit cleanups at natural block exit (LIFO order).
+        if (node->cleanup_vars)
+            emit_scope_cleanups(vm, g_cleanup_scope);
+
+        g_cleanup_scope = saved_cleanup;
+
         if (block_scope_id >= 0)
             emit_scopeout(vm, block_scope_id);
         return;
@@ -5364,6 +5430,31 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
                 gen_expr(vm, node->lhs, REG_A0);
             }
         }
+        // Emit cleanup calls for all active scopes before returning (LIFO, innermost first).
+        // If non-void, preserve the return value across cleanup calls (they clobber REG_A0).
+        if (g_cleanup_scope) {
+            bool is_void_ret = !node->lhs || (node->lhs->ty && node->lhs->ty->kind == TY_VOID);
+            bool is_float_ret = !is_void_ret && node->lhs && is_flonum(node->lhs->ty);
+            Obj *cur_fn = vm->compiler.current_fn;
+            if (!is_void_ret) {
+                if (!is_float_ret) {
+                    // Integer/pointer/struct-addr return: save via stack push
+                    emit_psh3(vm, REG_A0);
+                } else {
+                    // Float/double return: save to synthetic stack slot
+                    emit_ri(vm, FSTR_LOCAL, FREG_A0, cur_fn->cleanup_fp_retval_offset);
+                }
+            }
+            emit_cleanups_to_depth(vm, 0);
+            if (!is_void_ret) {
+                if (!is_float_ret) {
+                    emit_pop3(vm, REG_A0);
+                } else {
+                    emit_ri(vm, FLDR_LOCAL, FREG_A0, cur_fn->cleanup_fp_retval_offset);
+                }
+            }
+        }
+
         emit_flush_promoted_locals(vm);
         emit_flush_fp_promoted_locals(vm);
         // Deactivate function-level scope before returning.
@@ -5626,18 +5717,21 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
     }
 
     case ND_GOTO:
-        // break/continue/goto - emit a jump that will be patched
+        // break/continue/goto - emit cleanup calls for exited scopes, then jump
         if (node->unique_label) {
-            // This is a break or continue statement
+            // break or continue: emit cleanups for all scopes above the loop/switch entry depth
+            if (g_cleanup_scope)
+                emit_cleanups_to_depth(vm, node->cleanup_target_depth);
             emit(vm, JMP);
             Pc patch = emit_word_ptr(vm);
-            vm->text_seg[patch] = 0; // Placeholder
+            vm->text_seg[patch] = 0;
             add_label_patch(node->unique_label, patch, false);
         } else if (node->label) {
-            // Named goto - also needs patching
+            // Named goto: cleanup for goto across cleanup scopes is deferred (#218 follow-up).
+            // TODO: emit cleanups to target label's scope depth when known.
             emit(vm, JMP);
             Pc patch = emit_word_ptr(vm);
-            vm->text_seg[patch] = 0; // Placeholder
+            vm->text_seg[patch] = 0;
             add_label_patch(node->label, patch, false);
         }
         return;
@@ -5677,6 +5771,12 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
         error_tok(vm, node->tok, "codegen: unsupported statement node kind %d",
                   node->kind);
     }
+}
+
+static bool fn_has_any_cleanup_vars(Obj *fn) {
+    for (Obj *v = fn->locals; v; v = v->next)
+        if (v->cleanup_fn) return true;
+    return false;
 }
 
 // Assign stack offsets for parameters and locals
@@ -5747,6 +5847,14 @@ static int assign_stack_offsets(VirtualMachine *vm, Obj *fn) {
         }
     }
 
+    // Allocate a float retval save slot if this function has cleanup vars and
+    // a floating-point return type. Used to preserve FREG_A0 across cleanup calls.
+    if (fn_has_any_cleanup_vars(fn) && fn->ty && fn->ty->return_ty &&
+        is_flonum(fn->ty->return_ty)) {
+        stack_size++;
+        fn->cleanup_fp_retval_offset = -stack_size;
+    }
+
     // Ensure 16-byte stack alignment
     if (stack_size % 2 != 0) {
         stack_size++;
@@ -5763,6 +5871,9 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     // Set current function context for nested function checks (e.g. in
     // gen_addr)
     vm->compiler.current_fn = fn;
+
+    // Reset cleanup scope stack for this function
+    g_cleanup_scope = NULL;
 
     // Reset inlining context for this function
     vm->compiler.inline_exit_name = NULL;
