@@ -4616,21 +4616,25 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         return;
     }
 
-    // ND_MEMZERO: zero-clear a local variable's stack region.
+    // ND_MEMZERO: zero-clear a local variable's storage region.
     // Emitted as the first operand of the ND_COMMA produced by lvar_initializer
     // for partial aggregate initialisers (e.g. `T arr[N] = {0}`).  The MSET
     // opcode mirrors MCPY: dest=REG_A0, count=REG_A2.
     //
-    // __block variables: skip.  Their stack slot (bp+offset) holds an 8-byte
-    // heap pointer written by the function prologue; var->ty->size is the size
-    // of the *element* (e.g. 4 for int), so a blind memset would corrupt the
-    // pointer.  The explicit initialiser (if any) goes through gen_addr which
-    // correctly dereferences the pointer to the heap cell.
+    // __block variables: their stack slot (bp+offset) holds an 8-byte heap
+    // pointer written by the function prologue; a blind MSET of var->ty->size
+    // bytes at the slot would corrupt the pointer.  Instead, dereference the
+    // slot to obtain the heap cell address and zero through that — mirroring
+    // gen_addr's normal-local block path.  This ensures that `__block T arr[N]
+    // = {partial}` correctly zeroes the unspecified elements in the heap cell.
     case ND_MEMZERO:
-        if (node->var->is_block_var)
-            return;
-        emit_lea3(vm, REG_A0, node->var->offset); // bp + offset  -> A0 (dest)
-        emit_li3(vm, REG_A2, node->var->ty->size); // byte count  -> A2
+        if (node->var->is_block_var) {
+            emit_lea3(vm, REG_A0, node->var->offset); // &stack slot
+            emit_rr(vm, LDR_D, REG_A0, REG_A0);       // heap ptr -> A0
+        } else {
+            emit_lea3(vm, REG_A0, node->var->offset); // bp + offset -> A0
+        }
+        emit_li3(vm, REG_A2, node->var->ty->size); // byte count -> A2
         emit(vm, MSET);
         return;
 
