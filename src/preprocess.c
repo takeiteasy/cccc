@@ -2355,6 +2355,9 @@ typedef struct {
     double ret_epsilon_val;
     int exit_code_val; // -1 = not set
     const char *flags; // flags = "..." per-test CLI-flag string; NULL if unset
+    // RET_STRUCT: compound-literal field list and raw source span text
+    TestRetField *ret_fields;     // heap-alloc'd; ownership transferred to TestFnRecord
+    char         *ret_struct_text; // heap-alloc'd strndup of the literal source span
 } TestArgs;
 
 // Parsed arguments from [[cccc::test_setup(...)]] / __attribute__((test_setup(...)))
@@ -2363,6 +2366,70 @@ typedef struct {
     const char *suite;
     bool once;
 } TestSetupArgs;
+
+// Classify one scalar token (or a leading "-" then NUM) from the token stream
+// into a RetKind and value.  Advances *p_ptr past the consumed tokens.
+// Returns true on success; leaves *p_ptr unchanged on failure.
+// For RET_STR the caller must strdup val->s (it points into token string data).
+static bool parse_scalar_operand(Token **p_ptr,
+                                  RetKind *out_kind,
+                                  int64_t *out_i,
+                                  double  *out_f,
+                                  const char **out_s) {
+    Token *p = *p_ptr;
+    if (!p) return false;
+    if (p->kind == TK_STR) {
+        *out_kind = RET_STR;
+        *out_s = p->str;
+        *p_ptr = p->next;
+        return true;
+    }
+    if (p->kind == TK_NUM || p->kind == TK_PP_NUM) {
+        bool is_float = false;
+        for (int _i = 0; _i < (int)p->len; _i++) {
+            char _c = p->loc[_i];
+            if (_c == '.' || _c == 'e' || _c == 'E') { is_float = true; break; }
+        }
+        if (!is_float && p->len > 0 &&
+            (p->loc[p->len-1] == 'f' || p->loc[p->len-1] == 'F'))
+            is_float = true;
+        char _buf[64];
+        int _n = p->len < 63 ? (int)p->len : 63;
+        memcpy(_buf, p->loc, _n); _buf[_n] = '\0';
+        if (is_float) {
+            *out_kind = RET_FLOAT;
+            *out_f = strtod(_buf, NULL);
+        } else {
+            *out_kind = RET_INT;
+            *out_i = (int64_t)strtoll(_buf, NULL, 0);
+        }
+        *p_ptr = p->next;
+        return true;
+    }
+    // Negative number: "-" followed by NUM/PP_NUM
+    if (equal(p, "-") && p->next &&
+        (p->next->kind == TK_NUM || p->next->kind == TK_PP_NUM)) {
+        char _buf[64];
+        int _n = p->next->len < 63 ? (int)p->next->len : 63;
+        memcpy(_buf, p->next->loc, _n); _buf[_n] = '\0';
+        *out_kind = RET_INT;
+        *out_i = -(int64_t)strtoll(_buf, NULL, 0);
+        *p_ptr = p->next->next;
+        return true;
+    }
+    return false;
+}
+
+// Free a TestRetField linked list (heap-allocated by parse_test_args).
+static void free_ret_fields(TestRetField *f) {
+    while (f) {
+        TestRetField *next = f->next;
+        free(f->name);
+        if (f->kind == RET_STR) free(f->val.s);
+        free(f);
+        f = next;
+    }
+}
 
 // Parse test(...) argument list. *p_ptr must point to the first token inside
 // the opening "("; on return it points to the closing ")".
@@ -2432,49 +2499,105 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
                 else if (equal(p, ">"))  op = CMP_GT;
                 p = p->next;
             }
-            if (p && p->kind == TK_STR) {
-                out->ret_kind    = RET_STR;
-                out->ret_op      = op;
-                out->ret_str_val = p->str;
-                p = p->next;
-            } else if (p && (p->kind == TK_NUM || p->kind == TK_PP_NUM)) {
-                bool is_float = false;
-                for (int _i = 0; _i < (int)p->len; _i++) {
-                    char _c = p->loc[_i];
-                    if (_c == '.' || _c == 'e' || _c == 'E') { is_float = true; break; }
-                }
-                if (!is_float && p->len > 0 &&
-                    (p->loc[p->len-1] == 'f' || p->loc[p->len-1] == 'F'))
-                    is_float = true;
-                if (is_float) {
-                    char _buf[64];
-                    int _n = p->len < 63 ? (int)p->len : 63;
-                    memcpy(_buf, p->loc, _n); _buf[_n] = '\0';
-                    out->ret_kind      = RET_FLOAT;
-                    out->ret_op        = op;
-                    out->ret_float_val = strtod(_buf, NULL);
+            // Compound literal: (struct|union TAG){...}
+            if (p && equal(p, "(") &&
+                p->next && (equal(p->next, "struct") || equal(p->next, "union")) &&
+                p->next->next && p->next->next->kind == TK_IDENT &&
+                p->next->next->next && equal(p->next->next->next, ")") &&
+                p->next->next->next->next && equal(p->next->next->next->next, "{")) {
+
+                if (op != CMP_EQ && op != CMP_NE) {
+                    warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
+                             "struct return= assertion only supports '=' or '!='; "
+                             "ordered comparisons are not meaningful for structs; "
+                             "assertion skipped");
+                    // Skip to closing brace
+                    while (p && !equal(p, "}") && p->kind != TK_EOF) p = p->next;
+                    if (p && equal(p, "}")) p = p->next;
                 } else {
-                    char _buf[64];
-                    int _n = p->len < 63 ? (int)p->len : 63;
-                    memcpy(_buf, p->loc, _n); _buf[_n] = '\0';
-                    out->ret_kind    = RET_INT;
-                    out->ret_op      = op;
-                    out->ret_int_val = (int64_t)strtoll(_buf, NULL, 0);
+                    const char *span_start = p->loc;  // points to '('
+                    // Advance past: ( struct|union TAG ) {
+                    p = p->next->next->next->next->next;
+
+                    TestRetField *fields = NULL, **ftail = &fields;
+                    bool parse_ok = true;
+                    Token *close_brace = NULL;
+
+                    while (p && !equal(p, "}") && p->kind != TK_EOF) {
+                        if (!equal(p, ".")) { parse_ok = false; break; }
+                        p = p->next;
+                        if (!p || p->kind != TK_IDENT) { parse_ok = false; break; }
+                        char *fname = strndup(p->loc, p->len);
+                        p = p->next;
+                        if (!p || !equal(p, "=")) {
+                            free(fname);
+                            parse_ok = false;
+                            break;
+                        }
+                        p = p->next;
+
+                        RetKind fkind = RET_NONE;
+                        int64_t ival = 0;
+                        double  fval = 0.0;
+                        const char *sval = NULL;
+
+                        if (!parse_scalar_operand(&p, &fkind, &ival, &fval, &sval)) {
+                            warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
+                                     "unrecognized value for field '%s' in compound-literal "
+                                     "return= assertion; skipping",
+                                     fname);
+                            free(fname);
+                            parse_ok = false;
+                            break;
+                        }
+
+                        TestRetField *f = calloc(1, sizeof(TestRetField));
+                        f->name = fname;
+                        f->kind = fkind;
+                        if      (fkind == RET_INT)   f->val.i = ival;
+                        else if (fkind == RET_FLOAT) f->val.f = fval;
+                        else if (fkind == RET_STR)   f->val.s = sval ? strdup(sval) : NULL;
+                        *ftail = f;
+                        ftail = &f->next;
+
+                        if (p && equal(p, ",")) p = p->next;
+                    }
+
+                    if (p && equal(p, "}")) {
+                        close_brace = p;
+                        p = p->next;
+                    }
+
+                    if (!parse_ok || !close_brace) {
+                        // Malformed literal: warn, free partial fields, skip to '}'
+                        free_ret_fields(fields);
+                        if (!parse_ok) {
+                            warn_tok(vm, p ? p : close_brace, CCCC_WARN_ATTRIBUTES,
+                                     "malformed compound literal in return= assertion; "
+                                     "skipping");
+                        }
+                        while (p && !equal(p, "}") && p->kind != TK_EOF) p = p->next;
+                        if (p && equal(p, "}")) p = p->next;
+                    } else {
+                        size_t span_len = (close_brace->loc + close_brace->len) - span_start;
+                        out->ret_struct_text = strndup(span_start, span_len);
+                        out->ret_fields = fields;
+                        out->ret_kind   = RET_STRUCT;
+                        out->ret_op     = op;
+                    }
                 }
-                p = p->next;
             } else {
-                bool neg_num = p && equal(p, "-") &&
-                              p->next &&
-                              (p->next->kind == TK_NUM ||
-                               p->next->kind == TK_PP_NUM);
-                if (neg_num) {
-                    char _buf[64];
-                    int _n = p->next->len < 63 ? (int)p->next->len : 63;
-                    memcpy(_buf, p->next->loc, _n); _buf[_n] = '\0';
-                    out->ret_int_val = -(int64_t)strtoll(_buf, NULL, 0);
-                    p = p->next->next;
-                    out->ret_kind = RET_INT;
+                // Scalar operands: use helper (handles STR / NUM / PP_NUM / negative int)
+                int64_t ival = 0;
+                double  fval = 0.0;
+                const char *sval = NULL;
+                RetKind sk = RET_NONE;
+                if (parse_scalar_operand(&p, &sk, &ival, &fval, &sval)) {
+                    out->ret_kind = sk;
                     out->ret_op   = op;
+                    if      (sk == RET_INT)   out->ret_int_val   = ival;
+                    else if (sk == RET_FLOAT) out->ret_float_val = fval;
+                    else if (sk == RET_STR)   out->ret_str_val   = sval;
                 } else if (p && p->kind != TK_EOF &&
                            !equal(p, ")") && !equal(p, ",")) {
                     warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
@@ -2773,9 +2896,17 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
                 rec->ret_kind    = ta.ret_kind;
                 rec->ret_op      = (ta.ret_kind != RET_NONE) ? ta.ret_op : CMP_EQ;
                 rec->ret_epsilon = ta.ret_epsilon_val;
-                if (ta.ret_kind == RET_INT)        rec->ret_expect.ret_int   = ta.ret_int_val;
-                else if (ta.ret_kind == RET_FLOAT) rec->ret_expect.ret_float = ta.ret_float_val;
-                else if (ta.ret_kind == RET_STR)   rec->ret_expect.ret_str   = ta.ret_str_val ? strdup(ta.ret_str_val) : NULL;
+                if (ta.ret_kind == RET_INT)
+                    rec->ret_expect.ret_int   = ta.ret_int_val;
+                else if (ta.ret_kind == RET_FLOAT)
+                    rec->ret_expect.ret_float = ta.ret_float_val;
+                else if (ta.ret_kind == RET_STR)
+                    rec->ret_expect.ret_str   = ta.ret_str_val ? strdup(ta.ret_str_val) : NULL;
+                else if (ta.ret_kind == RET_STRUCT) {
+                    // Ownership of the heap-allocated fields/text is transferred here.
+                    rec->ret_expect.ret_fields = ta.ret_fields;
+                    rec->ret_struct_text        = ta.ret_struct_text;
+                }
                 rec->expect_exit_code = ta.exit_code_val;
                 // Link into the list before cc_parse_test_flags so that
                 // the VM cleanup loop frees the record if error_tok longjmps.

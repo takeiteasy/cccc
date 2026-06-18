@@ -1060,6 +1060,18 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         int64_t ret_int   = 0;
         double  ret_float = 0.0;
 
+        // For RET_STRUCT: allocate a capture buffer before setjmp so the bytes
+        // can be copied out of the rotating return-buffer pool immediately after
+        // cc_run_at (before teardown hooks clobber the pool).
+        char *ret_struct_buf  = NULL;
+        int   ret_struct_size = 0;
+        if (r->ret_kind == RET_STRUCT &&
+            fn->ty && fn->ty->return_ty &&
+            fn->ty->return_ty->size > 0) {
+            ret_struct_size = fn->ty->return_ty->size;
+            ret_struct_buf  = calloc(1, ret_struct_size);
+        }
+
         // Per-test timeout: individual timeout_ms overrides the global value.
         long effective_ms = r->timeout_ms > 0 ? r->timeout_ms : global_timeout_ms;
         SET_TIMEOUT(effective_ms);
@@ -1091,6 +1103,13 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
             // Capture return values before teardown hooks clobber the registers.
             ret_int   = (int64_t)vm->regs[REG_A0];
             ret_float = cccc_freg_get_f64(vm, FREG_A0);
+            // For structs: REG_A0 holds the address of the returned struct in
+            // the rotating return-buffer pool.  Copy it out immediately before
+            // teardown hooks can rotate the pool and overwrite the data.
+            if (ret_struct_buf && ret_struct_size > 0) {
+                void *st_ptr = (void *)(uintptr_t)(uint64_t)ret_int;
+                if (st_ptr) memcpy(ret_struct_buf, st_ptr, ret_struct_size);
+            }
         } else if (jval == 2) {
             run.timed_out = 1;
         }
@@ -1140,6 +1159,117 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                                  exp ? exp : "(null)", got ? got : "(null)");
                     break;
                 }
+                case RET_STRUCT: {
+                    Type *st = (fn->ty && fn->ty->return_ty) ? fn->ty->return_ty : NULL;
+                    if (!ret_struct_buf || !st || !st->members) {
+                        ret_ok = true; // can't compare; skip silently
+                        break;
+                    }
+                    // Build failure "got" string and compare field-by-field.
+                    // For != the whole struct must differ (all-equal → mismatch).
+                    char got_str[512] = "{";
+                    bool all_eq = true;
+                    bool first_field = true;
+                    double eps = (r->ret_epsilon > 0.0) ? r->ret_epsilon : 1e-9;
+                    for (Member *m = st->members; m; m = m->next) {
+                        if (!m->name) continue; // anonymous / padding pseudo-member
+
+                        // Find the matching expected field (NULL → expect 0)
+                        const TestRetField *ef = NULL;
+                        for (const TestRetField *f = r->ret_expect.ret_fields; f; f = f->next) {
+                            if (f->name && m->name &&
+                                m->name->len == strlen(f->name) &&
+                                strncmp(m->name->loc, f->name, m->name->len) == 0) {
+                                ef = f;
+                                break;
+                            }
+                        }
+
+                        // Read actual value from the captured buffer.
+                        bool field_eq = true;
+                        char field_got[64] = {0};
+                        const char *field_delim = first_field ? "" : ", ";
+
+                        if (m->ty->kind == TY_FLOAT) {
+                            float fv = 0.0f;
+                            memcpy(&fv, ret_struct_buf + m->offset, sizeof(fv));
+                            double actual = (double)fv;
+                            double expect = ef ? ef->val.f : 0.0;
+                            if (ef && ef->kind == RET_INT) expect = (double)ef->val.i;
+                            field_eq = (actual - expect < eps && expect - actual < eps);
+                            snprintf(field_got, sizeof(field_got), "%s.%.*s = %g",
+                                     field_delim, (int)m->name->len, m->name->loc, actual);
+                        } else if (m->ty->kind == TY_DOUBLE) {
+                            double actual = 0.0;
+                            memcpy(&actual, ret_struct_buf + m->offset, sizeof(actual));
+                            double expect = ef ? ef->val.f : 0.0;
+                            if (ef && ef->kind == RET_INT) expect = (double)ef->val.i;
+                            field_eq = (actual - expect < eps && expect - actual < eps);
+                            snprintf(field_got, sizeof(field_got), "%s.%.*s = %g",
+                                     field_delim, (int)m->name->len, m->name->loc, actual);
+                        } else if (m->ty->kind == TY_PTR &&
+                                   ef && ef->kind == RET_STR) {
+                            // char* field compared with strcmp
+                            uintptr_t ptr_val = 0;
+                            memcpy(&ptr_val, ret_struct_buf + m->offset,
+                                   sizeof(uintptr_t));
+                            char *actual = (char *)ptr_val;
+                            const char *expect = ef->val.s;
+                            int cmp = (actual && expect) ? strcmp(actual, expect)
+                                                        : (actual ? 1 : (expect ? -1 : 0));
+                            field_eq = (cmp == 0);
+                            snprintf(field_got, sizeof(field_got), "%s.%.*s = \"%s\"",
+                                     field_delim, (int)m->name->len, m->name->loc,
+                                     actual ? actual : "(null)");
+                        } else {
+                            // Integer (any size up to 8 bytes)
+                            int64_t actual = 0;
+                            int sz = m->ty->size < 8 ? m->ty->size : 8;
+                            if (m->ty->is_unsigned) {
+                                uint64_t uv = 0;
+                                memcpy(&uv, ret_struct_buf + m->offset, sz);
+                                actual = (int64_t)uv;
+                            } else {
+                                // Sign-extend for signed types < 8 bytes
+                                uint64_t uv = 0;
+                                memcpy(&uv, ret_struct_buf + m->offset, sz);
+                                int shift = (8 - sz) * 8;
+                                if (shift > 0 && shift < 64)
+                                    actual = (int64_t)((int64_t)(uv << shift) >> shift);
+                                else
+                                    actual = (int64_t)uv;
+                            }
+                            int64_t expect = ef ? ef->val.i : 0;
+                            if (ef && ef->kind == RET_FLOAT)
+                                expect = (int64_t)ef->val.f;
+                            field_eq = (actual == expect);
+                            snprintf(field_got, sizeof(field_got), "%s.%.*s = %" PRId64,
+                                     field_delim, (int)m->name->len, m->name->loc, actual);
+                        }
+
+                        // Append to got_str
+                        strncat(got_str, field_got,
+                                sizeof(got_str) - strlen(got_str) - 1);
+                        if (!field_eq) all_eq = false;
+                        first_field = false;
+                    }
+                    strncat(got_str, "}", sizeof(got_str) - strlen(got_str) - 1);
+
+                    // For = : all fields must be equal.
+                    // For !=: at least one field must differ (not all equal).
+                    if (r->ret_op == CMP_EQ)
+                        ret_ok = all_eq;
+                    else  // CMP_NE
+                        ret_ok = !all_eq;
+
+                    if (!ret_ok)
+                        snprintf(run.fail_msg, sizeof(run.fail_msg),
+                                 "expected return value %s %s, got %s",
+                                 cmp_op_str(r->ret_op),
+                                 r->ret_struct_text ? r->ret_struct_text : "(struct)",
+                                 got_str);
+                    break;
+                }
                 default:
                     ret_ok = true;
                     break;
@@ -1147,6 +1277,8 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                 if (!ret_ok) run.failed = 1;
             }
         }
+
+        free(ret_struct_buf);
 
         if (run.timed_out) {
             emit_test_result(fmt, disp, cur_suite, "timeout", NULL, &json_first, test_num);

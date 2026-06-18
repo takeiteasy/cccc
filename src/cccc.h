@@ -1168,7 +1168,22 @@ typedef enum {
     RET_INT,       // integer / char / enum (via vm->regs[REG_A0])
     RET_FLOAT,     // float / double (via vm->fregs[FREG_A0])
     RET_STR,       // char* compared with strcmp (pointer via vm->regs[REG_A0])
+    RET_STRUCT,    // struct/union: compound literal; field-by-field comparison
 } RetKind;
+
+// One expected field value for a RET_STRUCT return assertion.
+// Linked list built by parse_test_args; consumed by cc_run_tests.
+typedef struct TestRetField TestRetField;
+struct TestRetField {
+    char      *name;    // designated field name (e.g. "x")
+    RetKind    kind;    // RET_INT / RET_FLOAT / RET_STR per scalar type
+    union {
+        int64_t  i;    // RET_INT
+        double   f;    // RET_FLOAT
+        char    *s;    // RET_STR — heap-allocated strdup
+    } val;
+    TestRetField *next;
+};
 
 // A test function registered via [[cccc::test]].
 typedef struct TestFnRecord TestFnRecord;
@@ -1186,10 +1201,12 @@ struct TestFnRecord {
     RetKind ret_kind;      // RET_NONE = no return assertion
     CmpOp   ret_op;        // comparison operator for return (default CMP_EQ)
     union {
-        int64_t  ret_int;  // for RET_INT
-        double   ret_float;// for RET_FLOAT
-        char    *ret_str;  // for RET_STR
+        int64_t      ret_int;    // for RET_INT
+        double       ret_float;  // for RET_FLOAT
+        char        *ret_str;    // for RET_STR
+        TestRetField *ret_fields; // for RET_STRUCT (linked list of expected fields)
     } ret_expect;
+    char  *ret_struct_text;    // raw source span of compound literal (for error msg)
     double ret_epsilon;    // 0.0 = use default 1e-9; set by return_epsilon=
     int    expect_exit_code; // -1 = disabled; >=0 = expected shell-convention exit code
     // Per-test flags (from flags = "..." in [[cccc::test(flags = "...")]])

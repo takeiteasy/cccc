@@ -1380,6 +1380,15 @@ void cc_destroy(VirtualMachine *vm) {
         free(r->test_flags);
         if (r->ret_kind == RET_STR)
             free(r->ret_expect.ret_str);
+        else if (r->ret_kind == RET_STRUCT) {
+            for (TestRetField *f = r->ret_expect.ret_fields, *fn; f; f = fn) {
+                fn = f->next;
+                free(f->name);
+                if (f->kind == RET_STR) free(f->val.s);
+                free(f);
+            }
+            free(r->ret_struct_text);
+        }
         free(r);
     }
     vm->compiler.test_fns = NULL;

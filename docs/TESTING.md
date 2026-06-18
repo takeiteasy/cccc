@@ -233,6 +233,42 @@ const char *test_status(void) {
 }
 ```
 
+**Struct / union**: use an inline compound literal to assert a struct or union return value. Fields are compared field-by-field using the same per-type rules as the scalar paths (epsilon for `float`/`double`, `strcmp` for `char *`, integer equality for all other types). Fields omitted from the compound literal are expected to be zero (C zero-initialisation).
+
+```c
+struct Point { int x; int y; };
+
+[[cccc::test(return = (struct Point){.x = 1, .y = 2})]]
+struct Point test_make_point(void) {
+    return (struct Point){.x = 1, .y = 2};
+}
+```
+
+Mixed field types are supported:
+
+```c
+struct Named { char *label; int code; };
+
+[[cccc::test(return = (struct Named){.label = "ok", .code = 0})]]
+struct Named test_result(void) {
+    return (struct Named){.label = "ok", .code = 0};
+}
+```
+
+Struct assertions support `=` and `!=` operators only; ordered comparisons (`<`, `<=`, `>`, `>=`) are not meaningful for structs and produce a `-Wattributes` warning with the assertion skipped.
+
+If the assertion fails:
+
+```
+expected return value = (struct Point){.x = 1, .y = 2}, got {.x = 99, .y = 2}
+```
+
+**Scope limitations** — the following are not supported in v1 and are deferred to follow-up tickets:
+
+- *Nested struct fields* — a flat struct whose field is itself a struct.
+- *Non-`char *` pointer fields* — pointer fields other than `char *` are read as integers.
+- *Pre-declared constants* — field values must be compile-time literals; named constants (enum names, `#define` values) are not resolved in this context (see [ticket #349](https://todo.sr.ht/~takeiteasy/cccc/349)).
+
 **Comparison operators** (`=`, `!=`, `<`, `<=`, `>`, `>=`): use a comparison operator instead of equality. The default (no operator) is `=`.
 
 ```c
@@ -751,8 +787,9 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 
 ## Limitations
 
-- Test functions must take no arguments and return `void`, `int`, `double`, `float`, or `char *`. Use `return = value` to assert on the return value.
-- `return =` assertions support integer literals, float literals, and string literals. Enum names (`return = GREEN`) and character literals (`return = 'A'`) are not resolved — use the integer value instead (`return = 1`, `return = 65`). Unrecognized operands produce a `-Wattributes` warning and skip the assertion.
+- Test functions must take no arguments and return `void`, `int`, `double`, `float`, `char *`, or a flat struct/union. Use `return = value` to assert on the return value.
+- `return =` assertions support integer literals, float literals, string literals, and compound struct/union literals (`(struct T){.f = v, ...}`). Enum names (`return = GREEN`) and character literals (`return = 'A'`) are not resolved — use the integer value instead (`return = 1`, `return = 65`). Unrecognized operands produce a `-Wattributes` warning and skip the assertion.
+- Struct `return =` supports flat structs (scalar and `char *` fields only). Nested struct fields and non-`char *` pointer fields are not supported in v1.
 - Setup and teardown hook functions must also have signature `void name(void)`.
 - Teardown hooks are skipped on test timeout (VM state is unknown after `SIGALRM`). They run in all other cases, including after test or setup failure.
 - Calling `exit()` directly in a normal test terminates the entire process rather than failing just that test. Use `$assert*` macros instead, or use `exit_code =` if testing that the function exits with a specific code.
