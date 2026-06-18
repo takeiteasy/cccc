@@ -97,6 +97,9 @@ static const WarningInfo warning_infos[] = {
     {"cast-align",                 CCCC_WARN_CAST_ALIGN,                 false},
     {"missing-prototypes",         CCCC_WARN_MISSING_PROTOTYPES,         false},
     {"missing-declarations",       CCCC_WARN_MISSING_DECLARATIONS,       false},
+    {"redundant-decls",            CCCC_WARN_REDUNDANT_DECLS,            false},
+    {"override-init",              CCCC_WARN_OVERRIDE_INIT,              false},
+    {"unused-macros",              CCCC_WARN_UNUSED_MACROS,              false},
     {"all", CCCC_WARN_ALL, true},
     {"extra", CCCC_WARN_EXTRA, true},
 };

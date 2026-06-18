@@ -416,6 +416,11 @@ typedef enum {
     CCCC_WARN_MISSING_PROTOTYPES         = (1ULL << 50), // external fn defined without prior full prototype
     CCCC_WARN_MISSING_DECLARATIONS       = (1ULL << 51), // external fn defined without any prior declaration
 
+    // Ticket #471: misc analysis flags
+    CCCC_WARN_REDUNDANT_DECLS  = (1ULL << 52), // same-linkage declaration seen twice in same scope
+    CCCC_WARN_OVERRIDE_INIT    = (1ULL << 53), // later designator overrides earlier initializer
+    CCCC_WARN_UNUSED_MACROS    = (1ULL << 54), // #define that is never expanded
+
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
     CCCC_WARN_CONVERSION_GROUP = CCCC_WARN_CONVERSION |
                                 CCCC_WARN_SIGN_CONVERSION |
@@ -453,14 +458,16 @@ CCCC_WARN_ALL = CCCC_WARN_UNUSED |
                    CCCC_WARN_SIZEOF_POINTER_MEMACCESS |
                    CCCC_WARN_SWITCH |
                    CCCC_WARN_ENUM_COMPARE |
-                   CCCC_WARN_INCOMPATIBLE_POINTER_TYPES,
+                   CCCC_WARN_INCOMPATIBLE_POINTER_TYPES |
+                   CCCC_WARN_OVERRIDE_INIT,
     CCCC_WARN_EXTRA = CCCC_WARN_SHADOW |
                       CCCC_WARN_SIGN_COMPARE |
                       CCCC_WARN_CONVERSION |
                       CCCC_WARN_POINTER_ARITH |
                       CCCC_WARN_FALLTHROUGH |
                       CCCC_WARN_STRICT_PROTOTYPES |
-                      CCCC_WARN_OLD_STYLE_DEFINITION,
+                      CCCC_WARN_OLD_STYLE_DEFINITION |
+                      CCCC_WARN_REDUNDANT_DECLS,
 } CCCCWarning;
 
 /*!
@@ -507,6 +514,8 @@ typedef struct File {
     // For #line directive
     char *display_name;
     int line_delta;
+
+    bool is_system_header; // true when included via <...> from system search paths
 } File;
 
 /*!
@@ -1759,7 +1768,8 @@ typedef struct Compiler {
     CondIncl *cond_incl;      // Conditional inclusion stack
     HashMap pragma_once;      // #pragma once tracking
     HashMap included_headers; // Track included headers for lazy stdlib loading
-    HashMap include_guards;   // Header include guard cache
+    HashMap include_guards;   // Header include guard cache (path -> guard name)
+    HashMap guard_macros;     // Set of macro names used as include guards
     int include_next_idx;     // Index for #include_next
 
     // Compile-time macro state

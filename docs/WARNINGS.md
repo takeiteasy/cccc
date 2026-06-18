@@ -119,6 +119,9 @@ The warning infrastructure recognizes these category names:
 - `cast-align` — warns when an explicit cast increases the alignment requirement of the pointer target type
 - `missing-prototypes` — warns when a non-static function is defined without a prior full prototype declaration
 - `missing-declarations` — warns when a non-static, non-inline function is defined without any prior declaration
+- `redundant-decls` — warns when the same name is declared more than once with the same linkage in the same scope (e.g. two `extern` declarations of the same variable or two forward declarations of the same function); part of `-Wextra`
+- `override-init` — warns when a later designator in a compound initializer overrides an earlier one (e.g. `{.x=1, .x=2}`); part of `-Wall`
+- `unused-macros` — warns when a `#define` that is not in a system header is never expanded anywhere in the translation unit; standalone only (not part of `-Wall` or `-Wextra`)
 
 `conversion` is an umbrella name: `-Wconversion` enables `sign-conversion` and
 `float-conversion` as well as the integer-narrowing check.
@@ -331,3 +334,13 @@ and `(void)symbol`. Set-but-not-used analysis is not currently performed.
   all use `-Wmissing-declarations`.  A K&R-style or empty-parameter-list
   declaration seen before the definition suppresses this flag (but not
   `-Wmissing-prototypes`).  Nested functions and `main` are exempt.
+- A second `extern` variable declaration or a second function forward declaration
+  for the same name in the same scope uses `-Wredundant-decls`.  A declaration
+  followed by a definition does not trigger this warning.
+- A designated initializer that targets a member or array element that was
+  already set by an earlier initializer uses `-Woverride-init`.  The later
+  value wins (C semantics are preserved); only the warning is issued.
+- A `#define` that is never referenced (expanded) in the translation unit uses
+  `-Wunused-macros`.  Macros defined in system headers (`<...>` includes from
+  the system search path) are excluded.  The warning fires at end-of-file for
+  surviving macros and at `#undef` time for macros undef'd before first use.

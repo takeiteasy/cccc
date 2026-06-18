@@ -110,6 +110,7 @@ struct Initializer {
     Type *ty;
     Token *tok;
     bool is_flexible;
+    bool is_set; // true once this slot has received an initializer value
 
     // If it's not an aggregate type and has an initializer,
     // `expr` has an initialization expression.
@@ -2395,8 +2396,13 @@ static void designation(VirtualMachine *vm, Token **rest, Token *tok, Initialize
         array_designator(vm, &tok, tok, init->ty, &begin, &end);
 
         Token *tok2;
-        for (int i = begin; i <= end; i++)
+        for (int i = begin; i <= end; i++) {
+            if ((vm->compiler.warnings & CCCC_WARN_OVERRIDE_INIT) &&
+                init->children[i]->is_set)
+                warn_tok(vm, tok, CCCC_WARN_OVERRIDE_INIT,
+                         "initializer overrides prior initialization of element [%d]", i);
             designation(vm, &tok2, tok, init->children[i]);
+        }
         array_initializer2(vm, rest, tok2, init, begin + 1);
         return;
     }
@@ -2406,6 +2412,11 @@ static void designation(VirtualMachine *vm, Token **rest, Token *tok, Initialize
             warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
                      "designated initializers are a C99 extension");
         Member *mem = struct_designator(vm, &tok, tok, init->ty);
+        if ((vm->compiler.warnings & CCCC_WARN_OVERRIDE_INIT) &&
+            init->children[mem->idx]->is_set)
+            warn_tok(vm, tok, CCCC_WARN_OVERRIDE_INIT,
+                     "initializer overrides prior initialization of '%.*s'",
+                     (int)mem->name->len, mem->name->loc);
         designation(vm, &tok, tok, init->children[mem->idx]);
         init->expr = NULL;
 
@@ -2585,6 +2596,11 @@ static void struct_initializer1(VirtualMachine *vm, Token **rest, Token *tok,
                 warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
                          "designated initializers are a C99 extension");
             mem = struct_designator(vm, &tok, tok, init->ty);
+            if ((vm->compiler.warnings & CCCC_WARN_OVERRIDE_INIT) &&
+                init->children[mem->idx]->is_set)
+                warn_tok(vm, tok, CCCC_WARN_OVERRIDE_INIT,
+                         "initializer overrides prior initialization of '%.*s'",
+                         (int)mem->name->len, mem->name->loc);
             designation(vm, &tok, tok, init->children[mem->idx]);
             mem = mem->next;
             continue;
@@ -2657,6 +2673,8 @@ static void union_initializer(VirtualMachine *vm, Token **rest, Token *tok,
 //             | struct-initializer | union-initializer
 //             | assign
 static void initializer2(VirtualMachine *vm, Token **rest, Token *tok, Initializer *init) {
+    init->is_set = true;
+
     if (init->ty->kind == TY_ARRAY && tok->kind == TK_STR) {
         string_initializer(vm, rest, tok, init);
         return;
@@ -7670,6 +7688,10 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty, VarAttr *at
         if (!fn->is_static && attr->is_static)
             error_tok(vm, tok,
                       "static declaration follows a non-static declaration");
+        if (!fn->is_implicit && !fn->is_definition &&
+            (vm->compiler.warnings & CCCC_WARN_REDUNDANT_DECLS))
+            warn_tok(vm, ty->name, CCCC_WARN_REDUNDANT_DECLS,
+                     "redundant redeclaration of '%s'", fn->name);
         fn->is_maybe_unused |= ty->is_maybe_unused;
         fn->is_deprecated |= ty->is_deprecated;
         fn->is_noreturn |= ty->is_noreturn;
@@ -7890,6 +7912,10 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
         if (!fn->is_static && attr->is_static)
             error_tok(vm, tok,
                       "static declaration follows a non-static declaration");
+        if (!fn->is_implicit && !fn->is_definition && !equal(tok, "{") &&
+            (vm->compiler.warnings & CCCC_WARN_REDUNDANT_DECLS))
+            warn_tok(vm, ty->name, CCCC_WARN_REDUNDANT_DECLS,
+                     "redundant redeclaration of '%s'", fn->name);
         fn->is_definition = fn->is_definition || equal(tok, "{");
         fn->is_maybe_unused |= ty->is_maybe_unused;
         fn->is_deprecated |= ty->is_deprecated;
@@ -8225,6 +8251,11 @@ static Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
         }
 
         VarScope *previous = find_var(vm, ty->name);
+        if (previous && previous->var && !previous->var->is_function &&
+            !previous->var->is_definition && attr->is_extern &&
+            (vm->compiler.warnings & CCCC_WARN_REDUNDANT_DECLS))
+            warn_tok(vm, ty->name, CCCC_WARN_REDUNDANT_DECLS,
+                     "redundant redeclaration of '%s'", var_name);
         Obj *var = new_gvar(vm, var_name, var_name_len, ty);
         if (previous && previous->var && !previous->var->is_function) {
             var->is_maybe_unused |= previous->var->is_maybe_unused;

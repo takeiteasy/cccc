@@ -73,6 +73,8 @@ struct Macro {
     char *va_args_name;
     Token *body;
     macro_handler_fn *handler;
+    int use_count;    // number of times this macro has been expanded
+    Token *define_tok; // token at the #define site (the macro name token)
 };
 
 static Token *preprocess2(VirtualMachine *vm, Token *tok);
@@ -1156,6 +1158,7 @@ static Token *read_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
             if (tok->kind != TK_IDENT)
                 error_tok(vm, start, "macro name must be an identifier");
             Macro *m = find_macro(vm, tok);
+            if (m) m->use_count++;
             tok = tok->next;
 
             if (has_paren)
@@ -1271,12 +1274,13 @@ static Macro *find_macro(VirtualMachine *vm, Token *tok) {
 }
 
 static Macro *add_macro(VirtualMachine *vm, char *name, int name_len, bool is_objlike,
-                        Token *body) {
+                        Token *body, Token *define_tok) {
     Macro *m = arena_alloc(&vm->compiler.parser_arena, sizeof(Macro));
     memset(m, 0, sizeof(Macro));
     m->name = name;
     m->is_objlike = is_objlike;
     m->body = body;
+    m->define_tok = define_tok;
     hashmap_put2(&vm->compiler.macros, name, name_len, m);
     return m;
 }
@@ -1322,6 +1326,7 @@ static void read_macro_definition(VirtualMachine *vm, Token **rest, Token *tok) 
         error_tok(vm, tok, "macro name must be an identifier");
     char *name = arena_strndup(vm, tok->loc, tok->len);
     int name_len = tok->len; // Save name length before moving tok
+    Token *name_tok = tok;   // Save for define_tok
     tok = tok->next;
 
     if (!tok->has_space && equal(tok, "(")) {
@@ -1331,12 +1336,12 @@ static void read_macro_definition(VirtualMachine *vm, Token **rest, Token *tok) 
             read_macro_params(vm, &tok, tok->next, &va_args_name);
 
         Macro *m =
-            add_macro(vm, name, name_len, false, copy_line(vm, rest, tok));
+            add_macro(vm, name, name_len, false, copy_line(vm, rest, tok), name_tok);
         m->params = params;
         m->va_args_name = va_args_name;
     } else {
         // Object-like macro
-        add_macro(vm, name, name_len, true, copy_line(vm, rest, tok));
+        add_macro(vm, name, name_len, true, copy_line(vm, rest, tok), name_tok);
     }
 }
 
@@ -1621,6 +1626,8 @@ static bool expand_macro(VirtualMachine *vm, Token **rest, Token *tok) {
     if (!m)
         return false;
 
+    m->use_count++;
+
     // Built-in dynamic macro application such as __LINE__
     if (m->handler) {
         *rest = m->handler(vm, tok);
@@ -1873,7 +1880,8 @@ static void register_stdlib_for_header(VirtualMachine *vm, const char *header_na
 }
 
 static Token *include_file(VirtualMachine *vm, Token *tok, char *path,
-                           Token *filename_tok, const char *include_name) {
+                           Token *filename_tok, const char *include_name,
+                           bool is_system) {
     // Check for "#pragma once"
     if (hashmap_get(&vm->compiler.pragma_once, path))
         return tok;
@@ -1889,14 +1897,18 @@ static Token *include_file(VirtualMachine *vm, Token *tok, char *path,
     if (!tok2)
         error_tok(vm, filename_tok, "%s: cannot open file: %s", path,
                   strerror(errno));
+    if (is_system && tok2->file)
+        tok2->file->is_system_header = true;
 
     // Register stdlib functions for standard headers (header-based lazy
     // loading)
     register_stdlib_for_header(vm, include_name);
 
     guard_name = detect_include_guard(vm, tok2);
-    if (guard_name)
+    if (guard_name) {
         hashmap_put(&vm->compiler.include_guards, path, guard_name);
+        hashmap_put(&vm->compiler.guard_macros, guard_name, (void *)1);
+    }
 
     return append(vm, tok2, tok);
 }
@@ -3558,7 +3570,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 // Track URL -> cache path mapping for error reporting
                 hashmap_put(&vm->compiler.url_to_path, cache_path,
                             (void *)filename);
-                tok = include_file(vm, tok, cache_path, start->next->next, filename);
+                tok = include_file(vm, tok, cache_path, start->next->next, filename, false);
                 continue;
 #else
                 error_tok(
@@ -3571,7 +3583,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 char *path =
                     format_relative_path(vm, start->file->name, filename);
                 if (file_exists(path)) {
-                    tok = include_file(vm, tok, path, start->next->next, filename);
+                    tok = include_file(vm, tok, path, start->next->next,
+                                       filename, start->file->is_system_header);
                     break;
                 }
             }
@@ -3584,11 +3597,15 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             // For quoted includes, if not found in include_paths, also try
             // system_include_paths This is needed for system headers that use
             // quoted includes for internal files
-            if (!path && is_dquote)
+            bool found_in_sys = false;
+            if (!path && is_dquote) {
                 path = search_include_paths(vm, filename, filename_len, true);
+                found_in_sys = (path != NULL);
+            }
 
             tok = include_file(vm, tok, path ? path : filename,
-                               start->next->next, filename);
+                               start->next->next, filename,
+                               !is_dquote || found_in_sys);
             break;
         }
         case PP_INCLUDE_NEXT: {
@@ -3599,7 +3616,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             tok = skip_line(vm, tok);
             char *path = search_include_next(vm, filename);
             tok = include_file(vm, tok, path ? path : filename,
-                               start->next->next, filename);
+                               start->next->next, filename, !ignore);
             break;
         }
         case PP_DEFINE:
@@ -3620,18 +3637,20 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             break;
         }
         case PP_IFDEF: {
-            bool defined = find_macro(vm, tok->next);
-            push_cond_incl(vm, tok, defined);
+            Macro *ifdef_m = find_macro(vm, tok->next);
+            if (ifdef_m) ifdef_m->use_count++;
+            push_cond_incl(vm, tok, ifdef_m != NULL);
             tok = skip_line(vm, tok->next->next);
-            if (!defined)
+            if (!ifdef_m)
                 tok = skip_cond_incl(vm, tok);
             break;
         }
         case PP_IFNDEF: {
-            bool defined = find_macro(vm, tok->next);
-            push_cond_incl(vm, tok, !defined);
+            Macro *ifndef_m = find_macro(vm, tok->next);
+            if (ifndef_m) ifndef_m->use_count++;
+            push_cond_incl(vm, tok, ifndef_m == NULL);
             tok = skip_line(vm, tok->next->next);
-            if (defined)
+            if (ifndef_m)
                 tok = skip_cond_incl(vm, tok);
             break;
         }
@@ -3653,9 +3672,10 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             if (vm->compiler.cond_incl->ctx == IN_ELSE)
                 error_tok(vm, start, "stray #elifdef after #else");
             vm->compiler.cond_incl->ctx = IN_ELIF;
-            bool defined = find_macro(vm, tok->next);
+            Macro *elifdef_m = find_macro(vm, tok->next);
+            if (elifdef_m) elifdef_m->use_count++;
             tok = skip_line(vm, tok->next->next);
-            if (!vm->compiler.cond_incl->included && defined)
+            if (!vm->compiler.cond_incl->included && elifdef_m)
                 vm->compiler.cond_incl->included = true;
             else
                 tok = skip_cond_incl(vm, tok);
@@ -3667,9 +3687,10 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             if (vm->compiler.cond_incl->ctx == IN_ELSE)
                 error_tok(vm, start, "stray #elifndef after #else");
             vm->compiler.cond_incl->ctx = IN_ELIF;
-            bool defined = find_macro(vm, tok->next);
+            Macro *elifndef_m = find_macro(vm, tok->next);
+            if (elifndef_m) elifndef_m->use_count++;
             tok = skip_line(vm, tok->next->next);
-            if (!vm->compiler.cond_incl->included && !defined)
+            if (!vm->compiler.cond_incl->included && !elifndef_m)
                 vm->compiler.cond_incl->included = true;
             else
                 tok = skip_cond_incl(vm, tok);
@@ -3755,15 +3776,23 @@ void define_std_macros(VirtualMachine *vm) {
 
 void define_macro(VirtualMachine *vm, char *name, char *buf) {
     Token *tok = tokenize(vm, new_file(vm, "<built-in>", 1, buf));
-    add_macro(vm, name, strlen(name), true, tok);
+    add_macro(vm, name, strlen(name), true, tok, NULL);
 }
 
 void undef_macro(VirtualMachine *vm, char *name) {
+    if (vm->compiler.warnings & CCCC_WARN_UNUSED_MACROS) {
+        Macro *m = hashmap_get2(&vm->compiler.macros, name, strlen(name));
+        if (m && !m->handler && m->use_count == 0 && m->define_tok &&
+            m->define_tok->file && !m->define_tok->file->is_system_header &&
+            !hashmap_get(&vm->compiler.guard_macros, m->name))
+            warn_tok(vm, m->define_tok, CCCC_WARN_UNUSED_MACROS,
+                     "macro '%s' defined but not used", m->name);
+    }
     hashmap_delete(&vm->compiler.macros, name);
 }
 
 static Macro *add_builtin(VirtualMachine *vm, char *name, macro_handler_fn *fn) {
-    Macro *m = add_macro(vm, name, strlen(name), true, NULL);
+    Macro *m = add_macro(vm, name, strlen(name), true, NULL, NULL);
     m->handler = fn;
     return m;
 }
@@ -4085,6 +4114,18 @@ static void join_adjacent_string_literals(VirtualMachine *vm, Token *tok) {
 }
 
 // Entry point function of the preprocessor.
+static int warn_unused_macro_cb(char *key, int keylen, void *val, void *user_data) {
+    (void)key; (void)keylen;
+    VirtualMachine *vm = (VirtualMachine *)user_data;
+    Macro *m = (Macro *)val;
+    if (!m->handler && m->use_count == 0 && m->define_tok &&
+        m->define_tok->file && !m->define_tok->file->is_system_header &&
+        !hashmap_get(&vm->compiler.guard_macros, m->name))
+        warn_tok(vm, m->define_tok, CCCC_WARN_UNUSED_MACROS,
+                 "macro '%s' defined but not used", m->name);
+    return 0;
+}
+
 Token *preprocess(VirtualMachine *vm, Token *tok) {
     tok = preprocess2(vm, tok);
     // Bare comptime entries (no begin/end, runs to EOF) are silently closed.
@@ -4107,6 +4148,9 @@ Token *preprocess(VirtualMachine *vm, Token *tok) {
                   "unterminated conditional directive (started with #%.*s)%s",
                   ci_tok->len, ci_tok->loc, hint);
     }
+    if ((vm->compiler.warnings & CCCC_WARN_UNUSED_MACROS) &&
+        !vm->compiler.in_macro_mode)
+        hashmap_foreach(&vm->compiler.macros, warn_unused_macro_cb, vm);
     convert_pp_tokens(vm, tok);
     join_adjacent_string_literals(vm, tok);
 
