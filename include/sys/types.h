@@ -26,12 +26,20 @@ typedef unsigned int      socklen_t;
 typedef unsigned long     dev_t;
 typedef unsigned long     ino_t;
 typedef unsigned int      mode_t;
+#if defined(__aarch64__)
+typedef unsigned int      nlink_t;
+#else
 typedef unsigned long     nlink_t;
+#endif
 typedef unsigned int      uid_t;
 typedef unsigned int      gid_t;
 typedef long              off_t;
 typedef int               pid_t;
+#if defined(__aarch64__)
+typedef int               blksize_t;
+#else
 typedef long              blksize_t;
+#endif
 typedef long              blkcnt_t;
 typedef unsigned int      useconds_t;
 typedef unsigned short    sa_family_t;

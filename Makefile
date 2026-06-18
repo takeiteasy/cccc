@@ -55,6 +55,10 @@ else
 	else
 		DYLIB := .so
 	endif
+	ifeq ($(UNAME_S),Linux)
+		CFLAGS += -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L
+		LDFLAGS += -lm
+	endif
 endif
 EXE_OUT := cccc$(EXE)
 LIB_OUT := libcccc$(DYLIB)

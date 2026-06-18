@@ -9,7 +9,11 @@
 
 #include "stddef.h"
 
+#ifdef __APPLE__
 typedef long regoff_t;
+#else
+typedef int regoff_t;
+#endif
 
 #ifdef __APPLE__
 typedef struct {

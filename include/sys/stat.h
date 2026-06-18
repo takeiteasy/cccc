@@ -39,21 +39,22 @@ struct stat {
 /* Linux / generic POSIX */
 
 struct stat {
-    unsigned long st_dev;
-    unsigned long st_ino;
-    unsigned long st_nlink;
-    unsigned int  st_mode;
-    unsigned int  st_uid;
-    unsigned int  st_gid;
-    unsigned int  __pad0;
-    unsigned long st_rdev;
-    long          st_size;
-    long          st_blksize;
-    long          st_blocks;
+    dev_t st_dev;
+    ino_t st_ino;
+    mode_t st_mode;
+    nlink_t st_nlink;
+    uid_t st_uid;
+    gid_t st_gid;
+    dev_t st_rdev;
+    dev_t __pad1;
+    off_t st_size;
+    blksize_t st_blksize;
+    int __pad2;
+    blkcnt_t st_blocks;
     struct timespec st_atim;
     struct timespec st_mtim;
     struct timespec st_ctim;
-    long          __unused[3];
+    int __glibc_reserved[2];
 };
 
 #endif

@@ -9,6 +9,53 @@ integration test verifies interactive host-signal trapping, inspection-only
 debugger behavior, TTY/testing opt-outs, compile-time faults, and guest signal
 dispositions; it is skipped on other platforms.
 
+## Linux with Colima
+
+The root-level `Dockerfile` builds and tests CCCC on Ubuntu 24.04 with Clang 18
+and libffi. On an Apple Silicon host, start a native Linux/arm64 Colima VM using
+the containerd runtime, then build and run the test image:
+
+```bash
+colima start --runtime containerd --arch aarch64 --cpu 4 --memory 4
+colima nerdctl -- build -t cccc-linux .
+colima nerdctl -- run --rm cccc-linux
+```
+
+The Linux/arm64 source suite currently has one known failure: long-double FFI
+marshalling in `test_c23_exp10_pi.c` ([#491](https://todo.sr.ht/~takeiteasy/cccc/491)).
+The other 844 source tests pass. macOS and Linux x86_64 coverage is tracked in
+[#496](https://todo.sr.ht/~takeiteasy/cccc/496).
+
+The default image build compiles CCCC and running the image executes
+`make test`. Select the Dockerfile's `test` stage when tests must gate the image
+build:
+
+```bash
+colima nerdctl -- build --target test -t cccc-linux-test .
+```
+
+Use the built compiler directly for a smoke test, or open an interactive shell
+for diagnostics:
+
+```bash
+colima nerdctl -- run --rm cccc-linux sh -c './cccc -I./include tests/test_arithmetic.c; test "$?" -eq 42'
+colima nerdctl -- run --rm -it cccc-linux bash
+```
+
+The `.c4` bytecode round-trip remains a separate test mode:
+
+```bash
+colima nerdctl -- run --rm cccc-linux python3 tools/tests.py --c4 -j 8
+```
+
+The round-trip suite remains outside `make test` while its mode classification,
+TLS relocation, compound-literal relocation, and testing-prepass serialization
+failures remain tracked in
+[#492](https://todo.sr.ht/~takeiteasy/cccc/492),
+[#493](https://todo.sr.ht/~takeiteasy/cccc/493),
+[#494](https://todo.sr.ht/~takeiteasy/cccc/494), and
+[#495](https://todo.sr.ht/~takeiteasy/cccc/495).
+
 ## Attribute syntax variants
 
 Three equivalent syntaxes are supported for all test attributes:

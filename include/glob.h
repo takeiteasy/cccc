@@ -55,9 +55,15 @@ typedef struct {
 #define GLOB_NOESCAPE 0x0040
 #endif
 
+#ifdef __APPLE__
 #define GLOB_NOSPACE (-1)
 #define GLOB_ABORTED (-2)
 #define GLOB_NOMATCH (-3)
+#else
+#define GLOB_NOSPACE 1
+#define GLOB_ABORTED 2
+#define GLOB_NOMATCH 3
+#endif
 
 extern int glob(const char *pattern, int flags,
                 int (*errfunc)(const char *epath, int eerrno),

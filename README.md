@@ -239,12 +239,12 @@ VM work focuses on what matters for macro expansion cost and VM-only workflows (
 
 ```bash
 make          # Build cccc
-make all      # Build cccc + libcccc.dylib, then run the test suite
+make all      # Build cccc + the platform shared library, then run tests and build docs
 ```
 
 Produces:
 - `cccc` — compiler executable (C source → VM bytecode, or → native via `-c=native`)
-- `libcccc.dylib` — shared library for embedding CCCC in other applications
+- `libcccc.dylib` (macOS) or `libcccc.so` (Linux) — shared library for embedding CCCC in other applications
 
 CCCC requires libffi for native FFI calls. The Makefile uses `pkg-config
 libffi` when available, with Homebrew and common Unix fallbacks.
@@ -300,7 +300,40 @@ python3 tools/tests.py --c4               # Bytecode round-trip: compile each po
 # I recommend running --leaks with -j (takes a long time synchronously)
 ```
 
-`make test` runs both the source-mode suite and `--c4` round-trip.
+`make test` runs the source-mode suite and the platform-gated host-signal
+debugger integration test. Run the `.c4` round-trip separately with
+`python3 tools/tests.py --c4`.
+
+### Linux with Colima
+
+On Apple Silicon, the repository's Dockerfile provides an Ubuntu 24.04,
+Clang 18, Linux/arm64 build and test environment using Colima's containerd
+runtime. The default image build compiles CCCC and running it executes
+`make test`:
+
+```bash
+colima start --runtime containerd --arch aarch64 --cpu 4 --memory 4
+colima nerdctl -- build -t cccc-linux .
+colima nerdctl -- run --rm cccc-linux
+```
+
+The Linux/arm64 source suite currently has one known failure: long-double FFI
+marshalling in `test_c23_exp10_pi.c` ([#491](https://todo.sr.ht/~takeiteasy/cccc/491)).
+The other 844 source tests pass. macOS and Linux x86_64 coverage is tracked in
+[#496](https://todo.sr.ht/~takeiteasy/cccc/496).
+
+To make the test suite part of the image build itself, select the test stage:
+
+```bash
+colima nerdctl -- build --target test -t cccc-linux-test .
+```
+
+To run a compiler smoke test or open a shell in the built image:
+
+```bash
+colima nerdctl -- run --rm cccc-linux sh -c './cccc -I./include tests/test_arithmetic.c; test "$?" -eq 42'
+colima nerdctl -- run --rm -it cccc-linux bash
+```
 
 ### Sanitizer Builds
 

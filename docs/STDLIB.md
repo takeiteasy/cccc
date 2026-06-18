@@ -255,7 +255,7 @@ This table tracks shims that **reimplement** a standard function — not ABI-com
 
 | Function(s) | Source file | Reason for shim | Native availability | Removal condition |
 |---|---|---|---|---|
-| `memset_explicit` | `string.c` | C23 addition; not in older libcs | macOS 14+, glibc 2.39+ | When minimum supported SDK is raised past these versions |
+| `memset_explicit` | `string.c` | C23 addition not yet exposed consistently by supported host headers | Portable volatile-write shim on macOS and glibc | When supported host headers provide a portable native declaration |
 | `aligned_alloc` | `stdlib.c` | macOS before 10.15 lacked `aligned_alloc`; shimmed via `posix_memalign` | macOS 10.15+, glibc 2.16+ | Already available on current macOS; shim is a safe no-op candidate |
 | `free_sized`, `free_aligned_sized` | `stdlib.c` | C23 addition; no host libc exposes these yet | Nowhere yet | When host libc adds them |
 | `memalignment` | `stdlib.c` | C23 addition; no host libc equivalent | Nowhere yet | When host libc adds it |

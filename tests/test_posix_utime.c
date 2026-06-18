@@ -16,8 +16,13 @@ int main(void) {
 
     struct stat st;
     if (stat(path, &st) != 0) return 3;
+#ifdef __APPLE__
     if (st.st_atimespec.tv_sec != 1234567890) return 4;
     if (st.st_mtimespec.tv_sec != 1234567890) return 5;
+#else
+    if (st.st_atim.tv_sec != 1234567890) return 4;
+    if (st.st_mtim.tv_sec != 1234567890) return 5;
+#endif
 
     unlink(path);
     return 42;

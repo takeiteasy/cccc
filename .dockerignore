@@ -1,0 +1,17 @@
+.git
+.DS_Store
+
+/cccc
+/cccc-*
+/libcccc.dylib
+/libcccc.so
+
+/profile/*.json
+/profile/*.massif
+/profile/*.prof
+/profile/*.txt
+/fuzz/corpus
+/fuzz/out
+
+__pycache__/
+*.pyc

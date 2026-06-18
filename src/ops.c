@@ -1102,7 +1102,7 @@ static inline int op_LDR_B_fn(VirtualMachine *vm) {
     check_race_access(vm, (void *)vm->regs[rs], 0);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 1, WATCH_READ);
     if (rd != REG_ZERO)
-        vm->regs[rd] = *(char *)vm->regs[rs];
+        vm->regs[rd] = *(signed char *)vm->regs[rs];
     return 0;
 }
 
@@ -1219,7 +1219,7 @@ static inline int op_ALDR_fn(VirtualMachine *vm) {
     if (rd != REG_ZERO) {
         switch (sz) {
         case 1: vm->regs[rd] = is_unsigned ? (long long)*(unsigned char *)addr
-                                           : (long long)*(char *)addr; break;
+                                           : (long long)*(signed char *)addr; break;
         case 2: vm->regs[rd] = is_unsigned ? (long long)*(unsigned short *)addr
                                            : (long long)*(short *)addr; break;
         case 4: vm->regs[rd] = is_unsigned ? (long long)*(unsigned int *)addr
@@ -1269,7 +1269,7 @@ static inline int op_AXCHG_fn(VirtualMachine *vm) {
     check_atomic_access(vm, addr);
     switch (sz) {
     case 1: old_val = is_unsigned ? (long long)*(unsigned char *)addr
-                                  : (long long)*(char *)addr;
+                                  : (long long)*(signed char *)addr;
             *(char *)addr = (char)new_val; break;
     case 2: old_val = is_unsigned ? (long long)*(unsigned short *)addr
                                   : (long long)*(short *)addr;
@@ -1302,8 +1302,8 @@ static inline int op_ACAS_fn(VirtualMachine *vm) {
     check_atomic_access(vm, obj_ptr);
     int success = 0;
     switch (sz) {
-    case 1: { char cur = *(char *)obj_ptr;
-              if (cur == *(char *)exp_ptr) { *(char *)obj_ptr = (char)desired; success = 1; }
+    case 1: { signed char cur = *(signed char *)obj_ptr;
+              if (cur == *(signed char *)exp_ptr) { *(char *)obj_ptr = (char)desired; success = 1; }
               else                          *(char *)exp_ptr = cur; break; }
     case 2: { short cur = *(short *)obj_ptr;
               if (cur == *(short *)exp_ptr) { *(short *)obj_ptr = (short)desired; success = 1; }
@@ -1934,12 +1934,12 @@ static inline int op_POP3_fn(VirtualMachine *vm) {
 // ========== Type Conversion Opcodes ==========
 
 static inline int op_SX1_fn(VirtualMachine *vm) {
-    // Sign extend 1 byte to 8 bytes: regs[rd] = (long long)(char)regs[rs]
+    // Sign extend 1 byte to 8 bytes without depending on host char signedness.
     // Format: [SX1] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
-    vm->regs[rd] = (long long)(char)vm->regs[rs];
+    vm->regs[rd] = (long long)(signed char)vm->regs[rs];
     return 0;
 }
 
@@ -3241,7 +3241,7 @@ static inline int op_LDR_LOCAL_B_fn(VirtualMachine *vm) {
     long long offset = cc_read_i64(vm);
     check_race_access(vm, (void *)(vm->bp + offset), 0);
     if (rd != REG_ZERO)
-        vm->regs[rd] = *(char *)(vm->bp + offset);
+        vm->regs[rd] = *(signed char *)(vm->bp + offset);
     return 0;
 }
 
@@ -3371,7 +3371,7 @@ static inline int op_LDR_INDEX_B_fn(VirtualMachine *vm) {
     check_race_access(vm, addr, 0);
     WATCHPOINT_CHECK(vm, addr, 1, WATCH_READ);
     if (rd != REG_ZERO)
-        vm->regs[rd] = *(char *)addr;
+        vm->regs[rd] = *(signed char *)addr;
     return 0;
 }
 

@@ -450,6 +450,15 @@ static int load_requested_libraries(VirtualMachine *vm, const char **libs, int l
             return -1;
         int rc = cc_dlopen(vm, path);
         free(path);
+#if defined(__linux__)
+        // Development linker names such as libm.so may be linker scripts that
+        // dlopen cannot consume. Fall back to the conventional runtime SONAME.
+        if (rc != 0 && !strchr(libs[i], '/') && !strstr(libs[i], ".so")) {
+            char soname[512];
+            snprintf(soname, sizeof(soname), "lib%s.so.6", libs[i]);
+            rc = cc_dlopen(vm, soname);
+        }
+#endif
         if (rc != 0)
             return -1;
     }
