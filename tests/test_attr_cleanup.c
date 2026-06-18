@@ -269,3 +269,39 @@ static void test_goto_skip_multiple_scopes(void) {
     $assert_eq(g_log[1], 20);
     $assert_eq(g_log[2], 10);  // outer at natural return
 }
+
+// ---- Test 14: Cross-sibling goto cleans the SOURCE scope ----
+// Regression for #481.  Two sibling blocks at the same nesting depth each hold a
+// cleanup var.  The goto jumps from block A into block B, past B's declaration.
+// Before the LCA fix, the goto saw cleanup_target_depth == 1 (B's depth) and
+// skipped cleanup for `a` (also depth 1) — a leak.  With LCA tracking the common
+// ancestor is the function level (depth 0), so `a` is cleaned at the goto.
+//
+// Note: jumping past `b`'s initialization leaves `b` uninitialized when its
+// cleanup runs at B's block exit (genuine ill-formed C, diagnosed under
+// -Wattributes).  So `b`'s cleanup must NOT read its value — it logs a constant
+// tag instead, and we never assert b's value.
+static void cleanup_tag_99(int *p) { (void)p; log_val(99); }
+
+static void cross_sibling_goto(void) {
+    {
+        int a __attribute__((cleanup(cleanup_int))) = 7;  // depth 1, block A
+        (void)a;
+        goto L;
+    }
+    {
+        int b __attribute__((cleanup(cleanup_tag_99))) = 0; // depth 1, block B
+        (void)b;
+    L:;
+    }
+}
+
+[[cccc::test]]
+static void test_cross_sibling_goto_cleans_source(void) {
+    log_reset();
+    cross_sibling_goto();
+    // `a` cleaned at the goto (source scope), then `b`'s tag at B's block exit.
+    $assert_eq(g_log_n, 2);
+    $assert_eq(g_log[0], 7);   // SOURCE scope cleaned — the #481 regression
+    $assert_eq(g_log[1], 99);  // B's cleanup tag (value-independent)
+}

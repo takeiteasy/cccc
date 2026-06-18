@@ -3706,6 +3706,7 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
         Node *node = new_node(vm, ND_GOTO, tok);
         node->label = get_ident(vm, tok->next);
+        node->cleanup_chain = vm->compiler.cur_cleanup_chain;
         node->goto_next = vm->compiler.gotos;
         vm->compiler.gotos = node;
         *rest = skip(vm, tok->next->next, ";");
@@ -3769,6 +3770,7 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         // resolve_goto_labels can propagate it to each goto's cleanup_target_depth.
         // A goto landing here exits only cleanup scopes *above* this depth.
         node->cleanup_scope_depth = vm->compiler.cleanup_scope_depth;
+        node->cleanup_chain = vm->compiler.cur_cleanup_chain;
         Token *body_tok = tok->next->next;
         body_tok = attribute_list(vm, body_tok, NULL, &label_attr);
         body_tok = c23_attribute_list(vm, body_tok, NULL, &label_attr);
@@ -3834,6 +3836,14 @@ static Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok, Token *
                     if (sv->var && sv->var->cleanup_fn) {
                         scope_has_cleanup = true;
                         vm->compiler.cleanup_scope_depth++;
+                        // Push an ancestry node so gotos/labels can compute the
+                        // LCA of their cleanup scopes. Arena-allocated because
+                        // resolve_goto_labels reads it after compound_stmt returns.
+                        CleanupChainNode *cn = arena_alloc(&vm->compiler.parser_arena,
+                                                           sizeof(CleanupChainNode));
+                        cn->depth = vm->compiler.cleanup_scope_depth;
+                        cn->parent = vm->compiler.cur_cleanup_chain;
+                        vm->compiler.cur_cleanup_chain = cn;
                         break;
                     }
                 }
@@ -3871,6 +3881,8 @@ static Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok, Token *
         }
         node->cleanup_vars = cv_list; // LIFO order: codegen iterates directly
         vm->compiler.cleanup_scope_depth--;
+        if (vm->compiler.cur_cleanup_chain)
+            vm->compiler.cur_cleanup_chain = vm->compiler.cur_cleanup_chain->parent;
     }
 
     leave_scope(vm);
@@ -7722,6 +7734,23 @@ static void create_param_lvars(VirtualMachine *vm, Type *param) {
     }
 }
 
+// Depth of the lowest common ancestor of two cleanup-scope chains. The scopes
+// being exited by a goto are exactly those active at the goto whose depth is
+// greater than this LCA depth, so this is the correct cleanup_target_depth even
+// for cross-sibling jumps where the goto and label share a depth number but not
+// an ancestor. Returns 0 when there is no common cleanup scope (function level).
+static int cleanup_lca_depth(CleanupChainNode *g, CleanupChainNode *l) {
+    while (g && (!l || g->depth > l->depth))
+        g = g->parent;
+    while (l && (!g || l->depth > g->depth))
+        l = l->parent;
+    while (g != l) {
+        g = g->parent;
+        l = l->parent;
+    }
+    return g ? g->depth : 0;
+}
+
 // This function matches gotos or labels-as-values with labels.
 //
 // We cannot resolve gotos as we parse a function because gotos
@@ -7733,14 +7762,27 @@ static void resolve_goto_labels(VirtualMachine *vm) {
             if (strlen(x->label) == strlen(y->label) &&
                 strncmp(x->label, y->label, strlen(y->label)) == 0) {
                 x->unique_label = y->unique_label;
-                // Propagate the label's cleanup_scope_depth to the goto so
-                // that emit_cleanups_to_depth uses the correct target.
-                // NOTE: this depth comparison is lexical and relies on strictly
-                // increasing nesting depth.  Cross-sibling jumps (two unrelated
-                // scopes with the same depth number) are not detected and may
-                // leak cleanup vars in the source scope.  A follow-up ticket
-                // tracks LCA-based precision for that edge case.
-                x->cleanup_target_depth = y->cleanup_scope_depth;
+                // Cleanup ancestry applies only to actual jumps. ND_LABEL_VAL
+                // (labels-as-values, `&&label`) also flows through this loop but
+                // merely takes an address — it neither exits nor enters scopes.
+                if (x->kind == ND_GOTO) {
+                    // The goto must clean up every active cleanup scope that the
+                    // label is not inside of, i.e. everything below their lowest
+                    // common ancestor. Using the LCA depth (rather than the
+                    // label's depth) handles cross-sibling jumps, where the goto
+                    // and label share a depth number but no common cleanup scope.
+                    int lca = cleanup_lca_depth(x->cleanup_chain, y->cleanup_chain);
+                    x->cleanup_target_depth = lca;
+                    // Jumping *into* a cleanup scope (the label sits inside a
+                    // cleanup scope the goto is not in) leaves that variable
+                    // uninitialized when its cleanup runs at the label's block
+                    // exit — ill-formed C.
+                    if (y->cleanup_chain && y->cleanup_chain->depth > lca)
+                        warn_tok(vm, x->tok, CCCC_WARN_ATTRIBUTES,
+                                 "goto jumps into scope of variable with "
+                                 "__attribute__((cleanup)); cleanup may run on an "
+                                 "uninitialized object");
+                }
                 y->label_used = true;
                 break;
             }
@@ -8178,6 +8220,11 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
         new_lvar(vm, "__alloca_size__", 15, pointer_to(vm, ty_char));
 
     tok = skip(vm, tok, "{");
+
+    // Reset cleanup-scope ancestry for this function body. The ++/-- pairs in
+    // compound_stmt balance to NULL, but reset defensively in case of error
+    // recovery in a prior function.
+    vm->compiler.cur_cleanup_chain = NULL;
 
     // [https://www.sigbus.info/n1570#6.4.2.2p1] "__func__" is automatically
     // defined as a local variable containing the current function name.

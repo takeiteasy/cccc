@@ -875,6 +875,15 @@ typedef struct CleanupVar {
     struct CleanupVar *next;
 } CleanupVar;
 
+// Parse-time ancestry node for cleanup scopes. Unlike the flat
+// cleanup_scope_depth counter, the parent chain gives each cleanup scope an
+// identity so resolve_goto_labels can compute the lowest common ancestor of a
+// goto and its label and distinguish ancestors from same-depth siblings.
+typedef struct CleanupChainNode {
+    int depth;                        // == cleanup_scope_depth of this scope
+    struct CleanupChainNode *parent;  // enclosing cleanup scope (NULL at fn level)
+} CleanupChainNode;
+
 /*!
  @struct Node
  @abstract Represents a node in the parser's abstract syntax tree.
@@ -925,6 +934,7 @@ struct Node {
     bool is_fallthrough; // [[fallthrough]] on a null statement
     bool is_sizeof_ptr_expr; // ND_NUM from sizeof(pointer_type) — for -Wsizeof-pointer-memaccess
     int cleanup_target_depth; // for ND_GOTO (break/continue): cleanup_scope_depth of target
+    CleanupChainNode *cleanup_chain; // ND_GOTO/ND_LABEL: innermost active cleanup scope (NULL if none)
 
     // ND_BLOCK: cleanup vars declared in this scope (declaration order); codegen emits LIFO
     CleanupVar *cleanup_vars;
@@ -1882,6 +1892,7 @@ typedef struct Compiler {
     char *brk_label;       // Current break jump target
     char *cont_label;      // Current continue jump target
     int cleanup_scope_depth;   // number of active cleanup scopes (blocks with cleanup vars)
+    CleanupChainNode *cur_cleanup_chain; // innermost active cleanup scope (ancestry for goto LCA)
     int brk_cleanup_depth;     // cleanup_scope_depth when current brk_label was established
     int cont_cleanup_depth;    // cleanup_scope_depth when current cont_label was established
     Node *current_switch;  // Switch statement being parsed (NULL if none)

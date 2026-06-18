@@ -313,13 +313,17 @@ a dedicated stack slot is used.
 **Static inline cleanup functions** referenced only through the attribute are
 kept alive (not dead-stripped) by the liveness pass.
 
+**Goto and scope ancestry:** every named `goto` cleans up exactly the cleanup
+scopes between it and the lowest common ancestor it shares with the target label.
+This covers cross-sibling jumps (from one block into a sibling at the same
+nesting depth) — the source block's variables are still cleaned. Jumping *into*
+the scope of a cleanup variable (past its declaration) is ill-formed C and is
+diagnosed under `-Wattributes`, since the variable would be uninitialized when
+its cleanup runs.
+
 **Limitations:**
 
 - `longjmp` does not trigger cleanup, matching GCC C-mode behavior.
-- Cross-sibling `goto` (jumping from one unrelated block into a sibling block at
-  the same nesting depth, where both contain cleanup variables) may not clean up
-  variables in the source block. This is rare and generally ill-formed C; tracked
-  for future improvement.
 
 **`__has_attribute`:** returns `1` for `cleanup`.
 
