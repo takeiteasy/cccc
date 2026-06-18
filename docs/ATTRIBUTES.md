@@ -302,7 +302,7 @@ scope.
 | `return` | ✓ |
 | `break` | ✓ |
 | `continue` | ✓ |
-| Named `goto` out of scope | ✗ (deferred, see ticket) |
+| Named `goto` out of scope | ✓ |
 | `longjmp` | ✗ (matches GCC C-mode behavior) |
 
 **Return value preservation:** when a non-void return is combined with cleanup
@@ -315,9 +315,11 @@ kept alive (not dead-stripped) by the liveness pass.
 
 **Limitations:**
 
-- Named `goto` jumping out of a cleanup scope does **not** trigger cleanup.
-  Tracked in [#480](https://todo.sr.ht/~takeiteasy/cccc/480).
 - `longjmp` does not trigger cleanup, matching GCC C-mode behavior.
+- Cross-sibling `goto` (jumping from one unrelated block into a sibling block at
+  the same nesting depth, where both contain cleanup variables) may not clean up
+  variables in the source block. This is rare and generally ill-formed C; tracked
+  for future improvement.
 
 **`__has_attribute`:** returns `1` for `cleanup`.
 
@@ -356,7 +358,6 @@ Ignored attributes include (but are not limited to):
 | # | Attribute | Priority | Description |
 |---|-----------|----------|-------------|
 | [#215](https://todo.sr.ht/~takeiteasy/cccc/215) | Catch-all | medium | Remaining GNU builtins and attributes |
-| [#480](https://todo.sr.ht/~takeiteasy/cccc/480) | `cleanup(fn)` goto | low | Named goto out of cleanup scope does not trigger cleanup |
 
 ## `@`-prefix attribute syntax
 

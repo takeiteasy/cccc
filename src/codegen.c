@@ -5717,22 +5717,17 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
     }
 
     case ND_GOTO:
-        // break/continue/goto - emit cleanup calls for exited scopes, then jump
+        // Emit cleanup calls for any scopes being exited, then jump.
+        // By the time codegen runs, resolve_goto_labels has already set
+        // unique_label and cleanup_target_depth on all gotos (named, break,
+        // continue), so there is only one path here.
         if (node->unique_label) {
-            // break or continue: emit cleanups for all scopes above the loop/switch entry depth
             if (g_cleanup_scope)
                 emit_cleanups_to_depth(vm, node->cleanup_target_depth);
             emit(vm, JMP);
             Pc patch = emit_word_ptr(vm);
             vm->text_seg[patch] = 0;
             add_label_patch(node->unique_label, patch, false);
-        } else if (node->label) {
-            // Named goto: cleanup for goto across cleanup scopes is deferred (#218 follow-up).
-            // TODO: emit cleanups to target label's scope depth when known.
-            emit(vm, JMP);
-            Pc patch = emit_word_ptr(vm);
-            vm->text_seg[patch] = 0;
-            add_label_patch(node->label, patch, false);
         }
         return;
 

@@ -1,12 +1,11 @@
-// Tests for __attribute__((cleanup(fn))) scope-exit callbacks (ticket #218).
+// Tests for __attribute__((cleanup(fn))) scope-exit callbacks (tickets #218, #480).
 // CCCC_FLAGS: --testing
 //
 // Semantics (matching GCC C-mode):
 //   - On scope exit, calls fn(&var) for each cleanup-annotated local.
 //   - LIFO order: last-declared variable cleaned up first.
-//   - Fires on: natural block exit, return, break, continue.
+//   - Fires on: natural block exit, return, break, continue, named goto.
 //   - Does NOT fire on longjmp (matches GCC C-mode behavior).
-//   - Named goto across cleanup scopes: deferred to follow-up ticket.
 
 #include <stdbool.h>
 
@@ -197,4 +196,76 @@ static void test_early_return_from_nested_block(void) {
     $assert_eq(g_log_n, 2);
     $assert_eq(g_log[0], 200); // inner first (innermost scope)
     $assert_eq(g_log[1], 100); // then outer
+}
+
+// ---- Test 11: Named goto out of inner block fires cleanup exactly once ----
+// Regression for #480 — prior to fix, the goto emitted cleanups for ALL scopes
+// (cleanup_target_depth was 0) then the label's enclosing block also emitted on
+// natural exit → double cleanup.  Assert count == 1, not 0 or 2.
+static int goto_out_of_inner(void) {
+    int result = 0;
+    {
+        int x __attribute__((cleanup(cleanup_int))) = 55;
+        (void)x;
+        goto done; // exits inner block → x cleaned once here
+        result = 99; // unreachable
+    }
+done:
+    return result; // natural exit: no cleanup var in this scope
+}
+
+[[cccc::test]]
+static void test_goto_out_of_inner_block(void) {
+    log_reset();
+    int r = goto_out_of_inner();
+    $assert_eq(r, 0);
+    $assert_eq(g_log_n, 1);    // cleaned exactly once at the goto
+    $assert_eq(g_log[0], 55);
+}
+
+// ---- Test 12: Same-scope forward goto — double-cleanup regression ----
+// The var and the label are in the same scope.  The goto exits zero cleanup
+// scopes; the var is cleaned exactly once at natural block exit.
+static void same_scope_forward_goto(void) {
+    int x __attribute__((cleanup(cleanup_int))) = 77;
+    (void)x;
+    goto done;  // no scope change — cleanup_target_depth == this scope's depth
+done:;          // x cleaned here at natural block exit
+}
+
+[[cccc::test]]
+static void test_same_scope_forward_goto_no_double_cleanup(void) {
+    log_reset();
+    same_scope_forward_goto();
+    $assert_eq(g_log_n, 1);    // exactly once — NOT twice
+    $assert_eq(g_log[0], 77);
+}
+
+// ---- Test 13: Named goto skips multiple nested scopes — all cleaned LIFO ----
+static int goto_skip_two_scopes(void) {
+    int outer __attribute__((cleanup(cleanup_int))) = 10;
+    (void)outer;
+    {
+        int mid __attribute__((cleanup(cleanup_int))) = 20;
+        (void)mid;
+        {
+            int inner __attribute__((cleanup(cleanup_int))) = 30;
+            (void)inner;
+            goto top; // exits inner+mid cleanup scopes; outer is at function level
+        }
+    }
+top:
+    return 0; // outer cleaned at natural function exit
+}
+
+[[cccc::test]]
+static void test_goto_skip_multiple_scopes(void) {
+    log_reset();
+    int r = goto_skip_two_scopes();
+    $assert_eq(r, 0);
+    // inner (30) and mid (20) fired at the goto (LIFO), outer (10) at return
+    $assert_eq(g_log_n, 3);
+    $assert_eq(g_log[0], 30);  // innermost first
+    $assert_eq(g_log[1], 20);
+    $assert_eq(g_log[2], 10);  // outer at natural return
 }

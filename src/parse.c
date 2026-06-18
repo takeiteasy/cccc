@@ -3765,6 +3765,10 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *node = new_node(vm, ND_LABEL, tok);
         node->label = arena_strndup(vm, tok->loc, tok->len);
         node->unique_label = new_unique_name(vm);
+        // Record the active cleanup scope depth at this label so that
+        // resolve_goto_labels can propagate it to each goto's cleanup_target_depth.
+        // A goto landing here exits only cleanup scopes *above* this depth.
+        node->cleanup_scope_depth = vm->compiler.cleanup_scope_depth;
         Token *body_tok = tok->next->next;
         body_tok = attribute_list(vm, body_tok, NULL, &label_attr);
         body_tok = c23_attribute_list(vm, body_tok, NULL, &label_attr);
@@ -7729,6 +7733,14 @@ static void resolve_goto_labels(VirtualMachine *vm) {
             if (strlen(x->label) == strlen(y->label) &&
                 strncmp(x->label, y->label, strlen(y->label)) == 0) {
                 x->unique_label = y->unique_label;
+                // Propagate the label's cleanup_scope_depth to the goto so
+                // that emit_cleanups_to_depth uses the correct target.
+                // NOTE: this depth comparison is lexical and relies on strictly
+                // increasing nesting depth.  Cross-sibling jumps (two unrelated
+                // scopes with the same depth number) are not detected and may
+                // leak cleanup vars in the source scope.  A follow-up ticket
+                // tracks LCA-based precision for that edge case.
+                x->cleanup_target_depth = y->cleanup_scope_depth;
                 y->label_used = true;
                 break;
             }
