@@ -251,8 +251,12 @@ void register_math_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "logbf", (void*)logbf, 1, 2);    cc_register_cfunc(vm, "logbl", (void*)logb, 1, 1);
     cc_register_cfunc_ex(vm, "nextafter", (void*)nextafter, 2, 1, 0b11);  // double, double
     cc_register_cfunc_ex(vm, "nextafterf", (void*)nextafterf, 2, 2, 0b11);    cc_register_cfunc_ex(vm, "nextafterl", (void*)nextafter, 2, 1, 0b11);
-    cc_register_cfunc(vm, "nexttoward", (void*)nexttoward, 2, 1);
-    cc_register_cfunc(vm, "nexttowardf", (void*)nexttowardf, 2, 2);    cc_register_cfunc(vm, "nexttowardl", (void*)nextafter, 2, 1);
+    // nexttoward(double, long double) / nexttowardf(float, long double): the 2nd arg is
+    // long double which is 128-bit on Linux/aarch64.  The VM models long double as 8 bytes,
+    // so we redirect to nextafter/nextafterf (same return type, same double-ABI) to avoid
+    // the 128-bit host ABI mismatch (#491).  nexttowardl already redirects to nextafter below.
+    cc_register_cfunc_ex(vm, "nexttoward",  (void*)nextafter,  2, 1, 0b11);
+    cc_register_cfunc_ex(vm, "nexttowardf", (void*)nextafterf, 2, 2, 0b11);    cc_register_cfunc_ex(vm, "nexttowardl", (void*)nextafter, 2, 1, 0b11);
     cc_register_cfunc_ex(vm, "copysign", (void*)copysign, 2, 1, 0b11);  // double, double
     cc_register_cfunc_ex(vm, "copysignf", (void*)copysignf, 2, 2, 0b11);    cc_register_cfunc_ex(vm, "copysignl", (void*)copysign, 2, 1, 0b11);
 

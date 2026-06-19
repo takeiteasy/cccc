@@ -300,9 +300,9 @@ python3 tools/tests.py --c4               # Bytecode round-trip: compile each po
 # I recommend running --leaks with -j (takes a long time synchronously)
 ```
 
-`make test` runs the source-mode suite and the platform-gated host-signal
-debugger integration test. Run the `.c4` round-trip separately with
-`python3 tools/tests.py --c4`.
+`make test` runs the source-mode suite, the `.c4` bytecode round-trip, and the
+platform-gated host-signal debugger integration test. Run the `.c4` round-trip
+standalone with `python3 tools/tests.py --c4`.
 
 ### Linux with Colima
 

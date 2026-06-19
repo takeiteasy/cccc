@@ -40,16 +40,15 @@ colima nerdctl -- run --rm cccc-linux sh -c './cccc -I./include tests/test_arith
 colima nerdctl -- run --rm -it cccc-linux bash
 ```
 
-The `.c4` bytecode round-trip is a separate test mode that is green on both
-platforms (603 passed, 243 skipped — skips are mode-incompatible tests with
-explicit reasons):
+The `.c4` bytecode round-trip runs as part of `make test` (603 passed, 243 skipped —
+skips are mode-incompatible tests with explicit reasons). It can also be run
+standalone:
 
 ```bash
 colima nerdctl -- run --rm cccc-linux python3 tools/tests.py --c4 -j 8
 ```
 
-The round-trip suite runs separately from `make test`; all previously tracked
-issues have been resolved:
+All previously tracked round-trip issues have been resolved:
 
 - **#491** — `...l` math FFI ABI mismatch on Linux/aarch64: fixed by binding all
   `long double` math functions at double precision (the VM models `long double`
