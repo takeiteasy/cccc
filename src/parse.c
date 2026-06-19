@@ -769,6 +769,20 @@ static Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     return var;
 }
 
+// Create a function Obj that is NOT in the global scope or globals list.
+// Used for __builtin_strlen/__builtin_strcmp stubs so they don't interfere
+// with user redeclarations of strlen/strcmp.
+static Obj *new_private_func_obj(VirtualMachine *vm, const char *name, Type *ty) {
+    Obj *var = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
+    memset(var, 0, sizeof(Obj));
+    var->name = (char *)name;
+    var->display_name = (char *)name;
+    var->ty = ty;
+    var->is_function = true;
+    var->is_definition = false;
+    return var;
+}
+
 static Obj *new_implicit_function(VirtualMachine *vm, Token *tok) {
     Type *ty = func_type(vm, ty_int);
     ty->is_variadic = true;
@@ -8624,20 +8638,17 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     vm->compiler.builtin_alloca = new_gvar(vm, "alloca", 6, ty);
     vm->compiler.builtin_alloca->is_definition = false;
 
-    // strlen(s) -> long  (matches include/string.h: extern long strlen(const char *s))
+    // strlen(s) -> long  (private stub; not in global scope so it doesn't conflict
+    // with user redeclarations like `int strcmp(const char *s)`)
     Type *strlen_ty = func_type(vm, ty_long);
     strlen_ty->params = pointer_to(vm, ty_char);
-    vm->compiler.builtin_strlen = new_gvar(vm, "strlen", 6, strlen_ty);
-    vm->compiler.builtin_strlen->is_definition = false;
-    vm->compiler.builtin_strlen->is_function = true;
+    vm->compiler.builtin_strlen = new_private_func_obj(vm, "strlen", strlen_ty);
 
-    // strcmp(a, b) -> int  (matches include/string.h: extern int strcmp(const char *, const char *))
+    // strcmp(a, b) -> int  (private stub; same rationale as strlen above)
     Type *strcmp_ty = func_type(vm, ty_int);
     strcmp_ty->params = pointer_to(vm, ty_char);
     strcmp_ty->params->next = pointer_to(vm, ty_char);
-    vm->compiler.builtin_strcmp = new_gvar(vm, "strcmp", 6, strcmp_ty);
-    vm->compiler.builtin_strcmp->is_definition = false;
-    vm->compiler.builtin_strcmp->is_function = true;
+    vm->compiler.builtin_strcmp = new_private_func_obj(vm, "strcmp", strcmp_ty);
 
     // setjmp(jmp_buf) -> int
     // jmp_buf is an array type, but we'll treat it as a pointer for now
