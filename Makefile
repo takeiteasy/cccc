@@ -73,6 +73,9 @@ COLIMA ?= colima
 COLIMA_PROFILE ?= cccc-linux-amd64
 COLIMA_NERDCTL = $(COLIMA) -p $(COLIMA_PROFILE) nerdctl --
 LINUX_AMD64_IMAGE ?= cccc-linux-amd64
+# Per-subprocess wall-clock timeout for the QEMU smoke runner (seconds).
+# QEMU user-mode translation is slow; this prevents indefinite stalls (#501).
+QEMU_PROCESS_TIMEOUT ?= 120
 
 ifeq ($(UNAME_S),Linux)
 	SAN_OUT += cccc-msan
@@ -342,6 +345,10 @@ linux-x86_64-qemu-smoke:
 			file ./cccc | grep -Eq "x86-64|x86_64"; \
 			rc=0; ./cccc -I./include tests/test_arithmetic.c || rc=$$?; \
 			test "$$rc" -eq 42'
+	@$(COLIMA_NERDCTL) run --rm --platform linux/amd64 \
+		$(LINUX_AMD64_IMAGE) python3 tools/tests.py \
+		--match 'test_arithmetic.c' -j 1 \
+		--process-timeout $(QEMU_PROCESS_TIMEOUT)
 
 all: clean $(EXE_OUT) $(LIB_OUT) test docs
 

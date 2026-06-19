@@ -60,7 +60,7 @@ def vm_profile_path(profile_dir, test_name, mode):
 
 
 def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_args,
-                    bench=False, c4_mode=False, profile_dir=None):
+                    bench=False, c4_mode=False, profile_dir=None, process_timeout=None):
     tests_dir = Path(script_dir) / "tests"
     test_name = str(test_file.relative_to(tests_dir))
 
@@ -113,6 +113,7 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
             reject_stdout=reject_stdout,
             expect_stderr=expect_stderr,
             reject_stderr=reject_stderr,
+            process_timeout=process_timeout,
         )
 
     run_args = ["--", *per_test_run_args] if per_test_run_args else []
@@ -125,9 +126,24 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
                 str(cccc), "-I./include", *cccc_args, *per_test_flags,
                 *profile_args, str(test_file), *run_args,
             ]
-            normal_result = subprocess.run(
-                normal_cmd, capture_output=True, text=True, cwd=script_dir
-            )
+            try:
+                normal_result = subprocess.run(
+                    normal_cmd, capture_output=True, text=True, cwd=script_dir,
+                    timeout=process_timeout,
+                )
+            except subprocess.TimeoutExpired:
+                return {
+                    "idx": idx,
+                    "test_name": test_name,
+                    "exit_code": -1,
+                    "status": "timeout",
+                    "output": "",
+                    "is_negative_test": is_negative_test,
+                    "expects_runtime_error": expects_runtime_error,
+                    "stderr_mismatch": None,
+                    "elapsed": process_timeout,
+                    "vm_profile": str(profile_json) if profile_json else None,
+                }
             skip_leaks = test_file.name in LEAKS_SKIP_TESTS
             if not skip_leaks:
                 leak_cmd = [
@@ -215,7 +231,24 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
     elapsed = None
     if cmd is not None:
         start = time.perf_counter()
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd=script_dir)
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, cwd=script_dir,
+                timeout=process_timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "idx": idx,
+                "test_name": test_name,
+                "exit_code": -1,
+                "status": "timeout",
+                "output": "",
+                "is_negative_test": is_negative_test,
+                "expects_runtime_error": expects_runtime_error,
+                "stderr_mismatch": None,
+                "elapsed": time.perf_counter() - start,
+                "vm_profile": str(profile_json) if profile_json else None,
+            }
         elapsed = time.perf_counter() - start
         if profile_json and result.stdout:
             Path(profile_json).write_text(result.stdout)
@@ -311,7 +344,8 @@ def run_c4_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
                      per_test_flags, per_test_run_args, is_negative_test,
                      expects_runtime_error, bench, profile_dir=None,
                      is_testing_mode=False, expect_stdout=None,
-                     reject_stdout=None, expect_stderr=None, reject_stderr=None):
+                     reject_stdout=None, expect_stderr=None, reject_stderr=None,
+                     process_timeout=None):
     """Compile a test to .c4, then run it. Returns a result dict.
 
     Skips negative tests (EXPECT_COMPILE_ERROR / EXPECT_RUNTIME_ERROR),
@@ -353,7 +387,24 @@ def run_c4_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
             str(cccc), "-I./include", *cccc_args, *per_test_flags,
             "-c", "-o", str(c4_path), str(test_file),
         ]
-        save = subprocess.run(save_cmd, capture_output=True, text=True, cwd=script_dir)
+        try:
+            save = subprocess.run(
+                save_cmd, capture_output=True, text=True, cwd=script_dir,
+                timeout=process_timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "idx": idx,
+                "test_name": test_name,
+                "exit_code": -1,
+                "status": "c4_save_failed",
+                "output": "TIMEOUT",
+                "is_negative_test": False,
+                "expects_runtime_error": False,
+                "stderr_mismatch": None,
+                "elapsed": None,
+                "vm_profile": None,
+            }
         if save.returncode != 0:
             return {
                 "idx": idx,
@@ -373,7 +424,24 @@ def run_c4_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
         run_args = ["--", *per_test_run_args] if per_test_run_args else []
         run_cmd = [str(cccc), *profile_args, str(c4_path), *run_args]
         start = time.perf_counter() if bench else None
-        run = subprocess.run(run_cmd, capture_output=True, text=True, cwd=script_dir)
+        try:
+            run = subprocess.run(
+                run_cmd, capture_output=True, text=True, cwd=script_dir,
+                timeout=process_timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "idx": idx,
+                "test_name": test_name,
+                "exit_code": -1,
+                "status": "c4_failed",
+                "output": "TIMEOUT",
+                "is_negative_test": False,
+                "expects_runtime_error": False,
+                "stderr_mismatch": None,
+                "elapsed": (time.perf_counter() - start) if start else None,
+                "vm_profile": str(profile_json) if profile_json else None,
+            }
         elapsed = (time.perf_counter() - start) if bench else None
         stdout = run.stdout
         output = run.stdout + run.stderr
@@ -419,10 +487,12 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
         profile_dir = script_dir / "profile" / "vm-opcodes"
         profile_dir.mkdir(parents=True, exist_ok=True)
 
+    process_timeout = getattr(args, "process_timeout", None)
     test_args = [
         (
             i, test_file, cccc, str(script_dir), use_leaks, platform, cccc_args,
             args.bench, args.c4, str(profile_dir) if profile_dir else None,
+            process_timeout,
         )
         for i, test_file in enumerate(test_files)
     ]
@@ -492,6 +562,11 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
             passed += 1
             if not quiet:
                 print(f"✓ {test_name}{timing_str}")
+        elif status == "timeout":
+            failed += 1
+            failed_tests.append(f"{test_name} (TIMEOUT)")
+            if not quiet:
+                print(f"✗ {test_name} (TIMEOUT){timing_str}")
         elif status == "failed":
             failed += 1
             failed_tests.append(f"{test_name} (exit code: {exit_code})")
@@ -629,6 +704,12 @@ def main():
         "--c4", action="store_true",
         help="Run the .c4 bytecode round-trip: compile each positive test to a .c4, then run it. "
              "Negative tests and a small set of FFI tests that cannot survive rehydration are skipped."
+    )
+    parser.add_argument(
+        "--process-timeout", type=int, default=None, metavar="SECONDS",
+        help="Wall-clock timeout in seconds for each test subprocess. Timed-out tests are "
+             "reported as TIMEOUT failures. Useful for slow environments such as binfmt/QEMU "
+             "where processes may stall indefinitely. Default: no timeout."
     )
     args, cccc_args = parser.parse_known_args()
 
