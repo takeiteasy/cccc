@@ -94,8 +94,12 @@ The host-signal debugger integration passes.
 
 **Linux x86_64 (VZ/Rosetta, linux/amd64 container):** the full suite is
 partitioned into alphabetical filename batches to avoid child-reaping stalls
-(#500). `test_posix_sys_stat.c` and `test_posix_utime.c` fail due to an
-x86_64-specific `struct stat` layout mismatch (#499). All other tests pass.
+(#500, resolved WONT_FIX — Rosetta binfmt process-reaping limit, not fixable in
+CCCC; mitigated by partitioned batches and `--process-timeout`). The x86_64
+`struct stat` layout fix (#499) corrects the field ordering for glibc x86_64, so
+`test_posix_sys_stat.c` and `test_posix_utime.c` now pass. The only shared
+regression is `test_nexttowardf_matches_nextafterf` (#498), which also fails on
+arm64 and macOS x86_64.
 
 No architecture-specific tests are silently skipped; `.c4` skips remain limited
 to mode-incompatible tests and include explicit reasons.

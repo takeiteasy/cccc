@@ -1,6 +1,6 @@
 # cccc
 
-> **Warning:** Work in progress. Tested on `aarch64` (Apple Silicon) only.
+> **Warning:** Work in progress. Tested on macOS and Linux (`aarch64` and `x86_64`).
 
 `CCCC` (**C**omprehensive **C** **C**ompensation **C**ompiler) is a C bytecode compiler + VM interpreter. This system enables cccc to run an in-memory, compile-time pass to manipulate ast directly. It preprocesses C, runs `[[cccc::macro]]` / `__attribute__((macro))` functions during compilation, and then either executes the result in the VM or hands a macro-expanded C program off to a real system compiler (`-c=native`) for an actual native build.
 
