@@ -635,7 +635,7 @@ def main():
     script_dir = Path(__file__).parent.parent.resolve()
 
     if args.binary:
-        cccc = Path(args.binary)
+        cccc = Path(args.binary).resolve()
     elif args.asan:
         cccc = script_dir / "cccc-asan"
     elif args.ubsan:

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """macOS PTY integration tests for host-signal crash debugging."""
 
+import argparse
 import errno
 import os
 import pty
@@ -104,6 +105,23 @@ def assert_host_fault(source, expected_signal, commands=()):
 
 
 def main():
+    global CCCC
+
+    parser = argparse.ArgumentParser(
+        description="Run macOS host-signal debugger integration tests"
+    )
+    parser.add_argument(
+        "--binary",
+        default=str(CCCC),
+        help="Path to the CCCC binary (default: repository cccc binary)",
+    )
+    args = parser.parse_args()
+    CCCC = Path(args.binary).resolve()
+
+    if not CCCC.exists():
+        print(f"error: CCCC binary not found: {CCCC}", file=sys.stderr)
+        return 1
+
     if sys.platform != "darwin":
         print("host-signal debugger integration: skipped (macOS-only coverage)")
         return 0

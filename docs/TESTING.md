@@ -9,60 +9,96 @@ integration test verifies interactive host-signal trapping, inspection-only
 debugger behavior, TTY/testing opt-outs, compile-time faults, and guest signal
 dispositions; it is skipped on other platforms.
 
-## Linux with Colima
+## Architecture build and test workflows
 
-The root-level `Dockerfile` builds and tests CCCC on Ubuntu 24.04 with Clang 18
-and libffi. On an Apple Silicon host, start a native Linux/arm64 Colima VM using
-the containerd runtime, then build and run the test image:
+### macOS x86_64 under Rosetta 2
 
-```bash
-colima start --runtime containerd --arch aarch64 --cpu 4 --memory 4
-colima nerdctl -- build -t cccc-linux .
-colima nerdctl -- run --rm cccc-linux
-```
-
-All 846 source tests pass on Linux/arm64. macOS and Linux x86_64 coverage is
-tracked in [#496](https://todo.sr.ht/~takeiteasy/cccc/496).
-
-The default image build compiles CCCC and running the image executes
-`make test`. Select the Dockerfile's `test` stage when tests must gate the image
-build:
+The macOS cross-build uses `/usr/bin/clang -arch x86_64` and libffi from the
+active macOS SDK. It does not use an arm64-only Homebrew library. Run each stage
+with one Make target:
 
 ```bash
-colima nerdctl -- build --target test -t cccc-linux-test .
+make macos-x86_64-build
+make macos-x86_64-smoke
+make macos-x86_64-test
 ```
 
-Use the built compiler directly for a smoke test, or open an interactive shell
-for diagnostics:
+`macos-x86_64-build` produces `cccc-macos-x86_64` and checks its Mach-O
+architecture. `macos-x86_64-smoke` additionally:
+
+- asserts that Rosetta reports `uname -m` as `x86_64`;
+- runs `test_arithmetic.c` and the `--asm-passthru` regression;
+- runs `-c=native` with Apple Clang, checks the child executable with `file`,
+  and executes it under Rosetta.
+
+`macos-x86_64-test` runs the complete source and `.c4` suites plus the macOS
+host-signal debugger integration. Override `MACOS_X86_64_CC`,
+`MACOS_X86_64_BINARY`, or `TEST_JOBS` when required.
+
+### Linux/amd64 with VZ/Rosetta
+
+The root Dockerfile builds Ubuntu 24.04 with Clang 18, libffi, and `file` for
+both arm64 and amd64. On Apple Silicon, VZ/Rosetta is the supported amd64 path.
+Create the profile once:
 
 ```bash
-colima nerdctl -- run --rm cccc-linux sh -c './cccc -I./include tests/test_arithmetic.c; test "$?" -eq 42'
-colima nerdctl -- run --rm -it cccc-linux bash
+colima start cccc-linux-amd64 --runtime containerd --arch aarch64 \
+  --vm-type vz --vz-rosetta --cpu 4 --memory 4
 ```
 
-The `.c4` bytecode round-trip runs as part of `make test` (603 passed, 243 skipped —
-skips are mode-incompatible tests with explicit reasons). It can also be run
-standalone:
+The Make targets require that profile to be running and do not alter its
+lifecycle:
 
 ```bash
-colima nerdctl -- run --rm cccc-linux python3 tools/tests.py --c4 -j 8
+make linux-x86_64-build
+make linux-x86_64-smoke
+make linux-x86_64-test
 ```
 
-All previously tracked round-trip issues have been resolved:
+The image is built and run with `--platform linux/amd64` and tagged
+`cccc-linux-amd64`. The smoke and test targets require `uname -m` to report
+`x86_64` and `file ./cccc` to identify an x86-64 ELF executable. Override the
+defaults with `COLIMA_PROFILE=name`, `LINUX_AMD64_IMAGE=tag`, or `TEST_JOBS=N`.
 
-- **#491** — `...l` math FFI ABI mismatch on Linux/aarch64: fixed by binding all
-  `long double` math functions at double precision (the VM models `long double`
-  as 8 bytes, so double precision is sufficient and avoids the 128-bit host ABI).
-- **#492** — `.c4` runner mode classification: `--testing`, `-E`, `-M`/`-G`, and
-  compile-time diagnostic tests are now explicitly skipped with a stated reason
-  rather than counted as runtime failures.
-- **#493** — TLS relocation crashes after `.c4` reload: the TLS template and its
-  pointer relocations are now serialised in a dedicated section (bytecode V2) and
-  re-applied on load before `current_tls_seg` is materialised.
-- **#494** — Compound-literal TLS storage crash: root cause is #493; resolved by
-  the same fix.
-- **#495** — Save failure for `--testing` prepass bytecode: classified as
-  `c4-incompatible: testing prepass` by the updated runner.
+### binfmt/QEMU comparison path
+
+For hosts where VZ/Rosetta is unavailable, a separate aarch64 profile with
+binfmt enabled can be used for smoke checks:
+
+```bash
+colima start cccc-linux-amd64-qemu --runtime containerd --arch aarch64 \
+  --vm-type vz --binfmt --cpu 4 --memory 4
+make COLIMA_PROFILE=cccc-linux-amd64-qemu linux-x86_64-smoke
+```
+
+**Warning:** running the full test suite under binfmt/QEMU is not practical.
+The QEMU user-mode translation layer adds substantial overhead to every
+subprocess the test runner spawns, causing batch runs to stall or exceed the
+300 s per-batch timeout. Smoke runs (single binary invocations) complete
+correctly, but `linux-x86_64-test` should not be used with this profile.
+The root cause is tracked in
+[#501](https://todo.sr.ht/~takeiteasy/cccc/501). VZ/Rosetta hardware
+translation is the only supported path for the full Linux/amd64 suite.
+
+### Current results
+
+**arm64 baseline (macOS and Linux):** both source suites run 847 tests:
+737 pass, 109 are correctly rejected negative tests, and
+`test_nexttowardf_matches_nextafterf` fails on both platforms. The shared
+regression is tracked in [#498](https://todo.sr.ht/~takeiteasy/cccc/498).
+
+**macOS x86_64 (Rosetta 2):** build, smoke, and architecture assertions pass.
+The source and `.c4` suites run with the same counts as the arm64 baseline;
+`test_nexttowardf_matches_nextafterf` also fails here (same root cause, #498).
+The host-signal debugger integration passes.
+
+**Linux x86_64 (VZ/Rosetta, linux/amd64 container):** the full suite is
+partitioned into alphabetical filename batches to avoid child-reaping stalls
+(#500). `test_posix_sys_stat.c` and `test_posix_utime.c` fail due to an
+x86_64-specific `struct stat` layout mismatch (#499). All other tests pass.
+
+No architecture-specific tests are silently skipped; `.c4` skips remain limited
+to mode-incompatible tests and include explicit reasons.
 
 ## Attribute syntax variants
 

@@ -304,36 +304,55 @@ python3 tools/tests.py --c4               # Bytecode round-trip: compile each po
 platform-gated host-signal debugger integration test. Run the `.c4` round-trip
 standalone with `python3 tools/tests.py --c4`.
 
+### macOS x86_64 with Rosetta 2
+
+On Apple Silicon, the x86_64 workflow uses Apple Clang, the macOS SDK's
+universal libffi, and Rosetta 2. Each stage has a one-command Make target:
+
+```bash
+make macos-x86_64-build
+make macos-x86_64-smoke
+make macos-x86_64-test
+```
+
+The smoke target asserts `uname -m` and `file` output, runs a VM program and
+`--asm-passthru`, and confirms that `-c=native` produces an executable x86_64
+child process. The test target runs the source suite, `.c4` round-trip, and
+macOS host-signal debugger integration using `cccc-macos-x86_64`.
+
 ### Linux with Colima
 
-On Apple Silicon, the repository's Dockerfile provides an Ubuntu 24.04,
-Clang 18, Linux/arm64 build and test environment using Colima's containerd
-runtime. The default image build compiles CCCC and running it executes
-`make test`:
+The Dockerfile remains multi-architecture. For native Linux/arm64, use the
+existing Colima workflow:
 
 ```bash
 colima start --runtime containerd --arch aarch64 --cpu 4 --memory 4
-colima nerdctl -- build -t cccc-linux .
-colima nerdctl -- run --rm cccc-linux
+colima nerdctl -- build --platform linux/arm64 -t cccc-linux .
+colima nerdctl -- run --rm --platform linux/arm64 cccc-linux
 ```
 
-The Linux/arm64 source suite currently has one known failure: long-double FFI
-marshalling in `test_c23_exp10_pi.c` ([#491](https://todo.sr.ht/~takeiteasy/cccc/491)).
-The other 844 source tests pass. macOS and Linux x86_64 coverage is tracked in
-[#496](https://todo.sr.ht/~takeiteasy/cccc/496).
-
-To make the test suite part of the image build itself, select the test stage:
+For Linux/amd64 on Apple Silicon, create a named VZ/Rosetta profile once. The
+Make targets use this profile without starting or stopping it:
 
 ```bash
-colima nerdctl -- build --target test -t cccc-linux-test .
+colima start cccc-linux-amd64 --runtime containerd --arch aarch64 \
+  --vm-type vz --vz-rosetta --cpu 4 --memory 4
+make linux-x86_64-build
+make linux-x86_64-smoke
+make linux-x86_64-test
 ```
 
-To run a compiler smoke test or open a shell in the built image:
+The amd64 image is tagged `cccc-linux-amd64`. Override `COLIMA_PROFILE` or
+`LINUX_AMD64_IMAGE` when using different names. A binfmt/QEMU fallback is
+documented in [TESTING.md](docs/TESTING.md), but the full test suite hangs
+under QEMU user-mode translation ([#501](https://todo.sr.ht/~takeiteasy/cccc/501));
+use VZ/Rosetta for the complete suite. Architecture-specific results and known
+failures are also in [TESTING.md](docs/TESTING.md).
 
-```bash
-colima nerdctl -- run --rm cccc-linux sh -c './cccc -I./include tests/test_arithmetic.c; test "$?" -eq 42'
-colima nerdctl -- run --rm -it cccc-linux bash
-```
+The arm64 baseline currently has one source-suite failure in
+`test_nexttowardf_matches_nextafterf`, tracked by
+[#498](https://todo.sr.ht/~takeiteasy/cccc/498). The pipelines do not suppress
+architecture-sensitive failures.
 
 ### Sanitizer Builds
 

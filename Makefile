@@ -63,6 +63,16 @@ endif
 EXE_OUT := cccc$(EXE)
 LIB_OUT := libcccc$(DYLIB)
 SAN_OUT := cccc-asan cccc-ubsan cccc-tsan
+TEST_JOBS ?= 8
+
+# Reproducible x86_64 build/test workflows.
+MACOS_X86_64_CC ?= /usr/bin/clang
+MACOS_X86_64_BINARY ?= cccc-macos-x86_64
+MACOS_SDK_PATH ?= $(shell xcrun --sdk macosx --show-sdk-path 2>/dev/null)
+COLIMA ?= colima
+COLIMA_PROFILE ?= cccc-linux-amd64
+COLIMA_NERDCTL = $(COLIMA) -p $(COLIMA_PROFILE) nerdctl --
+LINUX_AMD64_IMAGE ?= cccc-linux-amd64
 
 ifeq ($(UNAME_S),Linux)
 	SAN_OUT += cccc-msan
@@ -220,9 +230,97 @@ stdlib: $(EXE_OUT)
 	fi
 
 test: clean $(EXE_OUT)
-	@python3 tools/tests.py -j 8
-	@python3 tools/tests.py --c4 -j 8
+	@python3 tools/tests.py -j $(TEST_JOBS)
+	@python3 tools/tests.py --c4 -j $(TEST_JOBS)
 	@python3 tools/test_host_signal_debugger.py
+
+macos-x86_64-build:
+	@if [ "$(UNAME_S)" != "Darwin" ]; then \
+		echo "Error: macos-x86_64-build requires macOS."; \
+		exit 1; \
+	fi
+	@if [ -z "$(MACOS_SDK_PATH)" ]; then \
+		echo "Error: macOS SDK not found. Install the Xcode Command Line Tools."; \
+		exit 1; \
+	fi
+	@$(MAKE) EXE_OUT=$(MACOS_X86_64_BINARY) \
+		CC="$(MACOS_X86_64_CC) -arch x86_64" \
+		LIBFFI_CFLAGS="-I$(MACOS_SDK_PATH)/usr/include/ffi" \
+		LIBFFI_LDFLAGS="-lffi" \
+		$(MACOS_X86_64_BINARY)
+	@file $(MACOS_X86_64_BINARY)
+	@file $(MACOS_X86_64_BINARY) | grep -q 'x86_64'
+
+macos-x86_64-smoke: macos-x86_64-build
+	@set -eu; \
+		machine=$$(/usr/bin/arch -x86_64 /usr/bin/uname -m); \
+		echo "Rosetta machine: $$machine"; \
+		test "$$machine" = "x86_64"; \
+		rc=0; \
+		/usr/bin/arch -x86_64 ./$(MACOS_X86_64_BINARY) -I./include tests/test_arithmetic.c || rc=$$?; \
+		test "$$rc" -eq 42; \
+		rc=0; \
+		CCCC_NATIVE_CC=/usr/bin/clang /usr/bin/arch -x86_64 \
+			./$(MACOS_X86_64_BINARY) -I./include --asm-passthru tests/test_asm_passthru.c || rc=$$?; \
+		test "$$rc" -eq 42; \
+		tmp=$$(mktemp /tmp/cccc-native-x86_64.XXXXXX); \
+		trap 'rm -f "$$tmp"' EXIT; \
+		CCCC_NATIVE_CC=/usr/bin/clang /usr/bin/arch -x86_64 \
+			./$(MACOS_X86_64_BINARY) -c=native -o "$$tmp" tests/test_arithmetic.c; \
+		file "$$tmp"; \
+		file "$$tmp" | grep -q 'x86_64'; \
+		rc=0; /usr/bin/arch -x86_64 "$$tmp" || rc=$$?; \
+		test "$$rc" -eq 42
+
+macos-x86_64-test: macos-x86_64-smoke
+	@set +e; \
+		rc=0; \
+		/usr/bin/arch -x86_64 /usr/bin/python3 tools/tests.py \
+			--binary ./$(MACOS_X86_64_BINARY) -j $(TEST_JOBS) || rc=1; \
+		/usr/bin/arch -x86_64 /usr/bin/python3 tools/tests.py \
+			--binary ./$(MACOS_X86_64_BINARY) --c4 -j $(TEST_JOBS) || rc=1; \
+		/usr/bin/arch -x86_64 /usr/bin/python3 tools/test_host_signal_debugger.py \
+			--binary ./$(MACOS_X86_64_BINARY) || rc=1; \
+		exit $$rc
+
+linux-x86_64-check:
+	@$(COLIMA) status -p $(COLIMA_PROFILE) >/dev/null 2>&1 || { \
+		echo "Error: Colima profile '$(COLIMA_PROFILE)' is not running."; \
+		echo "See docs/TESTING.md for the VZ/Rosetta profile setup."; \
+		exit 1; \
+	}
+
+linux-x86_64-build: linux-x86_64-check
+	$(COLIMA_NERDCTL) build --platform linux/amd64 \
+		-t $(LINUX_AMD64_IMAGE) .
+
+linux-x86_64-smoke: linux-x86_64-build
+	@$(COLIMA_NERDCTL) run --rm --platform linux/amd64 \
+		$(LINUX_AMD64_IMAGE) sh -ec ' \
+			machine=$$(uname -m); \
+			echo "Container machine: $$machine"; \
+			test "$$machine" = "x86_64"; \
+			file ./cccc; \
+			file ./cccc | grep -Eq "x86-64|x86_64"; \
+			rc=0; ./cccc -I./include tests/test_arithmetic.c || rc=$$?; \
+			test "$$rc" -eq 42'
+
+linux-x86_64-test: linux-x86_64-smoke
+	@set +e; \
+		rc=0; \
+		for pattern in 'test_[a-f]*.c' 'test_[g-l]*.c' 'test_[m-r]*.c' \
+			'test_[s-u]*.c' 'test_[v-x]*.c' 'test_[y-z]*.c'; do \
+			$(COLIMA_NERDCTL) run --rm --platform linux/amd64 \
+				$(LINUX_AMD64_IMAGE) timeout 300 python3 tools/tests.py \
+				--match "$$pattern" --quiet -j $(TEST_JOBS) || rc=1; \
+		done; \
+		for pattern in 'test_[a-f]*.c' 'test_[g-l]*.c' 'test_[m-r]*.c' \
+			'test_[s-u]*.c' 'test_[v-x]*.c' 'test_[y-z]*.c'; do \
+			$(COLIMA_NERDCTL) run --rm --platform linux/amd64 \
+				$(LINUX_AMD64_IMAGE) timeout 300 python3 tools/tests.py \
+				--match "$$pattern" --c4 --quiet -j $(TEST_JOBS) || rc=1; \
+		done; \
+		exit $$rc
 
 all: clean $(EXE_OUT) $(LIB_OUT) test docs
 
@@ -299,11 +397,11 @@ else
 endif
 
 clean:
-	@$(RM) -f $(EXE_OUT) $(LIB_OUT) $(SAN_OUT) cccc-afl cccc-afl-asan cccc-prof fuzz_harness
+	@$(RM) -f $(EXE_OUT) $(LIB_OUT) $(SAN_OUT) $(MACOS_X86_64_BINARY) cccc-afl cccc-afl-asan cccc-prof fuzz_harness
 	@$(RM) -rf profile/*.prof profile/*.txt profile/*.json profile/*.massif
 	@$(RM) -rf fuzz/corpus fuzz/out
 
-.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json
+.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json macos-x86_64-build macos-x86_64-smoke macos-x86_64-test linux-x86_64-check linux-x86_64-build linux-x86_64-smoke linux-x86_64-test
 ifeq ($(UNAME_S),Linux)
 .PHONY: msan
 endif
