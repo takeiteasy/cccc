@@ -223,9 +223,9 @@ void gen_prefixed(char *prefix, ...) {
 gen_prefixed("api", read, write, close);
 ```
 
-The 8-argument limit applies only to fixed parameters. A macro declaration with
-more than 8 named parameters is rejected, but a trailing `...` can receive any
-number of additional call-site arguments.
+Fixed parameters beyond the first 8 are stack-spilled via the VM calling
+convention. A trailing `...` can receive any number of additional call-site
+arguments.
 
 ### Block return from file-scope macros
 
