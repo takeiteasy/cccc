@@ -1970,6 +1970,17 @@ typedef struct Compiler {
     } data_relocs[MAX_CALLS];
     int num_data_relocs;
 
+    // TLS pointer relocations: same shape as data_relocs but the pointer
+    // slot lives in tls_template, not data_seg.  Serialised with the
+    // bytecode so tls_template can be re-materialized after .c4 load (#493).
+    struct {
+        long long tls_offset;    // Pointer slot offset in tls_template
+        long long target_offset; // Target offset in data segment (text NYI)
+        long long addend;        // Byte addend applied to target
+        int target_segment;      // 0 = data (only supported value currently)
+    } tls_relocs[MAX_CALLS];
+    int num_tls_relocs;
+
     LabelEntry label_table[MAX_LABELS];
     int num_labels;
     GotoPatch goto_patches[MAX_LABELS];

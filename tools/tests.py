@@ -108,6 +108,11 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
             idx, test_file, test_name, cccc, script_dir, cccc_args, per_test_flags,
             per_test_run_args, is_negative_test, expects_runtime_error, bench,
             profile_dir,
+            is_testing_mode=is_testing_mode,
+            expect_stdout=expect_stdout,
+            reject_stdout=reject_stdout,
+            expect_stderr=expect_stderr,
+            reject_stderr=reject_stderr,
         )
 
     run_args = ["--", *per_test_run_args] if per_test_run_args else []
@@ -304,18 +309,29 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
 
 def run_c4_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
                      per_test_flags, per_test_run_args, is_negative_test,
-                     expects_runtime_error, bench, profile_dir=None):
+                     expects_runtime_error, bench, profile_dir=None,
+                     is_testing_mode=False, expect_stdout=None,
+                     reject_stdout=None, expect_stderr=None, reject_stderr=None):
     """Compile a test to .c4, then run it. Returns a result dict.
 
-    Skips negative tests (EXPECT_COMPILE_ERROR / EXPECT_RUNTIME_ERROR) and
-    tests listed in C4_SKIP_TESTS, since the round-trip is only meaningful
-    for tests that produce a working executable.
+    Skips negative tests (EXPECT_COMPILE_ERROR / EXPECT_RUNTIME_ERROR),
+    tests listed in C4_SKIP_TESTS, and mode-incompatible tests (--testing
+    prepass, preprocess-only, macro/emit output, or compile-time diagnostic
+    tests whose pass condition depends on stderr rather than exit code).
     """
     skip_reason = None
     if is_negative_test:
         skip_reason = "negative test"
     elif test_file.name in C4_SKIP_TESTS:
         skip_reason = "c4-incompatible"
+    elif is_testing_mode:
+        skip_reason = "c4-incompatible: testing prepass"
+    elif "-E" in per_test_flags:
+        skip_reason = "c4-incompatible: preprocess-only output"
+    elif "-M" in per_test_flags or "-G" in per_test_flags:
+        skip_reason = "c4-incompatible: macro/emit generated source"
+    elif expect_stderr is not None or reject_stderr is not None:
+        skip_reason = "c4-incompatible: compile-time diagnostic"
     if skip_reason:
         return {
             "idx": idx,
@@ -359,13 +375,24 @@ def run_c4_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
         start = time.perf_counter() if bench else None
         run = subprocess.run(run_cmd, capture_output=True, text=True, cwd=script_dir)
         elapsed = (time.perf_counter() - start) if bench else None
+        stdout = run.stdout
         output = run.stdout + run.stderr
         if expects_runtime_error and run.returncode == 255:
             status = "c4_passed"
         elif not expects_runtime_error and run.returncode == 42:
             status = "c4_passed"
+        elif expect_stdout is not None and run.returncode == 0:
+            # Tests that validate via stdout output (not exit 42)
+            if re.search(expect_stdout, stdout, re.MULTILINE | re.DOTALL):
+                status = "c4_passed"
+            else:
+                status = "c4_failed"
         else:
             status = "c4_failed"
+        # Apply reject_stdout to passing tests
+        if status == "c4_passed" and reject_stdout is not None:
+            if re.search(reject_stdout, stdout, re.MULTILINE | re.DOTALL):
+                status = "c4_failed"
         return {
             "idx": idx,
             "test_name": test_name,

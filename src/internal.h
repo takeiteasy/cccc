@@ -39,7 +39,8 @@
 #endif
 
 #define CCCC_MAGIC "CCCC\0"
-#define CCCC_VERSION 1 // Bytecode format version (pre-1.0; bump only at release)
+#define CCCC_VERSION 2 // Bytecode format version (pre-1.0; bump only at release)
+                       // V2: TLS template + reloc section added (#493)
 
 // Stack canary constant for detecting stack overflows (used when random
 // canaries disabled)

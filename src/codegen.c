@@ -100,6 +100,17 @@ static void add_data_reloc(VirtualMachine *vm, long long data_offset, int target
     vm->compiler.num_data_relocs++;
 }
 
+static void add_tls_reloc(VirtualMachine *vm, long long tls_offset, int target_segment,
+                          long long target_offset, long long addend) {
+    if (vm->compiler.num_tls_relocs >= MAX_CALLS)
+        error("too many TLS relocations");
+    vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].tls_offset    = tls_offset;
+    vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].target_segment = target_segment;
+    vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].target_offset  = target_offset;
+    vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].addend         = addend;
+    vm->compiler.num_tls_relocs++;
+}
+
 static void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
     for (Obj *var = prog; var; var = var->next) {
         if (var->is_function)
@@ -132,9 +143,10 @@ static void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
 
             long long slot_offset = var->offset + rel->offset;
             if (var->is_tls) {
-                // TLS pointer initialiser: patch into tls_template
+                // TLS pointer initialiser: patch into tls_template and record
+                // the reloc so it can be re-applied after .c4 load (#493).
                 *(long long *)(vm->tls_template + slot_offset) = value;
-                // TLS relocs are not serialised into bytecode yet (follow-up)
+                add_tls_reloc(vm, slot_offset, segment, target_offset, rel->addend);
             } else {
                 *(long long *)(vm->data_seg + slot_offset) = value;
                 add_data_reloc(vm, slot_offset, segment, target_offset, rel->addend);

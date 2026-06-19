@@ -20,7 +20,7 @@
 #include "cccc.h"
 #include "./internal.h"
 
-// Bytecode file format (V5 - 32-bit text words):
+// Bytecode file format (V2 - 32-bit text words):
 //   Magic: "CCCC\0" (4 bytes)
 //   Version: CCCC_VERSION (4 bytes)
 //   Flags: CCCCFlags bitfield (4 bytes)
@@ -38,6 +38,10 @@
 //   FFI entries: name_len (4 bytes), name (name_len bytes),
 //                num_args (4), returns_double (4), returns_float (4), is_variadic (4),
 //                num_fixed_args (4), double_arg_mask (8), is_dynamic_placeholder (4)
+//   [V2] TLS template size (8 bytes)
+//   [V2] TLS template bytes (tls_template_size bytes; pointer slots stripped to addend)
+//   [V2] TLS relocation count (8 bytes)
+//   [V2] TLS relocations: tls_offset, target_segment, target_offset, addend (4×8B each)
 
 static int get_opcode_operand_count(int op) {
     return cc_opcode_operand_words(op);
@@ -263,10 +267,51 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f) {
         }
     }
 
+    // Write TLS section (V2): template bytes + relocation table (#493)
+    {
+        long long tls_size = (long long)vm->tls_template_size;
+        long long tls_reloc_count = vm->compiler.num_tls_relocs;
+        if (fwrite(&tls_size, sizeof(long long), 1, f) != 1) goto write_error;
+
+        if (tls_size > 0) {
+            // Strip absolute pointer values (replace with addend, matching the
+            // data-segment treatment) so the template is position-independent.
+            char *tls_copy = malloc((size_t)tls_size);
+            if (!tls_copy) {
+                fprintf(stderr, "error: failed to allocate TLS template buffer\n");
+                return -1;
+            }
+            memcpy(tls_copy, vm->tls_template, (size_t)tls_size);
+            for (long long i = 0; i < tls_reloc_count; i++) {
+                long long slot = vm->compiler.tls_relocs[i].tls_offset;
+                *(long long *)(tls_copy + slot) = vm->compiler.tls_relocs[i].addend;
+            }
+            if (fwrite(tls_copy, 1, (size_t)tls_size, f) != (size_t)tls_size) {
+                free(tls_copy);
+                goto write_error;
+            }
+            free(tls_copy);
+        }
+
+        if (fwrite(&tls_reloc_count, sizeof(long long), 1, f) != 1) goto write_error;
+        for (long long i = 0; i < tls_reloc_count; i++) {
+            long long tls_offset    = vm->compiler.tls_relocs[i].tls_offset;
+            long long target_seg    = vm->compiler.tls_relocs[i].target_segment;
+            long long target_offset = vm->compiler.tls_relocs[i].target_offset;
+            long long addend        = vm->compiler.tls_relocs[i].addend;
+            if (fwrite(&tls_offset,    sizeof(long long), 1, f) != 1) goto write_error;
+            if (fwrite(&target_seg,    sizeof(long long), 1, f) != 1) goto write_error;
+            if (fwrite(&target_offset, sizeof(long long), 1, f) != 1) goto write_error;
+            if (fwrite(&addend,        sizeof(long long), 1, f) != 1) goto write_error;
+        }
+    }
+
     if (vm->debug_vm) {
         printf("  Text size: %lld bytes (%lld instructions)\n", text_size, num_instructions);
         printf("  Data size: %lld bytes\n", data_size);
         printf("  Data relocations: %lld\n", data_reloc_count);
+        printf("  TLS template: %zu bytes, %d relocs\n",
+               vm->tls_template_size, vm->compiler.num_tls_relocs);
         printf("  Return buffers: %lld x %lld bytes\n", return_buffer_count,
                return_buffer_size);
         printf("  FFI entries: %lld\n", ffi_count);
@@ -572,6 +617,61 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
         }
     }
 
+    // Read TLS section (V2): template bytes + reloc table (#493)
+    {
+        READ_AND_INCR(tls_size_i, long long);
+        if (tls_size_i < 0) {
+            fprintf(stderr, "error: invalid TLS template size in bytecode\n");
+            return -1;
+        }
+        if (tls_size_i > 0) {
+            if (cursor + tls_size_i > end) {
+                fprintf(stderr, "error: TLS template extends past end of bytecode\n");
+                return -1;
+            }
+            // Allocate and populate tls_template from the file
+            free(vm->tls_template);
+            vm->tls_template = malloc((size_t)tls_size_i);
+            if (!vm->tls_template) {
+                fprintf(stderr, "error: failed to allocate TLS template\n");
+                return -1;
+            }
+            memcpy(vm->tls_template, cursor, (size_t)tls_size_i);
+            vm->tls_template_size = (size_t)tls_size_i;
+            vm->tls_template_cap  = (size_t)tls_size_i;
+            cursor += tls_size_i;
+        } else {
+            // No TLS in this bytecode
+            vm->tls_template_size = 0;
+        }
+
+        READ_AND_INCR(tls_reloc_count_i, long long);
+        if (tls_reloc_count_i < 0 || tls_reloc_count_i > MAX_CALLS ||
+            cursor + tls_reloc_count_i * 4 * (long long)sizeof(long long) > end) {
+            fprintf(stderr, "error: invalid TLS relocation count in bytecode\n");
+            return -1;
+        }
+        vm->compiler.num_tls_relocs = 0;
+        for (long long i = 0; i < tls_reloc_count_i; i++) {
+            READ_AND_INCR(tls_offset,    long long);
+            READ_AND_INCR(target_seg,    long long);
+            READ_AND_INCR(target_offset, long long);
+            READ_AND_INCR(addend,        long long);
+            if (tls_size_i > 0 &&
+                (tls_offset < 0 ||
+                 tls_offset + (long long)sizeof(long long) > tls_size_i ||
+                 (target_seg != 0 && target_seg != 1))) {
+                fprintf(stderr, "error: invalid TLS relocation record\n");
+                return -1;
+            }
+            vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].tls_offset    = tls_offset;
+            vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].target_segment = (int)target_seg;
+            vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].target_offset  = target_offset;
+            vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].addend         = addend;
+            vm->compiler.num_tls_relocs++;
+        }
+    }
+
     long long num_instructions = text_size / (long long)sizeof(InstrWord);
 
     // Mark operand positions
@@ -623,11 +723,28 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
             value;
     }
 
+    // Apply TLS relocations onto tls_template (#493)
+    for (int i = 0; i < vm->compiler.num_tls_relocs; i++) {
+        long long value;
+        if (vm->compiler.tls_relocs[i].target_segment == 0) {
+            value = (long long)(vm->data_seg +
+                                vm->compiler.tls_relocs[i].target_offset +
+                                vm->compiler.tls_relocs[i].addend);
+        } else {
+            value = vm->compiler.tls_relocs[i].target_offset +
+                    vm->compiler.tls_relocs[i].addend;
+        }
+        *(long long *)(vm->tls_template + vm->compiler.tls_relocs[i].tls_offset) =
+            value;
+    }
+
     if (vm->debug_vm) {
         printf("Loaded bytecode:\n");
         printf("  Text size: %lld bytes (%lld instructions)\n", text_size, num_instructions);
         printf("  Data size: %lld bytes\n", data_size);
         printf("  Data relocations: %lld\n", data_reloc_count);
+        printf("  TLS template: %zu bytes, %d relocs\n",
+               vm->tls_template_size, vm->compiler.num_tls_relocs);
         printf("  Return buffers: %lld x %lld bytes\n", return_buffer_count,
                return_buffer_size);
         printf("  FFI allow: %d  deny: %d  disable: %d\n",

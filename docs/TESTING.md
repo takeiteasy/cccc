@@ -21,10 +21,8 @@ colima nerdctl -- build -t cccc-linux .
 colima nerdctl -- run --rm cccc-linux
 ```
 
-The Linux/arm64 source suite currently has one known failure: long-double FFI
-marshalling in `test_c23_exp10_pi.c` ([#491](https://todo.sr.ht/~takeiteasy/cccc/491)).
-The other 844 source tests pass. macOS and Linux x86_64 coverage is tracked in
-[#496](https://todo.sr.ht/~takeiteasy/cccc/496).
+All 846 source tests pass on Linux/arm64. macOS and Linux x86_64 coverage is
+tracked in [#496](https://todo.sr.ht/~takeiteasy/cccc/496).
 
 The default image build compiles CCCC and running the image executes
 `make test`. Select the Dockerfile's `test` stage when tests must gate the image
@@ -42,19 +40,30 @@ colima nerdctl -- run --rm cccc-linux sh -c './cccc -I./include tests/test_arith
 colima nerdctl -- run --rm -it cccc-linux bash
 ```
 
-The `.c4` bytecode round-trip remains a separate test mode:
+The `.c4` bytecode round-trip is a separate test mode that is green on both
+platforms (603 passed, 243 skipped — skips are mode-incompatible tests with
+explicit reasons):
 
 ```bash
 colima nerdctl -- run --rm cccc-linux python3 tools/tests.py --c4 -j 8
 ```
 
-The round-trip suite remains outside `make test` while its mode classification,
-TLS relocation, compound-literal relocation, and testing-prepass serialization
-failures remain tracked in
-[#492](https://todo.sr.ht/~takeiteasy/cccc/492),
-[#493](https://todo.sr.ht/~takeiteasy/cccc/493),
-[#494](https://todo.sr.ht/~takeiteasy/cccc/494), and
-[#495](https://todo.sr.ht/~takeiteasy/cccc/495).
+The round-trip suite runs separately from `make test`; all previously tracked
+issues have been resolved:
+
+- **#491** — `...l` math FFI ABI mismatch on Linux/aarch64: fixed by binding all
+  `long double` math functions at double precision (the VM models `long double`
+  as 8 bytes, so double precision is sufficient and avoids the 128-bit host ABI).
+- **#492** — `.c4` runner mode classification: `--testing`, `-E`, `-M`/`-G`, and
+  compile-time diagnostic tests are now explicitly skipped with a stated reason
+  rather than counted as runtime failures.
+- **#493** — TLS relocation crashes after `.c4` reload: the TLS template and its
+  pointer relocations are now serialised in a dedicated section (bytecode V2) and
+  re-applied on load before `current_tls_seg` is materialised.
+- **#494** — Compound-literal TLS storage crash: root cause is #493; resolved by
+  the same fix.
+- **#495** — Save failure for `--testing` prepass bytecode: classified as
+  `c4-incompatible: testing prepass` by the updated runner.
 
 ## Attribute syntax variants
 
