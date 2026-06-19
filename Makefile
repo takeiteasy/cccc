@@ -322,6 +322,27 @@ linux-x86_64-test: linux-x86_64-smoke
 		done; \
 		exit $$rc
 
+# Smoke-only target for binfmt/QEMU profiles (#501).
+# The full test suite hangs under QEMU user-mode translation; use
+# linux-x86_64-test with a VZ/Rosetta profile for complete coverage.
+linux-x86_64-qemu-smoke:
+	@$(COLIMA) status -p $(COLIMA_PROFILE) >/dev/null 2>&1 || { \
+		echo "Error: Colima profile '$(COLIMA_PROFILE)' is not running."; \
+		echo "See docs/TESTING.md for the binfmt/QEMU profile setup."; \
+		exit 1; \
+	}
+	@$(COLIMA_NERDCTL) build --platform linux/amd64 \
+		-t $(LINUX_AMD64_IMAGE) .
+	@$(COLIMA_NERDCTL) run --rm --platform linux/amd64 \
+		$(LINUX_AMD64_IMAGE) sh -ec ' \
+			machine=$$(uname -m); \
+			echo "Container machine: $$machine"; \
+			test "$$machine" = "x86_64"; \
+			file ./cccc; \
+			file ./cccc | grep -Eq "x86-64|x86_64"; \
+			rc=0; ./cccc -I./include tests/test_arithmetic.c || rc=$$?; \
+			test "$$rc" -eq 42'
+
 all: clean $(EXE_OUT) $(LIB_OUT) test docs
 
 docs:
@@ -401,7 +422,7 @@ clean:
 	@$(RM) -rf profile/*.prof profile/*.txt profile/*.json profile/*.massif
 	@$(RM) -rf fuzz/corpus fuzz/out
 
-.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json macos-x86_64-build macos-x86_64-smoke macos-x86_64-test linux-x86_64-check linux-x86_64-build linux-x86_64-smoke linux-x86_64-test
+.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json macos-x86_64-build macos-x86_64-smoke macos-x86_64-test linux-x86_64-check linux-x86_64-build linux-x86_64-smoke linux-x86_64-test linux-x86_64-qemu-smoke
 ifeq ($(UNAME_S),Linux)
 .PHONY: msan
 endif
