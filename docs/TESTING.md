@@ -82,24 +82,21 @@ translation is the only supported path for the full Linux/amd64 suite.
 
 ### Current results
 
-**arm64 baseline (macOS and Linux):** both source suites run 847 tests:
-737 pass, 109 are correctly rejected negative tests, and
-`test_nexttowardf_matches_nextafterf` fails on both platforms. The shared
-regression is tracked in [#498](https://todo.sr.ht/~takeiteasy/cccc/498).
+**arm64 baseline (macOS and Linux):** all source-mode tests pass. `test_nexttoward.c`
+(which covers `nexttoward`, `nexttowardf`, and `nexttowardl`) is c4-incompatible
+(testing prepass) and is skipped in `.c4` mode. The `nexttowardf` ABI fix is
+resolved in [#498](https://todo.sr.ht/~takeiteasy/cccc/498).
 
 **macOS x86_64 (Rosetta 2):** build, smoke, and architecture assertions pass.
-The source and `.c4` suites run with the same counts as the arm64 baseline;
-`test_nexttowardf_matches_nextafterf` also fails here (same root cause, #498).
-The host-signal debugger integration passes.
+Source and `.c4` suites match the arm64 baseline. The host-signal debugger
+integration passes.
 
 **Linux x86_64 (VZ/Rosetta, linux/amd64 container):** the full suite is
 partitioned into alphabetical filename batches to avoid child-reaping stalls
 (#500, resolved WONT_FIX — Rosetta binfmt process-reaping limit, not fixable in
 CCCC; mitigated by partitioned batches and `--process-timeout`). The x86_64
 `struct stat` layout fix (#499) corrects the field ordering for glibc x86_64, so
-`test_posix_sys_stat.c` and `test_posix_utime.c` now pass. The only shared
-regression is `test_nexttowardf_matches_nextafterf` (#498), which also fails on
-arm64 and macOS x86_64.
+`test_posix_sys_stat.c` and `test_posix_utime.c` pass. All other tests pass.
 
 No architecture-specific tests are silently skipped; `.c4` skips remain limited
 to mode-incompatible tests and include explicit reasons.
