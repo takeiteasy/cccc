@@ -348,23 +348,25 @@ def run_c4_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
                      process_timeout=None):
     """Compile a test to .c4, then run it. Returns a result dict.
 
-    Skips negative tests (EXPECT_COMPILE_ERROR / EXPECT_RUNTIME_ERROR),
-    tests listed in C4_SKIP_TESTS, and mode-incompatible tests (--testing
+    Negative tests (EXPECT_COMPILE_ERROR) are run through the compile step
+    only: a non-zero exit code counts as c4_passed (expected failure), zero
+    counts as c4_failed. They are never skipped on account of being negative.
+
+    Skips tests listed in C4_SKIP_TESTS and mode-incompatible tests (--testing
     prepass, preprocess-only, macro/emit output, or compile-time diagnostic
-    tests whose pass condition depends on stderr rather than exit code).
+    tests whose pass condition depends on stderr rather than exit code), but
+    only when those tests are not negative tests.
     """
     skip_reason = None
-    if is_negative_test:
-        skip_reason = "negative test"
-    elif test_file.name in C4_SKIP_TESTS:
+    if not is_negative_test and test_file.name in C4_SKIP_TESTS:
         skip_reason = "c4-incompatible"
-    elif is_testing_mode:
+    elif not is_negative_test and is_testing_mode:
         skip_reason = "c4-incompatible: testing prepass"
-    elif "-E" in per_test_flags:
+    elif not is_negative_test and "-E" in per_test_flags:
         skip_reason = "c4-incompatible: preprocess-only output"
-    elif "-M" in per_test_flags or "-G" in per_test_flags:
+    elif not is_negative_test and ("-M" in per_test_flags or "-G" in per_test_flags):
         skip_reason = "c4-incompatible: macro/emit generated source"
-    elif expect_stderr is not None or reject_stderr is not None:
+    elif not is_negative_test and (expect_stderr is not None or reject_stderr is not None):
         skip_reason = "c4-incompatible: compile-time diagnostic"
     if skip_reason:
         return {
@@ -400,6 +402,20 @@ def run_c4_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
                 "status": "c4_save_failed",
                 "output": "TIMEOUT",
                 "is_negative_test": False,
+                "expects_runtime_error": False,
+                "stderr_mismatch": None,
+                "elapsed": None,
+                "vm_profile": None,
+            }
+        if is_negative_test:
+            status = "c4_passed" if save.returncode != 0 else "c4_failed"
+            return {
+                "idx": idx,
+                "test_name": test_name,
+                "exit_code": save.returncode,
+                "status": status,
+                "output": save.stderr,
+                "is_negative_test": True,
                 "expects_runtime_error": False,
                 "stderr_mismatch": None,
                 "elapsed": None,
@@ -950,7 +966,7 @@ def main():
         for test in failed_tests:
             print(f"  - {test}")
 
-    if args.c4 and c4_skipped > 0:
+    if args.c4 and c4_skipped > 0 and not args.quiet:
         print()
         print(f"C4 skipped tests ({c4_skipped}):")
         for test in c4_skipped_tests:
