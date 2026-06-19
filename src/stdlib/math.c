@@ -2,6 +2,13 @@
 #include "../cccc.h"
 #include <math.h>
 
+// nexttowardf(float, long double): CCCC promotes the long double arg to double
+// (the VM's long double width), so we need a wrapper that accepts (float, double)
+// and casts back to float before delegating to nextafterf (#498).
+static float cccc_nexttowardf(float x, double y) {
+    return nextafterf(x, (float)y);
+}
+
 #if defined(__APPLE__)
 // Private Apple libm symbols backing the C23 exp10/pi-trig family,
 // available since macOS 10.9 (no public declarations exist).
@@ -255,8 +262,13 @@ void register_math_functions(VirtualMachine *vm) {
     // long double which is 128-bit on Linux/aarch64.  The VM models long double as 8 bytes,
     // so we redirect to nextafter/nextafterf (same return type, same double-ABI) to avoid
     // the 128-bit host ABI mismatch (#491).  nexttowardl already redirects to nextafter below.
-    cc_register_cfunc_ex(vm, "nexttoward",  (void*)nextafter,  2, 1, 0b11);
-    cc_register_cfunc_ex(vm, "nexttowardf", (void*)nextafterf, 2, 2, 0b11);    cc_register_cfunc_ex(vm, "nexttowardl", (void*)nextafter, 2, 1, 0b11);
+    // nexttowardf uses a wrapper (cccc_nexttowardf) instead of nextafterf directly: CCCC
+    // inserts an implicit cast on the long double arg (→ double), so CALLF sees arg1 as
+    // double.  Passing a double to nextafterf(float,float) via libffi gives the wrong low
+    // 32-bit interpretation on arm64 (#498).  The wrapper accepts (float, double) and casts
+    // back to float before forwarding.
+    cc_register_cfunc_ex(vm, "nexttoward",  (void*)nextafter,         2, 1, 0b11);
+    cc_register_cfunc_ex(vm, "nexttowardf", (void*)cccc_nexttowardf,  2, 2, 0b10);    cc_register_cfunc_ex(vm, "nexttowardl", (void*)nextafter, 2, 1, 0b11);
     cc_register_cfunc_ex(vm, "copysign", (void*)copysign, 2, 1, 0b11);  // double, double
     cc_register_cfunc_ex(vm, "copysignf", (void*)copysignf, 2, 2, 0b11);    cc_register_cfunc_ex(vm, "copysignl", (void*)copysign, 2, 1, 0b11);
 
