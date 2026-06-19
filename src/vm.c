@@ -1229,6 +1229,12 @@ void cc_destroy(VirtualMachine *vm) {
     if (vm->compiler.ctx_stack)
         free(vm->compiler.ctx_stack);
 
+    // Free suite stack and any unconsumed current_suite (e.g. after longjmp)
+    if (vm->compiler.current_suite)
+        free(vm->compiler.current_suite);
+    if (vm->compiler.suite_len_stack)
+        free(vm->compiler.suite_len_stack);
+
     // Free macro-scope snapshot stack (#283)
     if (vm->compiler.macro_scope_stack)
         free(vm->compiler.macro_scope_stack);

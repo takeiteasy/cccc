@@ -578,6 +578,22 @@ static Obj *find_fn(Obj *prog, const char *name) {
     return NULL;
 }
 
+// Returns true if `suite` matches `filter` for --test-suite filtering.
+// Matching rules (filter is never NULL when this is called):
+//   - Exact match: suite == filter
+//   - Prefix match: suite starts with filter followed by '/' (sub-suite selection)
+//   - Glob match: filter contains glob metacharacters (*?[), use fnmatch
+// Hook suite matching (run_hooks/has_once_setups_for) uses exact strcmp and is
+// intentionally NOT hierarchical — parent hooks do not inherit to sub-suites.
+// TODO: add hierarchical hook inheritance in a follow-up ticket (#344).
+static bool suite_matches(const char *suite, const char *filter) {
+    const char *s = suite ? suite : "";
+    if (strpbrk(filter, "*?["))
+        return fnmatch(filter, s, 0) == 0;
+    size_t n = strlen(filter);
+    return strncmp(s, filter, n) == 0 && (s[n] == '\0' || s[n] == '/');
+}
+
 // Run a single hook function by name (no-op if not found).
 static void run_hook(VirtualMachine *vm, Obj *prog, const char *fn_name) {
     Obj *fn = find_fn(prog, fn_name);
@@ -752,8 +768,7 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         TestFnRecord *r = n2->rec;
         const char *disp = test_display_name(r);
         if (opts && opts->suite_filter) {
-            const char *s = r->suite ? r->suite : "";
-            if (strcmp(s, opts->suite_filter) != 0)
+            if (!suite_matches(r->suite, opts->suite_filter))
                 continue;
         }
         if (opts && opts->test_glob) {

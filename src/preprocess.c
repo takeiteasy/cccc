@@ -109,6 +109,48 @@ static void ctx_pop(VirtualMachine *vm) {
     vm->compiler.ctx_stack_len--;
 }
 
+// Push a new suite component onto the hierarchical suite path.
+// Composites current_suite + "/" + name and saves the previous strlen so
+// suite_pop can truncate back without re-joining.  open_tok is saved to
+// produce a useful "unclosed suite begin" error pointing at the pragma line.
+static void suite_push(VirtualMachine *vm, const char *name, Token *open_tok) {
+    size_t prev = vm->compiler.current_suite
+                      ? strlen(vm->compiler.current_suite) : 0;
+    // Grow the entry-stack if needed.
+    if (vm->compiler.suite_stack_len == vm->compiler.suite_stack_cap) {
+        vm->compiler.suite_stack_cap =
+            vm->compiler.suite_stack_cap ? vm->compiler.suite_stack_cap * 2 : 4;
+        vm->compiler.suite_len_stack =
+            realloc(vm->compiler.suite_len_stack,
+                    vm->compiler.suite_stack_cap *
+                    sizeof(*vm->compiler.suite_len_stack));
+    }
+    vm->compiler.suite_len_stack[vm->compiler.suite_stack_len++] =
+        (struct SuiteLenEntry){ prev, open_tok };
+    // Build new composite path: prev + "/" + name (or just name at depth 0).
+    size_t namelen = strlen(name);
+    size_t sep     = prev ? 1 : 0;  // '/' separator needed when joining
+    size_t need    = prev + sep + namelen + 1;
+    char *buf = realloc(vm->compiler.current_suite, need);
+    if (sep) buf[prev] = '/';
+    memcpy(buf + prev + sep, name, namelen + 1);
+    vm->compiler.current_suite = buf;
+}
+
+// Pop the innermost suite level, restoring current_suite to its previous path.
+// Must only be called when suite_stack_len > 0.
+static void suite_pop(VirtualMachine *vm) {
+    size_t prev = vm->compiler.suite_len_stack[--vm->compiler.suite_stack_len].prev_len;
+    if (prev == 0) {
+        // Popped back to top-level: no active suite.
+        free(vm->compiler.current_suite);
+        vm->compiler.current_suite = NULL;
+    } else {
+        // Truncate the composite path at the saved length.
+        vm->compiler.current_suite[prev] = '\0';
+    }
+}
+
 // Stack of vm->compiler.macros snapshots used to isolate #define/#undef
 // directives inside individual [[cccc::comptime]] function bodies from each
 // other (#283). Pushed/popped by TK_MACRO_SCOPE_PUSH/POP marker tokens
@@ -3400,9 +3442,8 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
             ComptimeCtxEntry *top = ctx_top(vm);
             if (top && top->type == CTX_COMPTIME && top->needs_end) {
                 ctx_pop(vm);
-            } else if (vm->compiler.current_suite) {
-                free(vm->compiler.current_suite);
-                vm->compiler.current_suite = NULL;
+            } else if (vm->compiler.suite_stack_len > 0) {
+                suite_pop(vm);
             } else {
                 error_tok(vm, tok, "stray #pragma cccc end without matching begin");
             }
@@ -3413,15 +3454,14 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
                 Token *name_tok = after->next;
                 if (!name_tok || name_tok->kind != TK_STR || name_tok->at_bol)
                     error_tok(vm, after, "#pragma cccc suite begin requires a string name");
-                if (vm->compiler.current_suite)
-                    error_tok(vm, tok, "#pragma cccc suite: suites cannot be nested");
-                vm->compiler.current_suite = strdup(name_tok->str);
+                if (name_tok->str[0] == '\0')
+                    error_tok(vm, name_tok, "#pragma cccc suite begin requires a non-empty name");
+                suite_push(vm, name_tok->str, tok);
                 return skip_line(vm, name_tok->next);
             } else if (equal(after, "end")) {
-                if (!vm->compiler.current_suite)
+                if (vm->compiler.suite_stack_len == 0)
                     error_tok(vm, tok, "stray #pragma cccc suite end without matching begin");
-                free(vm->compiler.current_suite);
-                vm->compiler.current_suite = NULL;
+                suite_pop(vm);
                 return skip_line(vm, after->next);
             } else {
                 error_tok(vm, after && after->kind != TK_EOF ? after : sub,
@@ -4269,6 +4309,9 @@ Token *preprocess(VirtualMachine *vm, Token *tok) {
                   top->type == CTX_EMIT ? "unclosed #pragma cccc emit begin"
                                         : "unclosed #pragma cccc comptime begin");
     }
+    if (vm->compiler.suite_stack_len > 0)
+        error_tok(vm, vm->compiler.suite_len_stack[0].open_tok,
+                  "unclosed #pragma cccc suite begin");
     if (vm->compiler.cond_incl) {
         Token *ci_tok = vm->compiler.cond_incl->tok;
         const char *hint = "";

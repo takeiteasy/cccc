@@ -184,6 +184,8 @@ void test_mul(void) {
 }
 ```
 
+Suite names can include `/` to form a hierarchical path (e.g. `suite = "math/trig"`).
+
 ### Pragma block
 
 Wrap a run of test functions in a pragma block to assign them all to the same suite:
@@ -204,7 +206,52 @@ void test_empty(void) {
 #pragma cccc suite end
 ```
 
-Suite blocks cannot be nested. Tests outside any block or attribute have no suite.
+### Nested suite blocks
+
+Pragma blocks can be nested to form a hierarchical suite path. The separator is `/`.
+
+```c
+#pragma cccc suite begin "math"
+
+[[cccc::test]]
+void test_basic_add(void) { $assert_eq(1 + 1, 2); }  // suite: "math"
+
+#pragma cccc suite begin "trig"
+
+[[cccc::test]]
+void test_sin(void) { ... }  // suite: "math/trig"
+
+[[cccc::test]]
+void test_cos(void) { ... }  // suite: "math/trig"
+
+#pragma cccc suite end  // end "trig"
+
+[[cccc::test]]
+void test_basic_mul(void) { $assert_eq(3 * 3, 9); }  // suite: "math"
+
+#pragma cccc suite end  // end "math"
+```
+
+Every `#pragma cccc suite begin` must have a matching `#pragma cccc suite end`. An unclosed block at end-of-file is a compile error.
+
+Tests outside any block or attribute have no suite.
+
+### Filtering by suite
+
+Use `--test-suite=NAME` to run only tests whose suite matches `NAME`:
+
+- **Exact match:** `--test-suite=math` runs tests with suite exactly `math`.
+- **Prefix/sub-suite match:** `--test-suite=math` also runs `math/trig`, `math/algebra`, and any deeper nesting — anything whose suite path starts with `math/`.
+- **Glob:** If `NAME` contains glob metacharacters (`*`, `?`, `[`), it is matched with `fnmatch` against the full suite path. For example, `--test-suite='math/*'` selects all direct children of `math`.
+
+```bash
+./cccc --testing --test-suite=math       myfile.c  # math + all sub-suites
+./cccc --testing --test-suite=math/trig  myfile.c  # only math/trig (and deeper)
+./cccc --testing --test-suite='math/*'   myfile.c  # glob: direct children only
+```
+
+> **Note:** Setup/teardown hooks are matched against suites by exact name. A hook
+> scoped to `math` does **not** automatically run for `math/trig` tests.
 
 ## Negative Tests
 
@@ -890,7 +937,7 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 - Setup and teardown hook functions must also have signature `void name(void)`.
 - Teardown hooks are skipped on test timeout (VM state is unknown after `SIGALRM`). They run in all other cases, including after test or setup failure.
 - Calling `exit()` directly in a normal test terminates the entire process rather than failing just that test. Use `$assert*` macros instead, or use `exit_code =` if testing that the function exits with a specific code.
-- Suite blocks (`#pragma cccc suite begin/end`) cannot be nested.
+- Setup/teardown hooks match suites by exact name. A hook scoped to `parent` does **not** automatically run for `parent/sub` tests.
 - **Negative test bodies are matched against error substrings.** Use a substring that is specific enough to avoid false matches but not so specific that it breaks with minor message wording changes.
 - **`exit_code =` tests are skipped on non-POSIX platforms** where `fork(2)` is not available.
 - `--test-timeout` uses `SIGALRM`; test code that also uses `alarm()` or installs a `SIGALRM` handler will interfere with the timeout mechanism.

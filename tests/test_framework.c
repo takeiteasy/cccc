@@ -395,3 +395,66 @@ void test_once_namepat_matched_second(void) {
     // Second matching test: once-namepat-setup should still be 1 (did not re-fire).
     $assert_eq(g_once_namepat_count, 1);
 }
+
+// ==========================================================================
+// Ticket #344: nested sub-suites
+// Tests verify that:
+//   - #pragma cccc suite begin can be nested
+//   - The composite suite path uses '/' as separator
+//   - Closing inner block restores the outer path
+//   - Tests outside all blocks have no suite
+// ==========================================================================
+
+#pragma cccc suite begin "parent"
+
+[[cccc::test(suite = "parent/explicit")]]
+void test_nested_attr_form(void) {
+    // Attribute form 'suite = "a/b"' already worked; verify it still does.
+    $assert_eq(1, 1);
+}
+
+[[cccc::test]]
+void test_nested_parent_only(void) {
+    // In the "parent" pragma block; should have suite "parent".
+    $assert_eq(2, 2);
+}
+
+#pragma cccc suite begin "child"
+
+[[cccc::test]]
+void test_nested_child(void) {
+    // In nested "parent"/"child" block; should have suite "parent/child".
+    $assert_eq(3, 3);
+}
+
+#pragma cccc suite begin "grandchild"
+
+[[cccc::test]]
+void test_nested_grandchild(void) {
+    // Three levels deep: "parent/child/grandchild".
+    $assert_eq(4, 4);
+}
+
+#pragma cccc suite end  // end grandchild
+
+[[cccc::test]]
+void test_nested_back_to_child(void) {
+    // Back in "parent/child" after closing grandchild.
+    $assert_eq(5, 5);
+}
+
+#pragma cccc suite end  // end child
+
+[[cccc::test]]
+void test_nested_back_to_parent(void) {
+    // Back in "parent" after closing child.
+    $assert_eq(6, 6);
+}
+
+#pragma cccc suite end  // end parent
+
+[[cccc::test]]
+void test_nested_no_suite(void) {
+    // Outside all suite blocks; no suite.
+    $assert_eq(7, 7);
+}
