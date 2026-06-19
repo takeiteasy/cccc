@@ -250,7 +250,8 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-d/--disassemble         Disassemble bytecode to stdout\n");
     printf("\t-t/--testing             Discover and run [[cccc::test]] functions\n");
     printf("\t   --test=GLOB           Run only tests whose name matches GLOB (implies --testing)\n");
-    printf("\t   --test-suite=NAME     Run only tests in the named suite (implies --testing)\n");
+    printf("\t   --test-suite=NAME     Run tests in NAME and its sub-suites (prefix match);\n");
+    printf("\t                         glob metacharacters (*?[) switch to fnmatch (implies --testing)\n");
     printf("\t   --list-tests          List test names without running (implies --testing)\n");
     printf("\t   --fail-fast           Stop after the first failing test\n");
     printf("\t   --test-timeout=N      Per-test timeout in seconds (0 = no timeout;\n");

@@ -1837,7 +1837,13 @@ typedef struct Compiler {
     TestFnRecord *test_fns;          // Linked list of [[cccc::test]] function names
     TestSetupRecord *test_setups;    // Linked list of [[cccc::test_setup/teardown]] records
     bool testing_mode;               // True when running under --testing (no main required)
-    char *current_suite;             // Active suite name set by #pragma cccc suite begin
+    char *current_suite;             // Active suite path ("a/b/c") set by nested #pragma cccc suite begin
+    struct SuiteLenEntry {
+        size_t prev_len;   // strlen(current_suite) before this begin was pushed
+        Token *open_tok;   // token of the #pragma cccc suite begin (for error messages)
+    } *suite_len_stack;              // Stack entry per open suite begin block
+    int     suite_stack_len;         // Number of currently open suite begin blocks
+    int     suite_stack_cap;         // Allocated capacity of suite_len_stack
     bool in_macro_mode;              // True when compiling/executing a macro function
     bool in_macro_expansion;         // True during macro AST expansion pass
     ComptimeCtxEntry *ctx_stack;     // Stack of active comptime/emit contexts
