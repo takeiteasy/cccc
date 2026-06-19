@@ -30,8 +30,10 @@ not yet implemented.
 | `__builtin_huge_vall()` | `long double` | Positive infinity (long double) |
 | `__builtin_inf()` | `double` | Positive infinity |
 | `__builtin_inff()` | `float` | Positive infinity (float) |
+| `__builtin_infl()` | `long double` | Positive infinity (long double) |
 | `__builtin_nan(tag)` | `double` | NaN; `tag` is a string literal (ignored) |
 | `__builtin_nanf(tag)` | `float` | NaN (float) |
+| `__builtin_nanl(tag)` | `long double` | NaN (long double) |
 
 ### Math Predicates
 
@@ -59,8 +61,31 @@ These are lowered to equivalent arithmetic comparisons at parse time.
 | Builtin | Description |
 |---------|-------------|
 | `__builtin_alloca(size)` | Dynamically allocate `size` bytes on the stack |
+| `__builtin_alloca_with_align(size, align)` | Like `__builtin_alloca`; `align` is in bits and must be a constant. Only 16-byte alignment is guaranteed; finer alignment is accepted but not enforced. |
 | `__builtin_frame_address(0)` | Returns the current frame's base pointer (level 0 only) |
 | `__builtin_unreachable()` | Marks an unreachable code path; halts the VM if executed |
+
+### String Builtins
+
+These are forwarded to libc via the FFI and require the matching libc function to be available. They do not require `#include <string.h>` but are compatible with it (the `extern` declaration in `<string.h>` merges cleanly with the builtin registration).
+
+| Builtin | Return type | Description |
+|---------|-------------|-------------|
+| `__builtin_strlen(s)` | `long` | Equivalent to `strlen(s)` |
+| `__builtin_strcmp(a, b)` | `int` | Equivalent to `strcmp(a, b)` |
+
+### Variadic Argument Macros (`__builtin_va_*`)
+
+When `<stdarg.h>` is included, the following macros are available as aliases for the standard `va_*` macros:
+
+| Macro | Equivalent |
+|-------|------------|
+| `__builtin_va_start(ap, last)` | `va_start(ap, last)` |
+| `__builtin_va_end(ap)` | `va_end(ap)` |
+| `__builtin_va_copy(d, s)` | `va_copy(d, s)` |
+| `__builtin_va_arg(ap, type)` | `va_arg(ap, type)` |
+
+These require `ap` to be of type `va_list` (the struct defined in `<stdarg.h>`). `__builtin_va_list` is defined as `char*` for macOS system-header compatibility and is a separate type.
 
 ### Atomic Operations
 

@@ -7208,20 +7208,34 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
-    // __builtin_inf() / __builtin_inff() -> infinity
-    if (equal(tok, "__builtin_inf") || equal(tok, "__builtin_inff")) {
-        bool is_f = equal(tok, "__builtin_inff");
+    // __builtin_huge_vall() -> long double infinity
+    if (equal(tok, "__builtin_huge_vall")) {
+        tok = skip(vm, tok->next, "(");
+        *rest = skip(vm, tok, ")");
+        Node *node = new_node(vm, ND_NUM, start);
+        node->fval = HUGE_VAL;
+        node->ty = ty_ldouble;
+        return node;
+    }
+
+    // __builtin_inf() / __builtin_inff() / __builtin_infl() -> infinity
+    if (equal(tok, "__builtin_inf") || equal(tok, "__builtin_inff") ||
+        equal(tok, "__builtin_infl")) {
+        Type *ty = equal(tok, "__builtin_inff") ? ty_float :
+                   equal(tok, "__builtin_infl") ? ty_ldouble : ty_double;
         tok = skip(vm, tok->next, "(");
         *rest = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_NUM, start);
         node->fval = INFINITY;
-        node->ty = is_f ? ty_float : ty_double;
+        node->ty = ty;
         return node;
     }
 
-    // __builtin_nan("tag") / __builtin_nanf("tag") -> NaN
-    if (equal(tok, "__builtin_nan") || equal(tok, "__builtin_nanf")) {
-        bool is_f = equal(tok, "__builtin_nanf");
+    // __builtin_nan("tag") / __builtin_nanf("tag") / __builtin_nanl("tag") -> NaN
+    if (equal(tok, "__builtin_nan") || equal(tok, "__builtin_nanf") ||
+        equal(tok, "__builtin_nanl")) {
+        Type *ty = equal(tok, "__builtin_nanf") ? ty_float :
+                   equal(tok, "__builtin_nanl") ? ty_ldouble : ty_double;
         tok = skip(vm, tok->next, "(");
         // Parse and discard the string tag argument
         Node *tag = assign(vm, &tok, tok);
@@ -7229,7 +7243,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         *rest = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_NUM, start);
         node->fval = NAN;
-        node->ty = is_f ? ty_float : ty_double;
+        node->ty = ty;
         return node;
     }
 
@@ -7322,6 +7336,59 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         node->ty = vm->compiler.builtin_alloca->ty->return_ty;
         node->args = sz;
         add_type(vm, sz);
+        return node;
+    }
+
+    // __builtin_alloca_with_align(size, align) -> dynamic stack allocation
+    // align is in bits and must be a constant; only 16-byte (128-bit) alignment is
+    // guaranteed by the VM arena. Finer alignment is silently ignored.
+    // PLACEHOLDER: actual alignment enforcement not implemented; see ticket for
+    // follow-up if needed.
+    if (equal(tok, "__builtin_alloca_with_align")) {
+        tok = skip(vm, tok->next, "(");
+        Node *sz = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        // alignment argument must be a compile-time constant (GCC requirement)
+        (void)const_expr(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        Node *node = new_unary(vm, ND_FUNCALL,
+            new_var_node(vm, vm->compiler.builtin_alloca, sz->tok), sz->tok);
+        node->func_ty = vm->compiler.builtin_alloca->ty;
+        node->ty = vm->compiler.builtin_alloca->ty->return_ty;
+        node->args = sz;
+        add_type(vm, sz);
+        return node;
+    }
+
+    // __builtin_strlen(s) -> forward to libc strlen
+    if (equal(tok, "__builtin_strlen")) {
+        tok = skip(vm, tok->next, "(");
+        Node *arg = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        Node *node = new_unary(vm, ND_FUNCALL,
+            new_var_node(vm, vm->compiler.builtin_strlen, arg->tok), arg->tok);
+        node->func_ty = vm->compiler.builtin_strlen->ty;
+        node->ty = vm->compiler.builtin_strlen->ty->return_ty;
+        node->args = arg;
+        add_type(vm, arg);
+        return node;
+    }
+
+    // __builtin_strcmp(a, b) -> forward to libc strcmp
+    if (equal(tok, "__builtin_strcmp")) {
+        tok = skip(vm, tok->next, "(");
+        Node *a = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *b = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        Node *node = new_unary(vm, ND_FUNCALL,
+            new_var_node(vm, vm->compiler.builtin_strcmp, a->tok), a->tok);
+        node->func_ty = vm->compiler.builtin_strcmp->ty;
+        node->ty = vm->compiler.builtin_strcmp->ty->return_ty;
+        node->args = a;
+        a->next = b;
+        add_type(vm, a);
+        add_type(vm, b);
         return node;
     }
 
@@ -8556,6 +8623,21 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     ty->params = copy_type(vm, ty_int);
     vm->compiler.builtin_alloca = new_gvar(vm, "alloca", 6, ty);
     vm->compiler.builtin_alloca->is_definition = false;
+
+    // strlen(s) -> long  (matches include/string.h: extern long strlen(const char *s))
+    Type *strlen_ty = func_type(vm, ty_long);
+    strlen_ty->params = pointer_to(vm, ty_char);
+    vm->compiler.builtin_strlen = new_gvar(vm, "strlen", 6, strlen_ty);
+    vm->compiler.builtin_strlen->is_definition = false;
+    vm->compiler.builtin_strlen->is_function = true;
+
+    // strcmp(a, b) -> int  (matches include/string.h: extern int strcmp(const char *, const char *))
+    Type *strcmp_ty = func_type(vm, ty_int);
+    strcmp_ty->params = pointer_to(vm, ty_char);
+    strcmp_ty->params->next = pointer_to(vm, ty_char);
+    vm->compiler.builtin_strcmp = new_gvar(vm, "strcmp", 6, strcmp_ty);
+    vm->compiler.builtin_strcmp->is_definition = false;
+    vm->compiler.builtin_strcmp->is_function = true;
 
     // setjmp(jmp_buf) -> int
     // jmp_buf is an array type, but we'll treat it as a pointer for now

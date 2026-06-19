@@ -1,8 +1,9 @@
-// Test GNU-style builtins implemented in the parser (ticket #220, #212, #213)
+// Test GNU-style builtins implemented in the parser (ticket #220, #212, #213, #513)
 
 #include <math.h>
 #include <limits.h>
 #include <stdint.h>
+#include <string.h>
 
 int main() {
     // Math constants
@@ -119,6 +120,39 @@ int main() {
     long long r_addl;
     if (__builtin_add_overflow(1ll, 2ll, &r_addl)) return 72;
     if (r_addl != 3ll) return 73;
+
+    // ==== Ticket #513: long-double constant builtins ====
+
+    // __builtin_huge_vall() -> long double positive infinity
+    long double hvl = __builtin_huge_vall();
+    if (!(hvl > 0)) return 80;
+    if (sizeof(hvl) != sizeof(long double)) return 81;
+
+    // __builtin_infl() -> long double infinity
+    long double il = __builtin_infl();
+    if (!(il > 0)) return 82;
+
+    // __builtin_nanl("") -> long double NaN
+    long double nl = __builtin_nanl("");
+    if (nl == nl) return 83;  // NaN != NaN
+
+    // ==== __builtin_alloca_with_align ====
+    // align arg is in bits; 128 = 16 bytes (VM minimum)
+    char *awa = (char *)__builtin_alloca_with_align(16, 128);
+    if (!awa) return 84;
+    awa[0] = 'X';
+    if (awa[0] != 'X') return 85;
+
+    // ==== __builtin_strlen / __builtin_strcmp (forwarded to libc) ====
+    const char *s = "hello";
+    if (__builtin_strlen(s) != strlen(s)) return 86;
+    if (__builtin_strlen("") != 0) return 87;
+    if (__builtin_strcmp("abc", "abc") != 0) return 88;
+    if (__builtin_strcmp("abc", "abd") >= 0) return 89;
+    if (__builtin_strcmp("abd", "abc") <= 0) return 90;
+
+    // Verify __builtin_strlen agrees with <string.h> strlen on same symbol
+    if (__builtin_strlen("world") != 5) return 91;
 
     return 42;
 }

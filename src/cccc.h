@@ -1915,6 +1915,8 @@ typedef struct Compiler {
     int cont_cleanup_depth;    // cleanup_scope_depth when current cont_label was established
     Node *current_switch;  // Switch statement being parsed (NULL if none)
     Obj *builtin_alloca;   // Builtin alloca function
+    Obj *builtin_strlen;   // Builtin strlen (forwarded to libc)
+    Obj *builtin_strcmp;   // Builtin strcmp (forwarded to libc)
     Obj *builtin_setjmp;   // Builtin setjmp function
     Obj *builtin_longjmp;  // Builtin longjmp function
     Obj *builtin_signal;   // VM-managed signal() registration

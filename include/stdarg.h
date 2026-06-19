@@ -124,9 +124,27 @@ typedef struct {
  * va_copy(dest, src) - Copy va_list (C99)
  * @dest: destination va_list
  * @src:  source va_list
- * 
+ *
  * Struct assignment copies all fields.
  */
 #define va_copy(dest, src) ((dest) = (src))
+
+/*
+ * __builtin_va_* aliases
+ *
+ * GCC exposes these alternative names for the va_arg family.  They are aliased
+ * to the corresponding va_* macros here so that code using either form works
+ * identically when <stdarg.h> is included.
+ *
+ * Note: __builtin_va_list is defined as 'char*' by the preprocessor
+ * (preprocess.c) for macOS system-header compatibility and is intentionally
+ * NOT the struct va_list used by this header.  These macros therefore require
+ * that the ap argument has type 'va_list' (the struct) rather than
+ * '__builtin_va_list'.
+ */
+#define __builtin_va_start(ap, last) va_start(ap, last)
+#define __builtin_va_end(ap)         va_end(ap)
+#define __builtin_va_copy(d, s)      va_copy(d, s)
+#define __builtin_va_arg(ap, type)   va_arg(ap, type)
 
 #endif /* _STDARG_H */
