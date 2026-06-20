@@ -341,6 +341,7 @@ void define_std_macros(VirtualMachine *vm);
 void define_macro(VirtualMachine *vm, char *name, char *buf);
 void undef_macro(VirtualMachine *vm, char *name);
 Token *preprocess(VirtualMachine *vm, Token *tok);
+void gate_runtime_only_macros(VirtualMachine *vm, const char *main_filename);
 
 //
 // parse.c

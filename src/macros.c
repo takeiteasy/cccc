@@ -1512,6 +1512,15 @@ static bool compile_macro_program(VirtualMachine *vm) {
     vm->compiler.has_macro_snapshot = true;
     HashMap saved_macros = vm->compiler.macro_snapshot_backup;
 
+    // Gate #define macros from runtime-only (plain) included headers so they
+    // are not visible during the comptime preprocessing pass. Must run before
+    // implicit_reflection_tokens() so that reflection.h macros (added
+    // afterward) are not incorrectly deleted. @shared/@comptime macros removed
+    // here are re-added when their queued re-includes are re-processed below.
+    // --comptime-include-all disables the filter (legacy behavior). (#552)
+    if (!vm->compiler.comptime_include_all && vm->compiler.primary_file)
+        gate_runtime_only_macros(vm, vm->compiler.primary_file->display_name);
+
     vm->compiler.in_macro_mode = true;
     vm->compiler.locals = NULL;
     vm->compiler.globals = NULL;

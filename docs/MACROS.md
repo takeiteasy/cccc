@@ -84,10 +84,11 @@ forwarded to the comptime pass by default. Declarations from regular `#include`d
 headers are not visible to comptime functions unless the include is annotated
 `@shared` (see [Include scoping](#include-scoping)).
 
-> **Note (v1 scope):** The scoping mechanism gates header *declarations and
-> types*. `#define` macros from plain-included headers may still reach comptime
-> via the shared preprocessor macro table. Per-header macro isolation is not yet
-> supported; annotate with `@shared` or `@comptime` for reliable control.
+The scoping applies to both **declarations and types** and **preprocessor
+`#define` macros**. A `#define` from a plain-included header is not visible
+inside comptime function bodies, just as its declarations are not.
+Use `@shared` or `@comptime` routing for reliable control over what each context
+sees.
 
 This makes included types and prototypes visible to `[[cccc::comptime]]` helpers
 used by global-generation macros, but it does not compile arbitrary non-macro
@@ -95,9 +96,9 @@ program definitions into the macro VM. Function bodies, file-scope macro calls,
 and initialized global definitions are skipped.
 
 Pass `--comptime-include-all` to restore the legacy behavior and forward all
-`#include`d header declarations to the comptime pass. `#include
-[[cccc::comptime]]` and `#pragma cccc comptime begin...end` blocks are always
-available regardless of this flag.
+`#include`d header declarations **and `#define` macros** to the comptime pass.
+`#include [[cccc::comptime]]` and `#pragma cccc comptime begin...end` blocks
+are always available regardless of this flag.
 
 ### Macro isolation between comptime functions
 
@@ -610,8 +611,9 @@ never triggers this warning.
 ### Include scoping
 
 By default, headers included with a plain `#include` are **runtime-only**: their
-declarations are visible to runtime code but are not forwarded to comptime
-functions. Three annotation forms control which context a header reaches:
+declarations and `#define` macros are visible to runtime code but are not
+forwarded to comptime functions. Three annotation forms control which context a
+header reaches:
 
 | Form | Runtime TU | Comptime pass |
 |------|-----------|---------------|
@@ -646,8 +648,8 @@ int main(void) {
 ```
 
 **`@shared`** — includes the header in both the runtime translation unit and the
-comptime pass. Use this when comptime functions need types or prototypes from a
-header that runtime code also uses.
+comptime pass. Use this when comptime functions need types, prototypes, or
+`#define` macros from a header that runtime code also uses.
 
 ```c
 #include @shared <glob.h>
@@ -668,9 +670,9 @@ int main(void) {
 `#define @shared`) is a compile error.
 
 **`--comptime-include-all`** — global flag that restores the legacy behavior:
-forward all `#include`d header declarations to comptime without needing per-include
-`@shared` annotations. Use this as a migration escape hatch when porting code that
-relied on the old all-headers forwarding.
+forward all `#include`d header declarations **and `#define` macros** to comptime
+without needing per-include `@shared` annotations. Use this as a migration
+escape hatch when porting code that relied on the old all-headers forwarding.
 
 **Emit includes** — `#include [[cccc::emit]]` routes an include to serialized
 generated output only (see
