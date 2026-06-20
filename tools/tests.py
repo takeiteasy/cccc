@@ -747,7 +747,7 @@ def main():
     parser.add_argument(
         "--process-timeout", type=int, default=None, metavar="SECONDS",
         help="Wall-clock timeout in seconds for each test subprocess. Timed-out tests are "
-             "reported as TIMEOUT failures. Useful for slow environments such as binfmt/QEMU "
+             "reported as TIMEOUT failures. Useful for slow environments "
              "where processes may stall indefinitely. Default: no timeout."
     )
     args, cccc_args = parser.parse_known_args()

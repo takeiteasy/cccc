@@ -1,0 +1,629 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN" "http://www.w3.org/TR/1998/REC-html40-19980424/loose.dtd">
+<html>
+<head>
+    <title>building.h</title>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf8">
+ <meta name="generator" content="HeaderDoc">
+<meta name="xcode-display" content="render">
+<style type="text/css"><!--.char {background: #ffffff; color:#0000ff;}.comment {background:#ffffff; color:#236e25}.function {background:#ffffff; color:#000000;}.keyword {background:#ffffff; color:#761550;}.number {background: #ffffff; color:#0000ff;}.param {background:#ffffff; color:#000000;}.preprocessor {background:#ffffff; color:#236e25}.string {background: #ffffff; color:#891315;}.template {background:#ffffff; color:#761550;}.type {background:#ffffff; color:#761550;}.var {background:#ffffff; color:#000000;}body {border: 0px; margin: 0px;}div {font-size: 10pt; text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #000000;}td {font-size: 10pt; text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #000000;}span.hd_tocAccessSpace { display: block; font-size: 1px; height: 3px; min-height: 3px; }span.hd_tocGroupSpace { display: block; font-size: 1px; height: 3px; min-height: 3px; }span.hd_tocGroup { display: block; font-weight: bold; font-size: 10pt; text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #000000; margin-left: 0px; padding-left: 40px; }span.hd_tocGroup + span.hd_tocAccess { padding-top: 5px; }td.toc_contents_text {font-size: 11pt; text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #000000; }li.tocSubEntry {font-size: 11pt; text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #000000;}p {font-size: 10pt; text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #000000;}a:link {text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #36c;}a:visited {text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #36c;}a:visited:hover {text-decoration: underline; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #36c;}a:active {text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #36c;}a:hover {text-decoration: underline; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #36c;}h2.h2tight { margin-top: 0px; padding-top: 0px; }h1 { margin-top: 13px; padding-top: 0px; }h4 {text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; font-size: tiny; font-weight: bold;}h5 {text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; font-size: 10.1pt; font-weight: bold;}pre {text-decoration: none; font-family: Courier, Consolas, monospace; color: #666; font-size: 10pt;}pre a { font-family: Courier, Consolas, monospace; color: #666;font-size: 10pt;}pre a:link { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}pre a:visited { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}pre a:visited:hover { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}pre a:active { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}pre a:hover { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}code {text-decoration: none; font-family: Courier, Consolas, monospace; color: #666;font-size: 10pt;}code a { font-family: Courier, Consolas, monospace; color: #666;font-size: 10pt;}code a:link { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}code a:visited { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}code a:visited:hover { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}code a:active { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}code a:hover { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}tt {text-decoration: none; font-family: Courier, Consolas, monospace; color: #666;font-size: 10pt;}tt a { font-family: Courier, Consolas, monospace; color: #666;font-size: 10pt;}tt a:link { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}tt a:visited { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}tt a:visited:hover { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}tt a:active { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}tt a:hover { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}body  {text-decoration: none; font-family: Courier, Consolas, monospace; color: #666;font-size: 10pt; padding-left: 0px; padding-top: 0px; margin-left: 0px; margin-top: 0px; border: none; }#hd_outermost_table { margin-left: 0px; border-spacing: 0px; margin-top: 0px; padding-left: 0px; padding-top: 0px; border: none; }#hd_outermost_table > tr { border-spacing: 0px; margin-left: 0px; margin-top: 0px; padding-left: 0px; padding-top: 0px; border: none; }#hd_outermost_table > tr > td { border-spacing: 0px; margin-left: 0px; margin-top: 0px; }#hd_outermost_table > tbody > tr { border-spacing: 0px; margin-left: 0px; margin-top: 0px; padding-left: 0px; padding-top: 0px; border: none; }#hd_outermost_table > tbody > tr > td { border-spacing: 0px; margin-left: 0px; margin-top: 0px; padding-top: 3px; }.afterName { display: none; }.list_indent { margin-left: 40px; }.declaration_indent { margin-left: 40px; margin-top: 0px; margin-bottom: 0px; padding-top: 0px; padding-bottom: 0px; min-height: 12px; vertical-align: middle; }.declaration_indent pre { margin-top: 20px; padding-top: 0px; margin-bottom: 20px; padding-bottom: 0px; }.gapBeforeFooter { display: none; }hr { height: 0px; min-height: 0px; border-top: none; border-left: none; border-right: none; border-bottom: 1px solid #909090;}hr.afterHeader { display: none }.param_group_indent { margin-left: 25px; }.param_indent { margin-left: 40px; margin-top: 0px; padding-top: 0px; }.param_indent dl { margin-top: 4px; padding-top: 0px; }dl dd > p:first-child { margin-top: 2px; padding-top: 0px; }.param_indent dl dd > p:first-child { margin-top: 2px; padding-top: 0px; }.group_indent { margin-left: 40px; }.group_desc_indent { margin-left: 20px; }.warning_indent { margin-left: 40px; }.important_indent { margin-left: 40px; }.note_indent { margin-left: 40px; }h3 {       color: #3C4C6C;}.tight {       margin-top: 2px; margin-bottom: 0px;       padding-top: 0px; padding-bottom: 0px;}h3 a {       color: #3C4C6C;	font-size: 16px;	font-style: normal;	font-variant: normal;	font-weight: bold;	height: 0px;	line-height: normal;}.hd_tocAccess { display: block; margin-left: 40px; font-style: italic; font-size: 10px; font-weight: normal; color: #303030; }.tocSubheading { margin-bottom: 4px; }--></style>
+<style><!--
+body {
+    padding: 0px;
+    margin: 0px;
+    border: 0px;
+}
+.toc_contents_text {
+    padding-left: 1em;
+    text-indent: -1em;
+}
+
+ul.tocSubEntryList li.tocSubEntry {
+    list-style: none;
+}
+
+#colorbox {
+		display: none;
+}
+.spec_sheet_line {
+		margin-bottom: 1px;
+}
+.collapsible {
+		display: none;
+}
+.toc_leadspace {
+		width: 10; min-width: 10;
+}
+.disclosure_triangle_td {
+		width: 14; min-width: 14;
+		font-size: 10px;
+		vertical-align: middle;
+}
+.specbox td {
+		font-size: 13px;
+}
+.specbox td a {
+		font-size: 13px;
+}
+.specbox td code {
+		font-size: 13px;
+}
+.specbox td tt {
+		font-size: 13px;
+}
+.specbox td pre {
+		font-size: 13px;
+}
+.specbox a {
+		font-size: 12px;
+}
+.disclosure_triangle_td a {
+		text-decoration: none;
+}
+.disclosure_triangle_td a:link {
+		text-decoration: none;
+}
+.disclosure_triangle_td a:active {
+		text-decoration: none;
+}
+.disclosure_triangle_td a:visited:hover {
+		text-decoration: none;
+}
+.disclosure_triangle_td a:hover {
+		text-decoration: none;
+}
+.hd_toc_box {
+		padding-top: 10px;
+		padding-right: 15px;
+}.tocSeparator {
+		margin-top: 15px;
+		padding-bottom: 0px;
+		margin-bottom: 0px;
+}
+.tocSubEntryList {
+		margin-left: 0px;
+		padding-left: 40px;
+		padding-top: 0px;
+		margin-top: 2px;
+		padding-bottom: 0px;
+		margin-bottom: 8px;
+}
+.hd_toc_heading_table {
+		margin-top: 2px;
+		margin-bottom: 2px;
+}
+.hd_toc_entry_table {
+		margin-top: 2px;
+		margin-bottom: 2px;
+}
+.tocSubEntry {
+		margin-left: 0px;
+		padding-left: 0px;
+		margin-top: 0px;
+		margin-bottom: 1px;
+}
+.tocSubEntry a {
+		font-size: 10pt;
+}
+.tocSubheading {
+		padding-left: 14px;
+		margin-left: 0px;
+		margin-top: 5px;
+		padding-top: 0px;
+		font-size: 16px;
+		color: #808080;
+}
+
+#hd_outermost_table { margin-left: 0px; border-spacing: 0px; margin-top: 0px; padding-left: 0px; padding-top: 0px; border: none; }
+#hd_outermost_table > tr { border-spacing: 0px; margin-left: 0px; margin-top: 0px; padding-left: 0px; padding-top: 0px; border: none; }
+#hd_outermost_table > tr > td { border-spacing: 0px; margin-left: 0px; margin-top: 0px; }
+#hd_outermost_table > tbody > tr { border-spacing: 0px; margin-left: 0px; margin-top: 0px; padding-left: 0px; padding-top: 0px; border: none; }
+#hd_outermost_table > tbody > tr > td { border-spacing: 0px; margin-left: 0px; margin-top: 0px; padding-top: 3px; }
+
+#tocMenu {
+		border-right: 1px solid #c0c0c0;
+		background-color: #f4f4ff;
+		top:0px;
+		left:0px;
+		width:230px;
+		height:100%;
+}
+#bodyContents {
+		width: auto;
+		padding-left: 15px;
+}
+--></style>
+<style id="disable_before_iOS_5"><!--
+#tocMenu {
+		position: fixed;
+		height: 100%;
+		overflow: auto;
+}
+#bodyContents {
+		width: auto;
+		left: 235px;
+		right: 0;
+		padding-left: 15px;
+		position: fixed;
+		height: 100%;
+		overflow-y: scroll;
+}
+--></style>
+<script language="JavaScript" type="text/javascript"><!--
+    if (navigator.platform && (navigator.platform.match(/iPad/) || navigator.platform.match(/iPhone/) || navigator.platform.match(/iPod/))) {
+        if (navigator.userAgent.match(/OS 1(_\d)+/) ||
+            navigator.userAgent.match(/OS 2(_\d)+/) ||
+            navigator.userAgent.match(/OS 3(_\d)+/) ||
+            navigator.userAgent.match(/OS 4(_\d)+/)) {
+                /* Earlier iOS versions require different scrolling gestures with position: fixed. */
+                var del_style_elt = document.getElementById("disable_before_iOS_5");
+                if (del_style_elt) del_style_elt.parentNode.removeChild(del_style_elt);
+        }
+    }
+// --></script>
+<script language="JavaScript" type="text/javascript"><!--
+function getNewHTTPObject()
+{
+        var xmlhttp;
+
+        /** Special IE only code ... */
+        /*@cc_on
+          @if (@_jscript_version >= 5)
+              try
+              {
+                  xmlhttp = new ActiveXObject('Msxml2.XMLHTTP');
+              }
+              catch (e)
+              {
+                  try
+                  {
+                      xmlhttp = new ActiveXObject('Microsoft.XMLHTTP');
+                  }
+                  catch (E)
+                  {
+                      xmlhttp = false;
+                  }
+             }
+          @else
+             xmlhttp = false;
+        @end @*/
+
+        /** Every other browser on the planet */
+        if (!xmlhttp && typeof XMLHttpRequest != 'undefined')
+        {
+            try
+            {
+                xmlhttp = new XMLHttpRequest();
+            }
+            catch (e)
+            {
+                xmlhttp = false;
+            }
+        }
+
+        return xmlhttp;
+}
+
+function hidetoc() {
+	var toc = document.getElementById('tocMenu');
+	var src = toc.getAttribute('src');
+	var xhr = getNewHTTPObject();
+	xhr.open('GET', src, true);
+	xhr.onreadystatechange = function() {
+		if(xhr.readyState == 4) {
+			var toc = document.getElementById('tocMenu');
+			toc.innerHTML = xhr.responseText;
+		}
+	}
+	xhr.send(null);
+	var origURL = parent.document.URL;
+	var contentURL = origURL.substring(origURL.indexOf('?')+1, origURL.length);
+	if (contentURL.length == origURL.length) {
+		jumpPos = origURL.substring(origURL.indexOf('#')+1, origURL.length);
+	}
+	if (contentURL == "hidetoc") {
+		var body = document.getElementById('bodyContents');
+		if (toc && body) {
+			toc.style.display = 'none';
+			body.style.marginLeft = '0px';
+		}
+	}
+}
+
+function disclosure_triangle(elt) {
+   var linkelt = elt;
+   while (elt && elt.tagName != 'TABLE') { elt = elt.parentNode;}
+   if (!elt) { return; }
+   while (elt && elt.tagName != 'DIV') { elt = elt.nextSibling;}
+   if (!elt) { return; }
+   if (parseInt(linkelt.getAttribute('state'))) {
+      // It's open.  Close it
+      linkelt.innerHTML = '&#x25B7;';
+      linkelt.setAttribute('state', 0);
+      linkelt.setAttribute('class', 'closed_disclosure_triangle');
+      elt.style.display = 'none';
+   } else {
+      // It's closed.  Open it
+      linkelt.innerHTML = '&#x25BC;';
+      linkelt.setAttribute('state', 1);
+      linkelt.setAttribute('class', 'open_disclosure_triangle');
+      elt.style.display = 'block';
+   }
+}
+--></script>
+<style type="text/css"><!--.char {background: #ffffff; color:#0000ff;}.comment {background:#ffffff; color:#236e25}.function {background:#ffffff; color:#000000;}.keyword {background:#ffffff; color:#761550;}.number {background: #ffffff; color:#0000ff;}.param {background:#ffffff; color:#000000;}.preprocessor {background:#ffffff; color:#236e25}.string {background: #ffffff; color:#891315;}.template {background:#ffffff; color:#761550;}.type {background:#ffffff; color:#761550;}.var {background:#ffffff; color:#000000;}body {border: 0px; margin: 0px;}div {font-size: 10pt; text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #000000;}td {font-size: 10pt; text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #000000;}span.hd_tocAccessSpace { display: block; font-size: 1px; height: 3px; min-height: 3px; }span.hd_tocGroupSpace { display: block; font-size: 1px; height: 3px; min-height: 3px; }span.hd_tocGroup { display: block; font-weight: bold; font-size: 10pt; text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #000000; margin-left: 0px; padding-left: 40px; }span.hd_tocGroup + span.hd_tocAccess { padding-top: 5px; }td.toc_contents_text {font-size: 11pt; text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #000000; }li.tocSubEntry {font-size: 11pt; text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #000000;}p {font-size: 10pt; text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #000000;}a:link {text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #36c;}a:visited {text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #36c;}a:visited:hover {text-decoration: underline; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #36c;}a:active {text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #36c;}a:hover {text-decoration: underline; font-family: lucida grande, geneva, helvetica, arial, sans-serif; color: #36c;}h2.h2tight { margin-top: 0px; padding-top: 0px; }h1 { margin-top: 13px; padding-top: 0px; }h4 {text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; font-size: tiny; font-weight: bold;}h5 {text-decoration: none; font-family: lucida grande, geneva, helvetica, arial, sans-serif; font-size: 10.1pt; font-weight: bold;}pre {text-decoration: none; font-family: Courier, Consolas, monospace; color: #666; font-size: 10pt;}pre a { font-family: Courier, Consolas, monospace; color: #666;font-size: 10pt;}pre a:link { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}pre a:visited { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}pre a:visited:hover { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}pre a:active { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}pre a:hover { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}code {text-decoration: none; font-family: Courier, Consolas, monospace; color: #666;font-size: 10pt;}code a { font-family: Courier, Consolas, monospace; color: #666;font-size: 10pt;}code a:link { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}code a:visited { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}code a:visited:hover { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}code a:active { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}code a:hover { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}tt {text-decoration: none; font-family: Courier, Consolas, monospace; color: #666;font-size: 10pt;}tt a { font-family: Courier, Consolas, monospace; color: #666;font-size: 10pt;}tt a:link { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}tt a:visited { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}tt a:visited:hover { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}tt a:active { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}tt a:hover { font-family: Courier, Consolas, monospace; color: #36c;font-size: 10pt;}body  {text-decoration: none; font-family: Courier, Consolas, monospace; color: #666;font-size: 10pt; padding-left: 0px; padding-top: 0px; margin-left: 0px; margin-top: 0px; border: none; }#hd_outermost_table { margin-left: 0px; border-spacing: 0px; margin-top: 0px; padding-left: 0px; padding-top: 0px; border: none; }#hd_outermost_table > tr { border-spacing: 0px; margin-left: 0px; margin-top: 0px; padding-left: 0px; padding-top: 0px; border: none; }#hd_outermost_table > tr > td { border-spacing: 0px; margin-left: 0px; margin-top: 0px; }#hd_outermost_table > tbody > tr { border-spacing: 0px; margin-left: 0px; margin-top: 0px; padding-left: 0px; padding-top: 0px; border: none; }#hd_outermost_table > tbody > tr > td { border-spacing: 0px; margin-left: 0px; margin-top: 0px; padding-top: 3px; }.afterName { display: none; }.list_indent { margin-left: 40px; }.declaration_indent { margin-left: 40px; margin-top: 0px; margin-bottom: 0px; padding-top: 0px; padding-bottom: 0px; min-height: 12px; vertical-align: middle; }.declaration_indent pre { margin-top: 20px; padding-top: 0px; margin-bottom: 20px; padding-bottom: 0px; }.gapBeforeFooter { display: none; }hr { height: 0px; min-height: 0px; border-top: none; border-left: none; border-right: none; border-bottom: 1px solid #909090;}hr.afterHeader { display: none }.param_group_indent { margin-left: 25px; }.param_indent { margin-left: 40px; margin-top: 0px; padding-top: 0px; }.param_indent dl { margin-top: 4px; padding-top: 0px; }dl dd > p:first-child { margin-top: 2px; padding-top: 0px; }.param_indent dl dd > p:first-child { margin-top: 2px; padding-top: 0px; }.group_indent { margin-left: 40px; }.group_desc_indent { margin-left: 20px; }.warning_indent { margin-left: 40px; }.important_indent { margin-left: 40px; }.note_indent { margin-left: 40px; }h3 {       color: #3C4C6C;}.tight {       margin-top: 2px; margin-bottom: 0px;       padding-top: 0px; padding-bottom: 0px;}h3 a {       color: #3C4C6C;	font-size: 16px;	font-style: normal;	font-variant: normal;	font-weight: bold;	height: 0px;	line-height: normal;}.hd_tocAccess { display: block; margin-left: 40px; font-style: italic; font-size: 10px; font-weight: normal; color: #303030; }.tocSubheading { margin-bottom: 4px; }--></style>
+</head>
+<body bgcolor="#ffffff" onload="hidetoc();">
+<!-- headerDoc=Header;  uid=//apple_ref/doc/header/building.h;   name=building.h -->
+<a name="//apple_ref/doc/header/building.h"></a>
+<table id="hd_outermost_table" height="100%" width="100%"><tr>
+<td valign="top" id="tocMenu" src="toc.html"></td>
+<td id="bodyContents" valign="top">
+<a name="top"></a>
+<h1><a name="building.h">building.h</a></h1>
+<h2>Introduction</h2>
+<p><!-- headerDoc=abstract;uid=//apple_ref/doc/header/building.h;name=start --><!-- begin abstract --></p>
+<p>CCCC Build System — builder API injected in --build mode.<!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/doc/header/building.h;name=end --></p>
+<h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
+<!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/doc/header/building.h;name=start --><p>This header is automatically injected when CCCC is invoked with the @c --build
+flag and should not be included directly.  It declares the opaque build types,
+the underlying @c __builtin_build_* FFI-callable functions, and PascalCase macro
+wrappers that auto-inject the build context singleton.
+</p>
+<p>A build script is an ordinary @c .c file containing a build entry — a function
+tagged @c [[cccc::build]] (or named @c build_main).  The entry runs inside the
+CCCC VM, imperatively creates targets, wires their dependencies, and calls one
+of the @c Build* functions.  The host-side runner then compiles and links the
+declared targets with the system toolchain (@c cc / @c ar / @c ld).
+</p>
+<p>## Usage
+</p>
+<p>@code
+[[cccc::build]]
+int build_main(void) {
+cccc_target_t *core = StaticLib("core");
+AddSource(core, "src/lib/sum.c");
+AddInclude(core, "include");
+</p>
+<p>cccc_target_t *app = Executable("app");
+AddSource(app, "src/main.c");
+LinkWith(app, core);
+</p>
+<p>return BuildDefault();
+}
+@endcode
+</p>
+<p>A non-zero return from the entry signals build failure.
+<!-- headerDoc=discussion;uid=//apple_ref/doc/header/building.h;name=end --><!-- end discussion -->
+</p>
+<hr class="afterClassOrHeaderInfo">
+<br><a name="HeaderDoc_functions"></a>
+<h2 class="h2tight">Functions</h2>
+<dl>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_add_cflag" target="_top">__builtin_build_add_cflag</a></tt></dt>
+<dd><p>Add a raw compiler flag (e.g. "-O2"). </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_add_define" target="_top">__builtin_build_add_define</a></tt></dt>
+<dd><p>Add a preprocessor define (-D). Pass NULL value for a bare define. </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_add_include" target="_top">__builtin_build_add_include</a></tt></dt>
+<dd><p>Add an include search path (-I) to the target's compiles. </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_add_ldflag" target="_top">__builtin_build_add_ldflag</a></tt></dt>
+<dd><p>Add a raw linker flag. </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_add_lib" target="_top">__builtin_build_add_lib</a></tt></dt>
+<dd><p>Add a system library to link against (-l&lt;name&gt;). </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_add_libpath" target="_top">__builtin_build_add_libpath</a></tt></dt>
+<dd><p>Add a library search path (-L&lt;path&gt;). </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_add_source" target="_top">__builtin_build_add_source</a></tt></dt>
+<dd><p>Add a C source file to the target. </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_add_undef" target="_top">__builtin_build_add_undef</a></tt></dt>
+<dd><p>Add a preprocessor undefine (-U). </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_ctx" target="_top">__builtin_build_ctx</a></tt></dt>
+<dd><p>Return the active build context singleton. </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_dynamic_lib" target="_top">__builtin_build_dynamic_lib</a></tt></dt>
+<dd><p>Create a dynamic-library target (output @c lib/lib&lt;name&gt;.{so,dylib}). </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_executable" target="_top">__builtin_build_executable</a></tt></dt>
+<dd><p>Create an executable target named @c name (output @c bin/&lt;name&gt;). </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_host" target="_top">__builtin_build_host</a></tt></dt>
+<dd><p>Host platform name (@c "darwin", @c "linux", ...). </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_link_with" target="_top">__builtin_build_link_with</a></tt></dt>
+<dd><p>Declare that @c t links against (and is built after) @c dep. </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_out_dir" target="_top">__builtin_build_out_dir</a></tt></dt>
+<dd><p>Output directory for build artifacts (default @c build/). </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_root" target="_top">__builtin_build_root</a></tt></dt>
+<dd><p>Absolute path of the directory the build was launched from. </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_run" target="_top">__builtin_build_run</a></tt></dt>
+<dd><p>Build @c t and its transitive dependencies. Returns 0 on success. </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_run_all" target="_top">__builtin_build_run_all</a></tt></dt>
+<dd><p>Build every declared target in topological order. </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_run_default" target="_top">__builtin_build_run_default</a></tt></dt>
+<dd><p>Build every declared target and print a summary. </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_set_output" target="_top">__builtin_build_set_output</a></tt></dt>
+<dd><p>Override the target's output path (relative to the out dir). </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_static_lib" target="_top">__builtin_build_static_lib</a></tt></dt>
+<dd><p>Create a static-library target (output @c lib/lib&lt;name&gt;.a). </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_verbose" target="_top">__builtin_build_verbose</a></tt></dt>
+<dd><p>Non-zero when verbose output was requested. </p></dd>
+</dl>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_add_cflag;   name=__builtin_build_add_cflag -->
+<a name="//apple_ref/c/func/__builtin_build_add_cflag"></a>
+<h3><a name="__builtin_build_add_cflag">__builtin_build_add_cflag</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_cflag;name=start --><!-- begin abstract --></p>
+<p>Add a raw compiler flag (e.g. "-O2"). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_cflag;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_cflag;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_add_cflag" logicalPath="//apple_ref/c/instm/__builtin_build_add_cflag //apple_ref/c/clm/__builtin_build_add_cflag //apple_ref/c/intfcm/__builtin_build_add_cflag //apple_ref/c/intfm/__builtin_build_add_cflag //apple_ref/c/func/__builtin_build_add_cflag" target="_top"><span class="function">__builtin_build_add_cflag</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">flag</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_cflag;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_add_define;   name=__builtin_build_add_define -->
+<a name="//apple_ref/c/func/__builtin_build_add_define"></a>
+<h3><a name="__builtin_build_add_define">__builtin_build_add_define</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_define;name=start --><!-- begin abstract --></p>
+<p>Add a preprocessor define (-D). Pass NULL value for a bare define. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_define;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_define;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_add_define" logicalPath="//apple_ref/c/instm/__builtin_build_add_define //apple_ref/c/clm/__builtin_build_add_define //apple_ref/c/intfcm/__builtin_build_add_define //apple_ref/c/intfm/__builtin_build_add_define //apple_ref/c/func/__builtin_build_add_define" target="_top"><span class="function">__builtin_build_add_define</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">name</span>,
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">value</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_define;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_add_include;   name=__builtin_build_add_include -->
+<a name="//apple_ref/c/func/__builtin_build_add_include"></a>
+<h3><a name="__builtin_build_add_include">__builtin_build_add_include</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_include;name=start --><!-- begin abstract --></p>
+<p>Add an include search path (-I) to the target's compiles. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_include;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_include;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_add_include" logicalPath="//apple_ref/c/instm/__builtin_build_add_include //apple_ref/c/clm/__builtin_build_add_include //apple_ref/c/intfcm/__builtin_build_add_include //apple_ref/c/intfm/__builtin_build_add_include //apple_ref/c/func/__builtin_build_add_include" target="_top"><span class="function">__builtin_build_add_include</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">path</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_include;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_add_ldflag;   name=__builtin_build_add_ldflag -->
+<a name="//apple_ref/c/func/__builtin_build_add_ldflag"></a>
+<h3><a name="__builtin_build_add_ldflag">__builtin_build_add_ldflag</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_ldflag;name=start --><!-- begin abstract --></p>
+<p>Add a raw linker flag. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_ldflag;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_ldflag;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_add_ldflag" logicalPath="//apple_ref/c/instm/__builtin_build_add_ldflag //apple_ref/c/clm/__builtin_build_add_ldflag //apple_ref/c/intfcm/__builtin_build_add_ldflag //apple_ref/c/intfm/__builtin_build_add_ldflag //apple_ref/c/func/__builtin_build_add_ldflag" target="_top"><span class="function">__builtin_build_add_ldflag</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">flag</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_ldflag;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_add_lib;   name=__builtin_build_add_lib -->
+<a name="//apple_ref/c/func/__builtin_build_add_lib"></a>
+<h3><a name="__builtin_build_add_lib">__builtin_build_add_lib</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_lib;name=start --><!-- begin abstract --></p>
+<p>Add a system library to link against (-l&lt;name&gt;). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_lib;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_lib;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_add_lib" logicalPath="//apple_ref/c/instm/__builtin_build_add_lib //apple_ref/c/clm/__builtin_build_add_lib //apple_ref/c/intfcm/__builtin_build_add_lib //apple_ref/c/intfm/__builtin_build_add_lib //apple_ref/c/func/__builtin_build_add_lib" target="_top"><span class="function">__builtin_build_add_lib</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">name</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_lib;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_add_libpath;   name=__builtin_build_add_libpath -->
+<a name="//apple_ref/c/func/__builtin_build_add_libpath"></a>
+<h3><a name="__builtin_build_add_libpath">__builtin_build_add_libpath</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_libpath;name=start --><!-- begin abstract --></p>
+<p>Add a library search path (-L&lt;path&gt;). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_libpath;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_libpath;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_add_libpath" logicalPath="//apple_ref/c/instm/__builtin_build_add_libpath //apple_ref/c/clm/__builtin_build_add_libpath //apple_ref/c/intfcm/__builtin_build_add_libpath //apple_ref/c/intfm/__builtin_build_add_libpath //apple_ref/c/func/__builtin_build_add_libpath" target="_top"><span class="function">__builtin_build_add_libpath</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">path</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_libpath;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_add_source;   name=__builtin_build_add_source -->
+<a name="//apple_ref/c/func/__builtin_build_add_source"></a>
+<h3><a name="__builtin_build_add_source">__builtin_build_add_source</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_source;name=start --><!-- begin abstract --></p>
+<p>Add a C source file to the target. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_source;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_source;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_add_source" logicalPath="//apple_ref/c/instm/__builtin_build_add_source //apple_ref/c/clm/__builtin_build_add_source //apple_ref/c/intfcm/__builtin_build_add_source //apple_ref/c/intfm/__builtin_build_add_source //apple_ref/c/func/__builtin_build_add_source" target="_top"><span class="function">__builtin_build_add_source</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">path</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_source;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_add_undef;   name=__builtin_build_add_undef -->
+<a name="//apple_ref/c/func/__builtin_build_add_undef"></a>
+<h3><a name="__builtin_build_add_undef">__builtin_build_add_undef</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_undef;name=start --><!-- begin abstract --></p>
+<p>Add a preprocessor undefine (-U). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_undef;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_undef;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_add_undef" logicalPath="//apple_ref/c/instm/__builtin_build_add_undef //apple_ref/c/clm/__builtin_build_add_undef //apple_ref/c/intfcm/__builtin_build_add_undef //apple_ref/c/intfm/__builtin_build_add_undef //apple_ref/c/func/__builtin_build_add_undef" target="_top"><span class="function">__builtin_build_add_undef</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">name</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_undef;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_ctx;   name=__builtin_build_ctx -->
+<a name="//apple_ref/c/func/__builtin_build_ctx"></a>
+<h3><a name="__builtin_build_ctx">__builtin_build_ctx</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_ctx;name=start --><!-- begin abstract --></p>
+<p>Return the active build context singleton. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_ctx;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_ctx;name=start --><a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_ctx" logicalPath="//apple_ref/c/instm/__builtin_build_ctx //apple_ref/c/clm/__builtin_build_ctx //apple_ref/c/intfcm/__builtin_build_ctx //apple_ref/c/intfm/__builtin_build_ctx //apple_ref/c/func/__builtin_build_ctx" target="_top"><span class="function">__builtin_build_ctx</span></a>(
+    <span class="param">void</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_ctx;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_dynamic_lib;   name=__builtin_build_dynamic_lib -->
+<a name="//apple_ref/c/func/__builtin_build_dynamic_lib"></a>
+<h3><a name="__builtin_build_dynamic_lib">__builtin_build_dynamic_lib</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_dynamic_lib;name=start --><!-- begin abstract --></p>
+<p>Create a dynamic-library target (output @c lib/lib&lt;name&gt;.{so,dylib}). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_dynamic_lib;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_dynamic_lib;name=start --><a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_dynamic_lib" logicalPath="//apple_ref/c/instm/__builtin_build_dynamic_lib //apple_ref/c/clm/__builtin_build_dynamic_lib //apple_ref/c/intfcm/__builtin_build_dynamic_lib //apple_ref/c/intfm/__builtin_build_dynamic_lib //apple_ref/c/func/__builtin_build_dynamic_lib" target="_top"><span class="function">__builtin_build_dynamic_lib</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>,
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">name</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_dynamic_lib;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_executable;   name=__builtin_build_executable -->
+<a name="//apple_ref/c/func/__builtin_build_executable"></a>
+<h3><a name="__builtin_build_executable">__builtin_build_executable</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_executable;name=start --><!-- begin abstract --></p>
+<p>Create an executable target named @c name (output @c bin/&lt;name&gt;). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_executable;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_executable;name=start --><a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_executable" logicalPath="//apple_ref/c/instm/__builtin_build_executable //apple_ref/c/clm/__builtin_build_executable //apple_ref/c/intfcm/__builtin_build_executable //apple_ref/c/intfm/__builtin_build_executable //apple_ref/c/func/__builtin_build_executable" target="_top"><span class="function">__builtin_build_executable</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>,
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">name</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_executable;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_host;   name=__builtin_build_host -->
+<a name="//apple_ref/c/func/__builtin_build_host"></a>
+<h3><a name="__builtin_build_host">__builtin_build_host</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_host;name=start --><!-- begin abstract --></p>
+<p>Host platform name (@c "darwin", @c "linux", ...). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_host;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_host;name=start --><span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_host" logicalPath="//apple_ref/c/instm/__builtin_build_host //apple_ref/c/clm/__builtin_build_host //apple_ref/c/intfcm/__builtin_build_host //apple_ref/c/intfm/__builtin_build_host //apple_ref/c/func/__builtin_build_host" target="_top"><span class="function">__builtin_build_host</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_host;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_link_with;   name=__builtin_build_link_with -->
+<a name="//apple_ref/c/func/__builtin_build_link_with"></a>
+<h3><a name="__builtin_build_link_with">__builtin_build_link_with</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_link_with;name=start --><!-- begin abstract --></p>
+<p>Declare that @c t links against (and is built after) @c dep. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_link_with;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_link_with;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_link_with" logicalPath="//apple_ref/c/instm/__builtin_build_link_with //apple_ref/c/clm/__builtin_build_link_with //apple_ref/c/intfcm/__builtin_build_link_with //apple_ref/c/intfm/__builtin_build_link_with //apple_ref/c/func/__builtin_build_link_with" target="_top"><span class="function">__builtin_build_link_with</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">dep</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_link_with;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_out_dir;   name=__builtin_build_out_dir -->
+<a name="//apple_ref/c/func/__builtin_build_out_dir"></a>
+<h3><a name="__builtin_build_out_dir">__builtin_build_out_dir</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_out_dir;name=start --><!-- begin abstract --></p>
+<p>Output directory for build artifacts (default @c build/). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_out_dir;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_out_dir;name=start --><span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_out_dir" logicalPath="//apple_ref/c/instm/__builtin_build_out_dir //apple_ref/c/clm/__builtin_build_out_dir //apple_ref/c/intfcm/__builtin_build_out_dir //apple_ref/c/intfm/__builtin_build_out_dir //apple_ref/c/func/__builtin_build_out_dir" target="_top"><span class="function">__builtin_build_out_dir</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_out_dir;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_root;   name=__builtin_build_root -->
+<a name="//apple_ref/c/func/__builtin_build_root"></a>
+<h3><a name="__builtin_build_root">__builtin_build_root</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_root;name=start --><!-- begin abstract --></p>
+<p>Absolute path of the directory the build was launched from. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_root;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_root;name=start --><span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_root" logicalPath="//apple_ref/c/instm/__builtin_build_root //apple_ref/c/clm/__builtin_build_root //apple_ref/c/intfcm/__builtin_build_root //apple_ref/c/intfm/__builtin_build_root //apple_ref/c/func/__builtin_build_root" target="_top"><span class="function">__builtin_build_root</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_root;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_run;   name=__builtin_build_run -->
+<a name="//apple_ref/c/func/__builtin_build_run"></a>
+<h3><a name="__builtin_build_run">__builtin_build_run</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_run;name=start --><!-- begin abstract --></p>
+<p>Build @c t and its transitive dependencies. Returns 0 on success. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_run;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_run;name=start --><!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_run" logicalPath="//apple_ref/c/instm/__builtin_build_run //apple_ref/c/clm/__builtin_build_run //apple_ref/c/intfcm/__builtin_build_run //apple_ref/c/intfm/__builtin_build_run //apple_ref/c/func/__builtin_build_run" target="_top"><span class="function">__builtin_build_run</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>,
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_run;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_run_all;   name=__builtin_build_run_all -->
+<a name="//apple_ref/c/func/__builtin_build_run_all"></a>
+<h3><a name="__builtin_build_run_all">__builtin_build_run_all</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_run_all;name=start --><!-- begin abstract --></p>
+<p>Build every declared target in topological order. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_run_all;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_run_all;name=start --><!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_run_all" logicalPath="//apple_ref/c/instm/__builtin_build_run_all //apple_ref/c/clm/__builtin_build_run_all //apple_ref/c/intfcm/__builtin_build_run_all //apple_ref/c/intfm/__builtin_build_run_all //apple_ref/c/func/__builtin_build_run_all" target="_top"><span class="function">__builtin_build_run_all</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_run_all;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_run_default;   name=__builtin_build_run_default -->
+<a name="//apple_ref/c/func/__builtin_build_run_default"></a>
+<h3><a name="__builtin_build_run_default">__builtin_build_run_default</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_run_default;name=start --><!-- begin abstract --></p>
+<p>Build every declared target and print a summary. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_run_default;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_run_default;name=start --><!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_run_default" logicalPath="//apple_ref/c/instm/__builtin_build_run_default //apple_ref/c/clm/__builtin_build_run_default //apple_ref/c/intfcm/__builtin_build_run_default //apple_ref/c/intfm/__builtin_build_run_default //apple_ref/c/func/__builtin_build_run_default" target="_top"><span class="function">__builtin_build_run_default</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_run_default;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_set_output;   name=__builtin_build_set_output -->
+<a name="//apple_ref/c/func/__builtin_build_set_output"></a>
+<h3><a name="__builtin_build_set_output">__builtin_build_set_output</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_set_output;name=start --><!-- begin abstract --></p>
+<p>Override the target's output path (relative to the out dir). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_set_output;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_set_output;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_set_output" logicalPath="//apple_ref/c/instm/__builtin_build_set_output //apple_ref/c/clm/__builtin_build_set_output //apple_ref/c/intfcm/__builtin_build_set_output //apple_ref/c/intfm/__builtin_build_set_output //apple_ref/c/func/__builtin_build_set_output" target="_top"><span class="function">__builtin_build_set_output</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">path</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_set_output;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_static_lib;   name=__builtin_build_static_lib -->
+<a name="//apple_ref/c/func/__builtin_build_static_lib"></a>
+<h3><a name="__builtin_build_static_lib">__builtin_build_static_lib</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_static_lib;name=start --><!-- begin abstract --></p>
+<p>Create a static-library target (output @c lib/lib&lt;name&gt;.a). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_static_lib;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_static_lib;name=start --><a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_static_lib" logicalPath="//apple_ref/c/instm/__builtin_build_static_lib //apple_ref/c/clm/__builtin_build_static_lib //apple_ref/c/intfcm/__builtin_build_static_lib //apple_ref/c/intfm/__builtin_build_static_lib //apple_ref/c/func/__builtin_build_static_lib" target="_top"><span class="function">__builtin_build_static_lib</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>,
+    <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">name</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_static_lib;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_verbose;   name=__builtin_build_verbose -->
+<a name="//apple_ref/c/func/__builtin_build_verbose"></a>
+<h3><a name="__builtin_build_verbose">__builtin_build_verbose</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_verbose;name=start --><!-- begin abstract --></p>
+<p>Non-zero when verbose output was requested. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_verbose;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_verbose;name=start --><!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_verbose" logicalPath="//apple_ref/c/instm/__builtin_build_verbose //apple_ref/c/clm/__builtin_build_verbose //apple_ref/c/intfcm/__builtin_build_verbose //apple_ref/c/intfm/__builtin_build_verbose //apple_ref/c/func/__builtin_build_verbose" target="_top"><span class="function">__builtin_build_verbose</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_verbose;name=end --></pre>
+</div>
+<hr class="betweenSections">
+<a name="HeaderDoc_datatypes"></a>
+<h2 class="h2tight">Typedefs</h2>
+<dl>
+<dt><tt><a href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" target="_top">cccc_build_ctx_t</a></tt></dt>
+<dd><p>Opaque build context; accessed via BuildCtx() in build scripts. </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/tdef/cccc_target_t" target="_top">cccc_target_t</a></tt></dt>
+<dd><p>Opaque handle to a declared build target. </p></dd>
+</dl>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=tdef;  uid=//apple_ref/c/tdef/cccc_build_ctx_t;   name=cccc_build_ctx_t -->
+<a name="//apple_ref/c/tdef/cccc_build_ctx_t"></a>
+<h3><a name="cccc_build_ctx_t">cccc_build_ctx_t</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/tdef/cccc_build_ctx_t;name=start --><!-- begin abstract --></p>
+<p>Opaque build context; accessed via BuildCtx() in build scripts. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/tdef/cccc_build_ctx_t;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/tdef/cccc_build_ctx_t;name=start --><span class="keyword">typedef</span> <span class="keyword">struct</span> <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <!-- a logicalPath="//apple_ref/c/econst/cccc_build_ctx_t //apple_ref/c/data/cccc_build_ctx_t //apple_ref/c/clconst/cccc_build_ctx_t " machineGenerated="true" --><span class="var">cccc_build_ctx_t</span><!-- /a -->;  <!-- headerDoc=declaration;uid=//apple_ref/c/tdef/cccc_build_ctx_t;name=end --></pre>
+</div>
+<hr class="betweenAPIEntries">
+<!-- headerDoc=tdef;  uid=//apple_ref/c/tdef/cccc_target_t;   name=cccc_target_t -->
+<a name="//apple_ref/c/tdef/cccc_target_t"></a>
+<h3><a name="cccc_target_t">cccc_target_t</a></h3>
+<hr class="afterName">
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/tdef/cccc_target_t;name=start --><!-- begin abstract --></p>
+<p>Opaque handle to a declared build target. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/tdef/cccc_target_t;name=end --></p>
+<div class="declaration_indent">
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/tdef/cccc_target_t;name=start --><span class="keyword">typedef</span> <span class="keyword">struct</span> <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <!-- a logicalPath="//apple_ref/c/econst/cccc_target_t //apple_ref/c/data/cccc_target_t //apple_ref/c/clconst/cccc_target_t " machineGenerated="true" --><span class="var">cccc_target_t</span><!-- /a -->;  <!-- headerDoc=declaration;uid=//apple_ref/c/tdef/cccc_target_t;name=end --></pre>
+</div>
+<p class="gapBeforeFooter"> </p>
+<hr class="afterFooter">
+<div class="hd_copyright_and_timestamp">
+<p class="hd_timestamp">Last Updated: Saturday, June 20, 2026
+</p>
+</div>
+</td>
+</tr></table>
+</body>
+</html>

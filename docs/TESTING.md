@@ -60,26 +60,6 @@ The image is built and run with `--platform linux/amd64` and tagged
 `x86_64` and `file ./cccc` to identify an x86-64 ELF executable. Override the
 defaults with `COLIMA_PROFILE=name`, `LINUX_AMD64_IMAGE=tag`, or `TEST_JOBS=N`.
 
-### binfmt/QEMU comparison path
-
-For hosts where VZ/Rosetta is unavailable, a separate aarch64 profile with
-binfmt enabled can be used for smoke checks:
-
-```bash
-colima start cccc-linux-amd64-qemu --runtime containerd --arch aarch64 \
-  --vm-type vz --binfmt --cpu 4 --memory 4
-make COLIMA_PROFILE=cccc-linux-amd64-qemu linux-x86_64-smoke
-```
-
-**Warning:** running the full test suite under binfmt/QEMU is not practical.
-The QEMU user-mode translation layer adds substantial overhead to every
-subprocess the test runner spawns, causing batch runs to stall or exceed the
-300 s per-batch timeout. Smoke runs (single binary invocations) complete
-correctly, but `linux-x86_64-test` should not be used with this profile.
-The root cause is tracked in
-[#501](https://todo.sr.ht/~takeiteasy/cccc/501). VZ/Rosetta hardware
-translation is the only supported path for the full Linux/amd64 suite.
-
 ### Current results
 
 **arm64 baseline (macOS and Linux):** all source-mode tests pass. `test_nexttoward.c`

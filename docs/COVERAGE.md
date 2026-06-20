@@ -29,8 +29,9 @@ a recursive global interpreter lock, while blocking pthread calls such as
 This provides pthread correctness and blocking/wakeup semantics, not parallel
 bytecode execution.
 
-C11 `<threads.h>`, language thread-local storage, and real atomic operations
-are tracked separately from the POSIX pthread layer.
+C11 `<threads.h>` and language thread-local storage are fully implemented.
+Real atomic operations via `<stdatomic.h>` macros use atomic-tagged opcodes and
+runtime mixed-access detection, tracked separately from the POSIX pthread layer.
 
 ---
 
@@ -132,8 +133,8 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `_Alignas` | ✓ | |
 | `_Static_assert` (and `static_assert` via `<assert.h>`) | ✓ | |
 | `_Noreturn` | ✓ | Accepted via keyword, `__attribute__((noreturn))`, and `[[noreturn]]`; emits BTRAP after calls; warns on returns |
-| `_Thread_local` | ~ | Emits `-Wignored-features`; no thread-local storage |
-| `_Atomic` types | ~ | Emits `-Wignored-features`; non-atomic load/store emitted |
+| `_Thread_local` | ✓ | TLS segment; each thread receives a private copy from the template |
+| `_Atomic` types | ~ | Parser emits `-Wignored-features`; direct access to `_Atomic`-qualified variables uses plain load/store. `<stdatomic.h>` macros (`atomic_load/store/exchange/compare_exchange`, `atomic_fetch_*`) emit ALDR/ASTR/AXCHG/ACAS opcodes with runtime shadow-tracking and mixed-access detection. Cross-thread correctness requires the GIL |
 | Anonymous structs and unions | ✓ | |
 | `char16_t` / `char32_t` types | ✓ | Provided by `<uchar.h>` |
 | `u8`, `u`, `U` string and character literal prefixes | ✓ | See C99 row; support predates formal C11 adoption |
@@ -153,7 +154,7 @@ language coverage figures apply.
 |---|---|---|
 | `typeof` / `typeof_unqual` | ✓ | |
 | `constexpr` for objects | ✓ | Object definitions require constant initializers and may be used in constant-expression contexts; constexpr functions are not supported |
-| `thread_local` storage-class spelling | ~ | C23 spelling is accepted as a keyword; emits `-Wignored-features`; no thread-local storage |
+| `thread_local` storage-class spelling | ✓ | C23 keyword; allocates in the TLS segment |
 | Compound literal storage classes | ✓ | C23 `(static T){...}`, `(constexpr T){...}`, `(register T){...}`, and TLS spellings are parsed; static/constexpr/TLS literals use anonymous static storage, while register keeps automatic storage |
 | `auto` type inference | ✓ | Deduces type as `typeof_unqual(initializer)` with array-to-pointer and function-to-pointer decay; pointer declarators (`auto *p = &x`) validated; initializer required |
 | `nullptr` keyword / `nullptr_t` | ✓ | `nullptr_t` is defined in `<stddef.h>` via `typeof(nullptr)` |
@@ -200,7 +201,7 @@ language coverage figures apply.
 | Nested functions | ✓ | Access to parent-scope variables via static link |
 | Blocks `^{ ... }` (Clang/Apple) | ✓ | Capture-by-value plus `__block` by-reference; nest to arbitrary depth (transitive capture through enclosing descriptors); `Block_copy` heap-duplicates the descriptor so a block can escape its frame, `Block_release` frees that copy |
 | `__builtin_*` | ✓ | Lowered by the compiler; see [STDLIB.md](STDLIB.md) for the full list |
-| `__thread` storage class | ~ | Emits `-Wignored-features`; treated as `static` |
+| `__thread` storage class | ✓ | TLS segment; per-thread private storage |
 | `__restrict` / `__restrict__` | ✓ | Spelling aliases for `restrict`; fully optimised (see `restrict` entry above) |
 | `__typeof__` | ✓ | Synonym for `typeof` |
 | `asm(...)` inline assembly | ✓ | `asm(...)` statements are no-ops by default; `--asm-passthru` compiles via native CC and executes via FFI; custom callback via `cc_set_asm_callback`; `__asm__` statement spelling is pending |

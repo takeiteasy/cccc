@@ -173,12 +173,12 @@ Optimization Levels:
 	                             3: All optimizations (including dead code elimination)
 	                             4: Level 3 + automatic fused-op pass
 	   --fuse-ops              Run automatic opcode fusion pass
-       --fma                   Enable single-rounding FMA (implies --fuse-ops; may change FP results)
+	   --fma                   Enable single-rounding FMA (implies --fuse-ops; may change FP results)
 	   --inline-limit=N        Limit inlining to N AST nodes (default: 256)
 
 Static Bytecode Analysis (compile or load input, walk text segment, exit):
 	   --ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, default 2)
-	   --ngrams-top=N          Show top N sequences (default 25)
+	   --ngrams-top=N          Show top N sequences (default)
 	   --ngrams-per-file       Print a per-input section in addition to the aggregate
 	   --fusion-candidates[=N] Use-def fusion candidate analysis (top N, default 50)
 	                          JSON output via -j/--json
@@ -380,11 +380,8 @@ make linux-x86_64-test
 ```
 
 The amd64 image is tagged `cccc-linux-amd64`. Override `COLIMA_PROFILE` or
-`LINUX_AMD64_IMAGE` when using different names. A binfmt/QEMU fallback is
-documented in [TESTING.md](docs/TESTING.md), but the full test suite hangs
-under QEMU user-mode translation ([#501](https://todo.sr.ht/~takeiteasy/cccc/501));
-use VZ/Rosetta for the complete suite. Architecture-specific results and known
-failures are also in [TESTING.md](docs/TESTING.md).
+`LINUX_AMD64_IMAGE` when using different names. Architecture-specific results
+and known failures are in [TESTING.md](docs/TESTING.md).
 
 The arm64 baseline currently has one source-suite failure in
 `test_nexttowardf_matches_nextafterf`, tracked by
