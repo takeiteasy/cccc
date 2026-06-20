@@ -7619,6 +7619,46 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return call;
     }
 
+    // $identifier: compile-time reflect operator.
+    // $TypeName → Type *, $varname/$fnname → Obj *
+    // Resolved at parse time; result is a ND_NUM constant holding the pointer.
+    if (tok->kind == TK_IDENT && tok->len > 1 && tok->loc[0] == '$' &&
+        (isalpha((unsigned char)tok->loc[1]) || tok->loc[1] == '_')) {
+        Token fake = *tok;
+        fake.loc = tok->loc + 1;
+        fake.len = tok->len - 1;
+
+        // Helper to get Type* or Obj* as the node's C type.
+        // Look up the typedef name from reflection.h; fall back to void*.
+        Token type_fake = {.kind = TK_IDENT, .loc = "Type", .len = 4};
+        Token obj_fake  = {.kind = TK_IDENT, .loc = "Obj",  .len = 3};
+
+        // 1. Typedef (e.g. typedef struct Foo Foo)
+        Type *found_ty = find_typedef(vm, &fake);
+        // 2. Struct/union/enum tag (e.g. struct Foo)
+        if (!found_ty)
+            found_ty = find_tag(vm, &fake);
+        if (found_ty) {
+            Node *node = new_ulong(vm, (uint64_t)(uintptr_t)found_ty, tok);
+            Type *meta = find_typedef(vm, &type_fake);
+            node->ty = meta ? pointer_to(vm, meta) : pointer_to(vm, ty_void);
+            *rest = tok->next;
+            return node;
+        }
+
+        // 3. Variable or function (Obj)
+        VarScope *vs = find_var(vm, &fake);
+        if (vs && vs->var) {
+            Node *node = new_ulong(vm, (uint64_t)(uintptr_t)vs->var, tok);
+            Type *meta = find_typedef(vm, &obj_fake);
+            node->ty = meta ? pointer_to(vm, meta) : pointer_to(vm, ty_void);
+            *rest = tok->next;
+            return node;
+        }
+
+        error_tok(vm, tok, "$%.*s: unknown name", tok->len - 1, tok->loc + 1);
+    }
+
     if (tok->kind == TK_IDENT) {
         // Variable or enum constant
         VarScope *sc = find_var(vm, tok);

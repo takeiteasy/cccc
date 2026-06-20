@@ -906,6 +906,53 @@ not matter; it matters when the template produces a `return` statement.
 Macros can inspect types and global symbols that are visible at the macro
 execution point.
 
+### `$identifier` — Compile-Time Reflect Operator
+
+The `$identifier` expression resolves a name to a compile-time pointer at
+parse time:
+
+| Expression | Result type | Resolves to |
+|------------|-------------|-------------|
+| `$TypeName` | `Type *` | The `Type *` for a typedef alias or struct/union/enum tag |
+| `$varname` | `Obj *` | The `Obj *` for a global variable |
+| `$fnname` | `Obj *` | The `Obj *` for a function |
+
+The name must be visible in the current scope; an unknown name is a
+compile-time error.
+
+`$` followed by `{` is the backtick-splice operator (not reflect). Splice
+placeholders inside `Quote` templates (`$1`, `$$`, `$@`) are also distinct.
+
+```c
+typedef struct { int x; int y; } Point;
+int counter = 0;
+
+[[cccc::comptime(inline)]]
+Node *reflect_type_kind(void) {
+    Type *ty = $Point;                       // Type* for Point
+    return MakeIntLiteral(GetTypeKind(ty));  // TK_STRUCT
+}
+
+[[cccc::comptime(inline)]]
+Node *reflect_var(void) {
+    Obj *obj = $counter;                     // Obj* for counter
+    return MakeIntLiteral(obj ? 1 : 0);
+}
+```
+
+`$SomeType` can also be used directly as a call argument to a comptime inline
+macro, avoiding an intermediate variable:
+
+```c
+[[cccc::comptime(inline)]]
+Node *describe(Type *ty) {
+    return MakeIntLiteral(GetTypeKind(ty));
+}
+
+// At the call site:
+int kind = describe($Point);
+```
+
 ```c
 typedef enum { RED, GREEN, BLUE } Color;
 
