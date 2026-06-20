@@ -1,4 +1,4 @@
-#include "macro_context_local.h"
+#include @shared "macro_context_local.h"
 
 [[cccc::comptime]]
 int local_header_type_size(void) {

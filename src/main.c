@@ -346,9 +346,10 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-r/--macro-recursion-limit=N  Limit recursive pragma macro "
             "expansion (default: 256, 0=unlimited)\n");
     printf("\t-n/--max-errors=N             Cap diagnostics at N (default: 20)\n");
-    printf("\t   --strict-comptime-includes Only forward the main source file's own\n");
-    printf("\t                              declarations to the comptime pass (skip\n");
-    printf("\t                              declarations from regular #includes)\n");
+    printf("\t   --comptime-include-all     Forward all #include'd declarations to the\n");
+    printf("\t                              comptime pass (legacy behavior; default is\n");
+    printf("\t                              runtime-only; use #include @shared to opt in\n");
+    printf("\t                              individual headers)\n");
     printf("\t   --allow-comptime-pp-bleed  Allow #define/#undef inside one\n");
     printf("\t                              [[cccc::comptime]] function body to remain\n");
     printf("\t                              visible to other comptime function bodies\n");
@@ -806,7 +807,7 @@ int main(int argc, const char *argv[]) {
     int vm_profile_ran = 0;
     const char *entry_name = NULL; // -e / --entry
     enum { COMPILE_NONE, COMPILE_BYTECODE, COMPILE_NATIVE } compile_format = COMPILE_NONE;
-    int strict_comptime_includes = 0; // --strict-comptime-includes
+    int comptime_include_all = 0; // --comptime-include-all
     int allow_comptime_pp_bleed = 0; // --allow-comptime-pp-bleed
     int run_ngrams = 0;            // 0 = off; 2 or 3 = enabled with n-gram size
     int ngrams_top = 25;
@@ -897,7 +898,7 @@ int main(int argc, const char *argv[]) {
         {"ngrams-top", required_argument, 0, 1030},
         {"ngrams-per-file", no_argument, 0, 1031},
         {"fusion-candidates", optional_argument, 0, 1058},
-        {"strict-comptime-includes", no_argument, 0, 1050},
+        {"comptime-include-all", no_argument, 0, 1050},
         {"allow-comptime-pp-bleed", no_argument, 0, 1068},
         {"inline-limit", required_argument, 0, 1051},
         {"asm-passthru", no_argument, 0, 'A'},
@@ -1280,8 +1281,8 @@ int main(int argc, const char *argv[]) {
         case 1031: // --ngrams-per-file
             ngrams_per_file = 1;
             break;
-        case 1050: // --strict-comptime-includes
-            strict_comptime_includes = 1;
+        case 1050: // --comptime-include-all
+            comptime_include_all = 1;
             break;
         case 1051: { // --inline-limit
             char *end = NULL;
@@ -1562,7 +1563,7 @@ int main(int argc, const char *argv[]) {
     vm.compiler.native_mode = (compile_format == COMPILE_NATIVE);
     vm.compiler.compile_only = compile_only;
     vm.compiler.asm_passthru = asm_passthru;
-    vm.compiler.strict_comptime_includes = strict_comptime_includes;
+    vm.compiler.comptime_include_all = comptime_include_all;
     vm.compiler.allow_comptime_pp_bleed = allow_comptime_pp_bleed;
     vm.compiler.emit_strict = emit_only;
     vm.compiler.attr_target = attr_target;

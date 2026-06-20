@@ -1,5 +1,4 @@
-// CCCC_FLAGS: --strict-comptime-includes
-// With --strict-comptime-includes, #include @comptime still works.
+// #include @comptime still works with the default runtime-only scoping.
 
 #include @comptime <glob.h>
 

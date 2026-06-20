@@ -721,17 +721,15 @@ static Token *build_macro_context_tokens(VirtualMachine *vm, Token **input_token
     Token head = {};
     Token *cur = &head;
 
-    // Derive the main source file name from the first input token stream.
-    // When --strict-comptime-includes is set, only declarations whose tokens
-    // originate from this file are forwarded to the comptime pass.
+    // By default (runtime-only include scoping) only declarations whose tokens
+    // originate from the main source file are forwarded to the comptime pass.
+    // --comptime-include-all restores the old all-headers behavior.
+    // Use primary_file->display_name — the same name stamped onto tok->filename
+    // during preprocessing — so the comparison is reliable regardless of which
+    // token happens to appear first in the stream.
     char *main_filename = NULL;
-    if (vm->compiler.strict_comptime_includes && count > 0 && input_tokens[0]) {
-        Token *t = input_tokens[0];
-        while (t && t->kind == TK_EOF)
-            t = t->next;
-        if (t)
-            main_filename = t->filename;
-    }
+    if (!vm->compiler.comptime_include_all && vm->compiler.primary_file)
+        main_filename = vm->compiler.primary_file->display_name;
 
     for (int fi = 0; fi < count; fi++) {
         Token *tok = input_tokens[fi];
@@ -769,8 +767,7 @@ static Token *build_macro_context_tokens(VirtualMachine *vm, Token **input_token
 
                     if (equal(tok, ";")) {
                         if (!has_top_level_eq) {
-                            bool skip = vm->compiler.strict_comptime_includes &&
-                                         main_filename &&
+                            bool skip = main_filename &&
                                          start->filename &&
                                          strcmp(start->filename, main_filename) != 0;
                             if (!skip) {
@@ -1474,6 +1471,18 @@ static void patch_macro_call_addresses(VirtualMachine *vm, Obj *macro_prog) {
     }
 }
 
+// hashmap_foreach callback: delete the key from the macros table so that
+// include guard macros are not visible during the comptime preprocessing pass.
+// This allows @shared headers (and their transitive includes) to be fully
+// re-included in the comptime context. The macro table is already snapshotted
+// before compile_macro_program runs and is restored afterward.
+static int undefine_guard_macro_iter(char *key, int keylen, void *val,
+                                     void *user_data) {
+    (void)keylen; (void)val;
+    hashmap_delete((HashMap *)user_data, key);
+    return 0; // continue
+}
+
 // Compile all macro functions and comptime helpers as one compile-time program so
 // macro bytecode can make ordinary function calls across the whole set.
 static bool compile_macro_program(VirtualMachine *vm) {
@@ -1522,7 +1531,25 @@ static bool compile_macro_program(VirtualMachine *vm) {
     uint64_t saved_werror = vm->compiler.warning_errors;
     vm->compiler.warnings = 0;
     vm->compiler.warning_errors = 0;
+    // Isolate the comptime preprocessing from the runtime's include guard state
+    // so that @shared headers (and any transitive dependencies) can be fully
+    // re-included in the comptime context. The runtime preprocessing is already
+    // complete at this point, so modifying these maps does not affect runtime code.
+    // The macro table is already snapshotted (line above) and will be restored,
+    // so undeclaring guard macros here is safe.
+    HashMap saved_pragma_once = vm->compiler.pragma_once;
+    HashMap saved_include_guards = vm->compiler.include_guards;
+    vm->compiler.pragma_once = (HashMap){};
+    vm->compiler.include_guards = (HashMap){};
+    hashmap_foreach(&vm->compiler.guard_macros, undefine_guard_macro_iter,
+                    &vm->compiler.macros);
     tokens = preprocess(vm, tokens);
+    // Restore include guard state; the comptime-specific maps were heap-allocated
+    // during the preprocessing pass and are discarded (borrowed-key free only).
+    hashmap_deinit_borrowed(&vm->compiler.pragma_once);
+    hashmap_deinit_borrowed(&vm->compiler.include_guards);
+    vm->compiler.pragma_once = saved_pragma_once;
+    vm->compiler.include_guards = saved_include_guards;
     Obj *macro_prog = parse(vm, tokens);
     vm->compiler.warnings = saved_warnings;
     vm->compiler.warning_errors = saved_werror;

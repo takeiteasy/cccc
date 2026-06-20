@@ -1,8 +1,7 @@
-// CCCC_FLAGS: --strict-comptime-includes
 // EXPECT_COMPILE_ERROR
-// Regular #include declarations must NOT be forwarded to comptime when
-// --strict-comptime-includes is set. glob_t from <glob.h> should be
-// unavailable inside the comptime function.
+// Regular #include declarations are NOT forwarded to comptime by default.
+// glob_t from <glob.h> must be unavailable inside the comptime function
+// unless the include is annotated @shared or @comptime.
 
 #include <glob.h>
 

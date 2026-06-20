@@ -173,6 +173,7 @@ typedef enum {
     INCLUDE_ROUTE_NORMAL,
     INCLUDE_ROUTE_COMPTIME,
     INCLUDE_ROUTE_EMIT,
+    INCLUDE_ROUTE_SHARED,
 } IncludeRoute;
 
 // Some preprocessor directives such as #include allow extraneous
@@ -254,6 +255,8 @@ static bool is_c23_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
         r = INCLUDE_ROUTE_COMPTIME;
     else if (equal(p, "emit"))
         r = INCLUDE_ROUTE_EMIT;
+    else if (equal(p, "shared"))
+        r = INCLUDE_ROUTE_SHARED;
     else
         return false;
     if (!p->next || !equal(p->next, "]") ||
@@ -271,6 +274,8 @@ static bool is_at_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
         *route = INCLUDE_ROUTE_COMPTIME;
     else if (equal(tok->next, "emit"))
         *route = INCLUDE_ROUTE_EMIT;
+    else if (equal(tok->next, "shared"))
+        *route = INCLUDE_ROUTE_SHARED;
     else
         return false;
     *rest = tok->next->next;
@@ -289,6 +294,8 @@ static bool is_gnu_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
         r = INCLUDE_ROUTE_COMPTIME;
     else if (equal(p, "emit"))
         r = INCLUDE_ROUTE_EMIT;
+    else if (equal(p, "shared"))
+        r = INCLUDE_ROUTE_SHARED;
     else
         return false;
     if (!p->next || !equal(p->next, ")") ||
@@ -3736,6 +3743,13 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             tok = skip_line(vm, route_after);
             continue;
         }
+        // @shared / [[cccc::shared]] is only meaningful on #include; reject it
+        // on other directives before falling into the switch.
+        if (directive_route == INCLUDE_ROUTE_SHARED &&
+            pp_directive(tok) != PP_INCLUDE) {
+            error_tok(vm, route_start,
+                      "@shared is only valid on #include");
+        }
 
         // Auto-capture: when not using --emit-only, record directives from the
         // primary source file that are outside comptime blocks verbatim, so
@@ -3743,6 +3757,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
         // Skip during the macro-compilation preprocessing pass (in_macro_mode)
         // since those token streams re-use primary_file pointers but are not
         // part of the user-visible source.
+        // For @shared includes, emit a clean line (route stripped) so generated
+        // output contains a plain #include rather than #include @shared.
         {
             ComptimeCtxEntry *_ac = ctx_top(vm);
             if (!vm->compiler.emit_strict &&
@@ -3751,7 +3767,9 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 start->file == vm->compiler.primary_file &&
                 !(_ac && _ac->type == CTX_COMPTIME) &&
                 !is_pragma_cccc(start)) {
-                char *_ac_line = copy_raw_directive_line(vm, start);
+                char *_ac_line = (directive_route == INCLUDE_ROUTE_SHARED)
+                    ? copy_routed_directive_line(vm, start, route_start, route_after)
+                    : copy_raw_directive_line(vm, start);
                 push_emit_directive(vm, _ac_line, pp_directive(tok) == PP_INCLUDE);
                 cc_record_emit_source(vm, _ac_line);
             }
@@ -3773,6 +3791,32 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 tok = skip_line(vm, tok);
                 queue_comptime_include(vm, filename, is_dquote);
                 break;
+            }
+            // Shared includes go to both contexts: queue for comptime, then fall
+            // through to the normal runtime splice below.
+            // Resolve the absolute path before queueing so that quoted relative
+            // includes like #include @shared "local.h" can be found from the
+            // synthetic comptime preprocessing context.
+            if (include_route == INCLUDE_ROUTE_SHARED) {
+                char *shared_path = NULL;
+                if (!is_url(filename)) {
+                    if (filename[0] != '/' && is_dquote) {
+                        char *rel =
+                            format_relative_path(vm, start->file->name, filename);
+                        if (file_exists(rel))
+                            shared_path = rel;
+                    }
+                    if (!shared_path)
+                        shared_path = search_include_paths(vm, filename,
+                                                           filename_len, !is_dquote);
+                    if (!shared_path && is_dquote)
+                        shared_path = search_include_paths(vm, filename,
+                                                           filename_len, true);
+                }
+                // Queue as an angle-bracket include so the absolute path is
+                // used directly (no relative-path ambiguity in comptime context).
+                queue_comptime_include(vm, shared_path ? shared_path : filename,
+                                       false);
             }
             if (include_route == INCLUDE_ROUTE_EMIT) {
                 char *line = arena_format(vm, is_dquote ? "#include \"%s\""

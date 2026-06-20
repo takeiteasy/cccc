@@ -1868,7 +1868,7 @@ typedef struct Compiler {
     bool has_macro_snapshot;
     HashMap macro_snapshot_backup;
     bool reflection_attrs_registered; // True after ensure_reflection_attrs_registered has run (#235)
-    bool strict_comptime_includes;   // --strict-comptime-includes: don't forward regular #include decls to comptime pass
+    bool comptime_include_all;       // --comptime-include-all: forward all #include decls to comptime pass (legacy behavior)
     HashMap *macro_scope_stack;       // Snapshot stack for per-comptime-fn macro isolation (#283)
     int      macro_scope_stack_len;
     int      macro_scope_stack_cap;

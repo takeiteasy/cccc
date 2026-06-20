@@ -79,15 +79,25 @@ snapshot of safe file-scope declarations from the preprocessed source. That
 snapshot includes typedefs, struct/union/enum tag declarations, function
 prototypes, `extern` declarations, and declarations without function bodies.
 
+Only declarations whose tokens originate from the **main source file** are
+forwarded to the comptime pass by default. Declarations from regular `#include`d
+headers are not visible to comptime functions unless the include is annotated
+`@shared` (see [Include scoping](#include-scoping)).
+
+> **Note (v1 scope):** The scoping mechanism gates header *declarations and
+> types*. `#define` macros from plain-included headers may still reach comptime
+> via the shared preprocessor macro table. Per-header macro isolation is not yet
+> supported; annotate with `@shared` or `@comptime` for reliable control.
+
 This makes included types and prototypes visible to `[[cccc::comptime]]` helpers
 used by global-generation macros, but it does not compile arbitrary non-macro
 program definitions into the macro VM. Function bodies, file-scope macro calls,
 and initialized global definitions are skipped.
 
-To prevent declarations from regular `#include`d headers from leaking into the
-comptime pass, pass `--strict-comptime-includes`. Only the main source file's own
-file-scope declarations are forwarded; `#include [[cccc::comptime]]` and
-`#pragma cccc comptime begin...end` blocks are unaffected.
+Pass `--comptime-include-all` to restore the legacy behavior and forward all
+`#include`d header declarations to the comptime pass. `#include
+[[cccc::comptime]]` and `#pragma cccc comptime begin...end` blocks are always
+available regardless of this flag.
 
 ### Macro isolation between comptime functions
 
@@ -597,17 +607,32 @@ omits `#pragma cccc comptime end`, the block is closed automatically when the
 header ends and a `[-Wcomptime-block-leak]` warning is emitted. The bare form
 never triggers this warning.
 
-### Comptime-only includes
+### Include scoping
 
-Use `#include [[cccc::comptime]]` to include a header only during the comptime
-compilation pass. The `@comptime` and `__attribute__((comptime))` spellings are
-also accepted after `#include`. The header and any macros or types it defines
-are invisible to the runtime translation unit.
+By default, headers included with a plain `#include` are **runtime-only**: their
+declarations are visible to runtime code but are not forwarded to comptime
+functions. Three annotation forms control which context a header reaches:
+
+| Form | Runtime TU | Comptime pass |
+|------|-----------|---------------|
+| `#include <header>` | ✓ | ✗ (default) |
+| `#include @comptime <header>` | ✗ | ✓ |
+| `#include @shared <header>` | ✓ | ✓ |
+
+All three forms accept the three interchangeable spelling styles:
 
 ```c
-#include [[cccc::comptime]] <glob.h>
-// Equivalent: #include @comptime <glob.h>
-// Equivalent: #include __attribute__((comptime)) <glob.h>
+#include @shared <glob.h>
+#include [[cccc::shared]] <glob.h>
+#include __attribute__((shared)) <glob.h>
+```
+
+**`@comptime`** — feeds a header into the comptime unit only. The header and any
+types it defines are invisible to the runtime translation unit.
+
+```c
+#include @comptime <glob.h>
+// Equivalent: #include [[cccc::comptime]] <glob.h>
 
 [[cccc::comptime]]
 int glob_struct_nonempty(void) {
@@ -620,10 +645,41 @@ int main(void) {
 }
 ```
 
-This is the comptime counterpart to `#include [[cccc::emit]]` (see
-[Emit directives and includes in generated output](#emit-directives-and-includes-in-generated-output)):
-`[[cccc::comptime]]` feeds a header into the comptime unit only;
-`[[cccc::emit]]` emits an `#include` into the generated output only.
+**`@shared`** — includes the header in both the runtime translation unit and the
+comptime pass. Use this when comptime functions need types or prototypes from a
+header that runtime code also uses.
+
+```c
+#include @shared <glob.h>
+
+[[cccc::comptime]]
+int glob_struct_nonempty(void) {
+    return (int)sizeof(glob_t) > 0;  // available in comptime
+}
+
+int main(void) {
+    glob_t g;         // also available in runtime
+    (void)g;
+    return glob_struct_nonempty() ? 42 : 1;
+}
+```
+
+`@shared` is only valid on `#include`. Applying it to other directives (e.g.
+`#define @shared`) is a compile error.
+
+**`--comptime-include-all`** — global flag that restores the legacy behavior:
+forward all `#include`d header declarations to comptime without needing per-include
+`@shared` annotations. Use this as a migration escape hatch when porting code that
+relied on the old all-headers forwarding.
+
+**Emit includes** — `#include [[cccc::emit]]` routes an include to serialized
+generated output only (see
+[Emit directives and includes in generated output](#emit-directives-and-includes-in-generated-output)).
+
+> **Note:** `@shared` and `@comptime` on non-include directives (e.g. `#define`,
+> `#ifdef`) continue to work as before — they route the directive to the
+> corresponding preprocessing context. Only `@shared` is new and only for
+> `#include`.
 
 ## Comptime Variables
 

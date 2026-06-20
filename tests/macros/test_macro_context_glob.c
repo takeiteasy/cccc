@@ -1,4 +1,4 @@
-#include <glob.h>
+#include @shared <glob.h>
 
 [[cccc::comptime]]
 int glob_type_size(void) {
