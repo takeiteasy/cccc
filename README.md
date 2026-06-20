@@ -318,6 +318,9 @@ int build_main(cccc_build_ctx_t *ctx) {
 
 # Choose the entry / output directory
 ./cccc --build build.c --build-entry=foo --build-out-dir=out
+
+# Build only the named target and its transitive dependencies
+./cccc --build build.c --build-target=core
 ```
 
 The entry is `build_main`, a `[[cccc::build]]`-tagged function, or `--build-entry=NAME`. The builder API (`cccc_executable`, `cccc_target_*`, `cccc_build_run*`) is injected automatically via a private `cccc_build.h`. Build mode inverts the FFI default — all FFI is allowed so the script can shell out to tools, and `--ffi-allow=list` switches to an allowlist. A runnable example lives in [`examples/build_demo/`](examples/build_demo). See [BUILDING.md](docs/BUILDING.md) for the full builder API, target kinds, and CLI.

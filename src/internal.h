@@ -774,6 +774,7 @@ typedef struct {
 //
 typedef struct {
     const char *entry_name;             // --build-entry override, or NULL
+    const char *target_name;            // --build-target=NAME, or NULL (build all)
     const char *out_dir;                // -O/--build-out-dir, or NULL (default "build")
     int         verbose;                // -v
     int         dry_run;                // --build-dry-run: print commands, run nothing

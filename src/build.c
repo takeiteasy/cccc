@@ -83,6 +83,7 @@ struct cccc_build_ctx_t {
     char *root;
     char *out_dir;
     const char *host;
+    const char *target_filter; // --build-target=NAME, or NULL (build all)
     int verbose;
     int dry_run;
     cccc_target_t **targets;
@@ -556,10 +557,40 @@ static int topo_visit(cccc_target_t *t, cccc_target_t **order, int *n) {
     return 0;
 }
 
+// Look up a registered target by name; returns NULL if not found.
+static cccc_target_t *find_target_by_name(cccc_build_ctx_t *ctx, const char *name) {
+    for (int i = 0; i < ctx->targets_count; i++)
+        if (strcmp(ctx->targets[i]->name, name) == 0)
+            return ctx->targets[i];
+    return NULL;
+}
+
 // Run the build for an explicit target set (NULL = all targets).  Returns the
 // number of failed targets (0 = success).
 static int run_graph(cccc_build_ctx_t *ctx, cccc_target_t *only) {
     ctx->run_invoked = 1;
+
+    // --build-target=NAME: if the CLI filter is set, resolve it now (after the
+    // entry has populated the full target graph) and override `only`.  A CLI
+    // selection beats an explicit cccc_build_run(x) argument (zig build <step>
+    // model).
+    if (ctx->target_filter) {
+        cccc_target_t *sel = find_target_by_name(ctx, ctx->target_filter);
+        if (!sel) {
+            fprintf(stderr, "build: --build-target '%s' does not match any declared target\n",
+                    ctx->target_filter);
+            if (ctx->targets_count > 0) {
+                fprintf(stderr, "  available targets:");
+                for (int i = 0; i < ctx->targets_count; i++)
+                    fprintf(stderr, " %s", ctx->targets[i]->name);
+                fprintf(stderr, "\n");
+            }
+            ctx->failed = 1;
+            return 1;
+        }
+        only = sel;
+    }
+
     if (ctx->targets_count == 0) {
         printf("build: no targets declared\n");
         return 0;
@@ -691,6 +722,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     ctx.root = cwd;
     ctx.out_dir = xstrdup(opts->out_dir ? opts->out_dir : "build");
     ctx.host = CCCC_BUILD_HOST;
+    ctx.target_filter = opts->target_name;
     ctx.verbose = opts->verbose;
     ctx.dry_run = opts->dry_run;
     ctx.defaults = opts->defaults;

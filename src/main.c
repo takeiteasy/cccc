@@ -269,6 +269,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --build-entry=NAME    Build entry function to invoke (default: build_main)\n");
     printf("\t   --build-out-dir=PATH  Output directory for build artifacts (default: build/)\n");
     printf("\t   --build-dry-run       Print the toolchain command lines without executing them\n");
+    printf("\t   --build-target=NAME   Build only the named target and its transitive dependencies\n");
     printf("\nWarning Options:\n");
     printf("\t-Wall               Enable common warning categories\n");
     printf("\t-Wextra             Enable extra warning categories\n");
@@ -822,6 +823,7 @@ int main(int argc, const char *argv[]) {
     CcTestFormat test_format = TEST_FORMAT_TAP; // --test-format=FORMAT
     int build_mode = 0;            // --build
     const char *build_entry = NULL;   // --build-entry=NAME
+    const char *build_target = NULL;  // --build-target=NAME
     const char *build_out_dir = NULL; // --build-out-dir=PATH (default "build")
     int build_dry_run = 0;         // --build-dry-run
 
@@ -913,6 +915,7 @@ int main(int argc, const char *argv[]) {
         {"build-entry", required_argument, 0, 1074},
         {"build-out-dir", required_argument, 0, 1075},
         {"build-dry-run", no_argument, 0, 1076},
+        {"build-target", required_argument, 0, 1077},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1358,6 +1361,10 @@ int main(int argc, const char *argv[]) {
             break;
         case 1076: // --build-dry-run
             build_dry_run = 1;
+            build_mode = 1;
+            break;
+        case 1077: // --build-target=NAME
+            build_target = optarg;
             build_mode = 1;
             break;
         case 1066: // --test-format=FORMAT
@@ -2067,11 +2074,12 @@ int main(int argc, const char *argv[]) {
             .std_arg        = std_arg,
         };
         CcBuildOptions build_opts = {
-            .entry_name = build_entry,
-            .out_dir    = build_out_dir,
-            .verbose    = verbose,
-            .dry_run    = build_dry_run,
-            .defaults   = &build_defaults,
+            .entry_name  = build_entry,
+            .target_name = build_target,
+            .out_dir     = build_out_dir,
+            .verbose     = verbose,
+            .dry_run     = build_dry_run,
+            .defaults    = &build_defaults,
         };
 
         exit_code = cc_run_build(&vm, merged_prog, &build_opts);

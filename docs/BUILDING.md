@@ -71,6 +71,7 @@ cccc --build build.c                      # run the build entry in build.c
 cccc --build build.c --build-entry=foo    # use `foo` as the entry
 cccc --build build.c --build-out-dir=out  # output directory (default: build/)
 cccc --build build.c --build-dry-run      # print command lines, run nothing
+cccc --build build.c --build-target=NAME  # build only NAME and its transitive deps
 ```
 
 | Flag | Default | Meaning |
@@ -79,6 +80,7 @@ cccc --build build.c --build-dry-run      # print command lines, run nothing
 | `--build-entry=NAME` | `build_main` | Symbol to invoke as the build entry. |
 | `--build-out-dir=PATH` | `build/` | Output directory for artifacts. |
 | `--build-dry-run` | off | Topo-sort and print the resolved command lines without executing them. |
+| `--build-target=NAME` | (all) | Build only the named registered target and its transitive dependencies. Pruning happens at `cccc_build_run*` call time — the full graph is declared first, then the filter is applied. |
 
 Existing flags forwarded to every target's compile as defaults: `-I`, `-i`, `-D`,
 `-U`, `--std=`, `-L`, `-l`. VM-only options (`-c`, `-d`/`--disassemble`,
@@ -184,13 +186,14 @@ are always available regardless of `--ffi-allow`/`--ffi-deny`/`--disable-ffi`.
 **v1 (this release):** the `--build` mode, `[[cccc::build]]` entry resolution,
 the auto-injected `cccc_build.h`, the three native target kinds, the core builder
 API, a host-side **serial** runner with topological sort, `--build-out-dir`,
-`--build-dry-run`, and the inverted FFI default.
+`--build-dry-run`, `--build-target=NAME` registered-name selection with
+transitive dependency pruning, and the inverted FFI default.
 
 **Deferred to later releases:** `[[cccc::build_target]]` discoverable factories;
-`--build-target=NAME` selection; parallel `-j`; glob / `add_source_str` /
-`exclude_source`; `cccc_probe_toolchain()` / pkg-config; `cccc_build_run_custom`;
-bytecode targets; incremental / caching; cross-compilation; release/debug
-profiles; a self-hosting `build.c` replacing the Makefile.
+parallel `-j`; glob / `add_source_str` / `exclude_source`;
+`cccc_probe_toolchain()` / pkg-config; `cccc_build_run_custom`; bytecode targets;
+incremental / caching; cross-compilation; release/debug profiles; a self-hosting
+`build.c` replacing the Makefile.
 
 ## See also
 
