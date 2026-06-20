@@ -266,10 +266,6 @@ int __builtin_ast_vararg_count(VirtualMachine *vm) {
     return vm ? vm->compiler.macro_vararg_count : 0;
 }
 
-int VarargCount(void) {
-    return __builtin_ast_vararg_count(__builtin_get_vm());
-}
-
 Node *__builtin_ast_vararg_at(VirtualMachine *vm, int index) {
     if (!vm)
         return NULL;
@@ -283,10 +279,6 @@ Node *__builtin_ast_vararg_at(VirtualMachine *vm, int index) {
     return vm->compiler.macro_vararg_nodes[index];
 }
 
-Node *VarargAt(int index) {
-    return __builtin_ast_vararg_at(__builtin_get_vm(), index);
-}
-
 Node **__builtin_ast_varargs_as_array(VirtualMachine *vm) {
     if (!vm)
         return NULL;
@@ -296,10 +288,6 @@ Node **__builtin_ast_varargs_as_array(VirtualMachine *vm) {
     if (vm->compiler.macro_vararg_count == 0)
         return NULL;
     return vm->compiler.macro_vararg_nodes;
-}
-
-Node **VarargAsArray(void) {
-    return __builtin_ast_varargs_as_array(__builtin_get_vm());
 }
 
 const char *__builtin_ast_vararg_str_at(VirtualMachine *vm, int index) {
@@ -313,10 +301,6 @@ const char *__builtin_ast_vararg_str_at(VirtualMachine *vm, int index) {
                   "VarargStrAt index %d out of range (count %d)",
                   index, vm->compiler.macro_vararg_count);
     return vm->compiler.macro_vararg_strs[index];
-}
-
-const char *VarargStrAt(int index) {
-    return __builtin_ast_vararg_str_at(__builtin_get_vm(), index);
 }
 
 // Register reflection API functions as FFI
@@ -619,14 +603,6 @@ static void register_reflection_ffi(VirtualMachine *vm) {
                       (void *)__builtin_ast_varargs_as_array, 1, 0);
     cc_register_cfunc(vm, "__builtin_ast_vararg_str_at",
                       (void *)__builtin_ast_vararg_str_at, 2, 0);
-    cc_register_cfunc(vm, "VarargCount",
-                      (void *)VarargCount, 0, 0);
-    cc_register_cfunc(vm, "VarargAt",
-                      (void *)VarargAt, 1, 0);
-    cc_register_cfunc(vm, "VarargAsArray",
-                      (void *)VarargAsArray, 0, 0);
-    cc_register_cfunc(vm, "VarargStrAt",
-                      (void *)VarargStrAt, 1, 0);
 }
 
 static void init_vm_segments_for_macros(VirtualMachine *vm);

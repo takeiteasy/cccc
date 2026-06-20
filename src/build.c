@@ -18,7 +18,7 @@
 */
 
 // --build mode runtime.  Mirrors src/testing.c: it injects a private header
-// (cccc_build.h), registers the builder API as FFI-callable cfuncs, then finds
+// (building.h), registers the builder API as FFI-callable cfuncs, then finds
 // and invokes the build entry in the VM.  The entry only *declares* a target
 // graph (pure data); the host-side runner in this file compiles and links it
 // with the system toolchain (cc/ar/ld), synchronously, inside the
@@ -289,6 +289,10 @@ static long long impl_add_libpath(long long t, long long path) {
     return 0;
 }
 
+static long long impl_build_ctx(void) {
+    return (long long)(intptr_t)s_ctx;
+}
+
 static long long impl_build_root(long long ctx) {
     (void)ctx;
     return (long long)(intptr_t)(s_ctx ? s_ctx->root : "");
@@ -312,26 +316,27 @@ static long long impl_build_run_all(long long ctx);
 static long long impl_build_run_default(long long ctx);
 
 void cc_load_build_runtime(VirtualMachine *vm) {
-    cc_register_cfunc(vm, "cccc_executable",          (void *)impl_executable,    2, 0);
-    cc_register_cfunc(vm, "cccc_static_lib",          (void *)impl_static_lib,    2, 0);
-    cc_register_cfunc(vm, "cccc_dynamic_lib",         (void *)impl_dynamic_lib,   2, 0);
-    cc_register_cfunc(vm, "cccc_target_set_output",   (void *)impl_set_output,    2, 0);
-    cc_register_cfunc(vm, "cccc_target_add_source",   (void *)impl_add_source,    2, 0);
-    cc_register_cfunc(vm, "cccc_target_add_include",  (void *)impl_add_include,   2, 0);
-    cc_register_cfunc(vm, "cccc_target_add_define",   (void *)impl_add_define,    3, 0);
-    cc_register_cfunc(vm, "cccc_target_add_undef",    (void *)impl_add_undef,     2, 0);
-    cc_register_cfunc(vm, "cccc_target_add_cflag",    (void *)impl_add_cflag,     2, 0);
-    cc_register_cfunc(vm, "cccc_target_add_ldflag",   (void *)impl_add_ldflag,    2, 0);
-    cc_register_cfunc(vm, "cccc_target_link_with",    (void *)impl_link_with,     2, 0);
-    cc_register_cfunc(vm, "cccc_target_add_lib",      (void *)impl_add_lib,       2, 0);
-    cc_register_cfunc(vm, "cccc_target_add_libpath",  (void *)impl_add_libpath,   2, 0);
-    cc_register_cfunc(vm, "cccc_build_root",          (void *)impl_build_root,    1, 0);
-    cc_register_cfunc(vm, "cccc_build_out_dir",       (void *)impl_build_out_dir, 1, 0);
-    cc_register_cfunc(vm, "cccc_build_host",          (void *)impl_build_host,    1, 0);
-    cc_register_cfunc(vm, "cccc_build_verbose",       (void *)impl_build_verbose, 1, 0);
-    cc_register_cfunc(vm, "cccc_build_run",           (void *)impl_build_run,     2, 0);
-    cc_register_cfunc(vm, "cccc_build_run_all",       (void *)impl_build_run_all, 1, 0);
-    cc_register_cfunc(vm, "cccc_build_run_default",   (void *)impl_build_run_default, 1, 0);
+    cc_register_cfunc(vm, "__builtin_build_ctx",        (void *)impl_build_ctx,         0, 0);
+    cc_register_cfunc(vm, "__builtin_build_executable", (void *)impl_executable,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_static_lib", (void *)impl_static_lib,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_dynamic_lib",(void *)impl_dynamic_lib,        2, 0);
+    cc_register_cfunc(vm, "__builtin_build_set_output", (void *)impl_set_output,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_source", (void *)impl_add_source,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_include",(void *)impl_add_include,        2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_define", (void *)impl_add_define,         3, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_undef",  (void *)impl_add_undef,          2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_cflag",  (void *)impl_add_cflag,          2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_ldflag", (void *)impl_add_ldflag,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_link_with",  (void *)impl_link_with,          2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_lib",    (void *)impl_add_lib,            2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_libpath",(void *)impl_add_libpath,        2, 0);
+    cc_register_cfunc(vm, "__builtin_build_root",       (void *)impl_build_root,         1, 0);
+    cc_register_cfunc(vm, "__builtin_build_out_dir",    (void *)impl_build_out_dir,      1, 0);
+    cc_register_cfunc(vm, "__builtin_build_host",       (void *)impl_build_host,         1, 0);
+    cc_register_cfunc(vm, "__builtin_build_verbose",    (void *)impl_build_verbose,      1, 0);
+    cc_register_cfunc(vm, "__builtin_build_run",        (void *)impl_build_run,          2, 0);
+    cc_register_cfunc(vm, "__builtin_build_run_all",    (void *)impl_build_run_all,      1, 0);
+    cc_register_cfunc(vm, "__builtin_build_run_default",(void *)impl_build_run_default,  1, 0);
 }
 
 // ============================================================================
@@ -339,10 +344,10 @@ void cc_load_build_runtime(VirtualMachine *vm) {
 // ============================================================================
 
 Token *cc_inject_build_header(VirtualMachine *vm) {
-    char *src = get_std_header("cccc_build.h");
+    char *src = get_std_header("building.h");
     if (!src)
-        error("could not load embedded cccc_build.h — run `make stdlib` to regenerate src/std.c");
-    Token *toks = tokenize_string(vm, "<cccc_build.h>", src);
+        error("could not load embedded building.h — run `make stdlib` to regenerate src/std.c");
+    Token *toks = tokenize_string(vm, "<building.h>", src);
     return preprocess(vm, toks);
 }
 

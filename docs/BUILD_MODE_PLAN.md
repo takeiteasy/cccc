@@ -184,9 +184,9 @@ Three kinds, all native.
 
 | Kind | Function | Default output | Backend |
 |------|----------|----------------|---------|
-| Executable | `cccc_executable(ctx, name)` | `bin/<name>` | system toolchain (`cc` / `clang` / `gcc`) |
-| Static library | `cccc_static_lib(ctx, name)` | `lib<name>.a` | `ar rcs` |
-| Dynamic library | `cccc_dynamic_lib(ctx, name)` | `lib<name>.{so,dylib}` | `cc -shared` |
+| Executable | `Executable(ctx, name)` | `bin/<name>` | system toolchain (`cc` / `clang` / `gcc`) |
+| Static library | `StaticLib(ctx, name)` | `lib<name>.a` | `ar rcs` |
+| Dynamic library | `DynamicLib(ctx, name)` | `lib<name>.{so,dylib}` | `cc -shared` |
 
 The backend is the system toolchain selected by `CCCC_NATIVE_CC` (or
 `cc` / `clang` / `gcc`). Adding a backend later is a new
@@ -196,51 +196,51 @@ a bytecode linker exists (decision 4).
 
 ## Builder API
 
-All APIs are exposed via a private `cccc_build.h` header that the runner
+All APIs are exposed via a private `building.h` header that the runner
 auto-injects into the build script the same way `reflection.h` is
 auto-injected into `[[cccc::comptime]]` code and `testing.h` into `--testing`
 mode. The header is **not** on the public include path.
 
 ```c
 // Build context
-const char *cccc_build_root(cccc_build_ctx_t *ctx);
-const char *cccc_build_out_dir(cccc_build_ctx_t *ctx);
-const char *cccc_build_host(cccc_build_ctx_t *ctx);    // "darwin" | "linux" | ...
-int         cccc_build_verbose(cccc_build_ctx_t *ctx);
+const char *BuildRoot(cccc_build_ctx_t *ctx);
+const char *BuildOutDir(cccc_build_ctx_t *ctx);
+const char *BuildHost(cccc_build_ctx_t *ctx);    // "darwin" | "linux" | ...
+int         BuildVerbose(cccc_build_ctx_t *ctx);
 
 // Target factories — all return a target owned by `ctx`
-cccc_target_t *cccc_executable(cccc_build_ctx_t *ctx, const char *name);
-cccc_target_t *cccc_static_lib(cccc_build_ctx_t *ctx, const char *name);
-cccc_target_t *cccc_dynamic_lib(cccc_build_ctx_t *ctx, const char *name);
+cccc_target_t *Executable(cccc_build_ctx_t *ctx, const char *name);
+cccc_target_t *StaticLib(cccc_build_ctx_t *ctx, const char *name);
+cccc_target_t *DynamicLib(cccc_build_ctx_t *ctx, const char *name);
 
 // Output
-void cccc_target_set_output(cccc_target_t *t, const char *path);
+void SetOutput(cccc_target_t *t, const char *path);
 
 // Sources
-void cccc_target_add_source(cccc_target_t *t, const char *path);
+void AddSource(cccc_target_t *t, const char *path);
 
 // Flags
-void cccc_target_add_include(cccc_target_t *t, const char *path);
-void cccc_target_add_define(cccc_target_t *t, const char *name, const char *value);
-void cccc_target_add_undef(cccc_target_t *t, const char *name);
-void cccc_target_add_cflag(cccc_target_t *t, const char *flag);
-void cccc_target_add_ldflag(cccc_target_t *t, const char *flag);
+void AddInclude(cccc_target_t *t, const char *path);
+void AddDefine(cccc_target_t *t, const char *name, const char *value);
+void AddUndef(cccc_target_t *t, const char *name);
+void AddCFlag(cccc_target_t *t, const char *flag);
+void AddLdFlag(cccc_target_t *t, const char *flag);
 
 // Dependencies
-void cccc_target_link_with(cccc_target_t *t, cccc_target_t *dep);
-void cccc_target_add_lib(cccc_target_t *t, const char *name);   // -l
-void cccc_target_add_libpath(cccc_target_t *t, const char *path); // -L
+void LinkWith(cccc_target_t *t, cccc_target_t *dep);
+void AddLib(cccc_target_t *t, const char *name);   // -l
+void AddLibPath(cccc_target_t *t, const char *path); // -L
 
 // Run
-int cccc_build_run(cccc_build_ctx_t *ctx, cccc_target_t *t);
-int cccc_build_run_all(cccc_build_ctx_t *ctx);     // topological order
-int cccc_build_run_default(cccc_build_ctx_t *ctx); // run_all + summary
+int Build(cccc_build_ctx_t *ctx, cccc_target_t *t);
+int BuildAll(cccc_build_ctx_t *ctx);     // topological order
+int BuildDefault(cccc_build_ctx_t *ctx); // run_all + summary
 ```
 
-Deferred to later releases: `cccc_target_add_sources_glob` (glob expansion),
-`cccc_target_add_source_str` (`#embed`-style), `cccc_target_exclude_source`,
+Deferred to later releases: `AddSources_glob` (glob expansion),
+`AddSource_str` (`#embed`-style), `cccc_target_exclude_source`,
 `cccc_probe_toolchain` (pkg-config/libffi detection),
-`cccc_build_run_custom` (run an arbitrary command as a build step).
+`Build_custom` (run an arbitrary command as a build step).
 
 ## Execution Model
 
@@ -250,7 +250,7 @@ Deferred to later releases: `cccc_target_add_sources_glob` (glob expansion),
                        ▼
    ┌─────────────────────────────────────────┐
    │  1. Preprocess build.c (inject           │
-   │     cccc_build.h)                         │
+   │     building.h)                         │
    │  2. Parse; intercept [[cccc::build]]      │
    │  3. Find the build entry (flag/attr/name) │
    │  4. Compile the entry into the CCCC VM    │
@@ -258,7 +258,7 @@ Deferred to later releases: `cccc_target_add_sources_glob` (glob expansion),
    │     ├─ entry calls factories, builds      │
    │     │   cccc_target_t graph (declarative  │
    │     │   data — no compilation yet)        │
-   │     └─ entry calls cccc_build_run_*(ctx)  │
+   │     └─ entry calls Build_*(ctx)  │
    │  6. HOST runner takes the registered      │
    │     graph and:                            │
    │     - topo-sorts the target DAG           │
@@ -275,7 +275,7 @@ Deferred to later releases: `cccc_target_add_sources_glob` (glob expansion),
 The VM-side entry only *builds data* (the target graph). The actual
 compilation happens host-side in step 6 — this is the resolution of the
 plan's old runner-location ambiguity, and it is what lets `cc`/`ar`/`ld` run
-without going through the VM's FFI (decision 2/3). `cccc_build_run_*` is the
+without going through the VM's FFI (decision 2/3). `Build_*` is the
 hand-off point: it records that the entry wants the graph built, and the host
 runner does the work after the entry returns (or synchronously, behind the
 FFI boundary — an implementation detail of the run call).
@@ -319,25 +319,25 @@ FFI boundary — an implementation detail of the run call).
 ```c
 [[cccc::build]]
 int build_main(cccc_build_ctx_t *ctx) {
-    cccc_target_t *core = cccc_static_lib(ctx, "core");
-    cccc_target_set_output(core, "lib/libcore.a");
-    cccc_target_add_source(core, "src/lib/sum.c");
-    cccc_target_add_include(core, "include");
+    cccc_target_t *core = StaticLib(ctx, "core");
+    SetOutput(core, "lib/libcore.a");
+    AddSource(core, "src/lib/sum.c");
+    AddInclude(core, "include");
 
-    cccc_target_t *greet = cccc_static_lib(ctx, "greet");
-    cccc_target_set_output(greet, "lib/libgreet.a");
-    cccc_target_add_source(greet, "src/greet.c");
-    cccc_target_add_include(greet, "include");
+    cccc_target_t *greet = StaticLib(ctx, "greet");
+    SetOutput(greet, "lib/libgreet.a");
+    AddSource(greet, "src/greet.c");
+    AddInclude(greet, "include");
 
-    cccc_target_t *app = cccc_executable(ctx, "app");
-    cccc_target_set_output(app, "bin/app");
-    cccc_target_add_source(app, "src/main.c");
-    cccc_target_add_include(app, "include");
-    cccc_target_link_with(app, core);
-    cccc_target_link_with(app, greet);
-    cccc_target_add_define(app, "GREET_DEFAULT", "world");
+    cccc_target_t *app = Executable(ctx, "app");
+    SetOutput(app, "bin/app");
+    AddSource(app, "src/main.c");
+    AddInclude(app, "include");
+    LinkWith(app, core);
+    LinkWith(app, greet);
+    AddDefine(app, "GREET_DEFAULT", "world");
 
-    return cccc_build_run_default(ctx);
+    return BuildDefault(ctx);
 }
 ```
 
@@ -359,7 +359,7 @@ The eventual `build.c` that replaces CCCC's own `Makefile` is the ultimate
 validation of the system, but it is the **last** milestone, not part of the
 initial v1. It needs several deferred features (glob sources, custom-command
 build steps, toolchain probing for libffi, platform branches via
-`cccc_build_host`) before it can express the existing targets
+`BuildHost`) before it can express the existing targets
 (`cccc`, `libcccc.{so,dylib}`, the sanitizer variants, `fuzz_harness`,
 `docs`, `stdlib`, `bench`). The migration stays gradual: the first `build.c`
 is compiled by the Makefile-built `cccc`; the Makefile is kept for one
@@ -372,7 +372,7 @@ release as a fallback; it is deleted only once `build.c` is stable.
 - `--build` mode branch in `src/main.c` (beside the native/testing blocks).
 - `[[cccc::build]]` entry interception in `preprocess.c`; `build_main`
   default name; `--build-entry=NAME`.
-- Auto-injected `cccc_build.h`; `cccc_target_t` / `cccc_build_ctx_t` owned
+- Auto-injected `building.h`; `cccc_target_t` / `cccc_build_ctx_t` owned
   by the VM.
 - Three native target kinds (executable / static / dynamic) via `cc`/`ar`/`ld`.
 - Core builder API (sources, includes, defines, undef, cflags, ldflags,
@@ -390,7 +390,7 @@ release as a fallback; it is deleted only once `build.c` is stable.
 - Parallel `-j` runner; `--build-keep-going` / `--build-quiet` /
   `--build-verbose`.
 - `add_sources_glob`, `add_source_str`, `exclude_source`.
-- `cccc_probe_toolchain()` / pkg-config; `cccc_build_run_custom`.
+- `cccc_probe_toolchain()` / pkg-config; `Build_custom`.
 - Bytecode targets (needs a bytecode linker first).
 - Incremental / caching; cross-compilation; release/debug profiles.
 - Self-hosting `build.c` replacing the Makefile (dogfood milestone).

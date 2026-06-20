@@ -64,7 +64,7 @@ static void handle_alarm(int sig) {
 static void impl_assert(long long cond, long long expr, long long file, long long line) {
     if (!cond) {
         if (!s_run) {
-            fprintf(stderr, "$assert called outside a test run at %s:%lld\n",
+            fprintf(stderr, "Assert called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -80,7 +80,7 @@ static void impl_assert_eq(long long a, long long b,
                            long long file, long long line) {
     if (a != b) {
         if (!s_run) {
-            fprintf(stderr, "$assert_eq called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertEq called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -97,7 +97,7 @@ static void impl_assert_neq(long long a, long long b,
                             long long file, long long line) {
     if (a == b) {
         if (!s_run) {
-            fprintf(stderr, "$assert_neq called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertNeq called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -113,7 +113,7 @@ static void impl_assert_null(long long p, long long ps,
                              long long file, long long line) {
     if (p != 0) {
         if (!s_run) {
-            fprintf(stderr, "$assert_null called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertNull called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -128,7 +128,7 @@ static void impl_assert_not_null(long long p, long long ps,
                                  long long file, long long line) {
     if (p == 0) {
         if (!s_run) {
-            fprintf(stderr, "$assert_not_null called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertNotNull called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -144,7 +144,7 @@ static void impl_assert_streq(long long a, long long b,
                               long long file, long long line) {
     if (strcmp((char *)a, (char *)b) != 0) {
         if (!s_run) {
-            fprintf(stderr, "$assert_streq called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertStrEq called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -161,7 +161,7 @@ static void impl_assert_false(long long cond, long long expr,
                               long long file, long long line) {
     if (cond) {
         if (!s_run) {
-            fprintf(stderr, "$assert_false called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertFalse called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -174,7 +174,7 @@ static void impl_assert_false(long long cond, long long expr,
 
 static void impl_assert_fail(long long file, long long line) {
     if (!s_run) {
-        fprintf(stderr, "$assert_fail called outside a test run at %s:%lld\n",
+        fprintf(stderr, "AssertFail called outside a test run at %s:%lld\n",
                 (char *)file, line);
         return;
     }
@@ -186,7 +186,7 @@ static void impl_assert_fail(long long file, long long line) {
 
 static void impl_assert_fail_msg(long long msg, long long file, long long line) {
     if (!s_run) {
-        fprintf(stderr, "$assert_fail_msg called outside a test run at %s:%lld\n",
+        fprintf(stderr, "AssertFailMsg called outside a test run at %s:%lld\n",
                 (char *)file, line);
         return;
     }
@@ -201,7 +201,7 @@ static void impl_assert_gt(long long a, long long b,
                            long long file, long long line) {
     if (!(a > b)) {
         if (!s_run) {
-            fprintf(stderr, "$assert_gt called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertGt called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -218,7 +218,7 @@ static void impl_assert_lt(long long a, long long b,
                            long long file, long long line) {
     if (!(a < b)) {
         if (!s_run) {
-            fprintf(stderr, "$assert_lt called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertLt called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -235,7 +235,7 @@ static void impl_assert_ge(long long a, long long b,
                            long long file, long long line) {
     if (!(a >= b)) {
         if (!s_run) {
-            fprintf(stderr, "$assert_ge called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertGe called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -252,7 +252,7 @@ static void impl_assert_le(long long a, long long b,
                            long long file, long long line) {
     if (!(a <= b)) {
         if (!s_run) {
-            fprintf(stderr, "$assert_le called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertLe called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -271,7 +271,7 @@ static void impl_assert_within(long long delta, long long expected, long long ac
     if (diff < 0) diff = -diff;
     if (diff > delta) {
         if (!s_run) {
-            fprintf(stderr, "$assert_within called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertWithin called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -289,7 +289,7 @@ static void impl_assert_streq_len(long long a, long long b, long long len,
                                   long long file, long long line) {
     if (strncmp((char *)a, (char *)b, (size_t)len) != 0) {
         if (!s_run) {
-            fprintf(stderr, "$assert_streq_len called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertStrEqLen called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -306,7 +306,7 @@ static void impl_assert_mem_eq(long long expected, long long actual, long long l
                                long long file, long long line) {
     if (memcmp((void *)expected, (void *)actual, (size_t)len) != 0) {
         if (!s_run) {
-            fprintf(stderr, "$assert_mem_eq called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertMemEq called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -325,7 +325,7 @@ static void impl_assert_float_within(double delta, double expected, double actua
     if (diff < 0) diff = -diff;
     if (diff > delta) {
         if (!s_run) {
-            fprintf(stderr, "$assert_float_within called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertFloatWithin called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -350,7 +350,7 @@ static void impl_assert_bits(long long mask, long long expected, long long actua
                              long long file, long long line) {
     if ((actual & mask) != (expected & mask)) {
         if (!s_run) {
-            fprintf(stderr, "$assert_bits called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertBits called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -369,7 +369,7 @@ static void impl_assert_bit_high(long long bit, long long actual,
                                  long long file, long long line) {
     if (!(actual & (1LL << bit))) {
         if (!s_run) {
-            fprintf(stderr, "$assert_bit_high called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertBitHigh called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -386,7 +386,7 @@ static void impl_assert_bit_low(long long bit, long long actual,
                                 long long file, long long line) {
     if (actual & (1LL << bit)) {
         if (!s_run) {
-            fprintf(stderr, "$assert_bit_low called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertBitLow called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -405,7 +405,7 @@ static void impl_assert_eq_array(long long expected, long long actual,
     size_t total = (size_t)elem_size * (size_t)count;
     if (memcmp((void *)expected, (void *)actual, total) != 0) {
         if (!s_run) {
-            fprintf(stderr, "$assert_eq_array called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertArrayEq called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -424,7 +424,7 @@ static void impl_assert_msg(long long cond, long long expr, long long msg,
                             long long file, long long line) {
     if (!cond) {
         if (!s_run) {
-            fprintf(stderr, "$assert_msg called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertMsg called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -440,7 +440,7 @@ static void impl_assert_eq_msg(long long a, long long b,
                                long long file, long long line) {
     if (a != b) {
         if (!s_run) {
-            fprintf(stderr, "$assert_eq_msg called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertEqMsg called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -457,7 +457,7 @@ static void impl_assert_streq_msg(long long a, long long b,
                                   long long file, long long line) {
     if (strcmp((char *)a, (char *)b) != 0) {
         if (!s_run) {
-            fprintf(stderr, "$assert_streq_msg called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertStrEqMsg called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -474,7 +474,7 @@ static void impl_assert_null_msg(long long p, long long ps, long long msg,
                                  long long file, long long line) {
     if (p != 0) {
         if (!s_run) {
-            fprintf(stderr, "$assert_null_msg called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertNullMsg called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -490,7 +490,7 @@ static void impl_assert_not_null_msg(long long p, long long ps, long long msg,
                                      long long file, long long line) {
     if (p == 0) {
         if (!s_run) {
-            fprintf(stderr, "$assert_not_null_msg called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertNotNullMsg called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }
@@ -507,7 +507,7 @@ static void impl_assert_bits_msg(long long mask, long long expected, long long a
                                  long long file, long long line) {
     if ((actual & mask) != (expected & mask)) {
         if (!s_run) {
-            fprintf(stderr, "$assert_bits_msg called outside a test run at %s:%lld\n",
+            fprintf(stderr, "AssertBitsMsg called outside a test run at %s:%lld\n",
                     (char *)file, line);
             return;
         }

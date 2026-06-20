@@ -20,30 +20,30 @@ Node *add_one(Node *x) {
 [[cccc::test]]
 void test_at_comptime_inline(void) {
     int v = make_doubled_42();
-    $assert_eq(v, 42);
+    AssertEq(v, 42);
 }
 
 [[cccc::test]]
 void test_at_macro_inline(void) {
     int v = add_one(10);
-    $assert_eq(v, 11);
+    AssertEq(v, 11);
 }
 
 // --- @test annotation ---
 
 @test
 void test_at_test_bare(void) {
-    $assert_eq(1 + 1, 2);
+    AssertEq(1 + 1, 2);
 }
 
 @test(suite="at_suite")
 void test_at_test_with_suite(void) {
-    $assert_eq(2 * 3, 6);
+    AssertEq(2 * 3, 6);
 }
 
 @test(name="custom name")
 void test_at_test_with_name(void) {
-    $assert(1);
+    Assert(1);
 }
 
 // --- @test_setup / @test_teardown ---
@@ -59,7 +59,7 @@ void at_teardown(void) { teardown_count++; }
 
 @test
 void test_at_setup_teardown_ran(void) {
-    $assert(setup_count > 0);
+    Assert(setup_count > 0);
 }
 
 // --- @nodiscard (std C23 -> [[nodiscard]]) ---
@@ -69,7 +69,7 @@ int @nodiscard compute_value(void) { return 99; }
 [[cccc::test]]
 void test_at_nodiscard_fn(void) {
     int v = compute_value();
-    $assert_eq(v, 99);
+    AssertEq(v, 99);
 }
 
 // --- @packed (GNU -> __attribute__((packed))) ---
@@ -83,7 +83,7 @@ struct @packed packed_data {
 [[cccc::test]]
 void test_at_packed_size(void) {
     // packed struct: 1 + 4 + 1 = 6, no padding
-    $assert_eq((int)sizeof(struct packed_data), 6);
+    AssertEq((int)sizeof(struct packed_data), 6);
 }
 
 // --- @unused (GNU -> __attribute__((unused))) ---
@@ -92,7 +92,7 @@ void test_at_packed_size(void) {
 void test_at_unused_var(void) {
     int @unused x = 7;
     (void)x;
-    $assert(1);
+    Assert(1);
 }
 
 // --- @unknown fallback: unknown attrs use GNU form, parser silently ignores ---

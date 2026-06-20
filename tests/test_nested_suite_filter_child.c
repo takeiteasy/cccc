@@ -13,15 +13,15 @@
 #pragma cccc suite begin "outer"
 
 [[cccc::test]]
-void test_subfilter_outer_only(void) { $assert_eq(1, 1); }
+void test_subfilter_outer_only(void) { AssertEq(1, 1); }
 
 #pragma cccc suite begin "inner"
 
 [[cccc::test]]
-void test_subfilter_inner_a(void) { $assert_eq(2, 2); }
+void test_subfilter_inner_a(void) { AssertEq(2, 2); }
 
 [[cccc::test]]
-void test_subfilter_inner_b(void) { $assert_eq(3, 3); }
+void test_subfilter_inner_b(void) { AssertEq(3, 3); }
 
 #pragma cccc suite end  // end inner
 
@@ -30,6 +30,6 @@ void test_subfilter_inner_b(void) { $assert_eq(3, 3); }
 #pragma cccc suite begin "unrelated"
 
 [[cccc::test]]
-void test_subfilter_unrelated(void) { $assert_eq(4, 4); }
+void test_subfilter_unrelated(void) { AssertEq(4, 4); }
 
 #pragma cccc suite end

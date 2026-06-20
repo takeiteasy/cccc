@@ -49,9 +49,9 @@ int test_return_with_suite(void) {
     return 100;
 }
 
-// return = combined with $assert — both must pass.
+// return = combined with Assert — both must pass.
 [[cccc::test(return = 1, suite = "return_combined")]]
 int test_return_with_assert(void) {
-    $assert_eq(1 + 1, 2);
+    AssertEq(1 + 1, 2);
     return 1;
 }

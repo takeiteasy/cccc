@@ -5,8 +5,8 @@
 // before running anything.
 
 [[cccc::build]]
-int build_main(cccc_build_ctx_t *ctx) {
-    return cccc_build_run_all(ctx);
+int build_main(void) {
+    return BuildAll();
 }
 
 int main(void) {

@@ -30,8 +30,8 @@ static void test_basic_block_exit(void) {
         int x __attribute__((cleanup(cleanup_int))) = 42;
         (void)x;
     }
-    $assert_eq(g_log_n, 1);
-    $assert_eq(g_log[0], 42);
+    AssertEq(g_log_n, 1);
+    AssertEq(g_log[0], 42);
 }
 
 // ---- Test 2: Cleanup on explicit return (void function) ----
@@ -52,7 +52,7 @@ static void test_cleanup_on_void_return(void) {
     void_with_cleanup_return(true, &took_early);
     // cleanup_set_true sets flag=true; but we only confirm no crash here.
     // The early-return path should not skip the cleanup.
-    $assert_eq(took_early, true);
+    AssertEq(took_early, true);
 }
 
 // ---- Test 3: Cleanup on non-void return; return value preserved ----
@@ -66,9 +66,9 @@ static int int_return_with_cleanup(void) {
 static void test_nonvoid_return_value_preserved(void) {
     log_reset();
     int result = int_return_with_cleanup();
-    $assert_eq(result, 42);      // return value must survive cleanup call
-    $assert_eq(g_log_n, 1);
-    $assert_eq(g_log[0], 99);   // cleanup did run
+    AssertEq(result, 42);      // return value must survive cleanup call
+    AssertEq(g_log_n, 1);
+    AssertEq(g_log[0], 99);   // cleanup did run
 }
 
 // ---- Test 4: Float return value preserved across cleanup ----
@@ -84,7 +84,7 @@ static float float_return_with_cleanup(void) {
 static void test_float_return_preserved(void) {
     float r = float_return_with_cleanup();
     // Verify float return value survived the cleanup call.
-    $assert_eq(r > 3.13f && r < 3.15f, true);
+    AssertEq(r > 3.13f && r < 3.15f, true);
 }
 
 // ---- Test 5: LIFO order — multiple cleanup vars in one scope ----
@@ -98,10 +98,10 @@ static void test_lifo_order(void) {
         (void)a; (void)b; (void)c;
     }
     // Expect LIFO: 3, 2, 1
-    $assert_eq(g_log_n, 3);
-    $assert_eq(g_log[0], 3);
-    $assert_eq(g_log[1], 2);
-    $assert_eq(g_log[2], 1);
+    AssertEq(g_log_n, 3);
+    AssertEq(g_log[0], 3);
+    AssertEq(g_log[1], 2);
+    AssertEq(g_log[2], 1);
 }
 
 // ---- Test 6: Nested scopes — inner cleaned before outer ----
@@ -117,9 +117,9 @@ static void test_nested_scope_order(void) {
         } // inner cleaned here → logs 20
         // outer cleaned here → logs 10
     }
-    $assert_eq(g_log_n, 2);
-    $assert_eq(g_log[0], 20); // inner first
-    $assert_eq(g_log[1], 10); // then outer
+    AssertEq(g_log_n, 2);
+    AssertEq(g_log[0], 20); // inner first
+    AssertEq(g_log[1], 10); // then outer
 }
 
 // ---- Test 7: Cleanup fires on break ----
@@ -134,9 +134,9 @@ static void test_cleanup_on_break(void) {
     }
     // Loop iteration 0: x=1, no break → cleaned at natural end
     // Loop iteration 1: x=2, break → cleaned before jumping out
-    $assert_eq(g_log_n, 2);
-    $assert_eq(g_log[0], 1); // iteration 0 natural exit
-    $assert_eq(g_log[1], 2); // iteration 1 break exit
+    AssertEq(g_log_n, 2);
+    AssertEq(g_log[0], 1); // iteration 0 natural exit
+    AssertEq(g_log[1], 2); // iteration 1 break exit
 }
 
 // ---- Test 8: Cleanup fires on continue ----
@@ -150,10 +150,10 @@ static void test_cleanup_on_continue(void) {
             continue; // x=2 must be cleaned before continuing
     }
     // All three iterations: 1, 2, 3 (continue on i==1 still cleans x)
-    $assert_eq(g_log_n, 3);
-    $assert_eq(g_log[0], 1);
-    $assert_eq(g_log[1], 2); // continue path
-    $assert_eq(g_log[2], 3);
+    AssertEq(g_log_n, 3);
+    AssertEq(g_log[0], 1);
+    AssertEq(g_log[1], 2); // continue path
+    AssertEq(g_log[2], 3);
 }
 
 // ---- Test 9: static inline cleanup function not dead-stripped ----
@@ -171,7 +171,7 @@ static void test_static_inline_cleanup_not_stripped(void) {
         int x __attribute__((cleanup(inline_cleanup))) = 5;
         (void)x;
     }
-    $assert_eq(g_inline_cleanup_ran, 1);
+    AssertEq(g_inline_cleanup_ran, 1);
 }
 
 // ---- Test 10: Early return from nested block ----
@@ -191,11 +191,11 @@ static int early_return_from_nested(bool flag) {
 static void test_early_return_from_nested_block(void) {
     log_reset();
     int r = early_return_from_nested(true);
-    $assert_eq(r, 99);
+    AssertEq(r, 99);
     // Both inner and outer must have been cleaned
-    $assert_eq(g_log_n, 2);
-    $assert_eq(g_log[0], 200); // inner first (innermost scope)
-    $assert_eq(g_log[1], 100); // then outer
+    AssertEq(g_log_n, 2);
+    AssertEq(g_log[0], 200); // inner first (innermost scope)
+    AssertEq(g_log[1], 100); // then outer
 }
 
 // ---- Test 11: Named goto out of inner block fires cleanup exactly once ----
@@ -218,9 +218,9 @@ done:
 static void test_goto_out_of_inner_block(void) {
     log_reset();
     int r = goto_out_of_inner();
-    $assert_eq(r, 0);
-    $assert_eq(g_log_n, 1);    // cleaned exactly once at the goto
-    $assert_eq(g_log[0], 55);
+    AssertEq(r, 0);
+    AssertEq(g_log_n, 1);    // cleaned exactly once at the goto
+    AssertEq(g_log[0], 55);
 }
 
 // ---- Test 12: Same-scope forward goto — double-cleanup regression ----
@@ -237,8 +237,8 @@ done:;          // x cleaned here at natural block exit
 static void test_same_scope_forward_goto_no_double_cleanup(void) {
     log_reset();
     same_scope_forward_goto();
-    $assert_eq(g_log_n, 1);    // exactly once — NOT twice
-    $assert_eq(g_log[0], 77);
+    AssertEq(g_log_n, 1);    // exactly once — NOT twice
+    AssertEq(g_log[0], 77);
 }
 
 // ---- Test 13: Named goto skips multiple nested scopes — all cleaned LIFO ----
@@ -262,12 +262,12 @@ top:
 static void test_goto_skip_multiple_scopes(void) {
     log_reset();
     int r = goto_skip_two_scopes();
-    $assert_eq(r, 0);
+    AssertEq(r, 0);
     // inner (30) and mid (20) fired at the goto (LIFO), outer (10) at return
-    $assert_eq(g_log_n, 3);
-    $assert_eq(g_log[0], 30);  // innermost first
-    $assert_eq(g_log[1], 20);
-    $assert_eq(g_log[2], 10);  // outer at natural return
+    AssertEq(g_log_n, 3);
+    AssertEq(g_log[0], 30);  // innermost first
+    AssertEq(g_log[1], 20);
+    AssertEq(g_log[2], 10);  // outer at natural return
 }
 
 // ---- Test 14: Cross-sibling goto cleans the SOURCE scope ----
@@ -301,9 +301,9 @@ static void test_cross_sibling_goto_cleans_source(void) {
     log_reset();
     cross_sibling_goto();
     // `a` cleaned at the goto (source scope), then `b`'s tag at B's block exit.
-    $assert_eq(g_log_n, 2);
-    $assert_eq(g_log[0], 7);   // SOURCE scope cleaned — the #481 regression
-    $assert_eq(g_log[1], 99);  // B's cleanup tag (value-independent)
+    AssertEq(g_log_n, 2);
+    AssertEq(g_log[0], 7);   // SOURCE scope cleaned — the #481 regression
+    AssertEq(g_log[1], 99);  // B's cleanup tag (value-independent)
 }
 
 // ---- Test 15: Well-formed cross-sibling goto (label before B's cleanup decl) ----
@@ -330,7 +330,7 @@ static void test_cross_sibling_goto_label_before_decl(void) {
     log_reset();
     cross_sibling_goto_label_first();
     // `a` cleaned at the goto (source scope), then `b` (real value) at B's exit.
-    $assert_eq(g_log_n, 2);
-    $assert_eq(g_log[0], 7);   // source scope cleaned
-    $assert_eq(g_log[1], 8);   // b initialized normally and cleaned with its value
+    AssertEq(g_log_n, 2);
+    AssertEq(g_log[0], 7);   // source scope cleaned
+    AssertEq(g_log[1], 8);   // b initialized normally and cleaned with its value
 }

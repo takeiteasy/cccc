@@ -276,11 +276,6 @@ Node **__builtin_ast_varargs_as_array(VirtualMachine *vm);
  */
 const char *__builtin_ast_vararg_str_at(VirtualMachine *vm, int index);
 
-int VarargCount();
-Node *VarargAt(int index);
-Node **VarargAsArray();
-const char *VarargStrAt(int index);
-
 // ============================================================================
 // Generated Node Source Locations (ticket #173)
 // ============================================================================

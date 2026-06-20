@@ -17,17 +17,17 @@ mirrors `--testing` (see [TESTING.md](TESTING.md)) and reuses the
 ```c
 // build.c
 [[cccc::build]]
-int build_main(cccc_build_ctx_t *ctx) {
-    cccc_target_t *core = cccc_static_lib(ctx, "core");
-    cccc_target_add_source(core, "src/lib/sum.c");
-    cccc_target_add_include(core, "include");
+int build_main(void) {
+    cccc_target_t *core = StaticLib("core");
+    AddSource(core, "src/lib/sum.c");
+    AddInclude(core, "include");
 
-    cccc_target_t *app = cccc_executable(ctx, "app");
-    cccc_target_add_source(app, "src/main.c");
-    cccc_target_add_include(app, "include");
-    cccc_target_link_with(app, core);
+    cccc_target_t *app = Executable("app");
+    AddSource(app, "src/main.c");
+    AddInclude(app, "include");
+    LinkWith(app, core);
 
-    return cccc_build_run_default(ctx);
+    return BuildDefault();
 }
 ```
 
@@ -48,13 +48,13 @@ A runnable example lives in [`examples/build_demo/`](../examples/build_demo).
         cccc --build build.c
                  │
                  ▼
-  1. Preprocess build.c (inject cccc_build.h)
+  1. Preprocess build.c (inject building.h)
   2. Parse; intercept [[cccc::build]]
   3. Resolve the build entry (flag / attribute / name)
   4. Compile the entry into the CCCC VM
   5. Invoke the entry inside the VM:
        ├─ entry calls factories → builds the cccc_target_t graph (data only)
-       └─ entry calls cccc_build_run*(ctx)
+       └─ entry calls Build*()
   6. The host runner (native C, behind the FFI boundary) topologically sorts the
      graph and spawns cc/ar/ld (serial) to compile and link the targets.
   7. Exit with the entry's return value (non-zero = build failure).
@@ -80,7 +80,7 @@ cccc --build build.c --build-target=NAME  # build only NAME and its transitive d
 | `--build-entry=NAME` | `build_main` | Symbol to invoke as the build entry. |
 | `--build-out-dir=PATH` | `build/` | Output directory for artifacts. |
 | `--build-dry-run` | off | Topo-sort and print the resolved command lines without executing them. |
-| `--build-target=NAME` | (all) | Build only the named registered target and its transitive dependencies. Pruning happens at `cccc_build_run*` call time — the full graph is declared first, then the filter is applied. |
+| `--build-target=NAME` | (all) | Build only the named registered target and its transitive dependencies. Pruning happens at `Build*` call time — the full graph is declared first, then the filter is applied. |
 
 Existing flags forwarded to every target's compile as defaults: `-I`, `-i`, `-D`,
 `-U`, `--std=`, `-L`, `-l`. VM-only options (`-c`, `-d`/`--disassemble`,
@@ -108,11 +108,11 @@ __attribute__((build))              // GNU
 __attribute__((cccc::build))        // GNU namespaced
 ```
 
-Signature (the entry takes only the context):
+Signature (build context is auto-injected; the entry takes no parameters):
 
 ```c
-int  build_main(cccc_build_ctx_t *ctx);   // non-zero return = build failure
-void build_main(cccc_build_ctx_t *ctx);   // success iff all targets built
+int  build_main(void);   // non-zero return = build failure
+void build_main(void);   // success iff all targets built
 ```
 
 The same file is still valid C: in default mode (`cccc build.c`) the
@@ -122,52 +122,52 @@ The same file is still valid C: in default mode (`cccc build.c`) the
 
 | Kind | Factory | Default output | Backend |
 |------|---------|----------------|---------|
-| Executable | `cccc_executable(ctx, name)` | `bin/<name>` | system `cc` |
-| Static library | `cccc_static_lib(ctx, name)` | `lib/lib<name>.a` | `ar rcs` |
-| Dynamic library | `cccc_dynamic_lib(ctx, name)` | `lib/lib<name>.{so,dylib}` | `cc -shared` |
+| Executable | `Executable(name)` | `bin/<name>` | system `cc` |
+| Static library | `StaticLib(name)` | `lib/lib<name>.a` | `ar rcs` |
+| Dynamic library | `DynamicLib(name)` | `lib/lib<name>.{so,dylib}` | `cc -shared` |
 
 ## Builder API
 
-All of the following are declared in the auto-injected `cccc_build.h`; do not
+All of the following are declared in the auto-injected `building.h`; do not
 include it directly.
 
 ```c
-// Build context
-const char *cccc_build_root(cccc_build_ctx_t *ctx);     // launch directory
-const char *cccc_build_out_dir(cccc_build_ctx_t *ctx);  // output directory
-const char *cccc_build_host(cccc_build_ctx_t *ctx);     // "darwin" | "linux" | ...
-int         cccc_build_verbose(cccc_build_ctx_t *ctx);
+// Build context (auto-injected; call with no arguments)
+const char *BuildRoot();      // launch directory
+const char *BuildOutDir();    // output directory
+const char *BuildHost();      // "darwin" | "linux" | ...
+int         BuildVerbose();
 
-// Target factories — each returns a target owned by ctx
-cccc_target_t *cccc_executable(cccc_build_ctx_t *ctx, const char *name);
-cccc_target_t *cccc_static_lib(cccc_build_ctx_t *ctx, const char *name);
-cccc_target_t *cccc_dynamic_lib(cccc_build_ctx_t *ctx, const char *name);
+// Target factories — each returns a target owned by the context
+cccc_target_t *Executable(const char *name);
+cccc_target_t *StaticLib(const char *name);
+cccc_target_t *DynamicLib(const char *name);
 
 // Output / sources
-void cccc_target_set_output(cccc_target_t *t, const char *path);
-void cccc_target_add_source(cccc_target_t *t, const char *path);
+void SetOutput(cccc_target_t *t, const char *path);
+void AddSource(cccc_target_t *t, const char *path);
 
 // Flags
-void cccc_target_add_include(cccc_target_t *t, const char *path);
-void cccc_target_add_define(cccc_target_t *t, const char *name, const char *value);
-void cccc_target_add_undef(cccc_target_t *t, const char *name);
-void cccc_target_add_cflag(cccc_target_t *t, const char *flag);
-void cccc_target_add_ldflag(cccc_target_t *t, const char *flag);
+void AddInclude(cccc_target_t *t, const char *path);
+void AddDefine(cccc_target_t *t, const char *name, const char *value);
+void AddUndef(cccc_target_t *t, const char *name);
+void AddCFlag(cccc_target_t *t, const char *flag);
+void AddLdFlag(cccc_target_t *t, const char *flag);
 
 // Dependencies
-void cccc_target_link_with(cccc_target_t *t, cccc_target_t *dep); // build before, -l<dep>
-void cccc_target_add_lib(cccc_target_t *t, const char *name);     // -l<name>
-void cccc_target_add_libpath(cccc_target_t *t, const char *path); // -L<path>
+void LinkWith(cccc_target_t *t, cccc_target_t *dep); // build before, -l<dep>
+void AddLib(cccc_target_t *t, const char *name);     // -l<name>
+void AddLibPath(cccc_target_t *t, const char *path); // -L<path>
 
 // Run (synchronous; returns 0 on success)
-int cccc_build_run(cccc_build_ctx_t *ctx, cccc_target_t *t);  // t + its deps
-int cccc_build_run_all(cccc_build_ctx_t *ctx);                // every target
-int cccc_build_run_default(cccc_build_ctx_t *ctx);            // run_all + summary
+int Build(cccc_target_t *t);  // t + its deps
+int BuildAll();               // every target
+int BuildDefault();           // run_all + summary
 ```
 
-`cccc_build_run*` compiles and links synchronously inside the call, so the
+`Build*` compiles and links synchronously inside the call, so the
 entry's return value reflects the real build status (this is why
-`return cccc_build_run_default(ctx);` is the idiomatic last line).
+`return BuildDefault();` is the idiomatic last line).
 
 ## FFI policy
 
@@ -175,7 +175,7 @@ Build mode exists to call tools, so FFI is **allow-all by default**: a build
 script may shell out to `pkg-config`, `hyperfine`, and so on without ceremony.
 Passing `--ffi-allow=a,b,c` switches build mode into allowlist mode — only the
 named functions are callable, everything else is blocked. The builder API
-(`cccc_*`) and the host-spawned `cc`/`ar`/`ld` are the build runtime itself and
+(`__builtin_build_*` / PascalCase macros) and the host-spawned `cc`/`ar`/`ld` are the build runtime itself and
 are always available regardless of `--ffi-allow`/`--ffi-deny`/`--disable-ffi`.
 
 > The allowlist matches **C function names** (e.g. `system`, `popen`), not tool
@@ -184,14 +184,14 @@ are always available regardless of `--ffi-allow`/`--ffi-deny`/`--disable-ffi`.
 ## Scope
 
 **v1 (this release):** the `--build` mode, `[[cccc::build]]` entry resolution,
-the auto-injected `cccc_build.h`, the three native target kinds, the core builder
+the auto-injected `building.h`, the three native target kinds, the core builder
 API, a host-side **serial** runner with topological sort, `--build-out-dir`,
 `--build-dry-run`, `--build-target=NAME` registered-name selection with
 transitive dependency pruning, and the inverted FFI default.
 
 **Deferred to later releases:** `[[cccc::build_target]]` discoverable factories;
 parallel `-j`; glob / `add_source_str` / `exclude_source`;
-`cccc_probe_toolchain()` / pkg-config; `cccc_build_run_custom`; bytecode targets;
+`cccc_probe_toolchain()` / pkg-config; `Build_custom`; bytecode targets;
 incremental / caching; cross-compilation; release/debug profiles; a self-hosting
 `build.c` replacing the Makefile.
 

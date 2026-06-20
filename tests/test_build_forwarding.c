@@ -7,11 +7,11 @@
 // Each flag must appear verbatim in the printed command lines.
 
 [[cccc::build]]
-int build_main(cccc_build_ctx_t *ctx) {
-    cccc_target_t *t = cccc_executable(ctx, "flagtest");
-    cccc_target_add_source(t, "examples/build_demo/src/main.c");
-    cccc_target_add_undef(t, "OLD_DEFINE");
-    cccc_target_add_cflag(t, "-ffast-math");
-    cccc_target_add_ldflag(t, "-Wl,-rpath,/opt/lib");
-    return cccc_build_run(ctx, t);
+int build_main(void) {
+    cccc_target_t *t = Executable("flagtest");
+    AddSource(t, "examples/build_demo/src/main.c");
+    AddUndef(t, "OLD_DEFINE");
+    AddCFlag(t, "-ffast-math");
+    AddLdFlag(t, "-Wl,-rpath,/opt/lib");
+    return Build(t);
 }

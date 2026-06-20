@@ -6,8 +6,8 @@
 // "single attribute" precedence rule.
 
 [[cccc::build]]
-int configure(cccc_build_ctx_t *ctx) {
-    cccc_target_t *t = cccc_executable(ctx, "singletest");
-    cccc_target_add_source(t, "examples/build_demo/src/main.c");
-    return cccc_build_run(ctx, t);
+int configure(void) {
+    cccc_target_t *t = Executable("singletest");
+    AddSource(t, "examples/build_demo/src/main.c");
+    return Build(t);
 }

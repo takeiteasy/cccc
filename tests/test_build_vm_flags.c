@@ -4,6 +4,6 @@
 // --build cannot be combined with VM/output options like -c=native.
 
 [[cccc::build]]
-int build_main(cccc_build_ctx_t *ctx) {
-    return cccc_build_run_all(ctx);
+int build_main(void) {
+    return BuildAll();
 }

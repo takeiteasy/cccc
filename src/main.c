@@ -1835,7 +1835,7 @@ int main(int argc, const char *argv[]) {
     vm.compiler.skip_preprocess = skip_preprocess;
 
     // In testing mode, inject testing.h before any source is preprocessed so
-    // $assert* macros are in scope. Save the returned declaration tokens for
+    // Assert* macros are in scope. Save the returned declaration tokens for
     // prepending to the parse stream after preprocessing.
     Token *test_decls = NULL;
     if (testing_mode)
@@ -1895,7 +1895,7 @@ int main(int argc, const char *argv[]) {
     cc_execute_inline_macros(&vm, input_tokens, input_files_count);
 
     // Register test-runtime FFI symbols after the comptime pass so that any
-    // [[cccc::macro]] calling $assert produces an unresolved-symbol error
+    // [[cccc::macro]] calling Assert produces an unresolved-symbol error
     // instead of longjmp-ing through an uninitialised jmp_buf (ticket #334).
     if (testing_mode)
         cc_load_test_runtime(&vm);

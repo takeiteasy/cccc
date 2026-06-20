@@ -399,7 +399,7 @@ otherwise; GNU-only attributes such as `packed` stay GNU in `auto` mode.
 Node *make_answer(void) { return MakeIntLiteral(42); }
 
 @test(suite = "math")
-void test_add(void) { $assert_eq(1 + 1, 2); }
+void test_add(void) { AssertEq(1 + 1, 2); }
 
 struct @packed point { char x; int y; };
 ```

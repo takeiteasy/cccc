@@ -24,9 +24,9 @@ static int gnu_attr_add(int a, int b) {
 
 [[cccc::test]]
 static void test_gnu_str_attr(void) {
-    $assert_eq(gnu_attr_add(3, 4), 7);
-    $assert_eq(gnu_attr_add(0, 0), 0);
-    $assert_eq(gnu_attr_add(-1, 1), 0);
+    AssertEq(gnu_attr_add(3, 4), 7);
+    AssertEq(gnu_attr_add(0, 0), 0);
+    AssertEq(gnu_attr_add(-1, 1), 0);
 }
 
 // ---- C23 [[cccc::optimize(N)]] integer form ----
@@ -38,9 +38,9 @@ static long c23_attr_mul(long a, long b) {
 
 [[cccc::test]]
 static void test_c23_int_attr(void) {
-    $assert_eq(c23_attr_mul(6, 7), 42);
-    $assert_eq(c23_attr_mul(0, 100), 0);
-    $assert_eq(c23_attr_mul(-3, -3), 9);
+    AssertEq(c23_attr_mul(6, 7), 42);
+    AssertEq(c23_attr_mul(0, 100), 0);
+    AssertEq(c23_attr_mul(-3, -3), 9);
 }
 
 // ---- @ shorthand ----
@@ -52,8 +52,8 @@ static int at_attr_sub(int a, int b) {
 
 [[cccc::test]]
 static void test_at_attr(void) {
-    $assert_eq(at_attr_sub(10, 3), 7);
-    $assert_eq(at_attr_sub(0, 0), 0);
+    AssertEq(at_attr_sub(10, 3), 7);
+    AssertEq(at_attr_sub(0, 0), 0);
 }
 
 // ---- O0 attribute: explicit disable ----
@@ -67,8 +67,8 @@ static int o0_attr_fn(int x) {
 
 [[cccc::test]]
 static void test_o0_attr(void) {
-    $assert_eq(o0_attr_fn(21), 42);
-    $assert_eq(o0_attr_fn(0), 0);
+    AssertEq(o0_attr_fn(21), 42);
+    AssertEq(o0_attr_fn(0), 0);
 }
 
 // ---- C23 string form: [[cccc::optimize("O2")]] ----
@@ -80,8 +80,8 @@ static int c23_str_attr_fn(int x) {
 
 [[cccc::test]]
 static void test_c23_str_attr(void) {
-    $assert_eq(c23_str_attr_fn(41), 42);
-    $assert_eq(c23_str_attr_fn(-1), 0);
+    AssertEq(c23_str_attr_fn(41), 42);
+    AssertEq(c23_str_attr_fn(-1), 0);
 }
 
 // ---- GCC-compatible dash prefix: "-O2" ----
@@ -93,8 +93,8 @@ static int gcc_dash_attr(int a, int b) {
 
 [[cccc::test]]
 static void test_gcc_dash_attr(void) {
-    $assert_eq(gcc_dash_attr(10, 4), 6);
-    $assert_eq(gcc_dash_attr(5, 5), 0);
+    AssertEq(gcc_dash_attr(10, 4), 6);
+    AssertEq(gcc_dash_attr(5, 5), 0);
 }
 
 // ---- Mixing attributed and non-attributed functions in the same TU ----
@@ -111,10 +111,10 @@ static int opt_double(int x) {
 
 [[cccc::test]]
 static void test_mixed(void) {
-    $assert_eq(plain_sq(5), 25);
-    $assert_eq(plain_sq(0), 0);
-    $assert_eq(opt_double(6), 12);
-    $assert_eq(opt_double(-3), -6);
+    AssertEq(plain_sq(5), 25);
+    AssertEq(plain_sq(0), 0);
+    AssertEq(opt_double(6), 12);
+    AssertEq(opt_double(-3), -6);
 }
 
 // ---- O4/fuse-ops level ----
@@ -126,6 +126,6 @@ static long opt4_muladd(long a, long b, long c) {
 
 [[cccc::test]]
 static void test_o4_attr(void) {
-    $assert_eq(opt4_muladd(3, 4, 5), 17);
-    $assert_eq(opt4_muladd(0, 100, 7), 7);
+    AssertEq(opt4_muladd(3, 4, 5), 17);
+    AssertEq(opt4_muladd(0, 100, 7), 7);
 }

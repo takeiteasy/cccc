@@ -1,7 +1,7 @@
 # CCCC Testing Framework
 
 CCCC includes a built-in test framework for writing tests directly in C, using
-the `[[cccc::test]]` attribute to mark test functions and `$assert*` macros for
+the `[[cccc::test]]` attribute to mark test functions and `Assert*` macros for
 assertions.
 
 `make test` also runs `tools/test_host_signal_debugger.py` on macOS. This PTY
@@ -123,15 +123,15 @@ Mark a function as a test with `[[cccc::test]]`, `__attribute__((test))`,
 ```c
 [[cccc::test]]
 void test_addition(void) {
-    $assert_eq(1 + 1, 2);
+    AssertEq(1 + 1, 2);
 }
 
 // Equivalent shorthands:
 __attribute__((test))
-void test_with_gnu_attr(void) { $assert_eq(2 * 3, 6); }
+void test_with_gnu_attr(void) { AssertEq(2 * 3, 6); }
 
 @test
-void test_with_at_prefix(void) { $assert_eq(10 - 8, 2); }
+void test_with_at_prefix(void) { AssertEq(10 - 8, 2); }
 ```
 
 Multiple test functions can coexist in the same file:
@@ -139,13 +139,13 @@ Multiple test functions can coexist in the same file:
 ```c
 [[cccc::test]]
 void test_strings(void) {
-    $assert_streq("hello", "hello");
+    AssertStrEq("hello", "hello");
 }
 
 [[cccc::test]]
 void test_pointers(void) {
     int x = 42;
-    $assert_not_null(&x);
+    AssertNotNull(&x);
 }
 ```
 
@@ -158,7 +158,7 @@ Give a test a human-readable name with the `name` option. The display name appea
 ```c
 [[cccc::test(name = "addition is commutative")]]
 void test_add_commutative(void) {
-    $assert_eq(1 + 2, 2 + 1);
+    AssertEq(1 + 2, 2 + 1);
 }
 ```
 
@@ -175,12 +175,12 @@ Specify the suite directly on the test attribute:
 ```c
 [[cccc::test(suite = "math")]]
 void test_add(void) {
-    $assert_eq(1 + 1, 2);
+    AssertEq(1 + 1, 2);
 }
 
 [[cccc::test(suite = "math")]]
 void test_mul(void) {
-    $assert_eq(6 * 7, 42);
+    AssertEq(6 * 7, 42);
 }
 ```
 
@@ -195,12 +195,12 @@ Wrap a run of test functions in a pragma block to assign them all to the same su
 
 [[cccc::test]]
 void test_equality(void) {
-    $assert_streq("foo", "foo");
+    AssertStrEq("foo", "foo");
 }
 
 [[cccc::test]]
 void test_empty(void) {
-    $assert_streq("", "");
+    AssertStrEq("", "");
 }
 
 #pragma cccc suite end
@@ -214,7 +214,7 @@ Pragma blocks can be nested to form a hierarchical suite path. The separator is 
 #pragma cccc suite begin "math"
 
 [[cccc::test]]
-void test_basic_add(void) { $assert_eq(1 + 1, 2); }  // suite: "math"
+void test_basic_add(void) { AssertEq(1 + 1, 2); }  // suite: "math"
 
 #pragma cccc suite begin "trig"
 
@@ -227,7 +227,7 @@ void test_cos(void) { ... }  // suite: "math/trig"
 #pragma cccc suite end  // end "trig"
 
 [[cccc::test]]
-void test_basic_mul(void) { $assert_eq(3 * 3, 9); }  // suite: "math"
+void test_basic_mul(void) { AssertEq(3 * 3, 9); }  // suite: "math"
 
 #pragma cccc suite end  // end "math"
 ```
@@ -443,7 +443,7 @@ int test_the_answer(void) {
 }
 ```
 
-`$assert*` macros and the `return` assertion are independent — both must pass for the test to pass.
+`Assert*` macros and the `return` assertion are independent — both must pass for the test to pass.
 
 ## Exit Code Tests
 
@@ -579,14 +579,14 @@ void lazy_init(void) {
 
 [[cccc::test(name = "needs_init_a")]]
 void test_a(void) {
-    $assert_eq(g_initialised, 1); // lazy_init fired before this test
+    AssertEq(g_initialised, 1); // lazy_init fired before this test
 }
 
 [[cccc::test(name = "needs_init_b")]]
 void test_b(void) {
     // g_initialised is still 1 — the data snapshot was taken after
     // lazy_init, so its state is visible to all subsequent tests.
-    $assert_eq(g_initialised, 1);
+    AssertEq(g_initialised, 1);
 }
 ```
 
@@ -607,7 +607,7 @@ Suite `once` hooks run at suite boundaries:
 - `once` setup: before the first test in the suite (before per-test hooks for that test)
 - `once` teardown: after the last test in the suite (after per-test hooks for that test)
 
-If a setup hook fails (via `$assert`), the test is skipped and the test is marked as failed. Teardown hooks still run after the failed setup.
+If a setup hook fails (via `Assert`), the test is skipped and the test is marked as failed. Teardown hooks still run after the failed setup.
 
 If the test itself fails, teardown hooks still run. Teardown is only skipped on timeout, because the VM state is unknown after `SIGALRM`.
 
@@ -621,13 +621,13 @@ static int g_count = 0;
 [[cccc::test]]
 void test_a(void) {
     g_count = 99;   // modifies g_count
-    $assert_eq(g_count, 99);
+    AssertEq(g_count, 99);
 }
 
 [[cccc::test]]
 void test_b(void) {
     // g_count is reset to 0 before this test; test_a's modification is gone
-    $assert_eq(g_count, 0);
+    AssertEq(g_count, 0);
 }
 ```
 
@@ -796,12 +796,12 @@ Override the compiler flags for a specific test with `flags = "..."`:
 [[cccc::test(flags = "--bounds-checks")]]
 void test_with_bounds(void) {
     int arr[3] = {1, 2, 3};
-    $assert_eq(arr[0], 1);
+    AssertEq(arr[0], 1);
 }
 
 [[cccc::test(flags = "--optimize=2 --safety=1")]]
 void test_optimised(void) {
-    $assert_eq(1 + 1, 2);
+    AssertEq(1 + 1, 2);
 }
 ```
 
@@ -850,67 +850,67 @@ All assertion macros use the `$` prefix and are injected automatically in `--tes
 
 | Macro | Description |
 |-------|-------------|
-| `$assert(cond)` | Fails if `cond` is false |
-| `$assert_true(cond)` | Alias for `$assert(cond)` |
-| `$assert_false(cond)` | Fails if `cond` is true |
-| `$assert_fail()` | Always fails |
-| `$assert_fail_msg(msg)` | Always fails with a custom message |
+| `Assert(cond)` | Fails if `cond` is false |
+| `AssertTrue(cond)` | Alias for `Assert(cond)` |
+| `AssertFalse(cond)` | Fails if `cond` is true |
+| `AssertFail()` | Always fails |
+| `AssertFailMsg(msg)` | Always fails with a custom message |
 
 ### Integer Comparisons
 
 | Macro | Description |
 |-------|-------------|
-| `$assert_eq(a, b)` | Fails if `a != b` |
-| `$assert_neq(a, b)` | Fails if `a == b` |
-| `$assert_gt(a, b)` | Fails if `a <= b` |
-| `$assert_lt(a, b)` | Fails if `a >= b` |
-| `$assert_ge(a, b)` | Fails if `a < b` |
-| `$assert_le(a, b)` | Fails if `a > b` |
-| `$assert_within(d, e, a)` | Fails if `\|e - a\| > d` |
+| `AssertEq(a, b)` | Fails if `a != b` |
+| `AssertNeq(a, b)` | Fails if `a == b` |
+| `AssertGt(a, b)` | Fails if `a <= b` |
+| `AssertLt(a, b)` | Fails if `a >= b` |
+| `AssertGe(a, b)` | Fails if `a < b` |
+| `AssertLe(a, b)` | Fails if `a > b` |
+| `AssertWithin(d, e, a)` | Fails if `\|e - a\| > d` |
 
 ### Bitwise
 
 | Macro | Description |
 |-------|-------------|
-| `$assert_bits(m, e, a)` | Fails if `(a & m) != (e & m)` |
-| `$assert_bit_high(b, a)` | Fails if bit `b` of `a` is low |
-| `$assert_bit_low(b, a)` | Fails if bit `b` of `a` is high |
+| `AssertBits(m, e, a)` | Fails if `(a & m) != (e & m)` |
+| `AssertBitHigh(b, a)` | Fails if bit `b` of `a` is low |
+| `AssertBitLow(b, a)` | Fails if bit `b` of `a` is high |
 
 ### Floating Point
 
 | Macro | Description |
 |-------|-------------|
-| `$assert_float_within(d, e, a)` | Fails if `\|e - a\| > d` (float) |
-| `$assert_double_within(d, e, a)` | Fails if `\|e - a\| > d` (double) |
-| `$assert_float_eq(e, a)` | Fails if `\|e - a\| > 1e-6` |
-| `$assert_double_eq(e, a)` | Fails if `\|e - a\| > 1e-15` |
+| `AssertFloatWithin(d, e, a)` | Fails if `\|e - a\| > d` (float) |
+| `AssertDoubleWithin(d, e, a)` | Fails if `\|e - a\| > d` (double) |
+| `AssertFloatEq(e, a)` | Fails if `\|e - a\| > 1e-6` |
+| `AssertDoubleEq(e, a)` | Fails if `\|e - a\| > 1e-15` |
 
 ### Pointers
 
 | Macro | Description |
 |-------|-------------|
-| `$assert_null(p)` | Fails if `p` is not null |
-| `$assert_not_null(p)` | Fails if `p` is null |
+| `AssertNull(p)` | Fails if `p` is not null |
+| `AssertNotNull(p)` | Fails if `p` is null |
 
 ### Strings
 
 | Macro | Description |
 |-------|-------------|
-| `$assert_streq(a, b)` | Fails if strings `a` and `b` differ |
-| `$assert_streq_len(a, b, len)` | Fails if first `len` chars differ |
+| `AssertStrEq(a, b)` | Fails if strings `a` and `b` differ |
+| `AssertStrEqLen(a, b, len)` | Fails if first `len` chars differ |
 
 ### Memory
 
 | Macro | Description |
 |-------|-------------|
-| `$assert_mem_eq(e, a, len)` | Fails if `memcmp(e, a, len) != 0` |
+| `AssertMemEq(e, a, len)` | Fails if `memcmp(e, a, len) != 0` |
 
 ### Arrays
 
 | Macro | Description |
 |-------|-------------|
-| `$assert_eq_array(e, a, cnt)` | Fails if `e[0..cnt-1] != a[0..cnt-1]` (memcmp) |
-| `$assert_each_eq(e, a, cnt)` | Fails if any `a[i] != e` (element-wise) |
+| `AssertArrayEq(e, a, cnt)` | Fails if `e[0..cnt-1] != a[0..cnt-1]` (memcmp) |
+| `AssertEachEq(e, a, cnt)` | Fails if any `a[i] != e` (element-wise) |
 
 ### Message-appending variants
 
@@ -918,14 +918,14 @@ Append `_msg` to any assertion to add a custom message string to the failure dia
 
 | Macro | Description |
 |-------|-------------|
-| `$assert_msg(cond, msg)` | `$assert` with custom message |
-| `$assert_true_msg(cond, msg)` | `$assert_true` with custom message |
-| `$assert_false_msg(cond, msg)` | `$assert_false` with custom message |
-| `$assert_eq_msg(a, b, msg)` | `$assert_eq` with custom message |
-| `$assert_streq_msg(a, b, msg)` | `$assert_streq` with custom message |
-| `$assert_null_msg(p, msg)` | `$assert_null` with custom message |
-| `$assert_not_null_msg(p, msg)` | `$assert_not_null` with custom message |
-| `$assert_bits_msg(m, e, a, msg)` | `$assert_bits` with custom message |
+| `AssertMsg(cond, msg)` | `Assert` with custom message |
+| `AssertTrueMsg(cond, msg)` | `AssertTrue` with custom message |
+| `AssertFalseMsg(cond, msg)` | `AssertFalse` with custom message |
+| `AssertEqMsg(a, b, msg)` | `AssertEq` with custom message |
+| `AssertStrEqMsg(a, b, msg)` | `AssertStrEq` with custom message |
+| `AssertNullMsg(p, msg)` | `AssertNull` with custom message |
+| `AssertNotNullMsg(p, msg)` | `AssertNotNull` with custom message |
+| `AssertBitsMsg(m, e, a, msg)` | `AssertBits` with custom message |
 
 When an assertion fails, the test is marked `not ok` and a diagnostic block is printed with the condition and source location. The remaining tests continue to run.
 
@@ -936,7 +936,7 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 - Struct `return =` supports flat structs (scalar and `char *` fields only). Nested struct fields and non-`char *` pointer fields are not supported in v1.
 - Setup and teardown hook functions must also have signature `void name(void)`.
 - Teardown hooks are skipped on test timeout (VM state is unknown after `SIGALRM`). They run in all other cases, including after test or setup failure.
-- Calling `exit()` directly in a normal test terminates the entire process rather than failing just that test. Use `$assert*` macros instead, or use `exit_code =` if testing that the function exits with a specific code.
+- Calling `exit()` directly in a normal test terminates the entire process rather than failing just that test. Use `Assert*` macros instead, or use `exit_code =` if testing that the function exits with a specific code.
 - Setup/teardown hooks match suites by exact name. A hook scoped to `parent` does **not** automatically run for `parent/sub` tests.
 - **Negative test bodies are matched against error substrings.** Use a substring that is specific enough to avoid false matches but not so specific that it breaks with minor message wording changes.
 - **`exit_code =` tests are skipped on non-POSIX platforms** where `fork(2)` is not available.

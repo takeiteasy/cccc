@@ -4,7 +4,7 @@
 
 [[cccc::test]]
 void test_prepass_basic(void) {
-    $assert_eq(1 + 1, 2);
+    AssertEq(1 + 1, 2);
 }
 
 [[cccc::test(return = 7)]]
