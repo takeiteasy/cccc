@@ -2347,8 +2347,8 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
         else if (equal(tok, ")")) paren_depth--;
 
         if (brace_depth == 0 && paren_depth == 0 &&
-            tok->kind == TK_IDENT && tok->len == 18 &&
-            strncmp(tok->loc, "__builtin_emit_line__", 18) == 0 &&
+            tok->kind == TK_IDENT && tok->len == 21 &&
+            strncmp(tok->loc, "__builtin_emit_line__", 21) == 0 &&
             tok->next && equal(tok->next, "(") &&
             tok->next->next && tok->next->next->kind == TK_STR &&
             tok->next->next->next && equal(tok->next->next->next, ")") &&

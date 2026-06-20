@@ -243,10 +243,10 @@ def main():
             tmp,
             "comptime_fault.c",
             "[[cccc::comptime(inline)]]\n"
-            "$node_t *crash(void) {\n"
+            "Node *crash(void) {\n"
             "  volatile int *p = (volatile int *)0;\n"
             "  int value = *p;\n"
-            "  return $int_literal(value);\n"
+            "  return MakeIntLiteral(value);\n"
             "}\n"
             "int main(void) { return crash(); }\n",
         )

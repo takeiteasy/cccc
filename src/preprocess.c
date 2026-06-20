@@ -899,7 +899,7 @@ static char *escape_c_string(VirtualMachine *vm, const char *s) {
 static Token *append_emit_marker_tokens(VirtualMachine *vm, Token *cur, Token *tmpl,
                                         char *line) {
     char *escaped = escape_c_string(vm, line);
-    char *src = arena_format(vm, "__cccc_emit_line__(\"%s\");\n", escaped);
+    char *src = arena_format(vm, "__builtin_emit_line__(\"%s\");\n", escaped);
     Token *tokens = tokenize_string(vm, "<cccc-emit>", src);
     for (Token *t = tokens; t && t->kind != TK_EOF; t = t->next) {
         Token *copy = copy_token(vm, t);
