@@ -348,6 +348,27 @@ compilation stream instead of runtime source:
 #endif @comptime
 ```
 
+As a shorthand, writing `@directive` (the `@` sign directly before the
+directive keyword) routes the directive to the **opposite** context
+automatically — no need to spell out `@comptime` or `@emit`:
+
+| Written in | `@define FOO` expands to |
+|---|---|
+| Runtime code | `#define @comptime FOO` |
+| Comptime block | `#define @emit FOO` |
+| Emit block | `#define @comptime FOO` |
+
+```c
+@define CT_VALUE 42      // equivalent to: #define @comptime CT_VALUE 42
+@ifdef CT_VALUE
+@define CT_SEEN 1
+@endif
+```
+
+The shorthand works with all preprocessor directives: `define`, `undef`, `if`,
+`ifdef`, `ifndef`, `elif`, `else`, `endif`, `include`, `pragma`, `error`,
+`warning`, and `line`.
+
 ## Call-Site Expansion
 
 Use an inline macro for call-site expansion inside expressions or statements.

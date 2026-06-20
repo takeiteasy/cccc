@@ -2252,6 +2252,41 @@ static PPDir pp_directive(Token *tok) {
     return PP_NONE;
 }
 
+static bool is_pp_directive_kw(Token *tok) {
+    static const char *kws[] = {
+        "define", "undef", "if", "ifdef", "ifndef",
+        "elif",   "else",  "endif", "include",
+        "pragma", "error", "warning", "line", NULL,
+    };
+    for (int i = 0; kws[i]; i++)
+        if (equal(tok, (char *)kws[i])) return true;
+    return false;
+}
+
+// Rewrite @<ppkeyword> rest-of-line to #<ppkeyword> @<opposite_route> rest-of-line.
+// Opposite route: CTX_COMPTIME -> "emit"; all other contexts -> "comptime".
+// Returns false (tok_ptr unchanged) if the current token is not @<ppkeyword>.
+// Must be called before try_rewrite_at_attr to prevent @define etc. from being
+// mangled into __attribute__((define)).
+static bool try_rewrite_at_directive(VirtualMachine *vm, Token **tok_ptr) {
+    Token *tok = *tok_ptr;
+    if (!equal(tok, "@") || !tok->next || tok->next->kind != TK_IDENT)
+        return false;
+    Token *kw = tok->next;
+    if (!is_pp_directive_kw(kw))
+        return false;
+    ComptimeCtxEntry *top = ctx_top(vm);
+    const char *route = (top && top->type == CTX_COMPTIME) ? "emit" : "comptime";
+    char *src = arena_format(vm, "#%.*s @%s ", (int)kw->len, kw->loc, route);
+    Token *new_toks = tokenize(vm, new_file(vm, tok->file->name, tok->file->file_no, src));
+    Token *last = new_toks;
+    while (last->next && last->next->kind != TK_EOF)
+        last = last->next;
+    last->next = kw->next;
+    *tok_ptr = new_toks;
+    return true;
+}
+
 // Rewrite @identifier or @identifier(args) into the equivalent attribute form
 // before try_extract_attr_macro runs. The target form depends on the attribute
 // registry: ATTR_CCCC -> [[cccc::name(args)]], ATTR_STD -> [[name(args)]],
@@ -3524,10 +3559,24 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
 
         if (ctx_top(vm) && ctx_top(vm)->type == CTX_EMIT) {
             Token *start = tok;
+            if (try_rewrite_at_directive(vm, &tok))
+                continue;
             if (is_hash(start)) {
                 if (is_pragma_cccc(start)) {
                     tok = handle_pragma_body(vm, tok->next->next);
                     continue;
+                }
+                {
+                    Token *route_start = start->next->next;
+                    Token *route_after = route_start;
+                    if (route_start &&
+                        read_include_route(&route_after) == INCLUDE_ROUTE_COMPTIME) {
+                        char *line = copy_routed_directive_line(vm, start, route_start,
+                                                                route_after);
+                        queue_comptime_directive(vm, line);
+                        tok = skip_line(vm, route_after);
+                        continue;
+                    }
                 }
                 char *line = copy_raw_directive_line(vm, start);
                 push_emit_directive(vm, line, false);
@@ -3559,8 +3608,11 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             // attribute blocks before they reach the parser. On a match,
             // the definition is extracted into the MacroFn/ComptimeVar list
             // and tok is advanced past it; nothing is added to the output.
-            // @name / @name(args) is first rewritten to the canonical form so
+            // @<ppkeyword> is rewritten to #<keyword> @<opposite_route> before
+            // @name / @name(args) is rewritten to the canonical attribute form so
             // that try_extract_attr_macro sees [[cccc::name(...)]] as usual.
+            if (try_rewrite_at_directive(vm, &tok))
+                continue;
             if (try_rewrite_at_attr(vm, &tok))
                 continue;
             if (try_rewrite_cccc_keyword_attr(vm, &tok))
