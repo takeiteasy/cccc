@@ -14,7 +14,7 @@ CCCC targets C23 (and below), and support for a wide-array of Clang/GNU extensio
   - Inline pre-parse generators for parser-visible functions and declarations (`[[cccc::macro(inline)]]`)
   - File-scope macro calls for explicit source-order generation
   - Call-site expansion for expression and statement rewriting
-  - Quasi-quoting (`$quote`), hygienic type/symbol reflection, `__cccc_gensym`, and AST construction helpers
+  - Backtick quasi-quoting with `${...}` interpolation, `Quote(...)` templates, hygienic type/symbol reflection, `__cccc_gensym`, and AST construction helpers
 - **Native compilation pipeline** — `-c=native` runs the CCCC frontend (preprocessor, compile-time macros) and hands the resulting C to `CCCC_NATIVE_CC` (or `cc` / `clang` / `gcc`) for an actual native build
   - This is the production path: full toolchain performance, system libraries, no VM overhead
   - `-o <file>` is required to name the produced executable; the temporary C source is removed after the build

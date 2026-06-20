@@ -596,6 +596,7 @@ typedef enum {
     TK_PUNCT,   // Punctuators
     TK_KEYWORD, // Keywords
     TK_STR,     // String literals
+    TK_BACKTICK_STR, // Raw quasi-quote fragment between ` / ${ / }
     TK_NUM,     // Numeric literals
     TK_PP_NUM,  // Preprocessing numbers
     TK_MACRO_SCOPE_PUSH, // Synthetic: push macro-table snapshot (#283); never from lexer
@@ -621,7 +622,7 @@ typedef struct Token {
     char *loc;          // Token location
     int len;            // Token length
     Type *ty;           // Used if TK_NUM or TK_STR
-    char *str;          // String literal contents including terminating '\0'
+    char *str;          // TK_STR contents, or TK_BACKTICK_STR fragment; NUL-terminated
     char *wide_digits;  // wb/uwb _BitInt literal: full-precision digit text
                          // (no prefix/suffix/separators) when bit_width > 64
     int wide_base;      // base (2/8/10/16) for wide_digits, else unused

@@ -7033,11 +7033,206 @@ static Node *generic_selection(VirtualMachine *vm, Token **rest, Token *tok) {
 //         | "_Generic" generic-selection
 //         | "__builtin_types_compatible_p" "(" type-name, type-name, ")"
 //         | "__builtin_reg_class" "(" type-name ")"
+//         | backtick-quasi-quote
 //         | ident
 //         | str
 //         | num
+typedef enum {
+    BT_LEX_NORMAL,
+    BT_LEX_SQUOTE,
+    BT_LEX_DQUOTE,
+    BT_LEX_LINE_COMMENT,
+    BT_LEX_BLOCK_COMMENT,
+} BacktickLexState;
+
+static void validate_backtick_fragment(VirtualMachine *vm, Token *fragment,
+                                       BacktickLexState *state) {
+    char *p = fragment->str;
+
+    while (*p) {
+        if (*state == BT_LEX_LINE_COMMENT) {
+            if (*p++ == '\n')
+                *state = BT_LEX_NORMAL;
+            continue;
+        }
+
+        if (*state == BT_LEX_BLOCK_COMMENT) {
+            if (p[0] == '*' && p[1] == '/') {
+                *state = BT_LEX_NORMAL;
+                p += 2;
+            } else {
+                p++;
+            }
+            continue;
+        }
+
+        if (*state == BT_LEX_SQUOTE || *state == BT_LEX_DQUOTE) {
+            char quote = (*state == BT_LEX_SQUOTE) ? '\'' : '"';
+            if (*p == '\\' && p[1]) {
+                p += 2;
+            } else if (*p++ == quote) {
+                *state = BT_LEX_NORMAL;
+            }
+            continue;
+        }
+
+        if (p[0] == '/' && p[1] == '/') {
+            *state = BT_LEX_LINE_COMMENT;
+            p += 2;
+            continue;
+        }
+        if (p[0] == '/' && p[1] == '*') {
+            *state = BT_LEX_BLOCK_COMMENT;
+            p += 2;
+            continue;
+        }
+        if (*p == '\'') {
+            *state = BT_LEX_SQUOTE;
+            p++;
+            continue;
+        }
+        if (*p == '"') {
+            *state = BT_LEX_DQUOTE;
+            p++;
+            continue;
+        }
+
+        if (*p == '$' && (isdigit((unsigned char)p[1]) || p[1] == '$' ||
+                          p[1] == '@'))
+            error_tok(vm, fragment,
+                      "legacy Quote placeholders are not allowed in backtick "
+                      "quasi-quotes; use ${...} or Quote(...)");
+        p++;
+    }
+}
+
+static Token *new_backtick_synthetic_token(VirtualMachine *vm, TokenKind kind,
+                                           char *text, Token *origin) {
+    Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
+    memset(tok, 0, sizeof(Token));
+    tok->kind = kind;
+    tok->loc = text;
+    tok->len = (int)strlen(text);
+    tok->file = origin->file;
+    tok->filename = origin->filename;
+    tok->line_no = origin->line_no;
+    tok->col_no = origin->col_no;
+    tok->origin = origin;
+    return tok;
+}
+
+static Token *copy_backtick_expr_token(VirtualMachine *vm, Token *src) {
+    Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
+    *tok = *src;
+    tok->next = NULL;
+    return tok;
+}
+
+// Lower `fragment ${expr} fragment` to the parser-visible equivalent of
+// __builtin_quote(__builtin_get_vm(), "fragment $1 fragment", expr).
+// Interpolation tokens have already passed through the preprocessor, so this
+// preserves macro expansion inside ${...}.
+static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest, Token *tok) {
+    if (!vm->compiler.in_macro_mode)
+        error_tok(vm, tok,
+                  "backtick quasi-quotes are only valid in comptime functions");
+
+    Token *fragments[7] = {};
+    Token *expr_begin[6] = {};
+    Token *expr_end[6] = {};
+    int fragment_count = 0;
+    int splice_count = 0;
+    size_t template_len = 0;
+    BacktickLexState lex_state = BT_LEX_NORMAL;
+    Token *fragment = tok;
+
+    for (;;) {
+        fragments[fragment_count++] = fragment;
+        template_len += strlen(fragment->str);
+        validate_backtick_fragment(vm, fragment, &lex_state);
+
+        if (!fragment->next || !equal(fragment->next, "$") ||
+            !fragment->next->next || !equal(fragment->next->next, "{"))
+            break;
+
+        if (splice_count == 6)
+            error_tok(vm, fragment->next,
+                      "backtick quasi-quotes support at most 6 interpolations; "
+                      "use QuoteN(...) for more");
+
+        Token *begin = fragment->next->next->next;
+        Token *end = begin;
+        while (end && end->kind != TK_EOF &&
+               !(equal(end, "}") && end->next &&
+                 end->next->kind == TK_BACKTICK_STR))
+            end = end->next;
+
+        if (!end || end->kind == TK_EOF)
+            error_tok(vm, fragment->next,
+                      "unterminated backtick interpolation; expected '}'");
+        if (begin == end)
+            error_tok(vm, fragment->next,
+                      "empty backtick interpolation is not allowed");
+
+        expr_begin[splice_count] = begin;
+        expr_end[splice_count] = end;
+        splice_count++;
+        template_len += 4; // " $N ", N is 1..6
+        fragment = end->next;
+    }
+
+    char *template = arena_alloc(&vm->compiler.parser_arena, template_len + 1);
+    char *out = template;
+    for (int i = 0; i < fragment_count; i++) {
+        size_t len = strlen(fragments[i]->str);
+        memcpy(out, fragments[i]->str, len);
+        out += len;
+        if (i < splice_count) {
+            *out++ = ' ';
+            *out++ = '$';
+            *out++ = (char)('1' + i);
+            *out++ = ' ';
+        }
+    }
+    *out = '\0';
+
+    Token head = {};
+    Token *cur = &head;
+#define APPEND_BT_TOKEN(kind, text)                                           \
+    (cur = cur->next = new_backtick_synthetic_token(vm, kind, text, tok))
+    APPEND_BT_TOKEN(TK_IDENT, "__builtin_quote");
+    APPEND_BT_TOKEN(TK_PUNCT, "(");
+    APPEND_BT_TOKEN(TK_IDENT, "__builtin_get_vm");
+    APPEND_BT_TOKEN(TK_PUNCT, "(");
+    APPEND_BT_TOKEN(TK_PUNCT, ")");
+    APPEND_BT_TOKEN(TK_PUNCT, ",");
+
+    Token *template_tok = new_backtick_synthetic_token(vm, TK_STR,
+                                                        tok->loc, tok);
+    template_tok->len = tok->len;
+    template_tok->str = template;
+    Type *elem = copy_type(vm, ty_char);
+    elem->is_const = true;
+    template_tok->ty = array_of(vm, elem, (int)template_len + 1);
+    cur = cur->next = template_tok;
+
+    for (int i = 0; i < splice_count; i++) {
+        APPEND_BT_TOKEN(TK_PUNCT, ",");
+        for (Token *src = expr_begin[i]; src != expr_end[i]; src = src->next)
+            cur = cur->next = copy_backtick_expr_token(vm, src);
+    }
+    APPEND_BT_TOKEN(TK_PUNCT, ")");
+#undef APPEND_BT_TOKEN
+
+    cur->next = fragments[fragment_count - 1]->next;
+    return postfix(vm, rest, head.next);
+}
+
 static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
+
+    if (tok->kind == TK_BACKTICK_STR)
+        return backtick_quasi_quote(vm, rest, tok);
 
     // C23 true/false/nullptr - only when actually classified as keywords
     // (pre-C23 these are downgraded to TK_IDENT and may be used as

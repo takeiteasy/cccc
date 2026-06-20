@@ -807,6 +807,50 @@ static Token *read_string_literal(VirtualMachine *vm, char *start, char *quote) 
     return tok;
 }
 
+// Read one raw fragment of a backtick quasi-quote. `token_start` includes the
+// opening backtick for the first fragment and starts immediately after `}` for
+// later fragments; `contents` always points at the first fragment byte.
+// Only \` is interpreted, as an escaped literal backtick. Every other byte is
+// copied verbatim for the underlying Quote template.
+static Token *read_backtick_fragment(VirtualMachine *vm, char *token_start,
+                                     char *contents, char **new_pos,
+                                     bool *has_splice) {
+    char *p = contents;
+    char *buf = arena_alloc(&vm->compiler.parser_arena, strlen(contents) + 1);
+    int len = 0;
+
+    for (;;) {
+        if (*p == '\0')
+            error_at(vm, token_start, "unterminated backtick quasi-quote");
+
+        if (p[0] == '\\' && p[1] == '`') {
+            buf[len++] = '`';
+            p += 2;
+            continue;
+        }
+
+        if (p[0] == '$' && p[1] == '{') {
+            Token *tok = new_token(vm, TK_BACKTICK_STR, token_start, p);
+            buf[len] = '\0';
+            tok->str = buf;
+            *new_pos = p + 2;
+            *has_splice = true;
+            return tok;
+        }
+
+        if (*p == '`') {
+            Token *tok = new_token(vm, TK_BACKTICK_STR, token_start, p + 1);
+            buf[len] = '\0';
+            tok->str = buf;
+            *new_pos = p + 1;
+            *has_splice = false;
+            return tok;
+        }
+
+        buf[len++] = *p++;
+    }
+}
+
 // Read a UTF-8-encoded string literal and transcode it in UTF-16.
 //
 // UTF-16 is yet another variable-width encoding for Unicode. Code
@@ -1230,6 +1274,9 @@ Token *tokenize(VirtualMachine *vm, File *file) {
     // State tracking for #include directive to preserve // in URLs
     bool after_include_directive = false;  // True after we see #include
     bool in_include_path = false;          // True when inside <...> or "..." of #include
+    bool in_backtick_splice = false;
+    int backtick_brace_depth = 0;
+    char *backtick_splice_start = NULL;
 
     while (*p) {
         // Skip line comments (but NOT inside #include paths where URLs may contain //)
@@ -1269,6 +1316,27 @@ Token *tokenize(VirtualMachine *vm, File *file) {
         if (isspace(*p)) {
             p++;
             vm->compiler.has_space = true;
+            continue;
+        }
+
+        if (in_backtick_splice && *p == '`')
+            error_at(vm, p, "nested backtick quasi-quotes are not supported");
+
+        // Backtick quasi-quote. The raw fragment is one token; `${` enters
+        // normal C tokenization so preprocessing and parsing apply to the
+        // interpolation expression exactly as they do elsewhere.
+        if (!in_backtick_splice && *p == '`') {
+            char *start = p++;
+            bool has_splice = false;
+            cur = cur->next = read_backtick_fragment(vm, start, p, &p,
+                                                      &has_splice);
+            if (has_splice) {
+                cur = cur->next = new_token(vm, TK_PUNCT, p - 2, p - 1);
+                cur = cur->next = new_token(vm, TK_PUNCT, p - 1, p);
+                in_backtick_splice = true;
+                backtick_brace_depth = 0;
+                backtick_splice_start = p - 2;
+            }
             continue;
         }
 
@@ -1403,6 +1471,29 @@ Token *tokenize(VirtualMachine *vm, File *file) {
         // Punctuators
         int punct_len = read_punct(vm, p);
         if (punct_len) {
+            if (in_backtick_splice && punct_len == 1 && *p == '{') {
+                backtick_brace_depth++;
+            } else if (in_backtick_splice && punct_len == 1 && *p == '}') {
+                if (backtick_brace_depth > 0) {
+                    backtick_brace_depth--;
+                } else {
+                    cur = cur->next = new_token(vm, TK_PUNCT, p, p + 1);
+                    p++;
+
+                    bool has_splice = false;
+                    cur = cur->next = read_backtick_fragment(vm, p, p, &p,
+                                                              &has_splice);
+                    if (has_splice) {
+                        cur = cur->next = new_token(vm, TK_PUNCT, p - 2, p - 1);
+                        cur = cur->next = new_token(vm, TK_PUNCT, p - 1, p);
+                        backtick_splice_start = p - 2;
+                    } else {
+                        in_backtick_splice = false;
+                        backtick_splice_start = NULL;
+                    }
+                    continue;
+                }
+            }
             cur = cur->next = new_token(vm, TK_PUNCT, p, p + punct_len);
             p += cur->len;
             continue;
@@ -1410,6 +1501,10 @@ Token *tokenize(VirtualMachine *vm, File *file) {
 
         error_at(vm, p, "invalid token");
     }
+
+    if (in_backtick_splice)
+        error_at(vm, backtick_splice_start,
+                 "unterminated backtick interpolation; expected '}'");
 
     cur = cur->next = new_token(vm, TK_EOF, p, p);
     add_line_numbers(vm, head.next);

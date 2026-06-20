@@ -709,6 +709,50 @@ that can reference comptime functions.
 
 ## Quasi-Quoting
 
+Backtick quasi-quotes embed a C expression or statement directly in a
+comptime function. `${...}` evaluates a comptime expression that returns a
+`Node *` and splices that node into the template:
+
+```c
+[[cccc::comptime(inline)]]
+Node *add_one(Node *x) {
+    return `return ${x} + 1;`;
+}
+
+int answer(void) {
+    add_one(41);
+}
+```
+
+Backticks are raw and may span lines, so C string quotes and ordinary
+backslashes do not need another layer of escaping. `\`` inserts a literal
+backtick; all other backslashes are preserved. Interpolation expressions use
+normal C parsing and preprocessing, including commas and nested braces:
+
+```c
+[[cccc::comptime(inline)]]
+Node *choose_second(Node *a, Node *b) {
+    return `return ${ ((Node *[]){ a, b })[1] };`;
+}
+```
+
+`$identifier` remains the reflect operator inside the generated template, so
+for example `` `return sizeof($Point);` `` reflects `Point` when the template
+is parsed. Backtick interpolation is scalar and supports up to six `${...}`
+splices. Use `Quote(...)` for `$N`, `$$`, or `$@` list splicing, and use
+`QuoteN(...)` when more splice nodes are required. Legacy `Quote` placeholders
+are rejected as backtick template tokens (text such as `"$1"` inside a C
+string literal remains ordinary text). Nested backtick quasi-quotes are not
+supported.
+
+The two forms use the same quote engine:
+
+| Backtick form | Equivalent `Quote` form |
+|---|---|
+| `` `return 42;` `` | `Quote("return 42;")` |
+| `` `return ${x} + 1;` `` | `Quote("return $1 + 1;", x)` |
+| Multiline raw template | Escaped C string template |
+
 `Quote(tmpl, ...)` parses a C expression or statement template and splices
 `Node *` values into `$1`, `$2`, and later numbered holes.
 
