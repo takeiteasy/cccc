@@ -738,12 +738,12 @@ Node *choose_second(Node *a, Node *b) {
 
 `$identifier` remains the reflect operator inside the generated template, so
 for example `` `return sizeof($Point);` `` reflects `Point` when the template
-is parsed. Backtick interpolation is scalar and supports up to six `${...}`
-splices. Use `Quote(...)` for `$N`, `$$`, or `$@` list splicing, and use
-`QuoteN(...)` when more splice nodes are required. Legacy `Quote` placeholders
-are rejected as backtick template tokens (text such as `"$1"` inside a C
-string literal remains ordinary text). Nested backtick quasi-quotes are not
-supported.
+is parsed. Backtick interpolation is scalar and uses the same variadic capacity
+as `Quote(...)` (up to 64 splice nodes). Use `Quote(...)` directly for `$N`,
+`$$`, or `$@` list splicing, and use `QuoteN(...)` when more splice nodes are
+required. Legacy `Quote` placeholders are rejected as backtick template tokens
+(text such as `"$1"` inside a C string literal remains ordinary text). Nested
+backtick quasi-quotes are not supported.
 
 The two forms use the same quote engine:
 

@@ -399,16 +399,16 @@ void __builtin_macro_warning_at(VirtualMachine *vm, Node *node, const char *fmt,
  * @return The parsed and substituted AST node, or NULL on error.
  * @discussion Template is parsed and substituted at macro-execution (compile)
  *             time; there is no runtime overhead.  Expressions and statements
- *             are auto-detected.  Capped at ~6 splice nodes due to the 8-
- *             register FFI limit; use __builtin_quote_n for more.
+ *             are auto-detected. The variadic form supports up to 64 splice
+ *             nodes; use __builtin_quote_n for larger node arrays.
  *             Convenience wrapper: Quote(tmpl, ...).
  */
 Node *__builtin_quote(VirtualMachine *vm, const char *tmpl, ...);
 
 /*!
  * @function __builtin_quote_n
- * @abstract Array-form quasi-quote; validates the splice count and supports
- *           more than 6 splice nodes.
+ * @abstract Array-form quasi-quote that validates the caller-provided splice
+ *           count and supports larger node arrays than the variadic form.
  * @param vm The VM context.
  * @param tmpl A C expression or statement as a string literal with $N / $@N
  *             splice points.

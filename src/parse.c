@@ -7128,6 +7128,29 @@ static Token *copy_backtick_expr_token(VirtualMachine *vm, Token *src) {
     return tok;
 }
 
+static bool backtick_fragment_has_splice(Token *fragment) {
+    return fragment->next && equal(fragment->next, "$") &&
+           fragment->next->next && equal(fragment->next->next, "{");
+}
+
+static Token *backtick_splice_end(VirtualMachine *vm, Token *fragment,
+                                  Token **begin) {
+    *begin = fragment->next->next->next;
+    Token *end = *begin;
+    while (end && end->kind != TK_EOF &&
+           !(equal(end, "}") && end->next &&
+             end->next->kind == TK_BACKTICK_STR))
+        end = end->next;
+
+    if (!end || end->kind == TK_EOF)
+        error_tok(vm, fragment->next,
+                  "unterminated backtick interpolation; expected '}'");
+    if (*begin == end)
+        error_tok(vm, fragment->next,
+                  "empty backtick interpolation is not allowed");
+    return end;
+}
+
 // Lower `fragment ${expr} fragment` to the parser-visible equivalent of
 // __builtin_quote(__builtin_get_vm(), "fragment $1 fragment", expr).
 // Interpolation tokens have already passed through the preprocessor, so this
@@ -7137,48 +7160,52 @@ static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest, Token *tok) 
         error_tok(vm, tok,
                   "backtick quasi-quotes are only valid in comptime functions");
 
-    Token *fragments[7] = {};
-    Token *expr_begin[6] = {};
-    Token *expr_end[6] = {};
     int fragment_count = 0;
     int splice_count = 0;
     size_t template_len = 0;
     BacktickLexState lex_state = BT_LEX_NORMAL;
     Token *fragment = tok;
 
+    // First pass: validate the stream and determine exact storage/template
+    // sizes. Quote's FFI path supports overflow arguments on the VM stack, so
+    // the parser does not impose an argument-register-derived splice limit.
     for (;;) {
-        fragments[fragment_count++] = fragment;
+        fragment_count++;
         template_len += strlen(fragment->str);
         validate_backtick_fragment(vm, fragment, &lex_state);
 
-        if (!fragment->next || !equal(fragment->next, "$") ||
-            !fragment->next->next || !equal(fragment->next->next, "{"))
+        if (!backtick_fragment_has_splice(fragment))
             break;
 
-        if (splice_count == 6)
-            error_tok(vm, fragment->next,
-                      "backtick quasi-quotes support at most 6 interpolations; "
-                      "use QuoteN(...) for more");
-
-        Token *begin = fragment->next->next->next;
-        Token *end = begin;
-        while (end && end->kind != TK_EOF &&
-               !(equal(end, "}") && end->next &&
-                 end->next->kind == TK_BACKTICK_STR))
-            end = end->next;
-
-        if (!end || end->kind == TK_EOF)
-            error_tok(vm, fragment->next,
-                      "unterminated backtick interpolation; expected '}'");
-        if (begin == end)
-            error_tok(vm, fragment->next,
-                      "empty backtick interpolation is not allowed");
-
-        expr_begin[splice_count] = begin;
-        expr_end[splice_count] = end;
+        Token *begin;
+        Token *end = backtick_splice_end(vm, fragment, &begin);
         splice_count++;
-        template_len += 4; // " $N ", N is 1..6
+        template_len += (size_t)snprintf(NULL, 0, " $%d ", splice_count);
         fragment = end->next;
+    }
+
+    Token **fragments = arena_alloc(&vm->compiler.parser_arena,
+                                    sizeof(*fragments) * fragment_count);
+    Token **expr_begin = NULL;
+    Token **expr_end = NULL;
+    if (splice_count > 0) {
+        expr_begin = arena_alloc(&vm->compiler.parser_arena,
+                                 sizeof(*expr_begin) * splice_count);
+        expr_end = arena_alloc(&vm->compiler.parser_arena,
+                               sizeof(*expr_end) * splice_count);
+    }
+
+    // Second pass: retain fragment and interpolation ranges for lowering.
+    fragment = tok;
+    for (int i = 0; i < fragment_count; i++) {
+        fragments[i] = fragment;
+        if (i < splice_count) {
+            Token *begin;
+            Token *end = backtick_splice_end(vm, fragment, &begin);
+            expr_begin[i] = begin;
+            expr_end[i] = end;
+            fragment = end->next;
+        }
     }
 
     char *template = arena_alloc(&vm->compiler.parser_arena, template_len + 1);
@@ -7187,12 +7214,8 @@ static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest, Token *tok) 
         size_t len = strlen(fragments[i]->str);
         memcpy(out, fragments[i]->str, len);
         out += len;
-        if (i < splice_count) {
-            *out++ = ' ';
-            *out++ = '$';
-            *out++ = (char)('1' + i);
-            *out++ = ' ';
-        }
+        if (i < splice_count)
+            out += sprintf(out, " $%d ", i + 1);
     }
     *out = '\0';
 

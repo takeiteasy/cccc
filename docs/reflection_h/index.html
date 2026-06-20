@@ -780,8 +780,8 @@ head.  Use the result as the argument to a `$@k` list splice.
 splice points with the provided argument nodes.
 </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__builtin_quote_n" target="_top">__builtin_quote_n</a></tt></dt>
-<dd><p>Array-form quasi-quote; validates the splice count and supports
-more than 6 splice nodes.
+<dd><p>Array-form quasi-quote that validates the caller-provided splice
+count and supports larger node arrays than the variadic form.
 </p></dd>
 </dl>
 <hr class="betweenAPIEntries">
@@ -6248,8 +6248,8 @@ lists. Using `$@k` as an expression operand is a compile-time error.</p>
 <h5 class="tight"><font face="Lucida Grande,Helvetica,Arial">Discussion</font></h5>
 <!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/c/func/__builtin_quote;name=start --><p>Template is parsed and substituted at macro-execution (compile)
 time; there is no runtime overhead.  Expressions and statements
-are auto-detected.  Capped at ~6 splice nodes due to the 8-
-register FFI limit; use __builtin_quote_n for more.
+are auto-detected. The variadic form supports up to 64 splice
+nodes; use __builtin_quote_n for larger node arrays.
 Convenience wrapper: Quote(tmpl, ...).
 <!-- headerDoc=discussion;uid=//apple_ref/c/func/__builtin_quote;name=end --><!-- end discussion -->
 </p>
@@ -6259,8 +6259,8 @@ Convenience wrapper: Quote(tmpl, ...).
 <h3><a name="__builtin_quote_n">__builtin_quote_n</a></h3>
 <hr class="afterName">
 <p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_quote_n;name=start --><!-- begin abstract --></p>
-<p>Array-form quasi-quote; validates the splice count and supports
-more than 6 splice nodes.
+<p>Array-form quasi-quote that validates the caller-provided splice
+count and supports larger node arrays than the variadic form.
 <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_quote_n;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_quote_n;name=start --><a machinegenerated="true" href="../cccc_h/index.html#//apple_ref/c/tag/Node" logicalPath="//apple_ref/c/cl/Node //apple_ref/c/tdef/Node //apple_ref/c/tag/Node" target="_top"><span class="type">Node</span></a> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_quote_n" logicalPath="//apple_ref/c/instm/__builtin_quote_n //apple_ref/c/clm/__builtin_quote_n //apple_ref/c/intfcm/__builtin_quote_n //apple_ref/c/intfm/__builtin_quote_n //apple_ref/c/func/__builtin_quote_n" target="_top"><span class="function">__builtin_quote_n</span></a>(
