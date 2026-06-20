@@ -87,7 +87,7 @@ char *get_std_header(char *filename) {
         {
             if (strcmp((const char *)filename, (const char *)"termios.h") == 0)
                 return (char *)__builtin_termios_h;
-            if (strcmp((const char *)filename, (const char *)"tests.h") == 0)
+            if (strcmp((const char *)filename, (const char *)"testing.h") == 0)
                 return (char *)__builtin_tests_h;
             if (strcmp((const char *)filename, (const char *)"tgmath.h") == 0)
                 return (char *)__builtin_tgmath_h;
@@ -416,7 +416,7 @@ char *get_std_header_name(int i) {
     case 52:
         return "tgmath.h";
     case 51:
-        return "tests.h";
+        return "testing.h";
     case 50:
         return "termios.h";
     case 49:
@@ -523,4 +523,3 @@ char *get_std_header_name(int i) {
         return 0;
     }
 }
-

@@ -353,7 +353,7 @@ linux-x86_64-qemu-smoke:
 all: clean $(EXE_OUT) $(LIB_OUT) test docs
 
 docs:
-	@headerdoc2html src/cccc.h include/cccc/reflection.h -o docs/; \
+	@headerdoc2html src/cccc.h include/cccc/reflection.h include/cccc/testing.h -o docs/; \
 	gatherheaderdoc docs/; \
 	mv docs/masterTOC.html docs/index.html
 

@@ -34,13 +34,13 @@ char *make_global_name(const char *header) {
     return buf;
 }
 
-// reflection.h and tests.h are private headers. Keep embedding them,
+// reflection.h and testing.h are private headers. Keep embedding them,
 // but do not place them under include/ where user source can find them.
 const char *header_source_path(const char *header) {
     if (strcmp(header, "reflection.h") == 0)
         return "include/cccc/reflection.h";
-    if (strcmp(header, "tests.h") == 0)
-        return "include/cccc/tests.h";
+    if (strcmp(header, "testing.h") == 0)
+        return "include/cccc/testing.h";
     static char path[256];
     snprintf(path, sizeof(path), "include/%s", header);
     return path;
@@ -97,11 +97,11 @@ char **discover_headers(void) {
         if (!skip) public_count++;
     }
 
-    int count = public_count + 2; // plus reflection.h and tests.h
+    int count = public_count + 2; // plus reflection.h and testing.h
     char **headers = malloc((count + 1) * sizeof(char *));
     int n = 0;
     headers[n++] = copy_header_name("reflection.h");
-    headers[n++] = copy_header_name("tests.h");
+    headers[n++] = copy_header_name("testing.h");
     for (int i = 0; i < (int)g.gl_pathc; i++) {
         char *name = copy_header_name(g.gl_pathv[i]);
         if (strncmp(name, "cccc/", 4) == 0) {
