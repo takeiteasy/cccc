@@ -3,7 +3,7 @@
 
 [[cccc::comptime]]
 void bad_str(...) {
-    $vararg_str_at($vararg_count());
+    VarargStrAt(VarargCount());
 }
 
 bad_str(foo);

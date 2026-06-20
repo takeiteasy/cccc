@@ -8,13 +8,13 @@ int double_it(int n) { return n * 2; }
 int answer = 21;
 
 [[cccc::comptime(inline)]]
-$node_t *get_answer(void) {
-    return $int_literal($get_comptime_int("answer") * 2);
+Node *get_answer(void) {
+    return MakeIntLiteral(GetComptimeInt("answer") * 2);
 }
 
 [[cccc::comptime(inline)]]
-$node_t *use_helper($node_t *x) {
-    return $binary(nk_add, x, $int_literal(double_it(1)));
+Node *use_helper(Node *x) {
+    return MakeBinary(NK_ADD, x, MakeIntLiteral(double_it(1)));
 }
 
 int main(void) {

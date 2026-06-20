@@ -1901,7 +1901,7 @@ int main(int argc, const char *argv[]) {
     }
 
     // Inject inline-macro-generated function definitions into the program.
-    // These Objs were created by __cccc_ast_function during pre-parse inline
+    // These Objs were created by __builtin_ast_function during pre-parse inline
     // macro execution and stashed in vm.compiler.macro_globals. They must be
     // in the prog list so cc_compile calls gen_function on them and the
     // call-patcher can resolve calls to them by name.

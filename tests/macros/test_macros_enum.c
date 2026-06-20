@@ -9,25 +9,25 @@ typedef enum { COLOR_RED, COLOR_GREEN, COLOR_BLUE } Color;
 
 // Pragma macro to get enum constant name at compile time
 [[cccc::comptime(inline)]]
-$node_t *color_name($node_t *value) {
-    $vm_t *vm = __cccc_get_vm();
+Node *color_name(Node *value) {
+    VirtualMachine *vm = __builtin_get_vm();
 
     // Find the Color type
-    $type_t *color_type = __cccc_ast_find_type(vm, "Color");
+    Type *color_type = __builtin_ast_find_type(vm, "Color");
     if (!color_type) {
         // Fallback if type not found
-        return __cccc_ast_string_literal(vm, "unknown");
+        return __builtin_ast_string_literal(vm, "unknown");
     }
 
     // Build a switch statement that maps values to strings
     // For now, just demonstrate enum introspection works
-    int count = __cccc_ast_enum_count(vm, color_type);
+    int count = __builtin_ast_enum_count(vm, color_type);
 
     // Return a string showing we found the enum
     if (count == 3) {
-        return __cccc_ast_string_literal(vm, "enum_found");
+        return __builtin_ast_string_literal(vm, "enum_found");
     }
-    return __cccc_ast_string_literal(vm, "enum_not_found");
+    return __builtin_ast_string_literal(vm, "enum_not_found");
 }
 
 int main(void) {

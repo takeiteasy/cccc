@@ -5,18 +5,18 @@
 int base = 20;
 
 [[cccc::comptime(inline)]]
-$node_t *doubled(void) {
-    return $int_literal($get_comptime_int("base") * 2);
+Node *doubled(void) {
+    return MakeIntLiteral(GetComptimeInt("base") * 2);
 }
 
 [[cccc::comptime]]
 int bonus = 2;
 
 [[cccc::comptime(inline)]]
-$node_t *total(void) {
-    int64_t b = $get_comptime_int("base");
-    int64_t n = $get_comptime_int("bonus");
-    return $int_literal(b + n);
+Node *total(void) {
+    int64_t b = GetComptimeInt("base");
+    int64_t n = GetComptimeInt("bonus");
+    return MakeIntLiteral(b + n);
 }
 
 int main(void) {

@@ -6,13 +6,13 @@ int inc_int(int n) {
 }
 
 [[cccc::comptime(inline)]]
-$node_t *make_answer(void) {
-    return $int_literal(inc_int(41));
+Node *make_answer(void) {
+    return MakeIntLiteral(inc_int(41));
 }
 
 [[cccc::comptime(inline)]]
-$node_t *add_later_helper($node_t *x) {
-    return $binary(nk_add, x, $int_literal(triple_later(2)));
+Node *add_later_helper(Node *x) {
+    return MakeBinary(NK_ADD, x, MakeIntLiteral(triple_later(2)));
 }
 
 [[cccc::comptime]]
@@ -35,9 +35,9 @@ int mutual_odd(int n) {
 }
 
 [[cccc::comptime(inline)]]
-$node_t *mutual_add_four($node_t *x) {
-    return $binary(nk_add, x,
-                          $int_literal(mutual_even(4)));
+Node *mutual_add_four(Node *x) {
+    return MakeBinary(NK_ADD, x,
+                          MakeIntLiteral(mutual_even(4)));
 }
 
 int main(void) {

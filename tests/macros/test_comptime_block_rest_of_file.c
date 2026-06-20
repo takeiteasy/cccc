@@ -10,8 +10,8 @@ int triple(int n) {
 int base = 14;
 
 [[cccc::comptime(inline)]]
-$node_t *make_answer(void) {
-    return $int_literal(triple($get_comptime_int("base")));
+Node *make_answer(void) {
+    return MakeIntLiteral(triple(GetComptimeInt("base")));
 }
 
 #pragma cccc comptime end

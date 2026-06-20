@@ -1,10 +1,10 @@
-// Ticket #235: $enum_to_string/$enum_from_string thin AST wrappers.
+// Ticket #235: EnumToString/EnumFromString thin AST wrappers.
 //
 // The function signatures use `int` instead of `enum Color` for the
 // enum-valued parameter/return to avoid a pre-existing forward-declaration
 // gap (`<inline-macro-fwd>` synthesizes "enum Color foo(...)" forward decls
 // for [[cccc::comptime]]-generated functions, which C23 rejects without an
-// underlying type). $enum_to_string/$enum_from_string only need the
+// underlying type). EnumToString/EnumFromString only need the
 // expression's value, not its declared type, so this is harmless.
 
 #include <string.h>
@@ -17,20 +17,20 @@ enum Color {
 
 [[cccc::comptime]]
 void generate_color_funcs(void) {
-    $type_t *ty = $get_type("Color");
+    Type *ty = GetType("Color");
 
-    $obj_t *to_str = $function("color_to_string", $make_pointer($make_const($get_type("char"))));
-    $function_add_param(to_str, "v", $get_type("int"));
-    $with_fn(to_str) {
-        $node_t *v = $param_ref(to_str, "v");
-        $function_set_body(to_str, $enum_to_string(ty, v));
+    Obj *to_str = MakeFunction("color_to_string", MakePointer(MakeConst(GetType("char"))));
+    FunctionAddParam(to_str, "v", GetType("int"));
+    WithFn(to_str) {
+        Node *v = MakeParamRef(to_str, "v");
+        FunctionSetBody(to_str, EnumToString(ty, v));
     }
 
-    $obj_t *from_str = $function("color_from_string", $get_type("int"));
-    $function_add_param(from_str, "s", $make_pointer($make_const($get_type("char"))));
-    $with_fn(from_str) {
-        $node_t *s = $param_ref(from_str, "s");
-        $function_set_body(from_str, $enum_from_string(ty, s));
+    Obj *from_str = MakeFunction("color_from_string", GetType("int"));
+    FunctionAddParam(from_str, "s", MakePointer(MakeConst(GetType("char"))));
+    WithFn(from_str) {
+        Node *s = MakeParamRef(from_str, "s");
+        FunctionSetBody(from_str, EnumFromString(ty, s));
     }
 }
 

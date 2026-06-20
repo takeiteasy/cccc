@@ -3,10 +3,10 @@
 // CCCC_EXPECT_STDERR: error: conflicting declaration for generated global variable 'conflict_name'
 
 [[cccc::comptime(inline)]]
-$node_t *publish_conflicting_global(void) {
-    $obj_t *g = $global_var("conflict_name", $get_type("int"));
-    $publish_at(g, $synthetic_token("publish conflict"));
-    return $int_literal(0);
+Node *publish_conflicting_global(void) {
+    Obj *g = GlobalVar("conflict_name", GetType("int"));
+    PublishNodeAt(g, SyntheticToken("publish conflict"));
+    return MakeIntLiteral(0);
 }
 
 int main(void) {

@@ -2,8 +2,8 @@
 // Ticket #284: AST vararg access is bounds checked.
 
 [[cccc::comptime(inline)]]
-$node_t *bad_at(...) {
-    return $vararg_at($vararg_count());
+Node *bad_at(...) {
+    return VarargAt(VarargCount());
 }
 
 int main(void) {

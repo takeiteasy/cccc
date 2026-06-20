@@ -3,24 +3,24 @@
 int add_numbers(int a, int b);
 
 [[cccc::comptime(inline)]]
-$node_t *gen_add_func(void) {
-    $vm_t *vm = __cccc_get_vm();
+Node *gen_add_func(void) {
+    VirtualMachine *vm = __builtin_get_vm();
 
-    $type_t *int_type = __cccc_ast_get_type(vm, "int");
-    $obj_t *fn = __cccc_ast_function(vm, "add_numbers", int_type);
+    Type *int_type = __builtin_ast_get_type(vm, "int");
+    Obj *fn = __builtin_ast_function(vm, "add_numbers", int_type);
 
     // Add parameters
-    __cccc_ast_function_add_param(vm, fn, "a", int_type);
-    __cccc_ast_function_add_param(vm, fn, "b", int_type);
+    __builtin_ast_function_add_param(vm, fn, "a", int_type);
+    __builtin_ast_function_add_param(vm, fn, "b", int_type);
 
     // Body: return a + b;
-    $node_t *a_ref = __cccc_ast_param_ref(vm, fn, "a");
-    $node_t *b_ref = __cccc_ast_param_ref(vm, fn, "b");
-    $node_t *sum = __cccc_ast_binary(vm, nk_add, a_ref, b_ref);
-    $node_t *body = __cccc_ast_return(vm, sum);
-    __cccc_ast_function_set_body(vm, fn, body);
+    Node *a_ref = __builtin_ast_param_ref(vm, fn, "a");
+    Node *b_ref = __builtin_ast_param_ref(vm, fn, "b");
+    Node *sum = __builtin_ast_binary(vm, NK_ADD, a_ref, b_ref);
+    Node *body = __builtin_ast_return(vm, sum);
+    __builtin_ast_function_set_body(vm, fn, body);
 
-    return __cccc_ast_int_literal(vm, 0);
+    return __builtin_ast_int_literal(vm, 0);
 }
 
 int main(void) {

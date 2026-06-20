@@ -26,12 +26,12 @@
  * - Enum reflection
  * - Struct/union member introspection
  * - AST node construction (literals, expressions, statements)
- * - Global variable generation ($global_var*)
- * - Function-building context ($with_fn)
+ * - Global variable generation (GlobalVar*)
+ * - Function-building context (WithFn)
  *
  * ## Return-value model
  *
- * A pragma macro's returned $node_t* is **the node spliced at the call site**,
+ * A pragma macro's returned Node* is **the node spliced at the call site**,
  * replacing the invocation.  Top-level definitions (functions, globals) are
  * **side effects** — injected into the program regardless of the return value.
  *
@@ -47,11 +47,11 @@
  * @code
  * #pragma macro
  * void emit_helpers(void) {
- *     $obj_t *fn = $function("helper", $get_type("int"));
- *     $with_fn(fn) {
- *         $function_set_body(fn, $quote("return 42;"));
+ *     Obj *fn = MakeFunction("helper", GetType("int"));
+ *     WithFn(fn) {
+ *         FunctionSetBody(fn, Quote("return 42;"));
  *     }
- *     $publish(fn);
+ *     PublishNode(fn);
  *     // no return needed
  * }
  * emit_helpers();
@@ -63,16 +63,16 @@
  *
  * This private header is embedded into CCCC and automatically injected when
  * compiling pragma macros. It is not installed as a public runtime header.
- * All functions that require VM context use the _VM macro, which
- * expands to __cccc_get_vm() - a builtin that returns the current
+ * All functions that require VM context use the VM macro, which
+ * expands to __builtin_get_vm() - a builtin that returns the current
  * VM instance during macro execution.
  *
  * ## Example (expression macro)
  *
  * @code
  * #pragma macro
- * $node_t *make_const_5(void) {
- *     return $int_literal(5);
+ * Node *make_const_5(void) {
+ *     return MakeIntLiteral(5);
  * }
  *
  * int main(void) {
@@ -96,152 +96,152 @@ extern "C" {
 
 // Forward declarations (opaque types for pragma macros)
 typedef struct VirtualMachine VirtualMachine;
-typedef struct VirtualMachine $vm_t;
-typedef struct Type $type_t;
-typedef struct Node $node_t;
-typedef struct Obj $obj_t;
-typedef struct Member $member_t;
-typedef struct EnumConstant $enum_constant_t;
-typedef struct Token $token_t;
-typedef struct AttrTarget $attr_target_t;
+typedef struct VirtualMachine VirtualMachine;
+typedef struct Type Type;
+typedef struct Node Node;
+typedef struct Obj Obj;
+typedef struct Member Member;
+typedef struct EnumConstant EnumConstant;
+typedef struct Token Token;
+typedef struct AttrTarget AttrTarget;
 
 // Type kind enumeration (matches cccc.h)
 typedef enum {
-    tk_void = 0,
-    tk_bool = 1,
-    tk_char = 2,
-    tk_short = 3,
-    tk_int = 4,
-    tk_long = 5,
-    tk_float = 6,
-    tk_double = 7,
-    tk_ldouble = 8,
-    tk_enum = 9,
-    tk_ptr = 10,
-    tk_func = 11,
-    tk_array = 12,
-    tk_vla = 13,
-    tk_struct = 14,
-    tk_union = 15,
-} $type_kind_t;
+    TK_VOID = 0,
+    TK_BOOL = 1,
+    TK_CHAR = 2,
+    TK_SHORT = 3,
+    TK_INT = 4,
+    TK_LONG = 5,
+    TK_FLOAT = 6,
+    TK_DOUBLE = 7,
+    TK_LDOUBLE = 8,
+    TK_ENUM = 9,
+    TK_PTR = 10,
+    TK_FUNC = 11,
+    TK_ARRAY = 12,
+    TK_VLA = 13,
+    TK_STRUCT = 14,
+    TK_UNION = 15,
+} TypeKind;
 
 // Node kind enumeration (subset for pragma macro use)
 typedef enum {
-    nk_null_expr = 0,
-    nk_add = 1,
-    nk_sub = 2,
-    nk_mul = 3,
-    nk_div = 4,
-    nk_neg = 5,
-    nk_mod = 6,
-    nk_bitand = 7,
-    nk_bitor = 8,
-    nk_bitxor = 9,
-    nk_shl = 10,
-    nk_shr = 11,
-    nk_eq = 12,
-    nk_ne = 13,
-    nk_lt = 14,
-    nk_le = 15,
-    nk_assign = 16,
-    nk_cond = 17,
-    nk_comma = 18,
-    nk_member = 19,
-    nk_addr = 20,
-    nk_deref = 21,
-    nk_not = 22,
-    nk_bitnot = 23,
-    nk_logand = 24,
-    nk_logor = 25,
-    nk_return = 26,
-    nk_if = 27,
-    nk_for = 28,
-    nk_do = 29,
-    nk_switch = 30,
-    nk_case = 31,
-    nk_block = 32,
-    nk_funcall = 37,
-    nk_expr_stmt = 38,
-    nk_var = 40,
-    nk_num = 42,
-    nk_cast = 43,
-    nk_macro_call = 51,
-} $node_kind_t;
+    NK_NULL_EXPR = 0,
+    NK_ADD = 1,
+    NK_SUB = 2,
+    NK_MUL = 3,
+    NK_DIV = 4,
+    NK_NEG = 5,
+    NK_MOD = 6,
+    NK_BITAND = 7,
+    NK_BITOR = 8,
+    NK_BITXOR = 9,
+    NK_SHL = 10,
+    NK_SHR = 11,
+    NK_EQ = 12,
+    NK_NE = 13,
+    NK_LT = 14,
+    NK_LE = 15,
+    NK_ASSIGN = 16,
+    NK_COND = 17,
+    NK_COMMA = 18,
+    NK_MEMBER = 19,
+    NK_ADDR = 20,
+    NK_DEREF = 21,
+    NK_NOT = 22,
+    NK_BITNOT = 23,
+    NK_LOGAND = 24,
+    NK_LOGOR = 25,
+    NK_RETURN = 26,
+    NK_IF = 27,
+    NK_FOR = 28,
+    NK_DO = 29,
+    NK_SWITCH = 30,
+    NK_CASE = 31,
+    NK_BLOCK = 32,
+    NK_FUNCALL = 37,
+    NK_EXPR_STMT = 38,
+    NK_VAR = 40,
+    NK_NUM = 42,
+    NK_CAST = 43,
+    NK_MACRO_CALL = 51,
+} NodeKind;
 
 typedef enum {
-    attr_target_typedef = 1,
-    attr_target_type = 2,
-    attr_target_function = 3,
-    attr_target_global = 4,
-} $attr_target_kind_t;
+    ATTR_TARGET_TYPEDEF = 1,
+    ATTR_TARGET_TYPE = 2,
+    ATTR_TARGET_FUNCTION = 3,
+    ATTR_TARGET_GLOBAL = 4,
+} AttrTargetKind;
 
 // ============================================================================
-// Magic _VM Builtin
+// Magic VM Builtin
 // ============================================================================
 
 /*!
- * @function __cccc_get_vm
+ * @function __builtin_get_vm
  * @abstract Builtin that returns the current parent VM context.
  * @discussion Set before calling a pragma macro and cleared after.
- *             Use the @c _VM convenience macro inside a macro body to refer
+ *             Use the @c VM convenience macro inside a macro body to refer
  *             to the active VM instance.
  * @return Pointer to the current CCCC VM instance.
  */
-extern VirtualMachine *__cccc_get_vm(void);
+extern VirtualMachine *__builtin_get_vm(void);
 
 /*!
- * @define _VM
+ * @define VM
  * @abstract Magic macro that references the VM instance in pragma macros.
  */
-#define _VM __cccc_get_vm()
+#define VM __builtin_get_vm()
 
 /*!
- * @function __cccc_gensym
+ * @function __builtin_gensym
  * @abstract Generate a unique identifier string for macro-created symbols.
  * @param vm The VM context.
  * @param prefix Prefix for the generated name.
  * @return An arena-allocated string of the form "<prefix>__<n>".
- * @discussion Convenience wrapper: $gensym(prefix).
+ * @discussion Convenience wrapper: Gensym(prefix).
  */
-const char *__cccc_gensym(VirtualMachine *vm, const char *prefix);
+const char *__builtin_gensym(VirtualMachine *vm, const char *prefix);
 
 /*!
- * @function __cccc_macroexpand_1
+ * @function __builtin_macroexpand_1
  * @abstract Lisp-style single-step macro expansion (macroexpand-1 semantics).
  * @discussion If @a node is an @c ND_MACRO_CALL node, execute the macro once
  *             and return the resulting node without splicing it into the AST
  *             or recursing into nested macro calls. If @a node is not a macro
  *             call, it is returned unchanged (identity).
- *             Convenience wrapper: $macroexpand_1(node).
+ *             Convenience wrapper: MacroExpand1(node).
  * @param vm The VM context.
  * @param node The node to (possibly) expand.
  * @return The expanded node, or @a node itself if it is not a macro call.
  */
-$node_t *__cccc_macroexpand_1(VirtualMachine *vm, $node_t *node);
+Node *__builtin_macroexpand_1(VirtualMachine *vm, Node *node);
 
 /*!
- * @function __cccc_macroexpand
+ * @function __builtin_macroexpand
  * @abstract Lisp-style full macro expansion.
- * @discussion Repeatedly calls @c __cccc_macroexpand_1 on the top-level node
+ * @discussion Repeatedly calls @c __builtin_macroexpand_1 on the top-level node
  *             until it is no longer an @c ND_MACRO_CALL (i.e. the form is
  *             stable). Does not recurse into child nodes. Respects the VM's
- *             @c macro_recursion_limit.  Convenience wrapper: $macroexpand(node).
+ *             @c macro_recursion_limit.  Convenience wrapper: MacroExpand(node).
  * @param vm The VM context.
  * @param node The node to fully expand.
  * @return The fully expanded node, or @a node itself if it is not a macro call.
  */
-$node_t *__cccc_macroexpand(VirtualMachine *vm, $node_t *node);
+Node *__builtin_macroexpand(VirtualMachine *vm, Node *node);
 
 /*!
- * @function __cccc_ast_vararg_count
+ * @function __builtin_ast_vararg_count
  * @abstract Return the number of variadic arguments for the active macro call.
  * @param vm The VM context.
  * @return Number of arguments after the fixed parameters.
  */
-int __cccc_ast_vararg_count(VirtualMachine *vm);
+int __builtin_ast_vararg_count(VirtualMachine *vm);
 
 /*!
- * @function __cccc_ast_vararg_at
+ * @function __builtin_ast_vararg_at
  * @abstract Return an inline macro's variadic AST argument by zero-based index.
  * @param vm The VM context.
  * @param index Zero-based variadic argument index.
@@ -249,10 +249,10 @@ int __cccc_ast_vararg_count(VirtualMachine *vm);
  * @discussion Emits a compile-time error if @a index is out of range or the
  *             active macro call is a global-generation string macro.
  */
-$node_t *__cccc_ast_vararg_at(VirtualMachine *vm, int index);
+Node *__builtin_ast_vararg_at(VirtualMachine *vm, int index);
 
 /*!
- * @function __cccc_ast_varargs_as_array
+ * @function __builtin_ast_varargs_as_array
  * @abstract Return an inline macro's variadic AST arguments as an array.
  * @param vm The VM context.
  * @return Borrowed array of variadic argument nodes, or NULL when the active
@@ -263,10 +263,10 @@ $node_t *__cccc_ast_vararg_at(VirtualMachine *vm, int index);
  *             compile-time error if the active macro call is a
  *             global-generation string macro.
  */
-$node_t **__cccc_ast_varargs_as_array(VirtualMachine *vm);
+Node **__builtin_ast_varargs_as_array(VirtualMachine *vm);
 
 /*!
- * @function __cccc_ast_vararg_str_at
+ * @function __builtin_ast_vararg_str_at
  * @abstract Return a global-generation macro's stringified variadic argument.
  * @param vm The VM context.
  * @param index Zero-based variadic argument index.
@@ -274,75 +274,75 @@ $node_t **__cccc_ast_varargs_as_array(VirtualMachine *vm);
  * @discussion Emits a compile-time error if @a index is out of range or the
  *             active macro call is an inline AST macro.
  */
-const char *__cccc_ast_vararg_str_at(VirtualMachine *vm, int index);
+const char *__builtin_ast_vararg_str_at(VirtualMachine *vm, int index);
 
-int $vararg_count();
-$node_t *$vararg_at(int index);
-$node_t **$vararg_as_array();
-const char *$vararg_str_at(int index);
+int VarargCount();
+Node *VarargAt(int index);
+Node **VarargAsArray();
+const char *VarargStrAt(int index);
 
 // ============================================================================
 // Generated Node Source Locations (ticket #173)
 // ============================================================================
 
 /*!
- * @function __cccc_ast_current_token
+ * @function __builtin_ast_current_token
  * @abstract Return the token for the macro invocation currently being executed.
  * @param vm The VM context.
  * @return Opaque token for the active macro call site, or NULL outside macro
  *         execution.
- * @discussion Convenience wrapper: $current_token().
+ * @discussion Convenience wrapper: CurrentToken().
  */
-$token_t *__cccc_ast_current_token(VirtualMachine *vm);
+Token *__builtin_ast_current_token(VirtualMachine *vm);
 
 /*!
- * @function __cccc_ast_synthetic_token
+ * @function __builtin_ast_synthetic_token
  * @abstract Create an opaque synthetic source token for generated AST nodes.
  * @param vm The VM context.
  * @param label Short diagnostic label for the synthetic location.
  * @return Arena-allocated synthetic token, or NULL on error.
  * @discussion Use this when a generated node should diagnose against a stable
  *             generated location instead of the macro call or an input node.
- *             Convenience wrapper: $synthetic_token(label).
+ *             Convenience wrapper: SyntheticToken(label).
  */
-$token_t *__cccc_ast_synthetic_token(VirtualMachine *vm, const char *label);
+Token *__builtin_ast_synthetic_token(VirtualMachine *vm, const char *label);
 
 /*!
- * @function __cccc_ast_token_from_node
+ * @function __builtin_ast_token_from_node
  * @abstract Return the opaque source token attached to a node.
  * @param node Node to inspect.
  * @return The node token, or NULL.
- * @discussion Convenience wrapper: $token_from_node(node).
+ * @discussion Convenience wrapper: TokenFromNode(node).
  */
-$token_t *__cccc_ast_token_from_node($node_t *node);
+Token *__builtin_ast_token_from_node(Node *node);
 
 /*!
- * @function __cccc_ast_set_token
+ * @function __builtin_ast_set_token
  * @abstract Attach an opaque source token to a node.
  * @param node Node to update.
- * @param tok Token from __cccc_ast_current_token(),
- *            __cccc_ast_synthetic_token(), or __cccc_ast_token_from_node().
+ * @param tok Token from __builtin_ast_current_token(),
+ *            __builtin_ast_synthetic_token(), or __builtin_ast_token_from_node().
  * @return node, for chaining.
- * @discussion Convenience wrapper: $set_token(node, tok).
+ * @discussion Convenience wrapper: SetToken(node, tok).
  */
-$node_t *__cccc_ast_set_token($node_t *node, $token_t *tok);
+Node *__builtin_ast_set_token(Node *node, Token *tok);
 
 /*!
- * @function __cccc_ast_copy_location
+ * @function __builtin_ast_copy_location
  * @abstract Copy the source token from one node to another.
  * @param dst Generated node to update.
  * @param src Source node whose location should be reused.
  * @return dst, for chaining.
- * @discussion Convenience wrapper: $copy_location(dst, src).
+ * @discussion Convenience wrapper: CopyLocation(dst, src).
  */
-$node_t *__cccc_ast_copy_location($node_t *dst, $node_t *src);
+Node *__builtin_ast_copy_location(Node *dst, Node *src);
 
 // ============================================================================
 // Macro Diagnostics (ticket #78)
 // ============================================================================
 
 /*!
- * @function __cccc_macro_error_at
+ * @function __builtin_macro_error_at
  * @abstract Emit a compiler error pointing at the source location of a node.
  * @param vm The VM context.
  * @param node A node whose tok field provides file/line/col. May be NULL
@@ -352,26 +352,26 @@ $node_t *__cccc_ast_copy_location($node_t *dst, $node_t *src);
  *             prints the error with file/line/col and source snippet then
  *             aborts via longjmp or exit.  When vm->collect_errors is set
  *             it records the error and compilation may continue.
- *             Convenience wrapper: $macro_error_at(node, ...).
+ *             Convenience wrapper: MacroErrorAt(node, ...).
  */
-void __cccc_macro_error_at(VirtualMachine *vm, $node_t *node, const char *fmt, ...)
+void __builtin_macro_error_at(VirtualMachine *vm, Node *node, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 
 /*!
- * @function __cccc_macro_warning_at
+ * @function __builtin_macro_warning_at
  * @abstract Emit a compiler warning pointing at the source location of a node.
  * @param vm The VM context.
  * @param node A node whose tok field provides file/line/col. May be NULL.
  * @param fmt printf-style format string, followed by format arguments.
  * @discussion Emitted only when -Wcccc-macro is enabled. Non-fatal unless
  *             promoted with -Werror or -Werror=cccc-macro.
- *             Convenience wrapper: $macro_warning_at(node, ...).
+ *             Convenience wrapper: MacroWarningAt(node, ...).
  */
-void __cccc_macro_warning_at(VirtualMachine *vm, $node_t *node, const char *fmt, ...)
+void __builtin_macro_warning_at(VirtualMachine *vm, Node *node, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 
 /*!
- * @function __cccc_quote
+ * @function __builtin_quote
  * @abstract Parse a C code template string into an AST node, substituting
  *           splice points with the provided argument nodes.
  * @param vm The VM context.
@@ -384,7 +384,7 @@ void __cccc_macro_warning_at(VirtualMachine *vm, $node_t *node, const char *fmt,
  *   **List splices** — expand a statement-position placeholder into a chain
  *   of N statements (ticket #172):
  *     - `$@1`, `$@2`, ... positional list splice.  The argument must be a
- *       `->next`-linked node chain (see `$node_list` / `__cccc_node_list`).
+ *       `->next`-linked node chain (see `NodeList` / `__builtin_node_list`).
  *       Each `$@k;` in the template is replaced by the entire chain.
  *     - `$@` sequential list splice, parallel to `$$`.
  *     - List splice identifiers (`$@k`) may share their index with scalar
@@ -395,469 +395,469 @@ void __cccc_macro_warning_at(VirtualMachine *vm, $node_t *node, const char *fmt,
  *   block), direct call-argument position, or compound-literal initializer
  *   lists. Using `$@k` as an expression operand is a compile-time error.
  *
- * @param ... $node_t* arguments corresponding to the splice points.
+ * @param ... Node* arguments corresponding to the splice points.
  * @return The parsed and substituted AST node, or NULL on error.
  * @discussion Template is parsed and substituted at macro-execution (compile)
  *             time; there is no runtime overhead.  Expressions and statements
  *             are auto-detected.  Capped at ~6 splice nodes due to the 8-
- *             register FFI limit; use __cccc_quote_n for more.
- *             Convenience wrapper: $quote(tmpl, ...).
+ *             register FFI limit; use __builtin_quote_n for more.
+ *             Convenience wrapper: Quote(tmpl, ...).
  */
-$node_t *__cccc_quote(VirtualMachine *vm, const char *tmpl, ...);
+Node *__builtin_quote(VirtualMachine *vm, const char *tmpl, ...);
 
 /*!
- * @function __cccc_quote_n
+ * @function __builtin_quote_n
  * @abstract Array-form quasi-quote; validates the splice count and supports
  *           more than 6 splice nodes.
  * @param vm The VM context.
  * @param tmpl A C expression or statement as a string literal with $N / $@N
  *             splice points.
- * @param nodes Array of $node_t* splice arguments.
+ * @param nodes Array of Node* splice arguments.
  * @param count Length of the nodes array.  If any $K in the template exceeds
  *              count, a compile-time error is emitted.
  * @return The parsed and substituted AST node, or NULL on error.
- * @discussion Convenience wrapper: $quote_n(tmpl, nodes, count).
+ * @discussion Convenience wrapper: QuoteN(tmpl, nodes, count).
  */
-$node_t *__cccc_quote_n(VirtualMachine *vm, const char *tmpl, $node_t **nodes, int count);
+Node *__builtin_quote_n(VirtualMachine *vm, const char *tmpl, Node **nodes, int count);
 
 /*!
- * @function __cccc_node_list
+ * @function __builtin_node_list
  * @abstract Build a `->next`-linked node chain from an array, returning the
  *           head.  Use the result as the argument to a `$@k` list splice.
  * @param vm    The VM context.
- * @param nodes Array of $node_t* to link together.  Linking stops at the first
+ * @param nodes Array of Node* to link together.  Linking stops at the first
  *              NULL element or at count, whichever comes first.
  * @param count Number of elements in the array.
  * @return Head of the chain, or NULL if count == 0 or nodes is NULL.
  * @discussion A single node is a valid chain of length 1.  An existing
- *             `->next` chain (e.g. `__cccc_ast_block(...)->body`) can also be
+ *             `->next` chain (e.g. `__builtin_ast_block(...)->body`) can also be
  *             passed directly as the splice argument without going through
- *             this helper.  Convenience wrapper: $node_list(nodes, count).
+ *             this helper.  Convenience wrapper: NodeList(nodes, count).
  */
-$node_t *__cccc_node_list(VirtualMachine *vm, $node_t **nodes, int count);
+Node *__builtin_node_list(VirtualMachine *vm, Node **nodes, int count);
 
 // ============================================================================
 // Type Lookup and Introspection
 // ============================================================================
 
 /*!
- * @function __cccc_ast_find_type
+ * @function __builtin_ast_find_type
  * @abstract Look up a type by tag name (struct/union/enum).
  * @param vm The VM context.
  * @param name The tag name to look up.
- * @return The matching $type_t*, or NULL if not found.
- * @discussion Convenience wrapper: $find_type(name).
+ * @return The matching Type*, or NULL if not found.
+ * @discussion Convenience wrapper: FindType(name).
  */
-$type_t *__cccc_ast_find_type(VirtualMachine *vm, const char *name);
+Type *__builtin_ast_find_type(VirtualMachine *vm, const char *name);
 
 /*!
- * @function __cccc_ast_type_exists
+ * @function __builtin_ast_type_exists
  * @abstract Check whether a type is currently in scope by name.
  * @param vm The VM context.
  * @param name The type name to look up.
  * @return True if the name resolves to a type, false otherwise.
- * @discussion Convenience wrapper: $type_exists(name).
+ * @discussion Convenience wrapper: TypeExists(name).
  */
-bool __cccc_ast_type_exists(VirtualMachine *vm, const char *name);
+bool __builtin_ast_type_exists(VirtualMachine *vm, const char *name);
 
 /*!
- * @function __cccc_ast_get_type
+ * @function __builtin_ast_get_type
  * @abstract Look up a type by name, falling back to the built-in primitives.
  * @param vm The VM context.
  * @param name The type name to look up.
- * @return The matching $type_t*, or NULL if not found.
- * @discussion Convenience wrapper: $get_type(name).
+ * @return The matching Type*, or NULL if not found.
+ * @discussion Convenience wrapper: GetType(name).
  */
-$type_t *__cccc_ast_get_type(VirtualMachine *vm, const char *name);
+Type *__builtin_ast_get_type(VirtualMachine *vm, const char *name);
 
 /*!
- * @function __cccc_ast_type_kind
- * @abstract Return the $type_kind_t tag of a type.
+ * @function __builtin_ast_type_kind
+ * @abstract Return the TypeKind tag of a type.
  * @param ty The type to inspect.
- * @return The type kind (tk_int, tk_struct, tk_ptr, ...).
- * @discussion Convenience wrapper: $type_kind(ty).
+ * @return The type kind (TK_INT, TK_STRUCT, TK_PTR, ...).
+ * @discussion Convenience wrapper: GetTypeKind(ty).
  */
-$type_kind_t __cccc_ast_type_kind($type_t *ty);
+TypeKind __builtin_ast_type_kind(Type *ty);
 
 /*!
- * @function __cccc_ast_type_size
+ * @function __builtin_ast_type_size
  * @abstract Return sizeof(ty) in bytes.
  * @param ty The type to inspect.
  * @return The size in bytes.
- * @discussion Convenience wrapper: $type_size(ty).
+ * @discussion Convenience wrapper: TypeSize(ty).
  */
-int __cccc_ast_type_size($type_t *ty);
+int __builtin_ast_type_size(Type *ty);
 
 /*!
- * @function __cccc_ast_type_align
+ * @function __builtin_ast_type_align
  * @abstract Return _Alignof(ty) in bytes.
  * @param ty The type to inspect.
  * @return The alignment in bytes.
- * @discussion Convenience wrapper: $type_align(ty).
+ * @discussion Convenience wrapper: TypeAlign(ty).
  */
-int __cccc_ast_type_align($type_t *ty);
+int __builtin_ast_type_align(Type *ty);
 
 /*!
- * @function __cccc_ast_type_is_unsigned
+ * @function __builtin_ast_type_is_unsigned
  * @abstract Test whether an integer type is unsigned.
  * @param ty The type to inspect.
  * @return True for unsigned integer types, false otherwise.
- * @discussion Convenience wrapper: $type_is_unsigned(ty).
+ * @discussion Convenience wrapper: TypeIsUnsigned(ty).
  */
-bool __cccc_ast_type_is_unsigned($type_t *ty);
+bool __builtin_ast_type_is_unsigned(Type *ty);
 
 /*!
- * @function __cccc_ast_type_is_const
+ * @function __builtin_ast_type_is_const
  * @abstract Test whether a type is const-qualified.
  * @param ty The type to inspect.
  * @return True if ty has a const qualifier, false otherwise.
- * @discussion Convenience wrapper: $type_is_const(ty).
+ * @discussion Convenience wrapper: TypeIsConst(ty).
  */
-bool __cccc_ast_type_is_const($type_t *ty);
+bool __builtin_ast_type_is_const(Type *ty);
 
 /*!
- * @function __cccc_ast_type_base
+ * @function __builtin_ast_type_base
  * @abstract Return the element type of a pointer or array.
  * @param ty The pointer/array type to inspect.
- * @return The base $type_t*, or NULL if ty is not a pointer or array.
- * @discussion Convenience wrapper: $type_base(ty).
+ * @return The base Type*, or NULL if ty is not a pointer or array.
+ * @discussion Convenience wrapper: TypeBase(ty).
  */
-$type_t *__cccc_ast_type_base($type_t *ty);
+Type *__builtin_ast_type_base(Type *ty);
 
 /*!
- * @function __cccc_ast_type_array_len
+ * @function __builtin_ast_type_array_len
  * @abstract Return the fixed length of an array type.
  * @param ty The array type to inspect.
- * @return The element count for tk_array types, -1 otherwise.
- * @discussion Convenience wrapper: $type_array_len(ty).
+ * @return The element count for TK_ARRAY types, -1 otherwise.
+ * @discussion Convenience wrapper: TypeArrayLen(ty).
  */
-int __cccc_ast_type_array_len($type_t *ty);
+int __builtin_ast_type_array_len(Type *ty);
 
 /*!
- * @function __cccc_ast_type_return_type
+ * @function __builtin_ast_type_return_type
  * @abstract Return the return type of a function type.
  * @param ty The function type to inspect.
- * @return The return $type_t*, or NULL if ty is not a function type.
- * @discussion Convenience wrapper: $type_return_type(ty).
+ * @return The return Type*, or NULL if ty is not a function type.
+ * @discussion Convenience wrapper: TypeReturnType(ty).
  */
-$type_t *__cccc_ast_type_return_type($type_t *ty);
+Type *__builtin_ast_type_return_type(Type *ty);
 
 /*!
- * @function __cccc_ast_type_param_count
+ * @function __builtin_ast_type_param_count
  * @abstract Return the number of declared parameters of a function type.
  * @param ty The function type to inspect.
- * @return The parameter count for tk_func types, -1 otherwise.
- * @discussion Convenience wrapper: $type_param_count(ty).
+ * @return The parameter count for TK_FUNC types, -1 otherwise.
+ * @discussion Convenience wrapper: TypeParamCount(ty).
  */
-int __cccc_ast_type_param_count($type_t *ty);
+int __builtin_ast_type_param_count(Type *ty);
 
 /*!
- * @function __cccc_ast_type_param_at
+ * @function __builtin_ast_type_param_at
  * @abstract Return the type of the parameter at the given index.
  * @param ty The function type to inspect.
  * @param index Zero-based parameter index.
- * @return The parameter's $type_t*, or NULL on out-of-range or non-function ty.
- * @discussion Convenience wrapper: $type_param_at(ty, index).
+ * @return The parameter's Type*, or NULL on out-of-range or non-function ty.
+ * @discussion Convenience wrapper: TypeParamAt(ty, index).
  */
-$type_t *__cccc_ast_type_param_at($type_t *ty, int index);
+Type *__builtin_ast_type_param_at(Type *ty, int index);
 
 /*!
- * @function __cccc_ast_type_is_variadic
+ * @function __builtin_ast_type_is_variadic
  * @abstract Test whether a function type is variadic.
  * @param ty The type to inspect.
  * @return True for variadic function types, false otherwise.
- * @discussion Convenience wrapper: $type_is_variadic(ty).
+ * @discussion Convenience wrapper: TypeIsVariadic(ty).
  */
-bool __cccc_ast_type_is_variadic($type_t *ty);
+bool __builtin_ast_type_is_variadic(Type *ty);
 
 /*!
- * @function __cccc_ast_type_name
+ * @function __builtin_ast_type_name
  * @abstract Return the user-visible name of a type, if any.
  * @param ty The type to inspect.
  * @return A freshly-allocated NUL-terminated string, or NULL for anonymous types.
- * @discussion Convenience wrapper: $type_name(ty).
+ * @discussion Convenience wrapper: TypeName(ty).
  */
-const char *__cccc_ast_type_name($type_t *ty);
+const char *__builtin_ast_type_name(Type *ty);
 
 /*!
- * @function __cccc_ast_type_c_name
+ * @function __builtin_ast_type_c_name
  * @abstract Return a valid C identifier fragment naming `ty`.
  * @param vm The VM context.
  * @param ty The type to inspect.
- * @return $type_name(ty) for named types, or a builtin spelling ("int",
+ * @return TypeName(ty) for named types, or a builtin spelling ("int",
  *   "double", "ulong", ...) for builtin scalar types, or NULL.
- * @discussion Convenience wrapper: $type_c_name(ty). Intended for naming
- *   generated functions, e.g. sum_<T> from $generate_sum(elem_type).
+ * @discussion Convenience wrapper: TypeCName(ty). Intended for naming
+ *   generated functions, e.g. sum_<T> from GenerateSum(elem_type).
  */
-const char *__cccc_ast_type_c_name(VirtualMachine *vm, $type_t *ty);
+const char *__builtin_ast_type_c_name(VirtualMachine *vm, Type *ty);
 
 /*!
- * @function __cccc_ast_make_pointer
+ * @function __builtin_ast_make_pointer
  * @abstract Build a pointer-to-base type.
  * @param vm The VM context.
  * @param base The pointed-to type.
- * @return A $type_t* representing "base *", or NULL on error.
- * @discussion Convenience wrapper: $make_pointer(base).
+ * @return A Type* representing "base *", or NULL on error.
+ * @discussion Convenience wrapper: MakePointer(base).
  */
-$type_t *__cccc_ast_make_pointer(VirtualMachine *vm, $type_t *base);
+Type *__builtin_ast_make_pointer(VirtualMachine *vm, Type *base);
 
 /*!
- * @function __cccc_ast_make_array
+ * @function __builtin_ast_make_array
  * @abstract Build a fixed-length array type.
  * @param vm The VM context.
  * @param base The element type.
  * @param length The element count.
- * @return A $type_t* representing "base[length]", or NULL on error.
- * @discussion Convenience wrapper: $make_array(base, length).
+ * @return A Type* representing "base[length]", or NULL on error.
+ * @discussion Convenience wrapper: MakeArray(base, length).
  */
-$type_t *__cccc_ast_make_array(VirtualMachine *vm, $type_t *base, int length);
+Type *__builtin_ast_make_array(VirtualMachine *vm, Type *base, int length);
 
 /*!
- * @function __cccc_ast_make_func_ptr_type
+ * @function __builtin_ast_make_func_ptr_type
  * @abstract Build a pointer-to-function type, e.g. "T (*)(T)".
  * @param vm The VM context.
  * @param return_ty The function's return type.
  * @param param_types Array of parameter types (each copy_type()'d internally).
  * @param nparams Number of entries in param_types (max 16).
- * @return A $type_t* representing "return_ty (*)(param_types...)", or NULL on error.
- * @discussion Convenience wrapper: $make_func_ptr_type(return_ty, param_types, nparams).
+ * @return A Type* representing "return_ty (*)(param_types...)", or NULL on error.
+ * @discussion Convenience wrapper: MakeFuncPtrType(return_ty, param_types, nparams).
  */
-$type_t *__cccc_ast_make_func_ptr_type(VirtualMachine *vm, $type_t *return_ty,
-                                        $type_t **param_types, int nparams);
+Type *__builtin_ast_make_func_ptr_type(VirtualMachine *vm, Type *return_ty,
+                                        Type **param_types, int nparams);
 
 // Ticket #171: qualified type constructors
 /*!
- * @function __cccc_ast_make_const
+ * @function __builtin_ast_make_const
  * @abstract Return a const-qualified copy of ty.
  * @param vm The VM context.
  * @param ty The type to qualify.
- * @return A const-qualified $type_t*, or NULL on error.
- * @discussion Convenience wrapper: $make_const(ty).
+ * @return A const-qualified Type*, or NULL on error.
+ * @discussion Convenience wrapper: MakeConst(ty).
  */
-$type_t *__cccc_ast_make_const(VirtualMachine *vm, $type_t *ty);
+Type *__builtin_ast_make_const(VirtualMachine *vm, Type *ty);
 /*!
- * @function __cccc_ast_make_volatile
+ * @function __builtin_ast_make_volatile
  * @abstract Return a volatile-qualified copy of ty.
  * @param vm The VM context.
  * @param ty The type to qualify.
- * @return A volatile-qualified $type_t*, or NULL on error.
- * @discussion Convenience wrapper: $make_volatile(ty).
+ * @return A volatile-qualified Type*, or NULL on error.
+ * @discussion Convenience wrapper: MakeVolatile(ty).
  */
-$type_t *__cccc_ast_make_volatile(VirtualMachine *vm, $type_t *ty);
+Type *__builtin_ast_make_volatile(VirtualMachine *vm, Type *ty);
 
 // ============================================================================
 // Enum Reflection
 // ============================================================================
 
 /*!
- * @function __cccc_ast_enum_count
+ * @function __builtin_ast_enum_count
  * @abstract Return the number of constants in an enum type.
  * @param vm The VM context.
  * @param enum_type The enum type to inspect.
  * @return The constant count, or -1 if enum_type is not an enum.
- * @discussion Convenience wrapper: $enum_count(ty).
+ * @discussion Convenience wrapper: EnumCount(ty).
  */
-int __cccc_ast_enum_count(VirtualMachine *vm, $type_t *enum_type);
+int __builtin_ast_enum_count(VirtualMachine *vm, Type *enum_type);
 
 /*!
- * @function __cccc_ast_enum_at
+ * @function __builtin_ast_enum_at
  * @abstract Return the enum constant at a given index.
  * @param vm The VM context.
  * @param enum_type The enum type to inspect.
  * @param index Zero-based index.
- * @return The $enum_constant_t*, or NULL on out-of-range or non-enum.
- * @discussion Convenience wrapper: $enum_at(ty, index).
+ * @return The EnumConstant*, or NULL on out-of-range or non-enum.
+ * @discussion Convenience wrapper: EnumAt(ty, index).
  */
-$enum_constant_t *__cccc_ast_enum_at(VirtualMachine *vm, $type_t *enum_type, int index);
+EnumConstant *__builtin_ast_enum_at(VirtualMachine *vm, Type *enum_type, int index);
 
 /*!
- * @function __cccc_ast_enum_find
+ * @function __builtin_ast_enum_find
  * @abstract Look up an enum constant by name.
  * @param vm The VM context.
  * @param enum_type The enum type to search.
  * @param name The constant name to look up.
- * @return The matching $enum_constant_t*, or NULL if not found.
- * @discussion Convenience wrapper: $enum_find(ty, name).
+ * @return The matching EnumConstant*, or NULL if not found.
+ * @discussion Convenience wrapper: EnumFind(ty, name).
  */
-$enum_constant_t *__cccc_ast_enum_find(VirtualMachine *vm, $type_t *enum_type,
+EnumConstant *__builtin_ast_enum_find(VirtualMachine *vm, Type *enum_type,
                                     const char *name);
 
 /*!
- * @function __cccc_ast_enum_constant_name
+ * @function __builtin_ast_enum_constant_name
  * @abstract Return the name of an enum constant.
  * @param ec The enum constant.
  * @return A NUL-terminated string owned by ec.
- * @discussion Convenience wrapper: $enum_constant_name(ec).
+ * @discussion Convenience wrapper: EnumConstantName(ec).
  */
-const char *__cccc_ast_enum_constant_name($enum_constant_t *ec);
+const char *__builtin_ast_enum_constant_name(EnumConstant *ec);
 
 /*!
- * @function __cccc_ast_enum_constant_value
+ * @function __builtin_ast_enum_constant_value
  * @abstract Return the integer value of an enum constant.
  * @param ec The enum constant.
  * @return The constant's integer value (int64_t to support C23 wide underlying types).
- * @discussion Convenience wrapper: $enum_constant_value(ec).
+ * @discussion Convenience wrapper: EnumConstantValue(ec).
  */
-int64_t __cccc_ast_enum_constant_value($enum_constant_t *ec);
+int64_t __builtin_ast_enum_constant_value(EnumConstant *ec);
 
 /*!
- * @function __cccc_ast_enum_name
+ * @function __builtin_ast_enum_name
  * @abstract Return the tag name of an enum type.
  * @param e The enum type to inspect.
  * @return A NUL-terminated string owned by e.
- * @discussion Convenience wrapper: $enum_name(ty).
+ * @discussion Convenience wrapper: EnumName(ty).
  */
-const char *__cccc_ast_enum_name($type_t *e);
+const char *__builtin_ast_enum_name(Type *e);
 
 /*!
- * @function __cccc_ast_enum_value_count
+ * @function __builtin_ast_enum_value_count
  * @abstract Return the number of values in an enum type.
  * @param e The enum type to inspect.
  * @return The constant count, or -1 if e is not an enum.
- * @discussion Convenience wrapper: $enum_value_count(ty).
+ * @discussion Convenience wrapper: EnumValueCount(ty).
  */
-int __cccc_ast_enum_value_count($type_t *e);
+int __builtin_ast_enum_value_count(Type *e);
 
 /*!
- * @function __cccc_ast_enum_value_name
+ * @function __builtin_ast_enum_value_name
  * @abstract Return the name of the enum constant at the given index.
  * @param e The enum type to inspect.
  * @param index Zero-based index.
  * @return A NUL-terminated string, or NULL on out-of-range.
- * @discussion Convenience wrapper: $enum_value_name(ty, index).
+ * @discussion Convenience wrapper: EnumValueName(ty, index).
  */
-const char *__cccc_ast_enum_value_name($type_t *e, int index);
+const char *__builtin_ast_enum_value_name(Type *e, int index);
 
 /*!
- * @function __cccc_ast_enum_value
+ * @function __builtin_ast_enum_value
  * @abstract Return the integer value of the enum constant at the given index.
  * @param e The enum type to inspect.
  * @param index Zero-based index.
  * @return The constant's integer value (int64_t), or -1 on out-of-range.
- * @discussion Convenience wrapper: $enum_value(ty, index).
+ * @discussion Convenience wrapper: EnumValue(ty, index).
  */
-int64_t __cccc_ast_enum_value($type_t *e, int index);
+int64_t __builtin_ast_enum_value(Type *e, int index);
 
 /*!
- * @function __cccc_ast_enum_to_string_switch
+ * @function __builtin_ast_enum_to_string_switch
  * @abstract Build a `switch (expr) { case V0: return "Name0"; ...
  *           default: return ""; }` over the constants of an enum type.
  * @param vm The virtual machine instance.
  * @param ty The enum type.
  * @param expr The expression to switch on (the enum value).
- * @return An nk_switch node. Caller wraps it in a function returning
+ * @return An NK_SWITCH node. Caller wraps it in a function returning
  *         `const char *`.
- * @discussion Convenience wrapper: $enum_to_string(ty, expr).
+ * @discussion Convenience wrapper: EnumToString(ty, expr).
  */
-$node_t *__cccc_ast_enum_to_string_switch(VirtualMachine *vm, $type_t *ty, $node_t *expr);
+Node *__builtin_ast_enum_to_string_switch(VirtualMachine *vm, Type *ty, Node *expr);
 
 /*!
- * @function __cccc_ast_enum_from_string_chain
+ * @function __builtin_ast_enum_from_string_chain
  * @abstract Build a block of `if (strcmp(expr, "Name0") == 0) return V0; ...
  *           return -1;` over the constants of an enum type.
  * @param vm The virtual machine instance.
  * @param ty The enum type.
  * @param expr The expression to compare (a `const char *`).
- * @return An nk_block node. Caller wraps it in a function returning the
+ * @return An NK_BLOCK node. Caller wraps it in a function returning the
  *         enum type (or an int).
- * @discussion Convenience wrapper: $enum_from_string(ty, expr).
+ * @discussion Convenience wrapper: EnumFromString(ty, expr).
  */
-$node_t *__cccc_ast_enum_from_string_chain(VirtualMachine *vm, $type_t *ty, $node_t *expr);
+Node *__builtin_ast_enum_from_string_chain(VirtualMachine *vm, Type *ty, Node *expr);
 
 // ============================================================================
 // Struct/Union Member Introspection
 // ============================================================================
 
 /*!
- * @function __cccc_ast_struct_member_count
+ * @function __builtin_ast_struct_member_count
  * @abstract Return the number of members of a struct or union type.
  * @param vm The VM context.
  * @param struct_type The struct or union type to inspect.
  * @return The member count, or -1 if struct_type is not a struct/union.
- * @discussion Convenience wrapper: $struct_member_count(ty).
+ * @discussion Convenience wrapper: StructMemberCount(ty).
  */
-int __cccc_ast_struct_member_count(VirtualMachine *vm, $type_t *struct_type);
+int __builtin_ast_struct_member_count(VirtualMachine *vm, Type *struct_type);
 
 /*!
- * @function __cccc_ast_struct_member_at
+ * @function __builtin_ast_struct_member_at
  * @abstract Return the member at the given index.
  * @param vm The VM context.
  * @param struct_type The struct or union type to inspect.
  * @param index Zero-based member index.
- * @return The $member_t*, or NULL on out-of-range or non-aggregate.
- * @discussion Convenience wrapper: $struct_member_at(ty, index).
+ * @return The Member*, or NULL on out-of-range or non-aggregate.
+ * @discussion Convenience wrapper: StructMemberAt(ty, index).
  */
-$member_t *__cccc_ast_struct_member_at(VirtualMachine *vm, $type_t *struct_type,
+Member *__builtin_ast_struct_member_at(VirtualMachine *vm, Type *struct_type,
                                         int index);
 
 /*!
- * @function __cccc_ast_struct_member_find
+ * @function __builtin_ast_struct_member_find
  * @abstract Look up a struct or union member by name.
  * @param vm The VM context.
  * @param struct_type The struct or union type to search.
  * @param name The member name to look up.
- * @return The matching $member_t*, or NULL if not found.
- * @discussion Convenience wrapper: $struct_member_find(ty, name).
+ * @return The matching Member*, or NULL if not found.
+ * @discussion Convenience wrapper: StructMemberFind(ty, name).
  */
-$member_t *__cccc_ast_struct_member_find(VirtualMachine *vm, $type_t *struct_type,
+Member *__builtin_ast_struct_member_find(VirtualMachine *vm, Type *struct_type,
                                         const char *name);
 
 /*!
- * @function __cccc_ast_member_name
+ * @function __builtin_ast_member_name
  * @abstract Return the name of a struct/union member.
  * @param m The member to inspect.
  * @return A NUL-terminated string owned by m.
- * @discussion Convenience wrapper: $member_name(m).
+ * @discussion Convenience wrapper: MemberName(m).
  */
-const char *__cccc_ast_member_name($member_t *m);
+const char *__builtin_ast_member_name(Member *m);
 
 /*!
- * @function __cccc_ast_member_type
+ * @function __builtin_ast_member_type
  * @abstract Return the type of a struct/union member.
  * @param m The member to inspect.
- * @return The member's $type_t*.
- * @discussion Convenience wrapper: $member_type(m).
+ * @return The member's Type*.
+ * @discussion Convenience wrapper: MemberType(m).
  */
-$type_t *__cccc_ast_member_type($member_t *m);
+Type *__builtin_ast_member_type(Member *m);
 
 /*!
- * @function __cccc_ast_member_offset
+ * @function __builtin_ast_member_offset
  * @abstract Return the byte offset of a struct/union member.
  * @param m The member to inspect.
  * @return The offset in bytes.
- * @discussion Convenience wrapper: $member_offset(m).
+ * @discussion Convenience wrapper: MemberOffset(m).
  */
-int __cccc_ast_member_offset($member_t *m);
+int __builtin_ast_member_offset(Member *m);
 
 /*!
- * @function __cccc_ast_member_is_bitfield
+ * @function __builtin_ast_member_is_bitfield
  * @abstract Test whether a member is a bitfield.
  * @param m The member to inspect.
  * @return True if the member is a bitfield, false otherwise.
- * @discussion Convenience wrapper: $member_is_bitfield(m).
+ * @discussion Convenience wrapper: MemberIsBitfield(m).
  */
-bool __cccc_ast_member_is_bitfield($member_t *m);
+bool __builtin_ast_member_is_bitfield(Member *m);
 
 /*!
- * @function __cccc_ast_member_bitfield_width
+ * @function __builtin_ast_member_bitfield_width
  * @abstract Return the bit width of a bitfield member.
  * @param m The member to inspect.
  * @return The bit width for bitfield members, 0 otherwise.
- * @discussion Convenience wrapper: $member_bitfield_width(m).
+ * @discussion Convenience wrapper: MemberBitfieldWidth(m).
  */
-int __cccc_ast_member_bitfield_width($member_t *m);
+int __builtin_ast_member_bitfield_width(Member *m);
 
 /*!
- * @function __cccc_ast_offsetof_chain
+ * @function __builtin_ast_offsetof_chain
  * @abstract Compute the byte offset of a (possibly nested) member chain.
  * @param vm The virtual machine instance.
  * @param ty The starting struct/union type.
  * @param names An array of member names to walk, innermost last.
  * @param n The number of names in the chain.
  * @return The summed byte offset, or -1 if any name cannot be resolved.
- * @discussion Convenience wrapper: $offsetof_chain(ty, "a", "b", ...).
+ * @discussion Convenience wrapper: OffsetofChain(ty, "a", "b", ...).
  */
-int64_t __cccc_ast_offsetof_chain(VirtualMachine *vm, $type_t *ty,
+int64_t __builtin_ast_offsetof_chain(VirtualMachine *vm, Type *ty,
                                    const char **names, int n);
 
 // ============================================================================
@@ -865,493 +865,493 @@ int64_t __cccc_ast_offsetof_chain(VirtualMachine *vm, $type_t *ty,
 // ============================================================================
 
 /*!
- * @function __cccc_ast_find_global
+ * @function __builtin_ast_find_global
  * @abstract Look up a global symbol by name.
  * @param vm The VM context.
  * @param name The global name to look up.
- * @return The matching $obj_t*, or NULL if not found.
- * @discussion Convenience wrapper: $find_global(name).
+ * @return The matching Obj*, or NULL if not found.
+ * @discussion Convenience wrapper: FindGlobal(name).
  */
-$obj_t *__cccc_ast_find_global(VirtualMachine *vm, const char *name);
+Obj *__builtin_ast_find_global(VirtualMachine *vm, const char *name);
 
 /*!
- * @function __cccc_ast_global_count
+ * @function __builtin_ast_global_count
  * @abstract Return the total number of global symbols.
  * @param vm The VM context.
  * @return The count of globals.
- * @discussion Convenience wrapper: $global_count().
+ * @discussion Convenience wrapper: GlobalCount().
  */
-int __cccc_ast_global_count(VirtualMachine *vm);
+int __builtin_ast_global_count(VirtualMachine *vm);
 
 /*!
- * @function __cccc_ast_global_at
+ * @function __builtin_ast_global_at
  * @abstract Return the global symbol at the given index.
  * @param vm The VM context.
  * @param index Zero-based global index.
- * @return The $obj_t* at the given slot, or NULL on out-of-range.
- * @discussion Convenience wrapper: $global_at(index).
+ * @return The Obj* at the given slot, or NULL on out-of-range.
+ * @discussion Convenience wrapper: GlobalAt(index).
  */
-$obj_t *__cccc_ast_global_at(VirtualMachine *vm, int index);
+Obj *__builtin_ast_global_at(VirtualMachine *vm, int index);
 
 /*!
- * @function __cccc_ast_obj_name
+ * @function __builtin_ast_obj_name
  * @abstract Return the name of a global object.
  * @param obj The object to inspect.
  * @return A NUL-terminated string owned by obj.
- * @discussion Convenience wrapper: $obj_name(obj).
+ * @discussion Convenience wrapper: ObjName(obj).
  */
-const char *__cccc_ast_obj_name($obj_t *obj);
+const char *__builtin_ast_obj_name(Obj *obj);
 
 /*!
- * @function __cccc_ast_obj_type
+ * @function __builtin_ast_obj_type
  * @abstract Return the type of a global object.
  * @param obj The object to inspect.
- * @return The object's $type_t*.
- * @discussion Convenience wrapper: $obj_type(obj).
+ * @return The object's Type*.
+ * @discussion Convenience wrapper: ObjType(obj).
  */
-$type_t *__cccc_ast_obj_type($obj_t *obj);
+Type *__builtin_ast_obj_type(Obj *obj);
 
 /*!
- * @function __cccc_ast_obj_is_function
+ * @function __builtin_ast_obj_is_function
  * @abstract Test whether a global object is a function.
  * @param obj The object to inspect.
  * @return True for functions, false for variables.
- * @discussion Convenience wrapper: $obj_is_function(obj).
+ * @discussion Convenience wrapper: ObjIsFunction(obj).
  */
-bool __cccc_ast_obj_is_function($obj_t *obj);
+bool __builtin_ast_obj_is_function(Obj *obj);
 
 /*!
- * @function __cccc_ast_obj_is_definition
+ * @function __builtin_ast_obj_is_definition
  * @abstract Test whether a global object has a definition.
  * @param obj The object to inspect.
  * @return True for defined objects, false for declarations only.
- * @discussion Convenience wrapper: $obj_is_definition(obj).
+ * @discussion Convenience wrapper: ObjIsDefinition(obj).
  */
-bool __cccc_ast_obj_is_definition($obj_t *obj);
+bool __builtin_ast_obj_is_definition(Obj *obj);
 
 /*!
- * @function __cccc_ast_obj_is_static
+ * @function __builtin_ast_obj_is_static
  * @abstract Test whether a global object has internal (static) linkage.
  * @param obj The object to inspect.
  * @return True for static linkage, false for external.
- * @discussion Convenience wrapper: $obj_is_static(obj).
+ * @discussion Convenience wrapper: ObjIsStatic(obj).
  */
-bool __cccc_ast_obj_is_static($obj_t *obj);
+bool __builtin_ast_obj_is_static(Obj *obj);
 
 /*!
- * @function __cccc_attr_target_kind
+ * @function __builtin_attr_target_kind
  * @abstract Return the kind of declaration decorated by a custom attribute.
  */
-int __cccc_attr_target_kind($attr_target_t *target);
+int __builtin_attr_target_kind(AttrTarget *target);
 
 /*!
- * @function __cccc_attr_target_name
+ * @function __builtin_attr_target_name
  * @abstract Return the decorated declaration's source name, when available.
  */
-const char *__cccc_attr_target_name($attr_target_t *target);
+const char *__builtin_attr_target_name(AttrTarget *target);
 
 /*!
- * @function __cccc_attr_target_type
+ * @function __builtin_attr_target_type
  * @abstract Return the decorated declaration's type.
  */
-$type_t *__cccc_attr_target_type($attr_target_t *target);
+Type *__builtin_attr_target_type(AttrTarget *target);
 
 /*!
- * @function __cccc_attr_target_obj
+ * @function __builtin_attr_target_obj
  * @abstract Return the decorated function or global object, or NULL for type targets.
  */
-$obj_t *__cccc_attr_target_obj($attr_target_t *target);
+Obj *__builtin_attr_target_obj(AttrTarget *target);
 
 /*!
- * @function __cccc_attr_target_token
+ * @function __builtin_attr_target_token
  * @abstract Return a source token for the decorated declaration.
  */
-$token_t *__cccc_attr_target_token($attr_target_t *target);
+Token *__builtin_attr_target_token(AttrTarget *target);
 
 // ============================================================================
 // AST Node Construction - Literals
 // ============================================================================
 
 /*!
- * @function __cccc_ast_int_literal
+ * @function __builtin_ast_int_literal
  * @abstract Build an integer literal AST node.
  * @param vm The VM context.
  * @param value The integer value.
- * @return An nk_num node for value.
- * @discussion Convenience wrapper: $int_literal(value).
+ * @return An NK_NUM node for value.
+ * @discussion Convenience wrapper: MakeIntLiteral(value).
  */
-$node_t *__cccc_ast_int_literal(VirtualMachine *vm, int64_t value);
+Node *__builtin_ast_int_literal(VirtualMachine *vm, int64_t value);
 
 /*!
- * @function __cccc_ast_float_literal
+ * @function __builtin_ast_float_literal
  * @abstract Build a floating-point literal AST node.
  * @param vm The VM context.
  * @param value The floating-point value.
- * @return An nk_num node for value.
- * @discussion Convenience wrapper: $float_literal(value).
+ * @return An NK_NUM node for value.
+ * @discussion Convenience wrapper: MakeFloatLiteral(value).
  */
-$node_t *__cccc_ast_float_literal(VirtualMachine *vm, double value);
+Node *__builtin_ast_float_literal(VirtualMachine *vm, double value);
 
 /*!
- * @function __cccc_ast_string_literal
+ * @function __builtin_ast_string_literal
  * @abstract Build a string literal AST node.
  * @param vm The VM context.
  * @param str A NUL-terminated string.
- * @return An nk_num string-literal node.
- * @discussion Convenience wrapper: $string_literal(str).
+ * @return An NK_NUM string-literal node.
+ * @discussion Convenience wrapper: MakeStringLiteral(str).
  */
-$node_t *__cccc_ast_string_literal(VirtualMachine *vm, const char *str);
+Node *__builtin_ast_string_literal(VirtualMachine *vm, const char *str);
 
 /*!
- * @function __cccc_ast_var_ref
+ * @function __builtin_ast_var_ref
  * @abstract Build a variable reference AST node.
  * @param vm The VM context.
  * @param name The variable name.
- * @return An nk_var node referencing name.
- * @discussion Convenience wrapper: $var_ref(name).
+ * @return An NK_VAR node referencing name.
+ * @discussion Convenience wrapper: MakeVarRef(name).
  */
-$node_t *__cccc_ast_var_ref(VirtualMachine *vm, const char *name);
+Node *__builtin_ast_var_ref(VirtualMachine *vm, const char *name);
 
 /*!
- * @function __cccc_ast_param_ref
+ * @function __builtin_ast_param_ref
  * @abstract Build a reference to a function parameter by name.
  * @param vm The VM context.
  * @param fn The function object whose parameter is being referenced.
  * @param name The parameter name.
- * @return An nk_var node for the named parameter.
+ * @return An NK_VAR node for the named parameter.
  * @discussion Use this when building function bodies to reference parameters
- *             by name.  Convenience wrapper: $param_ref(fn, name).
+ *             by name.  Convenience wrapper: MakeParamRef(fn, name).
  */
-$node_t *__cccc_ast_param_ref(VirtualMachine *vm, $obj_t *fn, const char *name);
+Node *__builtin_ast_param_ref(VirtualMachine *vm, Obj *fn, const char *name);
 
 // ============================================================================
 // AST Node Construction - Expressions
 // ============================================================================
 
 /*!
- * @function __cccc_ast_binary
+ * @function __builtin_ast_binary
  * @abstract Build a binary operation AST node.
  * @param vm The VM context.
- * @param op The operator kind (nk_add, nk_sub, ...).
+ * @param op The operator kind (NK_ADD, NK_SUB, ...).
  * @param left The left-hand operand.
  * @param right The right-hand operand.
  * @return The binary expression node.
- * @discussion Convenience wrapper: $binary(op, left, right).
+ * @discussion Convenience wrapper: MakeBinary(op, left, right).
  */
-$node_t *__cccc_ast_binary(VirtualMachine *vm, $node_kind_t op, $node_t *left,
-                            $node_t *right);
+Node *__builtin_ast_binary(VirtualMachine *vm, NodeKind op, Node *left,
+                            Node *right);
 
 /*!
- * @function __cccc_ast_unary
+ * @function __builtin_ast_unary
  * @abstract Build a unary operation AST node.
  * @param vm The VM context.
- * @param op The operator kind (nk_neg, nk_deref, ...).
+ * @param op The operator kind (NK_NEG, NK_DEREF, ...).
  * @param operand The operand expression.
  * @return The unary expression node.
- * @discussion Convenience wrapper: $unary(op, operand).
+ * @discussion Convenience wrapper: MakeUnary(op, operand).
  */
-$node_t *__cccc_ast_unary(VirtualMachine *vm, $node_kind_t op, $node_t *operand);
+Node *__builtin_ast_unary(VirtualMachine *vm, NodeKind op, Node *operand);
 
 /*!
- * @function __cccc_ast_cast
+ * @function __builtin_ast_cast
  * @abstract Build a type cast AST node.
  * @param vm The VM context.
  * @param expr The expression to cast.
  * @param target_type The type to cast to.
- * @return An nk_cast node.
- * @discussion Convenience wrapper: $cast(expr, target_type).
+ * @return An NK_CAST node.
+ * @discussion Convenience wrapper: MakeCast(expr, target_type).
  */
-$node_t *__cccc_ast_cast(VirtualMachine *vm, $node_t *expr, $type_t *target_type);
+Node *__builtin_ast_cast(VirtualMachine *vm, Node *expr, Type *target_type);
 
 // Ticket #171: new expression builders
 
 /*!
- * @function __cccc_ast_cond
+ * @function __builtin_ast_cond
  * @abstract Build a ternary conditional expression node (cond ? then : else).
  * @param vm The VM context.
  * @param cond The condition expression.
  * @param then_expr The expression evaluated when cond is non-zero.
  * @param else_expr The expression evaluated when cond is zero.
- * @return An nk_cond node.
- * @discussion Convenience wrapper: $cond(cond, then_expr, else_expr).
+ * @return An NK_COND node.
+ * @discussion Convenience wrapper: MakeCond(cond, then_expr, else_expr).
  */
-$node_t *__cccc_ast_cond(VirtualMachine *vm, $node_t *cond, $node_t *then_expr,
-                          $node_t *else_expr);
+Node *__builtin_ast_cond(VirtualMachine *vm, Node *cond, Node *then_expr,
+                          Node *else_expr);
 
 /*!
- * @function __cccc_ast_null
+ * @function __builtin_ast_null
  * @abstract Build a typed null pointer node: (void *)0.
  * @param vm The VM context.
- * @return An nk_num node representing a typed NULL.
- * @discussion Convenience wrapper: $null().
+ * @return An NK_NUM node representing a typed NULL.
+ * @discussion Convenience wrapper: MakeNull().
  */
-$node_t *__cccc_ast_null(VirtualMachine *vm);
+Node *__builtin_ast_null(VirtualMachine *vm);
 
 /*!
- * @function __cccc_ast_sizeof_type
+ * @function __builtin_ast_sizeof_type
  * @abstract Emit sizeof(ty) as a compile-time integer literal.
  * @param vm The VM context.
  * @param ty The type to measure.
- * @return An nk_num node holding sizeof(ty).
- * @discussion Convenience wrapper: $sizeof_type(ty).
+ * @return An NK_NUM node holding sizeof(ty).
+ * @discussion Convenience wrapper: MakeSizeofType(ty).
  */
-$node_t *__cccc_ast_sizeof_type(VirtualMachine *vm, $type_t *ty);
+Node *__builtin_ast_sizeof_type(VirtualMachine *vm, Type *ty);
 
 /*!
- * @function __cccc_ast_alignof_type
+ * @function __builtin_ast_alignof_type
  * @abstract Emit _Alignof(ty) as a compile-time integer literal.
  * @param vm The VM context.
  * @param ty The type to measure.
- * @return An nk_num node holding _Alignof(ty).
- * @discussion Convenience wrapper: $alignof_type(ty).
+ * @return An NK_NUM node holding _Alignof(ty).
+ * @discussion Convenience wrapper: MakeAlignofType(ty).
  */
-$node_t *__cccc_ast_alignof_type(VirtualMachine *vm, $type_t *ty);
+Node *__builtin_ast_alignof_type(VirtualMachine *vm, Type *ty);
 
 /*!
- * @function __cccc_ast_sizeof_expr
+ * @function __builtin_ast_sizeof_expr
  * @abstract Emit sizeof(expr): resolve the expression's type then its size.
  * @param vm The VM context.
  * @param expr The expression whose type to measure.
- * @return An nk_num node holding sizeof(expr).
- * @discussion Convenience wrapper: $sizeof_expr(expr).
+ * @return An NK_NUM node holding sizeof(expr).
+ * @discussion Convenience wrapper: MakeSizeofExpr(expr).
  */
-$node_t *__cccc_ast_sizeof_expr(VirtualMachine *vm, $node_t *expr);
+Node *__builtin_ast_sizeof_expr(VirtualMachine *vm, Node *expr);
 
 /*!
- * @function __cccc_ast_subscript
+ * @function __builtin_ast_subscript
  * @abstract Build an array subscript node: arr[idx], desugared as *(arr+idx).
  * @param vm The VM context.
  * @param arr The array (or pointer) expression.
  * @param idx The index expression.
- * @return An nk_add / nk_deref node pair representing the subscript.
- * @discussion Convenience wrapper: $subscript(arr, idx).
+ * @return An NK_ADD / NK_DEREF node pair representing the subscript.
+ * @discussion Convenience wrapper: MakeSubscript(arr, idx).
  */
-$node_t *__cccc_ast_subscript(VirtualMachine *vm, $node_t *arr, $node_t *idx);
+Node *__builtin_ast_subscript(VirtualMachine *vm, Node *arr, Node *idx);
 
 /*!
- * @function __cccc_ast_comma
+ * @function __builtin_ast_comma
  * @abstract Build a comma expression: evaluate lhs, yield rhs.
  * @param vm The VM context.
  * @param lhs The expression evaluated for side effects.
  * @param rhs The expression whose value is the result.
- * @return An nk_comma node.
- * @discussion Convenience wrapper: $comma(lhs, rhs).
+ * @return An NK_COMMA node.
+ * @discussion Convenience wrapper: MakeComma(lhs, rhs).
  */
-$node_t *__cccc_ast_comma(VirtualMachine *vm, $node_t *lhs, $node_t *rhs);
+Node *__builtin_ast_comma(VirtualMachine *vm, Node *lhs, Node *rhs);
 
 // ============================================================================
 // AST Node Construction - Statements
 // ============================================================================
 
 /*!
- * @function __cccc_ast_return
+ * @function __builtin_ast_return
  * @abstract Build a return statement node.
  * @param vm The VM context.
  * @param expr The value to return (may be NULL for `return;` in void functions).
- * @return An nk_return node.
- * @discussion Convenience wrapper: $return(expr).
+ * @return An NK_RETURN node.
+ * @discussion Convenience wrapper: MakeReturn(expr).
  */
-$node_t *__cccc_ast_return(VirtualMachine *vm, $node_t *expr);
+Node *__builtin_ast_return(VirtualMachine *vm, Node *expr);
 
 /*!
- * @function __cccc_ast_block
+ * @function __builtin_ast_block
  * @abstract Build a block (compound statement) node.
  * @param vm The VM context.
  * @param stmts Array of statement nodes, or NULL if count is 0.
  * @param count Number of statements in the array.
- * @return An nk_block node.
- * @discussion Convenience wrapper: $block(stmts, count).
+ * @return An NK_BLOCK node.
+ * @discussion Convenience wrapper: MakeBlock(stmts, count).
  */
-$node_t *__cccc_ast_block(VirtualMachine *vm, $node_t **stmts, int count);
+Node *__builtin_ast_block(VirtualMachine *vm, Node **stmts, int count);
 
 /*!
- * @function __cccc_ast_block_add_stmt
+ * @function __builtin_ast_block_add_stmt
  * @abstract Append a statement to a block node.
  * @param vm The VM context.
- * @param block The nk_block node to modify.
+ * @param block The NK_BLOCK node to modify.
  * @param stmt The statement to append.
  * @return The block on success, or NULL on invalid arguments.
- * @discussion Convenience wrapper: $block_add_stmt(block, stmt), or
- *             $block_add_stmt(stmt) inside $with_block(block).
+ * @discussion Convenience wrapper: BlockAddStmt(block, stmt), or
+ *             BlockAddStmt(stmt) inside WithBlock(block).
  */
-$node_t *__cccc_ast_block_add_stmt(VirtualMachine *vm, $node_t *block, $node_t *stmt);
+Node *__builtin_ast_block_add_stmt(VirtualMachine *vm, Node *block, Node *stmt);
 
 /*!
- * @function __cccc_ast_if
+ * @function __builtin_ast_if
  * @abstract Build an if statement node.
  * @param vm The VM context.
  * @param cond The condition expression.
  * @param then_body The body executed when cond is non-zero.
  * @param else_body The body executed when cond is zero, or NULL.
- * @return An nk_if node.
- * @discussion Convenience wrapper: $if(cond, then_body, else_body).
+ * @return An NK_IF node.
+ * @discussion Convenience wrapper: MakeIf(cond, then_body, else_body).
  */
-$node_t *__cccc_ast_if(VirtualMachine *vm, $node_t *cond, $node_t *then_body,
-                        $node_t *else_body);
+Node *__builtin_ast_if(VirtualMachine *vm, Node *cond, Node *then_body,
+                        Node *else_body);
 
 /*!
- * @function __cccc_ast_switch
+ * @function __builtin_ast_switch
  * @abstract Build a switch statement node.
  * @param vm The VM context.
  * @param cond The expression to switch on.
- * @return An nk_switch node.  Use __cccc_ast_switch_add_case and
- *         __cccc_ast_switch_set_default to populate it.
- * @discussion Convenience wrapper: $switch(cond).
+ * @return An NK_SWITCH node.  Use __builtin_ast_switch_add_case and
+ *         __builtin_ast_switch_set_default to populate it.
+ * @discussion Convenience wrapper: MakeSwitch(cond).
  */
-$node_t *__cccc_ast_switch(VirtualMachine *vm, $node_t *cond);
+Node *__builtin_ast_switch(VirtualMachine *vm, Node *cond);
 
 /*!
- * @function __cccc_ast_switch_add_case
+ * @function __builtin_ast_switch_add_case
  * @abstract Append a case to a switch statement.
  * @param vm The VM context.
- * @param switch_node The switch node returned by __cccc_ast_switch.
+ * @param switch_node The switch node returned by __builtin_ast_switch.
  * @param value The case value expression.
  * @param body The body statement for this case.
- * @discussion Convenience wrapper: $switch_add_case(sw, value, body), or
- *             $switch_add_case(value, body) inside $with_switch(sw).
+ * @discussion Convenience wrapper: SwitchAddCase(sw, value, body), or
+ *             SwitchAddCase(value, body) inside WithSwitch(sw).
  */
-void __cccc_ast_switch_add_case(VirtualMachine *vm, $node_t *switch_node,
-                                $node_t *value, $node_t *body);
+void __builtin_ast_switch_add_case(VirtualMachine *vm, Node *switch_node,
+                                Node *value, Node *body);
 
 /*!
- * @function __cccc_ast_switch_set_default
+ * @function __builtin_ast_switch_set_default
  * @abstract Set the default case for a switch statement.
  * @param vm The VM context.
- * @param switch_node The switch node returned by __cccc_ast_switch.
+ * @param switch_node The switch node returned by __builtin_ast_switch.
  * @param body The default-case body statement.
- * @discussion Convenience wrapper: $switch_set_default(sw, body), or
- *             $switch_set_default(body) inside $with_switch(sw).
+ * @discussion Convenience wrapper: SwitchSetDefault(sw, body), or
+ *             SwitchSetDefault(body) inside WithSwitch(sw).
  */
-void __cccc_ast_switch_set_default(VirtualMachine *vm, $node_t *switch_node,
-                                    $node_t *body);
+void __builtin_ast_switch_set_default(VirtualMachine *vm, Node *switch_node,
+                                    Node *body);
 
 /*!
- * @function __cccc_ast_expr_stmt
+ * @function __builtin_ast_expr_stmt
  * @abstract Build an expression statement node.
  * @param vm The VM context.
  * @param expr The expression to evaluate for side effects.
- * @return An nk_expr_stmt node.
- * @discussion Convenience wrapper: $expr_stmt(expr).
+ * @return An NK_EXPR_STMT node.
+ * @discussion Convenience wrapper: MakeExprStmt(expr).
  */
-$node_t *__cccc_ast_expr_stmt(VirtualMachine *vm, $node_t *expr);
+Node *__builtin_ast_expr_stmt(VirtualMachine *vm, Node *expr);
 
 // ============================================================================
 // AST Node Construction - Local Variable Injection (ticket #77)
 // ============================================================================
 
 /*!
- * @function __cccc_ast_local_var
+ * @function __builtin_ast_local_var
  * @abstract Declare a named local variable in the current function scope
  *           and return a variable-reference node for it.
  * @param vm The VM context.
  * @param name The variable name (user-visible).
  * @param ty The variable type.
- * @return A nk_var node referencing the new local, or NULL if called
+ * @return A NK_VAR node referencing the new local, or NULL if called
  *         outside a function body or on invalid arguments.
  * @note  The variable is injected into the current function's locals list
  *        and will receive a stack offset when the function is compiled.
  *        For temporaries that must not capture user names, prefer
- *        __cccc_ast_local_var_unique().
- * @discussion Convenience wrapper: $local_var(name, ty).
+ *        __builtin_ast_local_var_unique().
+ * @discussion Convenience wrapper: MakeLocalVar(name, ty).
  */
-$node_t *__cccc_ast_local_var(VirtualMachine *vm, const char *name, $type_t *ty);
+Node *__builtin_ast_local_var(VirtualMachine *vm, const char *name, Type *ty);
 
 /*!
- * @function __cccc_ast_local_var_unique
+ * @function __builtin_ast_local_var_unique
  * @abstract Declare a hygienic (gensym'd) local variable in the current
  *           function scope and return a variable-reference node for it.
  * @param vm The VM context.
  * @param ty The variable type.
- * @return A nk_var node referencing the new local, or NULL on error.
+ * @return A NK_VAR node referencing the new local, or NULL on error.
  * @note  The generated name begins with ".L.." and is therefore not
  *        expressible as a user identifier — guaranteed no name capture.
  *        This is the safe default for macro temporaries.
- * @discussion Convenience wrapper: $local_var_unique(ty).
+ * @discussion Convenience wrapper: MakeLocalVarUnique(ty).
  */
-$node_t *__cccc_ast_local_var_unique(VirtualMachine *vm, $type_t *ty);
+Node *__builtin_ast_local_var_unique(VirtualMachine *vm, Type *ty);
 
 /*!
- * @function __cccc_ast_assign
+ * @function __builtin_ast_assign
  * @abstract Build an assignment node (target = value).
  * @param vm The VM context.
  * @param target The lvalue expression being assigned to.
  * @param value The rvalue expression to assign.
- * @return An nk_assign node, or NULL on error.
- * @discussion Convenience wrapper: $assign(target, value).
+ * @return An NK_ASSIGN node, or NULL on error.
+ * @discussion Convenience wrapper: MakeAssign(target, value).
  */
-$node_t *__cccc_ast_assign(VirtualMachine *vm, $node_t *target, $node_t *value);
+Node *__builtin_ast_assign(VirtualMachine *vm, Node *target, Node *value);
 
 /*!
- * @function __cccc_ast_member
+ * @function __builtin_ast_member
  * @abstract Create a struct/union member access node (obj.name).
  * @param vm The VM context.
  * @param obj An expression node whose type must be a struct or union.
  * @param name The member name as a NUL-terminated string.
- * @return A nk_member node, or NULL if the member is not found or
+ * @return A NK_MEMBER node, or NULL if the member is not found or
  *         obj is not a struct/union type.
  * @note The callee is responsible for dereferencing pointers first;
- *       pass the struct value directly (use __cccc_ast_unary(ND_DEREF,…)
+ *       pass the struct value directly (use __builtin_ast_unary(ND_DEREF,…)
  *       for pointer-to-struct access).
- * @discussion Convenience wrapper: $member(obj, name).
+ * @discussion Convenience wrapper: MakeMember(obj, name).
  */
-$node_t *__cccc_ast_member(VirtualMachine *vm, $node_t *obj, const char *name);
+Node *__builtin_ast_member(VirtualMachine *vm, Node *obj, const char *name);
 
 /*!
- * @function __cccc_ast_funcall
+ * @function __builtin_ast_funcall
  * @abstract Create a function call node.
  * @param vm The VM context.
  * @param callee An expression node that evaluates to a function (or function
  *               pointer). The callee's lhs field holds this expression.
  * @param args Array of argument nodes (may be NULL if n == 0).
  * @param n Number of arguments.
- * @return A nk_funcall node, or NULL on error.
- * @discussion Convenience wrapper: $funcall(callee, args, n).
+ * @return A NK_FUNCALL node, or NULL on error.
+ * @discussion Convenience wrapper: MakeFuncCall(callee, args, n).
  */
-$node_t *__cccc_ast_funcall(VirtualMachine *vm, $node_t *callee, $node_t **args, int n);
+Node *__builtin_ast_funcall(VirtualMachine *vm, Node *callee, Node **args, int n);
 
 /*!
- * @function __cccc_ast_while
+ * @function __builtin_ast_while
  * @abstract Create a while loop node.
  * @param vm The VM context.
  * @param cond The loop condition expression.
  * @param body The loop body statement.
- * @return A nk_for node (CCCC represents while as for with no init/inc),
+ * @return A NK_FOR node (CCCC represents while as for with no init/inc),
  *         or NULL on error.
- * @discussion Convenience wrapper: $while(cond, body).
+ * @discussion Convenience wrapper: MakeWhile(cond, body).
  */
-$node_t *__cccc_ast_while(VirtualMachine *vm, $node_t *cond, $node_t *body);
+Node *__builtin_ast_while(VirtualMachine *vm, Node *cond, Node *body);
 
 /*!
- * @function __cccc_ast_for
+ * @function __builtin_ast_for
  * @abstract Create a for loop node.
  * @param vm The VM context.
  * @param init Initialiser expression/statement (may be NULL).
  * @param cond Loop condition (may be NULL for infinite loop).
  * @param inc Increment expression (may be NULL).
  * @param body Loop body.
- * @return A nk_for node, or NULL on error.
- * @discussion Convenience wrapper: $for(init, cond, inc, body).
+ * @return A NK_FOR node, or NULL on error.
+ * @discussion Convenience wrapper: MakeFor(init, cond, inc, body).
  */
-$node_t *__cccc_ast_for(VirtualMachine *vm, $node_t *init, $node_t *cond,
-                       $node_t *inc, $node_t *body);
+Node *__builtin_ast_for(VirtualMachine *vm, Node *init, Node *cond,
+                       Node *inc, Node *body);
 
 /*!
- * @function __cccc_ast_do_while
+ * @function __builtin_ast_do_while
  * @abstract Create a do-while loop node.
  * @param vm The VM context.
  * @param body The loop body.
  * @param cond The loop condition (tested after each iteration).
- * @return A nk_do node, or NULL on error.
- * @discussion Convenience wrapper: $do_while(body, cond).
+ * @return A NK_DO node, or NULL on error.
+ * @discussion Convenience wrapper: MakeDoWhile(body, cond).
  */
-$node_t *__cccc_ast_do_while(VirtualMachine *vm, $node_t *body, $node_t *cond);
+Node *__builtin_ast_do_while(VirtualMachine *vm, Node *body, Node *cond);
 
 // ============================================================================
 // Function Generation
 // ============================================================================
 
 /*!
- * @function __cccc_ast_function
+ * @function __builtin_ast_function
  * @abstract Create a new function object.
  * @param vm The VM context.
  * @param name The function name.
@@ -1359,52 +1359,52 @@ $node_t *__cccc_ast_do_while(VirtualMachine *vm, $node_t *body, $node_t *cond);
  * @return The newly created function object, or NULL on error.
  * @discussion The function is automatically added to the globals list
  *             and will be compiled when the main program is compiled.
- *             Convenience wrapper: $function(name, return_type).
+ *             Convenience wrapper: MakeFunction(name, return_type).
  */
-$obj_t *__cccc_ast_function(VirtualMachine *vm, const char *name,
-                            $type_t *return_type);
+Obj *__builtin_ast_function(VirtualMachine *vm, const char *name,
+                            Type *return_type);
 
 /*!
- * @function __cccc_ast_publish
+ * @function __builtin_ast_publish
  * @abstract Make a generated object visible at the current source position.
  * @param vm The VM context.
  * @param obj A function or global variable object created by the AST builders.
  * @param tok Optional representative token for diagnostics, or NULL.
- * @return A no-op $node_t on success, or NULL on invalid arguments.
+ * @return A no-op Node on success, or NULL on invalid arguments.
  * @discussion Top-level explicit macro calls run at their source position.
  *             Call this after creating a function or global variable when
  *             later macro-generated code at the same parse point should be
  *             able to reference it without a handwritten declaration.
- *             Convenience wrapper: $publish(obj) / $publish_at(obj, tok).
+ *             Convenience wrapper: PublishNode(obj) / PublishNodeAt(obj, tok).
  */
-$node_t *__cccc_ast_publish(VirtualMachine *vm, $obj_t *obj, $token_t *tok);
+Node *__builtin_ast_publish(VirtualMachine *vm, Obj *obj, Token *tok);
 
 /*!
- * @function __cccc_ast_publish_type
+ * @function __builtin_ast_publish_type
  * @abstract Accept a generated type declaration as already published.
  * @param vm The VM context.
- * @param ty A type created by $make_struct, $make_union,
- *           $make_enum, or $make_typedef.
+ * @param ty A type created by MakeStruct, MakeUnion,
+ *           MakeEnum, or MakeTypedef.
  * @param tok Optional representative token for diagnostics, or NULL.
- * @return A no-op $node_t on success, or NULL on invalid arguments.
+ * @return A no-op Node on success, or NULL on invalid arguments.
  * @discussion Generated type builders self-register in tag or typedef scope.
- *             This function lets $publish(type) be used uniformly; there
+ *             This function lets PublishNode(type) be used uniformly; there
  *             is no separate convenience macro for this entry point.
  */
-$node_t *__cccc_ast_publish_type(VirtualMachine *vm, $type_t *ty, $token_t *tok);
+Node *__builtin_ast_publish_type(VirtualMachine *vm, Type *ty, Token *tok);
 
 /*!
- * @function __cccc_emit_directive
+ * @function __builtin_emit_directive
  * @abstract Emit one raw preprocessor directive line into generated output.
  * @param vm The VM context.
  * @param line Complete directive text, for example "#ifdef _WIN32".
- * @discussion Convenience wrapper: $emit_directive(line).
+ * @discussion Convenience wrapper: EmitDirective(line).
  */
-void __cccc_emit_directive(VirtualMachine *vm, const char *line);
+void __builtin_emit_directive(VirtualMachine *vm, const char *line);
 
 
 /*!
- * @function __cccc_ast_function_add_param
+ * @function __builtin_ast_function_add_param
  * @abstract Add a parameter to a function.
  * @param vm The VM context.
  * @param fn The function object.
@@ -1412,91 +1412,91 @@ void __cccc_emit_directive(VirtualMachine *vm, const char *line);
  * @param type The parameter type.
  * @discussion Parameters are added in order. Call this multiple times
  *             for multiple parameters.  Convenience wrapper:
- *             $function_add_param(fn, name, type).
+ *             FunctionAddParam(fn, name, type).
  */
-void __cccc_ast_function_add_param(VirtualMachine *vm, $obj_t *fn, const char *name,
-                                $type_t *type);
+void __builtin_ast_function_add_param(VirtualMachine *vm, Obj *fn, const char *name,
+                                Type *type);
 
 /*!
- * @function __cccc_ast_function_set_body
+ * @function __builtin_ast_function_set_body
  * @abstract Set the body of a function.
  * @param vm The VM context.
  * @param fn The function object.
  * @param body The function body (a statement or block node).
- * @discussion If body is not already a nk_block, it will be wrapped in one.
- *             Convenience wrapper: $function_set_body(fn, body).
+ * @discussion If body is not already a NK_BLOCK, it will be wrapped in one.
+ *             Convenience wrapper: FunctionSetBody(fn, body).
  */
-void __cccc_ast_function_set_body(VirtualMachine *vm, $obj_t *fn, $node_t *body);
+void __builtin_ast_function_set_body(VirtualMachine *vm, Obj *fn, Node *body);
 
 /*!
- * @function __cccc_ast_function_set_static
+ * @function __builtin_ast_function_set_static
  * @abstract Set whether a function has static linkage.
  * @param fn The function object.
  * @param is_static True for static linkage, false for external.
- * @discussion Convenience wrapper: $function_set_static(fn, is_static).
+ * @discussion Convenience wrapper: FunctionSetStatic(fn, is_static).
  */
-void __cccc_ast_function_set_static($obj_t *fn, bool is_static);
+void __builtin_ast_function_set_static(Obj *fn, bool is_static);
 
 /*!
- * @function __cccc_ast_function_set_inline
+ * @function __builtin_ast_function_set_inline
  * @abstract Set whether a function is inline.
  * @param fn The function object.
  * @param is_inline True for inline, false otherwise.
- * @discussion Convenience wrapper: $function_set_inline(fn, is_inline).
+ * @discussion Convenience wrapper: FunctionSetInline(fn, is_inline).
  */
-void __cccc_ast_function_set_inline($obj_t *fn, bool is_inline);
+void __builtin_ast_function_set_inline(Obj *fn, bool is_inline);
 
 /*!
- * @function __cccc_ast_function_set_variadic
+ * @function __builtin_ast_function_set_variadic
  * @abstract Set whether a function is variadic.
  * @param fn The function object.
  * @param is_variadic True for variadic, false otherwise.
- * @discussion Convenience wrapper: $function_set_variadic(fn, is_variadic).
+ * @discussion Convenience wrapper: FunctionSetVariadic(fn, is_variadic).
  */
-void __cccc_ast_function_set_variadic($obj_t *fn, bool is_variadic);
+void __builtin_ast_function_set_variadic(Obj *fn, bool is_variadic);
 
 // Ticket #171: function prototype (forward declaration only, no body)
 /*!
- * @function __cccc_ast_function_prototype
+ * @function __builtin_ast_function_prototype
  * @abstract Create a function forward declaration (prototype) without a body.
  * @param vm The VM context.
  * @param name The function name.
  * @param return_type The return type.
  * @return The declaration Obj*, or NULL on error.
- * @discussion Use $function_add_param to add parameters and
- *             $publish to expose it in scope. A subsequent
- *             $function call with the same name will reuse this Obj and
- *             fill in the body.  Convenience wrapper: $function_prototype(name, return_type).
+ * @discussion Use FunctionAddParam to add parameters and
+ *             PublishNode to expose it in scope. A subsequent
+ *             MakeFunction call with the same name will reuse this Obj and
+ *             fill in the body.  Convenience wrapper: FunctionPrototype(name, return_type).
  */
-$obj_t *__cccc_ast_function_prototype(VirtualMachine *vm, const char *name,
-                                    $type_t *return_type);
+Obj *__builtin_ast_function_prototype(VirtualMachine *vm, const char *name,
+                                    Type *return_type);
 
 // Ticket #171: struct/union/enum/typedef type builders
 
 /*!
- * @function __cccc_ast_make_struct
+ * @function __builtin_ast_make_struct
  * @abstract Create and expose a new named struct type.
  * @param vm The VM context.
  * @param name The struct tag name.
- * @return The new struct $type_t*, or NULL on error.
- * @discussion Use $struct_add_field to add fields after creation.
- *             The type is immediately visible via $find_type(name).
- *             Convenience wrapper: $make_struct(name).
+ * @return The new struct Type*, or NULL on error.
+ * @discussion Use StructAddField to add fields after creation.
+ *             The type is immediately visible via FindType(name).
+ *             Convenience wrapper: MakeStruct(name).
  */
-$type_t *__cccc_ast_make_struct(VirtualMachine *vm, const char *name);
+Type *__builtin_ast_make_struct(VirtualMachine *vm, const char *name);
 
 /*!
- * @function __cccc_ast_make_union
+ * @function __builtin_ast_make_union
  * @abstract Create and expose a new named union type.
  * @param vm The VM context.
  * @param name The union tag name.
- * @return The new union $type_t*, or NULL on error.
- * @discussion Convenience wrapper: $make_union(name).
+ * @return The new union Type*, or NULL on error.
+ * @discussion Convenience wrapper: MakeUnion(name).
  */
-$type_t *__cccc_ast_make_union(VirtualMachine *vm, const char *name);
+Type *__builtin_ast_make_union(VirtualMachine *vm, const char *name);
 
 /*!
- * @function __cccc_ast_struct_add_field
+ * @function __builtin_ast_struct_add_field
  * @abstract Append a field to a struct or union and recompute its layout.
  * @param vm The VM context.
  * @param ty The struct or union type to modify.
@@ -1506,24 +1506,24 @@ $type_t *__cccc_ast_make_union(VirtualMachine *vm, const char *name);
  * @discussion For struct types, offsets are recalculated from scratch after
  *             each field addition. For union types, all fields stay at offset 0
  *             and the union size is updated to the maximum field size.
- *             Convenience wrapper: $struct_add_field(ty, name, field_type).
+ *             Convenience wrapper: StructAddField(ty, name, field_type).
  */
-$type_t *__cccc_ast_struct_add_field(VirtualMachine *vm, $type_t *ty, const char *name,
-                                   $type_t *field_type);
+Type *__builtin_ast_struct_add_field(VirtualMachine *vm, Type *ty, const char *name,
+                                   Type *field_type);
 
 /*!
- * @function __cccc_ast_make_enum
+ * @function __builtin_ast_make_enum
  * @abstract Create and expose a new named enum type.
  * @param vm The VM context.
  * @param name The enum tag name.
- * @return The new enum $type_t*, or NULL on error.
- * @discussion Use $enum_add_constant to add constants after creation.
- *             Convenience wrapper: $make_enum(name).
+ * @return The new enum Type*, or NULL on error.
+ * @discussion Use EnumAddConstant to add constants after creation.
+ *             Convenience wrapper: MakeEnum(name).
  */
-$type_t *__cccc_ast_make_enum(VirtualMachine *vm, const char *name);
+Type *__builtin_ast_make_enum(VirtualMachine *vm, const char *name);
 
 /*!
- * @function __cccc_ast_enum_add_constant
+ * @function __builtin_ast_enum_add_constant
  * @abstract Add a named constant to an enum type and expose it in scope.
  * @param vm The VM context.
  * @param ty The enum type.
@@ -1532,144 +1532,144 @@ $type_t *__cccc_ast_make_enum(VirtualMachine *vm, const char *name);
  * @discussion The constant is appended to ty->enum_constants and also pushed
  *             into the current scope so it is usable as an integer constant in
  *             subsequently compiled code.  Convenience wrapper:
- *             $enum_add_constant(ty, name, value).
+ *             EnumAddConstant(ty, name, value).
  */
-void __cccc_ast_enum_add_constant(VirtualMachine *vm, $type_t *ty, const char *name,
+void __builtin_ast_enum_add_constant(VirtualMachine *vm, Type *ty, const char *name,
                                   int64_t value);
 
 /*!
- * @function __cccc_ast_make_typedef
+ * @function __builtin_ast_make_typedef
  * @abstract Register a typedef alias for a type and expose it in scope.
  * @param vm The VM context.
  * @param name The typedef name.
  * @param underlying The aliased type.
  * @return The aliased type after registration, or NULL on invalid arguments.
- * @discussion After this call, $find_type(name) resolves to underlying and
+ * @discussion After this call, FindType(name) resolves to underlying and
  *             subsequently compiled code can use name as a type name.
- *             Convenience wrapper: $make_typedef(name, underlying).
+ *             Convenience wrapper: MakeTypedef(name, underlying).
  */
-$type_t *__cccc_ast_make_typedef(VirtualMachine *vm, const char *name, $type_t *underlying);
+Type *__builtin_ast_make_typedef(VirtualMachine *vm, const char *name, Type *underlying);
 
 // ============================================================================
 // Global Variable Generation (ticket #152)
 // ============================================================================
 
 /*!
- * @function __cccc_ast_global_var
+ * @function __builtin_ast_global_var
  * @abstract Create a new named global variable definition.
  * @param vm   The VM context.
  * @param name The variable name (must be unique among globals).
- * @param ty   The variable type.  Use $make_array(char_ty, len) for byte
+ * @param ty   The variable type.  Use MakeArray(char_ty, len) for byte
  *             arrays so that the size matches the init_data length.
  * @return The new Obj*, or NULL on error.
  * @discussion The variable is registered in vm->compiler.globals.  For inline
  *             macros the capture loop will stash it in macro_globals and emit
  *             an extern declaration into every input file's token stream so
  *             the parser can resolve references.
- *             Convenience wrapper: $global_var(name, ty).
+ *             Convenience wrapper: GlobalVar(name, ty).
  */
-$obj_t *__cccc_ast_global_var(VirtualMachine *vm, const char *name, $type_t *ty);
+Obj *__builtin_ast_global_var(VirtualMachine *vm, const char *name, Type *ty);
 
 /*!
- * @function __cccc_ast_global_var_set_init_data
+ * @function __builtin_ast_global_var_set_init_data
  * @abstract Set the initial data for a generated global variable.
  * @param vm   The VM context.
  * @param var  The global variable object.
  * @param data Pointer to the raw byte data.
  * @param len  Number of bytes to copy.  Must equal var->ty->size.
- * @discussion Convenience wrapper: $global_var_set_init_data(var, data, len).
+ * @discussion Convenience wrapper: GlobalVarSetInitData(var, data, len).
  */
-void __cccc_ast_global_var_set_init_data(VirtualMachine *vm, $obj_t *var,
+void __builtin_ast_global_var_set_init_data(VirtualMachine *vm, Obj *var,
                                         const char *data, int len);
 
 /*!
- * @function __cccc_ast_global_var_set_static
+ * @function __builtin_ast_global_var_set_static
  * @abstract Set the static (internal linkage) flag on a generated global.
  * @param var       The global variable object.
  * @param is_static True for internal linkage (file-scope static).
- * @discussion Convenience wrapper: $global_var_set_static(var, is_static).
+ * @discussion Convenience wrapper: GlobalVarSetStatic(var, is_static).
  */
-void __cccc_ast_global_var_set_static($obj_t *var, bool is_static);
+void __builtin_ast_global_var_set_static(Obj *var, bool is_static);
 
 // ============================================================================
 // Function-building context (ticket #148)
 // ============================================================================
 
 /*!
- * @function __cccc_ast_push_fn
+ * @function __builtin_ast_push_fn
  * @abstract Establish fn as the "function currently being built" so that
- *           $quote("return x;") applies the correct implicit return-type cast.
+ *           Quote("return x;") applies the correct implicit return-type cast.
  * @param vm The VM context.
  * @param fn The generated function whose return type should be used.
- * @discussion Call __cccc_ast_pop_fn (or use the $with_fn macro) to
+ * @discussion Call __builtin_ast_pop_fn (or use the WithFn macro) to
  *             restore the previous context.  execute_pragma_macro always
  *             restores current_fn after the macro returns, so unmatched pushes
  *             cannot leak into the main parse/codegen pass.  There is no
- *             1:1 convenience macro; use the @c $with_fn(fn) { ... } block
+ *             1:1 convenience macro; use the @c WithFn(fn) { ... } block
  *             helper to bracket push/pop pairs in a macro body.
  */
-void __cccc_ast_push_fn(VirtualMachine *vm, $obj_t *fn);
+void __builtin_ast_push_fn(VirtualMachine *vm, Obj *fn);
 
 /*!
- * @function __cccc_ast_pop_fn
+ * @function __builtin_ast_pop_fn
  * @abstract Restore the function context saved by the most recent push.
  * @param vm The VM context.
- * @discussion Inverse of __cccc_ast_push_fn; typically used through the
- *             @c $with_fn(fn) { ... } block helper, which performs the
+ * @discussion Inverse of __builtin_ast_push_fn; typically used through the
+ *             @c WithFn(fn) { ... } block helper, which performs the
  *             matching pop even on early exit.
  */
-void __cccc_ast_pop_fn(VirtualMachine *vm);
+void __builtin_ast_pop_fn(VirtualMachine *vm);
 
 /*!
- * @function __cccc_ast_push_block
+ * @function __builtin_ast_push_block
  * @abstract Establish a block as the current statement-append context.
  * @param vm The VM context.
- * @param block The nk_block node being populated.
- * @discussion Use with $with_block(block) so $block_add_stmt(stmt) appends to
+ * @param block The NK_BLOCK node being populated.
+ * @discussion Use with WithBlock(block) so BlockAddStmt(stmt) appends to
  *             block without repeating the block pointer.
  */
-void __cccc_ast_push_block(VirtualMachine *vm, $node_t *block);
-void __cccc_ast_pop_block(VirtualMachine *vm);
-$node_t *__cccc_ast_block_add_current_stmt(VirtualMachine *vm, $node_t *stmt);
+void __builtin_ast_push_block(VirtualMachine *vm, Node *block);
+void __builtin_ast_pop_block(VirtualMachine *vm);
+Node *__builtin_ast_block_add_current_stmt(VirtualMachine *vm, Node *stmt);
 
 /*!
- * @function __cccc_ast_push_struct
+ * @function __builtin_ast_push_struct
  * @abstract Establish a struct or union as the current field-add context.
  * @param vm The VM context.
  * @param ty The aggregate type being populated.
- * @discussion Use with $with_struct(ty) so $struct_add_field(name, ty) appends
+ * @discussion Use with WithStruct(ty) so StructAddField(name, ty) appends
  *             to the current aggregate.
  */
-void __cccc_ast_push_struct(VirtualMachine *vm, $type_t *ty);
-void __cccc_ast_pop_struct(VirtualMachine *vm);
-$type_t *__cccc_ast_struct_add_current_field(VirtualMachine *vm, const char *name,
-                                            $type_t *field_type);
+void __builtin_ast_push_struct(VirtualMachine *vm, Type *ty);
+void __builtin_ast_pop_struct(VirtualMachine *vm);
+Type *__builtin_ast_struct_add_current_field(VirtualMachine *vm, const char *name,
+                                            Type *field_type);
 
 /*!
- * @function __cccc_ast_push_switch
+ * @function __builtin_ast_push_switch
  * @abstract Establish a switch node as the current case/default context.
  * @param vm The VM context.
  * @param switch_node The switch node being populated.
- * @discussion Use with $with_switch(sw) so $switch_add_case(value, body) and
- *             $switch_set_default(body) append to the current switch.
+ * @discussion Use with WithSwitch(sw) so SwitchAddCase(value, body) and
+ *             SwitchSetDefault(body) append to the current switch.
  */
-void __cccc_ast_push_switch(VirtualMachine *vm, $node_t *switch_node);
-void __cccc_ast_pop_switch(VirtualMachine *vm);
-void __cccc_ast_switch_add_current_case(VirtualMachine *vm, $node_t *value,
-                                       $node_t *body);
-void __cccc_ast_switch_set_current_default(VirtualMachine *vm, $node_t *body);
+void __builtin_ast_push_switch(VirtualMachine *vm, Node *switch_node);
+void __builtin_ast_pop_switch(VirtualMachine *vm);
+void __builtin_ast_switch_add_current_case(VirtualMachine *vm, Node *value,
+                                       Node *body);
+void __builtin_ast_switch_set_current_default(VirtualMachine *vm, Node *body);
 
 /*!
- * @function __cccc_ast_push_enum
+ * @function __builtin_ast_push_enum
  * @abstract Establish an enum as the current constant-add context.
  * @param vm The VM context.
  * @param ty The enum type being populated.
- * @discussion Use with $with_enum(ty) so $enum_add_constant(name, value)
+ * @discussion Use with WithEnum(ty) so EnumAddConstant(name, value)
  *             appends to the current enum.
  */
-void __cccc_ast_push_enum(VirtualMachine *vm, $type_t *ty);
-void __cccc_ast_pop_enum(VirtualMachine *vm);
-void __cccc_ast_enum_add_current_constant(VirtualMachine *vm, const char *name,
+void __builtin_ast_push_enum(VirtualMachine *vm, Type *ty);
+void __builtin_ast_pop_enum(VirtualMachine *vm);
+void __builtin_ast_enum_add_current_constant(VirtualMachine *vm, const char *name,
                                          int value);
 
 // ============================================================================
@@ -1677,386 +1677,386 @@ void __cccc_ast_enum_add_current_constant(VirtualMachine *vm, const char *name,
 // ============================================================================
 
 /*!
- * @function __cccc_dump_tree
+ * @function __builtin_dump_tree
  * @abstract Print a human-readable tree representation of a node to stdout.
  * @param vm The VM context.
  * @param node The root node to print.
  * @discussion Reuses the compiler's internal cc_dump_ast text renderer.
- *             Convenience wrapper: $dump_tree(node).
+ *             Convenience wrapper: DumpTree(node).
  */
-void __cccc_dump_tree(VirtualMachine *vm, $node_t *node);
+void __builtin_dump_tree(VirtualMachine *vm, Node *node);
 
 /*!
- * @function __cccc_dump_tree_to_string
+ * @function __builtin_dump_tree_to_string
  * @abstract Render the tree representation to a heap-allocated string.
  * @param vm The VM context.
  * @param node The root node.
  * @return An arena-allocated NUL-terminated string, or NULL on error.
- * @discussion Convenience wrapper: $dump_tree_to_string(node).
+ * @discussion Convenience wrapper: DumpTreeToString(node).
  */
-const char *__cccc_dump_tree_to_string(VirtualMachine *vm, $node_t *node);
+const char *__builtin_dump_tree_to_string(VirtualMachine *vm, Node *node);
 
 /*!
- * @function __cccc_dump_ast_gen
- * @abstract Print __cccc_ast_*() builder calls that would reconstruct the node.
+ * @function __builtin_dump_ast_gen
+ * @abstract Print __builtin_ast_*() builder calls that would reconstruct the node.
  * @param vm The VM context.
  * @param node The root node to emit builder calls for.
  * @discussion Covers all node kinds for which relfection.c has a builder.
  *             Unsupported kinds are emitted as C comments.
- *             Convenience wrapper: $dump_ast_gen(node).
+ *             Convenience wrapper: DumpAstGen(node).
  */
-void __cccc_dump_ast_gen(VirtualMachine *vm, $node_t *node);
+void __builtin_dump_ast_gen(VirtualMachine *vm, Node *node);
 
 /*!
- * @function __cccc_dump_ast_gen_to_string
- * @abstract Render the __cccc_ast_*() builder call sequence to a string.
+ * @function __builtin_dump_ast_gen_to_string
+ * @abstract Render the __builtin_ast_*() builder call sequence to a string.
  * @param vm The VM context.
  * @param node The root node.
  * @return An arena-allocated NUL-terminated string, or NULL on error.
- * @discussion Convenience wrapper: $dump_ast_gen_to_string(node).
+ * @discussion Convenience wrapper: DumpAstGenToString(node).
  */
-const char *__cccc_dump_ast_gen_to_string(VirtualMachine *vm, $node_t *node);
+const char *__builtin_dump_ast_gen_to_string(VirtualMachine *vm, Node *node);
 
 // ============================================================================
-// Convenience Macros (automatically pass _VM)
+// Convenience Macros (automatically pass VM)
 // ============================================================================
 
 // Quasi-quoting helpers (ticket #1, #172)
-#define $quote(tmpl, ...) __cccc_quote(_VM, tmpl, ##__VA_ARGS__)
-#define $quote_n(tmpl, nodes, count) __cccc_quote_n(_VM, tmpl, nodes, count)
+#define Quote(tmpl, ...) __builtin_quote(VM, tmpl, ##__VA_ARGS__)
+#define QuoteN(tmpl, nodes, count) __builtin_quote_n(VM, tmpl, nodes, count)
 // Build a ->next-linked chain from a compound-literal array for $@k splices:
-//   $node_list(($node_t*[]){ a, b, c }, 3)
-#define $node_list(nodes, count) __cccc_node_list(_VM, nodes, count)
+//   NodeList((Node*[]){ a, b, c }, 3)
+#define NodeList(nodes, count) __builtin_node_list(VM, nodes, count)
 
 // Diagnostic helpers (ticket #78) — note: variadic macros require C99+
-#define $macro_error_at(node, ...) __cccc_macro_error_at(_VM, node, __VA_ARGS__)
-#define $macro_warning_at(node, ...) __cccc_macro_warning_at(_VM, node, __VA_ARGS__)
+#define MacroErrorAt(node, ...) __builtin_macro_error_at(VM, node, __VA_ARGS__)
+#define MacroWarningAt(node, ...) __builtin_macro_warning_at(VM, node, __VA_ARGS__)
 
 // AST dump helpers (ticket #58)
-#define $dump_tree(node) __cccc_dump_tree(_VM, node)
-#define $dump_tree_to_string(node) __cccc_dump_tree_to_string(_VM, node)
-#define $dump_ast_gen(node) __cccc_dump_ast_gen(_VM, node)
-#define $dump_ast_gen_to_string(node) __cccc_dump_ast_gen_to_string(_VM, node)
-#define $gensym(prefix) __cccc_gensym(_VM, prefix)
-#define $macroexpand_1(node) __cccc_macroexpand_1(_VM, node)
-#define $macroexpand(node) __cccc_macroexpand(_VM, node)
-#define $vararg_count() __cccc_ast_vararg_count(_VM)
-#define $vararg_at(i) __cccc_ast_vararg_at(_VM, i)
-#define $vararg_as_array() __cccc_ast_varargs_as_array(_VM)
-#define $vararg_str_at(i) __cccc_ast_vararg_str_at(_VM, i)
+#define DumpTree(node) __builtin_dump_tree(VM, node)
+#define DumpTreeToString(node) __builtin_dump_tree_to_string(VM, node)
+#define DumpAstGen(node) __builtin_dump_ast_gen(VM, node)
+#define DumpAstGenToString(node) __builtin_dump_ast_gen_to_string(VM, node)
+#define Gensym(prefix) __builtin_gensym(VM, prefix)
+#define MacroExpand1(node) __builtin_macroexpand_1(VM, node)
+#define MacroExpand(node) __builtin_macroexpand(VM, node)
+#define VarargCount() __builtin_ast_vararg_count(VM)
+#define VarargAt(i) __builtin_ast_vararg_at(VM, i)
+#define VarargAsArray() __builtin_ast_varargs_as_array(VM)
+#define VarargStrAt(i) __builtin_ast_vararg_str_at(VM, i)
 
-#define __cccc_dispatch_2(_1, _2, which, ...) which(_1, _2)
-#define __cccc_dispatch_3(_1, _2, _3, which, ...) which(_1, _2, _3)
+#define __builtin_dispatch_2(_1, _2, which, ...) which(_1, _2)
+#define __builtin_dispatch_3(_1, _2, _3, which, ...) which(_1, _2, _3)
 
-#define $current_token() __cccc_ast_current_token(_VM)
-#define $synthetic_token(label) __cccc_ast_synthetic_token(_VM, label)
-#define $token_from_node(node) __cccc_ast_token_from_node(node)
-#define $set_token(node, tok) __cccc_ast_set_token(node, tok)
-#define $copy_location(dst, src) __cccc_ast_copy_location(dst, src)
+#define CurrentToken() __builtin_ast_current_token(VM)
+#define SyntheticToken(label) __builtin_ast_synthetic_token(VM, label)
+#define TokenFromNode(node) __builtin_ast_token_from_node(node)
+#define SetToken(node, tok) __builtin_ast_set_token(node, tok)
+#define CopyLocation(dst, src) __builtin_ast_copy_location(dst, src)
 
-#define $find_type(name) __cccc_ast_find_type(_VM, name)
-#define $type_exists(name) __cccc_ast_type_exists(_VM, name)
-#define $get_type(name) __cccc_ast_get_type(_VM, name)
+#define FindType(name) __builtin_ast_find_type(VM, name)
+#define TypeExists(name) __builtin_ast_type_exists(VM, name)
+#define GetType(name) __builtin_ast_get_type(VM, name)
 
-// Type introspection — no _VM needed
-#define $type_kind(ty)          __cccc_ast_type_kind(ty)
-#define $type_size(ty)          __cccc_ast_type_size(ty)
-#define $type_align(ty)         __cccc_ast_type_align(ty)
-#define $type_is_unsigned(ty)   __cccc_ast_type_is_unsigned(ty)
-#define $type_is_const(ty)      __cccc_ast_type_is_const(ty)
-#define $type_base(ty)          __cccc_ast_type_base(ty)
-#define $type_array_len(ty)     __cccc_ast_type_array_len(ty)
-#define $type_return_type(ty)   __cccc_ast_type_return_type(ty)
-#define $type_param_count(ty)   __cccc_ast_type_param_count(ty)
-#define $type_param_at(ty, i)   __cccc_ast_type_param_at(ty, i)
-#define $type_is_variadic(ty)   __cccc_ast_type_is_variadic(ty)
-#define $type_name(ty)          __cccc_ast_type_name(ty)
-#define $type_c_name(ty)        __cccc_ast_type_c_name(_VM, ty)
+// Type introspection — no VM needed
+#define GetTypeKind(ty)          __builtin_ast_type_kind(ty)
+#define TypeSize(ty)          __builtin_ast_type_size(ty)
+#define TypeAlign(ty)         __builtin_ast_type_align(ty)
+#define TypeIsUnsigned(ty)   __builtin_ast_type_is_unsigned(ty)
+#define TypeIsConst(ty)      __builtin_ast_type_is_const(ty)
+#define TypeBase(ty)          __builtin_ast_type_base(ty)
+#define TypeArrayLen(ty)     __builtin_ast_type_array_len(ty)
+#define TypeReturnType(ty)   __builtin_ast_type_return_type(ty)
+#define TypeParamCount(ty)   __builtin_ast_type_param_count(ty)
+#define TypeParamAt(ty, i)   __builtin_ast_type_param_at(ty, i)
+#define TypeIsVariadic(ty)   __builtin_ast_type_is_variadic(ty)
+#define TypeName(ty)          __builtin_ast_type_name(ty)
+#define TypeCName(ty)        __builtin_ast_type_c_name(VM, ty)
 
-#define $int_literal(val) __cccc_ast_int_literal(_VM, val)
-#define $float_literal(val) __cccc_ast_float_literal(_VM, val)
-#define $string_literal(str) __cccc_ast_string_literal(_VM, str)
-#define $var_ref(name) __cccc_ast_var_ref(_VM, name)
-#define $param_ref(fn, name) __cccc_ast_param_ref(_VM, fn, name)
+#define MakeIntLiteral(val) __builtin_ast_int_literal(VM, val)
+#define MakeFloatLiteral(val) __builtin_ast_float_literal(VM, val)
+#define MakeStringLiteral(str) __builtin_ast_string_literal(VM, str)
+#define MakeVarRef(name) __builtin_ast_var_ref(VM, name)
+#define MakeParamRef(fn, name) __builtin_ast_param_ref(VM, fn, name)
 
-#define $binary(op, l, r) __cccc_ast_binary(_VM, op, l, r)
-#define $unary(op, operand) __cccc_ast_unary(_VM, op, operand)
-#define $cast(expr, ty) __cccc_ast_cast(_VM, expr, ty)
+#define MakeBinary(op, l, r) __builtin_ast_binary(VM, op, l, r)
+#define MakeUnary(op, operand) __builtin_ast_unary(VM, op, operand)
+#define MakeCast(expr, ty) __builtin_ast_cast(VM, expr, ty)
 
 // Ticket #171: new expression builders
 // Ternary conditional: cond ? then_expr : else_expr
-#define $cond(c, t, e) __cccc_ast_cond(_VM, c, t, e)
+#define MakeCond(c, t, e) __builtin_ast_cond(VM, c, t, e)
 // Typed null pointer: (void *)0
-#define $null() __cccc_ast_null(_VM)
+#define MakeNull() __builtin_ast_null(VM)
 // sizeof(type) / _Alignof(type) as a compile-time integer literal
-#define $sizeof_type(ty) __cccc_ast_sizeof_type(_VM, ty)
-#define $alignof_type(ty) __cccc_ast_alignof_type(_VM, ty)
+#define MakeSizeofType(ty) __builtin_ast_sizeof_type(VM, ty)
+#define MakeAlignofType(ty) __builtin_ast_alignof_type(VM, ty)
 // sizeof(expr): resolves expr's type then returns its size as an integer literal
-#define $sizeof_expr(expr) __cccc_ast_sizeof_expr(_VM, expr)
+#define MakeSizeofExpr(expr) __builtin_ast_sizeof_expr(VM, expr)
 // Array subscript: arr[idx] (desugared as *(arr+idx))
-#define $subscript(arr, idx) __cccc_ast_subscript(_VM, arr, idx)
+#define MakeSubscript(arr, idx) __builtin_ast_subscript(VM, arr, idx)
 // Comma expression: evaluate lhs (for side effects), yield rhs
-#define $comma(lhs, rhs) __cccc_ast_comma(_VM, lhs, rhs)
+#define MakeComma(lhs, rhs) __builtin_ast_comma(VM, lhs, rhs)
 
-#define $return(expr) __cccc_ast_return(_VM, expr)
-#define $block(stmts, count) __cccc_ast_block(_VM, stmts, count)
-#define __cccc_block_add_stmt_1(stmt, _ignored)                          \
-    __cccc_ast_block_add_current_stmt(_VM, stmt)
-#define __cccc_block_add_stmt_2(block, stmt)                              \
-    __cccc_ast_block_add_stmt(_VM, block, stmt)
-#define $block_add_stmt(...)                                             \
-    __cccc_dispatch_2(__VA_ARGS__, __cccc_block_add_stmt_2,                \
-                     __cccc_block_add_stmt_1)
-#define $if(c, t, e) __cccc_ast_if(_VM, c, t, e)
-#define $switch(cond) __cccc_ast_switch(_VM, cond)
-#define __cccc_switch_add_case_2(v, b, _ignored)                          \
-    __cccc_ast_switch_add_current_case(_VM, v, b)
-#define __cccc_switch_add_case_3(sw, v, b)                                \
-    __cccc_ast_switch_add_case(_VM, sw, v, b)
-#define $switch_add_case(...)                                            \
-    __cccc_dispatch_3(__VA_ARGS__, __cccc_switch_add_case_3,               \
-                     __cccc_switch_add_case_2)
-#define __cccc_switch_set_default_1(b, _ignored)                          \
-    __cccc_ast_switch_set_current_default(_VM, b)
-#define __cccc_switch_set_default_2(sw, b)                                \
-    __cccc_ast_switch_set_default(_VM, sw, b)
-#define $switch_set_default(...)                                         \
-    __cccc_dispatch_2(__VA_ARGS__, __cccc_switch_set_default_2,            \
-                     __cccc_switch_set_default_1)
-#define $expr_stmt(expr) __cccc_ast_expr_stmt(_VM, expr)
-#define $local_var(name, ty) __cccc_ast_local_var(_VM, name, ty)
-#define $local_var_unique(ty) __cccc_ast_local_var_unique(_VM, ty)
-#define $assign(target, value) __cccc_ast_assign(_VM, target, value)
-#define $member(obj, name) __cccc_ast_member(_VM, obj, name)
-#define $funcall(callee, args, n) __cccc_ast_funcall(_VM, callee, args, n)
+#define MakeReturn(expr) __builtin_ast_return(VM, expr)
+#define MakeBlock(stmts, count) __builtin_ast_block(VM, stmts, count)
+#define __builtin_block_add_stmt_1(stmt, _ignored)                          \
+    __builtin_ast_block_add_current_stmt(VM, stmt)
+#define __builtin_block_add_stmt_2(block, stmt)                              \
+    __builtin_ast_block_add_stmt(VM, block, stmt)
+#define BlockAddStmt(...)                                             \
+    __builtin_dispatch_2(__VA_ARGS__, __builtin_block_add_stmt_2,                \
+                     __builtin_block_add_stmt_1)
+#define MakeIf(c, t, e) __builtin_ast_if(VM, c, t, e)
+#define MakeSwitch(cond) __builtin_ast_switch(VM, cond)
+#define __builtin_switch_add_case_2(v, b, _ignored)                          \
+    __builtin_ast_switch_add_current_case(VM, v, b)
+#define __builtin_switch_add_case_3(sw, v, b)                                \
+    __builtin_ast_switch_add_case(VM, sw, v, b)
+#define SwitchAddCase(...)                                            \
+    __builtin_dispatch_3(__VA_ARGS__, __builtin_switch_add_case_3,               \
+                     __builtin_switch_add_case_2)
+#define __builtin_switch_set_default_1(b, _ignored)                          \
+    __builtin_ast_switch_set_current_default(VM, b)
+#define __builtin_switch_set_default_2(sw, b)                                \
+    __builtin_ast_switch_set_default(VM, sw, b)
+#define SwitchSetDefault(...)                                         \
+    __builtin_dispatch_2(__VA_ARGS__, __builtin_switch_set_default_2,            \
+                     __builtin_switch_set_default_1)
+#define MakeExprStmt(expr) __builtin_ast_expr_stmt(VM, expr)
+#define MakeLocalVar(name, ty) __builtin_ast_local_var(VM, name, ty)
+#define MakeLocalVarUnique(ty) __builtin_ast_local_var_unique(VM, ty)
+#define MakeAssign(target, value) __builtin_ast_assign(VM, target, value)
+#define MakeMember(obj, name) __builtin_ast_member(VM, obj, name)
+#define MakeFuncCall(callee, args, n) __builtin_ast_funcall(VM, callee, args, n)
 
 // Ticket #235: thin AST wrappers over <string.h> functions, available via
 // the implicit #include <string.h> at the top of this header.
-#define $memcpy(dst, src, n)                                              \
-    __cccc_ast_funcall(_VM, __cccc_ast_var_ref(_VM, "memcpy"),            \
-        ($node_t *[]){(dst), (src), (n)}, 3)
-#define $strlen(s)                                                        \
-    __cccc_ast_funcall(_VM, __cccc_ast_var_ref(_VM, "strlen"),            \
-        ($node_t *[]){(s)}, 1)
-#define $strcmp(a, b)                                                     \
-    __cccc_ast_funcall(_VM, __cccc_ast_var_ref(_VM, "strcmp"),            \
-        ($node_t *[]){(a), (b)}, 2)
-#define $while(cond, body) __cccc_ast_while(_VM, cond, body)
-#define $for(init, cond, inc, body) __cccc_ast_for(_VM, init, cond, inc, body)
-#define $do_while(body, cond) __cccc_ast_do_while(_VM, body, cond)
+#define Memcpy(dst, src, n)                                              \
+    __builtin_ast_funcall(VM, __builtin_ast_var_ref(VM, "memcpy"),            \
+        (Node *[]){(dst), (src), (n)}, 3)
+#define Strlen(s)                                                        \
+    __builtin_ast_funcall(VM, __builtin_ast_var_ref(VM, "strlen"),            \
+        (Node *[]){(s)}, 1)
+#define Strcmp(a, b)                                                     \
+    __builtin_ast_funcall(VM, __builtin_ast_var_ref(VM, "strcmp"),            \
+        (Node *[]){(a), (b)}, 2)
+#define MakeWhile(cond, body) __builtin_ast_while(VM, cond, body)
+#define MakeFor(init, cond, inc, body) __builtin_ast_for(VM, init, cond, inc, body)
+#define MakeDoWhile(body, cond) __builtin_ast_do_while(VM, body, cond)
 
-#define $make_pointer(base) __cccc_ast_make_pointer(_VM, base)
-#define $make_array(base, len) __cccc_ast_make_array(_VM, base, len)
-#define $make_func_ptr_type(ret, params, n) \
-    __cccc_ast_make_func_ptr_type(_VM, ret, params, n)
+#define MakePointer(base) __builtin_ast_make_pointer(VM, base)
+#define MakeArray(base, len) __builtin_ast_make_array(VM, base, len)
+#define MakeFuncPtrType(ret, params, n) \
+    __builtin_ast_make_func_ptr_type(VM, ret, params, n)
 
 // Ticket #171: qualified type constructors
-#define $make_const(ty)    __cccc_ast_make_const(_VM, ty)
-#define $make_volatile(ty) __cccc_ast_make_volatile(_VM, ty)
+#define MakeConst(ty)    __builtin_ast_make_const(VM, ty)
+#define MakeVolatile(ty) __builtin_ast_make_volatile(VM, ty)
 
-#define $enum_count(ty) __cccc_ast_enum_count(_VM, ty)
-#define $enum_at(ty, i) __cccc_ast_enum_at(_VM, ty, i)
-#define $enum_find(ty, name) __cccc_ast_enum_find(_VM, ty, name)
-#define $enum_constant_name(ec)   __cccc_ast_enum_constant_name(ec)
-#define $enum_constant_value(ec)  __cccc_ast_enum_constant_value(ec)
-#define $enum_name(ty)            __cccc_ast_enum_name(ty)
-#define $enum_value_count(ty)     __cccc_ast_enum_value_count(ty)
-#define $enum_value_name(ty, i)   __cccc_ast_enum_value_name(ty, i)
-#define $enum_value(ty, i)        __cccc_ast_enum_value(ty, i)
+#define EnumCount(ty) __builtin_ast_enum_count(VM, ty)
+#define EnumAt(ty, i) __builtin_ast_enum_at(VM, ty, i)
+#define EnumFind(ty, name) __builtin_ast_enum_find(VM, ty, name)
+#define EnumConstantName(ec)   __builtin_ast_enum_constant_name(ec)
+#define EnumConstantValue(ec)  __builtin_ast_enum_constant_value(ec)
+#define EnumName(ty)            __builtin_ast_enum_name(ty)
+#define EnumValueCount(ty)     __builtin_ast_enum_value_count(ty)
+#define EnumValueName(ty, i)   __builtin_ast_enum_value_name(ty, i)
+#define EnumValue(ty, i)        __builtin_ast_enum_value(ty, i)
 
-// Ticket #235: $enum_to_string(ty, expr) / $enum_from_string(ty, expr)
-#define $enum_to_string(ty, expr)   __cccc_ast_enum_to_string_switch(_VM, ty, expr)
-#define $enum_from_string(ty, expr) __cccc_ast_enum_from_string_chain(_VM, ty, expr)
+// Ticket #235: EnumToString(ty, expr) / EnumFromString(ty, expr)
+#define EnumToString(ty, expr)   __builtin_ast_enum_to_string_switch(VM, ty, expr)
+#define EnumFromString(ty, expr) __builtin_ast_enum_from_string_chain(VM, ty, expr)
 
-#define $struct_member_count(ty) __cccc_ast_struct_member_count(_VM, ty)
-#define $struct_member_at(ty, i) __cccc_ast_struct_member_at(_VM, ty, i)
-#define $struct_member_find(ty, name)                                   \
-    __cccc_ast_struct_member_find(_VM, ty, name)
-#define $member_name(m)             __cccc_ast_member_name(m)
-#define $member_type(m)             __cccc_ast_member_type(m)
-#define $member_offset(m)           __cccc_ast_member_offset(m)
-#define $member_is_bitfield(m)      __cccc_ast_member_is_bitfield(m)
-#define $member_bitfield_width(m)   __cccc_ast_member_bitfield_width(m)
+#define StructMemberCount(ty) __builtin_ast_struct_member_count(VM, ty)
+#define StructMemberAt(ty, i) __builtin_ast_struct_member_at(VM, ty, i)
+#define StructMemberFind(ty, name)                                   \
+    __builtin_ast_struct_member_find(VM, ty, name)
+#define MemberName(m)             __builtin_ast_member_name(m)
+#define MemberType(m)             __builtin_ast_member_type(m)
+#define MemberOffset(m)           __builtin_ast_member_offset(m)
+#define MemberIsBitfield(m)      __builtin_ast_member_is_bitfield(m)
+#define MemberBitfieldWidth(m)   __builtin_ast_member_bitfield_width(m)
 
-// Ticket #235: $foreach_member(type, varname, body) — host-side (comptime
+// Ticket #235: ForeachMember(type, varname, body) — host-side (comptime
 // C) loop over the members of a struct/union type. `varname` is bound to
-// each $member_t* in turn; `body` is a compound statement run once per
+// each Member* in turn; `body` is a compound statement run once per
 // member at macro-evaluation time (typically building AST nodes via
-// $block_add_stmt etc.). Two-layer __COUNTER__ indirection gives each
-// call-site unique loop-variable names so $foreach_member can be nested.
-#define __cccc_foreach_member_body(type, varname, body, uid)              \
+// BlockAddStmt etc.). Two-layer __COUNTER__ indirection gives each
+// call-site unique loop-variable names so ForeachMember can be nested.
+#define __builtin_foreach_member_body(type, varname, body, uid)              \
     do {                                                                  \
-        $type_t *__cccc_fem_ty_##uid = (type);                           \
-        int __cccc_fem_n_##uid = $struct_member_count(__cccc_fem_ty_##uid); \
-        for (int __cccc_fem_i_##uid = 0; __cccc_fem_i_##uid < __cccc_fem_n_##uid; \
-             __cccc_fem_i_##uid++) {                                      \
-            $member_t *varname =                                         \
-                $struct_member_at(__cccc_fem_ty_##uid, __cccc_fem_i_##uid); \
+        Type *__builtin_fem_ty_##uid = (type);                           \
+        int __builtin_fem_n_##uid = StructMemberCount(__builtin_fem_ty_##uid); \
+        for (int __builtin_fem_i_##uid = 0; __builtin_fem_i_##uid < __builtin_fem_n_##uid; \
+             __builtin_fem_i_##uid++) {                                      \
+            Member *varname =                                         \
+                StructMemberAt(__builtin_fem_ty_##uid, __builtin_fem_i_##uid); \
             body                                                          \
         }                                                                 \
     } while (0)
-#define __cccc_foreach_member_uid(type, varname, body, uid)               \
-    __cccc_foreach_member_body(type, varname, body, uid)
-#define $foreach_member(type, varname, body)                             \
-    __cccc_foreach_member_uid(type, varname, body, __COUNTER__)
+#define __builtin_foreach_member_uid(type, varname, body, uid)               \
+    __builtin_foreach_member_body(type, varname, body, uid)
+#define ForeachMember(type, varname, body)                             \
+    __builtin_foreach_member_uid(type, varname, body, __COUNTER__)
 
-// Ticket #235: $offsetof_chain(ty, "a", "b", ...) — offsetof(ty, a.b) as an
-// $int_literal AST node.
-#define $offsetof_chain(type, ...)                                       \
-    $int_literal(__cccc_ast_offsetof_chain(_VM, type,                   \
+// Ticket #235: OffsetofChain(ty, "a", "b", ...) — offsetof(ty, a.b) as an
+// MakeIntLiteral AST node.
+#define OffsetofChain(type, ...)                                       \
+    MakeIntLiteral(__builtin_ast_offsetof_chain(VM, type,                   \
         (const char *[]){__VA_ARGS__},                                  \
         (int)(sizeof((const char *[]){__VA_ARGS__}) / sizeof(const char *))))
 
-#define $find_global(name)        __cccc_ast_find_global(_VM, name)
-#define $global_count()           __cccc_ast_global_count(_VM)
-#define $global_at(i)             __cccc_ast_global_at(_VM, i)
-#define $obj_name(obj)            __cccc_ast_obj_name(obj)
-#define $obj_type(obj)            __cccc_ast_obj_type(obj)
-#define $obj_is_function(obj)     __cccc_ast_obj_is_function(obj)
-#define $obj_is_definition(obj)   __cccc_ast_obj_is_definition(obj)
-#define $obj_is_static(obj)       __cccc_ast_obj_is_static(obj)
-#define $attr_target_kind(target)  __cccc_attr_target_kind(target)
-#define $attr_target_name(target)  __cccc_attr_target_name(target)
-#define $attr_target_type(target)  __cccc_attr_target_type(target)
-#define $attr_target_obj(target)   __cccc_attr_target_obj(target)
-#define $attr_target_token(target) __cccc_attr_target_token(target)
+#define FindGlobal(name)        __builtin_ast_find_global(VM, name)
+#define GlobalCount()           __builtin_ast_global_count(VM)
+#define GlobalAt(i)             __builtin_ast_global_at(VM, i)
+#define ObjName(obj)            __builtin_ast_obj_name(obj)
+#define ObjType(obj)            __builtin_ast_obj_type(obj)
+#define ObjIsFunction(obj)     __builtin_ast_obj_is_function(obj)
+#define ObjIsDefinition(obj)   __builtin_ast_obj_is_definition(obj)
+#define ObjIsStatic(obj)       __builtin_ast_obj_is_static(obj)
+#define GetAttrTargetKind(target)  __builtin_attr_target_kind(target)
+#define AttrTargetName(target)  __builtin_attr_target_name(target)
+#define $ATTR_TARGET_TYPE(target)  __builtin_attr_target_type(target)
+#define AttrTargetObj(target)   __builtin_attr_target_obj(target)
+#define AttrTargetToken(target) __builtin_attr_target_token(target)
 
-#define $function(name, ret_type)                                       \
-    __cccc_ast_function(_VM, name, ret_type)
-#define $publish(decl)                                                  \
+#define MakeFunction(name, ret_type)                                       \
+    __builtin_ast_function(VM, name, ret_type)
+#define PublishNode(decl)                                                  \
     _Generic((decl),                                                        \
-        $obj_t *: __cccc_ast_publish,                                          \
-        $type_t *: __cccc_ast_publish_type                                     \
-    )(_VM, (decl), 0)
-#define $publish_at(decl, tok)                                          \
+        Obj *: __builtin_ast_publish,                                          \
+        Type *: __builtin_ast_publish_type                                     \
+    )(VM, (decl), 0)
+#define PublishNodeAt(decl, tok)                                          \
     _Generic((decl),                                                        \
-        $obj_t *: __cccc_ast_publish,                                          \
-        $type_t *: __cccc_ast_publish_type                                     \
-    )(_VM, (decl), (tok))
-#define $emit_directive(line) __cccc_emit_directive(_VM, line)
-#define $function_add_param(fn, name, type)                             \
-    __cccc_ast_function_add_param(_VM, fn, name, type)
-#define $function_set_body(fn, body)                                    \
-    __cccc_ast_function_set_body(_VM, fn, body)
-#define $function_set_static(fn, is_static)                             \
-    __cccc_ast_function_set_static(fn, is_static)
-#define $function_set_inline(fn, is_inline)                             \
-    __cccc_ast_function_set_inline(fn, is_inline)
-#define $function_set_variadic(fn, is_variadic)                         \
-    __cccc_ast_function_set_variadic(fn, is_variadic)
+        Obj *: __builtin_ast_publish,                                          \
+        Type *: __builtin_ast_publish_type                                     \
+    )(VM, (decl), (tok))
+#define EmitDirective(line) __builtin_emit_directive(VM, line)
+#define FunctionAddParam(fn, name, type)                             \
+    __builtin_ast_function_add_param(VM, fn, name, type)
+#define FunctionSetBody(fn, body)                                    \
+    __builtin_ast_function_set_body(VM, fn, body)
+#define FunctionSetStatic(fn, is_static)                             \
+    __builtin_ast_function_set_static(fn, is_static)
+#define FunctionSetInline(fn, is_inline)                             \
+    __builtin_ast_function_set_inline(fn, is_inline)
+#define FunctionSetVariadic(fn, is_variadic)                         \
+    __builtin_ast_function_set_variadic(fn, is_variadic)
 
 // Ticket #171: function forward declaration / prototype builder
-// Creates a declaration-only Obj (no body); use $function_add_param for
-// parameters and $publish to make it visible in scope.
-#define $function_prototype(name, ret)                                  \
-    __cccc_ast_function_prototype(_VM, name, ret)
+// Creates a declaration-only Obj (no body); use FunctionAddParam for
+// parameters and PublishNode to make it visible in scope.
+#define FunctionPrototype(name, ret)                                  \
+    __builtin_ast_function_prototype(VM, name, ret)
 
 // Ticket #171: struct/union/enum/typedef type builders
-// Build a new named aggregate and expose it so $get_type(name) resolves it.
+// Build a new named aggregate and expose it so GetType(name) resolves it.
 //
-//   $type_t *s = $make_struct("Point");
-//   $struct_add_field(s, "x", $get_type("int"));
-//   $struct_add_field(s, "y", $get_type("int"));
+//   Type *s = MakeStruct("Point");
+//   StructAddField(s, "x", GetType("int"));
+//   StructAddField(s, "y", GetType("int"));
 //
-// $struct_add_field works for both struct and union types.
-// $make_typedef registers name as an alias for underlying and returns it.
-// $enum_add_constant adds a constant to the enum AND to scope (usable as int).
-#define $make_struct(name)     __cccc_ast_make_struct(_VM, name)
-#define $make_union(name)      __cccc_ast_make_union(_VM, name)
-#define __cccc_struct_add_field_2(name, field_type, _ignored)             \
-    __cccc_ast_struct_add_current_field(_VM, name, field_type)
-#define __cccc_struct_add_field_3(ty, name, field_type)                   \
-    __cccc_ast_struct_add_field(_VM, ty, name, field_type)
-#define $struct_add_field(...)                                           \
-    __cccc_dispatch_3(__VA_ARGS__, __cccc_struct_add_field_3,              \
-                     __cccc_struct_add_field_2)
-#define $make_enum(name)       __cccc_ast_make_enum(_VM, name)
-#define __cccc_enum_add_constant_2(name, value, _ignored)                 \
-    __cccc_ast_enum_add_current_constant(_VM, name, value)
-#define __cccc_enum_add_constant_3(ty, name, value)                       \
-    __cccc_ast_enum_add_constant(_VM, ty, name, value)
-#define $enum_add_constant(...)                                          \
-    __cccc_dispatch_3(__VA_ARGS__, __cccc_enum_add_constant_3,             \
-                     __cccc_enum_add_constant_2)
-#define $make_typedef(name, underlying) \
-    __cccc_ast_make_typedef(_VM, name, underlying)
+// StructAddField works for both struct and union types.
+// MakeTypedef registers name as an alias for underlying and returns it.
+// EnumAddConstant adds a constant to the enum AND to scope (usable as int).
+#define MakeStruct(name)     __builtin_ast_make_struct(VM, name)
+#define MakeUnion(name)      __builtin_ast_make_union(VM, name)
+#define __builtin_struct_add_field_2(name, field_type, _ignored)             \
+    __builtin_ast_struct_add_current_field(VM, name, field_type)
+#define __builtin_struct_add_field_3(ty, name, field_type)                   \
+    __builtin_ast_struct_add_field(VM, ty, name, field_type)
+#define StructAddField(...)                                           \
+    __builtin_dispatch_3(__VA_ARGS__, __builtin_struct_add_field_3,              \
+                     __builtin_struct_add_field_2)
+#define MakeEnum(name)       __builtin_ast_make_enum(VM, name)
+#define __builtin_enum_add_constant_2(name, value, _ignored)                 \
+    __builtin_ast_enum_add_current_constant(VM, name, value)
+#define __builtin_enum_add_constant_3(ty, name, value)                       \
+    __builtin_ast_enum_add_constant(VM, ty, name, value)
+#define EnumAddConstant(...)                                          \
+    __builtin_dispatch_3(__VA_ARGS__, __builtin_enum_add_constant_3,             \
+                     __builtin_enum_add_constant_2)
+#define MakeTypedef(name, underlying) \
+    __builtin_ast_make_typedef(VM, name, underlying)
 
 // Comptime variable access (ticket #188)
 /*!
- * @function __cccc_get_comptime_int
+ * @function __builtin_get_comptime_int
  * @abstract Read an integer-typed @c #pragma comptime variable's value at
  *           compile time.
  * @param vm The VM context.
  * @param name The comptime variable's name.
  * @return The 64-bit integer value, or 0 if the variable is not defined.
- * @discussion Convenience wrapper: $get_comptime_int(name).
+ * @discussion Convenience wrapper: GetComptimeInt(name).
  */
-int64_t __cccc_get_comptime_int(VirtualMachine *vm, const char *name);
+int64_t __builtin_get_comptime_int(VirtualMachine *vm, const char *name);
 /*!
- * @function __cccc_get_comptime_float
+ * @function __builtin_get_comptime_float
  * @abstract Read a float/double-typed @c #pragma comptime variable's value
  *           at compile time.
  * @param vm The VM context.
  * @param name The comptime variable's name.
  * @return The double value, or 0.0 if the variable is not defined.
- * @discussion Convenience wrapper: $get_comptime_float(name).
+ * @discussion Convenience wrapper: GetComptimeFloat(name).
  */
-double __cccc_get_comptime_float(VirtualMachine *vm, const char *name);
+double __builtin_get_comptime_float(VirtualMachine *vm, const char *name);
 /*!
- * @function __cccc_get_comptime_var
+ * @function __builtin_get_comptime_var
  * @abstract Read a comptime scalar variable as an AST literal node.
  * @param vm The VM context.
  * @param name The comptime variable's name.
- * @return A nk_num node representing the variable's value, or NULL on error.
- * @discussion Convenience wrapper: $get_comptime_var(name).
+ * @return A NK_NUM node representing the variable's value, or NULL on error.
+ * @discussion Convenience wrapper: GetComptimeVar(name).
  */
-$node_t *__cccc_get_comptime_var(VirtualMachine *vm, const char *name);
+Node *__builtin_get_comptime_var(VirtualMachine *vm, const char *name);
 /*!
- * @function __cccc_get_comptime_ptr
+ * @function __builtin_get_comptime_ptr
  * @abstract Return the address of a comptime variable as a generated-code AST
  *           pointer node.
  * @param vm The VM context.
  * @param name The comptime variable's name.
- * @return An nk_addr node pointing at a static shadow copy of the evaluated
+ * @return An NK_ADDR node pointing at a static shadow copy of the evaluated
  *         comptime variable, or NULL on error.
- * @discussion Convenience wrapper: $get_comptime_ptr(name).
+ * @discussion Convenience wrapper: GetComptimePtr(name).
  */
-$node_t *__cccc_get_comptime_ptr(VirtualMachine *vm, const char *name);
+Node *__builtin_get_comptime_ptr(VirtualMachine *vm, const char *name);
 /*!
- * @function __cccc_get_comptime_member
+ * @function __builtin_get_comptime_member
  * @abstract Read a named field from a comptime struct variable as an AST
  *           literal node.
  * @param vm The VM context.
  * @param var_name The comptime struct variable's name.
  * @param field The field name to look up.
- * @return A nk_num node for the field's value, or NULL on error.
- * @discussion Convenience wrapper: $get_comptime_member(var_name, field).
+ * @return A NK_NUM node for the field's value, or NULL on error.
+ * @discussion Convenience wrapper: GetComptimeMember(var_name, field).
  */
-$node_t *__cccc_get_comptime_member(VirtualMachine *vm, const char *var_name,
+Node *__builtin_get_comptime_member(VirtualMachine *vm, const char *var_name,
                                   const char *field);
 
-#define $get_comptime_int(name)           __cccc_get_comptime_int(_VM, name)
-#define $get_comptime_float(name)         __cccc_get_comptime_float(_VM, name)
-#define $get_comptime_var(name)           __cccc_get_comptime_var(_VM, name)
-#define $get_comptime_ptr(name)           __cccc_get_comptime_ptr(_VM, name)
-#define $get_comptime_member(var, field)  __cccc_get_comptime_member(_VM, var, field)
+#define GetComptimeInt(name)           __builtin_get_comptime_int(VM, name)
+#define GetComptimeFloat(name)         __builtin_get_comptime_float(VM, name)
+#define GetComptimeVar(name)           __builtin_get_comptime_var(VM, name)
+#define GetComptimePtr(name)           __builtin_get_comptime_ptr(VM, name)
+#define GetComptimeMember(var, field)  __builtin_get_comptime_member(VM, var, field)
 
 // Constexpr variable access (ticket #189)
 /*!
- * @function __cccc_get_constexpr_value
+ * @function __builtin_get_constexpr_value
  * @abstract Read the evaluated initializer of a global @c constexpr variable
  *           as an AST literal node.
  * @param vm The VM context.
  * @param name The constexpr variable's name.
- * @return A nk_num node (integer or float, depending on the variable's type),
+ * @return A NK_NUM node (integer or float, depending on the variable's type),
  *         or NULL on error.
  * @discussion Errors at compile time if @a name does not refer to a visible
  *             @c constexpr variable.  Convenience wrapper:
- *             $get_constexpr_value(name).
+ *             GetConstexprValue(name).
  */
-$node_t *__cccc_get_constexpr_value(VirtualMachine *vm, const char *name);
+Node *__builtin_get_constexpr_value(VirtualMachine *vm, const char *name);
 
-#define $get_constexpr_value(name)  __cccc_get_constexpr_value(_VM, name)
+#define GetConstexprValue(name)  __builtin_get_constexpr_value(VM, name)
 
 // ============================================================================
 // Initializer Builders (ticket #296)
@@ -2067,36 +2067,36 @@ $node_t *__cccc_get_constexpr_value(VirtualMachine *vm, const char *name);
  *           local var then positionally assign @a inits via node_expand_init_splice.
  * @note Requires function scope (file-scope not supported in V1).
  */
-$node_t *__cccc_ast_compound_literal(VirtualMachine *vm, $type_t *ty, $node_t **inits, int n);
+Node *__builtin_ast_compound_literal(VirtualMachine *vm, Type *ty, Node **inits, int n);
 
 /**
  * @abstract Build an array compound literal.  Element type is explicit to avoid
- *           long-inference surprises with $int_literal.
+ *           long-inference surprises with MakeIntLiteral.
  */
-$node_t *__cccc_ast_init_array(VirtualMachine *vm, $type_t *elem_ty, $node_t **elems, int n);
+Node *__builtin_ast_init_array(VirtualMachine *vm, Type *elem_ty, Node **elems, int n);
 
 /**
  * @abstract Build a designated struct/union initializer.  Unmentioned fields
  *           are zero-initialised.  Partial init (n < member count) is allowed.
  */
-$node_t *__cccc_ast_init_struct(VirtualMachine *vm, $type_t *ty, const char **fields,
-                                $node_t **values, int n);
+Node *__builtin_ast_init_struct(VirtualMachine *vm, Type *ty, const char **fields,
+                                Node **values, int n);
 
 /** Positional compound literal — element count inferred from __VA_ARGS__. */
-#define $compound_literal(ty, ...)                                      \
-    __cccc_ast_compound_literal(_VM, ty,                                 \
-        ($node_t *[]){__VA_ARGS__},                                     \
-        (int)(sizeof(($node_t *[]){__VA_ARGS__}) / sizeof($node_t *)))
+#define CompoundLiteral(ty, ...)                                      \
+    __builtin_ast_compound_literal(VM, ty,                                 \
+        (Node *[]){__VA_ARGS__},                                     \
+        (int)(sizeof((Node *[]){__VA_ARGS__}) / sizeof(Node *)))
 
 /** Array compound literal with explicit element type. */
-#define $init_array(elem_ty, ...)                                       \
-    __cccc_ast_init_array(_VM, elem_ty,                                  \
-        ($node_t *[]){__VA_ARGS__},                                     \
-        (int)(sizeof(($node_t *[]){__VA_ARGS__}) / sizeof($node_t *)))
+#define InitArray(elem_ty, ...)                                       \
+    __builtin_ast_init_array(VM, elem_ty,                                  \
+        (Node *[]){__VA_ARGS__},                                     \
+        (int)(sizeof((Node *[]){__VA_ARGS__}) / sizeof(Node *)))
 
 /** Designated struct/union init — fields and values are separate arrays. */
-#define $init_struct(ty, fields, values, n)                             \
-    __cccc_ast_init_struct(_VM, ty, fields, values, n)
+#define InitStruct(ty, fields, values, n)                             \
+    __builtin_ast_init_struct(VM, ty, fields, values, n)
 
 // ============================================================================
 // Serialization (ticket #235)
@@ -2111,58 +2111,58 @@ $node_t *__cccc_ast_init_struct(VirtualMachine *vm, $type_t *ty, const char **fi
  * @note V1 placeholder: pointer-typed members are copied as raw pointer
  *       bytes, not followed.
  */
-$node_t *__cccc_ast_serialize(VirtualMachine *vm, $type_t *ty, $node_t *expr, $node_t *buf);
+Node *__builtin_ast_serialize(VirtualMachine *vm, Type *ty, Node *expr, Node *buf);
 
 /**
  * @abstract Build `*(ty*)buf` — reinterpret buf as a ty value.
  * @note V1 placeholder: inherits the host's alignment requirements for ty;
- *       if $serialize ever produces a packed/portable layout this must
+ *       if Serialize ever produces a packed/portable layout this must
  *       change to field-by-field reconstruction.
  */
-$node_t *__cccc_ast_deserialize(VirtualMachine *vm, $type_t *ty, $node_t *buf);
+Node *__builtin_ast_deserialize(VirtualMachine *vm, Type *ty, Node *buf);
 
-#define $serialize(ty, expr, buf)   __cccc_ast_serialize(_VM, ty, expr, buf)
-#define $deserialize(ty, buf)       __cccc_ast_deserialize(_VM, ty, buf)
+#define Serialize(ty, expr, buf)   __builtin_ast_serialize(VM, ty, expr, buf)
+#define Deserialize(ty, buf)       __builtin_ast_deserialize(VM, ty, buf)
 
 // Global variable generation (ticket #152)
-#define $global_var(name, ty)                                           \
-    __cccc_ast_global_var(_VM, name, ty)
-#define $global_var_set_init_data(var, data, len)                       \
-    __cccc_ast_global_var_set_init_data(_VM, var, data, len)
-#define $global_var_set_static(var, is_static)                          \
-    __cccc_ast_global_var_set_static(var, is_static)
+#define GlobalVar(name, ty)                                           \
+    __builtin_ast_global_var(VM, name, ty)
+#define GlobalVarSetInitData(var, data, len)                       \
+    __builtin_ast_global_var_set_init_data(VM, var, data, len)
+#define GlobalVarSetStatic(var, is_static)                          \
+    __builtin_ast_global_var_set_static(var, is_static)
 
 // Function-building context (ticket #148)
 // Usage:
-//   $with_fn(fn) {
-//       $function_set_body(fn, $quote("return 42;"));
+//   WithFn(fn) {
+//       FunctionSetBody(fn, Quote("return 42;"));
 //   }
-// Inside the block, current_fn is set to fn so $quote("return x;") casts
+// Inside the block, current_fn is set to fn so Quote("return x;") casts
 // to the correct return type.  The pop always runs even on early exit.
-#define $with_fn(fn)                                                    \
-    for (int _cccc_fn_ctx_ = (__cccc_ast_push_fn(_VM, (fn)), 1);             \
+#define WithFn(fn)                                                    \
+    for (int _cccc_fn_ctx_ = (__builtin_ast_push_fn(VM, (fn)), 1);             \
          _cccc_fn_ctx_;                                                      \
-         _cccc_fn_ctx_ = (__cccc_ast_pop_fn(_VM), 0))
+         _cccc_fn_ctx_ = (__builtin_ast_pop_fn(VM), 0))
 
-#define $with_block(block)                                               \
-    for (int _cccc_block_ctx_ = (__cccc_ast_push_block(_VM, (block)), 1);  \
+#define WithBlock(block)                                               \
+    for (int _cccc_block_ctx_ = (__builtin_ast_push_block(VM, (block)), 1);  \
          _cccc_block_ctx_;                                                \
-         _cccc_block_ctx_ = (__cccc_ast_pop_block(_VM), 0))
+         _cccc_block_ctx_ = (__builtin_ast_pop_block(VM), 0))
 
-#define $with_struct(ty)                                                 \
-    for (int _cccc_struct_ctx_ = (__cccc_ast_push_struct(_VM, (ty)), 1);   \
+#define WithStruct(ty)                                                 \
+    for (int _cccc_struct_ctx_ = (__builtin_ast_push_struct(VM, (ty)), 1);   \
          _cccc_struct_ctx_;                                               \
-         _cccc_struct_ctx_ = (__cccc_ast_pop_struct(_VM), 0))
+         _cccc_struct_ctx_ = (__builtin_ast_pop_struct(VM), 0))
 
-#define $with_switch(sw)                                                 \
-    for (int _cccc_switch_ctx_ = (__cccc_ast_push_switch(_VM, (sw)), 1);   \
+#define WithSwitch(sw)                                                 \
+    for (int _cccc_switch_ctx_ = (__builtin_ast_push_switch(VM, (sw)), 1);   \
          _cccc_switch_ctx_;                                               \
-         _cccc_switch_ctx_ = (__cccc_ast_pop_switch(_VM), 0))
+         _cccc_switch_ctx_ = (__builtin_ast_pop_switch(VM), 0))
 
-#define $with_enum(ty)                                                   \
-    for (int _cccc_enum_ctx_ = (__cccc_ast_push_enum(_VM, (ty)), 1);       \
+#define WithEnum(ty)                                                   \
+    for (int _cccc_enum_ctx_ = (__builtin_ast_push_enum(VM, (ty)), 1);       \
          _cccc_enum_ctx_;                                                 \
-         _cccc_enum_ctx_ = (__cccc_ast_pop_enum(_VM), 0))
+         _cccc_enum_ctx_ = (__builtin_ast_pop_enum(VM), 0))
 
 // ============================================================================
 // Macro Standard Library Attributes (ticket #235)
@@ -2170,58 +2170,58 @@ $node_t *__cccc_ast_deserialize(VirtualMachine *vm, $type_t *ty, $node_t *buf);
 
 // @serialize struct Foo {...}; publishes
 //   int Foo_serialize(struct Foo *self, void *buf);
-// which copies *self into buf via $serialize and returns sizeof(struct Foo).
+// which copies *self into buf via Serialize and returns sizeof(struct Foo).
 @macro(attribute("serialize"))
-void __cccc_attr_serialize($attr_target_t *target) {
-    if ($attr_target_kind(target) != attr_target_type)
-        $macro_error_at(0, "@serialize expects a type (struct/union) target");
+void __builtin_attr_serialize(AttrTarget *target) {
+    if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
+        MacroErrorAt(0, "@serialize expects a type (struct/union) target");
 
-    $type_t *ty = $attr_target_type(target);
-    const char *tname = $attr_target_name(target);
+    Type *ty = $ATTR_TARGET_TYPE(target);
+    const char *tname = AttrTargetName(target);
     if (!ty || !tname)
-        $macro_error_at(0, "@serialize target has no usable type/name");
+        MacroErrorAt(0, "@serialize target has no usable type/name");
 
     char fname[128];
     strcpy(fname, tname);
     strcat(fname, "_serialize");
 
-    $obj_t *fn = $function(fname, $get_type("int"));
-    $function_add_param(fn, "self", $make_pointer(ty));
-    $function_add_param(fn, "buf", $make_pointer($get_type("void")));
-    $with_fn(fn) {
-        $node_t *self = $unary(nk_deref, $param_ref(fn, "self"));
-        $node_t *buf = $param_ref(fn, "buf");
-        $node_t *block = $serialize(ty, self, buf);
-        $block_add_stmt(block, $return($int_literal($type_size(ty))));
-        $function_set_body(fn, block);
+    Obj *fn = MakeFunction(fname, GetType("int"));
+    FunctionAddParam(fn, "self", MakePointer(ty));
+    FunctionAddParam(fn, "buf", MakePointer(GetType("void")));
+    WithFn(fn) {
+        Node *self = MakeUnary(NK_DEREF, MakeParamRef(fn, "self"));
+        Node *buf = MakeParamRef(fn, "buf");
+        Node *block = Serialize(ty, self, buf);
+        BlockAddStmt(block, MakeReturn(MakeIntLiteral(TypeSize(ty))));
+        FunctionSetBody(fn, block);
     }
-    $publish(fn);
+    PublishNode(fn);
 }
 
 // @deserialize struct Foo {...}; publishes
 //   struct Foo Foo_deserialize(void *buf);
-// which reconstructs a struct Foo from buf via $deserialize.
+// which reconstructs a struct Foo from buf via Deserialize.
 @macro(attribute("deserialize"))
-void __cccc_attr_deserialize($attr_target_t *target) {
-    if ($attr_target_kind(target) != attr_target_type)
-        $macro_error_at(0, "@deserialize expects a type (struct/union) target");
+void __builtin_attr_deserialize(AttrTarget *target) {
+    if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
+        MacroErrorAt(0, "@deserialize expects a type (struct/union) target");
 
-    $type_t *ty = $attr_target_type(target);
-    const char *tname = $attr_target_name(target);
+    Type *ty = $ATTR_TARGET_TYPE(target);
+    const char *tname = AttrTargetName(target);
     if (!ty || !tname)
-        $macro_error_at(0, "@deserialize target has no usable type/name");
+        MacroErrorAt(0, "@deserialize target has no usable type/name");
 
     char fname[128];
     strcpy(fname, tname);
     strcat(fname, "_deserialize");
 
-    $obj_t *fn = $function(fname, ty);
-    $function_add_param(fn, "buf", $make_pointer($get_type("void")));
-    $with_fn(fn) {
-        $node_t *buf = $param_ref(fn, "buf");
-        $function_set_body(fn, $return($deserialize(ty, buf)));
+    Obj *fn = MakeFunction(fname, ty);
+    FunctionAddParam(fn, "buf", MakePointer(GetType("void")));
+    WithFn(fn) {
+        Node *buf = MakeParamRef(fn, "buf");
+        FunctionSetBody(fn, MakeReturn(Deserialize(ty, buf)));
     }
-    $publish(fn);
+    PublishNode(fn);
 }
 
 // @enum_to_string enum Color {...}; publishes
@@ -2229,29 +2229,29 @@ void __cccc_attr_deserialize($attr_target_t *target) {
 // which switches over v and returns the matching constant's name, or "" if
 // no constant matches.
 @macro(attribute("enum_to_string"))
-void __cccc_attr_enum_to_string($attr_target_t *target) {
-    if ($attr_target_kind(target) != attr_target_type)
-        $macro_error_at(0, "@enum_to_string expects a type (enum) target");
+void __builtin_attr_enum_to_string(AttrTarget *target) {
+    if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
+        MacroErrorAt(0, "@enum_to_string expects a type (enum) target");
 
-    $type_t *ty = $attr_target_type(target);
-    const char *tname = $attr_target_name(target);
+    Type *ty = $ATTR_TARGET_TYPE(target);
+    const char *tname = AttrTargetName(target);
     if (!ty || !tname)
-        $macro_error_at(0, "@enum_to_string target has no usable type/name");
-    if ($type_kind(ty) != tk_enum)
-        $macro_error_at(0, "@enum_to_string expects an enum target");
+        MacroErrorAt(0, "@enum_to_string target has no usable type/name");
+    if (GetTypeKind(ty) != TK_ENUM)
+        MacroErrorAt(0, "@enum_to_string expects an enum target");
 
     char fname[128];
     strcpy(fname, tname);
     strcat(fname, "_to_string");
 
-    $type_t *cstr_ty = $make_pointer($make_const($get_type("char")));
-    $obj_t *fn = $function(fname, cstr_ty);
-    $function_add_param(fn, "v", ty);
-    $with_fn(fn) {
-        $node_t *v = $param_ref(fn, "v");
-        $function_set_body(fn, $enum_to_string(ty, v));
+    Type *cstr_ty = MakePointer(MakeConst(GetType("char")));
+    Obj *fn = MakeFunction(fname, cstr_ty);
+    FunctionAddParam(fn, "v", ty);
+    WithFn(fn) {
+        Node *v = MakeParamRef(fn, "v");
+        FunctionSetBody(fn, EnumToString(ty, v));
     }
-    $publish(fn);
+    PublishNode(fn);
 }
 
 // @enum_from_string enum Color {...}; publishes
@@ -2259,199 +2259,199 @@ void __cccc_attr_enum_to_string($attr_target_t *target) {
 // which compares s against each constant's name and returns the matching
 // value, or -1 if no constant matches.
 @macro(attribute("enum_from_string"))
-void __cccc_attr_enum_from_string($attr_target_t *target) {
-    if ($attr_target_kind(target) != attr_target_type)
-        $macro_error_at(0, "@enum_from_string expects a type (enum) target");
+void __builtin_attr_enum_from_string(AttrTarget *target) {
+    if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
+        MacroErrorAt(0, "@enum_from_string expects a type (enum) target");
 
-    $type_t *ty = $attr_target_type(target);
-    const char *tname = $attr_target_name(target);
+    Type *ty = $ATTR_TARGET_TYPE(target);
+    const char *tname = AttrTargetName(target);
     if (!ty || !tname)
-        $macro_error_at(0, "@enum_from_string target has no usable type/name");
-    if ($type_kind(ty) != tk_enum)
-        $macro_error_at(0, "@enum_from_string expects an enum target");
+        MacroErrorAt(0, "@enum_from_string target has no usable type/name");
+    if (GetTypeKind(ty) != TK_ENUM)
+        MacroErrorAt(0, "@enum_from_string expects an enum target");
 
     char fname[128];
     strcpy(fname, tname);
     strcat(fname, "_from_string");
 
-    $type_t *cstr_ty = $make_pointer($make_const($get_type("char")));
-    $obj_t *fn = $function(fname, ty);
-    $function_add_param(fn, "s", cstr_ty);
-    $with_fn(fn) {
-        $node_t *s = $param_ref(fn, "s");
-        $function_set_body(fn, $enum_from_string(ty, s));
+    Type *cstr_ty = MakePointer(MakeConst(GetType("char")));
+    Obj *fn = MakeFunction(fname, ty);
+    FunctionAddParam(fn, "s", cstr_ty);
+    WithFn(fn) {
+        Node *s = MakeParamRef(fn, "s");
+        FunctionSetBody(fn, EnumFromString(ty, s));
     }
-    $publish(fn);
+    PublishNode(fn);
 }
 
-// Ticket #235: $generate_getters/$generate_setters/$generate_constructor
+// Ticket #235: GenerateGetters/GenerateSetters/GenerateConstructor
 // helpers. These are plain @macro functions (no attribute name), compiled
 // into the same macro program as the @generate_* attribute handlers below
 // and called from them as ordinary functions.
 
-// __cccc_generate_getters(ty): for each member of struct/union `ty`,
+// __builtin_generate_getters(ty): for each member of struct/union `ty`,
 // publishes `<MemberType> get_<field>(<ty> *self) { return self->field; }`.
 @macro
-void __cccc_generate_getters($type_t *ty) {
-    $foreach_member(ty, m, {
-        const char *field = $member_name(m);
-        $type_t *fty = $member_type(m);
+void __builtin_generate_getters(Type *ty) {
+    ForeachMember(ty, m, {
+        const char *field = MemberName(m);
+        Type *fty = MemberType(m);
 
         char gname[128];
         strcpy(gname, "get_");
         strcat(gname, field);
 
-        $obj_t *fn = $function(gname, fty);
-        $function_add_param(fn, "self", $make_pointer(ty));
-        $with_fn(fn) {
-            $node_t *self = $unary(nk_deref, $param_ref(fn, "self"));
-            $function_set_body(fn, $return($member(self, field)));
+        Obj *fn = MakeFunction(gname, fty);
+        FunctionAddParam(fn, "self", MakePointer(ty));
+        WithFn(fn) {
+            Node *self = MakeUnary(NK_DEREF, MakeParamRef(fn, "self"));
+            FunctionSetBody(fn, MakeReturn(MakeMember(self, field)));
         }
-        $publish(fn);
+        PublishNode(fn);
     });
 }
 
-// __cccc_generate_setters(ty): for each member of struct/union `ty`,
+// __builtin_generate_setters(ty): for each member of struct/union `ty`,
 // publishes `void set_<field>(<ty> *self, <MemberType> value) { self->field = value; }`.
 @macro
-void __cccc_generate_setters($type_t *ty) {
-    $foreach_member(ty, m, {
-        const char *field = $member_name(m);
-        $type_t *fty = $member_type(m);
+void __builtin_generate_setters(Type *ty) {
+    ForeachMember(ty, m, {
+        const char *field = MemberName(m);
+        Type *fty = MemberType(m);
 
         char gname[128];
         strcpy(gname, "set_");
         strcat(gname, field);
 
-        $obj_t *fn = $function(gname, $get_type("void"));
-        $function_add_param(fn, "self", $make_pointer(ty));
-        $function_add_param(fn, "value", fty);
-        $with_fn(fn) {
-            $node_t *self = $unary(nk_deref, $param_ref(fn, "self"));
-            $node_t *value = $param_ref(fn, "value");
-            $function_set_body(fn, $expr_stmt($assign($member(self, field), value)));
+        Obj *fn = MakeFunction(gname, GetType("void"));
+        FunctionAddParam(fn, "self", MakePointer(ty));
+        FunctionAddParam(fn, "value", fty);
+        WithFn(fn) {
+            Node *self = MakeUnary(NK_DEREF, MakeParamRef(fn, "self"));
+            Node *value = MakeParamRef(fn, "value");
+            FunctionSetBody(fn, MakeExprStmt(MakeAssign(MakeMember(self, field), value)));
         }
-        $publish(fn);
+        PublishNode(fn);
     });
 }
 
-// __cccc_generate_constructor(ty, tname): publishes
+// __builtin_generate_constructor(ty, tname): publishes
 // `<ty> <tname>_create(<member1>, <member2>, ...) { return (ty){ .member1 =
 // member1, ... }; }` with one parameter per member of `ty`.
 @macro
-void __cccc_generate_constructor($type_t *ty, const char *tname) {
+void __builtin_generate_constructor(Type *ty, const char *tname) {
     char gname[128];
     strcpy(gname, tname);
     strcat(gname, "_create");
 
-    $obj_t *fn = $function(gname, ty);
+    Obj *fn = MakeFunction(gname, ty);
 
-    $foreach_member(ty, m, {
-        $function_add_param(fn, $member_name(m), $member_type(m));
+    ForeachMember(ty, m, {
+        FunctionAddParam(fn, MemberName(m), MemberType(m));
     });
 
-    $with_fn(fn) {
+    WithFn(fn) {
         const char *fields[64];
-        $node_t *values[64];
+        Node *values[64];
         int n = 0;
-        $foreach_member(ty, m, {
-            fields[n] = $member_name(m);
-            values[n] = $param_ref(fn, $member_name(m));
+        ForeachMember(ty, m, {
+            fields[n] = MemberName(m);
+            values[n] = MakeParamRef(fn, MemberName(m));
             n++;
         });
-        $function_set_body(fn, $return($init_struct(ty, fields, values, n)));
+        FunctionSetBody(fn, MakeReturn(InitStruct(ty, fields, values, n)));
     }
-    $publish(fn);
+    PublishNode(fn);
 }
 
 // @generate_getters struct Foo {...}; publishes get_<field>(struct Foo *self)
 // for each member, returning self->field.
 @macro(attribute("generate_getters"))
-void __cccc_attr_generate_getters($attr_target_t *target) {
-    if ($attr_target_kind(target) != attr_target_type)
-        $macro_error_at(0, "@generate_getters expects a type (struct/union) target");
+void __builtin_attr_generate_getters(AttrTarget *target) {
+    if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
+        MacroErrorAt(0, "@generate_getters expects a type (struct/union) target");
 
-    $type_t *ty = $attr_target_type(target);
+    Type *ty = $ATTR_TARGET_TYPE(target);
     if (!ty)
-        $macro_error_at(0, "@generate_getters target has no usable type");
+        MacroErrorAt(0, "@generate_getters target has no usable type");
 
-    __cccc_generate_getters(ty);
+    __builtin_generate_getters(ty);
 }
 
 // @generate_setters struct Foo {...}; publishes set_<field>(struct Foo *self,
 // <FieldType> value) for each member, assigning self->field = value.
 @macro(attribute("generate_setters"))
-void __cccc_attr_generate_setters($attr_target_t *target) {
-    if ($attr_target_kind(target) != attr_target_type)
-        $macro_error_at(0, "@generate_setters expects a type (struct/union) target");
+void __builtin_attr_generate_setters(AttrTarget *target) {
+    if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
+        MacroErrorAt(0, "@generate_setters expects a type (struct/union) target");
 
-    $type_t *ty = $attr_target_type(target);
+    Type *ty = $ATTR_TARGET_TYPE(target);
     if (!ty)
-        $macro_error_at(0, "@generate_setters target has no usable type");
+        MacroErrorAt(0, "@generate_setters target has no usable type");
 
-    __cccc_generate_setters(ty);
+    __builtin_generate_setters(ty);
 }
 
 // @generate_constructor struct Foo {...}; publishes
 //   struct Foo Foo_create(<member1>, <member2>, ...);
 // returning a struct Foo initialized from the given member values.
 @macro(attribute("generate_constructor"))
-void __cccc_attr_generate_constructor($attr_target_t *target) {
-    if ($attr_target_kind(target) != attr_target_type)
-        $macro_error_at(0, "@generate_constructor expects a type (struct/union) target");
+void __builtin_attr_generate_constructor(AttrTarget *target) {
+    if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
+        MacroErrorAt(0, "@generate_constructor expects a type (struct/union) target");
 
-    $type_t *ty = $attr_target_type(target);
-    const char *tname = $attr_target_name(target);
+    Type *ty = $ATTR_TARGET_TYPE(target);
+    const char *tname = AttrTargetName(target);
     if (!ty || !tname)
-        $macro_error_at(0, "@generate_constructor target has no usable type/name");
+        MacroErrorAt(0, "@generate_constructor target has no usable type/name");
 
-    __cccc_generate_constructor(ty, tname);
+    __builtin_generate_constructor(ty, tname);
 }
 
-// Ticket #235: $generate_sum/$generate_map/$generate_reduce/$generate_filter
+// Ticket #235: GenerateSum/GenerateMap/GenerateReduce/GenerateFilter
 // -- FP-style array generators. Each publishes a single function named after
-// elem_ty's spelling (via $type_c_name, since builtin scalar types have no
-// $type_name): sum_<T>, map_<T>, reduce_<T>, filter_<T>. Implemented as plain
+// elem_ty's spelling (via TypeCName, since builtin scalar types have no
+// TypeName): sum_<T>, map_<T>, reduce_<T>, filter_<T>. Implemented as plain
 // C functions in reflection.c (registered via cc_register_cfunc) rather than
 // @macro functions, so they're callable from any [[cccc::comptime]] context,
 // not just from within reflection.h's own macro program.
 
 /*!
- * @function __cccc_generate_sum
+ * @function __builtin_generate_sum
  * @abstract Publish `T sum_T(T *arr, size_t n)` summing all elements.
- * @discussion Convenience wrapper: $generate_sum(elem_type).
+ * @discussion Convenience wrapper: GenerateSum(elem_type).
  */
-void __cccc_generate_sum(VirtualMachine *vm, $type_t *elem_ty);
+void __builtin_generate_sum(VirtualMachine *vm, Type *elem_ty);
 
 /*!
- * @function __cccc_generate_map
+ * @function __builtin_generate_map
  * @abstract Publish `void map_T(T *arr, size_t n, T *out, T (*f)(T))`,
  *   writing `f(arr[i])` into `out[i]` for each element.
- * @discussion Convenience wrapper: $generate_map(elem_type).
+ * @discussion Convenience wrapper: GenerateMap(elem_type).
  */
-void __cccc_generate_map(VirtualMachine *vm, $type_t *elem_ty);
+void __builtin_generate_map(VirtualMachine *vm, Type *elem_ty);
 
 /*!
- * @function __cccc_generate_reduce
+ * @function __builtin_generate_reduce
  * @abstract Publish `T reduce_T(T *arr, size_t n, T init, T (*f)(T, T))`,
  *   folding `f` over the array starting from `init`.
- * @discussion Convenience wrapper: $generate_reduce(elem_type).
+ * @discussion Convenience wrapper: GenerateReduce(elem_type).
  */
-void __cccc_generate_reduce(VirtualMachine *vm, $type_t *elem_ty);
+void __builtin_generate_reduce(VirtualMachine *vm, Type *elem_ty);
 
 /*!
- * @function __cccc_generate_filter
+ * @function __builtin_generate_filter
  * @abstract Publish `void filter_T(T *arr, size_t n, T *out, size_t *out_n,
  *   bool (*pred)(T))`, writing elements matching `pred` into `out` and
  *   setting `*out_n` to the match count.
- * @discussion Convenience wrapper: $generate_filter(elem_type).
+ * @discussion Convenience wrapper: GenerateFilter(elem_type).
  */
-void __cccc_generate_filter(VirtualMachine *vm, $type_t *elem_ty);
+void __builtin_generate_filter(VirtualMachine *vm, Type *elem_ty);
 
-#define $generate_sum(elem_type)    __cccc_generate_sum(_VM, elem_type)
-#define $generate_map(elem_type)    __cccc_generate_map(_VM, elem_type)
-#define $generate_reduce(elem_type) __cccc_generate_reduce(_VM, elem_type)
-#define $generate_filter(elem_type) __cccc_generate_filter(_VM, elem_type)
+#define GenerateSum(elem_type)    __builtin_generate_sum(VM, elem_type)
+#define GenerateMap(elem_type)    __builtin_generate_map(VM, elem_type)
+#define GenerateReduce(elem_type) __builtin_generate_reduce(VM, elem_type)
+#define GenerateFilter(elem_type) __builtin_generate_filter(VM, elem_type)
 
 #ifdef __cplusplus
 }

@@ -1,18 +1,18 @@
 // Test ticket #122: file-scope macro call publishes generated parameters.
 
 [[cccc::comptime]]
-$node_t *generate_add(void) {
-    $type_t *int_ty = $get_type("int");
-    $obj_t *fn = $function("generated_add", int_ty);
+Node *generate_add(void) {
+    Type *int_ty = GetType("int");
+    Obj *fn = MakeFunction("generated_add", int_ty);
 
-    $function_add_param(fn, "a", int_ty);
-    $function_add_param(fn, "b", int_ty);
+    FunctionAddParam(fn, "a", int_ty);
+    FunctionAddParam(fn, "b", int_ty);
 
-    $node_t *sum = $binary(nk_add, $param_ref(fn, "a"),
-                             $param_ref(fn, "b"));
-    $function_set_body(fn, $return(sum));
+    Node *sum = MakeBinary(NK_ADD, MakeParamRef(fn, "a"),
+                             MakeParamRef(fn, "b"));
+    FunctionSetBody(fn, MakeReturn(sum));
 
-    return $int_literal(0);
+    return MakeIntLiteral(0);
 }
 
 generate_add();

@@ -5,11 +5,11 @@
 struct Point { int x; int y; };
 
 [[cccc::comptime(inline)]]
-$node_t *bad_point($node_t *a) {
-    $vm_t *vm = __cccc_get_vm();
+Node *bad_point(Node *a) {
+    VirtualMachine *vm = __builtin_get_vm();
     // Only 1 element in chain but struct Point has 2 fields → error.
-    $node_t *chain = __cccc_node_list(vm, ($node_t*[]){ a }, 1);
-    return $quote("(struct Point){ $@1 }", chain);
+    Node *chain = __builtin_node_list(vm, (Node*[]){ a }, 1);
+    return Quote("(struct Point){ $@1 }", chain);
 }
 
 int main(void) {

@@ -7,7 +7,7 @@
 
 @comptime
 void gen(void) {
-    $publish($function("generated_attr_target", $get_type("int")));
+    PublishNode(MakeFunction("generated_attr_target", GetType("int")));
 }
 
 gen();

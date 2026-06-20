@@ -1,4 +1,4 @@
-// Test ticket #58: __cccc_dump_tree / __cccc_dump_ast_gen (print + to_string forms).
+// Test ticket #58: __builtin_dump_tree / __builtin_dump_ast_gen (print + to_string forms).
 // The _to_string variants return a string we can inspect at compile time.
 // Verified by checking the returned strings contain expected substrings.
 
@@ -21,33 +21,33 @@ static int contains(const char *hay, const char *needle) {
 // Macro: takes an int literal node, dumps it as tree and as gen,
 // returns the original node (the dumps are the side effect we inspect).
 [[cccc::comptime(inline)]]
-$node_t *dump_and_pass($node_t *n) {
-    $vm_t *vm = __cccc_get_vm();
+Node *dump_and_pass(Node *n) {
+    VirtualMachine *vm = __builtin_get_vm();
 
     // Tree form -- print to stdout
-    __cccc_dump_tree(vm, n);
+    __builtin_dump_tree(vm, n);
 
     // Gen form -- print to stdout
-    __cccc_dump_ast_gen(vm, n);
+    __builtin_dump_ast_gen(vm, n);
 
     return n;
 }
 
 // Macro: returns the tree dump string of the argument node.
 [[cccc::comptime(inline)]]
-$node_t *tree_string($node_t *n) {
-    $vm_t *vm = __cccc_get_vm();
-    const char *s = __cccc_dump_tree_to_string(vm, n);
+Node *tree_string(Node *n) {
+    VirtualMachine *vm = __builtin_get_vm();
+    const char *s = __builtin_dump_tree_to_string(vm, n);
     // Return the string as a string literal node (for use with contains())
-    return __cccc_ast_string_literal(vm, s);
+    return __builtin_ast_string_literal(vm, s);
 }
 
 // Macro: returns the ast-gen dump string of the argument node.
 [[cccc::comptime(inline)]]
-$node_t *gen_string($node_t *n) {
-    $vm_t *vm = __cccc_get_vm();
-    const char *s = __cccc_dump_ast_gen_to_string(vm, n);
-    return __cccc_ast_string_literal(vm, s);
+Node *gen_string(Node *n) {
+    VirtualMachine *vm = __builtin_get_vm();
+    const char *s = __builtin_dump_ast_gen_to_string(vm, n);
+    return __builtin_ast_string_literal(vm, s);
 }
 
 int main(void) {
@@ -60,13 +60,13 @@ int main(void) {
     if (!contains(ts, "NUM")) return 2;
 
     // gen_string: the ast-gen dump of an int literal should start with
-    // "__cccc_ast_int_literal"
+    // "__builtin_ast_int_literal"
     const char *gs = gen_string(42);
-    if (!contains(gs, "__cccc_ast_int_literal")) return 3;
+    if (!contains(gs, "__builtin_ast_int_literal")) return 3;
 
     // gen_string for a binary expression
     const char *bgs = gen_string(1 + 2);
-    if (!contains(bgs, "__cccc_ast_binary")) return 4;
+    if (!contains(bgs, "__builtin_ast_binary")) return 4;
 
     return 42;
 }

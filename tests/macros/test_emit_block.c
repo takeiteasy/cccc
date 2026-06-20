@@ -10,8 +10,8 @@
 
 [[cccc::comptime]]
 void gen_answer(void) {
-    $obj_t *fn = $function("emit_block_answer", $get_type("int"));
-    $function_set_body(fn, $return($int_literal(42)));
+    Obj *fn = MakeFunction("emit_block_answer", GetType("int"));
+    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(42)));
 }
 
 gen_answer();

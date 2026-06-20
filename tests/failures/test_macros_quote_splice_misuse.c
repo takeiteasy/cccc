@@ -3,10 +3,10 @@
 // list) must produce a compile-time error.
 
 [[cccc::comptime(inline)]]
-$node_t *bad_splice($node_t *x) {
-    $vm_t *vm = __cccc_get_vm();
+Node *bad_splice(Node *x) {
+    VirtualMachine *vm = __builtin_get_vm();
     // $@1 is a list splice — it cannot be used as an expression operand.
-    return __cccc_quote(vm, "$@1 + 1", x);
+    return __builtin_quote(vm, "$@1 + 1", x);
 }
 
 int main(void) {

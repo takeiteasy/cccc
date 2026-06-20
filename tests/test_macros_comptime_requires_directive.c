@@ -6,8 +6,8 @@ int runtime_helper(int n) {
 }
 
 [[cccc::comptime(inline)]]
-$node_t *uses_runtime_helper(void) {
-    return $int_literal(runtime_helper(41));
+Node *uses_runtime_helper(void) {
+    return MakeIntLiteral(runtime_helper(41));
 }
 
 int main(void) {

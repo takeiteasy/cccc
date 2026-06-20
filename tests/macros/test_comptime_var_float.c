@@ -4,15 +4,15 @@
 double scale = 2.5;
 
 [[cccc::comptime(inline)]]
-$node_t *get_scale(void) {
-    return $get_comptime_var("scale");
+Node *get_scale(void) {
+    return GetComptimeVar("scale");
 }
 
 [[cccc::comptime(inline)]]
-$node_t *check_scale(void) {
-    double s = $get_comptime_float("scale");
+Node *check_scale(void) {
+    double s = GetComptimeFloat("scale");
     // scale * 4 == 10 — check via int cast to avoid float equality issues
-    return $int_literal((int)(s * 4));
+    return MakeIntLiteral((int)(s * 4));
 }
 
 int main(void) {

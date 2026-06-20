@@ -356,7 +356,7 @@ void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
                                 AttrTarget *target, Node *args,
                                 int arg_count);
 void ensure_reflection_attrs_registered(VirtualMachine *vm);
-void __cccc_ensure_string_h_decls(VirtualMachine *vm);
+void __builtin_ensure_string_h_decls(VirtualMachine *vm);
 // Expand a deferred ND_INIT_SPLICE node into positional ND_ASSIGN chains.
 // Called by quote_substitute in relfection.c after the splice chain is resolved.
 Node *node_expand_init_splice(VirtualMachine *vm, Node *splice, Node *chain);

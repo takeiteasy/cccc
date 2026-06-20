@@ -5,13 +5,13 @@ constexpr int LIMIT = 100;
 constexpr int NEG   = -7;
 
 [[cccc::comptime(inline)]]
-$node_t *get_limit(void) {
-    return $get_constexpr_value("LIMIT");
+Node *get_limit(void) {
+    return GetConstexprValue("LIMIT");
 }
 
 [[cccc::comptime(inline)]]
-$node_t *get_neg(void) {
-    return $get_constexpr_value("NEG");
+Node *get_neg(void) {
+    return GetConstexprValue("NEG");
 }
 
 int main(void) {

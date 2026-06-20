@@ -9,8 +9,8 @@ int helper(int n) {
 }
 
 [[cccc::comptime(inline)]]
-$node_t *make_answer(void) {
-    return $int_literal(helper(41));
+Node *make_answer(void) {
+    return MakeIntLiteral(helper(41));
 }
 
 #pragma cccc comptime end

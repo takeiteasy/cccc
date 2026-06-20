@@ -11,8 +11,8 @@ int glob_type_size(void) {
 
 [[cccc::comptime]]
 void generate_result(void) {
-    $obj_t *fn = $function("result", $get_type("int"));
-    $function_set_body(fn, $return($int_literal(glob_type_size() ? 42 : 1)));
+    Obj *fn = MakeFunction("result", GetType("int"));
+    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(glob_type_size() ? 42 : 1)));
 }
 
 generate_result();

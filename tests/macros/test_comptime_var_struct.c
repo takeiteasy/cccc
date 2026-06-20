@@ -4,16 +4,16 @@
 struct Dims { int width; int height; int depth; } dims = { 640, 480, 3 };
 
 [[cccc::comptime(inline)]]
-$node_t *get_area(void) {
+Node *get_area(void) {
     // width * height at compile time
-    $node_t *w = $get_comptime_member("dims", "width");
-    $node_t *h = $get_comptime_member("dims", "height");
-    return $binary(nk_mul, w, h);
+    Node *w = GetComptimeMember("dims", "width");
+    Node *h = GetComptimeMember("dims", "height");
+    return MakeBinary(NK_MUL, w, h);
 }
 
 [[cccc::comptime(inline)]]
-$node_t *get_depth(void) {
-    return $get_comptime_member("dims", "depth");
+Node *get_depth(void) {
+    return GetComptimeMember("dims", "depth");
 }
 
 int main(void) {

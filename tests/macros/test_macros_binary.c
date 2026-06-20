@@ -2,11 +2,11 @@
 
 // Define a pragma macro that generates: (a + b) * 2
 [[cccc::comptime(inline)]]
-$node_t *double_sum($node_t *a, $node_t *b) {
-    $vm_t *vm = __cccc_get_vm();
-    $node_t *sum = __cccc_ast_binary(vm, nk_add, a, b);
-    $node_t *two = __cccc_ast_int_literal(vm, 2);
-    return __cccc_ast_binary(vm, nk_mul, sum, two);
+Node *double_sum(Node *a, Node *b) {
+    VirtualMachine *vm = __builtin_get_vm();
+    Node *sum = __builtin_ast_binary(vm, NK_ADD, a, b);
+    Node *two = __builtin_ast_int_literal(vm, 2);
+    return __builtin_ast_binary(vm, NK_MUL, sum, two);
 }
 
 int main(void) {

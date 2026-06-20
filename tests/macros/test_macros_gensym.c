@@ -1,9 +1,9 @@
-// Test __cccc_gensym and $gensym for collision-safe generated names.
+// Test __builtin_gensym and Gensym for collision-safe generated names.
 
 [[cccc::comptime(inline)]]
-$node_t *gensym_test(void) {
-    const char *a = $gensym("helper");
-    const char *b = __cccc_gensym(_VM, "helper");
+Node *gensym_test(void) {
+    const char *a = Gensym("helper");
+    const char *b = __builtin_gensym(VM, "helper");
 
     int same = 1;
     for (int i = 0; a[i] || b[i]; i++) {
@@ -13,15 +13,15 @@ $node_t *gensym_test(void) {
         }
     }
 
-    $type_t *int_ty = $get_type("int");
-    $obj_t *fn_a = $function(a, int_ty);
-    $obj_t *fn_b = $function(b, int_ty);
-    $function_set_body(fn_a, $return($int_literal(1)));
-    $function_set_body(fn_b, $return($int_literal(2)));
+    Type *int_ty = GetType("int");
+    Obj *fn_a = MakeFunction(a, int_ty);
+    Obj *fn_b = MakeFunction(b, int_ty);
+    FunctionSetBody(fn_a, MakeReturn(MakeIntLiteral(1)));
+    FunctionSetBody(fn_b, MakeReturn(MakeIntLiteral(2)));
 
     if (same || !fn_a || !fn_b || a[0] != 'h' || b[0] != 'h')
-        return $int_literal(1);
-    return $int_literal(42);
+        return MakeIntLiteral(1);
+    return MakeIntLiteral(42);
 }
 
 int main(void) {

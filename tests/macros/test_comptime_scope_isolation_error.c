@@ -10,8 +10,8 @@
 
 [[cccc::comptime]]
 void generate_result(void) {
-    $obj_t *fn = $function("result", $get_type("int"));
-    $function_set_body(fn, $return($int_literal(PRIV)));
+    Obj *fn = MakeFunction("result", GetType("int"));
+    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(PRIV)));
 }
 
 generate_result();

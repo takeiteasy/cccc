@@ -11,13 +11,13 @@ int a = compute_base() * 3;   // a == 21
 int b = a * 2;                 // b == 42  (references a)
 
 [[cccc::comptime(inline)]]
-$node_t *get_a(void) {
-    return $int_literal($get_comptime_int("a"));
+Node *get_a(void) {
+    return MakeIntLiteral(GetComptimeInt("a"));
 }
 
 [[cccc::comptime(inline)]]
-$node_t *get_b(void) {
-    return $int_literal($get_comptime_int("b"));
+Node *get_b(void) {
+    return MakeIntLiteral(GetComptimeInt("b"));
 }
 
 int main(void) {

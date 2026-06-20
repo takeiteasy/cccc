@@ -1,17 +1,17 @@
 // Ticket #287: compile-time macros can receive fixed parameters beyond 8.
 
 [[cccc::comptime(inline)]]
-$node_t *ninth_arg($node_t *a0, $node_t *a1, $node_t *a2, $node_t *a3,
-                   $node_t *a4, $node_t *a5, $node_t *a6, $node_t *a7,
-                   $node_t *a8) {
+Node *ninth_arg(Node *a0, Node *a1, Node *a2, Node *a3,
+                   Node *a4, Node *a5, Node *a6, Node *a7,
+                   Node *a8) {
     return a8;
 }
 
 [[cccc::comptime(inline)]]
-$node_t *fixed9_plus_tail($node_t *a0, $node_t *a1, $node_t *a2,
-                          $node_t *a3, $node_t *a4, $node_t *a5,
-                          $node_t *a6, $node_t *a7, $node_t *a8, ...) {
-    return $binary(nk_add, a8, $vararg_at(0));
+Node *fixed9_plus_tail(Node *a0, Node *a1, Node *a2,
+                          Node *a3, Node *a4, Node *a5,
+                          Node *a6, Node *a7, Node *a8, ...) {
+    return MakeBinary(NK_ADD, a8, VarargAt(0));
 }
 
 int main(void) {

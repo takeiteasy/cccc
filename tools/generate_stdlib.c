@@ -23,10 +23,10 @@ char *read_header_file(const char *path) {
 }
 
 // Sanitize a header filename into a valid C identifier, e.g.
-// "sys/cdefs.h" -> "__cccc_std_sys_cdefs_h"
+// "sys/cdefs.h" -> "__builtin_std_sys_cdefs_h"
 char *make_global_name(const char *header) {
     char *buf = malloc(strlen(header) + 12);
-    memcpy(buf, "__cccc_std_", 10);
+    memcpy(buf, "__builtin_std_", 10);
     char *dst = buf + 10;
     for (const char *src = header; *src; src++, dst++)
         *dst = (*src == '.' || *src == '/') ? '_' : *src;
@@ -117,17 +117,17 @@ char **discover_headers(void) {
     return headers;
 }
 
-// Build: if (strcmp(filename, header) == 0) return __cccc_std_XXX;
-$node_t *make_strcmp_return($obj_t *fn, $type_t *char_ptr_ty, const char *header) {
+// Build: if (strcmp(filename, header) == 0) return __builtin_std_XXX;
+Node *make_strcmp_return(Obj *fn, Type *char_ptr_ty, const char *header) {
     char *gname = make_global_name(header);
-    $node_t *args[2] = {
-        $param_ref(fn, "filename"),
-        $string_literal(header)
+    Node *args[2] = {
+        MakeParamRef(fn, "filename"),
+        MakeStringLiteral(header)
     };
-    $node_t *cmp  = $funcall($var_ref("strcmp"), args, 2);
-    $node_t *cond = $binary(nk_eq, cmp, $int_literal(0));
-    $node_t *ret  = $return($cast($var_ref(gname), char_ptr_ty));
-    return $if(cond, ret, NULL);
+    Node *cmp  = MakeFuncCall(MakeVarRef("strcmp"), args, 2);
+    Node *cond = MakeBinary(NK_EQ, cmp, MakeIntLiteral(0));
+    Node *ret  = MakeReturn(MakeCast(MakeVarRef(gname), char_ptr_ty));
+    return MakeIf(cond, ret, NULL);
 }
 
 struct reg_entry { char *header; char *fn; };
@@ -177,38 +177,38 @@ const char *reg_fn_for_header(const char *header) {
 }
 
 // Build: if (strcmp(header, name) == 0) return "register_XXX";
-$node_t *make_strcmp_return_fn_name($obj_t *fn, const char *header, const char *fn_name) {
-    $node_t *args[2] = {
-        $param_ref(fn, "header"),
-        $string_literal(header)
+Node *make_strcmp_return_fn_name(Obj *fn, const char *header, const char *fn_name) {
+    Node *args[2] = {
+        MakeParamRef(fn, "header"),
+        MakeStringLiteral(header)
     };
-    $node_t *cmp  = $funcall($var_ref("strcmp"), args, 2);
-    $node_t *cond = $binary(nk_eq, cmp, $int_literal(0));
-    return $if(cond, $return($string_literal(fn_name)), NULL);
+    Node *cmp  = MakeFuncCall(MakeVarRef("strcmp"), args, 2);
+    Node *cond = MakeBinary(NK_EQ, cmp, MakeIntLiteral(0));
+    return MakeIf(cond, MakeReturn(MakeStringLiteral(fn_name)), NULL);
 }
 
 void generate_stdlib_reg_fn(void) {
     char **headers = discover_headers();
     if (!headers) return;
 
-    $type_t *char_ptr_ty = $make_pointer($get_type("char"));
-    $obj_t  *fn          = $function("get_stdlib_reg_fn_name", char_ptr_ty);
-    $function_add_param(fn, "header", char_ptr_ty);
+    Type *char_ptr_ty = MakePointer(GetType("char"));
+    Obj  *fn          = MakeFunction("get_stdlib_reg_fn_name", char_ptr_ty);
+    FunctionAddParam(fn, "header", char_ptr_ty);
 
-    $with_fn(fn) {
+    WithFn(fn) {
         // Filter to only headers that have a registration function
         int total = 0;
         for (int i = 0; headers[i]; i++) {
             if (reg_fn_for_header(headers[i])) total++;
         }
         if (!total) {
-            $function_set_body(fn, $return($int_literal(0)));
-            $publish(fn);
+            FunctionSetBody(fn, MakeReturn(MakeIntLiteral(0)));
+            PublishNode(fn);
             return;
         }
 
-        $node_t *first_char = $unary(nk_deref, $param_ref(fn, "header"));
-        $node_t *sw = $switch(first_char);
+        Node *first_char = MakeUnary(NK_DEREF, MakeParamRef(fn, "header"));
+        Node *sw = MakeSwitch(first_char);
 
         unsigned char seen[256] = {0};
         for (int i = 0; headers[i]; i++) {
@@ -223,7 +223,7 @@ void generate_stdlib_reg_fn(void) {
             }
             if (!bucket_size) continue;
 
-            $node_t **case_stmts = malloc((bucket_size + 1) * sizeof($node_t *));
+            Node **case_stmts = malloc((bucket_size + 1) * sizeof(Node *));
             int cn = 0;
             for (int j = 0; headers[j]; j++) {
                 if ((unsigned char)headers[j][0] != c) continue;
@@ -231,20 +231,20 @@ void generate_stdlib_reg_fn(void) {
                 if (!fn_name) continue;
                 case_stmts[cn++] = make_strcmp_return_fn_name(fn, headers[j], fn_name);
             }
-            case_stmts[cn++] = $return($int_literal(0));
+            case_stmts[cn++] = MakeReturn(MakeIntLiteral(0));
 
-            $node_t *case_body = $block(case_stmts, cn);
-            $switch_add_case(sw, $int_literal(c), case_body);
+            Node *case_body = MakeBlock(case_stmts, cn);
+            SwitchAddCase(sw, MakeIntLiteral(c), case_body);
         }
 
-        $node_t **stmts = malloc(3 * sizeof($node_t *));
+        Node **stmts = malloc(3 * sizeof(Node *));
         int n = 0;
         stmts[n++] = sw;
-        stmts[n++] = $return($int_literal(0));
-        $function_set_body(fn, $block(stmts, n));
+        stmts[n++] = MakeReturn(MakeIntLiteral(0));
+        FunctionSetBody(fn, MakeBlock(stmts, n));
     }
 
-    $publish(fn);
+    PublishNode(fn);
 }
 
 void generate_std_header(void) {
@@ -252,12 +252,12 @@ void generate_std_header(void) {
     if (!headers)
         return;
 
-    $type_t *char_ty     = $get_type("char");
-    $type_t *char_ptr_ty = $make_pointer(char_ty);
-    $obj_t  *fn          = $function("get_std_header", char_ptr_ty);
-    $function_add_param(fn, "filename", char_ptr_ty);
+    Type *char_ty     = GetType("char");
+    Type *char_ptr_ty = MakePointer(char_ty);
+    Obj  *fn          = MakeFunction("get_std_header", char_ptr_ty);
+    FunctionAddParam(fn, "filename", char_ptr_ty);
 
-    $with_fn(fn) {
+    WithFn(fn) {
         // Count total headers that exist on disk and emit their globals.
         int total = 0;
         for (int i = 0; headers[i]; i++) {
@@ -266,10 +266,10 @@ void generate_std_header(void) {
 
             int content_len = (int)strlen(content) + 1;
             char *gname   = make_global_name(headers[i]);
-            $type_t *arr_ty = $make_array(char_ty, content_len);
-            $obj_t  *gvar   = $global_var(gname, arr_ty);
-            $global_var_set_init_data(gvar, content, content_len);
-            $global_var_set_static(gvar, 1);
+            Type *arr_ty = MakeArray(char_ty, content_len);
+            Obj  *gvar   = GlobalVar(gname, arr_ty);
+            GlobalVarSetInitData(gvar, content, content_len);
+            GlobalVarSetStatic(gvar, 1);
             total++;
         }
 
@@ -277,8 +277,8 @@ void generate_std_header(void) {
         // name). Within each case, sequential strcmp checks are used. Since
         // most first-char buckets are small (1-3 headers), this reduces the
         // average number of comparisons from O(N) to O(bucket_size).
-        $node_t *first_char = $unary(nk_deref, $param_ref(fn, "filename"));
-        $node_t *sw = $switch(first_char);
+        Node *first_char = MakeUnary(NK_DEREF, MakeParamRef(fn, "filename"));
+        Node *sw = MakeSwitch(first_char);
 
         // Find each unique first character and build its case.
         unsigned char seen[256] = {0};
@@ -298,66 +298,66 @@ void generate_std_header(void) {
 
             // Build the case body: one strcmp-return per header in bucket,
             // then return NULL for non-matching names with this first char.
-            $node_t **case_stmts = malloc((bucket_size + 1) * sizeof($node_t *));
+            Node **case_stmts = malloc((bucket_size + 1) * sizeof(Node *));
             int cn = 0;
             for (int j = 0; headers[j]; j++) {
                 if ((unsigned char)headers[j][0] != c) continue;
                 if (!read_header_file(header_source_path(headers[j]))) continue;
                 case_stmts[cn++] = make_strcmp_return(fn, char_ptr_ty, headers[j]);
             }
-            case_stmts[cn++] = $return($int_literal(0));
+            case_stmts[cn++] = MakeReturn(MakeIntLiteral(0));
 
-            $node_t *case_body = $block(case_stmts, cn);
-            $switch_add_case(sw, $int_literal(c), case_body);
+            Node *case_body = MakeBlock(case_stmts, cn);
+            SwitchAddCase(sw, MakeIntLiteral(c), case_body);
         }
 
-        $node_t **stmts = malloc(3 * sizeof($node_t *));
+        Node **stmts = malloc(3 * sizeof(Node *));
         int n = 0;
         stmts[n++] = sw;
-        stmts[n++] = $return($int_literal(0));
-        $function_set_body(fn, $block(stmts, n));
+        stmts[n++] = MakeReturn(MakeIntLiteral(0));
+        FunctionSetBody(fn, MakeBlock(stmts, n));
     }
 
-    $publish(fn);
+    PublishNode(fn);
 }
 
 void generate_stdlib_mark_headers(void) {
     char **headers = discover_headers();
     if (!headers) return;
 
-    $type_t *int_ty       = $get_type("int");
-    $type_t *char_ptr_ty  = $make_pointer($get_type("char"));
-    $obj_t  *fn           = $function("get_std_header_name", char_ptr_ty);
-    $function_add_param(fn, "i", int_ty);
+    Type *int_ty       = GetType("int");
+    Type *char_ptr_ty  = MakePointer(GetType("char"));
+    Obj  *fn           = MakeFunction("get_std_header_name", char_ptr_ty);
+    FunctionAddParam(fn, "i", int_ty);
 
-    $with_fn(fn) {
+    WithFn(fn) {
         int total = 0;
         for (int n = 0; headers[n]; n++) {
             if (read_header_file(header_source_path(headers[n]))) total++;
         }
         if (!total) {
-            $function_set_body(fn, $return($int_literal(0)));
-            $publish(fn);
+            FunctionSetBody(fn, MakeReturn(MakeIntLiteral(0)));
+            PublishNode(fn);
             return;
         }
 
-        $node_t *sw = $switch($param_ref(fn, "i"));
+        Node *sw = MakeSwitch(MakeParamRef(fn, "i"));
 
         int idx = 0;
         for (int n = 0; headers[n]; n++) {
             if (!read_header_file(header_source_path(headers[n]))) continue;
-            $switch_add_case(sw, $int_literal(idx), $return($string_literal(headers[n])));
+            SwitchAddCase(sw, MakeIntLiteral(idx), MakeReturn(MakeStringLiteral(headers[n])));
             idx++;
         }
-        $switch_set_default(sw, $return($int_literal(0)));
+        SwitchSetDefault(sw, MakeReturn(MakeIntLiteral(0)));
 
-        $node_t **stmts = malloc(2 * sizeof($node_t *));
+        Node **stmts = malloc(2 * sizeof(Node *));
         int n = 0;
         stmts[n++] = sw;
-        $function_set_body(fn, $block(stmts, n));
+        FunctionSetBody(fn, MakeBlock(stmts, n));
     }
 
-    $publish(fn);
+    PublishNode(fn);
 }
 
 generate_std_header();

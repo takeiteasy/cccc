@@ -8,8 +8,8 @@ int double_it(int n) {
 #pragma cccc comptime end
 
 [[cccc::comptime(inline)]]
-$node_t *make_doubled(void) {
-    return $int_literal(double_it(21));
+Node *make_doubled(void) {
+    return MakeIntLiteral(double_it(21));
 }
 
 int main(void) {

@@ -1,29 +1,29 @@
-// Ticket #235: $memcpy/$strlen/$strcmp thin AST wrappers over <string.h>.
+// Ticket #235: Memcpy/Strlen/Strcmp thin AST wrappers over <string.h>.
 
 [[cccc::comptime]]
 void generate_stdlib_wrappers(void) {
-    $obj_t *cpy = $function("wrap_memcpy", $make_pointer($get_type("void")));
-    $function_add_param(cpy, "dst", $make_pointer($get_type("void")));
-    $function_add_param(cpy, "src", $make_pointer($get_type("void")));
-    $function_add_param(cpy, "n", $get_type("size_t"));
-    $with_fn(cpy) {
-        $function_set_body(cpy, $return($memcpy($param_ref(cpy, "dst"),
-                                                  $param_ref(cpy, "src"),
-                                                  $param_ref(cpy, "n"))));
+    Obj *cpy = MakeFunction("wrap_memcpy", MakePointer(GetType("void")));
+    FunctionAddParam(cpy, "dst", MakePointer(GetType("void")));
+    FunctionAddParam(cpy, "src", MakePointer(GetType("void")));
+    FunctionAddParam(cpy, "n", GetType("size_t"));
+    WithFn(cpy) {
+        FunctionSetBody(cpy, MakeReturn(Memcpy(MakeParamRef(cpy, "dst"),
+                                                  MakeParamRef(cpy, "src"),
+                                                  MakeParamRef(cpy, "n"))));
     }
 
-    $obj_t *len = $function("wrap_strlen", $get_type("size_t"));
-    $function_add_param(len, "s", $make_pointer($get_type("char")));
-    $with_fn(len) {
-        $function_set_body(len, $return($strlen($param_ref(len, "s"))));
+    Obj *len = MakeFunction("wrap_strlen", GetType("size_t"));
+    FunctionAddParam(len, "s", MakePointer(GetType("char")));
+    WithFn(len) {
+        FunctionSetBody(len, MakeReturn(Strlen(MakeParamRef(len, "s"))));
     }
 
-    $obj_t *cmp = $function("wrap_strcmp", $get_type("int"));
-    $function_add_param(cmp, "a", $make_pointer($get_type("char")));
-    $function_add_param(cmp, "b", $make_pointer($get_type("char")));
-    $with_fn(cmp) {
-        $function_set_body(cmp, $return($strcmp($param_ref(cmp, "a"),
-                                                  $param_ref(cmp, "b"))));
+    Obj *cmp = MakeFunction("wrap_strcmp", GetType("int"));
+    FunctionAddParam(cmp, "a", MakePointer(GetType("char")));
+    FunctionAddParam(cmp, "b", MakePointer(GetType("char")));
+    WithFn(cmp) {
+        FunctionSetBody(cmp, MakeReturn(Strcmp(MakeParamRef(cmp, "a"),
+                                                  MakeParamRef(cmp, "b"))));
     }
 }
 

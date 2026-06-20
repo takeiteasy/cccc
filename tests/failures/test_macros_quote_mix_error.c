@@ -3,10 +3,10 @@
 // should produce a compile-time error.
 
 [[cccc::comptime(inline)]]
-$node_t *bad_mix($node_t *a, $node_t *b) {
-    $vm_t *vm = __cccc_get_vm();
+Node *bad_mix(Node *a, Node *b) {
+    VirtualMachine *vm = __builtin_get_vm();
     // $1 and $$ in the same template — must error
-    return __cccc_quote(vm, "$1 + $$", a, b);
+    return __builtin_quote(vm, "$1 + $$", a, b);
 }
 
 int main(void) {

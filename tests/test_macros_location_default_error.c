@@ -2,9 +2,9 @@
 // CCCC_EXPECT_STDERR: test_macros_location_default_error\.c:[0-9]+:.*default_loc
 
 [[cccc::comptime(inline)]]
-$node_t *default_loc(void) {
-    $node_t *node = $binary(nk_add, $int_literal(1), $int_literal(2));
-    $macro_error_at(node, "default generated location");
+Node *default_loc(void) {
+    Node *node = MakeBinary(NK_ADD, MakeIntLiteral(1), MakeIntLiteral(2));
+    MacroErrorAt(node, "default generated location");
     return node;
 }
 

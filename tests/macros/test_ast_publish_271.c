@@ -1,59 +1,59 @@
-// Test ticket #271: unified $publish API.
+// Test ticket #271: unified PublishNode API.
 
 [[cccc::comptime]]
 void publish_proto(void) {
-    $type_t *int_ty = $get_type("int");
-    $obj_t *proto = $function_prototype("published_add_one", int_ty);
-    $function_add_param(proto, "x", int_ty);
-    $publish(proto);
+    Type *int_ty = GetType("int");
+    Obj *proto = FunctionPrototype("published_add_one", int_ty);
+    FunctionAddParam(proto, "x", int_ty);
+    PublishNode(proto);
 }
 publish_proto();
 
 [[cccc::comptime]]
 void define_published_fn(void) {
-    $type_t *int_ty = $get_type("int");
-    $obj_t *fn = $function("published_add_one", int_ty);
-    $function_set_body(fn,
-        $return($binary(nk_add, $param_ref(fn, "x"),
-                                $int_literal(1))));
+    Type *int_ty = GetType("int");
+    Obj *fn = MakeFunction("published_add_one", int_ty);
+    FunctionSetBody(fn,
+        MakeReturn(MakeBinary(NK_ADD, MakeParamRef(fn, "x"),
+                                MakeIntLiteral(1))));
 }
 define_published_fn();
 
 [[cccc::comptime]]
 void publish_global_and_types(void) {
-    $type_t *char_ty = $get_type("char");
-    $type_t *arr_ty = $make_array(char_ty, 4);
-    $obj_t *g = $global_var("published_bytes", arr_ty);
-    $global_var_set_init_data(g, "CCCC\0", 4);
-    $publish_at(g, $synthetic_token("published global"));
+    Type *char_ty = GetType("char");
+    Type *arr_ty = MakeArray(char_ty, 4);
+    Obj *g = GlobalVar("published_bytes", arr_ty);
+    GlobalVarSetInitData(g, "CCCC\0", 4);
+    PublishNodeAt(g, SyntheticToken("published global"));
 
-    $type_t *int_ty = $get_type("int");
-    $type_t *point = $make_struct("PublishedPoint");
-    $struct_add_field(point, "x", int_ty);
-    $struct_add_field(point, "y", int_ty);
-    $publish(point);
+    Type *int_ty = GetType("int");
+    Type *point = MakeStruct("PublishedPoint");
+    StructAddField(point, "x", int_ty);
+    StructAddField(point, "y", int_ty);
+    PublishNode(point);
 
-    $type_t *tagged = $make_enum("PublishedTag");
-    $enum_add_constant(tagged, "PUBLISHED_TAG_OK", 7);
-    $publish(tagged);
+    Type *tagged = MakeEnum("PublishedTag");
+    EnumAddConstant(tagged, "PUBLISHED_TAG_OK", 7);
+    PublishNode(tagged);
 
-    $publish($make_typedef("PublishedLong", $get_type("long")));
+    PublishNode(MakeTypedef("PublishedLong", GetType("long")));
 }
 publish_global_and_types();
 
 [[cccc::comptime]]
 void forward_alias_still_works(void) {
-    $type_t *int_ty = $get_type("int");
-    $obj_t *proto = $function_prototype("published_alias_fn", int_ty);
-    $publish(proto);
+    Type *int_ty = GetType("int");
+    Obj *proto = FunctionPrototype("published_alias_fn", int_ty);
+    PublishNode(proto);
 }
 forward_alias_still_works();
 
 [[cccc::comptime]]
 void define_alias_fn(void) {
-    $type_t *int_ty = $get_type("int");
-    $obj_t *fn = $function("published_alias_fn", int_ty);
-    $function_set_body(fn, $return($int_literal(5)));
+    Type *int_ty = GetType("int");
+    Obj *fn = MakeFunction("published_alias_fn", int_ty);
+    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(5)));
 }
 define_alias_fn();
 

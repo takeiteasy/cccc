@@ -13,12 +13,12 @@ int dispatch(int i) {
 }
 
 [[cccc::comptime(inline)]]
-$node_t *dispatch_ok(void) {
+Node *dispatch_ok(void) {
     if (dispatch(0) != 10)
-        return $int_literal(1);
+        return MakeIntLiteral(1);
     if (dispatch(1) != 20)
-        return $int_literal(2);
-    return $int_literal(42);
+        return MakeIntLiteral(2);
+    return MakeIntLiteral(42);
 }
 
 int main(void) {

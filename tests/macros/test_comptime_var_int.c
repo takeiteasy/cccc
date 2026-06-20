@@ -4,13 +4,13 @@
 int magic = 42;
 
 [[cccc::comptime(inline)]]
-$node_t *get_magic(void) {
-    return $get_comptime_var("magic");
+Node *get_magic(void) {
+    return GetComptimeVar("magic");
 }
 
 [[cccc::comptime(inline)]]
-$node_t *get_magic_int(void) {
-    return $int_literal($get_comptime_int("magic"));
+Node *get_magic_int(void) {
+    return MakeIntLiteral(GetComptimeInt("magic"));
 }
 
 int main(void) {

@@ -14,12 +14,12 @@ int cdispatch(int i) {
 }
 
 [[cccc::comptime(inline)]]
-$node_t *cdispatch_ok(void) {
+Node *cdispatch_ok(void) {
     if (cdispatch(0) != 10)
-        return $int_literal(1);
+        return MakeIntLiteral(1);
     if (cdispatch(1) != 20)
-        return $int_literal(2);
-    return $int_literal(0);
+        return MakeIntLiteral(2);
+    return MakeIntLiteral(0);
 }
 
 int rhandler_a(void) { return 100; }

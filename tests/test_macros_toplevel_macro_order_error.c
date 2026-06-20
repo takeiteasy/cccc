@@ -3,9 +3,9 @@
 
 [[cccc::comptime]]
 void generate_late(void) {
-    $type_t *int_ty = $get_type("int");
-    $obj_t *fn = $function("late_generated", int_ty);
-    $function_set_body(fn, $return($int_literal(42)));
+    Type *int_ty = GetType("int");
+    Obj *fn = MakeFunction("late_generated", int_ty);
+    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(42)));
 }
 
 int main(void) {

@@ -2,7 +2,7 @@ EXPECT_COMPILE_ERROR
 
 [[cccc::comptime]]
 void bad(...) {
-    $vararg_as_array();
+    VarargAsArray();
 }
 
 bad(name);

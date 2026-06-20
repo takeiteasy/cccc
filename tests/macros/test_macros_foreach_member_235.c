@@ -1,4 +1,4 @@
-// Ticket #235: $foreach_member host-side iteration over struct members.
+// Ticket #235: ForeachMember host-side iteration over struct members.
 
 struct Point3D {
     int x;
@@ -8,23 +8,23 @@ struct Point3D {
 
 [[cccc::comptime]]
 void generate_point3d_offset_sum(void) {
-    $type_t *ty = $get_type("Point3D");
+    Type *ty = GetType("Point3D");
 
     int total_offset = 0;
     int count = 0;
-    $foreach_member(ty, m, {
-        total_offset += $member_offset(m);
+    ForeachMember(ty, m, {
+        total_offset += MemberOffset(m);
         count++;
     });
 
-    $obj_t *sum_fn = $function("point3d_offset_sum", $get_type("int"));
-    $with_fn(sum_fn) {
-        $function_set_body(sum_fn, $return($int_literal(total_offset)));
+    Obj *sum_fn = MakeFunction("point3d_offset_sum", GetType("int"));
+    WithFn(sum_fn) {
+        FunctionSetBody(sum_fn, MakeReturn(MakeIntLiteral(total_offset)));
     }
 
-    $obj_t *count_fn = $function("point3d_member_count", $get_type("int"));
-    $with_fn(count_fn) {
-        $function_set_body(count_fn, $return($int_literal(count)));
+    Obj *count_fn = MakeFunction("point3d_member_count", GetType("int"));
+    WithFn(count_fn) {
+        FunctionSetBody(count_fn, MakeReturn(MakeIntLiteral(count)));
     }
 }
 

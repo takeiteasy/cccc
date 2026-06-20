@@ -24,18 +24,18 @@ Dims dims = { compute_width(), 720 };
 Data data = { compute_value() };
 
 [[cccc::comptime(inline)]]
-$node_t *get_width(void) {
-    return $get_comptime_member("dims", "width");
+Node *get_width(void) {
+    return GetComptimeMember("dims", "width");
 }
 
 [[cccc::comptime(inline)]]
-$node_t *get_height(void) {
-    return $get_comptime_member("dims", "height");
+Node *get_height(void) {
+    return GetComptimeMember("dims", "height");
 }
 
 [[cccc::comptime(inline)]]
-$node_t *get_value(void) {
-    return $get_comptime_member("data", "i");
+Node *get_value(void) {
+    return GetComptimeMember("data", "i");
 }
 
 int main(void) {

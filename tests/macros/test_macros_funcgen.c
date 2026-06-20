@@ -3,20 +3,20 @@
 
 // Pragma macro that generates a function returning a constant
 [[cccc::comptime(inline)]]
-$node_t *generate_const_func($node_t *name_node, $node_t *value_node) {
-    $vm_t *vm = __cccc_get_vm();
+Node *generate_const_func(Node *name_node, Node *value_node) {
+    VirtualMachine *vm = __builtin_get_vm();
 
     // Create a function: int generated_func(void) { return 42; }
-    $type_t *int_type = __cccc_ast_get_type(vm, "int");
-    $obj_t *fn = __cccc_ast_function(vm, "generated_func", int_type);
+    Type *int_type = __builtin_ast_get_type(vm, "int");
+    Obj *fn = __builtin_ast_function(vm, "generated_func", int_type);
     
     // Set the body to return 42
-    $node_t *ret_val = __cccc_ast_int_literal(vm, 42);
-    $node_t *ret_stmt = __cccc_ast_return(vm, ret_val);
-    __cccc_ast_function_set_body(vm, fn, ret_stmt);
+    Node *ret_val = __builtin_ast_int_literal(vm, 42);
+    Node *ret_stmt = __builtin_ast_return(vm, ret_val);
+    __builtin_ast_function_set_body(vm, fn, ret_stmt);
     
     // Return a placeholder (the function generation is a side effect)
-    return __cccc_ast_int_literal(vm, 0);
+    return __builtin_ast_int_literal(vm, 0);
 }
 
 // Forward declare the function that will be generated

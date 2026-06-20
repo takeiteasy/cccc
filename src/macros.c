@@ -24,110 +24,110 @@
 #include "./internal.h"
 
 // External declaration from relfection.c
-extern VirtualMachine *__cccc_current_vm;
+extern VirtualMachine *__builtin_current_vm;
 
 // Forward declarations for reflection API functions (to register as FFI)
-extern VirtualMachine *__cccc_get_vm(void);
-extern const char *__cccc_gensym(VirtualMachine *vm, const char *prefix);
-extern Token *__cccc_ast_current_token(VirtualMachine *vm);
-extern Token *__cccc_ast_synthetic_token(VirtualMachine *vm, const char *label);
-extern Token *__cccc_ast_token_from_node(Node *node);
-extern Node *__cccc_ast_set_token(Node *node, Token *tok);
-extern Node *__cccc_ast_copy_location(Node *dst, Node *src);
-extern Type *__cccc_ast_find_type(VirtualMachine *vm, const char *name);
-extern bool __cccc_ast_type_exists(VirtualMachine *vm, const char *name);
-extern Type *__cccc_ast_get_type(VirtualMachine *vm, const char *name);
-extern TypeKind __cccc_ast_type_kind(Type *ty);
-extern int __cccc_ast_type_size(Type *ty);
-extern int __cccc_ast_type_align(Type *ty);
-extern bool __cccc_ast_type_is_unsigned(Type *ty);
-extern bool __cccc_ast_type_is_const(Type *ty);
-extern Type *__cccc_ast_type_base(Type *ty);
-extern int __cccc_ast_type_array_len(Type *ty);
-extern Type *__cccc_ast_type_return_type(Type *ty);
-extern int __cccc_ast_type_param_count(Type *ty);
-extern Type *__cccc_ast_type_param_at(Type *ty, int index);
-extern bool __cccc_ast_type_is_variadic(Type *ty);
-extern const char *__cccc_ast_type_name(Type *ty);
-extern const char *__cccc_ast_type_c_name(VirtualMachine *vm, Type *ty);
-extern Node *__cccc_ast_int_literal(VirtualMachine *vm, int64_t value);
-extern Node *__cccc_ast_float_literal(VirtualMachine *vm, double value);
-extern Node *__cccc_ast_string_literal(VirtualMachine *vm, const char *str);
-extern Node *__cccc_ast_var_ref(VirtualMachine *vm, const char *name);
-extern Node *__cccc_ast_binary(VirtualMachine *vm, NodeKind op, Node *left, Node *right);
-extern Node *__cccc_ast_unary(VirtualMachine *vm, NodeKind op, Node *operand);
-extern Node *__cccc_ast_cast(VirtualMachine *vm, Node *expr, Type *target_type);
-extern Node *__cccc_ast_return(VirtualMachine *vm, Node *expr);
-extern Node *__cccc_ast_if(VirtualMachine *vm, Node *cond, Node *then_body, Node *else_body);
-extern Node *__cccc_ast_switch(VirtualMachine *vm, Node *cond);
-extern void __cccc_ast_switch_add_case(VirtualMachine *vm, Node *switch_node, Node *value,
+extern VirtualMachine *__builtin_get_vm(void);
+extern const char *__builtin_gensym(VirtualMachine *vm, const char *prefix);
+extern Token *__builtin_ast_current_token(VirtualMachine *vm);
+extern Token *__builtin_ast_synthetic_token(VirtualMachine *vm, const char *label);
+extern Token *__builtin_ast_token_from_node(Node *node);
+extern Node *__builtin_ast_set_token(Node *node, Token *tok);
+extern Node *__builtin_ast_copy_location(Node *dst, Node *src);
+extern Type *__builtin_ast_find_type(VirtualMachine *vm, const char *name);
+extern bool __builtin_ast_type_exists(VirtualMachine *vm, const char *name);
+extern Type *__builtin_ast_get_type(VirtualMachine *vm, const char *name);
+extern TypeKind __builtin_ast_type_kind(Type *ty);
+extern int __builtin_ast_type_size(Type *ty);
+extern int __builtin_ast_type_align(Type *ty);
+extern bool __builtin_ast_type_is_unsigned(Type *ty);
+extern bool __builtin_ast_type_is_const(Type *ty);
+extern Type *__builtin_ast_type_base(Type *ty);
+extern int __builtin_ast_type_array_len(Type *ty);
+extern Type *__builtin_ast_type_return_type(Type *ty);
+extern int __builtin_ast_type_param_count(Type *ty);
+extern Type *__builtin_ast_type_param_at(Type *ty, int index);
+extern bool __builtin_ast_type_is_variadic(Type *ty);
+extern const char *__builtin_ast_type_name(Type *ty);
+extern const char *__builtin_ast_type_c_name(VirtualMachine *vm, Type *ty);
+extern Node *__builtin_ast_int_literal(VirtualMachine *vm, int64_t value);
+extern Node *__builtin_ast_float_literal(VirtualMachine *vm, double value);
+extern Node *__builtin_ast_string_literal(VirtualMachine *vm, const char *str);
+extern Node *__builtin_ast_var_ref(VirtualMachine *vm, const char *name);
+extern Node *__builtin_ast_binary(VirtualMachine *vm, NodeKind op, Node *left, Node *right);
+extern Node *__builtin_ast_unary(VirtualMachine *vm, NodeKind op, Node *operand);
+extern Node *__builtin_ast_cast(VirtualMachine *vm, Node *expr, Type *target_type);
+extern Node *__builtin_ast_return(VirtualMachine *vm, Node *expr);
+extern Node *__builtin_ast_if(VirtualMachine *vm, Node *cond, Node *then_body, Node *else_body);
+extern Node *__builtin_ast_switch(VirtualMachine *vm, Node *cond);
+extern void __builtin_ast_switch_add_case(VirtualMachine *vm, Node *switch_node, Node *value,
                                 Node *body);
-extern void __cccc_ast_switch_set_default(VirtualMachine *vm, Node *switch_node, Node *body);
-extern Node *__cccc_ast_block_add_stmt(VirtualMachine *vm, Node *block, Node *stmt);
-extern Node *__cccc_ast_block_add_current_stmt(VirtualMachine *vm, Node *stmt);
-extern void __cccc_ast_switch_add_current_case(VirtualMachine *vm, Node *value, Node *body);
-extern void __cccc_ast_switch_set_current_default(VirtualMachine *vm, Node *body);
-extern int __cccc_ast_enum_count(VirtualMachine *vm, Type *enum_type);
-extern EnumConstant *__cccc_ast_enum_at(VirtualMachine *vm, Type *enum_type, int index);
-extern const char *__cccc_ast_enum_constant_name(EnumConstant *ec);
-extern int __cccc_ast_enum_constant_value(EnumConstant *ec);
-extern int __cccc_ast_global_count(VirtualMachine *vm);
-extern Obj *__cccc_ast_global_at(VirtualMachine *vm, int index);
-extern const char *__cccc_ast_obj_name(Obj *obj);
-extern Type *__cccc_ast_obj_type(Obj *obj);
-extern bool __cccc_ast_obj_is_function(Obj *obj);
-extern bool __cccc_ast_obj_is_definition(Obj *obj);
-extern bool __cccc_ast_obj_is_static(Obj *obj);
-extern int __cccc_attr_target_kind(AttrTarget *target);
-extern const char *__cccc_attr_target_name(AttrTarget *target);
-extern Type *__cccc_attr_target_type(AttrTarget *target);
-extern Obj *__cccc_attr_target_obj(AttrTarget *target);
-extern Token *__cccc_attr_target_token(AttrTarget *target);
-extern Type *__cccc_ast_make_pointer(VirtualMachine *vm, Type *base);
-extern Type *__cccc_ast_make_array(VirtualMachine *vm, Type *base, int len);
-extern Type *__cccc_ast_make_func_ptr_type(VirtualMachine *vm, Type *return_ty,
+extern void __builtin_ast_switch_set_default(VirtualMachine *vm, Node *switch_node, Node *body);
+extern Node *__builtin_ast_block_add_stmt(VirtualMachine *vm, Node *block, Node *stmt);
+extern Node *__builtin_ast_block_add_current_stmt(VirtualMachine *vm, Node *stmt);
+extern void __builtin_ast_switch_add_current_case(VirtualMachine *vm, Node *value, Node *body);
+extern void __builtin_ast_switch_set_current_default(VirtualMachine *vm, Node *body);
+extern int __builtin_ast_enum_count(VirtualMachine *vm, Type *enum_type);
+extern EnumConstant *__builtin_ast_enum_at(VirtualMachine *vm, Type *enum_type, int index);
+extern const char *__builtin_ast_enum_constant_name(EnumConstant *ec);
+extern int __builtin_ast_enum_constant_value(EnumConstant *ec);
+extern int __builtin_ast_global_count(VirtualMachine *vm);
+extern Obj *__builtin_ast_global_at(VirtualMachine *vm, int index);
+extern const char *__builtin_ast_obj_name(Obj *obj);
+extern Type *__builtin_ast_obj_type(Obj *obj);
+extern bool __builtin_ast_obj_is_function(Obj *obj);
+extern bool __builtin_ast_obj_is_definition(Obj *obj);
+extern bool __builtin_ast_obj_is_static(Obj *obj);
+extern int __builtin_attr_target_kind(AttrTarget *target);
+extern const char *__builtin_attr_target_name(AttrTarget *target);
+extern Type *__builtin_attr_target_type(AttrTarget *target);
+extern Obj *__builtin_attr_target_obj(AttrTarget *target);
+extern Token *__builtin_attr_target_token(AttrTarget *target);
+extern Type *__builtin_ast_make_pointer(VirtualMachine *vm, Type *base);
+extern Type *__builtin_ast_make_array(VirtualMachine *vm, Type *base, int len);
+extern Type *__builtin_ast_make_func_ptr_type(VirtualMachine *vm, Type *return_ty,
                                             Type **param_types, int nparams);
-extern void __cccc_generate_sum(VirtualMachine *vm, Type *elem_ty);
-extern void __cccc_generate_map(VirtualMachine *vm, Type *elem_ty);
-extern void __cccc_generate_reduce(VirtualMachine *vm, Type *elem_ty);
-extern void __cccc_generate_filter(VirtualMachine *vm, Type *elem_ty);
+extern void __builtin_generate_sum(VirtualMachine *vm, Type *elem_ty);
+extern void __builtin_generate_map(VirtualMachine *vm, Type *elem_ty);
+extern void __builtin_generate_reduce(VirtualMachine *vm, Type *elem_ty);
+extern void __builtin_generate_filter(VirtualMachine *vm, Type *elem_ty);
 
 // Function generation
-extern Obj *__cccc_ast_function(VirtualMachine *vm, const char *name, Type *return_type);
-extern void __cccc_ast_function_add_param(VirtualMachine *vm, Obj *fn, const char *name,
+extern Obj *__builtin_ast_function(VirtualMachine *vm, const char *name, Type *return_type);
+extern void __builtin_ast_function_add_param(VirtualMachine *vm, Obj *fn, const char *name,
                                     Type *type);
-extern void __cccc_ast_function_set_body(VirtualMachine *vm, Obj *fn, Node *body);
-extern void __cccc_ast_function_set_static(Obj *fn, bool is_static);
-extern void __cccc_ast_function_set_inline(Obj *fn, bool is_inline);
-extern void __cccc_ast_function_set_variadic(Obj *fn, bool is_variadic);
-extern Node *__cccc_ast_publish(VirtualMachine *vm, Obj *obj, Token *tok);
-extern Node *__cccc_ast_publish_type(VirtualMachine *vm, Type *ty, Token *tok);
-extern Node *__cccc_ast_param_ref(VirtualMachine *vm, Obj *fn, const char *name);
-extern void __cccc_emit_directive(VirtualMachine *vm, const char *line);
+extern void __builtin_ast_function_set_body(VirtualMachine *vm, Obj *fn, Node *body);
+extern void __builtin_ast_function_set_static(Obj *fn, bool is_static);
+extern void __builtin_ast_function_set_inline(Obj *fn, bool is_inline);
+extern void __builtin_ast_function_set_variadic(Obj *fn, bool is_variadic);
+extern Node *__builtin_ast_publish(VirtualMachine *vm, Obj *obj, Token *tok);
+extern Node *__builtin_ast_publish_type(VirtualMachine *vm, Type *ty, Token *tok);
+extern Node *__builtin_ast_param_ref(VirtualMachine *vm, Obj *fn, const char *name);
+extern void __builtin_emit_directive(VirtualMachine *vm, const char *line);
 
 // Ticket #152: global variable generation
-extern Obj  *__cccc_ast_global_var(VirtualMachine *vm, const char *name, Type *ty);
-extern void  __cccc_ast_global_var_set_init_data(VirtualMachine *vm, Obj *var,
+extern Obj  *__builtin_ast_global_var(VirtualMachine *vm, const char *name, Type *ty);
+extern void  __builtin_ast_global_var_set_init_data(VirtualMachine *vm, Obj *var,
                                                 const char *data, int len);
-extern void  __cccc_ast_global_var_set_static(Obj *var, bool is_static);
+extern void  __builtin_ast_global_var_set_static(Obj *var, bool is_static);
 
-// Ticket #148: function-building context (push/pop current_fn for $quote)
-extern void __cccc_ast_push_fn(VirtualMachine *vm, Obj *fn);
-extern void __cccc_ast_pop_fn(VirtualMachine *vm);
-extern void __cccc_ast_push_block(VirtualMachine *vm, Node *block);
-extern void __cccc_ast_pop_block(VirtualMachine *vm);
-extern void __cccc_ast_push_struct(VirtualMachine *vm, Type *ty);
-extern void __cccc_ast_pop_struct(VirtualMachine *vm);
-extern void __cccc_ast_push_switch(VirtualMachine *vm, Node *switch_node);
-extern void __cccc_ast_pop_switch(VirtualMachine *vm);
-extern void __cccc_ast_push_enum(VirtualMachine *vm, Type *ty);
-extern void __cccc_ast_pop_enum(VirtualMachine *vm);
+// Ticket #148: function-building context (push/pop current_fn for Quote)
+extern void __builtin_ast_push_fn(VirtualMachine *vm, Obj *fn);
+extern void __builtin_ast_pop_fn(VirtualMachine *vm);
+extern void __builtin_ast_push_block(VirtualMachine *vm, Node *block);
+extern void __builtin_ast_pop_block(VirtualMachine *vm);
+extern void __builtin_ast_push_struct(VirtualMachine *vm, Type *ty);
+extern void __builtin_ast_pop_struct(VirtualMachine *vm);
+extern void __builtin_ast_push_switch(VirtualMachine *vm, Node *switch_node);
+extern void __builtin_ast_pop_switch(VirtualMachine *vm);
+extern void __builtin_ast_push_enum(VirtualMachine *vm, Type *ty);
+extern void __builtin_ast_pop_enum(VirtualMachine *vm);
 
 // Ticket #58: AST dump
-extern void __cccc_dump_tree(VirtualMachine *vm, Node *node);
-extern const char *__cccc_dump_tree_to_string(VirtualMachine *vm, Node *node);
-extern void __cccc_dump_ast_gen(VirtualMachine *vm, Node *node);
-extern const char *__cccc_dump_ast_gen_to_string(VirtualMachine *vm, Node *node);
+extern void __builtin_dump_tree(VirtualMachine *vm, Node *node);
+extern const char *__builtin_dump_tree_to_string(VirtualMachine *vm, Node *node);
+extern void __builtin_dump_ast_gen(VirtualMachine *vm, Node *node);
+extern const char *__builtin_dump_ast_gen_to_string(VirtualMachine *vm, Node *node);
 
 void cc_record_emit_source(VirtualMachine *vm, const char *source) {
     if (!vm || !source || !*source)
@@ -161,472 +161,472 @@ void cc_record_emit_object(VirtualMachine *vm, Obj *obj) {
 }
 
 // Ticket #78: source-located macro diagnostics
-extern void __cccc_macro_error_at(VirtualMachine *vm, Node *node, const char *fmt, ...);
-extern void __cccc_macro_warning_at(VirtualMachine *vm, Node *node, const char *fmt, ...);
+extern void __builtin_macro_error_at(VirtualMachine *vm, Node *node, const char *fmt, ...);
+extern void __builtin_macro_warning_at(VirtualMachine *vm, Node *node, const char *fmt, ...);
 
 // Previously unregistered statement builders (existing functions, now exposed)
-extern Node *__cccc_ast_block(VirtualMachine *vm, Node **stmts, int count);
-extern Node *__cccc_ast_expr_stmt(VirtualMachine *vm, Node *expr);
+extern Node *__builtin_ast_block(VirtualMachine *vm, Node **stmts, int count);
+extern Node *__builtin_ast_expr_stmt(VirtualMachine *vm, Node *expr);
 
 // Ticket #77: hygienic local variable injection
-extern Node *__cccc_ast_local_var(VirtualMachine *vm, const char *name, Type *ty);
-extern Node *__cccc_ast_local_var_unique(VirtualMachine *vm, Type *ty);
+extern Node *__builtin_ast_local_var(VirtualMachine *vm, const char *name, Type *ty);
+extern Node *__builtin_ast_local_var_unique(VirtualMachine *vm, Type *ty);
 
 // Struct/union member introspection (previously unregistered)
-extern int     __cccc_ast_struct_member_count(VirtualMachine *vm, Type *struct_type);
-extern Member *__cccc_ast_struct_member_at(VirtualMachine *vm, Type *struct_type, int index);
-extern Member *__cccc_ast_struct_member_find(VirtualMachine *vm, Type *struct_type,
+extern int     __builtin_ast_struct_member_count(VirtualMachine *vm, Type *struct_type);
+extern Member *__builtin_ast_struct_member_at(VirtualMachine *vm, Type *struct_type, int index);
+extern Member *__builtin_ast_struct_member_find(VirtualMachine *vm, Type *struct_type,
                                               const char *name);
-extern const char *__cccc_ast_member_name(Member *m);
-extern Type    *__cccc_ast_member_type(Member *m);
-extern int      __cccc_ast_member_offset(Member *m);
-extern bool     __cccc_ast_member_is_bitfield(Member *m);
-extern int      __cccc_ast_member_bitfield_width(Member *m);
-extern int64_t  __cccc_ast_offsetof_chain(VirtualMachine *vm, Type *ty,
+extern const char *__builtin_ast_member_name(Member *m);
+extern Type    *__builtin_ast_member_type(Member *m);
+extern int      __builtin_ast_member_offset(Member *m);
+extern bool     __builtin_ast_member_is_bitfield(Member *m);
+extern int      __builtin_ast_member_bitfield_width(Member *m);
+extern int64_t  __builtin_ast_offsetof_chain(VirtualMachine *vm, Type *ty,
                                           const char **names, int n);
 
 // Ticket #235: serialization
-extern Node *__cccc_ast_serialize(VirtualMachine *vm, Type *ty, Node *expr, Node *buf);
-extern Node *__cccc_ast_deserialize(VirtualMachine *vm, Type *ty, Node *buf);
+extern Node *__builtin_ast_serialize(VirtualMachine *vm, Type *ty, Node *expr, Node *buf);
+extern Node *__builtin_ast_deserialize(VirtualMachine *vm, Type *ty, Node *buf);
 
 // Ticket #235: enum <-> string conversion
-extern Node *__cccc_ast_enum_to_string_switch(VirtualMachine *vm, Type *ty, Node *expr);
-extern Node *__cccc_ast_enum_from_string_chain(VirtualMachine *vm, Type *ty, Node *expr);
+extern Node *__builtin_ast_enum_to_string_switch(VirtualMachine *vm, Type *ty, Node *expr);
+extern Node *__builtin_ast_enum_from_string_chain(VirtualMachine *vm, Type *ty, Node *expr);
 
 // Ticket #51: new expression/statement builders
-extern Node *__cccc_ast_assign(VirtualMachine *vm, Node *target, Node *value);
-extern Node *__cccc_ast_member(VirtualMachine *vm, Node *obj, const char *name);
-extern Node *__cccc_ast_funcall(VirtualMachine *vm, Node *callee, Node **args, int n);
-extern Node *__cccc_ast_while(VirtualMachine *vm, Node *cond, Node *body);
-extern Node *__cccc_ast_for(VirtualMachine *vm, Node *init, Node *cond, Node *inc, Node *body);
-extern Node *__cccc_ast_do_while(VirtualMachine *vm, Node *body, Node *cond);
+extern Node *__builtin_ast_assign(VirtualMachine *vm, Node *target, Node *value);
+extern Node *__builtin_ast_member(VirtualMachine *vm, Node *obj, const char *name);
+extern Node *__builtin_ast_funcall(VirtualMachine *vm, Node *callee, Node **args, int n);
+extern Node *__builtin_ast_while(VirtualMachine *vm, Node *cond, Node *body);
+extern Node *__builtin_ast_for(VirtualMachine *vm, Node *init, Node *cond, Node *inc, Node *body);
+extern Node *__builtin_ast_do_while(VirtualMachine *vm, Node *body, Node *cond);
 
 // Ticket #1: quasi-quoting; Ticket #172: list splice helper
-extern Node *__cccc_quote(VirtualMachine *vm, const char *tmpl, ...);
-extern Node *__cccc_quote_n(VirtualMachine *vm, const char *tmpl, Node **nodes, int count);
-extern Node *__cccc_node_list(VirtualMachine *vm, Node **nodes, int count);
+extern Node *__builtin_quote(VirtualMachine *vm, const char *tmpl, ...);
+extern Node *__builtin_quote_n(VirtualMachine *vm, const char *tmpl, Node **nodes, int count);
+extern Node *__builtin_node_list(VirtualMachine *vm, Node **nodes, int count);
 
 // Ticket #171: new expression builders
-extern Node  *__cccc_ast_cond(VirtualMachine *vm, Node *cond, Node *then_expr, Node *else_expr);
-extern Node  *__cccc_ast_null(VirtualMachine *vm);
-extern Node  *__cccc_ast_sizeof_type(VirtualMachine *vm, Type *ty);
-extern Node  *__cccc_ast_alignof_type(VirtualMachine *vm, Type *ty);
-extern Node  *__cccc_ast_sizeof_expr(VirtualMachine *vm, Node *expr);
-extern Node  *__cccc_ast_subscript(VirtualMachine *vm, Node *arr, Node *idx);
-extern Node  *__cccc_ast_comma(VirtualMachine *vm, Node *lhs, Node *rhs);
+extern Node  *__builtin_ast_cond(VirtualMachine *vm, Node *cond, Node *then_expr, Node *else_expr);
+extern Node  *__builtin_ast_null(VirtualMachine *vm);
+extern Node  *__builtin_ast_sizeof_type(VirtualMachine *vm, Type *ty);
+extern Node  *__builtin_ast_alignof_type(VirtualMachine *vm, Type *ty);
+extern Node  *__builtin_ast_sizeof_expr(VirtualMachine *vm, Node *expr);
+extern Node  *__builtin_ast_subscript(VirtualMachine *vm, Node *arr, Node *idx);
+extern Node  *__builtin_ast_comma(VirtualMachine *vm, Node *lhs, Node *rhs);
 
 // Ticket #171: qualified type builders
-extern Type  *__cccc_ast_make_const(VirtualMachine *vm, Type *ty);
-extern Type  *__cccc_ast_make_volatile(VirtualMachine *vm, Type *ty);
+extern Type  *__builtin_ast_make_const(VirtualMachine *vm, Type *ty);
+extern Type  *__builtin_ast_make_volatile(VirtualMachine *vm, Type *ty);
 
 // Ticket #171: function prototype builder
-extern Obj   *__cccc_ast_function_prototype(VirtualMachine *vm, const char *name,
+extern Obj   *__builtin_ast_function_prototype(VirtualMachine *vm, const char *name,
                                             Type *return_type);
 
 // Ticket #171: struct/union/enum/typedef type builders
-extern Type  *__cccc_ast_make_struct(VirtualMachine *vm, const char *name);
-extern Type  *__cccc_ast_make_union(VirtualMachine *vm, const char *name);
-extern Type  *__cccc_ast_struct_add_field(VirtualMachine *vm, Type *ty, const char *name,
+extern Type  *__builtin_ast_make_struct(VirtualMachine *vm, const char *name);
+extern Type  *__builtin_ast_make_union(VirtualMachine *vm, const char *name);
+extern Type  *__builtin_ast_struct_add_field(VirtualMachine *vm, Type *ty, const char *name,
                                           Type *field_type);
-extern Type  *__cccc_ast_struct_add_current_field(VirtualMachine *vm, const char *name,
+extern Type  *__builtin_ast_struct_add_current_field(VirtualMachine *vm, const char *name,
                                                   Type *field_type);
-extern Type  *__cccc_ast_make_enum(VirtualMachine *vm, const char *name);
-extern void   __cccc_ast_enum_add_constant(VirtualMachine *vm, Type *ty, const char *name,
+extern Type  *__builtin_ast_make_enum(VirtualMachine *vm, const char *name);
+extern void   __builtin_ast_enum_add_constant(VirtualMachine *vm, Type *ty, const char *name,
                                            int value);
-extern void   __cccc_ast_enum_add_current_constant(VirtualMachine *vm, const char *name,
+extern void   __builtin_ast_enum_add_current_constant(VirtualMachine *vm, const char *name,
                                                    int value);
-extern Type  *__cccc_ast_make_typedef(VirtualMachine *vm, const char *name, Type *underlying);
+extern Type  *__builtin_ast_make_typedef(VirtualMachine *vm, const char *name, Type *underlying);
 
 // Ticket #188: comptime variable access
-extern int64_t __cccc_get_comptime_int(VirtualMachine *vm, const char *name);
-extern double  __cccc_get_comptime_float(VirtualMachine *vm, const char *name);
-extern Node   *__cccc_get_comptime_var(VirtualMachine *vm, const char *name);
-extern Node   *__cccc_get_comptime_ptr(VirtualMachine *vm, const char *name);
-extern Node   *__cccc_get_comptime_member(VirtualMachine *vm, const char *var_name,
+extern int64_t __builtin_get_comptime_int(VirtualMachine *vm, const char *name);
+extern double  __builtin_get_comptime_float(VirtualMachine *vm, const char *name);
+extern Node   *__builtin_get_comptime_var(VirtualMachine *vm, const char *name);
+extern Node   *__builtin_get_comptime_ptr(VirtualMachine *vm, const char *name);
+extern Node   *__builtin_get_comptime_member(VirtualMachine *vm, const char *var_name,
                                          const char *field);
 
 // Ticket #189: constexpr variable access
-extern Node   *__cccc_get_constexpr_value(VirtualMachine *vm, const char *name);
+extern Node   *__builtin_get_constexpr_value(VirtualMachine *vm, const char *name);
 
 // Ticket #296: initializer builders
-extern Node   *__cccc_ast_compound_literal(VirtualMachine *vm, Type *ty, Node **inits, int n);
-extern Node   *__cccc_ast_init_array(VirtualMachine *vm, Type *elem_ty, Node **elems, int n);
-extern Node   *__cccc_ast_init_struct(VirtualMachine *vm, Type *ty, const char **fields,
+extern Node   *__builtin_ast_compound_literal(VirtualMachine *vm, Type *ty, Node **inits, int n);
+extern Node   *__builtin_ast_init_array(VirtualMachine *vm, Type *elem_ty, Node **elems, int n);
+extern Node   *__builtin_ast_init_struct(VirtualMachine *vm, Type *ty, const char **fields,
                                      Node **values, int n);
 
 // Ticket #277: Lisp-style single-macro expansion
-extern Node   *__cccc_macroexpand_1(VirtualMachine *vm, Node *node);
-extern Node   *__cccc_macroexpand(VirtualMachine *vm, Node *node);
-extern int     __cccc_ast_vararg_count(VirtualMachine *vm);
-extern Node   *__cccc_ast_vararg_at(VirtualMachine *vm, int index);
-extern Node   **__cccc_ast_varargs_as_array(VirtualMachine *vm);
-extern const char *__cccc_ast_vararg_str_at(VirtualMachine *vm, int index);
+extern Node   *__builtin_macroexpand_1(VirtualMachine *vm, Node *node);
+extern Node   *__builtin_macroexpand(VirtualMachine *vm, Node *node);
+extern int     __builtin_ast_vararg_count(VirtualMachine *vm);
+extern Node   *__builtin_ast_vararg_at(VirtualMachine *vm, int index);
+extern Node   **__builtin_ast_varargs_as_array(VirtualMachine *vm);
+extern const char *__builtin_ast_vararg_str_at(VirtualMachine *vm, int index);
 
-int __cccc_ast_vararg_count(VirtualMachine *vm) {
+int __builtin_ast_vararg_count(VirtualMachine *vm) {
     return vm ? vm->compiler.macro_vararg_count : 0;
 }
 
-int $vararg_count(void) {
-    return __cccc_ast_vararg_count(__cccc_get_vm());
+int VarargCount(void) {
+    return __builtin_ast_vararg_count(__builtin_get_vm());
 }
 
-Node *__cccc_ast_vararg_at(VirtualMachine *vm, int index) {
+Node *__builtin_ast_vararg_at(VirtualMachine *vm, int index) {
     if (!vm)
         return NULL;
     if (vm->compiler.macro_vararg_string_mode)
         error_tok(vm, vm->compiler.macro_call_tok,
-                  "$vararg_at is only valid for inline AST macros");
+                  "VarargAt is only valid for inline AST macros");
     if (index < 0 || index >= vm->compiler.macro_vararg_count)
         error_tok(vm, vm->compiler.macro_call_tok,
-                  "$vararg_at index %d out of range (count %d)",
+                  "VarargAt index %d out of range (count %d)",
                   index, vm->compiler.macro_vararg_count);
     return vm->compiler.macro_vararg_nodes[index];
 }
 
-Node *$vararg_at(int index) {
-    return __cccc_ast_vararg_at(__cccc_get_vm(), index);
+Node *VarargAt(int index) {
+    return __builtin_ast_vararg_at(__builtin_get_vm(), index);
 }
 
-Node **__cccc_ast_varargs_as_array(VirtualMachine *vm) {
+Node **__builtin_ast_varargs_as_array(VirtualMachine *vm) {
     if (!vm)
         return NULL;
     if (vm->compiler.macro_vararg_string_mode)
         error_tok(vm, vm->compiler.macro_call_tok,
-                  "$vararg_as_array is only valid for inline AST macros");
+                  "VarargAsArray is only valid for inline AST macros");
     if (vm->compiler.macro_vararg_count == 0)
         return NULL;
     return vm->compiler.macro_vararg_nodes;
 }
 
-Node **$vararg_as_array(void) {
-    return __cccc_ast_varargs_as_array(__cccc_get_vm());
+Node **VarargAsArray(void) {
+    return __builtin_ast_varargs_as_array(__builtin_get_vm());
 }
 
-const char *__cccc_ast_vararg_str_at(VirtualMachine *vm, int index) {
+const char *__builtin_ast_vararg_str_at(VirtualMachine *vm, int index) {
     if (!vm)
         return NULL;
     if (!vm->compiler.macro_vararg_string_mode)
         error_tok(vm, vm->compiler.macro_call_tok,
-                  "$vararg_str_at is only valid for global-generation string macros");
+                  "VarargStrAt is only valid for global-generation string macros");
     if (index < 0 || index >= vm->compiler.macro_vararg_count)
         error_tok(vm, vm->compiler.macro_call_tok,
-                  "$vararg_str_at index %d out of range (count %d)",
+                  "VarargStrAt index %d out of range (count %d)",
                   index, vm->compiler.macro_vararg_count);
     return vm->compiler.macro_vararg_strs[index];
 }
 
-const char *$vararg_str_at(int index) {
-    return __cccc_ast_vararg_str_at(__cccc_get_vm(), index);
+const char *VarargStrAt(int index) {
+    return __builtin_ast_vararg_str_at(__builtin_get_vm(), index);
 }
 
 // Register reflection API functions as FFI
 static void register_reflection_ffi(VirtualMachine *vm) {
     // VM accessor
-    cc_register_cfunc(vm, "__cccc_get_vm", (void *)__cccc_get_vm, 0, 0);
-    cc_register_cfunc(vm, "__cccc_gensym", (void *)__cccc_gensym, 2, 0);
+    cc_register_cfunc(vm, "__builtin_get_vm", (void *)__builtin_get_vm, 0, 0);
+    cc_register_cfunc(vm, "__builtin_gensym", (void *)__builtin_gensym, 2, 0);
 
     // Source location helpers
-    cc_register_cfunc(vm, "__cccc_ast_current_token",
-                      (void *)__cccc_ast_current_token, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_synthetic_token",
-                      (void *)__cccc_ast_synthetic_token, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_token_from_node",
-                      (void *)__cccc_ast_token_from_node, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_set_token",
-                      (void *)__cccc_ast_set_token, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_copy_location",
-                      (void *)__cccc_ast_copy_location, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_current_token",
+                      (void *)__builtin_ast_current_token, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_synthetic_token",
+                      (void *)__builtin_ast_synthetic_token, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_token_from_node",
+                      (void *)__builtin_ast_token_from_node, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_set_token",
+                      (void *)__builtin_ast_set_token, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_copy_location",
+                      (void *)__builtin_ast_copy_location, 2, 0);
 
     // Type lookup
-    cc_register_cfunc(vm, "__cccc_ast_find_type", (void *)__cccc_ast_find_type, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_type_exists", (void *)__cccc_ast_type_exists, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_get_type", (void *)__cccc_ast_get_type, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_type_kind", (void *)__cccc_ast_type_kind, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_type_size", (void *)__cccc_ast_type_size, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_type_align", (void *)__cccc_ast_type_align, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_type_is_unsigned",
-                      (void *)__cccc_ast_type_is_unsigned, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_type_is_const",
-                      (void *)__cccc_ast_type_is_const, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_type_base", (void *)__cccc_ast_type_base, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_type_array_len",
-                      (void *)__cccc_ast_type_array_len, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_type_return_type",
-                      (void *)__cccc_ast_type_return_type, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_type_param_count",
-                      (void *)__cccc_ast_type_param_count, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_type_param_at",
-                      (void *)__cccc_ast_type_param_at, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_type_is_variadic",
-                      (void *)__cccc_ast_type_is_variadic, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_type_name", (void *)__cccc_ast_type_name, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_type_c_name", (void *)__cccc_ast_type_c_name, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_find_type", (void *)__builtin_ast_find_type, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_type_exists", (void *)__builtin_ast_type_exists, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_get_type", (void *)__builtin_ast_get_type, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_type_kind", (void *)__builtin_ast_type_kind, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_type_size", (void *)__builtin_ast_type_size, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_type_align", (void *)__builtin_ast_type_align, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_type_is_unsigned",
+                      (void *)__builtin_ast_type_is_unsigned, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_type_is_const",
+                      (void *)__builtin_ast_type_is_const, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_type_base", (void *)__builtin_ast_type_base, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_type_array_len",
+                      (void *)__builtin_ast_type_array_len, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_type_return_type",
+                      (void *)__builtin_ast_type_return_type, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_type_param_count",
+                      (void *)__builtin_ast_type_param_count, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_type_param_at",
+                      (void *)__builtin_ast_type_param_at, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_type_is_variadic",
+                      (void *)__builtin_ast_type_is_variadic, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_type_name", (void *)__builtin_ast_type_name, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_type_c_name", (void *)__builtin_ast_type_c_name, 2, 0);
 
     // Type construction
-    cc_register_cfunc(vm, "__cccc_ast_make_pointer", (void *)__cccc_ast_make_pointer, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_make_array", (void *)__cccc_ast_make_array, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_make_func_ptr_type", (void *)__cccc_ast_make_func_ptr_type, 4, 0);
-    cc_register_cfunc(vm, "__cccc_generate_sum", (void *)__cccc_generate_sum, 2, 0);
-    cc_register_cfunc(vm, "__cccc_generate_map", (void *)__cccc_generate_map, 2, 0);
-    cc_register_cfunc(vm, "__cccc_generate_reduce", (void *)__cccc_generate_reduce, 2, 0);
-    cc_register_cfunc(vm, "__cccc_generate_filter", (void *)__cccc_generate_filter, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_make_pointer", (void *)__builtin_ast_make_pointer, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_make_array", (void *)__builtin_ast_make_array, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_make_func_ptr_type", (void *)__builtin_ast_make_func_ptr_type, 4, 0);
+    cc_register_cfunc(vm, "__builtin_generate_sum", (void *)__builtin_generate_sum, 2, 0);
+    cc_register_cfunc(vm, "__builtin_generate_map", (void *)__builtin_generate_map, 2, 0);
+    cc_register_cfunc(vm, "__builtin_generate_reduce", (void *)__builtin_generate_reduce, 2, 0);
+    cc_register_cfunc(vm, "__builtin_generate_filter", (void *)__builtin_generate_filter, 2, 0);
 
     // Literal construction
-    cc_register_cfunc(vm, "__cccc_ast_int_literal", (void *)__cccc_ast_int_literal, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_float_literal", (void *)__cccc_ast_float_literal, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_string_literal", (void *)__cccc_ast_string_literal, 2,
+    cc_register_cfunc(vm, "__builtin_ast_int_literal", (void *)__builtin_ast_int_literal, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_float_literal", (void *)__builtin_ast_float_literal, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_string_literal", (void *)__builtin_ast_string_literal, 2,
                       0);
-    cc_register_cfunc(vm, "__cccc_ast_var_ref", (void *)__cccc_ast_var_ref, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_var_ref", (void *)__builtin_ast_var_ref, 2, 0);
 
     // Expression construction
-    cc_register_cfunc(vm, "__cccc_ast_binary", (void *)__cccc_ast_binary, 4, 0);
-    cc_register_cfunc(vm, "__cccc_ast_unary", (void *)__cccc_ast_unary, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_cast", (void *)__cccc_ast_cast, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_binary", (void *)__builtin_ast_binary, 4, 0);
+    cc_register_cfunc(vm, "__builtin_ast_unary", (void *)__builtin_ast_unary, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_cast", (void *)__builtin_ast_cast, 3, 0);
 
     // Statement construction
-    cc_register_cfunc(vm, "__cccc_ast_return", (void *)__cccc_ast_return, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_if", (void *)__cccc_ast_if, 4, 0);
-    cc_register_cfunc(vm, "__cccc_ast_switch", (void *)__cccc_ast_switch, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_switch_add_case", (void *)__cccc_ast_switch_add_case, 4,
+    cc_register_cfunc(vm, "__builtin_ast_return", (void *)__builtin_ast_return, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_if", (void *)__builtin_ast_if, 4, 0);
+    cc_register_cfunc(vm, "__builtin_ast_switch", (void *)__builtin_ast_switch, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_switch_add_case", (void *)__builtin_ast_switch_add_case, 4,
                       0);
-    cc_register_cfunc(vm, "__cccc_ast_switch_set_default",
-                      (void *)__cccc_ast_switch_set_default, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_switch_add_current_case",
-                      (void *)__cccc_ast_switch_add_current_case, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_switch_set_current_default",
-                      (void *)__cccc_ast_switch_set_current_default, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_switch_set_default",
+                      (void *)__builtin_ast_switch_set_default, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_switch_add_current_case",
+                      (void *)__builtin_ast_switch_add_current_case, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_switch_set_current_default",
+                      (void *)__builtin_ast_switch_set_current_default, 2, 0);
 
     // Ticket #58: AST dump
-    cc_register_cfunc(vm, "__cccc_dump_tree",              (void *)__cccc_dump_tree,              2, 0);
-    cc_register_cfunc(vm, "__cccc_dump_tree_to_string",    (void *)__cccc_dump_tree_to_string,    2, 0);
-    cc_register_cfunc(vm, "__cccc_dump_ast_gen",           (void *)__cccc_dump_ast_gen,           2, 0);
-    cc_register_cfunc(vm, "__cccc_dump_ast_gen_to_string", (void *)__cccc_dump_ast_gen_to_string, 2, 0);
-    cc_register_cfunc(vm, "__cccc_emit_directive",
-                      (void *)__cccc_emit_directive, 2, 0);
+    cc_register_cfunc(vm, "__builtin_dump_tree",              (void *)__builtin_dump_tree,              2, 0);
+    cc_register_cfunc(vm, "__builtin_dump_tree_to_string",    (void *)__builtin_dump_tree_to_string,    2, 0);
+    cc_register_cfunc(vm, "__builtin_dump_ast_gen",           (void *)__builtin_dump_ast_gen,           2, 0);
+    cc_register_cfunc(vm, "__builtin_dump_ast_gen_to_string", (void *)__builtin_dump_ast_gen_to_string, 2, 0);
+    cc_register_cfunc(vm, "__builtin_emit_directive",
+                      (void *)__builtin_emit_directive, 2, 0);
 
     // Ticket #78: source-located macro diagnostics (variadic)
-    cc_register_variadic_cfunc(vm, "__cccc_macro_error_at",   (void *)__cccc_macro_error_at,   3, 0);
-    cc_register_variadic_cfunc(vm, "__cccc_macro_warning_at", (void *)__cccc_macro_warning_at, 3, 0);
+    cc_register_variadic_cfunc(vm, "__builtin_macro_error_at",   (void *)__builtin_macro_error_at,   3, 0);
+    cc_register_variadic_cfunc(vm, "__builtin_macro_warning_at", (void *)__builtin_macro_warning_at, 3, 0);
 
     // Previously unregistered statement builders
-    cc_register_cfunc(vm, "__cccc_ast_block",     (void *)__cccc_ast_block,     3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_block_add_stmt",
-                      (void *)__cccc_ast_block_add_stmt, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_block_add_current_stmt",
-                      (void *)__cccc_ast_block_add_current_stmt, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_expr_stmt", (void *)__cccc_ast_expr_stmt, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_block",     (void *)__builtin_ast_block,     3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_block_add_stmt",
+                      (void *)__builtin_ast_block_add_stmt, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_block_add_current_stmt",
+                      (void *)__builtin_ast_block_add_current_stmt, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_expr_stmt", (void *)__builtin_ast_expr_stmt, 2, 0);
 
     // Ticket #77: hygienic local variable injection
-    cc_register_cfunc(vm, "__cccc_ast_local_var",        (void *)__cccc_ast_local_var,        3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_local_var_unique",  (void *)__cccc_ast_local_var_unique,  2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_local_var",        (void *)__builtin_ast_local_var,        3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_local_var_unique",  (void *)__builtin_ast_local_var_unique,  2, 0);
 
     // Ticket #51: new expression/statement builders
-    cc_register_cfunc(vm, "__cccc_ast_assign",   (void *)__cccc_ast_assign,   3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_member",   (void *)__cccc_ast_member,   3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_assign",   (void *)__builtin_ast_assign,   3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_member",   (void *)__builtin_ast_member,   3, 0);
 
     // Struct/union member introspection (previously unregistered)
-    cc_register_cfunc(vm, "__cccc_ast_struct_member_count",
-                      (void *)__cccc_ast_struct_member_count, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_struct_member_at",
-                      (void *)__cccc_ast_struct_member_at, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_struct_member_find",
-                      (void *)__cccc_ast_struct_member_find, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_member_name",
-                      (void *)__cccc_ast_member_name, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_member_type",
-                      (void *)__cccc_ast_member_type, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_member_offset",
-                      (void *)__cccc_ast_member_offset, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_member_is_bitfield",
-                      (void *)__cccc_ast_member_is_bitfield, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_member_bitfield_width",
-                      (void *)__cccc_ast_member_bitfield_width, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_offsetof_chain",
-                      (void *)__cccc_ast_offsetof_chain, 4, 0);
+    cc_register_cfunc(vm, "__builtin_ast_struct_member_count",
+                      (void *)__builtin_ast_struct_member_count, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_struct_member_at",
+                      (void *)__builtin_ast_struct_member_at, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_struct_member_find",
+                      (void *)__builtin_ast_struct_member_find, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_member_name",
+                      (void *)__builtin_ast_member_name, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_member_type",
+                      (void *)__builtin_ast_member_type, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_member_offset",
+                      (void *)__builtin_ast_member_offset, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_member_is_bitfield",
+                      (void *)__builtin_ast_member_is_bitfield, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_member_bitfield_width",
+                      (void *)__builtin_ast_member_bitfield_width, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_offsetof_chain",
+                      (void *)__builtin_ast_offsetof_chain, 4, 0);
 
     // Ticket #235: serialization
-    cc_register_cfunc(vm, "__cccc_ast_serialize",
-                      (void *)__cccc_ast_serialize, 4, 0);
-    cc_register_cfunc(vm, "__cccc_ast_deserialize",
-                      (void *)__cccc_ast_deserialize, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_enum_to_string_switch",
-                      (void *)__cccc_ast_enum_to_string_switch, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_enum_from_string_chain",
-                      (void *)__cccc_ast_enum_from_string_chain, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_funcall",  (void *)__cccc_ast_funcall,  4, 0);
-    cc_register_cfunc(vm, "__cccc_ast_while",    (void *)__cccc_ast_while,    3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_for",      (void *)__cccc_ast_for,      5, 0);
-    cc_register_cfunc(vm, "__cccc_ast_do_while", (void *)__cccc_ast_do_while, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_serialize",
+                      (void *)__builtin_ast_serialize, 4, 0);
+    cc_register_cfunc(vm, "__builtin_ast_deserialize",
+                      (void *)__builtin_ast_deserialize, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_enum_to_string_switch",
+                      (void *)__builtin_ast_enum_to_string_switch, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_enum_from_string_chain",
+                      (void *)__builtin_ast_enum_from_string_chain, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_funcall",  (void *)__builtin_ast_funcall,  4, 0);
+    cc_register_cfunc(vm, "__builtin_ast_while",    (void *)__builtin_ast_while,    3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_for",      (void *)__builtin_ast_for,      5, 0);
+    cc_register_cfunc(vm, "__builtin_ast_do_while", (void *)__builtin_ast_do_while, 3, 0);
 
     // Enum reflection
-    cc_register_cfunc(vm, "__cccc_ast_enum_count", (void *)__cccc_ast_enum_count, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_enum_at", (void *)__cccc_ast_enum_at, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_enum_constant_name",
-                      (void *)__cccc_ast_enum_constant_name, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_enum_constant_value",
-                      (void *)__cccc_ast_enum_constant_value, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_enum_count", (void *)__builtin_ast_enum_count, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_enum_at", (void *)__builtin_ast_enum_at, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_enum_constant_name",
+                      (void *)__builtin_ast_enum_constant_name, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_enum_constant_value",
+                      (void *)__builtin_ast_enum_constant_value, 1, 0);
 
     // Global/object and custom-attribute target introspection
-    cc_register_cfunc(vm, "__cccc_ast_global_count",
-                      (void *)__cccc_ast_global_count, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_global_at",
-                      (void *)__cccc_ast_global_at, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_obj_name",
-                      (void *)__cccc_ast_obj_name, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_obj_type",
-                      (void *)__cccc_ast_obj_type, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_obj_is_function",
-                      (void *)__cccc_ast_obj_is_function, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_obj_is_definition",
-                      (void *)__cccc_ast_obj_is_definition, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_obj_is_static",
-                      (void *)__cccc_ast_obj_is_static, 1, 0);
-    cc_register_cfunc(vm, "__cccc_attr_target_kind",
-                      (void *)__cccc_attr_target_kind, 1, 0);
-    cc_register_cfunc(vm, "__cccc_attr_target_name",
-                      (void *)__cccc_attr_target_name, 1, 0);
-    cc_register_cfunc(vm, "__cccc_attr_target_type",
-                      (void *)__cccc_attr_target_type, 1, 0);
-    cc_register_cfunc(vm, "__cccc_attr_target_obj",
-                      (void *)__cccc_attr_target_obj, 1, 0);
-    cc_register_cfunc(vm, "__cccc_attr_target_token",
-                      (void *)__cccc_attr_target_token, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_global_count",
+                      (void *)__builtin_ast_global_count, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_global_at",
+                      (void *)__builtin_ast_global_at, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_obj_name",
+                      (void *)__builtin_ast_obj_name, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_obj_type",
+                      (void *)__builtin_ast_obj_type, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_obj_is_function",
+                      (void *)__builtin_ast_obj_is_function, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_obj_is_definition",
+                      (void *)__builtin_ast_obj_is_definition, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_obj_is_static",
+                      (void *)__builtin_ast_obj_is_static, 1, 0);
+    cc_register_cfunc(vm, "__builtin_attr_target_kind",
+                      (void *)__builtin_attr_target_kind, 1, 0);
+    cc_register_cfunc(vm, "__builtin_attr_target_name",
+                      (void *)__builtin_attr_target_name, 1, 0);
+    cc_register_cfunc(vm, "__builtin_attr_target_type",
+                      (void *)__builtin_attr_target_type, 1, 0);
+    cc_register_cfunc(vm, "__builtin_attr_target_obj",
+                      (void *)__builtin_attr_target_obj, 1, 0);
+    cc_register_cfunc(vm, "__builtin_attr_target_token",
+                      (void *)__builtin_attr_target_token, 1, 0);
 
     // Function generation
-    cc_register_cfunc(vm, "__cccc_ast_function", (void *)__cccc_ast_function, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_function_add_param",
-                      (void *)__cccc_ast_function_add_param, 4, 0);
-    cc_register_cfunc(vm, "__cccc_ast_function_set_body",
-                      (void *)__cccc_ast_function_set_body, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_function_set_static",
-                      (void *)__cccc_ast_function_set_static, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_function_set_inline",
-                      (void *)__cccc_ast_function_set_inline, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_function_set_variadic",
-                      (void *)__cccc_ast_function_set_variadic, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_publish",
-                      (void *)__cccc_ast_publish, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_publish_type",
-                      (void *)__cccc_ast_publish_type, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_param_ref", (void *)__cccc_ast_param_ref, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_function", (void *)__builtin_ast_function, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_function_add_param",
+                      (void *)__builtin_ast_function_add_param, 4, 0);
+    cc_register_cfunc(vm, "__builtin_ast_function_set_body",
+                      (void *)__builtin_ast_function_set_body, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_function_set_static",
+                      (void *)__builtin_ast_function_set_static, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_function_set_inline",
+                      (void *)__builtin_ast_function_set_inline, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_function_set_variadic",
+                      (void *)__builtin_ast_function_set_variadic, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_publish",
+                      (void *)__builtin_ast_publish, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_publish_type",
+                      (void *)__builtin_ast_publish_type, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_param_ref", (void *)__builtin_ast_param_ref, 3, 0);
 
     // Ticket #152: global variable generation
-    cc_register_cfunc(vm, "__cccc_ast_global_var",
-                      (void *)__cccc_ast_global_var, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_global_var_set_init_data",
-                      (void *)__cccc_ast_global_var_set_init_data, 4, 0);
-    cc_register_cfunc(vm, "__cccc_ast_global_var_set_static",
-                      (void *)__cccc_ast_global_var_set_static, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_global_var",
+                      (void *)__builtin_ast_global_var, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_global_var_set_init_data",
+                      (void *)__builtin_ast_global_var_set_init_data, 4, 0);
+    cc_register_cfunc(vm, "__builtin_ast_global_var_set_static",
+                      (void *)__builtin_ast_global_var_set_static, 2, 0);
 
     // Ticket #148: function-building context
-    cc_register_cfunc(vm, "__cccc_ast_push_fn",
-                      (void *)__cccc_ast_push_fn, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_pop_fn",
-                      (void *)__cccc_ast_pop_fn, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_push_block",
-                      (void *)__cccc_ast_push_block, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_pop_block",
-                      (void *)__cccc_ast_pop_block, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_push_struct",
-                      (void *)__cccc_ast_push_struct, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_pop_struct",
-                      (void *)__cccc_ast_pop_struct, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_push_switch",
-                      (void *)__cccc_ast_push_switch, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_pop_switch",
-                      (void *)__cccc_ast_pop_switch, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_push_enum",
-                      (void *)__cccc_ast_push_enum, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_pop_enum",
-                      (void *)__cccc_ast_pop_enum, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_push_fn",
+                      (void *)__builtin_ast_push_fn, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_pop_fn",
+                      (void *)__builtin_ast_pop_fn, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_push_block",
+                      (void *)__builtin_ast_push_block, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_pop_block",
+                      (void *)__builtin_ast_pop_block, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_push_struct",
+                      (void *)__builtin_ast_push_struct, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_pop_struct",
+                      (void *)__builtin_ast_pop_struct, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_push_switch",
+                      (void *)__builtin_ast_push_switch, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_pop_switch",
+                      (void *)__builtin_ast_pop_switch, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_push_enum",
+                      (void *)__builtin_ast_push_enum, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_pop_enum",
+                      (void *)__builtin_ast_pop_enum, 1, 0);
 
     // Ticket #1: quasi-quoting
-    cc_register_variadic_cfunc(vm, "__cccc_quote",      (void *)__cccc_quote,      2, 0);
-    cc_register_cfunc(vm,          "__cccc_quote_n",    (void *)__cccc_quote_n,    4, 0);
+    cc_register_variadic_cfunc(vm, "__builtin_quote",      (void *)__builtin_quote,      2, 0);
+    cc_register_cfunc(vm,          "__builtin_quote_n",    (void *)__builtin_quote_n,    4, 0);
 
     // Ticket #172: list splice helper
-    cc_register_cfunc(vm,          "__cccc_node_list",  (void *)__cccc_node_list,  3, 0);
+    cc_register_cfunc(vm,          "__builtin_node_list",  (void *)__builtin_node_list,  3, 0);
 
     // Ticket #171: new expression builders
-    cc_register_cfunc(vm, "__cccc_ast_cond",         (void *)__cccc_ast_cond,         4, 0);
-    cc_register_cfunc(vm, "__cccc_ast_null",         (void *)__cccc_ast_null,         1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_sizeof_type",  (void *)__cccc_ast_sizeof_type,  2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_alignof_type", (void *)__cccc_ast_alignof_type, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_sizeof_expr",  (void *)__cccc_ast_sizeof_expr,  2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_subscript",    (void *)__cccc_ast_subscript,    3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_comma",        (void *)__cccc_ast_comma,        3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_cond",         (void *)__builtin_ast_cond,         4, 0);
+    cc_register_cfunc(vm, "__builtin_ast_null",         (void *)__builtin_ast_null,         1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_sizeof_type",  (void *)__builtin_ast_sizeof_type,  2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_alignof_type", (void *)__builtin_ast_alignof_type, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_sizeof_expr",  (void *)__builtin_ast_sizeof_expr,  2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_subscript",    (void *)__builtin_ast_subscript,    3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_comma",        (void *)__builtin_ast_comma,        3, 0);
 
     // Ticket #171: qualified type builders
-    cc_register_cfunc(vm, "__cccc_ast_make_const",    (void *)__cccc_ast_make_const,    2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_make_volatile", (void *)__cccc_ast_make_volatile, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_make_const",    (void *)__builtin_ast_make_const,    2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_make_volatile", (void *)__builtin_ast_make_volatile, 2, 0);
 
     // Ticket #171: function prototype builder
-    cc_register_cfunc(vm, "__cccc_ast_function_prototype",
-                      (void *)__cccc_ast_function_prototype, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_function_prototype",
+                      (void *)__builtin_ast_function_prototype, 3, 0);
 
     // Ticket #171: struct/union/enum/typedef type builders
-    cc_register_cfunc(vm, "__cccc_ast_make_struct",
-                      (void *)__cccc_ast_make_struct, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_make_union",
-                      (void *)__cccc_ast_make_union, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_struct_add_field",
-                      (void *)__cccc_ast_struct_add_field, 4, 0);
-    cc_register_cfunc(vm, "__cccc_ast_struct_add_current_field",
-                      (void *)__cccc_ast_struct_add_current_field, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_make_enum",
-                      (void *)__cccc_ast_make_enum, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_enum_add_constant",
-                      (void *)__cccc_ast_enum_add_constant, 4, 0);
-    cc_register_cfunc(vm, "__cccc_ast_enum_add_current_constant",
-                      (void *)__cccc_ast_enum_add_current_constant, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_make_typedef",
-                      (void *)__cccc_ast_make_typedef, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_make_struct",
+                      (void *)__builtin_ast_make_struct, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_make_union",
+                      (void *)__builtin_ast_make_union, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_struct_add_field",
+                      (void *)__builtin_ast_struct_add_field, 4, 0);
+    cc_register_cfunc(vm, "__builtin_ast_struct_add_current_field",
+                      (void *)__builtin_ast_struct_add_current_field, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_make_enum",
+                      (void *)__builtin_ast_make_enum, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_enum_add_constant",
+                      (void *)__builtin_ast_enum_add_constant, 4, 0);
+    cc_register_cfunc(vm, "__builtin_ast_enum_add_current_constant",
+                      (void *)__builtin_ast_enum_add_current_constant, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_make_typedef",
+                      (void *)__builtin_ast_make_typedef, 3, 0);
 
     // Ticket #188: comptime variable access
-    cc_register_cfunc(vm, "__cccc_get_comptime_int",
-                      (void *)__cccc_get_comptime_int, 2, 0);
-    cc_register_cfunc(vm, "__cccc_get_comptime_float",
-                      (void *)__cccc_get_comptime_float, 2, 1); // returns double
-    cc_register_cfunc(vm, "__cccc_get_comptime_var",
-                      (void *)__cccc_get_comptime_var, 2, 0);
-    cc_register_cfunc(vm, "__cccc_get_comptime_ptr",
-                      (void *)__cccc_get_comptime_ptr, 2, 0);
-    cc_register_cfunc(vm, "__cccc_get_comptime_member",
-                      (void *)__cccc_get_comptime_member, 3, 0);
+    cc_register_cfunc(vm, "__builtin_get_comptime_int",
+                      (void *)__builtin_get_comptime_int, 2, 0);
+    cc_register_cfunc(vm, "__builtin_get_comptime_float",
+                      (void *)__builtin_get_comptime_float, 2, 1); // returns double
+    cc_register_cfunc(vm, "__builtin_get_comptime_var",
+                      (void *)__builtin_get_comptime_var, 2, 0);
+    cc_register_cfunc(vm, "__builtin_get_comptime_ptr",
+                      (void *)__builtin_get_comptime_ptr, 2, 0);
+    cc_register_cfunc(vm, "__builtin_get_comptime_member",
+                      (void *)__builtin_get_comptime_member, 3, 0);
 
     // Ticket #189: constexpr variable access
-    cc_register_cfunc(vm, "__cccc_get_constexpr_value",
-                      (void *)__cccc_get_constexpr_value, 2, 0);
+    cc_register_cfunc(vm, "__builtin_get_constexpr_value",
+                      (void *)__builtin_get_constexpr_value, 2, 0);
 
     // Ticket #296: initializer builders
-    cc_register_cfunc(vm, "__cccc_ast_compound_literal",
-                      (void *)__cccc_ast_compound_literal, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_init_array",
-                      (void *)__cccc_ast_init_array, 3, 0);
-    cc_register_cfunc(vm, "__cccc_ast_init_struct",
-                      (void *)__cccc_ast_init_struct, 4, 0);
+    cc_register_cfunc(vm, "__builtin_ast_compound_literal",
+                      (void *)__builtin_ast_compound_literal, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_init_array",
+                      (void *)__builtin_ast_init_array, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_init_struct",
+                      (void *)__builtin_ast_init_struct, 4, 0);
 
     // Ticket #277: Lisp-style macro expansion
-    cc_register_cfunc(vm, "__cccc_macroexpand_1",
-                      (void *)__cccc_macroexpand_1, 2, 0);
-    cc_register_cfunc(vm, "__cccc_macroexpand",
-                      (void *)__cccc_macroexpand, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_vararg_count",
-                      (void *)__cccc_ast_vararg_count, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_vararg_at",
-                      (void *)__cccc_ast_vararg_at, 2, 0);
-    cc_register_cfunc(vm, "__cccc_ast_varargs_as_array",
-                      (void *)__cccc_ast_varargs_as_array, 1, 0);
-    cc_register_cfunc(vm, "__cccc_ast_vararg_str_at",
-                      (void *)__cccc_ast_vararg_str_at, 2, 0);
-    cc_register_cfunc(vm, "$vararg_count",
-                      (void *)$vararg_count, 0, 0);
-    cc_register_cfunc(vm, "$vararg_at",
-                      (void *)$vararg_at, 1, 0);
-    cc_register_cfunc(vm, "$vararg_as_array",
-                      (void *)$vararg_as_array, 0, 0);
-    cc_register_cfunc(vm, "$vararg_str_at",
-                      (void *)$vararg_str_at, 1, 0);
+    cc_register_cfunc(vm, "__builtin_macroexpand_1",
+                      (void *)__builtin_macroexpand_1, 2, 0);
+    cc_register_cfunc(vm, "__builtin_macroexpand",
+                      (void *)__builtin_macroexpand, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_vararg_count",
+                      (void *)__builtin_ast_vararg_count, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_vararg_at",
+                      (void *)__builtin_ast_vararg_at, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_varargs_as_array",
+                      (void *)__builtin_ast_varargs_as_array, 1, 0);
+    cc_register_cfunc(vm, "__builtin_ast_vararg_str_at",
+                      (void *)__builtin_ast_vararg_str_at, 2, 0);
+    cc_register_cfunc(vm, "VarargCount",
+                      (void *)VarargCount, 0, 0);
+    cc_register_cfunc(vm, "VarargAt",
+                      (void *)VarargAt, 1, 0);
+    cc_register_cfunc(vm, "VarargAsArray",
+                      (void *)VarargAsArray, 0, 0);
+    cc_register_cfunc(vm, "VarargStrAt",
+                      (void *)VarargStrAt, 1, 0);
 }
 
 static void init_vm_segments_for_macros(VirtualMachine *vm);
@@ -919,7 +919,7 @@ static ComptimeAggregateCast comptime_aggregate_cast(ComptimeVar *cv) {
 }
 
 // True if this comptime var's initializer should be evaluated via
-// __cccc_comptime_init (ticket #191/#192/#193) rather than the constant init_data
+// __builtin_comptime_init (ticket #191/#192/#193) rather than the constant init_data
 // path. Both build_combined_macro_tokens and build_comptime_init_fn_tokens
 // call this so they agree on which vars are routed through the init fn.
 //
@@ -947,7 +947,7 @@ static Token *append_decl_stripped(VirtualMachine *vm, Token *cur, Token *decl_t
     return cur;
 }
 
-// Build a __cccc_comptime_init function that assigns each comptime var's
+// Build a __builtin_comptime_init function that assigns each comptime var's
 // initializer expression in source order. Handles:
 //   - scalar expression inits:  name = expr ;
 //   - aggregate inits:          name = (<aggregate type>){ ... } ;
@@ -969,7 +969,7 @@ static Token *build_comptime_init_fn_tokens(VirtualMachine *vm,
     char *p   = buf;
     char *end = buf + sizeof(buf) - 4;
 
-    p += snprintf(p, end - p, "void __cccc_comptime_init(void){\n");
+    p += snprintf(p, end - p, "void __builtin_comptime_init(void){\n");
 
     for (int i = 0; i < count; i++) {
         ComptimeVar *cv = vars[i];
@@ -1063,7 +1063,7 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
     }
 
     // Preprocessing reflection.h can trigger lookahead declaration-parsing
-    // (e.g. while scanning @macro bodies for locals) over expanded _VM/$...
+    // (e.g. while scanning @macro bodies for locals) over expanded VM/$...
     // tokens, which spuriously warns about CCCC's own internal API surface.
     // Suppress all warnings/werrors for the duration of this internal
     // preprocess pass; restore afterwards so the user's TU is unaffected.
@@ -1086,7 +1086,7 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
 }
 
 // Ticket #235: idempotently preprocess reflection.h so that its built-in
-// @macro(attribute(...)) handlers (e.g. __cccc_attr_serialize) are registered
+// @macro(attribute(...)) handlers (e.g. __builtin_attr_serialize) are registered
 // into vm->compiler.macro_fns before the first attribute-dispatch lookup
 // (find_attribute_macro / run_custom_attrs in parse.c). Without this, a
 // translation unit with no @macro definitions of its own never triggers
@@ -1099,7 +1099,7 @@ void ensure_reflection_attrs_registered(VirtualMachine *vm) {
         return;
     vm->compiler.reflection_attrs_registered = true;
     implicit_reflection_tokens(vm);
-    __cccc_ensure_string_h_decls(vm);
+    __builtin_ensure_string_h_decls(vm);
 }
 
 static Token *build_combined_macro_tokens(VirtualMachine *vm, Token *reflection_tokens,
@@ -1133,17 +1133,17 @@ static Token *build_combined_macro_tokens(VirtualMachine *vm, Token *reflection_
     }
 
     // Inject comptime variable declarations as file-scope globals.
-    // Vars routed through __cccc_comptime_init (ticket #191/#192) have their
+    // Vars routed through __builtin_comptime_init (ticket #191/#192) have their
     // initializer stripped so the parser never sees a non-constant expression
     // as a global initializer (which would hard-error via eval2). The stripped
-    // var is declared as a zero-initialized global; __cccc_comptime_init fills
+    // var is declared as a zero-initialized global; __builtin_comptime_init fills
     // it in at VM run time.
     // Uninitialised vars, and aggregate vars whose initializer is constant or
     // whose tag cannot be synthesized, are injected as-is (constant path).
     for (int i = 0; i < nv; i++) {
         ComptimeVar *cv = vars[i];
         if (comptime_var_uses_init_fn(cv)) {
-            // Strip initializer; __cccc_comptime_init will assign it.
+            // Strip initializer; __builtin_comptime_init will assign it.
             Token *eq = find_top_level_eq(cv->decl_tokens);
             cur = append_decl_stripped(vm, cur, cv->decl_tokens, eq);
         } else {
@@ -1204,7 +1204,7 @@ static Obj *find_macro_obj(Obj *prog, const char *name) {
 
 // Read a scalar value from the macro VM's data segment.
 // Valid after init_macro_globals has allocated storage; the value may have
-// been written by a constant-initializer memcpy, by __cccc_comptime_init, or
+// been written by a constant-initializer memcpy, by __builtin_comptime_init, or
 // left as zero (no initializer).
 static bool read_comptime_scalar(VirtualMachine *vm, Obj *obj, bool *is_float_out,
                                  int64_t *int_out, double *float_out) {
@@ -1262,19 +1262,19 @@ static void link_comptime_shadow_objs(VirtualMachine *vm) {
     }
 }
 
-// Execute the synthesized __cccc_comptime_init function (if present) to
+// Execute the synthesized __builtin_comptime_init function (if present) to
 // evaluate scalar comptime variable initializers that call comptime
 // functions. Must be called after gen_function + patch_macro_call_addresses
 // so all bytecode and call targets are resolved.
 static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
-    Obj *init_fn = find_macro_function(macro_prog, "__cccc_comptime_init");
+    Obj *init_fn = find_macro_function(macro_prog, "__builtin_comptime_init");
     if (!init_fn)
         return;
 
     if (vm->debug_vm)
-        printf("Running __cccc_comptime_init for comptime variable initializers...\n");
+        printf("Running __builtin_comptime_init for comptime variable initializers...\n");
 
-    __cccc_current_vm = vm;
+    __builtin_current_vm = vm;
 
     Pc      saved_pc   = vm->pc;
     long long *saved_sp   = vm->sp;
@@ -1294,7 +1294,7 @@ static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
     int eval_rc = vm_eval(vm);
     vm->debug_vm = saved_debug;
 
-    __cccc_current_vm = NULL;
+    __builtin_current_vm = NULL;
 
     vm->pc            = saved_pc;
     vm->sp            = saved_sp;
@@ -1308,7 +1308,7 @@ static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
                   vm->dbg.host_fault_signal);
 
     if (vm->debug_vm)
-        printf("__cccc_comptime_init completed.\n");
+        printf("__builtin_comptime_init completed.\n");
 }
 
 static void evaluate_comptime_vars(VirtualMachine *vm, Obj *macro_prog) {
@@ -1334,14 +1334,14 @@ static void evaluate_comptime_vars(VirtualMachine *vm, Obj *macro_prog) {
         TypeKind kind = obj->ty->kind;
         cv->ptr_obj = make_comptime_shadow_obj(vm, obj);
         if (kind == TY_STRUCT || kind == TY_UNION) {
-            // Routed vars: __cccc_comptime_init wrote the bytes
+            // Routed vars: __builtin_comptime_init wrote the bytes
             // into the data segment, so init_data is NULL — that is expected.
             // Non-routed vars (constant path): init_data must be present.
             if (!obj->init_data && !comptime_var_uses_init_fn(cv)) {
                 fprintf(stderr,
                         "Warning: comptime struct/union var '%s' has a "
                         "non-constant initializer that could not be routed "
-                        "through __cccc_comptime_init\n",
+                        "through __builtin_comptime_init\n",
                         cv->name);
                 continue;
             }
@@ -1390,7 +1390,7 @@ static void evaluate_comptime_vars(VirtualMachine *vm, Obj *macro_prog) {
             // Scalar: read from data segment unconditionally. The value is
             // valid after init_macro_globals allocates storage — it was either
             // written by a constant-initializer memcpy (init_data path), by
-            // __cccc_comptime_init (ticket #191 non-constant path), or is zero
+            // __builtin_comptime_init (ticket #191 non-constant path), or is zero
             // for an uninitialised var.
             read_comptime_scalar(vm, obj, &cv->is_float, &cv->int_val, &cv->float_val);
         }
@@ -1539,7 +1539,7 @@ static bool compile_macro_program(VirtualMachine *vm) {
 
     // Re-stamping during this preprocess pass would otherwise apply the
     // user TU's -W flags to reflection.h's internal implementation tokens
-    // (e.g. _VM expansions), producing warnings the user can't fix. Hard
+    // (e.g. VM expansions), producing warnings the user can't fix. Hard
     // errors (error_tok) are unaffected since they aren't gated by
     // vm->compiler.warnings.
     uint64_t saved_warnings = vm->compiler.warnings;
@@ -1599,7 +1599,7 @@ static bool compile_macro_program(VirtualMachine *vm) {
     init_macro_globals(vm, macro_prog);
 
     // Step 2: generate bytecode for all functions, including the synthesized
-    //         __cccc_comptime_init helper produced by build_combined_macro_tokens.
+    //         __builtin_comptime_init helper produced by build_combined_macro_tokens.
     for (Obj *fn = macro_prog; fn; fn = fn->next) {
         if (fn->is_function && fn->body)
             gen_function(vm, fn);
@@ -1610,10 +1610,10 @@ static bool compile_macro_program(VirtualMachine *vm) {
     //         function addresses (ticket #309).
     apply_macro_global_relocations(vm, macro_prog);
 
-    // Step 4: patch call addresses so __cccc_comptime_init can call comptime fns.
+    // Step 4: patch call addresses so __builtin_comptime_init can call comptime fns.
     patch_macro_call_addresses(vm, macro_prog);
 
-    // Step 5: run __cccc_comptime_init to evaluate scalar comptime var
+    // Step 5: run __builtin_comptime_init to evaluate scalar comptime var
     //         initializers (ticket #191). This writes results into the data
     //         segment via normal VM store instructions.
     run_comptime_var_initializers(vm, macro_prog);
@@ -1693,11 +1693,11 @@ static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
         printf("Executing macro function '%s' with %d args...\n", pm->name,
                arg_count);
 
-    // Set global VM pointer for __cccc_get_vm()
-    __cccc_current_vm = vm;
+    // Set global VM pointer for __builtin_get_vm()
+    __builtin_current_vm = vm;
 
     // Save VM execution state (including current_fn so a macro that calls
-    // __cccc_ast_push_fn without a matching pop cannot leak context).
+    // __builtin_ast_push_fn without a matching pop cannot leak context).
     Pc saved_pc = vm->pc;
     long long *saved_sp = vm->sp;
     long long *saved_bp = vm->bp;
@@ -1772,7 +1772,7 @@ static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
     Node *result = pm->is_void_macro ? NULL : (Node *)vm->regs[REG_A0];
 
     // Clear VM pointer
-    __cccc_current_vm = NULL;
+    __builtin_current_vm = NULL;
 
     // Restore VM execution state (current_fn last so it overrides any leaked
     // push_fn call that wasn't matched by a pop_fn inside the macro).
@@ -1889,7 +1889,7 @@ static MacroFn *find_macro_fn_by_name(VirtualMachine *vm, const char *name) {
 
 // Ticket #277: Lisp-style single-step macro expansion (macroexpand-1).
 // Expands the outermost ND_MACRO_CALL exactly once; identity for anything else.
-Node *__cccc_macroexpand_1(VirtualMachine *vm, Node *node) {
+Node *__builtin_macroexpand_1(VirtualMachine *vm, Node *node) {
     if (!vm || !node)
         return node;
     if (node->kind != ND_MACRO_CALL)
@@ -1910,7 +1910,7 @@ Node *__cccc_macroexpand_1(VirtualMachine *vm, Node *node) {
 // Repeatedly expands the outermost node via macroexpand_1 until it is no
 // longer an ND_MACRO_CALL (i.e. until the form is stable at the top level).
 // Does not recurse into child nodes — only the top-level call is expanded.
-Node *__cccc_macroexpand(VirtualMachine *vm, Node *node) {
+Node *__builtin_macroexpand(VirtualMachine *vm, Node *node) {
     if (!vm || !node)
         return node;
     int limit = vm->compiler.macro_recursion_limit;
@@ -1924,7 +1924,7 @@ Node *__cccc_macroexpand(VirtualMachine *vm, Node *node) {
                       current->macro_name, depth + 1, limit);
             return current;
         }
-        Node *next = __cccc_macroexpand_1(vm, current);
+        Node *next = __builtin_macroexpand_1(vm, current);
         if (next == current)
             break;
         current = next;
@@ -2348,7 +2348,7 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
 
         if (brace_depth == 0 && paren_depth == 0 &&
             tok->kind == TK_IDENT && tok->len == 18 &&
-            strncmp(tok->loc, "__cccc_emit_line__", 18) == 0 &&
+            strncmp(tok->loc, "__builtin_emit_line__", 18) == 0 &&
             tok->next && equal(tok->next, "(") &&
             tok->next->next && tok->next->next->kind == TK_STR &&
             tok->next->next->next && equal(tok->next->next->next, ")") &&
@@ -2548,7 +2548,7 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
                         // Ticket #233: if the macro returned an ND_BLOCK, splice
                         // its body tokens into the stream so they are re-parsed
                         // at global scope instead of being silently discarded.
-                        // The block came from $quote("{ ... }") so the token
+                        // The block came from Quote("{ ... }") so the token
                         // chain is: outer-'{' -> body tokens -> outer-'}' -> EOF.
                         // We start from block_result->tok->next (the token after
                         // the outer '{') and walk forward, tracking brace depth
@@ -2608,7 +2608,7 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
 // For each file-scope call:
 //   1. Scan the preprocessed token stream for zero-arg calls to non-inline
 //      macros at file scope (brace depth 0, paren depth 0).
-//   2. Execute the macro (it calls __cccc_ast_function etc.).
+//   2. Execute the macro (it calls __builtin_ast_function etc.).
 //   3. Drain newly-added Objs into vm->compiler.macro_globals immediately
 //      (safe saved-next walk; globals is restored to its pre-call state).
 //   4. Remove the call tokens so the parser never sees them.
@@ -2733,7 +2733,7 @@ void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
             printf("Expanding macros in function '%s'...\n", fn->name);
 
         // Set current function context, including the locals list so that
-        // any new_lvar() calls inside __cccc_quote (e.g. pointer temps for
+        // any new_lvar() calls inside __builtin_quote (e.g. pointer temps for
         // compound assignments in quote templates) are added to THIS
         // function's locals and get proper stack-offset allocation in codegen.
         vm->compiler.current_fn = fn;

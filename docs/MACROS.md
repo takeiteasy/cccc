@@ -19,9 +19,9 @@ __attribute__((comptime)) int helper(int n) { return n * 2; }
 __comptime               int helper(int n) { return n * 2; }
 
 // Inline variant (usable in expression position):
-[[cccc::comptime(inline)]]  $node_t *make_val(void) { return $int_literal(42); }
-@comptime(inline)           $node_t *make_val(void) { return $int_literal(42); }
-__comptime__(inline)        $node_t *make_val(void) { return $int_literal(42); }
+[[cccc::comptime(inline)]]  Node *make_val(void) { return MakeIntLiteral(42); }
+@comptime(inline)           Node *make_val(void) { return MakeIntLiteral(42); }
+__comptime__(inline)        Node *make_val(void) { return MakeIntLiteral(42); }
 ```
 
 The `@macro(inline)`, `__macro`, and `__macro__` spellings also work for the
@@ -30,20 +30,20 @@ deprecated `[[cccc::macro]]` alias.
 The macro API is private to macro compilation. CCCC embeds its own `cccc/reflection.h`
 and injects it automatically while macro and comptime helper functions are
 compiled, but that bundled header is not on the public include path. Macro code
-can use the `$*`, `$quote*`, `$macro_error_at`, `$gensym`, and `$dump_*`
+can use the `$*`, `Quote*`, `MacroErrorAt`, `Gensym`, and `$dump_*`
 convenience macros directly.
 
 ## Return-Value Model
 
 A macro's return value is **the node spliced at the call site**, replacing the
-invocation. Top-level definitions — functions created with `$function()`,
-globals with `$global_var()` — are **side effects** injected regardless of
+invocation. Top-level definitions — functions created with `MakeFunction()`,
+globals with `GlobalVar()` — are **side effects** injected regardless of
 what the macro returns. How generated names become visible to the parser depends
 on which execution form you use.
 
 | Call context | Return value |
 |--------------|--------------|
-| Expression position (`int x = mac()`) | Must return a non-NULL `$node_t *`. NULL is a compile error. |
+| Expression position (`int x = mac()`) | Must return a non-NULL `Node *`. NULL is a compile error. |
 | Declaration position (file-scope `mac();`) | Returning NULL or `void` is legal — means "I only emitted definitions." |
 
 For definition-only macros, declare the return type `void`. This is
@@ -58,8 +58,8 @@ void emit_helpers(void) {
 emit_helpers();
 ```
 
-`$node_t *` macros may still return NULL in declaration position without error. The
-old `return $int_literal(0)` idiom still works but is no longer needed.
+`Node *` macros may still return NULL in declaration position without error. The
+old `return MakeIntLiteral(0)` idiom still works but is no longer needed.
 
 ## Execution Model
 
@@ -68,8 +68,8 @@ CCCC supports two macro execution forms:
 | Form | Source shape | When it runs | What the return value means |
 |------|--------------|--------------|-----------------------------|
 | Global generation | `[[cccc::comptime]] void gen(char *a1, ...)` called at file scope | Before the main parse | `NULL` / `void` return means side-effects only. An `ND_BLOCK` return splices its body declarations directly into file scope (see [Block return](#block-return-from-file-scope-macros)). Args are stringified into `char *` parameters. |
-| Call-site expansion | `[[cccc::comptime(inline)]] $node_t *gen($node_t *a1, ...)` called inside code | During macro expansion after parsing | Replaces the call expression or statement |
-| Custom attribute | `@macro(attribute("name")) void gen($attr_target_t *target, ...)` used by `@name` on a file-scope declaration | During the main parse, after the target declaration is built | Return value is ignored; generated declarations are side effects. Attribute arguments are passed as `$node_t *` expression nodes. |
+| Call-site expansion | `[[cccc::comptime(inline)]] Node *gen(Node *a1, ...)` called inside code | During macro expansion after parsing | Replaces the call expression or statement |
+| Custom attribute | `@macro(attribute("name")) void gen(AttrTarget *target, ...)` used by `@name` on a file-scope declaration | During the main parse, after the target declaration is built | Return value is ignored; generated declarations are side effects. Attribute arguments are passed as `Node *` expression nodes. |
 
 ### Pre-parse macro declaration context
 
@@ -123,29 +123,29 @@ Comptime macros can register declaration attributes for file-scope declarations:
 
 ```c
 @macro(attribute("serialize"))
-void define_serializer($attr_target_t *target) {
-    $type_t *ty = $attr_target_type(target);
-    const char *name = $attr_target_name(target);
+void define_serializer(AttrTarget *target) {
+    Type *ty = $ATTR_TARGET_TYPE(target);
+    const char *name = AttrTargetName(target);
 
-    $obj_t *fn = $function("serialize_Point", $get_type("int"));
-    $function_add_param(fn, "p", $make_pointer(ty));
-    $with_fn(fn) {
-        $function_set_body(fn, $quote("return sizeof(struct Point);"));
+    Obj *fn = MakeFunction("serialize_Point", GetType("int"));
+    FunctionAddParam(fn, "p", MakePointer(ty));
+    WithFn(fn) {
+        FunctionSetBody(fn, Quote("return sizeof(struct Point);"));
     }
-    $publish(fn);
+    PublishNode(fn);
 }
 
 @serialize
 struct Point { int x; int y; };
 ```
 
-The handler's first parameter is always `$attr_target_t *`. Fixed parameters
-after that receive attribute arguments as `$node_t *` expression nodes, so
+The handler's first parameter is always `AttrTarget *`. Fixed parameters
+after that receive attribute arguments as `Node *` expression nodes, so
 `@answer(123)` calls a handler shaped like:
 
 ```c
 @macro(attribute("answer"))
-void answer_attr($attr_target_t *target, $node_t *value) { ... }
+void answer_attr(AttrTarget *target, Node *value) { ... }
 ```
 
 Variadic attribute handlers use the same `$ast_vararg_*` helpers as inline
@@ -153,11 +153,11 @@ macros. The target helpers are:
 
 | Helper | Description |
 |---|---|
-| `$attr_target_kind(target)` | `attr_target_type`, `attr_target_function`, `attr_target_global`, or `attr_target_typedef` |
-| `$attr_target_name(target)` | Source name when available |
-| `$attr_target_type(target)` | Target type |
-| `$attr_target_obj(target)` | Function/global object, or `NULL` for type/typedef targets |
-| `$attr_target_token(target)` | Source token for diagnostics |
+| `GetAttrTargetKind(target)` | `ATTR_TARGET_TYPE`, `ATTR_TARGET_FUNCTION`, `ATTR_TARGET_GLOBAL`, or `ATTR_TARGET_TYPEDEF` |
+| `AttrTargetName(target)` | Source name when available |
+| `$ATTR_TARGET_TYPE(target)` | Target type |
+| `AttrTargetObj(target)` | Function/global object, or `NULL` for type/typedef targets |
+| `AttrTargetToken(target)` | Source token for diagnostics |
 
 Custom attributes are v1 file-scope features. Applying one to a local variable
 or struct member is a compile error.
@@ -173,9 +173,9 @@ publication is needed.
 ```c
 [[cccc::comptime]]
 void generate_answer(void) {
-    $type_t *int_ty = $get_type("int");
-    $obj_t *fn = $function("answer", int_ty);
-    $function_set_body(fn, $return($int_literal(42)));
+    Type *int_ty = GetType("int");
+    Obj *fn = MakeFunction("answer", int_ty);
+    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(42)));
 }
 
 generate_answer();
@@ -191,16 +191,16 @@ Global-generation macros accept fixed parameters plus an unbounded trailing
 `...` tail. Each fixed argument's token sequence is stringified and delivered
 as a `char *` to the matching parameter: string literals pass their raw value,
 while keywords, identifiers, and numbers pass their spelling. The variadic tail
-is available through `$vararg_count()` and
-`$vararg_str_at(i)`.
+is available through `VarargCount()` and
+`VarargStrAt(i)`.
 
 ```c
 [[cccc::comptime]]
 void gen_types(...) {
-    for (int i = 0; i < $vararg_count(); i++) {
-        const char *name = $vararg_str_at(i);
-        $obj_t *fn = $function(name, $get_type("int"));
-        $function_set_body(fn, $quote("return 42;"));
+    for (int i = 0; i < VarargCount(); i++) {
+        const char *name = VarargStrAt(i);
+        Obj *fn = MakeFunction(name, GetType("int"));
+        FunctionSetBody(fn, Quote("return 42;"));
     }
 }
 
@@ -214,8 +214,8 @@ ordinary C parameter names:
 ```c
 [[cccc::comptime]]
 void gen_prefixed(char *prefix, ...) {
-    for (int i = 0; i < $vararg_count(); i++) {
-        const char *name = $vararg_str_at(i);
+    for (int i = 0; i < VarargCount(); i++) {
+        const char *name = VarargStrAt(i);
         // prefix is the fixed string argument; name is each tail argument.
     }
 }
@@ -236,8 +236,8 @@ file-scope token stream so they are parsed as top-level definitions.
 
 ```c
 [[cccc::comptime]]
-$node_t *emit_widget_helpers(void) {
-    return $quote("{ struct Widget { int x; int y; }; void widget_init(struct Widget *w) { w->x = 0; w->y = 0; } }");
+Node *emit_widget_helpers(void) {
+    return Quote("{ struct Widget { int x; int y; }; void widget_init(struct Widget *w) { w->x = 0; w->y = 0; } }");
 }
 
 emit_widget_helpers();
@@ -253,7 +253,7 @@ After expansion, `struct Widget` and `widget_init` appear directly in the
 global scope as if the user had written them verbatim. Any number of
 declarations can be grouped in the returned block.
 
-This approach complements the side-effect style (calling `$function` etc.):
+This approach complements the side-effect style (calling `MakeFunction` etc.):
 - **Side-effect style** — better when the generated declarations depend on
   runtime-computed names or types.
 - **Block-return style** — better when the declarations can be expressed as
@@ -296,7 +296,7 @@ does not apply:
 ```c
 #pragma cccc comptime begin
 #include [[cccc::emit]] <platform.h>   // escapes from comptime into output
-$publish(fn);
+PublishNode(fn);
 #pragma cccc comptime end
 ```
 
@@ -329,11 +329,11 @@ Macros can emit source-order directives while they run:
 ```c
 [[cccc::comptime]]
 void gen(void) {
-    $emit_directive("#ifdef _WIN32");
-    $obj_t *fn = $function("win_helper", $get_type("int"));
-    $function_set_body(fn, $quote("return 42;"));
-    $publish(fn);
-    $emit_directive("#endif");
+    EmitDirective("#ifdef _WIN32");
+    Obj *fn = MakeFunction("win_helper", GetType("int"));
+    FunctionSetBody(fn, Quote("return 42;"));
+    PublishNode(fn);
+    EmitDirective("#endif");
 }
 ```
 
@@ -359,21 +359,21 @@ Two equivalent spellings are accepted:
 ```c
 // Attribute argument form
 [[cccc::comptime(inline)]]
-$node_t *double_it($node_t *value) {
-    return $binary(nk_add, value, value);
+Node *double_it(Node *value) {
+    return MakeBinary(NK_ADD, value, value);
 }
 
 // C keyword form (preferred)
 [[cccc::comptime]]
-inline $node_t *double_it($node_t *value) {
-    return $binary(nk_add, value, value);
+inline Node *double_it(Node *value) {
+    return MakeBinary(NK_ADD, value, value);
 }
 ```
 
 ```c
 [[cccc::comptime(inline)]]
-$node_t *double_it($node_t *value) {
-    return $binary(nk_add, value, value);
+Node *double_it(Node *value) {
+    return MakeBinary(NK_ADD, value, value);
 }
 
 int main(void) {
@@ -382,47 +382,47 @@ int main(void) {
 }
 ```
 
-Macro arguments are `$node_t *` pointers to the original argument ASTs. A macro
+Macro arguments are `Node *` pointers to the original argument ASTs. A macro
 can reuse, inspect, wrap, or replace those nodes.
 
 Inline macros also support a trailing `...` parameter. Fixed arguments are
-passed as normal `$node_t *` parameters, and the variadic tail is available
-through `$vararg_count()`, `$vararg_at(i)`, and
-`$vararg_as_array()`. A macro with only `...` is valid:
+passed as normal `Node *` parameters, and the variadic tail is available
+through `VarargCount()`, `VarargAt(i)`, and
+`VarargAsArray()`. A macro with only `...` is valid:
 
 ```c
 [[cccc::comptime(inline)]]
-$node_t *sum_all(...) {
-    $node_t *acc = $vararg_at(0);
-    for (int i = 1; i < $vararg_count(); i++)
-        acc = $binary(nk_add, acc, $vararg_at(i));
+Node *sum_all(...) {
+    Node *acc = VarargAt(0);
+    for (int i = 1; i < VarargCount(); i++)
+        acc = MakeBinary(NK_ADD, acc, VarargAt(i));
     return acc;
 }
 
 int x = sum_all(1, 2, 3, 4);
 ```
 
-Use `$vararg_as_array()` when forwarding the tail to an array-form builder
-such as `$funcall(callee, args, n)`:
+Use `VarargAsArray()` when forwarding the tail to an array-form builder
+such as `MakeFuncCall(callee, args, n)`:
 
 ```c
 [[cccc::comptime(inline)]]
-$node_t *forward_call($node_t *fn_node, ...) {
-    return $funcall(fn_node,
-                    $vararg_as_array(),
-                    $vararg_count());
+Node *forward_call(Node *fn_node, ...) {
+    return MakeFuncCall(fn_node,
+                    VarargAsArray(),
+                    VarargCount());
 }
 
 int x = forward_call(target_fn, 1, 2, 3);
 ```
 
-`$vararg_as_array()` returns a borrowed read-only `$node_t **` slice that
+`VarargAsArray()` returns a borrowed read-only `Node **` slice that
 is valid only for the current macro call. It returns `NULL` when the variadic
 tail is empty. Forwarding shares AST nodes; it does not consume or clone them.
-Static macro-to-macro forwarding is handled with `$quote` and splice syntax.
+Static macro-to-macro forwarding is handled with `Quote` and splice syntax.
 Dynamic macro-call construction is not part of this API.
 
-`$vararg_at(i)` and `$vararg_str_at(i)` use zero-based indexes.
+`VarargAt(i)` and `VarargStrAt(i)` use zero-based indexes.
 Variadic helpers report a compile-time error when an index is negative, out of
 range, or the helper is used with the wrong macro execution form.
 
@@ -466,13 +466,13 @@ self-recursive expansions. The default is 256. Set the limit to 0 to disable
 the check.
 
 Statement macros work the same way. Return a statement node such as
-`$return(...)`, `$if(...)`, `$block(...)`, or a statement parsed with
-`$quote(...)`.
+`MakeReturn(...)`, `MakeIf(...)`, `MakeBlock(...)`, or a statement parsed with
+`Quote(...)`.
 
 ```c
 [[cccc::comptime]]
-$node_t *return_if_zero($node_t *value) {
-    return $quote("if ($1 == 0) return 0;", value);
+Node *return_if_zero(Node *value) {
+    return Quote("if ($1 == 0) return 0;", value);
 }
 
 int main(void) {
@@ -495,8 +495,8 @@ int plus_one(int n) {
 }
 
 [[cccc::comptime]]
-$node_t *make_value(void) {
-    return $int_literal(plus_one(41));
+Node *make_value(void) {
+    return MakeIntLiteral(plus_one(41));
 }
 
 int main(void) {
@@ -620,20 +620,20 @@ int tile_size = 64;
 double pi = 3.14159;
 
 [[cccc::comptime]]
-$node_t *area_of_n_tiles($node_t *n) {
-    int64_t ts = $get_comptime_int("tile_size");
-    return $quote("$$ * $$", n, $int_literal(ts * ts));
+Node *area_of_n_tiles(Node *n) {
+    int64_t ts = GetComptimeInt("tile_size");
+    return Quote("$$ * $$", n, MakeIntLiteral(ts * ts));
 }
 ```
 
 | API | Returns | Description |
 |---|---|---|
-| `$get_comptime_int(name)` | `int64_t` | Integer value of a comptime scalar |
-| `$get_comptime_float(name)` | `double` | Float/double value of a comptime scalar |
-| `$get_comptime_var(name)` | `$node_t *` | Comptime scalar as an AST literal node |
-| `$get_comptime_ptr(name)` | `$node_t *` | Address of a static shadow copy of the evaluated comptime variable |
+| `GetComptimeInt(name)` | `int64_t` | Integer value of a comptime scalar |
+| `GetComptimeFloat(name)` | `double` | Float/double value of a comptime scalar |
+| `GetComptimeVar(name)` | `Node *` | Comptime scalar as an AST literal node |
+| `GetComptimePtr(name)` | `Node *` | Address of a static shadow copy of the evaluated comptime variable |
 
-Use `$get_comptime_ptr(name)` when generated code needs an addressable value
+Use `GetComptimePtr(name)` when generated code needs an addressable value
 rather than a literal copy:
 
 ```c
@@ -641,8 +641,8 @@ rather than a literal copy:
 int threshold = 42;
 
 [[cccc::comptime(inline)]]
-$node_t *threshold_ptr(void) {
-    return $get_comptime_ptr("threshold");
+Node *threshold_ptr(void) {
+    return GetComptimePtr("threshold");
 }
 
 int *p = threshold_ptr(); // *p == 42
@@ -655,10 +655,10 @@ int *p = threshold_ptr(); // *p == 42
 struct Config { int width; int height; int channels; } cfg = { 1920, 1080, 3 };
 
 [[cccc::comptime]]
-$node_t *pixel_count(void) {
-    $node_t *w = $get_comptime_member("cfg", "width");
-    $node_t *h = $get_comptime_member("cfg", "height");
-    return $binary(nk_mul, w, h);
+Node *pixel_count(void) {
+    Node *w = GetComptimeMember("cfg", "width");
+    Node *h = GetComptimeMember("cfg", "height");
+    return MakeBinary(NK_MUL, w, h);
 }
 ```
 
@@ -666,7 +666,7 @@ Struct and union comptime variables can use tagged, anonymous, or typedef'd
 aggregate types. Initializers may be constant expressions or expressions that
 call comptime helper functions.
 
-`$get_comptime_member(var_name, field)` returns the field's value as an
+`GetComptimeMember(var_name, field)` returns the field's value as an
 AST literal node. Integer and float/double members are supported. Pointer and
 array members are not accessible this way.
 
@@ -675,7 +675,7 @@ array members are not accessible this way.
 - Comptime variables support constant initializers and initializers that call
   comptime helper functions.
 - Pointer and string variables produce a compile-time error at this point;
-  use `$string_literal` inside the macro body instead.
+  use `MakeStringLiteral` inside the macro body instead.
 - Comptime variables are **not emitted** into the output binary.
 
 ### constexpr variables
@@ -690,16 +690,16 @@ constexpr int BUF_SIZE = 256;
 constexpr double SCALE  = 1.5;
 
 [[cccc::comptime(inline)]]
-$node_t *make_buf_size(void) {
-    return $get_constexpr_value("BUF_SIZE");
+Node *make_buf_size(void) {
+    return GetConstexprValue("BUF_SIZE");
 }
 ```
 
 | API | Returns | Description |
 |---|---|---|
-| `$get_constexpr_value(name)` | `$node_t *` | Evaluated initializer of a global `constexpr` variable as an AST literal node (integer or float) |
+| `GetConstexprValue(name)` | `Node *` | Evaluated initializer of a global `constexpr` variable as an AST literal node (integer or float) |
 
-`$get_constexpr_value` errors at compile time if the name does not refer to
+`GetConstexprValue` errors at compile time if the name does not refer to
 a visible global `constexpr` variable.
 
 **`constexpr` vs `comptime`** — these are distinct qualifiers. A `constexpr`
@@ -709,13 +709,13 @@ that can reference comptime functions.
 
 ## Quasi-Quoting
 
-`$quote(tmpl, ...)` parses a C expression or statement template and splices
-`$node_t *` values into `$1`, `$2`, and later numbered holes.
+`Quote(tmpl, ...)` parses a C expression or statement template and splices
+`Node *` values into `$1`, `$2`, and later numbered holes.
 
 ```c
 [[cccc::comptime]]
-$node_t *square($node_t *x) {
-    return $quote("($1) * ($1)", x);
+Node *square(Node *x) {
+    return Quote("($1) * ($1)", x);
 }
 
 int main(void) {
@@ -728,12 +728,12 @@ right holes when order is enough:
 
 ```c
 [[cccc::comptime]]
-$node_t *sum2($node_t *a, $node_t *b) {
-    return $quote("$$ + $$", a, b);
+Node *sum2(Node *a, Node *b) {
+    return Quote("$$ + $$", a, b);
 }
 ```
 
-Do not mix `$N` and `$$` in one template. Use `$quote_n(tmpl, nodes, count)`
+Do not mix `$N` and `$$` in one template. Use `QuoteN(tmpl, nodes, count)`
 when splice nodes are already in an array.
 
 ### List splicing with `$@N` and `$@`
@@ -744,12 +744,12 @@ typed unquote-splicing.
 
 ```c
 [[cccc::comptime]]
-$node_t *double_inc($node_t *x) {
-    $node_t *chain = $node_list(($node_t*[]){
-        $quote("$1 += 1;", x),
-        $quote("$1 += 1;", x),
+Node *double_inc(Node *x) {
+    Node *chain = NodeList((Node*[]){
+        Quote("$1 += 1;", x),
+        Quote("$1 += 1;", x),
     }, 2);
-    return $quote("{ $@1; }", chain);
+    return Quote("{ $@1; }", chain);
 }
 
 int get_plus_two(int v) {
@@ -762,21 +762,21 @@ int get_plus_two(int v) {
 
 ```c
 [[cccc::comptime]]
-$node_t *two_increments($node_t *a, $node_t *b) {
-    return $quote("{ $@; $@; }",
-                  $quote("$1 += 10;", a),
-                  $quote("$1 += 20;", b));
+Node *two_increments(Node *a, Node *b) {
+    return Quote("{ $@; $@; }",
+                  Quote("$1 += 10;", a),
+                  Quote("$1 += 20;", b));
 }
 ```
 
 You can mix a scalar `$N` and a list `$@N` in the same template when both are
-positional. `$node_list(arr, count)` builds the `->next` chain from an array.
-An existing `->next` chain (e.g. `$block(...)->body`) can also be passed
+positional. `NodeList(arr, count)` builds the `->next` chain from an array.
+An existing `->next` chain (e.g. `MakeBlock(...)->body`) can also be passed
 directly as the splice argument.
 
 ### Call-argument splicing
 
-`$@k` can also appear as a **direct argument to a function call** in a `$quote`
+`$@k` can also appear as a **direct argument to a function call** in a `Quote`
 template, expanding the chain into the callee's argument list. This works for
 both **variadic callees** (functions accepting `...`) and **fixed-arity
 callees** (functions with an exact parameter count).
@@ -796,9 +796,9 @@ int sum_ints(int count, ...) {
 }
 
 [[cccc::comptime(inline)]]
-$node_t *call_sum3($node_t *a, $node_t *b, $node_t *c) {
-    $node_t *chain = $node_list(($node_t*[]){ a, b, c }, 3);
-    return $quote("sum_ints(3, $@1)", chain); // → sum_ints(3, a, b, c)
+Node *call_sum3(Node *a, Node *b, Node *c) {
+    Node *chain = NodeList((Node*[]){ a, b, c }, 3);
+    return Quote("sum_ints(3, $@1)", chain); // → sum_ints(3, a, b, c)
 }
 ```
 
@@ -809,19 +809,19 @@ of arguments after expansion. Parameter casts are applied post-expansion:
 int add3(int a, int b, int c) { return a + b + c; }
 
 [[cccc::comptime(inline)]]
-$node_t *call_add3($node_t *a, $node_t *b, $node_t *c) {
-    $node_t *chain = $node_list(($node_t*[]){ a, b, c }, 3);
-    return $quote("add3($@1)", chain); // → add3(a, b, c)
+Node *call_add3(Node *a, Node *b, Node *c) {
+    Node *chain = NodeList((Node*[]){ a, b, c }, 3);
+    return Quote("add3($@1)", chain); // → add3(a, b, c)
 }
 ```
 
 Mixing a scalar `$N` with a call-arg splice `$@M` in one template is supported:
 
 ```c
-return $quote("add3($1, $@2)", first_node, pair_chain);
+return Quote("add3($1, $@2)", first_node, pair_chain);
 ```
 
-An empty chain (`$node_list` with `count == 0`, which returns NULL) is a valid
+An empty chain (`NodeList` with `count == 0`, which returns NULL) is a valid
 splice that inserts zero arguments. Using `$@k` as a sub-expression operand
 (e.g. `"foo($@1 + 1)"`) rather than a direct argument remains a compile-time
 error. Splicing the wrong number of arguments into a fixed-arity callee is also
@@ -834,10 +834,10 @@ chain as positional initializers for a struct or array:
 
 ```c
 [[cccc::comptime(inline)]]
-$node_t *make_point($node_t *px, $node_t *py) {
-    $vm_t *vm = __cccc_get_vm();
-    $node_t *chain = $node_list(($node_t*[]){ px, py }, 2);
-    return $quote("(struct Point){ $@1 }", chain);
+Node *make_point(Node *px, Node *py) {
+    VirtualMachine *vm = __builtin_get_vm();
+    Node *chain = NodeList((Node*[]){ px, py }, 2);
+    return Quote("(struct Point){ $@1 }", chain);
     // → (struct Point){ .x = px, .y = py }  (positional, left-to-right)
 }
 
@@ -848,10 +848,10 @@ Array compound literals are also supported:
 
 ```c
 [[cccc::comptime(inline)]]
-$node_t *make_arr3($node_t *a, $node_t *b, $node_t *c) {
-    $vm_t *vm = __cccc_get_vm();
-    $node_t *chain = $node_list(($node_t*[]){ a, b, c }, 3);
-    return $quote("(int[3]){ $@1 }", chain);
+Node *make_arr3(Node *a, Node *b, Node *c) {
+    VirtualMachine *vm = __builtin_get_vm();
+    Node *chain = NodeList((Node*[]){ a, b, c }, 3);
+    return Quote("(int[3]){ $@1 }", chain);
 }
 ```
 
@@ -859,14 +859,14 @@ The splice can mix with ordinary positional initializer elements. Elements
 after the splice are placed after the expanded chain:
 
 ```c
-return $quote("(struct Triple){ 1, $@1 }", pair_chain);
-return $quote("(int[]){ 1, $@1, 4 }", pair_chain);
+return Quote("(struct Triple){ 1, $@1 }", pair_chain);
+return Quote("(int[]){ 1, $@1, 4 }", pair_chain);
 ```
 
 Inferred array length is supported for compound literals such as
 `(int[]){ $@1 }` and `(int[]){ 1, $@1, 4 }`.
 
-Initializer splices remain positional; use `$init_struct` for designated or
+Initializer splices remain positional; use `InitStruct` for designated or
 partial struct/union initialization. A mismatch between the expanded element
 count and the number of struct fields or explicit array elements is a
 compile-time error.
@@ -875,30 +875,30 @@ Mixing a scalar placeholder with a compound-literal splice in one template is
 fine:
 
 ```c
-return $quote("(struct Point){ $@2 }", unused_scalar, chain);
+return Quote("(struct Point){ $@2 }", unused_scalar, chain);
 ```
 
-### `$quote` inside generated function bodies
+### `Quote` inside generated function bodies
 
-`$quote("return x;")` needs to know the enclosing function's return type to
+`Quote("return x;")` needs to know the enclosing function's return type to
 apply the correct implicit cast. When building a generated function body, wrap
-the quote call in `$with_fn(fn)` to establish that context:
+the quote call in `WithFn(fn)` to establish that context:
 
 ```c
 [[cccc::comptime]]
 void generate_answer(void) {
-    $type_t *int_ty = $get_type("int");
-    $obj_t *fn = $function("answer", int_ty);
-    $with_fn(fn) {
-        $function_set_body(fn, $quote("return 42;"));
+    Type *int_ty = GetType("int");
+    Obj *fn = MakeFunction("answer", int_ty);
+    WithFn(fn) {
+        FunctionSetBody(fn, Quote("return 42;"));
     }
 }
 generate_answer();
 ```
 
-Without `$with_fn`, `$quote("return x;")` at file scope (where there is no
+Without `WithFn`, `Quote("return x;")` at file scope (where there is no
 enclosing function) will compile but the implicit return-type cast is skipped.
-For macros that only use `$return($int_literal(...))` directly this does
+For macros that only use `MakeReturn(MakeIntLiteral(...))` directly this does
 not matter; it matters when the template produces a `return` statement.
 
 ## Type And Symbol Reflection
@@ -910,11 +910,11 @@ execution point.
 typedef enum { RED, GREEN, BLUE } Color;
 
 [[cccc::comptime]]
-$node_t *color_count(void) {
-    $type_t *color = $find_type("Color");
+Node *color_count(void) {
+    Type *color = FindType("Color");
     if (!color)
-        return $int_literal(-1);
-    return $int_literal($enum_count(color));
+        return MakeIntLiteral(-1);
+    return MakeIntLiteral(EnumCount(color));
 }
 
 int main(void) {
@@ -926,15 +926,15 @@ Useful reflection entry points include:
 
 | Task | API |
 |------|-----|
-| Find a type by name | `$find_type(name)` |
-| Get a built-in or named type | `$get_type(name)` |
-| Count enum constants | `$enum_count(ty)` |
-| Read enum constants | `$enum_at(ty, i)`, `$enum_constant_name(ec)`, `$enum_constant_value(ec)` |
-| Count struct/union members | `$struct_member_count(ty)` |
-| Read members | `$struct_member_at(ty, i)`, `$member_name(m)`, `$member_type(m)`, `$member_offset(m)` |
-| Find globals | `$find_global(name)`, `$global_count()`, `$global_at(i)` |
+| Find a type by name | `FindType(name)` |
+| Get a built-in or named type | `GetType(name)` |
+| Count enum constants | `EnumCount(ty)` |
+| Read enum constants | `EnumAt(ty, i)`, `EnumConstantName(ec)`, `EnumConstantValue(ec)` |
+| Count struct/union members | `StructMemberCount(ty)` |
+| Read members | `StructMemberAt(ty, i)`, `MemberName(m)`, `MemberType(m)`, `MemberOffset(m)` |
+| Find globals | `FindGlobal(name)`, `GlobalCount()`, `GlobalAt(i)` |
 
-For call-site macro expansion, `$var_ref(name)` and `$find_type(name)`
+For call-site macro expansion, `MakeVarRef(name)` and `FindType(name)`
 use the lexical scope where the macro call appears, including nested block
 locals and typedefs. When a macro receives an expression argument and needs the
 exact variable passed by the caller, prefer inspecting the argument node itself
@@ -942,19 +942,19 @@ instead of looking it up again by string name.
 
 ## Function Generation
 
-Generated functions are `$obj_t *` values. Create the object, add parameters,
+Generated functions are `Obj *` values. Create the object, add parameters,
 build a body, and install the body.
 
 ```c
 [[cccc::comptime]]
 void generate_is_even(void) {
-    $type_t *int_ty = $get_type("int");
-    $obj_t *fn = $function("is_even", int_ty);
-    $function_add_param(fn, "n", int_ty);
+    Type *int_ty = GetType("int");
+    Obj *fn = MakeFunction("is_even", int_ty);
+    FunctionAddParam(fn, "n", int_ty);
 
-    $node_t *n = $param_ref(fn, "n");
-    $with_fn(fn) {
-        $function_set_body(fn, $quote("return $1 % 2 == 0;", n));
+    Node *n = MakeParamRef(fn, "n");
+    WithFn(fn) {
+        FunctionSetBody(fn, Quote("return $1 % 2 == 0;", n));
     }
 }
 generate_is_even();
@@ -966,46 +966,46 @@ int main(void) {
 
 For global-generation macros, CCCC automatically synthesizes forward
 declarations for every generated function definition, so manual publication is
-not required for ordinary generated definitions. Use `$publish(obj)` when a
+not required for ordinary generated definitions. Use `PublishNode(obj)` when a
 macro creates a declaration that later macro-generated code at the same parse
 point should reference before a definition is provided, such as a prototype
 generated by one macro and promoted to a definition by another.
 
-`$function(name, ret_type)` promotes an existing forward declaration with
+`MakeFunction(name, ret_type)` promotes an existing forward declaration with
 the same name to a generated definition. If a definition already exists, CCCC
 emits a compile-time error instead of silently replacing it. Use
-`$gensym(prefix)` or `__cccc_gensym(_VM, prefix)` for private helper names.
+`Gensym(prefix)` or `__builtin_gensym(VM, prefix)` for private helper names.
 
 ```c
 [[cccc::comptime]]
 void make_helper(void) {
-    const char *name = $gensym("helper");
-    $type_t *int_ty = $get_type("int");
-    $obj_t *fn = $function(name, int_ty);
-    $function_set_body(fn, $return($int_literal(42)));
+    const char *name = Gensym("helper");
+    Type *int_ty = GetType("int");
+    Obj *fn = MakeFunction(name, int_ty);
+    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(42)));
 }
 make_helper();
 ```
 
-`$publish_at(obj, tok)` is the same operation with an explicit diagnostic
-token. Pass `$synthetic_token("label")` when the declaration belongs to
+`PublishNodeAt(obj, tok)` is the same operation with an explicit diagnostic
+token. Pass `SyntheticToken("label")` when the declaration belongs to
 generated code rather than a source token. `$forward_declare(fn)` remains as
-a compatibility alias for `$publish(fn)`.
+a compatibility alias for `PublishNode(fn)`.
 
 ## Global Variable Generation
 
-Macros can emit global variables with initial data. Use `$make_array` to
+Macros can emit global variables with initial data. Use `MakeArray` to
 size the type to match the data length; the codegen copies exactly `ty->size`
 bytes from the init data.
 
 ```c
 [[cccc::comptime]]
 void embed_version(void) {
-    $type_t *char_ty = $get_type("char");
-    $type_t *arr_ty  = $make_array(char_ty, 8);
-    $obj_t  *var     = $global_var("version_str", arr_ty);
-    $global_var_set_init_data(var, "1.0.0\0\0", 8);
-    $global_var_set_static(var, 1);  // internal linkage
+    Type *char_ty = GetType("char");
+    Type *arr_ty  = MakeArray(char_ty, 8);
+    Obj  *var     = GlobalVar("version_str", arr_ty);
+    GlobalVarSetInitData(var, "1.0.0\0\0", 8);
+    GlobalVarSetStatic(var, 1);  // internal linkage
 }
 embed_version();
 
@@ -1030,92 +1030,92 @@ it:
 ```c
 [[cccc::comptime]]
 void embed_banner(void) {
-    $type_t *char_ty = $get_type("char");
-    $type_t *arr_ty = $make_array(char_ty, 4);
-    $obj_t *var = $global_var("banner", arr_ty);
-    $global_var_set_init_data(var, "CCCC\0", 4);
-    $publish_at(var, $synthetic_token("generated banner"));
+    Type *char_ty = GetType("char");
+    Type *arr_ty = MakeArray(char_ty, 4);
+    Obj *var = GlobalVar("banner", arr_ty);
+    GlobalVarSetInitData(var, "CCCC\0", 4);
+    PublishNodeAt(var, SyntheticToken("generated banner"));
 }
 embed_banner();
 ```
 
 Struct, union, enum, and typedef builders self-publish in tag or typedef scope.
-`$publish(type)` is accepted for those generated types as a no-op, which
+`PublishNode(type)` is accepted for those generated types as a no-op, which
 lets macros use one publication call uniformly.
 
 ## Local Variables
 
 Macros that expand into statements can inject locals into the current function.
-Prefer `$local_var_unique(ty)` for temporary variables; it creates a name
+Prefer `MakeLocalVarUnique(ty)` for temporary variables; it creates a name
 that user source cannot capture.
 
 ```c
 [[cccc::comptime]]
-$node_t *save_then_return($node_t *value) {
-    $type_t *int_ty = $get_type("int");
-    $node_t *tmp = $local_var_unique(int_ty);
-    $node_t *stmts[2] = {
-        $expr_stmt($assign(tmp, value)),
-        $return(tmp),
+Node *save_then_return(Node *value) {
+    Type *int_ty = GetType("int");
+    Node *tmp = MakeLocalVarUnique(int_ty);
+    Node *stmts[2] = {
+        MakeExprStmt(MakeAssign(tmp, value)),
+        MakeReturn(tmp),
     };
-    return $block(stmts, 2);
+    return MakeBlock(stmts, 2);
 }
 ```
 
-Use `$local_var(name, ty)` only when the generated local is meant to have a
+Use `MakeLocalVar(name, ty)` only when the generated local is meant to have a
 specific user-visible name.
 
-`$local_var_unique` and `$local_var` work correctly inside `$with_fn` blocks:
-the new local is allocated to the function established by `$with_fn`, not to
+`MakeLocalVarUnique` and `MakeLocalVar` work correctly inside `WithFn` blocks:
+the new local is allocated to the function established by `WithFn`, not to
 any outer function context.
 
 ## Initializer Builders
 
-Three builders create initialized aggregate values without requiring `$quote`
+Three builders create initialized aggregate values without requiring `Quote`
 template syntax.
 
-### `$compound_literal(ty, ...)`
+### `CompoundLiteral(ty, ...)`
 
 Positional compound literal. Elements are assigned left-to-right to struct
 members or array elements. All fields/elements must be provided.
 
 ```c
 [[cccc::comptime(inline)]]
-$node_t *make_point($node_t *px, $node_t *py) {
-    $type_t *pt = $get_type("Point");
-    $node_t *lit = $compound_literal(pt, px, py);
-    return $member(lit, "x");
+Node *make_point(Node *px, Node *py) {
+    Type *pt = GetType("Point");
+    Node *lit = CompoundLiteral(pt, px, py);
+    return MakeMember(lit, "x");
 }
 ```
 
-### `$init_array(elem_ty, ...)`
+### `InitArray(elem_ty, ...)`
 
 Array compound literal with explicit element type. The array length is inferred
 from the argument count.
 
 ```c
 [[cccc::comptime(inline)]]
-$node_t *second_of_three($node_t *a, $node_t *b, $node_t *c) {
-    $type_t *int_ty = $get_type("int");
-    $node_t *arr = $init_array(int_ty, a, b, c);
-    return $subscript(arr, $int_literal(1));
+Node *second_of_three(Node *a, Node *b, Node *c) {
+    Type *int_ty = GetType("int");
+    Node *arr = InitArray(int_ty, a, b, c);
+    return MakeSubscript(arr, MakeIntLiteral(1));
 }
 ```
 
-### `$init_struct(ty, fields, values, n)`
+### `InitStruct(ty, fields, values, n)`
 
 Designated struct or union init. `fields` is a `const char **` naming the
-members; `values` is the corresponding `$node_t **` array; `n` is the count.
+members; `values` is the corresponding `Node **` array; `n` is the count.
 Unspecified members are zero-initialized.
 
 ```c
 [[cccc::comptime(inline)]]
-$node_t *partial_point(void) {
-    $type_t *pt = $get_type("Point");
+Node *partial_point(void) {
+    Type *pt = GetType("Point");
     const char *flds[] = {"x"};
-    $node_t *vals[] = {$int_literal(5)};
-    $node_t *s = $init_struct(pt, flds, vals, 1);
-    return $member(s, "y");   // y == 0
+    Node *vals[] = {MakeIntLiteral(5)};
+    Node *s = InitStruct(pt, flds, vals, 1);
+    return MakeMember(s, "y");   // y == 0
 }
 ```
 
@@ -1123,8 +1123,8 @@ $node_t *partial_point(void) {
 
 | Call context | Storage |
 |---|---|
-| Inside a function (inline macro or `$with_fn` block) | Stack-allocated local; zeroed and assigned at run time |
-| Outside any `$with_fn` in a non-inline macro | Static anonymous global variable; init data is evaluated at compile time and stored in the data segment |
+| Inside a function (inline macro or `WithFn` block) | Stack-allocated local; zeroed and assigned at run time |
+| Outside any `WithFn` in a non-inline macro | Static anonymous global variable; init data is evaluated at compile time and stored in the data segment |
 
 The file-scope (static) case requires that initializer values are compile-time
 constants that can be folded by `cc_eval`. Passing a non-constant expression
@@ -1133,18 +1133,18 @@ constants that can be folded by `cc_eval`. Passing a non-constant expression
 ```c
 [[cccc::comptime]]
 void gen_lookup(void) {
-    $type_t *int_ty = $get_type("int");
+    Type *int_ty = GetType("int");
 
-    // Outside $with_fn: static global int[4] = {0, 1, 4, 9}
-    $node_t *table = $init_array(int_ty,
-        $int_literal(0), $int_literal(1),
-        $int_literal(4), $int_literal(9));
+    // Outside WithFn: static global int[4] = {0, 1, 4, 9}
+    Node *table = InitArray(int_ty,
+        MakeIntLiteral(0), MakeIntLiteral(1),
+        MakeIntLiteral(4), MakeIntLiteral(9));
 
-    $obj_t *fn = $function("lookup", int_ty);
-    $with_fn(fn) {
-        $function_add_param(fn, "i", int_ty);
-        $function_set_body(fn,
-            $return($subscript(table, $param_ref(fn, "i"))));
+    Obj *fn = MakeFunction("lookup", int_ty);
+    WithFn(fn) {
+        FunctionAddParam(fn, "i", int_ty);
+        FunctionSetBody(fn,
+            MakeReturn(MakeSubscript(table, MakeParamRef(fn, "i"))));
     }
 }
 gen_lookup();
@@ -1161,42 +1161,42 @@ macro/comptime TU, these are available without any extra `#include`.
 Thin AST wrappers over `memcpy`, `strlen`, and `strcmp`:
 
 ```c
-$node_t *dst, *src, *n;
-$memcpy(dst, src, n);      // memcpy(dst, src, n)
-$node_t *str;
-$strlen(str);              // strlen(str)
-$node_t *a, *b;
-$strcmp(a, b);             // strcmp(a, b)
+Node *dst, *src, *n;
+Memcpy(dst, src, n);      // memcpy(dst, src, n)
+Node *str;
+Strlen(str);              // strlen(str)
+Node *a, *b;
+Strcmp(a, b);             // strcmp(a, b)
 ```
 
 `<string.h>` is always declared in the comptime TU so these work without
 additional includes.
 
-### `$foreach_member(type, varname, body)`
+### `ForeachMember(type, varname, body)`
 
 Host-side loop over every struct/union member:
 
 ```c
 [[cccc::comptime]]
 void print_offsets(void) {
-    $type_t *ty = $get_type("MyStruct");
-    $foreach_member(ty, m, {
-        // m is a $member_t* — use $member_name(m), $member_offset(m), etc.
-        int off = $member_offset(m);
+    Type *ty = GetType("MyStruct");
+    ForeachMember(ty, m, {
+        // m is a Member* — use MemberName(m), MemberOffset(m), etc.
+        int off = MemberOffset(m);
     });
 }
 ```
 
 Each iteration executes `body` at compile time with `varname` bound to the
-current `$member_t *`.
+current `Member *`.
 
-### `$offsetof_chain(type, ...)`
+### `OffsetofChain(type, ...)`
 
 Sum offsets through a chain of nested struct fields:
 
 ```c
-$type_t *ty = $get_type("Outer");
-int off = $offsetof_chain(ty, "inner", "x");
+Type *ty = GetType("Outer");
+int off = OffsetofChain(ty, "inner", "x");
 // equivalent to offsetof(Outer, inner) + offsetof(Inner, x)
 ```
 
@@ -1204,18 +1204,18 @@ Returns `-1` if any field name in the chain is not found.
 
 ### Serialization Helpers
 
-#### `$serialize(type, expr, buf)` / `$deserialize(type, buf)`
+#### `Serialize(type, expr, buf)` / `Deserialize(type, buf)`
 
 Build a block that flat-copies a struct into/out of a raw byte buffer:
 
 ```c
 [[cccc::comptime(inline)]]
-$node_t *ser($node_t *val, $node_t *buf) {
-    return $serialize($get_type("Point"), val, buf);
+Node *ser(Node *val, Node *buf) {
+    return Serialize(GetType("Point"), val, buf);
 }
 [[cccc::comptime(inline)]]
-$node_t *deser($node_t *buf) {
-    return $deserialize($get_type("Point"), buf);
+Node *deser(Node *buf) {
+    return Deserialize(GetType("Point"), buf);
 }
 ```
 
@@ -1239,15 +1239,15 @@ struct Point { int x; int y; };
 
 ### Enum String Conversion
 
-#### `$enum_to_string(type, expr)` / `$enum_from_string(type, expr)`
+#### `EnumToString(type, expr)` / `EnumFromString(type, expr)`
 
 Build a switch or if-chain that converts between enum values and their name
 strings:
 
 ```c
 [[cccc::comptime(inline)]]
-$node_t *color_name($node_t *v) {
-    return $enum_to_string($get_type("Color"), v);
+Node *color_name(Node *v) {
+    return EnumToString(GetType("Color"), v);
 }
 ```
 
@@ -1297,32 +1297,32 @@ V1 cap: up to 64 members per struct.
 
 #### FP-Style Array Generators
 
-`$generate_sum`, `$generate_map`, `$generate_reduce`, and `$generate_filter`
+`GenerateSum`, `GenerateMap`, `GenerateReduce`, and `GenerateFilter`
 publish typed array helpers for a given element type. Call from a comptime
 function invoked at file scope:
 
 ```c
 [[cccc::comptime]]
 void setup_int_helpers(void) {
-    $type_t *int_ty = $get_type("int");
-    $generate_sum(int_ty);    // int sum_int(int *arr, size_t n)
-    $generate_map(int_ty);    // void map_int(int *arr, size_t n, int *out, int (*f)(int))
-    $generate_reduce(int_ty); // int reduce_int(int *arr, size_t n, int init, int (*f)(int, int))
-    $generate_filter(int_ty); // void filter_int(int *arr, size_t n, int *out, size_t *out_n, bool (*pred)(int))
+    Type *int_ty = GetType("int");
+    GenerateSum(int_ty);    // int sum_int(int *arr, size_t n)
+    GenerateMap(int_ty);    // void map_int(int *arr, size_t n, int *out, int (*f)(int))
+    GenerateReduce(int_ty); // int reduce_int(int *arr, size_t n, int init, int (*f)(int, int))
+    GenerateFilter(int_ty); // void filter_int(int *arr, size_t n, int *out, size_t *out_n, bool (*pred)(int))
 }
 setup_int_helpers();
 ```
 
-`$generate_map` and `$generate_filter` use caller-provided output buffers
-(no `malloc`). `$generate_filter` sets `*out_n` to the number of elements
+`GenerateMap` and `GenerateFilter` use caller-provided output buffers
+(no `malloc`). `GenerateFilter` sets `*out_n` to the number of elements
 written.
 
 | Generator | Signature |
 |---|---|
-| `$generate_sum(T)` | `T sum_T(T *arr, size_t n)` |
-| `$generate_map(T)` | `void map_T(T *arr, size_t n, T *out, T (*f)(T))` |
-| `$generate_reduce(T)` | `T reduce_T(T *arr, size_t n, T init, T (*f)(T, T))` |
-| `$generate_filter(T)` | `void filter_T(T *arr, size_t n, T *out, size_t *out_n, bool (*pred)(T))` |
+| `GenerateSum(T)` | `T sum_T(T *arr, size_t n)` |
+| `GenerateMap(T)` | `void map_T(T *arr, size_t n, T *out, T (*f)(T))` |
+| `GenerateReduce(T)` | `T reduce_T(T *arr, size_t n, T init, T (*f)(T, T))` |
+| `GenerateFilter(T)` | `void filter_T(T *arr, size_t n, T *out, size_t *out_n, bool (*pred)(T))` |
 
 The function name suffix is derived from the element type's canonical C name
 (`int`, `ulong`, `double`, etc.) or its user-defined type name for struct/enum
@@ -1334,12 +1334,12 @@ New entries in the reflection table:
 
 | Task | API |
 |------|-----|
-| Iterate all struct/union members | `$foreach_member(ty, var, body)` |
-| Nested-field byte offset | `$offsetof_chain(ty, "field", ...)` |
-| Flat struct serialization | `$serialize(ty, expr, buf)`, `$deserialize(ty, buf)` |
-| Enum → string switch | `$enum_to_string(ty, expr)` |
-| String → enum if-chain | `$enum_from_string(ty, expr)` |
-| Generate typed sum/map/reduce/filter | `$generate_sum(T)`, `$generate_map(T)`, `$generate_reduce(T)`, `$generate_filter(T)` |
+| Iterate all struct/union members | `ForeachMember(ty, var, body)` |
+| Nested-field byte offset | `OffsetofChain(ty, "field", ...)` |
+| Flat struct serialization | `Serialize(ty, expr, buf)`, `Deserialize(ty, buf)` |
+| Enum → string switch | `EnumToString(ty, expr)` |
+| String → enum if-chain | `EnumFromString(ty, expr)` |
+| Generate typed sum/map/reduce/filter | `GenerateSum(T)`, `GenerateMap(T)`, `GenerateReduce(T)`, `GenerateFilter(T)` |
 
 ## Diagnostics And Debugging
 
@@ -1347,9 +1347,9 @@ Use source-located diagnostics when rejecting a macro argument:
 
 ```c
 [[cccc::comptime]]
-$node_t *require_nonzero($node_t *value) {
+Node *require_nonzero(Node *value) {
     if (!value)
-        $macro_error_at(value, "expected an expression");
+        MacroErrorAt(value, "expected an expression");
     return value;
 }
 ```
@@ -1360,21 +1360,21 @@ helpers explicitly:
 
 ```c
 [[cccc::comptime]]
-$node_t *checked_double($node_t *value) {
-    $node_t *expr = $binary(nk_add, value, value);
-    return $copy_location(expr, value);
+Node *checked_double(Node *value) {
+    Node *expr = MakeBinary(NK_ADD, value, value);
+    return CopyLocation(expr, value);
 }
 ```
 
-Use `$synthetic_token(label)` for diagnostics that belong to deliberately
+Use `SyntheticToken(label)` for diagnostics that belong to deliberately
 generated code rather than the call site or an input expression:
 
 ```c
 [[cccc::comptime]]
-$node_t *generated_error(void) {
-    $node_t *expr = $int_literal(0);
-    $set_token(expr, $synthetic_token("generated expression"));
-    $macro_error_at(expr, "generated expression is invalid here");
+Node *generated_error(void) {
+    Node *expr = MakeIntLiteral(0);
+    SetToken(expr, SyntheticToken("generated expression"));
+    MacroErrorAt(expr, "generated expression is invalid here");
     return expr;
 }
 ```
@@ -1383,10 +1383,10 @@ AST dump helpers are available while developing macros:
 
 | Helper | Use |
 |--------|-----|
-| `$dump_tree(node)` | Print a readable tree |
-| `$dump_tree_to_string(node)` | Render a tree into a string |
-| `$dump_ast_gen(node)` | Print builder calls for a node |
-| `$dump_ast_gen_to_string(node)` | Render builder calls into a string |
+| `DumpTree(node)` | Print a readable tree |
+| `DumpTreeToString(node)` | Render a tree into a string |
+| `DumpAstGen(node)` | Print builder calls for a node |
+| `DumpAstGenToString(node)` | Render builder calls into a string |
 
 The interactive VM debugger (`-g`) does not currently stop inside macro
 execution. Macro bytecode runs during compilation, before the final program is
@@ -1399,34 +1399,34 @@ debugging.
 Two functions are provided, matching Lisp's `macroexpand-1` / `macroexpand`
 pair.
 
-**`$macroexpand_1(node)`** expands a single macro call node exactly once,
+**`MacroExpand1(node)`** expands a single macro call node exactly once,
 without splicing the result into the AST or recursing. Useful when you need
 to observe one expansion step at a time or write meta-macros that inspect
 intermediate forms.
 
-**`$macroexpand(node)`** repeatedly calls `$macroexpand_1` on the top-level
+**`MacroExpand(node)`** repeatedly calls `MacroExpand1` on the top-level
 node until it is no longer a macro call (the form is *stable*). It does not
 recurse into child nodes — only the outermost call is expanded. The VM's
 `macro_recursion_limit` applies; exceeding it is a compile error.
 
 ```c
 [[cccc::comptime(inline)]]
-$node_t *make_answer(void) { return $int_literal(42); }
+Node *make_answer(void) { return MakeIntLiteral(42); }
 
 [[cccc::comptime(inline)]]
-$node_t *wrap_answer(void) { return $quote("make_answer()"); }
+Node *wrap_answer(void) { return Quote("make_answer()"); }
 
 [[cccc::comptime]]
 void debug_macro(void) {
-    $node_t *call = $quote("wrap_answer()");
+    Node *call = Quote("wrap_answer()");
 
     // One step: wrap_answer() -> make_answer() (still a macro call)
-    $node_t *step1 = $macroexpand_1(call);
-    $dump_tree(step1);
+    Node *step1 = MacroExpand1(call);
+    DumpTree(step1);
 
     // Full expansion: wrap_answer() -> make_answer() -> 42
-    $node_t *full = $macroexpand(call);
-    $dump_tree(full);
+    Node *full = MacroExpand(call);
+    DumpTree(full);
 }
 ```
 
@@ -1434,8 +1434,8 @@ If `node` is not a macro call, both functions return `node` unchanged
 (identity). If the named macro is not found or has not compiled, `node` is
 returned unchanged.
 
-Underlying functions: `__cccc_macroexpand_1(VirtualMachine *vm, $node_t *node)` and
-`__cccc_macroexpand(VirtualMachine *vm, $node_t *node)`.
+Underlying functions: `__builtin_macroexpand_1(VirtualMachine *vm, Node *node)` and
+`__builtin_macroexpand(VirtualMachine *vm, Node *node)`.
 
 ## API Reference
 
@@ -1443,122 +1443,122 @@ Underlying functions: `__cccc_macroexpand_1(VirtualMachine *vm, $node_t *node)` 
 
 | Convenience macro | Description |
 |-------------------|-------------|
-| `$find_type(name)` | Find a typedef, struct, union, or enum by name |
-| `$type_exists(name)` | Test whether a type name exists |
-| `$get_type(name)` | Get a named or built-in type such as `"int"` |
-| `$type_kind(ty)` | Get `$type_kind_t` |
-| `$type_size(ty)` | Get size in bytes |
-| `$type_align(ty)` | Get alignment in bytes |
-| `$type_is_unsigned(ty)` | Test unsigned integer type |
-| `$type_is_const(ty)` | Test const-qualified type |
-| `$type_base(ty)` | Get pointer or array base type |
-| `$type_array_len(ty)` | Get array length, or `-1` |
-| `$type_return_type(ty)` | Get function return type |
-| `$type_param_count(ty)` | Count function parameters |
-| `$type_param_at(ty, i)` | Get function parameter type |
-| `$type_is_variadic(ty)` | Test variadic function type |
-| `$type_name(ty)` | Get a type name when available |
-| `$make_pointer(base)` | Create pointer type |
-| `$make_array(base, len)` | Create array type |
+| `FindType(name)` | Find a typedef, struct, union, or enum by name |
+| `TypeExists(name)` | Test whether a type name exists |
+| `GetType(name)` | Get a named or built-in type such as `"int"` |
+| `GetTypeKind(ty)` | Get `TypeKind` |
+| `TypeSize(ty)` | Get size in bytes |
+| `TypeAlign(ty)` | Get alignment in bytes |
+| `TypeIsUnsigned(ty)` | Test unsigned integer type |
+| `TypeIsConst(ty)` | Test const-qualified type |
+| `TypeBase(ty)` | Get pointer or array base type |
+| `TypeArrayLen(ty)` | Get array length, or `-1` |
+| `TypeReturnType(ty)` | Get function return type |
+| `TypeParamCount(ty)` | Count function parameters |
+| `TypeParamAt(ty, i)` | Get function parameter type |
+| `TypeIsVariadic(ty)` | Test variadic function type |
+| `TypeName(ty)` | Get a type name when available |
+| `MakePointer(base)` | Create pointer type |
+| `MakeArray(base, len)` | Create array type |
 
 ### Enum APIs
 
 | Convenience macro | Description |
 |-------------------|-------------|
-| `$enum_count(ty)` | Count enum constants |
-| `$enum_at(ty, i)` | Get enum constant at index |
-| `$enum_find(ty, name)` | Find enum constant by name |
-| `$enum_constant_name(ec)` | Get enum constant name |
-| `$enum_constant_value(ec)` | Get enum constant value |
-| `$enum_name(ty)` | Get enum type name |
-| `$enum_value_count(ty)` | Count enum values |
-| `$enum_value_name(ty, i)` | Get enum value name |
-| `$enum_value(ty, i)` | Get enum value |
+| `EnumCount(ty)` | Count enum constants |
+| `EnumAt(ty, i)` | Get enum constant at index |
+| `EnumFind(ty, name)` | Find enum constant by name |
+| `EnumConstantName(ec)` | Get enum constant name |
+| `EnumConstantValue(ec)` | Get enum constant value |
+| `EnumName(ty)` | Get enum type name |
+| `EnumValueCount(ty)` | Count enum values |
+| `EnumValueName(ty, i)` | Get enum value name |
+| `EnumValue(ty, i)` | Get enum value |
 
 ### Struct And Union APIs
 
 | Convenience macro | Description |
 |-------------------|-------------|
-| `$struct_member_count(ty)` | Count members |
-| `$struct_member_at(ty, i)` | Get member at index |
-| `$struct_member_find(ty, name)` | Find member by name |
-| `$member_name(m)` | Get member name |
-| `$member_type(m)` | Get member type |
-| `$member_offset(m)` | Get member offset |
-| `$member_is_bitfield(m)` | Test bitfield member |
-| `$member_bitfield_width(m)` | Get bitfield width |
+| `StructMemberCount(ty)` | Count members |
+| `StructMemberAt(ty, i)` | Get member at index |
+| `StructMemberFind(ty, name)` | Find member by name |
+| `MemberName(m)` | Get member name |
+| `MemberType(m)` | Get member type |
+| `MemberOffset(m)` | Get member offset |
+| `MemberIsBitfield(m)` | Test bitfield member |
+| `MemberBitfieldWidth(m)` | Get bitfield width |
 
 ### Global Symbol APIs
 
 | Convenience macro | Description |
 |-------------------|-------------|
-| `$find_global(name)` | Find global object |
-| `$global_count()` | Count globals |
-| `$global_at(i)` | Get global at index |
-| `$obj_name(obj)` | Get object name |
-| `$obj_type(obj)` | Get object type |
-| `$obj_is_function(obj)` | Test function object |
-| `$obj_is_definition(obj)` | Test definition |
-| `$obj_is_static(obj)` | Test static linkage |
+| `FindGlobal(name)` | Find global object |
+| `GlobalCount()` | Count globals |
+| `GlobalAt(i)` | Get global at index |
+| `ObjName(obj)` | Get object name |
+| `ObjType(obj)` | Get object type |
+| `ObjIsFunction(obj)` | Test function object |
+| `ObjIsDefinition(obj)` | Test definition |
+| `ObjIsStatic(obj)` | Test static linkage |
 
 ### AST Builder APIs
 
 | Convenience macro | Description |
 |-------------------|-------------|
-| `$int_literal(val)` | Integer literal |
-| `$float_literal(val)` | Floating-point literal |
-| `$string_literal(str)` | String literal |
-| `$var_ref(name)` | Variable reference |
-| `$param_ref(fn, name)` | Generated function parameter reference |
-| `$gensym(prefix)` | Unique arena-allocated symbol name using `__cccc_gensym` |
-| `$macroexpand_1(node)` | Single-step macro expansion (identity if not a macro call) |
-| `$macroexpand(node)` | Full macro expansion — repeats until the top-level form is stable |
-| `$current_token()` | Opaque token for the active macro call site |
-| `$synthetic_token(label)` | Opaque synthetic token for generated diagnostics |
-| `$token_from_node(node)` | Opaque source token attached to a node |
-| `$set_token(node, tok)` | Attach a token to a node and return the node |
-| `$copy_location(dst, src)` | Copy source location from one node to another |
-| `$node_list(arr, count)` | Build a `->next`-linked node chain from an array for use as a `$@k` splice argument |
-| `$binary(op, l, r)` | Binary expression |
-| `$unary(op, operand)` | Unary expression |
-| `$cast(expr, ty)` | Cast expression |
-| `$assign(target, value)` | Assignment expression |
-| `$member(obj, name)` | Struct/union member expression |
-| `$subscript(arr, idx)` | Array subscript expression (`arr[idx]`) |
-| `$compound_literal(ty, ...)` | Positional compound literal; stack-local in function scope, static global outside `$with_fn` |
-| `$init_array(elem_ty, ...)` | Array compound literal with explicit element type; length inferred from argument count |
-| `$init_struct(ty, fields, values, n)` | Designated struct/union init; unspecified members are zero |
-| `$funcall(callee, args, n)` | Function call expression |
-| `$vararg_as_array()` | Borrowed inline variadic argument array for forwarding |
-| `$return(expr)` | Return statement |
-| `$block(stmts, count)` | Compound statement |
-| `$block_add_stmt(block, stmt)` / `$block_add_stmt(stmt)` | Append a statement to a block; shorthand form uses `$with_block` |
-| `$if(cond, then_body, else_body)` | If statement |
-| `$switch(cond)` | Switch statement |
-| `$switch_add_case(sw, value, body)` / `$switch_add_case(value, body)` | Add switch case; shorthand form uses `$with_switch` |
-| `$switch_set_default(sw, body)` / `$switch_set_default(body)` | Set switch default; shorthand form uses `$with_switch` |
-| `$expr_stmt(expr)` | Expression statement |
-| `$local_var(name, ty)` | Named local variable |
-| `$local_var_unique(ty)` | Hygienic temporary local |
-| `$while(cond, body)` | While loop |
-| `$for(init, cond, inc, body)` | For loop |
-| `$do_while(body, cond)` | Do-while loop |
+| `MakeIntLiteral(val)` | Integer literal |
+| `MakeFloatLiteral(val)` | Floating-point literal |
+| `MakeStringLiteral(str)` | String literal |
+| `MakeVarRef(name)` | Variable reference |
+| `MakeParamRef(fn, name)` | Generated function parameter reference |
+| `Gensym(prefix)` | Unique arena-allocated symbol name using `__builtin_gensym` |
+| `MacroExpand1(node)` | Single-step macro expansion (identity if not a macro call) |
+| `MacroExpand(node)` | Full macro expansion — repeats until the top-level form is stable |
+| `CurrentToken()` | Opaque token for the active macro call site |
+| `SyntheticToken(label)` | Opaque synthetic token for generated diagnostics |
+| `TokenFromNode(node)` | Opaque source token attached to a node |
+| `SetToken(node, tok)` | Attach a token to a node and return the node |
+| `CopyLocation(dst, src)` | Copy source location from one node to another |
+| `NodeList(arr, count)` | Build a `->next`-linked node chain from an array for use as a `$@k` splice argument |
+| `MakeBinary(op, l, r)` | Binary expression |
+| `MakeUnary(op, operand)` | Unary expression |
+| `MakeCast(expr, ty)` | Cast expression |
+| `MakeAssign(target, value)` | Assignment expression |
+| `MakeMember(obj, name)` | Struct/union member expression |
+| `MakeSubscript(arr, idx)` | Array subscript expression (`arr[idx]`) |
+| `CompoundLiteral(ty, ...)` | Positional compound literal; stack-local in function scope, static global outside `WithFn` |
+| `InitArray(elem_ty, ...)` | Array compound literal with explicit element type; length inferred from argument count |
+| `InitStruct(ty, fields, values, n)` | Designated struct/union init; unspecified members are zero |
+| `MakeFuncCall(callee, args, n)` | Function call expression |
+| `VarargAsArray()` | Borrowed inline variadic argument array for forwarding |
+| `MakeReturn(expr)` | Return statement |
+| `MakeBlock(stmts, count)` | Compound statement |
+| `BlockAddStmt(block, stmt)` / `BlockAddStmt(stmt)` | Append a statement to a block; shorthand form uses `WithBlock` |
+| `MakeIf(cond, then_body, else_body)` | If statement |
+| `MakeSwitch(cond)` | Switch statement |
+| `SwitchAddCase(sw, value, body)` / `SwitchAddCase(value, body)` | Add switch case; shorthand form uses `WithSwitch` |
+| `SwitchSetDefault(sw, body)` / `SwitchSetDefault(body)` | Set switch default; shorthand form uses `WithSwitch` |
+| `MakeExprStmt(expr)` | Expression statement |
+| `MakeLocalVar(name, ty)` | Named local variable |
+| `MakeLocalVarUnique(ty)` | Hygienic temporary local |
+| `MakeWhile(cond, body)` | While loop |
+| `MakeFor(init, cond, inc, body)` | For loop |
+| `MakeDoWhile(body, cond)` | Do-while loop |
 
 ### Function Builder APIs
 
 | Convenience macro | Description |
 |-------------------|-------------|
-| `$publish(obj_or_type)` | Publish a generated function/global in current scope; accepted as a no-op for generated types |
-| `$publish_at(obj_or_type, tok)` | Publish with an explicit diagnostic token |
-| `$function(name, ret_type)` | Create a function object |
-| `$forward_declare(fn)` | Deprecated alias for `$publish(fn)` |
-| `$function_add_param(fn, name, ty)` | Add function parameter |
-| `$function_set_body(fn, body)` | Set function body |
-| `$function_set_static(fn, flag)` | Set static linkage |
-| `$function_set_inline(fn, flag)` | Set inline flag |
-| `$function_set_variadic(fn, flag)` | Set variadic flag |
-| `$with_fn(fn) { ... }` | Set `fn` as the current function context for the block so `$quote("return x;")` applies the correct return-type cast |
-| `$with_block(block) { ... }` | Set `block` as the current block context for `$block_add_stmt(stmt)` |
+| `PublishNode(obj_or_type)` | Publish a generated function/global in current scope; accepted as a no-op for generated types |
+| `PublishNodeAt(obj_or_type, tok)` | Publish with an explicit diagnostic token |
+| `MakeFunction(name, ret_type)` | Create a function object |
+| `$forward_declare(fn)` | Deprecated alias for `PublishNode(fn)` |
+| `FunctionAddParam(fn, name, ty)` | Add function parameter |
+| `FunctionSetBody(fn, body)` | Set function body |
+| `FunctionSetStatic(fn, flag)` | Set static linkage |
+| `FunctionSetInline(fn, flag)` | Set inline flag |
+| `FunctionSetVariadic(fn, flag)` | Set variadic flag |
+| `WithFn(fn) { ... }` | Set `fn` as the current function context for the block so `Quote("return x;")` applies the correct return-type cast |
+| `WithBlock(block) { ... }` | Set `block` as the current block context for `BlockAddStmt(stmt)` |
 
 ### Aggregate And Switch Builder Contexts
 
@@ -1568,11 +1568,11 @@ parent pointer at every call site. The explicit forms remain available.
 ```c
 [[cccc::comptime]]
 void generate_point(void) {
-    $type_t *int_ty = $get_type("int");
-    $type_t *point = $make_struct("Point");
-    $with_struct(point) {
-        $struct_add_field("x", int_ty);
-        $struct_add_field("y", int_ty);
+    Type *int_ty = GetType("int");
+    Type *point = MakeStruct("Point");
+    WithStruct(point) {
+        StructAddField("x", int_ty);
+        StructAddField("y", int_ty);
     }
 }
 generate_point();
@@ -1581,43 +1581,43 @@ generate_point();
 ```c
 [[cccc::comptime]]
 void generate_switch(void) {
-    $type_t *int_ty = $get_type("int");
-    $obj_t *fn = $function("classify", int_ty);
-    $function_add_param(fn, "x", int_ty);
+    Type *int_ty = GetType("int");
+    Obj *fn = MakeFunction("classify", int_ty);
+    FunctionAddParam(fn, "x", int_ty);
 
-    $with_fn(fn) {
-        $node_t *sw = $switch($param_ref(fn, "x"));
-        $with_switch(sw) {
-            $switch_add_case($int_literal(0), $return($int_literal(1)));
-            $switch_set_default($return($int_literal(-1)));
+    WithFn(fn) {
+        Node *sw = MakeSwitch(MakeParamRef(fn, "x"));
+        WithSwitch(sw) {
+            SwitchAddCase(MakeIntLiteral(0), MakeReturn(MakeIntLiteral(1)));
+            SwitchSetDefault(MakeReturn(MakeIntLiteral(-1)));
         }
-        $function_set_body(fn, sw);
+        FunctionSetBody(fn, sw);
     }
 }
 generate_switch();
 ```
 
-`$with_enum(e)` similarly enables `$enum_add_constant(name, value)`, and
-`$with_block(block)` enables `$block_add_stmt(stmt)`.
+`WithEnum(e)` similarly enables `EnumAddConstant(name, value)`, and
+`WithBlock(block)` enables `BlockAddStmt(stmt)`.
 
 ### Global Variable Builder APIs
 
 | Convenience macro | Description |
 |-------------------|-------------|
-| `$global_var(name, ty)` | Create a global variable definition |
-| `$global_var_set_init_data(var, data, len)` | Set raw initial data (`len` must equal `ty->size`) |
-| `$global_var_set_static(var, flag)` | Set internal linkage (file-scope `static`) |
+| `GlobalVar(name, ty)` | Create a global variable definition |
+| `GlobalVarSetInitData(var, data, len)` | Set raw initial data (`len` must equal `ty->size`) |
+| `GlobalVarSetStatic(var, flag)` | Set internal linkage (file-scope `static`) |
 
 ### Node Kinds
 
-Use these constants with `$binary()` and `$unary()`:
+Use these constants with `MakeBinary()` and `MakeUnary()`:
 
 ```c
-nk_add, nk_sub, nk_mul, nk_div, nk_mod, nk_neg
-nk_bitand, nk_bitor, nk_bitxor, nk_bitnot, nk_shl, nk_shr
-nk_eq, nk_ne, nk_lt, nk_le
-nk_not, nk_logand, nk_logor
-nk_assign, nk_addr, nk_deref, nk_comma
+NK_ADD, NK_SUB, NK_MUL, NK_DIV, NK_MOD, NK_NEG
+NK_BITAND, NK_BITOR, NK_BITXOR, NK_BITNOT, NK_SHL, NK_SHR
+NK_EQ, NK_NE, NK_LT, NK_LE
+NK_NOT, NK_LOGAND, NK_LOGOR
+NK_ASSIGN, NK_ADDR, NK_DEREF, NK_COMMA
 ```
 
 ## Attribute Syntax
@@ -1644,8 +1644,8 @@ The canonical form used in this document and in CCCC examples is `[[cccc::compti
 - Global-generation macros run before the main parse, so generated definitions
   are visible everywhere. Inline macros expand at the call site and follow
   normal C declaration rules for any side-effect definitions they emit.
-- `$publish(obj)` publishes generated functions and globals in the current
+- `PublishNode(obj)` publishes generated functions and globals in the current
   parser scope. Generated struct/union/enum/typedef types already self-publish,
-  and `$publish(type)` is accepted as a no-op.
+  and `PublishNode(type)` is accepted as a no-op.
 - `void` macros cannot be used in expression position; doing so is a compile
   error.

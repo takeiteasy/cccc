@@ -6,11 +6,11 @@ int existing_function(void) {
 }
 
 [[cccc::comptime(inline)]]
-$node_t *clobber_existing(void) {
-    $type_t *int_ty = $get_type("int");
-    $obj_t *fn = $function("existing_function", int_ty);
-    $function_set_body(fn, $return($int_literal(42)));
-    return $int_literal(0);
+Node *clobber_existing(void) {
+    Type *int_ty = GetType("int");
+    Obj *fn = MakeFunction("existing_function", int_ty);
+    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(42)));
+    return MakeIntLiteral(0);
 }
 
 int main(void) {

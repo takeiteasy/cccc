@@ -11,7 +11,7 @@ void comma_increment_repro(void) {
     *dst = 0;
 
     if (dst_buf[0] != 'a' || dst_buf[1] != 0)
-        $macro_error_at(0, "comma increment repro failed");
+        MacroErrorAt(0, "comma increment repro failed");
 }
 comma_increment_repro();
 
@@ -19,7 +19,7 @@ comma_increment_repro();
 void zero_initializer_repro(void) {
     unsigned char seen[256] = {0};
     if (seen[0] || seen[255])
-        $macro_error_at(0, "zero initializer repro failed");
+        MacroErrorAt(0, "zero initializer repro failed");
 }
 zero_initializer_repro();
 

@@ -8,13 +8,13 @@ int double_val(int x) { return x * 2; }
 
 // @comptime(inline) — usable in expression position from runtime code.
 @comptime(inline)
-$node_t *make_doubled_42(void) {
-    return $int_literal(double_val(21));
+Node *make_doubled_42(void) {
+    return MakeIntLiteral(double_val(21));
 }
 
 @macro(inline)
-$node_t *add_one($node_t *x) {
-    return $binary(nk_add, x, $int_literal(1));
+Node *add_one(Node *x) {
+    return MakeBinary(NK_ADD, x, MakeIntLiteral(1));
 }
 
 [[cccc::test]]

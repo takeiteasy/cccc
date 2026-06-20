@@ -1,4 +1,4 @@
-// Ticket #303: $get_comptime_ptr returns an addressable AST pointer to an
+// Ticket #303: GetComptimePtr returns an addressable AST pointer to an
 // evaluated comptime variable.
 
 [[cccc::comptime]]
@@ -10,13 +10,13 @@ struct Config { int width; int height; };
 struct Config cfg = { 20, 22 };
 
 [[cccc::comptime(inline)]]
-$node_t *magic_ptr(void) {
-    return $get_comptime_ptr("magic");
+Node *magic_ptr(void) {
+    return GetComptimePtr("magic");
 }
 
 [[cccc::comptime(inline)]]
-$node_t *cfg_ptr(void) {
-    return $get_comptime_ptr("cfg");
+Node *cfg_ptr(void) {
+    return GetComptimePtr("cfg");
 }
 
 int main(void) {

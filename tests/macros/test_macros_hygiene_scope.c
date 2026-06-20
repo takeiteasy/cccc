@@ -1,21 +1,21 @@
 // Test macro hygiene: call-site variable and typedef lookup.
 
 [[cccc::comptime(inline)]]
-$node_t *read_value(void) {
-    return $var_ref("value");
+Node *read_value(void) {
+    return MakeVarRef("value");
 }
 
 [[cccc::comptime(inline)]]
-$node_t *read_value_via_quote(void) {
-    return $quote("read_value()");
+Node *read_value_via_quote(void) {
+    return Quote("read_value()");
 }
 
 [[cccc::comptime(inline)]]
-$node_t *local_alias_size(void) {
-    $type_t *ty = $find_type("LocalAlias");
+Node *local_alias_size(void) {
+    Type *ty = FindType("LocalAlias");
     if (!ty)
-        return $int_literal(0);
-    return $int_literal($type_size(ty));
+        return MakeIntLiteral(0);
+    return MakeIntLiteral(TypeSize(ty));
 }
 
 int value = 5;

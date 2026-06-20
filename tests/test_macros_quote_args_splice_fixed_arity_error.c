@@ -12,10 +12,10 @@ int add2(int a, int b) {
 
 // Too few: splice 2 nodes into a 3-parameter callee.
 [[cccc::comptime(inline)]]
-$node_t *too_few_splice($node_t *a, $node_t *b) {
-    $vm_t *vm = __cccc_get_vm();
-    $node_t *chain = __cccc_node_list(vm, ($node_t*[]){ a, b }, 2);
-    return __cccc_quote(vm, "add3($@1)", chain);
+Node *too_few_splice(Node *a, Node *b) {
+    VirtualMachine *vm = __builtin_get_vm();
+    Node *chain = __builtin_node_list(vm, (Node*[]){ a, b }, 2);
+    return __builtin_quote(vm, "add3($@1)", chain);
 }
 
 int main(void) {

@@ -6,11 +6,11 @@
 
 [[cccc::comptime]]
 void make_fn(char *name) {
-    $vm_t *vm = __cccc_get_vm();
-    $type_t *int_ty = __cccc_ast_get_type(vm, "int");
-    $obj_t *fn = __cccc_ast_function(vm, name, int_ty);
-    $node_t *body = __cccc_ast_return(vm, __cccc_ast_int_literal(vm, 42));
-    __cccc_ast_function_set_body(vm, fn, body);
+    VirtualMachine *vm = __builtin_get_vm();
+    Type *int_ty = __builtin_ast_get_type(vm, "int");
+    Obj *fn = __builtin_ast_function(vm, name, int_ty);
+    Node *body = __builtin_ast_return(vm, __builtin_ast_int_literal(vm, 42));
+    __builtin_ast_function_set_body(vm, fn, body);
 }
 
 #define X(N) make_fn(#N);

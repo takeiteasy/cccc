@@ -1,4 +1,4 @@
-// Ticket #235: $generate_sum/$generate_map/$generate_reduce/$generate_filter
+// Ticket #235: GenerateSum/GenerateMap/GenerateReduce/GenerateFilter
 // FP-style array generators for a scalar element type (int).
 
 #include <stdbool.h>
@@ -6,11 +6,11 @@
 
 [[cccc::comptime]]
 void setup_fp_helpers(void) {
-    $type_t *int_ty = $get_type("int");
-    $generate_sum(int_ty);
-    $generate_map(int_ty);
-    $generate_reduce(int_ty);
-    $generate_filter(int_ty);
+    Type *int_ty = GetType("int");
+    GenerateSum(int_ty);
+    GenerateMap(int_ty);
+    GenerateReduce(int_ty);
+    GenerateFilter(int_ty);
 }
 
 setup_fp_helpers();

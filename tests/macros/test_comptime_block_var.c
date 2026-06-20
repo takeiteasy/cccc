@@ -6,8 +6,8 @@ int answer = 42;
 #pragma cccc comptime end
 
 [[cccc::comptime(inline)]]
-$node_t *get_answer(void) {
-    return $get_comptime_var("answer");
+Node *get_answer(void) {
+    return GetComptimeVar("answer");
 }
 
 int main(void) {

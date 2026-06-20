@@ -1,22 +1,22 @@
 // Test ticket #284: variadic inline macros receive an unbounded AST tail.
 
 [[cccc::comptime(inline)]]
-$node_t *sum_nodes(...) {
-    int count = $vararg_count();
+Node *sum_nodes(...) {
+    int count = VarargCount();
     if (count == 0)
-        return $int_literal(0);
+        return MakeIntLiteral(0);
 
-    $node_t *acc = $vararg_at(0);
+    Node *acc = VarargAt(0);
     for (int i = 1; i < count; i = i + 1)
-        acc = $binary(nk_add, acc, $vararg_at(i));
+        acc = MakeBinary(NK_ADD, acc, VarargAt(i));
     return acc;
 }
 
 [[cccc::comptime(inline)]]
-$node_t *add_tail($node_t *base, ...) {
-    $node_t *acc = base;
-    for (int i = 0; i < $vararg_count(); i = i + 1)
-        acc = $binary(nk_add, acc, $vararg_at(i));
+Node *add_tail(Node *base, ...) {
+    Node *acc = base;
+    for (int i = 0; i < VarargCount(); i = i + 1)
+        acc = MakeBinary(NK_ADD, acc, VarargAt(i));
     return acc;
 }
 

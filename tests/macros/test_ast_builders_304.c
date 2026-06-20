@@ -1,63 +1,63 @@
 // Test ticket #304: file-scope compound literals in AST builders.
-// $compound_literal / $init_array / $init_struct called with current_fn == NULL
-// (outside any $with_fn block in a non-inline comptime macro) produce a static
+// CompoundLiteral / InitArray / InitStruct called with current_fn == NULL
+// (outside any WithFn block in a non-inline comptime macro) produce a static
 // anonymous global var instead of a stack local.
 
 struct FPt { int x; int y; };
 
-// ---- $compound_literal outside $with_fn (current_fn == NULL) ---------------
+// ---- CompoundLiteral outside WithFn (current_fn == NULL) ---------------
 // The global_pt literal lives in static storage; the function captures it.
 [[cccc::comptime]]
-$node_t *gen_gvar_cl(void) {
-    $type_t *pt_ty = $get_type("FPt");
-    $type_t *int_ty = $get_type("int");
+Node *gen_gvar_cl(void) {
+    Type *pt_ty = GetType("FPt");
+    Type *int_ty = GetType("int");
 
-    $node_t *gpt = $compound_literal(pt_ty, $int_literal(7), $int_literal(13));
+    Node *gpt = CompoundLiteral(pt_ty, MakeIntLiteral(7), MakeIntLiteral(13));
 
-    $obj_t *fn = $function("gvar_cl_x", int_ty);
-    $with_fn(fn) {
-        $function_set_body(fn, $return($member(gpt, "x")));
+    Obj *fn = MakeFunction("gvar_cl_x", int_ty);
+    WithFn(fn) {
+        FunctionSetBody(fn, MakeReturn(MakeMember(gpt, "x")));
     }
-    return $int_literal(0);
+    return MakeIntLiteral(0);
 }
 gen_gvar_cl();
 
-// ---- $init_array outside $with_fn ------------------------------------------
+// ---- InitArray outside WithFn ------------------------------------------
 [[cccc::comptime]]
-$node_t *gen_gvar_arr(void) {
-    $type_t *int_ty = $get_type("int");
+Node *gen_gvar_arr(void) {
+    Type *int_ty = GetType("int");
 
-    $node_t *garr = $init_array(int_ty,
-        $int_literal(10), $int_literal(20), $int_literal(30));
+    Node *garr = InitArray(int_ty,
+        MakeIntLiteral(10), MakeIntLiteral(20), MakeIntLiteral(30));
 
-    $obj_t *fn = $function("gvar_arr_elem2", int_ty);
-    $with_fn(fn) {
-        $function_set_body(fn, $return($subscript(garr, $int_literal(2))));
+    Obj *fn = MakeFunction("gvar_arr_elem2", int_ty);
+    WithFn(fn) {
+        FunctionSetBody(fn, MakeReturn(MakeSubscript(garr, MakeIntLiteral(2))));
     }
-    return $int_literal(0);
+    return MakeIntLiteral(0);
 }
 gen_gvar_arr();
 
-// ---- $init_struct outside $with_fn, partial (y should be zero) --------------
+// ---- InitStruct outside WithFn, partial (y should be zero) --------------
 [[cccc::comptime]]
-$node_t *gen_gvar_struct(void) {
-    $type_t *pt_ty = $get_type("FPt");
-    $type_t *int_ty = $get_type("int");
+Node *gen_gvar_struct(void) {
+    Type *pt_ty = GetType("FPt");
+    Type *int_ty = GetType("int");
 
     const char *flds[] = {"x"};
-    $node_t *vals[] = {$int_literal(99)};
-    $node_t *gs = $init_struct(pt_ty, flds, vals, 1);
+    Node *vals[] = {MakeIntLiteral(99)};
+    Node *gs = InitStruct(pt_ty, flds, vals, 1);
 
-    $obj_t *fn_x = $function("gvar_struct_x", int_ty);
-    $with_fn(fn_x) {
-        $function_set_body(fn_x, $return($member(gs, "x")));
+    Obj *fn_x = MakeFunction("gvar_struct_x", int_ty);
+    WithFn(fn_x) {
+        FunctionSetBody(fn_x, MakeReturn(MakeMember(gs, "x")));
     }
 
-    $obj_t *fn_y = $function("gvar_struct_y", int_ty);
-    $with_fn(fn_y) {
-        $function_set_body(fn_y, $return($member(gs, "y")));
+    Obj *fn_y = MakeFunction("gvar_struct_y", int_ty);
+    WithFn(fn_y) {
+        FunctionSetBody(fn_y, MakeReturn(MakeMember(gs, "y")));
     }
-    return $int_literal(0);
+    return MakeIntLiteral(0);
 }
 gen_gvar_struct();
 

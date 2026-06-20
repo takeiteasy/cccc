@@ -1,4 +1,4 @@
-// Ticket #235: $offsetof_chain for (possibly nested) member chains.
+// Ticket #235: OffsetofChain for (possibly nested) member chains.
 
 #include <stddef.h>
 
@@ -14,17 +14,17 @@ struct Outer {
 
 [[cccc::comptime]]
 void generate_outer_offsets(void) {
-    $type_t *outer_ty = $get_type("Outer");
+    Type *outer_ty = GetType("Outer");
 
-    $obj_t *x_fn = $function("outer_x_offset", $get_type("int"));
-    $with_fn(x_fn) {
-        $function_set_body(x_fn, $return($offsetof_chain(outer_ty, "x")));
+    Obj *x_fn = MakeFunction("outer_x_offset", GetType("int"));
+    WithFn(x_fn) {
+        FunctionSetBody(x_fn, MakeReturn(OffsetofChain(outer_ty, "x")));
     }
 
-    $obj_t *inner_b_fn = $function("outer_inner_b_offset", $get_type("int"));
-    $with_fn(inner_b_fn) {
-        $function_set_body(inner_b_fn,
-            $return($offsetof_chain(outer_ty, "inner", "b")));
+    Obj *inner_b_fn = MakeFunction("outer_inner_b_offset", GetType("int"));
+    WithFn(inner_b_fn) {
+        FunctionSetBody(inner_b_fn,
+            MakeReturn(OffsetofChain(outer_ty, "inner", "b")));
     }
 }
 

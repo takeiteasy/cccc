@@ -1,13 +1,13 @@
 // Test ticket #122: explicit pragma macro calls at file scope.
 
 [[cccc::comptime]]
-$node_t *generate_answer(void) {
-    $type_t *int_ty = $get_type("int");
-    $obj_t *fn = $function("generated_answer", int_ty);
+Node *generate_answer(void) {
+    Type *int_ty = GetType("int");
+    Obj *fn = MakeFunction("generated_answer", int_ty);
 
-    $function_set_body(fn, $return($int_literal(42)));
+    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(42)));
 
-    return $int_literal(0);
+    return MakeIntLiteral(0);
 }
 
 generate_answer();

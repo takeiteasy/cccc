@@ -975,7 +975,7 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
         }
 
         // Function body — unpack a single ND_BLOCK to avoid double-brace wrapping.
-        // Both the parser and $function_set_body store the body as an ND_BLOCK node.
+        // Both the parser and FunctionSetBody store the body as an ND_BLOCK node.
         Node *body_stmts;
         if (fn->body && fn->body->kind == ND_BLOCK && !fn->body->next)
             body_stmts = fn->body->body;

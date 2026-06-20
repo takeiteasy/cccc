@@ -2,8 +2,8 @@
 // its declarations are spliced directly into global scope.
 
 [[cccc::comptime]]
-$node_t *emit_widget_helpers(void) {
-    return $quote("{ struct Widget { int x; int y; }; void widget_init(struct Widget *w) { w->x = 0; w->y = 0; } void widget_set(struct Widget *w, int x, int y) { w->x = x; w->y = y; } }");
+Node *emit_widget_helpers(void) {
+    return Quote("{ struct Widget { int x; int y; }; void widget_init(struct Widget *w) { w->x = 0; w->y = 0; } void widget_set(struct Widget *w, int x, int y) { w->x = x; w->y = y; } }");
 }
 
 emit_widget_helpers();

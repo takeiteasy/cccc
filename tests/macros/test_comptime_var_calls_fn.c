@@ -9,8 +9,8 @@ int page_count(void) { return 4; }
 int buf_size = page_count() * 4096;
 
 [[cccc::comptime(inline)]]
-$node_t *get_buf_size(void) {
-    return $int_literal($get_comptime_int("buf_size"));
+Node *get_buf_size(void) {
+    return MakeIntLiteral(GetComptimeInt("buf_size"));
 }
 
 int main(void) {

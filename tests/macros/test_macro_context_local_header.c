@@ -9,8 +9,8 @@ int local_header_type_size(void) {
 
 [[cccc::comptime]]
 void generate_local_header_context_result(void) {
-    $obj_t *fn = $function("local_header_context_result", $get_type("int"));
-    $function_set_body(fn, $return($int_literal(local_header_type_size() ? 42 : 1)));
+    Obj *fn = MakeFunction("local_header_context_result", GetType("int"));
+    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(local_header_type_size() ? 42 : 1)));
 }
 
 generate_local_header_context_result();

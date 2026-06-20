@@ -525,34 +525,34 @@ static void impl_assert_bits_msg(long long mask, long long expected, long long a
 // them. Must be called before cc_compile (but after cc_execute_inline_macros
 // to avoid registering these symbols during the comptime pass -- ticket #334).
 void cc_load_test_runtime(VirtualMachine *vm) {
-    cc_register_cfunc(vm, "__cccc_assert",             (void *)impl_assert,              4, 0);
-    cc_register_cfunc(vm, "__cccc_assert_false",       (void *)impl_assert_false,         4, 0);
-    cc_register_cfunc(vm, "__cccc_assert_fail",        (void *)impl_assert_fail,          2, 0);
-    cc_register_cfunc(vm, "__cccc_assert_fail_msg",    (void *)impl_assert_fail_msg,      3, 0);
-    cc_register_cfunc(vm, "__cccc_assert_eq",          (void *)impl_assert_eq,            6, 0);
-    cc_register_cfunc(vm, "__cccc_assert_neq",         (void *)impl_assert_neq,           6, 0);
-    cc_register_cfunc(vm, "__cccc_assert_gt",          (void *)impl_assert_gt,            6, 0);
-    cc_register_cfunc(vm, "__cccc_assert_lt",          (void *)impl_assert_lt,            6, 0);
-    cc_register_cfunc(vm, "__cccc_assert_ge",          (void *)impl_assert_ge,            6, 0);
-    cc_register_cfunc(vm, "__cccc_assert_le",          (void *)impl_assert_le,            6, 0);
-    cc_register_cfunc(vm, "__cccc_assert_within",      (void *)impl_assert_within,        8, 0);
-    cc_register_cfunc(vm, "__cccc_assert_null",        (void *)impl_assert_null,          4, 0);
-    cc_register_cfunc(vm, "__cccc_assert_not_null",    (void *)impl_assert_not_null,      4, 0);
-    cc_register_cfunc(vm, "__cccc_assert_streq",       (void *)impl_assert_streq,         6, 0);
-    cc_register_cfunc(vm, "__cccc_assert_streq_len",   (void *)impl_assert_streq_len,     7, 0);
-    cc_register_cfunc(vm, "__cccc_assert_mem_eq",      (void *)impl_assert_mem_eq,        7, 0);
-    cc_register_cfunc(vm, "__cccc_assert_float_within",(void *)impl_assert_float_within,  8, 0);
-    cc_register_cfunc(vm, "__cccc_assert_double_within",(void *)impl_assert_double_within,8, 0);
-    cc_register_cfunc(vm, "__cccc_assert_bits",        (void *)impl_assert_bits,          8, 0);
-    cc_register_cfunc(vm, "__cccc_assert_bit_high",    (void *)impl_assert_bit_high,      6, 0);
-    cc_register_cfunc(vm, "__cccc_assert_bit_low",     (void *)impl_assert_bit_low,       6, 0);
-    cc_register_cfunc(vm, "__cccc_assert_eq_array",    (void *)impl_assert_eq_array,      8, 0);
-    cc_register_cfunc(vm, "__cccc_assert_msg",         (void *)impl_assert_msg,           5, 0);
-    cc_register_cfunc(vm, "__cccc_assert_eq_msg",      (void *)impl_assert_eq_msg,        7, 0);
-    cc_register_cfunc(vm, "__cccc_assert_streq_msg",   (void *)impl_assert_streq_msg,     7, 0);
-    cc_register_cfunc(vm, "__cccc_assert_null_msg",    (void *)impl_assert_null_msg,      5, 0);
-    cc_register_cfunc(vm, "__cccc_assert_not_null_msg",(void *)impl_assert_not_null_msg,  5, 0);
-    cc_register_cfunc(vm, "__cccc_assert_bits_msg",    (void *)impl_assert_bits_msg,      9, 0);
+    cc_register_cfunc(vm, "__builtin_assert",             (void *)impl_assert,              4, 0);
+    cc_register_cfunc(vm, "__builtin_assert_false",       (void *)impl_assert_false,         4, 0);
+    cc_register_cfunc(vm, "__builtin_assert_fail",        (void *)impl_assert_fail,          2, 0);
+    cc_register_cfunc(vm, "__builtin_assert_fail_msg",    (void *)impl_assert_fail_msg,      3, 0);
+    cc_register_cfunc(vm, "__builtin_assert_eq",          (void *)impl_assert_eq,            6, 0);
+    cc_register_cfunc(vm, "__builtin_assert_neq",         (void *)impl_assert_neq,           6, 0);
+    cc_register_cfunc(vm, "__builtin_assert_gt",          (void *)impl_assert_gt,            6, 0);
+    cc_register_cfunc(vm, "__builtin_assert_lt",          (void *)impl_assert_lt,            6, 0);
+    cc_register_cfunc(vm, "__builtin_assert_ge",          (void *)impl_assert_ge,            6, 0);
+    cc_register_cfunc(vm, "__builtin_assert_le",          (void *)impl_assert_le,            6, 0);
+    cc_register_cfunc(vm, "__builtin_assert_within",      (void *)impl_assert_within,        8, 0);
+    cc_register_cfunc(vm, "__builtin_assert_null",        (void *)impl_assert_null,          4, 0);
+    cc_register_cfunc(vm, "__builtin_assert_not_null",    (void *)impl_assert_not_null,      4, 0);
+    cc_register_cfunc(vm, "__builtin_assert_streq",       (void *)impl_assert_streq,         6, 0);
+    cc_register_cfunc(vm, "__builtin_assert_streq_len",   (void *)impl_assert_streq_len,     7, 0);
+    cc_register_cfunc(vm, "__builtin_assert_mem_eq",      (void *)impl_assert_mem_eq,        7, 0);
+    cc_register_cfunc(vm, "__builtin_assert_float_within",(void *)impl_assert_float_within,  8, 0);
+    cc_register_cfunc(vm, "__builtin_assert_double_within",(void *)impl_assert_double_within,8, 0);
+    cc_register_cfunc(vm, "__builtin_assert_bits",        (void *)impl_assert_bits,          8, 0);
+    cc_register_cfunc(vm, "__builtin_assert_bit_high",    (void *)impl_assert_bit_high,      6, 0);
+    cc_register_cfunc(vm, "__builtin_assert_bit_low",     (void *)impl_assert_bit_low,       6, 0);
+    cc_register_cfunc(vm, "__builtin_assert_eq_array",    (void *)impl_assert_eq_array,      8, 0);
+    cc_register_cfunc(vm, "__builtin_assert_msg",         (void *)impl_assert_msg,           5, 0);
+    cc_register_cfunc(vm, "__builtin_assert_eq_msg",      (void *)impl_assert_eq_msg,        7, 0);
+    cc_register_cfunc(vm, "__builtin_assert_streq_msg",   (void *)impl_assert_streq_msg,     7, 0);
+    cc_register_cfunc(vm, "__builtin_assert_null_msg",    (void *)impl_assert_null_msg,      5, 0);
+    cc_register_cfunc(vm, "__builtin_assert_not_null_msg",(void *)impl_assert_not_null_msg,  5, 0);
+    cc_register_cfunc(vm, "__builtin_assert_bits_msg",    (void *)impl_assert_bits_msg,      9, 0);
 }
 
 // Preprocess src/tests.h (loaded via the embedded std registry). As a

@@ -13,15 +13,15 @@ int add2(int base, int a, int b) {
 }
 
 [[cccc::comptime(inline)]]
-$node_t *forward_all($node_t *fn_node, ...) {
-    return $funcall(fn_node, $vararg_as_array(), $vararg_count());
+Node *forward_all(Node *fn_node, ...) {
+    return MakeFuncCall(fn_node, VarargAsArray(), VarargCount());
 }
 
 [[cccc::comptime(inline)]]
-$node_t *forward_tail($node_t *fn_node, $node_t *base, ...) {
-    $node_t **tail = $vararg_as_array();
-    $node_t *args[3] = { base, tail[0], tail[1] };
-    return $funcall(fn_node, args, 3);
+Node *forward_tail(Node *fn_node, Node *base, ...) {
+    Node **tail = VarargAsArray();
+    Node *args[3] = { base, tail[0], tail[1] };
+    return MakeFuncCall(fn_node, args, 3);
 }
 
 int main(void) {

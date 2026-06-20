@@ -2,22 +2,22 @@
 
 [[cccc::comptime]]
 void gen_funcs(...) {
-    for (int i = 0; i < $vararg_count(); i = i + 1) {
-        const char *name = $vararg_str_at(i);
-        $obj_t *fn = $function(name, $get_type("int"));
-        $function_set_body(fn, $return($int_literal(42 + i)));
+    for (int i = 0; i < VarargCount(); i = i + 1) {
+        const char *name = VarargStrAt(i);
+        Obj *fn = MakeFunction(name, GetType("int"));
+        FunctionSetBody(fn, MakeReturn(MakeIntLiteral(42 + i)));
     }
 }
 
 [[cccc::comptime]]
 void gen_fixed_and_tail(char *first, ...) {
-    $obj_t *fixed = $function(first, $get_type("int"));
-    $function_set_body(fixed, $return($int_literal($vararg_count())));
+    Obj *fixed = MakeFunction(first, GetType("int"));
+    FunctionSetBody(fixed, MakeReturn(MakeIntLiteral(VarargCount())));
 
-    for (int i = 0; i < $vararg_count(); i = i + 1) {
-        const char *name = $vararg_str_at(i);
-        $obj_t *fn = $function(name, $get_type("int"));
-        $function_set_body(fn, $return($int_literal(20 + i)));
+    for (int i = 0; i < VarargCount(); i = i + 1) {
+        const char *name = VarargStrAt(i);
+        Obj *fn = MakeFunction(name, GetType("int"));
+        FunctionSetBody(fn, MakeReturn(MakeIntLiteral(20 + i)));
     }
 }
 

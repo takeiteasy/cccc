@@ -5,9 +5,9 @@
 
 [[cccc::comptime]]
 void gen(void) {
-    $obj_t *fn = $function("generated_answer", $get_type("int"));
-    $function_set_body(fn, $quote("return 42;"));
-    $publish(fn);
+    Obj *fn = MakeFunction("generated_answer", GetType("int"));
+    FunctionSetBody(fn, Quote("return 42;"));
+    PublishNode(fn);
 }
 
 #ifdef @emit _WIN32

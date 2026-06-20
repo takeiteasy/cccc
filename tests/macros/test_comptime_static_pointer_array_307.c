@@ -31,16 +31,16 @@ const char *lookup_reg_fn(const char *header) {
 }
 
 [[cccc::comptime(inline)]]
-$node_t *reg_lookup_ok(void) {
+Node *reg_lookup_ok(void) {
     static const char *headers[] = {"ctype.h", "stdio.h", "string.h"};
 
     if (strcmp(headers[1], "stdio.h") != 0)
-        return $int_literal(1);
+        return MakeIntLiteral(1);
     if (strcmp(lookup_reg_fn(headers[2]), "register_string") != 0)
-        return $int_literal(2);
+        return MakeIntLiteral(2);
     if (lookup_reg_fn("missing.h") != 0)
-        return $int_literal(3);
-    return $int_literal(42);
+        return MakeIntLiteral(3);
+    return MakeIntLiteral(42);
 }
 
 int main(void) {

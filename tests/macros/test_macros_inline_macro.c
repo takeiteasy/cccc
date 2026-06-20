@@ -7,14 +7,14 @@
 
 [[cccc::comptime]]
 void generate_const_func(void) {
-    $vm_t *vm = __cccc_get_vm();
+    VirtualMachine *vm = __builtin_get_vm();
 
-    $type_t *int_type = __cccc_ast_get_type(vm, "int");
-    $obj_t *fn = __cccc_ast_function(vm, "generated_func", int_type);
+    Type *int_type = __builtin_ast_get_type(vm, "int");
+    Obj *fn = __builtin_ast_function(vm, "generated_func", int_type);
 
-    $node_t *ret_val = __cccc_ast_int_literal(vm, 42);
-    $node_t *ret_stmt = __cccc_ast_return(vm, ret_val);
-    __cccc_ast_function_set_body(vm, fn, ret_stmt);
+    Node *ret_val = __builtin_ast_int_literal(vm, 42);
+    Node *ret_stmt = __builtin_ast_return(vm, ret_val);
+    __builtin_ast_function_set_body(vm, fn, ret_stmt);
 }
 
 generate_const_func();

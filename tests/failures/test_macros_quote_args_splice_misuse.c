@@ -7,11 +7,11 @@
 int sum_ints(int count, ...) { return 0; }
 
 [[cccc::comptime(inline)]]
-$node_t *bad_arg_splice($node_t *x) {
-    $vm_t *vm = __cccc_get_vm();
+Node *bad_arg_splice(Node *x) {
+    VirtualMachine *vm = __builtin_get_vm();
     // $@1 cannot be used as an operand inside an expression; it must be a
     // direct argument, not a sub-expression.
-    return __cccc_quote(vm, "sum_ints(1, $@1 + 1)", x);
+    return __builtin_quote(vm, "sum_ints(1, $@1 + 1)", x);
 }
 
 int main(void) {

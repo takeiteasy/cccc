@@ -396,7 +396,7 @@ otherwise; GNU-only attributes such as `packed` stay GNU in `auto` mode.
 
 ```c
 @comptime(inline)
-$node_t *make_answer(void) { return $int_literal(42); }
+Node *make_answer(void) { return MakeIntLiteral(42); }
 
 @test(suite = "math")
 void test_add(void) { $assert_eq(1 + 1, 2); }

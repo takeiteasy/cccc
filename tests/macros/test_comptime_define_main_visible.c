@@ -6,6 +6,6 @@
 [[cccc::comptime]] int get_val(void) { return FROM_MAIN; }
 
 [[cccc::comptime(inline)]]
-$node_t *call_get(void) { return $int_literal(get_val()); }
+Node *call_get(void) { return MakeIntLiteral(get_val()); }
 
 int main(void) { return call_get() == 77 ? 42 : 1; }

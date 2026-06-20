@@ -18,18 +18,18 @@ struct Config {
 } cfg = { base_width(), 240, scale };
 
 [[cccc::comptime(inline)]]
-$node_t *get_width(void) {
-    return $get_comptime_member("cfg", "width");
+Node *get_width(void) {
+    return GetComptimeMember("cfg", "width");
 }
 
 [[cccc::comptime(inline)]]
-$node_t *get_height(void) {
-    return $get_comptime_member("cfg", "height");
+Node *get_height(void) {
+    return GetComptimeMember("cfg", "height");
 }
 
 [[cccc::comptime(inline)]]
-$node_t *get_scale(void) {
-    return $get_comptime_member("cfg", "scale");
+Node *get_scale(void) {
+    return GetComptimeMember("cfg", "scale");
 }
 
 int main(void) {

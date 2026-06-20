@@ -4,11 +4,11 @@
 #endif @comptime
 
 [[cccc::comptime(inline)]]
-$node_t *answer(void) {
+Node *answer(void) {
 #if CT_SEEN
-    return $int_literal(CT_VALUE);
+    return MakeIntLiteral(CT_VALUE);
 #else
-    return $int_literal(0);
+    return MakeIntLiteral(0);
 #endif
 }
 
