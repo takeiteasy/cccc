@@ -5,28 +5,29 @@
  * This header is automatically injected when CCCC is invoked with the @c --build
  * flag and should not be included directly.  It declares the opaque build types,
  * the underlying @c __builtin_build_* FFI-callable functions, and PascalCase macro
- * wrappers that auto-inject the build context singleton.
+ * wrappers that forward an explicit build context parameter.
  *
  * A build script is an ordinary @c .c file containing a build entry — a function
- * tagged @c [[cccc::build]] (or named @c build_main).  The entry runs inside the
- * CCCC VM, imperatively creates targets, wires their dependencies, and calls one
- * of the @c Build* functions.  The host-side runner then compiles and links the
- * declared targets with the system toolchain (@c cc / @c ar / @c ld).
+ * tagged @c [[cccc::build]] (or named @c build_main).  The entry receives the
+ * build context as its first parameter, uses it to create targets, wires their
+ * dependencies, and calls one of the @c Build* functions.  The host-side runner
+ * then compiles and links the declared targets with the system toolchain
+ * (@c cc / @c ar / @c ld).
  *
  * ## Usage
  *
  * @code
  * [[cccc::build]]
- * int build_main(void) {
- *     cccc_target_t *core = StaticLib("core");
+ * int build_main(cccc_build_ctx_t *ctx) {
+ *     cccc_target_t *core = StaticLib(ctx, "core");
  *     AddSource(core, "src/lib/sum.c");
  *     AddInclude(core, "include");
  *
- *     cccc_target_t *app = Executable("app");
+ *     cccc_target_t *app = Executable(ctx, "app");
  *     AddSource(app, "src/main.c");
  *     LinkWith(app, core);
  *
- *     return BuildDefault();
+ *     return BuildDefault(ctx);
  * }
  * @endcode
  *
@@ -40,7 +41,7 @@
 // ============================================================================
 
 /*! @typedef cccc_build_ctx_t
- *  @abstract Opaque build context; accessed via BuildCtx() in build scripts. */
+ *  @abstract Opaque build context; passed to the entry and forwarded to macros. */
 typedef struct cccc_build_ctx_t cccc_build_ctx_t;
 
 /*! @typedef cccc_target_t
@@ -50,10 +51,6 @@ typedef struct cccc_target_t cccc_target_t;
 // ============================================================================
 // Underlying FFI-callable functions
 // ============================================================================
-
-/*! @function __builtin_build_ctx
- *  @abstract Return the active build context singleton. */
-cccc_build_ctx_t *__builtin_build_ctx(void);
 
 /*! @function __builtin_build_root
  *  @abstract Absolute path of the directory the build was launched from. */
@@ -136,30 +133,29 @@ int __builtin_build_run_all(cccc_build_ctx_t *ctx);
 int __builtin_build_run_default(cccc_build_ctx_t *ctx);
 
 // ============================================================================
-// PascalCase macro wrappers (auto-inject the build context singleton)
+// PascalCase macro wrappers (ctx is passed explicitly by the build entry)
 // ============================================================================
 
-#define BuildCtx()          __builtin_build_ctx()
-#define BuildRoot()         __builtin_build_root(BuildCtx())
-#define BuildOutDir()       __builtin_build_out_dir(BuildCtx())
-#define BuildHost()         __builtin_build_host(BuildCtx())
-#define BuildVerbose()      __builtin_build_verbose(BuildCtx())
+#define BuildRoot(ctx)          __builtin_build_root(ctx)
+#define BuildOutDir(ctx)        __builtin_build_out_dir(ctx)
+#define BuildHost(ctx)          __builtin_build_host(ctx)
+#define BuildVerbose(ctx)       __builtin_build_verbose(ctx)
 
-#define Executable(name)    __builtin_build_executable(BuildCtx(), name)
-#define StaticLib(name)     __builtin_build_static_lib(BuildCtx(), name)
-#define DynamicLib(name)    __builtin_build_dynamic_lib(BuildCtx(), name)
+#define Executable(ctx, name)   __builtin_build_executable(ctx, name)
+#define StaticLib(ctx, name)    __builtin_build_static_lib(ctx, name)
+#define DynamicLib(ctx, name)   __builtin_build_dynamic_lib(ctx, name)
 
-#define SetOutput(t, p)     __builtin_build_set_output(t, p)
-#define AddSource(t, p)     __builtin_build_add_source(t, p)
-#define AddInclude(t, p)    __builtin_build_add_include(t, p)
-#define AddDefine(t, n, v)  __builtin_build_add_define(t, n, v)
-#define AddUndef(t, n)      __builtin_build_add_undef(t, n)
-#define AddCFlag(t, f)      __builtin_build_add_cflag(t, f)
-#define AddLdFlag(t, f)     __builtin_build_add_ldflag(t, f)
-#define LinkWith(t, dep)    __builtin_build_link_with(t, dep)
-#define AddLib(t, n)        __builtin_build_add_lib(t, n)
-#define AddLibPath(t, p)    __builtin_build_add_libpath(t, p)
+#define SetOutput(t, p)         __builtin_build_set_output(t, p)
+#define AddSource(t, p)         __builtin_build_add_source(t, p)
+#define AddInclude(t, p)        __builtin_build_add_include(t, p)
+#define AddDefine(t, n, v)      __builtin_build_add_define(t, n, v)
+#define AddUndef(t, n)          __builtin_build_add_undef(t, n)
+#define AddCFlag(t, f)          __builtin_build_add_cflag(t, f)
+#define AddLdFlag(t, f)         __builtin_build_add_ldflag(t, f)
+#define LinkWith(t, dep)        __builtin_build_link_with(t, dep)
+#define AddLib(t, n)            __builtin_build_add_lib(t, n)
+#define AddLibPath(t, p)        __builtin_build_add_libpath(t, p)
 
-#define Build(t)            __builtin_build_run(BuildCtx(), t)
-#define BuildAll()          __builtin_build_run_all(BuildCtx())
-#define BuildDefault()      __builtin_build_run_default(BuildCtx())
+#define Build(ctx, t)           __builtin_build_run(ctx, t)
+#define BuildAll(ctx)           __builtin_build_run_all(ctx)
+#define BuildDefault(ctx)       __builtin_build_run_default(ctx)

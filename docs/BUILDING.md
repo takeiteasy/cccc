@@ -17,17 +17,17 @@ mirrors `--testing` (see [TESTING.md](TESTING.md)) and reuses the
 ```c
 // build.c
 [[cccc::build]]
-int build_main(void) {
-    cccc_target_t *core = StaticLib("core");
+int build_main(cccc_build_ctx_t *ctx) {
+    cccc_target_t *core = StaticLib(ctx, "core");
     AddSource(core, "src/lib/sum.c");
     AddInclude(core, "include");
 
-    cccc_target_t *app = Executable("app");
+    cccc_target_t *app = Executable(ctx, "app");
     AddSource(app, "src/main.c");
     AddInclude(app, "include");
     LinkWith(app, core);
 
-    return BuildDefault();
+    return BuildDefault(ctx);
 }
 ```
 
@@ -108,11 +108,11 @@ __attribute__((build))              // GNU
 __attribute__((cccc::build))        // GNU namespaced
 ```
 
-Signature (build context is auto-injected; the entry takes no parameters):
+Signature (the build context is passed as the first parameter):
 
 ```c
-int  build_main(void);   // non-zero return = build failure
-void build_main(void);   // success iff all targets built
+int  build_main(cccc_build_ctx_t *ctx);   // non-zero return = build failure
+void build_main(cccc_build_ctx_t *ctx);   // success iff all targets built
 ```
 
 The same file is still valid C: in default mode (`cccc build.c`) the
@@ -132,16 +132,16 @@ All of the following are declared in the auto-injected `building.h`; do not
 include it directly.
 
 ```c
-// Build context (auto-injected; call with no arguments)
-const char *BuildRoot();      // launch directory
-const char *BuildOutDir();    // output directory
-const char *BuildHost();      // "darwin" | "linux" | ...
-int         BuildVerbose();
+// Build context accessors
+const char *BuildRoot(cccc_build_ctx_t *ctx);      // launch directory
+const char *BuildOutDir(cccc_build_ctx_t *ctx);    // output directory
+const char *BuildHost(cccc_build_ctx_t *ctx);      // "darwin" | "linux" | ...
+int         BuildVerbose(cccc_build_ctx_t *ctx);
 
 // Target factories — each returns a target owned by the context
-cccc_target_t *Executable(const char *name);
-cccc_target_t *StaticLib(const char *name);
-cccc_target_t *DynamicLib(const char *name);
+cccc_target_t *Executable(cccc_build_ctx_t *ctx, const char *name);
+cccc_target_t *StaticLib(cccc_build_ctx_t *ctx, const char *name);
+cccc_target_t *DynamicLib(cccc_build_ctx_t *ctx, const char *name);
 
 // Output / sources
 void SetOutput(cccc_target_t *t, const char *path);
@@ -160,9 +160,9 @@ void AddLib(cccc_target_t *t, const char *name);     // -l<name>
 void AddLibPath(cccc_target_t *t, const char *path); // -L<path>
 
 // Run (synchronous; returns 0 on success)
-int Build(cccc_target_t *t);  // t + its deps
-int BuildAll();               // every target
-int BuildDefault();           // run_all + summary
+int Build(cccc_build_ctx_t *ctx, cccc_target_t *t);  // t + its deps
+int BuildAll(cccc_build_ctx_t *ctx);                  // every target
+int BuildDefault(cccc_build_ctx_t *ctx);              // run_all + summary
 ```
 
 `Build*` compiles and links synchronously inside the call, so the
@@ -177,6 +177,10 @@ Passing `--ffi-allow=a,b,c` switches build mode into allowlist mode — only the
 named functions are callable, everything else is blocked. The builder API
 (`__builtin_build_*` / PascalCase macros) and the host-spawned `cc`/`ar`/`ld` are the build runtime itself and
 are always available regardless of `--ffi-allow`/`--ffi-deny`/`--disable-ffi`.
+
+The PascalCase macros (`StaticLib`, `Executable`, `BuildDefault`, …) are thin
+wrappers around the underlying `__builtin_build_*` functions; they forward the
+`ctx` parameter passed by the entry.
 
 > The allowlist matches **C function names** (e.g. `system`, `popen`), not tool
 > executables. Tool-name gating and toolchain probing are deferred (see below).

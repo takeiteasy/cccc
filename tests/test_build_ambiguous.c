@@ -6,10 +6,10 @@
 
 [[cccc::build]]
 int build_a(cccc_build_ctx_t *ctx) {
-    return BuildAll();
+    return BuildAll(ctx);
 }
 
 [[cccc::build]]
 int build_b(cccc_build_ctx_t *ctx) {
-    return BuildAll();
+    return BuildAll(ctx);
 }

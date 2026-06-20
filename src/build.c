@@ -289,10 +289,6 @@ static long long impl_add_libpath(long long t, long long path) {
     return 0;
 }
 
-static long long impl_build_ctx(void) {
-    return (long long)(intptr_t)s_ctx;
-}
-
 static long long impl_build_root(long long ctx) {
     (void)ctx;
     return (long long)(intptr_t)(s_ctx ? s_ctx->root : "");
@@ -316,7 +312,6 @@ static long long impl_build_run_all(long long ctx);
 static long long impl_build_run_default(long long ctx);
 
 void cc_load_build_runtime(VirtualMachine *vm) {
-    cc_register_cfunc(vm, "__builtin_build_ctx",        (void *)impl_build_ctx,         0, 0);
     cc_register_cfunc(vm, "__builtin_build_executable", (void *)impl_executable,         2, 0);
     cc_register_cfunc(vm, "__builtin_build_static_lib", (void *)impl_static_lib,         2, 0);
     cc_register_cfunc(vm, "__builtin_build_dynamic_lib",(void *)impl_dynamic_lib,        2, 0);
