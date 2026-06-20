@@ -288,6 +288,40 @@ Without `-c=native`, CCCC compiles C to portable bytecode and runs it in its bui
 
 Bytecode uses 32-bit instruction words; 64-bit immediates are split across two consecutive words. Saved `.c4` files include relocation and ABI metadata so loaded programs re-anchor global pointers, function-pointer offsets, FFI entries, and aggregate return buffers to the new VM instance. See [VM.md](docs/VM.md) for the full instruction set, ABI, and file format.
 
+### Build System (`--build`)
+
+A build script is an ordinary `.c` file that CCCC compiles and runs at build time. It declares native targets (executables, static and dynamic libraries) and the CCCC runner compiles and links them with the system toolchain — no Make, no `build.zig`, no separate config language.
+
+```c
+// build.c
+[[cccc::build]]
+int build_main(cccc_build_ctx_t *ctx) {
+    cccc_target_t *core = cccc_static_lib(ctx, "core");
+    cccc_target_add_source(core, "src/lib/sum.c");
+    cccc_target_add_include(core, "include");
+
+    cccc_target_t *app = cccc_executable(ctx, "app");
+    cccc_target_add_source(app, "src/main.c");
+    cccc_target_add_include(app, "include");
+    cccc_target_link_with(app, core);
+
+    return cccc_build_run_default(ctx);
+}
+```
+
+```bash
+# Run the build entry; the host runner compiles the declared targets
+./cccc --build build.c
+
+# Print the toolchain command lines without running them
+./cccc --build build.c --build-dry-run
+
+# Choose the entry / output directory
+./cccc --build build.c --build-entry=foo --build-out-dir=out
+```
+
+The entry is `build_main`, a `[[cccc::build]]`-tagged function, or `--build-entry=NAME`. The builder API (`cccc_executable`, `cccc_target_*`, `cccc_build_run*`) is injected automatically via a private `cccc_build.h`. Build mode inverts the FFI default — all FFI is allowed so the script can shell out to tools, and `--ffi-allow=list` switches to an allowlist. A runnable example lives in [`examples/build_demo/`](examples/build_demo). See [BUILDING.md](docs/BUILDING.md) for the full builder API, target kinds, and CLI.
+
 ## Running Tests
 
 ```bash

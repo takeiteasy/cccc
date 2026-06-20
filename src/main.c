@@ -264,6 +264,11 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-e/--entry <name>        Set the entry-point function (default: main)\n");
     printf("\t   --vm-profile          Count executed VM opcodes and print a report\n");
     printf("\t                         Combine with --json to also dump the profile as JSON to stdout\n");
+    printf("\nBuild Options:\n");
+    printf("\t   --build               Run the input as a build script (declares native targets)\n");
+    printf("\t   --build-entry=NAME    Build entry function to invoke (default: build_main)\n");
+    printf("\t   --build-out-dir=PATH  Output directory for build artifacts (default: build/)\n");
+    printf("\t   --build-dry-run       Print the toolchain command lines without executing them\n");
     printf("\nWarning Options:\n");
     printf("\t-Wall               Enable common warning categories\n");
     printf("\t-Wextra             Enable extra warning categories\n");
@@ -815,6 +820,10 @@ int main(int argc, const char *argv[]) {
     int fail_fast = 0;             // --fail-fast
     int test_timeout = 0;          // --test-timeout=N
     CcTestFormat test_format = TEST_FORMAT_TAP; // --test-format=FORMAT
+    int build_mode = 0;            // --build
+    const char *build_entry = NULL;   // --build-entry=NAME
+    const char *build_out_dir = NULL; // --build-out-dir=PATH (default "build")
+    int build_dry_run = 0;         // --build-dry-run
 
     if (argc <= 1)
         usage(argv[0], 1);
@@ -900,6 +909,10 @@ int main(int argc, const char *argv[]) {
         {"emit-only", no_argument, 0, 1067},
         {"attr-target", required_argument, 0, 1069},
         {"no-debug-on-crash", no_argument, 0, 1071},
+        {"build", no_argument, 0, 1073},
+        {"build-entry", required_argument, 0, 1074},
+        {"build-out-dir", required_argument, 0, 1075},
+        {"build-dry-run", no_argument, 0, 1076},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1332,6 +1345,21 @@ int main(int argc, const char *argv[]) {
         case 1071: // --no-debug-on-crash
             flags |= CCCC_NO_DEBUG_ON_CRASH;
             break;
+        case 1073: // --build
+            build_mode = 1;
+            break;
+        case 1074: // --build-entry=NAME
+            build_entry = optarg;
+            build_mode = 1;
+            break;
+        case 1075: // --build-out-dir=PATH
+            build_out_dir = optarg;
+            build_mode = 1;
+            break;
+        case 1076: // --build-dry-run
+            build_dry_run = 1;
+            build_mode = 1;
+            break;
         case 1066: // --test-format=FORMAT
             if (strcmp(optarg, "tap") == 0) {
                 test_format = TEST_FORMAT_TAP;
@@ -1398,6 +1426,24 @@ int main(int argc, const char *argv[]) {
     if (input_files_count == 0) {
         fprintf(stderr, "error: no input files\n");
         usage((char *)argv[0], 1);
+    }
+
+    if (build_mode) {
+        // --build runs the build script in the VM; the host runner compiles the
+        // declared targets. VM-only and output modes do not apply here.
+        if (compile_format != COMPILE_NONE || disassemble || opt_level != 0 ||
+            fuse_ops || vm_profile || out_file || preprocess_only ||
+            dump_expanded_only || print_tokens || output_json ||
+            output_ffi_decls || dump_ast) {
+            fprintf(stderr,
+                    "error: --build cannot be combined with VM/output options "
+                    "(-c, -d, -O<n>, --vm-profile, -o, -E, -M, --ast, ...)\n");
+            usage(argv[0], 1);
+        }
+        if (flags & CCCC_ENABLE_DEBUGGER) {
+            fprintf(stderr, "error: --build cannot be combined with --debug\n");
+            usage(argv[0], 1);
+        }
     }
 
     if (compile_format == COMPILE_NATIVE) {
@@ -1495,7 +1541,7 @@ int main(int argc, const char *argv[]) {
     // itself if it invokes cccc directly.
     bool auto_debug_on_crash =
         !(flags & CCCC_ENABLE_DEBUGGER) && !(flags & CCCC_NO_DEBUG_ON_CRASH) &&
-        !testing_mode &&
+        !testing_mode && !build_mode &&
         CCCC_ISATTY(CCCC_FILENO(stdin)) && CCCC_ISATTY(CCCC_FILENO(stdout));
     if (auto_debug_on_crash)
         flags |= CCCC_ENABLE_DEBUGGER;
@@ -1515,6 +1561,7 @@ int main(int argc, const char *argv[]) {
     vm.compiler.attr_target = attr_target;
     vm.compiler.entry_name = (char *)entry_name;
     vm.compiler.testing_mode = (bool)testing_mode;
+    vm.compiler.build_mode = (bool)build_mode;
     vm.compiler.diagnostic_json = output_json;
     vm.disable_all_ffi = disable_all_ffi;
     vm.ffi_errors_fatal = ffi_errors_fatal;
@@ -1786,6 +1833,8 @@ int main(int argc, const char *argv[]) {
     Token *test_decls = NULL;
     if (testing_mode)
         test_decls = cc_inject_test_header(&vm);
+    else if (build_mode)
+        test_decls = cc_inject_build_header(&vm);
 
     input_tokens = calloc(input_files_count, sizeof(Token *));
     for (int i = 0; i < input_files_count; i++) {
@@ -1805,8 +1854,8 @@ int main(int argc, const char *argv[]) {
         }
     }
 
-    // Prepend __cccc_assert* declarations into the first file's parse stream.
-    if (testing_mode && test_decls && input_files_count > 0) {
+    // Prepend injected header declarations into the first file's parse stream.
+    if ((testing_mode || build_mode) && test_decls && input_files_count > 0) {
         Token *last = test_decls;
         while (last->next && last->next->kind != TK_EOF)
             last = last->next;
@@ -1843,6 +1892,8 @@ int main(int argc, const char *argv[]) {
     // instead of longjmp-ing through an uninitialised jmp_buf (ticket #334).
     if (testing_mode)
         cc_load_test_runtime(&vm);
+    if (build_mode)
+        cc_load_build_runtime(&vm);
 
     input_progs = calloc(input_files_count, sizeof(Obj *));
     for (int i = 0; i < input_files_count; i++) {
@@ -1995,6 +2046,39 @@ int main(int argc, const char *argv[]) {
     // for ticket #300: previously `compile_only` short-circuited at
     // `goto BAIL;` before the legacy `out_file` save block, silently
     // swallowing `-c -o foo.c4`.
+    if (build_mode) {
+        // A build script must not define main() in --build mode.
+        for (Obj *o = merged_prog; o; o = o->next) {
+            if (o->is_function && o->name && strcmp(o->name, "main") == 0) {
+                fprintf(stderr,
+                        "error: a --build script must not define main()\n");
+                exit_code = 1;
+                goto BAIL;
+            }
+        }
+
+        CcNativeCompileArgs build_defaults = {
+            .inc_paths      = inc_paths,      .inc_paths_count = inc_paths_count,
+            .sys_inc_paths  = sys_inc_paths,  .sys_inc_paths_count = sys_inc_paths_count,
+            .lib_paths      = lib_paths,      .lib_paths_count = lib_paths_count,
+            .libs           = libs,           .libs_count = libs_count,
+            .defines        = defines,        .defines_count = defines_count,
+            .undefs         = undefs,         .undefs_count = undefs_count,
+            .std_arg        = std_arg,
+        };
+        CcBuildOptions build_opts = {
+            .entry_name = build_entry,
+            .out_dir    = build_out_dir,
+            .verbose    = verbose,
+            .dry_run    = build_dry_run,
+            .defaults   = &build_defaults,
+        };
+
+        exit_code = cc_run_build(&vm, merged_prog, &build_opts);
+
+        goto BAIL;   // never fall through to the compile block
+    }
+
     if (testing_mode) {
         CcTestOptions test_opts = {
             .test_glob    = test_glob,

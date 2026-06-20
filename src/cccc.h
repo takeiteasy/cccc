@@ -1231,6 +1231,14 @@ struct TestSetupRecord {
     TestSetupRecord *next;
 };
 
+// A build-entry function registered via [[cccc::build]]. Only the C function
+// name is recorded; the --build runner resolves and invokes it by address.
+typedef struct BuildFnRecord BuildFnRecord;
+struct BuildFnRecord {
+    char *name;             // C function name (used for address lookup)
+    BuildFnRecord *next;
+};
+
 // Test output format selector.
 typedef enum {
     TEST_FORMAT_TAP,    // TAP version 13 (default)
@@ -1837,6 +1845,8 @@ typedef struct Compiler {
     ComptimeVar *comptime_vars;      // Linked list of [[cccc::comptime]] variable decls
     TestFnRecord *test_fns;          // Linked list of [[cccc::test]] function names
     TestSetupRecord *test_setups;    // Linked list of [[cccc::test_setup/teardown]] records
+    BuildFnRecord *build_fns;        // Linked list of [[cccc::build]] entry function names
+    bool build_mode;                 // True when running under --build (no main required)
     bool testing_mode;               // True when running under --testing (no main required)
     char *current_suite;             // Active suite path ("a/b/c") set by nested #pragma cccc suite begin
     struct SuiteLenEntry {

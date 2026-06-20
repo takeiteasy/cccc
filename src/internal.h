@@ -769,6 +769,22 @@ typedef struct {
     const char  *std_arg;
 } CcNativeCompileArgs;
 
+//
+// build.c (--build mode)
+//
+typedef struct {
+    const char *entry_name;             // --build-entry override, or NULL
+    const char *out_dir;                // -O/--build-out-dir, or NULL (default "build")
+    int         verbose;                // -v
+    int         dry_run;                // --build-dry-run: print commands, run nothing
+    const CcNativeCompileArgs *defaults; // CLI -I/-D/-U/--std forwarded to each target
+} CcBuildOptions;
+
+void   cc_load_build_runtime(VirtualMachine *vm);
+Token *cc_inject_build_header(VirtualMachine *vm);
+int    cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts);
+char  *cccc_find_native_tool(const char *tool);
+
 // serialize.c
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated_only);
 

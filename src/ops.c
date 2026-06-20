@@ -2770,6 +2770,15 @@ static int cccc_handle_ffi_policy_error(VirtualMachine *vm, const char *kind,
 
 static int cccc_check_ffi_policy(VirtualMachine *vm, const char *name, int actual_nargs,
                                 int is_variadic, int num_fixed_args) {
+    // In --build mode the builder API (the cccc_* runtime injected by
+    // cccc_build.h) is the build runtime itself, not user FFI. It is always
+    // callable regardless of --ffi-allow/--ffi-deny/--disable-ffi, exactly as
+    // the host-spawned cc/ar/ld are. Only the tool calls a script makes are
+    // gated by the FFI policy.
+    if (vm->compiler.build_mode && name &&
+        strlen(name) >= 5 && memcmp(name, "cccc_", 5) == 0)
+        return 1;
+
     if (vm->disable_all_ffi)
         return cccc_handle_ffi_policy_error(
             vm, "FFI Disabled", name,

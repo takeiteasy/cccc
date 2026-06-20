@@ -1411,6 +1411,14 @@ void cc_destroy(VirtualMachine *vm) {
     }
     vm->compiler.test_setups = NULL;
 
+    // Free build-entry records (build_fns linked list)
+    for (BuildFnRecord *b = vm->compiler.build_fns, *nb; b; b = nb) {
+        nb = b->next;
+        free(b->name);
+        free(b);
+    }
+    vm->compiler.build_fns = NULL;
+
     // Destroy parser arena (frees all tokens, AST nodes, preprocessor state)
     arena_destroy(&vm->compiler.parser_arena);
 }
@@ -1978,4 +1986,26 @@ char *cccc_find_native_cc(void) {
     fprintf(stderr,
             "error: no native C compiler found (tried cc, clang, gcc)\n");
     return NULL;
+}
+
+// Locate a toolchain tool (e.g. "ar", "ld") for --build mode.  An uppercased
+// CCCC_NATIVE_<TOOL> env var overrides the PATH lookup.
+char *cccc_find_native_tool(const char *tool) {
+    char envname[64];
+    snprintf(envname, sizeof(envname), "CCCC_NATIVE_%s", tool);
+    for (char *p = envname + strlen("CCCC_NATIVE_"); *p; p++)
+        if (*p >= 'a' && *p <= 'z')
+            *p = (char)(*p - 'a' + 'A');
+    const char *override = getenv(envname);
+    if (override && *override) {
+        char *found = cccc_path_find_executable(override);
+        if (found)
+            return found;
+        fprintf(stderr, "error: %s tool '%s' not found\n", envname, override);
+        return NULL;
+    }
+    char *found = cccc_path_find_executable(tool);
+    if (!found)
+        fprintf(stderr, "error: native tool '%s' not found in PATH\n", tool);
+    return found;
 }

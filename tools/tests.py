@@ -67,6 +67,7 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
     is_negative_test = False
     expects_runtime_error = False
     is_testing_mode = False
+    is_build_mode = False
     per_test_flags = []
     per_test_run_args = []
     expect_stderr = None
@@ -89,6 +90,8 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
                     per_test_flags = flags_str.split()
                     if "--testing" in per_test_flags:
                         is_testing_mode = True
+                    if "--build" in per_test_flags:
+                        is_build_mode = True
                 if "CCCC_RUN_ARGS:" in line:
                     args_str = line.split("CCCC_RUN_ARGS:", 1)[1].strip().rstrip("*/").strip()
                     per_test_run_args = args_str.split()
@@ -102,6 +105,22 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
                     reject_stdout = line.split("CCCC_REJECT_STDOUT:", 1)[1].strip().rstrip("*/").strip()
     except Exception:
         pass
+
+    if c4_mode and is_build_mode:
+        # Build scripts emit no bytecode to round-trip; the runner compiles
+        # native targets instead. Skip the .c4 pass entirely.
+        return {
+            "idx": idx,
+            "test_name": test_name,
+            "exit_code": 0,
+            "status": "c4_skipped",
+            "output": "",
+            "is_negative_test": is_negative_test,
+            "expects_runtime_error": expects_runtime_error,
+            "stderr_mismatch": None,
+            "elapsed": 0,
+            "skip_reason": "c4-incompatible: --build mode",
+        }
 
     if c4_mode:
         return run_c4_roundtrip(
@@ -308,6 +327,10 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
     elif expect_stdout and exit_code == 0:
         status = "passed"
     elif expects_runtime_error and exit_code == 255:
+        status = "negative_pass"
+    elif is_build_mode and expect_stderr and exit_code != 0:
+        # A --build script CLI/resolution error (e.g. main() defined, ambiguous
+        # entry). The expect_stderr regex below validates the diagnostic.
         status = "negative_pass"
     else:
         status = "failed"

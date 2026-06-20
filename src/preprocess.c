@@ -2815,6 +2815,7 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
     bool is_test_kind      = false;
     bool is_setup_kind     = false;
     bool is_teardown_kind  = false;
+    bool is_build_kind     = false;
     bool is_inline         = false;
     char *attribute_name   = NULL;
     Token *attr_end        = NULL;
@@ -2899,7 +2900,12 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
                     Token *p = after_scope->next->next;
                     parse_test_setup_args(&p, &tsa);
                 }
+            } else if (equal(after_scope, "build")) {
+                is_build_kind = true;
             }
+        } else if (equal(t, "build")) {
+            // bare: __attribute__((build))
+            is_build_kind = true;
         } else if (equal(t, "test")) {
             // bare: __attribute__((test)) or __attribute__((test(...)))
             is_test_kind = true;
@@ -2920,9 +2926,9 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
         }
     }
 
-    // Only act on a positive macro/comptime/test/setup/teardown match.
+    // Only act on a positive macro/comptime/test/setup/teardown/build match.
     if ((!is_macro_kind && !is_comptime_kind && !is_test_kind &&
-         !is_setup_kind && !is_teardown_kind) || !attr_end)
+         !is_setup_kind && !is_teardown_kind && !is_build_kind) || !attr_end)
         return false;
 
     // Support [[cccc::comptime]] inline fn() — detect the inline keyword
@@ -3034,6 +3040,26 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
                 rec->is_teardown = is_teardown_kind;
                 rec->next = vm->compiler.test_setups;
                 vm->compiler.test_setups = rec;
+                break;
+            }
+            probe = probe->next;
+        }
+        *tok_ptr = attr_end;
+        return true;
+    }
+
+    // [[cccc::build]] / __attribute__((build)): record the build-entry function
+    // name, strip the attribute, keep the function in the normal compilation
+    // stream (the runner finds and invokes it by name in --build mode).
+    if (is_build_kind) {
+        Token *probe = attr_end;
+        while (probe && probe->kind != TK_EOF) {
+            if (equal(probe, ";") || equal(probe, "=")) break;
+            if (probe->kind == TK_IDENT && probe->next && equal(probe->next, "(")) {
+                BuildFnRecord *rec = calloc(1, sizeof(BuildFnRecord));
+                rec->name = strndup(probe->loc, probe->len);
+                rec->next = vm->compiler.build_fns;
+                vm->compiler.build_fns = rec;
                 break;
             }
             probe = probe->next;

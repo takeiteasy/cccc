@@ -6200,6 +6200,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
         }
     }
 
-    if (!vm->compiler.compile_only && !vm->compiler.testing_mode)
+    if (!vm->compiler.compile_only && !vm->compiler.testing_mode &&
+        !vm->compiler.build_mode)
         error("%s() function not found", entry);
 }
