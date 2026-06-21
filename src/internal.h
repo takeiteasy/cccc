@@ -690,6 +690,25 @@ void debugger_disassemble_current(VirtualMachine *vm);
 int debugger_run(VirtualMachine *vm, int argc, char **argv);
 
 //
+// host_backtrace.c
+//
+
+/* Initialise libbacktrace state and warm up DWARF/Mach-O caches.
+ * Must be called once at process startup (not in a signal handler) before
+ * cc_host_backtrace_install_fatal().  argv0 is used to locate the binary. */
+void cc_host_backtrace_init(const char *argv0);
+
+/* Install top-level crash handlers (SIGSEGV/SIGBUS/SIGFPE/SIGILL) that print
+ * a host C backtrace to stderr then re-raise the signal so the process dies
+ * with the original signal/exit code.  No-op when CCCC_HAS_BACKTRACE is off
+ * or on Windows. */
+void cc_host_backtrace_install_fatal(void);
+
+/* Print a host C backtrace to stderr.  Safe to call from a signal handler
+ * after cc_host_backtrace_init() has completed. */
+void cc_host_backtrace_print(void);
+
+//
 // serialize.c
 //
 

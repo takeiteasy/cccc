@@ -79,8 +79,64 @@ ifeq ($(UNAME_S),Linux)
 	SAN_OUT += cccc-msan
 endif
 
+# libbacktrace — symbolic host C stack traces on crash.
+# On by default; disable with: make CCCC_HAS_BACKTRACE=0
+ifndef CCCC_HAS_BACKTRACE
+  CCCC_HAS_BACKTRACE := 1
+endif
+LIBBACKTRACE_A :=
+ifneq ($(OS),Windows_NT)
+  ifneq ($(CCCC_HAS_BACKTRACE),0)
+    LIBBACKTRACE_DIR  := src/backtrace
+    LIBBACKTRACE_A    := build/libbacktrace.a
+    LIBBACKTRACE_OBJS_DIR := build/libbacktrace
+    # Flags used only for compiling vendored libbacktrace (not -std=c23, no -Wall strictness)
+    LIBBACKTRACE_CC_FLAGS := -O2 -g -I$(LIBBACKTRACE_DIR) \
+      -Wno-unused-parameter -Wno-unused-variable \
+      -Wno-missing-field-initializers -Wno-shift-count-overflow \
+      -Wno-implicit-function-declaration -Wno-deprecated-declarations
+    # Platform-specific source list (elf.c on Linux, macho.c on macOS)
+    LIBBACKTRACE_COMMON := \
+      $(LIBBACKTRACE_DIR)/backtrace.c \
+      $(LIBBACKTRACE_DIR)/atomic.c \
+      $(LIBBACKTRACE_DIR)/dwarf.c \
+      $(LIBBACKTRACE_DIR)/fileline.c \
+      $(LIBBACKTRACE_DIR)/mmap.c \
+      $(LIBBACKTRACE_DIR)/mmapio.c \
+      $(LIBBACKTRACE_DIR)/posix.c \
+      $(LIBBACKTRACE_DIR)/print.c \
+      $(LIBBACKTRACE_DIR)/simple.c \
+      $(LIBBACKTRACE_DIR)/sort.c \
+      $(LIBBACKTRACE_DIR)/state.c
+    ifeq ($(UNAME_S),Darwin)
+      LIBBACKTRACE_SRCS := $(LIBBACKTRACE_COMMON) $(LIBBACKTRACE_DIR)/macho.c
+    else
+      LIBBACKTRACE_SRCS := $(LIBBACKTRACE_COMMON) $(LIBBACKTRACE_DIR)/elf.c
+    endif
+    LIBBACKTRACE_OBJS := $(patsubst $(LIBBACKTRACE_DIR)/%.c, \
+                           $(LIBBACKTRACE_OBJS_DIR)/%.o, $(LIBBACKTRACE_SRCS))
+    CFLAGS  += -DCCCC_HAS_BACKTRACE=1 -I$(LIBBACKTRACE_DIR)
+    LDFLAGS += $(LIBBACKTRACE_A)
+  endif
+endif
+
 default: $(EXE_OUT)
 
+# Build vendored libbacktrace as an isolated static archive.
+# All binary targets carry an order-only dep on this so it is built before linking.
+ifneq ($(LIBBACKTRACE_A),)
+$(LIBBACKTRACE_OBJS_DIR)/%.o: $(LIBBACKTRACE_DIR)/%.c
+	@mkdir -p $(LIBBACKTRACE_OBJS_DIR)
+	$(CC) $(LIBBACKTRACE_CC_FLAGS) -c -o $@ $<
+
+$(LIBBACKTRACE_A): $(LIBBACKTRACE_OBJS)
+	ar rcs $@ $^
+
+# Declare order-only dependency on the archive for all binary targets so that
+# they are never linked before the archive exists.
+$(EXE_OUT) $(LIB_OUT) cccc-asan cccc-ubsan cccc-tsan cccc-msan \
+  cccc-afl cccc-afl-asan fuzz_harness profile-cpu-build: | $(LIBBACKTRACE_A)
+endif
 
 $(EXE_OUT): $(SRCS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
@@ -403,8 +459,20 @@ clean:
 	@$(RM) -f $(EXE_OUT) $(LIB_OUT) $(SAN_OUT) $(MACOS_X86_64_BINARY) cccc-afl cccc-afl-asan cccc-prof fuzz_harness
 	@$(RM) -rf profile/*.prof profile/*.txt profile/*.json profile/*.massif
 	@$(RM) -rf fuzz/corpus fuzz/out
+	@$(RM) -rf $(LIBBACKTRACE_OBJS_DIR) $(LIBBACKTRACE_A)
 
-.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json macos-x86_64-build macos-x86_64-smoke macos-x86_64-test linux-x86_64-check linux-x86_64-build linux-x86_64-smoke linux-x86_64-test
+# dsym — (macOS only) run dsymutil to produce cccc.dSYM with full DWARF.
+# After running this, host C backtraces will include file:line information.
+# On Linux the -g build already embeds DWARF inline; this target is a no-op there.
+dsym:
+ifeq ($(UNAME_S),Darwin)
+	dsymutil $(EXE_OUT)
+	@echo "cccc.dSYM written. Host backtraces now resolve to file:line."
+else
+	@echo "dsym: DWARF is already embedded in the ELF binary on Linux; nothing to do."
+endif
+
+.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json macos-x86_64-build macos-x86_64-smoke macos-x86_64-test linux-x86_64-check linux-x86_64-build linux-x86_64-smoke linux-x86_64-test dsym
 ifeq ($(UNAME_S),Linux)
 .PHONY: msan
 endif

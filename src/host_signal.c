@@ -90,6 +90,13 @@ static void host_fault_handler(int sig, siginfo_t *info, void *context) {
 
     guard->signal = sig;
     guard->fault_addr = info ? info->si_addr : NULL;
+
+    /* Print the host C backtrace while the faulting stack is still live —
+     * after siglongjmp it will be unwound and unavailable.  Only do this on
+     * the fatal path (not when the guest is going to resume). */
+    if (!guard->guest_resume)
+        cc_host_backtrace_print();
+
     siglongjmp(guard->env, 1);
 }
 

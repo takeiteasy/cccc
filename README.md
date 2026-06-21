@@ -251,6 +251,12 @@ libffi` when available, with Homebrew and common Unix fallbacks.
 
 URL includes are an optional feature requiring libcurl: `make CCCC_HAS_CURL=1`.
 
+Host C stack traces on crash (the `src/backtrace/` library) are on by default
+and require no extra system dependencies — they are vendored directly in the
+repo. Disable with `make CCCC_HAS_BACKTRACE=0`. On macOS, run `make dsym`
+after building to unlock full `file:line` resolution in crash traces (see
+[DEBUGGER.md](docs/DEBUGGER.md#host-c-backtrace-on-crash)).
+
 ### Compile Natively (production)
 
 `-c=native` is the production path: CCCC preprocesses, expands compile-time macros, then hands the resulting C to a real system compiler. `-o <file>` is **required** to name the output executable; the temporary C source is removed after the build.
@@ -526,7 +532,7 @@ echo $?   # Should be 42
 
 ## Credits 
 
-This project builds on [chibicc](https://github.com/rui314/chibicc) for the C frontend and on ideas from [c4](https://github.com/rswier/c4) / [write-a-C-interpreter](https://github.com/lotabout/write-a-C-interpreter) for the VM-oriented execution model (You can run [test_c4](tests/test_c4.c) inside cccc by running `python3 tools/test.py --match "*c4*"`). [stb_sprintf.h](https://github.com/nothings/stb/blob/master/stb_sprintf.h) is used as a base for C23 compliant `*printf` functions.
+This project builds on [chibicc](https://github.com/rui314/chibicc) for the C frontend and on ideas from [c4](https://github.com/rswier/c4) / [write-a-C-interpreter](https://github.com/lotabout/write-a-C-interpreter) for the VM-oriented execution model (You can run [test_c4](tests/test_c4.c) inside cccc by running `python3 tools/test.py --match "*c4*"`). [stb_sprintf.h](https://github.com/nothings/stb/blob/master/stb_sprintf.h) is used as a base for C23 compliant `*printf` functions. Host C crash backtraces use [libbacktrace](https://github.com/ianlancetaylor/libbacktrace) by Ian Lance Taylor (BSD 3-clause), vendored in `src/backtrace/`.
 
 ## License
 

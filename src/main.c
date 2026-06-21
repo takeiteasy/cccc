@@ -737,6 +737,12 @@ static char **build_c4_argv(int *prog_argc, const char *input_file, int argc,
 }
 
 int main(int argc, const char *argv[]) {
+    /* Initialise and install libbacktrace crash handler as early as possible
+     * so that any fault during parse/codegen/VM produces a symbolic host
+     * C stack trace to stderr before the process dies. */
+    cc_host_backtrace_init(argv[0]);
+    cc_host_backtrace_install_fatal();
+
     int exit_code = 0;
     const char **input_files = NULL;
     int input_files_count = 0;

@@ -245,3 +245,59 @@ suffix operate as f64; `_F32` opcodes operate in f32 precision. `FROUND_F32`
 converts a floating register to f32 and tags the destination as f32. Raw-bit
 moves are typed: `FR2R`/`R2FR` move f64 payloads, and `FR2R_F32`/`R2FR_F32`
 move f32 payloads.
+
+## Host C Backtrace on Crash
+
+When CCCC itself crashes — during parsing, codegen, or VM dispatch — it prints
+a symbolic host C stack trace to stderr before the process exits. This works
+during **any** phase, not only inside the VM dispatch loop. Example output when
+a null dereference occurs inside the CCCC VM opcode handler:
+
+```
+Host C crash (SIGSEGV):
+  #0   <0x191c256a3>
+  #1   op_LDR_W_fn (src/ops.c:1130)
+  #2   cccc_vm_eval_dispatch (/src/vm.c:617)
+  #3   vm_eval (/src/host_signal.c:183)
+  #4   cc_run_at (/src/vm.c:1873)
+  #5   cc_run (/src/vm.c:1881)
+  #6   main (/src/main.c:2215)
+```
+
+The handler is installed early in `main()` for SIGSEGV, SIGBUS, SIGFPE, and
+SIGILL. It uses [libbacktrace](https://github.com/ianlancetaylor/libbacktrace)
+(vendored in `src/backtrace/`, BSD-licensed) and is on by default.
+
+After printing the trace the process dies with the original signal and exit
+code, so the test runner's exit-code semantics and negative-test failures are
+unaffected.
+
+When the interactive debugger is active (`-g` and both stdin/stdout are a TTY),
+the host C backtrace is also printed when the fault handler hands control to the
+debug REPL — before the native frame is unwound by `siglongjmp` — so you see
+both the host C call chain and the guest VM state.
+
+### File:line resolution on macOS
+
+On macOS, CCCC is linked in a single compiler invocation that deletes temp `.o`
+files. The binary carries only a debug map (N_OSO stabs) rather than inline
+DWARF, so libbacktrace resolves **function names** but not `file:line` for
+uninstrumented frames. To unlock full `file:line`:
+
+```bash
+make dsym      # runs dsymutil, produces cccc.dSYM
+```
+
+After that, re-running the same crash shows complete file and line numbers.
+`cccc.dSYM` is gitignored.
+
+On Linux, the `-g` build embeds DWARF inline in the ELF binary, so `file:line`
+works without any extra step.
+
+### Disabling
+
+Pass `CCCC_HAS_BACKTRACE=0` to `make` to build without libbacktrace:
+
+```bash
+make CCCC_HAS_BACKTRACE=0
+```
