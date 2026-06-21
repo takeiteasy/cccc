@@ -1245,6 +1245,16 @@ void cc_destroy(VirtualMachine *vm) {
     // Free include_guards HashMap
     hashmap_deinit(&vm->compiler.include_guards);
 
+    // Free dynamic patch tables (#555)
+    if (vm->compiler.call_patches)
+        free(vm->compiler.call_patches);
+    if (vm->compiler.func_addr_patches)
+        free(vm->compiler.func_addr_patches);
+    if (vm->compiler.data_relocs)
+        free(vm->compiler.data_relocs);
+    if (vm->compiler.tls_relocs)
+        free(vm->compiler.tls_relocs);
+
     // Free FFI table
     if (vm->compiler.ffi_table) {
         for (int i = 0; i < vm->compiler.ffi_count; i++) {

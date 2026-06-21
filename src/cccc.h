@@ -1972,26 +1972,33 @@ typedef struct Compiler {
     int label_counter; // For generating unique labels
     int local_offset;  // Current local variable offset
 
+    // Heap-allocated, grow-on-demand patch tables (initial capacity 256,
+    // doubles on overflow).  The four tables share the same shape: a pointer
+    // to the entries, a count, and a capacity.  No hard ceiling; very large
+    // translation units (e.g. minilua 31k lines) grow gracefully.
     struct {
         Pc location;      // Location in text segment to patch
-        Obj *function;       // Function to call
-    } call_patches[MAX_CALLS];
+        Obj *function;    // Function to call
+    } *call_patches;
     int num_call_patches;
+    int call_patches_cap;
 
     // Function address patches for function pointers
     struct {
         Pc location;      // Location of IMM operand to patch
-        Obj *function;       // Function whose address to use
-    } func_addr_patches[MAX_CALLS];
+        Obj *function;    // Function whose address to use
+    } *func_addr_patches;
     int num_func_addr_patches;
+    int func_addr_patches_cap;
 
     struct {
         long long data_offset;   // Pointer slot offset in data segment
         long long target_offset; // Target offset in text/data segment
         long long addend;        // Byte addend applied to target
         int target_segment;      // 0 = data, 1 = text
-    } data_relocs[MAX_CALLS];
+    } *data_relocs;
     int num_data_relocs;
+    int data_relocs_cap;
 
     // TLS pointer relocations: same shape as data_relocs but the pointer
     // slot lives in tls_template, not data_seg.  Serialised with the
@@ -2001,8 +2008,9 @@ typedef struct Compiler {
         long long target_offset; // Target offset in data segment (text NYI)
         long long addend;        // Byte addend applied to target
         int target_segment;      // 0 = data (only supported value currently)
-    } tls_relocs[MAX_CALLS];
+    } *tls_relocs;
     int num_tls_relocs;
+    int tls_relocs_cap;
 
     LabelEntry label_table[MAX_LABELS];
     int num_labels;

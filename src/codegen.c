@@ -24,6 +24,20 @@
 #include <sys/wait.h>
 #endif
 
+// Grow a dynamic patch table by 2x when full (initial capacity 256).
+// 'field' is the array pointer member, 'nf' is the count, 'cf' is the cap.
+#define PATCH_GROW(vm, field, nf, cf)                                       \
+    do {                                                                    \
+        if ((vm)->compiler.nf >= (vm)->compiler.cf) {                       \
+            int _nc = (vm)->compiler.cf ? (vm)->compiler.cf * 2 : 256;      \
+            void *_p = realloc((vm)->compiler.field,                        \
+                               (size_t)_nc * sizeof(*(vm)->compiler.field)); \
+            if (!_p) error("out of memory growing patch table");            \
+            (vm)->compiler.field = _p;                                      \
+            (vm)->compiler.cf = _nc;                                        \
+        }                                                                   \
+    } while (0)
+
 // ========== FFI Helper ==========
 
 static int find_ffi_function(VirtualMachine *vm, const char *name) {
@@ -88,8 +102,7 @@ static bool is_extern_func_name(Node *node, const char *name) {
 
 static void add_data_reloc(VirtualMachine *vm, long long data_offset, int target_segment,
                            long long target_offset, long long addend) {
-    if (vm->compiler.num_data_relocs >= MAX_CALLS)
-        error("too many data relocations");
+    PATCH_GROW(vm, data_relocs, num_data_relocs, data_relocs_cap);
     vm->compiler.data_relocs[vm->compiler.num_data_relocs].data_offset =
         data_offset;
     vm->compiler.data_relocs[vm->compiler.num_data_relocs].target_segment =
@@ -102,8 +115,7 @@ static void add_data_reloc(VirtualMachine *vm, long long data_offset, int target
 
 static void add_tls_reloc(VirtualMachine *vm, long long tls_offset, int target_segment,
                           long long target_offset, long long addend) {
-    if (vm->compiler.num_tls_relocs >= MAX_CALLS)
-        error("too many TLS relocations");
+    PATCH_GROW(vm, tls_relocs, num_tls_relocs, tls_relocs_cap);
     vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].tls_offset    = tls_offset;
     vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].target_segment = target_segment;
     vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].target_offset  = target_offset;
@@ -2280,8 +2292,7 @@ static void emit_one_cleanup(VirtualMachine *vm, CleanupVar *cv) {
     emit(vm, CALL);
     Pc patch = emit_word_ptr(vm);
     vm->text_seg[patch] = 0;
-    if (vm->compiler.num_call_patches >= MAX_CALLS)
-        error("too many function calls");
+    PATCH_GROW(vm, call_patches, num_call_patches, call_patches_cap);
     vm->compiler.call_patches[vm->compiler.num_call_patches].location = patch;
     vm->compiler.call_patches[vm->compiler.num_call_patches].function = cv->cleanup_fn;
     vm->compiler.num_call_patches++;
@@ -2697,9 +2708,7 @@ static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
             // Function address - emit placeholder and record patch
             Pc addr_loc = emit_lta3(vm, dest_reg, 0); // Placeholder
 
-            if (vm->compiler.num_func_addr_patches >= MAX_CALLS) {
-                error("too many function address references");
-            }
+            PATCH_GROW(vm, func_addr_patches, num_func_addr_patches, func_addr_patches_cap);
             vm->compiler.func_addr_patches[vm->compiler.num_func_addr_patches]
                 .location = addr_loc;
             vm->compiler.func_addr_patches[vm->compiler.num_func_addr_patches]
@@ -3091,9 +3100,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             Pc addr_loc = emit_lta3(vm, dest_reg, 0); // Placeholder
 
             // Record patch location for later resolution
-            if (vm->compiler.num_func_addr_patches >= MAX_CALLS) {
-                error("too many function address references");
-            }
+            PATCH_GROW(vm, func_addr_patches, num_func_addr_patches, func_addr_patches_cap);
             vm->compiler.func_addr_patches[vm->compiler.num_func_addr_patches]
                 .location = addr_loc;
             vm->compiler.func_addr_patches[vm->compiler.num_func_addr_patches]
@@ -4594,9 +4601,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     vm->text_seg[patch] = 0; // Will be patched later
 
                     // Record call patch location for later resolution
-                    if (vm->compiler.num_call_patches >= MAX_CALLS) {
-                        error("too many function calls");
-                    }
+                    PATCH_GROW(vm, call_patches, num_call_patches, call_patches_cap);
                     vm->compiler.call_patches[vm->compiler.num_call_patches].location =
                         patch;
                     vm->compiler.call_patches[vm->compiler.num_call_patches].function =
@@ -4934,8 +4939,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         Pc invoke_addr_loc = emit_lta3(vm, r_invoke, 0); // Placeholder
 
         // Record patch for block function address
-        if (vm->compiler.num_func_addr_patches >= MAX_CALLS)
-            error("too many function address references");
+        PATCH_GROW(vm, func_addr_patches, num_func_addr_patches, func_addr_patches_cap);
         vm->compiler.func_addr_patches[vm->compiler.num_func_addr_patches]
             .location = invoke_addr_loc;
         vm->compiler.func_addr_patches[vm->compiler.num_func_addr_patches]
@@ -5426,8 +5430,7 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
                 emit(vm, CALLT);
                 Pc tco_patch = emit_word_ptr(vm);
                 vm->text_seg[tco_patch] = 0;
-                if (vm->compiler.num_call_patches >= MAX_CALLS)
-                    error("too many function calls");
+                PATCH_GROW(vm, call_patches, num_call_patches, call_patches_cap);
                 vm->compiler.call_patches[vm->compiler.num_call_patches].location =
                     tco_patch;
                 vm->compiler.call_patches[vm->compiler.num_call_patches].function =

@@ -431,6 +431,17 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
     }
 
     vm->compiler.num_data_relocs = 0;
+    if (data_reloc_count > 0) {
+        void *_tmp = realloc(vm->compiler.data_relocs,
+                             (size_t)data_reloc_count *
+                             sizeof(*vm->compiler.data_relocs));
+        if (!_tmp) {
+            fprintf(stderr, "error: out of memory for data relocations\n");
+            return -1;
+        }
+        vm->compiler.data_relocs = _tmp;
+        vm->compiler.data_relocs_cap = (int)data_reloc_count;
+    }
     for (long long i = 0; i < data_reloc_count; i++) {
         READ_AND_INCR(data_offset, long long);
         READ_AND_INCR(target_segment, long long);
@@ -652,6 +663,17 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
             return -1;
         }
         vm->compiler.num_tls_relocs = 0;
+        if (tls_reloc_count_i > 0) {
+            void *_tmp = realloc(vm->compiler.tls_relocs,
+                                 (size_t)tls_reloc_count_i *
+                                 sizeof(*vm->compiler.tls_relocs));
+            if (!_tmp) {
+                fprintf(stderr, "error: out of memory for TLS relocations\n");
+                return -1;
+            }
+            vm->compiler.tls_relocs = _tmp;
+            vm->compiler.tls_relocs_cap = (int)tls_reloc_count_i;
+        }
         for (long long i = 0; i < tls_reloc_count_i; i++) {
             READ_AND_INCR(tls_offset,    long long);
             READ_AND_INCR(target_seg,    long long);
