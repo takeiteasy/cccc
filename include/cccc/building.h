@@ -88,6 +88,23 @@ void __builtin_build_set_output(BuildTarget *t, const char *path);
  *  @abstract Add a C source file to the target. */
 void __builtin_build_add_source(BuildTarget *t, const char *path);
 
+/*! @function __builtin_build_add_sources_glob
+ *  @abstract Expand a glob pattern relative to the build root and add each
+ *            match as a source file.  Requires POSIX @c glob(3). */
+void __builtin_build_add_sources_glob(BuildTarget *t, const char *pattern);
+
+/*! @function __builtin_build_add_source_str
+ *  @abstract Write @c content to @c \<out_dir\>/gen/\<name\> and add it as a source.
+ *            @c name must end in @c .c (or another compilable extension). */
+void __builtin_build_add_source_str(BuildTarget *t, const char *name,
+                                    const char *content);
+
+/*! @function __builtin_build_exclude_source
+ *  @abstract Exclude sources matching @c pattern (exact path or @c fnmatch glob)
+ *            from compilation.  Applies after any @c AddSource / @c AddSourcesGlob
+ *            calls, regardless of call order. */
+void __builtin_build_exclude_source(BuildTarget *t, const char *pattern);
+
 /*! @function __builtin_build_add_include
  *  @abstract Add an include search path (-I) to the target's compiles. */
 void __builtin_build_add_include(BuildTarget *t, const char *path);
@@ -109,8 +126,15 @@ void __builtin_build_add_cflag(BuildTarget *t, const char *flag);
 void __builtin_build_add_ldflag(BuildTarget *t, const char *flag);
 
 /*! @function __builtin_build_link_with
- *  @abstract Declare that @c t links against (and is built after) @c dep. */
+ *  @abstract Declare that @c t links against (and is built after) @c dep.
+ *            Adds a @c -l<dep> flag at link time. */
 void __builtin_build_link_with(BuildTarget *t, BuildTarget *dep);
+
+/*! @function __builtin_build_depends_on
+ *  @abstract Ordering-only dependency: @c t is built after @c dep but does
+ *            @b not add a @c -l<dep> linker flag.  Use this to order a
+ *            @c RunCustom codegen step before its consumer. */
+void __builtin_build_depends_on(BuildTarget *t, BuildTarget *dep);
 
 /*! @function __builtin_build_add_lib
  *  @abstract Add a system library to link against (-l<name>). */
@@ -119,6 +143,26 @@ void __builtin_build_add_lib(BuildTarget *t, const char *name);
 /*! @function __builtin_build_add_libpath
  *  @abstract Add a library search path (-L<path>). */
 void __builtin_build_add_libpath(BuildTarget *t, const char *path);
+
+/*! @function __builtin_build_have_tool
+ *  @abstract Returns 1 if the named tool is executable (found in @c PATH) and
+ *            permitted by the current tool allowlist, 0 otherwise. */
+int __builtin_build_have_tool(Builder *ctx, const char *name);
+
+/*! @function __builtin_build_pkg_config
+ *  @abstract Run @c pkg-config to obtain compile and link flags for @c pkg and
+ *            add them to @c t.  Returns 0 on success, non-zero if @c pkg-config
+ *            is not found, not allowed, or reports an error. */
+int __builtin_build_pkg_config(BuildTarget *t, const char *pkg);
+
+/*! @function __builtin_build_run_custom
+ *  @abstract Register a custom shell-command target named @c name that runs
+ *            @c cmd when the target is reached in the build graph.  Returns an
+ *            opaque @c BuildTarget* so other targets may declare a dependency on
+ *            it via @c DependsOn.  Fails (non-zero exit from @c BuildDefault)
+ *            if @c cmd returns a non-zero exit code. */
+BuildTarget *__builtin_build_run_custom(Builder *ctx, const char *name,
+                                        const char *cmd);
 
 /*! @function __builtin_build_run
  *  @abstract Build @c t and its transitive dependencies. Returns 0 on success. */
@@ -147,14 +191,22 @@ int __builtin_build_run_default(Builder *ctx);
 
 #define SetOutput(t, p)         __builtin_build_set_output(t, p)
 #define AddSource(t, p)         __builtin_build_add_source(t, p)
+#define AddSourcesGlob(t, pat)  __builtin_build_add_sources_glob(t, pat)
+#define AddSourceStr(t, n, c)   __builtin_build_add_source_str(t, n, c)
+#define ExcludeSource(t, pat)   __builtin_build_exclude_source(t, pat)
 #define AddInclude(t, p)        __builtin_build_add_include(t, p)
 #define AddDefine(t, n, v)      __builtin_build_add_define(t, n, v)
 #define AddUndef(t, n)          __builtin_build_add_undef(t, n)
 #define AddCFlag(t, f)          __builtin_build_add_cflag(t, f)
 #define AddLdFlag(t, f)         __builtin_build_add_ldflag(t, f)
 #define LinkWith(t, dep)        __builtin_build_link_with(t, dep)
+#define DependsOn(t, dep)       __builtin_build_depends_on(t, dep)
 #define AddLib(t, n)            __builtin_build_add_lib(t, n)
 #define AddLibPath(t, p)        __builtin_build_add_libpath(t, p)
+
+#define HaveTool(ctx, name)     __builtin_build_have_tool(ctx, name)
+#define PkgConfig(t, pkg)       __builtin_build_pkg_config(t, pkg)
+#define RunCustom(ctx, name, cmd) __builtin_build_run_custom(ctx, name, cmd)
 
 #define Build(ctx, t)           __builtin_build_run(ctx, t)
 #define BuildAll(ctx)           __builtin_build_run_all(ctx)

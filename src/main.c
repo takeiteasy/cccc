@@ -269,6 +269,8 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --build-out-dir=PATH  Output directory for build artifacts (default: build/)\n");
     printf("\t   --build-dry-run       Print the toolchain command lines without executing them\n");
     printf("\t   --build-target=NAME   Build only the named target and its transitive dependencies\n");
+    printf("\t   --build-tool-allow=N  Allowlist of tool names runnable via RunCustom/HaveTool/PkgConfig\n");
+    printf("\t                         Accepts comma-separated or repeated flags. Default: allow all.\n");
     printf("\nWarning Options:\n");
     printf("\t-Wall               Enable common warning categories\n");
     printf("\t-Wextra             Enable extra warning categories\n");
@@ -832,6 +834,8 @@ int main(int argc, const char *argv[]) {
     const char *build_target = NULL;  // --build-target=NAME
     const char *build_out_dir = NULL; // --build-out-dir=PATH (default "build")
     int build_dry_run = 0;         // --build-dry-run
+    const char **build_tool_allow = NULL; // --build-tool-allow=name,...
+    int build_tool_allow_count = 0;
 
     if (argc <= 1)
         usage(argv[0], 1);
@@ -922,6 +926,7 @@ int main(int argc, const char *argv[]) {
         {"build-out-dir", required_argument, 0, 1075},
         {"build-dry-run", no_argument, 0, 1076},
         {"build-target", required_argument, 0, 1077},
+        {"build-tool-allow", required_argument, 0, 1082},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1373,6 +1378,23 @@ int main(int argc, const char *argv[]) {
             build_target = optarg;
             build_mode = 1;
             break;
+        case 1082: { // --build-tool-allow=name[,name,...]
+            // Accept comma-separated names: --build-tool-allow=cc,ar,pkg-config
+            // or repeated flags: --build-tool-allow=cc --build-tool-allow=ar
+            char *tmp = strdup(optarg);
+            char *saveptr = NULL;
+            char *tok = strtok_r(tmp, ",", &saveptr);
+            while (tok) {
+                build_tool_allow = realloc(build_tool_allow,
+                                           sizeof(*build_tool_allow) *
+                                           (build_tool_allow_count + 1));
+                build_tool_allow[build_tool_allow_count++] = strdup(tok);
+                tok = strtok_r(NULL, ",", &saveptr);
+            }
+            free(tmp);
+            build_mode = 1;
+            break;
+        }
         case 1066: // --test-format=FORMAT
             if (strcmp(optarg, "tap") == 0) {
                 test_format = TEST_FORMAT_TAP;
@@ -2080,12 +2102,14 @@ int main(int argc, const char *argv[]) {
             .std_arg        = std_arg,
         };
         CcBuildOptions build_opts = {
-            .entry_name  = build_entry,
-            .target_name = build_target,
-            .out_dir     = build_out_dir,
-            .verbose     = verbose,
-            .dry_run     = build_dry_run,
-            .defaults    = &build_defaults,
+            .entry_name       = build_entry,
+            .target_name      = build_target,
+            .out_dir          = build_out_dir,
+            .verbose          = verbose,
+            .dry_run          = build_dry_run,
+            .defaults         = &build_defaults,
+            .tool_allow       = build_tool_allow,
+            .tool_allow_count = build_tool_allow_count,
         };
 
         exit_code = cc_run_build(&vm, merged_prog, &build_opts);

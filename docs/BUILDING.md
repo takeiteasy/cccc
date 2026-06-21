@@ -67,11 +67,12 @@ go through the VM's FFI layer and are not subject to FFI policy.
 ## CLI
 
 ```
-cccc --build build.c                      # run the build entry in build.c
-cccc --build build.c --build-entry=foo    # use `foo` as the entry
-cccc --build build.c --build-out-dir=out  # output directory (default: build/)
-cccc --build build.c --build-dry-run      # print command lines, run nothing
-cccc --build build.c --build-target=NAME  # build only NAME and its transitive deps
+cccc --build build.c                           # run the build entry in build.c
+cccc --build build.c --build-entry=foo         # use `foo` as the entry
+cccc --build build.c --build-out-dir=out       # output directory (default: build/)
+cccc --build build.c --build-dry-run           # print command lines, run nothing
+cccc --build build.c --build-target=NAME       # build only NAME and its transitive deps
+cccc --build build.c --build-tool-allow=a,b,c  # tool allowlist for probing / custom steps
 ```
 
 | Flag | Default | Meaning |
@@ -81,6 +82,7 @@ cccc --build build.c --build-target=NAME  # build only NAME and its transitive d
 | `--build-out-dir=PATH` | `build/` | Output directory for artifacts. |
 | `--build-dry-run` | off | Topo-sort and print the resolved command lines without executing them. |
 | `--build-target=NAME` | (all) | Build only the named registered target and its transitive dependencies. Pruning happens at `Build*` call time — the full graph is declared first, then the filter is applied. |
+| `--build-tool-allow=NAME[,NAME...]` | (allow all) | Comma-separated allowlist of tool names that may be probed via `HaveTool` / `PkgConfig` or executed via `RunCustom`. Repeated flags accumulate. `cc`/`ar`/`ld` are always invoked directly by the runner and are not subject to this list. |
 
 Existing flags forwarded to every target's compile as defaults: `-I`, `-i`, `-D`,
 `-U`, `--std=`, `-L`, `-l`. VM-only options (`-c`, `-d`/`--disassemble`,
@@ -125,6 +127,7 @@ The same file is still valid C: in default mode (`cccc build.c`) the
 | Executable | `Executable(name)` | `bin/<name>` | system `cc` |
 | Static library | `StaticLib(name)` | `lib/lib<name>.a` | `ar rcs` |
 | Dynamic library | `DynamicLib(name)` | `lib/lib<name>.{so,dylib}` | `cc -shared` |
+| Custom step | `RunCustom(name, cmd)` | (none) | vendored shell |
 
 ## Builder API
 
@@ -147,6 +150,12 @@ BuildTarget *DynamicLib(Builder *ctx, const char *name);
 void SetOutput(BuildTarget *t, const char *path);
 void AddSource(BuildTarget *t, const char *path);
 
+// Source-set ergonomics (#542)
+void AddSourcesGlob(BuildTarget *t, const char *pattern); // POSIX glob(3)
+void AddSourceStr(BuildTarget *t, const char *name, const char *content);
+                                         // write content to <out_dir>/gen/<name>
+void ExcludeSource(BuildTarget *t, const char *pattern);  // fnmatch or exact path
+
 // Flags
 void AddInclude(BuildTarget *t, const char *path);
 void AddDefine(BuildTarget *t, const char *name, const char *value);
@@ -155,48 +164,141 @@ void AddCFlag(BuildTarget *t, const char *flag);
 void AddLdFlag(BuildTarget *t, const char *flag);
 
 // Dependencies
-void LinkWith(BuildTarget *t, BuildTarget *dep); // build before, -l<dep>
+void LinkWith(BuildTarget *t, BuildTarget *dep); // build before + -l<dep>
+void DependsOn(BuildTarget *t, BuildTarget *dep); // build before, no linker flag (#544)
 void AddLib(BuildTarget *t, const char *name);     // -l<name>
 void AddLibPath(BuildTarget *t, const char *path); // -L<path>
 
+// Toolchain probing (#543)
+int  HaveTool(Builder *ctx, const char *name);     // 1 if tool in PATH + allowed
+int  PkgConfig(BuildTarget *t, const char *pkg);   // run pkg-config, add flags
+
+// Custom steps (#544)
+BuildTarget *RunCustom(Builder *ctx, const char *name, const char *cmd);
+
 // Run (synchronous; returns 0 on success)
 int Build(Builder *ctx, BuildTarget *t);  // t + its deps
-int BuildAll(Builder *ctx);                  // every target
-int BuildDefault(Builder *ctx);              // run_all + summary
+int BuildAll(Builder *ctx);               // every target
+int BuildDefault(Builder *ctx);           // run_all + summary
 ```
 
 `Build*` compiles and links synchronously inside the call, so the
 entry's return value reflects the real build status (this is why
 `return BuildDefault();` is the idiomatic last line).
 
+### Source-set ergonomics (#542)
+
+**`AddSourcesGlob(t, pattern)`** expands a POSIX `glob(3)` pattern relative to
+the current working directory and adds each match as a source file:
+
+```c
+AddSourcesGlob(lib, "src/lib/**/*.c");    // all .c under src/lib/
+AddSourcesGlob(app, "src/platform/*.c");  // platform-specific sources
+```
+
+**`ExcludeSource(t, pattern)`** removes sources matching an `fnmatch` glob
+pattern (or an exact path). Exclusions are applied at compile time regardless
+of call order relative to `AddSource` / `AddSourcesGlob`:
+
+```c
+AddSourcesGlob(lib, "src/*.c");
+ExcludeSource(lib, "src/test_main.c");  // drop test harness from lib
+```
+
+**`AddSourceStr(t, name, content)`** writes `content` to `<out_dir>/gen/<name>`
+and adds the generated file as a source. Useful for compile-time code
+generation:
+
+```c
+AddSourceStr(core, "version.c",
+    "const char *version(void) { return \"1.0\"; }\n");
+```
+
+### Toolchain probing (#543)
+
+**`HaveTool(ctx, name)`** returns 1 when `name` is executable (found in `$PATH`)
+and not blocked by `--build-tool-allow`:
+
+```c
+if (HaveTool(ctx, "pkg-config")) {
+    PkgConfig(greet, "zlib");
+}
+```
+
+**`PkgConfig(t, pkg)`** runs `pkg-config --cflags <pkg>` and `pkg-config --libs
+<pkg>`, then adds the tokens to `t->cflags` and `t->ldflags` respectively.
+Returns 0 on success. Requires `pkg-config` in `$PATH`.
+
+Both functions are subject to `--build-tool-allow`: if an allowlist is set, the
+tool name must appear in it or the probe/spawn is refused.
+
+### Custom steps (#544)
+
+**`RunCustom(ctx, name, cmd)`** registers an arbitrary shell command as a build
+step in the DAG. The command runs through a vendored bourne-compatible shell
+(POSIX; pipes and redirections work). The step's exit code is propagated — a
+non-zero exit stops the build.
+
+**`DependsOn(t, dep)`** creates an ordering-only edge from `t` to `dep`: `dep`
+is built first but no `-l<dep>` linker flag is added. This is the correct way
+to express that a compile target depends on a codegen step:
+
+```c
+BuildTarget *gen = RunCustom(ctx, "gen-headers",
+    "python3 tools/gen.py > include/gen.h");
+DependsOn(core, gen);   // core waits for gen-headers; no -lgen-headers
+
+BuildTarget *core = StaticLib(ctx, "core");
+AddSourcesGlob(core, "src/*.c");
+LinkWith(app, core);    // app gets -lcore (ordinary link dep)
+```
+
+> **v1 limitation:** the vendored shell's `die()` helper calls `exit()` on OOM
+> or a failed `open()` call inside a redirected step, which terminates the whole
+> CCCC process rather than cleanly failing the build step.  See the `BUILDMODE`
+> tracker for the planned improvement.
+
+## Tool allowlist (`--build-tool-allow`)
+
+By default, build mode allows all tools to be probed and run. Passing
+`--build-tool-allow` switches to allowlist mode: only named tools may be used
+by `HaveTool`, `PkgConfig`, or `RunCustom`. Comma-separated names or repeated
+flags both work:
+
+```sh
+cccc --build build.c --build-tool-allow=pkg-config,python3
+cccc --build build.c --build-tool-allow=pkg-config --build-tool-allow=python3
+```
+
+The native build-runtime tools (`cc`/`ar`/`ld`) are invoked directly by the
+host runner via `fork`+`execvp` and are never affected by this list.
+
 ## FFI policy
 
 Build mode exists to call tools, so FFI is **allow-all by default**: a build
-script may shell out to `pkg-config`, `hyperfine`, and so on without ceremony.
-Passing `--ffi-allow=a,b,c` switches build mode into allowlist mode — only the
-named functions are callable, everything else is blocked. The builder API
-(`__builtin_build_*` / PascalCase macros) and the host-spawned `cc`/`ar`/`ld` are the build runtime itself and
-are always available regardless of `--ffi-allow`/`--ffi-deny`/`--disable-ffi`.
+script may call any native function without ceremony. Passing `--ffi-allow=a,b,c`
+switches build mode into FFI allowlist mode — only the named C functions are
+callable. The builder API (`__builtin_build_*` / PascalCase macros) and the
+host-spawned `cc`/`ar`/`ld` are the build runtime itself and are always
+available regardless of `--ffi-allow`/`--ffi-deny`/`--disable-ffi`.
 
-The PascalCase macros (`StaticLib`, `Executable`, `BuildDefault`, …) are thin
-wrappers around the underlying `__builtin_build_*` functions; they forward the
-`ctx` parameter passed by the entry.
-
-> The allowlist matches **C function names** (e.g. `system`, `popen`), not tool
-> executables. Tool-name gating and toolchain probing are deferred (see below).
+For gating which **tool executables** may be probed or run via `RunCustom`,
+use `--build-tool-allow` (see above).
 
 ## Scope
 
-**v1 (this release):** the `--build` mode, `[[cccc::build]]` entry resolution,
+**Current release:** the `--build` mode, `[[cccc::build]]` entry resolution,
 the auto-injected `building.h`, the three native target kinds, the core builder
 API, a host-side **serial** runner with topological sort, `--build-out-dir`,
 `--build-dry-run`, `--build-target=NAME` registered-name selection with
-transitive dependency pruning, and the inverted FFI default.
+transitive dependency pruning, the inverted FFI default,
+`AddSourcesGlob` / `AddSourceStr` / `ExcludeSource` (#542),
+`HaveTool` / `PkgConfig` / `--build-tool-allow` (#543), and
+`RunCustom` / `DependsOn` (#544).
 
 **Deferred to later releases:** `[[cccc::build_target]]` discoverable factories;
-parallel `-j`; glob / `add_source_str` / `exclude_source`;
-`cccc_probe_toolchain()` / pkg-config; `Build_custom`; bytecode targets;
-incremental / caching; cross-compilation; release/debug profiles; a self-hosting
+parallel `-j`; bytecode targets; incremental / caching;
+cross-compilation; release/debug profiles; a self-hosting
 `build.c` replacing the Makefile.
 
 ## See also

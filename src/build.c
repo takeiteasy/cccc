@@ -32,7 +32,14 @@
 #include <sys/types.h>
 #ifdef _POSIX_VERSION
 #include <unistd.h>
+#include <fnmatch.h>
+#include <glob.h>
+#include <sys/wait.h>
 #endif
+
+// build_shell.c defines PAUL_SHELL_IMPLEMENTATION; here we just include the
+// declarations so build.c can call shell_with_ctx / shell_ctx_*.
+#include "vendor/paul_shell.h"
 
 #if defined(__APPLE__)
 #define CCCC_BUILD_HOST "darwin"
@@ -56,6 +63,7 @@ typedef enum {
     CCCC_TGT_EXE,
     CCCC_TGT_STATIC,
     CCCC_TGT_DYNAMIC,
+    CCCC_TGT_CUSTOM,   // arbitrary shell command (#544)
 } CcTargetKind;
 
 typedef struct BuildTarget BuildTarget;
@@ -65,7 +73,9 @@ struct BuildTarget {
     CcTargetKind kind;
     char *name;
     char *output;          // explicit output path (relative to out_dir) or NULL
+    char *command;         // CCCC_TGT_CUSTOM: shell command to run
     StringArray sources;
+    StringArray excludes;  // glob/path patterns excluded from sources (#542)
     StringArray includes;
     StringArray defines;   // "NAME=VALUE" or "NAME"
     StringArray undefs;
@@ -74,6 +84,7 @@ struct BuildTarget {
     StringArray libs;      // bare -l names
     StringArray libpaths;  // -L paths
     BuildTarget **deps;
+    int *deps_link;        // parallel to deps: 1=LinkWith (add -l), 0=DependsOn (order only)
     int deps_count, deps_cap;
     int visited;           // topo-sort marker: 0 unvisited, 1 in-progress, 2 done
 };
@@ -90,6 +101,11 @@ struct Builder {
     const CcNativeCompileArgs *defaults; // CLI -I/-D/-U/--std/-l/-L forwarded
     int run_invoked;       // set once a cccc_build_run* is called
     int failed;            // non-zero once any build step fails
+    // Tool gating (#543): if tool_allow_count > 0, only listed tools may run
+    // via RunCustom / HaveTool / PkgConfig.  cc/ar/ld bypass this check (they
+    // go through run_argv, not the shell).
+    const char **tool_allow;
+    int tool_allow_count;
 };
 
 // The active build context for the current --build run.  Set by cc_run_build
@@ -183,9 +199,78 @@ static char *default_output(const BuildTarget *t) {
     case CCCC_TGT_DYNAMIC:
         snprintf(buf, sizeof(buf), "lib/lib%s.%s", t->name, CCCC_DYLIB_EXT);
         break;
+    case CCCC_TGT_CUSTOM:
+        return xstrdup(""); // custom targets have no output artifact
     }
     return xstrdup(buf);
 }
+
+// ============================================================================
+// Tool gating (#543)
+// ============================================================================
+
+// Returns 1 if `name` may be executed by RunCustom / HaveTool / PkgConfig.
+// When the allowlist is empty (default), all tools are allowed.
+static int tool_allowed(const Builder *ctx, const char *name) {
+    if (!name || !*name)
+        return 0;
+    if (ctx->tool_allow_count == 0)
+        return 1; // allow-all (default; preserves v1 behaviour)
+    for (int i = 0; i < ctx->tool_allow_count; i++)
+        if (strcmp(ctx->tool_allow[i], name) == 0)
+            return 1;
+    return 0;
+}
+
+// ============================================================================
+// Capturing subprocess spawn (used by PkgConfig)
+// ============================================================================
+
+#ifdef _POSIX_VERSION
+// Run argv and capture stdout into *out (heap, NUL-terminated).
+// Returns exit code (0 = success, -1 = fork/exec error).
+static int run_capture(char *const argv[], char **out) {
+    if (!argv || !argv[0]) return -1;
+    int pipefd[2];
+    if (pipe(pipefd) != 0) return -1;
+    pid_t pid = fork();
+    if (pid < 0) { close(pipefd[0]); close(pipefd[1]); return -1; }
+    if (pid == 0) {
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
+        // Suppress stderr (pkg-config error messages go there)
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) { dup2(devnull, STDERR_FILENO); close(devnull); }
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+    close(pipefd[1]);
+
+    size_t cap = 256, len = 0;
+    char *buf = malloc(cap + 1);
+    if (!buf) { close(pipefd[0]); waitpid(pid, NULL, 0); return -1; }
+    ssize_t n;
+    char tmp[4096];
+    while ((n = read(pipefd[0], tmp, sizeof(tmp))) > 0) {
+        if (len + (size_t)n >= cap) {
+            cap = (cap + (size_t)n) * 2;
+            char *nb = realloc(buf, cap + 1);
+            if (!nb) { free(buf); close(pipefd[0]); waitpid(pid, NULL, 0); return -1; }
+            buf = nb;
+        }
+        memcpy(buf + len, tmp, n);
+        len += n;
+    }
+    close(pipefd[0]);
+    buf[len] = '\0';
+    *out = buf;
+
+    int status;
+    waitpid(pid, &status, 0);
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+#endif
 
 // ============================================================================
 // Builder API — FFI-callable.  Pointers are marshalled as int64; the cosmetic
@@ -267,16 +352,29 @@ static long long impl_add_ldflag(long long t, long long flag) {
     strarray_push(&((BuildTarget *)(intptr_t)t)->ldflags, xstrdup((const char *)flag));
     return 0;
 }
-static long long impl_link_with(long long t, long long dep) {
-    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
-    BuildTarget *d = (BuildTarget *)(intptr_t)dep;
+// Internal helper: add a dependency edge.  link=1 → LinkWith (adds -l<dep>);
+// link=0 → DependsOn (ordering only, no linker flag).
+static void add_dep(BuildTarget *tgt, BuildTarget *d, int link) {
     if (tgt->deps_count >= tgt->deps_cap) {
         tgt->deps_cap = tgt->deps_cap ? tgt->deps_cap * 2 : 4;
         tgt->deps = realloc(tgt->deps, sizeof(*tgt->deps) * tgt->deps_cap);
-        if (!tgt->deps)
+        tgt->deps_link = realloc(tgt->deps_link, sizeof(*tgt->deps_link) * tgt->deps_cap);
+        if (!tgt->deps || !tgt->deps_link)
             error("build: out of memory");
     }
-    tgt->deps[tgt->deps_count++] = d;
+    tgt->deps[tgt->deps_count] = d;
+    tgt->deps_link[tgt->deps_count] = link;
+    tgt->deps_count++;
+}
+
+static long long impl_link_with(long long t, long long dep) {
+    add_dep((BuildTarget *)(intptr_t)t, (BuildTarget *)(intptr_t)dep, 1);
+    return 0;
+}
+
+// DependsOn: ordering-only edge, no -l<dep> linker flag (#544).
+static long long impl_depends_on(long long t, long long dep) {
+    add_dep((BuildTarget *)(intptr_t)t, (BuildTarget *)(intptr_t)dep, 0);
     return 0;
 }
 static long long impl_add_lib(long long t, long long name) {
@@ -286,6 +384,175 @@ static long long impl_add_lib(long long t, long long name) {
 static long long impl_add_libpath(long long t, long long path) {
     strarray_push(&((BuildTarget *)(intptr_t)t)->libpaths, xstrdup((const char *)path));
     return 0;
+}
+
+// ============================================================================
+// #542 — source-set ergonomics
+// ============================================================================
+
+// AddSourcesGlob: expand a glob pattern (relative to build root) and add each
+// matched file as a source.  POSIX glob(3) only; on non-POSIX platforms this
+// is a no-op (a future Windows port can use FindFirstFile).
+static long long impl_add_sources_glob(long long t, long long pattern) {
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    const char *pat = (const char *)pattern;
+    if (!pat || !*pat) return 0;
+#ifdef _POSIX_VERSION
+    glob_t g;
+    memset(&g, 0, sizeof(g));
+    int rc = glob(pat, GLOB_NOSORT, NULL, &g);
+    if (rc == 0) {
+        for (size_t i = 0; i < g.gl_pathc; i++)
+            strarray_push(&tgt->sources, xstrdup(g.gl_pathv[i]));
+    } else if (rc != GLOB_NOMATCH) {
+        fprintf(stderr, "build: glob('%s') failed\n", pat);
+    }
+    globfree(&g);
+#else
+    (void)tgt;
+    fprintf(stderr, "build: AddSourcesGlob not supported on this platform\n");
+#endif
+    return 0;
+}
+
+// AddSourceStr: write `content` to <out_dir>/gen/<name> and add it as a source.
+// The name must end in .c (or a similar compilable extension).
+static long long impl_add_source_str(long long t, long long name, long long content) {
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    Builder *ctx = s_ctx;
+    const char *fname = (const char *)name;
+    const char *body  = (const char *)content;
+    if (!fname || !body || !ctx) return -1;
+
+    // Build the output path: <out_dir>/gen/<name>
+    char *gendir = join(ctx->out_dir, "gen");
+    char *path = join(gendir, fname);
+    free(gendir);
+
+    if (!ctx->dry_run) {
+        char *d = dir_of(path);
+        if (mkdir_p(d) != 0) {
+            fprintf(stderr, "build: failed to create gen dir for '%s'\n", fname);
+            free(d); free(path); return -1;
+        }
+        free(d);
+        FILE *f = fopen(path, "w");
+        if (!f) {
+            fprintf(stderr, "build: failed to write generated source '%s'\n", path);
+            free(path); return -1;
+        }
+        fputs(body, f);
+        fclose(f);
+    }
+
+    strarray_push(&tgt->sources, path); // path is now owned by the StringArray
+    return 0;
+}
+
+// ExcludeSource: add a path or glob pattern to the target's exclude list.
+// Exclusions are applied in compile_sources() via fnmatch().
+static long long impl_exclude_source(long long t, long long path) {
+    strarray_push(&((BuildTarget *)(intptr_t)t)->excludes, xstrdup((const char *)path));
+    return 0;
+}
+
+// ============================================================================
+// #543 — toolchain probing
+// ============================================================================
+
+// HaveTool: returns 1 if `name` is executable (found in PATH) and allowed,
+// 0 otherwise.  Uses cccc_path_find_executable (silent; no error print).
+static long long impl_have_tool(long long ctx, long long name) {
+    (void)ctx;
+    const char *tool = (const char *)name;
+    if (!s_ctx || !tool) return 0;
+    if (!tool_allowed(s_ctx, tool)) return 0;
+    char *path = cccc_path_find_executable(tool);
+    if (path) { free(path); return 1; }
+    return 0;
+}
+
+// PkgConfig: run `pkg-config --cflags --libs <pkg>`, parse the output into
+// the target's compile/link flag arrays.  Returns 0 on success.
+// Flags starting with -I or -D go to cflags; everything else goes to ldflags.
+static long long impl_pkg_config(long long t, long long pkg) {
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    const char *pkgname = (const char *)pkg;
+    if (!tgt || !pkgname || !s_ctx) return -1;
+
+    if (!tool_allowed(s_ctx, "pkg-config")) {
+        fprintf(stderr, "build: PkgConfig: 'pkg-config' not in tool allowlist\n");
+        return -1;
+    }
+
+#ifdef _POSIX_VERSION
+    char *cflags_out = NULL;
+    char *libs_out = NULL;
+    int rc = 0;
+
+    // Run pkg-config --cflags <pkg>
+    {
+        char *argv[] = { "pkg-config", "--cflags", (char *)pkgname, NULL };
+        rc = run_capture(argv, &cflags_out);
+        if (rc != 0) {
+            fprintf(stderr, "build: PkgConfig: pkg-config --cflags %s failed (rc=%d)\n", pkgname, rc);
+            free(cflags_out);
+            return rc;
+        }
+    }
+
+    // Run pkg-config --libs <pkg>
+    {
+        char *argv[] = { "pkg-config", "--libs", (char *)pkgname, NULL };
+        rc = run_capture(argv, &libs_out);
+        if (rc != 0) {
+            fprintf(stderr, "build: PkgConfig: pkg-config --libs %s failed (rc=%d)\n", pkgname, rc);
+            free(cflags_out); free(libs_out);
+            return rc;
+        }
+    }
+
+    // Parse cflags tokens → tgt->cflags
+    if (cflags_out) {
+        char *tok = strtok(cflags_out, " \t\n\r");
+        while (tok) {
+            if (*tok) strarray_push(&tgt->cflags, xstrdup(tok));
+            tok = strtok(NULL, " \t\n\r");
+        }
+        free(cflags_out);
+    }
+
+    // Parse libs tokens → tgt->ldflags
+    if (libs_out) {
+        char *tok = strtok(libs_out, " \t\n\r");
+        while (tok) {
+            if (*tok) strarray_push(&tgt->ldflags, xstrdup(tok));
+            tok = strtok(NULL, " \t\n\r");
+        }
+        free(libs_out);
+    }
+
+    return 0;
+#else
+    (void)tgt;
+    fprintf(stderr, "build: PkgConfig not supported on this platform\n");
+    return -1;
+#endif
+}
+
+// ============================================================================
+// #544 — custom build steps
+// ============================================================================
+
+// RunCustom: register a custom shell-command step as a DAG node.
+static long long impl_run_custom(long long ctx, long long name, long long cmd) {
+    (void)ctx;
+    Builder *bctx = s_ctx;
+    if (!bctx)
+        error("build: RunCustom called outside a build run");
+    BuildTarget *t = new_target(CCCC_TGT_CUSTOM, (const char *)name);
+    t->command = xstrdup((const char *)cmd);
+    return (long long)(intptr_t)t;
 }
 
 static long long impl_build_root(long long ctx) {
@@ -311,26 +578,33 @@ static long long impl_build_run_all(long long ctx);
 static long long impl_build_run_default(long long ctx);
 
 void cc_load_build_runtime(VirtualMachine *vm) {
-    cc_register_cfunc(vm, "__builtin_build_executable", (void *)impl_executable,         2, 0);
-    cc_register_cfunc(vm, "__builtin_build_static_lib", (void *)impl_static_lib,         2, 0);
-    cc_register_cfunc(vm, "__builtin_build_dynamic_lib",(void *)impl_dynamic_lib,        2, 0);
-    cc_register_cfunc(vm, "__builtin_build_set_output", (void *)impl_set_output,         2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_source", (void *)impl_add_source,         2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_include",(void *)impl_add_include,        2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_define", (void *)impl_add_define,         3, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_undef",  (void *)impl_add_undef,          2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_cflag",  (void *)impl_add_cflag,          2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_ldflag", (void *)impl_add_ldflag,         2, 0);
-    cc_register_cfunc(vm, "__builtin_build_link_with",  (void *)impl_link_with,          2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_lib",    (void *)impl_add_lib,            2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_libpath",(void *)impl_add_libpath,        2, 0);
-    cc_register_cfunc(vm, "__builtin_build_root",       (void *)impl_build_root,         1, 0);
-    cc_register_cfunc(vm, "__builtin_build_out_dir",    (void *)impl_build_out_dir,      1, 0);
-    cc_register_cfunc(vm, "__builtin_build_host",       (void *)impl_build_host,         1, 0);
-    cc_register_cfunc(vm, "__builtin_build_verbose",    (void *)impl_build_verbose,      1, 0);
-    cc_register_cfunc(vm, "__builtin_build_run",        (void *)impl_build_run,          2, 0);
-    cc_register_cfunc(vm, "__builtin_build_run_all",    (void *)impl_build_run_all,      1, 0);
-    cc_register_cfunc(vm, "__builtin_build_run_default",(void *)impl_build_run_default,  1, 0);
+    cc_register_cfunc(vm, "__builtin_build_executable",    (void *)impl_executable,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_static_lib",    (void *)impl_static_lib,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_dynamic_lib",   (void *)impl_dynamic_lib,        2, 0);
+    cc_register_cfunc(vm, "__builtin_build_set_output",    (void *)impl_set_output,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_source",    (void *)impl_add_source,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_sources_glob",(void*)impl_add_sources_glob,  2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_source_str",(void *)impl_add_source_str,     3, 0);
+    cc_register_cfunc(vm, "__builtin_build_exclude_source",(void *)impl_exclude_source,     2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_include",   (void *)impl_add_include,        2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_define",    (void *)impl_add_define,         3, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_undef",     (void *)impl_add_undef,          2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_cflag",     (void *)impl_add_cflag,          2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_ldflag",    (void *)impl_add_ldflag,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_link_with",     (void *)impl_link_with,          2, 0);
+    cc_register_cfunc(vm, "__builtin_build_depends_on",    (void *)impl_depends_on,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_lib",       (void *)impl_add_lib,            2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_libpath",   (void *)impl_add_libpath,        2, 0);
+    cc_register_cfunc(vm, "__builtin_build_have_tool",     (void *)impl_have_tool,          2, 0);
+    cc_register_cfunc(vm, "__builtin_build_pkg_config",    (void *)impl_pkg_config,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_run_custom",    (void *)impl_run_custom,         3, 0);
+    cc_register_cfunc(vm, "__builtin_build_root",          (void *)impl_build_root,         1, 0);
+    cc_register_cfunc(vm, "__builtin_build_out_dir",       (void *)impl_build_out_dir,      1, 0);
+    cc_register_cfunc(vm, "__builtin_build_host",          (void *)impl_build_host,         1, 0);
+    cc_register_cfunc(vm, "__builtin_build_verbose",       (void *)impl_build_verbose,      1, 0);
+    cc_register_cfunc(vm, "__builtin_build_run",           (void *)impl_build_run,          2, 0);
+    cc_register_cfunc(vm, "__builtin_build_run_all",       (void *)impl_build_run_all,      1, 0);
+    cc_register_cfunc(vm, "__builtin_build_run_default",   (void *)impl_build_run_default,  1, 0);
 }
 
 // ============================================================================
@@ -421,7 +695,26 @@ static int run_step(Builder *ctx, int n, int total, ArgVec *args) {
     return run_argv((char *const *)args->data);
 }
 
+// Returns 1 if `src` matches any pattern in the target's exclude list.
+static int source_is_excluded(const BuildTarget *t, const char *src) {
+#ifdef _POSIX_VERSION
+    for (int i = 0; i < t->excludes.len; i++) {
+        // Try fnmatch first (glob pattern), then exact path comparison.
+        if (fnmatch(t->excludes.data[i], src, FNM_PATHNAME) == 0)
+            return 1;
+        if (strcmp(t->excludes.data[i], src) == 0)
+            return 1;
+    }
+#else
+    for (int i = 0; i < t->excludes.len; i++)
+        if (strcmp(t->excludes.data[i], src) == 0)
+            return 1;
+#endif
+    return 0;
+}
+
 // Compile one target's sources to object files; collect the .o paths in `objs`.
+// Sources matching the target's exclude list are silently skipped.
 // Returns 0 on success.
 static int compile_sources(Builder *ctx, const char *cc,
                            BuildTarget *t, const char *objdir,
@@ -429,6 +722,8 @@ static int compile_sources(Builder *ctx, const char *cc,
     StringArray owned = {0};
     int rc = 0;
     for (int i = 0; i < t->sources.len && rc == 0; i++) {
+        if (source_is_excluded(t, t->sources.data[i]))
+            continue;
         char *stem = stem_of(t->sources.data[i]);
         char ofile[1024];
         snprintf(ofile, sizeof(ofile), "%s/%s.o", objdir, stem);
@@ -451,6 +746,38 @@ static int compile_sources(Builder *ctx, const char *cc,
 // Build a single target (its sources already; deps assumed built).  Returns 0 ok.
 static int build_target(Builder *ctx, const char *cc,
                         BuildTarget *t, int *step, int total) {
+    // Custom steps: run the shell command and return its exit code.
+    if (t->kind == CCCC_TGT_CUSTOM) {
+        if (t->command && *t->command) {
+            printf("[%d/%d] (custom) %s\n", ++(*step), total, t->command);
+            fflush(stdout);
+            if (ctx->dry_run)
+                return 0;
+#ifdef _POSIX_VERSION
+            // Build the shell context with the tool allowlist applied.
+            shell_ctx *sctx = shell_ctx_create();
+            if (!sctx) {
+                fprintf(stderr, "build: RunCustom '%s': failed to create shell context\n",
+                        t->name);
+                return 1;
+            }
+            for (int i = 0; i < ctx->tool_allow_count; i++)
+                shell_ctx_allowlist_cmd(sctx, ctx->tool_allow[i]);
+            int rc = shell_with_ctx(t->command, NULL, sctx);
+            shell_ctx_destroy(sctx);
+            if (rc != 0) {
+                fprintf(stderr, "build: custom step '%s' failed (exit %d)\n",
+                        t->name, rc);
+            }
+            return rc;
+#else
+            fprintf(stderr, "build: RunCustom not supported on this platform\n");
+            return 1;
+#endif
+        }
+        return 0;
+    }
+
     char *out_rel = t->output ? xstrdup(t->output) : default_output(t);
     char *out_abs = join(ctx->out_dir, out_rel);
     char *out_dir = dir_of(out_abs);
@@ -491,9 +818,12 @@ static int build_target(Builder *ctx, const char *cc,
         for (int i = 0; i < objs.len; i++)
             argv_push(&a, objs.data[i]);
         // Link against dependency libraries via -L<out>/lib -l<dep>.
+        // Only deps created with LinkWith (deps_link[i]==1) contribute -l flags.
         char *libdir = join(ctx->out_dir, "lib");
         int have_libdir = 0;
         for (int i = 0; i < t->deps_count; i++) {
+            if (!t->deps_link[i])
+                continue; // DependsOn edge — ordering only, no linker flag
             if (!have_libdir) {
                 argv_push(&a, "-L");
                 argv_push(&a, libdir);
@@ -534,8 +864,12 @@ done:
 // Count the total number of toolchain steps for the selected target set.
 static int count_steps(BuildTarget **order, int n) {
     int total = 0;
-    for (int i = 0; i < n; i++)
-        total += order[i]->sources.len + 1; // one compile per source + 1 link/ar
+    for (int i = 0; i < n; i++) {
+        if (order[i]->kind == CCCC_TGT_CUSTOM)
+            total += 1; // one step: run the custom command
+        else
+            total += order[i]->sources.len + 1; // one compile per source + 1 link/ar
+    }
     return total;
 }
 
@@ -690,7 +1024,9 @@ static const char *resolve_entry(VirtualMachine *vm, const char *flag) {
 static void free_target(BuildTarget *t) {
     free(t->name);
     free(t->output);
+    free(t->command);
     free_strarray(&t->sources);
+    free_strarray(&t->excludes);
     free_strarray(&t->includes);
     free_strarray(&t->defines);
     free_strarray(&t->undefs);
@@ -699,6 +1035,7 @@ static void free_target(BuildTarget *t) {
     free_strarray(&t->libs);
     free_strarray(&t->libpaths);
     free(t->deps);
+    free(t->deps_link);
     free(t);
 }
 
@@ -725,6 +1062,8 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     ctx.verbose = opts->verbose;
     ctx.dry_run = opts->dry_run;
     ctx.defaults = opts->defaults;
+    ctx.tool_allow = opts->tool_allow;
+    ctx.tool_allow_count = opts->tool_allow_count;
 
     s_ctx = &ctx;
     cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);

@@ -799,12 +799,15 @@ typedef struct {
     int         verbose;                // -v
     int         dry_run;                // --build-dry-run: print commands, run nothing
     const CcNativeCompileArgs *defaults; // CLI -I/-D/-U/--std forwarded to each target
+    const char **tool_allow;            // --build-tool-allow names (NULL = allow-all)
+    int          tool_allow_count;
 } CcBuildOptions;
 
 void   cc_load_build_runtime(VirtualMachine *vm);
 Token *cc_inject_build_header(VirtualMachine *vm);
 int    cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts);
 char  *cccc_find_native_tool(const char *tool);
+char  *cccc_path_find_executable(const char *name); // silent PATH probe (no error print)
 
 // serialize.c
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated_only);
