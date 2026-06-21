@@ -8,6 +8,8 @@
 typedef long clock_t;
 typedef long time_t;
 
+#define CLOCKS_PER_SEC 1000000
+
 struct timespec {
     time_t tv_sec;
     long tv_nsec;

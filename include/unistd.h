@@ -56,5 +56,17 @@ extern int execl(const char *path, const char *arg, ...);
 extern int execlp(const char *file, const char *arg, ...);
 extern int execle(const char *path, const char *arg, ...);
 extern int execvp(const char *file, char *const argv[]);
+extern int isatty(int fd);
+extern char *ttyname(int fd);
+extern int dup(int fd);
+extern int dup2(int oldfd, int newfd);
+extern int fsync(int fd);
+extern int ftruncate(int fd, off_t length);
+extern int truncate(const char *path, off_t length);
+extern long sysconf(int name);
+extern int mkstemp(char *tmpl);
+extern char *mkdtemp(char *tmpl);
+
+#define _SC_NPROCESSORS_ONLN 58
 
 #endif /* __UNISTD_H */

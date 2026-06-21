@@ -3160,8 +3160,12 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         if (emit_indexed_load_if_possible(vm, node, dest_reg))
             return;
         gen_expr(vm, node->lhs, dest_reg);
+        // TY_FUNC: dereferencing a function pointer is a no-op in C — *f and f
+        // are interchangeable when f has pointer-to-function type.  Do not emit
+        // a data load; the register already holds the callable address.
         if (node->ty->kind != TY_ARRAY && node->ty->kind != TY_STRUCT &&
-            node->ty->kind != TY_UNION && !is_wide_bitint(node->ty)) {
+            node->ty->kind != TY_UNION && node->ty->kind != TY_FUNC &&
+            !is_wide_bitint(node->ty)) {
             emit_load(vm, node->ty, dest_reg, dest_reg);
         }
         return;
@@ -3503,6 +3507,23 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                                 node->lhs->ty && node->lhs->ty->base;
             if (is_ptr_arith && (vm->flags & CCCC_BOUNDS_CHECKS))
                 emit_rr(vm, CHKB, dest_reg, r_rhs);
+
+            // Unsigned 64-bit comparison: SLT3/SLE3 are signed, so for
+            // 64-bit unsigned operands flip the sign bit on both sides first
+            // (XOR with LLONG_MIN converts unsigned order to signed order).
+            // Shorter unsigned types (≤32-bit) are zero-extended in 64-bit
+            // registers and don't need this treatment.
+            bool need_u64_flip =
+                (node->kind == ND_LT || node->kind == ND_LE) &&
+                node->lhs->ty && node->lhs->ty->is_unsigned &&
+                node->lhs->ty->size == 8;
+            if (need_u64_flip) {
+                int r_flip = alloc_temp_reg();
+                emit_li3(vm, r_flip, (long long)0x8000000000000000ULL);
+                emit_rrr(vm, XOR3, dest_reg, dest_reg, r_flip);
+                emit_rrr(vm, XOR3, r_rhs, r_rhs, r_flip);
+                free_temp_reg(r_flip);
+            }
 
             emit_rrr(vm, op, dest_reg, dest_reg, r_rhs);
 
@@ -3961,9 +3982,10 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             return;
         }
 
-        // Check if this is setjmp builtin
+        // Check if this is setjmp builtin (or its POSIX _setjmp alias)
         if (node->lhs->kind == ND_VAR &&
-            node->lhs->var == vm->compiler.builtin_setjmp) {
+            (node->lhs->var == vm->compiler.builtin_setjmp ||
+             node->lhs->var == vm->compiler.builtin__setjmp)) {
             if (!node->args) {
                 error_tok(vm, node->tok, "setjmp requires a jmp_buf argument");
             }
@@ -3977,9 +3999,10 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             return;
         }
 
-        // Check if this is longjmp builtin
+        // Check if this is longjmp builtin (or its POSIX _longjmp alias)
         if (node->lhs->kind == ND_VAR &&
-            node->lhs->var == vm->compiler.builtin_longjmp) {
+            (node->lhs->var == vm->compiler.builtin_longjmp ||
+             node->lhs->var == vm->compiler.builtin__longjmp)) {
             if (!node->args || !node->args->next) {
                 error_tok(vm, node->tok,
                           "longjmp requires jmp_buf and int arguments");

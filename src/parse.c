@@ -5513,7 +5513,7 @@ static Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "&")) {
         Node *lhs = cast(vm, rest, tok->next);
         add_type(vm, lhs);
-        if (lhs->kind == ND_MEMBER && lhs->member->is_bitfield) {
+        if (lhs->kind == ND_MEMBER && !is_error_type(lhs->ty) && lhs->member && lhs->member->is_bitfield) {
             if (vm->collect_errors &&
                 error_tok_recover(vm, tok, "cannot take address of bitfield")) {
                 // Return the member itself as an error placeholder
@@ -8921,6 +8921,13 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     longjmp_ty->params->next = copy_type(vm, ty_int);
     vm->compiler.builtin_longjmp = new_gvar(vm, "longjmp", 7, longjmp_ty);
     vm->compiler.builtin_longjmp->is_definition = false;
+
+    // _setjmp/_longjmp: POSIX variants without signal-mask save/restore.
+    // In the cccc VM there is no signal mask, so these are identical builtins.
+    vm->compiler.builtin__setjmp = new_gvar(vm, "_setjmp", 7, setjmp_ty);
+    vm->compiler.builtin__setjmp->is_definition = false;
+    vm->compiler.builtin__longjmp = new_gvar(vm, "_longjmp", 8, longjmp_ty);
+    vm->compiler.builtin__longjmp->is_definition = false;
 
     Type *dlopen_ty = func_type(vm, pointer_to(vm, ty_void));
     dlopen_ty->params = pointer_to(vm, ty_char);

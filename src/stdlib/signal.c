@@ -17,5 +17,10 @@ void _cccc_sig_shim(int sig) {
 void register_signal_functions(VirtualMachine *vm) {
     /* signal() and raise() are handled via VSIGNAL/VRAISE opcodes;
        no FFI registration is needed */
-    (void)vm;
+    cc_register_cfunc(vm, "sigaction",   (void*)sigaction,   3, 0);
+    cc_register_cfunc(vm, "sigemptyset", (void*)sigemptyset, 1, 0);
+    cc_register_cfunc(vm, "sigfillset",  (void*)sigfillset,  1, 0);
+    cc_register_cfunc(vm, "sigaddset",   (void*)sigaddset,   2, 0);
+    cc_register_cfunc(vm, "sigdelset",   (void*)sigdelset,   2, 0);
+    cc_register_cfunc(vm, "sigismember", (void*)sigismember, 2, 0);
 }

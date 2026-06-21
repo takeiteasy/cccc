@@ -55,9 +55,12 @@ void register_string_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "strrchr", (void*)strrchr, 2, 0);
     cc_register_cfunc(vm, "strstr", (void*)strstr, 2, 0);
     cc_register_cfunc(vm, "strpbrk", (void*)strpbrk, 2, 0);
+    cc_register_cfunc(vm, "strspn",  (void*)strspn,  2, 0);
+    cc_register_cfunc(vm, "strcspn", (void*)strcspn, 2, 0);
 
     // Other string functions
     cc_register_cfunc(vm, "strxfrm", (void*)strxfrm, 3, 0);
+    cc_register_cfunc(vm, "strcoll", (void*)strcoll, 2, 0);
     cc_register_cfunc(vm, "strerror", (void*)strerror, 1, 0);
     cc_register_cfunc(vm, "strdup", (void*)strdup, 1, 0);
     cc_register_cfunc(vm, "strndup", (void*)strndup, 2, 0);

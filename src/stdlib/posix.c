@@ -246,6 +246,16 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_variadic_cfunc(vm, "execlp", (void*)execlp, 2, 0);
     cc_register_variadic_cfunc(vm, "execle", (void*)execle, 2, 0);
     cc_register_cfunc(vm, "execvp",  (void*)execvp, 2, 0);
+    cc_register_cfunc(vm, "isatty",  (void*)isatty,  1, 0);
+    cc_register_cfunc(vm, "ttyname", (void*)ttyname, 1, 0);
+    cc_register_cfunc(vm, "dup",     (void*)dup,     1, 0);
+    cc_register_cfunc(vm, "dup2",    (void*)dup2,    2, 0);
+    cc_register_cfunc(vm, "fsync",   (void*)fsync,   1, 0);
+    cc_register_cfunc(vm, "ftruncate",(void*)ftruncate,2, 0);
+    cc_register_cfunc(vm, "truncate", (void*)truncate, 2, 0);
+    cc_register_cfunc(vm, "sysconf",  (void*)sysconf,  1, 0);
+    cc_register_cfunc(vm, "mkstemp",  (void*)mkstemp,  1, 0);
+    cc_register_cfunc(vm, "mkdtemp",  (void*)mkdtemp,  1, 0);
     cc_register_variadic_cfunc(vm, "open",   (void*)wrap_open,  2, 0);
     cc_register_cfunc(vm, "creat",   (void*)wrap_creat, 2, 0);
     cc_register_variadic_cfunc(vm, "fcntl",  (void*)fcntl, 2, 0);

@@ -29,6 +29,28 @@ typedef int sig_atomic_t;
 
 /* SIGKILL and SIGSTOP cannot be caught, blocked, or ignored */
 
+typedef unsigned int sigset_t;
+
+struct sigaction {
+    void     (*sa_handler)(int);
+    sigset_t   sa_mask;
+    int        sa_flags;
+};
+
+extern int sigaction(int sig, const struct sigaction *restrict act,
+                     struct sigaction *restrict oact);
+extern int sigemptyset(sigset_t *set);
+extern int sigfillset(sigset_t *set);
+extern int sigaddset(sigset_t *set, int signo);
+extern int sigdelset(sigset_t *set, int signo);
+extern int sigismember(const sigset_t *set, int signo);
+
+#define SA_RESTART  0x0002
+#define SA_RESETHAND 0x0004
+#define SA_NOCLDSTOP 0x0008
+#define SA_NOCLDWAIT 0x0020
+#define SA_NODEFER   0x0010
+
 extern void (*signal(int sig, void (*func)(int)))(int);
 extern int raise(int sig);
 

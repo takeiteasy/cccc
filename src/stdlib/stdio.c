@@ -200,9 +200,25 @@ void register_stdio_functions(VirtualMachine *vm) {
     // Positioning
     cc_register_cfunc(vm, "fgetpos", (void*)wrap_fgetpos, 2, 0);
     cc_register_cfunc(vm, "fsetpos", (void*)wrap_fsetpos, 2, 0);
-    cc_register_cfunc(vm, "fseek", (void*)wrap_fseek, 3, 0);
-    cc_register_cfunc(vm, "ftell", (void*)ftell, 1, 0);
+    cc_register_cfunc(vm, "fseek",  (void*)wrap_fseek, 3, 0);
+    cc_register_cfunc(vm, "fseeko", (void*)wrap_fseek, 3, 0);
+    cc_register_cfunc(vm, "ftell",  (void*)ftell, 1, 0);
+    cc_register_cfunc(vm, "ftello", (void*)ftell, 1, 0);
     cc_register_cfunc(vm, "rewind", (void*)rewind, 1, 0);
+
+    // Process I/O (POSIX)
+    cc_register_cfunc(vm, "popen",  (void*)popen,  2, 0);
+    cc_register_cfunc(vm, "pclose", (void*)pclose, 1, 0);
+
+    // Thread-safety file locking (POSIX)
+    cc_register_cfunc(vm, "flockfile",      (void*)flockfile,      1, 0);
+    cc_register_cfunc(vm, "funlockfile",    (void*)funlockfile,    1, 0);
+    cc_register_cfunc(vm, "ftrylockfile",   (void*)ftrylockfile,   1, 0);
+    // Unlocked I/O (POSIX thread-unsafe fast paths)
+    cc_register_cfunc(vm, "getc_unlocked",    (void*)getc_unlocked,    1, 0);
+    cc_register_cfunc(vm, "getchar_unlocked", (void*)getchar_unlocked, 0, 0);
+    cc_register_cfunc(vm, "putc_unlocked",    (void*)putc_unlocked,    2, 0);
+    cc_register_cfunc(vm, "putchar_unlocked", (void*)putchar_unlocked, 1, 0);
 
     // Error handling
     cc_register_cfunc(vm, "clearerr", (void*)clearerr, 1, 0);

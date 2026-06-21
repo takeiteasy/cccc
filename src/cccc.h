@@ -1769,7 +1769,7 @@ typedef struct Debugger {
 } Debugger;
 
 #ifndef MAX_CALLS
-#define MAX_CALLS 1024
+#define MAX_CALLS 16384
 #endif
 
 #ifndef MAX_LABELS
@@ -1936,6 +1936,8 @@ typedef struct Compiler {
     Obj *builtin_strcmp;   // Builtin strcmp (forwarded to libc)
     Obj *builtin_setjmp;   // Builtin setjmp function
     Obj *builtin_longjmp;  // Builtin longjmp function
+    Obj *builtin__setjmp;  // Builtin _setjmp (POSIX alias, same semantics as setjmp)
+    Obj *builtin__longjmp; // Builtin _longjmp (POSIX alias, same semantics as longjmp)
     Obj *builtin_signal;   // VM-managed signal() registration
     Obj *builtin_raise;    // VM-managed raise() delivery
     Obj *builtin_dlopen;   // VM-managed dlopen

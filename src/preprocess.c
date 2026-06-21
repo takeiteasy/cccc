@@ -4205,6 +4205,10 @@ void init_macros(VirtualMachine *vm) {
     // compilation.
     define_macro(vm, "__attribute__(x)", "");
 
+    // GCC extension keyword — expands to nothing; silences pedantic warnings
+    // in GCC-targeting headers that use __extension__ to suppress diagnostics.
+    define_macro(vm, "__extension__", "");
+
     // Architecture macros - pass through from host compiler
 #if defined(__x86_64__) || defined(__x86_64) || defined(__amd64__) ||          \
     defined(__amd64)
