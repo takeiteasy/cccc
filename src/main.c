@@ -271,6 +271,10 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --build-target=NAME   Build only the named target and its transitive dependencies\n");
     printf("\t   --build-tool-allow=N  Allowlist of tool names runnable via RunCustom/HaveTool/PkgConfig\n");
     printf("\t                         Accepts comma-separated or repeated flags. Default: allow all.\n");
+    printf("\t   --build-jobs=N        Compile up to N source files in parallel per target (default: 1)\n");
+    printf("\t   --build-keep-going    Continue building independent targets after a failure\n");
+    printf("\t   --build-quiet         Suppress per-step command lines; only show errors and summary\n");
+    printf("\t   --build-verbose       Print per-target headers and all command lines\n");
     printf("\nWarning Options:\n");
     printf("\t-Wall               Enable common warning categories\n");
     printf("\t-Wextra             Enable extra warning categories\n");
@@ -834,6 +838,10 @@ int main(int argc, const char *argv[]) {
     const char *build_target = NULL;  // --build-target=NAME
     const char *build_out_dir = NULL; // --build-out-dir=PATH (default "build")
     int build_dry_run = 0;         // --build-dry-run
+    int build_verbose = 0;         // --build-verbose
+    int build_quiet = 0;           // --build-quiet
+    int build_keep_going = 0;      // --build-keep-going
+    int build_jobs = 1;            // --build-jobs=N
     const char **build_tool_allow = NULL; // --build-tool-allow=name,...
     int build_tool_allow_count = 0;
 
@@ -927,6 +935,10 @@ int main(int argc, const char *argv[]) {
         {"build-dry-run", no_argument, 0, 1076},
         {"build-target", required_argument, 0, 1077},
         {"build-tool-allow", required_argument, 0, 1082},
+        {"build-jobs",       required_argument, 0, 1083},
+        {"build-keep-going", no_argument,       0, 1084},
+        {"build-quiet",      no_argument,       0, 1085},
+        {"build-verbose",    no_argument,       0, 1086},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1395,6 +1407,28 @@ int main(int argc, const char *argv[]) {
             build_mode = 1;
             break;
         }
+        case 1083: { // --build-jobs=N
+            int n = atoi(optarg);
+            if (n < 1) {
+                fprintf(stderr, "error: --build-jobs requires a positive integer\n");
+                usage(argv[0], 1);
+            }
+            build_jobs = n;
+            build_mode = 1;
+            break;
+        }
+        case 1084: // --build-keep-going
+            build_keep_going = 1;
+            build_mode = 1;
+            break;
+        case 1085: // --build-quiet
+            build_quiet = 1;
+            build_mode = 1;
+            break;
+        case 1086: // --build-verbose
+            build_verbose = 1;
+            build_mode = 1;
+            break;
         case 1066: // --test-format=FORMAT
             if (strcmp(optarg, "tap") == 0) {
                 test_format = TEST_FORMAT_TAP;
@@ -2106,7 +2140,11 @@ int main(int argc, const char *argv[]) {
             .target_name      = build_target,
             .out_dir          = build_out_dir,
             .verbose          = verbose,
+            .build_verbose    = build_verbose,
+            .quiet            = build_quiet,
+            .keep_going       = build_keep_going,
             .dry_run          = build_dry_run,
+            .jobs             = build_jobs,
             .defaults         = &build_defaults,
             .tool_allow       = build_tool_allow,
             .tool_allow_count = build_tool_allow_count,

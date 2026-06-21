@@ -56,7 +56,8 @@ A runnable example lives in [`examples/build_demo/`](../examples/build_demo).
        ├─ entry calls factories → builds the BuildTarget graph (data only)
        └─ entry calls Build*()
   6. The host runner (native C, behind the FFI boundary) topologically sorts the
-     graph and spawns cc/ar/ld (serial) to compile and link the targets.
+     graph and spawns cc/ar/ld to compile and link the targets (parallel source
+     compilation with `--build-jobs=N`).
   7. Exit with the entry's return value (non-zero = build failure).
 ```
 
@@ -73,6 +74,10 @@ cccc --build build.c --build-out-dir=out       # output directory (default: buil
 cccc --build build.c --build-dry-run           # print command lines, run nothing
 cccc --build build.c --build-target=NAME       # build only NAME and its transitive deps
 cccc --build build.c --build-tool-allow=a,b,c  # tool allowlist for probing / custom steps
+cccc --build build.c --build-jobs=8            # compile up to 8 sources in parallel
+cccc --build build.c --build-keep-going        # continue past failures to build independent targets
+cccc --build build.c --build-quiet             # suppress per-step command lines
+cccc --build build.c --build-verbose           # show per-target headers and all command lines
 ```
 
 | Flag | Default | Meaning |
@@ -83,6 +88,10 @@ cccc --build build.c --build-tool-allow=a,b,c  # tool allowlist for probing / cu
 | `--build-dry-run` | off | Topo-sort and print the resolved command lines without executing them. |
 | `--build-target=NAME` | (all) | Build only the named registered target and its transitive dependencies. Pruning happens at `Build*` call time — the full graph is declared first, then the filter is applied. |
 | `--build-tool-allow=NAME[,NAME...]` | (allow all) | Comma-separated allowlist of tool names that may be probed via `HaveTool` / `PkgConfig` or executed via `RunCustom`. Repeated flags accumulate. `cc`/`ar`/`ld` are always invoked directly by the runner and are not subject to this list. |
+| `--build-jobs=N` | `1` | Compile up to N source files in parallel within each target. Uses `fork()`+`exec()` on POSIX; falls back to serial on non-POSIX. |
+| `--build-keep-going` | off | Continue building independent targets when one fails, rather than stopping at the first error. All failed target names are listed in the final summary. |
+| `--build-quiet` | off | Suppress per-step `[N/M] cc ...` lines. Errors and the final summary are still printed. Overridden by `--build-verbose`. |
+| `--build-verbose` | off | Print a per-target header (`>> target 'name' [kind, N source(s)]`) before each target and show all command lines. Overrides `--build-quiet`. `-v` also enables this. |
 
 Existing flags forwarded to every target's compile as defaults: `-I`, `-i`, `-D`,
 `-U`, `--std=`, `-L`, `-l`. VM-only options (`-c`, `-d`/`--disassemble`,
@@ -289,16 +298,17 @@ use `--build-tool-allow` (see above).
 
 **Current release:** the `--build` mode, `[[cccc::build]]` entry resolution,
 the auto-injected `building.h`, the three native target kinds, the core builder
-API, a host-side **serial** runner with topological sort, `--build-out-dir`,
+API, a host-side runner with topological sort, `--build-out-dir`,
 `--build-dry-run`, `--build-target=NAME` registered-name selection with
 transitive dependency pruning, the inverted FFI default,
 `AddSourcesGlob` / `AddSourceStr` / `ExcludeSource` (#542),
-`HaveTool` / `PkgConfig` / `--build-tool-allow` (#543), and
-`RunCustom` / `DependsOn` (#544).
+`HaveTool` / `PkgConfig` / `--build-tool-allow` (#543),
+`RunCustom` / `DependsOn` (#544), and
+`--build-jobs` / `--build-keep-going` / `--build-quiet` / `--build-verbose` (#541).
 
 **Deferred to later releases:** `[[cccc::build_target]]` discoverable factories;
-parallel `-j`; bytecode targets; incremental / caching;
-cross-compilation; release/debug profiles; a self-hosting
+target-level parallel `-j` across DAG nodes (#557); bytecode targets;
+incremental / caching; cross-compilation; release/debug profiles; a self-hosting
 `build.c` replacing the Makefile.
 
 ## See also

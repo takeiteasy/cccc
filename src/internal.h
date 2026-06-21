@@ -796,8 +796,12 @@ typedef struct {
     const char *entry_name;             // --build-entry override, or NULL
     const char *target_name;            // --build-target=NAME, or NULL (build all)
     const char *out_dir;                // -O/--build-out-dir, or NULL (default "build")
-    int         verbose;                // -v
+    int         verbose;                // -v (also enables host-runner verbose output)
+    int         build_verbose;          // --build-verbose: per-target headers + command lines
+    int         quiet;                  // --build-quiet: suppress per-step command lines
+    int         keep_going;             // --build-keep-going: continue past target failures
     int         dry_run;                // --build-dry-run: print commands, run nothing
+    int         jobs;                   // --build-jobs=N: parallel source compile slots (0/1 = serial)
     const CcNativeCompileArgs *defaults; // CLI -I/-D/-U/--std forwarded to each target
     const char **tool_allow;            // --build-tool-allow names (NULL = allow-all)
     int          tool_allow_count;

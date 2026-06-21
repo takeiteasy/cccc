@@ -92,8 +92,11 @@ struct Builder {
     char *out_dir;
     const char *host;
     const char *target_filter; // --build-target=NAME, or NULL (build all)
-    int verbose;
+    int verbose;           // -v or --build-verbose: enables per-target headers
+    int quiet;             // --build-quiet: suppress per-step command lines
+    int keep_going;        // --build-keep-going: continue past target failures
     int dry_run;
+    int jobs;              // --build-jobs=N: max parallel cc -c slots (<=1 = serial)
     BuildTarget **targets;
     int targets_count, targets_cap;
     const CcNativeCompileArgs *defaults; // CLI -I/-D/-U/--std/-l/-L forwarded
@@ -686,8 +689,10 @@ static void print_cmd(int n, int total, char *const argv[]) {
 
 // Run (or, in dry-run, just print) one toolchain command.  Returns its exit code.
 static int run_step(Builder *ctx, int n, int total, ArgVec *args) {
-    print_cmd(n, total, (char *const *)args->data);
-    fflush(stdout);
+    if (!ctx->quiet || ctx->verbose || ctx->dry_run) {
+        print_cmd(n, total, (char *const *)args->data);
+        fflush(stdout);
+    }
     if (ctx->dry_run)
         return 0;
     return run_argv((char *const *)args->data);
@@ -718,6 +723,96 @@ static int compile_sources(Builder *ctx, const char *cc,
                            BuildTarget *t, const char *objdir,
                            StringArray *objs, int *step, int total) {
     StringArray owned = {0};
+
+#ifdef _POSIX_VERSION
+    int jobs = ctx->jobs > 1 ? ctx->jobs : 1;
+    if (jobs > 1 && !ctx->dry_run) {
+        // Parallel pid pool: launch up to `jobs` cc -c children at once.
+        typedef struct { pid_t pid; char *ofile; } Job;
+        Job *pool = calloc(jobs, sizeof(Job));
+        if (!pool) goto serial_fallback;
+
+        int in_flight = 0;
+        int any_failed = 0;
+
+        for (int i = 0; i <= t->sources.len; i++) {
+            // Drain one slot when the pool is full, or drain all on the final pass.
+            while (in_flight > 0 && (in_flight >= jobs || i == t->sources.len)) {
+                int status;
+                pid_t done = waitpid(-1, &status, 0);
+                if (done < 0) break;
+                for (int j = 0; j < jobs; j++) {
+                    if (pool[j].pid != done) continue;
+                    int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+                    if (exit_code != 0) {
+                        fprintf(stderr, "build: compile failed (exit %d)\n", exit_code);
+                        any_failed = 1;
+                        free(pool[j].ofile);
+                    } else {
+                        strarray_push(objs, pool[j].ofile); // transfer ownership
+                    }
+                    pool[j].pid = 0;
+                    pool[j].ofile = NULL;
+                    in_flight--;
+                    break;
+                }
+            }
+
+            if (i == t->sources.len) break;
+            if (source_is_excluded(t, t->sources.data[i])) continue;
+            if (any_failed) continue; // drain remaining, don't launch more
+
+            char *stem = stem_of(t->sources.data[i]);
+            char ofile[1024];
+            snprintf(ofile, sizeof(ofile), "%s/%s.o", objdir, stem);
+            free(stem);
+
+            ArgVec a = {0};
+            argv_push(&a, cc);
+            argv_push(&a, "-c");
+            argv_push(&a, t->sources.data[i]);
+            argv_push(&a, "-o");
+            argv_push(&a, ofile);
+            push_compile_flags(&a, ctx, t, &owned);
+
+            if (!ctx->quiet || ctx->verbose) {
+                print_cmd(++(*step), total, (char *const *)a.data);
+                fflush(stdout);
+            } else {
+                ++(*step);
+            }
+
+            pid_t pid = fork();
+            if (pid < 0) {
+                fprintf(stderr, "build: fork failed: %s\n", strerror(errno));
+                free(a.data);
+                any_failed = 1;
+                continue;
+            }
+            if (pid == 0) {
+                execvp(a.data[0], (char *const *)a.data);
+                _exit(127);
+            }
+            free(a.data);
+
+            for (int j = 0; j < jobs; j++) {
+                if (pool[j].pid == 0) {
+                    pool[j].pid = pid;
+                    pool[j].ofile = xstrdup(ofile);
+                    in_flight++;
+                    break;
+                }
+            }
+        }
+
+        free(pool);
+        free_strarray(&owned);
+        return any_failed ? 1 : 0;
+    }
+serial_fallback:;
+#endif
+
+    // Serial path (jobs==1, dry-run, or non-POSIX).
     int rc = 0;
     for (int i = 0; i < t->sources.len && rc == 0; i++) {
         if (source_is_excluded(t, t->sources.data[i]))
@@ -744,6 +839,19 @@ static int compile_sources(Builder *ctx, const char *cc,
 // Build a single target (its sources already; deps assumed built).  Returns 0 ok.
 static int build_target(Builder *ctx, const char *cc,
                         BuildTarget *t, int *step, int total) {
+    if (ctx->verbose) {
+        const char *kind_str = t->kind == CCCC_TGT_EXE     ? "executable"
+                             : t->kind == CCCC_TGT_STATIC   ? "static library"
+                             : t->kind == CCCC_TGT_DYNAMIC  ? "dynamic library"
+                             :                                 "custom";
+        if (t->kind == CCCC_TGT_CUSTOM)
+            printf(">> target '%s' [%s]\n", t->name, kind_str);
+        else
+            printf(">> target '%s' [%s, %d source(s)]\n",
+                   t->name, kind_str, t->sources.len);
+        fflush(stdout);
+    }
+
     // Custom steps: run the shell command and return its exit code.
     if (t->kind == CCCC_TGT_CUSTOM) {
         if (t->command && *t->command) {
@@ -954,22 +1062,32 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
     int total = count_steps(order, n);
     int step = 0;
     int failures = 0;
+    const char **failed_names = calloc(n, sizeof(*failed_names));
     for (int i = 0; i < n; i++) {
         if (build_target(ctx, cc, order[i], &step, total) != 0) {
-            fprintf(stderr, "build: target '%s' failed\n", order[i]->name);
+            fprintf(stderr, "build: target '%s' failed%s\n", order[i]->name,
+                    ctx->keep_going ? ", continuing" : "");
+            if (failed_names)
+                failed_names[failures] = order[i]->name;
             failures++;
-            break; // serial runner stops at first failure
+            if (!ctx->keep_going)
+                break;
         }
     }
     free(cc);
     free(order);
 
-    if (failures == 0)
+    if (failures == 0) {
         printf("build succeeded (%d target%s, 0 errors)\n", n, n == 1 ? "" : "s");
-    else {
+    } else {
         printf("build failed (%d error%s)\n", failures, failures == 1 ? "" : "s");
+        if (ctx->keep_going && failed_names) {
+            for (int i = 0; i < failures; i++)
+                printf("  failed: %s\n", failed_names[i]);
+        }
         ctx->failed = 1;
     }
+    free(failed_names);
     return failures;
 }
 
@@ -1057,8 +1175,11 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     ctx.out_dir = xstrdup(opts->out_dir ? opts->out_dir : "build");
     ctx.host = CCCC_BUILD_HOST;
     ctx.target_filter = opts->target_name;
-    ctx.verbose = opts->verbose;
+    ctx.verbose = opts->verbose || opts->build_verbose;
+    ctx.quiet = opts->quiet && !(opts->verbose || opts->build_verbose);
+    ctx.keep_going = opts->keep_going;
     ctx.dry_run = opts->dry_run;
+    ctx.jobs = opts->jobs > 1 ? opts->jobs : 1;
     ctx.defaults = opts->defaults;
     ctx.tool_allow = opts->tool_allow;
     ctx.tool_allow_count = opts->tool_allow_count;
