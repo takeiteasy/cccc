@@ -381,12 +381,7 @@ linux-x86_64-test: linux-x86_64-smoke
 
 
 
-all: clean $(EXE_OUT) $(LIB_OUT) test docs
-
-docs:
-	@headerdoc2html src/cccc.h include/cccc/reflection.h include/cccc/testing.h include/cccc/building.h -o docs/; \
-	gatherheaderdoc docs/; \
-	mv docs/masterTOC.html docs/index.html
+all: clean $(EXE_OUT) $(LIB_OUT) test
 
 # Profiling
 # Detect available profiling tools
@@ -472,7 +467,7 @@ else
 	@echo "dsym: DWARF is already embedded in the ELF binary on Linux; nothing to do."
 endif
 
-.PHONY: default test clean docs all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json macos-x86_64-build macos-x86_64-smoke macos-x86_64-test linux-x86_64-check linux-x86_64-build linux-x86_64-smoke linux-x86_64-test dsym
+.PHONY: default test clean all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json macos-x86_64-build macos-x86_64-smoke macos-x86_64-test linux-x86_64-check linux-x86_64-build linux-x86_64-smoke linux-x86_64-test dsym
 ifeq ($(UNAME_S),Linux)
 .PHONY: msan
 endif
