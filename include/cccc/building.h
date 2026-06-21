@@ -250,6 +250,16 @@ int __builtin_build_have_build_option(Builder *ctx, const char *name);
  *            @c AddLdFlag(t, "-framework Name"). */
 void __builtin_build_add_framework(BuildTarget *t, const char *name);
 
+/*! @function __builtin_build_argc
+ *  @abstract Number of positional arguments forwarded via @c -- on the CLI.
+ *            Returns 0 if no @c -- separator was given. */
+int __builtin_build_argc(Builder *ctx);
+
+/*! @function __builtin_build_argv
+ *  @abstract Return the @c i -th (0-based) positional argument forwarded via
+ *            @c -- on the CLI, or @c NULL if @c i is out of range. */
+const char *__builtin_build_argv(Builder *ctx, int i);
+
 /*! @function __builtin_build_set_install_prefix
  *  @abstract Override the install prefix for @c InstallArtifact
  *            (default: @c PREFIX env var or @c /usr/local). */
@@ -342,6 +352,9 @@ int __builtin_build_run_default(Builder *ctx);
 #define GetBuildOption(ctx, name)    __builtin_build_get_build_option(ctx, name)
 #define HaveBuildOption(ctx, name)   __builtin_build_have_build_option(ctx, name)
 #define AddFramework(t, name)        __builtin_build_add_framework(t, name)
+
+#define BuildArgc(ctx)               __builtin_build_argc(ctx)
+#define BuildArgv(ctx, i)            __builtin_build_argv(ctx, i)
 
 #define SetInstallPrefix(ctx, path)  __builtin_build_set_install_prefix(ctx, path)
 #define InstallArtifact(ctx, t)      __builtin_build_install_artifact(ctx, t)

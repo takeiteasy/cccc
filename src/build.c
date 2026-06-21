@@ -133,6 +133,9 @@ struct Builder {
     BuildTarget **install_targets;
     int           install_count, install_cap;
     int           build_install;   // --build-install flag
+    // User args forwarded from -- on the CLI (#558)
+    const char **user_args;
+    int          user_args_count;
 };
 
 // The active build context for the current --build run.  Set by cc_run_build
@@ -690,6 +693,19 @@ static long long impl_have_build_option(long long ctx, long long name) {
     return 0;
 }
 
+// BuildArgc: number of user args forwarded via -- on the CLI (#558).
+static long long impl_build_argc(long long ctx) {
+    (void)ctx;
+    return s_ctx ? s_ctx->user_args_count : 0;
+}
+
+// BuildArgv: return the i-th user arg (0-based), or NULL if out of range (#558).
+static long long impl_build_argv(long long ctx, long long i) {
+    (void)ctx;
+    if (!s_ctx || i < 0 || i >= s_ctx->user_args_count) return 0;
+    return (long long)(intptr_t)s_ctx->user_args[i];
+}
+
 // AddFramework: macOS -framework <name> shorthand (cleaner than two AddLdFlag calls).
 // Adds two separate linker tokens: "-framework" and the framework name.
 // On non-Apple platforms the tokens are still added; the linker will reject them,
@@ -947,6 +963,9 @@ void cc_load_build_runtime(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__builtin_build_set_install_prefix",(void *)impl_set_install_prefix, 2, 0);
     cc_register_cfunc(vm, "__builtin_build_install_artifact",  (void *)impl_install_artifact,   2, 0);
     cc_register_cfunc(vm, "__builtin_build_wants_install",     (void *)impl_build_wants_install, 1, 0);
+    // #558
+    cc_register_cfunc(vm, "__builtin_build_argc",              (void *)impl_build_argc,          1, 0);
+    cc_register_cfunc(vm, "__builtin_build_argv",              (void *)impl_build_argv,          2, 0);
     // #561
     cc_register_cfunc(vm, "__builtin_build_dir_exists",        (void *)impl_dir_exists,         2, 0);
     cc_register_cfunc(vm, "__builtin_build_glob_files",        (void *)impl_glob_files,         2, 0);
@@ -1978,6 +1997,8 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                 ctx.build_options = opts->build_options;
                 ctx.build_options_count = opts->build_options_count;
                 ctx.build_install = opts->build_install;
+                ctx.user_args       = opts->user_args;
+                ctx.user_args_count = opts->user_args_count;
                 const char *prefix_env = getenv("PREFIX");
                 ctx.install_prefix = xstrdup(prefix_env ? prefix_env : "/usr/local");
 
@@ -2076,6 +2097,8 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     ctx.build_options = opts->build_options;
     ctx.build_options_count = opts->build_options_count;
     ctx.build_install = opts->build_install;
+    ctx.user_args       = opts->user_args;
+    ctx.user_args_count = opts->user_args_count;
     {
         const char *prefix_env = getenv("PREFIX");
         ctx.install_prefix = xstrdup(prefix_env ? prefix_env : "/usr/local");

@@ -814,6 +814,8 @@ typedef struct {
     const char **build_options;         // --build-option=key=value strings (#559)
     int          build_options_count;
     int          build_install;         // --build-install: copy artifacts after build (#560)
+    const char **user_args;            // positional args after -- on the CLI (#558)
+    int          user_args_count;
 } CcBuildOptions;
 
 void   cc_load_build_runtime(VirtualMachine *vm);

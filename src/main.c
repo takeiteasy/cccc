@@ -285,6 +285,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                         Accepts repeated flags: --build-option=foo=bar --build-option=baz=1\n");
     printf("\t   --build-install       After a successful build copy artifacts registered with InstallArtifact\n");
     printf("\t                         to the install prefix (default: PREFIX env var or /usr/local).\n");
+    printf("\t   -- [args...]          Forward positional args to the build entry (BuildArgc/BuildArgv).\n");
     printf("\nWarning Options:\n");
     printf("\t-Wall               Enable common warning categories\n");
     printf("\t-Wextra             Enable extra warning categories\n");
@@ -2215,6 +2216,10 @@ int main(int argc, const char *argv[]) {
             .build_options        = build_options,
             .build_options_count  = build_options_count,
             .build_install        = build_install,
+            .user_args            = (dashdash >= 0 && dashdash + 1 < argc)
+                                        ? argv + dashdash + 1 : NULL,
+            .user_args_count      = (dashdash >= 0 && dashdash + 1 < argc)
+                                        ? argc - dashdash - 1 : 0,
         };
 
         exit_code = cc_run_build(&vm, merged_prog, &build_opts);

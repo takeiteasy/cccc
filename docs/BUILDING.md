@@ -99,6 +99,7 @@ cccc --build build.c --build-cache=~/.cache/cccc  # incremental builds with expl
 | `--build-cache[=PATH]` | (off) | Enable incremental builds. Two-level strategy: (1) mtime fast path — skips recompile when the existing `.o` is newer than the source; (2) content-hash CAS — on a mtime miss, looks up `hash(source_content + compile_flags)` in a content-addressable store and restores the cached `.o` without recompiling. Objects compiled fresh are stored in the CAS for future reuse. Default cache directory: `<out-dir>/.cccc-cache`. Pass `=PATH` to use a shared or cross-build cache directory. |
 | `--build-option=KEY=VALUE` | (none) | Pass a typed build option to the build script. Queried via `GetBuildOption(ctx, key)` / `HaveBuildOption(ctx, key)`. Repeated flags accumulate. (#559) |
 | `--build-install` | off | After a successful build, copy artifacts registered with `InstallArtifact` to the install prefix. Default prefix: `PREFIX` env var or `/usr/local`. (#560) |
+| `-- [args...]` | (none) | Positional arguments forwarded to the build entry. Accessible via `BuildArgc(ctx)` / `BuildArgv(ctx, i)`. (#558) |
 
 Existing flags forwarded to every target's compile as defaults: `-I`, `-i`, `-D`,
 `-U`, `--std=`, `-L`, `-l`. VM-only options (`-c`, `-d`/`--disassemble`,
@@ -295,6 +296,10 @@ void         AddFramework(BuildTarget *t, const char *name); // macOS -framework
 // Build options (#559)
 const char  *GetBuildOption(Builder *ctx, const char *name); // value of --build-option=key=value or NULL
 int          HaveBuildOption(Builder *ctx, const char *name); // 1 if --build-option=key[=...] was passed
+
+// User args (#558) — positional args after -- on the CLI
+int          BuildArgc(Builder *ctx);                // number of args after --
+const char  *BuildArgv(Builder *ctx, int i);         // i-th arg (0-based), or NULL
 
 // Install (#560)
 void SetInstallPrefix(Builder *ctx, const char *path); // override install root (default: PREFIX or /usr/local)
@@ -498,6 +503,39 @@ int build_main(Builder *ctx) {
 
 **`HaveBuildOption(ctx, name)`** returns 1 if `--build-option=name` (with or
 without a value) was passed.
+
+### Passing arguments to the build entry (#558)
+
+User-facing build steps (e.g. `install`, `test`, `clean`) can be passed as
+positional arguments after `--` on the command line:
+
+```bash
+cccc --build build.c -- install --prefix=/usr/local
+```
+
+Inside the build script, read them with `BuildArgc` and `BuildArgv`:
+
+```c
+[[cccc::build]]
+int build_main(Builder *ctx) {
+    BuildTarget *app = Executable(ctx, "myapp");
+    AddSource(app, "src/main.c");
+
+    int n = BuildArgc(ctx);
+    for (int i = 0; i < n; i++) {
+        if (strcmp(BuildArgv(ctx, i), "install") == 0)
+            InstallArtifact(ctx, app);
+    }
+
+    return BuildDefault(ctx);
+}
+```
+
+**`BuildArgc(ctx)`** returns the number of arguments after `--`
+(0 if `--` was not given).
+
+**`BuildArgv(ctx, i)`** returns the `i`-th argument (0-based), or `NULL` if
+`i` is out of range.
 
 ### Install (#560)
 
