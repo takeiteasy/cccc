@@ -24,7 +24,7 @@
 // with the system toolchain (cc/ar/ld), synchronously, inside the
 // cccc_build_run* FFI call so the entry's return value reflects the real status.
 
-#include "internal.h"
+#include "./internal.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -37,9 +37,7 @@
 #include <sys/wait.h>
 #endif
 
-// build_shell.c defines PAUL_SHELL_IMPLEMENTATION; here we just include the
-// declarations so build.c can call shell_with_ctx / shell_ctx_*.
-#include "vendor/paul_shell.h"
+#include "paul_shell.h"
 
 #if defined(__APPLE__)
 #define CCCC_BUILD_HOST "darwin"
