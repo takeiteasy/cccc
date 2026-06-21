@@ -279,6 +279,8 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --build-profile=NAME  Set build profile: debug | release | relwithdebinfo | minsizerel\n");
     printf("\t   --build-triple=TRIPLE Cross-compile target triple (e.g. aarch64-linux-gnu; clang only)\n");
     printf("\t   --build-cc=COMPILER   Override CC binary for all targets (e.g. aarch64-linux-gnu-gcc)\n");
+    printf("\t   --build-cache[=PATH]  Enable incremental builds: mtime+content-hash cache.\n");
+    printf("\t                         Default cache dir: <out-dir>/.cccc-cache\n");
     printf("\nWarning Options:\n");
     printf("\t-Wall               Enable common warning categories\n");
     printf("\t-Wextra             Enable extra warning categories\n");
@@ -850,6 +852,7 @@ int main(int argc, const char *argv[]) {
     const char *build_profile = NULL; // --build-profile=NAME (#548)
     const char *build_triple = NULL;  // --build-triple=TRIPLE (#547)
     const char *build_cc = NULL;      // --build-cc=COMPILER (#547)
+    const char *build_cache = NULL;   // --build-cache[=PATH] (#546)
     const char **build_tool_allow = NULL; // --build-tool-allow=name,...
     int build_tool_allow_count = 0;
 
@@ -951,6 +954,7 @@ int main(int argc, const char *argv[]) {
         {"build-profile",    required_argument, 0, 1088},
         {"build-triple",     required_argument, 0, 1089},
         {"build-cc",         required_argument, 0, 1090},
+        {"build-cache",      optional_argument, 0, 1091},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1455,6 +1459,10 @@ int main(int argc, const char *argv[]) {
             break;
         case 1090: // --build-cc=COMPILER
             build_cc = optarg;
+            build_mode = 1;
+            break;
+        case 1091: // --build-cache[=PATH]
+            build_cache = optarg ? optarg : "";
             build_mode = 1;
             break;
         case 1066: // --test-format=FORMAT
@@ -2180,6 +2188,7 @@ int main(int argc, const char *argv[]) {
             .profile          = build_profile,
             .cross_triple     = build_triple,
             .cross_cc         = build_cc,
+            .build_cache      = build_cache,
         };
 
         exit_code = cc_run_build(&vm, merged_prog, &build_opts);

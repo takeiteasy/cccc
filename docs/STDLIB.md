@@ -303,15 +303,3 @@ This table tracks shims that **reimplement** a standard function — not ABI-com
 > **Known limitation ([#406](https://todo.sr.ht/~takeiteasy/cccc/406)):** the native FFI call path does not support `float`-typed (single-precision) arguments/returns for *any* registered C function - this predates and is broader than this table. `exp10f`, `sinpif`, `cospif`, `tanpif`, `asinpif`, `acospif`, `atanpif`, `atan2pif` (and pre-existing functions like `sqrtf`, `sinf`, `fmodf`, `expf`, ...) are registered and implemented correctly, but currently return incorrect results when called. `double` and `long double` variants are unaffected.
 
 > **Known limitation ([#407](https://todo.sr.ht/~takeiteasy/cccc/407)):** when a user-defined variadic function forwards its `va_list` to `vprintf`/`vfprintf`/`vsprintf`/`vsnprintf`/`vscanf`/`vfscanf`/`vsscanf`, only the *first* variadic argument is passed through correctly; subsequent arguments are garbage. This is a pre-existing VM/FFI limitation, not specific to `%b`/`%B`.
-
----
-
-## Not Supported
-
-| Feature | Notes |
-|---|---|
-| True cross-thread atomics | `<stdatomic.h>` fetch/store operations are sequentially consistent within the GIL; cross-thread data races are not prevented by hardware atomics — use a mutex for shared mutable state across threads |
-| Complex function call ABI | Passing or returning complex values by function call is not implemented |
-| Full native ABI for runtime `dlsym` calls | Runtime dynamic function calls support scalar/pointer signatures through libffi using the current scalar/double metadata. Aggregate by-value arguments/returns, callbacks, variadic function-pointer calls, and full platform ABI descriptors are not implemented |
-| Native code generation | CCCC produces VM bytecode only |
-| Shared-library auto-linking for arbitrary undeclared symbols | `dlfcn.h` calls are available; `--library` opens requested libraries for registered FFI symbols |

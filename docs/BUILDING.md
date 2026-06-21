@@ -78,6 +78,8 @@ cccc --build build.c --build-jobs=8            # compile up to 8 sources in para
 cccc --build build.c --build-keep-going        # continue past failures to build independent targets
 cccc --build build.c --build-quiet             # suppress per-step command lines
 cccc --build build.c --build-verbose           # show per-target headers and all command lines
+cccc --build build.c --build-cache             # enable incremental builds (default cache dir)
+cccc --build build.c --build-cache=~/.cache/cccc  # incremental builds with explicit cache path
 ```
 
 | Flag | Default | Meaning |
@@ -94,6 +96,7 @@ cccc --build build.c --build-verbose           # show per-target headers and all
 | `--build-verbose` | off | Print a per-target header (`>> target 'name' [kind, N source(s)]`) before each target and show all command lines. Overrides `--build-quiet`. `-v` also enables this. |
 | `--build-list-targets` | off | Print the names of all `[[cccc::build_target]]` factory functions (one per line) and exit without running the build entry. |
 | `--build-profile=NAME` | (none) | Set a global build profile for all targets: `debug`, `release`, `relwithdebinfo`, or `minsizerel`. Individual targets can override with `SetProfile`. |
+| `--build-cache[=PATH]` | (off) | Enable incremental builds. Two-level strategy: (1) mtime fast path — skips recompile when the existing `.o` is newer than the source; (2) content-hash CAS — on a mtime miss, looks up `hash(source_content + compile_flags)` in a content-addressable store and restores the cached `.o` without recompiling. Objects compiled fresh are stored in the CAS for future reuse. Default cache directory: `<out-dir>/.cccc-cache`. Pass `=PATH` to use a shared or cross-build cache directory. |
 
 Existing flags forwarded to every target's compile as defaults: `-I`, `-i`, `-D`,
 `-U`, `--std=`, `-L`, `-l`. VM-only options (`-c`, `-d`/`--disassemble`,
@@ -513,14 +516,15 @@ build profiles (`debug` / `release` / `relwithdebinfo` / `minsizerel`) via
 `--build-profile` and `SetProfile` (#548),
 cross-compilation via `--build-triple` / `SetTargetTriple` and
 `--build-cc` / `SetToolchain` (#547),
-`GetEnv` / `CaptureCommand` / `FileExists` environment and filesystem helpers.
+`GetEnv` / `CaptureCommand` / `FileExists` environment and filesystem helpers,
+`--build-cache[=PATH]` incremental builds with mtime + content-hash CAS (#546).
 
 **Deferred to later releases:** target-level parallel `-j` across DAG nodes (#557);
 `FindTool` / build options / `AddFramework` (#559);
 `InstallArtifact` / `SetInstallPrefix` (#560);
 additional filesystem helpers — `DirExists`, glob search (#561);
 bytecode targets (`kind=bytecode` in `[[cccc::build_target]]`, pending #545);
-incremental / caching; a self-hosting `build.c` replacing the Makefile.
+a self-hosting `build.c` replacing the Makefile.
 
 ## See also
 

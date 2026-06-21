@@ -100,6 +100,7 @@ struct Builder {
     int keep_going;        // --build-keep-going: continue past target failures
     int dry_run;
     int jobs;              // --build-jobs=N: max parallel cc -c slots (<=1 = serial)
+    char *cache_dir;       // --build-cache[=PATH]: content-addressable cache root, or NULL (#546)
     BuildTarget **targets;
     int targets_count, targets_cap;
     const CcNativeCompileArgs *defaults; // CLI -I/-D/-U/--std/-l/-L forwarded
@@ -939,6 +940,99 @@ static int source_is_excluded(const BuildTarget *t, const char *src) {
     return 0;
 }
 
+// ============================================================================
+// Incremental build cache (#546)
+// ============================================================================
+
+// FNV-1a 64-bit: simple, dependency-free content hash used for the CAS key.
+#define CACHE_FNV_OFFSET 0xcbf29ce484222325ULL
+#define CACHE_FNV_PRIME  0x00000100000001b3ULL
+
+static uint64_t fnv1a_update(uint64_t h, const void *data, size_t n) {
+    const unsigned char *p = (const unsigned char *)data;
+    for (size_t i = 0; i < n; i++) { h ^= p[i]; h *= CACHE_FNV_PRIME; }
+    return h;
+}
+
+static uint64_t fnv1a_file(const char *path, uint64_t h) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return h;
+    unsigned char buf[8192];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
+        h = fnv1a_update(h, buf, n);
+    fclose(f);
+    return h;
+}
+
+// Build a 64-bit cache key from the compile command + source content.
+// Skips the -o <path> pair so the key is output-path-agnostic.
+static uint64_t source_cache_key(const char *src, char *const *argv) {
+    uint64_t h = CACHE_FNV_OFFSET;
+    for (int i = 0; argv[i]; i++) {
+        if (strcmp(argv[i], "-o") == 0) { i++; continue; } // skip -o <path>
+        h = fnv1a_update(h, argv[i], strlen(argv[i]));
+        h = fnv1a_update(h, "\0", 1); // arg separator
+    }
+    return fnv1a_file(src, h);
+}
+
+// Returns 1 if the existing ofile is at least as new as src (mtime fast path).
+static int ofile_is_current(const char *ofile, const char *src) {
+    struct stat o_st, s_st;
+    if (stat(ofile, &o_st) != 0 || stat(src, &s_st) != 0) return 0;
+    return o_st.st_mtime >= s_st.st_mtime;
+}
+
+// CAS layout: <cache_dir>/<key[0:2]>/<key_hex>.o
+static void cache_entry_path(char *buf, size_t len,
+                              const char *cache_dir, uint64_t key) {
+    char hex[17];
+    snprintf(hex, sizeof(hex), "%016llx", (unsigned long long)key);
+    snprintf(buf, len, "%s/%.2s/%s.o", cache_dir, hex, hex);
+}
+
+// Simple binary file copy; returns 0 on success, -1 on error.
+static int copy_file(const char *src, const char *dst) {
+    FILE *in = fopen(src, "rb");
+    if (!in) return -1;
+    FILE *out = fopen(dst, "wb");
+    if (!out) { fclose(in); return -1; }
+    char buf[8192];
+    size_t n;
+    int rc = 0;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
+        if (fwrite(buf, 1, n, out) != n) { rc = -1; break; }
+    fclose(in);
+    fclose(out);
+    if (rc != 0) remove(dst);
+    return rc;
+}
+
+// Try to restore ofile from the CAS. Returns 1 on hit, 0 on miss.
+static int cache_lookup(const char *cache_dir, uint64_t key, const char *ofile) {
+    char cpath[2048];
+    cache_entry_path(cpath, sizeof(cpath), cache_dir, key);
+    struct stat st;
+    if (stat(cpath, &st) != 0) return 0;
+    char *d = dir_of(ofile);
+    mkdir_p(d);
+    free(d);
+    return copy_file(cpath, ofile) == 0;
+}
+
+// Store compiled ofile into the CAS (best-effort; errors are silently ignored).
+static void cache_store(const char *cache_dir, uint64_t key, const char *ofile) {
+    char hex[17];
+    snprintf(hex, sizeof(hex), "%016llx", (unsigned long long)key);
+    char prefix[2048];
+    snprintf(prefix, sizeof(prefix), "%s/%.2s", cache_dir, hex);
+    if (mkdir_p(prefix) != 0) return;
+    char cpath[2048];
+    cache_entry_path(cpath, sizeof(cpath), cache_dir, key);
+    copy_file(ofile, cpath);
+}
+
 // Compile one target's sources to object files; collect the .o paths in `objs`.
 // Sources matching the target's exclude list are silently skipped.
 // Returns 0 on success.
@@ -951,7 +1045,7 @@ static int compile_sources(Builder *ctx, const char *cc,
     int jobs = ctx->jobs > 1 ? ctx->jobs : 1;
     if (jobs > 1 && !ctx->dry_run) {
         // Parallel pid pool: launch up to `jobs` cc -c children at once.
-        typedef struct { pid_t pid; char *ofile; } Job;
+        typedef struct { pid_t pid; char *ofile; uint64_t cache_key; } Job;
         Job *pool = calloc(jobs, sizeof(Job));
         if (!pool) goto serial_fallback;
 
@@ -972,10 +1066,13 @@ static int compile_sources(Builder *ctx, const char *cc,
                         any_failed = 1;
                         free(pool[j].ofile);
                     } else {
+                        if (ctx->cache_dir)
+                            cache_store(ctx->cache_dir, pool[j].cache_key, pool[j].ofile);
                         strarray_push(objs, pool[j].ofile); // transfer ownership
                     }
                     pool[j].pid = 0;
                     pool[j].ofile = NULL;
+                    pool[j].cache_key = 0;
                     in_flight--;
                     break;
                 }
@@ -990,6 +1087,16 @@ static int compile_sources(Builder *ctx, const char *cc,
             snprintf(ofile, sizeof(ofile), "%s/%s.o", objdir, stem);
             free(stem);
 
+            // Level 1: mtime check — skip recompile when ofile is up to date.
+            if (ctx->cache_dir && ofile_is_current(ofile, t->sources.data[i])) {
+                if (!ctx->quiet || ctx->verbose)
+                    printf("[%d/%d] (cached) %s\n", ++(*step), total, t->sources.data[i]);
+                else
+                    ++(*step);
+                strarray_push(objs, xstrdup(ofile));
+                continue;
+            }
+
             ArgVec a = {0};
             argv_push(&a, cc);
             argv_push(&a, "-c");
@@ -997,6 +1104,21 @@ static int compile_sources(Builder *ctx, const char *cc,
             argv_push(&a, "-o");
             argv_push(&a, ofile);
             push_compile_flags(&a, ctx, t, &owned);
+
+            // Level 2: content-hash CAS lookup — restore from cache if key matches.
+            uint64_t ckey = 0;
+            if (ctx->cache_dir) {
+                ckey = source_cache_key(t->sources.data[i], (char *const *)a.data);
+                if (cache_lookup(ctx->cache_dir, ckey, ofile)) {
+                    if (!ctx->quiet || ctx->verbose)
+                        printf("[%d/%d] (cached) %s\n", ++(*step), total, t->sources.data[i]);
+                    else
+                        ++(*step);
+                    free(a.data);
+                    strarray_push(objs, xstrdup(ofile));
+                    continue;
+                }
+            }
 
             if (!ctx->quiet || ctx->verbose) {
                 print_cmd(++(*step), total, (char *const *)a.data);
@@ -1022,6 +1144,7 @@ static int compile_sources(Builder *ctx, const char *cc,
                 if (pool[j].pid == 0) {
                     pool[j].pid = pid;
                     pool[j].ofile = xstrdup(ofile);
+                    pool[j].cache_key = ckey;
                     in_flight++;
                     break;
                 }
@@ -1044,6 +1167,18 @@ serial_fallback:;
         char ofile[1024];
         snprintf(ofile, sizeof(ofile), "%s/%s.o", objdir, stem);
         free(stem);
+
+        // Level 1: mtime check — skip recompile when ofile is up to date.
+        if (ctx->cache_dir && !ctx->dry_run &&
+            ofile_is_current(ofile, t->sources.data[i])) {
+            if (!ctx->quiet || ctx->verbose)
+                printf("[%d/%d] (cached) %s\n", ++(*step), total, t->sources.data[i]);
+            else
+                ++(*step);
+            strarray_push(objs, xstrdup(ofile));
+            continue;
+        }
+
         ArgVec a = {0};
         argv_push(&a, cc);
         argv_push(&a, "-c");
@@ -1051,8 +1186,26 @@ serial_fallback:;
         argv_push(&a, "-o");
         argv_push(&a, ofile);
         push_compile_flags(&a, ctx, t, &owned);
+
+        // Level 2: content-hash CAS lookup (skipped in dry-run).
+        uint64_t ckey = 0;
+        if (ctx->cache_dir && !ctx->dry_run) {
+            ckey = source_cache_key(t->sources.data[i], (char *const *)a.data);
+            if (cache_lookup(ctx->cache_dir, ckey, ofile)) {
+                if (!ctx->quiet || ctx->verbose)
+                    printf("[%d/%d] (cached) %s\n", ++(*step), total, t->sources.data[i]);
+                else
+                    ++(*step);
+                free(a.data);
+                strarray_push(objs, xstrdup(ofile));
+                continue;
+            }
+        }
+
         rc = run_step(ctx, ++(*step), total, &a);
         free(a.data);
+        if (rc == 0 && ctx->cache_dir)
+            cache_store(ctx->cache_dir, ckey, ofile);
         strarray_push(objs, xstrdup(ofile));
     }
     free_strarray(&owned);
@@ -1456,6 +1609,12 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                 ctx.profile = opts->profile;
                 ctx.cross_triple = opts->cross_triple;
                 ctx.cross_cc = opts->cross_cc;
+                if (opts->build_cache) {
+                    ctx.cache_dir = *opts->build_cache
+                        ? xstrdup(opts->build_cache)
+                        : join(ctx.out_dir, ".cccc-cache");
+                    mkdir_p(ctx.cache_dir);
+                }
 
                 s_ctx = &ctx;
                 cc_run_at(vm, (Pc)factory_fn->code_addr, 0, NULL);
@@ -1475,6 +1634,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                     free_target(ctx.targets[j]);
                 free(ctx.targets);
                 free(ctx.out_dir);
+                free(ctx.cache_dir);
                 for (int j = 0; j < ctx.captures_count; j++) free(ctx.captures[j]);
                 free(ctx.captures);
                 free(factory_names);
@@ -1522,6 +1682,12 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     ctx.profile = opts->profile;
     ctx.cross_triple = opts->cross_triple;
     ctx.cross_cc = opts->cross_cc;
+    if (opts->build_cache) {
+        ctx.cache_dir = *opts->build_cache
+            ? xstrdup(opts->build_cache)
+            : join(ctx.out_dir, ".cccc-cache");
+        mkdir_p(ctx.cache_dir);
+    }
 
     s_ctx = &ctx;
     cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
@@ -1538,6 +1704,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
         free_target(ctx.targets[i]);
     free(ctx.targets);
     free(ctx.out_dir);
+    free(ctx.cache_dir);
     for (int i = 0; i < ctx.captures_count; i++) free(ctx.captures[i]);
     free(ctx.captures);
     free(factory_names);
