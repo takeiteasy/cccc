@@ -164,6 +164,27 @@ int __builtin_build_pkg_config(BuildTarget *t, const char *pkg);
 BuildTarget *__builtin_build_run_custom(Builder *ctx, const char *name,
                                         const char *cmd);
 
+/*! @function __builtin_build_set_profile
+ *  @abstract Set the build profile for target @c t, overriding any global
+ *            @c --build-profile default.  Valid names: @c "debug",
+ *            @c "release", @c "relwithdebinfo", @c "minsizerel".
+ *
+ *  Profile flags are prepended before the target's own @c AddCFlag entries,
+ *  so per-target flags can override them:
+ *
+ *  | Profile       | Compiler flags | Defines   |
+ *  |---------------|----------------|-----------|
+ *  | debug         | -g -O0         | —         |
+ *  | release       | -O2            | -DNDEBUG  |
+ *  | relwithdebinfo| -O2 -g         | -DNDEBUG  |
+ *  | minsizerel    | -Os            | -DNDEBUG  | */
+void __builtin_build_set_profile(BuildTarget *t, const char *profile);
+
+/*! @function __builtin_build_profile
+ *  @abstract Returns the global build profile name (from @c --build-profile),
+ *            or @c NULL if no global profile is set. */
+const char *__builtin_build_profile(Builder *ctx);
+
 /*! @function __builtin_build_target_count
  *  @abstract Returns the number of @c [[cccc::build_target]] factory functions
  *            declared in the current build script.  Useful for programmatic
@@ -218,6 +239,9 @@ int __builtin_build_run_default(Builder *ctx);
 #define HaveTool(ctx, name)     __builtin_build_have_tool(ctx, name)
 #define PkgConfig(t, pkg)       __builtin_build_pkg_config(t, pkg)
 #define RunCustom(ctx, name, cmd) __builtin_build_run_custom(ctx, name, cmd)
+
+#define SetProfile(t, p)         __builtin_build_set_profile(t, p)
+#define BuildProfile(ctx)        __builtin_build_profile(ctx)
 
 #define BuildTargetCount(ctx)    __builtin_build_target_count(ctx)
 #define BuildTargetName(ctx, i)  __builtin_build_target_name(ctx, i)

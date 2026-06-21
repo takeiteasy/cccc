@@ -72,6 +72,7 @@ struct BuildTarget {
     char *name;
     char *output;          // explicit output path (relative to out_dir) or NULL
     char *command;         // CCCC_TGT_CUSTOM: shell command to run
+    char *profile;         // "debug"|"release"|"relwithdebinfo"|"minsizerel", or NULL (#548)
     StringArray sources;
     StringArray excludes;  // glob/path patterns excluded from sources (#542)
     StringArray includes;
@@ -112,6 +113,7 @@ struct Builder {
     // --build-target=NAME invocation.
     const char **factory_names;
     int factory_count;
+    const char *profile;   // --build-profile=NAME global default (#548)
 };
 
 // The active build context for the current --build run.  Set by cc_run_build
@@ -584,6 +586,24 @@ static long long impl_build_run_all(long long ctx);
 static long long impl_build_run_default(long long ctx);
 
 // ============================================================================
+// #548 — profile FFI impls
+// ============================================================================
+
+static long long impl_set_profile(long long t, long long p) {
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    const char *prof = (const char *)p;
+    if (!tgt || !prof) return 0;
+    free(tgt->profile);
+    tgt->profile = xstrdup(prof);
+    return 0;
+}
+
+static long long impl_build_profile(long long ctx) {
+    (void)ctx;
+    return (long long)(intptr_t)(s_ctx ? s_ctx->profile : NULL);
+}
+
+// ============================================================================
 // #540 — build_target factory reflection
 // ============================================================================
 
@@ -633,6 +653,8 @@ void cc_load_build_runtime(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__builtin_build_run_default",   (void *)impl_build_run_default,  1, 0);
     cc_register_cfunc(vm, "__builtin_build_target_count",  (void *)impl_target_count,       1, 0);
     cc_register_cfunc(vm, "__builtin_build_target_name",   (void *)impl_target_name,        2, 0);
+    cc_register_cfunc(vm, "__builtin_build_set_profile",   (void *)impl_set_profile,        2, 0);
+    cc_register_cfunc(vm, "__builtin_build_profile",       (void *)impl_build_profile,      1, 0);
 }
 
 // ============================================================================
@@ -650,6 +672,42 @@ Token *cc_inject_build_header(VirtualMachine *vm) {
 // ============================================================================
 // Host-side runner (#535): topo-sort + per-target cc/ar/ld
 // ============================================================================
+
+// ============================================================================
+// #548 — build profiles
+// ============================================================================
+
+// Push the compile-side flags for the named profile.  Called before the
+// target's own cflags so the target can override (e.g. AddCFlag("-O3")).
+// Profile flags intentionally do NOT include -DNDEBUG here; that is added
+// as a define flag in push_profile_defines() below.
+static void push_profile_cflags(ArgVec *args, const char *profile) {
+    if (!profile) return;
+    if (strcmp(profile, "debug") == 0) {
+        argv_push(args, "-g");
+        argv_push(args, "-O0");
+    } else if (strcmp(profile, "release") == 0) {
+        argv_push(args, "-O2");
+    } else if (strcmp(profile, "relwithdebinfo") == 0) {
+        argv_push(args, "-O2");
+        argv_push(args, "-g");
+    } else if (strcmp(profile, "minsizerel") == 0) {
+        argv_push(args, "-Os");
+    } else {
+        fprintf(stderr, "build: unknown profile '%s' (valid: debug, release, "
+                "relwithdebinfo, minsizerel)\n", profile);
+    }
+}
+
+// Push -DNDEBUG for profiles that use it.
+static void push_profile_defines(ArgVec *args, const char *profile) {
+    if (!profile) return;
+    if (strcmp(profile, "release") == 0 ||
+        strcmp(profile, "relwithdebinfo") == 0 ||
+        strcmp(profile, "minsizerel") == 0) {
+        argv_push(args, "-DNDEBUG");
+    }
+}
 
 // Append the CLI defaults and a target's own compile flags to an ArgVec.
 // `owned` accumulates heap strings (e.g. "-DFOO") that must outlive the spawn.
@@ -678,6 +736,12 @@ static void push_compile_flags(ArgVec *args, const Builder *ctx,
         strarray_push(owned, f);
         argv_push(args, f);
     }
+    // Profile flags: pushed before target-specific flags so targets can override.
+    // Effective profile = per-target override else global ctx->profile.
+    const char *profile = t->profile ? t->profile : ctx->profile;
+    push_profile_cflags(args, profile);
+    push_profile_defines(args, profile);
+
     for (int i = 0; i < t->includes.len; i++) {
         argv_push(args, "-I");
         argv_push(args, t->includes.data[i]);
@@ -1168,6 +1232,7 @@ static void free_target(BuildTarget *t) {
     free(t->name);
     free(t->output);
     free(t->command);
+    free(t->profile);
     free_strarray(&t->sources);
     free_strarray(&t->excludes);
     free_strarray(&t->includes);
@@ -1240,6 +1305,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                 ctx.tool_allow_count = opts->tool_allow_count;
                 ctx.factory_names = factory_names;
                 ctx.factory_count = factory_count;
+                ctx.profile = opts->profile;
 
                 s_ctx = &ctx;
                 cc_run_at(vm, (Pc)factory_fn->code_addr, 0, NULL);
@@ -1301,6 +1367,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     ctx.tool_allow_count = opts->tool_allow_count;
     ctx.factory_names = factory_names;
     ctx.factory_count = factory_count;
+    ctx.profile = opts->profile;
 
     s_ctx = &ctx;
     cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);

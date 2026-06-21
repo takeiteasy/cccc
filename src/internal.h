@@ -806,6 +806,7 @@ typedef struct {
     const char **tool_allow;            // --build-tool-allow names (NULL = allow-all)
     int          tool_allow_count;
     int          list_targets;          // --build-list-targets: print factory names and exit
+    const char  *profile;               // --build-profile=NAME: debug|release|relwithdebinfo|minsizerel
 } CcBuildOptions;
 
 void   cc_load_build_runtime(VirtualMachine *vm);

@@ -69,8 +69,8 @@ These are settled; the rest of the document elaborates them.
 - **Cross-compilation.** Host toolchain only (`CCCC_NATIVE_CC` or
   `cc` / `clang` / `gcc`).
 - **Remote / distributed builds.** Local only.
-- **Build profiles (release/debug).** Targets take flags directly; no
-  separate "profile" concept in v1.
+- **Build profiles (release/debug).** Implemented in #548; see
+  [BUILDING.md](BUILDING.md).
 - **Bytecode targets.** Native output only (decision 4).
 - **Discoverable target factories.** `[[cccc::build_target]]` is deferred
   (decision 1).
@@ -397,13 +397,15 @@ release as a fallback; it is deleted only once `build.c` is stable.
 - `RunCustom` / `DependsOn` (#544).
 - `[[cccc::build_target]]` factory functions with factory-direct `--build-target`,
   `--build-list-targets`, and `BuildTargetCount` / `BuildTargetName` (#540).
+- Build profiles (`debug` / `release` / `relwithdebinfo` / `minsizerel`) via
+  `--build-profile` and `SetProfile` / `BuildProfile` (#548).
 - One runnable example (`examples/build_demo/`) + `tests/test_build_*.c`.
 - Docs: README "Build" section; `BUILDING.md` full API reference.
 
 **Later:**
 
 - Bytecode targets (`kind=bytecode` in `[[cccc::build_target]]`, pending #545).
-- Incremental / caching; cross-compilation; release/debug profiles.
+- Incremental / caching; cross-compilation.
 - Self-hosting `build.c` replacing the Makefile (dogfood milestone).
 
 ## See Also

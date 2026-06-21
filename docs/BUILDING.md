@@ -93,6 +93,7 @@ cccc --build build.c --build-verbose           # show per-target headers and all
 | `--build-quiet` | off | Suppress per-step `[N/M] cc ...` lines. Errors and the final summary are still printed. Overridden by `--build-verbose`. |
 | `--build-verbose` | off | Print a per-target header (`>> target 'name' [kind, N source(s)]`) before each target and show all command lines. Overrides `--build-quiet`. `-v` also enables this. |
 | `--build-list-targets` | off | Print the names of all `[[cccc::build_target]]` factory functions (one per line) and exit without running the build entry. |
+| `--build-profile=NAME` | (none) | Set a global build profile for all targets: `debug`, `release`, `relwithdebinfo`, or `minsizerel`. Individual targets can override with `SetProfile`. |
 
 Existing flags forwarded to every target's compile as defaults: `-I`, `-i`, `-D`,
 `-U`, `--std=`, `-L`, `-l`. VM-only options (`-c`, `-d`/`--disassemble`,
@@ -247,6 +248,10 @@ int  PkgConfig(BuildTarget *t, const char *pkg);   // run pkg-config, add flags
 // Custom steps (#544)
 BuildTarget *RunCustom(Builder *ctx, const char *name, const char *cmd);
 
+// Profile (#548)
+void        SetProfile(BuildTarget *t, const char *profile); // per-target profile override
+const char *BuildProfile(Builder *ctx);  // global profile name (or NULL)
+
 // Factory reflection (#540)
 int         BuildTargetCount(Builder *ctx);     // number of [[cccc::build_target]] factories
 const char *BuildTargetName(Builder *ctx, int i); // name of factory i (0-based)
@@ -306,6 +311,40 @@ Returns 0 on success. Requires `pkg-config` in `$PATH`.
 
 Both functions are subject to `--build-tool-allow`: if an allowlist is set, the
 tool name must appear in it or the probe/spawn is refused.
+
+### Build profiles (#548)
+
+Four named profiles expose standard flag presets for compile steps:
+
+| Profile | Compiler flags | Defines added |
+|---|---|---|
+| `debug` | `-g -O0` | — |
+| `release` | `-O2` | `-DNDEBUG` |
+| `relwithdebinfo` | `-O2 -g` | `-DNDEBUG` |
+| `minsizerel` | `-Os` | `-DNDEBUG` |
+
+Set a global default via `--build-profile=NAME`:
+
+```sh
+cccc --build build.c --build-profile=release
+```
+
+Or override per target inside the build script:
+
+```c
+BuildTarget *lib = StaticLib(ctx, "core");
+SetProfile(lib, "release");   // this target uses release regardless of global
+
+BuildTarget *app = Executable(ctx, "app");
+// no SetProfile → inherits global profile (or no profile if none set)
+AddCFlag(app, "-O3");         // target cflags come after profile flags, so this wins
+```
+
+Profile flags are prepended before the target's own `AddCFlag` entries so
+per-target flags can override them (last `-O` wins; `-DNDEBUG` can be unset
+with `AddUndef(t, "NDEBUG")`).
+
+`BuildProfile(ctx)` returns the global profile name (or `NULL` if none is set).
 
 ### Custom steps (#544)
 
@@ -372,11 +411,13 @@ transitive dependency pruning, the inverted FFI default,
 `RunCustom` / `DependsOn` (#544),
 `--build-jobs` / `--build-keep-going` / `--build-quiet` / `--build-verbose` (#541),
 `[[cccc::build_target]]` discoverable factory functions with `--build-list-targets`
-and `BuildTargetCount` / `BuildTargetName` reflection (#540).
+and `BuildTargetCount` / `BuildTargetName` reflection (#540),
+build profiles (`debug` / `release` / `relwithdebinfo` / `minsizerel`) via
+`--build-profile` and `SetProfile` (#548).
 
 **Deferred to later releases:** target-level parallel `-j` across DAG nodes (#557);
 bytecode targets (`kind=bytecode` in `[[cccc::build_target]]`, pending #545);
-incremental / caching; cross-compilation; release/debug profiles; a self-hosting
+incremental / caching; cross-compilation; a self-hosting
 `build.c` replacing the Makefile.
 
 ## See also
