@@ -22,10 +22,9 @@ These are settled; the rest of the document elaborates them.
 
 1. **Hybrid entry model, entry-first.** v1 ships a single imperative
    `[[cccc::build]]` entry (a.k.a. `build_main`). Inside it you create and wire
-   targets with full C control flow. The discoverable
-   `[[cccc::build_target]]` factory attribute is **deferred to a later
-   release** as optional sugar — it is not part of v1. See
-   [Entry Model](#entry-model).
+   targets with full C control flow. The discoverable `[[cccc::build_target]]`
+   factory attribute is optional sugar added in #540; see
+   [Entry Model — Factory Functions](#entry-model--factory-functions).
 2. **Host-side runner.** The VM script only *declares* the target graph;
    the host compiles it. `cc`/`ar`/`ld` are invoked by host runner code
    outside the VM, so progress can be streamed and parallelism added later
@@ -158,25 +157,36 @@ void build_main(Builder *ctx);   // success iff all targets built
 The entry takes only the context pointer in v1. Config comes from CLI flags
 and env vars, not the entry signature.
 
-### Deferred: `[[cccc::build_target]]` factories
+### Entry Model — Factory Functions (#540)
 
-A later release adds `[[cccc::build_target]]`-tagged factory functions as
-*optional* sugar for individually-buildable named targets:
+`[[cccc::build_target]]` tags a factory function as an individually-buildable
+named target. Unlike `[[cccc::build]]` entries (which declare the full target
+graph and must be run to completion), a factory is self-contained:
 
 ```c
-// later — not v1
 [[cccc::build_target]]
-BuildTarget *app(Builder *ctx) { ... }
-// -> ./cccc --build build.c --build-target=app  (calls the factory directly)
+BuildTarget *app(Builder *ctx) {
+    BuildTarget *t = Executable(ctx, "app");
+    AddSource(t, "src/main.c");
+    return t;
+}
+// ./cccc --build build.c --build-target=app  → calls app(ctx) directly; build_main not invoked
 ```
 
-It is deferred because the plan's original example exposed two problems the
-entry-only model avoids: a standalone factory has no `ctx` to pass (the old
-example passed `(void*)0`), and the entry tended to *re-create* the same
-targets the factories made, raising a DAG-dedup question. With an entry-only
-v1, `--build-target=NAME` simply matches a *registered* target name after the
-entry has run and built the full graph (zig's `zig build <step>` model), so
-neither problem arises.
+**Invocation model:** when `--build-target=NAME` matches a factory name the
+runner calls that factory *directly*, skipping `build_main`. This avoids the
+DAG-dedup problem (the original deferred design would have had the entry
+re-create targets the factories already made). If `--build-target=NAME` does
+not match any factory, the runner falls back to the entry-based flow and
+matches `NAME` against registered target names (zig model).
+
+**Reflection:** `--build-list-targets` prints factory names without running the
+entry. Inside a build entry, `BuildTargetCount(ctx)` and `BuildTargetName(ctx, i)`
+enumerate them programmatically.
+
+**`kind=` option:** selects the output backend. `kind=native` (default) uses
+the system toolchain. `kind=bytecode` is reserved for #545 (bytecode linker)
+and is rejected at compile time with a diagnostic pointing at that ticket.
 
 ## Target Kinds
 
@@ -367,7 +377,7 @@ release as a fallback; it is deleted only once `build.c` is stable.
 
 ## v1 vs Later
 
-**v1 (MVP):**
+**Current:**
 
 - `--build` mode branch in `src/main.c` (beside the native/testing blocks).
 - `[[cccc::build]]` entry interception in `preprocess.c`; `build_main`
@@ -377,21 +387,22 @@ release as a fallback; it is deleted only once `build.c` is stable.
 - Three native target kinds (executable / static / dynamic) via `cc`/`ar`/`ld`.
 - Core builder API (sources, includes, defines, undef, cflags, ldflags,
   `link_with`, `add_lib`/`add_libpath`, `set_output`, context getters).
-- Host-side **serial** runner with topo-sort.
+- Host-side runner with topo-sort, parallel source compilation (`--build-jobs`).
 - `--build-target=NAME` (registered-name match + dep pruning).
-- `-O`/`--build-out-dir`, `--build-dry-run`.
+- `-O`/`--build-out-dir`, `--build-dry-run`, `--build-keep-going`,
+  `--build-quiet`, `--build-verbose`.
 - Inverted FFI default (allow-all; `--ffi-allow` ⇒ allowlist).
+- `AddSourcesGlob` / `AddSourceStr` / `ExcludeSource` (#542).
+- `HaveTool` / `PkgConfig` / `--build-tool-allow` (#543).
+- `RunCustom` / `DependsOn` (#544).
+- `[[cccc::build_target]]` factory functions with factory-direct `--build-target`,
+  `--build-list-targets`, and `BuildTargetCount` / `BuildTargetName` (#540).
 - One runnable example (`examples/build_demo/`) + `tests/test_build_*.c`.
-- Docs: README "Build" section; `AGENTS.md` reference row.
+- Docs: README "Build" section; `BUILDING.md` full API reference.
 
 **Later:**
 
-- `[[cccc::build_target]]` discoverable factories + reflection listing.
-- Parallel `-j` runner; `--build-keep-going` / `--build-quiet` /
-  `--build-verbose`.
-- `add_sources_glob`, `add_source_str`, `exclude_source`.
-- `cccc_probe_toolchain()` / pkg-config; `Build_custom`.
-- Bytecode targets (needs a bytecode linker first).
+- Bytecode targets (`kind=bytecode` in `[[cccc::build_target]]`, pending #545).
 - Incremental / caching; cross-compilation; release/debug profiles.
 - Self-hosting `build.c` replacing the Makefile (dogfood milestone).
 

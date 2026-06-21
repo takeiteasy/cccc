@@ -1242,6 +1242,16 @@ struct BuildFnRecord {
     BuildFnRecord *next;
 };
 
+// A factory function registered via [[cccc::build_target]] (or with kind=native).
+// When --build-target=NAME matches a factory name the runner calls the factory
+// directly (skipping build_main) and builds its returned target.
+typedef struct BuildTargetFnRecord BuildTargetFnRecord;
+struct BuildTargetFnRecord {
+    char *name;                  // C function name
+    char *kind;                  // "native" (only valid value for now; bytecode → #545)
+    BuildTargetFnRecord *next;
+};
+
 // Test output format selector.
 typedef enum {
     TEST_FORMAT_TAP,    // TAP version 13 (default)
@@ -1849,6 +1859,7 @@ typedef struct Compiler {
     TestFnRecord *test_fns;          // Linked list of [[cccc::test]] function names
     TestSetupRecord *test_setups;    // Linked list of [[cccc::test_setup/teardown]] records
     BuildFnRecord *build_fns;        // Linked list of [[cccc::build]] entry function names
+    BuildTargetFnRecord *build_target_fns; // Linked list of [[cccc::build_target]] factory names
     bool build_mode;                 // True when running under --build (no main required)
     bool testing_mode;               // True when running under --testing (no main required)
     char *current_suite;             // Active suite path ("a/b/c") set by nested #pragma cccc suite begin

@@ -2816,12 +2816,14 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
         return false;
 
     // Scan inside the attribute argument list for macro/comptime/test/inline markers.
-    bool is_macro_kind     = false;
-    bool is_comptime_kind  = false;
-    bool is_test_kind      = false;
-    bool is_setup_kind     = false;
-    bool is_teardown_kind  = false;
-    bool is_build_kind     = false;
+    bool is_macro_kind        = false;
+    bool is_comptime_kind     = false;
+    bool is_test_kind         = false;
+    bool is_setup_kind        = false;
+    bool is_teardown_kind     = false;
+    bool is_build_kind        = false;
+    bool is_build_target_kind = false;
+    char *build_target_kind   = NULL;  // "native" (default) when is_build_target_kind
     bool is_inline         = false;
     char *attribute_name   = NULL;
     Token *attr_end        = NULL;
@@ -2908,6 +2910,56 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
                 }
             } else if (equal(after_scope, "build")) {
                 is_build_kind = true;
+            } else if (equal(after_scope, "build_target")) {
+                is_build_target_kind = true;
+                // parse optional (kind=NAME); validate kind value now (with token)
+                if (after_scope->next && equal(after_scope->next, "(")) {
+                    Token *p = after_scope->next->next;
+                    while (p && !equal(p, ")") && p->kind != TK_EOF) {
+                        if (equal(p, "kind") && p->next && equal(p->next, "=") &&
+                            p->next->next && p->next->next->kind == TK_IDENT) {
+                            Token *kind_tok = p->next->next;
+                            if (!equal(kind_tok, "native"))
+                                error_tok(vm, kind_tok,
+                                    "[[cccc::build_target(kind=%.*s)]] is not supported — "
+                                    "only kind=native is valid; "
+                                    "kind=bytecode requires the bytecode linker (#545)",
+                                    kind_tok->len, kind_tok->loc);
+                            build_target_kind = strndup(kind_tok->loc, kind_tok->len);
+                            p = kind_tok->next;
+                        } else if (equal(p, ",")) {
+                            p = p->next;
+                        } else {
+                            error_tok(vm, p, "unknown [[cccc::build_target]] option '%.*s'",
+                                      p->len, p->loc);
+                        }
+                    }
+                }
+            }
+        } else if (equal(t, "build_target")) {
+            // bare: __attribute__((build_target)) or __attribute__((build_target(...)))
+            is_build_target_kind = true;
+            if (t->next && equal(t->next, "(")) {
+                Token *p = t->next->next;
+                while (p && !equal(p, ")") && p->kind != TK_EOF) {
+                    if (equal(p, "kind") && p->next && equal(p->next, "=") &&
+                        p->next->next && p->next->next->kind == TK_IDENT) {
+                        Token *kind_tok = p->next->next;
+                        if (!equal(kind_tok, "native"))
+                            error_tok(vm, kind_tok,
+                                "build_target(kind=%.*s) is not supported — "
+                                "only kind=native is valid; "
+                                "kind=bytecode requires the bytecode linker (#545)",
+                                kind_tok->len, kind_tok->loc);
+                        build_target_kind = strndup(kind_tok->loc, kind_tok->len);
+                        p = kind_tok->next;
+                    } else if (equal(p, ",")) {
+                        p = p->next;
+                    } else {
+                        error_tok(vm, p, "unknown build_target attribute option '%.*s'",
+                                  p->len, p->loc);
+                    }
+                }
             }
         } else if (equal(t, "build")) {
             // bare: __attribute__((build))
@@ -2934,7 +2986,8 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
 
     // Only act on a positive macro/comptime/test/setup/teardown/build match.
     if ((!is_macro_kind && !is_comptime_kind && !is_test_kind &&
-         !is_setup_kind && !is_teardown_kind && !is_build_kind) || !attr_end)
+         !is_setup_kind && !is_teardown_kind && !is_build_kind &&
+         !is_build_target_kind) || !attr_end)
         return false;
 
     // Support [[cccc::comptime]] inline fn() — detect the inline keyword
@@ -3070,6 +3123,30 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
             }
             probe = probe->next;
         }
+        *tok_ptr = attr_end;
+        return true;
+    }
+
+    // [[cccc::build_target]] / [[cccc::build_target(kind=native)]]: record the
+    // factory function name. kind=bytecode is reserved for #545; reject it now.
+    // The attribute is stripped; the function stays in the normal compilation
+    // stream so the runner can find and invoke it by address.
+    if (is_build_target_kind) {
+        const char *kind = build_target_kind ? build_target_kind : "native";
+        Token *probe = attr_end;
+        while (probe && probe->kind != TK_EOF) {
+            if (equal(probe, ";") || equal(probe, "=")) break;
+            if (probe->kind == TK_IDENT && probe->next && equal(probe->next, "(")) {
+                BuildTargetFnRecord *rec = calloc(1, sizeof(BuildTargetFnRecord));
+                rec->name = strndup(probe->loc, probe->len);
+                rec->kind = strdup(kind);
+                rec->next = vm->compiler.build_target_fns;
+                vm->compiler.build_target_fns = rec;
+                break;
+            }
+            probe = probe->next;
+        }
+        free(build_target_kind);
         *tok_ptr = attr_end;
         return true;
     }

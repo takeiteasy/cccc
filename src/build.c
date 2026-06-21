@@ -107,6 +107,11 @@ struct Builder {
     // go through run_argv, not the shell).
     const char **tool_allow;
     int tool_allow_count;
+    // [[cccc::build_target]] factory names (#540): copied from compiler state
+    // before the entry runs; used by --build-list-targets and factory-direct
+    // --build-target=NAME invocation.
+    const char **factory_names;
+    int factory_count;
 };
 
 // The active build context for the current --build run.  Set by cc_run_build
@@ -578,6 +583,26 @@ static long long impl_build_run(long long ctx, long long t);
 static long long impl_build_run_all(long long ctx);
 static long long impl_build_run_default(long long ctx);
 
+// ============================================================================
+// #540 — build_target factory reflection
+// ============================================================================
+
+// BuildTargetCount: returns the number of [[cccc::build_target]] factories
+// registered in the current build script.
+static long long impl_target_count(long long ctx) {
+    (void)ctx;
+    return s_ctx ? (long long)s_ctx->factory_count : 0;
+}
+
+// BuildTargetName: returns the name of factory i (0-based).  Returns NULL for
+// out-of-range indices.
+static long long impl_target_name(long long ctx, long long i) {
+    (void)ctx;
+    if (!s_ctx || i < 0 || (int)i >= s_ctx->factory_count)
+        return 0;
+    return (long long)(intptr_t)s_ctx->factory_names[(int)i];
+}
+
 void cc_load_build_runtime(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__builtin_build_executable",    (void *)impl_executable,         2, 0);
     cc_register_cfunc(vm, "__builtin_build_static_lib",    (void *)impl_static_lib,         2, 0);
@@ -606,6 +631,8 @@ void cc_load_build_runtime(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__builtin_build_run",           (void *)impl_build_run,          2, 0);
     cc_register_cfunc(vm, "__builtin_build_run_all",       (void *)impl_build_run_all,      1, 0);
     cc_register_cfunc(vm, "__builtin_build_run_default",   (void *)impl_build_run_default,  1, 0);
+    cc_register_cfunc(vm, "__builtin_build_target_count",  (void *)impl_target_count,       1, 0);
+    cc_register_cfunc(vm, "__builtin_build_target_name",   (void *)impl_target_name,        2, 0);
 }
 
 // ============================================================================
@@ -1156,13 +1183,102 @@ static void free_target(BuildTarget *t) {
 }
 
 int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
+    // Count [[cccc::build_target]] factories and copy their names so they are
+    // accessible from FFI impls (impl_target_count / impl_target_name) and for
+    // the --build-list-targets and factory-direct --build-target logic below.
+    int factory_count = 0;
+    for (BuildTargetFnRecord *r = vm->compiler.build_target_fns; r; r = r->next)
+        factory_count++;
+    const char **factory_names = NULL;
+    if (factory_count > 0) {
+        factory_names = calloc(factory_count, sizeof(*factory_names));
+        int fi = 0;
+        for (BuildTargetFnRecord *r = vm->compiler.build_target_fns; r; r = r->next)
+            factory_names[fi++] = r->name;
+    }
+
+    // --build-list-targets: print factory names and exit without running the entry.
+    if (opts->list_targets) {
+        if (factory_count == 0) {
+            printf("(no [[cccc::build_target]] factories found)\n");
+        } else {
+            for (int i = 0; i < factory_count; i++)
+                printf("%s\n", factory_names[i]);
+        }
+        free(factory_names);
+        return 0;
+    }
+
+    // --build-target=NAME: check if NAME matches a [[cccc::build_target]] factory.
+    // If so, invoke the factory directly (skipping build_main) and build its target.
+    if (opts->target_name) {
+        for (int i = 0; i < factory_count; i++) {
+            if (strcmp(factory_names[i], opts->target_name) == 0) {
+                Obj *factory_fn = find_fn(prog, opts->target_name);
+                if (!factory_fn || !factory_fn->is_function) {
+                    fprintf(stderr, "build: factory '%s' not found in compiled output\n",
+                            opts->target_name);
+                    free(factory_names);
+                    return 1;
+                }
+
+                char cwd[1024];
+                if (!getcwd(cwd, sizeof(cwd)))
+                    snprintf(cwd, sizeof(cwd), ".");
+
+                Builder ctx = {0};
+                ctx.root = cwd;
+                ctx.out_dir = xstrdup(opts->out_dir ? opts->out_dir : "build");
+                ctx.host = CCCC_BUILD_HOST;
+                ctx.verbose = opts->verbose || opts->build_verbose;
+                ctx.quiet = opts->quiet && !(opts->verbose || opts->build_verbose);
+                ctx.keep_going = opts->keep_going;
+                ctx.dry_run = opts->dry_run;
+                ctx.jobs = opts->jobs > 1 ? opts->jobs : 1;
+                ctx.defaults = opts->defaults;
+                ctx.tool_allow = opts->tool_allow;
+                ctx.tool_allow_count = opts->tool_allow_count;
+                ctx.factory_names = factory_names;
+                ctx.factory_count = factory_count;
+
+                s_ctx = &ctx;
+                cc_run_at(vm, (Pc)factory_fn->code_addr, 0, NULL);
+                BuildTarget *tgt = (BuildTarget *)(intptr_t)vm->regs[REG_A0];
+                s_ctx = NULL;
+
+                int exit_code = 0;
+                if (!tgt) {
+                    fprintf(stderr, "build: factory '%s' returned NULL\n",
+                            opts->target_name);
+                    exit_code = 1;
+                } else {
+                    exit_code = run_graph(&ctx, tgt) ? 1 : 0;
+                }
+
+                for (int j = 0; j < ctx.targets_count; j++)
+                    free_target(ctx.targets[j]);
+                free(ctx.targets);
+                free(ctx.out_dir);
+                free(factory_names);
+                return exit_code;
+            }
+        }
+        // NAME did not match any factory; fall through to entry-based flow where
+        // run_graph will match it against registered target names (existing behaviour).
+    }
+
+    // Entry-based flow: resolve and invoke build_main (or the --build-entry function),
+    // then run_graph filters by --build-target if set.
     const char *entry = resolve_entry(vm, opts->entry_name);
-    if (!entry)
+    if (!entry) {
+        free(factory_names);
         return 1;
+    }
 
     Obj *fn = find_fn(prog, entry);
     if (!fn || !fn->is_function) {
         fprintf(stderr, "build: entry '%s' not found\n", entry);
+        free(factory_names);
         return 1;
     }
 
@@ -1183,6 +1299,8 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     ctx.defaults = opts->defaults;
     ctx.tool_allow = opts->tool_allow;
     ctx.tool_allow_count = opts->tool_allow_count;
+    ctx.factory_names = factory_names;
+    ctx.factory_count = factory_count;
 
     s_ctx = &ctx;
     cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
@@ -1199,5 +1317,6 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
         free_target(ctx.targets[i]);
     free(ctx.targets);
     free(ctx.out_dir);
+    free(factory_names);
     return exit_code;
 }

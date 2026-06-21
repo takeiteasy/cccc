@@ -1428,6 +1428,15 @@ void cc_destroy(VirtualMachine *vm) {
     }
     vm->compiler.build_fns = NULL;
 
+    // Free build-target factory records (#540)
+    for (BuildTargetFnRecord *b = vm->compiler.build_target_fns, *nb; b; b = nb) {
+        nb = b->next;
+        free(b->name);
+        free(b->kind);
+        free(b);
+    }
+    vm->compiler.build_target_fns = NULL;
+
     // Destroy parser arena (frees all tokens, AST nodes, preprocessor state)
     arena_destroy(&vm->compiler.parser_arena);
 }

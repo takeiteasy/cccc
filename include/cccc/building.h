@@ -164,6 +164,17 @@ int __builtin_build_pkg_config(BuildTarget *t, const char *pkg);
 BuildTarget *__builtin_build_run_custom(Builder *ctx, const char *name,
                                         const char *cmd);
 
+/*! @function __builtin_build_target_count
+ *  @abstract Returns the number of @c [[cccc::build_target]] factory functions
+ *            declared in the current build script.  Useful for programmatic
+ *            target enumeration from inside the build entry. */
+int __builtin_build_target_count(Builder *ctx);
+
+/*! @function __builtin_build_target_name
+ *  @abstract Returns the name of the @c i -th (0-based) @c [[cccc::build_target]]
+ *            factory, or @c NULL if @c i is out of range. */
+const char *__builtin_build_target_name(Builder *ctx, int i);
+
 /*! @function __builtin_build_run
  *  @abstract Build @c t and its transitive dependencies. Returns 0 on success. */
 int __builtin_build_run(Builder *ctx, BuildTarget *t);
@@ -207,6 +218,9 @@ int __builtin_build_run_default(Builder *ctx);
 #define HaveTool(ctx, name)     __builtin_build_have_tool(ctx, name)
 #define PkgConfig(t, pkg)       __builtin_build_pkg_config(t, pkg)
 #define RunCustom(ctx, name, cmd) __builtin_build_run_custom(ctx, name, cmd)
+
+#define BuildTargetCount(ctx)    __builtin_build_target_count(ctx)
+#define BuildTargetName(ctx, i)  __builtin_build_target_name(ctx, i)
 
 #define Build(ctx, t)           __builtin_build_run(ctx, t)
 #define BuildAll(ctx)           __builtin_build_run_all(ctx)

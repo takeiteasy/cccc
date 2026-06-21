@@ -92,6 +92,7 @@ cccc --build build.c --build-verbose           # show per-target headers and all
 | `--build-keep-going` | off | Continue building independent targets when one fails, rather than stopping at the first error. All failed target names are listed in the final summary. |
 | `--build-quiet` | off | Suppress per-step `[N/M] cc ...` lines. Errors and the final summary are still printed. Overridden by `--build-verbose`. |
 | `--build-verbose` | off | Print a per-target header (`>> target 'name' [kind, N source(s)]`) before each target and show all command lines. Overrides `--build-quiet`. `-v` also enables this. |
+| `--build-list-targets` | off | Print the names of all `[[cccc::build_target]]` factory functions (one per line) and exit without running the build entry. |
 
 Existing flags forwarded to every target's compile as defaults: `-I`, `-i`, `-D`,
 `-U`, `--std=`, `-L`, `-l`. VM-only options (`-c`, `-d`/`--disassemble`,
@@ -128,6 +129,67 @@ void build_main(Builder *ctx);   // success iff all targets built
 
 The same file is still valid C: in default mode (`cccc build.c`) the
 `[[cccc::build]]` attribute is consumed and the entry is simply not called.
+
+## Discoverable factory functions (#540)
+
+`[[cccc::build_target]]` tags a *factory function* — an alternative to putting
+everything inside `build_main`. Each factory is a self-contained, individually
+invocable target builder:
+
+```c
+[[cccc::build_target]]                // kind=native is the default
+BuildTarget *app(Builder *ctx) {
+    BuildTarget *t = Executable(ctx, "app");
+    AddSource(t, "src/main.c");
+    return t;
+}
+
+[[cccc::build_target(kind=native)]]   // explicit
+BuildTarget *lib(Builder *ctx) {
+    BuildTarget *t = StaticLib(ctx, "core");
+    AddSource(t, "src/lib.c");
+    return t;
+}
+```
+
+**Factory-direct invocation:** when `--build-target=NAME` matches a factory name
+the runner calls that factory *directly* — `build_main` is skipped entirely.
+This avoids the DAG-dedup problem that would arise if the entry re-created the
+same targets the factories already made.
+
+```sh
+cccc --build build.c --build-target=app   # calls app(ctx) directly; build_main not invoked
+```
+
+**Listing factories:** `--build-list-targets` prints all factory names and exits:
+
+```sh
+cccc --build build.c --build-list-targets
+# app
+# lib
+```
+
+**Programmatic enumeration** inside the build entry:
+
+```c
+int n = BuildTargetCount(ctx);
+for (int i = 0; i < n; i++)
+    printf("factory: %s\n", BuildTargetName(ctx, i));
+```
+
+The `kind=` option selects the output backend. Currently only `kind=native` is
+supported (the system toolchain, which is the default). `kind=bytecode` is
+reserved and will be added when the bytecode linker is implemented (#545).
+
+The attribute accepts C23 and GNU forms:
+
+```c
+[[cccc::build_target]]
+[[cccc::build_target(kind=native)]]
+__attribute__((build_target))
+__attribute__((build_target(kind=native)))
+__attribute__((cccc::build_target))
+```
 
 ## Target kinds
 
@@ -184,6 +246,10 @@ int  PkgConfig(BuildTarget *t, const char *pkg);   // run pkg-config, add flags
 
 // Custom steps (#544)
 BuildTarget *RunCustom(Builder *ctx, const char *name, const char *cmd);
+
+// Factory reflection (#540)
+int         BuildTargetCount(Builder *ctx);     // number of [[cccc::build_target]] factories
+const char *BuildTargetName(Builder *ctx, int i); // name of factory i (0-based)
 
 // Run (synchronous; returns 0 on success)
 int Build(Builder *ctx, BuildTarget *t);  // t + its deps
@@ -303,11 +369,13 @@ API, a host-side runner with topological sort, `--build-out-dir`,
 transitive dependency pruning, the inverted FFI default,
 `AddSourcesGlob` / `AddSourceStr` / `ExcludeSource` (#542),
 `HaveTool` / `PkgConfig` / `--build-tool-allow` (#543),
-`RunCustom` / `DependsOn` (#544), and
-`--build-jobs` / `--build-keep-going` / `--build-quiet` / `--build-verbose` (#541).
+`RunCustom` / `DependsOn` (#544),
+`--build-jobs` / `--build-keep-going` / `--build-quiet` / `--build-verbose` (#541),
+`[[cccc::build_target]]` discoverable factory functions with `--build-list-targets`
+and `BuildTargetCount` / `BuildTargetName` reflection (#540).
 
-**Deferred to later releases:** `[[cccc::build_target]]` discoverable factories;
-target-level parallel `-j` across DAG nodes (#557); bytecode targets;
+**Deferred to later releases:** target-level parallel `-j` across DAG nodes (#557);
+bytecode targets (`kind=bytecode` in `[[cccc::build_target]]`, pending #545);
 incremental / caching; cross-compilation; release/debug profiles; a self-hosting
 `build.c` replacing the Makefile.
 

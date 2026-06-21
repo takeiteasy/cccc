@@ -275,6 +275,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --build-keep-going    Continue building independent targets after a failure\n");
     printf("\t   --build-quiet         Suppress per-step command lines; only show errors and summary\n");
     printf("\t   --build-verbose       Print per-target headers and all command lines\n");
+    printf("\t   --build-list-targets  List [[cccc::build_target]] factory names and exit\n");
     printf("\nWarning Options:\n");
     printf("\t-Wall               Enable common warning categories\n");
     printf("\t-Wextra             Enable extra warning categories\n");
@@ -842,6 +843,7 @@ int main(int argc, const char *argv[]) {
     int build_quiet = 0;           // --build-quiet
     int build_keep_going = 0;      // --build-keep-going
     int build_jobs = 1;            // --build-jobs=N
+    int build_list_targets = 0;    // --build-list-targets (#540)
     const char **build_tool_allow = NULL; // --build-tool-allow=name,...
     int build_tool_allow_count = 0;
 
@@ -939,6 +941,7 @@ int main(int argc, const char *argv[]) {
         {"build-keep-going", no_argument,       0, 1084},
         {"build-quiet",      no_argument,       0, 1085},
         {"build-verbose",    no_argument,       0, 1086},
+        {"build-list-targets", no_argument,    0, 1087},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1427,6 +1430,10 @@ int main(int argc, const char *argv[]) {
             break;
         case 1086: // --build-verbose
             build_verbose = 1;
+            build_mode = 1;
+            break;
+        case 1087: // --build-list-targets
+            build_list_targets = 1;
             build_mode = 1;
             break;
         case 1066: // --test-format=FORMAT
@@ -2148,6 +2155,7 @@ int main(int argc, const char *argv[]) {
             .defaults         = &build_defaults,
             .tool_allow       = build_tool_allow,
             .tool_allow_count = build_tool_allow_count,
+            .list_targets     = build_list_targets,
         };
 
         exit_code = cc_run_build(&vm, merged_prog, &build_opts);
