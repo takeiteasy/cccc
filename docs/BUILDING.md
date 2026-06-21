@@ -241,6 +241,11 @@ void DependsOn(BuildTarget *t, BuildTarget *dep); // build before, no linker fla
 void AddLib(BuildTarget *t, const char *name);     // -l<name>
 void AddLibPath(BuildTarget *t, const char *path); // -L<path>
 
+// Environment and filesystem
+const char *GetEnv(Builder *ctx, const char *name);         // env var value or NULL
+const char *CaptureCommand(Builder *ctx, const char *cmd);  // stdout of sh -c cmd (stripped), or NULL
+int         FileExists(Builder *ctx, const char *path);     // 1 if path exists
+
 // Toolchain probing (#543)
 int  HaveTool(Builder *ctx, const char *name);     // 1 if tool in PATH + allowed
 int  PkgConfig(BuildTarget *t, const char *pkg);   // run pkg-config, add flags
@@ -297,6 +302,40 @@ generation:
 ```c
 AddSourceStr(core, "version.c",
     "const char *version(void) { return \"1.0\"; }\n");
+```
+
+### Environment and filesystem
+
+**`GetEnv(ctx, name)`** returns the value of an environment variable, or `NULL`
+if it is unset. Useful for respecting user-set variables like `CC`, `CFLAGS`,
+or `PREFIX`:
+
+```c
+const char *cc = GetEnv(ctx, "CC");
+if (cc) SetToolchain(app, cc);
+```
+
+**`CaptureCommand(ctx, cmd)`** runs `cmd` via `sh -c`, captures its stdout,
+strips trailing whitespace, and returns a pointer valid until the build entry
+returns. Returns `NULL` if the command exits with a non-zero status. Useful
+for probing tool versions or generating values at build time:
+
+```c
+const char *ver = CaptureCommand(ctx, "git rev-parse --short HEAD");
+if (ver) AddDefine(app, "GIT_REV", ver);
+```
+
+**`FileExists(ctx, path)`** returns 1 if `path` exists (as a file, directory,
+or any other filesystem node), 0 otherwise. Useful for detecting vendored
+vs. system dependencies:
+
+```c
+if (FileExists(ctx, "vendor/zlib/zlib.h")) {
+    AddSource(lib, "vendor/zlib/inflate.c");
+    AddInclude(lib, "vendor/zlib");
+} else {
+    AddLib(lib, "z");
+}
 ```
 
 ### Toolchain probing (#543)
@@ -473,9 +512,13 @@ and `BuildTargetCount` / `BuildTargetName` reflection (#540),
 build profiles (`debug` / `release` / `relwithdebinfo` / `minsizerel`) via
 `--build-profile` and `SetProfile` (#548),
 cross-compilation via `--build-triple` / `SetTargetTriple` and
-`--build-cc` / `SetToolchain` (#547).
+`--build-cc` / `SetToolchain` (#547),
+`GetEnv` / `CaptureCommand` / `FileExists` environment and filesystem helpers.
 
 **Deferred to later releases:** target-level parallel `-j` across DAG nodes (#557);
+`FindTool` / build options / `AddFramework` (#559);
+`InstallArtifact` / `SetInstallPrefix` (#560);
+additional filesystem helpers — `DirExists`, glob search (#561);
 bytecode targets (`kind=bytecode` in `[[cccc::build_target]]`, pending #545);
 incremental / caching; a self-hosting `build.c` replacing the Makefile.
 

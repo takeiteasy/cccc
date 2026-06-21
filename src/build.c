@@ -118,6 +118,9 @@ struct Builder {
     const char *profile;      // --build-profile=NAME global default (#548)
     const char *cross_triple; // --build-triple=TRIPLE global target triple (#547)
     const char *cross_cc;     // --build-cc=COMPILER global CC override (#547)
+    // Strings returned by CaptureCommand; freed when the builder is torn down.
+    char **captures;
+    int captures_count, captures_cap;
 };
 
 // The active build context for the current --build run.  Set by cc_run_build
@@ -567,6 +570,67 @@ static long long impl_run_custom(long long ctx, long long name, long long cmd) {
     return (long long)(intptr_t)t;
 }
 
+// ============================================================================
+// Environment and filesystem helpers
+// ============================================================================
+
+// Intern a malloc'd string into the builder's capture pool so the pointer
+// stays valid until the builder is torn down.
+static const char *builder_intern(Builder *ctx, char *s) {
+    if (!s) return NULL;
+    if (ctx->captures_count >= ctx->captures_cap) {
+        ctx->captures_cap = ctx->captures_cap ? ctx->captures_cap * 2 : 8;
+        char **tmp = realloc(ctx->captures, ctx->captures_cap * sizeof(*ctx->captures));
+        if (!tmp) { free(s); return NULL; }
+        ctx->captures = tmp;
+    }
+    ctx->captures[ctx->captures_count++] = s;
+    return s;
+}
+
+// GetEnv: return the value of an environment variable, or NULL if unset.
+static long long impl_get_env(long long ctx, long long name) {
+    (void)ctx;
+    const char *var = (const char *)name;
+    if (!var) return 0;
+    return (long long)(intptr_t)getenv(var);
+}
+
+// CaptureCommand: run cmd via sh -c and return stdout (trailing whitespace
+// stripped) as a NUL-terminated string owned by the builder, or NULL on failure.
+static long long impl_capture_command(long long ctx, long long cmd) {
+    (void)ctx;
+    const char *command = (const char *)cmd;
+    if (!s_ctx || !command) return 0;
+#ifdef _POSIX_VERSION
+    char *out = NULL;
+    char *argv[] = { "sh", "-c", (char *)command, NULL };
+    int rc = run_capture(argv, &out);
+    if (rc != 0 || !out) { free(out); return 0; }
+    // Strip trailing whitespace/newlines
+    size_t len = strlen(out);
+    while (len > 0 && (out[len-1] == '\n' || out[len-1] == '\r' ||
+                       out[len-1] == ' '  || out[len-1] == '\t'))
+        out[--len] = '\0';
+    return (long long)(intptr_t)builder_intern(s_ctx, out);
+#else
+    return 0;
+#endif
+}
+
+// FileExists: return 1 if path exists (any filesystem node type), 0 otherwise.
+static long long impl_file_exists(long long ctx, long long path) {
+    (void)ctx;
+    const char *p = (const char *)path;
+    if (!p) return 0;
+#ifdef _POSIX_VERSION
+    return access(p, F_OK) == 0 ? 1 : 0;
+#else
+    struct stat st;
+    return stat(p, &st) == 0 ? 1 : 0;
+#endif
+}
+
 static long long impl_build_root(long long ctx) {
     (void)ctx;
     return (long long)(intptr_t)(s_ctx ? s_ctx->root : "");
@@ -672,9 +736,12 @@ void cc_load_build_runtime(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__builtin_build_depends_on",    (void *)impl_depends_on,         2, 0);
     cc_register_cfunc(vm, "__builtin_build_add_lib",       (void *)impl_add_lib,            2, 0);
     cc_register_cfunc(vm, "__builtin_build_add_libpath",   (void *)impl_add_libpath,        2, 0);
-    cc_register_cfunc(vm, "__builtin_build_have_tool",     (void *)impl_have_tool,          2, 0);
-    cc_register_cfunc(vm, "__builtin_build_pkg_config",    (void *)impl_pkg_config,         2, 0);
-    cc_register_cfunc(vm, "__builtin_build_run_custom",    (void *)impl_run_custom,         3, 0);
+    cc_register_cfunc(vm, "__builtin_build_have_tool",       (void *)impl_have_tool,          2, 0);
+    cc_register_cfunc(vm, "__builtin_build_pkg_config",      (void *)impl_pkg_config,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_run_custom",      (void *)impl_run_custom,         3, 0);
+    cc_register_cfunc(vm, "__builtin_build_get_env",         (void *)impl_get_env,            2, 0);
+    cc_register_cfunc(vm, "__builtin_build_capture_command", (void *)impl_capture_command,    2, 0);
+    cc_register_cfunc(vm, "__builtin_build_file_exists",     (void *)impl_file_exists,        2, 0);
     cc_register_cfunc(vm, "__builtin_build_root",          (void *)impl_build_root,         1, 0);
     cc_register_cfunc(vm, "__builtin_build_out_dir",       (void *)impl_build_out_dir,      1, 0);
     cc_register_cfunc(vm, "__builtin_build_host",          (void *)impl_build_host,         1, 0);
@@ -1408,6 +1475,8 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                     free_target(ctx.targets[j]);
                 free(ctx.targets);
                 free(ctx.out_dir);
+                for (int j = 0; j < ctx.captures_count; j++) free(ctx.captures[j]);
+                free(ctx.captures);
                 free(factory_names);
                 return exit_code;
             }
@@ -1469,6 +1538,8 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
         free_target(ctx.targets[i]);
     free(ctx.targets);
     free(ctx.out_dir);
+    for (int i = 0; i < ctx.captures_count; i++) free(ctx.captures[i]);
+    free(ctx.captures);
     free(factory_names);
     return exit_code;
 }

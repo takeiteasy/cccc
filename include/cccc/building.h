@@ -144,6 +144,22 @@ void __builtin_build_add_lib(BuildTarget *t, const char *name);
  *  @abstract Add a library search path (-L<path>). */
 void __builtin_build_add_libpath(BuildTarget *t, const char *path);
 
+/*! @function __builtin_build_get_env
+ *  @abstract Return the value of environment variable @c name, or @c NULL if unset. */
+const char *__builtin_build_get_env(Builder *ctx, const char *name);
+
+/*! @function __builtin_build_capture_command
+ *  @abstract Run @c cmd via @c sh @c -c and return its stdout as a NUL-terminated
+ *            string with trailing whitespace stripped, or @c NULL on failure.
+ *            The returned pointer is valid until the build entry returns.
+ *            Returns @c NULL on non-POSIX platforms. */
+const char *__builtin_build_capture_command(Builder *ctx, const char *cmd);
+
+/*! @function __builtin_build_file_exists
+ *  @abstract Returns 1 if @c path exists (file, directory, or any other
+ *            filesystem node), 0 otherwise. */
+int __builtin_build_file_exists(Builder *ctx, const char *path);
+
 /*! @function __builtin_build_have_tool
  *  @abstract Returns 1 if the named tool is executable (found in @c PATH) and
  *            permitted by the current tool allowlist, 0 otherwise. */
@@ -252,6 +268,10 @@ int __builtin_build_run_default(Builder *ctx);
 #define DependsOn(t, dep)       __builtin_build_depends_on(t, dep)
 #define AddLib(t, n)            __builtin_build_add_lib(t, n)
 #define AddLibPath(t, p)        __builtin_build_add_libpath(t, p)
+
+#define GetEnv(ctx, name)           __builtin_build_get_env(ctx, name)
+#define CaptureCommand(ctx, cmd)    __builtin_build_capture_command(ctx, cmd)
+#define FileExists(ctx, path)       __builtin_build_file_exists(ctx, path)
 
 #define HaveTool(ctx, name)     __builtin_build_have_tool(ctx, name)
 #define PkgConfig(t, pkg)       __builtin_build_pkg_config(t, pkg)
