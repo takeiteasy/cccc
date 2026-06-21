@@ -807,6 +807,8 @@ typedef struct {
     int          tool_allow_count;
     int          list_targets;          // --build-list-targets: print factory names and exit
     const char  *profile;               // --build-profile=NAME: debug|release|relwithdebinfo|minsizerel
+    const char  *cross_triple;          // --build-triple=TRIPLE: clang-style cross target triple (#547)
+    const char  *cross_cc;              // --build-cc=COMPILER: override CC binary globally (#547)
 } CcBuildOptions;
 
 void   cc_load_build_runtime(VirtualMachine *vm);

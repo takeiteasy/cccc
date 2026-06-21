@@ -66,8 +66,9 @@ These are settled; the rest of the document elaborates them.
   invalidation and content-addressable storage are deferred.
 - **Parallel jobs.** v1's runner is serial. `-j` is a clean host-side
   add-on once the serial runner is proven.
-- **Cross-compilation.** Host toolchain only (`CCCC_NATIVE_CC` or
-  `cc` / `clang` / `gcc`).
+- **Cross-compilation.** Implemented in #547 via `--build-triple` / `SetTargetTriple`
+  (clang-style `--target` flag) and `--build-cc` / `SetToolchain` (prefixed GCC binary);
+  see [BUILDING.md](BUILDING.md).
 - **Remote / distributed builds.** Local only.
 - **Build profiles (release/debug).** Implemented in #548; see
   [BUILDING.md](BUILDING.md).
@@ -405,7 +406,7 @@ release as a fallback; it is deleted only once `build.c` is stable.
 **Later:**
 
 - Bytecode targets (`kind=bytecode` in `[[cccc::build_target]]`, pending #545).
-- Incremental / caching; cross-compilation.
+- Incremental / caching.
 - Self-hosting `build.c` replacing the Makefile (dogfood milestone).
 
 ## See Also

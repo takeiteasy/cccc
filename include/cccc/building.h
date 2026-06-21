@@ -185,6 +185,23 @@ void __builtin_build_set_profile(BuildTarget *t, const char *profile);
  *            or @c NULL if no global profile is set. */
 const char *__builtin_build_profile(Builder *ctx);
 
+/*! @function __builtin_build_set_toolchain
+ *  @abstract Override the compiler binary for @c t (e.g. @c "aarch64-linux-gnu-gcc").
+ *            Takes precedence over @c --build-cc and the system default.
+ *            Use for GCC-style cross-compilers that are identified by a prefixed name. */
+void __builtin_build_set_toolchain(BuildTarget *t, const char *cc);
+
+/*! @function __builtin_build_set_target_triple
+ *  @abstract Set a clang-style target triple for @c t
+ *            (e.g. @c "aarch64-linux-gnu").  Appends @c --target=<triple>
+ *            to both compile and link invocations. */
+void __builtin_build_set_target_triple(BuildTarget *t, const char *triple);
+
+/*! @function __builtin_build_target_triple
+ *  @abstract Returns the global cross-compilation triple (from @c --build-triple),
+ *            or @c NULL if none is set. */
+const char *__builtin_build_target_triple(Builder *ctx);
+
 /*! @function __builtin_build_target_count
  *  @abstract Returns the number of @c [[cccc::build_target]] factory functions
  *            declared in the current build script.  Useful for programmatic
@@ -240,8 +257,12 @@ int __builtin_build_run_default(Builder *ctx);
 #define PkgConfig(t, pkg)       __builtin_build_pkg_config(t, pkg)
 #define RunCustom(ctx, name, cmd) __builtin_build_run_custom(ctx, name, cmd)
 
-#define SetProfile(t, p)         __builtin_build_set_profile(t, p)
-#define BuildProfile(ctx)        __builtin_build_profile(ctx)
+#define SetProfile(t, p)              __builtin_build_set_profile(t, p)
+#define BuildProfile(ctx)             __builtin_build_profile(ctx)
+
+#define SetToolchain(t, cc)           __builtin_build_set_toolchain(t, cc)
+#define SetTargetTriple(t, triple)    __builtin_build_set_target_triple(t, triple)
+#define BuildTargetTriple(ctx)        __builtin_build_target_triple(ctx)
 
 #define BuildTargetCount(ctx)    __builtin_build_target_count(ctx)
 #define BuildTargetName(ctx, i)  __builtin_build_target_name(ctx, i)

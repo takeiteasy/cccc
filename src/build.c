@@ -73,6 +73,8 @@ struct BuildTarget {
     char *output;          // explicit output path (relative to out_dir) or NULL
     char *command;         // CCCC_TGT_CUSTOM: shell command to run
     char *profile;         // "debug"|"release"|"relwithdebinfo"|"minsizerel", or NULL (#548)
+    char *cc_override;     // per-target compiler binary; NULL = use ctx->cross_cc or global (#547)
+    char *target_triple;   // per-target cross-compilation triple; NULL = inherit from ctx (#547)
     StringArray sources;
     StringArray excludes;  // glob/path patterns excluded from sources (#542)
     StringArray includes;
@@ -113,7 +115,9 @@ struct Builder {
     // --build-target=NAME invocation.
     const char **factory_names;
     int factory_count;
-    const char *profile;   // --build-profile=NAME global default (#548)
+    const char *profile;      // --build-profile=NAME global default (#548)
+    const char *cross_triple; // --build-triple=TRIPLE global target triple (#547)
+    const char *cross_cc;     // --build-cc=COMPILER global CC override (#547)
 };
 
 // The active build context for the current --build run.  Set by cc_run_build
@@ -586,6 +590,33 @@ static long long impl_build_run_all(long long ctx);
 static long long impl_build_run_default(long long ctx);
 
 // ============================================================================
+// #547 — cross-compilation FFI impls
+// ============================================================================
+
+static long long impl_set_toolchain(long long t, long long cc) {
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    const char *compiler = (const char *)cc;
+    if (!tgt || !compiler) return 0;
+    free(tgt->cc_override);
+    tgt->cc_override = xstrdup(compiler);
+    return 0;
+}
+
+static long long impl_set_target_triple(long long t, long long triple) {
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    const char *tr = (const char *)triple;
+    if (!tgt || !tr) return 0;
+    free(tgt->target_triple);
+    tgt->target_triple = xstrdup(tr);
+    return 0;
+}
+
+static long long impl_build_target_triple(long long ctx) {
+    (void)ctx;
+    return (long long)(intptr_t)(s_ctx ? s_ctx->cross_triple : NULL);
+}
+
+// ============================================================================
 // #548 — profile FFI impls
 // ============================================================================
 
@@ -653,8 +684,11 @@ void cc_load_build_runtime(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__builtin_build_run_default",   (void *)impl_build_run_default,  1, 0);
     cc_register_cfunc(vm, "__builtin_build_target_count",  (void *)impl_target_count,       1, 0);
     cc_register_cfunc(vm, "__builtin_build_target_name",   (void *)impl_target_name,        2, 0);
-    cc_register_cfunc(vm, "__builtin_build_set_profile",   (void *)impl_set_profile,        2, 0);
-    cc_register_cfunc(vm, "__builtin_build_profile",       (void *)impl_build_profile,      1, 0);
+    cc_register_cfunc(vm, "__builtin_build_set_profile",       (void *)impl_set_profile,        2, 0);
+    cc_register_cfunc(vm, "__builtin_build_profile",           (void *)impl_build_profile,      1, 0);
+    cc_register_cfunc(vm, "__builtin_build_set_toolchain",     (void *)impl_set_toolchain,      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_set_target_triple", (void *)impl_set_target_triple,  2, 0);
+    cc_register_cfunc(vm, "__builtin_build_target_triple",     (void *)impl_build_target_triple,1, 0);
 }
 
 // ============================================================================
@@ -672,6 +706,34 @@ Token *cc_inject_build_header(VirtualMachine *vm) {
 // ============================================================================
 // Host-side runner (#535): topo-sort + per-target cc/ar/ld
 // ============================================================================
+
+// ============================================================================
+// #547 — cross-compilation helpers
+// ============================================================================
+
+// Determine the effective compiler binary for a target:
+//   1. t->cc_override (per-target SetToolchain)
+//   2. ctx->cross_cc  (global --build-cc)
+//   3. cccc_find_native_cc() (system default)
+// Returns a newly-allocated string; caller must free.
+static char *effective_cc_for_target(const Builder *ctx, const BuildTarget *t) {
+    if (t->cc_override && *t->cc_override)
+        return xstrdup(t->cc_override);
+    if (ctx->cross_cc && *ctx->cross_cc)
+        return xstrdup(ctx->cross_cc);
+    return cccc_find_native_cc();
+}
+
+// Push --target=<triple> to args when a cross-compilation triple is in effect.
+// Effective triple: t->target_triple ?? ctx->cross_triple.
+// --target is accepted by clang; gcc-style cross-compilers use a prefixed
+// binary (SetToolchain) and do not need this flag.
+static void push_cross_flags(ArgVec *args, const Builder *ctx, const BuildTarget *t) {
+    const char *triple = t->target_triple ? t->target_triple : ctx->cross_triple;
+    if (!triple || !*triple) return;
+    argv_push(args, "--target");
+    argv_push(args, (char *)triple); // lifetime: ctx/t outlive the spawn
+}
 
 // ============================================================================
 // #548 — build profiles
@@ -741,6 +803,9 @@ static void push_compile_flags(ArgVec *args, const Builder *ctx,
     const char *profile = t->profile ? t->profile : ctx->profile;
     push_profile_cflags(args, profile);
     push_profile_defines(args, profile);
+
+    // Cross-compilation triple (#547): --target=<triple> when set.
+    push_cross_flags(args, ctx, t);
 
     for (int i = 0; i < t->includes.len; i++) {
         argv_push(args, "-I");
@@ -928,6 +993,8 @@ serial_fallback:;
 }
 
 // Build a single target (its sources already; deps assumed built).  Returns 0 ok.
+// `cc` is the global fallback CC; per-target and cross_cc overrides are applied
+// inside this function via effective_cc_for_target.
 static int build_target(Builder *ctx, const char *cc,
                         BuildTarget *t, int *step, int total) {
     if (ctx->verbose) {
@@ -987,10 +1054,20 @@ static int build_target(Builder *ctx, const char *cc,
         return 1;
     }
 
+    // Resolve the effective compiler for this target (#547).
+    char *eff_cc = effective_cc_for_target(ctx, t);
+    if (!eff_cc) {
+        fprintf(stderr, "build: could not find a C compiler for target '%s'\n", t->name);
+        free(out_rel); free(out_abs); free(out_dir); free(tobjdir);
+        return 1;
+    }
+
     StringArray objs = {0};
-    int rc = compile_sources(ctx, cc, t, tobjdir, &objs, step, total);
-    if (rc != 0)
+    int rc = compile_sources(ctx, eff_cc, t, tobjdir, &objs, step, total);
+    if (rc != 0) {
+        free(eff_cc);
         goto done;
+    }
 
     if (t->kind == CCCC_TGT_STATIC) {
         char *ar = cccc_find_native_tool("ar");
@@ -1005,11 +1082,12 @@ static int build_target(Builder *ctx, const char *cc,
         free(a.data);
         free(ar);
     } else {
-        // Executable or dynamic library: link with cc.
+        // Executable or dynamic library: link with effective cc.
         ArgVec a = {0};
-        argv_push(&a, cc);
+        argv_push(&a, eff_cc);
         if (t->kind == CCCC_TGT_DYNAMIC)
             argv_push(&a, "-shared");
+        push_cross_flags(&a, ctx, t); // --target=<triple> for clang-style cross-link
         argv_push(&a, "-o");
         argv_push(&a, out_abs);
         for (int i = 0; i < objs.len; i++)
@@ -1053,6 +1131,7 @@ static int build_target(Builder *ctx, const char *cc,
     }
 
 done:
+    free(eff_cc);
     free_strarray(&objs);
     free(out_rel); free(out_abs); free(out_dir); free(tobjdir);
     return rc;
@@ -1233,6 +1312,8 @@ static void free_target(BuildTarget *t) {
     free(t->output);
     free(t->command);
     free(t->profile);
+    free(t->cc_override);
+    free(t->target_triple);
     free_strarray(&t->sources);
     free_strarray(&t->excludes);
     free_strarray(&t->includes);
@@ -1306,6 +1387,8 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                 ctx.factory_names = factory_names;
                 ctx.factory_count = factory_count;
                 ctx.profile = opts->profile;
+                ctx.cross_triple = opts->cross_triple;
+                ctx.cross_cc = opts->cross_cc;
 
                 s_ctx = &ctx;
                 cc_run_at(vm, (Pc)factory_fn->code_addr, 0, NULL);
@@ -1368,6 +1451,8 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     ctx.factory_names = factory_names;
     ctx.factory_count = factory_count;
     ctx.profile = opts->profile;
+    ctx.cross_triple = opts->cross_triple;
+    ctx.cross_cc = opts->cross_cc;
 
     s_ctx = &ctx;
     cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);

@@ -252,6 +252,11 @@ BuildTarget *RunCustom(Builder *ctx, const char *name, const char *cmd);
 void        SetProfile(BuildTarget *t, const char *profile); // per-target profile override
 const char *BuildProfile(Builder *ctx);  // global profile name (or NULL)
 
+// Cross-compilation (#547)
+void        SetTargetTriple(BuildTarget *t, const char *triple); // --target=<triple> (clang-style)
+void        SetToolchain(BuildTarget *t, const char *cc);        // override CC binary per-target
+const char *BuildTargetTriple(Builder *ctx); // global triple from --build-triple (or NULL)
+
 // Factory reflection (#540)
 int         BuildTargetCount(Builder *ctx);     // number of [[cccc::build_target]] factories
 const char *BuildTargetName(Builder *ctx, int i); // name of factory i (0-based)
@@ -372,6 +377,59 @@ LinkWith(app, core);    // app gets -lcore (ordinary link dep)
 > CCCC process rather than cleanly failing the build step.  See the `BUILDMODE`
 > tracker for the planned improvement.
 
+### Cross-compilation (#547)
+
+Two mechanisms let a build script target a different architecture or OS than the
+host.  They can be used independently or together.
+
+**Clang-style triple (`--target`)** — use when your compiler accepts
+`--target=<triple>` (clang, clang-cl).  Set once globally or per target:
+
+```sh
+# Global: all targets get --target=aarch64-linux-gnu
+cccc --build build.c --build-triple=aarch64-linux-gnu
+
+# Or per-target from inside the script:
+SetTargetTriple(t, "aarch64-linux-gnu");
+```
+
+**Toolchain override** — use when your cross-compiler is a prefixed GCC binary
+(e.g. `aarch64-linux-gnu-gcc`).  The override replaces the CC binary entirely;
+`--target` is not added in this case.
+
+```sh
+# Global: every target uses the prefixed compiler
+cccc --build build.c --build-cc=aarch64-linux-gnu-gcc
+
+# Or per-target from inside the script:
+SetToolchain(t, "aarch64-linux-gnu-gcc");
+```
+
+**Combining both** — set the toolchain for the compiler binary *and* the triple
+for the clang-style `--target` flag when targeting a foreign sysroot with a
+wrapper script that delegates to clang:
+
+```c
+SetToolchain(t, "clang");
+SetTargetTriple(t, "aarch64-apple-macosx14.0");
+```
+
+**Precedence** for CC binary: `SetToolchain(t, …)` > `--build-cc` > system CC.
+**Precedence** for triple: `SetTargetTriple(t, …)` > `--build-triple` (no triple = no `--target` flag).
+
+**`BuildTargetTriple(ctx)`** returns the global triple set by `--build-triple`,
+or `NULL` if none was passed.  Use it to conditionally add target-specific
+sources or defines:
+
+```c
+const char *triple = BuildTargetTriple(ctx);
+if (triple && strstr(triple, "aarch64"))
+    AddCFlag(t, "-march=armv8-a");
+```
+
+> Cross-compilation tests use `--build-dry-run` to verify the correct flags
+> appear in output without requiring a cross-toolchain on the host.
+
 ## Tool allowlist (`--build-tool-allow`)
 
 By default, build mode allows all tools to be probed and run. Passing
@@ -413,12 +471,13 @@ transitive dependency pruning, the inverted FFI default,
 `[[cccc::build_target]]` discoverable factory functions with `--build-list-targets`
 and `BuildTargetCount` / `BuildTargetName` reflection (#540),
 build profiles (`debug` / `release` / `relwithdebinfo` / `minsizerel`) via
-`--build-profile` and `SetProfile` (#548).
+`--build-profile` and `SetProfile` (#548),
+cross-compilation via `--build-triple` / `SetTargetTriple` and
+`--build-cc` / `SetToolchain` (#547).
 
 **Deferred to later releases:** target-level parallel `-j` across DAG nodes (#557);
 bytecode targets (`kind=bytecode` in `[[cccc::build_target]]`, pending #545);
-incremental / caching; cross-compilation; a self-hosting
-`build.c` replacing the Makefile.
+incremental / caching; a self-hosting `build.c` replacing the Makefile.
 
 ## See also
 

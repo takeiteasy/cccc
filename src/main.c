@@ -277,6 +277,8 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --build-verbose       Print per-target headers and all command lines\n");
     printf("\t   --build-list-targets  List [[cccc::build_target]] factory names and exit\n");
     printf("\t   --build-profile=NAME  Set build profile: debug | release | relwithdebinfo | minsizerel\n");
+    printf("\t   --build-triple=TRIPLE Cross-compile target triple (e.g. aarch64-linux-gnu; clang only)\n");
+    printf("\t   --build-cc=COMPILER   Override CC binary for all targets (e.g. aarch64-linux-gnu-gcc)\n");
     printf("\nWarning Options:\n");
     printf("\t-Wall               Enable common warning categories\n");
     printf("\t-Wextra             Enable extra warning categories\n");
@@ -846,6 +848,8 @@ int main(int argc, const char *argv[]) {
     int build_jobs = 1;            // --build-jobs=N
     int build_list_targets = 0;    // --build-list-targets (#540)
     const char *build_profile = NULL; // --build-profile=NAME (#548)
+    const char *build_triple = NULL;  // --build-triple=TRIPLE (#547)
+    const char *build_cc = NULL;      // --build-cc=COMPILER (#547)
     const char **build_tool_allow = NULL; // --build-tool-allow=name,...
     int build_tool_allow_count = 0;
 
@@ -945,6 +949,8 @@ int main(int argc, const char *argv[]) {
         {"build-verbose",    no_argument,       0, 1086},
         {"build-list-targets", no_argument,    0, 1087},
         {"build-profile",    required_argument, 0, 1088},
+        {"build-triple",     required_argument, 0, 1089},
+        {"build-cc",         required_argument, 0, 1090},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1441,6 +1447,14 @@ int main(int argc, const char *argv[]) {
             break;
         case 1088: // --build-profile=NAME
             build_profile = optarg;
+            build_mode = 1;
+            break;
+        case 1089: // --build-triple=TRIPLE
+            build_triple = optarg;
+            build_mode = 1;
+            break;
+        case 1090: // --build-cc=COMPILER
+            build_cc = optarg;
             build_mode = 1;
             break;
         case 1066: // --test-format=FORMAT
@@ -2164,6 +2178,8 @@ int main(int argc, const char *argv[]) {
             .tool_allow_count = build_tool_allow_count,
             .list_targets     = build_list_targets,
             .profile          = build_profile,
+            .cross_triple     = build_triple,
+            .cross_cc         = build_cc,
         };
 
         exit_code = cc_run_build(&vm, merged_prog, &build_opts);
