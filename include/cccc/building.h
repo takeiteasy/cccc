@@ -229,6 +229,63 @@ int __builtin_build_target_count(Builder *ctx);
  *            factory, or @c NULL if @c i is out of range. */
 const char *__builtin_build_target_name(Builder *ctx, int i);
 
+/*! @function __builtin_build_find_tool
+ *  @abstract Return the full path of the named tool if it is executable in
+ *            @c PATH and permitted by the tool allowlist, or @c NULL otherwise.
+ *            The returned pointer is valid until the build entry returns. */
+const char *__builtin_build_find_tool(Builder *ctx, const char *name);
+
+/*! @function __builtin_build_get_build_option
+ *  @abstract Return the value of a @c --build-option=key=value option
+ *            passed on the command line, or @c NULL if @c key was not given. */
+const char *__builtin_build_get_build_option(Builder *ctx, const char *name);
+
+/*! @function __builtin_build_have_build_option
+ *  @abstract Return 1 if @c --build-option=key (or @c --build-option=key=...) was
+ *            passed on the command line, 0 otherwise. */
+int __builtin_build_have_build_option(Builder *ctx, const char *name);
+
+/*! @function __builtin_build_add_framework
+ *  @abstract Add a macOS @c -framework @c Name linker flag.  Shorthand for
+ *            @c AddLdFlag(t, "-framework Name"). */
+void __builtin_build_add_framework(BuildTarget *t, const char *name);
+
+/*! @function __builtin_build_set_install_prefix
+ *  @abstract Override the install prefix for @c InstallArtifact
+ *            (default: @c PREFIX env var or @c /usr/local). */
+void __builtin_build_set_install_prefix(Builder *ctx, const char *path);
+
+/*! @function __builtin_build_install_artifact
+ *  @abstract Register @c t for installation when @c --build-install is active.
+ *            A no-op if @c --build-install was not passed.  The copy happens
+ *            after the build entry returns and the build succeeded. */
+void __builtin_build_install_artifact(Builder *ctx, BuildTarget *t);
+
+/*! @function __builtin_build_wants_install
+ *  @abstract Returns 1 if @c --build-install was passed on the command line. */
+int __builtin_build_wants_install(Builder *ctx);
+
+/*! @function __builtin_build_dir_exists
+ *  @abstract Returns 1 if @c path exists and is a directory, 0 otherwise. */
+int __builtin_build_dir_exists(Builder *ctx, const char *path);
+
+/*! @function __builtin_build_glob_files
+ *  @abstract Expand @c pattern (POSIX @c glob(3)) and return a @c NULL-terminated
+ *            array of matching paths, or @c NULL on no match or non-POSIX platforms.
+ *            The array and its strings are valid until the build entry returns. */
+const char **__builtin_build_glob_files(Builder *ctx, const char *pattern);
+
+/*! @function __builtin_build_read_file
+ *  @abstract Read the file at @c path into a @c NUL-terminated string and return
+ *            it, or @c NULL on error or if the file exceeds 4 MB.
+ *            The returned pointer is valid until the build entry returns. */
+const char *__builtin_build_read_file(Builder *ctx, const char *path);
+
+/*! @function __builtin_build_write_file
+ *  @abstract Write @c content to @c path, creating parent directories as needed.
+ *            Returns 0 on success, -1 on error. */
+int __builtin_build_write_file(Builder *ctx, const char *path, const char *content);
+
 /*! @function __builtin_build_run
  *  @abstract Build @c t and its transitive dependencies. Returns 0 on success. */
 int __builtin_build_run(Builder *ctx, BuildTarget *t);
@@ -272,10 +329,23 @@ int __builtin_build_run_default(Builder *ctx);
 #define GetEnv(ctx, name)           __builtin_build_get_env(ctx, name)
 #define CaptureCommand(ctx, cmd)    __builtin_build_capture_command(ctx, cmd)
 #define FileExists(ctx, path)       __builtin_build_file_exists(ctx, path)
+#define DirExists(ctx, path)        __builtin_build_dir_exists(ctx, path)
+#define GlobFiles(ctx, pattern)     __builtin_build_glob_files(ctx, pattern)
+#define ReadFile(ctx, path)         __builtin_build_read_file(ctx, path)
+#define WriteFile(ctx, path, c)     __builtin_build_write_file(ctx, path, c)
 
 #define HaveTool(ctx, name)     __builtin_build_have_tool(ctx, name)
+#define FindTool(ctx, name)     __builtin_build_find_tool(ctx, name)
 #define PkgConfig(t, pkg)       __builtin_build_pkg_config(t, pkg)
 #define RunCustom(ctx, name, cmd) __builtin_build_run_custom(ctx, name, cmd)
+
+#define GetBuildOption(ctx, name)    __builtin_build_get_build_option(ctx, name)
+#define HaveBuildOption(ctx, name)   __builtin_build_have_build_option(ctx, name)
+#define AddFramework(t, name)        __builtin_build_add_framework(t, name)
+
+#define SetInstallPrefix(ctx, path)  __builtin_build_set_install_prefix(ctx, path)
+#define InstallArtifact(ctx, t)      __builtin_build_install_artifact(ctx, t)
+#define BuildWantsInstall(ctx)       __builtin_build_wants_install(ctx)
 
 #define SetProfile(t, p)              __builtin_build_set_profile(t, p)
 #define BuildProfile(ctx)             __builtin_build_profile(ctx)

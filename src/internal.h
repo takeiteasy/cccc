@@ -811,6 +811,9 @@ typedef struct {
     const char  *cross_cc;              // --build-cc=COMPILER: override CC binary globally (#547)
     const char  *build_cache;           // --build-cache[=PATH]: NULL=off, ""=default path, else given path (#546)
     const char  *cccc_self;             // path to the cccc binary (argv[0]); used for kind=bytecode targets (#545)
+    const char **build_options;         // --build-option=key=value strings (#559)
+    int          build_options_count;
+    int          build_install;         // --build-install: copy artifacts after build (#560)
 } CcBuildOptions;
 
 void   cc_load_build_runtime(VirtualMachine *vm);

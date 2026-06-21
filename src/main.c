@@ -281,6 +281,10 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --build-cc=COMPILER   Override CC binary for all targets (e.g. aarch64-linux-gnu-gcc)\n");
     printf("\t   --build-cache[=PATH]  Enable incremental builds: mtime+content-hash cache.\n");
     printf("\t                         Default cache dir: <out-dir>/.cccc-cache\n");
+    printf("\t   --build-option=K=V    Pass a typed build option to the build script (GetBuildOption/HaveBuildOption).\n");
+    printf("\t                         Accepts repeated flags: --build-option=foo=bar --build-option=baz=1\n");
+    printf("\t   --build-install       After a successful build copy artifacts registered with InstallArtifact\n");
+    printf("\t                         to the install prefix (default: PREFIX env var or /usr/local).\n");
     printf("\nWarning Options:\n");
     printf("\t-Wall               Enable common warning categories\n");
     printf("\t-Wextra             Enable extra warning categories\n");
@@ -855,6 +859,9 @@ int main(int argc, const char *argv[]) {
     const char *build_cache = NULL;   // --build-cache[=PATH] (#546)
     const char **build_tool_allow = NULL; // --build-tool-allow=name,...
     int build_tool_allow_count = 0;
+    const char **build_options = NULL;    // --build-option=key=value (#559)
+    int build_options_count = 0;
+    int build_install = 0;                // --build-install (#560)
 
     if (argc <= 1)
         usage(argv[0], 1);
@@ -955,6 +962,8 @@ int main(int argc, const char *argv[]) {
         {"build-triple",     required_argument, 0, 1089},
         {"build-cc",         required_argument, 0, 1090},
         {"build-cache",      optional_argument, 0, 1091},
+        {"build-option",     required_argument, 0, 1092},
+        {"build-install",    no_argument,       0, 1093},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1463,6 +1472,19 @@ int main(int argc, const char *argv[]) {
             break;
         case 1091: // --build-cache[=PATH]
             build_cache = optarg ? optarg : "";
+            build_mode = 1;
+            break;
+        case 1092: { // --build-option=key[=value]
+            const char **tmp = realloc(build_options,
+                                       (build_options_count + 1) * sizeof(*build_options));
+            if (!tmp) { fprintf(stderr, "error: out of memory\n"); return 1; }
+            build_options = tmp;
+            build_options[build_options_count++] = optarg;
+            build_mode = 1;
+            break;
+        }
+        case 1093: // --build-install
+            build_install = 1;
             build_mode = 1;
             break;
         case 1066: // --test-format=FORMAT
@@ -2188,8 +2210,11 @@ int main(int argc, const char *argv[]) {
             .profile          = build_profile,
             .cross_triple     = build_triple,
             .cross_cc         = build_cc,
-            .build_cache      = build_cache,
-            .cccc_self        = argv[0],
+            .build_cache          = build_cache,
+            .cccc_self            = argv[0],
+            .build_options        = build_options,
+            .build_options_count  = build_options_count,
+            .build_install        = build_install,
         };
 
         exit_code = cc_run_build(&vm, merged_prog, &build_opts);
@@ -2397,5 +2422,6 @@ BAIL:
             free((void *)input_files[i]);
         free(input_files);
     }
+    free(build_options);
     return exit_code;
 }

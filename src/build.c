@@ -26,6 +26,7 @@
 
 #include "./internal.h"
 
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -121,9 +122,17 @@ struct Builder {
     const char *cross_triple; // --build-triple=TRIPLE global target triple (#547)
     const char *cross_cc;     // --build-cc=COMPILER global CC override (#547)
     const char *cccc_self;    // path to the cccc binary; used for kind=bytecode targets (#545)
-    // Strings returned by CaptureCommand; freed when the builder is torn down.
+    // Strings returned by CaptureCommand/GlobFiles/ReadFile; freed at teardown.
     char **captures;
     int captures_count, captures_cap;
+    // Build options from --build-option=key=value CLI flags (#559)
+    const char **build_options;
+    int build_options_count;
+    // Install support (#560)
+    char         *install_prefix;  // default: PREFIX env or /usr/local
+    BuildTarget **install_targets;
+    int           install_count, install_cap;
+    int           build_install;   // --build-install flag
 };
 
 // The active build context for the current --build run.  Set by cc_run_build
@@ -637,6 +646,173 @@ static long long impl_file_exists(long long ctx, long long path) {
 #endif
 }
 
+// ============================================================================
+// #559 — FindTool, build options, AddFramework
+// ============================================================================
+
+// FindTool: like HaveTool but returns the full executable path (or NULL).
+// Useful when the path needs to be passed to RunCustom or embedded in a define.
+static long long impl_find_tool(long long ctx, long long name) {
+    (void)ctx;
+    const char *tool = (const char *)name;
+    if (!s_ctx || !tool) return 0;
+    if (!tool_allowed(s_ctx, tool)) return 0;
+    char *path = cccc_path_find_executable(tool);
+    if (!path) return 0;
+    return (long long)(intptr_t)builder_intern(s_ctx, path);
+}
+
+// GetBuildOption: return the value of a --build-option=key=value option, or NULL.
+static long long impl_get_build_option(long long ctx, long long name) {
+    (void)ctx;
+    const char *key = (const char *)name;
+    if (!s_ctx || !key) return 0;
+    size_t klen = strlen(key);
+    for (int i = 0; i < s_ctx->build_options_count; i++) {
+        const char *opt = s_ctx->build_options[i];
+        if (strncmp(opt, key, klen) == 0 && opt[klen] == '=')
+            return (long long)(intptr_t)(opt + klen + 1);
+    }
+    return 0;
+}
+
+// HaveBuildOption: return 1 if --build-option=key[=...] was given.
+static long long impl_have_build_option(long long ctx, long long name) {
+    (void)ctx;
+    const char *key = (const char *)name;
+    if (!s_ctx || !key) return 0;
+    size_t klen = strlen(key);
+    for (int i = 0; i < s_ctx->build_options_count; i++) {
+        const char *opt = s_ctx->build_options[i];
+        if (strncmp(opt, key, klen) == 0 && (opt[klen] == '=' || opt[klen] == '\0'))
+            return 1;
+    }
+    return 0;
+}
+
+// AddFramework: macOS -framework <name> shorthand (cleaner than two AddLdFlag calls).
+// Adds two separate linker tokens: "-framework" and the framework name.
+// On non-Apple platforms the tokens are still added; the linker will reject them,
+// which is the expected behaviour (build scripts should guard with BuildHost).
+static long long impl_add_framework(long long t, long long name) {
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    const char *fw = (const char *)name;
+    if (!tgt || !fw) return -1;
+    strarray_push(&tgt->ldflags, xstrdup("-framework"));
+    strarray_push(&tgt->ldflags, xstrdup(fw));
+    return 0;
+}
+
+// ============================================================================
+// #560 — SetInstallPrefix / InstallArtifact / BuildWantsInstall
+// ============================================================================
+
+static long long impl_set_install_prefix(long long ctx, long long path) {
+    (void)ctx;
+    const char *p = (const char *)path;
+    if (!s_ctx || !p) return 0;
+    free(s_ctx->install_prefix);
+    s_ctx->install_prefix = xstrdup(p);
+    return 0;
+}
+
+static long long impl_install_artifact(long long ctx, long long t) {
+    (void)ctx;
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    if (!s_ctx || !tgt) return 0;
+    if (!s_ctx->build_install) return 0; // no-op without --build-install
+    if (s_ctx->install_count >= s_ctx->install_cap) {
+        s_ctx->install_cap = s_ctx->install_cap ? s_ctx->install_cap * 2 : 4;
+        BuildTarget **tmp = realloc(s_ctx->install_targets,
+                                    s_ctx->install_cap * sizeof(*s_ctx->install_targets));
+        if (!tmp) return -1;
+        s_ctx->install_targets = tmp;
+    }
+    s_ctx->install_targets[s_ctx->install_count++] = tgt;
+    return 0;
+}
+
+static long long impl_build_wants_install(long long ctx) {
+    (void)ctx;
+    return s_ctx ? (long long)s_ctx->build_install : 0;
+}
+
+// ============================================================================
+// #561 — DirExists, GlobFiles, ReadFile, WriteFile
+// ============================================================================
+
+// DirExists: 1 if path exists and is a directory, 0 otherwise.
+static long long impl_dir_exists(long long ctx, long long path) {
+    (void)ctx;
+    const char *p = (const char *)path;
+    if (!p) return 0;
+    struct stat st;
+    if (stat(p, &st) != 0) return 0;
+    return S_ISDIR(st.st_mode) ? 1 : 0;
+}
+
+// GlobFiles: expand a glob pattern and return a NULL-terminated array of paths,
+// or NULL on no match or non-POSIX platforms.
+static long long impl_glob_files(long long ctx, long long pattern) {
+    (void)ctx;
+    if (!s_ctx || !pattern) return 0;
+#ifdef _POSIX_VERSION
+    glob_t g;
+    int rc = glob((const char *)pattern, GLOB_TILDE, NULL, &g);
+    if (rc != 0) { if (rc != GLOB_NOMATCH) globfree(&g); return 0; }
+    char **arr = malloc((g.gl_pathc + 1) * sizeof(char *));
+    if (!arr) { globfree(&g); return 0; }
+    for (size_t i = 0; i < g.gl_pathc; i++)
+        arr[i] = (char *)builder_intern(s_ctx, xstrdup(g.gl_pathv[i]));
+    arr[g.gl_pathc] = NULL;
+    globfree(&g);
+    // Intern the array pointer itself so it is freed when the builder is torn down.
+    builder_intern(s_ctx, (char *)arr);
+    return (long long)(intptr_t)arr;
+#else
+    return 0;
+#endif
+}
+
+// ReadFile: read a small file into a NUL-terminated string (max 4 MB).
+// Returns NULL on error or if the file exceeds the size limit.
+static long long impl_read_file(long long ctx, long long path) {
+    (void)ctx;
+    if (!s_ctx || !path) return 0;
+    FILE *f = fopen((const char *)path, "rb");
+    if (!f) return 0;
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return 0; }
+    long sz = ftell(f);
+    rewind(f);
+    if (sz < 0 || sz > 4 * 1024 * 1024) { fclose(f); return 0; }
+    char *buf = malloc((size_t)sz + 1);
+    if (!buf) { fclose(f); return 0; }
+    if (fread(buf, 1, (size_t)sz, f) != (size_t)sz) {
+        fclose(f); free(buf); return 0;
+    }
+    fclose(f);
+    buf[sz] = '\0';
+    return (long long)(intptr_t)builder_intern(s_ctx, buf);
+}
+
+// WriteFile: write content to path, creating parent directories as needed.
+// Returns 0 on success, -1 on failure.
+static long long impl_write_file(long long ctx, long long path, long long content) {
+    (void)ctx;
+    const char *p = (const char *)path;
+    const char *c = (const char *)content;
+    if (!p || !c) return -1;
+    char *d = dir_of(p);
+    if (mkdir_p(d) != 0) { free(d); return -1; }
+    free(d);
+    FILE *f = fopen(p, "wb");
+    if (!f) return -1;
+    size_t n = strlen(c);
+    int ok = fwrite(c, 1, n, f) == n;
+    fclose(f);
+    return ok ? 0 : -1;
+}
+
 static long long impl_build_root(long long ctx) {
     (void)ctx;
     return (long long)(intptr_t)(s_ctx ? s_ctx->root : "");
@@ -762,6 +938,20 @@ void cc_load_build_runtime(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__builtin_build_set_toolchain",     (void *)impl_set_toolchain,      2, 0);
     cc_register_cfunc(vm, "__builtin_build_set_target_triple", (void *)impl_set_target_triple,  2, 0);
     cc_register_cfunc(vm, "__builtin_build_target_triple",     (void *)impl_build_target_triple,1, 0);
+    // #559
+    cc_register_cfunc(vm, "__builtin_build_find_tool",         (void *)impl_find_tool,          2, 0);
+    cc_register_cfunc(vm, "__builtin_build_get_build_option",  (void *)impl_get_build_option,   2, 0);
+    cc_register_cfunc(vm, "__builtin_build_have_build_option", (void *)impl_have_build_option,  2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_framework",     (void *)impl_add_framework,      2, 0);
+    // #560
+    cc_register_cfunc(vm, "__builtin_build_set_install_prefix",(void *)impl_set_install_prefix, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_install_artifact",  (void *)impl_install_artifact,   2, 0);
+    cc_register_cfunc(vm, "__builtin_build_wants_install",     (void *)impl_build_wants_install, 1, 0);
+    // #561
+    cc_register_cfunc(vm, "__builtin_build_dir_exists",        (void *)impl_dir_exists,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_glob_files",        (void *)impl_glob_files,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_read_file",         (void *)impl_read_file,          2, 0);
+    cc_register_cfunc(vm, "__builtin_build_write_file",        (void *)impl_write_file,         3, 0);
 }
 
 // ============================================================================
@@ -1631,6 +1821,92 @@ static void free_target(BuildTarget *t) {
     free(t);
 }
 
+// run_install: copy all registered install_targets to install_prefix/{bin,lib}.
+// Respects dry_run.  Returns 0 on success, non-zero if any copy fails.
+static int run_install(Builder *ctx) {
+    int failed = 0;
+    for (int i = 0; i < ctx->install_count; i++) {
+        BuildTarget *t = ctx->install_targets[i];
+        // Determine destination subdirectory and filename within prefix.
+        char dest_rel[512];
+        switch (t->kind) {
+        case CCCC_TGT_EXE:
+            snprintf(dest_rel, sizeof(dest_rel), "bin/%s", t->name);
+            break;
+        case CCCC_TGT_STATIC:
+            snprintf(dest_rel, sizeof(dest_rel), "lib/lib%s.a", t->name);
+            break;
+        case CCCC_TGT_DYNAMIC:
+            snprintf(dest_rel, sizeof(dest_rel), "lib/lib%s.%s", t->name, CCCC_DYLIB_EXT);
+            break;
+        default:
+            fprintf(stderr, "build: install: cannot install target '%s' (unsupported kind)\n",
+                    t->name);
+            failed++;
+            continue;
+        }
+        // Source: the built artifact path.
+        char *src_rel = t->output ? xstrdup(t->output) : default_output(t);
+        char *src = join(ctx->out_dir, src_rel);
+        free(src_rel);
+        // Destination: prefix + dest_rel.
+        char *dst = join(ctx->install_prefix, dest_rel);
+        char *dst_dir = dir_of(dst);
+
+        if (ctx->dry_run) {
+            printf("install %s -> %s\n", src, dst);
+            free(src); free(dst); free(dst_dir);
+            continue;
+        }
+        if (mkdir_p(dst_dir) != 0) {
+            fprintf(stderr, "build: install: failed to create directory %s\n", dst_dir);
+            free(src); free(dst); free(dst_dir);
+            failed++;
+            continue;
+        }
+        free(dst_dir);
+
+        // Copy file contents.
+        FILE *in = fopen(src, "rb");
+        if (!in) {
+            fprintf(stderr, "build: install: cannot open %s: %s\n", src, strerror(errno));
+            free(src); free(dst);
+            failed++;
+            continue;
+        }
+        FILE *out = fopen(dst, "wb");
+        if (!out) {
+            fprintf(stderr, "build: install: cannot create %s: %s\n", dst, strerror(errno));
+            fclose(in); free(src); free(dst);
+            failed++;
+            continue;
+        }
+        char buf[65536];
+        size_t n;
+        int copy_ok = 1;
+        while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+            if (fwrite(buf, 1, n, out) != n) { copy_ok = 0; break; }
+        }
+        fclose(in);
+        if (fclose(out) != 0 || !copy_ok) {
+            fprintf(stderr, "build: install: write error for %s\n", dst);
+            free(src); free(dst);
+            failed++;
+            continue;
+        }
+#ifdef _POSIX_VERSION
+        // Preserve executable bit for binaries.
+        if (t->kind == CCCC_TGT_EXE) chmod(dst, 0755);
+#endif
+        if (ctx->verbose)
+            printf("installed  %s -> %s\n", t->name, dst);
+        else
+            printf("install    %s\n", dst);
+        free(src); free(dst);
+    }
+    return failed;
+}
+
 int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     // Count [[cccc::build_target]] factories and copy their names so they are
     // accessible from FFI impls (impl_target_count / impl_target_name) and for
@@ -1699,6 +1975,11 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                         : join(ctx.out_dir, ".cccc-cache");
                     mkdir_p(ctx.cache_dir);
                 }
+                ctx.build_options = opts->build_options;
+                ctx.build_options_count = opts->build_options_count;
+                ctx.build_install = opts->build_install;
+                const char *prefix_env = getenv("PREFIX");
+                ctx.install_prefix = xstrdup(prefix_env ? prefix_env : "/usr/local");
 
                 s_ctx = &ctx;
                 cc_run_at(vm, (Pc)factory_fn->code_addr, 0, NULL);
@@ -1728,6 +2009,8 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                 } else {
                     exit_code = run_graph(&ctx, tgt) ? 1 : 0;
                 }
+                if (exit_code == 0 && ctx.build_install && ctx.install_count > 0)
+                    if (run_install(&ctx) != 0) exit_code = 1;
 
                 for (int j = 0; j < ctx.targets_count; j++)
                     free_target(ctx.targets[j]);
@@ -1736,6 +2019,8 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                 free(ctx.cache_dir);
                 for (int j = 0; j < ctx.captures_count; j++) free(ctx.captures[j]);
                 free(ctx.captures);
+                free(ctx.install_prefix);
+                free(ctx.install_targets);
                 free(factory_names);
                 return exit_code;
             }
@@ -1788,6 +2073,13 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
             : join(ctx.out_dir, ".cccc-cache");
         mkdir_p(ctx.cache_dir);
     }
+    ctx.build_options = opts->build_options;
+    ctx.build_options_count = opts->build_options_count;
+    ctx.build_install = opts->build_install;
+    {
+        const char *prefix_env = getenv("PREFIX");
+        ctx.install_prefix = xstrdup(prefix_env ? prefix_env : "/usr/local");
+    }
 
     s_ctx = &ctx;
     cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
@@ -1800,6 +2092,9 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     else
         exit_code = (int)ret;
 
+    if (exit_code == 0 && ctx.build_install && ctx.install_count > 0)
+        if (run_install(&ctx) != 0) exit_code = 1;
+
     for (int i = 0; i < ctx.targets_count; i++)
         free_target(ctx.targets[i]);
     free(ctx.targets);
@@ -1807,6 +2102,8 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     free(ctx.cache_dir);
     for (int i = 0; i < ctx.captures_count; i++) free(ctx.captures[i]);
     free(ctx.captures);
+    free(ctx.install_prefix);
+    free(ctx.install_targets);
     free(factory_names);
     return exit_code;
 }

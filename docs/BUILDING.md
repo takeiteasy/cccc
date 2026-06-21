@@ -97,6 +97,8 @@ cccc --build build.c --build-cache=~/.cache/cccc  # incremental builds with expl
 | `--build-list-targets` | off | Print the names of all `[[cccc::build_target]]` factory functions (one per line) and exit without running the build entry. |
 | `--build-profile=NAME` | (none) | Set a global build profile for all targets: `debug`, `release`, `relwithdebinfo`, or `minsizerel`. Individual targets can override with `SetProfile`. |
 | `--build-cache[=PATH]` | (off) | Enable incremental builds. Two-level strategy: (1) mtime fast path — skips recompile when the existing `.o` is newer than the source; (2) content-hash CAS — on a mtime miss, looks up `hash(source_content + compile_flags)` in a content-addressable store and restores the cached `.o` without recompiling. Objects compiled fresh are stored in the CAS for future reuse. Default cache directory: `<out-dir>/.cccc-cache`. Pass `=PATH` to use a shared or cross-build cache directory. |
+| `--build-option=KEY=VALUE` | (none) | Pass a typed build option to the build script. Queried via `GetBuildOption(ctx, key)` / `HaveBuildOption(ctx, key)`. Repeated flags accumulate. (#559) |
+| `--build-install` | off | After a successful build, copy artifacts registered with `InstallArtifact` to the install prefix. Default prefix: `PREFIX` env var or `/usr/local`. (#560) |
 
 Existing flags forwarded to every target's compile as defaults: `-I`, `-i`, `-D`,
 `-U`, `--std=`, `-L`, `-l`. VM-only options (`-c`, `-d`/`--disassemble`,
@@ -276,13 +278,28 @@ void AddLib(BuildTarget *t, const char *name);     // -l<name>
 void AddLibPath(BuildTarget *t, const char *path); // -L<path>
 
 // Environment and filesystem
-const char *GetEnv(Builder *ctx, const char *name);         // env var value or NULL
-const char *CaptureCommand(Builder *ctx, const char *cmd);  // stdout of sh -c cmd (stripped), or NULL
-int         FileExists(Builder *ctx, const char *path);     // 1 if path exists
+const char  *GetEnv(Builder *ctx, const char *name);         // env var value or NULL
+const char  *CaptureCommand(Builder *ctx, const char *cmd);  // stdout of sh -c cmd (stripped), or NULL
+int          FileExists(Builder *ctx, const char *path);     // 1 if path exists (any node type)
+int          DirExists(Builder *ctx, const char *path);      // 1 if path exists and is a directory (#561)
+const char **GlobFiles(Builder *ctx, const char *pattern);   // NULL-terminated array of matched paths (#561)
+const char  *ReadFile(Builder *ctx, const char *path);       // file contents as string (≤4 MB) or NULL (#561)
+int          WriteFile(Builder *ctx, const char *path, const char *content); // write string to file (#561)
 
-// Toolchain probing (#543)
-int  HaveTool(Builder *ctx, const char *name);     // 1 if tool in PATH + allowed
-int  PkgConfig(BuildTarget *t, const char *pkg);   // run pkg-config, add flags
+// Toolchain probing (#543, #559)
+int          HaveTool(Builder *ctx, const char *name);       // 1 if tool in PATH + allowed
+const char  *FindTool(Builder *ctx, const char *name);       // full path if found + allowed, or NULL (#559)
+int          PkgConfig(BuildTarget *t, const char *pkg);     // run pkg-config, add flags
+void         AddFramework(BuildTarget *t, const char *name); // macOS -framework Name shorthand (#559)
+
+// Build options (#559)
+const char  *GetBuildOption(Builder *ctx, const char *name); // value of --build-option=key=value or NULL
+int          HaveBuildOption(Builder *ctx, const char *name); // 1 if --build-option=key[=...] was passed
+
+// Install (#560)
+void SetInstallPrefix(Builder *ctx, const char *path); // override install root (default: PREFIX or /usr/local)
+void InstallArtifact(Builder *ctx, BuildTarget *t);    // register t for installation (requires --build-install)
+int  BuildWantsInstall(Builder *ctx);                  // 1 if --build-install was passed
 
 // Custom steps (#544)
 BuildTarget *RunCustom(Builder *ctx, const char *name, const char *cmd);
@@ -372,7 +389,46 @@ if (FileExists(ctx, "vendor/zlib/zlib.h")) {
 }
 ```
 
-### Toolchain probing (#543)
+**`DirExists(ctx, path)`** returns 1 if `path` exists and is a directory:
+
+```c
+if (DirExists(ctx, "vendor/zlib")) {
+    AddInclude(lib, "vendor/zlib");
+} else {
+    AddLib(lib, "z");
+}
+```
+
+**`GlobFiles(ctx, pattern)`** expands a POSIX `glob(3)` pattern and returns a
+`NULL`-terminated `const char **` array of matching paths, or `NULL` if there
+are no matches or the platform is not POSIX. Paths are valid until the build
+entry returns:
+
+```c
+const char **headers = GlobFiles(ctx, "include/**/*.h");
+for (int i = 0; headers && headers[i]; i++)
+    printf("header: %s\n", headers[i]);
+```
+
+**`ReadFile(ctx, path)`** reads the file at `path` into a `NUL`-terminated
+string and returns it. Returns `NULL` on error or if the file exceeds 4 MB.
+The pointer is valid until the build entry returns:
+
+```c
+const char *ver = ReadFile(ctx, "VERSION");
+if (ver) AddDefine(app, "APP_VERSION", ver);
+```
+
+**`WriteFile(ctx, path, content)`** writes `content` to `path`, creating parent
+directories as needed. Returns 0 on success, -1 on error. Useful for generating
+header files or version stubs at build time without going through `AddSourceStr`:
+
+```c
+WriteFile(ctx, "build/gen/config.h",
+    "#define CCCC_VERSION \"1.0\"\n");
+```
+
+### Toolchain probing (#543, #559)
 
 **`HaveTool(ctx, name)`** returns 1 when `name` is executable (found in `$PATH`)
 and not blocked by `--build-tool-allow`:
@@ -383,12 +439,108 @@ if (HaveTool(ctx, "pkg-config")) {
 }
 ```
 
+**`FindTool(ctx, name)`** is like `HaveTool` but returns the full executable
+path instead of 1, or `NULL` if not found or not allowed. Useful when the path
+must be embedded in a `-D` define or passed to `RunCustom`:
+
+```c
+const char *cmake = FindTool(ctx, "cmake");
+if (cmake) AddDefine(app, "CMAKE_BIN", cmake);
+```
+
 **`PkgConfig(t, pkg)`** runs `pkg-config --cflags <pkg>` and `pkg-config --libs
 <pkg>`, then adds the tokens to `t->cflags` and `t->ldflags` respectively.
 Returns 0 on success. Requires `pkg-config` in `$PATH`.
 
-Both functions are subject to `--build-tool-allow`: if an allowlist is set, the
-tool name must appear in it or the probe/spawn is refused.
+**`AddFramework(t, name)`** adds a macOS `-framework Name` linker flag pair to
+`t`. This is a cleaner alternative to two `AddLdFlag` calls and works correctly
+because the framework name is passed as a separate linker token:
+
+```c
+if (strcmp(BuildHost(ctx), "darwin") == 0) {
+    AddFramework(app, "CoreFoundation");
+    AddFramework(app, "Security");
+}
+```
+
+All tool probing functions are subject to `--build-tool-allow`: if an allowlist
+is set, the tool name must appear in it or the probe/spawn is refused.
+
+### Build options (#559)
+
+Zig-style typed build options let users parameterise a build script from the
+command line without hacking environment variables.  Pass one or more
+`--build-option=key=value` flags; the build script queries them at runtime:
+
+```bash
+cccc --build build.c --build-option=sanitize=asan --build-option=lto=1
+```
+
+```c
+[[cccc::build]]
+int build_main(Builder *ctx) {
+    BuildTarget *app = Executable(ctx, "myapp");
+    AddSource(app, "src/main.c");
+
+    if (HaveBuildOption(ctx, "sanitize")) {
+        const char *san = GetBuildOption(ctx, "sanitize");
+        if (strcmp(san, "asan") == 0) AddCFlag(app, "-fsanitize=address");
+    }
+    if (HaveBuildOption(ctx, "lto"))
+        AddCFlag(app, "-flto");
+
+    return BuildDefault(ctx);
+}
+```
+
+**`GetBuildOption(ctx, name)`** returns the value part of
+`--build-option=name=value`, or `NULL` if `name` was not given.
+
+**`HaveBuildOption(ctx, name)`** returns 1 if `--build-option=name` (with or
+without a value) was passed.
+
+### Install (#560)
+
+The install API copies built artifacts to a system prefix after a successful
+build.  Activate it with `--build-install` on the command line; without that
+flag, `InstallArtifact` is a no-op.
+
+```bash
+cccc --build build.c --build-install          # installs to /usr/local
+PREFIX=/opt/myapp cccc --build build.c --build-install
+```
+
+**`SetInstallPrefix(ctx, path)`** overrides the install root.  The default is
+the `PREFIX` environment variable, falling back to `/usr/local`.
+
+**`InstallArtifact(ctx, t)`** registers `t` for installation.  After the build
+entry returns and the build succeeded, registered artifacts are copied to the
+appropriate subdirectory of the install prefix:
+
+| Target kind   | Destination                  |
+|---------------|------------------------------|
+| executable    | `{prefix}/bin/{name}`        |
+| static lib    | `{prefix}/lib/lib{name}.a`   |
+| dynamic lib   | `{prefix}/lib/lib{name}.{so\|dylib}` |
+
+**`BuildWantsInstall(ctx)`** returns 1 if `--build-install` was passed — useful
+for skipping registration when the user did not request an install:
+
+```c
+[[cccc::build]]
+int build_main(Builder *ctx) {
+    SetInstallPrefix(ctx, "/opt/myapp");
+
+    BuildTarget *app = Executable(ctx, "myapp");
+    AddSource(app, "src/main.c");
+    InstallArtifact(ctx, app);
+
+    return BuildDefault(ctx);
+}
+```
+
+The `--build-dry-run` flag is respected: install steps print their destination
+paths without copying.
 
 ### Build profiles (#548)
 
@@ -550,12 +702,13 @@ cross-compilation via `--build-triple` / `SetTargetTriple` and
 `GetEnv` / `CaptureCommand` / `FileExists` environment and filesystem helpers,
 `--build-cache[=PATH]` incremental builds with mtime + content-hash CAS (#546),
 `kind=bytecode` build targets producing `.c4` executables via whole-program cccc
-compilation (#545).
+compilation (#545),
+`FindTool` / `AddFramework` / `GetBuildOption` / `HaveBuildOption` /
+`--build-option=KEY=VALUE` (#559),
+`InstallArtifact` / `SetInstallPrefix` / `BuildWantsInstall` / `--build-install` (#560),
+`DirExists` / `GlobFiles` / `ReadFile` / `WriteFile` filesystem helpers (#561).
 
 **Deferred to later releases:** target-level parallel `-j` across DAG nodes (#557);
-`FindTool` / build options / `AddFramework` (#559);
-`InstallArtifact` / `SetInstallPrefix` (#560);
-additional filesystem helpers — `DirExists`, glob search (#561);
 a self-hosting `build.c` replacing the Makefile.
 
 ## See also
