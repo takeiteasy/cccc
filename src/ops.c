@@ -421,6 +421,30 @@ static inline int op_SLE3_fn(VirtualMachine *vm) {
     return 0;
 }
 
+static inline int op_ULT3_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    unsigned long long a = (unsigned long long)vm->regs[rs1];
+    unsigned long long b = (unsigned long long)vm->regs[rs2];
+    long long result = (a < b) ? 1 : 0;
+    if (rd != REG_ZERO)
+        vm->regs[rd] = result;
+    return 0;
+}
+
+static inline int op_ULE3_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    unsigned long long a = (unsigned long long)vm->regs[rs1];
+    unsigned long long b = (unsigned long long)vm->regs[rs2];
+    long long result = (a <= b) ? 1 : 0;
+    if (rd != REG_ZERO)
+        vm->regs[rd] = result;
+    return 0;
+}
+
 // ========== Data Movement ==========
 
 static inline int op_LI3_fn(VirtualMachine *vm) {

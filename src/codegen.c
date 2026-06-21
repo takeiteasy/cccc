@@ -3508,21 +3508,15 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             if (is_ptr_arith && (vm->flags & CCCC_BOUNDS_CHECKS))
                 emit_rr(vm, CHKB, dest_reg, r_rhs);
 
-            // Unsigned 64-bit comparison: SLT3/SLE3 are signed, so for
-            // 64-bit unsigned operands flip the sign bit on both sides first
-            // (XOR with LLONG_MIN converts unsigned order to signed order).
+            // Unsigned 64-bit comparison: use dedicated ULT3/ULE3 opcodes.
             // Shorter unsigned types (≤32-bit) are zero-extended in 64-bit
-            // registers and don't need this treatment.
-            bool need_u64_flip =
+            // registers so SLT3/SLE3 already give the correct signed result.
+            bool is_u64_cmp =
                 (node->kind == ND_LT || node->kind == ND_LE) &&
                 node->lhs->ty && node->lhs->ty->is_unsigned &&
                 node->lhs->ty->size == 8;
-            if (need_u64_flip) {
-                int r_flip = alloc_temp_reg();
-                emit_li3(vm, r_flip, (long long)0x8000000000000000ULL);
-                emit_rrr(vm, XOR3, dest_reg, dest_reg, r_flip);
-                emit_rrr(vm, XOR3, r_rhs, r_rhs, r_flip);
-                free_temp_reg(r_flip);
+            if (is_u64_cmp) {
+                op = (node->kind == ND_LT) ? ULT3 : ULE3;
             }
 
             emit_rrr(vm, op, dest_reg, dest_reg, r_rhs);

@@ -185,6 +185,8 @@ Opcodes are grouped by function.  Operands are shown as `rd = destination`, `rs 
 | `SLE3` | `rd = (rs1 <= rs2)` |
 | `SGT3` | `rd = (rs1 >  rs2)` |
 | `SGE3` | `rd = (rs1 >= rs2)` |
+| `ULT3` | `rd = (rs1 <  rs2)`, unsigned 64-bit |
+| `ULE3` | `rd = (rs1 <= rs2)`, unsigned 64-bit |
 
 ### Wide _BitInt Operations (N > 64)
 

@@ -362,6 +362,8 @@ static const DefUseEntry defuse_table[OP_COUNT] = {
     [SGE3] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
     [SGT3] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
     [SLE3] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
+    [ULT3] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
+    [ULE3] = {{P_RD}, {P_RS1, P_RS2}, 1, 2},
 
     // Register ops: rd = ... (rs1 optional)
     [LI3] = {{P_RD}, {}, 1, 0},

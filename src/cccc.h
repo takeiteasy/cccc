@@ -135,6 +135,8 @@ extern "C" {
     X(SGE3, 1) /* rd = (rs1 >= rs2) */                                         \
     X(SGT3, 1) /* rd = (rs1 > rs2) */                                          \
     X(SLE3, 1) /* rd = (rs1 <= rs2) */                                         \
+    X(ULT3, 1) /* rd = (rs1 <  rs2), unsigned 64-bit */                        \
+    X(ULE3, 1) /* rd = (rs1 <= rs2), unsigned 64-bit */                        \
     /* Register operations */                                                  \
     X(LI3, 3)   /* rd = immediate */                                           \
     X(LDA3, 3)  /* rd = data_seg + immediate byte offset */                    \

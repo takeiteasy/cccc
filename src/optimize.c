@@ -393,6 +393,12 @@ static bool eval_binary_const(int op, long long a, long long b,
         case SLE3:
             *out = (a <= b) ? 1 : 0;
             return true;
+        case ULT3:
+            *out = ((unsigned long long)a < (unsigned long long)b) ? 1 : 0;
+            return true;
+        case ULE3:
+            *out = ((unsigned long long)a <= (unsigned long long)b) ? 1 : 0;
+            return true;
         default:
             return false;
     }
@@ -515,7 +521,9 @@ static void opt_constant_fold(VirtualMachine *vm, OptReplacement *repls,
             case SLT3:
             case SGE3:
             case SGT3:
-            case SLE3: {
+            case SLE3:
+            case ULT3:
+            case ULE3: {
                 // OP3 rd, rs1, rs2 - check if both operands are constants
                 int rd, rs1, rs2;
                 DECODE_RRR(vm->text_seg[pc + 1], rd, rs1, rs2);
