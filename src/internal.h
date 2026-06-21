@@ -810,6 +810,7 @@ typedef struct {
     const char  *cross_triple;          // --build-triple=TRIPLE: clang-style cross target triple (#547)
     const char  *cross_cc;              // --build-cc=COMPILER: override CC binary globally (#547)
     const char  *build_cache;           // --build-cache[=PATH]: NULL=off, ""=default path, else given path (#546)
+    const char  *cccc_self;             // path to the cccc binary (argv[0]); used for kind=bytecode targets (#545)
 } CcBuildOptions;
 
 void   cc_load_build_runtime(VirtualMachine *vm);

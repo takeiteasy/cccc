@@ -1,12 +1,13 @@
-// CCCC_FLAGS: --build --build-dry-run --build-target=my_target
+// CCCC_FLAGS: --build --build-dry-run --build-target=bc_exe
 // CCCC_EXPECT_STDOUT: \.c4
 //
-// kind=bytecode is now a valid [[cccc::build_target]] option (#545).
-// Dry-run must print the cccc invocation with a .c4 output path.
+// Smoke test for kind=bytecode build targets (#545): the dry-run output must
+// contain a .c4 path, confirming the bytecode compilation pipeline is used
+// instead of the native cc/ar/ld toolchain.
 
 [[cccc::build_target(kind=bytecode)]]
-BuildTarget *my_target(Builder *ctx) {
-    BuildTarget *t = Executable(ctx, "app");
+BuildTarget *bc_exe(Builder *ctx) {
+    BuildTarget *t = Executable(ctx, "hello");
     AddSource(t, "examples/build_demo/src/main.c");
     AddSource(t, "examples/build_demo/src/greet.c");
     AddSource(t, "examples/build_demo/src/lib/sum.c");

@@ -181,17 +181,47 @@ for (int i = 0; i < n; i++)
     printf("factory: %s\n", BuildTargetName(ctx, i));
 ```
 
-The `kind=` option selects the output backend. Currently only `kind=native` is
-supported (the system toolchain, which is the default). `kind=bytecode` is
-reserved and will be added when the bytecode linker is implemented (#545).
+The `kind=` option selects the output backend:
+
+| `kind=` | Backend | Output |
+|---------|---------|--------|
+| `native` (default) | system `cc`/`ar`/`ld` | platform binary |
+| `bytecode` | `cccc` whole-program compile | `.c4` bytecode file |
+
+**`kind=bytecode`** compiles all sources in a single `cccc` invocation, producing
+a runnable `.c4` file (default path `bin/<name>.c4`). This uses CCCC's existing
+AST-level multi-TU merge (same as `cccc a.c b.c -o out.c4`). The factory must
+be invoked via `--build-target=NAME`; the target must call `Executable()`.
+
+```c
+[[cccc::build_target(kind=bytecode)]]
+BuildTarget *bc_app(Builder *ctx) {
+    BuildTarget *t = Executable(ctx, "app");
+    AddSource(t, "src/main.c");
+    AddSource(t, "src/lib.c");
+    AddInclude(t, "include");
+    return t;
+}
+```
+
+```sh
+cccc --build build.c --build-target=bc_app
+# produces build/bin/app.c4 — run with: cccc build/bin/app.c4
+```
+
+Flags forwarded to the `cccc` invocation: `-I`, `-D`, `-U`, `--std`. Native
+`cflags`/`ldflags`/profile flags are skipped. `LinkWith` between bytecode
+targets and incremental per-source caching are not supported in v1.
 
 The attribute accepts C23 and GNU forms:
 
 ```c
 [[cccc::build_target]]
 [[cccc::build_target(kind=native)]]
+[[cccc::build_target(kind=bytecode)]]
 __attribute__((build_target))
 __attribute__((build_target(kind=native)))
+__attribute__((build_target(kind=bytecode)))
 __attribute__((cccc::build_target))
 ```
 
@@ -203,6 +233,7 @@ __attribute__((cccc::build_target))
 | Static library | `StaticLib(name)` | `lib/lib<name>.a` | `ar rcs` |
 | Dynamic library | `DynamicLib(name)` | `lib/lib<name>.{so,dylib}` | `cc -shared` |
 | Custom step | `RunCustom(name, cmd)` | (none) | vendored shell |
+| Bytecode executable | `Executable(name)` + `kind=bytecode` | `bin/<name>.c4` | `cccc` |
 
 ## Builder API
 
@@ -517,13 +548,14 @@ build profiles (`debug` / `release` / `relwithdebinfo` / `minsizerel`) via
 cross-compilation via `--build-triple` / `SetTargetTriple` and
 `--build-cc` / `SetToolchain` (#547),
 `GetEnv` / `CaptureCommand` / `FileExists` environment and filesystem helpers,
-`--build-cache[=PATH]` incremental builds with mtime + content-hash CAS (#546).
+`--build-cache[=PATH]` incremental builds with mtime + content-hash CAS (#546),
+`kind=bytecode` build targets producing `.c4` executables via whole-program cccc
+compilation (#545).
 
 **Deferred to later releases:** target-level parallel `-j` across DAG nodes (#557);
 `FindTool` / build options / `AddFramework` (#559);
 `InstallArtifact` / `SetInstallPrefix` (#560);
 additional filesystem helpers — `DirExists`, glob search (#561);
-bytecode targets (`kind=bytecode` in `[[cccc::build_target]]`, pending #545);
 a self-hosting `build.c` replacing the Makefile.
 
 ## See also

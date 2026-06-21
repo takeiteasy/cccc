@@ -2189,6 +2189,7 @@ int main(int argc, const char *argv[]) {
             .cross_triple     = build_triple,
             .cross_cc         = build_cc,
             .build_cache      = build_cache,
+            .cccc_self        = argv[0],
         };
 
         exit_code = cc_run_build(&vm, merged_prog, &build_opts);

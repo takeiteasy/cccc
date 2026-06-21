@@ -2919,11 +2919,10 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
                         if (equal(p, "kind") && p->next && equal(p->next, "=") &&
                             p->next->next && p->next->next->kind == TK_IDENT) {
                             Token *kind_tok = p->next->next;
-                            if (!equal(kind_tok, "native"))
+                            if (!equal(kind_tok, "native") && !equal(kind_tok, "bytecode"))
                                 error_tok(vm, kind_tok,
                                     "[[cccc::build_target(kind=%.*s)]] is not supported — "
-                                    "only kind=native is valid; "
-                                    "kind=bytecode requires the bytecode linker (#545)",
+                                    "valid values are kind=native and kind=bytecode",
                                     kind_tok->len, kind_tok->loc);
                             build_target_kind = strndup(kind_tok->loc, kind_tok->len);
                             p = kind_tok->next;
@@ -2945,11 +2944,10 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
                     if (equal(p, "kind") && p->next && equal(p->next, "=") &&
                         p->next->next && p->next->next->kind == TK_IDENT) {
                         Token *kind_tok = p->next->next;
-                        if (!equal(kind_tok, "native"))
+                        if (!equal(kind_tok, "native") && !equal(kind_tok, "bytecode"))
                             error_tok(vm, kind_tok,
                                 "build_target(kind=%.*s) is not supported — "
-                                "only kind=native is valid; "
-                                "kind=bytecode requires the bytecode linker (#545)",
+                                "valid values are kind=native and kind=bytecode",
                                 kind_tok->len, kind_tok->loc);
                         build_target_kind = strndup(kind_tok->loc, kind_tok->len);
                         p = kind_tok->next;

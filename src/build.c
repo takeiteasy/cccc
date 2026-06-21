@@ -62,6 +62,7 @@ typedef enum {
     CCCC_TGT_STATIC,
     CCCC_TGT_DYNAMIC,
     CCCC_TGT_CUSTOM,   // arbitrary shell command (#544)
+    CCCC_TGT_BYTECODE, // whole-program cccc compile → .c4 executable (#545)
 } CcTargetKind;
 
 typedef struct BuildTarget BuildTarget;
@@ -119,6 +120,7 @@ struct Builder {
     const char *profile;      // --build-profile=NAME global default (#548)
     const char *cross_triple; // --build-triple=TRIPLE global target triple (#547)
     const char *cross_cc;     // --build-cc=COMPILER global CC override (#547)
+    const char *cccc_self;    // path to the cccc binary; used for kind=bytecode targets (#545)
     // Strings returned by CaptureCommand; freed when the builder is torn down.
     char **captures;
     int captures_count, captures_cap;
@@ -217,6 +219,9 @@ static char *default_output(const BuildTarget *t) {
         break;
     case CCCC_TGT_CUSTOM:
         return xstrdup(""); // custom targets have no output artifact
+    case CCCC_TGT_BYTECODE:
+        snprintf(buf, sizeof(buf), "bin/%s.c4", t->name);
+        break;
     }
     return xstrdup(buf);
 }
@@ -895,6 +900,51 @@ static void push_compile_flags(ArgVec *args, const Builder *ctx,
         argv_push(args, t->cflags.data[i]);
 }
 
+// Variant for kind=bytecode targets: forward only flags that cccc understands.
+// Skips native cflags/ldflags/profile flags; forwards -I, -D, -U, and --std.
+static void push_compile_flags_bytecode(ArgVec *args, const Builder *ctx,
+                                        const BuildTarget *t, StringArray *owned) {
+    const CcNativeCompileArgs *d = ctx->defaults;
+    if (d && d->std_arg) {
+        char *f = malloc(strlen(d->std_arg) + 10);
+        snprintf(f, strlen(d->std_arg) + 10, "--std=%s", d->std_arg);
+        strarray_push(owned, f);
+        argv_push(args, f);
+    }
+    for (int i = 0; d && i < d->inc_paths_count; i++) {
+        argv_push(args, "-I");
+        argv_push(args, d->inc_paths[i]);
+    }
+    for (int i = 0; d && i < d->defines_count; i++) {
+        char *f = malloc(strlen(d->defines[i]) + 3);
+        snprintf(f, strlen(d->defines[i]) + 3, "-D%s", d->defines[i]);
+        strarray_push(owned, f);
+        argv_push(args, f);
+    }
+    for (int i = 0; d && i < d->undefs_count; i++) {
+        char *f = malloc(strlen(d->undefs[i]) + 3);
+        snprintf(f, strlen(d->undefs[i]) + 3, "-U%s", d->undefs[i]);
+        strarray_push(owned, f);
+        argv_push(args, f);
+    }
+    for (int i = 0; i < t->includes.len; i++) {
+        argv_push(args, "-I");
+        argv_push(args, t->includes.data[i]);
+    }
+    for (int i = 0; i < t->defines.len; i++) {
+        char *f = malloc(strlen(t->defines.data[i]) + 3);
+        snprintf(f, strlen(t->defines.data[i]) + 3, "-D%s", t->defines.data[i]);
+        strarray_push(owned, f);
+        argv_push(args, f);
+    }
+    for (int i = 0; i < t->undefs.len; i++) {
+        char *f = malloc(strlen(t->undefs.data[i]) + 3);
+        snprintf(f, strlen(t->undefs.data[i]) + 3, "-U%s", t->undefs.data[i]);
+        strarray_push(owned, f);
+        argv_push(args, f);
+    }
+}
+
 static void free_strarray(StringArray *a) {
     for (int i = 0; i < a->len; i++)
         free(a->data[i]);
@@ -1218,10 +1268,11 @@ serial_fallback:;
 static int build_target(Builder *ctx, const char *cc,
                         BuildTarget *t, int *step, int total) {
     if (ctx->verbose) {
-        const char *kind_str = t->kind == CCCC_TGT_EXE     ? "executable"
-                             : t->kind == CCCC_TGT_STATIC   ? "static library"
-                             : t->kind == CCCC_TGT_DYNAMIC  ? "dynamic library"
-                             :                                 "custom";
+        const char *kind_str = t->kind == CCCC_TGT_EXE      ? "executable"
+                             : t->kind == CCCC_TGT_STATIC    ? "static library"
+                             : t->kind == CCCC_TGT_DYNAMIC   ? "dynamic library"
+                             : t->kind == CCCC_TGT_BYTECODE  ? "bytecode"
+                             :                                  "custom";
         if (t->kind == CCCC_TGT_CUSTOM)
             printf(">> target '%s' [%s]\n", t->name, kind_str);
         else
@@ -1272,6 +1323,36 @@ static int build_target(Builder *ctx, const char *cc,
         fprintf(stderr, "build: failed to create output directories\n");
         free(out_rel); free(out_abs); free(out_dir); free(tobjdir);
         return 1;
+    }
+
+    // Bytecode target (#545): single whole-program cccc invocation → .c4 file.
+    // Skips the per-source compile_sources() + native link steps entirely.
+    if (t->kind == CCCC_TGT_BYTECODE) {
+        char *cccc_bin = ctx->cccc_self
+                       ? xstrdup(ctx->cccc_self)
+                       : cccc_path_find_executable("cccc");
+        if (!cccc_bin) {
+            fprintf(stderr, "build: cannot find cccc binary for bytecode target '%s'\n",
+                    t->name);
+            free(out_rel); free(out_abs); free(out_dir); free(tobjdir);
+            return 1;
+        }
+        StringArray owned = {0};
+        ArgVec a = {0};
+        argv_push(&a, cccc_bin);
+        for (int i = 0; i < t->sources.len; i++) {
+            if (!source_is_excluded(t, t->sources.data[i]))
+                argv_push(&a, t->sources.data[i]);
+        }
+        argv_push(&a, "-o");
+        argv_push(&a, out_abs);
+        push_compile_flags_bytecode(&a, ctx, t, &owned);
+        int brc = run_step(ctx, ++(*step), total, &a);
+        free(a.data);
+        free_strarray(&owned);
+        free(cccc_bin);
+        free(out_rel); free(out_abs); free(out_dir); free(tobjdir);
+        return brc;
     }
 
     // Resolve the effective compiler for this target (#547).
@@ -1363,6 +1444,8 @@ static int count_steps(BuildTarget **order, int n) {
     for (int i = 0; i < n; i++) {
         if (order[i]->kind == CCCC_TGT_CUSTOM)
             total += 1; // one step: run the custom command
+        else if (order[i]->kind == CCCC_TGT_BYTECODE)
+            total += 1; // one step: single cccc whole-program invocation (#545)
         else
             total += order[i]->sources.len + 1; // one compile per source + 1 link/ar
     }
@@ -1609,6 +1692,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                 ctx.profile = opts->profile;
                 ctx.cross_triple = opts->cross_triple;
                 ctx.cross_cc = opts->cross_cc;
+                ctx.cccc_self = opts->cccc_self;
                 if (opts->build_cache) {
                     ctx.cache_dir = *opts->build_cache
                         ? xstrdup(opts->build_cache)
@@ -1620,6 +1704,21 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                 cc_run_at(vm, (Pc)factory_fn->code_addr, 0, NULL);
                 BuildTarget *tgt = (BuildTarget *)(intptr_t)vm->regs[REG_A0];
                 s_ctx = NULL;
+
+                // Apply factory-level kind=bytecode override (#545): if the
+                // matching factory record declares kind=bytecode and the factory
+                // returned an EXE target, promote it to CCCC_TGT_BYTECODE so the
+                // host runner uses the bytecode compilation pipeline.
+                if (tgt && tgt->kind == CCCC_TGT_EXE) {
+                    for (BuildTargetFnRecord *r = vm->compiler.build_target_fns;
+                         r; r = r->next) {
+                        if (strcmp(r->name, opts->target_name) == 0 &&
+                            r->kind && strcmp(r->kind, "bytecode") == 0) {
+                            tgt->kind = CCCC_TGT_BYTECODE;
+                            break;
+                        }
+                    }
+                }
 
                 int exit_code = 0;
                 if (!tgt) {
@@ -1682,6 +1781,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     ctx.profile = opts->profile;
     ctx.cross_triple = opts->cross_triple;
     ctx.cross_cc = opts->cross_cc;
+    ctx.cccc_self = opts->cccc_self;
     if (opts->build_cache) {
         ctx.cache_dir = *opts->build_cache
             ? xstrdup(opts->build_cache)
