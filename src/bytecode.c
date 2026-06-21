@@ -17,7 +17,6 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "cccc.h"
 #include "./internal.h"
 
 // Bytecode file format (V2 - 32-bit text words):

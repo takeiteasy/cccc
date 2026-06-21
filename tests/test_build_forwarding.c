@@ -7,8 +7,8 @@
 // Each flag must appear verbatim in the printed command lines.
 
 [[cccc::build]]
-int build_main(cccc_build_ctx_t *ctx) {
-    cccc_target_t *t = Executable(ctx, "flagtest");
+int build_main(Builder *ctx) {
+    BuildTarget *t = Executable(ctx, "flagtest");
     AddSource(t, "examples/build_demo/src/main.c");
     AddUndef(t, "OLD_DEFINE");
     AddCFlag(t, "-ffast-math");

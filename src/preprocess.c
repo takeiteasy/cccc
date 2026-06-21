@@ -45,7 +45,6 @@
 // https://github.com/rui314/chibicc/wiki/cpp.algo.pdf
 
 #include "./internal.h"
-#include "cccc.h"
 
 #define MAX_PP_NESTING 1000
 

@@ -1,9 +1,8 @@
 // json.c - AST to JSON serialization for header declarations
 // Outputs functions, structs, unions, enums as JSON for FFI wrapper generation
 
-#include "cccc.h"
 #include "internal.h"
-#include <stdio.h>
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>

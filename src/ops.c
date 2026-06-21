@@ -24,8 +24,6 @@
  */
 
 #include "./internal.h"
-#include "cccc.h"
-#include <limits.h>
 
 
 // ========== Arithmetic Operations ==========

@@ -8,14 +8,14 @@
 // dynamic lib — confirming the correct toolchain verb per kind.
 
 [[cccc::build]]
-int build_main(cccc_build_ctx_t *ctx) {
-    cccc_target_t *slib = StaticLib(ctx, "mystat");
+int build_main(Builder *ctx) {
+    BuildTarget *slib = StaticLib(ctx, "mystat");
     AddSource(slib, "examples/build_demo/src/lib/sum.c");
 
-    cccc_target_t *dlib = DynamicLib(ctx, "mydyn");
+    BuildTarget *dlib = DynamicLib(ctx, "mydyn");
     AddSource(dlib, "examples/build_demo/src/greet.c");
 
-    cccc_target_t *exe = Executable(ctx, "myexe");
+    BuildTarget *exe = Executable(ctx, "myexe");
     AddSource(exe, "examples/build_demo/src/main.c");
 
     return BuildAll(ctx);

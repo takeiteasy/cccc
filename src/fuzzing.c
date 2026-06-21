@@ -4,9 +4,8 @@
 //           src/fuzzing.c src/*.c src/stdlib/*.c -I./include
 // Run:   ./fuzz_harness corpus/
 
-#include "cccc.h"
 #include "internal.h"
-#include <stdlib.h>
+
 #include <string.h>
 
 // Compile C source without requiring main() or executing.

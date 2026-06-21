@@ -267,28 +267,29 @@ function disclosure_triangle(elt) {
 <!-- begin discussion --><!-- headerDoc=discussion;uid=//apple_ref/doc/header/building.h;name=start --><p>This header is automatically injected when CCCC is invoked with the @c --build
 flag and should not be included directly.  It declares the opaque build types,
 the underlying @c __builtin_build_* FFI-callable functions, and PascalCase macro
-wrappers that auto-inject the build context singleton.
+wrappers that forward an explicit build context parameter.
 </p>
 <p>A build script is an ordinary @c .c file containing a build entry — a function
-tagged @c [[cccc::build]] (or named @c build_main).  The entry runs inside the
-CCCC VM, imperatively creates targets, wires their dependencies, and calls one
-of the @c Build* functions.  The host-side runner then compiles and links the
-declared targets with the system toolchain (@c cc / @c ar / @c ld).
+tagged @c [[cccc::build]] (or named @c build_main).  The entry receives the
+build context as its first parameter, uses it to create targets, wires their
+dependencies, and calls one of the @c Build* functions.  The host-side runner
+then compiles and links the declared targets with the system toolchain
+(@c cc / @c ar / @c ld).
 </p>
 <p>## Usage
 </p>
 <p>@code
 [[cccc::build]]
-int build_main(void) {
-cccc_target_t *core = StaticLib("core");
+int build_main(Builder *ctx) {
+BuildTarget *core = StaticLib(ctx, "core");
 AddSource(core, "src/lib/sum.c");
 AddInclude(core, "include");
 </p>
-<p>cccc_target_t *app = Executable("app");
+<p>BuildTarget *app = Executable(ctx, "app");
 AddSource(app, "src/main.c");
 LinkWith(app, core);
 </p>
-<p>return BuildDefault();
+<p>return BuildDefault(ctx);
 }
 @endcode
 </p>
@@ -315,8 +316,6 @@ LinkWith(app, core);
 <dd><p>Add a C source file to the target. </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_add_undef" target="_top">__builtin_build_add_undef</a></tt></dt>
 <dd><p>Add a preprocessor undefine (-U). </p></dd>
-<dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_ctx" target="_top">__builtin_build_ctx</a></tt></dt>
-<dd><p>Return the active build context singleton. </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_dynamic_lib" target="_top">__builtin_build_dynamic_lib</a></tt></dt>
 <dd><p>Create a dynamic-library target (output @c lib/lib&lt;name&gt;.{so,dylib}). </p></dd>
 <dt><tt><a href="index.html#//apple_ref/c/func/__builtin_build_executable" target="_top">__builtin_build_executable</a></tt></dt>
@@ -351,7 +350,7 @@ LinkWith(app, core);
 <p>Add a raw compiler flag (e.g. "-O2"). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_cflag;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_cflag;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_add_cflag" logicalPath="//apple_ref/c/instm/__builtin_build_add_cflag //apple_ref/c/clm/__builtin_build_add_cflag //apple_ref/c/intfcm/__builtin_build_add_cflag //apple_ref/c/intfm/__builtin_build_add_cflag //apple_ref/c/func/__builtin_build_add_cflag" target="_top"><span class="function">__builtin_build_add_cflag</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/BuildTarget" logicalPath="//apple_ref/c/cl/BuildTarget //apple_ref/c/tdef/BuildTarget" target="_top"><span class="type">BuildTarget</span></a> <span class="type">*</span><span class="param">t</span>,
     <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">flag</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_cflag;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
@@ -363,7 +362,7 @@ LinkWith(app, core);
 <p>Add a preprocessor define (-D). Pass NULL value for a bare define. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_define;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_define;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_add_define" logicalPath="//apple_ref/c/instm/__builtin_build_add_define //apple_ref/c/clm/__builtin_build_add_define //apple_ref/c/intfcm/__builtin_build_add_define //apple_ref/c/intfm/__builtin_build_add_define //apple_ref/c/func/__builtin_build_add_define" target="_top"><span class="function">__builtin_build_add_define</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/BuildTarget" logicalPath="//apple_ref/c/cl/BuildTarget //apple_ref/c/tdef/BuildTarget" target="_top"><span class="type">BuildTarget</span></a> <span class="type">*</span><span class="param">t</span>,
     <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">name</span>,
     <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">value</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_define;name=end --></pre>
 </div>
@@ -376,7 +375,7 @@ LinkWith(app, core);
 <p>Add an include search path (-I) to the target's compiles. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_include;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_include;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_add_include" logicalPath="//apple_ref/c/instm/__builtin_build_add_include //apple_ref/c/clm/__builtin_build_add_include //apple_ref/c/intfcm/__builtin_build_add_include //apple_ref/c/intfm/__builtin_build_add_include //apple_ref/c/func/__builtin_build_add_include" target="_top"><span class="function">__builtin_build_add_include</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/BuildTarget" logicalPath="//apple_ref/c/cl/BuildTarget //apple_ref/c/tdef/BuildTarget" target="_top"><span class="type">BuildTarget</span></a> <span class="type">*</span><span class="param">t</span>,
     <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">path</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_include;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
@@ -388,7 +387,7 @@ LinkWith(app, core);
 <p>Add a raw linker flag. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_ldflag;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_ldflag;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_add_ldflag" logicalPath="//apple_ref/c/instm/__builtin_build_add_ldflag //apple_ref/c/clm/__builtin_build_add_ldflag //apple_ref/c/intfcm/__builtin_build_add_ldflag //apple_ref/c/intfm/__builtin_build_add_ldflag //apple_ref/c/func/__builtin_build_add_ldflag" target="_top"><span class="function">__builtin_build_add_ldflag</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/BuildTarget" logicalPath="//apple_ref/c/cl/BuildTarget //apple_ref/c/tdef/BuildTarget" target="_top"><span class="type">BuildTarget</span></a> <span class="type">*</span><span class="param">t</span>,
     <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">flag</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_ldflag;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
@@ -400,7 +399,7 @@ LinkWith(app, core);
 <p>Add a system library to link against (-l&lt;name&gt;). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_lib;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_lib;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_add_lib" logicalPath="//apple_ref/c/instm/__builtin_build_add_lib //apple_ref/c/clm/__builtin_build_add_lib //apple_ref/c/intfcm/__builtin_build_add_lib //apple_ref/c/intfm/__builtin_build_add_lib //apple_ref/c/func/__builtin_build_add_lib" target="_top"><span class="function">__builtin_build_add_lib</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/BuildTarget" logicalPath="//apple_ref/c/cl/BuildTarget //apple_ref/c/tdef/BuildTarget" target="_top"><span class="type">BuildTarget</span></a> <span class="type">*</span><span class="param">t</span>,
     <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">name</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_lib;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
@@ -412,7 +411,7 @@ LinkWith(app, core);
 <p>Add a library search path (-L&lt;path&gt;). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_libpath;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_libpath;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_add_libpath" logicalPath="//apple_ref/c/instm/__builtin_build_add_libpath //apple_ref/c/clm/__builtin_build_add_libpath //apple_ref/c/intfcm/__builtin_build_add_libpath //apple_ref/c/intfm/__builtin_build_add_libpath //apple_ref/c/func/__builtin_build_add_libpath" target="_top"><span class="function">__builtin_build_add_libpath</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/BuildTarget" logicalPath="//apple_ref/c/cl/BuildTarget //apple_ref/c/tdef/BuildTarget" target="_top"><span class="type">BuildTarget</span></a> <span class="type">*</span><span class="param">t</span>,
     <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">path</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_libpath;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
@@ -424,7 +423,7 @@ LinkWith(app, core);
 <p>Add a C source file to the target. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_source;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_source;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_add_source" logicalPath="//apple_ref/c/instm/__builtin_build_add_source //apple_ref/c/clm/__builtin_build_add_source //apple_ref/c/intfcm/__builtin_build_add_source //apple_ref/c/intfm/__builtin_build_add_source //apple_ref/c/func/__builtin_build_add_source" target="_top"><span class="function">__builtin_build_add_source</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/BuildTarget" logicalPath="//apple_ref/c/cl/BuildTarget //apple_ref/c/tdef/BuildTarget" target="_top"><span class="type">BuildTarget</span></a> <span class="type">*</span><span class="param">t</span>,
     <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">path</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_source;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
@@ -436,19 +435,8 @@ LinkWith(app, core);
 <p>Add a preprocessor undefine (-U). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_add_undef;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_undef;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_add_undef" logicalPath="//apple_ref/c/instm/__builtin_build_add_undef //apple_ref/c/clm/__builtin_build_add_undef //apple_ref/c/intfcm/__builtin_build_add_undef //apple_ref/c/intfm/__builtin_build_add_undef //apple_ref/c/func/__builtin_build_add_undef" target="_top"><span class="function">__builtin_build_add_undef</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/BuildTarget" logicalPath="//apple_ref/c/cl/BuildTarget //apple_ref/c/tdef/BuildTarget" target="_top"><span class="type">BuildTarget</span></a> <span class="type">*</span><span class="param">t</span>,
     <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">name</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_add_undef;name=end --></pre>
-</div>
-<hr class="betweenAPIEntries">
-<!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_ctx;   name=__builtin_build_ctx -->
-<a name="//apple_ref/c/func/__builtin_build_ctx"></a>
-<h3><a name="__builtin_build_ctx">__builtin_build_ctx</a></h3>
-<hr class="afterName">
-<p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_ctx;name=start --><!-- begin abstract --></p>
-<p>Return the active build context singleton. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_ctx;name=end --></p>
-<div class="declaration_indent">
-<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_ctx;name=start --><a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_ctx" logicalPath="//apple_ref/c/instm/__builtin_build_ctx //apple_ref/c/clm/__builtin_build_ctx //apple_ref/c/intfcm/__builtin_build_ctx //apple_ref/c/intfm/__builtin_build_ctx //apple_ref/c/func/__builtin_build_ctx" target="_top"><span class="function">__builtin_build_ctx</span></a>(
-    <span class="param">void</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_ctx;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_dynamic_lib;   name=__builtin_build_dynamic_lib -->
@@ -458,8 +446,8 @@ LinkWith(app, core);
 <p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_dynamic_lib;name=start --><!-- begin abstract --></p>
 <p>Create a dynamic-library target (output @c lib/lib&lt;name&gt;.{so,dylib}). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_dynamic_lib;name=end --></p>
 <div class="declaration_indent">
-<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_dynamic_lib;name=start --><a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_dynamic_lib" logicalPath="//apple_ref/c/instm/__builtin_build_dynamic_lib //apple_ref/c/clm/__builtin_build_dynamic_lib //apple_ref/c/intfcm/__builtin_build_dynamic_lib //apple_ref/c/intfm/__builtin_build_dynamic_lib //apple_ref/c/func/__builtin_build_dynamic_lib" target="_top"><span class="function">__builtin_build_dynamic_lib</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>,
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_dynamic_lib;name=start --><a machinegenerated="true" href="index.html#//apple_ref/c/tdef/BuildTarget" logicalPath="//apple_ref/c/cl/BuildTarget //apple_ref/c/tdef/BuildTarget" target="_top"><span class="type">BuildTarget</span></a> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_dynamic_lib" logicalPath="//apple_ref/c/instm/__builtin_build_dynamic_lib //apple_ref/c/clm/__builtin_build_dynamic_lib //apple_ref/c/intfcm/__builtin_build_dynamic_lib //apple_ref/c/intfm/__builtin_build_dynamic_lib //apple_ref/c/func/__builtin_build_dynamic_lib" target="_top"><span class="function">__builtin_build_dynamic_lib</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/Builder" logicalPath="//apple_ref/c/cl/Builder //apple_ref/c/tdef/Builder" target="_top"><span class="type">Builder</span></a> <span class="type">*</span><span class="param">ctx</span>,
     <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">name</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_dynamic_lib;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
@@ -470,8 +458,8 @@ LinkWith(app, core);
 <p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_executable;name=start --><!-- begin abstract --></p>
 <p>Create an executable target named @c name (output @c bin/&lt;name&gt;). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_executable;name=end --></p>
 <div class="declaration_indent">
-<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_executable;name=start --><a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_executable" logicalPath="//apple_ref/c/instm/__builtin_build_executable //apple_ref/c/clm/__builtin_build_executable //apple_ref/c/intfcm/__builtin_build_executable //apple_ref/c/intfm/__builtin_build_executable //apple_ref/c/func/__builtin_build_executable" target="_top"><span class="function">__builtin_build_executable</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>,
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_executable;name=start --><a machinegenerated="true" href="index.html#//apple_ref/c/tdef/BuildTarget" logicalPath="//apple_ref/c/cl/BuildTarget //apple_ref/c/tdef/BuildTarget" target="_top"><span class="type">BuildTarget</span></a> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_executable" logicalPath="//apple_ref/c/instm/__builtin_build_executable //apple_ref/c/clm/__builtin_build_executable //apple_ref/c/intfcm/__builtin_build_executable //apple_ref/c/intfm/__builtin_build_executable //apple_ref/c/func/__builtin_build_executable" target="_top"><span class="function">__builtin_build_executable</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/Builder" logicalPath="//apple_ref/c/cl/Builder //apple_ref/c/tdef/Builder" target="_top"><span class="type">Builder</span></a> <span class="type">*</span><span class="param">ctx</span>,
     <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">name</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_executable;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
@@ -483,7 +471,7 @@ LinkWith(app, core);
 <p>Host platform name (@c "darwin", @c "linux", ...). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_host;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_host;name=start --><span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_host" logicalPath="//apple_ref/c/instm/__builtin_build_host //apple_ref/c/clm/__builtin_build_host //apple_ref/c/intfcm/__builtin_build_host //apple_ref/c/intfm/__builtin_build_host //apple_ref/c/func/__builtin_build_host" target="_top"><span class="function">__builtin_build_host</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_host;name=end --></pre>
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/Builder" logicalPath="//apple_ref/c/cl/Builder //apple_ref/c/tdef/Builder" target="_top"><span class="type">Builder</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_host;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_link_with;   name=__builtin_build_link_with -->
@@ -494,8 +482,8 @@ LinkWith(app, core);
 <p>Declare that @c t links against (and is built after) @c dep. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_link_with;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_link_with;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_link_with" logicalPath="//apple_ref/c/instm/__builtin_build_link_with //apple_ref/c/clm/__builtin_build_link_with //apple_ref/c/intfcm/__builtin_build_link_with //apple_ref/c/intfm/__builtin_build_link_with //apple_ref/c/func/__builtin_build_link_with" target="_top"><span class="function">__builtin_build_link_with</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">dep</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_link_with;name=end --></pre>
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/BuildTarget" logicalPath="//apple_ref/c/cl/BuildTarget //apple_ref/c/tdef/BuildTarget" target="_top"><span class="type">BuildTarget</span></a> <span class="type">*</span><span class="param">t</span>,
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/BuildTarget" logicalPath="//apple_ref/c/cl/BuildTarget //apple_ref/c/tdef/BuildTarget" target="_top"><span class="type">BuildTarget</span></a> <span class="type">*</span><span class="param">dep</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_link_with;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_out_dir;   name=__builtin_build_out_dir -->
@@ -506,7 +494,7 @@ LinkWith(app, core);
 <p>Output directory for build artifacts (default @c build/). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_out_dir;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_out_dir;name=start --><span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_out_dir" logicalPath="//apple_ref/c/instm/__builtin_build_out_dir //apple_ref/c/clm/__builtin_build_out_dir //apple_ref/c/intfcm/__builtin_build_out_dir //apple_ref/c/intfm/__builtin_build_out_dir //apple_ref/c/func/__builtin_build_out_dir" target="_top"><span class="function">__builtin_build_out_dir</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_out_dir;name=end --></pre>
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/Builder" logicalPath="//apple_ref/c/cl/Builder //apple_ref/c/tdef/Builder" target="_top"><span class="type">Builder</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_out_dir;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_root;   name=__builtin_build_root -->
@@ -517,7 +505,7 @@ LinkWith(app, core);
 <p>Absolute path of the directory the build was launched from. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_root;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_root;name=start --><span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_root" logicalPath="//apple_ref/c/instm/__builtin_build_root //apple_ref/c/clm/__builtin_build_root //apple_ref/c/intfcm/__builtin_build_root //apple_ref/c/intfm/__builtin_build_root //apple_ref/c/func/__builtin_build_root" target="_top"><span class="function">__builtin_build_root</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_root;name=end --></pre>
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/Builder" logicalPath="//apple_ref/c/cl/Builder //apple_ref/c/tdef/Builder" target="_top"><span class="type">Builder</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_root;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_run;   name=__builtin_build_run -->
@@ -528,8 +516,8 @@ LinkWith(app, core);
 <p>Build @c t and its transitive dependencies. Returns 0 on success. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_run;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_run;name=start --><!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_run" logicalPath="//apple_ref/c/instm/__builtin_build_run //apple_ref/c/clm/__builtin_build_run //apple_ref/c/intfcm/__builtin_build_run //apple_ref/c/intfm/__builtin_build_run //apple_ref/c/func/__builtin_build_run" target="_top"><span class="function">__builtin_build_run</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>,
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_run;name=end --></pre>
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/Builder" logicalPath="//apple_ref/c/cl/Builder //apple_ref/c/tdef/Builder" target="_top"><span class="type">Builder</span></a> <span class="type">*</span><span class="param">ctx</span>,
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/BuildTarget" logicalPath="//apple_ref/c/cl/BuildTarget //apple_ref/c/tdef/BuildTarget" target="_top"><span class="type">BuildTarget</span></a> <span class="type">*</span><span class="param">t</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_run;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_run_all;   name=__builtin_build_run_all -->
@@ -540,7 +528,7 @@ LinkWith(app, core);
 <p>Build every declared target in topological order. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_run_all;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_run_all;name=start --><!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_run_all" logicalPath="//apple_ref/c/instm/__builtin_build_run_all //apple_ref/c/clm/__builtin_build_run_all //apple_ref/c/intfcm/__builtin_build_run_all //apple_ref/c/intfm/__builtin_build_run_all //apple_ref/c/func/__builtin_build_run_all" target="_top"><span class="function">__builtin_build_run_all</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_run_all;name=end --></pre>
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/Builder" logicalPath="//apple_ref/c/cl/Builder //apple_ref/c/tdef/Builder" target="_top"><span class="type">Builder</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_run_all;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_run_default;   name=__builtin_build_run_default -->
@@ -551,7 +539,7 @@ LinkWith(app, core);
 <p>Build every declared target and print a summary. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_run_default;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_run_default;name=start --><!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_run_default" logicalPath="//apple_ref/c/instm/__builtin_build_run_default //apple_ref/c/clm/__builtin_build_run_default //apple_ref/c/intfcm/__builtin_build_run_default //apple_ref/c/intfm/__builtin_build_run_default //apple_ref/c/func/__builtin_build_run_default" target="_top"><span class="function">__builtin_build_run_default</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_run_default;name=end --></pre>
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/Builder" logicalPath="//apple_ref/c/cl/Builder //apple_ref/c/tdef/Builder" target="_top"><span class="type">Builder</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_run_default;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
 <!-- headerDoc=func;  uid=//apple_ref/c/func/__builtin_build_set_output;   name=__builtin_build_set_output -->
@@ -562,7 +550,7 @@ LinkWith(app, core);
 <p>Override the target's output path (relative to the out dir). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_set_output;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_set_output;name=start --><!-- a logicalPath="//apple_ref/c/cl/void //apple_ref/c/tdef/void //apple_ref/c/tag/void //apple_ref/c/struct/void //apple_ref/c/intf/void //apple_ref/doc/anysymbol/void" machineGenerated="true" --><span class="type">void</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_set_output" logicalPath="//apple_ref/c/instm/__builtin_build_set_output //apple_ref/c/clm/__builtin_build_set_output //apple_ref/c/intfcm/__builtin_build_set_output //apple_ref/c/intfm/__builtin_build_set_output //apple_ref/c/func/__builtin_build_set_output" target="_top"><span class="function">__builtin_build_set_output</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><span class="param">t</span>,
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/BuildTarget" logicalPath="//apple_ref/c/cl/BuildTarget //apple_ref/c/tdef/BuildTarget" target="_top"><span class="type">BuildTarget</span></a> <span class="type">*</span><span class="param">t</span>,
     <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">path</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_set_output;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
@@ -573,8 +561,8 @@ LinkWith(app, core);
 <p><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_static_lib;name=start --><!-- begin abstract --></p>
 <p>Create a static-library target (output @c lib/lib&lt;name&gt;.a). <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_static_lib;name=end --></p>
 <div class="declaration_indent">
-<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_static_lib;name=start --><a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_static_lib" logicalPath="//apple_ref/c/instm/__builtin_build_static_lib //apple_ref/c/clm/__builtin_build_static_lib //apple_ref/c/intfcm/__builtin_build_static_lib //apple_ref/c/intfm/__builtin_build_static_lib //apple_ref/c/func/__builtin_build_static_lib" target="_top"><span class="function">__builtin_build_static_lib</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>,
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_static_lib;name=start --><a machinegenerated="true" href="index.html#//apple_ref/c/tdef/BuildTarget" logicalPath="//apple_ref/c/cl/BuildTarget //apple_ref/c/tdef/BuildTarget" target="_top"><span class="type">BuildTarget</span></a> <span class="type">*</span><a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_static_lib" logicalPath="//apple_ref/c/instm/__builtin_build_static_lib //apple_ref/c/clm/__builtin_build_static_lib //apple_ref/c/intfcm/__builtin_build_static_lib //apple_ref/c/intfm/__builtin_build_static_lib //apple_ref/c/func/__builtin_build_static_lib" target="_top"><span class="function">__builtin_build_static_lib</span></a>(
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/Builder" logicalPath="//apple_ref/c/cl/Builder //apple_ref/c/tdef/Builder" target="_top"><span class="type">Builder</span></a> <span class="type">*</span><span class="param">ctx</span>,
     <span class="keyword">const</span> <!-- a logicalPath="//apple_ref/c/cl/char //apple_ref/c/tdef/char //apple_ref/c/tag/char //apple_ref/c/struct/char //apple_ref/c/intf/char //apple_ref/doc/anysymbol/char" machineGenerated="true" --><span class="type">char</span><!-- /a --> <span class="type">*</span><span class="param">name</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_static_lib;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
@@ -586,41 +574,41 @@ LinkWith(app, core);
 <p>Non-zero when verbose output was requested. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/func/__builtin_build_verbose;name=end --></p>
 <div class="declaration_indent">
 <pre><!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_verbose;name=start --><!-- a logicalPath="//apple_ref/c/cl/int //apple_ref/c/tdef/int //apple_ref/c/tag/int //apple_ref/c/struct/int //apple_ref/c/intf/int //apple_ref/doc/anysymbol/int" machineGenerated="true" --><span class="type">int</span><!-- /a --> <a machinegenerated="true" href="index.html#//apple_ref/c/func/__builtin_build_verbose" logicalPath="//apple_ref/c/instm/__builtin_build_verbose //apple_ref/c/clm/__builtin_build_verbose //apple_ref/c/intfcm/__builtin_build_verbose //apple_ref/c/intfm/__builtin_build_verbose //apple_ref/c/func/__builtin_build_verbose" target="_top"><span class="function">__builtin_build_verbose</span></a>(
-    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_verbose;name=end --></pre>
+    <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/Builder" logicalPath="//apple_ref/c/cl/Builder //apple_ref/c/tdef/Builder" target="_top"><span class="type">Builder</span></a> <span class="type">*</span><span class="param">ctx</span>);  <!-- headerDoc=declaration;uid=//apple_ref/c/func/__builtin_build_verbose;name=end --></pre>
 </div>
 <hr class="betweenSections">
 <a name="HeaderDoc_datatypes"></a>
 <h2 class="h2tight">Typedefs</h2>
 <dl>
-<dt><tt><a href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" target="_top">cccc_build_ctx_t</a></tt></dt>
-<dd><p>Opaque build context; accessed via BuildCtx() in build scripts. </p></dd>
-<dt><tt><a href="index.html#//apple_ref/c/tdef/cccc_target_t" target="_top">cccc_target_t</a></tt></dt>
+<dt><tt><a href="index.html#//apple_ref/c/tdef/Builder" target="_top">Builder</a></tt></dt>
+<dd><p>Opaque build context; passed to the entry and forwarded to macros. </p></dd>
+<dt><tt><a href="index.html#//apple_ref/c/tdef/BuildTarget" target="_top">BuildTarget</a></tt></dt>
 <dd><p>Opaque handle to a declared build target. </p></dd>
 </dl>
 <hr class="betweenAPIEntries">
-<!-- headerDoc=tdef;  uid=//apple_ref/c/tdef/cccc_build_ctx_t;   name=cccc_build_ctx_t -->
-<a name="//apple_ref/c/tdef/cccc_build_ctx_t"></a>
-<h3><a name="cccc_build_ctx_t">cccc_build_ctx_t</a></h3>
+<!-- headerDoc=tdef;  uid=//apple_ref/c/tdef/Builder;   name=Builder -->
+<a name="//apple_ref/c/tdef/Builder"></a>
+<h3><a name="Builder">Builder</a></h3>
 <hr class="afterName">
-<p><!-- headerDoc=abstract;uid=//apple_ref/c/tdef/cccc_build_ctx_t;name=start --><!-- begin abstract --></p>
-<p>Opaque build context; accessed via BuildCtx() in build scripts. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/tdef/cccc_build_ctx_t;name=end --></p>
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/tdef/Builder;name=start --><!-- begin abstract --></p>
+<p>Opaque build context; passed to the entry and forwarded to macros. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/tdef/Builder;name=end --></p>
 <div class="declaration_indent">
-<pre><!-- headerDoc=declaration;uid=//apple_ref/c/tdef/cccc_build_ctx_t;name=start --><span class="keyword">typedef</span> <span class="keyword">struct</span> <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_build_ctx_t" logicalPath="//apple_ref/c/cl/cccc_build_ctx_t //apple_ref/c/tdef/cccc_build_ctx_t" target="_top"><span class="type">cccc_build_ctx_t</span></a> <!-- a logicalPath="//apple_ref/c/econst/cccc_build_ctx_t //apple_ref/c/data/cccc_build_ctx_t //apple_ref/c/clconst/cccc_build_ctx_t " machineGenerated="true" --><span class="var">cccc_build_ctx_t</span><!-- /a -->;  <!-- headerDoc=declaration;uid=//apple_ref/c/tdef/cccc_build_ctx_t;name=end --></pre>
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/tdef/Builder;name=start --><span class="keyword">typedef</span> <span class="keyword">struct</span> <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/Builder" logicalPath="//apple_ref/c/cl/Builder //apple_ref/c/tdef/Builder" target="_top"><span class="type">Builder</span></a> <!-- a logicalPath="//apple_ref/c/econst/Builder //apple_ref/c/data/Builder //apple_ref/c/clconst/Builder " machineGenerated="true" --><span class="var">Builder</span><!-- /a -->;  <!-- headerDoc=declaration;uid=//apple_ref/c/tdef/Builder;name=end --></pre>
 </div>
 <hr class="betweenAPIEntries">
-<!-- headerDoc=tdef;  uid=//apple_ref/c/tdef/cccc_target_t;   name=cccc_target_t -->
-<a name="//apple_ref/c/tdef/cccc_target_t"></a>
-<h3><a name="cccc_target_t">cccc_target_t</a></h3>
+<!-- headerDoc=tdef;  uid=//apple_ref/c/tdef/BuildTarget;   name=BuildTarget -->
+<a name="//apple_ref/c/tdef/BuildTarget"></a>
+<h3><a name="BuildTarget">BuildTarget</a></h3>
 <hr class="afterName">
-<p><!-- headerDoc=abstract;uid=//apple_ref/c/tdef/cccc_target_t;name=start --><!-- begin abstract --></p>
-<p>Opaque handle to a declared build target. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/tdef/cccc_target_t;name=end --></p>
+<p><!-- headerDoc=abstract;uid=//apple_ref/c/tdef/BuildTarget;name=start --><!-- begin abstract --></p>
+<p>Opaque handle to a declared build target. <!-- end abstract --><!-- headerDoc=abstract;uid=//apple_ref/c/tdef/BuildTarget;name=end --></p>
 <div class="declaration_indent">
-<pre><!-- headerDoc=declaration;uid=//apple_ref/c/tdef/cccc_target_t;name=start --><span class="keyword">typedef</span> <span class="keyword">struct</span> <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/cccc_target_t" logicalPath="//apple_ref/c/cl/cccc_target_t //apple_ref/c/tdef/cccc_target_t" target="_top"><span class="type">cccc_target_t</span></a> <!-- a logicalPath="//apple_ref/c/econst/cccc_target_t //apple_ref/c/data/cccc_target_t //apple_ref/c/clconst/cccc_target_t " machineGenerated="true" --><span class="var">cccc_target_t</span><!-- /a -->;  <!-- headerDoc=declaration;uid=//apple_ref/c/tdef/cccc_target_t;name=end --></pre>
+<pre><!-- headerDoc=declaration;uid=//apple_ref/c/tdef/BuildTarget;name=start --><span class="keyword">typedef</span> <span class="keyword">struct</span> <a machinegenerated="true" href="index.html#//apple_ref/c/tdef/BuildTarget" logicalPath="//apple_ref/c/cl/BuildTarget //apple_ref/c/tdef/BuildTarget" target="_top"><span class="type">BuildTarget</span></a> <!-- a logicalPath="//apple_ref/c/econst/BuildTarget //apple_ref/c/data/BuildTarget //apple_ref/c/clconst/BuildTarget " machineGenerated="true" --><span class="var">BuildTarget</span><!-- /a -->;  <!-- headerDoc=declaration;uid=//apple_ref/c/tdef/BuildTarget;name=end --></pre>
 </div>
 <p class="gapBeforeFooter"> </p>
 <hr class="afterFooter">
 <div class="hd_copyright_and_timestamp">
-<p class="hd_timestamp">Last Updated: Saturday, June 20, 2026
+<p class="hd_timestamp">Last Updated: Sunday, June 21, 2026
 </p>
 </div>
 </td>

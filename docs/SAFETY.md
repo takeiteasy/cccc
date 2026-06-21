@@ -455,7 +455,7 @@ int main() {
 ```
 
 ```bash
-$ ./cccc -f test_double_free.c
+$ ./cccc -V test_double_free.c
 
 ========== DOUBLE-FREE DETECTED ==========
 Attempted to free already-freed memory
@@ -466,7 +466,7 @@ Generation: 1
 =========================================
 ```
 
-**Note:** Double-free detection is always enabled when using VM heap (MALC/MFRE), regardless of which safety flags are active. It works with any memory safety feature (`-f`, `-k`, `-l`, `-b`, etc.) that routes allocations through the VM heap.
+**Note:** Double-free detection is always enabled when using VM heap (MALC/MFRE), regardless of which safety flags are active. It works with any memory safety feature (`-V`/`--vm-heap`, `-M`/`--memory-leak-detection`, `-B`/`--bounds-checks`, etc.) that routes allocations through the VM heap.
 
 ### Bounds Checking
 ```c
@@ -818,8 +818,8 @@ int main() {
     free(ptr1);
 
     // Allocate new memory at different address
-    // Without -T flag, this might reuse same address
-    // With -T flag, memory is quarantined, gets new address
+    // Without --uaf-detection, this might reuse same address
+    // With --uaf-detection, memory is quarantined, gets new address
     int *ptr2 = (int *)malloc(sizeof(int) * 10);
     *ptr2 = 100;
 

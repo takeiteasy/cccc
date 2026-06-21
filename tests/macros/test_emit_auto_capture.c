@@ -1,4 +1,4 @@
-// CCCC_FLAGS: -M -G
+// CCCC_FLAGS: -m -G
 // CCCC_EXPECT_STDOUT: #include <stddef.h>
 // Test: directives outside comptime are auto-captured into -G output.
 

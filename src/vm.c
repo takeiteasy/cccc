@@ -20,7 +20,6 @@
  write-a-C-interpreter tutorial by Jinzhou Zhang (lotabout/write-a-C-interpreter)
 */
 
-#include "cccc.h"
 #include "./internal.h"
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <pthread.h>

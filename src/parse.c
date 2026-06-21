@@ -39,8 +39,6 @@
 // parser.
 
 #include "./internal.h"
-#include "cccc.h"
-#include <limits.h>
 
 #ifndef MAX
 #define MAX(x, y) ((x) < (y) ? (y) : (x))

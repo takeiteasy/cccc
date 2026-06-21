@@ -28,6 +28,7 @@
 #include <math.h>
 #include <setjmp.h>
 #include <signal.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -1812,7 +1813,7 @@ typedef enum {
  @enum CCCCAttrTarget
  @abstract Attribute spelling used when CCCC emits generated C source.
  @discussion Controls how non-CCCC attributes are printed for frontend output
- modes such as -E, -M, -G, and native compilation.
+ modes such as -E, -m, -G, and native compilation.
 */
 typedef enum {
     CCCC_ATTR_TARGET_AUTO,
@@ -1948,7 +1949,7 @@ typedef struct Compiler {
     Obj *builtin_dlerror;  // VM-managed dlerror
     Obj *builtin_block_copy; // Block_copy() heap-duplication helper (__cccc_block_copy_impl)
     Obj *builtin_free;       // free() prototype so Block_release always resolves (#458)
-    TypeNameRecord *type_names; // Persistent typedef/tag declarations for -M
+    TypeNameRecord *type_names; // Persistent typedef/tag declarations for -m
 
     // Arena allocator for parser frontend (tokens, AST, preprocessor state)
     Arena parser_arena; // Fast bump-pointer allocator
@@ -2712,7 +2713,7 @@ void cc_expand_macros(VirtualMachine *vm, Obj *prog);
 /*!
  @function cc_serialize_program
  @abstract Serialize a program AST back to C source code.
- @discussion Used with -M/--dump-expanded and -G flags to output
+ @discussion Used with -m/--dump-expanded and -G flags to output
              macro-expanded source that can be compiled with gcc or other
              C compilers.
  @param f Output file stream.

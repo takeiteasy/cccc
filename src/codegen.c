@@ -18,8 +18,6 @@
 */
 
 #include "./internal.h"
-#include "cccc.h"
-#include <ctype.h>
 #if !defined(_WIN32)
 #include <sys/wait.h>
 #endif

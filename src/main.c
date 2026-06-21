@@ -18,7 +18,6 @@
 */
 
 #include "./internal.h"
-#include "cccc.h"
 #include <getopt.h>
 #if defined(_WIN32)
 #include <io.h>
@@ -222,10 +221,10 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-D <macro>[=def]         Define a macro\n");
     printf("\t-U <macro>               Undefine a macro\n");
     printf("\t-a/--ast                 Dump AST\n");
-    printf("\t-P/--print-tokens        Print preprocessed tokens to stdout\n");
+    printf("\t-p/--print-tokens        Print preprocessed tokens to stdout\n");
     printf("\t-E/--preprocess          Output preprocessed source code (traditional "
            "C -E)\n");
-    printf("\t-M/--dump-expanded       Output macro-expanded source code (for gcc "
+    printf("\t-m/--dump-expanded       Output macro-expanded source code (for gcc "
            "compatibility)\n");
     printf("\t-G/--emit-generated      Serialize runtime TU + macro-generated objects to C\n");
     printf("\t   --emit-only           With -G: only emit explicitly tagged content "
@@ -234,7 +233,7 @@ static void usage(const char *argv0, int exit_code) {
            "auto, c23, gnu, msvc, strip\n");
     printf("\t-j/--json                Emit JSON for all eligible output "
            "(diagnostics, header declarations, --fusion-candidates, etc.)\n");
-    printf("\t   --ffi-decls           Emit parsed function/struct/enum declarations "
+    printf("\t-f/--ffi-decls           Emit parsed function/struct/enum declarations "
             "as JSON (for FFI wrapper generation)\n");
     printf("\t-X/--no-preprocess       Disable preprocessing step\n");
     printf("\t-S/--no-stdlib           Do not link standard library\n");
@@ -265,7 +264,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --vm-profile          Count executed VM opcodes and print a report\n");
     printf("\t                         Combine with --json to also dump the profile as JSON to stdout\n");
     printf("\nBuild Options:\n");
-    printf("\t   --build               Run the input as a build script (declares native targets)\n");
+    printf("\t-b/--build               Run the input as a build script (declares native targets)\n");
     printf("\t   --build-entry=NAME    Build entry function to invoke (default: build_main)\n");
     printf("\t   --build-out-dir=PATH  Output directory for build artifacts (default: build/)\n");
     printf("\t   --build-dry-run       Print the toolchain command lines without executing them\n");
@@ -275,7 +274,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-Wextra             Enable extra warning categories\n");
     printf("\t-W<name>            Enable a warning category\n");
     printf("\t-Wno-<name>         Disable a warning category\n");
-    printf("\t-x/--Werror         Treat enabled warnings as errors\n");
+    printf("\t-w/--Werror         Treat enabled warnings as errors\n");
     printf("\t-Werror=<name>      Treat one warning category as an error\n");
     printf("\t-Wno-error=<name>   Do not promote one warning category\n");
     printf("\nSafety Levels (preset flag combinations):\n");
@@ -287,23 +286,23 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-3/--safety=max      All safety features for deep debugging "
            "(~60-100%%+ overhead)\n");
     printf("\nMemory Safety Options (can be combined with safety levels):\n");
-    printf("\t-b/--bounds-checks           Runtime array bounds checking\n");
-    printf("\t-u/--uaf-detection           Use-after-free detection\n");
+    printf("\t-B/--bounds-checks           Runtime array bounds checking\n");
+    printf("\t   --uaf-detection           Use-after-free detection\n");
     printf("\t-C/--control-flow-integrity  Control-flow integrity (indirect call "
             "validation)\n");
-    printf("\t-T/--type-checks             Runtime type checking on pointer "
+    printf("\t   --type-checks             Runtime type checking on pointer "
             "dereferences\n");
     printf("\t   --uninitialized-detection Uninitialized variable detection\n");
     printf("\t   --overflow-checks         Detect signed integer overflow\n");
     printf("\t   --stack-canaries          Stack overflow protection\n");
-    printf("\t-H/--heap-canaries           Heap overflow protection\n");
-    printf("\t-m/--memory-leak-detection   Track allocations and report leaks "
+    printf("\t   --heap-canaries           Heap overflow protection\n");
+    printf("\t-M/--memory-leak-detection   Track allocations and report leaks "
             "at exit\n");
     printf("\t   --stack-instrumentation   Track stack variable lifetimes and "
             "accesses\n");
     printf("\t   --stack-errors            Enable runtime errors for stack "
            "instrumentation\n");
-    printf("\t-p/--pointer-sanitizer       Enable all pointer checks (bounds, "
+    printf("\t-P/--pointer-sanitizer       Enable all pointer checks (bounds, "
             "UAF, type)\n");
     printf("\t   --dangling-pointers       Detect use of stack pointers after "
            "function return\n");
@@ -315,13 +314,13 @@ static void usage(const char *argv0, int exit_code) {
            "object bounds\n");
     printf("\t   --format-string-checks    Validate format strings in "
             "printf-family functions\n");
-    printf("\t-R/--random-canaries         Use random stack canaries (prevents "
+    printf("\t   --random-canaries         Use random stack canaries (prevents "
             "predictable bypass)\n");
     printf("\t   --memory-poisoning        Poison allocated/freed memory "
            "(0xCD/0xDD patterns)\n");
     printf("\t   --memory-tagging          Temporal memory tagging (track "
             "pointer generation tags)\n");
-    printf("\t   --thread-safety           Threading safety diagnostics: race "
+    printf("\t-T/--thread-safety           Threading safety diagnostics: race "
            "detection, lock-order\n"
            "\t                             inversion, double-lock, and atomic "
            "cast warnings\n");
@@ -843,26 +842,26 @@ int main(int argc, const char *argv[]) {
         {"disassemble", no_argument, 0, 'd'},
         {"verbose", no_argument, 0, 'v'},
         {"ast", no_argument, 0, 'a'},
-        {"print-tokens", no_argument, 0, 'P'},
+        {"print-tokens", no_argument, 0, 'p'},
         {"preprocess", no_argument, 0, 'E'},
-        {"dump-expanded", no_argument, 0, 'M'},
+        {"dump-expanded", no_argument, 0, 'm'},
         {"emit-generated", no_argument, 0, 'G'},
         {"no-preprocess", no_argument, 0, 'X'},
         {"no-stdlib", no_argument, 0, 'S'},
         {"json", no_argument, 0, 'j'},
-        {"ffi-decls", no_argument, 0, 1059},
+        {"ffi-decls", no_argument, 0, 'f'},
         {"compile", optional_argument, 0, 'c'},
         {"debug", no_argument, 0, 'g'},
         {"safety", required_argument, 0, 1012},
-        {"bounds-checks", no_argument, 0, 'b'},
-        {"uaf-detection", no_argument, 0, 'u'},
-        {"type-checks", no_argument, 0, 'T'},
+        {"bounds-checks", no_argument, 0, 'B'},
+        {"uaf-detection", no_argument, 0, 1078},
+        {"type-checks", no_argument, 0, 1079},
         {"uninitialized-detection", no_argument, 0, 1038},
         {"overflow-checks", no_argument, 0, 1034},
         {"stack-canaries", no_argument, 0, 1039},
-        {"heap-canaries", no_argument, 0, 'H'},
-        {"pointer-sanitizer", no_argument, 0, 'p'},
-        {"memory-leak-detection", no_argument, 0, 'm'},
+        {"heap-canaries", no_argument, 0, 1080},
+        {"pointer-sanitizer", no_argument, 0, 'P'},
+        {"memory-leak-detection", no_argument, 0, 'M'},
         {"stack-instrumentation", no_argument, 0, 1043},
         {"stack-errors", no_argument, 0, 1005},
         {"dangling-pointers", no_argument, 0, 1001},
@@ -870,12 +869,12 @@ int main(int argc, const char *argv[]) {
         {"provenance-tracking", no_argument, 0, 1003},
         {"invalid-arithmetic", no_argument, 0, 1004},
         {"format-string-checks", no_argument, 0, 1044},
-        {"random-canaries", no_argument, 0, 'R'},
+        {"random-canaries", no_argument, 0, 1081},
         {"memory-poisoning", no_argument, 0, 1007},
         {"memory-tagging", no_argument, 0, 1045},
         {"vm-heap", no_argument, 0, 'V'},
         {"control-flow-integrity", no_argument, 0, 'C'},
-        {"thread-safety", no_argument, 0, 1046},
+        {"thread-safety", no_argument, 0, 'T'},
         {"include", required_argument, 0, 'I'},
         {"isystem", required_argument, 0, 'i'},
         {"library-path", required_argument, 0, 'L'},
@@ -885,7 +884,7 @@ int main(int argc, const char *argv[]) {
         {"url-cache-dir", required_argument, 0, 1008},
         {"url-cache-clear", no_argument, 0, 1009},
         {"max-errors", required_argument, 0, 'n'},
-        {"Werror", no_argument, 0, 'x'},
+        {"Werror", no_argument, 0, 'w'},
         {"embed-limit", required_argument, 0, 1048},
         {"embed-hard-limit", no_argument, 0, 1060},
         {"optimize", optional_argument, 0, 'O'},
@@ -918,7 +917,7 @@ int main(int argc, const char *argv[]) {
         {"emit-only", no_argument, 0, 1067},
         {"attr-target", required_argument, 0, 1069},
         {"no-debug-on-crash", no_argument, 0, 1071},
-        {"build", no_argument, 0, 1073},
+        {"build", no_argument, 0, 'b'},
         {"build-entry", required_argument, 0, 1074},
         {"build-out-dir", required_argument, 0, 1075},
         {"build-dry-run", no_argument, 0, 1076},
@@ -932,7 +931,7 @@ int main(int argc, const char *argv[]) {
     }
     int getopt_argc = (dashdash >= 0) ? dashdash : argc;
 
-    const char *optstring = "0123haI:L:D:U:o:c::dvgiPEMGXSjVCl:W:e:O::FbTuRmpHxtn:r:s:A";
+    const char *optstring = "0123haI:L:D:U:o:c::dvgiPEMGXSjVCl:W:e:O::FbTmptn:r:s:ABfw";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(getopt_argc, (char *const *)argv, optstring,
@@ -1034,15 +1033,15 @@ int main(int argc, const char *argv[]) {
             undefs = realloc(undefs, sizeof(*undefs) * (undefs_count + 1));
             undefs[undefs_count++] = strdup(optarg);
             break;
-        case 'b': // --bounds-checks
+        case 'B': // --bounds-checks
             flags |= CCCC_BOUNDS_CHECKS;
             cli_flags_mask |= CCCC_BOUNDS_CHECKS;
             break;
-        case 'u': // --uaf-detection
+        case 1078: // --uaf-detection
             flags |= CCCC_UAF_DETECTION;
             cli_flags_mask |= CCCC_UAF_DETECTION;
             break;
-        case 'T': // --type-checks
+        case 1079: // --type-checks
             flags |= CCCC_TYPE_CHECKS;
             cli_flags_mask |= CCCC_TYPE_CHECKS;
             break;
@@ -1058,15 +1057,15 @@ int main(int argc, const char *argv[]) {
             flags |= CCCC_STACK_CANARIES;
             cli_flags_mask |= CCCC_STACK_CANARIES;
             break;
-        case 'H': // --heap-canaries
+        case 1080: // --heap-canaries
             flags |= CCCC_HEAP_CANARIES;
             cli_flags_mask |= CCCC_HEAP_CANARIES;
             break;
-        case 'p': // --pointer-sanitizer
+        case 'P': // --pointer-sanitizer
             flags |= CCCC_POINTER_SANITIZER;
             cli_flags_mask |= CCCC_POINTER_SANITIZER;
             break;
-        case 'm': // --memory-leak-detection
+        case 'M': // --memory-leak-detection
             flags |= CCCC_MEMORY_LEAK_DETECT;
             cli_flags_mask |= CCCC_MEMORY_LEAK_DETECT;
             break;
@@ -1092,7 +1091,7 @@ int main(int argc, const char *argv[]) {
             flags |= CCCC_FORMAT_STR_CHECKS;
             warnings |= CCCC_WARN_FORMAT;
             break;
-        case 'R': // --random-canaries
+        case 1081: // --random-canaries
             flags |= CCCC_RANDOM_CANARIES;
             break;
         case 1007:
@@ -1102,7 +1101,7 @@ int main(int argc, const char *argv[]) {
             flags |= CCCC_MEMORY_TAGGING;
             cli_flags_mask |= CCCC_MEMORY_TAGGING;
             break;
-        case 1046: // --thread-safety
+        case 'T': // --thread-safety
             flags |= CCCC_THREAD_SAFETY;
             break;
         case 'V':
@@ -1111,13 +1110,13 @@ int main(int argc, const char *argv[]) {
         case 'C':
             flags |= CCCC_CFI;
             break;
-        case 'P':
+        case 'p':
             print_tokens = 1;
             break;
         case 'E':
             preprocess_only = 1;
             break;
-        case 'M':
+        case 'm':
             dump_expanded_only = 1;
             break;
         case 'G':
@@ -1177,7 +1176,7 @@ int main(int argc, const char *argv[]) {
                 usage(argv[0], 1);
             }
             break;
-        case 'x': // --Werror
+        case 'w': // --Werror
             warnings_as_errors = 1;
             warning_no_errors = 0;
             break;
@@ -1355,7 +1354,7 @@ int main(int argc, const char *argv[]) {
         case 1071: // --no-debug-on-crash
             flags |= CCCC_NO_DEBUG_ON_CRASH;
             break;
-        case 1073: // --build
+        case 'b': // --build
             build_mode = 1;
             break;
         case 1074: // --build-entry=NAME
@@ -1404,7 +1403,7 @@ int main(int argc, const char *argv[]) {
             }
             break;
         }
-        case 1059: // --ffi-decls
+        case 'f': // --ffi-decls
             output_ffi_decls = 1;
             break;
         case '?':

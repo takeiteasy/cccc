@@ -17,9 +17,8 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "cccc.h"
 #include "internal.h"
-#include <errno.h>
+
 #include <fnmatch.h>
 #include <inttypes.h>
 #include <signal.h>

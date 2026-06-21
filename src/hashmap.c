@@ -19,9 +19,6 @@
  This file was original part of chibicc by Rui Ueyama (MIT) https://github.com/rui314/chibicc
 */
 
-// This is an implementation of the open-addressing hash table.
-
-#include "cccc.h"
 #include "./internal.h"
 
 // Initial hash bucket size

@@ -24,9 +24,8 @@
 // with the system toolchain (cc/ar/ld), synchronously, inside the
 // cccc_build_run* FFI call so the entry's return value reflects the real status.
 
-#include "cccc.h"
 #include "internal.h"
-#include <errno.h>
+
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -59,10 +58,10 @@ typedef enum {
     CCCC_TGT_DYNAMIC,
 } CcTargetKind;
 
-typedef struct cccc_target_t cccc_target_t;
-typedef struct cccc_build_ctx_t cccc_build_ctx_t;
+typedef struct BuildTarget BuildTarget;
+typedef struct Builder Builder;
 
-struct cccc_target_t {
+struct BuildTarget {
     CcTargetKind kind;
     char *name;
     char *output;          // explicit output path (relative to out_dir) or NULL
@@ -74,19 +73,19 @@ struct cccc_target_t {
     StringArray ldflags;
     StringArray libs;      // bare -l names
     StringArray libpaths;  // -L paths
-    cccc_target_t **deps;
+    BuildTarget **deps;
     int deps_count, deps_cap;
     int visited;           // topo-sort marker: 0 unvisited, 1 in-progress, 2 done
 };
 
-struct cccc_build_ctx_t {
+struct Builder {
     char *root;
     char *out_dir;
     const char *host;
     const char *target_filter; // --build-target=NAME, or NULL (build all)
     int verbose;
     int dry_run;
-    cccc_target_t **targets;
+    BuildTarget **targets;
     int targets_count, targets_cap;
     const CcNativeCompileArgs *defaults; // CLI -I/-D/-U/--std/-l/-L forwarded
     int run_invoked;       // set once a cccc_build_run* is called
@@ -97,7 +96,7 @@ struct cccc_build_ctx_t {
 // before invoking the entry and cleared afterward.  The builder API ignores its
 // cosmetic `ctx` handle (a 64-bit pointer cannot be threaded through cc_run_at's
 // int argc slot) and uses this singleton instead -- one build run, one context.
-static cccc_build_ctx_t *s_ctx = NULL;
+static Builder *s_ctx = NULL;
 
 // ============================================================================
 // Small helpers
@@ -172,7 +171,7 @@ static char *join(const char *a, const char *b) {
 }
 
 // Default output path (relative to out_dir) for a target.
-static char *default_output(const cccc_target_t *t) {
+static char *default_output(const BuildTarget *t) {
     char buf[512];
     switch (t->kind) {
     case CCCC_TGT_EXE:
@@ -193,11 +192,11 @@ static char *default_output(const cccc_target_t *t) {
 // ctx handle is ignored in favour of s_ctx.
 // ============================================================================
 
-static cccc_target_t *new_target(CcTargetKind kind, const char *name) {
-    cccc_build_ctx_t *ctx = s_ctx;
+static BuildTarget *new_target(CcTargetKind kind, const char *name) {
+    Builder *ctx = s_ctx;
     if (!ctx)
         error("build: target factory called outside a build run");
-    cccc_target_t *t = calloc(1, sizeof(*t));
+    BuildTarget *t = calloc(1, sizeof(*t));
     if (!t)
         error("build: out of memory");
     t->kind = kind;
@@ -227,17 +226,17 @@ static long long impl_dynamic_lib(long long ctx, long long name) {
 }
 
 static long long impl_set_output(long long t, long long path) {
-    cccc_target_t *tgt = (cccc_target_t *)(intptr_t)t;
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
     free(tgt->output);
     tgt->output = xstrdup((const char *)path);
     return 0;
 }
 static long long impl_add_source(long long t, long long path) {
-    strarray_push(&((cccc_target_t *)(intptr_t)t)->sources, xstrdup((const char *)path));
+    strarray_push(&((BuildTarget *)(intptr_t)t)->sources, xstrdup((const char *)path));
     return 0;
 }
 static long long impl_add_include(long long t, long long path) {
-    strarray_push(&((cccc_target_t *)(intptr_t)t)->includes, xstrdup((const char *)path));
+    strarray_push(&((BuildTarget *)(intptr_t)t)->includes, xstrdup((const char *)path));
     return 0;
 }
 static long long impl_add_define(long long t, long long name, long long value) {
@@ -253,24 +252,24 @@ static long long impl_add_define(long long t, long long name, long long value) {
     } else {
         def = xstrdup(n);
     }
-    strarray_push(&((cccc_target_t *)(intptr_t)t)->defines, def);
+    strarray_push(&((BuildTarget *)(intptr_t)t)->defines, def);
     return 0;
 }
 static long long impl_add_undef(long long t, long long name) {
-    strarray_push(&((cccc_target_t *)(intptr_t)t)->undefs, xstrdup((const char *)name));
+    strarray_push(&((BuildTarget *)(intptr_t)t)->undefs, xstrdup((const char *)name));
     return 0;
 }
 static long long impl_add_cflag(long long t, long long flag) {
-    strarray_push(&((cccc_target_t *)(intptr_t)t)->cflags, xstrdup((const char *)flag));
+    strarray_push(&((BuildTarget *)(intptr_t)t)->cflags, xstrdup((const char *)flag));
     return 0;
 }
 static long long impl_add_ldflag(long long t, long long flag) {
-    strarray_push(&((cccc_target_t *)(intptr_t)t)->ldflags, xstrdup((const char *)flag));
+    strarray_push(&((BuildTarget *)(intptr_t)t)->ldflags, xstrdup((const char *)flag));
     return 0;
 }
 static long long impl_link_with(long long t, long long dep) {
-    cccc_target_t *tgt = (cccc_target_t *)(intptr_t)t;
-    cccc_target_t *d = (cccc_target_t *)(intptr_t)dep;
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    BuildTarget *d = (BuildTarget *)(intptr_t)dep;
     if (tgt->deps_count >= tgt->deps_cap) {
         tgt->deps_cap = tgt->deps_cap ? tgt->deps_cap * 2 : 4;
         tgt->deps = realloc(tgt->deps, sizeof(*tgt->deps) * tgt->deps_cap);
@@ -281,11 +280,11 @@ static long long impl_link_with(long long t, long long dep) {
     return 0;
 }
 static long long impl_add_lib(long long t, long long name) {
-    strarray_push(&((cccc_target_t *)(intptr_t)t)->libs, xstrdup((const char *)name));
+    strarray_push(&((BuildTarget *)(intptr_t)t)->libs, xstrdup((const char *)name));
     return 0;
 }
 static long long impl_add_libpath(long long t, long long path) {
-    strarray_push(&((cccc_target_t *)(intptr_t)t)->libpaths, xstrdup((const char *)path));
+    strarray_push(&((BuildTarget *)(intptr_t)t)->libpaths, xstrdup((const char *)path));
     return 0;
 }
 
@@ -352,8 +351,8 @@ Token *cc_inject_build_header(VirtualMachine *vm) {
 
 // Append the CLI defaults and a target's own compile flags to an ArgVec.
 // `owned` accumulates heap strings (e.g. "-DFOO") that must outlive the spawn.
-static void push_compile_flags(ArgVec *args, const cccc_build_ctx_t *ctx,
-                               const cccc_target_t *t, StringArray *owned) {
+static void push_compile_flags(ArgVec *args, const Builder *ctx,
+                               const BuildTarget *t, StringArray *owned) {
     const CcNativeCompileArgs *d = ctx->defaults;
     if (d && d->std_arg) {
         char *f = malloc(strlen(d->std_arg) + 8);
@@ -414,7 +413,7 @@ static void print_cmd(int n, int total, char *const argv[]) {
 }
 
 // Run (or, in dry-run, just print) one toolchain command.  Returns its exit code.
-static int run_step(cccc_build_ctx_t *ctx, int n, int total, ArgVec *args) {
+static int run_step(Builder *ctx, int n, int total, ArgVec *args) {
     print_cmd(n, total, (char *const *)args->data);
     fflush(stdout);
     if (ctx->dry_run)
@@ -424,8 +423,8 @@ static int run_step(cccc_build_ctx_t *ctx, int n, int total, ArgVec *args) {
 
 // Compile one target's sources to object files; collect the .o paths in `objs`.
 // Returns 0 on success.
-static int compile_sources(cccc_build_ctx_t *ctx, const char *cc,
-                           cccc_target_t *t, const char *objdir,
+static int compile_sources(Builder *ctx, const char *cc,
+                           BuildTarget *t, const char *objdir,
                            StringArray *objs, int *step, int total) {
     StringArray owned = {0};
     int rc = 0;
@@ -450,8 +449,8 @@ static int compile_sources(cccc_build_ctx_t *ctx, const char *cc,
 }
 
 // Build a single target (its sources already; deps assumed built).  Returns 0 ok.
-static int build_target(cccc_build_ctx_t *ctx, const char *cc,
-                        cccc_target_t *t, int *step, int total) {
+static int build_target(Builder *ctx, const char *cc,
+                        BuildTarget *t, int *step, int total) {
     char *out_rel = t->output ? xstrdup(t->output) : default_output(t);
     char *out_abs = join(ctx->out_dir, out_rel);
     char *out_dir = dir_of(out_abs);
@@ -533,7 +532,7 @@ done:
 }
 
 // Count the total number of toolchain steps for the selected target set.
-static int count_steps(cccc_target_t **order, int n) {
+static int count_steps(BuildTarget **order, int n) {
     int total = 0;
     for (int i = 0; i < n; i++)
         total += order[i]->sources.len + 1; // one compile per source + 1 link/ar
@@ -541,7 +540,7 @@ static int count_steps(cccc_target_t **order, int n) {
 }
 
 // Depth-first topological visit; appends to `order`.  Returns 0 ok, -1 cycle.
-static int topo_visit(cccc_target_t *t, cccc_target_t **order, int *n) {
+static int topo_visit(BuildTarget *t, BuildTarget **order, int *n) {
     if (t->visited == 2)
         return 0;
     if (t->visited == 1) {
@@ -558,7 +557,7 @@ static int topo_visit(cccc_target_t *t, cccc_target_t **order, int *n) {
 }
 
 // Look up a registered target by name; returns NULL if not found.
-static cccc_target_t *find_target_by_name(cccc_build_ctx_t *ctx, const char *name) {
+static BuildTarget *find_target_by_name(Builder *ctx, const char *name) {
     for (int i = 0; i < ctx->targets_count; i++)
         if (strcmp(ctx->targets[i]->name, name) == 0)
             return ctx->targets[i];
@@ -567,7 +566,7 @@ static cccc_target_t *find_target_by_name(cccc_build_ctx_t *ctx, const char *nam
 
 // Run the build for an explicit target set (NULL = all targets).  Returns the
 // number of failed targets (0 = success).
-static int run_graph(cccc_build_ctx_t *ctx, cccc_target_t *only) {
+static int run_graph(Builder *ctx, BuildTarget *only) {
     ctx->run_invoked = 1;
 
     // --build-target=NAME: if the CLI filter is set, resolve it now (after the
@@ -575,7 +574,7 @@ static int run_graph(cccc_build_ctx_t *ctx, cccc_target_t *only) {
     // selection beats an explicit cccc_build_run(x) argument (zig build <step>
     // model).
     if (ctx->target_filter) {
-        cccc_target_t *sel = find_target_by_name(ctx, ctx->target_filter);
+        BuildTarget *sel = find_target_by_name(ctx, ctx->target_filter);
         if (!sel) {
             fprintf(stderr, "build: --build-target '%s' does not match any declared target\n",
                     ctx->target_filter);
@@ -598,7 +597,7 @@ static int run_graph(cccc_build_ctx_t *ctx, cccc_target_t *only) {
     for (int i = 0; i < ctx->targets_count; i++)
         ctx->targets[i]->visited = 0;
 
-    cccc_target_t **order = calloc(ctx->targets_count, sizeof(*order));
+    BuildTarget **order = calloc(ctx->targets_count, sizeof(*order));
     int n = 0;
     int cyc = 0;
     if (only) {
@@ -646,7 +645,7 @@ static long long impl_build_run(long long ctx, long long t) {
     (void)ctx;
     if (!s_ctx)
         return 1;
-    return run_graph(s_ctx, (cccc_target_t *)(intptr_t)t);
+    return run_graph(s_ctx, (BuildTarget *)(intptr_t)t);
 }
 static long long impl_build_run_all(long long ctx) {
     (void)ctx;
@@ -688,7 +687,7 @@ static const char *resolve_entry(VirtualMachine *vm, const char *flag) {
     return "build_main";
 }
 
-static void free_target(cccc_target_t *t) {
+static void free_target(BuildTarget *t) {
     free(t->name);
     free(t->output);
     free_strarray(&t->sources);
@@ -718,7 +717,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     if (!getcwd(cwd, sizeof(cwd)))
         snprintf(cwd, sizeof(cwd), ".");
 
-    cccc_build_ctx_t ctx = {0};
+    Builder ctx = {0};
     ctx.root = cwd;
     ctx.out_dir = xstrdup(opts->out_dir ? opts->out_dir : "build");
     ctx.host = CCCC_BUILD_HOST;

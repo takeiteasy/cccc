@@ -7,16 +7,16 @@
 // target kinds, dependency linking and define forwarding deterministically.
 
 [[cccc::build]]
-int build_main(cccc_build_ctx_t *ctx) {
-    cccc_target_t *core = StaticLib(ctx, "core");
+int build_main(Builder *ctx) {
+    BuildTarget *core = StaticLib(ctx, "core");
     AddSource(core, "src/lib/sum.c");
     AddInclude(core, "include");
 
-    cccc_target_t *greet = DynamicLib(ctx, "greet");
+    BuildTarget *greet = DynamicLib(ctx, "greet");
     AddSource(greet, "src/greet.c");
     AddInclude(greet, "include");
 
-    cccc_target_t *app = Executable(ctx, "app");
+    BuildTarget *app = Executable(ctx, "app");
     AddSource(app, "src/main.c");
     AddInclude(app, "include");
     AddDefine(app, "GREET_DEFAULT", "\"world\"");

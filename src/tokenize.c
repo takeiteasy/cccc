@@ -19,7 +19,6 @@
  This file was original part of chibicc by Rui Ueyama (MIT) https://github.com/rui314/chibicc
 */
 
-#include "cccc.h"
 #include "./internal.h"
 
 // Reports an error and exit (or longjmp if error handling is enabled).

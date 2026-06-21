@@ -9,7 +9,6 @@
  (at your option) any later version.
 */
 
-#include "cccc.h"
 #include "./internal.h"
 
 #define STREQ_LIT(s, lit) (strncmp((s), (lit), sizeof(lit)) == 0)

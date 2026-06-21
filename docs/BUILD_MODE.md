@@ -87,7 +87,7 @@ These are settled; the rest of the document elaborates them.
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--build` | (off) | Switch to build mode. The input file is treated as a build script; `main()` is not required. |
+| `-b`/`--build` | (off) | Switch to build mode. The input file is treated as a build script; `main()` is not required. |
 | `--build-entry=NAME` | `build_main` | Symbol to invoke as the build entry. |
 | `--build-target=NAME` | (all) | Build only the named target (matched against the *registered* target name) and its dependencies. |
 | `-O` / `--build-out-dir=PATH` | `build/` | Output directory. |
@@ -151,8 +151,8 @@ The attribute is intercepted by the preprocessor the same way
 ### Signature
 
 ```c
-int  build_main(cccc_build_ctx_t *ctx);   // non-zero return = build failure
-void build_main(cccc_build_ctx_t *ctx);   // success iff all targets built
+int  build_main(Builder *ctx);   // non-zero return = build failure
+void build_main(Builder *ctx);   // success iff all targets built
 ```
 
 The entry takes only the context pointer in v1. Config comes from CLI flags
@@ -166,7 +166,7 @@ A later release adds `[[cccc::build_target]]`-tagged factory functions as
 ```c
 // later — not v1
 [[cccc::build_target]]
-cccc_target_t *app(cccc_build_ctx_t *ctx) { ... }
+BuildTarget *app(Builder *ctx) { ... }
 // -> ./cccc --build build.c --build-target=app  (calls the factory directly)
 ```
 
@@ -190,7 +190,7 @@ Three kinds, all native.
 
 The backend is the system toolchain selected by `CCCC_NATIVE_CC` (or
 `cc` / `clang` / `gcc`). Adding a backend later is a new
-`cccc_backend_t` registration against `cccc_target_t`; the entry signature
+`cccc_backend_t` registration against `BuildTarget`; the entry signature
 does not change. A bytecode backend is a candidate for a future release once
 a bytecode linker exists (decision 4).
 
@@ -203,38 +203,38 @@ mode. The header is **not** on the public include path.
 
 ```c
 // Build context
-const char *BuildRoot(cccc_build_ctx_t *ctx);
-const char *BuildOutDir(cccc_build_ctx_t *ctx);
-const char *BuildHost(cccc_build_ctx_t *ctx);    // "darwin" | "linux" | ...
-int         BuildVerbose(cccc_build_ctx_t *ctx);
+const char *BuildRoot(Builder *ctx);
+const char *BuildOutDir(Builder *ctx);
+const char *BuildHost(Builder *ctx);    // "darwin" | "linux" | ...
+int         BuildVerbose(Builder *ctx);
 
 // Target factories — all return a target owned by `ctx`
-cccc_target_t *Executable(cccc_build_ctx_t *ctx, const char *name);
-cccc_target_t *StaticLib(cccc_build_ctx_t *ctx, const char *name);
-cccc_target_t *DynamicLib(cccc_build_ctx_t *ctx, const char *name);
+BuildTarget *Executable(Builder *ctx, const char *name);
+BuildTarget *StaticLib(Builder *ctx, const char *name);
+BuildTarget *DynamicLib(Builder *ctx, const char *name);
 
 // Output
-void SetOutput(cccc_target_t *t, const char *path);
+void SetOutput(BuildTarget *t, const char *path);
 
 // Sources
-void AddSource(cccc_target_t *t, const char *path);
+void AddSource(BuildTarget *t, const char *path);
 
 // Flags
-void AddInclude(cccc_target_t *t, const char *path);
-void AddDefine(cccc_target_t *t, const char *name, const char *value);
-void AddUndef(cccc_target_t *t, const char *name);
-void AddCFlag(cccc_target_t *t, const char *flag);
-void AddLdFlag(cccc_target_t *t, const char *flag);
+void AddInclude(BuildTarget *t, const char *path);
+void AddDefine(BuildTarget *t, const char *name, const char *value);
+void AddUndef(BuildTarget *t, const char *name);
+void AddCFlag(BuildTarget *t, const char *flag);
+void AddLdFlag(BuildTarget *t, const char *flag);
 
 // Dependencies
-void LinkWith(cccc_target_t *t, cccc_target_t *dep);
-void AddLib(cccc_target_t *t, const char *name);   // -l
-void AddLibPath(cccc_target_t *t, const char *path); // -L
+void LinkWith(BuildTarget *t, BuildTarget *dep);
+void AddLib(BuildTarget *t, const char *name);   // -l
+void AddLibPath(BuildTarget *t, const char *path); // -L
 
 // Run
-int Build(cccc_build_ctx_t *ctx, cccc_target_t *t);
-int BuildAll(cccc_build_ctx_t *ctx);     // topological order
-int BuildDefault(cccc_build_ctx_t *ctx); // run_all + summary
+int Build(Builder *ctx, BuildTarget *t);
+int BuildAll(Builder *ctx);     // topological order
+int BuildDefault(Builder *ctx); // run_all + summary
 ```
 
 Deferred to later releases: `AddSources_glob` (glob expansion),
@@ -256,7 +256,7 @@ Deferred to later releases: `AddSources_glob` (glob expansion),
    │  4. Compile the entry into the CCCC VM    │
    │  5. Invoke the entry inside the VM:       │
    │     ├─ entry calls factories, builds      │
-   │     │   cccc_target_t graph (declarative  │
+   │     │   BuildTarget graph (declarative  │
    │     │   data — no compilation yet)        │
    │     └─ entry calls Build_*(ctx)  │
    │  6. HOST runner takes the registered      │
@@ -318,18 +318,18 @@ FFI boundary — an implementation detail of the run call).
 
 ```c
 [[cccc::build]]
-int build_main(cccc_build_ctx_t *ctx) {
-    cccc_target_t *core = StaticLib(ctx, "core");
+int build_main(Builder *ctx) {
+    BuildTarget *core = StaticLib(ctx, "core");
     SetOutput(core, "lib/libcore.a");
     AddSource(core, "src/lib/sum.c");
     AddInclude(core, "include");
 
-    cccc_target_t *greet = StaticLib(ctx, "greet");
+    BuildTarget *greet = StaticLib(ctx, "greet");
     SetOutput(greet, "lib/libgreet.a");
     AddSource(greet, "src/greet.c");
     AddInclude(greet, "include");
 
-    cccc_target_t *app = Executable(ctx, "app");
+    BuildTarget *app = Executable(ctx, "app");
     SetOutput(app, "bin/app");
     AddSource(app, "src/main.c");
     AddInclude(app, "include");
@@ -372,7 +372,7 @@ release as a fallback; it is deleted only once `build.c` is stable.
 - `--build` mode branch in `src/main.c` (beside the native/testing blocks).
 - `[[cccc::build]]` entry interception in `preprocess.c`; `build_main`
   default name; `--build-entry=NAME`.
-- Auto-injected `building.h`; `cccc_target_t` / `cccc_build_ctx_t` owned
+- Auto-injected `building.h`; `BuildTarget` / `Builder` owned
   by the VM.
 - Three native target kinds (executable / static / dynamic) via `cc`/`ar`/`ld`.
 - Core builder API (sources, includes, defines, undef, cflags, ldflags,

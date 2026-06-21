@@ -5,11 +5,11 @@
 // the conflict and point at --build-entry to disambiguate.
 
 [[cccc::build]]
-int build_a(cccc_build_ctx_t *ctx) {
+int build_a(Builder *ctx) {
     return BuildAll(ctx);
 }
 
 [[cccc::build]]
-int build_b(cccc_build_ctx_t *ctx) {
+int build_b(Builder *ctx) {
     return BuildAll(ctx);
 }

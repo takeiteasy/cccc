@@ -17,7 +17,6 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "cccc.h"
 #include "./internal.h"
 
 static Token *must_tokenize_file(VirtualMachine *vm, char *path) {

@@ -17,9 +17,8 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "cccc.h"
 #include "./internal.h"
-#include <limits.h>
+
 
 #define OPT_P_RS1 1
 #define OPT_P_RS2 2

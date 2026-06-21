@@ -7,14 +7,14 @@
 // lib) because app links_with both.  All three targets must be built.
 
 [[cccc::build]]
-int build_main(cccc_build_ctx_t *ctx) {
-    cccc_target_t *core = StaticLib(ctx, "core");
+int build_main(Builder *ctx) {
+    BuildTarget *core = StaticLib(ctx, "core");
     AddSource(core, "examples/build_demo/src/lib/sum.c");
 
-    cccc_target_t *greet = DynamicLib(ctx, "greet");
+    BuildTarget *greet = DynamicLib(ctx, "greet");
     AddSource(greet, "examples/build_demo/src/greet.c");
 
-    cccc_target_t *app = Executable(ctx, "app");
+    BuildTarget *app = Executable(ctx, "app");
     AddSource(app, "examples/build_demo/src/main.c");
     LinkWith(app, core);
     LinkWith(app, greet);

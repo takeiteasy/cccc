@@ -4,8 +4,8 @@
 // --build-entry=NAME selects a differently-named entry function.
 
 [[cccc::build]]
-int configure(cccc_build_ctx_t *ctx) {
-    cccc_target_t *t = Executable(ctx, "conftest");
+int configure(Builder *ctx) {
+    BuildTarget *t = Executable(ctx, "conftest");
     AddSource(t, "examples/build_demo/src/main.c");
     return Build(ctx, t);
 }

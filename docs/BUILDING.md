@@ -17,12 +17,12 @@ mirrors `--testing` (see [TESTING.md](TESTING.md)) and reuses the
 ```c
 // build.c
 [[cccc::build]]
-int build_main(cccc_build_ctx_t *ctx) {
-    cccc_target_t *core = StaticLib(ctx, "core");
+int build_main(Builder *ctx) {
+    BuildTarget *core = StaticLib(ctx, "core");
     AddSource(core, "src/lib/sum.c");
     AddInclude(core, "include");
 
-    cccc_target_t *app = Executable(ctx, "app");
+    BuildTarget *app = Executable(ctx, "app");
     AddSource(app, "src/main.c");
     AddInclude(app, "include");
     LinkWith(app, core);
@@ -53,7 +53,7 @@ A runnable example lives in [`examples/build_demo/`](../examples/build_demo).
   3. Resolve the build entry (flag / attribute / name)
   4. Compile the entry into the CCCC VM
   5. Invoke the entry inside the VM:
-       ├─ entry calls factories → builds the cccc_target_t graph (data only)
+       ├─ entry calls factories → builds the BuildTarget graph (data only)
        └─ entry calls Build*()
   6. The host runner (native C, behind the FFI boundary) topologically sorts the
      graph and spawns cc/ar/ld (serial) to compile and link the targets.
@@ -76,7 +76,7 @@ cccc --build build.c --build-target=NAME  # build only NAME and its transitive d
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--build` | (off) | Switch to build mode. The input is a build script; `main()` is not required (and is rejected). |
+| `-b`/`--build` | (off) | Switch to build mode. The input is a build script; `main()` is not required (and is rejected). |
 | `--build-entry=NAME` | `build_main` | Symbol to invoke as the build entry. |
 | `--build-out-dir=PATH` | `build/` | Output directory for artifacts. |
 | `--build-dry-run` | off | Topo-sort and print the resolved command lines without executing them. |
@@ -84,7 +84,7 @@ cccc --build build.c --build-target=NAME  # build only NAME and its transitive d
 
 Existing flags forwarded to every target's compile as defaults: `-I`, `-i`, `-D`,
 `-U`, `--std=`, `-L`, `-l`. VM-only options (`-c`, `-d`/`--disassemble`,
-`-O<n>`/`--optimize`, `--vm-profile`, `-g`/`--debug`, `-o`, `-E`, `-M`, `--ast`)
+`-O<n>`/`--optimize`, `--vm-profile`, `-g`/`--debug`, `-o`, `-E`, `-m`, `--ast`)
 are rejected in `--build` mode.
 
 The toolchain is selected via `CCCC_NATIVE_CC` (else `cc` / `clang` / `gcc`);
@@ -111,8 +111,8 @@ __attribute__((cccc::build))        // GNU namespaced
 Signature (the build context is passed as the first parameter):
 
 ```c
-int  build_main(cccc_build_ctx_t *ctx);   // non-zero return = build failure
-void build_main(cccc_build_ctx_t *ctx);   // success iff all targets built
+int  build_main(Builder *ctx);   // non-zero return = build failure
+void build_main(Builder *ctx);   // success iff all targets built
 ```
 
 The same file is still valid C: in default mode (`cccc build.c`) the
@@ -133,36 +133,36 @@ include it directly.
 
 ```c
 // Build context accessors
-const char *BuildRoot(cccc_build_ctx_t *ctx);      // launch directory
-const char *BuildOutDir(cccc_build_ctx_t *ctx);    // output directory
-const char *BuildHost(cccc_build_ctx_t *ctx);      // "darwin" | "linux" | ...
-int         BuildVerbose(cccc_build_ctx_t *ctx);
+const char *BuildRoot(Builder *ctx);      // launch directory
+const char *BuildOutDir(Builder *ctx);    // output directory
+const char *BuildHost(Builder *ctx);      // "darwin" | "linux" | ...
+int         BuildVerbose(Builder *ctx);
 
 // Target factories — each returns a target owned by the context
-cccc_target_t *Executable(cccc_build_ctx_t *ctx, const char *name);
-cccc_target_t *StaticLib(cccc_build_ctx_t *ctx, const char *name);
-cccc_target_t *DynamicLib(cccc_build_ctx_t *ctx, const char *name);
+BuildTarget *Executable(Builder *ctx, const char *name);
+BuildTarget *StaticLib(Builder *ctx, const char *name);
+BuildTarget *DynamicLib(Builder *ctx, const char *name);
 
 // Output / sources
-void SetOutput(cccc_target_t *t, const char *path);
-void AddSource(cccc_target_t *t, const char *path);
+void SetOutput(BuildTarget *t, const char *path);
+void AddSource(BuildTarget *t, const char *path);
 
 // Flags
-void AddInclude(cccc_target_t *t, const char *path);
-void AddDefine(cccc_target_t *t, const char *name, const char *value);
-void AddUndef(cccc_target_t *t, const char *name);
-void AddCFlag(cccc_target_t *t, const char *flag);
-void AddLdFlag(cccc_target_t *t, const char *flag);
+void AddInclude(BuildTarget *t, const char *path);
+void AddDefine(BuildTarget *t, const char *name, const char *value);
+void AddUndef(BuildTarget *t, const char *name);
+void AddCFlag(BuildTarget *t, const char *flag);
+void AddLdFlag(BuildTarget *t, const char *flag);
 
 // Dependencies
-void LinkWith(cccc_target_t *t, cccc_target_t *dep); // build before, -l<dep>
-void AddLib(cccc_target_t *t, const char *name);     // -l<name>
-void AddLibPath(cccc_target_t *t, const char *path); // -L<path>
+void LinkWith(BuildTarget *t, BuildTarget *dep); // build before, -l<dep>
+void AddLib(BuildTarget *t, const char *name);     // -l<name>
+void AddLibPath(BuildTarget *t, const char *path); // -L<path>
 
 // Run (synchronous; returns 0 on success)
-int Build(cccc_build_ctx_t *ctx, cccc_target_t *t);  // t + its deps
-int BuildAll(cccc_build_ctx_t *ctx);                  // every target
-int BuildDefault(cccc_build_ctx_t *ctx);              // run_all + summary
+int Build(Builder *ctx, BuildTarget *t);  // t + its deps
+int BuildAll(Builder *ctx);                  // every target
+int BuildDefault(Builder *ctx);              // run_all + summary
 ```
 
 `Build*` compiles and links synchronously inside the call, so the
