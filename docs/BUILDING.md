@@ -56,8 +56,10 @@ A runnable example lives in [`examples/build_demo/`](../examples/build_demo).
        ├─ entry calls factories → builds the BuildTarget graph (data only)
        └─ entry calls Build*()
   6. The host runner (native C, behind the FFI boundary) topologically sorts the
-     graph and spawns cc/ar/ld to compile and link the targets (parallel source
-     compilation with `--build-jobs=N`).
+     graph and dispatches it: with `--build-jobs=N > 1` and multiple simultaneously-
+     ready targets it forks up to N children in parallel; with only one ready target
+     it runs in-process (preserving source-level parallelism from `--build-jobs`).
+     Spawns cc/ar/ld to compile and link.
   7. Exit with the entry's return value (non-zero = build failure).
 ```
 
@@ -90,8 +92,8 @@ cccc --build build.c --build-cache=~/.cache/cccc  # incremental builds with expl
 | `--build-dry-run` | off | Topo-sort and print the resolved command lines without executing them. |
 | `--build-target=NAME` | (all) | Build only the named registered target and its transitive dependencies. Pruning happens at `Build*` call time — the full graph is declared first, then the filter is applied. |
 | `--build-tool-allow=NAME[,NAME...]` | (allow all) | Comma-separated allowlist of tool names that may be probed via `HaveTool` / `PkgConfig` or executed via `RunCustom`. Repeated flags accumulate. `cc`/`ar`/`ld` are always invoked directly by the runner and are not subject to this list. |
-| `--build-jobs=N` | `1` | Compile up to N source files in parallel within each target. Uses `fork()`+`exec()` on POSIX; falls back to serial on non-POSIX. |
-| `--build-keep-going` | off | Continue building independent targets when one fails, rather than stopping at the first error. All failed target names are listed in the final summary. |
+| `--build-jobs=N` | `1` | Controls parallelism at two levels (POSIX only; non-POSIX always serial). **Target-level** (N>1, multiple simultaneously-ready targets): forks up to N target children in parallel, each compiling its sources serially. **Source-level** (N>1, only one target ready at a time): compiles up to N `cc -c` invocations within that target in parallel. The `-j` budget covers both modes — at most N compiler processes run at once. |
+| `--build-keep-going` | off | Continue building independent targets when one fails, rather than stopping at the first error. Failed target names are listed in the final summary. Targets whose dependency chain includes a failed target are skipped (not attempted) and listed as `skipped:` in the summary. |
 | `--build-quiet` | off | Suppress per-step `[N/M] cc ...` lines. Errors and the final summary are still printed. Overridden by `--build-verbose`. |
 | `--build-verbose` | off | Print a per-target header (`>> target 'name' [kind, N source(s)]`) before each target and show all command lines. Overrides `--build-quiet`. `-v` also enables this. |
 | `--build-list-targets` | off | Print the names of all `[[cccc::build_target]]` factory functions (one per line) and exit without running the build entry. |
@@ -105,6 +107,26 @@ Existing flags forwarded to every target's compile as defaults: `-I`, `-i`, `-D`
 `-U`, `--std=`, `-L`, `-l`. VM-only options (`-c`, `-d`/`--disassemble`,
 `-O<n>`/`--optimize`, `--vm-profile`, `-g`/`--debug`, `-o`, `-E`, `-m`, `--ast`)
 are rejected in `--build` mode.
+
+## Parallel builds
+
+`--build-jobs=N` operates at two levels that share the same `-j` slot budget:
+
+**Target-level (N>1, multiple ready targets):** when two or more targets have all
+their dependencies satisfied at the same time, the runner forks up to N child
+processes and builds them simultaneously. Each child compiles its sources serially
+(`jobs=1`) so the total number of concurrent compiler invocations does not exceed N.
+Output from concurrent targets interleaves (same behaviour as `make -j`).
+
+**Source-level (N>1, lone ready target):** when only one target is unblocked, it
+runs in-process with the full `-j` budget, allowing up to N `cc -c` processes to
+compile that target's sources simultaneously.
+
+**Non-POSIX / `--build-dry-run`:** always uses the serial path regardless of `-j`.
+
+**Known limitation:** idle slots are not redistributed. If two targets build in
+parallel under `-j4`, each gets one serial source slot — the two idle slots are not
+reclaimed for additional source parallelism within the children.
 
 The toolchain is selected via `CCCC_NATIVE_CC` (else `cc` / `clang` / `gcc`);
 `ar` is selected via `CCCC_NATIVE_AR` (else `ar`).
@@ -861,6 +883,7 @@ transitive dependency pruning, the inverted FFI default,
 `HaveTool` / `PkgConfig` / `--build-tool-allow` (#543),
 `RunCustom` / `DependsOn` (#544),
 `--build-jobs` / `--build-keep-going` / `--build-quiet` / `--build-verbose` (#541),
+target-level parallel `-j` across DAG nodes (#557),
 `[[cccc::build_target]]` discoverable factory functions with `--build-list-targets`
 and `BuildTargetCount` / `BuildTargetName` reflection (#540),
 build profiles (`debug` / `release` / `relwithdebinfo` / `minsizerel`) via
@@ -881,8 +904,7 @@ modules into a running VM (#564),
 `InstallArtifact` / `SetInstallPrefix` / `BuildWantsInstall` / `--build-install` (#560),
 `DirExists` / `GlobFiles` / `ReadFile` / `WriteFile` filesystem helpers (#561).
 
-**Deferred to later releases:** target-level parallel `-j` across DAG nodes (#557);
-a self-hosting `build.c` replacing the Makefile.
+**Deferred to later releases:** a self-hosting `build.c` replacing the Makefile.
 
 ## See also
 

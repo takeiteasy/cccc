@@ -90,6 +90,7 @@ struct BuildTarget {
     int *deps_link;        // parallel to deps: 1=LinkWith (add -l), 0=DependsOn (order only)
     int deps_count, deps_cap;
     int visited;           // topo-sort marker: 0 unvisited, 1 in-progress, 2 done
+    int state;             // parallel dispatch state: see TARGET_* constants (#557)
     // Set by run_graph() for targets that are LinkWith'd (transitively) from a
     // kind=bytecode target (#563).  Such a target is a "bytecode library": its
     // sources are folded into the dependent's single cccc invocation and it is
@@ -100,6 +101,13 @@ struct BuildTarget {
     // Dynamic libs (.c4d) are runtime-loaded and never folded into anything.
     int bytecode_subkind;
 };
+
+// Parallel dispatch states for BuildTarget.state (#557).
+#define TARGET_PENDING  0  // not yet started
+#define TARGET_INFLIGHT 1  // forked child running
+#define TARGET_DONE     2  // built successfully
+#define TARGET_FAILED   3  // build failed
+#define TARGET_SKIPPED  4  // blocked: a dep failed/was skipped
 
 struct Builder {
     char *root;
@@ -1978,6 +1986,34 @@ static int topo_visit(BuildTarget *t, BuildTarget **order, int *n) {
     return 0;
 }
 
+// Returns 1 if t is ready to build: PENDING with all deps DONE. (#557)
+static int target_is_ready(BuildTarget *t) {
+    if (t->state != TARGET_PENDING) return 0;
+    for (int i = 0; i < t->deps_count; i++)
+        if (t->deps[i]->state != TARGET_DONE) return 0;
+    return 1;
+}
+
+// Fixpoint pass: mark PENDING targets whose dep chain includes a FAILED or
+// SKIPPED target as SKIPPED so they are never attempted. (#557)
+static void propagate_skipped(BuildTarget **order, int n) {
+    int changed = 1;
+    while (changed) {
+        changed = 0;
+        for (int i = 0; i < n; i++) {
+            if (order[i]->state != TARGET_PENDING) continue;
+            for (int j = 0; j < order[i]->deps_count; j++) {
+                int ds = order[i]->deps[j]->state;
+                if (ds == TARGET_FAILED || ds == TARGET_SKIPPED) {
+                    order[i]->state = TARGET_SKIPPED;
+                    changed = 1;
+                    break;
+                }
+            }
+        }
+    }
+}
+
 // Look up a registered target by name; returns NULL if not found.
 static BuildTarget *find_target_by_name(Builder *ctx, const char *name) {
     for (int i = 0; i < ctx->targets_count; i++)
@@ -2021,6 +2057,7 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
     for (int i = 0; i < ctx->targets_count; i++) {
         ctx->targets[i]->visited = 0;
         ctx->targets[i]->bytecode_folded = 0;
+        ctx->targets[i]->state = TARGET_PENDING;
     }
     for (int i = 0; i < ctx->targets_count; i++) {
         if (ctx->targets[i]->kind != CCCC_TGT_BYTECODE) continue;
@@ -2054,23 +2091,167 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
         return 1;
     }
 
+    // Pre-mark bytecode-folded targets as DONE so their dependents become ready
+    // immediately; mirrors the early-return in build_target() (#557).
+    for (int i = 0; i < n; i++)
+        if (order[i]->bytecode_folded)
+            order[i]->state = TARGET_DONE;
+
     int total = count_steps(order, n);
     int step = 0;
     int failures = 0;
     const char **failed_names = calloc(n, sizeof(*failed_names));
-    for (int i = 0; i < n; i++) {
-        if (build_target(ctx, cc, order[i], &step, total) != 0) {
-            fprintf(stderr, "build: target '%s' failed%s\n", order[i]->name,
-                    ctx->keep_going ? ", continuing" : "");
-            if (failed_names)
-                failed_names[failures] = order[i]->name;
-            failures++;
-            if (!ctx->keep_going)
+
+#ifdef _POSIX_VERSION
+    if (ctx->jobs > 1 && !ctx->dry_run) {
+        // Target-level parallel dispatch: fork up to `jobs` child processes for
+        // simultaneously-ready targets.  The -j budget is shared: each forked
+        // child runs source compilation serially (jobs=1) so the total number of
+        // concurrent compiler invocations never exceeds `jobs` (#557).
+        typedef struct { pid_t pid; BuildTarget *t; } TJob;
+        TJob *inflight_jobs = calloc(ctx->jobs, sizeof(TJob));
+        int in_flight = 0, stop_dispatch = 0;
+
+        for (;;) {
+            // Exit when no targets remain pending or in-flight.
+            int remaining = 0;
+            for (int i = 0; i < n; i++)
+                if (order[i]->state == TARGET_PENDING ||
+                    order[i]->state == TARGET_INFLIGHT)
+                    remaining++;
+            if (remaining == 0) break;
+
+            // Count how many targets are currently ready to build.
+            int ready_count = 0;
+            for (int i = 0; i < n; i++)
+                if (target_is_ready(order[i])) ready_count++;
+
+            // Lone ready target with nothing in-flight: run in-process so it
+            // can use the full source-level -j parallelism inside compile_sources().
+            // Running in-process while in_flight>0 would cause waitpid(-1) races
+            // between compile_sources() and the parent's reap loop below.
+            if (!stop_dispatch && ready_count == 1 && in_flight == 0) {
+                for (int i = 0; i < n; i++) {
+                    if (!target_is_ready(order[i])) continue;
+                    if (build_target(ctx, cc, order[i], &step, total) != 0) {
+                        fprintf(stderr, "build: target '%s' failed%s\n",
+                                order[i]->name,
+                                ctx->keep_going ? ", continuing" : "");
+                        order[i]->state = TARGET_FAILED;
+                        if (failed_names) failed_names[failures] = order[i]->name;
+                        failures++;
+                        if (!ctx->keep_going) { stop_dispatch = 1; break; }
+                        propagate_skipped(order, n);
+                    } else {
+                        order[i]->state = TARGET_DONE;
+                    }
+                    break;
+                }
+                continue;
+            }
+
+            // Dispatch ready targets as forked children up to the job limit.
+            if (!stop_dispatch) {
+                for (int i = 0; i < n && in_flight < ctx->jobs; i++) {
+                    if (!target_is_ready(order[i])) continue;
+                    fflush(stdout); fflush(stderr);
+                    pid_t pid = fork();
+                    if (pid < 0) {
+                        fprintf(stderr, "build: fork failed: %s\n", strerror(errno));
+                        order[i]->state = TARGET_FAILED;
+                        if (failed_names) failed_names[failures] = order[i]->name;
+                        failures++;
+                        continue;
+                    }
+                    if (pid == 0) {
+                        // Child: compile sources serially to respect shared -j budget.
+                        ctx->jobs = 1;
+                        int local_step = 0;
+                        int local_total = count_steps(&order[i], 1);
+                        int rc = build_target(ctx, cc, order[i], &local_step, local_total);
+                        fflush(stdout); fflush(stderr);
+                        _exit(rc == 0 ? 0 : 1);
+                    }
+                    order[i]->state = TARGET_INFLIGHT;
+                    for (int j = 0; j < ctx->jobs; j++) {
+                        if (inflight_jobs[j].pid == 0) {
+                            inflight_jobs[j].pid = pid;
+                            inflight_jobs[j].t = order[i];
+                            in_flight++;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // If nothing is running and nothing was dispatched, all remaining
+            // PENDING targets are blocked by failed deps — mark them skipped.
+            if (in_flight == 0) {
+                for (int i = 0; i < n; i++)
+                    if (order[i]->state == TARGET_PENDING)
+                        order[i]->state = TARGET_SKIPPED;
                 break;
+            }
+
+            // Reap one child.
+            int status;
+            pid_t done = waitpid(-1, &status, 0);
+            if (done < 0) break;
+            for (int j = 0; j < ctx->jobs; j++) {
+                if (inflight_jobs[j].pid != done) continue;
+                BuildTarget *t = inflight_jobs[j].t;
+                inflight_jobs[j].pid = 0;
+                inflight_jobs[j].t = NULL;
+                in_flight--;
+                if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+                    t->state = TARGET_DONE;
+                } else {
+                    fprintf(stderr, "build: target '%s' failed%s\n", t->name,
+                            ctx->keep_going ? ", continuing" : "");
+                    t->state = TARGET_FAILED;
+                    if (failed_names) failed_names[failures] = t->name;
+                    failures++;
+                    if (!ctx->keep_going) {
+                        stop_dispatch = 1;
+                        // Drain remaining in-flight children before returning.
+                        while (in_flight > 0) {
+                            pid_t d2 = waitpid(-1, &status, 0);
+                            if (d2 < 0) break;
+                            for (int k = 0; k < ctx->jobs; k++) {
+                                if (inflight_jobs[k].pid != d2) continue;
+                                inflight_jobs[k].pid = 0;
+                                inflight_jobs[k].t = NULL;
+                                in_flight--;
+                                break;
+                            }
+                        }
+                    } else {
+                        propagate_skipped(order, n);
+                    }
+                }
+                break;
+            }
+        }
+
+        free(inflight_jobs);
+    } else
+#endif
+    {
+        // Serial path: jobs==1, dry-run, or non-POSIX.
+        for (int i = 0; i < n; i++) {
+            if (build_target(ctx, cc, order[i], &step, total) != 0) {
+                fprintf(stderr, "build: target '%s' failed%s\n", order[i]->name,
+                        ctx->keep_going ? ", continuing" : "");
+                if (failed_names)
+                    failed_names[failures] = order[i]->name;
+                failures++;
+                if (!ctx->keep_going)
+                    break;
+            }
         }
     }
+
     free(cc);
-    free(order);
 
     if (failures == 0) {
         printf("build succeeded (%d target%s, 0 errors)\n", n, n == 1 ? "" : "s");
@@ -2079,9 +2260,14 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
         if (ctx->keep_going && failed_names) {
             for (int i = 0; i < failures; i++)
                 printf("  failed: %s\n", failed_names[i]);
+            // Report targets skipped because a dependency failed.
+            for (int i = 0; i < n; i++)
+                if (order[i]->state == TARGET_SKIPPED)
+                    printf("  skipped: %s\n", order[i]->name);
         }
         ctx->failed = 1;
     }
+    free(order);
     free(failed_names);
     return failures;
 }
