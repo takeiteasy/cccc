@@ -1257,12 +1257,13 @@ static int ofile_is_current(const char *ofile, const char *src) {
     return o_st.st_mtime >= s_st.st_mtime;
 }
 
-// CAS layout: <cache_dir>/<key[0:2]>/<key_hex>.o
+// CAS layout: <cache_dir>/<key[0:2]>/<key_hex><ext>
 static void cache_entry_path(char *buf, size_t len,
-                              const char *cache_dir, uint64_t key) {
+                              const char *cache_dir, uint64_t key,
+                              const char *ext) {
     char hex[17];
     snprintf(hex, sizeof(hex), "%016llx", (unsigned long long)key);
-    snprintf(buf, len, "%s/%.2s/%s.o", cache_dir, hex, hex);
+    snprintf(buf, len, "%s/%.2s/%s%s", cache_dir, hex, hex, ext);
 }
 
 // Simple binary file copy; returns 0 on success, -1 on error.
@@ -1283,9 +1284,10 @@ static int copy_file(const char *src, const char *dst) {
 }
 
 // Try to restore ofile from the CAS. Returns 1 on hit, 0 on miss.
-static int cache_lookup(const char *cache_dir, uint64_t key, const char *ofile) {
+static int cache_lookup(const char *cache_dir, uint64_t key,
+                        const char *ofile, const char *ext) {
     char cpath[2048];
-    cache_entry_path(cpath, sizeof(cpath), cache_dir, key);
+    cache_entry_path(cpath, sizeof(cpath), cache_dir, key, ext);
     struct stat st;
     if (stat(cpath, &st) != 0) return 0;
     char *d = dir_of(ofile);
@@ -1295,15 +1297,46 @@ static int cache_lookup(const char *cache_dir, uint64_t key, const char *ofile) 
 }
 
 // Store compiled ofile into the CAS (best-effort; errors are silently ignored).
-static void cache_store(const char *cache_dir, uint64_t key, const char *ofile) {
+static void cache_store(const char *cache_dir, uint64_t key,
+                        const char *ofile, const char *ext) {
     char hex[17];
     snprintf(hex, sizeof(hex), "%016llx", (unsigned long long)key);
     char prefix[2048];
     snprintf(prefix, sizeof(prefix), "%s/%.2s", cache_dir, hex);
     if (mkdir_p(prefix) != 0) return;
     char cpath[2048];
-    cache_entry_path(cpath, sizeof(cpath), cache_dir, key);
+    cache_entry_path(cpath, sizeof(cpath), cache_dir, key, ext);
     copy_file(ofile, cpath);
+}
+
+// Returns 1 if `out` is newer than every source in `srcs` (mtime fast path
+// for whole-target bytecode output: .c4 / .c4a / .c4d).
+static int bytecode_output_is_current(const char *out, StringArray *srcs) {
+    struct stat o_st;
+    if (stat(out, &o_st) != 0) return 0;
+    for (int i = 0; i < srcs->len; i++) {
+        struct stat s_st;
+        if (stat(srcs->data[i], &s_st) != 0) return 0;
+        if (o_st.st_mtime < s_st.st_mtime) return 0;
+    }
+    return srcs->len > 0;
+}
+
+// Per-target cache key for bytecode: FNV-1a over cccc argv (excluding -o <path>)
+// + all aggregated source file contents.  The "bytecode\0" prefix namespaces
+// these keys away from native .o keys so both can share a cache directory.
+static uint64_t bytecode_target_cache_key(char *const *argv, StringArray *srcs) {
+    uint64_t h = CACHE_FNV_OFFSET;
+    static const char ns[] = "bytecode\0";
+    h = fnv1a_update(h, ns, sizeof(ns));
+    for (int i = 0; argv[i]; i++) {
+        if (strcmp(argv[i], "-o") == 0) { i++; continue; }
+        h = fnv1a_update(h, argv[i], strlen(argv[i]));
+        h = fnv1a_update(h, "\0", 1);
+    }
+    for (int i = 0; i < srcs->len; i++)
+        h = fnv1a_file(srcs->data[i], h);
+    return h;
 }
 
 // Compile one target's sources to object files; collect the .o paths in `objs`.
@@ -1340,7 +1373,7 @@ static int compile_sources(Builder *ctx, const char *cc,
                         free(pool[j].ofile);
                     } else {
                         if (ctx->cache_dir)
-                            cache_store(ctx->cache_dir, pool[j].cache_key, pool[j].ofile);
+                            cache_store(ctx->cache_dir, pool[j].cache_key, pool[j].ofile, ".o");
                         strarray_push(objs, pool[j].ofile); // transfer ownership
                     }
                     pool[j].pid = 0;
@@ -1382,7 +1415,7 @@ static int compile_sources(Builder *ctx, const char *cc,
             uint64_t ckey = 0;
             if (ctx->cache_dir) {
                 ckey = source_cache_key(t->sources.data[i], (char *const *)a.data);
-                if (cache_lookup(ctx->cache_dir, ckey, ofile)) {
+                if (cache_lookup(ctx->cache_dir, ckey, ofile, ".o")) {
                     if (!ctx->quiet || ctx->verbose)
                         printf("[%d/%d] (cached) %s\n", ++(*step), total, t->sources.data[i]);
                     else
@@ -1464,7 +1497,7 @@ serial_fallback:;
         uint64_t ckey = 0;
         if (ctx->cache_dir && !ctx->dry_run) {
             ckey = source_cache_key(t->sources.data[i], (char *const *)a.data);
-            if (cache_lookup(ctx->cache_dir, ckey, ofile)) {
+            if (cache_lookup(ctx->cache_dir, ckey, ofile, ".o")) {
                 if (!ctx->quiet || ctx->verbose)
                     printf("[%d/%d] (cached) %s\n", ++(*step), total, t->sources.data[i]);
                 else
@@ -1478,7 +1511,7 @@ serial_fallback:;
         rc = run_step(ctx, ++(*step), total, &a);
         free(a.data);
         if (rc == 0 && ctx->cache_dir)
-            cache_store(ctx->cache_dir, ckey, ofile);
+            cache_store(ctx->cache_dir, ckey, ofile, ".o");
         strarray_push(objs, xstrdup(ofile));
     }
     free_strarray(&owned);
@@ -1790,7 +1823,37 @@ static int build_target(Builder *ctx, const char *cc,
         }
         free(dep_seen.data);
 
-        int brc = run_step(ctx, ++(*step), total, &a);
+        // Per-target incremental cache for bytecode (#562).
+        // Level 1: mtime fast path — skip if output is newer than all sources.
+        // Level 2: content-hash CAS — restore from cache if key matches.
+        const char *bc_ext = t->bytecode_subkind == 1 ? ".c4a"
+                           : t->bytecode_subkind == 2 ? ".c4d" : ".c4";
+        uint64_t bc_key = 0;
+        int brc = 0;
+
+        if (ctx->cache_dir && !ctx->dry_run) {
+            if (bytecode_output_is_current(out_abs, &agg_srcs)) {
+                if (!ctx->quiet || ctx->verbose)
+                    printf("[%d/%d] (cached) %s\n", ++(*step), total, t->name);
+                else
+                    ++(*step);
+                goto bytecode_done;
+            }
+            bc_key = bytecode_target_cache_key((char *const *)a.data, &agg_srcs);
+            if (cache_lookup(ctx->cache_dir, bc_key, out_abs, bc_ext)) {
+                if (!ctx->quiet || ctx->verbose)
+                    printf("[%d/%d] (cached) %s\n", ++(*step), total, t->name);
+                else
+                    ++(*step);
+                goto bytecode_done;
+            }
+        }
+
+        brc = run_step(ctx, ++(*step), total, &a);
+        if (brc == 0 && ctx->cache_dir && !ctx->dry_run && bc_key)
+            cache_store(ctx->cache_dir, bc_key, out_abs, bc_ext);
+
+    bytecode_done:
         free(a.data);
         free_strarray(&owned);
         free(agg_srcs.data);

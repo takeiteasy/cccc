@@ -96,7 +96,7 @@ cccc --build build.c --build-cache=~/.cache/cccc  # incremental builds with expl
 | `--build-verbose` | off | Print a per-target header (`>> target 'name' [kind, N source(s)]`) before each target and show all command lines. Overrides `--build-quiet`. `-v` also enables this. |
 | `--build-list-targets` | off | Print the names of all `[[cccc::build_target]]` factory functions (one per line) and exit without running the build entry. |
 | `--build-profile=NAME` | (none) | Set a global build profile for all targets: `debug`, `release`, `relwithdebinfo`, or `minsizerel`. Individual targets can override with `SetProfile`. |
-| `--build-cache[=PATH]` | (off) | Enable incremental builds. Two-level strategy: (1) mtime fast path — skips recompile when the existing `.o` is newer than the source; (2) content-hash CAS — on a mtime miss, looks up `hash(source_content + compile_flags)` in a content-addressable store and restores the cached `.o` without recompiling. Objects compiled fresh are stored in the CAS for future reuse. Default cache directory: `<out-dir>/.cccc-cache`. Pass `=PATH` to use a shared or cross-build cache directory. |
+| `--build-cache[=PATH]` | (off) | Enable incremental builds. Two-level strategy: (1) mtime fast path — skips recompile when the existing output is newer than all sources; (2) content-hash CAS — on a mtime miss, looks up `hash(source_content + compile_flags)` in a content-addressable store and restores the cached output without recompiling. Native targets cache at per-source (`.o`) granularity; bytecode targets cache at per-target granularity (all sources hashed together). Outputs compiled fresh are stored in the CAS for future reuse. Default cache directory: `<out-dir>/.cccc-cache`. Pass `=PATH` to use a shared or cross-build cache directory. |
 | `--build-option=KEY=VALUE` | (none) | Pass a typed build option to the build script. Queried via `GetBuildOption(ctx, key)` / `HaveBuildOption(ctx, key)`. Repeated flags accumulate. (#559) |
 | `--build-install` | off | After a successful build, copy artifacts registered with `InstallArtifact` to the install prefix. Default prefix: `PREFIX` env var or `/usr/local`. (#560) |
 | `-- [args...]` | (none) | Positional arguments forwarded to the build entry. Accessible via `BuildArgc(ctx)` / `BuildArgv(ctx, i)`. (#558) |
@@ -213,8 +213,8 @@ cccc --build build.c --build-target=bc_app
 ```
 
 Flags forwarded to the `cccc` invocation: `-I`, `-D`, `-U`, `--std`. Native
-`cflags`/`ldflags`/profile flags are skipped. Incremental per-source caching is
-not yet supported for bytecode targets.
+`cflags`/`ldflags`/profile flags are skipped. Incremental caching is supported
+via `--build-cache` at per-target granularity (all sources hashed together).
 
 ### Bytecode static libraries (`.c4a`)
 
@@ -869,6 +869,7 @@ cross-compilation via `--build-triple` / `SetTargetTriple` and
 `--build-cc` / `SetToolchain` (#547),
 `GetEnv` / `CaptureCommand` / `FileExists` environment and filesystem helpers,
 `--build-cache[=PATH]` incremental builds with mtime + content-hash CAS (#546),
+incremental per-target caching for `kind=bytecode` targets (#562),
 `kind=bytecode` build targets producing `.c4` executables via whole-program cccc
 compilation (#545),
 `LinkWith` between bytecode targets via source-folding (#563),
