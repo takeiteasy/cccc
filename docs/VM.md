@@ -520,6 +520,39 @@ addend          — addend baked into the pointer (usually 0)
 target_segment  — 0 = data segment, 1 = text segment
 ```
 
+### Module Loading — `.c4d` files
+
+Bytecode dynamic modules (`.c4d`, built via `DynamicLib(kind=bytecode)`) can be
+appended into a running VM at runtime:
+
+```c
+#include "cccc.h"
+int cc_load_module(VirtualMachine *vm, const char *path);
+```
+
+`cc_load_module` loads the `.c4d` file into a staging VM via `cc_load_bytecode`,
+then merges its segments into the host VM:
+
+1. **Text append**: the staging text words (indices 1…N, skipping the `main_offset`
+   metadata slot at 0) are appended to `vm->text_seg`. All absolute-PC operands
+   in the appended block are patched by `pc_shift = host_vm->text_ptr` — the
+   instruction-index offset at append time.
+2. **PC-typed operands patched**: `JMP`/`CALL`/`CALLT` (operand 0), `JZ3`/`JNZ3`
+   (operand 1), `JMPT` (operand 0 and operand 2 plus inline table entries), `LTA3`
+   (64-bit byte-offset immediate, shifted by `pc_shift × sizeof(InstrWord)`).
+3. **Data append**: staging data bytes are appended; all data-reloc pointer slots
+   are re-anchored to the host VM's segment base addresses.
+4. **TLS merge**: TLS template and relocs from the module are appended and adjusted.
+5. **Return-buffer merge**: return-buffer pool entries are merged with adjusted
+   `data_shift` offsets.
+6. **FFI merge**: FFI table entries from the module are merged (name strings are
+   transferred; `asm_src` passthru entries remain independently rehydratable).
+
+**Cross-module CALL limitation**: if the exe and the `.c4d` were compiled
+separately, direct `CALL` instructions from the exe into the module's functions are
+unresolvable — the `.c4` format does not yet carry a symbol table or text-relocation
+entries. A follow-up ticket covers exported symbol tables and text relocations.
+
 ### Asm-Passthru Rehydration
 
 FFI entries created by `--asm-passthru` cannot survive serialisation as raw function pointers because the compiled shared library is unlinked immediately after `dlopen`.  The `.c4` format stores the original assembly source string (`asm_src`) alongside each such entry (flagged `is_asm_passthru = 1`).  On load, `cc_rehydrate_asm_passthru()` recompiles each `asm_src` string into a fresh temporary shared library, `dlopen`s it, and resolves the function pointer — making the round-trip transparent to the program.

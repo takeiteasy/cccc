@@ -2864,6 +2864,22 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f);
 int cc_load_bytecode(VirtualMachine *vm, const char *path);
 
 /*!
+ @function cc_load_module
+ @abstract Append a compiled bytecode module (.c4d or .c4a) into a running VM.
+ @discussion Merges the module's text and data segments onto the host VM.
+             All absolute-PC jump/call operands and text-relative (LTA3)
+             immediates in the appended text are patched by the pre-append text
+             size. Data pointer slots are re-anchored. FFI, TLS, and return-buffer
+             metadata are merged. The module should be compiled with `-c bytecode`
+             (no main() required). Cross-module direct CALL resolution is not
+             supported; communicate via data-segment function pointers. (#564)
+ @param vm   The running CCCC VM instance to load the module into.
+ @param path Path to the .c4d (or .c4a) bytecode module file.
+ @return 0 on success, -1 on error.
+*/
+int cc_load_module(VirtualMachine *vm, const char *path);
+
+/*!
  @function cc_add_breakpoint
  @abstract Add a breakpoint at a specific program counter.
  @param vm The CCCC instance.

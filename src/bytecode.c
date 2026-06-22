@@ -813,6 +813,297 @@ int cc_load_bytecode(VirtualMachine *vm, const char *path) {
     return result;
 }
 
+// ============================================================================
+// cc_load_module: append a .c4d (or .c4a) bytecode module into a running VM.
+// The module's text and data segments are concatenated onto the host VM's
+// existing segments; all absolute-PC jump/call operands and text-relative
+// (LTA3) immediates in the appended text are patched by the pre-append text
+// size. Data-segment pointer slots are re-anchored for the host VM's segment
+// bases. FFI, TLS, and return-buffer metadata are merged. (#564)
+// ============================================================================
+
+// Patch one instruction starting at staging VM text position `i` into main VM.
+// `pc_shift` = instruction-index offset (staging PC s maps to main PC s+pc_shift).
+// Returns the total word count of this instruction (opcode + operands), or -1
+// on error.
+static int patch_and_copy_instr(VirtualMachine *stage, VirtualMachine *vm,
+                                 Pc i, Pc pc_shift) {
+    int op = (int)stage->text_seg[i];
+    Pc dest = i + pc_shift;
+
+    // Default: copy opcode as-is.
+    vm->text_seg[dest] = stage->text_seg[i];
+
+    switch (op) {
+    case JMP:
+    case CALL:
+    case CALLT:
+        // Format: [OPCODE] [target_pc:32]
+        vm->text_seg[dest + 1] = stage->text_seg[i + 1] + pc_shift;
+        return 2;
+
+    case JZ3:
+    case JNZ3:
+        // Format: [OPCODE] [rs_operand:32] [target_pc:32]
+        vm->text_seg[dest + 1] = stage->text_seg[i + 1]; // register operand, no patch
+        vm->text_seg[dest + 2] = stage->text_seg[i + 2] + pc_shift;
+        return 3;
+
+    case JMPT: {
+        // Format: [JMPT] [table_pc:32] [count:32] [default_pc:32] [pc0..pcN-1]
+        Pc table_pc  = stage->text_seg[i + 1];
+        InstrWord cnt = stage->text_seg[i + 2];
+        Pc default_pc = stage->text_seg[i + 3];
+        vm->text_seg[dest + 1] = table_pc + pc_shift;
+        vm->text_seg[dest + 2] = cnt; // count, not a PC
+        vm->text_seg[dest + 3] = default_pc + pc_shift;
+        int total = 4;
+        // Inline table: entries immediately follow the 3-operand header.
+        if (table_pc == i + 4) {
+            for (InstrWord j = 0; j < cnt; j++) {
+                vm->text_seg[dest + 4 + j] = stage->text_seg[i + 4 + j] + pc_shift;
+            }
+            total += (int)cnt;
+        }
+        return total;
+    }
+
+    case LTA3: {
+        // Format: [LTA3] [rd:32] [byte_offset_lo:32] [byte_offset_hi:32]
+        // The immediate is a text-segment BYTE OFFSET (not instruction index).
+        vm->text_seg[dest + 1] = stage->text_seg[i + 1]; // rd operand, no patch
+        long long old_off = cc_make_i64(stage->text_seg[i + 2], stage->text_seg[i + 3]);
+        long long new_off = old_off + (long long)pc_shift * (long long)sizeof(InstrWord);
+        vm->text_seg[dest + 2] = cc_i64_lo(new_off);
+        vm->text_seg[dest + 3] = cc_i64_hi(new_off);
+        return 4;
+    }
+
+    default: {
+        // All other opcodes: copy operand words verbatim (no PC values).
+        int n_ops = cc_opcode_operand_words(op);
+        if (n_ops < 0) {
+            fprintf(stderr, "cc_load_module: unknown opcode %d in module\n", op);
+            return -1;
+        }
+        for (int k = 1; k <= n_ops; k++)
+            vm->text_seg[dest + k] = stage->text_seg[i + k];
+        return n_ops + 1;
+    }
+    }
+}
+
+int cc_load_module(VirtualMachine *vm, const char *path) {
+    if (!vm || !path) {
+        fprintf(stderr, "error: invalid arguments to cc_load_module\n");
+        return -1;
+    }
+    if (!vm->text_seg || !vm->data_seg) {
+        fprintf(stderr, "cc_load_module: host VM has no segments (not initialised)\n");
+        return -1;
+    }
+
+    // Load the module into a fresh staging VM.
+    VirtualMachine stage;
+    memset(&stage, 0, sizeof(stage));
+    cc_init(&stage, 0);
+    if (cc_load_bytecode(&stage, path) != 0) {
+        cc_destroy(&stage);
+        return -1;
+    }
+
+    // Number of code words in the staging VM: text_seg[1..text_ptr].
+    // text_seg[0] is the main_offset metadata slot (0 for libraries).
+    Pc stage_code_words = stage.text_ptr;   // words 1..text_ptr
+
+    // PC shift: staging instruction at index s maps to host index s + pc_shift.
+    Pc pc_shift = vm->text_ptr;             // host's current last-word index
+
+    // Data byte base in host VM where staging data will land.
+    long long data_shift = (long long)(vm->data_ptr - vm->data_seg);
+
+    // Text byte shift for LTA3 immediates.
+    long long text_byte_shift = (long long)pc_shift * (long long)sizeof(InstrWord);
+
+    // TLS base in host VM.
+    size_t tls_shift = vm->tls_template_size;
+
+    // --- Grow host text segment and copy+patch module instructions ---
+    if (stage_code_words > 0) {
+        Pc new_text_ptr = vm->text_ptr + stage_code_words;
+        if (vm_text_ensure_count(vm, new_text_ptr + 1) != 0) {
+            fprintf(stderr, "cc_load_module: could not grow text segment\n");
+            cc_destroy(&stage);
+            return -1;
+        }
+        // Scan staging text[1..text_ptr] and copy+patch into host.
+        for (Pc i = 1; i <= stage.text_ptr; ) {
+            int words = patch_and_copy_instr(&stage, vm, i, pc_shift);
+            if (words < 0) {
+                cc_destroy(&stage);
+                return -1;
+            }
+            i += (Pc)words;
+        }
+        vm->text_ptr = new_text_ptr;
+    }
+
+    // --- Append data segment ---
+    long long stage_data_size = (long long)(stage.data_ptr - stage.data_seg);
+    if (stage_data_size > 0) {
+        if (vm_data_ensure(vm, data_shift + stage_data_size) != 0) {
+            fprintf(stderr, "cc_load_module: could not grow data segment\n");
+            cc_destroy(&stage);
+            return -1;
+        }
+        memcpy(vm->data_ptr, stage.data_seg, (size_t)stage_data_size);
+        vm->data_ptr += stage_data_size;
+    }
+
+    // --- Re-anchor staging data relocations in host data segment ---
+    for (int i = 0; i < stage.compiler.num_data_relocs; i++) {
+        long long do_  = stage.compiler.data_relocs[i].data_offset;
+        int      ts    = stage.compiler.data_relocs[i].target_segment;
+        long long to   = stage.compiler.data_relocs[i].target_offset;
+        long long addend = stage.compiler.data_relocs[i].addend;
+
+        long long new_val;
+        if (ts == 0)
+            new_val = (long long)(vm->data_seg + data_shift + to + addend);
+        else
+            new_val = text_byte_shift + to + addend;
+        *(long long *)(vm->data_seg + data_shift + do_) = new_val;
+
+        // Record in host reloc table (needed for future serialisation).
+        int idx = vm->compiler.num_data_relocs;
+        if (idx >= vm->compiler.data_relocs_cap) {
+            int new_cap = vm->compiler.data_relocs_cap ? vm->compiler.data_relocs_cap * 2 : 16;
+            void *tmp = realloc(vm->compiler.data_relocs,
+                                (size_t)new_cap * sizeof(*vm->compiler.data_relocs));
+            if (!tmp) {
+                fprintf(stderr, "cc_load_module: out of memory for data reloc table\n");
+                cc_destroy(&stage);
+                return -1;
+            }
+            vm->compiler.data_relocs = tmp;
+            vm->compiler.data_relocs_cap = new_cap;
+        }
+        vm->compiler.data_relocs[idx].data_offset    = data_shift + do_;
+        vm->compiler.data_relocs[idx].target_segment = ts;
+        vm->compiler.data_relocs[idx].target_offset  = (ts == 0)
+            ? data_shift + to : text_byte_shift + to;
+        vm->compiler.data_relocs[idx].addend         = addend;
+        vm->compiler.num_data_relocs++;
+    }
+
+    // --- Append TLS template ---
+    if (stage.tls_template_size > 0) {
+        size_t new_tls_size = vm->tls_template_size + stage.tls_template_size;
+        if (new_tls_size > vm->tls_template_cap) {
+            size_t new_cap = new_tls_size * 2;
+            void *tmp = realloc(vm->tls_template, new_cap);
+            if (!tmp) {
+                fprintf(stderr, "cc_load_module: out of memory for TLS template\n");
+                cc_destroy(&stage);
+                return -1;
+            }
+            vm->tls_template     = tmp;
+            vm->tls_template_cap = new_cap;
+        }
+        memcpy(vm->tls_template + vm->tls_template_size,
+               stage.tls_template, stage.tls_template_size);
+        vm->tls_template_size = new_tls_size;
+
+        // Re-anchor TLS relocs.
+        for (int i = 0; i < stage.compiler.num_tls_relocs; i++) {
+            long long to_  = stage.compiler.tls_relocs[i].tls_offset;
+            int      ts    = stage.compiler.tls_relocs[i].target_segment;
+            long long tgt  = stage.compiler.tls_relocs[i].target_offset;
+            long long addend = stage.compiler.tls_relocs[i].addend;
+
+            long long new_val;
+            if (ts == 0)
+                new_val = (long long)(vm->data_seg + data_shift + tgt + addend);
+            else
+                new_val = text_byte_shift + tgt + addend;
+            *(long long *)(vm->tls_template + tls_shift + to_) = new_val;
+
+            int idx = vm->compiler.num_tls_relocs;
+            if (idx >= vm->compiler.tls_relocs_cap) {
+                int new_cap = vm->compiler.tls_relocs_cap
+                            ? vm->compiler.tls_relocs_cap * 2 : 16;
+                void *tmp = realloc(vm->compiler.tls_relocs,
+                                    (size_t)new_cap * sizeof(*vm->compiler.tls_relocs));
+                if (!tmp) {
+                    fprintf(stderr, "cc_load_module: out of memory for TLS reloc table\n");
+                    cc_destroy(&stage);
+                    return -1;
+                }
+                vm->compiler.tls_relocs     = tmp;
+                vm->compiler.tls_relocs_cap = new_cap;
+            }
+            vm->compiler.tls_relocs[idx].tls_offset     = (long long)tls_shift + to_;
+            vm->compiler.tls_relocs[idx].target_segment = ts;
+            vm->compiler.tls_relocs[idx].target_offset  = (ts == 0)
+                ? data_shift + tgt : text_byte_shift + tgt;
+            vm->compiler.tls_relocs[idx].addend         = addend;
+            vm->compiler.num_tls_relocs++;
+        }
+    }
+
+    // --- Merge return-buffer pool entries ---
+    for (int i = 0; i < stage.compiler.return_buffer_count; i++) {
+        long long old_off = stage.compiler.return_buffer_offsets[i];
+        if (old_off < 0) continue;
+        long long new_off = data_shift + old_off;
+        int idx = vm->compiler.return_buffer_count;
+        if (idx >= RETURN_BUFFER_POOL_SIZE) {
+            fprintf(stderr, "cc_load_module: return-buffer pool full; "
+                    "module return buffers not added\n");
+            break;
+        }
+        vm->compiler.return_buffer_offsets[idx] = new_off;
+        vm->compiler.return_buffer_pool[idx] = vm->data_seg + new_off;
+        vm->compiler.return_buffer_count++;
+        if (vm->compiler.return_buffer_size == 0 && stage.compiler.return_buffer_size > 0)
+            vm->compiler.return_buffer_size = stage.compiler.return_buffer_size;
+    }
+
+    // --- Merge FFI table ---
+    if (stage.compiler.ffi_count > 0) {
+        int new_total = vm->compiler.ffi_count + stage.compiler.ffi_count;
+        if (new_total > vm->compiler.ffi_capacity) {
+            void *tmp = realloc(vm->compiler.ffi_table,
+                                (size_t)new_total * sizeof(ForeignFunc));
+            if (!tmp) {
+                fprintf(stderr, "cc_load_module: out of memory for FFI table\n");
+                cc_destroy(&stage);
+                return -1;
+            }
+            vm->compiler.ffi_table    = tmp;
+            vm->compiler.ffi_capacity = new_total;
+        }
+        memcpy(vm->compiler.ffi_table + vm->compiler.ffi_count,
+               stage.compiler.ffi_table,
+               (size_t)stage.compiler.ffi_count * sizeof(ForeignFunc));
+        // FFI name strings are owned by each entry; clear them in stage so
+        // cc_destroy doesn't double-free them.
+        for (int i = 0; i < stage.compiler.ffi_count; i++) {
+            stage.compiler.ffi_table[i].name    = NULL;
+            stage.compiler.ffi_table[i].asm_src = NULL;
+        }
+        vm->compiler.ffi_count = new_total;
+    }
+
+    if (vm->debug_vm) {
+        printf("cc_load_module: loaded '%s' (%lld text words, %lld data bytes)\n",
+               path, (long long)stage_code_words, stage_data_size);
+    }
+
+    cc_destroy(&stage);
+    return 0;
+}
+
 static int source_index_cmp(const void *a, const void *b) {
     const SourceIndex *sa = (const SourceIndex *)a;
     const SourceIndex *sb = (const SourceIndex *)b;

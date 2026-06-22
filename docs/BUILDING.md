@@ -10,7 +10,7 @@ by the same preprocessor / parser / VM as every other CCCC source file. The mode
 mirrors `--testing` (see [TESTING.md](TESTING.md)) and reuses the
 `[[cccc::comptime]]` interception machinery (see [MACROS.md](MACROS.md)).
 
-> v1 produces **native** output only. See [Scope](#scope) for what is deferred.
+> Native and bytecode output is supported. See [Scope](#scope) for what is deferred.
 
 ## Quick start
 
@@ -216,26 +216,79 @@ Flags forwarded to the `cccc` invocation: `-I`, `-D`, `-U`, `--std`. Native
 `cflags`/`ldflags`/profile flags are skipped. Incremental per-source caching is
 not yet supported for bytecode targets.
 
+### Bytecode static libraries (`.c4a`)
+
+A `StaticLib()` returned from a `kind=bytecode` factory produces a `.c4a` file
+(default path `lib/<name>.c4a`) — the bytecode equivalent of a native `.a` archive.
+The sources are compiled as a single `cccc -c bytecode` invocation (which skips the
+`main()` requirement).
+
+```c
+[[cccc::build_target(kind=bytecode)]]
+BuildTarget *bc_mathlib(Builder *ctx) {
+    BuildTarget *lib = StaticLib(ctx, "mathlib");
+    AddSource(lib, "src/math.c");
+    AddInclude(lib, "include");
+    return lib;
+}
+```
+
+```sh
+cccc --build build.c --build-target=bc_mathlib
+# produces build/lib/mathlib.c4a
+```
+
+### Bytecode dynamic modules (`.c4d`)
+
+A `DynamicLib()` returned from (or created inside) a `kind=bytecode` factory
+produces a `.c4d` file (default path `lib/<name>.c4d`) — a bytecode module that
+can be loaded into a running CCCC VM at runtime via `cc_load_module()`.
+
+```c
+[[cccc::build_target(kind=bytecode)]]
+BuildTarget *bc_plugin(Builder *ctx) {
+    BuildTarget *plugin = DynamicLib(ctx, "plugin");
+    AddSource(plugin, "src/plugin.c");
+    return plugin;
+}
+```
+
+```sh
+cccc --build build.c --build-target=bc_plugin
+# produces build/lib/plugin.c4d
+```
+
 ### LinkWith between bytecode targets
 
 `LinkWith(app, lib)` is supported when `app` is a `kind=bytecode` target (#563).
-The library target's sources are **folded** (transitively, deduplicated) into
+The linked target's sources are **folded** (transitively, deduplicated) into
 `app`'s single `cccc` invocation — reusing CCCC's existing AST-level merge.
-The library target is not built standalone and may omit `main()`.
+Folded targets may omit `main()`.
+
+Inside a `kind=bytecode` factory, `StaticLib()` and `DynamicLib()` targets are
+automatically treated as bytecode (no separate annotation needed):
+- `StaticLib` deps are **folded** into the exe's cccc invocation (same as `Executable` deps).
+- `DynamicLib` deps are **not folded**; they are built as standalone `.c4d` modules
+  and loaded at runtime via `cc_load_module()`. Use `DependsOn(exe, plugin)` to
+  ensure the `.c4d` is built before the exe.
 
 ```c
 [[cccc::build_target(kind=bytecode)]]
 BuildTarget *bc_app(Builder *ctx) {
-    // Library: defines helper functions, no main().
-    BuildTarget *lib = Executable(ctx, "mylib");
+    // Static lib dep: sources folded into exe at compile time.
+    BuildTarget *lib = StaticLib(ctx, "mylib");
     AddSource(lib, "src/lib.c");
     AddInclude(lib, "include");
 
-    // Executable: calls functions from lib.
+    // Dynamic module dep: built as .c4d, loaded at runtime.
+    BuildTarget *plugin = DynamicLib(ctx, "plugin");
+    AddSource(plugin, "src/plugin.c");
+
     BuildTarget *app = Executable(ctx, "app");
     AddSource(app, "src/main.c");
     AddInclude(app, "include");
-    LinkWith(app, lib);
+    LinkWith(app, lib);        // lib.c sources folded in
+    DependsOn(app, plugin);    // plugin.c4d built first, not folded
     return app;
 }
 ```
@@ -243,12 +296,36 @@ BuildTarget *bc_app(Builder *ctx) {
 `DependsOn` edges are ordering-only (as for native targets). `LinkWith` from a
 bytecode target to a source-less target (a `CUSTOM` step or a native FFI library)
 is ignored with a warning; native linking into `.c4` goes through FFI, not
-`LinkWith`. A target folded into a bytecode executable via `LinkWith` is a
-bytecode library and is not also native-linked.
+`LinkWith`.
 
-**Out of scope:** linking a prebuilt `.c4` with no corresponding source (that
-would require a bytecode-level linker with symbol tables and text relocations,
-which the `.c4` format does not currently provide).
+### Runtime module loading — `cc_load_module`
+
+A `.c4d` module built by the build system can be appended into a running VM:
+
+```c
+#include "cccc.h"
+
+int main(void) {
+    VirtualMachine *vm = cc_init(NULL);
+    cc_load_module(vm, "build/lib/plugin.c4d");
+    // module's functions are now available in vm's symbol table
+    cc_destroy(vm);
+    return 0;
+}
+```
+
+`cc_load_module` appends the module's text and data segments into the host VM,
+patching all absolute PC operands (jump/call targets) by the pre-append text size,
+and re-anchoring data relocations. FFI registrations from the module are merged.
+
+**Cross-module CALL limitation:** if the exe and the `.c4d` were compiled
+separately (not via source-folding), direct `CALL` instructions from the exe to
+symbols in the module are unresolvable — the `.c4` format does not yet carry a
+symbol table or text-relocation entries. A follow-up ticket covers adding exported
+symbol tables and text relocations to the `.c4`/`.c4a`/`.c4d` format.
+
+**Out of scope for now:** linking a prebuilt `.c4a` without source (that would
+require a bytecode-level linker with symbol tables and text relocations).
 
 The attribute accepts C23 and GNU forms:
 
@@ -271,6 +348,8 @@ __attribute__((cccc::build_target))
 | Dynamic library | `DynamicLib(name)` | `lib/lib<name>.{so,dylib}` | `cc -shared` |
 | Custom step | `RunCustom(name, cmd)` | (none) | vendored shell |
 | Bytecode executable | `Executable(name)` + `kind=bytecode` | `bin/<name>.c4` | `cccc` |
+| Bytecode static lib | `StaticLib(name)` + `kind=bytecode` | `lib/<name>.c4a` | `cccc -c bytecode` |
+| Bytecode dynamic mod | `DynamicLib(name)` + `kind=bytecode` | `lib/<name>.c4d` | `cccc -c bytecode` |
 
 ## Builder API
 
@@ -775,6 +854,10 @@ cross-compilation via `--build-triple` / `SetTargetTriple` and
 `--build-cache[=PATH]` incremental builds with mtime + content-hash CAS (#546),
 `kind=bytecode` build targets producing `.c4` executables via whole-program cccc
 compilation (#545),
+`LinkWith` between bytecode targets via source-folding (#563),
+`StaticLib(kind=bytecode)` producing `.c4a` files and `DynamicLib(kind=bytecode)`
+producing `.c4d` modules, runtime `cc_load_module()` API for appending `.c4d`
+modules into a running VM (#564),
 `FindTool` / `AddFramework` / `GetBuildOption` / `HaveBuildOption` /
 `--build-option=KEY=VALUE` (#559),
 `InstallArtifact` / `SetInstallPrefix` / `BuildWantsInstall` / `--build-install` (#560),

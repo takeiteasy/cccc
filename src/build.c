@@ -95,6 +95,10 @@ struct BuildTarget {
     // sources are folded into the dependent's single cccc invocation and it is
     // not built standalone.
     int bytecode_folded;
+    // Subkind for CCCC_TGT_BYTECODE targets (#564): 0=exe, 1=static lib, 2=dynamic lib.
+    // Static libs (.c4a) are still folded into dependent bytecode exe builds via source-
+    // folding; dynamic libs (.c4d) are runtime-loaded and never folded.
+    int bytecode_subkind;
 };
 
 struct Builder {
@@ -237,7 +241,12 @@ static char *default_output(const BuildTarget *t) {
     case CCCC_TGT_CUSTOM:
         return xstrdup(""); // custom targets have no output artifact
     case CCCC_TGT_BYTECODE:
-        snprintf(buf, sizeof(buf), "bin/%s.c4", t->name);
+        if (t->bytecode_subkind == 1)
+            snprintf(buf, sizeof(buf), "lib/%s.c4a", t->name);
+        else if (t->bytecode_subkind == 2)
+            snprintf(buf, sizeof(buf), "lib/%s.c4d", t->name);
+        else
+            snprintf(buf, sizeof(buf), "bin/%s.c4", t->name);
         break;
     }
     return xstrdup(buf);
@@ -1548,11 +1557,15 @@ static void collect_bytecode_inputs(BuildTarget *t,
     }
 }
 
-// Mark transitive LinkWith deps of every kind=bytecode target as folded.
-// A folded target is a bytecode library: not built standalone, sources folded
-// into its dependent's single cccc invocation.
+// Mark transitive LinkWith deps of every kind=bytecode exe target as folded.
+// A folded target is a bytecode static library: not built standalone, its
+// sources are folded into the dependent's single cccc invocation.
+// Dynamic bytecode libs (bytecode_subkind==2) are NOT folded — they are
+// runtime-loaded modules and must be built as standalone .c4d artifacts (#564).
 static void mark_bytecode_folded_deps(BuildTarget *dep) {
     if (dep->bytecode_folded) return; // already visited
+    // Dynamic bytecode libs are loaded at runtime; never fold.
+    if (dep->kind == CCCC_TGT_BYTECODE && dep->bytecode_subkind == 2) return;
     dep->bytecode_folded = 1;
     for (int i = 0; i < dep->deps_count; i++) {
         if (dep->deps_link[i])
@@ -1574,7 +1587,9 @@ static int build_target(Builder *ctx, const char *cc,
         const char *kind_str = t->kind == CCCC_TGT_EXE      ? "executable"
                              : t->kind == CCCC_TGT_STATIC    ? "static library"
                              : t->kind == CCCC_TGT_DYNAMIC   ? "dynamic library"
-                             : t->kind == CCCC_TGT_BYTECODE  ? "bytecode"
+                             : t->kind == CCCC_TGT_BYTECODE  ? (t->bytecode_subkind == 1 ? "bytecode-static"
+                                                               : t->bytecode_subkind == 2 ? "bytecode-dynamic"
+                                                               :                            "bytecode")
                              :                                  "custom";
         if (t->kind == CCCC_TGT_CUSTOM)
             printf(">> target '%s' [%s]\n", t->name, kind_str);
@@ -1628,9 +1643,13 @@ static int build_target(Builder *ctx, const char *cc,
         return 1;
     }
 
-    // Bytecode target (#545 + #563): single whole-program cccc invocation → .c4.
-    // LinkWith deps (transitively) are folded in by aggregating their sources into
-    // this same invocation, reusing CCCC's existing AST-level multi-TU merge.
+    // Bytecode target (#545 + #563 + #564): single whole-program cccc invocation.
+    // exe (bytecode_subkind=0)     → bin/<name>.c4   (runs cccc without -c; main required)
+    // static lib (subkind=1)       → lib/<name>.c4a  (cccc -c bytecode; no main required)
+    // dynamic lib (subkind=2)      → lib/<name>.c4d  (cccc -c bytecode; no main required)
+    // For static libs, source-folding (collecting deps' sources) still applies so the
+    // .c4a is a self-contained compilable snapshot.  For dynamic libs, the same folding
+    // applies so .c4d modules are self-contained and loadable via cc_load_module().
     // Source-less LinkWith deps (CUSTOM targets, native FFI libs) are skipped with
     // a warning — linking native artifacts into bytecode requires FFI, not LinkWith.
     if (t->kind == CCCC_TGT_BYTECODE) {
@@ -1676,6 +1695,12 @@ static int build_target(Builder *ctx, const char *cc,
         argv_push(&a, cccc_bin);
         for (int i = 0; i < agg_srcs.len; i++)
             argv_push(&a, agg_srcs.data[i]);
+        // Library targets (static .c4a / dynamic .c4d) need -c bytecode so that
+        // cccc compiles without requiring main() and exits after writing bytecode.
+        if (t->bytecode_subkind != 0) {
+            argv_push(&a, "-c");
+            argv_push(&a, "bytecode");
+        }
         argv_push(&a, "-o");
         argv_push(&a, out_abs);
 
@@ -2038,6 +2063,14 @@ static int run_install(Builder *ctx) {
         case CCCC_TGT_DYNAMIC:
             snprintf(dest_rel, sizeof(dest_rel), "lib/lib%s.%s", t->name, CCCC_DYLIB_EXT);
             break;
+        case CCCC_TGT_BYTECODE:
+            if (t->bytecode_subkind == 1)
+                snprintf(dest_rel, sizeof(dest_rel), "lib/%s.c4a", t->name);
+            else if (t->bytecode_subkind == 2)
+                snprintf(dest_rel, sizeof(dest_rel), "lib/%s.c4d", t->name);
+            else
+                snprintf(dest_rel, sizeof(dest_rel), "bin/%s.c4", t->name);
+            break;
         default:
             fprintf(stderr, "build: install: cannot install target '%s' (unsupported kind)\n",
                     t->name);
@@ -2187,17 +2220,36 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                 BuildTarget *tgt = (BuildTarget *)(intptr_t)vm->regs[REG_A0];
                 s_ctx = NULL;
 
-                // Apply factory-level kind=bytecode override (#545): if the
-                // matching factory record declares kind=bytecode and the factory
-                // returned an EXE target, promote it to CCCC_TGT_BYTECODE so the
-                // host runner uses the bytecode compilation pipeline.
-                if (tgt && tgt->kind == CCCC_TGT_EXE) {
+                // Apply factory-level kind=bytecode override (#545, #564): if the
+                // matching factory record declares kind=bytecode, promote the
+                // returned target AND all StaticLib/DynamicLib targets created
+                // within the factory to CCCC_TGT_BYTECODE with the appropriate
+                // bytecode_subkind so the host runner uses the bytecode pipeline.
+                // EXE deps are intentionally left as CCCC_TGT_EXE: they are
+                // consumed via source-folding, not built standalone.
+                bool factory_is_bytecode = false;
+                if (tgt) {
                     for (BuildTargetFnRecord *r = vm->compiler.build_target_fns;
                          r; r = r->next) {
                         if (strcmp(r->name, opts->target_name) == 0 &&
                             r->kind && strcmp(r->kind, "bytecode") == 0) {
-                            tgt->kind = CCCC_TGT_BYTECODE;
+                            factory_is_bytecode = true;
                             break;
+                        }
+                    }
+                }
+                if (factory_is_bytecode) {
+                    for (int j = 0; j < ctx.targets_count; j++) {
+                        BuildTarget *dep = ctx.targets[j];
+                        if (dep->kind == CCCC_TGT_STATIC) {
+                            dep->kind = CCCC_TGT_BYTECODE;
+                            dep->bytecode_subkind = 1;
+                        } else if (dep->kind == CCCC_TGT_DYNAMIC) {
+                            dep->kind = CCCC_TGT_BYTECODE;
+                            dep->bytecode_subkind = 2;
+                        } else if (dep == tgt && dep->kind == CCCC_TGT_EXE) {
+                            dep->kind = CCCC_TGT_BYTECODE;
+                            dep->bytecode_subkind = 0;
                         }
                     }
                 }
