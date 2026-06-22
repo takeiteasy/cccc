@@ -2279,6 +2279,15 @@ int main(int argc, const char *argv[]) {
                     exit_code = 1;
                 }
             }
+            // Error on any remaining unresolved address relocations (#566).
+            for (int i = 0; i < vm.compiler.num_addr_relocs; i++) {
+                if (!vm.compiler.addr_relocs[i].resolved) {
+                    fprintf(stderr, "error: unresolved function pointer: %s\n",
+                            vm.compiler.addr_relocs[i].name
+                            ? vm.compiler.addr_relocs[i].name : "(unknown)");
+                    exit_code = 1;
+                }
+            }
             if (exit_code != 0) goto BAIL;
         }
         if (out_file) {
@@ -2382,6 +2391,14 @@ int main(int argc, const char *argv[]) {
                     fprintf(stderr, "error: unresolved external: %s\n",
                             vm.compiler.text_relocs[i].name
                             ? vm.compiler.text_relocs[i].name : "(unknown)");
+                    exit_code = 1;
+                }
+            }
+            for (int i = 0; i < vm.compiler.num_addr_relocs; i++) {
+                if (!vm.compiler.addr_relocs[i].resolved) {
+                    fprintf(stderr, "error: unresolved function pointer: %s\n",
+                            vm.compiler.addr_relocs[i].name
+                            ? vm.compiler.addr_relocs[i].name : "(unknown)");
                     exit_code = 1;
                 }
             }

@@ -345,6 +345,25 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f) {
         }
     }
 
+    // Write address relocations [V3+]: unresolved function-pointer sites (#566).
+    {
+        long long addr_reloc_count = 0;
+        for (int i = 0; i < vm->compiler.num_addr_relocs; i++)
+            if (!vm->compiler.addr_relocs[i].resolved) addr_reloc_count++;
+        if (fwrite(&addr_reloc_count, sizeof(long long), 1, f) != 1) goto write_error;
+        for (int i = 0; i < vm->compiler.num_addr_relocs; i++) {
+            if (vm->compiler.addr_relocs[i].resolved) continue;
+            long long loc = (long long)vm->compiler.addr_relocs[i].location;
+            int name_len = (int)vm->compiler.addr_relocs[i].name_len;
+            if (fwrite(&loc, sizeof(long long), 1, f) != 1) goto write_error;
+            if (fwrite(&name_len, sizeof(int), 1, f) != 1) goto write_error;
+            if (name_len > 0) {
+                if (fwrite(vm->compiler.addr_relocs[i].name, 1, (size_t)name_len, f)
+                        != (size_t)name_len) goto write_error;
+            }
+        }
+    }
+
     if (vm->debug_vm) {
         printf("  Text size: %lld bytes (%lld instructions)\n", text_size, num_instructions);
         printf("  Data size: %lld bytes\n", data_size);
@@ -358,6 +377,7 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f) {
                vm->ffi_allow_count, vm->ffi_deny_count, vm->disable_all_ffi);
         printf("  Symbol table: %d entries\n", vm->compiler.num_sym_table);
         printf("  Text relocations: %d unresolved\n", vm->compiler.num_text_relocs);
+        printf("  Address relocations: %d unresolved\n", vm->compiler.num_addr_relocs);
         printf("  Main offset: %lld\n", main_offset);
     }
 
@@ -823,6 +843,50 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
                 vm->compiler.num_text_relocs++;
             }
         }
+
+        // Read address relocations [V3+] (#566).
+        if (cursor < end) {
+            READ_AND_INCR(areloc_count, long long);
+            if (areloc_count < 0 || areloc_count > MAX_CALLS) {
+                fprintf(stderr, "error: invalid address relocation count\n");
+                return -1;
+            }
+            if (areloc_count > 0) {
+                void *_tmp = realloc(vm->compiler.addr_relocs,
+                                     (size_t)areloc_count * sizeof(*vm->compiler.addr_relocs));
+                if (!_tmp) {
+                    fprintf(stderr, "error: out of memory for address relocations\n");
+                    return -1;
+                }
+                vm->compiler.addr_relocs = _tmp;
+                vm->compiler.addr_relocs_cap = (int)areloc_count;
+            }
+            for (long long i = 0; i < areloc_count; i++) {
+                READ_AND_INCR(arloc, long long);
+                READ_AND_INCR(arname_len, int);
+                if (arname_len < 0 || arname_len > 4096 ||
+                    cursor + arname_len > end) {
+                    fprintf(stderr, "error: invalid address relocation entry\n");
+                    return -1;
+                }
+                char *arname = NULL;
+                if (arname_len > 0) {
+                    arname = malloc((size_t)arname_len + 1);
+                    if (!arname) {
+                        fprintf(stderr, "error: out of memory for relocation name\n");
+                        return -1;
+                    }
+                    memcpy(arname, cursor, (size_t)arname_len);
+                    arname[arname_len] = '\0';
+                    cursor += arname_len;
+                }
+                vm->compiler.addr_relocs[vm->compiler.num_addr_relocs].location = (Pc)arloc;
+                vm->compiler.addr_relocs[vm->compiler.num_addr_relocs].name     = arname;
+                vm->compiler.addr_relocs[vm->compiler.num_addr_relocs].name_len = (size_t)arname_len;
+                vm->compiler.addr_relocs[vm->compiler.num_addr_relocs].resolved = 0;
+                vm->compiler.num_addr_relocs++;
+            }
+        }
     }
 
     long long num_instructions = text_size / (long long)sizeof(InstrWord);
@@ -1268,6 +1332,25 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
                 Pc target_pc = stage.compiler.sym_table[j].pc_offset + pc_shift;
                 vm->text_seg[vm->compiler.text_relocs[i].location] = target_pc;
                 vm->compiler.text_relocs[i].resolved = 1;
+                break;
+            }
+        }
+    }
+
+    // --- Resolve host VM's addr relocations using the module's symbol table (#566) ---
+    // Patch any LTA3 i64 immediate in the host text that names a symbol now defined
+    // in the freshly-appended module code (function-pointer decay to cross-module fn).
+    for (int i = 0; i < vm->compiler.num_addr_relocs; i++) {
+        if (vm->compiler.addr_relocs[i].resolved) continue;
+        const char *want = vm->compiler.addr_relocs[i].name;
+        if (!want) continue;
+        for (int j = 0; j < stage.compiler.num_sym_table; j++) {
+            const char *sym = stage.compiler.sym_table[j].name;
+            if (sym && strcmp(sym, want) == 0) {
+                Pc target_pc = stage.compiler.sym_table[j].pc_offset + pc_shift;
+                cc_write_i64_at(vm, vm->compiler.addr_relocs[i].location,
+                                cc_pc_to_byte_offset(target_pc));
+                vm->compiler.addr_relocs[i].resolved = 1;
                 break;
             }
         }

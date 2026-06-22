@@ -1263,6 +1263,11 @@ void cc_destroy(VirtualMachine *vm) {
             free(vm->compiler.text_relocs[i].name);
         free(vm->compiler.text_relocs);
     }
+    if (vm->compiler.addr_relocs) {
+        for (int i = 0; i < vm->compiler.num_addr_relocs; i++)
+            free(vm->compiler.addr_relocs[i].name);
+        free(vm->compiler.addr_relocs);
+    }
 
     // Free FFI table
     if (vm->compiler.ffi_table) {

@@ -518,6 +518,12 @@ Saved bytecode files are self-contained and can be loaded into a fresh VM instan
 | [V3] Text relocs | N × (location: 8 bytes, name_len: 4 bytes, name: name_len bytes)
 |               |  location is the text-seg slot to patch when the symbol is resolved
 +---------------+
+| [V3] Addr reloc cnt | 8 bytes — count of unresolved function-pointer address sites
++---------------+
+| [V3] Addr relocs | N × (location: 8 bytes, name_len: 4 bytes, name: name_len bytes)
+|               |  location is the instruction-word index of the lo-word of the LTA3
+|               |  i64 immediate; resolved by writing cc_pc_to_byte_offset(target_pc)
++---------------+
 ```
 
 The V3 sections are appended at the end and are optional — older `.c4` files that
@@ -563,7 +569,10 @@ then merges its segments into the host VM:
 7. **Symbol resolution**: the host VM's pending text relocations (`vm->compiler.text_relocs`)
    are scanned against the module's exported symbol table.  Any CALL site whose
    target symbol name appears in the module is patched to `sym.pc_offset + pc_shift`
-   and marked resolved.
+   and marked resolved.  Address relocations (`vm->compiler.addr_relocs`) are also
+   resolved: each records the lo-word PC of an LTA3 i64 immediate for a cross-module
+   function-pointer; the resolved value is `cc_pc_to_byte_offset(sym.pc_offset + pc_shift)`
+   written via `cc_write_i64_at`.
 
 ### Static Library Linking — `.c4a` files and `cc_link_bytecode`
 
@@ -581,21 +590,22 @@ segment-append and symbol-resolution steps.  It is called by the compiler after
 generating a bytecode executable with unresolved external `CALL` sites:
 
 1. The compiler emits text-relocation entries instead of erroring when a called
-   symbol is declared but not yet defined (`deferred_link` mode).
+   symbol is declared but not yet defined (`deferred_link` mode).  Function-pointer
+   address-of expressions against cross-module symbols similarly emit address-relocation
+   entries rather than erroring.
 2. After compilation, each `--link lib.c4a` file is processed by `cc_link_bytecode`.
 3. Any text relocation whose name matches a symbol exported by the library has its
-   CALL site patched to the correct PC.
-4. After all libraries are linked, any remaining unresolved text relocations cause
-   a hard link error.
-5. The final bytecode (with all CALL sites resolved) is written to `-o <file>`.
+   CALL site patched to the correct PC.  Any address relocation whose name matches
+   has its LTA3 i64 immediate patched to the byte-offset of the resolved symbol.
+4. After all libraries are linked, any remaining unresolved text or address relocations
+   cause a hard link error.
+5. The final bytecode (with all CALL and function-pointer sites resolved) is written
+   to `-o <file>`.
 
 The build system automatically adds `--link dep.c4a` flags for all `LinkWith` edges
 on a `kind=bytecode` executable target.  `.c4a` dependencies are compiled standalone
 first (with `--compile=bytecode`), then linked into the executable in a separate
 step.
-
-**Limitations** (function-pointer decay to cross-module symbols is not yet
-supported; only direct `CALL` sites are patched by text relocations).
 
 ### Asm-Passthru Rehydration
 

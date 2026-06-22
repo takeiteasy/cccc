@@ -6223,12 +6223,22 @@ void gen(VirtualMachine *vm, Obj *prog) {
         if (fn_def) {
             cc_write_i64_at(vm, loc, cc_pc_to_byte_offset((Pc)fn_def->code_addr));
         } else {
-            // FFI function used as a value (function-to-pointer decay).
-            // Store an FFI token so JMPI/CALLN can call it at runtime.
             const char *fn_name = obj_external_name(target);
             int ffi_idx = find_ffi_function(vm, fn_name);
-            if (ffi_idx >= 0)
+            if (ffi_idx >= 0) {
+                // FFI function used as a value: store token so JMPI/CALLN can call it.
                 cc_write_i64_at(vm, loc, CCCC_FFI_TOKEN_BASE - ffi_idx);
+            } else if ((vm->compiler.compile_only || vm->compiler.deferred_link) && fn_name) {
+                // Cross-module function-pointer: record addr reloc for link-time patching (#566).
+                PATCH_GROW(vm, addr_relocs, num_addr_relocs, addr_relocs_cap);
+                int ridx = vm->compiler.num_addr_relocs;
+                vm->compiler.addr_relocs[ridx].location = loc;
+                vm->compiler.addr_relocs[ridx].name     = strdup(fn_name);
+                vm->compiler.addr_relocs[ridx].name_len = strlen(fn_name);
+                vm->compiler.addr_relocs[ridx].resolved = 0;
+                vm->compiler.num_addr_relocs++;
+            }
+            // else: non-deferred mode; parser already rejects address-of-undeclared.
         }
     }
 

@@ -2047,6 +2047,19 @@ typedef struct Compiler {
     int num_text_relocs;
     int text_relocs_cap;
 
+    // Address relocations [V3+]: unresolved function-pointer address sites
+    // recorded when compile_only or deferred_link is set (#566).
+    // location = instruction-word index of the lo-word of the LTA3 i64 immediate.
+    // Resolved by --link (compile-time) or cc_load_module() (runtime).
+    struct {
+        Pc    location;  // Instruction-word index of the lo-word of the LTA3 i64
+        char *name;      // Heap-allocated target symbol name (owned)
+        size_t name_len;
+        int   resolved;  // 1 once patched by cc_link_bytecode / cc_load_module
+    } *addr_relocs;
+    int num_addr_relocs;
+    int addr_relocs_cap;
+
     // Set to 1 when --link libs are provided: defers undefined-symbol errors
     // from codegen to the post-link check in main.c (#565).
     int deferred_link;
