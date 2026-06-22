@@ -326,9 +326,9 @@ bytecode target to a source-less target (a `CUSTOM` step or a native FFI library
 is ignored with a warning; native linking into `.c4` goes through FFI, not
 `LinkWith`.
 
-**Limitation:** function-pointer decay to cross-module symbols (taking the address
-of a function defined in a `.c4a`) is not yet supported; only direct `CALL` sites
-are resolved by the text-relocation pass.
+Function-pointer decay to cross-module symbols (taking the address of a function
+defined in a `.c4a`) is supported: the text-relocation pass resolves both direct
+`CALL` sites and address-taken references to exported symbols (#566).
 
 ### The `--link` compiler flag
 
@@ -787,10 +787,9 @@ AddSourcesGlob(core, "src/*.c");
 LinkWith(app, core);    // app gets -lcore (ordinary link dep)
 ```
 
-> **v1 limitation:** the vendored shell's `die()` helper calls `exit()` on OOM
-> or a failed `open()` call inside a redirected step, which terminates the whole
-> CCCC process rather than cleanly failing the build step.  See the `BUILDMODE`
-> tracker for the planned improvement.
+> **v1 limitation (#568):** the vendored shell's `die()` helper calls `exit()` on
+> OOM or a failed `open()` call inside a redirected step, which terminates the
+> whole CCCC process rather than cleanly failing the build step.
 
 ### Cross-compilation (#547)
 
@@ -902,9 +901,9 @@ modules into a running VM (#564),
 `FindTool` / `AddFramework` / `GetBuildOption` / `HaveBuildOption` /
 `--build-option=KEY=VALUE` (#559),
 `InstallArtifact` / `SetInstallPrefix` / `BuildWantsInstall` / `--build-install` (#560),
-`DirExists` / `GlobFiles` / `ReadFile` / `WriteFile` filesystem helpers (#561).
-
-**Deferred to later releases:** a self-hosting `build.c` replacing the Makefile.
+`DirExists` / `GlobFiles` / `ReadFile` / `WriteFile` filesystem helpers (#561),
+a self-hosting `build.c` that builds cccc, libcccc, sanitizer variants,
+`fuzz_harness`, stdlib regeneration, and bench (#549).
 
 ## See also
 
