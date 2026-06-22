@@ -19,7 +19,7 @@
 
 #include "./internal.h"
 
-// Bytecode file format (V2 - 32-bit text words):
+// Bytecode file format (V3 - 32-bit text words):
 //   Magic: "CCCC\0" (4 bytes)
 //   Version: CCCC_VERSION (4 bytes)
 //   Flags: CCCCFlags bitfield (4 bytes)
@@ -41,6 +41,10 @@
 //   [V2] TLS template bytes (tls_template_size bytes; pointer slots stripped to addend)
 //   [V2] TLS relocation count (8 bytes)
 //   [V2] TLS relocations: tls_offset, target_segment, target_offset, addend (4×8B each)
+//   [V3] Exported symbol table count (8 bytes)
+//   [V3] Symbol entries: pc_offset (8B), name_len (4B), name (name_len bytes)
+//   [V3] Text relocation count (8 bytes)
+//   [V3] Text relocation entries: location (8B), name_len (4B), name (name_len bytes)
 
 static int get_opcode_operand_count(int op) {
     return cc_opcode_operand_words(op);
@@ -305,6 +309,42 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f) {
         }
     }
 
+    // Write exported symbol table [V3]: non-static function definitions (#565).
+    {
+        long long sym_count = vm->compiler.num_sym_table;
+        if (fwrite(&sym_count, sizeof(long long), 1, f) != 1) goto write_error;
+        for (long long i = 0; i < sym_count; i++) {
+            long long pc_off = (long long)vm->compiler.sym_table[i].pc_offset;
+            int name_len = (int)vm->compiler.sym_table[i].name_len;
+            if (fwrite(&pc_off, sizeof(long long), 1, f) != 1) goto write_error;
+            if (fwrite(&name_len, sizeof(int), 1, f) != 1) goto write_error;
+            if (name_len > 0) {
+                if (fwrite(vm->compiler.sym_table[i].name, 1, (size_t)name_len, f)
+                        != (size_t)name_len) goto write_error;
+            }
+        }
+    }
+
+    // Write text relocations [V3]: unresolved external CALL sites (#565).
+    {
+        // Only write unresolved entries.
+        long long reloc_count = 0;
+        for (int i = 0; i < vm->compiler.num_text_relocs; i++)
+            if (!vm->compiler.text_relocs[i].resolved) reloc_count++;
+        if (fwrite(&reloc_count, sizeof(long long), 1, f) != 1) goto write_error;
+        for (int i = 0; i < vm->compiler.num_text_relocs; i++) {
+            if (vm->compiler.text_relocs[i].resolved) continue;
+            long long loc = (long long)vm->compiler.text_relocs[i].location;
+            int name_len = (int)vm->compiler.text_relocs[i].name_len;
+            if (fwrite(&loc, sizeof(long long), 1, f) != 1) goto write_error;
+            if (fwrite(&name_len, sizeof(int), 1, f) != 1) goto write_error;
+            if (name_len > 0) {
+                if (fwrite(vm->compiler.text_relocs[i].name, 1, (size_t)name_len, f)
+                        != (size_t)name_len) goto write_error;
+            }
+        }
+    }
+
     if (vm->debug_vm) {
         printf("  Text size: %lld bytes (%lld instructions)\n", text_size, num_instructions);
         printf("  Data size: %lld bytes\n", data_size);
@@ -316,6 +356,8 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f) {
         printf("  FFI entries: %lld\n", ffi_count);
         printf("  FFI allow: %d  deny: %d  disable: %d\n",
                vm->ffi_allow_count, vm->ffi_deny_count, vm->disable_all_ffi);
+        printf("  Symbol table: %d entries\n", vm->compiler.num_sym_table);
+        printf("  Text relocations: %d unresolved\n", vm->compiler.num_text_relocs);
         printf("  Main offset: %lld\n", main_offset);
     }
 
@@ -690,6 +732,96 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
             vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].target_offset  = target_offset;
             vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].addend         = addend;
             vm->compiler.num_tls_relocs++;
+        }
+    }
+
+    // Read exported symbol table [V3] (#565).
+    // These sections are optional (old .c4 files without them are still valid).
+    vm->compiler.num_sym_table = 0;
+    vm->compiler.num_text_relocs = 0;
+    if (cursor < end) {
+        READ_AND_INCR(sym_count, long long);
+        if (sym_count < 0 || sym_count > MAX_CALLS) {
+            fprintf(stderr, "error: invalid symbol table count\n");
+            return -1;
+        }
+        if (sym_count > 0) {
+            void *_tmp = realloc(vm->compiler.sym_table,
+                                 (size_t)sym_count * sizeof(*vm->compiler.sym_table));
+            if (!_tmp) {
+                fprintf(stderr, "error: out of memory for symbol table\n");
+                return -1;
+            }
+            vm->compiler.sym_table = _tmp;
+            vm->compiler.sym_table_cap = (int)sym_count;
+        }
+        for (long long i = 0; i < sym_count; i++) {
+            READ_AND_INCR(pc_off, long long);
+            READ_AND_INCR(sname_len, int);
+            if (sname_len < 0 || sname_len > 4096 ||
+                cursor + sname_len > end) {
+                fprintf(stderr, "error: invalid symbol table entry\n");
+                return -1;
+            }
+            char *sname = NULL;
+            if (sname_len > 0) {
+                sname = malloc((size_t)sname_len + 1);
+                if (!sname) {
+                    fprintf(stderr, "error: out of memory for symbol name\n");
+                    return -1;
+                }
+                memcpy(sname, cursor, (size_t)sname_len);
+                sname[sname_len] = '\0';
+                cursor += sname_len;
+            }
+            vm->compiler.sym_table[vm->compiler.num_sym_table].pc_offset = (Pc)pc_off;
+            vm->compiler.sym_table[vm->compiler.num_sym_table].name      = sname;
+            vm->compiler.sym_table[vm->compiler.num_sym_table].name_len  = (size_t)sname_len;
+            vm->compiler.num_sym_table++;
+        }
+
+        // Read text relocations [V3] (#565).
+        if (cursor < end) {
+            READ_AND_INCR(treloc_count, long long);
+            if (treloc_count < 0 || treloc_count > MAX_CALLS) {
+                fprintf(stderr, "error: invalid text relocation count\n");
+                return -1;
+            }
+            if (treloc_count > 0) {
+                void *_tmp = realloc(vm->compiler.text_relocs,
+                                     (size_t)treloc_count * sizeof(*vm->compiler.text_relocs));
+                if (!_tmp) {
+                    fprintf(stderr, "error: out of memory for text relocations\n");
+                    return -1;
+                }
+                vm->compiler.text_relocs = _tmp;
+                vm->compiler.text_relocs_cap = (int)treloc_count;
+            }
+            for (long long i = 0; i < treloc_count; i++) {
+                READ_AND_INCR(trloc, long long);
+                READ_AND_INCR(trname_len, int);
+                if (trname_len < 0 || trname_len > 4096 ||
+                    cursor + trname_len > end) {
+                    fprintf(stderr, "error: invalid text relocation entry\n");
+                    return -1;
+                }
+                char *trname = NULL;
+                if (trname_len > 0) {
+                    trname = malloc((size_t)trname_len + 1);
+                    if (!trname) {
+                        fprintf(stderr, "error: out of memory for relocation name\n");
+                        return -1;
+                    }
+                    memcpy(trname, cursor, (size_t)trname_len);
+                    trname[trname_len] = '\0';
+                    cursor += trname_len;
+                }
+                vm->compiler.text_relocs[vm->compiler.num_text_relocs].location = (Pc)trloc;
+                vm->compiler.text_relocs[vm->compiler.num_text_relocs].name     = trname;
+                vm->compiler.text_relocs[vm->compiler.num_text_relocs].name_len = (size_t)trname_len;
+                vm->compiler.text_relocs[vm->compiler.num_text_relocs].resolved = 0;
+                vm->compiler.num_text_relocs++;
+            }
         }
     }
 
@@ -1095,6 +1227,52 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
         vm->compiler.ffi_count = new_total;
     }
 
+    // --- Merge stage's symbol table into host VM (#565) ---
+    // Allows chained --link calls to accumulate symbols.
+    if (stage.compiler.num_sym_table > 0) {
+        int new_total = vm->compiler.num_sym_table + stage.compiler.num_sym_table;
+        if (new_total > vm->compiler.sym_table_cap) {
+            int new_cap = new_total * 2;
+            void *tmp = realloc(vm->compiler.sym_table,
+                                (size_t)new_cap * sizeof(*vm->compiler.sym_table));
+            if (!tmp) {
+                fprintf(stderr, "cc_load_module: out of memory for symbol table\n");
+                cc_destroy(&stage);
+                return -1;
+            }
+            vm->compiler.sym_table     = tmp;
+            vm->compiler.sym_table_cap = new_cap;
+        }
+        for (int i = 0; i < stage.compiler.num_sym_table; i++) {
+            char *name_copy = stage.compiler.sym_table[i].name
+                ? strdup(stage.compiler.sym_table[i].name) : NULL;
+            int idx = vm->compiler.num_sym_table;
+            vm->compiler.sym_table[idx].pc_offset = stage.compiler.sym_table[i].pc_offset
+                                                   + pc_shift;
+            vm->compiler.sym_table[idx].name      = name_copy;
+            vm->compiler.sym_table[idx].name_len  = stage.compiler.sym_table[i].name_len;
+            vm->compiler.num_sym_table++;
+        }
+    }
+
+    // --- Resolve host VM's text relocations using the module's symbol table (#565) ---
+    // Patch any CALL operand in the host text that names a symbol now defined
+    // in the freshly-appended module code.
+    for (int i = 0; i < vm->compiler.num_text_relocs; i++) {
+        if (vm->compiler.text_relocs[i].resolved) continue;
+        const char *want = vm->compiler.text_relocs[i].name;
+        if (!want) continue;
+        for (int j = 0; j < stage.compiler.num_sym_table; j++) {
+            const char *sym = stage.compiler.sym_table[j].name;
+            if (sym && strcmp(sym, want) == 0) {
+                Pc target_pc = stage.compiler.sym_table[j].pc_offset + pc_shift;
+                vm->text_seg[vm->compiler.text_relocs[i].location] = target_pc;
+                vm->compiler.text_relocs[i].resolved = 1;
+                break;
+            }
+        }
+    }
+
     if (vm->debug_vm) {
         printf("cc_load_module: loaded '%s' (%lld text words, %lld data bytes)\n",
                path, (long long)stage_code_words, stage_data_size);
@@ -1102,6 +1280,19 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
 
     cc_destroy(&stage);
     return 0;
+}
+
+// ============================================================================
+// cc_link_bytecode: compile-time linker — append a .c4a library into a VM and
+// resolve the VM's pending text relocations using the library's symbol table.
+// This is the compile-time counterpart of cc_load_module() (#565).
+// ============================================================================
+
+int cc_link_bytecode(VirtualMachine *vm, const char *path) {
+    // cc_load_module already does everything we need: it appends text/data,
+    // merges FFI/TLS/return-buffers, accumulates the library's symbol table,
+    // and resolves text relocations.  Reuse it directly.
+    return cc_load_module(vm, path);
 }
 
 static int source_index_cmp(const void *a, const void *b) {

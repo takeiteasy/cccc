@@ -1253,6 +1253,16 @@ void cc_destroy(VirtualMachine *vm) {
         free(vm->compiler.data_relocs);
     if (vm->compiler.tls_relocs)
         free(vm->compiler.tls_relocs);
+    if (vm->compiler.sym_table) {
+        for (int i = 0; i < vm->compiler.num_sym_table; i++)
+            free(vm->compiler.sym_table[i].name);
+        free(vm->compiler.sym_table);
+    }
+    if (vm->compiler.text_relocs) {
+        for (int i = 0; i < vm->compiler.num_text_relocs; i++)
+            free(vm->compiler.text_relocs[i].name);
+        free(vm->compiler.text_relocs);
+    }
 
     // Free FFI table
     if (vm->compiler.ffi_table) {

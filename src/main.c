@@ -863,6 +863,8 @@ int main(int argc, const char *argv[]) {
     const char **build_options = NULL;    // --build-option=key=value (#559)
     int build_options_count = 0;
     int build_install = 0;                // --build-install (#560)
+    const char **link_paths = NULL;       // --link lib.c4a (#565)
+    int link_paths_count = 0;
 
     if (argc <= 1)
         usage(argv[0], 1);
@@ -965,6 +967,7 @@ int main(int argc, const char *argv[]) {
         {"build-cache",      optional_argument, 0, 1091},
         {"build-option",     required_argument, 0, 1092},
         {"build-install",    no_argument,       0, 1093},
+        {"link",             required_argument, 0, 1094},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1488,6 +1491,14 @@ int main(int argc, const char *argv[]) {
             build_install = 1;
             build_mode = 1;
             break;
+        case 1094: { // --link lib.c4a (#565)
+            void *tmp = realloc(link_paths,
+                                (size_t)(link_paths_count + 1) * sizeof(*link_paths));
+            if (!tmp) { fprintf(stderr, "error: out of memory\n"); return 1; }
+            link_paths = tmp;
+            link_paths[link_paths_count++] = optarg;
+            break;
+        }
         case 1066: // --test-format=FORMAT
             if (strcmp(optarg, "tap") == 0) {
                 test_format = TEST_FORMAT_TAP;
@@ -1682,6 +1693,7 @@ int main(int argc, const char *argv[]) {
     vm.compiler.cli_opt_level_set = cli_opt_level_set;
     vm.compiler.native_mode = (compile_format == COMPILE_NATIVE);
     vm.compiler.compile_only = compile_only;
+    vm.compiler.deferred_link = (link_paths_count > 0 && !compile_only);
     vm.compiler.asm_passthru = asm_passthru;
     vm.compiler.comptime_include_all = comptime_include_all;
     vm.compiler.allow_comptime_pp_bleed = allow_comptime_pp_bleed;
@@ -2243,6 +2255,32 @@ int main(int argc, const char *argv[]) {
     }
 
     if (compile_format == COMPILE_BYTECODE) {
+        // Run the bytecode linker pass: for each --link lib.c4a, append the
+        // library into the VM and resolve any pending text relocations (#565).
+        if (link_paths_count > 0 && compile_only) {
+            fprintf(stderr,
+                    "warning: --link has no effect when combined with -c bytecode "
+                    "(library output retains its text relocations)\n");
+        }
+        if (link_paths_count > 0 && !compile_only) {
+            for (int i = 0; i < link_paths_count; i++) {
+                if (cc_link_bytecode(&vm, link_paths[i]) != 0) {
+                    fprintf(stderr, "error: failed to link %s\n", link_paths[i]);
+                    exit_code = 1;
+                    goto BAIL;
+                }
+            }
+            // Error on any remaining unresolved text relocations.
+            for (int i = 0; i < vm.compiler.num_text_relocs; i++) {
+                if (!vm.compiler.text_relocs[i].resolved) {
+                    fprintf(stderr, "error: unresolved external: %s\n",
+                            vm.compiler.text_relocs[i].name
+                            ? vm.compiler.text_relocs[i].name : "(unknown)");
+                    exit_code = 1;
+                }
+            }
+            if (exit_code != 0) goto BAIL;
+        }
         if (out_file) {
             if (cc_save_bytecode(&vm, out_file) != 0) {
                 fprintf(stderr, "error: failed to save bytecode to %s\n",
@@ -2330,6 +2368,25 @@ int main(int argc, const char *argv[]) {
     }
 
     if (out_file) {
+        // Run the bytecode linker pass for --link libs (#565).
+        if (link_paths_count > 0) {
+            for (int i = 0; i < link_paths_count; i++) {
+                if (cc_link_bytecode(&vm, link_paths[i]) != 0) {
+                    fprintf(stderr, "error: failed to link %s\n", link_paths[i]);
+                    exit_code = 1;
+                    goto BAIL;
+                }
+            }
+            for (int i = 0; i < vm.compiler.num_text_relocs; i++) {
+                if (!vm.compiler.text_relocs[i].resolved) {
+                    fprintf(stderr, "error: unresolved external: %s\n",
+                            vm.compiler.text_relocs[i].name
+                            ? vm.compiler.text_relocs[i].name : "(unknown)");
+                    exit_code = 1;
+                }
+            }
+            if (exit_code != 0) goto BAIL;
+        }
         // Save bytecode to file and exit (legacy path: no -c, just -o).
         if (cc_save_bytecode(&vm, out_file) != 0) {
             fprintf(stderr, "error: failed to save bytecode to %s\n", out_file);
@@ -2428,5 +2485,6 @@ BAIL:
         free(input_files);
     }
     free(build_options);
+    free(link_paths);
     return exit_code;
 }

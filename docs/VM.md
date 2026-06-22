@@ -508,7 +508,20 @@ Saved bytecode files are self-contained and can be loaded into a fresh VM instan
 | TLS relocs    |  N × (tls_offset, target_segment, target_offset, addend)
 |               |  each field 8 bytes; target_segment: 0=data, 1=text
 +---------------+
+| [V3] Sym cnt  |  8 bytes — count of exported symbol entries (optional)
++---------------+
+| [V3] Sym entries | N × (pc_offset: 8 bytes, name_len: 4 bytes, name: name_len bytes)
+|               |  pc_offset is the instruction index of the exported function
++---------------+
+| [V3] Reloc cnt|  8 bytes — count of unresolved text-relocation entries
++---------------+
+| [V3] Text relocs | N × (location: 8 bytes, name_len: 4 bytes, name: name_len bytes)
+|               |  location is the text-seg slot to patch when the symbol is resolved
++---------------+
 ```
+
+The V3 sections are appended at the end and are optional — older `.c4` files that
+lack them are still valid.  Presence is detected by `cursor < end` in the reader.
 
 On load, the loader re-anchors global pointers, function-pointer offsets, FFI entries, return-buffer addresses, and TLS template pointer slots to the new VM’s segment bases.
 
@@ -547,11 +560,42 @@ then merges its segments into the host VM:
    `data_shift` offsets.
 6. **FFI merge**: FFI table entries from the module are merged (name strings are
    transferred; `asm_src` passthru entries remain independently rehydratable).
+7. **Symbol resolution**: the host VM's pending text relocations (`vm->compiler.text_relocs`)
+   are scanned against the module's exported symbol table.  Any CALL site whose
+   target symbol name appears in the module is patched to `sym.pc_offset + pc_shift`
+   and marked resolved.
 
-**Cross-module CALL limitation**: if the exe and the `.c4d` were compiled
-separately, direct `CALL` instructions from the exe into the module's functions are
-unresolvable — the `.c4` format does not yet carry a symbol table or text-relocation
-entries. A follow-up ticket covers exported symbol tables and text relocations.
+### Static Library Linking — `.c4a` files and `cc_link_bytecode`
+
+Bytecode static libraries (`.c4a`, built via `StaticLib(kind=bytecode)`) are linked
+at **compile time** by the `--link` flag or by the build system's `LinkWith` on a
+bytecode executable target.
+
+```c
+#include "cccc.h"
+int cc_link_bytecode(VirtualMachine *vm, const char *path);
+```
+
+`cc_link_bytecode` is a thin wrapper around `cc_load_module` that performs the same
+segment-append and symbol-resolution steps.  It is called by the compiler after
+generating a bytecode executable with unresolved external `CALL` sites:
+
+1. The compiler emits text-relocation entries instead of erroring when a called
+   symbol is declared but not yet defined (`deferred_link` mode).
+2. After compilation, each `--link lib.c4a` file is processed by `cc_link_bytecode`.
+3. Any text relocation whose name matches a symbol exported by the library has its
+   CALL site patched to the correct PC.
+4. After all libraries are linked, any remaining unresolved text relocations cause
+   a hard link error.
+5. The final bytecode (with all CALL sites resolved) is written to `-o <file>`.
+
+The build system automatically adds `--link dep.c4a` flags for all `LinkWith` edges
+on a `kind=bytecode` executable target.  `.c4a` dependencies are compiled standalone
+first (with `--compile=bytecode`), then linked into the executable in a separate
+step.
+
+**Limitations** (function-pointer decay to cross-module symbols is not yet
+supported; only direct `CALL` sites are patched by text relocations).
 
 ### Asm-Passthru Rehydration
 

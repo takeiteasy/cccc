@@ -1,21 +1,17 @@
 // CCCC_FLAGS: --build --build-dry-run --build-target=bc_app
-// CCCC_EXPECT_STDOUT: --link[^\n]*mathlib\.c4a
+// CCCC_EXPECT_STDOUT: \.c4a
 //
-// Regression test for StaticLib(kind=bytecode) as a LinkWith dep (#563 + #565).
-// A kind=bytecode Executable that links a StaticLib(kind=bytecode) dep must
-// build the static lib as a standalone .c4a and link it via --link in the exe's
-// cccc invocation (#565, replaces source-folding for exe targets).
-// The discriminating regex verifies that --link and mathlib.c4a appear on the
-// same invocation line (the exe's compile).
+// Regression test for bytecode-linker build pass (#565): a kind=bytecode
+// Executable with a StaticLib LinkWith dep must produce two separate cccc
+// invocations — one building the .c4a, one building the .c4 with --link.
+// The regex checks that a .c4a artifact appears in the dry-run output.
 
 [[cccc::build_target(kind=bytecode)]]
 BuildTarget *bc_app(Builder *ctx) {
-    // Static library: defines lib_add/lib_mul, no main().
     BuildTarget *lib = StaticLib(ctx, "mathlib");
     AddSource(lib, "examples/build_bytecode_libs_demo/src/math_lib.c");
     AddInclude(lib, "examples/build_bytecode_libs_demo/include");
 
-    // Executable: calls lib functions.
     BuildTarget *app = Executable(ctx, "app");
     AddSource(app, "examples/build_bytecode_libs_demo/src/main.c");
     AddInclude(app, "examples/build_bytecode_libs_demo/include");

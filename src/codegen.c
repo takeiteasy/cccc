@@ -6164,6 +6164,21 @@ void gen(VirtualMachine *vm, Obj *prog) {
             hashmap_put(&fn_defs, fn->name, fn);
     }
 
+    // Build exported symbol table [V3]: non-static function definitions (#565).
+    // This is emitted into the .c4 so --link and cc_load_module() can resolve
+    // cross-module CALLs.
+    for (Obj *fn = prog; fn; fn = fn->next) {
+        if (!fn->is_function || !fn->body || fn->is_static) continue;
+        const char *sym_name = obj_external_name(fn);
+        if (!sym_name) continue;
+        PATCH_GROW(vm, sym_table, num_sym_table, sym_table_cap);
+        int idx = vm->compiler.num_sym_table;
+        vm->compiler.sym_table[idx].pc_offset = fn->code_addr;
+        vm->compiler.sym_table[idx].name      = strdup(sym_name);
+        vm->compiler.sym_table[idx].name_len  = strlen(sym_name);
+        vm->compiler.num_sym_table++;
+    }
+
     // Second pass: Patch function call addresses
     for (int i = 0; i < vm->compiler.num_call_patches; i++) {
         Obj *target = vm->compiler.call_patches[i].function;
@@ -6177,6 +6192,19 @@ void gen(VirtualMachine *vm, Obj *prog) {
             int ffi_idx = find_ffi_function(vm, fn_name);
             if (ffi_idx >= 0) {
                 // FFI - not handled via CALL, skip
+                continue;
+            }
+            // When building a -c bytecode target or when --link libs are
+            // provided, record a text relocation instead of erroring — the
+            // symbol will be resolved at link time (#565).
+            if ((vm->compiler.compile_only || vm->compiler.deferred_link) && fn_name) {
+                PATCH_GROW(vm, text_relocs, num_text_relocs, text_relocs_cap);
+                int ridx = vm->compiler.num_text_relocs;
+                vm->compiler.text_relocs[ridx].location = loc;
+                vm->compiler.text_relocs[ridx].name     = strdup(fn_name);
+                vm->compiler.text_relocs[ridx].name_len = strlen(fn_name);
+                vm->compiler.text_relocs[ridx].resolved = 0;
+                vm->compiler.num_text_relocs++;
                 continue;
             }
             error("undefined function: %s", fn_name);

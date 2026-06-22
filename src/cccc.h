@@ -2024,6 +2024,33 @@ typedef struct Compiler {
     int num_tls_relocs;
     int tls_relocs_cap;
 
+    // Exported symbol table [V3]: non-static function definitions emitted by
+    // -c bytecode so --link and cc_load_module() can resolve CALLs (#565).
+    struct {
+        Pc     pc_offset;  // Instruction-word index of the function
+        char  *name;       // Heap-allocated symbol name (owned)
+        size_t name_len;
+    } *sym_table;
+    int num_sym_table;
+    int sym_table_cap;
+
+    // Text relocations [V3]: unresolved external CALL sites recorded instead
+    // of erroring when building a -c bytecode target or when --link libs are
+    // provided (#565).  Resolved by --link (compile-time) or cc_load_module()
+    // (runtime).
+    struct {
+        Pc    location;  // Instruction-word index of the CALL operand to patch
+        char *name;      // Heap-allocated target symbol name (owned)
+        size_t name_len;
+        int   resolved;  // 1 once patched by cc_link_bytecode / cc_load_module
+    } *text_relocs;
+    int num_text_relocs;
+    int text_relocs_cap;
+
+    // Set to 1 when --link libs are provided: defers undefined-symbol errors
+    // from codegen to the post-link check in main.c (#565).
+    int deferred_link;
+
     LabelEntry label_table[MAX_LABELS];
     int num_labels;
     GotoPatch goto_patches[MAX_LABELS];
@@ -2871,13 +2898,27 @@ int cc_load_bytecode(VirtualMachine *vm, const char *path);
              immediates in the appended text are patched by the pre-append text
              size. Data pointer slots are re-anchored. FFI, TLS, and return-buffer
              metadata are merged. The module should be compiled with `-c bytecode`
-             (no main() required). Cross-module direct CALL resolution is not
-             supported; communicate via data-segment function pointers. (#564)
+             (no main() required). If the host VM has unresolved text relocations
+             (from compiling with external CALL sites), they are patched using the
+             module's exported symbol table (#565).
  @param vm   The running CCCC VM instance to load the module into.
  @param path Path to the .c4d (or .c4a) bytecode module file.
  @return 0 on success, -1 on error.
 */
 int cc_load_module(VirtualMachine *vm, const char *path);
+
+/*!
+ @function cc_link_bytecode
+ @abstract Link a compiled bytecode library (.c4a) into a VM at compile time.
+ @discussion Appends the library's text and data segments onto the VM (like
+             cc_load_module), then resolves the VM's pending text relocations
+             using the library's exported symbol table. Used to implement the
+             `--link` flag and the build-system bytecode linker pass (#565).
+ @param vm   The VM instance to link the library into (must have been compiled).
+ @param path Path to the .c4a bytecode library file.
+ @return 0 on success, -1 on error.
+*/
+int cc_link_bytecode(VirtualMachine *vm, const char *path);
 
 /*!
  @function cc_add_breakpoint

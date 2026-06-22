@@ -260,22 +260,22 @@ cccc --build build.c --build-target=bc_plugin
 
 ### LinkWith between bytecode targets
 
-`LinkWith(app, lib)` is supported when `app` is a `kind=bytecode` target (#563).
-The linked target's sources are **folded** (transitively, deduplicated) into
-`app`'s single `cccc` invocation — reusing CCCC's existing AST-level merge.
-Folded targets may omit `main()`.
+`LinkWith(app, lib)` is supported when `app` is a `kind=bytecode` target (#563, #565).
 
 Inside a `kind=bytecode` factory, `StaticLib()` and `DynamicLib()` targets are
 automatically treated as bytecode (no separate annotation needed):
-- `StaticLib` deps are **folded** into the exe's cccc invocation (same as `Executable` deps).
-- `DynamicLib` deps are **not folded**; they are built as standalone `.c4d` modules
-  and loaded at runtime via `cc_load_module()`. Use `DependsOn(exe, plugin)` to
-  ensure the `.c4d` is built before the exe.
+- `StaticLib` deps are compiled **standalone** as `.c4a` files and then linked into
+  the exe via the bytecode linker pass (`--link`). This uses cross-module symbol
+  resolution: the lib exports a symbol table and the exe carries text-relocation
+  entries that are patched at link time.
+- `DynamicLib` deps are **not linked statically**; they are built as standalone `.c4d`
+  modules and loaded at runtime via `cc_load_module()`. Use `DependsOn(exe, plugin)`
+  to ensure the `.c4d` is built before the exe.
 
 ```c
 [[cccc::build_target(kind=bytecode)]]
 BuildTarget *bc_app(Builder *ctx) {
-    // Static lib dep: sources folded into exe at compile time.
+    // Static lib dep: compiled as .c4a, linked into exe at build time.
     BuildTarget *lib = StaticLib(ctx, "mylib");
     AddSource(lib, "src/lib.c");
     AddInclude(lib, "include");
@@ -287,16 +287,40 @@ BuildTarget *bc_app(Builder *ctx) {
     BuildTarget *app = Executable(ctx, "app");
     AddSource(app, "src/main.c");
     AddInclude(app, "include");
-    LinkWith(app, lib);        // lib.c sources folded in
+    LinkWith(app, lib);        // lib built as .c4a, linked via --link
     DependsOn(app, plugin);    // plugin.c4d built first, not folded
     return app;
 }
+```
+
+The build system generates two separate `cccc` invocations:
+```sh
+cccc src/lib.c --compile=bytecode -o build/lib/mylib.c4a -I include
+cccc src/main.c -o build/bin/app.c4 -I include --link build/lib/mylib.c4a
 ```
 
 `DependsOn` edges are ordering-only (as for native targets). `LinkWith` from a
 bytecode target to a source-less target (a `CUSTOM` step or a native FFI library)
 is ignored with a warning; native linking into `.c4` goes through FFI, not
 `LinkWith`.
+
+**Limitation:** function-pointer decay to cross-module symbols (taking the address
+of a function defined in a `.c4a`) is not yet supported; only direct `CALL` sites
+are resolved by the text-relocation pass.
+
+### The `--link` compiler flag
+
+```sh
+cccc src/main.c -o app.c4 --link build/lib/mylib.c4a
+```
+
+`--link lib.c4a` appends the library's text and data into the compiled exe, resolves
+any unresolved `CALL` sites that match exported symbols, and then writes the fully
+linked `.c4` file.  Multiple `--link` flags are processed in order.  Any symbol
+that remains unresolved after all libraries are linked causes a hard error.
+
+The flag is only meaningful when writing a `.c4` output file (`-o file`).  Using
+`--link` with `--compile=bytecode` (library output) emits a warning and is a no-op.
 
 ### Runtime module loading — `cc_load_module`
 
@@ -308,7 +332,7 @@ A `.c4d` module built by the build system can be appended into a running VM:
 int main(void) {
     VirtualMachine *vm = cc_init(NULL);
     cc_load_module(vm, "build/lib/plugin.c4d");
-    // module's functions are now available in vm's symbol table
+    // module's exported symbols are now callable via the resolved text relocations
     cc_destroy(vm);
     return 0;
 }
@@ -317,15 +341,8 @@ int main(void) {
 `cc_load_module` appends the module's text and data segments into the host VM,
 patching all absolute PC operands (jump/call targets) by the pre-append text size,
 and re-anchoring data relocations. FFI registrations from the module are merged.
-
-**Cross-module CALL limitation:** if the exe and the `.c4d` were compiled
-separately (not via source-folding), direct `CALL` instructions from the exe to
-symbols in the module are unresolvable — the `.c4` format does not yet carry a
-symbol table or text-relocation entries. A follow-up ticket covers adding exported
-symbol tables and text relocations to the `.c4`/`.c4a`/`.c4d` format.
-
-**Out of scope for now:** linking a prebuilt `.c4a` without source (that would
-require a bytecode-level linker with symbol tables and text relocations).
+After appending, it also resolves any of the host VM's pending text relocations
+whose target names match symbols exported by the loaded module.
 
 The attribute accepts C23 and GNU forms:
 

@@ -84,7 +84,10 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
                 is_negative_test = True
             if "EXPECT_RUNTIME_ERROR" in header:
                 expects_runtime_error = True
+            c4_skip = False
             for line in header_lines:
+                if "CCCC_C4_SKIP" in line:
+                    c4_skip = True
                 if "CCCC_FLAGS:" in line:
                     flags_str = line.split("CCCC_FLAGS:", 1)[1].strip().rstrip("*/").strip()
                     per_test_flags = flags_str.split()
@@ -105,6 +108,20 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
                     reject_stdout = line.split("CCCC_REJECT_STDOUT:", 1)[1].strip().rstrip("*/").strip()
     except Exception:
         pass
+
+    if c4_mode and c4_skip:
+        return {
+            "idx": idx,
+            "test_name": test_name,
+            "exit_code": 0,
+            "status": "c4_skipped",
+            "output": "",
+            "is_negative_test": is_negative_test,
+            "expects_runtime_error": expects_runtime_error,
+            "stderr_mismatch": None,
+            "elapsed": 0,
+            "skip_reason": "c4-incompatible: CCCC_C4_SKIP",
+        }
 
     if c4_mode and is_build_mode:
         # Build scripts emit no bytecode to round-trip; the runner compiles

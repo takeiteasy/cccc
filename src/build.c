@@ -96,8 +96,8 @@ struct BuildTarget {
     // not built standalone.
     int bytecode_folded;
     // Subkind for CCCC_TGT_BYTECODE targets (#564): 0=exe, 1=static lib, 2=dynamic lib.
-    // Static libs (.c4a) are still folded into dependent bytecode exe builds via source-
-    // folding; dynamic libs (.c4d) are runtime-loaded and never folded.
+    // Static libs (.c4a) are built standalone; bytecode EXEs link them via --link (#565).
+    // Dynamic libs (.c4d) are runtime-loaded and never folded into anything.
     int bytecode_subkind;
 };
 
@@ -1524,13 +1524,16 @@ static void sset_add(StrSet *s, const char *str) {
 // `seen_srcs` to prevent duplicate-symbol errors in cc_link_progs.
 // All strings pushed are aliases of the originals (not copied); callers must
 // not free them independently.
+// skip_c4a: if non-zero, do not recurse into bytecode static lib (.c4a) deps —
+// those are linked via --link in bytecode EXE builds (#565).
 static void collect_bytecode_inputs(BuildTarget *t,
                                      StringArray *srcs,
                                      StringArray *incs,
                                      StringArray *defs,
                                      StringArray *undefs,
                                      TargetSet *seen_tgts,
-                                     StrSet    *seen_srcs) {
+                                     StrSet    *seen_srcs,
+                                     int skip_c4a) {
     if (tset_has(seen_tgts, t)) return;
     tset_add(seen_tgts, t);
 
@@ -1553,23 +1556,35 @@ static void collect_bytecode_inputs(BuildTarget *t,
         if (!t->deps_link[i]) continue; // DependsOn: skip
         BuildTarget *dep = t->deps[i];
         if (dep->sources.len == 0) continue; // source-less dep: warned elsewhere
-        collect_bytecode_inputs(dep, srcs, incs, defs, undefs, seen_tgts, seen_srcs);
+        // For bytecode EXE targets, skip .c4a deps — they are built standalone
+        // and linked via --link (#565).
+        if (skip_c4a && dep->kind == CCCC_TGT_BYTECODE && dep->bytecode_subkind == 1)
+            continue;
+        collect_bytecode_inputs(dep, srcs, incs, defs, undefs, seen_tgts, seen_srcs, skip_c4a);
     }
 }
 
-// Mark transitive LinkWith deps of every kind=bytecode exe target as folded.
-// A folded target is a bytecode static library: not built standalone, its
-// sources are folded into the dependent's single cccc invocation.
-// Dynamic bytecode libs (bytecode_subkind==2) are NOT folded — they are
-// runtime-loaded modules and must be built as standalone .c4d artifacts (#564).
-static void mark_bytecode_folded_deps(BuildTarget *dep) {
+// Mark transitive LinkWith deps of a non-exe kind=bytecode target as folded.
+// A folded target's sources are compiled into the dependent's single cccc
+// invocation rather than as a standalone artifact.
+// Exclusions (never folded):
+//   - Dynamic bytecode libs (.c4d, subkind==2): built standalone; loaded at
+//     runtime via cc_load_module().
+//   - Static bytecode libs (.c4a, subkind==1): built standalone when they are
+//     a direct dep of a bytecode EXE — those use --link instead (#565).
+//     Static libs that are deps of OTHER static libs are still folded here.
+static void mark_bytecode_folded_deps(BuildTarget *dep, int for_exe) {
     if (dep->bytecode_folded) return; // already visited
-    // Dynamic bytecode libs are loaded at runtime; never fold.
+    // Dynamic bytecode libs are always built standalone.
     if (dep->kind == CCCC_TGT_BYTECODE && dep->bytecode_subkind == 2) return;
+    // Static bytecode libs that are direct deps of a bytecode EXE are built
+    // standalone and linked via --link (#565).
+    if (for_exe && dep->kind == CCCC_TGT_BYTECODE && dep->bytecode_subkind == 1) return;
     dep->bytecode_folded = 1;
     for (int i = 0; i < dep->deps_count; i++) {
         if (dep->deps_link[i])
-            mark_bytecode_folded_deps(dep->deps[i]);
+            // Recursive deps of a static lib are still folded (not for_exe).
+            mark_bytecode_folded_deps(dep->deps[i], 0);
     }
 }
 
@@ -1645,11 +1660,11 @@ static int build_target(Builder *ctx, const char *cc,
 
     // Bytecode target (#545 + #563 + #564): single whole-program cccc invocation.
     // exe (bytecode_subkind=0)     → bin/<name>.c4   (runs cccc without -c; main required)
+    //   LinkWith .c4a deps are built standalone and linked via --link (#565).
     // static lib (subkind=1)       → lib/<name>.c4a  (cccc -c bytecode; no main required)
+    //   LinkWith deps are source-folded into the .c4a (self-contained snapshot).
     // dynamic lib (subkind=2)      → lib/<name>.c4d  (cccc -c bytecode; no main required)
-    // For static libs, source-folding (collecting deps' sources) still applies so the
-    // .c4a is a self-contained compilable snapshot.  For dynamic libs, the same folding
-    // applies so .c4d modules are self-contained and loadable via cc_load_module().
+    //   LinkWith deps are source-folded into the .c4d (self-contained module).
     // Source-less LinkWith deps (CUSTOM targets, native FFI libs) are skipped with
     // a warning — linking native artifacts into bytecode requires FFI, not LinkWith.
     if (t->kind == CCCC_TGT_BYTECODE) {
@@ -1674,8 +1689,12 @@ static int build_target(Builder *ctx, const char *cc,
             }
         }
 
+        int is_exe = (t->bytecode_subkind == 0);
+
         // Collect all sources (transitively, deduped) from this target and its
-        // folded LinkWith deps. Only sources; flags are handled below.
+        // folded deps.  For bytecode EXEs, .c4a deps are skipped (they are built
+        // standalone and linked via --link, #565); all other folded deps are
+        // collected as before.
         StringArray agg_srcs   = {0};
         StringArray dummy_incs  = {0};
         StringArray dummy_defs  = {0};
@@ -1683,7 +1702,7 @@ static int build_target(Builder *ctx, const char *cc,
         TargetSet seen_tgts = {0};
         StrSet    seen_srcs = {0};
         collect_bytecode_inputs(t, &agg_srcs, &dummy_incs, &dummy_defs, &dummy_undefs,
-                                &seen_tgts, &seen_srcs);
+                                &seen_tgts, &seen_srcs, is_exe);
         free(seen_tgts.data);
         free(seen_srcs.data);
         free(dummy_incs.data);
@@ -1695,11 +1714,13 @@ static int build_target(Builder *ctx, const char *cc,
         argv_push(&a, cccc_bin);
         for (int i = 0; i < agg_srcs.len; i++)
             argv_push(&a, agg_srcs.data[i]);
-        // Library targets (static .c4a / dynamic .c4d) need -c bytecode so that
-        // cccc compiles without requiring main() and exits after writing bytecode.
-        if (t->bytecode_subkind != 0) {
-            argv_push(&a, "-c");
-            argv_push(&a, "bytecode");
+        // Library targets (static .c4a / dynamic .c4d) need --compile=bytecode so
+        // that cccc compiles without requiring main() and exits after writing
+        // bytecode.  Use the long-form `--compile=bytecode` (not `-c bytecode`)
+        // because -c uses optional_argument and the space-separated form would
+        // treat `bytecode` as a source file instead of the format specifier.
+        if (!is_exe) {
+            argv_push(&a, "--compile=bytecode");
         }
         argv_push(&a, "-o");
         argv_push(&a, out_abs);
@@ -1707,22 +1728,44 @@ static int build_target(Builder *ctx, const char *cc,
         // Flags: ctx defaults (--std, -I, -D, -U) + root target's own.
         push_compile_flags_bytecode(&a, ctx, t, &owned);
 
-        // Additionally push per-target includes/defines/undefs from each folded
-        // dep (transitively).  push_compile_flags_bytecode already covered t's
-        // own, so we only visit deps here.
-        // Reuse the TargetSet to avoid revisiting.
+        // Additionally push per-target includes/defines/undefs from deps.
+        // For EXEs, only push -I flags (not sources) from .c4a deps so that
+        // the exe can include the lib's headers (#565).
+        // For .c4a/.c4d, also push folded dep flags as before.
         TargetSet dep_seen = {0};
         tset_add(&dep_seen, t); // mark root so collect skips it
         for (int i = 0; i < t->deps_count; i++) {
             if (!t->deps_link[i]) continue;
             BuildTarget *dep = t->deps[i];
             if (dep->sources.len == 0) continue;
+            if (is_exe && dep->kind == CCCC_TGT_BYTECODE && dep->bytecode_subkind == 1) {
+                // .c4a dep of a bytecode EXE: add --link <dep.c4a> flag (#565).
+                char *dep_out_rel = default_output(dep);
+                char *dep_out_abs = join(ctx->out_dir, dep_out_rel);
+                free(dep_out_rel);
+                strarray_push(&owned, dep_out_abs); // owned for later free
+                argv_push(&a, "--link");
+                argv_push(&a, dep_out_abs);
+                // Still collect includes from this dep so the exe can find headers.
+                StringArray d_srcs = {0}, d_incs = {0}, d_defs = {0}, d_undefs = {0};
+                StrSet d_ss = {0};
+                TargetSet d_ts = {0};
+                collect_bytecode_inputs(dep, &d_srcs, &d_incs, &d_defs, &d_undefs,
+                                        &d_ts, &d_ss, 0);
+                free(d_ss.data); free(d_ts.data); free(d_srcs.data);
+                for (int j = 0; j < d_incs.len; j++) {
+                    argv_push(&a, "-I");
+                    argv_push(&a, d_incs.data[j]);
+                }
+                free(d_incs.data); free(d_defs.data); free(d_undefs.data);
+                continue;
+            }
             if (tset_has(&dep_seen, dep)) continue;
             // Gather this dep's (and its transitive deps') per-target flags.
             StringArray d_srcs = {0}, d_incs = {0}, d_defs = {0}, d_undefs = {0};
             StrSet d_ss = {0};
             collect_bytecode_inputs(dep, &d_srcs, &d_incs, &d_defs, &d_undefs,
-                                    &dep_seen, &d_ss);
+                                    &dep_seen, &d_ss, 0);
             free(d_ss.data);
             free(d_srcs.data);
             for (int j = 0; j < d_incs.len; j++) {
@@ -1918,9 +1961,11 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
     }
     for (int i = 0; i < ctx->targets_count; i++) {
         if (ctx->targets[i]->kind != CCCC_TGT_BYTECODE) continue;
+        int is_exe = (ctx->targets[i]->bytecode_subkind == 0);
         for (int j = 0; j < ctx->targets[i]->deps_count; j++) {
             if (ctx->targets[i]->deps_link[j])
-                mark_bytecode_folded_deps(ctx->targets[i]->deps[j]);
+                // EXE targets do not fold .c4a deps — they use --link (#565).
+                mark_bytecode_folded_deps(ctx->targets[i]->deps[j], is_exe);
         }
     }
 
