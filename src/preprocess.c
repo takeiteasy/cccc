@@ -3125,10 +3125,10 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
         return true;
     }
 
-    // [[cccc::build_target]] / [[cccc::build_target(kind=native)]]: record the
-    // factory function name. kind=bytecode is reserved for #545; reject it now.
-    // The attribute is stripped; the function stays in the normal compilation
-    // stream so the runner can find and invoke it by address.
+    // [[cccc::build_target]] / [[cccc::build_target(kind=native|bytecode)]]: record
+    // the factory function name and kind.  Supported kinds: "native" (default),
+    // "bytecode" (#545).  The attribute is stripped; the function stays in the normal
+    // compilation stream so the runner can find and invoke it by address.
     if (is_build_target_kind) {
         const char *kind = build_target_kind ? build_target_kind : "native";
         Token *probe = attr_end;

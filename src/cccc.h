@@ -1248,7 +1248,7 @@ struct BuildFnRecord {
 typedef struct BuildTargetFnRecord BuildTargetFnRecord;
 struct BuildTargetFnRecord {
     char *name;                  // C function name
-    char *kind;                  // "native" (only valid value for now; bytecode → #545)
+    char *kind;                  // "native" (default) or "bytecode" (#545)
     BuildTargetFnRecord *next;
 };
 

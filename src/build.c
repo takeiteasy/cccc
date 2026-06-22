@@ -90,6 +90,11 @@ struct BuildTarget {
     int *deps_link;        // parallel to deps: 1=LinkWith (add -l), 0=DependsOn (order only)
     int deps_count, deps_cap;
     int visited;           // topo-sort marker: 0 unvisited, 1 in-progress, 2 done
+    // Set by run_graph() for targets that are LinkWith'd (transitively) from a
+    // kind=bytecode target (#563).  Such a target is a "bytecode library": its
+    // sources are folded into the dependent's single cccc invocation and it is
+    // not built standalone.
+    int bytecode_folded;
 };
 
 struct Builder {
@@ -1471,11 +1476,100 @@ serial_fallback:;
     return rc;
 }
 
+// ============================================================================
+// kind=bytecode LinkWith support (#563)
+// ============================================================================
+
+// Seen-set helpers used by collect_bytecode_inputs to dedup target pointers and
+// source path strings.
+
+typedef struct { BuildTarget **data; int len, cap; } TargetSet;
+typedef struct { const char **data; int len, cap; } StrSet;
+
+static int tset_has(TargetSet *s, BuildTarget *t) {
+    for (int i = 0; i < s->len; i++) if (s->data[i] == t) return 1;
+    return 0;
+}
+static void tset_add(TargetSet *s, BuildTarget *t) {
+    if (s->len == s->cap) {
+        s->cap = s->cap ? s->cap * 2 : 8;
+        s->data = realloc(s->data, sizeof(*s->data) * (size_t)s->cap);
+    }
+    s->data[s->len++] = t;
+}
+static int sset_has(StrSet *s, const char *str) {
+    for (int i = 0; i < s->len; i++) if (strcmp(s->data[i], str) == 0) return 1;
+    return 0;
+}
+static void sset_add(StrSet *s, const char *str) {
+    if (s->len == s->cap) {
+        s->cap = s->cap ? s->cap * 2 : 16;
+        s->data = realloc(s->data, sizeof(*s->data) * (size_t)s->cap);
+    }
+    s->data[s->len++] = str;
+}
+
+// Recursively collect sources, includes, defines, and undefs from `t` and its
+// transitive LinkWith deps into the output StringArrays.  Target pointers are
+// deduped via `seen_tgts` (diamond deps); source paths are deduped via
+// `seen_srcs` to prevent duplicate-symbol errors in cc_link_progs.
+// All strings pushed are aliases of the originals (not copied); callers must
+// not free them independently.
+static void collect_bytecode_inputs(BuildTarget *t,
+                                     StringArray *srcs,
+                                     StringArray *incs,
+                                     StringArray *defs,
+                                     StringArray *undefs,
+                                     TargetSet *seen_tgts,
+                                     StrSet    *seen_srcs) {
+    if (tset_has(seen_tgts, t)) return;
+    tset_add(seen_tgts, t);
+
+    // Sources (respecting this target's excludes).
+    for (int i = 0; i < t->sources.len; i++) {
+        const char *src = t->sources.data[i];
+        if (source_is_excluded(t, src)) continue;
+        if (!sset_has(seen_srcs, src)) {
+            sset_add(seen_srcs, src);
+            strarray_push(srcs, t->sources.data[i]);
+        }
+    }
+    // Per-target includes, defines, undefs.
+    for (int i = 0; i < t->includes.len; i++) strarray_push(incs,   t->includes.data[i]);
+    for (int i = 0; i < t->defines.len;  i++) strarray_push(defs,   t->defines.data[i]);
+    for (int i = 0; i < t->undefs.len;   i++) strarray_push(undefs, t->undefs.data[i]);
+
+    // Recurse into LinkWith deps (DependsOn are ordering-only, not folded).
+    for (int i = 0; i < t->deps_count; i++) {
+        if (!t->deps_link[i]) continue; // DependsOn: skip
+        BuildTarget *dep = t->deps[i];
+        if (dep->sources.len == 0) continue; // source-less dep: warned elsewhere
+        collect_bytecode_inputs(dep, srcs, incs, defs, undefs, seen_tgts, seen_srcs);
+    }
+}
+
+// Mark transitive LinkWith deps of every kind=bytecode target as folded.
+// A folded target is a bytecode library: not built standalone, sources folded
+// into its dependent's single cccc invocation.
+static void mark_bytecode_folded_deps(BuildTarget *dep) {
+    if (dep->bytecode_folded) return; // already visited
+    dep->bytecode_folded = 1;
+    for (int i = 0; i < dep->deps_count; i++) {
+        if (dep->deps_link[i])
+            mark_bytecode_folded_deps(dep->deps[i]);
+    }
+}
+
 // Build a single target (its sources already; deps assumed built).  Returns 0 ok.
 // `cc` is the global fallback CC; per-target and cross_cc overrides are applied
 // inside this function via effective_cc_for_target.
 static int build_target(Builder *ctx, const char *cc,
                         BuildTarget *t, int *step, int total) {
+    // Bytecode-library targets are folded into their bytecode dependent's single
+    // cccc invocation and must not be built standalone (#563).
+    if (t->bytecode_folded)
+        return 0;
+
     if (ctx->verbose) {
         const char *kind_str = t->kind == CCCC_TGT_EXE      ? "executable"
                              : t->kind == CCCC_TGT_STATIC    ? "static library"
@@ -1534,8 +1628,11 @@ static int build_target(Builder *ctx, const char *cc,
         return 1;
     }
 
-    // Bytecode target (#545): single whole-program cccc invocation → .c4 file.
-    // Skips the per-source compile_sources() + native link steps entirely.
+    // Bytecode target (#545 + #563): single whole-program cccc invocation → .c4.
+    // LinkWith deps (transitively) are folded in by aggregating their sources into
+    // this same invocation, reusing CCCC's existing AST-level multi-TU merge.
+    // Source-less LinkWith deps (CUSTOM targets, native FFI libs) are skipped with
+    // a warning — linking native artifacts into bytecode requires FFI, not LinkWith.
     if (t->kind == CCCC_TGT_BYTECODE) {
         char *cccc_bin = ctx->cccc_self
                        ? xstrdup(ctx->cccc_self)
@@ -1546,19 +1643,89 @@ static int build_target(Builder *ctx, const char *cc,
             free(out_rel); free(out_abs); free(out_dir); free(tobjdir);
             return 1;
         }
+
+        // Warn about source-less LinkWith deps (out of scope for bytecode merge).
+        for (int i = 0; i < t->deps_count; i++) {
+            if (t->deps_link[i] && t->deps[i]->sources.len == 0) {
+                fprintf(stderr,
+                    "build: warning: bytecode target '%s': LinkWith dep '%s' has no "
+                    "sources — native FFI linking is out of scope for bytecode targets; "
+                    "dep ignored\n",
+                    t->name, t->deps[i]->name);
+            }
+        }
+
+        // Collect all sources (transitively, deduped) from this target and its
+        // folded LinkWith deps. Only sources; flags are handled below.
+        StringArray agg_srcs   = {0};
+        StringArray dummy_incs  = {0};
+        StringArray dummy_defs  = {0};
+        StringArray dummy_undefs = {0};
+        TargetSet seen_tgts = {0};
+        StrSet    seen_srcs = {0};
+        collect_bytecode_inputs(t, &agg_srcs, &dummy_incs, &dummy_defs, &dummy_undefs,
+                                &seen_tgts, &seen_srcs);
+        free(seen_tgts.data);
+        free(seen_srcs.data);
+        free(dummy_incs.data);
+        free(dummy_defs.data);
+        free(dummy_undefs.data);
+
         StringArray owned = {0};
         ArgVec a = {0};
         argv_push(&a, cccc_bin);
-        for (int i = 0; i < t->sources.len; i++) {
-            if (!source_is_excluded(t, t->sources.data[i]))
-                argv_push(&a, t->sources.data[i]);
-        }
+        for (int i = 0; i < agg_srcs.len; i++)
+            argv_push(&a, agg_srcs.data[i]);
         argv_push(&a, "-o");
         argv_push(&a, out_abs);
+
+        // Flags: ctx defaults (--std, -I, -D, -U) + root target's own.
         push_compile_flags_bytecode(&a, ctx, t, &owned);
+
+        // Additionally push per-target includes/defines/undefs from each folded
+        // dep (transitively).  push_compile_flags_bytecode already covered t's
+        // own, so we only visit deps here.
+        // Reuse the TargetSet to avoid revisiting.
+        TargetSet dep_seen = {0};
+        tset_add(&dep_seen, t); // mark root so collect skips it
+        for (int i = 0; i < t->deps_count; i++) {
+            if (!t->deps_link[i]) continue;
+            BuildTarget *dep = t->deps[i];
+            if (dep->sources.len == 0) continue;
+            if (tset_has(&dep_seen, dep)) continue;
+            // Gather this dep's (and its transitive deps') per-target flags.
+            StringArray d_srcs = {0}, d_incs = {0}, d_defs = {0}, d_undefs = {0};
+            StrSet d_ss = {0};
+            collect_bytecode_inputs(dep, &d_srcs, &d_incs, &d_defs, &d_undefs,
+                                    &dep_seen, &d_ss);
+            free(d_ss.data);
+            free(d_srcs.data);
+            for (int j = 0; j < d_incs.len; j++) {
+                argv_push(&a, "-I");
+                argv_push(&a, d_incs.data[j]);
+            }
+            for (int j = 0; j < d_defs.len; j++) {
+                char *f = malloc(strlen(d_defs.data[j]) + 3);
+                snprintf(f, strlen(d_defs.data[j]) + 3, "-D%s", d_defs.data[j]);
+                strarray_push(&owned, f);
+                argv_push(&a, f);
+            }
+            for (int j = 0; j < d_undefs.len; j++) {
+                char *f = malloc(strlen(d_undefs.data[j]) + 3);
+                snprintf(f, strlen(d_undefs.data[j]) + 3, "-U%s", d_undefs.data[j]);
+                strarray_push(&owned, f);
+                argv_push(&a, f);
+            }
+            free(d_incs.data);
+            free(d_defs.data);
+            free(d_undefs.data);
+        }
+        free(dep_seen.data);
+
         int brc = run_step(ctx, ++(*step), total, &a);
         free(a.data);
         free_strarray(&owned);
+        free(agg_srcs.data);
         free(cccc_bin);
         free(out_rel); free(out_abs); free(out_dir); free(tobjdir);
         return brc;
@@ -1651,6 +1818,8 @@ done:
 static int count_steps(BuildTarget **order, int n) {
     int total = 0;
     for (int i = 0; i < n; i++) {
+        if (order[i]->bytecode_folded)
+            continue; // skipped — folded into a bytecode dependent (#563)
         if (order[i]->kind == CCCC_TGT_CUSTOM)
             total += 1; // one step: run the custom command
         else if (order[i]->kind == CCCC_TGT_BYTECODE)
@@ -1716,8 +1885,19 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
         printf("build: no targets declared\n");
         return 0;
     }
-    for (int i = 0; i < ctx->targets_count; i++)
+    // Reset topo markers and bytecode_folded, then mark transitive LinkWith deps
+    // of kind=bytecode targets as folded libraries (#563).
+    for (int i = 0; i < ctx->targets_count; i++) {
         ctx->targets[i]->visited = 0;
+        ctx->targets[i]->bytecode_folded = 0;
+    }
+    for (int i = 0; i < ctx->targets_count; i++) {
+        if (ctx->targets[i]->kind != CCCC_TGT_BYTECODE) continue;
+        for (int j = 0; j < ctx->targets[i]->deps_count; j++) {
+            if (ctx->targets[i]->deps_link[j])
+                mark_bytecode_folded_deps(ctx->targets[i]->deps[j]);
+        }
+    }
 
     BuildTarget **order = calloc(ctx->targets_count, sizeof(*order));
     int n = 0;

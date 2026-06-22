@@ -213,8 +213,42 @@ cccc --build build.c --build-target=bc_app
 ```
 
 Flags forwarded to the `cccc` invocation: `-I`, `-D`, `-U`, `--std`. Native
-`cflags`/`ldflags`/profile flags are skipped. `LinkWith` between bytecode
-targets and incremental per-source caching are not supported in v1.
+`cflags`/`ldflags`/profile flags are skipped. Incremental per-source caching is
+not yet supported for bytecode targets.
+
+### LinkWith between bytecode targets
+
+`LinkWith(app, lib)` is supported when `app` is a `kind=bytecode` target (#563).
+The library target's sources are **folded** (transitively, deduplicated) into
+`app`'s single `cccc` invocation — reusing CCCC's existing AST-level merge.
+The library target is not built standalone and may omit `main()`.
+
+```c
+[[cccc::build_target(kind=bytecode)]]
+BuildTarget *bc_app(Builder *ctx) {
+    // Library: defines helper functions, no main().
+    BuildTarget *lib = Executable(ctx, "mylib");
+    AddSource(lib, "src/lib.c");
+    AddInclude(lib, "include");
+
+    // Executable: calls functions from lib.
+    BuildTarget *app = Executable(ctx, "app");
+    AddSource(app, "src/main.c");
+    AddInclude(app, "include");
+    LinkWith(app, lib);
+    return app;
+}
+```
+
+`DependsOn` edges are ordering-only (as for native targets). `LinkWith` from a
+bytecode target to a source-less target (a `CUSTOM` step or a native FFI library)
+is ignored with a warning; native linking into `.c4` goes through FFI, not
+`LinkWith`. A target folded into a bytecode executable via `LinkWith` is a
+bytecode library and is not also native-linked.
+
+**Out of scope:** linking a prebuilt `.c4` with no corresponding source (that
+would require a bytecode-level linker with symbol tables and text relocations,
+which the `.c4` format does not currently provide).
 
 The attribute accepts C23 and GNU forms:
 
