@@ -498,9 +498,27 @@ Saved bytecode files are self-contained and can be loaded into a fresh VM instan
 |               |  allow_count, allow_list strings,
 |               |  deny_count, deny_list strings
 +---------------+
+| TLS tmpl size |  8 bytes (byte length of TLS template)
++---------------+
+| TLS template  |  tls_template_size bytes
+|               |  (pointer slots stripped to addend, re-anchored on load)
++---------------+
+| TLS reloc cnt |  8 bytes
++---------------+
+| TLS relocs    |  N × (tls_offset, target_segment, target_offset, addend)
+|               |  each field 8 bytes; target_segment: 0=data, 1=text
++---------------+
 ```
 
-On load, the loader re-anchors global pointers, function-pointer offsets, FFI entries, and return-buffer addresses to the new VM’s segment bases.
+On load, the loader re-anchors global pointers, function-pointer offsets, FFI entries, return-buffer addresses, and TLS template pointer slots to the new VM’s segment bases.
+
+**Data reloc / TLS reloc record layout** (each field is a signed 64-bit integer):
+```
+data_offset     — byte offset within the data/TLS segment where a pointer slot lives
+target_offset   — byte offset of the pointed-to symbol within its segment
+addend          — addend baked into the pointer (usually 0)
+target_segment  — 0 = data segment, 1 = text segment
+```
 
 ### Asm-Passthru Rehydration
 
