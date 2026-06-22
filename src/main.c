@@ -2503,5 +2503,10 @@ BAIL:
     }
     free(build_options);
     free(link_paths);
+    if (build_tool_allow) {
+        for (int i = 0; i < build_tool_allow_count; i++)
+            free((void *)build_tool_allow[i]);
+        free(build_tool_allow);
+    }
     return exit_code;
 }

@@ -1244,6 +1244,9 @@ void cc_destroy(VirtualMachine *vm) {
     // Free include_guards HashMap
     hashmap_deinit(&vm->compiler.include_guards);
 
+    // Free guard_macros HashMap (set of macro names used as include guards)
+    hashmap_deinit(&vm->compiler.guard_macros);
+
     // Free dynamic patch tables (#555)
     if (vm->compiler.call_patches)
         free(vm->compiler.call_patches);

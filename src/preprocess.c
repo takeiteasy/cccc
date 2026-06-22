@@ -2935,6 +2935,10 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
                     }
                 }
             }
+            // Advance past the attribute name token so the bare-name branches below
+            // don't re-process it. The for loop's t = t->next will skip to
+            // after_scope->next (e.g. '(' for args, ']' for closing bracket).
+            t = after_scope;
         } else if (equal(t, "build_target")) {
             // bare: __attribute__((build_target)) or __attribute__((build_target(...)))
             is_build_target_kind = true;

@@ -1553,10 +1553,10 @@ static bool compile_macro_program(VirtualMachine *vm) {
     hashmap_foreach(&vm->compiler.guard_macros, undefine_guard_macro_iter,
                     &vm->compiler.macros);
     tokens = preprocess(vm, tokens);
-    // Restore include guard state; the comptime-specific maps were heap-allocated
-    // during the preprocessing pass and are discarded (borrowed-key free only).
-    hashmap_deinit_borrowed(&vm->compiler.pragma_once);
-    hashmap_deinit_borrowed(&vm->compiler.include_guards);
+    // Restore include guard state; the comptime-specific maps own their key copies
+    // (via hashmap_put) so must be freed with hashmap_deinit, not _borrowed.
+    hashmap_deinit(&vm->compiler.pragma_once);
+    hashmap_deinit(&vm->compiler.include_guards);
     vm->compiler.pragma_once = saved_pragma_once;
     vm->compiler.include_guards = saved_include_guards;
     Obj *macro_prog = parse(vm, tokens);

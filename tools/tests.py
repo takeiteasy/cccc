@@ -37,6 +37,14 @@ C4_SKIP_TESTS = {
 LEAKS_SKIP_TESTS = {
     "test_posix_sys_wait.c",
     "test_exit_code.c",
+    # These tests use fork() for parallel target dispatch (--build-jobs=N with
+    # multiple independent targets). leaks --atExit is not fork-safe: the
+    # forked child inherits DYLD_INSERT_LIBRARIES with libLeaksAtExit.dylib
+    # loaded; if the library fires in the child (which holds a copy of the
+    # parent's entire heap), it produces false-positive leak reports.
+    # Tracked in ticket for a proper fork-safety fix.
+    "test_build_parallel_targets.c",
+    "test_build_parallel_keep_going.c",
 }
 
 
@@ -138,6 +146,13 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
             "elapsed": 0,
             "skip_reason": "c4-incompatible: --build mode",
         }
+
+    # --build is incompatible with -O flags (build mode runs the build script
+    # in-process and does not compile VM bytecode at an optimization level).
+    # Strip any -On flags from cccc_args so --full sweeps don't break build tests.
+    if is_build_mode:
+        cccc_args = [a for a in cccc_args
+                     if not (a.startswith("-O") and len(a) > 2 and a[2].isdigit())]
 
     if c4_mode:
         return run_c4_roundtrip(
