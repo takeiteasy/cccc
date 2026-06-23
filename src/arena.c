@@ -87,23 +87,6 @@ void *arena_alloc(Arena *arena, size_t size) {
     return ptr;
 }
 
-// Reset arena (reuse all blocks without deallocating).
-// Rewinds every block's bump pointer to base so subsequent arena_alloc calls
-// can refill them. arena_alloc scans the block list for room, so all blocks
-// are eligible for reuse after a reset. (#53)
-// NOTE(#579): currently unwired — declared and defined but never called.
-void arena_reset(Arena *arena) {
-    for (ArenaBlock *block = arena->blocks; block; block = block->next) {
-        block->ptr = block->base;
-    }
-    // Point current at the oldest (smallest-index) block so the common case
-    // of filling blocks in order starts at the beginning of the list again.
-    ArenaBlock *tail = arena->blocks;
-    while (tail && tail->next)
-        tail = tail->next;
-    arena->current = tail;
-}
-
 // Destroy arena and free all memory
 void arena_destroy(Arena *arena) {
     ArenaBlock *block = arena->blocks;

@@ -435,7 +435,6 @@ int display_width(VirtualMachine *vm, char *p, int len);
 
 void arena_init(Arena *arena, size_t default_block_size);
 void *arena_alloc(Arena *arena, size_t size);
-void arena_reset(Arena *arena);
 void arena_destroy(Arena *arena);
 
 //
@@ -710,8 +709,6 @@ void cc_host_backtrace_print(void);
 //
 // serialize.c
 //
-
-char *serialize_node_to_source(VirtualMachine *vm, Node *node);
 
 //
 // dump_ast.c

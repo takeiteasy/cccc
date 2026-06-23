@@ -1298,30 +1298,3 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     free(ctx.typedefs);
 }
 
-// Serialize a single node to a string (for debugging)
-// NOTE(#579): currently unwired — declared and defined but never called.
-char *serialize_node_to_source(VirtualMachine *vm, Node *node) {
-    if (!node)
-        return strdup("");
-
-    // Create a memory stream
-    char *buffer = NULL;
-    size_t size = 0;
-    FILE *f = open_memstream(&buffer, &size);
-    if (!f)
-        return strdup("/* serialization error */");
-
-    SerializeContext ctx = {};
-    collect_scope_names(&ctx, vm);
-    collect_node_types(&ctx, node);
-
-    serialize_expr(f, vm, &ctx, node, 0);
-    fclose(f);
-
-    free(ctx.seen.data);
-    free(ctx.defs.data);
-    free(ctx.tags);
-    free(ctx.typedefs);
-
-    return buffer;
-}
