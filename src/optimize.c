@@ -1200,6 +1200,26 @@ static bool op_byte0_is_src(int op) {
     return op_byte0_is_int_src(op) || op_byte0_is_float(op);
 }
 
+// Opcodes whose pc+1 operand word holds an address or packed immediate, NOT a
+// register encoding.  Sub-pass B's generic size>=2 decode must skip these: it
+// would misread byte 0 of the address/immediate as a destination register and
+// fire KILL_INT_DEF on it, silently NOP-ing a live MOV3 whenever that byte
+// coincides with a pending destination register (e.g. a CALL whose target
+// address ends in 0x0A == REG_A0 kills the argument-setup `MOV3 A0, x`).  This
+// is the same aliasing hazard the AXCHG/ACAS special-case guards against (#497).
+// All of these are control-flow / stack-adjust opcodes already handled by the
+// switch below (RESET_MOV_TRACKING for the CF ops; ADJ touches no register).
+static bool op_operand_word_is_immediate(int op) {
+    switch (op) {
+    case JMP: case JMPT:
+    case CALL: case CALLT: case CALLF:
+    case ENT3: case ADJ:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
     if (!vm || !vm->text_seg || !vm->text_ptr)
         return;
@@ -1514,7 +1534,7 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
             KILL_INT_DEF(REG_A0);
 
         } else {
-            if (size >= 2) {
+            if (size >= 2 && !op_operand_word_is_immediate(op)) {
                 InstrWord w = vm->text_seg[pc + 1];
                 int rd  = (int)(w & 0xFF);
                 int rs1 = (int)((w >> 8) & 0xFF);
