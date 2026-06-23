@@ -296,53 +296,33 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-Wno-error=<name>   Do not promote one warning category\n");
     printf("\nSafety Levels (preset flag combinations):\n");
     printf("\t-0/--safety=none     No safety checks (maximum performance)\n");
-    printf("\t-1/--safety=basic    Essential low-overhead checks (~5-10%% "
-           "overhead)\n");
-    printf("\t-2/--safety=standard Comprehensive development safety (~20-40%% "
-           "overhead)\n");
-    printf("\t-3/--safety=max      All safety features for deep debugging "
-           "(~60-100%%+ overhead)\n");
+    printf("\t-1/--safety=basic    Essential low-overhead checks (~5-10%% overhead)\n");
+    printf("\t-2/--safety=standard Comprehensive development safety (~20-40%% overhead)\n");
+    printf("\t-3/--safety=max      All safety features for deep debugging (~60-100%%+ overhead)\n");
     printf("\nMemory Safety Options (can be combined with safety levels):\n");
     printf("\t-B/--bounds-checks           Runtime array bounds checking\n");
     printf("\t   --uaf-detection           Use-after-free detection\n");
-    printf("\t-C/--control-flow-integrity  Control-flow integrity (indirect call "
-            "validation)\n");
-    printf("\t   --type-checks             Runtime type checking on pointer "
-            "dereferences\n");
+    printf("\t-C/--control-flow-integrity  Control-flow integrity (indirect call validation)\n");
+    printf("\t   --type-checks             Runtime type checking on pointer dereferences\n");
     printf("\t   --uninitialized-detection Uninitialized variable detection\n");
     printf("\t   --overflow-checks         Detect signed integer overflow\n");
     printf("\t   --stack-canaries          Stack overflow protection\n");
     printf("\t   --heap-canaries           Heap overflow protection\n");
-    printf("\t-M/--memory-leak-detection   Track allocations and report leaks "
-            "at exit\n");
-    printf("\t   --stack-instrumentation   Track stack variable lifetimes and "
-            "accesses\n");
-    printf("\t   --stack-errors            Enable runtime errors for stack "
-           "instrumentation\n");
-    printf("\t-P/--pointer-sanitizer       Enable all pointer checks (bounds, "
-            "UAF, type)\n");
-    printf("\t   --dangling-pointers       Detect use of stack pointers after "
-           "function return\n");
-    printf(
-        "\t   --alignment-checks        Validate pointer alignment for type\n");
-    printf("\t   --provenance-tracking     Track pointer origin and validate "
-           "operations\n");
-    printf("\t   --invalid-arithmetic      Detect pointer arithmetic outside "
-           "object bounds\n");
-    printf("\t   --format-string-checks    Validate format strings in "
-            "printf-family functions\n");
-    printf("\t   --random-canaries         Use random stack canaries (prevents "
-            "predictable bypass)\n");
-    printf("\t   --memory-poisoning        Poison allocated/freed memory "
-           "(0xCD/0xDD patterns)\n");
-    printf("\t   --memory-tagging          Temporal memory tagging (track "
-            "pointer generation tags)\n");
-    printf("\t-T/--thread-safety           Threading safety diagnostics: race "
-           "detection, lock-order\n"
-           "\t                             inversion, double-lock, and atomic "
-           "cast warnings\n");
-    printf("\t-V/--vm-heap                 Route all malloc/free through VM "
-           "heap (enables memory safety)\n");
+    printf("\t-M/--memory-leak-detection   Track allocations and report leaks at exit\n");
+    printf("\t   --stack-instrumentation   Track stack variable lifetimes and accesses\n");
+    printf("\t   --stack-errors            Enable runtime errors for stack instrumentation\n");
+    printf("\t-P/--pointer-sanitizer       Enable all pointer checks (bounds, UAF, type)\n");
+    printf("\t   --dangling-pointers       Detect use of stack pointers after function return\n");
+    printf("\t   --alignment-checks        Validate pointer alignment for type\n");
+    printf("\t   --provenance-tracking     Track pointer origin and validate operations\n");
+    printf("\t   --invalid-arithmetic      Detect pointer arithmetic outside object bounds\n");
+    printf("\t   --format-string-checks    Validate format strings in printf-family functions\n");
+    printf("\t   --random-canaries         Use random stack canaries (prevents predictable bypass)\n");
+    printf("\t   --memory-poisoning        Poison allocated/freed memory (0xCD/0xDD patterns)\n");
+    printf("\t   --memory-tagging          Temporal memory tagging (track pointer generation tags)\n");
+    printf("\t-T/--thread-safety           Threading safety diagnostics: race detection, lock-order\n"
+           "\t                             inversion, double-lock, and atomic cast warnings\n");
+    printf("\t-V/--vm-heap                 Route all malloc/free through VM heap (enables memory safety)\n");
     printf("\nFFI Safety Options:\n");
     printf("\t   --ffi-allow=list       Allow only comma-separated native function names\n");
     printf("\t   --ffi-deny=list        Deny comma-separated native function names\n");
@@ -355,12 +335,9 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                     GNU variants: gnu99, gnu11, gnu17/gnu18, gnu23/gnu2x\n");
     printf("\t                     Note: -s/--std currently affects predefined macros only\n");
     printf("\nPreprocessor Options:\n");
-    printf("\t   --embed-limit=SIZE         Set #embed file size warning limit "
-            "(e.g., 50MB, 100mb, default: 10MB)\n");
-    printf("\t   --embed-hard-limit         Make #embed limit a hard error "
-            "instead of warning\n");
-    printf("\t-r/--macro-recursion-limit=N  Limit recursive pragma macro "
-            "expansion (default: 256, 0=unlimited)\n");
+    printf("\t   --embed-limit=SIZE         Set #embed file size warning limit (e.g., 50MB, 100mb, default: 10MB)\n");
+    printf("\t   --embed-hard-limit         Make #embed limit a hard error instead of warning\n");
+    printf("\t-r/--macro-recursion-limit=N  Limit recursive pragma macro expansion (default: 256, 0=unlimited)\n");
     printf("\t-n/--max-errors=N             Cap diagnostics at N (default: 20)\n");
     printf("\t   --comptime-include-all     Forward all #include'd declarations to the\n");
     printf("\t                              comptime pass (legacy behavior; default is\n");
@@ -371,35 +348,25 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                              visible to other comptime function bodies\n");
     printf("\t                              (pre-#283 behavior; default is isolated)\n");
     printf("\nOptimization:\n");
-    printf("\t-O/--optimize[=LEVEL]        Enable bytecode optimization "
-           "(default: disabled)\n");
-    printf("\t                             LEVEL: 0=none, 1=basic, 2=standard, "
-           "3=aggressive, 4=fused\n");
+    printf("\t-O/--optimize[=LEVEL]        Enable bytecode optimization (default: disabled)\n");
+    printf("\t                             LEVEL: 0=none, 1=basic, 2=standard, 3=aggressive, 4=fused\n");
     printf("\t                             1: constant folding (-ffold)\n");
     printf("\t                             2: +peephole, +CSE (-fpeephole -fcse)\n");
     printf("\t                             3: +copy-prop, +DCE (-fcopy-prop -fdce)\n");
     printf("\t                             4: +opcode fusion (-ffuse)\n");
-    printf("\t-f<pass>                     Enable a single optimisation pass "
-           "regardless of -O level.\n");
+    printf("\t-f<pass>                     Enable a single optimisation pass regardless of -O level.\n");
     printf("\t-fno-<pass>                  Disable a pass even if enabled by -O.\n");
-    printf("\t                             Passes: fold, peephole, copy-prop, "
-           "dce, cse, fuse\n");
+    printf("\t                             Passes: fold, peephole, copy-prop, dce, cse, fuse\n");
     printf("\t                             Examples: -O3 -fno-cse, -O0 -fpeephole, "
            "-ffold -fdce\n");
-    printf("\t   --fma                   Enable single-rounding FMA (-ffuse implied; "
-           "may change FP results)\n");
-    printf("\t   --inline-limit=N        Limit inlining to N AST nodes "
-            "(default: 256)\n");
-    printf("\nStatic Bytecode Analysis (compile or load input, walk text "
-           "segment, exit):\n");
-    printf("\t   --ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, "
-            "default 2)\n");
-    printf("\t   --ngrams-top=N          Show top N sequences (default 25)\n");
-    printf("\t   --ngrams-per-file       Print a per-input section in addition "
-           "to the aggregate\n");
-    printf("\t   --fusion-candidates[=N] Use-def fusion candidate analysis (top "
-            "N, default 50)\n");
-    printf("\t                          JSON output via -j/--json\n");
+    printf("\t--fma                        Enable single-rounding FMA (-ffuse implied; may change FP results)\n");
+    printf("\t--inline-limit=N             Limit inlining to N AST nodes (default: 256)\n");
+    printf("\nStatic Bytecode Analysis (compile or load input, walk text segment, exit):\n");
+    printf("\t--ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, default 2)\n");
+    printf("\t--ngrams-top=N          Show top N sequences (default 25)\n");
+    printf("\t--ngrams-per-file       Print a per-input section in addition to the aggregate\n");
+    printf("\t--fusion-candidates[=N] Use-def fusion candidate analysis (top N, default 50)\n");
+    printf("\t                        JSON output via -j/--json\n");
     printf("\nInline Assembly:\n");
     printf("\t-A/--asm-passthru   Compile asm(\"...\") statements via native C compiler\n");
     printf("\t                    and execute them via FFI (default: no-op)\n");
