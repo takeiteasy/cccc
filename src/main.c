@@ -233,7 +233,7 @@ static void usage(const char *argv0, int exit_code) {
            "auto, c23, gnu, msvc, strip\n");
     printf("\t-j/--json                Emit JSON for all eligible output "
            "(diagnostics, header declarations, --fusion-candidates, etc.)\n");
-    printf("\t-f/--ffi-decls           Emit parsed function/struct/enum declarations "
+    printf("\t   --ffi-decls           Emit parsed function/struct/enum declarations "
             "as JSON (for FFI wrapper generation)\n");
     printf("\t-X/--no-preprocess       Disable preprocessing step\n");
     printf("\t-S/--no-stdlib           Do not link standard library\n");
@@ -370,19 +370,24 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                              [[cccc::comptime]] function body to remain\n");
     printf("\t                              visible to other comptime function bodies\n");
     printf("\t                              (pre-#283 behavior; default is isolated)\n");
-    printf("\nOptimization Levels:\n");
+    printf("\nOptimization:\n");
     printf("\t-O/--optimize[=LEVEL]        Enable bytecode optimization "
            "(default: disabled)\n");
     printf("\t                             LEVEL: 0=none, 1=basic, 2=standard, "
            "3=aggressive, 4=fused\n");
-    printf("\t                             0: No optimization\n");
-    printf("\t                             1: Constant folding only\n");
-    printf("\t                             2: Constant folding + peephole\n");
-    printf("\t                             3: All optimizations (including "
-            "dead code elimination)\n");
-    printf("\t                             4: Level 3 + automatic fused-op pass\n");
-    printf("\t   --fuse-ops              Run automatic opcode fusion pass\n");
-    printf("\t   --fma                   Enable single-rounding FMA (implies --fuse-ops; may change FP results)\n");
+    printf("\t                             1: constant folding (-ffold)\n");
+    printf("\t                             2: +peephole, +CSE (-fpeephole -fcse)\n");
+    printf("\t                             3: +copy-prop, +DCE (-fcopy-prop -fdce)\n");
+    printf("\t                             4: +opcode fusion (-ffuse)\n");
+    printf("\t-f<pass>                     Enable a single optimisation pass "
+           "regardless of -O level.\n");
+    printf("\t-fno-<pass>                  Disable a pass even if enabled by -O.\n");
+    printf("\t                             Passes: fold, peephole, copy-prop, "
+           "dce, cse, fuse\n");
+    printf("\t                             Examples: -O3 -fno-cse, -O0 -fpeephole, "
+           "-ffold -fdce\n");
+    printf("\t   --fma                   Enable single-rounding FMA (-ffuse implied; "
+           "may change FP results)\n");
     printf("\t   --inline-limit=N        Limit inlining to N AST nodes "
             "(default: 256)\n");
     printf("\nStatic Bytecode Analysis (compile or load input, walk text "
@@ -810,8 +815,9 @@ int main(int argc, const char *argv[]) {
     int embed_hard_error = 0;   // --embed-hard-limit
     int macro_recursion_limit = -1; // --macro-recursion-limit
     int opt_level = 0; // -O0/-O1/-O2/-O3/-O4 (default: 0 = no optimization)
-    int fuse_ops = 0;          // --fuse-ops
     int ffp_contract_fma = 0;  // --fma
+    uint32_t opt_f_enable  = 0; // passes forced ON  by -f<pass>
+    uint32_t opt_f_disable = 0; // passes forced OFF by -fno-<pass>
     int inline_node_limit = 20; // --inline-limit (default 20, 0=disable)
     int asm_passthru = 0;       // --asm-passthru
     const char *std_arg = NULL; // --std=<standard>
@@ -882,7 +888,7 @@ int main(int argc, const char *argv[]) {
         {"no-preprocess", no_argument, 0, 'X'},
         {"no-stdlib", no_argument, 0, 'S'},
         {"json", no_argument, 0, 'j'},
-        {"ffi-decls", no_argument, 0, 'f'},
+        {"ffi-decls", no_argument, 0, 1095},
         {"compile", optional_argument, 0, 'c'},
         {"debug", no_argument, 0, 'g'},
         {"safety", required_argument, 0, 1012},
@@ -921,7 +927,6 @@ int main(int argc, const char *argv[]) {
         {"embed-limit", required_argument, 0, 1048},
         {"embed-hard-limit", no_argument, 0, 1060},
         {"optimize", optional_argument, 0, 'O'},
-        {"fuse-ops", no_argument, 0, 1070},
         {"fma", no_argument, 0, 1072},
         {"macro-recursion-limit", required_argument, 0, 'r'},
         {"std", required_argument, 0, 's'},
@@ -968,6 +973,19 @@ int main(int argc, const char *argv[]) {
         {"build-option",     required_argument, 0, 1092},
         {"build-install",    no_argument,       0, 1093},
         {"link",             required_argument, 0, 1094},
+        // Per-pass optimisation enables/disables (long-form aliases for -f<pass>)
+        {"ffold",            no_argument, 0, 1096},
+        {"fpeephole",        no_argument, 0, 1097},
+        {"fcopy-prop",       no_argument, 0, 1098},
+        {"fdce",             no_argument, 0, 1099},
+        {"fcse",             no_argument, 0, 1100},
+        {"ffuse",            no_argument, 0, 1101},
+        {"fno-fold",         no_argument, 0, 1102},
+        {"fno-peephole",     no_argument, 0, 1103},
+        {"fno-copy-prop",    no_argument, 0, 1104},
+        {"fno-dce",          no_argument, 0, 1105},
+        {"fno-cse",          no_argument, 0, 1106},
+        {"fno-fuse",         no_argument, 0, 1107},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -977,7 +995,9 @@ int main(int argc, const char *argv[]) {
     }
     int getopt_argc = (dashdash >= 0) ? dashdash : argc;
 
-    const char *optstring = "0123haI:L:D:U:o:c::dvgiPEMGXSjVCl:W:e:O::FbTmptn:r:s:ABfw";
+    // -f is used for optimisation-pass flags: -f<pass> and -fno-<pass>.
+    // --ffi-decls is now long-only (code 1095).
+    const char *optstring = "0123haI:L:D:U:o:c::dvgiPEMGXSjVCl:W:e:O::FbTmptn:r:s:ABf:w";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(getopt_argc, (char *const *)argv, optstring,
@@ -1244,8 +1264,6 @@ int main(int argc, const char *argv[]) {
             } else if (optarg[0] >= '0' && optarg[0] <= '4' &&
                        optarg[1] == '\0') {
                 opt_level = optarg[0] - '0';
-                if (opt_level >= 4)
-                    fuse_ops = 1;
             } else {
                 fprintf(stderr,
                         "error: invalid optimization level '%s' (use 0, 1, 2, "
@@ -1255,11 +1273,8 @@ int main(int argc, const char *argv[]) {
             }
             cli_opt_level_set = true;
             break;
-        case 1070:
-            fuse_ops = 1;
-            break;
-        case 1072:
-            fuse_ops = 1;
+        case 1072: // --fma
+            opt_f_enable |= CCCC_OPT_FUSE;
             ffp_contract_fma = 1;
             break;
         case 'r': { // --macro-recursion-limit
@@ -1529,9 +1544,52 @@ int main(int argc, const char *argv[]) {
             }
             break;
         }
-        case 'f': // --ffi-decls
+        case 'f': { // -f<pass> / -fno-<pass>  (e.g. -ffold, -fno-cse)
+            static const struct { const char *name; CcccOptPass bit; } pass_table[] = {
+                {"fold",      CCCC_OPT_FOLD},
+                {"peephole",  CCCC_OPT_PEEPHOLE},
+                {"copy-prop", CCCC_OPT_COPY_PROP},
+                {"dce",       CCCC_OPT_DCE},
+                {"cse",       CCCC_OPT_CSE},
+                {"fuse",      CCCC_OPT_FUSE},
+                {NULL, 0}
+            };
+            bool neg = (strncmp(optarg, "no-", 3) == 0);
+            const char *name = neg ? optarg + 3 : optarg;
+            bool matched = false;
+            for (int k = 0; pass_table[k].name; k++) {
+                if (strcmp(name, pass_table[k].name) == 0) {
+                    if (neg) opt_f_disable |= (uint32_t)pass_table[k].bit;
+                    else     opt_f_enable  |= (uint32_t)pass_table[k].bit;
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                fprintf(stderr,
+                        "error: unknown optimisation pass '-f%s'\n"
+                        "       valid: fold, peephole, copy-prop, dce, cse, fuse "
+                        "(prefix 'no-' to disable)\n",
+                        optarg);
+                usage(argv[0], 1);
+            }
+            break;
+        }
+        case 1095: // --ffi-decls (long-only; -f is now used for pass flags)
             output_ffi_decls = 1;
             break;
+        case 1096: opt_f_enable  |= CCCC_OPT_FOLD;      break; // --ffold
+        case 1097: opt_f_enable  |= CCCC_OPT_PEEPHOLE;  break; // --fpeephole
+        case 1098: opt_f_enable  |= CCCC_OPT_COPY_PROP; break; // --fcopy-prop
+        case 1099: opt_f_enable  |= CCCC_OPT_DCE;       break; // --fdce
+        case 1100: opt_f_enable  |= CCCC_OPT_CSE;       break; // --fcse
+        case 1101: opt_f_enable  |= CCCC_OPT_FUSE;      break; // --ffuse
+        case 1102: opt_f_disable |= CCCC_OPT_FOLD;      break; // --fno-fold
+        case 1103: opt_f_disable |= CCCC_OPT_PEEPHOLE;  break; // --fno-peephole
+        case 1104: opt_f_disable |= CCCC_OPT_COPY_PROP; break; // --fno-copy-prop
+        case 1105: opt_f_disable |= CCCC_OPT_DCE;       break; // --fno-dce
+        case 1106: opt_f_disable |= CCCC_OPT_CSE;       break; // --fno-cse
+        case 1107: opt_f_disable |= CCCC_OPT_FUSE;      break; // --fno-fuse
         case '?':
             if (optopt)
                 fprintf(stderr, "error: option -%c requires an argument\n",
@@ -1571,12 +1629,12 @@ int main(int argc, const char *argv[]) {
         // --build runs the build script in the VM; the host runner compiles the
         // declared targets. VM-only and output modes do not apply here.
         if (compile_format != COMPILE_NONE || disassemble || opt_level != 0 ||
-            fuse_ops || vm_profile || out_file || preprocess_only ||
-            dump_expanded_only || print_tokens || output_json ||
+            opt_f_enable || opt_f_disable || vm_profile || out_file ||
+            preprocess_only || dump_expanded_only || print_tokens || output_json ||
             output_ffi_decls || dump_ast) {
             fprintf(stderr,
                     "error: --build cannot be combined with VM/output options "
-                    "(-c, -d, -O<n>, --vm-profile, -o, -E, -M, --ast, ...)\n");
+                    "(-c, -d, -O<n>, -f<pass>, --vm-profile, -o, -E, -M, --ast, ...)\n");
             usage(argv[0], 1);
         }
         if (flags & CCCC_ENABLE_DEBUGGER) {
@@ -1592,8 +1650,8 @@ int main(int argc, const char *argv[]) {
                     "error: -c=native cannot be combined with frontend output modes\n");
             usage(argv[0], 1);
         }
-        if (disassemble || entry_name || opt_level != 0 || fuse_ops ||
-            vm_profile) {
+        if (disassemble || entry_name || opt_level != 0 ||
+            opt_f_enable || opt_f_disable || vm_profile) {
             fprintf(stderr,
                     "error: -c=native cannot be combined with VM bytecode options\n");
             usage(argv[0], 1);
@@ -1864,10 +1922,11 @@ int main(int argc, const char *argv[]) {
         vm.compiler.embed_hard_error = true;
     }
 
-    // Set optimization level
-    vm.compiler.opt_level = opt_level;
-    vm.compiler.fuse_ops = fuse_ops;
+    // Set optimization level and per-pass overrides
+    vm.compiler.opt_level    = opt_level;
     vm.compiler.ffp_contract_fma = ffp_contract_fma;
+    vm.compiler.opt_f_enable  = opt_f_enable;
+    vm.compiler.opt_f_disable = opt_f_disable;
     vm.compiler.inline_node_limit = inline_node_limit;
     if (macro_recursion_limit >= 0)
         vm.compiler.macro_recursion_limit = macro_recursion_limit;

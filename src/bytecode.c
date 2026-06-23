@@ -1422,12 +1422,11 @@ void cc_compile(VirtualMachine *vm, Obj *prog) {
     // Generate bytecode from AST using new register-based codegen
     gen(vm, prog);
 
-    // Run optimizer if enabled at the global level, or if any function carries
-    // a per-function [[cccc::optimize]] attribute (which may request a level
-    // higher than the current global, e.g. O2 under a global O0 build).
-    if (vm->compiler.opt_level > 0 || vm->compiler.fuse_ops ||
+    // Run optimizer if enabled at the global level, any per-pass flags are set,
+    // or any function carries a per-function [[cccc::optimize]] attribute.
+    if (vm->compiler.opt_level > 0 || vm->compiler.opt_f_enable ||
         vm->compiler.have_fn_opt_attrs) {
-        cc_optimize(vm, vm->compiler.opt_level, vm->compiler.fuse_ops);
+        cc_optimize(vm, vm->compiler.opt_level);
     }
 
     // Build source index for O(log n) line→PC lookups

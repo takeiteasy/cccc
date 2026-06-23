@@ -1,4 +1,4 @@
-// CCCC_FLAGS: --fuse-ops
+// CCCC_FLAGS: -ffuse
 
 int main(void) {
     long x = 7;

@@ -11,16 +11,22 @@ CCCC includes optional bytecode optimization passes that can improve execution p
 # Enable optimization (level 1 = basic)
 ./cccc --optimize program.c
 ./cccc --optimize=1 program.c
+./cccc -O1 program.c       # short form
 
 # Standard optimization
-./cccc --optimize=2 program.c
+./cccc -O2 program.c
 
 # Aggressive optimization
-./cccc --optimize=3 program.c
+./cccc -O3 program.c
 
 # Aggressive optimization plus automatic opcode fusion
-./cccc --optimize=4 program.c
-./cccc --fuse-ops program.c
+./cccc -O4 program.c       # level 4 includes fuse
+./cccc -ffuse program.c    # enable fuse pass only
+
+# Mix -O level with per-pass overrides
+./cccc -O3 -fno-cse program.c    # O3 without CSE
+./cccc -O0 -fpeephole program.c  # only peephole
+./cccc -ffold -fdce program.c    # exactly these two passes
 ```
 
 ## Optimization Levels
@@ -28,10 +34,36 @@ CCCC includes optional bytecode optimization passes that can improve execution p
 | Level | Flag | Description | Passes |
 |-------|------|-------------|--------|
 | 0 | (default) | No optimization | None |
-| 1 | `--optimize` or `--optimize=1` | Basic | Constant folding + dead-call elimination |
-| 2 | `--optimize=2` | Standard | All level-1 passes + peephole + CSE for const functions + scalar local promotion + indexed load/store lowering |
-| 3 | `--optimize=3` | Aggressive | All passes + copy propagation + dead-MOV3 elimination |
-| 4 | `--optimize=4` | Fused | All level-3 passes + automatic opcode fusion |
+| 1 | `-O1` / `--optimize=1` | Basic | Constant folding + dead-call elimination |
+| 2 | `-O2` / `--optimize=2` | Standard | All level-1 passes + peephole + CSE for const functions + scalar local promotion + indexed load/store lowering |
+| 3 | `-O3` / `--optimize=3` | Aggressive | All passes + copy propagation + dead-MOV3 elimination |
+| 4 | `-O4` / `--optimize=4` | Fused | All level-3 passes + automatic opcode fusion |
+
+## Per-Pass Flags
+
+Individual optimisation passes can be enabled or disabled independently of the
+`-O` level, using gcc-style `-f<pass>` / `-fno-<pass>` flags.  They compose:
+`-O<n>` sets the default pass set, then `-f` overrides are applied on top.
+
+| Pass | Enable flag | Disable flag | Default level |
+|------|-------------|--------------|---------------|
+| Constant folding | `-ffold` | `-fno-fold` | `-O1`+ |
+| Peephole reductions | `-fpeephole` | `-fno-peephole` | `-O2`+ |
+| CSE (const functions) | `-fcse` | `-fno-cse` | `-O2`+ |
+| Copy propagation | `-fcopy-prop` | `-fno-copy-prop` | `-O3`+ |
+| Dead code elimination | `-fdce` | `-fno-dce` | `-O3`+ |
+| Opcode fusion | `-ffuse` | `-fno-fuse` | `-O4`+ |
+
+Long-form equivalents (`--ffold`, `--fno-fold`, etc.) are also accepted.
+
+Examples:
+
+```bash
+./cccc -O3 -fno-cse prog.c       # O3 minus CSE
+./cccc -O0 -fpeephole prog.c     # only peephole
+./cccc -ffold -fdce prog.c       # exactly fold + dce
+./cccc -O3 -fno-copy-prop prog.c # O3 without copy propagation
+```
 
 ## Per-Function Optimization
 
@@ -100,7 +132,7 @@ The same levels also lower simple array and pointer dereferences of the form
 `MUL3 + ADD3 + LDR/STR` address sequence for scalar integer and floating-point
 loads/stores when pointer-safety instrumentation is not active.
 
-At `--optimize=4`, or whenever `--fuse-ops` is specified, a post-codegen
+At `-O4` / `--optimize=4`, or whenever `-ffuse` is specified, a post-codegen
 fusion pass scans the emitted bytecode for adjacent single-def/single-use
 opcode pairs with a registered fused form. The pass keeps the existing codegen
 lowerings above; it only rewrites remaining eligible arithmetic chains such as

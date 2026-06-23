@@ -1842,6 +1842,17 @@ typedef struct {
     Token          *open_tok;   // for unclosed-block diagnostics
 } ComptimeCtxEntry;
 
+// Bitmask of individual optimisation passes for -f/-fno- CLI overrides.
+// The effective pass set is (level_to_opt_mask(opt_level) | opt_f_enable) & ~opt_f_disable.
+typedef enum {
+    CCCC_OPT_FOLD      = 1 << 0, // Constant folding           (-ffold)
+    CCCC_OPT_PEEPHOLE  = 1 << 1, // Peephole reductions        (-fpeephole)
+    CCCC_OPT_COPY_PROP = 1 << 2, // Copy propagation           (-fcopy-prop)
+    CCCC_OPT_DCE       = 1 << 3, // Dead code elimination      (-fdce)
+    CCCC_OPT_CSE       = 1 << 4, // Common-subexp elimination  (-fcse)
+    CCCC_OPT_FUSE      = 1 << 5, // Opcode fusion              (-ffuse)
+} CcccOptPass;
+
 typedef struct Compiler {
     // Preprocessor state
     bool skip_preprocess;     // Skip preprocessing step
@@ -2111,11 +2122,14 @@ typedef struct Compiler {
     // Optimization settings
     int opt_level; // Optimization level (0=none, 1=basic, 2=standard,
                    // 3=aggressive; 4 enables fused-op pass)
-    bool fuse_ops;          // Enable post-codegen opcode fusion pass
     bool ffp_contract_fma;  // --fma: emit FMADD3_FMA (single-rounding) instead of FMADD3
     int inline_node_limit; // Max AST nodes for full inlining (0=disable)
     bool have_fn_opt_attrs; // True if any function carries an optimize attribute;
                             // gates the per-function optimizer path in cc_optimize
+    // Per-pass overrides from -f<pass> / -fno-<pass> (bitmask of CcccOptPass).
+    // Applied on top of the level-derived default: effective = (level_mask | opt_f_enable) & ~opt_f_disable.
+    uint32_t opt_f_enable;  // Passes forced ON regardless of -O level
+    uint32_t opt_f_disable; // Passes forced OFF regardless of -O level
 
     // #pragma cccc config(...) support
     uint32_t cli_flags_mask;  // CCCCFlags bits explicitly set on the CLI; these

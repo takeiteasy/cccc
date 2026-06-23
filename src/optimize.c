@@ -2365,34 +2365,53 @@ static void opt_fuse_ops(VirtualMachine *vm) {
 
 // ========== Main Entry Point ==========
 
-// Run the NOP-marking optimisation passes (fold / peephole / DCE) on the
-// bytecode range [fn_start, fn_end) at the requested level.  Called either
+// Convert an -O level to the default bitmask of passes it enables.
+// Levels are cumulative: each level includes all lower-level passes.
+//   L1: fold
+//   L2: +peephole, +cse
+//   L3: +copy-prop, +dce
+//   L4: +fuse  (also enabled explicitly by -ffuse)
+static uint32_t level_to_opt_mask(int level) {
+    uint32_t m = 0;
+    if (level >= 1) m |= CCCC_OPT_FOLD;
+    if (level >= 2) m |= CCCC_OPT_PEEPHOLE | CCCC_OPT_CSE;
+    if (level >= 3) m |= CCCC_OPT_COPY_PROP | CCCC_OPT_DCE;
+    if (level >= 4) m |= CCCC_OPT_FUSE;
+    return m;
+}
+
+// Run the NOP-marking optimisation passes (fold / peephole / copy-prop / DCE)
+// on [fn_start, fn_end) according to the given pass bitmask.  Called either
 // once for the whole segment (fast path) or once per function (per-fn path).
 static void run_opt_passes(VirtualMachine *vm, OptReplacement *repls,
-                           int level, Pc fn_start, Pc fn_end) {
-    if (level >= 1)
-        opt_constant_fold(vm, repls, fn_start, fn_end);
-    if (level >= 2)
-        opt_peephole(vm, fn_start, fn_end);
-    if (level >= 3) {
-        opt_copy_prop(vm, fn_start, fn_end);
-        opt_dead_code(vm, fn_start, fn_end);
-    }
+                           uint32_t mask, Pc fn_start, Pc fn_end) {
+    if (mask & CCCC_OPT_FOLD)      opt_constant_fold(vm, repls, fn_start, fn_end);
+    if (mask & CCCC_OPT_PEEPHOLE)  opt_peephole(vm, fn_start, fn_end);
+    if (mask & CCCC_OPT_COPY_PROP) opt_copy_prop(vm, fn_start, fn_end);
+    if (mask & CCCC_OPT_DCE)       opt_dead_code(vm, fn_start, fn_end);
 }
 
-// Run the post-compaction passes (CSE, fuse) on [fn_start, fn_end).
+// Run the post-compaction passes (CSE) on [fn_start, fn_end).
 // fn_start/fn_end must already be updated by remap_function_metadata.
-static void run_post_compact_passes(VirtualMachine *vm, int level, bool fn_fuse,
+static void run_post_compact_passes(VirtualMachine *vm, uint32_t mask,
                                     Pc fn_start, Pc fn_end) {
-    if (level >= 2)
-        opt_cse_const_calls(vm, fn_start, fn_end);
-    (void)fn_fuse; // fuse is handled globally after all per-fn passes (see below)
+    if (mask & CCCC_OPT_CSE) opt_cse_const_calls(vm, fn_start, fn_end);
 }
 
-void cc_optimize(VirtualMachine *vm, int level, bool fuse_ops) {
+void cc_optimize(VirtualMachine *vm, int level) {
     bool have_fn_attrs = vm->compiler.have_fn_opt_attrs;
 
-    if (!vm || !vm->text_seg || (level <= 0 && !fuse_ops && !have_fn_attrs)) {
+    // Compute the effective pass mask:
+    //   base = level-derived defaults (-O<n>)
+    //   +    explicit enables  (-f<pass>)
+    //   &~   explicit disables (-fno-<pass>)
+    uint32_t base_mask = level_to_opt_mask(level);
+    uint32_t effective_mask = (base_mask | vm->compiler.opt_f_enable)
+                              & ~vm->compiler.opt_f_disable;
+
+    bool do_fuse = (effective_mask & CCCC_OPT_FUSE) != 0;
+
+    if (!vm || !vm->text_seg || (effective_mask == 0 && !have_fn_attrs)) {
         return;
     }
 
@@ -2404,17 +2423,16 @@ void cc_optimize(VirtualMachine *vm, int level, bool fuse_ops) {
     if (!have_fn_attrs) {
         // ---- Fast path: whole-segment optimisation (existing behaviour) ----
 
-        run_opt_passes(vm, repls, level, 1, seg_end);
+        run_opt_passes(vm, repls, effective_mask, 1, seg_end);
         opt_compact_bytecode(vm, repls);
         free(repls);
 
-        // Level 2+: CSE for [[gnu::const]] functions.  Runs after compaction so
-        // it sees the final, folded bytecode.  Replaces CALL in-place with MOV3
-        // (same 2-word encoding) — no second compaction pass is needed.
-        if (level >= 2)
+        // CSE for [[gnu::const]] functions.  Runs after compaction so it sees
+        // the final, folded bytecode.  Replaces CALL in-place with MOV3.
+        if (effective_mask & CCCC_OPT_CSE)
             opt_cse_const_calls(vm, 1, vm->text_ptr + 1);
 
-        if (fuse_ops || level >= 4)
+        if (do_fuse)
             opt_fuse_ops(vm);
 
     } else {
@@ -2422,9 +2440,10 @@ void cc_optimize(VirtualMachine *vm, int level, bool fuse_ops) {
         //
         // Phase 1: NOP-marking passes per function, then a single global
         // compaction.  Functions without an optimize attribute use the global
-        // level.  Functions with one always use their own level regardless of
-        // the global -O flag (GCC semantics).
-        bool need_fuse = fuse_ops;
+        // effective mask.  Functions with an __attribute__((optimize(N))) always
+        // use their own level as the base (GCC semantics), with global -f/-fno-
+        // overrides applied on top.
+        bool need_fuse = do_fuse;
 
         for (Obj *fn = vm->compiler.globals; fn; fn = fn->next) {
             if (!fn->is_function || !fn->body || fn->code_addr <= 0)
@@ -2435,10 +2454,13 @@ void cc_optimize(VirtualMachine *vm, int level, bool fuse_ops) {
                 continue;
 
             int eff_level = fn->fn_optimize_set ? fn->fn_optimize_level : level;
-            if (eff_level >= 4 || (fn->fn_optimize_set && fn->fn_optimize_level >= 4))
+            uint32_t fn_mask = (level_to_opt_mask(eff_level) | vm->compiler.opt_f_enable)
+                               & ~vm->compiler.opt_f_disable;
+
+            if (fn_mask & CCCC_OPT_FUSE)
                 need_fuse = true;
 
-            run_opt_passes(vm, repls, eff_level, fn_start, fn_end);
+            run_opt_passes(vm, repls, fn_mask, fn_start, fn_end);
         }
 
         // Single global compaction — updates code_addr/code_end_addr via
@@ -2456,7 +2478,9 @@ void cc_optimize(VirtualMachine *vm, int level, bool fuse_ops) {
                 continue;
 
             int eff_level = fn->fn_optimize_set ? fn->fn_optimize_level : level;
-            run_post_compact_passes(vm, eff_level, false, fn_start, fn_end);
+            uint32_t fn_mask = (level_to_opt_mask(eff_level) | vm->compiler.opt_f_enable)
+                               & ~vm->compiler.opt_f_disable;
+            run_post_compact_passes(vm, fn_mask, fn_start, fn_end);
         }
 
         // Fuse-ops runs globally if any function requested it.  The fusion
@@ -2465,7 +2489,7 @@ void cc_optimize(VirtualMachine *vm, int level, bool fuse_ops) {
         // NOTE: non-attributed functions at a lower level may also be fused;
         // this is a known approximation.  A per-function fuse pass is tracked
         // as a potential future improvement.
-        if (need_fuse || level >= 4)
+        if (need_fuse)
             opt_fuse_ops(vm);
     }
 }

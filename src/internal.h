@@ -630,7 +630,7 @@ void cccc_gil_release(VirtualMachine *vm);
 // optimize.c
 //
 
-void cc_optimize(VirtualMachine *vm, int level, bool fuse_ops);
+void cc_optimize(VirtualMachine *vm, int level);
 
 //
 // analyze.c
