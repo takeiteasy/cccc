@@ -496,6 +496,15 @@ void __cccc_bitint_neg(uint64_t *dst, const uint64_t *a, int words, int width) {
     __cccc_bitint_trunc(dst, words, width);
 }
 
+// Truth test: 1 if any word is non-zero, else 0. Used for boolean contexts
+// (if/while/for conditions, !, &&, ||, casts to _Bool), where the value is
+// kept in canonical (truncated) form so an OR over the words is sufficient.
+int __cccc_bitint_nonzero(const uint64_t *a, int words) {
+    uint64_t acc = 0;
+    for (int i = 0; i < words; i++) acc |= a[i];
+    return acc != 0;
+}
+
 // Convert base-10/16/2/8 string → wide _BitInt (for wb literals > 64 bits).
 // str points to the digit string (no prefix), base is 2/8/10/16.
 void __cccc_bitint_from_str(uint64_t *dst, const char *str, int base,
@@ -547,5 +556,6 @@ void register_wide_bitint_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__cccc_bitint_xor",     (void*)__cccc_bitint_xor,     5, 0);
     cc_register_cfunc(vm, "__cccc_bitint_not",     (void*)__cccc_bitint_not,     4, 0);
     cc_register_cfunc(vm, "__cccc_bitint_neg",     (void*)__cccc_bitint_neg,     4, 0);
+    cc_register_cfunc(vm, "__cccc_bitint_nonzero", (void*)__cccc_bitint_nonzero, 2, 0);
     cc_register_cfunc(vm, "__cccc_bitint_from_str",(void*)__cccc_bitint_from_str,5, 0);
 }

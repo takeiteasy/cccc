@@ -192,6 +192,7 @@ language coverage figures apply.
 | Feature | Status | Notes |
 |---|---|---|
 | Statement expressions `({ ... })` | ✓ | |
+| 128-bit integers `__int128` / `__int128_t` / `__uint128_t` | ✓ | Implemented on top of the `_BitInt(128)` machinery (multi-word, address-based storage). `unsigned __int128` is honoured; `__SIZEOF_INT128__` is defined so feature-detecting code selects these paths |
 | `__attribute__((...))` | ~ | Parsed; `aligned`, `packed`, `unused`, `deprecated`, `format`, `nodiscard`, `fallthrough`, `noreturn` supported (see [ATTRIBUTES.md](ATTRIBUTES.md)) |
 | Labels as values `&&label` | ✓ | |
 | Computed goto `goto *expr` | ✓ | |

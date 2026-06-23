@@ -1056,6 +1056,7 @@ static bool is_wide_bitint_helper_op(Node *node) {
     case ND_ADD: case ND_SUB: case ND_MUL: case ND_DIV: case ND_MOD:
     case ND_BITAND: case ND_BITOR: case ND_BITXOR: case ND_SHL: case ND_SHR:
     case ND_EQ: case ND_NE: case ND_LT: case ND_LE: case ND_CAST:
+    case ND_NEG: case ND_BITNOT:
         return node->lhs && (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->ty));
     case ND_ASSIGN:
         return is_wide_bitint(node->ty);
@@ -1641,6 +1642,46 @@ static long long alloc_wide_bitint_temp(VirtualMachine *vm, int words) {
 static void gen_zero_size_arg(VirtualMachine *vm, Node *arg, int dest_reg) {
     gen_expr(vm, arg, REG_ZERO);
     emit_li3(vm, dest_reg, 0);
+}
+
+// Unary negate (-x) or bitwise-complement (~x) of a wide _BitInt, via its
+// runtime helper(dst, a, words, width). The operand is address-based (like
+// the binary wide ops), so gen_expr yields the source address; the result is
+// written into a fresh stack temp whose address is returned in dest_reg.
+static void gen_wide_bitint_unary(VirtualMachine *vm, Node *node, int dest_reg,
+                                  const char *helper) {
+    Type *ty = node->ty;
+    int words = ty->size / 8;
+    int r_src = alloc_temp_reg();
+    gen_expr(vm, node->lhs, r_src); // wide operand → address
+    long long dst_offset = node->ret_buffer
+                               ? (long long)node->ret_buffer->offset
+                               : alloc_wide_bitint_temp(vm, words);
+    emit_lea3(vm, REG_A0, dst_offset);
+    emit_mov3(vm, REG_A1, r_src);
+    emit_li3(vm, REG_A2, words);
+    emit_li3(vm, REG_A3, ty->bit_width);
+    if (vm->flags & CCCC_POINTER_CHECKS) {
+        emit_rr(vm, CHKP3, REG_A0, 0);
+        emit_rr(vm, CHKP3, REG_A1, 0);
+    }
+    emit_wide_helper(vm, helper, 4);
+    emit_lea3(vm, dest_reg, dst_offset);
+    free_temp_reg(r_src);
+}
+
+// Generate `node` as a scalar 0/1 truth value in dest_reg for boolean contexts
+// (if/while/for/?: conditions, &&, ||, casts to _Bool). For ordinary scalars
+// the value the branch ops test is already correct; wide _BitInt operands are
+// address-based, so OR-reduce their words to a single 0/1 via the runtime.
+static void gen_cond_expr(VirtualMachine *vm, Node *node, int dest_reg) {
+    gen_expr(vm, node, dest_reg);
+    if (is_wide_bitint(node->ty)) {
+        emit_mov3(vm, REG_A0, dest_reg); // address of the wide value
+        emit_li3(vm, REG_A1, node->ty->size / 8);
+        emit_wide_helper(vm, "__cccc_bitint_nonzero", 2);
+        emit_mov3(vm, dest_reg, REG_A0);
+    }
 }
 
 static void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr) {
@@ -3266,6 +3307,10 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         return;
 
     case ND_NEG:
+        if (is_wide_bitint(node->ty)) {
+            gen_wide_bitint_unary(vm, node, dest_reg, "__cccc_bitint_neg");
+            return;
+        }
         gen_expr(vm, node->lhs, dest_reg);
         if (is_flonum(node->ty)) {
             emit_frr(vm, fop_for_type(node->ty, FNEG3), dest_reg, dest_reg);
@@ -3275,11 +3320,20 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         return;
 
     case ND_NOT:
+        if (node->lhs && is_wide_bitint(node->lhs->ty)) {
+            gen_cond_expr(vm, node->lhs, dest_reg); // 0/1
+            emit_rr(vm, NOT3, dest_reg, dest_reg);  // logical negate of 0/1
+            return;
+        }
         gen_expr(vm, node->lhs, dest_reg);
         emit_rr(vm, NOT3, dest_reg, dest_reg);
         return;
 
     case ND_BITNOT:
+        if (is_wide_bitint(node->ty)) {
+            gen_wide_bitint_unary(vm, node, dest_reg, "__cccc_bitint_not");
+            return;
+        }
         gen_expr(vm, node->lhs, dest_reg);
         emit_rr(vm, BNOT3, dest_reg, dest_reg);
         return;
@@ -3849,7 +3903,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
     case ND_COND: {
         // Ternary: cond ? then : else
         int r_cond = alloc_temp_reg();
-        gen_expr(vm, node->cond, r_cond);
+        gen_cond_expr(vm, node->cond, r_cond);
         Pc jz_else = emit_jz3(vm, r_cond);
         free_temp_reg(r_cond);
 
@@ -3971,6 +4025,12 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     emit_rr(vm, R2FR, dest_reg, REG_A0);
                     if (dst->kind == TY_FLOAT)
                         emit_fround_f32(vm, dest_reg, dest_reg);
+                } else if (dst->kind == TY_BOOL) {
+                    // (_Bool) must reflect the whole value, not just the low
+                    // word: a wide value with only high bits set is still true.
+                    emit_li3(vm, REG_A1, src->size / 8); // words (A0 = address)
+                    emit_wide_helper(vm, "__cccc_bitint_nonzero", 2);
+                    emit_mov3(vm, dest_reg, REG_A0);
                 } else {
                     emit_wide_helper(vm, "__cccc_bitint_to_i64", 4);
                     emit_mov3(vm, dest_reg, REG_A0);
@@ -4817,10 +4877,10 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
     case ND_LOGAND: {
         // Logical AND with short-circuit evaluation
         int r_cond = alloc_temp_reg();
-        gen_expr(vm, node->lhs, r_cond);
+        gen_cond_expr(vm, node->lhs, r_cond);
         Pc jz_false = emit_jz3(vm, r_cond);
 
-        gen_expr(vm, node->rhs, r_cond);
+        gen_cond_expr(vm, node->rhs, r_cond);
         Pc jz_false2 = emit_jz3(vm, r_cond);
 
         // Both true
@@ -4840,10 +4900,10 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
     case ND_LOGOR: {
         // Logical OR with short-circuit evaluation
         int r_cond = alloc_temp_reg();
-        gen_expr(vm, node->lhs, r_cond);
+        gen_cond_expr(vm, node->lhs, r_cond);
         Pc jnz_true = emit_jnz3(vm, r_cond);
 
-        gen_expr(vm, node->rhs, r_cond);
+        gen_cond_expr(vm, node->rhs, r_cond);
         Pc jnz_true2 = emit_jnz3(vm, r_cond);
 
         // Both false
@@ -5647,7 +5707,7 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
     case ND_IF: {
         reset_temp_regs();
         int r_cond = alloc_temp_reg();
-        gen_expr(vm, node->cond, r_cond);
+        gen_cond_expr(vm, node->cond, r_cond);
         Pc jz_else = emit_jz3(vm, r_cond);
         free_temp_reg(r_cond);
 
@@ -5684,7 +5744,7 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
         if (node->cond) {
             reset_temp_regs();
             int r_cond = alloc_temp_reg();
-            gen_expr(vm, node->cond, r_cond);
+            gen_cond_expr(vm, node->cond, r_cond);
             jz_end = emit_jz3(vm, r_cond);
             free_temp_reg(r_cond);
         }
@@ -5735,7 +5795,7 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
 
         reset_temp_regs();
         int r_cond = alloc_temp_reg();
-        gen_expr(vm, node->cond, r_cond);
+        gen_cond_expr(vm, node->cond, r_cond);
         Pc jnz_start = emit_jnz3(vm, r_cond);
         vm->text_seg[jnz_start] = loop_start;
         free_temp_reg(r_cond);

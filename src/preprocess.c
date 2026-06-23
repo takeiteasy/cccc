@@ -4252,6 +4252,7 @@ void init_macros(VirtualMachine *vm) {
     define_macro(vm, "__SIZEOF_DOUBLE__", "8");
     define_macro(vm, "__SIZEOF_FLOAT__", "4");
     define_macro(vm, "__SIZEOF_INT__", "4");
+    define_macro(vm, "__SIZEOF_INT128__", "16");
     define_macro(vm, "__SIZEOF_LONG_DOUBLE__", "8");
     define_macro(vm, "__SIZEOF_LONG_LONG__", "8");
     define_macro(vm, "__SIZEOF_LONG__", "8");

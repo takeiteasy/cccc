@@ -913,6 +913,8 @@ typedef enum {
     DK_FLOAT, DK_DOUBLE, DK_COMPLEX, DK_IMAGINARY, DK_SIGNED, DK_UNSIGNED,
     // C23 types
     DK_BITINT, DK_DECIMAL32, DK_DECIMAL64, DK_DECIMAL128,
+    // GNU 128-bit integers (mapped onto _BitInt(128))
+    DK_INT128,
 } DeclKw;
 
 static DeclKw declspec_kw(Token *tok) {
@@ -981,6 +983,8 @@ static DeclKw declspec_kw(Token *tok) {
         case 'u': if (memcmp(s+1,"nsigned",7)==0) return DK_UNSIGNED;   break;
         case 'v': if (memcmp(s+1,"olatile",7)==0) return DK_VOLATILE;   break;
         }
+        // __int128 — GNU 128-bit signed integer (combines with signed/unsigned)
+        if (memcmp(s, "__int128", 8) == 0) return DK_INT128;
         break;
     case 9:  // _Noreturn, constexpr
         switch (s[0]) {
@@ -991,16 +995,18 @@ static DeclKw declspec_kw(Token *tok) {
             return tok->kind == TK_KEYWORD ? DK_CONSTEXPR : DK_NONE; break;
         }
         break;
-    case 10:  // __restrict, _Imaginary, _Decimal32, _Decimal64
+    case 10:  // __restrict, _Imaginary, _Decimal32, _Decimal64, __int128_t
         if (s[0]=='_') {
             if (s[1]=='_' && memcmp(s+2,"restrict",8)==0) return DK_RESTRICT;
             if (s[1]=='I' && memcmp(s+2,"maginary",8)==0) return DK_IMAGINARY;
             if (s[1]=='D' && memcmp(s+2,"ecimal32",8)==0) return DK_DECIMAL32;
             if (s[1]=='D' && memcmp(s+2,"ecimal64",8)==0) return DK_DECIMAL64;
+            if (s[1]=='_' && memcmp(s+2,"int128_t",8)==0) return DK_INT128;
         }
         break;
-    case 11:  // _Decimal128
+    case 11:  // _Decimal128, __uint128_t
         if (s[0]=='_' && s[1]=='D' && memcmp(s+2,"ecimal128",9)==0) return DK_DECIMAL128;
+        if (s[0]=='_' && s[1]=='_' && memcmp(s+2,"uint128_t",9)==0) return DK_INT128;
         break;
     case 12:  // __restrict__, thread_local
         if (memcmp(s,"__restrict__",12)==0) return DK_RESTRICT;
@@ -1169,6 +1175,22 @@ static Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *att
             bitint_width = const_expr(vm, &tok, tok);
             tok = skip(vm, tok, ")");
             ty = bitint_type(vm, bitint_tok, bitint_width, (bool)(counter & UNSIGNED));
+            counter = OTHER;
+            continue;
+        }
+        case DK_INT128: {
+            // GNU __int128 / __int128_t / __uint128_t, mapped onto _BitInt(128).
+            // __uint128_t is always unsigned; __int128 honours a preceding
+            // signed/unsigned specifier; __int128_t is always signed.
+            bool is_unsigned;
+            if (tok->len == 11)                 // __uint128_t
+                is_unsigned = true;
+            else if (tok->len == 10)            // __int128_t
+                is_unsigned = false;
+            else                                // __int128 [+ signed/unsigned]
+                is_unsigned = (counter & UNSIGNED) != 0;
+            ty = bitint_type(vm, tok, 128, is_unsigned);
+            tok = tok->next;
             counter = OTHER;
             continue;
         }
@@ -3365,6 +3387,7 @@ static bool is_typename(VirtualMachine *vm, Token *tok) {
             "_Thread_local", "__thread",     "_Atomic",       "constexpr",
             "__block",       "_Complex",     "_Imaginary",
             "_BitInt",       "_Decimal32",   "_Decimal64",   "_Decimal128",
+            "__int128",      "__int128_t",   "__uint128_t",
         };
 
         for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
