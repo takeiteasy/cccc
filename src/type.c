@@ -664,14 +664,43 @@ void add_type(VirtualMachine *vm, Node *node) {
                 node->ty = pointer_to(vm, node->var->ty);
             }
             return;
-        case ND_COND:
-            if (node->then->ty->kind == TY_VOID || node->els->ty->kind == TY_VOID) {
+        case ND_COND: {
+            Type *t = node->then->ty;
+            Type *e = node->els->ty;
+            bool t_ptr = (t->base != NULL) || t->kind == TY_FUNC;
+            bool e_ptr = (e->base != NULL) || e->kind == TY_FUNC;
+            if (t->kind == TY_VOID || e->kind == TY_VOID) {
                 node->ty = ty_void;
+            } else if (t_ptr || e_ptr) {
+                // C11 6.5.15p6/7: when one arm is a pointer and the other is a
+                // null pointer constant (or nullptr_t), or both arms are
+                // pointers, the conditional has a pointer type.  Resolve to that
+                // pointer type and cast both arms to it, so codegen never
+                // integer-truncates a 64-bit pointer down to int (#591).
+                Type *tp = !t_ptr ? NULL
+                           : t->kind == TY_ARRAY ? pointer_to(vm, t->base)
+                           : t->kind == TY_FUNC  ? pointer_to(vm, t)
+                                                 : t;
+                Type *ep = !e_ptr ? NULL
+                           : e->kind == TY_ARRAY ? pointer_to(vm, e->base)
+                           : e->kind == TY_FUNC  ? pointer_to(vm, e)
+                                                 : e;
+                Type *pty;
+                if (tp && ep)
+                    pty = (tp->base && tp->base->kind == TY_VOID) ? tp
+                        : (ep->base && ep->base->kind == TY_VOID) ? ep
+                                                                  : tp;
+                else
+                    pty = tp ? tp : ep;
+                node->then = new_cast(vm, node->then, pty);
+                node->els = new_cast(vm, node->els, pty);
+                node->ty = pty;
             } else {
                 usual_arith_conv(vm, &node->then, &node->els);
                 node->ty = node->then->ty;
             }
             return;
+        }
         case ND_COMMA:
             node->ty = node->rhs->ty;
             return;
