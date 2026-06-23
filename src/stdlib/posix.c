@@ -83,6 +83,28 @@ static long long wrap_pwrite_gil(long long fd, long long buf, long long count, l
     return (long long)r;
 }
 
+static long long wrap_nanosleep_gil(long long req, long long rem) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)nanosleep((const struct timespec *)req, (struct timespec *)rem);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    int r = nanosleep((const struct timespec *)req, (struct timespec *)rem);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_pread_gil(long long fd, long long buf, long long count, long long offset) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)pread((int)fd, (void *)buf, (size_t)count, (off_t)offset);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    ssize_t r = pread((int)fd, (void *)buf, (size_t)count, (off_t)offset);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
 static long long wrap_poll_gil(long long fds, long long nfds, long long timeout) {
     VirtualMachine *vm = current_vm();
     if (!vm || !vm->gil_initialized)
@@ -218,6 +240,7 @@ void register_posix_functions(VirtualMachine *vm) {
     // Blocking I/O — GIL released while blocked so other VM threads can run
     cc_register_cfunc(vm, "read",    (void*)wrap_read_gil,    3, 0);
     cc_register_cfunc(vm, "write",   (void*)wrap_write_gil,   3, 0);
+    cc_register_cfunc(vm, "pread",   (void*)wrap_pread_gil,   4, 0);
     cc_register_cfunc(vm, "pwrite",  (void*)wrap_pwrite_gil,  4, 0);
     cc_register_cfunc(vm, "poll",    (void*)wrap_poll_gil,    3, 0);
     cc_register_cfunc(vm, "accept",  (void*)wrap_accept_gil,  3, 0);
@@ -226,6 +249,7 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "waitpid", (void*)wrap_waitpid_gil, 3, 0);
     cc_register_cfunc(vm, "sleep",   (void*)wrap_sleep_gil,   1, 0);
     cc_register_cfunc(vm, "usleep",  (void*)wrap_usleep_gil,  1, 0);
+    cc_register_cfunc(vm, "nanosleep",(void*)wrap_nanosleep_gil, 2, 0);
 
     // Non-blocking / fast — intentionally keep the GIL (see comment above)
     cc_register_cfunc(vm, "close",   (void*)wrap_close,  1, 0);
@@ -281,10 +305,16 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "fstat",   (void*)fstat,   2, 0);
     cc_register_cfunc(vm, "lstat",   (void*)lstat,   2, 0);
     cc_register_cfunc(vm, "chmod",   (void*)chmod,   2, 0);
+    cc_register_cfunc(vm, "fchmod",  (void*)fchmod,  2, 0);
+    cc_register_cfunc(vm, "fchown",  (void*)fchown,  3, 0);
+    cc_register_cfunc(vm, "geteuid", (void*)geteuid, 0, 0);
+    cc_register_cfunc(vm, "readlink",(void*)readlink,3, 0);
+    cc_register_cfunc(vm, "getpagesize",(void*)getpagesize,0, 0);
     cc_register_cfunc(vm, "mkdir",   (void*)mkdir,   2, 0);
     cc_register_cfunc(vm, "mkfifo",  (void*)mkfifo,  2, 0);
     cc_register_cfunc(vm, "umask",   (void*)wrap_umask,  1, 0);
     cc_register_cfunc(vm, "utime",   (void*)utime,       2, 0);
+    cc_register_cfunc(vm, "utimes",  (void*)utimes,      2, 0);
     cc_register_cfunc(vm, "htonl",   (void*)wrap_htonl,  1, 0);
     cc_register_cfunc(vm, "htons",   (void*)wrap_htons,  1, 0);
     cc_register_cfunc(vm, "ntohl",   (void*)wrap_ntohl,  1, 0);

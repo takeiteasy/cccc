@@ -37,6 +37,7 @@ extern time_t mktime(struct tm *timeptr);
 extern time_t timegm(struct tm *timeptr);
 extern time_t time(time_t *t);
 extern int timespec_get(struct timespec *ts, int base);
+extern int nanosleep(const struct timespec *req, struct timespec *rem);
 // extern int timespec_getres(struct timespec *ts, int base);
 extern char *asctime(const struct tm *tm); // deprecated
 extern char *ctime(const time_t *timer); // deprecated

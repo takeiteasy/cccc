@@ -177,7 +177,7 @@ if (__builtin_mul_overflow(a, b, &r))
 | `<stdio.h>` | ✓ | |
 | `<stdlib.h>` | ✓ | |
 | `<string.h>` | ✓ | `strchr`, `strrchr`, `strstr`, `strpbrk` are const-correct via `_Generic` dispatch macros: return type matches const-ness of the input pointer. `strpbrk` added in C23. `memchr` returns `void *` (no const dispatch — accepts any pointer type). |
-| `<time.h>` | ✓ | |
+| `<time.h>` | ✓ | Time/date (`time`, `mktime`, `timegm`, `localtime`/`localtime_r`, `gmtime`/`gmtime_r`, `strftime`, `difftime`, `clock`, `nanosleep`), `struct tm`, `struct timespec` |
 
 ### C99
 
@@ -268,7 +268,7 @@ POSIX headers are embedded and backed by host OS calls. They are only available 
 | `<sys/param.h>` | ✓ | System limits and helpers (`MAXPATHLEN`, `NBBY`, `MIN`, `MAX`) |
 | `<sys/socket.h>` | ✓ | Socket API (`socket`, `bind`, `listen`, `accept`, `connect`, `setsockopt`, `getsockname`, `shutdown`, `struct sockaddr`, `socklen_t`) |
 | `<sys/stat.h>` | ✓ | File status (`stat`, `fstat`, `lstat`, `chmod`, `fchmod`, `mkdir`, `mkfifo`, `umask`), `struct stat`, `S_*` constants and macros |
-| `<sys/time.h>` | ✓ | Time operations (`gettimeofday`, `settimeofday`), `struct timeval`, `struct timezone`, `timeradd`, `timersub`) |
+| `<sys/time.h>` | ✓ | Time operations (`gettimeofday`, `settimeofday`, `utimes`), `struct timeval`, `struct timezone`, `timeradd`, `timersub`) |
 | `<sys/types.h>` | ✓ | Basic system types (`dev_t`, `ino_t`, `mode_t`, `nlink_t`, `uid_t`, `gid_t`, `off_t`, `pid_t`, `blksize_t`, `blkcnt_t`, `useconds_t`, `sa_family_t`, `socklen_t`) |
 | `<sys/wait.h>` | ✓ | Process wait (`wait`, `waitpid`), `WNOHANG`, `WUNTRACED`, `WIFEXITED`, `WEXITSTATUS`, `WIFSIGNALED`, `WIFSTOPPED`, `WSTOPSIG`, `WCOREDUMP` |
 | `<termios.h>` | ✓ | Terminal I/O (`tcgetattr`, `tcsetattr`, `struct termios`, `cc_t`, `speed_t`, `tcflag_t`) |
