@@ -8,6 +8,7 @@
 #endif
 
 #include "unistd.h"
+#include "sys/types.h"
 
 #define O_RDONLY 0x0000
 #define O_WRONLY 0x0001
@@ -20,12 +21,56 @@
 #define O_CREAT 0x0200
 #define O_TRUNC 0x0400
 #define O_EXCL 0x0800
+#define O_CLOEXEC 0x1000000
 #else
 #define O_CREAT 0100
 #define O_EXCL 0200
 #define O_TRUNC 01000
 #define O_APPEND 02000
 #define O_NONBLOCK 04000
+#define O_CLOEXEC 02000000
+#endif
+
+/* fcntl() commands and record-locking constants (platform-specific) */
+#define F_DUPFD 0
+#define F_GETFD 1
+#define F_SETFD 2
+#define F_GETFL 3
+#define F_SETFL 4
+
+#define FD_CLOEXEC 1
+
+#ifdef __APPLE__
+#define F_GETLK  7
+#define F_SETLK  8
+#define F_SETLKW 9
+#define F_RDLCK  1
+#define F_UNLCK  2
+#define F_WRLCK  3
+#define F_FULLFSYNC 51   /* Darwin: flush buffers to physical media */
+
+struct flock {
+    off_t l_start;   /* starting offset */
+    off_t l_len;     /* len = 0 means until end of file */
+    pid_t l_pid;     /* lock owner */
+    short l_type;    /* lock type: read/write, etc. */
+    short l_whence;  /* type of l_start */
+};
+#else
+#define F_GETLK  5
+#define F_SETLK  6
+#define F_SETLKW 7
+#define F_RDLCK  0
+#define F_WRLCK  1
+#define F_UNLCK  2
+
+struct flock {
+    short l_type;    /* lock type: read/write, etc. */
+    short l_whence;  /* type of l_start */
+    off_t l_start;   /* starting offset */
+    off_t l_len;     /* len = 0 means until end of file */
+    pid_t l_pid;     /* lock owner */
+};
 #endif
 
 #define S_IRUSR 0400

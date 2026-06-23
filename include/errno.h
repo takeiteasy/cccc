@@ -73,6 +73,8 @@ extern int errno;
 #  define EILSEQ       92
 #  define ENOLINK      97
 #  define EPROTO       100
+#  define ENOLCK       77
+#  define EOPNOTSUPP   102
 #else
 #  define EWOULDBLOCK  11
 #  define EINPROGRESS  115
@@ -104,6 +106,8 @@ extern int errno;
 #  define EILSEQ       84
 #  define ENOLINK      67
 #  define EPROTO       71
+#  define ENOLCK       37
+#  define EOPNOTSUPP   95
 #endif
 
 #endif /* __ERRNO_H */

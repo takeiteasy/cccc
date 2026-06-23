@@ -61,11 +61,38 @@ extern char *ttyname(int fd);
 extern int dup(int fd);
 extern int dup2(int oldfd, int newfd);
 extern int fsync(int fd);
+extern int fdatasync(int fd);
 extern int ftruncate(int fd, off_t length);
 extern int truncate(const char *path, off_t length);
 extern long sysconf(int name);
 extern int mkstemp(char *tmpl);
 extern char *mkdtemp(char *tmpl);
+
+/* Positioned I/O */
+extern ssize_t pread(int fd, void *buf, size_t count, off_t offset);
+extern ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset);
+
+/* Ownership and identity */
+extern int fchown(int fd, uid_t owner, gid_t group);
+extern int chown(const char *path, uid_t owner, gid_t group);
+extern uid_t getuid(void);
+extern uid_t geteuid(void);
+extern gid_t getgid(void);
+extern gid_t getegid(void);
+
+/* Symbolic links */
+extern ssize_t readlink(const char *path, char *buf, size_t bufsize);
+extern int symlink(const char *target, const char *linkpath);
+
+/* Page size (legacy BSD interface used by some VFS layers) */
+extern int getpagesize(void);
+
+#ifdef __APPLE__
+#define _SC_PAGESIZE 29
+#else
+#define _SC_PAGESIZE 30
+#endif
+#define _SC_PAGE_SIZE _SC_PAGESIZE
 
 #define _SC_NPROCESSORS_ONLN 58
 

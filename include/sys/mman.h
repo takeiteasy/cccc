@@ -14,6 +14,8 @@
 #define PROT_WRITE 0x02
 #define PROT_EXEC  0x04
 
+#define MAP_FAILED ((void *)-1)
+
 #ifdef __APPLE__
 #define MAP_SHARED    0x0001
 #define MAP_PRIVATE   0x0002
