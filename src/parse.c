@@ -2884,37 +2884,71 @@ static Node *init_desg_expr(VirtualMachine *vm, InitDesg *desg, Token *tok) {
     return new_unary(vm, ND_DEREF, new_add(vm, lhs, rhs, tok), tok);
 }
 
+// Combine items[lo..hi) into a *balanced* ND_COMMA tree (height O(log n))
+// rather than a left-leaning spine (height n). The comma operator is fully
+// associative — `(a,b),c` and `a,(b,c)` both evaluate a,b,c left-to-right and
+// yield the last value — so the shape is free to choose. A balanced shape keeps
+// every recursive AST pass (add_type, gen_expr, free, ...) at O(log n) stack
+// depth, so a large brace-initializer no longer overflows the C stack (#576).
+// Requires hi > lo.
+static Node *balanced_comma(VirtualMachine *vm, Node **items, int lo, int hi,
+                            Token *tok) {
+    if (hi - lo == 1)
+        return items[lo];
+    int mid = lo + (hi - lo) / 2;
+    Node *l = balanced_comma(vm, items, lo, mid, tok);
+    Node *r = balanced_comma(vm, items, mid, hi, tok);
+    return new_binary(vm, ND_COMMA, l, r, tok);
+}
+
 static Node *create_lvar_init(VirtualMachine *vm, Initializer *init, Type *ty,
                               InitDesg *desg, Token *tok) {
     if (ty->kind == TY_ARRAY) {
-        Node *node = new_node(vm, ND_NULL_EXPR, tok);
+        // Collect the per-element assignments, then fold them into a balanced
+        // comma tree. Implicitly-zero elements lower to ND_NULL_EXPR, which
+        // emits no code (lvar_initializer already pre-zeroes the whole object
+        // with a single ND_MEMZERO), so we drop them — both to avoid waste and
+        // because they are exactly what makes a partial `= {0}` initialiser
+        // huge. See balanced_comma / #576.
+        if (ty->array_len <= 0)
+            return new_node(vm, ND_NULL_EXPR, tok);
+        Node **items = malloc((size_t)ty->array_len * sizeof(Node *));
+        if (!items)
+            error_tok(vm, tok, "out of memory building array initializer");
+        int cnt = 0;
         for (int i = 0; i < ty->array_len; i++) {
             InitDesg desg2 = {desg, i};
             Node *rhs =
                 create_lvar_init(vm, init->children[i], ty->base, &desg2, tok);
-            // Implicitly-zero elements lower to ND_NULL_EXPR, which emits no
-            // code (lvar_initializer already pre-zeroes the whole object with a
-            // single ND_MEMZERO). Appending them is pure waste, and for large
-            // arrays the left-leaning ND_COMMA spine recurses gen_expr to depth
-            // array_len and overflows the C stack — see #576. Skip the no-ops.
-            if (rhs->kind == ND_NULL_EXPR)
-                continue;
-            node = new_binary(vm, ND_COMMA, node, rhs, tok);
+            if (rhs->kind != ND_NULL_EXPR)
+                items[cnt++] = rhs;
         }
+        Node *node = cnt ? balanced_comma(vm, items, 0, cnt, tok)
+                         : new_node(vm, ND_NULL_EXPR, tok);
+        free(items);
         return node;
     }
 
     if (ty->kind == TY_STRUCT && !init->expr) {
-        Node *node = new_node(vm, ND_NULL_EXPR, tok);
-
+        int nmem = 0;
+        for (Member *mem = ty->members; mem; mem = mem->next)
+            nmem++;
+        if (nmem == 0)
+            return new_node(vm, ND_NULL_EXPR, tok);
+        Node **items = malloc((size_t)nmem * sizeof(Node *));
+        if (!items)
+            error_tok(vm, tok, "out of memory building struct initializer");
+        int cnt = 0;
         for (Member *mem = ty->members; mem; mem = mem->next) {
             InitDesg desg2 = {desg, 0, mem};
             Node *rhs = create_lvar_init(vm, init->children[mem->idx], mem->ty,
                                          &desg2, tok);
-            if (rhs->kind == ND_NULL_EXPR)
-                continue; // no-op; pre-zeroed by ND_MEMZERO (see #576)
-            node = new_binary(vm, ND_COMMA, node, rhs, tok);
+            if (rhs->kind != ND_NULL_EXPR) // no-op; pre-zeroed by ND_MEMZERO
+                items[cnt++] = rhs;
         }
+        Node *node = cnt ? balanced_comma(vm, items, 0, cnt, tok)
+                         : new_node(vm, ND_NULL_EXPR, tok);
+        free(items);
         return node;
     }
 
