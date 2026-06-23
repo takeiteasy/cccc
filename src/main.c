@@ -233,7 +233,7 @@ static void usage(const char *argv0, int exit_code) {
            "auto, c23, gnu, msvc, strip\n");
     printf("\t-j/--json                Emit JSON for all eligible output "
            "(diagnostics, header declarations, --fusion-candidates, etc.)\n");
-    printf("\t   --ffi-decls           Emit parsed function/struct/enum declarations "
+    printf("\t-J/--ffi-decls           Emit parsed function/struct/enum declarations "
             "as JSON (for FFI wrapper generation)\n");
     printf("\t-X/--no-preprocess       Disable preprocessing step\n");
     printf("\t-S/--no-stdlib           Do not link standard library\n");
@@ -796,7 +796,7 @@ int main(int argc, const char *argv[]) {
     int skip_preprocess = 0;   // -X
     int skip_stdlib = 0;       // -S
     int output_json = 0;       // -j (general "emit JSON" flag)
-    int output_ffi_decls = 0;  // --ffi-decls
+    int output_ffi_decls = 0;  // -J/--ffi-decls
 #ifdef CCCC_HAS_CURL
     char *url_cache_dir = NULL; // --url-cache-dir
     int url_cache_clear = 0;    // --url-cache-clear
@@ -888,7 +888,7 @@ int main(int argc, const char *argv[]) {
         {"no-preprocess", no_argument, 0, 'X'},
         {"no-stdlib", no_argument, 0, 'S'},
         {"json", no_argument, 0, 'j'},
-        {"ffi-decls", no_argument, 0, 1095},
+        {"ffi-decls", no_argument, 0, 'J'},
         {"compile", optional_argument, 0, 'c'},
         {"debug", no_argument, 0, 'g'},
         {"safety", required_argument, 0, 1012},
@@ -994,10 +994,7 @@ int main(int argc, const char *argv[]) {
         if (strcmp(argv[i], "--") == 0) { dashdash = i; break; }
     }
     int getopt_argc = (dashdash >= 0) ? dashdash : argc;
-
-    // -f is used for optimisation-pass flags: -f<pass> and -fno-<pass>.
-    // --ffi-decls is now long-only (code 1095).
-    const char *optstring = "0123haI:L:D:U:o:c::dvgiPEMGXSjVCl:W:e:O::FbTmptn:r:s:ABf:w";
+    const char *optstring = "0123haI:L:D:U:o:c::dvgiPEMGXSjJVCl:W:e:O::FbTmptn:r:s:ABf:w";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(getopt_argc, (char *const *)argv, optstring,
@@ -1575,7 +1572,7 @@ int main(int argc, const char *argv[]) {
             }
             break;
         }
-        case 1095: // --ffi-decls (long-only; -f is now used for pass flags)
+        case 'J':
             output_ffi_decls = 1;
             break;
         case 1096: opt_f_enable  |= CCCC_OPT_FOLD;      break; // --ffold
