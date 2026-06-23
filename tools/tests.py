@@ -4,6 +4,9 @@
 Runs all test_*.c files in tests/ directory and reports results.
 Supports parallel execution with -j/--jobs.
 
+Arguments after -- are forwarded verbatim to the cccc binary for every test
+(e.g. `tools/tests.py -- -O2 -Wall`).  Unknown flags before -- are an error.
+
 With --c4, runs the bytecode round-trip: compile each positive test to
 a .c4 file and execute it, exercising the cc_save_bytecode / cc_load_bytecode
 FFI-table persistence and the cc_load_libc resolution path.
@@ -782,7 +785,15 @@ def main():
              "reported as TIMEOUT failures. Useful for slow environments "
              "where processes may stall indefinitely. Default: no timeout."
     )
-    args, cccc_args = parser.parse_known_args()
+    argv = sys.argv[1:]
+    try:
+        sep = argv.index("--")
+        cccc_args = argv[sep + 1:]
+        argv = argv[:sep]
+    except ValueError:
+        cccc_args = []
+
+    args = parser.parse_args(argv)
 
     script_dir = Path(__file__).parent.parent.resolve()
 

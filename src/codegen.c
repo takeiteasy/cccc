@@ -1707,6 +1707,18 @@ static Node *strip_index_casts(Node *node) {
     return node;
 }
 
+// Returns true if the expression subtree contains a function call.
+// Used to guard indexed addressing: calls clobber all temp registers
+// (caller-saved), so a base address held in r_base across a call in
+// the index expression will be corrupted at runtime.
+static bool expr_has_call(Node *node) {
+    if (!node) return false;
+    if (node->kind == ND_FUNCALL) return true;
+    return expr_has_call(node->lhs) || expr_has_call(node->rhs) ||
+           expr_has_call(node->cond) || expr_has_call(node->then) ||
+           expr_has_call(node->els) || expr_has_call(node->body);
+}
+
 static bool is_index_scale(Node *node, Node **index, int *scale) {
     node = strip_index_casts(node);
     if (!node || node->kind != ND_MUL)
@@ -1811,6 +1823,23 @@ static int indexed_store_op(Type *ty) {
     return STR_INDEX_D;
 }
 
+// After computing an array index into `reg`, an *unsigned* index narrower than
+// 64 bits may carry garbage in its high bits: intermediate unsigned arithmetic
+// results are not truncated to the type width (e.g. the post-increment `n++`
+// lowering `(unsigned)((n += 1) - 1)` evaluates `1 + 0xFFFFFFFF == 0x100000000`
+// in a 64-bit register), and match_indexed_addr strips the widening cast that
+// would otherwise zero-extend — i.e. truncate — the value before it is used as
+// a byte offset. Re-apply that zero-extension here. Signed indices are
+// sign-correct straight from their loads/arithmetic, so they need no fixup. (#581)
+static void emit_index_normalize(VirtualMachine *vm, int reg, Type *ty) {
+    if (!ty || !ty->is_unsigned || !is_integer(ty) || ty->kind == TY_BITINT)
+        return;
+    if (ty->size == 1)      emit_rr(vm, ZX1, reg, reg);
+    else if (ty->size == 2) emit_rr(vm, ZX2, reg, reg);
+    else if (ty->size == 4) emit_rr(vm, ZX4, reg, reg);
+    // size 8 (unsigned long / size_t): already full width.
+}
+
 static bool emit_indexed_load_if_possible(VirtualMachine *vm, Node *node, int dest_reg) {
     if (!node || node->kind != ND_DEREF || !node->lhs ||
         node->ty->kind == TY_ARRAY || node->ty->kind == TY_STRUCT ||
@@ -1820,11 +1849,14 @@ static bool emit_indexed_load_if_possible(VirtualMachine *vm, Node *node, int de
     IndexedAddr idx = {};
     if (!match_indexed_addr(vm, node->lhs, &idx))
         return false;
+    if (expr_has_call(idx.base) || expr_has_call(idx.index))
+        return false;
     int r_base = alloc_temp_reg();
     gen_expr(vm, idx.base, r_base);
     mark_temp_reg_used(r_base);
     int r_index = alloc_temp_reg();
     gen_expr(vm, idx.index, r_index);
+    emit_index_normalize(vm, r_index, idx.index->ty);
     emit_rrrs_i(vm, indexed_load_op(node->ty), dest_reg, r_base, r_index,
                 idx.scale, idx.offset);
     if (!is_flonum(node->ty)) {
@@ -1865,11 +1897,14 @@ static bool emit_indexed_store_if_possible(VirtualMachine *vm, Node *lhs, Type *
     IndexedAddr idx = {};
     if (!match_indexed_addr(vm, lhs->lhs, &idx))
         return false;
+    if (expr_has_call(idx.base) || expr_has_call(idx.index))
+        return false;
     int r_base = alloc_temp_reg();
     gen_expr(vm, idx.base, r_base);
     mark_temp_reg_used(r_base);
     int r_index = alloc_temp_reg();
     gen_expr(vm, idx.index, r_index);
+    emit_index_normalize(vm, r_index, idx.index->ty);
     emit_rrrs_i(vm, indexed_store_op(ty), value_reg, r_base, r_index,
                 idx.scale, idx.offset);
     free_temp_reg(r_index);
@@ -3616,8 +3651,27 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             gen_expr(vm, node->rhs, r_src); // RHS is address
             mark_temp_reg_used(r_src);
 
+            // If the LHS address expression contains a call, gen_addr below will
+            // clobber every caller-saved temp at runtime, destroying the RHS
+            // address held in r_src (e.g. `arr[f()] = some_struct;`). Spill it
+            // across the address computation and reload afterwards. (#581)
+            bool src_has_call = expr_has_call(node->lhs);
+            long long r_src_spill = 0;
+            if (src_has_call) {
+                r_src_spill = alloc_wide_bitint_temp(vm, 1);
+                emit_local_store(vm, ty_long, r_src, r_src_spill);
+            }
+
             int r_dest = alloc_temp_reg();
             gen_addr(vm, node->lhs, r_dest); // LHS address
+
+            if (src_has_call) {
+                mark_temp_reg_used(r_dest);
+                int r_reload = alloc_temp_reg();
+                emit_local_load(vm, ty_long, r_reload, r_src_spill);
+                free_temp_reg(r_src);
+                r_src = r_reload;
+            }
 
             // MCPY: REG_A0=dest, REG_A1=src, REG_A2=size
             emit_mov3(vm, REG_A0, r_dest);
@@ -3665,14 +3719,44 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // Fused local store: skip LEA3+STR for simple locals
         bool lhs_fused = node->lhs->kind == ND_VAR &&
                          is_simple_local_scalar(vm, node->lhs);
+        IndexedAddr lhs_idx_check = {};
         bool lhs_indexed = node->lhs->kind == ND_DEREF &&
-                           match_indexed_addr(vm, node->lhs->lhs,
-                                              &(IndexedAddr){});
+                           match_indexed_addr(vm, node->lhs->lhs, &lhs_idx_check) &&
+                           !expr_has_call(lhs_idx_check.base) &&
+                           !expr_has_call(lhs_idx_check.index);
+        // If the LHS address expression itself contains a function call (e.g.
+        // `form[strlen(form) - 1] = 's'`), that call clobbers every
+        // caller-saved temp register at runtime — including the one holding the
+        // already-evaluated RHS in r_val. (reset_temp_regs() inside the call's
+        // codegen mirrors this real clobber.) Spill r_val to a one-word stack
+        // slot across the address computation and reload it afterwards so the
+        // store sees the correct value. (#581)
+        bool lhs_has_call = !lhs_fused && expr_has_call(node->lhs);
+        long long r_val_spill = 0;
+        if (lhs_has_call) {
+            r_val_spill = alloc_wide_bitint_temp(vm, 1);
+            emit_local_store(vm, node->ty, r_val, r_val_spill);
+        }
+
         int r_addr = -1;
         if (!lhs_fused && !lhs_indexed) {
             // Now compute LHS address (after any function calls in RHS are done)
             r_addr = alloc_temp_reg();
             gen_addr(vm, node->lhs, r_addr);
+        }
+
+        if (lhs_has_call) {
+            // The address is now in r_addr; reload r_val into a fresh temp that
+            // is guaranteed distinct from r_addr. (The old r_val register was
+            // clobbered by the call and its allocator bit cleared by the reset.)
+            if (r_addr >= 0)
+                mark_temp_reg_used(r_addr);
+            int r_reload = alloc_temp_reg();
+            emit_local_load(vm, node->ty, r_reload, r_val_spill);
+            if (need_free)
+                free_temp_reg(r_val);
+            r_val = r_reload;
+            need_free = true;
         }
 
         // Handle Bitfields specially (Read-Modify-Write)
