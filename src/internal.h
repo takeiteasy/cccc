@@ -551,7 +551,6 @@ void hashmap_restore(HashMap *map, HashMap snapshot);
 // Integer key HashMap functions (avoid overhead of snprintf/strdup)
 void *hashmap_get_int(HashMap *map, long long key);
 void hashmap_put_int(HashMap *map, long long key, void *val);
-void hashmap_delete_int(HashMap *map, long long key);
 // HashMap iteration
 // Callback function type for iteration
 // Return 0 to continue iteration, non-zero to stop
@@ -559,7 +558,6 @@ typedef int (*HashMapIterator)(char *key, int keylen, void *val,
                                void *user_data);
 
 void hashmap_foreach(HashMap *map, HashMapIterator iter, void *user_data);
-int hashmap_count_if(HashMap *map, HashMapIterator predicate, void *user_data);
 
 //
 // generate_stdlib.c

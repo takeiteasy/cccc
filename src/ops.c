@@ -287,7 +287,11 @@ static inline int op_SHL3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
-    long long result = vm->regs[rs1] << vm->regs[rs2];
+    // Shift in unsigned space: left-shifting a negative value, or shifting a
+    // 1-bit into/past the sign bit, is UB on signed long long. The unsigned
+    // result is bit-identical on all two's-complement targets.
+    long long result =
+        (long long)((unsigned long long)vm->regs[rs1] << vm->regs[rs2]);
     if (rd != REG_ZERO)
         vm->regs[rd] = result;
     return 0;
@@ -1159,6 +1163,9 @@ static inline int op_LDR_W_fn(VirtualMachine *vm) {
 static inline int op_LDR_D_fn(VirtualMachine *vm) {
     // Load dword: regs[rd] = *(long long*)regs[rs]
     // Format: [LDR_D] [rd:8|rs:8|unused:48]
+    // NOTE(#577): the *(T*)guest_ptr deref here (and in the H/W/float/double
+    // load+store opcodes) is misaligned-UB when the guest does an unaligned
+    // access; tolerated on aarch64/x86_64 but should move to memcpy helpers.
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
@@ -3202,11 +3209,16 @@ static inline int op_IOVFL_fn(VirtualMachine *vm) {
     long long result = 0;
 
     if (!unsign) {
-        // Signed overflow: compute in 64-bit, check fit
-        switch (op_type) {
-        case 0: result = a + b; break;
-        case 1: result = a - b; break;
-        case 2: result = a * b; break;
+        // For widths <= 4 bytes the operands fit in 32 bits, so computing in
+        // signed 64-bit cannot overflow and the range check below is valid.
+        // The 8-byte case must NOT pre-compute a * b in long long here — that
+        // overflows (host UB); it is handled separately via the host builtins.
+        if (nbytes <= 4) {
+            switch (op_type) {
+            case 0: result = a + b; break;
+            case 1: result = a - b; break;
+            case 2: result = a * b; break;
+            }
         }
         if (nbytes <= 1) {
             overflow = (result < -128 || result > 127);

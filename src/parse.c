@@ -2892,6 +2892,13 @@ static Node *create_lvar_init(VirtualMachine *vm, Initializer *init, Type *ty,
             InitDesg desg2 = {desg, i};
             Node *rhs =
                 create_lvar_init(vm, init->children[i], ty->base, &desg2, tok);
+            // Implicitly-zero elements lower to ND_NULL_EXPR, which emits no
+            // code (lvar_initializer already pre-zeroes the whole object with a
+            // single ND_MEMZERO). Appending them is pure waste, and for large
+            // arrays the left-leaning ND_COMMA spine recurses gen_expr to depth
+            // array_len and overflows the C stack — see #576. Skip the no-ops.
+            if (rhs->kind == ND_NULL_EXPR)
+                continue;
             node = new_binary(vm, ND_COMMA, node, rhs, tok);
         }
         return node;
@@ -2904,6 +2911,8 @@ static Node *create_lvar_init(VirtualMachine *vm, Initializer *init, Type *ty,
             InitDesg desg2 = {desg, 0, mem};
             Node *rhs = create_lvar_init(vm, init->children[mem->idx], mem->ty,
                                          &desg2, tok);
+            if (rhs->kind == ND_NULL_EXPR)
+                continue; // no-op; pre-zeroed by ND_MEMZERO (see #576)
             node = new_binary(vm, ND_COMMA, node, rhs, tok);
         }
         return node;

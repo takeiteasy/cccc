@@ -302,12 +302,6 @@ void hashmap_put_int(HashMap *map, long long key, void *val) {
     ent->val = val;
 }
 
-void hashmap_delete_int(HashMap *map, long long key) {
-    HashEntry *ent = get_entry_int(map, key);
-    if (ent)
-        ent->key = TOMBSTONE;
-}
-
 void hashmap_deinit(HashMap *map) {
     if (!map || !map->buckets)
         return;
@@ -394,25 +388,4 @@ void hashmap_foreach(HashMap *map, HashMapIterator iter, void *user_data) {
         if (result != 0)
             break;  // User requested stop
     }
-}
-
-// Count entries that match a predicate
-// The predicate function should return non-zero for entries to count
-int hashmap_count_if(HashMap *map, HashMapIterator predicate, void *user_data) {
-    if (!map || !map->buckets || !predicate)
-        return 0;
-
-    int count = 0;
-    for (int i = 0; i < map->capacity; i++) {
-        HashEntry *ent = &map->buckets[i];
-
-        // Skip empty and deleted entries
-        if (!ent->key || ent->key == TOMBSTONE)
-            continue;
-
-        // Call predicate and count if it returns non-zero
-        if (predicate(ent->key, ent->keylen, ent->val, user_data) != 0)
-            count++;
-    }
-    return count;
 }

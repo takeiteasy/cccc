@@ -734,6 +734,9 @@ static void opt_constant_fold(VirtualMachine *vm, OptReplacement *repls,
 // 5. LDR_W rd, rs; SX4 rd, rd -> LDR_W rd, rs (SX4 is redundant)
 //
 
+// NOTE(#578): SX4/ZX4/ZX1 extension opcodes are ~20% of executed instructions
+// (per --vm-profile on test_minilua). A redundant-extension elimination pass
+// here — dropping extensions of already-in-range values — is a large win.
 static void opt_peephole(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
     if (!vm || !vm->text_seg || !vm->text_ptr) {
         return;

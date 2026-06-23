@@ -1299,6 +1299,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
 }
 
 // Serialize a single node to a string (for debugging)
+// NOTE(#579): currently unwired — declared and defined but never called.
 char *serialize_node_to_source(VirtualMachine *vm, Node *node) {
     if (!node)
         return strdup("");
