@@ -262,6 +262,25 @@ static void mark_temp_reg_used(int reg) {
 
 static void reset_temp_regs(void) { temp_reg_in_use = 0; }
 
+// Number of temp registers currently free. Used by the binary-op codegen to
+// decide when to spill the LHS to the stack instead of holding a live temp
+// across the RHS recursion (ticket #587 — bounds peak register use on deeply
+// nested / right-leaning expression trees).
+static int temp_regs_free(void) {
+    int used = 0;
+    for (int i = 0; i < NUM_TEMP_REGS; i++)
+        if (temp_reg_in_use & (1 << i))
+            used++;
+    return NUM_TEMP_REGS - used;
+}
+
+// When free temps drop to this many, the binary-op path stops reserving a
+// register for the RHS result (which would stay live across the RHS subtree
+// recursion → O(depth) peak) and instead spills the LHS to the stack, reusing
+// dest_reg for the RHS. Leaves headroom for ops that need 1-2 temps at once
+// (e.g. the float push/pop branch).
+#define TEMP_REG_SPILL_THRESHOLD 2
+
 // ========== Scalar Local Promotion (#249) ==========
 
 typedef struct {
@@ -3394,24 +3413,50 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // LHS might contain a function call which resets temp regs.
             // Re-mark dest_reg as used so r_rhs allocation doesn't clobber it.
             mark_temp_reg_used(dest_reg);
-            int r_rhs = alloc_temp_reg();
 
-            if (rhs_has_call) {
-                // For floats: convert to int, push to stack, evaluate RHS, pop,
-                // convert back dest_reg is FREG_*, so we use FR2R to move bits
-                // to an int temp
-                int r_temp = alloc_temp_reg();
-                emit_rr(vm, fop_for_type(node->lhs->ty, FR2R), r_temp,
-                        dest_reg); // Float bits -> int reg
-                emit_psh3(vm, r_temp);               // Push int reg to stack
-                gen_expr(vm, node->rhs,
-                         r_rhs);       // Evaluate RHS (may clobber all)
-                emit_pop3(vm, r_temp); // Pop saved bits into int reg
-                emit_rr(vm, fop_for_type(node->lhs->ty, R2FR), dest_reg,
-                        r_temp); // Int bits -> float reg
-                free_temp_reg(r_temp);
+            // Operands fed to the final float op, and the temp to release after.
+            // Fast path: LHS stays in dest_reg (float), RHS goes to a fresh
+            // float temp. Spill path (#587): under register pressure, save the
+            // LHS float bits to the stack and reuse dest_reg for the RHS so no
+            // temp stays live across the RHS recursion. PSH3/POP3 operate on
+            // integer regs, so the bits go through FR2R/R2FR (same idiom as the
+            // rhs_has_call branch below).
+            int r_lhs_op, r_rhs_op, r_free;
+            if (temp_regs_free() <= TEMP_REG_SPILL_THRESHOLD) {
+                int r_tmp = alloc_temp_reg();
+                emit_rr(vm, fop_for_type(node->lhs->ty, FR2R), r_tmp,
+                        dest_reg);     // LHS float bits -> int reg
+                emit_psh3(vm, r_tmp);  // save LHS on the stack
+                free_temp_reg(r_tmp);  // nothing held across the RHS recursion
+                gen_expr(vm, node->rhs, dest_reg); // RHS reuses dest; pool free
+                r_free = alloc_temp_reg();
+                emit_pop3(vm, r_free); // reload LHS bits into int reg
+                emit_rr(vm, fop_for_type(node->lhs->ty, R2FR), r_free,
+                        r_free);       // int bits -> float reg (in place)
+                r_lhs_op = r_free;
+                r_rhs_op = dest_reg;
             } else {
-                gen_expr(vm, node->rhs, r_rhs);
+                int r_rhs = alloc_temp_reg();
+                if (rhs_has_call) {
+                    // For floats: convert to int, push to stack, evaluate RHS,
+                    // pop, convert back. dest_reg is FREG_*, so we use FR2R to
+                    // move bits to an int temp.
+                    int r_temp = alloc_temp_reg();
+                    emit_rr(vm, fop_for_type(node->lhs->ty, FR2R), r_temp,
+                            dest_reg); // Float bits -> int reg
+                    emit_psh3(vm, r_temp);               // Push int reg to stack
+                    gen_expr(vm, node->rhs,
+                             r_rhs);       // Evaluate RHS (may clobber all)
+                    emit_pop3(vm, r_temp); // Pop saved bits into int reg
+                    emit_rr(vm, fop_for_type(node->lhs->ty, R2FR), dest_reg,
+                            r_temp); // Int bits -> float reg
+                    free_temp_reg(r_temp);
+                } else {
+                    gen_expr(vm, node->rhs, r_rhs);
+                }
+                r_lhs_op = dest_reg;
+                r_rhs_op = r_rhs;
+                r_free = r_rhs;
             }
 
             int fop;
@@ -3443,9 +3488,9 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             default:
                 error("unsupported float op");
             }
-            emit_frrr(vm, fop_for_type(node->lhs->ty, fop), dest_reg, dest_reg,
-                      r_rhs);
-            free_temp_reg(r_rhs);
+            emit_frrr(vm, fop_for_type(node->lhs->ty, fop), dest_reg, r_lhs_op,
+                      r_rhs_op);
+            free_temp_reg(r_free);
         } else if (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->ty)) {
             // Wide _BitInt operations: delegate to runtime helpers.
             // LHS and RHS are wide → each gen_expr returns an address.
@@ -3574,16 +3619,36 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // LHS might contain a function call which resets temp regs.
             // Re-mark dest_reg as used so r_rhs allocation doesn't clobber it.
             mark_temp_reg_used(dest_reg);
-            int r_rhs = alloc_temp_reg();
 
-            if (rhs_has_call) {
-                // Save LHS to stack before function call in RHS
-                emit_psh3(vm, dest_reg);
-                gen_expr(vm, node->rhs, r_rhs);
-                // Restore saved LHS from stack
-                emit_pop3(vm, dest_reg);
+            // Operands fed to the final op, and the temp to release afterwards.
+            // Fast path: LHS stays in dest_reg, RHS goes to a fresh temp.
+            // Spill path (#587): under register pressure, save LHS to the stack
+            // and reuse dest_reg for the RHS so no temp stays live across the
+            // RHS recursion — bounds peak register use on deeply nested trees.
+            // The spill path also subsumes the rhs_has_call case (PSH3 protects
+            // the LHS across any call inside the RHS).
+            int r_lhs_op, r_rhs_op, r_free;
+            if (temp_regs_free() <= TEMP_REG_SPILL_THRESHOLD) {
+                emit_psh3(vm, dest_reg);            // save LHS
+                gen_expr(vm, node->rhs, dest_reg);  // RHS reuses dest; pool free
+                r_free = alloc_temp_reg();
+                emit_pop3(vm, r_free);              // reload LHS
+                r_lhs_op = r_free;
+                r_rhs_op = dest_reg;
             } else {
-                gen_expr(vm, node->rhs, r_rhs);
+                int r_rhs = alloc_temp_reg();
+                if (rhs_has_call) {
+                    // Save LHS to stack before function call in RHS
+                    emit_psh3(vm, dest_reg);
+                    gen_expr(vm, node->rhs, r_rhs);
+                    // Restore saved LHS from stack
+                    emit_pop3(vm, dest_reg);
+                } else {
+                    gen_expr(vm, node->rhs, r_rhs);
+                }
+                r_lhs_op = dest_reg;
+                r_rhs_op = r_rhs;
+                r_free = r_rhs;
             }
 
             int op;
@@ -3641,7 +3706,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             bool is_ptr_arith = (node->kind == ND_ADD || node->kind == ND_SUB) &&
                                 node->lhs->ty && node->lhs->ty->base;
             if (is_ptr_arith && (vm->flags & CCCC_BOUNDS_CHECKS))
-                emit_rr(vm, CHKB, dest_reg, r_rhs);
+                emit_rr(vm, CHKB, r_lhs_op, r_rhs_op);
 
             // Unsigned 64-bit comparison: use dedicated ULT3/ULE3 opcodes.
             // Shorter unsigned types (≤32-bit) are zero-extended in 64-bit
@@ -3654,7 +3719,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 op = (node->kind == ND_LT) ? ULT3 : ULE3;
             }
 
-            emit_rrr(vm, op, dest_reg, dest_reg, r_rhs);
+            emit_rrr(vm, op, dest_reg, r_lhs_op, r_rhs_op);
 
             if (node->ty->kind == TY_BITINT)
                 emit_bitint_trunc(vm, node->ty, dest_reg);
@@ -3663,7 +3728,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 emit(vm, CHKPA);
                 emit_word(vm, ENCODE_R(dest_reg));
             }
-            free_temp_reg(r_rhs);
+            free_temp_reg(r_free);
         }
 
         return;
