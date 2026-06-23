@@ -890,7 +890,7 @@ int main(int argc, const char *argv[]) {
         if (strcmp(argv[i], "--") == 0) { dashdash = i; break; }
     }
     int getopt_argc = (dashdash >= 0) ? dashdash : argc;
-    const char *optstring = "0123haI:L:D:U:o:c::dvgiPEMGXSjJVCl:W:e:O::FbTmptn:r:s:ABf:w";
+    const char *optstring = "0123haI:L:D:U:o:c::dvgi:PEMGXSjJVCl:W:e:O::FbTmptn:r:s:ABf:w";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(getopt_argc, (char *const *)argv, optstring,
