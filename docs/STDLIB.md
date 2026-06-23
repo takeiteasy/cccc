@@ -52,6 +52,7 @@ These are lowered to equivalent arithmetic comparisons at parse time.
 |---------|-------------|
 | `__builtin_constant_p(expr)` | `1` if `expr` is a compile-time constant, else `0` |
 | `__builtin_types_compatible_p(t1, t2)` | `1` if types `t1` and `t2` are compatible |
+| `__builtin_choose_expr(c, e1, e2)` | Compile-time select: `e1` if constant `c` is non-zero, else `e2`. Result carries the chosen arm's type; the unchosen arm is parsed but not evaluated |
 | `__builtin_reg_class(type)` | `0` = integer/pointer, `1` = float, `2` = other |
 | `__builtin_expect(expr, hint)` | Returns `expr`; `hint` is a branch-prediction hint (ignored) |
 | `__builtin_offsetof(type, member)` | Compile-time offset of `member` within `type` |

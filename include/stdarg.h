@@ -101,16 +101,22 @@ typedef struct {
  * Else: read from stack_ptr, increment stack_ptr
  * 
  * For floating-point types, we cast to double* to get correct IEEE 754 value.
+ *
+ * The fp vs non-fp split uses __builtin_choose_expr (not a runtime "?:") so
+ * that each arm has a single, consistent element type.  A plain conditional
+ * would fuse the double and 'type' arms via the usual arithmetic conversions
+ * and mistype the result (e.g. typing va_arg(ap,int*) as double), which then
+ * breaks a dereference or member access on the result.
  */
 #define va_arg(ap, type) \
-    (((ap).reg_count > 0) \
-        ? (--((ap).reg_count), \
-           (__builtin_types_compatible_p(type, double) || __builtin_types_compatible_p(type, float) \
-               ? (*(double *)(((ap).reg_ptr) -= 8, ((ap).reg_ptr) + 8)) \
-               : (*(type *)(((ap).reg_ptr) -= 8, ((ap).reg_ptr) + 8)))) \
-        : (__builtin_types_compatible_p(type, double) || __builtin_types_compatible_p(type, float) \
-               ? (*(double *)(((ap).stack_ptr) += 8, ((ap).stack_ptr) - 8)) \
-               : (*(type *)(((ap).stack_ptr) += 8, ((ap).stack_ptr) - 8))))
+    __builtin_choose_expr( \
+        __builtin_types_compatible_p(type, double) || __builtin_types_compatible_p(type, float), \
+        (((ap).reg_count > 0) \
+            ? (--((ap).reg_count), (*(double *)(((ap).reg_ptr) -= 8, ((ap).reg_ptr) + 8))) \
+            : (*(double *)(((ap).stack_ptr) += 8, ((ap).stack_ptr) - 8))), \
+        (((ap).reg_count > 0) \
+            ? (--((ap).reg_count), (*(type *)(((ap).reg_ptr) -= 8, ((ap).reg_ptr) + 8))) \
+            : (*(type *)(((ap).stack_ptr) += 8, ((ap).stack_ptr) - 8))))
 
 /*
  * va_end(ap) - Cleanup va_list

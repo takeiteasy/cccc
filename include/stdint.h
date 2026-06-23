@@ -42,4 +42,19 @@ typedef unsigned long uintmax_t;
 #define UINT32_MAX 4294967295U
 #define UINT64_MAX 18446744073709551615UL
 
+/* 7.18.4 Macros for integer constants.
+ * Append the suffix that gives a constant of at least the requested width.
+ * On the CCCC target, long long / unsigned long long are 64-bit, so the
+ * 64-bit and maximum-width forms use the LL / ULL suffixes. */
+#define INT8_C(x)    x
+#define INT16_C(x)   x
+#define INT32_C(x)   x
+#define INT64_C(x)   x ## LL
+#define UINT8_C(x)   x
+#define UINT16_C(x)  x
+#define UINT32_C(x)  x ## U
+#define UINT64_C(x)  x ## ULL
+#define INTMAX_C(x)  x ## LL
+#define UINTMAX_C(x) x ## ULL
+
 #endif /* __STDINT_H */

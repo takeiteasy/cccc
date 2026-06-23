@@ -6365,6 +6365,16 @@ static Node *struct_ref(VirtualMachine *vm, Node *node, Token *tok) {
 
     Type *ty = node->ty;
 
+    // A qualified copy (e.g. "const struct S *") made while the tag S was
+    // still incomplete keeps its own empty member list; the canonical tag it
+    // was copied from (origin) is completed in place when S is later defined.
+    // Follow the origin chain to reach that completed definition so member
+    // lookup succeeds.  The const-ness of the access is taken from the
+    // original node->lhs->ty in add_type, so dropping qualifiers here is safe.
+    while (ty->size < 0 && ty->origin &&
+           (ty->origin->kind == TY_STRUCT || ty->origin->kind == TY_UNION))
+        ty = ty->origin;
+
     for (;;) {
         Member *mem = get_struct_member(ty, tok);
         if (!mem) {
@@ -7392,6 +7402,24 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         Type *t2 = typename(vm, &tok, tok);
         *rest = skip(vm, tok, ")");
         return new_num(vm, is_compatible(t1, t2), start);
+    }
+
+    // __builtin_choose_expr(const-expr, expr1, expr2)
+    //   Selects expr1 if const-expr is non-zero, else expr2, at compile time.
+    //   The result carries the *type* of the chosen arm (unlike "?:", which
+    //   fuses both arms via the usual arithmetic conversions).  The unchosen
+    //   arm is parsed but discarded, so it is never type-checked against the
+    //   chosen one nor emitted.  This is what <stdarg.h>'s va_arg relies on to
+    //   give the correct type for the requested argument.
+    if (equal(tok, "__builtin_choose_expr")) {
+        tok = skip(vm, tok->next, "(");
+        int64_t cond = const_expr(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *e1 = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *e2 = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        return cond ? e1 : e2;
     }
 
     if (equal(tok, "__builtin_reg_class")) {

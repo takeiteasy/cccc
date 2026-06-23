@@ -18,4 +18,5 @@ build/bench-*
 build/test_out/
 profile/benchmarks/results/
 profile/benchmarks/results/*.json
-IntelRDFPMathLib20U4.tar.gz
+tools/*.tar.gz
+tools/*.zip
