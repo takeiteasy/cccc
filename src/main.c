@@ -280,10 +280,10 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                             1: constant folding (-ffold)\n");
     printf("\t                             2: +peephole, +CSE (-fpeephole -fcse)\n");
     printf("\t                             3: +copy-prop, +DCE (-fcopy-prop -fdce)\n");
-    printf("\t                             4: +opcode fusion (-ffuse)\n");
+    printf("\t                             4: +opcode fusion, +redundant extension elimination (-ffuse -felim-ext)\n");
     printf("\t-f<pass>                     Enable a single optimisation pass regardless of -O level.\n");
     printf("\t-fno-<pass>                  Disable a pass even if enabled by -O.\n");
-    printf("\t                             Passes: fold, peephole, copy-prop, dce, cse, fuse\n");
+    printf("\t                             Passes: fold, peephole, copy-prop, dce, cse, fuse, elim-ext\n");
     printf("\t                             Examples: -O3 -fno-cse, -O0 -fpeephole, "
            "-ffold -fdce\n");
     printf("\t--fma                        Enable single-rounding FMA (-ffuse implied; may change FP results)\n");
@@ -880,6 +880,8 @@ int main(int argc, const char *argv[]) {
         {"fno-dce",          no_argument, 0, 1105},
         {"fno-cse",          no_argument, 0, 1106},
         {"fno-fuse",         no_argument, 0, 1107},
+        {"felim-ext",        no_argument, 0, 1108},
+        {"fno-elim-ext",     no_argument, 0, 1109},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1443,6 +1445,7 @@ int main(int argc, const char *argv[]) {
                 {"dce",       CCCC_OPT_DCE},
                 {"cse",       CCCC_OPT_CSE},
                 {"fuse",      CCCC_OPT_FUSE},
+                {"elim-ext",  CCCC_OPT_ELIM_EXT},
                 {NULL, 0}
             };
             bool neg = (strncmp(optarg, "no-", 3) == 0);
@@ -1481,6 +1484,8 @@ int main(int argc, const char *argv[]) {
         case 1105: opt_f_disable |= CCCC_OPT_DCE;       break; // --fno-dce
         case 1106: opt_f_disable |= CCCC_OPT_CSE;       break; // --fno-cse
         case 1107: opt_f_disable |= CCCC_OPT_FUSE;      break; // --fno-fuse
+        case 1108: opt_f_enable  |= CCCC_OPT_ELIM_EXT; break; // --felim-ext
+        case 1109: opt_f_disable |= CCCC_OPT_ELIM_EXT; break; // --fno-elim-ext
         case '?':
             if (optopt)
                 fprintf(stderr, "error: option -%c requires an argument\n",

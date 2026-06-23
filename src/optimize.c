@@ -2374,12 +2374,179 @@ static void opt_fuse_ops(VirtualMachine *vm) {
 //   L2: +peephole, +cse
 //   L3: +copy-prop, +dce
 //   L4: +fuse  (also enabled explicitly by -ffuse)
+// ========== Pass: Redundant Extension Elimination ==========
+//
+// Forward-dataflow pass that tracks a "range guarantee" per integer register
+// and eliminates sign/zero-extension opcodes whose result is provably
+// identical to the source value.
+//
+// Conservative at control-flow join points: all range state is cleared
+// whenever a branch target is reached.
+//
+// Redundancy conditions (OP rd, rs is a no-op when):
+//   SX1: rs ∈ [-128,127]               — ext[rs]==SX1
+//   SX2: rs ∈ [-32768,32767]           — ext[rs]∈{SX1,SX2,ZX1}
+//   SX4: rs ∈ [-2^31,2^31-1]          — ext[rs]∈{SX1,SX2,SX4,ZX1,ZX2}
+//   ZX1: rs ∈ [0,255]                  — ext[rs]==ZX1
+//   ZX2: rs ∈ [0,65535]               — ext[rs]∈{ZX1,ZX2}
+//   ZX4: rs ∈ [0,2^32-1]              — ext[rs]∈{ZX1,ZX2,ZX4}
+//
+// (ZX1=[0,255] ⊂ SX2=[-32768,32767]; ZX1,ZX2 ⊂ [0,2^31-1] ⊂ SX4 range.)
+//
+// Load opcodes that sign-extend seed the state for subsequent extensions:
+//   LDR_B / LDR_LOCAL_B / LDR_INDEX_B → SX1
+//   LDR_H / LDR_LOCAL_H / LDR_INDEX_H → SX2
+//   LDR_W / LDR_LOCAL_W / LDR_INDEX_W → SX4
+//
+// When redundant:
+//   rd == rs: emit_mov_nop (NOP; compacted away)
+//   rd != rs: replace opcode with MOV3 (same 2-word size; copy-prop handles later)
+
+typedef enum {
+    EXT_NONE = 0,
+    EXT_SX1,   // value in [-128, 127]
+    EXT_SX2,   // value in [-32768, 32767]
+    EXT_SX4,   // value in [-2^31, 2^31-1]
+    EXT_ZX1,   // value in [0, 255]
+    EXT_ZX2,   // value in [0, 65535]
+    EXT_ZX4,   // value in [0, 2^32-1]
+} ExtState;
+
+static bool ext_makes_sx1_redundant(ExtState s) { return s == EXT_SX1; }
+static bool ext_makes_sx2_redundant(ExtState s) { return s == EXT_SX1 || s == EXT_SX2 || s == EXT_ZX1; }
+static bool ext_makes_sx4_redundant(ExtState s) {
+    return s == EXT_SX1 || s == EXT_SX2 || s == EXT_SX4 || s == EXT_ZX1 || s == EXT_ZX2;
+}
+static bool ext_makes_zx1_redundant(ExtState s) { return s == EXT_ZX1; }
+static bool ext_makes_zx2_redundant(ExtState s) { return s == EXT_ZX1 || s == EXT_ZX2; }
+static bool ext_makes_zx4_redundant(ExtState s) { return s == EXT_ZX1 || s == EXT_ZX2 || s == EXT_ZX4; }
+
+static void opt_elim_ext(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
+    if (!vm || !vm->text_seg || !vm->text_ptr)
+        return;
+
+    Pc start = fn_start;
+    Pc end   = fn_end;
+    int opt_count = 0;
+
+    bool *cf_targets = build_control_flow_targets(vm, start, end);
+
+    ExtState ext[NUM_REGS];
+    for (int i = 0; i < NUM_REGS; i++)
+        ext[i] = EXT_NONE;
+
+    for (Pc pc = start; pc < end; ) {
+        int op   = get_opcode(vm, pc);
+        int size = get_instr_size_at(vm, pc, end);
+
+        // At a control-flow join, all range guarantees are invalidated.
+        if (pc != start && cf_targets[pc - start]) {
+            for (int i = 0; i < NUM_REGS; i++)
+                ext[i] = EXT_NONE;
+        }
+
+        // Decode rd/rs only when the instruction has at least one operand word.
+        // 0-operand instructions (MALC, MFRE, …) have size==1; reading pc+1
+        // for those would reach the next instruction's opcode.
+        if (size < 2) {
+            pc += size;
+            continue;
+        }
+
+        int rd = (int)(vm->text_seg[pc + 1] & 0xFF);
+        int rs = (int)((vm->text_seg[pc + 1] >> 8) & 0xFF);
+
+        // Determine if this extension is redundant and update state.
+        bool is_ext_op = true;
+        bool redundant = false;
+        ExtState new_state = EXT_NONE;
+
+        switch (op) {
+        case SX1:
+            redundant = ext_makes_sx1_redundant(rs < NUM_REGS ? ext[rs] : EXT_NONE);
+            new_state = EXT_SX1;
+            break;
+        case SX2:
+            redundant = ext_makes_sx2_redundant(rs < NUM_REGS ? ext[rs] : EXT_NONE);
+            new_state = EXT_SX2;
+            break;
+        case SX4:
+            redundant = ext_makes_sx4_redundant(rs < NUM_REGS ? ext[rs] : EXT_NONE);
+            new_state = EXT_SX4;
+            break;
+        case ZX1:
+            redundant = ext_makes_zx1_redundant(rs < NUM_REGS ? ext[rs] : EXT_NONE);
+            new_state = EXT_ZX1;
+            break;
+        case ZX2:
+            redundant = ext_makes_zx2_redundant(rs < NUM_REGS ? ext[rs] : EXT_NONE);
+            new_state = EXT_ZX2;
+            break;
+        case ZX4:
+            redundant = ext_makes_zx4_redundant(rs < NUM_REGS ? ext[rs] : EXT_NONE);
+            new_state = EXT_ZX4;
+            break;
+
+        // Sign-extending loads seed state for subsequent SX* ops.
+        case LDR_B: case LDR_LOCAL_B: case LDR_INDEX_B:
+            new_state = EXT_SX1;
+            is_ext_op = false;
+            break;
+        case LDR_H: case LDR_LOCAL_H: case LDR_INDEX_H:
+            new_state = EXT_SX2;
+            is_ext_op = false;
+            break;
+        case LDR_W: case LDR_LOCAL_W: case LDR_INDEX_W:
+            new_state = EXT_SX4;
+            is_ext_op = false;
+            break;
+
+        default:
+            is_ext_op = false;
+            // For instructions that write to an integer destination register,
+            // clear the range state.  Byte 0 is a source (not a dest) for
+            // stores, branches, and stack-push ops — skip those.
+            // Also: for non-register instructions (JMP, CALL, ENT3, LI3 etc.)
+            // byte 0 may encode an address or immediate, not a register number,
+            // so guard rd < NUM_REGS to avoid an OOB write into ext[].
+            if (!op_byte0_is_int_src(op) && !op_byte0_is_float(op) &&
+                rd != 0 && rd < NUM_REGS)
+                ext[rd] = EXT_NONE;
+            break;
+        }
+
+        if (is_ext_op && rd != 0 && rd < NUM_REGS) {
+            if (redundant) {
+                if (rd == rs) {
+                    emit_mov_nop(vm, pc);
+                } else {
+                    // Replace in-place: MOV3 has the same 2-word format.
+                    vm->text_seg[pc] = MOV3;
+                    // Operand word already encodes (rd, rs) correctly.
+                }
+                opt_count++;
+            }
+            // Even if we NOPed it, propagate what the value's range would be.
+            ext[rd] = new_state;
+        } else if (!is_ext_op && rd != 0 && rd < NUM_REGS && new_state != EXT_NONE) {
+            ext[rd] = new_state;
+        }
+
+        pc += size;
+    }
+
+    if (vm->debug_vm && opt_count > 0)
+        printf("[opt] elim-ext: removed %d redundant extensions\n", opt_count);
+
+    free(cf_targets);
+}
+
 static uint32_t level_to_opt_mask(int level) {
     uint32_t m = 0;
     if (level >= 1) m |= CCCC_OPT_FOLD;
     if (level >= 2) m |= CCCC_OPT_PEEPHOLE | CCCC_OPT_CSE;
     if (level >= 3) m |= CCCC_OPT_COPY_PROP | CCCC_OPT_DCE;
-    if (level >= 4) m |= CCCC_OPT_FUSE;
+    if (level >= 4) m |= CCCC_OPT_FUSE | CCCC_OPT_ELIM_EXT;
     return m;
 }
 
@@ -2390,6 +2557,7 @@ static void run_opt_passes(VirtualMachine *vm, OptReplacement *repls,
                            uint32_t mask, Pc fn_start, Pc fn_end) {
     if (mask & CCCC_OPT_FOLD)      opt_constant_fold(vm, repls, fn_start, fn_end);
     if (mask & CCCC_OPT_PEEPHOLE)  opt_peephole(vm, fn_start, fn_end);
+    if (mask & CCCC_OPT_ELIM_EXT)  opt_elim_ext(vm, fn_start, fn_end);
     if (mask & CCCC_OPT_COPY_PROP) opt_copy_prop(vm, fn_start, fn_end);
     if (mask & CCCC_OPT_DCE)       opt_dead_code(vm, fn_start, fn_end);
 }

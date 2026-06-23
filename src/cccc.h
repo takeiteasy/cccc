@@ -1851,6 +1851,7 @@ typedef enum {
     CCCC_OPT_DCE       = 1 << 3, // Dead code elimination      (-fdce)
     CCCC_OPT_CSE       = 1 << 4, // Common-subexp elimination  (-fcse)
     CCCC_OPT_FUSE      = 1 << 5, // Opcode fusion              (-ffuse)
+    CCCC_OPT_ELIM_EXT  = 1 << 6, // Redundant extension elim   (-felim-ext)
 } CcccOptPass;
 
 typedef struct Compiler {
