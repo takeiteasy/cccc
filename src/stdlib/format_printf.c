@@ -6,6 +6,12 @@
 
 #define STB_SPRINTF_IMPLEMENTATION
 #define STB_SPRINTF_DECORATE(name) cccc_stbsp_##name
+// Local patch (#577): force aligned accesses. The vendored fast paths store a
+// 32-bit word straight into the output buffer (`*(stbsp__uint32*)bf = v`),
+// which is misaligned-UB when bf is not 4-byte aligned (UBSan flagged
+// stb_sprintf.h:434). This vendor-provided knob routes those through byte
+// copies; the perf cost is negligible for our diagnostic/printf use.
+#define STB_SPRINTF_NOUNALIGNED
 #include "stb_sprintf.h"
 
 int cccc_vsnprintf(char *buf, size_t count, const char *fmt, va_list ap) {

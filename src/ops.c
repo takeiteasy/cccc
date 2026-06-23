@@ -1118,6 +1118,30 @@ static inline int op_NEG3_fn(VirtualMachine *vm) {
 
 // ========== Register-Based Load/Store ==========
 
+// Guest memory access goes through these memcpy helpers rather than a direct
+// `*(T*)guest_ptr` cast: the guest can hold a pointer of any alignment (packed
+// structs, char-buffer aliasing, flexible array members), and dereferencing it
+// as a wider type is undefined behaviour on the host — it happens to work on
+// aarch64/x86_64 but UBSan flags it and it would SIGBUS on strict-alignment
+// targets (#577). __builtin_memcpy of a constant size lowers to the same single
+// load/store the compiler would emit for an aligned access. The signed integer
+// loads return long long so the narrow->wide conversion sign-extends, matching
+// the original `*(short*)`/`*(int*)` semantics.
+//
+// The atomic-tagged opcodes (ALDR/ASTR/AXCHG/ACAS) keep direct derefs: C
+// atomics require natural alignment, so an unaligned atomic is a guest-program
+// bug, not something the VM should silently paper over.
+static inline long long ld_i16(const void *p) { short v; __builtin_memcpy(&v, p, 2); return v; }
+static inline long long ld_i32(const void *p) { int v;   __builtin_memcpy(&v, p, 4); return v; }
+static inline long long ld_i64(const void *p) { long long v; __builtin_memcpy(&v, p, 8); return v; }
+static inline void st_i16(void *p, long long v) { short x = (short)v; __builtin_memcpy(p, &x, 2); }
+static inline void st_i32(void *p, long long v) { int x = (int)v; __builtin_memcpy(p, &x, 4); }
+static inline void st_i64(void *p, long long v) { __builtin_memcpy(p, &v, 8); }
+static inline double ld_f64(const void *p) { double v; __builtin_memcpy(&v, p, 8); return v; }
+static inline float  ld_f32(const void *p) { float v;  __builtin_memcpy(&v, p, 4); return v; }
+static inline void st_f64(void *p, double v) { __builtin_memcpy(p, &v, 8); }
+static inline void st_f32(void *p, float v)  { __builtin_memcpy(p, &v, 4); }
+
 static inline int op_LDR_B_fn(VirtualMachine *vm) {
     // Load byte (sign-extend): regs[rd] = *(char*)regs[rs]
     // Format: [LDR_B] [rd:8|rs:8|unused:48]
@@ -1142,7 +1166,7 @@ static inline int op_LDR_H_fn(VirtualMachine *vm) {
     check_race_access(vm, (void *)vm->regs[rs], 0);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 2, WATCH_READ);
     if (rd != REG_ZERO)
-        vm->regs[rd] = *(short *)vm->regs[rs];
+        vm->regs[rd] = ld_i16((void *)vm->regs[rs]);
     return 0;
 }
 
@@ -1156,16 +1180,13 @@ static inline int op_LDR_W_fn(VirtualMachine *vm) {
     check_race_access(vm, (void *)vm->regs[rs], 0);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 4, WATCH_READ);
     if (rd != REG_ZERO)
-        vm->regs[rd] = *(int *)vm->regs[rs];
+        vm->regs[rd] = ld_i32((void *)vm->regs[rs]);
     return 0;
 }
 
 static inline int op_LDR_D_fn(VirtualMachine *vm) {
     // Load dword: regs[rd] = *(long long*)regs[rs]
     // Format: [LDR_D] [rd:8|rs:8|unused:48]
-    // NOTE(#577): the *(T*)guest_ptr deref here (and in the H/W/float/double
-    // load+store opcodes) is misaligned-UB when the guest does an unaligned
-    // access; tolerated on aarch64/x86_64 but should move to memcpy helpers.
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
@@ -1173,7 +1194,7 @@ static inline int op_LDR_D_fn(VirtualMachine *vm) {
     check_race_access(vm, (void *)vm->regs[rs], 0);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 8, WATCH_READ);
     if (rd != REG_ZERO)
-        vm->regs[rd] = *(long long *)vm->regs[rs];
+        vm->regs[rd] = ld_i64((void *)vm->regs[rs]);
     return 0;
 }
 
@@ -1198,7 +1219,7 @@ static inline int op_STR_H_fn(VirtualMachine *vm) {
     DECODE_RR(operands, rd, rs);
 
     check_race_access(vm, (void *)vm->regs[rs], 1);
-    *(short *)vm->regs[rs] = (short)vm->regs[rd];
+    st_i16((void *)vm->regs[rs], vm->regs[rd]);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 2, WATCH_WRITE);
     return 0;
 }
@@ -1211,7 +1232,7 @@ static inline int op_STR_W_fn(VirtualMachine *vm) {
     DECODE_RR(operands, rd, rs);
 
     check_race_access(vm, (void *)vm->regs[rs], 1);
-    *(int *)vm->regs[rs] = (int)vm->regs[rd];
+    st_i32((void *)vm->regs[rs], vm->regs[rd]);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 4, WATCH_WRITE);
     return 0;
 }
@@ -1224,7 +1245,7 @@ static inline int op_STR_D_fn(VirtualMachine *vm) {
     DECODE_RR(operands, rd, rs);
 
     check_race_access(vm, (void *)vm->regs[rs], 1);
-    *(long long *)vm->regs[rs] = vm->regs[rd];
+    st_i64((void *)vm->regs[rs], vm->regs[rd]);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 8, WATCH_WRITE);
     return 0;
 }
@@ -1356,7 +1377,7 @@ static inline int op_FLDR_fn(VirtualMachine *vm) {
     DECODE_RR(operands, rd, rs);
 
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 8, WATCH_READ);
-    cccc_freg_set_f64(vm, rd, *(double *)vm->regs[rs]);
+    cccc_freg_set_f64(vm, rd, ld_f64((void *)vm->regs[rs]));
     return 0;
 }
 
@@ -1367,7 +1388,7 @@ static inline int op_FSTR_fn(VirtualMachine *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
-    *(double *)vm->regs[rs] = cccc_freg_get_f64(vm, rd);
+    st_f64((void *)vm->regs[rs], cccc_freg_get_f64(vm, rd));
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 8, WATCH_WRITE);
     return 0;
 }
@@ -1380,7 +1401,7 @@ static inline int op_FLDR_F32_fn(VirtualMachine *vm) {
     DECODE_RR(operands, rd, rs);
 
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 4, WATCH_READ);
-    cccc_freg_set_f32(vm, rd, *(float *)vm->regs[rs]);
+    cccc_freg_set_f32(vm, rd, ld_f32((void *)vm->regs[rs]));
     return 0;
 }
 
@@ -1391,7 +1412,7 @@ static inline int op_FSTR_F32_fn(VirtualMachine *vm) {
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
-    *(float *)vm->regs[rs] = cccc_freg_get_f32(vm, rd);
+    st_f32((void *)vm->regs[rs], cccc_freg_get_f32(vm, rd));
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 4, WATCH_WRITE);
     return 0;
 }
