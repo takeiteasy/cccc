@@ -164,9 +164,28 @@ static void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
                 target_offset = cc_pc_to_byte_offset(label_pc);
                 value        = target_offset + rel->addend;
             } else if (target->is_function) {
-                if (!target->body)
-                    error("unsupported relocation to undefined function: %s",
-                          target->name);
+                if (!target->body) {
+                    // Undefined function: if it is an FFI/extern function, store
+                    // the FFI dispatch token (CCCC_FFI_TOKEN_BASE - idx) directly,
+                    // mirroring the runtime function-address path (CALLN/JMPI
+                    // recognise the token).  This is how static initialisers that
+                    // take the address of a libc/POSIX function resolve, e.g.
+                    // SQLite's unix VFS structs full of { close, read, write, ... }
+                    // (#589).  The token is segment-independent, so no data/tls
+                    // reloc is recorded (it survives .c4 round-trips verbatim,
+                    // exactly like the text-segment FFI case).
+                    int ffi_idx = find_ffi_function(vm, obj_external_name(target));
+                    if (ffi_idx < 0)
+                        error("unsupported relocation to undefined function: %s",
+                              target->name);
+                    long long slot = var->offset + rel->offset;
+                    long long token = CCCC_FFI_TOKEN_BASE - ffi_idx;
+                    if (var->is_tls)
+                        *(long long *)(vm->tls_template + slot) = token;
+                    else
+                        *(long long *)(vm->data_seg + slot) = token;
+                    continue;
+                }
                 segment      = 1;
                 target_offset = cc_pc_to_byte_offset((Pc)target->code_addr);
                 value        = target_offset + rel->addend;
