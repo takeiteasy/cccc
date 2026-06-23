@@ -212,6 +212,8 @@ Example:
 - **URL includes** — fetch headers directly from URLs with `#include <https://...>`; build with `make CCCC_HAS_CURL=1` (optional, requires libcurl)
 - **Built-in test framework** — `[[cccc::test]]`, `__attribute__((test))`, or `@test` attribute and `Assert*` macros for writing tests in C (see [TESTING.md](docs/TESTING.md))
   - Run with `--testing`; outputs TAP 13 format; no external dependencies or includes needed
+  - `#include [[cccc::test]] "fixtures.h"` conditionally includes a file only in `--testing` mode
+- **Mode predefined macros** — `__CCCC_BUILD_MODE__`, `__CCCC_TEST_MODE__`, or `__CCCC_COMP_MODE__` is defined at compile time to reflect the active execution mode, enabling `#ifdef`-based mode branching
 - **Attribute support** — GNU `__attribute__((...))`, C23 `[[...]]`, and `@name` shorthand with partial semantic support (see [ATTRIBUTES.md](docs/ATTRIBUTES.md))
   - Covers `packed`, `aligned`, `unused`/`maybe_unused`, `deprecated`, and CCCC-specific `macro`/`comptime`/`test`
   - `@comptime`, `@test`, `@packed`, `@nodiscard`, etc. are sugar for the longer attribute forms

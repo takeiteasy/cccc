@@ -1,0 +1,1 @@
+#define TEST_ONLY_LOADED 1

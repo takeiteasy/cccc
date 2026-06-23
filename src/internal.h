@@ -337,6 +337,7 @@ const char *get_std_header_name(int i);
 char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
                            bool is_system);
 void init_macros(VirtualMachine *vm);
+void init_mode_macros(VirtualMachine *vm);
 void define_std_macros(VirtualMachine *vm);
 void define_macro(VirtualMachine *vm, char *name, char *buf);
 void undef_macro(VirtualMachine *vm, char *name);

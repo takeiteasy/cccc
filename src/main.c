@@ -1724,6 +1724,7 @@ int main(int argc, const char *argv[]) {
     vm.compiler.entry_name = (char *)entry_name;
     vm.compiler.testing_mode = (bool)testing_mode;
     vm.compiler.build_mode = (bool)build_mode;
+    init_mode_macros(&vm);
     vm.compiler.diagnostic_json = output_json;
     vm.disable_all_ffi = disable_all_ffi;
     vm.ffi_errors_fatal = ffi_errors_fatal;

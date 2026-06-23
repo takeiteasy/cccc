@@ -173,6 +173,8 @@ typedef enum {
     INCLUDE_ROUTE_COMPTIME,
     INCLUDE_ROUTE_EMIT,
     INCLUDE_ROUTE_SHARED,
+    INCLUDE_ROUTE_BUILD,
+    INCLUDE_ROUTE_TEST,
 } IncludeRoute;
 
 // Some preprocessor directives such as #include allow extraneous
@@ -256,6 +258,10 @@ static bool is_c23_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
         r = INCLUDE_ROUTE_EMIT;
     else if (equal(p, "shared"))
         r = INCLUDE_ROUTE_SHARED;
+    else if (equal(p, "build"))
+        r = INCLUDE_ROUTE_BUILD;
+    else if (equal(p, "test"))
+        r = INCLUDE_ROUTE_TEST;
     else
         return false;
     if (!p->next || !equal(p->next, "]") ||
@@ -275,6 +281,10 @@ static bool is_at_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
         *route = INCLUDE_ROUTE_EMIT;
     else if (equal(tok->next, "shared"))
         *route = INCLUDE_ROUTE_SHARED;
+    else if (equal(tok->next, "build"))
+        *route = INCLUDE_ROUTE_BUILD;
+    else if (equal(tok->next, "test"))
+        *route = INCLUDE_ROUTE_TEST;
     else
         return false;
     *rest = tok->next->next;
@@ -295,6 +305,10 @@ static bool is_gnu_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
         r = INCLUDE_ROUTE_EMIT;
     else if (equal(p, "shared"))
         r = INCLUDE_ROUTE_SHARED;
+    else if (equal(p, "build"))
+        r = INCLUDE_ROUTE_BUILD;
+    else if (equal(p, "test"))
+        r = INCLUDE_ROUTE_TEST;
     else
         return false;
     if (!p->next || !equal(p->next, ")") ||
@@ -3861,6 +3875,15 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             IncludeRoute include_route = read_include_route(&filename_start);
             char *filename = read_include_filename(vm, &tok, filename_start,
                                                    &is_dquote, &filename_len);
+            // Mode-gated includes: skip silently when the mode is inactive.
+            if (include_route == INCLUDE_ROUTE_BUILD && !vm->compiler.build_mode) {
+                tok = skip_line(vm, tok);
+                break;
+            }
+            if (include_route == INCLUDE_ROUTE_TEST && !vm->compiler.testing_mode) {
+                tok = skip_line(vm, tok);
+                break;
+            }
             // Comptime includes and ordinary includes inside a comptime block are
             // queued for the comptime pass only; they never reach the runtime TU.
             if (include_route == INCLUDE_ROUTE_COMPTIME ||
@@ -4397,6 +4420,18 @@ void init_macros(VirtualMachine *vm) {
     struct tm *tm = localtime(&now);
     define_macro(vm, "__DATE__", format_date(vm, tm));
     define_macro(vm, "__TIME__", format_time(vm, tm));
+}
+
+// Called after vm->compiler.build_mode / testing_mode are set in main.
+// Defines __CCCC_BUILD_MODE__, __CCCC_TEST_MODE__, or __CCCC_COMP_MODE__
+// (only the active one) so user code can #ifdef on the current mode.
+void init_mode_macros(VirtualMachine *vm) {
+    if (vm->compiler.build_mode)
+        define_macro(vm, "__CCCC_BUILD_MODE__", "1");
+    if (vm->compiler.testing_mode)
+        define_macro(vm, "__CCCC_TEST_MODE__", "1");
+    if (!vm->compiler.build_mode && !vm->compiler.testing_mode)
+        define_macro(vm, "__CCCC_COMP_MODE__", "1");
 }
 
 typedef enum {

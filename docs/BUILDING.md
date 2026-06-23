@@ -159,6 +159,54 @@ void build_main(Builder *ctx);   // success iff all targets built
 The same file is still valid C: in default mode (`cccc build.c`) the
 `[[cccc::build]]` attribute is consumed and the entry is simply not called.
 
+## Mode predefined macros
+
+When CCCC starts it defines exactly one of three mutually-exclusive macros
+depending on the active mode:
+
+| Macro | Defined when |
+|---|---|
+| `__CCCC_BUILD_MODE__` | `--build` is active |
+| `__CCCC_TEST_MODE__` | `--testing` is active |
+| `__CCCC_COMP_MODE__` | Neither `--build` nor `--testing` (normal compilation) |
+
+Use `#ifdef` / `#ifndef` to branch on these at compile time:
+
+```c
+#ifdef __CCCC_BUILD_MODE__
+#include "build/extra_targets.h"
+#endif
+```
+
+## Conditional includes (`#include [[cccc::build]]`)
+
+A `#include` with a `[[cccc::build]]` route attribute is only processed when
+`--build` is active; otherwise the directive is silently skipped.  All three
+attribute forms are accepted:
+
+```c
+#include [[cccc::build]]           "build/extra_targets.h"   // C23
+#include @build                    "build/extra_targets.h"   // @-prefix
+#include __attribute__((build))    "build/extra_targets.h"   // GNU
+```
+
+Angle-bracket includes work the same way:
+
+```c
+#include [[cccc::build]] <external/build_helpers.h>
+```
+
+This is the first-class equivalent of:
+
+```c
+#ifdef __CCCC_BUILD_MODE__
+#include "build/extra_targets.h"
+#endif
+```
+
+Use it to split large build scripts across multiple files without polluting
+normal compilation.
+
 ## Discoverable factory functions (#540)
 
 `[[cccc::build_target]]` tags a *factory function* — an alternative to putting
@@ -960,7 +1008,10 @@ modules into a running VM (#564),
 `InstallArtifact` / `SetInstallPrefix` / `BuildWantsInstall` / `--build-install` (#560),
 `DirExists` / `GlobFiles` / `ReadFile` / `WriteFile` filesystem helpers (#561),
 a self-hosting `build.c` that builds cccc, libcccc, sanitizer variants,
-`fuzz_harness`, stdlib regeneration, and bench (#549).
+`fuzz_harness`, stdlib regeneration, and bench (#549),
+`__CCCC_BUILD_MODE__` / `__CCCC_TEST_MODE__` / `__CCCC_COMP_MODE__` predefined
+mode macros (#575), and `#include [[cccc::build]]` / `#include [[cccc::test]]`
+conditional include directives (#570).
 
 ## See also
 

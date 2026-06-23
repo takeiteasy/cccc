@@ -615,6 +615,46 @@ The reset happens after per-test setup hooks are scheduled but before they run â
 
 For suites with `once` setup hooks, each test in the suite restores the post-once-setup snapshot rather than the original initial snapshot, so the shared state established by `once` setup persists across the suite's tests.
 
+## Mode predefined macros
+
+When CCCC starts it defines exactly one of three mutually-exclusive macros
+depending on the active mode:
+
+| Macro | Defined when |
+|---|---|
+| `__CCCC_TEST_MODE__` | `--testing` is active |
+| `__CCCC_BUILD_MODE__` | `--build` is active |
+| `__CCCC_COMP_MODE__` | Neither (normal compilation) |
+
+Use `#ifdef` / `#ifndef` to branch at compile time:
+
+```c
+#ifdef __CCCC_TEST_MODE__
+#include "tests/shared_fixtures.h"
+#endif
+```
+
+## Conditional includes (`#include [[cccc::test]]`)
+
+A `#include` with a `[[cccc::test]]` route attribute is only processed when
+`--testing` is active; otherwise the directive is silently skipped.  All three
+attribute forms are accepted:
+
+```c
+#include [[cccc::test]]           "tests/shared_fixtures.h"   // C23
+#include @test                    "tests/shared_fixtures.h"   // @-prefix
+#include __attribute__((test))    "tests/shared_fixtures.h"   // GNU
+```
+
+This lets you split large test files across multiple headers without polluting
+normal compilation â€” it is the first-class equivalent of:
+
+```c
+#ifdef __CCCC_TEST_MODE__
+#include "tests/shared_fixtures.h"
+#endif
+```
+
 ## Running Tests
 
 ```
