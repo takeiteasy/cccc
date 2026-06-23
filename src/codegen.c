@@ -121,6 +121,17 @@ static void add_tls_reloc(VirtualMachine *vm, long long tls_offset, int target_s
     vm->compiler.num_tls_relocs++;
 }
 
+// Persistent label map: records every label defined across all functions during
+// a single gen() call.  Unlike label_defs[] (per-function, reset each time)
+// this map survives until apply_global_relocations() has run, so &&label
+// stored in static/global initialisers can be resolved to their text offsets
+// (#573).  All .L..N names are globally unique (unique_name_counter), so there
+// are no cross-function clashes.
+typedef struct { char *name; Pc offset; } GlobalLabelEntry;
+static GlobalLabelEntry *global_label_map = NULL;
+static int num_global_labels = 0;
+static int global_labels_cap = 0;
+
 static void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
     for (Obj *var = prog; var; var = var->next) {
         if (var->is_function)
@@ -130,25 +141,39 @@ static void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
             if (!rel->label || !*rel->label)
                 error("invalid global relocation");
 
-            Obj *target = find_global_obj(prog, *rel->label);
-            if (!target)
-                error("undefined relocation target: %s", *rel->label);
-
             long long target_offset;
             long long value;
             int segment;
 
-            if (target->is_function) {
+            Obj *target = find_global_obj(prog, *rel->label);
+            if (!target) {
+                // Not a global object — try the persistent label map.  This
+                // handles &&label stored in a static/global initialiser, where
+                // the label lives in the text segment rather than the data
+                // segment (#573).
+                Pc label_pc = 0;
+                for (int li = 0; li < num_global_labels; li++) {
+                    if (strcmp(global_label_map[li].name, *rel->label) == 0) {
+                        label_pc = global_label_map[li].offset;
+                        break;
+                    }
+                }
+                if (!label_pc)
+                    error("undefined relocation target: %s", *rel->label);
+                segment      = 1;
+                target_offset = cc_pc_to_byte_offset(label_pc);
+                value        = target_offset + rel->addend;
+            } else if (target->is_function) {
                 if (!target->body)
                     error("unsupported relocation to undefined function: %s",
                           target->name);
-                segment = 1;
+                segment      = 1;
                 target_offset = cc_pc_to_byte_offset((Pc)target->code_addr);
-                value = target_offset + rel->addend;
+                value        = target_offset + rel->addend;
             } else {
-                segment = 0;
+                segment      = 0;
                 target_offset = target->offset;
-                value = (long long)(vm->data_seg + target_offset + rel->addend);
+                value        = (long long)(vm->data_seg + target_offset + rel->addend);
             }
 
             long long slot_offset = var->offset + rel->offset;
@@ -1327,9 +1352,25 @@ static void define_label(VirtualMachine *vm, char *name) {
     if (num_label_defs >= MAX_LABELS) {
         error("codegen: too many labels");
     }
+    Pc label_pc = vm->text_ptr + 1;
     label_defs[num_label_defs].name = name;
-    label_defs[num_label_defs].offset = vm->text_ptr + 1;
+    label_defs[num_label_defs].offset = label_pc;
     num_label_defs++;
+
+    // Also record in the persistent global map so apply_global_relocations() can
+    // resolve &&label references stored in static/global initialisers (#573).
+    if (num_global_labels >= global_labels_cap) {
+        int new_cap = global_labels_cap ? global_labels_cap * 2 : 64;
+        GlobalLabelEntry *buf = realloc(global_label_map, (size_t)new_cap * sizeof(GlobalLabelEntry));
+        if (!buf)
+            error("codegen: out of memory for global label map");
+        global_label_map = buf;
+        global_labels_cap = new_cap;
+    }
+    global_label_map[num_global_labels].name   = name;
+    global_label_map[num_global_labels].offset = label_pc;
+    num_global_labels++;
+
     // A label is a control-flow join point; the restrict cache is no longer valid.
     restrict_cache_invalidate_all(vm);
 }
@@ -6075,6 +6116,11 @@ void gen(VirtualMachine *vm, Obj *prog) {
     vm->compiler.num_func_addr_patches = 0;
     vm->compiler.num_data_relocs = 0;
 
+    // Reset the persistent global label map (populated by define_label during
+    // function codegen; consumed by apply_global_relocations for &&label
+    // static initialisers).  We reuse any previously allocated buffer.
+    num_global_labels = 0;
+
     // Initialize text pointer - text_seg[0] is reserved for main entry point
     vm->text_ptr = 0;
 
@@ -6245,6 +6291,14 @@ void gen(VirtualMachine *vm, Obj *prog) {
     hashmap_deinit(&fn_defs);
 
     apply_global_relocations(vm, prog);
+
+    // Release the persistent label map; it is no longer needed after relocs are
+    // applied.  Keeping this explicit rather than leaking it into the process
+    // lifetime, as the repo is leak-paranoid.
+    free(global_label_map);
+    global_label_map = NULL;
+    global_labels_cap = 0;
+    num_global_labels = 0;
 
     // Find entry function and store its address in text_seg[0]
     const char *entry = vm->compiler.entry_name ? vm->compiler.entry_name : "main";
