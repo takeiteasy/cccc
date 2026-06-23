@@ -269,7 +269,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --build-out-dir=PATH  Output directory for build artifacts (default: build/)\n");
     printf("\t   --build-dry-run       Print the toolchain command lines without executing them\n");
     printf("\t   --build-target=NAME   Build only the named target and its transitive dependencies\n");
-    printf("\t   --build-tool-allow=N  Allowlist of tool names runnable via RunCustom/HaveTool/PkgConfig\n");
+    printf("\t   --build-tool-allow=N  Allowlist of tool names runnable via RunCustom/HaveTool/PkgConfig/CaptureCommand\n");
     printf("\t                         Accepts comma-separated or repeated flags. Default: allow all.\n");
     printf("\t   --build-jobs=N        Compile up to N source files in parallel per target (default: 1)\n");
     printf("\t   --build-keep-going    Continue building independent targets after a failure\n");

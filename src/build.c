@@ -36,6 +36,7 @@
 #include <fnmatch.h>
 #include <glob.h>
 #include <sys/wait.h>
+#include <dirent.h>
 #endif
 
 #include "paul_shell.h"
@@ -153,6 +154,8 @@ struct Builder {
     // User args forwarded from -- on the CLI (#558)
     const char **user_args;
     int          user_args_count;
+    // CWD saved on first SetCwd call; restored at teardown (#569)
+    char *original_cwd;
 };
 
 // The active build context for the current --build run.  Set by cc_run_build
@@ -258,6 +261,19 @@ static char *default_output(const BuildTarget *t) {
         break;
     }
     return xstrdup(buf);
+}
+
+// ============================================================================
+// Shell passthrough callbacks for RunCustom (#568)
+// ============================================================================
+
+// Passthrough stdout/stderr for posix_shell_with_io.  Both callbacks must be
+// set; if either is NULL the parent drain loop uses xrealloc/xmalloc instead.
+static void build_passthru_out(const char *d, size_t n, void *u) {
+    (void)u; fwrite(d, 1, n, stdout); fflush(stdout);
+}
+static void build_passthru_err(const char *d, size_t n, void *u) {
+    (void)u; fwrite(d, 1, n, stderr);
 }
 
 // ============================================================================
@@ -642,6 +658,10 @@ static long long impl_capture_command(long long ctx, long long cmd) {
     (void)ctx;
     const char *command = (const char *)cmd;
     if (!s_ctx || !command) return 0;
+    if (!tool_allowed(s_ctx, "CaptureCommand")) {
+        fprintf(stderr, "build: CaptureCommand is not in the tool allowlist\n");
+        return 0;
+    }
 #ifdef _POSIX_VERSION
     char *out = NULL;
     char *argv[] = { "sh", "-c", (char *)command, NULL };
@@ -938,6 +958,15 @@ static long long impl_target_name(long long ctx, long long i) {
     return (long long)(intptr_t)s_ctx->factory_names[(int)i];
 }
 
+// Forward declarations for filesystem helpers defined later in this file.
+static long long impl_set_cwd(long long ctx, long long path);
+static long long impl_get_cwd(long long ctx);
+static long long impl_copy_file(long long ctx, long long src, long long dst);
+static long long impl_move_file(long long ctx, long long src, long long dst);
+static long long impl_delete_file(long long ctx, long long path);
+static long long impl_mkdir(long long ctx, long long path);
+static long long impl_delete_dir(long long ctx, long long path);
+
 void cc_load_build_runtime(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__builtin_build_executable",    (void *)impl_executable,         2, 0);
     cc_register_cfunc(vm, "__builtin_build_static_lib",    (void *)impl_static_lib,         2, 0);
@@ -993,6 +1022,14 @@ void cc_load_build_runtime(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__builtin_build_glob_files",        (void *)impl_glob_files,         2, 0);
     cc_register_cfunc(vm, "__builtin_build_read_file",         (void *)impl_read_file,          2, 0);
     cc_register_cfunc(vm, "__builtin_build_write_file",        (void *)impl_write_file,         3, 0);
+    // #569
+    cc_register_cfunc(vm, "__builtin_build_set_cwd",           (void *)impl_set_cwd,            2, 0);
+    cc_register_cfunc(vm, "__builtin_build_get_cwd",           (void *)impl_get_cwd,            1, 0);
+    cc_register_cfunc(vm, "__builtin_build_copy_file",         (void *)impl_copy_file,          3, 0);
+    cc_register_cfunc(vm, "__builtin_build_move_file",         (void *)impl_move_file,          3, 0);
+    cc_register_cfunc(vm, "__builtin_build_delete_file",       (void *)impl_delete_file,        2, 0);
+    cc_register_cfunc(vm, "__builtin_build_mkdir",             (void *)impl_mkdir,              2, 0);
+    cc_register_cfunc(vm, "__builtin_build_delete_dir",        (void *)impl_delete_dir,         2, 0);
 }
 
 // ============================================================================
@@ -1289,6 +1326,99 @@ static int copy_file(const char *src, const char *dst) {
     fclose(out);
     if (rc != 0) remove(dst);
     return rc;
+}
+
+// ============================================================================
+// Build filesystem helpers (#569)
+// ============================================================================
+
+static long long impl_set_cwd(long long ctx, long long path) {
+    (void)ctx;
+    const char *p = (const char *)path;
+    if (!s_ctx || !p) return -1;
+    // Save original CWD on first call for auto-restore at teardown.
+    if (!s_ctx->original_cwd) {
+        char buf[4096];
+        if (getcwd(buf, sizeof(buf)))
+            s_ctx->original_cwd = xstrdup(buf);
+    }
+    return chdir(p) == 0 ? 0 : -1;
+}
+
+static long long impl_get_cwd(long long ctx) {
+    (void)ctx;
+    if (!s_ctx) return 0;
+    char buf[4096];
+    if (!getcwd(buf, sizeof(buf))) return 0;
+    char *copy = strdup(buf);
+    if (!copy) return 0;
+    return (long long)(intptr_t)builder_intern(s_ctx, copy);
+}
+
+static long long impl_copy_file(long long ctx, long long src, long long dst) {
+    (void)ctx;
+    const char *s = (const char *)src, *d = (const char *)dst;
+    if (!s || !d) return -1;
+    return copy_file(s, d);
+}
+
+static long long impl_move_file(long long ctx, long long src, long long dst) {
+    (void)ctx;
+    const char *s = (const char *)src, *d = (const char *)dst;
+    if (!s || !d) return -1;
+    if (rename(s, d) == 0) return 0;
+    // Cross-device move: copy then delete.
+    if (errno == EXDEV) {
+        if (copy_file(s, d) != 0) return -1;
+        if (unlink(s) != 0) { remove(d); return -1; }
+        return 0;
+    }
+    return -1;
+}
+
+static long long impl_delete_file(long long ctx, long long path) {
+    (void)ctx;
+    const char *p = (const char *)path;
+    if (!p) return -1;
+    return unlink(p) == 0 ? 0 : -1;
+}
+
+static long long impl_mkdir(long long ctx, long long path) {
+    (void)ctx;
+    const char *p = (const char *)path;
+    if (!p) return -1;
+    return mkdir_p(p);
+}
+
+// Recursive rm-rf; does not follow symlinks out of the tree.
+static int delete_dir_recursive(const char *path) {
+    DIR *d = opendir(path);
+    if (!d) return -1;
+    struct dirent *e;
+    int rc = 0;
+    while ((e = readdir(d)) != NULL) {
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+            continue;
+        char child[4096];
+        snprintf(child, sizeof(child), "%s/%s", path, e->d_name);
+        struct stat st;
+        if (lstat(child, &st) != 0) { rc = -1; continue; }
+        if (S_ISDIR(st.st_mode)) {
+            if (delete_dir_recursive(child) != 0) rc = -1;
+        } else {
+            if (unlink(child) != 0) rc = -1;
+        }
+    }
+    closedir(d);
+    if (rc == 0 && rmdir(path) != 0) rc = -1;
+    return rc;
+}
+
+static long long impl_delete_dir(long long ctx, long long path) {
+    (void)ctx;
+    const char *p = (const char *)path;
+    if (!p) return -1;
+    return delete_dir_recursive(p);
 }
 
 // Try to restore ofile from the CAS. Returns 1 on hit, 0 on miss.
@@ -1672,7 +1802,11 @@ static int build_target(Builder *ctx, const char *cc,
             }
             for (int i = 0; i < ctx->tool_allow_count; i++)
                 shell_ctx_allowlist_cmd(sctx, ctx->tool_allow[i]);
-            int rc = shell_with_ctx(t->command, NULL, sctx);
+            // Both callbacks must be set: without them the parent drain loop
+            // falls through to ensure_buffer_capacity/xmalloc in posix_shell_with_io,
+            // which calls die() in the parent process on OOM.
+            shell_io sio = { .out_cb = build_passthru_out, .err_cb = build_passthru_err };
+            int rc = shell_with_ctx(t->command, &sio, sctx);
             shell_ctx_destroy(sctx);
             if (rc != 0) {
                 fprintf(stderr, "build: custom step '%s' failed (exit %d)\n",
@@ -2568,6 +2702,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                 free(ctx.captures);
                 free(ctx.install_prefix);
                 free(ctx.install_targets);
+                if (ctx.original_cwd) { chdir(ctx.original_cwd); free(ctx.original_cwd); }
                 free(factory_names);
                 return exit_code;
             }
@@ -2653,6 +2788,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     free(ctx.captures);
     free(ctx.install_prefix);
     free(ctx.install_targets);
+    if (ctx.original_cwd) { chdir(ctx.original_cwd); free(ctx.original_cwd); }
     free(factory_names);
     return exit_code;
 }

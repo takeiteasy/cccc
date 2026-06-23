@@ -296,6 +296,45 @@ const char *__builtin_build_read_file(Builder *ctx, const char *path);
  *            Returns 0 on success, -1 on error. */
 int __builtin_build_write_file(Builder *ctx, const char *path, const char *content);
 
+/*! @function __builtin_build_set_cwd
+ *  @abstract Change the process working directory to @c path.
+ *            The original CWD is saved on the first call and automatically
+ *            restored when the build entry returns.  Returns 0 on success, -1 on error.
+ *
+ *  @note @c cd inside a @c RunCustom shell script does **not** affect the parent
+ *        CWD (RunCustom runs in a forked child); @c SetCwd changes the real process
+ *        CWD and is visible to all subsequent build steps. */
+int __builtin_build_set_cwd(Builder *ctx, const char *path);
+
+/*! @function __builtin_build_get_cwd
+ *  @abstract Return the current process working directory as an interned string,
+ *            or @c NULL on error.  The pointer is valid until the build entry returns. */
+const char *__builtin_build_get_cwd(Builder *ctx);
+
+/*! @function __builtin_build_copy_file
+ *  @abstract Copy file @c src to @c dst.  Returns 0 on success, -1 on error. */
+int __builtin_build_copy_file(Builder *ctx, const char *src, const char *dst);
+
+/*! @function __builtin_build_move_file
+ *  @abstract Move (rename) file @c src to @c dst.  Falls back to copy + delete
+ *            on cross-device moves.  Returns 0 on success, -1 on error. */
+int __builtin_build_move_file(Builder *ctx, const char *src, const char *dst);
+
+/*! @function __builtin_build_delete_file
+ *  @abstract Delete the file at @c path (@c unlink).  Returns 0 on success, -1 on error. */
+int __builtin_build_delete_file(Builder *ctx, const char *path);
+
+/*! @function __builtin_build_mkdir
+ *  @abstract Create @c path and all intermediate directories (@c mkdir @c -p semantics).
+ *            Returns 0 on success, -1 on error. */
+int __builtin_build_mkdir(Builder *ctx, const char *path);
+
+/*! @function __builtin_build_delete_dir
+ *  @abstract Recursively delete @c path and all contents (@c rm @c -rf semantics).
+ *            Does not follow symlinks out of the tree.
+ *            Returns 0 on success, -1 on error. */
+int __builtin_build_delete_dir(Builder *ctx, const char *path);
+
 /*! @function __builtin_build_run
  *  @abstract Build @c t and its transitive dependencies. Returns 0 on success. */
 int __builtin_build_run(Builder *ctx, BuildTarget *t);
@@ -343,6 +382,14 @@ int __builtin_build_run_default(Builder *ctx);
 #define GlobFiles(ctx, pattern)     __builtin_build_glob_files(ctx, pattern)
 #define ReadFile(ctx, path)         __builtin_build_read_file(ctx, path)
 #define WriteFile(ctx, path, c)     __builtin_build_write_file(ctx, path, c)
+
+#define SetCwd(ctx, path)           __builtin_build_set_cwd(ctx, path)
+#define GetCwd(ctx)                 __builtin_build_get_cwd(ctx)
+#define CopyFile(ctx, src, dst)     __builtin_build_copy_file(ctx, src, dst)
+#define MoveFile(ctx, src, dst)     __builtin_build_move_file(ctx, src, dst)
+#define DeleteFile(ctx, path)       __builtin_build_delete_file(ctx, path)
+#define MkDir(ctx, path)            __builtin_build_mkdir(ctx, path)
+#define DeleteDir(ctx, path)        __builtin_build_delete_dir(ctx, path)
 
 #define HaveTool(ctx, name)     __builtin_build_have_tool(ctx, name)
 #define FindTool(ctx, name)     __builtin_build_find_tool(ctx, name)

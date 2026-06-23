@@ -91,7 +91,7 @@ cccc --build build.c --build-cache=~/.cache/cccc  # incremental builds with expl
 | `--build-out-dir=PATH` | `build/` | Output directory for artifacts. |
 | `--build-dry-run` | off | Topo-sort and print the resolved command lines without executing them. |
 | `--build-target=NAME` | (all) | Build only the named registered target and its transitive dependencies. Pruning happens at `Build*` call time — the full graph is declared first, then the filter is applied. |
-| `--build-tool-allow=NAME[,NAME...]` | (allow all) | Comma-separated allowlist of tool names that may be probed via `HaveTool` / `PkgConfig` or executed via `RunCustom`. Repeated flags accumulate. `cc`/`ar`/`ld` are always invoked directly by the runner and are not subject to this list. |
+| `--build-tool-allow=NAME[,NAME...]` | (allow all) | Comma-separated allowlist of tool names that may be probed via `HaveTool` / `PkgConfig`, executed via `RunCustom`, or called via `CaptureCommand`. Repeated flags accumulate. `cc`/`ar`/`ld` are always invoked directly by the runner and are not subject to this list. |
 | `--build-jobs=N` | `1` | Controls parallelism at two levels (POSIX only; non-POSIX always serial). **Target-level** (N>1, multiple simultaneously-ready targets): forks up to N target children in parallel, each compiling its sources serially. **Source-level** (N>1, only one target ready at a time): compiles up to N `cc -c` invocations within that target in parallel. The `-j` budget covers both modes — at most N compiler processes run at once. |
 | `--build-keep-going` | off | Continue building independent targets when one fails, rather than stopping at the first error. Failed target names are listed in the final summary. Targets whose dependency chain includes a failed target are skipped (not attempted) and listed as `skipped:` in the summary. |
 | `--build-quiet` | off | Suppress per-step `[N/M] cc ...` lines. Errors and the final summary are still printed. Overridden by `--build-verbose`. |
@@ -438,6 +438,13 @@ int          DirExists(Builder *ctx, const char *path);      // 1 if path exists
 const char **GlobFiles(Builder *ctx, const char *pattern);   // NULL-terminated array of matched paths (#561)
 const char  *ReadFile(Builder *ctx, const char *path);       // file contents as string (≤4 MB) or NULL (#561)
 int          WriteFile(Builder *ctx, const char *path, const char *content); // write string to file (#561)
+int          SetCwd(Builder *ctx, const char *path);         // chdir; saves original CWD for auto-restore (#569)
+const char  *GetCwd(Builder *ctx);                           // current working directory (#569)
+int          CopyFile(Builder *ctx, const char *src, const char *dst); // copy file (#569)
+int          MoveFile(Builder *ctx, const char *src, const char *dst); // rename/move file, EXDEV fallback (#569)
+int          DeleteFile(Builder *ctx, const char *path);     // delete file (#569)
+int          MkDir(Builder *ctx, const char *path);          // mkdir -p (#569)
+int          DeleteDir(Builder *ctx, const char *path);      // rm -rf, no symlink follow (#569)
 
 // Toolchain probing (#543, #559)
 int          HaveTool(Builder *ctx, const char *name);       // 1 if tool in PATH + allowed
@@ -585,6 +592,53 @@ WriteFile(ctx, "build/gen/config.h",
     "#define CCCC_VERSION \"1.0\"\n");
 ```
 
+### Working directory and file operations (#569)
+
+**`SetCwd(ctx, path)`** changes the process working directory to `path`. The
+original CWD is saved on the first call and automatically restored when the build
+entry returns, so accidental CWD leakage between targets is prevented. Returns 0
+on success, -1 on error.
+
+> **Note:** `cd` inside a `RunCustom` shell script does **not** affect the parent
+> process CWD (RunCustom runs in a forked child). `SetCwd` changes the real
+> process CWD and is visible to all subsequent build steps.
+
+```c
+const char *saved = GetCwd(ctx);
+SetCwd(ctx, "third_party/zlib");
+// ... relative path operations ...
+SetCwd(ctx, saved);  // or rely on auto-restore at entry exit
+```
+
+**`GetCwd(ctx)`** returns the current process working directory as an interned
+string valid until the build entry returns, or `NULL` on error.
+
+**`CopyFile(ctx, src, dst)`** copies the file at `src` to `dst`. Returns 0 on
+success, -1 on error.
+
+**`MoveFile(ctx, src, dst)`** renames/moves `src` to `dst`. Automatically falls
+back to copy + delete on cross-device moves (`EXDEV`). Returns 0 on success,
+-1 on error.
+
+**`DeleteFile(ctx, path)`** deletes the file at `path` (`unlink`). Returns 0 on
+success, -1 on error.
+
+**`MkDir(ctx, path)`** creates `path` and all intermediate directories
+(`mkdir -p` semantics). Returns 0 on success, -1 on error.
+
+**`DeleteDir(ctx, path)`** recursively removes `path` and all its contents
+(`rm -rf` semantics). Does not follow symlinks out of the tree. Returns 0 on
+success, -1 on error.
+
+```c
+// Example: generate a build artifact and clean up on error
+MkDir(ctx, "build/gen");
+if (WriteFile(ctx, "build/gen/config.h", contents) != 0) {
+    DeleteDir(ctx, "build/gen");
+    return 1;
+}
+```
+
 ### Toolchain probing (#543, #559)
 
 **`HaveTool(ctx, name)`** returns 1 when `name` is executable (found in `$PATH`)
@@ -622,6 +676,9 @@ if (strcmp(BuildHost(ctx), "darwin") == 0) {
 
 All tool probing functions are subject to `--build-tool-allow`: if an allowlist
 is set, the tool name must appear in it or the probe/spawn is refused.
+`CaptureCommand` is also gated by the allowlist — include the literal string
+`"CaptureCommand"` to allow it when an allowlist is active. `cc`/`ar`/`ld`
+invocations by the host runner bypass the allowlist entirely.
 
 ### Build options (#559)
 

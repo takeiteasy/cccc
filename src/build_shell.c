@@ -200,10 +200,9 @@ static void _perror(const char *msg) {
     eprintf("shell: %s: %s\n", msg, strerror(errno));
 }
 
-/* v1 limitation: die() terminates the entire process on OOM or failed open.
- * This means a build step that triggers one of these failures will kill the
- * whole compiler rather than cleanly failing that step.  A future version
- * should use longjmp or an error-return path instead.  TODO: file ticket. */
+/* die() is only called from forked child processes (shell_with_io forks before
+ * invoking the shell); xmalloc/xrealloc failures here exit the child, not the
+ * parent cccc process. */
 static void die(const char *msg) {
     if (errno)
         _perror(msg);
@@ -608,8 +607,7 @@ static void command_argv_from_ast(shell_command_t *cmd, shell_ast_t *ast) {
 }
 
 static void builtin_exit(int argc, char **argv) {
-    (void)argc; (void)argv;
-    exit(0);
+    exit(argc >= 2 ? atoi(argv[1]) : 0);
 }
 
 static void builtin_cd(int argc, char **argv) {
