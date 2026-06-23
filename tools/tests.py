@@ -37,12 +37,12 @@ C4_SKIP_TESTS = {
 LEAKS_SKIP_TESTS = {
     "test_posix_sys_wait.c",
     "test_exit_code.c",
-    # These tests use fork() for parallel target dispatch (--build-jobs=N with
-    # multiple independent targets). leaks --atExit is not fork-safe: the
-    # forked child inherits DYLD_INSERT_LIBRARIES with libLeaksAtExit.dylib
-    # loaded; if the library fires in the child (which holds a copy of the
-    # parent's entire heap), it produces false-positive leak reports.
-    # Tracked in ticket for a proper fork-safety fix.
+    # leaks -atExit is not fork-safe: libLeaksAtExit.dylib installs a dylib
+    # finalizer that fires even on _exit() and sends SIGSTOP to the child for
+    # analysis.  The parent's waitpid(-1,0) then blocks forever because the
+    # child never actually exits.  The proper fix requires WUNTRACED+SIGCONT
+    # in every waitpid loop and cooperation from the leak library; not worth
+    # the complexity for tests that are otherwise clean.  Tracked: #574.
     "test_build_parallel_targets.c",
     "test_build_parallel_keep_going.c",
 }
