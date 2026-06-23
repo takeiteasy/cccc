@@ -1038,6 +1038,7 @@ struct Obj {
     bool is_function;
     bool is_definition;
     bool is_static;
+    bool is_builtin_alloca; // the builtin alloca() used to lower VLAs (#588)
     bool is_constexpr;
     bool is_implicit; // synthesized by an implicit function declaration
     bool is_macro_generated; // true if created by a #pragma macro via $function/$global_var

@@ -4182,7 +4182,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
         // Check if this is a builtin alloca call (used for VLAs)
         if (node->lhs->kind == ND_VAR &&
-            node->lhs->var == vm->compiler.builtin_alloca) {
+            node->lhs->var->is_builtin_alloca) {
             // Special handling for alloca: uses MALC opcode
             if (!node->args) {
                 error_tok(vm, node->tok, "alloca requires a size argument");

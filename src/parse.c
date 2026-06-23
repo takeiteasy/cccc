@@ -8987,6 +8987,11 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     ty->params = copy_type(vm, ty_int);
     vm->compiler.builtin_alloca = new_gvar(vm, "alloca", 6, ty);
     vm->compiler.builtin_alloca->is_definition = false;
+    // Mark with a stable flag: codegen identifies VLA-lowered alloca calls by
+    // this flag rather than pointer identity, because declare_builtin_functions
+    // re-runs on every parse() (incl. the macro-expansion re-parse) and would
+    // otherwise leave AST nodes pointing at a stale builtin_alloca Obj (#588).
+    vm->compiler.builtin_alloca->is_builtin_alloca = true;
 
     // strlen(s) -> long  (private stub; not in global scope so it doesn't conflict
     // with user redeclarations like `int strcmp(const char *s)`)
