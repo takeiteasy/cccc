@@ -23,17 +23,17 @@ Dims dims = { compute_width(), 720 };
 [[cccc::comptime]]
 Data data = { compute_value() };
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_width(void) {
     return GetComptimeMember("dims", "width");
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_height(void) {
     return GetComptimeMember("dims", "height");
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_value(void) {
     return GetComptimeMember("data", "i");
 }

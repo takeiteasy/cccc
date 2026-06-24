@@ -4,12 +4,12 @@
 constexpr int LIMIT = 100;
 constexpr int NEG   = -7;
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_limit(void) {
     return GetConstexprValue("LIMIT");
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_neg(void) {
     return GetConstexprValue("NEG");
 }

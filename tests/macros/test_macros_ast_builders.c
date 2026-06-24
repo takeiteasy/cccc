@@ -4,7 +4,7 @@
 // Macro that returns an assignment expression (target = value).
 // Used as: int x; int y = set_var(x, 99);
 // After expansion: int y = (x = 99);  => y == 99, x == 99
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *set_var(Node *target, Node *value) {
     VirtualMachine *vm = __builtin_get_vm();
     return __builtin_ast_assign(vm, target, value);
@@ -14,7 +14,7 @@ Node *set_var(Node *target, Node *value) {
 // Macro that returns obj.field (struct member access).
 struct Point { int x; int y; };
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_x(Node *pt) {
     VirtualMachine *vm = __builtin_get_vm();
     return __builtin_ast_member(vm, pt, "x");
@@ -25,7 +25,7 @@ Node *get_x(Node *pt) {
 int triple(int n) { return n * 3; }
 
 // Macro that generates: triple(arg)
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *call_triple(Node *arg) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *callee = __builtin_ast_var_ref(vm, "triple");

@@ -3,7 +3,7 @@
 @define CT_SEEN 1
 @endif
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *answer(void) {
 #if CT_SEEN
     return MakeIntLiteral(CT_VALUE);

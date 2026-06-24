@@ -5,7 +5,7 @@
 int answer = 42;
 #pragma cccc comptime end
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_answer(void) {
     return GetComptimeVar("answer");
 }

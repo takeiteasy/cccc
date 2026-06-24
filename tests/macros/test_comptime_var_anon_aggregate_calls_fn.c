@@ -13,17 +13,17 @@ struct { int width; int height; } dims = { compute_width(), 768 };
 [[cccc::comptime]]
 union { int i; unsigned char bytes[4]; } data = { compute_value() };
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_width(void) {
     return GetComptimeMember("dims", "width");
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_height(void) {
     return GetComptimeMember("dims", "height");
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_value(void) {
     return GetComptimeMember("data", "i");
 }

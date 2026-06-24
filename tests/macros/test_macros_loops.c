@@ -19,7 +19,7 @@ static int contains(const char *hay, const char *needle) {
 }
 
 // Macro: builds a while node and returns its gen-dump string.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *while_gen_str(Node *cond, Node *body) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *w = __builtin_ast_while(vm, cond, body);
@@ -28,7 +28,7 @@ Node *while_gen_str(Node *cond, Node *body) {
 }
 
 // Macro: builds a for node and returns its gen-dump string.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *for_gen_str(Node *init, Node *cond, Node *inc, Node *body) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *f = __builtin_ast_for(vm, init, cond, inc, body);
@@ -37,7 +37,7 @@ Node *for_gen_str(Node *init, Node *cond, Node *inc, Node *body) {
 }
 
 // Macro: builds a do-while node and returns its gen-dump string.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *do_while_gen_str(Node *body, Node *cond) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *d = __builtin_ast_do_while(vm, body, cond);

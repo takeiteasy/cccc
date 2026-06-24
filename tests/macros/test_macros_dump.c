@@ -20,7 +20,7 @@ static int contains(const char *hay, const char *needle) {
 
 // Macro: takes an int literal node, dumps it as tree and as gen,
 // returns the original node (the dumps are the side effect we inspect).
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *dump_and_pass(Node *n) {
     VirtualMachine *vm = __builtin_get_vm();
 
@@ -34,7 +34,7 @@ Node *dump_and_pass(Node *n) {
 }
 
 // Macro: returns the tree dump string of the argument node.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *tree_string(Node *n) {
     VirtualMachine *vm = __builtin_get_vm();
     const char *s = __builtin_dump_tree_to_string(vm, n);
@@ -43,7 +43,7 @@ Node *tree_string(Node *n) {
 }
 
 // Macro: returns the ast-gen dump string of the argument node.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *gen_string(Node *n) {
     VirtualMachine *vm = __builtin_get_vm();
     const char *s = __builtin_dump_ast_gen_to_string(vm, n);

@@ -2166,7 +2166,7 @@ Node *__builtin_ast_deserialize(VirtualMachine *vm, Type *ty, Node *buf);
 // @serialize struct Foo {...}; publishes
 //   int Foo_serialize(struct Foo *self, void *buf);
 // which copies *self into buf via Serialize and returns sizeof(struct Foo).
-@macro(attribute("serialize"))
+@comptime(attribute("serialize"))
 void __builtin_attr_serialize(AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@serialize expects a type (struct/union) target");
@@ -2196,7 +2196,7 @@ void __builtin_attr_serialize(AttrTarget *target) {
 // @deserialize struct Foo {...}; publishes
 //   struct Foo Foo_deserialize(void *buf);
 // which reconstructs a struct Foo from buf via Deserialize.
-@macro(attribute("deserialize"))
+@comptime(attribute("deserialize"))
 void __builtin_attr_deserialize(AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@deserialize expects a type (struct/union) target");
@@ -2223,7 +2223,7 @@ void __builtin_attr_deserialize(AttrTarget *target) {
 //   const char *Color_to_string(enum Color v);
 // which switches over v and returns the matching constant's name, or "" if
 // no constant matches.
-@macro(attribute("enum_to_string"))
+@comptime(attribute("enum_to_string"))
 void __builtin_attr_enum_to_string(AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@enum_to_string expects a type (enum) target");
@@ -2253,7 +2253,7 @@ void __builtin_attr_enum_to_string(AttrTarget *target) {
 //   enum Color Color_from_string(const char *s);
 // which compares s against each constant's name and returns the matching
 // value, or -1 if no constant matches.
-@macro(attribute("enum_from_string"))
+@comptime(attribute("enum_from_string"))
 void __builtin_attr_enum_from_string(AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@enum_from_string expects a type (enum) target");
@@ -2286,7 +2286,7 @@ void __builtin_attr_enum_from_string(AttrTarget *target) {
 
 // __builtin_generate_getters(ty): for each member of struct/union `ty`,
 // publishes `<MemberType> get_<field>(<ty> *self) { return self->field; }`.
-@macro
+@comptime
 void __builtin_generate_getters(Type *ty) {
     ForeachMember(ty, m, {
         const char *field = MemberName(m);
@@ -2308,7 +2308,7 @@ void __builtin_generate_getters(Type *ty) {
 
 // __builtin_generate_setters(ty): for each member of struct/union `ty`,
 // publishes `void set_<field>(<ty> *self, <MemberType> value) { self->field = value; }`.
-@macro
+@comptime
 void __builtin_generate_setters(Type *ty) {
     ForeachMember(ty, m, {
         const char *field = MemberName(m);
@@ -2333,7 +2333,7 @@ void __builtin_generate_setters(Type *ty) {
 // __builtin_generate_constructor(ty, tname): publishes
 // `<ty> <tname>_create(<member1>, <member2>, ...) { return (ty){ .member1 =
 // member1, ... }; }` with one parameter per member of `ty`.
-@macro
+@comptime
 void __builtin_generate_constructor(Type *ty, const char *tname) {
     char gname[128];
     strcpy(gname, tname);
@@ -2361,7 +2361,7 @@ void __builtin_generate_constructor(Type *ty, const char *tname) {
 
 // @generate_getters struct Foo {...}; publishes get_<field>(struct Foo *self)
 // for each member, returning self->field.
-@macro(attribute("generate_getters"))
+@comptime(attribute("generate_getters"))
 void __builtin_attr_generate_getters(AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@generate_getters expects a type (struct/union) target");
@@ -2375,7 +2375,7 @@ void __builtin_attr_generate_getters(AttrTarget *target) {
 
 // @generate_setters struct Foo {...}; publishes set_<field>(struct Foo *self,
 // <FieldType> value) for each member, assigning self->field = value.
-@macro(attribute("generate_setters"))
+@comptime(attribute("generate_setters"))
 void __builtin_attr_generate_setters(AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@generate_setters expects a type (struct/union) target");
@@ -2390,7 +2390,7 @@ void __builtin_attr_generate_setters(AttrTarget *target) {
 // @generate_constructor struct Foo {...}; publishes
 //   struct Foo Foo_create(<member1>, <member2>, ...);
 // returning a struct Foo initialized from the given member values.
-@macro(attribute("generate_constructor"))
+@comptime(attribute("generate_constructor"))
 void __builtin_attr_generate_constructor(AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@generate_constructor expects a type (struct/union) target");

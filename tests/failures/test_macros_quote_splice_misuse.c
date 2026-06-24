@@ -2,7 +2,7 @@
 // Test ticket #172: using $@N as an expression operand (outside a statement
 // list) must produce a compile-time error.
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *bad_splice(Node *x) {
     VirtualMachine *vm = __builtin_get_vm();
     // $@1 is a list splice — it cannot be used as an expression operand.

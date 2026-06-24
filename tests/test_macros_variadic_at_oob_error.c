@@ -1,7 +1,7 @@
 // EXPECT_COMPILE_ERROR
 // Ticket #284: AST vararg access is bounds checked.
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *bad_at(...) {
     return VarargAt(VarargCount());
 }

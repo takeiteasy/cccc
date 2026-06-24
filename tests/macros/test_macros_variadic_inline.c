@@ -1,6 +1,6 @@
-// Test ticket #284: variadic inline macros receive an unbounded AST tail.
+// Test ticket #284: variadic comptime macros receive an unbounded AST tail.
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *sum_nodes(...) {
     int count = VarargCount();
     if (count == 0)
@@ -12,7 +12,7 @@ Node *sum_nodes(...) {
     return acc;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *add_tail(Node *base, ...) {
     Node *acc = base;
     for (int i = 0; i < VarargCount(); i = i + 1)

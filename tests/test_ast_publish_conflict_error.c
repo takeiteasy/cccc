@@ -2,7 +2,7 @@
 // CCCC_EXPECT_STDERR: <cccc macro: publish conflict>:1: publish conflict
 // CCCC_EXPECT_STDERR: error: conflicting declaration for generated global variable 'conflict_name'
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *publish_conflicting_global(void) {
     Obj *g = GlobalVar("conflict_name", GetType("int"));
     PublishNodeAt(g, SyntheticToken("publish conflict"));

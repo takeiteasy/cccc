@@ -3,7 +3,7 @@
 
 typedef struct { int x; int y; } Point;
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *reflect_type_kind(void) {
     Type *ty = $Point;
     if (GetTypeKind(ty) != TK_STRUCT)

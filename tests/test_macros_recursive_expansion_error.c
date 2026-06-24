@@ -1,7 +1,7 @@
 // EXPECT_COMPILE_ERROR
 // Recursive macro expansion should report a compiler error, not crash.
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *recurse_forever(void) {
     return Quote("recurse_forever()");
 }

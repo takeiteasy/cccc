@@ -2,7 +2,7 @@
 // A macro that generates a simple function at compile time
 
 // Pragma macro that generates a function returning a constant
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *generate_const_func(Node *name_node, Node *value_node) {
     VirtualMachine *vm = __builtin_get_vm();
 

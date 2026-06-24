@@ -2,7 +2,7 @@
 // Test ticket #78: __builtin_macro_error_at emits a source-located error and fails compilation.
 
 // Macro that always errors with a located message.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *always_error(Node *n) {
     VirtualMachine *vm = __builtin_get_vm();
     __builtin_macro_error_at(vm, n, "always_error: this argument is not allowed");

@@ -5,12 +5,12 @@ int inc_int(int n) {
     return n + 1;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *make_answer(void) {
     return MakeIntLiteral(inc_int(41));
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *add_later_helper(Node *x) {
     return MakeBinary(NK_ADD, x, MakeIntLiteral(triple_later(2)));
 }
@@ -34,7 +34,7 @@ int mutual_odd(int n) {
     return 1 + mutual_even(n - 1);
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *mutual_add_four(Node *x) {
     return MakeBinary(NK_ADD, x,
                           MakeIntLiteral(mutual_even(4)));

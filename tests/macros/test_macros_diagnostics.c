@@ -5,7 +5,7 @@
 
 // Macro that emits a warning at the argument's source location,
 // then returns the argument unchanged.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *warn_if_zero(Node *n) {
     VirtualMachine *vm = __builtin_get_vm();
     // Always emit a warning — we're testing the mechanism, not the logic

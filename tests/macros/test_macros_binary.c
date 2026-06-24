@@ -1,7 +1,7 @@
 // Test pragma macro with binary expression generation
 
 // Define a pragma macro that generates: (a + b) * 2
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *double_sum(Node *a, Node *b) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *sum = __builtin_ast_binary(vm, NK_ADD, a, b);

@@ -13,19 +13,17 @@ everywhere:
 
 ```c
 // All forms are identical:
-[[cccc::comptime]]       int helper(int n) { return n * 2; }
+[[cccc::comptime]]        int helper(int n) { return n * 2; }
 __attribute__((comptime)) int helper(int n) { return n * 2; }
-@comptime                int helper(int n) { return n * 2; }
-__comptime               int helper(int n) { return n * 2; }
+@comptime                 int helper(int n) { return n * 2; }
+__comptime                int helper(int n) { return n * 2; }
 
-// Inline variant (usable in expression position):
-[[cccc::comptime(inline)]]  Node *make_val(void) { return MakeIntLiteral(42); }
-@comptime(inline)           Node *make_val(void) { return MakeIntLiteral(42); }
-__comptime__(inline)        Node *make_val(void) { return MakeIntLiteral(42); }
+// Expression-position (call-site) macro — returns Node*:
+[[cccc::comptime]]  Node *make_val(void) { return MakeIntLiteral(42); }
+@comptime           Node *make_val(void) { return MakeIntLiteral(42); }
 ```
 
-The `@macro(inline)`, `__macro`, and `__macro__` spellings also work for the
-deprecated `[[cccc::macro]]` alias.
+The deprecated `[[cccc::macro]]` alias is no longer accepted. Use `[[cccc::comptime]]`.
 
 The macro API is private to macro compilation. CCCC embeds its own `cccc/reflection.h`
 and injects it automatically while macro and comptime helper functions are
@@ -68,8 +66,8 @@ CCCC supports two macro execution forms:
 | Form | Source shape | When it runs | What the return value means |
 |------|--------------|--------------|-----------------------------|
 | Global generation | `[[cccc::comptime]] void gen(char *a1, ...)` called at file scope | Before the main parse | `NULL` / `void` return means side-effects only. An `ND_BLOCK` return splices its body declarations directly into file scope (see [Block return](#block-return-from-file-scope-macros)). Args are stringified into `char *` parameters. |
-| Call-site expansion | `[[cccc::comptime(inline)]] Node *gen(Node *a1, ...)` called inside code | During macro expansion after parsing | Replaces the call expression or statement |
-| Custom attribute | `@macro(attribute("name")) void gen(AttrTarget *target, ...)` used by `@name` on a file-scope declaration | During the main parse, after the target declaration is built | Return value is ignored; generated declarations are side effects. Attribute arguments are passed as `Node *` expression nodes. |
+| Call-site expansion | `[[cccc::comptime]] Node *gen(Node *a1, ...)` called inside code | During macro expansion after parsing | Replaces the call expression or statement |
+| Custom attribute | `@comptime(attribute("name")) void gen(AttrTarget *target, ...)` used by `@name` on a file-scope declaration | During the main parse, after the target declaration is built | Return value is ignored; generated declarations are side effects. Attribute arguments are passed as `Node *` expression nodes. |
 
 ### Pre-parse macro declaration context
 
@@ -133,7 +131,7 @@ in one body affects the others.
 Comptime macros can register declaration attributes for file-scope declarations:
 
 ```c
-@macro(attribute("serialize"))
+@comptime(attribute("serialize"))
 void define_serializer(AttrTarget *target) {
     Type *ty = $ATTR_TARGET_TYPE(target);
     const char *name = AttrTargetName(target);
@@ -155,7 +153,7 @@ after that receive attribute arguments as `Node *` expression nodes, so
 `@answer(123)` calls a handler shaped like:
 
 ```c
-@macro(attribute("answer"))
+@comptime(attribute("answer"))
 void answer_attr(AttrTarget *target, Node *value) { ... }
 ```
 
@@ -390,7 +388,7 @@ Two equivalent spellings are accepted:
 
 ```c
 // Attribute argument form
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *double_it(Node *value) {
     return MakeBinary(NK_ADD, value, value);
 }
@@ -403,7 +401,7 @@ inline Node *double_it(Node *value) {
 ```
 
 ```c
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *double_it(Node *value) {
     return MakeBinary(NK_ADD, value, value);
 }
@@ -423,7 +421,7 @@ through `VarargCount()`, `VarargAt(i)`, and
 `VarargAsArray()`. A macro with only `...` is valid:
 
 ```c
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *sum_all(...) {
     Node *acc = VarargAt(0);
     for (int i = 1; i < VarargCount(); i++)
@@ -438,7 +436,7 @@ Use `VarargAsArray()` when forwarding the tail to an array-form builder
 such as `MakeFuncCall(callee, args, n)`:
 
 ```c
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *forward_call(Node *fn_node, ...) {
     return MakeFuncCall(fn_node,
                     VarargAsArray(),
@@ -573,7 +571,7 @@ Inside a comptime block:
 - `#pragma cccc emit begin...end` opens a runtime escape sub-block; multiple sub-blocks are allowed.
 - Function definitions are treated as `[[cccc::comptime]]`.
 - Variable and struct declarations are treated as comptime variables.
-- Existing `[[cccc::comptime(inline)]]` annotations are respected; explicit attributes always take precedence.
+- Existing `[[cccc::comptime]]` annotations are respected; explicit attributes always take precedence.
 
 Nesting rules: alternation between comptime and emit contexts is allowed. A
 second `#pragma cccc comptime begin` while a comptime context is active, or a
@@ -719,7 +717,7 @@ rather than a literal copy:
 [[cccc::comptime]]
 int threshold = 42;
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *threshold_ptr(void) {
     return GetComptimePtr("threshold");
 }
@@ -768,7 +766,7 @@ no variable references in the initializer.
 constexpr int BUF_SIZE = 256;
 constexpr double SCALE  = 1.5;
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *make_buf_size(void) {
     return GetConstexprValue("BUF_SIZE");
 }
@@ -793,7 +791,7 @@ comptime function. `${...}` evaluates a comptime expression that returns a
 `Node *` and splices that node into the template:
 
 ```c
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *add_one(Node *x) {
     return `return ${x} + 1;`;
 }
@@ -809,7 +807,7 @@ backtick; all other backslashes are preserved. Interpolation expressions use
 normal C parsing and preprocessing, including commas and nested braces:
 
 ```c
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *choose_second(Node *a, Node *b) {
     return `return ${ ((Node *[]){ a, b })[1] };`;
 }
@@ -918,7 +916,7 @@ int sum_ints(int count, ...) {
     return s;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *call_sum3(Node *a, Node *b, Node *c) {
     Node *chain = NodeList((Node*[]){ a, b, c }, 3);
     return Quote("sum_ints(3, $@1)", chain); // → sum_ints(3, a, b, c)
@@ -931,7 +929,7 @@ of arguments after expansion. Parameter casts are applied post-expansion:
 ```c
 int add3(int a, int b, int c) { return a + b + c; }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *call_add3(Node *a, Node *b, Node *c) {
     Node *chain = NodeList((Node*[]){ a, b, c }, 3);
     return Quote("add3($@1)", chain); // → add3(a, b, c)
@@ -956,7 +954,7 @@ a compile-time error.
 chain as positional initializers for a struct or array:
 
 ```c
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *make_point(Node *px, Node *py) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = NodeList((Node*[]){ px, py }, 2);
@@ -970,7 +968,7 @@ struct Point p = make_point(10, 32); // p.x == 10, p.y == 32
 Array compound literals are also supported:
 
 ```c
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *make_arr3(Node *a, Node *b, Node *c) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = NodeList((Node*[]){ a, b, c }, 3);
@@ -1050,13 +1048,13 @@ placeholders inside `Quote` templates (`$1`, `$$`, `$@`) are also distinct.
 typedef struct { int x; int y; } Point;
 int counter = 0;
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *reflect_type_kind(void) {
     Type *ty = $Point;                       // Type* for Point
     return MakeIntLiteral(GetTypeKind(ty));  // TK_STRUCT
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *reflect_var(void) {
     Obj *obj = $counter;                     // Obj* for counter
     return MakeIntLiteral(obj ? 1 : 0);
@@ -1067,7 +1065,7 @@ Node *reflect_var(void) {
 macro, avoiding an intermediate variable:
 
 ```c
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *describe(Type *ty) {
     return MakeIntLiteral(GetTypeKind(ty));
 }
@@ -1250,7 +1248,7 @@ Positional compound literal. Elements are assigned left-to-right to struct
 members or array elements. All fields/elements must be provided.
 
 ```c
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *make_point(Node *px, Node *py) {
     Type *pt = GetType("Point");
     Node *lit = CompoundLiteral(pt, px, py);
@@ -1264,7 +1262,7 @@ Array compound literal with explicit element type. The array length is inferred
 from the argument count.
 
 ```c
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *second_of_three(Node *a, Node *b, Node *c) {
     Type *int_ty = GetType("int");
     Node *arr = InitArray(int_ty, a, b, c);
@@ -1279,7 +1277,7 @@ members; `values` is the corresponding `Node **` array; `n` is the count.
 Unspecified members are zero-initialized.
 
 ```c
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *partial_point(void) {
     Type *pt = GetType("Point");
     const char *flds[] = {"x"};
@@ -1379,11 +1377,11 @@ Returns `-1` if any field name in the chain is not found.
 Build a block that flat-copies a struct into/out of a raw byte buffer:
 
 ```c
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *ser(Node *val, Node *buf) {
     return Serialize(GetType("Point"), val, buf);
 }
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *deser(Node *buf) {
     return Deserialize(GetType("Point"), buf);
 }
@@ -1415,7 +1413,7 @@ Build a switch or if-chain that converts between enum values and their name
 strings:
 
 ```c
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *color_name(Node *v) {
     return EnumToString(GetType("Color"), v);
 }
@@ -1580,10 +1578,10 @@ recurse into child nodes — only the outermost call is expanded. The VM's
 `macro_recursion_limit` applies; exceeding it is a compile error.
 
 ```c
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *make_answer(void) { return MakeIntLiteral(42); }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *wrap_answer(void) { return Quote("make_answer()"); }
 
 [[cccc::comptime]]
@@ -1796,8 +1794,6 @@ Both C23 attribute syntax and GNU attribute syntax are accepted everywhere:
 
 | C23 form | GNU form |
 |----------|----------|
-| `[[cccc::comptime]]` | `__attribute__((comptime))` |
-| `[[cccc::comptime(inline)]]` | `__attribute__((macro(inline)))` |
 | `[[cccc::comptime]]` | `__attribute__((comptime))` |
 
 The canonical form used in this document and in CCCC examples is `[[cccc::comptime]]`.

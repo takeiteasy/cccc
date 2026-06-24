@@ -10,12 +10,12 @@ int a = compute_base() * 3;   // a == 21
 [[cccc::comptime]]
 int b = a * 2;                 // b == 42  (references a)
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_a(void) {
     return MakeIntLiteral(GetComptimeInt("a"));
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_b(void) {
     return MakeIntLiteral(GetComptimeInt("b"));
 }

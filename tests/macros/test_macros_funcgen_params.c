@@ -2,7 +2,7 @@
 // Forward declare the function we'll generate
 int add_numbers(int a, int b);
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *gen_add_func(void) {
     VirtualMachine *vm = __builtin_get_vm();
 

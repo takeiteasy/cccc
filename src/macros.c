@@ -1956,12 +1956,6 @@ void cc_execute_top_level_macro(VirtualMachine *vm, char *name, Token *tok,
         return;
     }
 
-    if (pm->is_inline) {
-        error_tok(vm, tok, "inline macro '%s' cannot be called explicitly",
-                  name);
-        return;
-    }
-
     init_vm_segments_for_macros(vm);
     compile_all_macros(vm);
 
@@ -1999,6 +1993,18 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth) {
             error_tok(vm, node->tok,
                       "void macro '%s' cannot be used as an expression; "
                       "it only emits definitions",
+                      node->macro_name);
+            return node;
+        }
+
+        // Expression-position macros must return Node* — a plain C return type
+        // (int, struct, etc.) cannot be spliced into the AST.
+        if (pm->compiled_fn && pm->compiled_fn->ty && pm->compiled_fn->ty->return_ty &&
+            pm->compiled_fn->ty->return_ty->kind != TY_PTR) {
+            error_tok(vm, node->tok,
+                      "comptime function '%s' returns a non-pointer type and cannot "
+                      "be used in expression position; expression-position comptime "
+                      "functions must return Node*",
                       node->macro_name);
             return node;
         }
@@ -2350,13 +2356,16 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
     Token *tok = *tokens_ptr;
     int brace_depth = 0;
     int paren_depth = 0;
+    bool in_init = false; // true after '=' at depth 0, until ';' or '}'
 
     while (tok && tok->kind != TK_EOF) {
         // Track brace/paren depth
         if (equal(tok, "{")) brace_depth++;
-        else if (equal(tok, "}")) brace_depth--;
+        else if (equal(tok, "}")) { brace_depth--; if (brace_depth == 0) in_init = false; }
         else if (equal(tok, "(")) paren_depth++;
         else if (equal(tok, ")")) paren_depth--;
+        else if (equal(tok, ";") && brace_depth == 0) in_init = false;
+        else if (equal(tok, "=") && brace_depth == 0 && paren_depth == 0) in_init = true;
 
         if (brace_depth == 0 && paren_depth == 0 &&
             tok->kind == TK_IDENT && tok->len == 21 &&
@@ -2376,13 +2385,13 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
             continue;
         }
 
-        // Only match at file scope (outside braces and parens)
-        if (brace_depth == 0 && paren_depth == 0 &&
+        // Only match standalone file-scope calls (outside braces/parens, not in initializers)
+        if (brace_depth == 0 && paren_depth == 0 && !in_init &&
             tok->kind == TK_IDENT && tok->next && equal(tok->next, "(")) {
-            // Check if this identifier is a non-inline macro
+            // Check if this identifier is a macro
             MacroFn *pm = NULL;
             for (MacroFn *m = vm->compiler.macro_fns; m; m = m->next) {
-                if (m->is_macro_entry && !m->is_inline &&
+                if (m->is_macro_entry &&
                     strlen(m->name) == tok->len &&
                     strncmp(m->name, tok->loc, tok->len) == 0) {
                     pm = m;
@@ -2644,11 +2653,50 @@ void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens, int coun
         vm->compiler.macro_context_tokens =
             build_macro_context_tokens(vm, input_tokens, count);
 
-    // Quick check: any non-inline macros?
-    bool any_global = false;
-    for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next)
-        if (!pm->is_inline) { any_global = true; break; }
-    if (!any_global) {
+    // Quick check: are there any file-scope macro calls in the token streams?
+    // If not, skip init+compile here — they will happen lazily in cc_expand_macros
+    // after parsing, when all symbols are defined. This avoids premature $symbol
+    // lookups in macros that are only called in expression position.
+    bool any_file_scope_call = false;
+    for (int fi = 0; fi < count && !any_file_scope_call; fi++) {
+        Token *t = input_tokens[fi];
+        int bd = 0, pd = 0;
+        bool in_init = false;
+        while (t && t->kind != TK_EOF) {
+            if (equal(t, "{")) bd++;
+            else if (equal(t, "}")) { bd--; if (bd == 0) in_init = false; }
+            else if (equal(t, "(")) pd++;
+            else if (equal(t, ")")) pd--;
+            else if (equal(t, ";") && bd == 0) in_init = false;
+            else if (equal(t, "=") && bd == 0 && pd == 0) in_init = true;
+            if (bd == 0 && pd == 0 && !in_init &&
+                t->kind == TK_IDENT && t->next && equal(t->next, "(")) {
+                for (MacroFn *m = vm->compiler.macro_fns; m; m = m->next) {
+                    if (m->is_macro_entry &&
+                        strlen(m->name) == t->len &&
+                        strncmp(m->name, t->loc, t->len) == 0) {
+                        // Check for ';' after matching ')'
+                        Token *ap = t->next->next;
+                        int cd = 1;
+                        while (ap && ap->kind != TK_EOF && cd > 0) {
+                            if (equal(ap, "(")) cd++;
+                            else if (equal(ap, ")")) { cd--; if (cd==0) break; }
+                            ap = ap->next;
+                        }
+                        if (ap && cd == 0 && ap->next && equal(ap->next, ";"))
+                            any_file_scope_call = true;
+                        break;
+                    }
+                }
+            }
+            if (any_file_scope_call) break;
+            t = t->next;
+        }
+    }
+
+    if (!any_file_scope_call) {
+        // No file-scope calls: just scan for __builtin_emit_line__ but defer
+        // macro compilation to cc_expand_macros (after parsing).
         for (int fi = 0; fi < count; fi++)
             if (input_tokens[fi])
                 scan_and_execute_global_calls(vm, &input_tokens[fi]);

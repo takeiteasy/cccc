@@ -9,14 +9,14 @@ int compute_width(void) { return 1920; }
 [[cccc::comptime]]
 struct Dims { int width; int height; } dims = { compute_width(), 1080 };
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_area(void) {
     Node *w = GetComptimeMember("dims", "width");
     Node *h = GetComptimeMember("dims", "height");
     return MakeBinary(NK_MUL, w, h);
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_width(void) {
     return GetComptimeMember("dims", "width");
 }

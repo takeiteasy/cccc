@@ -17,7 +17,7 @@ int g_do_result;
 // Since we can't easily use a loop-local variable for `i`, we use a simpler
 // approach: g_while_result is both the counter and the accumulator.
 // Generated: while (g_while_result < 10) g_while_result = g_while_result + 1;
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *gen_while_func() {
     VirtualMachine *vm = __builtin_get_vm();
     Type *void_ty = __builtin_ast_get_type(vm, "void");
@@ -46,7 +46,7 @@ Node *gen_while_func() {
 
 // Macro: generates a function that uses a for loop.
 // Generated: for (; g_for_result < 5; ) g_for_result = g_for_result + 1;
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *gen_for_func() {
     VirtualMachine *vm = __builtin_get_vm();
     Type *void_ty = __builtin_ast_get_type(vm, "void");
@@ -72,7 +72,7 @@ Node *gen_for_func() {
 // Macro: generates a function that uses a do-while loop.
 // Generated: do { g_do_result = g_do_result + 1; } while (g_do_result < 3);
 // After: g_do_result == 3 (started at 0, runs 3 times)
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *gen_do_func() {
     VirtualMachine *vm = __builtin_get_vm();
     Type *void_ty = __builtin_ast_get_type(vm, "void");

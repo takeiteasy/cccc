@@ -6,7 +6,7 @@ struct Triple { int a; int b; int c; };
 
 // ---- Test 1: splice into a struct compound literal --------------------------
 // Builds a two-element chain and splices it as positional initializers for Point.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *make_point(Node *px, Node *py) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = __builtin_node_list(vm, (Node*[]){ px, py }, 2);
@@ -21,7 +21,7 @@ int test_struct_splice(void) {
 // ---- Test 2: splice into an array compound literal --------------------------
 // Builds a three-element chain and splices it into int[3].
 // The compound literal decays to a pointer; sum all elements.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *make_arr3(Node *a, Node *b, Node *c) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = __builtin_node_list(vm, (Node*[]){ a, b, c }, 3);
@@ -35,7 +35,7 @@ int test_array_splice(void) {
 
 // ---- Test 3: struct splice with expression arguments (not just literals) -----
 // Verifies that non-trivial caller expressions are correctly substituted.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *make_triple(Node *a, Node *b, Node *c) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = __builtin_node_list(vm, (Node*[]){ a, b, c }, 3);
@@ -50,7 +50,7 @@ int test_struct_triple(void) {
 
 // ---- Test 4: scalar $1 combined with a separate splice $@2 ------------------
 // Verifies that scalar and splice placeholders coexist in one template.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *scale_and_make_point(Node *scale, Node *px, Node *py) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = __builtin_node_list(vm, (Node*[]){ px, py }, 2);

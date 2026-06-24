@@ -1,6 +1,6 @@
 // Test: global macro call runs before the main parse (ticket #229)
 //
-// A file-scope call to a non-inline macro:
+// A file-scope call to a comptime macro:
 //   - Executes before the main parse begins
 //   - Generates definitions visible to the whole program
 //   - No explicit forward declaration needed

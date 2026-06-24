@@ -4,7 +4,7 @@
 
 struct Point { int x; int y; };
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *bad_point(Node *a) {
     VirtualMachine *vm = __builtin_get_vm();
     // Only 1 element in chain but struct Point has 2 fields → error.

@@ -1,6 +1,6 @@
 // CCCC_FLAGS: --std=c99 -Wpedantic
 // CCCC_REJECT_STDERR: \[-Wpedantic\]
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_42(void) {
     return MakeIntLiteral(42);
 }

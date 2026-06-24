@@ -2,7 +2,7 @@
 
 // Macro that creates a hygienic temporary, assigns arg*2 to it, and returns it.
 // Demonstrates that the gensym'd name doesn't collide with user locals.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *doubled(Node *arg) {
     VirtualMachine *vm = __builtin_get_vm();
 
@@ -22,7 +22,7 @@ Node *doubled(Node *arg) {
 
 // Macro that creates a named local and returns a reference to it.
 // Proves __builtin_ast_local_var works (not just the unique variant).
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *make_local_forty_two(void) {
     VirtualMachine *vm = __builtin_get_vm();
     Type *ty_int = __builtin_ast_get_type(vm, "int");

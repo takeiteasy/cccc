@@ -30,7 +30,7 @@ const char *lookup_reg_fn(const char *header) {
     return 0;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *reg_lookup_ok(void) {
     static const char *headers[] = {"ctype.h", "stdio.h", "string.h"};
 

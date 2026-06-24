@@ -17,17 +17,17 @@ struct Config {
     int scale;
 } cfg = { base_width(), 240, scale };
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_width(void) {
     return GetComptimeMember("cfg", "width");
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_height(void) {
     return GetComptimeMember("cfg", "height");
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_scale(void) {
     return GetComptimeMember("cfg", "scale");
 }

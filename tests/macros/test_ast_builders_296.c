@@ -1,11 +1,11 @@
 // Test ticket #296: CompoundLiteral, InitArray, InitStruct AST builders.
-// Exercises both inline and non-inline comptime macro paths.
+// Exercises comptime macros used at both file scope and expression position.
 
 struct CLPoint { int x; int y; };
 
 // ---- CompoundLiteral (inline) ----------------------------------------
 // Inline macro: current_fn is the caller, so local var allocation works directly.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *cl_point_x(void) {
     Type *pt = GetType("CLPoint");
     // positional: {10, 20} — x=10, y=20
@@ -13,7 +13,7 @@ Node *cl_point_x(void) {
     return MakeMember(lit, "x");
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *cl_point_y(void) {
     Type *pt = GetType("CLPoint");
     Node *lit = CompoundLiteral(pt, MakeIntLiteral(10), MakeIntLiteral(20));
@@ -37,7 +37,7 @@ gen_array_fn();
 
 // ---- InitStruct (designated, partial) --------------------------------
 // Only .x is set; .y should be zero from the ND_MEMZERO.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *is_partial_y(void) {
     Type *pt = GetType("CLPoint");
     Node *s = InitStruct(pt,
@@ -48,7 +48,7 @@ Node *is_partial_y(void) {
 }
 
 // Both fields designated: use local arrays to avoid preprocessor comma confusion.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *is_both_sum(void) {
     Type *pt = GetType("CLPoint");
     const char *fields[] = {"x", "y"};

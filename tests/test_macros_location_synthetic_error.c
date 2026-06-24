@@ -1,7 +1,7 @@
 // EXPECT_COMPILE_ERROR
 // CCCC_EXPECT_STDERR: <cccc macro: generated expression>:1: generated expression
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *synthetic_loc(void) {
     Node *node = MakeIntLiteral(0);
     SetToken(node, SyntheticToken("generated expression"));

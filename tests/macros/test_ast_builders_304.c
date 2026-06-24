@@ -1,6 +1,6 @@
 // Test ticket #304: file-scope compound literals in AST builders.
 // CompoundLiteral / InitArray / InitStruct called with current_fn == NULL
-// (outside any WithFn block in a non-inline comptime macro) produce a static
+// (outside any WithFn block in a file-scope comptime macro) produce a static
 // anonymous global var instead of a stack local.
 
 struct FPt { int x; int y; };

@@ -1142,7 +1142,6 @@ typedef struct MacroFn {
     Obj *compiled_fn;         // Compiled function object
     bool is_compiled;         // True after successful compilation
     bool is_macro_entry;      // True for all comptime functions (entry-callable from user code)
-    bool is_inline;           // True for inline macros (auto-execute at declaration)
     bool is_void_macro;       // True if declared void — definition-only, no splice node
     bool is_variadic;         // True if declaration has a trailing ...
     bool is_attribute_handler; // True for @macro(attribute("name")) handlers

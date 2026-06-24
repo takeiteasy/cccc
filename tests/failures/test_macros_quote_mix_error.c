@@ -2,7 +2,7 @@
 // Test ticket #1: mixing $N positional and $$ incremental in one template
 // should produce a compile-time error.
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *bad_mix(Node *a, Node *b) {
     VirtualMachine *vm = __builtin_get_vm();
     // $1 and $$ in the same template — must error

@@ -10,7 +10,7 @@ int main(void) {
 #if __has_attribute(deprecated)
     result += 4;
 #endif
-#if __has_attribute(comptime) && __has_attribute(macro)
+#if __has_attribute(comptime)
     result += 4;
 #endif
 #if __has_attribute(format)
@@ -37,9 +37,6 @@ int main(void) {
     result += 4;
 #endif
 #if __has_c_attribute(cccc::comptime)
-    result += 4;
-#endif
-#if __has_c_attribute(macro, cccc)
     result += 4;
 #endif
 #if __has_c_attribute(noreturn)
@@ -70,9 +67,6 @@ int main(void) {
     return 8;
 #endif
 
-    // result was 40 before adding format (10 checks × 4)
-    // now 44 with format (11 × 4); then 48 with noreturn attribute (12 × 4);
-    // now 52 with noreturn c_attribute (13 × 4); plus fallthrough/nodiscard
-    // gives 60 (15 × 4); subtract 18 to keep exit code 42
-    return result - 18;
+    // 14 checks × 4 = 56; subtract 14 to get exit code 42
+    return result - 14;
 }

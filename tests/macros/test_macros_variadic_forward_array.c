@@ -12,12 +12,12 @@ int add2(int base, int a, int b) {
     return base + a + b;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *forward_all(Node *fn_node, ...) {
     return MakeFuncCall(fn_node, VarargAsArray(), VarargCount());
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *forward_tail(Node *fn_node, Node *base, ...) {
     Node **tail = VarargAsArray();
     Node *args[3] = { base, tail[0], tail[1] };

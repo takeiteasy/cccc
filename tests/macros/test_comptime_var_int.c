@@ -3,12 +3,12 @@
 [[cccc::comptime]]
 int magic = 42;
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_magic(void) {
     return GetComptimeVar("magic");
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_magic_int(void) {
     return MakeIntLiteral(GetComptimeInt("magic"));
 }

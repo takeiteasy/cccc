@@ -1,6 +1,6 @@
 __comptime int helper(void) { return 21; }
 
-__comptime__(inline)
+__comptime__
 Node *answer(void) {
     return MakeIntLiteral(helper() * 2);
 }

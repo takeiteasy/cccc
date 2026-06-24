@@ -6,7 +6,7 @@
 
 int sum_ints(int count, ...) { return 0; }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *bad_arg_splice(Node *x) {
     VirtualMachine *vm = __builtin_get_vm();
     // $@1 cannot be used as an operand inside an expression; it must be a

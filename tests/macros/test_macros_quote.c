@@ -2,7 +2,7 @@
 
 // ---- Expression splice: positional $N ------------------------------------
 // Produces: a + b * a  (reuses $1)
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *add_mul(Node *a, Node *b) {
     VirtualMachine *vm = __builtin_get_vm();
     return __builtin_quote(vm, "$1 + $2 * $1", a, b);
@@ -10,7 +10,7 @@ Node *add_mul(Node *a, Node *b) {
 
 // ---- Expression splice: reorder ($2 * $1 + $2) ---------------------------
 // Produces: y*x + y
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *quad(Node *x, Node *y) {
     VirtualMachine *vm = __builtin_get_vm();
     return __builtin_quote(vm, "$2 * $1 + $2", x, y);
@@ -18,7 +18,7 @@ Node *quad(Node *x, Node *y) {
 
 // ---- Statement splice: return $1; ----------------------------------------
 // Must be called in statement position (not as an expression).
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *ret_val(Node *v) {
     VirtualMachine *vm = __builtin_get_vm();
     return __builtin_quote(vm, "return $1;", v);
@@ -31,7 +31,7 @@ int get_99(void) {
 // ---- $$ incremental sugar ------------------------------------------------
 // $$ maps to $1, $2, ... sequentially (left-to-right).
 // Produces: a + b
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *sum_incr(Node *a, Node *b) {
     VirtualMachine *vm = __builtin_get_vm();
     return __builtin_quote(vm, "$$ + $$", a, b);
@@ -39,7 +39,7 @@ Node *sum_incr(Node *a, Node *b) {
 
 // ---- __builtin_quote_n: array form ---------------------------------------------
 // Produces: a + b + c
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *add3(Node *a, Node *b, Node *c) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *args[3] = { a, b, c };
@@ -47,7 +47,7 @@ Node *add3(Node *a, Node *b, Node *c) {
 }
 
 // ---- No splice points (plain expression) ---------------------------------
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *const_expr(void) {
     VirtualMachine *vm = __builtin_get_vm();
     return __builtin_quote(vm, "6 * 7");
@@ -55,7 +55,7 @@ Node *const_expr(void) {
 
 // ---- If-statement template -----------------------------------------------
 // Returns one of two values based on sign; invoked as statement in function body.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *clamp_zero(Node *val) {
     VirtualMachine *vm = __builtin_get_vm();
     return __builtin_quote(vm, "if ($1 < 0) return 0; else return $1;", val);

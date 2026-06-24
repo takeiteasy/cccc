@@ -4,12 +4,12 @@
 constexpr double SCALE = 3.5;
 constexpr float  HALF  = 0.5f;
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_scale(void) {
     return GetConstexprValue("SCALE");
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_half(void) {
     return GetConstexprValue("HALF");
 }

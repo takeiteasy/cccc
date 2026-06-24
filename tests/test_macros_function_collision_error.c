@@ -5,7 +5,7 @@ int existing_function(void) {
     return 1;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *clobber_existing(void) {
     Type *int_ty = GetType("int");
     Obj *fn = MakeFunction("existing_function", int_ty);

@@ -8,57 +8,57 @@ Node *pick_second(Node *a, Node *b) {
     return b;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *plain_quote(void) {
     return `return 42;`;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *single_splice(Node *x) {
     return `return ${ IDENTITY(x) } + 1;`;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *multiple_splices(Node *a, Node *b) {
     return `return ${ a } + ${ b };`;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *call_splice(Node *a, Node *b) {
     return `return ${ pick_second(a, b) };`;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *nested_brace_splice(Node *a, Node *b) {
     return `return ${ ((Node *[]){ a, b })[1] };`;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *ignored_braces_splice(Node *x) {
     return `return ${ /* } */ (sizeof("}") && ('}' == '}')) ? x : x };`;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *reflect_in_quote(void) {
     return `return sizeof($Point);`;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *escaped_backtick(void) {
     return `return '\`';`;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *preserved_backslash(void) {
     return `return '\n';`;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *literal_placeholder_text(void) {
     return `return sizeof("$1");`;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *multiline_quote(void) {
     return `{
         int value = 40;

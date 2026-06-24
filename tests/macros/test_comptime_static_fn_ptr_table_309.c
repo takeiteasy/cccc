@@ -12,7 +12,7 @@ int dispatch(int i) {
     return table[i]();
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *dispatch_ok(void) {
     if (dispatch(0) != 10)
         return MakeIntLiteral(1);

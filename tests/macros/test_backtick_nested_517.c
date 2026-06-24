@@ -1,7 +1,7 @@
 // EXPECT_COMPILE_ERROR
 // CCCC_EXPECT_STDERR: nested backtick quasi-quotes are not supported
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *bad_quote(void) {
     return `return ${ `42` };`;
 }

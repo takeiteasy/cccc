@@ -3,12 +3,12 @@
 [[cccc::comptime]]
 double scale = 2.5;
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_scale(void) {
     return GetComptimeVar("scale");
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *check_scale(void) {
     double s = GetComptimeFloat("scale");
     // scale * 4 == 10 — check via int cast to avoid float equality issues

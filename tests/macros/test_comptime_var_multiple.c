@@ -4,7 +4,7 @@
 [[cccc::comptime]]
 int base = 20;
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *doubled(void) {
     return MakeIntLiteral(GetComptimeInt("base") * 2);
 }
@@ -12,7 +12,7 @@ Node *doubled(void) {
 [[cccc::comptime]]
 int bonus = 2;
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *total(void) {
     int64_t b = GetComptimeInt("base");
     int64_t n = GetComptimeInt("bonus");

@@ -8,7 +8,7 @@ int items = get_item_count();   // forward ref — get_item_count defined below
 [[cccc::comptime]]
 int get_item_count(void) { return 6; }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_items(void) {
     return MakeIntLiteral(GetComptimeInt("items"));
 }

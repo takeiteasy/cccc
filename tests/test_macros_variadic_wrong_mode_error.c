@@ -1,7 +1,7 @@
 // EXPECT_COMPILE_ERROR
 // Ticket #284: string vararg access is only valid for global-generation macros.
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *bad_mode(...) {
     return MakeStringLiteral(VarargStrAt(0));
 }

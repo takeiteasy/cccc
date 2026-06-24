@@ -2,7 +2,7 @@
 
 int counter = 0;
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *reflect_var(void) {
     Obj *obj = $counter;
     if (!obj)

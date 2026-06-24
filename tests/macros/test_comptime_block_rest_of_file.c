@@ -9,7 +9,7 @@ int triple(int n) {
 
 int base = 14;
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *make_answer(void) {
     return MakeIntLiteral(triple(GetComptimeInt("base")));
 }

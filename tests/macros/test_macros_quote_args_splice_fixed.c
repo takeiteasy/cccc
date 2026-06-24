@@ -13,7 +13,7 @@ int add2(int a, int b) {
 
 // ---- Test 1: splice all args into a fixed-arity callee ----------------------
 // all three arguments come from a spliced chain; no scalar args.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *call_add3(Node *a, Node *b, Node *c) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = __builtin_node_list(vm, (Node*[]){ a, b, c }, 3);
@@ -26,7 +26,7 @@ int test_full_fixed_splice(void) {
 
 // ---- Test 2: scalar prefix + splice tail into fixed-arity callee ------------
 // $1 fills the first fixed parameter; $@2 expands to fill the rest.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *call_add3_mixed(Node *a, Node *b, Node *c) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = __builtin_node_list(vm, (Node*[]){ b, c }, 2);
@@ -38,7 +38,7 @@ int test_prefix_then_fixed_splice(void) {
 }
 
 // ---- Test 3: splice into a two-parameter fixed callee -----------------------
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *call_add2(Node *a, Node *b) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = __builtin_node_list(vm, (Node*[]){ a, b }, 2);
@@ -52,7 +52,7 @@ int test_two_param_fixed_splice(void) {
 // ---- Test 4: parameter casts are applied after splice expansion -------------
 // Splice double literals into int parameters; the cast should truncate them.
 // 10.7 → 10, 21.3 → 21, 10.9 → 10 — correct result is 41 (not 42.9).
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *call_add3_cast(Node *a, Node *b, Node *c) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = __builtin_node_list(vm, (Node*[]){ a, b, c }, 3);

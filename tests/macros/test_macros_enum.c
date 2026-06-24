@@ -8,7 +8,7 @@
 typedef enum { COLOR_RED, COLOR_GREEN, COLOR_BLUE } Color;
 
 // Pragma macro to get enum constant name at compile time
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *color_name(Node *value) {
     VirtualMachine *vm = __builtin_get_vm();
 

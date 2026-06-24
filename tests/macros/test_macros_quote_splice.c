@@ -4,7 +4,7 @@
 // ---- Positional list splice: $@1 ------------------------------------------
 // double_inc builds a two-statement chain (x+=1; x+=1;) and splices it
 // into a block using the positional $@1 splice.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *double_inc(Node *x) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *s1    = __builtin_quote(vm, "$1 += 1;", x);
@@ -22,7 +22,7 @@ int get_plus_two(int v) {
 // accumulate3 takes an accumulator variable and three addends; builds a
 // three-statement chain and splices it.  All inner templates reference only
 // macro arguments (which are call-site nodes, in scope at macro execution).
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *accumulate3(Node *acc, Node *a, Node *b, Node *c) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *s1    = __builtin_quote(vm, "$1 += $2;", acc, a);
@@ -40,7 +40,7 @@ int test_accumulate(void) {
 
 // ---- Incremental splice $@ (two statements) --------------------------------
 // two_increments builds two stmts and splices them via incremental $@.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *two_increments(Node *a, Node *b) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *s1 = __builtin_quote(vm, "$1 += 10;", a);
@@ -56,7 +56,7 @@ int test_incr(void) {
 
 // ---- Mixed scalar $1 and list splice $@2 -----------------------------------
 // if_then uses scalar $1 for the condition and list splice $@2 for the body.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *if_then(Node *cond, Node *body_expr) {
     VirtualMachine *vm = __builtin_get_vm();
     // Wrap the expression argument in a statement so it can be list-spliced.

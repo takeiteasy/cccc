@@ -1,18 +1,18 @@
 // Tests for @identifier / @identifier(args) attribute syntax (#234).
 // CCCC_FLAGS: --testing
 
-// --- @comptime and @macro ---
+// --- @comptime ---
 
 @comptime
 int double_val(int x) { return x * 2; }
 
-// @comptime(inline) — usable in expression position from runtime code.
-@comptime(inline)
+// @comptime — callable in expression position.
+@comptime
 Node *make_doubled_42(void) {
     return MakeIntLiteral(double_val(21));
 }
 
-@macro(inline)
+@comptime
 Node *add_one(Node *x) {
     return MakeBinary(NK_ADD, x, MakeIntLiteral(1));
 }

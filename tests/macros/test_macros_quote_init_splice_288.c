@@ -3,35 +3,35 @@
 
 struct Triple { int a; int b; int c; };
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *make_triple_tail(Node *b, Node *c) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = __builtin_node_list(vm, (Node*[]){ b, c }, 2);
     return Quote("(struct Triple){ 1, $@1 }", chain);
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *make_triple_middle(Node *a, Node *b) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = __builtin_node_list(vm, (Node*[]){ a, b }, 2);
     return Quote("(struct Triple){ $@1, 30 }", chain);
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *make_arr4(Node *b, Node *c) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = __builtin_node_list(vm, (Node*[]){ b, c }, 2);
     return Quote("(int[4]){ 1, $@1, 4 }", chain);
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *make_arr_inferred(Node *a, Node *b, Node *c) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = __builtin_node_list(vm, (Node*[]){ a, b, c }, 3);
     return Quote("(int[]){ $@1 }", chain);
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *make_arr_mixed_inferred(Node *b, Node *c) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = __builtin_node_list(vm, (Node*[]){ b, c }, 2);

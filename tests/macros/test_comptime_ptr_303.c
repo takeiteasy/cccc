@@ -9,12 +9,12 @@ struct Config { int width; int height; };
 [[cccc::comptime]]
 struct Config cfg = { 20, 22 };
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *magic_ptr(void) {
     return GetComptimePtr("magic");
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *cfg_ptr(void) {
     return GetComptimePtr("cfg");
 }

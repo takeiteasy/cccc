@@ -8,7 +8,7 @@ int page_count(void) { return 4; }
 [[cccc::comptime]]
 int buf_size = page_count() * 4096;
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_buf_size(void) {
     return MakeIntLiteral(GetComptimeInt("buf_size"));
 }

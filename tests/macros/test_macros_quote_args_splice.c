@@ -30,7 +30,7 @@ int base_plus_sum(int base, int count, ...) {
 // ---- Test 1: splice full arg list into a variadic callee ---------------------
 // call_sum3 builds a three-element node chain and splices it as the variadic
 // portion of sum_ints(3, ...).
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *call_sum3(Node *a, Node *b, Node *c) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = __builtin_node_list(vm, (Node*[]){ a, b, c }, 3);
@@ -43,7 +43,7 @@ int test_full_variadic_splice(void) {
 
 // ---- Test 2: splice into variadic tail after a fixed prefix arg --------------
 // call_bps passes a fixed base, then splices two more ints into the variadic.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *call_bps(Node *base, Node *x, Node *y) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = __builtin_node_list(vm, (Node*[]){ x, y }, 2);
@@ -57,7 +57,7 @@ int test_prefix_then_splice(void) {
 // ---- Test 3: empty splice (zero variadic args inserted) ----------------------
 // When __builtin_node_list returns NULL the $@k placeholder expands to nothing,
 // leaving sum_ints with only the fixed count argument.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *call_sum_empty(Node *fixed) {
     VirtualMachine *vm = __builtin_get_vm();
     // count == 0 → __builtin_node_list returns NULL → empty splice
@@ -71,7 +71,7 @@ int test_empty_splice(void) {
 
 // ---- Test 4: positional $@2 with a scalar $1 --------------------------------
 // Mixed scalar + splice in the same template.
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *call_mixed(Node *base, Node *a, Node *b, Node *c) {
     VirtualMachine *vm = __builtin_get_vm();
     Node *chain = __builtin_node_list(vm, (Node*[]){ a, b, c }, 3);

@@ -7,7 +7,7 @@ int double_it(int n) {
 }
 #pragma cccc comptime end
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *make_doubled(void) {
     return MakeIntLiteral(double_it(21));
 }

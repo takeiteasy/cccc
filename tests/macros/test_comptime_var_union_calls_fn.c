@@ -7,7 +7,7 @@ int compute_value(void) { return 0x12345678; }
 [[cccc::comptime]]
 union Data { int i; unsigned char bytes[4]; } data = { compute_value() };
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_value(void) {
     return GetComptimeMember("data", "i");
 }

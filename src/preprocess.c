@@ -360,11 +360,9 @@ static Token *new_eof(VirtualMachine *vm, Token *tok) {
 }
 
 // Extract a [[cccc::comptime]] / __attribute__((comptime)) function definition
-// and store it. [[cccc::macro]] / __attribute__((macro)) are deprecated aliases.
-// Returns the token after the function definition (or original token on failure).
+// and store it. Returns the token after the function definition (or original token on failure).
 static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
                                      bool is_macro_entry,
-                                     bool is_inline,
                                      char *attribute_name) {
     // Expected format: <return_type> <function_name>(<params>) { <body> }
     // tok should be the first token of the function definition
@@ -555,7 +553,6 @@ static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
     pm->compiled_fn = NULL;
     pm->is_compiled = false;
     pm->is_macro_entry = is_macro_entry;
-    pm->is_inline = is_inline;
     pm->is_void_macro = is_void_macro;
     pm->is_variadic = is_variadic;
     pm->is_attribute_handler = attribute_name != NULL;
@@ -1072,7 +1069,6 @@ static const AttrInfo known_attrs[] = {
     // CCCC-specific (cccc:: scoped) — vendor attrs report 1, not a date
     {"comptime",      ATTR_CCCC, true,  1},
     {"emit",          ATTR_CCCC, true,  1},
-    {"macro",         ATTR_CCCC, true,  1},
     {"optimize",      ATTR_CCCC, true,  1},
     {"test",          ATTR_CCCC, true,  1},
     {"test_setup",    ATTR_CCCC, true,  1},
@@ -2379,8 +2375,6 @@ static bool try_rewrite_at_attr(VirtualMachine *vm, Token **tok_ptr) {
 static const char *cccc_keyword_alias_name(Token *tok) {
     if (equal(tok, "__comptime") || equal(tok, "__comptime__"))
         return "comptime";
-    if (equal(tok, "__macro") || equal(tok, "__macro__"))
-        return "macro";
     if (equal(tok, "__test") || equal(tok, "__test__"))
         return "test";
     if (equal(tok, "__test_setup") || equal(tok, "__test_setup__"))
@@ -2784,7 +2778,6 @@ static void parse_test_setup_args(Token **p_ptr, TestSetupArgs *out) {
 // __attribute__((unused))), *tok_ptr is left unchanged and the function returns
 // false so the token flows to the parser as normal.
 static void read_macro_attr_options(VirtualMachine *vm, Token *macro_tok,
-                                    bool *is_inline,
                                     char **attribute_name) {
     if (!macro_tok || !macro_tok->next || !equal(macro_tok->next, "("))
         return;
@@ -2796,7 +2789,10 @@ static void read_macro_attr_options(VirtualMachine *vm, Token *macro_tok,
             continue;
         }
         if (equal(p, "inline")) {
-            *is_inline = true;
+            error_tok(vm, p,
+                      "[[cccc::comptime(inline)]] is no longer supported; "
+                      "use [[cccc::comptime]] — all comptime functions are "
+                      "callable in expression position");
             p = p->next;
             continue;
         }
@@ -2804,12 +2800,12 @@ static void read_macro_attr_options(VirtualMachine *vm, Token *macro_tok,
             p = skip(vm, p->next, "(");
             if (p->kind != TK_STR)
                 error_tok(vm, p,
-                          "macro(attribute(...)) expects a string literal attribute name");
+                          "comptime(attribute(...)) expects a string literal attribute name");
             *attribute_name = arena_strdup(vm, p->str);
             p = skip(vm, p->next, ")");
             continue;
         }
-        error_tok(vm, p, "unknown macro attribute option '%.*s'",
+        error_tok(vm, p, "unknown comptime attribute option '%.*s'",
                   p->len, p->loc);
     }
 }
@@ -2830,7 +2826,6 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
         return false;
 
     // Scan inside the attribute argument list for macro/comptime/test/inline markers.
-    bool is_macro_kind        = false;
     bool is_comptime_kind     = false;
     bool is_test_kind         = false;
     bool is_setup_kind        = false;
@@ -2838,7 +2833,6 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
     bool is_build_kind        = false;
     bool is_build_target_kind = false;
     char *build_target_kind   = NULL;  // "native" (default) when is_build_target_kind
-    bool is_inline         = false;
     char *attribute_name   = NULL;
     Token *attr_end        = NULL;
     TestArgs ta            = {0};
@@ -2880,32 +2874,22 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
         if (equal(t, ",")) continue;
 
         if (equal(t, "macro")) {
-            is_macro_kind = true;
-            read_macro_attr_options(vm, t, &is_inline, &attribute_name);
+            error_tok(vm, t,
+                      "[[cccc::macro]] is deprecated; use [[cccc::comptime]]");
         } else if (equal(t, "comptime")) {
             is_comptime_kind = true;
-            // comptime(inline)
-            if (t->next && equal(t->next, "(") &&
-                t->next->next && equal(t->next->next, "inline") &&
-                t->next->next->next && equal(t->next->next->next, ")"))
-                is_inline = true;
+            read_macro_attr_options(vm, t, &attribute_name);
         } else if (equal(t, "cccc") &&
                    t->next && equal(t->next, ":") &&
                    t->next->next && equal(t->next->next, ":") &&
                    t->next->next->next) {
             Token *after_scope = t->next->next->next;
             if (equal(after_scope, "macro")) {
-                is_macro_kind = true;
-                read_macro_attr_options(vm, after_scope, &is_inline,
-                                        &attribute_name);
+                error_tok(vm, after_scope,
+                          "[[cccc::macro]] is deprecated; use [[cccc::comptime]]");
             } else if (equal(after_scope, "comptime")) {
                 is_comptime_kind = true;
-                // cccc::comptime(inline)
-                if (after_scope->next && equal(after_scope->next, "(") &&
-                    after_scope->next->next && equal(after_scope->next->next, "inline") &&
-                    after_scope->next->next->next &&
-                    equal(after_scope->next->next->next, ")"))
-                    is_inline = true;
+                read_macro_attr_options(vm, after_scope, &attribute_name);
             } else if (equal(after_scope, "test")) {
                 is_test_kind = true;
                 if (after_scope->next && equal(after_scope->next, "(")) {
@@ -3000,18 +2984,11 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
         }
     }
 
-    // Only act on a positive macro/comptime/test/setup/teardown/build match.
-    if ((!is_macro_kind && !is_comptime_kind && !is_test_kind &&
+    // Only act on a positive comptime/test/setup/teardown/build match.
+    if ((!is_comptime_kind && !is_test_kind &&
          !is_setup_kind && !is_teardown_kind && !is_build_kind &&
          !is_build_target_kind) || !attr_end)
         return false;
-
-    // Support [[cccc::comptime]] inline fn() — detect the inline keyword
-    // that follows the closing ]] and treat it like comptime(inline).
-    if (is_comptime_kind && !is_inline && attr_end && equal(attr_end, "inline")) {
-        is_inline = true;
-        attr_end = attr_end->next;
-    }
 
     // Probe what follows attr_end: function or variable?
     // Heuristic: scan (respecting brace depth) for "ident (" before ";" or "=".
@@ -3167,12 +3144,9 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
         return true;
     }
 
-    // Route to function or variable extraction. Use is_macro_kind (not a
-    // combined entry flag) to avoid misrouting [[cccc::comptime]] variables.
-    // All annotated functions — both [[cccc::macro]] and [[cccc::comptime]] —
-    // are entry-callable from user code (is_macro_entry=true).
-    if (is_macro_kind || looks_like_function) {
-        *tok_ptr = extract_macro_function(vm, attr_end, true, is_inline,
+    // Route to function or variable extraction.
+    if (looks_like_function) {
+        *tok_ptr = extract_macro_function(vm, attr_end, true,
                                           attribute_name);
     } else {
         *tok_ptr = extract_comptime_var(vm, attr_end);
@@ -3260,7 +3234,7 @@ static bool try_extract_comptime_block_decl(VirtualMachine *vm, Token **tok_ptr)
     Token *tok = *tok_ptr;
 
     if (probe_function_definition(tok)) {
-        *tok_ptr = extract_macro_function(vm, tok, true, false, NULL);
+        *tok_ptr = extract_macro_function(vm, tok, true, NULL);
         return true;
     }
     if (probe_var_declaration(tok)) {

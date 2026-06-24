@@ -1,5 +1,5 @@
 // Test ticket #275: file-scope macro call with a string literal argument.
-// A non-inline macro that receives a char* name generates a function with
+// A comptime macro that receives a char* name generates a function with
 // that name; the call happens before the main parse.
 
 [[cccc::comptime]]

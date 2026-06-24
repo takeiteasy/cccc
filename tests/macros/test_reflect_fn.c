@@ -2,7 +2,7 @@
 
 int helper(int x) { return x + 1; }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *reflect_fn(void) {
     Obj *obj = $helper;
     if (!obj)

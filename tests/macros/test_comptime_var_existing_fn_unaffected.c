@@ -7,12 +7,12 @@ int double_it(int n) { return n * 2; }
 [[cccc::comptime]]
 int answer = 21;
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_answer(void) {
     return MakeIntLiteral(GetComptimeInt("answer") * 2);
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *use_helper(Node *x) {
     return MakeBinary(NK_ADD, x, MakeIntLiteral(double_it(1)));
 }

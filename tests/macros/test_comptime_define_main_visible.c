@@ -5,7 +5,7 @@
 
 [[cccc::comptime]] int get_val(void) { return FROM_MAIN; }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *call_get(void) { return MakeIntLiteral(get_val()); }
 
 int main(void) { return call_get() == 77 ? 42 : 1; }

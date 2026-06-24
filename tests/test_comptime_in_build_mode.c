@@ -1,12 +1,12 @@
 // CCCC_FLAGS: --build
-// comptime(inline) macros work inside [[cccc::build]] functions.
+// comptime macros work inside [[cccc::build]] functions.
 
 [[cccc::comptime]]
 int ct_add(int a, int b) {
     return a + b;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *ct_twenty_plus_twenty_two(void) {
     return MakeIntLiteral(ct_add(20, 22));
 }

@@ -1,6 +1,6 @@
 // Test __builtin_gensym and Gensym for collision-safe generated names.
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *gensym_test(void) {
     const char *a = Gensym("helper");
     const char *b = __builtin_gensym(VM, "helper");

@@ -1,7 +1,7 @@
 // EXPECT_COMPILE_ERROR
 // CCCC_EXPECT_STDERR: empty backtick interpolation is not allowed
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *bad_quote(void) {
     return `return ${ };`;
 }

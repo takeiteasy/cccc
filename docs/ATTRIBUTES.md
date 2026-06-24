@@ -373,7 +373,7 @@ the canonical attribute form before parsing:
 | `@name` (CCCC-specific) | `[[cccc::name]]` | `@comptime`, `@test`, `@test_setup` |
 | `@name` (standard C23) | `[[name]]` | `@nodiscard`, `@maybe_unused` |
 | `@name` (GNU / unknown) | `__attribute__((name))` | `@packed`, `@aligned(16)` |
-| `@name` (custom comptime) | handler registered by `@macro(attribute("name"))` | `@serialize struct Point { ... };` |
+| `@name` (custom comptime) | handler registered by `@comptime(attribute("name"))` | `@serialize struct Point { ... };` |
 
 Resolution order: CCCC-specific attributes are checked first (they become
 `[[cccc::name(...)]]`), then standard C23 attributes (they become
@@ -395,7 +395,7 @@ attributes as `[[...]]` in C23 mode and uses GNU `__attribute__((...))`
 otherwise; GNU-only attributes such as `packed` stay GNU in `auto` mode.
 
 ```c
-@comptime(inline)
+@comptime
 Node *make_answer(void) { return MakeIntLiteral(42); }
 
 @test(suite = "math")

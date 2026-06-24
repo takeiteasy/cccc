@@ -1,5 +1,5 @@
 // CCCC_FLAGS: --testing --build
-// comptime(inline) macros work in composable --testing --build mode,
+// comptime macros work in composable --testing --build mode,
 // usable from both test functions and the build entry.
 
 [[cccc::comptime]]
@@ -7,12 +7,12 @@ int ct_mul(int a, int b) {
     return a * b;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *ct_six_times_seven(void) {
     return MakeIntLiteral(ct_mul(6, 7));
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *ct_three_times_fourteen(void) {
     return MakeIntLiteral(ct_mul(3, 14));
 }

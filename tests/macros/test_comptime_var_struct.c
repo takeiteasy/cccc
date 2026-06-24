@@ -3,7 +3,7 @@
 [[cccc::comptime]]
 struct Dims { int width; int height; int depth; } dims = { 640, 480, 3 };
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_area(void) {
     // width * height at compile time
     Node *w = GetComptimeMember("dims", "width");
@@ -11,7 +11,7 @@ Node *get_area(void) {
     return MakeBinary(NK_MUL, w, h);
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *get_depth(void) {
     return GetComptimeMember("dims", "depth");
 }

@@ -1,16 +1,16 @@
 // Test macro hygiene: call-site variable and typedef lookup.
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *read_value(void) {
     return MakeVarRef("value");
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *read_value_via_quote(void) {
     return Quote("read_value()");
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *local_alias_size(void) {
     Type *ty = FindType("LocalAlias");
     if (!ty)

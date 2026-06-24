@@ -5,7 +5,7 @@ int runtime_helper(int n) {
     return n + 1;
 }
 
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *uses_runtime_helper(void) {
     return MakeIntLiteral(runtime_helper(41));
 }
