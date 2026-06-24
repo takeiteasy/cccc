@@ -1173,6 +1173,7 @@ int main(int argc, const char *argv[]) {
         case 1072: // --fma
             opt_f_enable |= CCCC_OPT_FUSE;
             ffp_contract_fma = 1;
+            flags |= CCCC_FMA;
             break;
         case 'r': { // --macro-recursion-limit
             char *end = NULL;
@@ -1204,6 +1205,7 @@ int main(int argc, const char *argv[]) {
             break;
         case 1055: // --ffi-errors-fatal
             ffi_errors_fatal = 1;
+            flags |= CCCC_FFI_ERRORS_FATAL;
             break;
         case 1024:
             enable_ffi_type_checking = 1;
@@ -1931,14 +1933,24 @@ int main(int argc, const char *argv[]) {
 
     vm.compiler.skip_preprocess = skip_preprocess;
 
-    // In testing mode, inject testing.h before any source is preprocessed so
-    // Assert* macros are in scope. Save the returned declaration tokens for
-    // prepending to the parse stream after preprocessing.
+    // Inject mode headers before preprocessing so their types/macros are in
+    // scope. When both --testing and --build are active, both headers are
+    // injected and their declaration lists are chained together.
     Token *test_decls = NULL;
     if (testing_mode)
         test_decls = cc_inject_test_header(&vm);
-    else if (build_mode)
-        test_decls = cc_inject_build_header(&vm);
+    if (build_mode) {
+        Token *build_decls = cc_inject_build_header(&vm);
+        if (build_decls && test_decls) {
+            Token *tail = build_decls;
+            while (tail->next && tail->next->kind != TK_EOF)
+                tail = tail->next;
+            tail->next = test_decls;
+            test_decls = build_decls;
+        } else if (build_decls) {
+            test_decls = build_decls;
+        }
+    }
 
     input_tokens = calloc(input_files_count, sizeof(Token *));
     for (int i = 0; i < input_files_count; i++) {
@@ -2150,59 +2162,6 @@ int main(int argc, const char *argv[]) {
     // for ticket #300: previously `compile_only` short-circuited at
     // `goto BAIL;` before the legacy `out_file` save block, silently
     // swallowing `-c -o foo.c4`.
-    if (build_mode) {
-        // A build script must not define main() in --build mode.
-        for (Obj *o = merged_prog; o; o = o->next) {
-            if (o->is_function && o->name && strcmp(o->name, "main") == 0) {
-                fprintf(stderr,
-                        "error: a --build script must not define main()\n");
-                exit_code = 1;
-                goto BAIL;
-            }
-        }
-
-        CcNativeCompileArgs build_defaults = {
-            .inc_paths      = inc_paths,      .inc_paths_count = inc_paths_count,
-            .sys_inc_paths  = sys_inc_paths,  .sys_inc_paths_count = sys_inc_paths_count,
-            .lib_paths      = lib_paths,      .lib_paths_count = lib_paths_count,
-            .libs           = libs,           .libs_count = libs_count,
-            .defines        = defines,        .defines_count = defines_count,
-            .undefs         = undefs,         .undefs_count = undefs_count,
-            .std_arg        = std_arg,
-        };
-        CcBuildOptions build_opts = {
-            .entry_name       = build_entry,
-            .target_name      = build_target,
-            .out_dir          = build_out_dir,
-            .verbose          = verbose,
-            .build_verbose    = build_verbose,
-            .quiet            = build_quiet,
-            .keep_going       = build_keep_going,
-            .dry_run          = build_dry_run,
-            .jobs             = build_jobs,
-            .defaults         = &build_defaults,
-            .tool_allow       = build_tool_allow,
-            .tool_allow_count = build_tool_allow_count,
-            .list_targets     = build_list_targets,
-            .profile          = build_profile,
-            .cross_triple     = build_triple,
-            .cross_cc         = build_cc,
-            .build_cache          = build_cache,
-            .cccc_self            = argv[0],
-            .build_options        = build_options,
-            .build_options_count  = build_options_count,
-            .build_install        = build_install,
-            .user_args            = (dashdash >= 0 && dashdash + 1 < argc)
-                                        ? argv + dashdash + 1 : NULL,
-            .user_args_count      = (dashdash >= 0 && dashdash + 1 < argc)
-                                        ? argc - dashdash - 1 : 0,
-        };
-
-        exit_code = cc_run_build(&vm, merged_prog, &build_opts);
-
-        goto BAIL;   // never fall through to the compile block
-    }
-
     if (testing_mode) {
         if (test_c4_mode) {
             // In-process bytecode round-trip: compile → save .c4 → reload → run tests.
@@ -2257,7 +2216,63 @@ int main(int argc, const char *argv[]) {
 
         exit_code = cc_run_tests(&vm, merged_prog, &test_opts);
 
-        goto BAIL;   // never fall through to the compile block
+        if (!build_mode || (fail_fast && exit_code != 0))
+            goto BAIL;
+    }
+
+    if (build_mode) {
+        // A build script must not define main() in --build mode.
+        for (Obj *o = merged_prog; o; o = o->next) {
+            if (o->is_function && o->name && strcmp(o->name, "main") == 0) {
+                fprintf(stderr,
+                        "error: a --build script must not define main()\n");
+                exit_code = 1;
+                goto BAIL;
+            }
+        }
+
+        CcNativeCompileArgs build_defaults = {
+            .inc_paths      = inc_paths,      .inc_paths_count = inc_paths_count,
+            .sys_inc_paths  = sys_inc_paths,  .sys_inc_paths_count = sys_inc_paths_count,
+            .lib_paths      = lib_paths,      .lib_paths_count = lib_paths_count,
+            .libs           = libs,           .libs_count = libs_count,
+            .defines        = defines,        .defines_count = defines_count,
+            .undefs         = undefs,         .undefs_count = undefs_count,
+            .std_arg        = std_arg,
+        };
+        CcBuildOptions build_opts = {
+            .entry_name       = build_entry,
+            .target_name      = build_target,
+            .out_dir          = build_out_dir,
+            .verbose          = verbose,
+            .build_verbose    = build_verbose,
+            .quiet            = build_quiet,
+            .keep_going       = build_keep_going,
+            .dry_run          = build_dry_run,
+            .jobs             = build_jobs,
+            .defaults         = &build_defaults,
+            .tool_allow       = build_tool_allow,
+            .tool_allow_count = build_tool_allow_count,
+            .list_targets     = build_list_targets,
+            .profile          = build_profile,
+            .cross_triple     = build_triple,
+            .cross_cc         = build_cc,
+            .build_cache          = build_cache,
+            .cccc_self            = argv[0],
+            .build_options        = build_options,
+            .build_options_count  = build_options_count,
+            .build_install        = build_install,
+            .user_args            = (dashdash >= 0 && dashdash + 1 < argc)
+                                        ? argv + dashdash + 1 : NULL,
+            .user_args_count      = (dashdash >= 0 && dashdash + 1 < argc)
+                                        ? argc - dashdash - 1 : 0,
+        };
+
+        int build_code = cc_run_build(&vm, merged_prog, &build_opts);
+        if (build_code != 0)
+            exit_code = build_code;
+
+        goto BAIL;
     }
 
     if (compile_format == COMPILE_BYTECODE) {

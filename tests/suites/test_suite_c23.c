@@ -1,6 +1,21 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: C23: _BitInt, auto, nullptr, constexpr, char8_t, embed, literals
-// Source tests: test_c23_attributes, test_c23_auto, test_c23_bitint, test_c23_bitint_wide, test_c23_bitint_wide_safety, test_c23_bool_keywords, test_c23_bool_stdbool_compat, test_c23_char8, test_c23_decimal, test_c23_empty_params_void_equiv, test_c23_exp10_pi, test_c23_keywords, test_c23_literals, test_c23_mbrtoc8, test_c23_nullptr, test_c23_preprocessor, test_c23_tag_redeclarations, test_c23_wb_suffix, test_constexpr_basic, test_std_c23_stdbit, test_std_c23_stdckdint, test_std_c23_strtol_binary, test_std_c23_unreachable
+// Source tests: test_c23_attributes, test_c23_auto, test_c23_bitint, test_c23_bitint_wide,
+//   test_c23_bitint_wide_safety, test_c23_bool_keywords, test_c23_bool_stdbool_compat,
+//   test_c23_char8, test_c23_decimal, test_c23_empty_params_void_equiv, test_c23_exp10_pi,
+//   test_c23_keywords, test_c23_literals, test_c23_mbrtoc8, test_c23_nullptr,
+//   test_c23_preprocessor, test_c23_tag_redeclarations, test_c23_wb_suffix,
+//   test_constexpr_basic, test_std_c23_stdbit, test_std_c23_stdckdint,
+//   test_std_c23_strtol_binary, test_std_c23_unreachable,
+//   test_has_feature, test_std_c23_binary_literal_ok, test_std_c23_digit_separator_ok,
+//   test_std_c23_memlib, test_c23_label_before_decl
+//
+// Deferred (file-scope OR non-recoverable compile errors — error_tok() aborts the whole
+//   suite file compilation, not catchable per-function via collect_errors):
+//   test_c23_compound_literal_{auto,extern,inline,typedef}_error,
+//   test_c23_duplicate_enum_constant_error, test_c23_incompatible_{enum,struct,union}_redecl_error,
+//   test_constexpr_{function,missing_init,restrict,volatile,nonconstant_init,div_zero,mod_zero}_error,
+//   test_static_assert_no_message_error
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -1473,5 +1488,103 @@ int test_std_c23_unreachable(void) {
     if (classify(0) != 0) return 3;
     return 42;
 }
+
+// test_has_feature: __has_feature/__has_extension in C23 mode
+[[cccc::test(return = 42)]]
+int test_has_feature(void) {
+    int result = 0;
+#if __has_feature(c99)
+    result += 6;
+#endif
+#if __has_feature(c11)
+    result += 6;
+#endif
+#if __has_feature(c23)
+    result += 6;
+#endif
+#if __has_extension(c_generic_selections)
+    result += 6;
+#endif
+#if __has_feature(c_alignas) && __has_feature(c_alignof)
+    result += 6;
+#endif
+#if __has_feature(c_static_assert)
+    result += 6;
+#endif
+#if __has_feature(c_atomic) || __has_feature(c_thread_local)
+    return 1;
+#endif
+#if __has_feature(unknown_cccc_feature_280)
+    return 2;
+#endif
+    return result + 6;
+}
+
+// test_std_c23_binary_literal_ok: 0b prefix accepted in C23
+[[cccc::test(return = 42)]]
+int test_std_c23_binary_literal(void) { return 0b1010 == 10 ? 42 : 1; }
+
+// test_std_c23_digit_separator_ok: apostrophe digit separator accepted in C23
+[[cccc::test(return = 42)]]
+int test_std_c23_digit_separator(void) {
+    int n = 1'000'000;
+    return n == 1000000 ? 42 : 1;
+}
+
+// test_std_c23_memlib: memset_explicit, memchr, memalignment, free_sized, timegm
+[[cccc::test(return = 42)]]
+int test_std_c23_memlib(void) {
+    char buf[8] = "abcdefg";
+    memset_explicit(buf, 'X', 3);
+    if (memcmp(buf, "XXXdefg", 7) != 0) return 1;
+    if (memset_explicit(buf + 3, 'Y', 4) != buf + 3) return 2;
+    if (memcmp(buf, "XXXYYYY", 8) != 0) return 3;
+    const char *s = "hello world";
+    const char *p = memchr(s, 'w', 11);
+    if (p == NULL || *p != 'w') return 4;
+    if (memchr(s, 'z', 11) != NULL) return 5;
+    void *a16 = aligned_alloc(16, 64);
+    if (memalignment(a16) < 16) return 7;
+    void *a64 = aligned_alloc(64, 128);
+    if (memalignment(a64) < 64) return 8;
+    free_sized(malloc(32), 32);
+    free_aligned_sized(a16, 16, 64);
+    free_aligned_sized(a64, 64, 128);
+    struct tm t = {0}; t.tm_year = 70; t.tm_mon = 0; t.tm_mday = 1;
+    if (timegm(&t) != 0) return 9;
+    struct tm t2 = {0}; t2.tm_year = 100; t2.tm_mon = 0; t2.tm_mday = 1;
+    if (timegm(&t2) != 946684800) return 10;
+    return 42;
+}
+
+// test_c23_label_before_decl: declaration directly after label is valid in C23
+[[cccc::test(return = 42)]]
+int test_c23_label_before_decl(void) {
+    int value = 1, result = 0;
+    switch (value) {
+        case 1:
+            int x = 5;
+            result = x;
+            break;
+        case 2:
+            result = x * 2;
+            break;
+        default:
+            int y = 99;
+            result = y;
+            break;
+    }
+    goto done;
+done:
+    int z = 42;
+    result += z;
+    return result == 47 ? 42 : 1;
+}
+
+// test_c23_compound_literal_auto_error, test_c23_compound_literal_extern_error,
+// test_c23_compound_literal_inline_error, test_c23_compound_literal_typedef_error,
+// test_constexpr_nonconstant_init_error: deferred — these errors use error_tok() paths
+// that are not recoverable via collect_errors, so the suite compilation aborts.
+// These remain as legacy tests.
 
 #pragma cccc suite end

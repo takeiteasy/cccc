@@ -960,8 +960,10 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                 memset(vm->data_seg, 0, snap_size);
                 vm->data_ptr = vm->data_seg;
 
-                vm->flags              = req_flags;
-                vm->compiler.opt_level = req_opt;
+                vm->flags                     = req_flags;
+                vm->compiler.opt_level        = req_opt;
+                vm->compiler.ffp_contract_fma = (req_flags & CCCC_FMA) != 0;
+                vm->ffi_errors_fatal          = (req_flags & CCCC_FFI_ERRORS_FATAL) ? 1 : 0;
                 cc_compile(vm, prog);
 
                 // Refresh the base snapshot from the newly initialised data segment.
@@ -1356,8 +1358,10 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
     if (cur_vm_flags != base_vm_flags || cur_opt_lvl != base_opt_lvl) {
         memset(vm->data_seg, 0, snap_size);
         vm->data_ptr           = vm->data_seg;
-        vm->flags              = base_vm_flags;
-        vm->compiler.opt_level = base_opt_lvl;
+        vm->flags                     = base_vm_flags;
+        vm->compiler.opt_level        = base_opt_lvl;
+        vm->compiler.ffp_contract_fma = (base_vm_flags & CCCC_FMA) != 0;
+        vm->ffi_errors_fatal          = (base_vm_flags & CCCC_FFI_ERRORS_FATAL) ? 1 : 0;
         cc_compile(vm, prog);
     }
 

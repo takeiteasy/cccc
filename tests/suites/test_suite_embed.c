@@ -1,6 +1,10 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: #embed directive and parameters
-// Source tests: test_embed_all_params, test_embed_if_empty, test_embed_limit_constexpr, test_embed_limit_zero_if_empty, test_embed_nested_parens, test_embed_param_order, test_embed_prefix, test_embed_prefix_suffix, test_embed_suffix
+// Source tests: test_embed_all_params, test_embed_if_empty, test_embed_limit_constexpr,
+//   test_embed_limit_zero_if_empty, test_embed_nested_parens, test_embed_param_order,
+//   test_embed_prefix, test_embed_prefix_suffix, test_embed_suffix,
+//   test_embed_basic, test_embed_empty, test_embed_minimal, test_embed_limit,
+//   test_embed_limit_zero, test_embed_inline
 
 // [from test_embed_all_params]
 // Test #embed with all parameters: prefix, suffix, limit, if_empty
@@ -269,6 +273,65 @@ int test_embed_suffix(void) {
     }
 
     return 42;  // Success
+}
+
+// test_embed_basic: basic #embed reading 3 bytes that sum to 42
+[[cccc::test(return = 42)]]
+int test_embed_basic(void) {
+    unsigned char data[] = {
+        #embed "../embed_data/test_data.bin"
+    };
+    if (sizeof(data) != 3) return 1;
+    return data[0] + data[1] + data[2];
+}
+
+// test_embed_empty: #embed on empty file with single fallback byte
+[[cccc::test(return = 42)]]
+int test_embed_empty(void) {
+    unsigned char data[] = {
+#embed "../embed_data/empty_file.bin"
+        42
+    };
+    if (sizeof(data) != 1) return 1;
+    return data[0];
+}
+
+// test_embed_minimal: #embed with no surrounding whitespace
+[[cccc::test(return = 42)]]
+int test_embed_minimal(void) {
+    unsigned char data[] = {
+#embed "../embed_data/test_data.bin"
+    };
+    return data[0] + data[1] + data[2];
+}
+
+// test_embed_limit: #embed limit(2) reads first 2 bytes, add 12 to reach 42
+[[cccc::test(return = 42)]]
+int test_embed_limit_basic(void) {
+    unsigned char data[] = {
+        #embed "../embed_data/test_data.bin" limit(2)
+    };
+    if (sizeof(data) != 2) return 1;
+    return data[0] + data[1] + 12;
+}
+
+// test_embed_limit_zero: #embed limit(0) produces empty with fallback byte 42
+[[cccc::test(return = 42)]]
+int test_embed_limit_zero_basic(void) {
+    unsigned char data[] = {
+#embed "../embed_data/test_data.bin" limit(0)
+        42
+    };
+    if (sizeof(data) != 1) return 1;
+    return data[0];
+}
+
+// test_embed_inline: #embed on same line as initializer brace
+[[cccc::test(return = 42)]]
+int test_embed_inline_basic(void) {
+    unsigned char data[] = { #embed "../embed_data/test_data.bin" };
+    if (sizeof(data) != 3) return 1;
+    return data[0] + data[1] + data[2];
 }
 
 #pragma cccc suite end

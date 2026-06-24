@@ -4744,6 +4744,10 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
             SET_FLAG(CCCC_CFI);
         } else if (strcmp(tok, "-g") == 0 || strcmp(tok, "--debug") == 0) {
             SET_FLAG(CCCC_ENABLE_DEBUGGER);
+        } else if (strcmp(tok, "--fma") == 0) {
+            SET_FLAG(CCCC_FMA);
+        } else if (strcmp(tok, "--ffi-errors-fatal") == 0) {
+            SET_FLAG(CCCC_FFI_ERRORS_FATAL);
 #undef SET_FLAG
         } else {
             // Copy tok before freeing buf (tok points into buf).

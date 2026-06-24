@@ -1,6 +1,6 @@
 // CCCC_FLAGS: --testing
-// Consolidated suite: optimizer: constant fold, inline, CSE, compaction, pure/const
-// Source tests: test_calln_callf_dead_elim, test_cse_const_calls, test_inline_dead, test_inline_locals, test_inline_multistmt, test_inline_singlereturn, test_inline_threshold, test_inline_void, test_optimizer_compaction, test_optimizer_constant_fold, test_optimizer_indexed_ops, test_optimizer_linear_statements, test_optimizer_scalar_promotion, test_pure_const_attr, test_pure_dead_call_elim
+// Consolidated suite: optimizer: constant fold, inline, CSE, compaction, pure/const, FMA
+// Source tests: test_calln_callf_dead_elim, test_cse_const_calls, test_inline_dead, test_inline_locals, test_inline_multistmt, test_inline_singlereturn, test_inline_threshold, test_inline_void, test_optimizer_compaction, test_optimizer_constant_fold, test_optimizer_indexed_ops, test_optimizer_linear_statements, test_optimizer_scalar_promotion, test_pure_const_attr, test_pure_dead_call_elim, test_optimizer_fmadd_precision, test_optimizer_fmsub_precision, test_optimizer_fnmsub_precision
 
 // [from test_calln_callf_dead_elim]
 // Test dead-call elimination for CALLN (indirect calls).
@@ -535,6 +535,79 @@ int test_pure_dead_call_elim(void) {
     _pure_dead_call_elim_square(++k);
     if (k != 2) return 5;
 
+    return 42;
+}
+
+// test_optimizer_fmadd_precision: FMADD3_FMA single-rounding path (--fma)
+// Uses exact-representable values so FMA and two-rounding agree.
+[[cccc::test(return = 42, flags = "--fma --optimize=4")]]
+int test_optimizer_fmadd_precision(void) {
+    static double dot_d(const double *a, const double *b, int n) {
+        double sum = 0.0;
+        for (int i = 0; i < n; i++)
+            sum += a[i] * b[i];
+        return sum;
+    }
+    static float dot_f(const float *a, const float *b, int n) {
+        float sum = 0.0f;
+        for (int i = 0; i < n; i++)
+            sum += a[i] * b[i];
+        return sum;
+    }
+    double a[3] = {1.0, 2.0, 4.0};
+    double b[3] = {1.0, 2.0, 4.0};
+    if (dot_d(a, b, 3) != 21.0) return 1;
+    float fa[3] = {1.0f, 2.0f, 4.0f};
+    float fb[3] = {1.0f, 2.0f, 4.0f};
+    if (dot_f(fa, fb, 3) != 21.0f) return 2;
+    return 42;
+}
+
+// test_optimizer_fmsub_precision: FMSUB3_FMA single-rounding path (--fma)
+[[cccc::test(return = 42, flags = "--fma --optimize=4")]]
+int test_optimizer_fmsub_precision(void) {
+    static double dot_sub_d(const double *a, const double *b, int n) {
+        double sum = 0.0;
+        for (int i = 0; i < n; i++)
+            sum -= a[i] * b[i];
+        return sum;
+    }
+    static float dot_sub_f(const float *a, const float *b, int n) {
+        float sum = 0.0f;
+        for (int i = 0; i < n; i++)
+            sum -= a[i] * b[i];
+        return sum;
+    }
+    double a[3] = {1.0, 2.0, 4.0};
+    double b[3] = {1.0, 2.0, 4.0};
+    if (dot_sub_d(a, b, 3) != -21.0) return 1;
+    float fa[3] = {1.0f, 2.0f, 4.0f};
+    float fb[3] = {1.0f, 2.0f, 4.0f};
+    if (dot_sub_f(fa, fb, 3) != -21.0f) return 2;
+    return 42;
+}
+
+// test_optimizer_fnmsub_precision: FNMSUB3_FMA single-rounding path (--fma)
+[[cccc::test(return = 42, flags = "--fma --optimize=4")]]
+int test_optimizer_fnmsub_precision(void) {
+    static double acc_sub_d(const double *a, const double *b, int n) {
+        double sum = 1000.0;
+        for (int i = 0; i < n; i++)
+            sum -= a[i] * b[i];
+        return sum;
+    }
+    static float acc_sub_f(const float *a, const float *b, int n) {
+        float sum = 1000.0f;
+        for (int i = 0; i < n; i++)
+            sum -= a[i] * b[i];
+        return sum;
+    }
+    double a[3] = {1.0, 2.0, 4.0};
+    double b[3] = {1.0, 2.0, 4.0};
+    if (acc_sub_d(a, b, 3) != 979.0) return 1;
+    float fa[3] = {1.0f, 2.0f, 4.0f};
+    float fb[3] = {1.0f, 2.0f, 4.0f};
+    if (acc_sub_f(fa, fb, 3) != 979.0f) return 2;
     return 42;
 }
 

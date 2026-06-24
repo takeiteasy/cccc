@@ -332,6 +332,10 @@ typedef enum {
     CCCC_THREAD_SAFETY = (1 << 21),   // 0x00200000 - Threading safety diagnostics
     CCCC_NO_DEBUG_ON_CRASH =
         (1 << 22), // 0x00400000 - Suppress auto-debugger-on-crash
+    CCCC_FMA =
+        (1 << 23), // 0x00800000 - FMA fusion codegen (--fma)
+    CCCC_FFI_ERRORS_FATAL =
+        (1 << 24), // 0x01000000 - Fatal FFI errors (--ffi-errors-fatal)
 
     // Convenience flag combinations
     CCCC_POINTER_SANITIZER =
