@@ -175,6 +175,8 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                         bytecode to <file>; if omitted, writes to stdout\n");
     printf("\t-d/--disassemble         Disassemble bytecode to stdout\n");
     printf("\t-t/--testing             Discover and run [[cccc::test]] functions\n");
+    printf("\t   --test-c4             Bytecode round-trip: compile, save .c4, reload, then run tests\n");
+    printf("\t                         (implies --testing; exercises FFI-table and bytecode persistence)\n");
     printf("\t   --test=GLOB           Run only tests whose name matches GLOB (implies --testing)\n");
     printf("\t   --test-suite=NAME     Run tests in NAME and its sub-suites (prefix match);\n");
     printf("\t                         glob metacharacters (*?[) switch to fnmatch (implies --testing)\n");
@@ -738,6 +740,7 @@ int main(int argc, const char *argv[]) {
     CcNgramState *ngram_state = NULL;
     CcFusionState *fusion_state = NULL;
     int testing_mode = 0;          // --testing
+    int test_c4_mode = 0;          // --test-c4
     const char *test_glob = NULL;  // --test=GLOB
     const char *suite_filter = NULL; // --test-suite=NAME
     int list_tests = 0;            // --list-tests
@@ -840,6 +843,7 @@ int main(int argc, const char *argv[]) {
         {"inline-limit", required_argument, 0, 1051},
         {"asm-passthru", no_argument, 0, 'A'},
         {"testing", no_argument, 0, 't'},
+        {"test-c4", no_argument, 0, 1110},
         {"test", required_argument, 0, 1061},
         {"test-suite", required_argument, 0, 1062},
         {"list-tests", no_argument, 0, 1063},
@@ -1258,6 +1262,10 @@ int main(int argc, const char *argv[]) {
             asm_passthru = 1;
             break;
         case 't': // --testing
+            testing_mode = 1;
+            break;
+        case 1110: // --test-c4
+            test_c4_mode = 1;
             testing_mode = 1;
             break;
         case 1061: // --test=GLOB
@@ -2196,6 +2204,48 @@ int main(int argc, const char *argv[]) {
     }
 
     if (testing_mode) {
+        if (test_c4_mode) {
+            // In-process bytecode round-trip: compile → save .c4 → reload → run tests.
+            // test_fns/test_setups survive cc_load_bytecode (not stored in .c4); text_ptr
+            // is reset correctly (bytecode.c:925); only FFI func_ptrs need restoration.
+            int n_ffi = vm.compiler.ffi_count;
+            void **ffi_ptrs = n_ffi > 0 ? malloc((size_t)n_ffi * sizeof(void *)) : NULL;
+            if (n_ffi > 0 && !ffi_ptrs) {
+                fprintf(stderr, "error: --test-c4: out of memory\n");
+                exit_code = 1;
+                goto BAIL;
+            }
+            for (int i = 0; i < n_ffi; i++)
+                ffi_ptrs[i] = vm.compiler.ffi_table[i].func_ptr;
+
+            char *c4_tmp = make_tmp_path(".c4");
+            if (!c4_tmp) {
+                fprintf(stderr, "error: --test-c4: failed to create temp file\n");
+                free(ffi_ptrs);
+                exit_code = 1;
+                goto BAIL;
+            }
+            if (cc_save_bytecode(&vm, c4_tmp) != 0) {
+                fprintf(stderr, "error: --test-c4: failed to save bytecode\n");
+                unlink(c4_tmp); free(c4_tmp); free(ffi_ptrs);
+                exit_code = 1;
+                goto BAIL;
+            }
+            if (cc_load_bytecode(&vm, c4_tmp) != 0) {
+                fprintf(stderr, "error: --test-c4: failed to reload bytecode\n");
+                unlink(c4_tmp); free(c4_tmp); free(ffi_ptrs);
+                exit_code = 1;
+                goto BAIL;
+            }
+            unlink(c4_tmp);
+            free(c4_tmp);
+
+            int n_after = vm.compiler.ffi_count < n_ffi ? vm.compiler.ffi_count : n_ffi;
+            for (int i = 0; i < n_after; i++)
+                vm.compiler.ffi_table[i].func_ptr = ffi_ptrs[i];
+            free(ffi_ptrs);
+        }
+
         CcTestOptions test_opts = {
             .test_glob    = test_glob,
             .suite_filter = suite_filter,

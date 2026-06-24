@@ -123,9 +123,9 @@ UB in code paths that only manifest under specific heap/ASLR layouts.
 ### Current results
 
 **arm64 baseline (macOS and Linux):** all source-mode tests pass. `test_nexttoward.c`
-(which covers `nexttoward`, `nexttowardf`, and `nexttowardl`) is c4-incompatible
-(testing prepass) and is skipped in `.c4` mode. The `nexttowardf` ABI fix is
-resolved in [#498](https://todo.sr.ht/~takeiteasy/cccc/498).
+passes in `.c4` mode via `--test-c4`. The `nexttowardf` ABI fix is
+resolved in [#498](https://todo.sr.ht/~takeiteasy/cccc/498). `[[cccc::test]]` suite
+files use `--test-c4` for the bytecode round-trip internally.
 
 **macOS x86_64 (Rosetta 2):** build, smoke, and architecture assertions pass.
 Source and `.c4` suites match the arm64 baseline. The host-signal debugger
@@ -785,6 +785,22 @@ Line-delimited JSON objects, one per test, wrapped in an array:
 ```
 
 The process exits with code `0` if all tests pass, `1` if any fail.
+
+### Bytecode round-trip mode (`--test-c4`)
+
+`--test-c4` (implies `--testing`) compiles the source, saves the bytecode to a temporary `.c4` file, reloads it via `cc_load_bytecode`, and then runs the test suite against the reloaded bytecode. This exercises FFI-table persistence and bytecode round-trip correctness.
+
+```
+./cccc --testing --test-c4 myfile.c
+```
+
+The round-trip is transparent to the test suite — all assertion macros, setup/teardown hooks, and output formats work identically. Tests with per-test `flags =` attributes that trigger lazy recompilation still execute correctly; their specific run uses freshly compiled bytecode rather than the round-tripped copy, which is expected behaviour.
+
+The `tools/tests.py --c4` runner uses this flag automatically for `[[cccc::test]]` suite files:
+
+```
+python3 tools/tests.py --suites --c4
+```
 
 ### Combining with `-c` (compile pre-pass)
 
