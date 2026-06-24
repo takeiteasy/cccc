@@ -67,6 +67,39 @@ Examples:
 ./cccc -O3 -fno-copy-prop prog.c # O3 without copy propagation
 ```
 
+### Per-Pass Overrides via `#pragma cccc config`
+
+Individual optimisation passes can also be enabled or disabled inline using
+`#pragma cccc config`. The key names use underscores (matching the `snake_case`
+convention of existing config keys):
+
+```c
+#pragma cccc config(fold = true)           // enable constant folding
+#pragma cccc config(cse = false)           // disable CSE
+#pragma cccc config(fold, peephole)        // bare key = true for multiple passes
+#pragma cccc config(dce = false, fuse = false)
+```
+
+Accepted pass keys: `fold`, `peephole`, `copy_prop`, `dce`, `cse`, `fuse`,
+`elim_ext`. Boolean values `true`/`false` (or `1`/`0`) are accepted; a bare
+key without `= value` defaults to `true`.
+
+CLI `-f`/`-fno-` flags take precedence over `#pragma cccc config` for the same
+pass — the pragma is silently ignored for any pass already pinned by the CLI.
+
+### Per-Pass Overrides in `[[cccc::test]]` Suites
+
+Inside `[[cccc::test]]` suite files, `-f<pass>` and `-fno-<pass>` flags are
+accepted in the `flags=` attribute and trigger a lazy recompile with that
+pass configuration:
+
+```c
+[[cccc::test(return = 42, flags = "-ffold -fno-cse")]]
+int test_fold_only(void) { return 6 * 7; }
+```
+
+See [TESTING.md](TESTING.md) for the full per-test flags reference.
+
 ## Per-Function Optimization
 
 A single function can request its own optimization level using the `optimize`

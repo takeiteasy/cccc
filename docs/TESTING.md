@@ -904,32 +904,57 @@ void test_optimised(void) {
 ```
 
 The `flags` value is a whitespace-separated string of CCCC CLI flags. Any flag
-accepted by `cccc` for safety or optimisation can be used: `-b`/`--bounds-checks`,
-`--overflow-checks`, `--type-checks`, `--stack-canaries`, `--heap-canaries`,
-`--uaf-detection`, `--pointer-sanitizer`, `--memory-leak-detection`,
-`--memory-tagging`, `--uninitialized-detection`, `--stack-instrumentation`,
-`--alignment-checks`, `--provenance-tracking`, `--invalid-arithmetic`,
-`--format-string-checks`, `--random-canaries`, `--memory-poisoning`,
-`--thread-safety`, `-O<n>`/`--optimize=<n>`, the safety presets
-`-0`/`-1`/`-2`/`-3`/`--safety=none|basic|standard|max`, and:
+accepted by `cccc` for safety, optimisation, or warnings can be used:
 
-- `--fma` — enable FMA fusion in the bytecode optimizer
-- `--ffi-errors-fatal` — make denied FFI calls abort immediately instead of returning 0
+**Safety check flags:** `-b`/`--bounds-checks`, `--overflow-checks`, `--type-checks`,
+`--stack-canaries`, `--heap-canaries`, `--uaf-detection`, `--pointer-sanitizer`,
+`--memory-leak-detection`, `--memory-tagging`, `--uninitialized-detection`,
+`--stack-instrumentation`, `--alignment-checks`, `--provenance-tracking`,
+`--invalid-arithmetic`, `--format-string-checks`, `--random-canaries`,
+`--memory-poisoning`, `--thread-safety`, `--dangling-pointers`, `-V`/`--vm-heap`,
+`-C`/`--control-flow-integrity`, `--fma`, `--ffi-errors-fatal`
+
+**Safety presets:** `-0`/`-1`/`-2`/`-3` and `--safety=none|basic|standard|max`
+
+**Optimisation level:** `-O<n>`/`--optimize=<n>`
+
+**Optimisation-pass flags** (enable/disable individual passes regardless of `-O` level):
+- `-ffold` / `-fno-fold` — constant folding
+- `-fpeephole` / `-fno-peephole` — peephole reduction
+- `-fcopy-prop` / `-fno-copy-prop` — copy propagation
+- `-fdce` / `-fno-dce` — dead code elimination
+- `-fcse` / `-fno-cse` — common subexpression elimination
+- `-ffuse` / `-fno-fuse` — opcode fusion
+- `-felim-ext` / `-fno-elim-ext` — redundant extension elimination
+
+**Warning flags** (affect compilation diagnostics for this test's lazy recompile):
+- `-W<name>` / `-Wno-<name>` — enable/disable a warning category
+- `-Wall`, `-Wextra`, `-Wpedantic`, `-Wstrict-prototypes`, etc.
+- `-Werror` — treat all enabled warnings as errors for this test
+- `-Werror=<name>` — promote one warning category to an error
+- `-Wno-error=<name>` — demote one category (reverses a previous `-Werror=<name>`)
+
+```c
+[[cccc::test(return = 42, flags = "-Wpedantic")]]
+int test_pedantic_clean(void) { return 42; }
+
+[[cccc::test(return = 42, flags = "-ffold -fno-cse")]]
+int test_fold_no_cse(void) { return 6 * 7; }
+```
 
 Unknown flags are a hard compile error referencing the test name.
 
 ### Flags that must stay at file scope
 
-Some flags affect parsing or preprocessing and cannot be applied per-test because
-the lazy recompile only re-runs codegen, not the parser. Use a dedicated suite file
-with the flag in its `CCCC_FLAGS:` comment instead:
+Some flags affect parsing or preprocessing at tokenisation time and cannot be
+applied per-test because the lazy recompile only re-runs codegen/semantics.
+Use a dedicated suite file with the flag in its `CCCC_FLAGS:` comment instead:
 
 | Flag | Suite file pattern |
 |------|--------------------|
 | `--std=c89`/`c99`/`c11`/`c17`/`c23` | `test_suite_std_c89.c`, `test_suite_std_c17.c`, … |
 | `--ffi-deny=NAME` | `test_suite_ffi_deny.c` (one file per deny set) |
 | `--disable-ffi` | `test_suite_ffi_disable.c` |
-| `-W…`/`-Werror…`/warning flags | Remain as legacy `tests/test_*.c` files for now |
 
 ### Semantics
 
@@ -1056,4 +1081,4 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 - **`exit_code =` tests are skipped on non-POSIX platforms** where `fork(2)` is not available.
 - `--test-timeout` uses `SIGALRM`; test code that also uses `alarm()` or installs a `SIGALRM` handler will interfere with the timeout mechanism.
 - **`flags=` triggers a whole-program recompile.** The recompile is lazy (only when the required config changes), but setup/teardown hook once-snapshots taken before a recompile are discarded and re-taken under the new compile. If a once-setup hook leaves per-test state in global variables, that state may not survive across recompile boundaries.
-- **`flags=` only supports codegen and safety flags.** Flags that affect parsing, preprocessing, or output format (e.g. `--std=`, `--include`, `-D`) are not meaningful in `flags=` and will be rejected as unknown flags.
+- **`flags=` supports safety, optimisation, warning, and -f pass flags.** Flags that affect tokenisation, preprocessing, or output format (e.g. `--std=`, `--include`, `-D`) cannot be per-test and will be rejected as unknown flags.

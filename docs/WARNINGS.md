@@ -20,6 +20,26 @@ Exception: `-Werror=<name>` is **sticky**. Once a category is promoted to an
 error with `-Werror=<name>`, a subsequent `-Wno-error=<name>` has no effect.
 Use `-Wno-<name>` to fully disable the category, including its error promotion.
 
+## Per-Test Warning Flags (in `[[cccc::test]]` suites)
+
+Warning flags can be applied per-test inside `[[cccc::test]]` suite files using
+the `flags=` attribute. This triggers a lazy recompile of the whole program with
+the specified warning configuration before running that test:
+
+```c
+// Compile this test with -Wpedantic active
+[[cccc::test(return = 42, flags = "-Wpedantic")]]
+int test_pedantic_clean(void) { return 42; }
+
+// Promote conversion warnings to errors for this test
+[[cccc::test(return = 42, flags = "-Werror=conversion")]]
+int test_no_conversion(void) { return 42; }
+```
+
+All CLI warning flags are accepted: `-W<name>`, `-Wno-<name>`, `-Wall`,
+`-Wextra`, `-Wpedantic`, `-Werror`, `-Werror=<name>`, `-Wno-error=<name>`.
+See [TESTING.md](TESTING.md) for the full per-test flags reference.
+
 ## Pragma-Based Suppression
 
 Within source files, `#pragma cccc diagnostic` controls warning state inline:

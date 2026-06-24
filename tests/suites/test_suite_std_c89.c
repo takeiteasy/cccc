@@ -7,8 +7,12 @@
 // Note: compile-error tests (test_std_c89_{bool,flexible_array,inline,restrict,
 //       stdbool_include}_error) remain as legacy tests — their errors fire at
 //       tokenise/preprocess time and cannot be caught per-function in the suite
-//       framework. test_pedantic_{compound,line}_error (--std=c89 -Werror=pedantic)
-//       also remain as legacy since they need -Werror=pedantic at file scope.
+//       framework.
+// Kept legacy (#612): test_pedantic_compound_literal_error and
+//   test_pedantic_line_comment_error — these use -Werror=pedantic, which
+//   promotes warn_tok() to non-recoverable error_tok(); cannot be caught
+//   per-function by collect_errors until error_tok_recover() is adopted
+//   for warn→error paths.
 
 #pragma cccc suite begin "std_c89"
 

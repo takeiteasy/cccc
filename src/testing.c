@@ -861,13 +861,23 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
     memcpy(base_snap, vm->data_seg, snap_size);
     char  *cur_snap   = base_snap;
 
-    // Per-test flags (#356): capture the base compiled config.  Safety and
-    // optimisation flags are baked into codegen, so any test that requests a
-    // different flag set triggers a lazy recompile of the whole program.
-    uint32_t base_vm_flags = vm->flags;
-    int      base_opt_lvl  = vm->compiler.opt_level;
-    uint32_t cur_vm_flags  = base_vm_flags;
-    int      cur_opt_lvl   = base_opt_lvl;
+    // Per-test flags (#356, #612): capture the base compiled config.  Safety,
+    // optimisation, warning, and -f pass flags are baked into codegen, so any
+    // test that requests a different config triggers a lazy recompile.
+    uint32_t base_vm_flags   = vm->flags;
+    int      base_opt_lvl    = vm->compiler.opt_level;
+    uint64_t base_warnings   = vm->compiler.warnings;
+    uint64_t base_warn_errs  = vm->compiler.warning_errors;
+    bool     base_warn_ae    = vm->warnings_as_errors;
+    uint32_t base_f_enable   = vm->compiler.opt_f_enable;
+    uint32_t base_f_disable  = vm->compiler.opt_f_disable;
+    uint32_t cur_vm_flags    = base_vm_flags;
+    int      cur_opt_lvl     = base_opt_lvl;
+    uint64_t cur_warnings    = base_warnings;
+    uint64_t cur_warn_errs   = base_warn_errs;
+    bool     cur_warn_ae     = base_warn_ae;
+    uint32_t cur_f_enable    = base_f_enable;
+    uint32_t cur_f_disable   = base_f_disable;
 
     bool stop_early = false;
     for (TestListNode *n2 = filtered; n2 && !stop_early; n2 = n2->next) {
@@ -934,25 +944,54 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
             continue;
         }
 
-        // --- Lazy recompile for per-test flags (#356) ---
+        // --- Lazy recompile for per-test flags (#356, #612) ---
         // flags= on the test attribute may specify a different codegen config
-        // (safety level, optimisation level, individual checks).  Since those
-        // are baked in at cc_compile() time, we recompile the whole program
-        // whenever the required config differs from what is currently compiled.
+        // (safety level, optimisation level, individual checks, warning flags,
+        // optimisation-pass enables/disables).  Since those are baked in at
+        // cc_compile() time, we recompile the whole program whenever the
+        // required config differs from what is currently compiled.
         // Adjacent tests sharing the same flags share one compile; the unflagged
         // base-config compile is also reused across consecutive unflagged tests.
         {
             uint32_t req_flags;
             int      req_opt;
-            if (r->test_flags_mask || r->test_opt_set) {
-                req_flags = (base_vm_flags & ~r->test_flags_mask) | r->test_flags_or;
-                req_opt   = r->test_opt_set ? r->test_opt_level : base_opt_lvl;
+            uint64_t req_warnings;
+            uint64_t req_warn_errs;
+            bool     req_warn_ae;
+            uint32_t req_f_enable;
+            uint32_t req_f_disable;
+
+            bool has_any_flags = r->test_flags_mask || r->test_opt_set
+                              || r->test_warn_mask   || r->test_warn_errors_mask
+                              || r->test_warn_as_errors_set || r->test_f_set;
+
+            if (has_any_flags) {
+                req_flags     = (base_vm_flags & ~r->test_flags_mask) | r->test_flags_or;
+                req_opt       = r->test_opt_set ? r->test_opt_level : base_opt_lvl;
+                req_warnings  = (base_warnings  & ~r->test_warn_mask)        | r->test_warn_or;
+                req_warn_errs = (base_warn_errs & ~r->test_warn_errors_mask) | r->test_warn_errors_or;
+                req_warn_ae   = r->test_warn_as_errors_set ? r->test_warn_as_errors : base_warn_ae;
+                req_f_enable  = (base_f_enable  & ~r->test_f_disable) | r->test_f_enable;
+                req_f_disable = (base_f_disable & ~r->test_f_enable)  | r->test_f_disable;
             } else {
-                req_flags = base_vm_flags;
-                req_opt   = base_opt_lvl;
+                req_flags     = base_vm_flags;
+                req_opt       = base_opt_lvl;
+                req_warnings  = base_warnings;
+                req_warn_errs = base_warn_errs;
+                req_warn_ae   = base_warn_ae;
+                req_f_enable  = base_f_enable;
+                req_f_disable = base_f_disable;
             }
 
-            if (req_flags != cur_vm_flags || req_opt != cur_opt_lvl) {
+            bool needs_recompile = (req_flags    != cur_vm_flags)
+                                || (req_opt       != cur_opt_lvl)
+                                || (req_warnings  != cur_warnings)
+                                || (req_warn_errs != cur_warn_errs)
+                                || (req_warn_ae   != cur_warn_ae)
+                                || (req_f_enable  != cur_f_enable)
+                                || (req_f_disable != cur_f_disable);
+
+            if (needs_recompile) {
                 // Discard any per-once-hook snapshot that references the old compile.
                 if (cur_snap != base_snap) { free(cur_snap); cur_snap = base_snap; }
                 // Zero-clear and reset the data segment so gen() re-emits all
@@ -960,18 +999,28 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                 memset(vm->data_seg, 0, snap_size);
                 vm->data_ptr = vm->data_seg;
 
-                vm->flags                     = req_flags;
-                vm->compiler.opt_level        = req_opt;
-                vm->compiler.ffp_contract_fma = (req_flags & CCCC_FMA) != 0;
-                vm->ffi_errors_fatal          = (req_flags & CCCC_FFI_ERRORS_FATAL) ? 1 : 0;
+                vm->flags                        = req_flags;
+                vm->compiler.opt_level           = req_opt;
+                vm->compiler.ffp_contract_fma    = (req_flags & CCCC_FMA) != 0;
+                vm->ffi_errors_fatal             = (req_flags & CCCC_FFI_ERRORS_FATAL) ? 1 : 0;
+                vm->compiler.warnings            = req_warnings;
+                vm->compiler.warning_errors      = req_warn_errs;
+                vm->warnings_as_errors           = req_warn_ae;
+                vm->compiler.opt_f_enable        = req_f_enable;
+                vm->compiler.opt_f_disable       = req_f_disable;
                 cc_compile(vm, prog);
 
                 // Refresh the base snapshot from the newly initialised data segment.
                 memcpy(base_snap, vm->data_seg, snap_size);
                 cur_snap = base_snap;
 
-                cur_vm_flags = req_flags;
-                cur_opt_lvl  = req_opt;
+                cur_vm_flags  = req_flags;
+                cur_opt_lvl   = req_opt;
+                cur_warnings  = req_warnings;
+                cur_warn_errs = req_warn_errs;
+                cur_warn_ae   = req_warn_ae;
+                cur_f_enable  = req_f_enable;
+                cur_f_disable = req_f_disable;
             }
         }
 

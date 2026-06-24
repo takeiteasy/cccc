@@ -714,6 +714,7 @@ int main(int argc, const char *argv[]) {
     int ffp_contract_fma = 0;  // --fma
     uint32_t opt_f_enable  = 0; // passes forced ON  by -f<pass>
     uint32_t opt_f_disable = 0; // passes forced OFF by -fno-<pass>
+    uint32_t opt_f_mask    = 0; // all bits touched by -f/-fno- CLI args (#612)
     int inline_node_limit = 20; // --inline-limit (default 20, 0=disable)
     int asm_passthru = 0;       // --asm-passthru
     const char *std_arg = NULL; // --std=<standard>
@@ -1465,6 +1466,7 @@ int main(int argc, const char *argv[]) {
                 if (strcmp(name, pass_table[k].name) == 0) {
                     if (neg) opt_f_disable |= (uint32_t)pass_table[k].bit;
                     else     opt_f_enable  |= (uint32_t)pass_table[k].bit;
+                    opt_f_mask |= (uint32_t)pass_table[k].bit;
                     matched = true;
                     break;
                 }
@@ -1482,20 +1484,20 @@ int main(int argc, const char *argv[]) {
         case 'J':
             output_ffi_decls = 1;
             break;
-        case 1096: opt_f_enable  |= CCCC_OPT_FOLD;      break; // --ffold
-        case 1097: opt_f_enable  |= CCCC_OPT_PEEPHOLE;  break; // --fpeephole
-        case 1098: opt_f_enable  |= CCCC_OPT_COPY_PROP; break; // --fcopy-prop
-        case 1099: opt_f_enable  |= CCCC_OPT_DCE;       break; // --fdce
-        case 1100: opt_f_enable  |= CCCC_OPT_CSE;       break; // --fcse
-        case 1101: opt_f_enable  |= CCCC_OPT_FUSE;      break; // --ffuse
-        case 1102: opt_f_disable |= CCCC_OPT_FOLD;      break; // --fno-fold
-        case 1103: opt_f_disable |= CCCC_OPT_PEEPHOLE;  break; // --fno-peephole
-        case 1104: opt_f_disable |= CCCC_OPT_COPY_PROP; break; // --fno-copy-prop
-        case 1105: opt_f_disable |= CCCC_OPT_DCE;       break; // --fno-dce
-        case 1106: opt_f_disable |= CCCC_OPT_CSE;       break; // --fno-cse
-        case 1107: opt_f_disable |= CCCC_OPT_FUSE;      break; // --fno-fuse
-        case 1108: opt_f_enable  |= CCCC_OPT_ELIM_EXT; break; // --felim-ext
-        case 1109: opt_f_disable |= CCCC_OPT_ELIM_EXT; break; // --fno-elim-ext
+        case 1096: opt_f_enable  |= CCCC_OPT_FOLD;      opt_f_mask |= CCCC_OPT_FOLD;      break; // --ffold
+        case 1097: opt_f_enable  |= CCCC_OPT_PEEPHOLE;  opt_f_mask |= CCCC_OPT_PEEPHOLE;  break; // --fpeephole
+        case 1098: opt_f_enable  |= CCCC_OPT_COPY_PROP; opt_f_mask |= CCCC_OPT_COPY_PROP; break; // --fcopy-prop
+        case 1099: opt_f_enable  |= CCCC_OPT_DCE;       opt_f_mask |= CCCC_OPT_DCE;       break; // --fdce
+        case 1100: opt_f_enable  |= CCCC_OPT_CSE;       opt_f_mask |= CCCC_OPT_CSE;       break; // --fcse
+        case 1101: opt_f_enable  |= CCCC_OPT_FUSE;      opt_f_mask |= CCCC_OPT_FUSE;      break; // --ffuse
+        case 1102: opt_f_disable |= CCCC_OPT_FOLD;      opt_f_mask |= CCCC_OPT_FOLD;      break; // --fno-fold
+        case 1103: opt_f_disable |= CCCC_OPT_PEEPHOLE;  opt_f_mask |= CCCC_OPT_PEEPHOLE;  break; // --fno-peephole
+        case 1104: opt_f_disable |= CCCC_OPT_COPY_PROP; opt_f_mask |= CCCC_OPT_COPY_PROP; break; // --fno-copy-prop
+        case 1105: opt_f_disable |= CCCC_OPT_DCE;       opt_f_mask |= CCCC_OPT_DCE;       break; // --fno-dce
+        case 1106: opt_f_disable |= CCCC_OPT_CSE;       opt_f_mask |= CCCC_OPT_CSE;       break; // --fno-cse
+        case 1107: opt_f_disable |= CCCC_OPT_FUSE;      opt_f_mask |= CCCC_OPT_FUSE;      break; // --fno-fuse
+        case 1108: opt_f_enable  |= CCCC_OPT_ELIM_EXT;  opt_f_mask |= CCCC_OPT_ELIM_EXT;  break; // --felim-ext
+        case 1109: opt_f_disable |= CCCC_OPT_ELIM_EXT;  opt_f_mask |= CCCC_OPT_ELIM_EXT;  break; // --fno-elim-ext
         case '?':
             if (optopt)
                 fprintf(stderr, "error: option -%c requires an argument\n",
@@ -1834,6 +1836,7 @@ int main(int argc, const char *argv[]) {
     vm.compiler.ffp_contract_fma = ffp_contract_fma;
     vm.compiler.opt_f_enable  = opt_f_enable;
     vm.compiler.opt_f_disable = opt_f_disable;
+    vm.compiler.cli_f_mask    = opt_f_mask;
     vm.compiler.inline_node_limit = inline_node_limit;
     if (macro_recursion_limit >= 0)
         vm.compiler.macro_recursion_limit = macro_recursion_limit;

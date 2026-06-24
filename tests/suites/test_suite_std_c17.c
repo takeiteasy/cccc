@@ -5,10 +5,12 @@
 //               test_c23_keywords_pre_c23_idents, test_std_c17_constexpr_ok,
 //               test_std_c17_attributes_error
 //
+// Migrated (#612): test_std_c17_binary_literal_error (CCCC_EXPECT_STDERR not
+//   preserved — suite framework has no per-test stderr matching)
+//
 // Deferred (whole-file compile errors, not per-function catchable):
 //   test_c23_label_before_decl_error, test_c23_compound_literal_storage_c17_error,
 //   test_std_c17_digit_separator_error, test_std_c17_embed_error
-// Deferred (needs -Wpedantic): test_std_c17_binary_literal_error
 
 // C17: int foo() with no prototype — K&R style; must be defined at file scope
 int c17_kr_add();
@@ -85,6 +87,14 @@ int test_std_c17_constexpr_ok(void) {
 [[cccc::test(return = 42)]]
 int test_std_c17_attributes(void) {
     return c17_nodiscard_fn();
+}
+
+// test_std_c17_binary_literal (#612): binary literals are a C23 extension;
+// should warn (not error) in --std=c17 -Wpedantic. Code returns 42.
+// CCCC_EXPECT_STDERR for the pedantic warning is not preserved in suite format.
+[[cccc::test(return = 42, flags = "-Wpedantic")]]
+int test_std_c17_binary_literal(void) {
+    return 0b101010 == 42 ? 42 : 1;
 }
 
 #pragma cccc suite end

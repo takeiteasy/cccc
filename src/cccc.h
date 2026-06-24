@@ -1193,6 +1193,23 @@ struct TestRetField {
     TestRetField *next;
 };
 
+// Output bundle for cc_parse_test_flags(). Holds the full delta to apply when
+// lazily recompiling for a per-test flags= attribute.
+typedef struct {
+    uint32_t or_bits;             // CCCCFlags bits to force on
+    uint32_t set_mask;            // CCCCFlags bits explicitly named (on or off)
+    int      opt_level;           // -O level (valid only when opt_set)
+    bool     opt_set;             // true if -O/-Ox/--optimize=N was present
+    uint64_t warn_or;             // CCCCWarning bits to enable
+    uint64_t warn_mask;           // CCCCWarning bits explicitly named
+    uint64_t warn_errors_or;      // warning_errors bits to enable
+    uint64_t warn_errors_mask;    // warning_errors bits explicitly named
+    bool     warn_as_errors;      // true if -Werror (global) was given
+    bool     warn_as_errors_set;  // true if any -Werror variant was present
+    uint32_t f_enable;            // CcccOptPass bits to force ON
+    uint32_t f_disable;           // CcccOptPass bits to force OFF
+} CcTestFlagsDelta;
+
 // A test function registered via [[cccc::test]].
 typedef struct TestFnRecord TestFnRecord;
 struct TestFnRecord {
@@ -1223,6 +1240,17 @@ struct TestFnRecord {
     uint32_t  test_flags_mask; // which bits the string explicitly controls (on or off)
     int       test_opt_level;  // per-test optimisation level (0..4)
     bool      test_opt_set;    // true if flags= specified an -O/-Ox/--optimize=N level
+    // Per-test warning delta (#612)
+    uint64_t  test_warn_or;          // CCCCWarning bits to enable
+    uint64_t  test_warn_mask;        // CCCCWarning bits explicitly named
+    uint64_t  test_warn_errors_or;   // warning_errors bits to enable
+    uint64_t  test_warn_errors_mask; // warning_errors bits explicitly named
+    bool      test_warn_as_errors;   // -Werror (global) given
+    bool      test_warn_as_errors_set; // any -Werror variant present
+    // Per-test -f pass delta (#612)
+    uint32_t  test_f_enable;   // CcccOptPass bits to force ON
+    uint32_t  test_f_disable;  // CcccOptPass bits to force OFF
+    bool      test_f_set;      // true if any -f/-fno- flag given
     TestFnRecord *next;
 };
 
@@ -2135,6 +2163,7 @@ typedef struct Compiler {
     // Applied on top of the level-derived default: effective = (level_mask | opt_f_enable) & ~opt_f_disable.
     uint32_t opt_f_enable;  // Passes forced ON regardless of -O level
     uint32_t opt_f_disable; // Passes forced OFF regardless of -O level
+    uint32_t cli_f_mask;    // -f/-fno- pass bits pinned by CLI (#612: pragma config won't override)
 
     // #pragma cccc config(...) support
     uint32_t cli_flags_mask;  // CCCCFlags bits explicitly set on the CLI; these

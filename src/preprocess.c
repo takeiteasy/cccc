@@ -3055,9 +3055,21 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
                 vm->compiler.test_fns = rec;
                 if (ta.flags) {
                     rec->test_flags = strdup(ta.flags);
-                    cc_parse_test_flags(vm, probe, ta.flags, rec->name,
-                                        &rec->test_flags_or, &rec->test_flags_mask,
-                                        &rec->test_opt_level, &rec->test_opt_set);
+                    CcTestFlagsDelta _delta = {0};
+                    cc_parse_test_flags(vm, probe, ta.flags, rec->name, &_delta);
+                    rec->test_flags_or          = _delta.or_bits;
+                    rec->test_flags_mask        = _delta.set_mask;
+                    rec->test_opt_level         = _delta.opt_level;
+                    rec->test_opt_set           = _delta.opt_set;
+                    rec->test_warn_or           = _delta.warn_or;
+                    rec->test_warn_mask         = _delta.warn_mask;
+                    rec->test_warn_errors_or    = _delta.warn_errors_or;
+                    rec->test_warn_errors_mask  = _delta.warn_errors_mask;
+                    rec->test_warn_as_errors    = _delta.warn_as_errors;
+                    rec->test_warn_as_errors_set = _delta.warn_as_errors_set;
+                    rec->test_f_enable          = _delta.f_enable;
+                    rec->test_f_disable         = _delta.f_disable;
+                    rec->test_f_set             = (_delta.f_enable || _delta.f_disable);
                 }
                 if (ta.exit_code_val >= 0 && ta.error_pat) {
                     warn_tok(vm, probe, CCCC_WARN_ATTRIBUTES,
@@ -3426,6 +3438,35 @@ static void pragma_config_set_optimisation(VirtualMachine *vm, int level) {
     vm->compiler.opt_level = level;
 }
 
+// Table of optimisation-pass keys accepted by #pragma cccc config(...) (#612).
+typedef struct { const char *name; uint32_t bit; } PragmaConfigOptPass;
+static const PragmaConfigOptPass pragma_config_opt_passes[] = {
+    {"fold",      CCCC_OPT_FOLD},
+    {"peephole",  CCCC_OPT_PEEPHOLE},
+    {"copy_prop", CCCC_OPT_COPY_PROP},
+    {"dce",       CCCC_OPT_DCE},
+    {"cse",       CCCC_OPT_CSE},
+    {"fuse",      CCCC_OPT_FUSE},
+    {"elim_ext",  CCCC_OPT_ELIM_EXT},
+};
+
+// Enables or disables a single optimisation pass, unless the CLI pinned it via
+// -f/-fno-. Note: enable and disable are mutually exclusive; setting one clears
+// the other so that opt_f_enable and opt_f_disable stay consistent.
+static void pragma_config_set_opt_pass(VirtualMachine *vm, uint32_t bit, bool enable) {
+    if (vm->compiler.native_mode)
+        return;
+    if (vm->compiler.cli_f_mask & bit)
+        return;
+    if (enable) {
+        vm->compiler.opt_f_enable  |=  bit;
+        vm->compiler.opt_f_disable &= ~bit;
+    } else {
+        vm->compiler.opt_f_disable |=  bit;
+        vm->compiler.opt_f_enable  &= ~bit;
+    }
+}
+
 // Applies a single `key [= value]` pair from #pragma cccc config(...).
 // `value` is NULL for a bare key. Unknown keys and invalid values are hard
 // errors, matching existing #pragma cccc diagnostic style.
@@ -3454,6 +3495,17 @@ static void pragma_config_apply(VirtualMachine *vm, Token *key, Token *value) {
             error_tok(vm, value, "#pragma cccc config: '%.*s' requires a boolean value (true/false)",
                       (int)key->len, key->loc);
         pragma_config_set_flag(vm, pragma_config_flags[i].bit, enable);
+        return;
+    }
+    // Optimisation-pass keys (#612): fold, peephole, copy_prop, dce, cse, fuse, elim_ext
+    for (size_t i = 0; i < sizeof(pragma_config_opt_passes) / sizeof(pragma_config_opt_passes[0]); i++) {
+        if (!equal(key, (char *)pragma_config_opt_passes[i].name))
+            continue;
+        bool enable = true;
+        if (value && !pragma_config_read_bool(value, &enable))
+            error_tok(vm, value, "#pragma cccc config: '%.*s' requires a boolean value (true/false)",
+                      (int)key->len, key->loc);
+        pragma_config_set_opt_pass(vm, pragma_config_opt_passes[i].bit, enable);
         return;
     }
     error_tok(vm, key, "#pragma cccc config: unknown option '%.*s'", (int)key->len, key->loc);
@@ -4589,24 +4641,22 @@ Token *preprocess(VirtualMachine *vm, Token *tok) {
 
 // ---------------------------------------------------------------------------
 // cc_parse_test_flags — parse a whitespace-separated CLI-flag string from
-// [[cccc::test(flags = "...")]] into a flag delta for per-test recompilation.
-//
-// *or_bits   receives the set of CCCCFlags bits to force on.
-// *set_mask  receives all bits explicitly named (cleared or set).
-// *opt_level / *opt_set receive the opt level if -O/-Ox/--optimize=N present.
+// [[cccc::test(flags = "...")]] into a CcTestFlagsDelta for per-test
+// recompilation.  Supports:
+//   safety presets (-0/-1/-2/-3, --safety=N)
+//   optimisation levels (-O/-On/--optimize=N)
+//   individual CCCCFlags check flags (--bounds-checks, -b, etc.)
+//   warning flags (-W*, -Wno-*, -Werror, -Werror=*, -Wno-error=*)   [#612]
+//   optimisation-pass flags (-f<pass>, -fno-<pass>)                  [#612]
 //
 // Unknown or malformed flags are reported via error_tok() at src_tok's
 // source location and terminate compilation.
 // ---------------------------------------------------------------------------
 void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
                          const char *flags_str, const char *test_name,
-                         uint32_t *or_bits, uint32_t *set_mask,
-                         int *opt_level, bool *opt_set)
+                         CcTestFlagsDelta *out)
 {
-    *or_bits   = 0;
-    *set_mask  = 0;
-    *opt_level = 0;
-    *opt_set   = false;
+    memset(out, 0, sizeof(*out));
 
     if (!flags_str || !*flags_str)
         return;
@@ -4630,35 +4680,35 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
         if (strcmp(tok, "-0") == 0 ||
             (strncmp(tok, "--safety=", 9) == 0 &&
              (strcmp(tok+9, "none") == 0 || strcmp(tok+9, "0") == 0))) {
-            *or_bits  = (*or_bits) & ~(uint32_t)CCCC_SAFETY_PRESET_BITS;
-            *set_mask |= (uint32_t)CCCC_SAFETY_PRESET_BITS;
+            out->or_bits  = out->or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS;
+            out->set_mask |= (uint32_t)CCCC_SAFETY_PRESET_BITS;
         } else if (strcmp(tok, "-1") == 0 ||
                    (strncmp(tok, "--safety=", 9) == 0 &&
                     (strcmp(tok+9, "basic") == 0 || strcmp(tok+9, "1") == 0))) {
-            *or_bits  = (*or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS) |
-                        (uint32_t)CCCC_SAFETY_BASIC;
-            *set_mask |= (uint32_t)CCCC_SAFETY_PRESET_BITS;
+            out->or_bits  = (out->or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS) |
+                            (uint32_t)CCCC_SAFETY_BASIC;
+            out->set_mask |= (uint32_t)CCCC_SAFETY_PRESET_BITS;
         } else if (strcmp(tok, "-2") == 0 ||
                    (strncmp(tok, "--safety=", 9) == 0 &&
                     (strcmp(tok+9, "standard") == 0 || strcmp(tok+9, "2") == 0))) {
-            *or_bits  = (*or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS) |
-                        (uint32_t)CCCC_SAFETY_STANDARD;
-            *set_mask |= (uint32_t)CCCC_SAFETY_PRESET_BITS;
+            out->or_bits  = (out->or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS) |
+                            (uint32_t)CCCC_SAFETY_STANDARD;
+            out->set_mask |= (uint32_t)CCCC_SAFETY_PRESET_BITS;
         } else if (strcmp(tok, "-3") == 0 ||
                    (strncmp(tok, "--safety=", 9) == 0 &&
                     (strcmp(tok+9, "max") == 0 || strcmp(tok+9, "3") == 0))) {
-            *or_bits  = (*or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS) |
-                        (uint32_t)CCCC_SAFETY_MAX;
-            *set_mask |= (uint32_t)CCCC_SAFETY_PRESET_BITS;
+            out->or_bits  = (out->or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS) |
+                            (uint32_t)CCCC_SAFETY_MAX;
+            out->set_mask |= (uint32_t)CCCC_SAFETY_PRESET_BITS;
 
         // --- optimisation level ---
         } else if (strcmp(tok, "-O") == 0 || strcmp(tok, "--optimize") == 0) {
-            *opt_level = 1;
-            *opt_set   = true;
+            out->opt_level = 1;
+            out->opt_set   = true;
         } else if (tok[0] == '-' && tok[1] == 'O' &&
                    tok[2] >= '0' && tok[2] <= '4' && tok[3] == '\0') {
-            *opt_level = tok[2] - '0';
-            *opt_set   = true;
+            out->opt_level = tok[2] - '0';
+            out->opt_set   = true;
         } else if (strncmp(tok, "--optimize=", 11) == 0) {
             char *endp;
             long v = strtol(tok + 11, &endp, 10);
@@ -4667,11 +4717,11 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
                           "[[cccc::test]] flags=\"...\": invalid optimization"
                           " level '%s' (use 0..4) in test '%s'",
                           tok, test_name ? test_name : "?");
-            *opt_level = (int)v;
-            *opt_set   = true;
+            out->opt_level = (int)v;
+            out->opt_set   = true;
 
         // --- individual check flags (matching long_options names in main.c) ---
-#define SET_FLAG(bit) do { *or_bits |= (uint32_t)(bit); *set_mask |= (uint32_t)(bit); } while (0)
+#define SET_FLAG(bit) do { out->or_bits |= (uint32_t)(bit); out->set_mask |= (uint32_t)(bit); } while (0)
         } else if (strcmp(tok, "-b") == 0 || strcmp(tok, "--bounds-checks") == 0) {
             SET_FLAG(CCCC_BOUNDS_CHECKS);
         } else if (strcmp(tok, "-u") == 0 || strcmp(tok, "--uaf-detection") == 0) {
@@ -4723,6 +4773,104 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
         } else if (strcmp(tok, "--ffi-errors-fatal") == 0) {
             SET_FLAG(CCCC_FFI_ERRORS_FATAL);
 #undef SET_FLAG
+
+        // --- warning flags (#612): -W*, -Wno-*, -Werror, -Werror=*, -Wno-error=* ---
+        } else if (strncmp(tok, "-W", 2) == 0) {
+            const char *arg = tok + 2; // everything after "-W"
+            if (strcmp(arg, "error") == 0) {
+                out->warn_as_errors     = true;
+                out->warn_as_errors_set = true;
+            } else if (strncmp(arg, "error=", 6) == 0) {
+                const char *name = arg + 6;
+                uint64_t mask = cccc_warning_mask_for_name(name);
+                if (!mask || cccc_warning_is_group_name(name)) {
+                    char bad[256]; snprintf(bad, sizeof(bad), "%s", tok);
+                    free(buf);
+                    error_tok(vm, src_tok,
+                              "[[cccc::test]] flags=\"...\": unknown warning"
+                              " option '%s' in test '%s'",
+                              bad, test_name ? test_name : "?");
+                }
+                out->warn_or           |= mask;
+                out->warn_mask         |= mask;
+                out->warn_errors_or    |= mask;
+                out->warn_errors_mask  |= mask;
+                out->warn_as_errors_set = true;
+            } else if (strncmp(arg, "no-error=", 9) == 0) {
+                const char *name = arg + 9;
+                uint64_t mask = cccc_warning_mask_for_name(name);
+                if (!mask || cccc_warning_is_group_name(name)) {
+                    char bad[256]; snprintf(bad, sizeof(bad), "%s", tok);
+                    free(buf);
+                    error_tok(vm, src_tok,
+                              "[[cccc::test]] flags=\"...\": unknown warning"
+                              " option '%s' in test '%s'",
+                              bad, test_name ? test_name : "?");
+                }
+                out->warn_errors_or    &= ~mask;
+                out->warn_errors_mask  |= mask;
+                out->warn_as_errors_set = true;
+            } else {
+                bool disable = (strncmp(arg, "no-", 3) == 0);
+                const char *name = disable ? arg + 3 : arg;
+                uint64_t mask = cccc_warning_mask_for_name(name);
+                if (!mask) {
+                    char bad[256]; snprintf(bad, sizeof(bad), "%s", tok);
+                    free(buf);
+                    error_tok(vm, src_tok,
+                              "[[cccc::test]] flags=\"...\": unknown warning"
+                              " option '%s' in test '%s'",
+                              bad, test_name ? test_name : "?");
+                }
+                if (disable) {
+                    out->warn_or   &= ~mask;
+                    out->warn_mask |= mask;
+                } else {
+                    out->warn_or   |= mask;
+                    out->warn_mask |= mask;
+                }
+            }
+
+        // --- optimisation-pass flags (#612): -f<pass> / -fno-<pass> ---
+        } else if (tok[0] == '-' && tok[1] == 'f' && tok[2] != '\0') {
+            static const struct { const char *name; uint32_t bit; } ptab[] = {
+                {"fold",      CCCC_OPT_FOLD},
+                {"peephole",  CCCC_OPT_PEEPHOLE},
+                {"copy-prop", CCCC_OPT_COPY_PROP},
+                {"dce",       CCCC_OPT_DCE},
+                {"cse",       CCCC_OPT_CSE},
+                {"fuse",      CCCC_OPT_FUSE},
+                {"elim-ext",  CCCC_OPT_ELIM_EXT},
+                {NULL, 0}
+            };
+            const char *fname = tok + 2;
+            bool neg = (strncmp(fname, "no-", 3) == 0);
+            const char *pname = neg ? fname + 3 : fname;
+            bool matched = false;
+            for (int k = 0; ptab[k].name; k++) {
+                if (strcmp(pname, ptab[k].name) == 0) {
+                    if (neg) {
+                        out->f_disable |=  ptab[k].bit;
+                        out->f_enable  &= ~ptab[k].bit;
+                    } else {
+                        out->f_enable  |=  ptab[k].bit;
+                        out->f_disable &= ~ptab[k].bit;
+                    }
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                char bad[256]; snprintf(bad, sizeof(bad), "%s", tok);
+                free(buf);
+                error_tok(vm, src_tok,
+                          "[[cccc::test]] flags=\"...\": unknown optimisation"
+                          " pass '%s' in test '%s'"
+                          " (valid: fold, peephole, copy-prop, dce, cse,"
+                          " fuse, elim-ext; prefix 'no-' to disable)",
+                          bad, test_name ? test_name : "?");
+            }
+
         } else {
             // Copy tok before freeing buf (tok points into buf).
             char bad[256];
