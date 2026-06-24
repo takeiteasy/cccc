@@ -999,8 +999,8 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                 unsetenv("MallocStackLogging");
                 unsetenv("MallocStackLoggingNoCompact");
                 unsetenv("DYLD_INSERT_LIBRARIES");
-                cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
-                _exit(0);
+                int rc = cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
+                _exit((unsigned char)rc); /* -1 (VM error) → 255, matching non-testing exit convention */
             }
 
             s_fork_child_pid = pid;

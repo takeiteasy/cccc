@@ -91,7 +91,7 @@ ifneq ($(OS),Windows_NT)
     LIBBACKTRACE_A    := build/libbacktrace.a
     LIBBACKTRACE_OBJS_DIR := build/libbacktrace
     # Flags used only for compiling vendored libbacktrace (not -std=c23, no -Wall strictness)
-    LIBBACKTRACE_CC_FLAGS := -O2 -g -I$(LIBBACKTRACE_DIR) \
+    LIBBACKTRACE_CC_FLAGS := -O2 -g -I$(LIBBACKTRACE_DIR) -D_GNU_SOURCE \
       -Wno-unused-parameter -Wno-unused-variable \
       -Wno-missing-field-initializers -Wno-shift-count-overflow \
       -Wno-implicit-function-declaration -Wno-deprecated-declarations
@@ -290,6 +290,20 @@ test: clean $(EXE_OUT)
 	@python3 tools/tests.py -j $(TEST_JOBS)
 	@python3 tools/tests.py --c4 -j $(TEST_JOBS)
 	@python3 tools/test_host_signal_debugger.py
+	@python3 tools/sqlite_smoke.py
+
+# Run only the [[cccc::test]] framework suites in tests/suites/
+test-suites: $(EXE_OUT)
+	@python3 tools/tests.py --suites -j $(TEST_JOBS)
+
+# Run only the legacy single-file tests in tests/ (excludes tests/suites/)
+test-legacy: $(EXE_OUT)
+	@python3 tools/tests.py --legacy -j $(TEST_JOBS)
+
+# SQLite amalgamation preprocess smoke-test (#584 regression). Skips cleanly
+# when tools/sqlite-amalgamation-3530200.zip is absent; see docs/TESTING.md.
+sqlite-smoke: $(EXE_OUT)
+	@python3 tools/sqlite_smoke.py
 
 macos-x86_64-build:
 	@if [ "$(UNAME_S)" != "Darwin" ]; then \
@@ -379,6 +393,11 @@ linux-x86_64-test: linux-x86_64-smoke
 		done; \
 		exit $$rc
 
+linux-x86_64-msan-test: linux-x86_64-build
+	$(COLIMA_NERDCTL) run --rm --platform linux/amd64 \
+		$(LINUX_AMD64_IMAGE) sh -ec \
+		'make cccc-msan && python3 tools/tests.py --msan --quiet -j $(TEST_JOBS)'
+
 
 
 all: clean $(EXE_OUT) $(LIB_OUT) test
@@ -467,7 +486,7 @@ else
 	@echo "dsym: DWARF is already embedded in the ELF binary on Linux; nothing to do."
 endif
 
-.PHONY: default test clean all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json macos-x86_64-build macos-x86_64-smoke macos-x86_64-test linux-x86_64-check linux-x86_64-build linux-x86_64-smoke linux-x86_64-test dsym
+.PHONY: default test clean all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json macos-x86_64-build macos-x86_64-smoke macos-x86_64-test linux-x86_64-check linux-x86_64-build linux-x86_64-smoke linux-x86_64-test linux-x86_64-msan-test sqlite-smoke dsym
 ifeq ($(UNAME_S),Linux)
 .PHONY: msan
 endif

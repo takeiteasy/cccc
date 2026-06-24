@@ -744,6 +744,14 @@ def main():
     )
     parser.add_argument("--match", help="Filter tests by pattern")
     parser.add_argument(
+        "--suites", action="store_true",
+        help="Run only [[cccc::test]] framework suites (tests/suites/)"
+    )
+    parser.add_argument(
+        "--legacy", action="store_true",
+        help="Run only legacy single-file tests (tests/, excluding tests/suites/)"
+    )
+    parser.add_argument(
         "-j", "--jobs", type=int, default=8, help="Number of parallel jobs"
     )
     parser.add_argument(
@@ -832,6 +840,10 @@ def main():
 
     if args.match:
         test_files = [f for f in test_files if fnmatch.fnmatch(f.name, args.match)]
+    elif args.suites:
+        test_files = [f for f in test_files if "suites" in f.parts]
+    elif args.legacy:
+        test_files = [f for f in test_files if "suites" not in f.parts]
 
     if not test_files:
         print(f"No test files found in {tests_dir}")
