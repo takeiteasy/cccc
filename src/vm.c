@@ -1876,8 +1876,17 @@ int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv) {
         vm->stack_base = (long long *)((char *)vm->stack_seg +
                                        reserved_stack - initial_stack);
 
-        // Shadow stack for CFI
+        // Shadow stack for CFI — lazily allocated here to handle per-test -C flag
+        // changes where vm_alloc_segments ran before CCCC_CFI was set (#605).
         if (vm->flags & CCCC_CFI) {
+            if (!vm->shadow_stack) {
+                size_t stack_top_off = reserved_stack - initial_stack;
+                vm->shadow_stack = (long long *)cccc_vm_reserve(reserved_stack);
+                if (!vm->shadow_stack)
+                    error("could not reserve shadow stack");
+                if (cccc_vm_commit(vm->shadow_stack, stack_top_off, initial_stack) != 0)
+                    error("could not commit shadow stack");
+            }
             vm->shadow_sp = (long long *)((char *)vm->shadow_stack + reserved_stack);
         }
     }

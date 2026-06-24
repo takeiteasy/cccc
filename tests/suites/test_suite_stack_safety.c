@@ -1,8 +1,9 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: stack canaries, CFI, deep expressions, multi-VM isolation
-// Source tests: test_cfi_main_return, test_deep_nested_expr_587, test_deep_nested_expr_587_safety, test_multi_vm_isolation, test_stack_canary_float, test_stack_canary_many_params, test_stack_canary_params, test_stack_canary_threads
+// Source tests: test_cfi_main_return, test_cfi_setjmp_shadow_stack, test_deep_nested_expr_587, test_deep_nested_expr_587_safety, test_multi_vm_isolation, test_stack_canary_float, test_stack_canary_many_params, test_stack_canary_params, test_stack_canary_threads
 
 #include <pthread.h>
+#include <setjmp.h>
 
 // [from test_deep_nested_expr_587]
 // Regression test for ticket #587: deeply nested / right-leaning binary
@@ -83,12 +84,42 @@ static void *worker(void *arg) {
     return (void *)acc;
 }
 
+// [from test_cfi_setjmp_shadow_stack]
+// CFI regression: longjmp must restore shadow_sp so the caller of the setjmp
+// function can return without consuming orphaned shadow entries.
+
+static jmp_buf _cfi_env;
+
+static void _cfi_level2(void) {
+    longjmp(_cfi_env, 1);
+}
+
+static void _cfi_level1(void) {
+    _cfi_level2();
+}
+
+// setjmp and longjmp happen inside this function; when it returns, shadow_sp
+// must match what it was on entry, not be 2 levels deeper.
+static int _cfi_do_work(void) {
+    if (setjmp(_cfi_env) == 0)
+        _cfi_level1();
+    // After longjmp: shadow_sp has 2 orphaned entries from level1/level2 CALLs
+    // unless SETJMP saved and LONGJMP restored shadow_sp.
+    return 42;
+}
+
 #pragma cccc suite begin "stack_safety"
 
 // test_cfi_main_return
 [[cccc::test(return = 42)]]
 int test_cfi_main_return(void) {
     return 42;
+}
+
+// test_cfi_setjmp_shadow_stack
+[[cccc::test(return = 42, flags = "-C")]]
+int test_cfi_setjmp_shadow_stack(void) {
+    return _cfi_do_work();
 }
 
 // test_deep_nested_expr_587
