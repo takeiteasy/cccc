@@ -137,6 +137,13 @@ static HashEntry *get_or_insert_entry_raw(HashMap *map, char *key, int keylen) {
 
     uint64_t hash = fnv_hash(key, keylen);
 
+    // Reuse the first tombstone we pass over, but only after we are certain the
+    // key is not already present further along the probe chain. Inserting at a
+    // tombstone eagerly would create a duplicate entry whenever an existing copy
+    // of the key sits past that tombstone, leaving a stale entry that survives a
+    // later delete (manifested as "#undef doesn't stick", #584).
+    HashEntry *tombstone = NULL;
+
     for (int i = 0; i < map->capacity; i++) {
         HashEntry *ent = &map->buckets[(hash + i) % map->capacity];
 
@@ -144,17 +151,31 @@ static HashEntry *get_or_insert_entry_raw(HashMap *map, char *key, int keylen) {
             return ent;
 
         if (ent->key == TOMBSTONE) {
-            ent->key = key;
-            ent->keylen = keylen;
-            return ent;
+            if (!tombstone)
+                tombstone = ent;
+            continue;
         }
 
         if (ent->key == NULL) {
+            if (tombstone) {
+                // Revive a tombstone slot; map->used already counts it.
+                tombstone->key = key;
+                tombstone->keylen = keylen;
+                return tombstone;
+            }
             ent->key = key;
             ent->keylen = keylen;
             map->used++;
             return ent;
         }
+    }
+
+    // The probe chain is full of live entries and tombstones with no empty slot.
+    // If we saw a tombstone we can still reuse it for this key.
+    if (tombstone) {
+        tombstone->key = key;
+        tombstone->keylen = keylen;
+        return tombstone;
     }
     unreachable();
     return NULL;
@@ -269,6 +290,10 @@ static HashEntry *get_or_insert_entry_int(HashMap *map, long long key) {
 
     uint64_t hash = int_hash(key);
 
+    // See get_or_insert_entry_raw: defer tombstone reuse until we know the key
+    // is absent, otherwise a duplicate is created past the tombstone (#584).
+    HashEntry *tombstone = NULL;
+
     for (int i = 0; i < map->capacity; i++) {
         HashEntry *ent = &map->buckets[(hash + i) % map->capacity];
 
@@ -276,17 +301,28 @@ static HashEntry *get_or_insert_entry_int(HashMap *map, long long key) {
             return ent;
 
         if (ent->key == TOMBSTONE) {
-            ent->key = (char *)key;
-            ent->keylen = -1;  // Mark as integer key
-            return ent;
+            if (!tombstone)
+                tombstone = ent;
+            continue;
         }
 
         if (ent->key == NULL) {
+            if (tombstone) {
+                tombstone->key = (char *)key;
+                tombstone->keylen = -1;  // Mark as integer key
+                return tombstone;
+            }
             ent->key = (char *)key;
             ent->keylen = -1;  // Mark as integer key
             map->used++;
             return ent;
         }
+    }
+
+    if (tombstone) {
+        tombstone->key = (char *)key;
+        tombstone->keylen = -1;  // Mark as integer key
+        return tombstone;
     }
     unreachable();
     return NULL;
