@@ -978,7 +978,7 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
             }
         }
 
-        if (r->error_pat) {
+        if (r->error_pat || r->expect_compile_error) {
             if (r->neg_passed == 1) {
                 emit_test_result(fmt, disp, cur_suite, "neg_pass", NULL, &json_first, test_num);
                 passed++;

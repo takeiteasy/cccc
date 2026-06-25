@@ -1221,6 +1221,7 @@ struct TestFnRecord {
     int   neg_passed;   // 1=passed, 0=no error produced, -1=wrong error
     char  neg_actual[256]; // first actual error for failure diagnostics
     long  timeout_ms;   // per-test timeout in ms (0 = use global --test-timeout)
+    bool  expect_compile_error; // true = any compile error passes the test (#615)
     int   expect_errors;   // operand for error_count assertion (0 if unset)
     CmpOp error_count_op;  // CMP_NONE = not set; otherwise the comparison operator
     RetKind ret_kind;      // RET_NONE = no return assertion

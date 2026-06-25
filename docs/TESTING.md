@@ -370,6 +370,23 @@ void test_combined(void) {
 
 Negative test bodies are compiled in error-collection mode; their errors are absorbed and never propagate to the rest of the compilation. The test result is computed at compile time.
 
+### Asserting any compile error
+
+Use `expect_compile_error = true` when you want to assert that the function body fails to compile but do not need to match a specific error message:
+
+```c
+[[cccc::test(expect_compile_error = true)]]
+void test_bad_bitfield(void) {
+    struct S { int x : -1; };
+}
+```
+
+The test passes if at least one compile error is produced. It fails if the code compiles without error.
+
+This is more explicit than `error = ""` (empty string, which matches any message). When both `expect_compile_error = true` and `error = "pattern"` are set, `expect_compile_error` is redundant and a `-Wattributes` warning is emitted.
+
+**Limitation:** only parse-time errors are catchable this way. Errors that fire during code generation — such as comptime macro expansion errors, unresolved external symbols, and global-initialiser type checks — occur after the function body is parsed and cannot be asserted with this mechanism. Use a legacy `// EXPECT_COMPILE_ERROR` test file for those cases.
+
 ### Expected error count
 
 Add `error_count` with a comparison operator to assert something about the number of compilation errors produced. The supported operators are `=` (or `==`), `!=`, `<`, `<=`, `>`, and `>=`. When no operator is written, `=` is assumed:

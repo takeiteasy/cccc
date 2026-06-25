@@ -2451,6 +2451,7 @@ typedef struct {
     const char *ret_str_val;
     double ret_epsilon_val;
     int exit_code_val; // -1 = not set
+    bool expect_compile_error; // true = any compile error passes the test (#615)
     const char *flags; // flags = "..." per-test CLI-flag string; NULL if unset
     // Per-test output assertions (#614)
     const char *expect_stderr;
@@ -2552,6 +2553,12 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
                 out->error_pat_negate = neg;
                 p = p->next;
             }
+        } else if (equal(p, "expect_compile_error")) {
+            p = p->next;
+            if (p && equal(p, "=")) p = p->next;
+            if (p && equal(p, "true"))       { out->expect_compile_error = true;  p = p->next; }
+            else if (p && equal(p, "false")) { out->expect_compile_error = false; p = p->next; }
+            else                             { out->expect_compile_error = true; }
         } else if (equal(p, "name") &&
                    p->next && equal(p->next, "=") &&
                    p->next->next && p->next->next->kind == TK_STR) {
@@ -3051,6 +3058,10 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
                 rec->suite            = s ? strdup(s) : NULL;
                 rec->error_pat        = ta.error_pat ? strdup(ta.error_pat) : NULL;
                 rec->error_pat_negate = ta.error_pat_negate;
+                rec->expect_compile_error = ta.expect_compile_error && !ta.error_pat;
+                if (ta.expect_compile_error && ta.error_pat)
+                    warn_tok(vm, probe, CCCC_WARN_ATTRIBUTES,
+                             "expect_compile_error= is redundant when error= is also set; ignored");
                 rec->timeout_ms       = ta.timeout_ms;
                 if (ta.error_pat && ta.error_count_op != CMP_NONE) {
                     rec->expect_errors  = ta.error_count;

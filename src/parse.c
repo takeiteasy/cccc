@@ -222,11 +222,12 @@ static int align_to(int n, int align) {
     return (int)(((long long)n + align - 1) / align * align);
 }
 
-// Return the TestFnRecord for this name if it is a negative test (has error_pat), else NULL.
+// Return the TestFnRecord for this name if it is a negative test, else NULL.
+// A negative test has either error_pat or expect_compile_error set.
 static TestFnRecord *find_neg_test_record(VirtualMachine *vm, const char *name) {
     if (!name) return NULL;
     for (TestFnRecord *r = vm->compiler.test_fns; r; r = r->next)
-        if (r->error_pat && strcmp(r->name, name) == 0)
+        if ((r->error_pat || r->expect_compile_error) && strcmp(r->name, name) == 0)
             return r;
     return NULL;
 }
@@ -8724,18 +8725,48 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
 
     // Negative test: body is expected to fail compilation with a specific error.
     // Compile in error-collection mode and absorb all errors regardless of match.
+    // A nested setjmp catches fatal error_tok() longjmps so they are treated the
+    // same as recoverable errors (#615): the function body is entered, any error
+    // terminates it, and the error is counted and matched normally.
     TestFnRecord *neg_rec = find_neg_test_record(vm, fn->name);
     if (neg_rec) {
         bool old_collect       = vm->collect_errors;
         int  pre_count         = vm->error_count;
         CompileError *pre_tail = vm->errors_tail;
-        vm->collect_errors     = true;
+        jmp_buf       neg_jmp_buf;
+        jmp_buf      *saved_jmp_buf = vm->error_jmp_buf;
+        vm->collect_errors = true;
+        vm->error_jmp_buf  = &neg_jmp_buf;
 
-        fn->body = compound_stmt(vm, &tok, tok, &close_brace);
-        append_implicit_return(vm, fn, close_brace ? close_brace : ty->name);
-        fn->locals = vm->compiler.locals;
-        leave_scope(vm);
-        resolve_goto_labels(vm);
+        // Save the opening '{' position so we can skip past the body if a
+        // fatal longjmp fires and leaves tok stranded inside it (#615).
+        Token *body_start = tok;
+
+        if (setjmp(neg_jmp_buf) == 0) {
+            fn->body = compound_stmt(vm, &tok, tok, &close_brace);
+            append_implicit_return(vm, fn, close_brace ? close_brace : ty->name);
+            fn->locals = vm->compiler.locals;
+            leave_scope(vm);
+            resolve_goto_labels(vm);
+        } else {
+            // Fatal error_tok() fired inside the function body.  The error has
+            // already been collected by error_tok(); we just need to clean up scope.
+            // Advance tok past the closing '}' of the function body so the outer
+            // parse loop doesn't try to re-parse tokens from inside the body.
+            // Note: tok = skip(vm, tok, "{") above already consumed the opening '{',
+            // so body_start is the first token *inside* the body — start at depth 1.
+            leave_scope(vm);
+            int depth = 1;
+            for (Token *t = body_start; t && t->kind != TK_EOF; t = t->next) {
+                if (equal(t, "{")) depth++;
+                else if (equal(t, "}")) {
+                    depth--;
+                    if (depth == 0) { tok = t->next; break; }
+                }
+            }
+        }
+
+        vm->error_jmp_buf = saved_jmp_buf;
 
         CompileError *new_errors = pre_tail ? pre_tail->next : vm->errors;
         int err_count = vm->error_count - pre_count;
@@ -8755,6 +8786,9 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
                          "expected error_count %s %d, got %d",
                          cmp_op_str(neg_rec->error_count_op),
                          neg_rec->expect_errors, err_count);
+            } else if (!neg_rec->error_pat) {
+                // expect_compile_error = true and no pattern: any error passes (#615)
+                neg_rec->neg_passed = 1;
             } else {
                 // Second check: error message pattern
                 if (neg_rec->error_pat_negate) {
