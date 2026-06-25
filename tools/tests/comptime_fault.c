@@ -1,4 +1,4 @@
-[[cccc::comptime(inline)]]
+[[cccc::comptime]]
 Node *crash(void) {
   volatile int *p = (volatile int *)0;
   int value = *p;
