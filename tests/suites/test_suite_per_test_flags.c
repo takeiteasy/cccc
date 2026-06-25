@@ -118,6 +118,13 @@ int test_pragma_config_mixed(void) {
     return 42;
 }
 
+// Unrecognized return= operand with -Wattributes per-test: assertion is
+// silently skipped (ret_kind = RET_NONE), test still passes (#350, #621).
+// Warning emission is tested by tests/test_warning_return_unrecognized_operand.c
+// (parse-time; cannot be captured via expect_stderr in a suite test).
+[[cccc::test(return = GREEN, flags = "-Wattributes")]]
+int test_unrecognized_return_operand(void) { return 42; }
+
 #pragma cccc suite end
 
 // [from test_attr_flags_bounds.c]

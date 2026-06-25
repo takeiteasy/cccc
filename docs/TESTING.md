@@ -1071,6 +1071,18 @@ void test_prints_result(void) {
 All four keys can be combined in one attribute and with all other
 `[[cccc::test(...)]]` keys.
 
+When `flags = "..."` is also present, `expect_stderr`/`reject_stderr` capture
+output from both the lazy-recompile phase and the test-execution phase.
+The recompile invokes `cc_compile()` (code generation and optimisation only —
+not preprocessing or parsing), so any gen-phase or optimiser diagnostics are
+also captured and prepended to the test-execution output before the pattern check.
+
+**Note:** Parse-time diagnostics (such as `-W` warnings emitted during
+tokenisation or attribute parsing) are produced before `cc_run_tests()` sets up
+any capture pipes and cannot be matched with `expect_stderr` in a suite test.
+Tests that assert on parse-time warnings must remain as legacy files using
+`CCCC_FLAGS:` and `CCCC_EXPECT_STDERR:`.
+
 **Limitations:**
 - Output capture is not supported for `exit_code =` tests (the subprocess
   runs in a forked child; future ticket).

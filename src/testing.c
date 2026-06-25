@@ -1004,6 +1004,9 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         // required config differs from what is currently compiled.
         // Adjacent tests sharing the same flags share one compile; the unflagged
         // base-config compile is also reused across consecutive unflagged tests.
+#ifdef _POSIX_VERSION
+        char *captured_compile_stderr = NULL;
+#endif
         {
             uint32_t req_flags;
             int      req_opt;
@@ -1060,7 +1063,40 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                 vm->warnings_as_errors           = req_warn_ae;
                 vm->compiler.opt_f_enable        = req_f_enable;
                 vm->compiler.opt_f_disable       = req_f_disable;
+
+                // Capture compile-time stderr when the test asserts on it (#621).
+                // This covers warnings/errors emitted by cc_compile() during the
+                // recompile, which happen before the runtime fd-redirect below.
+                // Do NOT redirect here for exit_code= tests — those use a fork path
+                // that comes later and must not inherit a hijacked stderr.
+#ifdef _POSIX_VERSION
+                bool   needs_compile_capture = (r->expect_stderr || r->reject_stderr)
+                                              && r->expect_exit_code < 0;
+                int    saved_compile_err = -1;
+                int    compile_pipe[2]   = {-1, -1};
+                if (needs_compile_capture) {
+                    if (pipe(compile_pipe) == 0) {
+                        saved_compile_err = dup(STDERR_FILENO);
+                        fflush(stderr);
+                        dup2(compile_pipe[1], STDERR_FILENO);
+                        close(compile_pipe[1]); compile_pipe[1] = -1;
+                    } else {
+                        needs_compile_capture = false;
+                    }
+                }
+#endif
                 cc_compile(vm, prog);
+#ifdef _POSIX_VERSION
+                if (needs_compile_capture) {
+                    fflush(stderr);
+                    if (saved_compile_err >= 0) {
+                        dup2(saved_compile_err, STDERR_FILENO);
+                        close(saved_compile_err);
+                    }
+                    captured_compile_stderr = drain_pipe(compile_pipe[0]);
+                    if (compile_pipe[0] >= 0) close(compile_pipe[0]);
+                }
+#endif
 
                 // Refresh the base snapshot from the newly initialised data segment.
                 memcpy(base_snap, vm->data_seg, snap_size);
@@ -1267,6 +1303,19 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
             if (pipe_out[0] >= 0) close(pipe_out[0]);
             if (pipe_err[0] >= 0) close(pipe_err[0]);
         }
+        // Prepend compile-phase stderr (#621) so pattern checks see both phases.
+        if (captured_compile_stderr && captured_compile_stderr[0]) {
+            size_t clen = strlen(captured_compile_stderr);
+            const char *rpart = captured_stderr ? captured_stderr : "";
+            size_t rlen = strlen(rpart);
+            char *merged = malloc(clen + rlen + 1);
+            memcpy(merged, captured_compile_stderr, clen);
+            memcpy(merged + clen, rpart, rlen + 1);
+            free(captured_stderr);
+            captured_stderr = merged;
+        }
+        free(captured_compile_stderr);
+        captured_compile_stderr = NULL;
 #endif
 
         if (!run.timed_out) {
