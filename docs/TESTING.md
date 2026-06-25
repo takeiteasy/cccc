@@ -215,8 +215,9 @@ or structure the test body so that assertions live outside the emit block.
 ### Programmatic test registration via AST API
 
 When building functions through the AST API (`MakeFunction` + `PublishNode`),
-use `MarkAsTest` to register the function as a test entry. It returns a
-`TestFnRecord *` handle that the `TestSet*` helpers can configure:
+use `AddAttribute` to register and configure the function as a test entry.
+Suite, display name, timeout, and all other test options are expressed inline
+in the attribute string — the same options available in `[[cccc::test(...)]]`:
 
 ```c
 [[cccc::comptime]]
@@ -225,24 +226,23 @@ void gen_tests(void) {
     WithFn(fn) { FunctionSetBody(fn, Quote("return;")); }
     PublishNode(fn);
 
-    TestFnRecord *rec = MarkAsTest(fn);
-    TestSetSuite(rec, "generated");
-    TestSetDisplayName(rec, "my test name");
-    TestSetTimeout(rec, 5000);  // ms; 0 = global --test-timeout
+    // All test options inline — same syntax as [[cccc::test(...)]]
+    AddAttribute(fn, "cccc::test(suite=\"generated\", name=\"my test name\", timeout=5000)");
 }
 gen_tests();
 ```
 
 | Helper | Effect |
 |---|---|
-| `MarkAsTest(fn)` | Register as `[[cccc::test]]`; returns `TestFnRecord *` |
-| `TestSetSuite(rec, suite)` | Override the suite name |
-| `TestSetDisplayName(rec, name)` | Set a human-readable display name |
-| `TestSetTimeout(rec, ms)` | Set a per-test timeout |
+| `AddAttribute(fn, "cccc::test")` | Register as `[[cccc::test]]` |
+| `AddAttribute(fn, "cccc::test(suite=\"s\")")` | Register with suite |
+| `AddAttribute(fn, "cccc::test(name=\"n\")")` | Register with display name |
+| `AddAttribute(fn, "cccc::test(timeout=5000)")` | Register with timeout |
+| `MarkAsTest(fn)` | Shorthand for `AddAttribute(fn, "cccc::test")` |
 
-For more complex options (error patterns, return assertions, per-test compiler
-flags), the `[[cccc::test(...)]]` attribute syntax in an emit block is the
-recommended path. See [MACROS.md](MACROS.md) for the full emit-block API.
+For error patterns, return assertions, and per-test compiler flags, use the
+full `[[cccc::test(...)]]` attribute string inside `AddAttribute` — all options
+from the attribute syntax are available. See [MACROS.md](MACROS.md) for details.
 
 ### Custom display names
 

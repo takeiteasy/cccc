@@ -501,6 +501,67 @@ static void run_decl_custom_attrs(VirtualMachine *vm, Type *ty, VarAttr *attr,
                          tok);
 }
 
+// Ticket #619: generic programmatic attribute application for AST-generated Objs.
+// Parses attr_text as though it appeared in [[attr_text]] in source and applies it to fn.
+// Handles mode attrs (test/build/build_target/…), standard C23/GNU attrs, and custom @attrs.
+void cc_apply_attr_to_fn(VirtualMachine *vm, Obj *fn, const char *attr_text, Token *site_tok) {
+    if (!vm || !fn || !fn->name || !attr_text) return;
+
+    // cccc::comptime cannot be applied retroactively — the fn is already compiled.
+    if (strstr(attr_text, "comptime"))
+        error_tok(vm, site_tok, "cccc::comptime cannot be applied via AddAttribute");
+
+    // Synthesize "[[attr_text]]\nvoid fn_name(void);\n" so the mode-attr scanner
+    // can find the function name by looking ahead past "]]\n".
+    size_t buf_len = strlen(attr_text) + strlen(fn->name) + 32;
+    char *buf = malloc(buf_len);
+    snprintf(buf, buf_len, "[[%s]]\nvoid %s(void);\n", attr_text, fn->name);
+    Token *toks = tokenize_string(vm, "<add-attribute>", buf);
+    free(buf);
+
+    // Fix up error locations to point at the macro call site.
+    if (site_tok) {
+        for (Token *t = toks; t && t->kind != TK_EOF; t = t->next) {
+            t->file = site_tok->file;
+            t->line_no = site_tok->line_no;
+        }
+    }
+
+    // Try mode attributes (test/build/build_target/test_setup/test_teardown).
+    // emit_scan=true: register records but do NOT re-extract as a comptime function.
+    Token *tok_ptr = toks;
+    if (try_extract_attr_macro(vm, &tok_ptr, /*emit_scan=*/true))
+        return;
+
+    // Try standard C23 / GNU attributes.  Both parsers fill a VarAttr and
+    // advance past the attribute syntax; custom @attrs land in VarAttr.custom_attrs.
+    VarAttr attr = {0};
+    Token *after = toks;
+    if (equal(after, "[") && after->next && equal(after->next, "["))
+        after = c23_attribute_list(vm, after, NULL, &attr);
+    else if (equal(after, "__attribute__"))
+        after = attribute_list(vm, after, NULL, &attr);
+
+    bool has_std = attr.is_maybe_unused || attr.is_deprecated || attr.is_noreturn ||
+                   attr.is_nodiscard || attr.is_pure || attr.is_func_const ||
+                   attr.format_style || attr.cleanup_fn || attr.align > 0 ||
+                   attr.fn_optimize_set;
+    bool has_custom = attr.custom_attrs != NULL;
+
+    if (!has_std && !has_custom)
+        error_tok(vm, site_tok ? site_tok : toks,
+                  "AddAttribute: unrecognized attribute '%s'", attr_text);
+
+    if (has_std) {
+        fn->ty = apply_var_attrs_to_type(vm, fn->ty, &attr);
+        if (attr.align > 0)
+            fn->align = attr.align;
+    }
+    if (has_custom)
+        run_decl_custom_attrs(vm, NULL, &attr, ATTR_TARGET_FUNCTION,
+                              fn->name, fn->ty, fn, site_tok);
+}
+
 static void append_custom_attr_list(CustomAttrUse **dst, CustomAttrUse *src) {
     if (!dst || !src)
         return;

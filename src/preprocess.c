@@ -2810,7 +2810,7 @@ static void read_macro_attr_options(VirtualMachine *vm, Token *macro_tok,
     }
 }
 
-static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan) {
+bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan) {
     Token *tok = *tok_ptr;
     bool is_gnu_attr = false;
     bool is_c23_attr = false;

@@ -360,8 +360,9 @@ output stream, bypassing macro expansion. Use the underlying `__builtin_*`
 functions directly, or move assertions outside the emit block.
 
 When building functions via the **AST API** (`MakeFunction` + `FunctionSetBody` +
-`PublishNode`) rather than emit blocks, use the `MarkAs*` helpers to register
-the function as a test or build entry:
+`PublishNode`) rather than emit blocks, use `AddAttribute` to apply any attribute
+to the generated function — mode attributes, standard C23/GNU attributes, and
+custom `@attribute` handlers all work:
 
 ```c
 [[cccc::comptime]]
@@ -370,11 +371,8 @@ void gen_tests(void) {
     WithFn(fn) { FunctionSetBody(fn, Quote("return;")); }
     PublishNode(fn);
 
-    // Register as [[cccc::test]] and configure the record
-    TestFnRecord *rec = MarkAsTest(fn);
-    TestSetSuite(rec, "generated");          // optional: assign to suite
-    TestSetDisplayName(rec, "my test name"); // optional: human-readable label
-    TestSetTimeout(rec, 5000);               // optional: per-test timeout in ms
+    // Register as [[cccc::test]] with suite, display name, and timeout inline
+    AddAttribute(fn, "cccc::test(suite=\"generated\", name=\"my test name\", timeout=5000)");
 }
 gen_tests();
 ```
@@ -383,22 +381,29 @@ For build entries:
 
 ```c
 // Register as [[cccc::build]]
-MarkAsBuild(fn);
+AddAttribute(fn, "cccc::build");
 
 // Register as [[cccc::build_target(kind=native)]]
-MarkAsBuildTarget(fn, "native");   // or "bytecode"
+AddAttribute(fn, "cccc::build_target(kind=native)");
 ```
 
-`MarkAsTest` returns a `TestFnRecord *` handle for further configuration.
-`MarkAsBuild` and `MarkAsBuildTarget` return void. The active pragma suite
-(if any) is inherited automatically by `MarkAsTest`; use `TestSetSuite` to
-override it.
+`MarkAsTest(fn)`, `MarkAsBuild(fn)`, and `MarkAsBuildTarget(fn, kind)` are
+convenience shorthands for the common case — they expand to `AddAttribute` calls
+internally. Use `AddAttribute` directly when you need to express test options
+(suite, display name, timeout) or apply standard attributes such as `nodiscard`
+or `noreturn` to the generated function.
 
-For complex test options (error patterns, return assertions, per-test compiler
-flags), the `[[cccc::test(...)]]` attribute syntax in an emit block is the
-recommended path since it expresses all options inline. The `MarkAs*` API
-targets the common case of simple test/build registration from AST-built
-functions.
+`AddAttribute` also accepts standard C23 and GNU attributes:
+
+```c
+AddAttribute(fn, "nodiscard");
+AddAttribute(fn, "nodiscard(\"check return value\")");
+AddAttribute(fn, "__attribute__((noreturn))");
+AddAttribute(fn, "@myattr");   // custom @attribute handler
+```
+
+All three attribute syntaxes are supported; the string is parsed through the same
+pipeline as source-level attributes.
 
 Macros can emit source-order directives while they run:
 

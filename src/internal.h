@@ -343,6 +343,7 @@ void define_macro(VirtualMachine *vm, char *name, char *buf);
 void undef_macro(VirtualMachine *vm, char *name);
 Token *preprocess(VirtualMachine *vm, Token *tok);
 void gate_runtime_only_macros(VirtualMachine *vm, const char *main_filename);
+bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan);
 
 //
 // parse.c
@@ -359,6 +360,7 @@ void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
                                 int arg_count);
 void ensure_reflection_attrs_registered(VirtualMachine *vm);
 void __builtin_ensure_string_h_decls(VirtualMachine *vm);
+void cc_apply_attr_to_fn(VirtualMachine *vm, Obj *fn, const char *attr_text, Token *site_tok);
 // Expand a deferred ND_INIT_SPLICE node into positional ND_ASSIGN chains.
 // Called by quote_substitute in relfection.c after the splice chain is resolved.
 Node *node_expand_init_splice(VirtualMachine *vm, Node *splice, Node *chain);

@@ -1467,71 +1467,30 @@ Obj *__builtin_ast_function_prototype(VirtualMachine *vm, const char *name,
                                     Type *return_type);
 
 // ============================================================================
-// Mode Attribute Registration
+// Programmatic Attribute Application — ticket #619
 // ============================================================================
 
-// Opaque handle returned by MarkAsTest; pass to TestSet* helpers to configure
-// the test record.  The record is owned by the VM and freed at cc_destroy time.
-typedef struct TestFnRecord TestFnRecord;
-
 /*!
- * @function __builtin_ast_mark_test
- * @abstract Register a programmatically generated function as a [[cccc::test]] entry.
+ * @function __builtin_ast_add_attribute
+ * @abstract Apply an attribute string to a programmatically created function.
  * @param vm The VM context.
- * @param fn The function object created by MakeFunction.
- * @return The TestFnRecord* handle for further configuration, or NULL on error.
- * @discussion The function name is taken from fn->name.  The active pragma
- *             suite (if any) is inherited automatically.  Use the TestSet*
- *             helpers to override suite, display name, or timeout.
- *             Convenience wrapper: MarkAsTest(fn).
+ * @param fn The function object to attribute (created by MakeFunction).
+ * @param attr_text Attribute text as it would appear between [[ and ]] in source,
+ *                  e.g. "cccc::test", "cccc::test(suite=\"gen\", timeout=5000)",
+ *                  "nodiscard", "nodiscard(\"always check\")", or "@myattr".
+ *                  GNU form __attribute__((…)) is also accepted as the full string.
+ * @discussion Parses attr_text through the existing attribute pipeline and applies
+ *             the result to fn.  Supports mode attrs (test/build/build_target/
+ *             test_setup/test_teardown), standard C23/GNU attrs (nodiscard, noreturn,
+ *             pure, aligned, …), and custom @attribute handlers.
+ *             cccc::comptime cannot be applied this way and will error.
+ *             Convenience wrapper: AddAttribute(fn, text).
  */
-TestFnRecord *__builtin_ast_mark_test(VirtualMachine *vm, Obj *fn);
+void __builtin_ast_add_attribute(VirtualMachine *vm, Obj *fn, const char *attr_text);
 
-/*!
- * @function __builtin_ast_mark_build
- * @abstract Register a programmatically generated function as a [[cccc::build]] entry.
- * @param vm The VM context.
- * @param fn The function object created by MakeFunction.
- * @discussion Convenience wrapper: MarkAsBuild(fn).
- */
-void __builtin_ast_mark_build(VirtualMachine *vm, Obj *fn);
-
-/*!
- * @function __builtin_ast_mark_build_target
- * @abstract Register a programmatically generated function as a [[cccc::build_target]] entry.
- * @param vm The VM context.
- * @param fn The function object created by MakeFunction.
- * @param kind "native" (default) or "bytecode".
- * @discussion Convenience wrapper: MarkAsBuildTarget(fn, kind).
- */
-void __builtin_ast_mark_build_target(VirtualMachine *vm, Obj *fn, const char *kind);
-
-/*!
- * @function __builtin_ast_test_set_suite
- * @abstract Override the suite name on a TestFnRecord.
- * @param rec Handle returned by MarkAsTest.
- * @param suite Suite name string, or NULL to clear.
- * @discussion Convenience wrapper: TestSetSuite(rec, suite).
- */
-void __builtin_ast_test_set_suite(TestFnRecord *rec, const char *suite);
-
-/*!
- * @function __builtin_ast_test_set_display_name
- * @abstract Set a human-readable display name on a TestFnRecord.
- * @param rec Handle returned by MarkAsTest.
- * @param name Display name, or NULL to use the C function name.
- * @discussion Convenience wrapper: TestSetDisplayName(rec, name).
- */
-void __builtin_ast_test_set_display_name(TestFnRecord *rec, const char *name);
-
-/*!
- * @function __builtin_ast_test_set_timeout
- * @abstract Set a per-test timeout on a TestFnRecord.
- * @param rec Handle returned by MarkAsTest.
- * @param timeout_ms Timeout in milliseconds; 0 = use the global --test-timeout.
- * @discussion Convenience wrapper: TestSetTimeout(rec, ms).
- */
-void __builtin_ast_test_set_timeout(TestFnRecord *rec, long timeout_ms);
+// Internal helper for MarkAsBuildTarget: composes "cccc::build_target(kind=…)"
+// at runtime so the macro doesn't require string concatenation.
+void __builtin_ast_add_build_target_attr(VirtualMachine *vm, Obj *fn, const char *kind);
 
 // Ticket #171: struct/union/enum/typedef type builders
 
@@ -2014,13 +1973,12 @@ const char *__builtin_dump_ast_gen_to_string(VirtualMachine *vm, Node *node);
     __builtin_ast_function_prototype(VM, name, ret)
 
 // Mode attribute registration for AST-generated functions.
-// MarkAsTest returns a TestFnRecord* that can be further configured.
-#define MarkAsTest(fn)                  __builtin_ast_mark_test(VM, fn)
-#define MarkAsBuild(fn)                 __builtin_ast_mark_build(VM, fn)
-#define MarkAsBuildTarget(fn, kind)     __builtin_ast_mark_build_target(VM, fn, kind)
-#define TestSetSuite(rec, suite)        __builtin_ast_test_set_suite(rec, suite)
-#define TestSetDisplayName(rec, name)   __builtin_ast_test_set_display_name(rec, name)
-#define TestSetTimeout(rec, ms)         __builtin_ast_test_set_timeout(rec, ms)
+// Ticket #619: generic attribute application and convenience shorthands.
+// Use AddAttribute(fn, "cccc::test(suite=\"s\", timeout=5000)") for fine-grained control.
+#define AddAttribute(fn, text)          __builtin_ast_add_attribute(VM, fn, text)
+#define MarkAsTest(fn)                  AddAttribute(fn, "cccc::test")
+#define MarkAsBuild(fn)                 AddAttribute(fn, "cccc::build")
+#define MarkAsBuildTarget(fn, kind)     __builtin_ast_add_build_target_attr(VM, fn, kind)
 
 // Ticket #171: struct/union/enum/typedef type builders
 // Build a new named aggregate and expose it so GetType(name) resolves it.
