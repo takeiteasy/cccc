@@ -1413,6 +1413,10 @@ void cc_destroy(VirtualMachine *vm) {
         free(r->suite);
         free(r->error_pat);
         free(r->test_flags);
+        free(r->expect_stderr);
+        free(r->reject_stderr);
+        free(r->expect_stdout);
+        free(r->reject_stdout);
         if (r->ret_kind == RET_STR)
             free(r->ret_expect.ret_str);
         else if (r->ret_kind == RET_STRUCT) {

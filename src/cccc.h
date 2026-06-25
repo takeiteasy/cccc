@@ -1251,6 +1251,11 @@ struct TestFnRecord {
     uint32_t  test_f_enable;   // CcccOptPass bits to force ON
     uint32_t  test_f_disable;  // CcccOptPass bits to force OFF
     bool      test_f_set;      // true if any -f/-fno- flag given
+    // Per-test output assertions (#614)
+    char *expect_stderr;   // POSIX ERE; test FAILS if stderr does not match
+    char *reject_stderr;   // POSIX ERE; test FAILS if stderr matches
+    char *expect_stdout;   // POSIX ERE; test FAILS if stdout does not match
+    char *reject_stdout;   // POSIX ERE; test FAILS if stdout matches
     TestFnRecord *next;
 };
 

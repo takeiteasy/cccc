@@ -21,6 +21,7 @@
 
 #include <fnmatch.h>
 #include <inttypes.h>
+#include <regex.h>
 #include <signal.h>
 #include <string.h>
 #include <sys/time.h>
@@ -739,6 +740,57 @@ typedef struct TestListNode {
     struct TestListNode *next;
 } TestListNode;
 
+// drain_pipe: read all data from fd until EOF, return malloc'd NUL-terminated
+// string. The caller must free the returned buffer. Returns "" (not NULL) on
+// empty or error so pattern checks always have a valid string to match against.
+#ifdef _POSIX_VERSION
+static char *drain_pipe(int fd) {
+    char tmp[4096];
+    size_t total = 0;
+    char *buf = malloc(1);
+    buf[0] = '\0';
+    ssize_t n;
+    while ((n = read(fd, tmp, sizeof(tmp))) > 0) {
+        buf = realloc(buf, total + (size_t)n + 1);
+        memcpy(buf + total, tmp, (size_t)n);
+        total += (size_t)n;
+    }
+    buf[total] = '\0';
+    return buf;
+}
+
+// check_output_pattern: compile POSIX ERE and search buf.
+// negate=false: FAIL if pattern does NOT match.
+// negate=true:  FAIL if pattern DOES match.
+// Returns true on success (assertion passes), false on failure.
+// On failure writes a message into fail_msg[512].
+static bool check_output_pattern(const char *pat, const char *buf,
+                                  bool negate, const char *label,
+                                  char fail_msg[512]) {
+    if (!pat) return true;
+    if (!buf) buf = "";
+    regex_t re;
+    int rc = regcomp(&re, pat, REG_EXTENDED);
+    if (rc != 0) {
+        char errbuf[128];
+        regerror(rc, &re, errbuf, sizeof(errbuf));
+        snprintf(fail_msg, 512, "%s \"%s\" (regex error: %s)", label, pat, errbuf);
+        return false;
+    }
+    int matched = (regexec(&re, buf, 0, NULL, 0) == 0);
+    regfree(&re);
+    if (!negate && !matched) {
+        snprintf(fail_msg, 512, "%s \"%s\"", label, pat);
+        return false;
+    }
+    if (negate && matched) {
+        snprintf(fail_msg, 512, "%s \"%s\"", label, pat);
+        return false;
+    }
+    return true;
+}
+#endif
+
 int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
 
     // Reverse setup records to declaration order (built by prepending).
@@ -1161,6 +1213,29 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
             memcpy(cur_snap, vm->data_seg, snap_size);
         }
 
+        // Per-test stdout/stderr capture (#614). Redirect fds to pipes before
+        // setjmp so the captured span covers setup hooks + the test function.
+        // Not supported for exit_code= tests (handled above via fork).
+#ifdef _POSIX_VERSION
+        bool needs_capture = r->expect_stdout || r->reject_stdout ||
+                             r->expect_stderr || r->reject_stderr;
+        int saved_stdout = -1, saved_stderr = -1;
+        int pipe_out[2], pipe_err[2];
+        pipe_out[0] = pipe_out[1] = pipe_err[0] = pipe_err[1] = -1;
+        char *captured_stdout = NULL, *captured_stderr = NULL;
+        if (needs_capture) {
+            if (pipe(pipe_out) == 0 && pipe(pipe_err) == 0) {
+                saved_stdout = dup(STDOUT_FILENO);
+                saved_stderr = dup(STDERR_FILENO);
+                fflush(stdout); fflush(stderr);
+                dup2(pipe_out[1], STDOUT_FILENO); close(pipe_out[1]); pipe_out[1] = -1;
+                dup2(pipe_err[1], STDERR_FILENO); close(pipe_err[1]); pipe_err[1] = -1;
+            } else {
+                needs_capture = false;
+            }
+        }
+#endif
+
         int jval = setjmp(run.jmp);
         if (jval == 0) {
             run_hooks(vm, prog, setups, false, false, cur_suite, disp);
@@ -1180,6 +1255,19 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         }
 
         SET_TIMEOUT(0);
+
+        // Restore stdout/stderr and drain captured output.
+#ifdef _POSIX_VERSION
+        if (needs_capture) {
+            fflush(stdout); fflush(stderr);
+            if (saved_stdout >= 0) { dup2(saved_stdout, STDOUT_FILENO); close(saved_stdout); }
+            if (saved_stderr >= 0) { dup2(saved_stderr, STDERR_FILENO); close(saved_stderr); }
+            captured_stdout = drain_pipe(pipe_out[0]);
+            captured_stderr = drain_pipe(pipe_err[0]);
+            if (pipe_out[0] >= 0) close(pipe_out[0]);
+            if (pipe_err[0] >= 0) close(pipe_err[0]);
+        }
+#endif
 
         if (!run.timed_out) {
             char td_fail[512] = {0};
@@ -1344,6 +1432,26 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         }
 
         free(ret_struct_buf);
+
+        // Per-test output pattern checks (#614).
+#ifdef _POSIX_VERSION
+        if (!run.timed_out && needs_capture && !run.failed) {
+            if (!check_output_pattern(r->expect_stderr, captured_stderr, false,
+                                      "expected stderr to match", run.fail_msg))
+                run.failed = 1;
+            else if (!check_output_pattern(r->reject_stderr, captured_stderr, true,
+                                      "expected stderr not to match", run.fail_msg))
+                run.failed = 1;
+            else if (!check_output_pattern(r->expect_stdout, captured_stdout, false,
+                                      "expected stdout to match", run.fail_msg))
+                run.failed = 1;
+            else if (!check_output_pattern(r->reject_stdout, captured_stdout, true,
+                                      "expected stdout not to match", run.fail_msg))
+                run.failed = 1;
+        }
+        free(captured_stdout);
+        free(captured_stderr);
+#endif
 
         if (run.timed_out) {
             emit_test_result(fmt, disp, cur_suite, "timeout", NULL, &json_first, test_num);

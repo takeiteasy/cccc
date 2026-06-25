@@ -2452,6 +2452,11 @@ typedef struct {
     double ret_epsilon_val;
     int exit_code_val; // -1 = not set
     const char *flags; // flags = "..." per-test CLI-flag string; NULL if unset
+    // Per-test output assertions (#614)
+    const char *expect_stderr;
+    const char *reject_stderr;
+    const char *expect_stdout;
+    const char *reject_stdout;
     // RET_STRUCT: compound-literal field list and raw source span text
     TestRetField *ret_fields;     // heap-alloc'd; ownership transferred to TestFnRecord
     char         *ret_struct_text; // heap-alloc'd strndup of the literal source span
@@ -2731,6 +2736,26 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
                    p->next && equal(p->next, "=") &&
                    p->next->next && p->next->next->kind == TK_STR) {
             out->flags = p->next->next->str;
+            p = p->next->next->next;
+        } else if (equal(p, "expect_stderr") &&
+                   p->next && equal(p->next, "=") &&
+                   p->next->next && p->next->next->kind == TK_STR) {
+            out->expect_stderr = p->next->next->str;
+            p = p->next->next->next;
+        } else if (equal(p, "reject_stderr") &&
+                   p->next && equal(p->next, "=") &&
+                   p->next->next && p->next->next->kind == TK_STR) {
+            out->reject_stderr = p->next->next->str;
+            p = p->next->next->next;
+        } else if (equal(p, "expect_stdout") &&
+                   p->next && equal(p->next, "=") &&
+                   p->next->next && p->next->next->kind == TK_STR) {
+            out->expect_stdout = p->next->next->str;
+            p = p->next->next->next;
+        } else if (equal(p, "reject_stdout") &&
+                   p->next && equal(p->next, "=") &&
+                   p->next->next && p->next->next->kind == TK_STR) {
+            out->reject_stdout = p->next->next->str;
             p = p->next->next->next;
         } else {
             p = p->next;
@@ -3071,6 +3096,10 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
                     rec->test_f_disable         = _delta.f_disable;
                     rec->test_f_set             = (_delta.f_enable || _delta.f_disable);
                 }
+                rec->expect_stderr = ta.expect_stderr ? strdup(ta.expect_stderr) : NULL;
+                rec->reject_stderr = ta.reject_stderr ? strdup(ta.reject_stderr) : NULL;
+                rec->expect_stdout = ta.expect_stdout ? strdup(ta.expect_stdout) : NULL;
+                rec->reject_stdout = ta.reject_stdout ? strdup(ta.reject_stdout) : NULL;
                 if (ta.exit_code_val >= 0 && ta.error_pat) {
                     warn_tok(vm, probe, CCCC_WARN_ATTRIBUTES,
                              "exit_code= and error= are mutually exclusive; error= ignored");

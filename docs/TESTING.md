@@ -255,7 +255,7 @@ void test_add_commutative(void) {
 }
 ```
 
-`name`, `suite`, `error`, `exit_code`, `timeout`, `error_count`, `return`, `return_epsilon`, and `flags` may all be combined in one attribute (with the exception that `exit_code` is mutually exclusive with `error` and `return`).
+`name`, `suite`, `error`, `exit_code`, `timeout`, `error_count`, `return`, `return_epsilon`, `flags`, `expect_stderr`, `reject_stderr`, `expect_stdout`, and `reject_stdout` may all be combined in one attribute (with the exception that `exit_code` is mutually exclusive with `error` and `return`).
 
 ## Test Suites
 
@@ -1031,6 +1031,50 @@ options. Both can coexist: per-test `flags=` takes precedence over
 
 `flags=` is silently ignored when the test is compiled and run in native
 mode. It applies only to the bytecode/VM execution path.
+
+## Per-test output assertions
+
+Four attribute keys let a suite test assert on the text printed to stdout or
+stderr during the test function (and any setup hooks that run before it):
+
+| Key | Passes when... |
+|-----|----------------|
+| `expect_stderr = "regex"` | stderr **matches** the POSIX ERE pattern |
+| `reject_stderr = "regex"` | stderr does **not** match the POSIX ERE pattern |
+| `expect_stdout = "regex"` | stdout **matches** the POSIX ERE pattern |
+| `reject_stdout = "regex"` | stdout does **not** match the POSIX ERE pattern |
+
+Matching uses `regcomp(REG_EXTENDED)` + `regexec()` — equivalent to Python's
+`re.search()` with `re.MULTILINE` (pattern is searched anywhere in the output).
+
+```c
+// Test passes only if the warning appears on stderr.
+[[cccc::test(flags = "-Wattributes",
+             expect_stderr = "warning: unrecognized return= operand")]]
+int test_unrecognized_operand(void) {
+    return 42;
+}
+
+// Test passes only if "fatal" never appears in stderr.
+[[cccc::test(reject_stderr = "fatal")]]
+void test_no_fatal_output(void) {
+    printf("hello\n");
+}
+
+// Test passes only if stdout contains the expected line.
+[[cccc::test(expect_stdout = "result: 42")]]
+void test_prints_result(void) {
+    printf("result: %d\n", 6 * 7);
+}
+```
+
+All four keys can be combined in one attribute and with all other
+`[[cccc::test(...)]]` keys.
+
+**Limitations:**
+- Output capture is not supported for `exit_code =` tests (the subprocess
+  runs in a forked child; future ticket).
+- Capture is not available on non-POSIX platforms.
 
 ## Assertion Macros
 
