@@ -2810,7 +2810,7 @@ static void read_macro_attr_options(VirtualMachine *vm, Token *macro_tok,
     }
 }
 
-static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
+static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan) {
     Token *tok = *tok_ptr;
     bool is_gnu_attr = false;
     bool is_c23_attr = false;
@@ -3157,6 +3157,7 @@ static bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr) {
     }
 
     // Route to function or variable extraction.
+    if (emit_scan) return false;  // comptime/macro extraction invalid inside emit blocks
     if (looks_like_function) {
         *tok_ptr = extract_macro_function(vm, attr_end, true,
                                           attribute_name);
@@ -3735,6 +3736,13 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 tok = skip_line(vm, tok->next);
                 continue;
             }
+            // Scan for [[cccc::test]]/[[cccc::build]]/[[cccc::build_target]] in
+            // emitted tokens so comptime emit blocks can generate mode-attributed
+            // functions. Use a local pointer so the emit loop's tok is unaffected.
+            {
+                Token *scan = start;
+                try_extract_attr_macro(vm, &scan, /*emit_scan=*/true);
+            }
             cc_record_emit_source(vm, copy_raw_directive_line(vm, start));
             bool first_token = true;
             while (tok->kind != TK_EOF && (first_token || !tok->at_bol)) {
@@ -3768,7 +3776,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 continue;
             if (try_rewrite_cccc_keyword_attr(vm, &tok))
                 continue;
-            if (try_extract_attr_macro(vm, &tok))
+            if (try_extract_attr_macro(vm, &tok, false))
                 continue;
 
             // _Pragma("string") — C99 §6.10.9: equivalent to #pragma string

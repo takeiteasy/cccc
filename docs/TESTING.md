@@ -193,6 +193,25 @@ void test_pointers(void) {
 
 No `#include` is required — the assertion macros and their backing declarations are injected automatically when running with `--testing`.
 
+### Programmatic test generation via emit blocks
+
+`[[cccc::test]]` (and `[[cccc::test_setup]]` / `[[cccc::test_teardown]]`) inside
+`#pragma cccc emit begin...end` blocks are scanned and registered, enabling
+comptime macros to generate test functions programmatically:
+
+```c
+#pragma cccc comptime begin
+#pragma cccc emit begin
+[[cccc::test]]
+void generated_test(void) { }   // registered and run under --testing
+#pragma cccc emit end
+#pragma cccc comptime end
+```
+
+Note that C preprocessor macros (`AssertEq`, `Assert`, etc.) are not expanded
+inside emit blocks. Use the underlying `__builtin_assert_*` functions directly,
+or structure the test body so that assertions live outside the emit block.
+
 ### Custom display names
 
 Give a test a human-readable name with the `name` option. The display name appears in TAP output and is used for glob filtering; the C function name is unchanged:

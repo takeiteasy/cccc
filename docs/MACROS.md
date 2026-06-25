@@ -333,6 +333,32 @@ Multiple `#pragma cccc emit begin...end` sub-blocks can appear inside a single
 comptime block. Same-type nesting (emit inside emit, comptime inside comptime)
 is a hard error.
 
+Functions inside emit blocks can carry `[[cccc::test]]`, `[[cccc::build]]`,
+`[[cccc::build_target]]`, `[[cccc::test_setup]]`, and `[[cccc::test_teardown]]`
+attributes. CCCC scans the emitted token stream for these attributes and
+registers the records exactly as it would for the same attributes in normal
+source, enabling comptime emit blocks to generate test and build entries
+programmatically:
+
+```c
+#pragma cccc comptime begin
+#pragma cccc emit begin
+
+[[cccc::test]]
+void generated_test(void) { }    // registered and run under --testing
+
+[[cccc::build]]
+int generated_build(Builder *ctx) { return 42; }  // registered under --build
+
+#pragma cccc emit end
+#pragma cccc comptime end
+```
+
+Note: C preprocessor macros (such as `AssertEq`, `Executable`, `AddSource`)
+are **not** expanded inside emit blocks — tokens are appended verbatim to the
+output stream, bypassing macro expansion. Use the underlying `__builtin_*`
+functions directly, or move assertions outside the emit block.
+
 Macros can emit source-order directives while they run:
 
 ```c
