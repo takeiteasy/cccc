@@ -119,3 +119,198 @@ int test_pragma_config_mixed(void) {
 }
 
 #pragma cccc suite end
+
+// [from test_attr_flags_bounds.c]
+// Per-test bounds-checking via flags= attribute (ticket #356).
+#pragma cccc suite begin "per_test_flags/bounds"
+
+[[cccc::test(flags = "--bounds-checks", return = 6)]]
+int test_bounds_in_bounds(void) {
+    int arr[4] = {1, 2, 3, 6};
+    return arr[3];
+}
+
+[[cccc::test(flags = "-b", return = 10)]]
+int test_bounds_short_flag(void) {
+    int arr[3] = {10, 20, 30};
+    return arr[0];
+}
+
+[[cccc::test(return = 99)]]
+int test_bounds_after_flagged(void) {
+    return 99;
+}
+
+#pragma cccc suite end
+
+// [from test_attr_flags_mixed.c]
+// Lazy recompile with mixed flagged/unflagged tests (ticket #356).
+#pragma cccc suite begin "per_test_flags/mixed"
+
+[[cccc::test(flags = "--bounds-checks --overflow-checks", return = 7)]]
+int test_shared_flags_first(void) {
+    return 3 + 4;
+}
+
+[[cccc::test(flags = "--bounds-checks --overflow-checks", return = 12)]]
+int test_shared_flags_second(void) {
+    return 12;
+}
+
+[[cccc::test(return = 1)]]
+int test_unflagged_between(void) {
+    return 1;
+}
+
+[[cccc::test(flags = "--optimize=1", return = 9)]]
+int test_different_flags(void) {
+    return 9;
+}
+
+[[cccc::test(return = 55)]]
+int test_unflagged_at_end(void) {
+    return 55;
+}
+
+#pragma cccc suite end
+
+// [from test_attr_flags_optimise.c]
+// Per-test optimisation and combined flags (ticket #356).
+#pragma cccc suite begin "per_test_flags/optimise"
+
+[[cccc::test(flags = "--optimize=2 --safety=1", return = 2)]]
+int test_combined_flags(void) {
+    return 1 + 1;
+}
+
+[[cccc::test(flags = "--optimize=3", return = 42)]]
+int test_opt3(void) {
+    int x = 6;
+    int y = 7;
+    return x * y;
+}
+
+[[cccc::test(flags = "-O2", return = 5)]]
+int test_opt_short(void) {
+    return 2 + 3;
+}
+
+[[cccc::test(flags = "--safety=standard", return = 3)]]
+int test_safety_standard(void) {
+    int a = 1, b = 2;
+    return a + b;
+}
+
+[[cccc::test(flags = "-2", return = 100)]]
+int test_safety_short(void) {
+    return 100;
+}
+
+[[cccc::test(return = 0)]]
+int test_baseline_after_optimised(void) {
+    return 0;
+}
+
+#pragma cccc suite end
+
+// [from test_attr_optimize.c]
+// Per-function optimize attribute: GCC string form, C23 integer form, @ shorthand.
+#pragma cccc suite begin "per_fn_optimize"
+
+__attribute__((optimize("O2")))
+static int gnu_attr_add_opt(int a, int b) {
+    return a + b;
+}
+
+[[cccc::test]]
+static void test_gnu_str_attr(void) {
+    AssertEq(gnu_attr_add_opt(3, 4), 7);
+    AssertEq(gnu_attr_add_opt(0, 0), 0);
+    AssertEq(gnu_attr_add_opt(-1, 1), 0);
+}
+
+[[cccc::optimize(3)]]
+static long c23_attr_mul(long a, long b) {
+    return a * b;
+}
+
+[[cccc::test]]
+static void test_c23_int_attr(void) {
+    AssertEq(c23_attr_mul(6, 7), 42);
+    AssertEq(c23_attr_mul(0, 100), 0);
+    AssertEq(c23_attr_mul(-3, -3), 9);
+}
+
+@optimize(1)
+static int at_attr_sub(int a, int b) {
+    return a - b;
+}
+
+[[cccc::test]]
+static void test_at_attr(void) {
+    AssertEq(at_attr_sub(10, 3), 7);
+    AssertEq(at_attr_sub(0, 0), 0);
+}
+
+[[cccc::optimize(0)]]
+static int o0_attr_fn(int x) {
+    return x * 2;
+}
+
+[[cccc::test]]
+static void test_o0_attr(void) {
+    AssertEq(o0_attr_fn(21), 42);
+    AssertEq(o0_attr_fn(0), 0);
+}
+
+[[cccc::optimize("O2")]]
+static int c23_str_attr_fn(int x) {
+    return x + 1;
+}
+
+[[cccc::test]]
+static void test_c23_str_attr(void) {
+    AssertEq(c23_str_attr_fn(41), 42);
+    AssertEq(c23_str_attr_fn(-1), 0);
+}
+
+__attribute__((optimize("-O3")))
+static int gcc_dash_attr(int a, int b) {
+    return a - b;
+}
+
+[[cccc::test]]
+static void test_gcc_dash_attr(void) {
+    AssertEq(gcc_dash_attr(10, 4), 6);
+    AssertEq(gcc_dash_attr(5, 5), 0);
+}
+
+static int plain_sq(int x) {
+    return x * x;
+}
+
+[[cccc::optimize(2)]]
+static int opt_double(int x) {
+    return x + x;
+}
+
+[[cccc::test]]
+static void test_mixed_opt(void) {
+    AssertEq(plain_sq(5), 25);
+    AssertEq(plain_sq(0), 0);
+    AssertEq(opt_double(6), 12);
+    AssertEq(opt_double(-3), -6);
+}
+
+[[cccc::optimize(4)]]
+static long opt4_muladd(long a, long b, long c) {
+    return a * b + c;
+}
+
+[[cccc::test]]
+static void test_o4_attr(void) {
+    AssertEq(opt4_muladd(3, 4, 5), 17);
+    AssertEq(opt4_muladd(0, 100, 7), 7);
+}
+
+#pragma cccc suite end

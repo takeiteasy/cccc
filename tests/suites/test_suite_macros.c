@@ -517,3 +517,30 @@ int test_define(void) {
 int test_macro_undef_collision_584(void) { return 42; }
 
 #pragma cccc suite end
+
+// [from test_comptime_in_test_mode.c]
+// Comptime macros work inside [[cccc::test]] functions.
+#pragma cccc suite begin "macros/comptime_in_test_mode"
+
+[[cccc::comptime]]
+int ct_mul_test_mode(int a, int b) {
+    return a * b;
+}
+
+[[cccc::comptime]]
+Node *ct_answer_test_mode(void) {
+    return MakeIntLiteral(ct_mul_test_mode(6, 7));
+}
+
+[[cccc::comptime]]
+Node *ct_two_test_mode(void) {
+    return MakeIntLiteral(ct_mul_test_mode(1, 2));
+}
+
+[[cccc::test]]
+void test_comptime_inline_in_test(void) {
+    AssertEq(ct_answer_test_mode(), 42);
+    AssertEq(ct_two_test_mode(), 2);
+}
+
+#pragma cccc suite end
