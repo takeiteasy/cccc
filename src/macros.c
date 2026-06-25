@@ -223,6 +223,15 @@ extern Type  *__builtin_ast_make_volatile(VirtualMachine *vm, Type *ty);
 extern Obj   *__builtin_ast_function_prototype(VirtualMachine *vm, const char *name,
                                             Type *return_type);
 
+// Mode attribute registration
+extern TestFnRecord *__builtin_ast_mark_test(VirtualMachine *vm, Obj *fn);
+extern void          __builtin_ast_mark_build(VirtualMachine *vm, Obj *fn);
+extern void          __builtin_ast_mark_build_target(VirtualMachine *vm, Obj *fn,
+                                                     const char *kind);
+extern void __builtin_ast_test_set_suite(TestFnRecord *rec, const char *suite);
+extern void __builtin_ast_test_set_display_name(TestFnRecord *rec, const char *name);
+extern void __builtin_ast_test_set_timeout(TestFnRecord *rec, long timeout_ms);
+
 // Ticket #171: struct/union/enum/typedef type builders
 extern Type  *__builtin_ast_make_struct(VirtualMachine *vm, const char *name);
 extern Type  *__builtin_ast_make_union(VirtualMachine *vm, const char *name);
@@ -547,6 +556,20 @@ static void register_reflection_ffi(VirtualMachine *vm) {
     // Ticket #171: function prototype builder
     cc_register_cfunc(vm, "__builtin_ast_function_prototype",
                       (void *)__builtin_ast_function_prototype, 3, 0);
+
+    // Mode attribute registration for AST-generated functions
+    cc_register_cfunc(vm, "__builtin_ast_mark_test",
+                      (void *)__builtin_ast_mark_test, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_mark_build",
+                      (void *)__builtin_ast_mark_build, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_mark_build_target",
+                      (void *)__builtin_ast_mark_build_target, 3, 0);
+    cc_register_cfunc(vm, "__builtin_ast_test_set_suite",
+                      (void *)__builtin_ast_test_set_suite, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_test_set_display_name",
+                      (void *)__builtin_ast_test_set_display_name, 2, 0);
+    cc_register_cfunc(vm, "__builtin_ast_test_set_timeout",
+                      (void *)__builtin_ast_test_set_timeout, 2, 0);
 
     // Ticket #171: struct/union/enum/typedef type builders
     cc_register_cfunc(vm, "__builtin_ast_make_struct",

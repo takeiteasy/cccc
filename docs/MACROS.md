@@ -359,6 +359,47 @@ are **not** expanded inside emit blocks — tokens are appended verbatim to the
 output stream, bypassing macro expansion. Use the underlying `__builtin_*`
 functions directly, or move assertions outside the emit block.
 
+When building functions via the **AST API** (`MakeFunction` + `FunctionSetBody` +
+`PublishNode`) rather than emit blocks, use the `MarkAs*` helpers to register
+the function as a test or build entry:
+
+```c
+[[cccc::comptime]]
+void gen_tests(void) {
+    Obj *fn = MakeFunction("my_generated_test", GetType("void"));
+    WithFn(fn) { FunctionSetBody(fn, Quote("return;")); }
+    PublishNode(fn);
+
+    // Register as [[cccc::test]] and configure the record
+    TestFnRecord *rec = MarkAsTest(fn);
+    TestSetSuite(rec, "generated");          // optional: assign to suite
+    TestSetDisplayName(rec, "my test name"); // optional: human-readable label
+    TestSetTimeout(rec, 5000);               // optional: per-test timeout in ms
+}
+gen_tests();
+```
+
+For build entries:
+
+```c
+// Register as [[cccc::build]]
+MarkAsBuild(fn);
+
+// Register as [[cccc::build_target(kind=native)]]
+MarkAsBuildTarget(fn, "native");   // or "bytecode"
+```
+
+`MarkAsTest` returns a `TestFnRecord *` handle for further configuration.
+`MarkAsBuild` and `MarkAsBuildTarget` return void. The active pragma suite
+(if any) is inherited automatically by `MarkAsTest`; use `TestSetSuite` to
+override it.
+
+For complex test options (error patterns, return assertions, per-test compiler
+flags), the `[[cccc::test(...)]]` attribute syntax in an emit block is the
+recommended path since it expresses all options inline. The `MarkAs*` API
+targets the common case of simple test/build registration from AST-built
+functions.
+
 Macros can emit source-order directives while they run:
 
 ```c

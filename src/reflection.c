@@ -1842,6 +1842,58 @@ Obj *__builtin_ast_function_prototype(VirtualMachine *vm, const char *name,
 }
 
 // ============================================================================
+// Mode Attribute Registration — MarkAsTest / MarkAsBuild / MarkAsBuildTarget
+// ============================================================================
+
+// Register an AST-generated function as a [[cccc::test]] entry.
+// Returns the TestFnRecord* so callers can configure it with TestSet* helpers.
+// Inherits the active pragma suite (vm->compiler.current_suite) as the default.
+TestFnRecord *__builtin_ast_mark_test(VirtualMachine *vm, Obj *fn) {
+    if (!vm || !fn || !fn->name) return NULL;
+    TestFnRecord *rec = calloc(1, sizeof(TestFnRecord));
+    rec->name = strdup(fn->name);
+    const char *s = vm->compiler.current_suite;
+    rec->suite = s ? strdup(s) : NULL;
+    rec->ret_op = CMP_EQ;
+    rec->next = vm->compiler.test_fns;
+    vm->compiler.test_fns = rec;
+    return rec;
+}
+
+void __builtin_ast_mark_build(VirtualMachine *vm, Obj *fn) {
+    if (!vm || !fn || !fn->name) return;
+    BuildFnRecord *rec = calloc(1, sizeof(BuildFnRecord));
+    rec->name = strdup(fn->name);
+    rec->next = vm->compiler.build_fns;
+    vm->compiler.build_fns = rec;
+}
+
+void __builtin_ast_mark_build_target(VirtualMachine *vm, Obj *fn, const char *kind) {
+    if (!vm || !fn || !fn->name) return;
+    BuildTargetFnRecord *rec = calloc(1, sizeof(BuildTargetFnRecord));
+    rec->name = strdup(fn->name);
+    rec->kind = strdup(kind ? kind : "native");
+    rec->next = vm->compiler.build_target_fns;
+    vm->compiler.build_target_fns = rec;
+}
+
+void __builtin_ast_test_set_suite(TestFnRecord *rec, const char *suite) {
+    if (!rec) return;
+    free(rec->suite);
+    rec->suite = suite ? strdup(suite) : NULL;
+}
+
+void __builtin_ast_test_set_display_name(TestFnRecord *rec, const char *name) {
+    if (!rec) return;
+    free(rec->display_name);
+    rec->display_name = name ? strdup(name) : NULL;
+}
+
+void __builtin_ast_test_set_timeout(TestFnRecord *rec, long timeout_ms) {
+    if (rec) rec->timeout_ms = timeout_ms;
+}
+
+// ============================================================================
 // Global Variable Generation (ticket #152)
 // ============================================================================
 

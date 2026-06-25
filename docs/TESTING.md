@@ -212,6 +212,38 @@ Note that C preprocessor macros (`AssertEq`, `Assert`, etc.) are not expanded
 inside emit blocks. Use the underlying `__builtin_assert_*` functions directly,
 or structure the test body so that assertions live outside the emit block.
 
+### Programmatic test registration via AST API
+
+When building functions through the AST API (`MakeFunction` + `PublishNode`),
+use `MarkAsTest` to register the function as a test entry. It returns a
+`TestFnRecord *` handle that the `TestSet*` helpers can configure:
+
+```c
+[[cccc::comptime]]
+void gen_tests(void) {
+    Obj *fn = MakeFunction("my_generated_test", GetType("void"));
+    WithFn(fn) { FunctionSetBody(fn, Quote("return;")); }
+    PublishNode(fn);
+
+    TestFnRecord *rec = MarkAsTest(fn);
+    TestSetSuite(rec, "generated");
+    TestSetDisplayName(rec, "my test name");
+    TestSetTimeout(rec, 5000);  // ms; 0 = global --test-timeout
+}
+gen_tests();
+```
+
+| Helper | Effect |
+|---|---|
+| `MarkAsTest(fn)` | Register as `[[cccc::test]]`; returns `TestFnRecord *` |
+| `TestSetSuite(rec, suite)` | Override the suite name |
+| `TestSetDisplayName(rec, name)` | Set a human-readable display name |
+| `TestSetTimeout(rec, ms)` | Set a per-test timeout |
+
+For more complex options (error patterns, return assertions, per-test compiler
+flags), the `[[cccc::test(...)]]` attribute syntax in an emit block is the
+recommended path. See [MACROS.md](MACROS.md) for the full emit-block API.
+
 ### Custom display names
 
 Give a test a human-readable name with the `name` option. The display name appears in TAP output and is used for glob filtering; the C function name is unchanged:
