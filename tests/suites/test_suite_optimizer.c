@@ -1,6 +1,15 @@
 // CCCC_FLAGS: --testing
-// Consolidated suite: optimizer: constant fold, inline, CSE, compaction, pure/const, FMA
-// Source tests: test_calln_callf_dead_elim, test_cse_const_calls, test_inline_dead, test_inline_locals, test_inline_multistmt, test_inline_singlereturn, test_inline_threshold, test_inline_void, test_optimizer_compaction, test_optimizer_constant_fold, test_optimizer_indexed_ops, test_optimizer_linear_statements, test_optimizer_scalar_promotion, test_pure_const_attr, test_pure_dead_call_elim, test_optimizer_fmadd_precision, test_optimizer_fmsub_precision, test_optimizer_fnmsub_precision
+// Consolidated suite: optimizer: constant fold, inline, CSE, compaction, pure/const, FMA,
+//   elim-ext, fuse, O4 arith, tail-call, atomic ops
+// Source tests: test_calln_callf_dead_elim, test_cse_const_calls, test_inline_dead,
+//   test_inline_locals, test_inline_multistmt, test_inline_singlereturn,
+//   test_inline_threshold, test_inline_void, test_optimizer_compaction,
+//   test_optimizer_constant_fold, test_optimizer_indexed_ops,
+//   test_optimizer_linear_statements, test_optimizer_scalar_promotion,
+//   test_pure_const_attr, test_pure_dead_call_elim, test_optimizer_fmadd_precision,
+//   test_optimizer_fmsub_precision, test_optimizer_fnmsub_precision,
+//   test_optimizer_elim_ext, test_optimizer_fuse_ops, test_optimizer_o4_fused_arith,
+//   test_optimizer_tail_call, test_atomic_ops_o3
 
 // [from test_calln_callf_dead_elim]
 // Test dead-call elimination for CALLN (indirect calls).
@@ -608,6 +617,127 @@ int test_optimizer_fnmsub_precision(void) {
     float fa[3] = {1.0f, 2.0f, 4.0f};
     float fb[3] = {1.0f, 2.0f, 4.0f};
     if (acc_sub_f(fa, fb, 3) != 979.0f) return 2;
+    return 42;
+}
+
+// [from test_optimizer_elim_ext]
+// Test redundant sign/zero-extension elimination (-felim-ext).
+#include <stdint.h>
+
+static int opt_elim_failures = 0;
+#define OPT_EXPECT(expr, expected) do { \
+    long long got = (long long)(expr); \
+    long long want = (long long)(expected); \
+    if (got != want) opt_elim_failures++; \
+} while (0)
+
+static long long opt_non_adjacent_sx4(int *p) {
+    int v = *p; long long a = v; long long b = a + 1; long long c = (int)b; return c;
+}
+static long long opt_chained_sx4(long long x) { int a=(int)x; int b=a; long long c=(int)b; return c; }
+static long long opt_zx1_then_zx2(unsigned char v) { unsigned short s=v; return (long long)s; }
+static long long opt_zx4_after_sx4(int v) { unsigned int u=(unsigned int)v; return (long long)u; }
+static long long opt_branch_reset(int cond, int a, int b) {
+    int v; if(cond) v=a; else v=b; long long r=(int)v; return r;
+}
+static long long opt_local_zx4_chain(unsigned int u) { unsigned int a=u; unsigned long long b=a; return (long long)b; }
+static long long opt_sx4_on_zx2(unsigned short h) { int i=(int)h; return (long long)i; }
+
+[[cccc::test(return = 42, flags = "-felim-ext")]]
+int test_optimizer_elim_ext(void) {
+    int base = 7;
+    OPT_EXPECT(opt_non_adjacent_sx4(&base), 8);
+    OPT_EXPECT(opt_chained_sx4(-5LL), -5);
+    OPT_EXPECT(opt_chained_sx4(2147483647LL), 2147483647);
+    OPT_EXPECT(opt_zx1_then_zx2(200), 200);
+    OPT_EXPECT(opt_zx4_after_sx4(-1), (long long)(unsigned int)-1);
+    OPT_EXPECT(opt_branch_reset(1, 42, 0), 42);
+    OPT_EXPECT(opt_branch_reset(0, 0, -99), -99);
+    OPT_EXPECT(opt_local_zx4_chain(0u), 0);
+    OPT_EXPECT(opt_local_zx4_chain(4294967295u), 4294967295LL);
+    OPT_EXPECT(opt_sx4_on_zx2(65535), 65535);
+    if (opt_elim_failures) return 1;
+    return 42;
+}
+
+// [from test_optimizer_fuse_ops]
+// Verify fused-ops (-ffuse) on a simple arithmetic chain.
+[[cccc::test(return = 42, flags = "-ffuse")]]
+int test_optimizer_fuse_ops(void) {
+    long x = 7; long y = x * 6; long z = y + 0; return (int)z;
+}
+
+// [from test_optimizer_o4_fused_arith]
+// Verify --optimize=4 on a base+index*6 expression.
+static long opt_o4_seed = 5;
+[[cccc::test(return = 42, flags = "--optimize=4")]]
+int test_optimizer_o4_fused_arith(void) {
+    long base = 12; long index = opt_o4_seed; long result = base + index * 6; return (int)result;
+}
+
+// [from test_optimizer_tail_call]
+// Tail-call optimisation: direct recursion and mutual recursion with large depths.
+#include <stdio.h>
+
+static long opt_tail_sum(long n, long acc) {
+    if (n <= 0) return acc; return opt_tail_sum(n - 1, acc + n);
+}
+static int opt_is_odd(int n);
+static int opt_is_even(int n) { if (n == 0) return 1; return opt_is_odd(n - 1); }
+static int opt_is_odd(int n)  { if (n == 0) return 0; return opt_is_even(n - 1); }
+static int opt_one(void) { return 1; }
+static int opt_non_tail(int n) { if (n <= 0) return 0; return opt_non_tail(n - 1) + 1; }
+static int opt_double_it(int x) { return x * 2; }
+static int opt_add_one(int x) { return x + 1; }
+static int opt_compose(int x) { return opt_add_one(opt_double_it(x)); }
+
+[[cccc::test(return = 42, flags = "-O1")]]
+int test_optimizer_tail_call(void) {
+    (void)opt_one;
+    long s = opt_tail_sum(500000, 0);
+    if (s != 125000250000L) return 1;
+    if (!opt_is_even(200000)) return 2;
+    if (opt_is_even(200001)) return 3;
+    if (opt_non_tail(200) != 200) return 4;
+    if (opt_compose(5) != 11) return 5;
+    return 42;
+}
+
+// [from test_atomic_ops_o3]
+// Atomic exchange/CAS at -O3 (regression guard for copy-prop width_enc aliasing #497).
+#include <stdatomic.h>
+
+[[cccc::test(return = 42, flags = "-O3")]]
+int test_atomic_ops_o3(void) {
+    atomic_int xi = 0;
+    int a=1,b=2,c=3,d=4,e=5,f=6,g=7,h=8,i=9,j=10,k=11,l=12;
+    atomic_store(&xi, 100);
+    int old_int = atomic_exchange(&xi, 200);
+    if (old_int != 100) return 1;
+    if (atomic_load(&xi) != 200) return 2;
+    int sum = a+b+c+d+e+f+g+h+i+j+k+l;
+    if (sum != 78) return 3;
+    int expected_i = 200;
+    int r = atomic_compare_exchange_strong(&xi, &expected_i, 300);
+    if (!r || atomic_load(&xi) != 300) return 4;
+    expected_i = 999;
+    r = atomic_compare_exchange_strong(&xi, &expected_i, 400);
+    if (r || atomic_load(&xi) != 300 || expected_i != 300) return 5;
+
+    atomic_long xl = 0;
+    long p=100,q=200,s2=300,t=400,u=500,v=600,w2=700,x2=800,y=900,z=1000;
+    atomic_store(&xl, 10000LL);
+    long old_long = atomic_exchange(&xl, 20000LL);
+    if (old_long != 10000LL) return 6;
+    if (atomic_load(&xl) != 20000LL) return 7;
+    long lsum = p+q+s2+t+u+v+w2+x2+y+z;
+    if (lsum != 5500LL) return 8;
+    long expected_l = 20000LL;
+    int rl = atomic_compare_exchange_strong(&xl, &expected_l, 30000LL);
+    if (!rl || atomic_load(&xl) != 30000LL) return 9;
+    expected_l = 99999LL;
+    rl = atomic_compare_exchange_strong(&xl, &expected_l, 40000LL);
+    if (rl || atomic_load(&xl) != 30000LL || expected_l != 30000LL) return 10;
     return 42;
 }
 

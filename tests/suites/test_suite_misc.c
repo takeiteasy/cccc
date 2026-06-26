@@ -1,12 +1,22 @@
 // CCCC_FLAGS: --testing
-// Consolidated suite: miscellaneous: volatile, builtins
-// Source tests: test_builtins, test_volatile
+// Consolidated suite: miscellaneous: volatile, builtins, compound literals,
+//   comma operator, block scope, token paste, digraphs, edge cases, regression tests
+// Source tests: test_builtins, test_volatile, test_cast_const, test_comma,
+//   test_block_scope, test_compound_simple, test_compound_struct_access,
+//   test_define_only, test_simple_paste, test_vm_profile_smoke,
+//   test_deep_initializer_576, test_memzero_init, test_cond_pointer_type,
+//   test_coalesce, test_block_partial_init,
+//   test_edge_digraph_braces, test_edge_digraph_directive,
+//   test_edge_digraph_paste, test_edge_digraph_subscript,
+//   test_edge_empty_union_varargs, test_edge_worm_emoji_macros
 
 #include <math.h>
 #include <limits.h>
 #include <stdint.h>
 #include <string.h>
 #include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 // [from test_builtins]
 // Test GNU-style builtins implemented in the parser (ticket #220, #212, #213, #513)
@@ -237,6 +247,270 @@ int test_volatile(void) {
     // Volatile global write and re-read
     global_volatile = 55;
     if (global_volatile != 55) return 10;
+
+    return 42;
+}
+
+// [from test_cast_const]
+[[cccc::test(return = 42)]]
+int test_cast_const(void) {
+    return ((char)1000) == -24 ? 42 : 1;
+}
+
+// [from test_comma]
+// Comprehensive comma operator test.
+[[cccc::test(return = 42)]]
+int test_comma(void) {
+    int x = 0, y = 0, result = 0;
+    result = (x = 5, y = 10, x + y);        // 15
+    int a = 0;
+    int b = (a = 3, a * 2);                  // b=6, a=3
+    if ((x = 7, y = 8, x < y)) result += 10; // 25
+    int i = 0, sum = 0;
+    for (i = 0, sum = 0; i < 3; i = i + 1) sum += 1;
+    result += sum;                            // 28
+    int c = (a = 1, (b = 2, a + b));         // c=3 (unused)
+    result += (a = 5, b = 6, a + b);         // 39
+    int final = (x = 1, y = 2, x + y);      // 3
+    return result + final;                    // 42
+}
+
+// [from test_block_scope]
+// Nested block scope and variable shadowing.
+[[cccc::test(return = 42)]]
+int test_block_scope(void) {
+    int x = 10, result = 0;
+    { int x = 20; result = x; }
+    if (x != 10) return 1;
+    if (result != 20) return 2;
+    { int x = 30; { int x = 40; result = x; } if (x != 30) return 3; }
+    if (result != 40) return 4;
+    if (x != 10) return 5;
+    { int y = 5; result = x + y; }
+    if (result != 15) return 6;
+    result = 0;
+    { int x = 2; { int x = 3; result = x * 10; } result += x; }
+    result += x; // 32 + 10 = 42
+    return result;
+}
+
+// [from test_compound_simple]
+// Simple compound literal returning a scalar.
+[[cccc::test(return = 42)]]
+int test_compound_simple(void) {
+    int x = (int){42};
+    return x;
+}
+
+// [from test_compound_struct_access]
+// Struct compound literal with pointer member access.
+[[cccc::test(return = 42)]]
+int test_compound_struct_access(void) {
+    struct CmpPoint { int x; int y; };
+    struct CmpPoint *p1 = &(struct CmpPoint){30, 12};
+    return p1->x + p1->y;
+}
+
+// [from test_define_only]
+// Defining a macro but never calling it must not error.
+[[cccc::test(return = 42)]]
+int test_define_only(void) {
+#define JUST_ARGS(...) __VA_OPT__(__VA_ARGS__)
+    return 42;
+#undef JUST_ARGS
+}
+
+// [from test_simple_paste]
+// ## token paste outside __VA_OPT__.
+[[cccc::test(return = 42)]]
+int test_simple_paste(void) {
+#define SIMPLE_PASTE(a, b) a ## b
+    int var123 = 42;
+    int v = SIMPLE_PASTE(var, 123);
+    return v == 42 ? 42 : 1;
+#undef SIMPLE_PASTE
+}
+
+// [from test_vm_profile_smoke]
+// Basic loop: vm profile smoke test.
+[[cccc::test(return = 42)]]
+int test_vm_profile_smoke(void) {
+    int acc = 0;
+    for (int i = 0; i < 6; i++) acc += i;
+    return acc == 15 ? 42 : 1;
+}
+
+// [from test_deep_initializer_576]
+// Regression #576: large brace-initialiser must not overflow the host C stack.
+[[cccc::test(return = 42)]]
+int test_deep_initializer_576(void) {
+    int a[1000] = {0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11,12,0,1,2,3,4,5,6,7,8,9,10,11};
+    long s = 0;
+    for (int i = 0; i < 1000; i++) s += a[i];
+    if (s != 5994) return 1;
+    int b[4096] = {7};
+    if (b[0] != 7) return 2;
+    long s2 = 0;
+    for (int i = 1; i < 4096; i++) s2 += b[i];
+    if (s2 != 0) return 3;
+    return 42;
+}
+
+// [from test_memzero_init]
+// Regression #464: partial aggregate initialiser must zero unspecified elements.
+[[cccc::test(return = 42, flags = "-O0")]]
+int test_memzero_init(void) {
+    static void dirty_stack(void) {
+        volatile unsigned char buf[256];
+        for (int i = 0; i < 256; i++) buf[i] = 0xAB;
+        (void)buf[0];
+    }
+    dirty_stack();
+    unsigned char seen[256] = {0};
+    for (int i = 0; i < 256; i++) if (seen[i]) return 1;
+    dirty_stack();
+    struct MzS { int a; char b; long c; char d[8]; };
+    struct MzS s = {.a = 1};
+    if (s.b != 0) return 2;
+    if (s.c != 0) return 3;
+    for (int i = 0; i < 8; i++) if (s.d[i] != 0) return 4;
+    return 42;
+}
+
+// [from test_cond_pointer_type]
+// Regression #591: conditional operator must yield pointer type (not int).
+[[cccc::test(return = 42)]]
+int test_cond_pointer_type(void) {
+    static void *xmalloc(int n) { return n <= 0 ? 0 : malloc((size_t)n); }
+    int *a = (int *)xmalloc((int)sizeof(int) * 4);
+    if (!a) return 1;
+    a[0] = 10; a[1] = 20; a[2] = 12;
+    int sum = a[0] + a[1] + a[2];
+    free(a);
+    if (sum != 42) return 2;
+    int x = 7;
+    int *p = (1 ? &x : 0);
+    if (*p != 7) return 3;
+    *p = 35;
+    if (x != 35) return 4;
+    int y = 100, z = 200;
+    int *q = (0 ? &y : &z);
+    if (*q != 200) return 5;
+    char buf[8] = "ok";
+    void *vp = (1 ? (void *)buf : 0);
+    if (__builtin_strcmp((char *)vp, "ok") != 0) return 6;
+    return 42;
+}
+
+// [from test_coalesce]
+// VM heap coalesces adjacent free blocks for large re-allocations.
+[[cccc::test(return = 42)]]
+int test_coalesce(void) {
+    void *p1 = malloc(100), *p2 = malloc(100), *p3 = malloc(100);
+    void *p4 = malloc(100), *p5 = malloc(100);
+    free(p1); free(p3); free(p5);
+    free(p2); free(p4);
+    void *large = malloc(400);
+    if (!large) return 1;
+    free(large);
+    return 42;
+}
+
+// [from test_block_partial_init]
+// Regression #473: __block aggregate partial-init must zero unspecified elements.
+[[cccc::test(return = 42, flags = "-O0 --memory-poisoning")]]
+int test_block_partial_init(void) {
+    struct BpS { int a; char b; long c; char d[8]; };
+    __block int x[4] = {1};
+    if (x[0] != 1) return 1;
+    if (x[1] != 0 || x[2] != 0 || x[3] != 0) return 2;
+    __block struct BpS s = {.a = 42};
+    if (s.a != 42 || s.b != 0 || s.c != 0) return 3;
+    for (int i = 0; i < 8; i++) if (s.d[i] != 0) return 4;
+    __block int arr[4] = {99};
+    __block int result = 0;
+    void (^check)(void) = ^{
+        if (arr[0] != 99) result = 5;
+        if (arr[1] != 0 || arr[2] != 0 || arr[3] != 0) result = 6;
+    };
+    check();
+    if (result) return result;
+    return 42;
+}
+
+// [from test_edge_digraph_braces]
+// <% and %> digraphs as { and } block delimiters (C23 §6.4.6).
+[[cccc::test(return = 42)]]
+int test_edge_digraph_braces(void) <%
+    static int sq(int x) <% return x * x; %>
+    int r = sq(7);
+    return r == 49 ? 42 : 1;
+%>
+
+// [from test_edge_digraph_directive]
+// %: digraph as # in preprocessor directive lines (C23 §6.4.6).
+[[cccc::test(return = 42)]]
+int test_edge_digraph_directive(void) <%
+%:define DGRAPH_ANSWER 42
+    return DGRAPH_ANSWER == 42 ? 42 : 1;
+%:undef DGRAPH_ANSWER
+%>
+
+// [from test_edge_digraph_paste]
+// %:%: digraph as ## token-paste operator (C23 §6.4.6).
+[[cccc::test(return = 42)]]
+int test_edge_digraph_paste(void) {
+#define DG_PASTE(a, b) a %:%: b
+    int dgfoobar = 42;
+    int result = DG_PASTE(dgfoo, bar);
+    return result == 42 ? 42 : 1;
+#undef DG_PASTE
+}
+
+// [from test_edge_digraph_subscript]
+// <: and :> digraphs as [ and ] (C23 §6.4.6).
+[[cccc::test(return = 42)]]
+int test_edge_digraph_subscript(void) {
+    int a<:3:> = {10, 20, 30};
+    int sum = a<:0:> + a<:1:> + a<:2:>;
+    return sum == 60 ? 42 : 1;
+}
+
+// [from test_edge_empty_union_varargs]
+// Empty union variables (global, local, array) compile and have size 0.
+union {} misc_empty_global = {};
+union {} misc_empty_global_arr[3] = {};
+
+[[cccc::test(return = 42, expect_stdout = "Let's count: 3 0 2 1")]]
+int test_edge_empty_union_varargs(void) {
+    union {} local_empty = {};
+    union {} var[100] = {};
+    (void)misc_empty_global;
+    (void)misc_empty_global_arr[0];
+    (void)local_empty;
+    printf("Let's count: %d %d %d %d\n", 3, var[42], 2, 1);
+    return 42;
+}
+
+// [from test_edge_worm_emoji_macros]
+// -~ (right worm, +1) and ~- (left worm, -1) chains; emoji macro identifiers.
+[[cccc::test(return = 42, expect_stdout = "-42 \\+ 5 = -37")]]
+int test_edge_worm_emoji_macros(void) {
+    if (-~42 != 43) return 1;
+    if (~-42 != 41) return 2;
+    if (-~-~-~42 != 45) return 3;
+    if (~-~-~-~-~-42 != 37) return 4;
+
+#define 🪱 -~
+#define 🐍 ~-
+
+    if ((🪱 🪱 🐍 🐍 🐍 42) != 41) return 5;  // 42 - 3 + 2
+    int v = 🪱 🪱 🪱 🪱 🪱 -42;               // -42 + 5 = -37
+    printf("-42 + 5 = %d\n", v);
+    if (v != -37) return 6;
+
+#undef 🪱
+#undef 🐍
 
     return 42;
 }
