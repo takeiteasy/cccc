@@ -1208,6 +1208,8 @@ typedef struct {
     bool     warn_as_errors_set;  // true if any -Werror variant was present
     uint32_t f_enable;            // CcccOptPass bits to force ON
     uint32_t f_disable;           // CcccOptPass bits to force OFF
+    char   **ffi_allow;           // names to add to allow-list (heap-allocated)
+    int      ffi_allow_count;     // number of entries in ffi_allow
 } CcTestFlagsDelta;
 
 // A test function registered via [[cccc::test]].
@@ -1252,6 +1254,9 @@ struct TestFnRecord {
     uint32_t  test_f_enable;   // CcccOptPass bits to force ON
     uint32_t  test_f_disable;  // CcccOptPass bits to force OFF
     bool      test_f_set;      // true if any -f/-fno- flag given
+    // Per-test ffi-allow list
+    char    **test_ffi_allow;       // NULL or names to allow; heap-allocated
+    int       test_ffi_allow_count; // number of entries
     // Per-test output assertions (#614)
     char *expect_stderr;   // POSIX ERE; test FAILS if stderr does not match
     char *reject_stderr;   // POSIX ERE; test FAILS if stderr matches

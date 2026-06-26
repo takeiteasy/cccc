@@ -916,20 +916,22 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
     // Per-test flags (#356, #612): capture the base compiled config.  Safety,
     // optimisation, warning, and -f pass flags are baked into codegen, so any
     // test that requests a different config triggers a lazy recompile.
-    uint32_t base_vm_flags   = vm->flags;
-    int      base_opt_lvl    = vm->compiler.opt_level;
-    uint64_t base_warnings   = vm->compiler.warnings;
-    uint64_t base_warn_errs  = vm->compiler.warning_errors;
-    bool     base_warn_ae    = vm->warnings_as_errors;
-    uint32_t base_f_enable   = vm->compiler.opt_f_enable;
-    uint32_t base_f_disable  = vm->compiler.opt_f_disable;
-    uint32_t cur_vm_flags    = base_vm_flags;
-    int      cur_opt_lvl     = base_opt_lvl;
-    uint64_t cur_warnings    = base_warnings;
-    uint64_t cur_warn_errs   = base_warn_errs;
-    bool     cur_warn_ae     = base_warn_ae;
-    uint32_t cur_f_enable    = base_f_enable;
-    uint32_t cur_f_disable   = base_f_disable;
+    uint32_t base_vm_flags        = vm->flags;
+    int      base_opt_lvl         = vm->compiler.opt_level;
+    uint64_t base_warnings        = vm->compiler.warnings;
+    uint64_t base_warn_errs       = vm->compiler.warning_errors;
+    bool     base_warn_ae         = vm->warnings_as_errors;
+    uint32_t base_f_enable        = vm->compiler.opt_f_enable;
+    uint32_t base_f_disable       = vm->compiler.opt_f_disable;
+    int      base_ffi_allow_count = vm->ffi_allow_count;
+    uint32_t cur_vm_flags         = base_vm_flags;
+    int      cur_opt_lvl          = base_opt_lvl;
+    uint64_t cur_warnings         = base_warnings;
+    uint64_t cur_warn_errs        = base_warn_errs;
+    bool     cur_warn_ae          = base_warn_ae;
+    uint32_t cur_f_enable         = base_f_enable;
+    uint32_t cur_f_disable        = base_f_disable;
+    int      cur_ffi_allow_count  = base_ffi_allow_count;
 
     bool stop_early = false;
     for (TestListNode *n2 = filtered; n2 && !stop_early; n2 = n2->next) {
@@ -1018,7 +1020,8 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
 
             bool has_any_flags = r->test_flags_mask || r->test_opt_set
                               || r->test_warn_mask   || r->test_warn_errors_mask
-                              || r->test_warn_as_errors_set || r->test_f_set;
+                              || r->test_warn_as_errors_set || r->test_f_set
+                              || r->test_ffi_allow_count > 0;
 
             if (has_any_flags) {
                 req_flags     = (base_vm_flags & ~r->test_flags_mask) | r->test_flags_or;
@@ -1038,13 +1041,26 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                 req_f_disable = base_f_disable;
             }
 
+            // Determine whether the per-test ffi-allow list differs from current.
+            int req_ffi_allow_count = r->test_ffi_allow_count;
+            bool ffi_allow_changed  = (req_ffi_allow_count !=
+                                       cur_ffi_allow_count - base_ffi_allow_count);
+            if (!ffi_allow_changed && req_ffi_allow_count > 0) {
+                for (int i = 0; i < req_ffi_allow_count && !ffi_allow_changed; i++) {
+                    if (strcmp(r->test_ffi_allow[i],
+                               vm->ffi_allow_list[base_ffi_allow_count + i]) != 0)
+                        ffi_allow_changed = true;
+                }
+            }
+
             bool needs_recompile = (req_flags    != cur_vm_flags)
                                 || (req_opt       != cur_opt_lvl)
                                 || (req_warnings  != cur_warnings)
                                 || (req_warn_errs != cur_warn_errs)
                                 || (req_warn_ae   != cur_warn_ae)
                                 || (req_f_enable  != cur_f_enable)
-                                || (req_f_disable != cur_f_disable);
+                                || (req_f_disable != cur_f_disable)
+                                || ffi_allow_changed;
 
             if (needs_recompile) {
                 // Discard any per-once-hook snapshot that references the old compile.
@@ -1063,6 +1079,15 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                 vm->warnings_as_errors           = req_warn_ae;
                 vm->compiler.opt_f_enable        = req_f_enable;
                 vm->compiler.opt_f_disable       = req_f_disable;
+                // Apply per-test ffi-allow: truncate to base then add new entries.
+                if (ffi_allow_changed) {
+                    for (int i = base_ffi_allow_count; i < vm->ffi_allow_count; i++)
+                        free(vm->ffi_allow_list[i]);
+                    vm->ffi_allow_count = base_ffi_allow_count;
+                    for (int i = 0; i < req_ffi_allow_count; i++)
+                        cc_ffi_allow(vm, r->test_ffi_allow[i]);
+                    cur_ffi_allow_count = base_ffi_allow_count + req_ffi_allow_count;
+                }
 
                 // Capture compile-time stderr when the test asserts on it (#621).
                 // This covers warnings/errors emitted by cc_compile() during the
@@ -1561,7 +1586,12 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
     }
 
     // Restore the base compiled config if the last test used a per-test one.
-    if (cur_vm_flags != base_vm_flags || cur_opt_lvl != base_opt_lvl) {
+    if (cur_vm_flags != base_vm_flags || cur_opt_lvl != base_opt_lvl
+        || cur_ffi_allow_count != base_ffi_allow_count) {
+        // Restore per-test ffi-allow list to base state first.
+        for (int i = base_ffi_allow_count; i < vm->ffi_allow_count; i++)
+            free(vm->ffi_allow_list[i]);
+        vm->ffi_allow_count = base_ffi_allow_count;
         memset(vm->data_seg, 0, snap_size);
         vm->data_ptr           = vm->data_seg;
         vm->flags                     = base_vm_flags;

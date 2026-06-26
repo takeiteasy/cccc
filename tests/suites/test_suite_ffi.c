@@ -219,4 +219,15 @@ int test_float_funcall(void) {
     return 42;
 }
 
+// [from test_ffi_allow_zero] -- --ffi-allow restricts which FFI calls succeed
+[[cccc::test(return = 42, flags = "--ffi-allow=strlen")]]
+int test_ffi_allow_zero(void) {
+    if (strlen("allowed") != 7)
+        return 1;
+    // puts is not in the allow list; returns 0 (blocked) when ffi_errors_fatal is off
+    if (puts("blocked") != 0)
+        return 2;
+    return 42;
+}
+
 #pragma cccc suite end

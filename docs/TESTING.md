@@ -980,7 +980,8 @@ accepted by `cccc` for safety, optimisation, or warnings can be used:
 `--stack-instrumentation`, `--alignment-checks`, `--provenance-tracking`,
 `--invalid-arithmetic`, `--format-string-checks`, `--random-canaries`,
 `--memory-poisoning`, `--thread-safety`, `--dangling-pointers`, `-V`/`--vm-heap`,
-`-C`/`--control-flow-integrity`, `--fma`, `--ffi-errors-fatal`
+`-C`/`--control-flow-integrity`, `--fma`, `--ffi-errors-fatal`,
+`--ffi-allow=NAME` (additive; adds to any suite-level allow list)
 
 **Safety presets:** `-0`/`-1`/`-2`/`-3` and `--safety=none|basic|standard|max`
 

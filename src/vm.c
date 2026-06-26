@@ -1428,6 +1428,9 @@ void cc_destroy(VirtualMachine *vm) {
             }
             free(r->ret_struct_text);
         }
+        for (int i = 0; i < r->test_ffi_allow_count; i++)
+            free(r->test_ffi_allow[i]);
+        free(r->test_ffi_allow);
         free(r);
     }
     vm->compiler.test_fns = NULL;

@@ -3106,6 +3106,10 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
                     rec->test_f_enable          = _delta.f_enable;
                     rec->test_f_disable         = _delta.f_disable;
                     rec->test_f_set             = (_delta.f_enable || _delta.f_disable);
+                    rec->test_ffi_allow         = _delta.ffi_allow;
+                    rec->test_ffi_allow_count   = _delta.ffi_allow_count;
+                    _delta.ffi_allow            = NULL;
+                    _delta.ffi_allow_count      = 0;
                 }
                 rec->expect_stderr = ta.expect_stderr ? strdup(ta.expect_stderr) : NULL;
                 rec->reject_stderr = ta.reject_stderr ? strdup(ta.reject_stderr) : NULL;
@@ -4820,6 +4824,15 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
             SET_FLAG(CCCC_FMA);
         } else if (strcmp(tok, "--ffi-errors-fatal") == 0) {
             SET_FLAG(CCCC_FFI_ERRORS_FATAL);
+        } else if (strncmp(tok, "--ffi-allow=", 12) == 0) {
+            const char *name = tok + 12;
+            if (*name) {
+                out->ffi_allow = realloc(out->ffi_allow,
+                    sizeof(*out->ffi_allow) * (size_t)(out->ffi_allow_count + 1));
+                if (!out->ffi_allow)
+                    error("cc_parse_test_flags: realloc failed");
+                out->ffi_allow[out->ffi_allow_count++] = strdup(name);
+            }
 #undef SET_FLAG
 
         // --- warning flags (#612): -W*, -Wno-*, -Werror, -Werror=*, -Wno-error=* ---
