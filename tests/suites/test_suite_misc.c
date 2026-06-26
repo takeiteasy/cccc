@@ -1,6 +1,8 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: miscellaneous: volatile, builtins, compound literals,
-//   comma operator, block scope, token paste, digraphs, edge cases, regression tests
+//   comma operator, block scope, token paste, digraphs, edge cases, regression tests,
+//   malloc/realloc/calloc, stdio, printf/snprintf/sprintf/sscanf, binary format specs,
+//   setjmp/longjmp, signal handling, stack recursion, designated initializers
 // Source tests: test_builtins, test_volatile, test_cast_const, test_comma,
 //   test_block_scope, test_compound_simple, test_compound_struct_access,
 //   test_define_only, test_simple_paste, test_vm_profile_smoke,
@@ -8,7 +10,13 @@
 //   test_coalesce, test_block_partial_init,
 //   test_edge_digraph_braces, test_edge_digraph_directive,
 //   test_edge_digraph_paste, test_edge_digraph_subscript,
-//   test_edge_empty_union_varargs, test_edge_worm_emoji_macros
+//   test_edge_empty_union_varargs, test_edge_worm_emoji_macros,
+//   test_simple_malloc, test_realloc_calloc, test_designated_init,
+//   test_c11_stdlib_additions, test_string_char_array_init,
+//   test_stack_normal_recursion, test_stack_overflow_recursion,
+//   test_builtin_choose_expr, test_simple_printf, test_snprintf,
+//   test_sprintf_sscanf, test_scanf_binary, test_vprintf_binary,
+//   test_signal, test_setjmp
 
 #include <math.h>
 #include <limits.h>
@@ -17,6 +25,43 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
+#include <setjmp.h>
+#include <time.h>
+
+// [from test_stack_normal_recursion]
+static int misc_factorial(int n) { return n <= 1 ? 1 : n * misc_factorial(n - 1); }
+
+// [from test_stack_overflow_recursion]
+static int misc_recurse(int n) { return n <= 0 ? 0 : misc_recurse(n - 1) + 1; }
+
+// [from test_builtin_choose_expr]
+static volatile int misc_side_effects = 0;
+static int misc_bump(void) { misc_side_effects++; return 1; }
+
+// [from test_vprintf_binary]
+static int misc_vb_my_printf(const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt); int r = vprintf(fmt, ap); va_end(ap); return r;
+}
+static int misc_vb_my_sprintf(char *buf, const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt); int r = vsprintf(buf, fmt, ap); va_end(ap); return r;
+}
+static int misc_vb_my_sscanf(const char *str, const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt); int r = vsscanf(str, fmt, ap); va_end(ap); return r;
+}
+
+// [from test_signal]
+static volatile int misc_sig_handler_called = 0;
+static volatile int misc_sig_handler_sig = 0;
+static void misc_on_usr1(int sig) {
+    misc_sig_handler_called = 1; misc_sig_handler_sig = sig;
+}
+
+// [from test_setjmp]
+static jmp_buf misc_jmp_buf;
+static void misc_may_fail(int should_fail) {
+    if (should_fail) longjmp(misc_jmp_buf, should_fail);
+}
 
 // [from test_builtins]
 // Test GNU-style builtins implemented in the parser (ticket #220, #212, #213, #513)
@@ -492,7 +537,7 @@ int test_edge_empty_union_varargs(void) {
     return 42;
 }
 
-// [from test_edge_worm_emoji_macros]
+// [from test_edge_worm_emoji_macros] (moved below; see suite end)
 // -~ (right worm, +1) and ~- (left worm, -1) chains; emoji macro identifiers.
 [[cccc::test(return = 42, expect_stdout = "-42 \\+ 5 = -37")]]
 int test_edge_worm_emoji_macros(void) {
@@ -512,6 +557,251 @@ int test_edge_worm_emoji_macros(void) {
 #undef 🪱
 #undef 🐍
 
+    return 42;
+}
+
+// [from test_simple_malloc]
+[[cccc::test(return = 42)]]
+int test_simple_malloc(void) {
+    int *ptr = (int *)malloc(sizeof(int));
+    *ptr = 42;
+    int value = *ptr;
+    free(ptr);
+    return value;
+}
+
+// [from test_designated_init]
+// Designated initializers: struct .field, array [idx], range [lo...hi].
+[[cccc::test(return = 42)]]
+int test_designated_init(void) {
+    struct DI_Point { int x; int y; };
+    struct DI_Point p1 = {.x = 10, .y = 20};
+    if (p1.x != 10 || p1.y != 20) return 1;
+    struct DI_Point p2 = {.y = 30, .x = 40};
+    if (p2.x != 40 || p2.y != 30) return 2;
+    struct DI_Point p3 = {.x = 50};
+    if (p3.x != 50 || p3.y != 0) return 3;
+    int arr1[10] = {[5] = 42};
+    if (arr1[5] != 42 || arr1[0] != 0) return 4;
+    int arr2[6] = {[0] = 1, [2] = 3, [4] = 5};
+    if (arr2[0] != 1 || arr2[1] != 0 || arr2[2] != 3) return 5;
+    struct DI_Rect { struct DI_Point tl, br; };
+    struct DI_Rect r1 = {.tl.x = 0, .tl.y = 0, .br.x = 100, .br.y = 100};
+    if (r1.br.x != 100) return 6;
+    struct DI_Point p4 = {.x = 5, 10};
+    if (p4.x != 5 || p4.y != 10) return 7;
+    int arr3[8] = {[2 ... 5] = 7};
+    if (arr3[0] != 0 || arr3[2] != 7 || arr3[5] != 7 || arr3[6] != 0) return 8;
+    int arr4[5] = {[1] = 10, [3] = 32};
+    if (arr4[1] + arr4[3] != 42) return 9;
+    struct DI_Data { int id; int value; int flags; };
+    struct DI_Data d1 = {.value = 42, .id = 1};
+    if (d1.id != 1 || d1.value != 42 || d1.flags != 0) return 10;
+    return d1.value;
+}
+
+// [from test_c11_stdlib_additions]
+// C11: aligned_alloc and timespec_get.
+[[cccc::test(return = 42)]]
+int test_c11_stdlib_additions(void) {
+    void *p = aligned_alloc(16, 64);
+    if (!p) return 1;
+    if (((unsigned long)p % 16) != 0) return 2;
+    free(p);
+    struct timespec ts;
+    if (timespec_get(&ts, TIME_UTC) != TIME_UTC) return 3;
+    if (ts.tv_sec <= 0) return 4;
+    return 42;
+}
+
+// [from test_string_char_array_init]
+// char arr[] = "literal" initializer semantics.
+[[cccc::test(return = 42)]]
+int test_string_char_array_init(void) {
+    char str1[] = "hello";
+    if (str1[0]!='h'||str1[4]!='o'||str1[5]!='\0') return 1;
+    char str2[] = "";
+    if (str2[0] != '\0') return 2;
+    char str3[] = "A";
+    if (str3[0]!='A'||str3[1]!='\0') return 3;
+    char str4[] = "a\nb";
+    if (str4[0]!='a'||str4[1]!='\n'||str4[2]!='b') return 4;
+    char str5[10] = "hello";
+    if (str5[5] != '\0') return 5;
+    int sum = 0;
+    for (int i = 0; str5[i]; i++) sum++;
+    if (sum != 5) return 6;
+    char dest[20];
+    strcpy(dest, str1);
+    if (strcmp(dest, "hello") != 0) return 7;
+    return 42;
+}
+
+// [from test_stack_normal_recursion]
+// Normal recursion to depth 10 must not overflow.
+[[cccc::test(return = 42)]]
+int test_stack_normal_recursion(void) {
+    return misc_factorial(10) == 3628800 ? 42 : 1;
+}
+
+// [from test_stack_overflow_recursion]
+// Deep recursion (100 000 frames) grows stack on demand (ticket #75).
+[[cccc::test(return = 42)]]
+int test_stack_overflow_recursion(void) {
+    return misc_recurse(100000) == 100000 ? 42 : 1;
+}
+
+// [from test_builtin_choose_expr]
+// __builtin_choose_expr selects arm at compile time and carries its type.
+[[cccc::test(return = 42)]]
+int test_builtin_choose_expr(void) {
+    misc_side_effects = 0;
+    int v = 100;
+    int *p = __builtin_choose_expr(1, &v, (void *)0);
+    *p = 42;
+    if (v != 42) return 1;
+    int r = __builtin_choose_expr(1, 7, misc_bump());
+    if (r != 7 || misc_side_effects != 0) return 2;
+    int r2 = __builtin_choose_expr(0, misc_bump(), 9);
+    if (r2 != 9 || misc_side_effects != 0) return 3;
+    double d = __builtin_choose_expr(0, 5, 21.0);
+    if (d != 21.0) return 4;
+    return v; // 42
+}
+
+// [from test_simple_printf]
+[[cccc::test(return = 42)]]
+int test_simple_printf(void) {
+    printf("Test 1 arg: %d\n", 42);
+    printf("Test 2 args: %d %d\n", 10, 20);
+    printf("Test 3 args: %d %d %d\n", 1, 2, 3);
+    return 42;
+}
+
+// [from test_snprintf]
+[[cccc::test(return = 42)]]
+int test_snprintf(void) {
+    char buf[20];
+    int n;
+    n = snprintf(buf, 20, "Hello");
+    if (__builtin_strcmp(buf, "Hello") != 0) return 1;
+    n = snprintf(buf, 20, "x=%d", 42);
+    if (n <= 0 || buf[0] != 'x') return 2;
+    n = snprintf(buf, 20, "%d+%d=%d", 10, 20, 30);
+    if (__builtin_strcmp(buf, "10+20=30") != 0) return 3;
+    n = snprintf(buf, 5, "Hello World");
+    if (n != 11 || __builtin_strlen(buf) != 4) return 4; // truncated to 4 chars + NUL
+    return 42;
+}
+
+// [from test_sprintf_sscanf]
+[[cccc::test(return = 42)]]
+int test_sprintf_sscanf(void) {
+    char buf[100];
+    sprintf(buf, "x=%d", 42);
+    int v = 0;
+    sscanf(buf, "x=%d", &v);
+    if (v != 42) return 1;
+    int a = 0, b = 0;
+    sscanf("42 99", "%d %d", &a, &b);
+    if (a != 42 || b != 99) return 2;
+    return 42;
+}
+
+// [from test_scanf_binary]
+// C23 %b/%B binary conversion specifier.
+[[cccc::test(return = 42)]]
+int test_scanf_binary(void) {
+    int a = 0, b = 0, c = 0, d = 0;
+    sscanf("101010", "%b", &a);
+    if (a != 42) return 1;
+    sscanf("0b101010", "%b", &b);
+    if (b != 42) return 2;
+    sscanf("0B1111", "%B", &c);
+    if (c != 15) return 3;
+    sscanf("101111", "%4b", &d);
+    if (d != 11) return 4; // 0b1011 = 11
+    int x = 0, y = 0, z = 0;
+    int n = sscanf("10 0x1F 0b110", "%d %x %b", &x, &y, &z);
+    if (n != 3 || x != 10 || y != 31 || z != 6) return 5;
+    return 42;
+}
+
+// [from test_vprintf_binary]
+// %b/%B with v*printf/v*scanf multi-arg forwarding.
+[[cccc::test(return = 42)]]
+int test_vprintf_binary(void) {
+    char buf[64];
+    misc_vb_my_sprintf(buf, "%#b", 255u);
+    if (__builtin_strcmp(buf, "0b11111111") != 0) return 1;
+    int v = 0;
+    misc_vb_my_sscanf("0b101", "%b", &v);
+    if (v != 5) return 2;
+    misc_vb_my_sprintf(buf, "%d+%d=%d", 10, 20, 30);
+    if (__builtin_strcmp(buf, "10+20=30") != 0) return 3;
+    int a = 0, b = 0, c = 0;
+    misc_vb_my_sscanf("7 8 9", "%d %d %d", &a, &b, &c);
+    if (a != 7 || b != 8 || c != 9) return 4;
+    return 42;
+}
+
+// [from test_signal]
+// signal()/raise() with SIG_IGN, SIG_DFL, and a custom handler.
+[[cccc::test(return = 42)]]
+int test_signal(void) {
+    if (signal(SIGINT, SIG_IGN) == SIG_ERR) return 1;
+    if (raise(SIGINT) != 0) return 2;
+    void (*old)(int) = signal(SIGINT, SIG_DFL);
+    if (old == SIG_ERR || old != SIG_IGN) return 3;
+    misc_sig_handler_called = 0; misc_sig_handler_sig = 0;
+    if (signal(SIGUSR1, misc_on_usr1) == SIG_ERR) return 4;
+    if (raise(SIGUSR1) != 0) return 5;
+    if (!misc_sig_handler_called || misc_sig_handler_sig != SIGUSR1) return 6;
+    misc_sig_handler_called = 0;
+    if (signal(SIGUSR1, SIG_IGN) == SIG_ERR) return 7;
+    if (raise(SIGUSR1) != 0) return 8;
+    if (misc_sig_handler_called) return 9;
+    return 42;
+}
+
+// [from test_setjmp]
+// setjmp/longjmp error-path unwinding.
+[[cccc::test(return = 42)]]
+int test_setjmp(void) {
+    int result = setjmp(misc_jmp_buf);
+    if (result == 0) {
+        misc_may_fail(0);
+        misc_may_fail(42); // longjmps with value 42
+        return 1; // not reached
+    }
+    return result; // 42 from longjmp
+}
+
+// [from test_realloc_calloc]
+// realloc and calloc: grow, shrink, NULL-ptr, zero-size.
+[[cccc::test(return = 42)]]
+int test_realloc_calloc(void) {
+    int *arr = (int *)calloc(5, sizeof(int));
+    if (!arr) return 1;
+    for (int i = 0; i < 5; i++) if (arr[i] != 0) return 2;
+    for (int i = 0; i < 5; i++) arr[i] = i * 10;
+    int *arr2 = (int *)realloc(arr, 10 * sizeof(int));
+    if (!arr2) return 3;
+    for (int i = 0; i < 5; i++) if (arr2[i] != i * 10) return 4;
+    for (int i = 5; i < 10; i++) arr2[i] = i * 10;
+    int *arr3 = (int *)realloc(arr2, 3 * sizeof(int));
+    if (!arr3) return 5;
+    for (int i = 0; i < 3; i++) if (arr3[i] != i * 10) return 6;
+    int *arr4 = (int *)realloc(NULL, 4 * sizeof(int));
+    if (!arr4) return 7;
+    arr4[0] = 42;
+    int *arr5 = (int *)malloc(sizeof(int)); *arr5 = 999;
+    int *result = (int *)realloc(arr5, 0);
+    if (result != NULL) return 8;
+    char *large = (char *)calloc(1000, 1);
+    if (!large) return 9;
+    for (int i = 0; i < 1000; i++) if (large[i] != 0) return 10;
+    free(arr3); free(arr4); free(large);
     return 42;
 }
 

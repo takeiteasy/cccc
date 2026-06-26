@@ -1,6 +1,7 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: type system: typedef, typeof, generics, int128, unsigned, bitwise
-// Source tests: test_bitwise, test_generic, test_int128, test_int_sizes, test_keywords_accepted, test_keywords_simple, test_multireg_basic, test_sizeof_expressions, test_stdint_constant_macros, test_type_conversions, test_typedef_advanced, test_typeof, test_typeof_generic, test_unary, test_unsigned_ops
+// Source tests: test_bitwise, test_generic, test_int128, test_int_sizes, test_keywords_accepted, test_keywords_simple, test_multireg_basic, test_sizeof_expressions, test_stdint_constant_macros, test_type_conversions, test_typedef_advanced, test_typeof, test_typeof_generic, test_unary, test_unsigned_ops,
+//   test_typedef_simple, test_typedef_struct, test_typedef_enum_union, test_typedef_funcptr, test_typedef_comprehensive
 
 #include <stdint.h>
 
@@ -1071,6 +1072,84 @@ int test_unsigned_ops(void) {
         return 10;
 
     return 42;
+}
+
+// [from test_typedef_simple]
+[[cccc::test(return = 42)]]
+int test_typedef_simple(void) {
+    typedef int TdInteger;
+    typedef char TdByte;
+    TdInteger x = 10, y = 32;
+    TdByte c = 'A'; (void)c;
+    return x + y;
+}
+
+// [from test_typedef_struct]
+[[cccc::test(return = 42)]]
+int test_typedef_struct(void) {
+    typedef struct TdPoint TdPoint;
+    struct TdPoint { int x; int y; };
+    typedef struct { int width; int height; } TdSize;
+    struct TdColor { int r; int g; int b; };
+    typedef struct TdColor TdColor;
+    TdPoint p; p.x = 10; p.y = 20;
+    TdSize s; s.width = 5; s.height = 7;
+    TdColor c; c.r = 255; c.g = 0; c.b = 0; (void)c;
+    return p.x + s.width + s.height + p.y; // 10+5+7+20=42
+}
+
+// [from test_typedef_enum_union]
+[[cccc::test(return = 42)]]
+int test_typedef_enum_union(void) {
+    typedef enum { TD_RED, TD_GREEN, TD_BLUE } TdColor2;
+    typedef enum TdStatus { TD_INACTIVE, TD_ACTIVE = 10, TD_PENDING } TdStatus;
+    typedef union { int i; char c; } TdData;
+    typedef union TdValue TdValue;
+    union TdValue { int x; long y; };
+    TdColor2 col = TD_RED; (void)col;
+    TdStatus st = TD_ACTIVE; (void)st;
+    TdData d; d.i = 42;
+    TdValue v; v.x = 100; (void)v;
+    return d.i;
+}
+
+// [from test_typedef_funcptr]
+// Function pointer typedef — helpers defined at file scope to avoid type-order issues.
+static int td_funcptr_double_it(int x) { return x + x; }
+static int td_funcptr_apply(int (*f)(int), int v) { return f(v); }
+
+[[cccc::test(return = 42)]]
+int test_typedef_funcptr(void) {
+    typedef int (*TdCallback)(int);
+    TdCallback f = td_funcptr_double_it;
+    return td_funcptr_apply(f, 21); // 21*2=42
+}
+
+// [from test_typedef_comprehensive]
+static int td_comp_add(int a, int b) { return a + b; }
+
+[[cccc::test(return = 42)]]
+int test_typedef_comprehensive(void) {
+    typedef int TdComp_Integer;
+    typedef char TdComp_Byte;
+    typedef long TdComp_Long;
+    typedef int *TdComp_IntPtr;
+    struct TdComp_Point { int x; int y; };
+    typedef struct TdComp_Point TdComp_Point;
+    typedef struct { int width; int height; } TdComp_Rectangle;
+    typedef int (*TdComp_BinaryOp)(int, int);
+    typedef int TdComp_IntArray[5];
+
+    TdComp_Integer x = 10;
+    TdComp_Byte b = 32;
+    TdComp_Long l = 0; (void)l;
+    TdComp_IntPtr ptr = &x; (void)ptr;
+    TdComp_Point p; p.x = 5; p.y = 7; (void)p;
+    TdComp_Rectangle r; r.width = 3; r.height = 4; (void)r;
+    TdComp_BinaryOp op = td_comp_add;
+    int result = op(20, 10); (void)result; // 30
+    TdComp_IntArray arr; arr[0] = 1; arr[1] = 2; (void)arr;
+    return x + b; // 10+32=42
 }
 
 #pragma cccc suite end

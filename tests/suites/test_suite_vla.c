@@ -1,6 +1,7 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: variable-length arrays
-// Source tests: test_vla_basic, test_vla_cleanup, test_vla_comprehensive, test_vla_enhancements, test_vla_expr, test_vla_nested, test_vla_param, test_vla_ultra_minimal
+// Source tests: test_vla_basic, test_vla_cleanup, test_vla_comprehensive, test_vla_enhancements, test_vla_expr, test_vla_nested, test_vla_param, test_vla_ultra_minimal,
+//   test_vla_simple, test_vla_minimal, test_vla_init, test_vla_cleanup_simple, test_vla_with_constructor
 
 // [from test_vla_basic]
 // Test: VLA basic allocation
@@ -276,6 +277,56 @@ int test_vla_ultra_minimal(void) {
     int arr[n];
     if (n != 1) return 0;  // Assert n == 1
     return 42;
+}
+
+// [from test_vla_simple]
+[[cccc::test(return = 42)]]
+int test_vla_simple(void) {
+    int n = 5;
+    int arr[n];
+    arr[0] = 10; arr[1] = 20; arr[2] = 30; arr[3] = 40; arr[4] = 50;
+    int sum = arr[0] + arr[1] + arr[2] + arr[3] + arr[4];
+    return sum - 108; // 150 - 108 = 42
+}
+
+// [from test_vla_minimal]
+[[cccc::test(return = 42)]]
+int test_vla_minimal(void) {
+    int n = 1;
+    int arr[n];
+    arr[0] = 42;
+    return arr[0];
+}
+
+// [from test_vla_init]
+// VLA with brace initializer.
+[[cccc::test(return = 42)]]
+int test_vla_init(void) {
+    int n = 5;
+    int arr[n] = {10, 20, 30, 40, 50};
+    int sum = arr[0] + arr[1] + arr[2] + arr[3] + arr[4];
+    return sum - 108; // 150 - 108 = 42
+}
+
+// [from test_vla_cleanup_simple]
+[[cccc::test(return = 42)]]
+int test_vla_cleanup_simple(void) {
+    int n = 5;
+    int arr[n];
+    arr[0] = 42;
+    return arr[0];
+}
+
+// [from test_vla_with_constructor]
+// Regression #588: VLA + __attribute__((constructor)) must not SIGSEGV.
+[[cccc::test(return = 42)]]
+int test_vla_with_constructor(void) {
+    __attribute__((constructor)) static void init_thing588(void) {}
+    static int vla_sink(char *p, int n) { p[0] = (char)n; return p[0]; }
+    int n = 8;
+    char buf[n + 4];
+    if ((int)sizeof(buf) != 12) return 1;
+    return vla_sink(buf, 42);
 }
 
 #pragma cccc suite end
