@@ -1,9 +1,12 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: variadic functions, va_list, nested varargs
-// Source tests: test_nested_vararg, test_varargs_builtin_va, test_varargs_comprehensive_v2, test_varargs_double_medium, test_varargs_double_simple, test_varargs_float, test_varargs_int, test_varargs_nested_double, test_varargs_simple, test_varargs_struct, test_varargs_struct_double, test_varargs_struct_simple, test_varargs_struct_simple2, test_varargs_struct_va, test_varargs_vacopy_double
+// Source tests: test_nested_vararg, test_varargs_builtin_va, test_varargs_comprehensive_v2, test_varargs_double_medium, test_varargs_double_simple, test_varargs_float, test_varargs_int, test_varargs_nested_double, test_varargs_simple, test_varargs_struct, test_varargs_struct_double, test_varargs_struct_simple, test_varargs_struct_simple2, test_varargs_struct_va, test_varargs_vacopy_double,
+//   test_va_arg_pointer_deref, test_va_opt_minimal, test_va_args_single, test_va_opt, test_va_opt_working,
+//   test_varargs_vprintf, test_variadic_comprehensive, test_varargs_many, test_vm_variadic_simple, test_vm_variadic_comprehensive
 
 #include "stdarg.h"
 #include <stdarg.h>
+#include <stdio.h>
 
 // [from test_nested_vararg]
 // Nested variadic test with val*2
@@ -666,6 +669,81 @@ static double _varargs_vacopy_double_test_va_copy_double(int count, ...) {
     }
 }
 
+// [from test_va_arg_pointer_deref]
+struct VArgPdPt { int x, y; };
+static void vargpd_fill(int n, ...) {
+    va_list ap; va_start(ap, n);
+    for (int i = 0; i < n; i++) *va_arg(ap, int *) = i + 1;
+    va_end(ap);
+}
+static int vargpd_sum_first(int n, ...) {
+    va_list ap; va_start(ap, n);
+    struct VArgPdPt *p = va_arg(ap, struct VArgPdPt *);
+    int s = p->x + p->y; va_end(ap); (void)n; return s;
+}
+
+// [from test_varargs_many]
+static int vmany_double_equal(double a, double b, double epsilon) {
+    double diff = a - b; if (diff < 0.0) diff = -diff; return diff < epsilon;
+}
+static int vmany_sum_many_ints(int count, ...) {
+    va_list args; va_start(args, count);
+    int sum = 0;
+    for (int i = 0; i < count; i++) sum += va_arg(args, int);
+    va_end(args); return sum;
+}
+static double vmany_sum_many_doubles(int count, ...) {
+    va_list args; va_start(args, count);
+    double sum = 0.0;
+    for (int i = 0; i < count; i++) sum += va_arg(args, double);
+    va_end(args); return sum;
+}
+static double vmany_sum_mixed_many(int count, ...) {
+    va_list args; va_start(args, count);
+    double sum = 0.0;
+    for (int i = 0; i < count; i++) {
+        if (i % 2 == 0) sum += va_arg(args, int);
+        else sum += va_arg(args, double);
+    }
+    va_end(args); return sum;
+}
+
+// [from test_vm_variadic_simple / test_vm_variadic_comprehensive]
+static int vmvc_sum_ints(int count, ...) {
+    va_list ap; va_start(ap, count);
+    int sum = 0;
+    for (int i = 0; i < count; i++) sum += va_arg(ap, int);
+    va_end(ap); return sum;
+}
+static long vmvc_sum_mixed(int count, ...) {
+    va_list ap; va_start(ap, count);
+    long sum = 0;
+    for (int i = 0; i < count; i++) sum += va_arg(ap, long);
+    va_end(ap); return sum;
+}
+static int vmvc_max_of(int count, ...) {
+    if (count == 0) return 0;
+    va_list ap; va_start(ap, count);
+    int max = va_arg(ap, int);
+    for (int i = 1; i < count; i++) { int v = va_arg(ap, int); if (v > max) max = v; }
+    va_end(ap); return max;
+}
+
+// [from test_va_opt / test_va_opt_working] — file-scope functions for __VA_OPT__ comprehensive test
+static int vaopt_tests_passed = 0;
+static int vaopt_tests_failed = 0;
+
+// macros for va_opt tests (unique prefixes to avoid clashes)
+#define VAOPT_LOG1(fmt, ...) printf(fmt __VA_OPT__(,) __VA_ARGS__)
+#define VAOPT_JUST_ARGS(...) __VA_OPT__(__VA_ARGS__)
+#define VAOPT_EMPTY(...) __VA_OPT__()
+#define VAOPT_PARENS(...) __VA_OPT__((1 + 2))
+#define VAOPT_ADD_IF_ARGS(a, ...) a __VA_OPT__(+ 10)
+#define VAOPT_ASSERT(cond, msg) do { if (cond) vaopt_tests_passed++; else { printf("FAIL: %s\n", msg); vaopt_tests_failed++; } } while(0)
+// macros for va_args_single test
+#define VAARGS_ONLY(...) __VA_ARGS__
+#define VAARGS_WITH_OPT(...) __VA_OPT__(+) __VA_ARGS__
+
 #pragma cccc suite begin "varargs"
 
 // test_nested_vararg
@@ -967,6 +1045,128 @@ int test_varargs_vacopy_double(void) {
     if (diff < 0.0) diff = -diff;
     if (diff > 0.0001) return 1;
     
+    return 42;
+}
+
+// [from test_va_arg_pointer_deref]
+// Regression: va_arg(ap, T*) must carry pointer type, not double.
+[[cccc::test(return = 42)]]
+int test_va_arg_pointer_deref(void) {
+    int a = 0, b = 0, c = 0;
+    vargpd_fill(3, &a, &b, &c);
+    if (a != 1 || b != 2 || c != 3) return 1;
+    struct VArgPdPt pt = {30, 9};
+    if (vargpd_sum_first(1, &pt) != 39) return 2;
+    return a + b + c + 36; // 1+2+3+36 = 42
+}
+
+// [from test_varargs_vprintf]
+// printf macro dispatch (via stdio.h) with 0–4 variadic args.
+[[cccc::test(return = 42)]]
+int test_varargs_vprintf(void) {
+    printf("Hello, world!\n");
+    printf("Number: %d\n", 42);
+    printf("Two numbers: %d and %d\n", 10, 20);
+    printf("Three values: %d, %d, %d\n", 1, 2, 3);
+    return 42;
+}
+
+// [from test_variadic_comprehensive]
+// printf/sprintf with 0–10 variadic args.
+[[cccc::test(return = 42)]]
+int test_variadic_comprehensive(void) {
+    char buf[256];
+    printf("Test 1\n");
+    printf("Test 2: %d\n", 42);
+    sprintf(buf, "%d", 42);
+    if (buf[0] != '4' || buf[1] != '2') return 1;
+    printf("10 args: %d %d %d %d %d %d %d %d %d %d\n", 1,2,3,4,5,6,7,8,9,10);
+    return 42;
+}
+
+// [from test_varargs_many]
+// Variadic functions with 9+ total arguments (beyond the 8-register limit).
+[[cccc::test(return = 42)]]
+int test_varargs_many(void) {
+    int ir = vmany_sum_many_ints(10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10); // =55
+    if (ir != 55) return 1;
+    double dr = vmany_sum_many_doubles(10, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0);
+    if (!vmany_double_equal(dr, 55.0, 0.0001)) return 2;
+    double mr = vmany_sum_mixed_many(11, 0, 1.5, 2, 3.5, 4, 5.5, 6, 7.5, 8, 9.5, 10);
+    if (!vmany_double_equal(mr, 57.5, 0.0001)) return 3;
+    return 42;
+}
+
+// [from test_vm_variadic_simple]
+// User-defined variadic function compiled to VM bytecode.
+[[cccc::test(return = 42)]]
+int test_vm_variadic_simple(void) {
+    if (vmvc_sum_ints(3, 10, 20, 30) != 60) return 1;
+    if (vmvc_sum_ints(5, 1, 2, 3, 4, 5) != 15) return 2;
+    return 42;
+}
+
+// [from test_vm_variadic_comprehensive]
+// VM-compiled variadic: sum ints, sum long, max, print_strings.
+[[cccc::test(return = 42)]]
+int test_vm_variadic_comprehensive(void) {
+    if (vmvc_sum_ints(3, 10, 20, 30) != 60) return 1;
+    if (vmvc_sum_ints(1, 42) != 42) return 2;
+    if (vmvc_max_of(3, 10, 50, 30) != 50) return 3;
+    if (vmvc_max_of(3, 100, 50, 75) != 100) return 4;
+    return 42;
+}
+
+// [from test_va_opt_minimal]
+// Basic __VA_OPT__ with comma: LOG1 with and without variadic args.
+[[cccc::test(return = 42)]]
+int test_va_opt_minimal(void) {
+    VAOPT_LOG1("test1\n");
+    VAOPT_LOG1("test2: x=%d\n", 42);
+    return 42;
+}
+
+// [from test_va_args_single]
+// __VA_ARGS__ with single arg and __VA_OPT__ in expression context.
+[[cccc::test(return = 42)]]
+int test_va_args_single(void) {
+    int a = VAARGS_ONLY(10);
+    int b = 5 VAARGS_WITH_OPT(10);
+    if (a != 10) return 1;
+    if (b != 15) return 2;
+    return 42;
+}
+
+// [from test_va_opt / test_va_opt_working]
+// Comprehensive __VA_OPT__ tests: comma, token sequence, bare args, empty, parens, operators.
+[[cccc::test(return = 42)]]
+int test_va_opt(void) {
+    vaopt_tests_passed = 0; vaopt_tests_failed = 0;
+    // Test 1: basic comma insertion
+    VAOPT_LOG1("vaopt1\n");
+    VAOPT_LOG1("vaopt2: x=%d\n", 42);
+    VAOPT_ASSERT(1, "basic comma insertion");
+    // Test 2: just __VA_ARGS__
+    int x = 10 VAOPT_JUST_ARGS();
+    int y = 10 VAOPT_JUST_ARGS(+ 5);
+    VAOPT_ASSERT(x == 10, "JUST_ARGS() no args");
+    VAOPT_ASSERT(y == 15, "JUST_ARGS() with args");
+    // Test 3: empty __VA_OPT__
+    int ex = 42 VAOPT_EMPTY();
+    int ey = 42 VAOPT_EMPTY(a, b, c);
+    VAOPT_ASSERT(ex == 42, "EMPTY() no args");
+    VAOPT_ASSERT(ey == 42, "EMPTY() with args");
+    // Test 4: parentheses in content
+    int px = 0 VAOPT_PARENS();
+    int pz = VAOPT_PARENS(ignored);
+    VAOPT_ASSERT(px == 0, "PARENS() no args");
+    VAOPT_ASSERT(pz == 3, "PARENS() with args");
+    // Test 5: operators
+    int ox = VAOPT_ADD_IF_ARGS(5);
+    int oy = VAOPT_ADD_IF_ARGS(5, x);
+    VAOPT_ASSERT(ox == 5, "ADD_IF_ARGS no args");
+    VAOPT_ASSERT(oy == 15, "ADD_IF_ARGS with args");
+    if (vaopt_tests_failed != 0) return 1;
     return 42;
 }
 
