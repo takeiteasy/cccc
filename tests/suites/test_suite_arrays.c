@@ -643,4 +643,32 @@ int test_zero_length_arrays(void) {
     return 42;
 }
 
+// test_array_partial_init: partial initialization; remaining elements zero-filled
+[[cccc::test(return = 42)]]
+int test_array_partial_init(void) {
+    int arr1[5] = {1, 2};
+    if (arr1[0] != 1) return 1;
+    if (arr1[1] != 2) return 2;
+    if (arr1[2] != 0) return 3;
+    if (arr1[4] != 0) return 4;
+
+    int arr2[10] = {42};
+    if (arr2[0] != 42) return 5;
+    if (arr2[1] != 0) return 6;
+    if (arr2[9] != 0) return 7;
+
+    int arr3[5] = {0};
+    if (arr3[0] != 0) return 8;
+    if (arr3[4] != 0) return 9;
+
+    int arr4[7] = {10, 20, 30};
+    int sum = arr4[0] + arr4[1] + arr4[2];
+    if (sum != 60) return 10;
+    if (arr4[3] != 0) return 11;
+
+    int arr5[4] = {10, 32};
+    int result = arr5[0] + arr5[1] + arr5[2] + arr5[3];  // 10+32+0+0 = 42
+    return result;
+}
+
 #pragma cccc suite end

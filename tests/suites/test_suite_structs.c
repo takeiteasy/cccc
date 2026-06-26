@@ -273,6 +273,86 @@ union tc_union_size_Data {
     long l;
 };
 
+// [from test_struct_fwd_const_member]
+// Regression: const ptr to forward-declared struct must resolve after completion
+struct tc_fwd_file {
+    const struct tc_fwd_io_methods *pMethods;  // incomplete at point of use
+};
+struct tc_fwd_io_methods {
+    int (*xClose)(struct tc_fwd_file *);
+    int (*xRead)(struct tc_fwd_file *, int);
+};
+static int tc_fwd_do_close(struct tc_fwd_file *f) { (void)f; return 40; }
+static int tc_fwd_do_read(struct tc_fwd_file *f, int n) { (void)f; return n; }
+static const struct tc_fwd_io_methods TC_FWD_METHODS = { tc_fwd_do_close, tc_fwd_do_read };
+
+// [from test_union_global]
+union TcUnionGlobal {
+    int val;
+    char ch;
+} tc_union_global;
+
+// [from test_union_pointer]
+union TcUnionPtrData {
+    int i;
+    char c;
+};
+
+// [from test_union_separate_assign]
+union TcUnionSepData { int i; };
+static union TcUnionSepData tc_union_sep_make(void) {
+    union TcUnionSepData d;
+    d.i = 42;
+    return d;
+}
+
+// [from test_union_bytes]
+// Anonymous struct inside union for byte-level access
+union TcUnionBytesAccess {
+    int value;
+    struct {
+        char byte0;
+        char byte1;
+        char byte2;
+        char byte3;
+    } bytes;
+};
+
+// [from test_union_init]
+union TcUnionInitData {
+    int i;
+    long l;
+    char c;
+};
+union TcUnionArrays {
+    int arr[3];
+    char bytes[12];
+};
+
+// [from test_union_realworld]
+// Struct with anonymous union member (type-tagged value)
+#define TC_UNION_RW_INT  1
+#define TC_UNION_RW_CHAR 2
+struct TcUnionRealworldValue {
+    int type;
+    union {
+        int i;
+        char c;
+        void *ptr;
+    } data;
+};
+
+// [from test_union_advanced]
+// Union with char-array member and nested union
+union TcUnionAdvData {
+    int i;
+    char bytes[8];
+};
+union TcUnionAdvNested {
+    int x;
+    char a;
+};
+
 #pragma cccc suite begin "structs"
 
 // test_bitfields
@@ -614,6 +694,128 @@ int test_union_size(void) {
     int size = sizeof(union tc_union_size_Data);  // Should return 8 (size of long, which is 8 in VM)
     if (size != 8) return 1;  // Assert sizeof(union tc_union_size_Data) == 8
     return 42;
+}
+
+// test_struct_fwd_const_member: const ptr to forward-declared struct regression
+[[cccc::test(return = 42)]]
+int test_struct_fwd_const_member(void) {
+    struct tc_fwd_file f;
+    f.pMethods = &TC_FWD_METHODS;
+    int r = f.pMethods->xClose(&f);   // 40
+    r += f.pMethods->xRead(&f, 2);    // +2
+    return r;                          // 42
+}
+
+// test_union_global: file-scope union declaration and access
+[[cccc::test(return = 42)]]
+int test_union_global(void) {
+    tc_union_global.val = 42;
+    return tc_union_global.val;
+}
+
+// test_union_pointer: union pointer arrow access
+[[cccc::test(return = 42)]]
+int test_union_pointer(void) {
+    union TcUnionPtrData d;
+    d.i = 100;
+    union TcUnionPtrData *ptr = &d;
+    ptr->i = 42;
+    return ptr->i;
+}
+
+// test_union_separate_assign: union return assigned separately (not at init)
+[[cccc::test(return = 42)]]
+int test_union_separate_assign(void) {
+    union TcUnionSepData result;
+    result = tc_union_sep_make();
+    return result.i;
+}
+
+// test_union_bytes: anonymous struct inside union for byte-level access
+[[cccc::test(return = 42)]]
+int test_union_bytes(void) {
+    union TcUnionBytesAccess u;
+    u.value = 0x2A1E0F05;  // bytes: 05 0F 1E 2A (little-endian)
+    if (u.bytes.byte3 != 0x2A) return 1;  // 0x2A == 42
+    return 42;
+}
+
+// test_union_init: union with array member and long member
+[[cccc::test(return = 42)]]
+int test_union_init(void) {
+    int score = 0;
+
+    union TcUnionInitData d1;
+    d1.i = 100;
+    d1.c = 42;
+    if (d1.c == 42) score += 10;
+
+    union TcUnionArrays a;
+    a.arr[0] = 10; a.arr[1] = 20; a.arr[2] = 30;
+    if (a.arr[0] == 10 && a.arr[1] == 20 && a.arr[2] == 30) score += 10;
+
+    union TcUnionInitData d2;
+    d2.c = 42;
+    if (d2.c == 42) score += 10;
+
+    union TcUnionInitData d3;
+    d3.l = 12;
+    if (d3.l == 12) score += 12;
+
+    return score;  // 42
+}
+
+// test_union_realworld: struct with anonymous union member (type-tagged value)
+[[cccc::test(return = 42)]]
+int test_union_realworld(void) {
+    int score = 0;
+
+    struct TcUnionRealworldValue v1;
+    v1.type = TC_UNION_RW_INT;
+    v1.data.i = 100;
+    if (v1.type == TC_UNION_RW_INT && v1.data.i == 100) score += 10;
+
+    struct TcUnionRealworldValue v2;
+    v2.type = TC_UNION_RW_CHAR;
+    v2.data.c = 'A';
+    if (v2.type == TC_UNION_RW_CHAR && v2.data.c == 'A') score += 10;
+
+    struct TcUnionRealworldValue v3;
+    v3.type = TC_UNION_RW_INT;
+    v3.data.i = 200;
+    v3.type = TC_UNION_RW_CHAR;
+    v3.data.c = 42;
+    if (v3.type == TC_UNION_RW_CHAR && v3.data.c == 42) score += 10;
+
+    struct TcUnionRealworldValue arr[3];
+    arr[0].type = TC_UNION_RW_INT; arr[0].data.i = 1;
+    arr[1].type = TC_UNION_RW_INT; arr[1].data.i = 2;
+    arr[2].type = TC_UNION_RW_INT; arr[2].data.i = 3;
+    int sum = arr[0].data.i + arr[1].data.i + arr[2].data.i;
+    if (sum == 6) score += 12;
+
+    return score;  // 42
+}
+
+// test_union_advanced: char-array union member, nested union, pointer access
+[[cccc::test(return = 42)]]
+int test_union_advanced(void) {
+    // char array member
+    union TcUnionAdvData d;
+    d.i = 0x04030201;
+    int byte_ok = (d.bytes[0] == 0x01) ? 10 : 0;
+
+    // nested union (trivial; verifies union of different sizes)
+    union TcUnionAdvNested n;
+    n.a = 10;
+    int nested_ok = (n.a == 10) ? 10 : 0;
+
+    // pointer arrow access
+    union TcUnionAdvData *ptr = &d;
+    ptr->i = 200;
+    int ptr_ok = (ptr->i == 200) ? 10 : 0;
+
+    return byte_ok + nested_ok + ptr_ok + 12;  // 10+10+10+12 = 42
 }
 
 #pragma cccc suite end

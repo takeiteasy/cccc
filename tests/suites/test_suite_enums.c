@@ -32,6 +32,20 @@ enum Plain { P_X = 7, P_Y = 42 };
 // --- Typedef with underlying type ---
 typedef enum TdEnum : unsigned char { TD_ZERO = 0, TD_MAX = 200 } TdEnum;
 
+// [from test_enum_typedef]
+// Test enum scoping and typedef enum (anonymous typedef)
+enum TcEnumTypedefColor { TC_ENUM_TYPEDEF_RED, TC_ENUM_TYPEDEF_GREEN, TC_ENUM_TYPEDEF_BLUE };
+
+typedef enum { TC_ENUM_TYPEDEF_SMALL = 1, TC_ENUM_TYPEDEF_MEDIUM = 2, TC_ENUM_TYPEDEF_LARGE = 3 } TcEnumTypedefSize;
+
+static int get_typedef_color_value(enum TcEnumTypedefColor c) {
+    return c;
+}
+
+static int get_typedef_size_value(TcEnumTypedefSize s) {
+    return s;
+}
+
 // [from test_enum_advanced]
 // Test enum edge cases and advanced features
 enum Large {
@@ -281,6 +295,25 @@ int test_enum_sizeof(void) {
     if (s != 4) return 1;
     
     return 42;  // Success!
+}
+
+// test_enum_typedef: plain anonymous typedef enum
+[[cccc::test(return = 42)]]
+int test_enum_typedef(void) {
+    enum TcEnumTypedefColor c = TC_ENUM_TYPEDEF_GREEN;
+    TcEnumTypedefSize s = TC_ENUM_TYPEDEF_MEDIUM;
+
+    int result = get_typedef_color_value(c) + get_typedef_size_value(s);  // 1 + 2 = 3
+    if (result != 3) return 1;
+
+    // Reassignment and multiply
+    c = TC_ENUM_TYPEDEF_BLUE;
+    s = TC_ENUM_TYPEDEF_LARGE;
+
+    result = get_typedef_color_value(c) * get_typedef_size_value(s);  // 2 * 3 = 6
+    if (result != 6) return 2;
+
+    return result * 7;  // 6 * 7 = 42
 }
 
 // test_enum_switch
