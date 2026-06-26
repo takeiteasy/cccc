@@ -1,6 +1,7 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: floating-point, complex, FMA/FMS optimizer, float32
-// Source tests: test_complex, test_complex_tgmath, test_fenv_tgmath_hexfloat, test_float, test_float32_register_file, test_float32_width, test_float_mixed, test_float_simple, test_fstr_promoted, test_optimizer_fmadd, test_optimizer_fmsub, test_optimizer_fnmsub, test_optimizer_fp_promotion
+// Source tests: test_complex, test_complex_tgmath, test_fenv_tgmath_hexfloat, test_float, test_float32_register_file, test_float32_width, test_float_mixed, test_float_simple, test_fstr_promoted, test_optimizer_fmadd, test_optimizer_fmsub, test_optimizer_fnmsub, test_optimizer_fp_promotion,
+//   test_float_comprehensive, test_fp_minimal
 
 #include <complex.h>
 #include <tgmath.h>
@@ -731,6 +732,39 @@ int test_optimizer_fp_promotion(void) {
     Assert(a > (long double)1.0);
     long double b = nexttowardl((long double)x, (long double)0.0);
     Assert(b < (long double)1.0);
+}
+
+// [from test_float_comprehensive]
+// Arithmetic, comparisons, unary minus, assignment chain with doubles.
+static double flc_add(double a, double b) { return a + b; }
+static double flc_multiply(double a, double b) { return a * b; }
+
+[[cccc::test(return = 42)]]
+int test_float_comprehensive(void) {
+    if (flc_add(10.0, 32.0) != 42.0) return 1;
+    if (flc_multiply(6.0, 7.0) != 42.0) return 2;
+    if (84.0 / 2.0 != 42.0) return 3;
+    if (50.0 - 8.0 != 42.0) return 4;
+    double expr = (10.0 + 2.0) * 3.0 + 6.0; // (12*3)+6=42
+    if (expr != 42.0) return 5;
+    double a = 42.0, b = 41.0;
+    if (!(a > b) || !(b < a) || a != 42.0) return 6;
+    double neg = -42.0;
+    if (neg != -42.0 || -neg != 42.0) return 7;
+    double v1, v2, v3;
+    v1 = v2 = v3 = 42.0;
+    if (v1 != 42.0 || v2 != 42.0 || v3 != 42.0) return 8;
+    return 42;
+}
+
+// [from test_fp_minimal]
+// Function-pointer call through int-returning function.
+static int fpm_add(int a, int b) { return a + b; }
+
+[[cccc::test(return = 42)]]
+int test_fp_minimal(void) {
+    int (*fp)(int, int) = fpm_add;
+    return fp(10, 32);
 }
 
 #pragma cccc suite end

@@ -988,6 +988,15 @@ int test_printf_binary(void) {
     return 42;
 }
 
+// [from test_fprintf]
+// fprintf to stderr and stdout.
+[[cccc::test(return = 42)]]
+int test_fprintf(void) {
+    fprintf(stderr, "This is an error message\n");
+    fprintf(stdout, "This goes to stdout: %d %s\n", 123, "hello");
+    return 42;
+}
+
 // [from test_malloc_basic]
 // Simple malloc/free without coalescing.
 [[cccc::test(return = 42)]]

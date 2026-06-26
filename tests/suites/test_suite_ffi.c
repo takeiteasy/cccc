@@ -1,11 +1,13 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: FFI, dlfcn, float FFI
-// Source tests: test_dlfcn, test_dlfcn_call, test_dlfcn_close_no_symbols, test_dlfcn_missing, test_ffi_puts, test_ffi_simple, test_ffi_strlen, test_float_ffi, test_float_funcall
+// Source tests: test_dlfcn, test_dlfcn_call, test_dlfcn_close_no_symbols, test_dlfcn_missing, test_ffi_puts, test_ffi_simple, test_ffi_strlen, test_float_ffi, test_float_funcall,
+//   test_ffi, test_ffi_variadic_large_args, test_ffi_variadic_many_args
 
 #include <dlfcn.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include <stdlib.h>
 
 // [from test_ffi_puts]
 // Test just puts
@@ -227,6 +229,91 @@ int test_ffi_allow_zero(void) {
     // puts is not in the allow list; returns 0 (blocked) when ffi_errors_fatal is off
     if (puts("blocked") != 0)
         return 2;
+    return 42;
+}
+
+// [from test_ffi]
+// FFI: string functions, memory, conversions, math via standard library.
+static int ffi_lc_string(void) {
+    char str1[20], str2[20];
+    strcpy(str1, "hello");
+    if (strcmp(str1, "hello") != 0) return 1;
+    if (strlen(str1) != 5) return 2;
+    strcpy(str2, " world"); strcat(str1, str2);
+    if (strcmp(str1, "hello world") != 0) return 3;
+    return 0;
+}
+static int ffi_lc_memory(void) {
+    int *ptr = (int *)malloc(40);
+    if (!ptr) return 4;
+    ptr[0] = 10; ptr[1] = 20; ptr[2] = 30;
+    int sum = ptr[0] + ptr[1] + ptr[2]; free(ptr);
+    if (sum != 60) return 5;
+    char buffer[10]; memset(buffer, 0, 10);
+    if (buffer[0] != 0) return 6;
+    char src[5] = {1, 2, 3, 4, 5}, dst[5];
+    memcpy(dst, src, 5);
+    if (dst[2] != 3 || memcmp(src, dst, 5) != 0) return 7;
+    return 0;
+}
+static int ffi_lc_conversions(void) {
+    if (atoi("123") != 123) return 9;
+    if (atol("456") != 456) return 10;
+    return 0;
+}
+static int ffi_lc_math(void) {
+    double r = sqrt(16.0);
+    if (r < 3.99 || r > 4.01) return 11;
+    double p = pow(2.0, 3.0);
+    if (p < 7.99 || p > 8.01) return 12;
+    if (floor(3.7) < 2.99 || floor(3.7) > 3.01) return 13;
+    if (ceil(3.2) < 3.99 || ceil(3.2) > 4.01) return 14;
+    return 0;
+}
+
+[[cccc::test(return = 42)]]
+int test_ffi_comprehensive(void) {
+    int r;
+    r = ffi_lc_string(); if (r != 0) return r;
+    r = ffi_lc_memory(); if (r != 0) return r;
+    r = ffi_lc_conversions(); if (r != 0) return r;
+    r = ffi_lc_math(); if (r != 0) return r;
+    return 42;
+}
+
+// [from test_ffi_variadic_large_args]
+// Regression #160: snprintf with 35 arguments (> 32 stack scratch limit).
+[[cccc::test(return = 42)]]
+int test_ffi_variadic_large_args(void) {
+    char buf[512];
+    snprintf(buf, sizeof(buf),
+             "%d %d %d %d %d %d %d %d %d %d "
+             "%d %d %d %d %d %d %d %d %d %d "
+             "%d %d %d %d %d %d %d %d %d %d "
+             "%d %d %d %d %d",
+             1,2,3,4,5,6,7,8,9,10,
+             11,12,13,14,15,16,17,18,19,20,
+             21,22,23,24,25,26,27,28,29,30,
+             31,32,33,34,35);
+    if (strcmp(buf,
+               "1 2 3 4 5 6 7 8 9 10 "
+               "11 12 13 14 15 16 17 18 19 20 "
+               "21 22 23 24 25 26 27 28 29 30 "
+               "31 32 33 34 35") != 0) return 1;
+    return 42;
+}
+
+// [from test_ffi_variadic_many_args]
+// Regression #119: snprintf with many int/double/mixed args.
+[[cccc::test(return = 42)]]
+int test_ffi_variadic_many_args(void) {
+    char buf[512];
+    snprintf(buf, sizeof(buf), "ints:%d %d %d %d %d %d %d %d %d %d",
+             1,2,3,4,5,6,7,8,9,10);
+    if (strcmp(buf, "ints:1 2 3 4 5 6 7 8 9 10") != 0) return 1;
+    snprintf(buf, sizeof(buf), "dbl:%.1f %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.1f",
+             1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0);
+    if (strcmp(buf, "dbl:1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0") != 0) return 2;
     return 42;
 }
 
