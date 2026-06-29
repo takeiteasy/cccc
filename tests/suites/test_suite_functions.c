@@ -551,7 +551,7 @@ int test_static_assert(void) {
     // Test with pointer sizes
     _Static_assert(sizeof(void*) == 8, "pointers must be 8 bytes");
     _Static_assert(sizeof(int*) == 8, "int pointers must be 8 bytes");
-    
+
     return 42;  // Success
 }
 

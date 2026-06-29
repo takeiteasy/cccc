@@ -1,6 +1,7 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: POSIX: unistd, dirent, glob, regex, socket, mman, etc.
-// Source tests: test_posix_arpa_inet, test_posix_dirent, test_posix_extra_ffi, test_posix_fnmatch, test_posix_glob, test_posix_libgen, test_posix_poll, test_posix_pwd_grp, test_posix_regex, test_posix_socket_netdb, test_posix_strings, test_posix_sys_mman, test_posix_sys_stat, test_posix_sys_time, test_posix_termios, test_posix_unistd_fcntl, test_posix_utime, test_posix_vfs_decls
+// Source tests: test_posix_arpa_inet, test_posix_dirent, test_posix_extra_ffi, test_posix_fnmatch, test_posix_glob, test_posix_libgen, test_posix_poll, test_posix_pwd_grp, test_posix_regex, test_posix_socket_netdb, test_posix_strings, test_posix_sys_mman, test_posix_sys_stat, test_posix_sys_time, test_posix_termios, test_posix_unistd_fcntl, test_posix_utime, test_posix_vfs_decls,
+//   test_glob_header, test_quick_exit, test_posix_sys_wait
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -447,6 +448,37 @@ int test_posix_vfs_decls(void) {
                   + (sfs.f_bsize == 0) + (sizeof(fns) > 0) + MIN(1,2) + MAX(1,2);
     (void)constants;
     return 42;
+}
+
+// [from test_glob_header]
+// Basic glob_t struct: sizeof must be > 0.
+[[cccc::test(return = 42)]]
+int test_glob_header(void) {
+    glob_t g;
+    return sizeof(g) > 0 ? 42 : 1;
+}
+
+// [from test_posix_sys_wait]
+// fork() + waitpid() + WEXITSTATUS.
+[[cccc::test(return = 42)]]
+int test_posix_sys_wait(void) {
+    pid_t pid = fork();
+    if (pid < 0) return 1;
+    if (pid == 0) { _exit(42); }
+    int status;
+    pid_t r = waitpid(pid, &status, 0);
+    if (r != pid) return 2;
+    if (!WIFEXITED(status)) return 3;
+    if (WEXITSTATUS(status) != 42) return 4;
+    return 42;
+}
+
+// [from test_quick_exit]
+// quick_exit(42) terminates with code 42 (uses fork-based execution).
+[[cccc::test(exit_code = 42)]]
+int test_quick_exit(void) {
+    quick_exit(42);
+    return 1;
 }
 
 #pragma cccc suite end

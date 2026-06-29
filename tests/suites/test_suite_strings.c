@@ -1,6 +1,7 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: string literals, character arrays, string functions
-// Source tests: test_string_concat, test_string_functions, test_strings, test_strings_and_arrays, test_strings_comprehensive, test_unicode_comments, test_wchar_uchar_headers
+// Source tests: test_string_concat, test_string_functions, test_strings, test_strings_and_arrays, test_strings_comprehensive, test_unicode_comments, test_wchar_uchar_headers,
+//   test_format_string_valid, test_format_string_complex, test_format_length_modifier_valid
 
 #include <string.h>
 #include <uchar.h>
@@ -265,6 +266,46 @@ int test_wchar_uchar_headers(void) {
     char buf[8];
     if (c16rtomb(buf, c16, &st) < 1) return 6;
 
+    return 42;
+}
+
+// [from test_format_string_valid]
+// Format string validation: valid printf/sprintf calls with --format-string-checks.
+[[cccc::test(return = 42, flags = "--format-string-checks")]]
+int test_format_string_valid(void) {
+    char buf[100];
+    printf("Number: %d\n", 42);
+    printf("Mixed: %d %s %f\n", 42, "hello", 3.14);
+    printf("Percentage: 100%%\n");
+    printf("Formatted: %10d\n", 42);
+    sprintf(buf, "x=%d y=%d", 10, 20);
+    printf("Result: %s\n", buf);
+    return 42;
+}
+
+// [from test_format_string_complex]
+// Format string validation: * width/precision specifiers, length modifiers.
+[[cccc::test(return = 42, flags = "--format-string-checks")]]
+int test_format_string_complex(void) {
+    printf("Width from arg: %*d\n", 10, 42);
+    printf("Precision from arg: %.*f\n", 2, 3.14159);
+    printf("Both dynamic: %*.*f\n", 10, 2, 3.14159);
+    printf("Long: %ld\n", 42L);
+    printf("Long long: %lld\n", 42LL);
+    return 42;
+}
+
+// [from test_format_length_modifier_valid]
+// Format string validation: length modifiers with correct types.
+[[cccc::test(return = 42, flags = "--format-string-checks")]]
+int test_format_length_modifier_valid(void) {
+    long l = 42L;
+    unsigned long ul = 100UL;
+    long double ld = 3.14L;
+    printf("%ld\n",  l);
+    printf("%lu\n",  ul);
+    printf("%Lf\n",  ld);
+    printf("%zu\n",  ul);
     return 42;
 }
 
