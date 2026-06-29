@@ -1,7 +1,9 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: FFI, dlfcn, float FFI
 // Source tests: test_dlfcn, test_dlfcn_call, test_dlfcn_close_no_symbols, test_dlfcn_missing, test_ffi_puts, test_ffi_simple, test_ffi_strlen, test_float_ffi, test_float_funcall,
-//   test_ffi, test_ffi_variadic_large_args, test_ffi_variadic_many_args
+//   test_ffi, test_ffi_variadic_large_args, test_ffi_variadic_many_args,
+//   test_static_ffi_func_ptr, test_vprintf_ffi
+// Kept legacy: test_dlfcn_user_function_name — nested dlopen() can't shadow <dlfcn.h> decl in suite
 
 #include <dlfcn.h>
 #include <string.h>
@@ -315,6 +317,48 @@ int test_ffi_variadic_many_args(void) {
              1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0);
     if (strcmp(buf, "dbl:1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0") != 0) return 2;
     return 42;
+}
+
+// [from test_static_ffi_func_ptr]
+// Regression #589: static struct initialised with FFI function pointers.
+typedef struct { unsigned long (*len)(const char *); int (*cmp)(const char *, const char *); } FfiOps;
+static FfiOps ffi_ops_global = { strlen, strcmp };
+[[cccc::test(return = 42)]]
+int test_static_ffi_func_ptr(void) {
+    if (ffi_ops_global.len("hello world!!") != 13) return 1;
+    if (ffi_ops_global.cmp("abc", "abc") != 0) return 2;
+    if (ffi_ops_global.cmp("abc", "abd") >= 0) return 3;
+    return 42;
+}
+
+// [from test_vprintf_ffi]
+// Regression #407: va_list forwarding in v*-family passes all args correctly.
+#include <stdarg.h>
+static int ffi_my_vsprintf(char *buf, const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt); int r = vsprintf(buf, fmt, ap); va_end(ap); return r;
+}
+static int ffi_my_vsnprintf(char *buf, int n, const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt); int r = vsnprintf(buf, (unsigned)n, fmt, ap); va_end(ap); return r;
+}
+static int ffi_my_vsscanf(const char *str, const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt); int r = vsscanf(str, fmt, ap); va_end(ap); return r;
+}
+[[cccc::test(return = 42)]]
+int test_vprintf_ffi(void) {
+    char buf[128];
+    int fail = 0;
+    ffi_my_vsprintf(buf, "[%d] [%d]", 6, -5);
+    if (strcmp(buf, "[6] [-5]") != 0) fail++;
+    ffi_my_vsprintf(buf, "%d %.1f %d", 1, 2.5, 3);
+    if (strcmp(buf, "1 2.5 3") != 0) fail++;
+    ffi_my_vsprintf(buf, "%d+%d=%d", 10, 20, 30);
+    if (strcmp(buf, "10+20=30") != 0) fail++;
+    ffi_my_vsnprintf(buf, (int)sizeof buf, "%d %d %d", 7, 8, 9);
+    if (strcmp(buf, "7 8 9") != 0) fail++;
+    int a = 0, b = 0, c = 0;
+    ffi_my_vsscanf("11 22 33", "%d %d %d", &a, &b, &c);
+    if (a != 11 || b != 22 || c != 33) fail++;
+    return fail == 0 ? 42 : 1;
 }
 
 #pragma cccc suite end

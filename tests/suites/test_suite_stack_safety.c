@@ -13,7 +13,8 @@
 //   test_memory_tagging_basic, test_memory_tagging_multiple_gens,
 //   test_memory_tagging_reuse,
 //   test_thread_safety_double_lock, test_thread_safety_lock_order,
-//   test_thread_safety_race, test_thread_safety_atomic_mix_runtime
+//   test_thread_safety_race, test_thread_safety_atomic_mix_runtime,
+//   test_stack_overflow_large_frame, test_tagging_simple
 
 #include <pthread.h>
 #include <setjmp.h>
@@ -497,6 +498,26 @@ int test_thread_safety_atomic_mix_runtime(void) {
     if (pthread_create(&t, 0, ts_plain_read, 0) != 0) return 1;
     pthread_join(t, 0);
     return 42;
+}
+
+// [from test_stack_overflow_large_frame]
+// Large stack frame (500 000 longs) should trigger stack overflow detection.
+[[cccc::test(expect_runtime_error = true)]]
+int test_stack_overflow_large_frame(void) {
+    long long arr[500000];
+    arr[0] = 42;
+    return (int)arr[0];
+}
+
+// [from test_tagging_simple]
+// Simple malloc/free returning 42 — baseline for memory-tagging infrastructure.
+[[cccc::test(return = 42)]]
+int test_tagging_simple(void) {
+    int *ptr = (int *)malloc(sizeof(int));
+    *ptr = 42;
+    int result = *ptr;
+    free(ptr);
+    return result;
 }
 
 #pragma cccc suite end

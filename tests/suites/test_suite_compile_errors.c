@@ -1,6 +1,6 @@
 // CCCC_FLAGS: --testing
-// Migration of legacy EXPECT_COMPILE_ERROR tests that have parse-time errors
-// (no flags, no stderr pattern required). Ticket #615.
+// Consolidated suite: compile-error tests (parse-time, inside function bodies).
+// Ticket #615.
 #include <complex.h>
 
 #pragma cccc suite begin "compile_errors"
@@ -120,6 +120,78 @@ void test_undefined_x_assign(void) {
 void test_fuzz_regr_invalid_arith(void) {
     int b = 10 - &;
     (void)b;
+}
+
+// --- Parser errors with specific stderr ---
+
+// [from test_parser_invalid_operands_error]
+[[cccc::test(expect_compile_error = true, error = "cannot add two pointers")]]
+void test_parser_invalid_operands_error(void) {
+    int *p = 0;
+    (void)(p + p);
+}
+
+// [from test_parser_no_such_member_error]
+struct PErr_Foo { int x; };
+[[cccc::test(expect_compile_error = true, error = "no such member")]]
+void test_parser_no_such_member_error(void) {
+    struct PErr_Foo f;
+    (void)(f.bar);
+}
+
+// [from test_parser_undefined_variable_error]
+[[cccc::test(expect_compile_error = true, error = "undefined variable")]]
+void test_parser_undefined_variable_error(void) {
+    (void)(undeclared_xyz);
+}
+
+// --- C23 constexpr in function body ---
+
+// [from test_constexpr_nonconstant_init_error]
+[[cccc::test(expect_compile_error = true, error = "constexpr initializer is not a constant expression")]]
+void test_constexpr_nonconstant_init_error(void) {
+    int x = 1;
+    constexpr int n = x;
+    (void)n;
+}
+
+// --- C23 empty params (C23 default: int f() means f(void)) ---
+
+// [from test_c23_empty_params_error]
+[[cccc::test(expect_compile_error = true, error = "too many arguments")]]
+void test_c23_empty_params_error(void) {
+    int add_ep();
+    (void)add_ep(1, 2);
+}
+
+// --- C23 compound literal storage class errors (inside function body) ---
+
+// [from test_c23_compound_literal_auto_error]
+[[cccc::test(expect_compile_error = true)]]
+void test_c23_compound_literal_auto_error(void) {
+    int *p = &(auto int){ 7 };
+    (void)p;
+}
+
+// [from test_c23_compound_literal_extern_error]
+[[cccc::test(expect_compile_error = true)]]
+void test_c23_compound_literal_extern_error(void) {
+    int *p = &(extern int){ 7 };
+    (void)p;
+}
+
+// [from test_c23_compound_literal_inline_error]
+[[cccc::test(expect_compile_error = true)]]
+void test_c23_compound_literal_inline_error(void) {
+    int *p = &(inline int){ 7 };
+    (void)p;
+}
+
+// [from test_c23_compound_literal_typedef_error]
+[[cccc::test(expect_compile_error = true)]]
+void test_c23_compound_literal_typedef_error(void) {
+    int *p = &(typedef int){ 7 };
+    (void)p;
 }
 
 #pragma cccc suite end

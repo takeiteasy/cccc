@@ -1583,8 +1583,34 @@ done:
 
 // test_c23_compound_literal_auto_error, test_c23_compound_literal_extern_error,
 // test_c23_compound_literal_inline_error, test_c23_compound_literal_typedef_error,
-// test_constexpr_nonconstant_init_error: deferred — these errors use error_tok() paths
-// that are not recoverable via collect_errors, so the suite compilation aborts.
-// These remain as legacy tests.
+// test_constexpr_nonconstant_init_error: migrated to test_suite_compile_errors.c.
+
+// [from test_c23_compound_literal_storage]
+// C23 compound literal storage classes: static/register/thread_local are valid.
+struct CLS_Pair { int a; int b; };
+int *cls_global_static = &(static int){ 11 };
+int cls_next_value(void) {
+    int *p = &(static int){ 7 }; *p = *p + 1; return *p;
+}
+int cls_register_value(void) {
+    int *p = &(register int){ 5 }; *p = *p + 1; return *p;
+}
+int cls_tls_value(void) {
+    int *p = &(thread_local int){ 13 }; return *p;
+}
+static_assert((constexpr int){ 42 } == 42);
+static_assert(((constexpr struct CLS_Pair){ 3, 9 }).b == 9);
+[[cccc::test(return = 42, flags = "-Wignored-features")]]
+int test_c23_compound_literal_storage(void) {
+    if (*cls_global_static != 11) return 1;
+    *cls_global_static = 12;
+    if (*cls_global_static != 12) return 2;
+    if (cls_next_value() != 8) return 3;
+    if (cls_next_value() != 9) return 4;
+    if (cls_register_value() != 6) return 5;
+    if (cls_register_value() != 6) return 6;
+    if (cls_tls_value() != 13) return 7;
+    return 42;
+}
 
 #pragma cccc suite end

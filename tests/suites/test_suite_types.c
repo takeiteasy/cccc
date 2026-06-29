@@ -1,7 +1,25 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: type sizes, char, casts, sizeof
 // Source tests: test_char_as_int, test_int_size, test_long_size,
-//               test_char_return, test_cast_expressions, test_sizeof
+//               test_char_return, test_cast_expressions, test_sizeof,
+//               test_serialize_typedef_roundtrip, test_serialize_types
+
+// [from test_serialize_typedef_roundtrip] — file-scope type aliases for -M regression
+typedef int SerTR_Int;
+typedef SerTR_Int *SerTR_IntPtr;
+typedef SerTR_Int SerTR_IntArray[3];
+struct SerTR_Tagged { SerTR_Int value; };
+typedef struct SerTR_Tagged SerTR_TaggedAlias;
+typedef struct { SerTR_Int width; SerTR_Int height; } SerTR_AnonStruct;
+typedef enum { SER_TR_RED = 1, SER_TR_GREEN = 2 } SerTR_EnumAlias;
+typedef union { SerTR_Int i; char c; } SerTR_UnionAlias;
+
+// [from test_serialize_types] — file-scope struct/union/enum for -M regression
+typedef struct { int width; int height; } SerT_Size;
+typedef enum { SER_T_RED = 1, SER_T_GREEN = 2 } SerT_Color;
+union SerT_Value { int i; char c; };
+struct SerT_Point { int x; int y; };
+struct SerT_Box { struct SerT_Point origin; SerT_Size size; union SerT_Value value; SerT_Color color; };
 
 #pragma cccc suite begin "types"
 
@@ -90,6 +108,50 @@ static int identity_fn(int x) { return x; }
 static int cast_in_call(void) {
     double d = 7.9;
     return identity_fn((int)d);  // 7
+}
+
+// [from test_serialize_typedef_roundtrip]
+// Regression: -M typedef alias serialization round-trip; returns sum-25=42.
+[[cccc::test(return = 42)]]
+int test_serialize_typedef_roundtrip(void) {
+    typedef struct { SerTR_Int x; SerTR_Int y; } LocalPoint;
+    typedef SerTR_Int LocalScalar;
+    SerTR_Int n = 10;
+    SerTR_TaggedAlias tagged; tagged.value = 5;
+    SerTR_AnonStruct anon; anon.width = 6; anon.height = 7;
+    SerTR_EnumAlias color = SER_TR_GREEN;
+    SerTR_UnionAlias uni; uni.i = 8;
+    LocalPoint point; point.x = 9; point.y = 10;
+    LocalScalar local = 4;
+    SerTR_Int sum = 0;
+    sum = sum + n;
+    sum = sum + 1;
+    sum = sum + 2;
+    sum = sum + 3;
+    sum = sum + tagged.value;
+    sum = sum + anon.width;
+    sum = sum + anon.height;
+    sum = sum + color;
+    sum = sum + uni.i;
+    sum = sum + point.x;
+    sum = sum + point.y;
+    sum = sum + local;
+    return sum - 25; // 67-25=42
+}
+
+// [from test_serialize_types]
+// Regression: -M type definition serialization round-trip.
+[[cccc::test(return = 42)]]
+int test_serialize_types(void) {
+    struct SerT_Box box;
+    box.origin.x = 10;
+    box.origin.y = 20;
+    box.size.width = 5;
+    box.size.height = 4;
+    box.value.i = 1;
+    box.color = SER_T_GREEN;
+    return box.origin.x + box.origin.y + box.size.width + box.size.height +
+           box.value.i + box.color; // 10+20+5+4+1+2=42
 }
 
 [[cccc::test]]

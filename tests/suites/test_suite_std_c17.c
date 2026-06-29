@@ -8,8 +8,10 @@
 // Migrated (#612): test_std_c17_binary_literal_error (CCCC_EXPECT_STDERR not
 //   preserved — suite framework has no per-test stderr matching)
 //
+// Migrated:
+//   test_c23_label_before_decl_error — declaration after switch label triggers error inside function body
 // Deferred (whole-file compile errors, not per-function catchable):
-//   test_c23_label_before_decl_error, test_c23_compound_literal_storage_c17_error,
+//   test_c23_compound_literal_storage_c17_error,
 //   test_std_c17_digit_separator_error, test_std_c17_embed_error
 
 // C17: int foo() with no prototype — K&R style; must be defined at file scope
@@ -95,6 +97,20 @@ int test_std_c17_attributes(void) {
 [[cccc::test(return = 42, flags = "-Wpedantic")]]
 int test_std_c17_binary_literal(void) {
     return 0b101010 == 42 ? 42 : 1;
+}
+
+// [from test_c23_label_before_decl_error]
+// In C17, a declaration immediately after a case label is an error.
+[[cccc::test(expect_compile_error = true, error = "a declaration may not appear directly after a label")]]
+void test_c23_label_before_decl_error(void) {
+    int v = 1;
+    switch (v) {
+        case 1:
+            int x = 5;
+            (void)x;
+            break;
+    }
+    (void)v;
 }
 
 #pragma cccc suite end
