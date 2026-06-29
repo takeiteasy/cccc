@@ -194,4 +194,70 @@ void test_c23_compound_literal_typedef_error(void) {
     (void)p;
 }
 
+// --- C23 duplicate/incompatible type redeclarations ---
+
+// [from test_c23_duplicate_enum_constant_error]
+[[cccc::test(expect_compile_error = true)]]
+void test_c23_duplicate_enum_constant_error(void) {
+    enum DupFirst { DUP_CONST_A = 1 };
+    enum DupSecond { DUP_CONST_A = 2 };
+    (void)(DUP_CONST_A);
+}
+
+// [from test_c23_incompatible_enum_redecl_error]
+[[cccc::test(expect_compile_error = true)]]
+void test_c23_incompatible_enum_redecl_error(void) {
+    enum IncompBadEnum { INCOMPAT_ENUM_A = 1 };
+    enum IncompBadEnum { INCOMPAT_ENUM_A = 2 };
+    (void)(INCOMPAT_ENUM_A);
+}
+
+// [from test_c23_incompatible_struct_redecl_error]
+[[cccc::test(expect_compile_error = true)]]
+void test_c23_incompatible_struct_redecl_error(void) {
+    struct IncompBadStruct { int x; };
+    struct IncompBadStruct { long x; };
+    struct IncompBadStruct s; (void)s;
+}
+
+// [from test_c23_incompatible_union_redecl_error]
+[[cccc::test(expect_compile_error = true)]]
+void test_c23_incompatible_union_redecl_error(void) {
+    union IncompBadUnion { int x; };
+    union IncompBadUnion { long x; };
+    union IncompBadUnion u; (void)u;
+}
+
+// --- constexpr error tests ---
+
+// [from test_constexpr_missing_init_error]
+[[cccc::test(expect_compile_error = true, error = "constexpr object requires an initializer")]]
+void test_constexpr_missing_init_error(void) {
+    constexpr int ce_no_init;
+    (void)ce_no_init;
+}
+
+// [from test_constexpr_restrict_error]
+[[cccc::test(expect_compile_error = true, error = "constexpr object has unsupported type or qualifiers")]]
+void test_constexpr_restrict_error(void) {
+    int ce_target;
+    constexpr int *restrict ce_p = &ce_target;
+    (void)ce_p;
+}
+
+// [from test_constexpr_volatile_error]
+[[cccc::test(expect_compile_error = true, error = "constexpr object has unsupported type or qualifiers")]]
+void test_constexpr_volatile_error(void) {
+    constexpr volatile int ce_vol_n = 1;
+    (void)ce_vol_n;
+}
+
+// --- static_assert error ---
+
+// [from test_static_assert_no_message_error]
+[[cccc::test(expect_compile_error = true, error = "static assertion failed")]]
+void test_static_assert_no_message_error(void) {
+    static_assert(0);
+}
+
 #pragma cccc suite end
