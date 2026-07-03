@@ -300,8 +300,8 @@ test-suites: $(EXE_OUT)
 test-legacy: $(EXE_OUT)
 	@python3 tools/tests.py --legacy -j $(TEST_JOBS)
 
-# SQLite amalgamation preprocess smoke-test (#584 regression). Skips cleanly
-# when tools/sqlite-amalgamation-3530200.zip is absent; see docs/TESTING.md.
+# SQLite amalgamation smoke-test (preprocess #584 + compile+run #587/#588).
+# Skips cleanly when tools/sqlite-amalgamation-3530200.zip is absent; see docs/TESTING.md.
 sqlite-smoke: $(EXE_OUT)
 	@python3 tools/sqlite_smoke.py
 

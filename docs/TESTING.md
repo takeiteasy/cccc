@@ -40,12 +40,23 @@ dispositions; it is skipped on other platforms.
 ### SQLite amalgamation smoke-test
 
 `make test` finishes by running `tools/sqlite_smoke.py` (also available as
-`make sqlite-smoke`). It preprocesses the real SQLite 3.53.2 amalgamation with
-the exact flags from ticket #584 (`-DSQLITE_OS_OTHER=1 -U__APPLE__ -U__MACH__`,
-among others) and asserts the run succeeds with no `expected an identifier`
-parser error on `#define TK_FLOAT 154` — the symptom of the hashmap
-duplicate-key bug fixed in 602a291, where command-line `-D`/`-U` state could
-fail to stick.
+`make sqlite-smoke`). Two phases run in sequence:
+
+**Phase 1 — preprocess (#584 regression):** Preprocesses the real SQLite 3.53.2
+amalgamation with the exact flags from ticket #584 (`-DSQLITE_OS_OTHER=1
+-U__APPLE__ -U__MACH__`, among others) and asserts the run succeeds with no
+`expected an identifier` parser error on `#define TK_FLOAT 154` — the symptom
+of the hashmap duplicate-key bug fixed in 602a291.
+
+**Phase 2 — compile + run (#587/#588 regression + functional):** Compiles
+`sqlite3.c` via a source-level `#undef` prelude (source-level undef is used
+because command-line `-U` is unreliable in `-c` mode; see ticket #624) together
+with a minimal driver that opens an in-memory database, runs a `CREATE TABLE` /
+`INSERT` / `SELECT` sequence, and asserts exit code 42. This catches regressions
+in the codegen fixes from tickets #587 (register-spill for deep expressions) and
+#588 (builtin-alloca identity). Compilation uses `-DSQLITE_THREADSAFE=0` because
+`PTHREAD_MUTEX_RECURSIVE` / `pthread_mutexattr_settype` are not yet in CCCC's
+`pthread.h` (ticket #623).
 
 The amalgamation zip is ~2.9MB and gitignored (`tools/*.zip`), so it is not a
 tracked `tests/test_*.c`. The test looks for
@@ -57,6 +68,9 @@ present, the zip's SHA3-256 is verified before use. Fetch it with:
 curl -fsSL -o tools/sqlite-amalgamation-3530200.zip \
   https://sqlite.org/2026/sqlite-amalgamation-3530200.zip
 ```
+
+Phase 2 takes ~9 seconds (9 MB amalgamation). Preprocess-only (phase 1) is
+under 1 second.
 
 ## Architecture build and test workflows
 
