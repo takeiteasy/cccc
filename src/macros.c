@@ -2772,6 +2772,18 @@ void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens, int coun
         printf("Pre-parse global macro execution complete.\n");
 }
 
+// Expand a single ND_MACRO_CALL node using the already-compiled macros.
+// Called from cc_finalize_macro_gvar_inits while in_macro_expansion is true,
+// after compile_all_macros has run. Returns the expanded node (or the original
+// node unchanged if it is not an ND_MACRO_CALL).
+Node *cc_eager_expand_macro_call(VirtualMachine *vm, Node *node) {
+    if (!node)
+        return NULL;
+    // transform_node handles all ND_MACRO_CALL expansion, type annotation,
+    // void/return-type checks, NULL-result errors, and recursive re-expansion.
+    return transform_node(vm, node, 0);
+}
+
 // Expand all macro calls in the program
 void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
     if (!vm || !prog)
@@ -2821,7 +2833,7 @@ void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
     vm->compiler.locals = NULL;
     vm->compiler.current_fn = NULL;
 
-    // Also check global initializers
+    // Also check global initializers (constexpr init_expr expansion).
     for (Obj *var = prog; var; var = var->next) {
         if (var->is_function)
             continue;
@@ -2829,6 +2841,12 @@ void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
             var->init_expr = transform_node(vm, var->init_expr, 0);
         }
     }
+
+    // Finalize any global variable initializers whose scalar expression
+    // contained an ND_MACRO_CALL at parse time (deferred by gvar_initializer).
+    // Now that all macros are compiled and all symbols are defined, we can
+    // safely expand and serialize those pending initializers (#613).
+    cc_finalize_macro_gvar_inits(vm, prog);
 
     vm->compiler.in_macro_expansion = false;
 

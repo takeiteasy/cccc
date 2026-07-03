@@ -3413,10 +3413,29 @@ static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur, Initiali
     return cur->next;
 }
 
+// Returns true if any node in the expression tree is an ND_MACRO_CALL.
+// Used to detect scalar global initializers that require deferred evaluation.
+static bool expr_contains_macro_call(Node *node) {
+    if (!node)
+        return false;
+    if (node->kind == ND_MACRO_CALL)
+        return true;
+    return expr_contains_macro_call(node->lhs)  ||
+           expr_contains_macro_call(node->rhs)  ||
+           expr_contains_macro_call(node->cond) ||
+           expr_contains_macro_call(node->then) ||
+           expr_contains_macro_call(node->els);
+}
+
 // Initializers for global variables are evaluated at compile-time and
 // embedded to .data section. This function serializes Initializer
 // objects to a flat byte array. It is a compile error if an
 // initializer list contains a non-constant expression.
+//
+// Exception: if the scalar initializer expression contains an ND_MACRO_CALL,
+// serialization is deferred to cc_finalize_macro_gvar_inits (called from
+// cc_expand_macros after all macros have been compiled and expanded).
+// See ticket #613.
 static void gvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var) {
     Initializer *init = initializer(vm, rest, tok, var->ty, &var->ty);
 
@@ -3425,12 +3444,52 @@ static void gvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *
     if (var->is_constexpr)
         validate_constexpr_initializer(vm, var, init, tok);
 
+    // If the scalar initializer expression contains a macro call, defer
+    // write_gvar_data to cc_finalize_macro_gvar_inits (after cc_expand_macros).
+    // This avoids premature compile_all_macros which would break $symbol
+    // forward-reference lookups in other comptime functions (#613).
+    if (!var->is_constexpr && init->expr && expr_contains_macro_call(init->expr)) {
+        // Temporarily borrow constexpr_init (unused for non-constexpr vars) to
+        // store the pending Initializer tree. constexpr_init_for_node() guards
+        // on is_constexpr before reading this field, so there is no conflict.
+        var->constexpr_init = init;
+        var->has_pending_macro_init = true;
+        return;
+    }
+
     Relocation head = {};
     char *buf = arena_alloc(&vm->compiler.parser_arena, var->ty->size);
     memset(buf, 0, var->ty->size);
     write_gvar_data(vm, &head, init, var->ty, buf, 0);
     var->init_data = buf;
     var->rel = head.next;
+}
+
+// Finalize global variable initializers that were deferred because their
+// scalar expression contained an ND_MACRO_CALL (see gvar_initializer above).
+// Called from cc_expand_macros after compile_all_macros and the AST transform
+// passes complete, so all macros are compiled and all symbols are defined.
+void cc_finalize_macro_gvar_inits(VirtualMachine *vm, Obj *prog) {
+    if (!vm || !prog)
+        return;
+    for (Obj *var = prog; var; var = var->next) {
+        if (!var->has_pending_macro_init)
+            continue;
+        Initializer *init = (Initializer *)var->constexpr_init;
+        // Expand macro calls in the scalar initializer expression.
+        if (init->expr)
+            init->expr = cc_eager_expand_macro_call(vm, init->expr);
+        // Serialize the expanded expression to .data.
+        Relocation head = {};
+        char *buf = arena_alloc(&vm->compiler.parser_arena, var->ty->size);
+        memset(buf, 0, var->ty->size);
+        write_gvar_data(vm, &head, init, var->ty, buf, 0);
+        var->init_data = buf;
+        var->rel = head.next;
+        // Clear the temporary storage.
+        var->has_pending_macro_init = false;
+        var->constexpr_init = NULL;
+    }
 }
 
 // Returns true if a given token represents a type.

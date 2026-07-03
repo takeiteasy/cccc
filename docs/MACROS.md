@@ -42,6 +42,7 @@ on which execution form you use.
 | Call context | Return value |
 |--------------|--------------|
 | Expression position (`int x = mac()`) | Must return a non-NULL `Node *`. NULL is a compile error. |
+| Global variable initializer (`int G = mac()`) | Must return a `Node *` that evaluates to an integer or float constant. Pointer/struct results are not supported. See [Comptime functions in global initializers](#comptime-functions-in-global-initializers). |
 | Declaration position (file-scope `mac();`) | Returning NULL or `void` is legal — means "I only emitted definitions." |
 
 For definition-only macros, declare the return type `void`. This is
@@ -92,6 +93,12 @@ This makes included types and prototypes visible to `[[cccc::comptime]]` helpers
 used by global-generation macros, but it does not compile arbitrary non-macro
 program definitions into the macro VM. Function bodies, file-scope macro calls,
 and initialized global definitions are skipped.
+
+Note: global variable definitions whose scalar initializer expression contains a
+`Node *`-returning comptime call (see
+[Comptime functions in global initializers](#comptime-functions-in-global-initializers))
+are the exception — those initializers are evaluated after the main parse completes,
+once all symbols are in scope.
 
 Pass `--comptime-include-all` to restore the legacy behavior and forward all
 `#include`d header declarations **and `#define` macros** to the comptime pass.
@@ -170,6 +177,39 @@ macros. The target helpers are:
 
 Custom attributes are v1 file-scope features. Applying one to a local variable
 or struct member is a compile error.
+
+## Comptime functions in global initializers
+
+A `Node *`-returning comptime function whose result is an integer or float
+constant literal can initialize a **scalar** global variable:
+
+```c
+[[cccc::comptime]]
+Node *ct_val(void) { return MakeIntLiteral(42); }
+
+[[cccc::comptime]]
+Node *ct_add(Node *a, Node *b) { return MakeBinary(NK_ADD, a, b); }
+
+int G = ct_val();           // G == 42
+int H = ct_add(20, 22);     // H == 42
+float F = ct_val();         // F == 42.0
+int I = ct_add(1, 1) + 40;  // arithmetic on macro result: I == 42
+```
+
+The macro call is deferred until after the main parse completes (during
+`cc_expand_macros`), so `$symbol` forward-references in **other** comptime
+functions are not affected.
+
+### Scope limitations
+
+- Only **integer and float scalar** initializers. Pointer-valued or struct-valued
+  macro results are not supported; they produce a "not a compile-time constant"
+  error just as before.
+- `constexpr` variables cannot use macro-call initializers. Use a regular
+  (non-constexpr) global variable instead.
+- The macro must return `Node *`. An `int`- or `void`-returning comptime function
+  in a global initializer is rejected with "expression-position comptime functions
+  must return Node*".
 
 ## Global Generation
 

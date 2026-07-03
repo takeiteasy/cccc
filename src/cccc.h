@@ -1054,7 +1054,9 @@ struct Obj {
     char *init_data;
     Relocation *rel;
     Node *init_expr; // For constexpr: AST of initializer expression
-    void *constexpr_init; // For constexpr: private Initializer tree
+    void *constexpr_init; // For constexpr: private Initializer tree; also used
+                          // temporarily for pending macro-init Initializer trees
+    bool has_pending_macro_init; // gvar init deferred: init expr contains ND_MACRO_CALL
 
     // Function
     bool is_inline;
@@ -2819,6 +2821,31 @@ void cc_record_emit_object(VirtualMachine *vm, Obj *obj);
  @param prog Linked list of top-level Obj returned by cc_parse.
 */
 void cc_expand_macros(VirtualMachine *vm, Obj *prog);
+
+/*!
+ @function cc_eager_expand_macro_call
+ @abstract Expand a single ND_MACRO_CALL node using the already-compiled macros.
+ @discussion Called from cc_finalize_macro_gvar_inits while in_macro_expansion is true.
+             Must only be called after compile_all_macros has run (i.e. from within
+             cc_expand_macros or cc_finalize_macro_gvar_inits).
+ @param vm The CCCC instance.
+ @param node The node to expand; must be non-NULL.
+ @returns The expanded (replacement) node, or the original node if not ND_MACRO_CALL.
+*/
+Node *cc_eager_expand_macro_call(VirtualMachine *vm, Node *node);
+
+/*!
+ @function cc_finalize_macro_gvar_inits
+ @abstract Finalize global variable initializers that were deferred due to macro calls.
+ @discussion During cc_parse, gvar initializers containing ND_MACRO_CALL are deferred
+             (their has_pending_macro_init flag is set and the Initializer tree stored in
+             constexpr_init). This function, called from cc_expand_macros after macros are
+             compiled and expanded, processes those deferred initializers: it expands the
+             macro calls via transform_node and then serializes the result to .data.
+ @param vm The CCCC instance.
+ @param prog Linked list of top-level Obj returned by cc_parse.
+*/
+void cc_finalize_macro_gvar_inits(VirtualMachine *vm, Obj *prog);
 
 /*!
  @function cc_serialize_program
