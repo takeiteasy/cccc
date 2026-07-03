@@ -5,7 +5,7 @@ typedef struct { float r; float g; float b; } Color;
 
 [[cccc::comptime]]
 Node *check_is_struct(Type *ty) {
-    if (GetTypeKind(ty) != TK_STRUCT)
+    if (GetTypeKind(ty) != TY_STRUCT)
         return MakeIntLiteral(1);
     return MakeIntLiteral(42);
 }

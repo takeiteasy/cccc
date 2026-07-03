@@ -7,19 +7,17 @@ Two phases, both conditional on the zip being present:
     Preprocesses sqlite3.c with -DSQLITE_OS_OTHER=1 and command-line -U flags,
     asserting the TK_FLOAT parse error is gone (hashmap duplicate-key fix).
 
-  Phase 2 — compile + run (#587/#588 regression + functional smoke)
-    Compiles sqlite3.c via a source-level-undef prelude (avoiding the -U flag
-    bug in -c mode, see notes below) together with a minimal driver, then runs
-    the result and expects exit code 42.  Exercises: CREATE TABLE, INSERT,
-    prepared SELECT, column accessors.
+  Phase 2 — compile + run (#587/#588/#624 regression + functional smoke)
+    Compiles sqlite3.c with command-line -U flags directly (no prelude workaround
+    needed since #624 fixed the TK_* / reflection.h collision) together with a
+    minimal driver, then runs the result and expects exit code 42.  Exercises:
+    CREATE TABLE, INSERT, prepared SELECT, column accessors.
 
 The zip (~2.9 MB) is gitignored (tools/*.zip).  When absent both phases skip
 gracefully and print the fetch URL + SHA3-256.  When present, SHA3-256 is
 verified before use.
 
-Known limitations (tracked separately):
-  - Command-line -U flags are unreliable in -c (full compile) mode; source-level
-    #undef via prelude.c is the workaround.  (#584 fixed -E mode only.)
+Known limitations:
   - SQLITE_THREADSAFE requires PTHREAD_MUTEX_RECURSIVE / pthread_mutexattr_settype,
     which are not yet in CCCC's pthread.h; SQLITE_THREADSAFE=0 is used instead.
 
@@ -140,17 +138,8 @@ def phase1_preprocess(cccc: Path, include: Path, src: Path) -> bool:
 
 
 def phase2_compile_run(cccc: Path, include: Path, src: Path, tmp: str) -> bool:
-    """#587/#588 regression + functional smoke: compile and run a simple query."""
-    print("  Phase 2: compile + run (#587/#588 + functional)")
-
-    # Source-level #undef is used instead of command-line -U because -U is
-    # unreliable in full-compile (-c) mode (see module docstring).
-    prelude = Path(tmp) / "prelude.c"
-    prelude.write_text(
-        f'#undef __APPLE__\n'
-        f'#undef __MACH__\n'
-        f'#include "{src}"\n'
-    )
+    """#587/#588/#624 regression + functional smoke: compile and run a simple query."""
+    print("  Phase 2: compile + run (#587/#588/#624 + functional)")
 
     driver = Path(tmp) / "driver.c"
     driver.write_text(DRIVER_C)
@@ -159,8 +148,10 @@ def phase2_compile_run(cccc: Path, include: Path, src: Path, tmp: str) -> bool:
         str(cccc),
         "-I", str(include),
         "-I", str(src.parent),  # sqlite3.h lives next to sqlite3.c
+        "-U__APPLE__",
+        "-U__MACH__",
         *COMPILE_FLAGS,
-        str(prelude),
+        str(src),
         str(driver),
     ]
     result = run(cmd)
@@ -173,6 +164,12 @@ def phase2_compile_run(cccc: Path, include: Path, src: Path, tmp: str) -> bool:
 
     if "SIGSEGV" in err or "gen_addr" in err:
         print("    FAIL: #588 regression — SIGSEGV in gen_addr")
+        for line in err.splitlines()[:5]:
+            print(f"    {line}")
+        return False
+
+    if "expected an identifier" in err:
+        print("    FAIL: #624 regression — TK_* macro collision with reflection.h")
         for line in err.splitlines()[:5]:
             print(f"    {line}")
         return False

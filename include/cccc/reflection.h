@@ -105,27 +105,28 @@ typedef struct EnumConstant EnumConstant;
 typedef struct Token Token;
 typedef struct AttrTarget AttrTarget;
 
-// Type kind enumeration (matches cccc.h)
+// Type kind enumeration (matches cccc.h; TY_ prefix avoids collision with
+// user-defined TK_* macros such as those in SQLite or parser generators)
 typedef enum {
-    TK_VOID = 0,
-    TK_BOOL = 1,
-    TK_CHAR = 2,
-    TK_SHORT = 3,
-    TK_INT = 4,
-    TK_LONG = 5,
-    TK_FLOAT = 6,
-    TK_DOUBLE = 7,
-    TK_LDOUBLE = 8,
-    TK_ENUM = 9,
-    TK_PTR = 10,
-    TK_FUNC = 11,
-    TK_ARRAY = 12,
-    TK_VLA = 13,
-    TK_STRUCT = 14,
-    TK_UNION = 15,
+    TY_VOID = 0,
+    TY_BOOL = 1,
+    TY_CHAR = 2,
+    TY_SHORT = 3,
+    TY_INT = 4,
+    TY_LONG = 5,
+    TY_FLOAT = 6,
+    TY_DOUBLE = 7,
+    TY_LDOUBLE = 8,
+    TY_ENUM = 9,
+    TY_PTR = 10,
+    TY_FUNC = 11,
+    TY_ARRAY = 12,
+    TY_VLA = 13,
+    TY_STRUCT = 14,
+    TY_UNION = 15,
 } TypeKind;
 
-// Node kind enumeration (subset for pragma macro use)
+// Node kind enumeration (subset for pragma macro use; ND_ prefix matches cccc.h)
 typedef enum {
     NK_NULL_EXPR = 0,
     NK_ADD = 1,
@@ -208,7 +209,7 @@ const char *__builtin_gensym(VirtualMachine *vm, const char *prefix);
 /*!
  * @function __builtin_macroexpand_1
  * @abstract Lisp-style single-step macro expansion (macroexpand-1 semantics).
- * @discussion If @a node is an @c ND_MACRO_CALL node, execute the macro once
+ * @discussion If @a node is an @c NK_MACRO_CALL node, execute the macro once
  *             and return the resulting node without splicing it into the AST
  *             or recursing into nested macro calls. If @a node is not a macro
  *             call, it is returned unchanged (identity).
@@ -223,7 +224,7 @@ Node *__builtin_macroexpand_1(VirtualMachine *vm, Node *node);
  * @function __builtin_macroexpand
  * @abstract Lisp-style full macro expansion.
  * @discussion Repeatedly calls @c __builtin_macroexpand_1 on the top-level node
- *             until it is no longer an @c ND_MACRO_CALL (i.e. the form is
+ *             until it is no longer an @c NK_MACRO_CALL (i.e. the form is
  *             stable). Does not recurse into child nodes. Respects the VM's
  *             @c macro_recursion_limit.  Convenience wrapper: MacroExpand(node).
  * @param vm The VM context.
@@ -469,7 +470,7 @@ Type *__builtin_ast_get_type(VirtualMachine *vm, const char *name);
  * @function __builtin_ast_type_kind
  * @abstract Return the TypeKind tag of a type.
  * @param ty The type to inspect.
- * @return The type kind (TK_INT, TK_STRUCT, TK_PTR, ...).
+ * @return The type kind (TY_INT, TY_STRUCT, TY_PTR, ...).
  * @discussion Convenience wrapper: GetTypeKind(ty).
  */
 TypeKind __builtin_ast_type_kind(Type *ty);
@@ -523,7 +524,7 @@ Type *__builtin_ast_type_base(Type *ty);
  * @function __builtin_ast_type_array_len
  * @abstract Return the fixed length of an array type.
  * @param ty The array type to inspect.
- * @return The element count for TK_ARRAY types, -1 otherwise.
+ * @return The element count for TY_ARRAY types, -1 otherwise.
  * @discussion Convenience wrapper: TypeArrayLen(ty).
  */
 int __builtin_ast_type_array_len(Type *ty);
@@ -541,7 +542,7 @@ Type *__builtin_ast_type_return_type(Type *ty);
  * @function __builtin_ast_type_param_count
  * @abstract Return the number of declared parameters of a function type.
  * @param ty The function type to inspect.
- * @return The parameter count for TK_FUNC types, -1 otherwise.
+ * @return The parameter count for TY_FUNC types, -1 otherwise.
  * @discussion Convenience wrapper: TypeParamCount(ty).
  */
 int __builtin_ast_type_param_count(Type *ty);
@@ -1285,7 +1286,7 @@ Node *__builtin_ast_assign(VirtualMachine *vm, Node *target, Node *value);
  * @return A NK_MEMBER node, or NULL if the member is not found or
  *         obj is not a struct/union type.
  * @note The callee is responsible for dereferencing pointers first;
- *       pass the struct value directly (use __builtin_ast_unary(ND_DEREF,…)
+ *       pass the struct value directly (use __builtin_ast_unary(NK_DEREF,…)
  *       for pointer-to-struct access).
  * @discussion Convenience wrapper: MakeMember(obj, name).
  */
@@ -2266,7 +2267,7 @@ void __builtin_attr_enum_to_string(AttrTarget *target) {
     const char *tname = AttrTargetName(target);
     if (!ty || !tname)
         MacroErrorAt(0, "@enum_to_string target has no usable type/name");
-    if (GetTypeKind(ty) != TK_ENUM)
+    if (GetTypeKind(ty) != TY_ENUM)
         MacroErrorAt(0, "@enum_to_string expects an enum target");
 
     char fname[128];
@@ -2296,7 +2297,7 @@ void __builtin_attr_enum_from_string(AttrTarget *target) {
     const char *tname = AttrTargetName(target);
     if (!ty || !tname)
         MacroErrorAt(0, "@enum_from_string target has no usable type/name");
-    if (GetTypeKind(ty) != TK_ENUM)
+    if (GetTypeKind(ty) != TY_ENUM)
         MacroErrorAt(0, "@enum_from_string expects an enum target");
 
     char fname[128];
