@@ -295,9 +295,10 @@ python3 tools/tests.py --c4               # Bytecode round-trip: compile each po
 # I recommend running --leaks with -j (takes a long time synchronously)
 ```
 
-`make test` runs the source-mode suite, the `.c4` bytecode round-trip, and the
-platform-gated host-signal debugger integration test. Run the `.c4` round-trip
-standalone with `python3 tools/tests.py --c4`.
+`make test` calls `tools/run_tests.py`, the unified orchestrator that runs:
+source-mode suite, `.c4` bytecode round-trip, the macOS host-signal debugger
+integration (skipped on other platforms), and the SQLite smoke test. Run
+sub-suites standalone with `python3 tools/tests.py` or `python3 tools/tests.py --c4`.
 
 ### macOS x86_64 with Rosetta 2
 
@@ -317,17 +318,9 @@ macOS host-signal debugger integration using `cccc-macos-x86_64`.
 
 ### Linux with Colima
 
-The Dockerfile remains multi-architecture. For native Linux/arm64, use the
-existing Colima workflow:
+Two Linux targets are supported, each using a named Colima profile.
 
-```bash
-colima start --runtime containerd --arch aarch64 --cpu 4 --memory 4
-colima nerdctl -- build --platform linux/arm64 -t cccc-linux .
-colima nerdctl -- run --rm --platform linux/arm64 cccc-linux
-```
-
-For Linux/amd64 on Apple Silicon, create a named VZ/Rosetta profile once. The
-Make targets use this profile without starting or stopping it:
+**Linux/amd64 (VZ/Rosetta)** — create the profile once:
 
 ```bash
 colima start cccc-linux-amd64 --runtime containerd --arch aarch64 \
@@ -338,13 +331,23 @@ make linux-x86_64-test
 ```
 
 The amd64 image is tagged `cccc-linux-amd64`. Override `COLIMA_PROFILE` or
-`LINUX_AMD64_IMAGE` when using different names. Architecture-specific results
-and known failures are in [TESTING.md](docs/TESTING.md).
+`LINUX_AMD64_IMAGE` when using different names.
 
-The arm64 baseline currently has one source-suite failure in
-`test_nexttowardf_matches_nextafterf`, tracked by
-[#498](https://todo.sr.ht/~takeiteasy/cccc/498). The pipelines do not suppress
-architecture-sensitive failures.
+**Linux/aarch64 (native arm64)** — create the profile once:
+
+```bash
+colima start cccc-linux-arm64 --runtime containerd --arch aarch64 \
+  --vm-type vz --cpu 4 --memory 4
+make linux-aarch64-build
+make linux-aarch64-smoke
+make linux-aarch64-test
+```
+
+The arm64 test target runs `tools/run_tests.py` in one unbatched pass (no
+Rosetta binfmt limit on native arm64). Override `LINUX_ARM64_PROFILE` or
+`LINUX_ARM64_IMAGE` when using different names.
+
+Architecture-specific results and known failures are in [TESTING.md](docs/TESTING.md).
 
 ### Sanitizer Builds
 

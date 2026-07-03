@@ -135,10 +135,10 @@ The string form accepts `"O0"`–`"O4"` with an optional leading `-`
   level.  The primary use case is selectively enabling optimization on hot
   functions in a debug (`-O0`) build.
 
-**With `tools/tests.py --full`:** because attributed functions always use their
-own level, their behaviour is identical at every global opt level swept by
-`--full`.  Attribute-based tests are therefore naturally safe to include in the
-full sweep without special casing.
+**With `tools/tests.py --matrix`:** because attributed functions always use their
+own level, their behaviour is identical at every pass combination swept by
+`--matrix`.  Attribute-based tests are therefore naturally safe to include in the
+matrix sweep without special casing.
 
 See [ATTRIBUTES.md — optimize](ATTRIBUTES.md#__attribute__optimize--ccccoptimizen--optimizen-cccc-specific)
 for the complete attribute reference.

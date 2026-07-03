@@ -65,7 +65,7 @@ LIB_OUT := libcccc$(DYLIB)
 SAN_OUT := cccc-asan cccc-ubsan cccc-tsan
 TEST_JOBS ?= 8
 
-# Reproducible x86_64 build/test workflows.
+# Reproducible cross-platform build/test workflows.
 MACOS_X86_64_CC ?= /usr/bin/clang
 MACOS_X86_64_BINARY ?= cccc-macos-x86_64
 MACOS_SDK_PATH ?= $(shell xcrun --sdk macosx --show-sdk-path 2>/dev/null)
@@ -73,6 +73,9 @@ COLIMA ?= colima
 COLIMA_PROFILE ?= cccc-linux-amd64
 COLIMA_NERDCTL = $(COLIMA) -p $(COLIMA_PROFILE) nerdctl --
 LINUX_AMD64_IMAGE ?= cccc-linux-amd64
+LINUX_ARM64_PROFILE ?= cccc-linux-arm64
+LINUX_ARM64_NERDCTL = $(COLIMA) -p $(LINUX_ARM64_PROFILE) nerdctl --
+LINUX_ARM64_IMAGE ?= cccc-linux-arm64
 
 
 ifeq ($(UNAME_S),Linux)
@@ -287,10 +290,7 @@ stdlib: $(EXE_OUT)
 	fi
 
 test: clean $(EXE_OUT)
-	@python3 tools/tests.py -j $(TEST_JOBS)
-	@python3 tools/tests.py --c4 -j $(TEST_JOBS)
-	@python3 tools/test_host_signal_debugger.py
-	@python3 tools/sqlite_smoke.py
+	@python3 tools/run_tests.py -j $(TEST_JOBS)
 
 # Run only the [[cccc::test]] framework suites in tests/suites/
 test-suites: $(EXE_OUT)
@@ -398,6 +398,34 @@ linux-x86_64-msan-test: linux-x86_64-build
 		$(LINUX_AMD64_IMAGE) sh -ec \
 		'make cccc-msan && python3 tools/tests.py --msan --quiet -j $(TEST_JOBS)'
 
+linux-aarch64-check:
+	@$(COLIMA) status -p $(LINUX_ARM64_PROFILE) >/dev/null 2>&1 || { \
+		echo "Error: Colima profile '$(LINUX_ARM64_PROFILE)' is not running."; \
+		echo "Start it with:"; \
+		echo "  colima start $(LINUX_ARM64_PROFILE) --runtime containerd --arch aarch64 --vm-type vz --cpu 4 --memory 4"; \
+		echo "See docs/TESTING.md for setup details."; \
+		exit 1; \
+	}
+
+linux-aarch64-build: linux-aarch64-check
+	$(LINUX_ARM64_NERDCTL) build --platform linux/arm64 \
+		-t $(LINUX_ARM64_IMAGE) .
+
+linux-aarch64-smoke: linux-aarch64-build
+	@$(LINUX_ARM64_NERDCTL) run --rm --platform linux/arm64 \
+		$(LINUX_ARM64_IMAGE) sh -ec ' \
+			machine=$$(uname -m); \
+			echo "Container machine: $$machine"; \
+			test "$$machine" = "aarch64"; \
+			file ./cccc; \
+			file ./cccc | grep -Eq "aarch64|arm64"; \
+			rc=0; ./cccc -I./include tests/test_arithmetic.c || rc=$$?; \
+			test "$$rc" -eq 42'
+
+linux-aarch64-test: linux-aarch64-smoke
+	@$(LINUX_ARM64_NERDCTL) run --rm --platform linux/arm64 \
+		$(LINUX_ARM64_IMAGE) timeout 600 python3 tools/run_tests.py \
+		-j $(TEST_JOBS)
 
 
 all: clean $(EXE_OUT) $(LIB_OUT) test
@@ -486,7 +514,7 @@ else
 	@echo "dsym: DWARF is already embedded in the ELF binary on Linux; nothing to do."
 endif
 
-.PHONY: default test clean all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json macos-x86_64-build macos-x86_64-smoke macos-x86_64-test linux-x86_64-check linux-x86_64-build linux-x86_64-smoke linux-x86_64-test linux-x86_64-msan-test sqlite-smoke dsym
+.PHONY: default test clean all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json macos-x86_64-build macos-x86_64-smoke macos-x86_64-test linux-x86_64-check linux-x86_64-build linux-x86_64-smoke linux-x86_64-test linux-x86_64-msan-test linux-aarch64-check linux-aarch64-build linux-aarch64-smoke linux-aarch64-test sqlite-smoke dsym
 ifeq ($(UNAME_S),Linux)
 .PHONY: msan
 endif
