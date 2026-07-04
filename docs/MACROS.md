@@ -83,11 +83,12 @@ forwarded to the comptime pass by default. Declarations from regular `#include`d
 headers are not visible to comptime functions unless the include is annotated
 `@shared` (see [Include scoping](#include-scoping)).
 
-The scoping applies to both **declarations and types** and **preprocessor
-`#define` macros**. A `#define` from a plain-included header is not visible
-inside comptime function bodies, just as its declarations are not.
-Use `@shared` or `@comptime` routing for reliable control over what each context
-sees.
+The scoping applies to **declarations and types** but **not preprocessor
+`#define` macros**. The comptime pass starts with an isolated macro state
+containing only CCCC builtins and command-line `-D` defines. `#define`s from
+the main source file and any included headers are **not** forwarded to comptime
+function bodies. Use `@shared` routing to make a header's `#define`s visible in
+both the runtime and comptime contexts.
 
 This makes included types and prototypes visible to `[[cccc::comptime]]` helpers
 used by global-generation macros, but it does not compile arbitrary non-macro
@@ -124,10 +125,12 @@ void generate(void) {
 }
 ```
 
-`#define`s from the main source file, `reflection.h`, `#include [[cccc::comptime]]`
-/ `#pragma cccc comptime begin...end` blocks, and comptime variable declarations
-are all part of the macro table *before* any comptime function body begins, so
-they remain visible to every comptime function body.
+`#define`s from `reflection.h`, `#include [[cccc::comptime]]` /
+`#pragma cccc comptime begin...end` blocks, and `@shared`-included headers are
+part of the macro table *before* any comptime function body begins and remain
+visible to every comptime function body. Primary-file `#define`s are **not**
+forwarded; place them in an `@shared` header to opt them into the comptime
+context (see [Include scoping](#include-scoping)).
 
 Pass `--allow-comptime-pp-bleed` to restore the pre-isolation behavior, where
 all comptime function bodies share a single macro table and `#define`/`#undef`

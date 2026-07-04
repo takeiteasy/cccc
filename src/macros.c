@@ -1571,20 +1571,24 @@ static bool compile_macro_program(VirtualMachine *vm) {
     // Snapshot the preprocessor macro table so that #define directives emitted
     // by reflection.h, comptime-only includes, or comptime function bodies do
     // not persist into the runtime translation unit after this pass completes.
-    // Main-file defines remain visible inside comptime bodies because the
-    // snapshot is taken after the main preprocessing pass has run (ticket #283).
+    // The snapshot is taken before isolation so the runtime TU always gets its
+    // full original macro state back regardless of what the comptime pass does.
     vm->compiler.macro_snapshot_backup = hashmap_snapshot(&vm->compiler.macros);
     vm->compiler.has_macro_snapshot = true;
     HashMap saved_macros = vm->compiler.macro_snapshot_backup;
 
-    // Gate #define macros from runtime-only (plain) included headers so they
-    // are not visible during the comptime preprocessing pass. Must run before
+    // Isolate the comptime macro state: strip ALL source-file #define macros
+    // (primary file and any included headers), keeping only CCCC builtins and
+    // command-line -D defines (define_tok == NULL). This gives the comptime
+    // pass a clean context where primary-file user #defines are NOT visible.
+    // Users who need a #define in comptime code must put it in an @shared
+    // header. @shared / @comptime macros removed here are re-added when their
+    // queued re-includes are re-preprocessed below. Must run before
     // implicit_reflection_tokens() so that reflection.h macros (added
-    // afterward) are not incorrectly deleted. @shared/@comptime macros removed
-    // here are re-added when their queued re-includes are re-processed below.
-    // --comptime-include-all disables the filter (legacy behavior). (#552)
-    if (!vm->compiler.comptime_include_all && vm->compiler.primary_file)
-        gate_runtime_only_macros(vm, vm->compiler.primary_file->display_name);
+    // afterward) are not deleted. --comptime-include-all disables isolation
+    // entirely (legacy: forward everything). (tickets #552, #627)
+    if (!vm->compiler.comptime_include_all)
+        isolate_comptime_macros(vm);
 
     // Suppress user-defined TK_*/NK_* macros for the ENTIRE comptime preprocess
     // pass (both implicit_reflection_tokens and the second preprocess below).

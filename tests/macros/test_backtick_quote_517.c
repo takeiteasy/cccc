@@ -1,7 +1,8 @@
 // Ticket #517: backtick quasi-quoting with ${...} interpolation.
+// Note: primary-file #defines are not visible in comptime bodies (#627).
+// IDENTITY is defined inside the comptime body where it is used.
 
 typedef struct { int value; } Point;
-#define IDENTITY(x) (x)
 
 [[cccc::comptime]]
 Node *pick_second(Node *a, Node *b) {
@@ -15,6 +16,8 @@ Node *plain_quote(void) {
 
 [[cccc::comptime]]
 Node *single_splice(Node *x) {
+    // Macro defined in-body is visible within this comptime function's scope.
+    #define IDENTITY(x) (x)
     return `return ${ IDENTITY(x) } + 1;`;
 }
 

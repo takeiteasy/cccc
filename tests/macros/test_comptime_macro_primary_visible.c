@@ -1,10 +1,12 @@
-// #define macros in the primary source file must remain visible inside comptime
-// function bodies. Guards against the filter being too aggressive.
-#define PRIMARY_ANSWER 42
+// Ticket #627 migration example: primary-file #define macros are not directly
+// visible in comptime function bodies. Instead, place the definition in a
+// header and include it with @shared so it is visible in both the runtime and
+// comptime contexts.
+#include @shared "comptime_primary_answer.h"
 
 [[cccc::comptime]]
 int get_answer(void) {
-    return PRIMARY_ANSWER; // must be visible — defined in primary file
+    return PRIMARY_ANSWER; // visible because the header was @shared-included
 }
 
 [[cccc::comptime]]

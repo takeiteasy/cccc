@@ -4608,38 +4608,35 @@ static void join_adjacent_string_literals(VirtualMachine *vm, Token *tok) {
     }
 }
 
-// hashmap_foreach callback used by gate_runtime_only_macros.
-typedef struct {
-    HashMap *macros;
-    const char *main_filename;
-} GateRuntimeMacrosCtx;
-
-static int gate_runtime_macro_iter(char *key, int keylen, void *val,
-                                   void *user_data) {
+// hashmap_foreach callback used by isolate_comptime_macros.
+static int isolate_comptime_macro_iter(char *key, int keylen, void *val,
+                                       void *user_data) {
     (void)key; (void)keylen;
-    GateRuntimeMacrosCtx *ctx = (GateRuntimeMacrosCtx *)user_data;
+    HashMap *macros = (HashMap *)user_data;
     Macro *m = (Macro *)val;
-    // Keep command-line / builtin macros (define_tok == NULL) and macros that
-    // originated in the primary source file. Delete everything else — those
-    // came from runtime-only (plain) included headers and must not be visible
-    // during the comptime preprocessing pass (ticket #552).
-    if (m->define_tok && m->define_tok->filename &&
-        strcmp(m->define_tok->filename, ctx->main_filename) != 0)
-        hashmap_delete2(ctx->macros, key, keylen);
+    // Keep only command-line and builtin macros (define_tok == NULL).
+    // All source-file #defines — whether from the primary file or any included
+    // header — are removed so they are not visible during the comptime
+    // preprocessing pass. @shared / @comptime header macros are removed here
+    // but re-added when their queued re-includes are re-processed by the
+    // comptime pass. (tickets #552, #627)
+    if (m->define_tok)
+        hashmap_delete2(macros, key, keylen);
     return 0; // continue
 }
 
-// Remove #define macros that originated from runtime-only (plain) included
-// headers so they are not visible to the comptime preprocessing pass.
-// Primary-file macros (filename == main_filename) and command-line / builtin
-// macros (define_tok == NULL) are preserved.  @shared / @comptime header macros
-// are removed here but re-added when their queued re-includes are re-processed
-// by the comptime pass. Safe to call while compile_macro_program holds a
-// snapshot: hashmap_delete2 writes a TOMBSTONE and hashmap_foreach iterates by
-// bucket index, matching the pattern in undefine_guard_macro_iter. (ticket #552)
-void gate_runtime_only_macros(VirtualMachine *vm, const char *main_filename) {
-    GateRuntimeMacrosCtx ctx = {&vm->compiler.macros, main_filename};
-    hashmap_foreach(&vm->compiler.macros, gate_runtime_macro_iter, &ctx);
+// Strip all source-file #define macros from vm->compiler.macros so that the
+// comptime preprocessing pass starts with an isolated macro state containing
+// only CCCC builtins and command-line -D defines (define_tok == NULL).
+// Primary-file user #defines are NOT forwarded; users opt macros into the
+// comptime context via @shared includes. @shared / @comptime header macros are
+// removed here but re-added when their queued re-includes are re-preprocessed.
+// Safe to call while compile_macro_program holds a snapshot: hashmap_delete2
+// writes a TOMBSTONE and hashmap_foreach iterates by bucket index, matching the
+// pattern in undefine_guard_macro_iter. (ticket #627)
+void isolate_comptime_macros(VirtualMachine *vm) {
+    hashmap_foreach(&vm->compiler.macros, isolate_comptime_macro_iter,
+                    &vm->compiler.macros);
 }
 
 // Entry point function of the preprocessor.
