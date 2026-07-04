@@ -1163,7 +1163,7 @@ int counter = 0;
 [[cccc::comptime]]
 Node *reflect_type_kind(void) {
     Type *ty = $Point;                       // Type* for Point
-    return MakeIntLiteral(GetTypeKind(ty));  // TY_STRUCT
+    return MakeIntLiteral(GetTypeKind(ty));  // TK_STRUCT
 }
 
 [[cccc::comptime]]

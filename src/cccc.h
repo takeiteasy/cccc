@@ -1939,6 +1939,7 @@ typedef struct Compiler {
     bool has_macro_snapshot;
     HashMap macro_snapshot_backup;
     bool reflection_attrs_registered; // True after ensure_reflection_attrs_registered has run (#235)
+    bool no_comptime;                // --no-comptime: skip entire comptime/macro phase (for TUs that don't use comptime)
     bool comptime_include_all;       // --comptime-include-all: forward all #include decls to comptime pass (legacy behavior)
     HashMap *macro_scope_stack;       // Snapshot stack for per-comptime-fn macro isolation (#283)
     int      macro_scope_stack_len;

@@ -231,7 +231,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\nMemory Safety Options (can be combined with safety levels):\n");
     printf("\t-B/--bounds-checks           Runtime array bounds checking\n");
     printf("\t   --uaf-detection           Use-after-free detection\n");
-    printf("\t-C/--control-flow-integrity  Control-flow integrity (indirect call validation)\n");
+    printf("\t   --control-flow-integrity  Control-flow integrity (indirect call validation)\n");
     printf("\t   --type-checks             Runtime type checking on pointer dereferences\n");
     printf("\t   --uninitialized-detection Uninitialized variable detection\n");
     printf("\t   --overflow-checks         Detect signed integer overflow\n");
@@ -268,6 +268,8 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --embed-hard-limit         Make #embed limit a hard error instead of warning\n");
     printf("\t-r/--macro-recursion-limit=N  Limit recursive pragma macro expansion (default: 256, 0=unlimited)\n");
     printf("\t-n/--max-errors=N             Cap diagnostics at N (default: 20)\n");
+    printf("\t-C/--no-comptime              Skip the comptime/macro phase entirely (for\n");
+    printf("\t                              large TUs that don't use [[cccc::comptime]])\n");
     printf("\t   --comptime-include-all     Forward all #include'd declarations to the\n");
     printf("\t                              comptime pass (legacy behavior; default is\n");
     printf("\t                              runtime-only; use #include @shared to opt in\n");
@@ -732,6 +734,7 @@ int main(int argc, const char *argv[]) {
     int vm_profile_ran = 0;
     const char *entry_name = NULL; // -e / --entry
     enum { COMPILE_NONE, COMPILE_BYTECODE, COMPILE_NATIVE } compile_format = COMPILE_NONE;
+    int no_comptime = 0;           // --no-comptime / -C
     int comptime_include_all = 0; // --comptime-include-all
     int allow_comptime_pp_bleed = 0; // --allow-comptime-pp-bleed
     int run_ngrams = 0;            // 0 = off; 2 or 3 = enabled with n-gram size
@@ -810,7 +813,8 @@ int main(int argc, const char *argv[]) {
         {"memory-poisoning", no_argument, 0, 1007},
         {"memory-tagging", no_argument, 0, 1045},
         {"vm-heap", no_argument, 0, 'V'},
-        {"control-flow-integrity", no_argument, 0, 'C'},
+        {"control-flow-integrity", no_argument, 0, 1111},
+        {"no-comptime", no_argument, 0, 'C'},
         {"thread-safety", no_argument, 0, 'T'},
         {"include", required_argument, 0, 'I'},
         {"isystem", required_argument, 0, 'i'},
@@ -1072,6 +1076,9 @@ int main(int argc, const char *argv[]) {
             flags |= CCCC_VM_HEAP;
             break;
         case 'C':
+            no_comptime = 1;
+            break;
+        case 1111: // --control-flow-integrity (long form only)
             flags |= CCCC_CFI;
             break;
         case 'p':
@@ -1661,6 +1668,7 @@ int main(int argc, const char *argv[]) {
     vm.compiler.compile_only = compile_only;
     vm.compiler.deferred_link = (link_paths_count > 0 && !compile_only);
     vm.compiler.asm_passthru = asm_passthru;
+    vm.compiler.no_comptime = no_comptime;
     vm.compiler.comptime_include_all = comptime_include_all;
     vm.compiler.allow_comptime_pp_bleed = allow_comptime_pp_bleed;
     vm.compiler.emit_strict = emit_only;

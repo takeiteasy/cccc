@@ -1,6 +1,7 @@
 // Regression test for ticket #624: user TK_* macros (e.g. SQLite's
 // #define TK_FLOAT 154) must not corrupt reflection.h's TypeKind enum.
-// reflection.h was renamed from TK_* to TY_* so these no longer collide.
+// implicit_reflection_tokens() now snapshots and clears the user macro table
+// before preprocessing reflection.h, so user TK_* macros cannot interfere.
 #define TK_VOID    100
 #define TK_BOOL    101
 #define TK_CHAR    102

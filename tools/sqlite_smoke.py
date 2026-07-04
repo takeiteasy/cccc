@@ -8,10 +8,11 @@ Two phases, both conditional on the zip being present:
     asserting the TK_FLOAT parse error is gone (hashmap duplicate-key fix).
 
   Phase 2 — compile + run (#587/#588/#624 regression + functional smoke)
-    Compiles sqlite3.c with command-line -U flags directly (no prelude workaround
-    needed since #624 fixed the TK_* / reflection.h collision) together with a
-    minimal driver, then runs the result and expects exit code 42.  Exercises:
-    CREATE TABLE, INSERT, prepared SELECT, column accessors.
+    Compiles sqlite3.c with --no-comptime (-C) to skip the comptime/macro phase
+    entirely (sqlite doesn't use [[cccc::comptime]] so this is the right fix for
+    large third-party TUs).  Together with a minimal driver, runs the result and
+    expects exit code 42.  Exercises: CREATE TABLE, INSERT, prepared SELECT,
+    column accessors.
 
 The zip (~2.9 MB) is gitignored (tools/*.zip).  When absent both phases skip
 gracefully and print the fetch URL + SHA3-256.  When present, SHA3-256 is
@@ -150,6 +151,8 @@ def phase2_compile_run(cccc: Path, include: Path, src: Path, tmp: str) -> bool:
         "-I", str(src.parent),  # sqlite3.h lives next to sqlite3.c
         "-U__APPLE__",
         "-U__MACH__",
+        "--no-comptime",        # sqlite doesn't use [[cccc::comptime]]; skip the
+                                # comptime/macro phase entirely (#624)
         *COMPILE_FLAGS,
         str(src),
         str(driver),
@@ -169,7 +172,7 @@ def phase2_compile_run(cccc: Path, include: Path, src: Path, tmp: str) -> bool:
         return False
 
     if "expected an identifier" in err:
-        print("    FAIL: #624 regression — TK_* macro collision with reflection.h")
+        print("    FAIL: #624 regression — TK_* macro collision (--no-comptime should prevent this)")
         for line in err.splitlines()[:5]:
             print(f"    {line}")
         return False

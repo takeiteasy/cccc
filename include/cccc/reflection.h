@@ -105,25 +105,24 @@ typedef struct EnumConstant EnumConstant;
 typedef struct Token Token;
 typedef struct AttrTarget AttrTarget;
 
-// Type kind enumeration (matches cccc.h; TY_ prefix avoids collision with
-// user-defined TK_* macros such as those in SQLite or parser generators)
+// Type kind enumeration (matches cccc.h TypeKind)
 typedef enum {
-    TY_VOID = 0,
-    TY_BOOL = 1,
-    TY_CHAR = 2,
-    TY_SHORT = 3,
-    TY_INT = 4,
-    TY_LONG = 5,
-    TY_FLOAT = 6,
-    TY_DOUBLE = 7,
-    TY_LDOUBLE = 8,
-    TY_ENUM = 9,
-    TY_PTR = 10,
-    TY_FUNC = 11,
-    TY_ARRAY = 12,
-    TY_VLA = 13,
-    TY_STRUCT = 14,
-    TY_UNION = 15,
+    TK_VOID = 0,
+    TK_BOOL = 1,
+    TK_CHAR = 2,
+    TK_SHORT = 3,
+    TK_INT = 4,
+    TK_LONG = 5,
+    TK_FLOAT = 6,
+    TK_DOUBLE = 7,
+    TK_LDOUBLE = 8,
+    TK_ENUM = 9,
+    TK_PTR = 10,
+    TK_FUNC = 11,
+    TK_ARRAY = 12,
+    TK_VLA = 13,
+    TK_STRUCT = 14,
+    TK_UNION = 15,
 } TypeKind;
 
 // Node kind enumeration (subset for pragma macro use; ND_ prefix matches cccc.h)
@@ -470,7 +469,7 @@ Type *__builtin_ast_get_type(VirtualMachine *vm, const char *name);
  * @function __builtin_ast_type_kind
  * @abstract Return the TypeKind tag of a type.
  * @param ty The type to inspect.
- * @return The type kind (TY_INT, TY_STRUCT, TY_PTR, ...).
+ * @return The type kind (TK_INT, TK_STRUCT, TK_PTR, ...).
  * @discussion Convenience wrapper: GetTypeKind(ty).
  */
 TypeKind __builtin_ast_type_kind(Type *ty);
@@ -2267,7 +2266,7 @@ void __builtin_attr_enum_to_string(AttrTarget *target) {
     const char *tname = AttrTargetName(target);
     if (!ty || !tname)
         MacroErrorAt(0, "@enum_to_string target has no usable type/name");
-    if (GetTypeKind(ty) != TY_ENUM)
+    if (GetTypeKind(ty) != TK_ENUM)
         MacroErrorAt(0, "@enum_to_string expects an enum target");
 
     char fname[128];
@@ -2297,7 +2296,7 @@ void __builtin_attr_enum_from_string(AttrTarget *target) {
     const char *tname = AttrTargetName(target);
     if (!ty || !tname)
         MacroErrorAt(0, "@enum_from_string target has no usable type/name");
-    if (GetTypeKind(ty) != TY_ENUM)
+    if (GetTypeKind(ty) != TK_ENUM)
         MacroErrorAt(0, "@enum_from_string expects an enum target");
 
     char fname[128];

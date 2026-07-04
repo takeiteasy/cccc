@@ -1017,6 +1017,48 @@ static Token *build_comptime_init_fn_tokens(VirtualMachine *vm,
     return toks;
 }
 
+// Names used as enum constants in reflection.h's TypeKind and NodeKind enums.
+// User-code macros with these names (e.g. SQLite's #define TK_FLOAT 154 or
+// parser-generator TK_*/NK_* tokens) must be temporarily removed before any
+// preprocessing pass that includes reflection.h, otherwise the preprocessor
+// expands them inside the enum initializers and produces a parse error.
+static const char *reflection_enum_names[] = {
+    // TypeKind
+    "TK_VOID", "TK_BOOL", "TK_CHAR", "TK_SHORT", "TK_INT", "TK_LONG",
+    "TK_FLOAT", "TK_DOUBLE", "TK_LDOUBLE", "TK_ENUM", "TK_PTR",
+    "TK_FUNC", "TK_ARRAY", "TK_VLA", "TK_STRUCT", "TK_UNION",
+    // NodeKind
+    "NK_NULL_EXPR", "NK_ADD", "NK_SUB", "NK_MUL", "NK_DIV", "NK_NEG",
+    "NK_MOD", "NK_BITAND", "NK_BITOR", "NK_BITXOR", "NK_SHL", "NK_SHR",
+    "NK_EQ", "NK_NE", "NK_LT", "NK_LE", "NK_ASSIGN", "NK_COND",
+    "NK_COMMA", "NK_MEMBER", "NK_ADDR", "NK_DEREF", "NK_NOT",
+    "NK_BITNOT", "NK_LOGAND", "NK_LOGOR", "NK_RETURN", "NK_IF",
+    "NK_FOR", "NK_DO", "NK_SWITCH", "NK_CASE", "NK_BLOCK", "NK_FUNCALL",
+    "NK_EXPR_STMT", "NK_VAR", "NK_NUM", "NK_CAST", "NK_MACRO_CALL",
+    NULL
+};
+#define REFLECTION_ENUM_NAMES_COUNT 55
+
+// Remove reflection.h enum-constant macros from the live table, storing each
+// previous value in saved[] (indexed by position in reflection_enum_names[]).
+// Call reflection_enum_names_restore() to put them back.
+static void reflection_enum_names_hide(VirtualMachine *vm, void **saved) {
+    for (int i = 0; reflection_enum_names[i]; i++) {
+        saved[i] = hashmap_get(&vm->compiler.macros,
+                               (char *)reflection_enum_names[i]);
+        if (saved[i])
+            hashmap_delete(&vm->compiler.macros,
+                           (char *)reflection_enum_names[i]);
+    }
+}
+
+static void reflection_enum_names_restore(VirtualMachine *vm, void **saved) {
+    for (int i = 0; reflection_enum_names[i]; i++)
+        if (saved[i])
+            hashmap_put(&vm->compiler.macros,
+                        (char *)reflection_enum_names[i], saved[i]);
+}
+
 static Token *implicit_reflection_tokens(VirtualMachine *vm) {
     char *header = get_std_header("reflection.h");
     if (!header)
@@ -1030,13 +1072,22 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
     if (!strstr(header, "#endif // CCCC_REFLECTION_H"))
         error("embedded reflection.h appears truncated — run `make stdlib` to regenerate src/std.c");
 
+    // Temporarily suppress user-defined TK_*/NK_* macros (TypeKind/NodeKind
+    // enum constant names) so they can't expand inside reflection.h's enum
+    // initializers.  reflection.h's own #define macros (WithFn, VM, etc.)
+    // are unaffected.  See also compile_macro_program which suppresses them
+    // for the broader comptime preprocess pass.
+    void *saved_enum_macros[REFLECTION_ENUM_NAMES_COUNT];
+    reflection_enum_names_hide(vm, saved_enum_macros);
+
     // The user's translation unit may already have included stdbool.h,
     // stddef.h, or stdint.h. Temporarily clear those guards so reflection.h's
     // private macro API is processed completely in the macro compilation
     // scope. We restore the guards afterwards so subsequent compilation phases
     // are unaffected.
     static const char *guards[] = {
-        "CCCC_REFLECTION_H", "__STDBOOL_H", "__STDDEF_H", "__STDINT_H", "__STRING_H", NULL
+        "CCCC_REFLECTION_H", "__STDBOOL_H", "__STDDEF_H", "__STDINT_H",
+        "__STRING_H", NULL
     };
     void *saved_guards[5] = {};
     for (int i = 0; guards[i]; i++) {
@@ -1065,6 +1116,8 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
         if (saved_guards[i])
             hashmap_put(&vm->compiler.macros, (char *)guards[i], saved_guards[i]);
 
+    reflection_enum_names_restore(vm, saved_enum_macros);
+
     return result;
 }
 
@@ -1078,6 +1131,8 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
 // Safe to call mid-parse: implicit_reflection_tokens only tokenizes and
 // preprocesses reflection.h and temporarily toggles include-guard macros.
 void ensure_reflection_attrs_registered(VirtualMachine *vm) {
+    if (vm->compiler.no_comptime)
+        return;
     if (vm->compiler.reflection_attrs_registered)
         return;
     vm->compiler.reflection_attrs_registered = true;
@@ -1531,6 +1586,15 @@ static bool compile_macro_program(VirtualMachine *vm) {
     if (!vm->compiler.comptime_include_all && vm->compiler.primary_file)
         gate_runtime_only_macros(vm, vm->compiler.primary_file->display_name);
 
+    // Suppress user-defined TK_*/NK_* macros for the ENTIRE comptime preprocess
+    // pass (both implicit_reflection_tokens and the second preprocess below).
+    // Primary-file macros like SQLite's #define TK_FLOAT 154 survive
+    // gate_runtime_only_macros; without this they expand inside reflection.h's
+    // TypeKind/NodeKind enum initializers causing "expected an identifier".
+    // The macro_snapshot_backup taken above will restore them at the end.
+    void *saved_enum_macros_cmp[REFLECTION_ENUM_NAMES_COUNT];
+    reflection_enum_names_hide(vm, saved_enum_macros_cmp);
+
     vm->compiler.in_macro_mode = true;
     vm->compiler.locals = NULL;
     vm->compiler.globals = NULL;
@@ -1666,6 +1730,8 @@ static bool compile_macro_program(VirtualMachine *vm) {
 
 // Compile all macro functions and comptime helpers (idempotent)
 static void compile_all_macros(VirtualMachine *vm) {
+    if (vm->compiler.no_comptime)
+        return;
     if (!vm->compiler.macro_fns)
         return;
     // Guard: compile once even if called from both the pre-parse inline phase
