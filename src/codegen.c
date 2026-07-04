@@ -3986,13 +3986,17 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
     case ND_COND: {
         // Ternary: cond ? then : else.
-        // Use dest_reg for the condition scratch — same rationale as ND_LOGAND/
-        // ND_LOGOR: avoids O(depth) register accumulation when the condition is a
-        // deeply nested && / || chain. The then/else branches overwrite dest_reg
-        // with the final result, so dest_reg is free to reuse for the condition.
-        mark_temp_reg_used(dest_reg);
-        gen_cond_expr(vm, node->cond, dest_reg);
-        Pc jz_else = emit_jz3(vm, dest_reg);
+        // Reuse dest_reg for the condition scratch to avoid O(depth) register
+        // accumulation on deeply nested && / || conditions (#587 gap).
+        // Guard: dest_reg may be REG_ZERO (discarded expression statement) — the
+        // zero register silently discards writes, so the condition is always read
+        // back as 0, making the branch always take the else arm. Allocate a real
+        // temp when dest_reg == REG_ZERO and free it before generating the branches.
+        int r_cond = (dest_reg == REG_ZERO) ? alloc_temp_reg() : dest_reg;
+        mark_temp_reg_used(r_cond);
+        gen_cond_expr(vm, node->cond, r_cond);
+        Pc jz_else = emit_jz3(vm, r_cond);
+        if (r_cond != dest_reg) free_temp_reg(r_cond);
 
         gen_expr(vm, node->then, dest_reg);
         emit(vm, JMP);
@@ -4963,15 +4967,21 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
     case ND_LOGAND: {
         // Logical AND with short-circuit evaluation.
-        // dest_reg is used as the condition scratch register to avoid allocating
-        // a separate r_cond — holding an extra temp across gen_cond_expr causes
-        // O(depth) register accumulation for deeply nested && chains (#587 gap).
-        mark_temp_reg_used(dest_reg); // protect dest_reg from inner allocs
-        gen_cond_expr(vm, node->lhs, dest_reg);
-        Pc jz_false = emit_jz3(vm, dest_reg);
+        // Reuse dest_reg as the condition scratch to avoid O(depth) register
+        // accumulation for deeply nested && chains (#587 gap).
+        // Guard: dest_reg may be REG_ZERO (discarded expression statement) — the
+        // zero register silently discards writes, so both conditions read back as 0
+        // and jz is always taken, preventing the rhs and any side-effects from
+        // running. Allocate a real temp when dest_reg == REG_ZERO and free it after
+        // the last jz (before generating the final 0/1 into dest_reg).
+        int r_cond = (dest_reg == REG_ZERO) ? alloc_temp_reg() : dest_reg;
+        mark_temp_reg_used(r_cond); // protect from inner allocs
+        gen_cond_expr(vm, node->lhs, r_cond);
+        Pc jz_false = emit_jz3(vm, r_cond);
 
-        gen_cond_expr(vm, node->rhs, dest_reg);
-        Pc jz_false2 = emit_jz3(vm, dest_reg);
+        gen_cond_expr(vm, node->rhs, r_cond);
+        Pc jz_false2 = emit_jz3(vm, r_cond);
+        if (r_cond != dest_reg) free_temp_reg(r_cond);
 
         // Both true
         emit_li3(vm, dest_reg, 1);
@@ -4988,13 +4998,15 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
     case ND_LOGOR: {
         // Logical OR with short-circuit evaluation.
-        // Same dest_reg reuse as ND_LOGAND above (see comment there).
-        mark_temp_reg_used(dest_reg);
-        gen_cond_expr(vm, node->lhs, dest_reg);
-        Pc jnz_true = emit_jnz3(vm, dest_reg);
+        // Same dest_reg reuse + REG_ZERO guard as ND_LOGAND above (see comment there).
+        int r_cond = (dest_reg == REG_ZERO) ? alloc_temp_reg() : dest_reg;
+        mark_temp_reg_used(r_cond);
+        gen_cond_expr(vm, node->lhs, r_cond);
+        Pc jnz_true = emit_jnz3(vm, r_cond);
 
-        gen_cond_expr(vm, node->rhs, dest_reg);
-        Pc jnz_true2 = emit_jnz3(vm, dest_reg);
+        gen_cond_expr(vm, node->rhs, r_cond);
+        Pc jnz_true2 = emit_jnz3(vm, r_cond);
+        if (r_cond != dest_reg) free_temp_reg(r_cond);
 
         // Both false
         emit_li3(vm, dest_reg, 0);
