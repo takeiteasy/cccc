@@ -1938,7 +1938,7 @@ const char *__builtin_dump_ast_gen_to_string(VirtualMachine *vm, Node *node);
 #define ObjIsStatic(obj)       __builtin_ast_obj_is_static(obj)
 #define GetAttrTargetKind(target)  __builtin_attr_target_kind(target)
 #define AttrTargetName(target)  __builtin_attr_target_name(target)
-#define $ATTR_TARGET_TYPE(target)  __builtin_attr_target_type(target)
+#define AttrTargetType(target)  __builtin_attr_target_type(target)
 #define AttrTargetObj(target)   __builtin_attr_target_obj(target)
 #define AttrTargetToken(target) __builtin_attr_target_token(target)
 
@@ -2205,7 +2205,7 @@ void __builtin_attr_serialize(AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@serialize expects a type (struct/union) target");
 
-    Type *ty = $ATTR_TARGET_TYPE(target);
+    Type *ty = AttrTargetType(target);
     const char *tname = AttrTargetName(target);
     if (!ty || !tname)
         MacroErrorAt(0, "@serialize target has no usable type/name");
@@ -2235,7 +2235,7 @@ void __builtin_attr_deserialize(AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@deserialize expects a type (struct/union) target");
 
-    Type *ty = $ATTR_TARGET_TYPE(target);
+    Type *ty = AttrTargetType(target);
     const char *tname = AttrTargetName(target);
     if (!ty || !tname)
         MacroErrorAt(0, "@deserialize target has no usable type/name");
@@ -2262,7 +2262,7 @@ void __builtin_attr_enum_to_string(AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@enum_to_string expects a type (enum) target");
 
-    Type *ty = $ATTR_TARGET_TYPE(target);
+    Type *ty = AttrTargetType(target);
     const char *tname = AttrTargetName(target);
     if (!ty || !tname)
         MacroErrorAt(0, "@enum_to_string target has no usable type/name");
@@ -2292,7 +2292,7 @@ void __builtin_attr_enum_from_string(AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@enum_from_string expects a type (enum) target");
 
-    Type *ty = $ATTR_TARGET_TYPE(target);
+    Type *ty = AttrTargetType(target);
     const char *tname = AttrTargetName(target);
     if (!ty || !tname)
         MacroErrorAt(0, "@enum_from_string target has no usable type/name");
@@ -2400,7 +2400,7 @@ void __builtin_attr_generate_getters(AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@generate_getters expects a type (struct/union) target");
 
-    Type *ty = $ATTR_TARGET_TYPE(target);
+    Type *ty = AttrTargetType(target);
     if (!ty)
         MacroErrorAt(0, "@generate_getters target has no usable type");
 
@@ -2414,7 +2414,7 @@ void __builtin_attr_generate_setters(AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@generate_setters expects a type (struct/union) target");
 
-    Type *ty = $ATTR_TARGET_TYPE(target);
+    Type *ty = AttrTargetType(target);
     if (!ty)
         MacroErrorAt(0, "@generate_setters target has no usable type");
 
@@ -2429,7 +2429,7 @@ void __builtin_attr_generate_constructor(AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@generate_constructor expects a type (struct/union) target");
 
-    Type *ty = $ATTR_TARGET_TYPE(target);
+    Type *ty = AttrTargetType(target);
     const char *tname = AttrTargetName(target);
     if (!ty || !tname)
         MacroErrorAt(0, "@generate_constructor target has no usable type/name");

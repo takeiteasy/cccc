@@ -7,7 +7,7 @@ void define_serializer(AttrTarget *target) {
     if (!AttrTargetName(target))
         MacroErrorAt(0, "serialize target has no name");
 
-    Type *ty = $ATTR_TARGET_TYPE(target);
+    Type *ty = AttrTargetType(target);
     Obj *fn = MakeFunction("serialize_Point", GetType("int"));
     FunctionAddParam(fn, "p", MakePointer(ty));
     WithFn(fn) {
