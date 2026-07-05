@@ -1302,8 +1302,25 @@ static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     // we replace remaining non-macro identifiers with "0" before
     // evaluating a constant expression. For example, `#if foo` is
     // equivalent to `#if 0` if foo is not defined.
+    //
+    // C23 §6.10.1 additionally specifies that `true` evaluates to 1
+    // and `false` evaluates to 0 in preprocessor constant expressions.
+    // In C23 mode these tokens are TK_KEYWORD (not TK_IDENT), so the
+    // generic ident→0 pass below would leave them unhandled — producing
+    // wrong results (e.g. `#if true` evaluating to 0). Handle them
+    // explicitly first, before the generic TK_IDENT fallback.
     for (Token *t = expr; t->kind != TK_EOF; t = t->next) {
-        if (t->kind == TK_IDENT) {
+        if (equal(t, "true")) {
+            // C23 §6.10.1: true → pp-number 1
+            Token *next = t->next;
+            *t = *new_num_token(vm, 1, t);
+            t->next = next;
+        } else if (equal(t, "false")) {
+            // C23 §6.10.1: false → pp-number 0
+            Token *next = t->next;
+            *t = *new_num_token(vm, 0, t);
+            t->next = next;
+        } else if (t->kind == TK_IDENT) {
             Token *next = t->next;
             *t = *new_num_token(vm, 0, t);
             t->next = next;
