@@ -140,7 +140,7 @@ own level, their behaviour is identical at every pass combination swept by
 `--matrix`.  Attribute-based tests are therefore naturally safe to include in the
 matrix sweep without special casing.
 
-See [ATTRIBUTES.md — optimize](ATTRIBUTES.md#__attribute__optimize--ccccoptimizen--optimizen-cccc-specific)
+See [COVERAGE.md — optimize attribute](COVERAGE.md#__attribute__optimize--ccccoptimizen--optimizen-cccc-specific)
 for the complete attribute reference.
 
 ## Optimization Passes
