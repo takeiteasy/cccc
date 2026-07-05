@@ -86,7 +86,7 @@ typedef struct {
     bool fn_optimize_set;
 
     // Format string validation
-    int format_style;          // 0=none, 1=printf, 2=scanf
+    int format_style;          // 0=none/unvalidated, 1=printf, 2=scanf
     int format_string_index;   // 1-based index of format string arg
     int format_fmt_first_arg;  // 1-based index of first variadic arg to check
 
@@ -6041,11 +6041,17 @@ static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *
                 if (equal(tok, "(")) {
                     tok = tok->next;
                     int style = 0;
-                    if (equal(tok, "printf"))
+                    // Accept GCC/Clang alternate spellings.  strftime, os_log and
+                    // unknown variants are accepted silently (style=0 = no validation).
+                    if (equal(tok, "printf") || equal(tok, "__printf__") ||
+                        equal(tok, "gnu_printf") || equal(tok, "printf0") ||
+                        equal(tok, "__printf0__"))
                         style = 1;
-                    else if (equal(tok, "scanf"))
+                    else if (equal(tok, "scanf") || equal(tok, "__scanf__") ||
+                             equal(tok, "gnu_scanf"))
                         style = 2;
-                    else
+                    else if (!equal(tok, "strftime") && !equal(tok, "__strftime__") &&
+                             !equal(tok, "os_log") && !equal(tok, "__os_log__"))
                         error_tok(vm, tok,
                                   "expected 'printf' or 'scanf' in format attribute");
                     tok = tok->next;
