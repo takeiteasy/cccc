@@ -197,6 +197,7 @@ language coverage figures apply.
 | `__builtin_*` | ✓ | Lowered by the compiler; see [Built-in Functions](#built-in-functions) below |
 | `__thread` storage class | ✓ | TLS segment; per-thread private storage |
 | `__restrict` / `__restrict__` | ✓ | Spelling aliases for `restrict`; fully optimised (see `restrict` entry above) |
+| `__inline` / `__inline__` | ✓ | Spelling aliases for `inline`; recognized as GCC keyword aliases (GCC compatibility) |
 | `__typeof__` | ✓ | Synonym for `typeof` |
 | `asm(...)` inline assembly | ✓ | `asm(...)` statements are no-ops by default; `--asm-passthru` compiles via native CC and executes via FFI; custom callback via `cc_set_asm_callback`; `__asm__` statement spelling is pending |
 | GNU `asm("symbol")` declaration labels | ~ | Supported on function declarations, including typedef-based and multi-declarator declarations; the label is used as the external FFI symbol name |
@@ -224,7 +225,7 @@ groups from that ticket.
 | `__declspec(thread)` | ✗ | TLS via VM per-thread storage — pending |
 | `__cdecl` / `__stdcall` / `__fastcall` / `__thiscall` / `__vectorcall` | ✗ | Calling-convention keywords, no-op (CCCC has a single VM ABI) — pending |
 | `__ptr32` / `__ptr64` / `__sptr` / `__uptr` / `__unaligned` / `__w64` | ✗ | Pointer modifiers, no-op — pending |
-| `__forceinline` / `__inline` | ~ | Fold to existing `inline` (dead-elim + inlining applies) — pending `__declspec` alias |
+| `__forceinline` | ~ | Folds to `inline` — pending `__declspec` alias |
 | `__assume(expr)` | ✗ | Optimizer hint — pending |
 | `__noop` | ✗ | Variable-arg no-op builtin — pending |
 | `__debugbreak` | ✗ | Trap opcode — pending |

@@ -4387,6 +4387,7 @@ void init_macros(VirtualMachine *vm) {
     define_macro(vm, "__USER_LABEL_PREFIX__", "");
     define_macro(vm, "__alignof__", "_Alignof");
     define_macro(vm, "__const__", "const");
+    define_macro(vm, "__inline", "inline");
     define_macro(vm, "__inline__", "inline");
     define_macro(vm, "__signed__", "signed");
     define_macro(vm, "__typeof__", "typeof");
