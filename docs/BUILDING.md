@@ -178,34 +178,53 @@ Use `#ifdef` / `#ifndef` to branch on these at compile time:
 #endif
 ```
 
-## Conditional includes (`#include [[cccc::build]]`)
+## Conditional directives (`@build`)
 
-A `#include` with a `[[cccc::build]]` route attribute is only processed when
-`--build` is active; otherwise the directive is silently skipped.  All three
-attribute forms are accepted:
+Any preprocessor directive can be gated on `--build` mode by prefixing it with
+a `@build` route attribute.  When `--build` is active the route token is
+stripped and the directive is processed normally; when it is inactive the
+directive is silently skipped.  All three attribute spellings are accepted:
 
 ```c
-#include [[cccc::build]]           "build/extra_targets.h"   // C23
-#include @build                    "build/extra_targets.h"   // @-prefix
-#include __attribute__((build))    "build/extra_targets.h"   // GNU
+#define @build            BUILD_JOBS 8     // @-prefix
+#define [[cccc::build]]   BUILD_JOBS 8     // C23
+#define __attribute__((build)) BUILD_JOBS 8 // GNU
 ```
 
-Angle-bracket includes work the same way:
+This extends to `#include`, `#ifdef`, `#ifndef`, `#undef`, and every other
+preprocessor directive:
 
 ```c
-#include [[cccc::build]] <external/build_helpers.h>
+#include @build "build/extra_targets.h"
+#include @build <external/build_helpers.h>
+
+#define @build BUILD_JOBS 8
+
+#ifdef @build BUILD_JOBS
+#  define JOBS BUILD_JOBS
+#endif                              // plain #endif — no route needed
 ```
 
-This is the first-class equivalent of:
+When `--build` is inactive, an `@build #ifdef`/`#ifndef`/`#if` is rewritten
+as `#if 0` internally so the conditional stack stays balanced.  A plain
+`#endif` (without `@build`) closes it correctly.  The `#else` branch under an
+inactive `@build` conditional **runs** normally.
+
+These are the first-class equivalents of the `__CCCC_BUILD_MODE__` guard style:
 
 ```c
-#ifdef __CCCC_BUILD_MODE__
+// Old style                          // New style
+#ifdef __CCCC_BUILD_MODE__            #define @build BUILD_JOBS 8
+#define BUILD_JOBS 8
+#endif
+
+#ifdef __CCCC_BUILD_MODE__            #include @build "build/extra_targets.h"
 #include "build/extra_targets.h"
 #endif
 ```
 
-Use it to split large build scripts across multiple files without polluting
-normal compilation.
+Use them to split large build scripts across multiple files without polluting
+normal compilation, and to define build-only constants cleanly.
 
 ## Discoverable factory functions (#540)
 

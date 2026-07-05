@@ -806,23 +806,46 @@ Use `#ifdef` / `#ifndef` to branch at compile time:
 #endif
 ```
 
-## Conditional includes (`#include [[cccc::test]]`)
+## Conditional directives (`@test`)
 
-A `#include` with a `[[cccc::test]]` route attribute is only processed when
-`--testing` is active; otherwise the directive is silently skipped.  All three
-attribute forms are accepted:
+Any preprocessor directive can be gated on `--testing` mode by prefixing it
+with a `@test` route attribute.  When `--testing` is active the route token is
+stripped and the directive is processed normally; when it is inactive the
+directive is silently skipped.  All three attribute spellings are accepted:
 
 ```c
-#include [[cccc::test]]           "tests/shared_fixtures.h"   // C23
-#include @test                    "tests/shared_fixtures.h"   // @-prefix
-#include __attribute__((test))    "tests/shared_fixtures.h"   // GNU
+#define @test            TEST_TIMEOUT_MS 5000   // @-prefix
+#define [[cccc::test]]   TEST_TIMEOUT_MS 5000   // C23
+#define __attribute__((test)) TEST_TIMEOUT_MS 5000 // GNU
 ```
 
-This lets you split large test files across multiple headers without polluting
-normal compilation — it is the first-class equivalent of:
+This extends to `#include`, `#ifdef`, `#ifndef`, `#undef`, and every other
+preprocessor directive:
 
 ```c
-#ifdef __CCCC_TEST_MODE__
+#include @test "tests/shared_fixtures.h"
+
+#define @test TEST_TIMEOUT_MS 5000
+
+#ifdef @test TEST_TIMEOUT_MS
+#  define TIMEOUT TEST_TIMEOUT_MS
+#endif                              // plain #endif — no route needed
+```
+
+When `--testing` is inactive, an `@test #ifdef`/`#ifndef`/`#if` is rewritten
+as `#if 0` internally so the conditional stack stays balanced.  A plain
+`#endif` (without `@test`) closes it correctly.  The `#else` branch under an
+inactive `@test` conditional **runs** normally.
+
+These are the first-class equivalents of the `__CCCC_TEST_MODE__` guard style:
+
+```c
+// Old style                            // New style
+#ifdef __CCCC_TEST_MODE__               #define @test TEST_TIMEOUT_MS 5000
+#define TEST_TIMEOUT_MS 5000
+#endif
+
+#ifdef __CCCC_TEST_MODE__               #include @test "tests/shared_fixtures.h"
 #include "tests/shared_fixtures.h"
 #endif
 ```

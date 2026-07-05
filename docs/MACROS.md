@@ -796,6 +796,55 @@ generated output only (see
 > corresponding preprocessing context. Only `@shared` is new and only for
 > `#include`.
 
+### Mode-conditional directives (`@build` / `@test`)
+
+`@build` and `@test` route attributes gate **any** preprocessor directive on
+whether `--build` or `--testing` mode is active. When the mode is inactive the
+directive is silently skipped; when it is active, the route token is stripped
+and the directive is processed normally.
+
+```c
+// Applied only when --build is active:
+#define @build BUILD_JOBS 8
+
+// Applied only when --testing is active:
+#define @test  TEST_TIMEOUT_MS 5000
+
+// Conditional blocks gate entire regions:
+#ifdef @build BUILD_JOBS
+#  define JOBS BUILD_JOBS
+#endif                          // plain #endif — no route required
+```
+
+All three attribute spellings are accepted:
+
+```c
+#define @build            BUILD_JOBS 8
+#define [[cccc::build]]   BUILD_JOBS 8
+#define __attribute__((build)) BUILD_JOBS 8
+```
+
+**Conditional-nesting rules**: `#ifdef @build` / `#ifndef @build` / `#if @build`
+desugar to `#if 0` when the mode is inactive, keeping the conditional stack
+balanced so that a plain `#endif` (without a route) can close them.  The
+`#else` branch under an inactive `@build`/`@test` conditional **runs** normally:
+
+```c
+#ifdef @build BUILD_JOBS
+    /* skipped — build mode is off */
+#else
+    /* runs in comp and testing modes */
+#endif
+```
+
+`@build`/`@test` can also appear on `#undef`, `#include`, and other directives
+— all are silently dropped when the mode is inactive.  `#else` and `#endif`
+with a route attribute have the route stripped and are always processed.
+
+This is the first-class alternative to `#ifdef __CCCC_BUILD_MODE__` /
+`#ifdef __CCCC_TEST_MODE__` guards and composes cleanly with the `@build` /
+`@test` routing on `#include` directives already supported.
+
 ## Comptime Variables
 
 `[[cccc::comptime]]` can also precede a **variable or struct declaration**. The

@@ -3913,6 +3913,52 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             tok = skip_line(vm, route_after);
             continue;
         }
+        // @build / @test gate: mode-conditional directive routing.
+        // When the mode is active the route token is stripped and the directive
+        // falls through to the switch for normal processing.
+        // When inactive:
+        //   - if/ifdef/ifndef/elif/elifdef/elifndef → rewrite as #if 0 / #elif 0
+        //     so the conditional is always false while keeping nesting balanced
+        //   - else/endif → strip route and process normally (must run to balance)
+        //   - all other directives (define, undef, include, ...) → silently drop
+        if (directive_route == INCLUDE_ROUTE_BUILD ||
+            directive_route == INCLUDE_ROUTE_TEST) {
+            bool active = (directive_route == INCLUDE_ROUTE_BUILD)
+                              ? vm->compiler.build_mode
+                              : vm->compiler.testing_mode;
+            PPDir d = pp_directive(tok);
+            if (active) {
+                // Strip the route token; directive falls through to the switch.
+                tok->next = route_after;
+            } else {
+                switch (d) {
+                case PP_IF: case PP_IFDEF: case PP_IFNDEF:
+                case PP_ELIF: case PP_ELIFDEF: case PP_ELIFNDEF: {
+                    // Push a false conditional to maintain nesting balance.
+                    const char *kw = (d == PP_ELIF || d == PP_ELIFDEF ||
+                                      d == PP_ELIFNDEF) ? "elif" : "if";
+                    char *src = arena_format(vm, "#%s 0\n", kw);
+                    Token *nt = tokenize(
+                        vm, new_file(vm, start->file->name,
+                                     start->file->file_no, src));
+                    Token *last = nt;
+                    while (last->next && last->next->kind != TK_EOF)
+                        last = last->next;
+                    last->next = skip_line(vm, route_after);
+                    tok = nt;
+                    continue;
+                }
+                case PP_ELSE: case PP_ENDIF:
+                    // Must run so the conditional stack stays balanced.
+                    tok->next = route_after;
+                    break;
+                default:
+                    // Silently drop mode-inactive directives.
+                    tok = skip_line(vm, route_after);
+                    continue;
+                }
+            }
+        }
         // @shared / [[cccc::shared]] is only meaningful on #include; reject it
         // on other directives before falling into the switch.
         if (directive_route == INCLUDE_ROUTE_SHARED &&
@@ -3937,7 +3983,9 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 start->file == vm->compiler.primary_file &&
                 !(_ac && _ac->type == CTX_COMPTIME) &&
                 !is_pragma_cccc(start)) {
-                char *_ac_line = (directive_route == INCLUDE_ROUTE_SHARED)
+                char *_ac_line = (directive_route == INCLUDE_ROUTE_SHARED ||
+                                  directive_route == INCLUDE_ROUTE_BUILD  ||
+                                  directive_route == INCLUDE_ROUTE_TEST)
                     ? copy_routed_directive_line(vm, start, route_start, route_after)
                     : copy_raw_directive_line(vm, start);
                 push_emit_directive(vm, _ac_line, pp_directive(tok) == PP_INCLUDE);
@@ -3953,15 +4001,6 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             IncludeRoute include_route = read_include_route(&filename_start);
             char *filename = read_include_filename(vm, &tok, filename_start,
                                                    &is_dquote, &filename_len);
-            // Mode-gated includes: skip silently when the mode is inactive.
-            if (include_route == INCLUDE_ROUTE_BUILD && !vm->compiler.build_mode) {
-                tok = skip_line(vm, tok);
-                break;
-            }
-            if (include_route == INCLUDE_ROUTE_TEST && !vm->compiler.testing_mode) {
-                tok = skip_line(vm, tok);
-                break;
-            }
             // Comptime includes and ordinary includes inside a comptime block are
             // queued for the comptime pass only; they never reach the runtime TU.
             if (include_route == INCLUDE_ROUTE_COMPTIME ||
