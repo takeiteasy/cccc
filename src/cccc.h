@@ -1978,6 +1978,11 @@ typedef struct Compiler {
     // Diagnostic output format
     bool diagnostic_json; // --json (general JSON output flag)
 
+    // System-header mode (--use-system-headers / --no-builtin-includes / --sysroot)
+    bool use_system_headers;      // Prefer SDK headers over CCCC polyfills for non-owned std headers
+    bool no_builtin_includes;     // Do not fall back to ./include for non-owned std headers
+    const char *builtin_include_dir; // Path of CCCC's own header dir; excluded from SDK-first search
+
     // Tokenization state
     File *current_file;  // Input file
     File **input_files;  // A list of all input files

@@ -847,3 +847,73 @@ make fuzz_harness
 ```bash
 make clean          # remove corpus, output, and crash directories
 ```
+
+---
+
+## System Headers
+
+By default CCCC resolves all standard C library `#include` directives to its
+own polyfill headers from `./include/`. This ensures portability and correct
+VM-ABI types regardless of the host SDK. Three CLI flags let you point CCCC at
+real macOS/Linux SDK headers instead:
+
+### `--use-system-headers`
+
+For standard headers that are **not** compiler-owned (see list below), search
+`-isystem` / `--sysroot` directories **before** falling back to the CCCC
+polyfill in `./include/`. Useful for testing CCCC against real SDK headers.
+
+```bash
+./cccc --use-system-headers -isystem /usr/include program.c
+./cccc --use-system-headers --sysroot "$(xcrun --show-sdk-path)" program.c
+```
+
+### `--no-builtin-includes`
+
+Combine with `--use-system-headers` to **disable the polyfill fallback** for
+non-owned standard headers. The include fails with "cannot open file" if the
+SDK copy is not present in any configured system include path. Compiler-owned
+headers (see below) are still resolved from CCCC.
+
+```bash
+./cccc --use-system-headers --no-builtin-includes \
+       --sysroot "$(xcrun --show-sdk-path)" program.c
+```
+
+### `--sysroot <path>`
+
+Set the SDK root. Automatically adds `<path>/usr/include` (and
+`<path>/usr/local/include` if present) to the system include path list and
+implies `--use-system-headers`.
+
+```bash
+./cccc --sysroot "$(xcrun --show-sdk-path)" program.c
+```
+
+### Compiler-owned headers (never overridden)
+
+These headers are tightly coupled to CCCC's VM ABI and are always resolved from
+CCCC's own copies, even when `--use-system-headers` or `--no-builtin-includes`
+is active:
+
+| Header | Reason |
+|--------|--------|
+| `stdarg.h` | `va_list` layout matches CCCC's register-spill ABI |
+| `setjmp.h` | `jmp_buf` layout matches CCCC's `SETJMP`/`LONGJMP` opcodes |
+| `stdbool.h` | Authoritative C23 boolean type definitions |
+| `stddef.h` | Authoritative `ptrdiff_t`, `size_t`, `nullptr_t` definitions |
+| `stdint.h` | Authoritative fixed-width integer types |
+| `inttypes.h` | Companion to `stdint.h` |
+
+### Pragma suppression in system-header mode
+
+When `--use-system-headers` is active (or a file is marked as a system header
+via `is_system_header`), CCCC suppresses:
+
+- "unknown pragma ignored" — e.g. `#pragma GCC system_header`,
+  `#pragma clang assume_nonnull begin/end`
+- "unknown warning option" — e.g. Clang-specific `-W` names in
+  `#pragma clang diagnostic ignored`
+
+These are common in real SDK headers and are informational hints to the native
+compiler that have no meaning in CCCC's VM execution.

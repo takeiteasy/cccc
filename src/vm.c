@@ -1010,8 +1010,11 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     vm->dyn_next_token = 1;
     vm->dyn_error = NULL;
 
-    // Add default system include path for <...> includes
+    // Add default system include path for <...> includes.
+    // Track it as the builtin dir so --use-system-headers can skip it when
+    // searching for SDK copies of non-owned standard headers.
     cc_system_include(vm, "./include");
+    vm->compiler.builtin_include_dir = "./include";
 
     cc_define(vm, "CCCC_HAS_FFI", "1");
 

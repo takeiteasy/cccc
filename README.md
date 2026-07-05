@@ -19,6 +19,9 @@ Options:
 	-h/--help                Show this message
 	-I <path>                Add <path> to include search paths
 	-i/--isystem <path>      Add <path> to system include paths (for non-standard headers)
+	--use-system-headers     Prefer SDK headers over CCCC polyfills for non-owned standard headers
+	--no-builtin-includes    No polyfill fallback for non-owned standard headers (requires --use-system-headers)
+	--sysroot <path>         Set SDK root; adds <path>/usr/include to system paths, implies --use-system-headers
 	-L/--library-path <path> Add <path> to dynamic library search paths
 	-l/--library <name>      Link dynamic library by name or path
 	-D <macro>[=def]         Define a macro

@@ -143,6 +143,12 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-I <path>                Add <path> to include search paths\n");
     printf("\t-i/--isystem <path>      Add <path> to system include paths (for "
            "non-standard headers)\n");
+    printf("\t--use-system-headers     Prefer SDK headers over CCCC polyfills for "
+           "non-owned standard headers\n");
+    printf("\t--no-builtin-includes    Do not fall back to CCCC's ./include for "
+           "non-owned standard headers (requires --use-system-headers)\n");
+    printf("\t--sysroot <path>         Set SDK root; adds <path>/usr/include to "
+           "system include paths and implies --use-system-headers\n");
     printf("\t-L/--library-path <path> Add <path> to dynamic library search paths\n");
     printf("\t-l/--library <name>      Link dynamic library by name or path\n");
     printf("\t-D <macro>[=def]         Define a macro\n");
@@ -772,6 +778,9 @@ int main(int argc, const char *argv[]) {
     int build_install = 0;                // --build-install (#560)
     const char **link_paths = NULL;       // --link lib.c4a (#565)
     int link_paths_count = 0;
+    bool use_system_headers = false;  // --use-system-headers
+    bool no_builtin_includes = false; // --no-builtin-includes
+    const char *sysroot = NULL;       // --sysroot <path>
 
     if (argc <= 1)
         usage(argv[0], 1);
@@ -891,6 +900,10 @@ int main(int argc, const char *argv[]) {
         {"fno-fuse",         no_argument, 0, 1107},
         {"felim-ext",        no_argument, 0, 1108},
         {"fno-elim-ext",     no_argument, 0, 1109},
+        // System-header mode
+        {"use-system-headers", no_argument,       0, 1112},
+        {"no-builtin-includes", no_argument,      0, 1113},
+        {"sysroot",            required_argument, 0, 1114},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1505,6 +1518,9 @@ int main(int argc, const char *argv[]) {
         case 1107: opt_f_disable |= CCCC_OPT_FUSE;      opt_f_mask |= CCCC_OPT_FUSE;      break; // --fno-fuse
         case 1108: opt_f_enable  |= CCCC_OPT_ELIM_EXT;  opt_f_mask |= CCCC_OPT_ELIM_EXT;  break; // --felim-ext
         case 1109: opt_f_disable |= CCCC_OPT_ELIM_EXT;  opt_f_mask |= CCCC_OPT_ELIM_EXT;  break; // --fno-elim-ext
+        case 1112: use_system_headers = true; break;  // --use-system-headers
+        case 1113: no_builtin_includes = true; break; // --no-builtin-includes
+        case 1114: sysroot = optarg; use_system_headers = true; break; // --sysroot
         case '?':
             if (optopt)
                 fprintf(stderr, "error: option -%c requires an argument\n",
@@ -1936,6 +1952,25 @@ int main(int argc, const char *argv[]) {
     // Add system include paths (for non-standard headers with angle brackets)
     for (int i = 0; i < sys_inc_paths_count; i++)
         cc_system_include(&vm, sys_inc_paths[i]);
+
+    // --sysroot: auto-configure system include paths from the SDK root.
+    // Implies --use-system-headers.
+    if (sysroot) {
+        struct stat _st;
+        char sysroot_inc[4096];
+        snprintf(sysroot_inc, sizeof(sysroot_inc), "%s/usr/include", sysroot);
+        if (!stat(sysroot_inc, &_st))
+            cc_system_include(&vm, sysroot_inc);
+        char sysroot_local_inc[4096];
+        snprintf(sysroot_local_inc, sizeof(sysroot_local_inc),
+                 "%s/usr/local/include", sysroot);
+        if (!stat(sysroot_local_inc, &_st))
+            cc_system_include(&vm, sysroot_local_inc);
+    }
+
+    // Propagate system-header mode flags to the compiler state.
+    vm.compiler.use_system_headers  = use_system_headers;
+    vm.compiler.no_builtin_includes = no_builtin_includes;
 
     for (int i = 0; i < defines_count; i++)
         parse_define(&vm, (char *)defines[i]);

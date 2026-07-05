@@ -1770,6 +1770,27 @@ static char *format_relative_path(VirtualMachine *vm, char *base_file, char *fil
                         filename);
 }
 
+// Headers that must always resolve to CCCC's own copies because they are
+// tightly coupled to the VM ABI or the compiler's type system.
+//
+// - stdarg.h / setjmp.h: va_list and jmp_buf have CCCC-VM-specific layouts;
+//   the SDK copies use compiler builtins that do not match.
+// - stdbool.h / stddef.h / stdint.h / inttypes.h: CCCC's versions are
+//   authoritative for the built-in boolean and integer types it exposes.
+//
+// These are never overridden even when --use-system-headers is active.
+static bool is_compiler_owned_header(const char *name) {
+    static const char *owned[] = {
+        "stdarg.h", "setjmp.h",
+        "stdbool.h", "stddef.h", "stdint.h", "inttypes.h",
+        NULL,
+    };
+    for (int i = 0; owned[i]; i++)
+        if (!strcmp(name, owned[i]))
+            return true;
+    return false;
+}
+
 char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
                            bool is_system) {
     if (filename[0] == '/')
@@ -1780,10 +1801,47 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
     if (cached)
         return cached;
 
-    // - If use_system_headers is enabled: only force for VM-required headers
-    // (stdarg.h, setjmp.h)
-    // - Otherwise: force for all standard C library headers
-    bool force_cccc_headers = get_std_header(filename) != NULL;
+    // Determine how aggressively we force CCCC's own headers.
+    //
+    // Default mode (use_system_headers=false):
+    //   All headers known to CCCC (get_std_header != NULL) are forced to
+    //   resolve from CCCC's ./include rather than any system directory.
+    //
+    // --use-system-headers mode:
+    //   Headers in is_compiler_owned_header() are still forced to CCCC.
+    //   All other std headers prefer system_include_paths first, then fall
+    //   back to ./include (unless --no-builtin-includes is also set).
+    //
+    // --no-builtin-includes (requires --use-system-headers):
+    //   Non-owned std headers do NOT fall back to ./include; if missing from
+    //   system paths the include fails with "cannot open file".
+    bool is_std = get_std_header(filename) != NULL;
+    bool owned  = is_std && is_compiler_owned_header(filename);
+    bool force_cccc = owned || (!vm->compiler.use_system_headers && is_std);
+
+    if (vm->compiler.use_system_headers && is_std && !owned && is_system) {
+        // In system-header mode, try SDK directories before ./include.
+        // Skip CCCC's own builtin include directory — we want genuine SDK
+        // headers here, not our polyfills (those are the fallback below).
+        const char *bdir = vm->compiler.builtin_include_dir;
+        for (int i = 0; i < vm->compiler.system_include_paths.len; i++) {
+            const char *dir = vm->compiler.system_include_paths.data[i];
+            if (bdir && !strcmp(dir, bdir))
+                continue; // skip the CCCC builtin dir
+            char *path = format("%s/%s", dir, filename);
+            if (file_exists(path)) {
+                hashmap_put2(&vm->compiler.include_cache, filename,
+                             filename_len, path);
+                vm->compiler.include_next_idx =
+                    vm->compiler.include_paths.len + i + 1;
+                return path;
+            }
+            free(path);
+        }
+        // SDK copy not found. If --no-builtin-includes, do not fall back.
+        if (vm->compiler.no_builtin_includes)
+            return NULL;
+    }
 
     // For <...> includes, search -I paths first and then --isystem paths.
     // For "..." includes, the caller handles current-file-relative lookup and
@@ -1798,7 +1856,7 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
         free(path);
     }
 
-    if (force_cccc_headers || !is_system)
+    if (force_cccc || !is_system)
         return NULL;
 
     for (int i = 0; i < vm->compiler.system_include_paths.len; i++) {
@@ -3386,8 +3444,16 @@ static Token *handle_gcc_diagnostic(VirtualMachine *vm, Token *tok) {
 
         uint64_t mask = cccc_warning_mask_for_name(name);
         if (!mask) {
-            warn_tok(vm, tok, CCCC_WARN_CPP,
-                     "#pragma GCC diagnostic: unknown warning option '-W%s'", name);
+            // Suppress the "unknown warning" diagnostic when compiling a system
+            // header or when --use-system-headers is active: SDK headers
+            // routinely suppress Clang-specific warnings that CCCC does not
+            // recognise, and these would just be noise.
+            bool in_sys = (tok->file && tok->file->is_system_header) ||
+                          vm->compiler.use_system_headers;
+            if (!in_sys)
+                warn_tok(vm, tok, CCCC_WARN_CPP,
+                         "#pragma GCC diagnostic: unknown warning option '-W%s'",
+                         name);
             return skip_line(vm, tok->next);
         }
 
@@ -3735,7 +3801,15 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
                equal(tok->next, "diagnostic")) {
         return handle_gcc_diagnostic(vm, tok->next->next);
     } else {
-        warn_tok(vm, tok, CCCC_WARN_CPP, "unknown pragma ignored");
+        // Suppress "unknown pragma" noise from system headers. Real SDK
+        // headers use #pragma GCC system_header, #pragma clang
+        // assume_nonnull, and various other pragmas that CCCC does not
+        // implement. These are informational hints to the SDK compiler and
+        // not relevant to CCCC's VM execution.
+        bool in_sys = (tok->file && tok->file->is_system_header) ||
+                      vm->compiler.use_system_headers;
+        if (!in_sys)
+            warn_tok(vm, tok, CCCC_WARN_CPP, "unknown pragma ignored");
         do { tok = tok->next; } while (!tok->at_bol && tok->kind != TK_EOF);
     }
     return tok;
