@@ -761,6 +761,9 @@ These are lowered to equivalent arithmetic comparisons at parse time.
 | `__builtin_choose_expr(c, e1, e2)` | Compile-time select: `e1` if constant `c` is non-zero, else `e2`. Result carries the chosen arm's type; the unchosen arm is parsed but not evaluated |
 | `__builtin_reg_class(type)` | `0` = integer/pointer, `1` = float, `2` = other |
 | `__builtin_expect(expr, hint)` | Returns `expr`; `hint` is a branch-prediction hint (ignored) |
+| `__builtin_expect_with_probability(expr, hint, prob)` | Returns `expr`; `hint` and `prob` are branch-prediction hints (ignored) |
+| `__builtin_prefetch(addr, [rw], [locality])` | Cache prefetch hint; `addr` is evaluated for side effects, hint args are ignored |
+| `__builtin_assume(expr)` | Optimizer hint; `expr` is **not** evaluated (matches Clang/GCC semantics) |
 | `__builtin_offsetof(type, member)` | Compile-time offset of `member` within `type` |
 
 #### Memory and Control Flow

@@ -7773,6 +7773,46 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return exp;
     }
 
+    // __builtin_expect_with_probability(exp, c, prob) -> exp
+    // Three-arg extension of __builtin_expect; probability hint is discarded.
+    if (equal(tok, "__builtin_expect_with_probability")) {
+        tok = skip(vm, tok->next, "(");
+        Node *exp = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *c = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *prob = assign(vm, &tok, tok);
+        (void)c; (void)prob;
+        *rest = skip(vm, tok, ")");
+        return exp;
+    }
+
+    // __builtin_prefetch(addr, [rw], [locality]) -> (void)addr
+    // Cache prefetch hint; ignored by the VM. The address operand IS evaluated
+    // for side effects (matching GCC). rw and locality are compile-time constant
+    // hints that are parsed and discarded.
+    if (equal(tok, "__builtin_prefetch")) {
+        tok = skip(vm, tok->next, "(");
+        Node *addr = assign(vm, &tok, tok);
+        while (consume(vm, &tok, tok, ","))
+            (void)assign(vm, &tok, tok);  // discard rw / locality hints
+        *rest = skip(vm, tok, ")");
+        return new_cast(vm, addr, ty_void);
+    }
+
+    // __builtin_assume(expr) -> no-op (optimizer hint; expr NOT evaluated)
+    // Matches Clang/GCC semantics: the assumption is for the optimizer only;
+    // side effects inside expr must not be relied upon.
+    if (equal(tok, "__builtin_assume")) {
+        tok = skip(vm, tok->next, "(");
+        Node *expr = assign(vm, &tok, tok);
+        (void)expr;
+        *rest = skip(vm, tok, ")");
+        Node *node = new_node(vm, ND_NULL_EXPR, start);
+        node->ty = ty_void;
+        return node;
+    }
+
     // __builtin_constant_p(expr) -> 1 if compile-time constant, 0 otherwise
     if (equal(tok, "__builtin_constant_p")) {
         tok = skip(vm, tok->next, "(");

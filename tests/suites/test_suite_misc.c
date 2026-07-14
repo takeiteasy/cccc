@@ -165,6 +165,27 @@ int test_builtins(void) {
     if (__builtin_expect(42, 0) != 42) return 21;
     if (__builtin_expect(0, 1) != 0) return 22;
 
+    // __builtin_expect_with_probability (3-arg extension; hint discarded, expr returned)
+    if (__builtin_expect_with_probability(42, 0, 0.9) != 42) return 26;
+    if (__builtin_expect_with_probability(0, 1, 0.1) != 0) return 27;
+
+    // __builtin_prefetch (cache hint no-op; addr IS evaluated for side effects)
+    {
+        int arr[3] = {0};
+        int pf_i = 0;
+        __builtin_prefetch(&arr[pf_i++]);      // side effect must run
+        __builtin_prefetch(&arr[0], 0);        // 2-arg form
+        __builtin_prefetch(&arr[0], 1, 3);     // 3-arg form
+        if (pf_i != 1) return 28;
+    }
+
+    // __builtin_assume (optimizer hint; expr NOT evaluated, matches Clang/GCC)
+    {
+        int as = 0;
+        __builtin_assume((as = 5, as > 0));
+        if (as != 0) return 29;   // side effect must be discarded
+    }
+
     // __builtin_constant_p
     if (!__builtin_constant_p(1 + 2)) return 23;
     int x = 5;
