@@ -1,6 +1,9 @@
 // CCCC_FLAGS: --testing
-// Consolidated suite: attributes: [[nodiscard]], [[noreturn]], fallthrough, format, pragma
-// Source tests: test_alignof_alignas, test_attribute_simple, test_fallthrough_attribute, test_format_attribute_custom, test_noreturn, test_pragma_link
+// Consolidated suite: attributes: [[nodiscard]], [[noreturn]], fallthrough, format, pragma,
+//   __has_attribute/__has_builtin/__has_c_attribute, format spelling aliases
+// Source tests: test_alignof_alignas, test_attr_format_spellings, test_attribute_simple,
+//   test_fallthrough_attribute, test_format_attribute_custom, test_has_attribute_builtin,
+//   test_noreturn, test_pragma_link
 
 #include "stdio.h"
 
@@ -575,5 +578,96 @@ void test_gnu_once_setup_b(void) {
 #if !__has_c_attribute(cccc::test_teardown)
 #error "__has_c_attribute(cccc::test_teardown) should be 1"
 #endif
+
+// [from test_attr_format_spellings]
+// Verify __attribute__((format(...))) accepts GNU/Clang alternate spellings.
+// macOS SDK headers use __printf__, gnu_printf, __scanf__, strftime, os_log
+// via __printflike/__scanflike macros from <sys/cdefs.h>.  Compile-time only.
+__attribute__((format(__printf__, 1, 2)))    int _fmts_my_printf(const char *fmt, ...);
+__attribute__((format(gnu_printf, 1, 2)))    int _fmts_my_gprintf(const char *fmt, ...);
+__attribute__((format(__printf0__, 1, 2)))   int _fmts_my_printf0(const char *fmt, ...);
+__attribute__((format(__scanf__, 1, 2)))     int _fmts_my_scanf(const char *fmt, ...);
+__attribute__((format(gnu_scanf, 1, 2)))     int _fmts_my_gscanf(const char *fmt, ...);
+__attribute__((format(strftime, 3, 0)))      int _fmts_my_strftime(char *s, int n, const char *fmt, void *tm);
+__attribute__((format(__strftime__, 3, 0)))  int _fmts_my_strftime2(char *s, int n, const char *fmt, void *tm);
+__attribute__((format(os_log, 1, 2)))        int _fmts_my_oslog(const char *fmt, ...);
+__attribute__((format(__os_log__, 1, 2)))    int _fmts_my_oslog2(const char *fmt, ...);
+
+[[cccc::test(return = 42)]]
+int test_attr_format_spellings(void) {
+    // If any format spelling above failed to parse, the file would not compile.
+    return 42;
+}
+
+// [from test_has_attribute_builtin]
+// Verify __has_attribute, __has_builtin, __has_c_attribute return correct values.
+// All checks are in preprocessor #if context (the only valid form for these predicates).
+#if !__has_attribute(aligned)
+#error expected __has_attribute(aligned)
+#endif
+#if !__has_attribute(__unused__)
+#error expected __has_attribute(__unused__)
+#endif
+#if !__has_attribute(deprecated)
+#error expected __has_attribute(deprecated)
+#endif
+#if !__has_attribute(comptime)
+#error expected __has_attribute(comptime)
+#endif
+#if !__has_attribute(format)
+#error expected __has_attribute(format)
+#endif
+#if !__has_attribute(noreturn)
+#error expected __has_attribute(noreturn)
+#endif
+#if !__has_builtin(__builtin_mul_overflow)
+#error expected __has_builtin(__builtin_mul_overflow)
+#endif
+#if !__has_builtin(__builtin_alloca)
+#error expected __has_builtin(__builtin_alloca)
+#endif
+#if __has_builtin(__builtin_offsetof)
+#error __builtin_offsetof should not be reported supported by CCCC
+#endif
+#if !__has_c_attribute(maybe_unused)
+#error expected __has_c_attribute(maybe_unused)
+#endif
+#if !__has_c_attribute(deprecated)
+#error expected __has_c_attribute(deprecated)
+#endif
+#if !__has_c_attribute(cccc::comptime)
+#error expected __has_c_attribute(cccc::comptime)
+#endif
+#if !__has_c_attribute(noreturn)
+#error expected __has_c_attribute(noreturn)
+#endif
+#if !__has_c_attribute(fallthrough)
+#error expected __has_c_attribute(fallthrough)
+#endif
+#if !__has_c_attribute(nodiscard)
+#error expected __has_c_attribute(nodiscard)
+#endif
+#if __has_cpp_attribute(deprecated)
+#error __has_cpp_attribute(deprecated) should be 0 (C++ attrs not supported)
+#endif
+#if __has_c_attribute(deprecated) != 202311L
+#error expected __has_c_attribute(deprecated) == 202311L
+#endif
+#if __has_c_attribute(maybe_unused) != 202311L
+#error expected __has_c_attribute(maybe_unused) == 202311L
+#endif
+#if __has_c_attribute(noreturn) != 202311L
+#error expected __has_c_attribute(noreturn) == 202311L
+#endif
+#if __has_c_attribute(cccc::comptime) != 1
+#error expected __has_c_attribute(cccc::comptime) == 1
+#endif
+
+[[cccc::test(return = 42)]]
+int test_has_attribute_builtins(void) {
+    // All assertions are compile-time (#if/#error above).
+    // If any condition were wrong the file would fail to compile.
+    return 42;
+}
 
 #pragma cccc suite end

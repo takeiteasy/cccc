@@ -20,7 +20,7 @@
 //   test_literals, test_multidim_arrays, test_forward_decl, test_forward_decl_advanced,
 //   test_oneword_struct, test_flexible_simple, test_flexible_array, test_flexible_long,
 //   test_printf, test_printf_simple, test_printf_binary, test_malloc_basic,
-//   test_asm, test_load_stdlib, test_missing_headers
+//   test_asm, test_load_stdlib, test_missing_headers, test_preproc_inline_alias
 // Kept legacy: test_realc_simple (redeclares malloc/free, conflicts with <stdlib.h>),
 //   test_mode_macro_comp (__CCCC_TEST_MODE__ is defined in --testing mode)
 
@@ -1076,6 +1076,17 @@ int test_load_stdlib(void) {
     double r = sqrt(16.0);
     if (r < 3.99 || r > 4.01) return 6;
     return 42;
+}
+
+// [from test_preproc_inline_alias]
+// __inline and __inline__ must be recognised as spelling aliases for inline,
+// matching GCC's predefined keyword aliases.
+extern __inline int _inl_add1(int x) { return x + 1; }
+static __inline__ int _inl_add2(int x) { return x + 2; }
+
+[[cccc::test(return = 42)]]
+int test_preproc_inline_alias(void) {
+    return _inl_add1(_inl_add2(39));  // 39 + 2 + 1 = 42
 }
 
 // [from test_missing_headers]

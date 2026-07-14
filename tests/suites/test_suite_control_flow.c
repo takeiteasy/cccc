@@ -1,6 +1,6 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: control flow: switch, goto, labels-as-values, edge cases
-// Source tests: test_control_flow, test_edge_computed_goto_comma, test_edge_coroutine_switch, test_edge_duffs_device, test_edge_map_macro, test_edge_narg_macro, test_edge_try_catch, test_edge_url_as_label_comment, test_goto, test_label_value_static, test_labels_as_values, test_stmt_expr, test_switch, test_switch_codegen_optimized, test_switch_debug, test_switch_dense_100, test_switch_edge, test_switch_minimal, test_switch_nobreak
+// Source tests: test_control_flow, test_edge_computed_goto_comma, test_edge_coroutine_switch, test_edge_duffs_device, test_edge_map_macro, test_edge_narg_macro, test_edge_try_catch, test_edge_url_as_label_comment, test_goto, test_label_value_static, test_labels_as_values, test_logicop_void_context, test_stmt_expr, test_switch, test_switch_codegen_optimized, test_switch_debug, test_switch_dense_100, test_switch_edge, test_switch_minimal, test_switch_nobreak
 
 #include <stdio.h>
 #include <string.h>
@@ -846,6 +846,22 @@ int test_switch_nobreak(void) {
     if (_switch_nobreak_test_no_default(5) != 33) return 7;  // Falls through to return 33
     
     return 42;
+}
+
+// [from test_logicop_void_context]
+// Regression test for #628: &&, ||, ?: side-effects in void/expression-statement context.
+// Commit 4ff58d5 reworked ND_LOGAND/ND_LOGOR/ND_COND to reuse dest_reg as the
+// condition scratch, but ND_EXPR_STMT passes REG_ZERO (hardwired zero), causing
+// the condition to always read back as 0.
+static int _logicop_t(const char *s) { fputs(s, stdout); return 1; }
+
+[[cccc::test(expect_stdout = "AOC")]]
+void test_logicop_void_context(void) {
+    volatile int argc = 1;  // volatile: prevent constant-folding the conditions
+    argc          && _logicop_t("A");   // truthy  -> rhs runs  -> A
+    argc          || _logicop_t("X");   // truthy  -> short-circuit, X suppressed
+    (argc - argc) || _logicop_t("O");   // 0 (falsy) -> rhs runs  -> O
+    argc ? _logicop_t("C") : _logicop_t("Y");  // truthy -> then branch -> C
 }
 
 #pragma cccc suite end
