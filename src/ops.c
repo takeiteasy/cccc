@@ -1621,6 +1621,48 @@ static inline int op_BNOT3_fn(VirtualMachine *vm) {
 
 // ========== Register-Based Safety Opcodes ==========
 
+// Binary search for the allocation with the largest base address <= ptr.
+// Returns its index, or -1 if ptr is below every tracked base address.
+static int sorted_allocs_find(VirtualMachine *vm, void *ptr) {
+    void **addrs = vm->sorted_allocs.addresses;
+    int lo = 0, hi = vm->sorted_allocs.count - 1, result = -1;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        if ((char *)addrs[mid] <= (char *)ptr) {
+            result = mid;
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return result;
+}
+
+// Resolve the tracked heap allocation containing `ptr` (base or interior),
+// via sorted_allocs_find — the same range query DYNOBJSZ uses (#647).
+// Returns the AllocHeader*, or NULL if ptr is outside the VM heap or not
+// within any tracked allocation. On success *out_offset = ptr - base.
+// Does NOT filter freed allocations — callers that need UAF detection
+// (CHKP3) must inspect header->freed themselves. Containment bound is
+// header->size (the aligned/usable size), consistent with CHKB's existing
+// `>= size` comparison — do NOT use requested_size here, that is DYNOBJSZ's
+// bound and would tighten CHKB's semantics.
+static AllocHeader *heap_alloc_for_ptr(VirtualMachine *vm, long long ptr,
+                                       size_t *out_offset) {
+    if (ptr < (long long)vm->heap_seg || ptr >= (long long)vm->heap_end)
+        return NULL;
+    int idx = sorted_allocs_find(vm, (void *)ptr);
+    if (idx < 0)
+        return NULL;
+    AllocHeader *h = vm->sorted_allocs.headers[idx];
+    size_t off = (size_t)((char *)ptr - (char *)vm->sorted_allocs.addresses[idx]);
+    if (h->magic != 0xDEADBEEF || off > h->size)
+        return NULL;
+    if (out_offset)
+        *out_offset = off;
+    return h;
+}
+
 static inline int op_CHKP3_fn(VirtualMachine *vm) {
     // Check pointer validity (register-based version of CHKP)
     // Format: [CHKP3] [rs:8|unused:56]
@@ -1642,12 +1684,12 @@ static inline int op_CHKP3_fn(VirtualMachine *vm) {
         return -1;
     }
 
-    // Check if pointer is in heap range
-    if (ptr >= (long long)vm->heap_seg && ptr < (long long)vm->heap_end) {
-        // Find allocation header - need to search backwards
-        AllocHeader *header = ((AllocHeader *)ptr) - 1;
+    // Resolve the containing allocation — handles base pointers and
+    // interior pointers (p + k) alike via sorted_allocs_find (#650).
+    {
+        AllocHeader *header = heap_alloc_for_ptr(vm, ptr, NULL);
 
-        if (header->magic == 0xDEADBEEF) {
+        if (header) {
             // Temporal memory tagging: detect stale pointers via side table
             if (vm->flags & CCCC_MEMORY_TAGGING) {
                 intptr_t stored_gen =
@@ -2112,23 +2154,6 @@ static void sorted_allocs_insert(VirtualMachine *vm, void *user_ptr, AllocHeader
     vm->sorted_allocs.count++;
 }
 
-// Binary search for the allocation with the largest base address <= ptr.
-// Returns its index, or -1 if ptr is below every tracked base address.
-static int sorted_allocs_find(VirtualMachine *vm, void *ptr) {
-    void **addrs = vm->sorted_allocs.addresses;
-    int lo = 0, hi = vm->sorted_allocs.count - 1, result = -1;
-    while (lo <= hi) {
-        int mid = lo + (hi - lo) / 2;
-        if ((char *)addrs[mid] <= (char *)ptr) {
-            result = mid;
-            lo = mid + 1;
-        } else {
-            hi = mid - 1;
-        }
-    }
-    return result;
-}
-
 static inline int op_MALC_fn(VirtualMachine *vm) {
     // malloc: size in REG_A0, return pointer in REG_A0
     long long requested_size = vm->regs[REG_A0];
@@ -2535,6 +2560,34 @@ static inline int op_CHKB_fn(VirtualMachine *vm) {
     long long base         = vm->regs[rs1];
     long long scaled_offset = vm->regs[rs2];
 
+    // Resolve the containing allocation — handles base pointers and
+    // interior pointers (base = q + k) alike via sorted_allocs_find (#650).
+    // The bound is checked against the *effective* offset from the
+    // allocation's own base, not against `base` itself, so a negative
+    // scaled_offset is only an error if it steps before the allocation
+    // start (e.g. p = q+2; p[-1] is valid; p[-3] is not).
+    size_t base_off;
+    AllocHeader *header = heap_alloc_for_ptr(vm, base, &base_off);
+    if (header) {
+        long long eff = (long long)base_off + scaled_offset;
+        if (eff < 0 || eff >= (long long)header->size) {
+            printf("\n========== ARRAY BOUNDS ERROR ==========\n");
+            printf("Array index out of bounds\n");
+            printf("Scaled offset: %lld bytes (base offset %zu)\n",
+                   scaled_offset, base_off);
+            printf("Array size:    %zu bytes\n", header->size);
+            printf("Base address:  0x%llx\n", base);
+            printf("Allocated at PC offset: %lld\n", header->alloc_pc);
+            printf("PC: 0x%llx (offset: %lld)\n",
+                   (long long)vm->pc, (long long)vm->pc);
+            printf("=========================================\n");
+            return -1;
+        }
+        return 0;
+    }
+
+    // Non-heap or untracked base (stack/global arrays): no upper bound is
+    // known here, but a negative index is unconditionally invalid.
     if (scaled_offset < 0) {
         printf("\n========== ARRAY BOUNDS ERROR ==========\n");
         printf("Negative array index (scaled offset: %lld)\n", scaled_offset);
@@ -2545,23 +2598,6 @@ static inline int op_CHKB_fn(VirtualMachine *vm) {
         return -1;
     }
 
-    if (base >= (long long)vm->heap_seg && base < (long long)vm->heap_end) {
-        AllocHeader *header = ((AllocHeader *)base) - 1;
-        if (header->magic == 0xDEADBEEF) {
-            if (scaled_offset >= (long long)header->size) {
-                printf("\n========== ARRAY BOUNDS ERROR ==========\n");
-                printf("Array index out of bounds\n");
-                printf("Scaled offset: %lld bytes\n", scaled_offset);
-                printf("Array size:    %zu bytes\n", header->size);
-                printf("Base address:  0x%llx\n", base);
-                printf("Allocated at PC offset: %lld\n", header->alloc_pc);
-                printf("PC: 0x%llx (offset: %lld)\n",
-                       (long long)vm->pc, (long long)vm->pc);
-                printf("=========================================\n");
-                return -1;
-            }
-        }
-    }
     return 0;
 }
 

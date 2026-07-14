@@ -215,6 +215,10 @@ All features listed below can be enabled individually or through the safety leve
   - Increments generation counter on each free
   - CHKP opcode checks if accessed pointer has been freed
   - Reports UAF with allocation details and generation number
+  - Resolves **interior pointers** (`p = q + k`) back to their containing
+    allocation via `vm->sorted_allocs` (the same range-query table used by
+    `__builtin_dynamic_object_size`, #647), not just exact base pointers, so
+    a UAF reached through an interior pointer is caught too (#650)
 - **Double-free detection** (always enabled)
   - Automatically detects attempts to free the same pointer twice
   - Works independently of UAF detection setting
@@ -226,6 +230,11 @@ All features listed below can be enabled individually or through the safety leve
   - CHKP opcode validates pointer is within allocated region
   - Checks against originally requested size (not rounded allocation)
   - Detects out-of-bounds array accesses with offset information
+  - Resolves **interior pointers** (`p = q + k`) back to their containing
+    allocation via `vm->sorted_allocs`, not just exact base pointers; a
+    negative index is only rejected once it steps before the *resolved
+    allocation's* start, so `p[-1]` on an interior pointer that stays
+    within the allocation is valid (#650)
 - `--type-checks` **Runtime type checking on pointer dereferences**
   - Tracks allocation type information in heap headers
   - CHKT opcode validates pointer type matches expected type on dereference

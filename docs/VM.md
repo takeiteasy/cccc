@@ -336,15 +336,30 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 
 | Opcode | Description | Controlled by |
 |--------|-------------|---------------|
-| `CHKB` | Array bounds check on `base + scaled_offset` | `CCCC_BOUNDS_CHECKS` |
+| `CHKB` | Array bounds check on `base + scaled_offset`, resolving `base` (exact or interior pointer) via `vm->sorted_allocs` | `CCCC_BOUNDS_CHECKS` |
 | `CHKI` | Uninitialised-variable read check (`bp+offset`) | `CCCC_UNINIT_DETECTION` |
 | `MARKI` | Mark variable at `bp+offset` as initialised | `CCCC_UNINIT_DETECTION` |
 | `MARKA` | Record stack address for dangling-pointer tracking | `CCCC_DANGLING_DETECT` / `CCCC_STACK_INSTR` |
 | `CHKPA` | Validate pointer arithmetic against provenance | `CCCC_INVALID_ARITH` + `CCCC_PROVENANCE_TRACK` |
 | `MARKP` | Record pointer provenance (`origin`, `base`, `size`) | `CCCC_PROVENANCE_TRACK` |
-| `CHKP3` | Pointer validity (NULL, UAF, heap range) | `CCCC_POINTER_CHECKS` |
+| `CHKP3` | Pointer validity (NULL, UAF, heap range), resolving the pointer (exact or interior) via `vm->sorted_allocs` | `CCCC_POINTER_CHECKS` |
 | `CHKA3` | Pointer alignment check | `CCCC_ALIGNMENT_CHECKS` |
 | `CHKT3` | Heap type-tag check on dereference | `CCCC_TYPE_CHECKS` |
+
+`CHKB` and `CHKP3` resolve their pointer's containing allocation via the same
+`sorted_allocs_find` binary search `DYNOBJSZ` uses (#647): the largest
+tracked base address ≤ the pointer. This lets both checks recognise
+**interior pointers** (`p = q + k`) into a heap allocation, not only exact
+base pointers — an out-of-bounds index or a use-after-free reached through
+an interior pointer is now caught (#650). `CHKB`'s bound is
+`AllocHeader.size` (the aligned/usable size); a negative scaled offset is
+only rejected once it steps before the *resolved allocation's* start, so
+`p[-1]` on an interior pointer that stays within the allocation is valid.
+`CHKA3` is unaffected — alignment is pure address arithmetic and was already
+correct for interior pointers. `CHKT3`'s heap type check is dormant
+(`AllocHeader.type_kind` is only ever written as `TY_VOID`, and no codegen
+path currently emits `CHKT3`), so interior-pointer support for it is left to
+a follow-up ticket.
 
 ### Stack Instrumentation Opcodes
 
@@ -664,8 +679,8 @@ When `CCCC_ENABLE_DEBUGGER` is set, every dispatch checks breakpoints, single-st
 
 The VM does not rely on external sanitizer libraries.  Instead, the compiler injects safety opcodes at compile time and the interpreter implements the checks inline:
 
-* **Bounds checks** — `CHKB` before every array-subscript or pointer-dereference that the compiler can annotate with a size.
-* **UAF detection** — `CHKP3` consults `AllocHeader` metadata (magic `0xDEADBEEF`, `freed` bit, generation counter).
+* **Bounds checks** — `CHKB` before every array-subscript or pointer-dereference that the compiler can annotate with a size; resolves interior heap pointers via `vm->sorted_allocs`, not just exact base pointers.
+* **UAF detection** — `CHKP3` consults `AllocHeader` metadata (magic `0xDEADBEEF`, `freed` bit, generation counter); also resolves interior heap pointers via `vm->sorted_allocs`.
 * **Uninitialised reads** — `CHKI` / `MARKI` maintain a per-address hash map of initialised stack slots.
 * **Stack canaries** — `ENT3` writes a canary word; `LEV3` validates it before returning.
 * **CFI** — A shadow stack mirrors the real stack; `CALL` pushes to both, `CALLT` pops the current frame's entry (consuming one shadow-slot but not pushing a new one), and `LEV3` compares before trusting the return address.
