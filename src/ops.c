@@ -2420,6 +2420,46 @@ static inline int op_CALC_fn(VirtualMachine *vm) {
     return 0;
 }
 
+// ========== Dynamic Object Size Opcode ==========
+
+static inline int op_DYNOBJSZ_fn(VirtualMachine *vm) {
+    // Runtime object byte-size: rd = size of the heap allocation at regs[rs].
+    // Format: [DYNOBJSZ] [rd:8|rs:8|unused:48] [type:i64]
+    //
+    // Mirrors __builtin_object_size semantics at runtime:
+    //   type bit 1 == 0 → max fallback (size_t)-1 on unknown (type 0 or 1)
+    //   type bit 1 == 1 → min fallback 0 on unknown (type 2 or 3)
+    //
+    // For base pointers into the VM heap the result is AllocHeader.requested_size.
+    // Interior pointers (p + k) and all non-heap / freed pointers return the
+    // conservative fallback.  (Interior pointer support via sorted_allocs is a
+    // follow-up; see ticket #640 comment.)
+    long long operands = cc_read_word(vm);
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+    long long type = cc_read_i64(vm);
+
+    long long ptr = vm->regs[rs];
+
+    // Conservative fallback depends on the type argument (bit 1).
+    size_t result = (type & 2) ? 0 : (size_t)-1;
+
+    // Only VM heap pointers have an AllocHeader we can trust.
+    if (ptr != 0 &&
+        ptr >= (long long)vm->heap_seg &&
+        ptr < (long long)vm->heap_end) {
+        AllocHeader *h = ((AllocHeader *)ptr) - 1;
+        if (h->magic == 0xDEADBEEF && !h->freed) {
+            // Base pointer: remaining = requested_size (no interior offset).
+            result = h->requested_size;
+        }
+    }
+
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (long long)(size_t)result;
+    return 0;
+}
+
 // ========== Safety Opcodes ==========
 
 static inline int op_CHKB_fn(VirtualMachine *vm) {

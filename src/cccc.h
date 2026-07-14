@@ -276,7 +276,13 @@ extern "C" {
     X(FNMSUB3_F32_FMA, 1) /* f32 single-rounding: fmaf(-rs2,rs3,rs1) (--fma opt-in) */  \
     /* Return-address capture */                                                       \
     X(RETADDR, 3) /* rd = return address n frames up; NULL past outermost frame.   \
-                     Format: [RETADDR][rd:8|unused:56][level:i64] */
+                     Format: [RETADDR][rd:8|unused:56][level:i64] */               \
+    /* Runtime dynamic object sizing */                                             \
+    X(DYNOBJSZ, 3) /* rd = runtime object byte-size at regs[rs].                  \
+                      Reads AllocHeader.requested_size for VM heap allocations;    \
+                      falls back to (size_t)-1 (type 0/1) or 0 (type 2/3) for    \
+                      non-heap, freed, or unknown pointers.                        \
+                      Format: [DYNOBJSZ][rd:8|rs:8|unused:48][type:i64] */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
@@ -880,6 +886,9 @@ typedef enum {
     ND_ASTORE = 58,         // Atomic store via __builtin_atomic_store; lhs=addr ptr, rhs=value
     ND_RETURN_ADDR = 59,    // __builtin_return_address(n) - returns return address n frames up
                             // val = level (compile-time constant); ty = void*
+    ND_DYNOBJ_SIZE = 60,    // __builtin_dynamic_object_size(ptr, type) — runtime heap size.
+                            // lhs = ptr expr (evaluated at runtime); val = type arg (0-3);
+                            // ty = size_t (ulong).  Emits DYNOBJSZ opcode.
 } NodeKind;
 
 // Linked list of locals with __attribute__((cleanup(fn))) in one block scope.

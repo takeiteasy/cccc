@@ -8086,6 +8086,67 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
+    // __builtin_dynamic_object_size(ptr, type) — runtime object-size query.
+    //
+    // GCC semantics mirror __builtin_object_size, with one key difference: when
+    // the object's size cannot be determined at compile time we emit a DYNOBJSZ
+    // opcode that looks up AllocHeader.requested_size at runtime, rather than
+    // falling back unconditionally to a conservative constant.
+    //
+    // The `type` argument encodes the same two bits as __builtin_object_size:
+    //   bit 0 == 0: whole base object (type 0 or 2)
+    //   bit 0 == 1: nearest surrounding subobject (type 1 or 3)
+    //   bit 1 == 0: unknown fallback = (size_t)-1 (type 0 or 1)
+    //   bit 1 == 1: unknown fallback = 0           (type 2 or 3)
+    //
+    // Static fold: we first try objsize_resolve_ptr.  If it succeeds (the
+    // pointer's backing object is statically known — stack/global/constant
+    // offset chain), we emit an ND_NUM constant, identical to the compile-time
+    // builtin.  This ensures correctness for all cases the static pass handles.
+    //
+    // Runtime path: for pointers not resolved statically (heap allocations,
+    // function-parameter pointers, non-constant indices) we build an
+    // ND_DYNOBJ_SIZE node that evaluates `ptr` and emits DYNOBJSZ.  For VM
+    // heap allocations the opcode reads AllocHeader.requested_size; for all
+    // other pointers it returns the conservative fallback.
+    //
+    // Scope limitations (v1):
+    //   - Interior pointers (p + k): return conservative — DYNOBJSZ only
+    //     handles base pointers.  Interior support requires wiring the
+    //     sorted_allocs range-query table (follow-up ticket).
+    //   - stack/VLA/alloca buffers: no AllocHeader → conservative.
+    if (equal(tok, "__builtin_dynamic_object_size")) {
+        tok = skip(vm, tok->next, "(");
+        Node *ptr = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        long long type_arg = const_expr(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+
+        add_type(vm, ptr);
+
+        // Static fold: try to resolve at compile time (same as __builtin_object_size).
+        ObjSizeInfo info;
+        if (objsize_resolve_ptr(vm, ptr, &info)) {
+            int remaining;
+            if (type_arg & 1)
+                remaining = info.sub_size - info.sub_offset;
+            else
+                remaining = info.base_size - info.base_offset;
+            size_t result = remaining > 0 ? (size_t)remaining : 0;
+            Node *node = new_node(vm, ND_NUM, start);
+            node->val = (int64_t)result;
+            node->ty = ty_ulong;
+            return node;
+        }
+
+        // Runtime path: emit DYNOBJSZ opcode that reads AllocHeader at runtime.
+        Node *node = new_node(vm, ND_DYNOBJ_SIZE, start);
+        node->lhs = ptr;
+        node->val = type_arg;
+        node->ty = ty_ulong;
+        return node;
+    }
+
     // __builtin_huge_val() -> double infinity
     if (equal(tok, "__builtin_huge_val")) {
         tok = skip(vm, tok->next, "(");

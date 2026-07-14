@@ -641,7 +641,11 @@ static void opt_constant_fold(VirtualMachine *vm, OptReplacement *repls,
             case CLZ:
             case CTZ:
             case FFS:
-            case BSWAP: {
+            case BSWAP:
+            // DYNOBJSZ is a 3-word op: [DYNOBJSZ][rd:8|rs:8|...][type:i64].
+            // rd is the destination; must invalidate so the constant-fold pass
+            // does not carry a stale value through the pointer-size lookup.
+            case DYNOBJSZ: {
                 int rd = vm->text_seg[pc + 1] & 0xFF;
                 invalidate_reg(&state, rd);
                 break;

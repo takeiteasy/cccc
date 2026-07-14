@@ -5049,6 +5049,17 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         emit_ri(vm, RETADDR, dest_reg, node->val);
         return;
 
+    case ND_DYNOBJ_SIZE: {
+        // __builtin_dynamic_object_size(ptr, type) — runtime heap size lookup.
+        // Evaluate the pointer into a temp register, then emit DYNOBJSZ which
+        // reads AllocHeader.requested_size for VM heap base pointers.
+        int ptr_reg = alloc_temp_reg();
+        gen_expr(vm, node->lhs, ptr_reg);
+        emit_rri(vm, DYNOBJSZ, dest_reg, ptr_reg, node->val);
+        free_temp_reg(ptr_reg);
+        return;
+    }
+
     case ND_BITOP: {
         // Bit-manipulation builtins: val = (op_selector<<8) | bit_width
         int bitop_op = (int)(node->val >> 8);
