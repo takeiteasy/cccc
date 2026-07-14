@@ -4198,6 +4198,12 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         return;
 
     case ND_FUNCALL: {
+        // Capture and clear the tail-call flag immediately so that argument
+        // sub-calls (e.g. return f(g(x))) and inlined bodies never see it.
+        // The captured value is used below when deciding CALL vs CALLT.
+        bool is_tail = vm->compiler.emitting_tail_call;
+        vm->compiler.emitting_tail_call = false;
+
         if (is_complex(node->ty))
             error_tok(vm, node->tok,
                       "complex function return ABI is not supported");
@@ -4849,11 +4855,6 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 emit_lea3(vm, REG_A0, 0);
             }
         }
-
-        // Capture and immediately clear the tail-call flag so that argument
-        // sub-calls (e.g. return f(g(x))) never see it and suppress g's CALL.
-        bool is_tail = vm->compiler.emitting_tail_call;
-        vm->compiler.emitting_tail_call = false;
 
         // Call function
         if (node->lhs->kind == ND_VAR && node->lhs->var->is_function) {
@@ -5700,13 +5701,23 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
         // After gen_expr, pending_tail_callee is set only if CALL was reached;
         // inlining/builtins leave it NULL and we fall through to the LEV3 path.
         // expr_already_eval prevents re-evaluating node->lhs in the LEV3 path below.
+        //
+        // The parser always wraps the return expression in ND_CAST, even for
+        // identity conversions (e.g. int→int).  Strip through those cast wrappers
+        // to expose the underlying ND_FUNCALL for can_emit_tail_call.  Skipping
+        // the cast is safe: in CCCC's 64-bit register model the callee already
+        // returns a value that is typed at the source level, and callers apply
+        // their own narrowing/extension at each use site.
         bool expr_already_eval = false;
-        if (node->lhs && vm->compiler.opt_level >= 1 &&
-            can_emit_tail_call(vm, node->lhs)) {
-            int tco_dest = is_flonum(node->lhs->ty) ? FREG_A0 : REG_A0;
+        Node *tco_expr = node->lhs;
+        while (tco_expr && tco_expr->kind == ND_CAST && tco_expr->lhs)
+            tco_expr = tco_expr->lhs;
+        if (tco_expr && vm->compiler.opt_level >= 1 &&
+            can_emit_tail_call(vm, tco_expr)) {
+            int tco_dest = is_flonum(tco_expr->ty) ? FREG_A0 : REG_A0;
             vm->compiler.emitting_tail_call = true;
             vm->compiler.pending_tail_callee = NULL;
-            gen_expr(vm, node->lhs, tco_dest);
+            gen_expr(vm, tco_expr, tco_dest);
             vm->compiler.emitting_tail_call = false; // belt-and-suspenders; cleared in ND_FUNCALL
             if (vm->compiler.pending_tail_callee) {
                 Obj *tco_fn = vm->compiler.pending_tail_callee;

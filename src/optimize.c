@@ -941,7 +941,7 @@ static void retarget_compacted_bytecode(VirtualMachine *vm, Pc *pc_map,
         if (size <= 0)
             break;
 
-        if (op == JMP || op == CALL) {
+        if (op == JMP || op == CALL || op == CALLT) {
             Pc old_target = vm->text_seg[pc + 1];
             vm->text_seg[pc + 1] = remap_pc(pc_map, old_end, old_target);
         } else if (op == JZ3 || op == JNZ3) {

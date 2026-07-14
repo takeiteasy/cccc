@@ -80,6 +80,25 @@ When codegen detects that a `return` statement's outermost expression is a direc
 
 Mutually-recursive pairs (`A → B → A`) are handled correctly because `CALLT` leaves the caller's return address in place; `B`'s `CALLT` back to `A` reuses `B`'s frame, and so on.
 
+**Interaction with `__builtin_return_address`**
+
+Because `CALLT` unwinds the intermediate frame, `__builtin_return_address(0)` called from inside a tail-called function returns the *original caller's* return address — the frame for the tail-call site no longer exists on the stack.
+
+Example with `-O1`:
+
+```
+// test_fn → tail_wrapper → ra_capture  (CALLT used for tail_wrapper → ra_capture)
+static void *ra_capture(void) { return __builtin_return_address(0); }
+static void *tail_wrapper(void) { return ra_capture(); }  // tail call → CALLT
+```
+
+Inside `ra_capture`:
+* `__builtin_return_address(0)` → return address back into `test_fn` (the original caller); `tail_wrapper`'s frame has been unwound.
+* `__builtin_return_address(1)` → `NULL` (sentinel: `test_fn` is outermost).
+* `__builtin_pc_function_name(__builtin_return_address(0))` → `"test_fn"`, not `"tail_wrapper"`.
+
+This is deterministic and by design: `CALLT` semantics guarantee that the callee's stack view is identical to what it would see if the tail-call site had never existed. Without `-O1` (no TCO), `tail_wrapper`'s frame is present and `__builtin_return_address(0)` returns a PC inside `tail_wrapper`.
+
 ### VM Threads
 
 Both the POSIX `<pthread.h>` and C11 `<threads.h>` layers map thread creation to host pthreads while keeping VM execution correctness-first. Each VM thread receives an independent VM stack/register snapshot and enters the requested VM function with the `void *` argument in `REG_A0`. The VM's text, data, heap, globals, FFI registrations, and safety metadata remain shared by the `CCCC` instance.
