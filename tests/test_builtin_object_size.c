@@ -135,3 +135,106 @@ void test_unknown_ptr_type2_conservative(void) {
     size_t sz = __builtin_object_size(p, 2);
     AssertEq((unsigned long long)sz, 0ULL);
 }
+
+// ---------------------------------------------------------------------------
+// Ternary (cond ? a : b) pointer: resolve both branches, combine with max or
+// min depending on type bit 1.  Both branches must be statically resolvable;
+// if either is unknown the conservative default is returned.
+// ---------------------------------------------------------------------------
+
+[[cccc::test]]
+void test_object_size_ternary_type0_max(void) {
+    // type 0 (whole object, max fallback): return max(100, 10) = 100.
+    char big[100]; char small[10];
+    int cond = 1;
+    size_t sz = __builtin_object_size(cond ? big : small, 0);
+    AssertEq((unsigned long long)sz, 100ULL);
+}
+
+[[cccc::test]]
+void test_object_size_ternary_type1_max(void) {
+    // type 1 (subobject, max fallback): bare arrays have sub == whole → 100.
+    char big[100]; char small[10];
+    int cond = 0;
+    size_t sz = __builtin_object_size(cond ? big : small, 1);
+    AssertEq((unsigned long long)sz, 100ULL);
+}
+
+[[cccc::test]]
+void test_object_size_ternary_type2_min(void) {
+    // type 2 (whole object, min fallback): return min(100, 10) = 10.
+    char big[100]; char small[10];
+    int cond = 1;
+    size_t sz = __builtin_object_size(cond ? big : small, 2);
+    AssertEq((unsigned long long)sz, 10ULL);
+}
+
+[[cccc::test]]
+void test_object_size_ternary_type3_min(void) {
+    // type 3 (subobject, min fallback): min of subobject sizes → 10.
+    char big[100]; char small[10];
+    int cond = 0;
+    size_t sz = __builtin_object_size(cond ? big : small, 3);
+    AssertEq((unsigned long long)sz, 10ULL);
+}
+
+[[cccc::test]]
+void test_object_size_ternary_equal_branches(void) {
+    // Equal-size branches: max == min == 32.
+    char a[32]; char b[32];
+    int cond = 1;
+    AssertEq((unsigned long long)__builtin_object_size(cond ? a : b, 0), 32ULL);
+    AssertEq((unsigned long long)__builtin_object_size(cond ? a : b, 2), 32ULL);
+}
+
+[[cccc::test]]
+void test_object_size_ternary_with_offset(void) {
+    // Ternary with constant offset on each branch.
+    // &big[20]: 80 bytes remaining; &small[5]: 5 bytes remaining.
+    // type 0 → max(80, 5) = 80; type 2 → min(80, 5) = 5.
+    char big[100]; char small[10];
+    int cond = 1;
+    size_t s0 = __builtin_object_size(cond ? &big[20] : &small[5], 0);
+    size_t s2 = __builtin_object_size(cond ? &big[20] : &small[5], 2);
+    AssertEq((unsigned long long)s0, 80ULL);
+    AssertEq((unsigned long long)s2, 5ULL);
+}
+
+[[cccc::test]]
+void test_object_size_ternary_unknown_branch_conservative(void) {
+    // One branch is a pointer variable (unknown) → conservative fallback.
+    char buf[32];
+    char *p = buf; // pointer var → unknown
+    int cond = 1;
+    size_t s0 = __builtin_object_size(cond ? buf : p, 0);
+    size_t s2 = __builtin_object_size(cond ? buf : p, 2);
+    AssertEq((unsigned long long)s0, (unsigned long long)(size_t)-1);
+    AssertEq((unsigned long long)s2, 0ULL);
+}
+
+// ---------------------------------------------------------------------------
+// Union members: base_size reflects the whole union (largest member); sub_size
+// reflects the specific member accessed.
+// ---------------------------------------------------------------------------
+
+[[cccc::test]]
+void test_object_size_union_small_member(void) {
+    // u.a is char[4]; u.b is char[16] (largest).  Union size = 16.
+    // type 0 (whole): 16 bytes from start of union.
+    // type 1 (sub):    4 bytes (sizeof u.a).
+    union { char a[4]; char b[16]; } u;
+    size_t w = __builtin_object_size(&u.a, 0);
+    size_t s = __builtin_object_size(&u.a, 1);
+    AssertEq((unsigned long long)w, (unsigned long long)sizeof(u));
+    AssertEq((unsigned long long)s, 4ULL);
+}
+
+[[cccc::test]]
+void test_object_size_union_large_member(void) {
+    // u.b is the largest member → sub == whole.
+    union { char a[4]; char b[16]; } u;
+    size_t w = __builtin_object_size(&u.b, 0);
+    size_t s = __builtin_object_size(&u.b, 1);
+    AssertEq((unsigned long long)w, (unsigned long long)sizeof(u));
+    AssertEq((unsigned long long)s, 16ULL);
+}

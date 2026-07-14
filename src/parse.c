@@ -8051,6 +8051,11 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // non-constant indices, heap allocations — we fall back to the conservative
     // estimate, preserving _FORTIFY_SOURCE safety.
     //
+    // Ternary (cond ? a : b) pointers: resolve both branches independently and
+    // combine with max (type 0/1) or min (type 2/3), matching GCC behavior.
+    // Union member access is handled by objsize_resolve_lvalue's ND_MEMBER case
+    // (offset == 0 for all union members; base_size reflects the whole union).
+    //
     // The ptr argument is not evaluated (no side-effects emitted), matching GCC.
     // Runtime sizing is a separate builtin (__builtin_dynamic_object_size).
     if (equal(tok, "__builtin_object_size")) {
@@ -8065,20 +8070,31 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // Conservative default: type 0/1 → (size_t)-1, type 2/3 → 0.
         size_t result = (type_arg & 2) ? 0 : (size_t)-1;
 
-        ObjSizeInfo info;
-        if (objsize_resolve_ptr(vm, ptr, &info)) {
-            int remaining;
-            if (type_arg & 1) {
-                // Subobject: bytes remaining from current position within the
-                // nearest surrounding subobject.
-                remaining = info.sub_size - info.sub_offset;
-            } else {
-                // Whole object: bytes remaining from current position to the
-                // end of the base object.
-                remaining = info.base_size - info.base_offset;
+        // Helper: bytes remaining in `info` for this type_arg.
+#define OBJSZ_REMAINING(info) ({                                    \
+    int _rem = (type_arg & 1) ? (info).sub_size  - (info).sub_offset  \
+                               : (info).base_size - (info).base_offset; \
+    _rem > 0 ? (size_t)_rem : (size_t)0; })
+
+        if (ptr->kind == ND_COND) {
+            // Ternary: resolve each branch; combine with max (type 0/1) or
+            // min (type 2/3).  If either branch is unresolvable, keep the
+            // conservative default.
+            ObjSizeInfo ti, ei;
+            if (objsize_resolve_ptr(vm, ptr->then, &ti) &&
+                objsize_resolve_ptr(vm, ptr->els,  &ei)) {
+                size_t sa = OBJSZ_REMAINING(ti);
+                size_t sb = OBJSZ_REMAINING(ei);
+                result = (type_arg & 2) ? (sa < sb ? sa : sb)
+                                        : (sa > sb ? sa : sb);
             }
-            result = remaining > 0 ? (size_t)remaining : 0;
+        } else {
+            ObjSizeInfo info;
+            if (objsize_resolve_ptr(vm, ptr, &info))
+                result = OBJSZ_REMAINING(info);
         }
+
+#undef OBJSZ_REMAINING
 
         Node *node = new_node(vm, ND_NUM, start);
         node->val = (int64_t)result;
@@ -8125,19 +8141,41 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         add_type(vm, ptr);
 
         // Static fold: try to resolve at compile time (same as __builtin_object_size).
-        ObjSizeInfo info;
-        if (objsize_resolve_ptr(vm, ptr, &info)) {
-            int remaining;
-            if (type_arg & 1)
-                remaining = info.sub_size - info.sub_offset;
-            else
-                remaining = info.base_size - info.base_offset;
-            size_t result = remaining > 0 ? (size_t)remaining : 0;
-            Node *node = new_node(vm, ND_NUM, start);
-            node->val = (int64_t)result;
-            node->ty = ty_ulong;
-            return node;
+        // Ternary (ND_COND) is handled by resolving both branches and combining.
+#define DYNOSZ_REMAINING(info) ({                                        \
+    int _rem = (type_arg & 1) ? (info).sub_size  - (info).sub_offset    \
+                               : (info).base_size - (info).base_offset;  \
+    _rem > 0 ? (size_t)_rem : (size_t)0; })
+
+        {
+            bool folded = false;
+            size_t fold_result = 0;
+            if (ptr->kind == ND_COND) {
+                ObjSizeInfo ti, ei;
+                if (objsize_resolve_ptr(vm, ptr->then, &ti) &&
+                    objsize_resolve_ptr(vm, ptr->els,  &ei)) {
+                    size_t sa = DYNOSZ_REMAINING(ti);
+                    size_t sb = DYNOSZ_REMAINING(ei);
+                    fold_result = (type_arg & 2) ? (sa < sb ? sa : sb)
+                                                 : (sa > sb ? sa : sb);
+                    folded = true;
+                }
+            } else {
+                ObjSizeInfo info;
+                if (objsize_resolve_ptr(vm, ptr, &info)) {
+                    fold_result = DYNOSZ_REMAINING(info);
+                    folded = true;
+                }
+            }
+            if (folded) {
+                Node *node = new_node(vm, ND_NUM, start);
+                node->val = (int64_t)fold_result;
+                node->ty = ty_ulong;
+#undef DYNOSZ_REMAINING
+                return node;
+            }
         }
+#undef DYNOSZ_REMAINING
 
         // Runtime path: emit DYNOBJSZ opcode that reads AllocHeader at runtime.
         Node *node = new_node(vm, ND_DYNOBJ_SIZE, start);
