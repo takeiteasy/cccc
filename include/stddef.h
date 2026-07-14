@@ -4,7 +4,7 @@
 #define __STDDEF_H
 
 typedef long ptrdiff_t;
-typedef long size_t;
+typedef unsigned long size_t;
 typedef int wchar_t;
 
 #if __STDC_VERSION__ >= 202311L
