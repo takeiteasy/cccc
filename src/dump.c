@@ -74,6 +74,7 @@ static const char *node_kind_name(NodeKind kind) {
     case ND_ALOAD:         return "ALOAD";
     case ND_ASTORE:        return "ASTORE";
     case ND_FRAME_ADDR:    return "FRAME_ADDR";
+    case ND_RETURN_ADDR:   return "RETURN_ADDR";
     case ND_BLOCK_LITERAL: return "BLOCK_LITERAL";
     case ND_BLOCK_CALL:    return "BLOCK_CALL";
     case ND_MACRO_CALL:    return "MACRO_CALL";
@@ -379,6 +380,7 @@ static void dump_node(FILE *f, Node *node, int depth, int verbose) {
     case ND_VLA_PTR:
     case ND_MEMZERO:
     case ND_FRAME_ADDR:
+    case ND_RETURN_ADDR:
     case ND_NULL_EXPR:
     case ND_NUM:
     case ND_VAR:
@@ -854,6 +856,7 @@ static void dump_ast_json_node(FILE *f, Node *node, int indent) {
     case ND_VLA_PTR:
     case ND_MEMZERO:
     case ND_FRAME_ADDR:
+    case ND_RETURN_ADDR:
     case ND_NULL_EXPR:
     case ND_UNREACHABLE:
         // Leaf nodes with no extra fields

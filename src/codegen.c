@@ -5041,6 +5041,13 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         emit_lea3(vm, dest_reg, 0);
         return;
 
+    case ND_RETURN_ADDR:
+        // __builtin_return_address(n) - returns return address n frames up as void*
+        // Emits RETADDR opcode which walks the saved-bp chain at runtime and
+        // bounds-checks each step.  Returns NULL past the outermost frame.
+        emit_ri(vm, RETADDR, dest_reg, node->val);
+        return;
+
     case ND_BITOP: {
         // Bit-manipulation builtins: val = (op_selector<<8) | bit_width
         int bitop_op = (int)(node->val >> 8);

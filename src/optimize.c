@@ -633,6 +633,7 @@ static void opt_constant_fold(VirtualMachine *vm, OptReplacement *repls,
             case LDA3:
             case LTA3:
             case LEA3:
+            case RETADDR:  // 3-word op: [RETADDR][rd:8|unused:56][level:i64]; writes rd
             // CLZ/CTZ/FFS/BSWAP are 3-word ops (rd|rs, bit/byte-width) that
             // write rd. They fall outside the `default` case's `size == 2`
             // check, so without an explicit case rd's prior constant value

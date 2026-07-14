@@ -775,7 +775,7 @@ These are lowered to equivalent arithmetic comparisons at parse time.
 | `__builtin_alloca(size)` | Dynamically allocate `size` bytes on the stack |
 | `__builtin_alloca_with_align(size, align)` | Like `__builtin_alloca`; `align` is in bits and must be a constant. Only 16-byte alignment is guaranteed; finer alignment is accepted but not enforced. |
 | `__builtin_frame_address(0)` | Returns the current frame's base pointer (level 0 only) |
-| `__builtin_return_address(0)` | Stub: returns `NULL` (level 0 only; real return-address capture tracked in follow-up ticket) |
+| `__builtin_return_address(n)` | Returns the return address `n` frames up the call stack (all levels supported). The value is a VM bytecode offset (`Pc`/`uint32_t`) cast to `void*`, **not** a host machine address — unlike `__builtin_frame_address`, which returns a real `bp` pointer. Returns `NULL` past the outermost frame. Implemented via the `RETADDR` VM opcode, which walks the saved-bp chain with runtime bounds-checking. |
 | `__builtin_object_size(ptr, type)` | Stub: conservative `(size_t)-1` for type 0/1 (max), `0` for type 2/3 (min); sufficient for `_FORTIFY_SOURCE` wrappers to compile correctly (real computation tracked in follow-up ticket) |
 | `__builtin_unreachable()` | Marks an unreachable code path; halts the VM if executed |
 

@@ -273,7 +273,10 @@ extern "C" {
     X(FNMSUB3,         1) /* f64 two-rounding: rs1 minus product, rounded to double */    \
     X(FNMSUB3_F32,     1) /* f32 two-rounding: rs1 minus product, rounded to float */     \
     X(FNMSUB3_FMA,     1) /* f64 single-rounding: fma(-rs2,rs3,rs1)  (--fma opt-in) */   \
-    X(FNMSUB3_F32_FMA, 1) /* f32 single-rounding: fmaf(-rs2,rs3,rs1) (--fma opt-in) */
+    X(FNMSUB3_F32_FMA, 1) /* f32 single-rounding: fmaf(-rs2,rs3,rs1) (--fma opt-in) */  \
+    /* Return-address capture */                                                       \
+    X(RETADDR, 3) /* rd = return address n frames up; NULL past outermost frame.   \
+                     Format: [RETADDR][rd:8|unused:56][level:i64] */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
@@ -875,6 +878,8 @@ typedef enum {
                             // var=lvar, lhs=ND_VAR($@k placeholder)
     ND_ALOAD = 57,          // Atomic load via __builtin_atomic_load; lhs=addr ptr
     ND_ASTORE = 58,         // Atomic store via __builtin_atomic_store; lhs=addr ptr, rhs=value
+    ND_RETURN_ADDR = 59,    // __builtin_return_address(n) - returns return address n frames up
+                            // val = level (compile-time constant); ty = void*
 } NodeKind;
 
 // Linked list of locals with __attribute__((cleanup(fn))) in one block scope.

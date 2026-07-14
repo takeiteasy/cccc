@@ -215,6 +215,7 @@ Multi-word arithmetic and shift opcodes for `_BitInt(N)` types wider than 64 bit
 | `LDA3` | 3 | `regs[rd] = data_seg + byte_offset` |
 | `LTA3` | 3 | `regs[rd] = text_seg + byte_offset` (stores raw offset) |
 | `LEA3` | 3 | `regs[rd] = bp + offset` (local variable address) |
+| `RETADDR` | 3 | `regs[rd] = return address of the nth caller frame`. Walks the saved-bp chain `level` steps from `vm->bp`; each step loads `frame[0]` (saved old-bp). Bounds-checks each frame against the live stack (`vm->sp ≤ frame < vm->initial_sp`). On success, sets `regs[rd] = frame[+1]` (the `Pc` return address stored by `CALL`/`CALLI`). Returns `NULL` (0) past the outermost frame. Format: `[RETADDR][rd:8\|unused:56][level:i64]`. Lowered from `__builtin_return_address(n)`. |
 | `MOV3` | 1 | Register-to-register move |
 
 ### Load / Store

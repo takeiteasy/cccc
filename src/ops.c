@@ -1441,6 +1441,43 @@ static inline int op_LEA3_fn(VirtualMachine *vm) {
     return 0;
 }
 
+static inline int op_RETADDR_fn(VirtualMachine *vm) {
+    // Return address of the nth caller frame.
+    // Format: [RETADDR] [rd:8|unused:56] [level:i64]
+    //
+    // Frame layout (established by ENT3 / CALL):
+    //   frame[+1]  <- return address (pushed by CALL before ENT3)
+    //   frame[+0]  <- saved old_bp   (pushed by ENT3; vm->bp points here)
+    //
+    // For level 0:  regs[rd] = vm->bp[+1]    (current frame's ret addr)
+    // For level n:  walk n saved-bp links up, then read frame[+1]
+    // Returns NULL (0) if the walk exits the live stack (past outermost frame).
+    long long operands = cc_read_word(vm);
+    int rd;
+    DECODE_R(operands, rd);
+    long long level = cc_read_i64(vm);
+
+    long long *frame = vm->bp;
+
+    for (long long i = 0; i < level; i++) {
+        // frame[0] is the saved old_bp; load it to step up one frame
+        long long *next = (long long *)frame[0];
+        // Bounds-check: next must be within the live stack region
+        if (next < vm->sp || next >= vm->initial_sp) {
+            // Past the outermost frame — return NULL
+            if (rd != REG_ZERO)
+                vm->regs[rd] = 0;
+            return 0;
+        }
+        frame = next;
+    }
+
+    // frame[+1] holds the return address for this frame
+    if (rd != REG_ZERO)
+        vm->regs[rd] = frame[1];
+    return 0;
+}
+
 static inline int op_I2F3_fn(VirtualMachine *vm) {
     // Int to float: fregs[rd] = (double)regs[rs]
     // Format: [I2F3] [rd:8|rs:8|unused:48]

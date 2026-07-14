@@ -7715,17 +7715,18 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
-    // __builtin_return_address(0) - returns the return address of the current function.
-    // Stub: returns NULL (a pointer-typed zero). Only level 0 is supported.
-    // TODO: real return-address capture requires a dedicated VM opcode; tracked in follow-up ticket.
+    // __builtin_return_address(n) - returns the return address of the nth caller frame.
+    // The returned value is a VM bytecode offset (Pc, uint32_t) cast to void*, NOT a
+    // host machine address. This differs from __builtin_frame_address which returns bp
+    // as a real host pointer. Returns NULL past the outermost frame.
+    // Lowered to the RETADDR opcode which walks the saved-bp chain at runtime and
+    // bounds-checks each step against the live stack region.
     if (equal(tok, "__builtin_return_address")) {
         tok = skip(vm, tok->next, "(");
         long long level = const_expr(vm, &tok, tok);
-        if (level != 0)
-            error_tok(vm, tok, "__builtin_return_address only supports level 0");
         *rest = skip(vm, tok, ")");
-        Node *node = new_node(vm, ND_NUM, start);
-        node->val = 0;
+        Node *node = new_node(vm, ND_RETURN_ADDR, start);
+        node->val = level;
         node->ty = pointer_to(vm, ty_void);
         return node;
     }
