@@ -3860,7 +3860,12 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             node->inc = expr(vm, &tok, tok);
         tok = skip(vm, tok, ")");
 
+        // DCE-aware suppression: for(;0;){...} — body is statically dead.
+        bool for_body_dead = node->cond && vm->compiler.saw_diag_attr &&
+                             static_branch_value(vm, node->cond) == 0;
+        if (for_body_dead) vm->compiler.dead_code_depth++;
         node->then = stmt(vm, rest, tok);
+        if (for_body_dead) vm->compiler.dead_code_depth--;
 
         leave_scope(vm);
         vm->compiler.brk_label = brk;
@@ -3885,7 +3890,12 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         vm->compiler.brk_cleanup_depth = vm->compiler.cleanup_scope_depth;
         vm->compiler.cont_cleanup_depth = vm->compiler.cleanup_scope_depth;
 
+        // DCE-aware suppression: while(0){...} — body is statically dead.
+        bool whl_body_dead = vm->compiler.saw_diag_attr &&
+                             static_branch_value(vm, node->cond) == 0;
+        if (whl_body_dead) vm->compiler.dead_code_depth++;
         node->then = stmt(vm, rest, tok);
+        if (whl_body_dead) vm->compiler.dead_code_depth--;
 
         vm->compiler.brk_label = brk;
         vm->compiler.cont_label = cont;
@@ -5011,7 +5021,17 @@ static Node *conditional(VirtualMachine *vm, Token **rest, Token *tok) {
 
     Node *node = new_node(vm, ND_COND, tok);
     node->cond = cond;
+
+    // DCE-aware suppression: 0 ? dead() : live() — then branch is dead;
+    // 1 ? live() : dead() — else branch is dead.
+    int ternary_bv = vm->compiler.saw_diag_attr
+                         ? static_branch_value(vm, cond)
+                         : -1;
+    bool then_dead = (ternary_bv == 0), else_dead = (ternary_bv == 1);
+
+    if (then_dead) vm->compiler.dead_code_depth++;
     node->then = expr(vm, &tok, tok->next);
+    if (then_dead) vm->compiler.dead_code_depth--;
 
     // Try to recover if ':' is missing
     if (!equal(tok, ":")) {
@@ -5027,7 +5047,9 @@ static Node *conditional(VirtualMachine *vm, Token **rest, Token *tok) {
         tok = tok->next;
     }
 
+    if (else_dead) vm->compiler.dead_code_depth++;
     node->els = conditional(vm, rest, tok);
+    if (else_dead) vm->compiler.dead_code_depth--;
     return node;
 }
 
@@ -5036,7 +5058,14 @@ static Node *logor(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = logand(vm, &tok, tok);
     while (equal(tok, "||")) {
         Token *start = tok;
+        // DCE-aware suppression: true || chk() — RHS is statically dead.
+        // static_branch_value handles both Tier-1 (const) and Tier-2
+        // (unsigned tautology), matching the if-statement treatment.
+        bool rhs_dead = vm->compiler.saw_diag_attr &&
+                        static_branch_value(vm, node) == 1;
+        if (rhs_dead) vm->compiler.dead_code_depth++;
         Node *rhs = logand(vm, &tok, tok->next);
+        if (rhs_dead) vm->compiler.dead_code_depth--;
         if (vm->compiler.warnings & CCCC_WARN_LOGICAL_OP) {
             if (is_const_expr(vm, node))
                 warn_tok(vm, start, CCCC_WARN_LOGICAL_OP,
@@ -5056,7 +5085,12 @@ static Node *logand(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = bitor(vm, &tok, tok);
     while (equal(tok, "&&")) {
         Token *start = tok;
+        // DCE-aware suppression: false && chk() — RHS is statically dead.
+        bool rhs_dead = vm->compiler.saw_diag_attr &&
+                        static_branch_value(vm, node) == 0;
+        if (rhs_dead) vm->compiler.dead_code_depth++;
         Node *rhs = bitor(vm, &tok, tok->next);
+        if (rhs_dead) vm->compiler.dead_code_depth--;
         if (vm->compiler.warnings & CCCC_WARN_LOGICAL_OP) {
             if (is_const_expr(vm, node))
                 warn_tok(vm, start, CCCC_WARN_LOGICAL_OP,
