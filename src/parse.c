@@ -6096,6 +6096,13 @@ static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *
                 continue;
             }
 
+            // GNU equivalent of [[nodiscard]]: warn if return value is discarded
+            if (is_attr_name(tok, "warn_unused_result")) {
+                tok = tok->next;
+                apply_semantic_attr(ty, attr, attr_tok, false, false, true, NULL);
+                continue;
+            }
+
             // Handle optimize attribute: __attribute__((optimize("O2"))) or optimize(2)
             if (is_attr_name(tok, "optimize")) {
                 tok = tok->next;
