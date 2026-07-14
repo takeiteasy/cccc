@@ -77,6 +77,8 @@ typedef struct {
     bool is_func_const;
     char *deprecated_msg;
     char *nodiscard_msg;
+    char *attr_error_msg;   // __attribute__((error("msg")))
+    char *attr_warning_msg; // __attribute__((warning("msg")))
     Token *attribute_tok;
     CustomAttrUse *custom_attrs;
     int align;
@@ -5868,7 +5870,8 @@ static Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr
     if (!attr || (!attr->is_maybe_unused && !attr->is_deprecated &&
                   !attr->is_noreturn && !attr->is_nodiscard &&
                   !attr->is_pure && !attr->is_func_const &&
-                  !attr->format_style && !attr->cleanup_fn))
+                  !attr->format_style && !attr->cleanup_fn &&
+                  !attr->attr_error_msg && !attr->attr_warning_msg))
         return ty;
     ty = copy_type(vm, ty);
     apply_semantic_attr(ty, NULL, attr->attribute_tok, attr->is_maybe_unused,
@@ -5890,6 +5893,10 @@ static Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr
     // (cleanup is a variable attribute, not a real type attribute.)
     if (attr->cleanup_fn)
         ty->cleanup_fn = attr->cleanup_fn;
+    if (attr->attr_error_msg && ty->kind == TY_FUNC)
+        ty->attr_error_msg = attr->attr_error_msg;
+    if (attr->attr_warning_msg && ty->kind == TY_FUNC)
+        ty->attr_warning_msg = attr->attr_warning_msg;
     return ty;
 }
 
@@ -5906,6 +5913,10 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
         dst->deprecated_msg = src->deprecated_msg;
     if (!dst->nodiscard_msg)
         dst->nodiscard_msg = src->nodiscard_msg;
+    if (!dst->attr_error_msg)
+        dst->attr_error_msg = src->attr_error_msg;
+    if (!dst->attr_warning_msg)
+        dst->attr_warning_msg = src->attr_warning_msg;
     if (src->format_style) {
         dst->format_style = src->format_style;
         dst->format_string_index = src->format_string_index;
@@ -6100,6 +6111,55 @@ static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *
             if (is_attr_name(tok, "warn_unused_result")) {
                 tok = tok->next;
                 apply_semantic_attr(ty, attr, attr_tok, false, false, true, NULL);
+                continue;
+            }
+
+            // __attribute__((error("msg"))): if this function is called (and the call is
+            // not eliminated), emit a compile-time error with the given message.
+            // Note: CCCC has no AST-level DCE, so the error fires on every syntactic call.
+            // A DCE-aware version is tracked in the follow-up ticket.
+            if (is_attr_name(tok, "error")) {
+                tok = tok->next;
+                char *message = NULL;
+                if (equal(tok, "(")) {
+                    tok = tok->next;
+                    if (tok->kind == TK_STR)
+                        message = tok->str;
+                    // Skip to closing paren
+                    int depth = 1;
+                    while (depth > 0) {
+                        if (equal(tok, "(")) depth++;
+                        else if (equal(tok, ")")) depth--;
+                        tok = tok->next;
+                    }
+                }
+                if (!vm->compiler.in_type_lookahead) {
+                    if (ty) ty->attr_error_msg = message ? message : "";
+                    if (attr) attr->attr_error_msg = message ? message : "";
+                }
+                continue;
+            }
+
+            // __attribute__((warning("msg"))): emit a compile-time warning when called.
+            // Same DCE caveat as error above.
+            if (is_attr_name(tok, "warning")) {
+                tok = tok->next;
+                char *message = NULL;
+                if (equal(tok, "(")) {
+                    tok = tok->next;
+                    if (tok->kind == TK_STR)
+                        message = tok->str;
+                    int depth = 1;
+                    while (depth > 0) {
+                        if (equal(tok, "(")) depth++;
+                        else if (equal(tok, ")")) depth--;
+                        tok = tok->next;
+                    }
+                }
+                if (!vm->compiler.in_type_lookahead) {
+                    if (ty) ty->attr_warning_msg = message ? message : "";
+                    if (attr) attr->attr_warning_msg = message ? message : "";
+                }
                 continue;
             }
 
@@ -7144,6 +7204,15 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
             error_tok(vm, tok, "too few arguments");
         }
     }
+
+    // __attribute__((error("msg"))): every call to this function is a compile error.
+    // Note: fires on every syntactic call; CCCC has no AST-level DCE to suppress it.
+    if (ty->attr_error_msg)
+        error_tok(vm, fn->tok, "%s", ty->attr_error_msg);
+
+    // __attribute__((warning("msg"))): emit a compile-time warning on every call.
+    if (ty->attr_warning_msg)
+        warn_tok(vm, fn->tok, CCCC_WARN_ATTRIBUTES, "%s", ty->attr_warning_msg);
 
     // Validate format string arguments when -F is active
     if (!deferred_splice && (vm->flags & CCCC_FORMAT_STR_CHECKS))

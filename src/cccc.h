@@ -767,6 +767,8 @@ struct Type {
     bool is_func_const; // __attribute__((const)): no side effects, no global reads
     char *deprecated_msg;
     char *nodiscard_msg;
+    char *attr_error_msg;   // __attribute__((error("msg"))): error if callee is called
+    char *attr_warning_msg; // __attribute__((warning("msg"))): warn if callee is called
     struct CustomAttrUse *custom_attrs;
     struct Obj *cleanup_fn; // transport: __attribute__((cleanup(fn))); copied to Obj by new_var()
 
@@ -1025,6 +1027,8 @@ struct Obj {
     bool is_local_symbol;
     char *deprecated_msg;
     char *nodiscard_msg;
+    char *attr_error_msg;   // __attribute__((error("msg")))
+    char *attr_warning_msg; // __attribute__((warning("msg")))
 
     // Per-function optimization level (GCC-style: attribute overrides global -O)
     int  fn_optimize_level; // requested opt level (0–4); only valid if fn_optimize_set
