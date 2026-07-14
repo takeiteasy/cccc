@@ -27,6 +27,56 @@ static int is_valid_vm_address(VirtualMachine *vm, void *addr) {
     return 0;
 }
 
+// ============================================================================
+// Public PC-to-symbol API (cc_pc_to_name / cc_pc_to_source)
+// These are the building blocks for __builtin_pc_function_name and
+// __builtin_pc_source_location, exposed via the FFI shims below, and also
+// directly callable by embedders through cccc.h.
+// ============================================================================
+
+const char *cc_pc_to_name(VirtualMachine *vm, Pc pc) {
+    if (!vm || pc == CCCC_INVALID_PC)
+        return NULL;
+    long long pc_offset = (long long)pc;
+    for (Obj *fn = vm->compiler.globals; fn; fn = fn->next) {
+        if (!fn->is_function || !fn->body || !fn->name)
+            continue;
+        if (pc_offset >= fn->code_addr && pc_offset < fn->code_end_addr)
+            return fn->name;
+    }
+    return NULL;
+}
+
+int cc_pc_to_source(VirtualMachine *vm, Pc pc, const char **out_file,
+                    int *out_line) {
+    if (out_file) *out_file = NULL;
+    if (out_line) *out_line = 0;
+    if (!vm || pc == CCCC_INVALID_PC)
+        return 0;
+    File *file = NULL;
+    int line_no = 0;
+    if (!cc_get_source_location(vm, pc, &file, &line_no, NULL))
+        return 0;
+    if (out_file) *out_file = file ? file->name : NULL;
+    if (out_line) *out_line = line_no;
+    return 1;
+}
+
+// ============================================================================
+// FFI shims: thin wrappers called from VM bytecode via the CALLF path.
+// They read cc_running_vm (set by cc_run_at) to obtain the live VM pointer.
+// ============================================================================
+
+static const char *__cccc_pc_to_name(void *pc) {
+    return cc_pc_to_name(cc_running_vm, (Pc)(uintptr_t)pc);
+}
+
+static int __cccc_pc_to_source(void *pc, const char **out_file, int *out_line) {
+    return cc_pc_to_source(cc_running_vm, (Pc)(uintptr_t)pc, out_file, out_line);
+}
+
+// Refactored helper — now delegates to the public API so there is no duplicated
+// globals-scan logic.
 static Obj *debugger_current_function(VirtualMachine *vm) {
     if (!vm || vm->pc == CCCC_INVALID_PC)
         return NULL;
@@ -1704,6 +1754,24 @@ int debugger_check_watchpoint(VirtualMachine *vm, void *addr, int size, int acce
 }
 
 // ========== Random Canary Generation ==========
+
+// ============================================================================
+// Symbolize runtime registration
+// Register the FFI shims so that __builtin_pc_function_name /
+// __builtin_pc_source_location work in every compilation (not just --testing).
+// Called unconditionally from main.c after the comptime pass.
+// ============================================================================
+
+void cc_load_symbolize_runtime(VirtualMachine *vm) {
+    // __cccc_pc_to_name(void *pc) -> const char *
+    // 1 argument (pc as void*); returns a pointer (long long register slot,
+    // returns_double=0).
+    cc_register_cfunc(vm, "__cccc_pc_to_name", (void *)__cccc_pc_to_name, 1, 0);
+
+    // __cccc_pc_to_source(void *pc, const char **file, int *line) -> int
+    // 3 arguments; returns int (returns_double=0).
+    cc_register_cfunc(vm, "__cccc_pc_to_source", (void *)__cccc_pc_to_source, 3, 0);
+}
 
 long long generate_random_canary(void) {
     long long canary = 0;

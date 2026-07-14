@@ -25,6 +25,14 @@
 #include <pthread.h>
 #endif
 
+// Global pointer to the currently executing VM instance.
+// Set at the start of cc_run_at and cleared on return.
+// Used by FFI shims (e.g. __cccc_pc_to_name) that need to reach the live VM
+// without an explicit vm parameter, mirroring the __builtin_current_vm pattern.
+// Protected by the recursive GIL (cccc_gil_acquire/release), so this is safe
+// even when multiple VMs run sequentially in a process.
+VirtualMachine *cc_running_vm = NULL;
+
 #define CCCC_DYN_TOKEN_BASE (-0x4a434300LL)
 
 static void cccc_set_dyn_error(VirtualMachine *vm, const char *fmt, ...) {
@@ -1871,6 +1879,7 @@ int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv) {
     if (!vm || !vm->text_seg) {
         error("VM not initialized - call cc_compile first");
     }
+    cc_running_vm = vm;
     cccc_gil_acquire(vm);
     cc_vm_profile_reset(vm);
     vm->dbg.host_fault_signal = 0;
@@ -1929,6 +1938,7 @@ int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv) {
     if (rc == CCCC_HOST_SIGNAL_RC && vm->dbg.host_fault_signal > 0)
         rc = 128 + vm->dbg.host_fault_signal;
     cccc_gil_release(vm);
+    cc_running_vm = NULL;
     return rc;
 }
 

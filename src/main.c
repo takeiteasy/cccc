@@ -2056,6 +2056,7 @@ int main(int argc, const char *argv[]) {
         cc_load_test_runtime(&vm);
     if (build_mode)
         cc_load_build_runtime(&vm);
+    cc_load_symbolize_runtime(&vm);
 
     input_progs = calloc(input_files_count, sizeof(Obj *));
     for (int i = 0; i < input_files_count; i++) {

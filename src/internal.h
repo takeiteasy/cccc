@@ -748,8 +748,13 @@ char *fetch_url_to_cache(VirtualMachine *vm, const char *url);
 // stdlib
 //
 
+// vm.c — global pointer to the currently executing VM (set/cleared by cc_run_at)
+extern VirtualMachine *cc_running_vm;
+
 // testing.c
 void   cc_load_test_runtime(VirtualMachine *vm);
+// debugger.c
+void   cc_load_symbolize_runtime(VirtualMachine *vm);
 Token *cc_inject_test_header(VirtualMachine *vm);
 int    cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts);
 

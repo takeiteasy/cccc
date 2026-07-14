@@ -2038,6 +2038,8 @@ typedef struct Compiler {
     Obj *builtin_dlerror;  // VM-managed dlerror
     Obj *builtin_block_copy; // Block_copy() heap-duplication helper (__cccc_block_copy_impl)
     Obj *builtin_free;       // free() prototype so Block_release always resolves (#458)
+    Obj *builtin_pc_to_name;   // __builtin_pc_function_name: (void*) -> const char*
+    Obj *builtin_pc_to_source; // __builtin_pc_source_location: (void*, const char**, int*) -> int
     TypeNameRecord *type_names; // Persistent typedef/tag declarations for -m
 
     // Arena allocator for parser frontend (tokens, AST, preprocessor state)
@@ -3093,6 +3095,34 @@ int cc_add_watchpoint(VirtualMachine *vm, void *address, int size, int type,
  @param index Watchpoint index to remove.
 */
 void cc_remove_watchpoint(VirtualMachine *vm, int index);
+
+/*!
+ @function cc_pc_to_name
+ @abstract Map a program counter to the name of the enclosing function.
+ @param vm The CCCC instance.
+ @param pc Instruction-word index (as returned by __builtin_return_address).
+ @return The C function name string if the PC falls within a known function's
+         code range, or NULL if not found. The returned pointer is owned by the
+         VM and remains valid for the lifetime of the vm. This function does
+         NOT require the debugger / -g to be enabled.
+*/
+const char *cc_pc_to_name(VirtualMachine *vm, Pc pc);
+
+/*!
+ @function cc_pc_to_source
+ @abstract Map a program counter to a source file name and line number.
+ @param vm The CCCC instance.
+ @param pc Instruction-word index (as returned by __builtin_return_address).
+ @param out_file On success, receives a pointer to the source file name string
+                 (owned by the VM). Set to NULL on failure.
+ @param out_line On success, receives the 1-based line number. Set to 0 on
+                 failure.
+ @return 1 if the source location was found, 0 if not. Requires the program to
+         have been compiled with -g (debugger/source-map enabled); without -g
+         this always returns 0 with out_file=NULL, out_line=0.
+*/
+int cc_pc_to_source(VirtualMachine *vm, Pc pc, const char **out_file,
+                    int *out_line);
 
 /*!
  @function cc_get_source_location

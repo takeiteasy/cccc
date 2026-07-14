@@ -174,10 +174,64 @@ otherwise inherit the parent's TTY and hang waiting on debugger input).
 
 CCCC provides a programmatic API for accessing source location information, which is useful for building custom debugging tools or IDE integrations.
 
-#### Getting Source Location
+#### Symbolizing a PC from User Code
+
+Two builtins compose with `__builtin_return_address` to produce human-readable symbolization from within bytecode programs:
 
 ```c
-// Get source location for a given PC address
+#include <stdio.h>
+
+void print_caller_info(void) {
+    // Capture the return address (= a VM bytecode offset, not a host address).
+    void *ra = __builtin_return_address(0);
+
+    // Map to the enclosing function name — always available, no -g required.
+    const char *fn = __builtin_pc_function_name(ra);
+
+    // Map to file/line — requires -g; gracefully returns NULL/0 without it.
+    const char *file = NULL;
+    int line = 0;
+    __builtin_pc_source_location(ra, &file, &line);
+
+    if (file)
+        printf("called from %s at %s:%d\n", fn ? fn : "?", file, line);
+    else
+        printf("called from %s\n", fn ? fn : "?");
+}
+```
+
+#### Embedder C API
+
+The same lookups are available to embedders through `cccc.h`:
+
+```c
+// Map a bytecode PC to the enclosing function name.
+// Does NOT require -g. Returns NULL if not found.
+const char *cc_pc_to_name(VirtualMachine *vm, Pc pc);
+
+// Map a bytecode PC to a source file name and 1-based line number.
+// Requires -g. Returns 1 on success (sets *out_file, *out_line);
+// returns 0 and zeros the outputs on failure.
+int cc_pc_to_source(VirtualMachine *vm, Pc pc, const char **out_file, int *out_line);
+```
+
+Example:
+
+```c
+// Symbolize the current PC from the embedder side.
+const char *name = cc_pc_to_name(&vm, vm.pc);
+const char *file = NULL;
+int line = 0;
+cc_pc_to_source(&vm, vm.pc, &file, &line);
+if (name) printf("in %s", name);
+if (file) printf(" (%s:%d)", file, line);
+putchar('\n');
+```
+
+#### Getting Source Location (low-level)
+
+```c
+// Get source file location for a given PC address (requires -g).
 File *file = NULL;
 int line_no = 0;
 int col_no = 0;

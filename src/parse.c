@@ -7987,6 +7987,56 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
+    // __builtin_pc_function_name(pc) — map a VM bytecode pc (void*) to the
+    // name of the enclosing C function.  Composes with __builtin_return_address:
+    //   const char *fn = __builtin_pc_function_name(__builtin_return_address(0));
+    // Returns NULL if the pc is NULL or falls outside all known function ranges.
+    // Works in all builds; does NOT require -g.
+    // Lowered to a CALLF to the __cccc_pc_to_name FFI shim registered by
+    // cc_load_symbolize_runtime.
+    if (equal(tok, "__builtin_pc_function_name")) {
+        tok = skip(vm, tok->next, "(");
+        Node *arg = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        Node *node = new_unary(vm, ND_FUNCALL,
+            new_var_node(vm, vm->compiler.builtin_pc_to_name, arg->tok), arg->tok);
+        node->func_ty = vm->compiler.builtin_pc_to_name->ty;
+        node->ty = vm->compiler.builtin_pc_to_name->ty->return_ty;
+        node->args = arg;
+        add_type(vm, arg);
+        return node;
+    }
+
+    // __builtin_pc_source_location(pc, &file, &line) — map a VM bytecode pc
+    // (void*) to a source file name and line number.  Returns 1 on success,
+    // 0 if the source map is unavailable (requires -g) or the pc is unknown.
+    // On success, *file and *line are set; on failure both are zeroed.
+    // Composes with __builtin_return_address:
+    //   const char *file; int line;
+    //   __builtin_pc_source_location(__builtin_return_address(0), &file, &line);
+    // Lowered to a CALLF to the __cccc_pc_to_source FFI shim.
+    if (equal(tok, "__builtin_pc_source_location")) {
+        tok = skip(vm, tok->next, "(");
+        Node *pc_arg = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *file_arg = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *line_arg = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        Node *node = new_unary(vm, ND_FUNCALL,
+            new_var_node(vm, vm->compiler.builtin_pc_to_source, pc_arg->tok),
+            pc_arg->tok);
+        node->func_ty = vm->compiler.builtin_pc_to_source->ty;
+        node->ty = vm->compiler.builtin_pc_to_source->ty->return_ty;
+        node->args = pc_arg;
+        pc_arg->next = file_arg;
+        file_arg->next = line_arg;
+        add_type(vm, pc_arg);
+        add_type(vm, file_arg);
+        add_type(vm, line_arg);
+        return node;
+    }
+
     // __builtin_object_size(ptr, type) — compile-time object size.
     //
     // The `type` argument encodes two independent bits:
@@ -9590,6 +9640,30 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     strcmp_ty->params = pointer_to(vm, ty_char);
     strcmp_ty->params->next = pointer_to(vm, ty_char);
     vm->compiler.builtin_strcmp = new_private_func_obj(vm, "strcmp", strcmp_ty);
+
+    // __cccc_pc_to_name(void *pc) -> const char*
+    // Private stub for __builtin_pc_function_name — maps a VM bytecode offset
+    // (returned by __builtin_return_address) to the enclosing function name.
+    Type *pc_to_name_ty = func_type(vm, pointer_to(vm, copy_type(vm, ty_char)));
+    pc_to_name_ty->return_ty->base->is_const = true;  // const char *
+    pc_to_name_ty->params = pointer_to(vm, ty_void);
+    vm->compiler.builtin_pc_to_name =
+        new_private_func_obj(vm, "__cccc_pc_to_name", pc_to_name_ty);
+
+    // __cccc_pc_to_source(void *pc, const char **file, int *line) -> int
+    // Private stub for __builtin_pc_source_location.
+    Type *pc_to_src_ty = func_type(vm, ty_int);
+    Type *pc_param = pointer_to(vm, ty_void);
+    // const char **:  pointer to (const char *)
+    Type *const_char_p = pointer_to(vm, copy_type(vm, ty_char));
+    const_char_p->base->is_const = true;
+    Type *file_param = pointer_to(vm, const_char_p);
+    Type *line_param = pointer_to(vm, ty_int);
+    pc_to_src_ty->params = pc_param;
+    pc_param->next = file_param;
+    file_param->next = line_param;
+    vm->compiler.builtin_pc_to_source =
+        new_private_func_obj(vm, "__cccc_pc_to_source", pc_to_src_ty);
 
     // setjmp(jmp_buf) -> int
     // jmp_buf is an array type, but we'll treat it as a pointer for now
