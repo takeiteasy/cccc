@@ -186,7 +186,7 @@ language coverage figures apply.
 |---|---|---|
 | Statement expressions `({ ... })` | ✓ | |
 | 128-bit integers `__int128` / `__int128_t` / `__uint128_t` | ✓ | Implemented on top of the `_BitInt(128)` machinery (multi-word, address-based storage). `unsigned __int128` is honoured; `__SIZEOF_INT128__` is defined so feature-detecting code selects these paths |
-| `__attribute__((...))` | ~ | Parsed; `aligned`, `packed`, `unused`, `deprecated`, `format`, `nodiscard`, `warn_unused_result`, `fallthrough`, `noreturn` supported (see [Attributes](#attributes) below) |
+| `__attribute__((...))` | ~ | Parsed; `aligned`, `packed`, `unused`, `deprecated`, `format`, `nodiscard`, `warn_unused_result`, `fallthrough`, `noreturn`, `error`, `warning` supported (see [Attributes](#attributes) below) |
 | Labels as values `&&label` | ✓ | |
 | Computed goto `goto *expr` | ✓ | |
 | Switch case ranges `case 1 ... 5:` | ✓ | |
@@ -306,6 +306,8 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 | `noreturn` | C23 / GNU | ✓ | Emits `BTRAP` after calls; warns on returns |
 | `optimize("ON")` / `optimize(N)` | GNU / CCCC | ✓ | Per-function optimization level (0–4); attribute wins over global `-O` |
 | `cleanup(fn)` | GNU | ✓ | Scope-exit callback: calls `fn(&var)` when the variable goes out of scope |
+| `error("msg")` | GNU | ~ | Stub: emits a compile-time error on every call to the decorated function; no DCE suppression (follow-up ticket filed) |
+| `warning("msg")` | GNU | ~ | Stub: emits a compile-time warning on every call; same DCE caveat as `error` |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
 ### Supported Attributes
@@ -773,6 +775,8 @@ These are lowered to equivalent arithmetic comparisons at parse time.
 | `__builtin_alloca(size)` | Dynamically allocate `size` bytes on the stack |
 | `__builtin_alloca_with_align(size, align)` | Like `__builtin_alloca`; `align` is in bits and must be a constant. Only 16-byte alignment is guaranteed; finer alignment is accepted but not enforced. |
 | `__builtin_frame_address(0)` | Returns the current frame's base pointer (level 0 only) |
+| `__builtin_return_address(0)` | Stub: returns `NULL` (level 0 only; real return-address capture tracked in follow-up ticket) |
+| `__builtin_object_size(ptr, type)` | Stub: conservative `(size_t)-1` for type 0/1 (max), `0` for type 2/3 (min); sufficient for `_FORTIFY_SOURCE` wrappers to compile correctly (real computation tracked in follow-up ticket) |
 | `__builtin_unreachable()` | Marks an unreachable code path; halts the VM if executed |
 
 #### String Builtins

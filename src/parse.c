@@ -7715,6 +7715,39 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
+    // __builtin_return_address(0) - returns the return address of the current function.
+    // Stub: returns NULL (a pointer-typed zero). Only level 0 is supported.
+    // TODO: real return-address capture requires a dedicated VM opcode; tracked in follow-up ticket.
+    if (equal(tok, "__builtin_return_address")) {
+        tok = skip(vm, tok->next, "(");
+        long long level = const_expr(vm, &tok, tok);
+        if (level != 0)
+            error_tok(vm, tok, "__builtin_return_address only supports level 0");
+        *rest = skip(vm, tok, ")");
+        Node *node = new_node(vm, ND_NUM, start);
+        node->val = 0;
+        node->ty = pointer_to(vm, ty_void);
+        return node;
+    }
+
+    // __builtin_object_size(ptr, type) - conservative stub for _FORTIFY_SOURCE.
+    // Returns (size_t)-1 for type 0/1 (unknown = max, safe conservative estimate).
+    // Returns 0 for type 2/3 (unknown = min, safe conservative estimate).
+    // TODO: compute real object sizes from the pointed-to object; tracked in follow-up ticket.
+    if (equal(tok, "__builtin_object_size")) {
+        tok = skip(vm, tok->next, "(");
+        Node *ptr = assign(vm, &tok, tok);
+        (void)ptr;
+        tok = skip(vm, tok, ",");
+        long long type_arg = const_expr(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        Node *node = new_node(vm, ND_NUM, start);
+        // type 0/1: conservative max (unknown = unlimited); type 2/3: conservative min (unknown = 0)
+        node->val = (type_arg <= 1) ? (long long)(size_t)-1 : 0;
+        node->ty = ty_ulong;
+        return node;
+    }
+
     // __builtin_huge_val() -> double infinity
     if (equal(tok, "__builtin_huge_val")) {
         tok = skip(vm, tok->next, "(");
