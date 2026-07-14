@@ -2367,12 +2367,19 @@ struct VirtualMachine {
                             // StackVarMeta)
     HashMap ptr_tags; // ptr address → creation_generation (CCCC_MEMORY_TAGGING)
 
-    // Sorted allocation array for O(log n) range queries (CHKP/CHKT performance
-    // and heap provenance)
+    // Sorted allocation array for O(log n) base-address range queries.
+    // Populated by MALC (CALC/REALC delegate to MALC) as a simple append —
+    // the VM heap is a bump allocator so heap_ptr only grows, meaning every
+    // new base address is higher than all previous ones and the array stays
+    // sorted without a search. Entries for freed allocations are left in
+    // place (addresses are never reused) and are filtered out by checking
+    // AllocHeader.freed at lookup time. Used by DYNOBJSZ to resolve interior
+    // pointers (p + k) to their containing allocation; CHKB/CHKP3 could use
+    // the same table for interior-pointer provenance checks (follow-up).
     struct {
-        void **addresses;      // Sorted array of base addresses
+        void **addresses;      // Sorted array of base addresses (ascending)
         AllocHeader **headers; // Parallel array of headers
-        int count;             // Number of active allocations
+        int count;             // Number of tracked allocations (incl. freed)
         int capacity;          // Allocated array capacity
     } sorted_allocs;
 

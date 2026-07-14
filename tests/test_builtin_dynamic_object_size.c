@@ -11,12 +11,15 @@
 //
 // Runtime path: uses the VM heap (-V / --vm-heap) so that malloc/calloc/
 // realloc are routed through the MALC/CALC/REALC opcodes which write an
-// AllocHeader before each allocation.  DYNOBJSZ reads
-// AllocHeader.requested_size for base pointers into this heap.
+// AllocHeader before each allocation and record the base address in
+// vm->sorted_allocs.  DYNOBJSZ binary-searches sorted_allocs for the
+// allocation containing the pointer (base or interior) and returns
+// AllocHeader.requested_size - offset.
 //
-// Conservative fallback: function-parameter stack pointers, interior heap
-// pointers (p + k in v1), freed pointers, and non-VM-heap pointers all
-// return (size_t)-1 (type 0/1) or 0 (type 2/3).
+// Conservative fallback: function-parameter stack pointers, freed pointers,
+// out-of-bounds interior pointers (past requested_size, e.g. into alignment
+// padding), and non-VM-heap pointers all return (size_t)-1 (type 0/1) or 0
+// (type 2/3).
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -167,20 +170,87 @@ void test_dynobj_param_ptr_type2(void) {
     AssertEq((unsigned long long)sz, 0ULL);
 }
 
+// ---------------------------------------------------------------------------
+// Interior heap pointers (p + k) — resolved via the vm->sorted_allocs
+// base-address range query (binary search for the containing allocation).
+// ---------------------------------------------------------------------------
+
 [[cccc::test(flags = "-V")]]
-void test_dynobj_interior_heap_ptr_conservative(void) {
-    // v1 limitation: interior pointers (p + k) are not yet backed by the
-    // sorted_allocs range query → conservative fallback is returned.
-    // This is always safe (never a false pass) and documented behaviour.
-    // Interior pointer support is tracked as a follow-up ticket.
+void test_dynobj_interior_heap_ptr_type0(void) {
     char *p = malloc(64);
     AssertNotNull(p);
     char *interior = p + 10;
+    // 64 - 10 = 54 bytes remaining.
     size_t sz = __builtin_dynamic_object_size(interior, 0);
-    // interior = p + 10: ((AllocHeader*)interior)-1 does not have
-    // magic 0xDEADBEEF → returns conservative (size_t)-1.
+    AssertEq((unsigned long long)sz, 54ULL);
+    free(p);
+}
+
+[[cccc::test(flags = "-V")]]
+void test_dynobj_interior_heap_ptr_type2(void) {
+    char *p = malloc(64);
+    AssertNotNull(p);
+    char *interior = p + 40;
+    size_t sz = __builtin_dynamic_object_size(interior, 2);
+    AssertEq((unsigned long long)sz, 24ULL);
+    free(p);
+}
+
+[[cccc::test(flags = "-V")]]
+void test_dynobj_interior_heap_ptr_last_byte(void) {
+    // Pointer to the very last valid byte: 1 byte remaining.
+    char *p = malloc(32);
+    AssertNotNull(p);
+    char *interior = p + 31;
+    size_t sz = __builtin_dynamic_object_size(interior, 0);
+    AssertEq((unsigned long long)sz, 1ULL);
+    free(p);
+}
+
+[[cccc::test(flags = "-V")]]
+void test_dynobj_interior_heap_ptr_out_of_bounds_conservative(void) {
+    // Pointer past the end of the requested allocation (e.g. into 8-byte
+    // alignment padding) is out of bounds → conservative fallback, never a
+    // false (too-large) claim.
+    char *p = malloc(3);
+    AssertNotNull(p);
+    char *past_end = p + 8; // rounded allocation is 8 bytes, requested is 3
+    size_t sz = __builtin_dynamic_object_size(past_end, 0);
     AssertEq((unsigned long long)sz, (unsigned long long)(size_t)-1);
     free(p);
+}
+
+[[cccc::test(flags = "-V")]]
+void test_dynobj_interior_heap_ptr_freed_conservative(void) {
+    // Interior pointer into a freed allocation → conservative fallback.
+    char *p = malloc(64);
+    AssertNotNull(p);
+    char *interior = p + 10;
+    free(p);
+    size_t sz = __builtin_dynamic_object_size(interior, 0);
+    AssertEq((unsigned long long)sz, (unsigned long long)(size_t)-1);
+}
+
+[[cccc::test(flags = "-V")]]
+void test_dynobj_multiple_allocs_interior_lookup(void) {
+    // Ensures the binary search picks the correct allocation among several.
+    char *a = malloc(16);
+    char *b = malloc(32);
+    char *c = malloc(64);
+    AssertNotNull(a);
+    AssertNotNull(b);
+    AssertNotNull(c);
+
+    size_t sz_a = __builtin_dynamic_object_size(a + 4, 0);
+    size_t sz_b = __builtin_dynamic_object_size(b + 4, 0);
+    size_t sz_c = __builtin_dynamic_object_size(c + 4, 0);
+    AssertEq((unsigned long long)sz_a, 12ULL);
+    AssertEq((unsigned long long)sz_b, 28ULL);
+    AssertEq((unsigned long long)sz_c, 60ULL);
+
+    free(a);
+    free(b);
+    free(c);
 }
 
 // ---------------------------------------------------------------------------

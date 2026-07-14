@@ -2082,6 +2082,53 @@ static inline int op_ZX4_fn(VirtualMachine *vm) {
 
 // ========== Memory Allocation Opcodes ==========
 
+// Records a new heap allocation in vm->sorted_allocs for O(log n) interior-
+// pointer lookups (DYNOBJSZ, and future CHKB/CHKP3 provenance checks).
+// The VM heap is a pure bump allocator — heap_ptr only ever grows, so every
+// new allocation's base address is higher than all previous ones, and a
+// plain append preserves sorted order without a search.
+static void sorted_allocs_insert(VirtualMachine *vm, void *user_ptr, AllocHeader *header) {
+    if (vm->sorted_allocs.count == vm->sorted_allocs.capacity) {
+        int new_cap = vm->sorted_allocs.capacity ? vm->sorted_allocs.capacity * 2 : 64;
+        void **new_addrs = realloc(vm->sorted_allocs.addresses, (size_t)new_cap * sizeof(void *));
+        if (new_addrs)
+            vm->sorted_allocs.addresses = new_addrs;
+        AllocHeader **new_headers = realloc(vm->sorted_allocs.headers, (size_t)new_cap * sizeof(AllocHeader *));
+        if (new_headers)
+            vm->sorted_allocs.headers = new_headers;
+        if (!new_addrs || !new_headers) {
+            // Internal bookkeeping OOM: skip tracking this allocation. The
+            // allocation itself already succeeded; only interior-pointer
+            // DYNOBJSZ queries on it will fall back to the conservative
+            // value. Capacity is left unchanged, and whichever of the two
+            // arrays *did* reallocate successfully above has already been
+            // written back, so both pointers remain valid to free later.
+            return;
+        }
+        vm->sorted_allocs.capacity = new_cap;
+    }
+    vm->sorted_allocs.addresses[vm->sorted_allocs.count] = user_ptr;
+    vm->sorted_allocs.headers[vm->sorted_allocs.count] = header;
+    vm->sorted_allocs.count++;
+}
+
+// Binary search for the allocation with the largest base address <= ptr.
+// Returns its index, or -1 if ptr is below every tracked base address.
+static int sorted_allocs_find(VirtualMachine *vm, void *ptr) {
+    void **addrs = vm->sorted_allocs.addresses;
+    int lo = 0, hi = vm->sorted_allocs.count - 1, result = -1;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        if ((char *)addrs[mid] <= (char *)ptr) {
+            result = mid;
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return result;
+}
+
 static inline int op_MALC_fn(VirtualMachine *vm) {
     // malloc: size in REG_A0, return pointer in REG_A0
     long long requested_size = vm->regs[REG_A0];
@@ -2127,6 +2174,9 @@ static inline int op_MALC_fn(VirtualMachine *vm) {
     vm->heap_ptr = vm->heap_ptr + total_size;
     void *user_ptr = (void *)(header + 1);
     vm->regs[REG_A0] = (long long)user_ptr;
+
+    // Track base address -> header for O(log n) interior-pointer lookups.
+    sorted_allocs_insert(vm, user_ptr, header);
 
     // Heap canaries: write front + rear guard values
     if (vm->flags & CCCC_HEAP_CANARIES) {
@@ -2423,17 +2473,21 @@ static inline int op_CALC_fn(VirtualMachine *vm) {
 // ========== Dynamic Object Size Opcode ==========
 
 static inline int op_DYNOBJSZ_fn(VirtualMachine *vm) {
-    // Runtime object byte-size: rd = size of the heap allocation at regs[rs].
+    // Runtime object byte-size: rd = remaining bytes in the heap allocation
+    // containing regs[rs] (base or interior pointer).
     // Format: [DYNOBJSZ] [rd:8|rs:8|unused:48] [type:i64]
     //
     // Mirrors __builtin_object_size semantics at runtime:
     //   type bit 1 == 0 → max fallback (size_t)-1 on unknown (type 0 or 1)
     //   type bit 1 == 1 → min fallback 0 on unknown (type 2 or 3)
     //
-    // For base pointers into the VM heap the result is AllocHeader.requested_size.
-    // Interior pointers (p + k) and all non-heap / freed pointers return the
-    // conservative fallback.  (Interior pointer support via sorted_allocs is a
-    // follow-up; see ticket #640 comment.)
+    // Looks up the containing allocation via vm->sorted_allocs (binary search
+    // for the largest tracked base address <= ptr), then computes
+    // requested_size - (ptr - base). This handles both base pointers
+    // (offset 0) and interior pointers (p + k) uniformly. Non-heap, freed,
+    // and out-of-range pointers (offset > requested_size, e.g. into the
+    // alignment padding past the requested bytes) return the conservative
+    // fallback.
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
@@ -2444,14 +2498,19 @@ static inline int op_DYNOBJSZ_fn(VirtualMachine *vm) {
     // Conservative fallback depends on the type argument (bit 1).
     size_t result = (type & 2) ? 0 : (size_t)-1;
 
-    // Only VM heap pointers have an AllocHeader we can trust.
+    // Only VM heap pointers have a tracked allocation.
     if (ptr != 0 &&
         ptr >= (long long)vm->heap_seg &&
         ptr < (long long)vm->heap_end) {
-        AllocHeader *h = ((AllocHeader *)ptr) - 1;
-        if (h->magic == 0xDEADBEEF && !h->freed) {
-            // Base pointer: remaining = requested_size (no interior offset).
-            result = h->requested_size;
+        int idx = sorted_allocs_find(vm, (void *)ptr);
+        if (idx >= 0) {
+            AllocHeader *h = vm->sorted_allocs.headers[idx];
+            void *base = vm->sorted_allocs.addresses[idx];
+            size_t offset = (size_t)((char *)ptr - (char *)base);
+            if (h->magic == 0xDEADBEEF && !h->freed &&
+                offset <= h->requested_size) {
+                result = h->requested_size - offset;
+            }
         }
     }
 

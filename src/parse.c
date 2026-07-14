@@ -8323,13 +8323,13 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // Runtime path: for pointers not resolved statically (heap allocations,
     // function-parameter pointers, non-constant indices) we build an
     // ND_DYNOBJ_SIZE node that evaluates `ptr` and emits DYNOBJSZ.  For VM
-    // heap allocations the opcode reads AllocHeader.requested_size; for all
-    // other pointers it returns the conservative fallback.
+    // heap allocations the opcode looks up the containing allocation via
+    // vm->sorted_allocs (a base-address range query), so both base pointers
+    // and interior pointers (p + k) resolve to
+    // AllocHeader.requested_size - offset; for all other pointers it returns
+    // the conservative fallback.
     //
     // Scope limitations (v1):
-    //   - Interior pointers (p + k): return conservative — DYNOBJSZ only
-    //     handles base pointers.  Interior support requires wiring the
-    //     sorted_allocs range-query table (follow-up ticket).
     //   - stack/VLA/alloca buffers: no AllocHeader → conservative.
     if (equal(tok, "__builtin_dynamic_object_size")) {
         tok = skip(vm, tok->next, "(");
