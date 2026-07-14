@@ -10,6 +10,7 @@
 // conservative defaults ((size_t)-1 for type 0/1, 0 for type 2/3).
 
 #include <stddef.h>
+#include <stdlib.h>
 
 // ---------------------------------------------------------------------------
 // Plain array (whole == subobject for a bare array)
@@ -237,4 +238,158 @@ void test_object_size_union_large_member(void) {
     size_t s = __builtin_object_size(&u.b, 1);
     AssertEq((unsigned long long)w, (unsigned long long)sizeof(u));
     AssertEq((unsigned long long)s, 16ULL);
+}
+
+// ---------------------------------------------------------------------------
+// #642: constant malloc-family allocation tracking.
+//
+// A pointer that is assigned exactly once — its declaration initializer — to
+// a malloc-family call with a compile-time constant size, and never
+// reassigned or address-taken anywhere in the function, resolves to the real
+// allocation size. This is resolved in a post-parse pass (after the whole
+// function body is seen), so it correctly stays conservative for pointers
+// that are reassigned later in the source, including across a loop
+// back-edge — a naive parse-time fold would get this wrong. This is a
+// GCC-compatible (but static-only; see __builtin_dynamic_object_size for the
+// runtime-correct equivalent) extension for the "simple pattern" case
+// documented in the ticket: direct assignment, no aliasing.
+// ---------------------------------------------------------------------------
+
+[[cccc::test]]
+void test_object_size_malloc_const(void) {
+    char *p = malloc(128);
+    AssertEq((unsigned long long)__builtin_object_size(p, 0), 128ULL);
+    AssertEq((unsigned long long)__builtin_object_size(p, 1), 128ULL);
+    AssertEq((unsigned long long)__builtin_object_size(p, 2), 128ULL);
+    AssertEq((unsigned long long)__builtin_object_size(p, 3), 128ULL);
+}
+
+[[cccc::test]]
+void test_object_size_calloc_const(void) {
+    // calloc(nmemb, size) → nmemb * size = 64.
+    char *p = calloc(4, 16);
+    AssertEq((unsigned long long)__builtin_object_size(p, 0), 64ULL);
+}
+
+[[cccc::test]]
+void test_object_size_realloc_const(void) {
+    // realloc(ptr, size) tracks the *new* size; the source pointer being
+    // reallocated is a plain expression (not the tracked variable), so it
+    // doesn't interact with the poisoning rules.
+    char *base = malloc(8);
+    char *p = realloc(base, 96);
+    AssertEq((unsigned long long)__builtin_object_size(p, 0), 96ULL);
+}
+
+[[cccc::test]]
+void test_object_size_aligned_alloc_const(void) {
+    char *p = aligned_alloc(16, 256);
+    AssertEq((unsigned long long)__builtin_object_size(p, 0), 256ULL);
+}
+
+[[cccc::test]]
+void test_object_size_malloc_cast(void) {
+    // A cast on the initializer is seen through.
+    int *p = (int *)malloc(64);
+    AssertEq((unsigned long long)__builtin_object_size(p, 0), 64ULL);
+}
+
+static void check_object_size_nonconst(size_t n) {
+    // Non-constant size argument → cannot be tracked, conservative fallback.
+    char *p = malloc(n);
+    AssertEq((unsigned long long)__builtin_object_size(p, 0),
+             (unsigned long long)(size_t)-1);
+}
+
+[[cccc::test]]
+void test_object_size_malloc_nonconst_unresolved(void) {
+    check_object_size_nonconst(32);
+}
+
+// ---------------------------------------------------------------------------
+// Soundness lock-in: reassignment, address-of, and loop back-edges must all
+// keep the query conservative rather than folding a stale size.
+// ---------------------------------------------------------------------------
+
+[[cccc::test]]
+void test_object_size_malloc_reassigned_conservative(void) {
+    char *p = malloc(128);
+    p = malloc(16); // reassignment poisons the tracked allocation
+    AssertEq((unsigned long long)__builtin_object_size(p, 0),
+             (unsigned long long)(size_t)-1);
+}
+
+[[cccc::test]]
+void test_object_size_malloc_address_taken_conservative(void) {
+    char *p = malloc(64);
+    char **pp = &p; // address-of poisons the tracked allocation
+    AssertTrue(pp != NULL);
+    AssertEq((unsigned long long)__builtin_object_size(p, 0),
+             (unsigned long long)(size_t)-1);
+}
+
+[[cccc::test]]
+void test_object_size_malloc_loop_reassign_conservative(void) {
+    // The query is parsed *before* the reassignment inside the loop body,
+    // but the reassignment is reachable at runtime via the loop back-edge on
+    // iteration 2+. A parse-time fold would incorrectly return 128 for every
+    // iteration; the post-parse poison scan must catch the later
+    // reassignment and keep every query conservative.
+    char *p = malloc(128);
+    unsigned long long sum = 0;
+    for (int i = 0; i < 3; i++) {
+        sum += __builtin_object_size(p, 0);
+        p = malloc(16);
+    }
+    AssertEq(sum, 3ULL * (unsigned long long)(size_t)-1);
+}
+
+[[cccc::test]]
+void test_object_size_malloc_nested_fn_reassign_conservative(void) {
+    // A GNU nested function that reassigns a captured pointer accesses the
+    // *same* Obj as the enclosing function (shared via the static-link
+    // chain, not a by-value copy) — so this is really the same hazard as
+    // direct reassignment, just reachable through a call rather than
+    // straight-line code. resolve_objsize_queries must scan every function
+    // body (nested ones included) so this poisoning lands before the
+    // enclosing function's own query is resolved.
+    char *p = malloc(128);
+    void reassign(void) { p = malloc(4); }
+    reassign();
+    AssertEq((unsigned long long)__builtin_object_size(p, 0),
+             (unsigned long long)(size_t)-1);
+}
+
+[[cccc::test]]
+void test_object_size_malloc_block_reassign_conservative(void) {
+    // Same hazard via an Apple block literal capturing a __block (by
+    // reference) variable — plain by-value block captures can't alias the
+    // outer pointer, but __block ones share the same Obj.
+    __block char *p = malloc(128);
+    void (^reassign)(void) = ^{ p = malloc(4); };
+    reassign();
+    AssertEq((unsigned long long)__builtin_object_size(p, 0),
+             (unsigned long long)(size_t)-1);
+}
+
+[[cccc::test]]
+void test_object_size_malloc_query_in_nested_fn_conservative(void) {
+    // The query itself sits inside a nested function, on an enclosing-scope
+    // pointer that is reassigned *after* the nested function is defined (but
+    // still before the query re-runs at its second call). The nested
+    // function's own resolve_objsize_queries fires the instant its body
+    // finishes parsing — before the later `p = malloc(4)` in main is even
+    // parsed — so if the query were allowed to register there it would
+    // freeze at 128 and never see the reassignment. The query is only
+    // registered when asked from the same function the pointer was declared
+    // in (Obj.objsize_decl_fn), so this case must stay conservative on both
+    // calls.
+    char *p = malloc(128);
+    size_t s = 0;
+    void q(void) { s = __builtin_object_size(p, 0); }
+    q();
+    AssertEq((unsigned long long)s, (unsigned long long)(size_t)-1);
+    p = malloc(4);
+    q();
+    AssertEq((unsigned long long)s, (unsigned long long)(size_t)-1);
 }

@@ -192,6 +192,18 @@ typedef struct {
 } ObjSizeInfo;
 static bool objsize_resolve_ptr(VirtualMachine *vm, Node *node, ObjSizeInfo *r);
 static bool objsize_resolve_lvalue(VirtualMachine *vm, Node *node, ObjSizeInfo *r);
+// #642: constant malloc-family allocation tracking for __builtin_object_size.
+// A pending query on a malloc-tracked pointer var, resolved after the whole
+// function body has been parsed (see resolve_objsize_queries) so that a
+// reassignment or address-of appearing anywhere in the function — including
+// after the query textually, e.g. inside a loop back-edge — can poison it.
+struct ObjSizeQuery {
+    Node *node;   // the ND_NUM node to (maybe) upgrade with the real size
+    Obj  *var;    // the tracked pointer variable
+    struct ObjSizeQuery *next;
+};
+static bool objsize_alloc_from_call(VirtualMachine *vm, Node *rhs, int *out);
+static void resolve_objsize_queries(VirtualMachine *vm, Node *body);
 static void validate_constexpr_object_type(VirtualMachine *vm, Token *tok, Type *ty);
 static void validate_constexpr_initializer(VirtualMachine *vm, Obj *var, Initializer *init,
                                            Token *tok);
@@ -2353,6 +2365,24 @@ static Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *bas
             cur = cur->next = new_unary(vm, ND_EXPR_STMT, expr, tok);
             // Don't clear here - will be cleared by next init or at end of
             // parsing
+
+            // #642: track `ptr = malloc-family(const size)` initializers so
+            // __builtin_object_size can resolve the allocation size, provided
+            // the pointer is never reassigned or address-taken (checked by
+            // resolve_objsize_queries once the whole function is parsed).
+            // Only the plain scalar-assignment shape qualifies — is_aggregate
+            // in lvar_initializer wraps aggregates in an ND_COMMA, which we
+            // don't try to unwrap.
+            if (var->ty->kind == TY_PTR && expr->kind == ND_ASSIGN &&
+                expr->lhs->kind == ND_VAR && expr->lhs->var == var) {
+                int alloc_size;
+                if (objsize_alloc_from_call(vm, expr->rhs, &alloc_size)) {
+                    var->objsize_has_alloc = true;
+                    var->objsize_alloc = alloc_size;
+                    var->objsize_init_assign = expr;
+                    var->objsize_decl_fn = vm->compiler.current_fn;
+                }
+            }
         } else if (var->is_constexpr) {
             error_tok(vm, ty->name, "constexpr object requires an initializer");
         }
@@ -4766,6 +4796,130 @@ static bool objsize_resolve_ptr(VirtualMachine *vm, Node *node, ObjSizeInfo *r) 
     }
 }
 
+// ---------------------------------------------------------------------------
+// #642: constant malloc-family allocation tracking.
+//
+// Recognizes `rhs` (a pointer initializer expression, casts already peeled by
+// the caller) as a call to a malloc-family function with compile-time
+// constant size argument(s), and returns the allocated byte count in *out.
+// Only direct calls to the real library function are matched — a user
+// declaration/shadow named e.g. "malloc" with a different signature is
+// rejected by checking the parameter count matches what we expect to read.
+//
+// This is intentionally name-based (no `alloc_size` attribute exists yet in
+// CCCC); see the #642 follow-up ticket for attribute-based generalization.
+static bool objsize_alloc_from_call(VirtualMachine *vm, Node *rhs, int *out) {
+    while (rhs && rhs->kind == ND_CAST)
+        rhs = rhs->lhs;
+    if (!rhs || rhs->kind != ND_FUNCALL || !rhs->lhs || rhs->lhs->kind != ND_VAR)
+        return false;
+    Obj *fn = rhs->lhs->var;
+    if (!fn || !fn->name || !fn->is_function)
+        return false;
+
+    // Fetch the Nth argument (0-based), or NULL if out of range.
+    Node *args[3] = {0};
+    int nargs = 0;
+    for (Node *a = rhs->args; a && nargs < 3; a = a->next)
+        args[nargs++] = a;
+
+    int64_t size = -1;
+    if (strcmp(fn->name, "malloc") == 0 || strcmp(fn->name, "realloc") == 0) {
+        // malloc(size) / realloc(ptr, size) — size is the last of 1/2 args.
+        int want = strcmp(fn->name, "malloc") == 0 ? 1 : 2;
+        if (nargs != want || !is_const_expr(vm, args[want - 1]))
+            return false;
+        size = eval(vm, args[want - 1]);
+    } else if (strcmp(fn->name, "calloc") == 0 || strcmp(fn->name, "reallocarray") == 0) {
+        // calloc(nmemb, size) / reallocarray(ptr, nmemb, size).
+        int want = strcmp(fn->name, "calloc") == 0 ? 2 : 3;
+        if (nargs != want || !is_const_expr(vm, args[want - 2]) ||
+            !is_const_expr(vm, args[want - 1]))
+            return false;
+        int64_t nmemb = eval(vm, args[want - 2]);
+        int64_t elem  = eval(vm, args[want - 1]);
+        if (nmemb < 0 || elem < 0)
+            return false;
+        // Overflow guard: bail rather than fold a wrapped-around size.
+        if (elem != 0 && nmemb > (INT64_MAX / elem))
+            return false;
+        size = nmemb * elem;
+    } else if (strcmp(fn->name, "aligned_alloc") == 0) {
+        // aligned_alloc(alignment, size).
+        if (nargs != 2 || !is_const_expr(vm, args[1]))
+            return false;
+        size = eval(vm, args[1]);
+    } else {
+        return false;
+    }
+
+    if (size < 0 || size > INT_MAX)
+        return false; // negative or too large to fit ObjSizeInfo's int fields
+    *out = (int)size;
+    return true;
+}
+
+// #642: post-parse pass resolving deferred __builtin_object_size queries on
+// malloc-tracked pointers. Must run after the whole function body has been
+// parsed (mirrors resolve_goto_labels) so that a reassignment or address-of
+// appearing anywhere in the function — including textually after the query,
+// e.g. across a loop back-edge — can still poison the query. A pointer's
+// allocation size is only trusted when it is assigned exactly once (its
+// declaration initializer, exempted via Obj.objsize_init_assign) and never
+// has its address taken.
+static void objsize_poison_scan(Node *node) {
+    // Iterate the `next` chain rather than recursing on it — a function body
+    // is a linked list of statements, and recursing here would blow the host
+    // stack on long straight-line bodies (unlike ND_COMMA trees elsewhere in
+    // the parser, which are deliberately kept balanced for this reason).
+    for (; node; node = node->next) {
+        switch (node->kind) {
+        case ND_ASSIGN:
+            // Plain `p = expr` reaches here directly with lhs == the raw
+            // ND_VAR. Compound assignment (`p += x`) and `++p`/`p++`/`--p`/
+            // `p--` are desugared by to_assign() into `tmp = &p, *tmp = *tmp
+            // op rhs`, which is caught by the ND_ADDR case below instead.
+            if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
+                node->lhs->var->objsize_has_alloc &&
+                node->lhs->var->objsize_init_assign != node)
+                node->lhs->var->objsize_unsafe = true;
+            break;
+        case ND_ADDR:
+            if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
+                node->lhs->var->objsize_has_alloc)
+                node->lhs->var->objsize_unsafe = true;
+            break;
+        default:
+            break;
+        }
+        objsize_poison_scan(node->lhs);
+        objsize_poison_scan(node->rhs);
+        objsize_poison_scan(node->cond);
+        objsize_poison_scan(node->then);
+        objsize_poison_scan(node->els);
+        objsize_poison_scan(node->init);
+        objsize_poison_scan(node->inc);
+        objsize_poison_scan(node->body);
+        for (Node *a = node->args; a; a = a->next)
+            objsize_poison_scan(a);
+    }
+}
+
+static void resolve_objsize_queries(VirtualMachine *vm, Node *body) {
+    // Always scan, even when *this* function has no pending queries of its
+    // own: a nested function or block can reassign / take the address of a
+    // pointer tracked by an *enclosing* function (captured variables share
+    // the same Obj — see codegen's static-link walk), and that poisoning
+    // must land on the shared Obj before the enclosing function's own
+    // resolve_objsize_queries call reads objsize_unsafe.
+    objsize_poison_scan(body);
+    for (struct ObjSizeQuery *q = vm->compiler.objsize_queries; q; q = q->next) {
+        if (!q->var->objsize_unsafe)
+            q->node->val = (int64_t)q->var->objsize_alloc;
+    }
+    vm->compiler.objsize_queries = NULL;
+}
+
 // Returns true when `expr` is an integer constant expression whose value fits
 // within the range of `to` without truncation.  Used to suppress -Wconversion
 // false positives such as `char c = 0;` or `char c = 1 + 1;`.
@@ -5832,6 +5986,13 @@ static Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     // Set up block function context
     vm->compiler.current_fn = block_fn;
     vm->compiler.locals = NULL;
+    // #642: blocks get their own pending __builtin_object_size query list,
+    // resolved against block_fn->body below — otherwise a query on a
+    // block-local malloc-tracked pointer would be poison-scanned against the
+    // *enclosing* function's body, which never mentions the block-local var,
+    // and could wrongly resolve to the allocation size.
+    struct ObjSizeQuery *saved_objsize_queries = vm->compiler.objsize_queries;
+    vm->compiler.objsize_queries = NULL;
 
     enter_scope(vm);
 
@@ -5879,6 +6040,7 @@ static Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     block_fn->locals = vm->compiler.locals;
 
     leave_scope(vm);
+    resolve_objsize_queries(vm, block_fn->body);
 
     // Collect captured variables from the parsed body.
     // Walk all ancestor scopes so that variables from grandparent+ scopes are
@@ -5904,6 +6066,7 @@ static Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     // Restore outer function context
     vm->compiler.current_fn = outer_fn;
     vm->compiler.locals = saved_locals;
+    vm->compiler.objsize_queries = saved_objsize_queries;
 
     // Allocate descriptor storage on the enclosing function's stack frame.
     // Layout: [invoke_ptr(0) | desc_size(8) | cap0(16) | cap1(24) | ...]
@@ -8099,6 +8262,43 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *node = new_node(vm, ND_NUM, start);
         node->val = (int64_t)result;
         node->ty = ty_ulong;
+
+        // #642: constant malloc-family allocation tracking. A bare pointer
+        // variable (through casts) whose declaration initializer was
+        // recognized as `malloc(const)`/`calloc(const,const)`/etc. gets its
+        // size resolved *after* the whole function is parsed, not here — a
+        // later reassignment or address-of (including across a loop
+        // back-edge) must be able to poison it first. See
+        // resolve_objsize_queries. The node already holds the conservative
+        // fallback, so if it's never upgraded (or this turns out not to be a
+        // whole-function query, e.g. objsize_resolve_ptr already resolved a
+        // more specific path above) behavior is unchanged.
+        //
+        // The query is only registered when it is asked from the *same*
+        // function the pointer was declared in. A query made from inside a
+        // nested function / block on an enclosing-scope pointer would
+        // otherwise be resolved (and its ND_NUM frozen) the instant that
+        // inner function finishes parsing — which happens *before* a later
+        // reassignment in the enclosing scope is even parsed, let alone
+        // poison-scanned. Restricting registration this way means such
+        // cross-scope queries always keep the conservative fallback, which
+        // is exactly what a same-function query would fall back to anyway
+        // once reassigned.
+        if (ptr->kind != ND_COND) {
+            Node *p = ptr;
+            while (p->kind == ND_CAST)
+                p = p->lhs;
+            if (p->kind == ND_VAR && p->var && p->var->objsize_has_alloc &&
+                p->var->objsize_decl_fn == vm->compiler.current_fn) {
+                struct ObjSizeQuery *q = arena_alloc(&vm->compiler.parser_arena,
+                                                      sizeof(struct ObjSizeQuery));
+                q->node = node;
+                q->var = p->var;
+                q->next = vm->compiler.objsize_queries;
+                vm->compiler.objsize_queries = q;
+            }
+        }
+
         return node;
     }
 
@@ -9186,11 +9386,18 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
     bool is_nested = (parent_fn != NULL);
     Obj *saved_locals = NULL;
     int saved_nesting_depth = 0;
+    struct ObjSizeQuery *saved_objsize_queries = NULL;
 
     if (is_nested) {
         // Save parent's locals - we're about to start a new locals chain
         saved_locals = vm->compiler.locals;
         saved_nesting_depth = vm->compiler.fn_nesting_depth;
+        // #642: the nested function gets its own pending __builtin_object_size
+        // query list; resolve_objsize_queries resets it to NULL when the
+        // nested body finishes, so the parent's in-flight queries must be
+        // parked here rather than lost.
+        saved_objsize_queries = vm->compiler.objsize_queries;
+        vm->compiler.objsize_queries = NULL;
     }
 
     Obj *fn = attr->is_static
@@ -9399,6 +9606,7 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
             fn->locals = vm->compiler.locals;
             leave_scope(vm);
             resolve_goto_labels(vm);
+            resolve_objsize_queries(vm, fn->body);
         } else {
             // Fatal error_tok() fired inside the function body.  The error has
             // already been collected by error_tok(); we just need to clean up scope.
@@ -9482,6 +9690,7 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
         fn->locals = vm->compiler.locals;
         leave_scope(vm);
         resolve_goto_labels(vm);
+        resolve_objsize_queries(vm, fn->body);
     }
 
     // Restore parent function context if this was a nested function
@@ -9489,6 +9698,7 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
         vm->compiler.current_fn = parent_fn;
         vm->compiler.locals = saved_locals;
         vm->compiler.fn_nesting_depth = saved_nesting_depth;
+        vm->compiler.objsize_queries = saved_objsize_queries;
     } else {
         // CRITICAL: Reset current_fn to NULL for top-level functions!
         // Otherwise the next top-level function will incorrectly think it's

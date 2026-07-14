@@ -1056,6 +1056,22 @@ struct Obj {
     struct Obj *cleanup_fn; // non-NULL: void fn(T*) called at scope exit (__attribute__((cleanup)))
     int cleanup_fp_retval_offset; // stack offset for float retval save slot (set by assign_stack_offsets)
 
+    // __builtin_object_size: constant malloc-family allocation tracking (#642).
+    // Only honored when the pointer is assigned exactly once (its declaration
+    // initializer) and never has its address taken; see resolve_objsize_queries.
+    int   objsize_alloc;       // bytes from a const malloc-family initializer
+    bool  objsize_has_alloc;   // true if objsize_alloc was recognized
+    bool  objsize_unsafe;      // true if reassigned or address-taken in scope
+    Node *objsize_init_assign; // the initializer ND_ASSIGN node (exempt from poisoning)
+    struct Obj *objsize_decl_fn; // the function this var was declared in; a
+                                 // query is only ever registered when it's
+                                 // asked from this same function — a query
+                                 // inside a nested function/block on an
+                                 // enclosing-scope pointer resolves (and gets
+                                 // frozen) before the enclosing function's own
+                                 // poison scan can see a later reassignment,
+                                 // so such queries must stay conservative
+
     // Global variable or function
     bool is_function;
     bool is_definition;
@@ -2025,6 +2041,9 @@ typedef struct Compiler {
                             // compiles pay no extra overhead
     Node *gotos;           // Goto statements in current function
     Node *labels;          // Labels in current function
+    struct ObjSizeQuery *objsize_queries; // Pending __builtin_object_size(ptr,...)
+                            // queries on malloc-tracked pointers in current
+                            // function; resolved by resolve_objsize_queries (#642)
     char *brk_label;       // Current break jump target
     char *cont_label;      // Current continue jump target
     int cleanup_scope_depth;   // number of active cleanup scopes (blocks with cleanup vars)
