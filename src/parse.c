@@ -182,6 +182,15 @@ static int64_t eval2(VirtualMachine *vm, Node *node, char ***label);
 static int64_t eval_rval(VirtualMachine *vm, Node *node, char ***label);
 static bool is_const_expr(VirtualMachine *vm, Node *node);
 static bool is_constexpr_object_type(Type *ty);
+// __builtin_object_size helpers
+typedef struct {
+    int base_size;   // sizeof(base object); -1 = unknown
+    int base_offset; // byte offset from start of base
+    int sub_size;    // sizeof(nearest surrounding subobject); -1 = unknown
+    int sub_offset;  // byte offset from start of nearest subobject
+} ObjSizeInfo;
+static bool objsize_resolve_ptr(VirtualMachine *vm, Node *node, ObjSizeInfo *r);
+static bool objsize_resolve_lvalue(VirtualMachine *vm, Node *node, ObjSizeInfo *r);
 static void validate_constexpr_object_type(VirtualMachine *vm, Token *tok, Type *ty);
 static void validate_constexpr_initializer(VirtualMachine *vm, Obj *var, Initializer *init,
                                            Token *tok);
@@ -4547,6 +4556,102 @@ int64_t const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     return eval(vm, node);
 }
 
+// ---------------------------------------------------------------------------
+// __builtin_object_size static AST walkers
+//
+// These resolve a pointer expression to (base_size, base_offset, sub_size,
+// sub_offset) without emitting any code.  The contract mirrors GCC's
+// __builtin_object_size specification:
+//   - We only succeed when the base object and all offsets are compile-time
+//     constants.  Any non-constant index or unknown base causes bail (return
+//     false), which lets the caller fall back to the conservative default.
+//   - The argument is never evaluated; no side-effects are emitted.
+//
+// Pointer-arithmetic offsets in ND_ADD nodes have already been byte-scaled
+// by new_add() (see parse.c new_add: rhs *= sizeof(*lhs)), so we use eval()
+// on them directly.
+// ---------------------------------------------------------------------------
+
+// Resolve the lvalue `node` points to into an ObjSizeInfo describing the
+// base object and nearest surrounding subobject.
+static bool objsize_resolve_lvalue(VirtualMachine *vm, Node *node, ObjSizeInfo *r) {
+    add_type(vm, node);
+    switch (node->kind) {
+    case ND_VAR: {
+        Type *ty = node->var->ty;
+        // VLAs have no compile-time size; bail.
+        if (ty->kind == TY_VLA || ty->size <= 0)
+            return false;
+        r->base_size   = ty->size;
+        r->base_offset = 0;
+        r->sub_size    = ty->size;
+        r->sub_offset  = 0;
+        return true;
+    }
+    case ND_MEMBER: {
+        // Resolve the containing aggregate, then step into the member.
+        ObjSizeInfo base;
+        if (!objsize_resolve_lvalue(vm, node->lhs, &base))
+            return false;
+        Member *m = node->member;
+        if (!m || m->is_bitfield || !m->ty || m->ty->size <= 0)
+            return false;
+        r->base_size   = base.base_size;
+        r->base_offset = base.base_offset + m->offset;
+        r->sub_size    = m->ty->size;
+        r->sub_offset  = 0;
+        return true;
+    }
+    case ND_DEREF:
+        // *ptr  →  resolve ptr as a pointer expression.
+        // This is how arr[k] arrives: x[y] lowers to *(x+y).
+        return objsize_resolve_ptr(vm, node->lhs, r);
+    default:
+        return false;
+    }
+}
+
+// Resolve a pointer-valued `node` into an ObjSizeInfo.
+static bool objsize_resolve_ptr(VirtualMachine *vm, Node *node, ObjSizeInfo *r) {
+    add_type(vm, node);
+    switch (node->kind) {
+    case ND_CAST:
+        // See through casts.
+        return objsize_resolve_ptr(vm, node->lhs, r);
+    case ND_ADDR:
+        // &lvalue → resolve the lvalue.
+        return objsize_resolve_lvalue(vm, node->lhs, r);
+    case ND_ADD: {
+        // ptr + scaled_int (rhs is already byte-scaled by new_add).
+        // Only proceed if the offset is a compile-time constant.
+        ObjSizeInfo base;
+        if (!objsize_resolve_ptr(vm, node->lhs, &base))
+            return false;
+        if (!is_const_expr(vm, node->rhs))
+            return false;
+        int64_t byte_delta = eval(vm, node->rhs);
+        r->base_size   = base.base_size;
+        r->base_offset = base.base_offset + (int)byte_delta;
+        r->sub_size    = base.sub_size;
+        r->sub_offset  = base.sub_offset + (int)byte_delta;
+        return true;
+    }
+    case ND_VAR:
+        // A bare array name decays to a pointer to its first element.
+        // The node kind remains ND_VAR with array type.
+        if (node->var->ty->kind == TY_ARRAY && node->var->ty->size > 0) {
+            r->base_size   = node->var->ty->size;
+            r->base_offset = 0;
+            r->sub_size    = node->var->ty->size;
+            r->sub_offset  = 0;
+            return true;
+        }
+        return false; // pointer variable or unknown → bail
+    default:
+        return false;
+    }
+}
+
 // Returns true when `expr` is an integer constant expression whose value fits
 // within the range of `to` without truncation.  Used to suppress -Wconversion
 // false positives such as `char c = 0;` or `char c = 1 + 1;`.
@@ -7731,20 +7836,51 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
-    // __builtin_object_size(ptr, type) - conservative stub for _FORTIFY_SOURCE.
-    // Returns (size_t)-1 for type 0/1 (unknown = max, safe conservative estimate).
-    // Returns 0 for type 2/3 (unknown = min, safe conservative estimate).
-    // TODO: compute real object sizes from the pointed-to object; tracked in follow-up ticket.
+    // __builtin_object_size(ptr, type) — compile-time object size.
+    //
+    // The `type` argument encodes two independent bits:
+    //   bit 0 == 0: whole base object (type 0 or 2)
+    //   bit 0 == 1: nearest surrounding subobject (type 1 or 3)
+    //   bit 1 == 0: unknown fallback = (size_t)-1 (maximum, type 0 or 1)
+    //   bit 1 == 1: unknown fallback = 0          (minimum, type 2 or 3)
+    //
+    // For objects of statically known size (local/global arrays, scalars,
+    // struct members accessed via constant-offset chains) we compute the exact
+    // remaining byte count.  For anything else — function-parameter pointers,
+    // non-constant indices, heap allocations — we fall back to the conservative
+    // estimate, preserving _FORTIFY_SOURCE safety.
+    //
+    // The ptr argument is not evaluated (no side-effects emitted), matching GCC.
+    // Runtime sizing is a separate builtin (__builtin_dynamic_object_size).
     if (equal(tok, "__builtin_object_size")) {
         tok = skip(vm, tok->next, "(");
         Node *ptr = assign(vm, &tok, tok);
-        (void)ptr;
         tok = skip(vm, tok, ",");
         long long type_arg = const_expr(vm, &tok, tok);
         *rest = skip(vm, tok, ")");
+
+        add_type(vm, ptr);
+
+        // Conservative default: type 0/1 → (size_t)-1, type 2/3 → 0.
+        size_t result = (type_arg & 2) ? 0 : (size_t)-1;
+
+        ObjSizeInfo info;
+        if (objsize_resolve_ptr(vm, ptr, &info)) {
+            int remaining;
+            if (type_arg & 1) {
+                // Subobject: bytes remaining from current position within the
+                // nearest surrounding subobject.
+                remaining = info.sub_size - info.sub_offset;
+            } else {
+                // Whole object: bytes remaining from current position to the
+                // end of the base object.
+                remaining = info.base_size - info.base_offset;
+            }
+            result = remaining > 0 ? (size_t)remaining : 0;
+        }
+
         Node *node = new_node(vm, ND_NUM, start);
-        // type 0/1: conservative max (unknown = unlimited); type 2/3: conservative min (unknown = 0)
-        node->val = (type_arg <= 1) ? (long long)(size_t)-1 : 0;
+        node->val = (int64_t)result;
         node->ty = ty_ulong;
         return node;
     }
