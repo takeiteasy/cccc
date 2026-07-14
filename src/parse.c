@@ -181,6 +181,7 @@ static int64_t eval(VirtualMachine *vm, Node *node);
 static int64_t eval2(VirtualMachine *vm, Node *node, char ***label);
 static int64_t eval_rval(VirtualMachine *vm, Node *node, char ***label);
 static bool is_const_expr(VirtualMachine *vm, Node *node);
+static int static_branch_value(VirtualMachine *vm, Node *cond);
 static bool is_constexpr_object_type(Type *ty);
 // __builtin_object_size helpers
 typedef struct {
@@ -3666,9 +3667,27 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         tok = skip(vm, tok->next, "(");
         node->cond = expr(vm, &tok, tok);
         tok = skip(vm, tok, ")");
+
+        // DCE-aware diagnostic suppression: when saw_diag_attr is set, check
+        // whether the condition is a compile-time constant or an unsigned
+        // boundary tautology.  We track a counter (not a bool) so nested dead
+        // branches compose correctly, e.g. if(0){ if(1){ chk_fail(); } }.
+        // Note: we suppress diagnostics inside the dead branch but still parse
+        // and emit it — we do not prune the AST, so codegen is unaffected.
+        int bv = vm->compiler.saw_diag_attr
+                     ? static_branch_value(vm, node->cond)
+                     : -1;
+        bool then_dead = (bv == 0), else_dead = (bv == 1);
+
+        if (then_dead) vm->compiler.dead_code_depth++;
         node->then = stmt(vm, &tok, tok);
-        if (equal(tok, "else"))
+        if (then_dead) vm->compiler.dead_code_depth--;
+
+        if (equal(tok, "else")) {
+            if (else_dead) vm->compiler.dead_code_depth++;
             node->els = stmt(vm, &tok, tok->next);
+            if (else_dead) vm->compiler.dead_code_depth--;
+        }
         *rest = tok;
 
         if (node->els && (vm->compiler.warnings & CCCC_WARN_DUPLICATED_BRANCHES) &&
@@ -4554,6 +4573,86 @@ static bool is_const_expr(VirtualMachine *vm, Node *node) {
 int64_t const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = conditional(vm, rest, tok);
     return eval(vm, node);
+}
+
+// static_branch_value — decide whether a condition node is a compile-time
+// constant or an unsigned tautology, without a full range analysis.
+//
+// Returns:
+//   1  — condition is always true  (then-branch live, else-branch dead)
+//   0  — condition is always false (then-branch dead, else-branch live)
+//  -1  — unknown / runtime
+//
+// Tier 1: plain constant fold via is_const_expr / eval.
+// Tier 2: unsigned boundary tautologies that arise in _FORTIFY_SOURCE idioms.
+//   All relational operators lower to ND_LT / ND_LE at parse time:
+//     a > b  →  ND_LT(b, a)
+//     a >= b →  ND_LE(b, a)
+//   For ND_LT(lhs, rhs) / ND_LE(lhs, rhs) where exactly one side is a
+//   compile-time constant C and the other side R is a runtime unsigned type,
+//   we check boundary values in the uint64 domain:
+//     ND_LT(C, R):  C < R  — always false if C == UMAX  (e.g. SIZE_MAX < len)
+//     ND_LT(R, C):  R < C  — always false if C == 0
+//     ND_LE(C, R):  C <= R — always true  if C == 0
+//     ND_LE(R, C):  R <= C — always true  if C == UMAX
+//   where UMAX = (1u << (8 * width)) - 1 (or UINT64_MAX for 8-byte types).
+//
+// Note: this helper is only called from the `if`-statement parser when
+// vm->compiler.saw_diag_attr is set, so normal compiles pay nothing.
+static int static_branch_value(VirtualMachine *vm, Node *cond) {
+    add_type(vm, cond);
+
+    // Tier 1: plain constant fold.
+    if (is_const_expr(vm, cond))
+        return eval(vm, cond) ? 1 : 0;
+
+    // Tier 2: unsigned tautology on relational ops.
+    if (cond->kind != ND_LT && cond->kind != ND_LE)
+        return -1;
+
+    Node *lhs = cond->lhs;
+    Node *rhs = cond->rhs;
+    add_type(vm, lhs);
+    add_type(vm, rhs);
+
+    bool lhs_const = is_const_expr(vm, lhs);
+    bool rhs_const = is_const_expr(vm, rhs);
+
+    // Need exactly one constant side and one runtime unsigned side.
+    if (lhs_const == rhs_const)
+        return -1;  // both constant (already folded above) or both runtime
+
+    Node *R = lhs_const ? rhs : lhs;   // runtime operand
+    int64_t C_signed = lhs_const ? eval(vm, lhs) : eval(vm, rhs);
+    bool C_is_lhs = lhs_const;
+
+    if (!R->ty || !R->ty->is_unsigned)
+        return -1;
+
+    int width = R->ty->size;  // bytes: 1, 2, 4, 8
+    uint64_t UMAX = (width >= 8) ? UINT64_MAX : ((uint64_t)1 << (8 * width)) - 1;
+    uint64_t C = (uint64_t)C_signed;
+
+    if (cond->kind == ND_LT) {
+        // Stored as ND_LT(lhs, rhs) meaning lhs < rhs.
+        if (C_is_lhs) {
+            // C < R: always false when C == UMAX (e.g. SIZE_MAX < len).
+            if (C == UMAX) return 0;
+        } else {
+            // R < C: always false when C == 0.
+            if (C == 0) return 0;
+        }
+    } else { // ND_LE
+        // Stored as ND_LE(lhs, rhs) meaning lhs <= rhs.
+        if (C_is_lhs) {
+            // C <= R: always true when C == 0.
+            if (C == 0) return 1;
+        } else {
+            // R <= C: always true when C == UMAX.
+            if (C == UMAX) return 1;
+        }
+    }
+    return -1;
 }
 
 // ---------------------------------------------------------------------------
@@ -6220,9 +6319,9 @@ static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *
             }
 
             // __attribute__((error("msg"))): if this function is called (and the call is
-            // not eliminated), emit a compile-time error with the given message.
-            // Note: CCCC has no AST-level DCE, so the error fires on every syntactic call.
-            // A DCE-aware version is tracked in the follow-up ticket.
+            // not eliminated by dead-code suppression), emit a compile-time error.
+            // DCE-aware: the diagnostic is suppressed when the call site is inside a
+            // statically-dead branch (dead_code_depth > 0).  See static_branch_value().
             if (is_attr_name(tok, "error")) {
                 tok = tok->next;
                 char *message = NULL;
@@ -6241,12 +6340,13 @@ static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *
                 if (!vm->compiler.in_type_lookahead) {
                     if (ty) ty->attr_error_msg = message ? message : "";
                     if (attr) attr->attr_error_msg = message ? message : "";
+                    vm->compiler.saw_diag_attr = true;
                 }
                 continue;
             }
 
             // __attribute__((warning("msg"))): emit a compile-time warning when called.
-            // Same DCE caveat as error above.
+            // DCE-aware: suppressed inside statically-dead branches, same as error above.
             if (is_attr_name(tok, "warning")) {
                 tok = tok->next;
                 char *message = NULL;
@@ -6264,6 +6364,7 @@ static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *
                 if (!vm->compiler.in_type_lookahead) {
                     if (ty) ty->attr_warning_msg = message ? message : "";
                     if (attr) attr->attr_warning_msg = message ? message : "";
+                    vm->compiler.saw_diag_attr = true;
                 }
                 continue;
             }
@@ -7310,13 +7411,17 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
         }
     }
 
-    // __attribute__((error("msg"))): every call to this function is a compile error.
-    // Note: fires on every syntactic call; CCCC has no AST-level DCE to suppress it.
-    if (ty->attr_error_msg)
+    // __attribute__((error("msg"))): emit a compile-time error on every live call.
+    // Suppressed when dead_code_depth > 0, i.e. the call site is inside a
+    // statically-dead branch identified by static_branch_value() at the enclosing
+    // if-statement.  Under collect_errors recovery a live error_tok may longjmp
+    // past the decrement — but dead branches never trigger error_tok, so the
+    // counter stays balanced.
+    if (ty->attr_error_msg && vm->compiler.dead_code_depth == 0)
         error_tok(vm, fn->tok, "%s", ty->attr_error_msg);
 
-    // __attribute__((warning("msg"))): emit a compile-time warning on every call.
-    if (ty->attr_warning_msg)
+    // __attribute__((warning("msg"))): emit a compile-time warning on every live call.
+    if (ty->attr_warning_msg && vm->compiler.dead_code_depth == 0)
         warn_tok(vm, fn->tok, CCCC_WARN_ATTRIBUTES, "%s", ty->attr_warning_msg);
 
     // Validate format string arguments when -F is active

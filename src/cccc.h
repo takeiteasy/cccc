@@ -2008,6 +2008,11 @@ typedef struct Compiler {
     Obj *current_fn;       // Function being parsed
     int fn_nesting_depth;  // Current function nesting depth (0 = top-level)
     bool in_type_lookahead; // Parsing a declarator only to classify it
+    int dead_code_depth;    // >0 while parsing a statically-dead branch (counter
+                            // so nesting composes: if(0){ if(1){ f(); } })
+    bool saw_diag_attr;     // true once any error/warning attribute is seen in
+                            // this TU; gates all deadness computation so normal
+                            // compiles pay no extra overhead
     Node *gotos;           // Goto statements in current function
     Node *labels;          // Labels in current function
     char *brk_label;       // Current break jump target
