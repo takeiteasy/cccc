@@ -1,5 +1,5 @@
 // CCCC_FLAGS: --testing
-// DCE-aware __attribute__((error)) suppression (#637, #644).
+// DCE-aware __attribute__((error)) suppression (#637, #644, #645, #646).
 //
 // All calls to __chk_fail() below sit in statically-dead branches; none should
 // trigger a compile-time error.  The test verifies:
@@ -14,6 +14,8 @@
 //   - true || chk() short-circuit  (#644)
 //   - ternary dead then-branch  (#644)
 //   - ternary dead else-branch  (#644)
+//   - for(;0; chk()) dead increment expression  (#646)
+//   - GNU a ?: b dead b when a is statically truthy  (#645)
 //
 // NOTE on types: __builtin_object_size returns ty_ulong (unsigned long).
 // size_t is typedef unsigned long (#643), so the FORTIFY idiom
@@ -175,4 +177,30 @@ void test_warning_ternary_dead_then(void) {
 [[cccc::test]]
 void test_warning_ternary_dead_else(void) {
     (void)(1 ? 0 : __chk_warn_i());
+}
+
+// --- #646: for(;0; inc) dead increment expression ---
+
+[[cccc::test]]
+void test_error_for_dead_inc(void) {
+    // for(;0; chk()) — cond is statically 0, so inc is never reached.
+    for (; 0; __chk_fail());
+}
+
+[[cccc::test]]
+void test_warning_for_dead_inc(void) {
+    for (; 0; __chk_warn());
+}
+
+// --- #645: GNU a ?: b — dead b when a is statically truthy ---
+
+[[cccc::test]]
+void test_error_elvis_dead_b(void) {
+    // 1 ?: chk_i() — b is never evaluated (a is truthy, so tmp?tmp:b takes tmp).
+    (void)(1 ?: __chk_fail_i());
+}
+
+[[cccc::test]]
+void test_warning_elvis_dead_b(void) {
+    (void)(1 ?: __chk_warn_i());
 }

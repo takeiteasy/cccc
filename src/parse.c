@@ -3856,16 +3856,21 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             node->cond = expr(vm, &tok, tok);
         tok = skip(vm, tok, ";");
 
-        if (!equal(tok, ")"))
+        // DCE-aware suppression: for(;0; inc){body} — cond statically 0 makes
+        // both the increment expression and the body unreachable (#644, #646).
+        bool for_cond_dead = node->cond && vm->compiler.saw_diag_attr &&
+                             static_branch_value(vm, node->cond) == 0;
+
+        if (!equal(tok, ")")) {
+            if (for_cond_dead) vm->compiler.dead_code_depth++;
             node->inc = expr(vm, &tok, tok);
+            if (for_cond_dead) vm->compiler.dead_code_depth--;
+        }
         tok = skip(vm, tok, ")");
 
-        // DCE-aware suppression: for(;0;){...} — body is statically dead.
-        bool for_body_dead = node->cond && vm->compiler.saw_diag_attr &&
-                             static_branch_value(vm, node->cond) == 0;
-        if (for_body_dead) vm->compiler.dead_code_depth++;
+        if (for_cond_dead) vm->compiler.dead_code_depth++;
         node->then = stmt(vm, rest, tok);
-        if (for_body_dead) vm->compiler.dead_code_depth--;
+        if (for_cond_dead) vm->compiler.dead_code_depth--;
 
         leave_scope(vm);
         vm->compiler.brk_label = brk;
@@ -5015,7 +5020,14 @@ static Node *conditional(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *rhs = new_node(vm, ND_COND, tok);
         rhs->cond = new_var_node(vm, var, tok);
         rhs->then = new_var_node(vm, var, tok);
+        // DCE-aware suppression: 1 ?: chk() — `b` is dead when `a` is
+        // statically truthy (a ?: b == a ? a : b, so b is only reached when
+        // a is falsy).  Matches standard-ternary els_dead direction (#645).
+        bool elvis_els_dead = vm->compiler.saw_diag_attr &&
+                              static_branch_value(vm, cond) == 1;
+        if (elvis_els_dead) vm->compiler.dead_code_depth++;
         rhs->els = conditional(vm, rest, tok->next->next);
+        if (elvis_els_dead) vm->compiler.dead_code_depth--;
         return new_binary(vm, ND_COMMA, lhs, rhs, tok);
     }
 
