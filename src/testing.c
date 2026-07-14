@@ -583,9 +583,8 @@ static Obj *find_fn(Obj *prog, const char *name) {
 //   - Exact match: suite == filter
 //   - Prefix match: suite starts with filter followed by '/' (sub-suite selection)
 //   - Glob match: filter contains glob metacharacters (*?[), use fnmatch
-// Hook suite matching (run_hooks/has_once_setups_for) uses exact strcmp and is
-// intentionally NOT hierarchical — parent hooks do not inherit to sub-suites.
-// TODO: add hierarchical hook inheritance in a follow-up ticket (#344).
+// Hook suite matching: exact by default; when a hook has inherit=true it uses
+// suite_matches so the hook covers the named suite and all sub-suites (#515).
 static bool suite_matches(const char *suite, const char *filter) {
     const char *s = suite ? suite : "";
     if (strpbrk(filter, "*?["))
@@ -611,8 +610,11 @@ static void run_hooks(VirtualMachine *vm, Obj *prog, TestSetupRecord *setups,
         if (s->is_teardown != is_teardown) continue;
         if (s->once       != once_only)   continue;
         // Suite filter: if the hook targets a specific suite, it must match.
+        // With inherit=true, use hierarchical suite_matches; otherwise exact.
         if (s->suite) {
-            if (!suite || strcmp(s->suite, suite) != 0) continue;
+            if (!suite) continue;
+            if (s->inherit ? !suite_matches(suite, s->suite)
+                           : strcmp(s->suite, suite) != 0) continue;
         }
         // Name-pattern filter.
         // For per-test (once_only=false): run if name_pat matches or no name_pat.
@@ -625,14 +627,6 @@ static void run_hooks(VirtualMachine *vm, Obj *prog, TestSetupRecord *setups,
         }
         run_hook(vm, prog, s->fn_name);
     }
-}
-
-// Returns true if any once-setup exists for the given suite.
-static bool has_once_setups_for(TestSetupRecord *setups, const char *suite) {
-    for (TestSetupRecord *s = setups; s; s = s->next)
-        if (!s->is_teardown && s->once && s->suite && strcmp(s->suite, suite) == 0)
-            return true;
-    return false;
 }
 
 // Run hooks in an isolated setjmp context so that CCCC_ASSERT failures are
@@ -668,6 +662,22 @@ static bool run_once_hooks(VirtualMachine *vm, Obj *prog, TestSetupRecord *setup
                            bool is_teardown, const char *suite) {
     return run_hooks_guarded(vm, prog, setups, is_teardown, true,
                              suite, NULL, NULL);
+}
+
+// Streaming once-suite-hook state (#515). Tracks one once-suite-setup hook
+// through its open (setup fired) → closed (teardown fired) lifecycle.
+typedef struct {
+    TestSetupRecord *hook; // points into the local setups copy
+    bool  open;            // setup has fired; teardown has not
+    char *snap;            // data-segment snapshot taken right after setup ran
+} OnceSuiteHook;
+
+// Returns the innermost open once-suite-hook's snapshot, or fallback
+// (cur_snap / base_snap) when no suite hooks are active.
+static char *once_suite_snap(OnceSuiteHook *hs, int n, char *fallback) {
+    for (int i = n - 1; i >= 0; i--)
+        if (hs[i].open) return hs[i].snap;
+    return fallback;
 }
 
 // Escapes a string for JSON output (writes to buf, returns buf).
@@ -800,6 +810,19 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         *copy      = *s;
         copy->next = setups;
         setups     = copy;
+    }
+
+    // Build streaming once-suite-hook state array (#515).
+    int n_once_suite = 0;
+    for (TestSetupRecord *s = setups; s; s = s->next)
+        if (!s->is_teardown && s->once && s->suite) n_once_suite++;
+    OnceSuiteHook *once_suite = calloc(n_once_suite > 0 ? n_once_suite : 1,
+                                       sizeof(OnceSuiteHook));
+    {
+        int idx = 0;
+        for (TestSetupRecord *s = setups; s; s = s->next)
+            if (!s->is_teardown && s->once && s->suite)
+                once_suite[idx++].hook = s;
     }
 
     // Reverse test records to run in declaration order (test_fns is built by prepending).
@@ -940,23 +963,30 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         const char *disp      = test_display_name(r);
         const char *cur_suite = r->suite;
 
+        // Streaming once-suite-hook close pass (#515): close innermost-first any
+        // hook whose subtree no longer covers this test.  "Subtree" uses
+        // suite_matches regardless of the hook's inherit flag, so a hook on "a"
+        // stays open across a "a/b" dip, preventing re-entry double-fire.
+        for (int _i = n_once_suite - 1; _i >= 0; _i--) {
+            if (!once_suite[_i].open) continue;
+            const char *hs = once_suite[_i].hook->suite;
+            if (suite_matches(cur_suite ? cur_suite : "", hs)) continue;
+            if (!run_once_hooks(vm, prog, setups, true, hs)) {
+                if (fmt == TEST_FORMAT_TAP)
+                    printf("# once-teardown for suite \"%s\" failed\n", hs);
+                else if (fmt == TEST_FORMAT_PLAIN)
+                    printf("  ! once-teardown for suite \"%s\" failed\n", hs);
+            }
+            once_suite[_i].open = false;
+            free(once_suite[_i].snap);
+            once_suite[_i].snap = NULL;
+        }
+
+        // Suite-change header (purely cosmetic; hook lifecycle is now streaming).
         bool suite_changed = (cur_suite != prev_suite) &&
                              (cur_suite == NULL || prev_suite == NULL ||
                               strcmp(cur_suite, prev_suite) != 0);
-
         if (suite_changed) {
-            if (prev_suite) {
-                if (!run_once_hooks(vm, prog, setups, true, prev_suite)) {
-                    if (fmt == TEST_FORMAT_TAP)
-                        printf("# once-teardown for suite \"%s\" failed\n", prev_suite);
-                    else if (fmt == TEST_FORMAT_PLAIN)
-                        printf("  ! once-teardown for suite \"%s\" failed\n", prev_suite);
-                }
-            }
-            if (cur_snap != base_snap) {
-                free(cur_snap);
-                cur_snap = base_snap;
-            }
             if (fmt == TEST_FORMAT_TAP) {
                 if (cur_suite)
                     printf("# Suite: %s\n", cur_suite);
@@ -966,18 +996,24 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                 printf("── %s ──\n", cur_suite ? cur_suite : "(no suite)");
             }
             prev_suite = cur_suite;
+        }
 
-            if (cur_suite && has_once_setups_for(setups, cur_suite)) {
-                memcpy(vm->data_seg, base_snap, snap_size);
-                if (!run_once_hooks(vm, prog, setups, false, cur_suite)) {
-                    if (fmt == TEST_FORMAT_TAP)
-                        printf("# once-setup for suite \"%s\" failed\n", cur_suite);
-                    else if (fmt == TEST_FORMAT_PLAIN)
-                        printf("  ! once-setup for suite \"%s\" failed\n", cur_suite);
-                }
-                cur_snap = malloc(snap_size);
-                memcpy(cur_snap, vm->data_seg, snap_size);
-            }
+        // Streaming once-suite-hook open pass (#515): open outermost-first any
+        // hook not yet fired that covers this test.
+        for (int _i = 0; _i < n_once_suite; _i++) {
+            if (once_suite[_i].hook->once_fired) continue;
+            const char *hs = once_suite[_i].hook->suite;
+            bool covers = once_suite[_i].hook->inherit
+                              ? suite_matches(cur_suite ? cur_suite : "", hs)
+                              : (cur_suite && strcmp(cur_suite, hs) == 0);
+            if (!covers) continue;
+            // Restore from current top-of-stack before firing this setup.
+            memcpy(vm->data_seg, once_suite_snap(once_suite, _i, cur_snap), snap_size);
+            run_hook(vm, prog, once_suite[_i].hook->fn_name);
+            once_suite[_i].snap = malloc(snap_size);
+            memcpy(once_suite[_i].snap, vm->data_seg, snap_size);
+            once_suite[_i].open            = true;
+            once_suite[_i].hook->once_fired = true;
         }
 
         if (r->error_pat || r->expect_compile_error) {
@@ -1146,7 +1182,7 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                 continue;
             }
 
-            memcpy(vm->data_seg, cur_snap, snap_size);
+            memcpy(vm->data_seg, once_suite_snap(once_suite, n_once_suite, cur_snap), snap_size);
             run_hooks(vm, prog, setups, false, false, cur_suite, disp);
 
             fflush(stdout);
@@ -1229,7 +1265,7 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
             continue;
         }
 
-        memcpy(vm->data_seg, cur_snap, snap_size);
+        memcpy(vm->data_seg, once_suite_snap(once_suite, n_once_suite, cur_snap), snap_size);
 
         run.failed    = 0;
         run.timed_out = 0;
@@ -1267,11 +1303,14 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
             }
         }
         if (namepat_once_fired) {
-            // Snapshot after once-setup so subsequent tests see its state
-            if (cur_snap == base_snap) {
-                cur_snap = malloc(snap_size);
+            // Re-capture the top-of-stack snapshot to include name_pat side-effects.
+            char *ts = once_suite_snap(once_suite, n_once_suite, NULL);
+            if (ts) {
+                memcpy(ts, vm->data_seg, snap_size);
+            } else {
+                if (cur_snap == base_snap) cur_snap = malloc(snap_size);
+                memcpy(cur_snap, vm->data_seg, snap_size);
             }
-            memcpy(cur_snap, vm->data_seg, snap_size);
         }
 
         // Per-test stdout/stderr capture (#614). Redirect fds to pipes before
@@ -1542,13 +1581,20 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         }
     }
 
-    if (prev_suite && !stop_early) {
-        if (!run_once_hooks(vm, prog, setups, true, prev_suite)) {
+    // Close all still-open once-suite hooks innermost-first (covers both normal
+    // end-of-run and stop_early — teardowns always fire on exit).
+    for (int _i = n_once_suite - 1; _i >= 0; _i--) {
+        if (!once_suite[_i].open) continue;
+        const char *hs = once_suite[_i].hook->suite;
+        if (!run_once_hooks(vm, prog, setups, true, hs)) {
             if (fmt == TEST_FORMAT_TAP)
-                printf("# once-teardown for suite \"%s\" failed\n", prev_suite);
+                printf("# once-teardown for suite \"%s\" failed\n", hs);
             else if (fmt == TEST_FORMAT_PLAIN)
-                printf("  ! once-teardown for suite \"%s\" failed\n", prev_suite);
+                printf("  ! once-teardown for suite \"%s\" failed\n", hs);
         }
+        once_suite[_i].open = false;
+        free(once_suite[_i].snap);
+        once_suite[_i].snap = NULL;
     }
 
     // Fire once-teardown hooks with name_pat after all tests complete
@@ -1603,6 +1649,10 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
 
     if (cur_snap != base_snap) free(cur_snap);
     free(base_snap);
+
+    for (int _i = 0; _i < n_once_suite; _i++)
+        if (once_suite[_i].snap) free(once_suite[_i].snap);
+    free(once_suite);
 
     if (any_timeout_possible)
         signal(SIGALRM, SIG_DFL);

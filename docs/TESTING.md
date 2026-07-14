@@ -385,8 +385,9 @@ Use `--test-suite=NAME` to run only tests whose suite matches `NAME`:
 ./cccc --testing --test-suite='math/*'   myfile.c  # glob: direct children only
 ```
 
-> **Note:** Setup/teardown hooks are matched against suites by exact name. A hook
-> scoped to `math` does **not** automatically run for `math/trig` tests.
+> **Note:** Setup/teardown hooks are matched against suites by exact name by default.
+> A hook scoped to `math` does **not** automatically run for `math/trig` tests
+> unless the hook is declared with the `inherit` keyword (see [Setup and Teardown](#setup-and-teardown)).
 
 ## Negative Tests
 
@@ -693,9 +694,46 @@ Use `suite = "name"` to run a hook before (or after) every test in the named sui
 ```c
 [[cccc::test_setup(suite = "network")]]
 void network_setup(void) {
-    // runs before each test in the "network" suite
+    // runs before each test in the "network" suite — exact match only
 }
 ```
+
+### Suite hook inheritance
+
+By default, a hook scoped to `suite = "math"` runs only for tests whose suite is
+exactly `"math"`. Add the `inherit` keyword to also cover all sub-suites
+(`"math/trig"`, `"math/trig/advanced"`, etc.):
+
+```c
+[[cccc::test_setup(suite = "math", inherit)]]
+void math_setup(void) {
+    // runs before each test in "math" AND any "math/*" sub-suite
+}
+```
+
+The `inherit` flag uses the same `/`-boundary prefix rule as `--test-suite` filtering,
+so a hook on `"math"` does **not** accidentally match `"mathematics"`.
+
+`inherit` can be combined with `once` to wrap an entire subtree with a single
+setup/teardown pair:
+
+```c
+[[cccc::test_setup(suite = "math", once, inherit)]]
+void math_once_setup(void) {
+    // fires once before the first "math" or "math/*" test
+}
+
+[[cccc::test_teardown(suite = "math", once, inherit)]]
+void math_once_teardown(void) {
+    // fires once after the last "math" or "math/*" test leaves the subtree
+}
+```
+
+The once-hook lifecycle is **streaming**: as tests move from one sub-suite to another,
+the framework closes hooks that no longer cover the current test (innermost-first)
+and opens hooks that newly cover it (outermost-first). A parent suite hook stays
+open across a dip into a child block — it does **not** re-fire when the suite
+re-enters the parent scope after visiting a child.
 
 ### Suite once-hooks
 
@@ -1266,7 +1304,7 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 - Setup and teardown hook functions must also have signature `void name(void)`.
 - Teardown hooks are skipped on test timeout (VM state is unknown after `SIGALRM`). They run in all other cases, including after test or setup failure.
 - Calling `exit()` directly in a normal test terminates the entire process rather than failing just that test. Use `Assert*` macros instead, or use `exit_code =` if testing that the function exits with a specific code.
-- Setup/teardown hooks match suites by exact name. A hook scoped to `parent` does **not** automatically run for `parent/sub` tests.
+- Setup/teardown hooks match suites by exact name by default. Add `inherit` to also cover sub-suites.
 - **Negative test bodies are matched against error substrings.** Use a substring that is specific enough to avoid false matches but not so specific that it breaks with minor message wording changes.
 - **`exit_code =` tests are skipped on non-POSIX platforms** where `fork(2)` is not available.
 - `--test-timeout` uses `SIGALRM`; test code that also uses `alarm()` or installs a `SIGALRM` handler will interfere with the timeout mechanism.

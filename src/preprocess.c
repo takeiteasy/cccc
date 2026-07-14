@@ -2543,6 +2543,7 @@ typedef struct {
     const char *name_pat;
     const char *suite;
     bool once;
+    bool inherit;
 } TestSetupArgs;
 
 // Classify one scalar token (or a leading "-" then NUM) from the token stream
@@ -2864,6 +2865,9 @@ static void parse_test_setup_args(Token **p_ptr, TestSetupArgs *out) {
             p = p->next->next->next;
         } else if (equal(p, "once")) {
             out->once = true;
+            p = p->next;
+        } else if (equal(p, "inherit")) {
+            out->inherit = true;
             p = p->next;
         } else {
             p = p->next;
@@ -3221,6 +3225,7 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
                 rec->suite       = tsa.suite    ? strdup(tsa.suite)    : NULL;
                 rec->once        = tsa.once;
                 rec->is_teardown = is_teardown_kind;
+                rec->inherit     = tsa.inherit;
                 rec->next = vm->compiler.test_setups;
                 vm->compiler.test_setups = rec;
                 break;

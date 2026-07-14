@@ -1285,6 +1285,7 @@ struct TestSetupRecord {
     bool  once;         // run once at suite boundary (suite) or first/last match (name_pat)
     bool  once_fired;   // true after the once-hook has been executed
     bool  is_teardown;  // false = setup, true = teardown
+    bool  inherit;      // if true, hook applies to sub-suites via suite_matches (#515)
     TestSetupRecord *next;
 };
 
