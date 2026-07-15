@@ -938,7 +938,7 @@ if (__builtin_mul_overflow(a, b, &r))
 | `<stdnoreturn.h>` | ✓ | |
 | `<threads.h>` | ✓ | Thread lifecycle (`thrd_create/join/exit/detach/yield/sleep/current/equal`), mutex (`mtx_init/lock/trylock/unlock/destroy`), condition variables (`cnd_init/wait/signal/broadcast/destroy`), and thread-specific storage (`tss_create/get/set/delete`); backed by host pthreads via POSIX `<pthread.h>` |
 | `<uchar.h>` | ✓ | `char8_t`, `char16_t`, `char32_t` defined; `mbrtoc16`/`c16rtomb`/`mbrtoc32`/`c32rtomb`/`mbrtoc8`/`c8rtomb` registered (native on glibc where available, shimmed via `mbrtowc`/`wcrtomb` elsewhere) |
-| `aligned_alloc` | ✓ | Backed by host aligned allocation |
+| `aligned_alloc` | ✓ | Routed through the VM heap (`MALCA` opcode, #668) when the VM heap is enabled (the default); backed by host aligned allocation only under `-V`/`--vm-heap` |
 | `quick_exit` / `at_quick_exit` | ✓ | |
 | `timespec_get` | ✓ | `TIME_UTC` |
 

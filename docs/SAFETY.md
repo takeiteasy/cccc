@@ -406,19 +406,24 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
 
 ## VM Heap Allocator
 
-`malloc`/`free`/`calloc`/`realloc` route through the VM heap (`MALC`/`MFRE`/`CALC`/`REALC`
-opcodes) by default at every safety level, including `-0`. This is what makes the heap safety
-features below usable without any special opt-in in normal code.
+`malloc`/`free`/`calloc`/`realloc`/`aligned_alloc`/`posix_memalign` route through the VM heap
+(`MALC`/`MFRE`/`CALC`/`REALC`/`MALCA`/`PMEMA` opcodes) by default at every safety level, including
+`-0`. This is what makes the heap safety features below usable without any special opt-in in
+normal code.
 
-- `-V` / `--vm-heap` **turns the VM heap off**, reverting `malloc`/`free`/`calloc`/`realloc` to
-  the host allocator via FFI. It is only valid at safety level 0 (default or explicit `-0`);
-  combining it with `-1`/`-2`/`-3` (or `--safety=basic/standard/max`) is a hard compile-time
-  error since those presets require the VM heap.
+- `-V` / `--vm-heap` **turns the VM heap off**, reverting all of the above to the host allocator
+  via FFI. It is only valid at safety level 0 (default or explicit `-0`); combining it with
+  `-1`/`-2`/`-3` (or `--safety=basic/standard/max`) is a hard compile-time error since those
+  presets require the VM heap.
 - `free_sized`/`free_aligned_sized` (C23) are routed through the same `MFRE` opcode as `free`,
-  so a VM-heap-allocated pointer freed through either call is handled correctly. `aligned_alloc`
-  and `posix_memalign` are not intercepted and still allocate via the host allocator; freeing
-  their result with plain `free()`/`free_sized()`/`free_aligned_sized()` works because `MFRE`
-  detects a missing VM-heap header (`ops.c` `op_MFRE_fn`) and falls back to the host `free()`.
+  so a VM-heap-allocated pointer freed through either call is handled correctly.
+- `aligned_alloc`/`posix_memalign` (#668) are intercepted the same way as `malloc`/`calloc`, via
+  `MALCA`/`PMEMA`: the bump allocator pads *before* the `AllocHeader` so the returned pointer
+  meets the requested alignment while the header is still recoverable via
+  `((AllocHeader*)ptr) - 1`, giving them the same canaries/bounds-checks/UAF-detection/
+  type-checks/leak-detection/tagging coverage as `malloc`. Freeing their result with plain
+  `free()`/`free_sized()`/`free_aligned_sized()` works via the normal `MFRE` path (no fallback to
+  the host allocator needed, since the pointer now carries a VM-heap header).
 - Zero overhead when no other safety features are enabled.
 
 ## FFI Safety Features

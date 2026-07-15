@@ -329,6 +329,18 @@ These opcodes implement the C standard library heap when `--vm-heap` is enabled.
 | `MSET` | `REG_A0` = dest, `REG_A2` = count | `memset` to 0; backs `ND_MEMZERO` (pre-zero for partial aggregate initialisers) |
 | `REALC` | `REG_A0` = ptr, `REG_A1` = new_size | `realloc` |
 | `CALC` | `REG_A0` = nmemb, `REG_A1` = size | `calloc` |
+| `MALCA` | `REG_A0` = size, `REG_A1` = alignment | `aligned_alloc`; pointer returned in `REG_A0` (`NULL` if `alignment` isn't a power of two) |
+| `PMEMA` | `REG_A0` = memptr, `REG_A1` = alignment, `REG_A2` = size | `posix_memalign`; status (`0`/`EINVAL`/`ENOMEM`) returned in `REG_A0`, allocated pointer written through `memptr` |
+
+`MALC`/`CALC`/`REALC` allocate with the default 8-byte alignment; `MALCA`/`PMEMA`
+(#668) pad the bump pointer *before* the `AllocHeader` so the returned user
+pointer lands on the requested alignment, while every consumer that recovers
+the header via `((AllocHeader*)ptr) - 1` (`MFRE`, `REALC`, `DYNOBJSZ`, `CHKB`,
+`CHKP3`, `CHKT3`) keeps working unmodified. Padding is only ever added
+upward and is never reclaimed, consistent with the bump allocator having no
+free-list reuse. Both opcodes share `MALC`'s canary/poisoning/leak-detection/
+tagging tail via a common `vm_heap_bump_alloc` helper, so `aligned_alloc` and
+`posix_memalign` allocations get the same heap safety coverage as `malloc`.
 
 ### Safety Opcodes
 

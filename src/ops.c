@@ -2177,17 +2177,37 @@ static void sorted_allocs_insert(VirtualMachine *vm, void *user_ptr, AllocHeader
     vm->sorted_allocs.count++;
 }
 
-static inline int op_MALC_fn(VirtualMachine *vm) {
-    // malloc: size in REG_A0, return pointer in REG_A0
-    long long requested_size = vm->regs[REG_A0];
-    if (requested_size <= 0) {
-        vm->regs[REG_A0] = 0; // Return NULL for invalid size
-        return 0;
-    }
+// Bump-allocate `requested_size` bytes from the VM heap with an AllocHeader
+// immediately preceding the returned pointer, aligned to `alignment` bytes
+// (must be a power of two; the caller is responsible for validating that).
+// alignment=8 is the default (malloc/calloc/realloc) path and — because
+// sizeof(AllocHeader) is a multiple of 8 (see the _Static_assert next to its
+// definition) and the bump pointer only ever advances by multiples of 8 —
+// never introduces padding, so it is exactly the original MALC behaviour.
+//
+// For larger alignments, padding is inserted *before* the header (never
+// between the header and the user pointer), so every consumer that recovers
+// the header via `((AllocHeader*)ptr) - 1` — MFRE, REALC, DYNOBJSZ, CHKB,
+// heap_alloc_for_ptr — keeps working unmodified. The pad bytes are simply
+// wasted (never reclaimed), consistent with this being a bump/mark-freed
+// allocator with no free-list reuse.
+//
+// Returns NULL (without touching any VM register) on invalid size or OOM;
+// callers translate that into their own error-reporting convention.
+static inline void *vm_heap_bump_alloc(VirtualMachine *vm, long long requested_size, size_t alignment) {
+    if (requested_size <= 0)
+        return NULL;
 
-    // Align to 8-byte boundary
+    // Align the requested size to 8 bytes as before.
     size_t size = (requested_size + 7) & ~7;
-    size_t total_size = size + sizeof(AllocHeader);
+
+    // Compute padding so that (base + pad + sizeof(AllocHeader)) — i.e. the
+    // user pointer — lands on an `alignment` boundary.
+    size_t base = (size_t)vm->heap_ptr;
+    size_t header_off = base + sizeof(AllocHeader);
+    size_t pad = (alignment - (header_off % alignment)) % alignment;
+
+    size_t total_size = pad + sizeof(AllocHeader) + size;
 
     // Reserve space for rear heap canary when enabled
     if (vm->flags & CCCC_HEAP_CANARIES)
@@ -2196,19 +2216,17 @@ static inline int op_MALC_fn(VirtualMachine *vm) {
     // Check for OOM — try to grow the heap before giving up
     size_t available = (size_t)(vm->heap_end - vm->heap_ptr);
     if (total_size > available) {
-        if (vm_heap_grow(vm, total_size) != 0) {
-            vm->regs[REG_A0] = 0; // Out of memory (reservation exhausted)
-            return 0;
-        }
+        if (vm_heap_grow(vm, total_size) != 0)
+            return NULL; // Out of memory (reservation exhausted)
+        // vm_heap_grow only extends heap_end (commits more of the reserved
+        // pool); heap_ptr itself is unchanged, so pad/total_size still hold.
         available = (size_t)(vm->heap_end - vm->heap_ptr);
-        if (total_size > available) {
-            vm->regs[REG_A0] = 0;
-            return 0;
-        }
+        if (total_size > available)
+            return NULL;
     }
 
-    // Allocate from bump pointer
-    AllocHeader *header = (AllocHeader *)vm->heap_ptr;
+    // Allocate from bump pointer, skipping the alignment pad
+    AllocHeader *header = (AllocHeader *)(vm->heap_ptr + pad);
     header->size = size;
     header->requested_size = requested_size;
     header->magic = 0xDEADBEEF;
@@ -2221,7 +2239,6 @@ static inline int op_MALC_fn(VirtualMachine *vm) {
 
     vm->heap_ptr = vm->heap_ptr + total_size;
     void *user_ptr = (void *)(header + 1);
-    vm->regs[REG_A0] = (long long)user_ptr;
 
     // Track base address -> header for O(log n) interior-pointer lookups.
     sorted_allocs_insert(vm, user_ptr, header);
@@ -2252,8 +2269,76 @@ static inline int op_MALC_fn(VirtualMachine *vm) {
     if (vm->flags & CCCC_MEMORY_TAGGING)
         hashmap_put_int(&vm->ptr_tags, (long long)user_ptr, (void *)(intptr_t)0);
 
+    return user_ptr;
+}
+
+static inline int op_MALC_fn(VirtualMachine *vm) {
+    // malloc: size in REG_A0, return pointer in REG_A0
+    long long requested_size = vm->regs[REG_A0];
+    void *user_ptr = vm_heap_bump_alloc(vm, requested_size, 8);
+    vm->regs[REG_A0] = (long long)user_ptr;
+
+    if (vm->debug_vm && user_ptr) {
+        printf("MALC: allocated %zu bytes at 0x%llx\n", (size_t)((requested_size + 7) & ~7), vm->regs[REG_A0]);
+    }
+    return 0;
+}
+
+static inline int op_MALCA_fn(VirtualMachine *vm) {
+    // aligned_alloc: size in REG_A0, alignment in REG_A1, return pointer in REG_A0
+    long long requested_size = vm->regs[REG_A0];
+    size_t alignment = (size_t)vm->regs[REG_A1];
+
+    // aligned_alloc requires a power-of-two alignment; reject anything else
+    // (and anything smaller than the default 8-byte alignment just uses 8).
+    if (alignment == 0 || (alignment & (alignment - 1)) != 0) {
+        vm->regs[REG_A0] = 0;
+        return 0;
+    }
+    if (alignment < 8)
+        alignment = 8;
+
+    void *user_ptr = vm_heap_bump_alloc(vm, requested_size, alignment);
+    vm->regs[REG_A0] = (long long)user_ptr;
+
+    if (vm->debug_vm && user_ptr) {
+        printf("MALCA: allocated %zu bytes aligned to %zu at 0x%llx\n", (size_t)requested_size, alignment,
+               vm->regs[REG_A0]);
+    }
+    return 0;
+}
+
+static inline int op_PMEMA_fn(VirtualMachine *vm) {
+    // posix_memalign: memptr in REG_A0, alignment in REG_A1, size in REG_A2,
+    // return status (0/EINVAL/ENOMEM) in REG_A0.
+    void **memptr = (void **)vm->regs[REG_A0];
+    size_t alignment = (size_t)vm->regs[REG_A1];
+    long long requested_size = vm->regs[REG_A2];
+
+    // POSIX: alignment must be a power of two and a multiple of sizeof(void*).
+    if (alignment == 0 || (alignment & (alignment - 1)) != 0 || alignment % sizeof(void *) != 0) {
+        vm->regs[REG_A0] = EINVAL;
+        return 0;
+    }
+
+    if (requested_size == 0) {
+        // Implementation-defined: either NULL or a unique freeable pointer.
+        // Return a minimal unique allocation, matching glibc's behaviour.
+        requested_size = 1;
+    }
+
+    void *user_ptr = vm_heap_bump_alloc(vm, requested_size, alignment);
+    if (!user_ptr) {
+        vm->regs[REG_A0] = ENOMEM;
+        return 0;
+    }
+
+    *memptr = user_ptr;
+    vm->regs[REG_A0] = 0;
+
     if (vm->debug_vm) {
-        printf("MALC: allocated %zu bytes at 0x%llx\n", size, vm->regs[REG_A0]);
+        printf("PMEMA: allocated %zu bytes aligned to %zu at 0x%llx\n", (size_t)requested_size, alignment,
+               (long long)user_ptr);
     }
     return 0;
 }

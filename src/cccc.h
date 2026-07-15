@@ -67,6 +67,8 @@ extern "C" {
     X(MSET, 0) /* memset to 0: dest=REG_A0, count=REG_A2; backs ND_MEMZERO */   \
     X(REALC, 0)                                                                \
     X(CALC, 0)                                                                 \
+    X(MALCA, 0) /* aligned_alloc: size=A0, alignment=A1, result=A0 */          \
+    X(PMEMA, 0) /* posix_memalign: memptr=A0, alignment=A1, size=A2, result=A0 */ \
     /* Type conversion instructions (in-register) */                           \
     X(SX1, 1)   /* Sign extend 1 byte to 8 bytes */                            \
     X(SX2, 1)   /* Sign extend 2 bytes to 8 bytes */                           \
@@ -1552,6 +1554,13 @@ typedef struct AllocHeader {
     long long alloc_pc;      // PC at allocation site (for leak detection)
     int type_kind; // Type of allocation (TypeKind enum, for type checking)
 } AllocHeader;
+
+// The default (malloc) allocation path assumes 8-byte alignment introduces
+// zero padding before the header (vm_heap_bump_alloc's alignment=8 fast
+// path). That only holds if the header itself is a multiple of 8 bytes.
+_Static_assert(sizeof(AllocHeader) % 8 == 0,
+               "AllocHeader size must be a multiple of 8 for the default "
+               "malloc alignment path to introduce zero padding");
 
 /*!
  @struct FreeBlock

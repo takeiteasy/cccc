@@ -4414,6 +4414,37 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     emit_mov3(vm, dest_reg, REG_A0);
                 return;
             }
+            // aligned_alloc/posix_memalign (C11/C23) route through the VM
+            // heap's alignment-aware bump allocator (MALCA/PMEMA) so their
+            // allocations get an AllocHeader and full heap safety coverage
+            // (canaries, bounds/UAF/type checks, leak detection, tagging),
+            // mirroring malloc/calloc/realloc/free above. Before this, they
+            // fell through to the host allocator via FFI: not a crash (MFRE
+            // already falls back to host free() for non-VM-heap pointers),
+            // but heap safety silently didn't apply to them (#668).
+            if (is_extern_func_name(node->lhs, "aligned_alloc")) {
+                if (!node->args || !node->args->next)
+                    error_tok(vm, node->tok, "aligned_alloc requires alignment and size arguments");
+                reset_temp_regs();
+                gen_expr(vm, node->args->next, REG_A0); // size
+                gen_expr(vm, node->args, REG_A1);       // alignment
+                emit(vm, MALCA);
+                if (dest_reg != REG_A0)
+                    emit_mov3(vm, dest_reg, REG_A0);
+                return;
+            }
+            if (is_extern_func_name(node->lhs, "posix_memalign")) {
+                if (!node->args || !node->args->next || !node->args->next->next)
+                    error_tok(vm, node->tok, "posix_memalign requires memptr, alignment, and size arguments");
+                reset_temp_regs();
+                gen_expr(vm, node->args, REG_A0);             // memptr
+                gen_expr(vm, node->args->next, REG_A1);       // alignment
+                gen_expr(vm, node->args->next->next, REG_A2); // size
+                emit(vm, PMEMA);
+                if (dest_reg != REG_A0)
+                    emit_mov3(vm, dest_reg, REG_A0);
+                return;
+            }
         }
 
         // Check for FFI call - foreign functions use register-based calling

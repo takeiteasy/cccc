@@ -703,6 +703,8 @@ static void opt_constant_fold(VirtualMachine *vm, OptReplacement *repls,
             case LONGJMP:
             case MALC:
             case REALC:
+            case MALCA:
+            case PMEMA:
             case RETBUF:
             case SETJMP:
             case VRAISE:
@@ -1334,6 +1336,7 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
             case LONGJMP:
             case DLOPEN: case DLSYM: case DLCLOSE: case DLERROR:
             case MALC: case CALC: case REALC:
+            case MALCA: case PMEMA:
             case MFRE:
             case RETBUF:
             case SETJMP:
@@ -1607,6 +1610,21 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
             case REALC:
                 MARK_INT_USE(REG_A0);
                 MARK_INT_USE(REG_A1);
+                KILL_INT_DEF(REG_A0);
+                break;
+
+            // MALCA(size=A0, alignment=A1): reads A0, A1, writes A0.
+            case MALCA:
+                MARK_INT_USE(REG_A0);
+                MARK_INT_USE(REG_A1);
+                KILL_INT_DEF(REG_A0);
+                break;
+
+            // PMEMA(memptr=A0, alignment=A1, size=A2): reads A0, A1, A2, writes A0.
+            case PMEMA:
+                MARK_INT_USE(REG_A0);
+                MARK_INT_USE(REG_A1);
+                MARK_INT_USE(REG_A2);
                 KILL_INT_DEF(REG_A0);
                 break;
 
