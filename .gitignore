@@ -20,3 +20,4 @@ profile/benchmarks/results/
 profile/benchmarks/results/*.json
 tools/*.tar.gz
 tools/*.zip
+README.imd
