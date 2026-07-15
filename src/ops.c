@@ -2862,6 +2862,14 @@ static inline int op_SCOPEIN_fn(VirtualMachine *vm) {
         if (meta && meta->scope_id == scope_id) {
             meta->is_alive = 1;
             meta->bp       = (long long)vm->bp;
+            // Record this specific activation's liveness by its actual
+            // runtime address (bp+offset), not just the declaration-level
+            // scope_id/bp pair -- recursive calls of the same function
+            // enter this scope_id multiple times with different bp values,
+            // and meta->bp above can only remember the most recent one
+            // (#671).
+            hashmap_put_int(&vm->stack_var_active,
+                             (long long)vm->bp + meta->offset, meta);
             if (vm->debug_vm)
                 printf("  Activated '%s' at bp%+lld\n", meta->name, meta->offset);
         }
@@ -2888,11 +2896,19 @@ static inline int op_SCOPEOUT_fn(VirtualMachine *vm) {
         if (!ent->key || ent->key == (char *)-1)
             continue;
         StackVarMeta *meta = (StackVarMeta *)ent->val;
-        if (meta && meta->scope_id == scope_id && meta->bp == (long long)vm->bp) {
-            meta->is_alive = 0;
-            if (vm->debug_vm)
-                printf("  Deactivated '%s' at bp%+lld (reads=%lld writes=%lld)\n",
-                       meta->name, meta->offset, meta->read_count, meta->write_count);
+        if (meta && meta->scope_id == scope_id) {
+            // Clear this exact activation's liveness entry. This uses the
+            // current (exiting) frame's own bp, not meta->bp -- correct
+            // regardless of whether a recursive call already overwrote
+            // meta->bp with a deeper activation's value (#671).
+            hashmap_delete_int(&vm->stack_var_active,
+                                (long long)vm->bp + meta->offset);
+            if (meta->bp == (long long)vm->bp) {
+                meta->is_alive = 0;
+                if (vm->debug_vm)
+                    printf("  Deactivated '%s' at bp%+lld (reads=%lld writes=%lld)\n",
+                           meta->name, meta->offset, meta->read_count, meta->write_count);
+            }
         }
     }
 
@@ -2926,44 +2942,40 @@ static inline int op_SCOPEOUT_fn(VirtualMachine *vm) {
 
 static inline int op_CHKL_fn(VirtualMachine *vm) {
     // Check variable liveness before access (use-after-scope / use-after-return).
-    // Format: [CHKL] [offset:i64]
-    long long offset = cc_read_i64(vm);
+    // Format: [CHKL] [offset:i64] [scope_id]
+    long long offset   = cc_read_i64(vm);
+    int       scope_id = (int)cc_read_word(vm);
 
     if (!(vm->flags & CCCC_STACK_INSTR))
         return 0;
 
-    StackVarMeta *meta =
-        (StackVarMeta *)hashmap_get_int(&vm->stack_var_meta, offset);
+    // Liveness is keyed by actual runtime address (bp+offset), not by a
+    // single scope_id/bp pair on the declaration record -- recursive calls
+    // of the same function have multiple simultaneous activations sharing
+    // one scope_id, and a single "current bp" field on the declaration
+    // can't represent "is *this* activation still live" (#671). Each
+    // activation gets its own entry in stack_var_active via SCOPEIN/SCOPEOUT.
+    long long addr = (long long)vm->bp + offset;
+    if (hashmap_get_int(&vm->stack_var_active, addr))
+        return 0;
+
+    // Not live. scope_id (unused for the liveness decision above) resolves
+    // the declaration record purely for the error message.
+    StackVarMeta *meta = (StackVarMeta *)hashmap_get_int(
+        &vm->stack_var_meta, stack_var_meta_key(scope_id, offset));
     if (!meta)
         return 0;
 
-    if (meta->bp != (long long)vm->bp && meta->bp != 0) {
-        if (vm->flags & CCCC_STACK_INSTR_ERRORS) {
-            printf("\n========== USE AFTER RETURN DETECTED ==========\n");
-            printf("Variable '%s' at bp%+lld accessed after function return\n",
-                   meta->name, meta->offset);
-            printf("Variable BP:  0x%llx\n", meta->bp);
-            printf("Current BP:   0x%llx\n", (long long)vm->bp);
-            printf("PC:           0x%llx (offset: %lld)\n",
-                   (long long)vm->pc, (long long)vm->pc);
-            printf("==============================================\n");
-            return -1;
-        }
-    }
-
-    if (!meta->is_alive) {
-        if (vm->flags & CCCC_STACK_INSTR_ERRORS) {
-            printf("\n========== USE AFTER SCOPE DETECTED ==========\n");
-            printf("Variable '%s' at bp%+lld accessed after scope exit\n",
-                   meta->name, meta->offset);
-            printf("Scope ID: %d\n", meta->scope_id);
-            printf("PC:       0x%llx (offset: %lld)\n",
-                   (long long)vm->pc, (long long)vm->pc);
-            printf("=============================================\n");
-            return -1;
-        } else if (vm->debug_vm) {
-            printf("WARNING: Variable '%s' accessed after scope exit\n", meta->name);
-        }
+    if (vm->flags & CCCC_STACK_INSTR_ERRORS) {
+        printf("\n========== USE AFTER SCOPE/RETURN DETECTED ==========\n");
+        printf("Variable '%s' at bp%+lld accessed while not live (its scope "
+               "has exited or its function has returned)\n",
+               meta->name, meta->offset);
+        printf("PC: 0x%llx (offset: %lld)\n", (long long)vm->pc, (long long)vm->pc);
+        printf("=======================================================\n");
+        return -1;
+    } else if (vm->debug_vm) {
+        printf("WARNING: Variable '%s' accessed while not live\n", meta->name);
     }
     return 0;
 }
@@ -2976,9 +2988,12 @@ static inline int op_MARKR_fn(VirtualMachine *vm) {
     if (!(vm->flags & CCCC_STACK_INSTR))
         return 0;
 
-    StackVarMeta *meta =
-        (StackVarMeta *)hashmap_get_int(&vm->stack_var_meta, offset);
-    if (meta && meta->bp == (long long)vm->bp) {
+    // Looked up by actual runtime address, which yields the correct
+    // declaration record directly regardless of recursion (#671) -- see
+    // op_CHKL_fn.
+    StackVarMeta *meta = (StackVarMeta *)hashmap_get_int(
+        &vm->stack_var_active, (long long)vm->bp + offset);
+    if (meta) {
         meta->read_count++;
         if (vm->debug_vm)
             printf("MARKR: '%s' read (count=%lld)\n", meta->name, meta->read_count);
@@ -2994,9 +3009,9 @@ static inline int op_MARKW_fn(VirtualMachine *vm) {
     if (!(vm->flags & CCCC_STACK_INSTR))
         return 0;
 
-    StackVarMeta *meta =
-        (StackVarMeta *)hashmap_get_int(&vm->stack_var_meta, offset);
-    if (meta && meta->bp == (long long)vm->bp) {
+    StackVarMeta *meta = (StackVarMeta *)hashmap_get_int(
+        &vm->stack_var_active, (long long)vm->bp + offset);
+    if (meta) {
         meta->write_count++;
         if (!meta->initialized)
             meta->initialized = 1;

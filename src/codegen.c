@@ -2776,7 +2776,9 @@ static bool is_simple_local_scalar(VirtualMachine *vm, Node *node) {
 // ========== Safety Instrumentation Helpers ==========
 
 // Register stack variable metadata for runtime instrumentation.
-// Uses integer key (var->offset) so ops can look it up with hashmap_get_int.
+// Keyed by (scope_id, offset) via stack_var_meta_key(), not offset alone --
+// two different functions whose locals land at the same bp-relative offset
+// (the common case) must not collide in the table (#671).
 static void add_stack_var_meta(VirtualMachine *vm, const char *name, long long offset,
                                Type *ty, int scope_id) {
     if (!(vm->flags & CCCC_STACK_INSTR))
@@ -2789,7 +2791,7 @@ static void add_stack_var_meta(VirtualMachine *vm, const char *name, long long o
     meta->ty       = ty;
     meta->scope_id = scope_id;
     meta->is_alive = 0;
-    hashmap_put_int(&vm->stack_var_meta, offset, meta);
+    hashmap_put_int(&vm->stack_var_meta, stack_var_meta_key(scope_id, offset), meta);
 }
 
 // Emit SCOPEIN for scope_id.
@@ -2816,19 +2818,28 @@ static void emit_marki(VirtualMachine *vm, long long offset) {
     emit_i64(vm, offset);
 }
 
-// Emit CHKL (check liveness) for local at bp+offset.
+// Emit CHKL (check liveness) for local at bp+offset, declared in
+// vm->current_function_scope_id. The runtime liveness check itself is keyed
+// by actual address (bp+offset); the scope_id operand is only used to look
+// up the declaration record (name/type) for the error message when the
+// check fails (#671) -- see stack_var_meta_key().
 static void emit_chkl(VirtualMachine *vm, long long offset) {
     emit(vm, CHKL);
     emit_i64(vm, offset);
+    emit_word(vm, vm->current_function_scope_id);
 }
 
-// Emit MARKR (mark read) for local at bp+offset.
+// Emit MARKR (mark read) for local at bp+offset. No scope_id operand needed:
+// the runtime looks this up by address (bp+offset) in vm->stack_var_active,
+// which directly yields the correct StackVarMeta* for whichever activation
+// is currently live at that address.
 static void emit_markr(VirtualMachine *vm, long long offset) {
     emit(vm, MARKR);
     emit_i64(vm, offset);
 }
 
-// Emit MARKW (mark write) for local at bp+offset.
+// Emit MARKW (mark write) for local at bp+offset. See emit_markr() re: no
+// scope_id operand needed.
 static void emit_markw(VirtualMachine *vm, long long offset) {
     emit(vm, MARKW);
     emit_i64(vm, offset);

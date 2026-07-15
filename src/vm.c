@@ -945,6 +945,11 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     vm->stack_var_meta.buckets = NULL;
     vm->stack_var_meta.used = 0;
 
+    // Initialize stack_var_active HashMap (runtime liveness set, #671)
+    vm->stack_var_active.capacity = 0;
+    vm->stack_var_active.buckets = NULL;
+    vm->stack_var_active.used = 0;
+
     // Note: alloc_map and ptr_tags removed - now using sorted_allocs for heap tracking
 
     // Initialize included_headers HashMap for header-based stdlib loading
@@ -1199,6 +1204,11 @@ void cc_destroy(VirtualMachine *vm) {
         }
         hashmap_deinit(&vm->stack_var_meta);
     }
+
+    // Free stack_var_active HashMap. Values are StackVarMeta* borrowed from
+    // stack_var_meta (freed just above) -- do not free them again here.
+    if (vm->stack_var_active.buckets)
+        hashmap_deinit(&vm->stack_var_active);
 
     // Free scope variable lists
     if (vm->scope_vars) {

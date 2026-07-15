@@ -167,6 +167,17 @@ static inline InstrWord cc_i64_lo(long long val) {
     return (InstrWord)((uint64_t)val & 0xFFFFFFFFu);
 }
 
+// Composite key for vm->stack_var_meta. Two different functions whose
+// locals happen to land at the same compile-time bp-relative offset (the
+// common case, e.g. each function's first local) must not share a table
+// entry, or SCOPEIN/CHKL/MARKR/MARKW end up reading one function's variable
+// metadata while executing another's (#671). Folding the declaring
+// function's unique scope_id into the key keeps lookups O(1) via the
+// existing flat HashMap instead of falling back to a linear scan.
+static inline long long stack_var_meta_key(int scope_id, long long offset) {
+    return ((int64_t)scope_id << 32) | (uint32_t)offset;
+}
+
 static inline InstrWord cc_i64_hi(long long val) {
     return (InstrWord)(((uint64_t)val >> 32) & 0xFFFFFFFFu);
 }
@@ -544,6 +555,7 @@ void hashmap_restore(HashMap *map, HashMap snapshot);
 // Integer key HashMap functions (avoid overhead of snprintf/strdup)
 void *hashmap_get_int(HashMap *map, long long key);
 void hashmap_put_int(HashMap *map, long long key, void *val);
+void hashmap_delete_int(HashMap *map, long long key);
 // HashMap iteration
 // Callback function type for iteration
 // Return 0 to continue iteration, non-zero to stop

@@ -82,12 +82,15 @@ CCCC provides preset safety levels that make it easy to choose the right combina
   - Alignment checks
   - Provenance tracking (pointer origin validation)
   - Invalid pointer arithmetic detection
-  - Stack variable instrumentation with runtime errors (has a known false-positive
-    limitation across functions sharing a stack offset — see above)
+  - Stack variable instrumentation (per-activation liveness tracking,
+    read/write counts — see below for what it does and doesn't catch)
   - Random canaries (unpredictable stack protection)
 
-**Detects:** Most memory safety bugs CCCC can catch — with the known false-positive
-gaps noted above for temporal (use-after-return/dangling) detection
+**Detects:** Most memory safety bugs CCCC can catch. Two known gaps: dangling
+stack pointers are tracked but not enforced (`--dangling-pointers`, #669), and
+genuine use-after-return via pointer dereference isn't yet caught (#670) —
+`CHKL`'s liveness guard only protects direct-by-name variable access, which
+ordinary C can't violate
 
 ---
 
@@ -363,13 +366,21 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
 - `--stack-instrumentation` **Stack variable lifetime and access tracking**
   - Tracks all stack variable lifetimes with full block-level scoping
   - SCOPEIN/SCOPEOUT opcodes mark scope entry/exit for each `{ }` block
-  - CHKL opcode validates variable is alive before access
-  - MARKR/MARKW opcodes track read/write counts for each variable
-  - Detects use-after-scope and use-after-return bugs — **known limitation:**
-    `CHKL`'s liveness table is keyed by stack offset alone, not per-function, so
-    two functions whose locals happen to land at the same offset (common) can
-    collide and produce a false "USE AFTER RETURN"; tracked as a follow-up, not
-    yet fixed
+  - CHKL opcode validates variable is alive before access, keyed by the
+    variable's actual runtime address (bp+offset) — not by stack offset or
+    scope_id alone, so two functions whose locals land at the same offset, or
+    recursive calls of the same function, don't collide with each other's
+    liveness state (#671)
+  - MARKR/MARKW opcodes track read/write counts for each variable, aggregated
+    across all activations (including recursive calls) of that declaration
+  - **Note on detection coverage:** `CHKL` is a liveness *guard*, not a
+    dangling-pointer *detector* — it only checks that a local being accessed
+    by name is currently in scope, which ordinary C code can't violate (a
+    local's name isn't visible outside its own lexical scope). In practice it
+    no longer fires in correct programs after #671; catching a genuine
+    use-after-return (e.g. dereferencing a pointer to a dead local through
+    another variable) is the dereference-based detection tracked in #670, not
+    yet implemented
   - Stack overflow detection: tracks high water mark, warns at 90% threshold
   - `--dangling-pointers` tracks stack-address creation via the same
     infrastructure, but does not currently enforce anything on its own (see above)

@@ -338,6 +338,15 @@ void hashmap_put_int(HashMap *map, long long key, void *val) {
     ent->val = val;
 }
 
+// Removes an integer-keyed entry. Does not free ent->val (int-keyed maps
+// commonly store borrowed pointers owned elsewhere); does not free ent->key
+// either, since integer keys are stored as raw values, not heap pointers.
+void hashmap_delete_int(HashMap *map, long long key) {
+    HashEntry *ent = get_entry_int(map, key);
+    if (ent)
+        ent->key = TOMBSTONE;
+}
+
 void hashmap_deinit(HashMap *map) {
     if (!map || !map->buckets)
         return;

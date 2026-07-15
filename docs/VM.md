@@ -392,9 +392,9 @@ follow-up ticket referenced in `docs/SAFETY.md`.
 
 | Opcode | Description |
 |--------|-------------|
-| `SCOPEIN` | Activate variables belonging to a lexical scope |
-| `SCOPEOUT` | Deactivate variables and detect dangling pointers |
-| `CHKL` | Check variable liveness before access (use-after-scope / use-after-return) |
+| `SCOPEIN` | Activate variables belonging to a lexical scope; records each variable's runtime liveness by actual address (bp+offset), not just its declaration record (#671) |
+| `SCOPEOUT` | Deactivate variables (see #669 for why this no longer also aborts on tracked stack addresses — that check is detection-only, see `docs/SAFETY.md`) |
+| `CHKL` | Check variable liveness before access (use-after-scope / use-after-return), keyed by runtime address so cross-function offset collisions and recursive re-entry don't produce false positives (#671) |
 | `MARKR` | Record a read access to a stack variable |
 | `MARKW` | Record a write access; marks variable as initialised |
 
@@ -712,7 +712,8 @@ The VM does not rely on external sanitizer libraries.  Instead, the compiler inj
 * **Stack canaries** — `ENT3` writes a canary word; `LEV3` validates it before returning.
 * **CFI** — A shadow stack mirrors the real stack; `CALL` pushes to both, `CALLT` pops the current frame's entry (consuming one shadow-slot but not pushing a new one), and `LEV3` compares before trusting the return address.
 * **Provenance tracking** — `MARKP` records `(origin, base, size)`; `CHKPA` rejects arithmetic that leaves the object.
-* **Dangling pointers** — `MARKA` records stack addresses; `SCOPEOUT` detects live pointers to variables that are going out of scope.
+* **Dangling pointers** — `MARKA` records stack addresses into `vm->stack_ptrs`; detection-only (no enforcement) as of #669 — see `docs/SAFETY.md` for why.
+* **Use-after-scope / use-after-return** — `CHKL`, keyed by a variable's actual runtime address (bp+offset) via `vm->stack_var_active`, populated by `SCOPEIN`/`SCOPEOUT` per activation (#671).
 
 Because every check is guarded by a runtime flag, the same bytecode can run with full safety or with zero overhead simply by changing the active `CCCCFlags` mask.
 

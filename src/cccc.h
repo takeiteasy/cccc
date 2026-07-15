@@ -92,9 +92,12 @@ extern "C" {
     X(SCOPEIN, 1)  /* Mark scope entry (allocate/activate variables) */        \
     X(SCOPEOUT, 1) /* Mark scope exit (invalidate variables, detect dangling   \
                    pointers) */                                                \
-    X(CHKL, 2)     /* Check variable liveness before access */                 \
-    X(MARKR, 2)    /* Mark variable read access */                             \
-    X(MARKW, 2)    /* Mark variable write access */                            \
+    X(CHKL, 3)     /* Check variable liveness before access: [offset:i64]      \
+                   [scope_id] -- liveness itself is keyed by runtime address   \
+                   (bp+offset); scope_id only names the variable in the error  \
+                   message on failure (#671) */                                \
+    X(MARKR, 2)    /* Mark variable read access: [offset:i64] */               \
+    X(MARKW, 2)    /* Mark variable write access: [offset:i64] */              \
     /* Non-local jump instructions (setjmp/longjmp) */                         \
     X(SETJMP, 0)  /* Save execution context to jmp_buf, return 0 */            \
     X(LONGJMP, 0) /* Restore execution context from jmp_buf, return val */     \
@@ -2372,8 +2375,17 @@ struct VirtualMachine {
                         // {bp, offset, size})
     HashMap provenance; // Track pointer provenance for stack/global (ptr ->
                         // {origin_type, base, size})
-    HashMap stack_var_meta; // Unified stack variable metadata (bp+offset ->
-                            // StackVarMeta)
+    HashMap stack_var_meta; // Declaration-level stack variable metadata,
+                            // one persistent entry per (scope_id, offset) --
+                            // see stack_var_meta_key(). Read/write counts and
+                            // name/type info live here, aggregated across all
+                            // activations of a variable (including recursion).
+    HashMap stack_var_active; // Runtime liveness set: currently-live stack
+                              // slots, keyed by actual address (bp+offset) ->
+                              // StackVarMeta*. One entry per activation, so
+                              // recursive calls of the same function don't
+                              // collide the way a single scope_id-keyed bp
+                              // field would (#671).
     HashMap ptr_tags; // ptr address → creation_generation (CCCC_MEMORY_TAGGING)
 
     // Sorted allocation array for O(log n) base-address range queries.
