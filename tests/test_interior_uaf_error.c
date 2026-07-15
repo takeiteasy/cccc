@@ -1,4 +1,4 @@
-// EXPECT_RUNTIME_ERROR CCCC_FLAGS: -V --uaf-detection
+// EXPECT_RUNTIME_ERROR CCCC_FLAGS: --uaf-detection
 // Ticket #650: CHKP3 now resolves interior heap pointers (p + k) via
 // vm->sorted_allocs, not just exact base pointers. A use-after-free through
 // an interior pointer must be caught, not silently missed.

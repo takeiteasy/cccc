@@ -144,11 +144,11 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-I <path>                Add <path> to include search paths\n");
     printf("\t-i/--isystem <path>      Add <path> to system include paths (for "
            "non-standard headers)\n");
-    printf("\t--use-system-headers     Prefer SDK headers over CCCC polyfills for "
+    printf("\t   --use-system-headers  Prefer SDK headers over CCCC polyfills for "
            "non-owned standard headers\n");
-    printf("\t--no-builtin-includes    Do not fall back to CCCC's ./include for "
+    printf("\t   --no-builtin-includes Do not fall back to CCCC's ./include for "
            "non-owned standard headers (requires --use-system-headers)\n");
-    printf("\t--sysroot <path>         Set SDK root; adds <path>/usr/include to "
+    printf("\t   --sysroot <path>      Set SDK root; adds <path>/usr/include to "
            "system include paths and implies --use-system-headers\n");
     printf("\t-L/--library-path <path> Add <path> to dynamic library search paths\n");
     printf("\t-l/--library <name>      Link dynamic library by name or path\n");
@@ -181,6 +181,14 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-o/--out <file>          Output file. Required for -c=native. For -c=bytecode, writes\n");
     printf("\t                         bytecode to <file>; if omitted, writes to stdout\n");
     printf("\t-d/--disassemble         Disassemble bytecode to stdout\n");
+    printf("\t-v/--verbose             Enable debug logging\n");
+    printf("\t-g/--debug               Enable interactive debugger\n");
+    printf("\t   --no-debug-on-crash   Disable auto-drop into debugger on crash (for test harnesses)\n");
+    printf("\t-r/--repl                Start an interactive read-eval-print loop (no input file)\n");
+    printf("\t-e/--entry <name>        Set the entry-point function (default: main)\n");
+    printf("\t   --vm-profile          Count executed VM opcodes and print a report\n");
+    printf("\t                         Combine with --json to also dump the profile as JSON to stdout\n");
+    printf("\nTesting Options:\n");
     printf("\t-t/--testing             Discover and run [[cccc::test]] functions\n");
     printf("\t   --test-c4             Bytecode round-trip: compile, save .c4, reload, then run tests\n");
     printf("\t                         (implies --testing; exercises FFI-table and bytecode persistence)\n");
@@ -193,13 +201,6 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                         individual tests may override via\n");
     printf("\t                         [[cccc::test(timeout = ms)]])\n");
     printf("\t   --test-format=FMT     Output format for test results: tap (default), plain, json\n");
-    printf("\t-v/--verbose             Enable debug logging\n");
-    printf("\t-g/--debug               Enable interactive debugger\n");
-    printf("\t   --no-debug-on-crash   Disable auto-drop into debugger on crash (for test harnesses)\n");
-    printf("\t-r/--repl                Start an interactive read-eval-print loop (no input file)\n");
-    printf("\t-e/--entry <name>        Set the entry-point function (default: main)\n");
-    printf("\t   --vm-profile          Count executed VM opcodes and print a report\n");
-    printf("\t                         Combine with --json to also dump the profile as JSON to stdout\n");
     printf("\nBuild Options:\n");
     printf("\t-b/--build               Run the input as a build script (declares native targets)\n");
     printf("\t   --build-entry=NAME    Build entry function to invoke (default: build_main)\n");
@@ -232,7 +233,8 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-Werror=<name>      Treat one warning category as an error\n");
     printf("\t-Wno-error=<name>   Do not promote one warning category\n");
     printf("\nSafety Levels (preset flag combinations):\n");
-    printf("\t-0/--safety=none     No safety checks (maximum performance)\n");
+    printf("\t-0/--safety=none     No safety checks (VM heap stays on by default; add -V to also "
+           "use the host allocator)\n");
     printf("\t-1/--safety=basic    Essential low-overhead checks (~5-10%% overhead)\n");
     printf("\t-2/--safety=standard Comprehensive development safety (~20-40%% overhead)\n");
     printf("\t-3/--safety=max      All safety features for deep debugging (~60-100%%+ overhead)\n");
@@ -259,7 +261,9 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --memory-tagging          Temporal memory tagging (track pointer generation tags)\n");
     printf("\t-T/--thread-safety           Threading safety diagnostics: race detection, lock-order\n"
            "\t                             inversion, double-lock, and atomic cast warnings\n");
-    printf("\t-V/--vm-heap                 Route all malloc/free through VM heap (enables memory safety)\n");
+    printf("\t-V/--vm-heap                 VM heap is on by default; pass -V to route malloc/free\n");
+    printf("\t                             through the host allocator instead. Not compatible with\n");
+    printf("\t                             -1/-2/-3 (or --safety=basic/standard/max), which require it\n");
     printf("\nFFI Safety Options:\n");
     printf("\t   --ffi-allow=list       Allow only comma-separated native function names\n");
     printf("\t   --ffi-deny=list        Deny comma-separated native function names\n");
@@ -691,8 +695,10 @@ int main(int argc, const char *argv[]) {
     int dump_ast = 0;          // -a
     int disassemble = 0;       // -d
     int verbose = 0;           // -v
-    uint32_t flags = 0;        // CCCCFlags bitfield for runtime features
+    uint32_t flags = CCCC_VM_HEAP; // CCCCFlags bitfield for runtime features; VM heap is on by default (#665)
     uint32_t cli_flags_mask = 0; // Bits explicitly set via CLI; wins over #pragma cccc config(...) (#357)
+    bool safety_level_gt0 = false; // True if -1/-2/-3 or --safety=basic/standard/max was requested (#665)
+    bool vm_heap_disable_requested = false; // True if -V/--vm-heap was passed (now toggles the heap off) (#665)
     bool cli_opt_level_set = false; // True if -O/--optimize was passed on the CLI (#357)
     int print_tokens = 0;      // -P
     int preprocess_only = 0;   // -E
@@ -926,39 +932,48 @@ int main(int argc, const char *argv[]) {
             usage(argv[0], 0);
             break;
         case '0':
-            // Safety level 0: None - explicitly clear all safety flags
-            flags = 0;
+            // Safety level 0: None - explicitly clear all safety flags, but
+            // VM heap stays on by default (#665); use -V to turn it off too.
+            flags = CCCC_VM_HEAP;
+            safety_level_gt0 = false;
             cli_flags_mask |= CCCC_SAFETY_PRESET_BITS;
             break;
         case '1':
             // Safety level 1: Basic - essential low-overhead checks
             flags |= CCCC_SAFETY_BASIC;
+            safety_level_gt0 = true;
             cli_flags_mask |= CCCC_SAFETY_PRESET_BITS;
             break;
         case '2':
             // Safety level 2: Standard - comprehensive development safety
             flags |= CCCC_SAFETY_STANDARD;
+            safety_level_gt0 = true;
             cli_flags_mask |= CCCC_SAFETY_PRESET_BITS;
             break;
         case '3':
             // Safety level 3: Maximum - all safety features
             flags |= CCCC_SAFETY_MAX;
+            safety_level_gt0 = true;
             cli_flags_mask |= CCCC_SAFETY_PRESET_BITS;
             break;
         case 1012:
             // --safety=<level> flag
             if (strncmp(optarg, "none", sizeof("none")) == 0 ||
                 strncmp(optarg, "0", sizeof("0")) == 0) {
-                flags = 0;
+                flags = CCCC_VM_HEAP;
+                safety_level_gt0 = false;
             } else if (strncmp(optarg, "basic", sizeof("basic")) == 0 ||
                        strncmp(optarg, "1", sizeof("1")) == 0) {
                 flags |= CCCC_SAFETY_BASIC;
+                safety_level_gt0 = true;
             } else if (strncmp(optarg, "standard", sizeof("standard")) == 0 ||
                        strncmp(optarg, "2", sizeof("2")) == 0) {
                 flags |= CCCC_SAFETY_STANDARD;
+                safety_level_gt0 = true;
             } else if (strncmp(optarg, "max", sizeof("max")) == 0 ||
                        strncmp(optarg, "3", sizeof("3")) == 0) {
                 flags |= CCCC_SAFETY_MAX;
+                safety_level_gt0 = true;
             } else {
                 fprintf(stderr,
                         "error: invalid safety level '%s' (use "
@@ -1090,7 +1105,10 @@ int main(int argc, const char *argv[]) {
             flags |= CCCC_THREAD_SAFETY;
             break;
         case 'V':
-            flags |= CCCC_VM_HEAP;
+            // VM heap is on by default (#665); -V/--vm-heap now toggles it
+            // off. Resolved after the option loop since it must see the
+            // final safety level regardless of flag order.
+            vm_heap_disable_requested = true;
             break;
         case 'C':
             no_comptime = 1;
@@ -1542,6 +1560,21 @@ int main(int argc, const char *argv[]) {
         default:
             usage(argv[0], 1);
         }
+    }
+
+    // Resolve -V/--vm-heap now that the final safety level is known (#665).
+    // VM heap is required by -1/-2/-3, so disabling it there is a hard error;
+    // at level 0 (default or explicit -0) -V just turns the default off.
+    if (vm_heap_disable_requested) {
+        if (safety_level_gt0) {
+            fprintf(stderr,
+                    "error: -V/--vm-heap cannot be combined with -1/-2/-3 "
+                    "(or --safety=basic/standard/max); those levels require "
+                    "the VM heap\n");
+            usage(argv[0], 1);
+        }
+        flags &= ~CCCC_VM_HEAP;
+        cli_flags_mask |= CCCC_VM_HEAP;
     }
 
     /* Remaining arguments are input files (positional, up to "--" if present) */

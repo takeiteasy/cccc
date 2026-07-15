@@ -4364,6 +4364,34 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 emit(vm, MFRE);
                 return;
             }
+            // free_sized/free_aligned_sized (C23) route through the same MFRE
+            // opcode as free: MFRE derives the real size from the AllocHeader
+            // and already falls back to the host free() for non-VM-heap
+            // pointers (ops.c op_MFRE_fn), so the size/alignment arguments
+            // are only evaluated for side effects and otherwise discarded.
+            // Without this, a VM-heap malloc() paired with free_sized() would
+            // hand a VM-heap pointer straight to the host's free_sized() via
+            // FFI and abort (#665 fallout: VM heap is on by default now).
+            if (is_extern_func_name(node->lhs, "free_sized")) {
+                if (!node->args || !node->args->next)
+                    error_tok(vm, node->tok, "free_sized requires ptr and size arguments");
+                reset_temp_regs();
+                gen_expr(vm, node->args, REG_A0);
+                gen_expr(vm, node->args->next, REG_A1);
+                emit(vm, MFRE);
+                return;
+            }
+            if (is_extern_func_name(node->lhs, "free_aligned_sized")) {
+                if (!node->args || !node->args->next || !node->args->next->next)
+                    error_tok(vm, node->tok,
+                              "free_aligned_sized requires ptr, alignment, and size arguments");
+                reset_temp_regs();
+                gen_expr(vm, node->args, REG_A0);
+                gen_expr(vm, node->args->next, REG_A1);
+                gen_expr(vm, node->args->next->next, REG_A2);
+                emit(vm, MFRE);
+                return;
+            }
             if (is_extern_func_name(node->lhs, "calloc")) {
                 if (!node->args || !node->args->next)
                     error_tok(vm, node->tok, "calloc requires nmemb and size arguments");

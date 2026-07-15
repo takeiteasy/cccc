@@ -1,4 +1,4 @@
-// CCCC_FLAGS: -V --type-checks
+// CCCC_FLAGS: --type-checks
 // Ticket #651: reusing a heap allocation as a different type is legal C
 // (the effective type updates on each store, C11 6.5p6). CHKT3's
 // effective-type model must not false-positive here: the char store

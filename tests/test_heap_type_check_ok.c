@@ -1,4 +1,4 @@
-// CCCC_FLAGS: -V --type-checks
+// CCCC_FLAGS: --type-checks
 // Ticket #651: a matching type on store and load through a heap base
 // pointer must never raise CHKT3's type mismatch, even with type checks
 // enabled.

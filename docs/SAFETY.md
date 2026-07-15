@@ -7,8 +7,8 @@ CCCC includes a suite of powerful memory safety features designed to detect comm
 CCCC provides preset safety levels that make it easy to choose the right combination of features without needing to understand every individual flag. Each level builds on the previous one, adding more comprehensive checks with increasing performance overhead.
 
 ### Level 0: None (`-0` or `--safety=none`)
-**Purpose:** Maximum performance, zero safety overhead
-**Overhead:** 0%
+**Purpose:** Maximum performance, no safety *checks*
+**Overhead:** ~0% for checks; `malloc`/`free`/`calloc`/`realloc` still route through the VM heap by default (see below)
 **Use when:** You've thoroughly tested your code and need maximum speed, or when running in a trusted/controlled environment
 
 ```bash
@@ -16,7 +16,7 @@ CCCC provides preset safety levels that make it easy to choose the right combina
 ./cccc --safety=none program.c
 ```
 
-**Enabled features:** None
+**Enabled features:** None. The VM heap allocator is still active by default at every level (add `-V`/`--vm-heap` to opt back into the host allocator); see [VM Heap Allocator](#vm-heap-allocator) below.
 
 ---
 
@@ -187,7 +187,7 @@ All features listed below can be enabled individually or through the safety leve
   - Both canaries use the current stack canary value (0xDEADBEEFCAFEBABE, or random if `--random-canaries`)
   - Both validated on free(); mismatch triggers HEAP CANARY CORRUPTED error with address and size
   - Detects heap buffer overflows (rear canary) and header corruption (front canary)
-  - Requires VM heap mode (`-V` or any heap safety flag)
+  - Requires VM heap mode (on by default; not compatible with disabling it via `-V`)
 - `--random-canaries` **Random stack canaries**
   - Generates cryptographically random canary value on VM initialization
   - Uses /dev/urandom on Unix-like systems for strong randomness
@@ -202,7 +202,7 @@ All features listed below can be enabled individually or through the safety leve
   - Makes uninitialized reads return consistent bad values (0xCDCDCDCD…)
   - Makes use-after-free reads return dead memory pattern (0xDDDDDDDD…)
   - Helps detect uninitialized variable bugs and UAF issues
-  - Requires VM heap mode (`-V` or any heap safety flag)
+  - Requires VM heap mode (on by default; not compatible with disabling it via `-V`)
   - Performance overhead proportional to allocation size (memset on alloc/free)
 - `--memory-leak-detection` **Memory leak detection**
   - Tracks all VM heap allocations in a host-memory linked list (AllocRecord)
@@ -383,7 +383,7 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
   - Increments generation counter when memory is freed (MFRE opcode)
   - CHKP3 opcode validates pointer's stored generation matches current header generation
   - Detects use-after-free with generation detail: shows which generation the pointer was born at
-  - Requires `-V` / `--vm-heap` to intercept malloc/free
+  - Requires VM heap mode (on by default; not compatible with disabling it via `-V`)
   - Uses `hashmap_put_int` / `hashmap_get_int` for O(1) pointer tag lookup
   - **Limitation:** side table is keyed by address; if freed memory is reallocated at the same
     address (free-list path), the old entry is overwritten and stale pointers to that address
@@ -400,14 +400,26 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
   - Zero overhead when disabled
   - Works with all function calls including recursion and indirect calls
   - Automatically skips validation for main() exit (no corresponding CALL)
-- `--vm-heap` **Force VM heap allocation**
-  - Intercepts malloc/free calls at compile time (codegen phase)
-  - Routes malloc → MALC opcode, free → MFRE opcode
-  - Enables memory safety features for user code using standard malloc/free
-  - Without this flag, safety checks only apply to code directly using VM heap
-  - Automatically enabled when any heap-related safety flag is used
-  - Can be used standalone to enable double-free detection
-  - Zero overhead when no safety features are enabled
+- `-V` / `--vm-heap` **VM heap allocator** — see [VM Heap Allocator](#vm-heap-allocator) below;
+  as of #665 this flag *disables* the VM heap (it's on by default) and cannot be combined with
+  `-1`/`-2`/`-3` or `--safety=basic/standard/max`, which require it.
+
+## VM Heap Allocator
+
+`malloc`/`free`/`calloc`/`realloc` route through the VM heap (`MALC`/`MFRE`/`CALC`/`REALC`
+opcodes) by default at every safety level, including `-0`. This is what makes the heap safety
+features below usable without any special opt-in in normal code.
+
+- `-V` / `--vm-heap` **turns the VM heap off**, reverting `malloc`/`free`/`calloc`/`realloc` to
+  the host allocator via FFI. It is only valid at safety level 0 (default or explicit `-0`);
+  combining it with `-1`/`-2`/`-3` (or `--safety=basic/standard/max`) is a hard compile-time
+  error since those presets require the VM heap.
+- `free_sized`/`free_aligned_sized` (C23) are routed through the same `MFRE` opcode as `free`,
+  so a VM-heap-allocated pointer freed through either call is handled correctly. `aligned_alloc`
+  and `posix_memalign` are not intercepted and still allocate via the host allocator; freeing
+  their result with plain `free()`/`free_sized()`/`free_aligned_sized()` works because `MFRE`
+  detects a missing VM-heap header (`ops.c` `op_MFRE_fn`) and falls back to the host `free()`.
+- Zero overhead when no other safety features are enabled.
 
 ## FFI Safety Features
 
@@ -496,7 +508,7 @@ Generation: 1
 =========================================
 ```
 
-**Note:** Double-free detection is always enabled when using VM heap (MALC/MFRE), regardless of which safety flags are active. It works with any memory safety feature (`-V`/`--vm-heap`, `-M`/`--memory-leak-detection`, `-B`/`--bounds-checks`, etc.) that routes allocations through the VM heap.
+**Note:** Double-free detection is always enabled when using VM heap (MALC/MFRE), regardless of which safety flags are active. Since the VM heap is on by default, this applies to plain `malloc`/`free` code without any extra flags; it also works with any memory safety feature (`-M`/`--memory-leak-detection`, `-B`/`--bounds-checks`, etc.) that routes allocations through the VM heap.
 
 ### Bounds Checking
 ```c
@@ -877,13 +889,13 @@ Current PC:         0x57 (offset: 87)
 
 **Note:** Memory tagging uses a host-side HashMap keyed by pointer address. Because the current
 VM heap is a bump allocator that never reuses freed addresses, the stored generation at the old
-address will always diverge after a free, giving correct temporal violation reports. Always
-combine with `-V` / `--vm-heap` when using programs that call `malloc`/`free` directly.
+address will always diverge after a free, giving correct temporal violation reports. This works
+for programs that call `malloc`/`free` directly since the VM heap is on by default; do not pass
+`-V` (it disables the VM heap and is incompatible with `--memory-tagging`, which requires it).
 
-**Combining with VM Heap Mode:**
+**Example:**
 ```bash
-# For code using malloc/free, combine with --vm-heap
-$ ./cccc --memory-tagging --vm-heap my_program.c
+$ ./cccc --memory-tagging my_program.c
 
 # Or use short flags
 $ ./cccc -TV my_program.c

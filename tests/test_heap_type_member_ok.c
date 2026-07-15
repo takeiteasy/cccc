@@ -1,4 +1,4 @@
-// CCCC_FLAGS: -V --type-checks
+// CCCC_FLAGS: --type-checks
 // Ticket #651: CHKT3 is scoped to base pointers only (offset 0 into the
 // allocation) since subobject/member types aren't tracked. Accessing a
 // struct member at a non-zero offset (s->b, an interior access) must not

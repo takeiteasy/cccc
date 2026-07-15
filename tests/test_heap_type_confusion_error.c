@@ -1,4 +1,4 @@
-// EXPECT_RUNTIME_ERROR CCCC_FLAGS: -V --type-checks
+// EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // Ticket #651: CHKT3 is now emitted from codegen and populates
 // AllocHeader.type_kind via an effective-type model (a store through a
 // base pointer stamps the allocation's type; a load checks against it).

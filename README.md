@@ -19,9 +19,9 @@ Options:
 	-h/--help                Show this message
 	-I <path>                Add <path> to include search paths
 	-i/--isystem <path>      Add <path> to system include paths (for non-standard headers)
-	--use-system-headers     Prefer SDK headers over CCCC polyfills for non-owned standard headers
-	--no-builtin-includes    No polyfill fallback for non-owned standard headers (requires --use-system-headers)
-	--sysroot <path>         Set SDK root; adds <path>/usr/include to system paths, implies --use-system-headers
+	   --use-system-headers  Prefer SDK headers over CCCC polyfills for non-owned standard headers
+	   --no-builtin-includes Do not fall back to CCCC's ./include for non-owned standard headers (requires --use-system-headers)
+	   --sysroot <path>      Set SDK root; adds <path>/usr/include to system include paths and implies --use-system-headers
 	-L/--library-path <path> Add <path> to dynamic library search paths
 	-l/--library <name>      Link dynamic library by name or path
 	-D <macro>[=def]         Define a macro
@@ -47,7 +47,18 @@ Options:
 	-o/--out <file>          Output file. Required for -c=native. For -c=bytecode, writes
 	                         bytecode to <file>; if omitted, writes to stdout
 	-d/--disassemble         Disassemble bytecode to stdout
+	-v/--verbose             Enable debug logging
+	-g/--debug               Enable interactive debugger
+	   --no-debug-on-crash   Disable auto-drop into debugger on crash (for test harnesses)
+	-r/--repl                Start an interactive read-eval-print loop (no input file)
+	-e/--entry <name>        Set the entry-point function (default: main)
+	   --vm-profile          Count executed VM opcodes and print a report
+	                         Combine with --json to also dump the profile as JSON to stdout
+
+Testing Options:
 	-t/--testing             Discover and run [[cccc::test]] functions
+	   --test-c4             Bytecode round-trip: compile, save .c4, reload, then run tests
+	                         (implies --testing; exercises FFI-table and bytecode persistence)
 	   --test=GLOB           Run only tests whose name matches GLOB (implies --testing)
 	   --test-suite=NAME     Run tests in NAME and its sub-suites (prefix match);
 	                         glob metacharacters (*?[) switch to fnmatch (implies --testing)
@@ -57,13 +68,6 @@ Options:
 	                         individual tests may override via
 	                         [[cccc::test(timeout = ms)]])
 	   --test-format=FMT     Output format for test results: tap (default), plain, json
-	-v/--verbose             Enable debug logging
-	-g/--debug               Enable interactive debugger
-	   --no-debug-on-crash   Disable auto-drop into debugger on crash (for test harnesses)
-	-r/--repl                Start an interactive read-eval-print loop (no input file)
-	-e/--entry <name>        Set the entry-point function (default: main)
-	   --vm-profile          Count executed VM opcodes and print a report
-	                         Combine with --json to also dump the profile as JSON to stdout
 
 Build Options:
 	-b/--build               Run the input as a build script (declares native targets)
@@ -99,7 +103,7 @@ Warning Options:
 	-Wno-error=<name>   Do not promote one warning category
 
 Safety Levels (preset flag combinations):
-	-0/--safety=none     No safety checks (maximum performance)
+	-0/--safety=none     No safety checks (VM heap stays on by default; add -V to also use the host allocator)
 	-1/--safety=basic    Essential low-overhead checks (~5-10% overhead)
 	-2/--safety=standard Comprehensive development safety (~20-40% overhead)
 	-3/--safety=max      All safety features for deep debugging (~60-100%+ overhead)
@@ -107,7 +111,7 @@ Safety Levels (preset flag combinations):
 Memory Safety Options (can be combined with safety levels):
 	-B/--bounds-checks           Runtime array bounds checking
 	   --uaf-detection           Use-after-free detection
-	-C/--control-flow-integrity  Control-flow integrity (indirect call validation)
+	   --control-flow-integrity  Control-flow integrity (indirect call validation)
 	   --type-checks             Runtime type checking on pointer dereferences
 	   --uninitialized-detection Uninitialized variable detection
 	   --overflow-checks         Detect signed integer overflow
@@ -127,7 +131,9 @@ Memory Safety Options (can be combined with safety levels):
 	   --memory-tagging          Temporal memory tagging (track pointer generation tags)
 	-T/--thread-safety           Threading safety diagnostics: race detection, lock-order
 	                             inversion, double-lock, and atomic cast warnings
-	-V/--vm-heap                 Route all malloc/free through VM heap (enables memory safety)
+	-V/--vm-heap                 VM heap is on by default; pass -V to route malloc/free
+	                             through the host allocator instead. Not compatible with
+	                             -1/-2/-3 (or --safety=basic/standard/max), which require it
 
 FFI Safety Options:
 	   --ffi-allow=list       Allow only comma-separated native function names
@@ -147,6 +153,8 @@ Preprocessor Options:
 	   --embed-hard-limit         Make #embed limit a hard error instead of warning
 	   --macro-recursion-limit=N  Limit recursive pragma macro expansion (default: 256, 0=unlimited)
 	-n/--max-errors=N             Cap diagnostics at N (default: 20)
+	-C/--no-comptime              Skip the comptime/macro phase entirely (for
+	                              large TUs that don't use [[cccc::comptime]])
 	   --comptime-include-all     Forward all #include'd declarations to the
 	                              comptime pass (legacy behavior; default is
 	                              runtime-only; use #include @shared to opt in
@@ -162,10 +170,10 @@ Optimization:
 	                             1: constant folding (-ffold)
 	                             2: +peephole, +CSE (-fpeephole -fcse)
 	                             3: +copy-prop, +DCE (-fcopy-prop -fdce)
-	                             4: +opcode fusion (-ffuse)
+	                             4: +opcode fusion, +redundant extension elimination (-ffuse -felim-ext)
 	-f<pass>                     Enable a single optimisation pass regardless of -O level.
 	-fno-<pass>                  Disable a pass even if enabled by -O.
-	                             Passes: fold, peephole, copy-prop, dce, cse, fuse
+	                             Passes: fold, peephole, copy-prop, dce, cse, fuse, elim-ext
 	                             Examples: -O3 -fno-cse, -O0 -fpeephole, -ffold -fdce
 	--fma                        Enable single-rounding FMA (-ffuse implied; may change FP results)
 	--inline-limit=N             Limit inlining to N AST nodes (default: 256)
@@ -185,7 +193,6 @@ Example:
 	./cccc -o hello hello.c
 	./cccc -I ./include -D DEBUG -o prog prog.c
 	echo 'int main() { return 42; }' | ./cccc -
-
 
 ```
 
@@ -228,8 +235,9 @@ Example:
   - Warnings are disabled by default and can be enabled with `-Wall`, `-Wextra`, or individual categories
 - **JSON reflection output** — dump all function, struct, union, enum, and global definitions
   - `./cccc --ffi-decls -o lib.json lib.h` — useful for generating FFI wrappers
-- **VM heap** — built-in allocator that intercepts `malloc`/`free` at compile time (`--vm-heap`)
-  - Required for heap safety features; enabled automatically when heap safety flags are active
+- **VM heap** — built-in allocator that intercepts `malloc`/`free`/`calloc`/`realloc` at compile time
+  - On by default at every safety level, including `-0`; pass `-V`/`--vm-heap` to opt back into the
+    host allocator (only valid at safety level 0 — `-1`/`-2`/`-3` require the VM heap)
 
 ## Building
 
