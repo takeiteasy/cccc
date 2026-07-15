@@ -23,6 +23,7 @@
 #pragma once
 
 #include "cccc.h"
+#include "driver.h"
 
 #ifndef __has_include
 #define __has_include(x) 0
@@ -295,7 +296,6 @@ Token *preprocess(VirtualMachine *vm, Token *tok);
 // tokenize.c
 //
 
-noreturn void error(char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void error_at(VirtualMachine *vm, char *loc, char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 void error_tok(VirtualMachine *vm, Token *tok, char *fmt, ...)
@@ -307,8 +307,6 @@ void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt, ...
 void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt, ...)
     __attribute__((format(printf, 4, 5)));
 const char *cccc_warning_name(CCCCWarning warning);
-uint64_t cccc_warning_mask_for_name(const char *name);
-bool cccc_warning_is_group_name(const char *name);
 bool equal(Token *tok, char *op);
 Token *skip(VirtualMachine *vm, Token *tok, char *op);
 bool consume(VirtualMachine *vm, Token **rest, Token *tok, char *str);
@@ -319,7 +317,6 @@ Token *tokenize(VirtualMachine *vm, File *file);
 Token *tokenize_file(VirtualMachine *vm, char *filename);
 Token *tokenize_string(VirtualMachine *vm, char *name, char *contents);
 unsigned char *read_binary_file(VirtualMachine *vm, char *path, size_t *out_size);
-void cc_output_preprocessed(FILE *f, VirtualMachine *vm, Token *tok);
 
 #undef unreachable
 #define unreachable() error("internal error at %s:%d", __FILE__, __LINE__)
@@ -329,16 +326,12 @@ void cc_output_preprocessed(FILE *f, VirtualMachine *vm, Token *tok);
 //
 
 char *cccc_path_find_executable(const char *name);
-char *cccc_find_native_cc(void);
-int cc_rehydrate_asm_passthru(VirtualMachine *vm);
 char *get_std_header(char *filename);
 const char *get_stdlib_reg_fn_name(const char *header);
 const char *get_std_header_name(int i);
 char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
                            bool is_system);
 void init_macros(VirtualMachine *vm);
-void init_mode_macros(VirtualMachine *vm);
-void define_std_macros(VirtualMachine *vm);
 void define_macro(VirtualMachine *vm, char *name, char *buf);
 void undef_macro(VirtualMachine *vm, char *name);
 Token *preprocess(VirtualMachine *vm, Token *tok);
@@ -402,7 +395,6 @@ extern Type *ty_auto;  // C23 type-inference sentinel
 extern Type *ty_error;
 
 bool is_integer(Type *ty);
-bool is_flonum(Type *ty);
 bool is_complex(Type *ty);
 bool is_numeric(Type *ty);
 bool is_error_type(Type *ty);
@@ -594,9 +586,6 @@ int cccc_vm_eval_dispatch(VirtualMachine *vm, volatile Pc *current_pc);
 #define CCCC_HOST_SIGNAL_RC (-4096)
 int cccc_set_guest_signal_action(VirtualMachine *vm, int sig, int action);
 void cc_vm_profile_reset(VirtualMachine *vm);
-void cc_vm_profile_print(VirtualMachine *vm, FILE *f);
-int cc_vm_profile_write_json(VirtualMachine *vm, FILE *f, const char *mode,
-                             const char *input_name);
 
 typedef struct ExecState {
     long long regs[32];
@@ -637,17 +626,6 @@ void cc_optimize(VirtualMachine *vm, int level);
 //
 
 typedef struct {
-    int n;        // 2 or 3
-    int top_n;
-    bool per_file;
-} CcAnalyzeNgramOptions;
-
-typedef struct {
-    int top_n;
-    bool json;    // emit JSON instead of text
-} CcAnalyzeFusionOptions;
-
-typedef struct {
     int def_op;
     int def_pc;
     int def_size;
@@ -658,20 +636,11 @@ typedef struct {
     int use_byte;
 } CcFusionCandidate;
 
-typedef struct CcNgramState CcNgramState;
-typedef struct CcFusionState CcFusionState;
+// CcAnalyzeNgramOptions, CcAnalyzeFusionOptions, CcNgramState, CcFusionState,
+// and the cc_analyze_ngram_*/cc_analyze_fusion_begin/feed/finish declarations
+// live in driver.h (#664).
 
-CcNgramState *cc_analyze_ngram_begin(const CcAnalyzeNgramOptions *opts);
-void cc_analyze_ngram_feed(CcNgramState *st, const InstrWord *text,
-                           long long num_words, const char *label, FILE *out);
-void cc_analyze_ngram_finish(CcNgramState *st, FILE *out);
-
-CcFusionState *cc_analyze_fusion_begin(const CcAnalyzeFusionOptions *opts);
-void cc_analyze_fusion_feed(CcFusionState *st, const InstrWord *text,
-                            long long num_words, const char *label,
-                            FILE *out);
 CcFusionCandidate *cc_analyze_fusion_collect(CcFusionState *st, int *out_count);
-void cc_analyze_fusion_finish(CcFusionState *st, FILE *out);
 
 //
 // debugger.c
@@ -692,17 +661,7 @@ int debugger_run(VirtualMachine *vm, int argc, char **argv);
 //
 // host_backtrace.c
 //
-
-/* Initialise libbacktrace state and warm up DWARF/Mach-O caches.
- * Must be called once at process startup (not in a signal handler) before
- * cc_host_backtrace_install_fatal().  argv0 is used to locate the binary. */
-void cc_host_backtrace_init(const char *argv0);
-
-/* Install top-level crash handlers (SIGSEGV/SIGBUS/SIGFPE/SIGILL) that print
- * a host C backtrace to stderr then re-raise the signal so the process dies
- * with the original signal/exit code.  No-op when CCCC_HAS_BACKTRACE is off
- * or on Windows. */
-void cc_host_backtrace_install_fatal(void);
+// cc_host_backtrace_init/cc_host_backtrace_install_fatal live in driver.h (#664).
 
 /* Print a host C backtrace to stderr.  Safe to call from a signal handler
  * after cc_host_backtrace_init() has completed. */
@@ -715,9 +674,8 @@ void cc_host_backtrace_print(void);
 //
 // dump_ast.c
 //
+// cc_dump_ast/cc_dump_ast_json live in driver.h (#664).
 
-void cc_dump_ast(FILE *f, Obj *prog, int verbose);
-void cc_dump_ast_json(FILE *f, Obj *prog, int verbose);
 void cc_dump_node(FILE *f, Node *node, int verbose);      // single-node dump (used by relfection.c)
 const char *cc_node_kind_name(NodeKind kind);             // kind→string (used by relfection.c)
 void cc_dump_type(FILE *f, Type *ty);                     // C-ish type spelling (used by the REPL, #661)
@@ -729,12 +687,6 @@ void cc_dump_type(FILE *f, Type *ty);                     // C-ish type spelling
 void serialize_type_json(FILE *f, Type *ty, int indent);
 void print_indent(FILE *f, int indent);
 void print_escaped_string(FILE *f, const char *str);
-
-//
-// vm.c
-//
-
-long long generate_random_canary(void);
 
 //
 // url_fetch.c
@@ -752,12 +704,8 @@ char *fetch_url_to_cache(VirtualMachine *vm, const char *url);
 // vm.c — global pointer to the currently executing VM (set/cleared by cc_run_at)
 extern VirtualMachine *cc_running_vm;
 
-// testing.c
-void   cc_load_test_runtime(VirtualMachine *vm);
-// debugger.c
-void   cc_load_symbolize_runtime(VirtualMachine *vm);
-Token *cc_inject_test_header(VirtualMachine *vm);
-int    cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts);
+// cc_load_test_runtime, cc_load_symbolize_runtime, cc_inject_test_header, and
+// cc_run_tests live in driver.h (#664).
 
 // preprocess.c — parse a whitespace-separated CLI-flag string (as allowed in
 // Parses a whitespace-separated CLI-flag string from [[cccc::test(flags="...")]]
@@ -769,60 +717,13 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
                          const char *flags_str, const char *test_name,
                          CcTestFlagsDelta *out);
 
-// native.c / main.c shared infrastructure
-typedef struct {
-    const char **data;
-    int          len;
-    int          cap;
-} ArgVec;
-
-void   argv_push(ArgVec *args, const char *arg);
-char  *make_tmp_path(const char *suffix);
-int    run_argv(char *const argv[]);
-
-// Native compile flags extracted from a CCCC vm instance.
-typedef struct {
-    const char **inc_paths;       int inc_paths_count;
-    const char **sys_inc_paths;   int sys_inc_paths_count;
-    const char **lib_paths;       int lib_paths_count;
-    const char **libs;            int libs_count;
-    const char **defines;         int defines_count;
-    const char **undefs;          int undefs_count;
-    const char  *std_arg;
-} CcNativeCompileArgs;
+// ArgVec/argv_push/make_tmp_path/run_argv, CcNativeCompileArgs, and
+// CcBuildOptions/cc_load_build_runtime/cc_inject_build_header/cc_run_build
+// live in driver.h (#664).
 
 //
 // build.c (--build mode)
 //
-typedef struct {
-    const char *entry_name;             // --build-entry override, or NULL
-    const char *target_name;            // --build-target=NAME, or NULL (build all)
-    const char *out_dir;                // -O/--build-out-dir, or NULL (default "build")
-    int         verbose;                // -v (also enables host-runner verbose output)
-    int         build_verbose;          // --build-verbose: per-target headers + command lines
-    int         quiet;                  // --build-quiet: suppress per-step command lines
-    int         keep_going;             // --build-keep-going: continue past target failures
-    int         dry_run;                // --build-dry-run: print commands, run nothing
-    int         jobs;                   // --build-jobs=N: parallel source compile slots (0/1 = serial)
-    const CcNativeCompileArgs *defaults; // CLI -I/-D/-U/--std forwarded to each target
-    const char **tool_allow;            // --build-tool-allow names (NULL = allow-all)
-    int          tool_allow_count;
-    int          list_targets;          // --build-list-targets: print factory names and exit
-    const char  *profile;               // --build-profile=NAME: debug|release|relwithdebinfo|minsizerel
-    const char  *cross_triple;          // --build-triple=TRIPLE: clang-style cross target triple (#547)
-    const char  *cross_cc;              // --build-cc=COMPILER: override CC binary globally (#547)
-    const char  *build_cache;           // --build-cache[=PATH]: NULL=off, ""=default path, else given path (#546)
-    const char  *cccc_self;             // path to the cccc binary (argv[0]); used for kind=bytecode targets (#545)
-    const char **build_options;         // --build-option=key=value strings (#559)
-    int          build_options_count;
-    int          build_install;         // --build-install: copy artifacts after build (#560)
-    const char **user_args;            // positional args after -- on the CLI (#558)
-    int          user_args_count;
-} CcBuildOptions;
-
-void   cc_load_build_runtime(VirtualMachine *vm);
-Token *cc_inject_build_header(VirtualMachine *vm);
-int    cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts);
 char  *cccc_find_native_tool(const char *tool);
 char  *cccc_path_find_executable(const char *name); // silent PATH probe (no error print)
 

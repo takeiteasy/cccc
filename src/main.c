@@ -17,7 +17,8 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "./internal.h"
+#include "./cccc.h"
+#include "./driver.h"
 #include <getopt.h>
 #if defined(_WIN32)
 #include <io.h>
