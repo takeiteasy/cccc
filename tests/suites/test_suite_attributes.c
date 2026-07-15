@@ -670,4 +670,59 @@ int test_has_attribute_builtins(void) {
     return 42;
 }
 
+// [ticket #657] Architecturally inert GCC attributes (no ELF/linker/inliner/
+// TBAA/machine-mode in a bytecode VM) are still parsed-and-ignored and
+// should report as recognized by __has_attribute, matching real GCC/Clang.
+#if !__has_attribute(visibility)
+#error expected __has_attribute(visibility)
+#endif
+#if !__has_attribute(section)
+#error expected __has_attribute(section)
+#endif
+#if !__has_attribute(weak)
+#error expected __has_attribute(weak)
+#endif
+#if !__has_attribute(alias)
+#error expected __has_attribute(alias)
+#endif
+#if !__has_attribute(target)
+#error expected __has_attribute(target)
+#endif
+#if !__has_attribute(always_inline)
+#error expected __has_attribute(always_inline)
+#endif
+#if !__has_attribute(noinline)
+#error expected __has_attribute(noinline)
+#endif
+#if !__has_attribute(flatten)
+#error expected __has_attribute(flatten)
+#endif
+#if !__has_attribute(cold)
+#error expected __has_attribute(cold)
+#endif
+#if !__has_attribute(hot)
+#error expected __has_attribute(hot)
+#endif
+#if !__has_attribute(used)
+#error expected __has_attribute(used)
+#endif
+#if !__has_attribute(may_alias)
+#error expected __has_attribute(may_alias)
+#endif
+#if !__has_attribute(mode)
+#error expected __has_attribute(mode)
+#endif
+#if !__has_attribute(transparent_union)
+#error expected __has_attribute(transparent_union)
+#endif
+#if __has_attribute(totally_bogus_attr_that_does_not_exist)
+#error unknown attribute should not be reported supported
+#endif
+
+[[cccc::test(return = 42)]]
+int test_has_attribute_inert_gnu_attrs(void) {
+    // All assertions are compile-time (#if/#error above).
+    return 42;
+}
+
 #pragma cccc suite end

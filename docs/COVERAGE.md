@@ -280,8 +280,15 @@ CCCC provides the common `__has_*` operators in preprocessor conditionals:
 `c_static_assert`. Parsed-but-incomplete features such as `_Atomic` and
 `_Thread_local` intentionally return `0`.
 
-`__has_attribute` and `__has_builtin` return `1` only for attributes and builtins
-with compiler semantics; parsed-but-ignored attributes return `0`.
+`__has_builtin` returns `1` only for builtins with compiler semantics.
+`__has_attribute` returns `1` for attributes with compiler semantics, and also
+for a set of GNU attributes that are architecturally inert in a bytecode-VM
+target (no ELF/Mach-O output, no linker, no per-function ISA codegen, no
+inliner, no branch-temperature layout, no symbol-level DCE, no strict-aliasing
+optimizer, no machine-mode type system — see
+[Parsed but Ignored](#parsed-but-ignored)) but are recognized and consumed by
+name, matching real GCC/Clang so headers that feature-test on them don't
+diverge; genuinely unrecognized attributes return `0`.
 `__has_c_attribute` returns the C23 version date (`202311L`) for standard C23
 attributes (C23 N3220 §6.10.10.2) and `1` for CCCC vendor attributes;
 unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
@@ -605,18 +612,24 @@ Ignored attributes include (but are not limited to):
 | Attribute | Syntax | Tracking |
 |-----------|--------|----------|
 | `no_unique_address` | C23 | Parsed but ignored — VM optimisation deferred |
-| `visibility` | GNU | |
-| `section` | GNU | |
-| `weak` | GNU | |
+| `visibility` | GNU | Recognized by `__has_attribute` (no ELF, so no-op) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
+| `section` | GNU | Recognized by `__has_attribute` (no object-file sections) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
+| `weak` | GNU | Recognized by `__has_attribute` (no linker) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
 | `weakref` | GNU | |
-| `alias` | GNU | |
-| `constructor` / `destructor` | GNU | |
-| `hot` / `cold` | GNU | |
-| `always_inline` / `flatten` / `noinline` | ~ | `always_inline`/`flatten` fold to inline hint; `noinline` parsed — semantics pending `__attribute__` integration with inline pass |
-| `returns_nonnull` / `nonnull` | GNU | |
-| `malloc` | GNU | |
-| `alloc_size` / `alloc_align` | GNU | |
-| `sentinel` | GNU | |
+| `alias` | GNU | Recognized by `__has_attribute` (no linker) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
+| `constructor` / `destructor` | GNU | Pre-main/post-exit hooks — [#656](https://todo.sr.ht/~takeiteasy/cccc/656) |
+| `target` | GNU | Recognized by `__has_attribute` (no per-function ISA codegen) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
+| `hot` / `cold` | GNU | Recognized by `__has_attribute` (no branch-temperature layout) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
+| `always_inline` / `flatten` / `noinline` | GNU | Recognized by `__has_attribute` (no inliner in the JIT) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
+| `used` | GNU | Recognized by `__has_attribute` (no symbol-level DCE) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
+| `may_alias` | GNU | Recognized by `__has_attribute` (no strict-aliasing optimizer) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
+| `mode` | GNU | Recognized by `__has_attribute` (no machine-mode type system) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
+| `transparent_union` | GNU | Recognized by `__has_attribute` (no union-arg coercion modeling) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
+| `returns_nonnull` / `nonnull` | GNU | Static null-argument/return warnings — [#655](https://todo.sr.ht/~takeiteasy/cccc/655) |
+| `malloc` | GNU | Feeds `__builtin_object_size` — [#649](https://todo.sr.ht/~takeiteasy/cccc/649) |
+| `alloc_size` / `alloc_align` | GNU | Feeds `__builtin_object_size` — [#649](https://todo.sr.ht/~takeiteasy/cccc/649) |
+| `sentinel` | GNU | NULL-terminated variadic check — [#658](https://todo.sr.ht/~takeiteasy/cccc/658) |
+| `designated_init` | GNU | Require designated struct initializers — [#659](https://todo.sr.ht/~takeiteasy/cccc/659) |
 | `format_arg` | GNU | |
 | `unsequenced` | C23 | |
 | `reproducible` | C23 | |
@@ -626,6 +639,11 @@ Ignored attributes include (but are not limited to):
 | # | Attribute | Priority | Description |
 |---|-----------|----------|-------------|
 | [#215](https://todo.sr.ht/~takeiteasy/cccc/215) | Catch-all | medium | Remaining GNU builtins and attributes |
+| [#655](https://todo.sr.ht/~takeiteasy/cccc/655) | `nonnull` / `returns_nonnull` | low | Static null-argument/return warnings |
+| [#656](https://todo.sr.ht/~takeiteasy/cccc/656) | `constructor` / `destructor` | low | Pre-main/post-exit callback hooks |
+| [#657](https://todo.sr.ht/~takeiteasy/cccc/657) | 14 architecturally-inert GNU attributes | low | Register in `known_attrs[]` for `__has_attribute` (done) |
+| [#658](https://todo.sr.ht/~takeiteasy/cccc/658) | `sentinel` | low | NULL-terminated variadic argument check |
+| [#659](https://todo.sr.ht/~takeiteasy/cccc/659) | `designated_init` | low | Require designated struct initializers |
 
 ### `@`-prefix Attribute Syntax
 

@@ -1095,6 +1095,26 @@ static const AttrInfo known_attrs[] = {
     {"__unused__",       ATTR_GNU, true,  0},
     {"__deprecated__",   ATTR_GNU, true,  0},
     {"format",           ATTR_GNU, true,  0},
+    // Recognized but architecturally inert (ticket #657): no ELF/Mach-O
+    // output, no linker, no per-function ISA codegen, no inliner, no
+    // branch-temperature layout, no symbol-level DCE, no strict-aliasing
+    // optimizer, no machine-mode type system. Parsed and ignored via the
+    // generic attribute fallback (src/parse.c), but reported as
+    // recognized so __has_attribute matches real GCC/Clang.
+    {"visibility",       ATTR_GNU, true,  0},
+    {"section",          ATTR_GNU, true,  0},
+    {"weak",             ATTR_GNU, true,  0},
+    {"alias",            ATTR_GNU, true,  0},
+    {"target",           ATTR_GNU, true,  0},
+    {"always_inline",    ATTR_GNU, true,  0},
+    {"noinline",         ATTR_GNU, true,  0},
+    {"flatten",          ATTR_GNU, true,  0},
+    {"cold",             ATTR_GNU, true,  0},
+    {"hot",              ATTR_GNU, true,  0},
+    {"used",             ATTR_GNU, true,  0},
+    {"may_alias",        ATTR_GNU, true,  0},
+    {"mode",             ATTR_GNU, true,  0},
+    {"transparent_union", ATTR_GNU, true, 0},
     {NULL, 0, false, 0},
 };
 
