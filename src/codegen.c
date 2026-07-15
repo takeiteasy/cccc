@@ -6592,3 +6592,149 @@ void gen(VirtualMachine *vm, Obj *prog) {
         !vm->compiler.build_mode)
         error("%s() function not found", entry);
 }
+
+// ========== Incremental Code Generation (REPL support, ticket #661) ==========
+//
+// gen() above is a whole-program pass: it resets text_ptr/data_ptr to zero and
+// regenerates every function and global from scratch every time it runs. That
+// is wrong for an interactive REPL, where each evaluated line must build on a
+// VM state that is still live -- global variables may have been mutated at
+// runtime by a previous line, and any pointers a previous line computed into
+// the data or text segment must stay valid. A full rebuild would silently
+// reset every global back to its initializer and invalidate those addresses.
+//
+// cc_repl_compile_new() instead compiles only the globals that were prepended
+// to vm->compiler.globals since `old_head` (the list head captured by the
+// caller before parsing/synthesizing the new unit): it assigns data-segment
+// storage for new non-function globals, generates code for new function
+// definitions via gen_function(), and patches only the call/function-address
+// relocations recorded during *this* call (a new function may still call any
+// previously-compiled function, so patch resolution consults the full globals
+// list). Already-compiled globals and functions are never revisited, so their
+// code_addr, data offsets, and current runtime contents are untouched. This
+// mirrors the sequence compile_macro_program() uses to compile the separate
+// comptime program (macros.c), retargeted at the main globals list.
+void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
+    if (!vm->text_seg) {
+        vm_alloc_segments(vm);
+        vm->compiler.current_codegen_fn = NULL;
+        vm->text_ptr = 0; // reserve text_seg[0], as gen() does
+        if (vm->flags & CCCC_ENABLE_DEBUGGER) {
+            vm->dbg.source_map_capacity = 1024;
+            vm->dbg.source_map = malloc(vm->dbg.source_map_capacity * sizeof(SourceMap));
+            if (!vm->dbg.source_map)
+                error("could not malloc for source map");
+            vm->dbg.source_map_count = 0;
+            vm->dbg.last_debug_file = NULL;
+            vm->dbg.last_debug_line = -1;
+            vm->dbg.source_index = NULL;
+            vm->dbg.source_index_count = 0;
+            vm->dbg.num_debug_symbols = 0;
+            vm->dbg.num_watchpoints = 0;
+        }
+    }
+
+    // Count and collect the new non-function globals, oldest-first (the list
+    // is built by prepending, so walking old_head..globals gives newest-first).
+    int num_new_vars = 0;
+    for (Obj *v = vm->compiler.globals; v != old_head; v = v->next)
+        if (!v->is_function)
+            num_new_vars++;
+    if (num_new_vars > 0) {
+        Obj **arr = alloca((size_t)num_new_vars * sizeof(Obj *));
+        int idx = num_new_vars - 1;
+        for (Obj *v = vm->compiler.globals; v != old_head; v = v->next)
+            if (!v->is_function)
+                arr[idx--] = v;
+        for (int i = 0; i < num_new_vars; i++) {
+            Obj *var = arr[i];
+            if (var->is_tls) {
+                size_t tls_offset = (vm->tls_template_size + 7) & ~(size_t)7;
+                check_tls_capacity(vm, tls_offset + (size_t)var->ty->size);
+                var->offset = (long long)tls_offset;
+                if (var->init_data)
+                    memcpy(vm->tls_template + tls_offset, var->init_data,
+                           (size_t)var->ty->size);
+                vm->tls_template_size = tls_offset + (size_t)var->ty->size;
+            } else {
+                long long offset = vm->data_ptr - vm->data_seg;
+                offset = (offset + 7) & ~7;
+                check_data_capacity(vm, offset + var->ty->size);
+                vm->data_ptr = vm->data_seg + offset;
+                var->offset = vm->data_ptr - vm->data_seg;
+                add_debug_symbol(vm, var->name, var->offset, var->ty, 0, NULL);
+                if (var->init_data)
+                    memcpy(vm->data_ptr, var->init_data, var->ty->size);
+                vm->data_ptr += var->ty->size;
+            }
+        }
+    }
+
+    // Count and collect the new function definitions, oldest-first.
+    int num_new_fns = 0;
+    for (Obj *v = vm->compiler.globals; v != old_head; v = v->next)
+        if (v->is_function && v->body)
+            num_new_fns++;
+    if (num_new_fns > 0) {
+        Obj **farr = alloca((size_t)num_new_fns * sizeof(Obj *));
+        int idx = num_new_fns - 1;
+        for (Obj *v = vm->compiler.globals; v != old_head; v = v->next)
+            if (v->is_function && v->body)
+                farr[idx--] = v;
+
+        int call_patch_start = vm->compiler.num_call_patches;
+        int addr_patch_start = vm->compiler.num_func_addr_patches;
+
+        for (int i = 0; i < num_new_fns; i++) {
+            Obj *fn = farr[i];
+            if (fn->is_inline && fn->is_static && !fn->is_live)
+                continue;
+            gen_function(vm, fn);
+        }
+
+        // A newly-compiled function may call any previously-compiled function,
+        // so build the patch-resolution map over the full globals list.
+        HashMap fn_defs = {};
+        for (Obj *fn = vm->compiler.globals; fn; fn = fn->next)
+            if (fn->is_function && fn->body && !fn->is_static)
+                hashmap_put(&fn_defs, fn->name, fn);
+
+        for (int i = call_patch_start; i < vm->compiler.num_call_patches; i++) {
+            Obj *target = vm->compiler.call_patches[i].function;
+            const char *fn_name = obj_external_name(target);
+            Pc loc = vm->compiler.call_patches[i].location;
+
+            Obj *fn_def = find_function_definition_for_patch(&fn_defs, target);
+            if (!fn_def) {
+                int ffi_idx = find_ffi_function(vm, fn_name);
+                if (ffi_idx >= 0)
+                    continue; // FFI - not handled via CALL
+                error("undefined function: %s", fn_name);
+            }
+            vm->text_seg[loc] = (Pc)fn_def->code_addr;
+        }
+
+        for (int i = addr_patch_start; i < vm->compiler.num_func_addr_patches; i++) {
+            Obj *target = vm->compiler.func_addr_patches[i].function;
+            Pc loc = vm->compiler.func_addr_patches[i].location;
+
+            Obj *fn_def = find_function_definition_for_patch(&fn_defs, target);
+            if (fn_def) {
+                cc_write_i64_at(vm, loc, cc_pc_to_byte_offset((Pc)fn_def->code_addr));
+            } else {
+                const char *fn_name = obj_external_name(target);
+                int ffi_idx = find_ffi_function(vm, fn_name);
+                if (ffi_idx >= 0)
+                    cc_write_i64_at(vm, loc, CCCC_FFI_TOKEN_BASE - ffi_idx);
+                // else: REPL disallows -c/deferred-link, so there is no
+                // cross-module reloc path to fall back to here.
+            }
+        }
+
+        hashmap_deinit(&fn_defs);
+    }
+
+    // Idempotent per-variable: only touches globals that carry a ->rel list,
+    // safe to run over the whole (small, REPL-sized) globals list each time.
+    apply_global_relocations(vm, vm->compiler.globals);
+}

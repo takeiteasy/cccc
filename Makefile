@@ -42,6 +42,31 @@ ifdef CCCC_HAS_CURL
   endif
 endif
 
+# Optional readline support for the interactive REPL (-r/--repl) line
+# history/editing. Falls back to plain fgets (no history) when not found.
+LIBREADLINE_CFLAGS := $(shell $(PKG_CONFIG) --cflags readline 2>/dev/null)
+LIBREADLINE_LDFLAGS := $(shell $(PKG_CONFIG) --libs readline 2>/dev/null)
+ifeq ($(LIBREADLINE_LDFLAGS),)
+  ifeq ($(shell uname -s),Darwin)
+    # readline is keg-only on Homebrew (macOS ships libedit under the same
+    # name), so it is never on the default include/lib search path.
+    READLINE_TEST_CFLAGS := -I/opt/homebrew/opt/readline/include -I/usr/local/opt/readline/include
+    READLINE_TEST_LDFLAGS := -L/opt/homebrew/opt/readline/lib -L/usr/local/opt/readline/lib -lreadline
+  else
+    READLINE_TEST_CFLAGS := -I/usr/include -I/usr/local/include
+    READLINE_TEST_LDFLAGS := -L/usr/lib -L/usr/local/lib -lreadline
+  endif
+  ifneq ($(shell echo 'int main(void){return 0;}' | $(CC) -x c - $(READLINE_TEST_CFLAGS) $(READLINE_TEST_LDFLAGS) -o /dev/null 2>/dev/null && echo ok),)
+    LIBREADLINE_CFLAGS := $(READLINE_TEST_CFLAGS)
+    LIBREADLINE_LDFLAGS := $(READLINE_TEST_LDFLAGS)
+  endif
+endif
+
+ifneq ($(LIBREADLINE_LDFLAGS),)
+  CFLAGS += -DHAVE_READLINE $(LIBREADLINE_CFLAGS)
+  LDFLAGS += $(LIBREADLINE_LDFLAGS)
+endif
+
 ifeq ($(OS),Windows_NT)
 	EXE := .EXE
 	DYLIB := .dll

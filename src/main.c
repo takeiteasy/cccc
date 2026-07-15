@@ -195,6 +195,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-v/--verbose             Enable debug logging\n");
     printf("\t-g/--debug               Enable interactive debugger\n");
     printf("\t   --no-debug-on-crash   Disable auto-drop into debugger on crash (for test harnesses)\n");
+    printf("\t-r/--repl                Start an interactive read-eval-print loop (no input file)\n");
     printf("\t-e/--entry <name>        Set the entry-point function (default: main)\n");
     printf("\t   --vm-profile          Count executed VM opcodes and print a report\n");
     printf("\t                         Combine with --json to also dump the profile as JSON to stdout\n");
@@ -272,7 +273,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\nPreprocessor Options:\n");
     printf("\t   --embed-limit=SIZE         Set #embed file size warning limit (e.g., 50MB, 100mb, default: 10MB)\n");
     printf("\t   --embed-hard-limit         Make #embed limit a hard error instead of warning\n");
-    printf("\t-r/--macro-recursion-limit=N  Limit recursive pragma macro expansion (default: 256, 0=unlimited)\n");
+    printf("\t   --macro-recursion-limit=N  Limit recursive pragma macro expansion (default: 256, 0=unlimited)\n");
     printf("\t-n/--max-errors=N             Cap diagnostics at N (default: 20)\n");
     printf("\t-C/--no-comptime              Skip the comptime/macro phase entirely (for\n");
     printf("\t                              large TUs that don't use [[cccc::comptime]])\n");
@@ -718,6 +719,7 @@ int main(int argc, const char *argv[]) {
     size_t embed_limit = 0;     // --embed-limit (0 = use default)
     int embed_hard_error = 0;   // --embed-hard-limit
     int macro_recursion_limit = -1; // --macro-recursion-limit
+    int repl_mode = 0;          // -r / --repl
     int opt_level = 0; // -O0/-O1/-O2/-O3/-O4 (default: 0 = no optimization)
     int ffp_contract_fma = 0;  // --fma
     uint32_t opt_f_enable  = 0; // passes forced ON  by -f<pass>
@@ -839,7 +841,8 @@ int main(int argc, const char *argv[]) {
         {"embed-hard-limit", no_argument, 0, 1060},
         {"optimize", optional_argument, 0, 'O'},
         {"fma", no_argument, 0, 1072},
-        {"macro-recursion-limit", required_argument, 0, 'r'},
+        {"macro-recursion-limit", required_argument, 0, 1115},
+        {"repl", no_argument, 0, 'r'},
         {"std", required_argument, 0, 's'},
         {"ffi-allow", required_argument, 0, 1052},
         {"ffi-deny", required_argument, 0, 1053},
@@ -912,7 +915,7 @@ int main(int argc, const char *argv[]) {
         if (strcmp(argv[i], "--") == 0) { dashdash = i; break; }
     }
     int getopt_argc = (dashdash >= 0) ? dashdash : argc;
-    const char *optstring = "0123haI:L:D:U:o:c::dvgi:PEMGXSjJVCl:W:e:O::FbTmptn:r:s:ABf:w";
+    const char *optstring = "0123haI:L:D:U:o:c::dvgi:PEMGXSjJVCl:W:e:O::FbTmptn:rs:ABf:w";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(getopt_argc, (char *const *)argv, optstring,
@@ -1196,7 +1199,10 @@ int main(int argc, const char *argv[]) {
             ffp_contract_fma = 1;
             flags |= CCCC_FMA;
             break;
-        case 'r': { // --macro-recursion-limit
+        case 'r': // --repl
+            repl_mode = 1;
+            break;
+        case 1115: { // --macro-recursion-limit
             char *end = NULL;
             long val = strtol(optarg, &end, 10);
             if (!optarg[0] || *end != '\0' || val < 0 || val > INT32_MAX) {
@@ -1550,10 +1556,30 @@ int main(int argc, const char *argv[]) {
             input_files[input_files_count++] = strdup(a);
         }
     }
-    // If no input files, error
-    if (input_files_count == 0) {
+    // If no input files, error (the REPL is the one mode that runs without one)
+    if (input_files_count == 0 && !repl_mode) {
         fprintf(stderr, "error: no input files\n");
         usage((char *)argv[0], 1);
+    }
+
+    if (repl_mode) {
+        // --repl is an interactive VM-only mode: it takes no input files and
+        // is mutually exclusive with every other frontend/output/execution
+        // mode (mirrors the --build validation block below).
+        if (input_files_count != 0) {
+            fprintf(stderr, "error: --repl does not take input files\n");
+            usage(argv[0], 1);
+        }
+        if (build_mode || testing_mode || run_ngrams || run_fusion ||
+            compile_format != COMPILE_NONE || disassemble ||
+            preprocess_only || dump_expanded_only || print_tokens ||
+            output_json || output_ffi_decls || dump_ast || vm_profile) {
+            fprintf(stderr,
+                    "error: --repl cannot be combined with --build, --testing, "
+                    "--ngrams/--fusion-candidates, -c (incl. -c=native), -d, "
+                    "-E, -M, --ast, --vm-profile, or other output modes\n");
+            usage(argv[0], 1);
+        }
     }
 
     if (build_mode) {
@@ -1710,6 +1736,15 @@ int main(int argc, const char *argv[]) {
 
     if (verbose)
         vm.debug_vm = 1;
+
+    if (repl_mode) {
+        // Interactive read-eval-print loop: persistent VM, no input file.
+        // See src/repl.c for the session driver.
+        if (macro_recursion_limit >= 0)
+            vm.compiler.macro_recursion_limit = macro_recursion_limit;
+        cc_run_repl(&vm);
+        goto BAIL;
+    }
 
     // If the only input file is "-", read stdin into a temporary file and
     // replace it

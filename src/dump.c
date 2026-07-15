@@ -466,6 +466,13 @@ const char *cc_node_kind_name(NodeKind kind) {
     return node_kind_name(kind);
 }
 
+// Public entry point for printing a Type as C-ish declarator syntax (e.g.
+// "int *", "struct Point", "unsigned long"). Used by the REPL's `:type`
+// command and result formatter (ticket #661).
+void cc_dump_type(FILE *f, Type *ty) {
+    dump_type_simple(f, ty);
+}
+
 // ========================================================================
 // JSON AST dump
 // ========================================================================

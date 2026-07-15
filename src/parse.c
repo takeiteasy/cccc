@@ -10164,3 +10164,72 @@ int64_t cc_eval(VirtualMachine *vm, Node *node) { return eval(vm, node); }
 double  cc_eval_double(VirtualMachine *vm, Node *node) { return eval_double(vm, node); }
 
 void cc_init_parser(VirtualMachine *vm) { error_var->ty = ty_error; }
+
+// ---------------------------------------------------------------------
+// REPL support (ticket #661)
+// ---------------------------------------------------------------------
+// Parse and classify one top-level unit against the *persistent* global
+// scope already installed on vm (see cc_run_repl in src/repl.c, which calls
+// parse() once up front on an empty token stream to enter the global scope
+// and declare builtins). Unlike parse(), this never enters/leaves scope and
+// never resets vm->compiler.globals -- declarations accumulate across calls.
+ReplUnitKind cc_parse_repl_unit(VirtualMachine *vm, Token *tok, Node **out_expr) {
+    *out_expr = NULL;
+    if (!tok || tok->kind == TK_EOF)
+        return REPL_UNIT_EMPTY;
+
+    if (is_decl_start(vm, tok)) {
+        // Same body as parse()'s top-level loop (src/parse.c:parse()), minus
+        // the scope/globals reset -- a REPL "line" may itself contain more
+        // than one declaration (e.g. "int a; int b = a + 1;").
+        while (tok->kind != TK_EOF) {
+            if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
+                tok = static_assert_decl(vm, tok);
+                continue;
+            }
+
+            VarAttr attr = {};
+            Type *basety = declspec(vm, &tok, tok, &attr);
+
+            if (attr.is_typedef) {
+                tok = parse_typedef(vm, tok, basety, &attr);
+                continue;
+            }
+
+            if (is_function(vm, tok, basety)) {
+                tok = is_function_decl_list(vm, tok, basety)
+                          ? function_declaration_list(vm, tok, basety, &attr)
+                          : function(vm, tok, basety, &attr);
+                continue;
+            }
+
+            if (equal(tok, ";")) {
+                if (has_custom_attrs(basety, &attr)) {
+                    char *name = NULL;
+                    if (basety->name)
+                        name = arena_strndup(vm, basety->name->loc, basety->name->len);
+                    run_decl_custom_attrs(vm, basety, &attr, ATTR_TARGET_TYPE, name,
+                                          basety, NULL, basety->name);
+                }
+                tok = tok->next;
+                continue;
+            }
+
+            tok = global_variable(vm, tok, basety, &attr);
+        }
+        return REPL_UNIT_DECL;
+    }
+
+    // Bare expression: the one REPL affordance with no equivalent at real
+    // file scope. Parse via expr() (assignment + comma operator), consume an
+    // optional trailing ';', and require the whole line be consumed.
+    Node *n = expr(vm, &tok, tok);
+    add_type(vm, n);
+    if (equal(tok, ";"))
+        tok = tok->next;
+    if (tok->kind != TK_EOF)
+        error_tok(vm, tok, "unexpected token after expression: '%.*s'", tok->len,
+                  tok->loc);
+    *out_expr = n;
+    return REPL_UNIT_EXPR;
+}

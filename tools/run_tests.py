@@ -8,6 +8,7 @@ Sub-suites:
   source    — main test suite (tools/testing/ package)
   c4        — .c4 bytecode round-trip (compile → save → reload → run)
   debugger  — macOS host-signal crash-debugger integration (macOS only)
+  repl      — interactive REPL PTY integration (POSIX only, ticket #661)
   sqlite    — SQLite 3.53.2 amalgamation smoke test (skips if zip absent)
 
 Optional:
@@ -101,6 +102,42 @@ def _run_host_signal_suite(cccc):
         # Inject --binary argument so the argparse in main() picks it up.
         old_argv = sys.argv
         sys.argv = ["test_host_signal_debugger.py", "--binary", str(cccc)]
+        try:
+            rc = mod.main()
+        finally:
+            sys.argv = old_argv
+
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
+def _run_repl_suite(cccc):
+    """Run the interactive REPL PTY integration tests (ticket #661).
+
+    Returns (status_str, ok) where status_str is 'passed'/'failed'/'skipped'.
+    The REPL is a stdin-driven interactive session (readline, multi-line
+    continuation prompts), so it needs a real pseudo-terminal to exercise --
+    the `pty` module is POSIX-only, hence the Windows skip (matching the
+    host-signal suite's platform-gating pattern above).
+    """
+    if sys.platform == "win32":
+        return "skipped (POSIX-only, needs a pty)", True
+
+    script = _TOOLS_DIR / "test_repl.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("test_repl", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        old_argv = sys.argv
+        sys.argv = ["test_repl.py", "--binary", str(cccc)]
         try:
             rc = mod.main()
         finally:
@@ -220,6 +257,13 @@ def main():
     hsd_status, ok_hsd = _run_host_signal_suite(cccc)
     print(f"  {hsd_status}")
     suite_results["debugger"] = ok_hsd
+
+    # --- REPL PTY integration ---
+    print()
+    print("[ repl integration ]")
+    repl_status, ok_repl = _run_repl_suite(cccc)
+    print(f"  {repl_status}")
+    suite_results["repl"] = ok_repl
 
     # --- SQLite smoke ---
     print()

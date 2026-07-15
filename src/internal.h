@@ -720,6 +720,7 @@ void cc_dump_ast(FILE *f, Obj *prog, int verbose);
 void cc_dump_ast_json(FILE *f, Obj *prog, int verbose);
 void cc_dump_node(FILE *f, Node *node, int verbose);      // single-node dump (used by relfection.c)
 const char *cc_node_kind_name(NodeKind kind);             // kind→string (used by relfection.c)
+void cc_dump_type(FILE *f, Type *ty);                     // C-ish type spelling (used by the REPL, #661)
 
 //
 // json.c

@@ -2851,6 +2851,40 @@ double  cc_eval_double(VirtualMachine *vm, Node *node);
 void cc_init_parser(VirtualMachine *vm);
 
 /*!
+ @enum ReplUnitKind
+ @abstract Classification result from cc_parse_repl_unit (ticket #661).
+*/
+typedef enum {
+    REPL_UNIT_EMPTY, // line was empty/whitespace-only after tokenizing
+    REPL_UNIT_DECL,  // one or more declarations were added to vm->compiler.globals
+    REPL_UNIT_EXPR,  // *out_expr holds a parsed+typed expression Node
+} ReplUnitKind;
+
+/*!
+ @function cc_parse_repl_unit
+ @abstract Parse and classify one top-level unit typed at the REPL prompt.
+ @param vm The CCCC instance. vm->compiler.scope must already hold a
+           persistent global scope (see parse()) -- this function does not
+           enter/leave scope or reset vm->compiler.globals; declarations
+           accumulate across calls, exactly like typing more source into an
+           already-open translation unit.
+ @param tok Head of the tokenized (and pp-converted) line/block.
+ @param out_expr Receives the parsed expression Node when the return value is
+           REPL_UNIT_EXPR; set to NULL otherwise.
+ @return REPL_UNIT_EMPTY, REPL_UNIT_DECL, or REPL_UNIT_EXPR.
+ @discussion Classification peeks the first token with the same predicate
+             used to distinguish a block-scope declaration from a statement
+             (is_decl_start, which consults the persistent typedef/keyword
+             table) so `a * b;` parses as a declaration when `a` is a typedef
+             and as an expression otherwise. A parse or type error calls
+             error_tok(), which longjmps via vm->error_jmp_buf if the caller
+             installed one -- this function does not itself catch errors; the
+             caller is responsible for snapshotting/rolling back scope state
+             around the call (see cc_run_repl in src/repl.c).
+*/
+ReplUnitKind cc_parse_repl_unit(VirtualMachine *vm, Token *tok, Node **out_expr);
+
+/*!
  @function cc_execute_inline_macros
  @abstract Execute all inline macros before parsing.
  @discussion Compiles and executes every [[cccc::macro(inline)]] (or
@@ -2940,6 +2974,24 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count);
  @param prog Linked list of top-level Obj returned by cc_parse.
 */
 void cc_compile(VirtualMachine *vm, Obj *prog);
+
+/*!
+ @function cc_repl_compile_new
+ @abstract Incrementally compile only the globals prepended to
+           vm->compiler.globals since `old_head` -- for the REPL (ticket #661).
+ @param vm The CCCC instance. On first call this lazily allocates VM segments
+           the same way cc_compile does.
+ @param old_head The value of vm->compiler.globals captured *before* the new
+           unit was parsed/synthesized. Everything from vm->compiler.globals
+           up to (but not including) old_head is treated as new.
+ @discussion Unlike cc_compile/gen(), this never resets or re-lays-out
+             already-compiled globals or functions: their code_addr, data
+             offsets, and current runtime contents are left untouched, so
+             prior REPL evaluations' side effects (mutated globals, pointers
+             into the data/text segment) remain valid. New function calls may
+             still target any previously-compiled function.
+*/
+void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head);
 
 /*!
  @function cc_run
@@ -3109,6 +3161,26 @@ void cc_remove_breakpoint(VirtualMachine *vm, int index);
              - help/h: Show help
 */
 void cc_debug_repl(VirtualMachine *vm);
+
+/*!
+ @function cc_run_repl
+ @abstract Run an interactive top-level read-eval-print loop on a VM.
+ @param vm The CCCC instance. Must already be initialized via cc_init and
+            configured (flags, entry name, FFI policy, etc.) exactly as for
+            a normal compile; cc_run_repl does not call cc_init itself.
+ @discussion Distinct from cc_debug_repl (src/debugger.c), which is scoped to
+             breakpoint-time inspection of an already-running program.
+             cc_run_repl instead drives a persistent top-level session: it
+             reads C source a line (or multi-line block) at a time, classifies
+             each unit as a declaration (persisted into the session's global
+             scope) or an expression (compiled into a synthetic wrapper
+             function and executed on the VM, with the typed result printed),
+             and supports session commands (:help, :quit, :type, :load).
+             A failed parse rolls back the session's symbol-table state
+             rather than corrupting it. Returns when the session ends
+             (:quit or EOF on stdin).
+*/
+void cc_run_repl(VirtualMachine *vm);
 
 /*!
  @function cc_add_watchpoint

@@ -34,10 +34,22 @@ that cannot yet be expressed in the framework (e.g. those combining warning
 flags with `--std=` at file scope) remain as standalone files in `tests/`.
 
 `make test` calls `tools/run_tests.py`, which is the unified orchestrator. It
-runs four sub-suites in sequence: source mode, `.c4` round-trip, the macOS
-host-signal debugger integration (skipped on other platforms), and the SQLite
-amalgamation smoke test (skips cleanly when the zip is absent). A non-zero exit
-is produced if any sub-suite fails.
+runs five sub-suites in sequence: source mode, `.c4` round-trip, the macOS
+host-signal debugger integration (skipped on other platforms), the interactive
+REPL PTY integration (`tools/test_repl.py`, POSIX-only -- skipped on Windows),
+and the SQLite amalgamation smoke test (skips cleanly when the zip is absent).
+A non-zero exit is produced if any sub-suite fails.
+
+### Interactive REPL integration test
+
+`tools/test_repl.py` drives `./cccc --repl` over a real pseudo-terminal (the
+REPL is a readline-backed interactive session, so a plain pipe can't exercise
+its prompts/continuation behavior) and asserts on expression evaluation,
+declaration persistence, incremental-compile correctness (a global mutated by
+one line must still hold that value on the next), multi-line continuation,
+error rollback, and the `:type`/`:load`/`:help`/`:quit` session commands. Run
+it directly with `python3 tools/test_repl.py [--binary PATH]`. See
+[TOOLING.md](TOOLING.md#interactive-repl) for the REPL itself.
 
 ### SQLite amalgamation smoke-test
 
