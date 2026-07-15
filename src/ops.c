@@ -1684,6 +1684,37 @@ static inline int op_CHKP3_fn(VirtualMachine *vm) {
         return -1;
     }
 
+    // Dangling stack pointer detection (#670, use-based / dereference-time
+    // design -- replaces the neutered scope-exit check removed in #669).
+    // The VM stack grows downward: vm->sp is the current top-of-stack, and
+    // every *live* local sits at an address >= vm->sp. A pointer obtained
+    // from &local (see op_LEA3_fn: regs[rd] = (long long)(vm->bp + offset),
+    // a raw host address) whose target frame has since returned therefore
+    // satisfies stack_seg <= ptr < vm->sp -- the slot has been reclaimed by
+    // sp rising back above it. This is precise by construction: any &local
+    // still within a live frame, or passed as an out-param into a *deeper*
+    // call, has ptr >= sp and is never flagged. Known gap: a dangling
+    // pointer passed deeper and dereferenced *there* is missed, because the
+    // deeper call's own frame re-covers the dead address (ptr >= sp again);
+    // closing that needs per-pointer frame-liveness tracking, not just a
+    // range check (see docs/SAFETY.md).
+    if (vm->flags & CCCC_DANGLING_DETECT) {
+        uintptr_t p   = (uintptr_t)ptr;
+        uintptr_t lo  = (uintptr_t)vm->stack_seg;
+        uintptr_t cur = (uintptr_t)vm->sp;
+        if (p >= lo && p < cur) {
+            printf("\n========== DANGLING STACK POINTER ==========\n");
+            printf("Dereferenced a pointer into a stack frame that has already returned\n");
+            printf("Address:    0x%llx\n", (unsigned long long)p);
+            printf("Current SP: 0x%llx (address is below live stack -> frame is dead)\n",
+                   (unsigned long long)cur);
+            printf("Current PC: 0x%llx (offset: %lld)\n", (long long)vm->pc,
+                   (long long)vm->pc);
+            printf("============================================\n");
+            return -1;
+        }
+    }
+
     // Resolve the containing allocation — handles base pointers and
     // interior pointers (p + k) alike via sorted_allocs_find (#650).
     {
@@ -2745,39 +2776,6 @@ static inline int op_MARKI_fn(VirtualMachine *vm) {
     return 0;
 }
 
-static inline int op_MARKA_fn(VirtualMachine *vm) {
-    // Mark a stack address for dangling-pointer detection.
-    // Format: [MARKA] [rs:ptr] [offset:i64] [size:i64] [scope_id:i64]
-    long long operands = cc_read_word(vm);
-    int rs;
-    DECODE_R(operands, rs);
-    long long offset   = cc_read_i64(vm);
-    size_t    size     = (size_t)cc_read_i64(vm);
-    int       scope_id = (int)cc_read_word(vm);
-
-    if (!(vm->flags & CCCC_DANGLING_DETECT) && !(vm->flags & CCCC_STACK_INSTR))
-        return 0;
-
-    long long ptr = vm->regs[rs];
-
-    if (vm->debug_vm) {
-        printf("MARKA: tracking ptr 0x%llx (bp=0x%llx offset=%lld size=%zu scope=%d)\n",
-               ptr, (long long)vm->bp, offset, size, scope_id);
-    }
-
-    StackPtrInfo *info = malloc(sizeof(StackPtrInfo));
-    if (!info) {
-        fprintf(stderr, "MARKA: failed to allocate StackPtrInfo\n");
-        return 0;
-    }
-    info->bp       = (long long)vm->bp;
-    info->offset   = offset;
-    info->size     = size;
-    info->scope_id = scope_id;
-    hashmap_put_int(&vm->stack_ptrs, ptr, info);
-    return 0;
-}
-
 static inline int op_CHKPA_fn(VirtualMachine *vm) {
     // Check pointer arithmetic result against its recorded provenance.
     // Format: [CHKPA] [rs:ptr_result]
@@ -2912,31 +2910,16 @@ static inline int op_SCOPEOUT_fn(VirtualMachine *vm) {
         }
     }
 
-    // NOTE (#669): this used to hard-error here whenever a still-tracked
-    // StackPtrInfo matched the exiting scope/bp. That conflated
-    // "address-taken" with "escaped" -- MARKA (see ND_ADDR in codegen.c)
-    // tracks *every* `&local`, always tagged with the function's own
-    // top-level scope_id, so this check only ever fired at *function* exit,
-    // where the whole frame (and every address-taken local in it) dies
+    // NOTE (#669/#670): this used to hard-error here whenever a still-tracked
+    // MARKA-recorded pointer matched the exiting scope/bp. That conflated
+    // "address-taken" with "escaped" -- MARKA tracked *every* `&local`,
+    // always tagged with the function's own top-level scope_id, so the check
+    // only ever fired at *function* exit, where the whole frame dies
     // together and nothing can actually dangle. It had zero true-positive
-    // capability and aborted on fully benign code, e.g. `int *p = &n; *p =
-    // 5;` or any out-param call like `posix_memalign(&q, ...)`. The hard
-    // error was removed; the MARKA/stack_ptrs tracking below is left in
-    // place as a hook for a real fix (detect actual escape, or check on
-    // dereference of a pointer into a dead frame, rather than on scope
-    // exit). See ticket #670 for the follow-up design.
-    if ((vm->flags & CCCC_DANGLING_DETECT) && vm->debug_vm) {
-        for (int i = 0; i < vm->stack_ptrs.capacity; i++) {
-            HashEntry *ent = &vm->stack_ptrs.buckets[i];
-            if (!ent->key || ent->key == (char *)-1)
-                continue;
-            StackPtrInfo *ptr_info = (StackPtrInfo *)ent->val;
-            if (ptr_info && ptr_info->scope_id == scope_id &&
-                ptr_info->bp == (long long)vm->bp) {
-                printf("WARNING: Dangling pointer detected for scope %d\n", scope_id);
-            }
-        }
-    }
+    // capability and aborted on fully benign code. Real enforcement is now a
+    // precise dereference-time range check in op_CHKP3_fn (#670); the
+    // MARKA opcode and vm->stack_ptrs tracking it depended on have been
+    // removed as dead placeholder infrastructure.
     return 0;
 }
 

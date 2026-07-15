@@ -351,10 +351,9 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 | `CHKB` | Array bounds check on `base + scaled_offset`, resolving `base` (exact or interior pointer) via `vm->sorted_allocs` | `CCCC_BOUNDS_CHECKS` |
 | `CHKI` | Uninitialised-variable read check (`bp+offset`) | `CCCC_UNINIT_DETECTION` |
 | `MARKI` | Mark variable at `bp+offset` as initialised | `CCCC_UNINIT_DETECTION` |
-| `MARKA` | Record stack address for dangling-pointer tracking | `CCCC_DANGLING_DETECT` / `CCCC_STACK_INSTR` |
 | `CHKPA` | Validate pointer arithmetic against provenance | `CCCC_INVALID_ARITH` + `CCCC_PROVENANCE_TRACK` |
 | `MARKP` | Record pointer provenance (`origin`, `base`, `size`) | `CCCC_PROVENANCE_TRACK` |
-| `CHKP3` | Pointer validity (NULL, UAF, heap range), resolving the pointer (exact or interior) via `vm->sorted_allocs` | `CCCC_POINTER_CHECKS` |
+| `CHKP3` | Pointer validity (NULL, UAF, heap range, dangling stack deref), resolving the pointer (exact or interior) via `vm->sorted_allocs` | `CCCC_POINTER_CHECKS` |
 | `CHKA3` | Pointer alignment check | `CCCC_ALIGNMENT_CHECKS` |
 | `CHKT3` | Heap type-tag check on dereference (effective-type model), resolving the base pointer via `vm->sorted_allocs` | `CCCC_TYPE_CHECKS` |
 
@@ -712,7 +711,7 @@ The VM does not rely on external sanitizer libraries.  Instead, the compiler inj
 * **Stack canaries** — `ENT3` writes a canary word; `LEV3` validates it before returning.
 * **CFI** — A shadow stack mirrors the real stack; `CALL` pushes to both, `CALLT` pops the current frame's entry (consuming one shadow-slot but not pushing a new one), and `LEV3` compares before trusting the return address.
 * **Provenance tracking** — `MARKP` records `(origin, base, size)`; `CHKPA` rejects arithmetic that leaves the object.
-* **Dangling pointers** — `MARKA` records stack addresses into `vm->stack_ptrs`; detection-only (no enforcement) as of #669 — see `docs/SAFETY.md` for why.
+* **Dangling pointers** — `CHKP3` range-checks every dereferenced pointer against `[vm->stack_seg, vm->sp)`; since the stack grows downward, an address in that range belongs to a frame that has already returned (#670) — see `docs/SAFETY.md` for the known false-negative (dereference through a further call).
 * **Use-after-scope / use-after-return** — `CHKL`, keyed by a variable's actual runtime address (bp+offset) via `vm->stack_var_active`, populated by `SCOPEIN`/`SCOPEOUT` per activation (#671).
 
 Because every check is guarded by a runtime flag, the same bytecode can run with full safety or with zero overhead simply by changing the active `CCCCFlags` mask.

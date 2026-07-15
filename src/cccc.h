@@ -85,7 +85,6 @@ extern "C" {
     X(CHKB, 1)  /* Check array bounds */                                       \
     X(CHKI, 2)  /* Check initialization */                                     \
     X(MARKI, 2) /* Mark as initialized */                                      \
-    X(MARKA, 6) /* Mark address (track stack pointer for dangling detection) */\
     X(CHKPA, 1) /* Check pointer arithmetic (invalid arithmetic detection) */  \
     X(MARKP, 4) /* Mark provenance (track pointer origin) */                   \
     /* Stack instrumentation opcodes */                                        \
@@ -1592,21 +1591,6 @@ typedef struct AllocRecord {
 } AllocRecord;
 
 /*!
- @struct StackPtrInfo
- @abstract Tracks stack pointer information for dangling pointer detection.
- @field bp Base pointer value when pointer was created.
- @field offset Stack offset from BP.
- @field size Size of the pointed-to object.
- @field scope_id Unique identifier for the scope where variable was declared.
-*/
-typedef struct StackPtrInfo {
-    long long bp;
-    long long offset;
-    size_t size;
-    int scope_id;
-} StackPtrInfo;
-
-/*!
  @struct StackVarMeta
  @abstract Unified metadata for stack variable instrumentation.
  @field name Variable name (for debugging/reporting).
@@ -2371,8 +2355,6 @@ struct VirtualMachine {
     AllocRecord *alloc_list; // List of active allocations (for leak detection)
     HashMap init_state; // Track initialization state of stack variables (for
                         // uninitialized detection)
-    HashMap stack_ptrs; // Track stack pointers for dangling detection (ptr ->
-                        // {bp, offset, size})
     HashMap provenance; // Track pointer provenance for stack/global (ptr ->
                         // {origin_type, base, size})
     HashMap stack_var_meta; // Declaration-level stack variable metadata,

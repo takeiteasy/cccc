@@ -76,9 +76,9 @@ CCCC provides preset safety levels that make it easy to choose the right combina
 - **All safety features** including:
   - Control flow integrity (CFI) with shadow stack
   - Temporal memory tagging (generation-based UAF detection)
-  - Dangling stack pointer *tracking* (detection-only; see [Advanced Pointer
-    Tracking Features](#advanced-pointer-tracking-features) — use-after-return
-    enforcement was removed as a false-positive generator, #669)
+  - Dangling stack pointer detection (dereference-time range check; see
+    [Advanced Pointer Tracking Features](#advanced-pointer-tracking-features)
+    for what it catches and its one known false-negative, #670)
   - Alignment checks
   - Provenance tracking (pointer origin validation)
   - Invalid pointer arithmetic detection
@@ -86,11 +86,11 @@ CCCC provides preset safety levels that make it easy to choose the right combina
     read/write counts — see below for what it does and doesn't catch)
   - Random canaries (unpredictable stack protection)
 
-**Detects:** Most memory safety bugs CCCC can catch. Two known gaps: dangling
-stack pointers are tracked but not enforced (`--dangling-pointers`, #669), and
-genuine use-after-return via pointer dereference isn't yet caught (#670) —
-`CHKL`'s liveness guard only protects direct-by-name variable access, which
-ordinary C can't violate
+**Detects:** Most memory safety bugs CCCC can catch, including dereferencing a
+stack pointer whose owning frame has already returned. One known gap: a
+dangling pointer passed *deeper* into a further call and dereferenced there is
+missed, because the deeper frame reclaims the same address (see
+`--dangling-pointers` below, #670)
 
 ---
 
@@ -336,17 +336,31 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
 
 ## Advanced Pointer Tracking Features
 
-- `--dangling-pointers` **Dangling stack pointer tracking (detection-only, no enforcement — see below)**
-  - Tracks all stack pointer creations via MARKA opcode
-  - HashMap tracks: pointer value → {BP, stack offset, size}
-  - **Does not currently abort on use-after-return.** A previous scope-exit check
-    aborted whenever *any* tracked `&local` was still present when its function
-    returned — which conflated "address taken" with "escaped" and fired on fully
-    benign code (e.g. `&local` passed as an out-param to a call), not just genuine
-    dangling pointers. It had no way to distinguish the two, so it was removed
-    (#669); real enforcement (escape-aware tracking, or checking on dereference of
-    a pointer into a dead frame rather than at scope exit) is tracked as a
-    follow-up, not yet implemented
+- `--dangling-pointers` **Dangling stack pointer detection (dereference-time range check, #670)**
+  - Enforced in `CHKP3`, the same gate that runs before every pointer
+    dereference under `--pointer-checks` / `-3`. No creation-time tracking is
+    needed: the VM stack grows downward, so every *live* local sits at an
+    address `>= vm->sp`, and any address inside the stack reservation but
+    below the current `vm->sp` belongs to a frame that has already returned.
+    A single unsigned range check (`stack_seg <= ptr < sp`) is precise by
+    construction — no hashmap of address-taken pointers, no escape analysis
+  - **What it catches:** dereferencing a pointer to a local whose function has
+    returned, when the dereference happens in the frame that got control back
+    (or any ancestor of it) — e.g. `int *p = get_local(); return *p;`. This
+    also covers deref-through-pointer cases that `CHKL` (see
+    `--stack-instrumentation` below) does not
+  - **What it does not catch (known false-negative):** a dangling pointer
+    passed *deeper* into a further call and dereferenced there. That deeper
+    call's own frame reuses the same stack memory, pushing `sp` back down
+    past the dangling address, so `ptr >= sp` holds again and the check
+    doesn't fire. Closing this gap needs per-pointer frame-liveness tracking,
+    not just a range check, and isn't implemented
+  - This replaces the pre-#670 scope-exit check (removed in #669), which
+    conflated "address taken" with "escaped" — it tracked every `&local` via
+    the (now removed) `MARKA` opcode and aborted whenever any of them was
+    still present at *function* exit, which is every non-consumed `&local`,
+    not just ones that actually escaped. It had zero true-positive coverage
+    and aborted on fully benign code (e.g. `int *p = &n; *p = 5;`)
 - `--alignment-checks` **Pointer alignment validation**
   - CHKA opcode validates pointer alignment before dereference
   - Checks that `pointer % type_size == 0`
@@ -378,12 +392,11 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
     by name is currently in scope, which ordinary C code can't violate (a
     local's name isn't visible outside its own lexical scope). In practice it
     no longer fires in correct programs after #671; catching a genuine
-    use-after-return (e.g. dereferencing a pointer to a dead local through
-    another variable) is the dereference-based detection tracked in #670, not
-    yet implemented
+    use-after-return through a pointer dereference is `--dangling-pointers`'
+    job (see above, #670)
   - Stack overflow detection: tracks high water mark, warns at 90% threshold
-  - `--dangling-pointers` tracks stack-address creation via the same
-    infrastructure, but does not currently enforce anything on its own (see above)
+  - `--dangling-pointers` is independent of this flag — its check lives in
+    `CHKP3`, not in the SCOPEIN/SCOPEOUT/CHKL machinery described here
   - Use `--stack-errors` flag to enable runtime errors (vs logging only)
   - Use `cc_print_stack_report()` API to print access statistics
 - `--format-string-checks` **Format string validation**
@@ -816,30 +829,42 @@ PC:         0x1280080a8 (offset: 21)
 
 ### Dangling Pointers
 
-**Current status (as of #669): detection only, no enforcement.** `--dangling-pointers`
-tracks every `&local` taken (via the `MARKA` opcode, into a `pointer -> {BP, offset,
-size}` map) but no longer aborts on it. An earlier scope-exit check aborted on *any*
-tracked address still present when its enclosing function returned — which is every
-`&local` whose value hasn't been consumed yet, not just ones that actually escaped —
-so it flagged ordinary, correct code (e.g. `int *p = &n; *p = 5;`, or `&local` passed
-as an out-param to a call) exactly as often as it caught a real bug. It was removed as
-a pure false-positive generator; see the tracker for the follow-up (precise
-escape-aware or dereference-based detection) that will restore enforcement.
+`--dangling-pointers` (also enabled by `-3` / `--safety=max`) enforces a
+dereference-time range check in `CHKP3`: the stack grows downward, so any
+address that falls inside the stack reservation but below the current stack
+pointer belongs to a frame that has already returned. Dereferencing it aborts.
 
 ```c
-// Still compiles and runs to completion under --dangling-pointers / -3 today —
-// MARKA tracks the &x, but nothing currently flags the eventual dereference.
+// test_dangling_pointer.c - Dangling stack pointer example
 int *get_local_address() {
     int x = 42;
-    return &x;  // Return address of local variable (dangling pointer!)
+    return &x;  // Address of local variable -- fine to take, fine to return.
 }
 
 int main() {
     int *ptr = get_local_address();
-    int value = *ptr;  // Dereference dangling pointer -- not currently detected.
+    int value = *ptr;  // Dereference of a dangling pointer -- caught here.
     return value;
 }
 ```
+
+```bash
+$ ./cccc --dangling-pointers test_dangling_pointer.c
+
+========== DANGLING STACK POINTER ==========
+Dereferenced a pointer into a stack frame that has already returned
+Address:    0x15fffffc8
+Current SP: 0x15fffffe0 (address is below live stack -> frame is dead)
+Current PC: 0x14 (offset: 20)
+============================================
+```
+
+**Known false-negative (#670):** a dangling pointer passed *deeper* into
+another call and dereferenced there is not caught — the deeper call's own
+frame reuses the same stack memory, so the address is `>= sp` again by the
+time it's dereferenced. Only the "dereference in the frame that got control
+back" form above is detected; closing the general case needs per-pointer
+frame-liveness tracking, not just a range check.
 
 ### Pointer Alignment
 ```c

@@ -930,11 +930,6 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     vm->init_state.buckets = NULL;
     vm->init_state.used = 0;
 
-    // Initialize stack_ptrs HashMap for dangling pointer detection
-    vm->stack_ptrs.capacity = 0;
-    vm->stack_ptrs.buckets = NULL;
-    vm->stack_ptrs.used = 0;
-
     // Initialize provenance HashMap for provenance tracking
     vm->provenance.capacity = 0;
     vm->provenance.buckets = NULL;
@@ -1174,16 +1169,6 @@ void cc_destroy(VirtualMachine *vm) {
     hashmap_deinit(&vm->race_shadow);
     // Free atomic_shadow HashMap (mixed atomic/non-atomic detection)
     hashmap_deinit(&vm->atomic_shadow);
-
-    // Free stack_ptrs HashMap (integer keys + StackPtrInfo values)
-    if (vm->stack_ptrs.buckets) {
-        for (int i = 0; i < vm->stack_ptrs.capacity; i++) {
-            HashEntry *entry = &vm->stack_ptrs.buckets[i];
-            if (entry->key && entry->key != (void *)-1 && entry->val)
-                free(entry->val);
-        }
-        hashmap_deinit(&vm->stack_ptrs);
-    }
 
     // Free provenance HashMap (integer keys + ProvenanceInfo values)
     if (vm->provenance.buckets) {

@@ -2845,17 +2845,6 @@ static void emit_markw(VirtualMachine *vm, long long offset) {
     emit_i64(vm, offset);
 }
 
-// Emit MARKA (mark address for dangling detection).
-// rs holds the pointer; offset/size/scope_id are compile-time immediates.
-static void emit_marka(VirtualMachine *vm, int rs, long long offset, size_t size,
-                       int scope_id) {
-    emit(vm, MARKA);
-    emit_word(vm, ENCODE_R(rs));
-    emit_i64(vm, offset);
-    emit_i64(vm, (long long)size);
-    emit_word(vm, scope_id);
-}
-
 // Emit MARKP (mark provenance).
 // rs_ptr and rs_base hold the pointer and its allocation base.
 static void emit_markp(VirtualMachine *vm, int rs_ptr, int rs_base, int origin_type,
@@ -3347,15 +3336,15 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
     case ND_ADDR:
         gen_addr(vm, node->lhs, dest_reg);
-        // Track explicit address-of a local var for dangling detection and provenance.
+        // Track explicit address-of a local var for provenance. Dangling-pointer
+        // detection no longer needs address-taken tracking here -- it's now a
+        // precise dereference-time range check in op_CHKP3_fn (#670).
         if (node->lhs->kind == ND_VAR && node->lhs->var->is_local &&
             !node->lhs->var->is_block_var) {
-            size_t var_size = node->lhs->var->ty ? node->lhs->var->ty->size : 8;
-            if (vm->flags & (CCCC_DANGLING_DETECT | CCCC_STACK_INSTR))
-                emit_marka(vm, dest_reg, node->lhs->var->offset, var_size,
-                           vm->current_function_scope_id);
-            if (vm->flags & CCCC_PROVENANCE_TRACK)
+            if (vm->flags & CCCC_PROVENANCE_TRACK) {
+                size_t var_size = node->lhs->var->ty ? node->lhs->var->ty->size : 8;
                 emit_markp(vm, dest_reg, dest_reg, 1 /* STACK */, var_size);
+            }
         }
         return;
 

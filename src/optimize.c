@@ -1160,8 +1160,6 @@ static bool op_byte0_is_int_src(int op) {
     case PSH3:
     // Pointer and type safety checks: byte 0 is the pointer source register.
     case CHKP3: case CHKA3: case CHKT3: case CHKPA:
-    // Dangling-pointer tracker: byte 0 is the base-pointer source register.
-    case MARKA:
         return true;
     default:
         return false;
