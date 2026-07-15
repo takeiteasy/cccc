@@ -236,11 +236,32 @@ All features listed below can be enabled individually or through the safety leve
     allocation's* start, so `p[-1]` on an interior pointer that stays
     within the allocation is valid (#650)
 - `--type-checks` **Runtime type checking on pointer dereferences**
-  - Tracks allocation type information in heap headers
-  - CHKT opcode validates pointer type matches expected type on dereference
-  - Detects type confusion bugs (e.g., casting `int*` to `float*`)
-  - Only checks heap allocations (stack types not tracked at runtime)
+  - Tracks allocation type information in heap headers via an
+    **effective-type model** (mirroring C11 §6.5p6): a heap allocation
+    starts with no effective type; a **store** through the allocation's
+    base pointer establishes (or re-establishes) its effective type; a
+    **load** through the base pointer checks the loaded type against it
+  - CHKT3 opcode validates pointer type matches expected type on dereference
+  - Detects type confusion bugs (e.g., casting `int*` to `float*` and
+    reading through it)
+  - Only checks heap allocations, and only at the allocation's **base
+    pointer** (offset 0) — interior/member accesses (e.g. `s->b` on a
+    struct pointer) are not type-tracked and are skipped, since a
+    subobject may legitimately have a different type than the whole
+    allocation (stack types are also not tracked at runtime)
+  - Reusing a heap buffer as a different type — legal in C — does not
+    false-positive: the next store simply re-establishes the effective
+    type
   - Skips checks for `void*` and generic pointers (universal pointers)
+  - Resolves the allocation via the same `vm->sorted_allocs` binary search
+    as `--bounds-checks`/`--uaf-detection` (#650's pattern), so it works
+    through interior *pointer arithmetic* on the way to a base-pointer
+    dereference, not just an exact base-pointer variable
+  - **Known limitation:** at `opt_level >= 2`, if `--type-checks` is
+    enabled *without* `--bounds-checks`/`--uaf-detection`/`--pointer-sanitizer`,
+    fused/promoted load paths that bypass the normal load emission may
+    skip CHKT3 (tracked as a follow-up ticket); combine with
+    `--pointer-sanitizer` or a `-2`/`-3` safety tier for full coverage
 - `--uninitialized-detection` **Uninitialized variable detection**
   - Tracks initialization state of stack variables using HashMap
   - MARKI opcode marks variables as initialized after assignment

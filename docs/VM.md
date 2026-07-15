@@ -344,7 +344,7 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 | `MARKP` | Record pointer provenance (`origin`, `base`, `size`) | `CCCC_PROVENANCE_TRACK` |
 | `CHKP3` | Pointer validity (NULL, UAF, heap range), resolving the pointer (exact or interior) via `vm->sorted_allocs` | `CCCC_POINTER_CHECKS` |
 | `CHKA3` | Pointer alignment check | `CCCC_ALIGNMENT_CHECKS` |
-| `CHKT3` | Heap type-tag check on dereference | `CCCC_TYPE_CHECKS` |
+| `CHKT3` | Heap type-tag check on dereference (effective-type model), resolving the base pointer via `vm->sorted_allocs` | `CCCC_TYPE_CHECKS` |
 
 `CHKB` and `CHKP3` resolve their pointer's containing allocation via the same
 `sorted_allocs_find` binary search `DYNOBJSZ` uses (#647): the largest
@@ -356,10 +356,25 @@ an interior pointer is now caught (#650). `CHKB`'s bound is
 only rejected once it steps before the *resolved allocation's* start, so
 `p[-1]` on an interior pointer that stays within the allocation is valid.
 `CHKA3` is unaffected — alignment is pure address arithmetic and was already
-correct for interior pointers. `CHKT3`'s heap type check is dormant
-(`AllocHeader.type_kind` is only ever written as `TY_VOID`, and no codegen
-path currently emits `CHKT3`), so interior-pointer support for it is left to
-a follow-up ticket.
+correct for interior pointers.
+
+`CHKT3` is now live (#651). It is emitted by `emit_load`/`emit_store`
+(`src/codegen.c`) right after `CHKP3`, carrying the pointee's static
+`TypeKind` and a load/store flag (`[rs:8|store_flag:8]` in the operand word,
+`[expected_type:64]` as the trailing immediate). `AllocHeader.type_kind`
+follows an **effective-type model**, mirroring C11 §6.5p6: `MALC` leaves it
+as `TY_VOID` ("no effective type established yet"); a **store** through the
+allocation's base pointer stamps `type_kind` to the stored type; a **load**
+through the base pointer checks the loaded type against it. Reusing a heap
+buffer as a different type — legal C — never false-positives, since the next
+store simply re-stamps the effective type. `CHKT3` resolves the allocation
+via the same `heap_alloc_for_ptr`/`sorted_allocs_find` helper as `CHKB` and
+`CHKP3` (#650's pattern), but **only checks at offset 0** (the allocation's
+base pointer): a struct member or other interior/subobject access is not
+type-tracked, so an interior deref (`off != 0`) is silently skipped. This
+avoids false positives on same-size struct members of different types (e.g.
+`int a` then `float b`) until subobject-type tracking exists — see the
+follow-up ticket referenced in `docs/SAFETY.md`.
 
 ### Stack Instrumentation Opcodes
 

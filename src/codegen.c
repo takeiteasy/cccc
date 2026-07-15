@@ -1725,6 +1725,8 @@ static void gen_cond_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 static void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr) {
     if (vm->flags & CCCC_POINTER_CHECKS)
         emit_rr(vm, CHKP3, rs_addr, 0);
+    if (vm->flags & CCCC_TYPE_CHECKS)
+        emit_rri(vm, CHKT3, rs_addr, 0 /* load */, (long long)ty->kind);
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
         emit_rr(vm, LDR_B, rd, rs_addr);
         if (ty->is_unsigned || ty->kind == TY_BOOL)
@@ -2206,6 +2208,8 @@ static void emit_init_fp_promoted_params(VirtualMachine *vm) {
 static void emit_store(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr) {
     if (vm->flags & CCCC_POINTER_CHECKS)
         emit_rr(vm, CHKP3, rs_addr, 0);
+    if (vm->flags & CCCC_TYPE_CHECKS)
+        emit_rri(vm, CHKT3, rs_addr, 1 /* store */, (long long)ty->kind);
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
         emit_rr(vm, STR_B, rd_val, rs_addr);
     } else if (ty->kind == TY_SHORT) {

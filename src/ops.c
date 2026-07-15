@@ -1759,11 +1759,16 @@ static inline int op_CHKA3_fn(VirtualMachine *vm) {
 }
 
 static inline int op_CHKT3_fn(VirtualMachine *vm) {
-    // Check type on dereference (register-based version of CHKT)
-    // Format: [CHKT3] [rs:8|unused:56] [expected_type:64]
+    // Check type on dereference (register-based version of CHKT).
+    // Effective-type model (#651): a store through a base pointer stamps
+    // the allocation's type_kind ("establishes" the effective type,
+    // mirroring C11 6.5p6); a load checks the pointer's static type
+    // against it. type_kind == TY_VOID means "no effective type
+    // established yet" (the state MALC leaves it in) — never an error.
+    // Format: [CHKT3] [rs:8|store_flag:8|unused:48] [expected_type:64]
     long long operands = cc_read_word(vm);
-    int rs;
-    DECODE_R(operands, rs);
+    int rs, store_flag;
+    DECODE_RR(operands, rs, store_flag);
     int expected_type = (int)cc_read_i64(vm);
     long long ptr = vm->regs[rs];
 
@@ -1780,44 +1785,62 @@ static inline int op_CHKT3_fn(VirtualMachine *vm) {
         return 0;
     }
 
-    // Only check heap allocations
-    if (ptr >= (long long)vm->heap_seg && ptr < (long long)vm->heap_end) {
-        AllocHeader *header = ((AllocHeader *)ptr) - 1;
+    // Resolve the containing allocation — handles base pointers and
+    // interior pointers alike via sorted_allocs_find (#650's resolver).
+    size_t off;
+    AllocHeader *header = heap_alloc_for_ptr(vm, ptr, &off);
+    if (!header) {
+        return 0; // untracked (stack/global) — types not tracked there
+    }
+    if (header->freed) {
+        return 0; // UAF is CHKP3's job; don't double-report here
+    }
+    // Base-pointer-only scoping (#651 point 4): an interior/member deref
+    // may legitimately have a different subobject type than the whole
+    // allocation, and that isn't tracked. Only check at offset 0.
+    if (off != 0) {
+        return 0;
+    }
 
-        if (header->magic == 0xDEADBEEF) {
-            int actual_type = header->type_kind;
+    if (store_flag) {
+        // Establish (or update) the allocation's effective type.
+        header->type_kind = expected_type;
+        return 0;
+    }
 
-            if (actual_type != TY_VOID && actual_type != TY_PTR) {
-                if (actual_type != expected_type) {
-                    const char *type_names[] = {
-                        "void",        "bool", "char",    "short",
-                        "int",         "long", "float",   "double",
-                        "long double", "enum", "pointer", "function",
-                        "array",       "vla",  "struct",  "union"};
+    int actual_type = header->type_kind;
+    if (actual_type == TY_VOID) {
+        return 0; // no effective type established yet — nothing to check
+    }
 
-                    const char *expected_name =
-                        (expected_type >= 0 && expected_type < 16)
-                            ? type_names[expected_type]
-                            : "unknown";
-                    const char *actual_name =
-                        (actual_type >= 0 && actual_type < 16)
-                            ? type_names[actual_type]
-                            : "unknown";
+    if (actual_type != expected_type) {
+        static const char *type_names[] = {
+            "void",     "bool",   "char",        "short",  "int",
+            "long",     "float",  "double",      "long double", "enum",
+            "pointer",  "function", "array",     "vla",    "struct",
+            "union",    "error",  "block",       "complex", "nullptr_t",
+            "_BitInt",  "auto"};
+        const int n_type_names = (int)(sizeof(type_names) / sizeof(type_names[0]));
 
-                    printf("\n========== TYPE MISMATCH DETECTED ==========\n");
-                    printf("Pointer type mismatch on dereference\n");
-                    printf("Address:       0x%llx\n", ptr);
-                    printf("Expected type: %s\n", expected_name);
-                    printf("Actual type:   %s\n", actual_name);
-                    printf("Allocated at PC offset: %lld\n", header->alloc_pc);
-                    printf("Current PC:    0x%llx (offset: %lld)\n",
-                           (long long)vm->pc,
-                           (long long)vm->pc);
-                    printf("============================================\n");
-                    return -1;
-                }
-            }
-        }
+        const char *expected_name =
+            (expected_type >= 0 && expected_type < n_type_names)
+                ? type_names[expected_type]
+                : "unknown";
+        const char *actual_name =
+            (actual_type >= 0 && actual_type < n_type_names)
+                ? type_names[actual_type]
+                : "unknown";
+
+        printf("\n========== TYPE MISMATCH DETECTED ==========\n");
+        printf("Pointer type mismatch on dereference\n");
+        printf("Address:       0x%llx\n", ptr);
+        printf("Expected type: %s\n", expected_name);
+        printf("Actual type:   %s\n", actual_name);
+        printf("Allocated at PC offset: %lld\n", header->alloc_pc);
+        printf("Current PC:    0x%llx (offset: %lld)\n", (long long)vm->pc,
+               (long long)vm->pc);
+        printf("============================================\n");
+        return -1;
     }
 
     return 0;
