@@ -76,14 +76,18 @@ CCCC provides preset safety levels that make it easy to choose the right combina
 - **All safety features** including:
   - Control flow integrity (CFI) with shadow stack
   - Temporal memory tagging (generation-based UAF detection)
-  - Dangling pointer detection (use-after-return)
+  - Dangling stack pointer *tracking* (detection-only; see [Advanced Pointer
+    Tracking Features](#advanced-pointer-tracking-features) — use-after-return
+    enforcement was removed as a false-positive generator, #669)
   - Alignment checks
   - Provenance tracking (pointer origin validation)
   - Invalid pointer arithmetic detection
-  - Stack variable instrumentation with runtime errors
+  - Stack variable instrumentation with runtime errors (has a known false-positive
+    limitation across functions sharing a stack offset — see above)
   - Random canaries (unpredictable stack protection)
 
-**Detects:** Everything possible - every memory safety bug CCCC can catch
+**Detects:** Most memory safety bugs CCCC can catch — with the known false-positive
+gaps noted above for temporal (use-after-return/dangling) detection
 
 ---
 
@@ -329,12 +333,17 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
 
 ## Advanced Pointer Tracking Features
 
-- `--dangling-pointers` **Dangling stack pointer detection**
+- `--dangling-pointers` **Dangling stack pointer tracking (detection-only, no enforcement — see below)**
   - Tracks all stack pointer creations via MARKA opcode
-  - Invalidates pointers when function returns (LEV instruction)
-  - CHKP validates pointer hasn't been invalidated before dereference
-  - Detects use-after-return bugs (e.g., returning `&local_var`)
   - HashMap tracks: pointer value → {BP, stack offset, size}
+  - **Does not currently abort on use-after-return.** A previous scope-exit check
+    aborted whenever *any* tracked `&local` was still present when its function
+    returned — which conflated "address taken" with "escaped" and fired on fully
+    benign code (e.g. `&local` passed as an out-param to a call), not just genuine
+    dangling pointers. It had no way to distinguish the two, so it was removed
+    (#669); real enforcement (escape-aware tracking, or checking on dereference of
+    a pointer into a dead frame rather than at scope exit) is tracked as a
+    follow-up, not yet implemented
 - `--alignment-checks` **Pointer alignment validation**
   - CHKA opcode validates pointer alignment before dereference
   - Checks that `pointer % type_size == 0`
@@ -356,9 +365,14 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
   - SCOPEIN/SCOPEOUT opcodes mark scope entry/exit for each `{ }` block
   - CHKL opcode validates variable is alive before access
   - MARKR/MARKW opcodes track read/write counts for each variable
-  - Detects use-after-scope and use-after-return bugs
+  - Detects use-after-scope and use-after-return bugs — **known limitation:**
+    `CHKL`'s liveness table is keyed by stack offset alone, not per-function, so
+    two functions whose locals happen to land at the same offset (common) can
+    collide and produce a false "USE AFTER RETURN"; tracked as a follow-up, not
+    yet fixed
   - Stack overflow detection: tracks high water mark, warns at 90% threshold
-  - Integrated with `--dangling-pointers` for comprehensive temporal safety
+  - `--dangling-pointers` tracks stack-address creation via the same
+    infrastructure, but does not currently enforce anything on its own (see above)
   - Use `--stack-errors` flag to enable runtime errors (vs logging only)
   - Use `cc_print_stack_report()` API to print access statistics
 - `--format-string-checks` **Format string validation**
@@ -790,9 +804,20 @@ PC:         0x1280080a8 (offset: 21)
 **Note:** Stack bounds checking is **always enabled** to prevent memory corruption. The default stack size is 2MB (256KB poolsize × 8 bytes per slot). Stack overflow is always a bug and cannot be disabled.
 
 ### Dangling Pointers
-```c
-// test_dangling_pointer.c - Dangling stack pointer example
 
+**Current status (as of #669): detection only, no enforcement.** `--dangling-pointers`
+tracks every `&local` taken (via the `MARKA` opcode, into a `pointer -> {BP, offset,
+size}` map) but no longer aborts on it. An earlier scope-exit check aborted on *any*
+tracked address still present when its enclosing function returned — which is every
+`&local` whose value hasn't been consumed yet, not just ones that actually escaped —
+so it flagged ordinary, correct code (e.g. `int *p = &n; *p = 5;`, or `&local` passed
+as an out-param to a call) exactly as often as it caught a real bug. It was removed as
+a pure false-positive generator; see the tracker for the follow-up (precise
+escape-aware or dereference-based detection) that will restore enforcement.
+
+```c
+// Still compiles and runs to completion under --dangling-pointers / -3 today —
+// MARKA tracks the &x, but nothing currently flags the eventual dereference.
 int *get_local_address() {
     int x = 42;
     return &x;  // Return address of local variable (dangling pointer!)
@@ -800,22 +825,9 @@ int *get_local_address() {
 
 int main() {
     int *ptr = get_local_address();
-    int value = *ptr;  // Dereference dangling pointer!
+    int value = *ptr;  // Dereference dangling pointer -- not currently detected.
     return value;
 }
-```
-
-```bash
-$ ./cccc --dangling-pointers test_dangling_pointer.c
-
-========== DANGLING STACK POINTER ==========
-Attempted to dereference invalidated stack pointer
-Address:       0x92e5fffb0
-Original BP:   invalidated (function has returned)
-Stack offset:  -1
-Size:          4 bytes
-Current PC:    0x92e800080 (offset: 16)
-==========================================
 ```
 
 ### Pointer Alignment

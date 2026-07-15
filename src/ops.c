@@ -2896,7 +2896,20 @@ static inline int op_SCOPEOUT_fn(VirtualMachine *vm) {
         }
     }
 
-    if (vm->flags & CCCC_DANGLING_DETECT) {
+    // NOTE (#669): this used to hard-error here whenever a still-tracked
+    // StackPtrInfo matched the exiting scope/bp. That conflated
+    // "address-taken" with "escaped" -- MARKA (see ND_ADDR in codegen.c)
+    // tracks *every* `&local`, always tagged with the function's own
+    // top-level scope_id, so this check only ever fired at *function* exit,
+    // where the whole frame (and every address-taken local in it) dies
+    // together and nothing can actually dangle. It had zero true-positive
+    // capability and aborted on fully benign code, e.g. `int *p = &n; *p =
+    // 5;` or any out-param call like `posix_memalign(&q, ...)`. The hard
+    // error was removed; the MARKA/stack_ptrs tracking below is left in
+    // place as a hook for a real fix (detect actual escape, or check on
+    // dereference of a pointer into a dead frame, rather than on scope
+    // exit). See ticket #670 for the follow-up design.
+    if ((vm->flags & CCCC_DANGLING_DETECT) && vm->debug_vm) {
         for (int i = 0; i < vm->stack_ptrs.capacity; i++) {
             HashEntry *ent = &vm->stack_ptrs.buckets[i];
             if (!ent->key || ent->key == (char *)-1)
@@ -2904,18 +2917,7 @@ static inline int op_SCOPEOUT_fn(VirtualMachine *vm) {
             StackPtrInfo *ptr_info = (StackPtrInfo *)ent->val;
             if (ptr_info && ptr_info->scope_id == scope_id &&
                 ptr_info->bp == (long long)vm->bp) {
-                if (vm->flags & CCCC_STACK_INSTR_ERRORS) {
-                    printf("\n========== DANGLING POINTER DETECTED ==========\n");
-                    printf("Pointer to stack variable in scope %d still exists\n", scope_id);
-                    printf("BP offset: %lld\n", ptr_info->offset);
-                    printf("Scope is now exiting — this pointer will dangle\n");
-                    printf("PC: 0x%llx (offset: %lld)\n",
-                           (long long)vm->pc, (long long)vm->pc);
-                    printf("==============================================\n");
-                    return -1;
-                } else if (vm->debug_vm) {
-                    printf("WARNING: Dangling pointer detected for scope %d\n", scope_id);
-                }
+                printf("WARNING: Dangling pointer detected for scope %d\n", scope_id);
             }
         }
     }
