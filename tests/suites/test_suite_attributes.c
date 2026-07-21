@@ -715,6 +715,12 @@ int test_has_attribute_builtins(void) {
 #if !__has_attribute(transparent_union)
 #error expected __has_attribute(transparent_union)
 #endif
+#if !__has_attribute(constructor)
+#error expected __has_attribute(constructor)
+#endif
+#if !__has_attribute(destructor)
+#error expected __has_attribute(destructor)
+#endif
 #if __has_attribute(totally_bogus_attr_that_does_not_exist)
 #error unknown attribute should not be reported supported
 #endif

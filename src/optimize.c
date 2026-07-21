@@ -976,6 +976,20 @@ static void retarget_compacted_bytecode(VirtualMachine *vm, Pc *pc_map,
 
     remap_function_metadata(vm->compiler.globals, pc_map, old_end);
 
+    // Remap __attribute__((constructor))/((destructor)) entries (#656) —
+    // these hold their own copy of code_addr (not Obj->code_addr), gathered
+    // by gen() before this pass runs any text compaction.
+    for (int i = 0; i < vm->compiler.ctor_count; i++) {
+        Pc pc = (Pc)vm->compiler.ctor_list[i].code_addr;
+        if (pc <= old_end)
+            vm->compiler.ctor_list[i].code_addr = remap_pc(pc_map, old_end, pc);
+    }
+    for (int i = 0; i < vm->compiler.dtor_count; i++) {
+        Pc pc = (Pc)vm->compiler.dtor_list[i].code_addr;
+        if (pc <= old_end)
+            vm->compiler.dtor_list[i].code_addr = remap_pc(pc_map, old_end, pc);
+    }
+
     if (vm->dbg.source_map) {
         for (int i = 0; i < vm->dbg.source_map_count; i++) {
             long long pc = vm->dbg.source_map[i].pc_offset;

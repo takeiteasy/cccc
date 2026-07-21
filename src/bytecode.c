@@ -364,6 +364,34 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f) {
         }
     }
 
+    // Write constructor/destructor lists [V3+]: __attribute__((constructor))
+    // / ((destructor)) functions gathered by gen() (#656), already sorted
+    // into execution order. code_addr indexes text_seg, which is restored
+    // verbatim on load, so offsets remain valid without further relocation.
+    {
+        long long ctor_count = vm->compiler.ctor_count;
+        if (fwrite(&ctor_count, sizeof(long long), 1, f) != 1) goto write_error;
+        for (long long i = 0; i < ctor_count; i++) {
+            long long addr = vm->compiler.ctor_list[i].code_addr;
+            int priority = vm->compiler.ctor_list[i].priority;
+            int seq = vm->compiler.ctor_list[i].seq;
+            if (fwrite(&addr, sizeof(long long), 1, f) != 1) goto write_error;
+            if (fwrite(&priority, sizeof(int), 1, f) != 1) goto write_error;
+            if (fwrite(&seq, sizeof(int), 1, f) != 1) goto write_error;
+        }
+
+        long long dtor_count = vm->compiler.dtor_count;
+        if (fwrite(&dtor_count, sizeof(long long), 1, f) != 1) goto write_error;
+        for (long long i = 0; i < dtor_count; i++) {
+            long long addr = vm->compiler.dtor_list[i].code_addr;
+            int priority = vm->compiler.dtor_list[i].priority;
+            int seq = vm->compiler.dtor_list[i].seq;
+            if (fwrite(&addr, sizeof(long long), 1, f) != 1) goto write_error;
+            if (fwrite(&priority, sizeof(int), 1, f) != 1) goto write_error;
+            if (fwrite(&seq, sizeof(int), 1, f) != 1) goto write_error;
+        }
+    }
+
     if (vm->debug_vm) {
         printf("  Text size: %lld bytes (%lld instructions)\n", text_size, num_instructions);
         printf("  Data size: %lld bytes\n", data_size);
@@ -759,6 +787,8 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
     // These sections are optional (old .c4 files without them are still valid).
     vm->compiler.num_sym_table = 0;
     vm->compiler.num_text_relocs = 0;
+    vm->compiler.ctor_count = 0;
+    vm->compiler.dtor_count = 0;
     if (cursor < end) {
         READ_AND_INCR(sym_count, long long);
         if (sym_count < 0 || sym_count > MAX_CALLS) {
@@ -885,6 +915,65 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
                 vm->compiler.addr_relocs[vm->compiler.num_addr_relocs].name_len = (size_t)arname_len;
                 vm->compiler.addr_relocs[vm->compiler.num_addr_relocs].resolved = 0;
                 vm->compiler.num_addr_relocs++;
+            }
+        }
+
+        // Read constructor/destructor lists [V3+] (#656). code_addr indexes
+        // text_seg directly (restored verbatim above), so no relocation is
+        // needed; entries are already sorted into execution order.
+        if (cursor < end) {
+            READ_AND_INCR(ctor_count, long long);
+            if (ctor_count < 0 || ctor_count > MAX_CALLS) {
+                fprintf(stderr, "error: invalid constructor list count\n");
+                return -1;
+            }
+            if (ctor_count > vm->compiler.ctor_capacity) {
+                void *_tmp = realloc(vm->compiler.ctor_list,
+                                     (size_t)ctor_count * sizeof(*vm->compiler.ctor_list));
+                if (!_tmp) {
+                    fprintf(stderr, "error: out of memory for constructor list\n");
+                    return -1;
+                }
+                vm->compiler.ctor_list = _tmp;
+                vm->compiler.ctor_capacity = (int)ctor_count;
+            }
+            vm->compiler.ctor_count = 0;
+            for (long long i = 0; i < ctor_count; i++) {
+                READ_AND_INCR(caddr, long long);
+                READ_AND_INCR(cpriority, int);
+                READ_AND_INCR(cseq, int);
+                vm->compiler.ctor_list[vm->compiler.ctor_count].code_addr = caddr;
+                vm->compiler.ctor_list[vm->compiler.ctor_count].priority  = cpriority;
+                vm->compiler.ctor_list[vm->compiler.ctor_count].seq       = cseq;
+                vm->compiler.ctor_count++;
+            }
+
+            if (cursor < end) {
+                READ_AND_INCR(dtor_count, long long);
+                if (dtor_count < 0 || dtor_count > MAX_CALLS) {
+                    fprintf(stderr, "error: invalid destructor list count\n");
+                    return -1;
+                }
+                if (dtor_count > vm->compiler.dtor_capacity) {
+                    void *_tmp = realloc(vm->compiler.dtor_list,
+                                         (size_t)dtor_count * sizeof(*vm->compiler.dtor_list));
+                    if (!_tmp) {
+                        fprintf(stderr, "error: out of memory for destructor list\n");
+                        return -1;
+                    }
+                    vm->compiler.dtor_list = _tmp;
+                    vm->compiler.dtor_capacity = (int)dtor_count;
+                }
+                vm->compiler.dtor_count = 0;
+                for (long long i = 0; i < dtor_count; i++) {
+                    READ_AND_INCR(daddr, long long);
+                    READ_AND_INCR(dpriority, int);
+                    READ_AND_INCR(dseq, int);
+                    vm->compiler.dtor_list[vm->compiler.dtor_count].code_addr = daddr;
+                    vm->compiler.dtor_list[vm->compiler.dtor_count].priority  = dpriority;
+                    vm->compiler.dtor_list[vm->compiler.dtor_count].seq       = dseq;
+                    vm->compiler.dtor_count++;
+                }
             }
         }
     }

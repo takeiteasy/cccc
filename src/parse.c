@@ -100,6 +100,11 @@ typedef struct {
     // __attribute__((cleanup(fn)))
     Obj *cleanup_fn;
     Token *cleanup_tok;
+
+    // __attribute__((constructor[(priority)])) / ((destructor[(priority)]))
+    bool is_constructor;
+    bool is_destructor;
+    int  init_priority; // CCCC_NO_INIT_PRIORITY if not explicitly given
 } VarAttr;
 
 struct CustomAttrUse {
@@ -829,6 +834,15 @@ static Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     var->fn_optimize_level = ty->fn_optimize_level;
     var->fn_optimize_set = ty->fn_optimize_set;
     var->deprecated_msg = ty->deprecated_msg;
+    var->is_constructor = ty->is_constructor;
+    var->is_destructor = ty->is_destructor;
+    var->init_priority = ty->init_priority;
+    if (var->is_constructor || var->is_destructor) {
+        // Reachable only via the attribute (gen() walks prog for is_constructor/
+        // is_destructor, not through any call site) — keep it live under DCE.
+        var->is_live = true;
+        var->is_root = true;
+    }
     if (ty->cleanup_fn) {
         var->cleanup_fn = ty->cleanup_fn;
         // Mark cleanup fn as reachable so the liveness pass keeps it.
@@ -6431,7 +6445,8 @@ static Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr
                   !attr->format_style && !attr->cleanup_fn &&
                   !attr->attr_error_msg && !attr->attr_warning_msg &&
                   !attr->nonnull_all && !attr->nonnull_mask &&
-                  !attr->returns_nonnull))
+                  !attr->returns_nonnull && !attr->is_constructor &&
+                  !attr->is_destructor))
         return ty;
     ty = copy_type(vm, ty);
     apply_semantic_attr(ty, NULL, attr->attribute_tok, attr->is_maybe_unused,
@@ -6461,6 +6476,14 @@ static Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr
         if (attr->nonnull_all) ty->nonnull_all = true;
         ty->nonnull_mask |= attr->nonnull_mask;
         if (attr->returns_nonnull) ty->returns_nonnull = true;
+        if (attr->is_constructor) {
+            ty->is_constructor = true;
+            ty->init_priority = attr->init_priority;
+        }
+        if (attr->is_destructor) {
+            ty->is_destructor = true;
+            ty->init_priority = attr->init_priority;
+        }
     }
     return ty;
 }
@@ -6490,6 +6513,14 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
     dst->nonnull_all |= src->nonnull_all;
     dst->nonnull_mask |= src->nonnull_mask;
     dst->returns_nonnull |= src->returns_nonnull;
+    if (src->is_constructor) {
+        dst->is_constructor = true;
+        dst->init_priority = src->init_priority;
+    }
+    if (src->is_destructor) {
+        dst->is_destructor = true;
+        dst->init_priority = src->init_priority;
+    }
 }
 
 // Parse optimize attribute argument: (N) where N is an integer 0-4, or ("ON") where
@@ -6802,6 +6833,39 @@ static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *
                 continue;
             }
 
+            // Handle __attribute__((constructor[(priority)]))
+            // __attribute__((destructor[(priority)]))
+            {
+                bool is_ctor = is_attr_name(tok, "constructor");
+                bool is_dtor = !is_ctor && is_attr_name(tok, "destructor");
+                if (is_ctor || is_dtor) {
+                    tok = tok->next;
+                    int priority = CCCC_NO_INIT_PRIORITY;
+                    if (equal(tok, "(")) {
+                        tok = skip(vm, tok, "(");
+                        priority = const_expr(vm, &tok, tok);
+                        tok = skip(vm, tok, ")");
+                    }
+                    if (ty) {
+                        if (is_ctor) {
+                            ty->is_constructor = true;
+                        } else {
+                            ty->is_destructor = true;
+                        }
+                        ty->init_priority = priority;
+                    }
+                    if (attr) {
+                        if (is_ctor) {
+                            attr->is_constructor = true;
+                        } else {
+                            attr->is_destructor = true;
+                        }
+                        attr->init_priority = priority;
+                    }
+                    continue;
+                }
+            }
+
             if (find_attribute_macro(vm, tok)) {
                 Token *name_tok = tok;
                 tok = tok->next;
@@ -6970,6 +7034,30 @@ static Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
                         if (all) attr->nonnull_all = true;
                         attr->nonnull_mask |= mask;
                     }
+                }
+                continue;
+            }
+
+            // [[gnu::constructor]] / [[gnu::constructor(101)]]
+            // [[gnu::destructor]] / [[gnu::destructor(101)]]
+            if (gnu_scoped && (equal(name_tok, "constructor") ||
+                               equal(name_tok, "destructor"))) {
+                bool is_ctor = equal(name_tok, "constructor");
+                int priority = CCCC_NO_INIT_PRIORITY;
+                if (equal(tok, "(")) {
+                    tok = skip(vm, tok, "(");
+                    priority = const_expr(vm, &tok, tok);
+                    tok = skip(vm, tok, ")");
+                }
+                if (ty && ty->kind == TY_FUNC) {
+                    if (is_ctor) ty->is_constructor = true;
+                    else ty->is_destructor = true;
+                    ty->init_priority = priority;
+                }
+                if (attr) {
+                    if (is_ctor) attr->is_constructor = true;
+                    else attr->is_destructor = true;
+                    attr->init_priority = priority;
                 }
                 continue;
             }

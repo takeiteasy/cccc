@@ -1115,6 +1115,8 @@ static const AttrInfo known_attrs[] = {
     {"may_alias",        ATTR_GNU, true,  0},
     {"mode",             ATTR_GNU, true,  0},
     {"transparent_union", ATTR_GNU, true, 0},
+    {"constructor",      ATTR_GNU, true,  0},
+    {"destructor",       ATTR_GNU, true,  0},
     {NULL, 0, false, 0},
 };
 

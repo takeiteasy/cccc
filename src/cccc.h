@@ -811,7 +811,17 @@ struct Type {
     bool     nonnull_all;    // bare nonnull: every pointer parameter is non-null
     uint64_t nonnull_mask;   // 1-based arg indices marked non-null (bit i-1); >64 args ignored
     bool     returns_nonnull;
+
+    // __attribute__((constructor[(priority)])) / ((destructor[(priority)]))
+    bool is_constructor; // run before main(), ordered by init_priority
+    bool is_destructor;  // run after main() returns normally, reverse order
+    int  init_priority;  // CCCC_NO_INIT_PRIORITY unless an explicit priority was given
 };
+
+// Sentinel meaning "no explicit constructor/destructor priority given" — such
+// functions form the default-priority group, which GCC runs last for
+// constructors and first for destructors relative to explicitly prioritised ones.
+#define CCCC_NO_INIT_PRIORITY (-1)
 
 /*!
  @struct Member
@@ -1149,6 +1159,11 @@ struct Obj {
     // Code generation (for VM)
     long long code_addr; // Address in text segment where function code starts
     long long code_end_addr; // Address after function code in text segment
+
+    // __attribute__((constructor[(priority)])) / ((destructor[(priority)]))
+    bool is_constructor;
+    bool is_destructor;
+    int  init_priority; // CCCC_NO_INIT_PRIORITY unless an explicit priority was given
 
     // Lazy membership set for belongs_to_outer_function (#165).
     // Populated on first query; keyed by (long long)(intptr_t)var_ptr → var_ptr.
@@ -1954,6 +1969,14 @@ typedef enum {
     CCCC_OPT_ELIM_EXT  = 1 << 6, // Redundant extension elim   (-felim-ext)
 } CcccOptPass;
 
+// One __attribute__((constructor)) / ((destructor)) function, gathered by
+// gen() (codegen.c) and run around main() by cc_run() (vm.c).
+typedef struct {
+    long long code_addr; // Address in text_seg where the function starts
+    int       priority;  // CCCC_NO_INIT_PRIORITY unless explicitly given
+    int       seq;       // Declaration order, for a stable sort tie-break
+} CCCCInitEntry;
+
 typedef struct Compiler {
     // Preprocessor state
     bool skip_preprocess;     // Skip preprocessing step
@@ -2320,6 +2343,17 @@ typedef struct Compiler {
 
     // Custom entry point name (NULL means "main")
     char *entry_name;
+
+    // __attribute__((constructor)) / ((destructor)) — functions to run
+    // before/after main(), sorted by priority in gen() (codegen.c). Each
+    // entry's code_addr indexes vm->text_seg once codegen completes.
+    // Populated by gen(); consumed by cc_run() in vm.c.
+    CCCCInitEntry *ctor_list;
+    int ctor_count;
+    int ctor_capacity;
+    CCCCInitEntry *dtor_list;
+    int dtor_count;
+    int dtor_capacity;
 
     // Fuzzing / compile-only mode
     bool compile_only; // If true, compile to bytecode but do not require main()

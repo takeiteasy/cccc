@@ -186,7 +186,7 @@ language coverage figures apply.
 |---|---|---|
 | Statement expressions `({ ... })` | ✓ | |
 | 128-bit integers `__int128` / `__int128_t` / `__uint128_t` | ✓ | Implemented on top of the `_BitInt(128)` machinery (multi-word, address-based storage). `unsigned __int128` is honoured; `__SIZEOF_INT128__` is defined so feature-detecting code selects these paths |
-| `__attribute__((...))` | ~ | Parsed; `aligned`, `packed`, `unused`, `deprecated`, `format`, `nodiscard`, `warn_unused_result`, `fallthrough`, `noreturn`, `error`, `warning` supported (see [Attributes](#attributes) below) |
+| `__attribute__((...))` | ~ | Parsed; `aligned`, `packed`, `unused`, `deprecated`, `format`, `nodiscard`, `warn_unused_result`, `fallthrough`, `noreturn`, `error`, `warning`, `constructor`, `destructor` supported (see [Attributes](#attributes) below) |
 | Labels as values `&&label` | ✓ | |
 | Computed goto `goto *expr` | ✓ | |
 | Switch case ranges `case 1 ... 5:` | ✓ | |
@@ -317,6 +317,8 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 | `warning("msg")` | GNU | ✓ | Emits a compile-time warning when called; same DCE-aware suppression as `error` |
 | `nonnull` / `nonnull(N,...)` | GNU / C23 | ✓ | Warns when a statically-null argument is passed to a nonnull-marked parameter (`-Wnonnull`, part of `-Wall`) |
 | `returns_nonnull` | GNU / C23 | ✓ | Warns when a statically-null value is returned from a `returns_nonnull` function (`-Wnonnull`, part of `-Wall`) |
+| `constructor` / `constructor(N)` | GNU (C23: `[[gnu::constructor]]`) | ✓ | Runs `void(void)` function before `main()`, ordered by priority (lower first; unprioritised functions run last) |
+| `destructor` / `destructor(N)` | GNU (C23: `[[gnu::destructor]]`) | ✓ | Runs `void(void)` function after `main()` returns normally, in reverse priority order (higher first; unprioritised functions run first) |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
 ### Supported Attributes
@@ -603,6 +605,48 @@ its cleanup runs.
 
 ---
 
+#### `__attribute__((constructor))` / `__attribute__((destructor))` / `[[gnu::constructor]]` / `[[gnu::destructor]]`
+
+Registers a `void(void)` function to run before `main()` (constructor) or
+after `main()` returns (destructor). An optional integer priority controls
+relative ordering among multiple constructors/destructors:
+
+```c
+__attribute__((constructor)) void init(void) { /* runs before main() */ }
+__attribute__((constructor(101))) void init_early(void) { /* lower number runs first */ }
+
+__attribute__((destructor)) void fini(void) { /* runs after main() returns */ }
+[[gnu::destructor(101)]] void fini_late(void) { /* higher number runs first */ }
+```
+
+**Ordering:** constructors run in ascending priority order (lower numbers
+first); functions with no explicit priority form the default group and run
+last. Destructors run in the reverse order — descending priority (higher
+numbers first), with the default group running first. A simple stable sort
+is used; CCCC does not replicate full ELF `.init_array` priority-band
+semantics.
+
+**Limitations:**
+
+- Destructors run only on a **normal return from `main()`**. A guest
+  `exit()`, `_Exit()`, or `abort()` call passes straight through to the host
+  libc function and terminates the process without returning to CCCC's
+  startup path, so registered destructors do **not** run on those paths.
+- Constructors and destructors must have signature `void(void)` — the GCC
+  extension allowing constructors to receive `argc`/`argv`/`envp` is not
+  supported.
+- A constructor's writes to `_Thread_local` variables are not visible to
+  `main()` or later destructors: each of these runs as an independent
+  `cc_run_at` cycle with its own freshly-copied TLS segment. Non-TLS globals
+  are unaffected — they live in the shared data segment.
+- Constructors/destructors only run around `main()` (`cc_run`). `-t`/
+  `--testing` mode (`[[cccc::test]]` discovery) invokes test functions
+  directly and does not go through `cc_run`, so they do not run in that mode.
+
+**`__has_attribute`:** returns `1` for `constructor` and `destructor`.
+
+---
+
 #### `__attribute__((nonnull))` / `__attribute__((nonnull(N,...)))` / `[[gnu::nonnull]]` and `__attribute__((returns_nonnull))` / `[[gnu::returns_nonnull]]`
 
 Marks pointer parameters (bare `nonnull`, or `nonnull(1,3)` for specific
@@ -651,7 +695,6 @@ Ignored attributes include (but are not limited to):
 | `weak` | GNU | Recognized by `__has_attribute` (no linker) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
 | `weakref` | GNU | |
 | `alias` | GNU | Recognized by `__has_attribute` (no linker) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
-| `constructor` / `destructor` | GNU | Pre-main/post-exit hooks — [#656](https://todo.sr.ht/~takeiteasy/cccc/656) |
 | `target` | GNU | Recognized by `__has_attribute` (no per-function ISA codegen) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
 | `hot` / `cold` | GNU | Recognized by `__has_attribute` (no branch-temperature layout) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
 | `always_inline` / `flatten` / `noinline` | GNU | Recognized by `__has_attribute` (no inliner in the JIT) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
@@ -672,7 +715,6 @@ Ignored attributes include (but are not limited to):
 | # | Attribute | Priority | Description |
 |---|-----------|----------|-------------|
 | [#215](https://todo.sr.ht/~takeiteasy/cccc/215) | Catch-all | medium | Remaining GNU builtins and attributes |
-| [#656](https://todo.sr.ht/~takeiteasy/cccc/656) | `constructor` / `destructor` | low | Pre-main/post-exit callback hooks |
 | [#657](https://todo.sr.ht/~takeiteasy/cccc/657) | 14 architecturally-inert GNU attributes | low | Register in `known_attrs[]` for `__has_attribute` (done) |
 | [#658](https://todo.sr.ht/~takeiteasy/cccc/658) | `sentinel` | low | NULL-terminated variadic argument check |
 | [#659](https://todo.sr.ht/~takeiteasy/cccc/659) | `designated_init` | low | Require designated struct initializers |

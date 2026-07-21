@@ -6517,6 +6517,42 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
 
 // ========== Top-Level Code Generation ==========
 
+// Sort __attribute__((constructor))/((destructor)) entries in place.
+// Functions with no explicit priority (CCCC_NO_INIT_PRIORITY) form the
+// default-priority group, which GCC runs last among constructors and first
+// among destructors relative to explicitly prioritised ones — modelled here
+// by substituting INT_MAX for the missing priority before sorting.
+// ascending=true sorts lowest-priority-first (constructors); ascending=false
+// sorts highest-priority-first (destructors — the reverse order), with the
+// seq tie-break reversed too so same-priority destructors unwind in reverse
+// declaration order.
+static int init_entry_effective_priority(const CCCCInitEntry *e) {
+    return e->priority == CCCC_NO_INIT_PRIORITY ? INT_MAX : e->priority;
+}
+
+static void sort_init_entries(CCCCInitEntry *list, int count, bool ascending) {
+    // Simple insertion sort: these lists are tiny (a handful of functions),
+    // and seq guarantees a strict order so no comparator ties are possible.
+    for (int i = 1; i < count; i++) {
+        CCCCInitEntry key = list[i];
+        int key_pri = init_entry_effective_priority(&key);
+        int j = i - 1;
+        while (j >= 0) {
+            int cur_pri = init_entry_effective_priority(&list[j]);
+            bool key_before_cur = ascending
+                ? (key_pri < cur_pri ||
+                   (key_pri == cur_pri && key.seq < list[j].seq))
+                : (key_pri > cur_pri ||
+                   (key_pri == cur_pri && key.seq > list[j].seq));
+            if (!key_before_cur)
+                break;
+            list[j + 1] = list[j];
+            j--;
+        }
+        list[j + 1] = key;
+    }
+}
+
 void gen(VirtualMachine *vm, Obj *prog) {
     // Reset patch counters
     vm->compiler.num_call_patches = 0;
@@ -6706,6 +6742,36 @@ void gen(VirtualMachine *vm, Obj *prog) {
     global_label_map = NULL;
     global_labels_cap = 0;
     num_global_labels = 0;
+
+    // Collect __attribute__((constructor)) / ((destructor)) functions.
+    // gen() is a whole-program pass (re-run for REPL/incremental use), so
+    // reset the lists each time rather than appending across runs.
+    vm->compiler.ctor_count = 0;
+    vm->compiler.dtor_count = 0;
+    {
+        int seq = 0;
+        for (Obj *fn = prog; fn; fn = fn->next) {
+            if (!fn->is_function)
+                continue;
+            if (fn->is_constructor) {
+                PATCH_GROW(vm, ctor_list, ctor_count, ctor_capacity);
+                CCCCInitEntry *e = &vm->compiler.ctor_list[vm->compiler.ctor_count++];
+                e->code_addr = fn->code_addr;
+                e->priority = fn->init_priority;
+                e->seq = seq;
+            }
+            if (fn->is_destructor) {
+                PATCH_GROW(vm, dtor_list, dtor_count, dtor_capacity);
+                CCCCInitEntry *e = &vm->compiler.dtor_list[vm->compiler.dtor_count++];
+                e->code_addr = fn->code_addr;
+                e->priority = fn->init_priority;
+                e->seq = seq;
+            }
+            seq++;
+        }
+    }
+    sort_init_entries(vm->compiler.ctor_list, vm->compiler.ctor_count, true);
+    sort_init_entries(vm->compiler.dtor_list, vm->compiler.dtor_count, false);
 
     // Find entry function and store its address in text_seg[0]
     const char *entry = vm->compiler.entry_name ? vm->compiler.entry_name : "main";

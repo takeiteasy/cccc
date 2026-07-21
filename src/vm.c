@@ -1286,6 +1286,10 @@ void cc_destroy(VirtualMachine *vm) {
             free(vm->compiler.addr_relocs[i].name);
         free(vm->compiler.addr_relocs);
     }
+    if (vm->compiler.ctor_list)
+        free(vm->compiler.ctor_list);
+    if (vm->compiler.dtor_list)
+        free(vm->compiler.dtor_list);
 
     // Free FFI table
     if (vm->compiler.ffi_table) {
@@ -1946,8 +1950,31 @@ int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv) {
     return rc;
 }
 
+// Run __attribute__((constructor))/((destructor)) functions collected by
+// gen() (codegen.c), already sorted into execution order. Each is invoked as
+// a complete, non-nested cc_run_at cycle — reusing the normal startup/
+// teardown machinery — rather than being spliced into main's call graph.
+// Non-TLS globals live in vm->data_seg, which persists across these calls,
+// so a constructor's writes are visible to main() and to later destructors.
+// Caveat: cc_run_at() re-copies vm->tls_template into a fresh TLS segment on
+// every call, so writes to _Thread_local variables inside a constructor are
+// NOT visible to main() or to destructors — main-thread TLS is only ever
+// seeded from the compile-time template, never carried across these
+// pre/post-main invocations.
+static void cc_run_init_entries(VirtualMachine *vm, CCCCInitEntry *list, int count) {
+    for (int i = 0; i < count; i++)
+        cc_run_at(vm, list[i].code_addr, 0, NULL);
+}
+
 int cc_run(VirtualMachine *vm, int argc, char **argv) {
-    return cc_run_at(vm, vm->text_seg[0], argc, argv);
+    cc_run_init_entries(vm, vm->compiler.ctor_list, vm->compiler.ctor_count);
+    int rc = cc_run_at(vm, vm->text_seg[0], argc, argv);
+    // Destructors run only on normal return from main(); a guest exit()/
+    // _Exit()/abort() bypasses this (see docs/COVERAGE.md) since it calls
+    // straight through to the host libc function and tears down the process
+    // without returning here.
+    cc_run_init_entries(vm, vm->compiler.dtor_list, vm->compiler.dtor_count);
+    return rc;
 }
 
 #if defined(_WIN32) || defined(_WIN64)
