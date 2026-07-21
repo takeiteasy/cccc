@@ -2781,6 +2781,11 @@ static void struct_initializer1(VirtualMachine *vm, Token **rest, Token *tok,
         }
 
         if (mem) {
+            if ((vm->compiler.warnings & CCCC_WARN_DESIGNATED_INIT) &&
+                init->ty->designated_init)
+                warn_tok(vm, tok, CCCC_WARN_DESIGNATED_INIT,
+                         "positional initialization of field in struct "
+                         "declared with 'designated_init' attribute");
             initializer2(vm, &tok, tok, init->children[mem->idx]);
             mem = mem->next;
         } else {
@@ -2806,6 +2811,11 @@ static void struct_initializer2(VirtualMachine *vm, Token **rest, Token *tok,
             return;
         }
 
+        if ((vm->compiler.warnings & CCCC_WARN_DESIGNATED_INIT) &&
+            init->ty->designated_init)
+            warn_tok(vm, tok, CCCC_WARN_DESIGNATED_INIT,
+                     "positional initialization of field in struct "
+                     "declared with 'designated_init' attribute");
         initializer2(vm, &tok, tok, init->children[mem->idx]);
     }
     *rest = tok;
@@ -6623,6 +6633,14 @@ static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *
                 continue;
             }
 
+            // Handle designated_init attribute: requires all initializers of
+            // this struct type to use designated (.field = value) syntax (#659)
+            if (consume(vm, &tok, tok, "designated_init")) {
+                if (ty)
+                    ty->designated_init = true;
+                continue;
+            }
+
             // Handle aligned attribute
             if (consume(vm, &tok, tok, "aligned")) {
                 if (equal(tok, "(")) {
@@ -7006,6 +7024,7 @@ static Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
             bool is_pure_attr = equal(name_tok, "pure");
             bool is_func_const_attr = equal(name_tok, "const");
             bool is_optimize_attr = equal(name_tok, "optimize");
+            bool is_designated_init_attr = equal(name_tok, "designated_init");
             tok = tok->next;
 
             // Optimize attribute has mandatory args: [[cccc::optimize(2)]] or ("O2")
@@ -7186,6 +7205,8 @@ static Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
             } else if (is_func_const_attr) {
                 if (ty) ty->is_func_const = true;
                 if (attr) attr->is_func_const = true;
+            } else if (is_designated_init_attr) {
+                if (ty) ty->designated_init = true;
             } else if (!unused && !deprecated) {
                 warn_tok(vm, attr_tok, CCCC_WARN_ATTRIBUTES,
                          "unknown attribute '%.*s' ignored",

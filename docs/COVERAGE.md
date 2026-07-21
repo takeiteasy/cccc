@@ -840,6 +840,37 @@ argument list.
 
 Diagnosed under `-Wsentinel` (part of `-Wall`); disable with `-Wno-sentinel`.
 
+#### `__attribute__((designated_init))` / `[[gnu::designated_init]]`
+
+Marks a struct type as requiring **every** initializer of that type to use
+designated (`.field = value`) syntax rather than positional. This guards
+against silent breakage when a struct's field order changes — the classic
+use case is Linux-kernel-style ABI-facing structs.
+
+This is a **static, parse-time-only** check over braced initializer lists: any
+positional element reaching a `designated_init` struct's member list warns,
+including the positional tail of a mixed literal (`{.a = 1, 2}`) and `{0}`.
+A brace-less copy-initializer (`struct S a = b;`) is not a positional element
+list and is never flagged. C23 empty-init `{}` supplies no elements and is
+also silent.
+
+```c
+struct point { int x, y; } __attribute__((designated_init));
+
+int main(void) {
+    struct point a = {.x = 1, .y = 2};  // ok
+    struct point b = {1, 2};            // warns: positional initialization
+    struct point c = {.x = 1, 2};       // warns: positional tail
+    struct point d = {0};               // warns: positional
+    struct point e = {};                // ok: no elements
+}
+```
+
+Diagnosed under `-Wdesignated-init`. Unlike GCC, this is **opt-in only** — it
+is not part of `-Wall`/`-Wextra`, since CCCC otherwise enables no warnings by
+default; pass `-Wdesignated-init` explicitly (or promote it with
+`-Werror=designated-init`).
+
 ---
 
 ### Parsed but Ignored
@@ -867,8 +898,6 @@ Ignored attributes include (but are not limited to):
 | `transparent_union` | GNU | Recognized by `__has_attribute` (no union-arg coercion modeling) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
 | `malloc` | GNU | Feeds `__builtin_object_size` — [#649](https://todo.sr.ht/~takeiteasy/cccc/649) |
 | `alloc_size` / `alloc_align` | GNU | Feeds `__builtin_object_size` — [#649](https://todo.sr.ht/~takeiteasy/cccc/649) |
-| `sentinel` | GNU | NULL-terminated variadic check — [#658](https://todo.sr.ht/~takeiteasy/cccc/658) |
-| `designated_init` | GNU | Require designated struct initializers — [#659](https://todo.sr.ht/~takeiteasy/cccc/659) |
 | `format_arg` | GNU | |
 | `unsequenced` | C23 | |
 | `reproducible` | C23 | |
@@ -879,8 +908,6 @@ Ignored attributes include (but are not limited to):
 |---|-----------|----------|-------------|
 | [#215](https://todo.sr.ht/~takeiteasy/cccc/215) | Catch-all | medium | Remaining GNU builtins and attributes |
 | [#657](https://todo.sr.ht/~takeiteasy/cccc/657) | 14 architecturally-inert GNU attributes | low | Register in `known_attrs[]` for `__has_attribute` (done) |
-| [#658](https://todo.sr.ht/~takeiteasy/cccc/658) | `sentinel` | low | NULL-terminated variadic argument check |
-| [#659](https://todo.sr.ht/~takeiteasy/cccc/659) | `designated_init` | low | Require designated struct initializers |
 
 ### `@`-prefix Attribute Syntax
 

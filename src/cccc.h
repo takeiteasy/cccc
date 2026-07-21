@@ -463,6 +463,7 @@ typedef enum {
     CCCC_WARN_NONNULL          = (1ULL << 55), // null passed to a nonnull param / returned from returns_nonnull
     CCCC_WARN_MAYBE_NONNULL    = (1ULL << 56), // maybe-null (post-branch-merge) value reaching a nonnull param / returns_nonnull return; opt-in, not in -Wall/-Wextra (#687)
     CCCC_WARN_SENTINEL         = (1ULL << 57), // missing/non-literal NULL terminator in a call to a sentinel-marked variadic function (#658)
+    CCCC_WARN_DESIGNATED_INIT  = (1ULL << 58), // positional member initializer of a struct declared __attribute__((designated_init)); opt-in, not in -Wall/-Wextra (#659)
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
     CCCC_WARN_CONVERSION_GROUP = CCCC_WARN_CONVERSION |
@@ -770,6 +771,7 @@ struct Type {
     struct Member *members;
     bool is_flexible;
     bool is_packed;
+    bool designated_init; // __attribute__((designated_init)): all initializers of this struct type must be designated (#659)
 
     // Enum
     EnumConstant *enum_constants;
