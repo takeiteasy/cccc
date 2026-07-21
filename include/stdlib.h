@@ -46,11 +46,10 @@ extern void free_sized(void* ptr, size_t size);
 extern void free_aligned_sized(void* ptr, size_t alignment, size_t size);
 extern void* malloc(size_t size) __attribute__((alloc_size(1), malloc));
 extern void* realloc(void* ptr, size_t size) __attribute__((alloc_size(2)));
-// NOTE: declared for GCC-compatible self-description only -- not yet
-// registered in the VM's FFI table / codegen allocator dispatch, so it
-// cannot actually be called from CCCC source (pre-existing gap, tracked
-// separately; #642's original name-based match for it was likewise
-// unreachable).
+// (#699) Routed through the VM heap's overflow-checked REALCA opcode by
+// default, or the cccc_reallocarray polyfill on the -V/--vm-heap host
+// allocator path -- not a native host FFI call, since not every libc
+// provides reallocarray (e.g. this SDK's macOS does not).
 extern void* reallocarray(void* ptr, size_t nmemb, size_t size) __attribute__((alloc_size(2, 3)));
 extern void abort(void);
 extern int atexit(void (*func)(void));

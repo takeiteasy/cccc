@@ -870,11 +870,9 @@ int main(void) {
 
 libc's `malloc`, `calloc`, `realloc`, `aligned_alloc`, and `reallocarray` are
 declared with `alloc_size` in `include/stdlib.h`, so they self-describe the
-same way (`reallocarray` is declared for self-description only — it is not
-yet registered as a callable function, see below). See the
-`__builtin_object_size`/`__builtin_dynamic_object_size` entries in the
-Builtins table below for the soundness rules (reassignment/address-of
-poisoning) that gate when the tracked size is actually trusted.
+same way. See the `__builtin_object_size`/`__builtin_dynamic_object_size`
+entries in the Builtins table below for the soundness rules (reassignment/
+address-of poisoning) that gate when the tracked size is actually trusted.
 
 #### `__attribute__((malloc))` / `[[gnu::malloc]]`
 

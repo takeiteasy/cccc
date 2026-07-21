@@ -330,6 +330,7 @@ These opcodes implement the C standard library heap when `--vm-heap` is enabled.
 | `MSET` | `REG_A0` = dest, `REG_A2` = count | `memset` to 0; backs `ND_MEMZERO` (pre-zero for partial aggregate initialisers) |
 | `REALC` | `REG_A0` = ptr, `REG_A1` = new_size | `realloc` |
 | `CALC` | `REG_A0` = nmemb, `REG_A1` = size | `calloc` |
+| `REALCA` | `REG_A0` = ptr, `REG_A1` = nmemb, `REG_A2` = size | `reallocarray`; overflow-checked `nmemb * size` delegates to `REALC`'s logic, returning `NULL` (original allocation untouched) on overflow rather than truncating (#699) |
 | `MALCA` | `REG_A0` = size, `REG_A1` = alignment | `aligned_alloc`; pointer returned in `REG_A0` (`NULL` if `alignment` isn't a power of two) |
 | `PMEMA` | `REG_A0` = memptr, `REG_A1` = alignment, `REG_A2` = size | `posix_memalign`; status (`0`/`EINVAL`/`ENOMEM`) returned in `REG_A0`, allocated pointer written through `memptr` |
 

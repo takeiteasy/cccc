@@ -137,6 +137,22 @@ void test_dynobj_heap_realloc(void) {
     free(p);
 }
 
+// #699: reallocarray routes through REALCA -> REALC -> MALC on the VM-heap
+// path, so the resulting allocation gets a real AllocHeader and is recorded
+// in sorted_allocs exactly like realloc's -- this is the proof that REALCA
+// delivers the heap-safety parity it was added for, not just a working
+// return value.
+[[cccc::test]]
+void test_dynobj_heap_reallocarray(void) {
+    int *base = malloc(4 * sizeof(int));
+    AssertNotNull(base);
+    int *p = reallocarray(base, 8, sizeof(int));
+    AssertNotNull(p);
+    size_t sz = __builtin_dynamic_object_size(p, 0);
+    AssertEq((unsigned long long)sz, (unsigned long long)(8 * sizeof(int)));
+    free(p);
+}
+
 // ---------------------------------------------------------------------------
 // Conservative fallback for unknown / non-base-heap pointers.
 // These do not require --vm-heap: the fallback path fires for any pointer

@@ -4474,6 +4474,23 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     emit_mov3(vm, dest_reg, REG_A0);
                 return;
             }
+            // reallocarray (#699): full parity with the rest of the malloc
+            // family via the VM heap's overflow-checked REALCA opcode,
+            // instead of falling through to a generic FFI call (which would
+            // both skip heap-safety tracking and be unavailable on hosts
+            // without a native reallocarray, e.g. this macOS SDK).
+            if (is_extern_func_name(node->lhs, "reallocarray")) {
+                if (!node->args || !node->args->next || !node->args->next->next)
+                    error_tok(vm, node->tok, "reallocarray requires ptr, nmemb, and size arguments");
+                reset_temp_regs();
+                gen_expr(vm, node->args, REG_A0);
+                gen_expr(vm, node->args->next, REG_A1);
+                gen_expr(vm, node->args->next->next, REG_A2);
+                emit(vm, REALCA);
+                if (dest_reg != REG_A0)
+                    emit_mov3(vm, dest_reg, REG_A0);
+                return;
+            }
             // aligned_alloc/posix_memalign (C11/C23) route through the VM
             // heap's alignment-aware bump allocator (MALCA/PMEMA) so their
             // allocations get an AllocHeader and full heap safety coverage

@@ -2,6 +2,7 @@
 #include "../cccc.h"
 #include <wchar.h>
 #include <string.h>
+#include <errno.h>
 
 #if defined(__APPLE__)
 #include <Availability.h>
@@ -47,6 +48,21 @@ static void *cccc_realloc(void *ptr, size_t size) {
         return NULL;
     }
     return realloc(ptr, size);
+}
+
+// Portable reallocarray polyfill (#699): not every host libc has it (e.g.
+// this SDK's macOS -- glibc >= 2.26 and some BSDs do). The overflow check on
+// nmemb*size is the entire point of reallocarray over realloc(ptr,
+// nmemb*size); relying on a native symbol that may not exist would either
+// fail to link or (worse) silently drop that check on hosts that lack it.
+// Used for the --no-vm-heap FFI path; the VM-heap path (default) instead
+// routes through the overflow-checked REALCA opcode in ops.c.
+static void *cccc_reallocarray(void *ptr, size_t nmemb, size_t size) {
+    if (size != 0 && nmemb > (SIZE_MAX / size)) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    return cccc_realloc(ptr, nmemb * size);
 }
 
 // Wrappers for int-returning functions that can return negative values
@@ -168,6 +184,7 @@ void register_stdlib_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "free_aligned_sized", (void*)cccc_free_aligned_sized, 3, 0);
     cc_register_cfunc(vm, "malloc", (void*)malloc, 1, 0);
     cc_register_cfunc(vm, "realloc", (void*)cccc_realloc, 2, 0);  // Use wrapper for C11 semantics
+    cc_register_cfunc(vm, "reallocarray", (void*)cccc_reallocarray, 3, 0);  // Portable polyfill (#699)
     cc_register_cfunc(vm, "posix_memalign", (void*)posix_memalign, 3, 0);
     cc_register_cfunc(vm, "memalignment", (void*)cccc_memalignment, 1, 0);
 

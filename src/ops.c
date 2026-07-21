@@ -2861,6 +2861,31 @@ static inline int op_CALC_fn(VirtualMachine *vm) {
     return 0;
 }
 
+// reallocarray(ptr, nmemb, size) (#699): routes through the VM heap the same
+// way malloc/calloc/realloc/aligned_alloc do, giving it full heap-safety
+// coverage (AllocHeader tracking, sorted_allocs, bounds/UAF checks). Unlike
+// CALC's plain nmemb*size, this checks for multiplication overflow before
+// delegating to op_REALC_fn -- overflow detection is the entire reason to
+// call reallocarray instead of realloc(ptr, nmemb*size), so silently
+// truncating it here would defeat the function's purpose.
+static inline int op_REALCA_fn(VirtualMachine *vm) {
+    // ptr in REG_A0 (passed through to REALC), nmemb in REG_A1, size in
+    // REG_A2, return in REG_A0.
+    long long nmemb = vm->regs[REG_A1];
+    long long size  = vm->regs[REG_A2];
+
+    if (nmemb < 0 || size < 0 || (size != 0 && nmemb > (INT64_MAX / size))) {
+        // Overflow (or a negative argument): the original allocation is left
+        // untouched and NULL is returned, matching real reallocarray/ENOMEM
+        // semantics -- unlike realloc(ptr, 0), this must NOT free ptr.
+        vm->regs[REG_A0] = 0;
+        return 0;
+    }
+
+    vm->regs[REG_A1] = nmemb * size;
+    return op_REALC_fn(vm);
+}
+
 // ========== Dynamic Object Size Opcode ==========
 
 static inline int op_DYNOBJSZ_fn(VirtualMachine *vm) {

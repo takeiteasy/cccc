@@ -67,6 +67,7 @@ extern "C" {
     X(MSET, 0) /* memset to 0: dest=REG_A0, count=REG_A2; backs ND_MEMZERO */   \
     X(REALC, 0)                                                                \
     X(CALC, 0)                                                                 \
+    X(REALCA, 0) /* reallocarray: ptr=A0, nmemb=A1, size=A2, result=A0 (#699) */ \
     X(MALCA, 0) /* aligned_alloc: size=A0, alignment=A1, result=A0 */          \
     X(PMEMA, 0) /* posix_memalign: memptr=A0, alignment=A1, size=A2, result=A0 */ \
     /* Type conversion instructions (in-register) */                           \

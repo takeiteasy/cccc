@@ -703,6 +703,7 @@ static void opt_constant_fold(VirtualMachine *vm, OptReplacement *repls,
             case LONGJMP:
             case MALC:
             case REALC:
+            case REALCA:
             case MALCA:
             case PMEMA:
             case RETBUF:
@@ -1347,7 +1348,7 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
             // substitutions downstream.  Clear conservatively (mirrors sub-pass B).
             case LONGJMP:
             case DLOPEN: case DLSYM: case DLCLOSE: case DLERROR:
-            case MALC: case CALC: case REALC:
+            case MALC: case CALC: case REALC: case REALCA:
             case MALCA: case PMEMA:
             case MFRE:
             case RETBUF:
@@ -1622,6 +1623,14 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
             case REALC:
                 MARK_INT_USE(REG_A0);
                 MARK_INT_USE(REG_A1);
+                KILL_INT_DEF(REG_A0);
+                break;
+
+            // REALCA(ptr=A0, nmemb=A1, size=A2): reads A0, A1, A2, writes A0.
+            case REALCA:
+                MARK_INT_USE(REG_A0);
+                MARK_INT_USE(REG_A1);
+                MARK_INT_USE(REG_A2);
                 KILL_INT_DEF(REG_A0);
                 break;
 

@@ -461,10 +461,12 @@ void test_object_size_libc_malloc_via_attribute(void) {
     AssertEq((unsigned long long)__builtin_object_size(p, 0), 48ULL);
 }
 
-// NOTE: reallocarray is declared in include/stdlib.h with alloc_size(2,3)
-// for GCC-compatible self-description (matching #642's original name list),
-// but is not yet registered in the VM's FFI table / codegen allocator
-// dispatch, so it cannot actually be called from CCCC source -- this was
-// already true before #649 (the #642 name-matching branch for it was
-// unreachable dead code, since no program could compile a call to it in the
-// first place). Not fixed here; tracked as a separate followup ticket.
+// reallocarray(ptr, nmemb, size) -- alloc_size(2,3) product form. #642's
+// name-based match for it was already dead code (nothing registered it as
+// callable); it's wired up as of #699, so this now exercises the real thing.
+[[cccc::test]]
+void test_object_size_reallocarray_const(void) {
+    char *base = malloc(8);
+    char *p = reallocarray(base, 4, 8);
+    AssertEq((unsigned long long)__builtin_object_size(p, 0), 32ULL);
+}
