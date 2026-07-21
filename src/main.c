@@ -2083,6 +2083,9 @@ int main(int argc, const char *argv[]) {
             exit_code = 1;
             goto BAIL;
         }
+        // #686: warnings have been printed; clear them so later checkpoints
+        // (which reprint the whole vm->errors list) don't print them again.
+        cc_clear_errors(&vm);
     }
 
     // Prepend injected header declarations into the first file's parse stream.
@@ -2208,6 +2211,9 @@ int main(int argc, const char *argv[]) {
             exit_code = 1;
             goto BAIL;
         }
+        // #686: warnings have been printed; clear them so later checkpoints
+        // (which reprint the whole vm->errors list) don't print them again.
+        cc_clear_errors(&vm);
     }
 
     // If -M/--dump-expanded flag is set, output macro-expanded source and exit
