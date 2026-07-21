@@ -92,6 +92,11 @@ typedef struct {
     int format_string_index;   // 1-based index of format string arg
     int format_fmt_first_arg;  // 1-based index of first variadic arg to check
 
+    // Nonnull argument / return checking
+    bool     nonnull_all;
+    uint64_t nonnull_mask;
+    bool     returns_nonnull;
+
     // __attribute__((cleanup(fn)))
     Obj *cleanup_fn;
     Token *cleanup_tok;
@@ -3686,6 +3691,11 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                 warn_implicit_conversion(vm, exp, ty, node->tok);
                 exp = new_cast(vm, exp, ty);
             }
+            if (vm->compiler.current_fn->ty->returns_nonnull &&
+                (vm->compiler.warnings & CCCC_WARN_NONNULL) &&
+                is_const_expr(vm, exp) && eval(vm, exp) == 0)
+                warn_tok(vm, node->tok, CCCC_WARN_NONNULL,
+                         "null returned from function declared with 'returns_nonnull'");
         }
 
         node->lhs = exp;
@@ -6419,7 +6429,9 @@ static Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr
                   !attr->is_noreturn && !attr->is_nodiscard &&
                   !attr->is_pure && !attr->is_func_const &&
                   !attr->format_style && !attr->cleanup_fn &&
-                  !attr->attr_error_msg && !attr->attr_warning_msg))
+                  !attr->attr_error_msg && !attr->attr_warning_msg &&
+                  !attr->nonnull_all && !attr->nonnull_mask &&
+                  !attr->returns_nonnull))
         return ty;
     ty = copy_type(vm, ty);
     apply_semantic_attr(ty, NULL, attr->attribute_tok, attr->is_maybe_unused,
@@ -6445,6 +6457,11 @@ static Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr
         ty->attr_error_msg = attr->attr_error_msg;
     if (attr->attr_warning_msg && ty->kind == TY_FUNC)
         ty->attr_warning_msg = attr->attr_warning_msg;
+    if (ty->kind == TY_FUNC) {
+        if (attr->nonnull_all) ty->nonnull_all = true;
+        ty->nonnull_mask |= attr->nonnull_mask;
+        if (attr->returns_nonnull) ty->returns_nonnull = true;
+    }
     return ty;
 }
 
@@ -6470,6 +6487,9 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
         dst->format_string_index = src->format_string_index;
         dst->format_fmt_first_arg = src->format_fmt_first_arg;
     }
+    dst->nonnull_all |= src->nonnull_all;
+    dst->nonnull_mask |= src->nonnull_mask;
+    dst->returns_nonnull |= src->returns_nonnull;
 }
 
 // Parse optimize attribute argument: (N) where N is an integer 0-4, or ("ON") where
@@ -6630,6 +6650,47 @@ static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *
                         attr->format_fmt_first_arg = first_arg;
                     }
                 }
+                continue;
+            }
+
+            // Handle nonnull attribute: __attribute__((nonnull)) or
+            // __attribute__((nonnull(1,3))). Bare form marks every pointer
+            // parameter non-null; the indexed form marks specific 1-based
+            // argument positions.
+            if (is_attr_name(tok, "nonnull")) {
+                tok = tok->next;
+                bool all = true;
+                uint64_t mask = 0;
+                if (equal(tok, "(")) {
+                    tok = tok->next;
+                    all = false;
+                    if (!equal(tok, ")")) {
+                        for (;;) {
+                            int idx = const_expr(vm, &tok, tok);
+                            if (idx >= 1 && idx <= 64)
+                                mask |= (1ULL << (idx - 1));
+                            if (!consume(vm, &tok, tok, ","))
+                                break;
+                        }
+                    }
+                    tok = skip(vm, tok, ")");
+                }
+                if (ty && ty->kind == TY_FUNC) {
+                    if (all) ty->nonnull_all = true;
+                    ty->nonnull_mask |= mask;
+                }
+                if (attr) {
+                    if (all) attr->nonnull_all = true;
+                    attr->nonnull_mask |= mask;
+                }
+                continue;
+            }
+
+            // Handle returns_nonnull attribute
+            if (is_attr_name(tok, "returns_nonnull")) {
+                tok = tok->next;
+                if (ty && ty->kind == TY_FUNC) ty->returns_nonnull = true;
+                if (attr) attr->returns_nonnull = true;
                 continue;
             }
 
@@ -6874,6 +6935,41 @@ static Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
                                   fn_tok->len, fn_tok->loc);
                     attr->cleanup_fn = sc->var;
                     attr->cleanup_tok = fn_tok;
+                }
+                continue;
+            }
+
+            // [[gnu::nonnull]] / [[gnu::nonnull(1,3)]] / [[gnu::returns_nonnull]]
+            if (equal(name_tok, "nonnull") || equal(name_tok, "returns_nonnull")) {
+                bool is_returns = equal(name_tok, "returns_nonnull");
+                bool all = true;
+                uint64_t mask = 0;
+                if (!is_returns && equal(tok, "(")) {
+                    tok = tok->next;
+                    all = false;
+                    if (!equal(tok, ")")) {
+                        for (;;) {
+                            int idx = const_expr(vm, &tok, tok);
+                            if (idx >= 1 && idx <= 64)
+                                mask |= (1ULL << (idx - 1));
+                            if (!consume(vm, &tok, tok, ","))
+                                break;
+                        }
+                    }
+                    tok = skip(vm, tok, ")");
+                }
+                if (is_returns) {
+                    if (ty && ty->kind == TY_FUNC) ty->returns_nonnull = true;
+                    if (attr) attr->returns_nonnull = true;
+                } else {
+                    if (ty && ty->kind == TY_FUNC) {
+                        if (all) ty->nonnull_all = true;
+                        ty->nonnull_mask |= mask;
+                    }
+                    if (attr) {
+                        if (all) attr->nonnull_all = true;
+                        attr->nonnull_mask |= mask;
+                    }
                 }
                 continue;
             }
@@ -7673,6 +7769,29 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
 
 #undef MAX_FMT_ARGS
 
+// Warn on statically-provable-null arguments passed to a parameter marked
+// __attribute__((nonnull)) / [[gnu::nonnull]]. Only literal/constant-folded
+// null values are caught here -- no flow analysis across variables.
+static void validate_nonnull_call(VirtualMachine *vm, Type *func_ty, Node *args) {
+    if (!func_ty->nonnull_all && !func_ty->nonnull_mask)
+        return;
+
+    Node *arg = args;
+    Type *param_ty = func_ty->params;
+    int idx = 1;
+    while (arg && param_ty) {
+        bool marked = func_ty->nonnull_all
+                          ? (param_ty->kind == TY_PTR)
+                          : (idx <= 64 && (func_ty->nonnull_mask & (1ULL << (idx - 1))));
+        if (marked && is_const_expr(vm, arg) && eval(vm, arg) == 0)
+            warn_tok(vm, arg->tok, CCCC_WARN_NONNULL,
+                     "null passed to a parameter marked nonnull (parameter %d)", idx);
+        arg = arg->next;
+        param_ty = param_ty->next;
+        idx++;
+    }
+}
+
 // funcall = (assign ("," assign)*)? ")"
 static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
     add_type(vm, fn);
@@ -7771,6 +7890,11 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
     // Validate format string arguments when -F is active
     if (!deferred_splice && (vm->flags & CCCC_FORMAT_STR_CHECKS))
         validate_format_call(vm, tok, ty, head.next);
+
+    // __attribute__((nonnull)): warn on statically-provable-null arguments.
+    if (!deferred_splice && vm->compiler.dead_code_depth == 0 &&
+        (vm->compiler.warnings & CCCC_WARN_NONNULL))
+        validate_nonnull_call(vm, ty, head.next);
 
     if ((vm->compiler.warnings & CCCC_WARN_SIZEOF_POINTER_MEMACCESS) &&
         !deferred_splice &&
@@ -9344,6 +9468,11 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty, VarAttr *at
             fn->ty->format_string_index = ty->format_string_index;
             fn->ty->format_fmt_first_arg = ty->format_fmt_first_arg;
         }
+        if (fn->ty) {
+            if (ty->nonnull_all) fn->ty->nonnull_all = true;
+            fn->ty->nonnull_mask |= ty->nonnull_mask;
+            if (ty->returns_nonnull) fn->ty->returns_nonnull = true;
+        }
     } else {
         fn = new_gvar(vm, name_str, ty->name->len, ty);
         fn->is_function = true;
@@ -9575,6 +9704,11 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
             fn->ty->format_style = ty->format_style;
             fn->ty->format_string_index = ty->format_string_index;
             fn->ty->format_fmt_first_arg = ty->format_fmt_first_arg;
+        }
+        if (fn->ty) {
+            if (ty->nonnull_all) fn->ty->nonnull_all = true;
+            fn->ty->nonnull_mask |= ty->nonnull_mask;
+            if (ty->returns_nonnull) fn->ty->returns_nonnull = true;
         }
     } else {
         fn = new_gvar(vm, name_str, ty->name->len, ty);

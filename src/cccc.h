@@ -460,6 +460,7 @@ typedef enum {
     CCCC_WARN_REDUNDANT_DECLS  = (1ULL << 52), // same-linkage declaration seen twice in same scope
     CCCC_WARN_OVERRIDE_INIT    = (1ULL << 53), // later designator overrides earlier initializer
     CCCC_WARN_UNUSED_MACROS    = (1ULL << 54), // #define that is never expanded
+    CCCC_WARN_NONNULL          = (1ULL << 55), // null passed to a nonnull param / returned from returns_nonnull
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
     CCCC_WARN_CONVERSION_GROUP = CCCC_WARN_CONVERSION |
@@ -499,7 +500,8 @@ CCCC_WARN_ALL = CCCC_WARN_UNUSED |
                    CCCC_WARN_SWITCH |
                    CCCC_WARN_ENUM_COMPARE |
                    CCCC_WARN_INCOMPATIBLE_POINTER_TYPES |
-                   CCCC_WARN_OVERRIDE_INIT,
+                   CCCC_WARN_OVERRIDE_INIT |
+                   CCCC_WARN_NONNULL,
     CCCC_WARN_EXTRA = CCCC_WARN_SHADOW |
                       CCCC_WARN_SIGN_COMPARE |
                       CCCC_WARN_CONVERSION |
@@ -804,6 +806,11 @@ struct Type {
     int format_style;          // 0=none, 1=printf, 2=scanf
     int format_string_index;   // 1-based index of format string arg
     int format_fmt_first_arg;  // 1-based index of first variadic arg to check
+
+    // Nonnull argument / return checking (__attribute__((nonnull / returns_nonnull)))
+    bool     nonnull_all;    // bare nonnull: every pointer parameter is non-null
+    uint64_t nonnull_mask;   // 1-based arg indices marked non-null (bit i-1); >64 args ignored
+    bool     returns_nonnull;
 };
 
 /*!

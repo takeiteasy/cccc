@@ -315,6 +315,8 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 | `cleanup(fn)` | GNU | ✓ | Scope-exit callback: calls `fn(&var)` when the variable goes out of scope |
 | `error("msg")` | GNU | ✓ | Emits a compile-time error when called; DCE-aware: suppressed inside statically-dead positions (constant-fold + unsigned boundary tautology): `if`/`else` branches, `while(0)`/`for(;0;)` bodies and increment expressions, `false && call()` / `true \|\| call()` short-circuit operands, ternary `cond ? dead : live` branches, GNU elvis `truthy ?: dead` — enabling the `_FORTIFY_SOURCE` `__chk_fail` idiom |
 | `warning("msg")` | GNU | ✓ | Emits a compile-time warning when called; same DCE-aware suppression as `error` |
+| `nonnull` / `nonnull(N,...)` | GNU / C23 | ✓ | Warns when a statically-null argument is passed to a nonnull-marked parameter (`-Wnonnull`, part of `-Wall`) |
+| `returns_nonnull` | GNU / C23 | ✓ | Warns when a statically-null value is returned from a `returns_nonnull` function (`-Wnonnull`, part of `-Wall`) |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
 ### Supported Attributes
@@ -601,6 +603,38 @@ its cleanup runs.
 
 ---
 
+#### `__attribute__((nonnull))` / `__attribute__((nonnull(N,...)))` / `[[gnu::nonnull]]` and `__attribute__((returns_nonnull))` / `[[gnu::returns_nonnull]]`
+
+Marks pointer parameters (bare `nonnull`, or `nonnull(1,3)` for specific
+1-based argument indices) as never null, and `returns_nonnull` marks a
+function's return value as never null. Both are static, compile-time-only
+checks — there is no codegen effect.
+
+At each call site, an argument in a nonnull position (or a `return` in a
+`returns_nonnull` function) is checked only when it is a **compile-time
+constant** that folds to zero, e.g. a literal `NULL`/`0`/`(void*)0`. This
+catches the common literal-null mistake but does not perform flow analysis —
+a pointer that is null through a variable, an `if`-guarded branch, or any
+non-constant expression is not tracked.
+
+```c
+void handle(int *p) __attribute__((nonnull(1)));
+void handle(int *p) { *p = 1; }
+
+int *make(void) __attribute__((returns_nonnull));
+int *make(void) { return 0; }   // warns: null returned from function declared with 'returns_nonnull'
+
+int main(void) {
+    handle(0);                  // warns: null passed to a parameter marked nonnull (parameter 1)
+    make();
+    return 42;
+}
+```
+
+Diagnosed under `-Wnonnull` (part of `-Wall`); disable with `-Wno-nonnull`.
+
+---
+
 ### Parsed but Ignored
 
 Any GNU `__attribute__` identifier that is not explicitly handled (i.e., not `packed`, `aligned`, `unused`/`__unused__`, `deprecated`/`__deprecated__`, or `warn_unused_result`/`__warn_unused_result__`) is **consumed and emits a `-Wattributes` warning**. The parser skips the attribute name and any parenthesised argument list, then continues.
@@ -625,7 +659,6 @@ Ignored attributes include (but are not limited to):
 | `may_alias` | GNU | Recognized by `__has_attribute` (no strict-aliasing optimizer) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
 | `mode` | GNU | Recognized by `__has_attribute` (no machine-mode type system) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
 | `transparent_union` | GNU | Recognized by `__has_attribute` (no union-arg coercion modeling) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
-| `returns_nonnull` / `nonnull` | GNU | Static null-argument/return warnings — [#655](https://todo.sr.ht/~takeiteasy/cccc/655) |
 | `malloc` | GNU | Feeds `__builtin_object_size` — [#649](https://todo.sr.ht/~takeiteasy/cccc/649) |
 | `alloc_size` / `alloc_align` | GNU | Feeds `__builtin_object_size` — [#649](https://todo.sr.ht/~takeiteasy/cccc/649) |
 | `sentinel` | GNU | NULL-terminated variadic check — [#658](https://todo.sr.ht/~takeiteasy/cccc/658) |
@@ -639,7 +672,6 @@ Ignored attributes include (but are not limited to):
 | # | Attribute | Priority | Description |
 |---|-----------|----------|-------------|
 | [#215](https://todo.sr.ht/~takeiteasy/cccc/215) | Catch-all | medium | Remaining GNU builtins and attributes |
-| [#655](https://todo.sr.ht/~takeiteasy/cccc/655) | `nonnull` / `returns_nonnull` | low | Static null-argument/return warnings |
 | [#656](https://todo.sr.ht/~takeiteasy/cccc/656) | `constructor` / `destructor` | low | Pre-main/post-exit callback hooks |
 | [#657](https://todo.sr.ht/~takeiteasy/cccc/657) | 14 architecturally-inert GNU attributes | low | Register in `known_attrs[]` for `__has_attribute` (done) |
 | [#658](https://todo.sr.ht/~takeiteasy/cccc/658) | `sentinel` | low | NULL-terminated variadic argument check |

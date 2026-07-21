@@ -99,6 +99,7 @@ static const WarningInfo warning_infos[] = {
     {"redundant-decls",            CCCC_WARN_REDUNDANT_DECLS,            false},
     {"override-init",              CCCC_WARN_OVERRIDE_INIT,              false},
     {"unused-macros",              CCCC_WARN_UNUSED_MACROS,              false},
+    {"nonnull",                    CCCC_WARN_NONNULL,                    false},
     {"all", CCCC_WARN_ALL, true},
     {"extra", CCCC_WARN_EXTRA, true},
 };
