@@ -1209,6 +1209,17 @@ static bool is_has_builtin_supported(char *name) {
         "__builtin_add_overflow",
         "__builtin_sub_overflow",
         "__builtin_mul_overflow",
+        // Parser special forms with dedicated codegen (ticket #682) — these
+        // were missing despite being fully implemented in src/parse.c.
+        "__builtin_choose_expr",
+        "__builtin_return_address",
+        "__builtin_object_size",
+        "__builtin_dynamic_object_size",
+        "__builtin_expect_with_probability",
+        "__builtin_prefetch",
+        "__builtin_assume",
+        "__builtin_pc_function_name",
+        "__builtin_pc_source_location",
         NULL,
     };
 

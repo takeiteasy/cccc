@@ -699,6 +699,37 @@ int test_attr_format_spellings(void) {
 #if __has_builtin(__builtin_offsetof)
 #error __builtin_offsetof should not be reported supported by CCCC
 #endif
+
+// [ticket #682] These builtins are parser special forms with dedicated
+// codegen in src/parse.c but were missing from the __has_builtin table.
+#if !__has_builtin(__builtin_choose_expr)
+#error expected __has_builtin(__builtin_choose_expr)
+#endif
+#if !__has_builtin(__builtin_return_address)
+#error expected __has_builtin(__builtin_return_address)
+#endif
+#if !__has_builtin(__builtin_object_size)
+#error expected __has_builtin(__builtin_object_size)
+#endif
+#if !__has_builtin(__builtin_dynamic_object_size)
+#error expected __has_builtin(__builtin_dynamic_object_size)
+#endif
+#if !__has_builtin(__builtin_expect_with_probability)
+#error expected __has_builtin(__builtin_expect_with_probability)
+#endif
+#if !__has_builtin(__builtin_prefetch)
+#error expected __has_builtin(__builtin_prefetch)
+#endif
+#if !__has_builtin(__builtin_assume)
+#error expected __has_builtin(__builtin_assume)
+#endif
+#if !__has_builtin(__builtin_pc_function_name)
+#error expected __has_builtin(__builtin_pc_function_name)
+#endif
+#if !__has_builtin(__builtin_pc_source_location)
+#error expected __has_builtin(__builtin_pc_source_location)
+#endif
+
 #if !__has_c_attribute(maybe_unused)
 #error expected __has_c_attribute(maybe_unused)
 #endif
