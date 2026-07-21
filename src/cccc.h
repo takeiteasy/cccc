@@ -462,6 +462,7 @@ typedef enum {
     CCCC_WARN_UNUSED_MACROS    = (1ULL << 54), // #define that is never expanded
     CCCC_WARN_NONNULL          = (1ULL << 55), // null passed to a nonnull param / returned from returns_nonnull
     CCCC_WARN_MAYBE_NONNULL    = (1ULL << 56), // maybe-null (post-branch-merge) value reaching a nonnull param / returns_nonnull return; opt-in, not in -Wall/-Wextra (#687)
+    CCCC_WARN_SENTINEL         = (1ULL << 57), // missing/non-literal NULL terminator in a call to a sentinel-marked variadic function (#658)
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
     CCCC_WARN_CONVERSION_GROUP = CCCC_WARN_CONVERSION |
@@ -502,7 +503,8 @@ CCCC_WARN_ALL = CCCC_WARN_UNUSED |
                    CCCC_WARN_ENUM_COMPARE |
                    CCCC_WARN_INCOMPATIBLE_POINTER_TYPES |
                    CCCC_WARN_OVERRIDE_INIT |
-                   CCCC_WARN_NONNULL,
+                   CCCC_WARN_NONNULL |
+                   CCCC_WARN_SENTINEL,
     CCCC_WARN_EXTRA = CCCC_WARN_SHADOW |
                       CCCC_WARN_SIGN_COMPARE |
                       CCCC_WARN_CONVERSION |
@@ -813,6 +815,10 @@ struct Type {
     bool     nonnull_all;    // bare nonnull: every pointer parameter is non-null
     uint64_t nonnull_mask;   // 1-based arg indices marked non-null (bit i-1); >64 args ignored
     bool     returns_nonnull;
+
+    // NULL-terminated variadic argument check (__attribute__((sentinel[(N)])))
+    bool is_sentinel;    // true if the function requires a NULL sentinel arg
+    int  sentinel_pos;   // trailing non-sentinel args allowed before the NULL (0 = last arg)
 
     // __attribute__((constructor[(priority)])) / ((destructor[(priority)]))
     bool is_constructor; // run before main(), ordered by init_priority

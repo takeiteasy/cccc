@@ -97,6 +97,10 @@ typedef struct {
     uint64_t nonnull_mask;
     bool     returns_nonnull;
 
+    // NULL-terminated variadic argument check (__attribute__((sentinel[(N)])))
+    bool is_sentinel;
+    int  sentinel_pos;
+
     // __attribute__((cleanup(fn)))
     Obj *cleanup_fn;
     Token *cleanup_tok;
@@ -6447,7 +6451,7 @@ static Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr
                   !attr->attr_error_msg && !attr->attr_warning_msg &&
                   !attr->nonnull_all && !attr->nonnull_mask &&
                   !attr->returns_nonnull && !attr->is_constructor &&
-                  !attr->is_destructor))
+                  !attr->is_destructor && !attr->is_sentinel))
         return ty;
     ty = copy_type(vm, ty);
     apply_semantic_attr(ty, NULL, attr->attribute_tok, attr->is_maybe_unused,
@@ -6477,6 +6481,10 @@ static Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr
         if (attr->nonnull_all) ty->nonnull_all = true;
         ty->nonnull_mask |= attr->nonnull_mask;
         if (attr->returns_nonnull) ty->returns_nonnull = true;
+        if (attr->is_sentinel) {
+            ty->is_sentinel = true;
+            ty->sentinel_pos = attr->sentinel_pos;
+        }
         if (attr->is_constructor) {
             ty->is_constructor = true;
             ty->init_priority = attr->init_priority;
@@ -6514,6 +6522,10 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
     dst->nonnull_all |= src->nonnull_all;
     dst->nonnull_mask |= src->nonnull_mask;
     dst->returns_nonnull |= src->returns_nonnull;
+    if (src->is_sentinel) {
+        dst->is_sentinel = true;
+        dst->sentinel_pos = src->sentinel_pos;
+    }
     if (src->is_constructor) {
         dst->is_constructor = true;
         dst->init_priority = src->init_priority;
@@ -6723,6 +6735,28 @@ static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *
                 tok = tok->next;
                 if (ty && ty->kind == TY_FUNC) ty->returns_nonnull = true;
                 if (attr) attr->returns_nonnull = true;
+                continue;
+            }
+
+            // Handle sentinel attribute: __attribute__((sentinel)) requires the
+            // last variadic argument to be a literal NULL; __attribute__((sentinel(N)))
+            // allows N trailing non-sentinel args before the NULL (#658).
+            if (is_attr_name(tok, "sentinel")) {
+                tok = tok->next;
+                int pos = 0;
+                if (equal(tok, "(")) {
+                    tok = tok->next;
+                    pos = const_expr(vm, &tok, tok);
+                    tok = skip(vm, tok, ")");
+                }
+                if (ty && ty->kind == TY_FUNC) {
+                    ty->is_sentinel = true;
+                    ty->sentinel_pos = pos;
+                }
+                if (attr) {
+                    attr->is_sentinel = true;
+                    attr->sentinel_pos = pos;
+                }
                 continue;
             }
 
@@ -7035,6 +7069,25 @@ static Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
                         if (all) attr->nonnull_all = true;
                         attr->nonnull_mask |= mask;
                     }
+                }
+                continue;
+            }
+
+            // [[gnu::sentinel]] / [[gnu::sentinel(N)]] (#658)
+            if (equal(name_tok, "sentinel")) {
+                int pos = 0;
+                if (equal(tok, "(")) {
+                    tok = tok->next;
+                    pos = const_expr(vm, &tok, tok);
+                    tok = skip(vm, tok, ")");
+                }
+                if (ty && ty->kind == TY_FUNC) {
+                    ty->is_sentinel = true;
+                    ty->sentinel_pos = pos;
+                }
+                if (attr) {
+                    attr->is_sentinel = true;
+                    attr->sentinel_pos = pos;
                 }
                 continue;
             }
@@ -8482,6 +8535,45 @@ static void validate_nonnull_call(VirtualMachine *vm, Type *func_ty, Node *args)
     }
 }
 
+// Warn when a call to a function marked __attribute__((sentinel)) /
+// __attribute__((sentinel(N))) / [[gnu::sentinel]] does not terminate its
+// variadic arguments with a literal NULL (#658). `sentinel_pos` counts
+// trailing non-sentinel arguments allowed before the NULL (0 = last arg),
+// so the target argument is counted from the END of the call's argument
+// list, unlike the format-string validator which counts from the front.
+// Only a literal/constant-folded null is accepted -- a variable that
+// happens to hold NULL still warns, matching GCC's syntactic check.
+static void validate_sentinel_call(VirtualMachine *vm, Token *tok, Type *func_ty,
+                                    Node *args) {
+    if (!func_ty->is_sentinel)
+        return;
+
+    int nargs = 0;
+    for (Node *a = args; a; a = a->next)
+        nargs++;
+    int num_named = 0;
+    for (Type *p = func_ty->params; p; p = p->next)
+        num_named++;
+
+    int target = nargs - 1 - func_ty->sentinel_pos;
+    // Bound both ends: target < num_named catches sentinel_pos >= nargs
+    // (too few variadic args); target >= nargs catches a negative
+    // sentinel_pos (e.g. sentinel(-1)), which would otherwise walk off
+    // the end of the argument list.
+    if (target < num_named || target >= nargs) {
+        warn_tok(vm, tok, CCCC_WARN_SENTINEL,
+                 "not enough variable arguments to fit a sentinel");
+        return;
+    }
+
+    Node *arg = args;
+    for (int i = 0; i < target; i++)
+        arg = arg->next;
+    if (!(is_const_expr(vm, arg) && eval(vm, arg) == 0))
+        warn_tok(vm, arg->tok, CCCC_WARN_SENTINEL,
+                 "missing sentinel in function call");
+}
+
 // funcall = (assign ("," assign)*)? ")"
 static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
     add_type(vm, fn);
@@ -8585,6 +8677,11 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
     if (!deferred_splice && vm->compiler.dead_code_depth == 0 &&
         (vm->compiler.warnings & CCCC_WARN_NONNULL))
         validate_nonnull_call(vm, ty, head.next);
+
+    // __attribute__((sentinel)): warn on a missing/non-literal NULL terminator.
+    if (!deferred_splice && vm->compiler.dead_code_depth == 0 &&
+        (vm->compiler.warnings & CCCC_WARN_SENTINEL))
+        validate_sentinel_call(vm, tok, ty, head.next);
 
     if ((vm->compiler.warnings & CCCC_WARN_SIZEOF_POINTER_MEMACCESS) &&
         !deferred_splice &&
@@ -10162,6 +10259,10 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty, VarAttr *at
             if (ty->nonnull_all) fn->ty->nonnull_all = true;
             fn->ty->nonnull_mask |= ty->nonnull_mask;
             if (ty->returns_nonnull) fn->ty->returns_nonnull = true;
+            if (ty->is_sentinel) {
+                fn->ty->is_sentinel = true;
+                fn->ty->sentinel_pos = ty->sentinel_pos;
+            }
         }
     } else {
         fn = new_gvar(vm, name_str, ty->name->len, ty);
@@ -10399,6 +10500,10 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
             if (ty->nonnull_all) fn->ty->nonnull_all = true;
             fn->ty->nonnull_mask |= ty->nonnull_mask;
             if (ty->returns_nonnull) fn->ty->returns_nonnull = true;
+            if (ty->is_sentinel) {
+                fn->ty->is_sentinel = true;
+                fn->ty->sentinel_pos = ty->sentinel_pos;
+            }
         }
     } else {
         fn = new_gvar(vm, name_str, ty->name->len, ty);

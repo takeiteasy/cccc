@@ -186,7 +186,7 @@ language coverage figures apply.
 |---|---|---|
 | Statement expressions `({ ... })` | ✓ | |
 | 128-bit integers `__int128` / `__int128_t` / `__uint128_t` | ✓ | Implemented on top of the `_BitInt(128)` machinery (multi-word, address-based storage). `unsigned __int128` is honoured; `__SIZEOF_INT128__` is defined so feature-detecting code selects these paths |
-| `__attribute__((...))` | ~ | Parsed; `aligned`, `packed`, `unused`, `deprecated`, `format`, `nodiscard`, `warn_unused_result`, `fallthrough`, `noreturn`, `error`, `warning`, `constructor`, `destructor` supported (see [Attributes](#attributes) below) |
+| `__attribute__((...))` | ~ | Parsed; `aligned`, `packed`, `unused`, `deprecated`, `format`, `nodiscard`, `warn_unused_result`, `fallthrough`, `noreturn`, `error`, `warning`, `constructor`, `destructor`, `sentinel` supported (see [Attributes](#attributes) below) |
 | Labels as values `&&label` | ✓ | |
 | Computed goto `goto *expr` | ✓ | |
 | Switch case ranges `case 1 ... 5:` | ✓ | |
@@ -320,6 +320,7 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 | `returns_nonnull` | GNU / C23 | ✓ | Warns when a statically- or flow-provably-null value is returned from a `returns_nonnull` function (`-Wnonnull`, part of `-Wall`); a merely maybe-null return warns under the opt-in `-Wmaybe-nonnull` |
 | `constructor` / `constructor(N)` | GNU (C23: `[[gnu::constructor]]`) | ✓ | Runs `void(void)` function before `main()`, ordered by priority (lower first; unprioritised functions run last) |
 | `destructor` / `destructor(N)` | GNU (C23: `[[gnu::destructor]]`) | ✓ | Runs `void(void)` function after `main()` returns normally, in reverse priority order (higher first; unprioritised functions run first) |
+| `sentinel` / `sentinel(N)` | GNU (C23: `[[gnu::sentinel]]`) | ✓ | Warns at each call site when the expected trailing variadic argument is not a literal `NULL`/`0` (`-Wsentinel`, part of `-Wall`); static syntactic check only, no runtime enforcement |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
 `__has_attribute` returns `1` for `error`, `warning`, `warn_unused_result`, and
@@ -787,6 +788,50 @@ Diagnosed under `-Wnonnull` (part of `-Wall`) and `-Wmaybe-nonnull`
 
 **`__has_attribute`:** returns `1` for `nonnull`, `__nonnull__`,
 `returns_nonnull`, and `__returns_nonnull__`.
+
+#### `__attribute__((sentinel))` / `__attribute__((sentinel(N)))` / `[[gnu::sentinel]]`
+
+Marks a variadic function as requiring a `NULL`-terminated argument list —
+the classic example is `execl()`/`execlp()`. Bare `sentinel` requires the
+*last* argument to be a literal `NULL`; `sentinel(N)` allows `N` trailing
+non-sentinel arguments to follow the required `NULL` (i.e. the `NULL` must
+be `N` positions back from the end of the call).
+
+This is a **static, call-site-only** check — a syntactic scan of the parsed
+argument list, with no runtime enforcement. Only a literal/constant-folded
+null (`NULL`, `0`, `(void*)0`, …) satisfies the check; a variable that
+merely holds `NULL` at runtime still warns, since the parser has no flow
+analysis over the value (unlike `-Wmaybe-nonnull`'s dataflow pass — sentinel
+checking mirrors GCC's own purely-syntactic behaviour here). A bare `0` is
+accepted without requiring a pointer cast, more lenient than GCC's stricter
+`-Wstrict-overflow`-adjacent typed check.
+
+```c
+void run(const char *path, ...) __attribute__((sentinel));
+void run(const char *path, ...) { }
+
+int main(void) {
+    run("/bin/ls", "-l", (void*)0);   // ok
+    run("/bin/ls", "-l");             // warns: missing sentinel in function call
+}
+```
+
+```c
+// sentinel(1): one trailing argument is allowed after the NULL
+void run2(const char *path, ...) __attribute__((sentinel(1)));
+void run2(const char *path, ...) { }
+
+int main(void) {
+    run2("/bin/ls", "-l", (void*)0, extra_flag);   // ok
+}
+```
+
+If the call does not supply enough variadic arguments for the expected
+sentinel position to exist at all, CCCC warns `"not enough variable
+arguments to fit a sentinel"` instead of indexing past the end of the
+argument list.
+
+Diagnosed under `-Wsentinel` (part of `-Wall`); disable with `-Wno-sentinel`.
 
 ---
 

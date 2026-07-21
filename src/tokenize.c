@@ -102,6 +102,7 @@ static const WarningInfo warning_infos[] = {
     {"unused-macros",              CCCC_WARN_UNUSED_MACROS,              false},
     {"nonnull",                    CCCC_WARN_NONNULL,                    false},
     {"maybe-nonnull",              CCCC_WARN_MAYBE_NONNULL,              false},
+    {"sentinel",                   CCCC_WARN_SENTINEL,                   false},
     {"all", CCCC_WARN_ALL, true},
     {"extra", CCCC_WARN_EXTRA, true},
 };
