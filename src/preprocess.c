@@ -1086,7 +1086,10 @@ static const AttrInfo known_attrs[] = {
     {"deprecated",        ATTR_STD, true,  202311L},
     {"noreturn",          ATTR_STD, true,  202311L},
     {"nodiscard",         ATTR_STD, false, 202311L},
-    {"fallthrough",       ATTR_STD, false, 202311L},
+    // fallthrough has a GNU __attribute__ form with real compiler semantics
+    // (matches GCC/Clang __has_attribute), so has_attr=true here even though
+    // it's listed under the C23 std table for __has_c_attribute's date value.
+    {"fallthrough",       ATTR_STD, true,  202311L},
     {"no_unique_address", ATTR_STD, false, 202311L},
     // GNU-only (__attribute__((name)))
     {"aligned",          ATTR_GNU, true,  0},
@@ -1095,6 +1098,17 @@ static const AttrInfo known_attrs[] = {
     {"__unused__",       ATTR_GNU, true,  0},
     {"__deprecated__",   ATTR_GNU, true,  0},
     {"format",           ATTR_GNU, true,  0},
+    // Genuinely-implemented GNU attributes with real compiler semantics
+    // (ticket #681) — these were missing from this table despite being
+    // fully handled in src/parse.c, so __has_attribute wrongly reported 0.
+    {"cleanup",            ATTR_GNU, true, 0},
+    {"error",              ATTR_GNU, true, 0},
+    {"warning",            ATTR_GNU, true, 0},
+    {"nonnull",            ATTR_GNU, true, 0},
+    {"returns_nonnull",    ATTR_GNU, true, 0},
+    {"pure",               ATTR_GNU, true, 0},
+    {"const",              ATTR_GNU, true, 0},
+    {"warn_unused_result", ATTR_GNU, true, 0},
     // Recognized but architecturally inert (ticket #657): no ELF/Mach-O
     // output, no linker, no per-function ISA codegen, no inliner, no
     // branch-temperature layout, no symbol-level DCE, no strict-aliasing
@@ -1124,6 +1138,22 @@ static const AttrInfo *find_attr_info(char *name) {
     for (int i = 0; known_attrs[i].name; i++)
         if (!strcmp(name, known_attrs[i].name))
             return &known_attrs[i];
+
+    // GNU __x__ alternate spelling (e.g. __pure__, __cleanup__): strip the
+    // leading/trailing "__" and retry, matching real GCC/Clang behavior
+    // (ticket #681). The explicit __unused__/__deprecated__ entries above
+    // still win via exact match first, so this is purely additive.
+    size_t len = strlen(name);
+    if (len >= 5 && len < 64 && name[0] == '_' && name[1] == '_' &&
+        name[len - 1] == '_' && name[len - 2] == '_') {
+        char inner[64];
+        size_t inner_len = len - 4;
+        memcpy(inner, name + 2, inner_len);
+        inner[inner_len] = '\0';
+        for (int i = 0; known_attrs[i].name; i++)
+            if (!strcmp(inner, known_attrs[i].name))
+                return &known_attrs[i];
+    }
     return NULL;
 }
 

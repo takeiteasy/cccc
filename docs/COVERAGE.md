@@ -315,11 +315,16 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 | `cleanup(fn)` | GNU | ✓ | Scope-exit callback: calls `fn(&var)` when the variable goes out of scope |
 | `error("msg")` | GNU | ✓ | Emits a compile-time error when called; DCE-aware: suppressed inside statically-dead positions (constant-fold + unsigned boundary tautology): `if`/`else` branches, `while(0)`/`for(;0;)` bodies and increment expressions, `false && call()` / `true \|\| call()` short-circuit operands, ternary `cond ? dead : live` branches, GNU elvis `truthy ?: dead` — enabling the `_FORTIFY_SOURCE` `__chk_fail` idiom |
 | `warning("msg")` | GNU | ✓ | Emits a compile-time warning when called; same DCE-aware suppression as `error` |
+| `warn_unused_result` / `__warn_unused_result__` | GNU | ✓ | GNU equivalent of `[[nodiscard]]`: warns if the return value is discarded (`-Wnodiscard`, part of `-Wall`) |
 | `nonnull` / `nonnull(N,...)` | GNU / C23 | ✓ | Warns when a statically-null argument is passed to a nonnull-marked parameter (`-Wnonnull`, part of `-Wall`) |
 | `returns_nonnull` | GNU / C23 | ✓ | Warns when a statically-null value is returned from a `returns_nonnull` function (`-Wnonnull`, part of `-Wall`) |
 | `constructor` / `constructor(N)` | GNU (C23: `[[gnu::constructor]]`) | ✓ | Runs `void(void)` function before `main()`, ordered by priority (lower first; unprioritised functions run last) |
 | `destructor` / `destructor(N)` | GNU (C23: `[[gnu::destructor]]`) | ✓ | Runs `void(void)` function after `main()` returns normally, in reverse priority order (higher first; unprioritised functions run first) |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
+
+`__has_attribute` returns `1` for `error`, `warning`, `warn_unused_result`, and
+`__warn_unused_result__` — all four carry real compile-time semantics (see
+above), matching real GCC/Clang.
 
 ### Supported Attributes
 
@@ -463,6 +468,8 @@ strlen_pure(buf);  // result unused — call omitted
 Accepted spellings: `__attribute__((pure))`, `__attribute__((__pure__))`,
 `[[gnu::pure]]`, `[[cccc::pure]]`.
 
+**`__has_attribute`:** returns `1` for `pure` and `__pure__`.
+
 ---
 
 #### `__attribute__((const))` / `[[gnu::const]]`
@@ -493,6 +500,8 @@ Accepted spellings: `__attribute__((const))`, `__attribute__((__const__))`,
 > **Note:** `gnu::const` would collide with the C keyword `const` if written
 > as `[[const]]` — the `gnu::` namespace qualifier is required for the C23
 > spelling.
+
+**`__has_attribute`:** returns `1` for `const` and `__const__`.
 
 ---
 
@@ -676,6 +685,9 @@ int main(void) {
 ```
 
 Diagnosed under `-Wnonnull` (part of `-Wall`); disable with `-Wno-nonnull`.
+
+**`__has_attribute`:** returns `1` for `nonnull`, `__nonnull__`,
+`returns_nonnull`, and `__returns_nonnull__`.
 
 ---
 

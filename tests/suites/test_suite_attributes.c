@@ -620,6 +620,76 @@ int test_attr_format_spellings(void) {
 #if !__has_attribute(noreturn)
 #error expected __has_attribute(noreturn)
 #endif
+
+// [ticket #681] These attributes are fully implemented in src/parse.c but
+// were missing from known_attrs[], so __has_attribute wrongly reported 0.
+// Verified against real GCC/Clang, which return 1 for all of these.
+#if !__has_attribute(cleanup)
+#error expected __has_attribute(cleanup)
+#endif
+#if !__has_attribute(__cleanup__)
+#error expected __has_attribute(__cleanup__)
+#endif
+#if !__has_attribute(error)
+#error expected __has_attribute(error)
+#endif
+#if !__has_attribute(__error__)
+#error expected __has_attribute(__error__)
+#endif
+#if !__has_attribute(warning)
+#error expected __has_attribute(warning)
+#endif
+#if !__has_attribute(__warning__)
+#error expected __has_attribute(__warning__)
+#endif
+#if !__has_attribute(nonnull)
+#error expected __has_attribute(nonnull)
+#endif
+#if !__has_attribute(__nonnull__)
+#error expected __has_attribute(__nonnull__)
+#endif
+#if !__has_attribute(returns_nonnull)
+#error expected __has_attribute(returns_nonnull)
+#endif
+#if !__has_attribute(__returns_nonnull__)
+#error expected __has_attribute(__returns_nonnull__)
+#endif
+#if !__has_attribute(pure)
+#error expected __has_attribute(pure)
+#endif
+#if !__has_attribute(__pure__)
+#error expected __has_attribute(__pure__)
+#endif
+#if !__has_attribute(const)
+#error expected __has_attribute(const)
+#endif
+#if !__has_attribute(__const__)
+#error expected __has_attribute(__const__)
+#endif
+#if !__has_attribute(warn_unused_result)
+#error expected __has_attribute(warn_unused_result)
+#endif
+#if !__has_attribute(__warn_unused_result__)
+#error expected __has_attribute(__warn_unused_result__)
+#endif
+// fallthrough has a GNU __attribute__ form with real semantics (matches
+// GCC/Clang __has_attribute); __has_c_attribute is checked separately below.
+#if !__has_attribute(fallthrough)
+#error expected __has_attribute(fallthrough)
+#endif
+// Negative pins: these correctly report 0, matching GCC/Clang exactly —
+// "usable attribute" (COVERAGE.md Quick Reference ✓) is not the same claim
+// as __has_attribute==1.
+#if __has_attribute(nodiscard)
+#error __has_attribute(nodiscard) should be 0 (C23-only, no GNU form in GCC/Clang)
+#endif
+#if __has_attribute(maybe_unused)
+#error __has_attribute(maybe_unused) should be 0 (C23-only, no GNU form in GCC/Clang)
+#endif
+#if __has_attribute(macro)
+#error __has_attribute(macro) should be 0 (deprecated CCCC alias, not GCC-recognized)
+#endif
+
 #if !__has_builtin(__builtin_mul_overflow)
 #error expected __has_builtin(__builtin_mul_overflow)
 #endif
