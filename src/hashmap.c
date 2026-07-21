@@ -57,6 +57,7 @@ static uint64_t int_hash(long long key) {
 // Forward declarations for internal raw operations (no key copying)
 static void hashmap_put2_raw(HashMap *map, const char *key, int keylen, void *val);
 static HashEntry *get_or_insert_entry_raw(HashMap *map, char *key, int keylen);
+static HashEntry *get_or_insert_entry_int(HashMap *map, long long key);
 
 // Make room for new entires in a given hashmap by removing
 // tombstones and possibly extending the bucket size.
@@ -83,8 +84,28 @@ static void rehash(HashMap *map) {
 
     for (int ii = 0; ii < map->capacity; ii++) {
         HashEntry *ent = &map->buckets[ii];
-        if (ent->key && ent->key != TOMBSTONE)
+        if (!ent->key || ent->key == TOMBSTONE)
+            continue;
+        if (ent->keylen == -1) {
+            // Integer-keyed entry: must be placed by int_hash(), the same
+            // hash get_entry_int() will later probe from. Routing it through
+            // the string path here would hash via fnv_hash(key, -1) instead
+            // -- and since the loop `for (i = 0; i < len; i++)` never runs
+            // when len is -1, fnv_hash returns the same constant seed for
+            // *every* integer key, clustering all of them at one slot. A
+            // post-rehash lookup via int_hash() then probes from the wrong
+            // start and can hit an empty slot before reaching the real
+            // entry, silently reporting "not found" for a live key. This
+            // corrupted every int-keyed HashMap in the VM under load
+            // (ptr_tags, provenance, stack_var_active, race_shadow,
+            // atomic_shadow, init_state, ...) -- see #674. Found while
+            // implementing #673's frame-epoch tracking, whose churn was
+            // the first workload to hit it reliably.
+            HashEntry *e2 = get_or_insert_entry_int(&map2, (long long)ent->key);
+            e2->val = ent->val;
+        } else {
             hashmap_put2_raw(&map2, ent->key, ent->keylen, ent->val);
+        }
     }
 
     assert(map2.used == nkeys);
