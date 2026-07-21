@@ -733,10 +733,22 @@ null-returning path is flagged — an unannotated external or
 declaration-only function (e.g. `malloc`) is never assumed to maybe-return
 null, since that would warn on nearly every unannotated pointer-returning
 call. The fact only ever produces a maybe-null state, never a definite one,
-so it is diagnosed under `-Wmaybe-nonnull` only, and only propagates through
-a direct call assigned to a tracked local — a call used inline as an
-argument or return expression, or a transitive call chain
-(`return other_maybe_null_fn();`), is not yet covered.
+so it is diagnosed under `-Wmaybe-nonnull` only. It propagates through a
+direct call to a flagged function whether that call is first assigned to a
+local or used inline as the argument/return expression itself:
+
+```c
+handle(maybe_null(1));               // -Wmaybe-nonnull: warns, same as above
+
+int *wrap(void) __attribute__((returns_nonnull));
+int *wrap(void) { return maybe_null(1); }   // -Wmaybe-nonnull: warns
+```
+
+A transitive call chain — a function whose *only* null-returning path is
+itself a call to another flagged function (`return other_maybe_null_fn();`,
+as opposed to a literal `return 0;`) — is not yet covered by the summary pass
+itself; that would need a call-graph fixpoint over
+`check_may_return_null_summaries()` rather than a call-site change.
 
 Diagnosed under `-Wnonnull` (part of `-Wall`) and `-Wmaybe-nonnull`
 (opt-in only); disable with `-Wno-nonnull` / `-Wno-maybe-nonnull`.

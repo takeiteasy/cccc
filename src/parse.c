@@ -8021,9 +8021,13 @@ static void nn_check_call_args(VirtualMachine *vm, NNEnv *env, Node *call) {
         // Skip const-null args entirely -- validate_nonnull_call() already
         // warned on those at parse time; don't double-warn.
         Node *stripped = nn_strip_cast(arg);
-        if (marked && stripped && !is_const_expr(vm, stripped) &&
-            stripped->kind == ND_VAR && nn_trackable(stripped->var)) {
-            NNState state = nn_env_get(env, stripped->var);
+        // #690: route through nn_state_of_expr() rather than only handling
+        // ND_VAR directly, so a call used inline as the argument
+        // (handle(maybe_null())) also picks up the ND_FUNCALL case #688 added
+        // there -- ND_VAR/non-trackable behaviour is unchanged since
+        // nn_state_of_expr() falls back to nn_env_get()/NN_UNKNOWN the same way.
+        if (marked && stripped && !is_const_expr(vm, stripped)) {
+            NNState state = nn_state_of_expr(vm, env, arg);
             if (state == NN_NULL && (vm->compiler.warnings & CCCC_WARN_NONNULL))
                 warn_tok(vm, arg->tok, CCCC_WARN_NONNULL,
                          "null value passed to a parameter marked nonnull (parameter %d)",
@@ -8043,10 +8047,12 @@ static void nn_check_return(VirtualMachine *vm, NNEnv *env, Obj *fn, Node *ret_e
     if (!fn->ty->returns_nonnull)
         return;
     Node *stripped = nn_strip_cast(ret_expr);
-    if (!stripped || is_const_expr(vm, stripped) ||
-        stripped->kind != ND_VAR || !nn_trackable(stripped->var))
+    if (!stripped || is_const_expr(vm, stripped))
         return;
-    NNState state = nn_env_get(env, stripped->var);
+    // #690: same nn_state_of_expr() routing as nn_check_call_args() above, so
+    // `return maybe_null();` (a bare ND_FUNCALL return expression) is also
+    // covered, not just `int *p = maybe_null(); return p;`.
+    NNState state = nn_state_of_expr(vm, env, ret_expr);
     if (state == NN_NULL && (vm->compiler.warnings & CCCC_WARN_NONNULL))
         warn_tok(vm, ret_expr->tok, CCCC_WARN_NONNULL,
                  "null value returned from function declared with 'returns_nonnull'");
