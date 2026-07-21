@@ -7948,14 +7948,21 @@ static NNState nn_state_of_expr(VirtualMachine *vm, NNEnv *env, Node *node) {
         return eval(vm, node) == 0 ? NN_NULL : NN_NONNULL;
     if (node->kind == ND_VAR && nn_trackable(node->var))
         return nn_env_get(env, node->var);
-    // #688: a direct call to a function flagged by the whole-TU
-    // may-return-null summary (check_may_return_null_summaries()) is
-    // "maybe null" evidence, never definite -- an indirect call (through a
-    // function pointer, node->lhs->kind != ND_VAR) has no known callee and
-    // stays NN_UNKNOWN, matching the "unknown callee => no evidence" rule.
+    // #688/#692: a direct call to a function flagged by the whole-TU
+    // may-return-null summary (check_may_return_null_summaries()) is "maybe
+    // null" evidence -- unless the summary also proved the callee returns
+    // null on *every* path (always_returns_null), in which case it's
+    // definite, mirroring the intra-function NN_NULL vs NN_MAYBE distinction
+    // #687 makes for local variables. An indirect call (through a function
+    // pointer, node->lhs->kind != ND_VAR) has no known callee and stays
+    // NN_UNKNOWN, matching the "unknown callee => no evidence" rule.
     if (node->kind == ND_FUNCALL && node->lhs && node->lhs->kind == ND_VAR &&
-        node->lhs->var && node->lhs->var->may_return_null)
-        return NN_MAYBE;
+        node->lhs->var) {
+        if (node->lhs->var->always_returns_null)
+            return NN_NULL;
+        if (node->lhs->var->may_return_null)
+            return NN_MAYBE;
+    }
     return NN_UNKNOWN;
 }
 
@@ -8337,6 +8344,72 @@ static bool nn_returns_null_walk(VirtualMachine *vm, Node *node) {
     return false;
 }
 
+// #692: the "definitely" counterpart to nn_expr_may_be_null() above -- true
+// only when every live arm of the expression is provably null (a literal, or
+// a ternary whose live then/els arms are all provably null, or a direct call
+// to a function already proved to always return null). Used by
+// nn_all_returns_null_walk() below to check whether *every* reachable return
+// in a function is null, as opposed to nn_expr_may_be_null()'s existential
+// "does at least one live arm evaluate to null".
+static bool nn_expr_is_null(VirtualMachine *vm, Node *expr) {
+    expr = nn_strip_cast(expr);
+    if (!expr)
+        return false;
+    if (is_const_expr(vm, expr))
+        return eval(vm, expr) == 0;
+    if (expr->kind == ND_COND) {
+        int bv = static_branch_value(vm, expr->cond);
+        if (bv == 0)
+            return nn_expr_is_null(vm, expr->els);
+        if (bv == 1)
+            return nn_expr_is_null(vm, expr->then);
+        return nn_expr_is_null(vm, expr->then) && nn_expr_is_null(vm, expr->els);
+    }
+    if (expr->kind == ND_FUNCALL && expr->lhs && expr->lhs->kind == ND_VAR &&
+        expr->lhs->var && expr->lhs->var->always_returns_null)
+        return true;
+    return false;
+}
+
+// #692: true when every reachable return statement in `node`'s subtree is
+// provably null via nn_expr_is_null() -- the "for all" counterpart to
+// nn_returns_null_walk()'s "there exists" search. Soundness relies on
+// append_implicit_return() having already materialized a real `return
+// (T)0;` node for any pointer-returning function that could otherwise fall
+// off the end, so every live path through the function is guaranteed to hit
+// an actual ND_RETURN by the time this runs -- there's no separate
+// fall-off-the-end case to account for here.
+static bool nn_all_returns_null_walk(VirtualMachine *vm, Node *node) {
+    for (; node; node = node->next) {
+        if (node->kind == ND_IF || node->kind == ND_COND) {
+            int bv = static_branch_value(vm, node->cond);
+            if (bv != 0 && !nn_all_returns_null_walk(vm, node->then))
+                return false;
+            if (node->els && bv != 1 && !nn_all_returns_null_walk(vm, node->els))
+                return false;
+            continue; // dead branches already excluded above -- skip the generic recursion
+        }
+        if (node->kind == ND_RETURN) {
+            if (!node->lhs || !nn_expr_is_null(vm, node->lhs))
+                return false;
+            continue;
+        }
+        if (!nn_all_returns_null_walk(vm, node->lhs)) return false;
+        if (!nn_all_returns_null_walk(vm, node->rhs)) return false;
+        if (node->kind != ND_IF && node->kind != ND_COND) {
+            if (!nn_all_returns_null_walk(vm, node->cond)) return false;
+            if (!nn_all_returns_null_walk(vm, node->then)) return false;
+            if (!nn_all_returns_null_walk(vm, node->els)) return false;
+        }
+        if (!nn_all_returns_null_walk(vm, node->init)) return false;
+        if (!nn_all_returns_null_walk(vm, node->inc)) return false;
+        if (!nn_all_returns_null_walk(vm, node->body)) return false;
+        for (Node *a = node->args; a; a = a->next)
+            if (!nn_all_returns_null_walk(vm, a)) return false;
+    }
+    return true;
+}
+
 // Entry point for the summary pass: called once from parse() after every
 // top-level function has been parsed, so a caller anywhere in the
 // translation unit sees a complete summary for every callee, regardless of
@@ -8345,21 +8418,32 @@ static bool nn_returns_null_walk(VirtualMachine *vm, Node *node) {
 static void check_may_return_null_summaries(VirtualMachine *vm) {
     if (!(vm->compiler.warnings & CCCC_WARN_MAYBE_NONNULL))
         return; // fact is only ever consumed under -Wmaybe-nonnull
-    // #693: iterate to a fixpoint so a transitive chain (relay() whose only
-    // null-returning path is `return maybe_null();`) converges regardless of
-    // how many hops deep it is or which function is defined first in the
-    // translation unit. Flags only ever flip false->true, so this always
-    // terminates within at most one pass per function.
+    // #693/#692: iterate both facts to a fixpoint together so a transitive
+    // chain (relay() whose only null-returning path is `return
+    // maybe_null();`, or whose every path is `return always_null_fn();`)
+    // converges regardless of how many hops deep it is or which function is
+    // defined first in the translation unit. Both flags only ever flip
+    // false->true, so this always terminates within at most one pass per
+    // function. always_returns_null implies may_return_null (a function
+    // that returns null on every path also has at least one null-returning
+    // path), so set both together.
     bool changed;
     do {
         changed = false;
-        for (Obj *fn = vm->compiler.globals; fn; fn = fn->next)
-            if (fn->is_function && fn->body && fn->ty && fn->ty->kind == TY_FUNC &&
-                fn->ty->return_ty && fn->ty->return_ty->kind == TY_PTR &&
-                !fn->may_return_null && nn_returns_null_walk(vm, fn->body)) {
+        for (Obj *fn = vm->compiler.globals; fn; fn = fn->next) {
+            if (!(fn->is_function && fn->body && fn->ty && fn->ty->kind == TY_FUNC &&
+                  fn->ty->return_ty && fn->ty->return_ty->kind == TY_PTR))
+                continue;
+            if (!fn->may_return_null && nn_returns_null_walk(vm, fn->body)) {
                 fn->may_return_null = true;
                 changed = true;
             }
+            if (!fn->always_returns_null && nn_all_returns_null_walk(vm, fn->body)) {
+                fn->always_returns_null = true;
+                fn->may_return_null = true;
+                changed = true;
+            }
+        }
     } while (changed);
 }
 

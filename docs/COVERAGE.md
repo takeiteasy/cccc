@@ -732,10 +732,9 @@ with a **visible body** in the current translation unit and a **provable**
 null-returning path is flagged — an unannotated external or
 declaration-only function (e.g. `malloc`) is never assumed to maybe-return
 null, since that would warn on nearly every unannotated pointer-returning
-call. The fact only ever produces a maybe-null state, never a definite one,
-so it is diagnosed under `-Wmaybe-nonnull` only. It propagates through a
-direct call to a flagged function whether that call is first assigned to a
-local or used inline as the argument/return expression itself:
+call. It propagates through a direct call to a flagged function whether that
+call is first assigned to a local or used inline as the argument/return
+expression itself:
 
 ```c
 handle(maybe_null(1));               // -Wmaybe-nonnull: warns, same as above
@@ -758,6 +757,30 @@ void use(void) {
     handle(p);   // -Wmaybe-nonnull: warns
 }
 ```
+
+When a flagged function is provably null on **every** reachable path (never
+just some), the whole-TU pass promotes it from a maybe-null fact to a
+definite one — mirroring the same NN_NULL-vs-NN_MAYBE distinction the
+intra-function flow analysis already makes for local variables:
+
+```c
+int *always_null(void) { return 0; }
+
+void use(void) {
+    int *p = always_null();
+    handle(p);   // -Wnonnull: warns (needs -Wmaybe-nonnull passed too, to
+                 // run the interprocedural pass that discovers the fact)
+}
+```
+
+Note this still requires `-Wmaybe-nonnull` to be passed for the
+interprocedural pass to run at all — the always-null fact is diagnosed
+under `-Wnonnull`'s message text once discovered, but discovering it in the
+first place stays gated behind the opt-in flag, same as every other
+interprocedural fact here. Passing `-Wmaybe-nonnull` alone (without
+`-Wnonnull`) does **not** warn on an always-null callee, again mirroring the
+local-variable convention: `-Wmaybe-nonnull` covers *maybe*-null evidence,
+and a provably-always-null value is `-Wnonnull`'s concern.
 
 Diagnosed under `-Wnonnull` (part of `-Wall`) and `-Wmaybe-nonnull`
 (opt-in only); disable with `-Wno-nonnull` / `-Wno-maybe-nonnull`.
