@@ -320,7 +320,7 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 | `returns_nonnull` | GNU / C23 | ✓ | Warns when a statically- or flow-provably-null value is returned from a `returns_nonnull` function (`-Wnonnull`, part of `-Wall`); a merely maybe-null return warns under the opt-in `-Wmaybe-nonnull` |
 | `constructor` / `constructor(N)` | GNU (C23: `[[gnu::constructor]]`) | ✓ | Runs `void(void)` function before `main()`, ordered by priority (lower first; unprioritised functions run last) |
 | `destructor` / `destructor(N)` | GNU (C23: `[[gnu::destructor]]`) | ✓ | Runs `void(void)` function after `main()` returns normally, in reverse priority order (higher first; unprioritised functions run first) |
-| `sentinel` / `sentinel(N)` | GNU (C23: `[[gnu::sentinel]]`) | ✓ | Warns at each call site when the expected trailing variadic argument is not a literal `NULL`/`0` (`-Wsentinel`, part of `-Wall`); static syntactic check only, no runtime enforcement |
+| `sentinel` / `sentinel(N)` | GNU (C23: `[[gnu::sentinel]]`) | ✓ | Warns at each call site when the expected trailing variadic argument is not a literal, pointer-typed `NULL` (`-Wsentinel`, part of `-Wall`); static syntactic check only, no runtime enforcement. Applying it to a non-variadic function warns under `-Wattributes` instead |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
 `__has_attribute` returns `1` for `error`, `warning`, `warn_unused_result`, and
@@ -799,12 +799,18 @@ be `N` positions back from the end of the call).
 
 This is a **static, call-site-only** check — a syntactic scan of the parsed
 argument list, with no runtime enforcement. Only a literal/constant-folded
-null (`NULL`, `0`, `(void*)0`, …) satisfies the check; a variable that
-merely holds `NULL` at runtime still warns, since the parser has no flow
-analysis over the value (unlike `-Wmaybe-nonnull`'s dataflow pass — sentinel
-checking mirrors GCC's own purely-syntactic behaviour here). A bare `0` is
-accepted without requiring a pointer cast, more lenient than GCC's stricter
-`-Wstrict-overflow`-adjacent typed check.
+*pointer-typed* null (`NULL`, `(void*)0`, `(T*)0`, C23 `nullptr`) satisfies
+the check; a variable that merely holds `NULL` at runtime still warns, since
+the parser has no flow analysis over the value (unlike `-Wmaybe-nonnull`'s
+dataflow pass — sentinel checking mirrors GCC's own purely-syntactic
+behaviour here). A bare, uncast `0` (`int`-typed) also warns, distinctly from
+a fully-missing terminator, since it is not guaranteed to zero-fill a
+pointer-sized `va_list` slot — matching GCC's `-Wsentinel` strictness.
+
+`sentinel` only makes sense on a variadic function; applying it to a
+non-variadic function warns `"sentinel attribute only applies to variadic
+functions"` under `-Wattributes` at the declaration, and the (necessarily
+argument-less) call sites are not additionally flagged.
 
 ```c
 void run(const char *path, ...) __attribute__((sentinel));
@@ -812,6 +818,7 @@ void run(const char *path, ...) { }
 
 int main(void) {
     run("/bin/ls", "-l", (void*)0);   // ok
+    run("/bin/ls", "-l", 0);          // warns: bare 0 is not a pointer; cast NULL / (void*)0
     run("/bin/ls", "-l");             // warns: missing sentinel in function call
 }
 ```

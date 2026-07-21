@@ -8547,6 +8547,13 @@ static void validate_sentinel_call(VirtualMachine *vm, Token *tok, Type *func_ty
                                     Node *args) {
     if (!func_ty->is_sentinel)
         return;
+    // #696: sentinel on a non-variadic function is misapplied; that is
+    // already flagged at the declaration (check_sentinel_variadic()), so
+    // don't also trip the "not enough variable arguments" guard on every
+    // call -- there being no variadic args at all is the real problem, not
+    // a missing NULL.
+    if (!func_ty->is_variadic)
+        return;
 
     int nargs = 0;
     for (Node *a = args; a; a = a->next)
@@ -8569,9 +8576,18 @@ static void validate_sentinel_call(VirtualMachine *vm, Token *tok, Type *func_ty
     Node *arg = args;
     for (int i = 0; i < target; i++)
         arg = arg->next;
-    if (!(is_const_expr(vm, arg) && eval(vm, arg) == 0))
+    if (!(is_const_expr(vm, arg) && eval(vm, arg) == 0)) {
         warn_tok(vm, arg->tok, CCCC_WARN_SENTINEL,
                  "missing sentinel in function call");
+    } else if (arg->ty->kind != TY_PTR && arg->ty->kind != TY_NULLPTR_T) {
+        // #695: a literal 0 that is not pointer-typed (bare "int 0" rather
+        // than NULL/(void*)0/nullptr) still warns, matching GCC's stricter
+        // -Wsentinel: an untyped 0 is not guaranteed to zero-fill a
+        // pointer-sized va_list slot.
+        warn_tok(vm, arg->tok, CCCC_WARN_SENTINEL,
+                 "missing sentinel in function call "
+                 "(bare 0 is not a pointer; cast NULL / (void*)0)");
+    }
 }
 
 // funcall = (assign ("," assign)*)? ")"
@@ -10211,12 +10227,24 @@ static Obj *find_func_in_current_scope(VirtualMachine *vm, char *name, int name_
     return NULL;
 }
 
+// #696: __attribute__((sentinel)) / [[gnu::sentinel]] only makes sense on a
+// variadic function -- warn (under -Wattributes, matching GCC) when it's
+// applied to one that isn't, instead of silently relying on
+// validate_sentinel_call()'s per-call-site bounds guard to notice.
+static void check_sentinel_variadic(VirtualMachine *vm, Type *ty) {
+    if (ty && ty->kind == TY_FUNC && ty->is_sentinel && !ty->is_variadic &&
+        (vm->compiler.warnings & CCCC_WARN_ATTRIBUTES))
+        warn_tok(vm, ty->name, CCCC_WARN_ATTRIBUTES,
+                 "sentinel attribute only applies to variadic functions");
+}
+
 static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty, VarAttr *attr,
                                        Token *tok) {
     if (!ty->name)
         error_tok(vm, ty->name_pos, "function name omitted");
 
     char *name_str = get_ident(vm, ty->name);
+    check_sentinel_variadic(vm, ty);
 
     if (attr->is_noreturn && ty->kind == TY_FUNC)
         ty->is_noreturn = true;
@@ -10431,6 +10459,7 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
     if (!ty->name)
         error_tok(vm, ty->name_pos, "function name omitted");
     char *name_str = get_ident(vm, ty->name);
+    check_sentinel_variadic(vm, ty);
 
     // Propagate noreturn from attribute to function type
     if (attr->is_noreturn && ty->kind == TY_FUNC)
