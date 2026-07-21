@@ -664,11 +664,13 @@ function's return value as never null. Both are static, compile-time-only
 checks — there is no codegen effect.
 
 At each call site, an argument in a nonnull position (or a `return` in a
-`returns_nonnull` function) is checked only when it is a **compile-time
-constant** that folds to zero, e.g. a literal `NULL`/`0`/`(void*)0`. This
-catches the common literal-null mistake but does not perform flow analysis —
-a pointer that is null through a variable, an `if`-guarded branch, or any
-non-constant expression is not tracked.
+`returns_nonnull` function) is checked in two ways:
+
+- A **compile-time constant** that folds to zero, e.g. a literal
+  `NULL`/`0`/`(void*)0`, is always caught.
+- A light **flow-sensitive pass** additionally tracks simple local pointer
+  variables through straight-line code within a single function body, so a
+  null value that reaches the call through a variable is also caught:
 
 ```c
 void handle(int *p) __attribute__((nonnull(1)));
@@ -679,10 +681,20 @@ int *make(void) { return 0; }   // warns: null returned from function declared w
 
 int main(void) {
     handle(0);                  // warns: null passed to a parameter marked nonnull (parameter 1)
+
+    int *p = 0;
+    handle(p);                  // warns: null value passed to a parameter marked nonnull (parameter 1)
+
     make();
     return 42;
 }
 ```
+
+The flow pass only warns on **provably-null** values — it never flags a
+pointer that is merely *maybe* null after a branch (e.g.
+`int *p = 0; if (cond) p = &x; handle(p);` is not diagnosed), a pointer whose
+address has been taken, or anything that depends on another function's
+return value. There is no interprocedural analysis.
 
 Diagnosed under `-Wnonnull` (part of `-Wall`); disable with `-Wno-nonnull`.
 

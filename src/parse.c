@@ -192,6 +192,7 @@ static int64_t eval2(VirtualMachine *vm, Node *node, char ***label);
 static int64_t eval_rval(VirtualMachine *vm, Node *node, char ***label);
 static bool is_const_expr(VirtualMachine *vm, Node *node);
 static int static_branch_value(VirtualMachine *vm, Node *cond);
+static void check_nonnull_flow(VirtualMachine *vm, Obj *fn);
 static bool is_constexpr_object_type(Type *ty);
 // __builtin_object_size helpers
 typedef struct {
@@ -7857,6 +7858,297 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
 
 #undef MAX_FMT_ARGS
 
+// ---------------------------------------------------------------------
+// Flow-sensitive nonnull tracking (#679, follow-up to #655)
+//
+// validate_nonnull_call() below only catches literal/constant-folded null
+// arguments. This post-parse pass extends that with a light forward walk
+// over each function body that tracks simple local pointer null-state
+// through straight-line code, catching the case named in #679:
+//
+//     int *p = 0;
+//     f(p);          // p flows from a null initializer -- now warns
+//
+// Deliberately conservative to avoid false positives (matches #655's design
+// and GCC/Clang -Wnonnull): only *provably*-null values ever warn. A pointer
+// that is merely *maybe* null after a branch --
+//     int *p = 0; if (cond) p = &x; f(p);
+// -- is left alone; that needs per-branch merge dataflow and is out of scope
+// (tracked as a follow-up). No interprocedural analysis either (also out of
+// scope per the ticket).
+//
+// Implementation: a single forward env (Obj* -> null-state), no clone/merge
+// dataflow. At any control-flow construct (if/loop/switch) any local
+// assigned somewhere inside is reset to UNKNOWN on exit -- a "barrier" --
+// which is sound without needing per-branch state cloning. A label resets
+// the whole env (a goto target is a merge point from unknown predecessors).
+// Locals whose address has escaped (Obj->addr_escapes, set by the
+// mark_addr_escapes() pass that already ran) are never tracked, since a
+// reassignment through an escaped alias is invisible to this walk.
+typedef enum { NN_UNKNOWN, NN_NULL, NN_NONNULL } NNState;
+
+typedef struct {
+    Obj *var;
+    NNState state;
+} NNEnvEntry;
+
+// Locals lists are short; a linear-scan array keeps this pass simple (same
+// spirit as restrict_derived_walk()'s DerivedCand[] scratch array).
+#define NN_MAX_TRACKED 256
+
+typedef struct {
+    NNEnvEntry entries[NN_MAX_TRACKED];
+    int count;
+} NNEnv;
+
+static bool nn_trackable(Obj *v) {
+    return v && v->is_local && !v->is_param && !v->addr_escapes &&
+           v->ty && v->ty->kind == TY_PTR;
+}
+
+static NNState nn_env_get(NNEnv *env, Obj *v) {
+    for (int i = 0; i < env->count; i++)
+        if (env->entries[i].var == v)
+            return env->entries[i].state;
+    return NN_UNKNOWN;
+}
+
+// Returns NULL on scratch-array overflow -- callers must treat that as "stop
+// tracking this var", which only means a missed warning, never a false one.
+static NNState *nn_env_slot(NNEnv *env, Obj *v) {
+    for (int i = 0; i < env->count; i++)
+        if (env->entries[i].var == v)
+            return &env->entries[i].state;
+    if (env->count < NN_MAX_TRACKED) {
+        env->entries[env->count].var = v;
+        env->entries[env->count].state = NN_UNKNOWN;
+        return &env->entries[env->count++].state;
+    }
+    return NULL;
+}
+
+static Node *nn_strip_cast(Node *node) {
+    while (node && node->kind == ND_CAST)
+        node = node->lhs;
+    return node;
+}
+
+static NNState nn_state_of_expr(VirtualMachine *vm, NNEnv *env, Node *node) {
+    node = nn_strip_cast(node);
+    if (!node)
+        return NN_UNKNOWN;
+    add_type(vm, node);
+    if (node->kind == ND_ADDR)
+        return NN_NONNULL;
+    if (is_const_expr(vm, node))
+        return eval(vm, node) == 0 ? NN_NULL : NN_NONNULL;
+    if (node->kind == ND_VAR && nn_trackable(node->var))
+        return nn_env_get(env, node->var);
+    return NN_UNKNOWN;
+}
+
+// Barrier: collect every trackable local assigned anywhere in `node`'s
+// subtree and reset it to UNKNOWN in `env`. Used at the exit of an
+// if/loop/switch construct so a conditionally-taken write can't leave a
+// stale (and possibly wrong) null-state behind for the fall-through path.
+static void nn_collect_assigned(Node *node, NNEnv *env) {
+    for (; node; node = node->next) {
+        if (node->kind == ND_ASSIGN && node->lhs && node->lhs->kind == ND_VAR &&
+            nn_trackable(node->lhs->var)) {
+            NNState *slot = nn_env_slot(env, node->lhs->var);
+            if (slot) *slot = NN_UNKNOWN;
+        }
+        nn_collect_assigned(node->lhs, env);
+        nn_collect_assigned(node->rhs, env);
+        nn_collect_assigned(node->cond, env);
+        nn_collect_assigned(node->then, env);
+        nn_collect_assigned(node->els, env);
+        nn_collect_assigned(node->init, env);
+        nn_collect_assigned(node->inc, env);
+        nn_collect_assigned(node->body, env);
+        for (Node *a = node->args; a; a = a->next)
+            nn_collect_assigned(a, env);
+    }
+}
+
+static void nn_check_call_args(VirtualMachine *vm, NNEnv *env, Node *call) {
+    Type *func_ty = call->func_ty;
+    if (!func_ty || (!func_ty->nonnull_all && !func_ty->nonnull_mask))
+        return;
+
+    Node *arg = call->args;
+    Type *param_ty = func_ty->params;
+    int idx = 1;
+    while (arg && param_ty) {
+        bool marked = func_ty->nonnull_all
+                          ? (param_ty->kind == TY_PTR)
+                          : (idx <= 64 && (func_ty->nonnull_mask & (1ULL << (idx - 1))));
+        // Skip const-null args entirely -- validate_nonnull_call() already
+        // warned on those at parse time; don't double-warn.
+        Node *stripped = nn_strip_cast(arg);
+        if (marked && stripped && !is_const_expr(vm, stripped) &&
+            stripped->kind == ND_VAR && nn_trackable(stripped->var) &&
+            nn_env_get(env, stripped->var) == NN_NULL)
+            warn_tok(vm, arg->tok, CCCC_WARN_NONNULL,
+                     "null value passed to a parameter marked nonnull (parameter %d)",
+                     idx);
+        arg = arg->next;
+        param_ty = param_ty->next;
+        idx++;
+    }
+}
+
+static void nn_check_return(VirtualMachine *vm, NNEnv *env, Obj *fn, Node *ret_expr) {
+    if (!fn->ty->returns_nonnull)
+        return;
+    Node *stripped = nn_strip_cast(ret_expr);
+    if (stripped && !is_const_expr(vm, stripped) &&
+        stripped->kind == ND_VAR && nn_trackable(stripped->var) &&
+        nn_env_get(env, stripped->var) == NN_NULL)
+        warn_tok(vm, ret_expr->tok, CCCC_WARN_NONNULL,
+                 "null value returned from function declared with 'returns_nonnull'");
+}
+
+static void nn_walk(VirtualMachine *vm, Obj *fn, Node *node, NNEnv *env);
+
+// Shared handling for ND_IF and ND_COND (ternary): both use cond/then/els.
+// Each live branch is walked with its own copy of env (to catch calls inside
+// it), then the copies are discarded and a barrier resets any var assigned
+// in a live branch to UNKNOWN -- see block comment above.
+static void nn_walk_branch(VirtualMachine *vm, Obj *fn, Node *node, NNEnv *env) {
+    nn_walk(vm, fn, node->cond, env);
+
+    int bv = static_branch_value(vm, node->cond);
+    bool then_dead = (bv == 0), els_dead = (bv == 1);
+
+    if (!then_dead) {
+        NNEnv then_env = *env;
+        nn_walk(vm, fn, node->then, &then_env);
+    }
+    if (node->els && !els_dead) {
+        NNEnv els_env = *env;
+        nn_walk(vm, fn, node->els, &els_env);
+    }
+
+    if (!then_dead)
+        nn_collect_assigned(node->then, env);
+    if (node->els && !els_dead)
+        nn_collect_assigned(node->els, env);
+}
+
+static void nn_walk(VirtualMachine *vm, Obj *fn, Node *node, NNEnv *env) {
+    for (; node; node = node->next) {
+        switch (node->kind) {
+        case ND_LABEL:
+        case ND_CASE:
+            // A goto label or switch case is a jump target -- the switch
+            // head can dispatch straight into any case, skipping whatever
+            // an earlier case in the same body did (no fall-through model
+            // here), so it's a merge point from unknown predecessors just
+            // like a goto label. Discard all tracked state to stay sound.
+            env->count = 0;
+            nn_walk(vm, fn, node->lhs, env);
+            continue;
+
+        case ND_ASSIGN:
+            if (node->rhs) nn_walk(vm, fn, node->rhs, env);
+            if (node->lhs && node->lhs->kind != ND_VAR)
+                nn_walk(vm, fn, node->lhs, env);
+            if (node->lhs && node->lhs->kind == ND_VAR && nn_trackable(node->lhs->var)) {
+                NNState *slot = nn_env_slot(env, node->lhs->var);
+                if (slot) *slot = nn_state_of_expr(vm, env, node->rhs);
+            }
+            continue;
+
+        case ND_FUNCALL:
+            for (Node *a = node->args; a; a = a->next)
+                nn_walk(vm, fn, a, env);
+            if (vm->compiler.warnings & CCCC_WARN_NONNULL)
+                nn_check_call_args(vm, env, node);
+            continue;
+
+        case ND_RETURN:
+            if (node->lhs) {
+                nn_walk(vm, fn, node->lhs, env);
+                if (vm->compiler.warnings & CCCC_WARN_NONNULL)
+                    nn_check_return(vm, env, fn, node->lhs);
+            }
+            continue;
+
+        case ND_IF:
+        case ND_COND:
+            nn_walk_branch(vm, fn, node, env);
+            continue;
+
+        case ND_LOGAND:
+        case ND_LOGOR:
+            // rhs is conditionally evaluated (short-circuit) -- same
+            // clone-then-barrier treatment as an ND_IF/ND_COND branch.
+            nn_walk(vm, fn, node->lhs, env);
+            {
+                NNEnv rhs_env = *env;
+                nn_walk(vm, fn, node->rhs, &rhs_env);
+            }
+            nn_collect_assigned(node->rhs, env);
+            continue;
+
+        case ND_FOR:
+        case ND_DO:
+            if (node->init) nn_walk(vm, fn, node->init, env);
+            if (node->cond) nn_walk(vm, fn, node->cond, env);
+            // Barrier before entering the body: the loop may run 0+ times
+            // and repeat, so a var the body assigns must already read as
+            // UNKNOWN on entry to avoid a false positive on a later
+            // iteration or on the (already-executed) first one.
+            nn_collect_assigned(node->then, env);
+            if (node->inc) nn_collect_assigned(node->inc, env);
+            {
+                NNEnv body_env = *env;
+                nn_walk(vm, fn, node->then, &body_env);
+                if (node->inc) nn_walk(vm, fn, node->inc, &body_env);
+            }
+            continue;
+
+        case ND_SWITCH:
+            if (node->cond) nn_walk(vm, fn, node->cond, env);
+            // Case labels make precise per-branch merging impractical for a
+            // light pass -- barrier the whole body instead.
+            nn_collect_assigned(node->then, env);
+            {
+                NNEnv body_env = *env;
+                nn_walk(vm, fn, node->then, &body_env);
+            }
+            continue;
+
+        default:
+            break;
+        }
+
+        nn_walk(vm, fn, node->lhs, env);
+        nn_walk(vm, fn, node->rhs, env);
+        nn_walk(vm, fn, node->cond, env);
+        nn_walk(vm, fn, node->then, env);
+        nn_walk(vm, fn, node->els, env);
+        nn_walk(vm, fn, node->init, env);
+        nn_walk(vm, fn, node->inc, env);
+        nn_walk(vm, fn, node->body, env);
+        for (Node *a = node->args; a; a = a->next)
+            nn_walk(vm, fn, a, env);
+    }
+}
+
+// Entry point: run the flow-sensitive nonnull pass over a fully-parsed
+// function body. Call after mark_addr_escapes() has run (this pass relies
+// on Obj->addr_escapes to exclude address-taken locals from tracking).
+static void check_nonnull_flow(VirtualMachine *vm, Obj *fn) {
+    if (!fn || !fn->body || !fn->ty)
+        return;
+    if (!(vm->compiler.warnings & CCCC_WARN_NONNULL))
+        return;
+    NNEnv env = {0};
+    nn_walk(vm, fn, fn->body, &env);
+}
+
 // Warn on statically-provable-null arguments passed to a parameter marked
 // __attribute__((nonnull)) / [[gnu::nonnull]]. Only literal/constant-folded
 // null values are caught here -- no flow analysis across variables.
@@ -9965,6 +10257,7 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
             resolve_goto_labels(vm);
             resolve_objsize_queries(vm, fn->body);
             mark_addr_escapes(fn->body);
+            check_nonnull_flow(vm, fn);
         } else {
             // Fatal error_tok() fired inside the function body.  The error has
             // already been collected by error_tok(); we just need to clean up scope.
@@ -10050,6 +10343,7 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
         resolve_goto_labels(vm);
         resolve_objsize_queries(vm, fn->body);
         mark_addr_escapes(fn->body);
+        check_nonnull_flow(vm, fn);
     }
 
     // Restore parent function context if this was a nested function
