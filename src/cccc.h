@@ -509,7 +509,8 @@ CCCC_WARN_ALL = CCCC_WARN_UNUSED |
                       CCCC_WARN_FALLTHROUGH |
                       CCCC_WARN_STRICT_PROTOTYPES |
                       CCCC_WARN_OLD_STYLE_DEFINITION |
-                      CCCC_WARN_REDUNDANT_DECLS,
+                      CCCC_WARN_REDUNDANT_DECLS |
+                      CCCC_WARN_COMPTIME_BLOCK_LEAK,
 } CCCCWarning;
 
 /*!

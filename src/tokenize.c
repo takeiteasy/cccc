@@ -62,6 +62,7 @@ static const WarningInfo warning_infos[] = {
     {"extra-tokens", CCCC_WARN_EXTRA_TOKENS, false},
     {"large-file-embed", CCCC_WARN_LARGE_FILE_EMBED, false},
     {"cccc-macro", CCCC_WARN_CCCC_MACRO, false},
+    {"comptime-block-leak", CCCC_WARN_COMPTIME_BLOCK_LEAK, false},
     {"ignored-features", CCCC_WARN_IGNORED_FEATURES, false},
     {"attributes", CCCC_WARN_ATTRIBUTES, false},
     {"nodiscard", CCCC_WARN_NODISCARD, false},

@@ -580,6 +580,7 @@ The trailing summary line (`N warnings generated.`) is suppressed in JSON mode.
 - `extra-tokens`
 - `large-file-embed`
 - `cccc-macro`
+- `comptime-block-leak` — warns when a `#pragma cccc comptime begin` block in an included header is left unclosed at EOF and is auto-closed (part of `-Wextra`)
 - `ignored-features`
 - `attributes`
 - `nodiscard`
