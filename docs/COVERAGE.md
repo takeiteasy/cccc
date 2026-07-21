@@ -691,9 +691,7 @@ int main(void) {
 ```
 
 Under plain `-Wnonnull`, the flow pass only warns on **provably-null**
-values — a pointer whose address has been taken is never tracked, and
-neither is anything that depends on another function's return value (no
-interprocedural analysis).
+values — a pointer whose address has been taken is never tracked.
 
 A pointer that is only **maybe** null — definitely null on one path through
 a branch but not on all of them, e.g.:
@@ -712,6 +710,33 @@ plain `-Wnonnull`, so it is never implied by `-Wall` or `-Wextra` — pass it
 explicitly. Loops and `switch` are not merged precisely by either flag (a
 local assigned anywhere inside is conservatively treated as unknown on exit,
 so no maybe-null warning fires there).
+
+A limited form of **interprocedural** tracking also feeds the same
+`-Wmaybe-nonnull` lattice: a whole-translation-unit pass flags any
+pointer-returning function that has a provable null-returning path (a
+literal `return 0;`/`return NULL;` on some reachable branch), regardless of
+where in the file it's defined relative to its callers. A direct call to a
+flagged function, assigned to a local, is treated as maybe-null:
+
+```c
+int *maybe_null(int cond) { return cond ? &x : 0; }
+
+void use(void) {
+    int *p = maybe_null(1);
+    handle(p);   // -Wmaybe-nonnull: warns; maybe_null() may return null
+}
+```
+
+This is deliberately conservative in the safe direction: only a function
+with a **visible body** in the current translation unit and a **provable**
+null-returning path is flagged — an unannotated external or
+declaration-only function (e.g. `malloc`) is never assumed to maybe-return
+null, since that would warn on nearly every unannotated pointer-returning
+call. The fact only ever produces a maybe-null state, never a definite one,
+so it is diagnosed under `-Wmaybe-nonnull` only, and only propagates through
+a direct call assigned to a tracked local — a call used inline as an
+argument or return expression, or a transitive call chain
+(`return other_maybe_null_fn();`), is not yet covered.
 
 Diagnosed under `-Wnonnull` (part of `-Wall`) and `-Wmaybe-nonnull`
 (opt-in only); disable with `-Wno-nonnull` / `-Wno-maybe-nonnull`.

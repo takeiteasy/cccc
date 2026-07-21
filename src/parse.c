@@ -7948,6 +7948,14 @@ static NNState nn_state_of_expr(VirtualMachine *vm, NNEnv *env, Node *node) {
         return eval(vm, node) == 0 ? NN_NULL : NN_NONNULL;
     if (node->kind == ND_VAR && nn_trackable(node->var))
         return nn_env_get(env, node->var);
+    // #688: a direct call to a function flagged by the whole-TU
+    // may-return-null summary (check_may_return_null_summaries()) is
+    // "maybe null" evidence, never definite -- an indirect call (through a
+    // function pointer, node->lhs->kind != ND_VAR) has no known callee and
+    // stays NN_UNKNOWN, matching the "unknown callee => no evidence" rule.
+    if (node->kind == ND_FUNCALL && node->lhs && node->lhs->kind == ND_VAR &&
+        node->lhs->var && node->lhs->var->may_return_null)
+        return NN_MAYBE;
     return NN_UNKNOWN;
 }
 
@@ -8235,6 +8243,99 @@ static void nn_walk(VirtualMachine *vm, Obj *fn, Node *node, NNEnv *env) {
         for (Node *a = node->args; a; a = a->next)
             nn_walk(vm, fn, a, env);
     }
+}
+
+// ---------------------------------------------------------------------
+// Interprocedural "may return null" summaries (#688, follow-up to #687)
+//
+// A whole-translation-unit pass, run once after every function has been
+// parsed (see the post-parse loop in parse()), that flags each
+// pointer-returning function with a visible body which has a provable
+// null-returning path (a `return 0;`/`return NULL;` reachable per
+// static_branch_value dead-branch pruning). The fact is consumed at call
+// sites by nn_state_of_expr() below, which reports NN_MAYBE for a call to
+// a flagged function -- never NN_NULL, matching #688's framing that a
+// callee-may-return-null fact "naturally produces a MAYBE state." This
+// keeps the interprocedural extension entirely behind the opt-in
+// -Wmaybe-nonnull flag; plain -Wnonnull is completely unaffected.
+//
+// Conservative in the safe direction only: a function is flagged solely on
+// positive evidence of a literal-null return. Anything else -- no return
+// statement found, a non-literal return, or (crucially) no visible body at
+// all, e.g. an extern-only declaration -- leaves may_return_null false,
+// which callers read as "no evidence" (NN_UNKNOWN). This is what keeps
+// unknown/external callees from flooding every f(g()) call site with a
+// warning, per #688's explicit constraint.
+//
+// Only a literal-null return is detected here, not a call to another
+// flagged function (`return g();` where g may return null) -- transitive
+// summaries would need a call-graph fixpoint/topological order and are
+// deferred as a follow-up, same spirit as the existing loop/switch
+// barriers being simpler than real fixpoint dataflow.
+//
+// Evaluates whether a *value-producing expression* (a return's operand)
+// may be null -- as opposed to nn_returns_null_walk below, which searches
+// *statement* trees for a nested `return 0;`. A ternary used as the
+// return operand itself (e.g. `return cond ? &x : 0;`, the ticket's own
+// example) needs this distinct expression-level check: its `then`/`els`
+// arms are values to evaluate for nullness, not statement bodies to search
+// for further return statements.
+static bool nn_expr_may_be_null(VirtualMachine *vm, Node *expr) {
+    expr = nn_strip_cast(expr);
+    if (!expr)
+        return false;
+    if (is_const_expr(vm, expr))
+        return eval(vm, expr) == 0;
+    if (expr->kind == ND_COND) {
+        int bv = static_branch_value(vm, expr->cond);
+        if (bv != 0 && nn_expr_may_be_null(vm, expr->then))
+            return true;
+        if (bv != 1 && nn_expr_may_be_null(vm, expr->els))
+            return true;
+    }
+    return false;
+}
+
+static bool nn_returns_null_walk(VirtualMachine *vm, Node *node) {
+    for (; node; node = node->next) {
+        if (node->kind == ND_IF || node->kind == ND_COND) {
+            int bv = static_branch_value(vm, node->cond);
+            if (bv != 0 && nn_returns_null_walk(vm, node->then))
+                return true;
+            if (node->els && bv != 1 && nn_returns_null_walk(vm, node->els))
+                return true;
+            continue; // dead branches already excluded above -- skip the generic recursion
+        }
+        if (node->kind == ND_RETURN && node->lhs && nn_expr_may_be_null(vm, node->lhs))
+            return true;
+        if (nn_returns_null_walk(vm, node->lhs)) return true;
+        if (nn_returns_null_walk(vm, node->rhs)) return true;
+        if (node->kind != ND_IF && node->kind != ND_COND) {
+            if (nn_returns_null_walk(vm, node->cond)) return true;
+            if (nn_returns_null_walk(vm, node->then)) return true;
+            if (nn_returns_null_walk(vm, node->els)) return true;
+        }
+        if (nn_returns_null_walk(vm, node->init)) return true;
+        if (nn_returns_null_walk(vm, node->inc)) return true;
+        if (nn_returns_null_walk(vm, node->body)) return true;
+        for (Node *a = node->args; a; a = a->next)
+            if (nn_returns_null_walk(vm, a)) return true;
+    }
+    return false;
+}
+
+// Entry point for the summary pass: called once from parse() after every
+// top-level function has been parsed, so a caller anywhere in the
+// translation unit sees a complete summary for every callee, regardless of
+// source order (the #688 fix for check_nonnull_flow's forward-reference
+// gap -- see the post-parse loop in parse()).
+static void check_may_return_null_summaries(VirtualMachine *vm) {
+    if (!(vm->compiler.warnings & CCCC_WARN_MAYBE_NONNULL))
+        return; // fact is only ever consumed under -Wmaybe-nonnull
+    for (Obj *fn = vm->compiler.globals; fn; fn = fn->next)
+        if (fn->is_function && fn->body && fn->ty && fn->ty->kind == TY_FUNC &&
+            fn->ty->return_ty && fn->ty->return_ty->kind == TY_PTR)
+            fn->may_return_null = nn_returns_null_walk(vm, fn->body);
 }
 
 // Entry point: run the flow-sensitive nonnull pass over a fully-parsed
@@ -10357,7 +10458,10 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
             resolve_goto_labels(vm);
             resolve_objsize_queries(vm, fn->body);
             mark_addr_escapes(fn->body);
-            check_nonnull_flow(vm, fn);
+            // check_nonnull_flow() runs post-parse now (#688) -- see the
+            // loop in parse() -- so a forward-referenced callee's summary
+            // is available. This negative-test path nulls fn->body below
+            // regardless, so the function is simply skipped by that loop.
         } else {
             // Fatal error_tok() fired inside the function body.  The error has
             // already been collected by error_tok(); we just need to clean up scope.
@@ -10443,7 +10547,9 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
         resolve_goto_labels(vm);
         resolve_objsize_queries(vm, fn->body);
         mark_addr_escapes(fn->body);
-        check_nonnull_flow(vm, fn);
+        // check_nonnull_flow() runs post-parse now (#688) -- see the loop
+        // in parse() -- so a caller of a later-defined function still sees
+        // that callee's may-return-null summary.
     }
 
     // Restore parent function context if this was a nested function
@@ -10893,6 +10999,19 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
     // Remove redundant tentative definitions.
     scan_globals(vm);
     warn_unused_globals(vm);
+
+    // #688: run the flow-sensitive -Wnonnull/-Wmaybe-nonnull pass here,
+    // post-parse over every function, rather than inline as each
+    // definition finishes (the old #679/#687 scheme). This is what lets a
+    // caller see the may-return-null summary of a callee defined *later*
+    // in the translation unit -- summaries must be computed first so every
+    // check_nonnull_flow() call below sees a complete picture regardless
+    // of source order.
+    check_may_return_null_summaries(vm);
+    for (Obj *fn = vm->compiler.globals; fn; fn = fn->next)
+        if (fn->is_function && fn->body)
+            check_nonnull_flow(vm, fn);
+
     return vm->compiler.globals;
 }
 

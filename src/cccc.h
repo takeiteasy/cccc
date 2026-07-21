@@ -1066,6 +1066,7 @@ struct Obj {
     bool is_nodiscard;
     bool is_pure;
     bool is_func_const;
+    bool may_return_null; // #688: function has a provable null-returning path (whole-TU summary)
     bool is_local_symbol;
     char *deprecated_msg;
     char *nodiscard_msg;
