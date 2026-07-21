@@ -3889,6 +3889,31 @@ static void queue_comptime_include(VirtualMachine *vm, const char *filename, boo
     strarray_push(&vm->compiler.comptime_pending_includes, line);
 }
 
+// Resolve a quoted relative include (e.g. "local.h") against the including
+// file's directory (and the include search paths) before it gets replayed
+// under the synthetic <comptime-include> filename during the comptime pass
+// (build_combined_macro_tokens in src/macros.c) — that synthetic file has no
+// real directory of its own, so an unresolved relative path can't be found
+// from there. Returns NULL (caller falls back to the raw filename) for URLs
+// or names that don't resolve to an existing path.
+static char *resolve_comptime_include_path(VirtualMachine *vm, Token *start_tok,
+                                           char *filename, int filename_len,
+                                           bool is_dquote) {
+    if (is_url(filename))
+        return NULL;
+    char *resolved = NULL;
+    if (filename[0] != '/' && is_dquote) {
+        char *rel = format_relative_path(vm, start_tok->file->name, filename);
+        if (file_exists(rel))
+            resolved = rel;
+    }
+    if (!resolved)
+        resolved = search_include_paths(vm, filename, filename_len, !is_dquote);
+    if (!resolved && is_dquote)
+        resolved = search_include_paths(vm, filename, filename_len, true);
+    return resolved;
+}
+
 static void queue_comptime_directive(VirtualMachine *vm, char *line) {
     if (line && *line)
         strarray_push(&vm->compiler.comptime_pending_includes, line);
@@ -4066,6 +4091,26 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             continue;
         }
         if (directive_route == INCLUDE_ROUTE_COMPTIME) {
+            // #include @comptime "local.h" needs its relative path resolved
+            // here — the generic copy_routed_directive_line text path below
+            // would otherwise replay the raw quoted filename under the
+            // synthetic <comptime-include> file, which has no directory of
+            // its own to resolve against (ticket #684). Other directives
+            // routed with @comptime (#define, #if, ...) don't reference a
+            // filesystem path, so they keep the original text-copy path.
+            if (pp_directive(tok) == PP_INCLUDE) {
+                bool is_dquote;
+                int filename_len;
+                Token *rest = route_after;
+                char *filename = read_include_filename(vm, &rest, route_after,
+                                                        &is_dquote, &filename_len);
+                char *resolved = resolve_comptime_include_path(vm, start, filename,
+                                                                filename_len, is_dquote);
+                queue_comptime_include(vm, resolved ? resolved : filename,
+                                       resolved ? false : is_dquote);
+                tok = skip_line(vm, rest);
+                continue;
+            }
             char *line =
                 copy_routed_directive_line(vm, start, route_start, route_after);
             queue_comptime_directive(vm, line);
@@ -4162,11 +4207,19 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                                                    &is_dquote, &filename_len);
             // Comptime includes and ordinary includes inside a comptime block are
             // queued for the comptime pass only; they never reach the runtime TU.
+            // Resolve the absolute path before queueing so that quoted relative
+            // includes like #include @comptime "local.h" can be found from the
+            // synthetic comptime preprocessing context (ticket #684).
             if (include_route == INCLUDE_ROUTE_COMPTIME ||
                 (include_route == INCLUDE_ROUTE_NORMAL &&
                  ctx_top(vm) && ctx_top(vm)->type == CTX_COMPTIME)) {
                 tok = skip_line(vm, tok);
-                queue_comptime_include(vm, filename, is_dquote);
+                char *resolved = resolve_comptime_include_path(vm, start, filename,
+                                                               filename_len, is_dquote);
+                // Unresolved (e.g. a URL, or a name genuinely not found anywhere)
+                // falls back to the original filename/quoting unchanged.
+                queue_comptime_include(vm, resolved ? resolved : filename,
+                                       resolved ? false : is_dquote);
                 break;
             }
             // Shared includes go to both contexts: queue for comptime, then fall
@@ -4175,21 +4228,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             // includes like #include @shared "local.h" can be found from the
             // synthetic comptime preprocessing context.
             if (include_route == INCLUDE_ROUTE_SHARED) {
-                char *shared_path = NULL;
-                if (!is_url(filename)) {
-                    if (filename[0] != '/' && is_dquote) {
-                        char *rel =
-                            format_relative_path(vm, start->file->name, filename);
-                        if (file_exists(rel))
-                            shared_path = rel;
-                    }
-                    if (!shared_path)
-                        shared_path = search_include_paths(vm, filename,
-                                                           filename_len, !is_dquote);
-                    if (!shared_path && is_dquote)
-                        shared_path = search_include_paths(vm, filename,
-                                                           filename_len, true);
-                }
+                char *shared_path = resolve_comptime_include_path(vm, start, filename,
+                                                                   filename_len, is_dquote);
                 // Queue as an angle-bracket include so the absolute path is
                 // used directly (no relative-path ambiguity in comptime context).
                 queue_comptime_include(vm, shared_path ? shared_path : filename,
