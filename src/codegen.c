@@ -1577,9 +1577,34 @@ static Pc emit_lta3(VirtualMachine *vm, int rd, long long offset) {
     return emit_ri(vm, LTA3, rd, offset);
 }
 
-// LEA3: rd = bp + offset
+// LEA3: rd = bp + offset. `skip_record` sets LEA3_NO_RECORD (#676), telling
+// op_LEA3_fn to skip its vm->stack_ptr_epochs write for this address -- pass
+// true only when the result is proven never to escape its creating frame
+// (see docs/SAFETY.md and the mark_addr_escapes pass in parse.c).
+static Pc emit_lea3_ex(VirtualMachine *vm, int rd, long long offset, bool skip_record) {
+    emit_word(vm, LEA3);
+    emit_word(vm, ENCODE_R(rd) | (skip_record ? LEA3_NO_RECORD : 0));
+    return emit_i64(vm, offset);
+}
+
+// LEA3: rd = bp + offset. Default: recorded (safe) -- see emit_lea3_ex.
 static Pc emit_lea3(VirtualMachine *vm, int rd, long long offset) {
-    return emit_ri(vm, LEA3, rd, offset);
+    return emit_lea3_ex(vm, rd, offset, false);
+}
+
+// LEA3 for a local Obj's own base address, e.g. `&var`/array-or-struct
+// base materialization -- skips recording iff #676's escape analysis
+// proved `var`'s address never escapes its creating frame.
+static Pc emit_lea3_var(VirtualMachine *vm, int rd, Obj *var) {
+    return emit_lea3_ex(vm, rd, var->offset, !var->addr_escapes);
+}
+
+// LEA3 for compiler-internal bookkeeping addresses (static links, block
+// descriptors, closure captures, memcpy/cleanup scratch) that never
+// correspond to a user-visible `&local` and are proven, by construction,
+// never to escape their creating frame -- always skip recording (#676).
+static Pc emit_lea3_internal(VirtualMachine *vm, int rd, long long offset) {
+    return emit_lea3_ex(vm, rd, offset, true);
 }
 
 // ADDI3: rd = rs + immediate
@@ -2885,7 +2910,11 @@ static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
                 if (!static_link)
                     error("block function missing __static_link");
                 int cap_offset = (cap_idx + 2) * 8; // skip invoke(0) and size(1) slots
-                emit_lea3(vm, dest_reg, static_link->offset); // &__static_link
+                // Compiler-internal: this LEA3 only materializes
+                // __static_link's own slot address to immediately load the
+                // descriptor pointer out of it (#676) -- the slot address
+                // itself never survives past the next instruction.
+                emit_lea3_internal(vm, dest_reg, static_link->offset); // &__static_link
                 emit_rr(vm, LDR_D, dest_reg, dest_reg);       // Load descriptor ptr
                 emit_addi3(vm, dest_reg, dest_reg, cap_offset);
                 if (node->var->is_block_var)
@@ -2903,7 +2932,9 @@ static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
                     if (!static_link) {
                         error("nested function missing __static_link");
                     }
-                    emit_lea3(vm, dest_reg,
+                    // Compiler-internal: slot address only feeds the
+                    // immediate load below (#676).
+                    emit_lea3_internal(vm, dest_reg,
                               static_link->offset); // &__static_link
                     emit_rr(vm, LDR_D, dest_reg,
                             dest_reg); // Load static_link (parent's bp)
@@ -2933,20 +2964,29 @@ static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
                     if (node->var->is_param && (node->ty->kind == TY_STRUCT ||
                                                 node->ty->kind == TY_UNION ||
                                                 is_wide_bitint(node->ty))) {
-                        emit_lea3(vm, dest_reg,
+                        // Compiler-internal: slot address only feeds the
+                        // immediate load below (#676), not the struct's own
+                        // data address.
+                        emit_lea3_internal(vm, dest_reg,
                                   node->var->offset); // Slot address
                         emit_rr(vm, LDR_D, dest_reg,
                                 dest_reg); // Load pointer from slot
                     } else if (node->var->is_block_var) {
                         // __block variable: slot contains pointer to
-                        // heap-allocated wrapper
-                        emit_lea3(vm, dest_reg,
+                        // heap-allocated wrapper. Compiler-internal: slot
+                        // address only feeds the immediate load (#676).
+                        emit_lea3_internal(vm, dest_reg,
                                   node->var->offset); // Slot address
                         emit_rr(vm, LDR_D, dest_reg,
                                 dest_reg); // Load heap pointer from slot
                         // dest_reg now points to actual storage on heap
                     } else {
-                        emit_lea3(vm, dest_reg, node->var->offset);
+                        // The address returned here IS this var's own base
+                        // address, handed to whatever wanted it (&var,
+                        // array/struct decay, member/subscript base, ...) --
+                        // skip recording iff #676's escape analysis proved
+                        // it never leaves this frame.
+                        emit_lea3_var(vm, dest_reg, node->var);
                     }
                 }
             }
@@ -4891,15 +4931,17 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             Obj *current_fn = vm->compiler.current_fn;
 
             // Determine the static link value based on relationship
+            // Static-link/bp passing for nested calls is compiler-internal
+            // ABI plumbing, not a user-visible &local (#676): skip recording.
             if (callee_parent == current_fn) {
                 // Calling our own nested function - pass our bp
-                emit_lea3(vm, REG_A0, 0); // LEA3 with offset 0 = current bp
+                emit_lea3_internal(vm, REG_A0, 0); // LEA3 with offset 0 = current bp
             } else if (current_fn && current_fn->is_nested) {
                 // We're nested and calling a sibling or parent's nested
                 // function Walk our static chain to find callee's parent's bp
                 Obj *static_link = find_static_link_var(current_fn);
                 if (static_link) {
-                    emit_lea3(vm, REG_A0, static_link->offset);
+                    emit_lea3_internal(vm, REG_A0, static_link->offset);
                     emit_rr(vm, LDR_D, REG_A0, REG_A0);
                     // Walk chain if needed
                     for (Obj *fn = current_fn->parent_fn;
@@ -4910,12 +4952,12 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     }
                 } else {
                     // Fallback: use current bp
-                    emit_lea3(vm, REG_A0, 0);
+                    emit_lea3_internal(vm, REG_A0, 0);
                 }
             } else {
                 // Fallback: use current bp (shouldn't happen if parser is
                 // correct)
-                emit_lea3(vm, REG_A0, 0);
+                emit_lea3_internal(vm, REG_A0, 0);
             }
         }
 
@@ -5019,11 +5061,14 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
     // gen_addr's normal-local block path.  This ensures that `__block T arr[N]
     // = {partial}` correctly zeroes the unspecified elements in the heap cell.
     case ND_MEMZERO:
+        // Compiler-internal zero-init of the var's own storage: the address
+        // is consumed synchronously by the MSET below and never survives
+        // beyond it (#676).
         if (node->var->is_block_var) {
-            emit_lea3(vm, REG_A0, node->var->offset); // &stack slot
+            emit_lea3_internal(vm, REG_A0, node->var->offset); // &stack slot
             emit_rr(vm, LDR_D, REG_A0, REG_A0);       // heap ptr -> A0
         } else {
-            emit_lea3(vm, REG_A0, node->var->offset); // bp + offset -> A0
+            emit_lea3_internal(vm, REG_A0, node->var->offset); // bp + offset -> A0
         }
         emit_li3(vm, REG_A2, node->var->ty->size); // byte count -> A2
         emit(vm, MSET);
@@ -5263,7 +5308,8 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // VLAs are implemented by storing a pointer to dynamically allocated
         // memory The pointer itself is a local variable
         if (node->var->is_local) {
-            emit_lea3(vm, dest_reg, node->var->offset); // Address of pointer
+            // Slot address only feeds the immediate load below (#676).
+            emit_lea3_internal(vm, dest_reg, node->var->offset); // Address of pointer
             emit_rr(vm, LDR_D, dest_reg, dest_reg); // Load the pointer value
         } else {
             error_tok(vm, node->tok, "VLA must be local");
@@ -5341,9 +5387,10 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             if (enc_cap_idx >= 0) {
                 // Variable lives in the enclosing block's descriptor: read via
                 // __static_link so we don't use a stale stack offset from an
-                // outer function's frame.
+                // outer function's frame. Compiler-internal chase (#676):
+                // every intermediate address here feeds an immediate load.
                 Obj *static_link = find_static_link_var(enc_fn);
-                emit_lea3(vm, r_val, static_link->offset);
+                emit_lea3_internal(vm, r_val, static_link->offset);
                 emit_rr(vm, LDR_D, r_val, r_val);                    // descriptor ptr
                 emit_addi3(vm, r_val, r_val, (enc_cap_idx + 2) * 8); // slot addr (skip invoke+size)
                 if (cap->is_block_var)
@@ -5351,12 +5398,14 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 else
                     emit_load(vm, cap->ty, r_val, r_val); // value from descriptor slot
             } else if (cap->is_block_var) {
-                // __block var directly in enclosing stack: copy heap pointer
-                emit_lea3(vm, r_val, cap->offset);
+                // __block var directly in enclosing stack: copy heap pointer.
+                // Slot address only feeds the immediate load (#676).
+                emit_lea3_internal(vm, r_val, cap->offset);
                 emit_rr(vm, LDR_D, r_val, r_val);
             } else if (cap->is_local) {
-                // Regular local directly in enclosing stack: copy value
-                emit_lea3(vm, r_val, cap->offset);
+                // Regular local directly in enclosing stack: copy value.
+                // Slot address only feeds the immediate load (#676).
+                emit_lea3_internal(vm, r_val, cap->offset);
                 emit_load(vm, cap->ty, r_val, r_val);
             } else {
                 // Global
@@ -6404,7 +6453,8 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
             emit(vm, MALC);
             // Store the heap pointer in the variable's stack slot
             int r_addr = alloc_temp_reg();
-            emit_lea3(vm, r_addr, var->offset); // Address of stack slot
+            // Slot address only feeds the immediate store below (#676).
+            emit_lea3_internal(vm, r_addr, var->offset); // Address of stack slot
             emit_rr(vm, STR_D, REG_A0, r_addr); // Store heap pointer in slot
             free_temp_reg(r_addr);
         }

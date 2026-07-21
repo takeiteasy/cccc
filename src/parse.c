@@ -4905,6 +4905,140 @@ static void objsize_poison_scan(Node *node) {
     }
 }
 
+// #676: walk an addressed-lvalue chain rooted at an explicit `&expr`,
+// finding the local Obj whose own frame-relative storage the resulting
+// LEA3 actually materializes, and mark it as escaping. Interior-aware:
+// &arr[i] and &s.field descend through the runtime-offset / member chain
+// to arr / s, the variable whose *base* LEA3 is what op_LEA3_fn actually
+// tags in stack_ptr_epochs (see #675's interior resolution, which depends
+// on that base still being recorded whenever it escapes). Purely additive:
+// if the chain bottoms out in something other than a plain local var (e.g.
+// a global, or an address computed off an unrelated pointer parameter),
+// there's no Obj to mark here and we simply do nothing -- safe, since no
+// LEA3-of-this-Obj recording decision hinges on it.
+static void mark_escaping_root(Node *n) {
+    while (n) {
+        switch (n->kind) {
+        case ND_VAR:
+            if (n->var)
+                n->var->addr_escapes = true;
+            return;
+        case ND_MEMBER:
+        case ND_CAST:
+        case ND_DEREF:
+            n = n->lhs;
+            continue;
+        case ND_ADD:
+        case ND_SUB:
+            if (n->lhs && n->lhs->ty &&
+                (n->lhs->ty->kind == TY_PTR || n->lhs->ty->kind == TY_ARRAY)) {
+                n = n->lhs;
+            } else if (n->rhs && n->rhs->ty &&
+                       (n->rhs->ty->kind == TY_PTR || n->rhs->ty->kind == TY_ARRAY)) {
+                n = n->rhs;
+            } else {
+                return;
+            }
+            continue;
+        default:
+            return;
+        }
+    }
+}
+
+// Walk value-transparent wrappers (cast, comma, ternary branches, chained
+// assignment) from an escaping sink's operand down to the actual `&expr`
+// node it carries, if any, and mark its root var escaping. Any other node
+// kind reached along the way (arithmetic on the resulting pointer, a plain
+// non-address expression, etc.) simply isn't a literal &-chain -- there is
+// nothing to mark, so we stop. This deliberately only recognizes the common
+// wrapper shapes; an `&expr` that reaches an escaping sink through some
+// other wrapper this doesn't unwrap will be under-marked (left recorded
+// only if some OTHER occurrence of the same var already marked it) --
+// no false positive risk (see #669), but if this turns out to miss real
+// code, extend the wrapper list here.
+static void find_and_mark_escaping_addr(Node *n) {
+    while (n) {
+        switch (n->kind) {
+        case ND_CAST:
+            n = n->lhs;
+            continue;
+        case ND_COMMA:
+        case ND_ASSIGN: // the *value* of `a = b` (or the tail of a comma) is its rhs
+            n = n->rhs;
+            continue;
+        case ND_COND: // ternary: both arms can be the value actually passed on
+            find_and_mark_escaping_addr(n->then);
+            find_and_mark_escaping_addr(n->els);
+            return;
+        case ND_ADDR:
+            mark_escaping_root(n->lhs);
+            return;
+        default:
+            // Arrays (always) and structs/unions (conservatively -- some
+            // ABI paths copy them, but gen_addr's shared local-var funnel
+            // can't tell at emit time) decay to their own base address with
+            // no explicit `&` in the source at all. Treat one reaching an
+            // escaping sink the same as an explicit &-chain rooted at the
+            // same base, via the same interior-aware walk.
+            if (n->ty && (n->ty->kind == TY_ARRAY || n->ty->kind == TY_STRUCT ||
+                          n->ty->kind == TY_UNION))
+                mark_escaping_root(n);
+            return;
+        }
+    }
+}
+
+// #676: post-parse pass marking which locals' addresses provably escape
+// their creating frame (call argument, return operand, or stored into a
+// pointer/aggregate lvalue), so op_LEA3_fn (#673) can skip recording
+// vm->stack_ptr_epochs entries for addresses that never leave their own
+// frame -- the overwhelming majority of `&local` sites in ordinary code
+// (loop counters, in-place accumulators). Mirrors objsize_poison_scan's
+// structure: iterate the statement-chain via `next`, recurse into every
+// expression-tree field. Default (addr_escapes left false, from Obj's
+// zero-init) is "record" -- this pass only ever adds escaping marks, never
+// removes the safe default, so a pattern this scan doesn't recognize is
+// merely a missed pruning opportunity, not a #673 regression.
+static void mark_addr_escapes(Node *node) {
+    for (; node; node = node->next) {
+        switch (node->kind) {
+        case ND_FUNCALL:
+            for (Node *a = node->args; a; a = a->next)
+                find_and_mark_escaping_addr(a);
+            break;
+        case ND_RETURN:
+            if (node->lhs)
+                find_and_mark_escaping_addr(node->lhs);
+            break;
+        case ND_ASSIGN:
+            // Escaping iff the destination is a pointer (or aggregate --
+            // e.g. an array of pointers/structs-of-pointers via a member
+            // store) lvalue; a store into a plain scalar can't retain an
+            // address at all.
+            if (node->lhs && node->lhs->ty &&
+                (node->lhs->ty->kind == TY_PTR ||
+                 node->lhs->ty->kind == TY_ARRAY ||
+                 node->lhs->ty->kind == TY_STRUCT ||
+                 node->lhs->ty->kind == TY_UNION))
+                find_and_mark_escaping_addr(node->rhs);
+            break;
+        default:
+            break;
+        }
+        mark_addr_escapes(node->lhs);
+        mark_addr_escapes(node->rhs);
+        mark_addr_escapes(node->cond);
+        mark_addr_escapes(node->then);
+        mark_addr_escapes(node->els);
+        mark_addr_escapes(node->init);
+        mark_addr_escapes(node->inc);
+        mark_addr_escapes(node->body);
+        for (Node *a = node->args; a; a = a->next)
+            mark_addr_escapes(a);
+    }
+}
+
 static void resolve_objsize_queries(VirtualMachine *vm, Node *body) {
     // Always scan, even when *this* function has no pending queries of its
     // own: a nested function or block can reassign / take the address of a
@@ -6041,6 +6175,7 @@ static Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
 
     leave_scope(vm);
     resolve_objsize_queries(vm, block_fn->body);
+    mark_addr_escapes(block_fn->body);
 
     // Collect captured variables from the parsed body.
     // Walk all ancestor scopes so that variables from grandparent+ scopes are
@@ -9607,6 +9742,7 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
             leave_scope(vm);
             resolve_goto_labels(vm);
             resolve_objsize_queries(vm, fn->body);
+            mark_addr_escapes(fn->body);
         } else {
             // Fatal error_tok() fired inside the function body.  The error has
             // already been collected by error_tok(); we just need to clean up scope.
@@ -9691,6 +9827,7 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
         leave_scope(vm);
         resolve_goto_labels(vm);
         resolve_objsize_queries(vm, fn->body);
+        mark_addr_escapes(fn->body);
     }
 
     // Restore parent function context if this was a nested function

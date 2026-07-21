@@ -155,6 +155,12 @@
         rd = (operands) & 0xFF;                                                \
     } while (0)
 
+// LEA3-only flag (#676): set in the unused bits above rd (DECODE_R only
+// reads the low 8 bits, so this doesn't disturb ordinary RI decoding) to
+// suppress vm->stack_ptr_epochs recording for this LEA3's result. Set only
+// when codegen has proven the address never escapes its creating frame.
+#define LEA3_NO_RECORD ((InstrWord)(1 << 8))
+
 static inline uint64_t cc_make_u64(InstrWord lo, InstrWord hi) {
     return (uint64_t)lo | ((uint64_t)hi << 32);
 }

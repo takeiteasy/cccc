@@ -1510,10 +1510,11 @@ static inline int op_FROUND_F32_fn(VirtualMachine *vm) {
 
 static inline int op_LEA3_fn(VirtualMachine *vm) {
     // Load effective address: regs[rd] = bp + immediate
-    // Format: [LEA3] [rd:8|unused:56] [immediate:64]
+    // Format: [LEA3] [rd:8|LEA3_NO_RECORD:1|unused:55] [immediate:64]
     long long operands = cc_read_word(vm);
     int rd;
     DECODE_R(operands, rd);
+    bool no_record = (operands & LEA3_NO_RECORD) != 0;
     long long offset = cc_read_i64(vm);
 
     if (rd != REG_ZERO) {
@@ -1522,10 +1523,15 @@ static inline int op_LEA3_fn(VirtualMachine *vm) {
 
         // Tag this &local with the current frame's liveness epoch (#673),
         // the stack analogue of ptr_tags recording a heap allocation's
-        // creation generation. Recorded unconditionally for every &local,
-        // not just ones that provably escape -- see the #669 postmortem in
-        // op_ENT3_fn above for why escape analysis is the wrong tool here.
-        if ((vm->flags & CCCC_DANGLING_DETECT) && vm->frame_epochs.count > 0) {
+        // creation generation. Recorded whenever codegen hasn't proven the
+        // address stays confined to its creating frame (#676) -- escape
+        // analysis at *record* time is safe here (unlike the #669 postmortem
+        // in op_ENT3_fn, which was about escape analysis deciding
+        // *correctness*, i.e. whether to flag a dangling deref at all; here
+        // it only ever prunes a redundant hashmap write, never the epoch
+        // check itself, so under-pruning costs perf, never correctness).
+        if (!no_record && (vm->flags & CCCC_DANGLING_DETECT) &&
+            vm->frame_epochs.count > 0) {
             unsigned long long epoch =
                 vm->frame_epochs.epochs[vm->frame_epochs.count - 1];
             hashmap_put_int(&vm->stack_ptr_epochs, addr, (void *)(intptr_t)epoch);

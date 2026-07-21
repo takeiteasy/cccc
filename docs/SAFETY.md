@@ -379,11 +379,25 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
     detection, not block-granular: a `&local` whose *block* (not function)
     has exited while the frame is still alive is `CHKL`'s job, not this
     check's (see `--stack-instrumentation` below)
-  - Recording happens **unconditionally** at every `LEA3`, not just for
-    pointers that provably escape — over-recording is harmless (a
-    non-escaping `&local` just matches its own still-live frame at deref
-    time), while escape analysis is exactly what made the pre-#670 design
-    (below) produce false positives
+  - Recording is pruned to addresses that provably *escape* their creating
+    frame (#676) — a post-parse pass (`mark_addr_escapes` in `src/parse.c`)
+    marks a local's `Obj.addr_escapes` when its address (or an array/struct
+    it owns, interior-aware through `&arr[i]`/`&s.field`) is observed as a
+    call argument, a `return` operand, or stored into a pointer/aggregate
+    lvalue; `LEA3` carries a `LEA3_NO_RECORD` flag (set at codegen time) that
+    tells `op_LEA3_fn` to skip the `stack_ptr_epochs` write whenever the
+    creating var's address was never marked. This is the *opposite* polarity
+    from the pre-#676 escape analysis mistake below: an **unmarked** local
+    still records unconditionally (safe default), and only a *proven*
+    non-escaping address is pruned — so a pattern the pass fails to
+    recognize just costs a wasted hashmap entry, never a missed catch.
+    Measured ~16% overhead on a call-heavy `-3` microbenchmark before this
+    change; pruning is skipped (recording stays on) for any address that
+    reaches a call/return/pointer-store, so that worst case is unaffected —
+    the win is on the common non-escaping case (loop counters, in-place
+    accumulators, and all compiler-internal `LEA3`s: static links, block
+    descriptors, closure captures, and other slot addresses that only ever
+    feed one immediate load/store)
   - This replaces the pre-#670 scope-exit check (removed in #669), which
     conflated "address taken" with "escaped" — it tracked every `&local` via
     the (now removed) `MARKA` opcode and aborted whenever any of them was

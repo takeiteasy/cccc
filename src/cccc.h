@@ -1060,6 +1060,18 @@ struct Obj {
     struct Obj *cleanup_fn; // non-NULL: void fn(T*) called at scope exit (__attribute__((cleanup)))
     int cleanup_fp_retval_offset; // stack offset for float retval save slot (set by assign_stack_offsets)
 
+    // Escape analysis for LEA3 epoch-recording pruning (#676). Set by a
+    // post-parse scan (mark_addr_escapes in parse.c) whenever this local's
+    // address is provably observed escaping its creating frame -- passed as
+    // a call argument, returned, or stored into a pointer/aggregate lvalue
+    // (walking through interior addressing, e.g. &arr[i] marks arr, and
+    // through cast/comma/ternary/chained-assign wrappers). Defaults to false
+    // (safe: LEA3 records into vm->stack_ptr_epochs unless this is proven
+    // true) -- any address-of this scan fails to classify simply stays
+    // recorded, so under-approximation here can only cost a wasted hashmap
+    // entry, never reintroduce the #673 false negative. See docs/SAFETY.md.
+    bool addr_escapes;
+
     // __builtin_object_size: constant malloc-family allocation tracking (#642).
     // Only honored when the pointer is assigned exactly once (its declaration
     // initializer) and never has its address taken; see resolve_objsize_queries.
