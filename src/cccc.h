@@ -2370,6 +2370,22 @@ struct VirtualMachine {
                               // field would (#671).
     HashMap ptr_tags; // ptr address → creation_generation (CCCC_MEMORY_TAGGING)
 
+    // Per-frame liveness epochs for dangling-stack-pointer detection through
+    // a deeper call (#673). Mirrors the heap temporal-safety scheme (ptr_tags
+    // vs AllocHeader.generation) but for stack frames: each activation gets a
+    // monotonic epoch at ENT3; every `&local` (LEA3) records the creating
+    // frame's epoch; CHKP3 flags a deref iff that epoch is no longer live.
+    // Only touched when CCCC_DANGLING_DETECT is set.
+    unsigned long long frame_epoch_counter; // monotonic, bumped per ENT3
+    struct {
+        long long **bps;            // parallel array: bp at push time
+        unsigned long long *epochs; // parallel array: epoch assigned
+        int count;
+        int capacity;
+    } frame_epochs; // mirrors the saved-bp chain, for ordered pop/truncate
+    HashMap live_epochs;      // epoch -> present; O(1) liveness membership
+    HashMap stack_ptr_epochs; // &local address -> creating frame's epoch
+
     // Sorted allocation array for O(log n) base-address range queries.
     // Populated by MALC (CALC/REALC delegate to MALC) as a simple append —
     // the VM heap is a bump allocator so heap_ptr only grows, meaning every

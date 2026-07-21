@@ -76,9 +76,10 @@ CCCC provides preset safety levels that make it easy to choose the right combina
 - **All safety features** including:
   - Control flow integrity (CFI) with shadow stack
   - Temporal memory tagging (generation-based UAF detection)
-  - Dangling stack pointer detection (dereference-time range check; see
+  - Dangling stack pointer detection (dereference-time range check plus
+    per-frame epoch liveness tracking; see
     [Advanced Pointer Tracking Features](#advanced-pointer-tracking-features)
-    for what it catches and its one known false-negative, #670)
+    for what it catches and its residual gap, #670/#673)
   - Alignment checks
   - Provenance tracking (pointer origin validation)
   - Invalid pointer arithmetic detection
@@ -87,10 +88,12 @@ CCCC provides preset safety levels that make it easy to choose the right combina
   - Random canaries (unpredictable stack protection)
 
 **Detects:** Most memory safety bugs CCCC can catch, including dereferencing a
-stack pointer whose owning frame has already returned. One known gap: a
-dangling pointer passed *deeper* into a further call and dereferenced there is
-missed, because the deeper frame reclaims the same address (see
-`--dangling-pointers` below, #670)
+stack pointer whose owning frame has already returned -- whether the
+dereference happens in the frame that got control back or one or more calls
+*deeper* than that (#673 closed the deeper-call gap left by #670). Residual
+gap: interior stack pointers (e.g. `&arr[i]` with a runtime index) aren't
+tagged with a frame epoch, so a deeper-call dereference through one of those
+still relies on the plain range check alone (see `--dangling-pointers` below)
 
 ---
 
@@ -336,25 +339,51 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
 
 ## Advanced Pointer Tracking Features
 
-- `--dangling-pointers` **Dangling stack pointer detection (dereference-time range check, #670)**
+- `--dangling-pointers` **Dangling stack pointer detection (dereference-time range check + per-frame epoch liveness, #670/#673)**
   - Enforced in `CHKP3`, the same gate that runs before every pointer
-    dereference under `--pointer-checks` / `-3`. No creation-time tracking is
-    needed: the VM stack grows downward, so every *live* local sits at an
-    address `>= vm->sp`, and any address inside the stack reservation but
-    below the current `vm->sp` belongs to a frame that has already returned.
-    A single unsigned range check (`stack_seg <= ptr < sp`) is precise by
-    construction — no hashmap of address-taken pointers, no escape analysis
+    dereference under `--pointer-checks` / `-3`. Two layers, both
+    dereference-time (no creation-time escape analysis):
+    1. **Range check (#670).** The VM stack grows downward, so every *live*
+       local sits at an address `>= vm->sp`, and any address inside the stack
+       reservation but below the current `vm->sp` belongs to a frame that has
+       already returned. A single unsigned range check
+       (`stack_seg <= ptr < sp`) is precise by construction — cheap, no
+       hashmap needed for this layer.
+    2. **Frame-epoch liveness (#673).** Every activation gets a monotonic
+       epoch at `ENT3`; every `&local` (`LEA3`) tags the resulting address
+       with the current frame's epoch in a side table (`stack_ptr_epochs`),
+       the direct stack analogue of how heap UAF detection tags an
+       allocation's creation generation in `ptr_tags`. A pointer to a local
+       is valid iff the frame that created it is still live, so `CHKP3` flags
+       a dereference whose tagged epoch is no longer in the live set
+       (`live_epochs`) — regardless of whether the address happens to sit
+       above or below the *current* `sp`. This closes the range check's gap:
+       a pointer passed *deeper* into another call reuses the dead frame's
+       memory (`ptr >= sp` again there), which layer 1 alone would miss, but
+       its tagged epoch is still absent from `live_epochs` and layer 2 still
+       catches it
   - **What it catches:** dereferencing a pointer to a local whose function has
-    returned, when the dereference happens in the frame that got control back
-    (or any ancestor of it) — e.g. `int *p = get_local(); return *p;`. This
-    also covers deref-through-pointer cases that `CHKL` (see
-    `--stack-instrumentation` below) does not
-  - **What it does not catch (known false-negative):** a dangling pointer
-    passed *deeper* into a further call and dereferenced there. That deeper
-    call's own frame reuses the same stack memory, pushing `sp` back down
-    past the dangling address, so `ptr >= sp` holds again and the check
-    doesn't fire. Closing this gap needs per-pointer frame-liveness tracking,
-    not just a range check, and isn't implemented
+    returned, whether the dereference happens in the frame that got control
+    back (or any ancestor of it — layer 1) or one or more calls *deeper* than
+    that (layer 2) — e.g. both `int *p = get_local(); return *p;` and
+    `int *p = get_local(); use(p);` where `use` derefs `p`. This also covers
+    deref-through-pointer cases that `CHKL` (see `--stack-instrumentation`
+    below) does not
+  - **What it does not catch (residual gap, #673):** interior stack pointers
+    with a runtime-computed offset (e.g. `&arr[i]` for non-constant `i`) never
+    pass through `LEA3` with a single recorded address, so they're never
+    tagged in `stack_ptr_epochs` — a deeper-call dereference through one of
+    those still relies on layer 1 alone and can be missed the same way #670
+    documented. Constant-offset member access (`&s.field`) folds into a
+    single `LEA3` immediate and *is* covered. This is frame-granular
+    detection, not block-granular: a `&local` whose *block* (not function)
+    has exited while the frame is still alive is `CHKL`'s job, not this
+    check's (see `--stack-instrumentation` below)
+  - Recording happens **unconditionally** at every `LEA3`, not just for
+    pointers that provably escape — over-recording is harmless (a
+    non-escaping `&local` just matches its own still-live frame at deref
+    time), while escape analysis is exactly what made the pre-#670 design
+    (below) produce false positives
   - This replaces the pre-#670 scope-exit check (removed in #669), which
     conflated "address taken" with "escaped" — it tracked every `&local` via
     the (now removed) `MARKA` opcode and aborted whenever any of them was
@@ -829,10 +858,9 @@ PC:         0x1280080a8 (offset: 21)
 
 ### Dangling Pointers
 
-`--dangling-pointers` (also enabled by `-3` / `--safety=max`) enforces a
-dereference-time range check in `CHKP3`: the stack grows downward, so any
-address that falls inside the stack reservation but below the current stack
-pointer belongs to a frame that has already returned. Dereferencing it aborts.
+`--dangling-pointers` (also enabled by `-3` / `--safety=max`) enforces two
+dereference-time checks in `CHKP3`: a range check (#670) and a per-frame
+epoch liveness check (#673, layered on top to close the range check's gap).
 
 ```c
 // test_dangling_pointer.c - Dangling stack pointer example
@@ -859,12 +887,57 @@ Current PC: 0x14 (offset: 20)
 ============================================
 ```
 
-**Known false-negative (#670):** a dangling pointer passed *deeper* into
-another call and dereferenced there is not caught — the deeper call's own
-frame reuses the same stack memory, so the address is `>= sp` again by the
-time it's dereferenced. Only the "dereference in the frame that got control
-back" form above is detected; closing the general case needs per-pointer
-frame-liveness tracking, not just a range check.
+The stack grows downward, so any address that falls inside the stack
+reservation but below the current stack pointer belongs to a frame that has
+already returned — that's the range check (#670) firing above, the cheap
+common case.
+
+**The deeper-call case (#673):** passing the dangling pointer one call
+*deeper* and dereferencing it there defeats the range check alone, because
+the deeper call's own frame reuses the same stack memory (the address is
+`>= sp` again by the time it's dereferenced):
+
+```c
+// test_dangling_deref_deeper_call.c - Dangling deref through a deeper call
+int *get_local(void) {
+    int x = 42;
+    return &x;
+}
+
+void use(int *p) {
+    int y = *p;  // Dereference happens one frame deeper than get_local()'s
+    (void)y;     // caller -- caught by the epoch check, not the range check.
+}
+
+int main(void) {
+    int *p = get_local();
+    use(p);
+    return 0;
+}
+```
+
+```bash
+$ ./cccc --dangling-pointers test_dangling_deref_deeper_call.c
+
+========== DANGLING STACK POINTER ==========
+Dereferenced a pointer into a stack frame that has already returned
+Address:    0x31fffffc8
+Creating frame's epoch is no longer live (dereferenced through a deeper call, #673)
+Current PC: 0x2d (offset: 45)
+============================================
+```
+
+Every `&local` is tagged at the moment it's taken with the current frame's
+liveness epoch; `get_local()`'s epoch dies at `LEV3` along with the rest of
+its frame, so `use()`'s dereference is flagged regardless of what address
+range `use()`'s own frame happens to occupy.
+
+**Residual gap:** an interior stack pointer with a runtime-computed offset
+(e.g. `&arr[i]` for non-constant `i`) is never tagged with a frame epoch — it
+doesn't go through a single `LEA3` the way a plain `&local` or constant-offset
+`&s.field` does — so a deeper-call dereference through one of those still
+relies on the range check alone and can be missed the same way #670
+originally documented.
 
 ### Pointer Alignment
 ```c

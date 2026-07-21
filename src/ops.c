@@ -561,6 +561,58 @@ static inline int op_MOV3_fn(VirtualMachine *vm) {
 
 // ========== Register-Based Calling Convention ==========
 
+// Frame-epoch liveness stack for dangling-stack-pointer detection through a
+// deeper call (#673). Mirrors the saved-bp chain: one entry is pushed per
+// ENT3 and popped by whichever teardown path leaves that frame (normal
+// return, tail call, or a longjmp that unwinds past it). Kept as a plain
+// parallel array (not just the live_epochs set) so frame identity and push
+// order are available for the multi-frame longjmp truncation below.
+
+static void frame_epoch_push(VirtualMachine *vm, long long *bp,
+                              unsigned long long epoch) {
+    if (vm->frame_epochs.count == vm->frame_epochs.capacity) {
+        int new_cap = vm->frame_epochs.capacity ? vm->frame_epochs.capacity * 2 : 64;
+        long long **new_bps = realloc(vm->frame_epochs.bps, (size_t)new_cap * sizeof(long long *));
+        if (new_bps)
+            vm->frame_epochs.bps = new_bps;
+        unsigned long long *new_epochs = realloc(vm->frame_epochs.epochs, (size_t)new_cap * sizeof(unsigned long long));
+        if (new_epochs)
+            vm->frame_epochs.epochs = new_epochs;
+        if (!new_bps || !new_epochs) {
+            // Internal bookkeeping OOM: skip tracking this frame. Its
+            // pointers will simply never match in stack_ptr_epochs, so the
+            // epoch check silently falls back to the (still-precise) range
+            // check for them -- no false positives, only a missed catch.
+            return;
+        }
+        vm->frame_epochs.capacity = new_cap;
+    }
+    vm->frame_epochs.bps[vm->frame_epochs.count] = bp;
+    vm->frame_epochs.epochs[vm->frame_epochs.count] = epoch;
+    vm->frame_epochs.count++;
+    hashmap_put_int(&vm->live_epochs, (long long)epoch, (void *)1);
+}
+
+// Pop exactly the top frame (normal return / tail-call unwind).
+static void frame_epoch_pop(VirtualMachine *vm) {
+    if (vm->frame_epochs.count == 0)
+        return;
+    vm->frame_epochs.count--;
+    unsigned long long epoch = vm->frame_epochs.epochs[vm->frame_epochs.count];
+    hashmap_delete_int(&vm->live_epochs, (long long)epoch);
+}
+
+// Pop every frame above (and not equal to) new_bp -- used by longjmp, which
+// can unwind several frames at once. The target frame (bp == new_bp) stays.
+static void frame_epoch_truncate_to(VirtualMachine *vm, long long *new_bp) {
+    while (vm->frame_epochs.count > 0 &&
+           vm->frame_epochs.bps[vm->frame_epochs.count - 1] < new_bp) {
+        vm->frame_epochs.count--;
+        unsigned long long epoch = vm->frame_epochs.epochs[vm->frame_epochs.count];
+        hashmap_delete_int(&vm->live_epochs, (long long)epoch);
+    }
+}
+
 static inline int op_ENT3_fn(VirtualMachine *vm) {
     // Enter function: [ENT3] [stack_size:32|spill_param_count:32]
     // [f32_param_mask:32|float_param_mask:32]
@@ -581,6 +633,14 @@ static inline int op_ENT3_fn(VirtualMachine *vm) {
     // Save old base pointer
     *--vm->sp = (long long)vm->bp;
     vm->bp = vm->sp;
+
+    // Assign this activation a fresh liveness epoch (#673). Recorded
+    // unconditionally -- not just for pointers that escape -- because
+    // over-recording is harmless (a non-escaping &local just matches its own
+    // still-live frame at deref) while under-recording via escape analysis
+    // is exactly how the removed #669 design produced false positives.
+    if (vm->flags & CCCC_DANGLING_DETECT)
+        frame_epoch_push(vm, vm->bp, ++vm->frame_epoch_counter);
 
     // Allocate space for local variables AND parameters
     // Parameters are now stored at negative offsets like locals.
@@ -669,6 +729,26 @@ static inline int op_LEV3_fn(VirtualMachine *vm) {
             printf("=============================================\n");
             return -1;
         }
+    }
+
+    // Retire this activation's liveness epoch (#673) before the bp that
+    // identifies it is overwritten below.
+    if (vm->flags & CCCC_DANGLING_DETECT) {
+        // Tripwire: frame_epochs depth must match the live saved-bp chain
+        // depth (same bounded walk/bounds check as op_RETADDR_fn) before we
+        // pop. A mismatch means some teardown path failed to keep
+        // frame_epochs/live_epochs in sync with the real call stack -- the
+        // #669-style desync #673's design must avoid.
+        int chain_depth = 0;
+        for (long long *frame = vm->bp; frame >= vm->sp && frame < vm->initial_sp;) {
+            chain_depth++;
+            long long *next = (long long *)frame[0];
+            if (next < vm->sp || next >= vm->initial_sp)
+                break;
+            frame = next;
+        }
+        assert(chain_depth == vm->frame_epochs.count);
+        frame_epoch_pop(vm);
     }
 
     // Restore old base pointer
@@ -1436,8 +1516,21 @@ static inline int op_LEA3_fn(VirtualMachine *vm) {
     DECODE_R(operands, rd);
     long long offset = cc_read_i64(vm);
 
-    if (rd != REG_ZERO)
-        vm->regs[rd] = (long long)(vm->bp + offset);
+    if (rd != REG_ZERO) {
+        long long addr = (long long)(vm->bp + offset);
+        vm->regs[rd] = addr;
+
+        // Tag this &local with the current frame's liveness epoch (#673),
+        // the stack analogue of ptr_tags recording a heap allocation's
+        // creation generation. Recorded unconditionally for every &local,
+        // not just ones that provably escape -- see the #669 postmortem in
+        // op_ENT3_fn above for why escape analysis is the wrong tool here.
+        if ((vm->flags & CCCC_DANGLING_DETECT) && vm->frame_epochs.count > 0) {
+            unsigned long long epoch =
+                vm->frame_epochs.epochs[vm->frame_epochs.count - 1];
+            hashmap_put_int(&vm->stack_ptr_epochs, addr, (void *)(intptr_t)epoch);
+        }
+    }
     return 0;
 }
 
@@ -1684,30 +1777,57 @@ static inline int op_CHKP3_fn(VirtualMachine *vm) {
         return -1;
     }
 
-    // Dangling stack pointer detection (#670, use-based / dereference-time
-    // design -- replaces the neutered scope-exit check removed in #669).
-    // The VM stack grows downward: vm->sp is the current top-of-stack, and
-    // every *live* local sits at an address >= vm->sp. A pointer obtained
-    // from &local (see op_LEA3_fn: regs[rd] = (long long)(vm->bp + offset),
-    // a raw host address) whose target frame has since returned therefore
-    // satisfies stack_seg <= ptr < vm->sp -- the slot has been reclaimed by
-    // sp rising back above it. This is precise by construction: any &local
-    // still within a live frame, or passed as an out-param into a *deeper*
-    // call, has ptr >= sp and is never flagged. Known gap: a dangling
-    // pointer passed deeper and dereferenced *there* is missed, because the
-    // deeper call's own frame re-covers the dead address (ptr >= sp again);
-    // closing that needs per-pointer frame-liveness tracking, not just a
-    // range check (see docs/SAFETY.md).
+    // Dangling stack pointer detection: two layers.
+    //
+    // 1) Cheap range check (#670, use-based / dereference-time design --
+    //    replaces the neutered scope-exit check removed in #669). The VM
+    //    stack grows downward: vm->sp is the current top-of-stack, and every
+    //    *live* local sits at an address >= vm->sp. A pointer obtained from
+    //    &local (see op_LEA3_fn: regs[rd] = (long long)(vm->bp + offset), a
+    //    raw host address) whose target frame has since returned therefore
+    //    satisfies stack_seg <= ptr < vm->sp -- the slot has been reclaimed
+    //    by sp rising back above it. Precise by construction, but has a
+    //    known gap: if the pointer is passed *deeper* into another call and
+    //    dereferenced there, that deeper call's own frame re-covers the dead
+    //    address (ptr >= sp again), and this check alone misses it.
+    //
+    // 2) Frame-epoch liveness check (#673, closes the gap above). Every
+    //    &local (LEA3) is tagged in stack_ptr_epochs with the epoch of the
+    //    frame that created it; live_epochs holds the epochs of every frame
+    //    currently on the call stack. A pointer to a local is valid iff the
+    //    frame that created it is still live -- so if the tagged epoch isn't
+    //    in live_epochs, the pointer is dangling regardless of where the
+    //    address now sits relative to sp. This mirrors the heap temporal-
+    //    safety scheme (ptr_tags vs AllocHeader.generation) one layer down.
+    //    Pointers layer 1 already caught are not re-tagged here; pointers
+    //    never recorded by LEA3 (e.g. interior pointers like &arr[i] with a
+    //    runtime index) simply aren't found in stack_ptr_epochs and fall
+    //    through -- a documented residual gap, see docs/SAFETY.md.
     if (vm->flags & CCCC_DANGLING_DETECT) {
         uintptr_t p   = (uintptr_t)ptr;
         uintptr_t lo  = (uintptr_t)vm->stack_seg;
         uintptr_t cur = (uintptr_t)vm->sp;
-        if (p >= lo && p < cur) {
+        bool range_dangling = (p >= lo && p < cur);
+
+        bool epoch_dangling = false;
+        if (!range_dangling) {
+            void *tagged = hashmap_get_int(&vm->stack_ptr_epochs, ptr);
+            if (tagged &&
+                !hashmap_get_int(&vm->live_epochs, (long long)(intptr_t)tagged))
+                epoch_dangling = true;
+        }
+
+        if (range_dangling || epoch_dangling) {
             printf("\n========== DANGLING STACK POINTER ==========\n");
             printf("Dereferenced a pointer into a stack frame that has already returned\n");
             printf("Address:    0x%llx\n", (unsigned long long)p);
-            printf("Current SP: 0x%llx (address is below live stack -> frame is dead)\n",
-                   (unsigned long long)cur);
+            if (range_dangling) {
+                printf("Current SP: 0x%llx (address is below live stack -> frame is dead)\n",
+                       (unsigned long long)cur);
+            } else {
+                printf("Creating frame's epoch is no longer live (dereferenced through a "
+                       "deeper call, #673)\n");
+            }
             printf("Current PC: 0x%llx (offset: %lld)\n", (long long)vm->pc,
                    (long long)vm->pc);
             printf("============================================\n");
@@ -1920,6 +2040,11 @@ static inline int op_CALLT_fn(VirtualMachine *vm) {
             return -1;
         }
     }
+
+    // Retire this activation's liveness epoch (#673). The tail-callee's own
+    // ENT3 will push a fresh one; nothing here should stay live under it.
+    if (vm->flags & CCCC_DANGLING_DETECT)
+        frame_epoch_pop(vm);
 
     vm->bp = (long long *)*vm->sp++;
 
@@ -3027,6 +3152,13 @@ static inline int op_LONGJMP_fn(VirtualMachine *vm) {
     vm->pc = (Pc)jmp_buf[0];
     vm->sp = (long long *)jmp_buf[1];
     vm->bp = (long long *)jmp_buf[2];
+
+    // longjmp can unwind several frames at once (#673): retire every
+    // activation's liveness epoch above the target frame. The target frame
+    // itself (bp == vm->bp) keeps its epoch -- it's still live.
+    if (vm->flags & CCCC_DANGLING_DETECT)
+        frame_epoch_truncate_to(vm, vm->bp);
+
     if (vm->flags & CCCC_CFI) {
         long long saved_offset = jmp_buf[3];
         size_t reserved_stack = (size_t)vm->poolsize_max * sizeof(long long);

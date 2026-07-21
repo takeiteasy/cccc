@@ -1195,6 +1195,14 @@ void cc_destroy(VirtualMachine *vm) {
     if (vm->stack_var_active.buckets)
         hashmap_deinit(&vm->stack_var_active);
 
+    // Free frame-epoch liveness state (#673: dangling deref through a
+    // deeper call). live_epochs/stack_ptr_epochs are integer-keyed with no
+    // heap-allocated values to free; frame_epochs is a plain parallel array.
+    hashmap_deinit(&vm->live_epochs);
+    hashmap_deinit(&vm->stack_ptr_epochs);
+    free(vm->frame_epochs.bps);
+    free(vm->frame_epochs.epochs);
+
     // Free scope variable lists
     if (vm->scope_vars) {
         for (int i = 0; i < vm->scope_vars_capacity; i++) {
