@@ -746,9 +746,18 @@ int *wrap(void) { return maybe_null(1); }   // -Wmaybe-nonnull: warns
 
 A transitive call chain — a function whose *only* null-returning path is
 itself a call to another flagged function (`return other_maybe_null_fn();`,
-as opposed to a literal `return 0;`) — is not yet covered by the summary pass
-itself; that would need a call-graph fixpoint over
-`check_may_return_null_summaries()` rather than a call-site change.
+as opposed to a literal `return 0;`) — is also covered: the summary pass
+iterates to a fixpoint, so chains of any depth converge regardless of source
+order:
+
+```c
+int *relay(int cond) { return maybe_null(cond); }  // relay flagged too, transitively
+
+void use(void) {
+    int *p = relay(1);
+    handle(p);   // -Wmaybe-nonnull: warns
+}
+```
 
 Diagnosed under `-Wnonnull` (part of `-Wall`) and `-Wmaybe-nonnull`
 (opt-in only); disable with `-Wno-nonnull` / `-Wno-maybe-nonnull`.

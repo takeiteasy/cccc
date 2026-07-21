@@ -8299,6 +8299,13 @@ static bool nn_expr_may_be_null(VirtualMachine *vm, Node *expr) {
         if (bv != 1 && nn_expr_may_be_null(vm, expr->els))
             return true;
     }
+    // #693: a return expression that is itself a direct call to an
+    // already-flagged function is transitive null-returning evidence too
+    // (`return other_maybe_null_fn();`). check_may_return_null_summaries()
+    // runs this to a fixpoint so chains of any depth/source order converge.
+    if (expr->kind == ND_FUNCALL && expr->lhs && expr->lhs->kind == ND_VAR &&
+        expr->lhs->var && expr->lhs->var->may_return_null)
+        return true;
     return false;
 }
 
@@ -8338,10 +8345,22 @@ static bool nn_returns_null_walk(VirtualMachine *vm, Node *node) {
 static void check_may_return_null_summaries(VirtualMachine *vm) {
     if (!(vm->compiler.warnings & CCCC_WARN_MAYBE_NONNULL))
         return; // fact is only ever consumed under -Wmaybe-nonnull
-    for (Obj *fn = vm->compiler.globals; fn; fn = fn->next)
-        if (fn->is_function && fn->body && fn->ty && fn->ty->kind == TY_FUNC &&
-            fn->ty->return_ty && fn->ty->return_ty->kind == TY_PTR)
-            fn->may_return_null = nn_returns_null_walk(vm, fn->body);
+    // #693: iterate to a fixpoint so a transitive chain (relay() whose only
+    // null-returning path is `return maybe_null();`) converges regardless of
+    // how many hops deep it is or which function is defined first in the
+    // translation unit. Flags only ever flip false->true, so this always
+    // terminates within at most one pass per function.
+    bool changed;
+    do {
+        changed = false;
+        for (Obj *fn = vm->compiler.globals; fn; fn = fn->next)
+            if (fn->is_function && fn->body && fn->ty && fn->ty->kind == TY_FUNC &&
+                fn->ty->return_ty && fn->ty->return_ty->kind == TY_PTR &&
+                !fn->may_return_null && nn_returns_null_walk(vm, fn->body)) {
+                fn->may_return_null = true;
+                changed = true;
+            }
+    } while (changed);
 }
 
 // Entry point: run the flow-sensitive nonnull pass over a fully-parsed
