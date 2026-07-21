@@ -316,8 +316,8 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 | `error("msg")` | GNU | ✓ | Emits a compile-time error when called; DCE-aware: suppressed inside statically-dead positions (constant-fold + unsigned boundary tautology): `if`/`else` branches, `while(0)`/`for(;0;)` bodies and increment expressions, `false && call()` / `true \|\| call()` short-circuit operands, ternary `cond ? dead : live` branches, GNU elvis `truthy ?: dead` — enabling the `_FORTIFY_SOURCE` `__chk_fail` idiom |
 | `warning("msg")` | GNU | ✓ | Emits a compile-time warning when called; same DCE-aware suppression as `error` |
 | `warn_unused_result` / `__warn_unused_result__` | GNU | ✓ | GNU equivalent of `[[nodiscard]]`: warns if the return value is discarded (`-Wnodiscard`, part of `-Wall`) |
-| `nonnull` / `nonnull(N,...)` | GNU / C23 | ✓ | Warns when a statically-null argument is passed to a nonnull-marked parameter (`-Wnonnull`, part of `-Wall`) |
-| `returns_nonnull` | GNU / C23 | ✓ | Warns when a statically-null value is returned from a `returns_nonnull` function (`-Wnonnull`, part of `-Wall`) |
+| `nonnull` / `nonnull(N,...)` | GNU / C23 | ✓ | Warns when a statically- or flow-provably-null argument is passed to a nonnull-marked parameter (`-Wnonnull`, part of `-Wall`); a merely maybe-null argument warns under the opt-in `-Wmaybe-nonnull` |
+| `returns_nonnull` | GNU / C23 | ✓ | Warns when a statically- or flow-provably-null value is returned from a `returns_nonnull` function (`-Wnonnull`, part of `-Wall`); a merely maybe-null return warns under the opt-in `-Wmaybe-nonnull` |
 | `constructor` / `constructor(N)` | GNU (C23: `[[gnu::constructor]]`) | ✓ | Runs `void(void)` function before `main()`, ordered by priority (lower first; unprioritised functions run last) |
 | `destructor` / `destructor(N)` | GNU (C23: `[[gnu::destructor]]`) | ✓ | Runs `void(void)` function after `main()` returns normally, in reverse priority order (higher first; unprioritised functions run first) |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
@@ -690,13 +690,31 @@ int main(void) {
 }
 ```
 
-The flow pass only warns on **provably-null** values — it never flags a
-pointer that is merely *maybe* null after a branch (e.g.
-`int *p = 0; if (cond) p = &x; handle(p);` is not diagnosed), a pointer whose
-address has been taken, or anything that depends on another function's
-return value. There is no interprocedural analysis.
+Under plain `-Wnonnull`, the flow pass only warns on **provably-null**
+values — a pointer whose address has been taken is never tracked, and
+neither is anything that depends on another function's return value (no
+interprocedural analysis).
 
-Diagnosed under `-Wnonnull` (part of `-Wall`); disable with `-Wno-nonnull`.
+A pointer that is only **maybe** null — definitely null on one path through
+a branch but not on all of them, e.g.:
+
+```c
+int *p = 0;
+if (cond) p = &x;
+handle(p);   // -Wnonnull: silent; -Wmaybe-nonnull: warns
+```
+
+is diagnosed separately under the opt-in `-Wmaybe-nonnull`, via real
+per-branch merge dataflow (each live branch of an `if`/ternary/`&&`/`||` is
+walked independently and the resulting null-states are joined at the merge
+point). `-Wmaybe-nonnull` has a higher false-positive rate on real code than
+plain `-Wnonnull`, so it is never implied by `-Wall` or `-Wextra` — pass it
+explicitly. Loops and `switch` are not merged precisely by either flag (a
+local assigned anywhere inside is conservatively treated as unknown on exit,
+so no maybe-null warning fires there).
+
+Diagnosed under `-Wnonnull` (part of `-Wall`) and `-Wmaybe-nonnull`
+(opt-in only); disable with `-Wno-nonnull` / `-Wno-maybe-nonnull`.
 
 **`__has_attribute`:** returns `1` for `nonnull`, `__nonnull__`,
 `returns_nonnull`, and `__returns_nonnull__`.

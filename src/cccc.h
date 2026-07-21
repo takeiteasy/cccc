@@ -461,6 +461,7 @@ typedef enum {
     CCCC_WARN_OVERRIDE_INIT    = (1ULL << 53), // later designator overrides earlier initializer
     CCCC_WARN_UNUSED_MACROS    = (1ULL << 54), // #define that is never expanded
     CCCC_WARN_NONNULL          = (1ULL << 55), // null passed to a nonnull param / returned from returns_nonnull
+    CCCC_WARN_MAYBE_NONNULL    = (1ULL << 56), // maybe-null (post-branch-merge) value reaching a nonnull param / returns_nonnull return; opt-in, not in -Wall/-Wextra (#687)
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
     CCCC_WARN_CONVERSION_GROUP = CCCC_WARN_CONVERSION |

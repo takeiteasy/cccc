@@ -613,7 +613,8 @@ The trailing summary line (`N warnings generated.`) is suppressed in JSON mode.
 - `redundant-decls` — warns when the same name is declared more than once with the same linkage in the same scope; part of `-Wextra`
 - `override-init` — warns when a later designator in a compound initializer overrides an earlier one (e.g. `{.x=1, .x=2}`); part of `-Wall`
 - `unused-macros` — warns when a `#define` that is not in a system header is never expanded anywhere in the translation unit; standalone only (not part of `-Wall` or `-Wextra`)
-- `nonnull` — warns when a null argument is passed to a parameter marked `nonnull`/`nonnull(N,...)`, or when null is returned from a function marked `returns_nonnull`. Catches both a literal/constant-folded null and, via a light flow-sensitive pass, a null value that reaches the call through a local variable in straight-line code (no warning on a merely-*maybe*-null pointer, and no interprocedural analysis); part of `-Wall`
+- `nonnull` — warns when a null argument is passed to a parameter marked `nonnull`/`nonnull(N,...)`, or when null is returned from a function marked `returns_nonnull`. Catches both a literal/constant-folded null and, via a flow-sensitive pass, a value provably null on *every* live path that reaches the call through a local variable (no interprocedural analysis); part of `-Wall`
+- `maybe-nonnull` — companion to `nonnull`: warns on a value that is null on only *some* live paths reaching a nonnull-marked parameter or `returns_nonnull` return (e.g. `int *p = 0; if (cond) p = &x; f(p);`), via real per-branch merge dataflow over `if`/ternary/`&&`/`||` (loops and `switch` are not merged precisely, so no maybe-null warning fires there). Higher false-positive rate on real code than plain `nonnull`, so standalone only — not part of `-Wall` or `-Wextra`
 
 `conversion` is an umbrella name: `-Wconversion` enables `sign-conversion` and
 `float-conversion` as well as the integer-narrowing check.

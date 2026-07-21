@@ -7870,22 +7870,26 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
 //     f(p);          // p flows from a null initializer -- now warns
 //
 // Deliberately conservative to avoid false positives (matches #655's design
-// and GCC/Clang -Wnonnull): only *provably*-null values ever warn. A pointer
-// that is merely *maybe* null after a branch --
+// and GCC/Clang -Wnonnull): under plain -Wnonnull only *provably*-null
+// values warn. A pointer that is merely *maybe* null after a branch --
 //     int *p = 0; if (cond) p = &x; f(p);
-// -- is left alone; that needs per-branch merge dataflow and is out of scope
-// (tracked as a follow-up). No interprocedural analysis either (also out of
-// scope per the ticket).
+// -- warns separately under the opt-in -Wmaybe-nonnull (#687), which has a
+// higher false-positive risk on real code and so is never folded into -Wall
+// or -Wextra. No interprocedural analysis (tracked as #688, deferred until
+// this NN_MAYBE lattice can feed it a callee-may-return-null fact).
 //
-// Implementation: a single forward env (Obj* -> null-state), no clone/merge
-// dataflow. At any control-flow construct (if/loop/switch) any local
-// assigned somewhere inside is reset to UNKNOWN on exit -- a "barrier" --
-// which is sound without needing per-branch state cloning. A label resets
-// the whole env (a goto target is a merge point from unknown predecessors).
+// Implementation: at ND_IF/ND_COND and short-circuit &&/|| the env is cloned
+// per live branch and *merged* back at the join point (nn_join(), below) --
+// real per-branch dataflow, not just a barrier. Loops and switch still use
+// the simpler "barrier" scheme: any local assigned somewhere inside is reset
+// to UNKNOWN on exit, which is sound without needing back-edge fixpoint
+// iteration (loops) or per-case merge (switch) -- both out of scope for this
+// light pass (tracked as a follow-up). A label resets the whole env (a goto
+// target is a merge point from unknown predecessors).
 // Locals whose address has escaped (Obj->addr_escapes, set by the
 // mark_addr_escapes() pass that already ran) are never tracked, since a
 // reassignment through an escaped alias is invisible to this walk.
-typedef enum { NN_UNKNOWN, NN_NULL, NN_NONNULL } NNState;
+typedef enum { NN_UNKNOWN, NN_NULL, NN_NONNULL, NN_MAYBE } NNState;
 
 typedef struct {
     Obj *var;
@@ -7947,6 +7951,29 @@ static NNState nn_state_of_expr(VirtualMachine *vm, NNEnv *env, Node *node) {
     return NN_UNKNOWN;
 }
 
+// Join two null-states at a control-flow merge point (branch/short-circuit
+// join, #687). NN_MAYBE means "definitely null on at least one live
+// predecessor path, and not definitely null on all of them" -- it is the
+// only state -Wmaybe-nonnull warns on; NN_NULL still means "definitely null
+// on every live path" and keeps warning under plain -Wnonnull.
+//
+//   X       ⊔ X       -> X        (both paths agree)
+//   NULL    ⊔ NONNULL -> MAYBE    (definitely null on one path only)
+//   MAYBE   ⊔ anything -> MAYBE   (already conditional, stays conditional)
+//   UNKNOWN ⊔ NULL     -> MAYBE   (one path proves null; dead paths already
+//                                  pruned by static_branch_value, so this
+//                                  is real conditional-null evidence)
+//   UNKNOWN ⊔ NONNULL  -> UNKNOWN (no null evidence from either path)
+static NNState nn_join(NNState a, NNState b) {
+    if (a == b)
+        return a;
+    if (a == NN_MAYBE || b == NN_MAYBE)
+        return NN_MAYBE;
+    if (a == NN_NULL || b == NN_NULL)
+        return NN_MAYBE;
+    return NN_UNKNOWN;
+}
+
 // Barrier: collect every trackable local assigned anywhere in `node`'s
 // subtree and reset it to UNKNOWN in `env`. Used at the exit of an
 // if/loop/switch construct so a conditionally-taken write can't leave a
@@ -7987,11 +8014,17 @@ static void nn_check_call_args(VirtualMachine *vm, NNEnv *env, Node *call) {
         // warned on those at parse time; don't double-warn.
         Node *stripped = nn_strip_cast(arg);
         if (marked && stripped && !is_const_expr(vm, stripped) &&
-            stripped->kind == ND_VAR && nn_trackable(stripped->var) &&
-            nn_env_get(env, stripped->var) == NN_NULL)
-            warn_tok(vm, arg->tok, CCCC_WARN_NONNULL,
-                     "null value passed to a parameter marked nonnull (parameter %d)",
-                     idx);
+            stripped->kind == ND_VAR && nn_trackable(stripped->var)) {
+            NNState state = nn_env_get(env, stripped->var);
+            if (state == NN_NULL && (vm->compiler.warnings & CCCC_WARN_NONNULL))
+                warn_tok(vm, arg->tok, CCCC_WARN_NONNULL,
+                         "null value passed to a parameter marked nonnull (parameter %d)",
+                         idx);
+            else if (state == NN_MAYBE && (vm->compiler.warnings & CCCC_WARN_MAYBE_NONNULL))
+                warn_tok(vm, arg->tok, CCCC_WARN_MAYBE_NONNULL,
+                         "argument may be null when passed to a parameter marked nonnull (parameter %d)",
+                         idx);
+        }
         arg = arg->next;
         param_ty = param_ty->next;
         idx++;
@@ -8002,38 +8035,102 @@ static void nn_check_return(VirtualMachine *vm, NNEnv *env, Obj *fn, Node *ret_e
     if (!fn->ty->returns_nonnull)
         return;
     Node *stripped = nn_strip_cast(ret_expr);
-    if (stripped && !is_const_expr(vm, stripped) &&
-        stripped->kind == ND_VAR && nn_trackable(stripped->var) &&
-        nn_env_get(env, stripped->var) == NN_NULL)
+    if (!stripped || is_const_expr(vm, stripped) ||
+        stripped->kind != ND_VAR || !nn_trackable(stripped->var))
+        return;
+    NNState state = nn_env_get(env, stripped->var);
+    if (state == NN_NULL && (vm->compiler.warnings & CCCC_WARN_NONNULL))
         warn_tok(vm, ret_expr->tok, CCCC_WARN_NONNULL,
                  "null value returned from function declared with 'returns_nonnull'");
+    else if (state == NN_MAYBE && (vm->compiler.warnings & CCCC_WARN_MAYBE_NONNULL))
+        warn_tok(vm, ret_expr->tok, CCCC_WARN_MAYBE_NONNULL,
+                 "value may be null when returned from function declared with 'returns_nonnull'");
 }
 
 static void nn_walk(VirtualMachine *vm, Obj *fn, Node *node, NNEnv *env);
 
+static bool nn_env_has(const NNEnv *env, Obj *v) {
+    for (int i = 0; i < env->count; i++)
+        if (env->entries[i].var == v)
+            return true;
+    return false;
+}
+
+// Pointwise join of two full branch-end envs into `dst` (#687): dst[v] :=
+// join(a[v], b[v]) for every var known to either side, where "known to a
+// side" that never touched v (absent from its entries) reads as whatever
+// that side's snapshot already had for v -- which for `a`/`b` produced by
+// `NNEnv x = *env; nn_walk(..., &x)` is exactly the pre-branch value, since
+// the struct copy starts with every entry `env` already had. The only case
+// a var is present in one side's entries but not the other's is a var that
+// didn't exist in the pre-branch env at all and got added purely by one
+// branch's own assignment -- there nn_env_get() on the side missing it
+// correctly reports NN_UNKNOWN (never assigned along that path).
+// dst may alias env itself (the common case): each var is looked up in `a`
+// and `b` (not `dst`) before writing, so aliasing is safe.
+static void nn_env_join_into(NNEnv *dst, const NNEnv *a, const NNEnv *b) {
+    for (int i = 0; i < a->count; i++) {
+        Obj *v = a->entries[i].var;
+        NNState joined = nn_join(a->entries[i].state, nn_env_get((NNEnv *)b, v));
+        NNState *slot = nn_env_slot(dst, v);
+        if (slot) *slot = joined; // overflow: stop tracking, never a false positive
+    }
+    // Vars known only to `b` (never present in `a`, so the loop above never
+    // wrote them): join against NN_UNKNOWN, the implicit `a`-side state.
+    for (int i = 0; i < b->count; i++) {
+        Obj *v = b->entries[i].var;
+        if (nn_env_has(a, v))
+            continue;
+        NNState *slot = nn_env_slot(dst, v);
+        if (slot) *slot = nn_join(NN_UNKNOWN, b->entries[i].state);
+    }
+}
+
 // Shared handling for ND_IF and ND_COND (ternary): both use cond/then/els.
-// Each live branch is walked with its own copy of env (to catch calls inside
-// it), then the copies are discarded and a barrier resets any var assigned
-// in a live branch to UNKNOWN -- see block comment above.
+// Real per-branch merge dataflow (#687): each live branch is walked with its
+// own full copy of env, then the live branches' end-states are joined back
+// into `env` via nn_env_join_into(). A statically-dead branch (per
+// static_branch_value) contributes nothing, matching the dead-branch
+// pruning used elsewhere in the compiler (see test_warning_nonnull_flow_dead.c).
+//
+// A missing `else` is treated as an implicit empty branch -- the "skip the
+// whole if" path -- which is itself live (and joins in the pre-branch state
+// unchanged) unless the condition is statically always-true (bv == 1), in
+// which case skipping is provably impossible.
 static void nn_walk_branch(VirtualMachine *vm, Obj *fn, Node *node, NNEnv *env) {
     nn_walk(vm, fn, node->cond, env);
 
     int bv = static_branch_value(vm, node->cond);
-    bool then_dead = (bv == 0), els_dead = (bv == 1);
+    bool then_dead = (bv == 0);
+    bool els_specified = node->els != NULL;
+    bool els_dead = els_specified && (bv == 1);
+    bool implicit_skip_live = !els_specified && bv != 1;
 
-    if (!then_dead) {
-        NNEnv then_env = *env;
+    NNEnv pre = *env; // snapshot for the implicit-skip / "b absent" case below
+    NNEnv then_env, els_env;
+    bool then_live = !then_dead;
+    bool right_live = (els_specified && !els_dead) || implicit_skip_live;
+
+    if (then_live) {
+        then_env = *env;
         nn_walk(vm, fn, node->then, &then_env);
     }
-    if (node->els && !els_dead) {
-        NNEnv els_env = *env;
+    NNEnv *right_env = NULL;
+    if (els_specified && !els_dead) {
+        els_env = *env;
         nn_walk(vm, fn, node->els, &els_env);
+        right_env = &els_env;
+    } else if (implicit_skip_live) {
+        right_env = &pre; // "skip the if" path: env unchanged
     }
 
-    if (!then_dead)
-        nn_collect_assigned(node->then, env);
-    if (node->els && !els_dead)
-        nn_collect_assigned(node->els, env);
+    if (then_live && right_live)
+        nn_env_join_into(env, &then_env, right_env);
+    else if (then_live)
+        *env = then_env;
+    else if (right_live)
+        *env = *right_env;
+    // else: both sides dead -- unreachable code; env (== pre) is already correct.
 }
 
 static void nn_walk(VirtualMachine *vm, Obj *fn, Node *node, NNEnv *env) {
@@ -8063,14 +8160,14 @@ static void nn_walk(VirtualMachine *vm, Obj *fn, Node *node, NNEnv *env) {
         case ND_FUNCALL:
             for (Node *a = node->args; a; a = a->next)
                 nn_walk(vm, fn, a, env);
-            if (vm->compiler.warnings & CCCC_WARN_NONNULL)
+            if (vm->compiler.warnings & (CCCC_WARN_NONNULL | CCCC_WARN_MAYBE_NONNULL))
                 nn_check_call_args(vm, env, node);
             continue;
 
         case ND_RETURN:
             if (node->lhs) {
                 nn_walk(vm, fn, node->lhs, env);
-                if (vm->compiler.warnings & CCCC_WARN_NONNULL)
+                if (vm->compiler.warnings & (CCCC_WARN_NONNULL | CCCC_WARN_MAYBE_NONNULL))
                     nn_check_return(vm, env, fn, node->lhs);
             }
             continue;
@@ -8083,13 +8180,16 @@ static void nn_walk(VirtualMachine *vm, Obj *fn, Node *node, NNEnv *env) {
         case ND_LOGAND:
         case ND_LOGOR:
             // rhs is conditionally evaluated (short-circuit) -- same
-            // clone-then-barrier treatment as an ND_IF/ND_COND branch.
+            // clone-then-join merge as an ND_IF/ND_COND branch (#687): the
+            // "rhs evaluated" path and the "short-circuited, rhs skipped"
+            // path (env right after lhs, unchanged) are joined back in.
             nn_walk(vm, fn, node->lhs, env);
             {
+                NNEnv pre = *env;
                 NNEnv rhs_env = *env;
                 nn_walk(vm, fn, node->rhs, &rhs_env);
+                nn_env_join_into(env, &rhs_env, &pre);
             }
-            nn_collect_assigned(node->rhs, env);
             continue;
 
         case ND_FOR:
@@ -8143,7 +8243,7 @@ static void nn_walk(VirtualMachine *vm, Obj *fn, Node *node, NNEnv *env) {
 static void check_nonnull_flow(VirtualMachine *vm, Obj *fn) {
     if (!fn || !fn->body || !fn->ty)
         return;
-    if (!(vm->compiler.warnings & CCCC_WARN_NONNULL))
+    if (!(vm->compiler.warnings & (CCCC_WARN_NONNULL | CCCC_WARN_MAYBE_NONNULL)))
         return;
     NNEnv env = {0};
     nn_walk(vm, fn, fn->body, &env);
