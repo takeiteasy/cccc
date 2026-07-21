@@ -393,3 +393,78 @@ void test_object_size_malloc_query_in_nested_fn_conservative(void) {
     q();
     AssertEq((unsigned long long)s, (unsigned long long)(size_t)-1);
 }
+
+// ---------------------------------------------------------------------------
+// #649: __attribute__((alloc_size(...))) / __attribute__((malloc)).
+//
+// Generalizes #642's hardcoded malloc/calloc/realloc/reallocarray/
+// aligned_alloc name matching to any function declared with the alloc_size
+// attribute. The attribute is now the *sole* source of truth for
+// objsize_alloc_from_call: libc's allocators self-describe via
+// include/stdlib.h, custom allocators participate by declaring the
+// attribute themselves, and a function that merely happens to share a
+// malloc-family name but carries no attribute is correctly left untracked.
+// ---------------------------------------------------------------------------
+
+// A custom arena allocator, annotated the same way malloc is, using the C23
+// [[gnu::alloc_size(...)]] / [[gnu::malloc]] spelling. Fixes #649's
+// limitation #2: a project's own allocator wrapper now participates in
+// __builtin_object_size sizing.
+[[gnu::alloc_size(1), gnu::malloc]]
+void *test_objsize_arena_alloc(size_t n);
+void *test_objsize_arena_alloc(size_t n) { return malloc(n); }
+
+[[cccc::test]]
+void test_object_size_custom_allocator_c23_syntax(void) {
+    char *p = test_objsize_arena_alloc(96);
+    AssertEq((unsigned long long)__builtin_object_size(p, 0), 96ULL);
+}
+
+// Same custom-allocator coverage via the GNU __attribute__((alloc_size(...)))
+// spelling, exercising the two-index (calloc-style product) form.
+__attribute__((alloc_size(1, 2), malloc))
+void *test_objsize_pool_calloc(size_t nmemb, size_t size);
+void *test_objsize_pool_calloc(size_t nmemb, size_t size) {
+    return calloc(nmemb, size);
+}
+
+[[cccc::test]]
+void test_object_size_custom_allocator_two_arg(void) {
+    // 4 * 16 = 64, exercising the alloc_size(n,m) product form on a
+    // non-libc function.
+    char *p = test_objsize_pool_calloc(4, 16);
+    AssertEq((unsigned long long)__builtin_object_size(p, 0), 64ULL);
+}
+
+// Fixes #649's limitation #1: a user function literally named "malloc" with
+// a different signature/semantics and *no* alloc_size attribute must not be
+// mistaken for the real allocator -- unlike #642's name-only matching, which
+// only distinguished it by argument count.
+static void *fake_malloc(int size) {
+    static char buf[4];
+    return buf;
+}
+
+[[cccc::test]]
+void test_object_size_unannotated_malloc_lookalike_conservative(void) {
+    void *p = fake_malloc(128);
+    AssertEq((unsigned long long)__builtin_object_size(p, 0),
+             (unsigned long long)(size_t)-1);
+}
+
+// The real libc malloc/calloc/realloc/aligned_alloc still resolve through
+// their include/stdlib.h alloc_size attribute (regression coverage for the
+// authoritative-attribute rewrite of objsize_alloc_from_call).
+[[cccc::test]]
+void test_object_size_libc_malloc_via_attribute(void) {
+    char *p = malloc(48);
+    AssertEq((unsigned long long)__builtin_object_size(p, 0), 48ULL);
+}
+
+// NOTE: reallocarray is declared in include/stdlib.h with alloc_size(2,3)
+// for GCC-compatible self-description (matching #642's original name list),
+// but is not yet registered in the VM's FFI table / codegen allocator
+// dispatch, so it cannot actually be called from CCCC source -- this was
+// already true before #649 (the #642 name-matching branch for it was
+// unreachable dead code, since no program could compile a call to it in the
+// first place). Not fixed here; tracked as a separate followup ticket.

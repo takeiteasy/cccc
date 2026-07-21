@@ -186,7 +186,7 @@ language coverage figures apply.
 |---|---|---|
 | Statement expressions `({ ... })` | ✓ | |
 | 128-bit integers `__int128` / `__int128_t` / `__uint128_t` | ✓ | Implemented on top of the `_BitInt(128)` machinery (multi-word, address-based storage). `unsigned __int128` is honoured; `__SIZEOF_INT128__` is defined so feature-detecting code selects these paths |
-| `__attribute__((...))` | ~ | Parsed; `aligned`, `packed`, `unused`, `deprecated`, `format`, `nodiscard`, `warn_unused_result`, `fallthrough`, `noreturn`, `error`, `warning`, `constructor`, `destructor`, `sentinel` supported (see [Attributes](#attributes) below) |
+| `__attribute__((...))` | ~ | Parsed; `aligned`, `packed`, `unused`, `deprecated`, `format`, `nodiscard`, `warn_unused_result`, `fallthrough`, `noreturn`, `error`, `warning`, `constructor`, `destructor`, `sentinel`, `alloc_size`, `malloc` supported (see [Attributes](#attributes) below) |
 | Labels as values `&&label` | ✓ | |
 | Computed goto `goto *expr` | ✓ | |
 | Switch case ranges `case 1 ... 5:` | ✓ | |
@@ -321,6 +321,8 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 | `constructor` / `constructor(N)` | GNU (C23: `[[gnu::constructor]]`) | ✓ | Runs `void(void)` function before `main()`, ordered by priority (lower first; unprioritised functions run last) |
 | `destructor` / `destructor(N)` | GNU (C23: `[[gnu::destructor]]`) | ✓ | Runs `void(void)` function after `main()` returns normally, in reverse priority order (higher first; unprioritised functions run first) |
 | `sentinel` / `sentinel(N)` | GNU (C23: `[[gnu::sentinel]]`) | ✓ | Warns at each call site when the expected trailing variadic argument is not a literal, pointer-typed `NULL` (`-Wsentinel`, part of `-Wall`); static syntactic check only, no runtime enforcement. Applying it to a non-variadic function warns under `-Wattributes` instead |
+| `alloc_size(n)` / `alloc_size(n,m)` | GNU (C23: `[[gnu::alloc_size]]`) | ✓ | Marks a function as an allocator whose return value has a compile-time-computable byte size: argument `n` (1-based) for the single-index form, or the product of arguments `n` and `m` for the two-index (calloc-style) form. Consulted by `__builtin_object_size`/`__builtin_dynamic_object_size` heap-allocation sizing (see below) — the sole recognition mechanism, superseding earlier hardcoded name matching |
+| `malloc` | GNU (C23: `[[gnu::malloc]]`) | ~ | Parsed and stored (self-describes a fresh, non-aliasing allocator, matching libc's `malloc`/`calloc`/`aligned_alloc`) but not yet wired to any aliasing optimization or nonnull inference — informational only |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
 `__has_attribute` returns `1` for `error`, `warning`, `warn_unused_result`, and
@@ -840,6 +842,50 @@ argument list.
 
 Diagnosed under `-Wsentinel` (part of `-Wall`); disable with `-Wno-sentinel`.
 
+#### `__attribute__((alloc_size(n)))` / `__attribute__((alloc_size(n,m)))` / `[[gnu::alloc_size]]`
+
+Marks a function as returning a pointer to an allocation whose byte size is
+given by argument `n` (1-based), or by the product of arguments `n` and `m`
+for the two-index form (e.g. `calloc`-style `nmemb * size`). This is the
+sole mechanism `__builtin_object_size`/`__builtin_dynamic_object_size` use to
+recognize heap allocators — it supersedes an earlier hardcoded name match
+against `malloc`/`calloc`/`realloc`/`aligned_alloc`, so any function
+(including a project's own arena/pool allocator) participates in heap-size
+tracking once annotated, and a function that merely shares an allocator's
+*name* but carries no attribute is correctly left untracked:
+
+```c
+void *arena_alloc(size_t n) __attribute__((alloc_size(1)));
+void *arena_alloc(size_t n) { return malloc(n); }
+
+int main(void) {
+    char *p = arena_alloc(64);
+    __builtin_object_size(p, 0); // 64 — tracked via the attribute, not the name
+
+    void *my_malloc(int n); // a same-named lookalike with no attribute
+    void *q = my_malloc(64);
+    __builtin_object_size(q, 0); // (size_t)-1 — conservative, untracked
+}
+```
+
+libc's `malloc`, `calloc`, `realloc`, `aligned_alloc`, and `reallocarray` are
+declared with `alloc_size` in `include/stdlib.h`, so they self-describe the
+same way (`reallocarray` is declared for self-description only — it is not
+yet registered as a callable function, see below). See the
+`__builtin_object_size`/`__builtin_dynamic_object_size` entries in the
+Builtins table below for the soundness rules (reassignment/address-of
+poisoning) that gate when the tracked size is actually trusted.
+
+#### `__attribute__((malloc))` / `[[gnu::malloc]]`
+
+Marks a function as returning a fresh, non-aliasing pointer (matching GCC's
+`malloc` attribute). Parsed and stored on the function type, but currently
+informational only — CCCC does not yet exploit it for aliasing optimizations,
+and it deliberately does **not** imply `nonnull`/`returns_nonnull` (a real
+allocator can return `NULL` on failure). libc's `malloc`, `calloc`, and
+`aligned_alloc` carry it in `include/stdlib.h`; `realloc`/`reallocarray` do
+not, since they may return the same block as their input pointer.
+
 #### `__attribute__((designated_init))` / `[[gnu::designated_init]]`
 
 Marks a struct type as requiring **every** initializer of that type to use
@@ -896,8 +942,7 @@ Ignored attributes include (but are not limited to):
 | `may_alias` | GNU | Recognized by `__has_attribute` (no strict-aliasing optimizer) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
 | `mode` | GNU | Recognized by `__has_attribute` (no machine-mode type system) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
 | `transparent_union` | GNU | Recognized by `__has_attribute` (no union-arg coercion modeling) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
-| `malloc` | GNU | Feeds `__builtin_object_size` — [#649](https://todo.sr.ht/~takeiteasy/cccc/649) |
-| `alloc_size` / `alloc_align` | GNU | Feeds `__builtin_object_size` — [#649](https://todo.sr.ht/~takeiteasy/cccc/649) |
+| `alloc_align` | GNU | Recognized by `__has_attribute` (no alignment-fact propagation) |
 | `format_arg` | GNU | |
 | `unsequenced` | C23 | |
 | `reproducible` | C23 | |
@@ -1060,7 +1105,7 @@ These are lowered to equivalent arithmetic comparisons at parse time.
 | `__builtin_return_address(n)` | Returns the return address `n` frames up the call stack (all levels supported). The value is a VM bytecode offset (`Pc`/`uint32_t`) cast to `void*`, **not** a host machine address — unlike `__builtin_frame_address`, which returns a real `bp` pointer. Returns `NULL` past the outermost frame. Implemented via the `RETADDR` VM opcode, which walks the saved-bp chain with runtime bounds-checking. **CALLT interaction**: when a function is reached via a tail call (`CALLT`, enabled at `-O1`), the intermediate frame has been unwound; `__builtin_return_address(0)` therefore returns the *original caller's* address, not the address of the tail-call site. See [VM.md](VM.md) (Tail-Call Optimisation section) for details. |
 | `__builtin_pc_function_name(pc)` | Maps a VM bytecode offset (`void*` as returned by `__builtin_return_address`) to the name (`const char*`) of the enclosing C function. Returns `NULL` if `pc` is `NULL` or outside all known function ranges. Works in all builds — does **not** require `-g`. |
 | `__builtin_pc_source_location(pc, &file, &line)` | Maps a VM bytecode offset to a source file name and 1-based line number. On success sets `*file` (a `const char*` pointing into the VM's internal table) and `*line`, and returns `1`. On failure (unknown pc or source map not populated) sets `*file = NULL`, `*line = 0`, and returns `0`. Requires the program to have been compiled with `-g`; without it this always returns `0`. Use together with `__builtin_return_address` for a full symbolization pipeline. |
-| `__builtin_object_size(ptr, type)` | Compile-time object-size computation for statically-known objects (local/global arrays, scalars, struct members reachable via constant-offset chains). Returns exact remaining byte count for `type` 0–3 (bit 0: whole object vs nearest subobject; bit 1: max vs min fallback). Ternary expressions (`cond ? a : b`) are resolved by computing the size for each branch independently and returning the larger (type 0/1) or smaller (type 2/3). Union member accesses report the whole-union size for `type` 0/2 and the specific member size for `type` 1/3. **Heap allocations**: a pointer initialized directly from `malloc`/`calloc`/`realloc`/`reallocarray`/`aligned_alloc` with compile-time constant size argument(s) resolves to the real allocation size, *provided* the pointer is never reassigned or has its address taken anywhere in the enclosing function — this is checked across the whole function body (including loop back-edges) before the query is resolved, so it can't fold a stale size for a pointer that is reassigned later in the source. Any other pattern (non-constant size, reassignment, `&ptr`, interior heap pointers `p + k`) falls back conservatively to `(size_t)-1` (type 0/1) or `0` (type 2/3) — preserving `_FORTIFY_SOURCE` safety. |
+| `__builtin_object_size(ptr, type)` | Compile-time object-size computation for statically-known objects (local/global arrays, scalars, struct members reachable via constant-offset chains). Returns exact remaining byte count for `type` 0–3 (bit 0: whole object vs nearest subobject; bit 1: max vs min fallback). Ternary expressions (`cond ? a : b`) are resolved by computing the size for each branch independently and returning the larger (type 0/1) or smaller (type 2/3). Union member accesses report the whole-union size for `type` 0/2 and the specific member size for `type` 1/3. **Heap allocations**: a pointer initialized directly from a call to a function declared `__attribute__((alloc_size(...)))` (see [Attributes](#attributes) above) with compile-time constant size argument(s) resolves to the real allocation size, *provided* the pointer is never reassigned or has its address taken anywhere in the enclosing function — this is checked across the whole function body (including loop back-edges) before the query is resolved, so it can't fold a stale size for a pointer that is reassigned later in the source. Recognition is attribute-driven, not name-based: libc's `malloc`/`calloc`/`realloc`/`reallocarray`/`aligned_alloc` self-describe via `alloc_size` in `include/stdlib.h`, and any annotated custom allocator (e.g. an arena/pool wrapper) participates the same way — a function that merely shares an allocator's name but carries no attribute is correctly left untracked. Any other pattern (non-constant size, reassignment, `&ptr`, interior heap pointers `p + k`, an allocator with no `alloc_size` attribute) falls back conservatively to `(size_t)-1` (type 0/1) or `0` (type 2/3) — preserving `_FORTIFY_SOURCE` safety. |
 | `__builtin_dynamic_object_size(ptr, type)` | Runtime object-size query. For statically-known objects (stack/global arrays, constant-offset chains, ternary expressions where both branches are statically resolvable) the result is folded to a compile-time constant (identical to `__builtin_object_size`). For VM heap allocations made via `malloc`/`calloc`/`realloc` under `--vm-heap` (`-V`), the `DYNOBJSZ` opcode binary-searches the `sorted_allocs` base-address table for the containing allocation and returns `AllocHeader.requested_size - offset` — this works for both base pointers and **interior pointers** (`p + k`), resolving to the exact remaining byte count. The `type` argument has the same bit encoding as `__builtin_object_size`. **Limitations**: pointers past the end of the requested allocation (e.g. into 8-byte alignment padding) and `alloca`/VLA stack buffers (no `AllocHeader`) fall back to the conservative value, preserving `_FORTIFY_SOURCE` safety. |
 | `__builtin_unreachable()` | Marks an unreachable code path; halts the VM if executed |
 

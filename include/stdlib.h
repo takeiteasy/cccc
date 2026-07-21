@@ -35,13 +35,23 @@ extern unsigned long long int strtoull(const char* nptr, char** endptr, int base
 
 extern int rand(void);
 extern void srand(unsigned int seed);
-extern void* aligned_alloc(size_t alignment, size_t size);
-extern void* calloc(size_t nmemb, size_t size);
+// alloc_size/malloc (#649): self-describing sizes for __builtin_object_size,
+// generalizing #642's hardcoded name-based malloc-family detection. realloc
+// and reallocarray are not annotated `malloc` since they may return the same
+// block as their input pointer (not a fresh, non-aliasing allocation).
+extern void* aligned_alloc(size_t alignment, size_t size) __attribute__((alloc_size(2), malloc));
+extern void* calloc(size_t nmemb, size_t size) __attribute__((alloc_size(1, 2), malloc));
 extern void free(void* ptr);
 extern void free_sized(void* ptr, size_t size);
 extern void free_aligned_sized(void* ptr, size_t alignment, size_t size);
-extern void* malloc(size_t size);
-extern void* realloc(void* ptr, size_t size);
+extern void* malloc(size_t size) __attribute__((alloc_size(1), malloc));
+extern void* realloc(void* ptr, size_t size) __attribute__((alloc_size(2)));
+// NOTE: declared for GCC-compatible self-description only -- not yet
+// registered in the VM's FFI table / codegen allocator dispatch, so it
+// cannot actually be called from CCCC source (pre-existing gap, tracked
+// separately; #642's original name-based match for it was likewise
+// unreachable).
+extern void* reallocarray(void* ptr, size_t nmemb, size_t size) __attribute__((alloc_size(2, 3)));
 extern void abort(void);
 extern int atexit(void (*func)(void));
 extern int at_quick_exit(void (*func)(void));

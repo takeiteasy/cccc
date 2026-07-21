@@ -101,6 +101,11 @@ typedef struct {
     bool is_sentinel;
     int  sentinel_pos;
 
+    // __attribute__((alloc_size(n[,m]))) / __attribute__((malloc)) (#649)
+    int  alloc_size_idx;
+    int  alloc_size_idx2;
+    bool is_malloc;
+
     // __attribute__((cleanup(fn)))
     Obj *cleanup_fn;
     Token *cleanup_tok;
@@ -4836,60 +4841,56 @@ static bool objsize_resolve_ptr(VirtualMachine *vm, Node *node, ObjSizeInfo *r) 
 }
 
 // ---------------------------------------------------------------------------
-// #642: constant malloc-family allocation tracking.
+// #649: attribute-driven allocation-size tracking (generalizes #642).
 //
 // Recognizes `rhs` (a pointer initializer expression, casts already peeled by
-// the caller) as a call to a malloc-family function with compile-time
-// constant size argument(s), and returns the allocated byte count in *out.
-// Only direct calls to the real library function are matched — a user
-// declaration/shadow named e.g. "malloc" with a different signature is
-// rejected by checking the parameter count matches what we expect to read.
+// the caller) as a call to a function declared __attribute__((alloc_size(n)))
+// / __attribute__((alloc_size(n,m))), with compile-time constant argument(s)
+// at the designated 1-based index/indices, and returns the allocated byte
+// count in *out.
 //
-// This is intentionally name-based (no `alloc_size` attribute exists yet in
-// CCCC); see the #642 follow-up ticket for attribute-based generalization.
+// The attribute is authoritative: a function is only recognized as an
+// allocator if it (or a prior compatible declaration merged onto its Type,
+// see inherit_semantic_attrs/declare_function_prototype) carries alloc_size.
+// This is deliberately *not* name-based any more -- a user function literally
+// named "malloc" with no attribute is correctly left untracked, and any
+// annotated custom allocator (arena/pool wrapper) is tracked the same way
+// libc's malloc/calloc/realloc/reallocarray/aligned_alloc are (see their
+// declarations in include/stdlib.h).
 static bool objsize_alloc_from_call(VirtualMachine *vm, Node *rhs, int *out) {
     while (rhs && rhs->kind == ND_CAST)
         rhs = rhs->lhs;
     if (!rhs || rhs->kind != ND_FUNCALL || !rhs->lhs || rhs->lhs->kind != ND_VAR)
         return false;
     Obj *fn = rhs->lhs->var;
-    if (!fn || !fn->name || !fn->is_function)
+    if (!fn || !fn->name || !fn->is_function || !fn->ty || fn->ty->kind != TY_FUNC)
         return false;
+    int idx1 = fn->ty->alloc_size_idx;
+    int idx2 = fn->ty->alloc_size_idx2;
+    if (idx1 <= 0)
+        return false; // no alloc_size attribute on this declaration
 
     // Fetch the Nth argument (0-based), or NULL if out of range.
-    Node *args[3] = {0};
+    Node *args[8] = {0};
     int nargs = 0;
-    for (Node *a = rhs->args; a && nargs < 3; a = a->next)
+    for (Node *a = rhs->args; a && nargs < 8; a = a->next)
         args[nargs++] = a;
 
-    int64_t size = -1;
-    if (strcmp(fn->name, "malloc") == 0 || strcmp(fn->name, "realloc") == 0) {
-        // malloc(size) / realloc(ptr, size) — size is the last of 1/2 args.
-        int want = strcmp(fn->name, "malloc") == 0 ? 1 : 2;
-        if (nargs != want || !is_const_expr(vm, args[want - 1]))
-            return false;
-        size = eval(vm, args[want - 1]);
-    } else if (strcmp(fn->name, "calloc") == 0 || strcmp(fn->name, "reallocarray") == 0) {
-        // calloc(nmemb, size) / reallocarray(ptr, nmemb, size).
-        int want = strcmp(fn->name, "calloc") == 0 ? 2 : 3;
-        if (nargs != want || !is_const_expr(vm, args[want - 2]) ||
-            !is_const_expr(vm, args[want - 1]))
-            return false;
-        int64_t nmemb = eval(vm, args[want - 2]);
-        int64_t elem  = eval(vm, args[want - 1]);
-        if (nmemb < 0 || elem < 0)
+    if (idx1 > nargs || (idx2 && idx2 > nargs))
+        return false; // attribute refers to an argument this call doesn't have
+    if (!is_const_expr(vm, args[idx1 - 1]) || (idx2 && !is_const_expr(vm, args[idx2 - 1])))
+        return false;
+
+    int64_t size = eval(vm, args[idx1 - 1]);
+    if (idx2) {
+        // calloc(nmemb, size)-style two-factor form: product of both args.
+        int64_t elem = eval(vm, args[idx2 - 1]);
+        if (size < 0 || elem < 0)
             return false;
         // Overflow guard: bail rather than fold a wrapped-around size.
-        if (elem != 0 && nmemb > (INT64_MAX / elem))
+        if (elem != 0 && size > (INT64_MAX / elem))
             return false;
-        size = nmemb * elem;
-    } else if (strcmp(fn->name, "aligned_alloc") == 0) {
-        // aligned_alloc(alignment, size).
-        if (nargs != 2 || !is_const_expr(vm, args[1]))
-            return false;
-        size = eval(vm, args[1]);
-    } else {
-        return false;
+        size *= elem;
     }
 
     if (size < 0 || size > INT_MAX)
@@ -6461,7 +6462,8 @@ static Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr
                   !attr->attr_error_msg && !attr->attr_warning_msg &&
                   !attr->nonnull_all && !attr->nonnull_mask &&
                   !attr->returns_nonnull && !attr->is_constructor &&
-                  !attr->is_destructor && !attr->is_sentinel))
+                  !attr->is_destructor && !attr->is_sentinel &&
+                  !attr->alloc_size_idx && !attr->is_malloc))
         return ty;
     ty = copy_type(vm, ty);
     apply_semantic_attr(ty, NULL, attr->attribute_tok, attr->is_maybe_unused,
@@ -6495,6 +6497,11 @@ static Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr
             ty->is_sentinel = true;
             ty->sentinel_pos = attr->sentinel_pos;
         }
+        if (attr->alloc_size_idx) {
+            ty->alloc_size_idx = attr->alloc_size_idx;
+            ty->alloc_size_idx2 = attr->alloc_size_idx2;
+        }
+        if (attr->is_malloc) ty->is_malloc = true;
         if (attr->is_constructor) {
             ty->is_constructor = true;
             ty->init_priority = attr->init_priority;
@@ -6536,6 +6543,11 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
         dst->is_sentinel = true;
         dst->sentinel_pos = src->sentinel_pos;
     }
+    if (src->alloc_size_idx) {
+        dst->alloc_size_idx = src->alloc_size_idx;
+        dst->alloc_size_idx2 = src->alloc_size_idx2;
+    }
+    dst->is_malloc |= src->is_malloc;
     if (src->is_constructor) {
         dst->is_constructor = true;
         dst->init_priority = src->init_priority;
@@ -6775,6 +6787,43 @@ static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *
                     attr->is_sentinel = true;
                     attr->sentinel_pos = pos;
                 }
+                continue;
+            }
+
+            // __attribute__((alloc_size(n))) / __attribute__((alloc_size(n,m))):
+            // 1-based argument index(es) whose (product of) value(s) is the byte
+            // size of the object returned by this allocator-shaped function.
+            // Consulted by objsize_alloc_from_call (#649) to generalize #642's
+            // hardcoded malloc-family name matching to any annotated function.
+            if (is_attr_name(tok, "alloc_size")) {
+                tok = tok->next;
+                int idx1 = 0, idx2 = 0;
+                if (equal(tok, "(")) {
+                    tok = tok->next;
+                    idx1 = const_expr(vm, &tok, tok);
+                    if (consume(vm, &tok, tok, ","))
+                        idx2 = const_expr(vm, &tok, tok);
+                    tok = skip(vm, tok, ")");
+                }
+                if (ty && ty->kind == TY_FUNC) {
+                    ty->alloc_size_idx = idx1;
+                    ty->alloc_size_idx2 = idx2;
+                }
+                if (attr) {
+                    attr->alloc_size_idx = idx1;
+                    attr->alloc_size_idx2 = idx2;
+                }
+                continue;
+            }
+
+            // __attribute__((malloc)): the function returns a freshly allocated,
+            // non-aliasing pointer. Informational only in CCCC for now -- not
+            // wired to nonnull inference (malloc can return NULL) or to any
+            // aliasing optimization; see #649 followup.
+            if (is_attr_name(tok, "malloc")) {
+                tok = tok->next;
+                if (ty && ty->kind == TY_FUNC) ty->is_malloc = true;
+                if (attr) attr->is_malloc = true;
                 continue;
             }
 
@@ -7108,6 +7157,35 @@ static Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
                     attr->is_sentinel = true;
                     attr->sentinel_pos = pos;
                 }
+                continue;
+            }
+
+            // [[gnu::alloc_size(n)]] / [[gnu::alloc_size(n,m)]] (#649)
+            if (equal(name_tok, "alloc_size")) {
+                int idx1 = 0, idx2 = 0;
+                if (equal(tok, "(")) {
+                    tok = tok->next;
+                    idx1 = const_expr(vm, &tok, tok);
+                    if (consume(vm, &tok, tok, ","))
+                        idx2 = const_expr(vm, &tok, tok);
+                    tok = skip(vm, tok, ")");
+                }
+                if (ty && ty->kind == TY_FUNC) {
+                    ty->alloc_size_idx = idx1;
+                    ty->alloc_size_idx2 = idx2;
+                }
+                if (attr) {
+                    attr->alloc_size_idx = idx1;
+                    attr->alloc_size_idx2 = idx2;
+                }
+                continue;
+            }
+
+            // [[gnu::malloc]] (#649) -- informational, see the GNU-syntax
+            // handler above for the full rationale.
+            if (equal(name_tok, "malloc")) {
+                if (ty && ty->kind == TY_FUNC) ty->is_malloc = true;
+                if (attr) attr->is_malloc = true;
                 continue;
             }
 
@@ -10312,6 +10390,11 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty, VarAttr *at
                 fn->ty->is_sentinel = true;
                 fn->ty->sentinel_pos = ty->sentinel_pos;
             }
+            if (ty->alloc_size_idx) {
+                fn->ty->alloc_size_idx = ty->alloc_size_idx;
+                fn->ty->alloc_size_idx2 = ty->alloc_size_idx2;
+            }
+            fn->ty->is_malloc |= ty->is_malloc;
         }
     } else {
         fn = new_gvar(vm, name_str, ty->name->len, ty);
@@ -10554,6 +10637,11 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
                 fn->ty->is_sentinel = true;
                 fn->ty->sentinel_pos = ty->sentinel_pos;
             }
+            if (ty->alloc_size_idx) {
+                fn->ty->alloc_size_idx = ty->alloc_size_idx;
+                fn->ty->alloc_size_idx2 = ty->alloc_size_idx2;
+            }
+            fn->ty->is_malloc |= ty->is_malloc;
         }
     } else {
         fn = new_gvar(vm, name_str, ty->name->len, ty);

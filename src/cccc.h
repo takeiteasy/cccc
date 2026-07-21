@@ -822,6 +822,17 @@ struct Type {
     bool is_sentinel;    // true if the function requires a NULL sentinel arg
     int  sentinel_pos;   // trailing non-sentinel args allowed before the NULL (0 = last arg)
 
+    // __attribute__((alloc_size(n[,m]))): 1-based arg indices (0 = unset).
+    // Generalizes #642's name-based malloc-family detection: any function
+    // declared with this attribute participates in __builtin_object_size
+    // heap-allocation sizing (#649).
+    int  alloc_size_idx;   // size arg, or first factor for the 2-arg form
+    int  alloc_size_idx2;  // second factor (calloc-style product), 0 if 1-arg form
+
+    // __attribute__((malloc)): noalias/fresh-pointer hint (informational;
+    // not wired to any optimization or nonnull inference yet -- #649 followup).
+    bool is_malloc;
+
     // __attribute__((constructor[(priority)])) / ((destructor[(priority)]))
     bool is_constructor; // run before main(), ordered by init_priority
     bool is_destructor;  // run after main() returns normally, reverse order
