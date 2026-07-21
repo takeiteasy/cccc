@@ -153,6 +153,11 @@ extern "C" {
     X(BNOT3, 1) /* rd = ~rs (bitwise not) */                                   \
     X(ADDI3, 3) /* rd = rs1 + immediate */                                     \
     X(LEA3, 3)  /* rd = bp + immediate (local variable address) */             \
+    X(STKTAG, 5) /* Tag an aggregate local's [bp+offset, bp+offset+size) extent \
+                    with the current frame's liveness epoch, for interior      \
+                    dangling-pointer resolution (#675). Emitted immediately     \
+                    after the LEA3 base of an escaping array/struct local.      \
+                    Format: [STKTAG][unused:32][offset:i64][size:i64] */        \
     /* Register-based control flow */                                          \
     X(JZ3, 2)  /* if (regs[rs] == 0) pc = target */                            \
     X(JNZ3, 2) /* if (regs[rs] != 0) pc = target */                            \
@@ -2397,6 +2402,29 @@ struct VirtualMachine {
     } frame_epochs; // mirrors the saved-bp chain, for ordered pop/truncate
     HashMap live_epochs;      // epoch -> present; O(1) liveness membership
     HashMap stack_ptr_epochs; // &local address -> creating frame's epoch
+
+    // Retained address intervals for interior stack-pointer resolution
+    // (#675), the stack analogue of sorted_allocs below. STKTAG, emitted
+    // immediately after the LEA3 base of an escaping array/struct local,
+    // records [bp+offset, bp+offset+size) tagged with the creating frame's
+    // epoch. Unlike sorted_allocs (a bump allocator, so bases are globally
+    // ordered and never reused), stack addresses ARE reused across frames,
+    // so intervals from dead frames are retained rather than pruned: a dead
+    // frame's extent and a later live frame's extent can overlap at the
+    // same addresses. Recency is resolved by epoch order (strictly
+    // increasing per activation), so "the interval that currently owns this
+    // address" is simply the max-epoch interval containing it -- see
+    // stack_interval_stab in ops.c. Exact-address hits are already covered
+    // by stack_ptr_epochs above; this table is consulted by CHKP3 only when
+    // that lookup misses (i.e. only for interior addresses).
+    struct {
+        struct {
+            long long lo, hi;           // [lo, hi) byte range, raw host addrs
+            unsigned long long epoch;   // creating frame's epoch
+        } *iv;
+        int count;
+        int capacity;
+    } stack_intervals;
 
     // Sorted allocation array for O(log n) base-address range queries.
     // Populated by MALC (CALC/REALC delegate to MALC) as a simple append —

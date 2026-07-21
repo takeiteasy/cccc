@@ -1202,6 +1202,7 @@ void cc_destroy(VirtualMachine *vm) {
     hashmap_deinit(&vm->stack_ptr_epochs);
     free(vm->frame_epochs.bps);
     free(vm->frame_epochs.epochs);
+    free(vm->stack_intervals.iv); // #675: retained interior-pointer intervals
 
     // Free scope variable lists
     if (vm->scope_vars) {

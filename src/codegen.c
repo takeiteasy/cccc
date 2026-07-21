@@ -1592,11 +1592,31 @@ static Pc emit_lea3(VirtualMachine *vm, int rd, long long offset) {
     return emit_lea3_ex(vm, rd, offset, false);
 }
 
+// STKTAG: tag [bp+offset, bp+offset+size) with the current frame's epoch,
+// for interior dangling-pointer resolution (#675). See docs/SAFETY.md.
+static Pc emit_stktag(VirtualMachine *vm, long long offset, long long size) {
+    emit_word(vm, STKTAG);
+    emit_word(vm, 0); // unused (no register operand)
+    emit_i64(vm, offset);
+    return emit_i64(vm, size);
+}
+
 // LEA3 for a local Obj's own base address, e.g. `&var`/array-or-struct
 // base materialization -- skips recording iff #676's escape analysis
-// proved `var`'s address never escapes its creating frame.
+// proved `var`'s address never escapes its creating frame. When `var` is
+// an escaping array/struct/union, also emits STKTAG (#675) so an interior
+// pointer derived from this base at a runtime offset (e.g. &arr[i] for
+// non-constant i, which never itself passes through LEA3 as a single
+// recorded address) can still be resolved back to this base's epoch at
+// CHKP3 time. Scalars need no interior resolution -- their one address is
+// already covered exactly by stack_ptr_epochs.
 static Pc emit_lea3_var(VirtualMachine *vm, int rd, Obj *var) {
-    return emit_lea3_ex(vm, rd, var->offset, !var->addr_escapes);
+    Pc pc = emit_lea3_ex(vm, rd, var->offset, !var->addr_escapes);
+    if (var->addr_escapes &&
+        (var->ty->kind == TY_ARRAY || var->ty->kind == TY_STRUCT ||
+         var->ty->kind == TY_UNION))
+        emit_stktag(vm, var->offset, var->ty->size);
+    return pc;
 }
 
 // LEA3 for compiler-internal bookkeeping addresses (static links, block

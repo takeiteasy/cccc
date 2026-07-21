@@ -77,9 +77,9 @@ CCCC provides preset safety levels that make it easy to choose the right combina
   - Control flow integrity (CFI) with shadow stack
   - Temporal memory tagging (generation-based UAF detection)
   - Dangling stack pointer detection (dereference-time range check plus
-    per-frame epoch liveness tracking; see
+    per-frame epoch liveness tracking plus interior interval-stabbing; see
     [Advanced Pointer Tracking Features](#advanced-pointer-tracking-features)
-    for what it catches and its residual gap, #670/#673)
+    for what it catches, #670/#673/#675)
   - Alignment checks
   - Provenance tracking (pointer origin validation)
   - Invalid pointer arithmetic detection
@@ -90,10 +90,10 @@ CCCC provides preset safety levels that make it easy to choose the right combina
 **Detects:** Most memory safety bugs CCCC can catch, including dereferencing a
 stack pointer whose owning frame has already returned -- whether the
 dereference happens in the frame that got control back or one or more calls
-*deeper* than that (#673 closed the deeper-call gap left by #670). Residual
-gap: interior stack pointers (e.g. `&arr[i]` with a runtime index) aren't
-tagged with a frame epoch, so a deeper-call dereference through one of those
-still relies on the plain range check alone (see `--dangling-pointers` below)
+*deeper* than that (#673 closed the deeper-call gap left by #670), including
+through an interior pointer with a runtime-computed offset (e.g. `&arr[i]`
+for non-constant `i`) whose owning array/struct escapes its frame (#675
+closed the remaining gap left by #673; see `--dangling-pointers` below)
 
 ---
 
@@ -339,10 +339,11 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
 
 ## Advanced Pointer Tracking Features
 
-- `--dangling-pointers` **Dangling stack pointer detection (dereference-time range check + per-frame epoch liveness, #670/#673)**
+- `--dangling-pointers` **Dangling stack pointer detection (dereference-time range check + per-frame epoch liveness + interior interval-stabbing, #670/#673/#675)**
   - Enforced in `CHKP3`, the same gate that runs before every pointer
-    dereference under `--pointer-checks` / `-3`. Two layers, both
-    dereference-time (no creation-time escape analysis):
+    dereference under `--pointer-checks` / `-3`. Three layers, all
+    dereference-time (no creation-time escape analysis decides *correctness*
+    — #676's escape analysis only prunes a redundant recording, see below):
     1. **Range check (#670).** The VM stack grows downward, so every *live*
        local sits at an address `>= vm->sp`, and any address inside the stack
        reservation but below the current `vm->sp` belongs to a frame that has
@@ -362,23 +363,37 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
        memory (`ptr >= sp` again there), which layer 1 alone would miss, but
        its tagged epoch is still absent from `live_epochs` and layer 2 still
        catches it
+    3. **Interior interval-stabbing (#675).** An interior stack pointer with a
+       runtime-computed offset (e.g. `&arr[i]` for non-constant `i`) compiles
+       to a base `LEA3` for `arr` plus a separate runtime `ADD`, so the
+       *final* dereferenced address is never itself the one recorded in
+       `stack_ptr_epochs` by layer 2 — only `arr`'s base is. `STKTAG`, emitted
+       immediately after the base `LEA3` of any *escaping* array/struct local,
+       retains `[base, base+size)` tagged with the creating frame's epoch in
+       `vm->stack_intervals`. Unlike `sorted_allocs` (the heap analogue,
+       #650) — a bump allocator whose base addresses are globally ordered and
+       never reused — stack addresses *are* reused across frames, so
+       intervals are retained rather than pruned on frame death; a dead
+       frame's extent and a later live frame's extent can share the same
+       addresses. Recency is resolved by epoch order (strictly increasing per
+       activation, so epoch order *is* recency order): consulted only when
+       layer 2's exact lookup misses, `CHKP3` resolves an interior address to
+       the max-epoch interval containing it and flags it iff that epoch is no
+       longer in `live_epochs` — so a live frame that has reused a dead
+       frame's address range for a smaller object still resolves correctly.
   - **What it catches:** dereferencing a pointer to a local whose function has
     returned, whether the dereference happens in the frame that got control
     back (or any ancestor of it — layer 1) or one or more calls *deeper* than
-    that (layer 2) — e.g. both `int *p = get_local(); return *p;` and
-    `int *p = get_local(); use(p);` where `use` derefs `p`. This also covers
-    deref-through-pointer cases that `CHKL` (see `--stack-instrumentation`
-    below) does not
-  - **What it does not catch (residual gap, #673):** interior stack pointers
-    with a runtime-computed offset (e.g. `&arr[i]` for non-constant `i`) never
-    pass through `LEA3` with a single recorded address, so they're never
-    tagged in `stack_ptr_epochs` — a deeper-call dereference through one of
-    those still relies on layer 1 alone and can be missed the same way #670
-    documented. Constant-offset member access (`&s.field`) folds into a
-    single `LEA3` immediate and *is* covered. This is frame-granular
-    detection, not block-granular: a `&local` whose *block* (not function)
-    has exited while the frame is still alive is `CHKL`'s job, not this
-    check's (see `--stack-instrumentation` below)
+    that (layer 2), through a base pointer or an interior one with a
+    runtime-computed offset whose owning array/struct escapes (layer 3) —
+    e.g. `int *p = get_local(); return *p;`, `int *p = get_local(); use(p);`
+    where `use` derefs `p`, and `int *p = &arr[i]` (runtime `i`) returned from
+    `get_local` and derefed in a deeper call. This also covers deref-through-
+    pointer cases that `CHKL` (see `--stack-instrumentation` below) does not
+  - **What it does not catch:** this is frame-granular detection, not
+    block-granular — a `&local` whose *block* (not function) has exited
+    while the frame is still alive is `CHKL`'s job, not this check's (see
+    `--stack-instrumentation` below)
   - Recording is pruned to addresses that provably *escape* their creating
     frame (#676) — a post-parse pass (`mark_addr_escapes` in `src/parse.c`)
     marks a local's `Obj.addr_escapes` when its address (or an array/struct
@@ -946,12 +961,55 @@ liveness epoch; `get_local()`'s epoch dies at `LEV3` along with the rest of
 its frame, so `use()`'s dereference is flagged regardless of what address
 range `use()`'s own frame happens to occupy.
 
-**Residual gap:** an interior stack pointer with a runtime-computed offset
-(e.g. `&arr[i]` for non-constant `i`) is never tagged with a frame epoch — it
-doesn't go through a single `LEA3` the way a plain `&local` or constant-offset
-`&s.field` does — so a deeper-call dereference through one of those still
-relies on the range check alone and can be missed the same way #670
-originally documented.
+**The interior-pointer case (#675):** an interior stack pointer with a
+runtime-computed offset (e.g. `&arr[i]` for non-constant `i`) doesn't go
+through a single `LEA3` the way a plain `&local` or constant-offset
+`&s.field` does — the base `arr` gets its own `LEA3`, but the final address
+is computed by a separate runtime add, so it was never itself the address
+tagged in `stack_ptr_epochs`. A deeper-call dereference through one of these
+used to rely on the range check alone (and could be missed the same way #670
+originally documented for plain locals) until `STKTAG` closed the gap:
+
+```c
+// test_dangling_interior_deeper_call.c - Dangling deref through an interior pointer
+int *get_local(int i) {
+    int arr[8];
+    arr[i] = 42;
+    return &arr[i]; // runtime offset -- not a single LEA3
+}
+
+void use(int *p) {
+    int pad[8]; // reoccupies the same memory arr used, defeating the range check
+    pad[0] = 0;
+    int y = *p; // NOT caught by the range check alone; caught by #675.
+    (void)y;
+    (void)pad;
+}
+
+int main(void) {
+    int *p = get_local(3);
+    use(p);
+    return 0;
+}
+```
+
+```bash
+$ ./cccc --dangling-pointers test_dangling_interior_deeper_call.c
+
+========== DANGLING STACK POINTER ==========
+Dereferenced a pointer into a stack frame that has already returned
+Address:    0x167ffffb4
+Creating frame's epoch is no longer live (dereferenced through an interior pointer into a deeper call, #675)
+Current PC: 0x4d (offset: 77)
+============================================
+```
+
+`STKTAG`, emitted right after `arr`'s base `LEA3` because `&arr[i]` escapes
+via the `return`, retains `arr`'s `[base, base+size)` extent tagged with
+`get_local()`'s epoch. `CHKP3`'s exact `stack_ptr_epochs` lookup misses (the
+dereferenced address is interior, not the tagged base), so it falls through
+to the interval-stabbing lookup, finds `arr`'s retained interval containing
+the address, and flags it — same as the plain-local case, one layer deeper.
 
 ### Pointer Alignment
 ```c

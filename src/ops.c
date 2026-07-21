@@ -1540,6 +1540,82 @@ static inline int op_LEA3_fn(VirtualMachine *vm) {
     return 0;
 }
 
+// Insert (or refresh) a retained stack address interval (#675). Stack
+// addresses are reused across frames -- unlike sorted_allocs' bump-allocated
+// heap addresses -- so intervals are never dropped on frame death; only an
+// exact [lo,hi) repeat (the common same-slot/same-size reuse case) is
+// deduped by overwriting its epoch in place, keeping the array from growing
+// unboundedly for a tight loop that repeatedly re-enters the same frame
+// shape. Partial overlaps are retained as distinct entries -- correctness
+// (not dropping a dead frame's extent just because a later frame reused
+// part of it) depends on that; see stack_interval_stab below.
+static void stack_interval_insert(VirtualMachine *vm, long long lo, long long hi,
+                                   unsigned long long epoch) {
+    for (int i = 0; i < vm->stack_intervals.count; i++) {
+        if (vm->stack_intervals.iv[i].lo == lo && vm->stack_intervals.iv[i].hi == hi) {
+            vm->stack_intervals.iv[i].epoch = epoch;
+            return;
+        }
+    }
+    if (vm->stack_intervals.count == vm->stack_intervals.capacity) {
+        int new_cap = vm->stack_intervals.capacity ? vm->stack_intervals.capacity * 2 : 64;
+        void *new_iv = realloc(vm->stack_intervals.iv,
+                                (size_t)new_cap * sizeof(*vm->stack_intervals.iv));
+        if (!new_iv)
+            return; // OOM: skip tracking this interval -- falls back to the
+                     // (still-precise) range check for it, no false positives
+        vm->stack_intervals.iv = new_iv;
+        vm->stack_intervals.capacity = new_cap;
+    }
+    vm->stack_intervals.iv[vm->stack_intervals.count].lo = lo;
+    vm->stack_intervals.iv[vm->stack_intervals.count].hi = hi;
+    vm->stack_intervals.iv[vm->stack_intervals.count].epoch = epoch;
+    vm->stack_intervals.count++;
+}
+
+// Resolve an interior stack address to the most-recent (max-epoch) retained
+// interval containing it (#675). Epoch order IS recency order -- later
+// activations always get strictly higher epochs (vm->frame_epoch_counter is
+// monotonic), so whichever containing interval has the highest epoch is,
+// by construction, the one that currently owns this address, whether or not
+// its frame is still live. Returns false if no interval contains ptr.
+// PLACEHOLDER: linear scan over all retained intervals. Fine for the
+// small, mostly-distinct working set typical programs produce; if a hot
+// loop retains many intervals this should become an interval tree.
+// Ticket: https://todo.sr.ht/~takeiteasy/cccc/677
+static bool stack_interval_stab(VirtualMachine *vm, long long ptr,
+                                 unsigned long long *out_epoch) {
+    bool found = false;
+    unsigned long long best_epoch = 0;
+    for (int i = 0; i < vm->stack_intervals.count; i++) {
+        if (ptr >= vm->stack_intervals.iv[i].lo && ptr < vm->stack_intervals.iv[i].hi) {
+            if (!found || vm->stack_intervals.iv[i].epoch > best_epoch) {
+                best_epoch = vm->stack_intervals.iv[i].epoch;
+                found = true;
+            }
+        }
+    }
+    if (found)
+        *out_epoch = best_epoch;
+    return found;
+}
+
+static inline int op_STKTAG_fn(VirtualMachine *vm) {
+    // Tag an escaping aggregate local's [bp+offset, bp+offset+size) extent
+    // with the current frame's epoch, for interior dangling-pointer
+    // resolution (#675). Format: [STKTAG] [unused:32] [offset:i64] [size:i64]
+    cc_read_word(vm); // unused first word (no register operand)
+    long long offset = cc_read_i64(vm);
+    long long size = cc_read_i64(vm);
+
+    if ((vm->flags & CCCC_DANGLING_DETECT) && vm->frame_epochs.count > 0) {
+        long long lo = (long long)(vm->bp + offset);
+        unsigned long long epoch = vm->frame_epochs.epochs[vm->frame_epochs.count - 1];
+        stack_interval_insert(vm, lo, lo + size, epoch);
+    }
+    return 0;
+}
+
 static inline int op_RETADDR_fn(VirtualMachine *vm) {
     // Return address of the nth caller frame.
     // Format: [RETADDR] [rd:8|unused:56] [level:i64]
@@ -1805,10 +1881,18 @@ static inline int op_CHKP3_fn(VirtualMachine *vm) {
     //    in live_epochs, the pointer is dangling regardless of where the
     //    address now sits relative to sp. This mirrors the heap temporal-
     //    safety scheme (ptr_tags vs AllocHeader.generation) one layer down.
-    //    Pointers layer 1 already caught are not re-tagged here; pointers
-    //    never recorded by LEA3 (e.g. interior pointers like &arr[i] with a
-    //    runtime index) simply aren't found in stack_ptr_epochs and fall
-    //    through -- a documented residual gap, see docs/SAFETY.md.
+    //    Pointers layer 1 already caught are not re-tagged here.
+    //
+    // 3) Interior interval-stabbing (#675, closes layer 2's own residual
+    //    gap). Interior stack pointers with a runtime-computed offset (e.g.
+    //    &arr[i] for non-constant i) never pass through LEA3 with a single
+    //    recorded address, so they're never found in stack_ptr_epochs above
+    //    -- but STKTAG (emitted right after the LEA3 base of any *escaping*
+    //    array/struct local) retains [base, base+size) tagged with the same
+    //    epoch in vm->stack_intervals. Consulted only when the exact lookup
+    //    misses. Resolves by max-epoch containing interval (recency), so a
+    //    live frame that has reused a dead frame's address range still
+    //    resolves correctly -- see stack_interval_stab's own comment.
     if (vm->flags & CCCC_DANGLING_DETECT) {
         uintptr_t p   = (uintptr_t)ptr;
         uintptr_t lo  = (uintptr_t)vm->stack_seg;
@@ -1816,11 +1900,20 @@ static inline int op_CHKP3_fn(VirtualMachine *vm) {
         bool range_dangling = (p >= lo && p < cur);
 
         bool epoch_dangling = false;
+        bool interior = false;
         if (!range_dangling) {
             void *tagged = hashmap_get_int(&vm->stack_ptr_epochs, ptr);
-            if (tagged &&
-                !hashmap_get_int(&vm->live_epochs, (long long)(intptr_t)tagged))
-                epoch_dangling = true;
+            if (tagged) {
+                if (!hashmap_get_int(&vm->live_epochs, (long long)(intptr_t)tagged))
+                    epoch_dangling = true;
+            } else {
+                unsigned long long iv_epoch;
+                if (stack_interval_stab(vm, ptr, &iv_epoch) &&
+                    !hashmap_get_int(&vm->live_epochs, (long long)iv_epoch)) {
+                    epoch_dangling = true;
+                    interior = true;
+                }
+            }
         }
 
         if (range_dangling || epoch_dangling) {
@@ -1830,6 +1923,9 @@ static inline int op_CHKP3_fn(VirtualMachine *vm) {
             if (range_dangling) {
                 printf("Current SP: 0x%llx (address is below live stack -> frame is dead)\n",
                        (unsigned long long)cur);
+            } else if (interior) {
+                printf("Creating frame's epoch is no longer live (dereferenced through an "
+                       "interior pointer into a deeper call, #675)\n");
             } else {
                 printf("Creating frame's epoch is no longer live (dereferenced through a "
                        "deeper call, #673)\n");
