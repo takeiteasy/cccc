@@ -96,23 +96,25 @@ def print_matrix_summary(all_results, passes):
     print("========================================")
     print("Optimization Pass Matrix Summary")
     print("========================================")
-    print(f"{'Pass':<22} {'Total':>6} {'Passed':>6} {'Failed':>6} {'Crashed':>6}")
-    print("-" * 52)
-    grand_total = grand_passed = grand_failed = grand_crashed = 0
+    print(f"{'Pass':<22} {'Total':>6} {'Passed':>6} {'Failed':>6} {'Crashed':>6} {'Skipped':>7}")
+    print("-" * 60)
+    grand_total = grand_passed = grand_failed = grand_crashed = grand_skipped = 0
     for label, name in passes:
         r = all_results[label]
         r_total = r["total"]
         r_passed = r["passed"] + r["negative_passed"] + r["c4_passed"]
         r_failed = r["failed"]
         r_crashed = r["crashed"]
+        r_skipped = r.get("matrix_skipped", 0)
         display = f"{label} ({name})"
-        print(f"{display:<22} {r_total:>6} {r_passed:>6} {r_failed:>6} {r_crashed:>6}")
+        print(f"{display:<22} {r_total:>6} {r_passed:>6} {r_failed:>6} {r_crashed:>6} {r_skipped:>7}")
         grand_total += r_total
         grand_passed += r_passed
         grand_failed += r_failed
         grand_crashed += r_crashed
-    print("-" * 52)
-    print(f"{'Sum':<22} {grand_total:>6} {grand_passed:>6} {grand_failed:>6} {grand_crashed:>6}")
+        grand_skipped += r_skipped
+    print("-" * 60)
+    print(f"{'Sum':<22} {grand_total:>6} {grand_passed:>6} {grand_failed:>6} {grand_crashed:>6} {grand_skipped:>7}")
     print()
 
     # Per-test attribution: which pass(es) broke each test?

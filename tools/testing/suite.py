@@ -49,16 +49,18 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
     c4_failed = 0
     c4_skipped = 0
     c4_save_failed = 0
+    matrix_skipped = 0
     failed_tests = []
     crashed_tests = []
     c4_skipped_tests = []
+    matrix_skipped_tests = []
     timings = []
 
     quiet = getattr(args, "quiet", False)
 
     def print_single_result(result):
         nonlocal total, passed, failed, crashed, negative_passed
-        nonlocal c4_passed, c4_failed, c4_skipped, c4_save_failed
+        nonlocal c4_passed, c4_failed, c4_skipped, c4_save_failed, matrix_skipped
         total += 1
         test_name = result["test_name"]
         status = result["status"]
@@ -128,6 +130,11 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
             reason = result.get("skip_reason", "")
             if reason:
                 c4_skipped_tests.append(f"{test_name} ({reason})")
+        elif status == "matrix_skipped":
+            matrix_skipped += 1
+            reason = result.get("skip_reason", "")
+            if reason:
+                matrix_skipped_tests.append(f"{test_name} ({reason})")
         elif status == "c4_save_failed":
             c4_save_failed += 1
             failed += 1
@@ -188,8 +195,10 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
         "c4_failed": c4_failed,
         "c4_skipped": c4_skipped,
         "c4_save_failed": c4_save_failed,
+        "matrix_skipped": matrix_skipped,
         "failed_tests": failed_tests,
         "crashed_tests": crashed_tests,
         "c4_skipped_tests": c4_skipped_tests,
+        "matrix_skipped_tests": matrix_skipped_tests,
         "timings": timings,
     }

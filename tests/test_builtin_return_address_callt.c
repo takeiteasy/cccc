@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing -O1
+// CCCC_MATRIX_SKIP: CALLT tail-call codegen requires -O1; the per-pass matrix forces -O0
 // Tests for __builtin_return_address interaction with tail calls (CALLT).
 //
 // CALLT unwinds the intermediate frame before jumping to the callee.

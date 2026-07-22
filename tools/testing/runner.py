@@ -15,7 +15,11 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
     """Run one test file and return a result dict.
 
     matrix_mode: when True, strip any -On flags from per-test CCCC_FLAGS so
-    they do not override the matrix sweep flags injected via cccc_args.
+    they do not override the matrix sweep flags injected via cccc_args. Tests
+    annotated with CCCC_MATRIX_SKIP are skipped entirely in this mode (e.g.
+    tests whose correctness depends on a specific -O level the per-pass
+    matrix cannot reproduce, since it always forces -O0 plus at most one -f
+    pass).
     """
     tests_dir = Path(script_dir) / "tests"
     test_name = str(test_file.relative_to(tests_dir))
@@ -41,9 +45,15 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
             if "EXPECT_RUNTIME_ERROR" in header:
                 expects_runtime_error = True
             c4_skip = False
+            matrix_skip_reason = None
             for line in header_lines:
                 if "CCCC_C4_SKIP" in line:
                     c4_skip = True
+                if "CCCC_MATRIX_SKIP" in line:
+                    if ":" in line:
+                        matrix_skip_reason = line.split("CCCC_MATRIX_SKIP:", 1)[1].strip().rstrip("*/").strip()
+                    else:
+                        matrix_skip_reason = "matrix-incompatible"
                 if "CCCC_FLAGS:" in line:
                     flags_str = line.split("CCCC_FLAGS:", 1)[1].strip().rstrip("*/").strip()
                     per_test_flags = flags_str.split()
@@ -72,6 +82,20 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
             f for f in per_test_flags
             if not (f.startswith("-O") and len(f) > 2 and f[2].isdigit())
         ]
+
+    if matrix_mode and matrix_skip_reason:
+        return {
+            "idx": idx,
+            "test_name": test_name,
+            "exit_code": 0,
+            "status": "matrix_skipped",
+            "output": "",
+            "is_negative_test": is_negative_test,
+            "expects_runtime_error": expects_runtime_error,
+            "stderr_mismatch": None,
+            "elapsed": 0,
+            "skip_reason": f"matrix-incompatible: {matrix_skip_reason}",
+        }
 
     if c4_mode and c4_skip:
         return {
@@ -103,12 +127,15 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
             "skip_reason": "c4-incompatible: --build mode",
         }
 
-    # --build is incompatible with -O flags (build mode runs the build script
-    # in-process and does not compile VM bytecode at an optimization level).
-    # Strip any -On flags from cccc_args so matrix sweeps don't break build tests.
+    # --build is incompatible with -O and -f<pass> flags (build mode runs the
+    # build script in-process and does not compile VM bytecode at an
+    # optimization level or through the peephole/pass pipeline; the compiler
+    # rejects --build combined with either). Strip both from cccc_args so
+    # matrix sweeps don't break build tests.
     if is_build_mode:
         cccc_args = [a for a in cccc_args
-                     if not (a.startswith("-O") and len(a) > 2 and a[2].isdigit())]
+                     if not (a.startswith("-O") and len(a) > 2 and a[2].isdigit())
+                     and not a.startswith("-f")]
 
     if c4_mode:
         return run_c4_roundtrip(
