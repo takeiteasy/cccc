@@ -224,8 +224,11 @@ endif
 afl-asan: cccc-afl-asan
 
 # libFuzzer harness (optional)
-fuzz_harness: src/fuzzing.c $(SRCS)
-	$(CC) $(CFLAGS) -fsanitize=fuzzer,address -o $@ $(filter-out src/main.c, $(SRCS)) $< $(LDFLAGS)
+# src/fuzzing.c is already part of $(SRCS) via the src/*.c wildcard -- do not
+# also pass it as an explicit prerequisite/dependency, or it links twice and
+# fails with a duplicate _LLVMFuzzerTestOneInput symbol on strict linkers (#708).
+fuzz_harness: $(SRCS)
+	$(CC) $(CFLAGS) -fsanitize=fuzzer,address -o $@ $(filter-out src/main.c, $(SRCS)) $(LDFLAGS)
 
 # --- Host-side test harnesses (#707) ---
 # Link directly against the compiler sources (like fuzz_harness), bypassing
