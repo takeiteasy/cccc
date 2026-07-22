@@ -227,6 +227,26 @@ afl-asan: cccc-afl-asan
 fuzz_harness: src/fuzzing.c $(SRCS)
 	$(CC) $(CFLAGS) -fsanitize=fuzzer,address -o $@ $(filter-out src/main.c, $(SRCS)) $< $(LDFLAGS)
 
+# --- Host-side test harnesses (#707) ---
+# Link directly against the compiler sources (like fuzz_harness), bypassing
+# tools/tests.py's guest-.c/exit-code-42 protocol. For regression tests that
+# need to construct multiple VirtualMachine instances (or threads) in one
+# host process -- not expressible as a single cccc-compiled source file.
+HOST_TEST_SRCS := $(wildcard tests/host/test_*.c)
+HOST_TEST_BINS := $(patsubst tests/host/%.c,build/host_tests/%,$(HOST_TEST_SRCS))
+
+build/host_tests/%: tests/host/%.c $(filter-out src/main.c, $(SRCS)) | $(LIBBACKTRACE_A)
+	@mkdir -p build/host_tests
+	$(CC) -Isrc $(CFLAGS) -o $@ $< $(filter-out src/main.c, $(SRCS)) $(LDFLAGS)
+
+host-tests: $(HOST_TEST_BINS)
+	@fail=0; \
+	for bin in $(HOST_TEST_BINS); do \
+		echo "Running $$bin..."; \
+		if ! $$bin; then fail=1; fi; \
+	done; \
+	if [ $$fail -eq 0 ]; then echo "All host tests passed! 🎉"; else exit 1; fi
+
 # --- Fuzzing targets (moved from fuzz/Makefile) ---
 
 FUZZ_CORPUS := fuzz/corpus
@@ -526,6 +546,7 @@ clean:
 	@$(RM) -f $(EXE_OUT) $(LIB_OUT) $(SAN_OUT) $(MACOS_X86_64_BINARY) cccc-afl cccc-afl-asan cccc-prof fuzz_harness
 	@$(RM) -rf profile/*.prof profile/*.txt profile/*.json profile/*.massif
 	@$(RM) -rf fuzz/corpus fuzz/out
+	@$(RM) -rf build/host_tests
 	@$(RM) -rf $(LIBBACKTRACE_OBJS_DIR) $(LIBBACKTRACE_A)
 
 # dsym — (macOS only) run dsymutil to produce cccc.dSYM with full DWARF.
@@ -539,7 +560,7 @@ else
 	@echo "dsym: DWARF is already embedded in the ELF binary on Linux; nothing to do."
 endif
 
-.PHONY: default test clean all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json macos-x86_64-build macos-x86_64-smoke macos-x86_64-test linux-x86_64-check linux-x86_64-build linux-x86_64-smoke linux-x86_64-test linux-x86_64-msan-test linux-aarch64-check linux-aarch64-build linux-aarch64-smoke linux-aarch64-test sqlite-smoke dsym
+.PHONY: default test clean all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness host-tests bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json macos-x86_64-build macos-x86_64-smoke macos-x86_64-test linux-x86_64-check linux-x86_64-build linux-x86_64-smoke linux-x86_64-test linux-x86_64-msan-test linux-aarch64-check linux-aarch64-build linux-aarch64-smoke linux-aarch64-test sqlite-smoke dsym
 ifeq ($(UNAME_S),Linux)
 .PHONY: msan
 endif

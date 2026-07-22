@@ -10,6 +10,7 @@ assertions.
 |-----------|----------|----------------|
 | `tests/` | Legacy single-file tests (`test_*.c`) | Exit code 42 |
 | `tests/suites/` | `[[cccc::test]]` framework suites (`test_suite_*.c`) | `--testing` exit 0 |
+| `tests/host/` | Host-side harnesses (`test_*.c`), linked directly against the compiler sources | Exit code 0 |
 
 Run each group independently:
 
@@ -39,6 +40,22 @@ host-signal debugger integration (skipped on other platforms), the interactive
 REPL PTY integration (`tools/test_repl.py`, POSIX-only -- skipped on Windows),
 and the SQLite amalgamation smoke test (skips cleanly when the zip is absent).
 A non-zero exit is produced if any sub-suite fails.
+
+### Host-side test harnesses
+
+`tests/host/` holds regression tests that cannot be expressed as a single
+`cccc`-compiled guest source file -- for example, constructing multiple
+`VirtualMachine` instances (or threads) in one process to catch cross-instance
+static-state corruption. Each `tests/host/test_*.c` links directly against the
+compiler sources (`#include "internal.h"`, like `src/fuzzing.c`), builds with
+the same `$(CFLAGS)`/`$(LDFLAGS)` as the main binary, and is expected to
+`return 0` on success (not the guest exit-code-42 convention). `tools/tests.py`
+discovery explicitly excludes `tests/host/` (see `tools/testing/discovery.py`);
+run this category with its own Makefile target:
+
+```bash
+make host-tests
+```
 
 ### Interactive REPL integration test
 
