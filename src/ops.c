@@ -2679,11 +2679,31 @@ static inline int op_PMEMA_fn(VirtualMachine *vm) {
     return 0;
 }
 
+// True if `ptr` has room for an AllocHeader below it inside the VM heap
+// arena, i.e. it is safe to read `((AllocHeader *)ptr) - 1` without running
+// off the front/back of the arena. Host-allocator pointers (e.g. from
+// Block_copy, strdup, aligned_alloc) live outside [heap_seg, heap_end) and
+// must never have their "header" peeked — doing so reads into whatever
+// host allocation happens to precede them (caught by ASan as a
+// heap-buffer-overflow; see #709).
+static inline int is_vm_heap_ptr(VirtualMachine *vm, void *ptr) {
+    return (char *)ptr >= vm->heap_seg + sizeof(AllocHeader) && (char *)ptr < vm->heap_end;
+}
+
 static inline int op_MFRE_fn(VirtualMachine *vm) {
     // free: pointer in REG_A0
     void *ptr = (void *)vm->regs[REG_A0];
     if (!ptr) {
         return 0; // free(NULL) is a no-op
+    }
+
+    // Pointer isn't inside the VM heap arena at all — it came from a host
+    // allocator (e.g. Block_copy's malloc). There is no AllocHeader to read;
+    // peeking at ptr-sizeof(AllocHeader) would read out of bounds. Fall
+    // back to system free directly.
+    if (!is_vm_heap_ptr(vm, ptr)) {
+        free(ptr);
+        return 0;
     }
 
     AllocHeader *header = ((AllocHeader *)ptr) - 1;
@@ -2885,6 +2905,15 @@ static inline int op_REALC_fn(VirtualMachine *vm) {
         // realloc(ptr, 0) == free(ptr)
         op_MFRE_fn(vm);
         vm->regs[REG_A0] = 0;
+        return 0;
+    }
+
+    // Pointer isn't inside the VM heap arena at all (e.g. Block_copy's
+    // malloc) — there is no AllocHeader to read, so don't peek at
+    // ptr-sizeof(AllocHeader); fall back to system realloc directly.
+    if (!is_vm_heap_ptr(vm, ptr)) {
+        void *new_ptr = realloc(ptr, (size_t)new_size);
+        vm->regs[REG_A0] = (long long)new_ptr;
         return 0;
     }
 
