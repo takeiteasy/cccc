@@ -322,7 +322,7 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 | `destructor` / `destructor(N)` | GNU (C23: `[[gnu::destructor]]`) | ✓ | Runs `void(void)` function after `main()` returns normally, in reverse priority order (higher first; unprioritised functions run first) |
 | `sentinel` / `sentinel(N)` | GNU (C23: `[[gnu::sentinel]]`) | ✓ | Warns at each call site when the expected trailing variadic argument is not a literal, pointer-typed `NULL` (`-Wsentinel`, part of `-Wall`); static syntactic check only, no runtime enforcement. Applying it to a non-variadic function warns under `-Wattributes` instead |
 | `alloc_size(n)` / `alloc_size(n,m)` | GNU (C23: `[[gnu::alloc_size]]`) | ✓ | Marks a function as an allocator whose return value has a compile-time-computable byte size: argument `n` (1-based) for the single-index form, or the product of arguments `n` and `m` for the two-index (calloc-style) form. Consulted by `__builtin_object_size`/`__builtin_dynamic_object_size` heap-allocation sizing (see below) — the sole recognition mechanism, superseding earlier hardcoded name matching |
-| `malloc` | GNU (C23: `[[gnu::malloc]]`) | ~ | Parsed and stored (self-describes a fresh, non-aliasing allocator, matching libc's `malloc`/`calloc`/`aligned_alloc`) but not yet wired to any aliasing optimization or nonnull inference — informational only |
+| `malloc` | GNU (C23: `[[gnu::malloc]]`) | ~ | Parsed and stored (self-describes a fresh, non-aliasing allocator, matching libc's `malloc`/`calloc`/`aligned_alloc`) but not yet wired to any aliasing optimization or nonnull inference — informational only; the aliasing optimizations GCC uses it for need a memory-dependency pass the VM optimizer doesn't have yet (see `__attribute__((malloc))` below) |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
 `__has_attribute` returns `1` for `error`, `warning`, `warn_unused_result`, and
@@ -883,6 +883,21 @@ and it deliberately does **not** imply `nonnull`/`returns_nonnull` (a real
 allocator can return `NULL` on failure). libc's `malloc`, `calloc`, and
 `aligned_alloc` carry it in `include/stdlib.h`; `realloc`/`reallocarray` do
 not, since they may return the same block as their input pointer.
+
+Exploiting the attribute (as GCC/Clang do, to justify reordering loads/stores
+around a call and eliding dead stores) needs a memory-dependency / alias
+analysis the bytecode optimizer (`src/optimize.c`) doesn't have: there is no
+dead-store elimination, no load/store reordering, and no general "does pointer
+A alias pointer B" reasoning anywhere in the pass pipeline — stores are
+deliberately never removed by the DCE pass, and the CSE pass's only memory
+model is an exact-offset local-slot cache that a call invalidates outright
+regardless of `malloc`. The closest existing aliasing consumer, the
+`restrict`-pointer register cache (see [OPTIMIZATION.md](OPTIMIZATION.md)),
+relies on `restrict`'s *scope-wide* non-aliasing promise; `malloc` only gives
+*point-wise* freshness at the instant of return, so feeding it into that cache
+would require the same missing dataflow analysis. Wiring `is_malloc` in is
+tracked as low-priority future work, gated on a memory-dependency pass being
+added first.
 
 #### `__attribute__((designated_init))` / `[[gnu::designated_init]]`
 

@@ -185,6 +185,18 @@ targeted invalidation of only `p`'s slots. `for` loops of the form
 `for (T i=0; i<n; i++) dst[i]=src[i]` where both pointers are restrict-qualified
 are lowered to a single `MCPY` opcode (libc memcpy) at `--optimize=2`+.
 
+This `restrict` cache is the only aliasing-aware optimization in CCCC. It works
+because `restrict` is a *scope-wide* non-aliasing promise about a parameter,
+which is enough to justify caching loads across the whole function body. There
+is no general alias analysis, memory-dependency tracking, dead-store
+elimination, or load/store reordering pass — none of the passes below reason
+about whether two arbitrary pointers can alias. This is also why
+`__attribute__((malloc))` (a *point-wise* freshness fact about a call's return
+value, see [COVERAGE.md](COVERAGE.md)) isn't exploited: feeding it into the
+`restrict` cache, or any other reordering/elimination decision, would need the
+same dataflow analysis the optimizer doesn't have. Adding a memory-dependency
+pass is tracked as low-priority future work.
+
 ### Phase 1: Constant Folding (`--optimize=1`)
 
 Tracks constant values through register operations and records foldable integer
