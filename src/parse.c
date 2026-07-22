@@ -39,6 +39,7 @@
 // parser.
 
 #include "./internal.h"
+#include <pthread.h>
 
 #ifndef MAX
 #define MAX(x, y) ((x) < (y) ? (y) : (x))
@@ -156,14 +157,6 @@ struct InitDesg {
     Member *member;
     Obj *var;
 };
-
-// Error placeholder variable for recovery
-static Obj error_var_obj = {
-    .name = "<error>",
-    .ty = NULL, // Will be set to ty_error during initialization
-    .is_local = false,
-};
-static Obj *error_var = &error_var_obj;
 
 static bool is_typename(VirtualMachine *vm, Token *tok);
 static Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr);
@@ -3601,35 +3594,38 @@ void cc_finalize_macro_gvar_inits(VirtualMachine *vm, Obj *prog) {
     }
 }
 
+static HashMap typename_map;
+static pthread_once_t typename_map_once = PTHREAD_ONCE_INIT;
+
+static void init_typename_map(void) {
+    static char *kw[] = {
+        "void",          "_Bool",        "char",          "short",
+        "int",           "long",         "struct",        "union",
+        "typedef",       "enum",         "static",        "extern",
+        "_Alignas",      "signed",       "unsigned",      "const",
+        "volatile",      "auto",         "register",      "restrict",
+        "__restrict",    "__restrict__", "_Noreturn",     "float",
+        "double",        "typeof",       "typeof_unqual", "inline",
+        "_Thread_local", "__thread",     "_Atomic",       "constexpr",
+        "__block",       "_Complex",     "_Imaginary",
+        "_BitInt",       "_Decimal32",   "_Decimal64",   "_Decimal128",
+        "__int128",      "__int128_t",   "__uint128_t",
+    };
+
+    for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
+        hashmap_put_borrowed(&typename_map, kw[i], (void *)1);
+}
+
 // Returns true if a given token represents a type.
 static bool is_typename(VirtualMachine *vm, Token *tok) {
-    static HashMap map;
-
-    if (map.capacity == 0) {
-        static char *kw[] = {
-            "void",          "_Bool",        "char",          "short",
-            "int",           "long",         "struct",        "union",
-            "typedef",       "enum",         "static",        "extern",
-            "_Alignas",      "signed",       "unsigned",      "const",
-            "volatile",      "auto",         "register",      "restrict",
-            "__restrict",    "__restrict__", "_Noreturn",     "float",
-            "double",        "typeof",       "typeof_unqual", "inline",
-            "_Thread_local", "__thread",     "_Atomic",       "constexpr",
-            "__block",       "_Complex",     "_Imaginary",
-            "_BitInt",       "_Decimal32",   "_Decimal64",   "_Decimal128",
-            "__int128",      "__int128_t",   "__uint128_t",
-        };
-
-        for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
-            hashmap_put_borrowed(&map, kw[i], (void *)1);
-    }
+    pthread_once(&typename_map_once, init_typename_map);
 
     // "bool" is only a typename when it was actually classified as a C23
     // keyword; in pre-C23 modes it is downgraded to TK_IDENT and may be
     // used as an ordinary identifier (e.g. without <stdbool.h>), so it is
     // deliberately not added to the hashmap above (which matches by text
     // regardless of token kind).
-    return hashmap_get2(&map, tok->loc, tok->len) || find_typedef(vm, tok) ||
+    return hashmap_get2(&typename_map, tok->loc, tok->len) || find_typedef(vm, tok) ||
            (tok->kind == TK_KEYWORD &&
             (equal(tok, "bool") || equal(tok, "thread_local")));
 }
@@ -10231,7 +10227,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             error_tok_recover(vm, tok, "undefined variable '%.*s'", tok->len,
                               tok->loc)) {
             // Return error placeholder node instead of aborting
-            Node *node = new_var_node(vm, error_var, tok);
+            Node *node = new_var_node(vm, &vm->compiler.error_var, tok);
             node->ty = ty_error;
             return node;
         }
@@ -11367,7 +11363,8 @@ static void declare_builtin_functions(VirtualMachine *vm) {
 // program = (typedef | function-definition | global-variable)*
 Obj *parse(VirtualMachine *vm, Token *tok) {
     // Initialize error recovery placeholder
-    error_var->ty = ty_error;
+    vm->compiler.error_var.name = "<error>";
+    vm->compiler.error_var.ty = ty_error;
 
     // Initialize global scope
     enter_scope(vm);
@@ -11485,7 +11482,10 @@ Node *cc_parse_compound_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 int64_t cc_eval(VirtualMachine *vm, Node *node) { return eval(vm, node); }
 double  cc_eval_double(VirtualMachine *vm, Node *node) { return eval_double(vm, node); }
 
-void cc_init_parser(VirtualMachine *vm) { error_var->ty = ty_error; }
+void cc_init_parser(VirtualMachine *vm) {
+    vm->compiler.error_var.name = "<error>";
+    vm->compiler.error_var.ty = ty_error;
+}
 
 // ---------------------------------------------------------------------
 // REPL support (ticket #661)

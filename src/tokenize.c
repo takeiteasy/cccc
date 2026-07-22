@@ -20,6 +20,7 @@
 */
 
 #include "./internal.h"
+#include <pthread.h>
 
 // Reports an error and exit (or longjmp if error handling is enabled).
 void error(char *fmt, ...) {
@@ -700,29 +701,31 @@ static int read_punct(VirtualMachine *vm, char *p) {
     return ispunct(*p) ? 1 : 0;
 }
 
+static HashMap keyword_map;
+static pthread_once_t keyword_map_once = PTHREAD_ONCE_INIT;
+
+static void init_keyword_map(void) {
+    static char *kw[] = {
+        "return", "if", "else", "for", "while", "int", "sizeof", "char",
+        "struct", "union", "short", "long", "void", "typedef", "_Bool",
+        "enum", "static", "goto", "break", "continue", "switch", "case",
+        "default", "extern", "_Alignof", "_Alignas", "do", "signed",
+        "unsigned", "const", "volatile", "auto", "register", "restrict",
+        "__restrict", "__restrict__", "_Noreturn", "float", "double",
+        "typeof", "typeof_unqual", "asm", "_Thread_local", "__thread", "_Atomic",
+        "__attribute__", "_Static_assert", "static_assert", "constexpr",
+        "__block", "_Complex", "_Imaginary",  // Apple Blocks extension and C99 complex
+        "bool", "true", "false", "nullptr", "thread_local",  // C23 keywords
+        "_BitInt", "_Decimal32", "_Decimal64", "_Decimal128",  // C23 types
+    };
+
+    for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
+        hashmap_put_borrowed(&keyword_map, kw[i], (void *)1);
+}
+
 static bool is_keyword(Token *tok) {
-    static HashMap map;
-
-    if (map.capacity == 0) {
-        static char *kw[] = {
-            "return", "if", "else", "for", "while", "int", "sizeof", "char",
-            "struct", "union", "short", "long", "void", "typedef", "_Bool",
-            "enum", "static", "goto", "break", "continue", "switch", "case",
-            "default", "extern", "_Alignof", "_Alignas", "do", "signed",
-            "unsigned", "const", "volatile", "auto", "register", "restrict",
-            "__restrict", "__restrict__", "_Noreturn", "float", "double",
-            "typeof", "typeof_unqual", "asm", "_Thread_local", "__thread", "_Atomic",
-            "__attribute__", "_Static_assert", "static_assert", "constexpr",
-            "__block", "_Complex", "_Imaginary",  // Apple Blocks extension and C99 complex
-            "bool", "true", "false", "nullptr", "thread_local",  // C23 keywords
-            "_BitInt", "_Decimal32", "_Decimal64", "_Decimal128",  // C23 types
-        };
-
-        for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
-            hashmap_put_borrowed(&map, kw[i], (void *)1);
-    }
-
-    return hashmap_get2(&map, tok->loc, tok->len);
+    pthread_once(&keyword_map_once, init_keyword_map);
+    return hashmap_get2(&keyword_map, tok->loc, tok->len);
 }
 
 static int read_escaped_char(VirtualMachine *vm, char **new_pos, char *p) {

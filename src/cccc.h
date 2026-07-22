@@ -2127,6 +2127,9 @@ typedef struct Compiler {
     // Parser state
     Obj *locals;           // All local variable instances during parsing
     Obj *globals;          // Global variables accumulated list
+    Obj error_var;         // Error placeholder variable for recovery (per-VM;
+                           // was a shared static Obj across all instances, #706).
+                           // .name/.ty set in cc_init_parser/parse().
     Scope *scope;          // Current scope
     Obj *initializing_var; // Variable being initialized (for const
                            // initialization)
