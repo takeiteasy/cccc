@@ -42,7 +42,7 @@
 //     is not reclaimed -- known limitation, ticket #667).
 //   - A failed parse rolls back the scope/globals list to a snapshot taken
 //     before the line was parsed, via vm->error_jmp_buf (see
-//     repl_snapshot/repl_snapshot_restore below).
+//     cc_expr_snapshot/cc_expr_snapshot_restore, declared in cccc.h).
 
 #include "./internal.h"
 #include <setjmp.h>
@@ -232,16 +232,13 @@ static char *repl_read_unit(LineSource *src, bool interactive, bool allow_comman
 
 // ---------------------------------------------------------------------
 // Persistent global-scope snapshot / rollback (ticket #661).
+//
+// CcExprSnapshot/cc_expr_snapshot*/cc_expr_exec_wrapper are declared in
+// cccc.h and shared with the debugger's conditional breakpoint evaluator
+// (src/debugger.c, ticket 113), which faces the same problem: compile a
+// synthesized one-off expression against the live scope, and either keep it
+// or roll back on failure.
 // ---------------------------------------------------------------------
-
-typedef struct {
-    HashMap var_map_snap;
-    HashMap tag_map_snap;
-    VarScopeNode *vars_head;
-    TagScopeNode *tags_head;
-    Obj *globals_head;
-    Obj *locals_head;
-} ReplSnapshot;
 
 // hashmap_snapshot/hashmap_restore (src/hashmap.c) assume an *owning* map --
 // they deep-copy and later free each entry's key. The global scope's
@@ -274,9 +271,9 @@ static void repl_hashmap_restore_borrowed(HashMap *map, HashMap snapshot) {
     *map = snapshot;
 }
 
-static ReplSnapshot repl_snapshot(VirtualMachine *vm) {
+CcExprSnapshot cc_expr_snapshot(VirtualMachine *vm) {
     Scope *sc = vm->compiler.scope;
-    ReplSnapshot snap;
+    CcExprSnapshot snap;
     snap.var_map_snap = repl_hashmap_snapshot_borrowed(&sc->var_map);
     snap.tag_map_snap = repl_hashmap_snapshot_borrowed(&sc->tag_map);
     snap.vars_head = sc->vars;
@@ -286,18 +283,18 @@ static ReplSnapshot repl_snapshot(VirtualMachine *vm) {
     return snap;
 }
 
-// Discard a snapshot taken for a line that succeeded -- just frees the
+// Discard a snapshot taken for a unit that succeeded -- just frees the
 // (now-unneeded) copied bucket array.
-static void repl_snapshot_discard(ReplSnapshot *snap) {
+void cc_expr_snapshot_discard(CcExprSnapshot *snap) {
     repl_hashmap_discard_borrowed(&snap->var_map_snap);
     repl_hashmap_discard_borrowed(&snap->tag_map_snap);
 }
 
-// Restore scope/globals/locals to the state captured by repl_snapshot,
-// discarding anything the failed line added. Obj/Node/scope-entry memory
-// from the failed line is arena-allocated and simply becomes unreachable
+// Restore scope/globals/locals to the state captured by cc_expr_snapshot,
+// discarding anything the failed unit added. Obj/Node/scope-entry memory
+// from the failed unit is arena-allocated and simply becomes unreachable
 // rather than being freed (documented known limitation).
-static void repl_snapshot_restore(VirtualMachine *vm, ReplSnapshot *snap) {
+void cc_expr_snapshot_restore(VirtualMachine *vm, CcExprSnapshot *snap) {
     Scope *sc = vm->compiler.scope;
     repl_hashmap_restore_borrowed(&sc->var_map, snap->var_map_snap);
     repl_hashmap_restore_borrowed(&sc->tag_map, snap->tag_map_snap);
@@ -322,8 +319,8 @@ static void repl_print_pending_error(VirtualMachine *vm) {
 // rather than a comptime AST-node result.
 // ---------------------------------------------------------------------
 
-static void repl_exec_wrapper(VirtualMachine *vm, Obj *fn, long long *out_i,
-                              double *out_f) {
+void cc_expr_exec_wrapper(VirtualMachine *vm, Obj *fn, long long *out_i,
+                          double *out_f) {
     Pc saved_pc = vm->pc;
     long long *saved_sp = vm->sp;
     long long *saved_bp = vm->bp;
@@ -458,7 +455,7 @@ static void repl_cmd_type(VirtualMachine *vm, char *arg) {
         return;
     }
 
-    ReplSnapshot snap = repl_snapshot(vm);
+    CcExprSnapshot snap = cc_expr_snapshot(vm);
     jmp_buf jb;
     jmp_buf *saved_jmp_buf = vm->error_jmp_buf;
     vm->error_jmp_buf = &jb;
@@ -470,14 +467,14 @@ static void repl_cmd_type(VirtualMachine *vm, char *arg) {
         Node *n = cc_parse_expr(vm, &rest, tok);
         add_type(vm, n);
         vm->error_jmp_buf = saved_jmp_buf;
-        repl_snapshot_discard(&snap);
+        cc_expr_snapshot_discard(&snap);
         printf("=> ");
         cc_dump_type(stdout, n->ty);
         printf("\n");
     } else {
         vm->error_jmp_buf = saved_jmp_buf;
         repl_print_pending_error(vm);
-        repl_snapshot_restore(vm, &snap);
+        cc_expr_snapshot_restore(vm, &snap);
     }
 }
 
@@ -512,7 +509,7 @@ static void repl_cmd_load(VirtualMachine *vm, char *arg) {
 // ---------------------------------------------------------------------
 
 static void repl_process_unit(VirtualMachine *vm, const char *text) {
-    ReplSnapshot snap = repl_snapshot(vm);
+    CcExprSnapshot snap = cc_expr_snapshot(vm);
     jmp_buf jb;
     jmp_buf *saved_jmp_buf = vm->error_jmp_buf;
     vm->error_jmp_buf = &jb;
@@ -541,7 +538,7 @@ static void repl_process_unit(VirtualMachine *vm, const char *text) {
 
             long long ival = 0;
             double fval = 0.0;
-            repl_exec_wrapper(vm, fn, &ival, &fval);
+            cc_expr_exec_wrapper(vm, fn, &ival, &fval);
             repl_print_result(expr_node->ty, ival, fval);
 
             // One-shot wrapper: drop it from the persistent globals list so
@@ -553,11 +550,11 @@ static void repl_process_unit(VirtualMachine *vm, const char *text) {
         }
 
         vm->error_jmp_buf = saved_jmp_buf;
-        repl_snapshot_discard(&snap);
+        cc_expr_snapshot_discard(&snap);
     } else {
         vm->error_jmp_buf = saved_jmp_buf;
         repl_print_pending_error(vm);
-        repl_snapshot_restore(vm, &snap);
+        cc_expr_snapshot_restore(vm, &snap);
     }
 }
 

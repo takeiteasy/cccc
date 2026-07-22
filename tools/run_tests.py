@@ -5,11 +5,12 @@ Runs all sub-suites in sequence and reports a unified pass/fail summary.
 Exit code is non-zero if any sub-suite fails.
 
 Sub-suites:
-  source    — main test suite (tools/testing/ package)
-  c4        — .c4 bytecode round-trip (compile → save → reload → run)
-  debugger  — macOS host-signal crash-debugger integration (macOS only)
-  repl      — interactive REPL PTY integration (POSIX only, ticket #661)
-  sqlite    — SQLite 3.53.2 amalgamation smoke test (skips if zip absent)
+  source              — main test suite (tools/testing/ package)
+  c4                  — .c4 bytecode round-trip (compile → save → reload → run)
+  debugger            — macOS host-signal crash-debugger integration (macOS only)
+  repl                — interactive REPL PTY integration (POSIX only, ticket #661)
+  debugger_condition  — conditional breakpoint PTY integration (POSIX only, ticket 113)
+  sqlite              — SQLite 3.53.2 amalgamation smoke test (skips if zip absent)
 
 Optional:
   --bench  — run the cross-compiler benchmark after the test suites
@@ -150,6 +151,39 @@ def _run_repl_suite(cccc):
         return f"FAILED ({e})", False
 
 
+def _run_debugger_condition_suite(cccc):
+    """Run the conditional-breakpoint PTY integration tests (ticket 113).
+
+    Returns (status_str, ok) where status_str is 'passed'/'failed'/'skipped'.
+    Same pty-required rationale as the REPL suite above.
+    """
+    if sys.platform == "win32":
+        return "skipped (POSIX-only, needs a pty)", True
+
+    script = _TOOLS_DIR / "test_debugger_condition.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("test_debugger_condition", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        old_argv = sys.argv
+        sys.argv = ["test_debugger_condition.py", "--binary", str(cccc)]
+        try:
+            rc = mod.main()
+        finally:
+            sys.argv = old_argv
+
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
 def _run_sqlite_suite(cccc):
     """Run the SQLite amalgamation smoke test.
 
@@ -264,6 +298,13 @@ def main():
     repl_status, ok_repl = _run_repl_suite(cccc)
     print(f"  {repl_status}")
     suite_results["repl"] = ok_repl
+
+    # --- Conditional breakpoint PTY integration ---
+    print()
+    print("[ debugger condition integration ]")
+    cond_status, ok_cond = _run_debugger_condition_suite(cccc)
+    print(f"  {cond_status}")
+    suite_results["debugger_condition"] = ok_cond
 
     # --- SQLite smoke ---
     print()

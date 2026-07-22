@@ -130,6 +130,7 @@ void debugger_init(VirtualMachine *vm) {
     vm->dbg.step_over_return_addr = CCCC_INVALID_PC;
     vm->dbg.step_out_bp = NULL;
     vm->dbg.debugger_attached = 0;
+    vm->dbg.dbg_frame_var = NULL;
 
     // Initialize all breakpoints
     for (int i = 0; i < MAX_BREAKPOINTS; i++) {
@@ -137,6 +138,8 @@ void debugger_init(VirtualMachine *vm) {
         vm->dbg.breakpoints[i].enabled = 0;
         vm->dbg.breakpoints[i].hit_count = 0;
         vm->dbg.breakpoints[i].condition = NULL;
+        vm->dbg.breakpoints[i].cond_fn = NULL;
+        vm->dbg.breakpoints[i].cond_compile_failed = false;
     }
 
     // Initialize all watchpoints
@@ -172,6 +175,8 @@ int cc_add_breakpoint(VirtualMachine *vm, Pc pc) {
             vm->dbg.breakpoints[i].enabled = 1;
             vm->dbg.breakpoints[i].hit_count = 0;
             vm->dbg.breakpoints[i].condition = NULL;
+            vm->dbg.breakpoints[i].cond_fn = NULL;
+            vm->dbg.breakpoints[i].cond_compile_failed = false;
             vm->dbg.num_breakpoints++;
 
             // Calculate offset from text_seg for display
@@ -201,12 +206,14 @@ void cc_remove_breakpoint(VirtualMachine *vm, int index) {
         free(vm->dbg.breakpoints[index].condition);
         vm->dbg.breakpoints[index].condition = NULL;
     }
+    vm->dbg.breakpoints[index].cond_fn = NULL;
+    vm->dbg.breakpoints[index].cond_compile_failed = false;
     vm->dbg.num_breakpoints--;
 
     printf("Breakpoint #%d removed\n", index);
 }
 
-static int debugger_eval_condition(VirtualMachine *vm, const char *condition_str);
+static int debugger_eval_condition(VirtualMachine *vm, Breakpoint *bp);
 
 int debugger_check_breakpoint(VirtualMachine *vm) {
     // Safety check
@@ -217,9 +224,8 @@ int debugger_check_breakpoint(VirtualMachine *vm) {
     for (int i = 0; i < MAX_BREAKPOINTS; i++) {
         if (vm->dbg.breakpoints[i].enabled && vm->dbg.breakpoints[i].pc == vm->pc) {
             // Check condition if one exists
-            char *cond = vm->dbg.breakpoints[i].condition;
-            if (cond != NULL) {
-                if (!debugger_eval_condition(vm, cond)) {
+            if (vm->dbg.breakpoints[i].condition != NULL) {
+                if (!debugger_eval_condition(vm, &vm->dbg.breakpoints[i])) {
                     // Condition not met, don't trigger breakpoint
                     continue;
                 }
@@ -933,25 +939,45 @@ DebugSymbol *cc_lookup_symbol(VirtualMachine *vm, const char *name) {
 }
 
 // ============================================================================
-// Condition Evaluator for Conditional Breakpoints
+// Condition Evaluator for Conditional Breakpoints (ticket 113)
+//
+// A condition is compiled -- not tree-walked -- into a zero-argument wrapper
+// function, exactly like the REPL compiles an expression line (src/repl.c,
+// cc_expr_snapshot/cc_repl_compile_new/cc_expr_exec_wrapper, declared in
+// cccc.h). Because it goes through real codegen it gets the full call ABI
+// (float args/returns, struct/union returns, variadics, indirect calls,
+// nested-function static links, stack-passed arguments) for free, along with
+// float/pointer/struct conditions in general -- not just calls.
+//
+// The one problem the REPL doesn't have: a conditional breakpoint must read
+// the *paused frame's* locals (live vm->bp), but a compiled wrapper runs in
+// its own fresh frame. This is solved without recompiling on every hit: each
+// breakpoint's condition is parsed and compiled exactly once (its pc fixes
+// the enclosing function, and therefore every local's frame offset); local
+// variable references are rewritten at compile time into dereferences of one
+// session-wide frame-pointer global (__cccc_dbg_frame, see debugger_frame_var
+// below), which is set to vm->bp immediately before each hit runs the cached
+// wrapper. See debugger_rewrite_locals for the rewrite itself.
 // ============================================================================
 
-static long long eval_ast_node(VirtualMachine *vm, Node *node, int *error);
-
-static int debugger_find_ffi_function(VirtualMachine *vm, const char *name) {
-    if (!vm || !name)
-        return -1;
-
-    size_t len = strlen(name);
-    for (int i = 0; i < vm->compiler.ffi_count; i++) {
-        if (vm->compiler.ffi_table[i].name &&
-            vm->compiler.ffi_table[i].name_len == len &&
-            memcmp(vm->compiler.ffi_table[i].name, name, len) == 0)
-            return i;
-    }
-
-    return -1;
-}
+// AST-builder / gensym entry points, implemented in src/reflection.c. Same
+// local-extern pattern src/macros.c and src/repl.c use for the same
+// functions (see the comment at the top of src/repl.c) -- the public
+// prototypes in include/cccc/reflection.h are meant for *user* comptime
+// macro programs, not compiler-internal callers.
+extern const char *__builtin_gensym(VirtualMachine *vm, const char *prefix);
+extern Obj *__builtin_ast_function(VirtualMachine *vm, const char *name,
+                                   Type *return_type);
+extern Node *__builtin_ast_return(VirtualMachine *vm, Node *expr);
+extern void __builtin_ast_function_set_body(VirtualMachine *vm, Obj *fn,
+                                            Node *body);
+extern Obj *__builtin_ast_global_var(VirtualMachine *vm, const char *name,
+                                     Type *ty);
+extern Node *__builtin_ast_var_ref(VirtualMachine *vm, const char *name);
+extern Node *__builtin_ast_cast(VirtualMachine *vm, Node *expr, Type *target_type);
+extern Node *__builtin_ast_unary(VirtualMachine *vm, NodeKind op, Node *operand);
+extern Node *__builtin_ast_subscript(VirtualMachine *vm, Node *arr, Node *idx);
+extern Node *__builtin_ast_int_literal(VirtualMachine *vm, int64_t value);
 
 static void debugger_add_condition_scope_var(VarScopeNode **vars, Obj *var) {
     if (!var || !var->name || !*var->name)
@@ -975,553 +1001,127 @@ static void debugger_free_condition_scope(VarScopeNode *vars) {
     }
 }
 
-static int debugger_type_is_scalar_integer(Type *ty) {
+// A condition's controlling expression must have scalar type, exactly like a
+// real "if" statement's controlling expression -- struct/union/array/void
+// have no defined truthiness.
+static bool debugger_type_is_valid_condition(Type *ty) {
     return ty && (is_integer(ty) || ty->kind == TY_PTR || ty->kind == TY_FUNC ||
-                  ty->kind == TY_NULLPTR_T);
+                  ty->kind == TY_NULLPTR_T || is_flonum(ty));
 }
 
-static long long debugger_cast_integer(long long val, Type *ty) {
-    if (!ty)
-        return val;
-    if (ty->kind == TY_BOOL)
-        return val != 0;
-    if (!is_integer(ty))
-        return val;
-
-    switch (ty->size) {
-    case 1:
-        return ty->is_unsigned ? (long long)(uint8_t)val : (long long)(int8_t)val;
-    case 2:
-        return ty->is_unsigned ? (long long)(uint16_t)val : (long long)(int16_t)val;
-    case 4:
-        return ty->is_unsigned ? (long long)(uint32_t)val : (long long)(int32_t)val;
-    default:
-        return val;
-    }
+// True if `var` is one of the locals (including parameters) of the function
+// that is paused at the breakpoint's pc -- i.e. it lives in the live frame at
+// vm->bp, not in whatever frame the compiled condition wrapper itself runs
+// in, and therefore needs the frame-pointer rewrite below.
+static bool debugger_var_is_paused_frame_local(Obj *current_fn, Obj *var) {
+    if (!current_fn)
+        return false;
+    for (Obj *o = current_fn->locals; o; o = o->next)
+        if (o == var)
+            return true;
+    return false;
 }
 
-static long long debugger_read_scalar(void *addr, Type *ty) {
-    if (!addr)
-        return 0;
-    if (!ty)
-        return *(long long *)addr;
+// Rewrite every reference to a paused-frame local `x` (offset `off` words
+// from bp, per assign_stack_offsets -- codegen.c) into
+// `*(T*)&((char*)__cccc_dbg_frame)[off*8]`, an lvalue that reaches the live
+// frame at vm->bp through the frame-pointer global instead of the wrapper's
+// own (unrelated) frame. Globals are left untouched: they resolve normally
+// through ordinary codegen since a single data segment is shared by every
+// function. The rewrite is type-preserving (see the node->ty note below), so
+// ancestor nodes never need retyping and this can simply mutate in place.
+static void debugger_rewrite_locals(VirtualMachine *vm, Obj *current_fn, Node *node) {
+    if (!node)
+        return;
 
-    switch (ty->kind) {
-    case TY_BOOL:
-        return *(uint8_t *)addr != 0;
-    case TY_CHAR:
-        return ty->is_unsigned ? (long long)*(uint8_t *)addr
-                               : (long long)*(int8_t *)addr;
-    case TY_SHORT:
-        return ty->is_unsigned ? (long long)*(uint16_t *)addr
-                               : (long long)*(int16_t *)addr;
-    case TY_INT:
-    case TY_ENUM:
-        return ty->is_unsigned ? (long long)*(uint32_t *)addr
-                               : (long long)*(int32_t *)addr;
-    default:
-        return *(long long *)addr;
-    }
-}
+    if (node->kind == ND_VAR && node->var &&
+        debugger_var_is_paused_frame_local(current_fn, node->var)) {
+        Obj *var = node->var;
+        Node *frame_ref = __builtin_ast_var_ref(vm, "__cccc_dbg_frame");
+        Node *char_ptr = __builtin_ast_cast(vm, frame_ref, pointer_to(vm, ty_char));
+        Node *idx = __builtin_ast_int_literal(vm, (int64_t)var->offset *
+                                                        (int64_t)sizeof(long long));
+        Node *elem = __builtin_ast_subscript(vm, char_ptr, idx);
+        Node *addr = __builtin_ast_unary(vm, ND_ADDR, elem);
+        add_type(vm, addr); // types elem + addr; __builtin_ast_cast doesn't type
+                             // its operand for us (unlike parse.c's new_cast), and
+                             // once typed_ptr wraps addr in a CAST, add_type would
+                             // never reach it again (see the node->ty note below).
+        Node *typed_ptr = __builtin_ast_cast(vm, addr, pointer_to(vm, var->ty));
 
-static void debugger_write_scalar(void *addr, Type *ty, long long val) {
-    if (!addr)
-        return;
-    if (!ty) {
-        *(long long *)addr = val;
-        return;
-    }
-
-    switch (ty->kind) {
-    case TY_BOOL:
-    case TY_CHAR:
-        *(uint8_t *)addr = (uint8_t)val;
-        return;
-    case TY_SHORT:
-        *(uint16_t *)addr = (uint16_t)val;
-        return;
-    case TY_INT:
-    case TY_ENUM:
-        *(uint32_t *)addr = (uint32_t)val;
-        return;
-    default:
-        *(long long *)addr = val;
+        node->kind = ND_DEREF;
+        node->lhs = typed_ptr;
+        node->var = NULL;
+        // Type-preserving rewrite: *(T*)&frame[off] has exactly the same type
+        // T as the original variable, so set it directly instead of clearing
+        // it for add_type to recompute. That matters beyond saving a call:
+        // add_type's switch (src/type.c) has no case for ND_CAST or ND_NUM --
+        // it assumes those are always pre-typed at construction and, given a
+        // NULL ->ty, silently leaves it NULL forever (falls to `default:
+        // return;`). If this variable sits under an implicit cast add_type
+        // inserted during the original parse (e.g. usual arithmetic
+        // conversions), clearing that cast's ->ty to force a "fresh" retype
+        // would permanently null it out instead.
+        node->ty = var->ty;
         return;
     }
+
+    debugger_rewrite_locals(vm, current_fn, node->lhs);
+    debugger_rewrite_locals(vm, current_fn, node->rhs);
+    debugger_rewrite_locals(vm, current_fn, node->cond);
+    debugger_rewrite_locals(vm, current_fn, node->then);
+    debugger_rewrite_locals(vm, current_fn, node->els);
+    for (Node *a = node->args; a; a = a->next)
+        debugger_rewrite_locals(vm, current_fn, a);
 }
 
-static long long eval_ast_addr(VirtualMachine *vm, Node *node, int *error) {
-    if (!node) {
-        *error = 1;
-        return 0;
+// Lazily declare and compile the single session-wide frame-pointer global
+// that every compiled condition wrapper dereferences. Cached on
+// vm->dbg.dbg_frame_var so this only runs once per VM session.
+static Obj *debugger_frame_var(VirtualMachine *vm) {
+    if (vm->dbg.dbg_frame_var)
+        return vm->dbg.dbg_frame_var;
+
+    CcExprSnapshot snap = cc_expr_snapshot(vm);
+    jmp_buf jb;
+    jmp_buf *saved_jmp_buf = vm->error_jmp_buf;
+    vm->error_jmp_buf = &jb;
+
+    if (setjmp(jb) == 0) {
+        Obj *var = __builtin_ast_global_var(vm, "__cccc_dbg_frame",
+                                            pointer_to(vm, ty_void));
+        cc_repl_compile_new(vm, snap.globals_head);
+        vm->error_jmp_buf = saved_jmp_buf;
+        cc_expr_snapshot_discard(&snap);
+        vm->dbg.dbg_frame_var = var;
+        return var;
     }
 
-    switch (node->kind) {
-    case ND_VAR: {
-        if (!node->var || !node->var->name) {
-            printf("Error: Variable has no name\n");
-            *error = 1;
-            return 0;
-        }
-
-        if (node->var->is_function)
-            return cc_pc_to_byte_offset((Pc)node->var->code_addr);
-
-        DebugSymbol *sym = cc_lookup_symbol(vm, node->var->name);
-        if (sym)
-            return (long long)debugger_symbol_address(vm, sym);
-
-        if (!node->var->is_local)
-            return (long long)(vm->data_seg + node->var->offset);
-
-        printf("Error: Variable '%s' not found in current scope\n", node->var->name);
-        *error = 1;
-        return 0;
-    }
-    case ND_DEREF:
-        return eval_ast_node(vm, node->lhs, error);
-    case ND_MEMBER: {
-        long long base = eval_ast_addr(vm, node->lhs, error);
-        if (*error)
-            return 0;
-        return base + (node->member ? node->member->offset : 0);
-    }
-    case ND_COMMA:
-        (void)eval_ast_node(vm, node->lhs, error);
-        if (*error)
-            return 0;
-        return eval_ast_addr(vm, node->rhs, error);
-    default:
-        printf("Error: Expression is not an lvalue in condition\n");
-        *error = 1;
-        return 0;
-    }
+    vm->error_jmp_buf = saved_jmp_buf;
+    printf("Error: failed to initialize condition evaluator: %s\n",
+           vm->error_message ? vm->error_message : "unknown error");
+    vm->error_message = NULL;
+    cc_expr_snapshot_restore(vm, &snap);
+    return NULL;
 }
 
-static long long debugger_read_bitfield(Node *node, void *addr) {
-    Member *mem = node->member;
-    unsigned long long raw = debugger_read_scalar(addr, mem->ty);
-    unsigned long long mask = (1ULL << mem->bit_width) - 1;
-    unsigned long long val = (raw >> mem->bit_offset) & mask;
-
-    if (!mem->ty->is_unsigned && mem->bit_width < 64 &&
-        (val & (1ULL << (mem->bit_width - 1))))
-        val |= ~mask;
-
-    return (long long)val;
-}
-
-static void debugger_write_bitfield(Node *node, void *addr, long long val) {
-    Member *mem = node->member;
-    unsigned long long raw = debugger_read_scalar(addr, mem->ty);
-    unsigned long long mask = (1ULL << mem->bit_width) - 1;
-    raw &= ~(mask << mem->bit_offset);
-    raw |= (((unsigned long long)val & mask) << mem->bit_offset);
-    debugger_write_scalar(addr, mem->ty, (long long)raw);
-}
-
-static long long debugger_eval_direct_call(VirtualMachine *vm, Node *node, int *error) {
-    // PLACEHOLDER: support full debugger condition call ABI including floats,
-    // structs/unions, variadics, indirect calls, nested static links, and
-    // stack-passed arguments.
-    // Ticket: https://todo.sr.ht/~takeiteasy/cccc/113
-    if (!node->func_ty || node->func_ty->is_variadic) {
-        printf("Error: Variadic function calls in conditions are not supported\n");
-        *error = 1;
-        return 0;
-    }
-    if (!debugger_type_is_scalar_integer(node->ty)) {
-        printf("Error: Non-scalar function return in condition is not supported\n");
-        *error = 1;
-        return 0;
+// Parse, rewrite, and compile a breakpoint's condition exactly once. On
+// success bp->cond_fn is set; on failure bp->cond_compile_failed is set (so
+// later hits don't retry and re-print the same diagnostic every time).
+//
+// LIMITATION: the compiled wrapper's bytecode (and any string-literal rodata
+// it needs) is appended to the VM's text/data segments and never reclaimed --
+// the same shape of issue as the REPL's per-expression wrapper accumulation
+// (ticket #667), just keyed per conditional breakpoint here. Low priority;
+// tracked as a follow-up: https://todo.sr.ht/~takeiteasy/cccc/702
+static bool debugger_compile_condition_once(VirtualMachine *vm, Breakpoint *bp) {
+    if (!debugger_frame_var(vm)) {
+        bp->cond_compile_failed = true;
+        return false;
     }
 
-    int nargs = 0;
-    for (Node *arg = node->args; arg; arg = arg->next)
-        nargs++;
-
-    long long *args = NULL;
-    if (nargs > 0) {
-        args = alloca((size_t)nargs * sizeof(long long));
-    }
-
-    int arg_idx = 0;
-    for (Node *arg = node->args; arg; arg = arg->next) {
-        if (!debugger_type_is_scalar_integer(arg->ty)) {
-            printf("Error: Non-integer function arguments in conditions are not supported\n");
-            *error = 1;
-            return 0;
-        }
-        args[arg_idx++] = eval_ast_node(vm, arg, error);
-        if (*error)
-            return 0;
-    }
-
-    if (node->lhs->kind == ND_VAR && node->lhs->var &&
-        node->lhs->var->is_function) {
-        Obj *fn = node->lhs->var;
-        int ffi_idx = debugger_find_ffi_function(vm, fn->name);
-        if (ffi_idx >= 0) {
-            ForeignFunc *ff = &vm->compiler.ffi_table[ffi_idx];
-            if (ff->is_variadic || ff->returns_double) {
-                printf("Error: Full FFI call ABI in conditions is not supported\n");
-                *error = 1;
-                return 0;
-            }
-            if (nargs > 8) {
-                printf("Error: Stack-passed FFI arguments in conditions are not supported\n");
-                *error = 1;
-                return 0;
-            }
-            switch (nargs) {
-            case 0: return ((long long (*)(void))ff->func_ptr)();
-            case 1: return ((long long (*)(long long))ff->func_ptr)(args[0]);
-            case 2: return ((long long (*)(long long, long long))ff->func_ptr)(args[0], args[1]);
-            case 3: return ((long long (*)(long long, long long, long long))ff->func_ptr)(args[0], args[1], args[2]);
-            case 4: return ((long long (*)(long long, long long, long long, long long))ff->func_ptr)(args[0], args[1], args[2], args[3]);
-            case 5: return ((long long (*)(long long, long long, long long, long long, long long))ff->func_ptr)(args[0], args[1], args[2], args[3], args[4]);
-            case 6: return ((long long (*)(long long, long long, long long, long long, long long, long long))ff->func_ptr)(args[0], args[1], args[2], args[3], args[4], args[5]);
-            case 7: return ((long long (*)(long long, long long, long long, long long, long long, long long, long long))ff->func_ptr)(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
-            case 8: return ((long long (*)(long long, long long, long long, long long, long long, long long, long long, long long))ff->func_ptr)(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
-            }
-        }
-
-        if (fn->is_nested) {
-            printf("Error: Nested function calls in conditions are not supported\n");
-            *error = 1;
-            return 0;
-        }
-
-        long long saved_regs[32];
-        FReg saved_fregs[32];
-        memcpy(saved_regs, vm->regs, sizeof(saved_regs));
-        memcpy(saved_fregs, vm->fregs, sizeof(saved_fregs));
-        Pc saved_pc = vm->pc;
-        long long *saved_bp = vm->bp;
-        long long *saved_sp = vm->sp;
-        long long *saved_shadow_sp = vm->shadow_sp;
-        uint32_t saved_flags = vm->flags;
-        int saved_single_step = vm->dbg.single_step;
-        int saved_step_over = vm->dbg.step_over;
-        int saved_step_out = vm->dbg.step_out;
-        Pc saved_step_over_return_addr = vm->dbg.step_over_return_addr;
-        long long *saved_step_out_bp = vm->dbg.step_out_bp;
-        int saved_debugger_attached = vm->dbg.debugger_attached;
-
-        for (int i = nargs - 1; i >= 8; i--)
-            *--vm->sp = args[i];
-        for (int i = 0; i < nargs && i < 8; i++)
-            vm->regs[REG_A0 + i] = args[i];
-
-        vm->flags &= ~CCCC_ENABLE_DEBUGGER;
-        vm->dbg.single_step = 0;
-        vm->dbg.step_over = 0;
-        vm->dbg.step_out = 0;
-        vm->dbg.debugger_attached = 0;
-        if (vm->flags & CCCC_CFI)
-            *--vm->shadow_sp = 0;
-        *--vm->sp = 0;
-        vm->pc = (Pc)fn->code_addr;
-        int rc = vm_eval(vm);
-        long long result = vm->regs[REG_A0];
-
-        memcpy(vm->regs, saved_regs, sizeof(saved_regs));
-        memcpy(vm->fregs, saved_fregs, sizeof(saved_fregs));
-        vm->pc = saved_pc;
-        vm->bp = saved_bp;
-        vm->sp = saved_sp;
-        vm->shadow_sp = saved_shadow_sp;
-        vm->flags = saved_flags;
-        vm->dbg.single_step = saved_single_step;
-        vm->dbg.step_over = saved_step_over;
-        vm->dbg.step_out = saved_step_out;
-        vm->dbg.step_over_return_addr = saved_step_over_return_addr;
-        vm->dbg.step_out_bp = saved_step_out_bp;
-        vm->dbg.debugger_attached = saved_debugger_attached;
-
-        if (rc < 0) {
-            printf("Error: Function call in condition failed\n");
-            *error = 1;
-            return 0;
-        }
-        return debugger_cast_integer(result, node->ty);
-    }
-
-    printf("Error: Indirect function calls in conditions are not supported\n");
-    *error = 1;
-    return 0;
-}
-
-// Evaluate an AST node in the current debugger context.
-static long long eval_ast_node(VirtualMachine *vm, Node *node, int *error) {
-    if (!node) {
-        *error = 1;
-        return 0;
-    }
-
-    add_type(vm, node);
-
-    switch (node->kind) {
-        case ND_NUM:
-            return node->val;
-
-        case ND_VAR: {
-            long long addr = eval_ast_addr(vm, node, error);
-            if (*error)
-                return 0;
-            if (node->ty && (node->ty->kind == TY_ARRAY ||
-                             node->ty->kind == TY_STRUCT ||
-                             node->ty->kind == TY_UNION ||
-                             node->ty->kind == TY_FUNC))
-                return addr;
-            return debugger_read_scalar((void *)addr, node->ty);
-        }
-
-        case ND_ADD: {
-            long long left = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            long long right = eval_ast_node(vm, node->rhs, error);
-            if (*error) return 0;
-            return left + right;
-        }
-
-        case ND_SUB: {
-            long long left = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            long long right = eval_ast_node(vm, node->rhs, error);
-            if (*error) return 0;
-            return left - right;
-        }
-
-        case ND_MUL: {
-            long long left = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            long long right = eval_ast_node(vm, node->rhs, error);
-            if (*error) return 0;
-            return left * right;
-        }
-
-        case ND_DIV: {
-            long long left = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            long long right = eval_ast_node(vm, node->rhs, error);
-            if (*error) return 0;
-            if (right == 0) {
-                printf("Error: Division by zero in condition\n");
-                *error = 1;
-                return 0;
-            }
-            if (node->ty && node->ty->is_unsigned)
-                return (long long)((uint64_t)left / (uint64_t)right);
-            return left / right;
-        }
-
-        case ND_MOD: {
-            long long left = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            long long right = eval_ast_node(vm, node->rhs, error);
-            if (*error) return 0;
-            if (right == 0) {
-                printf("Error: Modulo by zero in condition\n");
-                *error = 1;
-                return 0;
-            }
-            if (node->ty && node->ty->is_unsigned)
-                return (long long)((uint64_t)left % (uint64_t)right);
-            return left % right;
-        }
-
-        case ND_SHL: {
-            long long left = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            long long right = eval_ast_node(vm, node->rhs, error);
-            if (*error) return 0;
-            return left << right;
-        }
-
-        case ND_SHR: {
-            long long left = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            long long right = eval_ast_node(vm, node->rhs, error);
-            if (*error) return 0;
-            if (node->lhs && node->lhs->ty && node->lhs->ty->is_unsigned)
-                return (long long)((uint64_t)left >> right);
-            return left >> right;
-        }
-
-        case ND_EQ: {
-            long long left = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            long long right = eval_ast_node(vm, node->rhs, error);
-            if (*error) return 0;
-            return left == right;
-        }
-
-        case ND_NE: {
-            long long left = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            long long right = eval_ast_node(vm, node->rhs, error);
-            if (*error) return 0;
-            return left != right;
-        }
-
-        case ND_LT: {
-            long long left = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            long long right = eval_ast_node(vm, node->rhs, error);
-            if (*error) return 0;
-            if (node->lhs && node->lhs->ty && node->lhs->ty->is_unsigned)
-                return (uint64_t)left < (uint64_t)right;
-            return left < right;
-        }
-
-        case ND_LE: {
-            long long left = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            long long right = eval_ast_node(vm, node->rhs, error);
-            if (*error) return 0;
-            if (node->lhs && node->lhs->ty && node->lhs->ty->is_unsigned)
-                return (uint64_t)left <= (uint64_t)right;
-            return left <= right;
-        }
-
-        case ND_LOGAND: {
-            long long left = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            if (!left) return 0;  // Short-circuit
-            long long right = eval_ast_node(vm, node->rhs, error);
-            if (*error) return 0;
-            return right != 0;
-        }
-
-        case ND_LOGOR: {
-            long long left = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            if (left) return 1;  // Short-circuit
-            long long right = eval_ast_node(vm, node->rhs, error);
-            if (*error) return 0;
-            return right != 0;
-        }
-
-        case ND_NEG: {
-            long long val = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            return -val;
-        }
-
-        case ND_NOT: {
-            long long val = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            return !val;
-        }
-
-        case ND_BITNOT: {
-            long long val = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            return ~val;
-        }
-
-        case ND_BITAND: {
-            long long left = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            long long right = eval_ast_node(vm, node->rhs, error);
-            if (*error) return 0;
-            return left & right;
-        }
-
-        case ND_BITOR: {
-            long long left = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            long long right = eval_ast_node(vm, node->rhs, error);
-            if (*error) return 0;
-            return left | right;
-        }
-
-        case ND_BITXOR: {
-            long long left = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            long long right = eval_ast_node(vm, node->rhs, error);
-            if (*error) return 0;
-            return left ^ right;
-        }
-
-        case ND_CAST: {
-            long long val = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            return debugger_cast_integer(val, node->ty);
-        }
-
-        case ND_ADDR:
-            return eval_ast_addr(vm, node->lhs, error);
-
-        case ND_DEREF: {
-            long long addr = eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            if (node->ty && (node->ty->kind == TY_ARRAY ||
-                             node->ty->kind == TY_STRUCT ||
-                             node->ty->kind == TY_UNION))
-                return addr;
-            return debugger_read_scalar((void *)addr, node->ty);
-        }
-
-        case ND_MEMBER: {
-            long long addr = eval_ast_addr(vm, node, error);
-            if (*error) return 0;
-            if (node->member && node->member->is_bitfield)
-                return debugger_read_bitfield(node, (void *)addr);
-            if (node->ty && (node->ty->kind == TY_ARRAY ||
-                             node->ty->kind == TY_STRUCT ||
-                             node->ty->kind == TY_UNION))
-                return addr;
-            return debugger_read_scalar((void *)addr, node->ty);
-        }
-
-        case ND_ASSIGN: {
-            long long val = eval_ast_node(vm, node->rhs, error);
-            if (*error) return 0;
-            long long addr = eval_ast_addr(vm, node->lhs, error);
-            if (*error) return 0;
-            if (node->lhs->kind == ND_MEMBER && node->lhs->member &&
-                node->lhs->member->is_bitfield)
-                debugger_write_bitfield(node->lhs, (void *)addr, val);
-            else
-                debugger_write_scalar((void *)addr, node->lhs->ty, val);
-            return debugger_cast_integer(val, node->ty);
-        }
-
-        case ND_COND: {
-            long long cond = eval_ast_node(vm, node->cond, error);
-            if (*error) return 0;
-            return eval_ast_node(vm, cond ? node->then : node->els, error);
-        }
-
-        case ND_COMMA:
-            (void)eval_ast_node(vm, node->lhs, error);
-            if (*error) return 0;
-            return eval_ast_node(vm, node->rhs, error);
-
-        case ND_FUNCALL:
-            return debugger_eval_direct_call(vm, node, error);
-
-        default:
-            printf("Error: Unsupported node kind %d in condition\n", node->kind);
-            *error = 1;
-            return 0;
-    }
-}
-
-// Evaluate a condition string and return true/false
-// Returns: 1 if condition is true, 0 if false or error
-static int debugger_eval_condition(VirtualMachine *vm, const char *condition_str) {
-    if (!condition_str || !*condition_str) {
-        return 1;  // Empty condition is always true
-    }
-
-    // Create a temporary buffer for tokenization
     char buf[512];
-    snprintf(buf, sizeof(buf), "%s\n", condition_str);
-
-    // Create a temporary file struct for tokenization
+    snprintf(buf, sizeof(buf), "%s\n", bp->condition);
     File temp_file = {
         .name = "<condition>",
         .file_no = 0,
@@ -1529,16 +1129,14 @@ static int debugger_eval_condition(VirtualMachine *vm, const char *condition_str
         .display_name = NULL,
         .line_delta = 0
     };
-
-    // Tokenize the condition
     Token *tok = tokenize(vm, &temp_file);
     if (!tok) {
         printf("Error: Failed to tokenize condition\n");
-        return 0;
+        bp->cond_compile_failed = true;
+        return false;
     }
     convert_pp_tokens(vm, tok);
 
-    // Parse as expression
     Obj *current_fn = debugger_current_function(vm);
     Scope condition_scope = {0};
     for (Obj *obj = vm->compiler.globals; obj; obj = obj->next)
@@ -1557,18 +1155,122 @@ static int debugger_eval_condition(VirtualMachine *vm, const char *condition_str
     debugger_free_condition_scope(condition_scope.vars);
     if (!expr) {
         printf("Error: Failed to parse condition expression\n");
+        bp->cond_compile_failed = true;
+        return false;
+    }
+    add_type(vm, expr);
+
+    if (!debugger_type_is_valid_condition(expr->ty)) {
+        printf("Error: condition must have scalar type\n");
+        bp->cond_compile_failed = true;
+        return false;
+    }
+    Type *cond_ty = expr->ty;
+
+    CcExprSnapshot snap = cc_expr_snapshot(vm);
+    jmp_buf jb;
+    jmp_buf *saved_jmp_buf = vm->error_jmp_buf;
+    vm->error_jmp_buf = &jb;
+
+    if (setjmp(jb) == 0) {
+        debugger_rewrite_locals(vm, current_fn, expr);
+        const char *name = __builtin_gensym(vm, "__cccc_dbg_cond");
+        Obj *fn = __builtin_ast_function(vm, name, cond_ty);
+        Node *ret = __builtin_ast_return(vm, expr);
+        __builtin_ast_function_set_body(vm, fn, ret);
+        cc_repl_compile_new(vm, snap.globals_head);
+        vm->error_jmp_buf = saved_jmp_buf;
+        cc_expr_snapshot_discard(&snap);
+        bp->cond_fn = fn;
+        return true;
+    }
+
+    vm->error_jmp_buf = saved_jmp_buf;
+    printf("Error: %s\n", vm->error_message ? vm->error_message : "failed to compile condition");
+    vm->error_message = NULL;
+    cc_expr_snapshot_restore(vm, &snap);
+    bp->cond_compile_failed = true;
+    return false;
+}
+
+// Run a compiled condition wrapper once and return its truthiness. Mirrors
+// the save/reset/run/restore pattern the old debugger_eval_direct_call used
+// for a direct CCCC call: unlike cc_expr_exec_wrapper (REPL's variant), this
+// does *not* reset vm->sp/vm->bp to vm->initial_sp/initial_bp -- those would
+// overwrite the live paused program's own call stack, which occupies exactly
+// that address range. Instead it keeps vm->bp (the wrapper establishes its
+// own frame on entry, same as any real call) and only pushes a fresh return
+// sentinel below the current vm->sp, exactly like a normal nested call.
+static bool debugger_exec_condition_wrapper(VirtualMachine *vm, Obj *fn, Type *cond_ty) {
+    long long saved_regs[NUM_REGS];
+    FReg saved_fregs[NUM_REGS];
+    memcpy(saved_regs, vm->regs, sizeof(saved_regs));
+    memcpy(saved_fregs, vm->fregs, sizeof(saved_fregs));
+    Pc saved_pc = vm->pc;
+    long long *saved_bp = vm->bp;
+    long long *saved_sp = vm->sp;
+    long long *saved_shadow_sp = vm->shadow_sp;
+    uint32_t saved_flags = vm->flags;
+    int saved_single_step = vm->dbg.single_step;
+    int saved_step_over = vm->dbg.step_over;
+    int saved_step_out = vm->dbg.step_out;
+    Pc saved_step_over_return_addr = vm->dbg.step_over_return_addr;
+    long long *saved_step_out_bp = vm->dbg.step_out_bp;
+    int saved_debugger_attached = vm->dbg.debugger_attached;
+
+    vm->flags &= ~CCCC_ENABLE_DEBUGGER;
+    vm->dbg.single_step = 0;
+    vm->dbg.step_over = 0;
+    vm->dbg.step_out = 0;
+    vm->dbg.debugger_attached = 0;
+    if (vm->flags & CCCC_CFI)
+        *--vm->shadow_sp = 0;
+    *--vm->sp = 0; // sentinel return address
+    vm->pc = (Pc)fn->code_addr;
+    int rc = vm_eval(vm);
+    long long ival = vm->regs[REG_A0];
+    double fval = vm->fregs[FREG_A0].f64;
+
+    memcpy(vm->regs, saved_regs, sizeof(saved_regs));
+    memcpy(vm->fregs, saved_fregs, sizeof(saved_fregs));
+    vm->pc = saved_pc;
+    vm->bp = saved_bp;
+    vm->sp = saved_sp;
+    vm->shadow_sp = saved_shadow_sp;
+    vm->flags = saved_flags;
+    vm->dbg.single_step = saved_single_step;
+    vm->dbg.step_over = saved_step_over;
+    vm->dbg.step_out = saved_step_out;
+    vm->dbg.step_over_return_addr = saved_step_over_return_addr;
+    vm->dbg.step_out_bp = saved_step_out_bp;
+    vm->dbg.debugger_attached = saved_debugger_attached;
+
+    if (rc < 0) {
+        printf("Error: Condition evaluation failed\n");
+        return false;
+    }
+    return is_flonum(cond_ty) ? fval != 0.0 : ival != 0;
+}
+
+// Evaluate a breakpoint's condition and return its truthiness. Compiles the
+// condition on the first hit (see debugger_compile_condition_once) and
+// reuses the cached wrapper on every later hit -- only the live frame
+// pointer varies between hits.
+static int debugger_eval_condition(VirtualMachine *vm, Breakpoint *bp) {
+    if (!bp->condition || !*bp->condition)
+        return 1; // Empty condition is always true
+
+    if (bp->cond_compile_failed)
         return 0;
-    }
 
-    // Evaluate the expression
-    int error = 0;
-    long long result = eval_ast_node(vm, expr, &error);
+    if (!bp->cond_fn && !debugger_compile_condition_once(vm, bp))
+        return 0;
 
-    if (error) {
-        return 0;  // Error during evaluation
-    }
+    Obj *frame_var = vm->dbg.dbg_frame_var;
+    *(void **)(vm->data_seg + frame_var->offset) = (void *)vm->bp;
 
-    return result != 0;  // Return true if non-zero
+    Type *cond_ty = bp->cond_fn->ty->return_ty;
+    return debugger_exec_condition_wrapper(vm, bp->cond_fn, cond_ty);
 }
 
 // ============================================================================

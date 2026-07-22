@@ -1816,6 +1816,14 @@ typedef struct Watchpoint {
  @field pc Program counter address where the breakpoint is set.
  @field enabled Whether this breakpoint is currently active.
  @field hit_count Number of times this breakpoint has been hit.
+ @field condition Optional condition expression source (NULL if unconditional).
+ @field cond_fn Compiled condition wrapper function (NULL until the first hit
+        compiles it, or compilation fails -- see cond_compile_failed).
+        Compiled once per breakpoint (its pc fixes the enclosing function and
+        therefore every local's frame offset) and reused on every later hit;
+        only the live frame pointer varies between hits (ticket 113).
+ @field cond_compile_failed Set when compiling `condition` failed, so later
+        hits don't retry and re-print the same diagnostic every time.
 */
 #ifndef MAX_BREAKPOINTS
 #define MAX_BREAKPOINTS 256
@@ -1826,6 +1834,8 @@ typedef struct Breakpoint {
     int enabled;     // 1 if enabled, 0 if disabled
     int hit_count;   // Number of times hit
     char *condition; // Optional condition expression (NULL if unconditional)
+    struct Obj *cond_fn;      // Compiled condition wrapper (see doc above)
+    bool cond_compile_failed; // true if compiling `condition` failed once
 } Breakpoint;
 
 /*!
@@ -1928,6 +1938,13 @@ typedef struct Debugger {
     // Watchpoints (data breakpoints)
     Watchpoint watchpoints[MAX_WATCHPOINTS];
     int num_watchpoints;
+
+    // Compile-and-run conditional breakpoints (ticket 113): a single global
+    // pointer variable, lazily declared once per session, that each compiled
+    // condition wrapper dereferences to reach the paused frame's locals. Set
+    // to the live vm->bp immediately before each conditional-breakpoint hit
+    // runs its cached wrapper -- see debugger_eval_condition in debugger.c.
+    struct Obj *dbg_frame_var;
 } Debugger;
 
 #ifndef MAX_CALLS
@@ -3126,6 +3143,62 @@ void cc_compile(VirtualMachine *vm, Obj *prog);
              still target any previously-compiled function.
 */
 void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head);
+
+/*!
+ @struct CcExprSnapshot
+ @abstract Captured compiler scope/globals/locals state, taken before parsing
+           or synthesizing a one-off expression (REPL line or debugger
+           condition) so a failed attempt can be rolled back without
+           disturbing earlier, successful state. Implemented in src/repl.c;
+           shared by the REPL (src/repl.c) and the debugger's conditional
+           breakpoint evaluator (src/debugger.c, ticket 113).
+*/
+typedef struct {
+    HashMap var_map_snap;
+    HashMap tag_map_snap;
+    VarScopeNode *vars_head;
+    TagScopeNode *tags_head;
+    Obj *globals_head;
+    Obj *locals_head;
+} CcExprSnapshot;
+
+/*!
+ @function cc_expr_snapshot
+ @abstract Capture the current scope/globals/locals state.
+ @param vm The CCCC instance. vm->compiler.scope must be non-NULL.
+*/
+CcExprSnapshot cc_expr_snapshot(VirtualMachine *vm);
+
+/*!
+ @function cc_expr_snapshot_discard
+ @abstract Free the bucket-array copies taken by cc_expr_snapshot, for a unit
+           that succeeded and whose state should be kept as-is.
+*/
+void cc_expr_snapshot_discard(CcExprSnapshot *snap);
+
+/*!
+ @function cc_expr_snapshot_restore
+ @abstract Roll vm->compiler.scope/globals/locals back to a prior
+           cc_expr_snapshot, discarding anything a failed unit added.
+           Obj/Node/scope-entry memory the failed unit allocated is
+           arena-allocated and simply becomes unreachable rather than freed.
+*/
+void cc_expr_snapshot_restore(VirtualMachine *vm, CcExprSnapshot *snap);
+
+/*!
+ @function cc_expr_exec_wrapper
+ @abstract Run a compiled zero-argument wrapper function once on the
+           persistent VM and read its result, mirroring the save/reset/run/
+           restore pattern execute_macro_fn (src/macros.c) uses for comptime
+           macro bodies -- but reading the *runtime* return registers
+           (REG_A0 / FREG_A0) rather than a comptime AST-node result.
+ @param vm The CCCC instance.
+ @param fn The compiled wrapper function to execute.
+ @param out_i Receives REG_A0 (integer/pointer result). May be NULL.
+ @param out_f Receives FREG_A0.f64 (float/double result). May be NULL.
+*/
+void cc_expr_exec_wrapper(VirtualMachine *vm, Obj *fn, long long *out_i,
+                          double *out_f);
 
 /*!
  @function cc_run

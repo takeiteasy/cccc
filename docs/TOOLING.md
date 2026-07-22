@@ -20,10 +20,10 @@ When enabled, the debugger provides a powerful GDB-like interface for controllin
     - By file and line number (`break test.c:42`).
     - At the entry point of a function (`break main`).
     - At a raw bytecode offset (legacy support).
-- **Conditional Breakpoints**: Set breakpoints that only trigger when a specific condition is met. The expression can use local and global variables, arithmetic, comparison, logical operators, casts, assignments, member and pointer access, ternary expressions, comma expressions, and scalar integer/pointer direct function calls. Assignments and supported function calls are evaluated normally and can change program state.
+- **Conditional Breakpoints**: Set breakpoints that only trigger when a specific condition is met. A condition is compiled -- not tree-walked -- into a small wrapper function the first time its breakpoint is hit, and that compiled wrapper is reused on every later hit, so it supports the full C expression grammar and the full call ABI: local and global variables, arithmetic, comparison, logical operators, casts, assignments, member and pointer access, ternary and comma expressions, and function calls with floating-point arguments/returns, struct/union returns, variadic calls, indirect calls, nested-function static links, and stack-passed arguments. Assignments and function calls are evaluated normally and can change program state (including the paused frame's own locals). The condition's controlling expression must have scalar type, exactly like a real `if` statement.
     - Syntax: `break <location> if <expression>`
     - Example: `break 22 if x > 5`
-    - Full function-call ABI support is not yet available in conditions: floating-point arguments or returns, struct/union returns, variadic calls, indirect calls, nested-function static links, and stack-passed FFI arguments are rejected with diagnostics.
+    - Example: `break 22 if half(fx) > 2.0 && sum_point(pt) == 7`
 - **Watchpoints (Data Breakpoints)**: Break execution when memory is read or written. Watchpoints can be set on variables by name or on raw memory addresses.
     - `watch <var|addr>`: Break on write.
     - `rwatch <addr>`: Break on read.
