@@ -1121,8 +1121,11 @@ struct Obj {
     // __builtin_object_size: constant malloc-family allocation tracking (#642).
     // Only honored when the pointer is assigned exactly once (its declaration
     // initializer) and never has its address taken; see resolve_objsize_queries.
-    int   objsize_alloc;       // bytes from a const malloc-family initializer
-    bool  objsize_has_alloc;   // true if objsize_alloc was recognized
+    int   objsize_alloc;       // bytes from a const malloc-family initializer;
+                               // meaningless when objsize_derived_from is set
+    bool  objsize_has_alloc;   // true if this var is alloc-tracked, either
+                               // directly (objsize_alloc) or derived
+                               // (objsize_derived_from) (#642, #700)
     bool  objsize_unsafe;      // true if reassigned or address-taken in scope
     Node *objsize_init_assign; // the initializer ND_ASSIGN node (exempt from poisoning)
     struct Obj *objsize_decl_fn; // the function this var was declared in; a
@@ -1133,6 +1136,13 @@ struct Obj {
                                  // frozen) before the enclosing function's own
                                  // poison scan can see a later reassignment,
                                  // so such queries must stay conservative
+    // #700: `q = p + const` initializer tracking, where p is itself
+    // alloc-tracked (directly or transitively). objsize_derived_from chains
+    // resolve at query time (see objsize_effective_remaining), so a var may
+    // be derived from another derived var. NULL means this var's size comes
+    // straight from objsize_alloc (the #642/#649 direct case).
+    struct Obj *objsize_derived_from;
+    int   objsize_derived_offset; // byte offset from objsize_derived_from
 
     // Global variable or function
     bool is_function;

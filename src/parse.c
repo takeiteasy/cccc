@@ -229,6 +229,7 @@ struct ObjSizeQuery {
     struct ObjSizeQuery *next;
 };
 static bool objsize_alloc_from_call(VirtualMachine *vm, Node *rhs, int *out);
+static bool objsize_peel_offset_chain(VirtualMachine *vm, Node *node, Obj **out_base, int *out_offset);
 static void resolve_objsize_queries(VirtualMachine *vm, Node *body);
 static void validate_constexpr_object_type(VirtualMachine *vm, Token *tok, Type *ty);
 static void validate_constexpr_initializer(VirtualMachine *vm, Obj *var, Initializer *init,
@@ -2411,9 +2412,30 @@ static Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *bas
             if (var->ty->kind == TY_PTR && expr->kind == ND_ASSIGN &&
                 expr->lhs->kind == ND_VAR && expr->lhs->var == var) {
                 int alloc_size;
+                Obj *base;
+                int base_offset;
                 if (objsize_alloc_from_call(vm, expr->rhs, &alloc_size)) {
                     var->objsize_has_alloc = true;
                     var->objsize_alloc = alloc_size;
+                    var->objsize_init_assign = expr;
+                    var->objsize_decl_fn = vm->compiler.current_fn;
+                } else if (objsize_peel_offset_chain(vm, expr->rhs, &base, &base_offset) &&
+                           base->objsize_has_alloc &&
+                           base->objsize_decl_fn == vm->compiler.current_fn) {
+                    // #700: `q = p + const`, where p is itself alloc-tracked
+                    // (directly or transitively) and declared in the same
+                    // function. q's effective size is resolved at query time
+                    // by following objsize_derived_from -- see
+                    // objsize_effective_remaining -- so this only records the
+                    // link, not a concrete size. Restricting to p being
+                    // declared in the *same* function sidesteps the same
+                    // nested-fn/block timing hazard documented on
+                    // objsize_decl_fn: a cross-function derivation could
+                    // resolve (and freeze) before a later reassignment in the
+                    // enclosing scope is even parsed.
+                    var->objsize_has_alloc = true;
+                    var->objsize_derived_from = base;
+                    var->objsize_derived_offset = base_offset;
                     var->objsize_init_assign = expr;
                     var->objsize_decl_fn = vm->compiler.current_fn;
                 }
@@ -4905,6 +4927,35 @@ static bool objsize_alloc_from_call(VirtualMachine *vm, Node *rhs, int *out) {
     return true;
 }
 
+// #697/#700: peel casts and constant-offset ND_ADDs off `node`, accumulating
+// the total byte delta (rhs is already byte-scaled by new_add()), down to a
+// bare ND_VAR. Succeeds only if the walk bottoms out at a plain variable and
+// the accumulated offset is non-negative and fits an `int` -- callers additionally
+// check `objsize_has_alloc` on *out_base, this helper only does the syntactic
+// peel. Shared by the #697 inline-interior-pointer builtin-argument case and
+// the #700 `q = p + const` derived-declaration case.
+static bool objsize_peel_offset_chain(VirtualMachine *vm, Node *node, Obj **out_base, int *out_offset) {
+    Node *p = node;
+    int64_t offset = 0;
+    for (;;) {
+        if (p->kind == ND_CAST) {
+            p = p->lhs;
+        } else if (p->kind == ND_ADD && is_const_expr(vm, p->rhs)) {
+            offset += eval(vm, p->rhs);
+            p = p->lhs;
+        } else {
+            break;
+        }
+    }
+    if (offset < 0 || offset > INT_MAX)
+        return false;
+    if (p->kind != ND_VAR || !p->var)
+        return false;
+    *out_base = p->var;
+    *out_offset = (int)offset;
+    return true;
+}
+
 // #642: post-parse pass resolving deferred __builtin_object_size queries on
 // malloc-tracked pointers. Must run after the whole function body has been
 // parsed (mirrors resolve_goto_labels) so that a reassignment or address-of
@@ -5085,6 +5136,29 @@ static void mark_addr_escapes(Node *node) {
     }
 }
 
+// #700: resolve `var`'s effective remaining byte count `offset` bytes into
+// its tracked allocation, following the objsize_derived_from chain (`q = p +
+// k` initializers, possibly nested). Returns -1 if `var` itself is unsafe, or
+// any ancestor in the chain is unsafe -- a reassignment/address-of anywhere
+// in the chain must poison every var derived from it, since the derived
+// var's tracked size is only sound if every ancestor held its originally-
+// assigned allocation for the whole function (single-assignment, never
+// address-taken; see objsize_poison_scan). `depth` bounds recursion; the
+// chain is only ever as deep as nested `q = p + k` initializers, so this is
+// just a defensive cap, not expected to be hit.
+static int64_t objsize_effective_remaining(Obj *var, int offset, int depth) {
+    if (!var || var->objsize_unsafe || depth > 64)
+        return -1;
+    if (var->objsize_derived_from) {
+        int64_t base_rem = objsize_effective_remaining(
+            var->objsize_derived_from, var->objsize_derived_offset, depth + 1);
+        if (base_rem < 0)
+            return -1;
+        return base_rem - offset;
+    }
+    return (int64_t)var->objsize_alloc - offset;
+}
+
 static void resolve_objsize_queries(VirtualMachine *vm, Node *body) {
     // Always scan, even when *this* function has no pending queries of its
     // own: a nested function or block can reassign / take the address of a
@@ -5094,17 +5168,15 @@ static void resolve_objsize_queries(VirtualMachine *vm, Node *body) {
     // resolve_objsize_queries call reads objsize_unsafe.
     objsize_poison_scan(body);
     for (struct ObjSizeQuery *q = vm->compiler.objsize_queries; q; q = q->next) {
-        if (q->var->objsize_unsafe)
-            continue;
-        // #697: subtract the interior-pointer offset (0 for a bare tracked
-        // var). Past-the-end (rem <= 0) leaves the node's pre-set
-        // conservative fallback untouched, rather than clamping to 0 like
-        // the statically-known array path (OBJSZ_REMAINING) does -- this
-        // matches the ticket's requested behavior for heap interior
-        // pointers specifically.
-        int rem = (int)q->var->objsize_alloc - q->offset;
+        // #697/#700: subtract the interior-pointer offset (0 for a bare
+        // tracked var) and follow any derived-from chain. Past-the-end or
+        // unsafe (rem <= 0) leaves the node's pre-set conservative fallback
+        // untouched, rather than clamping to 0 like the statically-known
+        // array path (OBJSZ_REMAINING) does -- this matches the ticket's
+        // requested behavior for heap interior pointers specifically.
+        int64_t rem = objsize_effective_remaining(q->var, q->offset, 0);
         if (rem > 0)
-            q->node->val = (int64_t)rem;
+            q->node->val = rem;
     }
     vm->compiler.objsize_queries = NULL;
 }
@@ -9461,38 +9533,26 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // is exactly what a same-function query would fall back to anyway
         // once reassigned.
         if (ptr->kind != ND_COND) {
-            // #697: peel casts *and* constant-offset ND_ADDs (interior
+            // #697/#700: peel casts *and* constant-offset ND_ADDs (interior
             // pointers, e.g. `p + 32`, written inline in the builtin's
             // argument) down to the base tracked var, accumulating the byte
-            // delta. The ADD's rhs is already byte-scaled by new_add(). Only
-            // a compile-time-constant offset qualifies; a non-constant
-            // offset (or an unresolvable base) simply skips registration,
+            // delta. `base` may itself be a derived var (#700's `q = p +
+            // const`), in which case objsize_effective_remaining follows the
+            // chain at resolve time. A non-constant offset (or an
+            // unresolvable/untracked base) simply skips registration,
             // leaving the conservative fallback already stored in `node`.
             // This is deliberately *not* done in objsize_resolve_ptr, which
             // runs at parse time before objsize_unsafe can be poisoned by a
             // later reassignment -- see resolve_objsize_queries.
-            Node *p = ptr;
-            int64_t offset = 0;
-            bool offset_ok = true;
-            for (;;) {
-                if (p->kind == ND_CAST) {
-                    p = p->lhs;
-                } else if (p->kind == ND_ADD && is_const_expr(vm, p->rhs)) {
-                    offset += eval(vm, p->rhs);
-                    p = p->lhs;
-                } else {
-                    break;
-                }
-            }
-            if (offset < 0 || offset > INT_MAX)
-                offset_ok = false;
-            if (offset_ok && p->kind == ND_VAR && p->var && p->var->objsize_has_alloc &&
-                p->var->objsize_decl_fn == vm->compiler.current_fn) {
+            Obj *base;
+            int base_offset;
+            if (objsize_peel_offset_chain(vm, ptr, &base, &base_offset) &&
+                base->objsize_has_alloc && base->objsize_decl_fn == vm->compiler.current_fn) {
                 struct ObjSizeQuery *q = arena_alloc(&vm->compiler.parser_arena,
                                                       sizeof(struct ObjSizeQuery));
                 q->node = node;
-                q->var = p->var;
-                q->offset = (int)offset;
+                q->var = base;
+                q->offset = base_offset;
                 q->next = vm->compiler.objsize_queries;
                 vm->compiler.objsize_queries = q;
             }

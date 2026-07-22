@@ -476,9 +476,8 @@ void test_object_size_reallocarray_const(void) {
 // argument.  Extends #642's deferred-query mechanism (not objsize_resolve_ptr
 // -- see resolve_objsize_queries) so `__builtin_object_size(p + k, type)`
 // resolves to `alloc_size - k` for an alloc-tracked, unpoisoned base pointer.
-// The intermediate-variable form (`char *q = p + k; __builtin_object_size(q,
-// ...)`) is a separate, larger dataflow problem and remains conservative --
-// tracked as a follow-up.
+// See below (#700) for the intermediate-variable form (`char *q = p + k;
+// __builtin_object_size(q, ...)`).
 // ---------------------------------------------------------------------------
 
 [[cccc::test]]
@@ -502,10 +501,8 @@ void test_object_size_interior_zero_offset(void) {
 void test_object_size_interior_cast(void) {
     // Interior pointer through an intervening typed-pointer cast: 4 ints (16
     // bytes) into a 64-byte allocation, cast back to char* -> 48 remaining.
+    // Inline form (no intermediate variable).
     char *p = malloc(64);
-    char *q = (char *)((int *)p + 4);
-    AssertEq((unsigned long long)__builtin_object_size(q, 0),
-             (unsigned long long)(size_t)-1); // intermediate var: still conservative
     AssertEq((unsigned long long)__builtin_object_size((char *)((int *)p + 4), 0), 48ULL);
 }
 
@@ -537,4 +534,134 @@ void test_object_size_interior_reassigned_conservative(void) {
     size_t sz = __builtin_object_size(p + 32, 0);
     p = malloc(16);
     AssertEq((unsigned long long)sz, (unsigned long long)(size_t)-1);
+}
+
+// ---------------------------------------------------------------------------
+// #700: interior heap pointers captured in an *intermediate variable*
+// (`char *q = p + k;` then querying q), the form #697 explicitly left
+// conservative. `q`'s tracked size is resolved lazily via Obj.objsize_derived_from
+// (see objsize_effective_remaining in resolve_objsize_queries): q records a
+// link to its base var and offset at declaration time, and the link is
+// followed -- checking every ancestor's objsize_unsafe -- only once the whole
+// function has been poison-scanned. This is required for soundness: p's
+// value is only guaranteed constant for the whole function (and thus valid
+// at q's initializer) when p itself is single-assignment and never
+// address-taken, which can't be known until the full poison scan completes.
+// ---------------------------------------------------------------------------
+
+[[cccc::test]]
+void test_object_size_derived_var_basic(void) {
+    char *p = malloc(128);
+    char *q = p + 32;
+    // 128 - 32 = 96 remaining, for both the derived var itself and a further
+    // inline offset on top of it.
+    AssertEq((unsigned long long)__builtin_object_size(q, 0), 96ULL);
+    AssertEq((unsigned long long)__builtin_object_size(q + 8, 0), 88ULL);
+}
+
+[[cccc::test]]
+void test_object_size_derived_var_chain(void) {
+    // Multi-hop derivation: r derived from q, q derived from p.
+    char *p = malloc(100);
+    char *q = p + 10; // 90 remaining
+    char *r = q + 20; // 70 remaining
+    AssertEq((unsigned long long)__builtin_object_size(q, 0), 90ULL);
+    AssertEq((unsigned long long)__builtin_object_size(r, 0), 70ULL);
+}
+
+[[cccc::test]]
+void test_object_size_derived_var_cast(void) {
+    // Derivation through an intervening typed-pointer cast in the
+    // initializer, mirroring #697's inline cast case.
+    char *p = malloc(64);
+    char *q = (char *)((int *)p + 4); // 16 bytes in -> 48 remaining
+    AssertEq((unsigned long long)__builtin_object_size(q, 0), 48ULL);
+}
+
+[[cccc::test]]
+void test_object_size_derived_var_custom_allocator(void) {
+    char *p = test_objsize_arena_alloc(96);
+    char *q = p + 16;
+    AssertEq((unsigned long long)__builtin_object_size(q, 0), 80ULL);
+}
+
+[[cccc::test]]
+void test_object_size_derived_var_nonconst_offset_conservative(void) {
+    // Non-constant offset -> q is never registered as alloc-tracked at all.
+    volatile int n = 8;
+    char *p = malloc(64);
+    char *q = p + n;
+    AssertEq((unsigned long long)__builtin_object_size(q, 0),
+             (unsigned long long)(size_t)-1);
+}
+
+[[cccc::test]]
+void test_object_size_derived_var_past_end_conservative(void) {
+    char *p = malloc(64);
+    char *q = p + 100; // past the end
+    AssertEq((unsigned long long)__builtin_object_size(q, 0),
+             (unsigned long long)(size_t)-1);
+}
+
+[[cccc::test]]
+void test_object_size_derived_var_own_reassignment_conservative(void) {
+    // q itself is reassigned after derivation -> q is poisoned directly
+    // (the pre-existing generic reassignment check applies to any
+    // objsize_has_alloc var, derived or not).
+    char *p = malloc(64);
+    char *q = p + 8;
+    q = malloc(4);
+    AssertEq((unsigned long long)__builtin_object_size(q, 0),
+             (unsigned long long)(size_t)-1);
+}
+
+[[cccc::test]]
+void test_object_size_derived_var_own_address_taken_conservative(void) {
+    char *p = malloc(64);
+    char *q = p + 8;
+    char **qq = &q;
+    AssertTrue(qq != NULL);
+    AssertEq((unsigned long long)__builtin_object_size(q, 0),
+             (unsigned long long)(size_t)-1);
+}
+
+[[cccc::test]]
+void test_object_size_derived_var_base_reassigned_after_conservative(void) {
+    // Base pointer p is reassigned *after* q derives from it -- q's tracked
+    // size becomes stale (q's runtime value still points into the original
+    // 128-byte allocation, but the derived-tracking invariant requires p to
+    // be single-assignment for the whole function) so the query must stay
+    // conservative, not silently return the original 96.
+    char *p = malloc(128);
+    char *q = p + 32;
+    p = malloc(16);
+    AssertEq((unsigned long long)__builtin_object_size(q, 0),
+             (unsigned long long)(size_t)-1);
+}
+
+[[cccc::test]]
+void test_object_size_derived_var_base_reassigned_before_conservative(void) {
+    // Base pointer p is reassigned *before* q is even declared -- p is
+    // poisoned (assigned twice) by the time the whole function is
+    // poison-scanned, so q's derived query must stay conservative even
+    // though the reassignment is textually earlier than the derivation.
+    char *p = malloc(128);
+    p = malloc(16);
+    char *q = p + 4;
+    AssertEq((unsigned long long)__builtin_object_size(q, 0),
+             (unsigned long long)(size_t)-1);
+}
+
+[[cccc::test]]
+void test_object_size_derived_var_loop_reassign_conservative(void) {
+    // Loop back-edge poisoning of the base var must propagate to a var
+    // derived from it, mirroring #642's own loop-reassignment test.
+    char *m = malloc(100);
+    char *n = m + 5;
+    unsigned long long sum = 0;
+    for (int i = 0; i < 3; i++) {
+        sum += __builtin_object_size(n, 0);
+        m = malloc(4);
+    }
+    AssertEq(sum, 3ULL * (unsigned long long)(size_t)-1);
 }
