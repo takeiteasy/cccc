@@ -2118,6 +2118,11 @@ typedef struct Compiler {
     File *primary_file;  // Top-level source file (set in cc_preprocess; used for auto-emit capture)
     bool at_bol;         // True if at beginning of line
     bool has_space;      // True if follows a space character
+    int file_no;          // Next real-input file index (indexes input_files); was a
+                           // function-local static in tokenize_file, which corrupted
+                           // input_files across multiple VMs in one process (#181)
+    int embedded_file_no; // Next embedded/in-memory file counter (negative file numbers);
+                           // was a function-local static in tokenize_string (#181)
 
     // Parser state
     Obj *locals;           // All local variable instances during parsing

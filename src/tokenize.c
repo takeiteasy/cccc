@@ -1713,14 +1713,13 @@ Token *tokenize_file(VirtualMachine *vm, char *path) {
     convert_universal_chars(vm, p);
 
     // Save the filename for assembler .file directive.
-    static int file_no;
-    File *file = new_file(vm, path, file_no + 1, p);
+    File *file = new_file(vm, path, vm->compiler.file_no + 1, p);
 
     // Save the filename for assembler .file directive.
-    vm->compiler.input_files = realloc(vm->compiler.input_files, sizeof(char *) * (file_no + 2));
-    vm->compiler.input_files[file_no] = file;
-    vm->compiler.input_files[file_no + 1] = NULL;
-    file_no++;
+    vm->compiler.input_files = realloc(vm->compiler.input_files, sizeof(char *) * (vm->compiler.file_no + 2));
+    vm->compiler.input_files[vm->compiler.file_no] = file;
+    vm->compiler.input_files[vm->compiler.file_no + 1] = NULL;
+    vm->compiler.file_no++;
 
     return tokenize(vm, file);
 }
@@ -1735,9 +1734,8 @@ Token *tokenize_string(VirtualMachine *vm, char *name, char *contents) {
     remove_backslash_newline(p);
     convert_universal_chars(vm, p);
 
-    static int embedded_file_no;
-    File *file = new_file(vm, name, -(embedded_file_no + 1), p);
-    embedded_file_no++;
+    File *file = new_file(vm, name, -(vm->compiler.embedded_file_no + 1), p);
+    vm->compiler.embedded_file_no++;
 
     return tokenize(vm, file);
 }
