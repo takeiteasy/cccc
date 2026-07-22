@@ -1681,6 +1681,22 @@ static int fop_for_type(Type *ty, int f64_op) {
     }
 }
 
+// FREG_A0..A7 alias REG_A0..A7 by raw register number (regs[] and fregs[] are
+// separate storage, but share index numbers). Many gen_expr paths legitimately
+// reuse their destination register *number* as an integer scratch while
+// producing a float result -- deref/member address computation, int->float
+// cast source, ternary condition -- so evaluating a float call argument
+// directly into FREG_A0+i would let that integer scratch clobber a
+// live REG_A0+i already holding a marshalled argument (e.g. printf's format
+// pointer). Evaluate into a caller-saved temp-numbered float register instead:
+// its aliased integer slot is a free temp, never a live argument register.
+// Caller moves the result out (FR2R/emit_fmov3) and frees the temp. (#712)
+static int gen_flonum_arg_to_scratch(VirtualMachine *vm, Node *arg) {
+    int r = alloc_temp_reg();
+    gen_expr(vm, arg, r);
+    return r;
+}
+
 // Load operations based on type
 static void emit_bitint_trunc(VirtualMachine *vm, Type *ty, int reg);
 static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg);
@@ -4722,8 +4738,9 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 if (is_zero_size_aggregate(arg->ty)) {
                     gen_zero_size_arg(vm, arg, REG_T0);
                 } else if (is_flonum(arg->ty)) {
-                    gen_expr(vm, arg, FREG_A0);
-                    emit_rr(vm, fop_for_type(arg->ty, FR2R), REG_T0, FREG_A0);
+                    int fs = gen_flonum_arg_to_scratch(vm, arg);
+                    emit_rr(vm, fop_for_type(arg->ty, FR2R), REG_T0, fs);
+                    free_temp_reg(fs);
                 } else {
                     gen_expr(vm, arg, REG_T0);
                 }
@@ -4759,8 +4776,9 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 if (is_zero_size_aggregate(arg->ty)) {
                     gen_zero_size_arg(vm, arg, REG_A0 + i);
                 } else if (is_flonum(arg->ty)) {
-                    gen_expr(vm, arg, FREG_A0);
-                    emit_rr(vm, fop_for_type(arg->ty, FR2R), REG_A0 + i, FREG_A0);
+                    int fs = gen_flonum_arg_to_scratch(vm, arg);
+                    emit_rr(vm, fop_for_type(arg->ty, FR2R), REG_A0 + i, fs);
+                    free_temp_reg(fs);
                 } else {
                     gen_expr(vm, arg, REG_A0 + i);
                 }
@@ -4989,12 +5007,13 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     gen_zero_size_arg(vm, arg, REG_T0);
                     emit_psh3(vm, REG_T0);
                 } else if (is_flonum(arg->ty)) {
-                    // Float arg: evaluate to float reg, move bits to int reg,
-                    // push
-                    int freg = FREG_A0; // Use as scratch
-                    gen_expr(vm, arg, freg);
+                    // Float arg: evaluate to a temp-numbered float scratch (not
+                    // FREG_A0 -- see gen_flonum_arg_to_scratch, #712), move bits
+                    // to int reg, push
+                    int freg = gen_flonum_arg_to_scratch(vm, arg);
                     emit_rr(vm, fop_for_type(arg->ty, FR2R), REG_T0,
                             freg); // Move bits to REG_T0
+                    free_temp_reg(freg);
                     emit_psh3(vm, REG_T0);
                 } else {
                     // Integer/pointer arg: evaluate to temp reg, push
@@ -5057,19 +5076,24 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     // Variadic double: put in integer register (as bit pattern)
                     // ENT3 will spill REG_A* to stack; va_arg reads from stack
                     if (int_arg_idx < 8) {
-                        // Generate double value into a float reg, then move
-                        // bits to int reg
-                        int freg = FREG_A0; // Use FREG_A0 as scratch
-                        gen_expr(vm, arg, freg);
+                        // Generate double value into a temp-numbered float
+                        // scratch (not FREG_A0 -- see gen_flonum_arg_to_scratch,
+                        // #712), then move bits to int reg
+                        int freg = gen_flonum_arg_to_scratch(vm, arg);
                         // Move double bits from freg to int reg (bit-pattern,
                         // not conversion)
                         emit_rr(vm, FR2R, REG_A0 + int_arg_idx, freg);
+                        free_temp_reg(freg);
                         int_arg_idx++;
                     }
                 } else {
-                    // Fixed param double: put in float register
+                    // Fixed param double: evaluate into a temp-numbered float
+                    // scratch (#712), then move into place with FMOV3 (writes
+                    // only fregs[], can never clobber a live int arg register).
                     if (float_arg_idx < 8) {
-                        gen_expr(vm, arg, FREG_A0 + float_arg_idx);
+                        int freg = gen_flonum_arg_to_scratch(vm, arg);
+                        emit_fmov3(vm, FREG_A0 + float_arg_idx, freg);
+                        free_temp_reg(freg);
                         float_arg_is_f32[float_arg_idx] =
                             arg->ty->kind == TY_FLOAT;
                         float_arg_idx++;
@@ -5630,20 +5654,42 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // int nargs = 0;
         // for (Node *a = node->args; a; a = a->next) nargs++;
 
-        // Generate user arguments into A1-A7 (A0 is reserved for descriptor)
-        int arg_idx = 0;
+        // Generate user arguments into A1-A7 for ints, FREG_A0-A7 for floats.
+        // The descriptor occupies REG_A0 (int slot 0), so int args start at
+        // int_arg_idx=1; there is no float static-link, so float args start
+        // at float_arg_idx=0. This must match the independent int/float
+        // register counters ENT3 uses to spill incoming params (op_ENT3_fn,
+        // src/ops.c) -- a single combined "user args start at A1" counter
+        // applied to both register files (the previous scheme here) puts
+        // float args in the wrong FREG_A* slot as soon as a block takes both
+        // an int and a float parameter, or a float parameter at all, since
+        // ENT3 counts int and float params separately. Pre-existing bug,
+        // found and fixed alongside #712.
+        int int_arg_idx = 1;
+        int float_arg_idx = 0;
         for (Node *a = node->args; a; a = a->next) {
             add_type(vm, a);
-            int arg_reg = REG_A1 + arg_idx; // User args start at A1
-            if (arg_idx >= 7) {
-                error_tok(vm, a->tok, "too many block arguments");
-            }
             if (is_flonum(a->ty)) {
-                gen_expr(vm, a, FREG_A1 + arg_idx);
+                if (float_arg_idx >= 8) {
+                    error_tok(vm, a->tok, "too many block arguments");
+                }
+                // Evaluate into a temp-numbered float scratch, not
+                // FREG_A0+float_arg_idx directly -- see
+                // gen_flonum_arg_to_scratch (#712): a leading integer arg
+                // already placed in REG_A1+k could otherwise be clobbered by
+                // an integer scratch this expression's own codegen reuses
+                // (e.g. deref address, int->float cast source).
+                int fs = gen_flonum_arg_to_scratch(vm, a);
+                emit_fmov3(vm, FREG_A0 + float_arg_idx, fs);
+                free_temp_reg(fs);
+                float_arg_idx++;
             } else {
-                gen_expr(vm, a, arg_reg);
+                if (int_arg_idx >= 8) {
+                    error_tok(vm, a->tok, "too many block arguments");
+                }
+                gen_expr(vm, a, REG_A0 + int_arg_idx);
+                int_arg_idx++;
             }
-            arg_idx++;
         }
 
         // Load function pointer from descriptor[0]
