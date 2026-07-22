@@ -470,3 +470,71 @@ void test_object_size_reallocarray_const(void) {
     char *p = reallocarray(base, 4, 8);
     AssertEq((unsigned long long)__builtin_object_size(p, 0), 32ULL);
 }
+
+// ---------------------------------------------------------------------------
+// #697: interior heap pointers (`p + k`) written *inline* in the builtin's
+// argument.  Extends #642's deferred-query mechanism (not objsize_resolve_ptr
+// -- see resolve_objsize_queries) so `__builtin_object_size(p + k, type)`
+// resolves to `alloc_size - k` for an alloc-tracked, unpoisoned base pointer.
+// The intermediate-variable form (`char *q = p + k; __builtin_object_size(q,
+// ...)`) is a separate, larger dataflow problem and remains conservative --
+// tracked as a follow-up.
+// ---------------------------------------------------------------------------
+
+[[cccc::test]]
+void test_object_size_malloc_interior_type0(void) {
+    char *p = malloc(128);
+    // p + 32 -> 128 - 32 = 96 bytes remaining.
+    AssertEq((unsigned long long)__builtin_object_size(p + 32, 0), 96ULL);
+    AssertEq((unsigned long long)__builtin_object_size(p + 32, 1), 96ULL);
+    AssertEq((unsigned long long)__builtin_object_size(p + 32, 2), 96ULL);
+    AssertEq((unsigned long long)__builtin_object_size(p + 32, 3), 96ULL);
+}
+
+[[cccc::test]]
+void test_object_size_interior_zero_offset(void) {
+    // offset 0 must behave exactly like the bare-var case (128).
+    char *p = malloc(128);
+    AssertEq((unsigned long long)__builtin_object_size(p + 0, 0), 128ULL);
+}
+
+[[cccc::test]]
+void test_object_size_interior_cast(void) {
+    // Interior pointer through an intervening typed-pointer cast: 4 ints (16
+    // bytes) into a 64-byte allocation, cast back to char* -> 48 remaining.
+    char *p = malloc(64);
+    char *q = (char *)((int *)p + 4);
+    AssertEq((unsigned long long)__builtin_object_size(q, 0),
+             (unsigned long long)(size_t)-1); // intermediate var: still conservative
+    AssertEq((unsigned long long)__builtin_object_size((char *)((int *)p + 4), 0), 48ULL);
+}
+
+[[cccc::test]]
+void test_object_size_interior_custom_allocator(void) {
+    // Interior pointer into a buffer from an alloc_size-annotated custom
+    // allocator -- confirms this is attribute-driven, not name-based.
+    char *p = test_objsize_arena_alloc(96);
+    AssertEq((unsigned long long)__builtin_object_size(p + 16, 0), 80ULL);
+}
+
+[[cccc::test]]
+void test_object_size_interior_past_end_conservative(void) {
+    // Offset past the end of the allocation -> conservative fallback, not a
+    // clamp to 0 (unlike the statically-known array path).
+    char *p = malloc(128);
+    AssertEq((unsigned long long)__builtin_object_size(p + 200, 0),
+             (unsigned long long)(size_t)-1);
+    AssertEq((unsigned long long)__builtin_object_size(p + 200, 2), 0ULL);
+}
+
+[[cccc::test]]
+void test_object_size_interior_reassigned_conservative(void) {
+    // Soundness lock-in: the interior-pointer fold must ride the same
+    // deferred poison-scan path as the bare-var case (#642), not a parse-time
+    // fold in objsize_resolve_ptr -- otherwise this would incorrectly freeze
+    // at 96 despite the later reassignment.
+    char *p = malloc(128);
+    size_t sz = __builtin_object_size(p + 32, 0);
+    p = malloc(16);
+    AssertEq((unsigned long long)sz, (unsigned long long)(size_t)-1);
+}

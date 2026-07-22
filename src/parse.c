@@ -217,9 +217,15 @@ static bool objsize_resolve_lvalue(VirtualMachine *vm, Node *node, ObjSizeInfo *
 // function body has been parsed (see resolve_objsize_queries) so that a
 // reassignment or address-of appearing anywhere in the function — including
 // after the query textually, e.g. inside a loop back-edge — can poison it.
+// #697: `offset` is the compile-time-constant byte delta of an interior
+// pointer expression (`p + k`, peeled from the builtin argument at
+// registration time) into the tracked allocation; 0 for the original bare-var
+// case. `var`'s poisoning (reassignment/address-of) still governs the whole
+// query since the offset is measured from `var`'s own allocation.
 struct ObjSizeQuery {
     Node *node;   // the ND_NUM node to (maybe) upgrade with the real size
     Obj  *var;    // the tracked pointer variable
+    int   offset; // byte offset of the queried pointer into var's allocation
     struct ObjSizeQuery *next;
 };
 static bool objsize_alloc_from_call(VirtualMachine *vm, Node *rhs, int *out);
@@ -5088,8 +5094,17 @@ static void resolve_objsize_queries(VirtualMachine *vm, Node *body) {
     // resolve_objsize_queries call reads objsize_unsafe.
     objsize_poison_scan(body);
     for (struct ObjSizeQuery *q = vm->compiler.objsize_queries; q; q = q->next) {
-        if (!q->var->objsize_unsafe)
-            q->node->val = (int64_t)q->var->objsize_alloc;
+        if (q->var->objsize_unsafe)
+            continue;
+        // #697: subtract the interior-pointer offset (0 for a bare tracked
+        // var). Past-the-end (rem <= 0) leaves the node's pre-set
+        // conservative fallback untouched, rather than clamping to 0 like
+        // the statically-known array path (OBJSZ_REMAINING) does -- this
+        // matches the ticket's requested behavior for heap interior
+        // pointers specifically.
+        int rem = (int)q->var->objsize_alloc - q->offset;
+        if (rem > 0)
+            q->node->val = (int64_t)rem;
     }
     vm->compiler.objsize_queries = NULL;
 }
@@ -9446,15 +9461,38 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // is exactly what a same-function query would fall back to anyway
         // once reassigned.
         if (ptr->kind != ND_COND) {
+            // #697: peel casts *and* constant-offset ND_ADDs (interior
+            // pointers, e.g. `p + 32`, written inline in the builtin's
+            // argument) down to the base tracked var, accumulating the byte
+            // delta. The ADD's rhs is already byte-scaled by new_add(). Only
+            // a compile-time-constant offset qualifies; a non-constant
+            // offset (or an unresolvable base) simply skips registration,
+            // leaving the conservative fallback already stored in `node`.
+            // This is deliberately *not* done in objsize_resolve_ptr, which
+            // runs at parse time before objsize_unsafe can be poisoned by a
+            // later reassignment -- see resolve_objsize_queries.
             Node *p = ptr;
-            while (p->kind == ND_CAST)
-                p = p->lhs;
-            if (p->kind == ND_VAR && p->var && p->var->objsize_has_alloc &&
+            int64_t offset = 0;
+            bool offset_ok = true;
+            for (;;) {
+                if (p->kind == ND_CAST) {
+                    p = p->lhs;
+                } else if (p->kind == ND_ADD && is_const_expr(vm, p->rhs)) {
+                    offset += eval(vm, p->rhs);
+                    p = p->lhs;
+                } else {
+                    break;
+                }
+            }
+            if (offset < 0 || offset > INT_MAX)
+                offset_ok = false;
+            if (offset_ok && p->kind == ND_VAR && p->var && p->var->objsize_has_alloc &&
                 p->var->objsize_decl_fn == vm->compiler.current_fn) {
                 struct ObjSizeQuery *q = arena_alloc(&vm->compiler.parser_arena,
                                                       sizeof(struct ObjSizeQuery));
                 q->node = node;
                 q->var = p->var;
+                q->offset = (int)offset;
                 q->next = vm->compiler.objsize_queries;
                 vm->compiler.objsize_queries = q;
             }
