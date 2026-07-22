@@ -291,6 +291,7 @@ Forward dataflow analysis that tracks which registers are copies of other regist
 - Conditional branches (JZ3/JNZ3) flush the tracking table: the fall-through path continues correctly, but the pass cannot verify the taken-path is also dead-safe
 - Only tracks integer registers (FMOV3 and float-register copies are not propagated)
 - Opcodes that carry an immediate in their operand words rather than a register encoding (e.g. `AXCHG`/`ACAS`, which store a `width_enc` i64 there) require a dedicated sub-pass B arm to avoid misreading the immediate as a register number; each such opcode explicitly marks its implicit ABI-register uses and def instead of going through the generic decode
+- SIMD/vector opcodes (see `docs/VM.md#simd--vector-operations`) are treated as fully opaque (`op_has_vector_operand()`): their `rd`/`rs1`/`rs2` bytes mix a third register namespace (`vregs[]`) with real `freg`/`greg` operands per-opcode in ways this pass's two-map (int/float) model cannot express safely — copy facts touching any of their operand bytes are conservatively invalidated rather than substituted
 
 **Example:**
 ```c

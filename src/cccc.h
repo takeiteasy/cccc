@@ -292,7 +292,58 @@ extern "C" {
                       Reads AllocHeader.requested_size for VM heap allocations;    \
                       falls back to (size_t)-1 (type 0/1) or 0 (type 2/3) for    \
                       non-heap, freed, or unknown pointers.                        \
-                      Format: [DYNOBJSZ][rd:8|rs:8|unused:48][type:i64] */
+                      Format: [DYNOBJSZ][rd:8|rs:8|unused:48][type:i64] */          \
+    /* 128-bit SIMD vector registers (tracker #72/#463). The lane type is        \
+       carried by the opcode, mirroring the FADD3/FADD3_F32 scalar split; the    \
+       register itself (VReg) is a raw union. RRRS-encoded extract/insert put   \
+       the lane index in the "scale" field (see ENCODE_RRRS/DECODE_RRRS). */     \
+    X(VLDR, 1) /* vregs[rd] = 16 raw bytes at regs[rs] (unaligned-safe) */          \
+    X(VSTR, 1) /* 16 raw bytes at regs[rs] = vregs[rd] */                          \
+    X(VMOV3, 1) /* vregs[rd] = vregs[rs1] (full 128-bit copy) */                   \
+    X(VSPLAT_F64, 1) /* vregs[rd].f64[0..1] = fregs[rs1] */                        \
+    X(VSPLAT_F32, 1) /* vregs[rd].f32[0..3] = (float)fregs[rs1] */                 \
+    X(VSPLAT_I64, 1) /* vregs[rd].i64[0..1] = regs[rs1] */                         \
+    X(VSPLAT_I32, 1) /* vregs[rd].i32[0..3] = (int32_t)regs[rs1] */                \
+    X(VSPLAT_I16, 1) /* vregs[rd].i16[0..7] = (int16_t)regs[rs1] */                \
+    X(VSPLAT_I8,  1) /* vregs[rd].i8[0..15] = (int8_t)regs[rs1] */                 \
+    X(VEXTRACT_F64, 1) /* fregs[rd] = vregs[rs1].f64[lane] */                      \
+    X(VEXTRACT_F32, 1) /* fregs[rd] = (double)vregs[rs1].f32[lane] */              \
+    X(VEXTRACT_I64, 1) /* regs[rd] = vregs[rs1].i64[lane] */                       \
+    X(VEXTRACT_I32, 1) /* regs[rd] = (long long)vregs[rs1].i32[lane] */            \
+    X(VEXTRACT_I16, 1) /* regs[rd] = (long long)vregs[rs1].i16[lane] */            \
+    X(VEXTRACT_I8,  1) /* regs[rd] = (long long)vregs[rs1].i8[lane] */             \
+    X(VINSERT_F64, 1) /* vregs[rd].f64[lane] = fregs[rs1] */                       \
+    X(VINSERT_F32, 1) /* vregs[rd].f32[lane] = (float)fregs[rs1] */                \
+    X(VINSERT_I64, 1) /* vregs[rd].i64[lane] = regs[rs1] */                        \
+    X(VINSERT_I32, 1) /* vregs[rd].i32[lane] = (int32_t)regs[rs1] */               \
+    X(VINSERT_I16, 1) /* vregs[rd].i16[lane] = (int16_t)regs[rs1] */               \
+    X(VINSERT_I8,  1) /* vregs[rd].i8[lane] = (int8_t)regs[rs1] */                 \
+    X(VADD_F64X2, 1) /* vregs[rd].f64[i] = vregs[rs1].f64[i] + vregs[rs2].f64[i] */ \
+    X(VSUB_F64X2, 1) /* ditto, - */                                                \
+    X(VMUL_F64X2, 1) /* ditto, * */                                                \
+    X(VDIV_F64X2, 1) /* ditto, / */                                                \
+    X(VNEG_F64X2, 1) /* vregs[rd].f64[i] = -vregs[rs1].f64[i] */                   \
+    X(VADD_F32X4, 1) /* vregs[rd].f32[i] = vregs[rs1].f32[i] + vregs[rs2].f32[i] */ \
+    X(VSUB_F32X4, 1) /* ditto, - */                                                \
+    X(VMUL_F32X4, 1) /* ditto, * */                                                \
+    X(VDIV_F32X4, 1) /* ditto, / */                                                \
+    X(VNEG_F32X4, 1) /* vregs[rd].f32[i] = -vregs[rs1].f32[i] */                   \
+    X(VADD_I64X2, 1) /* vregs[rd].i64[i] = vregs[rs1].i64[i] + vregs[rs2].i64[i] */ \
+    X(VSUB_I64X2, 1) /* ditto, - */                                                \
+    X(VMUL_I64X2, 1) /* ditto, * */                                                \
+    X(VNEG_I64X2, 1) /* vregs[rd].i64[i] = -vregs[rs1].i64[i] */                   \
+    X(VADD_I32X4, 1) /* vregs[rd].i32[i] = vregs[rs1].i32[i] + vregs[rs2].i32[i] */ \
+    X(VSUB_I32X4, 1) /* ditto, - */                                                \
+    X(VMUL_I32X4, 1) /* ditto, * */                                                \
+    X(VNEG_I32X4, 1) /* vregs[rd].i32[i] = -vregs[rs1].i32[i] */                   \
+    X(VADD_I16X8, 1) /* vregs[rd].i16[i] = vregs[rs1].i16[i] + vregs[rs2].i16[i] */ \
+    X(VSUB_I16X8, 1) /* ditto, - */                                                \
+    X(VMUL_I16X8, 1) /* ditto, * */                                                \
+    X(VNEG_I16X8, 1) /* vregs[rd].i16[i] = -vregs[rs1].i16[i] */                   \
+    X(VADD_I8X16, 1) /* vregs[rd].i8[i] = vregs[rs1].i8[i] + vregs[rs2].i8[i] */    \
+    X(VSUB_I8X16, 1) /* ditto, - */                                                \
+    X(VMUL_I8X16, 1) /* ditto, * */                                                \
+    X(VNEG_I8X16, 1) /* vregs[rd].i8[i] = -vregs[rs1].i8[i] */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
@@ -705,6 +756,8 @@ typedef enum {
     TY_NULLPTR_T = 19, // C23 nullptr_t
     TY_BITINT = 20,    // C23 _BitInt(N), N in [1,256]; N>64 uses multi-word storage
     TY_AUTO = 21,      // C23 auto type-inference sentinel (never reaches codegen)
+    TY_VECTOR = 22,    // GNU __attribute__((vector_size(N))); base=element type,
+                       // vec_len=lane count, size=N bytes (tracker #72)
 } TypeKind;
 
 typedef struct Node Node;
@@ -763,6 +816,10 @@ struct Type {
     // Array
     int array_len;
     int static_min;   // [static N] minimum required elements; 0 = no constraint
+
+    // GNU vector_size vector (TY_VECTOR): lane count. `base` is the element
+    // type, `size` is the total byte size (element size * vec_len).
+    int vec_len;
 
     // Variable-length array
     Node *vla_len; // # of elements
@@ -1542,6 +1599,19 @@ typedef struct {
 typedef struct {
     double f64;
 } FReg;
+
+/* 128-bit SIMD vector register: a lane-type-agnostic raw container. The
+ * active lane view is determined entirely by which opcode touches it (mirrors
+ * the FReg design: the opcode carries the type, not the register). Backs
+ * GCC vector_size(N) types (tracker #72) and the autovectorizer (#463). */
+typedef union {
+    double   f64[2];
+    float    f32[4];
+    int64_t  i64[2];
+    int32_t  i32[4];
+    int16_t  i16[8];
+    int8_t   i8[16];
+} VReg;
 
 /*!
  @typedef AsmCallback
@@ -2441,7 +2511,8 @@ typedef struct Compiler {
 struct VirtualMachine {
     // VM Registers (pure register-based architecture)
     long long regs[32]; // General-purpose register file (NUM_REGS)
-    FReg fregs[32];  // Tagged floating-point register file
+    FReg fregs[32];  // Flat-double floating-point register file
+    VReg vregs[32];  // 128-bit SIMD vector register file (see tracker #72/#463)
     Pc pc;           // Program counter (instruction index)
     long long *bp;      // Base pointer (frame pointer)
     long long *sp;      // Stack pointer

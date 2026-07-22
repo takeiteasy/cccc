@@ -30,7 +30,9 @@ Key properties:
 | `r18–r25` | `REG_S0` … `REG_S7` | Callee-saved registers |
 | `r26–r31` | `REG_T5` … `REG_T10` | Caller-saved temporaries |
 
-The floating-point register file (`fregs[32]`) uses the **same indices** and stores a flat `double` per slot.  The frontend already emits type-specific opcodes (`FADD3` vs `FADD3_F32`, `FLDR` vs `FLDR_F32`), so the register itself carries no precision tag.  A `float` value is held as the `double` that results from rounding to float precision and then widening — which is exact — so any register can be read as a `double` with no per-access branch, and the `*_F32` opcodes round their result through `(float)` before the (exact) widening store.  SIMD/vector register state lives in a separate wide-register file rather than in `fregs`.
+The floating-point register file (`fregs[32]`) uses the **same indices** and stores a flat `double` per slot.  The frontend already emits type-specific opcodes (`FADD3` vs `FADD3_F32`, `FLDR` vs `FLDR_F32`), so the register itself carries no precision tag.  A `float` value is held as the `double` that results from rounding to float precision and then widening — which is exact — so any register can be read as a `double` with no per-access branch, and the `*_F32` opcodes round their result through `(float)` before the (exact) widening store.
+
+A third register file, `vregs[32]` (`VReg`, see [SIMD / Vector Operations](#simd--vector-operations)), holds 128-bit SIMD state — GNU `vector_size` values and (future) autovectorized loop temporaries. It is a raw lane-agnostic union; like `fregs`, the opcode determines the active lane view, not the register.
 
 ### Memory Segments
 
@@ -306,6 +308,32 @@ All `F*` opcodes operate on `fregs[]`.  Comparisons write a boolean into an inte
 | `R2FR` | Bit-pattern transfer `reg → freg` (f64) |
 | `FR2R_F32` | Bit-pattern transfer `freg → reg` (f32) |
 | `R2FR_F32` | Bit-pattern transfer `reg → freg` (f32) |
+
+### SIMD / Vector Operations
+
+128-bit vector opcodes operating on `vregs[]` (see [Register File](#register-file)). Introduced for GNU `__attribute__((vector_size(N)))` support (`COVERAGE.md`) and reserved as the shared substrate for a future interpreter autovectorizer. Only 16-byte (128-bit) vectors are supported today — `v2f64`/`v4f32`/`v2i64`/`v4i32`/`v8i16`/`v16i8` lane layouts. As with `F*` vs `F*_F32`, the opcode — not the register — carries the active lane type. `VLDR`/`VSTR` move the full 16 bytes with a byte-copy (no alignment fault on unaligned addresses); arithmetic reads/writes the lane view named by the opcode.
+
+| Opcode | Description |
+|--------|-------------|
+| `VLDR` | `vregs[rd] = *(v128*)regs[rs]` (16 raw bytes) |
+| `VSTR` | `*(v128*)regs[rs] = vregs[rd]` |
+| `VMOV3` | `vregs[rd] = vregs[rs1]` (full 128-bit copy) |
+| `VSPLAT_F64` / `VSPLAT_F32` | `vregs[rd].lane[i] = fregs[rs1]` for every lane (scalar broadcast from a float register) |
+| `VSPLAT_I64` / `VSPLAT_I32` / `VSPLAT_I16` / `VSPLAT_I8` | Same, broadcasting from an integer register |
+| `VEXTRACT_F64` / `VEXTRACT_F32` | `fregs[rd] = vregs[rs1].lane[imm]` — lane index is an immediate in the RRRS "scale" field |
+| `VEXTRACT_I64` / `VEXTRACT_I32` / `VEXTRACT_I16` / `VEXTRACT_I8` | Same, into an integer register |
+| `VINSERT_F64` / `VINSERT_F32` | `vregs[rd].lane[imm] = fregs[rs1]` |
+| `VINSERT_I64` / `VINSERT_I32` / `VINSERT_I16` / `VINSERT_I8` | Same, from an integer register |
+| `VADD_F64X2` … `VDIV_F64X2`, `VNEG_F64X2` | Per-lane `+ - * /` and unary negate, 2×f64 |
+| `VADD_F32X4` … `VDIV_F32X4`, `VNEG_F32X4` | Per-lane `+ - * /` and unary negate, 4×f32 |
+| `VADD_I64X2`, `VSUB_I64X2`, `VMUL_I64X2`, `VNEG_I64X2` | Per-lane `+ - *` and unary negate, 2×i64 (no `VDIV`: needs per-lane div-by-zero handling, not yet implemented) |
+| `VADD_I32X4`, `VSUB_I32X4`, `VMUL_I32X4`, `VNEG_I32X4` | Same, 4×i32 |
+| `VADD_I16X8`, `VSUB_I16X8`, `VMUL_I16X8`, `VNEG_I16X8` | Same, 8×i16 |
+| `VADD_I8X16`, `VSUB_I8X16`, `VMUL_I8X16`, `VNEG_I8X16` | Same, 16×i8 |
+
+**Frontend lowering (codegen.c `gen_vector_expr`).** A vector local/global lives in a 16-byte memory slot, exactly like a small struct — no frame-layout changes were needed beyond sizing the slot correctly (`assign_stack_offsets`/`var_stack_slots`). The *value* of a vector expression flows through a `vregs[]` index in `dest_reg`, mirroring how float-typed expressions flow through `fregs[]` even though float locals also live in memory: `VLDR`/`VSTR` move between the slot and a vreg around each operation. `v[i]` subscript is **not** lowered through `VEXTRACT`/`VINSERT` — it is intercepted at parse time (before array-decay pointer arithmetic, which would misinterpret the vector's `base` field) and rewritten to `*(elem_ty*)(&v + i)`, reusing ordinary scalar load/store and supporting a runtime-variable index for free. `VEXTRACT`/`VINSERT` remain reserved for the autovectorizer (horizontal reductions).
+
+**Optimizer interaction.** The bytecode optimizer's copy-propagation and dead-code passes (`optimize.c`, `-O3`+) generically decode instruction operand bytes as living in either the int or float register file. Vector opcodes introduce a third namespace (`vregs[]`) and mix it with real `freg`/`greg` operands in opcode-specific ways that model can't express safely — `op_has_vector_operand()` in `optimize.c` treats every vector opcode as opaque to those passes (never substituted, conservatively invalidated), at the cost of a missed optimization opportunity but never a miscompile. See `docs/OPTIMIZATION.md`.
 
 ### Type Conversion
 

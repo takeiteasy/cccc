@@ -122,6 +122,11 @@ bool is_numeric(Type *ty) {
     return is_integer(ty) || is_flonum(ty) || is_complex(ty);
 }
 
+bool is_vector(Type *ty) {
+    if (!ty) return false;
+    return ty->kind == TY_VECTOR;
+}
+
 bool is_error_type(Type *ty) {
     return ty && ty->kind == TY_ERROR;
 }
@@ -176,6 +181,8 @@ bool is_compatible(Type *t1, Type *t2) {
                    t1->bit_width == t2->bit_width;
         case TY_NULLPTR_T:
             return true;
+        case TY_VECTOR:
+            return t1->vec_len == t2->vec_len && is_compatible(t1->base, t2->base);
         default:
             return false;
     }
@@ -213,6 +220,19 @@ Type *array_of(VirtualMachine *vm, Type *base, int len) {
     Type *ty = new_type(vm, TY_ARRAY, sz, base->align);
     ty->base = base;
     ty->array_len = len;
+    return ty;
+}
+
+// GNU __attribute__((vector_size(N))) type: `base` must be an arithmetic
+// scalar (int/float family), `bytes` is the total vector byte size (must be
+// an exact multiple of base->size). Current VM substrate (tracker #72/#463)
+// is a single 128-bit vector register, so only 16-byte vectors are supported
+// for now; wider vectors are a follow-up. The caller is expected to have
+// already validated divisibility/size via vector_size_attr_check.
+Type *vector_of(VirtualMachine *vm, Type *base, int bytes) {
+    Type *ty = new_type(vm, TY_VECTOR, bytes, bytes);
+    ty->base = base;
+    ty->vec_len = bytes / base->size;
     return ty;
 }
 
@@ -307,6 +327,18 @@ static Type *get_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
         Type *base1 = is_complex(ty1) ? ty1->base : ty1;
         Type *base2 = is_complex(ty2) ? ty2->base : ty2;
         return complex_type_for(vm, get_common_type(vm, base1, base2));
+    }
+
+    // GNU vector_size vectors (tracker #72): must go before the `ty1->base`
+    // pointer-arithmetic check below, since a vector's `base` is its element
+    // type (mirroring array/pointer duality), not a pointee to decay to.
+    // vec op vec requires identical vector types (no per-lane promotion, no
+    // decay); vec op scalar broadcasts the scalar (the caller inserts the
+    // splat cast via usual_arith_conv -> new_cast -> ND_CAST).
+    if (is_vector(ty1) || is_vector(ty2)) {
+        if (is_vector(ty1) && is_vector(ty2))
+            return is_compatible(ty1, ty2) ? ty1 : ty_error;
+        return is_vector(ty1) ? ty1 : ty2;
     }
 
     // C23 nullptr_t vs. pointer (or function, which decays to a pointer):
@@ -586,6 +618,30 @@ void add_type(VirtualMachine *vm, Node *node) {
         case ND_BITAND:
         case ND_BITOR:
         case ND_BITXOR:
+            // GNU vector_size vectors (tracker #72): element-wise +,-,*,/
+            // and unary - are supported (see gen_vector_expr in codegen.c).
+            // %, &, |, ^ have no vector opcodes yet (follow-up), and integer
+            // lane division needs per-lane div-by-zero handling that isn't
+            // implemented (follow-up) -- reject clearly rather than silently
+            // miscompiling.
+            if (is_vector(node->lhs->ty) || is_vector(node->rhs->ty)) {
+                if (is_vector(node->lhs->ty) && is_vector(node->rhs->ty) &&
+                    !is_compatible(node->lhs->ty, node->rhs->ty))
+                    error_tok(vm, node->tok,
+                              "vector types do not match in binary expression");
+                if (node->kind == ND_MOD || node->kind == ND_BITAND ||
+                    node->kind == ND_BITOR || node->kind == ND_BITXOR)
+                    error_tok(vm, node->tok,
+                              "'%s' is not yet supported on vector types",
+                              node->kind == ND_MOD ? "%" :
+                              node->kind == ND_BITAND ? "&" :
+                              node->kind == ND_BITOR ? "|" : "^");
+                Type *elem = is_vector(node->lhs->ty) ? node->lhs->ty->base
+                                                       : node->rhs->ty->base;
+                if (node->kind == ND_DIV && is_integer(elem))
+                    error_tok(vm, node->tok,
+                              "integer vector division is not yet supported");
+            }
             usual_arith_conv(vm, &node->lhs, &node->rhs);
             node->ty = node->lhs->ty;
             return;
@@ -617,6 +673,19 @@ void add_type(VirtualMachine *vm, Node *node) {
                 }
                 error_tok(vm, node->lhs->tok, "cannot assign to const-qualified variable");
             }
+            // GCC vector_size vectors (tracker #72): matching real GCC/clang,
+            // a bare scalar cannot initialize or be assigned to a whole
+            // vector -- only an arithmetic operator broadcasts a scalar
+            // (`v + 5.0f`), which by this point has already produced a
+            // vector-typed rhs via usual_arith_conv. Reject the narrower
+            // "v = 5.0f" case explicitly so #72's semantics match upstream
+            // rather than silently diverging.
+            if (is_vector(node->lhs->ty) && node->rhs->ty &&
+                !is_vector(node->rhs->ty) && !is_error_type(node->rhs->ty))
+                error_tok(vm, node->tok,
+                          "cannot initialize/assign a vector type from a "
+                          "bare scalar; broadcast via an arithmetic operator "
+                          "instead (e.g. 'v + 5.0f')");
             if (node->lhs->ty->kind != TY_STRUCT && node->lhs->ty->kind != TY_UNION) {
                 warn_implicit_conversion(vm, node->rhs, node->lhs->ty, node->lhs->tok);
                 node->rhs = new_cast(vm, node->rhs, node->lhs->ty);

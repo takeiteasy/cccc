@@ -694,6 +694,7 @@ void vm_alloc_segments(VirtualMachine *vm) {
 void cccc_exec_state_save(VirtualMachine *vm, ExecState *state) {
     memcpy(state->regs, vm->regs, sizeof(state->regs));
     memcpy(state->fregs, vm->fregs, sizeof(state->fregs));
+    memcpy(state->vregs, vm->vregs, sizeof(state->vregs));
     state->pc = vm->pc;
     state->bp = vm->bp;
     state->sp = vm->sp;
@@ -711,6 +712,7 @@ void cccc_exec_state_save(VirtualMachine *vm, ExecState *state) {
 void cccc_exec_state_restore(VirtualMachine *vm, const ExecState *state) {
     memcpy(vm->regs, state->regs, sizeof(state->regs));
     memcpy(vm->fregs, state->fregs, sizeof(state->fregs));
+    memcpy(vm->vregs, state->vregs, sizeof(state->vregs));
     vm->pc = state->pc;
     vm->bp = state->bp;
     vm->sp = state->sp;
@@ -784,6 +786,7 @@ void cccc_exec_state_prepare_call(VirtualMachine *vm, ExecState *state, Pc entry
 
     memset(state->regs, 0, sizeof(state->regs));
     memset(state->fregs, 0, sizeof(state->fregs));
+    memset(state->vregs, 0, sizeof(state->vregs));
     state->pc = entry;
     state->cycle = 0;
     state->sp = (long long *)((char *)state->stack_seg + reserved_stack);

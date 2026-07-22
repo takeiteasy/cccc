@@ -115,6 +115,11 @@ typedef struct {
     bool is_constructor;
     bool is_destructor;
     int  init_priority; // CCCC_NO_INIT_PRIORITY if not explicitly given
+
+    // __attribute__((vector_size(N))) / [[gnu::vector_size(N)]] (tracker #72)
+    bool has_vector_size;
+    int  vector_size_bytes;
+    Token *vector_size_tok; // for diagnostics
 } VarAttr;
 
 struct CustomAttrUse {
@@ -5829,6 +5834,13 @@ static Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
     if (is_numeric(lhs->ty) && is_numeric(rhs->ty))
         return new_binary(vm, ND_ADD, lhs, rhs, tok);
 
+    // vec + vec / vec + scalar (element-wise; GNU vector extension,
+    // tracker #72). Must come before the `->base` pointer checks below: a
+    // vector's `base` is its element type (array/pointer-duality field),
+    // not something to decay through pointer arithmetic.
+    if (is_vector(lhs->ty) || is_vector(rhs->ty))
+        return new_binary(vm, ND_ADD, lhs, rhs, tok);
+
     if (lhs->ty->base && rhs->ty->base)
         error_tok(vm, tok, "cannot add two pointers");
 
@@ -5883,6 +5895,11 @@ static Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
 
     // num - num
     if (is_numeric(lhs->ty) && is_numeric(rhs->ty))
+        return new_binary(vm, ND_SUB, lhs, rhs, tok);
+
+    // vec - vec / vec - scalar (element-wise; GNU vector extension,
+    // tracker #72). See the matching comment in new_add() above.
+    if (is_vector(lhs->ty) || is_vector(rhs->ty))
         return new_binary(vm, ND_SUB, lhs, rhs, tok);
 
     if (!lhs->ty->base)
@@ -6546,8 +6563,34 @@ static Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr
                   !attr->nonnull_all && !attr->nonnull_mask &&
                   !attr->returns_nonnull && !attr->is_constructor &&
                   !attr->is_destructor && !attr->is_sentinel &&
-                  !attr->alloc_size_idx && !attr->is_malloc))
+                  !attr->alloc_size_idx && !attr->is_malloc &&
+                  !attr->has_vector_size))
         return ty;
+
+    // __attribute__((vector_size(N))) rewrites the whole type (base scalar
+    // -> TY_VECTOR), so handle it before the generic copy_type()+field-merge
+    // below, which assumes `ty` keeps its original kind.
+    if (attr->has_vector_size) {
+        int bytes = attr->vector_size_bytes;
+        bool elem_size_ok = ty->size == 1 || ty->size == 2 ||
+                            ty->size == 4 || ty->size == 8;
+        if ((!is_integer(ty) && !is_flonum(ty)) || !elem_size_ok)
+            error_tok(vm, attr->vector_size_tok,
+                      "'vector_size' attribute applies only to 1/2/4/8-byte "
+                      "integer or floating-point scalar types");
+        else if (bytes <= 0 || bytes % ty->size != 0)
+            error_tok(vm, attr->vector_size_tok,
+                      "vector_size %d is not a positive multiple of the "
+                      "element size (%d)", bytes, ty->size);
+        else if (bytes != (int)sizeof(VReg))
+            error_tok(vm, attr->vector_size_tok,
+                      "vector_size %d is not supported: only %d-byte "
+                      "(128-bit) vectors are currently supported", bytes,
+                      (int)sizeof(VReg));
+        else
+            ty = vector_of(vm, ty, bytes);
+    }
+
     ty = copy_type(vm, ty);
     apply_semantic_attr(ty, NULL, attr->attribute_tok, attr->is_maybe_unused,
                         attr->is_deprecated, attr->is_nodiscard,
@@ -6733,6 +6776,28 @@ static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *
             if (consume(vm, &tok, tok, "designated_init")) {
                 if (ty)
                     ty->designated_init = true;
+                continue;
+            }
+
+            // Handle vector_size attribute: __attribute__((vector_size(N)))
+            // rewrites the base scalar type into a TY_VECTOR of N bytes
+            // (tracker #72). This only makes sense in declarator-suffix
+            // position (e.g. `typedef float v4sf __attribute__((vector_size(16)))`),
+            // which routes types through VarAttr -> apply_var_attrs_to_type
+            // (ty is NULL here); there is no meaningful struct/union-body
+            // use, so the `ty`-direct path is intentionally not handled.
+            if (consume(vm, &tok, tok, "vector_size")) {
+                tok = skip(vm, tok, "(");
+                int bytes = const_expr(vm, &tok, tok);
+                tok = skip(vm, tok, ")");
+                if (attr) {
+                    attr->has_vector_size = true;
+                    attr->vector_size_bytes = bytes;
+                    attr->vector_size_tok = attr_tok;
+                } else if (ty) {
+                    warn_tok(vm, attr_tok, CCCC_WARN_ATTRIBUTES,
+                             "'vector_size' ignored in this context");
+                }
                 continue;
             }
 
@@ -7264,6 +7329,24 @@ static Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
                 continue;
             }
 
+            // [[gnu::vector_size(N)]] (tracker #72) -- same semantics as the
+            // GNU-syntax handler in attribute_list(); only meaningful in
+            // declarator-suffix position (attr non-NULL).
+            if (gnu_scoped && equal(name_tok, "vector_size")) {
+                tok = skip(vm, tok, "(");
+                int bytes = const_expr(vm, &tok, tok);
+                tok = skip(vm, tok, ")");
+                if (attr) {
+                    attr->has_vector_size = true;
+                    attr->vector_size_bytes = bytes;
+                    attr->vector_size_tok = attr_tok;
+                } else if (ty) {
+                    warn_tok(vm, attr_tok, CCCC_WARN_ATTRIBUTES,
+                             "'vector_size' ignored in this context");
+                }
+                continue;
+            }
+
             // [[gnu::malloc]] (#649) -- informational, see the GNU-syntax
             // handler above for the full rationale.
             if (equal(name_tok, "malloc")) {
@@ -7730,6 +7813,26 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
                 }
             } else {
                 tok = tok->next;
+            }
+
+            // GNU vector_size subscript (tracker #72): v[i] reads/writes a
+            // lane. Unlike arrays, a vector type's `base` is its element
+            // type but the vector itself does NOT decay to a pointer (it's
+            // a register/memory-slot value, not addressable-by-default the
+            // way an array is) -- so this must be intercepted before
+            // new_add(), which would otherwise mis-treat vec->base as
+            // pointer arithmetic. Lower to element address: &v, cast to
+            // element-pointer, then ordinary pointer-offset + deref (this
+            // supports a runtime-variable index for free, and reuses the
+            // scalar load/store path -- no vector opcode needed here).
+            add_type(vm, node);
+            if (node->ty && is_vector(node->ty)) {
+                Type *elem_ty = node->ty->base;
+                Node *addr = new_unary(vm, ND_ADDR, node, start);
+                addr = new_cast(vm, addr, pointer_to(vm, elem_ty));
+                node = new_unary(vm, ND_DEREF,
+                                 new_add(vm, addr, idx, start), start);
+                continue;
             }
 
             node =

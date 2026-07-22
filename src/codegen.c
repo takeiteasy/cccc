@@ -1292,7 +1292,7 @@ static int var_stack_slots(Obj *var) {
     if (var->ty->kind == TY_ARRAY)
         return (var->ty->size + 7) / 8;
     if (var->ty->kind == TY_STRUCT || var->ty->kind == TY_UNION ||
-        var->ty->kind == TY_COMPLEX)
+        var->ty->kind == TY_COMPLEX || var->ty->kind == TY_VECTOR)
         return (var->ty->size + 7) / 8;
     return 1;
 }
@@ -3232,6 +3232,136 @@ static void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg, int i
     error_tok(vm, node->tok, "unsupported complex expression");
 }
 
+// ========== GNU vector_size Expressions (tracker #72) ==========
+//
+// A vector local/global lives in a 16-byte-aligned memory slot, exactly like
+// a small struct (gen_addr() already handles this generically -- no frame-
+// layout changes needed). The *value* of a vector expression, however,
+// flows through a vreg index in dest_reg, mirroring how FReg-typed
+// expressions flow through fregs[] even though float locals also live in
+// memory: VLDR/VSTR move between the slot and a vreg around each operation.
+//
+// Deliberately out of scope for this cut (see follow-up tickets): vector
+// args/returns (pass via memory like structs -- not wired yet), runtime-
+// variable-index subscript as an *rvalue* (named-variable subscript already
+// works via ordinary scalar load/store -- see the `[` postfix parse site),
+// %, &, |, ^ on vectors (no opcodes yet), integer lane division (needs
+// per-lane div-by-zero handling).
+
+typedef enum { VLANE_F64, VLANE_F32, VLANE_I64, VLANE_I32, VLANE_I16, VLANE_I8 } VecLaneFamily;
+
+static VecLaneFamily vector_lane_family(Type *elem) {
+    if (is_flonum(elem))
+        return elem->kind == TY_FLOAT ? VLANE_F32 : VLANE_F64;
+    switch (elem->size) {
+    case 1:  return VLANE_I8;
+    case 2:  return VLANE_I16;
+    case 4:  return VLANE_I32;
+    default: return VLANE_I64;
+    }
+}
+
+static int vector_binop_for(NodeKind kind, VecLaneFamily fam) {
+    static const int table[6][4] = {
+        // ADD              SUB              MUL              DIV
+        { VADD_F64X2,  VSUB_F64X2,  VMUL_F64X2,  VDIV_F64X2 }, // VLANE_F64
+        { VADD_F32X4,  VSUB_F32X4,  VMUL_F32X4,  VDIV_F32X4 }, // VLANE_F32
+        { VADD_I64X2,  VSUB_I64X2,  VMUL_I64X2,  -1 },         // VLANE_I64
+        { VADD_I32X4,  VSUB_I32X4,  VMUL_I32X4,  -1 },         // VLANE_I32
+        { VADD_I16X8,  VSUB_I16X8,  VMUL_I16X8,  -1 },         // VLANE_I16
+        { VADD_I8X16,  VSUB_I8X16,  VMUL_I8X16,  -1 },         // VLANE_I8
+    };
+    int col = kind == ND_ADD ? 0 : kind == ND_SUB ? 1 : kind == ND_MUL ? 2 : 3;
+    int op = table[fam][col];
+    if (op < 0)
+        error("codegen: unsupported vector binary op (should have been "
+              "rejected in add_type)");
+    return op;
+}
+
+static int vector_negop_for(VecLaneFamily fam) {
+    static const int table[6] = { VNEG_F64X2, VNEG_F32X4, VNEG_I64X2,
+                                   VNEG_I32X4, VNEG_I16X8, VNEG_I8X16 };
+    return table[fam];
+}
+
+static int vector_splatop_for(VecLaneFamily fam) {
+    static const int table[6] = { VSPLAT_F64, VSPLAT_F32, VSPLAT_I64,
+                                   VSPLAT_I32, VSPLAT_I16, VSPLAT_I8 };
+    return table[fam];
+}
+
+static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg);
+
+static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
+    switch (node->kind) {
+    case ND_VAR:
+    case ND_DEREF:
+    case ND_MEMBER: {
+        // Vector lvalue read: address, then a full-width load.
+        int r_addr = alloc_temp_reg();
+        gen_addr(vm, node, r_addr);
+        emit_rr(vm, VLDR, dest_reg, r_addr);
+        free_temp_reg(r_addr);
+        return;
+    }
+    case ND_ASSIGN: {
+        int r_val = dest_reg == REG_ZERO ? alloc_temp_reg() : dest_reg;
+        gen_expr(vm, node->rhs, r_val);
+        mark_temp_reg_used(r_val);
+        int r_addr = alloc_temp_reg();
+        gen_addr(vm, node->lhs, r_addr);
+        emit_rr(vm, VSTR, r_val, r_addr);
+        free_temp_reg(r_addr);
+        if (dest_reg == REG_ZERO)
+            free_temp_reg(r_val);
+        return;
+    }
+    case ND_ADD: case ND_SUB: case ND_MUL: case ND_DIV: {
+        // usual_arith_conv() already cast both operands to this node's
+        // (vector) type, so both sides are vector-valued here.
+        VecLaneFamily fam = vector_lane_family(node->ty->base);
+        int r_lhs = alloc_temp_reg();
+        gen_expr(vm, node->lhs, r_lhs);
+        mark_temp_reg_used(r_lhs);
+        int r_rhs = alloc_temp_reg();
+        gen_expr(vm, node->rhs, r_rhs);
+        emit_rrr(vm, vector_binop_for(node->kind, fam), dest_reg, r_lhs, r_rhs);
+        free_temp_reg(r_rhs);
+        free_temp_reg(r_lhs);
+        return;
+    }
+    case ND_NEG: {
+        VecLaneFamily fam = vector_lane_family(node->ty->base);
+        int r_src = alloc_temp_reg();
+        gen_expr(vm, node->lhs, r_src);
+        emit_rr(vm, vector_negop_for(fam), dest_reg, r_src);
+        free_temp_reg(r_src);
+        return;
+    }
+    case ND_CAST: {
+        if (is_vector(node->lhs->ty)) {
+            // Identity cast (usual_arith_conv casts a same-type vector
+            // operand to the common type, which is itself). No conversion
+            // needed -- just materialize the source value into dest_reg.
+            gen_expr(vm, node->lhs, dest_reg);
+            return;
+        }
+        // Scalar -> vector: broadcast to every lane (the `vec + scalar`
+        // broadcast semantics; also reachable via a bare scalar assigned to
+        // a vector variable).
+        VecLaneFamily fam = vector_lane_family(node->ty->base);
+        int r_scalar = alloc_temp_reg();
+        gen_expr(vm, node->lhs, r_scalar);
+        emit_rr(vm, vector_splatop_for(fam), dest_reg, r_scalar);
+        free_temp_reg(r_scalar);
+        return;
+    }
+    default:
+        error_tok(vm, node->tok, "unsupported vector expression");
+    }
+}
+
 // ========== Expression Generation ==========
 
 // Generate code for expression, result in dest_reg (integer) or dest_freg
@@ -3239,6 +3369,11 @@ static void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg, int i
 static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
     if (!node) {
         error("codegen: null expression node");
+    }
+
+    if (is_vector(node->ty)) {
+        gen_vector_expr(vm, node, dest_reg);
+        return;
     }
 
     if (is_complex(node->ty)) {
@@ -6364,6 +6499,7 @@ static int assign_stack_offsets(VirtualMachine *vm, Obj *fn) {
             } else if (var->ty->kind == TY_STRUCT ||
                        var->ty->kind == TY_UNION ||
                        var->ty->kind == TY_COMPLEX ||
+                       var->ty->kind == TY_VECTOR ||
                        (var->ty->kind == TY_BITINT && var->ty->size > 8)) {
                 var_size = (var->ty->size + 7) / 8;
             }

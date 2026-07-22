@@ -286,6 +286,22 @@ static inline void cccc_freg_set_raw_f32(VirtualMachine *vm, int reg, int bits) 
     cccc_freg_set_f32(vm, reg, conv.f);
 }
 
+/* 128-bit vector register accessors. The register itself is a raw union
+ * (see VReg in cccc.h); the opcode carries the lane type, mirroring the
+ * FReg design above. Loads/stores move the full 16 bytes; arithmetic reads
+ * and writes the lane view named by the opcode. */
+static inline void cccc_vreg_load(VirtualMachine *vm, int reg, const void *src) {
+    memcpy(&vm->vregs[reg], src, sizeof(VReg));
+}
+
+static inline void cccc_vreg_store(VirtualMachine *vm, int reg, void *dst) {
+    memcpy(dst, &vm->vregs[reg], sizeof(VReg));
+}
+
+static inline VReg *cccc_vreg(VirtualMachine *vm, int reg) {
+    return &vm->vregs[reg];
+}
+
 static inline int cc_opcode_operand_words(int op) {
     static const int operand_words[] = {
 #define X(NAME, OPERANDS) [NAME] = OPERANDS,
@@ -427,12 +443,14 @@ extern Type *ty_error;
 bool is_integer(Type *ty);
 bool is_complex(Type *ty);
 bool is_numeric(Type *ty);
+bool is_vector(Type *ty);
 bool is_error_type(Type *ty);
 bool is_compatible(Type *t1, Type *t2);
 Type *copy_type(VirtualMachine *vm, Type *ty);
 Type *pointer_to(VirtualMachine *vm, Type *base);
 Type *func_type(VirtualMachine *vm, Type *return_ty);
 Type *array_of(VirtualMachine *vm, Type *base, int size);
+Type *vector_of(VirtualMachine *vm, Type *base, int bytes);
 Type *vla_of(VirtualMachine *vm, Type *base, Node *expr);
 Type *enum_type(VirtualMachine *vm);
 Type *struct_type(VirtualMachine *vm);
@@ -621,6 +639,7 @@ void cc_vm_profile_reset(VirtualMachine *vm);
 typedef struct ExecState {
     long long regs[32];
     FReg fregs[32];
+    VReg vregs[32];
     Pc pc;
     long long *bp;
     long long *sp;

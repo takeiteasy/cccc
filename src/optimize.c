@@ -1240,6 +1240,43 @@ static bool op_operand_word_is_immediate(int op) {
     }
 }
 
+// SIMD/vector opcodes (tracker #72/#463): the generic rd/rs1/rs2 = byte0/1/2
+// decode below assumes every operand register lives in either the int
+// register file (regs[]) or the float register file (fregs[]) -- copy_of[]
+// and fcopy_of[] only model those two. Vector opcodes introduce a THIRD
+// namespace (vregs[]) that neither map tracks, and several of them mix
+// namespaces per-operand in ways op_is_float_src()'s single "all sources are
+// float, or all are int" split cannot express (e.g. VSPLAT_F64: rd is a
+// vreg, rs1 is a real freg; VADD_F64X2: rd/rs1/rs2 are all vregs, none of
+// them real registers at all). Applying the generic decode to these
+// mis-selects the copy map for real-register operands (verified: without
+// this guard, `-O3` corrupts VSPLAT_F64's freg source, per the register-
+// aliasing hazard already documented for AXCHG/ACAS at #497 and CALL targets
+// above) and would corrupt vreg operands outright by treating them as
+// int-register copy-propagation targets. Treat all of them as fully opaque
+// to this pass -- same tradeoff as an unrecognized opcode, at the cost of a
+// missed optimization opportunity, never a miscompile.
+static bool op_has_vector_operand(int op) {
+    switch (op) {
+    case VLDR: case VSTR: case VMOV3:
+    case VSPLAT_F64: case VSPLAT_F32: case VSPLAT_I64: case VSPLAT_I32:
+    case VSPLAT_I16: case VSPLAT_I8:
+    case VEXTRACT_F64: case VEXTRACT_F32: case VEXTRACT_I64: case VEXTRACT_I32:
+    case VEXTRACT_I16: case VEXTRACT_I8:
+    case VINSERT_F64: case VINSERT_F32: case VINSERT_I64: case VINSERT_I32:
+    case VINSERT_I16: case VINSERT_I8:
+    case VADD_F64X2: case VSUB_F64X2: case VMUL_F64X2: case VDIV_F64X2: case VNEG_F64X2:
+    case VADD_F32X4: case VSUB_F32X4: case VMUL_F32X4: case VDIV_F32X4: case VNEG_F32X4:
+    case VADD_I64X2: case VSUB_I64X2: case VMUL_I64X2: case VNEG_I64X2:
+    case VADD_I32X4: case VSUB_I32X4: case VMUL_I32X4: case VNEG_I32X4:
+    case VADD_I16X8: case VSUB_I16X8: case VMUL_I16X8: case VNEG_I16X8:
+    case VADD_I8X16: case VSUB_I8X16: case VMUL_I8X16: case VNEG_I8X16:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
     if (!vm || !vm->text_seg || !vm->text_ptr)
         return;
@@ -1363,6 +1400,33 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
                 break;
 
             default:
+                // Vector opcodes (tracker #72/#463): never substitute (their
+                // rd/rs1/rs2 mix a third vreg namespace with real registers
+                // in ways this pass's two-map model can't express safely —
+                // see op_has_vector_operand()'s comment), but DO
+                // conservatively invalidate any copy fact touching every
+                // byte of the operand word, in EITHER map. Skipping the
+                // invalidation too (as substitution is skipped) would let a
+                // later instruction substitute a stale register number for
+                // one a vector op just redefined (e.g. VEXTRACT_* writes a
+                // real freg/greg destination in byte 0) -- this can only
+                // forgo an optimization, never propagate a stale value.
+                if (size >= 2 && op_has_vector_operand(op)) {
+                    InstrWord w = vm->text_seg[pc + 1];
+                    int bytes3[3] = { (int)(w & 0xFF), (int)((w >> 8) & 0xFF),
+                                      (int)((w >> 16) & 0xFF) };
+                    for (int bi = 0; bi < 3; bi++) {
+                        int r = bytes3[bi];
+                        if (r > REG_ZERO && r < NUM_REGS) {
+                            copy_of[r] = fcopy_of[r] = -1;
+                            for (int i = 1; i < NUM_REGS; i++) {
+                                if (copy_of[i]  == r) copy_of[i]  = -1;
+                                if (fcopy_of[i] == r) fcopy_of[i] = -1;
+                            }
+                        }
+                    }
+                    break;
+                }
                 // Substitute rs1 (byte 1) and rs2 (byte 2) of the operand word
                 // using the appropriate copy map, then kill the destination
                 // register (byte 0).  Applies to all sizes — byte 3 (scale /
@@ -1554,6 +1618,22 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
                 MARK_INT_USE(REG_A2);
             KILL_INT_DEF(REG_A0);
 
+        } else if (op_has_vector_operand(op)) {
+            // Vector opcodes (tracker #72/#463): byte 1/2 mix vreg indices
+            // with real freg/greg operands in ways op_is_float_src()'s
+            // single all-float-or-all-int split cannot express (see the
+            // op_has_vector_operand() comment above). Mark both bytes as
+            // BOTH an int and a float use -- a safe over-approximation that
+            // can only suppress an optimization, never misclassify a live
+            // MOV3/FMOV3 as dead -- and never treat byte 0 as a def (it is
+            // a vreg index for every one of these opcodes today).
+            if (size >= 2) {
+                InstrWord w = vm->text_seg[pc + 1];
+                int rs1 = (int)((w >> 8) & 0xFF);
+                int rs2 = (int)((w >> 16) & 0xFF);
+                MARK_INT_USE(rs1);   MARK_INT_USE(rs2);
+                MARK_FLOAT_USE(rs1); MARK_FLOAT_USE(rs2);
+            }
         } else {
             if (size >= 2 && !op_operand_word_is_immediate(op)) {
                 InstrWord w = vm->text_seg[pc + 1];
@@ -1719,7 +1799,14 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
                     // rs (byte 1) is the float source.
                     if (rs1_2 > REG_ZERO && rs1_2 < NUM_REGS)
                         use_count[rs1_2]++;
-                } else if (op_is_float_src(op2)) {
+                } else if (op_is_float_src(op2) || op_has_vector_operand(op2)) {
+                    // Vector opcodes are included here too: e.g. VSPLAT_F64's
+                    // rs1 (byte 1) is a genuine freg source even though the
+                    // opcode is excluded from op_is_float_src() (see
+                    // op_has_vector_operand()'s comment) -- without this, a
+                    // freg only ever read by a VSPLAT/VINSERT would look
+                    // globally unused and the FMOV3 feeding it would be
+                    // wrongly eliminated as dead.
                     if (rs1_2 > REG_ZERO && rs1_2 < NUM_REGS)
                         use_count[rs1_2]++;
                     if (rs2_2 > REG_ZERO && rs2_2 < NUM_REGS)
