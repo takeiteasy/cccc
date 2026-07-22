@@ -613,6 +613,53 @@ static void frame_epoch_pop(VirtualMachine *vm) {
     hashmap_delete_int(&vm->live_epochs, (long long)epoch);
 }
 
+// Pop this activation's epoch iff it pushed one (#703). Since #703 makes
+// ENT3's push conditional (only frames that own an escaping local/param push
+// at all), a teardown path can no longer assume the top frame_epochs entry
+// belongs to the frame currently unwinding -- LEV3/CALLT run on *every*
+// return, pushing or not. frame_epochs.bps[] is monotonic (deeper calls
+// pushed later, at higher indices, with strictly smaller bp -- stack grows
+// down), so the top entry belongs to this activation iff its bp matches
+// exactly; a non-pushing frame simply isn't in the array and this is a
+// no-op for it. This is the self-synchronizing analog of #673's original
+// "frame_epochs depth == live saved-bp chain depth" tripwire, adapted so it
+// still holds when not every frame pushes.
+static inline void frame_epoch_pop_if_owner(VirtualMachine *vm) {
+    // Always-on O(1) guard: the top entry, if any, can never belong to a
+    // shallower (larger-bp) frame than the one currently unwinding -- that
+    // would mean some teardown path failed to pop an inner frame's epoch.
+    assert(vm->frame_epochs.count == 0 ||
+           vm->frame_epochs.bps[vm->frame_epochs.count - 1] >= vm->bp);
+#ifndef NDEBUG
+    // Strong check: frame_epochs must be an in-order subsequence of the live
+    // saved-bp chain (same bounded walk/bounds check as op_RETADDR_fn) --
+    // every pushed entry must correspond to some frame still on the real
+    // call stack, in the same order. A mismatch means frame_epochs desynced
+    // from the real call stack (the #669-style bug #673's design must
+    // avoid). Walked here (rather than unconditionally, as #673 originally
+    // did) because it costs O(chain depth) per return; the O(1) guard above
+    // catches the same class of desync cheaply for release builds.
+    {
+        int ei = vm->frame_epochs.count - 1;
+        for (long long *frame = vm->bp;
+             ei >= 0 && frame >= vm->sp && frame < vm->initial_sp;) {
+            if (vm->frame_epochs.bps[ei] == frame)
+                ei--;
+            long long *next = (long long *)frame[0];
+            if (next < vm->sp || next >= vm->initial_sp)
+                break;
+            frame = next;
+        }
+        assert(ei < 0 &&
+               "frame_epochs is not a subsequence of the live saved-bp "
+               "chain (#703)");
+    }
+#endif
+    if (vm->frame_epochs.count > 0 &&
+        vm->frame_epochs.bps[vm->frame_epochs.count - 1] == vm->bp)
+        frame_epoch_pop(vm);
+}
+
 // Pop every frame above (and not equal to) new_bp -- used by longjmp, which
 // can unwind several frames at once. The target frame (bp == new_bp) stays.
 static void frame_epoch_truncate_to(VirtualMachine *vm, long long *new_bp) {
@@ -633,6 +680,15 @@ static inline int op_ENT3_fn(VirtualMachine *vm) {
     int stack_size = (int)(operands & 0xFFFFFFFF);
     int spill_param_count = (int)((operands >> 32) & 0xFFFFFFFF);
     unsigned long long masks = (unsigned long long)cc_read_i64(vm);
+    // Bit 31 of each half carries #703's lazy epoch-push flags, not a param
+    // mask bit (register params are capped at 8) -- pull those out first,
+    // then mask them off so float_param_mask/f32_param_mask below only ever
+    // see real param bits.
+    bool push_epoch_agg = (masks & (unsigned long long)ENT3_PUSH_EPOCH_AGG) != 0;
+    bool push_epoch_scalar =
+        (masks & (((unsigned long long)ENT3_PUSH_EPOCH_SCALAR) << 32)) != 0;
+    masks &= ~((unsigned long long)ENT3_PUSH_EPOCH_AGG |
+               (((unsigned long long)ENT3_PUSH_EPOCH_SCALAR) << 32));
     unsigned int float_param_mask = (unsigned int)(masks & 0xFFFFFFFFu);
     unsigned int f32_param_mask = (unsigned int)(masks >> 32);
 
@@ -646,12 +702,26 @@ static inline int op_ENT3_fn(VirtualMachine *vm) {
     vm->bp = vm->sp;
 
     // Assign this activation a fresh liveness epoch (#673, and #648 for
-    // DYNOBJSZ stack-buffer sizing). Recorded unconditionally -- not just for
-    // pointers that escape -- because over-recording is harmless (a
-    // non-escaping &local just matches its own still-live frame at deref)
-    // while under-recording via escape analysis is exactly how the removed
-    // #669 design produced false positives.
-    if (stack_extents_enabled(vm))
+    // DYNOBJSZ stack-buffer sizing) -- but only when this function's body
+    // actually needs one (#703). Only STKTAG and a recording LEA3 ever read
+    // the *current top* epoch (frame_epochs.epochs[count-1]), and both are
+    // emitted (via emit_lea3_var) only for a local/param whose address
+    // escapes -- so a frame with no such local contributes nothing to
+    // liveness and can skip the push/pop entirely. This is a pure recording
+    // optimization, not a correctness relaxation, in the same spirit as
+    // #676's LEA3-recording prune: under-recording *what gets pushed* is
+    // safe here because push/pop stay self-synchronized on vm->bp (see
+    // op_LEV3_fn/op_CALLT_fn) -- unlike #669's mistake of under-recording
+    // *liveness itself*.
+    //
+    // ENT3_PUSH_EPOCH_AGG covers an escaping aggregate (STKTAG) and is
+    // needed in both --dangling-detection and dynobjsz-only mode.
+    // ENT3_PUSH_EPOCH_SCALAR covers an escaping scalar's recorded LEA3,
+    // which op_LEA3_fn itself only performs under CCCC_DANGLING_DETECT, so
+    // it's only checked in that mode here.
+    if (stack_extents_enabled(vm) &&
+        (push_epoch_agg ||
+         (push_epoch_scalar && (vm->flags & CCCC_DANGLING_DETECT))))
         frame_epoch_push(vm, vm->bp, ++vm->frame_epoch_counter);
 
     // Allocate space for local variables AND parameters
@@ -743,25 +813,10 @@ static inline int op_LEV3_fn(VirtualMachine *vm) {
         }
     }
 
-    // Retire this activation's liveness epoch (#673, #648) before the bp
-    // that identifies it is overwritten below.
-    if (stack_extents_enabled(vm)) {
-        // Tripwire: frame_epochs depth must match the live saved-bp chain
-        // depth (same bounded walk/bounds check as op_RETADDR_fn) before we
-        // pop. A mismatch means some teardown path failed to keep
-        // frame_epochs/live_epochs in sync with the real call stack -- the
-        // #669-style desync #673's design must avoid.
-        int chain_depth = 0;
-        for (long long *frame = vm->bp; frame >= vm->sp && frame < vm->initial_sp;) {
-            chain_depth++;
-            long long *next = (long long *)frame[0];
-            if (next < vm->sp || next >= vm->initial_sp)
-                break;
-            frame = next;
-        }
-        assert(chain_depth == vm->frame_epochs.count);
-        frame_epoch_pop(vm);
-    }
+    // Retire this activation's liveness epoch, if it pushed one (#673, #648,
+    // #703), before the bp that identifies it is overwritten below.
+    if (stack_extents_enabled(vm))
+        frame_epoch_pop_if_owner(vm);
 
     // Restore old base pointer
     vm->bp = (long long *)*vm->sp++;
@@ -2165,10 +2220,11 @@ static inline int op_CALLT_fn(VirtualMachine *vm) {
         }
     }
 
-    // Retire this activation's liveness epoch (#673, #648). The tail-callee's
-    // own ENT3 will push a fresh one; nothing here should stay live under it.
+    // Retire this activation's liveness epoch, if it pushed one (#673, #648,
+    // #703). The tail-callee's own ENT3 will push a fresh one if it needs
+    // one; nothing here should stay live under it.
     if (stack_extents_enabled(vm))
-        frame_epoch_pop(vm);
+        frame_epoch_pop_if_owner(vm);
 
     vm->bp = (long long *)*vm->sp++;
 

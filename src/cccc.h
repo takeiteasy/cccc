@@ -2352,6 +2352,16 @@ typedef struct Compiler {
     int ent3_base_stack;    // Original stack_size before inlining additions
     int ent3_extra_stack;   // Additional stack slots from inlined locals
 
+    // ENT3 masks patching for lazy frame-epoch activation (#703). Tracked
+    // while generating one function's body: set by emit_lea3_var whenever it
+    // emits a recorded LEA3/STKTAG for an escaping local or param of that
+    // function, then OR'd into the ENT3 masks word (bits 31 of each half,
+    // beyond the param-count-capped float/f32 masks) once the body is done.
+    // See ENT3_PUSH_EPOCH_AGG/SCALAR in internal.h and op_ENT3_fn.
+    Pc ent3_masks_loc;      // PC of ENT3 masks word (for patching)
+    bool frame_has_esc_agg;    // body emits STKTAG for an escaping aggregate
+    bool frame_has_esc_scalar; // body emits a recorded LEA3 for an escaping scalar
+
     // Scalar local promotion (#249). Active only while generating one function.
     // Capped at 4 slots (REG_S0-S3) to leave S4-S7 for the restrict cache.
     Obj *promoted_locals[4];

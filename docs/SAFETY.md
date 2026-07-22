@@ -404,6 +404,23 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
     its own, independently of `-1`/`-2`/`-3` — see [VM.md](VM.md)'s
     `DYNOBJSZ`/`STKTAG` opcode rows and [COVERAGE.md](COVERAGE.md)'s
     `__builtin_dynamic_object_size` entry.
+  - **Lazy per-function push (#703):** activation is scoped to the functions
+    that actually need it, not every call in the program. `ENT3` pushes a
+    frame epoch only when that function's own body emits `STKTAG` (an
+    escaping aggregate local/param) or a recorded `LEA3` (an escaping
+    scalar, under `--dangling-pointers`) — the only two consumers of the
+    *current top* epoch. A function with no escaping local/param of its own
+    (the common case — plain wrapper/leaf functions) pushes nothing and is
+    simply absent from `frame_epochs` for its entire activation; `LEV3`/
+    `CALLT` retire an epoch only when the top entry's saved `bp` matches the
+    frame currently unwinding, so this is self-synchronizing and needs no
+    per-frame flag on the teardown side. This means a program that uses
+    `__builtin_dynamic_object_size` sparingly (e.g. one `FORTIFY`-style
+    wrapper) in an otherwise call-heavy program pays the epoch push/pop cost
+    only in the functions on the path to that wrapper's escaping buffer, not
+    on every call in the program — the same shape of win #676 made for
+    `LEA3` recording, but for the `ENT3`/`LEV3` push/pop itself. See
+    [VM.md](VM.md)'s "Lazy per-function activation" note.
   - Recording is pruned to addresses that provably *escape* their creating
     frame (#676) — a post-parse pass (`mark_addr_escapes` in `src/parse.c`)
     marks a local's `Obj.addr_escapes` when its address (or an array/struct

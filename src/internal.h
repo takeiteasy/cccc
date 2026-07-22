@@ -161,6 +161,19 @@
 // when codegen has proven the address never escapes its creating frame.
 #define LEA3_NO_RECORD ((InstrWord)(1 << 8))
 
+// ENT3 masks-word flags (#703): float_param_mask/f32_param_mask only ever
+// set bits 0-7 (register params are capped at 8, see gen_function), so bit
+// 31 of each half is free. Set by codegen (patched post-body, mirroring the
+// existing ent3_stack_loc patch) when this function's body proved it needs
+// its own frame-epoch pushed -- ENT3_PUSH_EPOCH_AGG when it emits STKTAG for
+// an escaping aggregate local/param (needed in both --dangling-detection and
+// dynobjsz-only mode), ENT3_PUSH_EPOCH_SCALAR when it emits a recorded LEA3
+// for an escaping scalar (needed only under --dangling-detection, since
+// op_LEA3_fn's stack_ptr_epochs recording is itself gated on that flag).
+// See op_ENT3_fn.
+#define ENT3_PUSH_EPOCH_AGG    ((InstrWord)(1u << 31))
+#define ENT3_PUSH_EPOCH_SCALAR ((InstrWord)(1u << 31))
+
 static inline uint64_t cc_make_u64(InstrWord lo, InstrWord hi) {
     return (uint64_t)lo | ((uint64_t)hi << 32);
 }

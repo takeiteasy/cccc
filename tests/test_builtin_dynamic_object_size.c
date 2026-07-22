@@ -27,7 +27,12 @@
 // the creating frame's epoch; DYNOBJSZ stabs that table and trusts the
 // match only while its frame's epoch is still live.  Using this builtin at
 // all (regardless of --dangling-detection) is what activates the epoch/
-// interval bookkeeping needed for this path.
+// interval bookkeeping needed for this path -- but only for the functions
+// that actually need it: a function's ENT3 pushes its own frame epoch only
+// when its body emits STKTAG (an escaping aggregate local/param) or a
+// recorded LEA3 (an escaping scalar, under --dangling-detection); a frame
+// with no escaping local/param of its own pushes nothing and is simply
+// absent from vm->frame_epochs for its entire activation.
 //
 // Conservative fallback: freed pointers, out-of-bounds interior pointers
 // (past requested_size, e.g. into alignment padding), dangling pointers into
@@ -432,6 +437,74 @@ void test_dynobj_stack_recursion_activation(void) {
     AssertEq((unsigned long long)recurse_and_size(20), 8ULL);
 }
 
+// ---------------------------------------------------------------------------
+// #703: lazy per-function frame-epoch activation. A function's ENT3 now
+// pushes a frame epoch only when its own body emits STKTAG (an escaping
+// aggregate local/param) or a recorded LEA3 (an escaping scalar, under
+// --dangling-detection) -- not unconditionally for every call once DYNOBJSZ
+// is present anywhere. A frame that pushes nothing simply isn't in
+// vm->frame_epochs; op_LEV3_fn's bp-matched pop then no-ops for it. These
+// lock that behavior directly: an escaping struct *parameter* (which lives
+// on fn->params, not fn->locals -- the case a locals-only scan would have
+// missed), and a call chain mixing pushing and non-pushing frames.
+// ---------------------------------------------------------------------------
+
+typedef struct { int a[4]; } DynobjParamStruct;
+
+// s is a parameter of this function, not a local -- its address escaping
+// here (via struct_obj_size(&s), an ND_FUNCALL argument) must still mark
+// s->addr_escapes and emit STKTAG for it, and this function's ENT3 must
+// push its own epoch as a result.
+static size_t escaping_param_size(DynobjParamStruct s) {
+    return struct_obj_size(&s);
+}
+
+[[cccc::test]]
+void test_dynobj_escaping_aggregate_param(void) {
+    DynobjParamStruct s = {{1, 2, 3, 4}};
+    size_t sz = escaping_param_size(s);
+    AssertEq((unsigned long long)sz, (unsigned long long)sizeof(DynobjParamStruct));
+}
+
+// Plain pass-through wrappers: none takes the address of any local/param of
+// its own, so none of them emits STKTAG or a recorded LEA3 -- none pushes a
+// frame epoch (#703). The escaping buffer's *owner* frame (whichever caller
+// actually took &buf) is what the DYNOBJSZ resolution inside chain_c relies
+// on staying live; the non-pushing frames in between are simply absent from
+// vm->frame_epochs throughout.
+static size_t chain_a(void *p);
+static size_t chain_b(void *p);
+static size_t chain_c(void *p);
+
+static size_t chain_a(void *p) { return chain_b(p); }
+static size_t chain_b(void *p) { return chain_c(p); }
+static size_t chain_c(void *p) { return __builtin_dynamic_object_size(p, 0); }
+
+[[cccc::test]]
+void test_dynobj_mixed_chain_owner_alive(void) {
+    char buf[12];
+    // buf's address escapes into chain_a -- this test function's frame
+    // pushes an epoch; chain_a/b/c push none of their own.
+    size_t sz = chain_a(buf);
+    AssertEq((unsigned long long)sz, 12ULL);
+}
+
+static char *chain_owner_returns(void) {
+    char buf[12];
+    (void)chain_a(buf); // buf's frame pushes; chain_a/b/c do not
+    return buf;         // now dangling -- its owner frame is about to retire
+}
+
+[[cccc::test]]
+void test_dynobj_mixed_chain_owner_stale_conservative(void) {
+    char *p = chain_owner_returns();
+    // The owner frame (chain_owner_returns) has returned and its epoch
+    // retired; a stale match must be rejected even though the intermediate
+    // non-pushing frames (chain_a/b/c) never touched live_epochs at all.
+    size_t sz = __builtin_dynamic_object_size(p, 0);
+    AssertEq((unsigned long long)sz, (unsigned long long)(size_t)-1);
+}
+
 #include <setjmp.h>
 
 static jmp_buf dynobj_jmp_env;
@@ -460,4 +533,31 @@ void test_dynobj_stack_longjmp_activation(void) {
     // exactly the unwound frames and left this one's epoch live.
     size_t sz = param_obj_size(buf);
     AssertEq((unsigned long long)sz, 32ULL);
+}
+
+// #703: the same multi-frame longjmp, but with non-pushing wrapper frames
+// (no address-of-local of their own) interleaved between the pushing ones.
+// frame_epoch_truncate_to is bp-driven, so it must unwind exactly the
+// pushing frames it finds among them (dynobj_jmp_leaf) and land cleanly on
+// the setjmp frame, without needing every intermediate frame to have pushed.
+static jmp_buf dynobj_jmp_env2;
+
+static void dynobj_jmp_leaf(void) {
+    char buf[8];
+    (void)param_obj_size(buf); // this frame pushes (owns an escaping local)
+    longjmp(dynobj_jmp_env2, 1);
+}
+
+static void dynobj_jmp_wrapper2(void) { dynobj_jmp_leaf(); }
+static void dynobj_jmp_wrapper1(void) { dynobj_jmp_wrapper2(); }
+
+[[cccc::test]]
+void test_dynobj_longjmp_across_nonpushing_frames(void) {
+    char buf[40];
+    if (setjmp(dynobj_jmp_env2) == 0) {
+        dynobj_jmp_wrapper1();
+        Assert(0); // unreachable
+    }
+    size_t sz = param_obj_size(buf);
+    AssertEq((unsigned long long)sz, 40ULL);
 }

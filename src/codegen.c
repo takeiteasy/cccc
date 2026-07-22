@@ -1610,12 +1610,25 @@ static Pc emit_stktag(VirtualMachine *vm, long long offset, long long size) {
 // recorded address) can still be resolved back to this base's epoch at
 // CHKP3 time. Scalars need no interior resolution -- their one address is
 // already covered exactly by stack_ptr_epochs.
+//
+// Also records, on vm->compiler, whether the *current function* needs its
+// own frame epoch pushed (#703): STKTAG for an escaping aggregate, or a
+// recorded LEA3 for an escaping scalar. gen_function patches these into the
+// ENT3 masks word once the body is done. Deliberately keyed off what this
+// function actually emits (params included, via the same emit_lea3_var
+// path) rather than a fn->locals-only pre-scan, which would miss an
+// escaping aggregate *parameter*.
 static Pc emit_lea3_var(VirtualMachine *vm, int rd, Obj *var) {
-    Pc pc = emit_lea3_ex(vm, rd, var->offset, !var->addr_escapes);
-    if (var->addr_escapes &&
+    bool escaping_agg = var->addr_escapes &&
         (var->ty->kind == TY_ARRAY || var->ty->kind == TY_STRUCT ||
-         var->ty->kind == TY_UNION))
+         var->ty->kind == TY_UNION);
+    Pc pc = emit_lea3_ex(vm, rd, var->offset, !var->addr_escapes);
+    if (escaping_agg) {
         emit_stktag(vm, var->offset, var->ty->size);
+        vm->compiler.frame_has_esc_agg = true;
+    } else if (var->addr_escapes) {
+        vm->compiler.frame_has_esc_scalar = true;
+    }
     return pc;
 }
 
@@ -6391,6 +6404,10 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     vm->compiler.inline_exit_name = NULL;
     vm->compiler.ent3_extra_stack = 0;
 
+    // Reset lazy frame-epoch tracking for this function (#703).
+    vm->compiler.frame_has_esc_agg = false;
+    vm->compiler.frame_has_esc_scalar = false;
+
     // Reset label tracking for this function
     reset_labels();
 
@@ -6459,7 +6476,7 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
         (long long)float_param_mask | ((long long)f32_param_mask << 32);
     emit(vm, ENT3);
     vm->compiler.ent3_stack_loc = emit_i64(vm, ent3_operand);
-    emit_i64(vm, ent3_masks);
+    vm->compiler.ent3_masks_loc = emit_i64(vm, ent3_masks);
     vm->compiler.ent3_base_stack = stack_size;
     vm->compiler.ent3_extra_stack = 0;
 
@@ -6510,6 +6527,20 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
             ((long long)new_stack) | (((long long)spill_param_count) << 32);
         vm->text_seg[vm->compiler.ent3_stack_loc] = cc_i64_lo(new_operand);
         vm->text_seg[vm->compiler.ent3_stack_loc + 1] = cc_i64_hi(new_operand);
+    }
+
+    // Patch ENT3 masks with lazy frame-epoch push bits (#703), now that the
+    // whole body has been generated and emit_lea3_var has recorded whether
+    // this function owns an escaping local/param.
+    if (vm->compiler.frame_has_esc_agg || vm->compiler.frame_has_esc_scalar) {
+        long long new_masks =
+            (long long)float_param_mask | ((long long)f32_param_mask << 32);
+        if (vm->compiler.frame_has_esc_agg)
+            new_masks |= (long long)ENT3_PUSH_EPOCH_AGG;
+        if (vm->compiler.frame_has_esc_scalar)
+            new_masks |= ((long long)ENT3_PUSH_EPOCH_SCALAR << 32);
+        vm->text_seg[vm->compiler.ent3_masks_loc] = cc_i64_lo(new_masks);
+        vm->text_seg[vm->compiler.ent3_masks_loc + 1] = cc_i64_hi(new_masks);
     }
 
     // Patch all forward jumps (break/continue/goto)
