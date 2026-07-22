@@ -1840,12 +1840,20 @@ static char *format_relative_path(VirtualMachine *vm, char *base_file, char *fil
 //   the SDK copies use compiler builtins that do not match.
 // - stdbool.h / stddef.h / stdint.h / inttypes.h: CCCC's versions are
 //   authoritative for the built-in boolean and integer types it exposes.
+// - complex.h: creal/cimag/CMPLX etc. lower to CCCC-specific __cccc_* builtins
+//   rather than the real complex-argument-passing ABI a genuine SDK copy
+//   expects, so a real SDK complex.h compiles but silently miscodegens.
+// - stdatomic.h / stdckdint.h: atomic_load/atomic_store/ckd_add etc. lower to
+//   CCCC-specific __builtin_atomic_*/__builtin_*_overflow VM builtins, not a
+//   real hosted implementation, so a real SDK copy would silently miscodegen
+//   the same way.
 //
 // These are never overridden even when --use-system-headers is active.
 static bool is_compiler_owned_header(const char *name) {
     static const char *owned[] = {
         "stdarg.h", "setjmp.h",
         "stdbool.h", "stddef.h", "stdint.h", "inttypes.h",
+        "complex.h", "stdatomic.h", "stdckdint.h",
         NULL,
     };
     for (int i = 0; owned[i]; i++)

@@ -1069,6 +1069,9 @@ is active:
 | `stddef.h` | Authoritative `ptrdiff_t`, `size_t`, `nullptr_t` definitions |
 | `stdint.h` | Authoritative fixed-width integer types |
 | `inttypes.h` | Companion to `stdint.h` |
+| `complex.h` | `creal`/`cimag`/`CMPLX` etc. lower to CCCC's `__cccc_*` builtins, not real `_Complex`-argument-passing ABI |
+| `stdatomic.h` | `atomic_load`/`atomic_store`/`atomic_fetch_*` lower to CCCC's `__builtin_atomic_*` VM builtins |
+| `stdckdint.h` | `ckd_add`/`ckd_sub`/`ckd_mul` lower to CCCC's checked-arithmetic VM builtins |
 
 ### Pragma suppression in system-header mode
 
