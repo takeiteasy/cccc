@@ -9,17 +9,30 @@
 // array, constant-offset chain) the result is computed at compile time
 // (identical to __builtin_object_size).
 //
-// Runtime path: uses the VM heap (-V / --vm-heap) so that malloc/calloc/
-// realloc are routed through the MALC/CALC/REALC opcodes which write an
-// AllocHeader before each allocation and record the base address in
+// Runtime path, heap: uses the VM heap (-V / --vm-heap) so that malloc/
+// calloc/realloc are routed through the MALC/CALC/REALC opcodes which write
+// an AllocHeader before each allocation and record the base address in
 // vm->sorted_allocs.  DYNOBJSZ binary-searches sorted_allocs for the
 // allocation containing the pointer (base or interior) and returns
-// AllocHeader.requested_size - offset.
+// AllocHeader.requested_size - offset.  alloca()/VLA buffers also resolve
+// through this path: both lower to MALC (a VM heap bump allocation), so they
+// carry a full AllocHeader with no separate mechanism needed (#648).
 //
-// Conservative fallback: function-parameter stack pointers, freed pointers,
-// out-of-bounds interior pointers (past requested_size, e.g. into alignment
-// padding), and non-VM-heap pointers all return (size_t)-1 (type 0/1) or 0
-// (type 2/3).
+// Runtime path, stack: fixed-size stack arrays/structs/unions whose address
+// escapes (e.g. passed through a function parameter, so the pointer's
+// provenance is opaque by the time DYNOBJSZ sees it) resolve via
+// vm->stack_intervals, the stack analogue of sorted_allocs (#675, extended
+// by #648). The compiler emits STKTAG right after any escaping aggregate
+// local's address is materialized, recording [base, base+size) tagged with
+// the creating frame's epoch; DYNOBJSZ stabs that table and trusts the
+// match only while its frame's epoch is still live.  Using this builtin at
+// all (regardless of --dangling-detection) is what activates the epoch/
+// interval bookkeeping needed for this path.
+//
+// Conservative fallback: freed pointers, out-of-bounds interior pointers
+// (past requested_size, e.g. into alignment padding), dangling pointers into
+// a stack frame that has already returned, and any other pointer with no
+// resolvable provenance all return (size_t)-1 (type 0/1) or 0 (type 2/3).
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -154,13 +167,15 @@ void test_dynobj_heap_reallocarray(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Conservative fallback for unknown / non-base-heap pointers.
-// These do not require --vm-heap: the fallback path fires for any pointer
-// that is not a base pointer into the VM heap.
+// Runtime stack path (#648): a fixed-size stack array whose address escapes
+// through a function parameter resolves via vm->stack_intervals (STKTAG),
+// not the conservative fallback -- the escaping local's extent was tagged
+// with its creating frame's epoch, and that frame is still live here.
+// These do not require --vm-heap: the stack path is independent of it.
 // ---------------------------------------------------------------------------
 
-// Helper: function-parameter pointer has no statically-known backing object
-// and is a stack address (not in the VM heap) → conservative fallback.
+// Helper: function-parameter pointer has no statically-known backing object,
+// so this exercises the runtime path rather than the compile-time fold.
 static size_t param_obj_size(void *dst) {
     return __builtin_dynamic_object_size(dst, 0);
 }
@@ -168,10 +183,11 @@ static size_t param_obj_size(void *dst) {
 [[cccc::test]]
 void test_dynobj_param_ptr_type0(void) {
     char buf[8];
-    // Stack address passed through a function parameter.
-    // DYNOBJSZ: not in VM heap → conservative max (size_t)-1.
+    // Stack address passed through a function parameter. Not in the VM
+    // heap, but buf's [base, base+8) extent is tracked in stack_intervals
+    // (STKTAG) and buf's frame is still live → resolves to the real size.
     size_t sz = param_obj_size(buf);
-    AssertEq((unsigned long long)sz, (unsigned long long)(size_t)-1);
+    AssertEq((unsigned long long)sz, 8ULL);
 }
 
 static size_t param_obj_size_type2(void *dst) {
@@ -181,9 +197,11 @@ static size_t param_obj_size_type2(void *dst) {
 [[cccc::test]]
 void test_dynobj_param_ptr_type2(void) {
     char buf[8];
-    // type 2 conservative min fallback = 0
+    // type 2 (min fallback 0 on failure) still resolves to the real size
+    // when the stack path succeeds -- the fallback direction only matters
+    // for pointers DYNOBJSZ cannot resolve at all.
     size_t sz = param_obj_size_type2(buf);
-    AssertEq((unsigned long long)sz, 0ULL);
+    AssertEq((unsigned long long)sz, 8ULL);
 }
 
 // ---------------------------------------------------------------------------
@@ -298,4 +316,148 @@ void test_dynobj_fortify_style_heap(void) {
     AssertEq(dst[0], 'h');
     AssertEq(dst[4], 'o');
     free(dst);
+}
+
+// ---------------------------------------------------------------------------
+// alloca()/VLA buffers (#648 follow-up to #640). Both lower to MALC (a VM
+// heap bump allocation with a full AllocHeader), so they resolve through the
+// same sorted_allocs path as malloc -- no new mechanism, just a regression
+// lock proving it. No --vm-heap needed: MALC always carries an AllocHeader.
+// ---------------------------------------------------------------------------
+
+[[cccc::test]]
+void test_dynobj_alloca_base_and_interior(void) {
+    char *p = __builtin_alloca(20);
+    AssertEq((unsigned long long)__builtin_dynamic_object_size(p, 0), 20ULL);
+    AssertEq((unsigned long long)__builtin_dynamic_object_size(p + 5, 0), 15ULL);
+}
+
+[[cccc::test]]
+void test_dynobj_alloca_type2(void) {
+    char *p = __builtin_alloca(20);
+    // type 2 (min fallback 0) still resolves to the real size when the
+    // pointer is found -- the fallback direction only matters on a miss.
+    AssertEq((unsigned long long)__builtin_dynamic_object_size(p, 2), 20ULL);
+}
+
+static size_t vla_dynobjsize(int n) {
+    char buf[n]; // VLA -- lowered to alloca(vla_size)
+    return __builtin_dynamic_object_size(buf, 0);
+}
+
+static size_t vla_dynobjsize_interior(int n, int k) {
+    char buf[n];
+    return __builtin_dynamic_object_size(buf + k, 0);
+}
+
+[[cccc::test]]
+void test_dynobj_vla_base_and_interior(void) {
+    AssertEq((unsigned long long)vla_dynobjsize(10), 10ULL);
+    AssertEq((unsigned long long)vla_dynobjsize_interior(10, 3), 7ULL);
+}
+
+// ---------------------------------------------------------------------------
+// Escaping fixed-size stack aggregates (#648): resolved via
+// vm->stack_intervals (STKTAG), not sorted_allocs -- these are real stack
+// memory, never routed through MALC.
+// ---------------------------------------------------------------------------
+
+typedef struct { int a[4]; } DynobjStruct16;
+
+static size_t struct_obj_size(void *dst) {
+    return __builtin_dynamic_object_size(dst, 0);
+}
+
+[[cccc::test]]
+void test_dynobj_stack_struct_via_param(void) {
+    DynobjStruct16 s;
+    size_t sz = struct_obj_size(&s);
+    AssertEq((unsigned long long)sz, (unsigned long long)sizeof(DynobjStruct16));
+}
+
+// A pointer into a frame that has already returned must NOT resolve to a
+// stale size: stack_intervals retains dead-frame entries (addresses are
+// reused, never pruned, #675), so DYNOBJSZ must reject a match whose epoch
+// is no longer in vm->live_epochs and fall back to conservative.
+static char *dangling_stack_ptr(void) {
+    char buf[24];
+    return buf; // returning address of a local -- the pointer outlives it
+}
+
+[[cccc::test]]
+void test_dynobj_stack_dangling_conservative(void) {
+    char *p = dangling_stack_ptr();
+    size_t sz = __builtin_dynamic_object_size(p, 0);
+    AssertEq((unsigned long long)sz, (unsigned long long)(size_t)-1);
+}
+
+// ---------------------------------------------------------------------------
+// Activation without --dangling-detection (#648): using the builtin at all
+// turns on the same frame_epochs/stack_intervals bookkeeping #673/#675 use,
+// independently of -1/-2/-3. These exercise that mode specifically (no
+// CCCC_FLAGS safety level set) through recursion and a multi-frame longjmp,
+// to prove ENT3/LEV3 push/pop stays symmetric and the LEV3 tripwire
+// (chain_depth == frame_epochs.count) holds when this is the only consumer.
+// ---------------------------------------------------------------------------
+
+// Routed through param_obj_size (declared above) rather than calling
+// __builtin_dynamic_object_size(buf, 0) directly: a directly-named local
+// array statically folds (same resolver __builtin_object_size uses) and
+// never reaches the DYNOBJSZ opcode at all. Passing through an opaque
+// pointer parameter is what forces the runtime stack path.
+//
+// The base case deliberately assigns param_obj_size(buf)'s result to a local
+// before returning it, rather than `return param_obj_size(buf);` directly:
+// that tail-call shape lets the optimizer lower it to CALLT, which retires
+// *this* frame's epoch before the callee runs (correct: TCO hands this
+// frame's stack memory to the callee immediately, so a still-live epoch
+// here would be a lie -- see docs/SAFETY.md's #675 interval note). A
+// non-tail-call keeps this frame nested and its epoch live for the
+// duration of the call, which is what this test means to exercise.
+static size_t recurse_and_size(int depth) {
+    char buf[8];
+    if (depth == 0) {
+        size_t sz = param_obj_size(buf);
+        return sz;
+    }
+    size_t inner = recurse_and_size(depth - 1);
+    // Also size this frame's own buffer on the way back out, after several
+    // inner frames have pushed and popped their epochs.
+    size_t mine = param_obj_size(buf);
+    return (mine == 8 && inner == 8) ? 8 : 0;
+}
+
+[[cccc::test]]
+void test_dynobj_stack_recursion_activation(void) {
+    AssertEq((unsigned long long)recurse_and_size(20), 8ULL);
+}
+
+#include <setjmp.h>
+
+static jmp_buf dynobj_jmp_env;
+
+static void dynobj_jmp_level3(void) {
+    char buf[8];
+    (void)param_obj_size(buf); // opaque call -- forces the runtime path
+    longjmp(dynobj_jmp_env, 1); // unwinds level3 + level2 in one jump
+}
+
+static void dynobj_jmp_level2(void) {
+    char buf[16];
+    (void)param_obj_size(buf);
+    dynobj_jmp_level3();
+}
+
+[[cccc::test]]
+void test_dynobj_stack_longjmp_activation(void) {
+    char buf[32];
+    if (setjmp(dynobj_jmp_env) == 0) {
+        dynobj_jmp_level2();
+        Assert(0); // unreachable
+    }
+    // Back in the test function after the multi-frame unwind. buf must
+    // still resolve correctly -- proves frame_epoch_truncate_to retired
+    // exactly the unwound frames and left this one's epoch live.
+    size_t sz = param_obj_size(buf);
+    AssertEq((unsigned long long)sz, 32ULL);
 }

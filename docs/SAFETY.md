@@ -394,6 +394,16 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
     block-granular — a `&local` whose *block* (not function) has exited
     while the frame is still alive is `CHKL`'s job, not this check's (see
     `--stack-instrumentation` below)
+  - **Second consumer (#648):** the epoch/interval bookkeeping above
+    (`frame_epochs`, `live_epochs`, `stack_intervals`) is not exclusive to
+    `--dangling-pointers` — `__builtin_dynamic_object_size` also stabs
+    `stack_intervals` (via `DYNOBJSZ`) to size an escaping fixed-size stack
+    array/struct/union reached through an opaque pointer, using the exact
+    same max-epoch resolution and live-epoch trust check as layer 3 above.
+    Using that builtin anywhere in the program activates this bookkeeping on
+    its own, independently of `-1`/`-2`/`-3` — see [VM.md](VM.md)'s
+    `DYNOBJSZ`/`STKTAG` opcode rows and [COVERAGE.md](COVERAGE.md)'s
+    `__builtin_dynamic_object_size` entry.
   - Recording is pruned to addresses that provably *escape* their creating
     frame (#676) — a post-parse pass (`mark_addr_escapes` in `src/parse.c`)
     marks a local's `Obj.addr_escapes` when its address (or an array/struct

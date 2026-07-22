@@ -2484,7 +2484,22 @@ struct VirtualMachine {
     // vs AllocHeader.generation) but for stack frames: each activation gets a
     // monotonic epoch at ENT3; every `&local` (LEA3) records the creating
     // frame's epoch; CHKP3 flags a deref iff that epoch is no longer live.
-    // Only touched when CCCC_DANGLING_DETECT is set.
+    //
+    // Population (ENT3/LEV3 push/pop, STKTAG recording, longjmp truncate) is
+    // gated on stack_extents_enabled() below: either CCCC_DANGLING_DETECT, or
+    // the program contains a DYNOBJSZ opcode (#648), which also consults
+    // stack_intervals/live_epochs to size escaping fixed-size stack buffers.
+    // Consumption sites specific to dangling detection (stack_ptr_epochs
+    // exact-address recording, CHKP3) stay gated on CCCC_DANGLING_DETECT only.
+    bool dynobjsz_present; // set by an incremental text-segment scan (#648)
+                           // iff any DYNOBJSZ opcode appears; survives .c4
+                           // round-trip because it's derived from the
+                           // serialized bytecode, not a codegen-time flag.
+    long long dynobjsz_scan_pc; // resume point for that scan -- text can
+                                // still be growing when cc_run_at first runs
+                                // (comptime macros, --build factories), so
+                                // each call scans only the newly-appended
+                                // words rather than a fixed one-shot prefix.
     unsigned long long frame_epoch_counter; // monotonic, bumped per ENT3
     struct {
         long long **bps;            // parallel array: bp at push time

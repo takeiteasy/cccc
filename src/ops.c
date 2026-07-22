@@ -561,6 +561,17 @@ static inline int op_MOV3_fn(VirtualMachine *vm) {
 
 // ========== Register-Based Calling Convention ==========
 
+// Whether the epoch/interval bookkeeping below (frame_epochs, live_epochs,
+// stack_intervals) should be populated. True for CCCC_DANGLING_DETECT
+// (original #673/#675 purpose), and also when the program contains a
+// DYNOBJSZ opcode (#648) -- DYNOBJSZ stabs stack_intervals + live_epochs to
+// size escaping fixed-size stack buffers reached through an opaque pointer.
+// vm->dynobjsz_present is set once, by a text-segment scan before execution
+// starts (see cccc_vm_scan_dynobjsz in vm.c), so this stays cheap per call.
+static inline bool stack_extents_enabled(VirtualMachine *vm) {
+    return (vm->flags & CCCC_DANGLING_DETECT) || vm->dynobjsz_present;
+}
+
 // Frame-epoch liveness stack for dangling-stack-pointer detection through a
 // deeper call (#673). Mirrors the saved-bp chain: one entry is pushed per
 // ENT3 and popped by whichever teardown path leaves that frame (normal
@@ -634,12 +645,13 @@ static inline int op_ENT3_fn(VirtualMachine *vm) {
     *--vm->sp = (long long)vm->bp;
     vm->bp = vm->sp;
 
-    // Assign this activation a fresh liveness epoch (#673). Recorded
-    // unconditionally -- not just for pointers that escape -- because
-    // over-recording is harmless (a non-escaping &local just matches its own
-    // still-live frame at deref) while under-recording via escape analysis
-    // is exactly how the removed #669 design produced false positives.
-    if (vm->flags & CCCC_DANGLING_DETECT)
+    // Assign this activation a fresh liveness epoch (#673, and #648 for
+    // DYNOBJSZ stack-buffer sizing). Recorded unconditionally -- not just for
+    // pointers that escape -- because over-recording is harmless (a
+    // non-escaping &local just matches its own still-live frame at deref)
+    // while under-recording via escape analysis is exactly how the removed
+    // #669 design produced false positives.
+    if (stack_extents_enabled(vm))
         frame_epoch_push(vm, vm->bp, ++vm->frame_epoch_counter);
 
     // Allocate space for local variables AND parameters
@@ -731,9 +743,9 @@ static inline int op_LEV3_fn(VirtualMachine *vm) {
         }
     }
 
-    // Retire this activation's liveness epoch (#673) before the bp that
-    // identifies it is overwritten below.
-    if (vm->flags & CCCC_DANGLING_DETECT) {
+    // Retire this activation's liveness epoch (#673, #648) before the bp
+    // that identifies it is overwritten below.
+    if (stack_extents_enabled(vm)) {
         // Tripwire: frame_epochs depth must match the live saved-bp chain
         // depth (same bounded walk/bounds check as op_RETADDR_fn) before we
         // pop. A mismatch means some teardown path failed to keep
@@ -1579,36 +1591,46 @@ static void stack_interval_insert(VirtualMachine *vm, long long lo, long long hi
 // monotonic), so whichever containing interval has the highest epoch is,
 // by construction, the one that currently owns this address, whether or not
 // its frame is still live. Returns false if no interval contains ptr.
+// *out_hi (optional, may be NULL) receives the matched interval's upper
+// bound, so a caller like DYNOBJSZ (#648) can compute remaining bytes
+// (hi - ptr) without a second lookup.
 // PLACEHOLDER: linear scan over all retained intervals. Fine for the
 // small, mostly-distinct working set typical programs produce; if a hot
 // loop retains many intervals this should become an interval tree.
 // Ticket: https://todo.sr.ht/~takeiteasy/cccc/677
 static bool stack_interval_stab(VirtualMachine *vm, long long ptr,
-                                 unsigned long long *out_epoch) {
+                                 unsigned long long *out_epoch,
+                                 long long *out_hi) {
     bool found = false;
     unsigned long long best_epoch = 0;
+    long long best_hi = 0;
     for (int i = 0; i < vm->stack_intervals.count; i++) {
         if (ptr >= vm->stack_intervals.iv[i].lo && ptr < vm->stack_intervals.iv[i].hi) {
             if (!found || vm->stack_intervals.iv[i].epoch > best_epoch) {
                 best_epoch = vm->stack_intervals.iv[i].epoch;
+                best_hi = vm->stack_intervals.iv[i].hi;
                 found = true;
             }
         }
     }
-    if (found)
+    if (found) {
         *out_epoch = best_epoch;
+        if (out_hi)
+            *out_hi = best_hi;
+    }
     return found;
 }
 
 static inline int op_STKTAG_fn(VirtualMachine *vm) {
     // Tag an escaping aggregate local's [bp+offset, bp+offset+size) extent
     // with the current frame's epoch, for interior dangling-pointer
-    // resolution (#675). Format: [STKTAG] [unused:32] [offset:i64] [size:i64]
+    // resolution (#675) and DYNOBJSZ stack-buffer sizing (#648).
+    // Format: [STKTAG] [unused:32] [offset:i64] [size:i64]
     cc_read_word(vm); // unused first word (no register operand)
     long long offset = cc_read_i64(vm);
     long long size = cc_read_i64(vm);
 
-    if ((vm->flags & CCCC_DANGLING_DETECT) && vm->frame_epochs.count > 0) {
+    if (stack_extents_enabled(vm) && vm->frame_epochs.count > 0) {
         long long lo = (long long)(vm->bp + offset);
         unsigned long long epoch = vm->frame_epochs.epochs[vm->frame_epochs.count - 1];
         stack_interval_insert(vm, lo, lo + size, epoch);
@@ -1908,7 +1930,7 @@ static inline int op_CHKP3_fn(VirtualMachine *vm) {
                     epoch_dangling = true;
             } else {
                 unsigned long long iv_epoch;
-                if (stack_interval_stab(vm, ptr, &iv_epoch) &&
+                if (stack_interval_stab(vm, ptr, &iv_epoch, NULL) &&
                     !hashmap_get_int(&vm->live_epochs, (long long)iv_epoch)) {
                     epoch_dangling = true;
                     interior = true;
@@ -2143,9 +2165,9 @@ static inline int op_CALLT_fn(VirtualMachine *vm) {
         }
     }
 
-    // Retire this activation's liveness epoch (#673). The tail-callee's own
-    // ENT3 will push a fresh one; nothing here should stay live under it.
-    if (vm->flags & CCCC_DANGLING_DETECT)
+    // Retire this activation's liveness epoch (#673, #648). The tail-callee's
+    // own ENT3 will push a fresh one; nothing here should stay live under it.
+    if (stack_extents_enabled(vm))
         frame_epoch_pop(vm);
 
     vm->bp = (long long *)*vm->sp++;
@@ -2902,8 +2924,12 @@ static inline int op_DYNOBJSZ_fn(VirtualMachine *vm) {
     // requested_size - (ptr - base). This handles both base pointers
     // (offset 0) and interior pointers (p + k) uniformly. Non-heap, freed,
     // and out-of-range pointers (offset > requested_size, e.g. into the
-    // alignment padding past the requested bytes) return the conservative
-    // fallback.
+    // alignment padding past the requested bytes) fall through to the stack
+    // path below (or the conservative fallback if that also misses).
+    //
+    // alloca()/VLA buffers need no separate handling here: both lower to
+    // MALC (a VM heap bump allocation with an AllocHeader), so they already
+    // resolve through the heap path above (#648).
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
@@ -2913,6 +2939,7 @@ static inline int op_DYNOBJSZ_fn(VirtualMachine *vm) {
 
     // Conservative fallback depends on the type argument (bit 1).
     size_t result = (type & 2) ? 0 : (size_t)-1;
+    bool resolved = false;
 
     // Only VM heap pointers have a tracked allocation.
     if (ptr != 0 &&
@@ -2926,7 +2953,27 @@ static inline int op_DYNOBJSZ_fn(VirtualMachine *vm) {
             if (h->magic == 0xDEADBEEF && !h->freed &&
                 offset <= h->requested_size) {
                 result = h->requested_size - offset;
+                resolved = true;
             }
+        }
+    }
+
+    // Fixed-size stack arrays/structs/unions whose address escapes (so their
+    // provenance is opaque by the time DYNOBJSZ sees the pointer -- e.g.
+    // `char buf[16]` passed through a function parameter) are recorded by
+    // STKTAG into vm->stack_intervals as [base, base+size) tagged with their
+    // creating frame's epoch (#675's mechanism, extended by #648). Resolve
+    // ptr via the same max-epoch stab CHKP3 uses for interior dangling-
+    // pointer resolution, but only trust the match while its frame's epoch
+    // is still live: a match whose epoch has retired means the owning frame
+    // already returned (the pointer is dangling), and the conservative
+    // fallback -- not a stale size -- is the correct answer there.
+    if (!resolved && ptr != 0) {
+        unsigned long long iv_epoch;
+        long long hi;
+        if (stack_interval_stab(vm, ptr, &iv_epoch, &hi) &&
+            hashmap_get_int(&vm->live_epochs, (long long)iv_epoch)) {
+            result = (size_t)(hi - ptr);
         }
     }
 
@@ -3280,10 +3327,10 @@ static inline int op_LONGJMP_fn(VirtualMachine *vm) {
     vm->sp = (long long *)jmp_buf[1];
     vm->bp = (long long *)jmp_buf[2];
 
-    // longjmp can unwind several frames at once (#673): retire every
+    // longjmp can unwind several frames at once (#673, #648): retire every
     // activation's liveness epoch above the target frame. The target frame
     // itself (bp == vm->bp) keeps its epoch -- it's still live.
-    if (vm->flags & CCCC_DANGLING_DETECT)
+    if (stack_extents_enabled(vm))
         frame_epoch_truncate_to(vm, vm->bp);
 
     if (vm->flags & CCCC_CFI) {

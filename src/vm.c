@@ -1883,10 +1883,42 @@ void cc_load_stdlib(VirtualMachine *vm) {
     }
 }
 
+// Incremental text-segment scan (#648): set vm->dynobjsz_present the first
+// time a DYNOBJSZ opcode is seen, so stack_extents_enabled() (ops.c) knows
+// to populate frame_epochs/stack_intervals for programs that use
+// __builtin_dynamic_object_size, even with dangling-pointer detection off.
+// Scanning the serialized opcode stream (rather than latching a codegen-time
+// flag) keeps this correct across a .c4 save/reload round-trip. Resumes from
+// vm->dynobjsz_scan_pc rather than rescanning from the top, since text_seg
+// can still grow between cc_run_at calls (comptime macros / --build factory
+// functions run interleaved with codegen; testing.c also calls cc_run_at
+// once per test function). Same walk shape as the ngram/fusion analyzers
+// (analyze.c): step by cc_instr_words(), starting after the reserved
+// text_seg[0] entry-point slot.
+static void cc_scan_dynobjsz(VirtualMachine *vm) {
+    if (vm->dynobjsz_present)
+        return; // already found; nothing left to look for
+    long long num_words = (long long)vm->text_ptr + 1;
+    long long pc = vm->dynobjsz_scan_pc ? vm->dynobjsz_scan_pc : 1; // [0] = entry slot
+    while (pc < num_words) {
+        int op = (int)vm->text_seg[pc];
+        int words = cc_instr_words(op);
+        if (words <= 0)
+            break;
+        if (op == DYNOBJSZ) {
+            vm->dynobjsz_present = true;
+            return;
+        }
+        pc += words;
+    }
+    vm->dynobjsz_scan_pc = pc;
+}
+
 int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv) {
     if (!vm || !vm->text_seg) {
         error("VM not initialized - call cc_compile first");
     }
+    cc_scan_dynobjsz(vm);
     cc_running_vm = vm;
     cccc_gil_acquire(vm);
     cc_vm_profile_reset(vm);
@@ -1921,6 +1953,28 @@ int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv) {
     // Save initial stack/base pointers for exit detection in vm_eval
     vm->initial_sp = vm->sp;
     vm->initial_bp = vm->bp;
+
+    // Reset per-call-stack liveness bookkeeping (#648). A fresh top-level
+    // call means a fresh guest call stack -- but a *previous* call can leave
+    // this state non-empty: the test harness's __builtin_assert failure path
+    // (testing.c) does a host-level longjmp straight back to the harness's
+    // setjmp, abandoning the guest call stack without ever running the
+    // aborted frames' LEV3 (so their frame_epochs/stack_intervals/
+    // stack_ptr_epochs entries are never retired). Previously this was inert
+    // dead weight (CCCC_DANGLING_DETECT test files aren't expected to fail
+    // assertions), but with DYNOBJSZ able to activate the same bookkeeping,
+    // any assertion failure in a dynobjsz-using test file would leave stale
+    // epochs that desync the NEXT call's LEV3 tripwire assert. Pop down to
+    // empty (rather than a raw memset) so frame_epochs and live_epochs empty
+    // together and frame_epoch_counter is deliberately left untouched --
+    // resetting the counter while it's still monotonic across calls is what
+    // keeps a new call's epoch N from ever colliding with a stale retained
+    // interval also tagged N.
+    while (vm->frame_epochs.count > 0)
+        frame_epoch_pop(vm);
+    hashmap_deinit(&vm->live_epochs);
+    hashmap_deinit(&vm->stack_ptr_epochs);
+    vm->stack_intervals.count = 0;
 
     // Initialise main thread's TLS copy from the template built by gen()
     if (vm->tls_template_size > 0) {
