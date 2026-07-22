@@ -7,10 +7,17 @@ Each run uses -O0 plus the specific -f flag(s) so the optimizer state is clean.
 When a test has CCCC_FLAGS containing -On, that flag is stripped in matrix mode
 (run_single_test matrix_mode=True) so the injected -O0 governs and the
 per-pass attribution is accurate.
+
+Tests whose correctness depends on a specific -O level (CCCC_MATRIX_SKIP) are
+skipped in all 9 runs above, since none of them can reproduce a real -O1+
+build. To still exercise those tests somewhere in the matrix sweep, one more
+run executes just that subset with their own declared CCCC_FLAGS untouched
+(no injected -O0/-f, no stripping).
 """
 
 import types
 
+from .runner import has_matrix_skip
 from .suite import _run_test_suite
 from .report import print_matrix_summary
 
@@ -88,4 +95,31 @@ def run_pass_matrix(cccc, script_dir, platform, base_cccc_args, n_jobs, args, te
         print(f"    {r['total']} tests: {r_passed} passed, "
               f"{r_failed} failed, {r_crashed} crashed  [{status_str}]")
 
-    return print_matrix_summary(all_results, passes_display)
+    # Run any CCCC_MATRIX_SKIP-tagged tests once more, at their own declared
+    # -O level (no matrix flags injected, no per-test flags stripped), so
+    # they still get exercised somewhere in the matrix sweep instead of
+    # being silently excluded from all 9 passes above.
+    declared_result = None
+    skip_tests = [t for t in test_files if has_matrix_skip(t)]
+    if skip_tests:
+        run_args = types.SimpleNamespace(
+            vm_profile=getattr(args, "vm_profile", False),
+            bench=False,
+            c4=getattr(args, "c4", False),
+            quiet=True,
+            process_timeout=getattr(args, "process_timeout", None),
+        )
+        print("\n--- Declared-level run (CCCC_MATRIX_SKIP tests, own -O) ---")
+        declared_result = _run_test_suite(
+            cccc, script_dir, False, platform, filtered_base,
+            n_jobs, run_args, skip_tests,
+            matrix_mode=False,
+        )
+        d_passed = declared_result["passed"] + declared_result["negative_passed"]
+        d_failed = declared_result["failed"]
+        d_crashed = declared_result["crashed"]
+        status_str = "PASS" if d_failed == 0 and d_crashed == 0 else "FAIL"
+        print(f"    {declared_result['total']} tests: {d_passed} passed, "
+              f"{d_failed} failed, {d_crashed} crashed  [{status_str}]")
+
+    return print_matrix_summary(all_results, passes_display, declared_result)

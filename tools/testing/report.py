@@ -86,11 +86,15 @@ def print_summary(r, args):
     return True
 
 
-def print_matrix_summary(all_results, passes):
+def print_matrix_summary(all_results, passes, declared_result=None):
     """Print the per-pass attribution table for --matrix mode.
 
-    all_results — dict mapping pass_label → _run_test_suite result dict
-    passes      — list of (pass_label, pass_name) pairs in display order
+    all_results      — dict mapping pass_label → _run_test_suite result dict
+    passes           — list of (pass_label, pass_name) pairs in display order
+    declared_result  — optional _run_test_suite result dict for the extra
+                        declared-level run of CCCC_MATRIX_SKIP tests (run at
+                        their own -O level, outside the 9-pass attribution
+                        grid since it isn't one of the -f passes)
     """
     print()
     print("========================================")
@@ -115,6 +119,14 @@ def print_matrix_summary(all_results, passes):
         grand_skipped += r_skipped
     print("-" * 60)
     print(f"{'Sum':<22} {grand_total:>6} {grand_passed:>6} {grand_failed:>6} {grand_crashed:>6} {grand_skipped:>7}")
+
+    declared_failed = declared_crashed = 0
+    if declared_result is not None:
+        d_total = declared_result["total"]
+        d_passed = declared_result["passed"] + declared_result["negative_passed"]
+        declared_failed = declared_result["failed"]
+        declared_crashed = declared_result["crashed"]
+        print(f"{'declared (own -O)':<22} {d_total:>6} {d_passed:>6} {declared_failed:>6} {declared_crashed:>6} {0:>7}")
     print()
 
     # Per-test attribution: which pass(es) broke each test?
@@ -138,4 +150,11 @@ def print_matrix_summary(all_results, passes):
             print(f"  ✗ {test_name}  ({pass_str})")
         print()
 
-    return grand_failed == 0 and grand_crashed == 0
+    if declared_result is not None and (declared_failed or declared_crashed):
+        print("Failed Tests (declared-level run):")
+        print("-" * 52)
+        for entry in declared_result["failed_tests"] + declared_result["crashed_tests"]:
+            print(f"  ✗ {entry}")
+        print()
+
+    return grand_failed == 0 and grand_crashed == 0 and declared_failed == 0 and declared_crashed == 0

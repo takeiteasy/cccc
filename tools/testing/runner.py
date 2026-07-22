@@ -9,6 +9,16 @@ from . import LEAKS_SKIP_TESTS, vm_profile_path
 from .c4 import run_c4_roundtrip
 
 
+def has_matrix_skip(test_file):
+    """Return True if test_file carries a CCCC_MATRIX_SKIP annotation in its header."""
+    try:
+        with open(test_file, "r") as f:
+            header_lines = [f.readline() for _ in range(5)]
+    except Exception:
+        return False
+    return any("CCCC_MATRIX_SKIP" in line for line in header_lines)
+
+
 def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_args,
                     bench=False, c4_mode=False, profile_dir=None, process_timeout=None,
                     matrix_mode=False):
