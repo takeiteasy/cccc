@@ -15,9 +15,12 @@
 #endif
 #endif
 
-#ifndef CCCC_HAVE_NATIVE_PCT_B
+// Always pull in the custom engines: format_printf.c is only used when
+// CCCC_HAVE_NATIVE_PCT_B is unset, but format_scanf.c is used unconditionally
+// (see the scanf-family registration below -- glibc's scanf only accepts
+// lowercase %b, not the C23 %B, even on glibc >= 2.35, so the custom
+// engine stays in use for the scan family regardless of this macro; #728).
 #include "format.h"
-#endif
 
 // Standard stream getters (since we can't easily register global pointers)
 static FILE* __cccc_stdin(void) { return stdin; }
@@ -90,35 +93,6 @@ static long long wrap_vfprintf(FILE *stream, const char *fmt, long long va_ptr) 
     return cccc_ffi_call_variadic((void *)fprintf, 2, fixed, n, types, vals);
 }
 
-static long long wrap_vscanf(const char *fmt, long long va_ptr) {
-    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
-    int types[CCCC_VA_MAX_ARGS];
-    int n = cccc_parse_scanf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
-    int64_t vals[CCCC_VA_MAX_ARGS];
-    cccc_va_extract(va, types, n, vals);
-    int64_t fixed[] = { (int64_t)fmt };
-    return cccc_ffi_call_variadic((void *)scanf, 1, fixed, n, types, vals);
-}
-
-static long long wrap_vsscanf(const char *str, const char *fmt, long long va_ptr) {
-    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
-    int types[CCCC_VA_MAX_ARGS];
-    int n = cccc_parse_scanf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
-    int64_t vals[CCCC_VA_MAX_ARGS];
-    cccc_va_extract(va, types, n, vals);
-    int64_t fixed[] = { (int64_t)str, (int64_t)fmt };
-    return cccc_ffi_call_variadic((void *)sscanf, 2, fixed, n, types, vals);
-}
-
-static long long wrap_vfscanf(FILE *stream, const char *fmt, long long va_ptr) {
-    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
-    int types[CCCC_VA_MAX_ARGS];
-    int n = cccc_parse_scanf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
-    int64_t vals[CCCC_VA_MAX_ARGS];
-    cccc_va_extract(va, types, n, vals);
-    int64_t fixed[] = { (int64_t)stream, (int64_t)fmt };
-    return cccc_ffi_call_variadic((void *)fscanf, 2, fixed, n, types, vals);
-}
 #endif // CCCC_HAVE_NATIVE_PCT_B
 
 // Register all stdio.h functions
@@ -128,43 +102,44 @@ void register_stdio_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__cccc_stdout", (void*)__cccc_stdout, 0, 0);
     cc_register_cfunc(vm, "__cccc_stderr", (void*)__cccc_stderr, 0, 0);
 
-    // Variadic printf/scanf family
+    // Variadic printf family
 #ifdef CCCC_HAVE_NATIVE_PCT_B
     cc_register_variadic_cfunc(vm, "printf", (void*)printf, 1, 0);
     cc_register_variadic_cfunc(vm, "fprintf", (void*)fprintf, 2, 0);
     cc_register_variadic_cfunc(vm, "sprintf", (void*)sprintf, 2, 0);
     cc_register_variadic_cfunc(vm, "snprintf", (void*)snprintf, 3, 0);
-    cc_register_variadic_cfunc(vm, "scanf", (void*)scanf, 1, 0);
-    cc_register_variadic_cfunc(vm, "sscanf", (void*)sscanf, 2, 0);
-    cc_register_variadic_cfunc(vm, "fscanf", (void*)fscanf, 2, 0);
 
     // V* variants still need wrappers to handle va_list pointer conversion
     cc_register_cfunc(vm, "vprintf", (void*)wrap_vprintf, 2, 0);
     cc_register_cfunc(vm, "vsprintf", (void*)wrap_vsprintf, 3, 0);
     cc_register_cfunc(vm, "vsnprintf", (void*)wrap_vsnprintf, 4, 0);
     cc_register_cfunc(vm, "vfprintf", (void*)wrap_vfprintf, 3, 0);
-    cc_register_cfunc(vm, "vscanf", (void*)wrap_vscanf, 2, 0);
-    cc_register_cfunc(vm, "vsscanf", (void*)wrap_vsscanf, 3, 0);
-    cc_register_cfunc(vm, "vfscanf", (void*)wrap_vfscanf, 3, 0);
 #else
-    // Custom %b/%B-capable engines (format_printf.c / format_scanf.c)
+    // Custom %b/%B-capable engine (format_printf.c)
     cc_register_variadic_cfunc(vm, "printf", (void*)cccc_printf, 1, 0);
     cc_register_variadic_cfunc(vm, "fprintf", (void*)cccc_fprintf, 2, 0);
     cc_register_variadic_cfunc(vm, "sprintf", (void*)cccc_sprintf, 2, 0);
     cc_register_variadic_cfunc(vm, "snprintf", (void*)cccc_snprintf, 3, 0);
-    cc_register_variadic_cfunc(vm, "scanf", (void*)cccc_scanf, 1, 0);
-    cc_register_variadic_cfunc(vm, "sscanf", (void*)cccc_sscanf, 2, 0);
-    cc_register_variadic_cfunc(vm, "fscanf", (void*)cccc_fscanf, 2, 0);
 
     // V* variants still need wrappers to handle va_list pointer conversion
     cc_register_cfunc(vm, "vprintf", (void*)wrap_cccc_vprintf, 2, 0);
     cc_register_cfunc(vm, "vsprintf", (void*)wrap_cccc_vsprintf, 3, 0);
     cc_register_cfunc(vm, "vsnprintf", (void*)wrap_cccc_vsnprintf, 4, 0);
     cc_register_cfunc(vm, "vfprintf", (void*)wrap_cccc_vfprintf, 3, 0);
+#endif
+
+    // Variadic scanf family: always routed to the custom format_scanf.c
+    // engine, even when CCCC_HAVE_NATIVE_PCT_B is set. glibc's scanf family
+    // (>= 2.35) accepts the C23 %b conversion but rejects uppercase %B
+    // outright, so the native path can't be used for scanf the way it can
+    // for printf. See format_scanf.c and #728.
+    cc_register_variadic_cfunc(vm, "scanf", (void*)cccc_scanf, 1, 0);
+    cc_register_variadic_cfunc(vm, "sscanf", (void*)cccc_sscanf, 2, 0);
+    cc_register_variadic_cfunc(vm, "fscanf", (void*)cccc_fscanf, 2, 0);
+
     cc_register_cfunc(vm, "vscanf", (void*)wrap_cccc_vscanf, 2, 0);
     cc_register_cfunc(vm, "vsscanf", (void*)wrap_cccc_vsscanf, 3, 0);
     cc_register_cfunc(vm, "vfscanf", (void*)wrap_cccc_vfscanf, 3, 0);
-#endif
 
 
     // File operations

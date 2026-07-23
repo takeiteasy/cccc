@@ -1266,6 +1266,27 @@ static int source_is_excluded(const BuildTarget *t, const char *src) {
 #define CACHE_FNV_OFFSET 0xcbf29ce484222325ULL
 #define CACHE_FNV_PRIME  0x00000100000001b3ULL
 
+// Host architecture tag folded into the native object cache (#730). A plain
+// native build emits no --target flag, so two same-OS cccc binaries built
+// for different architectures (e.g. native arm64 macOS vs a cccc-macos-x86_64
+// binary run under Rosetta) can produce identical argv+source-content cache
+// keys if a build/cache directory is reused between them -- the second build
+// then links against wrong-arch object files. The compiler/linker cccc
+// spawns inherit its own process architecture, so the arch cccc itself was
+// built for is a direct, cheap discriminator (no subprocess query needed).
+// Real cross builds (--build-cc/--build-triple) already fold their target
+// triple into argv and are unaffected. Bytecode (.c4) output is portable
+// across same-OS architectures, so this tag is only used for native objects.
+#if defined(__x86_64__) || defined(__amd64__)
+#define CCCC_HOST_ARCH_TAG "x86_64"
+#elif defined(__aarch64__) || defined(__arm64__)
+#define CCCC_HOST_ARCH_TAG "aarch64"
+#elif defined(__arm__)
+#define CCCC_HOST_ARCH_TAG "arm"
+#else
+#define CCCC_HOST_ARCH_TAG "unknown-arch"
+#endif
+
 static uint64_t fnv1a_update(uint64_t h, const void *data, size_t n) {
     const unsigned char *p = (const unsigned char *)data;
     for (size_t i = 0; i < n; i++) { h ^= p[i]; h *= CACHE_FNV_PRIME; }
@@ -1284,9 +1305,12 @@ static uint64_t fnv1a_file(const char *path, uint64_t h) {
 }
 
 // Build a 64-bit cache key from the compile command + source content.
-// Skips the -o <path> pair so the key is output-path-agnostic.
+// Skips the -o <path> pair so the key is output-path-agnostic. Folds in
+// CCCC_HOST_ARCH_TAG so a cross-arch cache/build-dir reuse misses (#730).
 static uint64_t source_cache_key(const char *src, char *const *argv) {
     uint64_t h = CACHE_FNV_OFFSET;
+    h = fnv1a_update(h, CCCC_HOST_ARCH_TAG, strlen(CCCC_HOST_ARCH_TAG));
+    h = fnv1a_update(h, "\0", 1);
     for (int i = 0; argv[i]; i++) {
         if (strcmp(argv[i], "-o") == 0) { i++; continue; } // skip -o <path>
         h = fnv1a_update(h, argv[i], strlen(argv[i]));
@@ -1300,6 +1324,32 @@ static int ofile_is_current(const char *ofile, const char *src) {
     struct stat o_st, s_st;
     if (stat(ofile, &o_st) != 0 || stat(src, &s_st) != 0) return 0;
     return o_st.st_mtime >= s_st.st_mtime;
+}
+
+// Per-target arch stamp (<objdir>/.cccc-arch): guards the Level 1 mtime fast
+// path against serving objects that a different-arch cccc binary compiled
+// into the same reused build/cache directory (#730). The mtime check alone
+// never consults the cache key, so without this stamp it would happily
+// "cache hit" a wrong-arch .o that is merely newer than its source.
+static int arch_stamp_matches(const char *objdir) {
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/.cccc-arch", objdir);
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    char buf[64] = {0};
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) buf[--n] = '\0';
+    return strcmp(buf, CCCC_HOST_ARCH_TAG) == 0;
+}
+
+static void arch_stamp_write(const char *objdir) {
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/.cccc-arch", objdir);
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    fputs(CCCC_HOST_ARCH_TAG, f);
+    fclose(f);
 }
 
 // CAS layout: <cache_dir>/<key[0:2]>/<key_hex><ext>
@@ -1485,6 +1535,15 @@ static int compile_sources(Builder *ctx, const char *cc,
                            StringArray *objs, int *step, int total) {
     StringArray owned = {0};
 
+    // Level 1 (mtime fast path) is only trusted when this objdir's arch
+    // stamp matches the arch cccc itself is running as; otherwise a reused
+    // build dir from a different-arch cccc binary would look "up to date"
+    // by mtime alone (#730). On mismatch/first-use, (re)write the stamp so
+    // subsequent builds in this objdir can use the fast path again.
+    int arch_ok = ctx->cache_dir && arch_stamp_matches(objdir);
+    if (ctx->cache_dir && !arch_ok && !ctx->dry_run)
+        arch_stamp_write(objdir);
+
 #ifdef _POSIX_VERSION
     int jobs = ctx->jobs > 1 ? ctx->jobs : 1;
     if (jobs > 1 && !ctx->dry_run) {
@@ -1532,7 +1591,7 @@ static int compile_sources(Builder *ctx, const char *cc,
             free(stem);
 
             // Level 1: mtime check — skip recompile when ofile is up to date.
-            if (ctx->cache_dir && ofile_is_current(ofile, t->sources.data[i])) {
+            if (ctx->cache_dir && arch_ok && ofile_is_current(ofile, t->sources.data[i])) {
                 if (!ctx->quiet || ctx->verbose)
                     printf("[%d/%d] (cached) %s\n", ++(*step), total, t->sources.data[i]);
                 else
@@ -1613,7 +1672,7 @@ serial_fallback:;
         free(stem);
 
         // Level 1: mtime check — skip recompile when ofile is up to date.
-        if (ctx->cache_dir && !ctx->dry_run &&
+        if (ctx->cache_dir && !ctx->dry_run && arch_ok &&
             ofile_is_current(ofile, t->sources.data[i])) {
             if (!ctx->quiet || ctx->verbose)
                 printf("[%d/%d] (cached) %s\n", ++(*step), total, t->sources.data[i]);
