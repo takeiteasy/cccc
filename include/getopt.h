@@ -7,10 +7,18 @@
 #error "<getopt.h> is only available on POSIX targets in CCCC"
 #endif
 
-extern char *optarg;
-extern int optind;
-extern int opterr;
-extern int optopt;
+/* These alias the host's real getopt() state (via accessor functions, same
+ * pattern as stdin/stdout/stderr in stdio.h) so they reflect what the host's
+ * getopt()/getopt_long() actually parsed instead of being inert, always-zero
+ * guest globals (#736). */
+extern char **__cccc_optarg_ptr(void);
+extern int *__cccc_optind_ptr(void);
+extern int *__cccc_opterr_ptr(void);
+extern int *__cccc_optopt_ptr(void);
+#define optarg (*__cccc_optarg_ptr())
+#define optind (*__cccc_optind_ptr())
+#define opterr (*__cccc_opterr_ptr())
+#define optopt (*__cccc_optopt_ptr())
 
 #define no_argument       0
 #define required_argument 1

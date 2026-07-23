@@ -2,6 +2,7 @@ arpa/inet.h	register_posix_functions
 ctype.h	register_ctype_functions
 dirent.h	register_posix_functions
 dlfcn.h	register_posix_functions
+errno.h	register_posix_functions
 fcntl.h	register_posix_functions
 fenv.h	register_fenv_functions
 fnmatch.h	register_posix_functions

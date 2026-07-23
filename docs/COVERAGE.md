@@ -1223,7 +1223,7 @@ if (__builtin_mul_overflow(a, b, &r))
 |---|---|---|
 | `<assert.h>` | ✓ | |
 | `<ctype.h>` | ✓ | |
-| `<errno.h>` | ~ | `errno` is a plain guest global and constants (`EINVAL`, etc.) resolve correctly, but no POSIX FFI wrapper currently writes the host's errno back into it on failure — a failing call like `access()` or `sysconf()` leaves guest `errno` unchanged. Tracked as a follow-up (see ticket tracker). |
+| `<errno.h>` | ✓ | `errno` aliases the host's real per-thread errno via an accessor function (`#define errno (*__cccc_errno_ptr())`, same pattern as `stdin`/`stdout`/`stderr` in `<stdio.h>`), so a failing host-backed call (`access`, `sysconf`, etc.) is actually observable from guest code. Windows targets keep the old plain-global behavior (untested target; not wired to the accessor). |
 | `<float.h>` | ✓ | |
 | `<limits.h>` | ✓ | |
 | `<locale.h>` | ✓ | Host locale APIs registered |
@@ -1318,6 +1318,16 @@ functions in `src/stdlib/posix.c` before the host call. This keeps compiled
 `_SC_XOPEN_VERSION` answer with CCCC's own VM-model constants rather than the
 host's; an unrecognized or host-unsupported name returns `-1`/`0`.
 
+A handful of host libc globals (`errno`, and getopt's `optarg`/`optind`/
+`opterr`/`optopt`) are exposed the same way `stdin`/`stdout`/`stderr` always
+have been: as a macro expanding to a dereferenced accessor-function call
+(`#define errno (*__cccc_errno_ptr())`) rather than a plain `extern` global.
+Ordinary compiled globals live in the VM's own data segment and have no
+connection to identically-named host process state, so a plain `extern int
+errno;` would silently stay zero forever regardless of what host-backed calls
+actually did. The accessor pattern makes these specific, known globals alias
+the host's real storage directly, so guest code observes the real outcome.
+
 | Header | Status | Notes |
 |---|---|---|
 | `<arpa/inet.h>` | ✓ | Network byte-order conversion (`htonl`, `htons`, `ntohl`, `ntohs`), address manipulation (`inet_addr`, `inet_ntoa`, `inet_ntop`, `inet_pton`) |
@@ -1325,7 +1335,7 @@ host's; an unrecognized or host-unsupported name returns `-1`/`0`.
 | `<dlfcn.h>` | ✓ | VM-managed dynamic loading (`dlopen`, `dlsym`, `dlclose`, `dlerror`); `dlsym` function symbols are callable through typed function pointers for scalar/pointer signatures |
 | `<fcntl.h>` | ✓ | File control (`open`, `creat`, `fcntl`), `O_*` (including `O_DIRECTORY`, `O_NOFOLLOW`, `O_SYNC`, `O_NOCTTY`) and `S_*` permission constants, record-locking `F_*` commands (including `F_GETOWN`/`F_SETOWN`), `FD_CLOEXEC`, `struct flock`; `fallocate` declared and registered under `__linux__` |
 | `<fnmatch.h>` | ✓ | Filename pattern matching (`fnmatch`, `FNM_*` constants) |
-| `<getopt.h>` | ✓ | Command-line option parsing (`getopt`, `getopt_long`, `optarg`, `optind`, `opterr`, `optopt`, `struct option`) |
+| `<getopt.h>` | ✓ | Command-line option parsing (`getopt`, `getopt_long`, `struct option`); `optarg`/`optind`/`opterr`/`optopt` alias the host's real getopt state via accessor functions (same pattern as `<errno.h>`'s `errno`) so they reflect what the host parser actually found |
 | `<glob.h>` | ✓ | Pathname globbing (`glob`, `globfree`, `glob_t`, `GLOB_*` constants) |
 | `<grp.h>` | ✓ | Group database (`getgrgid`, `getgrnam`, `getgrgid_r`, `getgrnam_r`, `struct group`) |
 | `<libgen.h>` | ✓ | Pathname manipulation (`basename`, `dirname`) |

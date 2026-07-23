@@ -452,6 +452,25 @@ static long long wrap_confstr(long long name, long long buf, long long len) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Host-global accessors (#736)
+//
+// errno and getopt's optarg/optind/opterr/optopt are declared in
+// include/errno.h / include/getopt.h as macros expanding to
+// `(*__cccc_..._ptr())` rather than plain externs, mirroring the
+// stdin/stdout/stderr pattern in stdio.h. This makes them alias the host's
+// real per-thread/process storage directly instead of being an inert,
+// always-zero slot in the VM's own data segment (the previous behavior for
+// any extern-declared-but-never-defined global). Thread-locality of errno is
+// preserved for free: the same host OS thread that made the failing call
+// also executes the guest code that reads it back, since VM bytecode
+// execution never migrates mid-call to a different host thread.
+static int *__cccc_errno_ptr(void) { return &errno; }
+static char **__cccc_optarg_ptr(void) { return &optarg; }
+static int *__cccc_optind_ptr(void) { return &optind; }
+static int *__cccc_opterr_ptr(void) { return &opterr; }
+static int *__cccc_optopt_ptr(void) { return &optopt; }
+
 void register_posix_functions(VirtualMachine *vm) {
     // Blocking I/O — GIL released while blocked so other VM threads can run
     cc_register_cfunc(vm, "read",    (void*)wrap_read_gil,    3, 0);
@@ -531,6 +550,11 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "fnmatch",  (void*)fnmatch, 3, 0);
     cc_register_cfunc(vm, "getopt",      (void*)getopt,      3, 0);
     cc_register_cfunc(vm, "getopt_long", (void*)getopt_long, 5, 0);
+    cc_register_cfunc(vm, "__cccc_optarg_ptr", (void*)__cccc_optarg_ptr, 0, 0);
+    cc_register_cfunc(vm, "__cccc_optind_ptr", (void*)__cccc_optind_ptr, 0, 0);
+    cc_register_cfunc(vm, "__cccc_opterr_ptr", (void*)__cccc_opterr_ptr, 0, 0);
+    cc_register_cfunc(vm, "__cccc_optopt_ptr", (void*)__cccc_optopt_ptr, 0, 0);
+    cc_register_cfunc(vm, "__cccc_errno_ptr",  (void*)__cccc_errno_ptr,  0, 0);
     cc_register_cfunc(vm, "gettimeofday", (void*)gettimeofday, 2, 0);
     cc_register_cfunc(vm, "settimeofday", (void*)settimeofday, 2, 0);
     cc_register_cfunc(vm, "mmap",         (void*)mmap,         6, 0);
