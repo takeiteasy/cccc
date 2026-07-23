@@ -9453,16 +9453,20 @@ static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest, Token *tok) 
 }
 
 // GNU vector_size lane lvalue helper (tracker #715, used by __builtin_shuffle):
-// builds `vec_expr[lane]` the same way the `[` postfix subscript parse site
+// builds `vec_expr[index]` the same way the `[` postfix subscript parse site
 // lowers a vector subscript -- &vec_expr cast to an element-pointer, then
 // ordinary pointer-offset + deref. `vec_expr` must not yet have ->ty set
-// (e.g. a fresh new_var_node) since new_cast() below type-checks it.
+// (e.g. a fresh new_var_node) since new_cast() below type-checks it. `index`
+// may be a compile-time constant (new_num) or, since #723, a runtime
+// expression (e.g. a masked/wrapped lane index) -- the lowering is identical
+// either way because vector subscripting already supports a runtime index
+// (verified: `a[i]` / `r[j] = ...` with a variable `i`/`j` compiles and runs
+// correctly through this same ND_ADDR/ND_DEREF path).
 static Node *vector_lane_ref(VirtualMachine *vm, Node *vec_expr, Type *elem_ty,
-                              int lane, Token *tok) {
+                              Node *index, Token *tok) {
     Node *addr = new_unary(vm, ND_ADDR, vec_expr, tok);
     addr = new_cast(vm, addr, pointer_to(vm, elem_ty));
-    return new_unary(vm, ND_DEREF,
-                      new_add(vm, addr, new_num(vm, lane, tok), tok), tok);
+    return new_unary(vm, ND_DEREF, new_add(vm, addr, index, tok), tok);
 }
 
 static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
@@ -9638,14 +9642,26 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     // __builtin_shuffle(vec, {i0,...,iN-1}) / __builtin_shuffle(vec1, vec2,
-    // {i0,...,iN-1}) (tracker #715): GCC vector permute, restricted to a
-    // COMPILE-TIME-CONSTANT brace-enclosed index list (matching clang's
-    // constant-index __builtin_shufflevector rather than GCC's general
-    // vector-typed mask -- a runtime/named vector mask is a follow-up
-    // ticket). No new opcode: lowered to per-lane scalar reads/writes
-    // through the same vector-subscript lvalue machinery the `[` postfix
-    // parse site uses (see vector_lane_ref() above), reusing the
+    // {i0,...,iN-1}) (tracker #715): GCC vector permute. The mask may be
+    // either a COMPILE-TIME-CONSTANT brace-enclosed index list (matching
+    // clang's constant-index __builtin_shufflevector) or, since tracker
+    // #723, a RUNTIME (or named) integer vector value -- GCC's general
+    // vector-typed mask form. Neither form needs a new opcode: both lower
+    // to per-lane scalar reads/writes through the same vector-subscript
+    // lvalue machinery the `[` postfix parse site uses (see
+    // vector_lane_ref() above; verified a *runtime* index lowers correctly
+    // through this same path before choosing this design), reusing the
     // brace-init-verified hidden-local pattern from compound literals.
+    //
+    // Constant mask: each index is range-checked at compile time and the
+    // per-lane copy is fully unrolled with literal indices (no wrap needed
+    // -- out of range is a hard compile error, since it's statically
+    // checkable). Runtime mask: since the actual index isn't known until
+    // runtime, an out-of-range value WRAPS via `% lane_count` (1-vector
+    // form) or `% (2*lane_count)` (2-vector form), matching GCC's
+    // documented __builtin_shuffle semantics -- this intentionally diverges
+    // from the constant form's hard error, since a runtime value can't be
+    // rejected at compile time.
     if (equal(tok, "__builtin_shuffle")) {
         tok = skip(vm, tok->next, "(");
         Node *v1 = assign(vm, &tok, tok);
@@ -9654,51 +9670,118 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             error_tok(vm, start, "__builtin_shuffle: first argument must be a vector type");
         tok = skip(vm, tok, ",");
 
+        // Disambiguating the arg count: __builtin_shuffle(v1, mask) (1-vector
+        // runtime form) and __builtin_shuffle(v1, v2, mask) (2-vector form)
+        // both have a non-brace second argument, so a single token of
+        // lookahead ("{" vs not) can no longer tell them apart the way it
+        // could when the mask was always brace-enclosed (tracker #715). We
+        // parse the second argument eagerly and check what follows it: a
+        // "," means it was v2 and a mask still follows; anything else means
+        // it was itself the (1-vector, runtime) mask.
         Node *v2 = NULL;
-        if (!equal(tok, "{")) {
-            v2 = assign(vm, &tok, tok);
-            add_type(vm, v2);
-            if (!is_vector(v2->ty) || !is_compatible(v1->ty, v2->ty))
-                error_tok(vm, start,
-                          "__builtin_shuffle: second vector argument must "
-                          "match the first vector's type");
-            tok = skip(vm, tok, ",");
+        Node *mask = NULL;
+        bool mask_is_const = equal(tok, "{");
+
+        if (!mask_is_const) {
+            Node *second = assign(vm, &tok, tok);
+            add_type(vm, second);
+            if (equal(tok, ",")) {
+                v2 = second;
+                if (!is_vector(v2->ty) || !is_compatible(v1->ty, v2->ty))
+                    error_tok(vm, start,
+                              "__builtin_shuffle: second vector argument must "
+                              "match the first vector's type");
+                tok = skip(vm, tok, ",");
+                mask_is_const = equal(tok, "{");
+                if (!mask_is_const) {
+                    mask = assign(vm, &tok, tok);
+                    add_type(vm, mask);
+                }
+            } else {
+                mask = second;
+            }
         }
 
         int lane_count = v1->ty->vec_len;
         int max_index = v2 ? lane_count * 2 : lane_count;
+        Type *elem_ty = v1->ty->base;
 
-        // The mask must be a BARE brace list, `{i0,...}` -- not a
+        // The constant form must be a BARE brace list, `{i0,...}` -- not a
         // `(vTYPE){...}` compound literal. A `(type)`-prefixed literal is
-        // itself a valid vector *expression*, which would be ambiguous with
-        // the two-vector form's second argument (both start with '('); a
-        // bare '{' cannot start any other valid argument expression here,
-        // so it unambiguously marks the mask.
-        if (!equal(tok, "{"))
-            error_tok(vm, tok,
-                      "__builtin_shuffle: the index mask must be a "
-                      "brace-enclosed list of compile-time-constant lane "
-                      "indices, e.g. '{0,1,2,3}' -- a runtime/named vector "
-                      "mask is not yet supported");
-        tok = tok->next; // consume '{'
-        int *indices = arena_alloc(&vm->compiler.parser_arena,
-                                    sizeof(int) * (size_t)lane_count);
-        for (int i = 0; i < lane_count; i++) {
-            if (i > 0)
-                tok = skip(vm, tok, ",");
-            int64_t v = const_expr(vm, &tok, tok);
-            if (v < 0 || v >= max_index)
-                error_tok(vm, tok, "__builtin_shuffle: index out of range");
-            indices[i] = (int)v;
+        // itself a valid vector *expression* (the runtime-mask form below),
+        // which would be ambiguous with the two-vector form's second
+        // argument (both start with '('); a bare '{' cannot start any other
+        // valid argument expression here, so it unambiguously marks a
+        // constant mask.
+        if (mask_is_const) {
+            tok = tok->next; // consume '{'
+            int *indices = arena_alloc(&vm->compiler.parser_arena,
+                                        sizeof(int) * (size_t)lane_count);
+            for (int i = 0; i < lane_count; i++) {
+                if (i > 0)
+                    tok = skip(vm, tok, ",");
+                int64_t v = const_expr(vm, &tok, tok);
+                if (v < 0 || v >= max_index)
+                    error_tok(vm, tok, "__builtin_shuffle: index out of range");
+                indices[i] = (int)v;
+            }
+            if (equal(tok, ","))
+                tok = tok->next; // optional trailing comma
+            tok = skip(vm, tok, "}");
+            *rest = skip(vm, tok, ")");
+
+            // Materialize the source vector(s) into hidden locals so any
+            // side effects in v1/v2 run exactly once, then gather each
+            // destination lane individually.
+            Obj *v1var = new_lvar(vm, "", 0, v1->ty);
+            Node *chain = new_binary(vm, ND_ASSIGN, new_var_node(vm, v1var, start), v1, start);
+
+            Obj *v2var = NULL;
+            if (v2) {
+                v2var = new_lvar(vm, "", 0, v2->ty);
+                Node *v2init = new_binary(vm, ND_ASSIGN, new_var_node(vm, v2var, start), v2, start);
+                chain = new_binary(vm, ND_COMMA, chain, v2init, start);
+            }
+
+            Obj *rvar = new_lvar(vm, "", 0, v1->ty);
+            for (int i = 0; i < lane_count; i++) {
+                int idx = indices[i];
+                bool from_v2 = v2 && idx >= lane_count;
+                Obj *srcvar = from_v2 ? v2var : v1var;
+                int srclane = from_v2 ? idx - lane_count : idx;
+                Node *dst_lane = vector_lane_ref(vm, new_var_node(vm, rvar, start), elem_ty,
+                                                  new_num(vm, i, start), start);
+                Node *src_lane = vector_lane_ref(vm, new_var_node(vm, srcvar, start), elem_ty,
+                                                  new_num(vm, srclane, start), start);
+                Node *assign_lane = new_binary(vm, ND_ASSIGN, dst_lane, src_lane, start);
+                chain = new_binary(vm, ND_COMMA, chain, assign_lane, start);
+            }
+            Node *result = new_var_node(vm, rvar, start);
+            return new_binary(vm, ND_COMMA, chain, result, start);
         }
-        if (equal(tok, ","))
-            tok = tok->next; // optional trailing comma
-        tok = skip(vm, tok, "}");
+
+        // Runtime/named vector mask (tracker #723): an ordinary integer
+        // vector expression, not a bare brace list. Already parsed above
+        // (as either the 2nd or 3rd argument) while disambiguating arg count.
         *rest = skip(vm, tok, ")");
 
-        // Materialize the source vector(s) into hidden locals so any side
-        // effects in v1/v2 run exactly once, then gather each destination
-        // lane individually.
+        if (!is_vector(mask->ty) || !is_integer(mask->ty->base))
+            error_tok(vm, start,
+                      "__builtin_shuffle: the index mask must be an integer "
+                      "vector (a brace-enclosed compile-time-constant list, "
+                      "or a runtime/named integer vector value)");
+        if (mask->ty->vec_len != lane_count)
+            error_tok(vm, start,
+                      "__builtin_shuffle: the index mask must have the same "
+                      "number of lanes as the vector being shuffled");
+        if (mask->ty->base->size != elem_ty->size)
+            error_tok(vm, start,
+                      "__builtin_shuffle: the index mask's element size must "
+                      "match the shuffled vector's element size");
+
+        // Materialize v1/v2/mask into hidden locals so side effects run
+        // exactly once, then gather each destination lane via a runtime
+        // index read out of the mask vector, wrapped into range with `%`.
         Obj *v1var = new_lvar(vm, "", 0, v1->ty);
         Node *chain = new_binary(vm, ND_ASSIGN, new_var_node(vm, v1var, start), v1, start);
 
@@ -9709,15 +9792,48 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             chain = new_binary(vm, ND_COMMA, chain, v2init, start);
         }
 
+        Obj *maskvar = new_lvar(vm, "", 0, mask->ty);
+        Node *maskinit = new_binary(vm, ND_ASSIGN, new_var_node(vm, maskvar, start), mask, start);
+        chain = new_binary(vm, ND_COMMA, chain, maskinit, start);
+
+        Type *mask_elem_ty = mask->ty->base;
         Obj *rvar = new_lvar(vm, "", 0, v1->ty);
-        Type *elem_ty = v1->ty->base;
         for (int i = 0; i < lane_count; i++) {
-            int idx = indices[i];
-            bool from_v2 = v2 && idx >= lane_count;
-            Obj *srcvar = from_v2 ? v2var : v1var;
-            int srclane = from_v2 ? idx - lane_count : idx;
-            Node *dst_lane = vector_lane_ref(vm, new_var_node(vm, rvar, start), elem_ty, i, start);
-            Node *src_lane = vector_lane_ref(vm, new_var_node(vm, srcvar, start), elem_ty, srclane, start);
+            // raw_idx = maskvar[i]  (mask's own element type)
+            Node *raw_idx = vector_lane_ref(vm, new_var_node(vm, maskvar, start), mask_elem_ty,
+                                             new_num(vm, i, start), start);
+
+            Node *dst_lane = vector_lane_ref(vm, new_var_node(vm, rvar, start), elem_ty,
+                                              new_num(vm, i, start), start);
+            Node *src_lane;
+            if (!v2) {
+                // idx = raw_idx % lane_count; result = v1var[idx]
+                Node *idx = new_binary(vm, ND_MOD, raw_idx, new_num(vm, lane_count, start), start);
+                src_lane = vector_lane_ref(vm, new_var_node(vm, v1var, start), elem_ty, idx, start);
+            } else {
+                // idx = raw_idx % (2*lane_count); result = idx < lane_count
+                //     ? v1var[idx] : v2var[idx - lane_count]
+                // Bind idx to a hidden scalar local so it's evaluated once.
+                Obj *idxvar = new_lvar(vm, "", 0, ty_int);
+                Node *idx_mod = new_binary(vm, ND_MOD, raw_idx,
+                                            new_num(vm, max_index, start), start);
+                Node *idx_init = new_binary(vm, ND_ASSIGN, new_var_node(vm, idxvar, start),
+                                             idx_mod, start);
+
+                Node *cmp = new_binary(vm, ND_LT, new_var_node(vm, idxvar, start),
+                                        new_num(vm, lane_count, start), start);
+                Node *then_lane = vector_lane_ref(vm, new_var_node(vm, v1var, start), elem_ty,
+                                                   new_var_node(vm, idxvar, start), start);
+                Node *els_idx = new_binary(vm, ND_SUB, new_var_node(vm, idxvar, start),
+                                            new_num(vm, lane_count, start), start);
+                Node *els_lane = vector_lane_ref(vm, new_var_node(vm, v2var, start), elem_ty,
+                                                  els_idx, start);
+                Node *cond = new_node(vm, ND_COND, start);
+                cond->cond = cmp;
+                cond->then = then_lane;
+                cond->els = els_lane;
+                src_lane = new_binary(vm, ND_COMMA, idx_init, cond, start);
+            }
             Node *assign_lane = new_binary(vm, ND_ASSIGN, dst_lane, src_lane, start);
             chain = new_binary(vm, ND_COMMA, chain, assign_lane, start);
         }
