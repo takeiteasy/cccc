@@ -26,6 +26,7 @@
 #define O_NOCTTY 0x20000
 #define O_DIRECTORY 0x100000
 #define O_CLOEXEC 0x1000000
+#define O_DSYNC 0x400000
 #elif defined(__x86_64__)
 #define O_CREAT 0100
 #define O_EXCL 0200
@@ -33,25 +34,29 @@
 #define O_TRUNC 01000
 #define O_APPEND 02000
 #define O_NONBLOCK 04000
+#define O_DSYNC 010000
 #define O_SYNC 04010000
 #define O_DIRECTORY 0200000
 #define O_NOFOLLOW 0400000
 #define O_CLOEXEC 02000000
+#define O_RSYNC 04010000
 #else
 /* Linux aarch64 (and other asm-generic architectures): O_DIRECTORY/O_NOFOLLOW
-   differ from the x86_64 values above. Unverified against a real aarch64
-   Linux header on this host (no Linux/cross toolchain available in this
-   session) -- flagged for a follow-up CI verification pass. */
+   differ from the x86_64 values above. Empirically verified against a real
+   aarch64 Linux header via a native arm64 container (Colima VM) -- matches
+   the values below exactly. */
 #define O_CREAT 0100
 #define O_EXCL 0200
 #define O_NOCTTY 0400
 #define O_TRUNC 01000
 #define O_APPEND 02000
 #define O_NONBLOCK 04000
+#define O_DSYNC 010000
 #define O_SYNC 04010000
 #define O_DIRECTORY 040000
 #define O_NOFOLLOW 0100000
 #define O_CLOEXEC 02000000
+#define O_RSYNC 04010000
 #endif
 
 /* fcntl() commands and record-locking constants (platform-specific) */

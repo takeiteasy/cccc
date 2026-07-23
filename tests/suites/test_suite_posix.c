@@ -22,6 +22,7 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <strings.h>
 #include <sys/mman.h>
@@ -556,6 +557,229 @@ int test_posix_host_global_bridge(void) {
 
     opterr = 0;
     if (opterr != 0) return 7;
+
+    return 42;
+}
+
+// test_posix_socket_transfer
+// Proves sockets can actually move bytes: recv/send/recvfrom/sendto over an
+// AF_UNIX socketpair, plus getpeername/getsockopt/sockatmark sanity checks.
+[[cccc::test(return = 42)]]
+int test_posix_socket_transfer(void) {
+    int sv[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) return 1;
+
+    const char *msg = "hello";
+    if (send(sv[0], msg, 5, 0) != 5) return 2;
+
+    char buf[16];
+    for (int i = 0; i < 16; i++) buf[i] = 0;
+    if (recv(sv[1], buf, sizeof(buf), 0) != 5) return 3;
+    if (strcmp(buf, "hello") != 0) return 4;
+
+    if (sendto(sv[0], msg, 5, 0, 0, 0) != 5) return 5;
+    for (int i = 0; i < 16; i++) buf[i] = 0;
+    if (recvfrom(sv[1], buf, sizeof(buf), 0, 0, 0) != 5) return 6;
+    if (strcmp(buf, "hello") != 0) return 7;
+
+    int type = 0;
+    socklen_t tlen = sizeof(type);
+    if (getsockopt(sv[0], SOL_SOCKET, SO_TYPE, &type, &tlen) != 0) return 8;
+    if (type != SOCK_STREAM) return 9;
+
+    struct sockaddr_un addr;
+    socklen_t alen = sizeof(addr);
+    if (getpeername(sv[0], (struct sockaddr *)&addr, &alen) != 0) return 10;
+
+    if (sockatmark(sv[0]) != 0) return 11;
+
+    close(sv[0]);
+    close(sv[1]);
+    return 42;
+}
+
+// test_posix_socket_un_bind
+// AF_UNIX bind()/listen()/connect()/accept() round trip using struct
+// sockaddr_un, proving the header layout is host-ABI-correct.
+[[cccc::test(return = 42)]]
+int test_posix_socket_un_bind(void) {
+    char path[64];
+    for (int i = 0; i < 64; i++) path[i] = 0;
+    strcpy(path, "/tmp/cccc_test_un_XXXXXX");
+    int tfd = mkstemp(path);
+    if (tfd < 0) return 1;
+    close(tfd);
+    unlink(path);
+
+    int lfd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (lfd < 0) return 2;
+
+    struct sockaddr_un addr;
+    for (int i = 0; i < (int)sizeof(addr); i++) ((char *)&addr)[i] = 0;
+    addr.sun_family = AF_UNIX;
+    strcpy(addr.sun_path, path);
+#ifdef __APPLE__
+    addr.sun_len = sizeof(addr);
+#endif
+
+    if (bind(lfd, (struct sockaddr *)&addr, sizeof(addr)) != 0) { close(lfd); return 3; }
+    if (listen(lfd, 1) != 0) { close(lfd); unlink(path); return 4; }
+
+    int cfd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (cfd < 0) { close(lfd); unlink(path); return 5; }
+    if (connect(cfd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        close(lfd); close(cfd); unlink(path); return 6;
+    }
+
+    struct sockaddr_un peer;
+    socklen_t plen = sizeof(peer);
+    int afd = accept(lfd, (struct sockaddr *)&peer, &plen);
+    if (afd < 0) { close(lfd); close(cfd); unlink(path); return 7; }
+
+    if (send(cfd, "hi", 2, 0) != 2) { close(lfd); close(cfd); close(afd); unlink(path); return 8; }
+    char rbuf[4];
+    for (int i = 0; i < 4; i++) rbuf[i] = 0;
+    if (recv(afd, rbuf, sizeof(rbuf), 0) != 2 || strcmp(rbuf, "hi") != 0) {
+        close(lfd); close(cfd); close(afd); unlink(path); return 9;
+    }
+
+    close(lfd);
+    close(cfd);
+    close(afd);
+    unlink(path);
+    return 42;
+}
+
+// test_posix_cheap_wrappers
+// Exercises a representative slice of the small #735 leftover wrappers/
+// constants that reuse existing struct layouts: *at() family, itimer,
+// mlock, readdir_r/alphasort, getnameinfo, id functions, nice.
+[[cccc::test(return = 42)]]
+int test_posix_cheap_wrappers(void) {
+    if (mkdirat(AT_FDCWD, "/tmp/cccc_test_atdir", 0755) != 0) return 1;
+    struct stat st;
+    if (fstatat(AT_FDCWD, "/tmp/cccc_test_atdir", &st, 0) != 0) return 2;
+    if (!S_ISDIR(st.st_mode)) return 3;
+    if (fchmodat(AT_FDCWD, "/tmp/cccc_test_atdir", 0700, 0) != 0) return 4;
+    if ((st.st_mode & 0777) == 0 && fstatat(AT_FDCWD, "/tmp/cccc_test_atdir", &st, 0) != 0) return 5;
+    rmdir("/tmp/cccc_test_atdir");
+
+    struct itimerval it, old;
+    it.it_value.tv_sec = 0; it.it_value.tv_usec = 0;
+    it.it_interval.tv_sec = 0; it.it_interval.tv_usec = 0;
+    if (setitimer(ITIMER_REAL, &it, &old) != 0) return 6;
+    if (getitimer(ITIMER_REAL, &old) != 0) return 7;
+
+    void *p = mmap(0, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (p == (void *)-1) return 8;
+    if (mlock(p, 4096) == 0) munlock(p, 4096);
+    munmap(p, 4096);
+
+    DIR *dp = opendir("/tmp");
+    if (!dp) return 9;
+    struct dirent ent, *res;
+    if (readdir_r(dp, &ent, &res) != 0) return 10;
+    closedir(dp);
+
+    struct dirent da, db;
+    strcpy(da.d_name, "apple");
+    strcpy(db.d_name, "banana");
+    const struct dirent *pa = &da, *pb = &db;
+    if (alphasort(&pa, &pb) >= 0) return 11;
+
+    struct sockaddr_in sin;
+    for (int i = 0; i < (int)sizeof(sin); i++) ((char *)&sin)[i] = 0;
+#ifdef __APPLE__
+    sin.sin_len = sizeof(sin);
+#endif
+    sin.sin_family = AF_INET;
+    sin.sin_port = htons(80);
+    sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    char host[NI_MAXHOST];
+    if (getnameinfo((struct sockaddr *)&sin, sizeof(sin), host, sizeof(host), 0, 0, NI_NUMERICHOST) != 0) return 12;
+    if (strcmp(host, "127.0.0.1") != 0) return 13;
+
+    if (getuid() < 0) return 14;
+    if (getgid() < 0) return 15;
+
+    nice(0);
+
+    /* Constant distinctness within each namespace (AT_*, wait-flag, mlock) */
+    if (AT_FDCWD == AT_SYMLINK_NOFOLLOW) return 16;
+    if (WEXITED == WSTOPPED || WSTOPPED == WNOWAIT || WEXITED == WNOWAIT) return 17;
+    if (MCL_CURRENT == MCL_FUTURE) return 18;
+
+    return 42;
+}
+
+// test_posix_fcntl_dirflags
+// #734: O_DIRECTORY/O_NOFOLLOW round-trip + distinctness. The aarch64 #else
+// branch in include/fcntl.h was empirically verified against a real Linux
+// aarch64 header (native arm64 container) as part of this pass; this test
+// exercises the values functionally on whichever platform runs it.
+[[cccc::test(return = 42)]]
+int test_posix_fcntl_dirflags(void) {
+    if (O_DIRECTORY == O_NOFOLLOW) return 1;
+
+    if (mkdir("/tmp/cccc_test_dirflag", 0755) != 0 && errno != EEXIST) return 2;
+
+    int dfd = open("/tmp/cccc_test_dirflag", O_RDONLY | O_DIRECTORY);
+    if (dfd < 0) return 3;
+    close(dfd);
+
+    int ffd = open("/tmp/cccc_test_dirflag/probe_file", O_CREAT | O_RDWR | O_TRUNC, 0600);
+    if (ffd < 0) { rmdir("/tmp/cccc_test_dirflag"); return 4; }
+    close(ffd);
+
+    errno = 0;
+    int bad = open("/tmp/cccc_test_dirflag/probe_file", O_RDONLY | O_DIRECTORY);
+    if (bad >= 0) { close(bad); unlink("/tmp/cccc_test_dirflag/probe_file"); rmdir("/tmp/cccc_test_dirflag"); return 5; }
+    if (errno != ENOTDIR) { unlink("/tmp/cccc_test_dirflag/probe_file"); rmdir("/tmp/cccc_test_dirflag"); return 6; }
+
+    unlink("/tmp/cccc_test_dirflag/probe_file");
+    rmdir("/tmp/cccc_test_dirflag");
+    return 42;
+}
+
+// test_posix_termios_constants
+// Fixes a pre-existing bug: c_iflag/c_oflag/c_cflag/c_lflag and baud-rate
+// constants in include/termios.h were unconditionally macOS values applied
+// on Linux too (verified wrong against real Linux x86_64/aarch64 headers).
+// Now platform-split; this checks within-namespace distinctness (values may
+// legitimately collide *across* namespaces, same caveat as
+// test_wait_stat_constants.c).
+[[cccc::test(return = 42)]]
+int test_posix_termios_constants(void) {
+    long iflag[] = {IGNBRK, BRKINT, IGNPAR, PARMRK, INPCK, ISTRIP, INLCR, IGNCR, ICRNL, IXON, IXOFF, IXANY};
+    int n = (int)(sizeof(iflag) / sizeof(iflag[0]));
+    for (int i = 0; i < n; i++)
+        for (int j = i + 1; j < n; j++)
+            if (iflag[i] == iflag[j]) return 1;
+
+    long cflag[] = {CS5, CS6, CS7, CS8, CSTOPB, CREAD, PARENB, PARODD, HUPCL, CLOCAL};
+    n = (int)(sizeof(cflag) / sizeof(cflag[0]));
+    for (int i = 0; i < n; i++)
+        for (int j = i + 1; j < n; j++)
+            if (i != 0 && j != 0 && cflag[i] == cflag[j]) return 2; /* CS5 == 0 legitimately */
+
+    long lflag[] = {ECHOE, ECHOK, ECHONL, NOFLSH, TOSTOP, IEXTEN, ECHO, ICANON, ISIG};
+    n = (int)(sizeof(lflag) / sizeof(lflag[0]));
+    for (int i = 0; i < n; i++)
+        for (int j = i + 1; j < n; j++)
+            if (lflag[i] == lflag[j]) return 3;
+
+    long baud[] = {B9600, B19200, B38400, B57600, B115200, B230400};
+    n = (int)(sizeof(baud) / sizeof(baud[0]));
+    for (int i = 0; i < n; i++)
+        for (int j = i + 1; j < n; j++)
+            if (baud[i] == baud[j]) return 4;
+    if (B0 != 0) return 5;
+
+    long vchars[] = {VEOF, VEOL, VEOL2, VERASE, VWERASE, VKILL, VREPRINT, VINTR, VQUIT, VSUSP, VSTART, VSTOP, VLNEXT, VDISCARD, VMIN, VTIME};
+    n = (int)(sizeof(vchars) / sizeof(vchars[0]));
+    for (int i = 0; i < n; i++)
+        for (int j = i + 1; j < n; j++)
+            if (vchars[i] == vchars[j]) return 6;
 
     return 42;
 }

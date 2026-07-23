@@ -21,6 +21,14 @@ typedef long long         blkcnt_t;
 typedef unsigned int      useconds_t;
 typedef unsigned char     sa_family_t;
 typedef unsigned int      socklen_t;
+typedef int               clockid_t;
+typedef int                key_t;
+typedef unsigned int       id_t;
+typedef unsigned int       fsblkcnt_t;
+typedef unsigned int       fsfilcnt_t;
+typedef int                nl_item;
+/* timer_t (POSIX timer_create/timer_settime API) intentionally omitted:
+   macOS does not implement this API, so there is no host type to alias. */
 #else
 /* Linux / generic POSIX */
 typedef unsigned long     dev_t;
@@ -44,6 +52,13 @@ typedef long              blkcnt_t;
 typedef unsigned int      useconds_t;
 typedef unsigned short    sa_family_t;
 typedef unsigned int      socklen_t;
+typedef int               clockid_t;
+typedef void              *timer_t;
+typedef int                key_t;
+typedef unsigned int       id_t;
+typedef unsigned long      fsblkcnt_t;
+typedef unsigned long      fsfilcnt_t;
+typedef int                nl_item;
 #endif
 
 #endif /* __SYS_TYPES_H */

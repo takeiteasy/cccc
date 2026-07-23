@@ -108,6 +108,13 @@ extern int pause(void);
 /* Misc process/host */
 extern int fchdir(int fd);
 extern int gethostname(char *name, size_t namelen);
+extern int sethostname(const char *name, size_t namelen);
+extern int lchown(const char *path, uid_t owner, gid_t group);
+extern int ttyname_r(int fd, char *buf, size_t buflen);
+extern int getlogin_r(char *name, size_t namesize);
+extern int setgroups(int ngroups, const gid_t *grouplist);
+extern int initgroups(const char *user, gid_t group);
+extern int nice(int incr);
 
 /* Scatter/gather I/O */
 struct iovec {

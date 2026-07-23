@@ -125,13 +125,29 @@ struct stat {
 #define UTIME_OMIT 0x3FFFFFFE
 #endif
 
+/* *at() family: fd + flag constants (verified against real macOS and Linux
+   x86_64/aarch64 headers -- Linux x86_64/aarch64 values match each other). */
+#ifdef __APPLE__
+#define AT_FDCWD             -2
+#define AT_SYMLINK_NOFOLLOW  0x0020
+#define AT_REMOVEDIR         0x0080
+#else
+#define AT_FDCWD             -100
+#define AT_SYMLINK_NOFOLLOW  0x100
+#define AT_REMOVEDIR         0x200
+#endif
+
 extern int stat(const char *path, struct stat *buf);
 extern int fstat(int fd, struct stat *buf);
 extern int lstat(const char *path, struct stat *buf);
+extern int fstatat(int fd, const char *path, struct stat *buf, int flag);
 extern int chmod(const char *path, mode_t mode);
 extern int fchmod(int fd, mode_t mode);
+extern int fchmodat(int fd, const char *path, mode_t mode, int flag);
 extern int mkdir(const char *path, mode_t mode);
+extern int mkdirat(int fd, const char *path, mode_t mode);
 extern int mkfifo(const char *path, mode_t mode);
+extern int mknod(const char *path, mode_t mode, dev_t dev);
 extern mode_t umask(mode_t cmask);
 
 #endif /* __SYS_STAT_H */

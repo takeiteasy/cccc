@@ -140,6 +140,56 @@ static long long wrap_connect_gil(long long sockfd, long long addr, long long ad
     return (long long)r;
 }
 
+static long long wrap_recv_gil(long long sockfd, long long buf, long long len, long long flags) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)recv((int)sockfd, (void *)buf, (size_t)len, (int)flags);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    ssize_t r = recv((int)sockfd, (void *)buf, (size_t)len, (int)flags);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_send_gil(long long sockfd, long long buf, long long len, long long flags) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)send((int)sockfd, (const void *)buf, (size_t)len, (int)flags);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    ssize_t r = send((int)sockfd, (const void *)buf, (size_t)len, (int)flags);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_recvfrom_gil(long long sockfd, long long buf, long long len, long long flags,
+                                    long long addr, long long addrlen) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)recvfrom((int)sockfd, (void *)buf, (size_t)len, (int)flags,
+                                    (struct sockaddr *)addr, (socklen_t *)addrlen);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    ssize_t r = recvfrom((int)sockfd, (void *)buf, (size_t)len, (int)flags,
+                          (struct sockaddr *)addr, (socklen_t *)addrlen);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_sendto_gil(long long sockfd, long long buf, long long len, long long flags,
+                                  long long addr, long long addrlen) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)sendto((int)sockfd, (const void *)buf, (size_t)len, (int)flags,
+                                  (const struct sockaddr *)addr, (socklen_t)addrlen);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    ssize_t r = sendto((int)sockfd, (const void *)buf, (size_t)len, (int)flags,
+                        (const struct sockaddr *)addr, (socklen_t)addrlen);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
 static long long wrap_wait_gil(long long wstatus) {
     VirtualMachine *vm = current_vm();
     if (!vm || !vm->gil_initialized)
@@ -480,6 +530,10 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "poll",    (void*)wrap_poll_gil,    3, 0);
     cc_register_cfunc(vm, "accept",  (void*)wrap_accept_gil,  3, 0);
     cc_register_cfunc(vm, "connect", (void*)wrap_connect_gil, 3, 0);
+    cc_register_cfunc(vm, "recv",     (void*)wrap_recv_gil,     4, 0);
+    cc_register_cfunc(vm, "send",     (void*)wrap_send_gil,     4, 0);
+    cc_register_cfunc(vm, "recvfrom", (void*)wrap_recvfrom_gil, 6, 0);
+    cc_register_cfunc(vm, "sendto",   (void*)wrap_sendto_gil,   6, 0);
     cc_register_cfunc(vm, "wait",    (void*)wrap_wait_gil,    1, 0);
     cc_register_cfunc(vm, "waitpid", (void*)wrap_waitpid_gil, 3, 0);
     cc_register_cfunc(vm, "sleep",   (void*)wrap_sleep_gil,   1, 0);
@@ -534,6 +588,13 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "alarm",    (void*)alarm,    1, 0);
     cc_register_cfunc(vm, "fchdir",   (void*)fchdir,   1, 0);
     cc_register_cfunc(vm, "gethostname",(void*)gethostname,2, 0);
+    cc_register_cfunc(vm, "sethostname",(void*)sethostname,2, 0);
+    cc_register_cfunc(vm, "lchown",   (void*)lchown,   3, 0);
+    cc_register_cfunc(vm, "ttyname_r",(void*)ttyname_r,3, 0);
+    cc_register_cfunc(vm, "getlogin_r",(void*)getlogin_r,2, 0);
+    cc_register_cfunc(vm, "setgroups",(void*)setgroups,2, 0);
+    cc_register_cfunc(vm, "initgroups",(void*)initgroups,2, 0);
+    cc_register_cfunc(vm, "nice",     (void*)nice,     1, 0);
     cc_register_cfunc(vm, "readv",    (void*)readv,    3, 0);
     cc_register_cfunc(vm, "writev",   (void*)writev,   3, 0);
     cc_register_variadic_cfunc(vm, "open",   (void*)wrap_open,  2, 0);
@@ -562,6 +623,12 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "mprotect",     (void*)mprotect,     3, 0);
     cc_register_cfunc(vm, "msync",        (void*)msync,        3, 0);
     cc_register_cfunc(vm, "posix_madvise",(void*)posix_madvise,3, 0);
+    cc_register_cfunc(vm, "mlock",     (void*)mlock,     2, 0);
+    cc_register_cfunc(vm, "munlock",   (void*)munlock,   2, 0);
+    cc_register_cfunc(vm, "mlockall",  (void*)mlockall,  1, 0);
+    cc_register_cfunc(vm, "munlockall",(void*)munlockall,0, 0);
+    cc_register_cfunc(vm, "shm_open",  (void*)shm_open,  3, 0);
+    cc_register_cfunc(vm, "shm_unlink",(void*)shm_unlink,1, 0);
 #ifdef __linux__
     // mremap: Linux-only glibc/syscall extension for resizing an existing
     // mapping. Forward-declared here (rather than defining _GNU_SOURCE
@@ -584,17 +651,28 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "stat",    (void*)stat,    2, 0);
     cc_register_cfunc(vm, "fstat",   (void*)fstat,   2, 0);
     cc_register_cfunc(vm, "lstat",   (void*)lstat,   2, 0);
+    cc_register_cfunc(vm, "fstatat", (void*)fstatat, 4, 0);
     cc_register_cfunc(vm, "chmod",   (void*)chmod,   2, 0);
     cc_register_cfunc(vm, "fchmod",  (void*)fchmod,  2, 0);
+    cc_register_cfunc(vm, "fchmodat",(void*)fchmodat,4, 0);
     cc_register_cfunc(vm, "fchown",  (void*)fchown,  3, 0);
     cc_register_cfunc(vm, "geteuid", (void*)geteuid, 0, 0);
+    cc_register_cfunc(vm, "getuid",  (void*)getuid,  0, 0);
+    cc_register_cfunc(vm, "getgid",  (void*)getgid,  0, 0);
+    cc_register_cfunc(vm, "getegid", (void*)getegid, 0, 0);
     cc_register_cfunc(vm, "readlink",(void*)readlink,3, 0);
     cc_register_cfunc(vm, "getpagesize",(void*)getpagesize,0, 0);
     cc_register_cfunc(vm, "mkdir",   (void*)mkdir,   2, 0);
+    cc_register_cfunc(vm, "mkdirat", (void*)mkdirat, 3, 0);
     cc_register_cfunc(vm, "mkfifo",  (void*)mkfifo,  2, 0);
+    cc_register_cfunc(vm, "mknod",   (void*)mknod,   3, 0);
     cc_register_cfunc(vm, "umask",   (void*)wrap_umask,  1, 0);
     cc_register_cfunc(vm, "utime",   (void*)utime,       2, 0);
     cc_register_cfunc(vm, "utimes",  (void*)utimes,      2, 0);
+    cc_register_cfunc(vm, "futimes", (void*)futimes,     2, 0);
+    cc_register_cfunc(vm, "lutimes", (void*)lutimes,     2, 0);
+    cc_register_cfunc(vm, "setitimer",(void*)setitimer,  3, 0);
+    cc_register_cfunc(vm, "getitimer",(void*)getitimer,  2, 0);
     cc_register_cfunc(vm, "htonl",   (void*)wrap_htonl,  1, 0);
     cc_register_cfunc(vm, "htons",   (void*)wrap_htons,  1, 0);
     cc_register_cfunc(vm, "ntohl",   (void*)wrap_ntohl,  1, 0);
@@ -607,18 +685,26 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "bcopy",   (void*)wrap_bcopy, 3, 0);
 
     cc_register_cfunc(vm, "socket",      (void*)socket,      3, 0);
+    cc_register_cfunc(vm, "socketpair",  (void*)socketpair,  4, 0);
     cc_register_cfunc(vm, "bind",        (void*)bind,        3, 0);
     cc_register_cfunc(vm, "listen",      (void*)listen,      2, 0);
     cc_register_cfunc(vm, "setsockopt",  (void*)setsockopt,  5, 0);
+    cc_register_cfunc(vm, "getsockopt",  (void*)getsockopt,  5, 0);
     cc_register_cfunc(vm, "getsockname", (void*)getsockname, 3, 0);
+    cc_register_cfunc(vm, "getpeername", (void*)getpeername, 3, 0);
+    cc_register_cfunc(vm, "sockatmark",  (void*)sockatmark,  1, 0);
     cc_register_cfunc(vm, "shutdown",    (void*)shutdown,    2, 0);
     cc_register_cfunc(vm, "gethostbyname",(void*)gethostbyname, 1, 0);
+    cc_register_cfunc(vm, "gethostbyaddr",(void*)gethostbyaddr, 3, 0);
     cc_register_cfunc(vm, "getaddrinfo", (void*)getaddrinfo,    4, 0);
     cc_register_cfunc(vm, "freeaddrinfo",(void*)wrap_freeaddrinfo, 1, 0);
+    cc_register_cfunc(vm, "getnameinfo", (void*)getnameinfo,    7, 0);
 
     cc_register_cfunc(vm, "opendir",  (void*)opendir,  1, 0);
     cc_register_cfunc(vm, "readdir",  (void*)readdir,  1, 0);
+    cc_register_cfunc(vm, "readdir_r",(void*)readdir_r,3, 0);
     cc_register_cfunc(vm, "closedir", (void*)closedir, 1, 0);
+    cc_register_cfunc(vm, "alphasort",(void*)alphasort,2, 0);
     cc_register_cfunc(vm, "tcgetattr",(void*)tcgetattr, 2, 0);
     cc_register_cfunc(vm, "tcsetattr",(void*)tcsetattr, 3, 0);
     cc_register_cfunc(vm, "cfgetispeed",(void*)cfgetispeed, 1, 0);

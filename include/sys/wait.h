@@ -23,12 +23,25 @@
 #ifdef __APPLE__
 #define WCONTINUED 0x10
 #define WIFCONTINUED(status) (WSTOPSIG(status) == 0x13)
+/* waitid() 4th-argument flags (verified against real macOS header). */
+#define WEXITED  0x00000004
+#define WSTOPPED 0x00000008
+#define WNOWAIT  0x00000020
 #else
 #define WCONTINUED 8
 #define WIFCONTINUED(status) ((status) == 0xffff)
+/* waitid() 4th-argument flags (verified against real Linux x86_64/aarch64
+   headers -- values match across x86_64/aarch64). */
+#define WSTOPPED 2
+#define WEXITED  4
+#define WNOWAIT  0x01000000
 #endif
 
 extern pid_t wait(int *status);
 extern pid_t waitpid(pid_t pid, int *status, int options);
+
+/* waitid() is deferred: it needs a guest-visible siginfo_t, which does not
+   yet exist in include/signal.h -- the same struct-layout work class as the
+   items tracked in the follow-up ticket for this POSIX coverage pass. */
 
 #endif /* __SYS_WAIT_H */

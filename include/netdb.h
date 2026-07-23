@@ -40,6 +40,10 @@ struct addrinfo {
 #define AI_NUMERICHOST 0x00000004
 #define AI_NUMERICSERV 0x00001000
 
+/* EAI_* differ between macOS (small positive numbers) and Linux glibc
+   (negative numbers). Verified against real macOS and Linux x86_64/aarch64
+   headers -- Linux values match across x86_64/aarch64. */
+#ifdef __APPLE__
 #define EAI_AGAIN    2
 #define EAI_BADFLAGS 3
 #define EAI_FAIL     4
@@ -48,11 +52,47 @@ struct addrinfo {
 #define EAI_NONAME   8
 #define EAI_SERVICE  9
 #define EAI_SOCKTYPE 10
+#define EAI_SYSTEM   11
+#define EAI_OVERFLOW 14
+#else
+#define EAI_BADFLAGS  -1
+#define EAI_NONAME    -2
+#define EAI_AGAIN     -3
+#define EAI_FAIL      -4
+#define EAI_FAMILY    -6
+#define EAI_SOCKTYPE  -7
+#define EAI_SERVICE   -8
+#define EAI_MEMORY    -10
+#define EAI_SYSTEM    -11
+#define EAI_OVERFLOW  -12
+#endif
+
+/* getnameinfo() flags -- verified against real macOS and Linux
+   x86_64/aarch64 headers (Linux values match across x86_64/aarch64). */
+#ifdef __APPLE__
+#define NI_NOFQDN      0x00000001
+#define NI_NUMERICHOST 0x00000002
+#define NI_NAMEREQD    0x00000004
+#define NI_NUMERICSERV 0x00000008
+#define NI_DGRAM       0x00000010
+#else
+#define NI_NUMERICHOST 0x00000001
+#define NI_NUMERICSERV 0x00000002
+#define NI_NOFQDN      0x00000004
+#define NI_NAMEREQD    0x00000008
+#define NI_DGRAM       0x00000010
+#endif
+#define NI_MAXHOST 1025
+#define NI_MAXSERV 32
 
 extern struct hostent *gethostbyname(const char *name);
+extern struct hostent *gethostbyaddr(const void *addr, socklen_t len, int type);
 extern int getaddrinfo(const char *node, const char *service,
                        const struct addrinfo *hints,
                        struct addrinfo **res);
 extern void freeaddrinfo(struct addrinfo *res);
+extern int getnameinfo(const struct sockaddr *addr, socklen_t addrlen,
+                       char *host, socklen_t hostlen,
+                       char *serv, socklen_t servlen, int flags);
 
 #endif /* __NETDB_H */

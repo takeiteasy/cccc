@@ -45,11 +45,30 @@
 #define MREMAP_FIXED   2
 #endif
 
+/* Memory locking (verified against real macOS and Linux x86_64/aarch64
+   headers -- Linux values match across x86_64/aarch64). */
+#define MCL_CURRENT 1
+#define MCL_FUTURE  2
+#ifdef __linux__
+#define MCL_ONFAULT 4
+#define MAP_LOCKED    0x2000
+#define MAP_POPULATE  0x8000
+#define MAP_NORESERVE 0x4000
+#else
+#define MAP_NORESERVE 0x0040
+#endif
+
 extern void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
 extern int munmap(void *addr, size_t length);
 extern int mprotect(void *addr, size_t len, int prot);
 extern int msync(void *addr, size_t len, int flags);
 extern int posix_madvise(void *addr, size_t len, int advice);
+extern int mlock(const void *addr, size_t len);
+extern int munlock(const void *addr, size_t len);
+extern int mlockall(int flags);
+extern int munlockall(void);
+extern int shm_open(const char *name, int oflag, mode_t mode);
+extern int shm_unlink(const char *name);
 #ifdef __linux__
 // mremap resizes/moves an existing mapping; Linux-only glibc/syscall
 // extension, absent on macOS/BSD (#729).

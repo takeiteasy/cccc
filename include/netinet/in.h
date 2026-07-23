@@ -23,9 +23,14 @@ typedef uint32_t in_addr_t;
 #define PF_INET  AF_INET
 #define PF_INET6 AF_INET6
 
-#define IPPROTO_IP   0
-#define IPPROTO_TCP  6
-#define IPPROTO_UDP  17
+#define IPPROTO_IP     0
+#define IPPROTO_ICMP   1
+#define IPPROTO_TCP    6
+#define IPPROTO_UDP    17
+#define IPPROTO_ICMPV6 58
+#define IPPROTO_RAW    255
+
+#define IPPORT_RESERVED 1024
 
 #define INADDR_ANY       ((in_addr_t)0x00000000)
 #define INADDR_LOOPBACK  ((in_addr_t)0x7f000001)
