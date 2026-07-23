@@ -4707,6 +4707,22 @@ void init_macros(VirtualMachine *vm) {
     define_macro(vm, "_WIN64", "1");
 #endif
 
+    // POSIX feature-test macros (#732). CCCC's POSIX headers are always-on
+    // and ungated — these are predefined so third-party code that
+    // feature-tests before including them (e.g. `#if !defined(_XOPEN_SOURCE)`)
+    // sees the full POSIX.1-2008 / X/Open 7 surface CCCC actually exposes,
+    // rather than always seeing nothing. define_macro()/add_macro() silently
+    // overwrite on redefinition (no "redefined" diagnostic), so a user
+    // `-D`/`#define` of any of these before/instead of this point always
+    // wins — this is a default, not an override lock. Not defined on
+    // Windows, where the POSIX headers themselves are unavailable.
+#ifndef _WIN32
+    define_macro(vm, "_POSIX_C_SOURCE", "200809L");
+    define_macro(vm, "_POSIX_SOURCE", "1");
+    define_macro(vm, "_XOPEN_SOURCE", "700");
+    define_macro(vm, "_DEFAULT_SOURCE", "1");
+#endif
+
 #ifdef __linux__
     define_macro(vm, "__linux__", "1");
     define_macro(vm, "PLATFORM_LINUX", "1");

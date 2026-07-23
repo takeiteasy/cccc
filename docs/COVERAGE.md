@@ -1223,7 +1223,7 @@ if (__builtin_mul_overflow(a, b, &r))
 |---|---|---|
 | `<assert.h>` | ✓ | |
 | `<ctype.h>` | ✓ | |
-| `<errno.h>` | ✓ | |
+| `<errno.h>` | ~ | `errno` is a plain guest global and constants (`EINVAL`, etc.) resolve correctly, but no POSIX FFI wrapper currently writes the host's errno back into it on failure — a failing call like `access()` or `sysconf()` leaves guest `errno` unchanged. Tracked as a follow-up (see ticket tracker). |
 | `<float.h>` | ✓ | |
 | `<limits.h>` | ✓ | |
 | `<locale.h>` | ✓ | Host locale APIs registered |
@@ -1299,7 +1299,24 @@ C17 is a bug-fix release — no new language features or library functions were 
 
 ### POSIX Headers
 
-POSIX headers are embedded and backed by host OS calls. They are only available on POSIX targets (not Windows).
+POSIX headers are embedded and backed by host OS calls. They are only available on POSIX targets (not Windows). They are always-on and ungated by feature-test macros.
+
+CCCC predefines the common POSIX feature-test macros — `_POSIX_C_SOURCE`
+(`200809L`), `_POSIX_SOURCE` (`1`), `_XOPEN_SOURCE` (`700`), and
+`_DEFAULT_SOURCE` (`1`) — so third-party code that feature-tests before
+including a POSIX header (e.g. `#if !defined(_XOPEN_SOURCE)`) sees the
+POSIX.1-2008 / X/Open 7 surface CCCC actually exposes, rather than always
+seeing nothing. A user `-D`/`#define` of any of these overrides the default
+silently (predefined macros are not redefinition-locked).
+
+`sysconf`/`pathconf`/`fpathconf`/`confstr` use CCCC's own canonical,
+host-independent numbering for `_SC_*`/`_PC_*`/`_CS_*` (defined in
+`include/unistd.h`), translated to the host's real numbering by wrapper
+functions in `src/stdlib/posix.c` before the host call. This keeps compiled
+`.c4` bytecode portable across hosts whose libc disagree on these numbers
+(e.g. macOS vs glibc). `sysconf(_SC_VERSION)`, `_SC_2_VERSION`, and
+`_SC_XOPEN_VERSION` answer with CCCC's own VM-model constants rather than the
+host's; an unrecognized or host-unsupported name returns `-1`/`0`.
 
 | Header | Status | Notes |
 |---|---|---|
@@ -1330,7 +1347,7 @@ POSIX headers are embedded and backed by host OS calls. They are only available 
 | `<sys/types.h>` | ✓ | Basic system types (`dev_t`, `ino_t`, `mode_t`, `nlink_t`, `uid_t`, `gid_t`, `off_t`, `pid_t`, `blksize_t`, `blkcnt_t`, `useconds_t`, `sa_family_t`, `socklen_t`) |
 | `<sys/wait.h>` | ✓ | Process wait (`wait`, `waitpid`), `WNOHANG`, `WUNTRACED`, `WCONTINUED`, `WIFEXITED`, `WEXITSTATUS`, `WIFSIGNALED`, `WIFSTOPPED`, `WIFCONTINUED`, `WSTOPSIG`, `WCOREDUMP` |
 | `<termios.h>` | ✓ | Terminal I/O (`tcgetattr`, `tcsetattr`, `cfgetispeed`, `cfgetospeed`, `cfsetispeed`, `cfsetospeed`, `cfsetspeed`, `cfmakeraw`, `tcdrain`, `tcflow`, `tcflush`, `tcsendbreak`, `struct termios`, `cc_t`, `speed_t`, `tcflag_t`) |
-| `<unistd.h>` | ✓ | Core POSIX API (`read`, `write`, `pread`, `pwrite`, `close`, `lseek`, `access`, `unlink`, `rmdir`, `chdir`, `getcwd`, `getpid`, `getppid`, `getuid`, `geteuid`, `getgid`, `getegid`, `seteuid`, `setegid`, `setuid`, `setgid`, `getgroups`, `getlogin`, `fchown`, `chown`, `readlink`, `symlink`, `link`, `fdatasync`, `getpagesize`, `sleep`, `usleep`, `alarm`, `pause`, `getpgid`, `setpgid`, `getpgrp`, `setsid`, `getsid`, `fchdir`, `gethostname`, `readv`, `writev`, `struct iovec`, `pipe`, `fork`, `execv`, `execve`, `execl`, `execlp`, `execle`, `execvp`, `_exit`, `ssize_t`, `STDIN/STDOUT/STDERR_FILENO`, `SEEK_*`, `F_OK`/`R_OK`/`W_OK`/`X_OK`, `_SC_PAGESIZE`; `splice` declared and registered under `__linux__`) |
+| `<unistd.h>` | ✓ | Core POSIX API (`read`, `write`, `pread`, `pwrite`, `close`, `lseek`, `access`, `unlink`, `rmdir`, `chdir`, `getcwd`, `getpid`, `getppid`, `getuid`, `geteuid`, `getgid`, `getegid`, `seteuid`, `setegid`, `setuid`, `setgid`, `getgroups`, `getlogin`, `fchown`, `chown`, `readlink`, `symlink`, `link`, `fdatasync`, `getpagesize`, `sleep`, `usleep`, `alarm`, `pause`, `getpgid`, `setpgid`, `getpgrp`, `setsid`, `getsid`, `fchdir`, `gethostname`, `readv`, `writev`, `struct iovec`, `pipe`, `fork`, `execv`, `execve`, `execl`, `execlp`, `execle`, `execvp`, `_exit`, `ssize_t`, `STDIN/STDOUT/STDERR_FILENO`, `SEEK_*`, `F_OK`/`R_OK`/`W_OK`/`X_OK`, `sysconf`, `pathconf`, `fpathconf`, `confstr`, canonical `_SC_*`/`_PC_*`/`_CS_*` constants, `_POSIX_VERSION`/`_POSIX2_VERSION`/`_XOPEN_VERSION`; `splice` declared and registered under `__linux__`) |
 | `<utime.h>` | ✓ | File time manipulation (`utime`, `struct utimbuf`) |
 
 ---

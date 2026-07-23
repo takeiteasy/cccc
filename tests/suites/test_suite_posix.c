@@ -481,4 +481,51 @@ int test_quick_exit(void) {
     return 1;
 }
 
+// test_posix_sysconf_pathconf_confstr (#732)
+// Exercises sysconf()/pathconf()/fpathconf()/confstr() against CCCC's
+// canonical _SC_*/_PC_*/_CS_* numbering (translated to the host's real
+// numbering by wrap_sysconf/wrap_pathconf/wrap_fpathconf/wrap_confstr in
+// src/stdlib/posix.c), plus the predefined POSIX feature-test macros.
+[[cccc::test(return = 42)]]
+int test_posix_sysconf_pathconf_confstr(void) {
+    long ps = sysconf(_SC_PAGESIZE);
+    if (ps <= 0 || ps != getpagesize()) return 1;
+
+    if (sysconf(_SC_OPEN_MAX) <= 0) return 2;
+    if (sysconf(_SC_NPROCESSORS_ONLN) < 1) return 3;
+
+    // Version queries answer with CCCC's VM-model constants directly.
+    if (sysconf(_SC_VERSION) != 200809L) return 4;
+    if (_POSIX_VERSION != 200809L) return 5;
+    if (_XOPEN_VERSION != 700) return 6;
+
+    // Unknown/unsupported name -> -1 (POSIX-correct failure signal).
+    if (sysconf(99999) != -1) return 7;
+
+    int fd = open("/", O_RDONLY);
+    if (fd < 0) return 8;
+    long pm = pathconf("/", _PC_PATH_MAX);
+    long fpm = fpathconf(fd, _PC_PATH_MAX);
+    close(fd);
+    if (pm <= 0 || fpm <= 0) return 9;
+
+    char buf[256];
+    size_t cs = confstr(_CS_PATH, buf, sizeof(buf));
+    if (cs == 0 || cs > sizeof(buf)) return 10;
+
+    // Feature-test macros are predefined so gated third-party code sees the
+    // always-on POSIX surface CCCC exposes.
+#if !defined(_POSIX_C_SOURCE) || _POSIX_C_SOURCE < 200809L
+#error "_POSIX_C_SOURCE not predefined as expected"
+#endif
+#if !defined(_XOPEN_SOURCE) || _XOPEN_SOURCE < 700
+#error "_XOPEN_SOURCE not predefined as expected"
+#endif
+#if !defined(_DEFAULT_SOURCE)
+#error "_DEFAULT_SOURCE not predefined as expected"
+#endif
+
+    return 42;
+}
+
 #pragma cccc suite end
