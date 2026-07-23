@@ -13,5 +13,11 @@
 /fuzz/corpus
 /fuzz/out
 
+# Host-produced build directory: object files, native binaries, and
+# --build-cache dirs from local test runs are architecture-specific and must
+# never leak into a cross-platform Docker image (they can shadow-cache stale
+# object files across incompatible architectures).
+/build
+
 __pycache__/
 *.pyc

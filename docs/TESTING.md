@@ -121,7 +121,7 @@ make macos-x86_64-test
 architecture. `macos-x86_64-smoke` additionally:
 
 - asserts that Rosetta reports `uname -m` as `x86_64`;
-- runs `test_arithmetic.c` and the `--asm-passthru` regression;
+- runs `test_fortytwo.c` and the `--asm-passthru` regression;
 - runs `-c=native` with Apple Clang, checks the child executable with `file`,
   and executes it under Rosetta.
 
@@ -184,7 +184,7 @@ Then run the three-stage workflow:
 
 ```bash
 make linux-aarch64-build    # nerdctl build --platform linux/arm64
-make linux-aarch64-smoke    # assert uname -m == aarch64; run test_arithmetic.c
+make linux-aarch64-smoke    # assert uname -m == aarch64; run test_fortytwo.c
 make linux-aarch64-test     # full run_tests.py suite (source + c4 + sqlite)
 ```
 

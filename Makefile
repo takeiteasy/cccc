@@ -116,8 +116,14 @@ LIBBACKTRACE_A :=
 ifneq ($(OS),Windows_NT)
   ifneq ($(CCCC_HAS_BACKTRACE),0)
     LIBBACKTRACE_DIR  := src/backtrace
-    LIBBACKTRACE_A    := build/libbacktrace.a
-    LIBBACKTRACE_OBJS_DIR := build/libbacktrace
+    # Namespace the archive/objects by $(CC) so a cross-arch invocation (e.g.
+    # macos-x86_64-build's CC="clang -arch x86_64") never links against a
+    # stale archive built for a different architecture/compiler.
+    empty :=
+    space := $(empty) $(empty)
+    LIBBACKTRACE_CC_TAG := $(subst /,_,$(subst $(space),_,$(strip $(CC))))
+    LIBBACKTRACE_A    := build/libbacktrace-$(LIBBACKTRACE_CC_TAG).a
+    LIBBACKTRACE_OBJS_DIR := build/libbacktrace-$(LIBBACKTRACE_CC_TAG)
     # Flags used only for compiling vendored libbacktrace (not -std=c23, no -Wall strictness)
     LIBBACKTRACE_CC_FLAGS := -O2 -g -I$(LIBBACKTRACE_DIR) -D_GNU_SOURCE \
       -Wno-unused-parameter -Wno-unused-variable \
@@ -366,6 +372,8 @@ macos-x86_64-build:
 		CC="$(MACOS_X86_64_CC) -arch x86_64" \
 		LIBFFI_CFLAGS="-I$(MACOS_SDK_PATH)/usr/include/ffi" \
 		LIBFFI_LDFLAGS="-lffi" \
+		LIBREADLINE_CFLAGS="-I/usr/local/opt/readline/include" \
+		LIBREADLINE_LDFLAGS="-L/usr/local/opt/readline/lib -lreadline" \
 		$(MACOS_X86_64_BINARY)
 	@file $(MACOS_X86_64_BINARY)
 	@file $(MACOS_X86_64_BINARY) | grep -q 'x86_64'
@@ -376,7 +384,7 @@ macos-x86_64-smoke: macos-x86_64-build
 		echo "Rosetta machine: $$machine"; \
 		test "$$machine" = "x86_64"; \
 		rc=0; \
-		/usr/bin/arch -x86_64 ./$(MACOS_X86_64_BINARY) -I./include tests/test_arithmetic.c || rc=$$?; \
+		/usr/bin/arch -x86_64 ./$(MACOS_X86_64_BINARY) -I./include tests/test_fortytwo.c || rc=$$?; \
 		test "$$rc" -eq 42; \
 		rc=0; \
 		CCCC_NATIVE_CC=/usr/bin/clang /usr/bin/arch -x86_64 \
@@ -385,7 +393,7 @@ macos-x86_64-smoke: macos-x86_64-build
 		tmp=$$(mktemp /tmp/cccc-native-x86_64.XXXXXX); \
 		trap 'rm -f "$$tmp"' EXIT; \
 		CCCC_NATIVE_CC=/usr/bin/clang /usr/bin/arch -x86_64 \
-			./$(MACOS_X86_64_BINARY) -c=native -o "$$tmp" tests/test_arithmetic.c; \
+			./$(MACOS_X86_64_BINARY) -c=native -o "$$tmp" tests/test_fortytwo.c; \
 		file "$$tmp"; \
 		file "$$tmp" | grep -q 'x86_64'; \
 		rc=0; /usr/bin/arch -x86_64 "$$tmp" || rc=$$?; \
@@ -421,20 +429,20 @@ linux-x86_64-smoke: linux-x86_64-build
 			test "$$machine" = "x86_64"; \
 			file ./cccc; \
 			file ./cccc | grep -Eq "x86-64|x86_64"; \
-			rc=0; ./cccc -I./include tests/test_arithmetic.c || rc=$$?; \
+			rc=0; ./cccc -I./include tests/test_fortytwo.c || rc=$$?; \
 			test "$$rc" -eq 42'
 
 linux-x86_64-test: linux-x86_64-smoke
 	@set +e; \
 		rc=0; \
 		for pattern in 'test_[a-f]*.c' 'test_[g-l]*.c' 'test_[m-r]*.c' \
-			'test_[s-u]*.c' 'test_[v-x]*.c' 'test_[y-z]*.c'; do \
+			'test_[s-u]*.c' 'test_[v-z]*.c'; do \
 			$(COLIMA_NERDCTL) run --rm --platform linux/amd64 \
 				$(LINUX_AMD64_IMAGE) timeout 300 python3 tools/tests.py \
 				--match "$$pattern" --quiet -j $(TEST_JOBS) || rc=1; \
 		done; \
 		for pattern in 'test_[a-f]*.c' 'test_[g-l]*.c' 'test_[m-r]*.c' \
-			'test_[s-u]*.c' 'test_[v-x]*.c' 'test_[y-z]*.c'; do \
+			'test_[s-u]*.c' 'test_[v-z]*.c'; do \
 			$(COLIMA_NERDCTL) run --rm --platform linux/amd64 \
 				$(LINUX_AMD64_IMAGE) timeout 300 python3 tools/tests.py \
 				--match "$$pattern" --c4 --quiet -j $(TEST_JOBS) || rc=1; \
@@ -467,7 +475,7 @@ linux-aarch64-smoke: linux-aarch64-build
 			test "$$machine" = "aarch64"; \
 			file ./cccc; \
 			file ./cccc | grep -Eq "aarch64|arm64"; \
-			rc=0; ./cccc -I./include tests/test_arithmetic.c || rc=$$?; \
+			rc=0; ./cccc -I./include tests/test_fortytwo.c || rc=$$?; \
 			test "$$rc" -eq 42'
 
 linux-aarch64-test: linux-aarch64-smoke

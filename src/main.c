@@ -1647,7 +1647,7 @@ int main(int argc, const char *argv[]) {
                     "error: -c=native cannot be combined with VM bytecode options\n");
             usage(argv[0], 1);
         }
-        if (flags != 0) {
+        if (flags & ~(uint32_t)CCCC_VM_HEAP) {
             fprintf(stderr,
                     "error: -c=native cannot be combined with VM runtime safety/debug options\n");
             usage(argv[0], 1);
