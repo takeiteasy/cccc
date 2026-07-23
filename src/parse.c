@@ -2758,9 +2758,15 @@ static void array_initializer1(VirtualMachine *vm, Token **rest, Token *tok,
 
 // vector-initializer = "{" initializer ("," initializer)* ","? "}"
 //
-// GNU vector_size brace-initializer (tracker #713). Positional only — no
-// designators, unlike array_initializer1 (GCC doesn't support `[i]=` on
-// vector_size vectors either).
+// GNU vector_size brace-initializer (tracker #713). Positional only.
+// Designated initializers (`{[2] = 3.0f}`) are deliberately rejected with a
+// clear diagnostic rather than supported: verified directly against real
+// GCC and clang (both reject the identical syntax, in both direct and
+// compound-literal form, with "initialization of non-aggregate type ...
+// with a designated initializer list") -- vector_size vectors are
+// non-aggregate types in GCC's own model, and C's designated-initializer
+// grammar only applies to aggregates. Adding `[idx]=` support here would
+// make CCCC accept syntax neither reference compiler does (tracker #719).
 static void vector_initializer(VirtualMachine *vm, Token **rest, Token *tok,
                                 Initializer *init) {
     tok = skip(vm, tok, "{");
@@ -2770,6 +2776,11 @@ static void vector_initializer(VirtualMachine *vm, Token **rest, Token *tok,
         if (!first)
             tok = skip(vm, tok, ",");
         first = false;
+
+        if (equal(tok, "["))
+            error_tok(vm, tok,
+                      "initialization of non-aggregate vector type with a "
+                      "designated initializer list");
 
         if (i < init->ty->vec_len)
             initializer2(vm, &tok, tok, init->children[i]);
