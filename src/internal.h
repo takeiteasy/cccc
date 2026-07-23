@@ -286,10 +286,15 @@ static inline void cccc_freg_set_raw_f32(VirtualMachine *vm, int reg, int bits) 
     cccc_freg_set_f32(vm, reg, conv.f);
 }
 
-/* 128-bit vector register accessors. The register itself is a raw union
- * (see VReg in cccc.h); the opcode carries the lane type, mirroring the
- * FReg design above. Loads/stores move the full 16 bytes; arithmetic reads
- * and writes the lane view named by the opcode. */
+/* Vector register accessors (up to 512-bit, see #722). The register itself
+ * is a raw union (see VReg in cccc.h); the opcode carries the lane type,
+ * mirroring the FReg design above, and the active WIDTH/lane count for a
+ * given value rides in the instruction operand (see the SIMD opcode block
+ * in cccc.h), not here. These two helpers always move the full register
+ * (sizeof(VReg), all 64 bytes) -- correct for whole-register save/restore
+ * use (mirrors VMOV3), NOT for a value-width VLDR/VSTR-style move (see
+ * op_VLDR_fn/op_VSTR_fn in ops.c for that, which decode an explicit byte
+ * width from the operand instead of assuming sizeof(VReg)). */
 static inline void cccc_vreg_load(VirtualMachine *vm, int reg, const void *src) {
     memcpy(&vm->vregs[reg], src, sizeof(VReg));
 }

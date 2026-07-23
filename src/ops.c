@@ -3067,48 +3067,80 @@ static inline int op_DYNOBJSZ_fn(VirtualMachine *vm) {
     return 0;
 }
 
-// ========== SIMD / Vector Operations (#72/#463) ==========
+// ========== SIMD / Vector Operations (#72/#463, widened to 256/512-bit by
+// #722) ==========
 //
-// 128-bit vector registers (vregs[], see VReg in cccc.h). The opcode name
-// carries the lane type/width, mirroring the FADD3 vs FADD3_F32 scalar
-// split -- the register itself is just 16 raw bytes. Binary/unary arithmetic
+// Vector registers (vregs[], see VReg in cccc.h) hold up to 64 raw bytes; the
+// opcode name carries the lane TYPE (mirroring the FADD3 vs FADD3_F32 scalar
+// split), and the operand's "scale" byte carries the active WIDTH (VLDR/VSTR:
+// byte count) or LANE COUNT (every other op) -- see ENCODE_RRRS/DECODE_RRRS
+// in internal.h. Two-register ops (VLDR/VSTR/VSPLAT/VNEG/VNOT/VCVT) decode
+// with DECODE_RRRS and simply leave rs2 unread, exactly like the existing
+// VEC_EXTRACT_*/VEC_INSERT_* handlers already do. Binary/unary arithmetic
 // reads its operand(s) into locals before writing vregs[rd], so `rd == rs1`
 // (or `rd == rs2`) aliasing is safe.
 //
-// The op families below are near-identical across lane types/widths, so they
-// are generated with local macros (undef'd immediately after use) rather
-// than hand-duplicated ~40 times; each expansion is a small, ordinary
-// op_NAME_fn like every other handler in this file.
+// The op families below are near-identical across lane types, so they are
+// generated with local macros (undef'd immediately after use) rather than
+// hand-duplicated ~40 times; each expansion is a small, ordinary op_NAME_fn
+// like every other handler in this file.
 
-static inline void ld_v128(const void *p, VReg *out) { __builtin_memcpy(out, p, sizeof(VReg)); }
-static inline void st_v128(void *p, const VReg *v) { __builtin_memcpy(p, v, sizeof(VReg)); }
+static inline void ld_vN(const void *p, VReg *out, int bytes) { __builtin_memcpy(out, p, (size_t)bytes); }
+static inline void st_vN(void *p, const VReg *v, int bytes) { __builtin_memcpy(p, v, (size_t)bytes); }
+
+// The compiler only ever emits width == 16/32/64 (parse.c's vector_size
+// gate), but the width rides in an unauthenticated 8-bit bytecode operand
+// (0-255) -- unlike pre-#722, where VLDR/VSTR always moved a fixed
+// sizeof(VReg) with no attacker/corruption-controlled length at all. A
+// malformed or hand-crafted .c4 file could otherwise drive ld_vN/st_vN to
+// memcpy up to 255 bytes into/out of a 64-byte vregs[] slot, corrupting
+// adjacent VM state. Reject anything else outright, same trapping style as
+// VEC_IDIV/VEC_IMOD's zero-divisor check below.
+static inline bool vreg_width_ok(int width) { return width == 16 || width == 32 || width == 64; }
 
 static inline int op_VLDR_fn(VirtualMachine *vm) {
-    // vregs[rd] = 16 raw bytes at regs[rs] (unaligned-safe)
-    // Format: [VLDR] [rd:8|rs:8|unused:48]
+    // vregs[rd] = <width> raw bytes at regs[rs] (unaligned-safe)
+    // Format: [VLDR] [rd:8|rs:8|unused:8|width:8]
     long long operands = cc_read_word(vm);
-    int rd, rs;
-    DECODE_RR(operands, rd, rs);
+    int rd, rs, rs2, width;
+    DECODE_RRRS(operands, rd, rs, rs2, width);
+    (void)rs2;
+    if (!vreg_width_ok(width)) {
+        printf("\n========== CORRUPT BYTECODE ==========\n");
+        printf("Invalid vector load width %d (expected 16, 32, or 64)\n", width);
+        printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc, (long long)vm->pc);
+        printf("======================================\n");
+        return -1;
+    }
 
-    WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], (int)sizeof(VReg), WATCH_READ);
-    ld_v128((void *)vm->regs[rs], &vm->vregs[rd]);
+    WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], width, WATCH_READ);
+    ld_vN((void *)vm->regs[rs], &vm->vregs[rd], width);
     return 0;
 }
 
 static inline int op_VSTR_fn(VirtualMachine *vm) {
-    // 16 raw bytes at regs[rs] = vregs[rd]
-    // Format: [VSTR] [rd:8|rs:8|unused:48]
+    // <width> raw bytes at regs[rs] = vregs[rd]
+    // Format: [VSTR] [rd:8|rs:8|unused:8|width:8]
     long long operands = cc_read_word(vm);
-    int rd, rs;
-    DECODE_RR(operands, rd, rs);
+    int rd, rs, rs2, width;
+    DECODE_RRRS(operands, rd, rs, rs2, width);
+    (void)rs2;
+    if (!vreg_width_ok(width)) {
+        printf("\n========== CORRUPT BYTECODE ==========\n");
+        printf("Invalid vector store width %d (expected 16, 32, or 64)\n", width);
+        printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc, (long long)vm->pc);
+        printf("======================================\n");
+        return -1;
+    }
 
-    st_v128((void *)vm->regs[rs], &vm->vregs[rd]);
-    WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], (int)sizeof(VReg), WATCH_WRITE);
+    st_vN((void *)vm->regs[rs], &vm->vregs[rd], width);
+    WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], width, WATCH_WRITE);
     return 0;
 }
 
 static inline int op_VMOV3_fn(VirtualMachine *vm) {
-    // vregs[rd] = vregs[rs1] (full 128-bit copy)
+    // vregs[rd] = vregs[rs1] (full-register copy, all 64 bytes -- the
+    // uncopied tail beyond the value's real width is simply don't-care)
     // Format: [VMOV3] [rd:8|rs1:8|unused:48]
     long long operands = cc_read_word(vm);
     int rd, rs1;
@@ -3118,34 +3150,36 @@ static inline int op_VMOV3_fn(VirtualMachine *vm) {
     return 0;
 }
 
-// ---- Splat: vregs[rd].FIELD[0..N-1] = (scalar src, broadcast) ----
+// ---- Splat: vregs[rd].FIELD[0..count-1] = (scalar src, broadcast) ----
 
-#define VEC_SPLAT_FROM_FREG(NAME, FIELD, N, CTYPE)                            \
+#define VEC_SPLAT_FROM_FREG(NAME, FIELD, CTYPE)                              \
     static inline int op_##NAME##_fn(VirtualMachine *vm) {                    \
         long long operands = cc_read_word(vm);                                \
-        int rd, rs1;                                                          \
-        DECODE_RR(operands, rd, rs1);                                         \
+        int rd, rs1, rs2, count;                                              \
+        DECODE_RRRS(operands, rd, rs1, rs2, count);                           \
+        (void)rs2;                                                            \
         CTYPE v = (CTYPE)cccc_freg_get_f64(vm, rs1);                          \
-        for (int i = 0; i < (N); i++) vm->vregs[rd].FIELD[i] = v;             \
+        for (int i = 0; i < count; i++) vm->vregs[rd].FIELD[i] = v;           \
         return 0;                                                             \
     }
 
-#define VEC_SPLAT_FROM_REG(NAME, FIELD, N, CTYPE)                             \
+#define VEC_SPLAT_FROM_REG(NAME, FIELD, CTYPE)                               \
     static inline int op_##NAME##_fn(VirtualMachine *vm) {                    \
         long long operands = cc_read_word(vm);                                \
-        int rd, rs1;                                                          \
-        DECODE_RR(operands, rd, rs1);                                         \
+        int rd, rs1, rs2, count;                                              \
+        DECODE_RRRS(operands, rd, rs1, rs2, count);                           \
+        (void)rs2;                                                            \
         CTYPE v = (CTYPE)vm->regs[rs1];                                       \
-        for (int i = 0; i < (N); i++) vm->vregs[rd].FIELD[i] = v;             \
+        for (int i = 0; i < count; i++) vm->vregs[rd].FIELD[i] = v;           \
         return 0;                                                             \
     }
 
-VEC_SPLAT_FROM_FREG(VSPLAT_F64, f64, 2, double)
-VEC_SPLAT_FROM_FREG(VSPLAT_F32, f32, 4, float)
-VEC_SPLAT_FROM_REG(VSPLAT_I64, i64, 2, int64_t)
-VEC_SPLAT_FROM_REG(VSPLAT_I32, i32, 4, int32_t)
-VEC_SPLAT_FROM_REG(VSPLAT_I16, i16, 8, int16_t)
-VEC_SPLAT_FROM_REG(VSPLAT_I8, i8, 16, int8_t)
+VEC_SPLAT_FROM_FREG(VSPLAT_F64, f64, double)
+VEC_SPLAT_FROM_FREG(VSPLAT_F32, f32, float)
+VEC_SPLAT_FROM_REG(VSPLAT_I64, i64, int64_t)
+VEC_SPLAT_FROM_REG(VSPLAT_I32, i32, int32_t)
+VEC_SPLAT_FROM_REG(VSPLAT_I16, i16, int16_t)
+VEC_SPLAT_FROM_REG(VSPLAT_I8, i8, int8_t)
 
 #undef VEC_SPLAT_FROM_FREG
 #undef VEC_SPLAT_FROM_REG
@@ -3215,74 +3249,77 @@ VEC_INSERT_FROM_REG(VINSERT_I8, i8, int8_t)
 
 // ---- Per-lane arithmetic: vregs[rd].FIELD[i] = vregs[rs1].FIELD[i] OP vregs[rs2].FIELD[i] ----
 
-#define VEC_BINOP(NAME, FIELD, N, OP)                                         \
+#define VEC_BINOP(NAME, FIELD, OP)                                            \
     static inline int op_##NAME##_fn(VirtualMachine *vm) {                    \
         long long operands = cc_read_word(vm);                                \
-        int rd, rs1, rs2;                                                     \
-        DECODE_RRR(operands, rd, rs1, rs2);                                   \
-        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r;                       \
-        for (int i = 0; i < (N); i++) r.FIELD[i] = a.FIELD[i] OP b.FIELD[i];  \
+        int rd, rs1, rs2, count;                                              \
+        DECODE_RRRS(operands, rd, rs1, rs2, count);                           \
+        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r = {0};                       \
+        for (int i = 0; i < count; i++) r.FIELD[i] = a.FIELD[i] OP b.FIELD[i]; \
         vm->vregs[rd] = r;                                                    \
         return 0;                                                             \
     }
 
-#define VEC_NEG(NAME, FIELD, N)                                               \
+#define VEC_NEG(NAME, FIELD)                                                  \
     static inline int op_##NAME##_fn(VirtualMachine *vm) {                    \
         long long operands = cc_read_word(vm);                                \
-        int rd, rs1;                                                          \
-        DECODE_RR(operands, rd, rs1);                                         \
-        VReg a = vm->vregs[rs1], r;                                           \
-        for (int i = 0; i < (N); i++) r.FIELD[i] = -a.FIELD[i];               \
+        int rd, rs1, rs2, count;                                              \
+        DECODE_RRRS(operands, rd, rs1, rs2, count);                           \
+        (void)rs2;                                                            \
+        VReg a = vm->vregs[rs1], r = {0};                                           \
+        for (int i = 0; i < count; i++) r.FIELD[i] = -a.FIELD[i];             \
         vm->vregs[rd] = r;                                                    \
         return 0;                                                             \
     }
 
-VEC_BINOP(VADD_F64X2, f64, 2, +)
-VEC_BINOP(VSUB_F64X2, f64, 2, -)
-VEC_BINOP(VMUL_F64X2, f64, 2, *)
-VEC_BINOP(VDIV_F64X2, f64, 2, /)
-VEC_NEG(VNEG_F64X2, f64, 2)
+VEC_BINOP(VADD_F64, f64, +)
+VEC_BINOP(VSUB_F64, f64, -)
+VEC_BINOP(VMUL_F64, f64, *)
+VEC_BINOP(VDIV_F64, f64, /)
+VEC_NEG(VNEG_F64, f64)
 
-VEC_BINOP(VADD_F32X4, f32, 4, +)
-VEC_BINOP(VSUB_F32X4, f32, 4, -)
-VEC_BINOP(VMUL_F32X4, f32, 4, *)
-VEC_BINOP(VDIV_F32X4, f32, 4, /)
-VEC_NEG(VNEG_F32X4, f32, 4)
+VEC_BINOP(VADD_F32, f32, +)
+VEC_BINOP(VSUB_F32, f32, -)
+VEC_BINOP(VMUL_F32, f32, *)
+VEC_BINOP(VDIV_F32, f32, /)
+VEC_NEG(VNEG_F32, f32)
 
-// Integer lane division is intentionally not provided yet (needs div-by-zero
-// handling per lane); tracked as vector-integer-division follow-up.
-VEC_BINOP(VADD_I64X2, i64, 2, +)
-VEC_BINOP(VSUB_I64X2, i64, 2, -)
-VEC_BINOP(VMUL_I64X2, i64, 2, *)
-VEC_NEG(VNEG_I64X2, i64, 2)
+// Integer lane division is intentionally not provided as a plain VEC_BINOP
+// (needs div-by-zero handling per lane); see VEC_IDIV below.
+VEC_BINOP(VADD_I64, i64, +)
+VEC_BINOP(VSUB_I64, i64, -)
+VEC_BINOP(VMUL_I64, i64, *)
+VEC_NEG(VNEG_I64, i64)
 
-VEC_BINOP(VADD_I32X4, i32, 4, +)
-VEC_BINOP(VSUB_I32X4, i32, 4, -)
-VEC_BINOP(VMUL_I32X4, i32, 4, *)
-VEC_NEG(VNEG_I32X4, i32, 4)
+VEC_BINOP(VADD_I32, i32, +)
+VEC_BINOP(VSUB_I32, i32, -)
+VEC_BINOP(VMUL_I32, i32, *)
+VEC_NEG(VNEG_I32, i32)
 
-VEC_BINOP(VADD_I16X8, i16, 8, +)
-VEC_BINOP(VSUB_I16X8, i16, 8, -)
-VEC_BINOP(VMUL_I16X8, i16, 8, *)
-VEC_NEG(VNEG_I16X8, i16, 8)
+VEC_BINOP(VADD_I16, i16, +)
+VEC_BINOP(VSUB_I16, i16, -)
+VEC_BINOP(VMUL_I16, i16, *)
+VEC_NEG(VNEG_I16, i16)
 
-VEC_BINOP(VADD_I8X16, i8, 16, +)
-VEC_BINOP(VSUB_I8X16, i8, 16, -)
-VEC_BINOP(VMUL_I8X16, i8, 16, *)
-VEC_NEG(VNEG_I8X16, i8, 16)
+VEC_BINOP(VADD_I8, i8, +)
+VEC_BINOP(VSUB_I8, i8, -)
+VEC_BINOP(VMUL_I8, i8, *)
+VEC_NEG(VNEG_I8, i8)
 
 #undef VEC_BINOP
 #undef VEC_NEG
 
-// ---- Bitwise (tracker #715): whole-128-bit, width-agnostic over i64[2] ----
+// ---- Bitwise (tracker #715): width-agnostic over i64[0..words-1], where
+// `words` (operand-carried, like VLDR/VSTR's byte width) is the value's
+// byte width / 8. ----
 
 #define VEC_BITBINOP(NAME, OP)                                               \
     static inline int op_##NAME##_fn(VirtualMachine *vm) {                   \
         long long operands = cc_read_word(vm);                               \
-        int rd, rs1, rs2;                                                    \
-        DECODE_RRR(operands, rd, rs1, rs2);                                  \
-        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r;                      \
-        for (int i = 0; i < 2; i++) r.i64[i] = a.i64[i] OP b.i64[i];         \
+        int rd, rs1, rs2, words;                                             \
+        DECODE_RRRS(operands, rd, rs1, rs2, words);                          \
+        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r = {0};                      \
+        for (int i = 0; i < words; i++) r.i64[i] = a.i64[i] OP b.i64[i];     \
         vm->vregs[rd] = r;                                                   \
         return 0;                                                            \
     }
@@ -3295,10 +3332,11 @@ VEC_BITBINOP(VXOR, ^)
 
 static inline int op_VNOT_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
-    int rd, rs1;
-    DECODE_RR(operands, rd, rs1);
-    VReg a = vm->vregs[rs1], r;
-    for (int i = 0; i < 2; i++) r.i64[i] = ~a.i64[i];
+    int rd, rs1, rs2, words;
+    DECODE_RRRS(operands, rd, rs1, rs2, words);
+    (void)rs2;
+    VReg a = vm->vregs[rs1], r = {0};
+    for (int i = 0; i < words; i++) r.i64[i] = ~a.i64[i];
     vm->vregs[rd] = r;
     return 0;
 }
@@ -3308,13 +3346,13 @@ static inline int op_VNOT_fn(VirtualMachine *vm) {
 // (src/ops.c op_DIVC_fn) rather than op_DIV3_fn's non-trapping LLONG_MIN
 // return -- vector integer division is deliberately stricter. ----
 
-#define VEC_IDIV(NAME, FIELD, N, CTYPE, MINVAL)                              \
+#define VEC_IDIV(NAME, FIELD, CTYPE, MINVAL)                                 \
     static inline int op_##NAME##_fn(VirtualMachine *vm) {                   \
         long long operands = cc_read_word(vm);                               \
-        int rd, rs1, rs2;                                                    \
-        DECODE_RRR(operands, rd, rs1, rs2);                                  \
-        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r;                      \
-        for (int i = 0; i < (N); i++) {                                      \
+        int rd, rs1, rs2, count;                                             \
+        DECODE_RRRS(operands, rd, rs1, rs2, count);                          \
+        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r = {0};                      \
+        for (int i = 0; i < count; i++) {                                    \
             CTYPE bv = b.FIELD[i];                                           \
             if (bv == 0) {                                                   \
                 printf("\n========== DIVISION BY ZERO ==========\n");        \
@@ -3338,13 +3376,13 @@ static inline int op_VNOT_fn(VirtualMachine *vm) {
         return 0;                                                            \
     }
 
-#define VEC_IMOD(NAME, FIELD, N, CTYPE, MINVAL)                              \
+#define VEC_IMOD(NAME, FIELD, CTYPE, MINVAL)                                 \
     static inline int op_##NAME##_fn(VirtualMachine *vm) {                   \
         long long operands = cc_read_word(vm);                               \
-        int rd, rs1, rs2;                                                    \
-        DECODE_RRR(operands, rd, rs1, rs2);                                  \
-        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r;                      \
-        for (int i = 0; i < (N); i++) {                                      \
+        int rd, rs1, rs2, count;                                             \
+        DECODE_RRRS(operands, rd, rs1, rs2, count);                          \
+        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r = {0};                      \
+        for (int i = 0; i < count; i++) {                                    \
             CTYPE bv = b.FIELD[i];                                           \
             if (bv == 0) {                                                   \
                 printf("\n========== DIVISION BY ZERO ==========\n");        \
@@ -3364,15 +3402,15 @@ static inline int op_VNOT_fn(VirtualMachine *vm) {
         return 0;                                                            \
     }
 
-VEC_IDIV(VDIV_I64X2, i64, 2, int64_t, INT64_MIN)
-VEC_IDIV(VDIV_I32X4, i32, 4, int32_t, INT32_MIN)
-VEC_IDIV(VDIV_I16X8, i16, 8, int16_t, INT16_MIN)
-VEC_IDIV(VDIV_I8X16, i8, 16, int8_t, INT8_MIN)
+VEC_IDIV(VDIV_I64, i64, int64_t, INT64_MIN)
+VEC_IDIV(VDIV_I32, i32, int32_t, INT32_MIN)
+VEC_IDIV(VDIV_I16, i16, int16_t, INT16_MIN)
+VEC_IDIV(VDIV_I8, i8, int8_t, INT8_MIN)
 
-VEC_IMOD(VMOD_I64X2, i64, 2, int64_t, INT64_MIN)
-VEC_IMOD(VMOD_I32X4, i32, 4, int32_t, INT32_MIN)
-VEC_IMOD(VMOD_I16X8, i16, 8, int16_t, INT16_MIN)
-VEC_IMOD(VMOD_I8X16, i8, 16, int8_t, INT8_MIN)
+VEC_IMOD(VMOD_I64, i64, int64_t, INT64_MIN)
+VEC_IMOD(VMOD_I32, i32, int32_t, INT32_MIN)
+VEC_IMOD(VMOD_I16, i16, int16_t, INT16_MIN)
+VEC_IMOD(VMOD_I8, i8, int8_t, INT8_MIN)
 
 #undef VEC_IDIV
 #undef VEC_IMOD
@@ -3381,67 +3419,67 @@ VEC_IMOD(VMOD_I8X16, i8, 16, int8_t, INT8_MIN)
 // true, 0 if false, written into a same-width signed integer lane. Unsigned
 // variants (VCLTU/VCLEU) compare the unsigned view for int lanes. ----
 
-#define VEC_FCMP(NAME, FIELD, ICAST, N, OP)                                  \
+#define VEC_FCMP(NAME, FIELD, ICAST, OP)                                     \
     static inline int op_##NAME##_fn(VirtualMachine *vm) {                   \
         long long operands = cc_read_word(vm);                               \
-        int rd, rs1, rs2;                                                    \
-        DECODE_RRR(operands, rd, rs1, rs2);                                  \
-        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r;                      \
-        for (int i = 0; i < (N); i++)                                        \
+        int rd, rs1, rs2, count;                                             \
+        DECODE_RRRS(operands, rd, rs1, rs2, count);                          \
+        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r = {0};                      \
+        for (int i = 0; i < count; i++)                                      \
             r.ICAST[i] = (a.FIELD[i] OP b.FIELD[i]) ? -1 : 0;                \
         vm->vregs[rd] = r;                                                   \
         return 0;                                                            \
     }
 
-#define VEC_ICMP(NAME, FIELD, N, CTYPE, OP)                                  \
+#define VEC_ICMP(NAME, FIELD, CTYPE, OP)                                    \
     static inline int op_##NAME##_fn(VirtualMachine *vm) {                   \
         long long operands = cc_read_word(vm);                               \
-        int rd, rs1, rs2;                                                    \
-        DECODE_RRR(operands, rd, rs1, rs2);                                  \
-        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r;                      \
-        for (int i = 0; i < (N); i++)                                        \
+        int rd, rs1, rs2, count;                                             \
+        DECODE_RRRS(operands, rd, rs1, rs2, count);                          \
+        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r = {0};                      \
+        for (int i = 0; i < count; i++)                                      \
             r.FIELD[i] = ((CTYPE)a.FIELD[i] OP (CTYPE)b.FIELD[i]) ? -1 : 0;   \
         vm->vregs[rd] = r;                                                   \
         return 0;                                                            \
     }
 
-VEC_FCMP(VCEQ_F64X2, f64, i64, 2, ==)
-VEC_FCMP(VCNE_F64X2, f64, i64, 2, !=)
-VEC_FCMP(VCLT_F64X2, f64, i64, 2, <)
-VEC_FCMP(VCLE_F64X2, f64, i64, 2, <=)
+VEC_FCMP(VCEQ_F64, f64, i64, ==)
+VEC_FCMP(VCNE_F64, f64, i64, !=)
+VEC_FCMP(VCLT_F64, f64, i64, <)
+VEC_FCMP(VCLE_F64, f64, i64, <=)
 
-VEC_FCMP(VCEQ_F32X4, f32, i32, 4, ==)
-VEC_FCMP(VCNE_F32X4, f32, i32, 4, !=)
-VEC_FCMP(VCLT_F32X4, f32, i32, 4, <)
-VEC_FCMP(VCLE_F32X4, f32, i32, 4, <=)
+VEC_FCMP(VCEQ_F32, f32, i32, ==)
+VEC_FCMP(VCNE_F32, f32, i32, !=)
+VEC_FCMP(VCLT_F32, f32, i32, <)
+VEC_FCMP(VCLE_F32, f32, i32, <=)
 
-VEC_ICMP(VCEQ_I64X2, i64, 2, int64_t, ==)
-VEC_ICMP(VCNE_I64X2, i64, 2, int64_t, !=)
-VEC_ICMP(VCLT_I64X2, i64, 2, int64_t, <)
-VEC_ICMP(VCLE_I64X2, i64, 2, int64_t, <=)
-VEC_ICMP(VCLTU_I64X2, i64, 2, uint64_t, <)
-VEC_ICMP(VCLEU_I64X2, i64, 2, uint64_t, <=)
+VEC_ICMP(VCEQ_I64, i64, int64_t, ==)
+VEC_ICMP(VCNE_I64, i64, int64_t, !=)
+VEC_ICMP(VCLT_I64, i64, int64_t, <)
+VEC_ICMP(VCLE_I64, i64, int64_t, <=)
+VEC_ICMP(VCLTU_I64, i64, uint64_t, <)
+VEC_ICMP(VCLEU_I64, i64, uint64_t, <=)
 
-VEC_ICMP(VCEQ_I32X4, i32, 4, int32_t, ==)
-VEC_ICMP(VCNE_I32X4, i32, 4, int32_t, !=)
-VEC_ICMP(VCLT_I32X4, i32, 4, int32_t, <)
-VEC_ICMP(VCLE_I32X4, i32, 4, int32_t, <=)
-VEC_ICMP(VCLTU_I32X4, i32, 4, uint32_t, <)
-VEC_ICMP(VCLEU_I32X4, i32, 4, uint32_t, <=)
+VEC_ICMP(VCEQ_I32, i32, int32_t, ==)
+VEC_ICMP(VCNE_I32, i32, int32_t, !=)
+VEC_ICMP(VCLT_I32, i32, int32_t, <)
+VEC_ICMP(VCLE_I32, i32, int32_t, <=)
+VEC_ICMP(VCLTU_I32, i32, uint32_t, <)
+VEC_ICMP(VCLEU_I32, i32, uint32_t, <=)
 
-VEC_ICMP(VCEQ_I16X8, i16, 8, int16_t, ==)
-VEC_ICMP(VCNE_I16X8, i16, 8, int16_t, !=)
-VEC_ICMP(VCLT_I16X8, i16, 8, int16_t, <)
-VEC_ICMP(VCLE_I16X8, i16, 8, int16_t, <=)
-VEC_ICMP(VCLTU_I16X8, i16, 8, uint16_t, <)
-VEC_ICMP(VCLEU_I16X8, i16, 8, uint16_t, <=)
+VEC_ICMP(VCEQ_I16, i16, int16_t, ==)
+VEC_ICMP(VCNE_I16, i16, int16_t, !=)
+VEC_ICMP(VCLT_I16, i16, int16_t, <)
+VEC_ICMP(VCLE_I16, i16, int16_t, <=)
+VEC_ICMP(VCLTU_I16, i16, uint16_t, <)
+VEC_ICMP(VCLEU_I16, i16, uint16_t, <=)
 
-VEC_ICMP(VCEQ_I8X16, i8, 16, int8_t, ==)
-VEC_ICMP(VCNE_I8X16, i8, 16, int8_t, !=)
-VEC_ICMP(VCLT_I8X16, i8, 16, int8_t, <)
-VEC_ICMP(VCLE_I8X16, i8, 16, int8_t, <=)
-VEC_ICMP(VCLTU_I8X16, i8, 16, uint8_t, <)
-VEC_ICMP(VCLEU_I8X16, i8, 16, uint8_t, <=)
+VEC_ICMP(VCEQ_I8, i8, int8_t, ==)
+VEC_ICMP(VCNE_I8, i8, int8_t, !=)
+VEC_ICMP(VCLT_I8, i8, int8_t, <)
+VEC_ICMP(VCLE_I8, i8, int8_t, <=)
+VEC_ICMP(VCLTU_I8, i8, uint8_t, <)
+VEC_ICMP(VCLEU_I8, i8, uint8_t, <=)
 
 #undef VEC_FCMP
 #undef VEC_ICMP
@@ -3452,65 +3490,70 @@ VEC_ICMP(VCLEU_I8X16, i8, 16, uint8_t, <=)
 // (see op_has_vector_operand()'s comment in optimize.c for why this is safe
 // under the optimizer's fully-opaque treatment of vector opcodes). ----
 
-#define VEC_SEL(NAME, FIELD, N)                                              \
+#define VEC_SEL(NAME, FIELD)                                                 \
     static inline int op_##NAME##_fn(VirtualMachine *vm) {                   \
         long long operands = cc_read_word(vm);                               \
-        int rd, rcond, rthen;                                                \
-        DECODE_RRR(operands, rd, rcond, rthen);                              \
+        int rd, rcond, rthen, count;                                         \
+        DECODE_RRRS(operands, rd, rcond, rthen, count);                      \
         VReg cond = vm->vregs[rcond], then_ = vm->vregs[rthen];              \
         VReg r = vm->vregs[rd];                                              \
-        for (int i = 0; i < (N); i++)                                        \
+        for (int i = 0; i < count; i++)                                      \
             if (cond.FIELD[i]) r.FIELD[i] = then_.FIELD[i];                  \
         vm->vregs[rd] = r;                                                   \
         return 0;                                                            \
     }
 
-VEC_SEL(VSEL_8,  i8,  16)
-VEC_SEL(VSEL_16, i16, 8)
-VEC_SEL(VSEL_32, i32, 4)
-VEC_SEL(VSEL_64, i64, 2)
+VEC_SEL(VSEL_8,  i8)
+VEC_SEL(VSEL_16, i16)
+VEC_SEL(VSEL_32, i32)
+VEC_SEL(VSEL_64, i64)
 
 #undef VEC_SEL
 
-// ---- __builtin_convertvector (tracker #715): same lane count; integer
-// conversion truncates toward zero (C cast semantics, matches GCC). ----
+// ---- __builtin_convertvector (tracker #715): same lane count on both
+// sides, rides in the operand like every other op; integer conversion
+// truncates toward zero (C cast semantics, matches GCC). ----
 
 static inline int op_VCVT_I32_F32_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
-    int rd, rs1;
-    DECODE_RR(operands, rd, rs1);
-    VReg a = vm->vregs[rs1], r;
-    for (int i = 0; i < 4; i++) r.i32[i] = (int32_t)a.f32[i];
+    int rd, rs1, rs2, count;
+    DECODE_RRRS(operands, rd, rs1, rs2, count);
+    (void)rs2;
+    VReg a = vm->vregs[rs1], r = {0};
+    for (int i = 0; i < count; i++) r.i32[i] = (int32_t)a.f32[i];
     vm->vregs[rd] = r;
     return 0;
 }
 
 static inline int op_VCVT_F32_I32_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
-    int rd, rs1;
-    DECODE_RR(operands, rd, rs1);
-    VReg a = vm->vregs[rs1], r;
-    for (int i = 0; i < 4; i++) r.f32[i] = (float)a.i32[i];
+    int rd, rs1, rs2, count;
+    DECODE_RRRS(operands, rd, rs1, rs2, count);
+    (void)rs2;
+    VReg a = vm->vregs[rs1], r = {0};
+    for (int i = 0; i < count; i++) r.f32[i] = (float)a.i32[i];
     vm->vregs[rd] = r;
     return 0;
 }
 
 static inline int op_VCVT_I64_F64_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
-    int rd, rs1;
-    DECODE_RR(operands, rd, rs1);
-    VReg a = vm->vregs[rs1], r;
-    for (int i = 0; i < 2; i++) r.i64[i] = (int64_t)a.f64[i];
+    int rd, rs1, rs2, count;
+    DECODE_RRRS(operands, rd, rs1, rs2, count);
+    (void)rs2;
+    VReg a = vm->vregs[rs1], r = {0};
+    for (int i = 0; i < count; i++) r.i64[i] = (int64_t)a.f64[i];
     vm->vregs[rd] = r;
     return 0;
 }
 
 static inline int op_VCVT_F64_I64_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
-    int rd, rs1;
-    DECODE_RR(operands, rd, rs1);
-    VReg a = vm->vregs[rs1], r;
-    for (int i = 0; i < 2; i++) r.f64[i] = (double)a.i64[i];
+    int rd, rs1, rs2, count;
+    DECODE_RRRS(operands, rd, rs1, rs2, count);
+    (void)rs2;
+    VReg a = vm->vregs[rs1], r = {0};
+    for (int i = 0; i < count; i++) r.f64[i] = (double)a.i64[i];
     vm->vregs[rd] = r;
     return 0;
 }

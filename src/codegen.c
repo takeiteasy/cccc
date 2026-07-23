@@ -1637,6 +1637,24 @@ static void emit_rr(VirtualMachine *vm, int op, int rd, int rs1) {
     emit_word(vm, ENCODE_RR(rd, rs1));
 }
 
+// 3-register + 8-bit "scale" ops: [OP] [rd:8|rs1:8|rs2:8|scale:8|unused:32].
+// Used by the wide-vector opcodes (#722) to carry a runtime lane count/byte
+// width alongside up to 3 register operands -- see the SIMD opcode block in
+// cccc.h for which family uses which field.
+static void emit_rrrs(VirtualMachine *vm, int op, int rd, int rs1, int rs2, int scale) {
+    emit_word(vm, op);
+    emit_word(vm, ENCODE_RRRS(rd, rs1, rs2, scale));
+}
+
+// 2-register + 8-bit "scale" ops: rs2 is unused (0) -- the vector ops that
+// only take one source register (VLDR/VSTR/VSPLAT/VNEG/VNOT/VCVT) still need
+// the scale byte, so they reuse the RRRS encoding with rs2 left unread by
+// the VM handler (mirrors how VEXTRACT_*/VINSERT_* already ignore rs2).
+static void emit_rrs(VirtualMachine *vm, int op, int rd, int rs1, int scale) {
+    emit_word(vm, op);
+    emit_word(vm, ENCODE_RRRS(rd, rs1, 0, scale));
+}
+
 // 1-register + immediate: [OP] [rd:8|unused:24] [imm:64]
 static Pc emit_ri(VirtualMachine *vm, int op, int rd, long long imm) {
     emit_word(vm, op);
@@ -1863,24 +1881,25 @@ static long long alloc_wide_bitint_temp(VirtualMachine *vm, int words) {
     return -(long long)(vm->compiler.ent3_base_stack + vm->compiler.ent3_extra_stack);
 }
 
-// Materialize a vector-typed argument into a fresh 16-byte frame scratch slot
-// and load its address into addr_reg, ready to pass like a struct-by-value
-// arg (#714). Unlike a struct arg -- whose address is the caller's own
-// addressable storage -- a vector expression is a value living in a vregs[]
-// register (gen_vector_expr), so it must be copied out to memory before its
-// address can be handed to the callee. Reuses alloc_wide_bitint_temp's
-// per-function scratch allocator (same ENT3 extra-stack pool as wide
-// _BitInt temporaries; sized in words, so 2 words = 16 bytes covers every
-// currently-supported vector width).
+// Materialize a vector-typed argument into a fresh frame scratch slot sized
+// to the argument's own width and load its address into addr_reg, ready to
+// pass like a struct-by-value arg (#714). Unlike a struct arg -- whose
+// address is the caller's own addressable storage -- a vector expression is
+// a value living in a vregs[] register (gen_vector_expr), so it must be
+// copied out to memory before its address can be handed to the callee.
+// Reuses alloc_wide_bitint_temp's per-function scratch allocator (same ENT3
+// extra-stack pool as wide _BitInt temporaries), sized to arg->ty->size/8
+// words -- 2/4/8 words for the 16/32/64-byte vectors #722 supports.
 static void gen_vector_arg_ptr(VirtualMachine *vm, Node *arg, int addr_reg) {
     int v = alloc_temp_reg();
     gen_expr(vm, arg, v); // vector value -> vregs[v]
     mark_temp_reg_used(v);
-    long long off = alloc_wide_bitint_temp(vm, 2);
+    int bytes = arg->ty->size;
+    long long off = alloc_wide_bitint_temp(vm, bytes / 8);
     emit_lea3(vm, addr_reg, off); // address escapes to the callee -- record it
     if (vm->flags & CCCC_POINTER_CHECKS)
         emit_rr(vm, CHKP3, addr_reg, 0);
-    emit_rr(vm, VSTR, v, addr_reg);
+    emit_rrs(vm, VSTR, v, addr_reg, bytes);
     free_temp_reg(v);
 }
 
@@ -3384,21 +3403,27 @@ static void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg, int i
 
 // ========== GNU vector_size Expressions (tracker #72) ==========
 //
-// A vector local/global lives in a 16-byte-aligned memory slot, exactly like
-// a small struct (gen_addr() already handles this generically -- no frame-
-// layout changes needed). The *value* of a vector expression, however,
-// flows through a vreg index in dest_reg, mirroring how FReg-typed
-// expressions flow through fregs[] even though float locals also live in
-// memory: VLDR/VSTR move between the slot and a vreg around each operation.
+// A vector local/global lives in a memory slot aligned/sized to its own
+// width (16/32/64 bytes), exactly like a small struct (gen_addr() already
+// handles this generically -- no frame-layout changes needed). The *value*
+// of a vector expression, however, flows through a vreg index in dest_reg,
+// mirroring how FReg-typed expressions flow through fregs[] even though
+// float locals also live in memory: VLDR/VSTR move between the slot and a
+// vreg around each operation, carrying the value's byte width in the
+// instruction operand.
 //
 // tracker #715 adds: bitwise &|^~ (integer lanes), integer lane / and %
 // (per-lane trap on zero divisor / MIN-over-(-1)), comparisons ==/!=/</<=
 // (GCC per-lane all-ones/all-zero SIGNED mask; >/>= are parsed as swapped
 // </<=), GNU vector ?: select, and __builtin_convertvector.
 //
-// Still deliberately out of scope (see follow-up tickets): vectors wider
-// than 128 bits, and __builtin_shuffle with a non-constant (runtime) index
-// mask (the constant-mask form is supported, lowered without a new opcode).
+// tracker #722 widens the substrate from 128-bit only to 128/256/512-bit
+// (16/32/64-byte vectors), carrying the runtime lane count / byte width in
+// the instruction operand instead of baking a fixed count into each opcode.
+//
+// Still deliberately out of scope (see follow-up tickets): __builtin_shuffle
+// with a non-constant (runtime) index mask (the constant-mask form is
+// supported, lowered without a new opcode).
 
 typedef enum { VLANE_F64, VLANE_F32, VLANE_I64, VLANE_I32, VLANE_I16, VLANE_I8 } VecLaneFamily;
 
@@ -3415,13 +3440,15 @@ static VecLaneFamily vector_lane_family(Type *elem) {
 
 static int vector_binop_for(NodeKind kind, VecLaneFamily fam) {
     static const int table[6][4] = {
-        // ADD              SUB              MUL              DIV
-        { VADD_F64X2,  VSUB_F64X2,  VMUL_F64X2,  VDIV_F64X2 },   // VLANE_F64
-        { VADD_F32X4,  VSUB_F32X4,  VMUL_F32X4,  VDIV_F32X4 },   // VLANE_F32
-        { VADD_I64X2,  VSUB_I64X2,  VMUL_I64X2,  VDIV_I64X2 },   // VLANE_I64
-        { VADD_I32X4,  VSUB_I32X4,  VMUL_I32X4,  VDIV_I32X4 },   // VLANE_I32
-        { VADD_I16X8,  VSUB_I16X8,  VMUL_I16X8,  VDIV_I16X8 },   // VLANE_I16
-        { VADD_I8X16,  VSUB_I8X16,  VMUL_I8X16,  VDIV_I8X16 },   // VLANE_I8
+        // ADD          SUB          MUL          DIV (int lanes: the
+        //                                             trapping VDIV_I* also
+        //                                             used by vector_modop_for)
+        { VADD_F64,  VSUB_F64,  VMUL_F64,  VDIV_F64 },   // VLANE_F64
+        { VADD_F32,  VSUB_F32,  VMUL_F32,  VDIV_F32 },   // VLANE_F32
+        { VADD_I64,  VSUB_I64,  VMUL_I64,  VDIV_I64 },   // VLANE_I64
+        { VADD_I32,  VSUB_I32,  VMUL_I32,  VDIV_I32 },   // VLANE_I32
+        { VADD_I16,  VSUB_I16,  VMUL_I16,  VDIV_I16 },   // VLANE_I16
+        { VADD_I8,   VSUB_I8,   VMUL_I8,   VDIV_I8  },   // VLANE_I8
     };
     int col = kind == ND_ADD ? 0 : kind == ND_SUB ? 1 : kind == ND_MUL ? 2 : 3;
     int op = table[fam][col];
@@ -3434,10 +3461,10 @@ static int vector_binop_for(NodeKind kind, VecLaneFamily fam) {
 // Integer-lane-only modulo (tracker #715); add_type rejects float-lane %.
 static int vector_modop_for(VecLaneFamily fam) {
     switch (fam) {
-    case VLANE_I64: return VMOD_I64X2;
-    case VLANE_I32: return VMOD_I32X4;
-    case VLANE_I16: return VMOD_I16X8;
-    case VLANE_I8:  return VMOD_I8X16;
+    case VLANE_I64: return VMOD_I64;
+    case VLANE_I32: return VMOD_I32;
+    case VLANE_I16: return VMOD_I16;
+    case VLANE_I8:  return VMOD_I8;
     default:
         error("codegen: unsupported vector modulo (should have been "
               "rejected in add_type)");
@@ -3445,8 +3472,9 @@ static int vector_modop_for(VecLaneFamily fam) {
     }
 }
 
-// Bitwise (tracker #715): whole-128-bit, width-agnostic -- no per-lane-family
-// variants needed. add_type rejects float-lane &|^~.
+// Bitwise (tracker #715): width-agnostic -- no per-lane-family variants
+// needed (VM handler loops over the operand-carried word count). add_type
+// rejects float-lane &|^~.
 static int vector_bitop_for(NodeKind kind) {
     switch (kind) {
     case ND_BITAND: return VAND;
@@ -3459,8 +3487,8 @@ static int vector_bitop_for(NodeKind kind) {
 }
 
 static int vector_negop_for(VecLaneFamily fam) {
-    static const int table[6] = { VNEG_F64X2, VNEG_F32X4, VNEG_I64X2,
-                                   VNEG_I32X4, VNEG_I16X8, VNEG_I8X16 };
+    static const int table[6] = { VNEG_F64, VNEG_F32, VNEG_I64,
+                                   VNEG_I32, VNEG_I16, VNEG_I8 };
     return table[fam];
 }
 
@@ -3476,21 +3504,21 @@ static int vector_splatop_for(VecLaneFamily fam) {
 // lanes are always signed-ordered, `is_uns` is ignored for VLANE_F64/F32).
 static int vector_cmpop_for(NodeKind kind, VecLaneFamily fam, bool is_uns) {
     static const int table[6][4] = {
-        // EQ            NE            LT (signed)    LE (signed)
-        { VCEQ_F64X2, VCNE_F64X2, VCLT_F64X2, VCLE_F64X2 },
-        { VCEQ_F32X4, VCNE_F32X4, VCLT_F32X4, VCLE_F32X4 },
-        { VCEQ_I64X2, VCNE_I64X2, VCLT_I64X2, VCLE_I64X2 },
-        { VCEQ_I32X4, VCNE_I32X4, VCLT_I32X4, VCLE_I32X4 },
-        { VCEQ_I16X8, VCNE_I16X8, VCLT_I16X8, VCLE_I16X8 },
-        { VCEQ_I8X16, VCNE_I8X16, VCLT_I8X16, VCLE_I8X16 },
+        // EQ         NE         LT (signed)   LE (signed)
+        { VCEQ_F64, VCNE_F64, VCLT_F64, VCLE_F64 },
+        { VCEQ_F32, VCNE_F32, VCLT_F32, VCLE_F32 },
+        { VCEQ_I64, VCNE_I64, VCLT_I64, VCLE_I64 },
+        { VCEQ_I32, VCNE_I32, VCLT_I32, VCLE_I32 },
+        { VCEQ_I16, VCNE_I16, VCLT_I16, VCLE_I16 },
+        { VCEQ_I8,  VCNE_I8,  VCLT_I8,  VCLE_I8  },
     };
     static const int unsigned_table[6][2] = {
         // LT (unsigned)   LE (unsigned) -- only meaningful for int families
         { -1, -1 }, { -1, -1 },
-        { VCLTU_I64X2, VCLEU_I64X2 },
-        { VCLTU_I32X4, VCLEU_I32X4 },
-        { VCLTU_I16X8, VCLEU_I16X8 },
-        { VCLTU_I8X16, VCLEU_I8X16 },
+        { VCLTU_I64, VCLEU_I64 },
+        { VCLTU_I32, VCLEU_I32 },
+        { VCLTU_I16, VCLEU_I16 },
+        { VCLTU_I8,  VCLEU_I8  },
     };
     int col = kind == ND_EQ ? 0 : kind == ND_NE ? 1 : kind == ND_LT ? 2 : 3;
     if (is_uns && col >= 2) {
@@ -3521,7 +3549,7 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // Vector lvalue read: address, then a full-width load.
         int r_addr = alloc_temp_reg();
         gen_addr(vm, node, r_addr);
-        emit_rr(vm, VLDR, dest_reg, r_addr);
+        emit_rrs(vm, VLDR, dest_reg, r_addr, node->ty->size);
         free_temp_reg(r_addr);
         return;
     }
@@ -3531,7 +3559,7 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         mark_temp_reg_used(r_val);
         int r_addr = alloc_temp_reg();
         gen_addr(vm, node->lhs, r_addr);
-        emit_rr(vm, VSTR, r_val, r_addr);
+        emit_rrs(vm, VSTR, r_val, r_addr, node->ty->size);
         free_temp_reg(r_addr);
         if (dest_reg == REG_ZERO)
             free_temp_reg(r_val);
@@ -3548,7 +3576,7 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         gen_expr(vm, node->rhs, r_rhs);
         int op = node->kind == ND_MOD ? vector_modop_for(fam)
                                        : vector_binop_for(node->kind, fam);
-        emit_rrr(vm, op, dest_reg, r_lhs, r_rhs);
+        emit_rrrs(vm, op, dest_reg, r_lhs, r_rhs, node->ty->vec_len);
         free_temp_reg(r_rhs);
         free_temp_reg(r_lhs);
         return;
@@ -3559,7 +3587,8 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         mark_temp_reg_used(r_lhs);
         int r_rhs = alloc_temp_reg();
         gen_expr(vm, node->rhs, r_rhs);
-        emit_rrr(vm, vector_bitop_for(node->kind), dest_reg, r_lhs, r_rhs);
+        emit_rrrs(vm, vector_bitop_for(node->kind), dest_reg, r_lhs, r_rhs,
+                  node->ty->size / 8);
         free_temp_reg(r_rhs);
         free_temp_reg(r_lhs);
         return;
@@ -3567,7 +3596,7 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
     case ND_BITNOT: {
         int r_src = alloc_temp_reg();
         gen_expr(vm, node->lhs, r_src);
-        emit_rr(vm, VNOT, dest_reg, r_src);
+        emit_rrs(vm, VNOT, dest_reg, r_src, node->ty->size / 8);
         free_temp_reg(r_src);
         return;
     }
@@ -3582,7 +3611,8 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         mark_temp_reg_used(r_lhs);
         int r_rhs = alloc_temp_reg();
         gen_expr(vm, node->rhs, r_rhs);
-        emit_rrr(vm, vector_cmpop_for(node->kind, fam, is_uns), dest_reg, r_lhs, r_rhs);
+        emit_rrrs(vm, vector_cmpop_for(node->kind, fam, is_uns), dest_reg,
+                  r_lhs, r_rhs, node->lhs->ty->vec_len);
         free_temp_reg(r_rhs);
         free_temp_reg(r_lhs);
         return;
@@ -3622,7 +3652,8 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         mark_temp_reg_used(r_cond);
         int r_then = alloc_temp_reg();
         gen_expr(vm, node->then, r_then);
-        emit_rrr(vm, vector_selop_for(node->ty->base->size), r_dest, r_cond, r_then);
+        emit_rrrs(vm, vector_selop_for(node->ty->base->size), r_dest, r_cond,
+                  r_then, node->ty->vec_len);
         free_temp_reg(r_then);
         free_temp_reg(r_cond);
         if (dest_reg == REG_ZERO)
@@ -3633,7 +3664,7 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         VecLaneFamily fam = vector_lane_family(node->ty->base);
         int r_src = alloc_temp_reg();
         gen_expr(vm, node->lhs, r_src);
-        emit_rr(vm, vector_negop_for(fam), dest_reg, r_src);
+        emit_rrs(vm, vector_negop_for(fam), dest_reg, r_src, node->ty->vec_len);
         free_temp_reg(r_src);
         return;
     }
@@ -3651,7 +3682,7 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         VecLaneFamily fam = vector_lane_family(node->ty->base);
         int r_scalar = alloc_temp_reg();
         gen_expr(vm, node->lhs, r_scalar);
-        emit_rr(vm, vector_splatop_for(fam), dest_reg, r_scalar);
+        emit_rrs(vm, vector_splatop_for(fam), dest_reg, r_scalar, node->ty->vec_len);
         free_temp_reg(r_scalar);
         return;
     }
@@ -3674,7 +3705,7 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         }
         int r_src = alloc_temp_reg();
         gen_expr(vm, node->lhs, r_src);
-        emit_rr(vm, op, dest_reg, r_src);
+        emit_rrs(vm, op, dest_reg, r_src, node->ty->vec_len);
         free_temp_reg(r_src);
         return;
     }
@@ -5609,18 +5640,19 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             }
         } else if (is_vector(node->ty)) {
             // Vector return (#714): REG_A0 holds the RETBUF buffer address
-            // (see ND_RETURN's vector branch) -- load the 16-byte value out
-            // of it into the destination vreg. Skip when the result is
-            // discarded (dest_reg == REG_ZERO): unlike int/float write
-            // opcodes, VLDR has no built-in "writes to REG_ZERO are
-            // discarded" guard (op_VLDR_fn, ops.c), so an unconditional load
-            // here would write into vregs[0] instead of being a no-op --
-            // harmless in practice (index 0 is never handed out by
-            // alloc_temp_reg) but skip it anyway rather than relying on that.
+            // (see ND_RETURN's vector branch) -- load the value out of it
+            // into the destination vreg (width from the return type, #722).
+            // Skip when the result is discarded (dest_reg == REG_ZERO):
+            // unlike int/float write opcodes, VLDR has no built-in "writes to
+            // REG_ZERO are discarded" guard (op_VLDR_fn, ops.c), so an
+            // unconditional load here would write into vregs[0] instead of
+            // being a no-op -- harmless in practice (index 0 is never handed
+            // out by alloc_temp_reg) but skip it anyway rather than relying
+            // on that.
             if (dest_reg != REG_ZERO) {
                 if (vm->flags & CCCC_POINTER_CHECKS)
                     emit_rr(vm, CHKP3, REG_A0, 0);
-                emit_rr(vm, VLDR, dest_reg, REG_A0);
+                emit_rrs(vm, VLDR, dest_reg, REG_A0, node->ty->size);
             }
         } else {
             if (dest_reg != REG_A0) {
@@ -6534,7 +6566,7 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
                 emit_mov3(vm, r_dest, REG_A0); // Save buffer address
                 if (vm->flags & CCCC_POINTER_CHECKS)
                     emit_rr(vm, CHKP3, r_dest, 0);
-                emit_rr(vm, VSTR, v_src, r_dest);
+                emit_rrs(vm, VSTR, v_src, r_dest, node->lhs->ty->size);
                 emit_mov3(vm, REG_A0, r_dest); // Return buffer address
 
                 free_temp_reg(v_src);

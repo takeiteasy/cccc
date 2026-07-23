@@ -6731,11 +6731,11 @@ static Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr
             error_tok(vm, attr->vector_size_tok,
                       "vector_size %d is not a positive multiple of the "
                       "element size (%d)", bytes, ty->size);
-        else if (bytes != (int)sizeof(VReg))
+        else if (bytes != 16 && bytes != 32 && bytes != 64)
             error_tok(vm, attr->vector_size_tok,
-                      "vector_size %d is not supported: only %d-byte "
-                      "(128-bit) vectors are currently supported", bytes,
-                      (int)sizeof(VReg));
+                      "vector_size %d is not supported: only 16-, 32-, or "
+                      "64-byte (128/256/512-bit) vectors are currently "
+                      "supported", bytes);
         else
             ty = vector_of(vm, ty, bytes);
     }

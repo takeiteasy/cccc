@@ -1247,7 +1247,7 @@ static bool op_operand_word_is_immediate(int op) {
 // namespace (vregs[]) that neither map tracks, and several of them mix
 // namespaces per-operand in ways op_is_float_src()'s single "all sources are
 // float, or all are int" split cannot express (e.g. VSPLAT_F64: rd is a
-// vreg, rs1 is a real freg; VADD_F64X2: rd/rs1/rs2 are all vregs, none of
+// vreg, rs1 is a real freg; VADD_F64: rd/rs1/rs2 are all vregs, none of
 // them real registers at all). Applying the generic decode to these
 // mis-selects the copy map for real-register operands (verified: without
 // this guard, `-O3` corrupts VSPLAT_F64's freg source, per the register-
@@ -1265,26 +1265,26 @@ static bool op_has_vector_operand(int op) {
     case VEXTRACT_I16: case VEXTRACT_I8:
     case VINSERT_F64: case VINSERT_F32: case VINSERT_I64: case VINSERT_I32:
     case VINSERT_I16: case VINSERT_I8:
-    case VADD_F64X2: case VSUB_F64X2: case VMUL_F64X2: case VDIV_F64X2: case VNEG_F64X2:
-    case VADD_F32X4: case VSUB_F32X4: case VMUL_F32X4: case VDIV_F32X4: case VNEG_F32X4:
-    case VADD_I64X2: case VSUB_I64X2: case VMUL_I64X2: case VNEG_I64X2:
-    case VADD_I32X4: case VSUB_I32X4: case VMUL_I32X4: case VNEG_I32X4:
-    case VADD_I16X8: case VSUB_I16X8: case VMUL_I16X8: case VNEG_I16X8:
-    case VADD_I8X16: case VSUB_I8X16: case VMUL_I8X16: case VNEG_I8X16:
+    case VADD_F64: case VSUB_F64: case VMUL_F64: case VDIV_F64: case VNEG_F64:
+    case VADD_F32: case VSUB_F32: case VMUL_F32: case VDIV_F32: case VNEG_F32:
+    case VADD_I64: case VSUB_I64: case VMUL_I64: case VNEG_I64:
+    case VADD_I32: case VSUB_I32: case VMUL_I32: case VNEG_I32:
+    case VADD_I16: case VSUB_I16: case VMUL_I16: case VNEG_I16:
+    case VADD_I8: case VSUB_I8: case VMUL_I8: case VNEG_I8:
     // tracker #715 additions: bitwise, int div/mod, comparisons, select, convert.
     case VAND: case VOR: case VXOR: case VNOT:
-    case VDIV_I64X2: case VDIV_I32X4: case VDIV_I16X8: case VDIV_I8X16:
-    case VMOD_I64X2: case VMOD_I32X4: case VMOD_I16X8: case VMOD_I8X16:
-    case VCEQ_F64X2: case VCNE_F64X2: case VCLT_F64X2: case VCLE_F64X2:
-    case VCEQ_F32X4: case VCNE_F32X4: case VCLT_F32X4: case VCLE_F32X4:
-    case VCEQ_I64X2: case VCNE_I64X2: case VCLT_I64X2: case VCLE_I64X2:
-    case VCLTU_I64X2: case VCLEU_I64X2:
-    case VCEQ_I32X4: case VCNE_I32X4: case VCLT_I32X4: case VCLE_I32X4:
-    case VCLTU_I32X4: case VCLEU_I32X4:
-    case VCEQ_I16X8: case VCNE_I16X8: case VCLT_I16X8: case VCLE_I16X8:
-    case VCLTU_I16X8: case VCLEU_I16X8:
-    case VCEQ_I8X16: case VCNE_I8X16: case VCLT_I8X16: case VCLE_I8X16:
-    case VCLTU_I8X16: case VCLEU_I8X16:
+    case VDIV_I64: case VDIV_I32: case VDIV_I16: case VDIV_I8:
+    case VMOD_I64: case VMOD_I32: case VMOD_I16: case VMOD_I8:
+    case VCEQ_F64: case VCNE_F64: case VCLT_F64: case VCLE_F64:
+    case VCEQ_F32: case VCNE_F32: case VCLT_F32: case VCLE_F32:
+    case VCEQ_I64: case VCNE_I64: case VCLT_I64: case VCLE_I64:
+    case VCLTU_I64: case VCLEU_I64:
+    case VCEQ_I32: case VCNE_I32: case VCLT_I32: case VCLE_I32:
+    case VCLTU_I32: case VCLEU_I32:
+    case VCEQ_I16: case VCNE_I16: case VCLT_I16: case VCLE_I16:
+    case VCLTU_I16: case VCLEU_I16:
+    case VCEQ_I8: case VCNE_I8: case VCLT_I8: case VCLE_I8:
+    case VCLTU_I8: case VCLEU_I8:
     case VSEL_8: case VSEL_16: case VSEL_32: case VSEL_64:
     case VCVT_I32_F32: case VCVT_F32_I32: case VCVT_I64_F64: case VCVT_F64_I64:
         return true;
