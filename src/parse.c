@@ -3531,6 +3531,40 @@ static void write_buf(char *buf, uint64_t val, int sz) {
 
 static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur, Initializer *init,
                                    Type *ty, char *buf, int offset) {
+    // An aggregate/vector initialized from a whole-value expression rather
+    // than a brace-list -- a compound literal (which, thanks to
+    // in_const_gvar_init, always resolves here to a bare reference to an
+    // anonymous constant global) -- has no children[] to recurse into.
+    // GCC/clang extend constant-initializer folding to a compound literal's
+    // own (constant) elements, but NOT to an arbitrary global reference by
+    // value (`struct T x = y;` is rejected by real compilers even when y is
+    // itself constant-initialized), so this gates on is_compound_literal,
+    // not merely on having init_data. If the expression is such a
+    // reference, splice its bytes and relocations in directly; otherwise
+    // it's not something this compile-time serializer can evaluate (#720 --
+    // this used to silently leave the region zeroed for the compound-literal
+    // case instead of either working or erroring).
+    if (init->expr && (ty->kind == TY_STRUCT || ty->kind == TY_UNION ||
+                       ty->kind == TY_ARRAY || ty->kind == TY_VECTOR)) {
+        Node *src = init->expr;
+        if (src->kind == ND_VAR && src->var && src->var->is_compound_literal) {
+            memcpy(buf + offset, src->var->init_data, ty->size);
+            for (Relocation *r = src->var->rel; r; r = r->next) {
+                Relocation *nr =
+                    arena_alloc(&vm->compiler.parser_arena, sizeof(Relocation));
+                memset(nr, 0, sizeof(Relocation));
+                nr->offset = offset + r->offset;
+                nr->label = r->label;
+                nr->addend = r->addend;
+                cur->next = nr;
+                cur = nr;
+            }
+            return cur;
+        }
+        error_tok(vm, src->tok,
+                  "initializer element is not a compile-time constant");
+    }
+
     if (ty->kind == TY_ARRAY) {
         int sz = ty->base->size;
         for (int i = 0; i < ty->array_len; i++)
@@ -3631,7 +3665,13 @@ static bool expr_contains_macro_call(Node *node) {
 // cc_expand_macros after all macros have been compiled and expanded).
 // See ticket #613.
 static void gvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var) {
+    // See in_const_gvar_init's declaration (#720): any compound literal
+    // parsed while this is set resolves to an anonymous constant global
+    // rather than an auto-storage local, regardless of lexical scope.
+    bool prev_in_const_gvar_init = vm->compiler.in_const_gvar_init;
+    vm->compiler.in_const_gvar_init = true;
     Initializer *init = initializer(vm, rest, tok, var->ty, &var->ty);
+    vm->compiler.in_const_gvar_init = prev_in_const_gvar_init;
 
     // For constexpr variables, save the initializer expression for compile-time
     // evaluation
@@ -7845,13 +7885,22 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
         Type *ty = compound_literal_type(vm, &tok, tok->next, &attr);
         tok = skip(vm, tok, ")");
 
+        // A compound literal used inside a global/static initializer must
+        // itself resolve to a constant, even when it has no explicit
+        // storage-class specifier and lexical scope isn't file scope (e.g.
+        // `static struct P b = (struct P){5,6};` inside a function) --
+        // in_const_gvar_init forces the anonymous-constant-global path here
+        // instead of materializing a real (nonsensical) auto-storage local
+        // (#720).
         if (vm->compiler.scope->next == NULL || attr.is_static ||
-            attr.is_constexpr || attr.is_tls) {
+            attr.is_constexpr || attr.is_tls ||
+            vm->compiler.in_const_gvar_init) {
             Obj *var = new_anon_gvar(vm, ty);
             var->is_constexpr = attr.is_constexpr;
             var->is_static = attr.is_static || attr.is_constexpr;
             var->is_tls = attr.is_tls;
             var->is_local_symbol = vm->compiler.scope->next != NULL;
+            var->is_compound_literal = true;
             gvar_initializer(vm, rest, tok, var);
             return new_var_node(vm, var, start);
         }

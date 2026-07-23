@@ -1214,6 +1214,15 @@ struct Obj {
     // Global variable
     bool is_tentative;
     bool is_tls;
+    bool is_compound_literal; // Anonymous global synthesized to hold a
+                              // compound literal's value (postfix's
+                              // compound-literal branch). GCC/clang extend
+                              // constant-initializer folding to a compound
+                              // literal's own (constant) elements but not to
+                              // an arbitrary global reference by value, so
+                              // write_gvar_data's #720 splice-in path gates
+                              // on this flag rather than merely having
+                              // init_data.
     char *init_data;
     Relocation *rel;
     Node *init_expr; // For constexpr: AST of initializer expression
@@ -2203,6 +2212,12 @@ typedef struct Compiler {
     Scope *scope;          // Current scope
     Obj *initializing_var; // Variable being initialized (for const
                            // initialization)
+    bool in_const_gvar_init; // True while parsing a global/static variable's
+                             // initializer expression (see gvar_initializer);
+                             // forces a nested compound literal to resolve to
+                             // an anonymous constant global even when the
+                             // literal itself has no storage-class specifier
+                             // and lexical scope is not file scope (#720).
     Obj *current_fn;       // Function being parsed
     int fn_nesting_depth;  // Current function nesting depth (0 = top-level)
     bool in_type_lookahead; // Parsing a declarator only to classify it
