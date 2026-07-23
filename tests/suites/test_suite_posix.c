@@ -1,7 +1,8 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: POSIX: unistd, dirent, glob, regex, socket, mman, etc.
 // Source tests: test_posix_arpa_inet, test_posix_dirent, test_posix_extra_ffi, test_posix_fnmatch, test_posix_glob, test_posix_libgen, test_posix_poll, test_posix_pwd_grp, test_posix_regex, test_posix_socket_netdb, test_posix_strings, test_posix_sys_mman, test_posix_sys_stat, test_posix_sys_time, test_posix_termios, test_posix_unistd_fcntl, test_posix_utime, test_posix_vfs_decls,
-//   test_glob_header, test_quick_exit, test_posix_sys_wait
+//   test_glob_header, test_quick_exit, test_posix_sys_wait,
+//   test_posix_sysconf_pathconf_confstr, test_posix_host_global_bridge
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -32,6 +33,7 @@
 #include <sys/param.h>
 #include <sys/mount.h>
 #include <errno.h>
+#include <getopt.h>
 
 // [from test_posix_extra_ffi]
 // Regression test for #590: additional POSIX FFI functions registered for the
@@ -524,6 +526,36 @@ int test_posix_sysconf_pathconf_confstr(void) {
 #if !defined(_DEFAULT_SOURCE)
 #error "_DEFAULT_SOURCE not predefined as expected"
 #endif
+
+    return 42;
+}
+
+// test_posix_host_global_bridge (#736)
+// errno and getopt's optarg/optind/opterr/optopt used to be inert,
+// always-zero guest globals disconnected from the host's real POSIX call
+// outcomes. They now alias the host's real storage via accessor functions
+// (same pattern as stdin/stdout/stderr), so a failing call's real errno and
+// getopt's real parse state are actually observable from guest code.
+[[cccc::test(return = 42)]]
+int test_posix_host_global_bridge(void) {
+    errno = 0;
+    int r = access("/nonexistent-path-xyz-736", F_OK);
+    if (r != -1) return 1;
+    if (errno != ENOENT) return 2;
+
+    errno = 0;
+    errno = EAGAIN;
+    if (errno != EAGAIN) return 3;
+
+    char *argv[] = {"prog", "-x", "hello", NULL};
+    optind = 1;
+    int c = getopt(3, argv, "x:");
+    if (c != 'x') return 4;
+    if (!optarg || strcmp(optarg, "hello") != 0) return 5;
+    if (optind != 3) return 6;
+
+    opterr = 0;
+    if (opterr != 0) return 7;
 
     return 42;
 }

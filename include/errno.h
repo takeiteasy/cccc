@@ -3,7 +3,19 @@
 #ifndef __ERRNO_H
 #define __ERRNO_H
 
+#ifdef _WIN32
+/* Windows FFI registration doesn't wire up __cccc_errno_ptr (POSIX-only
+ * stdlib, not a tested CCCC target -- see docs/COVERAGE.md); errno stays a
+ * plain, host-disconnected guest global here as before. */
 extern int errno;
+#else
+/* errno aliases the host's real per-thread errno (via an accessor function,
+ * same pattern as stdin/stdout/stderr in stdio.h) so it reflects the actual
+ * outcome of host-backed POSIX/libc calls instead of being an inert,
+ * always-zero guest global (#736). */
+extern int *__cccc_errno_ptr(void);
+#define errno (*__cccc_errno_ptr())
+#endif
 
 /* Standard C error codes */
 #define EPERM    1
