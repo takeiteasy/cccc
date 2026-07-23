@@ -85,9 +85,9 @@ because command-line `-U` is unreliable in `-c` mode; see ticket #624) together
 with a minimal driver that opens an in-memory database, runs a `CREATE TABLE` /
 `INSERT` / `SELECT` sequence, and asserts exit code 42. This catches regressions
 in the codegen fixes from tickets #587 (register-spill for deep expressions) and
-#588 (builtin-alloca identity). Compilation uses `-DSQLITE_THREADSAFE=0` because
-`PTHREAD_MUTEX_RECURSIVE` / `pthread_mutexattr_settype` are not yet in CCCC's
-`pthread.h` (ticket #623).
+#588 (builtin-alloca identity). Compilation uses SQLite's default
+`SQLITE_THREADSAFE=1`, exercising `PTHREAD_MUTEX_RECURSIVE` /
+`pthread_mutexattr_settype` support in CCCC's `pthread.h`.
 
 The amalgamation zip is ~2.9MB and gitignored (`tools/*.zip`), so it is not a
 tracked `tests/test_*.c`. The test looks for

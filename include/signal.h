@@ -9,7 +9,8 @@ typedef int sig_atomic_t;
 #define SIG_IGN ((void (*)(int))1)
 #define SIG_ERR ((void (*)(int))-1)
 
-/* Standard POSIX signals (Darwin/macOS values) */
+/* Standard POSIX signals. Numbers differ between Darwin and Linux past the
+   common core (1-15), so the rest are guarded per-platform. */
 #define SIGHUP   1   /* hangup */
 #define SIGINT   2   /* interrupt */
 #define SIGQUIT  3   /* quit */
@@ -18,14 +19,49 @@ typedef int sig_atomic_t;
 #define SIGABRT  6   /* abort */
 #define SIGFPE   8   /* floating-point exception */
 #define SIGKILL  9   /* kill (cannot be caught or ignored) */
-#define SIGBUS  10   /* bus error */
-#define SIGSEGV 11   /* segmentation fault */
 #define SIGPIPE 13   /* broken pipe */
 #define SIGALRM 14   /* alarm clock */
 #define SIGTERM 15   /* termination */
-#define SIGCHLD 20   /* child status change */
-#define SIGUSR1 30   /* user-defined signal 1 */
-#define SIGUSR2 31   /* user-defined signal 2 */
+
+#ifdef __APPLE__
+#define SIGBUS     10   /* bus error */
+#define SIGSEGV    11   /* segmentation fault */
+#define SIGSYS     12   /* bad system call */
+#define SIGURG     16   /* urgent condition on socket */
+#define SIGSTOP    17   /* stop (cannot be caught or ignored) */
+#define SIGTSTP    18   /* stop signal from tty */
+#define SIGCONT    19   /* continue after stop */
+#define SIGCHLD    20   /* child status change */
+#define SIGTTIN    21   /* background tty read */
+#define SIGTTOU    22   /* background tty write */
+#define SIGIO      23   /* I/O now possible */
+#define SIGXCPU    24   /* CPU time limit exceeded */
+#define SIGXFSZ    25   /* file size limit exceeded */
+#define SIGVTALRM  26   /* virtual time alarm */
+#define SIGPROF    27   /* profiling time alarm */
+#define SIGWINCH   28   /* window size change */
+#define SIGUSR1    30   /* user-defined signal 1 */
+#define SIGUSR2    31   /* user-defined signal 2 */
+#else
+#define SIGBUS     7    /* bus error */
+#define SIGSEGV    11   /* segmentation fault */
+#define SIGUSR1    10   /* user-defined signal 1 */
+#define SIGUSR2    12   /* user-defined signal 2 */
+#define SIGCHLD    17   /* child status change */
+#define SIGCONT    18   /* continue after stop */
+#define SIGSTOP    19   /* stop (cannot be caught or ignored) */
+#define SIGTSTP    20   /* stop signal from tty */
+#define SIGTTIN    21   /* background tty read */
+#define SIGTTOU    22   /* background tty write */
+#define SIGURG     23   /* urgent condition on socket */
+#define SIGXCPU    24   /* CPU time limit exceeded */
+#define SIGXFSZ    25   /* file size limit exceeded */
+#define SIGVTALRM  26   /* virtual time alarm */
+#define SIGPROF    27   /* profiling time alarm */
+#define SIGWINCH   28   /* window size change */
+#define SIGIO      29   /* I/O now possible */
+#define SIGSYS     31   /* bad system call */
+#endif
 
 /* SIGKILL and SIGSTOP cannot be caught, blocked, or ignored */
 

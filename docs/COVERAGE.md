@@ -1229,7 +1229,7 @@ if (__builtin_mul_overflow(a, b, &r))
 | `<locale.h>` | ✓ | Host locale APIs registered |
 | `<math.h>` | ✓ | Full C99 function set registered |
 | `<setjmp.h>` | ✓ | CCCC-specific implementation for VM calling convention |
-| `<signal.h>` | ✓ | Full POSIX signal set (Darwin/macOS values); `signal` and `raise` are VM-managed. Handlers run from the dispatch loop, never native signal context. The macOS crash dispatcher preserves guest dispositions while trapping default `SIGSEGV`/`SIGBUS`/`SIGFPE`/`SIGILL`/`SIGABRT` into an interactive debugger. `SIGTRAP` with `-g` breaks into the debugger. |
+| `<signal.h>` | ✓ | Full POSIX signal set, `#ifdef __APPLE__`-guarded per-platform values (Darwin and Linux signal numbers diverge past the common 1-15 core; e.g. `SIGBUS`/`SIGUSR1`/`SIGCHLD` differ) including job-control (`SIGSTOP`, `SIGCONT`, `SIGTSTP`, `SIGTTIN`, `SIGTTOU`), resource-limit (`SIGXCPU`, `SIGXFSZ`), and misc (`SIGPROF`, `SIGSYS`, `SIGVTALRM`, `SIGIO`, `SIGURG`, `SIGWINCH`) signals; `sigaction`/`sigemptyset`/`sigfillset`/`sigaddset`/`sigdelset`/`sigismember` and `sigset_t` are registered. `signal` and `raise` are VM-managed. Handlers run from the dispatch loop, never native signal context. The macOS crash dispatcher preserves guest dispositions while trapping default `SIGSEGV`/`SIGBUS`/`SIGFPE`/`SIGILL`/`SIGABRT` into an interactive debugger. `SIGTRAP` with `-g` breaks into the debugger. |
 | `<stdarg.h>` | ✓ | CCCC-specific implementation |
 | `<stddef.h>` | ✓ | |
 | `<stdio.h>` | ✓ | |
@@ -1304,33 +1304,33 @@ POSIX headers are embedded and backed by host OS calls. They are only available 
 | Header | Status | Notes |
 |---|---|---|
 | `<arpa/inet.h>` | ✓ | Network byte-order conversion (`htonl`, `htons`, `ntohl`, `ntohs`), address manipulation (`inet_addr`, `inet_ntoa`, `inet_ntop`, `inet_pton`) |
-| `<dirent.h>` | ✓ | Directory entry iteration (`opendir`, `readdir`, `closedir`, `DIR`, `struct dirent`) |
+| `<dirent.h>` | ✓ | Directory entry iteration (`opendir`, `readdir`, `closedir`, `seekdir`, `telldir`, `rewinddir`, `DIR`, `struct dirent`) |
 | `<dlfcn.h>` | ✓ | VM-managed dynamic loading (`dlopen`, `dlsym`, `dlclose`, `dlerror`); `dlsym` function symbols are callable through typed function pointers for scalar/pointer signatures |
-| `<fcntl.h>` | ✓ | File control (`open`, `creat`, `fcntl`), `O_*` and `S_*` permission constants, record-locking `F_*` commands, `FD_CLOEXEC`, `struct flock` |
+| `<fcntl.h>` | ✓ | File control (`open`, `creat`, `fcntl`), `O_*` (including `O_DIRECTORY`, `O_NOFOLLOW`, `O_SYNC`, `O_NOCTTY`) and `S_*` permission constants, record-locking `F_*` commands (including `F_GETOWN`/`F_SETOWN`), `FD_CLOEXEC`, `struct flock`; `fallocate` declared and registered under `__linux__` |
 | `<fnmatch.h>` | ✓ | Filename pattern matching (`fnmatch`, `FNM_*` constants) |
 | `<getopt.h>` | ✓ | Command-line option parsing (`getopt`, `getopt_long`, `optarg`, `optind`, `opterr`, `optopt`, `struct option`) |
 | `<glob.h>` | ✓ | Pathname globbing (`glob`, `globfree`, `glob_t`, `GLOB_*` constants) |
-| `<grp.h>` | ✓ | Group database (`getgrgid`, `getgrnam`, `struct group`) |
+| `<grp.h>` | ✓ | Group database (`getgrgid`, `getgrnam`, `getgrgid_r`, `getgrnam_r`, `struct group`) |
 | `<libgen.h>` | ✓ | Pathname manipulation (`basename`, `dirname`) |
 | `<netdb.h>` | ✓ | Network database (`gethostbyname`, `getaddrinfo`, `freeaddrinfo`, `struct hostent`, `struct addrinfo`) |
 | `<netinet/in.h>` | ✓ | Internet address family (`struct sockaddr_in`, `struct in_addr`, `in_port_t`, `in_addr_t`, `INADDR_*`, `IPPROTO_*`) |
 | `<poll.h>` | ✓ | Event polling (`poll`, `struct pollfd`, `nfds_t`, `POLL_*` constants) |
-| `<pthread.h>` | ~ | POSIX pthread lifecycle, mutex, condition-variable, TLS key, and basic attr APIs are backed by host pthreads. VM bytecode execution is serialized by a recursive GIL, so pthreads provide correctness and blocking/wakeup semantics, not parallel VM execution. |
-| `<pwd.h>` | ✓ | Password database (`getpwuid`, `getpwnam`, `struct passwd`) |
+| `<pthread.h>` | ~ | POSIX pthread lifecycle, mutex (including `pthread_mutexattr_init/destroy/settype/gettype` and `PTHREAD_MUTEX_RECURSIVE`/`ERRORCHECK`/`NORMAL`/`DEFAULT`), condition-variable, TLS key, and basic attr APIs are backed by host pthreads. VM bytecode execution is serialized by a recursive GIL, so pthreads provide correctness and blocking/wakeup semantics, not parallel VM execution. |
+| `<pwd.h>` | ✓ | Password database (`getpwuid`, `getpwnam`, `getpwuid_r`, `getpwnam_r`, `struct passwd`) |
 | `<regex.h>` | ✓ | Regular expression matching (`regcomp`, `regexec`, `regerror`, `regfree`, `regex_t`, `regmatch_t`) |
 | `<strings.h>` | ✓ | BSD string functions (`strcasecmp`, `strncasecmp`, `bzero`, `bcopy`, `bcmp`, `index`, `rindex`) |
 | `<sys/file.h>` | ✓ | Advisory file locking (`flock`, `LOCK_SH`, `LOCK_EX`, `LOCK_NB`, `LOCK_UN`) |
 | `<sys/ioctl.h>` | ✓ | Device control (`ioctl`, `struct winsize`, `TIOCGWINSZ`, `TIOCSWINSZ`) |
-| `<sys/mman.h>` | ✓ | Memory management (`mmap`, `munmap`, `mprotect`, `msync`, `posix_madvise`), `PROT_*`, `MAP_*`, `MAP_FAILED`, `MS_*`, `MADV_*` constants |
+| `<sys/mman.h>` | ✓ | Memory management (`mmap`, `munmap`, `mprotect`, `msync`, `posix_madvise`), `PROT_*`, `MAP_*`, `MAP_FAILED`, `MS_*`, `MADV_*` constants; `mremap` declared and registered under `__linux__` |
 | `<sys/mount.h>` | ✓ | Filesystem statistics (`statfs`, `fstatfs`, `struct statfs`) — minimal portable field set |
 | `<sys/param.h>` | ✓ | System limits and helpers (`MAXPATHLEN`, `NBBY`, `MIN`, `MAX`) |
-| `<sys/socket.h>` | ✓ | Socket API (`socket`, `bind`, `listen`, `accept`, `connect`, `setsockopt`, `getsockname`, `shutdown`, `struct sockaddr`, `socklen_t`) |
-| `<sys/stat.h>` | ✓ | File status (`stat`, `fstat`, `lstat`, `chmod`, `fchmod`, `mkdir`, `mkfifo`, `umask`), `struct stat`, `S_*` constants and macros |
+| `<sys/socket.h>` | ✓ | Socket API (`socket`, `bind`, `listen`, `accept`, `connect`, `setsockopt`, `getsockname`, `shutdown`, `struct sockaddr`, `socklen_t`), expanded `SO_*` (`SO_ERROR`, `SO_KEEPALIVE`, `SO_BROADCAST`, `SO_RCVBUF`, `SO_SNDBUF`, `SO_LINGER`, `SO_TYPE`, `SO_REUSEPORT`, ...) and `MSG_*` (`MSG_PEEK`, `MSG_DONTWAIT`, `MSG_WAITALL`, `MSG_OOB`, `MSG_EOR`, `MSG_TRUNC`, `MSG_CTRUNC`, plus Linux `MSG_NOSIGNAL`) constants |
+| `<sys/stat.h>` | ✓ | File status (`stat`, `fstat`, `lstat`, `chmod`, `fchmod`, `mkdir`, `mkfifo`, `umask`), `struct stat`, `S_*` constants and macros, `UTIME_NOW`/`UTIME_OMIT` |
 | `<sys/time.h>` | ✓ | Time operations (`gettimeofday`, `settimeofday`, `utimes`), `struct timeval`, `struct timezone`, `timeradd`, `timersub`) |
 | `<sys/types.h>` | ✓ | Basic system types (`dev_t`, `ino_t`, `mode_t`, `nlink_t`, `uid_t`, `gid_t`, `off_t`, `pid_t`, `blksize_t`, `blkcnt_t`, `useconds_t`, `sa_family_t`, `socklen_t`) |
-| `<sys/wait.h>` | ✓ | Process wait (`wait`, `waitpid`), `WNOHANG`, `WUNTRACED`, `WIFEXITED`, `WEXITSTATUS`, `WIFSIGNALED`, `WIFSTOPPED`, `WSTOPSIG`, `WCOREDUMP` |
-| `<termios.h>` | ✓ | Terminal I/O (`tcgetattr`, `tcsetattr`, `struct termios`, `cc_t`, `speed_t`, `tcflag_t`) |
-| `<unistd.h>` | ✓ | Core POSIX API (`read`, `write`, `pread`, `pwrite`, `close`, `lseek`, `access`, `unlink`, `rmdir`, `chdir`, `getcwd`, `getpid`, `getppid`, `getuid`, `geteuid`, `getgid`, `getegid`, `fchown`, `chown`, `readlink`, `symlink`, `fdatasync`, `getpagesize`, `sleep`, `usleep`, `pipe`, `fork`, `execv`, `execve`, `execl`, `execlp`, `execle`, `execvp`, `_exit`, `ssize_t`, `STDIN/STDOUT/STDERR_FILENO`, `SEEK_*`, `F_OK`/`R_OK`/`W_OK`/`X_OK`, `_SC_PAGESIZE`) |
+| `<sys/wait.h>` | ✓ | Process wait (`wait`, `waitpid`), `WNOHANG`, `WUNTRACED`, `WCONTINUED`, `WIFEXITED`, `WEXITSTATUS`, `WIFSIGNALED`, `WIFSTOPPED`, `WIFCONTINUED`, `WSTOPSIG`, `WCOREDUMP` |
+| `<termios.h>` | ✓ | Terminal I/O (`tcgetattr`, `tcsetattr`, `cfgetispeed`, `cfgetospeed`, `cfsetispeed`, `cfsetospeed`, `cfsetspeed`, `cfmakeraw`, `tcdrain`, `tcflow`, `tcflush`, `tcsendbreak`, `struct termios`, `cc_t`, `speed_t`, `tcflag_t`) |
+| `<unistd.h>` | ✓ | Core POSIX API (`read`, `write`, `pread`, `pwrite`, `close`, `lseek`, `access`, `unlink`, `rmdir`, `chdir`, `getcwd`, `getpid`, `getppid`, `getuid`, `geteuid`, `getgid`, `getegid`, `seteuid`, `setegid`, `setuid`, `setgid`, `getgroups`, `getlogin`, `fchown`, `chown`, `readlink`, `symlink`, `link`, `fdatasync`, `getpagesize`, `sleep`, `usleep`, `alarm`, `pause`, `getpgid`, `setpgid`, `getpgrp`, `setsid`, `getsid`, `fchdir`, `gethostname`, `readv`, `writev`, `struct iovec`, `pipe`, `fork`, `execv`, `execve`, `execl`, `execlp`, `execle`, `execvp`, `_exit`, `ssize_t`, `STDIN/STDOUT/STDERR_FILENO`, `SEEK_*`, `F_OK`/`R_OK`/`W_OK`/`X_OK`, `_SC_PAGESIZE`; `splice` declared and registered under `__linux__`) |
 | `<utime.h>` | ✓ | File time manipulation (`utime`, `struct utimbuf`) |
 
 ---

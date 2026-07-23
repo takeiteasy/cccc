@@ -14,6 +14,7 @@ typedef unsigned int pthread_key_t;
 typedef struct {
     void *__handle;
     long __state;
+    int __type;
 } pthread_mutex_t;
 
 typedef struct {
@@ -27,15 +28,30 @@ typedef struct {
 } pthread_attr_t;
 
 typedef struct {
-    int __unused;
+    int __type;
 } pthread_mutexattr_t;
 
 typedef struct {
     int __unused;
 } pthread_condattr_t;
 
-#define PTHREAD_MUTEX_INITIALIZER { 0, 0 }
+#define PTHREAD_MUTEX_INITIALIZER { 0, 0, 0 }
 #define PTHREAD_COND_INITIALIZER { 0, 0 }
+
+// Mutex types (POSIX). Values are the real host encoding so they can be
+// forwarded directly to the native pthread_mutexattr_settype() underneath
+// the FFI wrapper -- see src/stdlib/pthread.c.
+#ifdef __APPLE__
+#define PTHREAD_MUTEX_NORMAL     0
+#define PTHREAD_MUTEX_ERRORCHECK 1
+#define PTHREAD_MUTEX_RECURSIVE  2
+#define PTHREAD_MUTEX_DEFAULT    PTHREAD_MUTEX_NORMAL
+#else
+#define PTHREAD_MUTEX_NORMAL     0
+#define PTHREAD_MUTEX_RECURSIVE  1
+#define PTHREAD_MUTEX_ERRORCHECK 2
+#define PTHREAD_MUTEX_DEFAULT    PTHREAD_MUTEX_NORMAL
+#endif
 
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
                    void *(*start_routine)(void *), void *arg);
@@ -51,6 +67,11 @@ int pthread_mutex_destroy(pthread_mutex_t *mutex);
 int pthread_mutex_lock(pthread_mutex_t *mutex);
 int pthread_mutex_trylock(pthread_mutex_t *mutex);
 int pthread_mutex_unlock(pthread_mutex_t *mutex);
+
+int pthread_mutexattr_init(pthread_mutexattr_t *attr);
+int pthread_mutexattr_destroy(pthread_mutexattr_t *attr);
+int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int type);
+int pthread_mutexattr_gettype(const pthread_mutexattr_t *attr, int *type);
 
 int pthread_cond_init(pthread_cond_t *cond, const pthread_condattr_t *attr);
 int pthread_cond_destroy(pthread_cond_t *cond);

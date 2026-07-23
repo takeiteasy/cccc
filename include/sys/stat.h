@@ -116,6 +116,15 @@ struct stat {
 #define S_ISGID  02000
 #define S_ISVTX  01000
 
+/* Sentinel tv_nsec values for utimensat()/futimens() */
+#ifdef __APPLE__
+#define UTIME_NOW  -1
+#define UTIME_OMIT -2
+#else
+#define UTIME_NOW  0x3FFFFFFF
+#define UTIME_OMIT 0x3FFFFFFE
+#endif
+
 extern int stat(const char *path, struct stat *buf);
 extern int fstat(int fd, struct stat *buf);
 extern int lstat(const char *path, struct stat *buf);

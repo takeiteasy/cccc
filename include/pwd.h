@@ -7,6 +7,7 @@
 #error "<pwd.h> is only available on POSIX targets in CCCC"
 #endif
 
+#include "stddef.h"
 #include "sys/types.h"
 
 struct passwd {
@@ -28,5 +29,9 @@ struct passwd {
 
 extern struct passwd *getpwuid(uid_t uid);
 extern struct passwd *getpwnam(const char *name);
+extern int getpwuid_r(uid_t uid, struct passwd *pwd, char *buf,
+                      size_t buflen, struct passwd **result);
+extern int getpwnam_r(const char *name, struct passwd *pwd, char *buf,
+                      size_t buflen, struct passwd **result);
 
 #endif /* __PWD_H */

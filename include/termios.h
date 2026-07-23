@@ -69,4 +69,25 @@ extern int tcgetattr(int fildes, struct termios *termios_p);
 extern int tcsetattr(int fildes, int optional_actions,
                      const struct termios *termios_p);
 
+/* Line control */
+#define TCIFLUSH  0
+#define TCOFLUSH  1
+#define TCIOFLUSH 2
+
+#define TCOOFF 0
+#define TCOON  1
+#define TCIOFF 2
+#define TCION  3
+
+extern speed_t cfgetispeed(const struct termios *termios_p);
+extern speed_t cfgetospeed(const struct termios *termios_p);
+extern int cfsetispeed(struct termios *termios_p, speed_t speed);
+extern int cfsetospeed(struct termios *termios_p, speed_t speed);
+extern int cfsetspeed(struct termios *termios_p, speed_t speed);
+extern void cfmakeraw(struct termios *termios_p);
+extern int tcdrain(int fildes);
+extern int tcflow(int fildes, int action);
+extern int tcflush(int fildes, int queue_selector);
+extern int tcsendbreak(int fildes, int duration);
+
 #endif /* __TERMIOS_H */

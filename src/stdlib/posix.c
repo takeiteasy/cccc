@@ -22,6 +22,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/uio.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
@@ -182,6 +183,17 @@ static long long wrap_usleep_gil(long long usec) {
     return (long long)r;
 }
 
+static long long wrap_pause_gil(void) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)pause();
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    int r = pause();
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
 // ---------------------------------------------------------------------------
 // Non-blocking wrappers (intentionally keep the GIL — fast, no I/O wait)
 // ---------------------------------------------------------------------------
@@ -250,6 +262,7 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "sleep",   (void*)wrap_sleep_gil,   1, 0);
     cc_register_cfunc(vm, "usleep",  (void*)wrap_usleep_gil,  1, 0);
     cc_register_cfunc(vm, "nanosleep",(void*)wrap_nanosleep_gil, 2, 0);
+    cc_register_cfunc(vm, "pause",   (void*)wrap_pause_gil,   0, 0);
 
     // Non-blocking / fast — intentionally keep the GIL (see comment above)
     cc_register_cfunc(vm, "close",   (void*)wrap_close,  1, 0);
@@ -280,6 +293,23 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "sysconf",  (void*)sysconf,  1, 0);
     cc_register_cfunc(vm, "mkstemp",  (void*)mkstemp,  1, 0);
     cc_register_cfunc(vm, "mkdtemp",  (void*)mkdtemp,  1, 0);
+    cc_register_cfunc(vm, "seteuid",  (void*)seteuid,  1, 0);
+    cc_register_cfunc(vm, "setegid",  (void*)setegid,  1, 0);
+    cc_register_cfunc(vm, "setuid",   (void*)setuid,   1, 0);
+    cc_register_cfunc(vm, "setgid",   (void*)setgid,   1, 0);
+    cc_register_cfunc(vm, "getgroups",(void*)getgroups,2, 0);
+    cc_register_cfunc(vm, "getlogin", (void*)getlogin, 0, 0);
+    cc_register_cfunc(vm, "link",     (void*)link,     2, 0);
+    cc_register_cfunc(vm, "getpgid",  (void*)getpgid,  1, 0);
+    cc_register_cfunc(vm, "setpgid",  (void*)setpgid,  2, 0);
+    cc_register_cfunc(vm, "getpgrp",  (void*)getpgrp,  0, 0);
+    cc_register_cfunc(vm, "setsid",   (void*)setsid,   0, 0);
+    cc_register_cfunc(vm, "getsid",   (void*)getsid,   1, 0);
+    cc_register_cfunc(vm, "alarm",    (void*)alarm,    1, 0);
+    cc_register_cfunc(vm, "fchdir",   (void*)fchdir,   1, 0);
+    cc_register_cfunc(vm, "gethostname",(void*)gethostname,2, 0);
+    cc_register_cfunc(vm, "readv",    (void*)readv,    3, 0);
+    cc_register_cfunc(vm, "writev",   (void*)writev,   3, 0);
     cc_register_variadic_cfunc(vm, "open",   (void*)wrap_open,  2, 0);
     cc_register_cfunc(vm, "creat",   (void*)wrap_creat, 2, 0);
     cc_register_variadic_cfunc(vm, "fcntl",  (void*)fcntl, 2, 0);
@@ -310,6 +340,15 @@ void register_posix_functions(VirtualMachine *vm) {
     // that calls mremap can link (#729).
     extern void *mremap(void *old_address, size_t old_size, size_t new_size, int flags, ...);
     cc_register_cfunc(vm, "mremap", (void*)mremap, 4, 0);
+    // fallocate/splice: same gap class as mremap above -- Linux-only libc
+    // calls SQLite's unix VFS can reference (behind HAVE_FALLOCATE config,
+    // not currently active in the smoke build) that were previously
+    // undeclared and unregistered anywhere in include/ or src/stdlib/ (#731).
+    extern int fallocate(int fd, int mode, off_t offset, off_t len);
+    cc_register_cfunc(vm, "fallocate", (void*)fallocate, 4, 0);
+    extern ssize_t splice(int fd_in, off_t *off_in, int fd_out, off_t *off_out,
+                          size_t len, unsigned int flags);
+    cc_register_cfunc(vm, "splice", (void*)splice, 6, 0);
 #endif
     cc_register_cfunc(vm, "stat",    (void*)stat,    2, 0);
     cc_register_cfunc(vm, "fstat",   (void*)fstat,   2, 0);
@@ -351,10 +390,27 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "closedir", (void*)closedir, 1, 0);
     cc_register_cfunc(vm, "tcgetattr",(void*)tcgetattr, 2, 0);
     cc_register_cfunc(vm, "tcsetattr",(void*)tcsetattr, 3, 0);
+    cc_register_cfunc(vm, "cfgetispeed",(void*)cfgetispeed, 1, 0);
+    cc_register_cfunc(vm, "cfgetospeed",(void*)cfgetospeed, 1, 0);
+    cc_register_cfunc(vm, "cfsetispeed",(void*)cfsetispeed, 2, 0);
+    cc_register_cfunc(vm, "cfsetospeed",(void*)cfsetospeed, 2, 0);
+    cc_register_cfunc(vm, "cfsetspeed", (void*)cfsetspeed,  2, 0);
+    cc_register_cfunc(vm, "cfmakeraw",  (void*)cfmakeraw,   1, 0);
+    cc_register_cfunc(vm, "tcdrain",    (void*)tcdrain,     1, 0);
+    cc_register_cfunc(vm, "tcflow",     (void*)tcflow,      2, 0);
+    cc_register_cfunc(vm, "tcflush",    (void*)tcflush,     2, 0);
+    cc_register_cfunc(vm, "tcsendbreak",(void*)tcsendbreak, 2, 0);
+    cc_register_cfunc(vm, "seekdir",    (void*)seekdir,     2, 0);
+    cc_register_cfunc(vm, "telldir",    (void*)telldir,     1, 0);
+    cc_register_cfunc(vm, "rewinddir",  (void*)rewinddir,   1, 0);
     cc_register_cfunc(vm, "getpwuid", (void*)getpwuid, 1, 0);
     cc_register_cfunc(vm, "getpwnam", (void*)getpwnam, 1, 0);
     cc_register_cfunc(vm, "getgrgid", (void*)getgrgid, 1, 0);
     cc_register_cfunc(vm, "getgrnam", (void*)getgrnam, 1, 0);
+    cc_register_cfunc(vm, "getpwuid_r", (void*)getpwuid_r, 5, 0);
+    cc_register_cfunc(vm, "getpwnam_r", (void*)getpwnam_r, 5, 0);
+    cc_register_cfunc(vm, "getgrgid_r", (void*)getgrgid_r, 5, 0);
+    cc_register_cfunc(vm, "getgrnam_r", (void*)getgrnam_r, 5, 0);
     cc_register_cfunc(vm, "regcomp",  (void*)regcomp,  3, 0);
     cc_register_cfunc(vm, "regexec",  (void*)regexec,  5, 0);
     cc_register_cfunc(vm, "regerror", (void*)regerror, 4, 0);

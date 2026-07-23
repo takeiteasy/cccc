@@ -20,6 +20,14 @@
 #define WSTOPSIG(status)    WEXITSTATUS(status)
 #define WCOREDUMP(status)   ((status) & 0x80)
 
+#ifdef __APPLE__
+#define WCONTINUED 0x10
+#define WIFCONTINUED(status) (WSTOPSIG(status) == 0x13)
+#else
+#define WCONTINUED 8
+#define WIFCONTINUED(status) ((status) == 0xffff)
+#endif
+
 extern pid_t wait(int *status);
 extern pid_t waitpid(pid_t pid, int *status, int options);
 

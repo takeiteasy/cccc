@@ -10,7 +10,14 @@
 typedef struct CCCCUserMutex {
     void *handle;
     long state;
+    int type;   // 0 (default/normal) or PTHREAD_MUTEX_RECURSIVE/etc, set via
+                // pthread_mutexattr_settype() before the first lock/init.
 } CCCCUserMutex;
+
+// Guest-visible pthread_mutexattr_t (include/pthread.h): { int __type; }
+typedef struct CCCCUserMutexAttr {
+    int type;
+} CCCCUserMutexAttr;
 
 typedef struct CCCCUserCond {
     void *handle;
@@ -399,7 +406,13 @@ static pthread_mutex_t *ensure_mutex(CCCCUserMutex *mutex) {
         pthread_mutex_t *host = malloc(sizeof(*host));
         if (!host)
             return NULL;
-        if (pthread_mutex_init(host, NULL) != 0) {
+        pthread_mutexattr_t attr;
+        pthread_mutexattr_init(&attr);
+        if (mutex->type != 0)
+            pthread_mutexattr_settype(&attr, mutex->type);
+        int rc = pthread_mutex_init(host, &attr);
+        pthread_mutexattr_destroy(&attr);
+        if (rc != 0) {
             free(host);
             return NULL;
         }
@@ -427,12 +440,13 @@ static pthread_cond_t *ensure_cond(CCCCUserCond *cond) {
 }
 
 static long long wrap_pthread_mutex_init(long long mutexp, long long attrp) {
-    (void)attrp;
     CCCCUserMutex *mutex = (CCCCUserMutex *)mutexp;
     if (!mutex)
         return EINVAL;
     if (mutex->handle)
         return EBUSY;
+    CCCCUserMutexAttr *attr = (CCCCUserMutexAttr *)attrp;
+    mutex->type = attr ? attr->type : 0;
     pthread_mutex_t *host = ensure_mutex(mutex);
     return host ? 0 : EAGAIN;
 }
@@ -452,10 +466,13 @@ static long long wrap_pthread_mutex_destroy(long long mutexp) {
 
 static long long wrap_pthread_mutex_lock(long long mutexp) {
     VirtualMachine *vm = current_vm();
-    pthread_mutex_t *host = ensure_mutex((CCCCUserMutex *)mutexp);
+    CCCCUserMutex *mutex = (CCCCUserMutex *)mutexp;
+    pthread_mutex_t *host = ensure_mutex(mutex);
     if (!vm || !host)
         return EINVAL;
-    if (vm->flags & CCCC_THREAD_SAFETY) {
+    // Recursive mutexes are legitimately re-locked by the same thread; skip
+    // the double-lock deadlock diagnostic for them (#623).
+    if ((vm->flags & CCCC_THREAD_SAFETY) && mutex->type != PTHREAD_MUTEX_RECURSIVE) {
         ThreadRecord *tr = current_thread(vm);
         if (tr && check_lock_safety(vm, tr, (void *)mutexp))
             return EDEADLK;
@@ -498,6 +515,36 @@ static long long wrap_pthread_mutex_unlock(long long mutexp) {
             thread_remove_held_lock(tr, (void *)mutexp);
     }
     return rc;
+}
+
+static long long wrap_pthread_mutexattr_init(long long attrp) {
+    CCCCUserMutexAttr *attr = (CCCCUserMutexAttr *)attrp;
+    if (!attr)
+        return EINVAL;
+    attr->type = PTHREAD_MUTEX_DEFAULT;
+    return 0;
+}
+
+static long long wrap_pthread_mutexattr_destroy(long long attrp) {
+    (void)attrp;
+    return 0;
+}
+
+static long long wrap_pthread_mutexattr_settype(long long attrp, long long type) {
+    CCCCUserMutexAttr *attr = (CCCCUserMutexAttr *)attrp;
+    if (!attr)
+        return EINVAL;
+    attr->type = (int)type;
+    return 0;
+}
+
+static long long wrap_pthread_mutexattr_gettype(long long attrp, long long typep) {
+    CCCCUserMutexAttr *attr = (CCCCUserMutexAttr *)attrp;
+    int *out = (int *)typep;
+    if (!attr || !out)
+        return EINVAL;
+    *out = attr->type;
+    return 0;
 }
 
 static long long wrap_pthread_cond_init(long long condp, long long attrp) {
@@ -676,6 +723,10 @@ void register_pthread_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "pthread_mutex_lock", (void *)wrap_pthread_mutex_lock, 1, 0);
     cc_register_cfunc(vm, "pthread_mutex_trylock", (void *)wrap_pthread_mutex_trylock, 1, 0);
     cc_register_cfunc(vm, "pthread_mutex_unlock", (void *)wrap_pthread_mutex_unlock, 1, 0);
+    cc_register_cfunc(vm, "pthread_mutexattr_init", (void *)wrap_pthread_mutexattr_init, 1, 0);
+    cc_register_cfunc(vm, "pthread_mutexattr_destroy", (void *)wrap_pthread_mutexattr_destroy, 1, 0);
+    cc_register_cfunc(vm, "pthread_mutexattr_settype", (void *)wrap_pthread_mutexattr_settype, 2, 0);
+    cc_register_cfunc(vm, "pthread_mutexattr_gettype", (void *)wrap_pthread_mutexattr_gettype, 2, 0);
     cc_register_cfunc(vm, "pthread_cond_init", (void *)wrap_pthread_cond_init, 2, 0);
     cc_register_cfunc(vm, "pthread_cond_destroy", (void *)wrap_pthread_cond_destroy, 1, 0);
     cc_register_cfunc(vm, "pthread_cond_wait", (void *)wrap_pthread_cond_wait, 2, 0);

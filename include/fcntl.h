@@ -18,16 +18,39 @@
 #ifdef __APPLE__
 #define O_NONBLOCK 0x0004
 #define O_APPEND 0x0008
+#define O_SYNC 0x0080
+#define O_NOFOLLOW 0x0100
 #define O_CREAT 0x0200
 #define O_TRUNC 0x0400
 #define O_EXCL 0x0800
+#define O_NOCTTY 0x20000
+#define O_DIRECTORY 0x100000
 #define O_CLOEXEC 0x1000000
-#else
+#elif defined(__x86_64__)
 #define O_CREAT 0100
 #define O_EXCL 0200
+#define O_NOCTTY 0400
 #define O_TRUNC 01000
 #define O_APPEND 02000
 #define O_NONBLOCK 04000
+#define O_SYNC 04010000
+#define O_DIRECTORY 0200000
+#define O_NOFOLLOW 0400000
+#define O_CLOEXEC 02000000
+#else
+/* Linux aarch64 (and other asm-generic architectures): O_DIRECTORY/O_NOFOLLOW
+   differ from the x86_64 values above. Unverified against a real aarch64
+   Linux header on this host (no Linux/cross toolchain available in this
+   session) -- flagged for a follow-up CI verification pass. */
+#define O_CREAT 0100
+#define O_EXCL 0200
+#define O_NOCTTY 0400
+#define O_TRUNC 01000
+#define O_APPEND 02000
+#define O_NONBLOCK 04000
+#define O_SYNC 04010000
+#define O_DIRECTORY 040000
+#define O_NOFOLLOW 0100000
 #define O_CLOEXEC 02000000
 #endif
 
@@ -44,6 +67,8 @@
 #define F_GETLK  7
 #define F_SETLK  8
 #define F_SETLKW 9
+#define F_GETOWN 5
+#define F_SETOWN 6
 #define F_RDLCK  1
 #define F_UNLCK  2
 #define F_WRLCK  3
@@ -60,6 +85,8 @@ struct flock {
 #define F_GETLK  5
 #define F_SETLK  6
 #define F_SETLKW 7
+#define F_SETOWN 8
+#define F_GETOWN 9
 #define F_RDLCK  0
 #define F_WRLCK  1
 #define F_UNLCK  2
@@ -86,5 +113,13 @@ struct flock {
 extern int open(const char *path, int oflag, ...);
 extern int creat(const char *path, unsigned int mode);
 extern int fcntl(int fd, int cmd, ...);
+
+#ifdef __linux__
+// fallocate: Linux-only glibc/syscall extension for preallocating file space.
+// SQLite's unix VFS references it (behind HAVE_FALLOCATE config) -- declared
+// here so a build that enables that config can link (#731, same class as the
+// #729 mremap gap).
+extern int fallocate(int fd, int mode, off_t offset, off_t len);
+#endif
 
 #endif /* __FCNTL_H */

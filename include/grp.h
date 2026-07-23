@@ -7,6 +7,7 @@
 #error "<grp.h> is only available on POSIX targets in CCCC"
 #endif
 
+#include "stddef.h"
 #include "sys/types.h"
 
 struct group {
@@ -18,5 +19,9 @@ struct group {
 
 extern struct group *getgrgid(gid_t gid);
 extern struct group *getgrnam(const char *name);
+extern int getgrgid_r(gid_t gid, struct group *grp, char *buf,
+                      size_t buflen, struct group **result);
+extern int getgrnam_r(const char *name, struct group *grp, char *buf,
+                      size_t buflen, struct group **result);
 
 #endif /* __GRP_H */

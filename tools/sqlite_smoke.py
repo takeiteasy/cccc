@@ -18,10 +18,6 @@ The zip (~2.9 MB) is gitignored (tools/*.zip).  When absent both phases skip
 gracefully and print the fetch URL + SHA3-256.  When present, SHA3-256 is
 verified before use.
 
-Known limitations:
-  - SQLITE_THREADSAFE requires PTHREAD_MUTEX_RECURSIVE / pthread_mutexattr_settype,
-    which are not yet in CCCC's pthread.h; SQLITE_THREADSAFE=0 is used instead.
-
 Exit codes: 0 = pass or skip, 1 = failure.
 """
 
@@ -41,7 +37,6 @@ ZIP_URL = "https://sqlite.org/2026/sqlite-amalgamation-3530200.zip"
 # Compile flags used for both phases (where applicable)
 COMPILE_FLAGS = [
     "-DSQLITE_OMIT_LOAD_EXTENSION",
-    "-DSQLITE_THREADSAFE=0",
     "-DSQLITE_DISABLE_INTRINSIC",
 ]
 
@@ -107,7 +102,6 @@ def phase1_preprocess(cccc: Path, include: Path, src: Path) -> bool:
     print("  Phase 1: preprocess (#584 regression)")
     flags = [
         "-DSQLITE_OMIT_LOAD_EXTENSION",
-        "-DSQLITE_THREADSAFE=0",
         "-DSQLITE_DISABLE_INTRINSIC",
         "-DSQLITE_OS_OTHER=1",
         "-U__APPLE__",

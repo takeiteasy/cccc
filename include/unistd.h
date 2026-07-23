@@ -79,13 +79,50 @@ extern uid_t getuid(void);
 extern uid_t geteuid(void);
 extern gid_t getgid(void);
 extern gid_t getegid(void);
+extern int seteuid(uid_t euid);
+extern int setegid(gid_t egid);
+extern int setuid(uid_t uid);
+extern int setgid(gid_t gid);
+extern int getgroups(int gidsetsize, gid_t grouplist[]);
+extern char *getlogin(void);
 
-/* Symbolic links */
+/* Symbolic links / hard links */
 extern ssize_t readlink(const char *path, char *buf, size_t bufsize);
 extern int symlink(const char *target, const char *linkpath);
+extern int link(const char *path1, const char *path2);
+
+/* Process groups and sessions */
+extern pid_t getpgid(pid_t pid);
+extern int setpgid(pid_t pid, pid_t pgid);
+extern pid_t getpgrp(void);
+extern pid_t setsid(void);
+extern pid_t getsid(pid_t pid);
+
+/* Alarms and signal waiting */
+extern unsigned int alarm(unsigned int seconds);
+extern int pause(void);
+
+/* Misc process/host */
+extern int fchdir(int fd);
+extern int gethostname(char *name, size_t namelen);
+
+/* Scatter/gather I/O */
+struct iovec {
+    void *iov_base;
+    size_t iov_len;
+};
+extern ssize_t readv(int fd, const struct iovec *iov, int iovcnt);
+extern ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
 
 /* Page size (legacy BSD interface used by some VFS layers) */
 extern int getpagesize(void);
+
+#ifdef __linux__
+// splice: Linux-only zero-copy pipe I/O, same gap class as mremap/fallocate
+// -- SQLite's unix VFS can reference it under Linux-specific config (#731).
+extern ssize_t splice(int fd_in, off_t *off_in, int fd_out, off_t *off_out,
+                      size_t len, unsigned int flags);
+#endif
 
 #ifdef __APPLE__
 #define _SC_PAGESIZE 29

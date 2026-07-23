@@ -28,15 +28,66 @@ struct sockaddr {
 
 #ifdef __APPLE__
 #define SOL_SOCKET   0xffff
+#define SO_DEBUG     0x0001
+#define SO_ACCEPTCONN 0x0002
 #define SO_REUSEADDR 0x0004
+#define SO_KEEPALIVE 0x0008
+#define SO_DONTROUTE 0x0010
+#define SO_BROADCAST 0x0020
+#define SO_LINGER    0x0080
+#define SO_OOBINLINE 0x0100
+#define SO_REUSEPORT 0x0200
+#define SO_SNDBUF    0x1001
+#define SO_RCVBUF    0x1002
+#define SO_SNDTIMEO  0x1005
+#define SO_RCVTIMEO  0x1006
+#define SO_ERROR     0x1007
+#define SO_TYPE      0x1008
+/* macOS has no MSG_NOSIGNAL; use SO_NOSIGPIPE (0x1022) via setsockopt instead. */
+#define SO_NOSIGPIPE 0x1022
 #else
 #define SOL_SOCKET   1
+#define SO_DEBUG     1
 #define SO_REUSEADDR 2
+#define SO_TYPE      3
+#define SO_ERROR     4
+#define SO_DONTROUTE 5
+#define SO_BROADCAST 6
+#define SO_SNDBUF    7
+#define SO_RCVBUF    8
+#define SO_KEEPALIVE 9
+#define SO_OOBINLINE 10
+#define SO_LINGER    13
+#define SO_REUSEPORT 15
+#define SO_RCVTIMEO  20
+#define SO_SNDTIMEO  21
+#define SO_ACCEPTCONN 30
 #endif
 
 #define SHUT_RD   0
 #define SHUT_WR   1
 #define SHUT_RDWR 2
+
+#ifdef __APPLE__
+#define MSG_OOB       0x1
+#define MSG_PEEK      0x2
+#define MSG_DONTROUTE 0x4
+#define MSG_EOR       0x8
+#define MSG_TRUNC     0x10
+#define MSG_CTRUNC    0x20
+#define MSG_WAITALL   0x40
+#define MSG_DONTWAIT  0x80
+#else
+#define MSG_OOB       0x1
+#define MSG_PEEK      0x2
+#define MSG_DONTROUTE 0x4
+#define MSG_CTRUNC    0x8
+#define MSG_TRUNC     0x20
+#define MSG_DONTWAIT  0x40
+#define MSG_EOR       0x80
+#define MSG_WAITALL   0x100
+#define MSG_NOSIGNAL  0x4000
+#endif
 
 extern int socket(int domain, int type, int protocol);
 extern int bind(int socket, const struct sockaddr *address, socklen_t address_len);
