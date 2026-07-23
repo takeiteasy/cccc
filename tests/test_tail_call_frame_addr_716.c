@@ -23,17 +23,37 @@
 
 #include <stddef.h>
 
+// Overwrite the top of the current frame with known-bad values. Inlined
+// directly into each unsafe `use_*` helper below (not a nested call — a
+// nested call pushes its own frame *below* the reused one and doesn't
+// reliably overlap the slot the caller's escaped local occupied), so that
+// when CALLT has reused the caller's frame for this callee, the write lands
+// on the exact memory the caller's local used to occupy. This makes a
+// dangling pointer to it deterministically read garbage instead of merely
+// risking it — without this, a trivial callee body might not happen to
+// touch that slot (verified empirically: e.g. `buf+i`'s slot is not
+// necessarily touched by a *sibling* call's own frame), and the regression
+// test could then pass even without the fix.
+static volatile long g_sink;
+#define CLOBBER_FRAME()                                                      \
+    do {                                                                     \
+        volatile long junk[8];                                               \
+        for (int _i = 0; _i < 8; _i++)                                       \
+            junk[_i] = 0xdeaddead + _i;                                      \
+        g_sink = junk[0]; /* keep the writes from being optimized away */    \
+    } while (0)
+
 // ─── Route (a): explicit &local as a tail-call argument ───────────────────
 
 static int chk_d(int n, double d) { return (n == 5 && d == 4.5) ? 42 : 0; }
-static int use_addr_d(double *p) { return chk_d(5, *p); }
+static int use_addr_d(double *p) { CLOBBER_FRAME(); return chk_d(5, *p); }
 static int call_use_addr_d(void) {
     double x = 4.5;
     return use_addr_d(&x); // tail call carries &x — must not become CALLT
 }
 
 static int chk_i(int n) { return n == 5 ? 42 : 0; }
-static int use_addr_i(int *p) { return chk_i(*p); }
+static int use_addr_i(int *p) { CLOBBER_FRAME(); return chk_i(*p); }
 static int call_use_addr_i(void) {
     int x = 5;
     return use_addr_i(&x);
@@ -41,7 +61,7 @@ static int call_use_addr_i(void) {
 
 // ─── Pointer arithmetic off a frame-local array ────────────────────────────
 
-static int use_arith(int *p) { return chk_i(*p); }
+static int use_arith(int *p) { CLOBBER_FRAME(); return chk_i(*p); }
 static int call_use_arith(void) {
     int buf[2] = {5, 0};
     int i = 0;
@@ -51,7 +71,7 @@ static int call_use_arith(void) {
 
 // ─── Route (b): frame address laundered through a pointer variable ────────
 
-static int use_ptrvar(int *p) { return chk_i(*p); }
+static int use_ptrvar(int *p) { CLOBBER_FRAME(); return chk_i(*p); }
 static int call_use_ptrvar(void) {
     int x = 5;
     int *q = &x; // &x escapes via assignment to a pointer lvalue
@@ -61,9 +81,12 @@ static int call_use_ptrvar(void) {
 // ─── Positive controls: must stay correct AND keep TCO ─────────────────────
 
 static double g_x = 4.5;
-static int use_global(double *p) { return chk_d(5, *p); }
+static int use_global(double *p) { CLOBBER_FRAME(); return chk_d(5, *p); }
 static int call_use_global(void) {
-    return use_global(&g_x); // address of a global, not a frame-local — safe
+    // Address of a global, not a frame-local: safe even though CALLT still
+    // reuses the frame and use_global still clobbers it, because g_x never
+    // lived in that frame to begin with.
+    return use_global(&g_x);
 }
 
 static int use_val(double d) { return chk_d(5, d); }
