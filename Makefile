@@ -378,7 +378,23 @@ macos-x86_64-build:
 	@file $(MACOS_X86_64_BINARY)
 	@file $(MACOS_X86_64_BINARY) | grep -q 'x86_64'
 
-macos-x86_64-smoke: macos-x86_64-build
+# --build-cache cross-arch regression check (#730): reusing the same
+# --build-out-dir across a native build and a different-arch cccc binary
+# must not serve wrong-arch objects to the link step. Reproduces the
+# ticket's exact repro sequence.
+build-cache-arch-smoke: $(EXE_OUT) macos-x86_64-build
+	@set -eu; \
+		outdir=build/build_cache_arch_smoke; \
+		rm -rf "$$outdir"; \
+		./$(EXE_OUT) -I./include --build --build-out-dir="$$outdir" --build-cache tests/test_build_cache.c >/dev/null; \
+		file "$$outdir/bin/cache_app" | grep -q 'arm64\|aarch64\|arm64e' || file "$$outdir/bin/cache_app"; \
+		/usr/bin/arch -x86_64 ./$(MACOS_X86_64_BINARY) -I./include --build --build-out-dir="$$outdir" --build-cache tests/test_build_cache.c; \
+		file "$$outdir/bin/cache_app" | grep -q 'x86_64'; \
+		/usr/bin/arch -x86_64 "$$outdir/bin/cache_app"; \
+		rm -rf "$$outdir"; \
+		echo "build-cache-arch-smoke: OK"
+
+macos-x86_64-smoke: macos-x86_64-build build-cache-arch-smoke
 	@set -eu; \
 		machine=$$(/usr/bin/arch -x86_64 /usr/bin/uname -m); \
 		echo "Rosetta machine: $$machine"; \
@@ -571,7 +587,7 @@ else
 	@echo "dsym: DWARF is already embedded in the ELF binary on Linux; nothing to do."
 endif
 
-.PHONY: default test clean all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness host-tests bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json macos-x86_64-build macos-x86_64-smoke macos-x86_64-test linux-x86_64-check linux-x86_64-build linux-x86_64-smoke linux-x86_64-test linux-x86_64-msan-test linux-aarch64-check linux-aarch64-build linux-aarch64-smoke linux-aarch64-test sqlite-smoke dsym
+.PHONY: default test clean all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness host-tests bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json macos-x86_64-build build-cache-arch-smoke macos-x86_64-smoke macos-x86_64-test linux-x86_64-check linux-x86_64-build linux-x86_64-smoke linux-x86_64-test linux-x86_64-msan-test linux-aarch64-check linux-aarch64-build linux-aarch64-smoke linux-aarch64-test sqlite-smoke dsym
 ifeq ($(UNAME_S),Linux)
 .PHONY: msan
 endif

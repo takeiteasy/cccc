@@ -40,10 +40,20 @@
 #define MADV_WILLNEED   3
 #define MADV_DONTNEED   4
 
+#ifdef __linux__
+#define MREMAP_MAYMOVE 1
+#define MREMAP_FIXED   2
+#endif
+
 extern void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
 extern int munmap(void *addr, size_t length);
 extern int mprotect(void *addr, size_t len, int prot);
 extern int msync(void *addr, size_t len, int flags);
 extern int posix_madvise(void *addr, size_t len, int advice);
+#ifdef __linux__
+// mremap resizes/moves an existing mapping; Linux-only glibc/syscall
+// extension, absent on macOS/BSD (#729).
+extern void *mremap(void *old_address, size_t old_size, size_t new_size, int flags, ...);
+#endif
 
 #endif /* __SYS_MMAN_H */

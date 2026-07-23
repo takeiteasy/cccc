@@ -301,6 +301,16 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "mprotect",     (void*)mprotect,     3, 0);
     cc_register_cfunc(vm, "msync",        (void*)msync,        3, 0);
     cc_register_cfunc(vm, "posix_madvise",(void*)posix_madvise,3, 0);
+#ifdef __linux__
+    // mremap: Linux-only glibc/syscall extension for resizing an existing
+    // mapping. Forward-declared here (rather than defining _GNU_SOURCE
+    // globally) because the host <sys/mman.h> only exposes this prototype
+    // under _GNU_SOURCE; glibc still exports the symbol regardless. Needed
+    // so cccc-compiled Linux code (e.g. SQLite's unix VFS syscall table)
+    // that calls mremap can link (#729).
+    extern void *mremap(void *old_address, size_t old_size, size_t new_size, int flags, ...);
+    cc_register_cfunc(vm, "mremap", (void*)mremap, 4, 0);
+#endif
     cc_register_cfunc(vm, "stat",    (void*)stat,    2, 0);
     cc_register_cfunc(vm, "fstat",   (void*)fstat,   2, 0);
     cc_register_cfunc(vm, "lstat",   (void*)lstat,   2, 0);
