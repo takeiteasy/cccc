@@ -7151,14 +7151,20 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     // whole body has been generated and emit_lea3_var has recorded whether
     // this function owns an escaping local/param.
     if (vm->compiler.frame_has_esc_agg || vm->compiler.frame_has_esc_scalar) {
-        long long new_masks =
-            (long long)float_param_mask | ((long long)f32_param_mask << 32);
+        // Pack into an unsigned long long: ENT3_PUSH_EPOCH_AGG/SCALAR both
+        // carry bit 31 set (0x80000000), and shifting that into a *signed*
+        // long long's top half is UB (signed-left-shift-into-sign-bit).
+        // Compute unsigned, cast to long long only at the end -- same bit
+        // pattern, no UB (#739).
+        unsigned long long new_masks =
+            (unsigned long long)float_param_mask |
+            ((unsigned long long)f32_param_mask << 32);
         if (vm->compiler.frame_has_esc_agg)
-            new_masks |= (long long)ENT3_PUSH_EPOCH_AGG;
+            new_masks |= (unsigned long long)ENT3_PUSH_EPOCH_AGG;
         if (vm->compiler.frame_has_esc_scalar)
-            new_masks |= ((long long)ENT3_PUSH_EPOCH_SCALAR << 32);
-        vm->text_seg[vm->compiler.ent3_masks_loc] = cc_i64_lo(new_masks);
-        vm->text_seg[vm->compiler.ent3_masks_loc + 1] = cc_i64_hi(new_masks);
+            new_masks |= ((unsigned long long)ENT3_PUSH_EPOCH_SCALAR << 32);
+        vm->text_seg[vm->compiler.ent3_masks_loc] = cc_i64_lo((long long)new_masks);
+        vm->text_seg[vm->compiler.ent3_masks_loc + 1] = cc_i64_hi((long long)new_masks);
     }
 
     // Patch all forward jumps (break/continue/goto)
