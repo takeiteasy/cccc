@@ -1174,6 +1174,85 @@ static bool contains_self_call(Node *node, Obj *fn) {
     return false;
 }
 
+// #716: does the &-chain / aggregate-decay / pointer-arithmetic expression
+// rooted at `n` bottom out at one of `fn`'s own locals or parameters?
+// Mirrors mark_escaping_root's walk in parse.c, but returns a verdict instead
+// of marking, and additionally follows ND_ADD/ND_SUB so pointer arithmetic
+// off a frame-local base (e.g. `buf + i`) is recognized -- a route
+// mark_addr_escapes deliberately leaves unmarked (safe there, since that
+// pass only needs to *record more*; unsafe here, since we need to *reject
+// more* — see the two-part guard in can_emit_tail_call below).
+static bool addr_roots_at_frame_local(Obj *fn, Node *n) {
+    while (n) {
+        switch (n->kind) {
+        case ND_VAR:
+            if (!n->var || !n->var->is_local)
+                return false;
+            for (Obj *v = fn->locals; v; v = v->next)
+                if (v == n->var)
+                    return true;
+            return false;
+        case ND_MEMBER:
+        case ND_CAST:
+        case ND_DEREF:
+            n = n->lhs;
+            continue;
+        case ND_ADD:
+        case ND_SUB:
+            if (n->lhs && n->lhs->ty &&
+                (n->lhs->ty->kind == TY_PTR || n->lhs->ty->kind == TY_ARRAY)) {
+                n = n->lhs;
+            } else if (n->rhs && n->rhs->ty &&
+                       (n->rhs->ty->kind == TY_PTR || n->rhs->ty->kind == TY_ARRAY)) {
+                n = n->rhs;
+            } else {
+                return false;
+            }
+            continue;
+        default:
+            return false;
+        }
+    }
+    return false;
+}
+
+// #716: does evaluating tail-call argument `n` yield a pointer into `fn`'s
+// own frame? A sound over-approximation (errs toward "yes, disable TCO") —
+// the inverse of find_and_mark_escaping_addr's under-approximation, which is
+// safe for its own #676 purpose but not for this one.
+static bool tail_arg_carries_frame_addr(Obj *fn, Node *n) {
+    while (n) {
+        switch (n->kind) {
+        case ND_CAST:
+            n = n->lhs;
+            continue;
+        case ND_COMMA:
+        case ND_ASSIGN:
+            n = n->rhs;
+            continue;
+        case ND_COND:
+            return tail_arg_carries_frame_addr(fn, n->then) ||
+                   tail_arg_carries_frame_addr(fn, n->els);
+        case ND_ADDR:
+            return addr_roots_at_frame_local(fn, n->lhs);
+        case ND_ADD:
+        case ND_SUB:
+            // Pointer arithmetic off a frame-local base, e.g. `buf + i`.
+            if (n->ty && n->ty->kind == TY_PTR)
+                return addr_roots_at_frame_local(fn, n);
+            return false;
+        default:
+            // Arrays/structs/unions decay to their own base address with no
+            // explicit `&` in the source at all.
+            if (n->ty && (n->ty->kind == TY_ARRAY || n->ty->kind == TY_STRUCT ||
+                          n->ty->kind == TY_UNION))
+                return addr_roots_at_frame_local(fn, n);
+            return false;
+        }
+    }
+    return false;
+}
+
 // Return true when `expr` is a tail-call candidate: a direct, in-VM,
 // non-variadic, non-nested, non-noreturn, non-struct-returning call with ≤8 args.
 // The caller is responsible for the opt_level >= 1 and inline_exit_name guards.
@@ -1199,6 +1278,28 @@ static bool can_emit_tail_call(VirtualMachine *vm, Node *expr) {
         nargs++;
     if (nargs > 8)
         return false; // stack-spill args would be below the unwound frame
+    // #716: CALLT reuses the caller's frame (vm->sp = vm->bp in op_CALLT_fn),
+    // so any pointer into that frame handed to the callee dangles the moment
+    // the callee's own prologue/body overwrites the slot. Reject:
+    //  (a) arguments that syntactically carry a frame-local address (sound
+    //      over-approximation — see tail_arg_carries_frame_addr), and
+    //  (b) any function whose address-escape scan (mark_addr_escapes,
+    //      parse.c) already proved a local's address reaches somewhere
+    //      outside this frame (pointer variable holding &x, &x stored to a
+    //      global the callee reads, etc.) — a cheap net for routes that
+    //      aren't syntactically in the argument list.
+    // Residual gap, tracked in #718: a frame address laundered through a
+    // wrapper mark_addr_escapes doesn't recognize (e.g. `int *q = buf + i;`
+    // then passing `q`) is still missed.
+    Obj *fn = vm->compiler.current_fn;
+    if (fn) {
+        for (Node *a = expr->args; a; a = a->next)
+            if (tail_arg_carries_frame_addr(fn, a))
+                return false;
+        for (Obj *v = fn->locals; v; v = v->next)
+            if (v->addr_escapes)
+                return false;
+    }
     return true;
 }
 

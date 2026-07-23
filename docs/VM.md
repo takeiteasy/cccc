@@ -79,6 +79,7 @@ When codegen detects that a `return` statement's outermost expression is a direc
 * The callee is not variadic and not a nested function (nested functions require a static-link argument in `REG_A0`).
 * The callee does not return a struct or union (struct returns use `RETBUF` and are incompatible with frame reuse).
 * The call uses 8 or fewer arguments (stack-spilled arguments would fall below the unwound frame).
+* No argument carries the address of one of the caller's own locals or parameters — directly (`&x`), via pointer arithmetic on a frame-local base (`buf + i`), via array/struct/union decay, or via a local whose address is already known to escape the frame (a pointer variable holding `&x`, `&x` stored into a global, etc.). `CALLT` reuses the caller's frame, so a pointer into that frame would dangle the instant the callee's own prologue or body overwrites the slot.
 
 Mutually-recursive pairs (`A → B → A`) are handled correctly because `CALLT` leaves the caller's return address in place; `B`'s `CALLT` back to `A` reuses `B`'s frame, and so on.
 
