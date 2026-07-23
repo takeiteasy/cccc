@@ -13,9 +13,10 @@ typedef long v2di __attribute__((vector_size(16)));
 typedef short v8hi __attribute__((vector_size(16)));
 typedef char v16qi __attribute__((vector_size(16)));
 
-// Vector-by-value function args/returns are not yet supported (tracker #72
-// follow-up -- pass via memory like structs); vectors here are always
-// constructed in place via per-lane assignment.
+// Vectors here are always constructed in place via per-lane assignment
+// (this test covers arithmetic, not the call ABI); by-value function
+// args/returns are covered separately in test_attr_vector_size_byval.c
+// (tracker #714).
 
 int main(void) {
     // Basic element-wise add/sub/mul/div on float32x4.

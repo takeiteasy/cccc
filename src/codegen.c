@@ -1271,11 +1271,22 @@ static bool can_emit_tail_call(VirtualMachine *vm, Node *expr) {
         return false; // va_area is part of the frame
     if (callee->is_noreturn)
         return false; // BTRAP emitted after CALL; can't compose with CALLT
-    if (expr->ty && (expr->ty->kind == TY_STRUCT || expr->ty->kind == TY_UNION))
+    if (expr->ty && (expr->ty->kind == TY_STRUCT || expr->ty->kind == TY_UNION ||
+                     expr->ty->kind == TY_VECTOR))
         return false; // RETBUF machinery — incompatible with frame reuse
     int nargs = 0;
-    for (Node *a = expr->args; a; a = a->next)
+    for (Node *a = expr->args; a; a = a->next) {
         nargs++;
+        // #714: a vector arg's address is a compiler-synthesized scratch
+        // slot in *this* frame (gen_vector_arg_ptr), invisible to
+        // tail_arg_carries_frame_addr/addr_escapes below since it never
+        // appears as such in the AST. CALLT reuses the caller's frame, so
+        // that address would dangle the instant the callee's prologue
+        // overwrites the slot -- same hazard class as #716/#718. Reject
+        // outright rather than trying to teach the escape scan about it.
+        if (is_vector(a->ty))
+            return false;
+    }
     if (nargs > 8)
         return false; // stack-spill args would be below the unwound frame
     // #716: CALLT reuses the caller's frame (vm->sp = vm->bp in op_CALLT_fn),
@@ -1850,6 +1861,27 @@ static void emit_wide_op(VirtualMachine *vm, int op) {
 static long long alloc_wide_bitint_temp(VirtualMachine *vm, int words) {
     vm->compiler.ent3_extra_stack += words;
     return -(long long)(vm->compiler.ent3_base_stack + vm->compiler.ent3_extra_stack);
+}
+
+// Materialize a vector-typed argument into a fresh 16-byte frame scratch slot
+// and load its address into addr_reg, ready to pass like a struct-by-value
+// arg (#714). Unlike a struct arg -- whose address is the caller's own
+// addressable storage -- a vector expression is a value living in a vregs[]
+// register (gen_vector_expr), so it must be copied out to memory before its
+// address can be handed to the callee. Reuses alloc_wide_bitint_temp's
+// per-function scratch allocator (same ENT3 extra-stack pool as wide
+// _BitInt temporaries; sized in words, so 2 words = 16 bytes covers every
+// currently-supported vector width).
+static void gen_vector_arg_ptr(VirtualMachine *vm, Node *arg, int addr_reg) {
+    int v = alloc_temp_reg();
+    gen_expr(vm, arg, v); // vector value -> vregs[v]
+    mark_temp_reg_used(v);
+    long long off = alloc_wide_bitint_temp(vm, 2);
+    emit_lea3(vm, addr_reg, off); // address escapes to the callee -- record it
+    if (vm->flags & CCCC_POINTER_CHECKS)
+        emit_rr(vm, CHKP3, addr_reg, 0);
+    emit_rr(vm, VSTR, v, addr_reg);
+    free_temp_reg(v);
 }
 
 static void gen_zero_size_arg(VirtualMachine *vm, Node *arg, int dest_reg) {
@@ -3108,11 +3140,12 @@ static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
                     emit_addi3(vm, dest_reg, dest_reg, node->var->offset * 8);
                 } else {
                     // Normal local variable access
-                    // For struct/union parameters, the slot contains a pointer
-                    // to the struct We need to load that pointer, not the slot
-                    // address
+                    // For struct/union (and vector, #714) parameters, the
+                    // slot contains a pointer to the value. We need to load
+                    // that pointer, not the slot address.
                     if (node->var->is_param && (node->ty->kind == TY_STRUCT ||
                                                 node->ty->kind == TY_UNION ||
+                                                node->ty->kind == TY_VECTOR ||
                                                 is_wide_bitint(node->ty))) {
                         // Compiler-internal: slot address only feeds the
                         // immediate load below (#676), not the struct's own
@@ -3496,7 +3529,17 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         error("codegen: null expression node");
     }
 
-    if (is_vector(node->ty)) {
+    // A vector-returning ND_FUNCALL falls through to the main switch below
+    // instead of gen_vector_expr (#714): the value comes back via the
+    // RETBUF+VSTR return-buffer convention (see ND_RETURN), handled in
+    // ND_FUNCALL's result tail, not as a plain vector expression.
+    // ND_BLOCK_CALL (Apple Blocks) is deliberately excluded from this bypass
+    // -- its ABI (src/codegen.c, `case ND_BLOCK_CALL`) has no RETBUF/pointer-
+    // arg machinery for aggregates at all, so a vector-typed block call still
+    // falls to gen_vector_expr's default case below and reports a clean
+    // "unsupported vector expression" error rather than silently
+    // mis-marshalling through REG_A0.
+    if (is_vector(node->ty) && node->kind != ND_FUNCALL) {
         gen_vector_expr(vm, node, dest_reg);
         return;
     }
@@ -4810,6 +4853,15 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // Slots 0-7 use REG_A0-A7; slots 8+ are pushed on the VM stack.
             reset_temp_regs();
 
+            // Vector-by-value through the native FFI marshalling path isn't
+            // wired up (#714 only covers the internal CCCC call ABI) --
+            // reject with a clear diagnostic rather than silently
+            // mis-marshalling a vregs[] value as a 64-bit slot.
+            if (is_vector(node->ty))
+                error_tok(vm, node->tok,
+                          "vector return values through FFI calls are not "
+                          "supported");
+
             // Count arguments and compute double_arg_mask/float_arg_mask
             int nargs = 0;
             uint64_t double_arg_mask = 0;
@@ -4823,6 +4875,10 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                         float_arg_mask |= (1ULL << nargs);
                     else
                         double_arg_mask |= (1ULL << nargs);
+                } else if (is_vector(arg->ty)) {
+                    error_tok(vm, arg->tok,
+                              "vector arguments through FFI calls are not "
+                              "supported");
                 }
                 nargs++;
             }
@@ -5124,6 +5180,15 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                             freg); // Move bits to REG_T0
                     free_temp_reg(freg);
                     emit_psh3(vm, REG_T0);
+                } else if (is_vector(arg->ty)) {
+                    // Vector arg: copy value to scratch slot, push its address
+                    // like a struct-by-value arg (#714).
+                    if (is_variadic_call && j >= fixed_param_count)
+                        error_tok(vm, arg->tok,
+                                  "vector arguments through variadic '...' "
+                                  "parameters are not supported");
+                    gen_vector_arg_ptr(vm, arg, REG_T0);
+                    emit_psh3(vm, REG_T0);
                 } else {
                     // Integer/pointer arg: evaluate to temp reg, push
                     gen_expr(vm, arg, REG_T0);
@@ -5207,6 +5272,18 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                             arg->ty->kind == TY_FLOAT;
                         float_arg_idx++;
                     }
+                }
+            } else if (is_vector(arg->ty)) {
+                // Vector arg: pass by memory like a struct-by-value arg
+                // (#714) -- copy the value to a scratch slot, pass its
+                // address in the integer arg register.
+                if (is_vararg)
+                    error_tok(vm, arg->tok,
+                              "vector arguments through variadic '...' "
+                              "parameters are not supported");
+                if (int_arg_idx < 8) {
+                    gen_vector_arg_ptr(vm, arg, REG_A0 + int_arg_idx);
+                    int_arg_idx++;
                 }
             } else {
                 // Integer/pointer argument - always goes in integer register
@@ -5358,6 +5435,21 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         if (is_flonum(node->ty)) {
             if (dest_reg != FREG_A0) {
                 emit_fmov3(vm, dest_reg, FREG_A0);
+            }
+        } else if (is_vector(node->ty)) {
+            // Vector return (#714): REG_A0 holds the RETBUF buffer address
+            // (see ND_RETURN's vector branch) -- load the 16-byte value out
+            // of it into the destination vreg. Skip when the result is
+            // discarded (dest_reg == REG_ZERO): unlike int/float write
+            // opcodes, VLDR has no built-in "writes to REG_ZERO are
+            // discarded" guard (op_VLDR_fn, ops.c), so an unconditional load
+            // here would write into vregs[0] instead of being a no-op --
+            // harmless in practice (index 0 is never handed out by
+            // alloc_temp_reg) but skip it anyway rather than relying on that.
+            if (dest_reg != REG_ZERO) {
+                if (vm->flags & CCCC_POINTER_CHECKS)
+                    emit_rr(vm, CHKP3, REG_A0, 0);
+                emit_rr(vm, VLDR, dest_reg, REG_A0);
             }
         } else {
             if (dest_reg != REG_A0) {
@@ -5778,6 +5870,15 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         int float_arg_idx = 0;
         for (Node *a = node->args; a; a = a->next) {
             add_type(vm, a);
+            if (is_vector(a->ty)) {
+                // Block invocation has no by-memory ABI for aggregates at
+                // all (no RETBUF/pointer-arg machinery here) -- reject
+                // cleanly rather than mis-marshalling a vregs[] value
+                // through a plain int arg register (#714).
+                error_tok(vm, a->tok,
+                          "vector arguments to block calls are not "
+                          "supported");
+            }
             if (is_flonum(a->ty)) {
                 if (float_arg_idx >= 8) {
                     error_tok(vm, a->tok, "too many block arguments");
@@ -6243,6 +6344,29 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
                 emit_mov3(vm, REG_A0, r_dest);
 
                 free_temp_reg(r_src);
+                free_temp_reg(r_dest);
+            } else if (is_vector(node->lhs->ty)) {
+                // Vector return (#714): unlike struct/union, the value lives
+                // in a vregs[] register (gen_vector_expr), not memory -- there
+                // is no source address to MCPY from. Materialize the value
+                // into a vreg, then VSTR it into a fresh RETBUF buffer and
+                // return that buffer's address, mirroring the struct path.
+                int v_src = alloc_temp_reg();
+                gen_expr(vm, node->lhs, v_src); // vector value -> vregs[v_src]
+                // Belt-and-suspenders as with the struct/wide-_BitInt path
+                // above: node->lhs may contain a nested call that resets the
+                // temp allocator's free list.
+                mark_temp_reg_used(v_src);
+
+                emit(vm, RETBUF); // buffer address -> REG_A0
+                int r_dest = alloc_temp_reg();
+                emit_mov3(vm, r_dest, REG_A0); // Save buffer address
+                if (vm->flags & CCCC_POINTER_CHECKS)
+                    emit_rr(vm, CHKP3, r_dest, 0);
+                emit_rr(vm, VSTR, v_src, r_dest);
+                emit_mov3(vm, REG_A0, r_dest); // Return buffer address
+
+                free_temp_reg(v_src);
                 free_temp_reg(r_dest);
             } else if (is_flonum(node->lhs->ty)) {
                 gen_expr(vm, node->lhs, FREG_A0);
