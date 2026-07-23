@@ -796,6 +796,17 @@ static Initializer *new_initializer(VirtualMachine *vm, Type *ty, bool is_flexib
         return init;
     }
 
+    // GNU vector_size vector (TY_VECTOR): one child per lane, keyed on
+    // vec_len like the TY_ARRAY case above (tracker #713).
+    if (ty->kind == TY_VECTOR) {
+        init->children = arena_alloc(&vm->compiler.parser_arena,
+                                     ty->vec_len * sizeof(Initializer *));
+        memset(init->children, 0, ty->vec_len * sizeof(Initializer *));
+        for (int i = 0; i < ty->vec_len; i++)
+            init->children[i] = new_initializer(vm, ty->base, false);
+        return init;
+    }
+
     // VLA initialization: treat like flexible array - will be sized during
     // parsing
     if (ty->kind == TY_VLA) {
@@ -2745,6 +2756,28 @@ static void array_initializer1(VirtualMachine *vm, Token **rest, Token *tok,
     }
 }
 
+// vector-initializer = "{" initializer ("," initializer)* ","? "}"
+//
+// GNU vector_size brace-initializer (tracker #713). Positional only — no
+// designators, unlike array_initializer1 (GCC doesn't support `[i]=` on
+// vector_size vectors either).
+static void vector_initializer(VirtualMachine *vm, Token **rest, Token *tok,
+                                Initializer *init) {
+    tok = skip(vm, tok, "{");
+
+    bool first = true;
+    for (int i = 0; !consume_end(rest, tok); i++) {
+        if (!first)
+            tok = skip(vm, tok, ",");
+        first = false;
+
+        if (i < init->ty->vec_len)
+            initializer2(vm, &tok, tok, init->children[i]);
+        else
+            tok = skip_excess_element(vm, tok);
+    }
+}
+
 // array-initializer2 = initializer ("," initializer)*
 static void array_initializer2(VirtualMachine *vm, Token **rest, Token *tok,
                                Initializer *init, int i) {
@@ -2900,6 +2933,15 @@ static void initializer2(VirtualMachine *vm, Token **rest, Token *tok, Initializ
             array_initializer1(vm, rest, tok, init);
         else
             array_initializer2(vm, rest, tok, init, 0);
+        return;
+    }
+
+    // GNU vector_size brace-initializer (tracker #713): only the braced form
+    // is intercepted here. Non-brace forms (whole-vector copy `v4sf b = a;`,
+    // or a bare scalar which is a deliberate compile error) must fall through
+    // to the scalar `init->expr = assign(...)` path below unchanged.
+    if (init->ty->kind == TY_VECTOR && equal(tok, "{")) {
+        vector_initializer(vm, rest, tok, init);
         return;
     }
 
@@ -3072,6 +3114,22 @@ static Node *init_desg_expr(VirtualMachine *vm, InitDesg *desg, Token *tok) {
 
     Node *lhs = init_desg_expr(vm, desg->next, tok);
     Node *rhs = new_num(vm, desg->idx, tok);
+
+    // Lane lvalue for a vector_size vector (tracker #713). new_add(vec, int)
+    // means element-wise vector arithmetic (parse.c ~5852), not pointer
+    // arithmetic, so a plain new_add() here would misinterpret the index.
+    // Mirror the postfix `v[i]` lowering: &v cast to element-pointer, then
+    // ordinary pointer-offset + deref. This generalizes to nesting for free
+    // (array-of-vector, struct-of-vector) since `lhs` is retyped at each
+    // recursion level.
+    add_type(vm, lhs);
+    if (lhs->ty && is_vector(lhs->ty)) {
+        Type *elem_ty = lhs->ty->base;
+        Node *addr = new_unary(vm, ND_ADDR, lhs, tok);
+        addr = new_cast(vm, addr, pointer_to(vm, elem_ty));
+        return new_unary(vm, ND_DEREF, new_add(vm, addr, rhs, tok), tok);
+    }
+
     return new_unary(vm, ND_DEREF, new_add(vm, lhs, rhs, tok), tok);
 }
 
@@ -3150,6 +3208,27 @@ static Node *create_lvar_init(VirtualMachine *vm, Initializer *init, Type *ty,
         InitDesg desg2 = {desg, 0, mem};
         return create_lvar_init(vm, init->children[mem->idx], mem->ty, &desg2,
                                 tok);
+    }
+
+    // GNU vector_size brace-initializer (tracker #713). Gated on !init->expr
+    // so a whole-vector copy (`v4sf b = a;`) still routes through the scalar
+    // ND_ASSIGN path below (init->children is unused/unset in that case).
+    if (ty->kind == TY_VECTOR && !init->expr) {
+        Node **items = malloc((size_t)ty->vec_len * sizeof(Node *));
+        if (!items)
+            error_tok(vm, tok, "out of memory building vector initializer");
+        int cnt = 0;
+        for (int i = 0; i < ty->vec_len; i++) {
+            InitDesg desg2 = {desg, i};
+            Node *rhs =
+                create_lvar_init(vm, init->children[i], ty->base, &desg2, tok);
+            if (rhs->kind != ND_NULL_EXPR)
+                items[cnt++] = rhs;
+        }
+        Node *node = cnt ? balanced_comma(vm, items, 0, cnt, tok)
+                         : new_node(vm, ND_NULL_EXPR, tok);
+        free(items);
+        return node;
     }
 
     if (!init->expr)
@@ -3415,7 +3494,7 @@ static Node *lvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj 
     Node *rhs = create_lvar_init(vm, init, var->ty, &desg, tok);
     Type *t = var->ty;
     bool is_aggregate = t->kind == TY_STRUCT || t->kind == TY_UNION ||
-                        t->kind == TY_ARRAY;
+                        t->kind == TY_ARRAY || t->kind == TY_VECTOR;
     if (!is_aggregate)
         return rhs;
 
@@ -3487,6 +3566,14 @@ static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur, Initiali
             return cur;
         return write_gvar_data(vm, cur, init->children[init->mem->idx],
                                init->mem->ty, buf, offset);
+    }
+
+    if (ty->kind == TY_VECTOR) {
+        int sz = ty->base->size;
+        for (int i = 0; i < ty->vec_len; i++)
+            cur = write_gvar_data(vm, cur, init->children[i], ty->base, buf,
+                                  offset + sz * i);
+        return cur;
     }
 
     if (!init->expr)

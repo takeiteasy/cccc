@@ -3474,6 +3474,14 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         free_temp_reg(r_scalar);
         return;
     }
+    case ND_COMMA:
+        // A vector-typed comma reaches here from lvar_initializer's
+        // ND_MEMZERO pre-zero (`ND_COMMA(memzero, rhs)`, tracker #713's
+        // brace-init/copy-init path) as well as ordinary comma expressions
+        // whose result is a vector.
+        gen_expr(vm, node->lhs, REG_ZERO); // Discard result
+        gen_expr(vm, node->rhs, dest_reg);
+        return;
     default:
         error_tok(vm, node->tok, "unsupported vector expression");
     }

@@ -2,8 +2,9 @@
 // Covers: parsing, lane read/write via subscript (constant and runtime
 // index), element-wise +,-,*,/, unary negate, scalar broadcast (splat),
 // vector-to-vector assignment, and mixed float/double/int lane types.
-// Vector brace-initializer syntax (`v4sf a = {1,2,3,4};`) is not yet
-// supported -- see follow-up ticket; construct via per-lane assignment.
+// Brace-initializer syntax and compound literals are covered separately in
+// test_attr_vector_size_brace_init.c, test_attr_vector_size_brace_global.c,
+// and test_attr_vector_size_compound_literal.c.
 
 typedef float v4sf __attribute__((vector_size(16)));
 typedef double v2df __attribute__((vector_size(16)));
