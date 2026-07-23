@@ -9469,6 +9469,66 @@ static Node *vector_lane_ref(VirtualMachine *vm, Node *vec_expr, Type *elem_ty,
     return new_unary(vm, ND_DEREF, new_add(vm, addr, index, tok), tok);
 }
 
+// __builtin_classify_type's result (ticket #721): gcc's typeclass.h codes,
+// reused where a CCCC type maps directly onto one. Only the exact numeric
+// value of CCCC_VECTOR_TYPE_CLASS is load-bearing (it's the discriminant
+// <stdarg.h>'s va_arg uses to detect a by-pointer variadic vector argument);
+// the rest exist for __has_builtin/gcc-compatibility and are not otherwise
+// consumed by CCCC itself.
+enum {
+    CCCC_VOID_TYPE_CLASS = 0,
+    CCCC_INTEGER_TYPE_CLASS = 1,
+    CCCC_CHAR_TYPE_CLASS = 2,
+    CCCC_ENUMERAL_TYPE_CLASS = 3,
+    CCCC_BOOLEAN_TYPE_CLASS = 4,
+    CCCC_POINTER_TYPE_CLASS = 5,
+    CCCC_REAL_TYPE_CLASS = 8,
+    CCCC_COMPLEX_TYPE_CLASS = 9,
+    CCCC_FUNCTION_TYPE_CLASS = 10,
+    CCCC_RECORD_TYPE_CLASS = 12,
+    CCCC_UNION_TYPE_CLASS = 13,
+    CCCC_ARRAY_TYPE_CLASS = 14,
+    // No gcc equivalent -- vector_size vectors aren't in gcc's typeclass.h.
+    CCCC_VECTOR_TYPE_CLASS = 99,
+};
+
+static int64_t classify_type_code(Type *ty) {
+    if (!ty)
+        return -1; // no_type_class
+    if (is_vector(ty))
+        return CCCC_VECTOR_TYPE_CLASS;
+    switch (ty->kind) {
+    case TY_VOID:
+        return CCCC_VOID_TYPE_CLASS;
+    case TY_BOOL:
+        return CCCC_BOOLEAN_TYPE_CLASS;
+    case TY_CHAR:
+        return CCCC_CHAR_TYPE_CLASS;
+    case TY_ENUM:
+        return CCCC_ENUMERAL_TYPE_CLASS;
+    case TY_PTR:
+        return CCCC_POINTER_TYPE_CLASS;
+    case TY_FLOAT:
+    case TY_DOUBLE:
+    case TY_LDOUBLE:
+        return CCCC_REAL_TYPE_CLASS;
+    case TY_COMPLEX:
+        return CCCC_COMPLEX_TYPE_CLASS;
+    case TY_FUNC:
+        return CCCC_FUNCTION_TYPE_CLASS;
+    case TY_STRUCT:
+        return CCCC_RECORD_TYPE_CLASS;
+    case TY_UNION:
+        return CCCC_UNION_TYPE_CLASS;
+    case TY_ARRAY:
+    case TY_VLA:
+        return CCCC_ARRAY_TYPE_CLASS;
+    default:
+        // SHORT, INT, LONG, BITINT, NULLPTR_T, etc.
+        return CCCC_INTEGER_TYPE_CLASS;
+    }
+}
+
 static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
 
@@ -9569,6 +9629,22 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         Type *t2 = typename(vm, &tok, tok);
         *rest = skip(vm, tok, ")");
         return new_num(vm, is_compatible(t1, t2), start);
+    }
+
+    // __builtin_classify_type(expr) (GCC extension): returns a small integer
+    // classifying expr's type. Only the operand's *type* is used -- exactly
+    // like sizeof(expr) above, the expression is parsed to recover its type
+    // and then discarded, so it is never emitted/evaluated (side effects in
+    // expr, e.g. `x++`, do not occur). The codes below follow gcc's
+    // typeclass.h where a matching CCCC type exists; TY_VECTOR has no gcc
+    // counterpart so it gets a CCCC-specific code (used by <stdarg.h>'s
+    // va_arg to detect a by-pointer variadic vector argument, ticket #721).
+    if (equal(tok, "__builtin_classify_type")) {
+        tok = skip(vm, tok->next, "(");
+        Node *operand = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        add_type(vm, operand);
+        return new_num(vm, classify_type_code(operand->ty), start);
     }
 
     // __builtin_choose_expr(const-expr, expr1, expr2)

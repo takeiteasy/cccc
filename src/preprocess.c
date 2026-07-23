@@ -1165,6 +1165,7 @@ static bool is_has_attribute_supported(char *name) {
 static bool is_has_builtin_supported(char *name) {
     static const char *builtins[] = {
         "__builtin_types_compatible_p",
+        "__builtin_classify_type",
         "__builtin_reg_class",
         "__builtin_compare_and_swap",
         "__builtin_atomic_exchange",

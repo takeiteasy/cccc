@@ -5384,11 +5384,11 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     emit_psh3(vm, REG_T0);
                 } else if (is_vector(arg->ty)) {
                     // Vector arg: copy value to scratch slot, push its address
-                    // like a struct-by-value arg (#714).
-                    if (is_variadic_call && j >= fixed_param_count)
-                        error_tok(vm, arg->tok,
-                                  "vector arguments through variadic '...' "
-                                  "parameters are not supported");
+                    // like a struct-by-value arg (#714). A variadic tail arg
+                    // (#721) works the same way -- it lands in exactly one
+                    // 8-byte stack slot holding the scratch pointer, which
+                    // <stdarg.h>'s va_arg dereferences via
+                    // __builtin_classify_type.
                     gen_vector_arg_ptr(vm, arg, REG_T0);
                     emit_psh3(vm, REG_T0);
                 } else {
@@ -5478,11 +5478,11 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             } else if (is_vector(arg->ty)) {
                 // Vector arg: pass by memory like a struct-by-value arg
                 // (#714) -- copy the value to a scratch slot, pass its
-                // address in the integer arg register.
-                if (is_vararg)
-                    error_tok(vm, arg->tok,
-                              "vector arguments through variadic '...' "
-                              "parameters are not supported");
+                // address in the integer arg register. Works identically for
+                // a variadic tail arg (#721): the pointer occupies exactly
+                // one int arg slot, which ENT3 spills like any other, and
+                // <stdarg.h>'s va_arg dereferences it via
+                // __builtin_classify_type.
                 if (int_arg_idx < 8) {
                     gen_vector_arg_ptr(vm, arg, REG_A0 + int_arg_idx);
                     int_arg_idx++;

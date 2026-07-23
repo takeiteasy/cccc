@@ -96,10 +96,10 @@ typedef struct {
  * va_arg(ap, type) - Retrieve next argument
  * @ap:   va_list to read from
  * @type: type of the argument to retrieve
- * 
+ *
  * If reg_count > 0: read from reg_ptr, decrement both reg_ptr and reg_count
  * Else: read from stack_ptr, increment stack_ptr
- * 
+ *
  * For floating-point types, we cast to double* to get correct IEEE 754 value.
  *
  * The fp vs non-fp split uses __builtin_choose_expr (not a runtime "?:") so
@@ -107,6 +107,18 @@ typedef struct {
  * would fuse the double and 'type' arms via the usual arithmetic conversions
  * and mistype the result (e.g. typing va_arg(ap,int*) as double), which then
  * breaks a dereference or member access on the result.
+ *
+ * A GNU vector_size vector (ticket #721) is a third case, checked via
+ * __builtin_classify_type(*(type *)0) == 99 (CCCC_VECTOR_TYPE_CLASS, see
+ * src/parse.c). The operand is never evaluated -- like sizeof(expr), only
+ * its type is inspected -- so the null dereference is compile-time only.
+ * Unlike a scalar, a variadic vector argument does NOT live directly in its
+ * 8-byte slot: the call site (gen_vector_arg_ptr, #714) always passes it BY
+ * POINTER to a caller-frame scratch copy, regardless of the vector's width,
+ * so it always occupies exactly one slot no matter how large the vector is
+ * (16/32/64 bytes, #722) and never straddles the register/stack boundary.
+ * The vector arm therefore reads the slot as a pointer and derefs it, one
+ * extra level of indirection versus the scalar arms.
  */
 #define va_arg(ap, type) \
     __builtin_choose_expr( \
@@ -114,9 +126,14 @@ typedef struct {
         (((ap).reg_count > 0) \
             ? (--((ap).reg_count), (*(double *)(((ap).reg_ptr) -= 8, ((ap).reg_ptr) + 8))) \
             : (*(double *)(((ap).stack_ptr) += 8, ((ap).stack_ptr) - 8))), \
-        (((ap).reg_count > 0) \
-            ? (--((ap).reg_count), (*(type *)(((ap).reg_ptr) -= 8, ((ap).reg_ptr) + 8))) \
-            : (*(type *)(((ap).stack_ptr) += 8, ((ap).stack_ptr) - 8))))
+        __builtin_choose_expr( \
+            __builtin_classify_type(*(type *)0) == 99, \
+            (((ap).reg_count > 0) \
+                ? (--((ap).reg_count), (*(type *)(*(void **)(((ap).reg_ptr) -= 8, ((ap).reg_ptr) + 8)))) \
+                : (*(type *)(*(void **)(((ap).stack_ptr) += 8, ((ap).stack_ptr) - 8)))), \
+            (((ap).reg_count > 0) \
+                ? (--((ap).reg_count), (*(type *)(((ap).reg_ptr) -= 8, ((ap).reg_ptr) + 8))) \
+                : (*(type *)(((ap).stack_ptr) += 8, ((ap).stack_ptr) - 8)))))
 
 /*
  * va_end(ap) - Cleanup va_list
