@@ -2007,6 +2007,104 @@ int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv) {
     return rc;
 }
 
+// Synchronously invoke a guest function-pointer value from host C code that
+// is already mid-vm_eval on this thread with the GIL held (see the doc
+// comment in internal.h). Two cases, matching how a bare function-name
+// expression can evaluate (codegen.c's third patch pass):
+//
+//   - An FFI token (fn_value <= CCCC_FFI_TOKEN_BASE): the "callback" is
+//     itself an already-registered host function taken as a value (e.g.
+//     qsort(a, n, sz, alphasort)). No VM reentry needed -- call the real
+//     host function pointer directly via the existing FFI call path.
+//
+//   - A byte offset (any other value): a real guest bytecode function.
+//     Reentering vm_eval on the same C stack is safe because op_LEV3_fn
+//     recognizes a `0` return-address sentinel as "stop here" (the same
+//     mechanism debugger_exec_condition_wrapper in debugger.c already
+//     relies on for zero-argument condition wrappers); this generalizes
+//     that pattern to N integer arguments in REG_A0.. and restores every
+//     piece of state a nested call could disturb.
+int cccc_call_guest_callback(VirtualMachine *vm, long long fn_value,
+                              const long long *args, int nargs,
+                              long long *out_ival) {
+    if (!vm || nargs < 0 || nargs > 8)
+        return -1;
+
+    if (fn_value <= CCCC_FFI_TOKEN_BASE) {
+        int ffi_idx = (int)(CCCC_FFI_TOKEN_BASE - fn_value);
+        if (ffi_idx < 0 || ffi_idx >= vm->compiler.ffi_count)
+            return -1;
+        ForeignFunc *ff = &vm->compiler.ffi_table[ffi_idx];
+        long long argbuf[8];
+        for (int i = 0; i < nargs; i++)
+            argbuf[i] = args[i];
+        if (cccc_call_native_function(vm, ff->func_ptr, ff->name, argbuf, nargs,
+                                      0, 0, 0, 0, ff->is_variadic,
+                                      ff->num_fixed_args) != 0)
+            return -1;
+        *out_ival = vm->regs[REG_A0];
+        return 0;
+    }
+
+    Pc entry = cc_byte_offset_to_pc(fn_value);
+    if (entry == CCCC_INVALID_PC || entry > vm->text_ptr)
+        return -1;
+
+    long long saved_regs[NUM_REGS];
+    FReg saved_fregs[NUM_REGS];
+    memcpy(saved_regs, vm->regs, sizeof(saved_regs));
+    memcpy(saved_fregs, vm->fregs, sizeof(saved_fregs));
+    Pc saved_pc = vm->pc;
+    long long *saved_bp = vm->bp;
+    long long *saved_sp = vm->sp;
+    long long *saved_shadow_sp = vm->shadow_sp;
+    uint32_t saved_flags = vm->flags;
+    int saved_single_step = vm->dbg.single_step;
+    int saved_step_over = vm->dbg.step_over;
+    int saved_step_out = vm->dbg.step_out;
+    Pc saved_step_over_return_addr = vm->dbg.step_over_return_addr;
+    long long *saved_step_out_bp = vm->dbg.step_out_bp;
+    int saved_debugger_attached = vm->dbg.debugger_attached;
+
+    if (check_stack_overflow(vm, 1))
+        return -1;
+
+    vm->flags &= ~CCCC_ENABLE_DEBUGGER;
+    vm->dbg.single_step = 0;
+    vm->dbg.step_over = 0;
+    vm->dbg.step_out = 0;
+    vm->dbg.debugger_attached = 0;
+
+    for (int i = 0; i < nargs; i++)
+        vm->regs[REG_A0 + i] = args[i];
+
+    if (vm->flags & CCCC_CFI)
+        *--vm->shadow_sp = 0;
+    *--vm->sp = 0; // sentinel return address, recognized by op_LEV3_fn
+    vm->pc = entry;
+    int rc = vm_eval(vm);
+    long long ival = vm->regs[REG_A0];
+
+    memcpy(vm->regs, saved_regs, sizeof(saved_regs));
+    memcpy(vm->fregs, saved_fregs, sizeof(saved_fregs));
+    vm->pc = saved_pc;
+    vm->bp = saved_bp;
+    vm->sp = saved_sp;
+    vm->shadow_sp = saved_shadow_sp;
+    vm->flags = saved_flags;
+    vm->dbg.single_step = saved_single_step;
+    vm->dbg.step_over = saved_step_over;
+    vm->dbg.step_out = saved_step_out;
+    vm->dbg.step_over_return_addr = saved_step_over_return_addr;
+    vm->dbg.step_out_bp = saved_step_out_bp;
+    vm->dbg.debugger_attached = saved_debugger_attached;
+
+    if (rc < 0)
+        return -1;
+    *out_ival = ival;
+    return 0;
+}
+
 // Run __attribute__((constructor))/((destructor)) functions collected by
 // gen() (codegen.c), already sorted into execution order. Each is invoked as
 // a complete, non-nested cc_run_at cycle — reusing the normal startup/
@@ -2023,13 +2121,50 @@ static void cc_run_init_entries(VirtualMachine *vm, CCCCInitEntry *list, int cou
         cc_run_at(vm, list[i].code_addr, 0, NULL);
 }
 
+// Drain vm->atexit_handlers in LIFO order on normal return from main() (#738)
+// -- ISO C requires atexit handlers to run here too, not only on an explicit
+// exit() call. Unlike wrap_exit's drain (stdlib.c), the GIL has already been
+// released by the time cc_run_at(main) returns and there is no live vm_eval
+// on the C stack, so cccc_call_guest_callback's nested-reentry mechanism
+// does not apply here. Each handler instead gets its own complete,
+// top-level cc_run_at cycle -- exactly the same mechanism already used for
+// constructors/destructors just above/below this call.
+static void cc_run_atexit_entries(VirtualMachine *vm) {
+    // A running handler may itself call atexit() to register another one
+    // (ISO C requires the newly-registered handler to also run before
+    // termination, verified against real glibc behavior). Re-checking
+    // vm->atexit_count on every iteration -- rather than capturing it once
+    // -- means a handler pushed during the loop becomes the new top of
+    // stack and runs next, exactly matching glibc's observed order.
+    while (vm->atexit_count > 0) {
+        long long fn_value = vm->atexit_handlers[--vm->atexit_count];
+        if (fn_value <= CCCC_FFI_TOKEN_BASE) {
+            int ffi_idx = (int)(CCCC_FFI_TOKEN_BASE - fn_value);
+            if (ffi_idx < 0 || ffi_idx >= vm->compiler.ffi_count)
+                continue;
+            ForeignFunc *ff = &vm->compiler.ffi_table[ffi_idx];
+            cccc_call_native_function(vm, ff->func_ptr, ff->name, NULL, 0,
+                                      0, 0, 0, 0, ff->is_variadic,
+                                      ff->num_fixed_args);
+            continue;
+        }
+        Pc entry = cc_byte_offset_to_pc(fn_value);
+        if (entry == CCCC_INVALID_PC || entry > vm->text_ptr)
+            continue;
+        cc_run_at(vm, entry, 0, NULL);
+    }
+}
+
 int cc_run(VirtualMachine *vm, int argc, char **argv) {
     cc_run_init_entries(vm, vm->compiler.ctor_list, vm->compiler.ctor_count);
     int rc = cc_run_at(vm, vm->text_seg[0], argc, argv);
-    // Destructors run only on normal return from main(); a guest exit()/
-    // _Exit()/abort() bypasses this (see docs/COVERAGE.md) since it calls
-    // straight through to the host libc function and tears down the process
-    // without returning here.
+    // atexit handlers and destructors run only on normal return from
+    // main(); a guest exit()/_Exit()/abort() bypasses this (see
+    // docs/COVERAGE.md) since it calls straight through to the host libc
+    // function and tears down the process without returning here. An
+    // explicit guest exit() drains atexit_handlers itself (wrap_exit,
+    // stdlib.c) before this function is ever reached again.
+    cc_run_atexit_entries(vm);
     cc_run_init_entries(vm, vm->compiler.dtor_list, vm->compiler.dtor_count);
     return rc;
 }

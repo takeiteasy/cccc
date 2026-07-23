@@ -300,6 +300,96 @@ static long long wrap_globfree(long long pglob) { globfree((glob_t *)pglob); ret
 static long long wrap_regfree(long long preg) { regfree((regex_t *)preg); return 0; }
 
 // ---------------------------------------------------------------------------
+// glob()'s errfunc / scandir()'s select+compar callbacks (#738)
+//
+// Same shape as qsort/bsearch's comparator fix above: a thread-local slot
+// holds which guest callback to invoke, a real host C trampoline reads it
+// and drives cccc_call_guest_callback, and the slot is saved/restored around
+// the host call (not written once) so a guest callback that itself calls
+// glob()/scandir() doesn't clobber the outer call's slot. Faults are latched
+// and surfaced via errno after the host call returns, since none of these
+// host APIs give the callback its own error-propagation channel.
+// ---------------------------------------------------------------------------
+
+static _Thread_local long long g_glob_errfunc_value;
+static _Thread_local int g_glob_errfunc_faulted;
+
+static int glob_errfunc_trampoline(const char *epath, int eerrno) {
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    long long args[2] = { (long long)(intptr_t)epath, (long long)eerrno };
+    long long result = 0;
+    if (!vm || cccc_call_guest_callback(vm, g_glob_errfunc_value, args, 2, &result) != 0) {
+        g_glob_errfunc_faulted = 1;
+        return 0; /* keep glob() enumerating rather than abort on a faulting errfunc */
+    }
+    return (int)result;
+}
+
+static long long wrap_glob(long long pattern, long long flags, long long errfunc, long long pglob) {
+    long long saved_errfunc = g_glob_errfunc_value;
+    int saved_faulted = g_glob_errfunc_faulted;
+    g_glob_errfunc_value = errfunc;
+    g_glob_errfunc_faulted = 0;
+
+    int r = glob((const char *)pattern, (int)flags,
+                errfunc ? glob_errfunc_trampoline : NULL, (glob_t *)pglob);
+
+    int faulted = g_glob_errfunc_faulted;
+    g_glob_errfunc_value = saved_errfunc;
+    g_glob_errfunc_faulted = saved_faulted;
+    if (faulted)
+        errno = EFAULT;
+    return r;
+}
+
+static _Thread_local long long g_scandir_select_value;
+static _Thread_local long long g_scandir_compar_value;
+static _Thread_local int g_scandir_faulted;
+
+static int scandir_select_trampoline(const struct dirent *e) {
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    long long args[1] = { (long long)(intptr_t)e };
+    long long result = 0;
+    if (!vm || cccc_call_guest_callback(vm, g_scandir_select_value, args, 1, &result) != 0) {
+        g_scandir_faulted = 1;
+        return 0;
+    }
+    return (int)result;
+}
+
+static int scandir_compar_trampoline(const struct dirent **a, const struct dirent **b) {
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    long long args[2] = { (long long)(intptr_t)a, (long long)(intptr_t)b };
+    long long result = 0;
+    if (!vm || cccc_call_guest_callback(vm, g_scandir_compar_value, args, 2, &result) != 0) {
+        g_scandir_faulted = 1;
+        return 0;
+    }
+    return (int)result;
+}
+
+static long long wrap_scandir(long long dirname, long long namelist, long long select, long long compar) {
+    long long saved_select = g_scandir_select_value;
+    long long saved_compar = g_scandir_compar_value;
+    int saved_faulted = g_scandir_faulted;
+    g_scandir_select_value = select;
+    g_scandir_compar_value = compar;
+    g_scandir_faulted = 0;
+
+    int n = scandir((const char *)dirname, (struct dirent ***)namelist,
+                    select ? scandir_select_trampoline : NULL,
+                    compar ? scandir_compar_trampoline : NULL);
+
+    int faulted = g_scandir_faulted;
+    g_scandir_select_value = saved_select;
+    g_scandir_compar_value = saved_compar;
+    g_scandir_faulted = saved_faulted;
+    if (faulted)
+        errno = EFAULT;
+    return n;
+}
+
+// ---------------------------------------------------------------------------
 // sysconf()/pathconf()/fpathconf()/confstr() — translating wrappers (#732)
 //
 // include/unistd.h (the guest-visible header served to compiled programs)
@@ -732,8 +822,9 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "regexec",  (void*)regexec,  5, 0);
     cc_register_cfunc(vm, "regerror", (void*)regerror, 4, 0);
     cc_register_cfunc(vm, "regfree",  (void*)wrap_regfree,  1, 0);
-    cc_register_cfunc(vm, "glob",     (void*)glob,     4, 0);
+    cc_register_cfunc(vm, "glob",     (void*)wrap_glob, 4, 0);
     cc_register_cfunc(vm, "globfree", (void*)wrap_globfree, 1, 0);
+    cc_register_cfunc(vm, "scandir",  (void*)wrap_scandir, 4, 0);
 }
 #else
 void register_posix_functions(VirtualMachine *vm) {

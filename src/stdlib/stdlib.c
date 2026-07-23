@@ -1,5 +1,6 @@
 // stdlib.h stdlib function registration
 #include "../cccc.h"
+#include "../internal.h"
 #include <wchar.h>
 #include <string.h>
 #include <errno.h>
@@ -39,6 +40,161 @@ static void *cccc_block_copy_impl(void *desc) {
     void *copy = malloc(size);
     if (copy) memcpy(copy, desc, size);
     return copy;
+}
+
+// ---------------------------------------------------------------------------
+// qsort/bsearch comparator callback (#738)
+//
+// qsort()/bsearch() invoke their compar argument synchronously, once per
+// comparison, from inside the host call -- exactly the pattern that used to
+// crash (a raw guest function-pointer value handed straight to a host API
+// that calls it as real machine code). qsort_compar_trampoline is a genuine
+// host C function with the right ABI; it reads which guest callback to
+// invoke from a thread-local slot and drives it via cccc_call_guest_callback
+// (see internal.h / vm.c), which re-enters vm_eval on this same C stack.
+//
+// The slot is saved/restored around each host call rather than written
+// once, because a guest comparator that itself calls qsort()/bsearch() (a
+// nested sort) would otherwise clobber the outer call's callback mid-sort.
+// If the guest comparator faults, qsort_compar_trampoline can't propagate
+// that through qsort()'s void return, so it latches the failure and returns
+// 0 (keeping the sort well-defined) and wrap_qsort/wrap_bsearch surface it
+// via errno after the host call returns.
+static _Thread_local long long g_qsort_compar_value;
+static _Thread_local int g_qsort_compar_faulted;
+
+static int qsort_compar_trampoline(const void *a, const void *b) {
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    long long args[2] = { (long long)(intptr_t)a, (long long)(intptr_t)b };
+    long long result = 0;
+    if (!vm || cccc_call_guest_callback(vm, g_qsort_compar_value, args, 2, &result) != 0) {
+        g_qsort_compar_faulted = 1;
+        return 0;
+    }
+    return (int)result;
+}
+
+static long long wrap_qsort(long long base, long long nmemb, long long size, long long compar) {
+    long long saved_compar = g_qsort_compar_value;
+    int saved_faulted = g_qsort_compar_faulted;
+    g_qsort_compar_value = compar;
+    g_qsort_compar_faulted = 0;
+
+    qsort((void *)base, (size_t)nmemb, (size_t)size, qsort_compar_trampoline);
+
+    int faulted = g_qsort_compar_faulted;
+    g_qsort_compar_value = saved_compar;
+    g_qsort_compar_faulted = saved_faulted;
+    if (faulted)
+        errno = EFAULT;
+    return 0;
+}
+
+static long long wrap_bsearch(long long key, long long base, long long nmemb,
+                              long long size, long long compar) {
+    long long saved_compar = g_qsort_compar_value;
+    int saved_faulted = g_qsort_compar_faulted;
+    g_qsort_compar_value = compar;
+    g_qsort_compar_faulted = 0;
+
+    void *result = bsearch((void *)key, (void *)base, (size_t)nmemb, (size_t)size,
+                           qsort_compar_trampoline);
+
+    int faulted = g_qsort_compar_faulted;
+    g_qsort_compar_value = saved_compar;
+    g_qsort_compar_faulted = saved_faulted;
+    if (faulted)
+        errno = EFAULT;
+    return (long long)(intptr_t)result;
+}
+
+// ---------------------------------------------------------------------------
+// atexit()/at_quick_exit() (#738)
+//
+// atexit/at_quick_exit used to be raw passthroughs to the real host
+// atexit()/at_quick_exit(), which stashed the guest function-pointer value
+// straight into the HOST's own libc exit table. That guest value is not a
+// real host-callable pointer, so it crashed the moment libc's real exit
+// sequence (real process exit -- which always eventually happens, whether
+// or not the guest program itself calls exit()) invoked it as machine code.
+//
+// Handlers are now tracked in a VM-owned list (vm->atexit_handlers /
+// at_quick_exit_handlers in cccc.h) and drained explicitly, in LIFO order,
+// by wrap_exit/wrap_quick_exit below via cccc_call_guest_callback -- safe
+// here because wrap_exit/wrap_quick_exit run mid-vm_eval, GIL held, same as
+// any other FFI call. Normal return from main() (no explicit exit() call)
+// is a DIFFERENT context -- the GIL has already been released by the time
+// cc_run_at(main) returns -- so that path (vm.c, cc_run) drains the same
+// list with a top-level cc_run_at cycle per handler instead, matching how
+// constructors/destructors already run.
+static int push_exit_handler(long long **list, int *count, int *cap, long long fn_value) {
+    if (*count >= *cap) {
+        int new_cap = *cap ? *cap * 2 : 8;
+        long long *grown = realloc(*list, (size_t)new_cap * sizeof(long long));
+        if (!grown)
+            return -1;
+        *list = grown;
+        *cap = new_cap;
+    }
+    (*list)[(*count)++] = fn_value;
+    return 0;
+}
+
+static long long wrap_atexit(long long fn_value) {
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    if (!vm)
+        return -1;
+    return push_exit_handler(&vm->atexit_handlers, &vm->atexit_count,
+                             &vm->atexit_cap, fn_value);
+}
+
+static long long wrap_at_quick_exit(long long fn_value) {
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    if (!vm)
+        return -1;
+    return push_exit_handler(&vm->at_quick_exit_handlers, &vm->at_quick_exit_count,
+                             &vm->at_quick_exit_cap, fn_value);
+}
+
+// Drain a handler list in LIFO (reverse registration) order via a nested,
+// mid-vm_eval guest callback -- the caller (wrap_exit/wrap_quick_exit) is
+// itself running as an FFI call, GIL held, so this is exactly the context
+// cccc_call_guest_callback is for.
+//
+// A running handler may itself register another one (e.g. atexit() called
+// from inside an atexit handler) -- both *count and *list_ptr are
+// re-dereferenced every iteration rather than captured once, since
+// push_exit_handler can realloc() the array out from under a stale local
+// copy of the pointer, and the freshly-pushed entry must become the new top
+// of the list and run next -- matching real glibc's observed order
+// (verified against a native build) and cc_run_atexit_entries's (vm.c)
+// identical top-level-context version of this same loop.
+static void drain_exit_handlers_nested(VirtualMachine *vm, long long **list_ptr, int *count) {
+    while (*count > 0) {
+        long long fn_value = (*list_ptr)[--*count];
+        long long ignored;
+        cccc_call_guest_callback(vm, fn_value, NULL, 0, &ignored);
+        /* A faulting handler doesn't abort the drain -- the remaining
+           handlers still deserve a chance to run, matching how a real
+           atexit handler that segfaults doesn't retroactively un-register
+           the ones registered before it. */
+    }
+}
+
+static long long wrap_exit(long long status) {
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    if (vm)
+        drain_exit_handlers_nested(vm, &vm->atexit_handlers, &vm->atexit_count);
+    exit((int)status);
+    return 0; /* unreachable */
+}
+
+static long long wrap_quick_exit(long long status) {
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    if (vm)
+        drain_exit_handlers_nested(vm, &vm->at_quick_exit_handlers, &vm->at_quick_exit_count);
+    quick_exit((int)status);
+    return 0; /* unreachable */
 }
 
 // Wrapper for realloc that matches C11 semantics
@@ -190,19 +346,19 @@ void register_stdlib_functions(VirtualMachine *vm) {
 
     // Process control
     cc_register_cfunc(vm, "abort", (void*)abort, 0, 0);
-    cc_register_cfunc(vm, "exit", (void*)exit, 1, 0);
+    cc_register_cfunc(vm, "exit", (void*)wrap_exit, 1, 0);
     cc_register_cfunc(vm, "_Exit", (void*)_Exit, 1, 0);
-    cc_register_cfunc(vm, "atexit", (void*)atexit, 1, 0);
-    cc_register_cfunc(vm, "at_quick_exit", (void*)at_quick_exit, 1, 0);
-    cc_register_cfunc(vm, "quick_exit", (void*)quick_exit, 1, 0);
+    cc_register_cfunc(vm, "atexit", (void*)wrap_atexit, 1, 0);
+    cc_register_cfunc(vm, "at_quick_exit", (void*)wrap_at_quick_exit, 1, 0);
+    cc_register_cfunc(vm, "quick_exit", (void*)wrap_quick_exit, 1, 0);
 
     // Environment
     cc_register_cfunc(vm, "getenv", (void*)getenv, 1, 0);
     cc_register_cfunc(vm, "system", (void*)wrap_system, 1, 0);
 
     // Search and sort
-    cc_register_cfunc(vm, "bsearch", (void*)bsearch, 4, 0);
-    cc_register_cfunc(vm, "qsort", (void*)qsort, 3, 0);
+    cc_register_cfunc(vm, "bsearch", (void*)wrap_bsearch, 5, 0);
+    cc_register_cfunc(vm, "qsort", (void*)wrap_qsort, 4, 0);
 
     // Integer arithmetic
     cc_register_cfunc(vm, "abs", (void*)abs, 1, 1);

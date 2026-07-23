@@ -35,6 +35,7 @@
 #include <sys/mount.h>
 #include <errno.h>
 #include <getopt.h>
+#include <signal.h>
 
 // [from test_posix_extra_ffi]
 // Regression test for #590: additional POSIX FFI functions registered for the
@@ -781,6 +782,199 @@ int test_posix_termios_constants(void) {
         for (int j = i + 1; j < n; j++)
             if (vchars[i] == vchars[j]) return 6;
 
+    return 42;
+}
+
+// test_posix_qsort_bsearch
+// #738: qsort/bsearch comparators used to crash the VM -- a guest
+// function-pointer value handed to a host API that calls it back as real
+// machine code isn't a real callable pointer. Exercises: a plain guest
+// comparator, nested reentrancy (a comparator that itself calls qsort()),
+// and an already-registered host FFI function (alphasort) taken as a value
+// -- the same pattern scandir(select, alphasort) below relies on.
+static int qb_cmp_int(const void *a, const void *b) {
+    return *(const int *)a - *(const int *)b;
+}
+
+static int qb_nested_ok = -1;
+static int qb_cmp_nested(const void *a, const void *b) {
+    if (qb_nested_ok == -1) {
+        int tmp[3] = {9, 7, 8};
+        qsort(tmp, 3, sizeof(int), qb_cmp_int);
+        qb_nested_ok = (tmp[0] == 7 && tmp[1] == 8 && tmp[2] == 9) ? 1 : 0;
+    }
+    return *(const int *)a - *(const int *)b;
+}
+
+[[cccc::test(return = 42)]]
+int test_posix_qsort_bsearch(void) {
+    int arr[] = {5, 3, 1, 4, 2};
+    qsort(arr, 5, sizeof(int), qb_cmp_int);
+    for (int i = 0; i < 5; i++)
+        if (arr[i] != i + 1) return 1;
+
+    int key = 3;
+    int *found = bsearch(&key, arr, 5, sizeof(int), qb_cmp_int);
+    if (!found || *found != 3) return 2;
+    key = 99;
+    if (bsearch(&key, arr, 5, sizeof(int), qb_cmp_int)) return 3;
+
+    int arr2[] = {5, 3, 1, 4, 2};
+    qsort(arr2, 5, sizeof(int), qb_cmp_nested);
+    for (int i = 0; i < 5; i++)
+        if (arr2[i] != i + 1) return 4;
+    if (qb_nested_ok != 1) return 5;
+
+    struct dirent a, b, c;
+    strcpy(a.d_name, "banana");
+    strcpy(b.d_name, "apple");
+    strcpy(c.d_name, "cherry");
+    const struct dirent *darr[3] = {&a, &b, &c};
+    qsort(darr, 3, sizeof(struct dirent *), (int (*)(const void *, const void *))alphasort);
+    if (strcmp(darr[0]->d_name, "apple") != 0) return 6;
+    if (strcmp(darr[1]->d_name, "banana") != 0) return 7;
+    if (strcmp(darr[2]->d_name, "cherry") != 0) return 8;
+
+    return 42;
+}
+
+// test_posix_glob_errfunc
+// #738: glob()'s errfunc used to crash if a real (non-NULL) guest callback
+// was passed. Deliberately globs an unreadable (mode 0000) directory to try
+// to force errfunc to actually fire -- but permission checks don't apply to
+// root, and this suite may run as root (e.g. inside a container), so
+// whether errfunc actually fires is only asserted when not running as
+// root. Either way, the call must not crash: that's the actual regression
+// this guards, and it's unconditional.
+static int glob_errfunc_calls;
+static int glob_errfunc(const char *epath, int eerrno) {
+    (void)epath; (void)eerrno;
+    glob_errfunc_calls++;
+    return 0;
+}
+
+[[cccc::test(return = 42)]]
+int test_posix_glob_errfunc(void) {
+    mkdir("/tmp/cccc_test_glob_noperm", 0000);
+    glob_t g;
+    glob("/tmp/cccc_test_glob_noperm/*", GLOB_ERR, glob_errfunc, &g);
+    rmdir("/tmp/cccc_test_glob_noperm");
+    if (geteuid() != 0 && glob_errfunc_calls < 1) return 1;
+    return 42;
+}
+
+// test_posix_scandir
+// #738: scandir() was previously not declared at all (its select/compar
+// callbacks crashed the VM). Exercises both callbacks: a real guest select
+// filter, and alphasort (an already-registered host FFI function) as compar.
+static int scandir_select_dotfiles_out(const struct dirent *e) {
+    return strcmp(e->d_name, ".") != 0 && strcmp(e->d_name, "..") != 0;
+}
+
+[[cccc::test(return = 42)]]
+int test_posix_scandir(void) {
+    struct dirent **list;
+    int n = scandir("/tmp", &list, scandir_select_dotfiles_out, alphasort);
+    if (n < 0) return 1;
+    int rc = 42;
+    for (int i = 0; i < n; i++) {
+        if (rc != 42) continue;
+        if (strcmp(list[i]->d_name, ".") == 0 || strcmp(list[i]->d_name, "..") == 0) rc = 2;
+        else if (i > 0 && strcmp(list[i - 1]->d_name, list[i]->d_name) > 0) rc = 3;
+    }
+    for (int i = 0; i < n; i++)
+        free(list[i]);
+    free(list);
+    return rc;
+}
+
+// test_posix_sigaction
+// #738: sigaction() used to be a raw passthrough to the real host
+// sigaction() -- a guest handler value isn't a real callable host pointer,
+// so it crashed the moment a signal was actually delivered. Now reuses the
+// same VM-managed slot + async-safe shim mechanism signal()/VSIGNAL already
+// use. Also exercises sa_mask/sa_flags round-trip through oact.
+static volatile sig_atomic_t sigaction_got_it;
+static void sigaction_handler(int sig) { sigaction_got_it = sig; }
+
+[[cccc::test(return = 42)]]
+int test_posix_sigaction(void) {
+    struct sigaction sa, old;
+    for (int i = 0; i < (int)sizeof(sa); i++) ((char *)&sa)[i] = 0;
+    sigemptyset(&sa.sa_mask);
+    sigaddset(&sa.sa_mask, SIGTERM);
+    sa.sa_handler = sigaction_handler;
+    sa.sa_flags = 0x1234;
+
+    if (sigaction(SIGUSR1, &sa, &old) != 0) return 1;
+    if (old.sa_handler != SIG_DFL) return 2;
+
+    raise(SIGUSR1);
+    if (sigaction_got_it != SIGUSR1) return 3;
+
+    struct sigaction q;
+    for (int i = 0; i < (int)sizeof(q); i++) ((char *)&q)[i] = 0;
+    if (sigaction(SIGUSR1, 0, &q) != 0) return 4;
+    if (q.sa_handler != sigaction_handler) return 5;
+    if (q.sa_flags != 0x1234) return 6;
+    if (sigismember(&q.sa_mask, SIGTERM) != 1) return 7;
+
+    struct sigaction dfl;
+    for (int i = 0; i < (int)sizeof(dfl); i++) ((char *)&dfl)[i] = 0;
+    dfl.sa_handler = SIG_DFL;
+    if (sigaction(SIGUSR1, &dfl, 0) != 0) return 8;
+
+    return 42;
+}
+
+// test_posix_sigset_ops
+// #738: sigemptyset/sigfillset/sigaddset/sigdelset/sigismember used to be
+// raw passthroughs to the real host functions, which are a genuine
+// out-of-bounds write/read on Linux (real sigset_t is 128 bytes there vs.
+// this guest header's 4-byte unsigned int -- coincidentally safe on macOS,
+// where the real sigset_t also happens to be 4 bytes). Now operate natively
+// on the guest's own 4-byte representation.
+[[cccc::test(return = 42)]]
+int test_posix_sigset_ops(void) {
+    sigset_t set;
+    if (sigemptyset(&set) != 0) return 1;
+    if (sigismember(&set, SIGUSR1) != 0) return 2;
+
+    if (sigaddset(&set, SIGUSR1) != 0) return 3;
+    if (sigismember(&set, SIGUSR1) != 1) return 4;
+    if (sigismember(&set, SIGUSR2) != 0) return 5;
+
+    if (sigdelset(&set, SIGUSR1) != 0) return 6;
+    if (sigismember(&set, SIGUSR1) != 0) return 7;
+
+    if (sigfillset(&set) != 0) return 8;
+    if (sigismember(&set, SIGUSR1) != 1) return 9;
+    if (sigismember(&set, SIGTERM) != 1) return 10;
+
+    return 42;
+}
+
+// test_posix_atexit_mid_call
+// #738: an explicit exit() call drains atexit handlers via a nested,
+// mid-vm_eval guest callback (cccc_call_guest_callback) since wrap_exit
+// itself runs as an ordinary FFI call with the GIL held -- unlike the
+// separate top-level cc_run_at-per-handler path used for atexit handlers
+// firing on normal return from main() (see tests/test_atexit_normal_return.c
+// and tests/test_atexit_mid_drain_registration.c, which need a real
+// standalone main() to exercise that context). This just confirms
+// atexit()/exit() are callable and don't crash from within a --testing
+// function (a full LIFO-order/exit-code check needs the real process exit
+// the two standalone test files above provide).
+static int atexit_mid_call_ran;
+static void atexit_mid_call_handler(void) { atexit_mid_call_ran = 1; }
+
+[[cccc::test(return = 42)]]
+int test_posix_atexit_registration(void) {
+    if (atexit(atexit_mid_call_handler) != 0) return 1;
+    /* Deliberately do not call exit() here -- this suite's own harness
+       drives multiple [[cccc::test]] functions through one real main(),
+       so calling exit() would terminate the whole suite early. Just prove
+       registration succeeds and doesn't crash. */
     return 42;
 }
 

@@ -1684,6 +1684,15 @@ typedef struct VirtualMachine VirtualMachine;
 typedef struct {
     int      action;      /* 0=DFL, 1=IGN, 2=VM handler */
     long long handler_fn; /* VM function pointer when action==2 */
+    /* sa_mask/sa_flags (#738): populated and round-tripped through oact by
+       sigaction() (signal.c) for guest struct-field fidelity, but NOT
+       enforced at the OS level -- cccc_set_guest_signal_action only ever
+       installs a fixed handler/ignore/default disposition (same as
+       signal()/VSIGNAL), so SA_RESTART/SA_NODEFER/SA_RESETHAND etc. are
+       stored but inert. signal()/raise() (VSIGNAL/VRAISE, ops.c) leave
+       these at 0. */
+    unsigned int sa_mask;
+    int sa_flags;
 } SigSlot;
 
 /* The floating-point register file is a flat double. The frontend already
@@ -2827,6 +2836,22 @@ struct VirtualMachine {
 
     // VM-managed signal table
     SigSlot vm_sigslots[CCCC_NSIG];
+
+    // VM-managed atexit()/at_quick_exit() handler lists (#738). These hold
+    // guest function-pointer values (byte offsets or FFI tokens), NOT raw
+    // pointers handed to the host's real atexit()/at_quick_exit() -- a guest
+    // value passed straight through would crash the moment the host's libc
+    // exit sequence actually invoked it as machine code. Drained in LIFO
+    // (reverse registration) order by wrap_exit/wrap_quick_exit (stdlib.c)
+    // and by cc_run's normal-return path (vm.c), each via a mechanism
+    // appropriate to whether the GIL is held at that point -- see the
+    // comment above cccc_call_guest_callback in internal.h.
+    long long *atexit_handlers;
+    int atexit_count;
+    int atexit_cap;
+    long long *at_quick_exit_handlers;
+    int at_quick_exit_count;
+    int at_quick_exit_cap;
 
     // GIL-backed pthread runtime state. Concrete pthread objects are kept
     // internal so the public CCCC struct does not expose host pthread ABI types.

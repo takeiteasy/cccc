@@ -568,6 +568,34 @@ VirtualMachine *cccc_current_ffi_vm(void);
 // Used by race detection in ops.c; implemented in stdlib/pthread.c.
 int cccc_thread_held_lock_count(VirtualMachine *vm);
 
+// Synchronously call a guest function-pointer VALUE (as produced by a bare
+// function-name expression: either a byte offset into vm->text_seg, or an
+// FFI token for an already-registered host function taken as a value, e.g.
+// `qsort(a, n, sz, alphasort)`) from host C code that is already executing
+// inside a native/FFI call on the current thread with the GIL held.
+//
+// This is for host libc functions that invoke a guest-supplied callback
+// synchronously and expect an ordinary C return value back (qsort/bsearch
+// comparators, glob's errfunc, atexit/at_quick_exit handlers run from
+// wrap_exit/wrap_quick_exit while still inside that FFI call, ...). It must
+// NOT be used from an async signal handler or any context without the GIL
+// held and a live vm_eval on the C stack. A post-GIL-release context (e.g.
+// cc_run's normal-return atexit drain in vm.c) must instead call cc_run_at
+// directly with each handler's byte offset converted to a Pc -- the same
+// top-level cc_run_at cycle already used for constructors/destructors.
+//
+// args/nargs: up to 8 plain integer/pointer arguments (REG_A0..REG_A7) --
+// sufficient for every current use site; no float/double argument or return
+// support is implemented since none of the callers need it.
+// out_ival: receives the callee's integer/pointer return value (REG_A0) on
+// success.
+// Returns 0 on success, -1 if fn_value doesn't resolve to a callable target
+// or if the nested vm_eval reports an error (e.g. the guest callback itself
+// faulted).
+int cccc_call_guest_callback(VirtualMachine *vm, long long fn_value,
+                              const long long *args, int nargs,
+                              long long *out_ival);
+
 //
 // hashmap.c
 //

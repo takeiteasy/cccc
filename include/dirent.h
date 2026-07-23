@@ -48,10 +48,8 @@ extern void seekdir(DIR *dirp, long loc);
 extern long telldir(DIR *dirp);
 extern void rewinddir(DIR *dirp);
 extern int alphasort(const struct dirent **a, const struct dirent **b);
-/* scandir() is intentionally not declared: its callback arguments (select,
-   compar) require the VM to hand a genuine host-callable function pointer
-   to scandir's internal sort, which the current FFI layer cannot produce
-   for a guest function reference -- passing one crashes the call. Tracked
-   as deferred work alongside this coverage pass' other follow-ups. */
+extern int scandir(const char *dirname, struct dirent ***namelist,
+                   int (*select)(const struct dirent *),
+                   int (*compar)(const struct dirent **, const struct dirent **));
 
 #endif /* __DIRENT_H */
