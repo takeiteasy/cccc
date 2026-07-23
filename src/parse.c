@@ -5072,6 +5072,17 @@ static void find_and_mark_escaping_addr(Node *n) {
         case ND_ADDR:
             mark_escaping_root(n->lhs);
             return;
+        case ND_ADD:
+        case ND_SUB:
+            // #718: pointer arithmetic on a frame-local base (`buf + i`) is
+            // itself an address -- an array's implicit decay already needs
+            // no explicit `&`, and offsetting that decayed pointer doesn't
+            // change what it points into. mark_escaping_root already knows
+            // how to walk ADD/SUB to find the base; reuse it directly
+            // instead of falling through to "not an address" below.
+            if (n->ty && n->ty->kind == TY_PTR)
+                mark_escaping_root(n);
+            return;
         default:
             // Arrays (always) and structs/unions (conservatively -- some
             // ABI paths copy them, but gen_addr's shared local-var funnel
