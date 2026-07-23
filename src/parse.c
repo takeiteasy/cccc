@@ -9452,6 +9452,19 @@ static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest, Token *tok) 
     return postfix(vm, rest, head.next);
 }
 
+// GNU vector_size lane lvalue helper (tracker #715, used by __builtin_shuffle):
+// builds `vec_expr[lane]` the same way the `[` postfix subscript parse site
+// lowers a vector subscript -- &vec_expr cast to an element-pointer, then
+// ordinary pointer-offset + deref. `vec_expr` must not yet have ->ty set
+// (e.g. a fresh new_var_node) since new_cast() below type-checks it.
+static Node *vector_lane_ref(VirtualMachine *vm, Node *vec_expr, Type *elem_ty,
+                              int lane, Token *tok) {
+    Node *addr = new_unary(vm, ND_ADDR, vec_expr, tok);
+    addr = new_cast(vm, addr, pointer_to(vm, elem_ty));
+    return new_unary(vm, ND_DEREF,
+                      new_add(vm, addr, new_num(vm, lane, tok), tok), tok);
+}
+
 static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
 
@@ -9582,6 +9595,134 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         if (is_flonum(ty))
             return new_num(vm, 1, start);
         return new_num(vm, 2, start);
+    }
+
+    // __builtin_convertvector(expr, type) (tracker #715): cross-lane-family
+    // element conversion between two vectors with the SAME lane count (e.g.
+    // int32 lanes <-> float32 lanes) -- unlike a `(vTYPE)expr` cast, which
+    // bit-reinterprets rather than converts. Because the VM substrate is a
+    // fixed 16-byte vector register, matching lane counts also forces
+    // matching element byte sizes, so only int32<->float32 and
+    // int64<->float64 pairs are representable; same-domain conversions
+    // (e.g. changing signedness or width without crossing int/float) have
+    // no opcode yet and are rejected with a diagnostic.
+    if (equal(tok, "__builtin_convertvector")) {
+        tok = skip(vm, tok->next, "(");
+        Node *src = assign(vm, &tok, tok);
+        add_type(vm, src);
+        tok = skip(vm, tok, ",");
+        Type *dst_ty = typename(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+
+        if (!is_vector(src->ty))
+            error_tok(vm, start,
+                      "__builtin_convertvector: first argument must be a vector type");
+        if (!is_vector(dst_ty))
+            error_tok(vm, start,
+                      "__builtin_convertvector: target type must be a vector type");
+        if (src->ty->vec_len != dst_ty->vec_len)
+            error_tok(vm, start,
+                      "__builtin_convertvector: source and target vectors "
+                      "must have the same number of lanes");
+        bool src_f = is_flonum(src->ty->base), dst_f = is_flonum(dst_ty->base);
+        if (src_f == dst_f || src->ty->base->size != dst_ty->base->size)
+            error_tok(vm, start,
+                      "__builtin_convertvector: unsupported lane conversion "
+                      "(only int32<->float32 and int64<->float64 lane pairs "
+                      "are currently supported)");
+
+        Node *node = new_node(vm, ND_CONVERTVECTOR, start);
+        node->lhs = src;
+        node->ty = copy_type(vm, dst_ty);
+        return node;
+    }
+
+    // __builtin_shuffle(vec, {i0,...,iN-1}) / __builtin_shuffle(vec1, vec2,
+    // {i0,...,iN-1}) (tracker #715): GCC vector permute, restricted to a
+    // COMPILE-TIME-CONSTANT brace-enclosed index list (matching clang's
+    // constant-index __builtin_shufflevector rather than GCC's general
+    // vector-typed mask -- a runtime/named vector mask is a follow-up
+    // ticket). No new opcode: lowered to per-lane scalar reads/writes
+    // through the same vector-subscript lvalue machinery the `[` postfix
+    // parse site uses (see vector_lane_ref() above), reusing the
+    // brace-init-verified hidden-local pattern from compound literals.
+    if (equal(tok, "__builtin_shuffle")) {
+        tok = skip(vm, tok->next, "(");
+        Node *v1 = assign(vm, &tok, tok);
+        add_type(vm, v1);
+        if (!is_vector(v1->ty))
+            error_tok(vm, start, "__builtin_shuffle: first argument must be a vector type");
+        tok = skip(vm, tok, ",");
+
+        Node *v2 = NULL;
+        if (!equal(tok, "{")) {
+            v2 = assign(vm, &tok, tok);
+            add_type(vm, v2);
+            if (!is_vector(v2->ty) || !is_compatible(v1->ty, v2->ty))
+                error_tok(vm, start,
+                          "__builtin_shuffle: second vector argument must "
+                          "match the first vector's type");
+            tok = skip(vm, tok, ",");
+        }
+
+        int lane_count = v1->ty->vec_len;
+        int max_index = v2 ? lane_count * 2 : lane_count;
+
+        // The mask must be a BARE brace list, `{i0,...}` -- not a
+        // `(vTYPE){...}` compound literal. A `(type)`-prefixed literal is
+        // itself a valid vector *expression*, which would be ambiguous with
+        // the two-vector form's second argument (both start with '('); a
+        // bare '{' cannot start any other valid argument expression here,
+        // so it unambiguously marks the mask.
+        if (!equal(tok, "{"))
+            error_tok(vm, tok,
+                      "__builtin_shuffle: the index mask must be a "
+                      "brace-enclosed list of compile-time-constant lane "
+                      "indices, e.g. '{0,1,2,3}' -- a runtime/named vector "
+                      "mask is not yet supported");
+        tok = tok->next; // consume '{'
+        int *indices = arena_alloc(&vm->compiler.parser_arena,
+                                    sizeof(int) * (size_t)lane_count);
+        for (int i = 0; i < lane_count; i++) {
+            if (i > 0)
+                tok = skip(vm, tok, ",");
+            int64_t v = const_expr(vm, &tok, tok);
+            if (v < 0 || v >= max_index)
+                error_tok(vm, tok, "__builtin_shuffle: index out of range");
+            indices[i] = (int)v;
+        }
+        if (equal(tok, ","))
+            tok = tok->next; // optional trailing comma
+        tok = skip(vm, tok, "}");
+        *rest = skip(vm, tok, ")");
+
+        // Materialize the source vector(s) into hidden locals so any side
+        // effects in v1/v2 run exactly once, then gather each destination
+        // lane individually.
+        Obj *v1var = new_lvar(vm, "", 0, v1->ty);
+        Node *chain = new_binary(vm, ND_ASSIGN, new_var_node(vm, v1var, start), v1, start);
+
+        Obj *v2var = NULL;
+        if (v2) {
+            v2var = new_lvar(vm, "", 0, v2->ty);
+            Node *v2init = new_binary(vm, ND_ASSIGN, new_var_node(vm, v2var, start), v2, start);
+            chain = new_binary(vm, ND_COMMA, chain, v2init, start);
+        }
+
+        Obj *rvar = new_lvar(vm, "", 0, v1->ty);
+        Type *elem_ty = v1->ty->base;
+        for (int i = 0; i < lane_count; i++) {
+            int idx = indices[i];
+            bool from_v2 = v2 && idx >= lane_count;
+            Obj *srcvar = from_v2 ? v2var : v1var;
+            int srclane = from_v2 ? idx - lane_count : idx;
+            Node *dst_lane = vector_lane_ref(vm, new_var_node(vm, rvar, start), elem_ty, i, start);
+            Node *src_lane = vector_lane_ref(vm, new_var_node(vm, srcvar, start), elem_ty, srclane, start);
+            Node *assign_lane = new_binary(vm, ND_ASSIGN, dst_lane, src_lane, start);
+            chain = new_binary(vm, ND_COMMA, chain, assign_lane, start);
+        }
+        Node *result = new_var_node(vm, rvar, start);
+        return new_binary(vm, ND_COMMA, chain, result, start);
     }
 
     if (equal(tok, "__builtin_compare_and_swap")) {

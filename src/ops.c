@@ -3274,6 +3274,247 @@ VEC_NEG(VNEG_I8X16, i8, 16)
 #undef VEC_BINOP
 #undef VEC_NEG
 
+// ---- Bitwise (tracker #715): whole-128-bit, width-agnostic over i64[2] ----
+
+#define VEC_BITBINOP(NAME, OP)                                               \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                   \
+        long long operands = cc_read_word(vm);                               \
+        int rd, rs1, rs2;                                                    \
+        DECODE_RRR(operands, rd, rs1, rs2);                                  \
+        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r;                      \
+        for (int i = 0; i < 2; i++) r.i64[i] = a.i64[i] OP b.i64[i];         \
+        vm->vregs[rd] = r;                                                   \
+        return 0;                                                            \
+    }
+
+VEC_BITBINOP(VAND, &)
+VEC_BITBINOP(VOR,  |)
+VEC_BITBINOP(VXOR, ^)
+
+#undef VEC_BITBINOP
+
+static inline int op_VNOT_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1;
+    DECODE_RR(operands, rd, rs1);
+    VReg a = vm->vregs[rs1], r;
+    for (int i = 0; i < 2; i++) r.i64[i] = ~a.i64[i];
+    vm->vregs[rd] = r;
+    return 0;
+}
+
+// ---- Integer lane division/modulo (tracker #715): traps on a zero divisor
+// or on MIN/-1 overflow, mirroring op_DIVC_fn/op_MODC_fn's scalar policy
+// (src/ops.c op_DIVC_fn) rather than op_DIV3_fn's non-trapping LLONG_MIN
+// return -- vector integer division is deliberately stricter. ----
+
+#define VEC_IDIV(NAME, FIELD, N, CTYPE, MINVAL)                              \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                   \
+        long long operands = cc_read_word(vm);                               \
+        int rd, rs1, rs2;                                                    \
+        DECODE_RRR(operands, rd, rs1, rs2);                                  \
+        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r;                      \
+        for (int i = 0; i < (N); i++) {                                      \
+            CTYPE bv = b.FIELD[i];                                           \
+            if (bv == 0) {                                                   \
+                printf("\n========== DIVISION BY ZERO ==========\n");        \
+                printf("Attempted vector lane division by zero (lane %d)\n", i); \
+                printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,   \
+                       (long long)vm->pc);                                   \
+                printf("======================================\n");         \
+                return -1;                                                   \
+            }                                                                \
+            if (a.FIELD[i] == (MINVAL) && bv == (CTYPE)-1) {                 \
+                printf("\n========== INTEGER OVERFLOW ==========\n");        \
+                printf("Vector lane division overflow (lane %d)\n", i);      \
+                printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,   \
+                       (long long)vm->pc);                                   \
+                printf("======================================\n");         \
+                return -1;                                                   \
+            }                                                                \
+            r.FIELD[i] = a.FIELD[i] / bv;                                    \
+        }                                                                    \
+        vm->vregs[rd] = r;                                                   \
+        return 0;                                                            \
+    }
+
+#define VEC_IMOD(NAME, FIELD, N, CTYPE, MINVAL)                              \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                   \
+        long long operands = cc_read_word(vm);                               \
+        int rd, rs1, rs2;                                                    \
+        DECODE_RRR(operands, rd, rs1, rs2);                                  \
+        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r;                      \
+        for (int i = 0; i < (N); i++) {                                      \
+            CTYPE bv = b.FIELD[i];                                           \
+            if (bv == 0) {                                                   \
+                printf("\n========== DIVISION BY ZERO ==========\n");        \
+                printf("Attempted vector lane modulo by zero (lane %d)\n", i);   \
+                printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,   \
+                       (long long)vm->pc);                                   \
+                printf("======================================\n");         \
+                return -1;                                                   \
+            }                                                                \
+            if (a.FIELD[i] == (MINVAL) && bv == (CTYPE)-1) {                 \
+                r.FIELD[i] = 0;                                              \
+            } else {                                                         \
+                r.FIELD[i] = a.FIELD[i] % bv;                                \
+            }                                                                \
+        }                                                                    \
+        vm->vregs[rd] = r;                                                   \
+        return 0;                                                            \
+    }
+
+VEC_IDIV(VDIV_I64X2, i64, 2, int64_t, INT64_MIN)
+VEC_IDIV(VDIV_I32X4, i32, 4, int32_t, INT32_MIN)
+VEC_IDIV(VDIV_I16X8, i16, 8, int16_t, INT16_MIN)
+VEC_IDIV(VDIV_I8X16, i8, 16, int8_t, INT8_MIN)
+
+VEC_IMOD(VMOD_I64X2, i64, 2, int64_t, INT64_MIN)
+VEC_IMOD(VMOD_I32X4, i32, 4, int32_t, INT32_MIN)
+VEC_IMOD(VMOD_I16X8, i16, 8, int16_t, INT16_MIN)
+VEC_IMOD(VMOD_I8X16, i8, 16, int8_t, INT8_MIN)
+
+#undef VEC_IDIV
+#undef VEC_IMOD
+
+// ---- Comparisons (tracker #715): GCC semantics -- per-lane all-ones (-1) if
+// true, 0 if false, written into a same-width signed integer lane. Unsigned
+// variants (VCLTU/VCLEU) compare the unsigned view for int lanes. ----
+
+#define VEC_FCMP(NAME, FIELD, ICAST, N, OP)                                  \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                   \
+        long long operands = cc_read_word(vm);                               \
+        int rd, rs1, rs2;                                                    \
+        DECODE_RRR(operands, rd, rs1, rs2);                                  \
+        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r;                      \
+        for (int i = 0; i < (N); i++)                                        \
+            r.ICAST[i] = (a.FIELD[i] OP b.FIELD[i]) ? -1 : 0;                \
+        vm->vregs[rd] = r;                                                   \
+        return 0;                                                            \
+    }
+
+#define VEC_ICMP(NAME, FIELD, N, CTYPE, OP)                                  \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                   \
+        long long operands = cc_read_word(vm);                               \
+        int rd, rs1, rs2;                                                    \
+        DECODE_RRR(operands, rd, rs1, rs2);                                  \
+        VReg a = vm->vregs[rs1], b = vm->vregs[rs2], r;                      \
+        for (int i = 0; i < (N); i++)                                        \
+            r.FIELD[i] = ((CTYPE)a.FIELD[i] OP (CTYPE)b.FIELD[i]) ? -1 : 0;   \
+        vm->vregs[rd] = r;                                                   \
+        return 0;                                                            \
+    }
+
+VEC_FCMP(VCEQ_F64X2, f64, i64, 2, ==)
+VEC_FCMP(VCNE_F64X2, f64, i64, 2, !=)
+VEC_FCMP(VCLT_F64X2, f64, i64, 2, <)
+VEC_FCMP(VCLE_F64X2, f64, i64, 2, <=)
+
+VEC_FCMP(VCEQ_F32X4, f32, i32, 4, ==)
+VEC_FCMP(VCNE_F32X4, f32, i32, 4, !=)
+VEC_FCMP(VCLT_F32X4, f32, i32, 4, <)
+VEC_FCMP(VCLE_F32X4, f32, i32, 4, <=)
+
+VEC_ICMP(VCEQ_I64X2, i64, 2, int64_t, ==)
+VEC_ICMP(VCNE_I64X2, i64, 2, int64_t, !=)
+VEC_ICMP(VCLT_I64X2, i64, 2, int64_t, <)
+VEC_ICMP(VCLE_I64X2, i64, 2, int64_t, <=)
+VEC_ICMP(VCLTU_I64X2, i64, 2, uint64_t, <)
+VEC_ICMP(VCLEU_I64X2, i64, 2, uint64_t, <=)
+
+VEC_ICMP(VCEQ_I32X4, i32, 4, int32_t, ==)
+VEC_ICMP(VCNE_I32X4, i32, 4, int32_t, !=)
+VEC_ICMP(VCLT_I32X4, i32, 4, int32_t, <)
+VEC_ICMP(VCLE_I32X4, i32, 4, int32_t, <=)
+VEC_ICMP(VCLTU_I32X4, i32, 4, uint32_t, <)
+VEC_ICMP(VCLEU_I32X4, i32, 4, uint32_t, <=)
+
+VEC_ICMP(VCEQ_I16X8, i16, 8, int16_t, ==)
+VEC_ICMP(VCNE_I16X8, i16, 8, int16_t, !=)
+VEC_ICMP(VCLT_I16X8, i16, 8, int16_t, <)
+VEC_ICMP(VCLE_I16X8, i16, 8, int16_t, <=)
+VEC_ICMP(VCLTU_I16X8, i16, 8, uint16_t, <)
+VEC_ICMP(VCLEU_I16X8, i16, 8, uint16_t, <=)
+
+VEC_ICMP(VCEQ_I8X16, i8, 16, int8_t, ==)
+VEC_ICMP(VCNE_I8X16, i8, 16, int8_t, !=)
+VEC_ICMP(VCLT_I8X16, i8, 16, int8_t, <)
+VEC_ICMP(VCLE_I8X16, i8, 16, int8_t, <=)
+VEC_ICMP(VCLTU_I8X16, i8, 16, uint8_t, <)
+VEC_ICMP(VCLEU_I8X16, i8, 16, uint8_t, <=)
+
+#undef VEC_FCMP
+#undef VEC_ICMP
+
+// ---- Select (tracker #715): GCC vector ?:, nonzero-per-lane condition.
+// rd is pre-loaded by codegen with the else-arm; VSEL overwrites only the
+// lanes where cond is nonzero -- a read-modify-write on rd, like VINSERT_*
+// (see op_has_vector_operand()'s comment in optimize.c for why this is safe
+// under the optimizer's fully-opaque treatment of vector opcodes). ----
+
+#define VEC_SEL(NAME, FIELD, N)                                              \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                   \
+        long long operands = cc_read_word(vm);                               \
+        int rd, rcond, rthen;                                                \
+        DECODE_RRR(operands, rd, rcond, rthen);                              \
+        VReg cond = vm->vregs[rcond], then_ = vm->vregs[rthen];              \
+        VReg r = vm->vregs[rd];                                              \
+        for (int i = 0; i < (N); i++)                                        \
+            if (cond.FIELD[i]) r.FIELD[i] = then_.FIELD[i];                  \
+        vm->vregs[rd] = r;                                                   \
+        return 0;                                                            \
+    }
+
+VEC_SEL(VSEL_8,  i8,  16)
+VEC_SEL(VSEL_16, i16, 8)
+VEC_SEL(VSEL_32, i32, 4)
+VEC_SEL(VSEL_64, i64, 2)
+
+#undef VEC_SEL
+
+// ---- __builtin_convertvector (tracker #715): same lane count; integer
+// conversion truncates toward zero (C cast semantics, matches GCC). ----
+
+static inline int op_VCVT_I32_F32_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1;
+    DECODE_RR(operands, rd, rs1);
+    VReg a = vm->vregs[rs1], r;
+    for (int i = 0; i < 4; i++) r.i32[i] = (int32_t)a.f32[i];
+    vm->vregs[rd] = r;
+    return 0;
+}
+
+static inline int op_VCVT_F32_I32_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1;
+    DECODE_RR(operands, rd, rs1);
+    VReg a = vm->vregs[rs1], r;
+    for (int i = 0; i < 4; i++) r.f32[i] = (float)a.i32[i];
+    vm->vregs[rd] = r;
+    return 0;
+}
+
+static inline int op_VCVT_I64_F64_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1;
+    DECODE_RR(operands, rd, rs1);
+    VReg a = vm->vregs[rs1], r;
+    for (int i = 0; i < 2; i++) r.i64[i] = (int64_t)a.f64[i];
+    vm->vregs[rd] = r;
+    return 0;
+}
+
+static inline int op_VCVT_F64_I64_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int rd, rs1;
+    DECODE_RR(operands, rd, rs1);
+    VReg a = vm->vregs[rs1], r;
+    for (int i = 0; i < 2; i++) r.f64[i] = (double)a.i64[i];
+    vm->vregs[rd] = r;
+    return 0;
+}
+
 // ========== Safety Opcodes ==========
 
 static inline int op_CHKB_fn(VirtualMachine *vm) {

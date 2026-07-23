@@ -343,7 +343,74 @@ extern "C" {
     X(VADD_I8X16, 1) /* vregs[rd].i8[i] = vregs[rs1].i8[i] + vregs[rs2].i8[i] */    \
     X(VSUB_I8X16, 1) /* ditto, - */                                                \
     X(VMUL_I8X16, 1) /* ditto, * */                                                \
-    X(VNEG_I8X16, 1) /* vregs[rd].i8[i] = -vregs[rs1].i8[i] */
+    X(VNEG_I8X16, 1) /* vregs[rd].i8[i] = -vregs[rs1].i8[i] */                     \
+    /* Bitwise (tracker #715): whole-128-bit, width-agnostic (over i64[2]) */      \
+    X(VAND, 1) /* vregs[rd].i64[0..1] = vregs[rs1].i64[i] & vregs[rs2].i64[i] */   \
+    X(VOR,  1) /* ditto, | */                                                     \
+    X(VXOR, 1) /* ditto, ^ */                                                     \
+    X(VNOT, 1) /* vregs[rd].i64[0..1] = ~vregs[rs1].i64[i] */                     \
+    /* Integer lane division/modulo (tracker #715): traps on divide-by-zero and  \
+       INT_MIN/-1 overflow, same policy as scalar DIVC/MODC. */                   \
+    X(VDIV_I64X2, 1) /* vregs[rd].i64[i] = vregs[rs1].i64[i] / vregs[rs2].i64[i], traps on 0 or overflow */ \
+    X(VDIV_I32X4, 1) /* ditto, i32 lanes */                                       \
+    X(VDIV_I16X8, 1) /* ditto, i16 lanes */                                       \
+    X(VDIV_I8X16, 1) /* ditto, i8 lanes */                                        \
+    X(VMOD_I64X2, 1) /* vregs[rd].i64[i] = vregs[rs1].i64[i] % vregs[rs2].i64[i], traps on 0 or overflow */ \
+    X(VMOD_I32X4, 1) /* ditto, i32 lanes */                                       \
+    X(VMOD_I16X8, 1) /* ditto, i16 lanes */                                       \
+    X(VMOD_I8X16, 1) /* ditto, i8 lanes */                                        \
+    /* Comparisons (tracker #715): GCC semantics -- per-lane all-ones (-1) if    \
+       true, all-zero if false, written into a same-width SIGNED integer lane.  \
+       VCLT/VCLE compare the signed view; VCLTU/VCLEU compare the unsigned view  \
+       (int lanes only -- float lanes are always signed-ordered). `>`/`>=` are  \
+       parsed as swapped-operand `<`/`<=`, so no separate opcodes are needed. */ \
+    X(VCEQ_F64X2, 1) /* vregs[rd].i64[i] = (vregs[rs1].f64[i] == vregs[rs2].f64[i]) ? -1 : 0 */ \
+    X(VCNE_F64X2, 1) /* ditto, != */                                              \
+    X(VCLT_F64X2, 1) /* ditto, < */                                               \
+    X(VCLE_F64X2, 1) /* ditto, <= */                                              \
+    X(VCEQ_F32X4, 1) /* vregs[rd].i32[i] = (vregs[rs1].f32[i] == vregs[rs2].f32[i]) ? -1 : 0 */ \
+    X(VCNE_F32X4, 1) /* ditto, != */                                              \
+    X(VCLT_F32X4, 1) /* ditto, < */                                               \
+    X(VCLE_F32X4, 1) /* ditto, <= */                                              \
+    X(VCEQ_I64X2, 1) /* vregs[rd].i64[i] = (vregs[rs1].i64[i] == vregs[rs2].i64[i]) ? -1 : 0 */ \
+    X(VCNE_I64X2, 1) /* ditto, != */                                              \
+    X(VCLT_I64X2, 1) /* ditto, signed < */                                        \
+    X(VCLE_I64X2, 1) /* ditto, signed <= */                                       \
+    X(VCLTU_I64X2, 1) /* ditto, unsigned < */                                     \
+    X(VCLEU_I64X2, 1) /* ditto, unsigned <= */                                    \
+    X(VCEQ_I32X4, 1) /* vregs[rd].i32[i] = (vregs[rs1].i32[i] == vregs[rs2].i32[i]) ? -1 : 0 */ \
+    X(VCNE_I32X4, 1) /* ditto, != */                                              \
+    X(VCLT_I32X4, 1) /* ditto, signed < */                                        \
+    X(VCLE_I32X4, 1) /* ditto, signed <= */                                       \
+    X(VCLTU_I32X4, 1) /* ditto, unsigned < */                                     \
+    X(VCLEU_I32X4, 1) /* ditto, unsigned <= */                                    \
+    X(VCEQ_I16X8, 1) /* vregs[rd].i16[i] = (vregs[rs1].i16[i] == vregs[rs2].i16[i]) ? -1 : 0 */ \
+    X(VCNE_I16X8, 1) /* ditto, != */                                              \
+    X(VCLT_I16X8, 1) /* ditto, signed < */                                        \
+    X(VCLE_I16X8, 1) /* ditto, signed <= */                                       \
+    X(VCLTU_I16X8, 1) /* ditto, unsigned < */                                     \
+    X(VCLEU_I16X8, 1) /* ditto, unsigned <= */                                    \
+    X(VCEQ_I8X16, 1) /* vregs[rd].i8[i] = (vregs[rs1].i8[i] == vregs[rs2].i8[i]) ? -1 : 0 */ \
+    X(VCNE_I8X16, 1) /* ditto, != */                                              \
+    X(VCLT_I8X16, 1) /* ditto, signed < */                                        \
+    X(VCLE_I8X16, 1) /* ditto, signed <= */                                       \
+    X(VCLTU_I8X16, 1) /* ditto, unsigned < */                                     \
+    X(VCLEU_I8X16, 1) /* ditto, unsigned <= */                                    \
+    /* Select (tracker #715): GCC vector ?: -- nonzero-per-lane condition.       \
+       rd is pre-loaded with the else-arm by codegen; VSEL then overwrites only  \
+       the lanes where cond is nonzero, leaving the rest (the else values          \
+       already in rd) untouched -- a read-modify-write on rd, like VINSERT_*. */ \
+    X(VSEL_8,  1) /* vregs[rd].i8[i]  = vregs[rcond].i8[i]  ? vregs[rthen].i8[i]  : vregs[rd].i8[i] */ \
+    X(VSEL_16, 1) /* ditto, i16 lanes */                                          \
+    X(VSEL_32, 1) /* ditto, i32 lanes */                                          \
+    X(VSEL_64, 1) /* ditto, i64 lanes */                                          \
+    /* __builtin_convertvector (tracker #715): same lane count, 16-byte total    \
+       size preserved (element size changes: 4 lanes of i32<->f32, 2 lanes of    \
+       i64<->f64). Integer conversion truncates toward zero (C cast semantics). */ \
+    X(VCVT_I32_F32, 1) /* vregs[rd].i32[i] = (int32_t)vregs[rs1].f32[i], truncating */ \
+    X(VCVT_F32_I32, 1) /* vregs[rd].f32[i] = (float)vregs[rs1].i32[i] */          \
+    X(VCVT_I64_F64, 1) /* vregs[rd].i64[i] = (int64_t)vregs[rs1].f64[i], truncating */ \
+    X(VCVT_F64_I64, 1) /* vregs[rd].f64[i] = (double)vregs[rs1].i64[i] */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
@@ -994,6 +1061,13 @@ typedef enum {
     ND_DYNOBJ_SIZE = 60,    // __builtin_dynamic_object_size(ptr, type) — runtime heap size.
                             // lhs = ptr expr (evaluated at runtime); val = type arg (0-3);
                             // ty = size_t (ulong).  Emits DYNOBJSZ opcode.
+    ND_CONVERTVECTOR = 61,  // __builtin_convertvector(expr, type) (tracker #715).
+                            // lhs = source vector expr (already add_type'd at
+                            // parse time); ty = target vector type (preset at
+                            // parse time, like ND_CAST via new_cast) --
+                            // cross-lane-family element conversion (e.g.
+                            // int32 lanes <-> float32 lanes), NOT a
+                            // bit-reinterpret cast.
 } NodeKind;
 
 // Linked list of locals with __attribute__((cleanup(fn))) in one block scope.

@@ -236,6 +236,22 @@ Type *vector_of(VirtualMachine *vm, Type *base, int bytes) {
     return ty;
 }
 
+// GNU vector comparison result type (tracker #715): same lane count/total
+// size as `vecty`, but with a same-width SIGNED integer element type
+// regardless of the operand's element type or signedness (GCC semantics --
+// verified against real gcc/clang: `v4sf == v4sf` yields a `v4si` mask, not
+// a float or unsigned result).
+Type *vector_mask_type(VirtualMachine *vm, Type *vecty) {
+    Type *base;
+    switch (vecty->base->size) {
+    case 1:  base = ty_char;  break;
+    case 2:  base = ty_short; break;
+    case 4:  base = ty_int;   break;
+    default: base = ty_long;  break;
+    }
+    return vector_of(vm, base, vecty->size);
+}
+
 Type *vla_of(VirtualMachine *vm, Type *base, Node *len) {
     Type *ty = new_type(vm, TY_VLA, 8, 8);
     ty->base = base;
@@ -618,29 +634,27 @@ void add_type(VirtualMachine *vm, Node *node) {
         case ND_BITAND:
         case ND_BITOR:
         case ND_BITXOR:
-            // GNU vector_size vectors (tracker #72): element-wise +,-,*,/
+            // GNU vector_size vectors (tracker #72, #715): element-wise
+            // +,-,*,/ (float and, as of #715, integer lanes), %, &, |, ^
+            // (integer lanes only -- GCC rejects these on float vectors too)
             // and unary - are supported (see gen_vector_expr in codegen.c).
-            // %, &, |, ^ have no vector opcodes yet (follow-up), and integer
-            // lane division needs per-lane div-by-zero handling that isn't
-            // implemented (follow-up) -- reject clearly rather than silently
-            // miscompiling.
+            // Integer division/modulo trap per-lane on a zero divisor or
+            // MIN/-1 overflow (see op_DIVC_fn-style traps in ops.c).
             if (is_vector(node->lhs->ty) || is_vector(node->rhs->ty)) {
                 if (is_vector(node->lhs->ty) && is_vector(node->rhs->ty) &&
                     !is_compatible(node->lhs->ty, node->rhs->ty))
                     error_tok(vm, node->tok,
                               "vector types do not match in binary expression");
-                if (node->kind == ND_MOD || node->kind == ND_BITAND ||
-                    node->kind == ND_BITOR || node->kind == ND_BITXOR)
+                Type *elem = is_vector(node->lhs->ty) ? node->lhs->ty->base
+                                                       : node->rhs->ty->base;
+                if ((node->kind == ND_MOD || node->kind == ND_BITAND ||
+                     node->kind == ND_BITOR || node->kind == ND_BITXOR) &&
+                    !is_integer(elem))
                     error_tok(vm, node->tok,
-                              "'%s' is not yet supported on vector types",
+                              "'%s' is not supported on floating-point vector types",
                               node->kind == ND_MOD ? "%" :
                               node->kind == ND_BITAND ? "&" :
                               node->kind == ND_BITOR ? "|" : "^");
-                Type *elem = is_vector(node->lhs->ty) ? node->lhs->ty->base
-                                                       : node->rhs->ty->base;
-                if (node->kind == ND_DIV && is_integer(elem))
-                    error_tok(vm, node->tok,
-                              "integer vector division is not yet supported");
             }
             usual_arith_conv(vm, &node->lhs, &node->rhs);
             node->ty = node->lhs->ty;
@@ -699,6 +713,18 @@ void add_type(VirtualMachine *vm, Node *node) {
                 node->ty = ty_int;
                 return;
             }
+            // GNU vector_size vectors (tracker #715): a vector comparison
+            // yields a per-lane all-ones(-1)/all-zero mask in a same-width
+            // SIGNED integer vector (GCC semantics, verified against real
+            // gcc/clang), not a scalar int.
+            if (is_vector(node->lhs->ty) || is_vector(node->rhs->ty)) {
+                if (!is_vector(node->lhs->ty) || !is_vector(node->rhs->ty) ||
+                    !is_compatible(node->lhs->ty, node->rhs->ty))
+                    error_tok(vm, node->tok,
+                              "vector types do not match in comparison");
+                node->ty = vector_mask_type(vm, node->lhs->ty);
+                return;
+            }
             check_sign_compare(vm, node->lhs, node->rhs, node->tok);
             usual_arith_conv(vm, &node->lhs, &node->rhs);
             node->ty = ty_int;
@@ -707,6 +733,14 @@ void add_type(VirtualMachine *vm, Node *node) {
         case ND_LE:
             if (is_complex(node->lhs->ty) || is_complex(node->rhs->ty))
                 error_tok(vm, node->tok, "ordered comparison of complex values is not supported");
+            if (is_vector(node->lhs->ty) || is_vector(node->rhs->ty)) {
+                if (!is_vector(node->lhs->ty) || !is_vector(node->rhs->ty) ||
+                    !is_compatible(node->lhs->ty, node->rhs->ty))
+                    error_tok(vm, node->tok,
+                              "vector types do not match in comparison");
+                node->ty = vector_mask_type(vm, node->lhs->ty);
+                return;
+            }
             check_sign_compare(vm, node->lhs, node->rhs, node->tok);
             usual_arith_conv(vm, &node->lhs, &node->rhs);
             node->ty = ty_int;
@@ -720,6 +754,13 @@ void add_type(VirtualMachine *vm, Node *node) {
             node->ty = ty_int;
             return;
         case ND_BITNOT:
+            // GNU vector_size vectors (tracker #715): ~v is supported on
+            // integer-lane vectors only (matches & | ^).
+            if (is_vector(node->lhs->ty) && !is_integer(node->lhs->ty->base))
+                error_tok(vm, node->tok,
+                          "'~' is not supported on floating-point vector types");
+            node->ty = node->lhs->ty;
+            return;
         case ND_SHL:
         case ND_SHR:
             node->ty = node->lhs->ty;
@@ -736,6 +777,36 @@ void add_type(VirtualMachine *vm, Node *node) {
         case ND_COND: {
             Type *t = node->then->ty;
             Type *e = node->els->ty;
+            // Vector arms in '?:' (tracker #715): must be checked before the
+            // pointer-arm logic below, since TY_VECTOR also sets `base` (to
+            // the element type) and would otherwise be misrouted into the
+            // t_ptr/e_ptr pointer-conditional branch. Two distinct forms:
+            //   - GNU per-lane select (a GCC extension): the CONDITION is
+            //     itself a vector (typically a comparison result), and each
+            //     lane of the result independently picks then/els.
+            //   - Ordinary C ternary with vector arms: the condition is an
+            //     ordinary scalar, and the *whole* vector value is selected
+            //     by a runtime branch, same as any other non-arithmetic
+            //     result type (struct, etc.) -- standard C, not a GNU
+            //     extension, verified against real clang.
+            // gen_vector_expr's ND_COND case dispatches between the two by
+            // re-checking is_vector(node->cond->ty) at codegen time.
+            if (is_vector(t) || is_vector(e)) {
+                if (!is_vector(t) || !is_vector(e) || !is_compatible(t, e))
+                    error_tok(vm, node->tok,
+                              "vector types do not match in '?:' select");
+                if (is_vector(node->cond->ty)) {
+                    Type *c = node->cond->ty;
+                    if (c->vec_len != t->vec_len || c->base->size != t->base->size)
+                        error_tok(vm, node->tok,
+                                  "vector '?:' condition must be a vector with "
+                                  "the same lane count and lane width as the "
+                                  "result (e.g. the result of a comparison on "
+                                  "the same vector type)");
+                }
+                node->ty = t;
+                return;
+            }
             bool t_ptr = (t->base != NULL) || t->kind == TY_FUNC;
             bool e_ptr = (e->base != NULL) || e->kind == TY_FUNC;
             if (t->kind == TY_VOID || e->kind == TY_VOID) {

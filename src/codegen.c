@@ -3391,12 +3391,14 @@ static void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg, int i
 // expressions flow through fregs[] even though float locals also live in
 // memory: VLDR/VSTR move between the slot and a vreg around each operation.
 //
-// Deliberately out of scope for this cut (see follow-up tickets): vector
-// args/returns (pass via memory like structs -- not wired yet), runtime-
-// variable-index subscript as an *rvalue* (named-variable subscript already
-// works via ordinary scalar load/store -- see the `[` postfix parse site),
-// %, &, |, ^ on vectors (no opcodes yet), integer lane division (needs
-// per-lane div-by-zero handling).
+// tracker #715 adds: bitwise &|^~ (integer lanes), integer lane / and %
+// (per-lane trap on zero divisor / MIN-over-(-1)), comparisons ==/!=/</<=
+// (GCC per-lane all-ones/all-zero SIGNED mask; >/>= are parsed as swapped
+// </<=), GNU vector ?: select, and __builtin_convertvector.
+//
+// Still deliberately out of scope (see follow-up tickets): vectors wider
+// than 128 bits, and __builtin_shuffle with a non-constant (runtime) index
+// mask (the constant-mask form is supported, lowered without a new opcode).
 
 typedef enum { VLANE_F64, VLANE_F32, VLANE_I64, VLANE_I32, VLANE_I16, VLANE_I8 } VecLaneFamily;
 
@@ -3414,12 +3416,12 @@ static VecLaneFamily vector_lane_family(Type *elem) {
 static int vector_binop_for(NodeKind kind, VecLaneFamily fam) {
     static const int table[6][4] = {
         // ADD              SUB              MUL              DIV
-        { VADD_F64X2,  VSUB_F64X2,  VMUL_F64X2,  VDIV_F64X2 }, // VLANE_F64
-        { VADD_F32X4,  VSUB_F32X4,  VMUL_F32X4,  VDIV_F32X4 }, // VLANE_F32
-        { VADD_I64X2,  VSUB_I64X2,  VMUL_I64X2,  -1 },         // VLANE_I64
-        { VADD_I32X4,  VSUB_I32X4,  VMUL_I32X4,  -1 },         // VLANE_I32
-        { VADD_I16X8,  VSUB_I16X8,  VMUL_I16X8,  -1 },         // VLANE_I16
-        { VADD_I8X16,  VSUB_I8X16,  VMUL_I8X16,  -1 },         // VLANE_I8
+        { VADD_F64X2,  VSUB_F64X2,  VMUL_F64X2,  VDIV_F64X2 },   // VLANE_F64
+        { VADD_F32X4,  VSUB_F32X4,  VMUL_F32X4,  VDIV_F32X4 },   // VLANE_F32
+        { VADD_I64X2,  VSUB_I64X2,  VMUL_I64X2,  VDIV_I64X2 },   // VLANE_I64
+        { VADD_I32X4,  VSUB_I32X4,  VMUL_I32X4,  VDIV_I32X4 },   // VLANE_I32
+        { VADD_I16X8,  VSUB_I16X8,  VMUL_I16X8,  VDIV_I16X8 },   // VLANE_I16
+        { VADD_I8X16,  VSUB_I8X16,  VMUL_I8X16,  VDIV_I8X16 },   // VLANE_I8
     };
     int col = kind == ND_ADD ? 0 : kind == ND_SUB ? 1 : kind == ND_MUL ? 2 : 3;
     int op = table[fam][col];
@@ -3427,6 +3429,33 @@ static int vector_binop_for(NodeKind kind, VecLaneFamily fam) {
         error("codegen: unsupported vector binary op (should have been "
               "rejected in add_type)");
     return op;
+}
+
+// Integer-lane-only modulo (tracker #715); add_type rejects float-lane %.
+static int vector_modop_for(VecLaneFamily fam) {
+    switch (fam) {
+    case VLANE_I64: return VMOD_I64X2;
+    case VLANE_I32: return VMOD_I32X4;
+    case VLANE_I16: return VMOD_I16X8;
+    case VLANE_I8:  return VMOD_I8X16;
+    default:
+        error("codegen: unsupported vector modulo (should have been "
+              "rejected in add_type)");
+        return -1;
+    }
+}
+
+// Bitwise (tracker #715): whole-128-bit, width-agnostic -- no per-lane-family
+// variants needed. add_type rejects float-lane &|^~.
+static int vector_bitop_for(NodeKind kind) {
+    switch (kind) {
+    case ND_BITAND: return VAND;
+    case ND_BITOR:  return VOR;
+    case ND_BITXOR: return VXOR;
+    default:
+        error("codegen: unsupported vector bitwise op");
+        return -1;
+    }
 }
 
 static int vector_negop_for(VecLaneFamily fam) {
@@ -3439,6 +3468,47 @@ static int vector_splatop_for(VecLaneFamily fam) {
     static const int table[6] = { VSPLAT_F64, VSPLAT_F32, VSPLAT_I64,
                                    VSPLAT_I32, VSPLAT_I16, VSPLAT_I8 };
     return table[fam];
+}
+
+// Comparisons (tracker #715): GCC semantics -- per-lane all-ones/all-zero
+// SIGNED mask. `is_uns` selects the unsigned-view VCLTU/VCLEU variants for
+// ordered comparisons on integer lanes (EQ/NE are sign-independent; float
+// lanes are always signed-ordered, `is_uns` is ignored for VLANE_F64/F32).
+static int vector_cmpop_for(NodeKind kind, VecLaneFamily fam, bool is_uns) {
+    static const int table[6][4] = {
+        // EQ            NE            LT (signed)    LE (signed)
+        { VCEQ_F64X2, VCNE_F64X2, VCLT_F64X2, VCLE_F64X2 },
+        { VCEQ_F32X4, VCNE_F32X4, VCLT_F32X4, VCLE_F32X4 },
+        { VCEQ_I64X2, VCNE_I64X2, VCLT_I64X2, VCLE_I64X2 },
+        { VCEQ_I32X4, VCNE_I32X4, VCLT_I32X4, VCLE_I32X4 },
+        { VCEQ_I16X8, VCNE_I16X8, VCLT_I16X8, VCLE_I16X8 },
+        { VCEQ_I8X16, VCNE_I8X16, VCLT_I8X16, VCLE_I8X16 },
+    };
+    static const int unsigned_table[6][2] = {
+        // LT (unsigned)   LE (unsigned) -- only meaningful for int families
+        { -1, -1 }, { -1, -1 },
+        { VCLTU_I64X2, VCLEU_I64X2 },
+        { VCLTU_I32X4, VCLEU_I32X4 },
+        { VCLTU_I16X8, VCLEU_I16X8 },
+        { VCLTU_I8X16, VCLEU_I8X16 },
+    };
+    int col = kind == ND_EQ ? 0 : kind == ND_NE ? 1 : kind == ND_LT ? 2 : 3;
+    if (is_uns && col >= 2) {
+        int op = unsigned_table[fam][col - 2];
+        if (op >= 0)
+            return op;
+    }
+    return table[fam][col];
+}
+
+// Select (tracker #715): VSEL_{8,16,32,64} by lane byte width.
+static int vector_selop_for(int lane_bytes) {
+    switch (lane_bytes) {
+    case 1: return VSEL_8;
+    case 2: return VSEL_16;
+    case 4: return VSEL_32;
+    default: return VSEL_64;
+    }
 }
 
 static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg);
@@ -3467,7 +3537,7 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             free_temp_reg(r_val);
         return;
     }
-    case ND_ADD: case ND_SUB: case ND_MUL: case ND_DIV: {
+    case ND_ADD: case ND_SUB: case ND_MUL: case ND_DIV: case ND_MOD: {
         // usual_arith_conv() already cast both operands to this node's
         // (vector) type, so both sides are vector-valued here.
         VecLaneFamily fam = vector_lane_family(node->ty->base);
@@ -3476,9 +3546,87 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         mark_temp_reg_used(r_lhs);
         int r_rhs = alloc_temp_reg();
         gen_expr(vm, node->rhs, r_rhs);
-        emit_rrr(vm, vector_binop_for(node->kind, fam), dest_reg, r_lhs, r_rhs);
+        int op = node->kind == ND_MOD ? vector_modop_for(fam)
+                                       : vector_binop_for(node->kind, fam);
+        emit_rrr(vm, op, dest_reg, r_lhs, r_rhs);
         free_temp_reg(r_rhs);
         free_temp_reg(r_lhs);
+        return;
+    }
+    case ND_BITAND: case ND_BITOR: case ND_BITXOR: {
+        int r_lhs = alloc_temp_reg();
+        gen_expr(vm, node->lhs, r_lhs);
+        mark_temp_reg_used(r_lhs);
+        int r_rhs = alloc_temp_reg();
+        gen_expr(vm, node->rhs, r_rhs);
+        emit_rrr(vm, vector_bitop_for(node->kind), dest_reg, r_lhs, r_rhs);
+        free_temp_reg(r_rhs);
+        free_temp_reg(r_lhs);
+        return;
+    }
+    case ND_BITNOT: {
+        int r_src = alloc_temp_reg();
+        gen_expr(vm, node->lhs, r_src);
+        emit_rr(vm, VNOT, dest_reg, r_src);
+        free_temp_reg(r_src);
+        return;
+    }
+    case ND_EQ: case ND_NE: case ND_LT: case ND_LE: {
+        // node->ty is the signed-integer mask type (vector_mask_type);
+        // node->lhs->ty is the still-intact operand vector type, which is
+        // what determines the lane family/signedness to compare.
+        VecLaneFamily fam = vector_lane_family(node->lhs->ty->base);
+        bool is_uns = node->lhs->ty->base->is_unsigned;
+        int r_lhs = alloc_temp_reg();
+        gen_expr(vm, node->lhs, r_lhs);
+        mark_temp_reg_used(r_lhs);
+        int r_rhs = alloc_temp_reg();
+        gen_expr(vm, node->rhs, r_rhs);
+        emit_rrr(vm, vector_cmpop_for(node->kind, fam, is_uns), dest_reg, r_lhs, r_rhs);
+        free_temp_reg(r_rhs);
+        free_temp_reg(r_lhs);
+        return;
+    }
+    case ND_COND: {
+        if (!is_vector(node->cond->ty)) {
+            // Ordinary C ternary with vector arms (tracker #715): the
+            // condition is a plain scalar, so the whole vector value is
+            // selected by a runtime branch -- standard C, not the GNU
+            // per-lane extension below. Identical shape to the generic
+            // (scalar/struct) ND_COND codegen elsewhere in this switch.
+            int r_cond = (dest_reg == REG_ZERO) ? alloc_temp_reg() : dest_reg;
+            mark_temp_reg_used(r_cond);
+            gen_cond_expr(vm, node->cond, r_cond);
+            Pc jz_else = emit_jz3(vm, r_cond);
+            if (r_cond != dest_reg) free_temp_reg(r_cond);
+
+            gen_expr(vm, node->then, dest_reg);
+            emit(vm, JMP);
+            Pc jmp_end = emit_word_ptr(vm);
+
+            vm->text_seg[jz_else] = vm->text_ptr + 1;
+            gen_expr(vm, node->els, dest_reg);
+            vm->text_seg[jmp_end] = vm->text_ptr + 1;
+            return;
+        }
+        // GNU per-lane vector ?: select (tracker #715): rd is pre-loaded
+        // with the else-arm, then VSEL_w overwrites only the lanes where
+        // cond is nonzero (see op_VSEL_*_fn in ops.c -- a read-modify-write
+        // on rd, like VINSERT_*, safe under the optimizer's fully-opaque
+        // treatment of vector opcodes).
+        int r_dest = dest_reg == REG_ZERO ? alloc_temp_reg() : dest_reg;
+        gen_expr(vm, node->els, r_dest);
+        mark_temp_reg_used(r_dest);
+        int r_cond = alloc_temp_reg();
+        gen_expr(vm, node->cond, r_cond);
+        mark_temp_reg_used(r_cond);
+        int r_then = alloc_temp_reg();
+        gen_expr(vm, node->then, r_then);
+        emit_rrr(vm, vector_selop_for(node->ty->base->size), r_dest, r_cond, r_then);
+        free_temp_reg(r_then);
+        free_temp_reg(r_cond);
+        if (dest_reg == REG_ZERO)
+            free_temp_reg(r_dest);
         return;
     }
     case ND_NEG: {
@@ -3505,6 +3653,29 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         gen_expr(vm, node->lhs, r_scalar);
         emit_rr(vm, vector_splatop_for(fam), dest_reg, r_scalar);
         free_temp_reg(r_scalar);
+        return;
+    }
+    case ND_CONVERTVECTOR: {
+        // __builtin_convertvector (tracker #715): cross-lane-family element
+        // conversion, restricted at parse time to int32<->float32 and
+        // int64<->float64 pairs (see the builtin's parse.c handler).
+        VecLaneFamily src_fam = vector_lane_family(node->lhs->ty->base);
+        VecLaneFamily dst_fam = vector_lane_family(node->ty->base);
+        int op;
+        if (src_fam == VLANE_F32 && dst_fam == VLANE_I32) op = VCVT_I32_F32;
+        else if (src_fam == VLANE_I32 && dst_fam == VLANE_F32) op = VCVT_F32_I32;
+        else if (src_fam == VLANE_F64 && dst_fam == VLANE_I64) op = VCVT_I64_F64;
+        else if (src_fam == VLANE_I64 && dst_fam == VLANE_F64) op = VCVT_F64_I64;
+        else {
+            error_tok(vm, node->tok,
+                      "codegen: unsupported vector conversion (should have "
+                      "been rejected by __builtin_convertvector's parser)");
+            op = -1;
+        }
+        int r_src = alloc_temp_reg();
+        gen_expr(vm, node->lhs, r_src);
+        emit_rr(vm, op, dest_reg, r_src);
+        free_temp_reg(r_src);
         return;
     }
     case ND_COMMA:

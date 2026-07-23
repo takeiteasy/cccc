@@ -1271,6 +1271,22 @@ static bool op_has_vector_operand(int op) {
     case VADD_I32X4: case VSUB_I32X4: case VMUL_I32X4: case VNEG_I32X4:
     case VADD_I16X8: case VSUB_I16X8: case VMUL_I16X8: case VNEG_I16X8:
     case VADD_I8X16: case VSUB_I8X16: case VMUL_I8X16: case VNEG_I8X16:
+    // tracker #715 additions: bitwise, int div/mod, comparisons, select, convert.
+    case VAND: case VOR: case VXOR: case VNOT:
+    case VDIV_I64X2: case VDIV_I32X4: case VDIV_I16X8: case VDIV_I8X16:
+    case VMOD_I64X2: case VMOD_I32X4: case VMOD_I16X8: case VMOD_I8X16:
+    case VCEQ_F64X2: case VCNE_F64X2: case VCLT_F64X2: case VCLE_F64X2:
+    case VCEQ_F32X4: case VCNE_F32X4: case VCLT_F32X4: case VCLE_F32X4:
+    case VCEQ_I64X2: case VCNE_I64X2: case VCLT_I64X2: case VCLE_I64X2:
+    case VCLTU_I64X2: case VCLEU_I64X2:
+    case VCEQ_I32X4: case VCNE_I32X4: case VCLT_I32X4: case VCLE_I32X4:
+    case VCLTU_I32X4: case VCLEU_I32X4:
+    case VCEQ_I16X8: case VCNE_I16X8: case VCLT_I16X8: case VCLE_I16X8:
+    case VCLTU_I16X8: case VCLEU_I16X8:
+    case VCEQ_I8X16: case VCNE_I8X16: case VCLT_I8X16: case VCLE_I8X16:
+    case VCLTU_I8X16: case VCLEU_I8X16:
+    case VSEL_8: case VSEL_16: case VSEL_32: case VSEL_64:
+    case VCVT_I32_F32: case VCVT_F32_I32: case VCVT_I64_F64: case VCVT_F64_I64:
         return true;
     default:
         return false;
