@@ -368,19 +368,31 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
        to a base `LEA3` for `arr` plus a separate runtime `ADD`, so the
        *final* dereferenced address is never itself the one recorded in
        `stack_ptr_epochs` by layer 2 — only `arr`'s base is. `STKTAG`, emitted
-       immediately after the base `LEA3` of any *escaping* array/struct local,
-       retains `[base, base+size)` tagged with the creating frame's epoch in
+       immediately after the base `LEA3` of any *escaping* array/struct local
+       (and, unconditionally, of any `vector_size` vector local regardless of
+       whether escape analysis proved it escaping — #727: element access
+       (`v[i]`) always re-derives the vector's address like a struct member,
+       even for a vector that never leaves its frame), retains
+       `[base, base+size)` tagged with the creating frame's epoch in
        `vm->stack_intervals`. Unlike `sorted_allocs` (the heap analogue,
        #650) — a bump allocator whose base addresses are globally ordered and
        never reused — stack addresses *are* reused across frames, so
        intervals are retained rather than pruned on frame death; a dead
        frame's extent and a later live frame's extent can share the same
-       addresses. Recency is resolved by epoch order (strictly increasing per
-       activation, so epoch order *is* recency order): consulted only when
-       layer 2's exact lookup misses, `CHKP3` resolves an interior address to
-       the max-epoch interval containing it and flags it iff that epoch is no
-       longer in `live_epochs` — so a live frame that has reused a dead
-       frame's address range for a smaller object still resolves correctly.
+       addresses. Consulted only when layer 2's exact lookup misses, `CHKP3`
+       resolves an interior address by **preferring the max-epoch *live*
+       containing interval** (#727) — only when every containing interval is
+       dead does it fall back to the plain max-epoch (dead) interval and
+       flag it. Recency-by-epoch-order alone (epoch order *is* recency order,
+       since activations get strictly increasing epochs) is not sound here:
+       a live frame's own STKTAG range can coexist with an *unrelated* dead
+       sibling frame's STKTAG range at the very same addresses (stack reuse
+       across siblings, not just across a dead frame and its live successor),
+       and the dead sibling can have a numerically higher epoch just by
+       having run more recently before returning. Preferring any live
+       containing interval resolves this regardless of epoch ordering,
+       while a genuinely dangling interior pointer (no live interval covers
+       it) is still flagged correctly.
   - **What it catches:** dereferencing a pointer to a local whose function has
     returned, whether the dereference happens in the frame that got control
     back (or any ancestor of it — layer 1) or one or more calls *deeper* than

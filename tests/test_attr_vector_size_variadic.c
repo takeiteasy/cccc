@@ -16,16 +16,12 @@
 // rejected case (vector through variadic FFI/libffi calls, out of scope;
 // tracked separately as #726).
 //
-// Not exercised under -3 here: two variadic functions that each read a
-// vector via va_arg, called in a specific order, can trip a false positive
-// in the -3 dangling-pointer detector's interior-pointer interval-stab
-// (confirmed a false positive, not an actual dangling read -- the value
-// read is correct and does not depend on call order; only the detector's
-// bookkeeping does). That is a narrow, pre-existing gap in the detector's
-// STKTAG/epoch-recency design (#669/#670/#673/#675), newly exposed by this
-// access pattern rather than caused by it, and is tracked separately as
-// #727. This test's scenarios are otherwise verified correct at -0/-1/-2,
-// -O3, and under the --c4 bytecode round-trip.
+// See tests/test_attr_vector_size_variadic_dangling.c for the -3
+// (dangling-pointer detector) exercise of this pattern: a non-escaping
+// vector local's element reads (v[i]) always go through gen_addr()+VLDR
+// like a struct member, even when escape analysis proves the vector never
+// leaves its frame, so it's always STKTAG'd regardless of that proof
+// (#727, emit_lea3_var).
 
 #include <stdarg.h>
 

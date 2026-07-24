@@ -1752,8 +1752,40 @@ static Pc emit_lea3_var(VirtualMachine *vm, int rd, Obj *var) {
     bool escaping_agg = var->addr_escapes &&
         (var->ty->kind == TY_ARRAY || var->ty->kind == TY_STRUCT ||
          var->ty->kind == TY_UNION);
+    // A TY_VECTOR local is always STKTAG'd, regardless of what escape
+    // analysis (mark_addr_escapes, #676) proved (#727). Structs/arrays only
+    // need STKTAG when addr_escapes is set because a *non*-escaping
+    // struct/array is never read back through its own address -- member
+    // access on a value that can't escape has no reason to re-derive an
+    // lvalue. Vectors break that assumption: element access (`v[i]`) always
+    // lowers through gen_addr()+VLDR (this file's #714/#722 comment: "a
+    // vector local ... lives in a memory slot ... exactly like a small
+    // struct"), even for a vector proven never to leave its frame. Without
+    // STKTAG, only the LEA3-recorded base offset is coverable at all, and
+    // for a non-escaping vector even the base isn't recorded (skip_record is
+    // still true below, matching struct/array's own policy) -- so *every*
+    // lane read of a non-escaping vector falls to stack_interval_stab.
+    // STKTAG-ing the whole vector extent with the current (live) frame's
+    // epoch on every access ensures stack_interval_stab's prefer-live
+    // resolution always has this vector's own live range to prefer over any
+    // dead sibling frame's STKTAG range that happens to physically overlap
+    // it (e.g. a prior variadic call's own dead va_list).
+    //
+    // Deliberately does NOT also force skip_record=false (exact
+    // stack_ptr_epochs recording) for a non-escaping vector: exact-recording
+    // the base would tag that one absolute address with this frame's epoch,
+    // and once this frame returns that tag goes stale -- unlike the STKTAG
+    // interval, a stale *exact* tag has no prefer-live protection (layer 2
+    // is a single last-write-wins hashmap slot, not a set of overlapping
+    // candidates), so an unrelated dereference by any later sibling frame
+    // that happens to reuse the same physical address (e.g. a stack-spilled
+    // variadic argument slot, which is address-passed rather than declared
+    // as a var) would spuriously collide with it. The STKTAG interval alone
+    // -- which layer 3 resolves soundly via prefer-live -- is enough to
+    // cover every offset of this vector, including offset 0.
+    bool vector_agg = var->ty->kind == TY_VECTOR;
     Pc pc = emit_lea3_ex(vm, rd, var->offset, !var->addr_escapes);
-    if (escaping_agg) {
+    if (escaping_agg || vector_agg) {
         emit_stktag(vm, var->offset, var->ty->size);
         vm->compiler.frame_has_esc_agg = true;
     } else if (var->addr_escapes) {

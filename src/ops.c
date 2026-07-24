@@ -1640,15 +1640,22 @@ static void stack_interval_insert(VirtualMachine *vm, long long lo, long long hi
     vm->stack_intervals.count++;
 }
 
-// Resolve an interior stack address to the most-recent (max-epoch) retained
-// interval containing it (#675). Epoch order IS recency order -- later
-// activations always get strictly higher epochs (vm->frame_epoch_counter is
-// monotonic), so whichever containing interval has the highest epoch is,
-// by construction, the one that currently owns this address, whether or not
-// its frame is still live. Returns false if no interval contains ptr.
-// *out_hi (optional, may be NULL) receives the matched interval's upper
-// bound, so a caller like DYNOBJSZ (#648) can compute remaining bytes
-// (hi - ptr) without a second lookup.
+// Resolve an interior stack address to the retained interval that currently
+// owns it (#675, prefer-live resolution added for #727). Epoch order is
+// recency order -- later activations always get strictly higher epochs
+// (vm->frame_epoch_counter is monotonic) -- but recency alone is unsound
+// when two *sibling* frames' tagged extents spatially overlap: a dead
+// frame's STKTAG range can outlive its frame and still have a higher epoch
+// than a live frame's own range that currently occupies (part of) the same
+// addresses (e.g. a live frame's escaping-vector scratch sits inside a
+// stale, already-returned sibling's escaping-aggregate range at the same
+// stack depth -- #727). Preferring the max-epoch *live* containing interval
+// when one exists fixes this: only when every containing interval is dead
+// do we fall back to the plain max-epoch (dead) interval, which still
+// reports a genuine dangling deref correctly. Returns false if no interval
+// contains ptr. *out_hi (optional, may be NULL) receives the matched
+// interval's upper bound, so a caller like DYNOBJSZ (#648) can compute
+// remaining bytes (hi - ptr) without a second lookup.
 // PLACEHOLDER: linear scan over all retained intervals. Fine for the
 // small, mostly-distinct working set typical programs produce; if a hot
 // loop retains many intervals this should become an interval tree.
@@ -1656,17 +1663,30 @@ static void stack_interval_insert(VirtualMachine *vm, long long lo, long long hi
 static bool stack_interval_stab(VirtualMachine *vm, long long ptr,
                                  unsigned long long *out_epoch,
                                  long long *out_hi) {
-    bool found = false;
-    unsigned long long best_epoch = 0;
-    long long best_hi = 0;
+    bool found = false, found_live = false;
+    unsigned long long best_epoch = 0, best_live_epoch = 0;
+    long long best_hi = 0, best_live_hi = 0;
     for (int i = 0; i < vm->stack_intervals.count; i++) {
         if (ptr >= vm->stack_intervals.iv[i].lo && ptr < vm->stack_intervals.iv[i].hi) {
-            if (!found || vm->stack_intervals.iv[i].epoch > best_epoch) {
-                best_epoch = vm->stack_intervals.iv[i].epoch;
+            unsigned long long epoch = vm->stack_intervals.iv[i].epoch;
+            if (!found || epoch > best_epoch) {
+                best_epoch = epoch;
                 best_hi = vm->stack_intervals.iv[i].hi;
                 found = true;
             }
+            if (hashmap_get_int(&vm->live_epochs, (long long)epoch) &&
+                (!found_live || epoch > best_live_epoch)) {
+                best_live_epoch = epoch;
+                best_live_hi = vm->stack_intervals.iv[i].hi;
+                found_live = true;
+            }
         }
+    }
+    if (found_live) {
+        *out_epoch = best_live_epoch;
+        if (out_hi)
+            *out_hi = best_live_hi;
+        return true;
     }
     if (found) {
         *out_epoch = best_epoch;
