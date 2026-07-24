@@ -4,7 +4,7 @@
 //   test_glob_header, test_quick_exit, test_posix_sys_wait,
 //   test_posix_sysconf_pathconf_confstr, test_posix_host_global_bridge,
 //   test_posix_sendmsg_recvmsg_scm_rights, test_posix_ipv6_udp_roundtrip,
-//   test_posix_netent
+//   test_posix_netent, test_posix_waitid
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -503,6 +503,26 @@ int test_posix_sys_wait(void) {
     if (r != pid) return 2;
     if (!WIFEXITED(status)) return 3;
     if (WEXITSTATUS(status) != 42) return 4;
+    return 42;
+}
+
+// test_posix_waitid
+// #744: waitid(P_PID, ..., WEXITED) fills a guest siginfo_t through the FFI
+// boundary exactly as the real host waitid() would -- proves the guest
+// struct is sized/laid out to match the host ABI (a too-small guest struct
+// would silently corrupt adjacent guest memory rather than fail loudly).
+[[cccc::test(return = 42)]]
+int test_posix_waitid(void) {
+    pid_t pid = fork();
+    if (pid < 0) return 1;
+    if (pid == 0) { _exit(7); }
+
+    siginfo_t si;
+    for (int i = 0; i < (int)sizeof(si); i++) ((char *)&si)[i] = 0;
+    if (waitid(P_PID, (id_t)pid, &si, WEXITED) != 0) return 2;
+    if (si.si_pid != pid) return 3;
+    if (si.si_code != CLD_EXITED) return 4;
+    if (si.si_status != 7) return 5;
     return 42;
 }
 

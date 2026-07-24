@@ -67,6 +67,56 @@ typedef int sig_atomic_t;
 
 typedef unsigned int sigset_t;
 
+/* siginfo_t for waitid() (#744). Host waitid() writes a full host-sized
+   siginfo_t through this pointer, so the guest struct must be at least as
+   large as the real one or the host call overflows into adjacent guest
+   memory -- sized to the full host sizeof (104 bytes macOS, 128 bytes
+   Linux) with explicit trailing padding, not a smaller "just the fields we
+   use" struct. si_signo/si_errno/si_code/si_pid/si_uid/si_status are laid
+   out at their real offsetof positions (verified against real macOS and
+   Linux x86_64/aarch64 headers -- Linux values match across
+   x86_64/aarch64; note Linux packs si_pid/si_uid at offset 16/20, behind 4
+   bytes of padding after si_code, where macOS packs them contiguously at
+   12/16 with no padding). si_addr and the rest of each platform's
+   siginfo_t union are only reachable through the padding here -- this
+   struct is only guest-visible for waitid(), which never touches them. */
+union sigval {
+    int    sival_int;
+    void  *sival_ptr;
+};
+
+#ifdef __APPLE__
+typedef struct {
+    int    si_signo;
+    int    si_errno;
+    int    si_code;
+    int    si_pid;
+    int    si_uid;
+    int    si_status;
+    char   __si_pad[104 - 6 * sizeof(int)];
+} siginfo_t;
+#else
+typedef struct {
+    int    si_signo;
+    int    si_errno;
+    int    si_code;
+    int    __si_pad0;
+    int    si_pid;
+    int    si_uid;
+    int    si_status;
+    char   __si_pad[128 - 7 * sizeof(int)];
+} siginfo_t;
+#endif
+
+/* si_code values for SIGCHLD, as reported by waitid(). Identical on macOS
+   and Linux. */
+#define CLD_EXITED    1
+#define CLD_KILLED    2
+#define CLD_DUMPED    3
+#define CLD_TRAPPED   4
+#define CLD_STOPPED   5
+#define CLD_CONTINUED 6
+
 struct sigaction {
     void     (*sa_handler)(int);
     sigset_t   sa_mask;

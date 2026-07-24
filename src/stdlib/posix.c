@@ -234,6 +234,17 @@ static long long wrap_waitpid_gil(long long pid, long long wstatus, long long op
     return (long long)r;
 }
 
+static long long wrap_waitid_gil(long long idtype, long long id, long long infop, long long options) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)waitid((idtype_t)idtype, (id_t)id, (siginfo_t *)infop, (int)options);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    int r = waitid((idtype_t)idtype, (id_t)id, (siginfo_t *)infop, (int)options);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
 static long long wrap_sleep_gil(long long seconds) {
     VirtualMachine *vm = current_vm();
     if (!vm || !vm->gil_initialized)
@@ -650,6 +661,7 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "recvmsg",  (void*)wrap_recvmsg_gil,  3, 0);
     cc_register_cfunc(vm, "wait",    (void*)wrap_wait_gil,    1, 0);
     cc_register_cfunc(vm, "waitpid", (void*)wrap_waitpid_gil, 3, 0);
+    cc_register_cfunc(vm, "waitid",  (void*)wrap_waitid_gil,  4, 0);
     cc_register_cfunc(vm, "sleep",   (void*)wrap_sleep_gil,   1, 0);
     cc_register_cfunc(vm, "usleep",  (void*)wrap_usleep_gil,  1, 0);
     cc_register_cfunc(vm, "nanosleep",(void*)wrap_nanosleep_gil, 2, 0);

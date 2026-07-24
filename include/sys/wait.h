@@ -7,6 +7,7 @@
 #error "<sys/wait.h> is only available on POSIX targets in CCCC"
 #endif
 
+#include "signal.h" /* for siginfo_t, waitid()'s 3rd argument */
 #include "unistd.h"
 
 #define WNOHANG    1
@@ -40,8 +41,14 @@
 extern pid_t wait(int *status);
 extern pid_t waitpid(pid_t pid, int *status, int options);
 
-/* waitid() is deferred: it needs a guest-visible siginfo_t, which does not
-   yet exist in include/signal.h -- the same struct-layout work class as the
-   items tracked in the follow-up ticket for this POSIX coverage pass. */
+/* waitid() (#744). idtype_t/P_* values are identical on macOS and Linux
+   (verified against real headers on both). */
+typedef enum {
+    P_ALL  = 0,
+    P_PID  = 1,
+    P_PGID = 2
+} idtype_t;
+
+extern int waitid(idtype_t idtype, id_t id, siginfo_t *infop, int options);
 
 #endif /* __SYS_WAIT_H */
