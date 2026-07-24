@@ -1980,8 +1980,13 @@ static void gen_cond_expr(VirtualMachine *vm, Node *node, int dest_reg) {
     }
 }
 
-static void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr) {
-    if (vm->flags & CCCC_POINTER_CHECKS)
+// dangling_check gates only the CHKP3 (pointer/dangling) emission -- CHKT3
+// (type checks, an orthogonal feature) is untouched. Pass false only when the
+// address is known at compile time to be a bp-relative local-frame address
+// (see addr_is_local_frame, #740), never for an address that could hold an
+// arbitrary/stale pointer value.
+static void emit_load_ex(VirtualMachine *vm, Type *ty, int rd, int rs_addr, bool dangling_check) {
+    if (dangling_check && (vm->flags & CCCC_POINTER_CHECKS))
         emit_rr(vm, CHKP3, rs_addr, 0);
     if (vm->flags & CCCC_TYPE_CHECKS)
         emit_rri(vm, CHKT3, rs_addr, 0 /* load */, (long long)ty->kind);
@@ -2031,6 +2036,10 @@ static void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr) {
     } else {
         emit_rr(vm, LDR_D, rd, rs_addr);
     }
+}
+
+static void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr) {
+    emit_load_ex(vm, ty, rd, rs_addr, true);
 }
 
 typedef struct {
@@ -2462,9 +2471,9 @@ static void emit_init_fp_promoted_params(VirtualMachine *vm) {
     }
 }
 
-// Store operations based on type
-static void emit_store(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr) {
-    if (vm->flags & CCCC_POINTER_CHECKS)
+// Store operations based on type. dangling_check: see emit_load_ex above.
+static void emit_store_ex(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr, bool dangling_check) {
+    if (dangling_check && (vm->flags & CCCC_POINTER_CHECKS))
         emit_rr(vm, CHKP3, rs_addr, 0);
     if (vm->flags & CCCC_TYPE_CHECKS)
         emit_rri(vm, CHKT3, rs_addr, 1 /* store */, (long long)ty->kind);
@@ -2499,6 +2508,10 @@ static void emit_store(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr) {
     } else {
         emit_rr(vm, STR_D, rd_val, rs_addr);
     }
+}
+
+static void emit_store(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr) {
+    emit_store_ex(vm, ty, rd_val, rs_addr, true);
 }
 
 // Truncate register to _BitInt(N) value semantics via shift pair.
@@ -3029,6 +3042,66 @@ static bool is_simple_local_scalar(VirtualMachine *vm, Node *node) {
            node->ty->kind != TY_UNION &&
            node->ty->kind != TY_COMPLEX &&
            !is_wide_bitint(node->ty);
+}
+
+// True iff gen_addr(node) is guaranteed to produce a bp-relative address of
+// the CURRENT function's own live frame -- i.e. built entirely through
+// emit_lea3_var's plain local-offset branch, with no intervening pointer
+// *value* load (captured-var descriptor, static-link chain, by-pointer
+// aggregate param, __block heap wrapper, or an actual ND_DEREF). Mirrors the
+// base-case conditions in gen_addr's ND_VAR handling (see above) and
+// is_simple_local_scalar's predicate cluster, generalized to aggregates and
+// to member-access chains of arbitrary depth (#740).
+//
+// Deliberately NOT gated on var->addr_escapes: accessing your own local from
+// within your own still-running frame is safe whether or not its address
+// escapes elsewhere -- escaping only matters when a *different* frame
+// dereferences a pointer *value* it was handed, which is exactly the
+// ND_DEREF case below (always declined, stays CHKP3-checked).
+//
+// #740: a non-escaping local struct/union's member access (t.a) always falls
+// to gen_addr()+emit_load/emit_store like a scalar dereference, since
+// is_simple_local_scalar above excludes aggregates from the fused frame-load
+// path. Without this classifier, CHKP3 unconditionally runs on that freshly
+// computed bp+offset address -- and can find a stale stack_ptr_epochs/
+// stack_intervals tag left by an unrelated dead sibling frame's own escaping
+// local that happened to reuse the same physical stack slot, false-positivin
+// a dangling-pointer report on a plainly-live access to the current frame's
+// own memory. <stdarg.h>'s va_arg/va_start hit this same pattern (ap.reg_ptr,
+// ap.stack_ptr are ND_MEMBER on a local va_list), which is why the original
+// #740 ticket's va_arg-specific diagnosis was actually one instance of this
+// more general bug, not a vector/variadic-specific mechanism.
+//
+// Scoped to struct/union member chains only, not array/vector indexing
+// (arr[i] on a local array reaches the same unchecked emit_load/store surface
+// under -3, since match_indexed_addr's fused fast path is disabled whenever
+// CCCC_POINTER_CHECKS is set -- but distinguishing an array/vector-decay base
+// from a pointer-variable base in that ND_ADD indexing chain needs its own
+// classifier and has no known reproducer yet; tracked separately).
+static bool addr_is_local_frame(VirtualMachine *vm, Node *node) {
+    switch (node->kind) {
+    case ND_VAR: {
+        Obj *var = node->var;
+        if (var->is_function || !var->is_local || var->is_block_var)
+            return false;
+        Obj *current_fn = vm->compiler.current_fn;
+        if (current_fn && current_fn->is_block &&
+            find_capture_index(current_fn, var) >= 0)
+            return false;
+        if (belongs_to_outer_function(current_fn, var))
+            return false;
+        if (var->is_param && (var->ty->kind == TY_STRUCT || var->ty->kind == TY_UNION ||
+                               var->ty->kind == TY_VECTOR || is_wide_bitint(var->ty)))
+            return false;
+        return true;
+    }
+    case ND_MEMBER:
+        return addr_is_local_frame(vm, node->lhs);
+    case ND_COMMA:
+        return addr_is_local_frame(vm, node->rhs);
+    default:
+        return false; // ND_DEREF (pointer value) and everything else: keep checked
+    }
 }
 
 // ========== Safety Instrumentation Helpers ==========
@@ -3911,14 +3984,14 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 // REG_A0-A7. Use a temp register to avoid clobbering int regs.
                 int r_addr = alloc_temp_reg();
                 gen_addr(vm, node, r_addr);
-                emit_load(vm, node->ty, dest_reg, r_addr);
+                emit_load_ex(vm, node->ty, dest_reg, r_addr, !addr_is_local_frame(vm, node));
                 free_temp_reg(r_addr);
             } else {
                 gen_addr(vm, node, dest_reg);
                 // For scalars, load the value (wide _BitInt stays as address)
                 if (node->ty->kind != TY_ARRAY && node->ty->kind != TY_STRUCT &&
                     node->ty->kind != TY_UNION && !is_wide_bitint(node->ty)) {
-                    emit_load(vm, node->ty, dest_reg, dest_reg);
+                    emit_load_ex(vm, node->ty, dest_reg, dest_reg, !addr_is_local_frame(vm, node));
                 }
             }
         }
@@ -4515,10 +4588,11 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         if (node->lhs->kind == ND_MEMBER && node->lhs->member->is_bitfield) {
             Member *mem = node->lhs->member;
             int r_container = alloc_temp_reg();
+            bool lhs_local_frame = addr_is_local_frame(vm, node->lhs);
 
             // Load container value
-            emit_load(vm, mem->ty, r_container,
-                      r_addr); // Use member type (container)
+            emit_load_ex(vm, mem->ty, r_container,
+                         r_addr, !lhs_local_frame); // Use member type (container)
 
             // Clear the bitfield bits: container &= ~(mask << bit_offset)
             int r_mask = alloc_temp_reg();
@@ -4543,8 +4617,8 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             emit_rrr(vm, OR3, r_container, r_container, r_new);
 
             // Store back
-            emit_store(vm, mem->ty, r_container,
-                       r_addr); // Use member type (container)
+            emit_store_ex(vm, mem->ty, r_container,
+                          r_addr, !lhs_local_frame); // Use member type (container)
 
             free_temp_reg(r_new);
             free_temp_reg(r_mask);
@@ -4563,7 +4637,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             emit_local_store(vm, node->ty, r_val, node->lhs->var->offset);
         } else {
             // Standard store
-            emit_store(vm, node->ty, r_val, r_addr);
+            emit_store_ex(vm, node->ty, r_val, r_addr, !addr_is_local_frame(vm, node->lhs));
         }
 
         // Update or invalidate the restrict cache for this store.
@@ -4627,13 +4701,14 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         gen_expr(vm, node->rhs, dest_reg);
         return;
 
-    case ND_MEMBER:
+    case ND_MEMBER: {
+        bool local_frame = addr_is_local_frame(vm, node);
         gen_addr(vm, node, dest_reg);
 
         if (node->member->is_bitfield) {
             Member *mem = node->member;
             // Load container value
-            emit_load(vm, mem->ty, dest_reg, dest_reg);
+            emit_load_ex(vm, mem->ty, dest_reg, dest_reg, !local_frame);
 
             if (mem->ty->is_unsigned) {
                 // Unsigned: (val >> bit_offset) & mask
@@ -4667,10 +4742,11 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // Standard member
             if (node->ty->kind != TY_ARRAY && node->ty->kind != TY_STRUCT &&
                 node->ty->kind != TY_UNION) {
-                emit_load(vm, node->ty, dest_reg, dest_reg);
+                emit_load_ex(vm, node->ty, dest_reg, dest_reg, !local_frame);
             }
         }
         return;
+    }
 
     case ND_CAST:
         if (is_complex(node->lhs->ty)) {

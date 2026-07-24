@@ -406,6 +406,37 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
     block-granular — a `&local` whose *block* (not function) has exited
     while the frame is still alive is `CHKL`'s job, not this check's (see
     `--stack-instrumentation` below)
+  - **Local aggregate member/element access is not gated on `CHKP3` at all
+    (#740).** A local struct/union's own member access (`t.a`) lowers
+    through `gen_addr()` + `emit_load`/`emit_store` exactly like a genuine
+    pointer dereference, so `CHKP3` used to run unconditionally there too —
+    and could find a *stale* exact tag left in `stack_ptr_epochs` by an
+    unrelated, already-returned sibling frame's own escaping local that
+    happened to reuse the same physical stack address, misreporting a
+    plainly-live access to the current frame's own memory as dangling.
+    `addr_is_local_frame` (`src/codegen.c`) recognizes when `gen_addr`'s
+    result is guaranteed to be a bp-relative address of the *current*
+    function's own live frame — built entirely through the plain
+    local-offset path, with no intervening pointer *value* load (captured
+    variable, static-link chain, by-pointer aggregate param, `__block` heap
+    wrapper, or an actual pointer dereference) — and skips `CHKP3` for that
+    access entirely; a genuine pointer dereference (`p->a`, `p[i]` through a
+    variable holding a passed/returned address) always bottoms out at a
+    dereference in this classifier and stays fully checked. Deliberately not
+    gated on whether the local's address escapes: accessing your own local
+    from within your own still-running frame is safe regardless.
+    **Residual gap, same underlying mechanism, left open:** array/vector
+    *indexing* (`arr[i]`) on a local reaches the same unchecked-under-#740
+    surface (the fused indexed-opcode fast path is disabled whenever
+    `--pointer-checks` is set), and a stack-spilled variadic argument slot
+    read by `va_arg` can likewise coincide with a dead sibling frame's exact
+    tag — both are layer-2 exact-tag collisions with no prefer-live
+    arbitration the way layer 3 has, and (unlike the member-access case)
+    the address in question is not always provably the current frame's own
+    memory, so the `addr_is_local_frame` skip does not apply. Fixing these
+    needs a structural change to layer 2 itself (e.g. retiring
+    `stack_ptr_epochs` entries when their creating frame's epoch dies); left
+    open as a distinct, still-unresolved bug
   - **Second consumer (#648):** the epoch/interval bookkeeping above
     (`frame_epochs`, `live_epochs`, `stack_intervals`) is not exclusive to
     `--dangling-pointers` — `__builtin_dynamic_object_size` also stabs
