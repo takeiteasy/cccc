@@ -2001,8 +2001,21 @@ static inline int op_CHKP3_fn(VirtualMachine *vm) {
         if (!range_dangling) {
             void *tagged = hashmap_get_int(&vm->stack_ptr_epochs, ptr);
             if (tagged) {
-                if (!hashmap_get_int(&vm->live_epochs, (long long)(intptr_t)tagged))
-                    epoch_dangling = true;
+                if (!hashmap_get_int(&vm->live_epochs, (long long)(intptr_t)tagged)) {
+                    // Stack addresses are reused; a returned sibling's
+                    // exact-recorded escaping local can leave a stale tag at
+                    // an address a *live* frame now legitimately owns (#740,
+                    // e.g. a stack-spilled variadic vector arg's va_arg slot
+                    // colliding with a dead sibling's va_list base). Prefer a
+                    // live containing interval before concluding dangling,
+                    // exactly as stack_interval_stab does within layer 3
+                    // (#727) -- if only dead intervals (or none) cover ptr,
+                    // this is still a genuine dangling deref (#673).
+                    unsigned long long iv_epoch;
+                    if (!(stack_interval_stab(vm, ptr, &iv_epoch, NULL) &&
+                          hashmap_get_int(&vm->live_epochs, (long long)iv_epoch)))
+                        epoch_dangling = true;
+                }
             } else {
                 unsigned long long iv_epoch;
                 if (stack_interval_stab(vm, ptr, &iv_epoch, NULL) &&

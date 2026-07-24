@@ -362,7 +362,16 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
        a pointer passed *deeper* into another call reuses the dead frame's
        memory (`ptr >= sp` again there), which layer 1 alone would miss, but
        its tagged epoch is still absent from `live_epochs` and layer 2 still
-       catches it
+       catches it. Since #740, a dead exact tag no longer concludes dangling
+       on its own: stack addresses are reused across frames, so a returned
+       sibling's own exact-recorded escaping local can leave a stale tag at
+       an address a *live* frame has since legitimately reclaimed (e.g. a
+       stack-spilled variadic vector argument's `va_arg` slot landing on a
+       dead sibling's old `va_list` base). `CHKP3` now falls through to
+       layer 3's `stack_interval_stab` on a dead exact hit and only reports
+       dangling if no *live* interval covers the address either — the same
+       prefer-live arbitration layer 3 already had for #727, now shared by
+       layer 2
     3. **Interior interval-stabbing (#675).** An interior stack pointer with a
        runtime-computed offset (e.g. `&arr[i]` for non-constant `i`) compiles
        to a base `LEA3` for `arr` plus a separate runtime `ADD`, so the
@@ -425,18 +434,23 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
     dereference in this classifier and stays fully checked. Deliberately not
     gated on whether the local's address escapes: accessing your own local
     from within your own still-running frame is safe regardless.
-    **Residual gap, same underlying mechanism, left open:** array/vector
-    *indexing* (`arr[i]`) on a local reaches the same unchecked-under-#740
-    surface (the fused indexed-opcode fast path is disabled whenever
-    `--pointer-checks` is set), and a stack-spilled variadic argument slot
-    read by `va_arg` can likewise coincide with a dead sibling frame's exact
-    tag — both are layer-2 exact-tag collisions with no prefer-live
-    arbitration the way layer 3 has, and (unlike the member-access case)
-    the address in question is not always provably the current frame's own
-    memory, so the `addr_is_local_frame` skip does not apply. Fixing these
-    needs a structural change to layer 2 itself (e.g. retiring
-    `stack_ptr_epochs` entries when their creating frame's epoch dies); left
-    open as a distinct, still-unresolved bug
+    **Related layer-2 exact-tag collision, resolved separately (#740).**
+    Array/vector *indexing* (`arr[i]`) and a stack-spilled variadic
+    argument slot read by `va_arg` don't qualify for the `addr_is_local_frame`
+    skip above (the address isn't always provably the current frame's own
+    memory — e.g. the `va_arg` slot lives in the argument-passing area, not
+    a declared local), so they can still hit a dead sibling frame's stale
+    exact tag in `stack_ptr_epochs`. Rather than skip `CHKP3` at these sites,
+    #740 fixed the collision at its source: layer 2 now falls through to
+    layer 3's prefer-live `stack_interval_stab` on a dead exact hit instead
+    of concluding dangling outright (see layer 2's own description above).
+    A live frame's own STKTAG'd extent — e.g. a non-escaping vector or array
+    local, or a stack-spilled `va_arg` read — now wins over an overlapping
+    dead sibling's stale exact tag; a genuinely dangling exact-tag deref
+    (nothing live covers the address) is still flagged. Verified with
+    `tests/test_dangling_variadic_stack_spilled.c` (the stack-spilled
+    `after8`/`wide` shapes from the ticket) plus manual probes of local
+    array-indexing collisions
   - **Second consumer (#648):** the epoch/interval bookkeeping above
     (`frame_epochs`, `live_epochs`, `stack_intervals`) is not exclusive to
     `--dangling-pointers` — `__builtin_dynamic_object_size` also stabs
