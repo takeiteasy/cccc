@@ -813,6 +813,10 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "getaddrinfo", (void*)getaddrinfo,    4, 0);
     cc_register_cfunc(vm, "freeaddrinfo",(void*)wrap_freeaddrinfo, 1, 0);
     cc_register_cfunc(vm, "getnameinfo", (void*)getnameinfo,    7, 0);
+    cc_register_cfunc(vm, "getnetbyname",(void*)getnetbyname,   1, 0);
+    cc_register_cfunc(vm, "getnetbyaddr",(void*)getnetbyaddr,   2, 0);
+    cc_register_cfunc(vm, "setnetent",   (void*)setnetent,      1, 0);
+    cc_register_cfunc(vm, "endnetent",   (void*)endnetent,      0, 0);
 
     cc_register_cfunc(vm, "opendir",  (void*)opendir,  1, 0);
     cc_register_cfunc(vm, "readdir",  (void*)readdir,  1, 0);

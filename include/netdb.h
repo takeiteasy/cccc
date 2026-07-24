@@ -7,6 +7,7 @@
 #error "<netdb.h> is only available on POSIX targets in CCCC"
 #endif
 
+#include "stdint.h"
 #include "sys/socket.h"
 
 struct hostent {
@@ -18,6 +19,19 @@ struct hostent {
 };
 
 #define h_addr h_addr_list[0]
+
+/* struct netent for getnetbyname()/getnetbyaddr() (#743). Field layout is
+   identical on macOS and Linux (no sa_family_t-style width divergence
+   here) -- verified via sizeof/offsetof against real macOS and Linux
+   x86_64/aarch64 headers (Linux values match across x86_64/aarch64;
+   sizeof(struct netent) == 24 on both, n_net is a 32-bit network number
+   in host byte order). */
+struct netent {
+    char     *n_name;
+    char    **n_aliases;
+    int       n_addrtype;
+    uint32_t  n_net;
+};
 
 struct addrinfo {
     int ai_flags;
@@ -94,5 +108,9 @@ extern void freeaddrinfo(struct addrinfo *res);
 extern int getnameinfo(const struct sockaddr *addr, socklen_t addrlen,
                        char *host, socklen_t hostlen,
                        char *serv, socklen_t servlen, int flags);
+extern struct netent *getnetbyname(const char *name);
+extern struct netent *getnetbyaddr(uint32_t net, int type);
+extern void setnetent(int stayopen);
+extern void endnetent(void);
 
 #endif /* __NETDB_H */

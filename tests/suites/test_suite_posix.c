@@ -3,7 +3,8 @@
 // Source tests: test_posix_arpa_inet, test_posix_dirent, test_posix_extra_ffi, test_posix_fnmatch, test_posix_glob, test_posix_libgen, test_posix_poll, test_posix_pwd_grp, test_posix_regex, test_posix_socket_netdb, test_posix_strings, test_posix_sys_mman, test_posix_sys_stat, test_posix_sys_time, test_posix_termios, test_posix_unistd_fcntl, test_posix_utime, test_posix_vfs_decls,
 //   test_glob_header, test_quick_exit, test_posix_sys_wait,
 //   test_posix_sysconf_pathconf_confstr, test_posix_host_global_bridge,
-//   test_posix_sendmsg_recvmsg_scm_rights, test_posix_ipv6_udp_roundtrip
+//   test_posix_sendmsg_recvmsg_scm_rights, test_posix_ipv6_udp_roundtrip,
+//   test_posix_netent
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -283,6 +284,33 @@ int test_posix_socket_netdb(void) {
     if (connect(-1, (struct sockaddr *)&addr, sizeof(addr)) != -1) return 12;
     if (getsockname(-1, (struct sockaddr *)&addr, &len) != -1) return 13;
 
+    return 42;
+}
+
+// test_posix_netent
+// #743: getnetbyname()/getnetbyaddr()/setnetent()/endnetent() against
+// struct netent. /etc/networks is frequently empty (or absent) on both
+// developer machines and CI, so a "real entry" round trip isn't
+// guaranteed -- this tolerates an empty networks database and only
+// asserts consistency between getnetbyname() and getnetbyaddr() when an
+// entry actually resolves.
+[[cccc::test(return = 42)]]
+int test_posix_netent(void) {
+    setnetent(0);
+
+    struct netent *ne = getnetbyname("loopback");
+    if (ne) {
+        if (!ne->n_name) return 1;
+        struct netent *by_addr = getnetbyaddr(ne->n_net, ne->n_addrtype);
+        if (!by_addr) return 2;
+        if (by_addr->n_net != ne->n_net) return 3;
+        if (by_addr->n_addrtype != ne->n_addrtype) return 4;
+    }
+
+    /* A name that should never resolve to a real network entry. */
+    if (getnetbyname("cccc-nonexistent-network-name")) return 5;
+
+    endnetent();
     return 42;
 }
 
