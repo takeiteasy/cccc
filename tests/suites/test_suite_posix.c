@@ -3,7 +3,7 @@
 // Source tests: test_posix_arpa_inet, test_posix_dirent, test_posix_extra_ffi, test_posix_fnmatch, test_posix_glob, test_posix_libgen, test_posix_poll, test_posix_pwd_grp, test_posix_regex, test_posix_socket_netdb, test_posix_strings, test_posix_sys_mman, test_posix_sys_stat, test_posix_sys_time, test_posix_termios, test_posix_unistd_fcntl, test_posix_utime, test_posix_vfs_decls,
 //   test_glob_header, test_quick_exit, test_posix_sys_wait,
 //   test_posix_sysconf_pathconf_confstr, test_posix_host_global_bridge,
-//   test_posix_sendmsg_recvmsg_scm_rights
+//   test_posix_sendmsg_recvmsg_scm_rights, test_posix_ipv6_udp_roundtrip
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -730,6 +730,51 @@ int test_posix_sendmsg_recvmsg_scm_rights(void) {
     close(received_fd);
     close(sv[0]);
     close(sv[1]);
+    return 42;
+}
+
+// test_posix_ipv6_udp_roundtrip
+// #742: AF_INET6 socket, bind to ::1 on an ephemeral port, UDP
+// sendto/recvfrom round trip -- proves struct sockaddr_in6's per-platform
+// layout (sin6_len/1-byte sa_family_t on Apple vs no-sin6_len/2-byte
+// sa_family_t on Linux) matches the host ABI closely enough for the kernel
+// to actually deliver the datagram.
+[[cccc::test(return = 42)]]
+int test_posix_ipv6_udp_roundtrip(void) {
+    int sfd = socket(AF_INET6, SOCK_DGRAM, 0);
+    if (sfd < 0) return 1;
+
+    struct sockaddr_in6 addr;
+    for (int i = 0; i < (int)sizeof(addr); i++) ((char *)&addr)[i] = 0;
+#ifdef __APPLE__
+    addr.sin6_len = sizeof(addr);
+#endif
+    addr.sin6_family = AF_INET6;
+    addr.sin6_port = 0; /* ephemeral */
+    struct in6_addr loopback = IN6ADDR_LOOPBACK_INIT;
+    addr.sin6_addr = loopback;
+
+    if (bind(sfd, (struct sockaddr *)&addr, sizeof(addr)) != 0) { close(sfd); return 2; }
+
+    struct sockaddr_in6 bound;
+    socklen_t blen = sizeof(bound);
+    if (getsockname(sfd, (struct sockaddr *)&bound, &blen) != 0) { close(sfd); return 3; }
+    if (bound.sin6_family != AF_INET6) { close(sfd); return 4; }
+    if (bound.sin6_port == 0) { close(sfd); return 5; }
+
+    if (sendto(sfd, "hi", 2, 0, (struct sockaddr *)&bound, sizeof(bound)) != 2) { close(sfd); return 6; }
+
+    char buf[4];
+    for (int i = 0; i < 4; i++) buf[i] = 0;
+    struct sockaddr_in6 from;
+    socklen_t flen = sizeof(from);
+    if (recvfrom(sfd, buf, sizeof(buf), 0, (struct sockaddr *)&from, &flen) != 2) { close(sfd); return 7; }
+    if (strcmp(buf, "hi") != 0) { close(sfd); return 8; }
+
+    close(sfd);
+
+    if (IPPROTO_IPV6 != 41) return 9;
+    if (IPV6_V6ONLY == IPV6_UNICAST_HOPS) return 10;
     return 42;
 }
 
