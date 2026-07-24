@@ -2,7 +2,8 @@
 // Consolidated suite: POSIX: unistd, dirent, glob, regex, socket, mman, etc.
 // Source tests: test_posix_arpa_inet, test_posix_dirent, test_posix_extra_ffi, test_posix_fnmatch, test_posix_glob, test_posix_libgen, test_posix_poll, test_posix_pwd_grp, test_posix_regex, test_posix_socket_netdb, test_posix_strings, test_posix_sys_mman, test_posix_sys_stat, test_posix_sys_time, test_posix_termios, test_posix_unistd_fcntl, test_posix_utime, test_posix_vfs_decls,
 //   test_glob_header, test_quick_exit, test_posix_sys_wait,
-//   test_posix_sysconf_pathconf_confstr, test_posix_host_global_bridge
+//   test_posix_sysconf_pathconf_confstr, test_posix_host_global_bridge,
+//   test_posix_sendmsg_recvmsg_scm_rights
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -648,6 +649,87 @@ int test_posix_socket_un_bind(void) {
     close(cfd);
     close(afd);
     unlink(path);
+    return 42;
+}
+
+// test_posix_sendmsg_recvmsg_scm_rights
+// #741: sendmsg()/recvmsg() with SCM_RIGHTS ancillary data over an AF_UNIX
+// socketpair, passing a real file descriptor from one guest "process" to
+// the other. If struct msghdr/cmsghdr's per-platform field widths or
+// CMSG_ALIGN were wrong, this either fails to find the control message or
+// (worse) reads garbage -- the fd being usable on the far end is the
+// end-to-end proof the layout matches the host ABI.
+[[cccc::test(return = 42)]]
+int test_posix_sendmsg_recvmsg_scm_rights(void) {
+    int sv[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) return 1;
+
+    char path[64];
+    for (int i = 0; i < 64; i++) path[i] = 0;
+    strcpy(path, "/tmp/cccc_test_scm_XXXXXX");
+    int passed_fd = mkstemp(path);
+    if (passed_fd < 0) { close(sv[0]); close(sv[1]); return 2; }
+    unlink(path);
+    if (write(passed_fd, "hi", 2) != 2) { close(passed_fd); close(sv[0]); close(sv[1]); return 3; }
+
+    char data = 'x';
+    struct iovec iov;
+    iov.iov_base = &data;
+    iov.iov_len = 1;
+
+    char cbuf[CMSG_SPACE(sizeof(int))];
+    for (int i = 0; i < (int)sizeof(cbuf); i++) cbuf[i] = 0;
+
+    struct msghdr smsg;
+    for (int i = 0; i < (int)sizeof(smsg); i++) ((char *)&smsg)[i] = 0;
+    smsg.msg_iov = &iov;
+    smsg.msg_iovlen = 1;
+    smsg.msg_control = cbuf;
+    smsg.msg_controllen = sizeof(cbuf);
+
+    struct cmsghdr *cmsg = CMSG_FIRSTHDR(&smsg);
+    if (!cmsg) { close(passed_fd); close(sv[0]); close(sv[1]); return 4; }
+    cmsg->cmsg_level = SOL_SOCKET;
+    cmsg->cmsg_type = SCM_RIGHTS;
+    cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+    *(int *)CMSG_DATA(cmsg) = passed_fd;
+
+    if (sendmsg(sv[0], &smsg, 0) != 1) { close(passed_fd); close(sv[0]); close(sv[1]); return 5; }
+    close(passed_fd);
+
+    char rdata = 0;
+    struct iovec riov;
+    riov.iov_base = &rdata;
+    riov.iov_len = 1;
+
+    char rcbuf[CMSG_SPACE(sizeof(int))];
+    for (int i = 0; i < (int)sizeof(rcbuf); i++) rcbuf[i] = 0;
+
+    struct msghdr rmsg;
+    for (int i = 0; i < (int)sizeof(rmsg); i++) ((char *)&rmsg)[i] = 0;
+    rmsg.msg_iov = &riov;
+    rmsg.msg_iovlen = 1;
+    rmsg.msg_control = rcbuf;
+    rmsg.msg_controllen = sizeof(rcbuf);
+
+    if (recvmsg(sv[1], &rmsg, 0) != 1) { close(sv[0]); close(sv[1]); return 6; }
+    if (rdata != 'x') { close(sv[0]); close(sv[1]); return 7; }
+
+    struct cmsghdr *rcmsg = CMSG_FIRSTHDR(&rmsg);
+    if (!rcmsg) { close(sv[0]); close(sv[1]); return 8; }
+    if (rcmsg->cmsg_level != SOL_SOCKET) { close(sv[0]); close(sv[1]); return 9; }
+    if (rcmsg->cmsg_type != SCM_RIGHTS) { close(sv[0]); close(sv[1]); return 10; }
+
+    int received_fd = *(int *)CMSG_DATA(rcmsg);
+    char verify[3];
+    for (int i = 0; i < 3; i++) verify[i] = 0;
+    if (lseek(received_fd, 0, SEEK_SET) != 0) { close(received_fd); close(sv[0]); close(sv[1]); return 11; }
+    if (read(received_fd, verify, 2) != 2) { close(received_fd); close(sv[0]); close(sv[1]); return 12; }
+    if (verify[0] != 'h' || verify[1] != 'i') { close(received_fd); close(sv[0]); close(sv[1]); return 13; }
+
+    close(received_fd);
+    close(sv[0]);
+    close(sv[1]);
     return 42;
 }
 

@@ -81,6 +81,72 @@ struct sockaddr {
 #define SHUT_WR   1
 #define SHUT_RDWR 2
 
+/* struct msghdr / struct cmsghdr for sendmsg()/recvmsg() ancillary
+   (control) data (#741). msg_iovlen/msg_controllen and cmsg_len are
+   socklen_t/int (4 bytes) on macOS vs size_t (8 bytes) on Linux --
+   verified via offsetof/sizeof against real macOS and Linux
+   x86_64/aarch64 headers (Linux values match across x86_64/aarch64).
+   struct iovec comes from unistd.h, already included above. */
+#ifdef __APPLE__
+struct msghdr {
+    void         *msg_name;
+    socklen_t     msg_namelen;
+    struct iovec *msg_iov;
+    int           msg_iovlen;
+    void         *msg_control;
+    socklen_t     msg_controllen;
+    int           msg_flags;
+};
+
+struct cmsghdr {
+    socklen_t cmsg_len;
+    int       cmsg_level;
+    int       cmsg_type;
+};
+#else
+struct msghdr {
+    void         *msg_name;
+    socklen_t     msg_namelen;
+    struct iovec *msg_iov;
+    size_t        msg_iovlen;
+    void         *msg_control;
+    size_t        msg_controllen;
+    int           msg_flags;
+};
+
+struct cmsghdr {
+    size_t cmsg_len;
+    int    cmsg_level;
+    int    cmsg_type;
+};
+#endif
+
+#define SCM_RIGHTS 1
+
+/* CMSG_ALIGN rounds to the width of cmsg_len -- 4 bytes (sizeof(int)) on
+   macOS (__DARWIN_ALIGN32), 8 bytes (sizeof(size_t)) on 64-bit Linux.
+   This is our own definition, not the host's private macro -- verified
+   sizeof(struct cmsghdr) == 12 (macOS) / 16 (Linux) so CMSG_SPACE/CMSG_LEN
+   land on the same byte offsets as the host ABI. */
+#ifdef __APPLE__
+#define __CCCC_CMSG_ALIGN(n) (((size_t)(n) + sizeof(int) - 1) & ~(sizeof(int) - 1))
+#else
+#define __CCCC_CMSG_ALIGN(n) (((size_t)(n) + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1))
+#endif
+
+#define CMSG_ALIGN(n)   __CCCC_CMSG_ALIGN(n)
+#define CMSG_SPACE(len) (__CCCC_CMSG_ALIGN(sizeof(struct cmsghdr)) + __CCCC_CMSG_ALIGN(len))
+#define CMSG_LEN(len)   (__CCCC_CMSG_ALIGN(sizeof(struct cmsghdr)) + (len))
+#define CMSG_FIRSTHDR(mhdr) \
+    ((size_t)(mhdr)->msg_controllen >= sizeof(struct cmsghdr) ? \
+     (struct cmsghdr *)(mhdr)->msg_control : (struct cmsghdr *)0)
+#define CMSG_DATA(cmsg) ((unsigned char *)(cmsg) + __CCCC_CMSG_ALIGN(sizeof(struct cmsghdr)))
+#define CMSG_NXTHDR(mhdr, cmsg) \
+    (((unsigned char *)(cmsg) + __CCCC_CMSG_ALIGN((cmsg)->cmsg_len) + sizeof(struct cmsghdr) > \
+      (unsigned char *)(mhdr)->msg_control + (mhdr)->msg_controllen) ? \
+     (struct cmsghdr *)0 : \
+     (struct cmsghdr *)((unsigned char *)(cmsg) + __CCCC_CMSG_ALIGN((cmsg)->cmsg_len)))
+
 #ifdef __APPLE__
 #define MSG_OOB       0x1
 #define MSG_PEEK      0x2
@@ -123,6 +189,8 @@ extern ssize_t recvfrom(int socket, void *buffer, size_t length, int flags,
                         struct sockaddr *address, socklen_t *address_len);
 extern ssize_t sendto(int socket, const void *message, size_t length, int flags,
                       const struct sockaddr *dest_addr, socklen_t dest_len);
+extern ssize_t sendmsg(int socket, const struct msghdr *message, int flags);
+extern ssize_t recvmsg(int socket, struct msghdr *message, int flags);
 extern int sockatmark(int fd);
 
 #endif /* __SYS_SOCKET_H */

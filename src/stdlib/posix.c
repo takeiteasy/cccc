@@ -190,6 +190,28 @@ static long long wrap_sendto_gil(long long sockfd, long long buf, long long len,
     return (long long)r;
 }
 
+static long long wrap_sendmsg_gil(long long sockfd, long long msg, long long flags) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)sendmsg((int)sockfd, (const struct msghdr *)msg, (int)flags);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    ssize_t r = sendmsg((int)sockfd, (const struct msghdr *)msg, (int)flags);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_recvmsg_gil(long long sockfd, long long msg, long long flags) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)recvmsg((int)sockfd, (struct msghdr *)msg, (int)flags);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    ssize_t r = recvmsg((int)sockfd, (struct msghdr *)msg, (int)flags);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
 static long long wrap_wait_gil(long long wstatus) {
     VirtualMachine *vm = current_vm();
     if (!vm || !vm->gil_initialized)
@@ -624,6 +646,8 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "send",     (void*)wrap_send_gil,     4, 0);
     cc_register_cfunc(vm, "recvfrom", (void*)wrap_recvfrom_gil, 6, 0);
     cc_register_cfunc(vm, "sendto",   (void*)wrap_sendto_gil,   6, 0);
+    cc_register_cfunc(vm, "sendmsg",  (void*)wrap_sendmsg_gil,  3, 0);
+    cc_register_cfunc(vm, "recvmsg",  (void*)wrap_recvmsg_gil,  3, 0);
     cc_register_cfunc(vm, "wait",    (void*)wrap_wait_gil,    1, 0);
     cc_register_cfunc(vm, "waitpid", (void*)wrap_waitpid_gil, 3, 0);
     cc_register_cfunc(vm, "sleep",   (void*)wrap_sleep_gil,   1, 0);
