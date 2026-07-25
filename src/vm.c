@@ -1233,15 +1233,23 @@ void cc_destroy(VirtualMachine *vm) {
     if (vm->sorted_allocs.headers)
         free(vm->sorted_allocs.headers);
 
-    // Free heap subobject type shadow (#653; page-chunked #753 -- lazily
-    // allocated/grown by type_shadow_ensure in ops.c)
-    if (vm->type_shadow_pages) {
-        for (size_t i = 0; i < vm->type_shadow_page_count; i++)
-            free(vm->type_shadow_pages[i]);
-        free(vm->type_shadow_pages);
+    // Free the heap and data (globals, #752) type shadows (#653;
+    // page-chunked #753 -- lazily allocated/grown by type_shadow_ensure in
+    // ops.c)
+    if (vm->heap_shadow.pages) {
+        for (size_t i = 0; i < vm->heap_shadow.page_count; i++)
+            free(vm->heap_shadow.pages[i]);
+        free(vm->heap_shadow.pages);
     }
-    vm->type_shadow_pages = NULL;
-    vm->type_shadow_page_count = 0;
+    vm->heap_shadow.pages = NULL;
+    vm->heap_shadow.page_count = 0;
+    if (vm->data_shadow.pages) {
+        for (size_t i = 0; i < vm->data_shadow.page_count; i++)
+            free(vm->data_shadow.pages[i]);
+        free(vm->data_shadow.pages);
+    }
+    vm->data_shadow.pages = NULL;
+    vm->data_shadow.page_count = 0;
 
     // Free macros HashMap (Macro values are arena-allocated; do not free them)
     hashmap_deinit(&vm->compiler.macros);

@@ -445,32 +445,52 @@ than stamps. `CHKT3` resolves the containing allocation via the same
 range — the type information itself lives in the shadow, not in
 `AllocHeader`.
 
-The shadow's page *vector* is lazily grown (`type_shadow_ensure`,
-`src/ops.c`) to cover `vm->heap_committed` whenever `CCCC_TYPE_CHECKS` is
-set, so it stays in sync even if the flag is toggled on mid-run by
-`#pragma cccc config(safety=N)`; individual 64 KiB pages are allocated only
-when a stamp first touches their range, and freed back to `NULL` the moment
-a clear zeroes one in full (`type_shadow_fill`, `src/ops.c`), so host memory
-for the shadow tracks the *live* stamped footprint rather than the heap's
-total reservation — a large allocate-then-free pattern reclaims its shadow
-pages once the allocation is freed. A missing page reads back as all
-`TY_VOID` ("no info"), identical to an allocated all-zero page. Every
-heap-mutating opcode keeps it
-current: `MALC`/`CALC`/`MALCA` clear a fresh allocation's range; `MFRE`
-clears on free; `MCPY` (backing struct/union assignment and the restrict
+There are two shadow instances (`TypeShadowSeg`, `src/cccc.h`), one per
+tracked segment: `vm->heap_shadow` (the original #653 scope) and
+`vm->data_shadow`, covering globals (`static`/file-scope variables, #752).
+`type_shadow_locate` (`src/ops.c`) resolves which segment (if either) a
+given `[ptr, ptr+len)` range falls wholly inside; `op_CHKT3_fn` itself
+still gates on `heap_alloc_for_ptr`/`sorted_allocs_find` exactly as before
+for any address inside the heap segment — a heap-range address that isn't
+inside a *live* allocation reports nothing at all here (`CHKP3`'s job) —
+and skips that resolution entirely for an address outside the heap
+segment, deferring to `type_shadow_locate` to decide whether it's a global
+or an untracked address (e.g. the stack). Each segment's page *vector* is
+lazily grown (`type_shadow_ensure`, `src/ops.c`) to cover its committed
+size whenever `CCCC_TYPE_CHECKS` is set, so it stays in sync even if the
+flag is toggled on mid-run by `#pragma cccc config(safety=N)`; individual
+64 KiB pages are allocated only when a stamp first touches their range, and
+freed back to `NULL` the moment a clear zeroes one in full
+(`type_shadow_fill`, `src/ops.c`), so host memory for the shadow tracks the
+*live* stamped footprint rather than either segment's total reservation —
+a large allocate-then-free pattern on the heap reclaims its shadow pages
+once the allocation is freed. A missing page reads back as all `TY_VOID`
+("no info"), identical to an allocated all-zero page.
+
+Every heap-mutating opcode keeps the heap shadow current: `MFRE` clears on
+free; `MCPY` (backing struct/union assignment and the restrict
 memcpy-loop lowering) propagates source shadow onto destination, mirroring
 `memcpy` copying the effective type along with the bytes; `REALC` (always a
 fresh bump allocation, never grown in place) carries the old block's shadow
-to the new address before freeing the old one. Guest `memcpy`/`memmove`
-route through shadow-aware host shims (`cccc_shim_memcpy`/`cccc_shim_memmove`,
-`src/stdlib/string.c`) that call `cc_type_shadow_copy` after the real libc
-call runs. Every *other* host function reachable through `CALLF` might write
-heap bytes with no VM-level hook at all (`fread`, `read`, `scanf`, any other
-FFI call) — `op_CALLF_fn` conservatively clears the shadow of any tracked,
-live heap allocation reachable through an integer argument register before
-such a call runs, so a write the VM can't observe can never leave a stale
-stamp that later false-positives (the accepted cost is a false negative if a
-real bug happens to route through an unshimmed host write).
+to the new address before freeing the old one. (`MALC`/`CALC`/`MALCA` need
+no explicit clear for a fresh allocation: with the page-chunked shadow, a
+range no stamp has ever touched already reads back as `TY_VOID` at zero
+host cost.) Guest `memcpy`/`memmove` route through shadow-aware host shims
+(`cccc_shim_memcpy`/`cccc_shim_memmove`, `src/stdlib/string.c`) that call
+`cc_type_shadow_copy` after the real libc call runs — this also covers a
+copy between the heap and a global, since `type_shadow_copy` resolves src
+and dst independently. Every *other* host function reachable through
+`CALLF` might write heap bytes with no VM-level hook at all (`fread`,
+`read`, `scanf`, any other FFI call) — `op_CALLF_fn` conservatively clears
+the shadow of any tracked, live heap allocation reachable through an
+integer argument register before such a call runs, so a write the VM can't
+observe can never leave a stale stamp that later false-positives (the
+accepted cost is a false negative if a real bug happens to route through an
+unshimmed host write). `RETBUF` clears its handed-out
+`return_buffer_pool` slot's shadow range before returning it: those slots
+live in `data_seg` and rotate between every struct-returning call, so
+without the clear a slot would carry a stale stamp from whichever struct
+type was returned through it last.
 
 Reusing a heap buffer as a different type — legal C — never false-positives,
 since the next store simply re-stamps the effective type for the bytes it
@@ -478,8 +498,11 @@ touches. Union member access is exempted in both directions via
 `vm->compiler.in_union_member_access` (set/cleared around `ND_MEMBER`
 codegen when the immediate parent expression's type is `TY_UNION`): a union
 load skips CHKT3 emission entirely; a union store emits `CHKT3_MODE_CLEAR`
-instead of `CHKT3_MODE_STAMP`. Heap-only; stack and global subobjects remain
-untracked.
+instead of `CHKT3_MODE_STAMP`. Covers the heap and globals; stack
+subobjects remain untracked (deferred — stack-slot reuse across frames
+would need its own liveness bookkeeping, mirroring `frame_epochs`/
+`stack_intervals`, to avoid reopening the false-positive class those exist
+to prevent in the dangling-pointer detector).
 
 ### Stack Instrumentation Opcodes
 

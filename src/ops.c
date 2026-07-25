@@ -1935,63 +1935,87 @@ static AllocHeader *heap_alloc_for_ptr(VirtualMachine *vm, long long ptr,
     return h;
 }
 
-// ---- Byte-granular heap subobject type shadow (#653), page-chunked (#753) ----
+// ---- Byte-granular subobject type shadow (#653), page-chunked (#753), ----
+// ---- heap + globals (#752)                                            ----
 //
-// Logically one TypeKind byte per heap byte (TY_VOID == 0 means "no
-// effective type established"), indexed by (char*)ptr - vm->heap_seg.
-// Physically a sparse page table rather than one flat heap_committed-sized
-// array: a page is allocated on first stamp into its range and freed back
-// to NULL the instant a clear zeroes it in full, so a program with a large
-// peak-then-shrink allocation pattern doesn't keep paying host memory for
-// heap regions nothing lives in anymore -- cost tracks the live stamped
-// footprint, not the heap reservation. An absent page reads back as all
-// TY_VOID, identical to an allocated all-zero page.
+// Logically one TypeKind byte per tracked segment byte (TY_VOID == 0 means
+// "no effective type established"), indexed relative to the segment's own
+// base pointer. Physically a sparse page table per segment (TypeShadowSeg,
+// src/cccc.h) rather than one flat array: a page is allocated on first
+// stamp into its range and freed back to NULL the instant a clear zeroes
+// it in full, so a program with a large peak-then-shrink allocation
+// pattern doesn't keep paying host memory for heap regions nothing lives
+// in anymore -- cost tracks the live stamped footprint, not the segment's
+// reservation. An absent page reads back as all TY_VOID, identical to an
+// allocated all-zero page.
+//
+// Two segments are tracked: vm->heap_shadow (the original #653 scope) and
+// vm->data_shadow (globals, #752). Stack subobjects remain untracked --
+// unlike the heap and data segments, stack addresses are reused across
+// frames/recursion, which would need its own liveness bookkeeping (mirror
+// frame_epochs/stack_intervals) to avoid reopening the class of
+// false-positive that #673/#675/#727/#740 fixed in the dangling-pointer
+// detector; deferred as a follow-up.
 #define TYPE_SHADOW_PAGE_SHIFT 16
 #define TYPE_SHADOW_PAGE_SIZE  (1u << TYPE_SHADOW_PAGE_SHIFT)
 
-// Grows the page *vector* (not the pages themselves) so it covers
-// vm->heap_committed. Lazily called here (rather than in vm_heap_grow) so
+// Grows `seg`'s page *vector* (not the pages themselves) so it covers
+// `committed` bytes. Lazily called here (rather than in vm_heap_grow) so
 // it stays in sync even if --type-checks is toggled on mid-run by #pragma
 // cccc config(safety=N); every heap-mutating opcode
-// (MALC/CALC/MALCA/REALC/MFRE/MCPY/MSET) and CHKT3 itself call this before
-// touching the shadow.
-static bool type_shadow_ensure(VirtualMachine *vm) {
+// (MALC/CALC/MALCA/REALC/MFRE/MCPY/MSET), RETBUF, and CHKT3 itself call
+// this (via type_shadow_locate) before touching a segment's shadow.
+static bool type_shadow_ensure(VirtualMachine *vm, TypeShadowSeg *seg, size_t committed) {
     if (!(vm->flags & CCCC_TYPE_CHECKS))
-        return vm->type_shadow_pages != NULL;
-    size_t need = (vm->heap_committed + TYPE_SHADOW_PAGE_SIZE - 1) >> TYPE_SHADOW_PAGE_SHIFT;
-    if (vm->type_shadow_page_count >= need)
-        return vm->type_shadow_pages != NULL;
-    unsigned char **np = realloc(vm->type_shadow_pages, need * sizeof(*np));
+        return seg->pages != NULL;
+    size_t need = (committed + TYPE_SHADOW_PAGE_SIZE - 1) >> TYPE_SHADOW_PAGE_SHIFT;
+    if (seg->page_count >= need)
+        return seg->pages != NULL;
+    unsigned char **np = realloc(seg->pages, need * sizeof(*np));
     if (!np)
-        return vm->type_shadow_pages != NULL;
-    for (size_t i = vm->type_shadow_page_count; i < need; i++)
+        return seg->pages != NULL;
+    for (size_t i = seg->page_count; i < need; i++)
         np[i] = NULL;
-    vm->type_shadow_pages = np;
-    vm->type_shadow_page_count = need;
+    seg->pages = np;
+    seg->page_count = need;
     return true;
 }
 
-// Validates [p, p+len) lies within the tracked heap range and, on success,
-// writes the byte offset from vm->heap_seg to *out_off. Does not touch the
-// page table.
-static bool type_shadow_bounds(VirtualMachine *vm, const void *p, size_t len, size_t *out_off) {
-    if (len == 0 || (const char *)p < vm->heap_seg)
+// Validates [p, p+len) lies within [base, base+committed) and, on success,
+// writes the byte offset from base to *out_off. Does not touch the page
+// table.
+static bool type_shadow_bounds(const char *base, size_t committed, const void *p, size_t len,
+                                size_t *out_off) {
+    if (len == 0 || (const char *)p < base)
         return false;
-    size_t off = (size_t)((const char *)p - vm->heap_seg);
-    if (off > vm->heap_committed || len > vm->heap_committed - off)
+    size_t off = (size_t)((const char *)p - base);
+    if (off > committed || len > committed - off)
         return false;
     *out_off = off;
     return true;
 }
 
-// Sets len shadow bytes starting at absolute heap-byte offset `off` to the
-// constant `val`. val == 0 (clear) frees a page the moment this call
-// zeroes it in full (page_off == 0 and the whole page-sized chunk), rather
-// than scanning for an all-zero page on every partial clear -- interior
-// pages of a large cleared range are freed exactly, edge pages that only
-// got partially zeroed stay allocated (harmless: at most two stray pages
-// per clear). val != 0 (stamp) allocates a page on demand.
-static void type_shadow_fill(VirtualMachine *vm, size_t off, size_t len, unsigned char val) {
+// Resolves which tracked segment [p, p+len) falls wholly within -- heap or
+// data (globals) -- and writes its byte offset from that segment's base to
+// *out_off. Returns NULL (leaving *out_off unset) if the range doesn't fit
+// wholly inside either tracked segment, e.g. a stack address, a wild
+// pointer, or a range straddling a segment boundary.
+static TypeShadowSeg *type_shadow_locate(VirtualMachine *vm, const void *p, size_t len, size_t *out_off) {
+    if (type_shadow_bounds(vm->heap_seg, vm->heap_committed, p, len, out_off))
+        return &vm->heap_shadow;
+    if (type_shadow_bounds(vm->data_seg, vm->data_committed, p, len, out_off))
+        return &vm->data_shadow;
+    return NULL;
+}
+
+// Sets len shadow bytes of `seg` starting at absolute segment-byte offset
+// `off` to the constant `val`. val == 0 (clear) frees a page the moment
+// this call zeroes it in full (page_off == 0 and the whole page-sized
+// chunk), rather than scanning for an all-zero page on every partial clear
+// -- interior pages of a large cleared range are freed exactly, edge pages
+// that only got partially zeroed stay allocated (harmless: at most two
+// stray pages per clear). val != 0 (stamp) allocates a page on demand.
+static void type_shadow_fill(TypeShadowSeg *seg, size_t off, size_t len, unsigned char val) {
     size_t end = off + len;
     while (off < end) {
         size_t page_idx = off >> TYPE_SHADOW_PAGE_SHIFT;
@@ -1999,9 +2023,9 @@ static void type_shadow_fill(VirtualMachine *vm, size_t off, size_t len, unsigne
         size_t chunk = TYPE_SHADOW_PAGE_SIZE - page_off;
         if (chunk > end - off)
             chunk = end - off;
-        if (page_idx >= vm->type_shadow_page_count)
+        if (page_idx >= seg->page_count)
             return; // shouldn't happen after type_shadow_ensure, stay safe
-        unsigned char *page = vm->type_shadow_pages[page_idx];
+        unsigned char *page = seg->pages[page_idx];
         if (!page) {
             if (val == 0) {
                 off += chunk;
@@ -2010,12 +2034,12 @@ static void type_shadow_fill(VirtualMachine *vm, size_t off, size_t len, unsigne
             page = calloc(1, TYPE_SHADOW_PAGE_SIZE);
             if (!page)
                 return; // OOM: leave this and remaining chunks as no-info
-            vm->type_shadow_pages[page_idx] = page;
+            seg->pages[page_idx] = page;
         }
         memset(page + page_off, val, chunk);
         if (val == 0 && page_off == 0 && chunk == TYPE_SHADOW_PAGE_SIZE) {
             free(page);
-            vm->type_shadow_pages[page_idx] = NULL;
+            seg->pages[page_idx] = NULL;
         }
         off += chunk;
     }
@@ -2023,24 +2047,28 @@ static void type_shadow_fill(VirtualMachine *vm, size_t off, size_t len, unsigne
 
 // Establish `kind` as the effective type for every byte in [p, p+len).
 static void type_shadow_stamp(VirtualMachine *vm, void *p, size_t len, int kind) {
-    if (!type_shadow_ensure(vm))
-        return;
     size_t off;
-    if (type_shadow_bounds(vm, p, len, &off))
-        type_shadow_fill(vm, off, len, (unsigned char)kind);
+    TypeShadowSeg *seg = type_shadow_locate(vm, p, len, &off);
+    if (!seg)
+        return;
+    size_t committed = (seg == &vm->heap_shadow) ? vm->heap_committed : vm->data_committed;
+    if (type_shadow_ensure(vm, seg, committed))
+        type_shadow_fill(seg, off, len, (unsigned char)kind);
 }
 
 // Erase effective-type info for every byte in [p, p+len) (back to "no
 // effective type established"). Calls type_shadow_ensure so the page
-// vector stays grown to cover heap_committed even when the only
-// heap-mutating traffic through an allocation is clears (e.g. malloc
-// immediately followed by a memset(0), or every fresh MALC below).
+// vector stays grown to cover the segment even when the only mutating
+// traffic through a range is clears (e.g. malloc immediately followed by a
+// memset(0), or every fresh MALC below).
 static void type_shadow_clear(VirtualMachine *vm, void *p, size_t len) {
-    if (!type_shadow_ensure(vm))
-        return;
     size_t off;
-    if (type_shadow_bounds(vm, p, len, &off))
-        type_shadow_fill(vm, off, len, 0);
+    TypeShadowSeg *seg = type_shadow_locate(vm, p, len, &off);
+    if (!seg)
+        return;
+    size_t committed = (seg == &vm->heap_shadow) ? vm->heap_committed : vm->data_committed;
+    if (type_shadow_ensure(vm, seg, committed))
+        type_shadow_fill(seg, off, len, 0);
 }
 
 // Returns true and writes the shared TypeKind to *out_kind iff every byte
@@ -2051,7 +2079,8 @@ static void type_shadow_clear(VirtualMachine *vm, void *p, size_t len) {
 // rather than a guess. Never allocates.
 static bool type_shadow_check_uniform(VirtualMachine *vm, const void *p, size_t len, unsigned char *out_kind) {
     size_t off;
-    if (!vm->type_shadow_pages || !type_shadow_bounds(vm, p, len, &off))
+    TypeShadowSeg *seg = type_shadow_locate(vm, p, len, &off);
+    if (!seg || !seg->pages)
         return false;
     size_t end = off + len;
     bool have_kind = false;
@@ -2062,8 +2091,7 @@ static bool type_shadow_check_uniform(VirtualMachine *vm, const void *p, size_t 
         size_t chunk = TYPE_SHADOW_PAGE_SIZE - page_off;
         if (chunk > end - off)
             chunk = end - off;
-        unsigned char *page =
-            (page_idx < vm->type_shadow_page_count) ? vm->type_shadow_pages[page_idx] : NULL;
+        unsigned char *page = (page_idx < seg->page_count) ? seg->pages[page_idx] : NULL;
         for (size_t i = 0; i < chunk; i++) {
             unsigned char b = page ? page[page_off + i] : 0;
             if (b == TY_VOID)
@@ -2083,9 +2111,10 @@ static bool type_shadow_check_uniform(VirtualMachine *vm, const void *p, size_t 
     return true;
 }
 
-// Copies len shadow bytes into `out`, starting at absolute heap-byte
-// offset `off`. A missing page reads back as TY_VOID. Never allocates.
-static void type_shadow_gather(VirtualMachine *vm, size_t off, size_t len, unsigned char *out) {
+// Copies len shadow bytes of `seg` into `out`, starting at absolute
+// segment-byte offset `off`. A missing page reads back as TY_VOID. Never
+// allocates.
+static void type_shadow_gather(TypeShadowSeg *seg, size_t off, size_t len, unsigned char *out) {
     size_t end = off + len, pos = 0;
     while (off < end) {
         size_t page_idx = off >> TYPE_SHADOW_PAGE_SHIFT;
@@ -2093,8 +2122,7 @@ static void type_shadow_gather(VirtualMachine *vm, size_t off, size_t len, unsig
         size_t chunk = TYPE_SHADOW_PAGE_SIZE - page_off;
         if (chunk > end - off)
             chunk = end - off;
-        unsigned char *page =
-            (page_idx < vm->type_shadow_page_count) ? vm->type_shadow_pages[page_idx] : NULL;
+        unsigned char *page = (page_idx < seg->page_count) ? seg->pages[page_idx] : NULL;
         if (page)
             memcpy(out + pos, page + page_off, chunk);
         else
@@ -2104,12 +2132,12 @@ static void type_shadow_gather(VirtualMachine *vm, size_t off, size_t len, unsig
     }
 }
 
-// Writes len shadow bytes from `in`, starting at absolute heap-byte offset
-// `off`. Allocates pages on demand, but skips allocating a page purely to
-// write all-zero bytes into it (an absent page already reads back as
-// TY_VOID); frees a page it writes an all-zero full-page chunk into,
-// mirroring type_shadow_fill's reclaim rule.
-static void type_shadow_scatter(VirtualMachine *vm, size_t off, size_t len, const unsigned char *in) {
+// Writes len shadow bytes of `seg` from `in`, starting at absolute
+// segment-byte offset `off`. Allocates pages on demand, but skips
+// allocating a page purely to write all-zero bytes into it (an absent
+// page already reads back as TY_VOID); frees a page it writes an all-zero
+// full-page chunk into, mirroring type_shadow_fill's reclaim rule.
+static void type_shadow_scatter(TypeShadowSeg *seg, size_t off, size_t len, const unsigned char *in) {
     size_t end = off + len, pos = 0;
     while (off < end) {
         size_t page_idx = off >> TYPE_SHADOW_PAGE_SHIFT;
@@ -2117,7 +2145,7 @@ static void type_shadow_scatter(VirtualMachine *vm, size_t off, size_t len, cons
         size_t chunk = TYPE_SHADOW_PAGE_SIZE - page_off;
         if (chunk > end - off)
             chunk = end - off;
-        if (page_idx >= vm->type_shadow_page_count)
+        if (page_idx >= seg->page_count)
             return; // shouldn't happen after type_shadow_ensure, stay safe
 
         bool all_zero = true;
@@ -2128,7 +2156,7 @@ static void type_shadow_scatter(VirtualMachine *vm, size_t off, size_t len, cons
             }
         }
 
-        unsigned char *page = vm->type_shadow_pages[page_idx];
+        unsigned char *page = seg->pages[page_idx];
         if (!page && all_zero) {
             off += chunk;
             pos += chunk;
@@ -2138,12 +2166,12 @@ static void type_shadow_scatter(VirtualMachine *vm, size_t off, size_t len, cons
             page = calloc(1, TYPE_SHADOW_PAGE_SIZE);
             if (!page)
                 return; // OOM: leave this and remaining chunks as no-info
-            vm->type_shadow_pages[page_idx] = page;
+            seg->pages[page_idx] = page;
         }
         memcpy(page + page_off, in + pos, chunk);
         if (all_zero && page_off == 0 && chunk == TYPE_SHADOW_PAGE_SIZE) {
             free(page);
-            vm->type_shadow_pages[page_idx] = NULL;
+            seg->pages[page_idx] = NULL;
         }
         off += chunk;
         pos += chunk;
@@ -2152,34 +2180,41 @@ static void type_shadow_scatter(VirtualMachine *vm, size_t off, size_t len, cons
 
 // Propagate effective-type info from [src, src+len) to [dst, dst+len)
 // (mirrors memcpy copying the effective type along with the bytes, C11
-// §6.5p6). If src isn't a tracked heap range (e.g. a stack/global source,
-// or a source outside any live allocation), conservatively clear dst
-// instead of leaving it stale.
+// §6.5p6) -- either range may be in the heap or in globals; a copy between
+// the two segments (e.g. a global struct assigned into a malloc'd one) is
+// tracked the same as a same-segment copy. If src isn't inside a tracked
+// segment (e.g. a stack source), conservatively clear dst instead of
+// leaving it stale.
 static void type_shadow_copy(VirtualMachine *vm, void *dst, const void *src, size_t len) {
-    if (!type_shadow_ensure(vm))
-        return;
     size_t dst_off;
-    if (!type_shadow_bounds(vm, dst, len, &dst_off))
-        return; // dst outside tracked heap range: nothing to propagate to
+    TypeShadowSeg *dst_seg = type_shadow_locate(vm, dst, len, &dst_off);
+    if (!dst_seg)
+        return; // dst outside tracked segments: nothing to propagate to
+    size_t dst_committed = (dst_seg == &vm->heap_shadow) ? vm->heap_committed : vm->data_committed;
+    if (!type_shadow_ensure(vm, dst_seg, dst_committed))
+        return;
+
     size_t src_off;
-    if (!vm->type_shadow_pages || !type_shadow_bounds(vm, src, len, &src_off)) {
-        type_shadow_clear(vm, dst, len);
+    TypeShadowSeg *src_seg = type_shadow_locate(vm, src, len, &src_off);
+    if (!src_seg || !src_seg->pages) {
+        type_shadow_fill(dst_seg, dst_off, len, 0); // OOM/untracked src: don't risk a stale stamp
         return;
     }
+
     // Gather the whole source range into a temporary buffer before
-    // scattering it to dst. src and dst can overlap (mirrors memmove);
-    // gather-then-scatter of the *whole* range is trivially correct for
-    // that, whereas chunk-by-chunk in place, with src/dst potentially at
-    // different page offsets, is easy to get subtly wrong. Correctness
-    // over micro-optimizing an opt-in safety check.
+    // scattering it to dst. src and dst can overlap (mirrors memmove) when
+    // they're the same segment; gather-then-scatter of the *whole* range
+    // is trivially correct for that, whereas chunk-by-chunk in place, with
+    // src/dst potentially at different page offsets, is easy to get subtly
+    // wrong. Correctness over micro-optimizing an opt-in safety check.
     unsigned char stack_buf[4096];
     unsigned char *buf = len <= sizeof(stack_buf) ? stack_buf : malloc(len);
     if (!buf) {
-        type_shadow_clear(vm, dst, len); // OOM: don't risk a stale stamp
+        type_shadow_fill(dst_seg, dst_off, len, 0); // OOM: don't risk a stale stamp
         return;
     }
-    type_shadow_gather(vm, src_off, len, buf);
-    type_shadow_scatter(vm, dst_off, len, buf);
+    type_shadow_gather(src_seg, src_off, len, buf);
+    type_shadow_scatter(dst_seg, dst_off, len, buf);
     if (buf != stack_buf)
         free(buf);
 }
@@ -2383,11 +2418,12 @@ static inline int op_CHKT3_fn(VirtualMachine *vm) {
     // Check type on dereference (register-based version of CHKT).
     // Effective-type model (#651), extended to per-offset byte granularity
     // (#653 -- subobject/member accesses are now tracked, not just base
-    // pointers): a store through any address stamps vm->type_shadow_pages
-    // across the accessed byte range ("establishes" the effective type, mirroring
-    // C11 6.5p6); a load checks the pointer's static type against the
-    // shadow. TY_VOID (0) means "no effective type established yet" (the
-    // state a fresh allocation or type_shadow_clear leaves bytes in) —
+    // pointers) and to globals (#752 -- vm->data_shadow): a store through
+    // any address stamps the owning segment's shadow across the accessed
+    // byte range ("establishes" the effective type, mirroring C11 6.5p6);
+    // a load checks the pointer's static type against the shadow. TY_VOID
+    // (0) means "no effective type established yet" (the state a fresh
+    // allocation, a fresh global, or type_shadow_clear leaves bytes in) —
     // never an error to load through.
     // Format: [CHKT3] [rs:8|mode:8|unused:48] [(size<<8)|expected_type:64]
     long long operands = cc_read_word(vm);
@@ -2406,22 +2442,38 @@ static inline int op_CHKT3_fn(VirtualMachine *vm) {
         return 0; // NULL will be caught by CHKP3
     }
 
-    // Resolve the containing allocation — handles base pointers and
-    // interior pointers alike via sorted_allocs_find (#650's resolver).
-    size_t off;
-    AllocHeader *header = heap_alloc_for_ptr(vm, ptr, &off);
-    if (!header) {
-        return 0; // untracked (stack/global) — types not tracked there
-    }
-    if (header->freed) {
-        return 0; // UAF is CHKP3's job; don't double-report here
+    // Dispatch on address class before touching the shadow. An address
+    // inside the heap segment keeps the exact #653 gate: it must resolve
+    // to a live allocation via heap_alloc_for_ptr (base pointers and
+    // interior pointers alike, #650's resolver) or this opcode says
+    // nothing at all -- a heap-range address that ISN'T inside any live
+    // allocation (a gap, header bytes, past sorted_allocs) is left to
+    // CHKP3 to report. Widening CHKT3's reporting domain to those
+    // addresses would risk a new class of false positive, so this must not
+    // change just because global tracking (#752) is being added below.
+    //
+    // An address outside the heap segment skips allocation resolution
+    // entirely: type_shadow_locate (called from the type_shadow_* helpers
+    // below) is what decides whether it's an untracked address (e.g. the
+    // stack -- no report, ever) or falls inside vm->data_seg (globals).
+    AllocHeader *header = NULL;
+    size_t off = 0;
+    if ((const char *)ptr >= vm->heap_seg && (const char *)ptr < vm->heap_end) {
+        header = heap_alloc_for_ptr(vm, ptr, &off);
+        if (!header) {
+            return 0; // heap-range but untracked — CHKP3's job, not ours
+        }
+        if (header->freed) {
+            return 0; // UAF is CHKP3's job; don't double-report here
+        }
     }
 
     if (mode == CHKT3_MODE_CLEAR) {
         // Union member access: erase any stamped type for this range so a
         // later non-union access through the same bytes starts fresh
         // rather than false-positiving against whichever member the union
-        // was last written through.
+        // was last written through. A no-op for any address outside a
+        // tracked segment (e.g. the stack).
         type_shadow_clear(vm, (void *)ptr, size);
         return 0;
     }
@@ -2478,10 +2530,16 @@ static inline int op_CHKT3_fn(VirtualMachine *vm) {
         printf("\n========== TYPE MISMATCH DETECTED ==========\n");
         printf("Pointer type mismatch on dereference\n");
         printf("Address:          0x%llx\n", ptr);
-        printf("Offset in alloc:  %zu (allocation size: %zu)\n", off, header->size);
+        // header is only resolved for a heap address (#752): a global has
+        // no AllocHeader/alloc_pc to report.
+        if (header) {
+            printf("Offset in alloc:  %zu (allocation size: %zu)\n", off, header->size);
+        }
         printf("Expected type:    %s\n", expected_name);
         printf("Actual type:      %s\n", actual_name);
-        printf("Allocated at PC offset: %lld\n", header->alloc_pc);
+        if (header) {
+            printf("Allocated at PC offset: %lld\n", header->alloc_pc);
+        }
         printf("Current PC:    0x%llx (offset: %lld)\n", (long long)vm->pc,
                (long long)vm->pc);
         printf("============================================\n");
@@ -4518,7 +4576,7 @@ static inline int op_CALLF_fn(VirtualMachine *vm) {
     // through an unshimmed host function is missed (accepted, tracked as a
     // follow-up), but no host write can ever leave a stale stamp that later
     // false-positives.
-    if ((vm->flags & CCCC_TYPE_CHECKS) && vm->type_shadow_pages &&
+    if ((vm->flags & CCCC_TYPE_CHECKS) && (vm->heap_shadow.pages || vm->data_shadow.pages) &&
         strcmp(ff->name, "memcpy") != 0 && strcmp(ff->name, "memmove") != 0) {
         for (int i = 0; i < actual_nargs && i < 64; i++) {
             if ((float_arg_mask | double_arg_mask) & (1ULL << i))
@@ -4556,6 +4614,15 @@ static inline int op_RETBUF_fn(VirtualMachine *vm) {
         return -1;
     }
     vm->runtime_return_buffer_index = (idx + 1) % count;
+    // return_buffer_pool entries live in data_seg and are reused by every
+    // struct-returning call (#752): without clearing, a buffer would carry
+    // a stale stamp from whichever struct type was returned through it
+    // last, and false-positive against a later call that returns a
+    // different type through the same rotating slot. A freshly handed-out
+    // return buffer has no effective type, same as any other fresh
+    // allocation.
+    type_shadow_clear(vm, vm->compiler.return_buffer_pool[idx],
+                       (size_t)vm->compiler.return_buffer_size);
     vm->regs[REG_A0] = (long long)vm->compiler.return_buffer_pool[idx];
     return 0;
 }

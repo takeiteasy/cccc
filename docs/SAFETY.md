@@ -287,7 +287,15 @@ All features listed below can be enabled individually or through the safety leve
     as `--bounds-checks`/`--uaf-detection` (#650's pattern), so it works
     through interior *pointer arithmetic* on the way to a dereference, not
     just an exact base-pointer variable
-  - Heap-only; stack and global subobjects are not type-tracked
+  - Covers the heap and globals (`static`/file-scope variables); stack
+    subobjects are not type-tracked. Globals need no lifetime bookkeeping
+    (unlike the heap, `data_seg` storage is never reused, so a global's
+    shadow entry is simply stamped on first store and never cleared, aside
+    from the struct-return buffer pool, which is cleared each time a slot
+    is handed out since it rotates between calls); the stack is excluded
+    because slot reuse across frames would need its own liveness tracking
+    to avoid the false-positive class the dangling-pointer detector's
+    frame-epoch/stack-interval bookkeeping exists to prevent
   - Full coverage at every optimization level, including standalone
     `--type-checks -O2`/`-O3`: the codegen fusion paths that bypass
     `emit_load`/`emit_store` (indexed-load fusion, restrict memcpy-loop
