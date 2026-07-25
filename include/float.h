@@ -66,4 +66,10 @@
 #define DBL_SNAN (__builtin_nans(""))
 #define LDBL_SNAN (__builtin_nansl(""))
 
+/* Rounding mode as last set by fesetround() (<fenv.h>); required by C11 to
+ * track the dynamic rounding mode rather than being a static constant.
+ * Declared here (not via #include <fenv.h>) so <float.h> stays standalone. */
+extern int __cccc_flt_rounds(void);
+#define FLT_ROUNDS (__cccc_flt_rounds())
+
 #endif /* __FLOAT_H */

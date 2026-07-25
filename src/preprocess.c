@@ -45,6 +45,7 @@
 // https://github.com/rui314/chibicc/wiki/cpp.algo.pdf
 
 #include "./internal.h"
+#include <fenv.h> // host <fenv.h>, for init_fenv_macros() (#771)
 
 #define MAX_PP_NESTING 1000
 
@@ -4571,8 +4572,41 @@ static char *format_time(VirtualMachine *vm, struct tm *tm) {
                         tm->tm_sec);
 }
 
+// Inject the real host <fenv.h> constants as predefined macros so
+// include/fenv.h (which guest programs see) can define FE_* in terms of
+// these instead of hardcoding one platform's bit values. src/stdlib/fenv.c's
+// wrap_fe*() functions pass FE_* straight through to the real host libc, so
+// the guest header's constants MUST match whatever <fenv.h> this binary was
+// actually compiled against on this machine -- they cannot be baked into
+// src/std.c at `make stdlib` time on one dev's machine and expected to be
+// correct on another platform (#771).
+static void init_fenv_macros(VirtualMachine *vm) {
+    define_macro(vm, "__CCCC_FE_INVALID__", arena_format(vm, "%d", FE_INVALID));
+    define_macro(vm, "__CCCC_FE_DIVBYZERO__", arena_format(vm, "%d", FE_DIVBYZERO));
+    define_macro(vm, "__CCCC_FE_OVERFLOW__", arena_format(vm, "%d", FE_OVERFLOW));
+    define_macro(vm, "__CCCC_FE_UNDERFLOW__", arena_format(vm, "%d", FE_UNDERFLOW));
+    define_macro(vm, "__CCCC_FE_INEXACT__", arena_format(vm, "%d", FE_INEXACT));
+    // Host FE_ALL_EXCEPT verbatim -- NOT the OR of the five named exceptions
+    // above, since some platforms (x86) include additional bits (e.g.
+    // FE_DENORMAL) that have no portable C name.
+    define_macro(vm, "__CCCC_FE_ALL_EXCEPT__", arena_format(vm, "%d", FE_ALL_EXCEPT));
+    define_macro(vm, "__CCCC_FE_TONEAREST__", arena_format(vm, "%d", FE_TONEAREST));
+    define_macro(vm, "__CCCC_FE_DOWNWARD__", arena_format(vm, "%d", FE_DOWNWARD));
+    define_macro(vm, "__CCCC_FE_UPWARD__", arena_format(vm, "%d", FE_UPWARD));
+    define_macro(vm, "__CCCC_FE_TOWARDZERO__", arena_format(vm, "%d", FE_TOWARDZERO));
+    // Sizes drive fexcept_t/fenv_t's guest typedefs -- fexcept_t is 2 bytes
+    // on macOS/arm64 but the guest header previously hardcoded `unsigned
+    // int` (4 bytes), leaving the top half of fegetexceptflag()'s output
+    // object uninitialized.
+    define_macro(vm, "__CCCC_SIZEOF_FEXCEPT_T__",
+                 arena_format(vm, "%d", (int)sizeof(fexcept_t)));
+    define_macro(vm, "__CCCC_SIZEOF_FENV_T__",
+                 arena_format(vm, "%d", (int)sizeof(fenv_t)));
+}
+
 void init_macros(VirtualMachine *vm) {
     // Define predefined macros
+    init_fenv_macros(vm);
     define_macro(vm, "__C99_MACRO_WITH_VA_ARGS", "1");
     define_macro(vm, "__SIZEOF_DOUBLE__", "8");
     define_macro(vm, "__SIZEOF_FLOAT__", "4");

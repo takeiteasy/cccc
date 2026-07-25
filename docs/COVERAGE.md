@@ -1245,7 +1245,7 @@ if (__builtin_mul_overflow(a, b, &r))
 | `<inttypes.h>` | ✓ | |
 | `<stdbool.h>` | ✓ | |
 | `<stdint.h>` | ✓ | |
-| `<fenv.h>` | ~ | APIs registered, but guest `FE_*` constants are hardcoded and mismatch the real host `<fenv.h>` values, so rounding-mode and exception-flag calls are currently non-functional |
+| `<fenv.h>` | ✓ | `FE_*` constants and `fexcept_t`/`fenv_t` sizes are injected from the real host `<fenv.h>` this binary was compiled against (not hardcoded), so rounding-mode and exception-flag calls are correct on whatever platform is running; `FLT_ROUNDS` (`<float.h>`) tracks the dynamic mode via `fegetround()`. `#pragma STDC FENV_ACCESS` / `FP_CONTRACT` are accepted and ignored (no scoped in-source toggle; `FP_CONTRACT` behaves correctly by default since contraction only happens when `--fma` is passed) |
 | `<tgmath.h>` | ~ | Type-generic macros for real floating types and complex absolute value |
 | `<wchar.h>` / `<wctype.h>` | ~ | Common wide-character APIs registered |
 | `<iso646.h>` | ✓ | |
