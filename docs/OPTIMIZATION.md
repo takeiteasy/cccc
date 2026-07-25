@@ -185,6 +185,16 @@ targeted invalidation of only `p`'s slots. `for` loops of the form
 `for (T i=0; i<n; i++) dst[i]=src[i]` where both pointers are restrict-qualified
 are lowered to a single `MCPY` opcode (libc memcpy) at `--optimize=2`+.
 
+Indexed load/store fusion, the `restrict` value cache, and the `restrict`
+memcpy-loop lowering above are all disabled whenever any of
+`--bounds-checks`, `--uaf-detection`, `--pointer-sanitizer`,
+`--type-checks`, or the invalid-arithmetic/provenance-tracking flags are
+enabled — each of these fusions elides a load/store and therefore bypasses
+the CHKP3/CHKT3 emission that the normal load/store path relies on
+(`CCCC_FUSION_UNSAFE_FLAGS` in `src/codegen.c`). This applies to each flag
+individually, not just their `-2`/`-3`/`--pointer-sanitizer` combinations,
+so a standalone `--type-checks -O3` build gets the same coverage as `-O0`.
+
 This `restrict` cache is the only aliasing-aware optimization in CCCC. It works
 because `restrict` is a *scope-wide* non-aliasing promise about a parameter,
 which is enough to justify caching loads across the whole function body. There

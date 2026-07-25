@@ -267,11 +267,11 @@ All features listed below can be enabled individually or through the safety leve
     as `--bounds-checks`/`--uaf-detection` (#650's pattern), so it works
     through interior *pointer arithmetic* on the way to a base-pointer
     dereference, not just an exact base-pointer variable
-  - **Known limitation:** at `opt_level >= 2`, if `--type-checks` is
-    enabled *without* `--bounds-checks`/`--uaf-detection`/`--pointer-sanitizer`,
-    fused/promoted load paths that bypass the normal load emission may
-    skip CHKT3 (tracked as a follow-up ticket); combine with
-    `--pointer-sanitizer` or a `-2`/`-3` safety tier for full coverage
+  - Full coverage at every optimization level, including standalone
+    `--type-checks -O2`/`-O3`: the codegen fusion paths that bypass
+    `emit_load`/`emit_store` (indexed-load fusion, restrict-value caching,
+    restrict memcpy-loop lowering) are disabled whenever `--type-checks`
+    is enabled, not just alongside `--bounds-checks`/`--uaf-detection`
 - `--uninitialized-detection` **Uninitialized variable detection**
   - Tracks initialization state of stack variables using HashMap
   - MARKI opcode marks variables as initialized after assignment

@@ -796,6 +796,16 @@ static void collect_restrict_derived_locals(VirtualMachine *vm, Obj *fn) {
     }
 }
 
+// Codegen fusions below (restrict-value caching, indexed load/store fusion,
+// restrict memcpy-loop lowering) elide a load/store and therefore bypass
+// emit_load_ex/emit_store_ex's CHKP3/CHKT3 emission entirely. Any flag whose
+// safety check rides on those opcodes must disable the fusion, or a build
+// enabling that flag alone (without the others) silently loses coverage at
+// opt_level >= 2 (#654).
+#define CCCC_FUSION_UNSAFE_FLAGS \
+    (CCCC_POINTER_CHECKS | CCCC_INVALID_ARITH | CCCC_PROVENANCE_TRACK | \
+     CCCC_TYPE_CHECKS)
+
 // Look up a variable in the restrict derivation map. Returns index or -1.
 static int restrict_derived_find(VirtualMachine *vm, Obj *var) {
     for (int i = 0; i < vm->compiler.restrict_derived_count; i++)
@@ -822,7 +832,16 @@ static void prepare_restrict_cache(VirtualMachine *vm, Obj *fn, int base_stack_s
     memset(vm->compiler.restrict_derived_vars, 0,
            sizeof(vm->compiler.restrict_derived_vars));
 
-    if (vm->compiler.opt_level < 2 || (vm->flags & CCCC_ENABLE_DEBUGGER))
+    // Bypassed with the fusion-unsafe mask (not just CCCC_ENABLE_DEBUGGER):
+    // restrict_cache_handle_deref's cache-hit path elides the load entirely
+    // (codegen.c, "Called on ND_DEREF to check/populate the restrict cache"),
+    // which skips CHKP3/CHKT3 for pattern 1 (*p on a restrict scalar param)
+    // with no other guard anywhere in the cache-hit path. Disabling the
+    // cache wholesale under any safety flag is what actually closes that
+    // gap; the other CCCC_FUSION_UNSAFE_FLAGS sites only cover pattern 2
+    // and other fusions (#654).
+    if (vm->compiler.opt_level < 2 || (vm->flags & CCCC_ENABLE_DEBUGGER) ||
+        (vm->flags & CCCC_FUSION_UNSAFE_FLAGS))
         return;
 
     // Only activate when there is at least one restrict scalar pointer param.
@@ -924,7 +943,7 @@ static bool restrict_const_deref_extract(VirtualMachine *vm, Node *node,
     // Requires opt_level >= 2 and no safety flags (same guards as indexed load).
     if (addr->kind != ND_ADD || vm->compiler.opt_level < 2)
         return false;
-    if (vm->flags & (CCCC_POINTER_CHECKS | CCCC_INVALID_ARITH | CCCC_PROVENANCE_TRACK))
+    if (vm->flags & CCCC_FUSION_UNSAFE_FLAGS)
         return false;
 
     // Try both orderings: (ptr + const) and (const + ptr)
@@ -2094,8 +2113,7 @@ static bool match_indexed_addr(VirtualMachine *vm, Node *addr, IndexedAddr *out)
     addr = strip_index_casts(addr);
     if (!addr || addr->kind != ND_ADD || vm->compiler.opt_level < 2)
         return false;
-    if (vm->flags & (CCCC_POINTER_CHECKS | CCCC_INVALID_ARITH |
-                     CCCC_PROVENANCE_TRACK))
+    if (vm->flags & CCCC_FUSION_UNSAFE_FLAGS)
         return false;
 
     Node *lhs = strip_index_casts(addr->lhs);
@@ -6390,7 +6408,7 @@ static bool try_emit_restrict_memcpy(VirtualMachine *vm, Node *node) {
     if (vm->compiler.opt_level < 2)
         return false;
     // Flags that disable indexed-load optimisation also make this unsafe.
-    if (vm->flags & (CCCC_POINTER_CHECKS | CCCC_INVALID_ARITH | CCCC_PROVENANCE_TRACK))
+    if (vm->flags & CCCC_FUSION_UNSAFE_FLAGS)
         return false;
 
     // 1. Init: must be a declaration/assignment of induction variable to 0.
