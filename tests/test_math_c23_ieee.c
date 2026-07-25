@@ -13,6 +13,11 @@
 // length as bytes-consumed instead of checking where strtoul actually
 // stopped). Filed separately; large literals here use the `N.0eE`/plain
 // decimal forms, which are unaffected.
+//
+// totalorder/totalordermag take pointers and fromfp/ufromfp/fromfpx/
+// ufromfpx return intmax_t/uintmax_t -- both verified against the real
+// glibc 2.39 declarations in bits/mathcalls.h rather than assumed, since
+// Darwin's libm doesn't have these at all.
 #include <math.h>
 #include <fenv.h>
 
@@ -46,16 +51,21 @@ int main(void) {
     float fx = fmaximumf(3.0f, 5.0f);
     if (fx != 5.0f) return 12;
 
-    // totalorder: -0 precedes +0; -1 precedes +1; not symmetric.
-    if (!totalorder(-0.0, 0.0)) return 13;
-    if (totalorder(0.0, -0.0)) return 14;
-    if (!totalorder(-1.0, 1.0)) return 15;
-    if (totalorder(1.0, -1.0)) return 16;
-    if (!totalorderf(-1.0f, 1.0f)) return 17;
+    // totalorder: -0 precedes +0; -1 precedes +1; not symmetric. Takes
+    // pointers (matching glibc/ISO C), needed to observe a signaling
+    // NaN's exact bit pattern without an intervening FP op quieting it.
+    double tneg0 = -0.0, tpos0 = 0.0, tnegone = -1.0, tposone = 1.0;
+    if (!totalorder(&tneg0, &tpos0)) return 13;
+    if (totalorder(&tpos0, &tneg0)) return 14;
+    if (!totalorder(&tnegone, &tposone)) return 15;
+    if (totalorder(&tposone, &tnegone)) return 16;
+    float ftnegone = -1.0f, ftposone = 1.0f;
+    if (!totalorderf(&ftnegone, &ftposone)) return 17;
 
     // totalordermag: compares |x|, |y|.
-    if (totalordermag(-5.0, 3.0)) return 18;  // |-5| > |3| -> false
-    if (!totalordermag(-3.0, 5.0)) return 19; // |-3| < |5| -> true
+    double tm5 = -5.0, tm3 = 3.0, tm3b = -3.0, tm5b = 5.0;
+    if (totalordermag(&tm5, &tm3)) return 18;   // |-5| > |3| -> false
+    if (!totalordermag(&tm3b, &tm5b)) return 19; // |-3| < |5| -> true
 
     // canonicalize: IEEE 754 binary formats have no non-canonical
     // encodings, so this is a copy that always succeeds.
@@ -84,20 +94,23 @@ int main(void) {
     if (llogb(8.0) != 3) return 30;
     if (llogbf(8.0f) != 3) return 31;
 
-    // fromfp/ufromfp: round to fit a width-bit integer, 0 (+ FE_INVALID)
-    // if it doesn't fit.
-    if (fromfp(3.7, FP_INT_TONEAREST, 8) != 4.0) return 32;
-    if (fromfp(10000000000.0, FP_INT_TONEAREST, 8) != 0.0) return 33; // overflow
-    if (ufromfp(3.7, FP_INT_UPWARD, 8) != 4.0) return 34;
-    if (ufromfp(-1.0, FP_INT_TONEAREST, 8) != 0.0) return 35; // negative -> invalid
+    // fromfp/ufromfp: round to fit a width-bit integer, returned as
+    // intmax_t/uintmax_t (NOT the source floating type -- these
+    // generalize lround/llround with configurable rounding + width,
+    // matching glibc's real intmax_t fromfp(double, int, unsigned int)
+    // signature). 0 (+ FE_INVALID) if it doesn't fit.
+    if (fromfp(3.7, FP_INT_TONEAREST, 8) != 4) return 32;
+    if (fromfp(10000000000.0, FP_INT_TONEAREST, 8) != 0) return 33; // overflow
+    if (ufromfp(3.7, FP_INT_UPWARD, 8) != 4) return 34;
+    if (ufromfp(-1.0, FP_INT_TONEAREST, 8) != 0) return 35; // negative -> invalid
 
     feclearexcept(FE_ALL_EXCEPT);
     (void)fromfp(10000000000.0, FP_INT_TONEAREST, 8);
     if (!fetestexcept(FE_INVALID)) return 36;
 
     feclearexcept(FE_ALL_EXCEPT);
-    double fx2 = fromfpx(3.7, FP_INT_TONEAREST, 16);
-    if (fx2 != 4.0) return 37;
+    intmax_t fx2 = fromfpx(3.7, FP_INT_TONEAREST, 16);
+    if (fx2 != 4) return 37;
     if (!fetestexcept(FE_INEXACT)) return 38; // 'x' variant: rounded != input
 
     // issignaling/iseqsig/iscanonical.

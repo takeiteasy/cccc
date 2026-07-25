@@ -393,16 +393,19 @@ float fminimum_mag_numf(float, float);
 long double fminimum_mag_numl(long double, long double);
 
 /* totalorder/totalordermag: IEEE-754-2019 totalOrder predicate. Returns
- * nonzero iff x precedes y in the total order (-qNaN < -Inf < ... < -0 <
+ * nonzero iff *x precedes *y in the total order (-qNaN < -Inf < ... < -0 <
  * +0 < ... < +Inf < +qNaN, ordered by raw bit pattern within each NaN
- * sign). totalordermag compares |x| and |y| under the same order. */
-int totalorder(double, double);
-int totalorderf(float, float);
-int totalorderl(long double, long double);
+ * sign). totalordermag compares |*x| and |*y| under the same order.
+ * Pointer parameters (matching glibc/ISO C): needed to observe a
+ * signaling NaN's exact bit pattern without an intervening FP operation
+ * quieting it. */
+int totalorder(const double *, const double *);
+int totalorderf(const float *, const float *);
+int totalorderl(const long double *, const long double *);
 
-int totalordermag(double, double);
-int totalordermagf(float, float);
-int totalordermagl(long double, long double);
+int totalordermag(const double *, const double *);
+int totalordermagf(const float *, const float *);
+int totalordermagl(const long double *, const long double *);
 
 /* canonicalize: converts *x to canonical encoding and stores it in *cx,
  * returning 0 if *x was already canonical. CCCC's float/double are IEEE
@@ -436,32 +439,34 @@ long llogb(double);
 long llogbf(float);
 long llogbl(long double);
 
-/* fromfp/ufromfp family: round x to an integer value (returned in the
- * source floating type) per rounding direction `rnd`, that fits in a
- * `width`-bit signed (fromfp) or unsigned (ufromfp) integer; returns 0 if
- * it doesn't fit. The x variants also raise FE_INEXACT if the result
- * differs from x. */
+/* fromfp/ufromfp family: round x to an integer per rounding direction
+ * `rnd`, returned as intmax_t (fromfp/fromfpx) or uintmax_t (ufromfp/
+ * ufromfpx) if it fits in `width` bits, else 0 with FE_INVALID raised.
+ * The x variants also raise FE_INEXACT if the rounded value differs from
+ * x. Note the return type is an integer type, not the source floating
+ * type -- these generalize lround/llround with a configurable rounding
+ * direction and width, they are not "round to an integer-valued float". */
 #define FP_INT_UPWARD 0
 #define FP_INT_DOWNWARD 1
 #define FP_INT_TOWARDZERO 2
 #define FP_INT_TONEARESTFROMZERO 3
 #define FP_INT_TONEAREST 4
 
-double fromfp(double, int, unsigned int);
-float fromfpf(float, int, unsigned int);
-long double fromfpl(long double, int, unsigned int);
+intmax_t fromfp(double, int, unsigned int);
+intmax_t fromfpf(float, int, unsigned int);
+intmax_t fromfpl(long double, int, unsigned int);
 
-double ufromfp(double, int, unsigned int);
-float ufromfpf(float, int, unsigned int);
-long double ufromfpl(long double, int, unsigned int);
+uintmax_t ufromfp(double, int, unsigned int);
+uintmax_t ufromfpf(float, int, unsigned int);
+uintmax_t ufromfpl(long double, int, unsigned int);
 
-double fromfpx(double, int, unsigned int);
-float fromfpxf(float, int, unsigned int);
-long double fromfpxl(long double, int, unsigned int);
+intmax_t fromfpx(double, int, unsigned int);
+intmax_t fromfpxf(float, int, unsigned int);
+intmax_t fromfpxl(long double, int, unsigned int);
 
-double ufromfpx(double, int, unsigned int);
-float ufromfpxf(float, int, unsigned int);
-long double ufromfpxl(long double, int, unsigned int);
+uintmax_t ufromfpx(double, int, unsigned int);
+uintmax_t ufromfpxf(float, int, unsigned int);
+uintmax_t ufromfpxl(long double, int, unsigned int);
 
 /* issignaling/iseqsig/iscanonical: macro-level classification (C23).
  * issignaling(x) tests the quiet bit directly on the raw bit pattern (a

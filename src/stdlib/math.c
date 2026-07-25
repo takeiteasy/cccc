@@ -256,21 +256,29 @@ static uint32_t cccc_order_key32(uint32_t u) {
     return u ^ mask;
 }
 
-static long long cccc_totalorder(double x, double y) {
+// Pointer parameters (matching glibc/ISO C): needed to observe a
+// signaling NaN's exact bit pattern without an intervening FP operation
+// quieting it -- unlike fmaximum/fminimum et al, totalorder is specified
+// to work correctly even when x or y is a signaling NaN.
+static long long cccc_totalorder(long long xp, long long yp) {
+    double x = *(const double *)(intptr_t)xp, y = *(const double *)(intptr_t)yp;
     return cccc_order_key64(cccc_d2b(x)) <= cccc_order_key64(cccc_d2b(y));
 }
-static long long cccc_totalorderf(float x, float y) {
+static long long cccc_totalorderf(long long xp, long long yp) {
+    float x = *(const float *)(intptr_t)xp, y = *(const float *)(intptr_t)yp;
     return cccc_order_key32(cccc_f2b(x)) <= cccc_order_key32(cccc_f2b(y));
 }
-static long long cccc_totalorderl(double x, double y) { return cccc_totalorder(x, y); }
+static long long cccc_totalorderl(long long xp, long long yp) { return cccc_totalorder(xp, yp); }
 
-static long long cccc_totalordermag(double x, double y) {
+static long long cccc_totalordermag(long long xp, long long yp) {
+    double x = *(const double *)(intptr_t)xp, y = *(const double *)(intptr_t)yp;
     return cccc_order_key64(cccc_d2b(fabs(x))) <= cccc_order_key64(cccc_d2b(fabs(y)));
 }
-static long long cccc_totalordermagf(float x, float y) {
+static long long cccc_totalordermagf(long long xp, long long yp) {
+    float x = *(const float *)(intptr_t)xp, y = *(const float *)(intptr_t)yp;
     return cccc_order_key32(cccc_f2b(fabsf(x))) <= cccc_order_key32(cccc_f2b(fabsf(y)));
 }
-static long long cccc_totalordermagl(double x, double y) { return cccc_totalordermag(x, y); }
+static long long cccc_totalordermagl(long long xp, long long yp) { return cccc_totalordermag(xp, yp); }
 
 // ---- canonicalize ----
 // IEEE 754 binary32/binary64 (CCCC's float/double) have no non-canonical
@@ -356,11 +364,15 @@ static long cccc_llogbf(float x) { return (long)ilogbf(x); }
 static long cccc_llogbl(double x) { return cccc_llogb(x); }
 
 // ---- fromfp/ufromfp family ----
-// Rounds x to an integer value (in the source floating type) per rounding
-// direction `rnd`, that fits in a `width`-bit signed (fromfp) / unsigned
-// (ufromfp) integer; returns 0 (raising FE_INVALID) if it doesn't fit.
-// The 'x' variants additionally raise FE_INEXACT if the rounded result
-// differs from the input.
+// Rounds x to an integer per rounding direction `rnd`, that fits in a
+// `width`-bit signed (fromfp/fromfpx) or unsigned (ufromfp/ufromfpx)
+// integer, returned as intmax_t/uintmax_t -- NOT the source floating
+// type. These generalize lround/llround with a configurable rounding
+// direction and width (matching glibc's real signature:
+// intmax_t fromfp(double, int, unsigned int)), not "round to the nearest
+// integer-valued float". Returns 0 (raising FE_INVALID) if the rounded
+// value doesn't fit. The 'x' variants additionally raise FE_INEXACT if
+// the rounded result differs from the input.
 static double cccc_round_by_direction(double x, int rnd) {
     switch (rnd) {
     case CCCC_FP_INT_UPWARD:              return ceil(x);
@@ -371,10 +383,15 @@ static double cccc_round_by_direction(double x, int rnd) {
     }
 }
 
-static double cccc_fromfp_impl(double x, long long rnd, long long width, int is_unsigned, int extended) {
+// Returns the rounded integer value bit-reinterpreted into a long long --
+// valid either as intmax_t (fromfp/fromfpx) or uintmax_t (ufromfp/
+// ufromfpx) depending on which the caller declared, since both are 64-bit
+// and the guest marshals all non-float/double returns through the same
+// register regardless of signedness.
+static long long cccc_fromfp_impl(double x, long long rnd, long long width, int is_unsigned, int extended) {
     if (isnan(x) || isinf(x) || width == 0) {
         feraiseexcept(FE_INVALID);
-        return 0.0;
+        return 0;
     }
     double r = cccc_round_by_direction(x, (int)rnd);
     double lo, hi; // inclusive range representable in `width` bits
@@ -387,30 +404,27 @@ static double cccc_fromfp_impl(double x, long long rnd, long long width, int is_
     }
     if (r < lo || r > hi) {
         feraiseexcept(FE_INVALID);
-        return 0.0;
+        return 0;
     }
     if (extended && r != x)
         feraiseexcept(FE_INEXACT);
-    return r;
+    return is_unsigned ? (long long)(uint64_t)r : (long long)(int64_t)r;
 }
 
-static double cccc_fromfp(double x, long long rnd, long long width)   { return cccc_fromfp_impl(x, rnd, width, 0, 0); }
-static double cccc_ufromfp(double x, long long rnd, long long width)  { return cccc_fromfp_impl(x, rnd, width, 1, 0); }
-static double cccc_fromfpx(double x, long long rnd, long long width)  { return cccc_fromfp_impl(x, rnd, width, 0, 1); }
-static double cccc_ufromfpx(double x, long long rnd, long long width) { return cccc_fromfp_impl(x, rnd, width, 1, 1); }
+static long long cccc_fromfp(double x, long long rnd, long long width)   { return cccc_fromfp_impl(x, rnd, width, 0, 0); }
+static long long cccc_ufromfp(double x, long long rnd, long long width)  { return cccc_fromfp_impl(x, rnd, width, 1, 0); }
+static long long cccc_fromfpx(double x, long long rnd, long long width)  { return cccc_fromfp_impl(x, rnd, width, 0, 1); }
+static long long cccc_ufromfpx(double x, long long rnd, long long width) { return cccc_fromfp_impl(x, rnd, width, 1, 1); }
 
-static float cccc_fromfp_implf(float x, long long rnd, long long width, int is_unsigned, int extended) {
-    return (float)cccc_fromfp_impl((double)x, rnd, width, is_unsigned, extended);
-}
-static float cccc_fromfpf(float x, long long rnd, long long width)   { return cccc_fromfp_implf(x, rnd, width, 0, 0); }
-static float cccc_ufromfpf(float x, long long rnd, long long width)  { return cccc_fromfp_implf(x, rnd, width, 1, 0); }
-static float cccc_fromfpxf(float x, long long rnd, long long width)  { return cccc_fromfp_implf(x, rnd, width, 0, 1); }
-static float cccc_ufromfpxf(float x, long long rnd, long long width) { return cccc_fromfp_implf(x, rnd, width, 1, 1); }
+static long long cccc_fromfpf(float x, long long rnd, long long width)   { return cccc_fromfp_impl((double)x, rnd, width, 0, 0); }
+static long long cccc_ufromfpf(float x, long long rnd, long long width)  { return cccc_fromfp_impl((double)x, rnd, width, 1, 0); }
+static long long cccc_fromfpxf(float x, long long rnd, long long width)  { return cccc_fromfp_impl((double)x, rnd, width, 0, 1); }
+static long long cccc_ufromfpxf(float x, long long rnd, long long width) { return cccc_fromfp_impl((double)x, rnd, width, 1, 1); }
 
-static double cccc_fromfpl(double x, long long rnd, long long width)   { return cccc_fromfp(x, rnd, width); }
-static double cccc_ufromfpl(double x, long long rnd, long long width)  { return cccc_ufromfp(x, rnd, width); }
-static double cccc_fromfpxl(double x, long long rnd, long long width)  { return cccc_fromfpx(x, rnd, width); }
-static double cccc_ufromfpxl(double x, long long rnd, long long width) { return cccc_ufromfpx(x, rnd, width); }
+static long long cccc_fromfpl(double x, long long rnd, long long width)   { return cccc_fromfp(x, rnd, width); }
+static long long cccc_ufromfpl(double x, long long rnd, long long width)  { return cccc_ufromfp(x, rnd, width); }
+static long long cccc_fromfpxl(double x, long long rnd, long long width)  { return cccc_fromfpx(x, rnd, width); }
+static long long cccc_ufromfpxl(double x, long long rnd, long long width) { return cccc_ufromfpx(x, rnd, width); }
 
 // ---- issignaling/iseqsig (backing __cccc_issignaling_*/__cccc_iseqsig_*
 // macros dispatched from <math.h>) ----
@@ -692,12 +706,12 @@ void register_math_functions(VirtualMachine *vm) {
     CCCC_REG_FMAXIMUM_FAMILY(fminimum_mag_num)
 #undef CCCC_REG_FMAXIMUM_FAMILY
 
-    cc_register_cfunc_ex(vm, "totalorder", (void*)cccc_totalorder, 2, 0, 0b11);
-    cc_register_cfunc_ex(vm, "totalorderf", (void*)cccc_totalorderf, 2, 0, 0b11);
-    cc_register_cfunc_ex(vm, "totalorderl", (void*)cccc_totalorderl, 2, 0, 0b11);
-    cc_register_cfunc_ex(vm, "totalordermag", (void*)cccc_totalordermag, 2, 0, 0b11);
-    cc_register_cfunc_ex(vm, "totalordermagf", (void*)cccc_totalordermagf, 2, 0, 0b11);
-    cc_register_cfunc_ex(vm, "totalordermagl", (void*)cccc_totalordermagl, 2, 0, 0b11);
+    cc_register_cfunc_ex(vm, "totalorder", (void*)cccc_totalorder, 2, 0, 0b00);      // const double*, const double*
+    cc_register_cfunc_ex(vm, "totalorderf", (void*)cccc_totalorderf, 2, 0, 0b00);    // const float*, const float*
+    cc_register_cfunc_ex(vm, "totalorderl", (void*)cccc_totalorderl, 2, 0, 0b00);
+    cc_register_cfunc_ex(vm, "totalordermag", (void*)cccc_totalordermag, 2, 0, 0b00);
+    cc_register_cfunc_ex(vm, "totalordermagf", (void*)cccc_totalordermagf, 2, 0, 0b00);
+    cc_register_cfunc_ex(vm, "totalordermagl", (void*)cccc_totalordermagl, 2, 0, 0b00);
 
     cc_register_cfunc_ex(vm, "canonicalize", (void*)cccc_canonicalize, 2, 0, 0b00);   // double*, const double*
     cc_register_cfunc_ex(vm, "canonicalizef", (void*)cccc_canonicalizef, 2, 0, 0b00); // float*, const float*
@@ -718,10 +732,13 @@ void register_math_functions(VirtualMachine *vm) {
     cc_register_cfunc_ex(vm, "llogbf", (void*)cccc_llogbf, 1, 0, 0b1);
     cc_register_cfunc_ex(vm, "llogbl", (void*)cccc_llogbl, 1, 0, 0b1);
 
+    // fromfp/ufromfp/fromfpx/ufromfpx return intmax_t/uintmax_t (long
+    // long, not double/float) -- only arg0 (x) is FP-class, so ret=0 with
+    // mask 0b1 for all three width variants.
 #define CCCC_REG_FROMFP_FAMILY(NAME)                                                         \
-    cc_register_cfunc_ex(vm, #NAME, (void*)cccc_##NAME, 3, 1, 0b1);                          \
-    cc_register_cfunc_ex(vm, #NAME "f", (void*)cccc_##NAME##f, 3, 2, 0b1);                   \
-    cc_register_cfunc_ex(vm, #NAME "l", (void*)cccc_##NAME##l, 3, 1, 0b1);
+    cc_register_cfunc_ex(vm, #NAME, (void*)cccc_##NAME, 3, 0, 0b1);                          \
+    cc_register_cfunc_ex(vm, #NAME "f", (void*)cccc_##NAME##f, 3, 0, 0b1);                   \
+    cc_register_cfunc_ex(vm, #NAME "l", (void*)cccc_##NAME##l, 3, 0, 0b1);
     CCCC_REG_FROMFP_FAMILY(fromfp)
     CCCC_REG_FROMFP_FAMILY(ufromfp)
     CCCC_REG_FROMFP_FAMILY(fromfpx)
