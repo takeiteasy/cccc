@@ -1275,6 +1275,120 @@ static bool op_operand_word_is_immediate(int op) {
     }
 }
 
+// ---- Implicit ABI-register effects (tracker #760/#761) ----
+//
+// Registers an opcode reads/writes WITHOUT encoding them in an operand word
+// (fixed-slot ABI registers like MCPY's A0/A1/A2, or a packed-immediate op's
+// hidden A0 result). Copy-prop sub-pass A (forward substitution), sub-pass B
+// (dead-MOV3 elimination), and opt_elim_ext (redundant extension removal)
+// each used to hand-maintain their own switch over this same opcode set --
+// #755 (CHKB/MARKP byte-0 sources) and #759 (IOVFL/AXCHG/ACAS/VRAISE hidden
+// A0 def in sub-pass A) were the same bug surfacing in different passes
+// because the lists drifted apart. This table is now the single source of
+// truth; all three passes query it instead of keeping their own list.
+typedef struct {
+    uint32_t reads;    // bitmask of implicitly-READ integer registers
+    uint32_t writes;   // bitmask of implicitly-WRITTEN integer registers
+    bool     opaque;   // control transfer / too-varied effects: reset ALL state
+} ImplicitRegs;
+
+#define IR_BIT(r) ((uint32_t)1u << (r))
+
+// Returns true and fills *out if op has implicit ABI-register effects.
+// Returns false (leaving *out untouched) for opcodes whose register effects
+// are fully visible in their operand word (handled by the generic decode in
+// each pass) -- this function only covers the "invisible" zero/immediate-
+// operand cases.
+static bool op_implicit_abi_regs(int op, ImplicitRegs *out) {
+    switch (op) {
+    // Unconditional control-flow / frame transitions: opaque, mirrors how
+    // sub-pass A/B already treat these (RESET_MOV_TRACKING / clear-all).
+    case JMP: case JMPT: case JMPI:
+    case CALL: case CALLT: case CALLI: case CALLN: case CALLF:
+    case ENT3: case LEV3:
+    // Zero-operand instructions whose implicit register usage is too varied
+    // to model precisely, or (VRAISE, VSIGNAL) that can themselves jump into
+    // a VM signal handler -- a control-flow edge, not a plain register def.
+    // VRAISE deviates from a literal "reads A0 / writes A0" reading of #760:
+    // op_VRAISE_fn's VM-handler case (ops.c) pushes a return address and
+    // jumps, so opaque is the correct (conservative) treatment, matching the
+    // neighbouring VSIGNAL.
+    case LONGJMP:
+    case DLOPEN: case DLSYM: case DLCLOSE: case DLERROR:
+    case WIDE_ADD: case WIDE_SUB: case WIDE_MUL: case WIDE_DIV:
+    case WIDE_MOD: case WIDE_SHL: case WIDE_SHR: case WIDE_USHR:
+    case VSIGNAL: case VRAISE:
+    case BTRAP:
+        out->reads = out->writes = 0;
+        out->opaque = true;
+        return true;
+
+    // MCPY(dest=A0, src=A1, count=A2): reads A0, A1, A2.
+    case MCPY:
+        out->reads = IR_BIT(REG_A0) | IR_BIT(REG_A1) | IR_BIT(REG_A2);
+        out->writes = 0; out->opaque = false;
+        return true;
+
+    // MSET(dest=A0, count=A2): reads A0, A2 (#760 -- previously unmodeled by
+    // sub-pass B, letting a live MOV3 feeding A2's count be NOP'd).
+    case MSET:
+        out->reads = IR_BIT(REG_A0) | IR_BIT(REG_A2);
+        out->writes = 0; out->opaque = false;
+        return true;
+
+    // MFRE(ptr=A0): reads A0.
+    case MFRE:
+        out->reads = IR_BIT(REG_A0);
+        out->writes = 0; out->opaque = false;
+        return true;
+
+    // MALC/CALC(size=A0): reads A0, writes A0. SETJMP(jmp_buf=A0): same shape.
+    case MALC: case CALC: case SETJMP:
+        out->reads = out->writes = IR_BIT(REG_A0);
+        out->opaque = false;
+        return true;
+
+    // REALC(ptr=A0, size=A1): reads A0, A1, writes A0.
+    // MALCA(size=A0, alignment=A1): reads A0, A1, writes A0.
+    case REALC: case MALCA:
+        out->reads = IR_BIT(REG_A0) | IR_BIT(REG_A1);
+        out->writes = IR_BIT(REG_A0); out->opaque = false;
+        return true;
+
+    // REALCA(ptr=A0, nmemb=A1, size=A2): reads A0, A1, A2, writes A0.
+    // PMEMA(memptr=A0, alignment=A1, size=A2): reads A0, A1, A2, writes A0.
+    case REALCA: case PMEMA:
+        out->reads = IR_BIT(REG_A0) | IR_BIT(REG_A1) | IR_BIT(REG_A2);
+        out->writes = IR_BIT(REG_A0); out->opaque = false;
+        return true;
+
+    // RETBUF: writes A0 (return buffer address from pool).
+    case RETBUF:
+        out->reads = 0; out->writes = IR_BIT(REG_A0); out->opaque = false;
+        return true;
+
+    // AXCHG(addr=A0, new=A1): reads A0, A1; writes A0 (old value). Carries a
+    // packed width_enc immediate in its operand word (see
+    // op_operand_word_is_immediate()), not a register encoding -- the
+    // generic size>=2 decode must never see this opcode's registers.
+    case AXCHG:
+        out->reads = IR_BIT(REG_A0) | IR_BIT(REG_A1);
+        out->writes = IR_BIT(REG_A0); out->opaque = false;
+        return true;
+
+    // ACAS(obj=A0, exp=A1, desired=A2): reads A0, A1, A2; writes A0 (bool).
+    // IOVFL(a=A0, b=A1, ptr=A2): reads A0, A1, A2; writes A0 (overflow bool).
+    // Both carry a packed immediate in their operand word, same as AXCHG.
+    case ACAS: case IOVFL:
+        out->reads = IR_BIT(REG_A0) | IR_BIT(REG_A1) | IR_BIT(REG_A2);
+        out->writes = IR_BIT(REG_A0); out->opaque = false;
+        return true;
+
+    default:
+        return false;
+    }
+}
+
 // SIMD/vector opcodes (tracker #72/#463): the generic rd/rs1/rs2 = byte0/1/2
 // decode below assumes every operand register lives in either the int
 // register file (regs[]) or the float register file (fregs[]) -- copy_of[]
@@ -1401,6 +1515,30 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
                     if (fcopy_of[i] == rd) fcopy_of[i] = -1;
             }
 
+        } else if (op != JZ3 && op != JNZ3 &&
+                   op_implicit_abi_regs(op, &(ImplicitRegs){ 0, 0, false })) {
+            // Every opcode with implicit ABI-register effects (tracker
+            // #760/#761's op_implicit_abi_regs() -- unconditional
+            // control-flow, MALC/MCPY/SETJMP/…, and the packed-immediate
+            // AXCHG/ACAS/IOVFL/VRAISE family) gets a full conservative clear
+            // here: sub-pass A's two-map model doesn't track individual
+            // register reads/writes the way sub-pass B does, so "has any
+            // implicit effect" is the only distinction that matters -- clear
+            // all copy facts rather than trying to preserve the rest.
+            //
+            // AXCHG/ACAS/IOVFL carry a packed immediate in their operand word
+            // (see op_operand_word_is_immediate()), so the generic decode
+            // below never sees them and never kills the copy fact for their
+            // implicit REG_A0 write.  Without this arm a stale
+            // `copy_of[A0] == S2` fact from an earlier `MOV3 A0, S2` survives
+            // across the IOVFL that redefines A0 with the overflow bool, and
+            // a later branch on A0 gets rewritten to test S2 instead (#759 --
+            // reproduced live: a ckd_add()-guarded loop returned the wrong
+            // branch outcome under -O3 because JZ3's condition register was
+            // substituted from a stale A0 copy fact).
+            for (int i = 0; i < NUM_REGS; i++)
+                copy_of[i] = fcopy_of[i] = -1;
+
         } else {
             switch (op) {
             // Conditional branches: fall-through retains copy facts.
@@ -1417,49 +1555,6 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
                         prop_count++;
                     }
                 }
-                break;
-
-            // Unconditional control-flow: clear all copy facts.
-            case JMP:
-            case JMPT:
-            case JMPI:
-            case CALL:
-            case CALLT:
-            case CALLI:
-            case CALLN:
-            case CALLF:
-            case ENT3:
-            case LEV3:
-            // Zero-operand instructions that clobber A-registers implicitly:
-            // their implicit writes are invisible to the size>=2 scan in the
-            // default case, so stale copy facts would survive and cause wrong
-            // substitutions downstream.  Clear conservatively (mirrors sub-pass B).
-            case LONGJMP:
-            case DLOPEN: case DLSYM: case DLCLOSE: case DLERROR:
-            case MALC: case CALC: case REALC: case REALCA:
-            case MALCA: case PMEMA:
-            case MFRE:
-            case RETBUF:
-            case SETJMP:
-            case MCPY:
-            case WIDE_ADD: case WIDE_SUB: case WIDE_MUL: case WIDE_DIV:
-            case WIDE_MOD: case WIDE_SHL: case WIDE_SHR: case WIDE_USHR:
-            case VSIGNAL:
-            case BTRAP:
-            // AXCHG/ACAS/IOVFL carry a packed immediate in their operand word
-            // (see op_operand_word_is_immediate()), so the generic decode below
-            // never sees them and never kills the copy fact for their implicit
-            // REG_A0 write.  Without this arm a stale `copy_of[A0] == S2` fact
-            // from an earlier `MOV3 A0, S2` survives across the IOVFL that
-            // redefines A0 with the overflow bool, and a later branch on A0
-            // gets rewritten to test S2 instead (#759 -- reproduced live: a
-            // ckd_add()-guarded loop returned the wrong branch outcome under
-            // -O3 because JZ3's condition register was substituted from a
-            // stale A0 copy fact).  VRAISE writes A0 (clamped signal result)
-            // the same way.
-            case AXCHG: case ACAS: case IOVFL: case VRAISE:
-                for (int i = 0; i < NUM_REGS; i++)
-                    copy_of[i] = fcopy_of[i] = -1;
                 break;
 
             default:
@@ -1668,29 +1763,6 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
                 MARK_FLOAT_USE(rs);
             }
 
-        } else if (op == AXCHG || op == ACAS) {
-            // AXCHG/ACAS carry a width_enc i64 immediate in their operand words
-            // (layout: [opcode][width_enc_lo32][width_enc_hi32]), NOT a register
-            // encoding.  The generic size>=2 decode below must be skipped for
-            // these opcodes — it would misread the low word of width_enc as a
-            // register encoding and fire KILL_INT_DEF on its low byte, silently
-            // NOPing a live MOV3 if that byte coincidentally matches a pending
-            // destination register (e.g. r8/r9 for a 4-byte atomic).
-            //
-            // Precise implicit register model (verified from ops.c / codegen.c):
-            //   AXCHG: reads A0 (addr), A1 (new val); writes A0 (old val).
-            //   ACAS:  reads A0 (obj ptr), A1 (exp ptr), A2 (desired);
-            //          writes A0 (bool result).  Failure update of *A1 is a
-            //          memory write through the pointer, not a register write.
-            //
-            // Mark uses before killing the A0 def so a pending MOV3 into A0
-            // is preserved if it is still live (matches the SETJMP pattern).
-            MARK_INT_USE(REG_A0);
-            MARK_INT_USE(REG_A1);
-            if (op == ACAS)
-                MARK_INT_USE(REG_A2);
-            KILL_INT_DEF(REG_A0);
-
         } else if (op_has_vector_operand(op)) {
             // Vector opcodes (tracker #72/#463): byte 1/2 mix vreg indices
             // with real freg/greg operands in ways op_is_float_src()'s
@@ -1743,89 +1815,28 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
                     KILL_FLOAT_DEF(rd);
             }
 
-            // Unconditional control-flow and zero-operand register-clobbering
-            // instructions: reset or conservatively mark A-register uses.
-            // Zero-operand instructions have no operand words so their implicit
-            // register reads/writes are invisible to the size>=2 scan above.
-            switch (op) {
-            case JMP: case JMPT: case JMPI:
-            case CALL: case CALLT: case CALLI: case CALLN: case CALLF:
-            case ENT3: case LEV3:
-                RESET_MOV_TRACKING();
-                break;
-
-            // MCPY(dest=A0, src=A1, count=A2): reads A0, A1, A2.
-            case MCPY:
-                MARK_INT_USE(REG_A0);
-                MARK_INT_USE(REG_A1);
-                MARK_INT_USE(REG_A2);
-                break;
-
-            // MALC/CALC(size=A0): reads A0, writes A0.
-            case MALC: case CALC:
-                MARK_INT_USE(REG_A0);
-                KILL_INT_DEF(REG_A0);
-                break;
-
-            // MFRE(ptr=A0): reads A0.
-            case MFRE:
-                MARK_INT_USE(REG_A0);
-                break;
-
-            // REALC(ptr=A0, size=A1): reads A0, A1, writes A0.
-            case REALC:
-                MARK_INT_USE(REG_A0);
-                MARK_INT_USE(REG_A1);
-                KILL_INT_DEF(REG_A0);
-                break;
-
-            // REALCA(ptr=A0, nmemb=A1, size=A2): reads A0, A1, A2, writes A0.
-            case REALCA:
-                MARK_INT_USE(REG_A0);
-                MARK_INT_USE(REG_A1);
-                MARK_INT_USE(REG_A2);
-                KILL_INT_DEF(REG_A0);
-                break;
-
-            // MALCA(size=A0, alignment=A1): reads A0, A1, writes A0.
-            case MALCA:
-                MARK_INT_USE(REG_A0);
-                MARK_INT_USE(REG_A1);
-                KILL_INT_DEF(REG_A0);
-                break;
-
-            // PMEMA(memptr=A0, alignment=A1, size=A2): reads A0, A1, A2, writes A0.
-            case PMEMA:
-                MARK_INT_USE(REG_A0);
-                MARK_INT_USE(REG_A1);
-                MARK_INT_USE(REG_A2);
-                KILL_INT_DEF(REG_A0);
-                break;
-
-            // RETBUF: writes A0 (return buffer address from pool).
-            case RETBUF:
-                KILL_INT_DEF(REG_A0);
-                break;
-
-            // SETJMP(jmp_buf=A0): reads A0, writes A0.
-            case SETJMP:
-                MARK_INT_USE(REG_A0);
-                KILL_INT_DEF(REG_A0);
-                break;
-
-            // All other zero-operand instructions (LONGJMP, DLOPEN, WIDE_* etc.):
-            // reset conservatively — their A-register usage is too varied.
-            case LONGJMP:
-            case DLOPEN: case DLSYM: case DLCLOSE: case DLERROR:
-            case WIDE_ADD: case WIDE_SUB: case WIDE_MUL: case WIDE_DIV:
-            case WIDE_MOD: case WIDE_SHL: case WIDE_SHR: case WIDE_USHR:
-            case VSIGNAL:
-            case BTRAP:
-                RESET_MOV_TRACKING();
-                break;
-
-            default:
-                break;
+            // Unconditional control-flow, zero-operand register-clobbering
+            // instructions (MCPY/MALC/SETJMP/…), and packed-immediate ops
+            // (AXCHG/ACAS/IOVFL, whose generic decode was skipped above by
+            // the op_operand_word_is_immediate() guard): reset or
+            // conservatively mark A-register uses via the shared
+            // op_implicit_abi_regs() table (tracker #760/#761 -- IOVFL,
+            // MSET, and VRAISE previously fell through to `default: break`
+            // here with no modeling at all, so a live MOV3 feeding A0/A1/A2
+            // immediately before one of them could be classified dead and
+            // NOP'd).  Uses are marked before defs are killed so a pending
+            // MOV3 into a register the opcode both reads and writes (e.g.
+            // AXCHG/SETJMP's A0) is preserved if still live.
+            ImplicitRegs ir;
+            if (op_implicit_abi_regs(op, &ir)) {
+                if (ir.opaque) {
+                    RESET_MOV_TRACKING();
+                } else {
+                    for (int r = 1; r < NUM_REGS; r++)
+                        if (ir.reads & IR_BIT(r)) MARK_INT_USE(r);
+                    for (int r = 1; r < NUM_REGS; r++)
+                        if (ir.writes & IR_BIT(r)) KILL_INT_DEF(r);
+                }
             }
         }
 
