@@ -1347,6 +1347,55 @@ static bool tail_arg_carries_frame_addr(Obj *fn, Node *n) {
     return false;
 }
 
+// #762: normalisation key mirroring gen_expr's ND_CAST case (~line 4990).
+// Two types with the same non-negative key leave an already-normalised value
+// in an identical register representation, so a cast between them is a
+// runtime no-op -- safe for the ND_RETURN tail-call path to strip, since a
+// funcall's result is already normalised to the callee's own return type by
+// the callee's own ND_RETURN cast. A negative key never matches anything
+// (including itself), so such a cast is never stripped.
+static long long return_repr_key(Type *ty) {
+    if (!ty)
+        return -1;
+    if (is_complex(ty) || is_vector(ty) || is_wide_bitint(ty))
+        return -1;
+    switch (ty->kind) {
+    case TY_STRUCT: case TY_UNION: case TY_ARRAY: case TY_VLA:
+    case TY_FUNC: case TY_ERROR: case TY_AUTO: case TY_BLOCK:
+        return -1;
+    case TY_FLOAT:
+        return 1; // f32 -- emit_fround_f32 is idempotent, but f32->f64 is not
+    case TY_DOUBLE: case TY_LDOUBLE:
+        return 2; // f64/f80 share a representation; f32<->f64 is not a no-op
+    case TY_BOOL:
+        return 3; // SNE3 is idempotent on an already-0/1 value
+    case TY_CHAR:
+        return 10 + (ty->is_unsigned ? 1 : 0);
+    case TY_SHORT:
+        return 20 + (ty->is_unsigned ? 1 : 0);
+    case TY_INT:
+        return 30 + (ty->is_unsigned ? 1 : 0);
+    case TY_BITINT:
+        // Narrow (<=64-bit) _BitInt only -- is_wide_bitint already handled
+        // above. Key on width/signedness: emit_bitint_trunc's mask depends
+        // on both.
+        return 1000 + ty->bit_width * 2 + (ty->is_unsigned ? 1 : 0);
+    default:
+        // TY_LONG, TY_PTR, TY_ENUM, TY_VOID, TY_NULLPTR_T: gen_expr's
+        // ND_CAST case emits nothing for these -- one shared 64-bit,
+        // no-conversion key.
+        return 0;
+    }
+}
+
+// True when casting `from` to `to` is a representation no-op on a value
+// already normalised to `from` -- see return_repr_key.
+static bool cast_is_repr_noop(Type *to, Type *from) {
+    long long k1 = return_repr_key(to);
+    long long k2 = return_repr_key(from);
+    return k1 >= 0 && k1 == k2;
+}
+
 // Return true when `expr` is a tail-call candidate: a direct, in-VM,
 // non-variadic, non-nested, non-noreturn, non-struct-returning call with ≤8 args.
 // The caller is responsible for the opt_level >= 1 and inline_exit_name guards.
@@ -6753,25 +6802,23 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
         // expr_already_eval prevents re-evaluating node->lhs in the LEV3 path below.
         //
         // The parser always wraps the return expression in ND_CAST, even for
-        // identity conversions (e.g. int→int).  Strip through those cast wrappers
-        // to expose the underlying ND_FUNCALL for can_emit_tail_call.  Skipping
-        // the cast is safe: in CCCC's 64-bit register model the callee already
-        // returns a value that is typed at the source level, and callers apply
-        // their own narrowing/extension at each use site.
-        //
-        // BUG (#762): this "skipping the cast is safe" reasoning does not
-        // hold for a NARROWING cast at the return site itself, e.g.
-        // `return (unsigned char) g(...);` in tail position. Stripping that
-        // cast to reach ND_FUNCALL for can_emit_tail_call, then emitting the
-        // CALLT with tco_expr (the un-cast funcall) as the evaluated
-        // expression, drops the narrowing entirely -- the caller of THIS
-        // function receives g(...)'s raw return value, not the declared
-        // truncation. Reproduced live at -O1+: `return (unsigned char)
-        // g(x);` where g returns e.g. 200037 yields 200037 instead of 101.
-        // Not fixed here.
+        // identity conversions (e.g. int→int).  Strip through those cast
+        // wrappers to expose the underlying ND_FUNCALL for can_emit_tail_call,
+        // but only while each cast is a representation no-op (return_repr_key/
+        // cast_is_repr_noop, ~line 1350): the callee's own ND_RETURN cast has
+        // already normalised its result to the callee's return type, so a
+        // no-op cast on top of that is redundant and safe to skip. A cast
+        // that genuinely changes representation (#762, e.g. `return
+        // (unsigned char) g(...);` truncating a wider result) must NOT be
+        // stripped -- CALLT hands the callee's raw value straight to the
+        // *original* caller with no opportunity to apply it, so stopping the
+        // strip there leaves tco_expr as an ND_CAST, which can_emit_tail_call
+        // rejects outright (only ND_FUNCALL is eligible), correctly falling
+        // back to the ordinary CALL+LEV3 path below.
         bool expr_already_eval = false;
         Node *tco_expr = node->lhs;
-        while (tco_expr && tco_expr->kind == ND_CAST && tco_expr->lhs)
+        while (tco_expr && tco_expr->kind == ND_CAST && tco_expr->lhs &&
+               cast_is_repr_noop(tco_expr->ty, tco_expr->lhs->ty))
             tco_expr = tco_expr->lhs;
         if (tco_expr && vm->compiler.opt_level >= 1 &&
             can_emit_tail_call(vm, tco_expr)) {

@@ -80,6 +80,7 @@ When codegen detects that a `return` statement's outermost expression is a direc
 * The callee does not return a struct or union (struct returns use `RETBUF` and are incompatible with frame reuse).
 * The call uses 8 or fewer arguments (stack-spilled arguments would fall below the unwound frame).
 * No argument carries the address of one of the caller's own locals or parameters — directly (`&x`), via pointer arithmetic on a frame-local base (`buf + i`), via array/struct/union decay, or via a local whose address is already known to escape the frame (a pointer variable holding `&x`, `&x` stored into a global, etc.). `CALLT` reuses the caller's frame, so a pointer into that frame would dangle the instant the callee's own prologue or body overwrites the slot.
+* The `return` statement's implicit cast to the function's own return type must be representation-preserving with respect to the callee's return type — an identity conversion (e.g. `int → int`) or one that leaves the value's register representation unchanged (e.g. `long`/pointer/enum, all read the same 64-bit register). A genuine narrowing or rounding at the return site itself (`return (unsigned char) g(x);`, `return (float) g(x);`) disqualifies the call: `CALLT` hands the callee's raw return value straight to the *original* caller, with no later point at which the narrowing/rounding could be applied.
 
 Mutually-recursive pairs (`A → B → A`) are handled correctly because `CALLT` leaves the caller's return address in place; `B`'s `CALLT` back to `A` reuses `B`'s frame, and so on.
 
