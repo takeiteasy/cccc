@@ -1,6 +1,19 @@
 // math.h stdlib function registration
 #include "../cccc.h"
 #include <math.h>
+#include <string.h>
+#include <stdint.h>
+#include <fenv.h>
+
+// Host-side mirrors of the FP_INT_* rounding-direction constants declared
+// in include/math.h (guest side) for the fromfp/ufromfp family -- this file
+// is compiled by the host toolchain, not cccc, so it can't see the guest
+// header's macros; the numeric values must match exactly.
+#define CCCC_FP_INT_UPWARD 0
+#define CCCC_FP_INT_DOWNWARD 1
+#define CCCC_FP_INT_TOWARDZERO 2
+#define CCCC_FP_INT_TONEARESTFROMZERO 3
+#define CCCC_FP_INT_TONEAREST 4
 
 // nexttowardf(float, long double): CCCC promotes the long double arg to double
 // (the VM's long double width), so we need a wrapper that accepts (float, double)
@@ -129,6 +142,306 @@ static double cccc_atanpil(double x) { return cccc_atanpi(x); }
 static double cccc_atan2pi(double y, double x)  { return atan2(y, x) / CCCC_PI; }
 static float  cccc_atan2pif(float y, float x)   { return atan2f(y, x) / CCCC_PIf; }
 static double cccc_atan2pil(double y, double x)  { return cccc_atan2pi(y, x); }
+
+// ==================== C23 IEC 60559:2020 interchange functions (#774) ====
+//
+// Software implementations operating on raw IEEE-754 bit patterns, not FFI
+// wrappers: Darwin's libm exports none of totalorder/totalordermag/
+// fromfp*/ufromfp*/getpayload/setpayload*/llogb at all, and glibc only
+// gained fmaximum/fminimum in 2.35 -- an FFI approach would need a
+// platform/version matrix for no benefit over a direct implementation.
+//
+// `l` (long double) variants are double-precision shims, matching the rest
+// of this file (#491): CCCC's guest long double is modeled as an 8-byte
+// double, so bridging through a real host long double (80-bit on Linux
+// x86_64, 128-bit on Linux aarch64) would be an ABI mismatch for no
+// precision CCCC guest code can actually observe.
+
+static uint64_t cccc_d2b(double x) { uint64_t u; memcpy(&u, &x, 8); return u; }
+static double   cccc_b2d(uint64_t u) { double x; memcpy(&x, &u, 8); return x; }
+static uint32_t cccc_f2b(float x) { uint32_t u; memcpy(&u, &x, 4); return u; }
+static float    cccc_b2f(uint32_t u) { float x; memcpy(&x, &u, 4); return x; }
+
+// ---- fmaximum/fminimum family ----
+// Unlike fmax/fmin, these propagate NaN (either argument NaN => NaN
+// result) and treat +0 as greater than -0 for equal-magnitude zero. The
+// _num variants ignore a single NaN like fmax/fmin (NaN only if *both*
+// are NaN); the _mag variants compare |x| vs |y|, falling back to the
+// corresponding non-mag function on a magnitude tie.
+
+#define CCCC_DEF_FMAXIMUM_FAMILY(SUF, T, ISNAN, SIGNBIT, FABS)              \
+static T cccc_fmaximum##SUF(T x, T y) {                                     \
+    if (ISNAN(x)) return x;                                                 \
+    if (ISNAN(y)) return y;                                                 \
+    if (x == y) return (SIGNBIT(x) && !SIGNBIT(y)) ? y : x;                 \
+    return x > y ? x : y;                                                   \
+}                                                                            \
+static T cccc_fminimum##SUF(T x, T y) {                                     \
+    if (ISNAN(x)) return x;                                                 \
+    if (ISNAN(y)) return y;                                                 \
+    if (x == y) return (SIGNBIT(x) && !SIGNBIT(y)) ? x : y;                 \
+    return x < y ? x : y;                                                   \
+}                                                                            \
+static T cccc_fmaximum_num##SUF(T x, T y) {                                 \
+    if (ISNAN(x) && ISNAN(y)) return x;                                     \
+    if (ISNAN(x)) return y;                                                 \
+    if (ISNAN(y)) return x;                                                 \
+    return cccc_fmaximum##SUF(x, y);                                        \
+}                                                                            \
+static T cccc_fminimum_num##SUF(T x, T y) {                                 \
+    if (ISNAN(x) && ISNAN(y)) return x;                                     \
+    if (ISNAN(x)) return y;                                                 \
+    if (ISNAN(y)) return x;                                                 \
+    return cccc_fminimum##SUF(x, y);                                        \
+}                                                                            \
+static T cccc_fmaximum_mag##SUF(T x, T y) {                                 \
+    if (ISNAN(x)) return x;                                                 \
+    if (ISNAN(y)) return y;                                                 \
+    T ax = FABS(x), ay = FABS(y);                                           \
+    if (ax == ay) return cccc_fmaximum##SUF(x, y);                          \
+    return ax > ay ? x : y;                                                 \
+}                                                                            \
+static T cccc_fminimum_mag##SUF(T x, T y) {                                 \
+    if (ISNAN(x)) return x;                                                 \
+    if (ISNAN(y)) return y;                                                 \
+    T ax = FABS(x), ay = FABS(y);                                           \
+    if (ax == ay) return cccc_fminimum##SUF(x, y);                          \
+    return ax < ay ? x : y;                                                 \
+}                                                                            \
+static T cccc_fmaximum_mag_num##SUF(T x, T y) {                             \
+    if (ISNAN(x) && ISNAN(y)) return x;                                     \
+    if (ISNAN(x)) return y;                                                 \
+    if (ISNAN(y)) return x;                                                 \
+    T ax = FABS(x), ay = FABS(y);                                           \
+    if (ax == ay) return cccc_fmaximum_num##SUF(x, y);                      \
+    return ax > ay ? x : y;                                                 \
+}                                                                            \
+static T cccc_fminimum_mag_num##SUF(T x, T y) {                             \
+    if (ISNAN(x) && ISNAN(y)) return x;                                     \
+    if (ISNAN(x)) return y;                                                 \
+    if (ISNAN(y)) return x;                                                 \
+    T ax = FABS(x), ay = FABS(y);                                           \
+    if (ax == ay) return cccc_fminimum_num##SUF(x, y);                      \
+    return ax < ay ? x : y;                                                 \
+}
+
+CCCC_DEF_FMAXIMUM_FAMILY(, double, isnan, signbit, fabs)
+CCCC_DEF_FMAXIMUM_FAMILY(f, float, isnan, signbit, fabsf)
+
+static double cccc_fmaximuml(double x, double y) { return cccc_fmaximum(x, y); }
+static double cccc_fminimuml(double x, double y) { return cccc_fminimum(x, y); }
+static double cccc_fmaximum_numl(double x, double y) { return cccc_fmaximum_num(x, y); }
+static double cccc_fminimum_numl(double x, double y) { return cccc_fminimum_num(x, y); }
+static double cccc_fmaximum_magl(double x, double y) { return cccc_fmaximum_mag(x, y); }
+static double cccc_fminimum_magl(double x, double y) { return cccc_fminimum_mag(x, y); }
+static double cccc_fmaximum_mag_numl(double x, double y) { return cccc_fmaximum_mag_num(x, y); }
+static double cccc_fminimum_mag_numl(double x, double y) { return cccc_fminimum_mag_num(x, y); }
+
+// ---- totalorder/totalordermag ----
+// IEEE-754-2019 totalOrder predicate via the standard "radix-sortable
+// float" bit trick: XOR every bit with all-1s when the sign bit is set
+// (reverses the ordering among negatives, so larger-magnitude negatives
+// get smaller keys), or XOR just the sign bit when clear (shifts all
+// positives above all negatives). Comparing the results as UNSIGNED
+// integers then yields the total order, including NaN payloads ordered by
+// raw bit pattern within each sign, matching the standard's requirement.
+// (Comparison must be unsigned -- a signed comparison of the raw
+// sign-bit-set keys, e.g. via a cast to int64_t, gets it backwards.)
+static uint64_t cccc_order_key64(uint64_t u) {
+    uint64_t mask = (u & 0x8000000000000000ULL) ? 0xFFFFFFFFFFFFFFFFULL : 0x8000000000000000ULL;
+    return u ^ mask;
+}
+static uint32_t cccc_order_key32(uint32_t u) {
+    uint32_t mask = (u & 0x80000000U) ? 0xFFFFFFFFU : 0x80000000U;
+    return u ^ mask;
+}
+
+static long long cccc_totalorder(double x, double y) {
+    return cccc_order_key64(cccc_d2b(x)) <= cccc_order_key64(cccc_d2b(y));
+}
+static long long cccc_totalorderf(float x, float y) {
+    return cccc_order_key32(cccc_f2b(x)) <= cccc_order_key32(cccc_f2b(y));
+}
+static long long cccc_totalorderl(double x, double y) { return cccc_totalorder(x, y); }
+
+static long long cccc_totalordermag(double x, double y) {
+    return cccc_order_key64(cccc_d2b(fabs(x))) <= cccc_order_key64(cccc_d2b(fabs(y)));
+}
+static long long cccc_totalordermagf(float x, float y) {
+    return cccc_order_key32(cccc_f2b(fabsf(x))) <= cccc_order_key32(cccc_f2b(fabsf(y)));
+}
+static long long cccc_totalordermagl(double x, double y) { return cccc_totalordermag(x, y); }
+
+// ---- canonicalize ----
+// IEEE 754 binary32/binary64 (CCCC's float/double) have no non-canonical
+// encodings (unlike decimal floating types), so this is always a plain
+// copy that reports success.
+static long long cccc_canonicalize(long long cx, long long x) {
+    *(double *)(intptr_t)cx = *(const double *)(intptr_t)x;
+    return 0;
+}
+static long long cccc_canonicalizef(long long cx, long long x) {
+    *(float *)(intptr_t)cx = *(const float *)(intptr_t)x;
+    return 0;
+}
+static long long cccc_canonicalizel(long long cx, long long x) {
+    return cccc_canonicalize(cx, x);
+}
+
+// ---- getpayload/setpayload/setpayload_sig ----
+// The payload occupies all significand bits below the quiet/signaling
+// bit (bit 51 for double, bit 22 for float). getpayload returns -1 for a
+// non-NaN input. setpayload builds a quiet NaN (quiet bit set);
+// setpayload_sig builds a signaling NaN (quiet bit clear) -- which
+// requires a nonzero payload, since an all-zero significand with the
+// quiet bit clear would be infinity, not a NaN.
+#define CCCC_DBL_QUIET_BIT   0x0008000000000000ULL
+#define CCCC_DBL_PAYLOAD_MAX 0x0007FFFFFFFFFFFFULL // 51 bits
+#define CCCC_FLT_QUIET_BIT   0x00400000U
+#define CCCC_FLT_PAYLOAD_MAX 0x003FFFFFU // 22 bits
+
+static double cccc_getpayload(long long xp) {
+    double x = *(const double *)(intptr_t)xp;
+    if (!isnan(x)) return -1.0;
+    uint64_t bits = cccc_d2b(x) & CCCC_DBL_PAYLOAD_MAX;
+    return (double)bits;
+}
+static float cccc_getpayloadf(long long xp) {
+    float x = *(const float *)(intptr_t)xp;
+    if (!isnan(x)) return -1.0f;
+    uint32_t bits = cccc_f2b(x) & CCCC_FLT_PAYLOAD_MAX;
+    return (float)bits;
+}
+static double cccc_getpayloadl(long long xp) { return cccc_getpayload(xp); }
+
+static long long cccc_setpayload_impl(long long xp, double payload, int quiet) {
+    if (payload < 0.0 || payload != (double)(uint64_t)payload ||
+        (uint64_t)payload > CCCC_DBL_PAYLOAD_MAX)
+        return 1;
+    if (!quiet && (uint64_t)payload == 0)
+        return 1; // signaling NaN payload cannot be all-zero (would be Inf)
+    uint64_t bits = 0x7FF0000000000000ULL | (uint64_t)payload;
+    if (quiet) bits |= CCCC_DBL_QUIET_BIT;
+    *(double *)(intptr_t)xp = cccc_b2d(bits);
+    return 0;
+}
+static long long cccc_setpayload(long long xp, double payload) { return cccc_setpayload_impl(xp, payload, 1); }
+static long long cccc_setpayloadsig(long long xp, double payload) { return cccc_setpayload_impl(xp, payload, 0); }
+
+static long long cccc_setpayloadf_impl(long long xp, float payload, int quiet) {
+    if (payload < 0.0f || payload != (float)(uint32_t)payload ||
+        (uint32_t)payload > CCCC_FLT_PAYLOAD_MAX)
+        return 1;
+    if (!quiet && (uint32_t)payload == 0)
+        return 1;
+    uint32_t bits = 0x7F800000U | (uint32_t)payload;
+    if (quiet) bits |= CCCC_FLT_QUIET_BIT;
+    *(float *)(intptr_t)xp = cccc_b2f(bits);
+    return 0;
+}
+static long long cccc_setpayloadf(long long xp, float payload) { return cccc_setpayloadf_impl(xp, payload, 1); }
+static long long cccc_setpayloadsigf(long long xp, float payload) { return cccc_setpayloadf_impl(xp, payload, 0); }
+
+static long long cccc_setpayloadl(long long xp, double payload) { return cccc_setpayload(xp, payload); }
+static long long cccc_setpayloadsigl(long long xp, double payload) { return cccc_setpayloadsig(xp, payload); }
+
+// ---- llogb ----
+// Like ilogb but returns long. FP_ILOGB0/FP_ILOGBNAN (from <math.h>) are
+// reused for the 0/NaN special cases via ilogb() itself, since llogb's
+// special-case values are the same, just widened to `long`.
+static long cccc_llogb(double x) { return (long)ilogb(x); }
+static long cccc_llogbf(float x) { return (long)ilogbf(x); }
+static long cccc_llogbl(double x) { return cccc_llogb(x); }
+
+// ---- fromfp/ufromfp family ----
+// Rounds x to an integer value (in the source floating type) per rounding
+// direction `rnd`, that fits in a `width`-bit signed (fromfp) / unsigned
+// (ufromfp) integer; returns 0 (raising FE_INVALID) if it doesn't fit.
+// The 'x' variants additionally raise FE_INEXACT if the rounded result
+// differs from the input.
+static double cccc_round_by_direction(double x, int rnd) {
+    switch (rnd) {
+    case CCCC_FP_INT_UPWARD:              return ceil(x);
+    case CCCC_FP_INT_DOWNWARD:            return floor(x);
+    case CCCC_FP_INT_TOWARDZERO:          return trunc(x);
+    case CCCC_FP_INT_TONEARESTFROMZERO:   return round(x);
+    case CCCC_FP_INT_TONEAREST: default:  return rint(x);
+    }
+}
+
+static double cccc_fromfp_impl(double x, long long rnd, long long width, int is_unsigned, int extended) {
+    if (isnan(x) || isinf(x) || width == 0) {
+        feraiseexcept(FE_INVALID);
+        return 0.0;
+    }
+    double r = cccc_round_by_direction(x, (int)rnd);
+    double lo, hi; // inclusive range representable in `width` bits
+    if (is_unsigned) {
+        lo = 0.0;
+        hi = (width >= 64) ? 18446744073709551615.0 : (ldexp(1.0, (int)width) - 1.0);
+    } else {
+        hi = (width >= 64) ? 9223372036854775807.0 : (ldexp(1.0, (int)width - 1) - 1.0);
+        lo = (width >= 64) ? -9223372036854775808.0 : -ldexp(1.0, (int)width - 1);
+    }
+    if (r < lo || r > hi) {
+        feraiseexcept(FE_INVALID);
+        return 0.0;
+    }
+    if (extended && r != x)
+        feraiseexcept(FE_INEXACT);
+    return r;
+}
+
+static double cccc_fromfp(double x, long long rnd, long long width)   { return cccc_fromfp_impl(x, rnd, width, 0, 0); }
+static double cccc_ufromfp(double x, long long rnd, long long width)  { return cccc_fromfp_impl(x, rnd, width, 1, 0); }
+static double cccc_fromfpx(double x, long long rnd, long long width)  { return cccc_fromfp_impl(x, rnd, width, 0, 1); }
+static double cccc_ufromfpx(double x, long long rnd, long long width) { return cccc_fromfp_impl(x, rnd, width, 1, 1); }
+
+static float cccc_fromfp_implf(float x, long long rnd, long long width, int is_unsigned, int extended) {
+    return (float)cccc_fromfp_impl((double)x, rnd, width, is_unsigned, extended);
+}
+static float cccc_fromfpf(float x, long long rnd, long long width)   { return cccc_fromfp_implf(x, rnd, width, 0, 0); }
+static float cccc_ufromfpf(float x, long long rnd, long long width)  { return cccc_fromfp_implf(x, rnd, width, 1, 0); }
+static float cccc_fromfpxf(float x, long long rnd, long long width)  { return cccc_fromfp_implf(x, rnd, width, 0, 1); }
+static float cccc_ufromfpxf(float x, long long rnd, long long width) { return cccc_fromfp_implf(x, rnd, width, 1, 1); }
+
+static double cccc_fromfpl(double x, long long rnd, long long width)   { return cccc_fromfp(x, rnd, width); }
+static double cccc_ufromfpl(double x, long long rnd, long long width)  { return cccc_ufromfp(x, rnd, width); }
+static double cccc_fromfpxl(double x, long long rnd, long long width)  { return cccc_fromfpx(x, rnd, width); }
+static double cccc_ufromfpxl(double x, long long rnd, long long width) { return cccc_ufromfpx(x, rnd, width); }
+
+// ---- issignaling/iseqsig (backing __cccc_issignaling_*/__cccc_iseqsig_*
+// macros dispatched from <math.h>) ----
+// issignaling tests the quiet bit directly on the raw bit pattern rather
+// than going through isnan()/arithmetic, since either would quiet a
+// signaling NaN before it could be observed.
+static long long cccc_issignaling_d(double x) {
+    uint64_t u = cccc_d2b(x);
+    return ((u & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) && // NaN or Inf
+           (u & CCCC_DBL_PAYLOAD_MAX) != 0 &&                        // NaN, not Inf
+           !(u & CCCC_DBL_QUIET_BIT);                                // quiet bit clear
+}
+static long long cccc_issignaling_f(float x) {
+    uint32_t u = cccc_f2b(x);
+    return ((u & 0x7F800000U) == 0x7F800000U) &&
+           (u & CCCC_FLT_PAYLOAD_MAX) != 0 &&
+           !(u & CCCC_FLT_QUIET_BIT);
+}
+
+// iseqsig: an equality compare that raises FE_INVALID for a signaling NaN
+// operand (unlike ==, which only traps quiet-vs-quiet). x != x below is
+// used instead of isnan() so it composes with the signaling check without
+// an extra function call.
+static long long cccc_iseqsig_d(double x, double y) {
+    if (cccc_issignaling_d(x) || cccc_issignaling_d(y))
+        feraiseexcept(FE_INVALID);
+    return x == y;
+}
+static long long cccc_iseqsig_f(float x, float y) {
+    if (cccc_issignaling_f(x) || cccc_issignaling_f(y))
+        feraiseexcept(FE_INVALID);
+    return x == y;
+}
 
 // Register all math.h functions
 void register_math_functions(VirtualMachine *vm) {
@@ -293,4 +606,60 @@ void register_math_functions(VirtualMachine *vm) {
     cc_register_cfunc_ex(vm, "atanpif", (void*)cccc_atanpif, 1, 2, 0b1);    cc_register_cfunc_ex(vm, "atanpil", (void*)cccc_atanpil, 1, 1, 0b1);
     cc_register_cfunc_ex(vm, "atan2pi", (void*)cccc_atan2pi, 2, 1, 0b11);  // double, double
     cc_register_cfunc_ex(vm, "atan2pif", (void*)cccc_atan2pif, 2, 2, 0b11);    cc_register_cfunc_ex(vm, "atan2pil", (void*)cccc_atan2pil, 2, 1, 0b11);
+
+    // C23 IEC 60559:2020 interchange functions (#774)
+#define CCCC_REG_FMAXIMUM_FAMILY(NAME)                                                      \
+    cc_register_cfunc_ex(vm, #NAME, (void*)cccc_##NAME, 2, 1, 0b11);                         \
+    cc_register_cfunc_ex(vm, #NAME "f", (void*)cccc_##NAME##f, 2, 2, 0b11);                  \
+    cc_register_cfunc_ex(vm, #NAME "l", (void*)cccc_##NAME##l, 2, 1, 0b11);
+    CCCC_REG_FMAXIMUM_FAMILY(fmaximum)
+    CCCC_REG_FMAXIMUM_FAMILY(fminimum)
+    CCCC_REG_FMAXIMUM_FAMILY(fmaximum_num)
+    CCCC_REG_FMAXIMUM_FAMILY(fminimum_num)
+    CCCC_REG_FMAXIMUM_FAMILY(fmaximum_mag)
+    CCCC_REG_FMAXIMUM_FAMILY(fminimum_mag)
+    CCCC_REG_FMAXIMUM_FAMILY(fmaximum_mag_num)
+    CCCC_REG_FMAXIMUM_FAMILY(fminimum_mag_num)
+#undef CCCC_REG_FMAXIMUM_FAMILY
+
+    cc_register_cfunc_ex(vm, "totalorder", (void*)cccc_totalorder, 2, 0, 0b11);
+    cc_register_cfunc_ex(vm, "totalorderf", (void*)cccc_totalorderf, 2, 0, 0b11);
+    cc_register_cfunc_ex(vm, "totalorderl", (void*)cccc_totalorderl, 2, 0, 0b11);
+    cc_register_cfunc_ex(vm, "totalordermag", (void*)cccc_totalordermag, 2, 0, 0b11);
+    cc_register_cfunc_ex(vm, "totalordermagf", (void*)cccc_totalordermagf, 2, 0, 0b11);
+    cc_register_cfunc_ex(vm, "totalordermagl", (void*)cccc_totalordermagl, 2, 0, 0b11);
+
+    cc_register_cfunc_ex(vm, "canonicalize", (void*)cccc_canonicalize, 2, 0, 0b00);   // double*, const double*
+    cc_register_cfunc_ex(vm, "canonicalizef", (void*)cccc_canonicalizef, 2, 0, 0b00); // float*, const float*
+    cc_register_cfunc_ex(vm, "canonicalizel", (void*)cccc_canonicalizel, 2, 0, 0b00);
+
+    cc_register_cfunc_ex(vm, "getpayload", (void*)cccc_getpayload, 1, 1, 0b0);    // const double* -> double
+    cc_register_cfunc_ex(vm, "getpayloadf", (void*)cccc_getpayloadf, 1, 2, 0b0);  // const float* -> float
+    cc_register_cfunc_ex(vm, "getpayloadl", (void*)cccc_getpayloadl, 1, 1, 0b0);
+
+    cc_register_cfunc_ex(vm, "setpayload", (void*)cccc_setpayload, 2, 0, 0b10);       // double*, double
+    cc_register_cfunc_ex(vm, "setpayloadf", (void*)cccc_setpayloadf, 2, 0, 0b10);     // float*, float
+    cc_register_cfunc_ex(vm, "setpayloadl", (void*)cccc_setpayloadl, 2, 0, 0b10);
+    cc_register_cfunc_ex(vm, "setpayloadsig", (void*)cccc_setpayloadsig, 2, 0, 0b10);
+    cc_register_cfunc_ex(vm, "setpayloadsigf", (void*)cccc_setpayloadsigf, 2, 0, 0b10);
+    cc_register_cfunc_ex(vm, "setpayloadsigl", (void*)cccc_setpayloadsigl, 2, 0, 0b10);
+
+    cc_register_cfunc_ex(vm, "llogb", (void*)cccc_llogb, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "llogbf", (void*)cccc_llogbf, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "llogbl", (void*)cccc_llogbl, 1, 0, 0b1);
+
+#define CCCC_REG_FROMFP_FAMILY(NAME)                                                         \
+    cc_register_cfunc_ex(vm, #NAME, (void*)cccc_##NAME, 3, 1, 0b1);                          \
+    cc_register_cfunc_ex(vm, #NAME "f", (void*)cccc_##NAME##f, 3, 2, 0b1);                   \
+    cc_register_cfunc_ex(vm, #NAME "l", (void*)cccc_##NAME##l, 3, 1, 0b1);
+    CCCC_REG_FROMFP_FAMILY(fromfp)
+    CCCC_REG_FROMFP_FAMILY(ufromfp)
+    CCCC_REG_FROMFP_FAMILY(fromfpx)
+    CCCC_REG_FROMFP_FAMILY(ufromfpx)
+#undef CCCC_REG_FROMFP_FAMILY
+
+    cc_register_cfunc_ex(vm, "__cccc_issignaling_f", (void*)cccc_issignaling_f, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "__cccc_issignaling_d", (void*)cccc_issignaling_d, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "__cccc_iseqsig_f", (void*)cccc_iseqsig_f, 2, 0, 0b11);
+    cc_register_cfunc_ex(vm, "__cccc_iseqsig_d", (void*)cccc_iseqsig_d, 2, 0, 0b11);
 }

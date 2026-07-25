@@ -165,7 +165,7 @@ language coverage figures apply.
 | `char8_t` | ✓ | Defined in `<uchar.h>`; `u8'x'` literals have type `unsigned char` and value `char8_t`; `mbrtoc8`/`c8rtomb` implement the full §7.31.1 incremental UTF-8 state machine |
 | Labels before declarations (at block scope) | ✓ | `case`, `default`, and goto-labels may directly precede object declarations; pre-C23 bare declaration after label is a hard error |
 | Empty parameter lists `()` — C23 prototype semantics | ✓ | Pre-C23: `()` is an unprototyped (K&R) declaration accepting any arguments; in C23, `()` is equivalent to `(void)`. Use `-Wstrict-prototypes` to warn about non-prototype `()` in pre-C23 modes |
-| `exp10`, `sinpi`/`cospi`/`tanpi`, `asinpi`/`acospi`/`atanpi`/`atan2pi` (`<math.h>`) | ~ | `double`/`long double` variants implemented (native on macOS/glibc where available, portable shims otherwise, with exact integer/half-integer special-casing for `sinpi`/`cospi`/`tanpi`); `f` variants registered but affected by a pre-existing float-FFI limitation ([#406](https://todo.sr.ht/~takeiteasy/cccc/406)) |
+| `exp10`, `sinpi`/`cospi`/`tanpi`, `asinpi`/`acospi`/`atanpi`/`atan2pi` (`<math.h>`) | ✓ | `double`/`float`/`long double` variants implemented (native on macOS/glibc where available, portable shims otherwise, with exact integer/half-integer special-casing for `sinpi`/`cospi`/`tanpi`) |
 
 ### Preprocessor
 
@@ -1227,7 +1227,7 @@ if (__builtin_mul_overflow(a, b, &r))
 | `<float.h>` | ✓ | Correct single-precision (`FLT_*`) values distinct from `DBL_*`/`LDBL_*` (`long double` is genuinely 64-bit on CCCC, so `LDBL_* == DBL_*` there is accurate, not a bug); full C11 (`DECIMAL_DIG`, `FLT_EVAL_METHOD`, `*_HAS_SUBNORM`, `*_TRUE_MIN`, `*_DECIMAL_DIG`) and C23 (`*_NORM_MAX`, `*_SNAN`) macro set |
 | `<limits.h>` | ✓ | |
 | `<locale.h>` | ✓ | Host locale APIs registered |
-| `<math.h>` | ✓ | Full C99 function set registered |
+| `<math.h>` | ✓ | Full C99 function set registered; C23 IEC 60559:2020 interchange/classification functions (`fmaximum`/`fminimum` family, `totalorder`/`totalordermag`, `canonicalize`, `getpayload`/`setpayload`/`setpayloadsig`, `llogb`, `fromfp`/`ufromfp`/`fromfpx`/`ufromfpx`, `issignaling`/`iseqsig`/`iscanonical`) implemented as software bit-pattern functions, not FFI -- several are absent from Darwin's libm entirely and glibc only gained `fmaximum`/`fminimum` in 2.35 |
 | `<setjmp.h>` | ✓ | CCCC-specific implementation for VM calling convention |
 | `<signal.h>` | ✓ | Full POSIX signal set, `#ifdef __APPLE__`-guarded per-platform values (Darwin and Linux signal numbers diverge past the common 1-15 core; e.g. `SIGBUS`/`SIGUSR1`/`SIGCHLD` differ) including job-control (`SIGSTOP`, `SIGCONT`, `SIGTSTP`, `SIGTTIN`, `SIGTTOU`), resource-limit (`SIGXCPU`, `SIGXFSZ`), and misc (`SIGPROF`, `SIGSYS`, `SIGVTALRM`, `SIGIO`, `SIGURG`, `SIGWINCH`) signals. `signal`/`raise` are VM-managed (VSIGNAL/VRAISE opcodes); `sigaction` reuses the same VM-managed slot + async-safe host shim, so it is safe to hand a real guest handler (previously a raw host passthrough that crashed on delivery -- the handler value was never a real callable host pointer). `sa_mask`/`sa_flags` round-trip faithfully through `oact` but are not enforced at the OS level (only the handler disposition is). `sigemptyset`/`sigfillset`/`sigaddset`/`sigdelset`/`sigismember` operate natively on the guest's own 4-byte `sigset_t` representation rather than the host's real `sigset_t` (previously a raw passthrough too -- harmless on macOS, where the real `sigset_t` also happens to be 4 bytes, but a 128-byte out-of-bounds write/read on Linux, where it isn't). Handlers run from the dispatch loop, never native signal context. The macOS crash dispatcher preserves guest dispositions while trapping default `SIGSEGV`/`SIGBUS`/`SIGFPE`/`SIGILL`/`SIGABRT` into an interactive debugger. `SIGTRAP` with `-g` breaks into the debugger. `siginfo_t` (`si_signo`/`si_errno`/`si_code`/`si_pid`/`si_uid`/`si_status` plus trailing padding sized to the full host struct -- 104 bytes macOS, 128 bytes Linux -- so host `waitid()` can't overflow adjacent guest memory), `union sigval`, and `CLD_*` si-codes are declared for `waitid()` (see `<sys/wait.h>`) |
 | `<stdarg.h>` | ✓ | CCCC-specific implementation |
@@ -1291,9 +1291,10 @@ C17 is a bug-fix release — no new language features or library functions were 
 | `strtol`/`strtoll`/`strtoul`/`strtoull` `0b`/`0B` binary prefix | ✓ | Accepted with base `0` or base `2` |
 | `nullptr_t` (`<stddef.h>`) | ✓ | Defined as `typeof(nullptr)` |
 | `bool`/`true`/`false` (`<stdbool.h>`) | ✓ | Real keywords in C23; `<stdbool.h>`'s macros are gated to pre-C23 modes, `__bool_true_false_are_defined` still set |
-| `exp10`, `sinpi`/`cospi`/`tanpi`, `asinpi`/`acospi`/`atanpi`/`atan2pi` (+ `f`/`l`) | ~ | `double`/`long double` variants correct; `f` variants registered but affected by the float-FFI limitation ([#406](https://todo.sr.ht/~takeiteasy/cccc/406)) |
+| `exp10`, `sinpi`/`cospi`/`tanpi`, `asinpi`/`acospi`/`atanpi`/`atan2pi` (+ `f`/`l`) | ✓ | `double`/`float`/`long double` variants all correct ([#406](https://todo.sr.ht/~takeiteasy/cccc/406), the float-FFI limitation this table used to note, is resolved) |
 | `mbrtoc8`, `c8rtomb` (`<uchar.h>`) | ✓ | Full incremental state machine per §7.31.1 (one `char8_t` per call, `(size_t)-3` queued-byte convention) |
 | `printf`/`scanf` family `%b`/`%B` (binary integer) specifier | ✓ | macOS / glibc < 2.35: handled by the custom `format_printf.c`/`format_scanf.c` engines; glibc 2.35+ uses the native host implementation |
+| IEC 60559:2020 interchange functions (`<math.h>`) | ✓ | `fmaximum`/`fminimum`/`fmaximum_num`/`fminimum_num`/`fmaximum_mag`/`fminimum_mag`/`fmaximum_mag_num`/`fminimum_mag_num`, `totalorder`/`totalordermag`, `canonicalize`, `getpayload`/`setpayload`/`setpayloadsig`, `llogb`, `fromfp`/`ufromfp`/`fromfpx`/`ufromfpx`, `issignaling`/`iseqsig`/`iscanonical` (`double`/`float`/`long double` where applicable); software bit-pattern implementations, not FFI (Darwin's libm has none of `totalorder`, `fromfp`/`ufromfp`, `getpayload`/`setpayload`, or `llogb`; glibc only gained `fmaximum`/`fminimum` in 2.35) |
 
 ---
 
@@ -1390,7 +1391,5 @@ This table tracks shims that **reimplement** a standard function — not ABI-com
 > corresponding `double` libc symbol or wrapped in a thin double-precision shim.
 > This is correct for all existing tests and avoids a host-ABI mismatch on
 > Linux/aarch64 where the native `long double` is 128-bit ([#491](https://todo.sr.ht/~takeiteasy/cccc/491)).
-
-> **Known limitation ([#406](https://todo.sr.ht/~takeiteasy/cccc/406)):** the native FFI call path does not support `float`-typed (single-precision) arguments/returns for *any* registered C function - this predates and is broader than this table. `exp10f`, `sinpif`, `cospif`, `tanpif`, `asinpif`, `acospif`, `atanpif`, `atan2pif` (and pre-existing functions like `sqrtf`, `sinf`, `fmodf`, `expf`, ...) are registered and implemented correctly, but currently return incorrect results when called. `double` and `long double` variants are unaffected.
 
 > **Known limitation ([#407](https://todo.sr.ht/~takeiteasy/cccc/407)):** when a user-defined variadic function forwards its `va_list` to `vprintf`/`vfprintf`/`vsprintf`/`vsnprintf`/`vscanf`/`vfscanf`/`vsscanf`, only the *first* variadic argument is passed through correctly; subsequent arguments are garbage. This is a pre-existing VM/FFI limitation, not specific to `%b`/`%B`.

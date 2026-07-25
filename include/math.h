@@ -327,4 +327,137 @@ double copysign(double, double);
 float copysignf(float, float);
 long double copysignl(long double, long double);
 
+/* C23 IEC 60559:2020 interchange/classification functions (#774). These are
+ * implemented as software bit-pattern functions in src/stdlib/math.c rather
+ * than FFI wrappers: several (totalorder, totalordermag, fromfp/ufromfp,
+ * getpayload/setpayload, llogb) are not exported by Darwin's libm at all,
+ * and fmaximum/fminimum only landed in glibc 2.35, so FFI would need a
+ * platform matrix for no benefit. */
+
+/* fmaximum/fminimum family: unlike fmax/fmin, these propagate NaN (if
+ * either argument is NaN, the result is NaN) and treat +0 as greater than
+ * -0. The _num variants ignore a single NaN argument like fmax/fmin do,
+ * but keep the +0 > -0 zero rule. The _mag variants compare by magnitude
+ * (|x| vs |y|), falling back to the corresponding non-mag function on a
+ * magnitude tie. */
+double fmaximum(double, double);
+float fmaximumf(float, float);
+long double fmaximuml(long double, long double);
+
+double fminimum(double, double);
+float fminimumf(float, float);
+long double fminimuml(long double, long double);
+
+double fmaximum_num(double, double);
+float fmaximum_numf(float, float);
+long double fmaximum_numl(long double, long double);
+
+double fminimum_num(double, double);
+float fminimum_numf(float, float);
+long double fminimum_numl(long double, long double);
+
+double fmaximum_mag(double, double);
+float fmaximum_magf(float, float);
+long double fmaximum_magl(long double, long double);
+
+double fminimum_mag(double, double);
+float fminimum_magf(float, float);
+long double fminimum_magl(long double, long double);
+
+double fmaximum_mag_num(double, double);
+float fmaximum_mag_numf(float, float);
+long double fmaximum_mag_numl(long double, long double);
+
+double fminimum_mag_num(double, double);
+float fminimum_mag_numf(float, float);
+long double fminimum_mag_numl(long double, long double);
+
+/* totalorder/totalordermag: IEEE-754-2019 totalOrder predicate. Returns
+ * nonzero iff x precedes y in the total order (-qNaN < -Inf < ... < -0 <
+ * +0 < ... < +Inf < +qNaN, ordered by raw bit pattern within each NaN
+ * sign). totalordermag compares |x| and |y| under the same order. */
+int totalorder(double, double);
+int totalorderf(float, float);
+int totalorderl(long double, long double);
+
+int totalordermag(double, double);
+int totalordermagf(float, float);
+int totalordermagl(long double, long double);
+
+/* canonicalize: converts *x to canonical encoding and stores it in *cx,
+ * returning 0 if *x was already canonical. CCCC's float/double are IEEE
+ * 754 binary32/binary64, which (unlike decimal floating types) have no
+ * non-canonical encodings, so this is a copy that always returns 0. */
+int canonicalize(double *, const double *);
+int canonicalizef(float *, const float *);
+int canonicalizel(long double *, const long double *);
+
+/* getpayload/setpayload/setpayload_sig: read/write a NaN's payload bits
+ * (the significand bits below the quiet/signaling bit) as a nonnegative
+ * double. getpayload returns -1 if *x is not a NaN. setpayload(_sig)
+ * constructs a quiet (signaling) NaN with the given payload in *x and
+ * returns 0 on success, nonzero if payload doesn't fit (negative,
+ * fractional, too large, or -- for setpayload_sig -- zero, since a
+ * signaling NaN's payload cannot be all-zero without becoming Inf). */
+double getpayload(const double *);
+float getpayloadf(const float *);
+long double getpayloadl(const long double *);
+
+int setpayload(double *, double);
+int setpayloadf(float *, float);
+int setpayloadl(long double *, long double);
+
+int setpayloadsig(double *, double);
+int setpayloadsigf(float *, float);
+int setpayloadsigl(long double *, long double);
+
+/* llogb: like ilogb but returns long. */
+long llogb(double);
+long llogbf(float);
+long llogbl(long double);
+
+/* fromfp/ufromfp family: round x to an integer value (returned in the
+ * source floating type) per rounding direction `rnd`, that fits in a
+ * `width`-bit signed (fromfp) or unsigned (ufromfp) integer; returns 0 if
+ * it doesn't fit. The x variants also raise FE_INEXACT if the result
+ * differs from x. */
+#define FP_INT_UPWARD 0
+#define FP_INT_DOWNWARD 1
+#define FP_INT_TOWARDZERO 2
+#define FP_INT_TONEARESTFROMZERO 3
+#define FP_INT_TONEAREST 4
+
+double fromfp(double, int, unsigned int);
+float fromfpf(float, int, unsigned int);
+long double fromfpl(long double, int, unsigned int);
+
+double ufromfp(double, int, unsigned int);
+float ufromfpf(float, int, unsigned int);
+long double ufromfpl(long double, int, unsigned int);
+
+double fromfpx(double, int, unsigned int);
+float fromfpxf(float, int, unsigned int);
+long double fromfpxl(long double, int, unsigned int);
+
+double ufromfpx(double, int, unsigned int);
+float ufromfpxf(float, int, unsigned int);
+long double ufromfpxl(long double, int, unsigned int);
+
+/* issignaling/iseqsig/iscanonical: macro-level classification (C23).
+ * issignaling(x) tests the quiet bit directly on the raw bit pattern (a
+ * signaling NaN would quiet itself if compared or arithmetic'd on, so this
+ * cannot be implemented via isnan()). iseqsig(x, y) is an equality compare
+ * that raises FE_INVALID for a signaling NaN operand (unlike ==, which
+ * only does so for quiet-vs-quiet). iscanonical is always true for
+ * IEEE-754 binary formats (see canonicalize above). */
+int __cccc_issignaling_f(float);
+int __cccc_issignaling_d(double);
+#define issignaling(x) _Generic((x), float: __cccc_issignaling_f, default: __cccc_issignaling_d)(x)
+
+int __cccc_iseqsig_f(float, float);
+int __cccc_iseqsig_d(double, double);
+#define iseqsig(x, y) _Generic((x), float: __cccc_iseqsig_f, default: __cccc_iseqsig_d)((x), (y))
+
+#define iscanonical(x) ((void)(x), 1)
+
 #endif /* __MATH_H */
