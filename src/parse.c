@@ -10293,6 +10293,33 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
+    // __builtin_nans("tag") / __builtin_nansf("tag") / __builtin_nansl("tag") -> signaling NaN
+    // Same shape as __builtin_nan above, but sets the IEEE-754 quiet bit to 0
+    // (mantissa MSB) so the bit pattern is a signaling NaN rather than a quiet
+    // one. Note: a narrowing conversion (e.g. long double -> float at literal
+    // codegen) may still quiet the value per IEEE-754 conversion rules -- this
+    // only guarantees the *initial* bit pattern is signaling.
+    if (equal(tok, "__builtin_nans") || equal(tok, "__builtin_nansf") ||
+        equal(tok, "__builtin_nansl")) {
+        Type *ty = equal(tok, "__builtin_nansf") ? ty_float :
+                   equal(tok, "__builtin_nansl") ? ty_ldouble : ty_double;
+        tok = skip(vm, tok->next, "(");
+        // Parse and discard the string tag argument
+        Node *tag = assign(vm, &tok, tok);
+        (void)tag;
+        *rest = skip(vm, tok, ")");
+        Node *node = new_node(vm, ND_NUM, start);
+        if (ty == ty_float) {
+            union { uint32_t u; float f; } snan = { .u = 0x7F800001u };
+            node->fval = snan.f;
+        } else {
+            union { uint64_t u; double d; } snan = { .u = 0x7FF0000000000001ULL };
+            node->fval = snan.d;
+        }
+        node->ty = ty;
+        return node;
+    }
+
     // __builtin_isnan(x) -> x != x
     if (equal(tok, "__builtin_isnan")) {
         tok = skip(vm, tok->next, "(");

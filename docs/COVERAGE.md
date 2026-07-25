@@ -1224,7 +1224,7 @@ if (__builtin_mul_overflow(a, b, &r))
 | `<assert.h>` | ✓ | |
 | `<ctype.h>` | ✓ | |
 | `<errno.h>` | ✓ | `errno` aliases the host's real per-thread errno via an accessor function (`#define errno (*__cccc_errno_ptr())`, same pattern as `stdin`/`stdout`/`stderr` in `<stdio.h>`), so a failing host-backed call (`access`, `sysconf`, etc.) is actually observable from guest code. Windows targets keep the old plain-global behavior (untested target; not wired to the accessor). |
-| `<float.h>` | ✓ | |
+| `<float.h>` | ✓ | Correct single-precision (`FLT_*`) values distinct from `DBL_*`/`LDBL_*` (`long double` is genuinely 64-bit on CCCC, so `LDBL_* == DBL_*` there is accurate, not a bug); full C11 (`DECIMAL_DIG`, `FLT_EVAL_METHOD`, `*_HAS_SUBNORM`, `*_TRUE_MIN`, `*_DECIMAL_DIG`) and C23 (`*_NORM_MAX`, `*_SNAN`) macro set |
 | `<limits.h>` | ✓ | |
 | `<locale.h>` | ✓ | Host locale APIs registered |
 | `<math.h>` | ✓ | Full C99 function set registered |
@@ -1245,7 +1245,7 @@ if (__builtin_mul_overflow(a, b, &r))
 | `<inttypes.h>` | ✓ | |
 | `<stdbool.h>` | ✓ | |
 | `<stdint.h>` | ✓ | |
-| `<fenv.h>` | ✓ | Host floating-point environment APIs registered |
+| `<fenv.h>` | ~ | APIs registered, but guest `FE_*` constants are hardcoded and mismatch the real host `<fenv.h>` values, so rounding-mode and exception-flag calls are currently non-functional |
 | `<tgmath.h>` | ~ | Type-generic macros for real floating types and complex absolute value |
 | `<wchar.h>` / `<wctype.h>` | ~ | Common wide-character APIs registered |
 | `<iso646.h>` | ✓ | |
