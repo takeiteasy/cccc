@@ -290,9 +290,12 @@ All features listed below can be enabled individually or through the safety leve
   - Heap-only; stack and global subobjects are not type-tracked
   - Full coverage at every optimization level, including standalone
     `--type-checks -O2`/`-O3`: the codegen fusion paths that bypass
-    `emit_load`/`emit_store` (indexed-load fusion, restrict-value caching,
-    restrict memcpy-loop lowering) are disabled whenever `--type-checks`
-    is enabled, not just alongside `--bounds-checks`/`--uaf-detection`
+    `emit_load`/`emit_store` (indexed-load fusion, restrict memcpy-loop
+    lowering) are disabled whenever `--type-checks` is enabled, not just
+    alongside `--bounds-checks`/`--uaf-detection`. The restrict-value cache
+    stays enabled instead of disabled — its cache-hit path re-derives the
+    address and runs CHKP3/CHKT3 itself, so a cache hit gets the same
+    coverage as a real load (see OPTIMIZATION.md)
   - Costs roughly one extra byte of host memory per committed heap byte
     once `--type-checks` is enabled (the shadow array)
 - `--uninitialized-detection` **Uninitialized variable detection**

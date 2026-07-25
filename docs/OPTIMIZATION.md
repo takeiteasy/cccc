@@ -188,15 +188,25 @@ targeted invalidation of only `p`'s slots. `for` loops of the form
 `for (T i=0; i<n; i++) dst[i]=src[i]` where both pointers are restrict-qualified
 are lowered to a single `MCPY` opcode (libc memcpy) at `--optimize=2`+.
 
-Indexed load/store fusion, the `restrict` value cache, and the `restrict`
-memcpy-loop lowering above are all disabled whenever any of
-`--bounds-checks`, `--uaf-detection`, `--pointer-sanitizer`,
-`--type-checks`, or the invalid-arithmetic/provenance-tracking flags are
-enabled — each of these fusions elides a load/store and therefore bypasses
-the CHKP3/CHKT3 emission that the normal load/store path relies on
-(`CCCC_FUSION_UNSAFE_FLAGS` in `src/codegen.c`). This applies to each flag
-individually, not just their `-2`/`-3`/`--pointer-sanitizer` combinations,
-so a standalone `--type-checks -O3` build gets the same coverage as `-O0`.
+Indexed load/store fusion and the `restrict` memcpy-loop lowering above are
+disabled whenever any of `--bounds-checks`, `--uaf-detection`,
+`--pointer-sanitizer`, `--type-checks`, or the invalid-arithmetic/
+provenance-tracking flags are enabled — each of these fusions elides a
+load/store and therefore bypasses the CHKP3/CHKT3 emission that the normal
+load/store path relies on (`CCCC_FUSION_UNSAFE_FLAGS` in `src/codegen.c`).
+This applies to each flag individually, not just their `-2`/`-3`/
+`--pointer-sanitizer` combinations, so a standalone `--type-checks -O3` build
+gets the same coverage as `-O0`.
+
+The `restrict` value cache is the exception: instead of disabling it under
+these flags, its cache-hit path re-derives the address and runs CHKP3/CHKT3
+itself. A cache hit only reaches into an S-register, so this re-derivation
+(and the checks) are pure overhead relative to a real load — in practice a
+wash rather than a win, since the checks dominate the eliminated `LDR`. It
+stays enabled under safety flags for the safety property, not throughput:
+the hit-site checks catch cache staleness that the invalidation logic (see
+below) doesn't anticipate, independent of whether the invalidation
+bookkeeping itself is complete.
 
 This `restrict` cache is the only aliasing-aware optimization in CCCC. It works
 because `restrict` is a *scope-wide* non-aliasing promise about a parameter,

@@ -796,15 +796,22 @@ static void collect_restrict_derived_locals(VirtualMachine *vm, Obj *fn) {
     }
 }
 
-// Codegen fusions below (restrict-value caching, indexed load/store fusion,
-// restrict memcpy-loop lowering) elide a load/store and therefore bypass
-// emit_load_ex/emit_store_ex's CHKP3/CHKT3 emission entirely. Any flag whose
-// safety check rides on those opcodes must disable the fusion, or a build
-// enabling that flag alone (without the others) silently loses coverage at
-// opt_level >= 2 (#654).
+// Codegen fusions below (indexed load/store fusion, restrict memcpy-loop
+// lowering) elide a load/store and therefore bypass emit_load_ex/
+// emit_store_ex's CHKP3/CHKT3 emission entirely. Any flag whose safety check
+// rides on those opcodes must disable the fusion, or a build enabling that
+// flag alone (without the others) silently loses coverage at opt_level >= 2
+// (#654). The restrict-value cache (below) is the exception: rather than
+// disabling it wholesale, its cache-hit path re-derives the address and
+// emits the same checks itself via emit_load_safety_checks (#750).
 #define CCCC_FUSION_UNSAFE_FLAGS \
     (CCCC_POINTER_CHECKS | CCCC_INVALID_ARITH | CCCC_PROVENANCE_TRACK | \
      CCCC_TYPE_CHECKS)
+
+// Forward-declared: the restrict-cache hit path (below) needs this before its
+// real definition, which sits next to emit_load_ex for locality.
+static void emit_load_safety_checks(VirtualMachine *vm, Type *ty, int rs_addr,
+                                     bool dangling_check);
 
 // Look up a variable in the restrict derivation map. Returns index or -1.
 static int restrict_derived_find(VirtualMachine *vm, Obj *var) {
@@ -832,16 +839,36 @@ static void prepare_restrict_cache(VirtualMachine *vm, Obj *fn, int base_stack_s
     memset(vm->compiler.restrict_derived_vars, 0,
            sizeof(vm->compiler.restrict_derived_vars));
 
-    // Bypassed with the fusion-unsafe mask (not just CCCC_ENABLE_DEBUGGER):
-    // restrict_cache_handle_deref's cache-hit path elides the load entirely
-    // (codegen.c, "Called on ND_DEREF to check/populate the restrict cache"),
-    // which skips CHKP3/CHKT3 for pattern 1 (*p on a restrict scalar param)
-    // with no other guard anywhere in the cache-hit path. Disabling the
-    // cache wholesale under any safety flag is what actually closes that
-    // gap; the other CCCC_FUSION_UNSAFE_FLAGS sites only cover pattern 2
-    // and other fusions (#654).
-    if (vm->compiler.opt_level < 2 || (vm->flags & CCCC_ENABLE_DEBUGGER) ||
-        (vm->flags & CCCC_FUSION_UNSAFE_FLAGS))
+    // #654 found that restrict_cache_handle_deref's cache-hit path elided
+    // the load entirely, which skipped CHKP3/CHKT3 for pattern 1 (*p on a
+    // restrict scalar param) with no other guard in the cache-hit path. The
+    // stopgap fix disabled the cache wholesale under any safety flag.
+    //
+    // #750: re-enabled here, with the cache-hit path in
+    // restrict_cache_handle_deref re-deriving the address and running
+    // CHKP3/CHKT3 itself (via emit_load_safety_checks). This is not just
+    // defence-in-depth against a hypothetical: #754 (the invalidation-gap
+    // fix, see the ND_FUNCALL entry in gen_expr) closed the two known ways a
+    // cache entry could go stale without the compiler's own bookkeeping
+    // noticing, but a hit-site check that doesn't depend on that bookkeeping
+    // being complete catches classes of bug that #654/#754 didn't anticipate
+    // either. Two tests demonstrate it firing on paths the invalidation
+    // fix alone does not cover:
+    // tests/test_type_check_restrict_cache_hit_error.c (a store through p at
+    // a different pointee type re-stamps the real heap type shadow without
+    // invalidating the cache entry -- only the hit-site CHKT3 catches the
+    // resulting type mismatch) and
+    // tests/test_restrict_cache_argument_fill_invalidation.c's CHKP3
+    // counterpart pattern (a callee mutates the pointee through an aliasing
+    // non-restrict parameter -- the hit-site check still observes live
+    // state even when cache bookkeeping would say "hit").
+    // Throughput-wise the re-enable is a wash, not a win: measured -1.1%
+    // total opcodes and flat wall-clock time in a best-case
+    // straight-line-deref microbench under -3 --optimize=3 (LDR_W 10M -> 4M,
+    // but the address re-derivation and checks cost roughly what the
+    // eliminated load saves). It ships for the safety property, not
+    // throughput -- see #750's resolution comment.
+    if (vm->compiler.opt_level < 2 || (vm->flags & CCCC_ENABLE_DEBUGGER))
         return;
 
     // Only activate when there is at least one restrict scalar pointer param.
@@ -940,10 +967,14 @@ static bool restrict_const_deref_extract(VirtualMachine *vm, Node *node,
 
     // Pattern 2: p[const] → *(p + k*elem_size) or *(p + byte_off)
     // Also handles q[const] where q is a derived local.
-    // Requires opt_level >= 2 and no safety flags (same guards as indexed load).
+    // Requires opt_level >= 2. Unlike match_indexed_addr (indexed load/store
+    // fusion, which elides the check with no recourse), this function only
+    // feeds the restrict cache, whose deref-side caller re-derives the
+    // address and runs CHKP3/CHKT3 itself on a cache hit (#750); the
+    // store-side caller (restrict_cache_handle_store) writes through to the
+    // real store, which already goes through emit_store_ex's checks. So no
+    // CCCC_FUSION_UNSAFE_FLAGS gate is needed here.
     if (addr->kind != ND_ADD || vm->compiler.opt_level < 2)
-        return false;
-    if (vm->flags & CCCC_FUSION_UNSAFE_FLAGS)
         return false;
 
     // Try both orderings: (ptr + const) and (const + ptr)
@@ -1032,7 +1063,19 @@ static bool restrict_cache_handle_deref(VirtualMachine *vm, Node *node,
     int cache_reg = vm->compiler.restrict_cache_regs[idx];
 
     if (vm->compiler.restrict_cache_valid[idx]) {
-        // Cache hit: use the S-reg directly
+        // Cache hit: the value is already in cache_reg, so no load is emitted
+        // and emit_load_ex's checks never run for this access. Under any
+        // CCCC_FUSION_UNSAFE_FLAGS flag, re-derive the address purely to run
+        // those checks against it (#750) -- emitted unconditionally, even
+        // when dest_reg == REG_ZERO (a discarded-value deref like `*p;` must
+        // still trap on a dangling/mistyped access).
+        if (vm->flags & CCCC_FUSION_UNSAFE_FLAGS) {
+            int r_addr = alloc_temp_reg();
+            gen_expr(vm, node->lhs, r_addr);
+            emit_load_safety_checks(vm, node->ty, r_addr, true);
+            free_temp_reg(r_addr);
+        }
+        // Use the S-reg directly for the value itself.
         if (dest_reg != REG_ZERO && dest_reg != cache_reg)
             emit_mov3(vm, dest_reg, cache_reg);
         return true;
@@ -2009,12 +2052,21 @@ static void gen_cond_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 // a union member load must never be checked against the shadow -- legal
 // union punning (write one member, read another) would otherwise
 // false-positive -- so no CHKT3 is emitted at all for a union load.
-static void emit_load_ex(VirtualMachine *vm, Type *ty, int rd, int rs_addr, bool dangling_check) {
+//
+// Shared with restrict_cache_handle_deref's cache-hit path (#750), which
+// re-derives rs_addr purely to run these checks -- forward-declared near
+// CCCC_FUSION_UNSAFE_FLAGS since that caller sits earlier in the file.
+static void emit_load_safety_checks(VirtualMachine *vm, Type *ty, int rs_addr,
+                                     bool dangling_check) {
     if (dangling_check && (vm->flags & CCCC_POINTER_CHECKS))
         emit_rr(vm, CHKP3, rs_addr, 0);
     if ((vm->flags & CCCC_TYPE_CHECKS) && !vm->compiler.in_union_member_access)
         emit_rri(vm, CHKT3, rs_addr, CHKT3_MODE_CHECK,
                  ((long long)ty->size << 8) | (long long)ty->kind);
+}
+
+static void emit_load_ex(VirtualMachine *vm, Type *ty, int rd, int rs_addr, bool dangling_check) {
+    emit_load_safety_checks(vm, ty, rs_addr, dangling_check);
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
         emit_rr(vm, LDR_B, rd, rs_addr);
         if (ty->is_unsigned || ty->kind == TY_BOOL)
