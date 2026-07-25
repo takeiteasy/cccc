@@ -6758,6 +6758,17 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
         // the cast is safe: in CCCC's 64-bit register model the callee already
         // returns a value that is typed at the source level, and callers apply
         // their own narrowing/extension at each use site.
+        //
+        // BUG (#762): this "skipping the cast is safe" reasoning does not
+        // hold for a NARROWING cast at the return site itself, e.g.
+        // `return (unsigned char) g(...);` in tail position. Stripping that
+        // cast to reach ND_FUNCALL for can_emit_tail_call, then emitting the
+        // CALLT with tco_expr (the un-cast funcall) as the evaluated
+        // expression, drops the narrowing entirely -- the caller of THIS
+        // function receives g(...)'s raw return value, not the declared
+        // truncation. Reproduced live at -O1+: `return (unsigned char)
+        // g(x);` where g returns e.g. 200037 yields 200037 instead of 101.
+        // Not fixed here.
         bool expr_already_eval = false;
         Node *tco_expr = node->lhs;
         while (tco_expr && tco_expr->kind == ND_CAST && tco_expr->lhs)
