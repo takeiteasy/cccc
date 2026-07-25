@@ -385,9 +385,25 @@ the target range:
 | `LDR_W`, `LDR_LOCAL_W`, `LDR_INDEX_W` | SX4 (signed word load) |
 | `SX1`/`SX2`/`SX4` | SX1/SX2/SX4 |
 | `ZX1`/`ZX2`/`ZX4` | ZX1/ZX2/ZX4 |
-| any other write | cleared (unknown) |
+| any other write with a real register in operand byte 0 | cleared (unknown) |
 
-State is cleared conservatively at every control-flow join point.
+State is cleared conservatively at every control-flow join point, and at
+every opcode with an implicit register effect per the shared
+`op_implicit_abi_regs()` table (see the Copy Propagation invariant above) —
+this includes unconditional control-flow (`CALL`/`CALLT`/`CALLI`/`CALLN`/
+`CALLF`/`JMP`/`JMPI`/`ENT3`/`LEV3`, all treated as opaque: a callee's `A0`
+return value must not inherit the caller's stale extension state) and
+zero-operand implicit-write opcodes (`MALC`, `SETJMP`, `VRAISE`, …). This
+query runs *before* the pass's `size < 2` bail-out, which used to make every
+zero-operand opcode invisible to it entirely — until #761, a later `SX4`/
+`ZX4` on `A0` could be judged redundant against range state that predated
+one of these opcodes and deleted, producing a value that was never actually
+extended. `AXCHG`/`ACAS`/`IOVFL` need the same treatment for a different
+reason: their operand word carries a packed immediate, not a register
+encoding, so the "any other write" row above must not read byte 0 of that
+word as a destination register to clear (harmless on its own — it only
+forgoes an optimization — but wrong on its face); their real implicit `A0`
+write is handled by the `op_implicit_abi_regs()` query instead.
 
 **When redundant:**
 - `rd == rs`: replaced with a NOP (same as peephole NOP; compacted away)

@@ -2680,6 +2680,31 @@ static void opt_elim_ext(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
                 ext[i] = EXT_NONE;
         }
 
+        // Implicit ABI-register clobbers (tracker #761), via the shared
+        // op_implicit_abi_regs() table: this runs BEFORE the size<2 bail-out
+        // below, because that bail-out is exactly what made every
+        // zero-operand implicit-write opcode (MALC, SETJMP, VRAISE, …)
+        // invisible to this pass -- a later SX4/ZX4 on A0 could be judged
+        // redundant against range state that predates the call and deleted,
+        // producing a value that is not actually extended. It also covers
+        // CALL/CALLI/CALLN/CALLT/CALLF/JMP/JMPI/ENT3/LEV3 (opaque: a callee's
+        // A0 return value must not inherit the caller's stale extension
+        // state -- previously unclobbered here even though sub-pass A/B
+        // already treat every one of these as a full clobber) and
+        // AXCHG/ACAS/IOVFL's real implicit A0 write, which the size>=2 path
+        // below cannot see (see the op_operand_word_is_immediate() guard on
+        // its default arm further down).
+        ImplicitRegs ir;
+        if (op_implicit_abi_regs(op, &ir)) {
+            if (ir.opaque) {
+                for (int i = 0; i < NUM_REGS; i++)
+                    ext[i] = EXT_NONE;
+            } else {
+                for (int r = 1; r < NUM_REGS; r++)
+                    if (ir.writes & IR_BIT(r)) ext[r] = EXT_NONE;
+            }
+        }
+
         // Decode rd/rs only when the instruction has at least one operand word.
         // 0-operand instructions (MALC, MFRE, …) have size==1; reading pc+1
         // for those would reach the next instruction's opcode.
@@ -2744,7 +2769,16 @@ static void opt_elim_ext(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
             // Also: for non-register instructions (JMP, CALL, ENT3, LI3 etc.)
             // byte 0 may encode an address or immediate, not a register number,
             // so guard rd < NUM_REGS to avoid an OOB write into ext[].
+            // op_operand_word_is_immediate() opcodes (AXCHG/ACAS/IOVFL/CALL/
+            // ENT3/…) are excluded here too: byte 0 of their operand word is
+            // an immediate byte, not a register encoding, so clearing
+            // ext[byte0] here would be bogus (harmless -- it only loses an
+            // optimization -- but still wrong on its face). Their real
+            // implicit-write clear, if any, already happened above via
+            // op_implicit_abi_regs() before the size<2 check; that is the
+            // clear that matters for correctness (#761).
             if (!op_byte0_is_int_src(op) && !op_byte0_is_float(op) &&
+                !op_operand_word_is_immediate(op) &&
                 rd != 0 && rd < NUM_REGS)
                 ext[rd] = EXT_NONE;
             break;
