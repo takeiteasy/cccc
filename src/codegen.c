@@ -1093,6 +1093,28 @@ static bool restrict_cache_handle_deref(VirtualMachine *vm, Node *node,
     return true;
 }
 
+// The write-through in restrict_cache_handle_store() below stamps the whole
+// cached slot with val_reg, normalized to the *param's* declared pointee
+// type (param->ty->base -- the type every cache entry is filled and
+// normalized against, see restrict_cache_handle_deref() and the
+// emit_normalize_promoted_scalar() call below). That is only correct when
+// the store itself covers exactly the bytes the entry tracks: a narrower
+// store (`*(char *)p = c` through an `int *restrict p`) leaves the other
+// bytes of the int intact in real memory, but write-through would splat the
+// zero/sign-extended byte over all four (#757). A wider store through a
+// smaller-typed restrict pointer would conversely spill into bytes owned by
+// a different (param, offset) cache entry. Neither case is expressible as a
+// single register copy, so require an exact type match between the store's
+// own (possibly cast) pointee type and the param's declared pointee type,
+// and invalidate the whole param instead of writing through on a mismatch.
+static bool restrict_cache_store_type_matches(Type *store_ty, Type *cached_ty) {
+    if (!store_ty || !cached_ty)
+        return false;
+    return store_ty->size == cached_ty->size &&
+           is_flonum(store_ty) == is_flonum(cached_ty) &&
+           store_ty->is_unsigned == cached_ty->is_unsigned;
+}
+
 // Called after a store through a pointer expression.
 // If the store goes through a restrict param, update or invalidate cache entries.
 // If the store goes through a non-restrict pointer, do nothing (restrict contract).
@@ -1106,6 +1128,16 @@ static void restrict_cache_handle_store(VirtualMachine *vm, Node *lhs, int val_r
     Obj *param;
     long byte_off;
     if (restrict_const_deref_extract(vm, lhs, &param, &byte_off)) {
+        if (!restrict_cache_store_type_matches(lhs->ty, param->ty->base)) {
+            // Type-punned store through this restrict param (narrowing,
+            // widening, or int/float mismatch, #757): the cached slot(s) no
+            // longer reflect real memory. Invalidate every entry for this
+            // param rather than just this (param, offset) slot -- a wider
+            // store at this offset can corrupt bytes tracked by a
+            // *different* entry too.
+            restrict_cache_invalidate_param(vm, param);
+            return;
+        }
         int idx = restrict_cache_find(vm, param, byte_off);
         if (idx >= 0) {
             int cache_reg = vm->compiler.restrict_cache_regs[idx];

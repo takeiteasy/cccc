@@ -177,7 +177,12 @@ At `--optimize=2` and above, `restrict`-qualified scalar pointer parameters are
 cached in callee-saved registers (S4–S7). Loads of `*p` or `p[const]` for a
 restrict param `p` hit the register directly on subsequent accesses within a
 straight-line block; stores write through, and control-flow joins invalidate.
-Function calls invalidate the whole cache too — both before and after the
+A store's write-through only fires when its own pointee type matches the
+cache entry's tracked type (`param`'s declared pointee type); a type-punned
+store at the same offset (e.g. `*(char *)p = c` against an `int *restrict p`
+entry, narrower or wider) invalidates that param's whole cache instead of
+splicing a partial value in, since a byte-granular value can't be expressed
+as a single register copy (#757). Function calls invalidate the whole cache too — both before and after the
 call itself, since evaluating the call's own arguments can fill an entry
 (e.g. `f(*p)`) that must not survive the call. A pre-pass AST walk also
 identifies locals provably derived from restrict params
