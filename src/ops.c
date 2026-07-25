@@ -2381,11 +2381,18 @@ static inline int op_CALLT_fn(VirtualMachine *vm) {
 
     vm->bp = (long long *)*vm->sp++;
 
-    // sp now points at the return address — leave it in place
-
-    if (vm->flags & CCCC_CFI) {
-        vm->shadow_sp++;
-    }
+    // sp now points at the return address — leave it in place.
+    //
+    // CFI: the original CALL's return address stays on the main stack (see
+    // above), so its shadow-stack twin must stay too -- do NOT pop it here.
+    // The tail-callee's own LEV3 is what eventually consumes both entries
+    // together when it actually returns. Popping the shadow entry here
+    // (#756) desynchronised the two stacks by one slot per tail call: with
+    // one CALL feeding N chained CALLTs, the shadow stack would underflow
+    // (or, for a deeper call graph, walk into unrelated memory) well before
+    // the matching LEV3, corrupting subsequent CALL/LEV3 shadow bookkeeping
+    // and eventually faulting with a host SIGSEGV instead of the intended
+    // controlled CFI/UAF trap.
 
     vm->pc = target;
     return 0;
