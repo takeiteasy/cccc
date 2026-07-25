@@ -1229,19 +1229,46 @@ static bool op_byte0_is_src(int op) {
 }
 
 // Opcodes whose pc+1 operand word holds an address or packed immediate, NOT a
-// register encoding.  Sub-pass B's generic size>=2 decode must skip these: it
-// would misread byte 0 of the address/immediate as a destination register and
-// fire KILL_INT_DEF on it, silently NOP-ing a live MOV3 whenever that byte
-// coincides with a pending destination register (e.g. a CALL whose target
-// address ends in 0x0A == REG_A0 kills the argument-setup `MOV3 A0, x`).  This
-// is the same aliasing hazard the AXCHG/ACAS special-case guards against (#497).
-// All of these are control-flow / stack-adjust opcodes already handled by the
-// switch below (RESET_MOV_TRACKING for the CF ops; ADJ touches no register).
+// register encoding.  Both copy-prop sub-passes must treat these as opaque:
+//   - Sub-pass B's generic size>=2 decode would misread byte 0 of the
+//     address/immediate as a destination register and fire KILL_INT_DEF on
+//     it, silently NOP-ing a live MOV3 whenever that byte coincides with a
+//     pending destination register (e.g. a CALL whose target address ends in
+//     0x0A == REG_A0 kills the argument-setup `MOV3 A0, x`).
+//   - Sub-pass A's generic default arm would misread bytes 1-2 as rs1/rs2
+//     sources and REWRITE them in place, corrupting the immediate itself
+//     (e.g. splicing a copy-propagated register number into the low bytes of
+//     an i64 bp-relative offset).
+// This is the same aliasing hazard the AXCHG/ACAS special-case guards
+// against (#497) and CHKB/MARKP hit in op_byte0_is_int_src() (#755).
+//
+// SCOPEIN/SCOPEOUT (scope-id immediate), CHKI/MARKI/MARKR/MARKW/CHKL (i64
+// bp-relative offset), and IOVFL (packed op_type|size_enc) were added by
+// #759 -- IOVFL in particular is live today: its implicit REG_A0 write also
+// needed a copy_of[A0] invalidation, see the AXCHG/ACAS/IOVFL/VRAISE arm in
+// sub-pass A below.
+//
+// STKTAG's first word is currently always emitted as a literal 0 by
+// emit_stktag() (never a live register byte), so listing it here is
+// defensive rather than fixing an observed gap.
+//
+// AXCHG/ACAS are listed for documentation/completeness only: sub-pass B
+// special-cases them in their own arm before reaching the generic decode,
+// and sub-pass A clears all copy facts for them (see the AXCHG/ACAS/IOVFL/
+// VRAISE case below) before falling through to default -- so this listing
+// is currently dead code for both sub-passes, kept so the invariant
+// documented in docs/OPTIMIZATION.md ("every immediate-carrying operand
+// word must be listed here") doesn't silently lie about these two.
 static bool op_operand_word_is_immediate(int op) {
     switch (op) {
     case JMP: case JMPT:
     case CALL: case CALLT: case CALLF:
     case ENT3: case ADJ:
+    case SCOPEIN: case SCOPEOUT:
+    case CHKI: case MARKI: case MARKR: case MARKW: case CHKL:
+    case STKTAG:
+    case IOVFL:
+    case AXCHG: case ACAS:
         return true;
     default:
         return false;
@@ -1419,6 +1446,18 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
             case WIDE_MOD: case WIDE_SHL: case WIDE_SHR: case WIDE_USHR:
             case VSIGNAL:
             case BTRAP:
+            // AXCHG/ACAS/IOVFL carry a packed immediate in their operand word
+            // (see op_operand_word_is_immediate()), so the generic decode below
+            // never sees them and never kills the copy fact for their implicit
+            // REG_A0 write.  Without this arm a stale `copy_of[A0] == S2` fact
+            // from an earlier `MOV3 A0, S2` survives across the IOVFL that
+            // redefines A0 with the overflow bool, and a later branch on A0
+            // gets rewritten to test S2 instead (#759 -- reproduced live: a
+            // ckd_add()-guarded loop returned the wrong branch outcome under
+            // -O3 because JZ3's condition register was substituted from a
+            // stale A0 copy fact).  VRAISE writes A0 (clamped signal result)
+            // the same way.
+            case AXCHG: case ACAS: case IOVFL: case VRAISE:
                 for (int i = 0; i < NUM_REGS; i++)
                     copy_of[i] = fcopy_of[i] = -1;
                 break;
@@ -1451,6 +1490,16 @@ static void opt_copy_prop(VirtualMachine *vm, Pc fn_start, Pc fn_end) {
                     }
                     break;
                 }
+                // Immediate-carrying opcodes (#759): word 0 at pc+1 is an
+                // address/immediate, not a register triple. Treating bytes
+                // 1-2 as rs1/rs2 below would rewrite live payload bits (e.g.
+                // splicing a copy-propagated register number into an i64
+                // bp-relative offset's low bytes), and byte 0 is not a real
+                // destination to invalidate. No substitution, no
+                // invalidation -- same "leave fully opaque" treatment as the
+                // vector-operand case above.
+                if (op_operand_word_is_immediate(op))
+                    break;
                 // Substitute rs1 (byte 1) and rs2 (byte 2) of the operand word
                 // using the appropriate copy map, then kill the destination
                 // register (byte 0).  Applies to all sizes — byte 3 (scale /
