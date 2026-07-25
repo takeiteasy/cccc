@@ -296,9 +296,11 @@ static long long cccc_canonicalizel(long long cx, long long x) {
 // requires a nonzero payload, since an all-zero significand with the
 // quiet bit clear would be infinity, not a NaN.
 #define CCCC_DBL_QUIET_BIT   0x0008000000000000ULL
-#define CCCC_DBL_PAYLOAD_MAX 0x0007FFFFFFFFFFFFULL // 51 bits
+#define CCCC_DBL_PAYLOAD_MAX 0x0007FFFFFFFFFFFFULL // 51 bits, excludes the quiet bit
+#define CCCC_DBL_MANT_MASK   0x000FFFFFFFFFFFFFULL // 52 bits, full mantissa incl. quiet bit
 #define CCCC_FLT_QUIET_BIT   0x00400000U
-#define CCCC_FLT_PAYLOAD_MAX 0x003FFFFFU // 22 bits
+#define CCCC_FLT_PAYLOAD_MAX 0x003FFFFFU // 22 bits, excludes the quiet bit
+#define CCCC_FLT_MANT_MASK   0x007FFFFFU // 23 bits, full mantissa incl. quiet bit
 
 static double cccc_getpayload(long long xp) {
     double x = *(const double *)(intptr_t)xp;
@@ -441,6 +443,74 @@ static long long cccc_iseqsig_f(float x, float y) {
     if (cccc_issignaling_f(x) || cccc_issignaling_f(y))
         feraiseexcept(FE_INVALID);
     return x == y;
+}
+
+// ==================== math.h classification macro fixes (#778) ==========
+//
+// isnan/isinf/isfinite/signbit/fpclassify/isnormal in include/math.h used
+// to be hand-written formulas referencing a bare `isnan`/`isinf` that was
+// never actually defined anywhere (only __builtin_isnan/__builtin_isinf
+// existed), so isfinite/fpclassify/isnormal failed to compile at all, and
+// signbit(x) ((x) < 0) was simply wrong for -0.0 and NaN. Backing these
+// with real bit-pattern functions (mirroring the issignaling/iseqsig
+// helpers above) fixes both: the compile failure and the semantics.
+
+// Host-side mirrors of the FP_* classification constants declared in
+// include/math.h (guest side) -- this file is compiled by the host
+// toolchain, so it can't see the guest header's macros directly.
+#define CCCC_FP_INFINITE 1
+#define CCCC_FP_NAN 2
+#define CCCC_FP_NORMAL 3
+#define CCCC_FP_SUBNORMAL 4
+#define CCCC_FP_ZERO 5
+
+// NB: uses CCCC_D/FLT_MANT_MASK (the full mantissa, including the quiet
+// bit) to test "is the mantissa nonzero", NOT CCCC_D/FLT_PAYLOAD_MAX (which
+// deliberately excludes the quiet bit, for getpayload/setpayload). A plain
+// quiet NaN with zero payload -- e.g. 0.0/0.0, whose mantissa is just the
+// quiet bit itself -- has a nonzero full mantissa but a zero payload, so
+// using PAYLOAD_MAX here would misclassify it as infinity.
+static long long cccc_isnan_d(double x) {
+    uint64_t u = cccc_d2b(x);
+    return (u & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL &&
+           (u & CCCC_DBL_MANT_MASK) != 0;
+}
+static long long cccc_isnan_f(float x) {
+    uint32_t u = cccc_f2b(x);
+    return (u & 0x7F800000U) == 0x7F800000U && (u & CCCC_FLT_MANT_MASK) != 0;
+}
+
+static long long cccc_isinf_d(double x) {
+    uint64_t u = cccc_d2b(x);
+    return (u & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL &&
+           (u & CCCC_DBL_MANT_MASK) == 0;
+}
+static long long cccc_isinf_f(float x) {
+    uint32_t u = cccc_f2b(x);
+    return (u & 0x7F800000U) == 0x7F800000U && (u & CCCC_FLT_MANT_MASK) == 0;
+}
+
+// signbit tests the raw sign bit directly -- correct for -0.0 (bit set,
+// unlike `x < 0`) and for NaN (whatever its actual sign bit is, unlike
+// `x < 0`'s always-false result since every NaN comparison is false).
+static long long cccc_signbit_d(double x) { return cccc_d2b(x) >> 63; }
+static long long cccc_signbit_f(float x) { return cccc_f2b(x) >> 31; }
+
+static long long cccc_fpclassify_d(double x) {
+    uint64_t u = cccc_d2b(x);
+    uint64_t exp = u & 0x7FF0000000000000ULL;
+    uint64_t mant = u & CCCC_DBL_MANT_MASK; // full mantissa -- see isnan/isinf note above
+    if (exp == 0x7FF0000000000000ULL) return mant ? CCCC_FP_NAN : CCCC_FP_INFINITE;
+    if (exp == 0) return mant ? CCCC_FP_SUBNORMAL : CCCC_FP_ZERO;
+    return CCCC_FP_NORMAL;
+}
+static long long cccc_fpclassify_f(float x) {
+    uint32_t u = cccc_f2b(x);
+    uint32_t exp = u & 0x7F800000U;
+    uint32_t mant = u & CCCC_FLT_MANT_MASK; // full mantissa -- see isnan/isinf note above
+    if (exp == 0x7F800000U) return mant ? CCCC_FP_NAN : CCCC_FP_INFINITE;
+    if (exp == 0) return mant ? CCCC_FP_SUBNORMAL : CCCC_FP_ZERO;
+    return CCCC_FP_NORMAL;
 }
 
 // Register all math.h functions
@@ -662,4 +732,14 @@ void register_math_functions(VirtualMachine *vm) {
     cc_register_cfunc_ex(vm, "__cccc_issignaling_d", (void*)cccc_issignaling_d, 1, 0, 0b1);
     cc_register_cfunc_ex(vm, "__cccc_iseqsig_f", (void*)cccc_iseqsig_f, 2, 0, 0b11);
     cc_register_cfunc_ex(vm, "__cccc_iseqsig_d", (void*)cccc_iseqsig_d, 2, 0, 0b11);
+
+    // Classification macro backing functions (#778)
+    cc_register_cfunc_ex(vm, "__cccc_isnan_f", (void*)cccc_isnan_f, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "__cccc_isnan_d", (void*)cccc_isnan_d, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "__cccc_isinf_f", (void*)cccc_isinf_f, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "__cccc_isinf_d", (void*)cccc_isinf_d, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "__cccc_signbit_f", (void*)cccc_signbit_f, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "__cccc_signbit_d", (void*)cccc_signbit_d, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "__cccc_fpclassify_f", (void*)cccc_fpclassify_f, 1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "__cccc_fpclassify_d", (void*)cccc_fpclassify_d, 1, 0, 0b1);
 }

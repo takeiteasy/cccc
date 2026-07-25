@@ -46,10 +46,30 @@
 #define islessgreater(x, y) (((x) < (y)) || ((x) > (y)))
 #define isunordered(x, y) (((x) != (x)) || ((y) != (y)))
 
+/* isnan/isinf/signbit/fpclassify (#778): real bit-pattern functions in
+ * src/stdlib/math.c, dispatched by argument type like the issignaling/
+ * iseqsig macros below (same _Generic pattern as include/tgmath.h). These
+ * used to be formulas referencing a bare isnan/isinf that was never
+ * defined anywhere, so isfinite/isnormal/fpclassify failed to compile;
+ * signbit(x) ((x) < 0) compiled but was wrong for -0.0 and NaN. */
+int __cccc_isnan_f(float);
+int __cccc_isnan_d(double);
+#define isnan(x) _Generic((x), float: __cccc_isnan_f, default: __cccc_isnan_d)(x)
+
+int __cccc_isinf_f(float);
+int __cccc_isinf_d(double);
+#define isinf(x) _Generic((x), float: __cccc_isinf_f, default: __cccc_isinf_d)(x)
+
+int __cccc_signbit_f(float);
+int __cccc_signbit_d(double);
+#define signbit(x) _Generic((x), float: __cccc_signbit_f, default: __cccc_signbit_d)(x)
+
+int __cccc_fpclassify_f(float);
+int __cccc_fpclassify_d(double);
+#define fpclassify(x) _Generic((x), float: __cccc_fpclassify_f, default: __cccc_fpclassify_d)(x)
+
 #define isfinite(x) (!(isnan(x) || isinf(x)))
-#define signbit(x) ((x) < 0)
-#define isnormal(x) (isfinite(x) && ((x) != 0.0))
-#define fpclassify(x) (isnan(x) ? FP_NAN : (isinf(x) ? FP_INFINITE : (isfinite(x) ? FP_NORMAL : FP_SUBNORMAL)))
+#define isnormal(x) (fpclassify(x) == FP_NORMAL)
 
 /* Basic arithmetic */
 double fabs(double);
