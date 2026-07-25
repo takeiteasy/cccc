@@ -482,15 +482,32 @@ copy between the heap and a global, since `type_shadow_copy` resolves src
 and dst independently. Every *other* host function reachable through
 `CALLF` might write heap bytes with no VM-level hook at all (`fread`,
 `read`, `scanf`, any other FFI call) — `op_CALLF_fn` conservatively clears
-the shadow of any tracked, live heap allocation reachable through an
-integer argument register before such a call runs, so a write the VM can't
-observe can never leave a stale stamp that later false-positives (the
-accepted cost is a false negative if a real bug happens to route through an
-unshimmed host write). `RETBUF` clears its handed-out
+shadow state reachable through an integer argument register before such a
+call runs, so a write the VM can't observe can never leave a stale stamp
+that later false-positives. `RETBUF` clears its handed-out
 `return_buffer_pool` slot's shadow range before returning it: those slots
 live in `data_seg` and rotate between every struct-returning call, so
 without the clear a slot would carry a stale stamp from whichever struct
 type was returned through it last.
+
+`op_CALLF_fn`'s clear is classified per host function by name (#751,
+`ffi_shadow_classify`/`ffi_shadow_rules`, `src/ops.c`), recovering coverage
+the blanket clear used to destroy for functions whose write behavior is
+statically known:
+
+| `FfiShadowClass` | Effect | Examples |
+|---|---|---|
+| `FFI_SHADOW_HANDLED` | no clear — the shim already propagated | `memcpy`, `memmove` |
+| `FFI_SHADOW_READONLY` | no clear at all — never writes through any pointer arg | `strlen`, `strcmp`, `memcmp`, `fwrite`, ... |
+| `FFI_SHADOW_BOUNDED` | clear narrowed to `[args[out_arg], args[out_arg]+len)`, where `len` comes from another argument (or a fixed size, for `strtol`/`strtod`'s `*endptr`), clamped against the allocation's actual remaining bytes | `fread`, `snprintf`, `read`, `recv`, `strncpy`, ... |
+| `FFI_SHADOW_DEFAULT` (unclassified) | today's whole-allocation clear, unchanged | everything else, including `printf`/`scanf` (`%n`) and `qsort`/`bsearch` (permute bytes, run guest callbacks) |
+
+A `BOUNDED` entry only narrows the clear for its one designated argument;
+every *other* pointer-shaped argument to that same call (e.g. `snprintf`'s
+variadic `%s` arguments) still gets the default whole-allocation clear.
+Since an unclassified name behaves exactly as before, adding or widening a
+rule can only ever reduce clearing relative to today's behavior, never
+introduce a false positive.
 
 Reusing a heap buffer as a different type — legal C — never false-positives,
 since the next store simply re-stamps the effective type for the bytes it

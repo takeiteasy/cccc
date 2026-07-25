@@ -270,12 +270,28 @@ All features listed below can be enabled individually or through the safety leve
   - `memcpy`/`memmove` propagate the source range's effective type onto
     the destination, so an ordinary struct/array copy followed by typed
     member reads doesn't false-positive; every other host function that
-    might write into a tracked heap allocation (`fread`, `read`, `scanf`,
-    any other FFI call) conservatively **clears** that allocation's
-    shadow before the call runs, since the VM can't observe what such a
-    call actually wrote — this trades a false negative (a type-confusion
-    bug that happens to route through an unshimmed host write) for zero
-    false positives
+    might write into a tracked heap allocation has no VM-level hook, so
+    the VM can't observe what such a call actually wrote and must
+    conservatively **clear** shadow state before the call runs — this
+    trades a false negative (a type-confusion bug that happens to route
+    through an unclassified host write) for zero false positives. Common
+    libc/POSIX functions are classified by name to recover coverage a
+    blanket clear would otherwise destroy, in three tiers, each of which
+    can only ever reduce clearing relative to an unclassified name (never
+    widen it, so classifying a function can't introduce a false positive):
+    a **read-only** allowlist (`strlen`, `strcmp`, `memcmp`, `fwrite`, ...)
+    gets no clear at all; a **bounded-write** list (`fread`, `snprintf`,
+    `read`, `recv`, `strncpy`, `strtol`'s `*endptr`, ...) narrows the clear
+    to the statically-known extent written through the one argument that
+    receives it, while every *other* pointer-shaped argument to that same
+    call still gets the default whole-allocation clear (keeping a `%n`-
+    capable format string, for instance, unaffected); an unclassified name
+    keeps today's whole-allocation clear across every pointer-shaped
+    argument. `qsort`/`bsearch` and the `printf`/`scanf` family are
+    deliberately left unclassified: the former permute a buffer's bytes in
+    place and can run guest code back through the array (the callback
+    trampoline), and the latter can write through an arbitrary argument
+    via `%n`
   - `realloc` (always a fresh allocation in CCCC's bump-allocating VM
     heap, never grown in place) carries the old block's shadow across to
     the new address

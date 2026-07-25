@@ -4512,6 +4512,95 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr, const char *na
     return 0;
 }
 
+// ---- #751: host-function classification for the CALLF shadow backstop ----
+//
+// op_CALLF_fn's generic backstop (below) must clear the shadow of any heap
+// allocation reachable through an unshimmed host call, since the VM can't
+// observe what the call actually wrote. That's sound (no false positives)
+// but lossy: for a read-only function (strlen, memcmp, ...) nothing was
+// written at all, and for a function with a statically-known write extent
+// (fread, snprintf, ...) only a sub-range of the allocation was. This
+// table recovers that coverage for a handful of common libc/POSIX names
+// without weakening the backstop's guarantee for anything else -- an
+// unclassified name keeps today's whole-allocation clear exactly as
+// before, so the no-false-positive property can only ever be preserved or
+// improved by adding an entry here, never regressed.
+typedef enum {
+    FFI_SHADOW_DEFAULT = 0, // unclassified: today's whole-allocation clear
+    FFI_SHADOW_HANDLED,     // memcpy/memmove: the shim already propagated; skip entirely
+    FFI_SHADOW_READONLY,    // never writes through any pointer arg: no clear at all
+    FFI_SHADOW_BOUNDED,     // writes only [args[out_arg], args[out_arg]+len): narrow the clear to that
+} FfiShadowClass;
+
+typedef struct FfiShadowRule {
+    const char *name;
+    FfiShadowClass class_;
+    int out_arg;      // BOUNDED: index of the pointer argument that gets narrowed
+    int len_arg;      // BOUNDED: index of the integer arg giving the length, or -1 for fixed_len
+    int len_arg2;     // BOUNDED: second length arg to multiply in (fread's nmemb), or -1
+    size_t fixed_len; // BOUNDED: used when len_arg == -1 (a statically-known length)
+} FfiShadowRule;
+
+static const FfiShadowRule ffi_shadow_rules[] = {
+    // Folds in what used to be two ad hoc strcmp(ff->name, ...) checks.
+    {"memcpy",  FFI_SHADOW_HANDLED, 0, -1, -1, 0},
+    {"memmove", FFI_SHADOW_HANDLED, 0, -1, -1, 0},
+
+    // Never write through a pointer argument.
+    {"strlen",  FFI_SHADOW_READONLY, 0, -1, -1, 0},
+    {"strnlen", FFI_SHADOW_READONLY, 0, -1, -1, 0},
+    {"strcmp",  FFI_SHADOW_READONLY, 0, -1, -1, 0},
+    {"strncmp", FFI_SHADOW_READONLY, 0, -1, -1, 0},
+    {"memcmp",  FFI_SHADOW_READONLY, 0, -1, -1, 0},
+    {"strchr",  FFI_SHADOW_READONLY, 0, -1, -1, 0},
+    {"strrchr", FFI_SHADOW_READONLY, 0, -1, -1, 0},
+    {"strstr",  FFI_SHADOW_READONLY, 0, -1, -1, 0},
+    {"fwrite",  FFI_SHADOW_READONLY, 0, -1, -1, 0},
+    {"puts",    FFI_SHADOW_READONLY, 0, -1, -1, 0},
+    {"fputs",   FFI_SHADOW_READONLY, 0, -1, -1, 0},
+    {"atoi",    FFI_SHADOW_READONLY, 0, -1, -1, 0},
+    {"atol",    FFI_SHADOW_READONLY, 0, -1, -1, 0},
+    {"atof",    FFI_SHADOW_READONLY, 0, -1, -1, 0},
+
+    // Write only a statically-known extent through one designated arg.
+    // Every *other* pointer-shaped argument to these calls (e.g. snprintf's
+    // variadic %s arguments) still falls through to the default
+    // whole-allocation clear below -- narrowing is per-argument, not
+    // per-call, which is what keeps a %n-capable format string safe.
+    {"memset",   FFI_SHADOW_BOUNDED, 0, 2, -1, 0},
+    {"fread",    FFI_SHADOW_BOUNDED, 0, 1, 2, 0}, // len = size(arg1) * nmemb(arg2)
+    {"fgets",    FFI_SHADOW_BOUNDED, 0, 1, -1, 0},
+    {"snprintf", FFI_SHADOW_BOUNDED, 0, 1, -1, 0},
+    {"strncpy",  FFI_SHADOW_BOUNDED, 0, 2, -1, 0},
+    {"read",     FFI_SHADOW_BOUNDED, 1, 2, -1, 0},
+    {"recv",     FFI_SHADOW_BOUNDED, 1, 2, -1, 0},
+    {"recvfrom", FFI_SHADOW_BOUNDED, 1, 2, -1, 0},
+    // strtol/strtod write a single pointer (*endptr) through arg 1, a
+    // fixed sizeof(char*) bytes -- there's no argument to read a length
+    // from.
+    {"strtol",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *)},
+    {"strtod",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *)},
+
+    // Deliberately left unclassified (default whole-allocation clear):
+    // printf/sprintf/scanf family (a %n conversion writes through any
+    // pointer argument, including a variadic one, so no static extent is
+    // safe to assume); qsort/bsearch (permute the buffer's bytes in place,
+    // and -- via the #738 guest-callback trampoline -- run guest code that
+    // can store arbitrarily); struct out-params like stat/gettimeofday/
+    // localtime_r/getaddrinfo/sigaction (safe by omission, which is the
+    // point of this table: absence keeps today's sound-but-lossy default).
+};
+
+// Returns the classification rule for `name`, or NULL if unclassified
+// (caller should treat that as FFI_SHADOW_DEFAULT).
+static const FfiShadowRule *ffi_shadow_classify(const char *name) {
+    for (size_t i = 0; i < sizeof(ffi_shadow_rules) / sizeof(ffi_shadow_rules[0]); i++) {
+        if (strcmp(ffi_shadow_rules[i].name, name) == 0)
+            return &ffi_shadow_rules[i];
+    }
+    return NULL;
+}
+
 static inline int op_CALLF_fn(VirtualMachine *vm) {
     // Foreign function call using register-based calling convention
     // Operands: [ffi_idx, nargs, double_arg_mask, float_arg_mask]
@@ -4564,27 +4653,70 @@ static inline int op_CALLF_fn(VirtualMachine *vm) {
                                                                 : "int");
     }
 
-    // #653 FFI-clear backstop: guest memcpy/memmove get shadow-aware shims
-    // (cccc_shim_memcpy/cccc_shim_memmove in src/stdlib/string.c) that
-    // propagate effective type from src to dst; every other host function
-    // may write heap bytes with no VM hook at all (fread, read, recv,
-    // scanf, sprintf, any third-party FFI library, ...), so conservatively
-    // erase the whole shadow of any tracked, live heap allocation reachable
-    // through an integer argument register before the call runs. This is
-    // what makes byte-granular CHKT3 sound against host writes the VM
-    // can't observe: a real type-confusion bug that happens to route
-    // through an unshimmed host function is missed (accepted, tracked as a
-    // follow-up), but no host write can ever leave a stale stamp that later
-    // false-positives.
-    if ((vm->flags & CCCC_TYPE_CHECKS) && (vm->heap_shadow.pages || vm->data_shadow.pages) &&
-        strcmp(ff->name, "memcpy") != 0 && strcmp(ff->name, "memmove") != 0) {
-        for (int i = 0; i < actual_nargs && i < 64; i++) {
-            if ((float_arg_mask | double_arg_mask) & (1ULL << i))
-                continue; // not a pointer-shaped argument
-            size_t off;
-            AllocHeader *header = heap_alloc_for_ptr(vm, args[i], &off);
-            if (header && !header->freed)
-                type_shadow_clear(vm, (char *)args[i] - off, header->size);
+    // FFI-clear backstop (#653), classified per host function (#751): guest
+    // memcpy/memmove get shadow-aware shims (cccc_shim_memcpy/
+    // cccc_shim_memmove in src/stdlib/string.c) that propagate effective
+    // type from src to dst; every other host function may write heap bytes
+    // with no VM hook at all (fread, read, recv, scanf, sprintf, any
+    // third-party FFI library, ...), so this backstop clears shadow state
+    // before the call runs rather than after -- see ffi_shadow_classify
+    // above for how much of a given allocation gets cleared. This is what
+    // makes byte-granular CHKT3 sound against host writes the VM can't
+    // observe: a real type-confusion bug that happens to route through an
+    // unclassified/unshimmed host function is missed (accepted for
+    // unclassified names, tracked as a follow-up), but no host write can
+    // ever leave a stale stamp that later false-positives.
+    if ((vm->flags & CCCC_TYPE_CHECKS) && (vm->heap_shadow.pages || vm->data_shadow.pages)) {
+        const FfiShadowRule *rule = ffi_shadow_classify(ff->name);
+        FfiShadowClass cls = rule ? rule->class_ : FFI_SHADOW_DEFAULT;
+
+        if (cls != FFI_SHADOW_HANDLED) {
+            for (int i = 0; i < actual_nargs && i < 64; i++) {
+                if ((float_arg_mask | double_arg_mask) & (1ULL << i))
+                    continue; // not a pointer-shaped argument
+
+                if (cls == FFI_SHADOW_READONLY)
+                    continue; // never writes: no clear needed for any arg
+
+                if (cls == FFI_SHADOW_BOUNDED && i == rule->out_arg) {
+                    // Narrow the clear to the statically-known extent this
+                    // call writes through this specific argument. Every
+                    // *other* pointer-shaped argument (checked below, on
+                    // the next loop iteration) still gets the default
+                    // whole-allocation clear -- narrowing is per-argument.
+                    size_t len = rule->fixed_len;
+                    if (rule->len_arg >= 0 && rule->len_arg < actual_nargs) {
+                        long long l = args[rule->len_arg];
+                        len = (l > 0) ? (size_t)l : 0;
+                        if (rule->len_arg2 >= 0 && rule->len_arg2 < actual_nargs) {
+                            long long l2 = args[rule->len_arg2]; // e.g. fread's nmemb
+                            if (l2 <= 0 || len == 0) {
+                                len = 0;
+                            } else if (len > SIZE_MAX / (size_t)l2) {
+                                len = SIZE_MAX; // overflow: clamp; the allocation-size clamp below still applies
+                            } else {
+                                len *= (size_t)l2;
+                            }
+                        }
+                    }
+                    size_t off;
+                    AllocHeader *header = heap_alloc_for_ptr(vm, args[i], &off);
+                    if (header && !header->freed) {
+                        size_t remaining = header->size - off;
+                        if (len > remaining)
+                            len = remaining; // a short/clamped read cleared a superset: still sound
+                        type_shadow_clear(vm, (void *)args[i], len);
+                    }
+                    continue;
+                }
+
+                // Default: unclassified name, or a BOUNDED call's
+                // non-designated pointer argument -- whole-allocation clear.
+                size_t off;
+                AllocHeader *header = heap_alloc_for_ptr(vm, args[i], &off);
+                if (header && !header->freed)
+                    type_shadow_clear(vm, (char *)args[i] - off, header->size);
+            }
         }
     }
 
