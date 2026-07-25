@@ -509,6 +509,12 @@ typedef enum {
         (1 << 23), // 0x00800000 - FMA fusion codegen (--fma)
     CCCC_FFI_ERRORS_FATAL =
         (1 << 24), // 0x01000000 - Fatal FFI errors (--ffi-errors-fatal)
+    CCCC_TRAP_FP_DIVZERO =
+        (1 << 25), // 0x02000000 - Abort on float division by zero
+                    // (--trap-fp-divzero); IEEE-754 semantics (+-Inf/NaN)
+                    // are the default and are not UB, so this is opt-in and
+                    // deliberately outside CCCC_ALL_SAFETY -- no -S0..-S3
+                    // tier enables it.
 
     // Convenience flag combinations
     CCCC_POINTER_SANITIZER =

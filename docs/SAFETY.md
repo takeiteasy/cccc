@@ -693,6 +693,20 @@ native symbols returned by VM-managed `dlsym`.
   - Runtime `dlsym` calls are policy-checked but do not have registered
     signatures for arity checking yet
 
+## Floating-Point Behavior
+
+- `--trap-fp-divzero` **Abort on float division by zero**
+  - By default, `float`/`double` division by zero follows IEEE-754: a
+    finite value divided by `0.0` produces a correctly-signed infinity
+    (and raises `FE_DIVBYZERO`, observable via `<fenv.h>`), and `0.0/0.0`
+    produces NaN (raises `FE_INVALID`). Neither is undefined behavior,
+    unlike integer division by zero, so this is not gated by any `-0`
+    through `-3` safety tier and is not part of `CCCC_ALL_SAFETY`.
+  - With this flag, any zero divisor in a float/double division aborts
+    execution with the same `DIVISION BY ZERO` diagnostic used by integer
+    division and `--overflow-checks`, for debugging code that assumes
+    division by zero is always a bug.
+
 ## Example Usage
 
 ### Use-after-free

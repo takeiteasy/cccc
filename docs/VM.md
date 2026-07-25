@@ -278,7 +278,7 @@ All `F*` opcodes operate on `fregs[]`.  Comparisons write a boolean into an inte
 | `FADD3` | `fregs[rd] = fregs[rs1] + fregs[rs2]` (f64) |
 | `FSUB3` | `fregs[rd] = fregs[rs1] - fregs[rs2]` (f64) |
 | `FMUL3` | `fregs[rd] = fregs[rs1] * fregs[rs2]` (f64) |
-| `FDIV3` | `fregs[rd] = fregs[rs1] / fregs[rs2]` (f64; traps on zero) |
+| `FDIV3` | `fregs[rd] = fregs[rs1] / fregs[rs2]` (f64; IEEE-754 semantics -- finite/0.0 is a correctly-signed infinity, 0.0/0.0 is NaN, neither is UB; traps only under the opt-in `--trap-fp-divzero`) |
 | `FMOV3` | `fregs[rd] = fregs[rs1]` (f64) |
 | `FNEG3` | `fregs[rd] = -fregs[rs1]` (f64) |
 | `FEQ3` … `FGE3` | f64 comparisons |

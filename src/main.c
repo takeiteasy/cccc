@@ -269,6 +269,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --ffi-deny=list        Deny comma-separated native function names\n");
     printf("\t-F/--disable-ffi          Block all registered and dynamic native calls\n");
     printf("\t   --ffi-errors-fatal     Abort execution on FFI policy violations\n");
+    printf("\t   --trap-fp-divzero      Abort on float division by zero instead of IEEE +-Inf/NaN\n");
     printf("\t   --ffi-type-checking    Validate registered FFI call arity at runtime\n");
     printf("\nLanguage Standard:\n");
     printf("\t-s/--std=<std>       Select C language standard (default: gnu17)\n");
@@ -914,6 +915,7 @@ int main(int argc, const char *argv[]) {
         {"use-system-headers", no_argument,       0, 1112},
         {"no-builtin-includes", no_argument,      0, 1113},
         {"sysroot",            required_argument, 0, 1114},
+        {"trap-fp-divzero",  no_argument, 0, 1116},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1252,6 +1254,10 @@ int main(int argc, const char *argv[]) {
         case 1055: // --ffi-errors-fatal
             ffi_errors_fatal = 1;
             flags |= CCCC_FFI_ERRORS_FATAL;
+            break;
+        case 1116: // --trap-fp-divzero
+            flags |= CCCC_TRAP_FP_DIVZERO;
+            cli_flags_mask |= CCCC_TRAP_FP_DIVZERO;
             break;
         case 1024:
             enable_ffi_type_checking = 1;

@@ -896,8 +896,12 @@ static inline int op_FDIV3_fn(VirtualMachine *vm) {
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
 
-    // Division by zero check
-    if (cccc_freg_get_f64(vm, rs2) == 0.0) {
+    // IEEE-754 finite/0.0 is well-defined (a correctly-signed infinity,
+    // raising FE_DIVBYZERO) and 0.0/0.0 is NaN (raising FE_INVALID) --
+    // neither is UB, unlike integer division by zero, so this is a plain
+    // divide by default (#773). --trap-fp-divzero opts back into the old
+    // abort-on-any-zero-divisor behavior for debugging.
+    if ((vm->flags & CCCC_TRAP_FP_DIVZERO) && cccc_freg_get_f64(vm, rs2) == 0.0) {
         printf("\n========== DIVISION BY ZERO ==========\n");
         printf("Floating-point division by zero detected!\n");
         printf("PC offset: %lld\n", (long long)(vm->pc - 1));
@@ -964,7 +968,9 @@ static inline int op_FDIV3_F32_fn(VirtualMachine *vm) {
     int rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
 
-    if (cccc_freg_get_f32(vm, rs2) == 0.0f) {
+    // See op_FDIV3_fn above -- IEEE-754 finite/0.0 division is well-defined,
+    // not UB, so this only traps when explicitly opted in (#773).
+    if ((vm->flags & CCCC_TRAP_FP_DIVZERO) && cccc_freg_get_f32(vm, rs2) == 0.0f) {
         printf("\n========== DIVISION BY ZERO ==========\n");
         printf("Floating-point division by zero detected!\n");
         printf("PC offset: %lld\n", (long long)(vm->pc - 1));

@@ -5119,6 +5119,8 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
             SET_FLAG(CCCC_FMA);
         } else if (strcmp(tok, "--ffi-errors-fatal") == 0) {
             SET_FLAG(CCCC_FFI_ERRORS_FATAL);
+        } else if (strcmp(tok, "--trap-fp-divzero") == 0) {
+            SET_FLAG(CCCC_TRAP_FP_DIVZERO);
         } else if (strncmp(tok, "--ffi-allow=", 12) == 0) {
             const char *name = tok + 12;
             if (*name) {
