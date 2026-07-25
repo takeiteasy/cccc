@@ -788,6 +788,13 @@ char *fetch_url_to_cache(VirtualMachine *vm, const char *url);
 // vm.c — global pointer to the currently executing VM (set/cleared by cc_run_at)
 extern VirtualMachine *cc_running_vm;
 
+// ops.c (included into vm.c) — propagate the #653 heap type shadow from
+// src to dst, exposed for the memcpy/memmove shims in stdlib/string.c
+// (host-function writes to guest heap memory have no other VM hook). A
+// no-op when --type-checks is off or either range isn't in the tracked
+// heap; see type_shadow_copy's doc comment in ops.c for full semantics.
+void cc_type_shadow_copy(VirtualMachine *vm, void *dst, const void *src, size_t len);
+
 // cc_load_test_runtime, cc_load_symbolize_runtime, cc_inject_test_header, and
 // cc_run_tests live in driver.h (#664).
 

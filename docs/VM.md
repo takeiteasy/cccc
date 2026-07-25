@@ -415,23 +415,62 @@ only rejected once it steps before the *resolved allocation's* start, so
 `CHKA3` is unaffected — alignment is pure address arithmetic and was already
 correct for interior pointers.
 
-`CHKT3` is now live (#651). It is emitted by `emit_load`/`emit_store`
-(`src/codegen.c`) right after `CHKP3`, carrying the pointee's static
-`TypeKind` and a load/store flag (`[rs:8|store_flag:8]` in the operand word,
-`[expected_type:64]` as the trailing immediate). `AllocHeader.type_kind`
-follows an **effective-type model**, mirroring C11 §6.5p6: `MALC` leaves it
-as `TY_VOID` ("no effective type established yet"); a **store** through the
-allocation's base pointer stamps `type_kind` to the stored type; a **load**
-through the base pointer checks the loaded type against it. Reusing a heap
-buffer as a different type — legal C — never false-positives, since the next
-store simply re-stamps the effective type. `CHKT3` resolves the allocation
-via the same `heap_alloc_for_ptr`/`sorted_allocs_find` helper as `CHKB` and
-`CHKP3` (#650's pattern), but **only checks at offset 0** (the allocation's
-base pointer): a struct member or other interior/subobject access is not
-type-tracked, so an interior deref (`off != 0`) is silently skipped. This
-avoids false positives on same-size struct members of different types (e.g.
-`int a` then `float b`) until subobject-type tracking exists — see the
-follow-up ticket referenced in `docs/SAFETY.md`.
+`CHKT3` is live (#651, extended to byte granularity by #653). It is emitted
+by `emit_load_ex`/`emit_store_ex` (`src/codegen.c`) right after `CHKP3`,
+carrying the pointee's static `TypeKind` and size, and a 3-way mode:
+`[rs:8|mode:8]` in the operand word, `[(size<<8)|expected_type:64]` as the
+trailing immediate. `mode` is `CHKT3Mode` (`src/cccc.h`):
+
+| Mode | Emitted by | Effect |
+|---|---|---|
+| `CHKT3_MODE_CHECK` (0) | a load | compares the shadow across `[ptr, ptr+size)` against `expected_type` |
+| `CHKT3_MODE_STAMP` (1) | a store | establishes `expected_type` as the effective type for `[ptr, ptr+size)` |
+| `CHKT3_MODE_CLEAR` (2) | a union member store | erases (rather than stamps) `[ptr, ptr+size)`, so a later access through a different union member doesn't false-positive |
+
+Type tracking (#653) is a **byte-granular shadow** (`vm->type_shadow`, one
+byte per heap byte, indexed by `(char*)ptr - vm->heap_seg`), replacing the
+earlier one-`type_kind`-per-allocation model — this is what lets a struct
+member or array element be checked independently of the allocation's base
+pointer or any other member/element. `TY_VOID` (0) means "no effective type
+established", mirroring C11 §6.5p6: fresh heap bytes start there; a store
+stamps the range it writes; a load checks the range it reads. A range whose
+bytes carry more than one stamped type (e.g. straddling two prior stamps) is
+treated as no-info rather than guessed at. `char`-typed accesses are always
+legal (§6.5p7): a `char` load never checks, and a `char` store clears rather
+than stamps. `CHKT3` resolves the containing allocation via the same
+`heap_alloc_for_ptr`/`sorted_allocs_find` helper as `CHKB` and `CHKP3`
+(#650's pattern) purely to find the allocation's liveness (`freed`) and
+range — the type information itself lives in the shadow, not in
+`AllocHeader`.
+
+The shadow is lazily allocated and grown (`type_shadow_ensure`, `src/ops.c`)
+to track `vm->heap_committed` whenever `CCCC_TYPE_CHECKS` is set, so it stays
+in sync even if the flag is toggled on mid-run by
+`#pragma cccc config(safety=N)`. Every heap-mutating opcode keeps it
+current: `MALC`/`CALC`/`MALCA` clear a fresh allocation's range; `MFRE`
+clears on free; `MCPY` (backing struct/union assignment and the restrict
+memcpy-loop lowering) propagates source shadow onto destination, mirroring
+`memcpy` copying the effective type along with the bytes; `REALC` (always a
+fresh bump allocation, never grown in place) carries the old block's shadow
+to the new address before freeing the old one. Guest `memcpy`/`memmove`
+route through shadow-aware host shims (`cccc_shim_memcpy`/`cccc_shim_memmove`,
+`src/stdlib/string.c`) that call `cc_type_shadow_copy` after the real libc
+call runs. Every *other* host function reachable through `CALLF` might write
+heap bytes with no VM-level hook at all (`fread`, `read`, `scanf`, any other
+FFI call) — `op_CALLF_fn` conservatively clears the shadow of any tracked,
+live heap allocation reachable through an integer argument register before
+such a call runs, so a write the VM can't observe can never leave a stale
+stamp that later false-positives (the accepted cost is a false negative if a
+real bug happens to route through an unshimmed host write).
+
+Reusing a heap buffer as a different type — legal C — never false-positives,
+since the next store simply re-stamps the effective type for the bytes it
+touches. Union member access is exempted in both directions via
+`vm->compiler.in_union_member_access` (set/cleared around `ND_MEMBER`
+codegen when the immediate parent expression's type is `TY_UNION`): a union
+load skips CHKT3 emission entirely; a union store emits `CHKT3_MODE_CLEAR`
+instead of `CHKT3_MODE_STAMP`. Heap-only; stack and global subobjects remain
+untracked.
 
 ### Stack Instrumentation Opcodes
 

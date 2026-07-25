@@ -445,6 +445,12 @@ typedef enum {
     OP_COUNT,
 } CCCC_OP;
 
+// CHKT3's mode operand (#653): widened from a plain load/store bool to a
+// 3-way mode since union member accesses need a "clear" behavior distinct
+// from both check (load) and stamp (store). Shared between codegen.c
+// (emission) and ops.c (op_CHKT3_fn, interpretation).
+typedef enum { CHKT3_MODE_CHECK = 0, CHKT3_MODE_STAMP = 1, CHKT3_MODE_CLEAR = 2 } CHKT3Mode;
+
 /*!
  @enum CCCCFlags
  @abstract Bitwise flags for CCCC runtime features and safety checks.
@@ -1796,7 +1802,6 @@ typedef struct DynamicSymbol {
  @field generation Generation counter incremented on each free (for UAF
  detection)
  @field alloc_pc Program counter at allocation site (for debugging)
- @field type_kind Type of allocation (for type checking on dereference)
 */
 typedef struct AllocHeader {
     size_t size;             // Allocated size (rounded, excluding header)
@@ -1808,7 +1813,10 @@ typedef struct AllocHeader {
     int creation_generation; // Generation when pointer was created (for
                              // temporal safety)
     long long alloc_pc;      // PC at allocation site (for leak detection)
-    int type_kind; // Type of allocation (TypeKind enum, for type checking)
+    // Per-allocation type_kind was removed (#653): type tracking now lives
+    // in a byte-granular shadow (vm->type_shadow) so member/interior
+    // accesses can be checked too, not just the base pointer. See CHKT3
+    // in ops.c.
 } AllocHeader;
 
 // The default (malloc) allocation path assumes 8-byte alignment introduces
@@ -2568,6 +2576,16 @@ typedef struct Compiler {
     Obj *promotion_alias_targets[16];
     int promotion_alias_count;
 
+    // True while gen_expr/gen_addr are emitting a load or store through a
+    // union member access (#653). Threaded as compiler-scoped state rather
+    // than a parameter on emit_load_ex/emit_store_ex (mirroring
+    // in_const_gvar_init's parser-side pattern, #720) since only a handful
+    // of the ~16 call sites need it. Consumed by emit_load_ex/emit_store_ex
+    // to keep CHKT3 from false-positiving on legal union member punning:
+    // a union load skips the type check entirely, a union store clears the
+    // accessed range's effective-type shadow instead of stamping it.
+    bool in_union_member_access;
+
     // Restrict-param deref cache (#267). Active only while generating one function.
     // Cache key is (param, byte_offset); up to MAX_RESTRICT_CACHE distinct pairs.
     // Slots are lazily bound on first access; restrict_cache_capacity tracks the
@@ -2658,6 +2676,17 @@ struct VirtualMachine {
     char *heap_ptr;          // Current allocation pointer (bump allocator)
     char *heap_end;          // End of heap segment
     FreeBlock *free_list;    // Head of free blocks list (for memory reuse)
+
+    // Byte-granular heap subobject type shadow for CHKT3 (#653). One byte
+    // per heap byte: a TypeKind (TY_VOID == 0 means "no effective type
+    // established"), indexed by (char*)ptr - heap_seg. Lazily allocated and
+    // grown (via type_shadow_ensure in ops.c) to track heap_committed
+    // whenever CCCC_TYPE_CHECKS is set, so it stays in sync even if the
+    // flag is toggled on mid-run by #pragma cccc config(safety=N).
+    // Replaces the old single AllocHeader.type_kind-per-allocation model,
+    // which only supported checking at offset 0.
+    unsigned char *type_shadow;
+    size_t type_shadow_size; // bytes currently allocated/valid in type_shadow
 
     // Segregated free lists for optimized allocation
     // Size classes: 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, LARGE

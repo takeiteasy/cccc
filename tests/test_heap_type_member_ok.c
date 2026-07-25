@@ -1,10 +1,12 @@
 // CCCC_FLAGS: --type-checks
-// Ticket #651: CHKT3 is scoped to base pointers only (offset 0 into the
-// allocation) since subobject/member types aren't tracked. Accessing a
-// struct member at a non-zero offset (s->b, an interior access) must not
-// be checked against the whole allocation's effective type, or a legal
-// same-size member of a different type (e.g. an int then a float member)
-// would false-positive.
+// Ticket #653 (was #651, before per-offset tracking landed): CHKT3 now
+// stamps and checks the effective type of each struct member's own byte
+// range independently, via a byte-granular heap type shadow rather than
+// one type_kind per allocation. Two same-size-but-different-type members
+// (an int then a float) at different offsets must each keep their own
+// effective type -- this is legal C and must never false-positive, since
+// each member's bytes are only ever checked against a store through that
+// same member.
 #include <stdlib.h>
 
 struct S {
@@ -14,8 +16,8 @@ struct S {
 
 int main(void) {
     struct S *s = malloc(sizeof(struct S));
-    s->a = 20;   // base member (offset 0): stamps effective type int
-    s->b = 22.0f; // interior member (offset != 0): skipped by CHKT3
+    s->a = 20;    // stamps s->a's own byte range (offset 0) as int
+    s->b = 22.0f; // stamps s->b's own byte range (offset 4) as float
     int result = s->a + (int)s->b;
     free(s);
     return result;

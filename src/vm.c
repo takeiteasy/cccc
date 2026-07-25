@@ -1233,6 +1233,12 @@ void cc_destroy(VirtualMachine *vm) {
     if (vm->sorted_allocs.headers)
         free(vm->sorted_allocs.headers);
 
+    // Free heap subobject type shadow (#653; lazily allocated/grown by
+    // type_shadow_ensure in ops.c)
+    free(vm->type_shadow);
+    vm->type_shadow = NULL;
+    vm->type_shadow_size = 0;
+
     // Free macros HashMap (Macro values are arena-allocated; do not free them)
     hashmap_deinit(&vm->compiler.macros);
 

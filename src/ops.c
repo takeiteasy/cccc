@@ -1935,6 +1935,92 @@ static AllocHeader *heap_alloc_for_ptr(VirtualMachine *vm, long long ptr,
     return h;
 }
 
+// ---- Byte-granular heap subobject type shadow (#653) ----
+//
+// One byte per heap byte, indexed by (char*)ptr - vm->heap_seg. TY_VOID (0)
+// means "no effective type established". Lazily allocated and grown here
+// (rather than in vm_heap_grow) so it stays in sync even if --type-checks
+// is toggled on mid-run by #pragma cccc config(safety=N); every heap-
+// mutating opcode (MALC/CALC/MALCA/REALC/MFRE/MCPY/MSET) and CHKT3 itself
+// call this before touching the shadow.
+static bool type_shadow_ensure(VirtualMachine *vm) {
+    if (!(vm->flags & CCCC_TYPE_CHECKS))
+        return vm->type_shadow != NULL;
+    if (vm->type_shadow_size >= vm->heap_committed)
+        return vm->type_shadow != NULL;
+    unsigned char *ns = realloc(vm->type_shadow, vm->heap_committed);
+    if (!ns)
+        return vm->type_shadow != NULL;
+    memset(ns + vm->type_shadow_size, 0, vm->heap_committed - vm->type_shadow_size);
+    vm->type_shadow = ns;
+    vm->type_shadow_size = vm->heap_committed;
+    return true;
+}
+
+// Returns a pointer into type_shadow for [p, p+len), or NULL if the shadow
+// doesn't exist yet or the whole range doesn't lie within the tracked
+// (committed) heap range. Does not allocate -- call type_shadow_ensure
+// first if the caller intends to write.
+static unsigned char *type_shadow_at(VirtualMachine *vm, const void *p, size_t len) {
+    if (!vm->type_shadow || len == 0)
+        return NULL;
+    if ((const char *)p < vm->heap_seg)
+        return NULL;
+    size_t off = (size_t)((const char *)p - vm->heap_seg);
+    if (off > vm->type_shadow_size || len > vm->type_shadow_size - off)
+        return NULL;
+    return vm->type_shadow + off;
+}
+
+// Establish `kind` as the effective type for every byte in [p, p+len).
+static void type_shadow_stamp(VirtualMachine *vm, void *p, size_t len, int kind) {
+    if (!type_shadow_ensure(vm))
+        return;
+    unsigned char *s = type_shadow_at(vm, p, len);
+    if (s)
+        memset(s, (unsigned char)kind, len);
+}
+
+// Erase effective-type info for every byte in [p, p+len) (back to "no
+// effective type established"). Calls type_shadow_ensure so the shadow
+// stays grown to heap_committed even when the only heap-mutating traffic
+// through an allocation is clears (e.g. malloc immediately followed by a
+// memset(0), or every fresh MALC below).
+static void type_shadow_clear(VirtualMachine *vm, void *p, size_t len) {
+    if (!type_shadow_ensure(vm))
+        return;
+    unsigned char *s = type_shadow_at(vm, p, len);
+    if (s)
+        memset(s, 0, len);
+}
+
+// Propagate effective-type info from [src, src+len) to [dst, dst+len)
+// (mirrors memcpy copying the effective type along with the bytes, C11
+// §6.5p6). If src isn't a tracked heap range (e.g. a stack/global source,
+// or a source outside any live allocation), conservatively clear dst
+// instead of leaving it stale.
+static void type_shadow_copy(VirtualMachine *vm, void *dst, const void *src, size_t len) {
+    if (!type_shadow_ensure(vm))
+        return;
+    unsigned char *sd = type_shadow_at(vm, dst, len);
+    if (!sd)
+        return;
+    const unsigned char *ss = type_shadow_at(vm, src, len);
+    if (ss)
+        memmove(sd, ss, len);
+    else
+        memset(sd, 0, len);
+}
+
+// Non-static entry point for the memcpy/memmove shims in stdlib/string.c
+// (a separate translation unit -- ops.c is #include'd into vm.c, so its
+// static helpers aren't visible there). Declared in internal.h.
+void cc_type_shadow_copy(VirtualMachine *vm, void *dst, const void *src, size_t len) {
+    if (!vm)
+        return;
+    type_shadow_copy(vm, dst, src, len);
+}
+
 static inline int op_CHKP3_fn(VirtualMachine *vm) {
     // Check pointer validity (register-based version of CHKP)
     // Format: [CHKP3] [rs:8|unused:56]
@@ -2123,16 +2209,21 @@ static inline int op_CHKA3_fn(VirtualMachine *vm) {
 
 static inline int op_CHKT3_fn(VirtualMachine *vm) {
     // Check type on dereference (register-based version of CHKT).
-    // Effective-type model (#651): a store through a base pointer stamps
-    // the allocation's type_kind ("establishes" the effective type,
-    // mirroring C11 6.5p6); a load checks the pointer's static type
-    // against it. type_kind == TY_VOID means "no effective type
-    // established yet" (the state MALC leaves it in) — never an error.
-    // Format: [CHKT3] [rs:8|store_flag:8|unused:48] [expected_type:64]
+    // Effective-type model (#651), extended to per-offset byte granularity
+    // (#653 -- subobject/member accesses are now tracked, not just base
+    // pointers): a store through any address stamps vm->type_shadow across
+    // the accessed byte range ("establishes" the effective type, mirroring
+    // C11 6.5p6); a load checks the pointer's static type against the
+    // shadow. TY_VOID (0) means "no effective type established yet" (the
+    // state a fresh allocation or type_shadow_clear leaves bytes in) —
+    // never an error to load through.
+    // Format: [CHKT3] [rs:8|mode:8|unused:48] [(size<<8)|expected_type:64]
     long long operands = cc_read_word(vm);
-    int rs, store_flag;
-    DECODE_RR(operands, rs, store_flag);
-    int expected_type = (int)cc_read_i64(vm);
+    int rs, mode;
+    DECODE_RR(operands, rs, mode);
+    long long imm = cc_read_i64(vm);
+    int expected_type = (int)(imm & 0xFF);
+    size_t size = (size_t)(imm >> 8);
     long long ptr = vm->regs[rs];
 
     if (!(vm->flags & CCCC_TYPE_CHECKS)) {
@@ -2141,11 +2232,6 @@ static inline int op_CHKT3_fn(VirtualMachine *vm) {
 
     if (ptr == 0) {
         return 0; // NULL will be caught by CHKP3
-    }
-
-    // Skip check for void* (TY_VOID) and generic pointers (TY_PTR)
-    if (expected_type == TY_VOID || expected_type == TY_PTR) {
-        return 0;
     }
 
     // Resolve the containing allocation — handles base pointers and
@@ -2158,25 +2244,58 @@ static inline int op_CHKT3_fn(VirtualMachine *vm) {
     if (header->freed) {
         return 0; // UAF is CHKP3's job; don't double-report here
     }
-    // Base-pointer-only scoping (#651 point 4): an interior/member deref
-    // may legitimately have a different subobject type than the whole
-    // allocation, and that isn't tracked. Only check at offset 0.
-    if (off != 0) {
+
+    if (mode == CHKT3_MODE_CLEAR) {
+        // Union member access: erase any stamped type for this range so a
+        // later non-union access through the same bytes starts fresh
+        // rather than false-positiving against whichever member the union
+        // was last written through.
+        type_shadow_clear(vm, (void *)ptr, size);
         return 0;
     }
 
-    if (store_flag) {
-        // Establish (or update) the allocation's effective type.
-        header->type_kind = expected_type;
+    // Skip check for void* (TY_VOID) and generic pointers (TY_PTR)
+    if (expected_type == TY_VOID || expected_type == TY_PTR) {
         return 0;
     }
 
-    int actual_type = header->type_kind;
+    // Any object's representation is always legally accessible as
+    // character type (C11 6.5p7): never flag a char load, and a char
+    // store clears the range rather than stamping it "char", so a
+    // hand-rolled byte-copy loop erases the destination's prior effective
+    // type instead of mis-stamping it.
+    if (expected_type == TY_CHAR) {
+        if (mode == CHKT3_MODE_STAMP)
+            type_shadow_clear(vm, (void *)ptr, size);
+        return 0;
+    }
+
+    if (mode == CHKT3_MODE_STAMP) {
+        // Establish (or re-establish) the effective type for this range.
+        type_shadow_stamp(vm, (void *)ptr, size, expected_type);
+        return 0;
+    }
+
+    unsigned char *shadow = type_shadow_at(vm, (void *)ptr, size);
+    if (!shadow) {
+        return 0; // shadow not allocated yet, or range outside tracked heap
+    }
+
+    unsigned char actual_type = shadow[0];
     if (actual_type == TY_VOID) {
         return 0; // no effective type established yet — nothing to check
     }
+    // A range whose bytes carry more than one stamped type is ambiguous
+    // (e.g. it straddles the tail of one stamp and the head of another)
+    // rather than a clear-cut mismatch — treat it as no info rather than
+    // guessing which stamp applies.
+    for (size_t i = 1; i < size; i++) {
+        if (shadow[i] != actual_type) {
+            return 0;
+        }
+    }
 
-    if (actual_type != expected_type) {
+    if (actual_type != (unsigned char)expected_type) {
         static const char *type_names[] = {
             "void",     "bool",   "char",        "short",  "int",
             "long",     "float",  "double",      "long double", "enum",
@@ -2190,15 +2309,16 @@ static inline int op_CHKT3_fn(VirtualMachine *vm) {
                 ? type_names[expected_type]
                 : "unknown";
         const char *actual_name =
-            (actual_type >= 0 && actual_type < n_type_names)
+            (actual_type < n_type_names)
                 ? type_names[actual_type]
                 : "unknown";
 
         printf("\n========== TYPE MISMATCH DETECTED ==========\n");
         printf("Pointer type mismatch on dereference\n");
-        printf("Address:       0x%llx\n", ptr);
-        printf("Expected type: %s\n", expected_name);
-        printf("Actual type:   %s\n", actual_name);
+        printf("Address:          0x%llx\n", ptr);
+        printf("Offset in alloc:  %zu (allocation size: %zu)\n", off, header->size);
+        printf("Expected type:    %s\n", expected_name);
+        printf("Actual type:      %s\n", actual_name);
         printf("Allocated at PC offset: %lld\n", header->alloc_pc);
         printf("Current PC:    0x%llx (offset: %lld)\n", (long long)vm->pc,
                (long long)vm->pc);
@@ -2604,13 +2724,19 @@ static inline void *vm_heap_bump_alloc(VirtualMachine *vm, long long requested_s
     header->creation_generation = 0;
     header->canary = 0;
     header->alloc_pc = vm->text_seg ? (long long)vm->pc : 0;
-    header->type_kind = TY_VOID;
 
     vm->heap_ptr = vm->heap_ptr + total_size;
     void *user_ptr = (void *)(header + 1);
 
     // Track base address -> header for O(log n) interior-pointer lookups.
     sorted_allocs_insert(vm, user_ptr, header);
+
+    // Fresh allocation: no effective type established yet. The bump
+    // allocator never reuses bytes, so newly-committed shadow bytes are
+    // already zero (type_shadow_ensure zeroes growth) -- this call exists
+    // mainly to make sure the shadow itself has grown to cover this
+    // allocation's range before any CHKT3 on it (#653).
+    type_shadow_clear(vm, user_ptr, size);
 
     // Heap canaries: write front + rear guard values
     if (vm->flags & CCCC_HEAP_CANARIES) {
@@ -2781,6 +2907,12 @@ static inline int op_MFRE_fn(VirtualMachine *vm) {
     header->freed = 1;
     header->generation++;
 
+    // Type shadow: a freed allocation has no effective type (#653);
+    // clearing also stops a later, unrelated CHKT3 through a stale
+    // interior pointer into this range from reporting a mismatch instead
+    // of leaving detection to CHKP3's UAF check.
+    type_shadow_clear(vm, ptr, header->size);
+
     // Memory poisoning: fill with 0xDD ("dead memory") pattern
     if (vm->flags & CCCC_MEMORY_POISONING)
         memset(ptr, 0xDD, header->size);
@@ -2818,6 +2950,12 @@ static inline int op_MCPY_fn(VirtualMachine *vm) {
     void *src = (void *)vm->regs[REG_A1];
     size_t count = (size_t)vm->regs[REG_A2];
     memcpy(dest, src, count);
+    // Propagate effective type along with the bytes (C11 6.5p6): backs
+    // struct/union assignment and the restrict memcpy-loop lowering, so
+    // e.g. `struct S a = b;` keeps both members' shadow entries correct
+    // (#653). type_shadow_copy clears dest when src isn't a tracked heap
+    // range, rather than leaving it stale.
+    type_shadow_copy(vm, dest, src, count);
     return 0;
 }
 
@@ -2827,6 +2965,9 @@ static inline int op_MSET_fn(VirtualMachine *vm) {
     void *dest = (void *)vm->regs[REG_A0];
     size_t count = (size_t)vm->regs[REG_A2];
     memset(dest, 0, count);
+    // dest may be a stack or heap address; type_shadow_clear is a no-op
+    // outside the tracked heap range, so this is safe either way (#653).
+    type_shadow_clear(vm, dest, count);
     return 0;
 }
 
@@ -2973,6 +3114,10 @@ static inline int op_REALC_fn(VirtualMachine *vm) {
     size_t copy_size =
         old_size < (size_t)new_size ? old_size : (size_t)new_size;
     memcpy(new_ptr, ptr, copy_size);
+    // realloc is always a fresh bump allocation here (never in-place), so
+    // carry the old block's effective type across the same way MCPY does
+    // (#653) -- must run before op_MFRE_fn below clears the old range.
+    type_shadow_copy(vm, new_ptr, ptr, copy_size);
 
     // Free old block through op_MFRE_fn so all free-path checks run
     vm->regs[REG_A0] = (long long)ptr;
@@ -4189,6 +4334,30 @@ static inline int op_CALLF_fn(VirtualMachine *vm) {
                    (i < 64 && (float_arg_mask & (1ULL << i)))  ? "float"
                    : (i < 64 && (double_arg_mask & (1ULL << i))) ? "double"
                                                                 : "int");
+    }
+
+    // #653 FFI-clear backstop: guest memcpy/memmove get shadow-aware shims
+    // (cccc_shim_memcpy/cccc_shim_memmove in src/stdlib/string.c) that
+    // propagate effective type from src to dst; every other host function
+    // may write heap bytes with no VM hook at all (fread, read, recv,
+    // scanf, sprintf, any third-party FFI library, ...), so conservatively
+    // erase the whole shadow of any tracked, live heap allocation reachable
+    // through an integer argument register before the call runs. This is
+    // what makes byte-granular CHKT3 sound against host writes the VM
+    // can't observe: a real type-confusion bug that happens to route
+    // through an unshimmed host function is missed (accepted, tracked as a
+    // follow-up), but no host write can ever leave a stale stamp that later
+    // false-positives.
+    if ((vm->flags & CCCC_TYPE_CHECKS) && vm->type_shadow &&
+        strcmp(ff->name, "memcpy") != 0 && strcmp(ff->name, "memmove") != 0) {
+        for (int i = 0; i < actual_nargs && i < 64; i++) {
+            if ((float_arg_mask | double_arg_mask) & (1ULL << i))
+                continue; // not a pointer-shaped argument
+            size_t off;
+            AllocHeader *header = heap_alloc_for_ptr(vm, args[i], &off);
+            if (header && !header->freed)
+                type_shadow_clear(vm, (char *)args[i] - off, header->size);
+        }
     }
 
     int rc = cccc_call_native_function(vm, ff->func_ptr, ff->name, args,

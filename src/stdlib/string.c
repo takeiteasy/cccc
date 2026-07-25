@@ -1,5 +1,6 @@
 // string.h stdlib function registration
 #include "../cccc.h"
+#include "../internal.h" // cc_running_vm / cc_type_shadow_copy (#653)
 
 // Wrapper functions for string.h to sign-extend int return values
 long long wrap_strcmp(long long s1, long long s2) {
@@ -12,6 +13,29 @@ long long wrap_strncmp(long long s1, long long s2, long long n) {
 
 long long wrap_memcmp(long long s1, long long s2, long long n) {
     return (long long)memcmp((const void *)s1, (const void *)s2, (size_t)n);
+}
+
+// Shadow-aware memcpy/memmove (#653): a plain FFI registration would leave
+// these routed through op_CALLF_fn's generic backstop, which -- lacking any
+// idea of what the call actually wrote -- just clears dst's effective type.
+// That's correct-but-lossy for the extremely common struct/array copy
+// pattern, so these shims run the real libc call and then propagate src's
+// effective type onto dst, exactly like the MCPY opcode used for compiler-
+// generated copies (op_MCPY_fn, ops.c). op_CALLF_fn special-cases these two
+// names to skip its backstop clear so this propagation isn't immediately
+// undone.
+static void *cccc_shim_memcpy(void *dst, const void *src, size_t n) {
+    void *r = memcpy(dst, src, n);
+    if (cc_running_vm)
+        cc_type_shadow_copy(cc_running_vm, dst, src, n);
+    return r;
+}
+
+static void *cccc_shim_memmove(void *dst, const void *src, size_t n) {
+    void *r = memmove(dst, src, n);
+    if (cc_running_vm)
+        cc_type_shadow_copy(cc_running_vm, dst, src, n);
+    return r;
 }
 
 // C23 memset_explicit: like memset, but guaranteed not to be optimized away.
@@ -27,8 +51,8 @@ static void *cccc_memset_explicit(void *s, int c, size_t n) {
 // Register all string.h functions
 void register_string_functions(VirtualMachine *vm) {
     // Memory operations
-    cc_register_cfunc(vm, "memcpy", (void*)memcpy, 3, 0);
-    cc_register_cfunc(vm, "memmove", (void*)memmove, 3, 0);
+    cc_register_cfunc(vm, "memcpy", (void*)cccc_shim_memcpy, 3, 0);
+    cc_register_cfunc(vm, "memmove", (void*)cccc_shim_memmove, 3, 0);
     cc_register_cfunc(vm, "memset", (void*)memset, 3, 0);
     cc_register_cfunc(vm, "memcmp", (void*)wrap_memcmp, 3, 0);
     cc_register_cfunc(vm, "memccpy", (void*)memccpy, 4, 0);

@@ -2004,11 +2004,17 @@ static void gen_cond_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 // address is known at compile time to be a bp-relative local-frame address
 // (see addr_is_local_frame, #740), never for an address that could hold an
 // arbitrary/stale pointer value.
+//
+// vm->compiler.in_union_member_access (#653) additionally gates CHKT3 here:
+// a union member load must never be checked against the shadow -- legal
+// union punning (write one member, read another) would otherwise
+// false-positive -- so no CHKT3 is emitted at all for a union load.
 static void emit_load_ex(VirtualMachine *vm, Type *ty, int rd, int rs_addr, bool dangling_check) {
     if (dangling_check && (vm->flags & CCCC_POINTER_CHECKS))
         emit_rr(vm, CHKP3, rs_addr, 0);
-    if (vm->flags & CCCC_TYPE_CHECKS)
-        emit_rri(vm, CHKT3, rs_addr, 0 /* load */, (long long)ty->kind);
+    if ((vm->flags & CCCC_TYPE_CHECKS) && !vm->compiler.in_union_member_access)
+        emit_rri(vm, CHKT3, rs_addr, CHKT3_MODE_CHECK,
+                 ((long long)ty->size << 8) | (long long)ty->kind);
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
         emit_rr(vm, LDR_B, rd, rs_addr);
         if (ty->is_unsigned || ty->kind == TY_BOOL)
@@ -2490,11 +2496,20 @@ static void emit_init_fp_promoted_params(VirtualMachine *vm) {
 }
 
 // Store operations based on type. dangling_check: see emit_load_ex above.
+//
+// vm->compiler.in_union_member_access (#653): a union member store must
+// not stamp the accessed range with that member's type -- a later access
+// through a *different* member of the same union is legal punning, not a
+// bug -- so this emits CHKT3 in "clear" mode instead of "stamp" mode,
+// erasing rather than establishing effective-type info for the range.
 static void emit_store_ex(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr, bool dangling_check) {
     if (dangling_check && (vm->flags & CCCC_POINTER_CHECKS))
         emit_rr(vm, CHKP3, rs_addr, 0);
-    if (vm->flags & CCCC_TYPE_CHECKS)
-        emit_rri(vm, CHKT3, rs_addr, 1 /* store */, (long long)ty->kind);
+    if (vm->flags & CCCC_TYPE_CHECKS) {
+        int mode = vm->compiler.in_union_member_access ? CHKT3_MODE_CLEAR : CHKT3_MODE_STAMP;
+        emit_rri(vm, CHKT3, rs_addr, mode,
+                 ((long long)ty->size << 8) | (long long)ty->kind);
+    }
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
         emit_rr(vm, STR_B, rd_val, rs_addr);
     } else if (ty->kind == TY_SHORT) {
@@ -3096,6 +3111,16 @@ static bool is_simple_local_scalar(VirtualMachine *vm, Node *node) {
 // CCCC_POINTER_CHECKS is set -- but distinguishing an array/vector-decay base
 // from a pointer-variable base in that ND_ADD indexing chain needs its own
 // classifier and has no known reproducer yet; tracked separately).
+// Is `node` a member access directly on a union expression (`u.m`, not a
+// struct nested inside a union or vice versa -- only the immediate parent
+// matters, since that's the object whose bytes might legally carry more
+// than one C11 effective type)? Used to gate CHKT3 emission around union
+// member loads/stores so legal punning doesn't false-positive (#653).
+static bool is_union_member_access(Node *node) {
+    return node && node->kind == ND_MEMBER && node->lhs && node->lhs->ty &&
+           node->lhs->ty->kind == TY_UNION;
+}
+
 static bool addr_is_local_frame(VirtualMachine *vm, Node *node) {
     switch (node->kind) {
     case ND_VAR: {
@@ -4602,6 +4627,12 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             need_free = true;
         }
 
+        // #653: a store through a union member must clear (not stamp) the
+        // type shadow for the accessed range -- see emit_store_ex's doc
+        // comment and is_union_member_access above.
+        bool lhs_saved_union_flag = vm->compiler.in_union_member_access;
+        vm->compiler.in_union_member_access = is_union_member_access(node->lhs);
+
         // Handle Bitfields specially (Read-Modify-Write)
         if (node->lhs->kind == ND_MEMBER && node->lhs->member->is_bitfield) {
             Member *mem = node->lhs->member;
@@ -4657,6 +4688,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // Standard store
             emit_store_ex(vm, node->ty, r_val, r_addr, !addr_is_local_frame(vm, node->lhs));
         }
+        vm->compiler.in_union_member_access = lhs_saved_union_flag;
 
         // Update or invalidate the restrict cache for this store.
         restrict_cache_handle_store(vm, node->lhs, r_val);
@@ -4723,6 +4755,10 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         bool local_frame = addr_is_local_frame(vm, node);
         gen_addr(vm, node, dest_reg);
 
+        bool is_union_member = is_union_member_access(node);
+        bool saved_union_flag = vm->compiler.in_union_member_access;
+        vm->compiler.in_union_member_access = is_union_member;
+
         if (node->member->is_bitfield) {
             Member *mem = node->member;
             // Load container value
@@ -4763,6 +4799,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 emit_load_ex(vm, node->ty, dest_reg, dest_reg, !local_frame);
             }
         }
+        vm->compiler.in_union_member_access = saved_union_flag;
         return;
     }
 

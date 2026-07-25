@@ -246,32 +246,55 @@ All features listed below can be enabled individually or through the safety leve
     allocation's* start, so `p[-1]` on an interior pointer that stays
     within the allocation is valid (#650)
 - `--type-checks` **Runtime type checking on pointer dereferences**
-  - Tracks allocation type information in heap headers via an
-    **effective-type model** (mirroring C11 §6.5p6): a heap allocation
-    starts with no effective type; a **store** through the allocation's
-    base pointer establishes (or re-establishes) its effective type; a
-    **load** through the base pointer checks the loaded type against it
-  - CHKT3 opcode validates pointer type matches expected type on dereference
+  - Tracks type information per heap byte in a byte-granular **type
+    shadow** (mirroring C11 §6.5p6's effective-type model): every heap
+    byte starts with no effective type; a **store** through any address
+    establishes (or re-establishes) the effective type of the bytes it
+    writes; a **load** checks its static type against the shadow for the
+    bytes it reads
+  - CHKT3 opcode implements the check/stamp/clear operations against the
+    shadow, keyed by `(char*)ptr - vm->heap_seg`
   - Detects type confusion bugs (e.g., casting `int*` to `float*` and
-    reading through it)
-  - Only checks heap allocations, and only at the allocation's **base
-    pointer** (offset 0) — interior/member accesses (e.g. `s->b` on a
-    struct pointer) are not type-tracked and are skipped, since a
-    subobject may legitimately have a different type than the whole
-    allocation (stack types are also not tracked at runtime)
+    reading through it) at **any offset into a heap allocation**, not just
+    the base pointer — a struct member (`s->b`) or array element (`a[2]`)
+    gets its own independent effective type, since each is checked only
+    against stores through that same sub-range
+  - `char`-typed accesses are always legal (C11 §6.5p7): a `char` load
+    never checks, and a `char` store clears the shadow for its range
+    rather than stamping it "char", so a hand-rolled byte-copy loop
+    doesn't mis-stamp its destination
+  - Union member access is exempted from both directions: a load through
+    a union member skips the check entirely, and a store clears (rather
+    than stamps) the accessed range, so legal member punning never
+    false-positives
+  - `memcpy`/`memmove` propagate the source range's effective type onto
+    the destination, so an ordinary struct/array copy followed by typed
+    member reads doesn't false-positive; every other host function that
+    might write into a tracked heap allocation (`fread`, `read`, `scanf`,
+    any other FFI call) conservatively **clears** that allocation's
+    shadow before the call runs, since the VM can't observe what such a
+    call actually wrote — this trades a false negative (a type-confusion
+    bug that happens to route through an unshimmed host write) for zero
+    false positives
+  - `realloc` (always a fresh allocation in CCCC's bump-allocating VM
+    heap, never grown in place) carries the old block's shadow across to
+    the new address
   - Reusing a heap buffer as a different type — legal in C — does not
     false-positive: the next store simply re-establishes the effective
-    type
+    type for the bytes it touches
   - Skips checks for `void*` and generic pointers (universal pointers)
   - Resolves the allocation via the same `vm->sorted_allocs` binary search
     as `--bounds-checks`/`--uaf-detection` (#650's pattern), so it works
-    through interior *pointer arithmetic* on the way to a base-pointer
-    dereference, not just an exact base-pointer variable
+    through interior *pointer arithmetic* on the way to a dereference, not
+    just an exact base-pointer variable
+  - Heap-only; stack and global subobjects are not type-tracked
   - Full coverage at every optimization level, including standalone
     `--type-checks -O2`/`-O3`: the codegen fusion paths that bypass
     `emit_load`/`emit_store` (indexed-load fusion, restrict-value caching,
     restrict memcpy-loop lowering) are disabled whenever `--type-checks`
     is enabled, not just alongside `--bounds-checks`/`--uaf-detection`
+  - Costs roughly one extra byte of host memory per committed heap byte
+    once `--type-checks` is enabled (the shadow array)
 - `--uninitialized-detection` **Uninitialized variable detection**
   - Tracks initialization state of stack variables using HashMap
   - MARKI opcode marks variables as initialized after assignment
