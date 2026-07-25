@@ -428,8 +428,9 @@ trailing immediate. `mode` is `CHKT3Mode` (`src/cccc.h`):
 | `CHKT3_MODE_STAMP` (1) | a store | establishes `expected_type` as the effective type for `[ptr, ptr+size)` |
 | `CHKT3_MODE_CLEAR` (2) | a union member store | erases (rather than stamps) `[ptr, ptr+size)`, so a later access through a different union member doesn't false-positive |
 
-Type tracking (#653) is a **byte-granular shadow** (`vm->type_shadow`, one
-byte per heap byte, indexed by `(char*)ptr - vm->heap_seg`), replacing the
+Type tracking (#653) is a **byte-granular shadow** (`vm->type_shadow_pages`,
+logically one byte per heap byte, indexed by `(char*)ptr - vm->heap_seg`,
+physically a sparse page table of 64 KiB pages — see below), replacing the
 earlier one-`type_kind`-per-allocation model — this is what lets a struct
 member or array element be checked independently of the allocation's base
 pointer or any other member/element. `TY_VOID` (0) means "no effective type
@@ -444,10 +445,17 @@ than stamps. `CHKT3` resolves the containing allocation via the same
 range — the type information itself lives in the shadow, not in
 `AllocHeader`.
 
-The shadow is lazily allocated and grown (`type_shadow_ensure`, `src/ops.c`)
-to track `vm->heap_committed` whenever `CCCC_TYPE_CHECKS` is set, so it stays
-in sync even if the flag is toggled on mid-run by
-`#pragma cccc config(safety=N)`. Every heap-mutating opcode keeps it
+The shadow's page *vector* is lazily grown (`type_shadow_ensure`,
+`src/ops.c`) to cover `vm->heap_committed` whenever `CCCC_TYPE_CHECKS` is
+set, so it stays in sync even if the flag is toggled on mid-run by
+`#pragma cccc config(safety=N)`; individual 64 KiB pages are allocated only
+when a stamp first touches their range, and freed back to `NULL` the moment
+a clear zeroes one in full (`type_shadow_fill`, `src/ops.c`), so host memory
+for the shadow tracks the *live* stamped footprint rather than the heap's
+total reservation — a large allocate-then-free pattern reclaims its shadow
+pages once the allocation is freed. A missing page reads back as all
+`TY_VOID` ("no info"), identical to an allocated all-zero page. Every
+heap-mutating opcode keeps it
 current: `MALC`/`CALC`/`MALCA` clear a fresh allocation's range; `MFRE`
 clears on free; `MCPY` (backing struct/union assignment and the restrict
 memcpy-loop lowering) propagates source shadow onto destination, mirroring

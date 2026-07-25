@@ -296,8 +296,13 @@ All features listed below can be enabled individually or through the safety leve
     stays enabled instead of disabled — its cache-hit path re-derives the
     address and runs CHKP3/CHKT3 itself, so a cache hit gets the same
     coverage as a real load (see OPTIMIZATION.md)
-  - Costs roughly one extra byte of host memory per committed heap byte
-    once `--type-checks` is enabled (the shadow array)
+  - The shadow is a sparse page table (64 KiB pages), not one flat
+    heap_committed-sized array: a page is allocated lazily on first stamp
+    and freed back the instant a clear zeroes it in full, so host memory
+    tracks the *live* stamped footprint rather than the heap's total
+    reservation — a large allocate-then-free pattern reclaims its shadow
+    pages once the allocation is freed, instead of paying for them for the
+    rest of the process
 - `--uninitialized-detection` **Uninitialized variable detection**
   - Tracks initialization state of stack variables using HashMap
   - MARKI opcode marks variables as initialized after assignment

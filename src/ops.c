@@ -1935,63 +1935,219 @@ static AllocHeader *heap_alloc_for_ptr(VirtualMachine *vm, long long ptr,
     return h;
 }
 
-// ---- Byte-granular heap subobject type shadow (#653) ----
+// ---- Byte-granular heap subobject type shadow (#653), page-chunked (#753) ----
 //
-// One byte per heap byte, indexed by (char*)ptr - vm->heap_seg. TY_VOID (0)
-// means "no effective type established". Lazily allocated and grown here
-// (rather than in vm_heap_grow) so it stays in sync even if --type-checks
-// is toggled on mid-run by #pragma cccc config(safety=N); every heap-
-// mutating opcode (MALC/CALC/MALCA/REALC/MFRE/MCPY/MSET) and CHKT3 itself
-// call this before touching the shadow.
+// Logically one TypeKind byte per heap byte (TY_VOID == 0 means "no
+// effective type established"), indexed by (char*)ptr - vm->heap_seg.
+// Physically a sparse page table rather than one flat heap_committed-sized
+// array: a page is allocated on first stamp into its range and freed back
+// to NULL the instant a clear zeroes it in full, so a program with a large
+// peak-then-shrink allocation pattern doesn't keep paying host memory for
+// heap regions nothing lives in anymore -- cost tracks the live stamped
+// footprint, not the heap reservation. An absent page reads back as all
+// TY_VOID, identical to an allocated all-zero page.
+#define TYPE_SHADOW_PAGE_SHIFT 16
+#define TYPE_SHADOW_PAGE_SIZE  (1u << TYPE_SHADOW_PAGE_SHIFT)
+
+// Grows the page *vector* (not the pages themselves) so it covers
+// vm->heap_committed. Lazily called here (rather than in vm_heap_grow) so
+// it stays in sync even if --type-checks is toggled on mid-run by #pragma
+// cccc config(safety=N); every heap-mutating opcode
+// (MALC/CALC/MALCA/REALC/MFRE/MCPY/MSET) and CHKT3 itself call this before
+// touching the shadow.
 static bool type_shadow_ensure(VirtualMachine *vm) {
     if (!(vm->flags & CCCC_TYPE_CHECKS))
-        return vm->type_shadow != NULL;
-    if (vm->type_shadow_size >= vm->heap_committed)
-        return vm->type_shadow != NULL;
-    unsigned char *ns = realloc(vm->type_shadow, vm->heap_committed);
-    if (!ns)
-        return vm->type_shadow != NULL;
-    memset(ns + vm->type_shadow_size, 0, vm->heap_committed - vm->type_shadow_size);
-    vm->type_shadow = ns;
-    vm->type_shadow_size = vm->heap_committed;
+        return vm->type_shadow_pages != NULL;
+    size_t need = (vm->heap_committed + TYPE_SHADOW_PAGE_SIZE - 1) >> TYPE_SHADOW_PAGE_SHIFT;
+    if (vm->type_shadow_page_count >= need)
+        return vm->type_shadow_pages != NULL;
+    unsigned char **np = realloc(vm->type_shadow_pages, need * sizeof(*np));
+    if (!np)
+        return vm->type_shadow_pages != NULL;
+    for (size_t i = vm->type_shadow_page_count; i < need; i++)
+        np[i] = NULL;
+    vm->type_shadow_pages = np;
+    vm->type_shadow_page_count = need;
     return true;
 }
 
-// Returns a pointer into type_shadow for [p, p+len), or NULL if the shadow
-// doesn't exist yet or the whole range doesn't lie within the tracked
-// (committed) heap range. Does not allocate -- call type_shadow_ensure
-// first if the caller intends to write.
-static unsigned char *type_shadow_at(VirtualMachine *vm, const void *p, size_t len) {
-    if (!vm->type_shadow || len == 0)
-        return NULL;
-    if ((const char *)p < vm->heap_seg)
-        return NULL;
+// Validates [p, p+len) lies within the tracked heap range and, on success,
+// writes the byte offset from vm->heap_seg to *out_off. Does not touch the
+// page table.
+static bool type_shadow_bounds(VirtualMachine *vm, const void *p, size_t len, size_t *out_off) {
+    if (len == 0 || (const char *)p < vm->heap_seg)
+        return false;
     size_t off = (size_t)((const char *)p - vm->heap_seg);
-    if (off > vm->type_shadow_size || len > vm->type_shadow_size - off)
-        return NULL;
-    return vm->type_shadow + off;
+    if (off > vm->heap_committed || len > vm->heap_committed - off)
+        return false;
+    *out_off = off;
+    return true;
+}
+
+// Sets len shadow bytes starting at absolute heap-byte offset `off` to the
+// constant `val`. val == 0 (clear) frees a page the moment this call
+// zeroes it in full (page_off == 0 and the whole page-sized chunk), rather
+// than scanning for an all-zero page on every partial clear -- interior
+// pages of a large cleared range are freed exactly, edge pages that only
+// got partially zeroed stay allocated (harmless: at most two stray pages
+// per clear). val != 0 (stamp) allocates a page on demand.
+static void type_shadow_fill(VirtualMachine *vm, size_t off, size_t len, unsigned char val) {
+    size_t end = off + len;
+    while (off < end) {
+        size_t page_idx = off >> TYPE_SHADOW_PAGE_SHIFT;
+        size_t page_off = off & (TYPE_SHADOW_PAGE_SIZE - 1);
+        size_t chunk = TYPE_SHADOW_PAGE_SIZE - page_off;
+        if (chunk > end - off)
+            chunk = end - off;
+        if (page_idx >= vm->type_shadow_page_count)
+            return; // shouldn't happen after type_shadow_ensure, stay safe
+        unsigned char *page = vm->type_shadow_pages[page_idx];
+        if (!page) {
+            if (val == 0) {
+                off += chunk;
+                continue; // already no-info, nothing to clear
+            }
+            page = calloc(1, TYPE_SHADOW_PAGE_SIZE);
+            if (!page)
+                return; // OOM: leave this and remaining chunks as no-info
+            vm->type_shadow_pages[page_idx] = page;
+        }
+        memset(page + page_off, val, chunk);
+        if (val == 0 && page_off == 0 && chunk == TYPE_SHADOW_PAGE_SIZE) {
+            free(page);
+            vm->type_shadow_pages[page_idx] = NULL;
+        }
+        off += chunk;
+    }
 }
 
 // Establish `kind` as the effective type for every byte in [p, p+len).
 static void type_shadow_stamp(VirtualMachine *vm, void *p, size_t len, int kind) {
     if (!type_shadow_ensure(vm))
         return;
-    unsigned char *s = type_shadow_at(vm, p, len);
-    if (s)
-        memset(s, (unsigned char)kind, len);
+    size_t off;
+    if (type_shadow_bounds(vm, p, len, &off))
+        type_shadow_fill(vm, off, len, (unsigned char)kind);
 }
 
 // Erase effective-type info for every byte in [p, p+len) (back to "no
-// effective type established"). Calls type_shadow_ensure so the shadow
-// stays grown to heap_committed even when the only heap-mutating traffic
-// through an allocation is clears (e.g. malloc immediately followed by a
-// memset(0), or every fresh MALC below).
+// effective type established"). Calls type_shadow_ensure so the page
+// vector stays grown to cover heap_committed even when the only
+// heap-mutating traffic through an allocation is clears (e.g. malloc
+// immediately followed by a memset(0), or every fresh MALC below).
 static void type_shadow_clear(VirtualMachine *vm, void *p, size_t len) {
     if (!type_shadow_ensure(vm))
         return;
-    unsigned char *s = type_shadow_at(vm, p, len);
-    if (s)
-        memset(s, 0, len);
+    size_t off;
+    if (type_shadow_bounds(vm, p, len, &off))
+        type_shadow_fill(vm, off, len, 0);
+}
+
+// Returns true and writes the shared TypeKind to *out_kind iff every byte
+// in [p, p+len) carries the same non-TY_VOID stamp -- i.e. there is
+// unambiguous effective-type info for the whole range. A missing page, a
+// TY_VOID byte, or a range straddling two different stamps (e.g. the tail
+// of one stamp and the head of another) all collapse to "no info" (false)
+// rather than a guess. Never allocates.
+static bool type_shadow_check_uniform(VirtualMachine *vm, const void *p, size_t len, unsigned char *out_kind) {
+    size_t off;
+    if (!vm->type_shadow_pages || !type_shadow_bounds(vm, p, len, &off))
+        return false;
+    size_t end = off + len;
+    bool have_kind = false;
+    unsigned char kind = 0;
+    while (off < end) {
+        size_t page_idx = off >> TYPE_SHADOW_PAGE_SHIFT;
+        size_t page_off = off & (TYPE_SHADOW_PAGE_SIZE - 1);
+        size_t chunk = TYPE_SHADOW_PAGE_SIZE - page_off;
+        if (chunk > end - off)
+            chunk = end - off;
+        unsigned char *page =
+            (page_idx < vm->type_shadow_page_count) ? vm->type_shadow_pages[page_idx] : NULL;
+        for (size_t i = 0; i < chunk; i++) {
+            unsigned char b = page ? page[page_off + i] : 0;
+            if (b == TY_VOID)
+                return false;
+            if (!have_kind) {
+                kind = b;
+                have_kind = true;
+            } else if (b != kind) {
+                return false;
+            }
+        }
+        off += chunk;
+    }
+    if (!have_kind)
+        return false;
+    *out_kind = kind;
+    return true;
+}
+
+// Copies len shadow bytes into `out`, starting at absolute heap-byte
+// offset `off`. A missing page reads back as TY_VOID. Never allocates.
+static void type_shadow_gather(VirtualMachine *vm, size_t off, size_t len, unsigned char *out) {
+    size_t end = off + len, pos = 0;
+    while (off < end) {
+        size_t page_idx = off >> TYPE_SHADOW_PAGE_SHIFT;
+        size_t page_off = off & (TYPE_SHADOW_PAGE_SIZE - 1);
+        size_t chunk = TYPE_SHADOW_PAGE_SIZE - page_off;
+        if (chunk > end - off)
+            chunk = end - off;
+        unsigned char *page =
+            (page_idx < vm->type_shadow_page_count) ? vm->type_shadow_pages[page_idx] : NULL;
+        if (page)
+            memcpy(out + pos, page + page_off, chunk);
+        else
+            memset(out + pos, 0, chunk);
+        off += chunk;
+        pos += chunk;
+    }
+}
+
+// Writes len shadow bytes from `in`, starting at absolute heap-byte offset
+// `off`. Allocates pages on demand, but skips allocating a page purely to
+// write all-zero bytes into it (an absent page already reads back as
+// TY_VOID); frees a page it writes an all-zero full-page chunk into,
+// mirroring type_shadow_fill's reclaim rule.
+static void type_shadow_scatter(VirtualMachine *vm, size_t off, size_t len, const unsigned char *in) {
+    size_t end = off + len, pos = 0;
+    while (off < end) {
+        size_t page_idx = off >> TYPE_SHADOW_PAGE_SHIFT;
+        size_t page_off = off & (TYPE_SHADOW_PAGE_SIZE - 1);
+        size_t chunk = TYPE_SHADOW_PAGE_SIZE - page_off;
+        if (chunk > end - off)
+            chunk = end - off;
+        if (page_idx >= vm->type_shadow_page_count)
+            return; // shouldn't happen after type_shadow_ensure, stay safe
+
+        bool all_zero = true;
+        for (size_t i = 0; i < chunk; i++) {
+            if (in[pos + i]) {
+                all_zero = false;
+                break;
+            }
+        }
+
+        unsigned char *page = vm->type_shadow_pages[page_idx];
+        if (!page && all_zero) {
+            off += chunk;
+            pos += chunk;
+            continue;
+        }
+        if (!page) {
+            page = calloc(1, TYPE_SHADOW_PAGE_SIZE);
+            if (!page)
+                return; // OOM: leave this and remaining chunks as no-info
+            vm->type_shadow_pages[page_idx] = page;
+        }
+        memcpy(page + page_off, in + pos, chunk);
+        if (all_zero && page_off == 0 && chunk == TYPE_SHADOW_PAGE_SIZE) {
+            free(page);
+            vm->type_shadow_pages[page_idx] = NULL;
+        }
+        off += chunk;
+        pos += chunk;
+    }
 }
 
 // Propagate effective-type info from [src, src+len) to [dst, dst+len)
@@ -2002,14 +2158,30 @@ static void type_shadow_clear(VirtualMachine *vm, void *p, size_t len) {
 static void type_shadow_copy(VirtualMachine *vm, void *dst, const void *src, size_t len) {
     if (!type_shadow_ensure(vm))
         return;
-    unsigned char *sd = type_shadow_at(vm, dst, len);
-    if (!sd)
+    size_t dst_off;
+    if (!type_shadow_bounds(vm, dst, len, &dst_off))
+        return; // dst outside tracked heap range: nothing to propagate to
+    size_t src_off;
+    if (!vm->type_shadow_pages || !type_shadow_bounds(vm, src, len, &src_off)) {
+        type_shadow_clear(vm, dst, len);
         return;
-    const unsigned char *ss = type_shadow_at(vm, src, len);
-    if (ss)
-        memmove(sd, ss, len);
-    else
-        memset(sd, 0, len);
+    }
+    // Gather the whole source range into a temporary buffer before
+    // scattering it to dst. src and dst can overlap (mirrors memmove);
+    // gather-then-scatter of the *whole* range is trivially correct for
+    // that, whereas chunk-by-chunk in place, with src/dst potentially at
+    // different page offsets, is easy to get subtly wrong. Correctness
+    // over micro-optimizing an opt-in safety check.
+    unsigned char stack_buf[4096];
+    unsigned char *buf = len <= sizeof(stack_buf) ? stack_buf : malloc(len);
+    if (!buf) {
+        type_shadow_clear(vm, dst, len); // OOM: don't risk a stale stamp
+        return;
+    }
+    type_shadow_gather(vm, src_off, len, buf);
+    type_shadow_scatter(vm, dst_off, len, buf);
+    if (buf != stack_buf)
+        free(buf);
 }
 
 // Non-static entry point for the memcpy/memmove shims in stdlib/string.c
@@ -2211,8 +2383,8 @@ static inline int op_CHKT3_fn(VirtualMachine *vm) {
     // Check type on dereference (register-based version of CHKT).
     // Effective-type model (#651), extended to per-offset byte granularity
     // (#653 -- subobject/member accesses are now tracked, not just base
-    // pointers): a store through any address stamps vm->type_shadow across
-    // the accessed byte range ("establishes" the effective type, mirroring
+    // pointers): a store through any address stamps vm->type_shadow_pages
+    // across the accessed byte range ("establishes" the effective type, mirroring
     // C11 6.5p6); a load checks the pointer's static type against the
     // shadow. TY_VOID (0) means "no effective type established yet" (the
     // state a fresh allocation or type_shadow_clear leaves bytes in) —
@@ -2276,23 +2448,13 @@ static inline int op_CHKT3_fn(VirtualMachine *vm) {
         return 0;
     }
 
-    unsigned char *shadow = type_shadow_at(vm, (void *)ptr, size);
-    if (!shadow) {
-        return 0; // shadow not allocated yet, or range outside tracked heap
-    }
-
-    unsigned char actual_type = shadow[0];
-    if (actual_type == TY_VOID) {
-        return 0; // no effective type established yet — nothing to check
-    }
-    // A range whose bytes carry more than one stamped type is ambiguous
-    // (e.g. it straddles the tail of one stamp and the head of another)
-    // rather than a clear-cut mismatch — treat it as no info rather than
-    // guessing which stamp applies.
-    for (size_t i = 1; i < size; i++) {
-        if (shadow[i] != actual_type) {
-            return 0;
-        }
+    unsigned char actual_type;
+    if (!type_shadow_check_uniform(vm, (void *)ptr, size, &actual_type)) {
+        // No unambiguous effective type for this range: either nothing has
+        // been stamped yet, or the range straddles more than one stamp
+        // (e.g. the tail of one stamp and the head of another) -- treat
+        // both as no info rather than guessing which stamp applies.
+        return 0;
     }
 
     if (actual_type != (unsigned char)expected_type) {
@@ -2738,12 +2900,13 @@ static inline void *vm_heap_bump_alloc(VirtualMachine *vm, long long requested_s
     // Track base address -> header for O(log n) interior-pointer lookups.
     sorted_allocs_insert(vm, user_ptr, header);
 
-    // Fresh allocation: no effective type established yet. The bump
-    // allocator never reuses bytes, so newly-committed shadow bytes are
-    // already zero (type_shadow_ensure zeroes growth) -- this call exists
-    // mainly to make sure the shadow itself has grown to cover this
-    // allocation's range before any CHKT3 on it (#653).
-    type_shadow_clear(vm, user_ptr, size);
+    // Fresh allocation: no effective type established yet. Nothing to do
+    // here for the shadow itself (#653/#753) -- the bump allocator never
+    // reuses bytes, and with the page-chunked shadow a page that was never
+    // allocated already reads back as all TY_VOID ("no info"), so there's
+    // no growth to force and eagerly touching a page here would just
+    // undermine #753's goal of costing memory only for what's actually
+    // stamped.
 
     // Heap canaries: write front + rear guard values
     if (vm->flags & CCCC_HEAP_CANARIES) {
@@ -4355,7 +4518,7 @@ static inline int op_CALLF_fn(VirtualMachine *vm) {
     // through an unshimmed host function is missed (accepted, tracked as a
     // follow-up), but no host write can ever leave a stale stamp that later
     // false-positives.
-    if ((vm->flags & CCCC_TYPE_CHECKS) && vm->type_shadow &&
+    if ((vm->flags & CCCC_TYPE_CHECKS) && vm->type_shadow_pages &&
         strcmp(ff->name, "memcpy") != 0 && strcmp(ff->name, "memmove") != 0) {
         for (int i = 0; i < actual_nargs && i < 64; i++) {
             if ((float_arg_mask | double_arg_mask) & (1ULL << i))

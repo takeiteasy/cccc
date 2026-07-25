@@ -1814,7 +1814,7 @@ typedef struct AllocHeader {
                              // temporal safety)
     long long alloc_pc;      // PC at allocation site (for leak detection)
     // Per-allocation type_kind was removed (#653): type tracking now lives
-    // in a byte-granular shadow (vm->type_shadow) so member/interior
+    // in a byte-granular shadow (vm->type_shadow_pages) so member/interior
     // accesses can be checked too, not just the base pointer. See CHKT3
     // in ops.c.
 } AllocHeader;
@@ -2677,16 +2677,25 @@ struct VirtualMachine {
     char *heap_end;          // End of heap segment
     FreeBlock *free_list;    // Head of free blocks list (for memory reuse)
 
-    // Byte-granular heap subobject type shadow for CHKT3 (#653). One byte
-    // per heap byte: a TypeKind (TY_VOID == 0 means "no effective type
-    // established"), indexed by (char*)ptr - heap_seg. Lazily allocated and
-    // grown (via type_shadow_ensure in ops.c) to track heap_committed
-    // whenever CCCC_TYPE_CHECKS is set, so it stays in sync even if the
-    // flag is toggled on mid-run by #pragma cccc config(safety=N).
-    // Replaces the old single AllocHeader.type_kind-per-allocation model,
-    // which only supported checking at offset 0.
-    unsigned char *type_shadow;
-    size_t type_shadow_size; // bytes currently allocated/valid in type_shadow
+    // Byte-granular heap subobject type shadow for CHKT3 (#653). Logically
+    // one byte per heap byte -- a TypeKind (TY_VOID == 0 means "no
+    // effective type established") -- but physically a sparse page table
+    // (#753): type_shadow_pages[i] is either NULL (every byte in that
+    // page's range reads back as TY_VOID -- "no info", without costing any
+    // host memory) or a TYPE_SHADOW_PAGE_SIZE-byte page, allocated lazily
+    // on first stamp and freed back to NULL once a clear zeroes it in
+    // full. This keeps host memory proportional to the heap's *live*
+    // stamped footprint rather than its total reservation (a large
+    // allocate-then-free workload reclaims its shadow pages, not just its
+    // heap bytes). type_shadow_page_count * TYPE_SHADOW_PAGE_SIZE is
+    // always >= heap_committed while CCCC_TYPE_CHECKS is set (see
+    // type_shadow_ensure in ops.c, which grows the page *vector*, not the
+    // pages, so it stays in sync even if the flag is toggled on mid-run by
+    // #pragma cccc config(safety=N)). Replaces the old single
+    // AllocHeader.type_kind-per-allocation model, which only supported
+    // checking at offset 0.
+    unsigned char **type_shadow_pages;
+    size_t type_shadow_page_count; // length of type_shadow_pages
 
     // Segregated free lists for optimized allocation
     // Size classes: 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, LARGE
