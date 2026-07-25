@@ -1417,6 +1417,18 @@ static bool can_emit_tail_call(VirtualMachine *vm, Node *expr) {
     if (expr->ty && (expr->ty->kind == TY_STRUCT || expr->ty->kind == TY_UNION ||
                      expr->ty->kind == TY_VECTOR))
         return false; // RETBUF machinery — incompatible with frame reuse
+    // #763: a wide _BitInt(N>64) return is materialised as an address into a
+    // frame-local scratch buffer (alloc_wide_bitint_temp, gen_expr's ND_CAST
+    // wide-BitInt handling), the same frame-reuse hazard shape as the
+    // struct/union/vector RETBUF case just above. In practice the ND_RETURN
+    // strip loop already never reaches here for a wide-_BitInt-returning
+    // call -- return_repr_key() gives is_wide_bitint() types a negative key,
+    // so the mandatory return-site ND_CAST is never stripped and tco_expr
+    // stops being ND_FUNCALL -- but that's an accidental consequence of
+    // #762's fix, not a guarantee this function should rely on. Reject
+    // explicitly so the invariant holds even if the strip logic changes.
+    if (expr->ty && is_wide_bitint(expr->ty))
+        return false;
     int nargs = 0;
     for (Node *a = expr->args; a; a = a->next) {
         nargs++;
