@@ -1175,6 +1175,14 @@ static bool op_byte0_is_int_src(int op) {
     case PSH3:
     // Pointer and type safety checks: byte 0 is the pointer source register.
     case CHKP3: case CHKA3: case CHKT3: case CHKPA:
+    // Bounds check: byte 0 (rs1, via DECODE_RR) is the base pointer source,
+    // byte 1 the scaled offset source; neither is a destination (#755 --
+    // missing here let copy-prop sub-pass B treat CHKB's base-pointer read as
+    // a definition and NOP the still-live MOV3 feeding it).
+    case CHKB:
+    // Provenance marker: byte 0 (rs_ptr) and byte 1 (rs_base) are both pure
+    // sources, same class as CHKB above.
+    case MARKP:
         return true;
     default:
         return false;

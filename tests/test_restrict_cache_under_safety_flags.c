@@ -14,10 +14,6 @@
 
 static int sum_pattern1(int *restrict p) {
     // Two straight-line hits on the same (p, 0) cache slot.
-    // (Not three: 3+ repeated constant-index reads of the same slot in one
-    // function trip an unrelated pre-existing crash under
-    // --bounds-checks --optimize=3, tracked separately -- see the ticket
-    // filed alongside this test.)
     return *p + *p;
 }
 
