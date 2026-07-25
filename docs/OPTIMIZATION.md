@@ -177,7 +177,10 @@ At `--optimize=2` and above, `restrict`-qualified scalar pointer parameters are
 cached in callee-saved registers (S4–S7). Loads of `*p` or `p[const]` for a
 restrict param `p` hit the register directly on subsequent accesses within a
 straight-line block; stores write through, and control-flow joins invalidate.
-A pre-pass AST walk also identifies locals provably derived from restrict params
+Function calls invalidate the whole cache too — both before and after the
+call itself, since evaluating the call's own arguments can fill an entry
+(e.g. `f(*p)`) that must not survive the call. A pre-pass AST walk also
+identifies locals provably derived from restrict params
 (`int *q = p + k`) and extends the same cache to `*q` and `q[const]` accesses —
 a store through `*q` updates the `(p, byte_offset)` slot rather than triggering a
 global invalidate. Variable-offset derivations (`q = p + n`) still benefit from

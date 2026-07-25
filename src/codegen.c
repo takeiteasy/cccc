@@ -4943,6 +4943,34 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         return;
 
     case ND_FUNCALL: {
+        // Invalidate the restrict cache up front for every call, not just the
+        // general CALL/CALLN/CALLF path below. Several intrinsics (malloc/
+        // free/calloc/realloc/... under CCCC_VM_HEAP, setjmp/longjmp/signal/
+        // raise/dlopen/dlsym/dlclose/dlerror) lower to a dedicated opcode via
+        // an early `return` that never reaches the general path's invalidate,
+        // leaving stale cache entries after e.g. free() (#754). The general
+        // path below still invalidates again *after* the call: this call's
+        // own argument expressions run after this point and may fill a cache
+        // entry (e.g. f(*p) as the first access to *p), which must not
+        // survive the call it was evaluated for. Over-invalidating only costs
+        // cache throughput, never correctness.
+        //
+        // Residual gap, not fixed here: an intrinsic's *own* argument
+        // expression can itself fill a cache entry (e.g. realloc(p, *p) --
+        // *p is read as the size argument), and that intrinsic's early
+        // `return` below skips any invalidate after it runs, same as before
+        // this fix. Unlike the general-path case above, there is no
+        // "after this call" invalidate to add for those branches without
+        // touching every intrinsic's early return individually. Any
+        // subsequent call (of any kind) still invalidates via its own
+        // top-of-case entry into this invalidate, so the gap is narrow:
+        // an intrinsic argument fill immediately followed by a stale access
+        // with no further call in between. restrict_cache_handle_deref's
+        // hit-site checks (#750) still catch anything CHKP3/CHKT3 would
+        // catch on a real load; only a silent value divergence under no
+        // safety flags at all would slip through. Tracked as a follow-up.
+        restrict_cache_invalidate_all(vm);
+
         // Capture and clear the tail-call flag immediately so that argument
         // sub-calls (e.g. return f(g(x))) and inlined bodies never see it.
         // The captured value is used below when deciding CALL vs CALLT.
@@ -5352,6 +5380,11 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             }
 
             // Reset temp regs after call; function may have modified *restrict_params.
+            // Also invalidate the restrict cache again: the up-front invalidate at
+            // the top of ND_FUNCALL runs before this call's own argument
+            // expressions are evaluated, so an argument access that fills a cache
+            // entry (e.g. f(*p) as the first access to *p) would otherwise survive
+            // past the call it was evaluated for (#754).
             restrict_cache_invalidate_all(vm);
             reset_temp_regs();
 
@@ -5788,7 +5821,10 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
         // Function calls clobber all temp registers (caller-saved)
         // Reset allocator so caller will recompute any addresses it needs.
-        // Also invalidate restrict cache: callee may have modified *restrict_params.
+        // Also invalidate the restrict cache again: see the comment on the
+        // matching invalidate in the tail-call branch above (#754) -- this
+        // call's own argument expressions may have filled a cache entry
+        // after the up-front invalidate at the top of ND_FUNCALL ran.
         restrict_cache_invalidate_all(vm);
         reset_temp_regs();
 
