@@ -467,7 +467,13 @@ int test_posix_vfs_decls(void) {
     void *fns[] = {
         (void*)fchmod, (void*)fchown, (void*)geteuid, (void*)getuid,
         (void*)getgid, (void*)getegid, (void*)readlink, (void*)symlink,
-        (void*)pread, (void*)pwrite, (void*)fdatasync, (void*)getpagesize,
+        (void*)pread, (void*)pwrite,
+#ifdef __linux__
+        // fdatasync is absent from Darwin's libc entirely; its guest-side
+        // declaration in include/unistd.h is __linux__-guarded to match (#783).
+        (void*)fdatasync,
+#endif
+        (void*)getpagesize,
         (void*)chown, (void*)ioctl, (void*)flock, (void*)statfs, (void*)fstatfs,
     };
     struct flock fl;

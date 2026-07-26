@@ -691,6 +691,14 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "dup",     (void*)dup,     1, 0);
     cc_register_cfunc(vm, "dup2",    (void*)dup2,    2, 0);
     cc_register_cfunc(vm, "fsync",   (void*)fsync,   1, 0);
+#ifdef __linux__
+    // fdatasync: POSIX, but absent from Darwin's libc entirely (macOS has
+    // no equivalent syscall/libc symbol at all, unlike fsync -- the
+    // closest analog is the fcntl F_FULLFSYNC command, not a drop-in
+    // replacement). Guest-side declaration in include/unistd.h is
+    // __linux__-guarded to match (#783).
+    cc_register_cfunc(vm, "fdatasync",(void*)fdatasync,1, 0);
+#endif
     cc_register_cfunc(vm, "ftruncate",(void*)ftruncate,2, 0);
     cc_register_cfunc(vm, "truncate", (void*)truncate, 2, 0);
     cc_register_cfunc(vm, "sysconf",   (void*)wrap_sysconf,   1, 0);
@@ -716,6 +724,7 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "gethostname",(void*)gethostname,2, 0);
     cc_register_cfunc(vm, "sethostname",(void*)sethostname,2, 0);
     cc_register_cfunc(vm, "lchown",   (void*)lchown,   3, 0);
+    cc_register_cfunc(vm, "chown",    (void*)chown,    3, 0); // #783: declared, never registered
     cc_register_cfunc(vm, "ttyname_r",(void*)ttyname_r,3, 0);
     cc_register_cfunc(vm, "getlogin_r",(void*)getlogin_r,2, 0);
     cc_register_cfunc(vm, "setgroups",(void*)setgroups,2, 0);
@@ -787,6 +796,7 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "getgid",  (void*)getgid,  0, 0);
     cc_register_cfunc(vm, "getegid", (void*)getegid, 0, 0);
     cc_register_cfunc(vm, "readlink",(void*)readlink,3, 0);
+    cc_register_cfunc(vm, "symlink", (void*)symlink, 2, 0); // #783: declared, never registered
     cc_register_cfunc(vm, "getpagesize",(void*)getpagesize,0, 0);
     cc_register_cfunc(vm, "mkdir",   (void*)mkdir,   2, 0);
     cc_register_cfunc(vm, "mkdirat", (void*)mkdirat, 3, 0);

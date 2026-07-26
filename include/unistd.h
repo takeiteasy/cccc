@@ -61,7 +61,13 @@ extern char *ttyname(int fd);
 extern int dup(int fd);
 extern int dup2(int oldfd, int newfd);
 extern int fsync(int fd);
+#ifdef __linux__
+// fdatasync: POSIX, but absent from Darwin's libc entirely -- macOS has no
+// equivalent syscall/libc symbol at all (the closest analog is the fcntl
+// F_FULLFSYNC command, not a drop-in replacement), unlike fsync above.
+// Same gap class as mremap/splice below (#783).
 extern int fdatasync(int fd);
+#endif
 extern int ftruncate(int fd, off_t length);
 extern int truncate(const char *path, off_t length);
 extern long sysconf(int name);
