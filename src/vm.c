@@ -529,11 +529,23 @@ dispatch:
         return (rc);                           \
     } while (0)
 
+    /* #787: unwind SigFrames for VM signal handlers that have returned,
+       restoring vm->sig_blocked so a deferred signal can be redelivered. */
+    if (__builtin_expect(vm->sig_depth != 0, 0))
+        cccc_signal_poll_handler_returns(vm);
+
     /* Poll pending signals (fast path: branch predicted not-taken) */
     if (__builtin_expect(_cccc_any_pending != 0, 0)) {
         _cccc_any_pending = 0;
+        bool _still_pending = false;
         for (int _sig = 1; _sig < CCCC_NSIG; _sig++) {
             if (!_cccc_pending[_sig]) continue;
+            /* #787: a blocked signal stays pending (delivered once
+               unblocked) rather than being dropped. */
+            if (vm->sig_blocked & (1u << (unsigned)(_sig - 1))) {
+                _still_pending = true;
+                continue;
+            }
             _cccc_pending[_sig] = 0;
             SigSlot *_slot = &vm->vm_sigslots[_sig];
             if (_slot->action == 1) continue; /* IGN */
@@ -548,18 +560,26 @@ dispatch:
                 *--vm->sp = (long long)vm->pc;
                 if (vm->flags & CCCC_CFI) *--vm->shadow_sp = (long long)vm->pc;
                 vm->regs[REG_A0] = (long long)_sig;
-                if (_slot->sa_flags & SA_SIGINFO) {
+                int _flags = cccc_signal_prepare_delivery(vm, _sig, _slot);
+                if (_flags & SA_SIGINFO) {
                     /* #745: real captured siginfo -- this path only runs
                        after an actual host-level signal delivery. */
                     vm->regs[REG_A1] = cccc_guest_siginfo_for(_sig, 0);
                     vm->regs[REG_A2] = 0; /* ucontext: not modelled */
                 }
                 vm->pc = _target;
+                /* Other signals may still be pending behind this one --
+                   don't let clearing _cccc_any_pending above cause them to
+                   be missed until some unrelated event re-sets it. */
+                for (int _k = 1; _k < CCCC_NSIG; _k++) {
+                    if (_cccc_pending[_k]) { _cccc_any_pending = 1; break; }
+                }
                 goto dispatch; /* resume at handler; delivers one signal per re-entry */
             }
             /* DFL: delegate to host */
             raise(_sig);
         }
+        if (_still_pending) _cccc_any_pending = 1;
     }
 
     if (vm->flags & CCCC_ENABLE_DEBUGGER) {

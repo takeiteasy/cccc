@@ -1727,6 +1727,24 @@ typedef struct {
     int sa_flags;
 } SigSlot;
 
+/* #787: sa_mask/SA_NODEFER/SA_RESETHAND enforcement needs to notice when a
+   VM-managed signal handler *returns*, so the blocked-signal mask it
+   installed on entry can be restored -- there is no bytecode-level "handler
+   return" hook, so this is detected by watermarking vm->sp at the moment
+   the handler is entered (right after its return address is pushed) and
+   comparing against the live vm->sp on each dispatch-loop poll: once sp has
+   risen back above the watermark, the handler's RET has executed and the
+   frame is popped. This is robust to a handler longjmp()ing out (the
+   watermark comparison doesn't care how sp got back above it) and needs no
+   new opcode, so it doesn't perturb the text segment or .c4 round-trip. */
+#define CCCC_SIG_FRAME_MAX 8
+
+typedef struct {
+    int sig;
+    unsigned int saved_blocked;
+    long long *sp_at_entry;
+} SigFrame;
+
 /* The floating-point register file is a flat double. The frontend already
  * emits type-specific opcodes (FADD3 vs FADD3_F32, FLDR vs FLDR_F32), so the
  * register itself does not need to carry a precision tag. A `float` value is
@@ -2898,6 +2916,11 @@ struct VirtualMachine {
 
     // VM-managed signal table
     SigSlot vm_sigslots[CCCC_NSIG];
+    // #787: currently-blocked signal mask (bit = signo-1) + the handler
+    // return-detection stack that unwinds it -- see SigFrame above.
+    unsigned int sig_blocked;
+    SigFrame sig_frames[CCCC_SIG_FRAME_MAX];
+    int sig_depth;
 
     // VM-managed atexit()/at_quick_exit() handler lists (#738). These hold
     // guest function-pointer values (byte offsets or FFI tokens), NOT raw

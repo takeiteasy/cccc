@@ -4808,6 +4808,13 @@ static inline int op_VSIGNAL_fn(VirtualMachine *vm) {
     else                        old = 0; /* SIG_DFL */
     vm->regs[REG_A0] = old;
 
+    /* #787: POSIX signal() implies an empty mask and no flags -- without
+       this, a signal() call after a sigaction(SA_SIGINFO|SA_RESETHAND, ...)
+       on the same slot would inherit stale flags (delivering a 1-arg
+       handler with 3-arg registers set, or resetting on first delivery). */
+    slot->sa_mask  = 0;
+    slot->sa_flags = 0;
+
     if (func == 0) {
         /* SIG_DFL: restore host default */
         slot->action     = 0;
@@ -4848,6 +4855,17 @@ static inline int op_VRAISE_fn(VirtualMachine *vm) {
     }
 #endif
 
+    /* #787: raise() of a currently-blocked signal generates it (marks it
+       pending) rather than delivering it synchronously -- POSIX semantics,
+       matching the dispatch loop's pending-signal poll. Delivered once the
+       signal is unblocked (sa_mask/SA_NODEFER expire on handler return). */
+    if (vm->sig_blocked & (1u << (unsigned)(sig - 1))) {
+        _cccc_pending[sig] = 1;
+        _cccc_any_pending = 1;
+        vm->regs[REG_A0] = 0;
+        return 0;
+    }
+
     SigSlot *slot = &vm->vm_sigslots[sig];
     switch (slot->action) {
     case 1: /* IGN */
@@ -4863,7 +4881,8 @@ static inline int op_VRAISE_fn(VirtualMachine *vm) {
         *--vm->sp = (long long)vm->pc;
         if (vm->flags & CCCC_CFI) *--vm->shadow_sp = (long long)vm->pc;
         vm->regs[REG_A0] = (long long)sig;
-        if (slot->sa_flags & SA_SIGINFO) {
+        int flags = cccc_signal_prepare_delivery(vm, sig, slot);
+        if (flags & SA_SIGINFO) {
             /* #745: raise() never goes through the host signal mechanism,
                so synthesize real POSIX raise() semantics instead of real
                captured data (si_code = SI_USER, si_pid/si_uid = self). */

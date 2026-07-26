@@ -131,6 +131,56 @@ long long cccc_guest_siginfo_for(int sig, int synthesized) {
 }
 
 // ---------------------------------------------------------------------------
+// sa_mask / SA_RESTART / SA_NODEFER / SA_RESETHAND enforcement (#787)
+//
+// #745 made the SA_* flag values correct per platform and enforced
+// SA_SIGINFO at dispatch; sa_mask/SA_RESTART/SA_NODEFER/SA_RESETHAND were
+// stored and round-tripped through oact faithfully but inert. This section
+// enforces the first three; SA_RESTART is handled separately, by passing it
+// through to the host sigaction() in cccc_set_guest_signal_action
+// (src/host_signal.c) -- it's a kernel-level concern for blocking FFI
+// syscalls, not something the VM dispatch loop can meaningfully emulate.
+//
+// See the SigFrame comment in cccc.h for why handler-return detection is an
+// sp watermark rather than a dedicated opcode.
+int cccc_signal_prepare_delivery(VirtualMachine *vm, int sig, SigSlot *slot) {
+    int flags = slot->sa_flags;
+    unsigned int bit = 1u << (unsigned)(sig - 1);
+    unsigned int newly_blocked = slot->sa_mask;
+    if (!(flags & SA_NODEFER)) newly_blocked |= bit;
+
+    if (vm->sig_depth < CCCC_SIG_FRAME_MAX) {
+        SigFrame *f = &vm->sig_frames[vm->sig_depth++];
+        f->sig = sig;
+        f->saved_blocked = vm->sig_blocked;
+        f->sp_at_entry = vm->sp;
+    }
+    /* If the frame stack overflowed (pathological recursive-signal case),
+       still apply the block -- it just won't be automatically unblocked on
+       return. Delivering unmasked would be worse (immediate re-entrancy). */
+    vm->sig_blocked |= newly_blocked;
+
+    if (flags & SA_RESETHAND) {
+        slot->action = 0;
+        slot->handler_fn = 0;
+        slot->sa_flags = 0;
+        slot->sa_mask = 0;
+        cccc_set_guest_signal_action(vm, sig, 0);
+    }
+    return flags;
+}
+
+void cccc_signal_poll_handler_returns(VirtualMachine *vm) {
+    while (vm->sig_depth > 0 &&
+           vm->sp > vm->sig_frames[vm->sig_depth - 1].sp_at_entry) {
+        vm->sig_depth--;
+        vm->sig_blocked = vm->sig_frames[vm->sig_depth].saved_blocked;
+        /* A signal deferred while blocked may now be deliverable. */
+        _cccc_any_pending = 1;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // sigaction() (#738)
 //
 // Was previously a raw passthrough to the real host sigaction(), which

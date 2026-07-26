@@ -8,7 +8,8 @@
 //   test_posix_netent, test_posix_waitid, test_posix_dns_gil_concurrency,
 //   test_posix_gethostbyname_r,
 //   test_posix_servent_protoent, test_posix_getrusage, test_posix_wait4,
-//   test_posix_sigaction_siginfo, test_posix_ipv6_multicast_roundtrip,
+//   test_posix_sigaction_siginfo, test_posix_sigaction_flags,
+//   test_posix_ipv6_multicast_roundtrip,
 //   test_posix_rlimit_priority
 
 #include <arpa/inet.h>
@@ -1532,6 +1533,14 @@ int test_posix_scandir(void) {
 // so it crashed the moment a signal was actually delivered. Now reuses the
 // same VM-managed slot + async-safe shim mechanism signal()/VSIGNAL already
 // use. Also exercises sa_mask/sa_flags round-trip through oact.
+//
+// #787: sa_flags = 0x1234 (used below purely to exercise oact fidelity for
+// an arbitrary bit pattern) happens to set SA_RESETHAND on macOS, which is
+// now genuinely enforced at delivery -- so the round-trip query must happen
+// *before* any raise(), and the slot that's actually delivered must be
+// re-registered with real, non-RESETHAND flags first (test_posix_
+// sigaction_flags below covers SA_RESETHAND/SA_NODEFER/sa_mask/SA_RESTART
+// enforcement itself).
 static volatile sig_atomic_t sigaction_got_it;
 static void sigaction_handler(int sig) { sigaction_got_it = sig; }
 
@@ -1547,15 +1556,23 @@ int test_posix_sigaction(void) {
     if (sigaction(SIGUSR1, &sa, &old) != 0) return 1;
     if (old.sa_handler != SIG_DFL) return 2;
 
-    raise(SIGUSR1);
-    if (sigaction_got_it != SIGUSR1) return 3;
-
+    /* oact fidelity round trip -- before any delivery, since 0x1234 may
+       set SA_RESETHAND depending on platform. */
     struct sigaction q;
     for (int i = 0; i < (int)sizeof(q); i++) ((char *)&q)[i] = 0;
     if (sigaction(SIGUSR1, 0, &q) != 0) return 4;
     if (q.sa_handler != sigaction_handler) return 5;
     if (q.sa_flags != 0x1234) return 6;
     if (sigismember(&q.sa_mask, SIGTERM) != 1) return 7;
+
+    /* Re-register with real (non-RESETHAND/NODEFER) flags before actually
+       delivering, so this test only exercises #738's basic dispatch, not
+       #787's flag enforcement. */
+    sa.sa_flags = 0;
+    if (sigaction(SIGUSR1, &sa, 0) != 0) return 9;
+
+    raise(SIGUSR1);
+    if (sigaction_got_it != SIGUSR1) return 3;
 
     struct sigaction dfl;
     for (int i = 0; i < (int)sizeof(dfl); i++) ((char *)&dfl)[i] = 0;
@@ -1637,6 +1654,136 @@ int test_posix_sigaction_siginfo(void) {
     for (int i = 0; i < (int)sizeof(dfl2); i++) ((char *)&dfl2)[i] = 0;
     dfl2.sa_handler = SIG_DFL;
     if (sigaction(SIGCHLD, &dfl2, 0) != 0) return 11;
+
+    return 42;
+}
+
+// test_posix_sigaction_flags
+// #787: enforcement of sa_mask/SA_NODEFER/SA_RESETHAND at dispatch (SA_RESTART
+// is handled separately, by passing it through to the host sigaction() --
+// see cccc_set_guest_signal_action in src/host_signal.c -- rather than VM-
+// level emulation, since guest handlers run from the dispatch loop, not
+// native signal context, so they can't act mid-syscall to demonstrate a
+// restart; not covered by an automated behavioral test here for that
+// reason, only round-tripped through oact like any other flag).
+static volatile sig_atomic_t resethand_ran;
+static void resethand_handler(int sig) { (void)sig; resethand_ran++; }
+
+static volatile sig_atomic_t nodefer_depth;
+static volatile sig_atomic_t nodefer_max_depth;
+static volatile sig_atomic_t nodefer_entries;
+static void nodefer_handler(int sig) {
+    nodefer_depth++;
+    if (nodefer_depth > nodefer_max_depth) nodefer_max_depth = nodefer_depth;
+    nodefer_entries++;
+    if (nodefer_entries == 1) raise(sig); /* recurses iff SA_NODEFER */
+    nodefer_depth--;
+}
+
+static volatile sig_atomic_t mask_log[8];
+static volatile sig_atomic_t mask_log_len;
+static void mask_log_push(int v) { if (mask_log_len < 8) mask_log[mask_log_len++] = v; }
+static void mask_handler_b(int sig) { (void)sig; mask_log_push(2); }
+static void mask_handler_a(int sig) {
+    (void)sig;
+    mask_log_push(1);
+    raise(SIGUSR2); /* blocked by A's sa_mask -- must not run B yet */
+    mask_log_push(3); /* proves B hasn't run between the two pushes above */
+}
+
+[[cccc::test(return = 42)]]
+int test_posix_sigaction_flags(void) {
+    /* SA_RESETHAND: disposition resets to SIG_DFL after one delivery. */
+    struct sigaction rh;
+    for (int i = 0; i < (int)sizeof(rh); i++) ((char *)&rh)[i] = 0;
+    rh.sa_handler = resethand_handler;
+    rh.sa_flags = SA_RESETHAND;
+    if (sigaction(SIGUSR2, &rh, 0) != 0) return 1;
+
+    raise(SIGUSR2);
+    if (resethand_ran != 1) return 2;
+
+    struct sigaction q;
+    for (int i = 0; i < (int)sizeof(q); i++) ((char *)&q)[i] = 0;
+    if (sigaction(SIGUSR2, 0, &q) != 0) return 3;
+    if (q.sa_handler != SIG_DFL) return 4;
+
+    /* SA_NODEFER: without it, a handler's self-raise() is deferred (not
+       reentered) until the handler returns; with it, the same self-raise()
+       recurses immediately. */
+    struct sigaction nd;
+    for (int i = 0; i < (int)sizeof(nd); i++) ((char *)&nd)[i] = 0;
+    nd.sa_handler = nodefer_handler;
+    nd.sa_flags = 0;
+    if (sigaction(SIGUSR2, &nd, 0) != 0) return 5;
+
+    nodefer_depth = 0; nodefer_max_depth = 0; nodefer_entries = 0;
+    raise(SIGUSR2);
+    /* Give the dispatch loop a few cycles to redeliver the signal that was
+       deferred during the handler's own execution (no OS wakeup needed --
+       it's polled on every VM instruction, including these no-ops). */
+    for (volatile int i = 0; i < 100000 && nodefer_entries < 2; i++) { }
+    if (nodefer_max_depth != 1) return 6;   /* never reentered */
+    if (nodefer_entries != 2) return 7;     /* but still delivered twice */
+
+    nd.sa_flags = SA_NODEFER;
+    if (sigaction(SIGUSR2, &nd, 0) != 0) return 8;
+    nodefer_depth = 0; nodefer_max_depth = 0; nodefer_entries = 0;
+    raise(SIGUSR2);
+    if (nodefer_max_depth != 2) return 9;   /* reentered synchronously */
+    if (nodefer_entries != 2) return 10;
+
+    struct sigaction dfl3;
+    for (int i = 0; i < (int)sizeof(dfl3); i++) ((char *)&dfl3)[i] = 0;
+    dfl3.sa_handler = SIG_DFL;
+    if (sigaction(SIGUSR2, &dfl3, 0) != 0) return 11;
+
+    /* sa_mask: A's mask blocks SIGUSR2 for the duration of A's execution,
+       so a self-raise(SIGUSR2) from inside A must not run B until A
+       returns. */
+    struct sigaction ma;
+    for (int i = 0; i < (int)sizeof(ma); i++) ((char *)&ma)[i] = 0;
+    sigemptyset(&ma.sa_mask);
+    sigaddset(&ma.sa_mask, SIGUSR2);
+    ma.sa_handler = mask_handler_a;
+    ma.sa_flags = 0;
+    if (sigaction(SIGUSR1, &ma, 0) != 0) return 12;
+
+    struct sigaction mb;
+    for (int i = 0; i < (int)sizeof(mb); i++) ((char *)&mb)[i] = 0;
+    mb.sa_handler = mask_handler_b;
+    mb.sa_flags = 0;
+    if (sigaction(SIGUSR2, &mb, 0) != 0) return 13;
+
+    mask_log_len = 0;
+    raise(SIGUSR1);
+    for (volatile int i = 0; i < 100000 && mask_log_len < 3; i++) { }
+    if (mask_log_len != 3) return 14;
+    if (mask_log[0] != 1 || mask_log[1] != 3 || mask_log[2] != 2) return 15;
+
+    struct sigaction dfl4, dfl5;
+    for (int i = 0; i < (int)sizeof(dfl4); i++) ((char *)&dfl4)[i] = 0;
+    dfl4.sa_handler = SIG_DFL;
+    dfl5 = dfl4;
+    if (sigaction(SIGUSR1, &dfl4, 0) != 0) return 16;
+    if (sigaction(SIGUSR2, &dfl5, 0) != 0) return 17;
+
+    /* SA_RESTART: round-trips through oact like any other flag (real
+       host-level pass-through -- see comment above). */
+    struct sigaction rs;
+    for (int i = 0; i < (int)sizeof(rs); i++) ((char *)&rs)[i] = 0;
+    rs.sa_handler = resethand_handler;
+    rs.sa_flags = SA_RESTART;
+    if (sigaction(SIGUSR2, &rs, 0) != 0) return 18;
+    struct sigaction rq;
+    for (int i = 0; i < (int)sizeof(rq); i++) ((char *)&rq)[i] = 0;
+    if (sigaction(SIGUSR2, 0, &rq) != 0) return 19;
+    if (!(rq.sa_flags & SA_RESTART)) return 20;
+
+    struct sigaction dfl6;
+    for (int i = 0; i < (int)sizeof(dfl6); i++) ((char *)&dfl6)[i] = 0;
+    dfl6.sa_handler = SIG_DFL;
+    if (sigaction(SIGUSR2, &dfl6, 0) != 0) return 21;
 
     return 42;
 }

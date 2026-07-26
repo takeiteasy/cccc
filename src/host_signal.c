@@ -149,18 +149,30 @@ static void uninstall_host_handlers(HostSignalGuard *guard) {
 /* use_siginfo (#745): when action == 2 (VM handler) and the guest slot's
    sa_flags has SA_SIGINFO set, install the async-safe three-argument shim
    (_cccc_sig_shim_info) with SA_SIGINFO instead of the plain one-argument
-   shim, so the real host siginfo_t is captured at delivery time. */
-static void make_guest_action(struct sigaction *sa, int action, bool use_siginfo) {
+   shim, so the real host siginfo_t is captured at delivery time.
+   passthrough_flags (#787): SA_RESTART/SA_NOCLDSTOP/SA_NOCLDWAIT, passed
+   through onto the real host sigaction() -- these are kernel-level
+   concerns (restarting an interrupted blocking FFI syscall like read()/
+   pause(), suppressing SIGCHLD delivery/queuing) that the VM dispatch loop
+   cannot meaningfully emulate itself, unlike sa_mask/SA_NODEFER/
+   SA_RESETHAND which are enforced in the VM (see cccc_signal_prepare_delivery
+   in src/stdlib/signal.c). Not applied for action == 0 (SIG_DFL): the
+   kernel's own default disposition already governs restart/notification
+   behavior there. */
+static void make_guest_action(struct sigaction *sa, int action, bool use_siginfo,
+                              int passthrough_flags) {
     memset(sa, 0, sizeof(*sa));
     sigemptyset(&sa->sa_mask);
     if (action == 1) {
         sa->sa_handler = SIG_IGN;
+        sa->sa_flags = passthrough_flags;
     } else if (action == 2) {
         if (use_siginfo) {
             sa->sa_sigaction = _cccc_sig_shim_info;
-            sa->sa_flags = SA_SIGINFO;
+            sa->sa_flags = SA_SIGINFO | passthrough_flags;
         } else {
             sa->sa_handler = _cccc_sig_shim;
+            sa->sa_flags = passthrough_flags;
         }
     } else {
         sa->sa_handler = SIG_DFL;
@@ -171,8 +183,12 @@ int cccc_set_guest_signal_action(VirtualMachine *vm, int sig, int action) {
     int idx = host_signal_index(sig);
     bool use_siginfo = vm && action == 2 &&
                         (vm->vm_sigslots[sig].sa_flags & SA_SIGINFO) != 0;
+    int passthrough = 0;
+    if (vm && sig > 0 && sig < CCCC_NSIG)
+        passthrough = vm->vm_sigslots[sig].sa_flags &
+                      (SA_RESTART | SA_NOCLDSTOP | SA_NOCLDWAIT);
     struct sigaction desired;
-    make_guest_action(&desired, action, use_siginfo);
+    make_guest_action(&desired, action, use_siginfo, passthrough);
 
     if (idx >= 0 && host_handler_depth > 0) {
         sigset_t block, oldmask;

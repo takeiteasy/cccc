@@ -937,6 +937,22 @@ void _cccc_sig_shim_info(int sig, siginfo_t *info, void *ucontext);
    (synthesized == 1: si_code = SI_USER, si_pid/si_uid = getpid()/getuid()).
    See src/stdlib/signal.c. */
 long long cccc_guest_siginfo_for(int sig, int synthesized);
+/* #787: called by both signal-delivery sites (vm.c's dispatch-loop poll and
+   op_VRAISE_fn in ops.c) immediately after pushing the handler's return
+   address onto the VM stack and before jumping to it. Pushes a SigFrame so
+   the dispatch loop can detect the handler's return and restore
+   vm->sig_blocked, applies sa_mask/SA_NODEFER to vm->sig_blocked for the
+   duration of the handler, and -- if the slot requests SA_RESETHAND --
+   resets the disposition to SIG_DFL before returning. Returns the sa_flags
+   value as it stood at the moment of delivery (the caller's SA_SIGINFO
+   check must use this return value, not slot->sa_flags, since SA_RESETHAND
+   may have just zeroed the live slot). See src/stdlib/signal.c. */
+int cccc_signal_prepare_delivery(VirtualMachine *vm, int sig, SigSlot *slot);
+/* #787: called from the dispatch loop, gated on vm->sig_depth != 0. Pops
+   any SigFrame(s) whose handler has returned (vm->sp risen back above
+   f->sp_at_entry) and restores vm->sig_blocked, so a signal deferred while
+   blocked can be redelivered. See src/stdlib/signal.c. */
+void cccc_signal_poll_handler_returns(VirtualMachine *vm);
 void register_stdio_functions(VirtualMachine *vm);
 void register_stdlib_functions(VirtualMachine *vm);
 void register_string_functions(VirtualMachine *vm);
