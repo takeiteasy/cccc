@@ -34,7 +34,9 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/times.h>
 #include <sys/uio.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
@@ -1356,6 +1358,11 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "setrlimit",   (void*)setrlimit,   2, 0);
     cc_register_cfunc(vm, "getpriority", (void*)getpriority, 2, 0);
     cc_register_cfunc(vm, "setpriority", (void*)setpriority, 3, 0);
+
+    // sys/utsname.h uname() and sys/times.h times() (#733/#737) -- fast,
+    // local, no GIL release needed.
+    cc_register_cfunc(vm, "uname", (void*)uname, 1, 0);
+    cc_register_cfunc(vm, "times", (void*)times, 1, 0);
 
     // net/if.h (#788) -- interface name<->index resolution, needed to target
     // a specific interface (e.g. loopback) for IPV6_MULTICAST_IF/JOIN_GROUP

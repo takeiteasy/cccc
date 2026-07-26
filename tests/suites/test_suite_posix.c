@@ -10,7 +10,8 @@
 //   test_posix_servent_protoent, test_posix_getrusage, test_posix_wait4,
 //   test_posix_sigaction_siginfo, test_posix_sigaction_flags,
 //   test_posix_ipv6_multicast_roundtrip,
-//   test_posix_rlimit_priority
+//   test_posix_rlimit_priority, test_posix_uname, test_posix_times,
+//   test_posix_tar_cpio
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -48,6 +49,10 @@
 #include <getopt.h>
 #include <signal.h>
 #include <pthread.h>
+#include <sys/utsname.h>
+#include <sys/times.h>
+#include <tar.h>
+#include <cpio.h>
 
 // [from test_posix_extra_ffi]
 // Regression test for #590: additional POSIX FFI functions registered for the
@@ -1836,6 +1841,78 @@ int test_posix_atexit_registration(void) {
        drives multiple [[cccc::test]] functions through one real main(),
        so calling exit() would terminate the whole suite early. Just prove
        registration succeeds and doesn't crash. */
+    return 42;
+}
+
+// test_posix_uname
+// #733/#737: uname() fills a guest struct utsname through the FFI boundary,
+// same struct-fidelity concern as getrusage()/waitid() above -- proves the
+// guest layout matches the host ABI (per-field length differs between macOS
+// (256 bytes) and Linux (65 bytes), and Linux has an extra `domainname`
+// field). Only checks the strings are non-empty and NUL-terminated within
+// bounds, since exact contents aren't portable across hosts.
+[[cccc::test(return = 42)]]
+int test_posix_uname(void) {
+    struct utsname u;
+    for (int i = 0; i < (int)sizeof(u); i++) ((char *)&u)[i] = 0x7f;
+    if (uname(&u) != 0) return 1;
+
+    /* memchr for the terminating NUL rather than strlen, since the buffer
+       was pre-filled with non-NUL 0x7f and strlen alone can't distinguish
+       "field never touched" from "field legitimately empty". */
+    if (!memchr(u.sysname, 0, sizeof(u.sysname))) return 2;
+    if (u.sysname[0] == 0) return 3;
+    if (!memchr(u.machine, 0, sizeof(u.machine))) return 4;
+    if (u.machine[0] == 0) return 5;
+    if (!memchr(u.release, 0, sizeof(u.release))) return 6;
+    return 42;
+}
+
+// test_posix_times
+// #733/#737: times() fills a guest struct tms (identical layout on macOS
+// and Linux -- sizeof(struct tms) == 32 on both, four plain clock_t fields)
+// and returns elapsed wall-clock ticks since an arbitrary point in the past.
+[[cccc::test(return = 42)]]
+int test_posix_times(void) {
+    struct tms t;
+    for (int i = 0; i < (int)sizeof(t); i++) ((char *)&t)[i] = 0;
+    clock_t r1 = times(&t);
+    if (r1 == (clock_t)-1) return 1;
+    if (r1 <= 0) return 2;
+    if (t.tms_utime < 0 || t.tms_stime < 0) return 3;
+    if (t.tms_cutime < 0 || t.tms_cstime < 0) return 4;
+
+    /* Burn some CPU so a second call is guaranteed to observe a strictly
+       later tick count -- proves the FFI return isn't silently truncated
+       to a 32-bit int (which could wrap to a smaller/negative value on a
+       host with enough uptime) and that struct tms is really being
+       refreshed, not just zero-filled once. */
+    volatile long busy = 0;
+    for (long i = 0; i < 20000000L; i++) busy += i;
+    (void)busy;
+
+    clock_t r2 = times(&t);
+    if (r2 == (clock_t)-1) return 5;
+    if (r2 < r1) return 6;
+    return 42;
+}
+
+// test_posix_tar_cpio
+// #733/#737: <tar.h>/<cpio.h> are pure constant headers -- values are fixed
+// by POSIX.1 itself, identical on every platform, nothing host-dependent to
+// verify. Just proves the constants are visible and have the right values.
+[[cccc::test(return = 42)]]
+int test_posix_tar_cpio(void) {
+    if (strcmp(TMAGIC, "ustar") != 0) return 1;
+    if (TMAGLEN != 6) return 2;
+    if (REGTYPE != '0') return 3;
+    if (DIRTYPE != '5') return 4;
+    if ((TUREAD | TUWRITE | TUEXEC) != 00700) return 5;
+
+    if (strcmp(MAGIC, "070707") != 0) return 6;
+    if ((C_IRUSR | C_IWUSR | C_IXUSR) != 000700) return 7;
+    if (C_ISDIR != 040000) return 8;
+    if (C_ISREG != 0100000) return 9;
     return 42;
 }
 

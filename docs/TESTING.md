@@ -184,6 +184,19 @@ defaults with `COLIMA_PROFILE=name`, `LINUX_AMD64_IMAGE=tag`, or `TEST_JOBS=N`.
 The Linux/amd64 test target partitions tests into alphabetical filename batches
 to avoid child-reaping stalls under Rosetta binfmt (#500, resolved WONT_FIX).
 
+**Gotcha:** the `cccc-linux-amd64` Colima *VM* is itself started with
+`--arch aarch64` (Apple Silicon cannot run an x86_64 VM natively) — x86_64
+only appears one layer down, inside a `--platform linux/amd64`
+container/image run *inside* that VM via VZ-Rosetta binfmt. `colima ssh -p
+cccc-linux-amd64` drops into the VM host, not that container, so `uname -m`
+there legitimately reports `aarch64` — that is not a misconfiguration. Only
+`uname -m` run *inside* the `--platform linux/amd64` image (as the
+`linux-x86_64-*` Make targets do, or `nerdctl run --platform linux/amd64
+cccc-linux-amd64 uname -m`) is expected to report `x86_64`. Ad-hoc
+verification probes (e.g. offsetof/sizeof checks against a real header) that
+just `colima ssh` into this profile are silently checking aarch64 twice, not
+x86_64 (#796) — run them inside the amd64-platform container instead.
+
 #### MemorySanitizer (MSan)
 
 MSan is Linux-only (clang, not available on macOS). The target builds `cccc-msan`
