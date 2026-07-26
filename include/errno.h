@@ -28,7 +28,6 @@ extern int *__cccc_errno_ptr(void);
 #define ENOEXEC  8
 #define EBADF    9
 #define ECHILD   10
-#define EDEADLK  11
 #define ENOMEM   12
 #define EACCES   13
 #define EFAULT   14
@@ -50,11 +49,12 @@ extern int *__cccc_errno_ptr(void);
 #define EPIPE    32
 #define EDOM     33
 #define ERANGE   34
-#define EAGAIN   35
 
 /* POSIX error codes (platform-specific where they differ) */
 #ifdef __APPLE__
-#  define EWOULDBLOCK  35
+#  define EAGAIN       35
+#  define EDEADLK      11
+#  define EWOULDBLOCK  EAGAIN
 #  define EINPROGRESS  36
 #  define EALREADY     37
 #  define ENOTSOCK     38
@@ -80,15 +80,27 @@ extern int *__cccc_errno_ptr(void);
 #  define EHOSTUNREACH 65
 #  define ENOTEMPTY    66
 #  define ENOSYS       78
+#  define ECANCELED    89
+#  define EIDRM        90
+#  define ENOMSG       91
 #  define EOVERFLOW    84
-#  define ENOTSUP      45
+#  define EBADMSG      94
+#  define EMULTIHOP    95
 #  define EILSEQ       92
 #  define ENOLINK      97
 #  define EPROTO       100
 #  define ENOLCK       77
 #  define EOPNOTSUPP   102
+#  define ENOTRECOVERABLE 104
+#  define EOWNERDEAD   105
+#  define ESTALE       70
+#  define EDQUOT       69
+#  define ETXTBSY      26
+#  define ENOTBLK      15
 #else
-#  define EWOULDBLOCK  11
+#  define EAGAIN       11
+#  define EDEADLK      35
+#  define EWOULDBLOCK  EAGAIN
 #  define EINPROGRESS  115
 #  define EALREADY     114
 #  define ENOTSOCK     88
@@ -113,13 +125,24 @@ extern int *__cccc_errno_ptr(void);
 #  define EHOSTUNREACH 113
 #  define ENOTEMPTY    39
 #  define ENOSYS       38
+#  define ECANCELED    125
+#  define EIDRM        43
+#  define ENOMSG       42
 #  define EOVERFLOW    75
+#  define EBADMSG      74
+#  define EMULTIHOP    72
 #  define ENOTSUP      95
 #  define EILSEQ       84
 #  define ENOLINK      67
 #  define EPROTO       71
 #  define ENOLCK       37
 #  define EOPNOTSUPP   95
+#  define ENOTRECOVERABLE 131
+#  define EOWNERDEAD   130
+#  define ESTALE       116
+#  define EDQUOT       122
+#  define ETXTBSY      26
+#  define ENOTBLK      15
 #endif
 
 #endif /* __ERRNO_H */
