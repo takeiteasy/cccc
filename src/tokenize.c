@@ -1191,8 +1191,26 @@ static void convert_pp_number(VirtualMachine *vm, Token *tok) {
         return;
 
     // If it's not an integer, it must be a floating point constant.
+    //
+    // #782: strtold() has no knowledge of C23 digit separators (single
+    // quotes) and simply stops at the first one, so a literal like
+    // "1'000e5" would otherwise only parse "1" and leave the rest
+    // unconsumed. Strip separators into a clean buffer first, the same way
+    // convert_pp_int already does, and call strtold() on that instead.
+    char *cleaned = arena_alloc(&vm->compiler.parser_arena, (size_t)tok->len + 1);
+    int j = 0;
+    for (char *s = tok->loc; s < tok->loc + tok->len; s++) {
+        if (*s == '\'') {
+            if (vm->compiler.c_std < CCCC_STD_C23)
+                error_tok(vm, tok, "digit separators are not available before C23");
+            continue;
+        }
+        cleaned[j++] = *s;
+    }
+    cleaned[j] = '\0';
+
     char *end;
-    long double val = strtold(tok->loc, &end);
+    long double val = strtold(cleaned, &end);
 
     Type *ty;
     if (*end == 'f' || *end == 'F') {
@@ -1205,7 +1223,7 @@ static void convert_pp_number(VirtualMachine *vm, Token *tok) {
         ty = ty_double;
     }
 
-    if (tok->loc + tok->len != end)
+    if (cleaned + j != end)
         error_tok(vm, tok, "invalid numeric constant");
 
     tok->kind = TK_NUM;
