@@ -1712,12 +1712,17 @@ typedef struct {
     int      action;      /* 0=DFL, 1=IGN, 2=VM handler */
     long long handler_fn; /* VM function pointer when action==2 */
     /* sa_mask/sa_flags (#738): populated and round-tripped through oact by
-       sigaction() (signal.c) for guest struct-field fidelity, but NOT
+       sigaction() (signal.c) for guest struct-field fidelity, mostly NOT
        enforced at the OS level -- cccc_set_guest_signal_action only ever
        installs a fixed handler/ignore/default disposition (same as
        signal()/VSIGNAL), so SA_RESTART/SA_NODEFER/SA_RESETHAND etc. are
        stored but inert. signal()/raise() (VSIGNAL/VRAISE, ops.c) leave
-       these at 0. */
+       these at 0. SA_SIGINFO (#745) is the one exception: both the
+       dispatch loop's pending-signal poll (vm.c) and op_VRAISE_fn (ops.c)
+       check it and, when set, deliver via the three-argument
+       sa_sigaction(int, siginfo_t *, void *) form instead of sa_handler,
+       and cccc_set_guest_signal_action installs the matching host-level
+       SA_SIGINFO handler for action==2. */
     unsigned int sa_mask;
     int sa_flags;
 } SigSlot;

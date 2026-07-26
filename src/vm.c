@@ -548,6 +548,12 @@ dispatch:
                 *--vm->sp = (long long)vm->pc;
                 if (vm->flags & CCCC_CFI) *--vm->shadow_sp = (long long)vm->pc;
                 vm->regs[REG_A0] = (long long)_sig;
+                if (_slot->sa_flags & SA_SIGINFO) {
+                    /* #745: real captured siginfo -- this path only runs
+                       after an actual host-level signal delivery. */
+                    vm->regs[REG_A1] = cccc_guest_siginfo_for(_sig, 0);
+                    vm->regs[REG_A2] = 0; /* ucontext: not modelled */
+                }
                 vm->pc = _target;
                 goto dispatch; /* resume at handler; delivers one signal per re-entry */
             }

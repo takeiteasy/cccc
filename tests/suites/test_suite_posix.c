@@ -6,7 +6,8 @@
 //   test_posix_sendmsg_recvmsg_scm_rights, test_posix_ipv6_udp_roundtrip,
 //   test_posix_ipv6_advanced_options,
 //   test_posix_netent, test_posix_waitid, test_posix_dns_gil_concurrency,
-//   test_posix_servent_protoent, test_posix_getrusage, test_posix_wait4
+//   test_posix_servent_protoent, test_posix_getrusage, test_posix_wait4,
+//   test_posix_sigaction_siginfo
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -1288,6 +1289,82 @@ int test_posix_sigaction(void) {
     for (int i = 0; i < (int)sizeof(dfl); i++) ((char *)&dfl)[i] = 0;
     dfl.sa_handler = SIG_DFL;
     if (sigaction(SIGUSR1, &dfl, 0) != 0) return 8;
+
+    return 42;
+}
+
+// test_posix_sigaction_siginfo
+// #745: sa_sigaction/SA_SIGINFO -- the three-argument handler form that
+// receives a real siginfo_t. Two delivery paths, two siginfo sources:
+// raise() (VRAISE, ops.c) never touches the host signal mechanism, so it
+// synthesizes real POSIX raise() semantics (si_code == SI_USER, si_pid ==
+// getpid()); a real delivered SIGCHLD goes through the async host-signal
+// shim, which captures genuine kernel-provided data (si_code == CLD_EXITED,
+// si_status == the child's real exit code).
+static volatile sig_atomic_t siginfo_signo = -1;
+static volatile sig_atomic_t siginfo_code = -1;
+static volatile sig_atomic_t siginfo_pid = -1;
+static void siginfo_handler(int sig, siginfo_t *info, void *uctx) {
+    (void)uctx;
+    siginfo_signo = sig;
+    siginfo_code = info->si_code;
+    siginfo_pid = info->si_pid;
+}
+
+static volatile sig_atomic_t sigchld_code = -1;
+static volatile sig_atomic_t sigchld_status = -1;
+static volatile sig_atomic_t sigchld_pid = -1;
+static void sigchld_handler(int sig, siginfo_t *info, void *uctx) {
+    (void)sig; (void)uctx;
+    sigchld_code = info->si_code;
+    sigchld_status = info->si_status;
+    sigchld_pid = info->si_pid;
+}
+
+[[cccc::test(return = 42)]]
+int test_posix_sigaction_siginfo(void) {
+    struct sigaction sa;
+    for (int i = 0; i < (int)sizeof(sa); i++) ((char *)&sa)[i] = 0;
+    sa.sa_sigaction = siginfo_handler;
+    sa.sa_flags = SA_SIGINFO;
+    if (sigaction(SIGUSR1, &sa, 0) != 0) return 1;
+
+    raise(SIGUSR1);
+    if (siginfo_signo != SIGUSR1) return 2;
+    if (siginfo_code != SI_USER) return 3;
+    if (siginfo_pid != getpid()) return 4;
+
+    struct sigaction dfl1;
+    for (int i = 0; i < (int)sizeof(dfl1); i++) ((char *)&dfl1)[i] = 0;
+    dfl1.sa_handler = SIG_DFL;
+    if (sigaction(SIGUSR1, &dfl1, 0) != 0) return 5;
+
+    /* Real delivered SIGCHLD -- genuine kernel-captured siginfo, not
+       synthesized by the VM. */
+    struct sigaction sc;
+    for (int i = 0; i < (int)sizeof(sc); i++) ((char *)&sc)[i] = 0;
+    sc.sa_sigaction = sigchld_handler;
+    sc.sa_flags = SA_SIGINFO;
+    if (sigaction(SIGCHLD, &sc, 0) != 0) return 6;
+
+    pid_t pid = fork();
+    if (pid < 0) return 7;
+    if (pid == 0) { _exit(7); }
+
+    int status;
+    /* waitpid() reaps the child; SIGCHLD delivery is polled for separately
+       via the dispatch loop's pending-signal check, so give it a moment. */
+    for (int i = 0; i < 2000 && sigchld_pid != pid; i++) usleep(1000);
+    waitpid(pid, &status, 0);
+
+    if (sigchld_pid != pid) return 8;
+    if (sigchld_code != CLD_EXITED) return 9;
+    if (sigchld_status != 7) return 10;
+
+    struct sigaction dfl2;
+    for (int i = 0; i < (int)sizeof(dfl2); i++) ((char *)&dfl2)[i] = 0;
+    dfl2.sa_handler = SIG_DFL;
+    if (sigaction(SIGCHLD, &dfl2, 0) != 0) return 11;
 
     return 42;
 }

@@ -4863,6 +4863,13 @@ static inline int op_VRAISE_fn(VirtualMachine *vm) {
         *--vm->sp = (long long)vm->pc;
         if (vm->flags & CCCC_CFI) *--vm->shadow_sp = (long long)vm->pc;
         vm->regs[REG_A0] = (long long)sig;
+        if (slot->sa_flags & SA_SIGINFO) {
+            /* #745: raise() never goes through the host signal mechanism,
+               so synthesize real POSIX raise() semantics instead of real
+               captured data (si_code = SI_USER, si_pid/si_uid = self). */
+            vm->regs[REG_A1] = cccc_guest_siginfo_for(sig, 1);
+            vm->regs[REG_A2] = 0; /* ucontext: not modelled */
+        }
         vm->pc = target;
         return 0; /* dispatch loop will goto dispatch → execute handler */
     }

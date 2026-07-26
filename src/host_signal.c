@@ -146,22 +146,33 @@ static void uninstall_host_handlers(HostSignalGuard *guard) {
     }
 }
 
-static void make_guest_action(struct sigaction *sa, int action) {
+/* use_siginfo (#745): when action == 2 (VM handler) and the guest slot's
+   sa_flags has SA_SIGINFO set, install the async-safe three-argument shim
+   (_cccc_sig_shim_info) with SA_SIGINFO instead of the plain one-argument
+   shim, so the real host siginfo_t is captured at delivery time. */
+static void make_guest_action(struct sigaction *sa, int action, bool use_siginfo) {
     memset(sa, 0, sizeof(*sa));
     sigemptyset(&sa->sa_mask);
-    if (action == 1)
+    if (action == 1) {
         sa->sa_handler = SIG_IGN;
-    else if (action == 2)
-        sa->sa_handler = _cccc_sig_shim;
-    else
+    } else if (action == 2) {
+        if (use_siginfo) {
+            sa->sa_sigaction = _cccc_sig_shim_info;
+            sa->sa_flags = SA_SIGINFO;
+        } else {
+            sa->sa_handler = _cccc_sig_shim;
+        }
+    } else {
         sa->sa_handler = SIG_DFL;
+    }
 }
 
 int cccc_set_guest_signal_action(VirtualMachine *vm, int sig, int action) {
-    (void)vm;
     int idx = host_signal_index(sig);
+    bool use_siginfo = vm && action == 2 &&
+                        (vm->vm_sigslots[sig].sa_flags & SA_SIGINFO) != 0;
     struct sigaction desired;
-    make_guest_action(&desired, action);
+    make_guest_action(&desired, action, use_siginfo);
 
     if (idx >= 0 && host_handler_depth > 0) {
         sigset_t block, oldmask;

@@ -3,6 +3,8 @@
 #include "../internal.h"
 #include <errno.h>
 #include <signal.h>
+#include <stdint.h>
+#include <unistd.h>
 
 /* Global async-safe pending flags (written only by native signal shims) */
 volatile sig_atomic_t _cccc_pending[CCCC_NSIG];
@@ -14,6 +16,118 @@ void _cccc_sig_shim(int sig) {
         _cccc_pending[sig] = 1;
         _cccc_any_pending  = 1;
     }
+}
+
+// ---------------------------------------------------------------------------
+// sa_sigaction / SA_SIGINFO (#745)
+//
+// Adds the three-argument signal handler form registerable via sigaction()'s
+// SA_SIGINFO flag. The dispatch loop's pending-signal poll (src/vm.c) and
+// op_VRAISE_fn (src/ops.c) both check slot->sa_flags & SA_SIGINFO before
+// entering a guest handler and, if set, additionally populate REG_A1 with a
+// pointer to a guest-layout siginfo_t and REG_A2 with a (currently
+// unmodelled) ucontext pointer.
+//
+// GuestSiginfo mirrors include/signal.h's per-platform siginfo_t layout
+// exactly -- same reasoning as GuestSigaction below: this is the GUEST's
+// own self-consistent struct, not the host's real siginfo_t (a much larger
+// union-based struct on both platforms). The two delivery paths populate it
+// differently:
+//   - the async host-signal path (_cccc_sig_shim_info, installed as the
+//     real OS-level handler) captures the real si_code/si_pid/si_uid/
+//     si_status/si_errno from the host's siginfo_t at the moment of
+//     delivery, since that's genuine kernel-provided data (e.g. a real
+//     SIGCHLD's si_code == CLD_EXITED). si_status is only meaningful for
+//     SIGCHLD -- for other signals it's whatever the host's own
+//     union-based siginfo_t happens to hold at that offset.
+//   - raise() (VRAISE, ops.c) never goes through the host signal mechanism
+//     at all, so it synthesizes real POSIX raise() semantics instead:
+//     si_code = SI_USER, si_pid = getpid(), si_uid = getuid().
+// Storage is a fixed-size, host-static array indexed by signal number --
+// deliberately not stack/heap allocated: a guest deref of a host-static
+// pointer is addressable under every CCCC safety tier (-0..-3; the
+// existing gethostbyname()/hostent path already proves this for FFI-
+// returned host-static pointers, and this is the same class of pointer).
+// Field names si_pid/si_uid/si_status deliberately avoided (g_pid/g_uid/
+// g_status instead): on glibc, si_pid/si_uid/si_status are macros aliasing
+// members of the REAL siginfo_t's anonymous union (_sifields._kill.si_pid
+// etc.), and would rewrite same-named fields in this unrelated struct
+// before the compiler ever sees them as identifiers -- the same class of
+// bug the GuestSigaction comment below warns about for sa_handler.
+#ifdef __APPLE__
+typedef struct {
+    int si_signo;
+    int si_errno;
+    int si_code;
+    int g_pid;
+    int g_uid;
+    int g_status;
+    char __si_pad[104 - 6 * (int)sizeof(int)];
+} GuestSiginfo;
+#else
+typedef struct {
+    int si_signo;
+    int si_errno;
+    int si_code;
+    int __si_pad0;
+    int g_pid;
+    int g_uid;
+    int g_status;
+    char __si_pad[128 - 7 * (int)sizeof(int)];
+} GuestSiginfo;
+#endif
+
+static GuestSiginfo guest_siginfo[CCCC_NSIG];
+
+/* Async-safe captured siginfo fields, written only from _cccc_sig_shim_info
+   (real OS signal context) and read back by cccc_guest_siginfo_for from the
+   dispatch loop. Plain sig_atomic_t arrays, same design as _cccc_pending --
+   safe because the dispatch loop only consumes a signal's captured fields
+   after observing _cccc_pending[sig] set, at which point delivery for that
+   signal has already completed. */
+static volatile sig_atomic_t _cccc_si_code[CCCC_NSIG];
+static volatile sig_atomic_t _cccc_si_pid[CCCC_NSIG];
+static volatile sig_atomic_t _cccc_si_uid[CCCC_NSIG];
+static volatile sig_atomic_t _cccc_si_status[CCCC_NSIG];
+static volatile sig_atomic_t _cccc_si_errno[CCCC_NSIG];
+
+/* Async-safe shim for SA_SIGINFO handlers: same pending-flag contract as
+   _cccc_sig_shim, plus captures the host-provided siginfo_t fields for
+   cccc_guest_siginfo_for to materialize later. */
+void _cccc_sig_shim_info(int sig, siginfo_t *info, void *ucontext) {
+    (void)ucontext;
+    if (sig > 0 && sig < CCCC_NSIG) {
+        if (info) {
+            _cccc_si_code[sig]   = info->si_code;
+            _cccc_si_pid[sig]    = info->si_pid;
+            _cccc_si_uid[sig]    = info->si_uid;
+            _cccc_si_status[sig] = info->si_status;
+            _cccc_si_errno[sig]  = info->si_errno;
+        }
+        _cccc_pending[sig] = 1;
+        _cccc_any_pending  = 1;
+    }
+}
+
+long long cccc_guest_siginfo_for(int sig, int synthesized) {
+    if (sig <= 0 || sig >= CCCC_NSIG)
+        return 0;
+    GuestSiginfo *gi = &guest_siginfo[sig];
+    gi->si_signo = sig;
+    if (synthesized) {
+        gi->si_errno = 0;
+        gi->si_code  = SI_USER;
+        gi->g_pid    = (int)getpid();
+        gi->g_uid    = (int)getuid();
+        gi->g_status = 0;
+    } else {
+        gi->si_errno = (int)_cccc_si_errno[sig];
+        gi->si_code  = (int)_cccc_si_code[sig];
+        gi->g_pid    = (int)_cccc_si_pid[sig];
+        gi->g_uid    = (int)_cccc_si_uid[sig];
+        gi->g_status = (int)_cccc_si_status[sig];
+    }
+    return (long long)(intptr_t)gi;
 }
 
 // ---------------------------------------------------------------------------

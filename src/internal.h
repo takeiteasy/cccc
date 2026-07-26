@@ -927,6 +927,16 @@ static inline bool apply_cmp_op_f64(CmpOp op, double a, double b, double eps) {
 
 /* Async-safe native shim installed for user-registered VM signal handlers */
 void _cccc_sig_shim(int sig);
+/* Async-safe SA_SIGINFO variant (#745) -- also captures siginfo_t fields for
+   cccc_guest_siginfo_for to materialize as a guest-layout siginfo_t later,
+   from the dispatch loop rather than from native signal context. */
+void _cccc_sig_shim_info(int sig, siginfo_t *info, void *ucontext);
+/* Returns (as a guest-visible address) a host-static, guest-layout
+   siginfo_t for signal sig, populated either from real captured async data
+   (synthesized == 0) or synthesized per raise()'s own POSIX semantics
+   (synthesized == 1: si_code = SI_USER, si_pid/si_uid = getpid()/getuid()).
+   See src/stdlib/signal.c. */
+long long cccc_guest_siginfo_for(int sig, int synthesized);
 void register_stdio_functions(VirtualMachine *vm);
 void register_stdlib_functions(VirtualMachine *vm);
 void register_string_functions(VirtualMachine *vm);
