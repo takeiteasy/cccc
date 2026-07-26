@@ -1,0 +1,59 @@
+// Regression test for #792 (and a bug found while fixing it): statfs()/
+// fstatfs() are declared in include/sys/mount.h but were never registered
+// via cc_register_cfunc anywhere -- same "undefined function" gap class as
+// flock/ioctl above, surfaced by widening tools/audit_ffi.py's header scan.
+//
+// The naive fix (registering the real host statfs()/fstatfs() directly
+// against a pointer to the guest's minimal `struct statfs`) is a serious
+// bug: the host struct is enormous (~2100 bytes on macOS, mostly
+// mount-path strings) versus the guest's ~56-byte projection, so the host
+// call writes far past the end of the guest buffer and corrupts whatever
+// follows it in guest memory. This test is the canary that catches that
+// regression: it allocates a buffer sized to exactly the guest struct plus
+// a 64-byte tail, poisons the whole thing, calls statfs(), and asserts the
+// tail is untouched. src/stdlib/posix.c's wrap_statfs/wrap_fstatfs
+// translate through a host-sized local and copy only the documented
+// fields across, which is what keeps this test passing.
+#include <sys/mount.h>
+
+extern void *malloc(unsigned long size);
+extern void free(void *ptr);
+extern void *memset(void *s, int c, unsigned long n);
+
+int main(void) {
+    unsigned long guest_size = sizeof(struct statfs);
+    unsigned long tail = 64;
+    unsigned char *buf = (unsigned char *)malloc(guest_size + tail);
+    if (!buf) return 1;
+    memset(buf, 0xAA, guest_size + tail);
+
+    struct statfs *sb = (struct statfs *)buf;
+    if (statfs("/", sb) != 0) return 2;
+    if (sb->f_bsize == 0) return 3;
+
+    for (unsigned long i = guest_size; i < guest_size + tail; i++) {
+        if (buf[i] != 0xAA) {
+            free(buf);
+            return 4; // canary clobbered: statfs overran the guest struct
+        }
+    }
+
+    // fstatfs, same canary shape.
+    unsigned char *buf2 = (unsigned char *)malloc(guest_size + tail);
+    if (!buf2) { free(buf); return 5; }
+    memset(buf2, 0xAA, guest_size + tail);
+
+    struct statfs *sb2 = (struct statfs *)buf2;
+    if (fstatfs(0, sb2) != 0) return 6;
+    for (unsigned long i = guest_size; i < guest_size + tail; i++) {
+        if (buf2[i] != 0xAA) {
+            free(buf);
+            free(buf2);
+            return 7;
+        }
+    }
+
+    free(buf);
+    free(buf2);
+    return 42;
+}

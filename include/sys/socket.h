@@ -86,7 +86,8 @@ struct sockaddr {
    socklen_t/int (4 bytes) on macOS vs size_t (8 bytes) on Linux --
    verified via offsetof/sizeof against real macOS and Linux
    x86_64/aarch64 headers (Linux values match across x86_64/aarch64).
-   struct iovec comes from unistd.h, already included above. */
+   struct iovec comes from sys/uio.h, transitively included via
+   unistd.h above (#792). */
 #ifdef __APPLE__
 struct msghdr {
     void         *msg_name;

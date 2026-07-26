@@ -122,13 +122,10 @@ extern int setgroups(int ngroups, const gid_t *grouplist);
 extern int initgroups(const char *user, gid_t group);
 extern int nice(int incr);
 
-/* Scatter/gather I/O */
-struct iovec {
-    void *iov_base;
-    size_t iov_len;
-};
-extern ssize_t readv(int fd, const struct iovec *iov, int iovcnt);
-extern ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
+/* Scatter/gather I/O -- struct iovec/readv/writev now live in sys/uio.h,
+ * included here so existing code that gets them via <unistd.h> keeps
+ * working (#792). */
+#include "sys/uio.h"
 
 /* Page size (legacy BSD interface used by some VFS layers) */
 extern int getpagesize(void);

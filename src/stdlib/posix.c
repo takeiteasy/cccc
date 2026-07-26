@@ -28,6 +28,8 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
+#include <sys/file.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -37,6 +39,12 @@
 #include <termios.h>
 #include <unistd.h>
 #include <utime.h>
+#ifdef __linux__
+#include <sys/vfs.h>
+#else
+#include <sys/mount.h>
+#include <sys/param.h>
+#endif
 
 // ---------------------------------------------------------------------------
 // GIL helpers (mirrors the pattern in stdlib/pthread.c)
@@ -1039,6 +1047,62 @@ static long long wrap_confstr(long long name, long long buf, long long len) {
     }
 }
 
+// statfs/fstatfs (#792): include/sys/mount.h deliberately declares a
+// minimal, CCCC-canonical `struct statfs` projection -- NOT the host ABI
+// layout, which is enormous (~2100 bytes on macOS, mostly mount-path
+// strings and per-platform extras) versus the guest's ~56-byte struct.
+// Registering the real statfs()/fstatfs() directly against a pointer to
+// the guest struct would have the host write far past the end of it,
+// corrupting adjacent guest memory (confirmed empirically: a canary
+// written just past a malloc'd guest-sized buffer gets clobbered). So
+// these translate through a host-sized local and copy only the documented
+// fields across, the same host-numbering-translation shape as
+// wrap_sysconf/wrap_pathconf/wrap_confstr above. Unlike struct stat
+// (include/sys/stat.h, byte-for-byte host-matched with a
+// _Static_assert), statfs is intentionally not host-matched -- the real
+// layout carries far more than any of CCCC's stdlib needs to expose.
+struct cccc_guest_statfs {
+    unsigned int  f_bsize;
+    unsigned int  f_iosize;
+    unsigned long f_blocks;
+    unsigned long f_bfree;
+    unsigned long f_bavail;
+    unsigned long f_files;
+    unsigned long f_ffree;
+    unsigned int  f_flags;
+};
+
+static void copy_statfs_fields(const struct statfs *host_buf, long long guest_ptr) {
+    struct cccc_guest_statfs *g = (struct cccc_guest_statfs *)(void *)guest_ptr;
+    g->f_bsize  = (unsigned int)host_buf->f_bsize;
+#ifdef __linux__
+    // glibc's struct statfs has f_frsize, not f_iosize; closest analog.
+    g->f_iosize = (unsigned int)host_buf->f_frsize;
+#else
+    g->f_iosize = (unsigned int)host_buf->f_iosize;
+#endif
+    g->f_blocks = (unsigned long)host_buf->f_blocks;
+    g->f_bfree  = (unsigned long)host_buf->f_bfree;
+    g->f_bavail = (unsigned long)host_buf->f_bavail;
+    g->f_files  = (unsigned long)host_buf->f_files;
+    g->f_ffree  = (unsigned long)host_buf->f_ffree;
+    g->f_flags  = (unsigned int)host_buf->f_flags;
+}
+
+static long long wrap_statfs(long long path, long long buf) {
+    struct statfs host_buf;
+    int rc = statfs((const char *)path, &host_buf);
+    if (rc == 0 && buf) copy_statfs_fields(&host_buf, buf);
+    return rc;
+}
+
+static long long wrap_fstatfs(long long fd, long long buf) {
+    struct statfs host_buf;
+    int rc = fstatfs((int)fd, &host_buf);
+    if (rc == 0 && buf) copy_statfs_fields(&host_buf, buf);
+    return rc;
+}
+
 // ---------------------------------------------------------------------------
 // Host-global accessors (#736)
 //
@@ -1162,6 +1226,20 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_variadic_cfunc(vm, "open",   (void*)wrap_open,  2, 0);
     cc_register_cfunc(vm, "creat",   (void*)wrap_creat, 2, 0);
     cc_register_variadic_cfunc(vm, "fcntl",  (void*)fcntl, 2, 0);
+    // flock/ioctl/statfs/fstatfs: declared in include/ but never registered
+    // anywhere -- same "undefined function" gap class as #783, surfaced by
+    // widening tools/audit_ffi.py's header scan for #784/#792.
+    cc_register_cfunc(vm, "flock",   (void*)flock,   2, 0);
+    // ioctl is a general passthrough (like the real syscall) -- only the
+    // two request codes include/sys/ioctl.h declares, TIOCGWINSZ/
+    // TIOCSWINSZ, have a verified guest/host struct winsize layout match
+    // (both 8 bytes: 4x unsigned short). Any other request code risks the
+    // same guest/host struct-size mismatch that statfs had (see
+    // wrap_statfs below) -- that's inherent to ioctl's design, not
+    // something this registration can guard against generically.
+    cc_register_variadic_cfunc(vm, "ioctl", (void*)ioctl, 2, 0);
+    cc_register_cfunc(vm, "statfs",  (void*)wrap_statfs,  2, 0);
+    cc_register_cfunc(vm, "fstatfs", (void*)wrap_fstatfs, 2, 0);
 
     cc_register_cfunc(vm, "strcasecmp",  (void*)strcasecmp,  2, 0);
     cc_register_cfunc(vm, "strncasecmp", (void*)strncasecmp, 3, 0);
