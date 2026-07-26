@@ -11,6 +11,7 @@ Sub-suites:
   repl                — interactive REPL PTY integration (POSIX only, ticket #661)
   debugger_condition  — conditional breakpoint PTY integration (POSIX only, ticket 113)
   sqlite              — SQLite 3.53.2 amalgamation smoke test (skips if zip absent)
+  audit_ffi           — src/stdlib FFI registration audit (ticket #784)
 
 Optional:
   --bench  — run the cross-compiler benchmark after the test suites
@@ -213,6 +214,29 @@ def _run_sqlite_suite(cccc):
         return f"FAILED ({e})", False
 
 
+def _run_audit_ffi_suite():
+    """Run the src/stdlib FFI registration audit (#784).
+
+    Pure source scan -- no cccc binary needed. Returns (status_str, ok).
+    """
+    script = _TOOLS_DIR / "audit_ffi.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("audit_ffi", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rc = mod.main()
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
 def _run_bench(cccc):
     """Run the cross-compiler benchmark as a subprocess (bench.py uses sys.exit)."""
     script = _TOOLS_DIR / "bench.py"
@@ -312,6 +336,13 @@ def main():
     sqlite_status, ok_sqlite = _run_sqlite_suite(cccc)
     print(f"  {sqlite_status}")
     suite_results["sqlite"] = ok_sqlite
+
+    # --- FFI registration audit ---
+    print()
+    print("[ audit_ffi ]")
+    audit_status, ok_audit = _run_audit_ffi_suite()
+    print(f"  {audit_status}")
+    suite_results["audit_ffi"] = ok_audit
 
     # --- Optional bench ---
     if args.bench:

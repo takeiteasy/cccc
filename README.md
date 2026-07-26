@@ -140,6 +140,7 @@ FFI Safety Options:
 	   --ffi-deny=list        Deny comma-separated native function names
 	-F/--disable-ffi          Block all registered and dynamic native calls
 	   --ffi-errors-fatal     Abort execution on FFI policy violations
+	   --trap-fp-divzero      Abort on float division by zero instead of IEEE +-Inf/NaN
 	   --ffi-type-checking    Validate registered FFI call arity at runtime
 
 Language Standard:
@@ -311,8 +312,10 @@ python3 tools/tests.py --c4               # Bytecode round-trip: compile each po
 
 `make test` calls `tools/run_tests.py`, the unified orchestrator that runs:
 source-mode suite, `.c4` bytecode round-trip, the macOS host-signal debugger
-integration (skipped on other platforms), and the SQLite smoke test. Run
-sub-suites standalone with `python3 tools/tests.py` or `python3 tools/tests.py --c4`.
+integration (skipped on other platforms), the REPL and conditional-breakpoint
+PTY integrations, the SQLite smoke test, and the `src/stdlib` FFI registration
+audit (`make audit-ffi`). Run sub-suites standalone with `python3 tools/tests.py`
+or `python3 tools/tests.py --c4`. See [TESTING.md](docs/TESTING.md) for details.
 
 ### macOS x86_64 with Rosetta 2
 

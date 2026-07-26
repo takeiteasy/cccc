@@ -359,6 +359,13 @@ test-legacy: $(EXE_OUT)
 sqlite-smoke: $(EXE_OUT)
 	@python3 tools/sqlite_smoke.py
 
+# Audit src/stdlib/*.c FFI registrations against include/**/*.h declarations
+# (num_args/returns_double/double_arg_mask mismatches, unregistered
+# declarations, headers that register nothing at all). Pure source scan, no
+# build required. See tools/audit_ffi.py and docs/TESTING.md.
+audit-ffi:
+	@python3 tools/audit_ffi.py
+
 macos-x86_64-build:
 	@if [ "$(UNAME_S)" != "Darwin" ]; then \
 		echo "Error: macos-x86_64-build requires macOS."; \
@@ -587,7 +594,7 @@ else
 	@echo "dsym: DWARF is already embedded in the ELF binary on Linux; nothing to do."
 endif
 
-.PHONY: default test clean all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness host-tests bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json macos-x86_64-build build-cache-arch-smoke macos-x86_64-smoke macos-x86_64-test linux-x86_64-check linux-x86_64-build linux-x86_64-smoke linux-x86_64-test linux-x86_64-msan-test linux-aarch64-check linux-aarch64-build linux-aarch64-smoke linux-aarch64-test sqlite-smoke dsym
+.PHONY: default test clean all asan ubsan tsan sanitizers afl afl-asan fuzz fuzz_harness host-tests bench profile-cpu profile-cpu-build profile-mem fuzz-all fuzz-seed fuzz-run fuzz-crashes fuzz-triage fuzz-minimize fuzz-info stdlib bench-compare bench-compare-quick bench-compare-json macos-x86_64-build build-cache-arch-smoke macos-x86_64-smoke macos-x86_64-test linux-x86_64-check linux-x86_64-build linux-x86_64-smoke linux-x86_64-test linux-x86_64-msan-test linux-aarch64-check linux-aarch64-build linux-aarch64-smoke linux-aarch64-test sqlite-smoke audit-ffi dsym
 ifeq ($(UNAME_S),Linux)
 .PHONY: msan
 endif

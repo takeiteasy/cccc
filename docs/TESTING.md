@@ -18,7 +18,7 @@ Run each group independently:
 python3 tools/tests.py --suites     # framework suites only (tests/suites/)
 python3 tools/tests.py --legacy     # legacy single-file tests only (tests/)
 python3 tools/tests.py              # all tests in both directories
-python3 tools/run_tests.py          # unified orchestrator (source + c4 + debugger + sqlite)
+python3 tools/run_tests.py          # unified orchestrator (source + c4 + debugger + repl + debugger_condition + sqlite + audit_ffi)
 
 make test-suites   # build + run framework suites
 make test-legacy   # build + run legacy tests
@@ -35,11 +35,38 @@ that cannot yet be expressed in the framework (e.g. those combining warning
 flags with `--std=` at file scope) remain as standalone files in `tests/`.
 
 `make test` calls `tools/run_tests.py`, which is the unified orchestrator. It
-runs five sub-suites in sequence: source mode, `.c4` round-trip, the macOS
+runs seven sub-suites in sequence: source mode, `.c4` round-trip, the macOS
 host-signal debugger integration (skipped on other platforms), the interactive
 REPL PTY integration (`tools/test_repl.py`, POSIX-only -- skipped on Windows),
-and the SQLite amalgamation smoke test (skips cleanly when the zip is absent).
-A non-zero exit is produced if any sub-suite fails.
+the conditional-breakpoint PTY integration (`tools/test_debugger_condition.py`,
+same POSIX-only gating), the SQLite amalgamation smoke test (skips cleanly
+when the zip is absent), and the `src/stdlib` FFI registration audit
+(`tools/audit_ffi.py`, see below). A non-zero exit is produced if any
+sub-suite fails.
+
+### FFI registration audit
+
+`make audit-ffi` (also run as the `audit_ffi` sub-suite of `make test`) runs
+`tools/audit_ffi.py`, a pure source scan with no build step required. For
+every `cc_register_cfunc`/`cc_register_cfunc_ex`/`cc_register_variadic_cfunc`
+call in `src/stdlib/*.c`, it cross-checks `num_args`/`returns_double`/
+`double_arg_mask` against the function's declared signature in
+`include/**/*.h`, and flags any declared function that is never registered
+anywhere, or any header that declares functions but registers none at all
+(a guest including only that header would compile clean and fail at call
+time -- the bug class fixed in `flock`/`ioctl`/`statfs`/`fstatfs`). It is
+regex-based, not a real C parser, so registrations wrapping a local `static`
+helper (rather than a directly-declared libc function) are only checked for
+"is something registered", not signature-matched -- see the module
+docstring in `tools/audit_ffi.py` for the exact limitations. A small
+allowlist (`COMPILER_LOWERED_HEADERS`) covers headers whose functions are
+lowered directly by the compiler (`dlfcn.h`, `stdbit.h`) rather than going
+through the FFI registration table at all.
+
+```bash
+make audit-ffi                 # run standalone
+python3 tools/audit_ffi.py      # equivalent, no build required
+```
 
 ### Host-side test harnesses
 
