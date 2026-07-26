@@ -3978,6 +3978,28 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
         warn_switch_fallthrough(vm, node);
 
+        // #815: the C standard requires every case label's constant
+        // expression to compare unequal to every other one in the same
+        // switch -- a duplicate (or, for GNU case ranges, an overlap) is a
+        // constraint violation and must be a compile-time diagnostic, not
+        // silently-last-one-wins behavior. Checked here (post-parse, over
+        // the fully-populated case_next chain) rather than at case
+        // registration so sequential and nested duplicate labels report
+        // identically.
+        for (Node *c1 = node->case_next; c1; c1 = c1->case_next) {
+            for (Node *c2 = c1->case_next; c2; c2 = c2->case_next) {
+                if (c1->begin <= c2->end && c2->begin <= c1->end) {
+                    Node *later = c1;
+                    if (c2->tok->file == c1->tok->file && c2->tok->loc > c1->tok->loc)
+                        later = c2;
+                    if (c1->begin == c1->end && c2->begin == c2->end)
+                        error_tok(vm, later->tok, "duplicate case value '%d'", c1->begin);
+                    else
+                        error_tok(vm, later->tok, "duplicate (or overlapping) case value");
+                }
+            }
+        }
+
         if (vm->compiler.warnings & (CCCC_WARN_SWITCH | CCCC_WARN_SWITCH_ENUM)) {
             add_type(vm, node->cond);
             Type *cond_ty = node->cond->ty;
@@ -4062,6 +4084,13 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             *rest = tok;
             return new_node(vm, ND_NULL_EXPR, tok);
         }
+
+        // #815: a second "default:" silently overwrote the first with no
+        // diagnostic. Must be checked here at registration -- by the time
+        // the switch epilogue runs, default_case has already been
+        // clobbered and the first label is gone.
+        if (vm->compiler.current_switch->default_case)
+            error_tok(vm, tok, "multiple default labels in one switch");
 
         Node *node = new_node(vm, ND_CASE, tok);
         tok = skip(vm, tok->next, ":");

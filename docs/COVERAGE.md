@@ -51,7 +51,7 @@ runtime mixed-access detection, tracked separately from the POSIX pthread layer.
 | Explicit cast expressions | ✓ | |
 | `if` / `else` | ✓ | |
 | `for`, `while`, `do`-`while` | ✓ | |
-| `switch` / `case` / `default` | ✓ | |
+| `switch` / `case` / `default` | ✓ | Duplicate/overlapping `case` values and multiple `default:` labels in one switch are compile errors |
 | `break`, `continue`, `return` | ✓ | |
 | `goto` and labels | ✓ | |
 | Function declarations and definitions | ✓ | |
@@ -189,7 +189,7 @@ language coverage figures apply.
 | `__attribute__((...))` | ~ | Parsed; `aligned`, `packed`, `unused`, `deprecated`, `format`, `nodiscard`, `warn_unused_result`, `fallthrough`, `noreturn`, `error`, `warning`, `constructor`, `destructor`, `sentinel`, `alloc_size`, `malloc` supported (see [Attributes](#attributes) below) |
 | Labels as values `&&label` | ✓ | |
 | Computed goto `goto *expr` | ✓ | |
-| Switch case ranges `case 1 ... 5:` | ✓ | |
+| Switch case ranges `case 1 ... 5:` | ✓ | A range overlapping another case label (range or scalar) is a compile error, same as a duplicate scalar case value |
 | Zero-length arrays `int arr[0]` | ✓ | |
 | Empty structs and unions | ✓ | GNU extension; empty aggregates have size 0 |
 | Nested functions | ✓ | Access to parent-scope variables via static link |

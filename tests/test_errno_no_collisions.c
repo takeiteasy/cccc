@@ -2,8 +2,9 @@
 // host <errno.h> (see init_errno_macros() in src/preprocess.c) instead of
 // a hand-maintained #ifdef __APPLE__ table. If that derivation ever
 // produced a wrong or duplicate value for two different codes, this test
-// catches it -- an O(n^2) runtime distinctness check, since CCCC doesn't
-// currently diagnose duplicate switch/case values at compile time (#815).
+// catches it -- an O(n^2) runtime distinctness check, since these values
+// come from a data array, not switch/case labels (see #815, which added
+// compile-time diagnostics for duplicate case values but doesn't apply here).
 //
 // EWOULDBLOCK is deliberately omitted: POSIX defines it identically to
 // EAGAIN on every supported platform, so including both here would be a
