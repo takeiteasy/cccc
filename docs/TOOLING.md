@@ -1085,3 +1085,24 @@ via `is_system_header`), CCCC suppresses:
 
 These are common in real SDK headers and are informational hints to the native
 compiler that have no meaning in CCCC's VM execution.
+
+## Stdlib FFI Registration Audit
+
+```bash
+python3 tools/audit_ffi.py
+```
+
+Cross-checks every `cc_register_cfunc`/`cc_register_cfunc_ex` call in
+`src/stdlib/*.c` against the declared signature of the wrapped function in
+`include/*.h`, flagging `num_args`, `returns_double`, and `double_arg_mask`
+mismatches, plus declarations that are never registered at all. Exists
+because a handful of hand-typo'd registrations (wrong arg count or return
+kind for functions with pointer out-params, like `frexp`/`modf`/`remquo`)
+silently produced garbage at runtime with no test catching it. Run after
+editing `include/*.h` or any `src/stdlib/*.c` registration table; exits
+nonzero on any finding.
+
+It's a regex-based scanner, not a real C parser: registrations wrapping a
+local static helper (not itself declared in `include/`) are silently
+skipped rather than flagged, so a clean run means "everything checkable was
+consistent," not "everything is provably correct."

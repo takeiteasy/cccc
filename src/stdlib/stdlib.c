@@ -314,7 +314,7 @@ void register_stdlib_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "atol", (void*)atol, 1, 0);       // returns long
     cc_register_cfunc(vm, "atoll", (void*)atoll, 1, 0);     // returns long long
     cc_register_cfunc(vm, "strtod", (void*)strtod, 2, 1);   // returns double
-    cc_register_cfunc(vm, "strtof", (void*)strtof, 2, 1);   // returns float (was incorrectly 0)
+    cc_register_cfunc(vm, "strtof", (void*)strtof, 2, 2);   // returns float
     cc_register_cfunc(vm, "strtold", (void*)strtold, 2, 1); // returns long double
     cc_register_cfunc(vm, "strtol", (void*)cccc_strtol, 3, 0);
     cc_register_cfunc(vm, "strtoll", (void*)cccc_strtoll, 3, 0);
@@ -361,9 +361,9 @@ void register_stdlib_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "qsort", (void*)wrap_qsort, 4, 0);
 
     // Integer arithmetic
-    cc_register_cfunc(vm, "abs", (void*)abs, 1, 1);
-    cc_register_cfunc(vm, "labs", (void*)labs, 1, 1);
-    cc_register_cfunc(vm, "llabs", (void*)llabs, 1, 1);
+    cc_register_cfunc(vm, "abs", (void*)abs, 1, 0);     // returns int (#777: was incorrectly 1/double)
+    cc_register_cfunc(vm, "labs", (void*)labs, 1, 0);   // returns long
+    cc_register_cfunc(vm, "llabs", (void*)llabs, 1, 0); // returns long long
     cc_register_cfunc(vm, "div", (void*)div, 2, 0);
     cc_register_cfunc(vm, "ldiv", (void*)ldiv, 2, 0);
     cc_register_cfunc(vm, "lldiv", (void*)lldiv, 2, 0);

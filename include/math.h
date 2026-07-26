@@ -84,9 +84,9 @@ double remainder(double, double);
 float remainderf(float, float);
 long double remainderl(long double, long double);
 
-int remquo(double, double, int *);
-int remquof(float, float, int *);
-int remquol(long double, long double, int *);
+double remquo(double, double, int *);
+float remquof(float, float, int *);
+long double remquol(long double, long double, int *);
 
 double fma(double, double, double);
 float fmaf(float, float, float);

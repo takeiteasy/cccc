@@ -304,7 +304,7 @@ void register_wide_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "wcsstr", (void*)wcsstr, 2, 0);
     cc_register_cfunc(vm, "wcsxfrm", (void*)wcsxfrm, 3, 0);
     cc_register_cfunc_ex(vm, "wcstod", (void*)wcstod, 2, 1, 0);
-    cc_register_cfunc_ex(vm, "wcstof", (void*)wcstof, 2, 1, 0);
+    cc_register_cfunc_ex(vm, "wcstof", (void*)wcstof, 2, 2, 0); // returns float (#777: was incorrectly 1/double)
     cc_register_cfunc_ex(vm, "wcstold", (void*)wcstold, 2, 1, 0);
     cc_register_cfunc(vm, "wcstol", (void*)wcstol, 3, 0);
     cc_register_cfunc(vm, "wcstoll", (void*)wcstoll, 3, 0);
