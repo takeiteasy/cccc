@@ -930,6 +930,16 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "freeaddrinfo",(void*)wrap_freeaddrinfo, 1, 0);
     cc_register_cfunc(vm, "setnetent",   (void*)setnetent,      1, 0);
     cc_register_cfunc(vm, "endnetent",   (void*)endnetent,      0, 0);
+    // servent/protoent (#746) -- local /etc/services /etc/protocols lookups,
+    // fast and CPU-bound like getnetbyname/getnetbyaddr; no GIL release needed
+    cc_register_cfunc(vm, "getservbyname",(void*)getservbyname,  2, 0);
+    cc_register_cfunc(vm, "getservbyport",(void*)getservbyport, 2, 0);
+    cc_register_cfunc(vm, "setservent",   (void*)setservent,    1, 0);
+    cc_register_cfunc(vm, "endservent",   (void*)endservent,    0, 0);
+    cc_register_cfunc(vm, "getprotobyname",  (void*)getprotobyname,   1, 0);
+    cc_register_cfunc(vm, "getprotobynumber",(void*)getprotobynumber,1, 0);
+    cc_register_cfunc(vm, "setprotoent",     (void*)setprotoent,     1, 0);
+    cc_register_cfunc(vm, "endprotoent",     (void*)endprotoent,     0, 0);
 
     cc_register_cfunc(vm, "opendir",  (void*)opendir,  1, 0);
     cc_register_cfunc(vm, "readdir",  (void*)readdir,  1, 0);

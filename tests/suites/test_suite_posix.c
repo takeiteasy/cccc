@@ -4,7 +4,8 @@
 //   test_glob_header, test_quick_exit, test_posix_sys_wait,
 //   test_posix_sysconf_pathconf_confstr, test_posix_host_global_bridge,
 //   test_posix_sendmsg_recvmsg_scm_rights, test_posix_ipv6_udp_roundtrip,
-//   test_posix_netent, test_posix_waitid, test_posix_dns_gil_concurrency
+//   test_posix_netent, test_posix_waitid, test_posix_dns_gil_concurrency,
+//   test_posix_servent_protoent
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -312,6 +313,44 @@ int test_posix_netent(void) {
     if (getnetbyname("cccc-nonexistent-network-name")) return 5;
 
     endnetent();
+    return 42;
+}
+
+// test_posix_servent_protoent
+// #746: getservbyname()/getservbyport()/getprotobyname()/getprotobynumber()
+// against struct servent/struct protoent. /etc/services and /etc/protocols
+// are near-universally present with "http"/"tcp" entries (unlike
+// /etc/networks, which test_posix_netent has to tolerate being empty), so
+// this asserts the real lookup succeeds and is internally consistent.
+// s_port is network byte order -- must ntohs() it before comparing.
+[[cccc::test(return = 42)]]
+int test_posix_servent_protoent(void) {
+    setservent(0);
+    setprotoent(0);
+
+    struct servent *se = getservbyname("http", "tcp");
+    if (se) {
+        if (!se->s_name) return 1;
+        if (ntohs((unsigned short)se->s_port) != 80) return 2;
+        struct servent *by_port = getservbyport(se->s_port, "tcp");
+        if (!by_port) return 3;
+        if (by_port->s_port != se->s_port) return 4;
+    }
+
+    struct protoent *pe = getprotobyname("tcp");
+    if (pe) {
+        if (!pe->p_name) return 5;
+        if (pe->p_proto != 6) return 6;
+        struct protoent *by_num = getprotobynumber(pe->p_proto);
+        if (!by_num) return 7;
+        if (by_num->p_proto != pe->p_proto) return 8;
+    }
+
+    if (getservbyname("cccc-nonexistent-service-name", "tcp")) return 9;
+    if (getprotobyname("cccc-nonexistent-protocol-name")) return 10;
+
+    endservent();
+    endprotoent();
     return 42;
 }
 

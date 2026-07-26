@@ -33,6 +33,25 @@ struct netent {
     uint32_t  n_net;
 };
 
+/* struct servent / struct protoent (#746). Same design class as struct
+   netent above: no sa_family_t-style divergence, layout identical on macOS
+   and Linux -- verified via sizeof/offsetof against real macOS and Linux
+   x86_64/aarch64 headers (Linux values match across x86_64/aarch64;
+   sizeof(struct servent) == 32, sizeof(struct protoent) == 24 on both).
+   s_port is in network byte order, matching the real getservbyname(). */
+struct servent {
+    char  *s_name;
+    char **s_aliases;
+    int    s_port;
+    char  *s_proto;
+};
+
+struct protoent {
+    char  *p_name;
+    char **p_aliases;
+    int    p_proto;
+};
+
 struct addrinfo {
     int ai_flags;
     int ai_family;
@@ -112,5 +131,15 @@ extern struct netent *getnetbyname(const char *name);
 extern struct netent *getnetbyaddr(uint32_t net, int type);
 extern void setnetent(int stayopen);
 extern void endnetent(void);
+
+extern struct servent *getservbyname(const char *name, const char *proto);
+extern struct servent *getservbyport(int port, const char *proto);
+extern void setservent(int stayopen);
+extern void endservent(void);
+
+extern struct protoent *getprotobyname(const char *name);
+extern struct protoent *getprotobynumber(int proto);
+extern void setprotoent(int stayopen);
+extern void endprotoent(void);
 
 #endif /* __NETDB_H */
