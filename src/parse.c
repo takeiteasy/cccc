@@ -4024,6 +4024,27 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                         }
                     }
                 }
+
+                // #817 (mined from clang's Sema/switch.c test coverage):
+                // the reverse of the check above -- a case label whose
+                // value doesn't correspond to any enumerator of the
+                // switch's enum-typed condition. Both directions are
+                // gated the same way since they're the same class of
+                // enum/switch mismatch.
+                if (vm->compiler.warnings & CCCC_WARN_SWITCH) {
+                    for (Node *c = node->case_next; c; c = c->case_next) {
+                        bool matches = false;
+                        for (EnumConstant *ec = cond_ty->enum_constants; ec; ec = ec->next) {
+                            if (ec->value >= c->begin && ec->value <= c->end) {
+                                matches = true;
+                                break;
+                            }
+                        }
+                        if (!matches)
+                            warn_tok(vm, c->tok, CCCC_WARN_SWITCH,
+                                     "case value not in enumerated type");
+                    }
+                }
             }
         }
 

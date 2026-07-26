@@ -599,6 +599,8 @@ The trailing summary line (`N warnings generated.`) is suppressed in JSON mode.
 - `main` — warns on suspicious `main()` signatures: non-`int` return type, wrong parameter count (not 0 or 2), wrong first parameter type, or wrong second parameter type
 - `switch-default` — warns when a `switch` statement has no `default:` label
 - `switch-bool` — warns when the controlling expression of a `switch` has boolean type (`_Bool` / `bool`)
+- `switch` — for a `switch` on an enum-typed condition: warns when an enumerator has no matching `case` (unless a `default:` is present), and warns when a `case` label's value doesn't match any enumerator of that enum
+- `switch-enum` — like `switch`'s missing-enumerator check, but fires even when a `default:` is present
 - `float-equal` — warns on direct `==` or `!=` comparisons between floating-point operands
 - `shift-negative-value` — warns when the shift amount is a negative integer constant
 - `shift-overflow` — warns when the shift amount equals or exceeds the promoted type's bit-width
