@@ -22,8 +22,10 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <pthread.h>
 #include <pwd.h>
 #include <regex.h>
+#include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
 #include <sys/mman.h>
@@ -325,13 +327,30 @@ static long long wrap_pause_gil(void) {
 // reading a result that another thread's later call has already overwritten,
 // not a hang or corruption of unrelated memory. getaddrinfo/getnameinfo are
 // reentrant and unaffected.
+//
+// nss_static_mutex (#785) additionally serializes these against the
+// gethostbyname_r/gethostbyaddr_r/getnetbyname_r shims below, so the static
+// buffer is at least never *written* concurrently -- the plain functions'
+// returned pointer is still only valid until the next call from any thread
+// on any of these six functions, which the mutex cannot fix; that's what
+// the _r variants are for.
+#if !defined(_WIN32) && !defined(_WIN64)
+static pthread_mutex_t nss_static_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
+
 static long long wrap_gethostbyname_gil(long long name) {
     VirtualMachine *vm = current_vm();
     if (!vm || !vm->gil_initialized)
         return (long long)gethostbyname((const char *)name);
     ExecState state;
     posix_save_and_release_gil(vm, &state);
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_lock(&nss_static_mutex);
+#endif
     struct hostent *r = gethostbyname((const char *)name);
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_unlock(&nss_static_mutex);
+#endif
     posix_acquire_and_restore_gil(vm, &state);
     return (long long)r;
 }
@@ -342,7 +361,13 @@ static long long wrap_gethostbyaddr_gil(long long addr, long long len, long long
         return (long long)gethostbyaddr((const void *)addr, (socklen_t)len, (int)type);
     ExecState state;
     posix_save_and_release_gil(vm, &state);
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_lock(&nss_static_mutex);
+#endif
     struct hostent *r = gethostbyaddr((const void *)addr, (socklen_t)len, (int)type);
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_unlock(&nss_static_mutex);
+#endif
     posix_acquire_and_restore_gil(vm, &state);
     return (long long)r;
 }
@@ -382,7 +407,13 @@ static long long wrap_getnetbyname_gil(long long name) {
         return (long long)getnetbyname((const char *)name);
     ExecState state;
     posix_save_and_release_gil(vm, &state);
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_lock(&nss_static_mutex);
+#endif
     struct netent *r = getnetbyname((const char *)name);
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_unlock(&nss_static_mutex);
+#endif
     posix_acquire_and_restore_gil(vm, &state);
     return (long long)r;
 }
@@ -393,9 +424,273 @@ static long long wrap_getnetbyaddr_gil(long long net, long long type) {
         return (long long)getnetbyaddr((uint32_t)net, (int)type);
     ExecState state;
     posix_save_and_release_gil(vm, &state);
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_lock(&nss_static_mutex);
+#endif
     struct netent *r = getnetbyaddr((uint32_t)net, (int)type);
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_unlock(&nss_static_mutex);
+#endif
     posix_acquire_and_restore_gil(vm, &state);
     return (long long)r;
+}
+
+// ---------------------------------------------------------------------------
+// gethostbyname_r/gethostbyaddr_r/getnetbyname_r (#785) — race-free
+// alternative to the static-buffer lookups above.
+//
+// macOS has no gethostbyname_r/gethostbyaddr_r/getnetbyname_r at all (glibc-
+// only extensions), so this is one portable shim used on both platforms
+// rather than a passthrough to the host's own _r functions: nss_static_mutex
+// serializes access to the underlying plain lookup's static buffer (taken
+// here AND by the plain wrappers above, so the two families are mutually
+// exclusive), and the result is deep-copied into the caller's own buf before
+// the mutex is released. This closes the write race the #748 GIL release
+// introduced -- concurrent guest threads can no longer see a torn or
+// overwritten struct -- but the plain wrappers' *returned pointer* is still
+// only valid until the next call from any thread on any of these six
+// functions; that part is unfixable for those and is exactly why the _r
+// variants exist. See followup ticket for forwarding to glibc's native _r
+// functions on Linux instead of this shim, for true reentrancy without
+// serialization. nss_static_mutex itself is declared above, next to the
+// plain wrappers it also protects.
+
+// Required buffer size for a NULL-terminated char* array of `count` non-NULL
+// entries (whose combined string bytes, each including its NUL, are
+// `str_bytes`) plus alignment padding for the pointer array itself.
+static size_t nss_r_layout_size(int count, size_t str_bytes) {
+    size_t ptrs = (size_t)(count + 1) * sizeof(char *);
+    return ptrs + sizeof(char *) /* worst-case alignment padding */ + str_bytes;
+}
+
+// Copies a NULL-terminated `char **list` (with `count` entries) into `buf`,
+// writing the new pointer array at *cursor (advanced past the array +
+// alignment) and each string right after. Returns the new array's base, or
+// NULL if `end` would be exceeded.
+static char **nss_r_copy_ptr_array(char **list, int count, char **cursor, char *end) {
+    char *p = (char *)*cursor;
+    /* Align the pointer-array base to sizeof(char *). */
+    p = (char *)(((uintptr_t)p + sizeof(char *) - 1) & ~(uintptr_t)(sizeof(char *) - 1));
+    char **arr = (char **)(void *)p;
+    if ((char *)(arr + count + 1) > end) return NULL;
+    char *strp = (char *)(arr + count + 1);
+    for (int i = 0; i < count; i++) {
+        size_t len = strlen(list[i]) + 1;
+        if (strp + len > end) return NULL;
+        memcpy(strp, list[i], len);
+        arr[i] = strp;
+        strp += len;
+    }
+    arr[count] = 0;
+    *cursor = strp;
+    return arr;
+}
+
+static int nss_count_list(char **list) {
+    int n = 0;
+    if (list) while (list[n]) n++;
+    return n;
+}
+
+static long long wrap_gethostbyname_r_gil(long long name, long long ret, long long buf,
+                                           long long buflen, long long result, long long h_errnop) {
+    struct hostent *out = (struct hostent *)ret;
+    char *b = (char *)buf;
+    size_t blen = (size_t)buflen;
+    struct hostent **resultp = (struct hostent **)result;
+    int *herrp = (int *)h_errnop;
+
+    VirtualMachine *vm = current_vm();
+    ExecState state;
+    int gil = vm && vm->gil_initialized;
+    if (gil) posix_save_and_release_gil(vm, &state);
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_lock(&nss_static_mutex);
+#endif
+    struct hostent *src = gethostbyname((const char *)name);
+    int rc = 0;
+    if (!src) {
+        *resultp = 0;
+        if (herrp) *herrp = HOST_NOT_FOUND;
+    } else {
+        int naliases = nss_count_list(src->h_aliases);
+        int naddrs = nss_count_list(src->h_addr_list);
+        size_t need = strlen(src->h_name) + 1;
+        for (int i = 0; i < naliases; i++) need += strlen(src->h_aliases[i]) + 1;
+        need = nss_r_layout_size(naliases, need) +
+               nss_r_layout_size(naddrs, (size_t)naddrs * (size_t)src->h_length);
+        if (need > blen) {
+            rc = ERANGE;
+            *resultp = 0;
+        } else {
+            char *cursor = b;
+            char *end = b + blen;
+            /* Name string first. */
+            size_t namelen = strlen(src->h_name) + 1;
+            if (cursor + namelen > end) { rc = ERANGE; *resultp = 0; goto done; }
+            memcpy(cursor, src->h_name, namelen);
+            out->h_name = cursor;
+            cursor += namelen;
+
+            char **aliases = nss_r_copy_ptr_array(src->h_aliases, naliases, &cursor, end);
+            if (!aliases) { rc = ERANGE; *resultp = 0; goto done; }
+            out->h_aliases = aliases;
+
+            out->h_addrtype = src->h_addrtype;
+            out->h_length = src->h_length;
+
+            /* Address list: not NUL-terminated strings but fixed h_length
+               byte blobs -- copy manually rather than via
+               nss_r_copy_ptr_array's strlen-based packer. */
+            char *p = cursor;
+            p = (char *)(((uintptr_t)p + sizeof(char *) - 1) & ~(uintptr_t)(sizeof(char *) - 1));
+            char **addrs = (char **)(void *)p;
+            if ((char *)(addrs + naddrs + 1) > end) { rc = ERANGE; *resultp = 0; goto done; }
+            char *ap = (char *)(addrs + naddrs + 1);
+            for (int i = 0; i < naddrs; i++) {
+                if (ap + src->h_length > end) { rc = ERANGE; *resultp = 0; goto done; }
+                memcpy(ap, src->h_addr_list[i], (size_t)src->h_length);
+                addrs[i] = ap;
+                ap += src->h_length;
+            }
+            addrs[naddrs] = 0;
+            out->h_addr_list = addrs;
+
+            *resultp = out;
+        }
+    }
+done:
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_unlock(&nss_static_mutex);
+#endif
+    if (gil) posix_acquire_and_restore_gil(vm, &state);
+    return (long long)rc;
+}
+
+static long long wrap_gethostbyaddr_r_gil(long long addr, long long len, long long type, long long ret,
+                                           long long buf, long long buflen, long long result, long long h_errnop) {
+    struct hostent *out = (struct hostent *)ret;
+    char *b = (char *)buf;
+    size_t blen = (size_t)buflen;
+    struct hostent **resultp = (struct hostent **)result;
+    int *herrp = (int *)h_errnop;
+
+    VirtualMachine *vm = current_vm();
+    ExecState state;
+    int gil = vm && vm->gil_initialized;
+    if (gil) posix_save_and_release_gil(vm, &state);
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_lock(&nss_static_mutex);
+#endif
+    struct hostent *src = gethostbyaddr((const void *)addr, (socklen_t)len, (int)type);
+    int rc = 0;
+    if (!src) {
+        *resultp = 0;
+        if (herrp) *herrp = HOST_NOT_FOUND;
+    } else {
+        int naliases = nss_count_list(src->h_aliases);
+        int naddrs = nss_count_list(src->h_addr_list);
+        size_t need = strlen(src->h_name) + 1;
+        for (int i = 0; i < naliases; i++) need += strlen(src->h_aliases[i]) + 1;
+        need = nss_r_layout_size(naliases, need) +
+               nss_r_layout_size(naddrs, (size_t)naddrs * (size_t)src->h_length);
+        if (need > blen) {
+            rc = ERANGE;
+            *resultp = 0;
+        } else {
+            char *cursor = b;
+            char *end = b + blen;
+            size_t namelen = strlen(src->h_name) + 1;
+            if (cursor + namelen > end) { rc = ERANGE; *resultp = 0; goto done2; }
+            memcpy(cursor, src->h_name, namelen);
+            out->h_name = cursor;
+            cursor += namelen;
+
+            char **aliases = nss_r_copy_ptr_array(src->h_aliases, naliases, &cursor, end);
+            if (!aliases) { rc = ERANGE; *resultp = 0; goto done2; }
+            out->h_aliases = aliases;
+
+            out->h_addrtype = src->h_addrtype;
+            out->h_length = src->h_length;
+
+            char *p = cursor;
+            p = (char *)(((uintptr_t)p + sizeof(char *) - 1) & ~(uintptr_t)(sizeof(char *) - 1));
+            char **addrs = (char **)(void *)p;
+            if ((char *)(addrs + naddrs + 1) > end) { rc = ERANGE; *resultp = 0; goto done2; }
+            char *ap = (char *)(addrs + naddrs + 1);
+            for (int i = 0; i < naddrs; i++) {
+                if (ap + src->h_length > end) { rc = ERANGE; *resultp = 0; goto done2; }
+                memcpy(ap, src->h_addr_list[i], (size_t)src->h_length);
+                addrs[i] = ap;
+                ap += src->h_length;
+            }
+            addrs[naddrs] = 0;
+            out->h_addr_list = addrs;
+
+            *resultp = out;
+        }
+    }
+done2:
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_unlock(&nss_static_mutex);
+#endif
+    if (gil) posix_acquire_and_restore_gil(vm, &state);
+    return (long long)rc;
+}
+
+static long long wrap_getnetbyname_r_gil(long long name, long long ret, long long buf,
+                                          long long buflen, long long result, long long h_errnop) {
+    struct netent *out = (struct netent *)ret;
+    char *b = (char *)buf;
+    size_t blen = (size_t)buflen;
+    struct netent **resultp = (struct netent **)result;
+    int *herrp = (int *)h_errnop;
+
+    VirtualMachine *vm = current_vm();
+    ExecState state;
+    int gil = vm && vm->gil_initialized;
+    if (gil) posix_save_and_release_gil(vm, &state);
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_lock(&nss_static_mutex);
+#endif
+    struct netent *src = getnetbyname((const char *)name);
+    int rc = 0;
+    if (!src) {
+        *resultp = 0;
+        if (herrp) *herrp = HOST_NOT_FOUND;
+    } else {
+        int naliases = nss_count_list(src->n_aliases);
+        size_t need = strlen(src->n_name) + 1;
+        for (int i = 0; i < naliases; i++) need += strlen(src->n_aliases[i]) + 1;
+        need = nss_r_layout_size(naliases, need);
+        if (need > blen) {
+            rc = ERANGE;
+            *resultp = 0;
+        } else {
+            char *cursor = b;
+            char *end = b + blen;
+            size_t namelen = strlen(src->n_name) + 1;
+            if (cursor + namelen > end) { rc = ERANGE; *resultp = 0; goto done3; }
+            memcpy(cursor, src->n_name, namelen);
+            out->n_name = cursor;
+            cursor += namelen;
+
+            char **aliases = nss_r_copy_ptr_array(src->n_aliases, naliases, &cursor, end);
+            if (!aliases) { rc = ERANGE; *resultp = 0; goto done3; }
+            out->n_aliases = aliases;
+
+            out->n_addrtype = src->n_addrtype;
+            out->n_net = src->n_net;
+
+            *resultp = out;
+        }
+    }
+done3:
+#if !defined(_WIN32) && !defined(_WIN64)
+    pthread_mutex_unlock(&nss_static_mutex);
+#endif
+    if (gil) posix_acquire_and_restore_gil(vm, &state);
+    return (long long)rc;
 }
 
 // ---------------------------------------------------------------------------
@@ -794,6 +1089,10 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "getnameinfo", (void*)wrap_getnameinfo_gil,    7, 0);
     cc_register_cfunc(vm, "getnetbyname",(void*)wrap_getnetbyname_gil,   1, 0);
     cc_register_cfunc(vm, "getnetbyaddr",(void*)wrap_getnetbyaddr_gil,   2, 0);
+    // Race-free _r variants (#785)
+    cc_register_cfunc(vm, "gethostbyname_r",(void*)wrap_gethostbyname_r_gil, 6, 0);
+    cc_register_cfunc(vm, "gethostbyaddr_r",(void*)wrap_gethostbyaddr_r_gil, 8, 0);
+    cc_register_cfunc(vm, "getnetbyname_r", (void*)wrap_getnetbyname_r_gil,  6, 0);
 
     // Non-blocking / fast — intentionally keep the GIL (see comment above)
     cc_register_cfunc(vm, "close",   (void*)wrap_close,  1, 0);

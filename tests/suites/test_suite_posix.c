@@ -6,6 +6,7 @@
 //   test_posix_sendmsg_recvmsg_scm_rights, test_posix_ipv6_udp_roundtrip,
 //   test_posix_ipv6_advanced_options,
 //   test_posix_netent, test_posix_waitid, test_posix_dns_gil_concurrency,
+//   test_posix_gethostbyname_r,
 //   test_posix_servent_protoent, test_posix_getrusage, test_posix_wait4,
 //   test_posix_sigaction_siginfo, test_posix_ipv6_multicast_roundtrip,
 //   test_posix_rlimit_priority
@@ -397,6 +398,82 @@ int test_posix_dns_gil_concurrency(void) {
     if (pthread_join(t2, &r2) != 0) return 4;
     if (r1 != 0) return 5;
     if (r2 != 0) return 6;
+    return 42;
+}
+
+// test_posix_gethostbyname_r
+// #785: race-free alternative to gethostbyname/gethostbyaddr/getnetbyname
+// above, deferred from #748 (releasing the GIL means concurrent guest
+// threads can now race on those functions' static host storage). Two
+// threads each loop gethostbyname_r() with a *private* stack buffer and
+// assert the result points *inside* that buffer (proving a real deep copy,
+// not an alias into shared static storage that a concurrent call could
+// overwrite), plus the correctness/ERANGE/not-found contracts.
+static void *gethostbyname_r_worker(void *arg) {
+    int iterations = *(int *)arg;
+    char buf[2048];
+    for (int i = 0; i < iterations; i++) {
+        struct hostent ret;
+        struct hostent *result = 0;
+        int herr = 0;
+        int rc = gethostbyname_r("localhost", &ret, buf, sizeof(buf), &result, &herr);
+        if (rc != 0) return (void *)1;
+        if (!result || result != &ret) return (void *)2;
+        if (ret.h_addrtype != AF_INET || ret.h_length != 4) return (void *)3;
+        /* Proves the deep copy: h_name/h_addr_list point into this
+           worker's own stack buffer, not shared static storage a
+           concurrent call on the other thread could be overwriting. */
+        if ((char *)ret.h_name < buf || (char *)ret.h_name >= buf + sizeof(buf)) return (void *)4;
+        if ((char *)ret.h_addr_list[0] < buf || (char *)ret.h_addr_list[0] >= buf + sizeof(buf)) return (void *)5;
+        unsigned char *addr = (unsigned char *)ret.h_addr_list[0];
+        if (addr[0] != 127 || addr[1] != 0 || addr[2] != 0 || addr[3] != 1) return (void *)6;
+    }
+    return (void *)0;
+}
+
+[[cccc::test(return = 42)]]
+int test_posix_gethostbyname_r(void) {
+    pthread_t t1, t2;
+    int n = 20;
+    if (pthread_create(&t1, 0, gethostbyname_r_worker, &n) != 0) return 1;
+    if (pthread_create(&t2, 0, gethostbyname_r_worker, &n) != 0) return 2;
+
+    void *r1 = 0, *r2 = 0;
+    if (pthread_join(t1, &r1) != 0) return 3;
+    if (pthread_join(t2, &r2) != 0) return 4;
+    if (r1 != 0) return 5;
+    if (r2 != 0) return 6;
+
+    /* Short buffer -> ERANGE, *result cleared. */
+    char tiny[4];
+    struct hostent ret2;
+    struct hostent *result2 = (struct hostent *)1;
+    int herr = 0;
+    int rc = gethostbyname_r("localhost", &ret2, tiny, sizeof(tiny), &result2, &herr);
+    if (rc != ERANGE) return 7;
+    if (result2 != 0) return 8;
+
+    /* gethostbyaddr_r round trip on the same loopback address. */
+    struct in_addr a;
+    a.s_addr = htonl(0x7f000001); /* 127.0.0.1 */
+    struct hostent aret;
+    char abuf[2048];
+    struct hostent *aresult = 0;
+    int aherr = 0;
+    if (gethostbyaddr_r(&a, sizeof(a), AF_INET, &aret, abuf, sizeof(abuf), &aresult, &aherr) != 0) return 9;
+    if (!aresult) return 10;
+
+    /* getnetbyname_r: tolerate "not found" (the networks DB is often empty
+       in containers), but the ERANGE/*result contract must still hold. */
+    struct netent nret;
+    char nbuf[512];
+    struct netent *nresult = (struct netent *)1;
+    int nherr = 0;
+    int nrc = getnetbyname_r("loopback", &nret, nbuf, sizeof(nbuf), &nresult, &nherr);
+    if (nrc != 0) return 11;
+    if (nresult && nresult != &nret) return 12;
+    if (!nresult && nherr != HOST_NOT_FOUND) return 13;
+
     return 42;
 }
 

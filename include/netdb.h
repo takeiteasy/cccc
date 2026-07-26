@@ -7,6 +7,7 @@
 #error "<netdb.h> is only available on POSIX targets in CCCC"
 #endif
 
+#include "stddef.h"
 #include "stdint.h"
 #include "sys/socket.h"
 
@@ -118,8 +119,42 @@ struct addrinfo {
 #define NI_MAXHOST 1025
 #define NI_MAXSERV 32
 
+/* h_errno values (#785). Identical on macOS and Linux (verified against
+   real headers). Only used as the out-param `*h_errnop` filled by the _r
+   functions below -- the host's own h_errno mechanism differs per platform
+   (a plain global on macOS, a `__h_errno_location()`-backed thread-local on
+   glibc) and is intentionally not exposed here. */
+#define HOST_NOT_FOUND 1
+#define TRY_AGAIN      2
+#define NO_RECOVERY    3
+#define NO_DATA        4
+#define NO_ADDRESS     NO_DATA
+
 extern struct hostent *gethostbyname(const char *name);
 extern struct hostent *gethostbyaddr(const void *addr, socklen_t len, int type);
+
+/* gethostbyname_r()/gethostbyaddr_r()/getnetbyname_r() (#785). Deferred
+   from #748: releasing the VM GIL around the plain lookups means two guest
+   threads can now race on the static, non-reentrant host storage those
+   return pointers into. These are a portable shim (a shared mutex plus a
+   deep copy into the caller's buffer), not a passthrough to the host's own
+   _r variants -- macOS has no gethostbyname_r/gethostbyaddr_r/
+   getnetbyname_r at all (glibc-only extensions), so a single portable
+   implementation is used on both platforms; see followup ticket for
+   forwarding to glibc's native _r functions on Linux instead. There is no
+   standard getnetbyaddr_r on any platform. Returns 0 on success (with
+   *result set, or NULL if not found and *h_errnop set), or a positive
+   errno value (ERANGE if buf is too small for the result). */
+extern int gethostbyname_r(const char *name, struct hostent *ret,
+                           char *buf, size_t buflen,
+                           struct hostent **result, int *h_errnop);
+extern int gethostbyaddr_r(const void *addr, socklen_t len, int type,
+                           struct hostent *ret, char *buf, size_t buflen,
+                           struct hostent **result, int *h_errnop);
+extern int getnetbyname_r(const char *name, struct netent *ret,
+                          char *buf, size_t buflen,
+                          struct netent **result, int *h_errnop);
+
 extern int getaddrinfo(const char *node, const char *service,
                        const struct addrinfo *hints,
                        struct addrinfo **res);
