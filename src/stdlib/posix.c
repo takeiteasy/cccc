@@ -18,6 +18,7 @@
 #include <glob.h>
 #include <grp.h>
 #include <libgen.h>
+#include <net/if.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -971,6 +972,14 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "setprotoent",     (void*)setprotoent,     1, 0);
     cc_register_cfunc(vm, "endprotoent",     (void*)endprotoent,     0, 0);
     cc_register_cfunc(vm, "getrusage",       (void*)getrusage,       2, 0);
+
+    // net/if.h (#788) -- interface name<->index resolution, needed to target
+    // a specific interface (e.g. loopback) for IPV6_MULTICAST_IF/JOIN_GROUP
+    // instead of relying on index 0. Fast/local, no GIL release needed.
+    cc_register_cfunc(vm, "if_nametoindex",  (void*)if_nametoindex,  1, 0);
+    cc_register_cfunc(vm, "if_indextoname",  (void*)if_indextoname,  2, 0);
+    cc_register_cfunc(vm, "if_nameindex",    (void*)if_nameindex,    0, 0);
+    cc_register_cfunc(vm, "if_freenameindex",(void*)if_freenameindex,1, 0);
 
     cc_register_cfunc(vm, "opendir",  (void*)opendir,  1, 0);
     cc_register_cfunc(vm, "readdir",  (void*)readdir,  1, 0);

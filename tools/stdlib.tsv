@@ -12,6 +12,7 @@ grp.h	register_posix_functions
 libgen.h	register_posix_functions
 locale.h	register_locale_functions
 math.h	register_math_functions
+net/if.h	register_posix_functions
 netdb.h	register_posix_functions
 netinet/in.h	register_posix_functions
 poll.h	register_posix_functions
