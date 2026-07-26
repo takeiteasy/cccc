@@ -973,6 +973,13 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "endprotoent",     (void*)endprotoent,     0, 0);
     cc_register_cfunc(vm, "getrusage",       (void*)getrusage,       2, 0);
 
+    // struct rlimit / RLIMIT_* / getpriority/setpriority (#786) -- fast,
+    // local, no GIL release needed.
+    cc_register_cfunc(vm, "getrlimit",   (void*)getrlimit,   2, 0);
+    cc_register_cfunc(vm, "setrlimit",   (void*)setrlimit,   2, 0);
+    cc_register_cfunc(vm, "getpriority", (void*)getpriority, 2, 0);
+    cc_register_cfunc(vm, "setpriority", (void*)setpriority, 3, 0);
+
     // net/if.h (#788) -- interface name<->index resolution, needed to target
     // a specific interface (e.g. loopback) for IPV6_MULTICAST_IF/JOIN_GROUP
     // instead of relying on index 0. Fast/local, no GIL release needed.

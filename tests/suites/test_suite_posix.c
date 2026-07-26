@@ -7,7 +7,8 @@
 //   test_posix_ipv6_advanced_options,
 //   test_posix_netent, test_posix_waitid, test_posix_dns_gil_concurrency,
 //   test_posix_servent_protoent, test_posix_getrusage, test_posix_wait4,
-//   test_posix_sigaction_siginfo, test_posix_ipv6_multicast_roundtrip
+//   test_posix_sigaction_siginfo, test_posix_ipv6_multicast_roundtrip,
+//   test_posix_rlimit_priority
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -653,6 +654,60 @@ int test_posix_wait4(void) {
        be 0 -- just prove the struct was actually written to, not left as
        whatever garbage/zero it started as for every field. */
     if (ru.ru_maxrss < 0) return 5;
+    return 42;
+}
+
+// test_posix_rlimit_priority
+// #786: the rest of <sys/resource.h> beyond #747's getrusage/wait3/wait4 --
+// struct rlimit, RLIMIT_* (numbering genuinely diverges between macOS and
+// Linux, unlike struct rusage's layout), getrlimit/setrlimit, and
+// getpriority/setpriority. Lowers and restores RLIMIT_NOFILE's soft limit
+// (must restore, or later tests in this same process would inherit the
+// lowered fd limit) rather than raising it, since raising past the hard
+// limit requires privilege. Similarly only lowers (never raises) process
+// niceness via setpriority, since raising priority is also privileged.
+[[cccc::test(return = 42)]]
+int test_posix_rlimit_priority(void) {
+    if (sizeof(struct rlimit) != 16) return 1;
+    if (RLIMIT_CORE == RLIMIT_NOFILE) return 2;
+
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_NOFILE, &rl) != 0) return 3;
+    if (rl.rlim_cur > rl.rlim_max && rl.rlim_max != RLIM_INFINITY) return 4;
+
+    rlim_t original_cur = rl.rlim_cur;
+    if (original_cur > 16) {
+        struct rlimit lowered = rl;
+        lowered.rlim_cur = 16;
+        if (setrlimit(RLIMIT_NOFILE, &lowered) != 0) return 5;
+
+        struct rlimit check;
+        if (getrlimit(RLIMIT_NOFILE, &check) != 0) return 6;
+        if (check.rlim_cur != 16) return 7;
+
+        /* Restore -- other tests in this same process must not inherit a
+           lowered fd limit. */
+        struct rlimit restore = rl;
+        restore.rlim_cur = original_cur;
+        if (setrlimit(RLIMIT_NOFILE, &restore) != 0) return 8;
+    }
+
+    errno = 0;
+    int nice_val = getpriority(PRIO_PROCESS, 0);
+    if (nice_val == -1 && errno != 0) return 9;
+    if (nice_val < -20 || nice_val > 19) return 10;
+
+    /* Lower (never raise) niceness by 1 -- unprivileged processes can only
+       increase niceness (lower priority), not decrease it. Skip if already
+       at the max nice value. */
+    if (nice_val < 19) {
+        if (setpriority(PRIO_PROCESS, 0, nice_val + 1) != 0) return 11;
+        errno = 0;
+        int check_nice = getpriority(PRIO_PROCESS, 0);
+        if (check_nice == -1 && errno != 0) return 12;
+        if (check_nice != nice_val + 1) return 13;
+    }
+
     return 42;
 }
 

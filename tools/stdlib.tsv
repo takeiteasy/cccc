@@ -25,6 +25,7 @@ stdlib.h	register_stdlib_functions
 string.h	register_string_functions
 strings.h	register_posix_functions
 sys/mman.h	register_posix_functions
+sys/resource.h	register_posix_functions
 sys/socket.h	register_posix_functions
 sys/stat.h	register_posix_functions
 sys/time.h	register_posix_functions
