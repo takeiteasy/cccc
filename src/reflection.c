@@ -751,6 +751,10 @@ Node *__builtin_ast_if(VirtualMachine *vm, Node *cond, Node *then_body,
     return node;
 }
 
+// Forward decl: defined further down (Macro Diagnostics section) but needed
+// here by __builtin_ast_switch_set_default's duplicate-default check.
+void __builtin_macro_error_at(VirtualMachine *vm, Node *node, const char *fmt, ...);
+
 Node *__builtin_ast_switch(VirtualMachine *vm, Node *cond) {
     if (!vm || !cond)
         return NULL;
@@ -771,11 +775,22 @@ void __builtin_ast_switch_add_case(VirtualMachine *vm, Node *switch_node, Node *
     if (switch_node->kind != ND_SWITCH)
         return;
 
-    // Create a case node
+    // Create a case node. cc_eval constant-folds "value" (it calls add_type
+    // itself, so this works even on reflection-built nodes that were never
+    // type-checked by the parser) and errors out at the macro call site if
+    // it isn't a compile-time constant -- previously this took value->val
+    // directly, which silently read 0 for anything but an ND_NUM literal.
     Node *case_node = alloc_node(vm, ND_CASE);
-    case_node->begin = value->val; // Assuming value is a numeric literal
-    case_node->end = value->val;
+    int64_t v = cc_eval(vm, value);
+    case_node->begin = v;
+    case_node->end = v;
     case_node->lhs = body;
+
+    // #815/#816: reject a case value that collides with one already on the
+    // switch, same as the parser does for hand-written switches. Must run
+    // before the splice below -- once case_node is linked into case_next it
+    // would trivially "collide" with itself.
+    check_case_conflict(vm, switch_node->case_next, case_node);
 
     // Add to switch's case list
     case_node->case_next = switch_node->case_next;
@@ -790,6 +805,12 @@ void __builtin_ast_switch_set_default(VirtualMachine *vm, Node *switch_node,
 
     if (switch_node->kind != ND_SWITCH)
         return;
+
+    // #815/#816: a second default label silently overwrote the first with no
+    // diagnostic; same fix as the parser's registration-time check.
+    if (switch_node->default_case)
+        __builtin_macro_error_at(vm, switch_node,
+                                 "multiple default labels in one switch");
 
     Node *def = alloc_node(vm, ND_CASE);
     def->lhs = body;

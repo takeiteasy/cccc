@@ -3807,6 +3807,45 @@ static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 //      | expr-stmt
 static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok);
 
+// #815/#816: report a case label ("c") whose value range collides with any
+// node already in "chain". Shared by the parser's switch epilogue below and
+// the comptime reflection switch builders (reflection.c's
+// __builtin_ast_switch_add_case), so hand-written and macro-generated
+// switches produce identical diagnostics. "chain" must already be known
+// conflict-free among itself (true for both callers: the parser rescans the
+// fully-built case_next list pairwise, and reflection.c calls this before
+// splicing the new node in, so it only ever compares against prior entries).
+//
+// Case nodes built by the reflection API may carry a NULL tok (macro_call_tok
+// can be unset -- see alloc_node in reflection.c), so this can't unconditionally
+// deref tok->file/tok->loc the way plain error_tok() call sites do.
+void check_case_conflict(VirtualMachine *vm, Node *chain, Node *c) {
+    for (Node *o = chain; o; o = o->case_next) {
+        if (c->begin > o->end || o->begin > c->end)
+            continue;
+
+        Node *later = o;
+        if (c->tok && o->tok && c->tok->file == o->tok->file &&
+            c->tok->loc > o->tok->loc)
+            later = c;
+
+        char *msg;
+        char buf[64];
+        if (c->begin == c->end && o->begin == o->end) {
+            snprintf(buf, sizeof(buf), "duplicate case value '%ld'", c->begin);
+            msg = buf;
+        } else {
+            msg = "duplicate (or overlapping) case value";
+        }
+
+        if (later->tok)
+            error_tok(vm, later->tok, "%s", msg);
+        else
+            error("%s", msg);
+        return;
+    }
+}
+
 // C23 §6.8.1: a label may precede a declaration at block scope.
 // Pre-C23 bare declarations after labels are a hard error.
 // Limitation: only handles object declarations; typedef/function-def after a
@@ -3986,19 +4025,8 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         // the fully-populated case_next chain) rather than at case
         // registration so sequential and nested duplicate labels report
         // identically.
-        for (Node *c1 = node->case_next; c1; c1 = c1->case_next) {
-            for (Node *c2 = c1->case_next; c2; c2 = c2->case_next) {
-                if (c1->begin <= c2->end && c2->begin <= c1->end) {
-                    Node *later = c1;
-                    if (c2->tok->file == c1->tok->file && c2->tok->loc > c1->tok->loc)
-                        later = c2;
-                    if (c1->begin == c1->end && c2->begin == c2->end)
-                        error_tok(vm, later->tok, "duplicate case value '%d'", c1->begin);
-                    else
-                        error_tok(vm, later->tok, "duplicate (or overlapping) case value");
-                }
-            }
-        }
+        for (Node *c1 = node->case_next; c1; c1 = c1->case_next)
+            check_case_conflict(vm, c1->case_next, c1);
 
         if (vm->compiler.warnings & (CCCC_WARN_SWITCH | CCCC_WARN_SWITCH_ENUM)) {
             add_type(vm, node->cond);

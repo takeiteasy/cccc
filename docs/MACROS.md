@@ -1932,6 +1932,13 @@ generate_switch();
 `WithEnum(e)` similarly enables `EnumAddConstant(name, value)`, and
 `WithBlock(block)` enables `BlockAddStmt(stmt)`.
 
+`SwitchAddCase`'s `value` must be a compile-time constant expression (it is
+constant-folded the same way a hand-written `case` label is). A case value
+that collides with one already added to the same switch, or a second
+`SwitchSetDefault` call on the same switch, is a compile error -- matching the
+diagnostics a hand-written `switch`/`case`/`default` gets for duplicate or
+overlapping case values and multiple default labels.
+
 ### Global Variable Builder APIs
 
 | Convenience macro | Description |

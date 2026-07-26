@@ -449,6 +449,10 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
 
 Node *new_cast(VirtualMachine *vm, Node *expr, Type *ty);
 int64_t const_expr(VirtualMachine *vm, Token **rest, Token *tok);
+// #815/#816: shared duplicate/overlapping case-label check -- used by the
+// switch-statement epilogue here and by the comptime reflection switch
+// builders in reflection.c.
+void check_case_conflict(VirtualMachine *vm, Node *chain, Node *c);
 bool node_int_const_fits(VirtualMachine *vm, Node *expr, Type *to);
 Obj *parse(VirtualMachine *vm, Token *tok);
 void cc_execute_top_level_macro(VirtualMachine *vm, char *name, Token *tok,
