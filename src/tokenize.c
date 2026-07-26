@@ -1002,6 +1002,32 @@ static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
         base = 8;
     }
 
+    // #776: a pp-number that is actually a floating constant (has a
+    // decimal point, or an exponent letter appropriate to this base --
+    // 'e'/'E' for octal/decimal, 'p'/'P' for hex; binary literals have no
+    // floating-point form in C) must fall through to convert_pp_number's
+    // strtold() path instead of being misparsed here. Checked over the
+    // *whole* raw token before any digit-run collection below, so a case
+    // like "08.5" (an invalid octal digit '8' followed by a decimal
+    // point) is recognized as a float before the invalid-digit check
+    // further down ever sees the '8'.
+    //
+    // This is the actual root cause of #776: the digit-collection loop
+    // below treats 'e'/'E' as ordinary alnum digits (isalnum('e') is
+    // true) and swallows a whole exponent like "1e10" into `cleaned`,
+    // then strtoul() only consumes the leading "1" -- but the old code
+    // trusted the *collected* length as bytes-consumed rather than
+    // checking where strtoul() actually stopped, so "1e10" silently
+    // "succeeded" as the integer 1 and never reached strtold().
+    for (char *s = tok->loc; s < tok->loc + tok->len; s++) {
+        if (*s == '.')
+            return false;
+        if ((base == 8 || base == 10) && (*s == 'e' || *s == 'E'))
+            return false;
+        if (base == 16 && (*s == 'p' || *s == 'P'))
+            return false;
+    }
+
     // C23: Remove digit separators (single quotes) before parsing
     // e.g., 1'000'000 becomes 1000000
     // Sized to tok->len+1 (an upper bound on digit count) rather than a
@@ -1026,7 +1052,22 @@ static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
     }
     cleaned[j] = '\0';
 
-    int64_t val = strtoul(cleaned, &p, base);
+    char *end_in_cleaned;
+    int64_t val = strtoul(cleaned, &end_in_cleaned, base);
+
+    // The float case (an 'e'/'E'/'p'/'P' exponent letter) was already
+    // ruled out by the whole-token scan above, so if strtoul() didn't
+    // consume every character the collection loop gathered, it's a
+    // genuine invalid digit for this base (e.g. '8' in an octal
+    // constant, '2' in a binary constant) -- a hard error rather than
+    // silently truncating to whatever strtoul() managed to parse (#776).
+    if (j > 0 && end_in_cleaned != cleaned + j) {
+        const char *base_name = base == 16 ? "hexadecimal" :
+                                 base == 8  ? "octal" :
+                                 base == 2  ? "binary" : "integer";
+        error_tok(vm, tok, "invalid digit '%c' in %s constant",
+                  *end_in_cleaned, base_name);
+    }
 
     // Adjust p to point to the position in original string after digits
     // Count non-quote characters we consumed

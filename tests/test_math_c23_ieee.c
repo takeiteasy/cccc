@@ -5,14 +5,9 @@
 // (bit-pattern based, not FFI) since several are absent from Darwin's
 // libm and glibc only gained fmaximum/fminimum in 2.35.
 //
-// NOTE: avoids bare-exponent float literals like `1e10` (no decimal
-// point/sign) -- an unrelated, pre-existing tokenizer bug silently
-// misparses those (see convert_pp_int in src/tokenize.c: the digit-
-// separator cleaning loop treats 'e'+exponent-digits as part of the
-// integer run since isalnum('e') is true, then trusts the collected
-// length as bytes-consumed instead of checking where strtoul actually
-// stopped). Filed separately; large literals here use the `N.0eE`/plain
-// decimal forms, which are unaffected.
+// (Previously avoided bare-exponent float literals like `1e10` here due
+// to a separate tokenizer bug -- see test_float_literal_exponent.c for
+// the regression test; fixed, so no longer a concern.)
 //
 // totalorder/totalordermag take pointers and fromfp/ufromfp/fromfpx/
 // ufromfpx return intmax_t/uintmax_t -- both verified against the real
