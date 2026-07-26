@@ -103,6 +103,26 @@ struct sockaddr_in6 {
 #define IPV6_JOIN_GROUP     12
 #define IPV6_LEAVE_GROUP    13
 #define IPV6_V6ONLY         27
+/* Advanced IPV6_* options (#749): multicast source-routing/packet-info set
+   beyond the baseline above. Verified against real macOS headers --
+   requires __APPLE_USE_RFC_3542 to be visible before <netinet/in.h> is
+   included (see src/stdlib/posix.c), or the host doesn't define these
+   either. */
+#define IPV6_CHECKSUM       26
+#define IPV6_RECVTCLASS     35
+#define IPV6_TCLASS         36
+#define IPV6_RECVHOPLIMIT   37
+#define IPV6_RECVRTHDR      38
+#define IPV6_RECVHOPOPTS    39
+#define IPV6_RECVDSTOPTS    40
+#define IPV6_PKTINFO        46
+#define IPV6_HOPLIMIT       47
+#define IPV6_HOPOPTS        49
+#define IPV6_DSTOPTS        50
+#define IPV6_RTHDR          51
+#define IPV6_RECVPKTINFO    61
+#define IPV6_RTHDR_TYPE_0    0
+#define IPV6_DONTFRAG       62
 #else
 #define IPV6_UNICAST_HOPS   16
 #define IPV6_MULTICAST_IF   17
@@ -111,6 +131,39 @@ struct sockaddr_in6 {
 #define IPV6_JOIN_GROUP     20
 #define IPV6_LEAVE_GROUP    21
 #define IPV6_V6ONLY         26
+/* Advanced IPV6_* options (#749) -- verified against real Linux
+   x86_64/aarch64 headers (values match across x86_64/aarch64). */
+#define IPV6_CHECKSUM        7
+#define IPV6_RECVPKTINFO    49
+#define IPV6_PKTINFO        50
+#define IPV6_RECVHOPLIMIT   51
+#define IPV6_HOPLIMIT       52
+#define IPV6_RECVHOPOPTS    53
+#define IPV6_HOPOPTS        54
+#define IPV6_RTHDR          57
+#define IPV6_RECVRTHDR      56
+#define IPV6_RECVDSTOPTS    58
+#define IPV6_DSTOPTS        59
+#define IPV6_RTHDR_TYPE_0    0
+#define IPV6_RECVTCLASS     66
+#define IPV6_TCLASS         67
+#define IPV6_DONTFRAG       62
 #endif
+
+/* struct ipv6_mreq for IPV6_JOIN_GROUP/IPV6_LEAVE_GROUP (#749). Layout is
+   identical on macOS and Linux -- verified via sizeof/offsetof against real
+   macOS and Linux x86_64/aarch64 headers (sizeof == 20 on both). */
+struct ipv6_mreq {
+    struct in6_addr ipv6mr_multiaddr;
+    unsigned int    ipv6mr_interface;
+};
+
+/* struct in6_pktinfo for IPV6_PKTINFO/IPV6_RECVPKTINFO ancillary data
+   (#749). Layout is identical on macOS and Linux -- verified the same way
+   (sizeof == 20 on both). */
+struct in6_pktinfo {
+    struct in6_addr ipi6_addr;
+    int             ipi6_ifindex;
+};
 
 #endif /* __NETINET_IN_H */

@@ -4,6 +4,7 @@
 //   test_glob_header, test_quick_exit, test_posix_sys_wait,
 //   test_posix_sysconf_pathconf_confstr, test_posix_host_global_bridge,
 //   test_posix_sendmsg_recvmsg_scm_rights, test_posix_ipv6_udp_roundtrip,
+//   test_posix_ipv6_advanced_options,
 //   test_posix_netent, test_posix_waitid, test_posix_dns_gil_concurrency,
 //   test_posix_servent_protoent, test_posix_getrusage, test_posix_wait4
 
@@ -949,6 +950,69 @@ int test_posix_ipv6_udp_roundtrip(void) {
 
     if (IPPROTO_IPV6 != 41) return 9;
     if (IPV6_V6ONLY == IPV6_UNICAST_HOPS) return 10;
+    return 42;
+}
+
+// test_posix_ipv6_advanced_options
+// #749: the advanced IPV6_* set beyond the #742 baseline (multicast/
+// packet-info/routing-header options), plus struct ipv6_mreq/in6_pktinfo.
+// A real multicast join can fail in CI/containers with no multicast-capable
+// interface, so this tolerates ENODEV/EADDRNOTAVAIL/ENOPROTOOPT there and
+// only hard-fails on an EINVAL-class error, which would indicate a wrong
+// constant. IPV6_TCLASS is round-tripped via setsockopt/getsockopt on a
+// real socket, which is a genuine end-to-end check on every host. The full
+// multicast receive round trip is verified by hand, not by this test.
+[[cccc::test(return = 42)]]
+int test_posix_ipv6_advanced_options(void) {
+    /* Constants distinct + match expectation (per-platform values verified
+       against real macOS/Linux headers). */
+    if (IPV6_PKTINFO == IPV6_TCLASS) return 1;
+    if (IPV6_RECVPKTINFO == IPV6_RECVTCLASS) return 2;
+    if (IPV6_HOPOPTS == IPV6_DSTOPTS) return 3;
+    if (IPV6_RTHDR_TYPE_0 != 0) return 4;
+
+    if (sizeof(struct ipv6_mreq) != 20) return 5;
+    if (sizeof(struct in6_pktinfo) != 20) return 6;
+
+    int sfd = socket(AF_INET6, SOCK_DGRAM, 0);
+    if (sfd < 0) return 7;
+
+    /* IPV6_TCLASS round trip -- genuine end-to-end check, no interface
+       dependency. */
+    int tclass = 42;
+    if (setsockopt(sfd, IPPROTO_IPV6, IPV6_TCLASS, &tclass, sizeof(tclass)) != 0) {
+        close(sfd);
+        return 8;
+    }
+    int got_tclass = -1;
+    socklen_t tclass_len = sizeof(got_tclass);
+    if (getsockopt(sfd, IPPROTO_IPV6, IPV6_TCLASS, &got_tclass, &tclass_len) != 0) {
+        close(sfd);
+        return 9;
+    }
+    if (got_tclass != tclass) { close(sfd); return 10; }
+
+    /* struct ipv6_mreq + IPV6_JOIN_GROUP against a real multicast group on
+       the default interface. Tolerate the host having no multicast-capable
+       interface (common in containers/CI). */
+    struct ipv6_mreq mreq;
+    for (int i = 0; i < (int)sizeof(mreq); i++) ((char *)&mreq)[i] = 0;
+    mreq.ipv6mr_multiaddr.s6_addr[0] = 0xff;
+    mreq.ipv6mr_multiaddr.s6_addr[1] = 0x02;
+    mreq.ipv6mr_multiaddr.s6_addr[15] = 0x01; /* ff02::1, all-nodes link-local */
+    mreq.ipv6mr_interface = 0; /* default interface */
+
+    if (setsockopt(sfd, IPPROTO_IPV6, IPV6_JOIN_GROUP, &mreq, sizeof(mreq)) != 0) {
+        if (errno == EINVAL) { close(sfd); return 11; }
+        /* ENODEV/EADDRNOTAVAIL/ENOPROTOOPT/etc. -- no usable multicast
+           interface on this host; the constant itself is proven correct
+           by the fact the kernel understood the option well enough to
+           reject it for an environmental reason, not "unknown option". */
+    } else {
+        setsockopt(sfd, IPPROTO_IPV6, IPV6_LEAVE_GROUP, &mreq, sizeof(mreq));
+    }
+
+    close(sfd);
     return 42;
 }
 

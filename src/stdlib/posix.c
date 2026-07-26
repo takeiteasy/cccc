@@ -3,6 +3,11 @@
 #include "../internal.h"
 
 #if !defined(_WIN32) && !defined(_WIN64)
+// Must be defined before <netinet/in.h> pulls in the real system header, or
+// the advanced IPV6_* options (#749) -- IPV6_PKTINFO, IPV6_TCLASS, etc. --
+// won't be visible on macOS (RFC 3542 options are opt-in there; Linux glibc
+// exposes them unconditionally).
+#define __APPLE_USE_RFC_3542
 #include <arpa/inet.h>
 #include <dirent.h>
 #include <dlfcn.h>
