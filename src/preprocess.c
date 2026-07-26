@@ -46,6 +46,7 @@
 
 #include "./internal.h"
 #include <fenv.h> // host <fenv.h>, for init_fenv_macros() (#771)
+#include <errno.h> // host <errno.h>, for init_errno_macros() (#813)
 
 #define MAX_PP_NESTING 1000
 
@@ -4604,9 +4605,36 @@ static void init_fenv_macros(VirtualMachine *vm) {
                  arena_format(vm, "%d", (int)sizeof(fenv_t)));
 }
 
+// Inject the real host <errno.h> values for the ~44 POSIX error codes that
+// differ across platforms, so include/errno.h (which guest programs see)
+// can define these in terms of __CCCC_E*__ instead of a hand-maintained
+// #ifdef __APPLE__ / #else table. #779 was exactly this failure mode:
+// EDEADLK/EAGAIN were hardcoded at one platform's values outside any
+// conditional, so the guest macro didn't match what the host libc actually
+// returned on the other platform. Deriving every value straight from this
+// binary's own compile-time <errno.h> (same reasoning as init_fenv_macros
+// above, #813) makes that class of bug structurally impossible: whichever
+// platform builds cccc is the platform whose real errno numbers get baked
+// in, with nothing to transcribe or keep in sync by hand.
+static void init_errno_macros(VirtualMachine *vm) {
+#define E(name) define_macro(vm, "__CCCC_" #name "__", arena_format(vm, "%d", name))
+    E(EAGAIN); E(EDEADLK); E(EWOULDBLOCK);
+    E(EINPROGRESS); E(EALREADY); E(ENOTSOCK); E(EDESTADDRREQ); E(EMSGSIZE);
+    E(EPROTOTYPE); E(ENOPROTOOPT); E(ENOTSUP); E(EAFNOSUPPORT); E(EADDRINUSE);
+    E(EADDRNOTAVAIL); E(ENETDOWN); E(ENETUNREACH); E(ECONNABORTED);
+    E(ECONNRESET); E(ENOBUFS); E(EISCONN); E(ENOTCONN); E(ETIMEDOUT);
+    E(ECONNREFUSED); E(ELOOP); E(ENAMETOOLONG); E(EHOSTUNREACH);
+    E(ENOTEMPTY); E(ENOSYS); E(ECANCELED); E(EIDRM); E(ENOMSG); E(EOVERFLOW);
+    E(EBADMSG); E(EMULTIHOP); E(EILSEQ); E(ENOLINK); E(EPROTO); E(ENOLCK);
+    E(EOPNOTSUPP); E(ENOTRECOVERABLE); E(EOWNERDEAD); E(ESTALE); E(EDQUOT);
+    E(ETXTBSY); E(ENOTBLK);
+#undef E
+}
+
 void init_macros(VirtualMachine *vm) {
     // Define predefined macros
     init_fenv_macros(vm);
+    init_errno_macros(vm);
     define_macro(vm, "__C99_MACRO_WITH_VA_ARGS", "1");
     define_macro(vm, "__SIZEOF_DOUBLE__", "8");
     define_macro(vm, "__SIZEOF_FLOAT__", "4");

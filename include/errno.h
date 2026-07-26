@@ -50,99 +50,57 @@ extern int *__cccc_errno_ptr(void);
 #define EDOM     33
 #define ERANGE   34
 
-/* POSIX error codes (platform-specific where they differ) */
-#ifdef __APPLE__
-#  define EAGAIN       35
-#  define EDEADLK      11
-#  define EWOULDBLOCK  EAGAIN
-#  define EINPROGRESS  36
-#  define EALREADY     37
-#  define ENOTSOCK     38
-#  define EDESTADDRREQ 39
-#  define EMSGSIZE     40
-#  define EPROTOTYPE   41
-#  define ENOPROTOOPT  42
-#  define ENOTSUP      45
-#  define EAFNOSUPPORT 47
-#  define EADDRINUSE   48
-#  define EADDRNOTAVAIL 49
-#  define ENETDOWN     50
-#  define ENETUNREACH  51
-#  define ECONNABORTED 53
-#  define ECONNRESET   54
-#  define ENOBUFS      55
-#  define EISCONN      56
-#  define ENOTCONN     57
-#  define ETIMEDOUT    60
-#  define ECONNREFUSED 61
-#  define ELOOP        62
-#  define ENAMETOOLONG 63
-#  define EHOSTUNREACH 65
-#  define ENOTEMPTY    66
-#  define ENOSYS       78
-#  define ECANCELED    89
-#  define EIDRM        90
-#  define ENOMSG       91
-#  define EOVERFLOW    84
-#  define EBADMSG      94
-#  define EMULTIHOP    95
-#  define EILSEQ       92
-#  define ENOLINK      97
-#  define EPROTO       100
-#  define ENOLCK       77
-#  define EOPNOTSUPP   102
-#  define ENOTRECOVERABLE 104
-#  define EOWNERDEAD   105
-#  define ESTALE       70
-#  define EDQUOT       69
-#  define ETXTBSY      26
-#  define ENOTBLK      15
-#else
-#  define EAGAIN       11
-#  define EDEADLK      35
-#  define EWOULDBLOCK  EAGAIN
-#  define EINPROGRESS  115
-#  define EALREADY     114
-#  define ENOTSOCK     88
-#  define EDESTADDRREQ 89
-#  define EMSGSIZE     90
-#  define EPROTOTYPE   91
-#  define ENOPROTOOPT  92
-#  define EAFNOSUPPORT 97
-#  define EADDRINUSE   98
-#  define EADDRNOTAVAIL 99
-#  define ENETDOWN     100
-#  define ENETUNREACH  101
-#  define ECONNABORTED 103
-#  define ECONNRESET   104
-#  define ENOBUFS      105
-#  define EISCONN      106
-#  define ENOTCONN     107
-#  define ETIMEDOUT    110
-#  define ECONNREFUSED 111
-#  define ELOOP        40
-#  define ENAMETOOLONG 36
-#  define EHOSTUNREACH 113
-#  define ENOTEMPTY    39
-#  define ENOSYS       38
-#  define ECANCELED    125
-#  define EIDRM        43
-#  define ENOMSG       42
-#  define EOVERFLOW    75
-#  define EBADMSG      74
-#  define EMULTIHOP    72
-#  define ENOTSUP      95
-#  define EILSEQ       84
-#  define ENOLINK      67
-#  define EPROTO       71
-#  define ENOLCK       37
-#  define EOPNOTSUPP   95
-#  define ENOTRECOVERABLE 131
-#  define EOWNERDEAD   130
-#  define ESTALE       116
-#  define EDQUOT       122
-#  define ETXTBSY      26
-#  define ENOTBLK      15
-#endif
+/* POSIX error codes that differ across platforms. Values come from the
+ * real host <errno.h> this binary was compiled against (see
+ * init_errno_macros() in src/preprocess.c), not a hand-maintained
+ * per-platform table -- #779 was a hardcoded-value bug in exactly that
+ * kind of table (EDEADLK/EAGAIN swapped between macOS/glibc); #813
+ * eliminates the table entirely so a future transcription slip can't
+ * reintroduce the same class of bug. */
+#define EAGAIN          __CCCC_EAGAIN__
+#define EDEADLK         __CCCC_EDEADLK__
+#define EWOULDBLOCK     __CCCC_EWOULDBLOCK__
+#define EINPROGRESS     __CCCC_EINPROGRESS__
+#define EALREADY        __CCCC_EALREADY__
+#define ENOTSOCK        __CCCC_ENOTSOCK__
+#define EDESTADDRREQ    __CCCC_EDESTADDRREQ__
+#define EMSGSIZE        __CCCC_EMSGSIZE__
+#define EPROTOTYPE      __CCCC_EPROTOTYPE__
+#define ENOPROTOOPT     __CCCC_ENOPROTOOPT__
+#define ENOTSUP         __CCCC_ENOTSUP__
+#define EAFNOSUPPORT    __CCCC_EAFNOSUPPORT__
+#define EADDRINUSE      __CCCC_EADDRINUSE__
+#define EADDRNOTAVAIL   __CCCC_EADDRNOTAVAIL__
+#define ENETDOWN        __CCCC_ENETDOWN__
+#define ENETUNREACH     __CCCC_ENETUNREACH__
+#define ECONNABORTED    __CCCC_ECONNABORTED__
+#define ECONNRESET      __CCCC_ECONNRESET__
+#define ENOBUFS         __CCCC_ENOBUFS__
+#define EISCONN         __CCCC_EISCONN__
+#define ENOTCONN        __CCCC_ENOTCONN__
+#define ETIMEDOUT       __CCCC_ETIMEDOUT__
+#define ECONNREFUSED    __CCCC_ECONNREFUSED__
+#define ELOOP           __CCCC_ELOOP__
+#define ENAMETOOLONG    __CCCC_ENAMETOOLONG__
+#define EHOSTUNREACH    __CCCC_EHOSTUNREACH__
+#define ENOTEMPTY       __CCCC_ENOTEMPTY__
+#define ENOSYS          __CCCC_ENOSYS__
+#define ECANCELED       __CCCC_ECANCELED__
+#define EIDRM           __CCCC_EIDRM__
+#define ENOMSG          __CCCC_ENOMSG__
+#define EOVERFLOW       __CCCC_EOVERFLOW__
+#define EBADMSG         __CCCC_EBADMSG__
+#define EMULTIHOP       __CCCC_EMULTIHOP__
+#define EILSEQ          __CCCC_EILSEQ__
+#define ENOLINK         __CCCC_ENOLINK__
+#define EPROTO          __CCCC_EPROTO__
+#define ENOLCK          __CCCC_ENOLCK__
+#define EOPNOTSUPP      __CCCC_EOPNOTSUPP__
+#define ENOTRECOVERABLE __CCCC_ENOTRECOVERABLE__
+#define EOWNERDEAD      __CCCC_EOWNERDEAD__
+#define ESTALE          __CCCC_ESTALE__
+#define EDQUOT          __CCCC_EDQUOT__
+#define ETXTBSY         __CCCC_ETXTBSY__
+#define ENOTBLK         __CCCC_ENOTBLK__
 
 #endif /* __ERRNO_H */
