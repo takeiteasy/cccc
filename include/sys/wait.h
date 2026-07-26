@@ -8,6 +8,7 @@
 #endif
 
 #include "signal.h" /* for siginfo_t, waitid()'s 3rd argument */
+#include "sys/resource.h" /* for struct rusage, wait3()/wait4()'s last argument */
 #include "unistd.h"
 
 #define WNOHANG    1
@@ -50,5 +51,11 @@ typedef enum {
 } idtype_t;
 
 extern int waitid(idtype_t idtype, id_t id, siginfo_t *infop, int options);
+
+/* wait3()/wait4() (#747) -- BSD-style wait variants that also fill a
+   struct rusage for the reaped child. Signatures are identical on macOS
+   and Linux. */
+extern pid_t wait3(int *status, int options, struct rusage *rusage);
+extern pid_t wait4(pid_t pid, int *status, int options, struct rusage *rusage);
 
 #endif /* __SYS_WAIT_H */

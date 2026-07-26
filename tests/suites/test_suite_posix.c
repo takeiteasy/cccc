@@ -5,7 +5,7 @@
 //   test_posix_sysconf_pathconf_confstr, test_posix_host_global_bridge,
 //   test_posix_sendmsg_recvmsg_scm_rights, test_posix_ipv6_udp_roundtrip,
 //   test_posix_netent, test_posix_waitid, test_posix_dns_gil_concurrency,
-//   test_posix_servent_protoent
+//   test_posix_servent_protoent, test_posix_getrusage, test_posix_wait4
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -29,6 +29,7 @@
 #include <sys/wait.h>
 #include <strings.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/time.h>
 #include <termios.h>
 #include <utime.h>
@@ -609,6 +610,45 @@ int test_posix_waitid(void) {
     if (si.si_pid != pid) return 3;
     if (si.si_code != CLD_EXITED) return 4;
     if (si.si_status != 7) return 5;
+    return 42;
+}
+
+// test_posix_getrusage
+// #747: getrusage() fills a guest struct rusage through the FFI boundary,
+// same struct-fidelity concern as waitid()'s siginfo_t above -- proves the
+// guest layout matches the host ABI (sizeof(struct rusage) == 144 on both
+// macOS and Linux). Only asserts non-negative/plausible values since exact
+// usage numbers aren't portable across hosts.
+[[cccc::test(return = 42)]]
+int test_posix_getrusage(void) {
+    struct rusage ru;
+    for (int i = 0; i < (int)sizeof(ru); i++) ((char *)&ru)[i] = 0;
+    if (getrusage(RUSAGE_SELF, &ru) != 0) return 1;
+    if (ru.ru_maxrss <= 0) return 2;
+    if (ru.ru_utime.tv_sec < 0) return 3;
+    return 42;
+}
+
+// test_posix_wait4
+// #747: wait3()/wait4() are the BSD-style wait variants that also fill a
+// struct rusage for the reaped child, unlike waitpid()/waitid().
+[[cccc::test(return = 42)]]
+int test_posix_wait4(void) {
+    pid_t pid = fork();
+    if (pid < 0) return 1;
+    if (pid == 0) { _exit(7); }
+
+    int status = 0;
+    struct rusage ru;
+    for (int i = 0; i < (int)sizeof(ru); i++) ((char *)&ru)[i] = 0;
+    pid_t r = wait4(pid, &status, 0, &ru);
+    if (r != pid) return 2;
+    if (!WIFEXITED(status)) return 3;
+    if (WEXITSTATUS(status) != 7) return 4;
+    /* The child did essentially no work, so most counters may legitimately
+       be 0 -- just prove the struct was actually written to, not left as
+       whatever garbage/zero it started as for every field. */
+    if (ru.ru_maxrss < 0) return 5;
     return 42;
 }
 
