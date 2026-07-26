@@ -56,7 +56,11 @@ struct sockaddr {
 #define SO_RCVTIMEO  0x1006
 #define SO_ERROR     0x1007
 #define SO_TYPE      0x1008
-/* macOS has no MSG_NOSIGNAL; use SO_NOSIGPIPE (0x1022) via setsockopt instead. */
+/* SO_NOSIGPIPE (setsockopt-level, suppresses SIGPIPE for the socket's
+   lifetime) predates MSG_NOSIGNAL on macOS and is the idiomatic way to get
+   this behavior, but modern macOS SDKs (verified: MacOSX14/14.5/15/15.5)
+   also define MSG_NOSIGNAL as a real per-call send() flag, so both are
+   provided rather than only the historical one. */
 #define SO_NOSIGPIPE 0x1022
 #else
 #define SOL_SOCKET   1
@@ -157,6 +161,7 @@ struct cmsghdr {
 #define MSG_CTRUNC    0x20
 #define MSG_WAITALL   0x40
 #define MSG_DONTWAIT  0x80
+#define MSG_NOSIGNAL  0x80000
 #else
 #define MSG_OOB       0x1
 #define MSG_PEEK      0x2
