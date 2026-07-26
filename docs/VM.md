@@ -303,9 +303,9 @@ All `F*` opcodes operate on `fregs[]`.  Comparisons write a boolean into an inte
 | `FSTR_F32` | `*(float*)regs[rs] = fregs[rd]` |
 | `FROUND_F32` | `fregs[rd] = (float)fregs[rs]` |
 | `I2F3` | `fregs[rd] = (double)regs[rs]` |
-| `F2I3` | `regs[rd] = (long long)fregs[rs]` |
+| `F2I3` | `regs[rd] = (long long)fregs[rs]`, saturating: NaN → 0, ≥2⁶³ or +Inf → `LLONG_MAX`, <-2⁶³ or -Inf → `LLONG_MIN`, `FE_INVALID` raised on all three |
 | `I2F3_F32` | `fregs[rd] = (float)regs[rs]` |
-| `F2I3_F32` | `regs[rd] = (long long)(float)fregs[rs]` |
+| `F2I3_F32` | `regs[rd] = (long long)(float)fregs[rs]`, same saturating rules as `F2I3` |
 | `FR2R` | Bit-pattern transfer `freg → reg` (f64) |
 | `R2FR` | Bit-pattern transfer `reg → freg` (f64) |
 | `FR2R_F32` | Bit-pattern transfer `freg → reg` (f32) |

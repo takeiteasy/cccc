@@ -1778,25 +1778,27 @@ static inline int op_I2F3_F32_fn(VirtualMachine *vm) {
 }
 
 static inline int op_F2I3_fn(VirtualMachine *vm) {
-    // Float to int: regs[rd] = (long long)fregs[rs]
+    // Float to int: regs[rd] = (long long)fregs[rs], saturating on
+    // NaN/out-of-range with FE_INVALID raised (#775) -- see
+    // cccc_f64_to_i64 in internal.h for why a bare cast is UB here.
     // Format: [F2I3] [rd:8|rs:8|unused:48]
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
     if (rd != REG_ZERO)
-        vm->regs[rd] = (long long)cccc_freg_get_f64(vm, rs);
+        vm->regs[rd] = cccc_f64_to_i64(cccc_freg_get_f64(vm, rs));
     return 0;
 }
 
 static inline int op_F2I3_F32_fn(VirtualMachine *vm) {
-    // Float to int: regs[rd] = (long long)fregs[rs]
+    // Float to int: regs[rd] = (long long)fregs[rs], saturating (#775).
     long long operands = cc_read_word(vm);
     int rd, rs;
     DECODE_RR(operands, rd, rs);
 
     if (rd != REG_ZERO)
-        vm->regs[rd] = (long long)cccc_freg_get_f32(vm, rs);
+        vm->regs[rd] = cccc_f32_to_i64(cccc_freg_get_f32(vm, rs));
     return 0;
 }
 

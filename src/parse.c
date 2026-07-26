@@ -4646,7 +4646,13 @@ static int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
     add_type(vm, node);
 
     if (is_flonum(node->ty))
-        return eval_double(vm, node);
+        // A bare "return eval_double(...)" here implicitly truncates a
+        // double to int64_t via a plain C cast -- UB in the host
+        // compiler for NaN/out-of-range values, same as F2I3/F2I3_F32 in
+        // ops.c (#775). This fires when a float/double-typed constant
+        // subexpression needs folding into an integer-typed constant
+        // context (e.g. under an outer ND_CAST to an integer type).
+        return cccc_f64_to_i64(eval_double(vm, node));
 
     switch (node->kind) {
     case ND_ADD:

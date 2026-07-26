@@ -25,6 +25,8 @@
 #include "cccc.h"
 #include "driver.h"
 
+#include <fenv.h> // for feraiseexcept(FE_INVALID) in cccc_f64_to_i64/cccc_f32_to_i64 (#775)
+
 #ifndef __has_include
 #define __has_include(x) 0
 #endif
@@ -248,6 +250,58 @@ static inline double cccc_freg_get_f64(VirtualMachine *vm, int reg) {
 
 static inline float cccc_freg_get_f32(VirtualMachine *vm, int reg) {
     return (float)vm->fregs[reg].f64; /* narrow on read */
+}
+
+// Defined float->integer conversion for F2I3/F2I3_F32 (#775) and the
+// matching compile-time constant fold in parse.c's eval2(). A bare
+// "(long long)double_value" cast is undefined behavior in the *host* C
+// compiler that built cccc whenever the source is NaN, +-infinity, or
+// out of range for long long -- the guest would then observe whatever
+// the host CPU's convert instruction happens to do (e.g. a saturated
+// value on aarch64's FCVTZS, but LLONG_MIN on x86's cvttsd2si on
+// overflow), which is neither portable nor IEEE-754/C23-Annex-F
+// conformant. Saturating matches what this project's primary
+// development platform (aarch64) already does for free, and per C23
+// Annex F.4 is a legitimate choice for "invalid" conversions alongside
+// raising FE_INVALID:
+//   NaN                       -> 0
+//   x >= 2^63 (incl. +Inf)    -> LLONG_MAX
+//   x <  -2^63 (incl. -Inf)   -> LLONG_MIN
+//   otherwise                 -> the plain truncating cast
+// The bounds are written as the exact powers of two (both exactly
+// representable in a double/float), not as "(double)LLONG_MAX": that
+// value rounds *up* to 2^63, so a "x <= (double)LLONG_MAX" guard would
+// let x == 2^63 slip through and land back in UB.
+static inline long long cccc_f64_to_i64(double x) {
+    if (isnan(x)) {
+        feraiseexcept(FE_INVALID);
+        return 0;
+    }
+    if (x >= 9223372036854775808.0) { // 2^63
+        feraiseexcept(FE_INVALID);
+        return LLONG_MAX;
+    }
+    if (x < -9223372036854775808.0) { // -2^63
+        feraiseexcept(FE_INVALID);
+        return LLONG_MIN;
+    }
+    return (long long)x;
+}
+
+static inline long long cccc_f32_to_i64(float x) {
+    if (isnan(x)) {
+        feraiseexcept(FE_INVALID);
+        return 0;
+    }
+    if (x >= 9223372036854775808.0f) { // 2^63
+        feraiseexcept(FE_INVALID);
+        return LLONG_MAX;
+    }
+    if (x < -9223372036854775808.0f) { // -2^63
+        feraiseexcept(FE_INVALID);
+        return LLONG_MIN;
+    }
+    return (long long)x;
 }
 
 static inline long long cccc_freg_raw_f64(VirtualMachine *vm, int reg) {
