@@ -279,6 +279,97 @@ static long long wrap_pause_gil(void) {
 }
 
 // ---------------------------------------------------------------------------
+// DNS/NSS lookup wrappers (#748) — release the GIL while the call may block
+//
+// gethostbyname/gethostbyaddr/getaddrinfo/getnameinfo/getnetbyname/
+// getnetbyaddr were previously direct (non-GIL-releasing) FFI calls, even
+// though real DNS/NSS lookups can block for seconds. Under the VM's
+// single-GIL threading model this stalled every other VM thread for the
+// duration. Now they follow the same posix_save_and_release_gil /
+// posix_acquire_and_restore_gil pattern as recv/send/waitpid/waitid.
+//
+// Caveat: gethostbyname/gethostbyaddr/getnetbyname/getnetbyaddr return
+// pointers into static, non-reentrant host storage. Releasing the GIL means
+// two VM threads can now race on that shared buffer where the GIL previously
+// serialized them -- inherent to this POSIX API (the _r variants exist for
+// exactly this reason); the guest-visible symptom would be one thread
+// reading a result that another thread's later call has already overwritten,
+// not a hang or corruption of unrelated memory. getaddrinfo/getnameinfo are
+// reentrant and unaffected.
+static long long wrap_gethostbyname_gil(long long name) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)gethostbyname((const char *)name);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    struct hostent *r = gethostbyname((const char *)name);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_gethostbyaddr_gil(long long addr, long long len, long long type) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)gethostbyaddr((const void *)addr, (socklen_t)len, (int)type);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    struct hostent *r = gethostbyaddr((const void *)addr, (socklen_t)len, (int)type);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_getaddrinfo_gil(long long node, long long service, long long hints, long long res) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)getaddrinfo((const char *)node, (const char *)service,
+                                       (const struct addrinfo *)hints, (struct addrinfo **)res);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    int r = getaddrinfo((const char *)node, (const char *)service,
+                         (const struct addrinfo *)hints, (struct addrinfo **)res);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_getnameinfo_gil(long long addr, long long addrlen, long long host, long long hostlen,
+                                       long long serv, long long servlen, long long flags) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)getnameinfo((const struct sockaddr *)addr, (socklen_t)addrlen,
+                                       (char *)host, (socklen_t)hostlen,
+                                       (char *)serv, (socklen_t)servlen, (int)flags);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    int r = getnameinfo((const struct sockaddr *)addr, (socklen_t)addrlen,
+                         (char *)host, (socklen_t)hostlen,
+                         (char *)serv, (socklen_t)servlen, (int)flags);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_getnetbyname_gil(long long name) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)getnetbyname((const char *)name);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    struct netent *r = getnetbyname((const char *)name);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_getnetbyaddr_gil(long long net, long long type) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)getnetbyaddr((uint32_t)net, (int)type);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    struct netent *r = getnetbyaddr((uint32_t)net, (int)type);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+// ---------------------------------------------------------------------------
 // Non-blocking wrappers (intentionally keep the GIL — fast, no I/O wait)
 // ---------------------------------------------------------------------------
 
@@ -303,7 +394,6 @@ static long long wrap_creat(const char *path, long long mode) {
 // execv/execve/execl/execlp/execle/execvp (exec replaces the process),
 // mmap/munmap/mprotect/msync/posix_madvise (kernel operations, not blocking),
 // socket/bind/listen/shutdown/setsockopt/getsockname (non-blocking control ops),
-// gethostbyname/getaddrinfo (may block — future work to add GIL release here),
 // opendir/readdir/closedir, tcgetattr/tcsetattr, getpwuid/getpwnam/getgrgid/getgrnam,
 // regcomp/regexec/regerror/regfree/glob/globfree (CPU-bound, no I/O wait),
 // string/network byte-order helpers.
@@ -666,6 +756,13 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "usleep",  (void*)wrap_usleep_gil,  1, 0);
     cc_register_cfunc(vm, "nanosleep",(void*)wrap_nanosleep_gil, 2, 0);
     cc_register_cfunc(vm, "pause",   (void*)wrap_pause_gil,   0, 0);
+    // DNS/NSS lookups (#748) — real resolver calls can block for seconds
+    cc_register_cfunc(vm, "gethostbyname",(void*)wrap_gethostbyname_gil, 1, 0);
+    cc_register_cfunc(vm, "gethostbyaddr",(void*)wrap_gethostbyaddr_gil, 3, 0);
+    cc_register_cfunc(vm, "getaddrinfo", (void*)wrap_getaddrinfo_gil,    4, 0);
+    cc_register_cfunc(vm, "getnameinfo", (void*)wrap_getnameinfo_gil,    7, 0);
+    cc_register_cfunc(vm, "getnetbyname",(void*)wrap_getnetbyname_gil,   1, 0);
+    cc_register_cfunc(vm, "getnetbyaddr",(void*)wrap_getnetbyaddr_gil,   2, 0);
 
     // Non-blocking / fast — intentionally keep the GIL (see comment above)
     cc_register_cfunc(vm, "close",   (void*)wrap_close,  1, 0);
@@ -830,13 +927,7 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "getpeername", (void*)getpeername, 3, 0);
     cc_register_cfunc(vm, "sockatmark",  (void*)sockatmark,  1, 0);
     cc_register_cfunc(vm, "shutdown",    (void*)shutdown,    2, 0);
-    cc_register_cfunc(vm, "gethostbyname",(void*)gethostbyname, 1, 0);
-    cc_register_cfunc(vm, "gethostbyaddr",(void*)gethostbyaddr, 3, 0);
-    cc_register_cfunc(vm, "getaddrinfo", (void*)getaddrinfo,    4, 0);
     cc_register_cfunc(vm, "freeaddrinfo",(void*)wrap_freeaddrinfo, 1, 0);
-    cc_register_cfunc(vm, "getnameinfo", (void*)getnameinfo,    7, 0);
-    cc_register_cfunc(vm, "getnetbyname",(void*)getnetbyname,   1, 0);
-    cc_register_cfunc(vm, "getnetbyaddr",(void*)getnetbyaddr,   2, 0);
     cc_register_cfunc(vm, "setnetent",   (void*)setnetent,      1, 0);
     cc_register_cfunc(vm, "endnetent",   (void*)endnetent,      0, 0);
 

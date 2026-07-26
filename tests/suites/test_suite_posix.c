@@ -4,7 +4,7 @@
 //   test_glob_header, test_quick_exit, test_posix_sys_wait,
 //   test_posix_sysconf_pathconf_confstr, test_posix_host_global_bridge,
 //   test_posix_sendmsg_recvmsg_scm_rights, test_posix_ipv6_udp_roundtrip,
-//   test_posix_netent, test_posix_waitid
+//   test_posix_netent, test_posix_waitid, test_posix_dns_gil_concurrency
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -38,6 +38,7 @@
 #include <errno.h>
 #include <getopt.h>
 #include <signal.h>
+#include <pthread.h>
 
 // [from test_posix_extra_ffi]
 // Regression test for #590: additional POSIX FFI functions registered for the
@@ -311,6 +312,46 @@ int test_posix_netent(void) {
     if (getnetbyname("cccc-nonexistent-network-name")) return 5;
 
     endnetent();
+    return 42;
+}
+
+// test_posix_dns_gil_concurrency
+// #748: gethostbyname/getaddrinfo/getnetbyname etc. used to be direct
+// (non-GIL-releasing) FFI calls, so a real DNS/NSS lookup could stall every
+// other VM thread for as long as it blocked. Now they release the GIL like
+// recv/send/waitpid/waitid do. This doesn't assert timing (that's
+// network-dependent and was verified by hand) -- it proves the regression-
+// prone part: two threads hammering the now-GIL-releasing lookups
+// concurrently don't deadlock, corrupt the ExecState save/restore, or
+// return wrong results.
+static void *dns_gil_worker(void *arg) {
+    int iterations = *(int *)arg;
+    for (int i = 0; i < iterations; i++) {
+        struct hostent *he = gethostbyname("localhost");
+        if (!he || he->h_addrtype != AF_INET) return (void *)1;
+
+        struct addrinfo hints, *res = 0;
+        for (int j = 0; j < (int)sizeof(hints); j++) ((char *)&hints)[j] = 0;
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        if (getaddrinfo("127.0.0.1", "80", &hints, &res) != 0 || !res) return (void *)2;
+        freeaddrinfo(res);
+    }
+    return (void *)0;
+}
+
+[[cccc::test(return = 42)]]
+int test_posix_dns_gil_concurrency(void) {
+    pthread_t t1, t2;
+    int n = 20;
+    if (pthread_create(&t1, 0, dns_gil_worker, &n) != 0) return 1;
+    if (pthread_create(&t2, 0, dns_gil_worker, &n) != 0) return 2;
+
+    void *r1 = 0, *r2 = 0;
+    if (pthread_join(t1, &r1) != 0) return 3;
+    if (pthread_join(t2, &r2) != 0) return 4;
+    if (r1 != 0) return 5;
+    if (r2 != 0) return 6;
     return 42;
 }
 
