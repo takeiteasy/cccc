@@ -11,7 +11,7 @@
 //   test_posix_sigaction_siginfo, test_posix_sigaction_flags,
 //   test_posix_ipv6_multicast_roundtrip,
 //   test_posix_rlimit_priority, test_posix_uname, test_posix_times,
-//   test_posix_tar_cpio
+//   test_posix_tar_cpio, test_posix_syslog
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -53,6 +53,8 @@
 #include <sys/times.h>
 #include <tar.h>
 #include <cpio.h>
+#include <syslog.h>
+#include <stdarg.h>
 
 // [from test_posix_extra_ffi]
 // Regression test for #590: additional POSIX FFI functions registered for the
@@ -1913,6 +1915,38 @@ int test_posix_tar_cpio(void) {
     if ((C_IRUSR | C_IWUSR | C_IXUSR) != 000700) return 7;
     if (C_ISDIR != 040000) return 8;
     if (C_ISREG != 0100000) return 9;
+    return 42;
+}
+
+// test_posix_syslog
+// #803: openlog/syslog/setlogmask/closelog, plus vsyslog forwarding a
+// captured va_list through ffi_prep_cif_var (same mechanism as the printf
+// v*-family, #407). syslog()'s output goes to the system log, not somewhere
+// this test can capture portably, so this only asserts no crash and that
+// setlogmask round-trips the previous mask correctly.
+static void posix_syslog_va_helper(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vsyslog(LOG_INFO, fmt, ap);
+    va_end(ap);
+}
+
+[[cccc::test(return = 42)]]
+int test_posix_syslog(void) {
+    openlog("cccc-test", LOG_PID | LOG_NDELAY, LOG_USER);
+
+    int prev = setlogmask(LOG_UPTO(LOG_INFO));
+    int prev2 = setlogmask(prev);
+    if (prev2 != LOG_UPTO(LOG_INFO)) return 1;
+
+    syslog(LOG_INFO, "cccc syslog test: %s %d %.2f", "ok", 7, 2.5);
+
+    errno = ENOENT;
+    syslog(LOG_ERR, "cccc syslog %%m test: %m");
+
+    posix_syslog_va_helper("cccc vsyslog test: %s %d %.2f", "ok", 9, 1.5);
+
+    closelog();
     return 42;
 }
 

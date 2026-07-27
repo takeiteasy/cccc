@@ -38,6 +38,7 @@
 #include <sys/uio.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
+#include <syslog.h>
 #include <termios.h>
 #include <unistd.h>
 #include <utime.h>
@@ -1106,6 +1107,86 @@ static long long wrap_fstatfs(long long fd, long long buf) {
 }
 
 // ---------------------------------------------------------------------------
+// vsyslog() (#803) -- forwards a captured cccc va_list to the host's real
+// variadic syslog() via ffi_prep_cif_var, same technique as
+// format_printf.c's wrap_cccc_vprintf family (#407). Unlike a plain printf
+// forward, syslog's "%m" conversion (strerror(errno)) consumes zero
+// variadic args -- the shared cccc_parse_printf_fmt classifies unknown
+// conversions as taking one INT arg, which would misalign extraction here,
+// so this uses its own parser that special-cases 'm' as a no-arg literal.
+// va_ffi_helper.h's __attribute__((unused)) markers rely on __attribute__
+// actually expanding; internal.h (included above) #defines __attribute__(x)
+// to nothing for this TU, so cccc_parse_printf_fmt/cccc_parse_scanf_fmt
+// (unused here -- this file only needs cccc_va_extract/cccc_ffi_call_variadic
+// and its own syslog-specific parser below) would otherwise warn.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#include "va_ffi_helper.h"
+#pragma GCC diagnostic pop
+
+static int cccc_parse_syslog_fmt(const char *fmt, int *types, int max_args) {
+    int n = 0;
+    for (const char *p = fmt; *p; p++) {
+        if (*p != '%')
+            continue;
+        p++;
+        if (!*p || *p == '%' || *p == 'm')
+            continue;
+
+        while (*p == '-' || *p == '+' || *p == ' ' || *p == '#' || *p == '0')
+            p++;
+        if (!*p) break;
+
+        if (*p == '*') {
+            if (n < max_args) types[n++] = CCCC_VAARG_INT;
+            p++;
+        } else {
+            while (*p >= '0' && *p <= '9') p++;
+        }
+        if (!*p) break;
+
+        if (*p == '.') {
+            p++;
+            if (*p == '*') {
+                if (n < max_args) types[n++] = CCCC_VAARG_INT;
+                p++;
+            } else {
+                while (*p >= '0' && *p <= '9') p++;
+            }
+        }
+        if (!*p) break;
+
+        while (*p == 'h' || *p == 'l' || *p == 'j' || *p == 'z' ||
+               *p == 't' || *p == 'L')
+            p++;
+        if (!*p) break;
+
+        if (n < max_args) {
+            switch (*p) {
+            case 'f': case 'F': case 'e': case 'E':
+            case 'g': case 'G': case 'a': case 'A':
+                types[n++] = CCCC_VAARG_DOUBLE;
+                break;
+            default:
+                types[n++] = CCCC_VAARG_INT;
+                break;
+            }
+        }
+    }
+    return n;
+}
+
+static long long wrap_vsyslog(long long priority, long long fmt, long long va_ptr) {
+    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
+    int types[CCCC_VA_MAX_ARGS];
+    int n = cccc_parse_syslog_fmt((const char *)fmt, types, CCCC_VA_MAX_ARGS);
+    int64_t vals[CCCC_VA_MAX_ARGS];
+    cccc_va_extract(va, types, n, vals);
+    int64_t fixed[] = { (int64_t)priority, (int64_t)fmt };
+    return cccc_ffi_call_variadic((void *)syslog, 2, fixed, n, types, vals);
+}
+
+// ---------------------------------------------------------------------------
 // Host-global accessors (#736)
 //
 // errno and getopt's optarg/optind/opterr/optopt are declared in
@@ -1363,6 +1444,20 @@ void register_posix_functions(VirtualMachine *vm) {
     // local, no GIL release needed.
     cc_register_cfunc(vm, "uname", (void*)uname, 1, 0);
     cc_register_cfunc(vm, "times", (void*)times, 1, 0);
+
+    // syslog.h (#803) -- LOG_* constants are identical on both platforms so
+    // the header needs no guards. syslog() is registered as a real variadic
+    // FFI function (not a va_list-forwarding wrapper): codegen computes
+    // double_arg_mask per call-site from the caller's static argument types
+    // (src/codegen.c:5405-5415), so this correctly threads through %f
+    // arguments the same way a direct printf() call does -- no format-string
+    // parsing required here, unlike the vprintf-family wrappers, which only
+    // exist because a captured va_list has already erased those static types.
+    cc_register_cfunc(vm, "openlog",    (void*)openlog,    3, 0);
+    cc_register_cfunc(vm, "closelog",   (void*)closelog,   0, 0);
+    cc_register_cfunc(vm, "setlogmask", (void*)setlogmask, 1, 0);
+    cc_register_variadic_cfunc(vm, "syslog", (void*)syslog, 2, 0);
+    cc_register_cfunc(vm, "vsyslog",    (void*)wrap_vsyslog, 3, 0);
 
     // net/if.h (#788) -- interface name<->index resolution, needed to target
     // a specific interface (e.g. loopback) for IPV6_MULTICAST_IF/JOIN_GROUP
