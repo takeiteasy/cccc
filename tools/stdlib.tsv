@@ -19,6 +19,7 @@ poll.h	register_posix_functions
 pthread.h	register_pthread_functions
 pwd.h	register_posix_functions
 regex.h	register_posix_functions
+sched.h	register_posix_functions
 signal.h	register_signal_functions
 stdio.h	register_stdio_functions
 stdlib.h	register_stdlib_functions

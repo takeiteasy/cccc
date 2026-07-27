@@ -12,7 +12,7 @@
 //   test_posix_ipv6_multicast_roundtrip,
 //   test_posix_rlimit_priority, test_posix_uname, test_posix_times,
 //   test_posix_tar_cpio, test_posix_syslog, test_posix_select,
-//   test_posix_statvfs
+//   test_posix_statvfs, test_posix_sched
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -56,6 +56,7 @@
 #include <cpio.h>
 #include <syslog.h>
 #include <stdarg.h>
+#include <sched.h>
 #include <sys/select.h>
 #include <sys/statvfs.h>
 
@@ -2030,6 +2031,29 @@ int test_posix_statvfs(void) {
     if (fstatvfs(fd, &sv2) != 0) return 6;
     close(fd);
     if (sv2.f_bsize != sv.f_bsize) return 7;
+
+    return 42;
+}
+
+// test_posix_sched
+// #800: sched_yield() succeeds; SCHED_OTHER's priority range is sane;
+// sched_getscheduler(0) returns a canonical policy on Linux and -1/ENOSYS
+// on macOS, where the real API doesn't exist (the test accepts either,
+// guarded by __linux__ since it's inherently platform-dependent).
+[[cccc::test(return = 42)]]
+int test_posix_sched(void) {
+    if (sched_yield() != 0) return 1;
+
+    int max = sched_get_priority_max(SCHED_OTHER);
+    int min = sched_get_priority_min(SCHED_OTHER);
+    if (max < min) return 2;
+
+    int r = sched_getscheduler(0);
+#ifdef __linux__
+    if (r < 0) return 3;
+#else
+    if (r != -1 || errno != ENOSYS) return 4;
+#endif
 
     return 42;
 }

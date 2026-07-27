@@ -25,6 +25,7 @@
 #include <pthread.h>
 #include <pwd.h>
 #include <regex.h>
+#include <sched.h>
 #include <signal.h>
 #include <string.h>
 #include <strings.h>
@@ -1216,6 +1217,114 @@ static long long wrap_fstatvfs(long long fd, long long buf) {
     return rc;
 }
 
+// sched.h (#800) -- SCHED_OTHER/FIFO/RR genuinely disagree between hosts
+// (macOS: 1/4/2, Linux: 0/1/2/3/5, verified against real headers), so the
+// guest sees CCCC-canonical numbering (include/sched.h) and these wrappers
+// translate to/from the host's real values. struct sched_param is also
+// host-divergent (8 bytes on macOS incl. a libpthread-internal __opaque
+// tail, 4 bytes on Linux) -- setparam/getparam marshal through a host-sized
+// local rather than handing the guest pointer to the host directly.
+// macOS's real <sched.h> declares only sched_yield/get_priority_min/max --
+// no process-scheduling API at all -- so setparam/getparam/setscheduler/
+// getscheduler/rr_get_interval are stubbed there to -1/ENOSYS, letting
+// portable guest code still compile and link.
+static int guest_to_host_sched_policy(int guest_policy) {
+    switch (guest_policy) {
+    case 0: return SCHED_OTHER; // guest SCHED_OTHER
+    case 1: return SCHED_FIFO;  // guest SCHED_FIFO
+    case 2: return SCHED_RR;    // guest SCHED_RR
+#ifdef __linux__
+    case 3: return SCHED_BATCH; // guest SCHED_BATCH
+    case 5: return SCHED_IDLE;  // guest SCHED_IDLE
+#endif
+    default: return guest_policy;
+    }
+}
+
+struct cccc_guest_sched_param {
+    int sched_priority;
+};
+
+static long long wrap_sched_get_priority_min(long long policy) {
+    return (long long)sched_get_priority_min(guest_to_host_sched_policy((int)policy));
+}
+
+static long long wrap_sched_get_priority_max(long long policy) {
+    return (long long)sched_get_priority_max(guest_to_host_sched_policy((int)policy));
+}
+
+#ifdef __linux__
+static long long wrap_sched_setparam(long long pid, long long param) {
+    struct sched_param host_param = {0};
+    if (param) host_param.sched_priority = ((struct cccc_guest_sched_param *)(void *)param)->sched_priority;
+    return (long long)sched_setparam((pid_t)pid, &host_param);
+}
+
+static long long wrap_sched_getparam(long long pid, long long param) {
+    struct sched_param host_param;
+    int rc = sched_getparam((pid_t)pid, &host_param);
+    if (rc == 0 && param)
+        ((struct cccc_guest_sched_param *)(void *)param)->sched_priority = host_param.sched_priority;
+    return rc;
+}
+
+static long long wrap_sched_setscheduler(long long pid, long long policy, long long param) {
+    struct sched_param host_param = {0};
+    if (param) host_param.sched_priority = ((struct cccc_guest_sched_param *)(void *)param)->sched_priority;
+    int rc = sched_setscheduler((pid_t)pid, guest_to_host_sched_policy((int)policy), &host_param);
+    return rc;
+}
+
+static int host_to_guest_sched_policy(int host_policy) {
+    if (host_policy == SCHED_OTHER) return 0;
+    if (host_policy == SCHED_FIFO)  return 1;
+    if (host_policy == SCHED_RR)    return 2;
+    if (host_policy == SCHED_BATCH) return 3;
+    if (host_policy == SCHED_IDLE)  return 5;
+    return host_policy;
+}
+
+static long long wrap_sched_getscheduler(long long pid) {
+    int rc = sched_getscheduler((pid_t)pid);
+    if (rc < 0) return rc;
+    return host_to_guest_sched_policy(rc);
+}
+
+static long long wrap_sched_rr_get_interval(long long pid, long long interval) {
+    return (long long)sched_rr_get_interval((pid_t)pid, (struct timespec *)interval);
+}
+#else
+static long long wrap_sched_setparam(long long pid, long long param) {
+    (void)pid; (void)param;
+    errno = ENOSYS;
+    return -1;
+}
+
+static long long wrap_sched_getparam(long long pid, long long param) {
+    (void)pid; (void)param;
+    errno = ENOSYS;
+    return -1;
+}
+
+static long long wrap_sched_setscheduler(long long pid, long long policy, long long param) {
+    (void)pid; (void)policy; (void)param;
+    errno = ENOSYS;
+    return -1;
+}
+
+static long long wrap_sched_getscheduler(long long pid) {
+    (void)pid;
+    errno = ENOSYS;
+    return -1;
+}
+
+static long long wrap_sched_rr_get_interval(long long pid, long long interval) {
+    (void)pid; (void)interval;
+    errno = ENOSYS;
+    return -1;
+}
+#endif
+
 // ---------------------------------------------------------------------------
 // vsyslog() (#803) -- forwards a captured cccc va_list to the host's real
 // variadic syslog() via ffi_prep_cif_var, same technique as
@@ -1437,6 +1546,14 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "fstatfs", (void*)wrap_fstatfs, 2, 0);
     cc_register_cfunc(vm, "statvfs",  (void*)wrap_statvfs,  2, 0);
     cc_register_cfunc(vm, "fstatvfs", (void*)wrap_fstatvfs, 2, 0);
+    cc_register_cfunc(vm, "sched_yield", (void*)sched_yield, 0, 0);
+    cc_register_cfunc(vm, "sched_get_priority_min", (void*)wrap_sched_get_priority_min, 1, 0);
+    cc_register_cfunc(vm, "sched_get_priority_max", (void*)wrap_sched_get_priority_max, 1, 0);
+    cc_register_cfunc(vm, "sched_setparam", (void*)wrap_sched_setparam, 2, 0);
+    cc_register_cfunc(vm, "sched_getparam", (void*)wrap_sched_getparam, 2, 0);
+    cc_register_cfunc(vm, "sched_setscheduler", (void*)wrap_sched_setscheduler, 3, 0);
+    cc_register_cfunc(vm, "sched_getscheduler", (void*)wrap_sched_getscheduler, 1, 0);
+    cc_register_cfunc(vm, "sched_rr_get_interval", (void*)wrap_sched_rr_get_interval, 2, 0);
 
     cc_register_cfunc(vm, "strcasecmp",  (void*)strcasecmp,  2, 0);
     cc_register_cfunc(vm, "strncasecmp", (void*)strncasecmp, 3, 0);
