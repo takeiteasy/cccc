@@ -12,7 +12,7 @@
 //   test_posix_ipv6_multicast_roundtrip,
 //   test_posix_rlimit_priority, test_posix_uname, test_posix_times,
 //   test_posix_tar_cpio, test_posix_syslog, test_posix_select,
-//   test_posix_statvfs, test_posix_sched
+//   test_posix_statvfs, test_posix_sched, test_posix_locale
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -57,6 +57,7 @@
 #include <syslog.h>
 #include <stdarg.h>
 #include <sched.h>
+#include <locale.h>
 #include <sys/select.h>
 #include <sys/statvfs.h>
 
@@ -2055,6 +2056,21 @@ int test_posix_sched(void) {
     if (r != -1 || errno != ENOSYS) return 4;
 #endif
 
+    return 42;
+}
+
+// test_posix_locale
+// Fix for #819: LC_* categories previously used macOS's numbering
+// unconditionally, so setlocale() addressed the wrong category on Linux
+// (LC_ALL(0) actually meant LC_CTYPE there). setlocale(LC_MONETARY, "C")
+// regresses today on Linux without the fix (it silently sets
+// LC_COLLATE's locale instead), and setlocale(LC_ALL, NULL) must return
+// non-NULL on both platforms.
+[[cccc::test(return = 42)]]
+int test_posix_locale(void) {
+    if (setlocale(LC_MONETARY, "C") == 0) return 1;
+    if (setlocale(LC_ALL, 0) == 0) return 2;
+    if (setlocale(LC_MESSAGES, "C") == 0) return 3;
     return 42;
 }
 

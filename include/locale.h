@@ -1,4 +1,14 @@
-/* locale.h - localization declarations for CCCC */
+/* locale.h - localization declarations for CCCC
+ *
+ * LC_* numbering is CCCC's own canonical numbering, not the host's --
+ * macOS and glibc disagree entirely (macOS: ALL=0/COLLATE=1/CTYPE=2/
+ * MONETARY=3/NUMERIC=4/TIME=5; glibc: CTYPE=0/NUMERIC=1/TIME=2/COLLATE=3/
+ * MONETARY=4/MESSAGES=5/ALL=6). wrap_setlocale (src/stdlib/locale.c)
+ * translates this canonical numbering to the host's real values before
+ * calling the host setlocale(), the same pattern used for _SC_, _PC_,
+ * and _CS_ constants in src/stdlib/posix.c -- this keeps compiled .c4
+ * bytecode portable across hosts.
+ */
 
 #ifndef __LOCALE_H
 #define __LOCALE_H
@@ -9,6 +19,7 @@
 #define LC_MONETARY 3
 #define LC_NUMERIC 4
 #define LC_TIME 5
+#define LC_MESSAGES 6
 
 struct lconv {
     char *decimal_point;
