@@ -9,6 +9,7 @@ fnmatch.h	register_posix_functions
 getopt.h	register_posix_functions
 glob.h	register_posix_functions
 grp.h	register_posix_functions
+iconv.h	register_posix_functions
 libgen.h	register_posix_functions
 locale.h	register_locale_functions
 math.h	register_math_functions

@@ -25,6 +25,7 @@
 #include <pthread.h>
 #include <pwd.h>
 #include <regex.h>
+#include <iconv.h>
 #include <sched.h>
 #include <spawn.h>
 #ifdef __linux__
@@ -1756,6 +1757,9 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "posix_spawn_file_actions_adddup2", (void*)wrap_posix_spawn_file_actions_adddup2, 3, 0);
     cc_register_cfunc(vm, "posix_spawn", (void*)wrap_posix_spawn_gil, 6, 0);
     cc_register_cfunc(vm, "posix_spawnp", (void*)wrap_posix_spawnp_gil, 6, 0);
+    cc_register_cfunc(vm, "iconv_open",  (void*)iconv_open,  2, 0);
+    cc_register_cfunc(vm, "iconv",       (void*)iconv,       5, 0);
+    cc_register_cfunc(vm, "iconv_close", (void*)iconv_close, 1, 0);
 
     cc_register_cfunc(vm, "strcasecmp",  (void*)strcasecmp,  2, 0);
     cc_register_cfunc(vm, "strncasecmp", (void*)strncasecmp, 3, 0);

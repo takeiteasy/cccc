@@ -77,6 +77,11 @@ else
 	UNAME_S := $(shell uname -s)
 	ifeq ($(UNAME_S),Darwin)
 		DYLIB := .dylib
+		# iconv() is declared in libSystem's <iconv.h> but the symbols only
+		# resolve at link time via libiconv (verified: link fails without
+		# it, succeeds with it). glibc ships iconv in libc itself, so no
+		# extra flag is needed on Linux.
+		LDFLAGS += -liconv
 	else
 		DYLIB := .so
 	endif

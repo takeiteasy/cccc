@@ -18,6 +18,7 @@ static char __builtin_fnmatch_h[646] = "/* fnmatch.h - filename pattern matching
 static char __builtin_getopt_h[1159] = "/* getopt.h - command-line option parsing for CCCC */\n\n#ifndef __GETOPT_H\n#define __GETOPT_H\n\n#ifdef _WIN32\n#error \"<getopt.h> is only available on POSIX targets in CCCC\"\n#endif\n\n/* These alias the host's real getopt() state (via accessor functions, same\n * pattern as stdin/stdout/stderr in stdio.h) so they reflect what the host's\n * getopt()/getopt_long() actually parsed instead of being inert, always-zero\n * guest globals (#736). */\nextern char **__cccc_optarg_ptr(void);\nextern int *__cccc_optind_ptr(void);\nextern int *__cccc_opterr_ptr(void);\nextern int *__cccc_optopt_ptr(void);\n#define optarg (*__cccc_optarg_ptr())\n#define optind (*__cccc_optind_ptr())\n#define opterr (*__cccc_opterr_ptr())\n#define optopt (*__cccc_optopt_ptr())\n\n#define no_argument       0\n#define required_argument 1\n#define optional_argument 2\n\nstruct option {\n    const char *name;\n    int has_arg;\n    int *flag;\n    int val;\n};\n\nextern int getopt(int argc, char *const argv[], const char *optstring);\nextern int getopt_long(int argc, char *const argv[], const char *optstring,\n                       const struct option *longopts, int *longindex);\n\n#endif /* __GETOPT_H */\n";
 static char __builtin_glob_h[1595] = "/* glob.h - pathname pattern matching for CCCC */\n\n#ifndef __GLOB_H\n#define __GLOB_H\n\n#ifdef _WIN32\n#error \"<glob.h> is only available on POSIX targets in CCCC\"\n#endif\n\n#include \"stddef.h\"\n\n#ifdef __APPLE__\ntypedef struct {\n    size_t gl_pathc;\n    size_t gl_matchc;\n    size_t gl_offs;\n    int gl_flags;\n    char **gl_pathv;\n    void **gl_statv;\n    void **gl_errfunc;\n    char **gl_matchv;\n    char *gl_lstat;\n    char *gl_stat;\n} glob_t;\n#else\nstruct dirent;\ntypedef struct {\n    size_t gl_pathc;\n    char **gl_pathv;\n    size_t gl_offs;\n    int gl_flags;\n    void (*gl_closedir)(void *);\n    struct dirent *(*gl_readdir)(void *);\n    void *(*gl_opendir)(const char *);\n    int (*gl_lstat)(const char *, void *);\n    int (*gl_stat)(const char *, void *);\n} glob_t;\n#endif\n\n#ifdef __APPLE__\n#define GLOB_APPEND   0x0001\n#define GLOB_DOOFFS   0x0002\n#define GLOB_ERR      0x0004\n#define GLOB_MARK     0x0008\n#define GLOB_NOCHECK  0x0010\n#define GLOB_NOSORT   0x0020\n#define GLOB_NOESCAPE 0x2000\n#else\n#define GLOB_ERR      0x0001\n#define GLOB_MARK     0x0002\n#define GLOB_NOSORT   0x0004\n#define GLOB_DOOFFS   0x0008\n#define GLOB_NOCHECK  0x0010\n#define GLOB_APPEND   0x0020\n#define GLOB_NOESCAPE 0x0040\n#endif\n\n#ifdef __APPLE__\n#define GLOB_NOSPACE (-1)\n#define GLOB_ABORTED (-2)\n#define GLOB_NOMATCH (-3)\n#else\n#define GLOB_NOSPACE 1\n#define GLOB_ABORTED 2\n#define GLOB_NOMATCH 3\n#endif\n\nextern int glob(const char *pattern, int flags,\n                int (*errfunc)(const char *epath, int eerrno),\n                glob_t *pglob);\nextern void globfree(glob_t *pglob);\n\n#endif /* __GLOB_H */\n";
 static char __builtin_grp_h[676] = "/* grp.h - group database declarations for CCCC */\n\n#ifndef __GRP_H\n#define __GRP_H\n\n#ifdef _WIN32\n#error \"<grp.h> is only available on POSIX targets in CCCC\"\n#endif\n\n#include \"stddef.h\"\n#include \"sys/types.h\"\n\nstruct group {\n    char *gr_name;\n    char *gr_passwd;\n    gid_t gr_gid;\n    char **gr_mem;\n};\n\nextern struct group *getgrgid(gid_t gid);\nextern struct group *getgrnam(const char *name);\nextern int getgrgid_r(gid_t gid, struct group *grp, char *buf,\n                      size_t buflen, struct group **result);\nextern int getgrnam_r(const char *name, struct group *grp, char *buf,\n                      size_t buflen, struct group **result);\n\n#endif /* __GRP_H */\n";
+static char __builtin_iconv_h[1033] = "/* iconv.h - character set conversion for CCCC\n *\n * iconv_t is an opaque handle on both hosts (a raw pointer returned by the\n * real iconv_open()), so it passes straight through as a pointer-width\n * value; (iconv_t)-1 is the error sentinel on both. iconv()'s four buffer\n * arguments are all pointers into guest memory that the host reads/writes\n * directly -- guest and host share one flat address space, so no\n * marshaling is needed.\n *\n * On macOS, linking iconv requires -liconv (verified: link fails without\n * it, succeeds with it); glibc ships iconv in libc itself, no extra link\n * flag needed.\n */\n\n#ifndef __ICONV_H\n#define __ICONV_H\n\n#ifdef _WIN32\n#error \"<iconv.h> is only available on POSIX targets in CCCC\"\n#endif\n\n#include \"stddef.h\"\n\ntypedef void *iconv_t;\n\nextern iconv_t iconv_open(const char *tocode, const char *fromcode);\nextern size_t iconv(iconv_t cd, char **inbuf, size_t *inbytesleft,\n                     char **outbuf, size_t *outbytesleft);\nextern int iconv_close(iconv_t cd);\n\n#endif /* __ICONV_H */\n";
 static char __builtin_inttypes_h[317] = "/* inttypes.h - format macros for integer types */\n\n#ifndef __INTTYPES_H\n#define __INTTYPES_H\n\n#include \"stdint.h\"\n\n#define PRId8 \"d\"\n#define PRIi8 \"i\"\n#define PRId16 \"d\"\n#define PRIi16 \"i\"\n#define PRId32 \"d\"\n#define PRIi32 \"i\"\n#define PRId64 \"ld\"\n#define PRIi64 \"ld\"\n\n#define PRIu64 \"lu\"\n\n#endif /* __INTTYPES_H */\n";
 static char __builtin_iso646_h[291] = "/* iso646.h - alternative operator spellings */\n\n#ifndef __ISO646_H\n#define __ISO646_H\n\n#define and &&\n#define and_eq &=\n#define bitand &\n#define bitor |\n#define compl ~\n#define not !\n#define not_eq !=\n#define or ||\n#define or_eq |=\n#define xor ^\n#define xor_eq ^=\n\n#endif /* __ISO646_H */\n";
 static char __builtin_libgen_h[268] = "/* libgen.h - pathname manipulation for CCCC */\n\n#ifndef __LIBGEN_H\n#define __LIBGEN_H\n\n#ifdef _WIN32\n#error \"<libgen.h> is only available on POSIX targets in CCCC\"\n#endif\n\nextern char *basename(char *path);\nextern char *dirname(char *path);\n\n#endif /* __LIBGEN_H */\n";
@@ -239,6 +240,8 @@ char *get_std_header(char *filename) {
         }
     case 105:
         {
+            if (strcmp((const char *)filename, (const char *)"iconv.h") == 0)
+                return (char *)__builtin_iconv_h;
             if (strcmp((const char *)filename, (const char *)"inttypes.h") == 0)
                 return (char *)__builtin_inttypes_h;
             if (strcmp((const char *)filename, (const char *)"iso646.h") == 0)
@@ -437,6 +440,12 @@ char *get_stdlib_reg_fn_name(char *header) {
                 return "register_locale_functions";
             return 0;
         }
+    case 105:
+        {
+            if (strcmp((const char *)header, (const char *)"iconv.h") == 0)
+                return "register_posix_functions";
+            return 0;
+        }
     case 103:
         {
             if (strcmp((const char *)header, (const char *)"getopt.h") == 0)
@@ -491,128 +500,130 @@ char *get_std_header_name(int i);
 
 char *get_std_header_name(int i) {
     switch (i) {
-    case 77:
+    case 78:
         return "wctype.h";
-    case 76:
+    case 77:
         return "wchar.h";
-    case 75:
+    case 76:
         return "utime.h";
-    case 74:
+    case 75:
         return "unistd.h";
-    case 73:
+    case 74:
         return "uchar.h";
-    case 72:
+    case 73:
         return "time.h";
-    case 71:
+    case 72:
         return "threads.h";
-    case 70:
+    case 71:
         return "tgmath.h";
-    case 69:
+    case 70:
         return "testing.h";
-    case 68:
+    case 69:
         return "termios.h";
-    case 67:
+    case 68:
         return "tar.h";
-    case 66:
+    case 67:
         return "syslog.h";
-    case 65:
+    case 66:
         return "sys/wait.h";
-    case 64:
+    case 65:
         return "sys/utsname.h";
-    case 63:
+    case 64:
         return "sys/un.h";
-    case 62:
+    case 63:
         return "sys/uio.h";
-    case 61:
+    case 62:
         return "sys/types.h";
-    case 60:
+    case 61:
         return "sys/times.h";
-    case 59:
+    case 60:
         return "sys/time.h";
-    case 58:
+    case 59:
         return "sys/statvfs.h";
-    case 57:
+    case 58:
         return "sys/stat.h";
-    case 56:
+    case 57:
         return "sys/socket.h";
-    case 55:
+    case 56:
         return "sys/select.h";
-    case 54:
+    case 55:
         return "sys/resource.h";
-    case 53:
+    case 54:
         return "sys/param.h";
-    case 52:
+    case 53:
         return "sys/mount.h";
-    case 51:
+    case 52:
         return "sys/mman.h";
-    case 50:
+    case 51:
         return "sys/ioctl.h";
-    case 49:
+    case 50:
         return "sys/file.h";
-    case 48:
+    case 49:
         return "sys/cdefs.h";
-    case 47:
+    case 48:
         return "strings.h";
-    case 46:
+    case 47:
         return "string.h";
-    case 45:
+    case 46:
         return "stdnoreturn.h";
-    case 44:
+    case 45:
         return "stdlib.h";
-    case 43:
+    case 44:
         return "stdio.h";
-    case 42:
+    case 43:
         return "stdint.h";
-    case 41:
+    case 42:
         return "stddef.h";
-    case 40:
+    case 41:
         return "stdckdint.h";
-    case 39:
+    case 40:
         return "stdbool.h";
-    case 38:
+    case 39:
         return "stdbit.h";
-    case 37:
+    case 38:
         return "stdatomic.h";
-    case 36:
+    case 37:
         return "stdarg.h";
-    case 35:
+    case 36:
         return "stdalign.h";
-    case 34:
+    case 35:
         return "spawn.h";
-    case 33:
+    case 34:
         return "signal.h";
-    case 32:
+    case 33:
         return "setjmp.h";
-    case 31:
+    case 32:
         return "sched.h";
-    case 30:
+    case 31:
         return "regex.h";
-    case 29:
+    case 30:
         return "reflection.h";
-    case 28:
+    case 29:
         return "pwd.h";
-    case 27:
+    case 28:
         return "pthread.h";
-    case 26:
+    case 27:
         return "poll.h";
-    case 25:
+    case 26:
         return "netinet/in.h";
-    case 24:
+    case 25:
         return "netdb.h";
-    case 23:
+    case 24:
         return "net/if.h";
-    case 22:
+    case 23:
         return "math.h";
-    case 21:
+    case 22:
         return "locale.h";
-    case 20:
+    case 21:
         return "limits.h";
-    case 19:
+    case 20:
         return "libgen.h";
-    case 18:
+    case 19:
         return "iso646.h";
-    case 17:
+    case 18:
         return "inttypes.h";
+    case 17:
+        return "iconv.h";
     case 16:
         return "grp.h";
     case 15:

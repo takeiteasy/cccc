@@ -13,7 +13,7 @@
 //   test_posix_rlimit_priority, test_posix_uname, test_posix_times,
 //   test_posix_tar_cpio, test_posix_syslog, test_posix_select,
 //   test_posix_statvfs, test_posix_sched, test_posix_locale,
-//   test_posix_spawn
+//   test_posix_spawn, test_posix_iconv
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -30,6 +30,7 @@
 #include <poll.h>
 #include <pwd.h>
 #include <grp.h>
+#include <iconv.h>
 #include <regex.h>
 #include <net/if.h>
 #include <netdb.h>
@@ -2130,6 +2131,35 @@ int test_posix_spawn(void) {
     unlink(tmpl);
 
     if (strncmp(buf, "posix-spawn-ok", 14) != 0) return 14;
+
+    return 42;
+}
+
+// test_posix_iconv
+// #806: convert a single Latin-1 byte with the high bit set (0xE9, "e with
+// acute") to UTF-8 and check the resulting 2-byte sequence (0xC3 0xA9 --
+// the UTF-8 encoding of U+00E9), plus inbytesleft reaching 0.
+[[cccc::test(return = 42)]]
+int test_posix_iconv(void) {
+    iconv_t cd = iconv_open("UTF-8", "ISO-8859-1");
+    if (cd == (iconv_t)-1) return 1;
+
+    char in[1] = { (char)0xE9 };
+    char out[8] = {0};
+    char *inp = in;
+    char *outp = out;
+    size_t inleft = 1;
+    size_t outleft = sizeof(out);
+
+    size_t rc = iconv(cd, &inp, &inleft, &outp, &outleft);
+    if (rc == (size_t)-1) return 2;
+    if (inleft != 0) return 3;
+
+    unsigned char b0 = (unsigned char)out[0];
+    unsigned char b1 = (unsigned char)out[1];
+    if (b0 != 0xC3 || b1 != 0xA9) return 4;
+
+    if (iconv_close(cd) != 0) return 5;
 
     return 42;
 }
