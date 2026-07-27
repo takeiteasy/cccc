@@ -454,8 +454,12 @@ static const DefUseEntry defuse_table[OP_COUNT] = {
     // Int<->float
     [I2F3] = {{P_RD}, {P_RS1}, 1, 1},
     [F2I3] = {{P_RD}, {P_RS1}, 1, 1},
+    [U2F3] = {{P_RD}, {P_RS1}, 1, 1},
+    [F2U3] = {{P_RD}, {P_RS1}, 1, 1},
     [I2F3_F32] = {{P_RD}, {P_RS1}, 1, 1},
     [F2I3_F32] = {{P_RD}, {P_RS1}, 1, 1},
+    [U2F3_F32] = {{P_RD}, {P_RS1}, 1, 1},
+    [F2U3_F32] = {{P_RD}, {P_RS1}, 1, 1},
     [FR2R] = {{P_RD}, {P_RS1}, 1, 1},
     [R2FR] = {{P_RD}, {P_RS1}, 1, 1},
     [FR2R_F32] = {{P_RD}, {P_RS1}, 1, 1},

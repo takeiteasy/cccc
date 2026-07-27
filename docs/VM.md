@@ -302,10 +302,14 @@ All `F*` opcodes operate on `fregs[]`.  Comparisons write a boolean into an inte
 | `FLDR_F32` | `fregs[rd] = *(float*)regs[rs]` |
 | `FSTR_F32` | `*(float*)regs[rs] = fregs[rd]` |
 | `FROUND_F32` | `fregs[rd] = (float)fregs[rs]` |
-| `I2F3` | `fregs[rd] = (double)regs[rs]` |
+| `I2F3` | `fregs[rd] = (double)regs[rs]` (signed source) |
 | `F2I3` | `regs[rd] = (long long)fregs[rs]`, saturating: NaN → 0, ≥2⁶³ or +Inf → `LLONG_MAX`, <-2⁶³ or -Inf → `LLONG_MIN`, `FE_INVALID` raised on all three |
-| `I2F3_F32` | `fregs[rd] = (float)regs[rs]` |
+| `U2F3` | `fregs[rd] = (double)(unsigned long long)regs[rs]`; selected instead of `I2F3` whenever the cast source is an unsigned 64-bit integer, since `I2F3` reinterprets the register as signed |
+| `F2U3` | `regs[rd] = (unsigned long long)fregs[rs]`, saturating: NaN → 0, ≥2⁶⁴ or +Inf → `ULLONG_MAX`, ≤-1 or -Inf → `0`, `FE_INVALID` raised on all three; a value in (-1, 0), e.g. `-0.5`, truncates to `0` with **no** exception, per well-defined `(unsigned long long)` cast semantics. Selected instead of `F2I3` whenever the cast destination is an unsigned 64-bit integer |
+| `I2F3_F32` | `fregs[rd] = (float)regs[rs]` (signed source) |
 | `F2I3_F32` | `regs[rd] = (long long)(float)fregs[rs]`, same saturating rules as `F2I3` |
+| `U2F3_F32` | `fregs[rd] = (float)(unsigned long long)regs[rs]`, same selection rule as `U2F3` |
+| `F2U3_F32` | `regs[rd] = (unsigned long long)(float)fregs[rs]`, same saturating rules as `F2U3` |
 | `FR2R` | Bit-pattern transfer `freg → reg` (f64) |
 | `R2FR` | Bit-pattern transfer `reg → freg` (f64) |
 | `FR2R_F32` | Bit-pattern transfer `freg → reg` (f32) |

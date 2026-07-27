@@ -4795,6 +4795,13 @@ static int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
     case ND_LOGOR:
         return eval(vm, node->lhs) || eval(vm, node->rhs);
     case ND_CAST: {
+        if (is_flonum(node->lhs->ty) && is_integer(node->ty) &&
+            node->ty->is_unsigned && node->ty->size == 8)
+            // #780: an unsigned 64-bit destination saturates against
+            // [0, 2^64), not the signed [-2^63, 2^63) rule eval2 applies
+            // to a bare flonum node above (which doesn't see this cast's
+            // destination type once we've recursed past it).
+            return (int64_t)cccc_f64_to_u64(eval_double(vm, node->lhs));
         int64_t val = eval2(vm, node->lhs, label);
         if (is_integer(node->ty)) {
             switch (node->ty->size) {
@@ -5441,7 +5448,7 @@ static double eval_double(VirtualMachine *vm, Node *node) {
 
     if (is_integer(node->ty)) {
         if (node->ty->is_unsigned)
-            return (unsigned long)eval(vm, node);
+            return (unsigned long long)eval(vm, node);
         return eval(vm, node);
     }
 
@@ -5462,9 +5469,12 @@ static double eval_double(VirtualMachine *vm, Node *node) {
     case ND_COMMA:
         return eval_double(vm, node->rhs);
     case ND_CAST:
-        if (is_flonum(node->lhs->ty))
-            return eval_double(vm, node->lhs);
-        return eval(vm, node->lhs);
+        // #780: route through eval_double unconditionally, even for an
+        // integer operand -- its is_integer() head above applies the
+        // correct unsigned widening (unsigned long long, not a bare
+        // "eval()" whose int64_t return implicitly sign-converts to
+        // double and loses the operand's unsignedness for values >= 2^63).
+        return eval_double(vm, node->lhs);
     case ND_VAR:
     case ND_MEMBER: {
         Node *expr = constexpr_expr_for_node(node);

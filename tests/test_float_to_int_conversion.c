@@ -14,9 +14,120 @@
 // (src/ops.c) and the compile-time constant-fold path in parse.c's
 // eval2() (which had the identical UB in a bare "return eval_double(...)"
 // implicitly truncating to int64_t).
+//
+// Extended for #780 (follow-up to #775): F2I3/F2I3_F32 carry no
+// destination-signedness information, so they always saturate against the
+// *signed* 64-bit range [-2^63, 2^63). A cast to an *unsigned* 64-bit
+// destination -- well-defined in C for any finite value in [0, 2^64) --
+// was getting clamped to LLONG_MAX instead of producing the correct
+// unsigned result. Fixed with a dedicated F2U3/F2U3_F32 opcode pair that
+// saturates against [0, 2^64) (cccc_f64_to_u64/cccc_f32_to_u64 in
+// src/internal.h), selected by codegen whenever the cast destination is
+// an unsigned 64-bit integer, plus the matching compile-time fold in
+// parse.c's eval2()/eval_double().
 #include <fenv.h>
 
+// Global initializer: exercises the compile-time constant-fold path
+// (eval2()) rather than the runtime F2U3 opcode.
+unsigned long long g_u64_from_double = (unsigned long long)1.5e19;
+
 int main(void) {
+    // The ticket's motivating case: 1.5e19 is well within [0, 2^64) and
+    // must convert exactly, not saturate to LLONG_MAX.
+    if (g_u64_from_double != 15000000000000000000ULL) return 25;
+
+    // In-function constant expression: also folds via eval2(), but through
+    // a different call path (local initializer, not a global).
+    unsigned long long local_const = (unsigned long long)1.5e19;
+    if (local_const != 15000000000000000000ULL) return 26;
+
+    volatile double u_in_range = 1.5e19;
+    volatile double u_just_under_2p64 = 18446744073709549568.0; // < 2^64
+    volatile double u_2p64 = 18446744073709551616.0;            // == 2^64
+    volatile double u_neg_half = -0.5;
+    volatile double u_neg_one = -1.0;
+
+    // Runtime path (F2U3): 1.5e19 fits in [0, 2^64) and converts exactly,
+    // raising nothing.
+    feclearexcept(FE_ALL_EXCEPT);
+    unsigned long long ur = (unsigned long long)u_in_range;
+    if (ur != 15000000000000000000ULL) return 27;
+    if (fetestexcept(FE_INVALID)) return 28;
+
+    // Largest double strictly less than 2^64 converts exactly, raising
+    // nothing -- the upper boundary must be compared against 2^64 itself,
+    // not against "(double)ULLONG_MAX" (which rounds *up* to exactly 2^64
+    // and would let this value slip through as "in range" incorrectly in
+    // the other direction: a naive ">" guard here is fine, but a naive
+    // "> (double)ULLONG_MAX" guard on u_2p64 below would not be).
+    feclearexcept(FE_ALL_EXCEPT);
+    ur = (unsigned long long)u_just_under_2p64;
+    if (ur != 18446744073709549568ULL) return 29;
+    if (fetestexcept(FE_INVALID)) return 30;
+
+    // Exactly 2^64 is out of range for unsigned 64-bit -> saturates to
+    // ULLONG_MAX with FE_INVALID raised.
+    feclearexcept(FE_ALL_EXCEPT);
+    ur = (unsigned long long)u_2p64;
+    if (ur != 18446744073709551615ULL) return 31;
+    if (!fetestexcept(FE_INVALID)) return 32;
+
+    // +Inf and NaN saturate the same way as the signed case (to
+    // ULLONG_MAX and 0 respectively), both raising FE_INVALID.
+    volatile double u_pos_inf = 1.0 / 0.0;
+    volatile double u_nan = 0.0 / 0.0;
+
+    feclearexcept(FE_ALL_EXCEPT);
+    ur = (unsigned long long)u_pos_inf;
+    if (ur != 18446744073709551615ULL) return 33;
+    if (!fetestexcept(FE_INVALID)) return 34;
+
+    feclearexcept(FE_ALL_EXCEPT);
+    ur = (unsigned long long)u_nan;
+    if (ur != 0) return 35;
+    if (!fetestexcept(FE_INVALID)) return 36;
+
+    // -0.5 truncates toward zero to -0.0, which as an unsigned value is
+    // simply 0 -- this is well-defined C and must raise NOTHING. This is
+    // the boundary case that has no signed-conversion analogue: a naive
+    // "x < 0" guard would wrongly flag this as invalid.
+    feclearexcept(FE_ALL_EXCEPT);
+    ur = (unsigned long long)u_neg_half;
+    if (ur != 0) return 37;
+    if (fetestexcept(FE_INVALID)) return 38;
+
+    // -1.0 truncates to -1, which is genuinely out of range for unsigned
+    // 64-bit -> saturates to 0 with FE_INVALID raised.
+    feclearexcept(FE_ALL_EXCEPT);
+    ur = (unsigned long long)u_neg_one;
+    if (ur != 0) return 39;
+    if (!fetestexcept(FE_INVALID)) return 40;
+
+    // -Inf saturates to 0 with FE_INVALID raised, same as the signed case's
+    // LLONG_MIN saturation direction.
+    volatile double u_neg_inf = -1.0 / 0.0;
+    feclearexcept(FE_ALL_EXCEPT);
+    ur = (unsigned long long)u_neg_inf;
+    if (ur != 0) return 41;
+    if (!fetestexcept(FE_INVALID)) return 43; // 42 is this file's success code
+
+    // float32 path (F2U3_F32): the source value is first rounded to
+    // float precision, so the expected result is the *rounded* value
+    // (15000000520515485696), not the original 1.5e19.
+    volatile float uf_in_range = 1.5e19f;
+    feclearexcept(FE_ALL_EXCEPT);
+    ur = (unsigned long long)uf_in_range;
+    if (ur != 15000000520515485696ULL) return 44;
+    if (fetestexcept(FE_INVALID)) return 45;
+
+    volatile float uf_neg_half = -0.5f;
+    feclearexcept(FE_ALL_EXCEPT);
+    ur = (unsigned long long)uf_neg_half;
+    if (ur != 0) return 46;
+    if (fetestexcept(FE_INVALID)) return 47;
+
+    // Signed destinations must still behave exactly as #775 specified --
+    // the new F2U3 gate must not change F2I3's existing behavior.
     volatile double nan_val = 0.0 / 0.0;
     volatile double pos_inf = 1.0 / 0.0;
     volatile double neg_inf = -1.0 / 0.0;

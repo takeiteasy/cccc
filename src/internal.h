@@ -304,6 +304,59 @@ static inline long long cccc_f32_to_i64(float x) {
     return (long long)x;
 }
 
+// Defined float->unsigned-integer conversion for F2U3/F2U3_F32 (#780,
+// follow-up to #775). Same rationale as cccc_f64_to_i64/cccc_f32_to_i64
+// above -- a bare "(unsigned long long)double_value" cast is undefined
+// behavior in the host compiler for NaN/out-of-range values -- but the
+// bounds differ from the signed helpers in two ways worth calling out:
+//
+//   * The upper guard is 2^64 (18446744073709551616.0, exactly
+//     representable in a double/float), not "(double)ULLONG_MAX": that
+//     value rounds *up* to exactly 2^64, so a "x > (double)ULLONG_MAX"
+//     guard would let x == 2^64 slip through, same trap as the signed
+//     LLONG_MAX case documented above.
+//   * The lower guard is x <= -1.0, not x < 0. "(unsigned long long)(-0.5)"
+//     is well-defined C and must yield 0 with NO FE_INVALID: truncation
+//     toward zero happens first, and the truncated value (-0.0) is
+//     representable. Only once the truncated magnitude reaches -1 does the
+//     conversion become genuinely out of range.
+//
+//   NaN                       -> 0
+//   x >= 2^64 (incl. +Inf)    -> ULLONG_MAX
+//   x <= -1.0 (incl. -Inf)    -> 0
+//   otherwise                 -> the plain truncating cast
+static inline unsigned long long cccc_f64_to_u64(double x) {
+    if (isnan(x)) {
+        feraiseexcept(FE_INVALID);
+        return 0;
+    }
+    if (x >= 18446744073709551616.0) { // 2^64
+        feraiseexcept(FE_INVALID);
+        return ULLONG_MAX;
+    }
+    if (x <= -1.0) {
+        feraiseexcept(FE_INVALID);
+        return 0;
+    }
+    return (unsigned long long)x;
+}
+
+static inline unsigned long long cccc_f32_to_u64(float x) {
+    if (isnan(x)) {
+        feraiseexcept(FE_INVALID);
+        return 0;
+    }
+    if (x >= 18446744073709551616.0f) { // 2^64
+        feraiseexcept(FE_INVALID);
+        return ULLONG_MAX;
+    }
+    if (x <= -1.0f) {
+        feraiseexcept(FE_INVALID);
+        return 0;
+    }
+    return (unsigned long long)x;
+}
+
 static inline long long cccc_freg_raw_f64(VirtualMachine *vm, int reg) {
     union {
         double d;

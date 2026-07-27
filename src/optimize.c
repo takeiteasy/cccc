@@ -1148,7 +1148,8 @@ static bool op_is_float_src(int op) {
     case FEQ3: case FNE3: case FLT3: case FLE3: case FGT3: case FGE3:
     case FEQ3_F32: case FNE3_F32: case FLT3_F32: case FLE3_F32:
     case FGT3_F32: case FGE3_F32:
-    case F2I3: case F2I3_F32: case FR2R: case FR2R_F32:
+    case F2I3: case F2I3_F32: case F2U3: case F2U3_F32:
+    case FR2R: case FR2R_F32:
         return true;
     default:
         return false;

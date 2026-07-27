@@ -203,6 +203,8 @@ extern "C" {
     X(FGE3, 1)  /* rd = (fregs[rs1] >= fregs[rs2]) */                          \
     X(I2F3, 1)  /* fregs[rd] = (double)regs[rs] */                             \
     X(F2I3, 1)  /* regs[rd] = (long long)fregs[rs] */                          \
+    X(U2F3, 1)  /* fregs[rd] = (double)(unsigned long long)regs[rs] */         \
+    X(F2U3, 1)  /* regs[rd] = (unsigned long long)fregs[rs] */                 \
     X(FR2R, 1)  /* regs[rd] = *(long long*)&fregs[rs] (bit-pattern transfer) */\
     X(R2FR, 1)  /* fregs[rd] = *(double*)&regs[rs] (bit-pattern transfer, reverse \
                 of FR2R) */                                                    \
@@ -219,6 +221,8 @@ extern "C" {
     X(FGE3_F32, 1)  /* rd = ((float)fregs[rs1] >= (float)fregs[rs2]) */        \
     X(I2F3_F32, 1)  /* fregs[rd] = (float)regs[rs] */                          \
     X(F2I3_F32, 1)  /* regs[rd] = (long long)(float)fregs[rs] */               \
+    X(U2F3_F32, 1)  /* fregs[rd] = (float)(unsigned long long)regs[rs] */      \
+    X(F2U3_F32, 1)  /* regs[rd] = (unsigned long long)(float)fregs[rs] */      \
     X(FR2R_F32, 1)  /* regs[rd] = raw float payload bits from fregs[rs] */      \
     X(R2FR_F32, 1)  /* fregs[rd] = raw float payload bits from regs[rs] */      \
     /* Register-based safety opcodes */                                        \

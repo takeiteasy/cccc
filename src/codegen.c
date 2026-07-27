@@ -1992,10 +1992,24 @@ static int fop_for_type(Type *ty, int f64_op) {
     case FGE3: return FGE3_F32;
     case I2F3: return I2F3_F32;
     case F2I3: return F2I3_F32;
+    case U2F3: return U2F3_F32;
+    case F2U3: return F2U3_F32;
     case FR2R: return FR2R_F32;
     case R2FR: return R2FR_F32;
     default: return f64_op;
     }
+}
+
+// #780: an unsigned 64-bit integer type needs the dedicated U2F3/F2U3
+// opcode pair, not I2F3/F2I3 -- the latter treat the register as a signed
+// 64-bit value, which is wrong for both directions once the value's high
+// bit is set (float->int saturates against the wrong range; int->float
+// reads a negative value). Narrower unsigned types are unaffected: they're
+// already zero-extended in the register (so I2F3 is correct) and F2I3's
+// signed saturation covers their full range (so a same-width ZX/SX after
+// F2I3 is correct too) -- only size-8 needs the new opcodes.
+static bool is_u64_int(Type *ty) {
+    return ty && is_integer(ty) && ty->is_unsigned && ty->size == 8;
 }
 
 // FREG_A0..A7 alias REG_A0..A7 by raw register number (regs[] and fregs[] are
@@ -3600,8 +3614,10 @@ static void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg, int i
         } else {
             gen_expr(vm, node->lhs, real_reg);
             if (!is_flonum(node->lhs->ty))
-                emit_rr(vm, fop_for_type(node->ty->base, I2F3), real_reg,
-                        real_reg);
+                emit_rr(vm,
+                        fop_for_type(node->ty->base,
+                                     is_u64_int(node->lhs->ty) ? U2F3 : I2F3),
+                        real_reg, real_reg);
             emit_float_zero(vm, imag_reg);
         }
         if (node->ty->base && node->ty->base->kind == TY_FLOAT) {
@@ -4953,8 +4969,10 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             int imag_reg = (dest_reg == FREG_A7) ? FREG_A6 : FREG_A7;
             gen_complex_expr(vm, node->lhs, dest_reg, imag_reg);
             if (!is_flonum(node->ty))
-                emit_rr(vm, fop_for_type(node->lhs->ty->base, F2I3), dest_reg,
-                        dest_reg);
+                emit_rr(vm,
+                        fop_for_type(node->lhs->ty->base,
+                                     is_u64_int(node->ty) ? F2U3 : F2I3),
+                        dest_reg, dest_reg);
             else if (node->ty->kind == TY_FLOAT)
                 emit_fround_f32(vm, dest_reg, dest_reg);
             return;
@@ -5053,10 +5071,16 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // Add type conversion if needed
         if (is_flonum(node->ty) && !is_flonum(node->lhs->ty)) {
             // int -> float
-            emit_rr(vm, fop_for_type(node->ty, I2F3), dest_reg, dest_reg);
+            emit_rr(vm,
+                    fop_for_type(node->ty,
+                                 is_u64_int(node->lhs->ty) ? U2F3 : I2F3),
+                    dest_reg, dest_reg);
         } else if (!is_flonum(node->ty) && is_flonum(node->lhs->ty)) {
             // float -> int
-            emit_rr(vm, fop_for_type(node->lhs->ty, F2I3), dest_reg, dest_reg);
+            emit_rr(vm,
+                    fop_for_type(node->lhs->ty,
+                                 is_u64_int(node->ty) ? F2U3 : F2I3),
+                    dest_reg, dest_reg);
         } else if (node->ty->kind == TY_FLOAT &&
                    node->lhs->ty->kind != TY_FLOAT) {
             emit_fround_f32(vm, dest_reg, dest_reg);

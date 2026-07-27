@@ -1802,6 +1802,52 @@ static inline int op_F2I3_F32_fn(VirtualMachine *vm) {
     return 0;
 }
 
+static inline int op_U2F3_fn(VirtualMachine *vm) {
+    // Unsigned int to float: fregs[rd] = (double)(unsigned long long)regs[rs]
+    long long operands = cc_read_word(vm);
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+
+    cccc_freg_set_f64(vm, rd, (double)(unsigned long long)vm->regs[rs]);
+    return 0;
+}
+
+static inline int op_F2U3_fn(VirtualMachine *vm) {
+    // Float to unsigned int: regs[rd] = (unsigned long long)fregs[rs],
+    // saturating on NaN/out-of-range with FE_INVALID raised (#780) -- see
+    // cccc_f64_to_u64 in internal.h for why a bare cast is UB here.
+    // Format: [F2U3] [rd:8|rs:8|unused:48]
+    long long operands = cc_read_word(vm);
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (long long)cccc_f64_to_u64(cccc_freg_get_f64(vm, rs));
+    return 0;
+}
+
+static inline int op_U2F3_F32_fn(VirtualMachine *vm) {
+    // Unsigned int to float: fregs[rd] = (float)(unsigned long long)regs[rs]
+    long long operands = cc_read_word(vm);
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+
+    cccc_freg_set_f32(vm, rd, (float)(unsigned long long)vm->regs[rs]);
+    return 0;
+}
+
+static inline int op_F2U3_F32_fn(VirtualMachine *vm) {
+    // Float to unsigned int: regs[rd] = (unsigned long long)fregs[rs],
+    // saturating (#780).
+    long long operands = cc_read_word(vm);
+    int rd, rs;
+    DECODE_RR(operands, rd, rs);
+
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (long long)cccc_f32_to_u64(cccc_freg_get_f32(vm, rs));
+    return 0;
+}
+
 static inline int op_FR2R_fn(VirtualMachine *vm) {
     // Float register to integer register (bit-pattern transfer, no conversion)
     // Format: [FR2R] [rd:8|rs:8|unused:48]
