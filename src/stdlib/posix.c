@@ -27,6 +27,7 @@
 #include <regex.h>
 #include <iconv.h>
 #include <langinfo.h>
+#include <monetary.h>
 #include <search.h>
 #include <nl_types.h>
 #include <sched.h>
@@ -2102,6 +2103,15 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "setlogmask", (void*)setlogmask, 1, 0);
     cc_register_variadic_cfunc(vm, "syslog", (void*)syslog, 2, 0);
     cc_register_cfunc(vm, "vsyslog",    (void*)wrap_vsyslog, 3, 0);
+
+    // monetary.h (#808) -- strfmon is variadic with double arguments, but
+    // (like syslog above) is a real, non-va_list-forwarding call site, so
+    // the plain host function registers directly and codegen's per-call-
+    // site double_arg_mask threads the double through correctly -- no
+    // split-format host-side reimplementation needed (confirmed
+    // empirically: a real double argument round-trips through a "%n"
+    // conversion correctly).
+    cc_register_variadic_cfunc(vm, "strfmon", (void*)strfmon, 3, 0);
 
     // net/if.h (#788) -- interface name<->index resolution, needed to target
     // a specific interface (e.g. loopback) for IPV6_MULTICAST_IF/JOIN_GROUP

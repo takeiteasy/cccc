@@ -14,7 +14,7 @@
 //   test_posix_tar_cpio, test_posix_syslog, test_posix_select,
 //   test_posix_statvfs, test_posix_sched, test_posix_locale,
 //   test_posix_spawn, test_posix_iconv, test_posix_langinfo,
-//   test_posix_search
+//   test_posix_search, test_posix_strfmon
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -33,6 +33,7 @@
 #include <grp.h>
 #include <iconv.h>
 #include <langinfo.h>
+#include <monetary.h>
 #include <nl_types.h>
 #include <regex.h>
 #include <net/if.h>
@@ -2263,6 +2264,28 @@ int test_posix_search(void) {
     int newval = 40;
     void *ls = lsearch(&newval, arr, &n, sizeof(int), search_compar);
     if (!ls || n != 4 || arr[3] != 40) return 12;
+
+    return 42;
+}
+
+// test_posix_strfmon
+// #808: strfmon(buf, sizeof buf, "%n", 1234.56) succeeds and contains
+// "1234"; a multi-conversion format with literal text between two
+// directives; a maxsize too small for the output returns -1/E2BIG.
+[[cccc::test(return = 42)]]
+int test_posix_strfmon(void) {
+    char buf[64] = {0};
+    ssize_t n = strfmon(buf, sizeof(buf), "%n", 1234.56);
+    if (n < 0) return 1;
+    if (!strstr(buf, "1234")) return 2;
+
+    char buf2[64] = {0};
+    ssize_t n2 = strfmon(buf2, sizeof(buf2), "Price: %n and %n", 10.5, 20.5);
+    if (n2 < 0) return 3;
+    if (!strstr(buf2, "Price:") || !strstr(buf2, "10.5") || !strstr(buf2, "20.5")) return 4;
+
+    char small[4];
+    if (strfmon(small, sizeof(small), "%n", 1234567.89) != -1) return 5;
 
     return 42;
 }
