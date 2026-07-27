@@ -360,9 +360,13 @@ char *get_stdlib_reg_fn_name(char *header) {
                 return "register_posix_functions";
             if (strcmp((const char *)header, (const char *)"sys/time.h") == 0)
                 return "register_posix_functions";
+            if (strcmp((const char *)header, (const char *)"sys/times.h") == 0)
+                return "register_posix_functions";
             if (strcmp((const char *)header, (const char *)"sys/uio.h") == 0)
                 return "register_posix_functions";
             if (strcmp((const char *)header, (const char *)"sys/un.h") == 0)
+                return "register_posix_functions";
+            if (strcmp((const char *)header, (const char *)"sys/utsname.h") == 0)
                 return "register_posix_functions";
             if (strcmp((const char *)header, (const char *)"sys/wait.h") == 0)
                 return "register_posix_functions";
