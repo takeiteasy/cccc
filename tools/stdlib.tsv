@@ -32,6 +32,7 @@ sys/resource.h	register_posix_functions
 sys/select.h	register_posix_functions
 sys/socket.h	register_posix_functions
 sys/stat.h	register_posix_functions
+sys/statvfs.h	register_posix_functions
 sys/time.h	register_posix_functions
 sys/times.h	register_posix_functions
 sys/uio.h	register_posix_functions

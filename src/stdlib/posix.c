@@ -35,6 +35,7 @@
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/time.h>
 #include <sys/times.h>
 #include <sys/uio.h>
@@ -1167,6 +1168,54 @@ static long long wrap_fstatfs(long long fd, long long buf) {
     return rc;
 }
 
+// sys/statvfs.h (#799) -- struct statvfs diverges even harder than statfs
+// (64 bytes/32-bit counters on macOS vs 112 bytes/64-bit counters on
+// Linux), so the guest gets a CCCC-canonical struct in POSIX field order
+// with wide counters on both platforms, populated field-by-field from a
+// host-local struct statvfs -- same shape as copy_statfs_fields above.
+struct cccc_guest_statvfs {
+    unsigned long f_bsize;
+    unsigned long f_frsize;
+    unsigned long f_blocks;
+    unsigned long f_bfree;
+    unsigned long f_bavail;
+    unsigned long f_files;
+    unsigned long f_ffree;
+    unsigned long f_favail;
+    unsigned long f_fsid;
+    unsigned long f_flag;
+    unsigned long f_namemax;
+};
+
+static void copy_statvfs_fields(const struct statvfs *host_buf, long long guest_ptr) {
+    struct cccc_guest_statvfs *g = (struct cccc_guest_statvfs *)(void *)guest_ptr;
+    g->f_bsize   = (unsigned long)host_buf->f_bsize;
+    g->f_frsize  = (unsigned long)host_buf->f_frsize;
+    g->f_blocks  = (unsigned long)host_buf->f_blocks;
+    g->f_bfree   = (unsigned long)host_buf->f_bfree;
+    g->f_bavail  = (unsigned long)host_buf->f_bavail;
+    g->f_files   = (unsigned long)host_buf->f_files;
+    g->f_ffree   = (unsigned long)host_buf->f_ffree;
+    g->f_favail  = (unsigned long)host_buf->f_favail;
+    g->f_fsid    = (unsigned long)host_buf->f_fsid;
+    g->f_flag    = (unsigned long)host_buf->f_flag;
+    g->f_namemax = (unsigned long)host_buf->f_namemax;
+}
+
+static long long wrap_statvfs(long long path, long long buf) {
+    struct statvfs host_buf;
+    int rc = statvfs((const char *)path, &host_buf);
+    if (rc == 0 && buf) copy_statvfs_fields(&host_buf, buf);
+    return rc;
+}
+
+static long long wrap_fstatvfs(long long fd, long long buf) {
+    struct statvfs host_buf;
+    int rc = fstatvfs((int)fd, &host_buf);
+    if (rc == 0 && buf) copy_statvfs_fields(&host_buf, buf);
+    return rc;
+}
+
 // ---------------------------------------------------------------------------
 // vsyslog() (#803) -- forwards a captured cccc va_list to the host's real
 // variadic syslog() via ffi_prep_cif_var, same technique as
@@ -1386,6 +1435,8 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_variadic_cfunc(vm, "ioctl", (void*)ioctl, 2, 0);
     cc_register_cfunc(vm, "statfs",  (void*)wrap_statfs,  2, 0);
     cc_register_cfunc(vm, "fstatfs", (void*)wrap_fstatfs, 2, 0);
+    cc_register_cfunc(vm, "statvfs",  (void*)wrap_statvfs,  2, 0);
+    cc_register_cfunc(vm, "fstatvfs", (void*)wrap_fstatvfs, 2, 0);
 
     cc_register_cfunc(vm, "strcasecmp",  (void*)strcasecmp,  2, 0);
     cc_register_cfunc(vm, "strncasecmp", (void*)strncasecmp, 3, 0);

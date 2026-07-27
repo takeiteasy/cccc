@@ -11,7 +11,8 @@
 //   test_posix_sigaction_siginfo, test_posix_sigaction_flags,
 //   test_posix_ipv6_multicast_roundtrip,
 //   test_posix_rlimit_priority, test_posix_uname, test_posix_times,
-//   test_posix_tar_cpio, test_posix_syslog, test_posix_select
+//   test_posix_tar_cpio, test_posix_syslog, test_posix_select,
+//   test_posix_statvfs
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -56,6 +57,7 @@
 #include <syslog.h>
 #include <stdarg.h>
 #include <sys/select.h>
+#include <sys/statvfs.h>
 
 // [from test_posix_extra_ffi]
 // Regression test for #590: additional POSIX FFI functions registered for the
@@ -2008,6 +2010,27 @@ int test_posix_select(void) {
 
     close(fds[0]);
     close(fds[1]);
+    return 42;
+}
+
+// test_posix_statvfs
+// #799: statvfs("/") and fstatvfs() on an open fd agree on f_bsize, and
+// f_blocks >= f_bfree >= f_bavail / f_namemax > 0 hold as POSIX requires.
+[[cccc::test(return = 42)]]
+int test_posix_statvfs(void) {
+    struct statvfs sv;
+    if (statvfs("/", &sv) != 0) return 1;
+    if (sv.f_bsize == 0) return 2;
+    if (!(sv.f_blocks >= sv.f_bfree && sv.f_bfree >= sv.f_bavail)) return 3;
+    if (sv.f_namemax == 0) return 4;
+
+    int fd = open("/", O_RDONLY);
+    if (fd < 0) return 5;
+    struct statvfs sv2;
+    if (fstatvfs(fd, &sv2) != 0) return 6;
+    close(fd);
+    if (sv2.f_bsize != sv.f_bsize) return 7;
+
     return 42;
 }
 
