@@ -21,3 +21,9 @@ profile/benchmarks/results/*.json
 tools/*.tar.gz
 tools/*.zip
 README.imd
+
+# Intel BID decimal-FP library (tools/fetch_intel_bid.sh) -- fetched on
+# demand, never vendored.
+/IntelRDFPMathLib*.tar.gz
+/IntelRDFPMathLib*/
+build/intel-bid/

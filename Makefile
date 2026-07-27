@@ -42,6 +42,23 @@ ifdef CCCC_HAS_CURL
   endif
 endif
 
+# Optional IEEE-754-2008 decimal floating-point (_Decimal32/64/128) support
+# via the Intel BID library. The library is NEVER vendored in this repo --
+# run tools/fetch_intel_bid.sh first to fetch, verify, and build it.
+# Enable with: make CCCC_HAS_DECIMAL=1 [CCCC_BID_PREFIX=build/intel-bid]
+ifdef CCCC_HAS_DECIMAL
+  ifneq ($(CCCC_HAS_DECIMAL),0)
+    CCCC_BID_PREFIX ?= build/intel-bid
+    BID_A := $(CCCC_BID_PREFIX)/lib/libbid.a
+    ifeq ($(wildcard $(BID_A)),)
+      $(error CCCC_HAS_DECIMAL=1 but $(BID_A) is missing. Run tools/fetch_intel_bid.sh \
+first (the Intel BID library is never vendored in this repo).)
+    endif
+    CFLAGS  += -DCCCC_HAS_DECIMAL=1 -I$(CCCC_BID_PREFIX)/src
+    LDFLAGS += $(BID_A)
+  endif
+endif
+
 # Optional readline support for the interactive REPL (-r/--repl) line
 # history/editing. Falls back to plain fgets (no history) when not found.
 LIBREADLINE_CFLAGS := $(shell $(PKG_CONFIG) --cflags readline 2>/dev/null)
