@@ -12,7 +12,8 @@
 //   test_posix_ipv6_multicast_roundtrip,
 //   test_posix_rlimit_priority, test_posix_uname, test_posix_times,
 //   test_posix_tar_cpio, test_posix_syslog, test_posix_select,
-//   test_posix_statvfs, test_posix_sched, test_posix_locale
+//   test_posix_statvfs, test_posix_sched, test_posix_locale,
+//   test_posix_spawn
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -58,6 +59,7 @@
 #include <stdarg.h>
 #include <sched.h>
 #include <locale.h>
+#include <spawn.h>
 #include <sys/select.h>
 #include <sys/statvfs.h>
 
@@ -2071,6 +2073,64 @@ int test_posix_locale(void) {
     if (setlocale(LC_MONETARY, "C") == 0) return 1;
     if (setlocale(LC_ALL, 0) == 0) return 2;
     if (setlocale(LC_MESSAGES, "C") == 0) return 3;
+    return 42;
+}
+
+// test_posix_spawn
+// #801: posix_spawn() runs /bin/echo (macOS)/echo (both, resolved via
+// posix_spawnp so PATH search covers whichever /bin layout the host uses)
+// with a file action redirecting stdout to a temp file, plus
+// POSIX_SPAWN_SETSIGDEF; waitpid() for a clean exit, then read the
+// redirected output back. Also exercises the opaque posix_spawnattr_t/
+// posix_spawn_file_actions_t handles (init/destroy) and the sigmask/
+// sigdefault guest<->host sigset_t round-trip.
+extern char **environ;
+
+[[cccc::test(return = 42)]]
+int test_posix_spawn(void) {
+    posix_spawnattr_t attr;
+    if (posix_spawnattr_init(&attr) != 0) return 1;
+
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGUSR1);
+    if (posix_spawnattr_setsigmask(&attr, &mask) != 0) return 2;
+    if (posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK) != 0) return 3;
+
+    sigset_t got_mask;
+    if (posix_spawnattr_getsigmask(&attr, &got_mask) != 0) return 4;
+    if (!sigismember(&got_mask, SIGUSR1)) return 5;
+
+    posix_spawn_file_actions_t fa;
+    if (posix_spawn_file_actions_init(&fa) != 0) return 6;
+
+    char tmpl[] = "/tmp/cccc_test_spawn_XXXXXX";
+    int tfd = mkstemp(tmpl);
+    if (tfd < 0) return 7;
+    close(tfd);
+
+    if (posix_spawn_file_actions_addopen(&fa, 1, tmpl, O_WRONLY | O_TRUNC, 0644) != 0) return 8;
+
+    char *argv[] = {"echo", "posix-spawn-ok", 0};
+    pid_t pid;
+    if (posix_spawnp(&pid, "echo", &fa, &attr, argv, environ) != 0) return 9;
+
+    int status;
+    if (waitpid(pid, &status, 0) != pid) return 10;
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) return 11;
+
+    posix_spawn_file_actions_destroy(&fa);
+    posix_spawnattr_destroy(&attr);
+
+    FILE *f = fopen(tmpl, "r");
+    if (!f) return 12;
+    char buf[64] = {0};
+    if (!fgets(buf, sizeof(buf), f)) return 13;
+    fclose(f);
+    unlink(tmpl);
+
+    if (strncmp(buf, "posix-spawn-ok", 14) != 0) return 14;
+
     return 42;
 }
 
