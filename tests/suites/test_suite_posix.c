@@ -14,7 +14,7 @@
 //   test_posix_tar_cpio, test_posix_syslog, test_posix_select,
 //   test_posix_statvfs, test_posix_sched, test_posix_locale,
 //   test_posix_spawn, test_posix_iconv, test_posix_langinfo,
-//   test_posix_search, test_posix_strfmon
+//   test_posix_search, test_posix_strfmon, test_posix_timer_macros
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -2286,6 +2286,36 @@ int test_posix_strfmon(void) {
 
     char small[4];
     if (strfmon(small, sizeof(small), "%n", 1234567.89) != -1) return 5;
+
+    return 42;
+}
+
+// test_posix_timer_macros
+// #822: timerclear/timerisset/timercmp -- the traditional BSD struct
+// timeval convenience macros. timeradd/timersub already existed; these
+// three are identical semantics on macOS and glibc, no host translation.
+[[cccc::test(return = 42)]]
+int test_posix_timer_macros(void) {
+    struct timeval tv;
+    timerclear(&tv);
+    if (tv.tv_sec != 0 || tv.tv_usec != 0) return 1;
+    if (timerisset(&tv)) return 2;
+
+    tv.tv_usec = 5;
+    if (!timerisset(&tv)) return 3;
+    timerclear(&tv);
+    tv.tv_sec = 1;
+    if (!timerisset(&tv)) return 4;
+
+    struct timeval a = {1, 500000};
+    struct timeval b = {1, 200000};
+    if (!timercmp(&a, &b, >)) return 5;
+    if (timercmp(&a, &b, <)) return 6;
+    if (!timercmp(&a, &a, ==)) return 7;
+
+    struct timeval c = {2, 0};
+    if (!timercmp(&c, &a, >)) return 8;
+    if (timercmp(&a, &c, >)) return 9;
 
     return 42;
 }

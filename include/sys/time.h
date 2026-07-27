@@ -70,4 +70,16 @@ extern int getitimer(int which, struct itimerval *curr_value);
     } \
 } while (0)
 
+/* The remaining traditional BSD timeval macros -- identical semantics on
+   macOS and glibc, no host translation needed. timerclear's chained
+   assignment is fine even though tv_usec is `int` under __APPLE__ (see the
+   struct timeval comment above): both fields are integral. */
+#define timerclear(tvp) ((tvp)->tv_sec = (tvp)->tv_usec = 0)
+
+#define timerisset(tvp) ((tvp)->tv_sec || (tvp)->tv_usec)
+
+#define timercmp(a, b, CMP) \
+    (((a)->tv_sec == (b)->tv_sec) ? ((a)->tv_usec CMP (b)->tv_usec) \
+                                  : ((a)->tv_sec CMP (b)->tv_sec))
+
 #endif /* __SYS_TIME_H */
