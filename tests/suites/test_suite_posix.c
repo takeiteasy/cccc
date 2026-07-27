@@ -14,7 +14,8 @@
 //   test_posix_tar_cpio, test_posix_syslog, test_posix_select,
 //   test_posix_statvfs, test_posix_sched, test_posix_locale,
 //   test_posix_spawn, test_posix_iconv, test_posix_langinfo,
-//   test_posix_search, test_posix_strfmon, test_posix_timer_macros
+//   test_posix_search, test_posix_strfmon, test_posix_timer_macros,
+//   test_posix_ppoll
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -2317,6 +2318,52 @@ int test_posix_timer_macros(void) {
     if (!timercmp(&c, &a, >)) return 8;
     if (timercmp(&a, &c, >)) return 9;
 
+    return 42;
+}
+
+// test_posix_ppoll
+// #821: ppoll() is the poll()-with-timeout-and-sigmask analog of
+// pselect(). A pipe with data ready returns 1 with POLLIN set; an empty
+// read end with a short timeout returns 0. Also exercises the
+// POLLWRNORM/POLLRDNORM/POLLRDBAND/POLLWRBAND canonical bits: macOS
+// aliases POLLWRNORM to POLLOUT, so requesting POLLWRNORM alone on a
+// writable fd must still report it set there -- this is the exact case
+// that regresses if the guest<->host event-bit translation is dropped.
+[[cccc::test(return = 42)]]
+int test_posix_ppoll(void) {
+    int fds[2];
+    if (pipe(fds) != 0) return 1;
+
+    if (write(fds[1], "x", 1) != 1) return 2;
+
+    struct pollfd pfd = {0};
+    pfd.fd = fds[0];
+    pfd.events = POLLIN;
+    struct timespec ts = {1, 0};
+    int r = ppoll(&pfd, 1, &ts, NULL);
+    if (r != 1) return 3;
+    if (!(pfd.revents & POLLIN)) return 4;
+
+    char c;
+    if (read(fds[0], &c, 1) != 1) return 5;
+
+    struct pollfd pfd2 = {0};
+    pfd2.fd = fds[0];
+    pfd2.events = POLLIN;
+    struct timespec ts2 = {0, 50000000}; // 50ms
+    r = ppoll(&pfd2, 1, &ts2, NULL);
+    if (r != 0) return 6;
+
+    struct pollfd pfd3 = {0};
+    pfd3.fd = fds[1];
+    pfd3.events = POLLWRNORM;
+    struct timespec ts3 = {1, 0};
+    r = ppoll(&pfd3, 1, &ts3, NULL);
+    if (r != 1) return 7;
+    if (!(pfd3.revents & POLLWRNORM)) return 8;
+
+    close(fds[0]);
+    close(fds[1]);
     return 42;
 }
 
