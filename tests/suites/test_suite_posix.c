@@ -11,7 +11,7 @@
 //   test_posix_sigaction_siginfo, test_posix_sigaction_flags,
 //   test_posix_ipv6_multicast_roundtrip,
 //   test_posix_rlimit_priority, test_posix_uname, test_posix_times,
-//   test_posix_tar_cpio, test_posix_syslog
+//   test_posix_tar_cpio, test_posix_syslog, test_posix_select
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -55,6 +55,7 @@
 #include <cpio.h>
 #include <syslog.h>
 #include <stdarg.h>
+#include <sys/select.h>
 
 // [from test_posix_extra_ffi]
 // Regression test for #590: additional POSIX FFI functions registered for the
@@ -1947,6 +1948,66 @@ int test_posix_syslog(void) {
     posix_syslog_va_helper("cccc vsyslog test: %s %d %.2f", "ok", 9, 1.5);
 
     closelog();
+    return 42;
+}
+
+// test_posix_select
+// #798: fd_set/FD_SET/FD_ZERO/FD_ISSET over a pipe, select() with a 0
+// timeout (nothing ready yet), then again after writing (ready). pselect()
+// exercised the same way, once with a real sigmask (built from the guest's
+// own sigset_t, translated to a host sigset_t by wrap_pselect_gil) and once
+// with NULL. Also asserts sizeof(struct timeval) == 16 with the tv_usec
+// width fix (previously 4 bytes on macOS's real timeval vs the guest's
+// 8-byte long, leaving the upper half stale after gettimeofday()).
+[[cccc::test(return = 42)]]
+int test_posix_select(void) {
+    if (sizeof(struct timeval) != 16) return 1;
+    if (sizeof(fd_set) != 128) return 2;
+
+    int fds[2];
+    if (pipe(fds) != 0) return 3;
+
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(fds[0], &rfds);
+    struct timeval tv = {0, 0};
+    int r = select(fds[0] + 1, &rfds, 0, 0, &tv);
+    if (r != 0) return 4;
+    if (FD_ISSET(fds[0], &rfds)) return 5;
+
+    if (write(fds[1], "x", 1) != 1) return 6;
+
+    FD_ZERO(&rfds);
+    FD_SET(fds[0], &rfds);
+    struct timeval tv2 = {1, 0};
+    r = select(fds[0] + 1, &rfds, 0, 0, &tv2);
+    if (r != 1) return 7;
+    if (!FD_ISSET(fds[0], &rfds)) return 8;
+
+    char c;
+    if (read(fds[0], &c, 1) != 1 || c != 'x') return 9;
+
+    /* pselect with a real (empty) sigmask */
+    FD_ZERO(&rfds);
+    FD_SET(fds[0], &rfds);
+    struct timespec ts = {0, 0};
+    sigset_t mask;
+    sigemptyset(&mask);
+    r = pselect(fds[0] + 1, &rfds, 0, 0, &ts, &mask);
+    if (r != 0) return 10;
+
+    if (write(fds[1], "y", 1) != 1) return 11;
+
+    /* pselect with NULL sigmask */
+    FD_ZERO(&rfds);
+    FD_SET(fds[0], &rfds);
+    struct timespec ts2 = {1, 0};
+    r = pselect(fds[0] + 1, &rfds, 0, 0, &ts2, 0);
+    if (r != 1) return 12;
+    if (!FD_ISSET(fds[0], &rfds)) return 13;
+
+    close(fds[0]);
+    close(fds[1]);
     return 42;
 }
 

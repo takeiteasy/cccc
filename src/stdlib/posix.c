@@ -25,8 +25,10 @@
 #include <pthread.h>
 #include <pwd.h>
 #include <regex.h>
+#include <signal.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
@@ -134,6 +136,65 @@ static long long wrap_poll_gil(long long fds, long long nfds, long long timeout)
     ExecState state;
     posix_save_and_release_gil(vm, &state);
     int r = poll((struct pollfd *)fds, (nfds_t)nfds, (int)timeout);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+// sys/select.h (#798) -- fd_set is byte-identical between the guest's flat
+// 128-byte representation and the host's real fd_set on both platforms (the
+// underlying word width used to test bits differs -- int32 on macOS, long
+// on Linux -- but both are little-endian, so the byte-level bit layout is
+// the same either way), so it passes straight through. struct timeval now
+// matches the host layout too (see include/sys/time.h). select()/pselect()
+// are blocking, so both release the GIL like poll() above.
+static long long wrap_select_gil(long long nfds, long long readfds, long long writefds,
+                                 long long exceptfds, long long timeout) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)select((int)nfds, (fd_set *)readfds, (fd_set *)writefds,
+                                 (fd_set *)exceptfds, (struct timeval *)timeout);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    int r = select((int)nfds, (fd_set *)readfds, (fd_set *)writefds,
+                   (fd_set *)exceptfds, (struct timeval *)timeout);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+// pselect()'s sigmask can't be passed through: the guest's sigset_t is its
+// own 4-byte bitmask (signals 1..31, bit signo-1 -- see signal.c's
+// wrap_sigemptyset/wrap_sigaddset/etc.), reimplemented natively rather than
+// aliasing the host's real sigset_t (a 128-byte struct on Linux) precisely
+// to avoid an OOB read/write of that pointer (#738). So the guest mask is
+// translated into a real host sigset_t via the host's own sigemptyset/
+// sigaddset before the call -- CCCC's SIG* constants already match the
+// host's numbering (include/signal.h is #ifdef __APPLE__-guarded per
+// platform), so signo translates unchanged.
+static void guest_sigset_to_host(unsigned int guest_mask, sigset_t *host_set) {
+    sigemptyset(host_set);
+    for (int signo = 1; signo < CCCC_NSIG; signo++) {
+        if (guest_mask & (1u << (unsigned)(signo - 1)))
+            sigaddset(host_set, signo);
+    }
+}
+
+static long long wrap_pselect_gil(long long nfds, long long readfds, long long writefds,
+                                  long long exceptfds, long long timeout, long long sigmask) {
+    sigset_t host_set;
+    sigset_t *host_set_ptr = NULL;
+    if (sigmask) {
+        guest_sigset_to_host(*(unsigned int *)sigmask, &host_set);
+        host_set_ptr = &host_set;
+    }
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)pselect((int)nfds, (fd_set *)readfds, (fd_set *)writefds,
+                                  (fd_set *)exceptfds, (const struct timespec *)timeout,
+                                  host_set_ptr);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    int r = pselect((int)nfds, (fd_set *)readfds, (fd_set *)writefds,
+                    (fd_set *)exceptfds, (const struct timespec *)timeout, host_set_ptr);
     posix_acquire_and_restore_gil(vm, &state);
     return (long long)r;
 }
@@ -1212,6 +1273,8 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "pread",   (void*)wrap_pread_gil,   4, 0);
     cc_register_cfunc(vm, "pwrite",  (void*)wrap_pwrite_gil,  4, 0);
     cc_register_cfunc(vm, "poll",    (void*)wrap_poll_gil,    3, 0);
+    cc_register_cfunc(vm, "select",  (void*)wrap_select_gil,  5, 0);
+    cc_register_cfunc(vm, "pselect", (void*)wrap_pselect_gil, 6, 0);
     cc_register_cfunc(vm, "accept",  (void*)wrap_accept_gil,  3, 0);
     cc_register_cfunc(vm, "connect", (void*)wrap_connect_gil, 3, 0);
     cc_register_cfunc(vm, "recv",     (void*)wrap_recv_gil,     4, 0);
