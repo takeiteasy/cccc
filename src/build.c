@@ -2074,7 +2074,6 @@ static int build_target(Builder *ctx, const char *cc,
     StringArray objs = {0};
     int rc = compile_sources(ctx, eff_cc, t, tobjdir, &objs, step, total);
     if (rc != 0) {
-        free(eff_cc);
         goto done;
     }
 
