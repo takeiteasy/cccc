@@ -7,6 +7,8 @@
 
 CCCC adds compile-time macro expansion and AST building capabilities on top of the existing toolchain by adding a new 'comptime' pass that runs between the preprocessor and the AST parser. Functions marked with `[[cccc::comptime]]` are run and expanded inside the VM during compilation and can then be forwarded to your native compiler.
 
+Currently targets **MacOS** (aarch64/x86_64) and **Linux** (aarch64/x86_64). Windows support is planned but not started.
+
 ## Usage
 
 ```#!/bin/sh
@@ -208,19 +210,6 @@ Other libraries used (linked, not vendored): [libcurl](https://curl.se/libcurl/)
 
 ## License
 
-```
-cccc  Copyright (C) 2025 George Watson
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
+```#!/bin/sh
+cat LICENSE | tail -42 | head -16
 ```
