@@ -27,6 +27,10 @@
 #include <regex.h>
 #include <iconv.h>
 #include <langinfo.h>
+#include <locale.h>
+#ifdef __APPLE__
+#include <xlocale.h>
+#endif
 #include <monetary.h>
 #include <search.h>
 #include <nl_types.h>
@@ -1841,9 +1845,14 @@ static long long wrap_posix_spawnp_gil(long long pid_ptr, long long file, long l
 // see the Makefile), so on Linux those names already expand to glibc's
 // real values (e.g. CODESET is 14, not 0) and would silently compare the
 // guest's canonical input against the wrong number.
-static char *wrap_nl_langinfo(nl_item guest_item) {
+// Shared by wrap_nl_langinfo and wrap_nl_langinfo_l (#820) so the
+// translation table/range arithmetic lives in exactly one place.
+// *found is set to 0 for an unrecognized canonical item (caller returns ""
+// without touching the host at all), 1 otherwise.
+static nl_item guest_to_host_nl_item(nl_item guest_item, int *found) {
+    *found = 1;
 #ifdef __APPLE__
-    return nl_langinfo(guest_item);
+    return guest_item;
 #else
     long v = (long)guest_item;
     long host_item;
@@ -1869,12 +1878,31 @@ static char *wrap_nl_langinfo(nl_item guest_item) {
             host_item = 131098 + (v - 21);
         else if (v >= 33 && v <= 44)    // ABMON_1..ABMON_12
             host_item = 131086 + (v - 33);
-        else
-            return "";
+        else {
+            *found = 0;
+            return (nl_item)0;
+        }
         break;
     }
-    return nl_langinfo((nl_item)host_item);
+    return (nl_item)host_item;
 #endif
+}
+
+static char *wrap_nl_langinfo(nl_item guest_item) {
+    int found;
+    nl_item host_item = guest_to_host_nl_item(guest_item, &found);
+    if (!found) return "";
+    return nl_langinfo(host_item);
+}
+
+// nl_langinfo_l() (#820) -- same canonical nl_item translation as
+// nl_langinfo() above, against an explicit locale_t instead of the
+// process-global/per-thread locale.
+static char *wrap_nl_langinfo_l(nl_item guest_item, locale_t loc) {
+    int found;
+    nl_item host_item = guest_to_host_nl_item(guest_item, &found);
+    if (!found) return "";
+    return nl_langinfo_l(host_item, loc);
 }
 
 // ---------------------------------------------------------------------------
@@ -2128,6 +2156,7 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "iconv",       (void*)iconv,       5, 0);
     cc_register_cfunc(vm, "iconv_close", (void*)iconv_close, 1, 0);
     cc_register_cfunc(vm, "nl_langinfo", (void*)wrap_nl_langinfo, 1, 0);
+    cc_register_cfunc(vm, "nl_langinfo_l", (void*)wrap_nl_langinfo_l, 2, 0);
     cc_register_cfunc(vm, "catopen",  (void*)catopen,  2, 0);
     cc_register_cfunc(vm, "catgets",  (void*)catgets,  4, 0);
     cc_register_cfunc(vm, "catclose", (void*)catclose, 1, 0);
@@ -2286,6 +2315,9 @@ void register_posix_functions(VirtualMachine *vm) {
     // empirically: a real double argument round-trips through a "%n"
     // conversion correctly).
     cc_register_variadic_cfunc(vm, "strfmon", (void*)strfmon, 3, 0);
+    // strfmon_l (#820) -- locale_t sits before the format string, so this
+    // is 4 fixed args, not 3 like strfmon above.
+    cc_register_variadic_cfunc(vm, "strfmon_l", (void*)strfmon_l, 4, 0);
 
     // net/if.h (#788) -- interface name<->index resolution, needed to target
     // a specific interface (e.g. loopback) for IPV6_MULTICAST_IF/JOIN_GROUP

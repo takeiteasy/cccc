@@ -7,10 +7,9 @@
  * works here (confirmed empirically: a "%n" conversion with a real double
  * argument round-trips correctly). This differs from vsyslog/vprintf-style
  * va_list-forwarding wrappers, where the limitation documented elsewhere
- * in this codebase actually applies.
- *
- * strfmon_l (needs locale_t) is not provided; see the locale_t and
- * per-thread-locale follow-up ticket.
+ * in this codebase actually applies. strfmon_l follows the same variadic
+ * registration, just with a locale_t (see locale.h) ahead of the format
+ * string.
  */
 
 #ifndef __MONETARY_H
@@ -21,7 +20,9 @@
 #endif
 
 #include "unistd.h"
+#include "locale.h"
 
 extern ssize_t strfmon(char *s, size_t maxsize, const char *format, ...);
+extern ssize_t strfmon_l(char *s, size_t maxsize, locale_t loc, const char *format, ...);
 
 #endif /* __MONETARY_H */

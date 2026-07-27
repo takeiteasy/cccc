@@ -22,6 +22,7 @@
 #endif
 
 #include "sys/types.h"
+#include "locale.h"
 
 #define CODESET     0
 #define D_T_FMT     1
@@ -82,5 +83,10 @@
 #define CRNCYSTR 56
 
 extern char *nl_langinfo(nl_item item);
+
+/* Same canonical nl_item numbering and host translation as nl_langinfo()
+   above, but against an explicit locale_t (see locale.h) instead of the
+   process-global/per-thread locale. */
+extern char *nl_langinfo_l(nl_item item, locale_t loc);
 
 #endif /* __LANGINFO_H */

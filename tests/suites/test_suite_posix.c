@@ -15,7 +15,7 @@
 //   test_posix_statvfs, test_posix_sched, test_posix_locale,
 //   test_posix_spawn, test_posix_iconv, test_posix_langinfo,
 //   test_posix_search, test_posix_strfmon, test_posix_timer_macros,
-//   test_posix_ppoll
+//   test_posix_ppoll, test_posix_locale_t
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -2364,6 +2364,47 @@ int test_posix_ppoll(void) {
 
     close(fds[0]);
     close(fds[1]);
+    return 42;
+}
+
+// test_posix_locale_t
+// #820: the POSIX.1-2008 per-thread locale API. newlocale(LC_ALL_MASK, ...)
+// exercises the canonical->host LC_ALL_MASK special case (glibc's real
+// LC_ALL_MASK covers 12 categories, not the 6 CCCC's bit-by-bit map
+// knows); newlocale(LC_MONETARY_MASK, ...) exercises the single-bit path.
+// nl_langinfo_l/strfmon_l/isalpha_l/toupper_l round-trip against the C
+// locale the same way their non-"_l" counterparts already do.
+[[cccc::test(return = 42)]]
+int test_posix_locale_t(void) {
+    locale_t all = newlocale(LC_ALL_MASK, "C", (locale_t)0);
+    if (!all) return 1;
+
+    locale_t mon = newlocale(LC_MONETARY_MASK, "C", (locale_t)0);
+    if (!mon) return 2;
+
+    locale_t dup = duplocale(all);
+    if (!dup) return 3;
+
+    locale_t prev = uselocale(all);
+    if (!prev) return 4;
+    if (uselocale(LC_GLOBAL_LOCALE) != all) return 5;
+
+    if (strcmp(nl_langinfo_l(RADIXCHAR, all), ".") != 0) return 6;
+    if (nl_langinfo_l(DAY_1, all)[0] == '\0') return 7;
+
+    char buf[64] = {0};
+    ssize_t n = strfmon_l(buf, sizeof(buf), all, "%n", 1234.56);
+    if (n < 0) return 8;
+    if (!strstr(buf, "1234")) return 9;
+
+    if (!isalpha_l('a', all)) return 10;
+    if (isalpha_l('1', all)) return 11;
+    if (toupper_l('a', all) != 'A') return 12;
+
+    freelocale(dup);
+    freelocale(mon);
+    freelocale(all);
+
     return 42;
 }
 
