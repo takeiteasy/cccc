@@ -2126,7 +2126,23 @@ int cccc_call_guest_callback(VirtualMachine *vm, long long fn_value,
         *--vm->shadow_sp = 0;
     *--vm->sp = 0; // sentinel return address, recognized by op_LEV3_fn
     vm->pc = entry;
-    int rc = vm_eval(vm);
+    vm_eval(vm);
+    // vm_eval()'s return value is not a status code on the path taken by a
+    // normal return -- when the dispatch loop's LEV handler pops the
+    // sentinel return address (0) pushed above, it sets vm->pc to
+    // CCCC_INVALID_PC and vm_eval propagates (int)vm->regs[REG_A0]
+    // straight through as its own return value (see the `return (int)
+    // vm->regs[REG_A0]` completion paths in cccc_vm_eval_dispatch,
+    // src/vm.c). That register holds the *callback's own* return value,
+    // which is legitimately negative for the extremely common case of a
+    // three-way comparator (tsearch/tfind/tdelete/lfind/lsearch/qsort/
+    // bsearch), so treating a negative vm_eval() result as failure here
+    // silently misreported every "a < b" comparison as a callback fault.
+    // The actual, unambiguous signal for "did we return cleanly" is
+    // whether vm->pc reached CCCC_INVALID_PC via that sentinel -- any
+    // other value (VM_TRAP_OR_RETURN paths return without reaching the
+    // sentinel) means a genuine trap.
+    int completed_cleanly = (vm->pc == CCCC_INVALID_PC);
     long long ival = vm->regs[REG_A0];
 
     memcpy(vm->regs, saved_regs, sizeof(saved_regs));
@@ -2143,7 +2159,7 @@ int cccc_call_guest_callback(VirtualMachine *vm, long long fn_value,
     vm->dbg.step_out_bp = saved_step_out_bp;
     vm->dbg.debugger_attached = saved_debugger_attached;
 
-    if (rc < 0)
+    if (!completed_cleanly)
         return -1;
     *out_ival = ival;
     return 0;

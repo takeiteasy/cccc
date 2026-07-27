@@ -13,7 +13,8 @@
 //   test_posix_rlimit_priority, test_posix_uname, test_posix_times,
 //   test_posix_tar_cpio, test_posix_syslog, test_posix_select,
 //   test_posix_statvfs, test_posix_sched, test_posix_locale,
-//   test_posix_spawn, test_posix_iconv, test_posix_langinfo
+//   test_posix_spawn, test_posix_iconv, test_posix_langinfo,
+//   test_posix_search
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -61,6 +62,7 @@
 #include <syslog.h>
 #include <stdarg.h>
 #include <sched.h>
+#include <search.h>
 #include <locale.h>
 #include <spawn.h>
 #include <sys/select.h>
@@ -2192,6 +2194,75 @@ int test_posix_langinfo(void) {
 
     char *msg = catgets(cat, 1, 1, "default-message");
     if (strcmp(msg, "default-message") != 0) return 6;
+
+    return 42;
+}
+
+// test_posix_search
+// #809: hcreate/hsearch(ENTER)/hsearch(FIND)/hdestroy; tsearch three ints
+// with a guest comparator, tfind hits, twalk counts leaf/postorder nodes
+// via a guest action, tdelete removes; lfind/lsearch over an int array.
+// hsearch's key must be heap-allocated (strdup), not a string literal --
+// hdestroy() on both macOS and Linux frees every stored key.
+static int search_compar(const void *a, const void *b) {
+    int ia = *(const int *)a, ib = *(const int *)b;
+    return ia - ib;
+}
+
+static int g_twalk_visits;
+
+static void search_action(const void *nodep, VISIT which, int depth) {
+    (void)nodep; (void)depth;
+    if (which == leaf || which == postorder)
+        g_twalk_visits++;
+}
+
+[[cccc::test(return = 42)]]
+int test_posix_search(void) {
+    if (hcreate(16) == 0) return 1;
+
+    ENTRY e1 = { strdup("key1"), (void *)100 };
+    if (!hsearch(e1, ENTER)) return 2;
+
+    ENTRY search_key = { "key1", 0 };
+    ENTRY *found = hsearch(search_key, FIND);
+    if (!found || (long)found->data != 100) return 3;
+
+    ENTRY missing_key = { "nope", 0 };
+    if (hsearch(missing_key, FIND) != 0) return 4;
+
+    hdestroy();
+
+    void *root = 0;
+    static int vals[3] = {3, 1, 2};
+    for (int i = 0; i < 3; i++) {
+        if (!tsearch(&vals[i], &root, search_compar)) return 5;
+    }
+
+    int key1 = 2;
+    void *tf = tfind(&key1, &root, search_compar);
+    if (!tf || *(*(int **)tf) != 2) return 6;
+
+    int key_missing = 99;
+    if (tfind(&key_missing, &root, search_compar) != 0) return 7;
+
+    g_twalk_visits = 0;
+    twalk(root, search_action);
+    if (g_twalk_visits != 3) return 8;
+
+    int key_del = 1;
+    if (!tdelete(&key_del, &root, search_compar)) return 9;
+    if (tfind(&key_del, &root, search_compar) != 0) return 10;
+
+    int arr[4] = {10, 20, 30, 0};
+    size_t n = 3;
+    int target = 20;
+    void *lf = lfind(&target, arr, &n, sizeof(int), search_compar);
+    if (!lf || *(int *)lf != 20) return 11;
+
+    int newval = 40;
+    void *ls = lsearch(&newval, arr, &n, sizeof(int), search_compar);
+    if (!ls || n != 4 || arr[3] != 40) return 12;
 
     return 42;
 }
