@@ -1212,6 +1212,48 @@ static void convert_pp_number(VirtualMachine *vm, Token *tok) {
     char *end;
     long double val = strtold(cleaned, &end);
 
+    // C23 decimal-floating-constant suffixes df/DF/dd/DD/dl/DL (#402) --
+    // exact-case pairs only, no mixed case, per the grammar. strtold() is
+    // still used to locate where the numeric text ends (a plain decimal
+    // digit sequence like "1" in "1dd" is valid strtold() syntax too), but
+    // its *value* is discarded for a decimal literal: strtold() would
+    // binary-round the value before BID ever saw the digit text, defeating
+    // the entire point of a decimal type. tok->fval is left at 0.0 and
+    // tok->dec_digits carries the verbatim (separator-stripped) digit text
+    // instead, encoded to BID bits at codegen time (compile-time only,
+    // requires CCCC_HAS_DECIMAL). A hex-float mantissa never takes a
+    // decimal suffix -- decimal-floating-constant is a distinct grammar
+    // production from hexadecimal-floating-constant -- so "0x1p3df" is
+    // rejected below exactly like today's "0x1p3d" would be.
+    bool is_hex = cleaned[0] == '0' && (cleaned[1] == 'x' || cleaned[1] == 'X');
+    Type *dec_ty = NULL;
+    if (!is_hex && end[0] && end[1]) {
+        if ((end[0] == 'd' && end[1] == 'f') || (end[0] == 'D' && end[1] == 'F'))
+            dec_ty = ty_decimal32;
+        else if ((end[0] == 'd' && end[1] == 'd') || (end[0] == 'D' && end[1] == 'D'))
+            dec_ty = ty_decimal64;
+        else if ((end[0] == 'd' && end[1] == 'l') || (end[0] == 'D' && end[1] == 'L'))
+            dec_ty = ty_decimal128;
+    }
+
+    if (dec_ty) {
+        if (vm->compiler.c_std < CCCC_STD_C23)
+            error_tok(vm, tok, "_Decimal literal suffixes are not available before C23");
+        char *digits_end = end; // numeric text ends here, before the suffix
+        end += 2;
+        if (cleaned + j != end)
+            error_tok(vm, tok, "invalid numeric constant");
+        size_t digit_len = (size_t)(digits_end - cleaned);
+        char *digits = arena_alloc(&vm->compiler.parser_arena, digit_len + 1);
+        memcpy(digits, cleaned, digit_len);
+        digits[digit_len] = '\0';
+        tok->kind = TK_NUM;
+        tok->fval = 0.0; // deliberately not strtold's value -- see above
+        tok->dec_digits = digits;
+        tok->ty = dec_ty;
+        return;
+    }
+
     Type *ty;
     if (*end == 'f' || *end == 'F') {
         ty = ty_float;

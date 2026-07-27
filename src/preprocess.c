@@ -4650,6 +4650,14 @@ void init_macros(VirtualMachine *vm) {
     define_macro(vm, "__SIZE_TYPE__", "unsigned long");
     define_macro(vm, "__STDC_HOSTED__", "1");
     define_macro(vm, "__STDC_NO_COMPLEX__", "1");
+#ifdef CCCC_HAS_DECIMAL
+    // #402: real IEEE-754-2008 decimal FP via Intel BID. This is the
+    // predefine a guest program checks to tell the two build configurations
+    // apart -- decimal literals/arithmetic are a compile error without it.
+    // __STDC_DEC_FP__ is the older TS 18661-2 spelling some code still checks.
+    define_macro(vm, "__STDC_IEC_60559_DFP__", "202311L");
+    define_macro(vm, "__STDC_DEC_FP__", "202311L");
+#endif
     define_macro(vm, "__STDC_UTF_16__", "1");
     define_macro(vm, "__STDC_UTF_32__", "1");
     define_std_macros(vm);

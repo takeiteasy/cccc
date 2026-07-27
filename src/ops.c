@@ -2564,12 +2564,18 @@ static inline int op_CHKT3_fn(VirtualMachine *vm) {
     }
 
     if (actual_type != (unsigned char)expected_type) {
+        // Positional, indexed by TypeKind -- must stay in exact sync with
+        // the enum in cccc.h. TY_VECTOR (22) was missing here before #402
+        // (a pre-existing overflow: this diagnostic's expected/actual name
+        // silently fell to "unknown" for any vector-typed CHKT3 mismatch);
+        // fixed in passing alongside appending the three decimal kinds.
         static const char *type_names[] = {
             "void",     "bool",   "char",        "short",  "int",
             "long",     "float",  "double",      "long double", "enum",
             "pointer",  "function", "array",     "vla",    "struct",
             "union",    "error",  "block",       "complex", "nullptr_t",
-            "_BitInt",  "auto"};
+            "_BitInt",  "auto",   "vector",
+            "_Decimal32", "_Decimal64", "_Decimal128"};
         const int n_type_names = (int)(sizeof(type_names) / sizeof(type_names[0]));
 
         const char *expected_name =
@@ -3343,6 +3349,94 @@ static inline int op_WIDE_USHR_fn(VirtualMachine *vm) {
     __cccc_bitint_ushr((uint64_t *)vm->regs[REG_A0], (uint64_t *)vm->regs[REG_A1],
                         vm->regs[REG_A2], (int)vm->regs[REG_A3],
                         (int)vm->regs[REG_A4]);
+    return 0;
+}
+
+// ========== C23 _Decimal32/64/128 (#402) ==========
+// Thin dispatch into src/stdlib/decimal.c's BID-backed shim. Same
+// zero-operand, fixed-A-register shape as WIDE_* above -- see the OPS_X
+// comment in cccc.h for why. Guest-pointer validation (CHKP3) for the
+// address operands is emitted by codegen before these ops, exactly like
+// the WIDE_* arithmetic ops; the handlers here just dereference directly.
+static inline int op_DADD_fn(VirtualMachine *vm) {
+    cccc_dec_binop('+', (int)vm->regs[REG_A3], (void *)vm->regs[REG_A0],
+                   (const void *)vm->regs[REG_A1], (const void *)vm->regs[REG_A2]);
+    return 0;
+}
+
+static inline int op_DSUB_fn(VirtualMachine *vm) {
+    cccc_dec_binop('-', (int)vm->regs[REG_A3], (void *)vm->regs[REG_A0],
+                   (const void *)vm->regs[REG_A1], (const void *)vm->regs[REG_A2]);
+    return 0;
+}
+
+static inline int op_DMUL_fn(VirtualMachine *vm) {
+    cccc_dec_binop('*', (int)vm->regs[REG_A3], (void *)vm->regs[REG_A0],
+                   (const void *)vm->regs[REG_A1], (const void *)vm->regs[REG_A2]);
+    return 0;
+}
+
+static inline int op_DDIV_fn(VirtualMachine *vm) {
+    cccc_dec_binop('/', (int)vm->regs[REG_A3], (void *)vm->regs[REG_A0],
+                   (const void *)vm->regs[REG_A1], (const void *)vm->regs[REG_A2]);
+    return 0;
+}
+
+static inline int op_DNEG_fn(VirtualMachine *vm) {
+    cccc_dec_neg((int)vm->regs[REG_A2], (void *)vm->regs[REG_A0],
+                 (const void *)vm->regs[REG_A1]);
+    return 0;
+}
+
+static inline int op_DCMP_fn(VirtualMachine *vm) {
+    int w = (int)vm->regs[REG_A2];
+    int result = cccc_dec_cmp(w, (const void *)vm->regs[REG_A0],
+                              (const void *)vm->regs[REG_A1]);
+    vm->regs[REG_A0] = result;
+    return 0;
+}
+
+static inline int op_DFROMI_fn(VirtualMachine *vm) {
+    cccc_dec_from_int((int)vm->regs[REG_A2], (void *)vm->regs[REG_A0],
+                      (long long)vm->regs[REG_A1], vm->regs[REG_A3] != 0);
+    return 0;
+}
+
+static inline int op_DTOI_fn(VirtualMachine *vm) {
+    long long out = 0;
+    cccc_dec_to_int((int)vm->regs[REG_A1], (const void *)vm->regs[REG_A0],
+                    &out, vm->regs[REG_A2] != 0);
+    vm->regs[REG_A0] = out;
+    return 0;
+}
+
+static inline int op_DFROMBITS_fn(VirtualMachine *vm) {
+    cccc_dec_from_bin((int)vm->regs[REG_A2], (void *)vm->regs[REG_A0],
+                      (uint64_t)vm->regs[REG_A1], vm->regs[REG_A3] != 0);
+    return 0;
+}
+
+static inline int op_DTOBITS_fn(VirtualMachine *vm) {
+    uint64_t bits = 0;
+    cccc_dec_to_bin((int)vm->regs[REG_A1], (const void *)vm->regs[REG_A0],
+                    vm->regs[REG_A2] != 0, &bits);
+    vm->regs[REG_A0] = (long long)bits;
+    return 0;
+}
+
+static inline int op_DCVT_fn(VirtualMachine *vm) {
+    cccc_dec_convert((int)vm->regs[REG_A2], (int)vm->regs[REG_A3],
+                     (void *)vm->regs[REG_A0], (const void *)vm->regs[REG_A1]);
+    return 0;
+}
+
+static inline int op_DFMT_fn(VirtualMachine *vm) {
+    char *buf = (char *)vm->regs[REG_A0];
+    size_t n = (size_t)vm->regs[REG_A1];
+    const void *val = (const void *)vm->regs[REG_A2];
+    int w = (int)vm->regs[REG_A3];
+    int written = cccc_dec_format(buf, n, val, w);
+    vm->regs[REG_A0] = written;
     return 0;
 }
 

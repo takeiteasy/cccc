@@ -512,6 +512,15 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
     case TY_LDOUBLE:
         fprintf(f, "long double");
         break;
+    case TY_DECIMAL32:
+        fprintf(f, "_Decimal32");
+        break;
+    case TY_DECIMAL64:
+        fprintf(f, "_Decimal64");
+        break;
+    case TY_DECIMAL128:
+        fprintf(f, "_Decimal128");
+        break;
     case TY_PTR:
         serialize_type_decl(f, ctx, ty, "");
         break;
@@ -636,7 +645,15 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
 
     switch (node->kind) {
     case ND_NUM:
-        if (node->ty && is_flonum(node->ty))
+        if (node->ty && is_decimal(node->ty)) {
+            // #402: node->fval/val are never populated for a decimal literal
+            // (see tokenize.c) -- dec_digits plus the width-appropriate
+            // suffix is the only way to round-trip it back to valid C source.
+            const char *suffix = dec_width_code(node->ty) == 0 ? "df"
+                                : dec_width_code(node->ty) == 1 ? "dd"
+                                                                 : "dl";
+            fprintf(f, "%s%s", node->dec_digits ? node->dec_digits : "0", suffix);
+        } else if (node->ty && is_flonum(node->ty))
             fprintf(f, "%Lg", node->fval);
         else
             fprintf(f, "%lld", (long long)node->val);
@@ -1019,6 +1036,18 @@ static void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *
         } else if (var->ty->kind == TY_DOUBLE || var->ty->kind == TY_LDOUBLE) {
             double dv; memcpy(&dv, var->init_data, 8);
             fprintf(f, "%.17g", dv);
+        } else if (is_decimal(var->ty)) {
+            // #402: raw BID bytes in init_data -> C source text. Requires
+            // CCCC_HAS_DECIMAL=1 (the same build that could have produced
+            // these bytes in the first place); cccc_dec_format returns -1
+            // in the off build, which can't happen here.
+            char buf[80];
+            int w = dec_width_code(var->ty);
+            const char *suffix = w == 0 ? "df" : w == 1 ? "dd" : "dl";
+            if (cccc_dec_format(buf, sizeof buf, var->init_data, w) >= 0)
+                fprintf(f, "%s%s", buf, suffix);
+            else
+                fprintf(f, "0%s", suffix);
         } else if (var->ty->kind == TY_BOOL || var->ty->kind == TY_CHAR ||
                    var->ty->kind == TY_SHORT || var->ty->kind == TY_INT ||
                    var->ty->kind == TY_LONG || var->ty->kind == TY_ENUM ||

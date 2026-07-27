@@ -72,4 +72,54 @@
 extern int __cccc_flt_rounds(void);
 #define FLT_ROUNDS (__cccc_flt_rounds())
 
+/* C23 IEC 60559 decimal floating-point (#402): declarations, sizeof, and
+ * struct layout for _Decimal32/64/128 always work; these characteristic
+ * macros are only meaningful (and only predefined as available) once the
+ * program is built with CCCC_HAS_DECIMAL=1 -- the same condition
+ * __STDC_IEC_60559_DFP__ signals. Values are the IEEE 754-2008 / ISO/IEC
+ * TS 18661-2 decimal32/64/128 format constants (7/16/34 significant
+ * decimal digits; the same values GCC's decfloat.h and glibc use). */
+#ifdef __STDC_IEC_60559_DFP__
+
+#define DEC_EVAL_METHOD 0 /* each decimal operation/constant evaluated in
+                              its own type -- this implementation does not
+                              promote to a wider decimal type internally */
+
+#define DEC32_MANT_DIG  7
+#define DEC64_MANT_DIG  16
+#define DEC128_MANT_DIG 34
+
+#define DEC32_MIN_EXP  (-94)
+#define DEC64_MIN_EXP  (-382)
+#define DEC128_MIN_EXP (-6142)
+
+#define DEC32_MAX_EXP  97
+#define DEC64_MAX_EXP  385
+#define DEC128_MAX_EXP 6145
+
+#define DEC32_MAX  9.999999E96DF
+#define DEC64_MAX  9.999999999999999E384DD
+#define DEC128_MAX 9.999999999999999999999999999999999E6144DL
+
+#define DEC32_MIN  1E-95DF
+#define DEC64_MIN  1E-383DD
+#define DEC128_MIN 1E-6143DL
+
+#define DEC32_EPSILON  1E-6DF
+#define DEC64_EPSILON  1E-15DD
+#define DEC128_EPSILON 1E-33DL
+
+#define DEC32_TRUE_MIN  1E-101DF
+#define DEC64_TRUE_MIN  1E-398DD
+#define DEC128_TRUE_MIN 1E-6176DL
+
+#define DEC32_SUBNORMAL_MIN  DEC32_TRUE_MIN
+#define DEC64_SUBNORMAL_MIN  DEC64_TRUE_MIN
+#define DEC128_SUBNORMAL_MIN DEC128_TRUE_MIN
+
+#define DEC_INFINITY (__builtin_infd64())
+#define DEC_NAN      (__builtin_nand64(""))
+
+#endif /* __STDC_IEC_60559_DFP__ */
+
 #endif /* __FLOAT_H */

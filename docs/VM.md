@@ -655,6 +655,93 @@ safety instrumentation is not active.
 | `FLDR_INDEX_F32` | `fregs[rd] = *(float*)(regs[base] + regs[index] * scale + offset)` |
 | `FSTR_INDEX_F32` | `*(float*)(regs[base] + regs[index] * scale + offset) = fregs[rd]` |
 
+## Decimal Floating-Point
+
+`_Decimal32/64/128` (C23) use real IEEE-754-2008 decimal encoding via the
+Intel BID library, opt-in with `make CCCC_HAS_DECIMAL=1`. The library is
+never vendored: `tools/fetch_intel_bid.sh` downloads (or reuses an
+already-present tarball), verifies its SHA3-256, and builds `libbid.a` into
+a gitignored `build/intel-bid/` prefix.
+
+```
+tools/fetch_intel_bid.sh
+make CCCC_HAS_DECIMAL=1 CCCC_BID_PREFIX=build/intel-bid
+```
+
+Without the flag, `_Decimal32/64/128` declarations, `sizeof`, `_Alignof`,
+typedefs, and struct/array layout all work normally (they have their own
+`TypeKind` values, `TY_DECIMAL32/64/128`, sized 4/8/16 bytes); only decimal
+*literals and arithmetic* require the library, and are a clean compile
+error without it. A guest program distinguishes the two configurations via
+the `__STDC_IEC_60559_DFP__` predefine (also exposed as the legacy
+`__STDC_DEC_FP__` spelling).
+
+### Value representation
+
+A decimal value is **address-based**, like a small struct or a wide
+`_BitInt(N>64)` value — never routed through `fregs[]`/`vregs[]`. This is
+what lets `_Decimal128` (16 bytes) work with no special case: every width
+is "a pointer to a 4/8/16-byte BID buffer" carried in an ordinary integer
+register. Local/temporary storage comes from the same per-function scratch
+stack pool wide `_BitInt` uses (`alloc_decimal_temp`, rounding up to whole
+64-bit words). Struct members, array elements, and function locals get
+their storage sized directly from `ty->size` like any other type.
+
+### Opcodes
+
+All twelve decimal opcodes share one convention: **zero operand words,
+fixed argument registers** (`REG_A0`–`REG_A3`), identical in shape to the
+`WIDE_ADD`/`WIDE_SUB`/… family (#456) used for wide `_BitInt`. Arguments are
+loaded into place with ordinary `MOV3`/`LEA3`/`LI3` immediately beforehand;
+the opcode itself just performs the operation and is treated as fully
+**opaque** by the optimizer (`op_implicit_abi_regs`, `src/optimize.c`) —
+the same conservative treatment already used for `WIDE_*`/`CALLF`, which is
+what makes this safe: no decimal op is ever RRRS-operand-decoded, so there
+is no `op_byte0_is_int_src`-style classification to keep in sync.
+
+`width` is `0` = `_Decimal32`, `1` = `_Decimal64`, `2` = `_Decimal128`.
+
+| Opcode | Arguments | Effect |
+|--------|-----------|--------|
+| `DADD` | `A0`=dst addr, `A1`=a addr, `A2`=b addr, `A3`=width | `*dst = *a + *b` |
+| `DSUB` | same | `*dst = *a - *b` |
+| `DMUL` | same | `*dst = *a * *b` |
+| `DDIV` | same | `*dst = *a / *b` |
+| `DNEG` | `A0`=dst addr, `A1`=a addr, `A2`=width | `*dst = -*a` |
+| `DCMP` | `A0`=a addr, `A1`=b addr, `A2`=width | `A0` result: `0`=EQ, `1`=LT, `2`=GT, `3`=UNORDERED |
+| `DFROMI` | `A0`=dst addr, `A1`=int64 value, `A2`=width, `A3`=is_unsigned | `*dst = (decimal)value` |
+| `DTOI` | `A0`=src addr, `A1`=width, `A2`=is_unsigned | `A0` = `(int64)*src`, truncating (C semantics) |
+| `DFROMBITS` | `A0`=dst addr, `A1`=raw f32/f64 bits, `A2`=width, `A3`=src_is_f32 | `*dst = (decimal)binary_value` |
+| `DTOBITS` | `A0`=src addr, `A1`=width, `A2`=dst_is_f32 | `A0` = raw f32/f64 bit pattern of `(binary)*src` |
+| `DCVT` | `A0`=dst addr, `A1`=src addr, `A2`=dst_width, `A3`=src_width | `*dst = (decimal)*src` (decimal-to-decimal) |
+| `DFMT` | `A0`=buf, `A1`=n, `A2`=val addr, `A3`=width | `A0` = bytes that would have been written (`snprintf` contract) |
+
+`DFROMBITS`/`DTOBITS` move the binary float side as a raw bit pattern via
+`FR2R`/`FR2R_F32` and `R2FR`/`R2FR_F32` (the existing float-register
+bit-reinterpret opcodes) rather than through memory — no decimal opcode
+ever touches an `FReg` directly. `DCMP`'s four-way result (rather than a
+plain `-1/0/1`) is what lets `==`/`!=`/`<`/`<=` all be derived correctly
+even when one operand is NaN; `>`/`>=` never reach codegen as distinct
+opcodes — like binary float, they're normalized to a swapped `<`/`<=` at
+parse time.
+
+Formatting is deliberately **not** part of `<stdio.h>`'s `printf`/`scanf` in
+this phase (`%Hf`/`%Df`/`%DDf` integration is a follow-up): the only
+guest-visible formatting entry point is `__builtin_decimal_to_chars(buf, n,
+decimal_value)`, which lowers directly to `DFMT`.
+
+### ABI
+
+By-value decimal arguments and returns reuse the vector-by-value struct-ABI
+machinery (#714): a caller-frame scratch-slot copy for arguments, `RETBUF`
++ copy for returns. `CALLT` (tail-call optimization) is excluded for any
+decimal-returning call, for the same reframe-reuse hazard reason vector and
+wide-`_BitInt` returns are (#716) — the value's scratch slot lives in the
+callee's own frame, so a tail call reusing that frame would return a
+dangling pointer. Passing a decimal value through a variadic argument or a
+native FFI call is rejected with a diagnostic (no `libffi` decimal type,
+and no `va_arg` decimal case yet — both deferred to the follow-up ticket).
+
 ## Bytecode File Format (`.c4`)
 
 Saved bytecode files are self-contained and can be loaded into a fresh VM instance without recompilation.  The format is versioned (current version **1**).

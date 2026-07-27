@@ -54,6 +54,9 @@ static const char *type_kind_name(TypeKind kind) {
         case TY_UNION:   return "union";
         case TY_NULLPTR_T: return "nullptr_t";
         case TY_BITINT:    return "_BitInt";
+        case TY_DECIMAL32:  return "decimal32";
+        case TY_DECIMAL64:  return "decimal64";
+        case TY_DECIMAL128: return "decimal128";
         default:           return "unknown";
     }
 }

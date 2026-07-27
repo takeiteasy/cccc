@@ -1181,6 +1181,9 @@ static void emit_restore_restrict_cache_regs(VirtualMachine *vm) {
 // a raw MCPY) that clobbers REG_A0-A7, just like a real function call — so
 // callers that decide whether to save argument registers around a
 // subexpression (contains_funcall) must treat these the same way.
+// _Decimal32/64/128 (#402) arithmetic/comparisons/casts clobber REG_A0-A3
+// via the same opaque-opcode convention (DADD/DCMP/DFROMI/...), so they
+// need identical treatment here.
 static bool is_wide_bitint_helper_op(Node *node) {
     if (!node)
         return false;
@@ -1189,9 +1192,12 @@ static bool is_wide_bitint_helper_op(Node *node) {
     case ND_BITAND: case ND_BITOR: case ND_BITXOR: case ND_SHL: case ND_SHR:
     case ND_EQ: case ND_NE: case ND_LT: case ND_LE: case ND_CAST:
     case ND_NEG: case ND_BITNOT:
-        return node->lhs && (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->ty));
+        return node->lhs && (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->ty) ||
+                              is_decimal(node->lhs->ty) || is_decimal(node->ty));
     case ND_ASSIGN:
-        return is_wide_bitint(node->ty);
+        return is_wide_bitint(node->ty) || is_decimal(node->ty);
+    case ND_DECIMAL_TO_CHARS:
+        return true;
     default:
         return false;
     }
@@ -1357,7 +1363,7 @@ static bool tail_arg_carries_frame_addr(Obj *fn, Node *n) {
 static long long return_repr_key(Type *ty) {
     if (!ty)
         return -1;
-    if (is_complex(ty) || is_vector(ty) || is_wide_bitint(ty))
+    if (is_complex(ty) || is_vector(ty) || is_wide_bitint(ty) || is_decimal(ty))
         return -1;
     switch (ty->kind) {
     case TY_STRUCT: case TY_UNION: case TY_ARRAY: case TY_VLA:
@@ -1429,6 +1435,12 @@ static bool can_emit_tail_call(VirtualMachine *vm, Node *expr) {
     // explicitly so the invariant holds even if the strip logic changes.
     if (expr->ty && is_wide_bitint(expr->ty))
         return false;
+    // _Decimal32/64/128 (#402): same frame-reuse hazard and same
+    // return_repr_key() negative-key argument as wide _BitInt above -- a
+    // decimal return also materialises into a frame-local scratch slot
+    // (alloc_decimal_temp), so CALLT is excluded explicitly here too.
+    if (expr->ty && is_decimal(expr->ty))
+        return false;
     int nargs = 0;
     for (Node *a = expr->args; a; a = a->next) {
         nargs++;
@@ -1440,6 +1452,11 @@ static bool can_emit_tail_call(VirtualMachine *vm, Node *expr) {
         // overwrites the slot -- same hazard class as #716/#718. Reject
         // outright rather than trying to teach the escape scan about it.
         if (is_vector(a->ty))
+            return false;
+        // #402: a decimal arg's address is likewise a compiler-synthesized
+        // scratch slot in *this* frame (gen_decimal_arg_ptr) -- same #714
+        // hazard, same rejection.
+        if (is_decimal(a->ty))
             return false;
     }
     if (nargs > 8)
@@ -1560,6 +1577,8 @@ static int var_stack_slots(Obj *var) {
         return (var->ty->size + 7) / 8;
     if (var->ty->kind == TY_STRUCT || var->ty->kind == TY_UNION ||
         var->ty->kind == TY_COMPLEX || var->ty->kind == TY_VECTOR)
+        return (var->ty->size + 7) / 8;
+    if (is_decimal(var->ty) && var->ty->size > 8) // #402: _Decimal128 is 2 words
         return (var->ty->size + 7) / 8;
     return 1;
 }
@@ -2082,6 +2101,18 @@ static long long alloc_wide_bitint_temp(VirtualMachine *vm, int words) {
     return -(long long)(vm->compiler.ent3_base_stack + vm->compiler.ent3_extra_stack);
 }
 
+// Allocate a fresh stack slot for a _Decimal32/64/128 intermediate result
+// (#402). Reuses alloc_wide_bitint_temp's per-function scratch pool,
+// rounding up to whole 64-bit words (4 bytes for _Decimal32 still costs a
+// full word -- same tradeoff wide _BitInt already makes for narrow widths).
+// Same address-based rationale applies: written via DADD/DSUB/... or the
+// BID shim, never through STR_LOCAL, so no MARKI/MARKW mark is emitted and
+// the ND_VAR read-side uninit guard must exclude decimal (see is_decimal
+// checks alongside is_wide_bitint below).
+static long long alloc_decimal_temp(VirtualMachine *vm, int bytes) {
+    return alloc_wide_bitint_temp(vm, (bytes + 7) / 8);
+}
+
 // Materialize a vector-typed argument into a fresh frame scratch slot sized
 // to the argument's own width and load its address into addr_reg, ready to
 // pass like a struct-by-value arg (#714). Unlike a struct arg -- whose
@@ -2139,6 +2170,9 @@ static void gen_wide_bitint_unary(VirtualMachine *vm, Node *node, int dest_reg,
 // (if/while/for/?: conditions, &&, ||, casts to _Bool). For ordinary scalars
 // the value the branch ops test is already correct; wide _BitInt operands are
 // address-based, so OR-reduce their words to a single 0/1 via the runtime.
+// _Decimal32/64/128 (#402) is likewise address-based -- test != 0 via DCMP
+// against a zero literal of the same width (C truthiness: nonzero is true,
+// including -0, which DCMP's quiet_equal already treats as == 0).
 static void gen_cond_expr(VirtualMachine *vm, Node *node, int dest_reg) {
     gen_expr(vm, node, dest_reg);
     if (is_wide_bitint(node->ty)) {
@@ -2146,6 +2180,30 @@ static void gen_cond_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         emit_li3(vm, REG_A1, node->ty->size / 8);
         emit_wide_helper(vm, "__cccc_bitint_nonzero", 2);
         emit_mov3(vm, dest_reg, REG_A0);
+    } else if (is_decimal(node->ty)) {
+        int w = dec_width_code(node->ty);
+        unsigned char zero_bits[16] = {0};
+        long long offset = vm->data_ptr - vm->data_seg;
+        offset = (offset + (node->ty->align - 1)) & ~(long long)(node->ty->align - 1);
+        vm->data_ptr = vm->data_seg + offset;
+        check_data_capacity(vm, offset + node->ty->size);
+        if (!cccc_dec_encode_literal("0", w, zero_bits))
+            error_tok(vm, node->tok,
+                      "_Decimal requires a build with CCCC_HAS_DECIMAL=1");
+        memcpy(vm->data_ptr, zero_bits, (size_t)node->ty->size);
+        vm->data_ptr += node->ty->size;
+
+        int r_zero = alloc_temp_reg();
+        emit_lda3(vm, r_zero, offset);
+        emit_mov3(vm, REG_A0, dest_reg);
+        emit_mov3(vm, REG_A1, r_zero);
+        emit_li3(vm, REG_A2, w);
+        emit_wide_op(vm, DCMP); // A0 = 0=EQ/1=LT/2=GT/3=UNORDERED
+        int tmp = alloc_temp_reg();
+        emit_li3(vm, tmp, 0);
+        emit_rrr(vm, SNE3, dest_reg, REG_A0, tmp); // nonzero iff code != EQ(0)
+        free_temp_reg(tmp);
+        free_temp_reg(r_zero);
     }
 }
 
@@ -2215,6 +2273,10 @@ static void emit_load_ex(VirtualMachine *vm, Type *ty, int rd, int rs_addr, bool
         }
         if (!is_wide_bitint(ty))
             emit_bitint_trunc(vm, ty, rd);
+    } else if (is_decimal(ty)) {
+        // _Decimal32/64/128 (#402): address-based, same as wide _BitInt.
+        // rd already holds the address (rs_addr); no value load needed.
+        if (rd != rs_addr) emit_mov3(vm, rd, rs_addr);
     } else if (is_flonum(ty)) {
         emit_rr(vm, ty->kind == TY_FLOAT ? FLDR_F32 : FLDR, rd, rs_addr);
     } else {
@@ -2375,7 +2437,7 @@ static bool emit_indexed_load_if_possible(VirtualMachine *vm, Node *node, int de
     if (!node || node->kind != ND_DEREF || !node->lhs ||
         node->ty->kind == TY_ARRAY || node->ty->kind == TY_STRUCT ||
         node->ty->kind == TY_UNION || node->ty->kind == TY_COMPLEX ||
-        is_wide_bitint(node->ty))
+        is_wide_bitint(node->ty) || is_decimal(node->ty)) // #402: address-based
         return false;
     IndexedAddr idx = {};
     if (!match_indexed_addr(vm, node->lhs, &idx))
@@ -2423,7 +2485,7 @@ static bool emit_indexed_store_if_possible(VirtualMachine *vm, Node *lhs, Type *
                                            int value_reg) {
     if (!lhs || lhs->kind != ND_DEREF || !lhs->lhs ||
         ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_COMPLEX ||
-        is_wide_bitint(ty))
+        is_wide_bitint(ty) || is_decimal(ty)) // #402: address-based
         return false;
     IndexedAddr idx = {};
     if (!match_indexed_addr(vm, lhs->lhs, &idx))
@@ -2695,6 +2757,13 @@ static void emit_store_ex(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr,
         } else {
             emit_rr(vm, STR_D, rd_val, rs_addr);
         }
+    } else if (is_decimal(ty)) {
+        // _Decimal32/64/128 (#402): rd_val holds the source address (like
+        // wide _BitInt); rs_addr is the destination. Plain memcpy.
+        emit_mov3(vm, REG_A0, rs_addr);
+        emit_mov3(vm, REG_A1, rd_val);
+        emit_li3(vm, REG_A2, ty->size);
+        emit(vm, MCPY);
     } else if (is_flonum(ty)) {
         emit_rr(vm, ty->kind == TY_FLOAT ? FSTR_F32 : FSTR, rd_val, rs_addr);
     } else {
@@ -3233,7 +3302,8 @@ static bool is_simple_local_scalar(VirtualMachine *vm, Node *node) {
            node->ty->kind != TY_STRUCT &&
            node->ty->kind != TY_UNION &&
            node->ty->kind != TY_COMPLEX &&
-           !is_wide_bitint(node->ty);
+           !is_wide_bitint(node->ty) &&
+           !is_decimal(node->ty); // #402: address-based, same as wide _BitInt
 }
 
 // True iff gen_addr(node) is guaranteed to produce a bp-relative address of
@@ -3293,7 +3363,8 @@ static bool addr_is_local_frame(VirtualMachine *vm, Node *node) {
         if (belongs_to_outer_function(current_fn, var))
             return false;
         if (var->is_param && (var->ty->kind == TY_STRUCT || var->ty->kind == TY_UNION ||
-                               var->ty->kind == TY_VECTOR || is_wide_bitint(var->ty)))
+                               var->ty->kind == TY_VECTOR || is_wide_bitint(var->ty) ||
+                               is_decimal(var->ty))) // #402: passed by pointer too
             return false;
         return true;
     }
@@ -3472,7 +3543,8 @@ static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
                     if (node->var->is_param && (node->ty->kind == TY_STRUCT ||
                                                 node->ty->kind == TY_UNION ||
                                                 node->ty->kind == TY_VECTOR ||
-                                                is_wide_bitint(node->ty))) {
+                                                is_wide_bitint(node->ty) ||
+                                                is_decimal(node->ty))) {
                         // Compiler-internal: slot address only feeds the
                         // immediate load below (#676), not the struct's own
                         // data address.
@@ -4070,6 +4142,49 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         emit(vm, BTRAP);
         return;
 
+    case ND_DECIMAL_TO_CHARS: {
+        // __builtin_decimal_to_chars(buf, n, decimal_val) (#402): lowers
+        // directly to DFMT. buf(A0), n(A1), val(A2)=address, width(A3).
+        //
+        // node->cond (the decimal value) is evaluated FIRST, before buf/n:
+        // any decimal subexpression (e.g. `x - y`) emits an opaque DADD/
+        // DSUB/... op, and emit_wide_op's reset_temp_regs() call marks
+        // every temp register "free" again for the *next* allocation --
+        // exactly like is_wide_bitint_helper_op's callers already have to
+        // account for. Evaluating it last, after buf/n were already parked
+        // in T-registers, let a later gen_expr()-internal alloc_temp_reg()
+        // legally reclaim one of those "freed" T-registers mid-evaluation
+        // and silently clobber buf/n's value (caught empirically: buf's
+        // address arrived 48 bytes off at runtime). Evaluating the risky
+        // operand first sidesteps the whole hazard rather than requiring
+        // a push/pop spill for buf/n.
+        int r_val = alloc_temp_reg();
+        gen_expr(vm, node->cond, r_val); // decimal operand -> its address
+        mark_temp_reg_used(r_val);
+        int r_buf = alloc_temp_reg();
+        gen_expr(vm, node->lhs, r_buf);
+        mark_temp_reg_used(r_buf);
+        int r_n = alloc_temp_reg();
+        gen_expr(vm, node->rhs, r_n);
+        mark_temp_reg_used(r_n);
+
+        emit_mov3(vm, REG_A0, r_buf);
+        emit_mov3(vm, REG_A1, r_n);
+        emit_mov3(vm, REG_A2, r_val);
+        emit_li3(vm, REG_A3, dec_width_code(node->cond->ty));
+        if (vm->flags & CCCC_POINTER_CHECKS) {
+            emit_rr(vm, CHKP3, REG_A0, 0);
+            emit_rr(vm, CHKP3, REG_A2, 0);
+        }
+        emit_wide_op(vm, DFMT);
+        if (dest_reg != REG_ZERO)
+            emit_mov3(vm, dest_reg, REG_A0);
+        free_temp_reg(r_n);
+        free_temp_reg(r_buf);
+        free_temp_reg(r_val);
+        return;
+    }
+
     case ND_NUM:
         if (is_flonum(node->ty)) {
             long long offset = vm->data_ptr - vm->data_seg;
@@ -4089,6 +4204,32 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             emit_lda3(vm, temp, offset);
             emit_rr(vm, node->ty->kind == TY_FLOAT ? FLDR_F32 : FLDR, dest_reg, temp);
             free_temp_reg(temp);
+        } else if (is_decimal(node->ty)) {
+            // _Decimal32/64/128 literal (#402): encoded to BID bits at
+            // COMPILE time (unlike the wide-_BitInt literal below, which
+            // resolves at runtime) -- there is no runtime global-init path
+            // for a static/global decimal initializer to hook into, so the
+            // bytes must already be correct in the data segment. A decimal
+            // value is address-based (never loaded into an FReg/int reg),
+            // so dest_reg receives the literal's address, not a loaded value.
+            if (!node->dec_digits)
+                error_tok(vm, node->tok,
+                          "internal error: _Decimal literal missing digit text");
+
+            unsigned char bits[16];
+            if (!cccc_dec_encode_literal(node->dec_digits, dec_width_code(node->ty), bits))
+                error_tok(vm, node->tok,
+                          "_Decimal literals require a build with CCCC_HAS_DECIMAL=1 "
+                          "(run tools/fetch_intel_bid.sh, then `make CCCC_HAS_DECIMAL=1`)");
+
+            long long offset = vm->data_ptr - vm->data_seg;
+            offset = (offset + (node->ty->align - 1)) & ~(long long)(node->ty->align - 1);
+            vm->data_ptr = vm->data_seg + offset;
+            check_data_capacity(vm, offset + node->ty->size);
+            memcpy(vm->data_ptr, bits, (size_t)node->ty->size);
+            vm->data_ptr += node->ty->size;
+
+            emit_lda3(vm, dest_reg, offset);
         } else if (is_wide_bitint(node->ty)) {
             // wb/uwb literal wider than 64 bits: materialize at runtime via
             // __cccc_bitint_from_str, reading the full-precision digit text
@@ -4164,7 +4305,8 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 node->var->ty && node->var->ty->kind != TY_ARRAY &&
                 node->var->ty->kind != TY_STRUCT &&
                 node->var->ty->kind != TY_UNION &&
-                !is_wide_bitint(node->var->ty)) {
+                !is_wide_bitint(node->var->ty) &&
+                !is_decimal(node->var->ty)) { // #402: address-based, same exemption
                 if (vm->flags & CCCC_STACK_INSTR)
                     emit_chkl(vm, node->var->offset);
                 if (vm->flags & CCCC_UNINIT_DETECTION)
@@ -4192,9 +4334,10 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 free_temp_reg(r_addr);
             } else {
                 gen_addr(vm, node, dest_reg);
-                // For scalars, load the value (wide _BitInt stays as address)
+                // For scalars, load the value (wide _BitInt/_Decimal stay as address)
                 if (node->ty->kind != TY_ARRAY && node->ty->kind != TY_STRUCT &&
-                    node->ty->kind != TY_UNION && !is_wide_bitint(node->ty)) {
+                    node->ty->kind != TY_UNION && !is_wide_bitint(node->ty) &&
+                    !is_decimal(node->ty)) {
                     emit_load_ex(vm, node->ty, dest_reg, dest_reg, !addr_is_local_frame(vm, node));
                 }
             }
@@ -4216,7 +4359,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // a data load; the register already holds the callable address.
         if (node->ty->kind != TY_ARRAY && node->ty->kind != TY_STRUCT &&
             node->ty->kind != TY_UNION && node->ty->kind != TY_FUNC &&
-            !is_wide_bitint(node->ty)) {
+            !is_wide_bitint(node->ty) && !is_decimal(node->ty)) {
             emit_load(vm, node->ty, dest_reg, dest_reg);
         }
         return;
@@ -4240,6 +4383,25 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             gen_wide_bitint_unary(vm, node, dest_reg, "__cccc_bitint_neg");
             return;
         }
+        if (is_decimal(node->ty)) {
+            int r_src = alloc_temp_reg();
+            gen_expr(vm, node->lhs, r_src);
+            mark_temp_reg_used(r_src);
+            long long dst_offset = node->ret_buffer
+                ? (long long)node->ret_buffer->offset
+                : alloc_decimal_temp(vm, node->ty->size);
+            emit_lea3(vm, REG_A0, dst_offset);
+            emit_mov3(vm, REG_A1, r_src);
+            emit_li3(vm, REG_A2, dec_width_code(node->ty));
+            if (vm->flags & CCCC_POINTER_CHECKS) {
+                emit_rr(vm, CHKP3, REG_A0, 0);
+                emit_rr(vm, CHKP3, REG_A1, 0);
+            }
+            emit_wide_op(vm, DNEG);
+            emit_lea3(vm, dest_reg, dst_offset);
+            free_temp_reg(r_src);
+            return;
+        }
         gen_expr(vm, node->lhs, dest_reg);
         if (is_flonum(node->ty)) {
             emit_frr(vm, fop_for_type(node->ty, FNEG3), dest_reg, dest_reg);
@@ -4249,7 +4411,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         return;
 
     case ND_NOT:
-        if (node->lhs && is_wide_bitint(node->lhs->ty)) {
+        if (node->lhs && (is_wide_bitint(node->lhs->ty) || is_decimal(node->lhs->ty))) {
             gen_cond_expr(vm, node->lhs, dest_reg); // 0/1
             emit_rr(vm, NOT3, dest_reg, dest_reg);  // logical negate of 0/1
             return;
@@ -4401,6 +4563,97 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             emit_frrr(vm, fop_for_type(node->lhs->ty, fop), dest_reg, r_lhs_op,
                       r_rhs_op);
             free_temp_reg(r_free);
+        } else if (is_decimal(node->lhs->ty) || is_decimal(node->ty)) {
+            // _Decimal32/64/128 (#402): address-based like wide _BitInt, but
+            // dispatches to the dedicated DADD/DSUB/DMUL/DDIV/DCMP opcodes
+            // (fixed A-register convention, fully opaque to the optimizer --
+            // see the OPS_X comment in cccc.h) instead of a CALLF helper.
+            // usual_arith_conv already rejected mixing decimal with a binary
+            // float or _BitInt operand, so node->lhs->ty == node->rhs->ty
+            // (modulo decimal-vs-decimal rank) here.
+            Type *operand_ty = node->lhs->ty;
+            int w = dec_width_code(operand_ty);
+            bool is_cmp = (node->kind == ND_EQ || node->kind == ND_NE ||
+                           node->kind == ND_LT || node->kind == ND_LE);
+
+            int r_lhs = alloc_temp_reg();
+            gen_expr(vm, node->lhs, r_lhs); // decimal operand -> its address
+            mark_temp_reg_used(r_lhs);
+            int r_rhs = alloc_temp_reg();
+            gen_expr(vm, node->rhs, r_rhs);
+            mark_temp_reg_used(r_rhs);
+
+            if (is_cmp) {
+                emit_mov3(vm, REG_A0, r_lhs);
+                emit_mov3(vm, REG_A1, r_rhs);
+                emit_li3(vm, REG_A2, w);
+                if (vm->flags & CCCC_POINTER_CHECKS) {
+                    emit_rr(vm, CHKP3, REG_A0, 0);
+                    emit_rr(vm, CHKP3, REG_A1, 0);
+                }
+                emit_wide_op(vm, DCMP); // A0 = 0=EQ/1=LT/2=GT/3=UNORDERED
+                int code = alloc_temp_reg();
+                emit_mov3(vm, code, REG_A0);
+                int tmp = alloc_temp_reg();
+                switch (node->kind) {
+                case ND_EQ:
+                    emit_li3(vm, tmp, 0);
+                    emit_rrr(vm, SEQ3, dest_reg, code, tmp);
+                    break;
+                case ND_NE:
+                    emit_li3(vm, tmp, 0);
+                    emit_rrr(vm, SNE3, dest_reg, code, tmp);
+                    break;
+                case ND_LT:
+                    emit_li3(vm, tmp, 1);
+                    emit_rrr(vm, SEQ3, dest_reg, code, tmp);
+                    break;
+                case ND_LE: {
+                    // LE is EQ(0) or LT(1) -- i.e. code <= 1, which also
+                    // correctly excludes GT(2) and UNORDERED(3). code is
+                    // always in [0,3], so plain signed SLE3 is exact here.
+                    int lim = alloc_temp_reg();
+                    emit_li3(vm, lim, 1);
+                    emit_rrr(vm, SLE3, dest_reg, code, lim);
+                    free_temp_reg(lim);
+                    break;
+                }
+                default: break;
+                }
+                free_temp_reg(tmp);
+                free_temp_reg(code);
+            } else {
+                long long dst_offset;
+                if (node->ret_buffer)
+                    dst_offset = (long long)node->ret_buffer->offset;
+                else
+                    dst_offset = alloc_decimal_temp(vm, operand_ty->size);
+
+                int decimal_op;
+                switch (node->kind) {
+                case ND_ADD: decimal_op = DADD; break;
+                case ND_SUB: decimal_op = DSUB; break;
+                case ND_MUL: decimal_op = DMUL; break;
+                case ND_DIV: decimal_op = DDIV; break;
+                default:
+                    error_tok(vm, node->tok, "unsupported _Decimal operator");
+                    decimal_op = DADD;
+                }
+
+                emit_lea3(vm, REG_A0, dst_offset);
+                emit_mov3(vm, REG_A1, r_lhs);
+                emit_mov3(vm, REG_A2, r_rhs);
+                emit_li3(vm, REG_A3, w);
+                if (vm->flags & CCCC_POINTER_CHECKS) {
+                    emit_rr(vm, CHKP3, REG_A0, 0);
+                    emit_rr(vm, CHKP3, REG_A1, 0);
+                    emit_rr(vm, CHKP3, REG_A2, 0);
+                }
+                emit_wide_op(vm, decimal_op);
+                emit_lea3(vm, dest_reg, dst_offset);
+            }
+            free_temp_reg(r_rhs);
+            free_temp_reg(r_lhs);
         } else if (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->ty)) {
             // Wide _BitInt operations: delegate to runtime helpers.
             // LHS and RHS are wide → each gen_expr returns an address.
@@ -4674,8 +4927,9 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // addresses)
         if (node->ty &&
             (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION ||
-             is_wide_bitint(node->ty))) {
-            // Struct/union/wide-_BitInt assignment: memcpy from RHS to LHS
+             is_wide_bitint(node->ty) || is_decimal(node->ty))) {
+            // Struct/union/wide-_BitInt/_Decimal assignment: memcpy from
+            // RHS to LHS (#402: decimal is address-based, same as these)
             int r_src = alloc_temp_reg();
             gen_expr(vm, node->rhs, r_src); // RHS is address
             mark_temp_reg_used(r_src);
@@ -5067,6 +5321,137 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 return;
             }
         }
+        // _Decimal32/64/128 conversion handling (#402): address-based, like
+        // wide _BitInt above, but dispatches to DFROMI/DTOI/DFROMBITS/
+        // DTOBITS/DCVT instead of a bitint runtime helper.
+        if (is_decimal(node->lhs->ty) || is_decimal(node->ty)) {
+            Type *src = node->lhs->ty;
+            Type *dst = node->ty;
+            if (is_decimal(dst) && !is_decimal(src)) {
+                long long dst_offset = node->ret_buffer
+                    ? (long long)node->ret_buffer->offset
+                    : alloc_decimal_temp(vm, dst->size);
+                emit_lea3(vm, REG_A0, dst_offset);
+                if (is_flonum(src)) {
+                    // binary float/double -> decimal: bit-reinterpret via
+                    // FR2R/FR2R_F32 (float reg's raw bits -> int reg), then
+                    // DFROMBITS. FR2R_F32 for an f32 source packs just the
+                    // 32-bit float pattern (not a misread of the full 64-bit
+                    // double pattern FReg would otherwise hold it as).
+                    int r_tmp = alloc_temp_reg();
+                    gen_expr(vm, node->lhs, r_tmp); // src in a float reg
+                    emit_rr(vm, src->kind == TY_FLOAT ? FR2R_F32 : FR2R,
+                            REG_A1, r_tmp);
+                    free_temp_reg(r_tmp);
+                    emit_lea3(vm, REG_A0, dst_offset);
+                    emit_li3(vm, REG_A2, dec_width_code(dst));
+                    emit_li3(vm, REG_A3, src->kind == TY_FLOAT ? 1 : 0);
+                    if (vm->flags & CCCC_POINTER_CHECKS)
+                        emit_rr(vm, CHKP3, REG_A0, 0);
+                    emit_wide_op(vm, DFROMBITS);
+                } else {
+                    // int -> decimal
+                    gen_expr(vm, node->lhs, REG_A1);
+                    emit_lea3(vm, REG_A0, dst_offset); // REG_A1 may share REG_A0's slot; reload
+                    emit_li3(vm, REG_A2, dec_width_code(dst));
+                    emit_li3(vm, REG_A3, src->is_unsigned ? 1 : 0);
+                    if (vm->flags & CCCC_POINTER_CHECKS)
+                        emit_rr(vm, CHKP3, REG_A0, 0);
+                    emit_wide_op(vm, DFROMI);
+                }
+                emit_lea3(vm, dest_reg, dst_offset);
+                return;
+            } else if (!is_decimal(dst) && is_decimal(src)) {
+                int r_src = alloc_temp_reg();
+                gen_expr(vm, node->lhs, r_src); // address of decimal value
+                mark_temp_reg_used(r_src);
+                if (is_flonum(dst)) {
+                    emit_mov3(vm, REG_A0, r_src);
+                    emit_li3(vm, REG_A1, dec_width_code(src));
+                    emit_li3(vm, REG_A2, dst->kind == TY_FLOAT ? 1 : 0);
+                    if (vm->flags & CCCC_POINTER_CHECKS)
+                        emit_rr(vm, CHKP3, REG_A0, 0);
+                    emit_wide_op(vm, DTOBITS); // A0 = raw f32/f64 bits
+                    // R2FR reinterprets the full 64 bits of A0 as a double
+                    // bit pattern -- wrong for an f32 destination, where
+                    // cccc_dec_to_bin packed only a 32-bit float pattern
+                    // into the low half of A0 (upper bits zero). R2FR_F32
+                    // is the f32-specific counterpart that does this
+                    // correctly (same convention I2F3_F32/FR2R_F32 use
+                    // elsewhere for float-reg bit transfers).
+                    emit_rr(vm, dst->kind == TY_FLOAT ? R2FR_F32 : R2FR,
+                            dest_reg, REG_A0);
+                } else if (dst->kind == TY_BOOL) {
+                    // (_Bool) is a truthiness test (nonzero -> 1): DCMP
+                    // against a zero literal of src's width, same test as
+                    // gen_cond_expr's decimal branch, but reusing r_src
+                    // (already evaluated above) instead of re-evaluating
+                    // node->lhs, which could duplicate side effects.
+                    int w = dec_width_code(src);
+                    unsigned char zero_bits[16] = {0};
+                    long long zoff = vm->data_ptr - vm->data_seg;
+                    zoff = (zoff + (src->align - 1)) & ~(long long)(src->align - 1);
+                    vm->data_ptr = vm->data_seg + zoff;
+                    check_data_capacity(vm, zoff + src->size);
+                    if (!cccc_dec_encode_literal("0", w, zero_bits))
+                        error_tok(vm, node->tok,
+                                  "_Decimal requires a build with CCCC_HAS_DECIMAL=1");
+                    memcpy(vm->data_ptr, zero_bits, (size_t)src->size);
+                    vm->data_ptr += src->size;
+
+                    int r_zero = alloc_temp_reg();
+                    emit_lda3(vm, r_zero, zoff);
+                    emit_mov3(vm, REG_A0, r_src);
+                    emit_mov3(vm, REG_A1, r_zero);
+                    emit_li3(vm, REG_A2, w);
+                    if (vm->flags & CCCC_POINTER_CHECKS)
+                        emit_rr(vm, CHKP3, REG_A0, 0);
+                    emit_wide_op(vm, DCMP);
+                    int tmp = alloc_temp_reg();
+                    emit_li3(vm, tmp, 0);
+                    emit_rrr(vm, SNE3, dest_reg, REG_A0, tmp);
+                    free_temp_reg(tmp);
+                    free_temp_reg(r_zero);
+                } else {
+                    // decimal -> int (truncating, C semantics)
+                    emit_mov3(vm, REG_A0, r_src);
+                    emit_li3(vm, REG_A1, dec_width_code(src));
+                    emit_li3(vm, REG_A2, dst->is_unsigned ? 1 : 0);
+                    if (vm->flags & CCCC_POINTER_CHECKS)
+                        emit_rr(vm, CHKP3, REG_A0, 0);
+                    emit_wide_op(vm, DTOI);
+                    emit_mov3(vm, dest_reg, REG_A0);
+                    if (dst->kind == TY_CHAR)
+                        emit_rr(vm, dst->is_unsigned ? ZX1 : SX1, dest_reg, dest_reg);
+                    else if (dst->kind == TY_SHORT)
+                        emit_rr(vm, dst->is_unsigned ? ZX2 : SX2, dest_reg, dest_reg);
+                    else if (dst->kind == TY_INT)
+                        emit_rr(vm, dst->is_unsigned ? ZX4 : SX4, dest_reg, dest_reg);
+                    else if (dst->kind == TY_BITINT && !is_wide_bitint(dst))
+                        emit_bitint_trunc(vm, dst, dest_reg);
+                }
+                free_temp_reg(r_src);
+                return;
+            } else if (is_decimal(src) && is_decimal(dst)) {
+                int r_src = alloc_temp_reg();
+                gen_expr(vm, node->lhs, r_src);
+                long long dst_offset = node->ret_buffer
+                    ? (long long)node->ret_buffer->offset
+                    : alloc_decimal_temp(vm, dst->size);
+                emit_lea3(vm, REG_A0, dst_offset);
+                emit_mov3(vm, REG_A1, r_src);
+                emit_li3(vm, REG_A2, dec_width_code(dst));
+                emit_li3(vm, REG_A3, dec_width_code(src));
+                if (vm->flags & CCCC_POINTER_CHECKS) {
+                    emit_rr(vm, CHKP3, REG_A0, 0);
+                    emit_rr(vm, CHKP3, REG_A1, 0);
+                }
+                emit_wide_op(vm, DCVT);
+                emit_lea3(vm, dest_reg, dst_offset);
+                free_temp_reg(r_src);
+                return;
+            }
+        }
         gen_expr(vm, node->lhs, dest_reg);
         // Add type conversion if needed
         if (is_flonum(node->ty) && !is_flonum(node->lhs->ty)) {
@@ -5423,6 +5808,14 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 error_tok(vm, node->tok,
                           "vector return values through FFI calls are not "
                           "supported");
+            // #402: same rationale as the vector rejection above -- libffi
+            // has no decimal ffi_type, so a _Decimal return through FFI
+            // would be mis-marshalled as a 64-bit int/double slot rather
+            // than rejected. Deferred to the #402 follow-up ticket.
+            if (is_decimal(node->ty))
+                error_tok(vm, node->tok,
+                          "_Decimal return values through FFI calls are not "
+                          "supported");
 
             // Count arguments and compute double_arg_mask/float_arg_mask
             int nargs = 0;
@@ -5440,6 +5833,10 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 } else if (is_vector(arg->ty)) {
                     error_tok(vm, arg->tok,
                               "vector arguments through FFI calls are not "
+                              "supported");
+                } else if (is_decimal(arg->ty)) {
+                    error_tok(vm, arg->tok,
+                              "_Decimal arguments through FFI calls are not "
                               "supported");
                 }
                 nargs++;
@@ -5787,6 +6184,18 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         for (int i = 0; i < nargs && i < 8; i++) {
             Node *arg = arg_array[i];
             bool is_vararg = is_variadic_call && (i >= fixed_param_count);
+
+            // #402: reject decimal through a variadic tail argument. The
+            // by-address ABI convention would technically thread through
+            // here (same as the vector path just below), but the receiving
+            // <stdarg.h> va_arg side has no __builtin_classify_type case for
+            // it yet, so a decimal value read back from a va_list would be
+            // silently misinterpreted -- deferred to the #402 follow-up
+            // ticket rather than shipped half-wired.
+            if (is_vararg && is_decimal(arg->ty))
+                error_tok(vm, arg->tok,
+                          "passing a _Decimal value through a variadic argument "
+                          "is not yet supported");
 
             // Before evaluating this arg, check if it contains a function call.
             // If so, save all previously-evaluated arg registers to the stack.
@@ -6896,7 +7305,13 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
             // into the callee's torn-down frame once LEV3 runs.
             if (node->lhs->ty && (node->lhs->ty->kind == TY_STRUCT ||
                                   node->lhs->ty->kind == TY_UNION ||
-                                  is_wide_bitint(node->lhs->ty))) {
+                                  is_wide_bitint(node->lhs->ty) ||
+                                  is_decimal(node->lhs->ty))) {
+                // #402: _Decimal32/64/128 is address-based, same dangling-
+                // frame hazard as struct/union/wide-_BitInt above -- the
+                // value's alloc_decimal_temp scratch slot lives in THIS
+                // (callee) frame, so it must be copied into the RETBUF
+                // pool before LEV3 tears the frame down.
                 // Evaluate source (struct address) into a temp register first
                 int r_src = alloc_temp_reg();
                 gen_expr(vm, node->lhs, r_src);
@@ -7359,7 +7774,10 @@ static int assign_stack_offsets(VirtualMachine *vm, Obj *fn) {
                        var->ty->kind == TY_UNION ||
                        var->ty->kind == TY_COMPLEX ||
                        var->ty->kind == TY_VECTOR ||
-                       (var->ty->kind == TY_BITINT && var->ty->size > 8)) {
+                       (var->ty->kind == TY_BITINT && var->ty->size > 8) ||
+                       (is_decimal(var->ty) && var->ty->size > 8)) {
+                // #402: _Decimal128 is 16 bytes (2 words) -- _Decimal32/64
+                // fit the default 1-word slot, same as float/double do.
                 var_size = (var->ty->size + 7) / 8;
             }
             stack_size += var_size;

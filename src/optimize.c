@@ -1318,6 +1318,11 @@ static bool op_implicit_abi_regs(int op, ImplicitRegs *out) {
     case DLOPEN: case DLSYM: case DLCLOSE: case DLERROR:
     case WIDE_ADD: case WIDE_SUB: case WIDE_MUL: case WIDE_DIV:
     case WIDE_MOD: case WIDE_SHL: case WIDE_SHR: case WIDE_USHR:
+    // _Decimal32/64/128 (#402): same zero-operand, fixed-A-register shape as
+    // WIDE_*, for the same reason -- opaque is correct because these never
+    // touch an RRRS-decoded operand word, an FReg, or a vreg.
+    case DADD: case DSUB: case DMUL: case DDIV: case DNEG: case DCMP:
+    case DFROMI: case DTOI: case DFROMBITS: case DTOBITS: case DCVT: case DFMT:
     case VSIGNAL: case VRAISE:
     case BTRAP:
         out->reads = out->writes = 0;

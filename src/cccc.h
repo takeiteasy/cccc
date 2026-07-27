@@ -429,7 +429,39 @@ extern "C" {
     X(VCVT_I32_F32, 1) /* vregs[rd].i32[i] = (int32_t)vregs[rs1].f32[i], truncating, i<count */ \
     X(VCVT_F32_I32, 1) /* vregs[rd].f32[i] = (float)vregs[rs1].i32[i], i<count */  \
     X(VCVT_I64_F64, 1) /* vregs[rd].i64[i] = (int64_t)vregs[rs1].f64[i], truncating, i<count */ \
-    X(VCVT_F64_I64, 1) /* vregs[rd].f64[i] = (double)vregs[rs1].i64[i], i<count */
+    X(VCVT_F64_I64, 1) /* vregs[rd].f64[i] = (double)vregs[rs1].i64[i], i<count */ \
+    \
+    /* C23 _Decimal32/64/128 (real IEEE-754-2008 decimal via Intel BID, \
+       tracker #402). Appended here, never interleaved with earlier \
+       opcodes, so TypeKind/opcode numbering never shifts under an \
+       unchanged CCCC_VERSION regardless of whether the build has \
+       CCCC_HAS_DECIMAL=1 (only the ops.c *handler bodies* are #ifdef'd; \
+       these opcode slots and their operand-word counts always exist). \
+       \
+       Zero-operand, fixed-A-register convention -- identical shape to \
+       WIDE_ADD/WIDE_SUB/etc (#456) -- because a decimal value is \
+       address-based (a pointer to a 4/8/16-byte BID buffer), never a \
+       fregs[]/vregs[] value: d128 doesn't fit a flat-double FReg, so \
+       every width uses the same memory-based convention. `width` is \
+       0=_Decimal32, 1=_Decimal64, 2=_Decimal128. Optimizer treatment: \
+       fully opaque (op_implicit_abi_regs, src/optimize.c), matching \
+       WIDE_* / CALLF -- correct and sufficient since no decimal op reads \
+       or writes an FReg/vreg or the RRRS-decoded operand word. */ \
+    X(DADD, 0) /* dst(A0)=addr, a(A1)=addr, b(A2)=addr, width(A3) */ \
+    X(DSUB, 0) /* ditto, - */ \
+    X(DMUL, 0) /* ditto, * */ \
+    X(DDIV, 0) /* ditto, / */ \
+    X(DNEG, 0) /* dst(A0)=addr, a(A1)=addr, width(A2) */ \
+    X(DCMP, 0) /* a(A0)=addr, b(A1)=addr, width(A2) -> A0 = 0=EQ/1=LT/2=GT/3=UNORDERED */ \
+    X(DFROMI, 0) /* dst(A0)=addr, val(A1)=int64, width(A2), is_unsigned(A3) */ \
+    X(DTOI, 0)   /* src(A0)=addr, width(A1), is_unsigned(A2) -> A0 = int64 (truncating) */ \
+    X(DFROMBITS, 0) /* dst(A0)=addr, bits(A1)=raw f32/f64 bit pattern (via FR2R), \
+                        width(A2), src_is_f32(A3) */ \
+    X(DTOBITS, 0)   /* src(A0)=addr, width(A1), dst_is_f32(A2) \
+                        -> A0 = raw f32/f64 bit pattern (caller does R2FR) */ \
+    X(DCVT, 0)  /* dst(A0)=addr, src(A1)=addr, dst_width(A2), src_width(A3) */ \
+    X(DFMT, 0)  /* buf(A0), n(A1), val(A2)=addr, width(A3) \
+                    -> A0 = bytes that would have been written (snprintf contract) */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
@@ -824,6 +856,14 @@ typedef struct Token {
                          // (no prefix/suffix/separators) when bit_width > 64
     int wide_base;      // base (2/8/10/16) for wide_digits, else unused
 
+    // C23 _Decimal32/64/128 literal (df/dd/dl suffix, #402): verbatim,
+    // separator-stripped, suffix-stripped digit text. The literal must NOT
+    // go through strtold (that binary-rounds it before BID ever sees it),
+    // so `fval` is left at 0.0 for a decimal-typed token and this is the
+    // only source of truth -- encoded to BID bits at codegen time via
+    // cccc_dec_encode_literal (compile-time-only, requires CCCC_HAS_DECIMAL).
+    char *dec_digits;
+
     File *file;       // Source location
     char *filename;   // Filename
     int line_no;      // Line number
@@ -871,6 +911,14 @@ typedef enum {
     TY_AUTO = 21,      // C23 auto type-inference sentinel (never reaches codegen)
     TY_VECTOR = 22,    // GNU __attribute__((vector_size(N))); base=element type,
                        // vec_len=lane count, size=N bytes (tracker #72)
+    // C23 _Decimal32/64/128: real IEEE-754-2008 decimal encoding (BID) when
+    // built with CCCC_HAS_DECIMAL=1; otherwise decimal literals/arithmetic
+    // are a compile error (declarations/sizeof/etc. always work). Appended
+    // here rather than interleaved with the binary-float kinds above so
+    // existing bytecode's TypeKind numbering never shifts.
+    TY_DECIMAL32 = 23,
+    TY_DECIMAL64 = 24,
+    TY_DECIMAL128 = 25,
 } TypeKind;
 
 typedef struct Node Node;
@@ -975,9 +1023,6 @@ struct Type {
 
     // _BitInt(N): bit width for TY_BITINT types
     int bit_width;
-
-    // _Decimal32/64/128: binary float placeholder (not real decimal encoding)
-    bool is_decimal;
 
     // Format string validation (__attribute__((format(...))))
     int format_style;          // 0=none, 1=printf, 2=scanf
@@ -1114,6 +1159,10 @@ typedef enum {
                             // cross-lane-family element conversion (e.g.
                             // int32 lanes <-> float32 lanes), NOT a
                             // bit-reinterpret cast.
+    ND_DECIMAL_TO_CHARS = 62, // __builtin_decimal_to_chars(buf, n, decimal_val)
+                              // (#402): lhs=buf, rhs=n, cond=the decimal-typed
+                              // value expr; ty=int (bytes-written result,
+                              // snprintf contract). Lowers to DFMT.
 } NodeKind;
 
 // Linked list of locals with __attribute__((cleanup(fn))) in one block scope.
@@ -1220,6 +1269,7 @@ struct Node {
     long double fval;
     char *wide_digits; // wb/uwb _BitInt literal digit text, when bit_width > 64
     int wide_base;      // base (2/8/10/16) for wide_digits, else unused
+    char *dec_digits;   // _Decimal32/64/128 literal digit text (#402), else NULL
 
     // Block literal (Apple blocks extension)
     Obj *block_fn;          // Synthetic function for block's body

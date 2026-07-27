@@ -957,6 +957,31 @@ These are the first-class equivalents of the `__CCCC_TEST_MODE__` guard style:
 #endif
 ```
 
+## Optional feature build matrix
+
+Tests that exercise an opt-in feature must pass in **both** configurations.
+Decimal floating-point (#402, `CCCC_HAS_DECIMAL=1`) is the current example:
+`tests/suites/test_suite_decimal.c` and `test_suite_c23.c`'s
+`test_c23_decimal` guard everything except size/alignment/struct-layout
+checks behind `#ifdef __STDC_IEC_60559_DFP__`, so the same file returns 42
+in the default build (decimal is a compile error there) and exercises real
+BID-backed arithmetic when the flag is on:
+
+```bash
+python3 tools/tests.py                                   # default build
+tools/fetch_intel_bid.sh && make CCCC_HAS_DECIMAL=1
+python3 tools/tests.py                                   # decimal-enabled build
+python3 tools/tests.py --match "*decimal*"                # focused, also at -O3 and -3
+python3 tools/tests.py --c4                               # bytecode round-trip
+```
+
+Negative tests that only make sense in one configuration (e.g. a decimal
+literal being a diagnostic *because* the library isn't linked) aren't
+encoded as checked-in `EXPECT_COMPILE_ERROR` files, since `tools/tests.py`
+runs every test against whichever single `cccc` binary already exists —
+there's no per-test build-config selector yet. Verify those by hand against
+each build instead.
+
 ## Running Tests
 
 ```

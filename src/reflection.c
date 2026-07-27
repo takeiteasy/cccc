@@ -172,6 +172,9 @@ Type *__builtin_ast_get_type(VirtualMachine *vm, const char *name) {
         {"float",  ty_float},
         {"double", ty_double},
         {"_Bool",  ty_bool},
+        {"_Decimal32",  ty_decimal32},
+        {"_Decimal64",  ty_decimal64},
+        {"_Decimal128", ty_decimal128},
     };
 
     for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); i++)
@@ -280,6 +283,9 @@ const char *__builtin_ast_type_c_name(VirtualMachine *vm, Type *ty) {
     case TY_FLOAT: base = "float"; break;
     case TY_DOUBLE: base = "double"; break;
     case TY_LDOUBLE: base = "ldouble"; break;
+    case TY_DECIMAL32: base = "_Decimal32"; break;
+    case TY_DECIMAL64: base = "_Decimal64"; break;
+    case TY_DECIMAL128: base = "_Decimal128"; break;
     default: break;
     }
     if (base)

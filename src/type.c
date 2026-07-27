@@ -48,15 +48,13 @@ Type *ty_dcomplex = &(Type){.kind = TY_COMPLEX, .size = 16, .align = 8,
 Type *ty_ldcomplex = &(Type){.kind = TY_COMPLEX, .size = 32, .align = 16,
                               .base = &(Type){TY_LDOUBLE, 16, 16}};
 
-// C23 decimal floating-point: correct sizes (4/8/16 bytes) but implemented as
-// aliases of float/double/long double — not IEEE-754-2008 decimal encoding.
-// Placeholder until a real decimal arithmetic library is available.
-Type *ty_decimal32  = &(Type){.kind = TY_FLOAT,   .size = 4,  .align = 4,
-                               .is_decimal = true};
-Type *ty_decimal64  = &(Type){.kind = TY_DOUBLE,  .size = 8,  .align = 8,
-                               .is_decimal = true};
-Type *ty_decimal128 = &(Type){.kind = TY_LDOUBLE, .size = 16, .align = 16,
-                               .is_decimal = true};
+// C23 decimal floating-point: real IEEE-754-2008 decimal encoding (Intel BID)
+// when built with CCCC_HAS_DECIMAL=1. Declarations, sizeof, struct layout,
+// etc. work unconditionally; decimal literals/arithmetic are a compile
+// error without the library (see cccc_dec_encode_literal / gen_decimal_expr).
+Type *ty_decimal32  = &(Type){.kind = TY_DECIMAL32,  .size = 4,  .align = 4};
+Type *ty_decimal64  = &(Type){.kind = TY_DECIMAL64,  .size = 8,  .align = 8};
+Type *ty_decimal128 = &(Type){.kind = TY_DECIMAL128, .size = 16, .align = 16};
 
 static Type ty_error_obj = {TY_ERROR, 0, 1};
 Type *ty_error = &ty_error_obj;
@@ -112,6 +110,28 @@ bool is_flonum(Type *ty) {
     ty->kind == TY_LDOUBLE;
 }
 
+// _Decimal32/64/128. Deliberately NOT is_flonum: a decimal value is
+// address-based (like a small struct / wide _BitInt), never routed through
+// the FReg/fregs[] file, so callers that gate on is_flonum() must not treat
+// decimal as flonum, or they'd force a 4/8/16-byte decimal value through a
+// flat 64-bit double register -- lossy for d32/d64, impossible for d128.
+bool is_decimal(Type *ty) {
+    if (!ty) return false;
+    return ty->kind == TY_DECIMAL32 || ty->kind == TY_DECIMAL64 ||
+    ty->kind == TY_DECIMAL128;
+}
+
+// 0/1/2 for _Decimal32/64/128, or -1 for a non-decimal type.
+int dec_width_code(Type *ty) {
+    if (!ty) return -1;
+    switch (ty->kind) {
+    case TY_DECIMAL32:  return 0;
+    case TY_DECIMAL64:  return 1;
+    case TY_DECIMAL128: return 2;
+    default: return -1;
+    }
+}
+
 bool is_complex(Type *ty) {
     if (!ty) return false;
     return ty->kind == TY_COMPLEX;
@@ -119,7 +139,7 @@ bool is_complex(Type *ty) {
 
 bool is_numeric(Type *ty) {
     if (!ty) return false;
-    return is_integer(ty) || is_flonum(ty) || is_complex(ty);
+    return is_integer(ty) || is_flonum(ty) || is_complex(ty) || is_decimal(ty);
 }
 
 bool is_vector(Type *ty) {
@@ -153,6 +173,9 @@ bool is_compatible(Type *t1, Type *t2) {
         case TY_FLOAT:
         case TY_DOUBLE:
         case TY_LDOUBLE:
+        case TY_DECIMAL32:
+        case TY_DECIMAL64:
+        case TY_DECIMAL128:
             return true;
         case TY_COMPLEX:
             return is_compatible(t1->base, t2->base);
@@ -374,6 +397,23 @@ static Type *get_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
     if (ty2->kind == TY_FUNC)
         return pointer_to(vm, ty2);
 
+    // C23 decimal floating types (#402): per the standard, mixing a decimal
+    // type with a standard (binary) floating type in an operation is a
+    // constraint violation, not an implicit conversion -- unlike int<->float,
+    // there's no common representation to convert through. Decimal<->decimal
+    // ranks _Decimal128 > _Decimal64 > _Decimal32 (by size, like the binary
+    // float steps below); decimal<->integer converts the integer operand to
+    // the decimal type. An explicit cast (DF2D3/DD2F3-backed) is always
+    // legal regardless of this rule -- it just isn't reached via
+    // usual_arith_conv/get_common_type.
+    if (is_decimal(ty1) || is_decimal(ty2)) {
+        if (is_flonum(ty1) || is_flonum(ty2))
+            return ty_error; // caller (usual_arith_conv) reports the diagnostic
+        if (is_decimal(ty1) && is_decimal(ty2))
+            return ty1->size >= ty2->size ? ty1 : ty2;
+        return is_decimal(ty1) ? ty1 : ty2;
+    }
+
     // Step 1: If either operand has type long double, the other is converted to long double
     if (ty1->kind == TY_LDOUBLE || ty2->kind == TY_LDOUBLE)
         return ty_ldouble;
@@ -432,6 +472,17 @@ static Type *get_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
 //
 // This operation is called the "usual arithmetic conversion".
 static void usual_arith_conv(VirtualMachine *vm, Node **lhs, Node **rhs) {
+    // #402: decimal<->binary-float mixing is a real diagnostic, not silent
+    // error-type propagation -- checked here (not left to get_common_type's
+    // ty_error return) because that return value is shared with genuine
+    // upstream-error propagation and must not be conflated with it.
+    if ((is_decimal((*lhs)->ty) && is_flonum((*rhs)->ty)) ||
+        (is_flonum((*lhs)->ty) && is_decimal((*rhs)->ty))) {
+        error_tok(vm, (*lhs)->tok,
+                  "operands of type '_Decimal' and a standard floating type "
+                  "may not be mixed implicitly; use an explicit cast");
+        return;
+    }
     Type *ty = get_common_type(vm, (*lhs)->ty, (*rhs)->ty);
     // Skip casting if we have error types - they propagate automatically
     if (ty->kind == TY_ERROR)

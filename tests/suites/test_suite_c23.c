@@ -165,8 +165,10 @@ static bool is_even(int n) {
 // are keywords (stdbool.h should not redefine them in C23 mode).
 
 // [from test_c23_decimal]
-// Test C23 _Decimal32/64/128 types (placeholder: binary float aliases)
-// Note: these use binary floating-point, not real IEEE-754-2008 decimal encoding.
+// Test C23 _Decimal32/64/128 types. Size/alignment/struct-layout checks run
+// unconditionally; real IEEE-754-2008 decimal arithmetic (via the Intel BID
+// library) only runs when built with CCCC_HAS_DECIMAL=1, detected via the
+// __STDC_IEC_60559_DFP__ predefine -- returns 42 in both build configurations.
 
 // [from test_c23_empty_params_void_equiv]
 // In C23, int foo() is equivalent to int foo(void).
@@ -733,24 +735,49 @@ int test_c23_bool_stdbool_compat(void) {
 // test_c23_decimal
 [[cccc::test(return = 42)]]
 int test_c23_decimal(void) {
-    // sizeof checks per C23 spec
+    // Unconditional: sizes/alignment/struct layout are a property of the
+    // type system, independent of whether real decimal arithmetic is built.
     if (sizeof(_Decimal32) != 4) return 1;
     if (sizeof(_Decimal64) != 8) return 2;
     if (sizeof(_Decimal128) != 16) return 3;
 
-    // Basic variable declarations and arithmetic
-    _Decimal32 d32 = 1.5f;
-    _Decimal64 d64 = 2.5;
-    _Decimal128 d128 = 3.5L;
+    struct S { char c; _Decimal64 d; };
+    if (sizeof(struct S) != 16) return 4; // 8-byte align pads after `c`
 
-    if (d32 + d32 != 3.0f) return 4;
-    if (d64 + d64 != 5.0) return 5;
-    if (d128 + d128 != 7.0L) return 6;
+    _Decimal32 d32;
+    _Decimal64 d64;
+    _Decimal128 d128;
+    (void)d32; (void)d64; (void)d128;
 
-    // Assignment and comparison
-    _Decimal64 x = 10.0;
-    x = x * 2.0;
-    if (x != 20.0) return 7;
+#ifdef __STDC_IEC_60559_DFP__
+    // Real BID-backed decimal arithmetic (CCCC_HAS_DECIMAL=1).
+    _Decimal64 a = 1.1dd, b = 2.2dd;
+    if (a + b != 3.3dd) return 10; // false for every binary-FP representation
+    if (0.1dd + 0.2dd != 0.3dd) return 11; // the load-bearing exactness check
+    if (!(a < b) || (b <= a) || !(b > a) || (a >= b)) return 12;
+    if (-a + a != 0.dd) return 13;
+
+    _Decimal32 s = (_Decimal32)a;
+    _Decimal128 w = (_Decimal128)a;
+    if ((_Decimal64)w != a) return 14;
+    if ((_Decimal64)s != a) return 15;
+
+    if ((int)3.9dd != 3) return 16; // truncating, C semantics
+    if ((_Decimal64)7 != 7.dd) return 17;
+    if ((double)0.5dd != 0.5) return 18;
+
+    char buf[32];
+    __builtin_decimal_to_chars(buf, sizeof buf, a + b);
+    if (__builtin_strcmp(buf, "3.3") != 0) return 19;
+
+    _Decimal64 x = 10.dd;
+    x = x * 2.dd;
+    if (x != 20.dd) return 20;
+
+    if (!x) return 21; // truthiness
+    _Decimal64 zero = 0.dd;
+    if (!(!zero)) return 22;
+#endif
 
     return 42;
 }

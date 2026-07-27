@@ -560,7 +560,26 @@ bool is_integer(Type *ty);
 bool is_complex(Type *ty);
 bool is_numeric(Type *ty);
 bool is_vector(Type *ty);
+bool is_decimal(Type *ty);
+int  dec_width_code(Type *ty); // 0/1/2 for _Decimal32/64/128, else -1
 bool is_error_type(Type *ty);
+
+// _Decimal32/64/128 runtime shim (src/stdlib/decimal.c, tracker #402). `w` is
+// the width code from dec_width_code(). Declared unconditionally; defined
+// under CCCC_HAS_DECIMAL via the Intel BID library, else return
+// false/UNORDERED/-1 as documented per-function below. Raw byte pointers
+// only, so no BID type needs to appear in a VM header.
+bool cccc_dec_binop(int op /* '+','-','*','/' */, int w,
+                    void *dst, const void *a, const void *b);
+bool cccc_dec_neg(int w, void *dst, const void *a);
+int  cccc_dec_cmp(int w, const void *a, const void *b); // 0=EQ,1=LT,2=GT,3=UNORDERED
+bool cccc_dec_from_int(int w, void *dst, long long v, bool is_unsigned);
+bool cccc_dec_to_int(int w, const void *src, long long *out, bool is_unsigned);
+bool cccc_dec_from_bin(int w, void *dst, uint64_t bits, bool src_is_f32);
+bool cccc_dec_to_bin(int w, const void *src, bool dst_is_f32, uint64_t *out_bits);
+bool cccc_dec_convert(int dst_w, int src_w, void *dst, const void *src);
+int  cccc_dec_format(char *buf, size_t n, const void *val, int w); // -1 if unsupported
+bool cccc_dec_encode_literal(const char *digits, int w, void *out); // compile-time only
 bool is_compatible(Type *t1, Type *t2);
 Type *copy_type(VirtualMachine *vm, Type *ty);
 Type *pointer_to(VirtualMachine *vm, Type *base);

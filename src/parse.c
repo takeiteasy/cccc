@@ -3634,6 +3634,27 @@ static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur, Initiali
         return cur;
     }
 
+    if (is_decimal(ty)) {
+        // #402: a decimal global/static initializer must be a literal (or a
+        // cast of one) -- constant folding of decimal *arithmetic* isn't
+        // implemented in phase 1 (see the follow-up ticket), so an
+        // expression like `1.1dd + 2.2dd` here is a diagnostic, not a
+        // silent zero. Strip through cast wrappers to the literal, exactly
+        // as the ND_NUM literal codegen path does for locals.
+        Node *lit = init->expr;
+        while (lit && lit->kind == ND_CAST)
+            lit = lit->lhs;
+        if (!lit || lit->kind != ND_NUM || !is_decimal(lit->ty) || !lit->dec_digits)
+            error_tok(vm, init->expr->tok,
+                      "_Decimal global/static initializer must be a literal "
+                      "constant (decimal constant folding is not yet supported)");
+        if (!cccc_dec_encode_literal(lit->dec_digits, dec_width_code(ty),
+                                     buf + offset))
+            error_tok(vm, init->expr->tok,
+                      "_Decimal literals require a build with CCCC_HAS_DECIMAL=1");
+        return cur;
+    }
+
     char **label = NULL;
     uint64_t val = eval2(vm, init->expr, &label);
 
@@ -4723,6 +4744,16 @@ static Node *constexpr_expr_for_node(Node *node) {
 static int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
     add_type(vm, node);
 
+    // _Decimal32/64/128 (#402): reject explicitly rather than falling
+    // through to a switch arm that reads node->val (always 0 for a decimal
+    // literal -- see tokenize.c). Decimal constant folding isn't
+    // implemented in phase 1, so a decimal value can only reach an integer
+    // constant-expression context (case label, array bound, bit-field
+    // width, _Static_assert, enumerator) through an explicit (int) cast,
+    // which itself isn't foldable yet either -- see eval_double's guard.
+    if (is_decimal(node->ty))
+        error_tok(vm, node->tok, "_Decimal is not valid in an integer constant expression");
+
     if (is_flonum(node->ty))
         // A bare "return eval_double(...)" here implicitly truncates a
         // double to int64_t via a plain C cast -- UB in the host
@@ -5445,6 +5476,16 @@ bool node_int_const_fits(VirtualMachine *vm, Node *expr, Type *to) {
 
 static double eval_double(VirtualMachine *vm, Node *node) {
     add_type(vm, node);
+
+    // _Decimal32/64/128 (#402): node->fval is never populated for these --
+    // the ND_NUM case below would otherwise silently return 0.0 for any
+    // decimal constant expression (e.g. a static initializer). Decimal
+    // constant folding is not implemented in phase 1 (see the #402
+    // follow-up ticket); a non-literal decimal constant expression must be
+    // a diagnostic, not silent 0.
+    if (is_decimal(node->ty))
+        error_tok(vm, node->tok,
+                  "_Decimal constant expressions are not supported in this context");
 
     if (is_integer(node->ty)) {
         if (node->ty->is_unsigned)
@@ -9811,6 +9852,41 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
+    // __builtin_decimal_to_chars(buf, n, decimal_val) (#402): phase-1
+    // decimal formatting entry point (printf/scanf %Hf/%Df/%DDf integration
+    // is deferred to the follow-up ticket). Returns the number of bytes
+    // that would have been written, snprintf-style.
+    if (equal(tok, "__builtin_decimal_to_chars")) {
+        tok = skip(vm, tok->next, "(");
+        Node *buf = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *n = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *val = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+
+        // add_type() short-circuits as soon as it sees node->ty already set
+        // (see its guard: "node->ty && node->kind != ND_COMPLEX"), and this
+        // node's ty is preset to ty_int below -- so the later whole-tree
+        // add_type walk will never descend into lhs/rhs/cond through THIS
+        // node. Each child must be add_type'd explicitly here first
+        // (mirrors __builtin_convertvector's add_type(vm, src) above).
+        add_type(vm, buf);
+        add_type(vm, n);
+        add_type(vm, val);
+        if (!is_decimal(val->ty))
+            error_tok(vm, start,
+                      "__builtin_decimal_to_chars: third argument must have a "
+                      "_Decimal32/64/128 type");
+
+        Node *node = new_node(vm, ND_DECIMAL_TO_CHARS, start);
+        node->lhs = buf;
+        node->rhs = n;
+        node->cond = val;
+        node->ty = ty_int;
+        return node;
+    }
+
     // __builtin_shuffle(vec, {i0,...,iN-1}) / __builtin_shuffle(vec1, vec2,
     // {i0,...,iN-1}) (tracker #715): GCC vector permute. The mask may be
     // either a COMPILE-TIME-CONSTANT brace-enclosed index list (matching
@@ -10358,9 +10434,44 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
+    // __builtin_infd32/64/128() -> _Decimal infinity (#402, backs
+    // <float.h>'s DEC_INFINITY). Unlike __builtin_inf's binary-float family
+    // below, a decimal value's ND_NUM node carries its digit text in
+    // dec_digits rather than a host `double` in fval -- BID's own
+    // from_string accepts "Inf"/"NaN" directly (verified), so that text is
+    // exactly what a decimal literal's dec_digits would already contain.
+    if (equal(tok, "__builtin_infd32") || equal(tok, "__builtin_infd64") ||
+        equal(tok, "__builtin_infd128")) {
+        Type *ty = equal(tok, "__builtin_infd32") ? ty_decimal32 :
+                   equal(tok, "__builtin_infd128") ? ty_decimal128 : ty_decimal64;
+        tok = skip(vm, tok->next, "(");
+        *rest = skip(vm, tok, ")");
+        Node *node = new_node(vm, ND_NUM, start);
+        node->dec_digits = "Inf";
+        node->ty = ty;
+        return node;
+    }
+
+    // __builtin_nand32/64/128("tag") -> _Decimal quiet NaN (#402, backs
+    // <float.h>'s DEC_NAN). The tag argument is parsed and discarded, same
+    // as __builtin_nan's binary-float family below.
+    if (equal(tok, "__builtin_nand32") || equal(tok, "__builtin_nand64") ||
+        equal(tok, "__builtin_nand128")) {
+        Type *ty = equal(tok, "__builtin_nand32") ? ty_decimal32 :
+                   equal(tok, "__builtin_nand128") ? ty_decimal128 : ty_decimal64;
+        tok = skip(vm, tok->next, "(");
+        Node *tag = assign(vm, &tok, tok);
+        (void)tag;
+        *rest = skip(vm, tok, ")");
+        Node *node = new_node(vm, ND_NUM, start);
+        node->dec_digits = "NaN";
+        node->ty = ty;
+        return node;
+    }
+
     // __builtin_inf() / __builtin_inff() / __builtin_infl() -> infinity
-    if (equal(tok, "__builtin_inf") || equal(tok, "__builtin_inff") ||
-        equal(tok, "__builtin_infl")) {
+    if (equal(tok, "__builtin_inf") || equal(tok, "__builtin_infl") ||
+        equal(tok, "__builtin_inff")) {
         Type *ty = equal(tok, "__builtin_inff") ? ty_float :
                    equal(tok, "__builtin_infl") ? ty_ldouble : ty_double;
         tok = skip(vm, tok->next, "(");
@@ -10969,6 +11080,11 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             if (vm->debug_vm)
                 printf("  primary: created flonum node, fval=%Lf\n",
                        node->fval);
+        } else if (is_decimal(tok->ty)) {
+            // _Decimal32/64/128 literal (#402): node->fval stays 0.0 (never
+            // populated for these -- see tokenize.c); node->dec_digits below
+            // is the sole source of truth, encoded to BID bits at codegen.
+            node = new_node(vm, ND_NUM, tok);
         } else {
             node = new_num(vm, tok->val, tok);
             if (vm->debug_vm)
@@ -10978,6 +11094,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         node->ty = tok->ty;
         node->wide_digits = tok->wide_digits;
         node->wide_base = tok->wide_base;
+        node->dec_digits = tok->dec_digits;
         if (vm->debug_vm)
             printf(" primary: set node->ty to tok->ty, kind=%d\n",
                    node->ty ? node->ty->kind : -1);
