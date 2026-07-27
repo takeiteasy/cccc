@@ -21,6 +21,7 @@ static char __builtin_grp_h[676] = "/* grp.h - group database declarations for C
 static char __builtin_iconv_h[1033] = "/* iconv.h - character set conversion for CCCC\n *\n * iconv_t is an opaque handle on both hosts (a raw pointer returned by the\n * real iconv_open()), so it passes straight through as a pointer-width\n * value; (iconv_t)-1 is the error sentinel on both. iconv()'s four buffer\n * arguments are all pointers into guest memory that the host reads/writes\n * directly -- guest and host share one flat address space, so no\n * marshaling is needed.\n *\n * On macOS, linking iconv requires -liconv (verified: link fails without\n * it, succeeds with it); glibc ships iconv in libc itself, no extra link\n * flag needed.\n */\n\n#ifndef __ICONV_H\n#define __ICONV_H\n\n#ifdef _WIN32\n#error \"<iconv.h> is only available on POSIX targets in CCCC\"\n#endif\n\n#include \"stddef.h\"\n\ntypedef void *iconv_t;\n\nextern iconv_t iconv_open(const char *tocode, const char *fromcode);\nextern size_t iconv(iconv_t cd, char **inbuf, size_t *inbytesleft,\n                     char **outbuf, size_t *outbytesleft);\nextern int iconv_close(iconv_t cd);\n\n#endif /* __ICONV_H */\n";
 static char __builtin_inttypes_h[317] = "/* inttypes.h - format macros for integer types */\n\n#ifndef __INTTYPES_H\n#define __INTTYPES_H\n\n#include \"stdint.h\"\n\n#define PRId8 \"d\"\n#define PRIi8 \"i\"\n#define PRId16 \"d\"\n#define PRIi16 \"i\"\n#define PRId32 \"d\"\n#define PRIi32 \"i\"\n#define PRId64 \"ld\"\n#define PRIi64 \"ld\"\n\n#define PRIu64 \"lu\"\n\n#endif /* __INTTYPES_H */\n";
 static char __builtin_iso646_h[291] = "/* iso646.h - alternative operator spellings */\n\n#ifndef __ISO646_H\n#define __ISO646_H\n\n#define and &&\n#define and_eq &=\n#define bitand &\n#define bitor |\n#define compl ~\n#define not !\n#define not_eq !=\n#define or ||\n#define or_eq |=\n#define xor ^\n#define xor_eq ^=\n\n#endif /* __ISO646_H */\n";
+static char __builtin_langinfo_h[2015] = "/* langinfo.h - locale information (POSIX) for CCCC\n *\n * nl_item values diverge wildly between hosts: macOS uses a flat 0-56\n * sequence, while glibc packs `(category << 16) | index` (e.g. D_T_FMT is\n * 1 on macOS but 131112 -- LC_TIME(2)<<16 | 40 -- on Linux, verified\n * against real headers). The constants below use CCCC's own canonical\n * numbering, which happens to equal macOS's real numbering (so no\n * translation is needed there); wrap_nl_langinfo (src/stdlib/posix.c)\n * translates to the host's real nl_item on Linux via range arithmetic\n * for the DAY_/ABDAY_/MON_/ABMON_ families (each is a contiguous run in\n * both numbering schemes) plus a small table for the rest, returning \"\"\n * for anything it doesn't recognize.\n *\n * nl_item itself is declared in <sys/types.h>, not redeclared here.\n */\n\n#ifndef __LANGINFO_H\n#define __LANGINFO_H\n\n#ifdef _WIN32\n#error \"<langinfo.h> is only available on POSIX targets in CCCC\"\n#endif\n\n#include \"sys/types.h\"\n\n#define CODESET     0\n#define D_T_FMT     1\n#define D_FMT       2\n#define T_FMT       3\n#define T_FMT_AMPM  4\n#define AM_STR      5\n#define PM_STR      6\n\n#define DAY_1  7\n#define DAY_2  8\n#define DAY_3  9\n#define DAY_4  10\n#define DAY_5  11\n#define DAY_6  12\n#define DAY_7  13\n\n#define ABDAY_1  14\n#define ABDAY_2  15\n#define ABDAY_3  16\n#define ABDAY_4  17\n#define ABDAY_5  18\n#define ABDAY_6  19\n#define ABDAY_7  20\n\n#define MON_1  21\n#define MON_2  22\n#define MON_3  23\n#define MON_4  24\n#define MON_5  25\n#define MON_6  26\n#define MON_7  27\n#define MON_8  28\n#define MON_9  29\n#define MON_10 30\n#define MON_11 31\n#define MON_12 32\n\n#define ABMON_1  33\n#define ABMON_2  34\n#define ABMON_3  35\n#define ABMON_4  36\n#define ABMON_5  37\n#define ABMON_6  38\n#define ABMON_7  39\n#define ABMON_8  40\n#define ABMON_9  41\n#define ABMON_10 42\n#define ABMON_11 43\n#define ABMON_12 44\n\n#define RADIXCHAR 50\n#define THOUSEP   51\n\n#define YESEXPR 52\n#define NOEXPR  53\n\n#define CRNCYSTR 56\n\nextern char *nl_langinfo(nl_item item);\n\n#endif /* __LANGINFO_H */\n";
 static char __builtin_libgen_h[268] = "/* libgen.h - pathname manipulation for CCCC */\n\n#ifndef __LIBGEN_H\n#define __LIBGEN_H\n\n#ifdef _WIN32\n#error \"<libgen.h> is only available on POSIX targets in CCCC\"\n#endif\n\nextern char *basename(char *path);\nextern char *dirname(char *path);\n\n#endif /* __LIBGEN_H */\n";
 static char __builtin_limits_h[696] = "/* limits.h - integer type limits for CCCC C compiler */\n\n#ifndef __LIMITS_H\n#define __LIMITS_H\n\n#define CHAR_BIT 8\n\n#define SCHAR_MIN (-128)\n#define SCHAR_MAX 127\n#define UCHAR_MAX 255\n\n#define SHRT_MIN (-32768)\n#define SHRT_MAX 32767\n#define USHRT_MAX 65535\n\n#define INT_MIN (-2147483648)\n#define INT_MAX 2147483647\n#define UINT_MAX 4294967295U\n\n#define LONG_MIN (-9223372036854775807L-1)\n#define LONG_MAX 9223372036854775807L\n#define ULONG_MAX 18446744073709551615UL\n\n#define LLONG_MIN (-9223372036854775807LL-1)\n#define LLONG_MAX 9223372036854775807LL\n#define ULLONG_MAX 18446744073709551615ULL\n\n// C23: maximum supported _BitInt width\n#define BITINT_MAXWIDTH 65535\n\n#endif /* __LIMITS_H */\n";
 static char __builtin_locale_h[1360] = "/* locale.h - localization declarations for CCCC\n *\n * LC_* numbering is CCCC's own canonical numbering, not the host's --\n * macOS and glibc disagree entirely (macOS: ALL=0/COLLATE=1/CTYPE=2/\n * MONETARY=3/NUMERIC=4/TIME=5; glibc: CTYPE=0/NUMERIC=1/TIME=2/COLLATE=3/\n * MONETARY=4/MESSAGES=5/ALL=6). wrap_setlocale (src/stdlib/locale.c)\n * translates this canonical numbering to the host's real values before\n * calling the host setlocale(), the same pattern used for _SC_, _PC_,\n * and _CS_ constants in src/stdlib/posix.c -- this keeps compiled .c4\n * bytecode portable across hosts.\n */\n\n#ifndef __LOCALE_H\n#define __LOCALE_H\n\n#define LC_ALL 0\n#define LC_COLLATE 1\n#define LC_CTYPE 2\n#define LC_MONETARY 3\n#define LC_NUMERIC 4\n#define LC_TIME 5\n#define LC_MESSAGES 6\n\nstruct lconv {\n    char *decimal_point;\n    char *thousands_sep;\n    char *grouping;\n    char *int_curr_symbol;\n    char *currency_symbol;\n    char *mon_decimal_point;\n    char *mon_thousands_sep;\n    char *mon_grouping;\n    char *positive_sign;\n    char *negative_sign;\n    char int_frac_digits;\n    char frac_digits;\n    char p_cs_precedes;\n    char p_sep_by_space;\n    char n_cs_precedes;\n    char n_sep_by_space;\n    char p_sign_posn;\n    char n_sign_posn;\n};\n\nextern char *setlocale(int category, const char *locale);\nextern struct lconv *localeconv(void);\n\n#endif /* __LOCALE_H */\n";
@@ -28,6 +29,7 @@ static char __builtin_math_h[14217] = "/* math.h - math functions for CCCC C com
 static char __builtin_net_if_h[1266] = "/* net/if.h - network interface naming for CCCC */\n\n#ifndef __NET_IF_H\n#define __NET_IF_H\n\n#ifdef _WIN32\n#error \"<net/if.h> is only available on POSIX targets in CCCC\"\n#endif\n\n/* if_nametoindex()/if_indextoname()/if_nameindex()/if_freenameindex() (#788).\n   Needed by guest code targeting a specific interface (e.g. for\n   IPV6_MULTICAST_IF or struct ipv6_mreq.ipv6mr_interface, see\n   <netinet/in.h>) rather than relying on interface index 0. IF_NAMESIZE and\n   struct if_nameindex are identical on macOS and Linux -- verified via\n   sizeof/offsetof against real macOS and Linux x86_64/aarch64 headers\n   (Linux values match across x86_64/aarch64). All four functions exist,\n   unguarded, on both platforms. */\n#define IF_NAMESIZE 16\n#define IFNAMSIZ    IF_NAMESIZE\n\nstruct if_nameindex {\n    unsigned int  if_index;\n    char         *if_name;\n};\n\nextern unsigned int if_nametoindex(const char *ifname);\nextern char *if_indextoname(unsigned int ifindex, char *ifname);\n/* if_nameindex()'s return value, and each if_name string within it, are\n   host-allocated -- the guest must release them via if_freenameindex(),\n   never free(). */\nextern struct if_nameindex *if_nameindex(void);\nextern void if_freenameindex(struct if_nameindex *ptr);\n\n#endif /* __NET_IF_H */\n";
 static char __builtin_netdb_h[6284] = "/* netdb.h - network database declarations for CCCC */\n\n#ifndef __NETDB_H\n#define __NETDB_H\n\n#ifdef _WIN32\n#error \"<netdb.h> is only available on POSIX targets in CCCC\"\n#endif\n\n#include \"stddef.h\"\n#include \"stdint.h\"\n#include \"sys/socket.h\"\n\nstruct hostent {\n    char *h_name;\n    char **h_aliases;\n    int h_addrtype;\n    int h_length;\n    char **h_addr_list;\n};\n\n#define h_addr h_addr_list[0]\n\n/* struct netent for getnetbyname()/getnetbyaddr() (#743). Field layout is\n   identical on macOS and Linux (no sa_family_t-style width divergence\n   here) -- verified via sizeof/offsetof against real macOS and Linux\n   x86_64/aarch64 headers (Linux values match across x86_64/aarch64;\n   sizeof(struct netent) == 24 on both, n_net is a 32-bit network number\n   in host byte order). */\nstruct netent {\n    char     *n_name;\n    char    **n_aliases;\n    int       n_addrtype;\n    uint32_t  n_net;\n};\n\n/* struct servent / struct protoent (#746). Same design class as struct\n   netent above: no sa_family_t-style divergence, layout identical on macOS\n   and Linux -- verified via sizeof/offsetof against real macOS and Linux\n   x86_64/aarch64 headers (Linux values match across x86_64/aarch64;\n   sizeof(struct servent) == 32, sizeof(struct protoent) == 24 on both).\n   s_port is in network byte order, matching the real getservbyname(). */\nstruct servent {\n    char  *s_name;\n    char **s_aliases;\n    int    s_port;\n    char  *s_proto;\n};\n\nstruct protoent {\n    char  *p_name;\n    char **p_aliases;\n    int    p_proto;\n};\n\nstruct addrinfo {\n    int ai_flags;\n    int ai_family;\n    int ai_socktype;\n    int ai_protocol;\n    socklen_t ai_addrlen;\n#ifdef __APPLE__\n    char *ai_canonname;\n    struct sockaddr *ai_addr;\n#else\n    struct sockaddr *ai_addr;\n    char *ai_canonname;\n#endif\n    struct addrinfo *ai_next;\n};\n\n#define AI_PASSIVE     0x00000001\n#define AI_CANONNAME   0x00000002\n#define AI_NUMERICHOST 0x00000004\n#define AI_NUMERICSERV 0x00001000\n\n/* EAI_* differ between macOS (small positive numbers) and Linux glibc\n   (negative numbers). Verified against real macOS and Linux x86_64/aarch64\n   headers -- Linux values match across x86_64/aarch64. */\n#ifdef __APPLE__\n#define EAI_AGAIN    2\n#define EAI_BADFLAGS 3\n#define EAI_FAIL     4\n#define EAI_FAMILY   5\n#define EAI_MEMORY   6\n#define EAI_NONAME   8\n#define EAI_SERVICE  9\n#define EAI_SOCKTYPE 10\n#define EAI_SYSTEM   11\n#define EAI_OVERFLOW 14\n#else\n#define EAI_BADFLAGS  -1\n#define EAI_NONAME    -2\n#define EAI_AGAIN     -3\n#define EAI_FAIL      -4\n#define EAI_FAMILY    -6\n#define EAI_SOCKTYPE  -7\n#define EAI_SERVICE   -8\n#define EAI_MEMORY    -10\n#define EAI_SYSTEM    -11\n#define EAI_OVERFLOW  -12\n#endif\n\n/* getnameinfo() flags -- verified against real macOS and Linux\n   x86_64/aarch64 headers (Linux values match across x86_64/aarch64). */\n#ifdef __APPLE__\n#define NI_NOFQDN      0x00000001\n#define NI_NUMERICHOST 0x00000002\n#define NI_NAMEREQD    0x00000004\n#define NI_NUMERICSERV 0x00000008\n#define NI_DGRAM       0x00000010\n#else\n#define NI_NUMERICHOST 0x00000001\n#define NI_NUMERICSERV 0x00000002\n#define NI_NOFQDN      0x00000004\n#define NI_NAMEREQD    0x00000008\n#define NI_DGRAM       0x00000010\n#endif\n#define NI_MAXHOST 1025\n#define NI_MAXSERV 32\n\n/* h_errno values (#785). Identical on macOS and Linux (verified against\n   real headers). Only used as the out-param `*h_errnop` filled by the _r\n   functions below -- the host's own h_errno mechanism differs per platform\n   (a plain global on macOS, a `__h_errno_location()`-backed thread-local on\n   glibc) and is intentionally not exposed here. */\n#define HOST_NOT_FOUND 1\n#define TRY_AGAIN      2\n#define NO_RECOVERY    3\n#define NO_DATA        4\n#define NO_ADDRESS     NO_DATA\n\nextern struct hostent *gethostbyname(const char *name);\nextern struct hostent *gethostbyaddr(const void *addr, socklen_t len, int type);\n\n/* gethostbyname_r()/gethostbyaddr_r()/getnetbyname_r() (#785). Deferred\n   from #748: releasing the VM GIL around the plain lookups means two guest\n   threads can now race on the static, non-reentrant host storage those\n   return pointers into. These are a portable shim (a shared mutex plus a\n   deep copy into the caller's buffer), not a passthrough to the host's own\n   _r variants -- macOS has no gethostbyname_r/gethostbyaddr_r/\n   getnetbyname_r at all (glibc-only extensions), so a single portable\n   implementation is used on both platforms; see followup ticket for\n   forwarding to glibc's native _r functions on Linux instead. There is no\n   standard getnetbyaddr_r on any platform. Returns 0 on success (with\n   *result set, or NULL if not found and *h_errnop set), or a positive\n   errno value (ERANGE if buf is too small for the result). */\nextern int gethostbyname_r(const char *name, struct hostent *ret,\n                           char *buf, size_t buflen,\n                           struct hostent **result, int *h_errnop);\nextern int gethostbyaddr_r(const void *addr, socklen_t len, int type,\n                           struct hostent *ret, char *buf, size_t buflen,\n                           struct hostent **result, int *h_errnop);\nextern int getnetbyname_r(const char *name, struct netent *ret,\n                          char *buf, size_t buflen,\n                          struct netent **result, int *h_errnop);\n\nextern int getaddrinfo(const char *node, const char *service,\n                       const struct addrinfo *hints,\n                       struct addrinfo **res);\nextern void freeaddrinfo(struct addrinfo *res);\nextern int getnameinfo(const struct sockaddr *addr, socklen_t addrlen,\n                       char *host, socklen_t hostlen,\n                       char *serv, socklen_t servlen, int flags);\nextern struct netent *getnetbyname(const char *name);\nextern struct netent *getnetbyaddr(uint32_t net, int type);\nextern void setnetent(int stayopen);\nextern void endnetent(void);\n\nextern struct servent *getservbyname(const char *name, const char *proto);\nextern struct servent *getservbyport(int port, const char *proto);\nextern void setservent(int stayopen);\nextern void endservent(void);\n\nextern struct protoent *getprotobyname(const char *name);\nextern struct protoent *getprotobynumber(int proto);\nextern void setprotoent(int stayopen);\nextern void endprotoent(void);\n\n#endif /* __NETDB_H */\n";
 static char __builtin_netinet_in_h[4873] = "/* netinet/in.h - Internet address declarations for CCCC */\n\n#ifndef __NETINET_IN_H\n#define __NETINET_IN_H\n\n#ifdef _WIN32\n#error \"<netinet/in.h> is only available on POSIX targets in CCCC\"\n#endif\n\n#include \"stdint.h\"\n#include \"sys/socket.h\"\n\ntypedef uint16_t in_port_t;\ntypedef uint32_t in_addr_t;\n\n#define AF_INET  2\n#ifdef __APPLE__\n#define AF_INET6 30\n#else\n#define AF_INET6 10\n#endif\n\n#define PF_INET  AF_INET\n#define PF_INET6 AF_INET6\n\n#define IPPROTO_IP     0\n#define IPPROTO_ICMP   1\n#define IPPROTO_TCP    6\n#define IPPROTO_UDP    17\n#define IPPROTO_ICMPV6 58\n#define IPPROTO_RAW    255\n\n#define IPPORT_RESERVED 1024\n\n#define INADDR_ANY       ((in_addr_t)0x00000000)\n#define INADDR_LOOPBACK  ((in_addr_t)0x7f000001)\n#define INADDR_BROADCAST ((in_addr_t)0xffffffff)\n#define INADDR_NONE      ((in_addr_t)0xffffffff)\n\nstruct in_addr {\n    in_addr_t s_addr;\n};\n\n#ifdef __APPLE__\nstruct sockaddr_in {\n    unsigned char sin_len;\n    sa_family_t sin_family;\n    in_port_t sin_port;\n    struct in_addr sin_addr;\n    char sin_zero[8];\n};\n#else\nstruct sockaddr_in {\n    sa_family_t sin_family;\n    in_port_t sin_port;\n    struct in_addr sin_addr;\n    char sin_zero[8];\n};\n#endif\n\n/* IPv6 (#742). struct in6_addr is a flat 16-byte address on both\n   platforms. struct sockaddr_in6 follows the same sin_len/1-byte\n   sa_family_t (Apple) vs no-sin6_len/2-byte sa_family_t (Linux) trick\n   already used for sockaddr/sockaddr_in/sockaddr_un -- verified via\n   offsetof/sizeof against real macOS and Linux x86_64/aarch64 headers\n   (Linux values match across x86_64/aarch64; sizeof(struct sockaddr_in6)\n   == 28 on both). */\nstruct in6_addr {\n    unsigned char s6_addr[16];\n};\n\n#ifdef __APPLE__\nstruct sockaddr_in6 {\n    unsigned char   sin6_len;\n    sa_family_t     sin6_family;\n    in_port_t       sin6_port;\n    uint32_t        sin6_flowinfo;\n    struct in6_addr sin6_addr;\n    uint32_t        sin6_scope_id;\n};\n#else\nstruct sockaddr_in6 {\n    sa_family_t     sin6_family;\n    in_port_t       sin6_port;\n    uint32_t        sin6_flowinfo;\n    struct in6_addr sin6_addr;\n    uint32_t        sin6_scope_id;\n};\n#endif\n\n#define IN6ADDR_ANY_INIT      { { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0 } }\n#define IN6ADDR_LOOPBACK_INIT { { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1 } }\n\n#define IPPROTO_IPV6 41\n\n/* IPV6_* socket-option constants -- verified against real macOS and Linux\n   x86_64/aarch64 headers (Linux values match across x86_64/aarch64). */\n#ifdef __APPLE__\n#define IPV6_UNICAST_HOPS   4\n#define IPV6_MULTICAST_IF   9\n#define IPV6_MULTICAST_HOPS 10\n#define IPV6_MULTICAST_LOOP 11\n#define IPV6_JOIN_GROUP     12\n#define IPV6_LEAVE_GROUP    13\n#define IPV6_V6ONLY         27\n/* Advanced IPV6_* options (#749): multicast source-routing/packet-info set\n   beyond the baseline above. Verified against real macOS headers --\n   requires __APPLE_USE_RFC_3542 to be visible before <netinet/in.h> is\n   included (see src/stdlib/posix.c), or the host doesn't define these\n   either. */\n#define IPV6_CHECKSUM       26\n#define IPV6_RECVTCLASS     35\n#define IPV6_TCLASS         36\n#define IPV6_RECVHOPLIMIT   37\n#define IPV6_RECVRTHDR      38\n#define IPV6_RECVHOPOPTS    39\n#define IPV6_RECVDSTOPTS    40\n#define IPV6_PKTINFO        46\n#define IPV6_HOPLIMIT       47\n#define IPV6_HOPOPTS        49\n#define IPV6_DSTOPTS        50\n#define IPV6_RTHDR          51\n#define IPV6_RECVPKTINFO    61\n#define IPV6_RTHDR_TYPE_0    0\n#define IPV6_DONTFRAG       62\n#else\n#define IPV6_UNICAST_HOPS   16\n#define IPV6_MULTICAST_IF   17\n#define IPV6_MULTICAST_HOPS 18\n#define IPV6_MULTICAST_LOOP 19\n#define IPV6_JOIN_GROUP     20\n#define IPV6_LEAVE_GROUP    21\n#define IPV6_V6ONLY         26\n/* Advanced IPV6_* options (#749) -- verified against real Linux\n   x86_64/aarch64 headers (values match across x86_64/aarch64). */\n#define IPV6_CHECKSUM        7\n#define IPV6_RECVPKTINFO    49\n#define IPV6_PKTINFO        50\n#define IPV6_RECVHOPLIMIT   51\n#define IPV6_HOPLIMIT       52\n#define IPV6_RECVHOPOPTS    53\n#define IPV6_HOPOPTS        54\n#define IPV6_RTHDR          57\n#define IPV6_RECVRTHDR      56\n#define IPV6_RECVDSTOPTS    58\n#define IPV6_DSTOPTS        59\n#define IPV6_RTHDR_TYPE_0    0\n#define IPV6_RECVTCLASS     66\n#define IPV6_TCLASS         67\n#define IPV6_DONTFRAG       62\n#endif\n\n/* struct ipv6_mreq for IPV6_JOIN_GROUP/IPV6_LEAVE_GROUP (#749). Layout is\n   identical on macOS and Linux -- verified via sizeof/offsetof against real\n   macOS and Linux x86_64/aarch64 headers (sizeof == 20 on both). */\nstruct ipv6_mreq {\n    struct in6_addr ipv6mr_multiaddr;\n    unsigned int    ipv6mr_interface;\n};\n\n/* struct in6_pktinfo for IPV6_PKTINFO/IPV6_RECVPKTINFO ancillary data\n   (#749). Layout is identical on macOS and Linux -- verified the same way\n   (sizeof == 20 on both). */\nstruct in6_pktinfo {\n    struct in6_addr ipi6_addr;\n    int             ipi6_ifindex;\n};\n\n#endif /* __NETINET_IN_H */\n";
+static char __builtin_nl_types_h[626] = "/* nl_types.h - message catalogs (POSIX) for CCCC\n *\n * nl_catd is an opaque handle on both hosts (a pointer on both macOS and\n * glibc), so it passes straight through; NL_SETD/NL_CAT_LOCALE are\n * identical (1/1) on both platforms.\n */\n\n#ifndef __NL_TYPES_H\n#define __NL_TYPES_H\n\n#ifdef _WIN32\n#error \"<nl_types.h> is only available on POSIX targets in CCCC\"\n#endif\n\ntypedef void *nl_catd;\n\n#define NL_SETD 1\n#define NL_CAT_LOCALE 1\n\nextern nl_catd catopen(const char *name, int oflag);\nextern char *catgets(nl_catd catd, int set_id, int msg_id, const char *s);\nextern int catclose(nl_catd catd);\n\n#endif /* __NL_TYPES_H */\n";
 static char __builtin_poll_h[488] = "/* poll.h - event polling for CCCC */\n\n#ifndef __POLL_H\n#define __POLL_H\n\n#ifdef _WIN32\n#error \"<poll.h> is only available on POSIX targets in CCCC\"\n#endif\n\n#define POLLIN   0x0001\n#define POLLPRI  0x0002\n#define POLLOUT  0x0004\n#define POLLERR  0x0008\n#define POLLHUP  0x0010\n#define POLLNVAL 0x0020\n\ntypedef unsigned int nfds_t;\n\nstruct pollfd {\n    int fd;\n    short events;\n    short revents;\n};\n\nextern int poll(struct pollfd *fds, nfds_t nfds, int timeout);\n\n#endif /* __POLL_H */\n";
 static char __builtin_pthread_h[3069] = "#ifndef __CCCC_PTHREAD_H\n#define __CCCC_PTHREAD_H\n\n#ifdef _WIN32\n#error \"<pthread.h> is only available on POSIX targets in CCCC\"\n#endif\n\n#include \"stddef.h\"\n#include \"time.h\"\n\ntypedef void *pthread_t;\ntypedef unsigned int pthread_key_t;\n\ntypedef struct {\n    void *__handle;\n    long __state;\n    int __type;\n} pthread_mutex_t;\n\ntypedef struct {\n    void *__handle;\n    long __state;\n} pthread_cond_t;\n\ntypedef struct {\n    size_t __stack_size;\n    void *__stack_addr;\n} pthread_attr_t;\n\ntypedef struct {\n    int __type;\n} pthread_mutexattr_t;\n\ntypedef struct {\n    int __unused;\n} pthread_condattr_t;\n\n#define PTHREAD_MUTEX_INITIALIZER { 0, 0, 0 }\n#define PTHREAD_COND_INITIALIZER { 0, 0 }\n\n// Mutex types (POSIX). Values are the real host encoding so they can be\n// forwarded directly to the native pthread_mutexattr_settype() underneath\n// the FFI wrapper -- see src/stdlib/pthread.c.\n#ifdef __APPLE__\n#define PTHREAD_MUTEX_NORMAL     0\n#define PTHREAD_MUTEX_ERRORCHECK 1\n#define PTHREAD_MUTEX_RECURSIVE  2\n#define PTHREAD_MUTEX_DEFAULT    PTHREAD_MUTEX_NORMAL\n#else\n#define PTHREAD_MUTEX_NORMAL     0\n#define PTHREAD_MUTEX_RECURSIVE  1\n#define PTHREAD_MUTEX_ERRORCHECK 2\n#define PTHREAD_MUTEX_DEFAULT    PTHREAD_MUTEX_NORMAL\n#endif\n\nint pthread_create(pthread_t *thread, const pthread_attr_t *attr,\n                   void *(*start_routine)(void *), void *arg);\nint pthread_join(pthread_t thread, void **retval);\nint pthread_detach(pthread_t thread);\nvoid pthread_exit(void *retval);\npthread_t pthread_self(void);\nint pthread_equal(pthread_t t1, pthread_t t2);\n\nint pthread_mutex_init(pthread_mutex_t *mutex,\n                       const pthread_mutexattr_t *attr);\nint pthread_mutex_destroy(pthread_mutex_t *mutex);\nint pthread_mutex_lock(pthread_mutex_t *mutex);\nint pthread_mutex_trylock(pthread_mutex_t *mutex);\nint pthread_mutex_unlock(pthread_mutex_t *mutex);\n\nint pthread_mutexattr_init(pthread_mutexattr_t *attr);\nint pthread_mutexattr_destroy(pthread_mutexattr_t *attr);\nint pthread_mutexattr_settype(pthread_mutexattr_t *attr, int type);\nint pthread_mutexattr_gettype(const pthread_mutexattr_t *attr, int *type);\n\nint pthread_cond_init(pthread_cond_t *cond, const pthread_condattr_t *attr);\nint pthread_cond_destroy(pthread_cond_t *cond);\nint pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex);\nint pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,\n                           const struct timespec *abstime);\nint pthread_cond_signal(pthread_cond_t *cond);\nint pthread_cond_broadcast(pthread_cond_t *cond);\n\nint pthread_key_create(pthread_key_t *key, void (*destructor)(void *));\nint pthread_key_delete(pthread_key_t key);\nvoid *pthread_getspecific(pthread_key_t key);\nint pthread_setspecific(pthread_key_t key, const void *value);\n\nint pthread_attr_init(pthread_attr_t *attr);\nint pthread_attr_destroy(pthread_attr_t *attr);\nint pthread_attr_setstacksize(pthread_attr_t *attr, size_t stacksize);\nint pthread_attr_getstack(const pthread_attr_t *attr, void **stackaddr,\n                          size_t *stacksize);\n\n#endif\n";
 static char __builtin_pwd_h[851] = "/* pwd.h - password database declarations for CCCC */\n\n#ifndef __PWD_H\n#define __PWD_H\n\n#ifdef _WIN32\n#error \"<pwd.h> is only available on POSIX targets in CCCC\"\n#endif\n\n#include \"stddef.h\"\n#include \"sys/types.h\"\n\nstruct passwd {\n    char *pw_name;\n    char *pw_passwd;\n    uid_t pw_uid;\n    gid_t pw_gid;\n#ifdef __APPLE__\n    long pw_change;\n    char *pw_class;\n#endif\n    char *pw_gecos;\n    char *pw_dir;\n    char *pw_shell;\n#ifdef __APPLE__\n    long pw_expire;\n#endif\n};\n\nextern struct passwd *getpwuid(uid_t uid);\nextern struct passwd *getpwnam(const char *name);\nextern int getpwuid_r(uid_t uid, struct passwd *pwd, char *buf,\n                      size_t buflen, struct passwd **result);\nextern int getpwnam_r(const char *name, struct passwd *pwd, char *buf,\n                      size_t buflen, struct passwd **result);\n\n#endif /* __PWD_H */\n";
@@ -220,6 +222,8 @@ char *get_std_header(char *filename) {
                 return (char *)__builtin_netdb_h;
             if (strcmp((const char *)filename, (const char *)"netinet/in.h") == 0)
                 return (char *)__builtin_netinet_in_h;
+            if (strcmp((const char *)filename, (const char *)"nl_types.h") == 0)
+                return (char *)__builtin_nl_types_h;
             return 0;
         }
     case 109:
@@ -230,6 +234,8 @@ char *get_std_header(char *filename) {
         }
     case 108:
         {
+            if (strcmp((const char *)filename, (const char *)"langinfo.h") == 0)
+                return (char *)__builtin_langinfo_h;
             if (strcmp((const char *)filename, (const char *)"libgen.h") == 0)
                 return (char *)__builtin_libgen_h;
             if (strcmp((const char *)filename, (const char *)"limits.h") == 0)
@@ -424,6 +430,8 @@ char *get_stdlib_reg_fn_name(char *header) {
                 return "register_posix_functions";
             if (strcmp((const char *)header, (const char *)"netinet/in.h") == 0)
                 return "register_posix_functions";
+            if (strcmp((const char *)header, (const char *)"nl_types.h") == 0)
+                return "register_posix_functions";
             return 0;
         }
     case 109:
@@ -434,6 +442,8 @@ char *get_stdlib_reg_fn_name(char *header) {
         }
     case 108:
         {
+            if (strcmp((const char *)header, (const char *)"langinfo.h") == 0)
+                return "register_posix_functions";
             if (strcmp((const char *)header, (const char *)"libgen.h") == 0)
                 return "register_posix_functions";
             if (strcmp((const char *)header, (const char *)"locale.h") == 0)
@@ -500,124 +510,128 @@ char *get_std_header_name(int i);
 
 char *get_std_header_name(int i) {
     switch (i) {
-    case 78:
+    case 80:
         return "wctype.h";
-    case 77:
+    case 79:
         return "wchar.h";
-    case 76:
+    case 78:
         return "utime.h";
-    case 75:
+    case 77:
         return "unistd.h";
-    case 74:
+    case 76:
         return "uchar.h";
-    case 73:
+    case 75:
         return "time.h";
-    case 72:
+    case 74:
         return "threads.h";
-    case 71:
+    case 73:
         return "tgmath.h";
-    case 70:
+    case 72:
         return "testing.h";
-    case 69:
+    case 71:
         return "termios.h";
-    case 68:
+    case 70:
         return "tar.h";
-    case 67:
+    case 69:
         return "syslog.h";
-    case 66:
+    case 68:
         return "sys/wait.h";
-    case 65:
+    case 67:
         return "sys/utsname.h";
-    case 64:
+    case 66:
         return "sys/un.h";
-    case 63:
+    case 65:
         return "sys/uio.h";
-    case 62:
+    case 64:
         return "sys/types.h";
-    case 61:
+    case 63:
         return "sys/times.h";
-    case 60:
+    case 62:
         return "sys/time.h";
-    case 59:
+    case 61:
         return "sys/statvfs.h";
-    case 58:
+    case 60:
         return "sys/stat.h";
-    case 57:
+    case 59:
         return "sys/socket.h";
-    case 56:
+    case 58:
         return "sys/select.h";
-    case 55:
+    case 57:
         return "sys/resource.h";
-    case 54:
+    case 56:
         return "sys/param.h";
-    case 53:
+    case 55:
         return "sys/mount.h";
-    case 52:
+    case 54:
         return "sys/mman.h";
-    case 51:
+    case 53:
         return "sys/ioctl.h";
-    case 50:
+    case 52:
         return "sys/file.h";
-    case 49:
+    case 51:
         return "sys/cdefs.h";
-    case 48:
+    case 50:
         return "strings.h";
-    case 47:
+    case 49:
         return "string.h";
-    case 46:
+    case 48:
         return "stdnoreturn.h";
-    case 45:
+    case 47:
         return "stdlib.h";
-    case 44:
+    case 46:
         return "stdio.h";
-    case 43:
+    case 45:
         return "stdint.h";
-    case 42:
+    case 44:
         return "stddef.h";
-    case 41:
+    case 43:
         return "stdckdint.h";
-    case 40:
+    case 42:
         return "stdbool.h";
-    case 39:
+    case 41:
         return "stdbit.h";
-    case 38:
+    case 40:
         return "stdatomic.h";
-    case 37:
+    case 39:
         return "stdarg.h";
-    case 36:
+    case 38:
         return "stdalign.h";
-    case 35:
+    case 37:
         return "spawn.h";
-    case 34:
+    case 36:
         return "signal.h";
-    case 33:
+    case 35:
         return "setjmp.h";
-    case 32:
+    case 34:
         return "sched.h";
-    case 31:
+    case 33:
         return "regex.h";
-    case 30:
+    case 32:
         return "reflection.h";
-    case 29:
+    case 31:
         return "pwd.h";
-    case 28:
+    case 30:
         return "pthread.h";
-    case 27:
+    case 29:
         return "poll.h";
-    case 26:
+    case 28:
+        return "nl_types.h";
+    case 27:
         return "netinet/in.h";
-    case 25:
+    case 26:
         return "netdb.h";
-    case 24:
+    case 25:
         return "net/if.h";
-    case 23:
+    case 24:
         return "math.h";
-    case 22:
+    case 23:
         return "locale.h";
-    case 21:
+    case 22:
         return "limits.h";
-    case 20:
+    case 21:
         return "libgen.h";
+    case 20:
+        return "langinfo.h";
     case 19:
         return "iso646.h";
     case 18:

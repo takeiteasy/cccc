@@ -10,12 +10,14 @@ getopt.h	register_posix_functions
 glob.h	register_posix_functions
 grp.h	register_posix_functions
 iconv.h	register_posix_functions
+langinfo.h	register_posix_functions
 libgen.h	register_posix_functions
 locale.h	register_locale_functions
 math.h	register_math_functions
 net/if.h	register_posix_functions
 netdb.h	register_posix_functions
 netinet/in.h	register_posix_functions
+nl_types.h	register_posix_functions
 poll.h	register_posix_functions
 pthread.h	register_pthread_functions
 pwd.h	register_posix_functions

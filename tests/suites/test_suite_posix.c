@@ -13,7 +13,7 @@
 //   test_posix_rlimit_priority, test_posix_uname, test_posix_times,
 //   test_posix_tar_cpio, test_posix_syslog, test_posix_select,
 //   test_posix_statvfs, test_posix_sched, test_posix_locale,
-//   test_posix_spawn, test_posix_iconv
+//   test_posix_spawn, test_posix_iconv, test_posix_langinfo
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -31,6 +31,8 @@
 #include <pwd.h>
 #include <grp.h>
 #include <iconv.h>
+#include <langinfo.h>
+#include <nl_types.h>
 #include <regex.h>
 #include <net/if.h>
 #include <netdb.h>
@@ -2160,6 +2162,36 @@ int test_posix_iconv(void) {
     if (b0 != 0xC3 || b1 != 0xA9) return 4;
 
     if (iconv_close(cd) != 0) return 5;
+
+    return 42;
+}
+
+// test_posix_langinfo
+// #807: setlocale(LC_ALL, "C") then nl_langinfo(CODESET)/RADIXCHAR/DAY_1/
+// ABMON_1 are all non-empty and RADIXCHAR == "." in the C locale. Also
+// catopen() on a nonexistent catalog returns (nl_catd)-1 and catgets()
+// falls back to the supplied default string.
+[[cccc::test(return = 42)]]
+int test_posix_langinfo(void) {
+    setlocale(LC_ALL, "C");
+
+    char *cs = nl_langinfo(CODESET);
+    if (!cs || !cs[0]) return 1;
+
+    char *radix = nl_langinfo(RADIXCHAR);
+    if (!radix || radix[0] != '.') return 2;
+
+    char *day1 = nl_langinfo(DAY_1);
+    if (!day1 || !day1[0]) return 3;
+
+    char *abmon1 = nl_langinfo(ABMON_1);
+    if (!abmon1 || !abmon1[0]) return 4;
+
+    nl_catd cat = catopen("nonexistent_catalog_xyz", NL_CAT_LOCALE);
+    if (cat != (nl_catd)-1) return 5;
+
+    char *msg = catgets(cat, 1, 1, "default-message");
+    if (strcmp(msg, "default-message") != 0) return 6;
 
     return 42;
 }

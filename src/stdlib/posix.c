@@ -26,6 +26,8 @@
 #include <pwd.h>
 #include <regex.h>
 #include <iconv.h>
+#include <langinfo.h>
+#include <nl_types.h>
 #include <sched.h>
 #include <spawn.h>
 #ifdef __linux__
@@ -1511,6 +1513,58 @@ static long long wrap_posix_spawnp_gil(long long pid_ptr, long long file, long l
     return (long long)r;
 }
 
+// nl_langinfo() (#807) -- nl_item values diverge wildly between hosts:
+// macOS uses a flat 0-56 sequence (which CCCC's canonical numbering,
+// include/langinfo.h, copies verbatim), glibc packs
+// (category << 16) | index. The DAY_/ABDAY_/MON_/ABMON_ families are each
+// a contiguous run under both numbering schemes, so they translate via
+// range arithmetic rather than 46 individual case labels; everything
+// else goes through a small table. Anything unrecognized returns ""
+// rather than forwarding a bogus nl_item to the host.
+//
+// The case/range bounds below are written as bare integer literals
+// (CCCC's own canonical numbering, matching include/langinfo.h) rather
+// than the CODESET/DAY_1/etc. macro names -- this file includes the
+// *host's* real <langinfo.h> (there is no -Iinclude in this TU's build,
+// see the Makefile), so on Linux those names already expand to glibc's
+// real values (e.g. CODESET is 14, not 0) and would silently compare the
+// guest's canonical input against the wrong number.
+static char *wrap_nl_langinfo(nl_item guest_item) {
+#ifdef __APPLE__
+    return nl_langinfo(guest_item);
+#else
+    long v = (long)guest_item;
+    long host_item;
+    switch (v) {
+    case 0:  host_item = 14;     break; // CODESET
+    case 1:  host_item = 131112; break; // D_T_FMT
+    case 2:  host_item = 131113; break; // D_FMT
+    case 3:  host_item = 131114; break; // T_FMT
+    case 4:  host_item = 131115; break; // T_FMT_AMPM
+    case 5:  host_item = 131110; break; // AM_STR
+    case 6:  host_item = 131111; break; // PM_STR
+    case 50: host_item = 65536;  break; // RADIXCHAR
+    case 51: host_item = 65537;  break; // THOUSEP
+    case 52: host_item = 327680; break; // YESEXPR
+    case 53: host_item = 327681; break; // NOEXPR
+    case 56: host_item = 262159; break; // CRNCYSTR
+    default:
+        if (v >= 7 && v <= 13)          // DAY_1..DAY_7
+            host_item = 131079 + (v - 7);
+        else if (v >= 14 && v <= 20)    // ABDAY_1..ABDAY_7
+            host_item = 131072 + (v - 14);
+        else if (v >= 21 && v <= 32)    // MON_1..MON_12
+            host_item = 131098 + (v - 21);
+        else if (v >= 33 && v <= 44)    // ABMON_1..ABMON_12
+            host_item = 131086 + (v - 33);
+        else
+            return "";
+        break;
+    }
+    return nl_langinfo((nl_item)host_item);
+#endif
+}
+
 // ---------------------------------------------------------------------------
 // vsyslog() (#803) -- forwards a captured cccc va_list to the host's real
 // variadic syslog() via ffi_prep_cif_var, same technique as
@@ -1760,6 +1814,10 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "iconv_open",  (void*)iconv_open,  2, 0);
     cc_register_cfunc(vm, "iconv",       (void*)iconv,       5, 0);
     cc_register_cfunc(vm, "iconv_close", (void*)iconv_close, 1, 0);
+    cc_register_cfunc(vm, "nl_langinfo", (void*)wrap_nl_langinfo, 1, 0);
+    cc_register_cfunc(vm, "catopen",  (void*)catopen,  2, 0);
+    cc_register_cfunc(vm, "catgets",  (void*)catgets,  4, 0);
+    cc_register_cfunc(vm, "catclose", (void*)catclose, 1, 0);
 
     cc_register_cfunc(vm, "strcasecmp",  (void*)strcasecmp,  2, 0);
     cc_register_cfunc(vm, "strncasecmp", (void*)strncasecmp, 3, 0);
