@@ -179,6 +179,10 @@ Optimization:
 	                             Passes: fold, peephole, copy-prop, dce, cse, fuse, elim-ext
 	                             Examples: -O3 -fno-cse, -O0 -fpeephole, -ffold -fdce
 	--fma                        Enable single-rounding FMA (-ffuse implied; may change FP results)
+	--posix-emulation            Enable lossy/approximate emulation of POSIX functions the
+	                             host doesn't natively support (e.g. ppoll() on macOS). Off
+	                             by default: such functions are undeclared/unregistered,
+	                             matching a native compiler on the same host. VM-only.
 	--inline-limit=N             Limit inlining to N AST nodes (default: 256)
 
 Static Bytecode Analysis (compile or load input, walk text segment, exit):
