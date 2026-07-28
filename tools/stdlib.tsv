@@ -1,5 +1,6 @@
 arpa/inet.h	register_posix_functions
 ctype.h	register_ctype_functions
+decimal_math.h	register_decimal_math_functions
 dirent.h	register_posix_functions
 dlfcn.h	register_posix_functions
 errno.h	register_posix_functions

@@ -54,22 +54,64 @@
  * signbit(x) ((x) < 0) compiled but was wrong for -0.0 and NaN. */
 int __cccc_isnan_f(float);
 int __cccc_isnan_d(double);
-#define isnan(x) _Generic((x), float: __cccc_isnan_f, default: __cccc_isnan_d)(x)
 
 int __cccc_isinf_f(float);
 int __cccc_isinf_d(double);
-#define isinf(x) _Generic((x), float: __cccc_isinf_f, default: __cccc_isinf_d)(x)
 
 int __cccc_signbit_f(float);
 int __cccc_signbit_d(double);
-#define signbit(x) _Generic((x), float: __cccc_signbit_f, default: __cccc_signbit_d)(x)
 
 int __cccc_fpclassify_f(float);
 int __cccc_fpclassify_d(double);
+
+/* _Decimal32/64/128 arms (#828): include/decimal_math.h supplies
+ * isnand32/64/128 etc as static inline definitions once CCCC_HAS_DECIMAL is
+ * linked. Guarded on __STDC_IEC_60559_DFP__ so the default (decimal-off)
+ * build never references a name that doesn't exist -- _Decimal32/64/128
+ * are valid type names in every build (see docs/VM.md), but decimal_math.h
+ * itself is a compile error to include without the library. */
+#ifdef __STDC_IEC_60559_DFP__
+#include "decimal_math.h"
+
+#define isnan(x) _Generic((x), \
+    float: __cccc_isnan_f, \
+    _Decimal32: isnand32, _Decimal64: isnand64, _Decimal128: isnand128, \
+    default: __cccc_isnan_d)(x)
+
+#define isinf(x) _Generic((x), \
+    float: __cccc_isinf_f, \
+    _Decimal32: isinfd32, _Decimal64: isinfd64, _Decimal128: isinfd128, \
+    default: __cccc_isinf_d)(x)
+
+#define signbit(x) _Generic((x), \
+    float: __cccc_signbit_f, \
+    _Decimal32: signbitd32, _Decimal64: signbitd64, _Decimal128: signbitd128, \
+    default: __cccc_signbit_d)(x)
+
+#define fpclassify(x) _Generic((x), \
+    float: __cccc_fpclassify_f, \
+    _Decimal32: fpclassifyd32, _Decimal64: fpclassifyd64, _Decimal128: fpclassifyd128, \
+    default: __cccc_fpclassify_d)(x)
+
+#else
+#define isnan(x) _Generic((x), float: __cccc_isnan_f, default: __cccc_isnan_d)(x)
+#define isinf(x) _Generic((x), float: __cccc_isinf_f, default: __cccc_isinf_d)(x)
+#define signbit(x) _Generic((x), float: __cccc_signbit_f, default: __cccc_signbit_d)(x)
 #define fpclassify(x) _Generic((x), float: __cccc_fpclassify_f, default: __cccc_fpclassify_d)(x)
+#endif
+
+/* isnormal is deliberately NOT its own _Generic dispatch: fpclassify(x)
+ * above already dispatches float/double/_Decimal32/64/128 correctly (and
+ * fpclassifyd*() returns CCCC_FP_NORMAL == FP_NORMAL for the decimal
+ * case), so composing on top of it covers every type for free. A parallel
+ * per-type isnormal _Generic was tried and dropped: its `default` arm has
+ * to be an expression rather than a bare function name, so the macro can't
+ * end in a uniform `(x)` call like the other four -- the decimal arms
+ * evaluated to an always-truthy function pointer instead of calling
+ * anything. */
+#define isnormal(x) (fpclassify(x) == FP_NORMAL)
 
 #define isfinite(x) (!(isnan(x) || isinf(x)))
-#define isnormal(x) (fpclassify(x) == FP_NORMAL)
 
 /* Basic arithmetic */
 double fabs(double);

@@ -207,4 +207,249 @@ int test_decimal_float_h(void) {
     return 42;
 }
 
+// -- <math.h> transcendentals (tracker #828, phase 2 of #402) --------------
+// bid{32,64,128}_{sqrt,exp,log,pow,sin,cos,...} exposed via
+// include/decimal_math.h + src/stdlib/decimal_math.c. Exact-string
+// assertions (__builtin_decimal_to_chars + strcmp) are used only for
+// exactly-representable results; transcendentals use a decimal tolerance
+// compare since BID's digit count drives the string form.
+
+#include <math.h>
+
+static int approx_eqd64(_Decimal64 got, _Decimal64 want, _Decimal64 tol) {
+    _Decimal64 diff = got - want;
+    if (diff < 0.dd) diff = -diff;
+    return diff < tol;
+}
+
+[[cccc::test(return = 42)]]
+int test_decimal_math_algebraic(void) {
+    if (sqrtd32(9.df) != 3.df) return 1;
+    if (sqrtd64(4.dd) != 2.dd) return 2;
+    if (sqrtd128(25.dl) != 5.dl) return 3;
+    if (cbrtd64(27.dd) != 3.dd) return 4;
+    if (hypotd64(3.dd, 4.dd) != 5.dd) return 5;
+    if (fmad64(2.dd, 3.dd, 4.dd) != 10.dd) return 6;
+    if (fmad128(2.dl, 3.dl, 4.dl) != 10.dl) return 7;
+    if (fabsd64(-5.dd) != 5.dd) return 8;
+    if (fabsd128(-5.dl) != 5.dl) return 9;
+    if (fdimd64(5.dd, 3.dd) != 2.dd) return 10;
+    if (fdimd64(3.dd, 5.dd) != 0.dd) return 11;
+    if (fmind64(3.dd, 5.dd) != 3.dd) return 12;
+    if (fmaxd64(3.dd, 5.dd) != 5.dd) return 13;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_decimal_math_exp_log(void) {
+    if (expd64(0.dd) != 1.dd) return 1;
+    if (logd64(1.dd) != 0.dd) return 2;
+    if (log10d64(100.dd) != 2.dd) return 3;
+    if (log2d64(8.dd) != 3.dd) return 4;
+    if (exp2d64(3.dd) != 8.dd) return 5;
+    if (exp10d64(2.dd) != 100.dd) return 6;
+    if (powd64(2.dd, 10.dd) != 1024.dd) return 7;
+    if (powd32(2.df, 10.df) != 1024.df) return 8;
+    if (powd128(2.dl, 10.dl) != 1024.dl) return 9;
+    if (!approx_eqd64(expd64(1.dd), 2.71828182845905dd, 1e-10dd)) return 10;
+    if (!approx_eqd64(expm1d64(0.dd), 0.dd, 1e-15dd)) return 11;
+    if (!approx_eqd64(log1pd64(0.dd), 0.dd, 1e-15dd)) return 12;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_decimal_math_trig(void) {
+    if (sind64(0.dd) != 0.dd) return 1;
+    if (cosd64(0.dd) != 1.dd) return 2;
+    if (tand64(0.dd) != 0.dd) return 3;
+    if (asind64(0.dd) != 0.dd) return 4;
+    if (atand64(0.dd) != 0.dd) return 5;
+    if (atan2d64(0.dd, 1.dd) != 0.dd) return 6;
+    if (!approx_eqd64(sind64(1.dd), 0.841470984807897dd, 1e-9dd)) return 7;
+    if (!approx_eqd64(cosd64(1.dd), 0.540302305868140dd, 1e-9dd)) return 8;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_decimal_math_hyperbolic(void) {
+    if (sinhd64(0.dd) != 0.dd) return 1;
+    if (coshd64(0.dd) != 1.dd) return 2;
+    if (tanhd64(0.dd) != 0.dd) return 3;
+    if (asinhd64(0.dd) != 0.dd) return 4;
+    if (atanhd64(0.dd) != 0.dd) return 5;
+    if (!approx_eqd64(sinhd64(1.dd), 1.17520119364380dd, 1e-9dd)) return 6;
+    if (!approx_eqd64(coshd64(1.dd), 1.54308063481524dd, 1e-9dd)) return 7;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_decimal_math_erf_gamma(void) {
+    if (erfd64(0.dd) != 0.dd) return 1;
+    if (!approx_eqd64(erfcd64(0.dd), 1.dd, 1e-15dd)) return 2;
+    if (!approx_eqd64(tgammad64(5.dd), 24.dd, 1e-9dd)) return 3; // 4!
+    if (!approx_eqd64(lgammad64(1.dd), 0.dd, 1e-9dd)) return 4;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_decimal_math_rounding(void) {
+    if (ceild64(1.1dd) != 2.dd) return 1;
+    if (ceild64(-1.1dd) != -1.dd) return 2;
+    if (floord64(1.9dd) != 1.dd) return 3;
+    if (floord64(-1.1dd) != -2.dd) return 4;
+    if (truncd64(1.9dd) != 1.dd) return 5;
+    if (truncd64(-1.9dd) != -1.dd) return 6;
+    if (roundd64(1.5dd) != 2.dd) return 7;
+    if (roundd64(-1.5dd) != -2.dd) return 8; // ties away from zero
+    if (nearbyintd64(2.5dd) != 2.dd) return 9; // ties to even (default rounding)
+    if (rintd64(1.dd) != 1.dd) return 10;
+    if (ceild32(1.1df) != 2.df) return 11;
+    if (ceild128(1.1dl) != 2.dl) return 12;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_decimal_math_int_valued(void) {
+    if (ilogbd64(100.dd) != 2) return 1;
+    if (lrintd64(3.dd) != 3) return 2;
+    if (llrintd64(3.dd) != 3) return 3;
+    if (lroundd64(1.5dd) != 2) return 4;
+    if (llroundd64(1.5dd) != 2) return 5;
+    if (quantexpd64(1.00dd) != -2) return 6;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_decimal_math_outparam(void) {
+    int exp;
+    _Decimal64 mant = frexpd64(8.dd, &exp);
+    _Decimal64 recombined = scalbnd64(mant, exp);
+    if (recombined != 8.dd) return 1;
+
+    _Decimal64 ip;
+    _Decimal64 frac = modfd64(3.5dd, &ip);
+    if (ip != 3.dd) return 2;
+    if (frac != 0.5dd) return 3;
+
+    _Decimal128 ip128;
+    _Decimal128 frac128 = modfd128(3.5dl, &ip128);
+    if (ip128 != 3.dl) return 4;
+    if (frac128 != 0.5dl) return 5;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_decimal_math_scale(void) {
+    if (scalbnd64(3.dd, 2) != 300.dd) return 1;
+    if (scalblnd64(3.dd, 2) != 300.dd) return 2;
+    if (ldexpd64(3.dd, 2) != 300.dd) return 3;
+    // stepping toward a larger value must move strictly upward
+    if (nextafterd64(1.dd, 2.dd) <= 1.dd) return 4;
+    // stepping toward itself must be a no-op
+    if (nextafterd64(1.dd, 1.dd) != 1.dd) return 5;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_decimal_math_quantum(void) {
+    _Decimal64 x = 1.dd;
+    _Decimal64 q = quantized64(x, 1.00dd);
+    if (q != 1.00dd) return 1;
+    if (!samequantumd64(1.00dd, 2.00dd)) return 2;
+    if (samequantumd64(1.0dd, 1.00dd)) return 3;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_decimal_math_predicates(void) {
+    _Decimal64 nanval = 0.dd / 0.dd;
+    _Decimal64 infval = 1.dd / 0.dd;
+
+    if (!isnand64(nanval)) return 1;
+    if (isnand64(1.dd)) return 2;
+    if (!isinfd64(infval)) return 3;
+    if (isinfd64(1.dd)) return 4;
+    if (!isfinited64(1.dd)) return 5;
+    if (isfinited64(infval)) return 6;
+    if (isfinited64(nanval)) return 7;
+    if (!isnormald64(1.dd)) return 8;
+    if (!signbitd64(-1.dd)) return 9;
+    if (signbitd64(1.dd)) return 10;
+
+    if (fpclassifyd64(0.dd) != FP_ZERO) return 11;
+    if (fpclassifyd64(nanval) != FP_NAN) return 12;
+    if (fpclassifyd64(infval) != FP_INFINITE) return 13;
+    if (fpclassifyd64(1.dd) != FP_NORMAL) return 14;
+
+    if (!isnand32((_Decimal32)nanval)) return 15;
+    if (!isnand128((_Decimal128)nanval)) return 16;
+
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_decimal_math_generic_dispatch(void) {
+    // isnan/isinf/signbit/fpclassify/isnormal/isfinite from <math.h> must
+    // dispatch correctly for float, double, AND _Decimal32/64/128 through
+    // the same _Generic macros (#828 extends #778's existing dispatch).
+    _Decimal64 nanval = 0.dd / 0.dd;
+
+    if (isnan(nanval) != 1) return 1;
+    if (isnan(1.0) != 0) return 2;
+    if (isnan(1.0f) != 0) return 3;
+
+    if (isinf(1.dd / 0.dd) != 1) return 4;
+    if (isinf(1.0) != 0) return 5;
+
+    if (signbit(-1.dd) == 0) return 6;
+    if (signbit(-1.0) == 0) return 7;
+
+    if (fpclassify(0.dd) != FP_ZERO) return 8;
+    if (fpclassify(0.0) != FP_ZERO) return 9;
+
+    if (!isfinite(1.dd)) return 10;
+    if (isfinite(nanval)) return 11;
+    if (!isfinite(1.0)) return 12;
+
+    if (!isnormal(1.dd)) return 13;
+    if (!isnormal(1.0)) return 14;
+    // isnormal's false cases matter: an earlier draft of the decimal
+    // _Generic dispatch evaluated to an always-truthy function pointer
+    // instead of actually calling anything (caught only by asserting the
+    // negative here, not just the positive above).
+    if (isnormal(0.dd)) return 15;
+    if (isnormal(nanval)) return 16;
+    if (isnormal(0.0)) return 17;
+
+    return 42;
+}
+
+// Op coverage for the math1/math2/mathi entries the tests above don't
+// otherwise exercise -- op numbers are hand-mirrored between
+// include/decimal_math.h and src/stdlib/decimal_math.c with no
+// compile-time link between them, so an untested op can silently mean a
+// mis-mapped one. NEXTTOWARD matters most here: it's the only op whose
+// second operand is a fixed _Decimal128 regardless of the first operand's
+// width.
+[[cccc::test(return = 42)]]
+int test_decimal_math_op_coverage(void) {
+    if (acosd64(1.dd) != 0.dd) return 1;
+    if (!approx_eqd64(acoshd64(1.dd), 0.dd, 1e-15dd)) return 2;
+    if (logbd64(100.dd) != 2.dd) return 3;
+    if (quantumd64(1.00dd) != 0.01dd) return 4;
+
+    if (fmodd64(7.dd, 3.dd) != 1.dd) return 5;
+    if (remainderd64(7.dd, 3.dd) != 1.dd) return 6;
+    if (copysignd64(3.dd, -1.dd) != -3.dd) return 7;
+    if (nexttowardd64(1.dd, 2.dl) <= 1.dd) return 8;
+    if (nexttowardd64(1.dd, 1.dl) != 1.dd) return 9;
+
+    if (issignalingd64(1.dd)) return 10; // a normal value must never signal
+
+    if (!totalorderd64(1.dd, 2.dd)) return 11;
+    if (totalorderd64(2.dd, 1.dd)) return 12;
+
+    return 42;
+}
+
 #endif // __STDC_IEC_60559_DFP__

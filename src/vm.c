@@ -1908,6 +1908,7 @@ int cc_load_libc(VirtualMachine *vm) {
 void cc_load_stdlib(VirtualMachine *vm) {
     // Register all standard library functions regardless of includes
     register_ctype_functions(vm);
+    register_decimal_math_functions(vm);
     register_fenv_functions(vm);
     register_locale_functions(vm);
     register_math_functions(vm);

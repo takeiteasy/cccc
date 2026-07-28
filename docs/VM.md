@@ -730,6 +730,20 @@ this phase (`%Hf`/`%Df`/`%DDf` integration is a follow-up): the only
 guest-visible formatting entry point is `__builtin_decimal_to_chars(buf, n,
 decimal_value)`, which lowers directly to `DFMT`.
 
+### `<math.h>` transcendentals (#828)
+
+`sqrt`/`exp`/`log`/`pow`/`sin`/`cos`/... for `_Decimal32/64/128` (`<decimal_math.h>`,
+opt-in with `CCCC_HAS_DECIMAL=1`; see [COVERAGE.md](COVERAGE.md)'s C23 header
+table for the full function list) add **no new opcodes**. Unlike the twelve
+`D*` arithmetic opcodes above — which call directly into `src/stdlib/decimal.c`
+from `src/ops.c` and are never FFI-registered — decimal maths is an ordinary
+stdlib module (`src/stdlib/decimal_math.c`, registered like any other
+`<header.h>` → `register_*_functions` mapping in `tools/stdlib.tsv`). A guest
+call to e.g. `sqrtd64()` goes through the normal FFI call path into six
+op-dispatch entry points, each taking raw byte addresses (same "no BID type in
+a VM header" convention as the `cccc_dec_*` shim functions above) rather than
+through a dedicated opcode.
+
 ### ABI
 
 By-value decimal arguments and returns reuse the vector-by-value struct-ABI

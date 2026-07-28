@@ -5,11 +5,30 @@
 #
 # The Intel library is NEVER vendored into this repository. This script
 # downloads (or reuses an already-present copy of) the upstream tarball,
-# verifies its checksum, extracts only the arithmetic sources it needs
-# (LIBRARY/src -- LIBRARY/float128/ is not required), builds them into a
+# verifies its checksum, extracts the sources it needs, builds them into a
 # static archive, and leaves everything under a gitignored prefix
 # directory. It is a plain script, not a `make` target: nothing else in
 # this build ever invokes it automatically.
+#
+# Both LIBRARY/src (arithmetic) and LIBRARY/float128 (the "dpml" 128-bit
+# binary-float emulation) are extracted and built. float128 was not needed
+# through phase 1 (#402, arithmetic only), but phase 2 (#828, <math.h>
+# transcendentals) needs it: bid{32,64,128}_{sin,cos,exp,log,pow,...} range-
+# reduce internally through __bid_f128_* calls (see build/intel-bid/src/
+# bid_trans.h), which on a compiler without a native 128-bit binary float
+# type -- true of the clang builds this project targets -- are satisfied by
+# LIBRARY/float128's software implementation, not by anything in
+# LIBRARY/src. Building src alone links but leaves every __bid_f128_*
+# symbol undefined, which only shows up as a link error the first time a
+# guest calls sin32d64d128() and friends -- not at `make`.
+#
+# Rather than hand-roll a second compile loop with float128's own per-file
+# flag quirks (a handful of its objects need "table" variants built from
+# the same .c with different macros -- see LIBRARY/makefile's F128_OBJS/
+# F53_OBJS rules), this script now shells out to the vendor's own
+# LIBRARY/makefile for the whole build. It already encodes that
+# dependency graph correctly and portably; re-deriving it by hand here
+# would just be a second, worse copy of the same logic.
 #
 # Usage:
 #   tools/fetch_intel_bid.sh [--prefix DIR] [--jobs N] [--verify-only] [--clean]
@@ -49,7 +68,7 @@ while [ $# -gt 0 ]; do
     --jobs=*) JOBS="${1#--jobs=}"; shift ;;
     --verify-only) VERIFY_ONLY=1; shift ;;
     --clean) DO_CLEAN=1; shift ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,48p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -126,12 +145,15 @@ if [ "$VERIFY_ONLY" -eq 1 ]; then
   exit 0
 fi
 
-# --- extract only LIBRARY/src ------------------------------------------------
+# --- extract LIBRARY/{src,float128} + the vendor makefile -------------------
 CC="${CC:-cc}"
 CC_TAG="$(echo "$CC" | tr -c 'A-Za-z0-9' '_')"
 SRC_DIR="$PREFIX/src"
 LIB_DIR="$PREFIX/lib"
-OBJ_DIR="$PREFIX/obj-$CC_TAG"
+# The vendor makefile builds in place (BID_SRC_ROOT defaults to "."), so
+# each $CC gets its own extracted LIBRARY copy rather than sharing one --
+# switching compilers must not race on the same .o files.
+VENDOR_DIR="$PREFIX/vendor-$CC_TAG/LIBRARY"
 LIBBID_A="$LIB_DIR/libbid-$CC_TAG.a"
 LIBBID_A_STABLE="$LIB_DIR/libbid.a"
 
@@ -146,45 +168,42 @@ if [ -f "$LIBBID_A" ] && [ "$LIBBID_A" -nt "$TARBALL" ] \
   exit 0
 fi
 
-mkdir -p "$SRC_DIR" "$OBJ_DIR" "$LIB_DIR"
-echo "Extracting LIBRARY/src ..."
+mkdir -p "$SRC_DIR" "$LIB_DIR" "$VENDOR_DIR"
+echo "Extracting LIBRARY/src (headers, -I$SRC_DIR) ..."
 tar xzf "$TARBALL" -C "$SRC_DIR" --strip-components=2 LIBRARY/src
 
 # bid_conf.h must be included before bid_functions.h by any consumer; that's
 # a consumer-side contract (documented in src/internal.h), not something
 # this script needs to enforce.
 
-echo "Compiling BID library sources ($JOBS parallel jobs) ..."
-BID_CFLAGS="-O2 -w -DLINUX -Defi2 -D__NO_BINARY80__ \
-  -DDECIMAL_CALL_BY_REFERENCE=0 -DDECIMAL_GLOBAL_ROUNDING=0 \
-  -DDECIMAL_GLOBAL_EXCEPTION_FLAGS=0 -I$SRC_DIR"
+echo "Extracting LIBRARY/{src,float128,makefile,makefile.iml_head} for the build ..."
+# No --strip-components here: VENDOR_DIR is .../vendor-$CC_TAG/LIBRARY, so
+# the tarball's own "LIBRARY/..." prefix is exactly what lands it there.
+tar xzf "$TARBALL" -C "$(dirname "$VENDOR_DIR")" \
+  LIBRARY/src LIBRARY/float128 LIBRARY/makefile LIBRARY/makefile.iml_head
 
-cd "$SRC_DIR"
-SRC_COUNT=$(ls -1 ./*.c | wc -l | tr -d ' ')
-pids=0
-fail=0
+echo "Building BID library ($JOBS parallel jobs, via the vendor makefile) ..."
+# CALL_BY_REF=0/GLOBAL_RND=0/GLOBAL_FLAGS=0 selects the same by-value,
+# per-call rounding-mode/exception-flags ABI src/stdlib/decimal.c and
+# decimal_math.c already call against (DECIMAL_CALL_BY_REFERENCE=0,
+# DECIMAL_GLOBAL_ROUNDING=0, DECIMAL_GLOBAL_EXCEPTION_FLAGS=0 -- this is
+# just the vendor makefile's own spelling of the same three switches).
 # eval is required, not cosmetic: $CC may itself contain flags (e.g. the
 # macos-x86_64-build target sets CC="clang -arch x86_64"), and eval is what
-# lets that word-split correctly inside the compile command.
-for f in ./*.c; do
-  base="$(basename "$f" .c)"
-  ( eval "$CC $BID_CFLAGS -c \"$f\" -o \"$OBJ_DIR/$base.o\"" ) &
-  pids=$((pids + 1))
-  if [ "$pids" -ge "$JOBS" ]; then
-    wait || fail=1
-    pids=0
-  fi
-done
-wait || fail=1
+# lets that word-split correctly inside the make invocation.
+if ! ( cd "$VENDOR_DIR" && eval "$CC -E -x c /dev/null >/dev/null 2>&1" ); then
+  echo "FAIL: \$CC ($CC) does not appear to work" >&2
+  exit 1
+fi
+( cd "$VENDOR_DIR" && eval "make -j$JOBS CC=\"$CC\" CALL_BY_REF=0 GLOBAL_RND=0 GLOBAL_FLAGS=0" )
 
-OBJ_COUNT=$(ls -1 "$OBJ_DIR"/*.o 2>/dev/null | wc -l | tr -d ' ')
-if [ "$fail" -ne 0 ] || [ "$OBJ_COUNT" -ne "$SRC_COUNT" ]; then
-  echo "FAIL: compiled $OBJ_COUNT/$SRC_COUNT BID sources -- aborting archive build" >&2
+if [ ! -f "$VENDOR_DIR/libbid.a" ]; then
+  echo "FAIL: vendor makefile did not produce $VENDOR_DIR/libbid.a" >&2
   exit 1
 fi
 
 rm -f "$LIBBID_A"
-ar rcs "$LIBBID_A" "$OBJ_DIR"/*.o
+cp "$VENDOR_DIR/libbid.a" "$LIBBID_A"
 ln -sf "$(basename "$LIBBID_A")" "$LIBBID_A_STABLE"
 
 echo

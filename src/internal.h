@@ -580,6 +580,11 @@ bool cccc_dec_to_bin(int w, const void *src, bool dst_is_f32, uint64_t *out_bits
 bool cccc_dec_convert(int dst_w, int src_w, void *dst, const void *src);
 int  cccc_dec_format(char *buf, size_t n, const void *val, int w); // -1 if unsupported
 bool cccc_dec_encode_literal(const char *digits, int w, void *out); // compile-time only
+
+// _Decimal32/64/128 <math.h> transcendentals (tracker #828, phase 2 of #402).
+// Defined in src/stdlib/decimal_math.c; the typed guest-facing API lives in
+// include/decimal_math.h.
+void register_decimal_math_functions(VirtualMachine *vm);
 bool is_compatible(Type *t1, Type *t2);
 Type *copy_type(VirtualMachine *vm, Type *ty);
 Type *pointer_to(VirtualMachine *vm, Type *base);
