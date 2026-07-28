@@ -160,7 +160,12 @@ At `--optimize=2` and above, code generation also promotes hot eligible
 integer/pointer locals to VM saved registers. Promoted locals exclude volatile,
 address-escaping, aggregate, array, captured, block, VLA, floating, complex, and
 debugger-visible cases; dirty values are flushed back to their stack slots at
-function exits.
+function exits. "Captured" covers both Apple block literals and GNU nested
+functions: a local read or written by either, anywhere at any nesting depth,
+is excluded even with no `&` in the source — a nested function reaches it
+directly through the static-link chain and its stack slot, so holding it in a
+register instead would make the enclosing function and the nested function
+disagree about its value.
 
 The same levels also lower simple array and pointer dereferences of the form
 `base + index * scale` to fused indexed VM opcodes. This removes the explicit

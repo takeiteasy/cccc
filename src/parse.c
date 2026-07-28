@@ -229,6 +229,11 @@ struct ObjSizeQuery {
 static bool objsize_alloc_from_call(VirtualMachine *vm, Node *rhs, int *out);
 static bool objsize_peel_offset_chain(VirtualMachine *vm, Node *node, Obj **out_base, int *out_offset);
 static void resolve_objsize_queries(VirtualMachine *vm, Node *body);
+// #836: mark locals of `fn`'s enclosing function(s) that a nested function's
+// body reaches via the static-link chain, so scalar/FP local promotion
+// (src/codegen.c's is_captured checks) never holds them in a saved register
+// behind the nested function's back. See mark_nested_captures below.
+static void mark_nested_captures(Obj *fn, Node *node);
 static void validate_constexpr_object_type(VirtualMachine *vm, Token *tok, Type *ty);
 static void validate_constexpr_initializer(VirtualMachine *vm, Obj *var, Initializer *init,
                                            Token *tok);
@@ -5405,6 +5410,52 @@ static void mark_addr_escapes(Node *node) {
         mark_addr_escapes(node->body);
         for (Node *a = node->args; a; a = a->next)
             mark_addr_escapes(a);
+    }
+}
+
+// #836: does `var` belong to `fn`'s own locals list? Used by
+// mark_nested_captures to tell "this function's own local" apart from
+// "reaches an enclosing frame through the static link".
+static bool var_in_fn_locals(Obj *fn, Obj *var) {
+    for (Obj *v = fn->locals; v; v = v->next)
+        if (v == var)
+            return true;
+    return false;
+}
+
+// #836: mark_addr_escapes/collect_captures_in_node's counterpart for GNU
+// nested functions. A nested function's body can read/write an enclosing
+// function's local directly (through the static-link chain and that local's
+// stack slot) without ever taking its address -- collect_captures_in_node
+// only marks is_captured for Apple block literals, so a plain nested
+// function's captures went unmarked and prepare_local_promotion /
+// prepare_fp_local_promotion (src/codegen.c) were free to hold such a local
+// in a saved register while the nested function kept mutating the stack
+// slot behind its back (#836). Any is_local ND_VAR reached from `fn`'s body
+// that is not in `fn`'s own locals list must belong to some enclosing
+// frame -- depth-agnostic, so a multi-level nest (main -> mid -> inner) is
+// covered without walking the parent chain explicitly. Mirrors the child set
+// walked by collect_promotion_candidates (src/codegen.c) so no path holding a
+// captured reference is missed.
+static void mark_nested_captures(Obj *fn, Node *node) {
+    for (; node; node = node->next) {
+        if (node->kind == ND_VAR && node->var && node->var->is_local &&
+            !var_in_fn_locals(fn, node->var))
+            node->var->is_captured = true;
+
+        mark_nested_captures(fn, node->lhs);
+        mark_nested_captures(fn, node->rhs);
+        mark_nested_captures(fn, node->cond);
+        mark_nested_captures(fn, node->then);
+        mark_nested_captures(fn, node->els);
+        mark_nested_captures(fn, node->init);
+        mark_nested_captures(fn, node->inc);
+        mark_nested_captures(fn, node->body);
+        mark_nested_captures(fn, node->cas_addr);
+        mark_nested_captures(fn, node->cas_old);
+        mark_nested_captures(fn, node->cas_new);
+        for (Node *a = node->args; a; a = a->next)
+            mark_nested_captures(fn, a);
     }
 }
 
@@ -11893,6 +11944,11 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
         resolve_goto_labels(vm);
         resolve_objsize_queries(vm, fn->body);
         mark_addr_escapes(fn->body);
+        // #836: mark this nested function's captures on whichever enclosing
+        // function(s) they belong to, before that/those function(s)'s own
+        // codegen runs prepare_local_promotion / prepare_fp_local_promotion.
+        if (is_nested)
+            mark_nested_captures(fn, fn->body);
         // check_nonnull_flow() runs post-parse now (#688) -- see the loop
         // in parse() -- so a caller of a later-defined function still sees
         // that callee's may-return-null summary.
