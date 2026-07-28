@@ -11,12 +11,12 @@
 //   level 0 → nonzero  (return addr back into test fn)
 //   level 1 → 0        (test fn's sentinel ret_addr)
 //
-// For level 1 to be nonzero we need a helper chain:
-//   test_fn → outer() → inner()
-// Inside inner():
-//   level 0 → nonzero  (return to outer)
-//   level 1 → nonzero  (return to test_fn, from the CALL inside test_fn)
-//   level 2 → 0        (test_fn's sentinel)
+// Level-1+ lookups through a two-deep test_fn → outer() → inner() helper
+// chain (#835) live in test_builtin_return_address_notco.c instead: each
+// `return inner();` there is a tail call at -O1+, and CALLT elides the
+// intermediate frame that those tests' level-1/level-2 lookups depend on
+// walking. This file's tests are unaffected by that (no tail-position helper
+// chain), so it keeps full opt-level coverage.
 
 #include <stddef.h>
 
@@ -24,16 +24,6 @@
 
 static void *get_ra0(void) { return __builtin_return_address(0); }
 static void *get_ra1(void) { return __builtin_return_address(1); }
-
-// Two-depth helpers (inner called from outer, outer called from test fn) ──
-
-static void *inner_ra0(void) { return __builtin_return_address(0); }
-static void *inner_ra1(void) { return __builtin_return_address(1); }
-static void *inner_ra2(void) { return __builtin_return_address(2); }
-
-static void *outer_calls_inner_ra0(void) { return inner_ra0(); }
-static void *outer_calls_inner_ra1(void) { return inner_ra1(); }
-static void *outer_calls_inner_ra2(void) { return inner_ra2(); }
 
 // ─── Type acceptance ───────────────────────────────────────────────────────
 
@@ -72,39 +62,6 @@ void test_return_address_distinct_call_sites(void) {
     void *ra1 = get_ra0();  // call site 1
     void *ra2 = get_ra0();  // call site 2
     AssertNeq((long long)ra1, (long long)ra2);
-}
-
-// ─── Level 1 from two-deep chain is nonzero ──────────────────────────────
-// test_fn → outer_calls_inner_ra1 → inner_ra1
-// Inside inner_ra1, level 1 is outer_calls_inner_ra1's return address
-// (the CALL back to test_fn) — nonzero.
-
-[[cccc::test]]
-void test_return_address_level1_nonzero(void) {
-    void *ra1 = outer_calls_inner_ra1();
-    AssertNotNull(ra1);
-}
-
-// ─── Level 2 from two-deep chain is the test fn sentinel (0) ────────────
-
-[[cccc::test]]
-void test_return_address_level2_is_sentinel(void) {
-    void *ra2 = outer_calls_inner_ra2();
-    AssertNull(ra2);
-}
-
-// ─── Level 0 vs level 1 differ (both from inside two-deep chain) ─────────
-
-[[cccc::test]]
-void test_return_address_levels_differ(void) {
-    void *ra0 = outer_calls_inner_ra0();
-    void *ra1 = outer_calls_inner_ra1();
-    // ra0 = ret addr inside outer_calls_inner_ra0 (back to outer)
-    // ra1 = ret addr inside outer_calls_inner_ra1 (back to test_fn)
-    // Both nonzero and different (different call depths).
-    AssertNotNull(ra0);
-    AssertNotNull(ra1);
-    AssertNeq((long long)ra0, (long long)ra1);
 }
 
 // ─── NULL past outermost frame (very deep level) ─────────────────────────

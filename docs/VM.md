@@ -103,6 +103,8 @@ Inside `ra_capture`:
 
 This is deterministic and by design: `CALLT` semantics guarantee that the callee's stack view is identical to what it would see if the tail-call site had never existed. Without `-O1` (no TCO), `tail_wrapper`'s frame is present and `__builtin_return_address(0)` returns a PC inside `tail_wrapper`.
 
+More generally, a level-`n` `__builtin_return_address` walk counts only the frames actually present on the stack — it has no way to know how many tail calls were elided along the way. Each `CALLT` in the chain being walked shifts every level below it down by one, so a lookup that would have returned a real return address without TCO can instead hit the outermost sentinel (`NULL`) early, or land on a different frame's return address than a naive (non-TCO) frame count would suggest. `tests/test_builtin_return_address_callt.c` (pinned to `-O1`, `CCCC_MATRIX_SKIP`) asserts this collapsed-frame behavior directly; `tests/test_builtin_return_address_notco.c` (pinned to `-O0`) covers the same nonzero-level lookups through a helper chain with no tail calls, for comparison.
+
 ### VM Threads
 
 Both the POSIX `<pthread.h>` and C11 `<threads.h>` layers map thread creation to host pthreads while keeping VM execution correctness-first. Each VM thread receives an independent VM stack/register snapshot and enters the requested VM function with the `void *` argument in `REG_A0`. The VM's text, data, heap, globals, FFI registrations, and safety metadata remain shared by the `CCCC` instance.

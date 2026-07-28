@@ -17,6 +17,10 @@
 //   const char *fn = __builtin_pc_function_name(ra);
 //   const char *file; int line;
 //   __builtin_pc_source_location(ra, &file, &line);
+//
+// The level-1 lookup through a three-deep tail-call chain (#835) lives in
+// test_builtin_return_address_notco.c instead, pinned to -O0 — see that
+// file's header for why.
 
 #include <stddef.h>
 #include <stdint.h>
@@ -39,16 +43,10 @@ static const char *name_of_caller(void) {
     return __builtin_pc_function_name(ra);
 }
 
-// Three-level chain for testing level-1 lookup:
-//   test_fn → outer_calls_name_inner → name_inner_ra1
-// Inside name_inner_ra1:
-//   level 0 → return addr in outer_calls_name_inner body
-//   level 1 → return addr in test_fn body
-static const char *name_inner_ra1(void) {
-    void *ra = __builtin_return_address(1);
-    return __builtin_pc_function_name(ra);
-}
-static const char *outer_calls_name_inner(void) { return name_inner_ra1(); }
+// The level-1 three-deep chain (test_fn → outer_calls_name_inner →
+// name_inner_ra1) lives in test_builtin_return_address_notco.c instead
+// (#835): `return name_inner_ra1();` there is a tail call at -O1+, and CALLT
+// elides the intermediate frame that a level-1 lookup depends on walking.
 
 // ─── Type acceptance ───────────────────────────────────────────────────────
 
@@ -101,16 +99,6 @@ void test_pc_function_name_resolves_caller(void) {
     // Must be non-NULL and equal to this function's name.
     AssertNotNull(fn);
     AssertStrEq(fn, "test_pc_function_name_resolves_caller");
-}
-
-[[cccc::test]]
-void test_pc_function_name_resolves_outer_caller(void) {
-    // Three-level chain: test_fn → outer_calls_name_inner → name_inner_ra1
-    // ra at level 1 inside name_inner_ra1 falls inside *this* test function's
-    // body, so the function name must be this test function's name.
-    const char *fn = outer_calls_name_inner();
-    AssertNotNull(fn);
-    AssertStrEq(fn, "test_pc_function_name_resolves_outer_caller");
 }
 
 // ─── Distinctness ─────────────────────────────────────────────────────────
