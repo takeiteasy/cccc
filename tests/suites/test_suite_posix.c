@@ -1,4 +1,4 @@
-// CCCC_FLAGS: --testing
+// CCCC_FLAGS: --testing --posix-emulation
 // Consolidated suite: POSIX: unistd, dirent, glob, regex, socket, mman, etc.
 // Source tests: test_posix_arpa_inet, test_posix_dirent, test_posix_extra_ffi, test_posix_fnmatch, test_posix_glob, test_posix_libgen, test_posix_poll, test_posix_pwd_grp, test_posix_regex, test_posix_socket_netdb, test_posix_strings, test_posix_sys_mman, test_posix_sys_stat, test_posix_sys_time, test_posix_termios, test_posix_unistd_fcntl, test_posix_utime, test_posix_vfs_decls,
 //   test_glob_header, test_quick_exit, test_posix_sys_wait,

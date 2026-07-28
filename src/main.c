@@ -304,6 +304,10 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                             Examples: -O3 -fno-cse, -O0 -fpeephole, "
            "-ffold -fdce\n");
     printf("\t--fma                        Enable single-rounding FMA (-ffuse implied; may change FP results)\n");
+    printf("\t--posix-emulation            Enable lossy/approximate emulation of POSIX functions the\n");
+    printf("\t                             host doesn't natively support (e.g. ppoll() on macOS). Off\n");
+    printf("\t                             by default: such functions are undeclared/unregistered,\n");
+    printf("\t                             matching a native compiler on the same host. VM-only.\n");
     printf("\t--inline-limit=N             Limit inlining to N AST nodes (default: 256)\n");
     printf("\nStatic Bytecode Analysis (compile or load input, walk text segment, exit):\n");
     printf("\t--ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, default 2)\n");
@@ -849,6 +853,7 @@ int main(int argc, const char *argv[]) {
         {"embed-hard-limit", no_argument, 0, 1060},
         {"optimize", optional_argument, 0, 'O'},
         {"fma", no_argument, 0, 1072},
+        {"posix-emulation", no_argument, 0, 1117},
         {"macro-recursion-limit", required_argument, 0, 1115},
         {"repl", no_argument, 0, 'r'},
         {"std", required_argument, 0, 's'},
@@ -1219,6 +1224,9 @@ int main(int argc, const char *argv[]) {
             opt_f_enable |= CCCC_OPT_FUSE;
             ffp_contract_fma = 1;
             flags |= CCCC_FMA;
+            break;
+        case 1117: // --posix-emulation
+            flags |= CCCC_POSIX_EMULATION;
             break;
         case 'r': // --repl
             repl_mode = 1;

@@ -4677,6 +4677,15 @@ void init_macros(VirtualMachine *vm) {
     define_macro(vm, "__CCCC_STACK_CANARIES__",
                  (vm->flags & CCCC_STACK_CANARIES) ? "1" : "0");
 
+    // Expose whether --posix-emulation is set so headers can guard the
+    // declarations of POSIX functions that only exist on this host via a
+    // lossy/approximate emulation (e.g. ppoll()/sched_setscheduler() family
+    // on macOS) -- see poll.h and sched.h. Without the flag those functions
+    // are simply undeclared on hosts lacking the real primitive, matching
+    // what a native compiler on the same host would do (#824).
+    if (vm->flags & CCCC_POSIX_EMULATION)
+        define_macro(vm, "__CCCC_POSIX_EMULATION__", "1");
+
     define_macro(vm, "__has_include(x)", "0");
     define_macro(vm, "__has_feature(x)", "0");
     define_macro(vm, "__has_extension(x)", "0");

@@ -47,12 +47,17 @@ extern int poll(struct pollfd *fds, nfds_t nfds, int timeout);
 
 /* ppoll() -- the poll()-with-timeout-and-sigmask analog of pselect(). The
  * guest sigset_t -> host sigset_t translation follows the same pattern as
- * wrap_pselect_gil (src/stdlib/posix.c). macOS has no native ppoll(); it is
- * emulated there via pthread_sigmask()+poll(), which is not atomic -- see
- * the wrap_ppoll_gil comment in src/stdlib/posix.c for the race this
- * leaves open.
+ * wrap_pselect_gil (src/stdlib/posix.c). macOS has no native ppoll(); on
+ * Linux it's a real syscall, so it's always declared there. On hosts
+ * without it, ppoll() is only declared under --posix-emulation, where it's
+ * emulated via pthread_sigmask()+poll() -- not atomic like the real
+ * syscall, see the wrap_ppoll_gil comment in src/stdlib/posix.c for the
+ * race this leaves open. Without the flag, ppoll() is simply undeclared
+ * here, matching what a native compiler on the same host would do (#824).
  */
+#if defined(__linux__) || defined(__CCCC_POSIX_EMULATION__)
 extern int ppoll(struct pollfd *fds, nfds_t nfds,
                  const struct timespec *timeout, const sigset_t *sigmask);
+#endif
 
 #endif /* __POLL_H */

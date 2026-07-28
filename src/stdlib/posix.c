@@ -332,9 +332,12 @@ static long long wrap_pselect_gil(long long nfds, long long readfds, long long w
 // (ppoll_emulate_macos above), which is NOT atomic like the real
 // ppoll()/pselect() -- a signal delivered between the mask swap and
 // poll()'s internal wait is not guaranteed to interrupt it, which is
-// exactly the race the real syscall exists to close. Acceptable as a
-// placeholder (documented limitation, follow-up ticket filed) since the
-// alternative is not offering ppoll() on macOS at all.
+// exactly the race the real syscall exists to close (#824). Because this
+// is a lossy emulation of a primitive the host doesn't actually have, it
+// is only registered/declared under --posix-emulation (see poll.h and
+// register_posix_functions below) -- without the flag, ppoll() is simply
+// undeclared on macOS, matching what a native compiler on the same host
+// would do.
 static long long wrap_ppoll_gil(long long fds, long long nfds, long long timeout,
                                 long long sigmask) {
     struct pollfd stack_buf[POLL_STACK_NFDS];
@@ -2011,7 +2014,14 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "pread",   (void*)wrap_pread_gil,   4, 0);
     cc_register_cfunc(vm, "pwrite",  (void*)wrap_pwrite_gil,  4, 0);
     cc_register_cfunc(vm, "poll",    (void*)wrap_poll_gil,    3, 0);
+#ifdef __linux__
     cc_register_cfunc(vm, "ppoll",   (void*)wrap_ppoll_gil,   4, 0);
+#else
+    // Non-atomic emulation (#824) -- only register if the caller opted in
+    // via --posix-emulation; matches poll.h's declaration guard.
+    if (vm->flags & CCCC_POSIX_EMULATION)
+        cc_register_cfunc(vm, "ppoll", (void*)wrap_ppoll_gil, 4, 0);
+#endif
     cc_register_cfunc(vm, "select",  (void*)wrap_select_gil,  5, 0);
     cc_register_cfunc(vm, "pselect", (void*)wrap_pselect_gil, 6, 0);
     cc_register_cfunc(vm, "accept",  (void*)wrap_accept_gil,  3, 0);
@@ -2130,11 +2140,24 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "sched_yield", (void*)sched_yield, 0, 0);
     cc_register_cfunc(vm, "sched_get_priority_min", (void*)wrap_sched_get_priority_min, 1, 0);
     cc_register_cfunc(vm, "sched_get_priority_max", (void*)wrap_sched_get_priority_max, 1, 0);
+#ifdef __linux__
     cc_register_cfunc(vm, "sched_setparam", (void*)wrap_sched_setparam, 2, 0);
     cc_register_cfunc(vm, "sched_getparam", (void*)wrap_sched_getparam, 2, 0);
     cc_register_cfunc(vm, "sched_setscheduler", (void*)wrap_sched_setscheduler, 3, 0);
     cc_register_cfunc(vm, "sched_getscheduler", (void*)wrap_sched_getscheduler, 1, 0);
     cc_register_cfunc(vm, "sched_rr_get_interval", (void*)wrap_sched_rr_get_interval, 2, 0);
+#else
+    // No process-scheduling API on this host at all (#824) -- only register
+    // the always-ENOSYS stubs if the caller opted in via --posix-emulation;
+    // matches sched.h's declaration guard.
+    if (vm->flags & CCCC_POSIX_EMULATION) {
+        cc_register_cfunc(vm, "sched_setparam", (void*)wrap_sched_setparam, 2, 0);
+        cc_register_cfunc(vm, "sched_getparam", (void*)wrap_sched_getparam, 2, 0);
+        cc_register_cfunc(vm, "sched_setscheduler", (void*)wrap_sched_setscheduler, 3, 0);
+        cc_register_cfunc(vm, "sched_getscheduler", (void*)wrap_sched_getscheduler, 1, 0);
+        cc_register_cfunc(vm, "sched_rr_get_interval", (void*)wrap_sched_rr_get_interval, 2, 0);
+    }
+#endif
     cc_register_cfunc(vm, "posix_spawnattr_init", (void*)wrap_posix_spawnattr_init, 1, 0);
     cc_register_cfunc(vm, "posix_spawnattr_destroy", (void*)wrap_posix_spawnattr_destroy, 1, 0);
     cc_register_cfunc(vm, "posix_spawnattr_getflags", (void*)wrap_posix_spawnattr_getflags, 2, 0);

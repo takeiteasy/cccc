@@ -551,6 +551,13 @@ typedef enum {
                     // are the default and are not UB, so this is opt-in and
                     // deliberately outside CCCC_ALL_SAFETY -- no -S0..-S3
                     // tier enables it.
+    CCCC_POSIX_EMULATION =
+        (1 << 26), // 0x04000000 - Enable lossy/approximate emulation of
+                    // POSIX functions the host doesn't natively support
+                    // (--posix-emulation). Off by default: such functions
+                    // are simply undeclared/unregistered, matching what a
+                    // native compiler on the same host would do. VM-only;
+                    // rejected under -c=native.
 
     // Convenience flag combinations
     CCCC_POINTER_SANITIZER =

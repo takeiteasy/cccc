@@ -16,9 +16,12 @@
  * Darwin's real <sched.h> only declares sched_yield() and
  * sched_get_priority_min/max() -- it has no process-scheduling API at all
  * (verified against the SDK header). sched_setparam/getparam/setscheduler/
- * getscheduler/rr_get_interval are Linux-only in the real world; on macOS
- * they're still registered here (so portable guest code compiles and links
- * on both platforms) but always return -1 with errno set to ENOSYS.
+ * getscheduler/rr_get_interval are Linux-only in the real world, so on
+ * other hosts they're only declared under --posix-emulation, where they're
+ * registered as stubs that always return -1 with errno set to ENOSYS (so
+ * portable guest code can still compile and link under the VM). Without
+ * the flag they're simply undeclared, matching what a native compiler on
+ * the same host would do (#824).
  */
 
 #ifndef __SCHED_H
@@ -50,10 +53,12 @@ extern int sched_yield(void);
 extern int sched_get_priority_min(int policy);
 extern int sched_get_priority_max(int policy);
 
+#if defined(__linux__) || defined(__CCCC_POSIX_EMULATION__)
 extern int sched_setparam(pid_t pid, const struct sched_param *param);
 extern int sched_getparam(pid_t pid, struct sched_param *param);
 extern int sched_setscheduler(pid_t pid, int policy, const struct sched_param *param);
 extern int sched_getscheduler(pid_t pid);
 extern int sched_rr_get_interval(pid_t pid, struct timespec *interval);
+#endif
 
 #endif /* __SCHED_H */
