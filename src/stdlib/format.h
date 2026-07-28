@@ -5,8 +5,23 @@
 #define CCCC_STDLIB_FORMAT_H
 
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
+
+// _Decimal32/64/128 printf/scanf integration (#829). Declared in
+// src/internal.h too; mirrored here (rather than including internal.h)
+// because format_printf.c/format_scanf.c/stb_sprintf.h only ever need this
+// one small slice of the VM-wide internal API. Keep in sync with
+// src/internal.h's CCCC_DECFMT_* / cccc_dec_format_ex / cccc_dec_from_string.
+#define CCCC_DECFMT_MINUS 1u
+#define CCCC_DECFMT_PLUS  2u
+#define CCCC_DECFMT_SPACE 4u
+#define CCCC_DECFMT_ALT   8u
+#define CCCC_DECFMT_ZERO  16u
+int  cccc_dec_format_ex(char *buf, size_t n, const void *val, int w, int conv,
+                        unsigned flags, int field_width, int prec);
+bool cccc_dec_from_string(int w, void *dst, const char *s);
 
 // ---- printf family (format_printf.c) ----
 int cccc_vsnprintf(char *buf, size_t count, const char *fmt, va_list ap);

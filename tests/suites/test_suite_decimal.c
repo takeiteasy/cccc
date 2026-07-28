@@ -452,4 +452,150 @@ int test_decimal_math_op_coverage(void) {
     return 42;
 }
 
+// -- printf/scanf %Hf/%Df/%DDf integration (tracker #829) ------------------
+// snprintf + strcmp is the assertion vehicle throughout, same as
+// test_decimal_to_chars above. Expected strings were cross-checked against
+// Python's decimal module (exact arbitrary-precision decimal, default
+// ROUND_HALF_EVEN) and, for f/e/g style selection, against real host %f/%e/%g
+// on an equal binary-double value.
+
+#include <stdarg.h>
+#include <stdio.h>
+
+[[cccc::test(return = 42)]]
+int test_decimal_printf_widths(void) {
+    char buf[64];
+    _Decimal32 h = 1.5df;
+    _Decimal64 d = 3.3dd;
+    _Decimal128 l = 100.dl;
+    snprintf(buf, sizeof buf, "%Hf", h);
+    if (__builtin_strcmp(buf, "1.500000") != 0) return 1;
+    snprintf(buf, sizeof buf, "%Df", d);
+    if (__builtin_strcmp(buf, "3.300000") != 0) return 2;
+    snprintf(buf, sizeof buf, "%DDf", l);
+    if (__builtin_strcmp(buf, "100.000000") != 0) return 3;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_decimal_printf_precision(void) {
+    char buf[64];
+    _Decimal64 d = 3.3dd;
+    snprintf(buf, sizeof buf, "%.0Df", d);
+    if (__builtin_strcmp(buf, "3") != 0) return 1;
+    snprintf(buf, sizeof buf, "%.3Df", d);
+    if (__builtin_strcmp(buf, "3.300") != 0) return 2;
+    snprintf(buf, sizeof buf, "%12.3Df", d);
+    if (__builtin_strcmp(buf, "       3.300") != 0) return 3;
+    snprintf(buf, sizeof buf, "%-12.3Df", d);
+    if (__builtin_strcmp(buf, "3.300       ") != 0) return 4;
+    snprintf(buf, sizeof buf, "%+Df", d);
+    if (__builtin_strcmp(buf, "+3.300000") != 0) return 5;
+    snprintf(buf, sizeof buf, "%012.4Df", d);
+    if (__builtin_strcmp(buf, "0000003.3000") != 0) return 6;
+    // round-half-even at the rounding boundary
+    snprintf(buf, sizeof buf, "%.0Df", 1.5dd);
+    if (__builtin_strcmp(buf, "2") != 0) return 7;
+    snprintf(buf, sizeof buf, "%.0Df", 2.5dd);
+    if (__builtin_strcmp(buf, "2") != 0) return 8;
+    snprintf(buf, sizeof buf, "%.2Df", 99.995dd); // carry-out across the point
+    if (__builtin_strcmp(buf, "100.00") != 0) return 9;
+    snprintf(buf, sizeof buf, "%.3Df", 9.9999dd); // carry collapses to "1"+exp
+    if (__builtin_strcmp(buf, "10.000") != 0) return 10;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_decimal_printf_styles(void) {
+    char buf[64];
+    _Decimal64 d = 3.3dd;
+    snprintf(buf, sizeof buf, "%De", d);
+    if (__builtin_strcmp(buf, "3.300000e+00") != 0) return 1;
+    snprintf(buf, sizeof buf, "%DE", d);
+    if (__builtin_strcmp(buf, "3.300000E+00") != 0) return 2;
+    snprintf(buf, sizeof buf, "%Dg", d);
+    if (__builtin_strcmp(buf, "3.3") != 0) return 3;
+    snprintf(buf, sizeof buf, "%DG", d);
+    if (__builtin_strcmp(buf, "3.3") != 0) return 4;
+    snprintf(buf, sizeof buf, "%#Dg", d);
+    if (__builtin_strcmp(buf, "3.30000") != 0) return 5;
+    // %g threshold: exponent < -4 goes scientific, matching C's %g rule
+    snprintf(buf, sizeof buf, "%Dg", 0.0000123dd);
+    if (__builtin_strcmp(buf, "1.23e-05") != 0) return 6;
+    // negative + zero
+    snprintf(buf, sizeof buf, "%Df", -2.5dd);
+    if (__builtin_strcmp(buf, "-2.500000") != 0) return 7;
+    snprintf(buf, sizeof buf, "%Df", 0.dd);
+    if (__builtin_strcmp(buf, "0.000000") != 0) return 8;
+    // inf/nan
+    snprintf(buf, sizeof buf, "%Df", __builtin_infd64());
+    if (__builtin_strcmp(buf, "inf") != 0) return 9;
+    snprintf(buf, sizeof buf, "%DF", __builtin_infd64());
+    if (__builtin_strcmp(buf, "INF") != 0) return 10;
+    snprintf(buf, sizeof buf, "%Df", __builtin_nand64(""));
+    if (__builtin_strcmp(buf, "nan") != 0) return 11;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_decimal_printf_d128_exact(void) {
+    // 32 significant digits -- exact in _Decimal128 (34-digit coefficient),
+    // but well beyond what a long double (~18-19 decimal digits) can hold,
+    // proving the formatter renders from the BID coefficient/exponent
+    // directly rather than round-tripping through a binary intermediate.
+    char buf[64];
+    _Decimal128 big = 12345678901234567890123456789012.dl;
+    snprintf(buf, sizeof buf, "%DDf", big);
+    if (__builtin_strcmp(buf, "12345678901234567890123456789012.000000") != 0)
+        return 1;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_decimal_scanf(void) {
+    _Decimal64 x = 0.dd;
+    _Decimal32 y = 0.df;
+    _Decimal128 z = 0.dl;
+    int n = sscanf("3.3 1.5 100", "%Df %Hf %DDf", &x, &y, &z);
+    if (n != 3) return 1;
+    if (x != 3.3dd) return 2;
+    if (y != 1.5df) return 3;
+    if (z != 100.dl) return 4;
+
+    // suppression: %*Df consumes no output pointer
+    _Decimal64 a = 0.dd, b = 0.dd;
+    n = sscanf("1.1 2.2 3.3", "%Df %*Df %Df", &a, &b);
+    if (n != 2) return 5;
+    if (a != 1.1dd) return 6;
+    if (b != 3.3dd) return 7;
+
+    // mixed with a non-decimal conversion
+    _Decimal64 c = 0.dd;
+    int ival = 0;
+    n = sscanf("7 8.25", "%d %Df", &ival, &c);
+    if (n != 2 || ival != 7 || c != 8.25dd) return 8;
+
+    return 42;
+}
+
+// Forwards its variadic tail through vsnprintf, exercising the va_ffi_helper.h
+// / va_list-marshalling path (wrap_cccc_vsnprintf) rather than the direct
+// CALLF dispatch the other tests above use.
+static int cccc_test_vprintf_helper(char *dst, long dstsz, char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(dst, dstsz, fmt, ap);
+    va_end(ap);
+    return n;
+}
+
+[[cccc::test(return = 42)]]
+int test_decimal_vprintf(void) {
+    char out[64];
+    _Decimal64 d = 42.5dd;
+    cccc_test_vprintf_helper(out, sizeof out, "[%Df]", d);
+    if (__builtin_strcmp(out, "[42.500000]") != 0) return 1;
+    return 42;
+}
+
 #endif // __STDC_IEC_60559_DFP__

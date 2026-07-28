@@ -2135,6 +2135,59 @@ static void gen_vector_arg_ptr(VirtualMachine *vm, Node *arg, int addr_reg) {
     free_temp_reg(v);
 }
 
+// Pass a _Decimal32/64/128 variadic argument by pointer to a caller-frame
+// scratch copy, mirroring gen_vector_arg_ptr just above (#714/#721) --
+// exactly one 8-byte slot regardless of the value's 4/8/16 byte width, which
+// <stdarg.h>'s va_arg dereferences via __builtin_classify_type. A FIXED
+// decimal param doesn't need this: gen_expr already yields the address of
+// the source value directly (decimal is address-based throughout codegen --
+// see alloc_decimal_temp's comment), and the callee only ever reads back
+// exactly the declared width. A variadic reader, though, picks its load
+// width from the %Hf/%Df/%DDf modifier in a printf-style format string,
+// which the compiler cannot generally correlate with the argument's actual
+// width (validate_format_call only catches a literal-format-string mismatch,
+// and only warns). So this always allocates and copies the full 16 bytes,
+// independent of arg->ty->size: a width mismatch then reads uninitialized-
+// but-in-bounds bytes from a fully-sized scratch object, never past it.
+static void gen_decimal_arg_ptr(VirtualMachine *vm, Node *arg, int addr_reg) {
+    int r_src = alloc_temp_reg();
+    gen_expr(vm, arg, r_src); // decimal value -> address of source
+    mark_temp_reg_used(r_src);
+    long long off = alloc_decimal_temp(vm, 16); // always full width, not arg->ty->size
+    emit_lea3(vm, addr_reg, off); // address escapes to the callee -- record it
+    if (vm->flags & CCCC_POINTER_CHECKS) {
+        emit_rr(vm, CHKP3, addr_reg, 0);
+        emit_rr(vm, CHKP3, r_src, 0);
+    }
+    // Raw word-at-a-time copy of arg->ty->size bytes (4, 8, or 16), NOT
+    // MCPY: MCPY hard-codes REG_A0/A1/A2, which this function runs
+    // interleaved with the call's own argument-register evaluation loop and
+    // would clobber earlier-placed argument registers.
+    int r_tmp = alloc_temp_reg();
+    int r_s = alloc_temp_reg();
+    int r_d = alloc_temp_reg();
+    emit_mov3(vm, r_s, r_src);
+    emit_mov3(vm, r_d, addr_reg);
+    if (arg->ty->size == 4) {
+        emit_rr(vm, LDR_W, r_tmp, r_s);
+        emit_rr(vm, STR_W, r_tmp, r_d);
+    } else {
+        int words = arg->ty->size / 8;
+        for (int i = 0; i < words; i++) {
+            emit_rr(vm, LDR_D, r_tmp, r_s);
+            emit_rr(vm, STR_D, r_tmp, r_d);
+            if (i + 1 < words) {
+                emit_addi3(vm, r_s, r_s, 8);
+                emit_addi3(vm, r_d, r_d, 8);
+            }
+        }
+    }
+    free_temp_reg(r_d);
+    free_temp_reg(r_s);
+    free_temp_reg(r_tmp);
+    free_temp_reg(r_src);
+}
+
 static void gen_zero_size_arg(VirtualMachine *vm, Node *arg, int dest_reg) {
     gen_expr(vm, arg, REG_ZERO);
     emit_li3(vm, dest_reg, 0);
@@ -5808,20 +5861,35 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 error_tok(vm, node->tok,
                           "vector return values through FFI calls are not "
                           "supported");
-            // #402: same rationale as the vector rejection above -- libffi
-            // has no decimal ffi_type, so a _Decimal return through FFI
-            // would be mis-marshalled as a 64-bit int/double slot rather
-            // than rejected. Deferred to the #402 follow-up ticket.
+            // #402/#830: same rationale as the vector rejection above --
+            // libffi has no decimal ffi_type, so a _Decimal return through
+            // FFI would be mis-marshalled as a 64-bit int/double slot rather
+            // than rejected. Remains out of scope here; see #830.
             if (is_decimal(node->ty))
                 error_tok(vm, node->tok,
                           "_Decimal return values through FFI calls are not "
                           "supported");
+
+            // #829: a decimal argument in the *variadic tail* of an FFI call
+            // (our own cccc_printf/cccc_fprintf/... engine, which expects a
+            // pointer for %Hf/%Df/%DDf) is passed by pointer -- see
+            // gen_decimal_arg_ptr. A FIXED decimal FFI parameter has no such
+            // convention to lean on (no libffi decimal ffi_type exists), so
+            // it stays rejected; that by-value FFI case is #830's scope.
+            bool ffi_is_variadic_call = node->func_ty && node->func_ty->is_variadic;
+            int ffi_fixed_param_count = 0;
+            if (ffi_is_variadic_call) {
+                for (Type *p = node->func_ty->params; p; p = p->next)
+                    ffi_fixed_param_count++;
+            }
 
             // Count arguments and compute double_arg_mask/float_arg_mask
             int nargs = 0;
             uint64_t double_arg_mask = 0;
             uint64_t float_arg_mask = 0;
             for (Node *arg = node->args; arg; arg = arg->next) {
+                bool ffi_arg_is_vararg = ffi_is_variadic_call &&
+                                         nargs >= ffi_fixed_param_count;
                 if (is_flonum(arg->ty)) {
                     if (nargs >= 64)
                         error_tok(vm, arg->tok,
@@ -5834,7 +5902,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     error_tok(vm, arg->tok,
                               "vector arguments through FFI calls are not "
                               "supported");
-                } else if (is_decimal(arg->ty)) {
+                } else if (is_decimal(arg->ty) && !ffi_arg_is_vararg) {
                     error_tok(vm, arg->tok,
                               "_Decimal arguments through FFI calls are not "
                               "supported");
@@ -5865,6 +5933,10 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     int fs = gen_flonum_arg_to_scratch(vm, arg);
                     emit_rr(vm, fop_for_type(arg->ty, FR2R), REG_T0, fs);
                     free_temp_reg(fs);
+                } else if (is_decimal(arg->ty)) {
+                    // #829: only reachable here for a variadic-tail decimal
+                    // arg -- a fixed one already errored out above.
+                    gen_decimal_arg_ptr(vm, arg, REG_T0);
                 } else {
                     gen_expr(vm, arg, REG_T0);
                 }
@@ -5903,6 +5975,10 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     int fs = gen_flonum_arg_to_scratch(vm, arg);
                     emit_rr(vm, fop_for_type(arg->ty, FR2R), REG_A0 + i, fs);
                     free_temp_reg(fs);
+                } else if (is_decimal(arg->ty)) {
+                    // #829: only reachable here for a variadic-tail decimal
+                    // arg -- a fixed one already errored out above.
+                    gen_decimal_arg_ptr(vm, arg, REG_A0 + i);
                 } else {
                     gen_expr(vm, arg, REG_A0 + i);
                 }
@@ -6153,6 +6229,15 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     // __builtin_classify_type.
                     gen_vector_arg_ptr(vm, arg, REG_T0);
                     emit_psh3(vm, REG_T0);
+                } else if (is_decimal(arg->ty) &&
+                          is_variadic_call && j >= fixed_param_count) {
+                    // Decimal variadic tail arg (#829), stack-passed: same
+                    // padded-scratch-copy rationale as gen_decimal_arg_ptr's
+                    // comment below. A fixed decimal param at a stack
+                    // position instead falls to the generic branch, matching
+                    // #402's existing address-passthrough ABI.
+                    gen_decimal_arg_ptr(vm, arg, REG_T0);
+                    emit_psh3(vm, REG_T0);
                 } else {
                     // Integer/pointer arg: evaluate to temp reg, push
                     gen_expr(vm, arg, REG_T0);
@@ -6184,18 +6269,6 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         for (int i = 0; i < nargs && i < 8; i++) {
             Node *arg = arg_array[i];
             bool is_vararg = is_variadic_call && (i >= fixed_param_count);
-
-            // #402: reject decimal through a variadic tail argument. The
-            // by-address ABI convention would technically thread through
-            // here (same as the vector path just below), but the receiving
-            // <stdarg.h> va_arg side has no __builtin_classify_type case for
-            // it yet, so a decimal value read back from a va_list would be
-            // silently misinterpreted -- deferred to the #402 follow-up
-            // ticket rather than shipped half-wired.
-            if (is_vararg && is_decimal(arg->ty))
-                error_tok(vm, arg->tok,
-                          "passing a _Decimal value through a variadic argument "
-                          "is not yet supported");
 
             // Before evaluating this arg, check if it contains a function call.
             // If so, save all previously-evaluated arg registers to the stack.
@@ -6248,6 +6321,18 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                             arg->ty->kind == TY_FLOAT;
                         float_arg_idx++;
                     }
+                }
+            } else if (is_decimal(arg->ty) && is_vararg) {
+                // Decimal variadic tail arg (#829, follow-up to #402's
+                // "deferred" rejection): pass by pointer to a fresh,
+                // width-independent scratch copy -- see gen_decimal_arg_ptr's
+                // comment. A FIXED decimal param falls through to the
+                // generic branch below instead, unchanged from #402:
+                // gen_expr's address-based decimal representation already
+                // gives the right by-address ABI with no extra copy needed.
+                if (int_arg_idx < 8) {
+                    gen_decimal_arg_ptr(vm, arg, REG_A0 + int_arg_idx);
+                    int_arg_idx++;
                 }
             } else if (is_vector(arg->ty)) {
                 // Vector arg: pass by memory like a struct-by-value arg

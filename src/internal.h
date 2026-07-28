@@ -581,6 +581,25 @@ bool cccc_dec_convert(int dst_w, int src_w, void *dst, const void *src);
 int  cccc_dec_format(char *buf, size_t n, const void *val, int w); // -1 if unsupported
 bool cccc_dec_encode_literal(const char *digits, int w, void *out); // compile-time only
 
+// printf/scanf %Hf/%Df/%DDf integration (tracker #829, phase 2 of #402).
+// cccc_dec_format() above only ever produces BID's canonical shortest-form
+// string (the __builtin_decimal_to_chars contract); cccc_dec_format_ex()
+// implements the full printf float surface (f/F/e/E/g/G, flags, field
+// width, precision) on top of the same decompose-and-render machinery.
+// `conv` is one of 'f' 'F' 'e' 'E' 'g' 'G'; `flags` is a bitmask of
+// CCCC_DECFMT_*; `field_width`/`prec` < 0 mean "not specified" (prec's
+// default matches C's per-conversion default: 6 for f/e, 6-treated-as-1 for
+// g). Returns the length that would have been written (snprintf contract),
+// or -1 if unsupported (CCCC_HAS_DECIMAL off).
+#define CCCC_DECFMT_MINUS 1u // '-' flag: left-justify
+#define CCCC_DECFMT_PLUS  2u // '+' flag: force sign
+#define CCCC_DECFMT_SPACE 4u // ' ' flag: space for positive sign
+#define CCCC_DECFMT_ALT   8u // '#' flag: keep trailing zeros / decimal point
+#define CCCC_DECFMT_ZERO  16u // '0' flag: zero-pad (ignored if '-' set)
+int  cccc_dec_format_ex(char *buf, size_t n, const void *val, int w, int conv,
+                        unsigned flags, int field_width, int prec);
+bool cccc_dec_from_string(int w, void *dst, const char *s); // scanf %Hf/%Df/%DDf
+
 // _Decimal32/64/128 <math.h> transcendentals (tracker #828, phase 2 of #402).
 // Defined in src/stdlib/decimal_math.c; the typed guest-facing API lives in
 // include/decimal_math.h.

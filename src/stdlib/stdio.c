@@ -103,7 +103,19 @@ void register_stdio_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__cccc_stderr", (void*)__cccc_stderr, 0, 0);
 
     // Variadic printf family
-#ifdef CCCC_HAVE_NATIVE_PCT_B
+    //
+    // #829: even on glibc >= 2.35, host printf has no IEEE 754-2008 decimal
+    // floating-point support -- verified against a real glibc 2.39 build:
+    // printf("%Df"/"%Hf"/"%DDf", ...) prints the length modifier and
+    // conversion character literally rather than formatting the argument.
+    // No libc on any of this project's target platforms implements DFP
+    // printf (that lives in the separate libdfp in the GNU world, via
+    // register_printf_specifier, and isn't something CCCC links against).
+    // So a CCCC_HAS_DECIMAL build always routes through the custom engine,
+    // the same way the scanf family already does unconditionally for %B
+    // just below (#728) -- CCCC_HAVE_NATIVE_PCT_B's fast host path is only
+    // safe to use when the guest program can never pass a decimal argument.
+#if defined(CCCC_HAVE_NATIVE_PCT_B) && !defined(CCCC_HAS_DECIMAL)
     cc_register_variadic_cfunc(vm, "printf", (void*)printf, 1, 0);
     cc_register_variadic_cfunc(vm, "fprintf", (void*)fprintf, 2, 0);
     cc_register_variadic_cfunc(vm, "sprintf", (void*)sprintf, 2, 0);

@@ -725,10 +725,70 @@ even when one operand is NaN; `>`/`>=` never reach codegen as distinct
 opcodes — like binary float, they're normalized to a swapped `<`/`<=` at
 parse time.
 
-Formatting is deliberately **not** part of `<stdio.h>`'s `printf`/`scanf` in
-this phase (`%Hf`/`%Df`/`%DDf` integration is a follow-up): the only
-guest-visible formatting entry point is `__builtin_decimal_to_chars(buf, n,
-decimal_value)`, which lowers directly to `DFMT`.
+`__builtin_decimal_to_chars(buf, n, decimal_value)` lowers directly to `DFMT`
+and always produces BID's canonical shortest-form string (no flags, width, or
+precision — that's its whole contract).
+
+### `printf`/`scanf` integration (#829)
+
+`%Hf`/`%Df`/`%DDf` (`_Decimal32`/`_Decimal64`/`_Decimal128`) work with the
+`f`/`F`/`e`/`E`/`g`/`G` conversions, including flags (`- + space # 0`), field
+width, and precision — the same surface as a binary `double`. Two runtime
+shim entry points do the work (`src/stdlib/decimal.c`, declared in
+`src/internal.h`, both raw-byte-pointer like the arithmetic shim above):
+
+- `cccc_dec_format_ex(buf, n, val, width, conv, flags, field_width, prec)` —
+  printf side. Decomposes the value via `__bidNN_to_string` into a
+  `(sign, digit-string, decimal exponent)` triple, rounds it to the requested
+  precision with round-half-even (BID's own default rounding mode, so this
+  stays consistent with `+`/`-`/`*`/`/`), and renders fixed/scientific/general
+  form from that triple directly — never through a binary `double`
+  intermediate, so it's exact for values a `long double` can't represent
+  (verified for `_Decimal128`).
+- `cccc_dec_from_string(width, dst, s)` — scanf side. Wraps
+  `__bidNN_from_string`, the same entry point compile-time decimal literals
+  use (`cccc_dec_encode_literal`), so parsing is exact rather than routing
+  through `strtold`.
+
+No native host libc implements decimal floating-point conversions (verified
+against real glibc 2.39: `printf("%Df", ...)` prints the length modifier and
+conversion character literally rather than formatting the argument), so a
+`CCCC_HAS_DECIMAL=1` build always routes `printf`/`fprintf`/`sprintf`/
+`snprintf` through the custom `stb_sprintf`-derived engine
+(`src/stdlib/format_printf.c`) regardless of `CCCC_HAVE_NATIVE_PCT_B` — the
+same reasoning that already makes the `scanf` family route through the custom
+engine unconditionally (#728).
+
+**Variadic ABI.** A decimal argument in the variadic tail of a call — the
+`x` in `printf("%Df", x)` — is passed **by pointer** to a caller-frame
+scratch copy (`gen_decimal_arg_ptr`, `src/codegen.c`), mirroring the
+vector-variadic convention (#721, see the "ABI" subsection below).
+`_Decimal32/64/128` isn't
+subject to default argument promotion (unlike `float`→`double`), which is
+why three distinct length modifiers exist; the by-pointer convention keeps
+all three widths distinct through a single 8-byte variadic slot regardless
+of which one is used. The scratch copy is
+always allocated at the full 16 bytes / 16-byte alignment, independent of
+the argument's actual 4/8/16-byte width: `validate_format_call`'s
+`%Hf`/`%Df`/`%DDf` type-checking only covers a literal format string and
+only warns, so a width mismatch **between two decimal widths** (`%DDf`
+reading a `_Decimal32`) must stay memory-safe — it reads
+uninitialized-but-in-bounds bytes from a fully-sized object rather than
+overrunning a narrower one. A mismatch **between a decimal and a
+non-decimal argument** (`%Df` given a plain `double`) is a different,
+unfixable case: it dereferences the `double`'s bit pattern as a pointer and
+crashes, exactly the same real UB `%s` given a `double` already has today
+with any pointer-expecting conversion — the by-pointer decimal ABI doesn't
+introduce a new hazard class here, though it does make the *consequence* of
+that specific mismatch a crash rather than garbage output (GCC's decimal
+varargs are by-value, so the equivalent GCC mismatch just misreads bits).
+Not something `-3`'s dangling-pointer detection can catch either: the
+dereference happens host-side inside `cccc_dec_format_ex`/`__bidNN_to_string`
+(via `va_arg(va, void *)` in `stb_sprintf.h`'s decimal short-circuit),
+outside the VM's own instrumentation. `<stdarg.h>`'s `va_arg`
+detects the by-pointer case via `__builtin_classify_type`, extended with a
+second discriminant (`CCCC_DECIMAL_TYPE_CLASS = 98`, alongside vector's
+`99`) folded into the same by-pointer `va_arg` arm.
 
 ### `<math.h>` transcendentals (#828)
 
@@ -749,12 +809,17 @@ through a dedicated opcode.
 By-value decimal arguments and returns reuse the vector-by-value struct-ABI
 machinery (#714): a caller-frame scratch-slot copy for arguments, `RETBUF`
 + copy for returns. `CALLT` (tail-call optimization) is excluded for any
-decimal-returning call, for the same reframe-reuse hazard reason vector and
-wide-`_BitInt` returns are (#716) — the value's scratch slot lives in the
-callee's own frame, so a tail call reusing that frame would return a
-dangling pointer. Passing a decimal value through a variadic argument or a
-native FFI call is rejected with a diagnostic (no `libffi` decimal type,
-and no `va_arg` decimal case yet — both deferred to the follow-up ticket).
+call with a decimal return *or* a decimal argument, for the same frame-reuse
+hazard reason vector returns/args are (#716) — the value's scratch slot
+lives in the caller's or callee's own frame, so a tail call reusing that
+frame would return or read through a dangling pointer.
+
+A decimal value through the **variadic tail** of a call is passed by
+pointer (#829, see above) — this covers `printf`/`scanf` and any other
+variadic call whose receiving side reads it back via `va_arg`. A decimal
+value as a **fixed** parameter or return through a **native FFI call**
+remains rejected with a diagnostic: `libffi` has no decimal `ffi_type`, so
+neither has a sound by-value marshalling convention yet (tracked as #830).
 
 ## Bytecode File Format (`.c4`)
 

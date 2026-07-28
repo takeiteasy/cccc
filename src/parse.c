@@ -8184,6 +8184,13 @@ enum {
     FMT_EXPECT_SHORT_PTR,    // scanf %hd → short *
     FMT_EXPECT_SCHAR_PTR,    // scanf %hhd → char *
     FMT_EXPECT_LDOUBLE_PTR,  // scanf %Lf → long double *
+    // #829: decimal length-modifier variants (%Hf/%Df/%DDf)
+    FMT_EXPECT_DECIMAL32,      // %Hf
+    FMT_EXPECT_DECIMAL64,      // %Df
+    FMT_EXPECT_DECIMAL128,     // %DDf
+    FMT_EXPECT_DECIMAL32_PTR,  // scanf %Hf → _Decimal32 *
+    FMT_EXPECT_DECIMAL64_PTR,  // scanf %Df → _Decimal64 *
+    FMT_EXPECT_DECIMAL128_PTR, // scanf %DDf → _Decimal128 *
 };
 
 #define MAX_FMT_ARGS 64
@@ -8192,7 +8199,9 @@ static const char *fmt_type_names[] = {
     "int", "unsigned int", "double", "char *", "void *",
     "int *", "unsigned int *", "float *",
     "long", "unsigned long", "long double",
-    "long *", "unsigned long *", "short *", "char *", "long double *"
+    "long *", "unsigned long *", "short *", "char *", "long double *",
+    "_Decimal32", "_Decimal64", "_Decimal128",
+    "_Decimal32 *", "_Decimal64 *", "_Decimal128 *"
 };
 
 // Validate format string arguments for __attribute__((format(...)))
@@ -8260,15 +8269,18 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                     while (*p >= '0' && *p <= '9') p++;
                 }
             }
-            // Capture length modifier (h, hh, l, ll, L, z, j, t)
+            // Capture length modifier (h, hh, l, ll, L, z, j, t, and the
+            // #829 decimal modifiers H, D, DD)
             const char *mod_start = p;
             while (*p == 'h' || *p == 'l' || *p == 'L' ||
-                   *p == 'z' || *p == 'j' || *p == 't')
+                   *p == 'z' || *p == 'j' || *p == 't' ||
+                   *p == 'H' || *p == 'D')
                 p++;
             int mod_len = (int)(p - mod_start);
             char mod0 = mod_len > 0 ? mod_start[0] : 0;
             char mod1 = mod_len > 1 ? mod_start[1] : 0;
-            // mod: 0=none,1=hh,2=h,3=l,4=ll,5=L,6=z,7=j,8=t
+            // mod: 0=none,1=hh,2=h,3=l,4=ll,5=L,6=z,7=j,8=t,
+            //      9=H(_Decimal32),10=D(_Decimal64),11=DD(_Decimal128)
             int mod = 0;
             if (mod_len == 0)                      mod = 0;
             else if (mod0 == 'h' && mod1 == 'h')   mod = 1;
@@ -8279,9 +8291,21 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
             else if (mod0 == 'z')                   mod = 6;
             else if (mod0 == 'j')                   mod = 7;
             else if (mod0 == 't')                   mod = 8;
+            else if (mod0 == 'H')                   mod = 9;
+            else if (mod0 == 'D' && mod1 == 'D')   mod = 11;
+            else if (mod0 == 'D')                   mod = 10;
+            bool mod_is_decimal = (mod == 9 || mod == 10 || mod == 11);
 
             if (*p) {
                 char c = *p;
+                // A decimal length modifier only makes sense on a floating
+                // conversion; %Dd, %Da, etc. are diagnosed here rather than
+                // silently falling through to the integer/hex-float default.
+                if (mod_is_decimal && c != 'f' && c != 'F' && c != 'e' &&
+                    c != 'E' && c != 'g' && c != 'G')
+                    warn_tok(vm, tok, CCCC_WARN_FORMAT,
+                             "conversion '%c' does not accept a decimal "
+                             "length modifier", c);
                 if (style == 1) {
                     switch (c) {
                         case 'd': case 'i': case 'c':
@@ -8300,9 +8324,16 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                             break;
                         case 'f': case 'F': case 'e': case 'E':
                         case 'g': case 'G': case 'a': case 'A':
-                            // L → long double; none → double (float promoted)
+                            // L → long double; H/D/DD → _Decimal32/64/128;
+                            // none → double (float promoted)
                             if (mod == 5)
                                 expected[num_expected++] = FMT_EXPECT_LDOUBLE;
+                            else if (mod == 9)
+                                expected[num_expected++] = FMT_EXPECT_DECIMAL32;
+                            else if (mod == 10)
+                                expected[num_expected++] = FMT_EXPECT_DECIMAL64;
+                            else if (mod == 11)
+                                expected[num_expected++] = FMT_EXPECT_DECIMAL128;
                             else
                                 expected[num_expected++] = FMT_EXPECT_DOUBLE;
                             break;
@@ -8337,6 +8368,12 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                         case 'g': case 'G': case 'a': case 'A':
                             if (mod == 5)
                                 expected[num_expected++] = FMT_EXPECT_LDOUBLE_PTR;
+                            else if (mod == 9)
+                                expected[num_expected++] = FMT_EXPECT_DECIMAL32_PTR;
+                            else if (mod == 10)
+                                expected[num_expected++] = FMT_EXPECT_DECIMAL64_PTR;
+                            else if (mod == 11)
+                                expected[num_expected++] = FMT_EXPECT_DECIMAL128_PTR;
                             else
                                 expected[num_expected++] = FMT_EXPECT_FLOAT_PTR;
                             break;
@@ -8371,7 +8408,8 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                 else while (*p >= '0' && *p <= '9') p++;
             }
             while (*p == 'h' || *p == 'l' || *p == 'L' ||
-                   *p == 'z' || *p == 'j' || *p == 't')
+                   *p == 'z' || *p == 'j' || *p == 't' ||
+                   *p == 'H' || *p == 'D')
                 p++;
             if (*p) { fmt_count++; p++; }
         } else {
@@ -8474,6 +8512,27 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                 case FMT_EXPECT_LDOUBLE_PTR:
                     ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
                           arg_ty->base->kind == TY_LDOUBLE);
+                    break;
+                case FMT_EXPECT_DECIMAL32:
+                    ok = (arg_ty->kind == TY_DECIMAL32);
+                    break;
+                case FMT_EXPECT_DECIMAL64:
+                    ok = (arg_ty->kind == TY_DECIMAL64);
+                    break;
+                case FMT_EXPECT_DECIMAL128:
+                    ok = (arg_ty->kind == TY_DECIMAL128);
+                    break;
+                case FMT_EXPECT_DECIMAL32_PTR:
+                    ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
+                          arg_ty->base->kind == TY_DECIMAL32);
+                    break;
+                case FMT_EXPECT_DECIMAL64_PTR:
+                    ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
+                          arg_ty->base->kind == TY_DECIMAL64);
+                    break;
+                case FMT_EXPECT_DECIMAL128_PTR:
+                    ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
+                          arg_ty->base->kind == TY_DECIMAL128);
                     break;
             }
             if (!ok)
@@ -9604,10 +9663,12 @@ static Node *vector_lane_ref(VirtualMachine *vm, Node *vec_expr, Type *elem_ty,
     return new_unary(vm, ND_DEREF, new_add(vm, addr, index, tok), tok);
 }
 
-// __builtin_classify_type's result (ticket #721): gcc's typeclass.h codes,
-// reused where a CCCC type maps directly onto one. Only the exact numeric
-// value of CCCC_VECTOR_TYPE_CLASS is load-bearing (it's the discriminant
-// <stdarg.h>'s va_arg uses to detect a by-pointer variadic vector argument);
+// __builtin_classify_type's result (ticket #721, extended by #829): gcc's
+// typeclass.h codes, reused where a CCCC type maps directly onto one. Only
+// the exact numeric values of CCCC_VECTOR_TYPE_CLASS and
+// CCCC_DECIMAL_TYPE_CLASS are load-bearing (they're the discriminants
+// <stdarg.h>'s va_arg uses to detect a by-pointer variadic vector/decimal
+// argument -- see the widened predicate in include/stdarg.h's va_arg macro);
 // the rest exist for __has_builtin/gcc-compatibility and are not otherwise
 // consumed by CCCC itself.
 enum {
@@ -9623,6 +9684,11 @@ enum {
     CCCC_RECORD_TYPE_CLASS = 12,
     CCCC_UNION_TYPE_CLASS = 13,
     CCCC_ARRAY_TYPE_CLASS = 14,
+    // No gcc equivalent -- _Decimal32/64/128 (#829) isn't in gcc's
+    // typeclass.h either (gcc classifies it as REAL_TYPE_CLASS, but CCCC's
+    // va_arg needs a distinct discriminant since decimal, unlike binary
+    // float, is read back by pointer -- see CCCC_VECTOR_TYPE_CLASS below).
+    CCCC_DECIMAL_TYPE_CLASS = 98,
     // No gcc equivalent -- vector_size vectors aren't in gcc's typeclass.h.
     CCCC_VECTOR_TYPE_CLASS = 99,
 };
@@ -9632,6 +9698,8 @@ static int64_t classify_type_code(Type *ty) {
         return -1; // no_type_class
     if (is_vector(ty))
         return CCCC_VECTOR_TYPE_CLASS;
+    if (is_decimal(ty))
+        return CCCC_DECIMAL_TYPE_CLASS;
     switch (ty->kind) {
     case TY_VOID:
         return CCCC_VOID_TYPE_CLASS;

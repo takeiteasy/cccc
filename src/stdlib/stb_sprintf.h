@@ -202,6 +202,7 @@ PERFORMANCE vs MSVC 2008 32-/64-bit (GCC is even slower than MSVC):
 
 #include <stdarg.h> // for va_arg(), va_list()
 #include <stddef.h> // size_t, ptrdiff_t
+#include <string.h> // strlen() -- #829's cccc__dec_stb_render
 
 #ifndef STB_SPRINTF_MIN
 #define STB_SPRINTF_MIN 512 // how many characters per callback
@@ -353,6 +354,31 @@ static STBSP__ASAN stbsp__uint32 stbsp__strlen_limited(char const *s, stbsp__uin
    return (stbsp__uint32)(sn - s);
 }
 
+// #829: render a _Decimal32/64/128 float conversion (%Hf/%Df/%DDf and
+// friends) into `buf`, translating stb_sprintf's own flag bits to
+// CCCC_DECFMT_* and setting *out_s/*out_l ready for the scopy tail at each
+// of the three call sites below (case 'f', case 'g'/'G', case 'e'/'E').
+// Pulled out to a standalone helper rather than repeating this at each site
+// since it doesn't touch any of vsprintfcb's own locals.
+static void cccc__dec_stb_render(stbsp__uint32 fl, stbsp__int32 fw,
+                                 stbsp__int32 pr, int dec_w, char conv,
+                                 void *decptr, char *buf, size_t bufsz,
+                                 char **out_s, stbsp__uint32 *out_l) {
+   unsigned decflags = 0;
+   if (fl & STBSP__LEFTJUST)     decflags |= CCCC_DECFMT_MINUS;
+   if (fl & STBSP__LEADINGPLUS)  decflags |= CCCC_DECFMT_PLUS;
+   if (fl & STBSP__LEADINGSPACE) decflags |= CCCC_DECFMT_SPACE;
+   if (fl & STBSP__LEADING_0X)   decflags |= CCCC_DECFMT_ALT;
+   if (fl & STBSP__LEADINGZERO)  decflags |= CCCC_DECFMT_ZERO;
+   int declen = cccc_dec_format_ex(buf, bufsz, decptr, dec_w, conv, decflags,
+                                   fw, pr);
+   // cccc_dec_format_ex returns -1 only when built without CCCC_HAS_DECIMAL
+   // (the src/stdlib/decimal.c stub) -- mirrors this file's own
+   // STB_SPRINTF_NOFLOAT "No float" placeholder convention just above.
+   *out_s = (declen < 0) ? (char *)"(decimal unsupported)" : buf;
+   *out_l = (stbsp__uint32)strlen(*out_s);
+}
+
 STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback, void *user, char *buf, char const *fmt, va_list va)
 {
    static char hex[] = "0123456789abcdefxp";
@@ -366,6 +392,7 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
    for (;;) {
       stbsp__int32 fw, pr, tz;
       stbsp__uint32 fl;
+      int dec_w; // #829: -1, or 0/1/2 for a _Decimal32/64/128 length modifier
 
       // macros for the callback buffer stuff
       #define stbsp__chk_cb_bufL(bytes)                        \
@@ -446,6 +473,7 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
       pr = -1;
       fl = 0;
       tz = 0;
+      dec_w = -1;
 
       // flags
       for (;;) {
@@ -572,6 +600,22 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
             ++f;
          }
          break;
+      // #829: _Decimal32/64/128 length modifiers. Only meaningful on a
+      // float conversion (f/F/e/E/g/G) -- see cccc__dec_stb_render's three
+      // call sites below; on any other conversion dec_w is simply never
+      // consulted, same as an 'L' modifier on %d is silently ignored today.
+      case 'H':
+         dec_w = 0; // _Decimal32
+         ++f;
+         break;
+      case 'D':
+         dec_w = 1; // _Decimal64
+         ++f;
+         if (f[0] == 'D') {
+            dec_w = 2; // _Decimal128
+            ++f;
+         }
+         break;
       default: break;
       }
 
@@ -590,6 +634,13 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
 #endif
          stbsp__int32 dp;
          char const *sn;
+         // #829: cccc__dec_stb_render's output buffer, sized to match
+         // cccc_dec_format_ex's own DEC128_TRUE_MIN-worst-case margin. Lives
+         // on every vsprintfcb call's stack (decimal conversion or not) --
+         // performance placeholder, matches decimal.c's own performance
+         // note at the top of this file's #402 sibling; candidate for #831
+         // (decimal performance follow-up) if it ever shows up in a profile.
+         char decbuf[8320];
 
       case 's':
          // get the string
@@ -717,6 +768,12 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
 
       case 'G': // float
       case 'g': // float
+         if (dec_w >= 0) {
+            cccc__dec_stb_render(fl, fw, pr, dec_w, f[0], va_arg(va, void *),
+                                 decbuf, sizeof decbuf, &s, &l);
+            lead[0] = 0; tail[0] = 0; tz = 0; cs = 0; pr = 0; fw = 0; dp = 0;
+            goto scopy;
+         }
          h = (f[0] == 'G') ? hexu : hex;
          fv = va_arg(va, double);
          if (pr == -1)
@@ -754,6 +811,12 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
 
       case 'E': // float
       case 'e': // float
+         if (dec_w >= 0) {
+            cccc__dec_stb_render(fl, fw, pr, dec_w, f[0], va_arg(va, void *),
+                                 decbuf, sizeof decbuf, &s, &l);
+            lead[0] = 0; tail[0] = 0; tz = 0; cs = 0; pr = 0; fw = 0; dp = 0;
+            goto scopy;
+         }
          h = (f[0] == 'E') ? hexu : hex;
          fv = va_arg(va, double);
          if (pr == -1)
@@ -809,7 +872,23 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
          cs = 1 + (3 << 24); // how many tens
          goto flt_lead;
 
+      // Pre-existing gap, unrelated to #829: this vendored fork had no
+      // 'F' case at all in the real (non-STB_SPRINTF_NOFLOAT) float path --
+      // plain %F fell to the "unknown conversion" default: below and never
+      // consumed its argument. Folding it into 'f' here (matching how 'G'/
+      // 'g' and 'E'/'e' already share a case) fixes that as a side effect;
+      // full C99 case-sensitivity (uppercase INF/NAN on the *binary* -- not
+      // decimal -- path) is still not implemented, since stbsp__real_to_str
+      // doesn't carry a case flag. Decimal's own INF/NAN casing is correct
+      // either way (cccc_dec_format_ex uppercases via `conv`).
+      case 'F': // float
       case 'f': // float
+         if (dec_w >= 0) {
+            cccc__dec_stb_render(fl, fw, pr, dec_w, f[0], va_arg(va, void *),
+                                 decbuf, sizeof decbuf, &s, &l);
+            lead[0] = 0; tail[0] = 0; tz = 0; cs = 0; pr = 0; fw = 0; dp = 0;
+            goto scopy;
+         }
          fv = va_arg(va, double);
       doafloat:
          // do kilos

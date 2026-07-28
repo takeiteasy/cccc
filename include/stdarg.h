@@ -119,6 +119,17 @@ typedef struct {
  * (16/32/64 bytes, #722) and never straddles the register/stack boundary.
  * The vector arm therefore reads the slot as a pointer and derefs it, one
  * extra level of indirection versus the scalar arms.
+ *
+ * _Decimal32/64/128 (#829) shares that same by-pointer arm: a decimal
+ * variadic argument is likewise never in its own 8-byte slot, so its
+ * discriminant (== 98, CCCC_DECIMAL_TYPE_CLASS) is folded into the same
+ * vector-or-decimal check via `||` rather than adding a fourth
+ * __builtin_choose_expr level. See gen_decimal_arg_ptr (src/codegen.c) for
+ * the call-site half of this convention -- it always copies into a fresh
+ * 16-byte scratch slot regardless of the argument's actual 4/8/16-byte
+ * width, since the reading side's width comes from the %Hf/%Df/%DDf
+ * modifier in a format string the compiler generally can't correlate with
+ * the argument's declared type.
  */
 #define va_arg(ap, type) \
     __builtin_choose_expr( \
@@ -127,7 +138,8 @@ typedef struct {
             ? (--((ap).reg_count), (*(double *)(((ap).reg_ptr) -= 8, ((ap).reg_ptr) + 8))) \
             : (*(double *)(((ap).stack_ptr) += 8, ((ap).stack_ptr) - 8))), \
         __builtin_choose_expr( \
-            __builtin_classify_type(*(type *)0) == 99, \
+            __builtin_classify_type(*(type *)0) == 99 || \
+            __builtin_classify_type(*(type *)0) == 98, \
             (((ap).reg_count > 0) \
                 ? (--((ap).reg_count), (*(type *)(*(void **)(((ap).reg_ptr) -= 8, ((ap).reg_ptr) + 8)))) \
                 : (*(type *)(*(void **)(((ap).stack_ptr) += 8, ((ap).stack_ptr) - 8)))), \

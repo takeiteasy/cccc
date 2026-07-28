@@ -81,6 +81,13 @@ enum {
     LEN_z,
     LEN_t,
     LEN_L,
+    // #829: _Decimal32/64/128 length modifiers (%Hf/%Df/%DDf), destination
+    // is a _Decimal32/64/128* rather than a float/double/long double*, so
+    // these are handled by their own branch in the 'f'/'e'/'g'/'a' case
+    // below (cccc_dec_from_string), not by store_float.
+    LEN_H,
+    LEN_D,
+    LEN_DD,
 };
 
 static void store_int(void *ptr, int lenmod, unsigned long long val) {
@@ -214,7 +221,15 @@ static int scan_uint_value(ScanSource *src, int base, int width,
 // Floating-point conversion (f e g a F E G A)
 // ---------------------------------------------------------------------
 
-static int scan_float_value(ScanSource *src, int width, long double *out) {
+// `raw_out`/`raw_cap`, if raw_out is non-NULL, receive a copy of the exact
+// numeric token text (sign, digits, '.', exponent, or an inf/nan spelling)
+// alongside the strtold'd *out -- used by the %Hf/%Df/%DDf decimal path
+// (#829) so BID can parse the token directly via cccc_dec_from_string
+// instead of round-tripping through long double, which would round a value
+// like 0.1 to its nearest *binary* approximation before it ever reaches the
+// correctly-rounded decimal parser.
+static int scan_float_value_raw(ScanSource *src, int width, long double *out,
+                                char *raw_out, size_t raw_cap) {
     skip_ws_input(src);
 
     int max = width > 0 ? width : INT_MAX;
@@ -273,6 +288,7 @@ static int scan_float_value(ScanSource *src, int width, long double *out) {
                 }
                 buf[n] = 0;
                 *out = strtold(buf, NULL);
+                if (raw_out) snprintf(raw_out, raw_cap, "%s", buf);
                 return SCAN_OK;
             }
             // not a match: push back everything peeked, in reverse order
@@ -353,7 +369,12 @@ static int scan_float_value(ScanSource *src, int width, long double *out) {
 
     buf[n] = 0;
     *out = strtold(buf, NULL);
+    if (raw_out) snprintf(raw_out, raw_cap, "%s", buf);
     return SCAN_OK;
+}
+
+static int scan_float_value(ScanSource *src, int width, long double *out) {
+    return scan_float_value_raw(src, width, out, NULL, 0);
 }
 
 // ---------------------------------------------------------------------
@@ -453,6 +474,11 @@ static int cccc_vscan(ScanSource *src, const char *fmt, va_list ap) {
         case 'z': lenmod = LEN_z; f++; break;
         case 't': lenmod = LEN_t; f++; break;
         case 'L': lenmod = LEN_L; f++; break;
+        case 'H': lenmod = LEN_H; f++; break;
+        case 'D':
+            f++;
+            if (*f == 'D') { lenmod = LEN_DD; f++; } else lenmod = LEN_D;
+            break;
         default: break;
         }
 
@@ -485,6 +511,26 @@ static int cccc_vscan(ScanSource *src, const char *fmt, va_list ap) {
 
         case 'f': case 'e': case 'g': case 'a':
         case 'F': case 'E': case 'G': case 'A': {
+            if (lenmod == LEN_H || lenmod == LEN_D || lenmod == LEN_DD) {
+                // #829: decimal destination -- scan the raw token text and
+                // hand it to BID directly (cccc_dec_from_string) rather than
+                // going through long double, so the result is correctly
+                // rounded per IEEE 754-2008 rather than double-rounded
+                // through a binary intermediate.
+                long double val;
+                char raw[256];
+                int r = scan_float_value_raw(src, width, &val, raw, sizeof raw);
+                if (r == SCAN_EOF) goto eof_before;
+                if (r == SCAN_NOMATCH) goto nomatch;
+                if (!suppress) {
+                    int w = (lenmod == LEN_H) ? 0 : (lenmod == LEN_D) ? 1 : 2;
+                    if (cccc_dec_from_string(w, va_arg(ap, void *), raw))
+                        result++;
+                    else
+                        goto nomatch; // CCCC_HAS_DECIMAL not built in
+                }
+                break;
+            }
             long double val;
             int r = scan_float_value(src, width, &val);
             if (r == SCAN_EOF) goto eof_before;

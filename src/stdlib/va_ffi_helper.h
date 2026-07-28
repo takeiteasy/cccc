@@ -94,9 +94,14 @@ cccc_parse_printf_fmt(const char *fmt, int *types, int max_args) {
         }
         if (!*p) break;
 
-        // Length modifiers (consume; all floats are passed as double slots)
+        // Length modifiers (consume; all floats are passed as double slots).
+        // H/D/DD (#829, _Decimal32/64/128) are consumed here too, but fall
+        // through to the 'default' INT/pointer classification below same as
+        // any other conversion -- a decimal variadic argument is always
+        // passed by pointer (gen_decimal_arg_ptr), i.e. already exactly an
+        // int64 slot, so no separate CCCC_VAARG_* class is needed for it.
         while (*p == 'h' || *p == 'l' || *p == 'j' || *p == 'z' ||
-               *p == 't' || *p == 'L')
+               *p == 't' || *p == 'L' || *p == 'H' || *p == 'D')
             p++;
         if (!*p) break;
 
@@ -137,9 +142,10 @@ cccc_parse_scanf_fmt(const char *fmt, int *types, int max_args) {
         while (*p >= '0' && *p <= '9') p++;   // width
         if (!*p) break;
 
-        // Length modifiers
+        // Length modifiers (H/D/DD, #829, consumed the same way as the
+        // printf parser above)
         while (*p == 'h' || *p == 'l' || *p == 'j' || *p == 'z' ||
-               *p == 't' || *p == 'L')
+               *p == 't' || *p == 'L' || *p == 'H' || *p == 'D')
             p++;
         if (!*p) break;
 

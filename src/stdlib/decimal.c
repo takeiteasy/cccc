@@ -16,6 +16,7 @@
 // ticket for measurement-driven optimization.
 
 #include "../internal.h"
+#include <ctype.h>
 #include <string.h>
 
 #ifdef CCCC_HAS_DECIMAL
@@ -308,6 +309,299 @@ bool cccc_dec_encode_literal(const char *digits, int w, void *out) {
     }
 }
 
+// #829: parse a decimal literal out of a NUL-terminated string (scanf's
+// %Hf/%Df/%DDf). Same entry points __bidNN_from_string uses for compile-time
+// literal encoding (cccc_dec_encode_literal above) -- BID does the rounding,
+// so this is exact per IEEE 754-2008 rather than round-tripping through a
+// binary double the way a naive strtod-based implementation would.
+bool cccc_dec_from_string(int w, void *dst, const char *s) {
+    unsigned f = 0;
+    switch (w) {
+    case 0: store32(dst, __bid32_from_string((char *)s, RND, &f)); return true;
+    case 1: store64(dst, __bid64_from_string((char *)s, RND, &f)); return true;
+    case 2: store128(dst, __bid128_from_string((char *)s, RND, &f)); return true;
+    default: return false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// #829: printf-style formatting (%Hf/%Df/%DDf -- f/F/e/E/g/G, with flags,
+// field width, and precision). cccc_dec_format() above only ever produces
+// BID's canonical shortest-form string (the __builtin_decimal_to_chars
+// contract); this is a separate, fuller renderer built on the same
+// [sign]digits*10^exp decomposition.
+
+// Decomposed (sign, coefficient digits, decimal exponent) view of a decimal
+// value: value == (is_neg ? -1 : 1) * digits * 10^exp, unless nan/inf.
+typedef struct {
+    bool is_neg;
+    bool is_nan;
+    bool is_inf;
+    char digits[48];
+    int ndigits;
+    long long exp;
+} DecParts;
+
+static bool dec_decompose(const void *val, int w, DecParts *out) {
+    unsigned f = 0;
+    char canon[64];
+    switch (w) {
+    case 0: __bid32_to_string(canon, load32(val), &f); break;
+    case 1: __bid64_to_string(canon, load64(val), &f); break;
+    case 2: __bid128_to_string(canon, load128(val), &f); break;
+    default: return false;
+    }
+    out->is_neg = (canon[0] == '-');
+    const char *p = canon + 1;
+    out->is_nan = (strncasecmp(p, "nan", 3) == 0 || strncasecmp(p, "snan", 4) == 0);
+    out->is_inf = (strncasecmp(p, "inf", 3) == 0);
+    if (out->is_nan || out->is_inf) {
+        out->ndigits = 0;
+        out->exp = 0;
+        out->digits[0] = '\0';
+        return true;
+    }
+    int i = 0;
+    while (p[i] && p[i] != 'E' && i < (int)sizeof(out->digits) - 1) {
+        out->digits[i] = p[i];
+        i++;
+    }
+    out->digits[i] = '\0';
+    out->ndigits = i;
+    out->exp = 0;
+    const char *e = strchr(p, 'E');
+    if (e) out->exp = strtoll(e + 1, NULL, 10);
+    return true;
+}
+
+// Rounds the `len`-digit coefficient string `digits` (ASCII '0'-'9', no
+// sign) to `keep` significant digits using round-half-even -- the IEEE
+// 754-2008 default and BID's own default rounding mode, so this stays
+// consistent with the arithmetic operators. `*exp` is adjusted so that
+// out * 10^(*exp) == the correctly-rounded value. `keep` must be in
+// [0, len]; a carry that overflows all kept digits (e.g. "99" -> "100" at
+// 1 sig fig) collapses to a single leading '1' with `*exp` bumped an extra
+// place, rather than growing the digit count -- callers must not assume the
+// returned length is always exactly `keep`. `out` must have room for
+// keep+1 bytes (worst case: keep==0 collapsing to "1\0", or a keep-digit
+// carry collapsing to "1\0").
+static int round_sig(const char *digits, int len, long long *exp, int keep,
+                     char *out) {
+    if (keep >= len) {
+        memcpy(out, digits, (size_t)len);
+        out[len] = '\0';
+        return len;
+    }
+    // keep in [0, len-1]: digits[keep] is the first dropped digit.
+    char rd = digits[keep];
+    bool round_up;
+    if (rd > '5') {
+        round_up = true;
+    } else if (rd < '5') {
+        round_up = false;
+    } else {
+        bool rest_nonzero = false;
+        for (int i = keep + 1; i < len; i++) {
+            if (digits[i] != '0') { rest_nonzero = true; break; }
+        }
+        if (rest_nonzero) round_up = true;
+        else if (keep == 0) round_up = false; // tie, no prior digit: "0" is even
+        else round_up = ((digits[keep - 1] - '0') % 2) != 0;
+    }
+    *exp += (len - keep);
+    if (keep == 0) {
+        if (round_up) { out[0] = '1'; out[1] = '\0'; return 1; }
+        out[0] = '0'; out[1] = '\0'; *exp = 0; return 1;
+    }
+    memcpy(out, digits, (size_t)keep);
+    out[keep] = '\0';
+    if (round_up) {
+        int i = keep - 1;
+        while (i >= 0 && out[i] == '9') { out[i] = '0'; i--; }
+        if (i >= 0) {
+            out[i]++;
+        } else {
+            // All `keep` kept digits were '9' and carried out: "999..9"+1 =
+            // "1000..0" (keep+1 digits). Collapse the keep trailing zeros
+            // into the exponent instead of storing them, so out becomes the
+            // single digit "1" and *exp absorbs all `keep` of the places
+            // that would have held those zeros (not just one -- e.g.
+            // rounding "9999" (keep=4) up must land on 10000 = "1" at
+            // exp+4, not "1" at exp+1).
+            out[0] = '1';
+            out[1] = '\0';
+            *exp += keep;
+            return 1;
+        }
+    }
+    return keep;
+}
+
+// Renders a rounded (digits,len,exp) coefficient with exactly `frac` digits
+// after the decimal point (zero-padded on the right as needed), no sign, no
+// field-width padding. `frac` may be 0 (integer-only, point omitted unless
+// `force_point`).
+static void render_fixed_body(char *out, size_t n, const char *digits, int len,
+                              long long exp, int frac, bool force_point) {
+    long long pointpos = (long long)len + exp; // digits before the point
+    size_t pos = 0;
+    if (pointpos <= 0) {
+        if (pos + 1 < n) out[pos++] = '0';
+    } else {
+        long long take = pointpos < len ? pointpos : len;
+        for (long long i = 0; i < take && pos + 1 < n; i++) out[pos++] = digits[i];
+        for (long long i = take; i < pointpos && pos + 1 < n; i++) out[pos++] = '0';
+    }
+    if (frac > 0 || force_point) {
+        if (pos + 1 < n) out[pos++] = '.';
+    }
+    for (int i = 0; i < frac && pos + 1 < n; i++) {
+        long long src_idx = pointpos + i; // index into `digits` (may be <0 or >=len)
+        char c = (src_idx >= 0 && src_idx < len) ? digits[src_idx] : '0';
+        out[pos++] = c;
+    }
+    out[pos] = '\0';
+}
+
+// Renders a rounded (digits,len,exp) coefficient in scientific form
+// "d[.ddd]e±dd" (>=2 exponent digits, C's minimum), no sign, no field-width
+// padding.
+static void render_sci_body(char *out, size_t n, const char *digits, int len,
+                            long long exp, int prec, bool force_point,
+                            bool upper) {
+    long long e10 = (long long)len + exp - 1; // decimal exponent of digits[0]
+    size_t pos = 0;
+    if (pos + 1 < n) out[pos++] = len > 0 ? digits[0] : '0';
+    if (prec > 0 || force_point) {
+        if (pos + 1 < n) out[pos++] = '.';
+        for (int i = 0; i < prec && pos + 1 < n; i++) {
+            int src_idx = i + 1;
+            char c = (src_idx < len) ? digits[src_idx] : '0';
+            out[pos++] = c;
+        }
+    }
+    if (pos + 1 < n) out[pos++] = upper ? 'E' : 'e';
+    if (pos + 1 < n) out[pos++] = (e10 < 0) ? '-' : '+';
+    long long ae = e10 < 0 ? -e10 : e10;
+    char ebuf[24];
+    int ei = 0;
+    if (ae == 0) ebuf[ei++] = '0';
+    while (ae > 0 && ei < (int)sizeof(ebuf)) { ebuf[ei++] = (char)('0' + ae % 10); ae /= 10; }
+    while (ei < 2) ebuf[ei++] = '0'; // C requires >=2 exponent digits
+    for (int i = ei - 1; i >= 0 && pos + 1 < n; i--) out[pos++] = ebuf[i];
+    out[pos] = '\0';
+}
+
+// Strips trailing fractional zeros (and a bare trailing '.') from a rendered
+// numeric body in place -- %g's "no trailing zeros unless #" rule.
+static void strip_trailing_frac_zeros(char *body) {
+    char *dot = strchr(body, '.');
+    if (!dot) return;
+    char *end = body + strlen(body);
+    // Don't eat into an exponent suffix if present.
+    char *e = strpbrk(dot, "eE");
+    char *stop = e ? e : end;
+    char *p = stop;
+    while (p > dot + 1 && p[-1] == '0') p--;
+    if (p == dot + 1) p = dot; // no fractional digits left: drop the point too
+    if (p < stop) memmove(p, stop, (size_t)(end - stop) + 1);
+}
+
+int cccc_dec_format_ex(char *buf, size_t n, const void *val, int w, int conv,
+                       unsigned flags, int field_width, int prec) {
+    DecParts parts;
+    if (!dec_decompose(val, w, &parts)) return -1;
+
+    bool upper = (conv == 'F' || conv == 'E' || conv == 'G');
+    char body[8320]; // matches format_from_string's DEC128_TRUE_MIN margin
+    bool force_point = (flags & CCCC_DECFMT_ALT) != 0;
+
+    if (parts.is_nan || parts.is_inf) {
+        const char *word = parts.is_nan ? "nan" : "inf";
+        char nb[8];
+        snprintf(nb, sizeof nb, "%s", word);
+        if (upper) for (char *c = nb; *c; c++) *c = (char)toupper((unsigned char)*c);
+        snprintf(body, sizeof body, "%s", nb);
+    } else {
+        char conv_lower = (char)tolower(conv);
+        if (conv_lower == 'f') {
+            int p = prec < 0 ? 6 : prec;
+            long long pointpos = (long long)parts.ndigits + parts.exp;
+            long long keep = pointpos + p;
+            char rdigits[64];
+            int rlen;
+            long long rexp;
+            if (keep < 0) {
+                rdigits[0] = '0'; rdigits[1] = '\0'; rlen = 1; rexp = 0;
+            } else {
+                int keep_i = keep > (long long)parts.ndigits ? parts.ndigits : (int)keep;
+                rexp = parts.exp;
+                rlen = round_sig(parts.digits, parts.ndigits, &rexp, keep_i, rdigits);
+            }
+            render_fixed_body(body, sizeof body, rdigits, rlen, rexp, p, force_point);
+        } else if (conv_lower == 'e') {
+            int p = prec < 0 ? 6 : prec;
+            char rdigits[64];
+            long long rexp = parts.exp;
+            int rlen = round_sig(parts.digits, parts.ndigits, &rexp, p + 1, rdigits);
+            render_sci_body(body, sizeof body, rdigits, rlen, rexp, p, force_point, upper);
+        } else { // 'g'
+            int P = prec < 0 ? 6 : (prec == 0 ? 1 : prec);
+            char rdigits[64];
+            long long rexp = parts.exp;
+            int rlen = round_sig(parts.digits, parts.ndigits, &rexp, P, rdigits);
+            long long X = (long long)rlen + rexp - 1; // decimal exponent, post-rounding
+            if (X >= -4 && X < P) {
+                int frac = (int)(P - 1 - X);
+                if (frac < 0) frac = 0;
+                render_fixed_body(body, sizeof body, rdigits, rlen, rexp, frac, force_point);
+            } else {
+                render_sci_body(body, sizeof body, rdigits, rlen, rexp, P - 1, force_point, upper);
+            }
+            if (!force_point) strip_trailing_frac_zeros(body);
+        }
+        if (upper) for (char *c = body; *c; c++) *c = (char)toupper((unsigned char)*c);
+    }
+
+    // Sign.
+    char sign = 0;
+    if (parts.is_neg) sign = '-';
+    else if (flags & CCCC_DECFMT_PLUS) sign = '+';
+    else if (flags & CCCC_DECFMT_SPACE) sign = ' ';
+
+    char numeric[8330];
+    size_t npos = 0;
+    if (sign) numeric[npos++] = sign;
+    snprintf(numeric + npos, sizeof numeric - npos, "%s", body);
+
+    int len = (int)strlen(numeric);
+    int pad = field_width > len ? field_width - len : 0;
+    bool left = (flags & CCCC_DECFMT_MINUS) != 0;
+    // Zero-padding never applies to nan/inf, and never combines with '-'.
+    bool zero_pad = (flags & CCCC_DECFMT_ZERO) != 0 && !left &&
+                    !parts.is_nan && !parts.is_inf;
+
+    size_t pos = 0;
+    if (!left && !zero_pad) {
+        for (int i = 0; i < pad && pos + 1 < n; i++) { if (buf) buf[pos] = ' '; pos++; }
+    }
+    if (zero_pad && sign) { if (pos + 1 < n && buf) buf[pos] = sign; pos++; }
+    if (zero_pad) {
+        for (int i = 0; i < pad && pos + 1 < n; i++) { if (buf) buf[pos] = '0'; pos++; }
+    }
+    const char *rest = (zero_pad && sign) ? numeric + 1 : numeric;
+    for (const char *s = rest; *s && pos + 1 < n; s++) { if (buf) buf[pos] = *s; pos++; }
+    if (left) {
+        for (int i = 0; i < pad && pos + 1 < n; i++) { if (buf) buf[pos] = ' '; pos++; }
+    }
+    if (buf && n) buf[pos < n ? pos : n - 1] = '\0';
+
+    // Return the length that *would* have been written, snprintf-style,
+    // matching cccc_dec_format()'s contract.
+    int total = len + pad;
+    return total;
+}
+
 #else // !CCCC_HAS_DECIMAL
 
 static bool dec_unsupported(void) { return false; }
@@ -354,6 +648,16 @@ int cccc_dec_format(char *buf, size_t n, const void *val, int w) {
 bool cccc_dec_encode_literal(const char *digits, int w, void *out) {
     (void)digits; (void)w; (void)out;
     return dec_unsupported();
+}
+bool cccc_dec_from_string(int w, void *dst, const char *s) {
+    (void)w; (void)dst; (void)s;
+    return dec_unsupported();
+}
+int cccc_dec_format_ex(char *buf, size_t n, const void *val, int w, int conv,
+                       unsigned flags, int field_width, int prec) {
+    (void)val; (void)w; (void)conv; (void)flags; (void)field_width; (void)prec;
+    if (buf && n) buf[0] = '\0';
+    return dec_unsupported() ? 0 : -1;
 }
 
 #endif // CCCC_HAS_DECIMAL
