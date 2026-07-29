@@ -564,22 +564,33 @@ bool is_decimal(Type *ty);
 int  dec_width_code(Type *ty); // 0/1/2 for _Decimal32/64/128, else -1
 bool is_error_type(Type *ty);
 
+// #832: `env` selects which BID rounding mode/exception-flag policy an
+// entry point uses -- CCCC_DEC_ENV_DYNAMIC translates the host's *current*
+// fesetround() mode and raises the resulting BID exception flags via
+// feraiseexcept() (every runtime call site: VM opcodes, strtod, scanf);
+// CCCC_DEC_ENV_STATIC always rounds to-nearest and discards flags (the
+// compile-time constant folder only, src/parse.c's eval_decimal, which must
+// never observe or perturb the host FP environment it runs inside). See
+// src/stdlib/decimal.c's top-of-#ifdef comment for the full rationale.
+#define CCCC_DEC_ENV_STATIC  0
+#define CCCC_DEC_ENV_DYNAMIC 1
+
 // _Decimal32/64/128 runtime shim (src/stdlib/decimal.c, tracker #402). `w` is
 // the width code from dec_width_code(). Declared unconditionally; defined
 // under CCCC_HAS_DECIMAL via the Intel BID library, else return
 // false/UNORDERED/-1 as documented per-function below. Raw byte pointers
 // only, so no BID type needs to appear in a VM header.
 bool cccc_dec_binop(int op /* '+','-','*','/' */, int w,
-                    void *dst, const void *a, const void *b);
-bool cccc_dec_neg(int w, void *dst, const void *a);
-int  cccc_dec_cmp(int w, const void *a, const void *b); // 0=EQ,1=LT,2=GT,3=UNORDERED
-bool cccc_dec_from_int(int w, void *dst, long long v, bool is_unsigned);
-bool cccc_dec_to_int(int w, const void *src, long long *out, bool is_unsigned);
-bool cccc_dec_from_bin(int w, void *dst, uint64_t bits, bool src_is_f32);
-bool cccc_dec_to_bin(int w, const void *src, bool dst_is_f32, uint64_t *out_bits);
-bool cccc_dec_convert(int dst_w, int src_w, void *dst, const void *src);
+                    void *dst, const void *a, const void *b, int env);
+bool cccc_dec_neg(int w, void *dst, const void *a); // exact, no env
+int  cccc_dec_cmp(int w, const void *a, const void *b); // 0=EQ,1=LT,2=GT,3=UNORDERED; quiet, no env
+bool cccc_dec_from_int(int w, void *dst, long long v, bool is_unsigned, int env);
+bool cccc_dec_to_int(int w, const void *src, long long *out, bool is_unsigned, int env);
+bool cccc_dec_from_bin(int w, void *dst, uint64_t bits, bool src_is_f32, int env);
+bool cccc_dec_to_bin(int w, const void *src, bool dst_is_f32, uint64_t *out_bits, int env);
+bool cccc_dec_convert(int dst_w, int src_w, void *dst, const void *src, int env);
 int  cccc_dec_format(char *buf, size_t n, const void *val, int w); // -1 if unsupported
-bool cccc_dec_encode_literal(const char *digits, int w, void *out); // compile-time only
+bool cccc_dec_encode_literal(const char *digits, int w, void *out); // compile-time only, always to-nearest
 
 // printf/scanf %Hf/%Df/%DDf integration (tracker #829, phase 2 of #402).
 // cccc_dec_format() above only ever produces BID's canonical shortest-form
@@ -598,7 +609,16 @@ bool cccc_dec_encode_literal(const char *digits, int w, void *out); // compile-t
 #define CCCC_DECFMT_ZERO  16u // '0' flag: zero-pad (ignored if '-' set)
 int  cccc_dec_format_ex(char *buf, size_t n, const void *val, int w, int conv,
                         unsigned flags, int field_width, int prec);
-bool cccc_dec_from_string(int w, void *dst, const char *s); // scanf %Hf/%Df/%DDf
+bool cccc_dec_from_string(int w, void *dst, const char *s, int env); // scanf %Hf/%Df/%DDf
+
+// strtod32/64/128 (tracker #832, phase 2 of #402): parse a decimal out of a
+// NUL-terminated string, C's strtod() contract (`*endptr` set past the
+// longest valid prefix, or left at `s` if there was none). Backs
+// include/stdlib.h's strtod32/64/128 static inline wrappers via the
+// __cccc_dec_strtod FFI trampoline (src/stdlib/stdlib.c) -- no new opcode,
+// same FFI-wrapper pattern <decimal_math.h> uses. Returns false only when
+// built without CCCC_HAS_DECIMAL.
+bool cccc_dec_strtod(int w, void *dst, const char *s, char **endptr, int env);
 
 // _Decimal32/64/128 <math.h> transcendentals (tracker #828, phase 2 of #402).
 // Defined in src/stdlib/decimal_math.c; the typed guest-facing API lives in

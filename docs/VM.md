@@ -806,6 +806,126 @@ op-dispatch entry points, each taking raw byte addresses (same "no BID type in
 a VM header" convention as the `cccc_dec_*` shim functions above) rather than
 through a dedicated opcode.
 
+### `strtod32`/`strtod64`/`strtod128` (#832)
+
+Parsing a decimal from a *runtime* string (as opposed to a compile-time
+literal) adds **no new opcode**, following the `<math.h>` precedent directly
+above: `include/stdlib.h`'s `strtod32`/`strtod64`/`strtod128` are `static
+inline` wrappers over a single `long long`-uniform FFI entry point,
+`__cccc_dec_strtod` (`src/stdlib/stdlib.c`), which forwards to
+`cccc_dec_strtod` (`src/stdlib/decimal.c`). `cccc_dec_strtod` scans the
+longest valid numeric prefix itself — `__bidNN_from_string` gives no
+`endptr` — sizing its own copy to the scanned length rather than a fixed
+buffer, so an arbitrarily long coefficient never truncates. `*endptr` and the
+no-conversion (`+0`, `endptr == s`) case match C's `strtod()` contract.
+
+Decimal **return by value** from a guest `static inline` function is already
+supported (the struct-ABI reuse described below) — this is exactly what
+every `<decimal_math.h>` wrapper already does, so no decimal value ever
+crosses the FFI boundary itself. `#830`'s restriction (decimal rejected as a
+*fixed* FFI parameter or return) doesn't apply here for that reason.
+
+### `<fenv.h>` rounding and exception flags (#832)
+
+Phase 1 hard-wired every arithmetic/conversion entry point in
+`src/stdlib/decimal.c` and `src/stdlib/decimal_math.c` to
+`BID_ROUNDING_TO_NEAREST` and discarded BID's exception-flags out-parameter,
+so `fesetround()` had no effect on decimal arithmetic and a decimal overflow/
+underflow/inexact/invalid/divide-by-zero could never be observed via
+`fetestexcept()`. Both are now real:
+
+- **Rounding.** `cccc_dec_host_rounding()` (`decimal.c`) / `dm_host_rounding()`
+  (`decimal_math.c`) map the host's *current* `fegetround()` mode to the
+  matching `BID_ROUNDING_*` constant (`FE_TONEAREST`/`_DOWNWARD`/`_UPWARD`/
+  `_TOWARDZERO` → `BID_ROUNDING_TO_NEAREST`/`_DOWN`/`_UP`/`_TO_ZERO`) — the
+  same mapping `__cccc_flt_rounds` (`src/stdlib/fenv.c`) already used for
+  `FLT_ROUNDS`. `BID_ROUNDING_TIES_AWAY` has no portable `<fenv.h>`
+  equivalent and is unreachable (follow-up ticket).
+- **Exception flags.** `cccc_dec_raise_flags()` / `dm_raise_flags()` map
+  BID's `DEC_FE_INVALID`/`_DIVBYZERO`/`_OVERFLOW`/`_UNDERFLOW`/`_INEXACT`
+  bits (verified numerically identical across platforms) to the matching
+  host `FE_*` bits and call `feraiseexcept()`. `DEC_FE_UNNORMAL` (denormal)
+  has no portable `FE_*` equivalent and is masked out.
+
+Every entry point that can round or raise takes a trailing `env` parameter
+(`CCCC_DEC_ENV_DYNAMIC` or `_STATIC`, `src/internal.h`):
+
+- **`CCCC_DEC_ENV_DYNAMIC`** — the runtime policy above (host rounding mode,
+  flags raised). Used by every `src/ops.c` `D*` opcode handler and by the
+  runtime `strtod32/64/128`/scanf paths.
+- **`CCCC_DEC_ENV_STATIC`** — always round-to-nearest, flags discarded. Used
+  only by the compile-time constant folder (`src/parse.c`'s `eval_decimal`,
+  see below), which runs inside the *compiler* process and must never
+  observe or perturb the host FP environment it happens to be in.
+
+`cccc_dec_neg`/`cccc_dec_cmp` take no `env` (negation is exact; the quiet
+comparisons cannot raise). `cccc_dec_to_int` keeps `__bidNN_to_int64_int`
+(truncation *is* C cast semantics regardless of rounding mode) but still
+raises flags. `cccc_dec_format`/`cccc_dec_format_ex` (printf) deliberately
+stay flag-discarding and nearest-rounding — `printf` isn't required to raise
+FP exceptions, and its precision rounding is independently specified as
+round-half-even.
+
+**Compile-time evaluation must never leak into the guest's runtime FP
+state**, in either direction — the trap this design exists to close:
+
+- A comptime macro (`[[cccc::comptime]]`) calling a decimal `<math.h>`
+  function reaches `src/stdlib/decimal_math.c` directly (no `env`
+  parameter there at all — it's FFI-only, always dynamic), so it depends on
+  a save/restore barrier around the comptime `vm_eval()` call
+  (`src/macros.c`'s `fenv_barrier_begin`/`_end`, wrapping both the
+  expression-position macro-call site and the `__builtin_comptime_init`
+  site) to avoid leaving the *compiler's* rounding mode or exception flags
+  dirty after that macro runs.
+- `eval_decimal` (`src/parse.c`) — the folder used by `write_gvar_data` for
+  a decimal-typed static/global initializer, and by `eval_double`/`eval2`'s
+  `ND_CAST` arms for the reverse decimal→binary-float/decimal→int
+  directions — wraps its own top-level entry the same way.
+
+Both barriers save/restore only the **rounding mode**, not the whole
+exception-flag state, and explicitly `feclearexcept()` before returning —
+deliberately *not* round-tripping the flags through `fegetenv()`/`fesetenv()`.
+This survives an independently-verified pre-existing condition: the
+*compile* phase can already leave host FP exception flags dirty before any
+decimal code runs at all (`tokenize.c`'s `convert_pp_number` scans every
+floating/decimal literal's extent via a host `strtold()` call whose value is
+discarded but whose side effect isn't — `strtold("1.1", NULL)` alone sets
+`FE_UNDERFLOW` on at least one verified platform) — restoring a saved
+environment via `fesetenv()` would silently reintroduce that dirty state.
+The guest program's actual clean-start guarantee comes from a third,
+higher-level fix: `cc_run()` (`src/vm.c`) resets the host FP environment
+(`fesetround(FE_TONEAREST); feclearexcept(FE_ALL_EXCEPT);`) exactly once, as
+the very first thing it does — before constructors, `main()`, or `atexit`
+handlers run (each of which is its own separate `cc_run_at()` cycle). A
+constructor's own `fesetround()`/`feraiseexcept()` calls still correctly
+persist into `main()` and beyond, matching real linked-C behavior, since the
+reset happens only once at the top, not before every `cc_run_at()` cycle —
+while whatever the *compile* phase left dirty never reaches the guest at
+all.
+
+### Compile-time constant folding (#832)
+
+`static _Decimal64 x = 1.1dd + 2.2dd;` used to be a hard diagnostic — only a
+bare literal (or a cast of one) was accepted as a decimal static/global
+initializer. `eval_decimal` (`src/parse.c`) now folds `+ - * /`, unary `-`,
+`?:`, `,`, a decimal-to-decimal cast, and casts to/from integer and binary
+floating-point, mirroring the shape of the existing `eval_double`/`eval2`
+integer/binary-float constant folders. Each recursive call derives its
+working width from the *node's own* type (`dec_width_code`), never trusts a
+caller-supplied width beyond the final store — `usual_arith_conv` is
+expected to have inserted a cast wherever two different decimal widths
+meet, so a width mismatch indicates a missing cast rather than something
+safe to paper over. Folding a decimal-to-integer cast is what makes
+`(int)1.5dd` in an array bound, case label, or similar integer constant
+expression fold correctly (`(int)(1.1dd + 2.2dd)` also folds, a
+GCC-compatible extension: strict C only permits a floating constant as a
+cast's *immediate* operand, which `1.5dd` satisfies and the sum doesn't).
+
+**Still deferred** (follow-up ticket): decimal comparisons directly in an
+integer constant expression (`_Static_assert(1.1dd == 1.1dd, "")`) — that
+needs decimal arms in `eval2`'s `ND_EQ`/`ND_NE`/`ND_LT`/`ND_LE`, which
+folding static initializers didn't require.
+
 ### ABI
 
 By-value decimal arguments and returns reuse the vector-by-value struct-ABI

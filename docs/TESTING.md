@@ -982,6 +982,16 @@ runs every test against whichever single `cccc` binary already exists —
 there's no per-test build-config selector yet. Verify those by hand against
 each build instead.
 
+`tests/test_decimal_fold_clean_fenv.c` (#832) is deliberately a standalone
+file with a plain `main()`, not a `[[cccc::test]]` case inside
+`test_suite_decimal.c`: it asserts `fetestexcept(FE_ALL_EXCEPT) == 0` as the
+very first statement, guarding against compile-time decimal constant folding
+(or comptime macro execution) leaving the host FP environment dirty before
+the guest program starts. Folding that assertion into the ~30-case suite
+would make it order-dependent on sibling tests that legitimately divide or
+`printf` a decimal value — either could set a flag the assertion would then
+misattribute.
+
 ## Running Tests
 
 ```

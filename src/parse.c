@@ -40,6 +40,7 @@
 
 #include "./internal.h"
 #include <pthread.h>
+#include <fenv.h> // host fenv.h -- #832 eval_decimal's fenv barrier
 
 #ifndef MAX
 #define MAX(x, y) ((x) < (y) ? (y) : (x))
@@ -243,6 +244,12 @@ static bool nodes_structurally_equal(Node *a, Node *b);
 static Node *assign(VirtualMachine *vm, Token **rest, Token *tok);
 static Node *logor(VirtualMachine *vm, Token **rest, Token *tok);
 static double eval_double(VirtualMachine *vm, Node *node);
+// #832: fold a decimal-typed constant expression into a 4/8/16-byte BID
+// buffer at compile time (`out` must have room for the width `node`'s own
+// type implies -- dec_width_code(node->ty), NOT necessarily `w`, which is
+// only the width of the final store the caller wants). See the definition
+// beside eval_double/eval2 for the node-kind table and the fenv barrier.
+static void eval_decimal(VirtualMachine *vm, Node *node, int w, void *out);
 static Node *conditional(VirtualMachine *vm, Token **rest, Token *tok);
 static Node *logand(VirtualMachine *vm, Token **rest, Token *tok);
 static Node *bitor(VirtualMachine *vm, Token **rest, Token *tok);
@@ -3640,23 +3647,12 @@ static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur, Initiali
     }
 
     if (is_decimal(ty)) {
-        // #402: a decimal global/static initializer must be a literal (or a
-        // cast of one) -- constant folding of decimal *arithmetic* isn't
-        // implemented in phase 1 (see the follow-up ticket), so an
-        // expression like `1.1dd + 2.2dd` here is a diagnostic, not a
-        // silent zero. Strip through cast wrappers to the literal, exactly
-        // as the ND_NUM literal codegen path does for locals.
-        Node *lit = init->expr;
-        while (lit && lit->kind == ND_CAST)
-            lit = lit->lhs;
-        if (!lit || lit->kind != ND_NUM || !is_decimal(lit->ty) || !lit->dec_digits)
-            error_tok(vm, init->expr->tok,
-                      "_Decimal global/static initializer must be a literal "
-                      "constant (decimal constant folding is not yet supported)");
-        if (!cccc_dec_encode_literal(lit->dec_digits, dec_width_code(ty),
-                                     buf + offset))
-            error_tok(vm, init->expr->tok,
-                      "_Decimal literals require a build with CCCC_HAS_DECIMAL=1");
+        // #832: fold arbitrary decimal constant arithmetic (literals, casts,
+        // +-*/, unary -, ?:, comma), not just a bare literal or a cast of
+        // one -- eval_decimal walks the same node shapes eval_double does.
+        // Always CCCC_DEC_ENV_STATIC internally (round-to-nearest, flags
+        // discarded, host fenv untouched -- see eval_decimal's own comment).
+        eval_decimal(vm, init->expr, dec_width_code(ty), buf + offset);
         return cur;
     }
 
@@ -4749,13 +4745,17 @@ static Node *constexpr_expr_for_node(Node *node) {
 static int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
     add_type(vm, node);
 
-    // _Decimal32/64/128 (#402): reject explicitly rather than falling
-    // through to a switch arm that reads node->val (always 0 for a decimal
-    // literal -- see tokenize.c). Decimal constant folding isn't
-    // implemented in phase 1, so a decimal value can only reach an integer
-    // constant-expression context (case label, array bound, bit-field
-    // width, _Static_assert, enumerator) through an explicit (int) cast,
-    // which itself isn't foldable yet either -- see eval_double's guard.
+    // _Decimal32/64/128: a node whose *own* type is decimal (as opposed to
+    // an ND_CAST *of* a decimal operand, handled in the ND_CAST arm below
+    // via eval_decimal, #832) can only reach here through a decimal
+    // comparison or equality operator (e.g. `1.1dd == 1.1dd` used directly
+    // in an integer constant expression) -- that's still rejected; folding
+    // it needs decimal arms in ND_EQ/ND_NE/ND_LT/ND_LE, deferred to a
+    // follow-up ticket. This message is imprecise for that specific case
+    // (it reads like decimal is categorically unusable in an ICE, when only
+    // decimal *comparisons* are), but reject explicitly either way rather
+    // than falling through to a switch arm that reads node->val (always 0
+    // for a decimal literal -- see tokenize.c).
     if (is_decimal(node->ty))
         error_tok(vm, node->tok, "_Decimal is not valid in an integer constant expression");
 
@@ -4831,6 +4831,31 @@ static int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
     case ND_LOGOR:
         return eval(vm, node->lhs) || eval(vm, node->rhs);
     case ND_CAST: {
+        // #832: a decimal-to-integer cast (e.g. `(int)1.5dd`, legal in an
+        // ICE since 1.5dd is the cast's immediate operand) folds via
+        // eval_decimal + cccc_dec_to_int instead of recursing into eval2,
+        // which would just hit this function's own is_decimal(node->ty)
+        // guard above on the recursive call. `(int)(1.1dd + 2.2dd)` also
+        // reaches here and folds -- a GCC-compatible extension beyond
+        // strict C, which only permits a floating constant as the cast's
+        // *immediate* operand.
+        if (is_decimal(node->lhs->ty)) {
+            int w = dec_width_code(node->lhs->ty);
+            unsigned char tmp[16];
+            eval_decimal(vm, node->lhs, w, tmp);
+            long long out = 0;
+            if (!cccc_dec_to_int(w, tmp, &out, node->ty->is_unsigned, CCCC_DEC_ENV_STATIC))
+                error_tok(vm, node->tok,
+                          "_Decimal literals require a build with CCCC_HAS_DECIMAL=1");
+            if (is_integer(node->ty)) {
+                switch (node->ty->size) {
+                case 1: return node->ty->is_unsigned ? (uint8_t)out : (int8_t)out;
+                case 2: return node->ty->is_unsigned ? (uint16_t)out : (int16_t)out;
+                case 4: return node->ty->is_unsigned ? (uint32_t)out : (int32_t)out;
+                }
+            }
+            return out;
+        }
         if (is_flonum(node->lhs->ty) && is_integer(node->ty) &&
             node->ty->is_unsigned && node->ty->size == 8)
             // #780: an unsigned 64-bit destination saturates against
@@ -5528,12 +5553,14 @@ bool node_int_const_fits(VirtualMachine *vm, Node *expr, Type *to) {
 static double eval_double(VirtualMachine *vm, Node *node) {
     add_type(vm, node);
 
-    // _Decimal32/64/128 (#402): node->fval is never populated for these --
-    // the ND_NUM case below would otherwise silently return 0.0 for any
-    // decimal constant expression (e.g. a static initializer). Decimal
-    // constant folding is not implemented in phase 1 (see the #402
-    // follow-up ticket); a non-literal decimal constant expression must be
-    // a diagnostic, not silent 0.
+    // _Decimal32/64/128: node->fval is never populated for these -- the
+    // ND_NUM case below would otherwise silently return 0.0 for any decimal
+    // constant expression. A node whose *own* type is decimal only reaches
+    // here through a decimal comparison used directly in a floating
+    // constant-expression context (e.g. as a controlling condition), not
+    // through the ND_CAST arm below (which now folds a decimal-to-binary-
+    // float cast via eval_decimal, #832) -- so this is still a diagnostic,
+    // not silent 0.
     if (is_decimal(node->ty))
         error_tok(vm, node->tok,
                   "_Decimal constant expressions are not supported in this context");
@@ -5561,6 +5588,26 @@ static double eval_double(VirtualMachine *vm, Node *node) {
     case ND_COMMA:
         return eval_double(vm, node->rhs);
     case ND_CAST:
+        // #832: a decimal-to-binary-float cast (e.g. `(double)(1.1dd +
+        // 2.2dd)`) folds via eval_decimal + cccc_dec_to_bin instead of
+        // recursing into eval_double, which would just hit this function's
+        // own is_decimal(node->ty) guard above on the recursive call.
+        if (is_decimal(node->lhs->ty)) {
+            int w = dec_width_code(node->lhs->ty);
+            unsigned char tmp[16];
+            eval_decimal(vm, node->lhs, w, tmp);
+            uint64_t bits = 0;
+            bool dst_is_f32 = (node->ty->kind == TY_FLOAT);
+            if (!cccc_dec_to_bin(w, tmp, dst_is_f32, &bits, CCCC_DEC_ENV_STATIC))
+                error_tok(vm, node->tok,
+                          "_Decimal literals require a build with CCCC_HAS_DECIMAL=1");
+            if (dst_is_f32) {
+                float fv; memcpy(&fv, &bits, 4);
+                return (double)fv;
+            }
+            double dv; memcpy(&dv, &bits, 8);
+            return dv;
+        }
         // #780: route through eval_double unconditionally, even for an
         // integer operand -- its is_integer() head above applies the
         // correct unsigned widening (unsigned long long, not a bare
@@ -5580,6 +5627,148 @@ static double eval_double(VirtualMachine *vm, Node *node) {
         error_tok(vm, node->tok, "not a compile-time constant");
         return 0;
     }
+}
+
+// #832: fold a decimal-typed constant expression at compile time into a
+// 4/8/16-byte BID buffer. Mirrors eval_double's node-kind table above, but
+// for decimal arithmetic (which eval_double explicitly refuses via its own
+// is_decimal(node->ty) guard).
+//
+// Width discipline: each recursive call derives its own width from the
+// *node's* type (dec_width_code(node->ty)), never trusts the caller's `w`
+// beyond the final store -- usual_arith_conv is expected to have inserted
+// ND_CAST nodes wherever two different decimal widths meet, so a mismatch
+// between a node's own width and the width the caller asked for indicates a
+// missing cast rather than something safe to paper over with the caller's
+// value.
+//
+// Always CCCC_DEC_ENV_STATIC (round-to-nearest, flags discarded) -- this
+// runs inside the *compiler* process, not the guest VM, so it must never
+// observe or perturb the host FP environment. The outermost call wraps the
+// whole recursive fold in a save/restore fenv barrier (mirroring
+// src/macros.c's fenv_barrier_begin/end around comptime vm_eval()); nested
+// recursive calls skip the barrier since it's already in effect.
+static void eval_decimal_rec(VirtualMachine *vm, Node *node, int w, void *out) {
+    add_type(vm, node);
+
+    int node_w = dec_width_code(node->ty);
+    if (node_w < 0 || node_w != w)
+        error_tok(vm, node->tok,
+                  "internal error: decimal constant-folding width mismatch "
+                  "(missing usual-arithmetic-conversion cast?)");
+
+    switch (node->kind) {
+    case ND_NUM:
+        if (!node->dec_digits)
+            error_tok(vm, node->tok, "not a compile-time constant");
+        if (!cccc_dec_encode_literal(node->dec_digits, w, out))
+            error_tok(vm, node->tok,
+                      "_Decimal literals require a build with CCCC_HAS_DECIMAL=1");
+        return;
+    case ND_CAST: {
+        Type *src_ty = node->lhs->ty;
+        if (is_decimal(src_ty)) {
+            int src_w = dec_width_code(src_ty);
+            unsigned char tmp[16];
+            eval_decimal_rec(vm, node->lhs, src_w, tmp);
+            if (!cccc_dec_convert(w, src_w, out, tmp, CCCC_DEC_ENV_STATIC))
+                error_tok(vm, node->tok,
+                          "_Decimal literals require a build with CCCC_HAS_DECIMAL=1");
+            return;
+        }
+        if (is_integer(src_ty)) {
+            int64_t v = eval(vm, node->lhs);
+            if (!cccc_dec_from_int(w, out, v, src_ty->is_unsigned, CCCC_DEC_ENV_STATIC))
+                error_tok(vm, node->tok,
+                          "_Decimal literals require a build with CCCC_HAS_DECIMAL=1");
+            return;
+        }
+        if (is_flonum(src_ty)) {
+            double d = eval_double(vm, node->lhs);
+            uint64_t bits;
+            bool src_is_f32 = (src_ty->kind == TY_FLOAT);
+            if (src_is_f32) {
+                float fv = (float)d;
+                uint32_t b32; memcpy(&b32, &fv, 4);
+                bits = b32;
+            } else {
+                memcpy(&bits, &d, 8);
+            }
+            if (!cccc_dec_from_bin(w, out, bits, src_is_f32, CCCC_DEC_ENV_STATIC))
+                error_tok(vm, node->tok,
+                          "_Decimal literals require a build with CCCC_HAS_DECIMAL=1");
+            return;
+        }
+        error_tok(vm, node->tok, "not a compile-time constant");
+        return;
+    }
+    case ND_ADD: case ND_SUB: case ND_MUL: case ND_DIV: {
+        unsigned char a[16], b[16];
+        eval_decimal_rec(vm, node->lhs, w, a);
+        eval_decimal_rec(vm, node->rhs, w, b);
+        int op = node->kind == ND_ADD ? '+' : node->kind == ND_SUB ? '-' :
+                 node->kind == ND_MUL ? '*' : '/';
+        if (!cccc_dec_binop(op, w, out, a, b, CCCC_DEC_ENV_STATIC))
+            error_tok(vm, node->tok,
+                      "_Decimal literals require a build with CCCC_HAS_DECIMAL=1");
+        return;
+    }
+    case ND_NEG: {
+        unsigned char a[16];
+        eval_decimal_rec(vm, node->lhs, w, a);
+        if (!cccc_dec_neg(w, out, a))
+            error_tok(vm, node->tok,
+                      "_Decimal literals require a build with CCCC_HAS_DECIMAL=1");
+        return;
+    }
+    case ND_COND:
+        // Mirrors eval_double's ND_COND handling: the condition itself is
+        // never decimal-typed in practice (C's ?: condition is an ordinary
+        // scalar test), so eval_double's own int/flonum handling covers it.
+        if (eval_double(vm, node->cond))
+            eval_decimal_rec(vm, node->then, w, out);
+        else
+            eval_decimal_rec(vm, node->els, w, out);
+        return;
+    case ND_COMMA:
+        eval_decimal_rec(vm, node->rhs, w, out);
+        return;
+    case ND_VAR:
+    case ND_MEMBER: {
+        Node *expr = constexpr_expr_for_node(node);
+        if (!expr)
+            error_tok(vm, node->tok, "not a compile-time constant");
+        eval_decimal_rec(vm, expr, w, out);
+        return;
+    }
+    default:
+        error_tok(vm, node->tok, "not a compile-time constant");
+        return;
+    }
+}
+
+static void eval_decimal(VirtualMachine *vm, Node *node, int w, void *out) {
+    // #832: restore only the *rounding mode* on the way out, not the whole
+    // fenv_t (in particular, NOT the exception-flag state). Pre-existing,
+    // independently-verified issue: the compile phase can leave host FP
+    // exception flags dirty before this ever runs -- e.g. tokenize.c's
+    // convert_pp_number scans every floating/decimal literal's extent via a
+    // host strtold() call whose value is discarded but whose side effect
+    // isn't (strtold("1.1", NULL) alone sets FE_UNDERFLOW on at least one
+    // verified platform). Round-tripping that dirty state through
+    // fegetenv()/fesetenv() here would silently reintroduce it after our
+    // own feclearexcept() below. The guest program's actual clean-start
+    // guarantee comes from cc_run() (src/vm.c) resetting the host FP
+    // environment exactly once, immediately before the compiled program
+    // begins executing -- this function only needs to (a) fold under a
+    // fixed, known rounding mode regardless of ambient state, and (b) not
+    // leave *new* dirty flags of its own behind for whatever compiles next.
+    int saved_round = fegetround();
+    fesetround(FE_TONEAREST);
+    feclearexcept(FE_ALL_EXCEPT);
+    eval_decimal_rec(vm, node, w, out);
+    feclearexcept(FE_ALL_EXCEPT);
+    fesetround(saved_round);
 }
 
 // Convert op= operators to expressions containing an assignment.

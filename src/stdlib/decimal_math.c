@@ -32,6 +32,7 @@
 #ifdef CCCC_HAS_DECIMAL
 #include "bid_conf.h" // must precede bid_functions.h (Intel's own contract)
 #include "bid_functions.h"
+#include <fenv.h> // host fenv.h -- #832 rounding-mode/exception-flag plumbing
 
 static BID_UINT32  load32(const void *p)  { BID_UINT32 v;  memcpy(&v, p, 4);  return v; }
 static BID_UINT64  load64(const void *p)  { BID_UINT64 v;  memcpy(&v, p, 8);  return v; }
@@ -40,7 +41,45 @@ static void store32(void *dst, BID_UINT32 v)   { memcpy(dst, &v, 4); }
 static void store64(void *dst, BID_UINT64 v)   { memcpy(dst, &v, 8); }
 static void store128(void *dst, BID_UINT128 v) { memcpy(dst, &v, 16); }
 
-#define RND BID_ROUNDING_TO_NEAREST
+// #832: every entry point here is FFI-only (reached from a guest sqrtd64()/
+// powd128()/... call, never from the compile-time folder), so unlike
+// src/stdlib/decimal.c there is no CCCC_DEC_ENV_STATIC/_DYNAMIC split to
+// thread through -- it's always dynamic. A comptime macro that calls e.g.
+// sqrtd64() still reaches this file directly, so it depends entirely on
+// src/parse.c's eval_decimal fenv barrier (around comptime VM execution) to
+// avoid leaving the host FP environment dirty after compilation -- see
+// docs/VM.md's "<fenv.h> rounding and exception flags" subsection.
+//
+// dm_host_rounding()/dm_raise_flags() duplicate src/stdlib/decimal.c's
+// cccc_dec_host_rounding()/cccc_dec_raise_flags() rather than sharing them --
+// matches this file's existing load32/store32-etc. duplication of decimal.c
+// (see that file's own comment); the two shims are compiled as independent
+// translation units by design.
+//
+// Perf note: dm_host_rounding()/dm_raise_flags() now run on every call here,
+// same placeholder-performance caveat as decimal.c's -- see #833.
+static int dm_host_rounding(void) {
+    switch (fegetround()) {
+    case FE_DOWNWARD:   return BID_ROUNDING_DOWN;
+    case FE_UPWARD:     return BID_ROUNDING_UP;
+    case FE_TOWARDZERO: return BID_ROUNDING_TO_ZERO;
+    case FE_TONEAREST:
+    default:            return BID_ROUNDING_TO_NEAREST;
+    }
+}
+
+static void dm_raise_flags(unsigned f) {
+    if (!f) return;
+    int host = 0;
+    if (f & DEC_FE_INVALID)   host |= FE_INVALID;
+    if (f & DEC_FE_DIVBYZERO) host |= FE_DIVBYZERO;
+    if (f & DEC_FE_OVERFLOW)  host |= FE_OVERFLOW;
+    if (f & DEC_FE_UNDERFLOW) host |= FE_UNDERFLOW;
+    if (f & DEC_FE_INEXACT)   host |= FE_INEXACT;
+    if (host) feraiseexcept(host);
+}
+
+#define RND dm_host_rounding()
 
 // -- op numbers (mirrored in include/decimal_math.h) -------------------
 
@@ -132,6 +171,7 @@ static long long dec_math1_##SFX(long long op, long long dst, long long a) { \
     default: return -1; \
     } \
     ST((void *)dst, r); \
+    dm_raise_flags(f); \
     return 0; \
 }
 MK_MATH1(32, BID_UINT32, load32, store32)
@@ -171,6 +211,7 @@ static long long dec_math2_##SFX(long long op, long long dst, long long a, long 
     default: return -1; \
     } \
     ST((void *)dst, r); \
+    dm_raise_flags(f); \
     return 0; \
 }
 MK_MATH2(32, BID_UINT32, load32, store32)
@@ -195,6 +236,7 @@ static long long dec_math3_##SFX(long long op, long long dst, long long a, long 
     if (op != OP3_FMA) return -1; \
     BIDT r = __bid##SFX##_fma(LD((const void *)a), LD((const void *)b), LD((const void *)c), RND, &f); \
     ST((void *)dst, r); \
+    dm_raise_flags(f); \
     return 0; \
 }
 MK_MATH3(32, BID_UINT32, load32, store32)
@@ -230,12 +272,12 @@ static long long dec_mathi_##SFX(long long op, long long a, long long b) { \
         if (__bid##SFX##_isZero(x)) return CCCC_FP_ZERO; \
         if (__bid##SFX##_isSubnormal(x)) return CCCC_FP_SUBNORMAL; \
         return CCCC_FP_NORMAL; \
-    case OPI_ILOGB:       return __bid##SFX##_ilogb(x, &f); \
-    case OPI_QUANTEXP:    return __bid##SFX##_quantexp(x, &f); \
-    case OPI_LRINT:       return __bid##SFX##_lrint(x, RND, &f); \
-    case OPI_LLRINT:      return __bid##SFX##_llrint(x, RND, &f); \
-    case OPI_LROUND:      return __bid##SFX##_lround(x, &f); \
-    case OPI_LLROUND:     return __bid##SFX##_llround(x, &f); \
+    case OPI_ILOGB:       { long long r = __bid##SFX##_ilogb(x, &f); dm_raise_flags(f); return r; } \
+    case OPI_QUANTEXP:    { long long r = __bid##SFX##_quantexp(x, &f); dm_raise_flags(f); return r; } \
+    case OPI_LRINT:       { long long r = __bid##SFX##_lrint(x, RND, &f); dm_raise_flags(f); return r; } \
+    case OPI_LLRINT:      { long long r = __bid##SFX##_llrint(x, RND, &f); dm_raise_flags(f); return r; } \
+    case OPI_LROUND:      { long long r = __bid##SFX##_lround(x, &f); dm_raise_flags(f); return r; } \
+    case OPI_LLROUND:     { long long r = __bid##SFX##_llround(x, &f); dm_raise_flags(f); return r; } \
     case OPI_SAMEQUANTUM: return __bid##SFX##_sameQuantum(x, LD((const void *)b)); \
     case OPI_TOTALORDER:  return __bid##SFX##_totalOrder(x, LD((const void *)b)); \
     default: return -1; \
@@ -269,6 +311,7 @@ static long long dec_mathn_##SFX(long long op, long long dst, long long a, long 
     default: return -1; \
     } \
     ST((void *)dst, r); \
+    dm_raise_flags(f); \
     return 0; \
 }
 MK_MATHN(32, BID_UINT32, load32, store32)
@@ -308,6 +351,7 @@ static long long dec_mathp_##SFX(long long op, long long dst, long long a, long 
     default: return -1; \
     } \
     ST((void *)dst, r); \
+    dm_raise_flags(f); \
     return 0; \
 }
 MK_MATHP(32, BID_UINT32, load32, store32)

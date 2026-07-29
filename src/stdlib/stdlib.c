@@ -306,6 +306,16 @@ static unsigned long cccc_strtoul(const char *nptr, char **endptr, int base) {
     return (unsigned long)cccc_strtoull(nptr, endptr, base);
 }
 
+// #832: strtod32/64/128's FFI trampoline. `long long`-uniform, like every
+// other decimal shim entry point (src/stdlib/decimal.c's cccc_dec_strtod) --
+// no BID type appears in a VM header. include/stdlib.h's strtod32/64/128
+// static inline wrappers call this directly; no new opcode, following the
+// #828 <decimal_math.h> precedent.
+static long long wrap_dec_strtod(long long w, long long dst, long long s, long long endp) {
+    return cccc_dec_strtod((int)w, (void *)(intptr_t)dst, (const char *)(intptr_t)s,
+                           (char **)(intptr_t)endp, CCCC_DEC_ENV_DYNAMIC);
+}
+
 // Register all stdlib.h functions
 void register_stdlib_functions(VirtualMachine *vm) {
     // Conversion functions
@@ -320,6 +330,7 @@ void register_stdlib_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "strtoll", (void*)cccc_strtoll, 3, 0);
     cc_register_cfunc(vm, "strtoul", (void*)cccc_strtoul, 3, 0);
     cc_register_cfunc(vm, "strtoull", (void*)cccc_strtoull, 3, 0);
+    cc_register_cfunc(vm, "__cccc_dec_strtod", (void*)wrap_dec_strtod, 4, 0); // #832
 
     // Random number generation
     cc_register_cfunc(vm, "rand", (void*)rand, 0, 0);

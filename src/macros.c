@@ -22,6 +22,39 @@
 // macro calls in the AST
 
 #include "./internal.h"
+#include <fenv.h> // host fenv.h -- #832 comptime fenv barrier (see below)
+
+// #832: guards a comptime (compile-time macro) vm_eval() call against
+// leaving the host FP environment dirty. A comptime macro can call a
+// decimal <math.h> function (src/stdlib/decimal_math.c), which -- unlike
+// the folder in src/parse.c's eval_decimal -- has no CCCC_DEC_ENV_STATIC/
+// _DYNAMIC parameter to force to-nearest-and-discard; it always rounds
+// under fegetround() and always raises host FP flags via feraiseexcept().
+// Without this barrier, a comptime sqrtd64() call would leave the compiler
+// process holding whatever rounding mode/exception flags that call raised.
+//
+// Only the *rounding mode* round-trips through save/restore -- deliberately
+// NOT the exception-flag state via fegetenv()/fesetenv(). Round-tripping
+// the whole fenv_t would silently reintroduce whatever the host FP
+// environment already had dirty *before* this call (a real, independently
+// verified pre-existing condition: tokenize.c's convert_pp_number scans
+// every floating/decimal literal's extent via a host strtold() call whose
+// value is discarded but whose side effect isn't -- strtold("1.1", NULL)
+// alone sets FE_UNDERFLOW on at least one verified platform). The guest
+// program's actual clean-start guarantee comes from cc_run() (src/vm.c)
+// resetting the host FP environment exactly once, immediately before the
+// compiled program begins executing; this barrier only needs to (a) run
+// the comptime call under a fixed, known rounding mode, and (b) not leave
+// new dirty exception flags of its own behind for whatever compiles next.
+static void fenv_barrier_begin(int *saved_round) {
+    *saved_round = fegetround();
+    fesetround(FE_TONEAREST);
+    feclearexcept(FE_ALL_EXCEPT);
+}
+static void fenv_barrier_end(int saved_round) {
+    feclearexcept(FE_ALL_EXCEPT);
+    fesetround(saved_round);
+}
 
 // External declaration from relfection.c
 extern VirtualMachine *__builtin_current_vm;
@@ -1329,7 +1362,10 @@ static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
 
     int saved_debug = vm->debug_vm;
     vm->debug_vm = 0;
+    int fenv_saved_round;
+    fenv_barrier_begin(&fenv_saved_round);
     int eval_rc = vm_eval(vm);
+    fenv_barrier_end(fenv_saved_round);
     vm->debug_vm = saved_debug;
 
     __builtin_current_vm = NULL;
@@ -1856,7 +1892,10 @@ static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
     // Execute the macro function
     int saved_debug = vm->debug_vm;
     vm->debug_vm = 0; // Disable debug output during macro execution
+    int fenv_saved_round;
+    fenv_barrier_begin(&fenv_saved_round);
     int eval_rc = vm_eval(vm);
+    fenv_barrier_end(fenv_saved_round);
     vm->debug_vm = saved_debug;
 
     // Get the returned Node* from regs[REG_A0]. Void macros do not produce a

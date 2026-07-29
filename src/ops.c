@@ -3360,25 +3360,29 @@ static inline int op_WIDE_USHR_fn(VirtualMachine *vm) {
 // the WIDE_* arithmetic ops; the handlers here just dereference directly.
 static inline int op_DADD_fn(VirtualMachine *vm) {
     cccc_dec_binop('+', (int)vm->regs[REG_A3], (void *)vm->regs[REG_A0],
-                   (const void *)vm->regs[REG_A1], (const void *)vm->regs[REG_A2]);
+                   (const void *)vm->regs[REG_A1], (const void *)vm->regs[REG_A2],
+                   CCCC_DEC_ENV_DYNAMIC);
     return 0;
 }
 
 static inline int op_DSUB_fn(VirtualMachine *vm) {
     cccc_dec_binop('-', (int)vm->regs[REG_A3], (void *)vm->regs[REG_A0],
-                   (const void *)vm->regs[REG_A1], (const void *)vm->regs[REG_A2]);
+                   (const void *)vm->regs[REG_A1], (const void *)vm->regs[REG_A2],
+                   CCCC_DEC_ENV_DYNAMIC);
     return 0;
 }
 
 static inline int op_DMUL_fn(VirtualMachine *vm) {
     cccc_dec_binop('*', (int)vm->regs[REG_A3], (void *)vm->regs[REG_A0],
-                   (const void *)vm->regs[REG_A1], (const void *)vm->regs[REG_A2]);
+                   (const void *)vm->regs[REG_A1], (const void *)vm->regs[REG_A2],
+                   CCCC_DEC_ENV_DYNAMIC);
     return 0;
 }
 
 static inline int op_DDIV_fn(VirtualMachine *vm) {
     cccc_dec_binop('/', (int)vm->regs[REG_A3], (void *)vm->regs[REG_A0],
-                   (const void *)vm->regs[REG_A1], (const void *)vm->regs[REG_A2]);
+                   (const void *)vm->regs[REG_A1], (const void *)vm->regs[REG_A2],
+                   CCCC_DEC_ENV_DYNAMIC);
     return 0;
 }
 
@@ -3398,35 +3402,38 @@ static inline int op_DCMP_fn(VirtualMachine *vm) {
 
 static inline int op_DFROMI_fn(VirtualMachine *vm) {
     cccc_dec_from_int((int)vm->regs[REG_A2], (void *)vm->regs[REG_A0],
-                      (long long)vm->regs[REG_A1], vm->regs[REG_A3] != 0);
+                      (long long)vm->regs[REG_A1], vm->regs[REG_A3] != 0,
+                      CCCC_DEC_ENV_DYNAMIC);
     return 0;
 }
 
 static inline int op_DTOI_fn(VirtualMachine *vm) {
     long long out = 0;
     cccc_dec_to_int((int)vm->regs[REG_A1], (const void *)vm->regs[REG_A0],
-                    &out, vm->regs[REG_A2] != 0);
+                    &out, vm->regs[REG_A2] != 0, CCCC_DEC_ENV_DYNAMIC);
     vm->regs[REG_A0] = out;
     return 0;
 }
 
 static inline int op_DFROMBITS_fn(VirtualMachine *vm) {
     cccc_dec_from_bin((int)vm->regs[REG_A2], (void *)vm->regs[REG_A0],
-                      (uint64_t)vm->regs[REG_A1], vm->regs[REG_A3] != 0);
+                      (uint64_t)vm->regs[REG_A1], vm->regs[REG_A3] != 0,
+                      CCCC_DEC_ENV_DYNAMIC);
     return 0;
 }
 
 static inline int op_DTOBITS_fn(VirtualMachine *vm) {
     uint64_t bits = 0;
     cccc_dec_to_bin((int)vm->regs[REG_A1], (const void *)vm->regs[REG_A0],
-                    vm->regs[REG_A2] != 0, &bits);
+                    vm->regs[REG_A2] != 0, &bits, CCCC_DEC_ENV_DYNAMIC);
     vm->regs[REG_A0] = (long long)bits;
     return 0;
 }
 
 static inline int op_DCVT_fn(VirtualMachine *vm) {
     cccc_dec_convert((int)vm->regs[REG_A2], (int)vm->regs[REG_A3],
-                     (void *)vm->regs[REG_A0], (const void *)vm->regs[REG_A1]);
+                     (void *)vm->regs[REG_A0], (const void *)vm->regs[REG_A1],
+                     CCCC_DEC_ENV_DYNAMIC);
     return 0;
 }
 
@@ -4728,6 +4735,13 @@ static const FfiShadowRule ffi_shadow_rules[] = {
     // from.
     {"strtol",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *)},
     {"strtod",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *)},
+    // __cccc_dec_strtod(w, dst, s, endp) -- #832's strtod32/64/128 shim
+    // (src/stdlib/stdlib.c). `endp` is arg index 3 here, not 1, since `dst`
+    // (the decimal out-param) occupies index 1. `dst`'s own write still
+    // falls through to the default whole-allocation clear below -- its
+    // width varies with `w` (4/8/16 bytes), which this table has no way to
+    // express, so it's conservative rather than unsafe.
+    {"__cccc_dec_strtod", FFI_SHADOW_BOUNDED, 3, -1, -1, sizeof(char *)},
 
     // Deliberately left unclassified (default whole-allocation clear):
     // printf/sprintf/scanf family (a %n conversion writes through any

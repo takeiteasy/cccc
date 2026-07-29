@@ -33,6 +33,33 @@ extern long long int strtoll(const char* nptr, char** endptr, int base);
 extern unsigned long int strtoul(const char* nptr, char** endptr, int base);
 extern unsigned long long int strtoull(const char* nptr, char** endptr, int base);
 
+// strtod32/64/128 (C23/TS 18661-2, tracker #832): parse a decimal out of a
+// string, exact per IEEE 754-2008 (no round-trip through a binary double).
+// Thin wrappers over __cccc_dec_strtod (src/stdlib/decimal.c's
+// cccc_dec_strtod via src/stdlib/stdlib.c's FFI trampoline) -- no new
+// opcode, same pattern <decimal_math.h>'s functions use. Decimal return by
+// value from a guest static inline is already supported (struct-ABI reuse,
+// see docs/VM.md); no decimal value crosses the FFI boundary itself.
+#ifdef __STDC_IEC_60559_DFP__
+extern long long __cccc_dec_strtod(long long w, long long dst,
+                                   long long s, long long endp);
+static inline _Decimal32 strtod32(const char *nptr, char **endptr) {
+    _Decimal32 r;
+    __cccc_dec_strtod(0, (long long)&r, (long long)nptr, (long long)endptr);
+    return r;
+}
+static inline _Decimal64 strtod64(const char *nptr, char **endptr) {
+    _Decimal64 r;
+    __cccc_dec_strtod(1, (long long)&r, (long long)nptr, (long long)endptr);
+    return r;
+}
+static inline _Decimal128 strtod128(const char *nptr, char **endptr) {
+    _Decimal128 r;
+    __cccc_dec_strtod(2, (long long)&r, (long long)nptr, (long long)endptr);
+    return r;
+}
+#endif
+
 extern int rand(void);
 extern void srand(unsigned int seed);
 // alloc_size/malloc (#649): self-describing sizes for __builtin_object_size,

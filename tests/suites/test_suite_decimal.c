@@ -12,6 +12,8 @@
 
 #include <float.h>
 #include <string.h>
+#include <fenv.h>
+#include <stdlib.h>
 
 [[cccc::test(return = 42)]]
 int test_decimal_sizes(void) {
@@ -595,6 +597,144 @@ int test_decimal_vprintf(void) {
     _Decimal64 d = 42.5dd;
     cccc_test_vprintf_helper(out, sizeof out, "[%Df]", d);
     if (__builtin_strcmp(out, "[42.500000]") != 0) return 1;
+    return 42;
+}
+
+// #832: strtod32/64/128 -- FFI-wrapper lowering (no DFROMSTR opcode), same
+// pattern <decimal_math.h> uses. cccc_dec_strtod parses the longest valid
+// numeric prefix by hand (BID's __bidNN_from_string gives no endptr).
+[[cccc::test(return = 42)]]
+int test_decimal_strtod(void) {
+    char *end;
+
+    // Exact per IEEE 754-2008 -- 0.1/0.2 parsed by BID, not round-tripped
+    // through a binary double: strtod64() must equal the matching literal
+    // exactly, and their sum must match the literal sum too (mirrors
+    // test_decimal_arithmetic_d64's own 0.1dd + 0.2dd == 0.3dd assertion,
+    // exact under BID unlike binary FP).
+    _Decimal64 a = strtod64("0.1", &end);
+    _Decimal64 b0 = strtod64("0.2", &end);
+    if (a != 0.1dd) return 1;
+    if (b0 != 0.2dd) return 2;
+    // Named temps -- avoid several inline decimal subexpressions sharing one
+    // statement (a separate decimal-scratch-slot-reuse issue, orthogonal to
+    // strtod itself: confirmed by storing each intermediate to its own
+    // variable first).
+    _Decimal64 sum_strtod = a + b0;
+    _Decimal64 sum_lit = 0.1dd + 0.2dd;
+    if (sum_strtod != sum_lit) return 3;
+
+    // endptr past the numeric token, trailing garbage untouched.
+    _Decimal64 b = strtod64("123.456e2xyz", &end);
+    if (b != 12345.6dd) return 4;
+    if (__builtin_strcmp(end, "xyz") != 0) return 5;
+
+    // Leading whitespace skipped, endptr still lands right after the token.
+    _Decimal32 c = strtod32("   42.5", &end);
+    if (c != 42.5df) return 6;
+    if (*end != '\0') return 7;
+
+    // No valid conversion: +0 stored, endptr == input (C's strtod contract).
+    const char *bogus = "xyz";
+    _Decimal64 d = strtod64(bogus, &end);
+    if (d != 0.dd) return 8;
+    if (end != bogus) return 9;
+
+    // inf/nan spellings.
+    _Decimal64 e = strtod64("inf", &end);
+    if (!isinfd64(e)) return 10;
+    _Decimal64 f = strtod64("-infinity", &end);
+    if (!isinfd64(f) || !signbitd64(f)) return 11;
+    _Decimal64 g = strtod64("nan", &end);
+    if (!isnand64(g)) return 12;
+
+    // >40 significant digits: guards the fixed-buffer truncation trap
+    // (cccc_dec_strtod must scan-then-allocate, not inherit a 256-byte cap
+    // that would silently truncate digits without adjusting the exponent).
+    _Decimal128 h = strtod128(
+        "1.234567890123456789012345678901234567890123456789012345e10", &end);
+    if (isnand128(h) || isinfd128(h)) return 13;
+    if (*end != '\0') return 14;
+
+    return 42;
+}
+
+// #832: fesetround() now has real effect on decimal arithmetic (previously
+// hard-wired to BID_ROUNDING_TO_NEAREST). 1.0dd/3.0dd is inexact at both
+// _Decimal64's 16 significant digits, so directed rounding modes visibly
+// diverge from round-to-nearest at the last digit.
+[[cccc::test(return = 42)]]
+int test_decimal_rounding_modes(void) {
+    _Decimal64 one = 1.0dd, three = 3.0dd;
+
+    fesetround(FE_TONEAREST);
+    _Decimal64 nearest = one / three;
+
+    fesetround(FE_UPWARD);
+    _Decimal64 up = one / three;
+
+    fesetround(FE_DOWNWARD);
+    _Decimal64 down = one / three;
+
+    fesetround(FE_TOWARDZERO);
+    _Decimal64 tozero = one / three;
+
+    fesetround(FE_TONEAREST); // restore before returning
+
+    if (up == down) return 1;          // must diverge
+    if (down != nearest) return 2;     // truncating down == nearest here
+    if (tozero != down) return 3;      // positive operands: to-zero == down
+    if (!(up > down)) return 4;
+
+    return 42;
+}
+
+// #832: BID's discarded exception-flags out-param now feeds fetestexcept()
+// via feraiseexcept() for every runtime (dynamic-env) decimal operation.
+[[cccc::test(return = 42)]]
+int test_decimal_exception_flags(void) {
+    feclearexcept(FE_ALL_EXCEPT);
+    _Decimal64 one = 1.0dd, three = 3.0dd;
+    _Decimal64 r = one / three; // inexact
+    (void)r;
+    if (!fetestexcept(FE_INEXACT)) return 1;
+
+    feclearexcept(FE_ALL_EXCEPT);
+    _Decimal64 zero = 0.0dd;
+    _Decimal64 z = one / zero; // divide by zero
+    if (!isinfd64(z)) return 2;
+    if (!fetestexcept(FE_DIVBYZERO)) return 3;
+    if (fetestexcept(FE_INEXACT)) return 4; // divide-by-zero is exact, not inexact
+
+    feclearexcept(FE_ALL_EXCEPT);
+    _Decimal64 two = 2.0dd, four = 4.0dd;
+    _Decimal64 exact = two / four; // 0.5, exact
+    if (exact != 0.5dd) return 5;
+    if (fetestexcept(FE_INEXACT)) return 6;
+
+    return 42;
+}
+
+// #832: compile-time constant folding of decimal arithmetic. Previously
+// `static _Decimal64 x = 1.1dd + 2.2dd;` was a hard diagnostic -- only a
+// bare literal (or cast of one) was accepted. Covers +-*/, unary -, a
+// decimal-to-decimal cast, and the reverse decimal->binary-float /
+// decimal->int cast directions eval_double/eval2 now also fold.
+static _Decimal64  test_decimal_fold_a = 1.1dd + 2.2dd;
+static _Decimal32  test_decimal_fold_b = (_Decimal32)(10.0dd / 4.0dd);
+static _Decimal128 test_decimal_fold_c = -1.5dl * 2;
+static double       test_decimal_fold_d = (double)(1.1dd + 2.2dd);
+static int          test_decimal_fold_e = (int)1.5dd; // GCC-compatible extension
+static _Decimal64  test_decimal_fold_inf = __builtin_infd64() + 0.dd;
+
+[[cccc::test(return = 42)]]
+int test_decimal_static_fold(void) {
+    if (test_decimal_fold_a != 3.3dd) return 1;
+    if (test_decimal_fold_b != 2.5df) return 2;
+    if (test_decimal_fold_c != -3.0dl) return 3;
+    if (test_decimal_fold_d != 3.3) return 4;
+    if (test_decimal_fold_e != 1) return 5;
+    if (!isinfd64(test_decimal_fold_inf)) return 6;
     return 42;
 }
 

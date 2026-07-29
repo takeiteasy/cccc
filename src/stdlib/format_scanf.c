@@ -524,7 +524,7 @@ static int cccc_vscan(ScanSource *src, const char *fmt, va_list ap) {
                 if (r == SCAN_NOMATCH) goto nomatch;
                 if (!suppress) {
                     int w = (lenmod == LEN_H) ? 0 : (lenmod == LEN_D) ? 1 : 2;
-                    if (cccc_dec_from_string(w, va_arg(ap, void *), raw))
+                    if (cccc_dec_from_string(w, va_arg(ap, void *), raw, CCCC_DEC_ENV_DYNAMIC))
                         result++;
                     else
                         goto nomatch; // CCCC_HAS_DECIMAL not built in

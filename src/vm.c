@@ -21,6 +21,7 @@
 */
 
 #include "./internal.h"
+#include <fenv.h> // host fenv.h -- #832, cc_run()'s pre-execution reset
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <pthread.h>
 #endif
@@ -2217,6 +2218,24 @@ static void cc_run_atexit_entries(VirtualMachine *vm) {
 }
 
 int cc_run(VirtualMachine *vm, int argc, char **argv) {
+    // #832: guarantee the guest program observes ISO C's startup contract
+    // (round-to-nearest, no pending FP exceptions) regardless of what the
+    // *compile* phase left in the host FP environment. This is a real,
+    // independently-reproducible pre-existing issue, not something #832
+    // introduced: tokenize.c's convert_pp_number scans every floating (and
+    // decimal) literal's extent via a host strtold() call whose *value* is
+    // discarded, but whose side effect isn't -- on at least one verified
+    // platform (macOS/arm64), strtold("1.1", NULL) alone leaves the host's
+    // FE_UNDERFLOW flag set, and nothing previously cleared it before
+    // running the compiled guest program in the same process. Reproduced
+    // with a plain `double x = 1.1;` global and no decimal code at all.
+    // Cleared exactly once here (not inside cc_run_at, which also runs
+    // constructors/main/atexit as separate top-level cycles) so a
+    // constructor's own fesetround()/feraiseexcept() calls still correctly
+    // persist into main() and beyond, matching real linked-C behavior.
+    fesetround(FE_TONEAREST);
+    feclearexcept(FE_ALL_EXCEPT);
+
     cc_run_init_entries(vm, vm->compiler.ctor_list, vm->compiler.ctor_count);
     int rc = cc_run_at(vm, vm->text_seg[0], argc, argv);
     // atexit handlers and destructors run only on normal return from

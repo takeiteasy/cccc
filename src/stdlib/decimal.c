@@ -22,6 +22,9 @@
 #ifdef CCCC_HAS_DECIMAL
 #include "bid_conf.h" // must precede bid_functions.h (Intel's own contract)
 #include "bid_functions.h"
+#include <fenv.h> // host fenv.h -- #832 rounding-mode/exception-flag plumbing
+#include <stdlib.h> // malloc/free (cccc_dec_strtod's unbounded prefix copy)
+#include <errno.h> // ERANGE (cccc_dec_strtod, matching strtod/strtof/strtold)
 
 typedef struct { uint8_t bytes[4]; }  Dec32Raw;
 typedef struct { uint8_t bytes[8]; }  Dec64Raw;
@@ -34,9 +37,63 @@ static void store32(void *dst, BID_UINT32 v)   { memcpy(dst, &v, 4); }
 static void store64(void *dst, BID_UINT64 v)   { memcpy(dst, &v, 8); }
 static void store128(void *dst, BID_UINT128 v) { memcpy(dst, &v, 16); }
 
-#define RND BID_ROUNDING_TO_NEAREST
+// #832: fesetround() now has real effect on decimal arithmetic, and BID's
+// exception flags now feed fetestexcept(). Every entry point that can round
+// or raise takes a trailing `env` parameter (CCCC_DEC_ENV_DYNAMIC or
+// _STATIC, src/internal.h): DYNAMIC translates the *host's current*
+// fegetround() into a BID_ROUNDING_* mode and raises the resulting BID
+// exception flags via feraiseexcept() -- used by every runtime (VM opcode /
+// strtod / scanf) call site. STATIC always rounds to-nearest and discards
+// flags -- used only by the compile-time constant folder (src/parse.c's
+// eval_decimal), which runs inside the *compiler* process and must never
+// observe or perturb the host FP environment (see eval_decimal's fenv
+// barrier). cccc_dec_neg/cccc_dec_cmp take no such parameter: negation is
+// exact and the quiet comparisons cannot raise (see their own comments).
+//
+// Perf note: cccc_dec_host_rounding()/cccc_dec_raise_flags() now run on
+// every dynamic-env decimal op, and FE_INEXACT is set by most divisions, so
+// the feraiseexcept() call fires on the common path. Placeholder
+// performance, same policy as the rest of decimal FP (#831/#833's
+// follow-ups); no fast path here yet.
+static int cccc_dec_host_rounding(void) {
+    switch (fegetround()) {
+    case FE_DOWNWARD:   return BID_ROUNDING_DOWN;
+    case FE_UPWARD:     return BID_ROUNDING_UP;
+    case FE_TOWARDZERO: return BID_ROUNDING_TO_ZERO;
+    case FE_TONEAREST:
+    default:            return BID_ROUNDING_TO_NEAREST;
+    }
+}
 
-bool cccc_dec_binop(int op, int w, void *dst, const void *a, const void *b) {
+// BID's exception bits (DEC_FE_INVALID/DIVBYZERO/OVERFLOW/UNDERFLOW/INEXACT)
+// share their bit positions and meaning with the real host FE_* macros on
+// every platform CCCC targets (verified: bid_functions.h's DEC_FE_* comment
+// block and each platform's <fenv.h> agree on INVALID=1, DIVBYZERO=4,
+// OVERFLOW=8, UNDERFLOW=0x10, INEXACT=0x20) -- only DEC_FE_UNNORMAL (0x02,
+// denormal) has no portable FE_* equivalent, so it's masked out rather than
+// raised as some unrelated host flag.
+static void cccc_dec_raise_flags(unsigned f) {
+    if (!f) return; // feraiseexcept() is not free -- skip the common case
+    int host = 0;
+    if (f & DEC_FE_INVALID)   host |= FE_INVALID;
+    if (f & DEC_FE_DIVBYZERO) host |= FE_DIVBYZERO;
+    if (f & DEC_FE_OVERFLOW)  host |= FE_OVERFLOW;
+    if (f & DEC_FE_UNDERFLOW) host |= FE_UNDERFLOW;
+    if (f & DEC_FE_INEXACT)   host |= FE_INEXACT;
+    if (host) feraiseexcept(host);
+}
+
+static int env_round(int env) {
+    return env == CCCC_DEC_ENV_DYNAMIC ? cccc_dec_host_rounding()
+                                        : BID_ROUNDING_TO_NEAREST;
+}
+static void env_raise(int env, unsigned f) {
+    if (env == CCCC_DEC_ENV_DYNAMIC) cccc_dec_raise_flags(f);
+}
+
+#define RND env_round(env)
+
+bool cccc_dec_binop(int op, int w, void *dst, const void *a, const void *b, int env) {
     unsigned f = 0;
     switch (w) {
     case 0: {
@@ -49,6 +106,7 @@ bool cccc_dec_binop(int op, int w, void *dst, const void *a, const void *b) {
         default: return false;
         }
         store32(dst, r);
+        env_raise(env, f);
         return true;
     }
     case 1: {
@@ -61,6 +119,7 @@ bool cccc_dec_binop(int op, int w, void *dst, const void *a, const void *b) {
         default: return false;
         }
         store64(dst, r);
+        env_raise(env, f);
         return true;
     }
     case 2: {
@@ -73,6 +132,7 @@ bool cccc_dec_binop(int op, int w, void *dst, const void *a, const void *b) {
         default: return false;
         }
         store128(dst, r);
+        env_raise(env, f);
         return true;
     }
     default: return false;
@@ -121,7 +181,7 @@ int cccc_dec_cmp(int w, const void *a, const void *b) {
     }
 }
 
-bool cccc_dec_from_int(int w, void *dst, long long v, bool is_unsigned) {
+bool cccc_dec_from_int(int w, void *dst, long long v, bool is_unsigned, int env) {
     unsigned f = 0;
     switch (w) {
     // bid32/64 from int64 can lose precision (7/16 significant digits vs.
@@ -130,10 +190,12 @@ bool cccc_dec_from_int(int w, void *dst, long long v, bool is_unsigned) {
     case 0:
         store32(dst, is_unsigned ? __bid32_from_uint64((uint64_t)v, RND, &f)
                                   : __bid32_from_int64(v, RND, &f));
+        env_raise(env, f);
         return true;
     case 1:
         store64(dst, is_unsigned ? __bid64_from_uint64((uint64_t)v, RND, &f)
                                   : __bid64_from_int64(v, RND, &f));
+        env_raise(env, f);
         return true;
     case 2:
         store128(dst, is_unsigned ? __bid128_from_uint64((uint64_t)v)
@@ -143,32 +205,35 @@ bool cccc_dec_from_int(int w, void *dst, long long v, bool is_unsigned) {
     }
 }
 
-bool cccc_dec_to_int(int w, const void *src, long long *out, bool is_unsigned) {
+bool cccc_dec_to_int(int w, const void *src, long long *out, bool is_unsigned, int env) {
     unsigned f = 0;
     switch (w) {
     case 0: {
         BID_UINT32 x = load32(src);
         *out = is_unsigned ? (long long)__bid32_to_uint64_int(x, &f)
                             : __bid32_to_int64_int(x, &f);
+        env_raise(env, f);
         return true;
     }
     case 1: {
         BID_UINT64 x = load64(src);
         *out = is_unsigned ? (long long)__bid64_to_uint64_int(x, &f)
                             : __bid64_to_int64_int(x, &f);
+        env_raise(env, f);
         return true;
     }
     case 2: {
         BID_UINT128 x = load128(src);
         *out = is_unsigned ? (long long)__bid128_to_uint64_int(x, &f)
                             : __bid128_to_int64_int(x, &f);
+        env_raise(env, f);
         return true;
     }
     default: return false;
     }
 }
 
-bool cccc_dec_from_bin(int w, void *dst, uint64_t bits, bool src_is_f32) {
+bool cccc_dec_from_bin(int w, void *dst, uint64_t bits, bool src_is_f32, int env) {
     unsigned f = 0;
     double d;
     if (src_is_f32) {
@@ -179,14 +244,14 @@ bool cccc_dec_from_bin(int w, void *dst, uint64_t bits, bool src_is_f32) {
         memcpy(&d, &bits, 8);
     }
     switch (w) {
-    case 0: store32(dst, __binary64_to_bid32(d, RND, &f)); return true;
-    case 1: store64(dst, __binary64_to_bid64(d, RND, &f)); return true;
-    case 2: store128(dst, __binary64_to_bid128(d, RND, &f)); return true;
+    case 0: store32(dst, __binary64_to_bid32(d, RND, &f)); env_raise(env, f); return true;
+    case 1: store64(dst, __binary64_to_bid64(d, RND, &f)); env_raise(env, f); return true;
+    case 2: store128(dst, __binary64_to_bid128(d, RND, &f)); env_raise(env, f); return true;
     default: return false;
     }
 }
 
-bool cccc_dec_to_bin(int w, const void *src, bool dst_is_f32, uint64_t *out_bits) {
+bool cccc_dec_to_bin(int w, const void *src, bool dst_is_f32, uint64_t *out_bits, int env) {
     unsigned f = 0;
     double d;
     switch (w) {
@@ -195,6 +260,7 @@ bool cccc_dec_to_bin(int w, const void *src, bool dst_is_f32, uint64_t *out_bits
     case 2: d = __bid128_to_binary64(load128(src), RND, &f); break;
     default: return false;
     }
+    env_raise(env, f);
     if (dst_is_f32) {
         float fv = (float)d;
         uint32_t b32; memcpy(&b32, &fv, 4);
@@ -205,7 +271,7 @@ bool cccc_dec_to_bin(int w, const void *src, bool dst_is_f32, uint64_t *out_bits
     return true;
 }
 
-bool cccc_dec_convert(int dst_w, int src_w, void *dst, const void *src) {
+bool cccc_dec_convert(int dst_w, int src_w, void *dst, const void *src, int env) {
     unsigned f = 0;
     if (dst_w == src_w) {
         memcpy(dst, src, dst_w == 0 ? 4 : dst_w == 1 ? 8 : 16);
@@ -214,12 +280,12 @@ bool cccc_dec_convert(int dst_w, int src_w, void *dst, const void *src) {
     // src -> bid128 -> dst is not exact for narrowing conversions, so go
     // through the direct pairwise entry points instead.
     switch (src_w * 3 + dst_w) {
-    case 0*3+1: store64(dst, __bid32_to_bid64(load32(src), &f)); return true;
-    case 0*3+2: store128(dst, __bid32_to_bid128(load32(src), &f)); return true;
-    case 1*3+0: store32(dst, __bid64_to_bid32(load64(src), RND, &f)); return true;
-    case 1*3+2: store128(dst, __bid64_to_bid128(load64(src), &f)); return true;
-    case 2*3+0: store32(dst, __bid128_to_bid32(load128(src), RND, &f)); return true;
-    case 2*3+1: store64(dst, __bid128_to_bid64(load128(src), RND, &f)); return true;
+    case 0*3+1: store64(dst, __bid32_to_bid64(load32(src), &f)); env_raise(env, f); return true;
+    case 0*3+2: store128(dst, __bid32_to_bid128(load32(src), &f)); env_raise(env, f); return true;
+    case 1*3+0: store32(dst, __bid64_to_bid32(load64(src), RND, &f)); env_raise(env, f); return true;
+    case 1*3+2: store128(dst, __bid64_to_bid128(load64(src), &f)); env_raise(env, f); return true;
+    case 2*3+0: store32(dst, __bid128_to_bid32(load128(src), RND, &f)); env_raise(env, f); return true;
+    case 2*3+1: store64(dst, __bid128_to_bid64(load128(src), RND, &f)); env_raise(env, f); return true;
     default: return false;
     }
 }
@@ -299,12 +365,16 @@ int cccc_dec_format(char *buf, size_t n, const void *val, int w) {
     return format_from_string(buf, n, canon);
 }
 
+// Compile-time literal encoding only (called from src/codegen.c and
+// src/parse.c's write_gvar_data): always round-to-nearest, flags discarded --
+// there is no `env` parameter to thread, and a translation-time literal has
+// no dynamic rounding mode to honour in the first place.
 bool cccc_dec_encode_literal(const char *digits, int w, void *out) {
     unsigned f = 0;
     switch (w) {
-    case 0: store32(out, __bid32_from_string((char *)digits, RND, &f)); return true;
-    case 1: store64(out, __bid64_from_string((char *)digits, RND, &f)); return true;
-    case 2: store128(out, __bid128_from_string((char *)digits, RND, &f)); return true;
+    case 0: store32(out, __bid32_from_string((char *)digits, BID_ROUNDING_TO_NEAREST, &f)); return true;
+    case 1: store64(out, __bid64_from_string((char *)digits, BID_ROUNDING_TO_NEAREST, &f)); return true;
+    case 2: store128(out, __bid128_from_string((char *)digits, BID_ROUNDING_TO_NEAREST, &f)); return true;
     default: return false;
     }
 }
@@ -313,15 +383,137 @@ bool cccc_dec_encode_literal(const char *digits, int w, void *out) {
 // %Hf/%Df/%DDf). Same entry points __bidNN_from_string uses for compile-time
 // literal encoding (cccc_dec_encode_literal above) -- BID does the rounding,
 // so this is exact per IEEE 754-2008 rather than round-tripping through a
-// binary double the way a naive strtod-based implementation would.
-bool cccc_dec_from_string(int w, void *dst, const char *s) {
+// binary double the way a naive strtod-based implementation would. #832:
+// gains the `env` parameter like every other runtime-reachable entry point
+// (scanf always passes CCCC_DEC_ENV_DYNAMIC).
+bool cccc_dec_from_string(int w, void *dst, const char *s, int env) {
     unsigned f = 0;
     switch (w) {
-    case 0: store32(dst, __bid32_from_string((char *)s, RND, &f)); return true;
-    case 1: store64(dst, __bid64_from_string((char *)s, RND, &f)); return true;
-    case 2: store128(dst, __bid128_from_string((char *)s, RND, &f)); return true;
+    case 0: store32(dst, __bid32_from_string((char *)s, RND, &f)); env_raise(env, f); return true;
+    case 1: store64(dst, __bid64_from_string((char *)s, RND, &f)); env_raise(env, f); return true;
+    case 2: store128(dst, __bid128_from_string((char *)s, RND, &f)); env_raise(env, f); return true;
     default: return false;
     }
+}
+
+// #832: strtod32/64/128's runtime entry point. BID's __bidNN_from_string
+// gives no endptr, so the longest valid numeric prefix must be scanned by
+// hand first -- mirrors src/stdlib/format_scanf.c's scan_float_value_raw
+// grammar (sign, digits, '.', exponent, inf/infinity/nan(...)), but does NOT
+// inherit that function's fixed 256-byte buffer: a legal >255-digit input
+// would truncate there, and truncating coefficient digits without adjusting
+// the exponent silently changes the parsed value. This scans the prefix
+// length first and allocates exactly enough (falling back to a small stack
+// buffer for the common short-token case).
+static size_t dec_strtod_scan_prefix(const char *s) {
+    size_t i = 0;
+    while (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' ||
+           s[i] == '\v' || s[i] == '\f' || s[i] == '\r')
+        i++;
+    size_t start = i;
+    if (s[i] == '+' || s[i] == '-') i++;
+
+    // inf/infinity
+    if ((s[i] == 'i' || s[i] == 'I')) {
+        size_t save = i;
+        static const char *const words[] = {"infinity", "inf"};
+        for (int w = 0; w < 2; w++) {
+            size_t len = strlen(words[w]);
+            size_t j;
+            for (j = 0; j < len; j++)
+                if (tolower((unsigned char)s[i + j]) != words[w][j]) break;
+            if (j == len) return i + len - start;
+        }
+        i = save;
+    }
+    // nan or nan(...)
+    if ((s[i] == 'n' || s[i] == 'N') &&
+        tolower((unsigned char)s[i + 1]) == 'a' &&
+        tolower((unsigned char)s[i + 2]) == 'n') {
+        i += 3;
+        if (s[i] == '(') {
+            size_t j = i + 1;
+            while (s[j] && s[j] != ')' &&
+                   (isalnum((unsigned char)s[j]) || s[j] == '_'))
+                j++;
+            if (s[j] == ')') i = j + 1;
+        }
+        return i - start;
+    }
+
+    size_t digits_start = i;
+    while (isdigit((unsigned char)s[i])) i++;
+    bool has_int_digits = i > digits_start;
+    bool has_frac_digits = false;
+    if (s[i] == '.') {
+        i++;
+        size_t frac_start = i;
+        while (isdigit((unsigned char)s[i])) i++;
+        has_frac_digits = i > frac_start;
+    }
+    if (!has_int_digits && !has_frac_digits)
+        return 0; // no valid numeric prefix at all
+    if (s[i] == 'e' || s[i] == 'E') {
+        size_t save = i;
+        i++;
+        if (s[i] == '+' || s[i] == '-') i++;
+        size_t exp_start = i;
+        while (isdigit((unsigned char)s[i])) i++;
+        if (i == exp_start) i = save; // no exponent digits: back off
+    }
+    return i - start;
+}
+
+bool cccc_dec_strtod(int w, void *dst, const char *s, char **endptr, int env) {
+    if (!s) {
+        if (endptr) *endptr = NULL;
+        return false;
+    }
+    size_t lead_ws = 0;
+    while (s[lead_ws] == ' ' || s[lead_ws] == '\t' || s[lead_ws] == '\n' ||
+           s[lead_ws] == '\v' || s[lead_ws] == '\f' || s[lead_ws] == '\r')
+        lead_ws++;
+    size_t toklen = dec_strtod_scan_prefix(s);
+    if (toklen == 0) {
+        // No valid conversion: store +0, endptr unchanged from `s` (C's
+        // strtod() contract), no exception raised.
+        unsigned zf = 0;
+        switch (w) {
+        case 0: store32(dst, __bid32_from_string((char *)"0", BID_ROUNDING_TO_NEAREST, &zf)); break;
+        case 1: store64(dst, __bid64_from_string((char *)"0", BID_ROUNDING_TO_NEAREST, &zf)); break;
+        case 2: store128(dst, __bid128_from_string((char *)"0", BID_ROUNDING_TO_NEAREST, &zf)); break;
+        default: if (endptr) *endptr = (char *)s; return false;
+        }
+        if (endptr) *endptr = (char *)s;
+        return true;
+    }
+    size_t copy_len = lead_ws + toklen;
+    char stackbuf[128];
+    char *buf = stackbuf;
+    bool heap = false;
+    if (copy_len + 1 > sizeof stackbuf) {
+        buf = malloc(copy_len + 1);
+        if (!buf) { if (endptr) *endptr = (char *)s; return false; }
+        heap = true;
+    }
+    memcpy(buf, s, copy_len);
+    buf[copy_len] = '\0';
+
+    unsigned f = 0;
+    bool ok = true;
+    switch (w) {
+    case 0: store32(dst, __bid32_from_string(buf, RND, &f)); break;
+    case 1: store64(dst, __bid64_from_string(buf, RND, &f)); break;
+    case 2: store128(dst, __bid128_from_string(buf, RND, &f)); break;
+    default: ok = false; break;
+    }
+    if (heap) free(buf);
+    if (!ok) { if (endptr) *endptr = (char *)s; return false; }
+    env_raise(env, f);
+    if (f & (DEC_FE_OVERFLOW | DEC_FE_UNDERFLOW))
+        errno = ERANGE; // matches strtod()/strtof()/strtold()'s C contract
+    if (endptr) *endptr = (char *)s + copy_len;
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -606,8 +798,8 @@ int cccc_dec_format_ex(char *buf, size_t n, const void *val, int w, int conv,
 
 static bool dec_unsupported(void) { return false; }
 
-bool cccc_dec_binop(int op, int w, void *dst, const void *a, const void *b) {
-    (void)op; (void)w; (void)dst; (void)a; (void)b;
+bool cccc_dec_binop(int op, int w, void *dst, const void *a, const void *b, int env) {
+    (void)op; (void)w; (void)dst; (void)a; (void)b; (void)env;
     return dec_unsupported();
 }
 bool cccc_dec_neg(int w, void *dst, const void *a) {
@@ -618,26 +810,26 @@ int cccc_dec_cmp(int w, const void *a, const void *b) {
     (void)w; (void)a; (void)b;
     return 3; // UNORDERED
 }
-bool cccc_dec_from_int(int w, void *dst, long long v, bool is_unsigned) {
-    (void)w; (void)dst; (void)v; (void)is_unsigned;
+bool cccc_dec_from_int(int w, void *dst, long long v, bool is_unsigned, int env) {
+    (void)w; (void)dst; (void)v; (void)is_unsigned; (void)env;
     return dec_unsupported();
 }
-bool cccc_dec_to_int(int w, const void *src, long long *out, bool is_unsigned) {
-    (void)w; (void)src; (void)is_unsigned;
+bool cccc_dec_to_int(int w, const void *src, long long *out, bool is_unsigned, int env) {
+    (void)w; (void)src; (void)is_unsigned; (void)env;
     if (out) *out = 0;
     return dec_unsupported();
 }
-bool cccc_dec_from_bin(int w, void *dst, uint64_t bits, bool src_is_f32) {
-    (void)w; (void)dst; (void)bits; (void)src_is_f32;
+bool cccc_dec_from_bin(int w, void *dst, uint64_t bits, bool src_is_f32, int env) {
+    (void)w; (void)dst; (void)bits; (void)src_is_f32; (void)env;
     return dec_unsupported();
 }
-bool cccc_dec_to_bin(int w, const void *src, bool dst_is_f32, uint64_t *out_bits) {
-    (void)w; (void)src; (void)dst_is_f32;
+bool cccc_dec_to_bin(int w, const void *src, bool dst_is_f32, uint64_t *out_bits, int env) {
+    (void)w; (void)src; (void)dst_is_f32; (void)env;
     if (out_bits) *out_bits = 0;
     return dec_unsupported();
 }
-bool cccc_dec_convert(int dst_w, int src_w, void *dst, const void *src) {
-    (void)dst_w; (void)src_w; (void)dst; (void)src;
+bool cccc_dec_convert(int dst_w, int src_w, void *dst, const void *src, int env) {
+    (void)dst_w; (void)src_w; (void)dst; (void)src; (void)env;
     return dec_unsupported();
 }
 int cccc_dec_format(char *buf, size_t n, const void *val, int w) {
@@ -649,8 +841,13 @@ bool cccc_dec_encode_literal(const char *digits, int w, void *out) {
     (void)digits; (void)w; (void)out;
     return dec_unsupported();
 }
-bool cccc_dec_from_string(int w, void *dst, const char *s) {
-    (void)w; (void)dst; (void)s;
+bool cccc_dec_from_string(int w, void *dst, const char *s, int env) {
+    (void)w; (void)dst; (void)s; (void)env;
+    return dec_unsupported();
+}
+bool cccc_dec_strtod(int w, void *dst, const char *s, char **endptr, int env) {
+    (void)w; (void)dst; (void)s; (void)env;
+    if (endptr) *endptr = (char *)s;
     return dec_unsupported();
 }
 int cccc_dec_format_ex(char *buf, size_t n, const void *val, int w, int conv,
