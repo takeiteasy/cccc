@@ -134,7 +134,10 @@ Memory Safety Options (can be combined with safety levels):
 	                             inversion, double-lock, and atomic cast warnings
 	-V/--vm-heap                 VM heap is on by default; pass -V to route malloc/free
 	                             through the host allocator instead. Not compatible with
-	                             -1/-2/-3 (or --safety=basic/standard/max), which require it
+	                             -1/-2/-3 (or --safety=basic/standard/max), or with
+	                             --bounds-checks/--uaf-detection/--type-checks/
+	                             --heap-canaries/--memory-leak-detection/--memory-tagging,
+	                             which require it
 
 FFI Safety Options:
 	   --ffi-allow=list       Allow only comma-separated native function names
@@ -284,11 +287,13 @@ library, which is fetched and built on demand (never vendored):
 `tools/fetch_intel_bid.sh && CCCC_HAS_DECIMAL=1 ./cccc --build build.c` (see
 [VM.md](docs/VM.md#decimal-floating-point)).
 
+`CCCC_HAS_BACKTRACE=0 ./cccc --build build.c` opts every target out of
+vendored backtrace support in one build.
+
 `make -f tools/Makefile.backup <target>` is the pre-cut, full-featured
-Makefile (`test`/`clean`/sanitizers/`afl`/`bench`/`profile-*`/cross-compile/
-Colima targets, plus `CCCC_HAS_BACKTRACE=0` to opt out of backtrace support,
-which `build.c` does not yet offer), kept as an escape hatch for when there
-is no working `cccc` yet. Not maintained going forward.
+Makefile (`test`/`clean`/sanitizers/`afl`/`bench`/`profile-*`), kept as an
+escape hatch for when there is no working `cccc` yet. Not maintained going
+forward.
 
 ### Compile Natively (production)
 
@@ -354,52 +359,63 @@ yet.
 
 ### macOS x86_64 with Rosetta 2
 
-On Apple Silicon, the x86_64 workflow uses Apple Clang, the macOS SDK's
-universal libffi, and Rosetta 2. `./cccc --build build.c
---build-target=macos_x86_64` does the cross-build only; the full staged
-build+smoke+test workflow lives in `tools/Makefile.backup`:
+On Apple Silicon, the x86_64 workflow uses clang's `--target=x86_64-apple-macos`,
+the macOS SDK's universal libffi, and Rosetta 2. The full staged
+build+smoke+test workflow is available directly via `--build-target`:
 
 ```bash
-make -f tools/Makefile.backup macos-x86_64-build
-make -f tools/Makefile.backup macos-x86_64-smoke
-make -f tools/Makefile.backup macos-x86_64-test
+./cccc --build build.c --build-target=macos_x86_64          # build only
+./cccc --build build.c --build-target=macos_x86_64_smoke    # + Rosetta smoke test
+./cccc --build build.c --build-target=macos_x86_64_test     # + full suite
 ```
 
-The smoke target asserts `uname -m` and `file` output, runs a VM program and
-`--asm-passthru`, and confirms that `-c=native` produces an executable x86_64
-child process. The test target runs the source suite, `.c4` round-trip, and
-macOS host-signal debugger integration using `cccc-macos-x86_64`.
+`macos_x86_64_smoke` asserts `uname -m` and `file` output, runs a VM program
+and `--asm-passthru`, confirms that `-c=native` produces an executable x86_64
+child process, and also runs `build_cache_arch_smoke` (the #730 regression
+guard: reusing the same `--build-cache` across a native and cross build must
+not serve wrong-arch objects). `macos_x86_64_test` runs the source suite,
+`.c4` round-trip, and macOS host-signal debugger integration against
+`cccc-macos-x86_64`.
 
 ### Linux with Colima
 
-Two Linux targets are supported, each using a named Colima profile.
-`./cccc --build build.c --build-target=linux_amd64_test` /
-`linux_aarch64_test` run a single-shot `run_tests.py` pass against each
-(no separate build/smoke stages, no source-pattern sharding); the full
-staged workflow lives in `tools/Makefile.backup`.
+Two Linux platforms are supported, each using a named Colima profile and the
+same staged build+smoke+test workflow via `--build-target`:
+
+```bash
+./cccc --build build.c --build-target=linux_amd64_build     # nerdctl build
+./cccc --build build.c --build-target=linux_amd64_smoke     # + uname/file/exit-42 check
+./cccc --build build.c --build-target=linux_amd64_test       # + full suite (5-way sharded)
+
+./cccc --build build.c --build-target=linux_aarch64_build
+./cccc --build build.c --build-target=linux_aarch64_smoke
+./cccc --build build.c --build-target=linux_aarch64_test
+```
+
+`linux_amd64_msan_test` builds `cccc-msan` and runs the full suite against it
+in the amd64 container — MSan is Linux-only. Expect a nontrivial failure
+count from a known, documented uninstrumented-libc/libffi blind spot (#844),
+not a regression signal on its own.
 
 **Linux/amd64 (VZ/Rosetta)** — create the profile once:
 
 ```bash
 colima start cccc-linux-amd64 --runtime containerd --arch aarch64 \
   --vm-type vz --vz-rosetta --cpu 4 --memory 4
-make -f tools/Makefile.backup linux-x86_64-build
-make -f tools/Makefile.backup linux-x86_64-smoke
-make -f tools/Makefile.backup linux-x86_64-test
 ```
 
-The amd64 image is tagged `cccc-linux-amd64`. Override `COLIMA_PROFILE` or
-`LINUX_AMD64_IMAGE` when using different names.
+The amd64 image is tagged `cccc-linux-amd64`.
 
 **Linux/aarch64 (native arm64)** — create the profile once:
 
 ```bash
 colima start cccc-linux-arm64 --runtime containerd --arch aarch64 \
   --vm-type vz --cpu 4 --memory 4
-make -f tools/Makefile.backup linux-aarch64-build
-make -f tools/Makefile.backup linux-aarch64-smoke
-make -f tools/Makefile.backup linux-aarch64-test
 ```
+
+See [TESTING.md](docs/TESTING.md#architecture-build-and-test-workflows) for
+the full walkthrough, including why the amd64 test target shards the suite
+5 ways and the exact Colima/Rosetta gotchas.
 
 The arm64 test target runs `tools/run_tests.py` in one unbatched pass (no
 Rosetta binfmt limit on native arm64). Override `LINUX_ARM64_PROFILE` or

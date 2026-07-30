@@ -1179,14 +1179,27 @@ targets: `cccc_asan`/`cccc_ubsan`/`cccc_tsan`/`cccc_msan`/`sanitizers`,
 `fuzz_harness`, `libcccc`, `clean`, `host_tests`, `test`/`test_suites`/
 `test_legacy`, `sqlite_smoke`, `audit_ffi`, `audit_reflection_enums`,
 `reflection_ffi_gen`/`reflection_ffi_check`, `bench`/`bench_compare`/`bench_compare_quick`/
-`bench_compare_json`, `profile_cpu`/`profile_mem`, `dsym`, `afl`/
-`afl_asan`, `macos_x86_64` (cross-build only — the Makefile's Rosetta
-smoke/test orchestration around `arch -x86_64` stays in
-`tools/Makefile.backup`), `linux_amd64_test`/`linux_aarch64_test`
-(single-shot — no source-pattern sharding; the vendored shell has no loop
-construct to replicate that with), and `stdlib_gen` (the two-pass regen
-alone, no final rebuild). `./cccc --build build.c --build-list-targets`
-lists them all.
+`bench_compare_json`, `profile_cpu`/`profile_mem`, `dsym`, `afl`/`afl_asan`,
+and `stdlib_gen` (the two-pass regen alone, no final rebuild).
+
+The full staged cross-platform workflow is also covered (#850):
+`macos_x86_64`/`macos_x86_64_smoke`/`macos_x86_64_test` (macOS x86_64
+cross-build under Rosetta 2), `build_cache_arch_smoke` (the #730
+cross-arch `--build-cache` regression guard), `linux_amd64_build`/
+`linux_amd64_smoke`/`linux_amd64_test` (5-way sharded) and
+`linux_aarch64_build`/`linux_aarch64_smoke`/`linux_aarch64_test`, and
+`linux_amd64_msan_test`. The smoke and sharded-test recipes need `$(...)`
+command substitution, `$?` exit-code capture, and (for the amd64 shard loop)
+a fail-flag accumulator across a `for` loop — none of which the vendored
+build shell (`src/build_shell.c`) supports — so those are delegated to real
+shell scripts (`tools/macos_x86_64_smoke.sh`, `tools/macos_x86_64_test.sh`,
+`tools/linux_container_smoke.sh`, `tools/linux_amd64_test.sh`,
+`tools/linux_amd64_msan_test.sh`) rather than inlined into `RunCustom`
+command strings. See [docs/TESTING.md](TESTING.md#architecture-build-and-test-workflows)
+for the full walkthrough of each, including the required Colima/Rosetta
+setup.
+
+`./cccc --build build.c --build-list-targets` lists them all.
 
 ## Tool allowlist (`--build-tool-allow`)
 

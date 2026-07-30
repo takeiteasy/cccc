@@ -241,67 +241,80 @@ under 1 second.
 
 > As of #842, the repo-root `Makefile` is a bare-minimum bootstrap (just
 > enough to run `./cccc --build build.c` — see
-> [BUILDING.md](BUILDING.md#bootstrapping-makefile--buildc-842)). The
-> staged `<platform>-build`/`<platform>-smoke`/`<platform>-test` Make
-> targets below no longer exist in the root Makefile; run them via
-> `make -f tools/Makefile.backup <target>` instead (the pre-cut,
-> full-featured Makefile, kept as an escape hatch — not maintained going
-> forward). build.c has simplified, single-shot equivalents for the final
-> `-test` stage of each (`macos_x86_64`, `linux_amd64_test`,
-> `linux_aarch64_test` via `--build-target=NAME`) but not the separate
-> `-build`/`-smoke` stages or `linux-x86_64-msan-test`.
+> [BUILDING.md](BUILDING.md#bootstrapping-makefile--buildc-842)).
+> `tools/Makefile.backup` (the pre-cut, full-featured Makefile, kept as an
+> escape hatch — not maintained going forward) is still there if `build.c`
+> itself doesn't work yet (e.g. bisecting a bootstrap regression), but as of
+> #850 every staged `<platform>-build`/`-smoke`/`-test` workflow below,
+> `build-cache-arch-smoke`, and `linux-x86_64-msan-test` all have
+> `--build-target=NAME` equivalents in `build.c` — see each subsection.
 
 ### macOS x86_64 under Rosetta 2
 
-The macOS cross-build uses `/usr/bin/clang -arch x86_64` and libffi from the
-active macOS SDK. It does not use an arm64-only Homebrew library. Run each stage
-with one Make target:
+The macOS cross-build uses clang's `--target=x86_64-apple-macos` and libffi
+from the active macOS SDK. It does not use an arm64-only Homebrew library.
+Run each stage with `--build-target=NAME`:
 
 ```bash
-make macos-x86_64-build
-make macos-x86_64-smoke
-make macos-x86_64-test
+./cccc --build build.c --build-target=macos_x86_64          # build only
+./cccc --build build.c --build-target=macos_x86_64_smoke    # + Rosetta smoke test
+./cccc --build build.c --build-target=macos_x86_64_test     # + full suite
 ```
 
-`macos-x86_64-build` produces `cccc-macos-x86_64` and checks its Mach-O
-architecture. `macos-x86_64-smoke` additionally:
+`macos_x86_64` produces `build/cccc-macos-x86_64` and links it (no smoke/test
+performed). `macos_x86_64_smoke` additionally:
 
+- runs `build_cache_arch_smoke` (see below) first — the #730 regression
+  guard, reusing the same `--build-cache` across a native and cross build;
 - asserts that Rosetta reports `uname -m` as `x86_64`;
-- runs `test_fortytwo.c` and the `--asm-passthru` regression;
+- runs `tests/test_fortytwo.c` and the `--asm-passthru` regression;
 - runs `-c=native` with Apple Clang, checks the child executable with `file`,
   and executes it under Rosetta.
 
-`macos-x86_64-test` runs the complete source and `.c4` suites plus the macOS
-host-signal debugger integration. Override `MACOS_X86_64_CC`,
-`MACOS_X86_64_BINARY`, or `TEST_JOBS` when required.
+(That last bullet needs `CCCC_NATIVE_CC=/usr/bin/clang` set for the cross
+binary's own `-c=native` step, which `tools/macos_x86_64_smoke.sh` — the
+script the build target shells out to, since the Rosetta dance needs
+`$(...)` substitution and `$?` capture the vendored build shell doesn't
+support — sets internally.)
+
+`macos_x86_64_test` runs the complete source and `.c4` suites (via
+`tools/tests.py --binary`) plus the macOS host-signal debugger integration
+(`tools/test_host_signal_debugger.py`), all under Rosetta.
 
 ### Linux/amd64 with VZ/Rosetta
 
-The root Dockerfile builds Ubuntu 24.04 with Clang 18, libffi, and `file` for
-both arm64 and amd64. On Apple Silicon, VZ/Rosetta is the supported amd64 path.
-Create the profile once:
+The root Dockerfile builds Ubuntu 24.04 with Clang, libffi, and `file` for
+both arm64 and amd64, running `make bootstrap && ./cccc --build build.c`
+inside the image (mirroring `.builds/linux-amd64.yml`). On Apple Silicon,
+VZ/Rosetta is the supported amd64 path. Create the profile once:
 
 ```bash
 colima start cccc-linux-amd64 --runtime containerd --arch aarch64 \
   --vm-type vz --vz-rosetta --cpu 4 --memory 4
 ```
 
-The Make targets require that profile to be running and do not alter its
-lifecycle:
+Then run the staged workflow (each target requires that profile running; none
+of them alter its lifecycle):
 
 ```bash
-make linux-x86_64-build
-make linux-x86_64-smoke
-make linux-x86_64-test
+./cccc --build build.c --build-target=linux_amd64_build    # nerdctl build --platform linux/amd64
+./cccc --build build.c --build-target=linux_amd64_smoke    # + uname/file/exit-42 check
+./cccc --build build.c --build-target=linux_amd64_test     # + full sharded suite
 ```
 
 The image is built and run with `--platform linux/amd64` and tagged
-`cccc-linux-amd64`. The smoke and test targets require `uname -m` to report
-`x86_64` and `file ./cccc` to identify an x86-64 ELF executable. Override the
-defaults with `COLIMA_PROFILE=name`, `LINUX_AMD64_IMAGE=tag`, or `TEST_JOBS=N`.
-
-The Linux/amd64 test target partitions tests into alphabetical filename batches
-to avoid child-reaping stalls under Rosetta binfmt (#500, resolved WONT_FIX).
+`cccc-linux-amd64`. `linux_amd64_smoke` requires `uname -m` to report
+`x86_64` and `file ./cccc` to identify an x86-64 ELF executable (delegated to
+`tools/linux_container_smoke.sh`, shared with the aarch64 side below).
+`linux_amd64_test` depends on `linux_amd64_smoke` and then shards the suite
+5 ways by test-filename pattern, each shard under a 300s `timeout`, plain and
+`--c4` (delegated to `tools/linux_amd64_test.sh`, since the vendored build
+shell has no loop construct or fail-flag accumulator to express "run every
+shard, then fail if any failed" — the same partitioning that avoids
+child-reaping stalls under Rosetta binfmt, #500, resolved WONT_FIX). All
+three targets accept optional positional args (profile, image, jobs) if you
+need to override the `cccc-linux-amd64` / `8` defaults — see each script's
+header comment in `tools/`.
 
 **Gotcha:** the `cccc-linux-amd64` Colima *VM* is itself started with
 `--arch aarch64` (Apple Silicon cannot run an x86_64 VM natively) — x86_64
@@ -309,27 +322,28 @@ only appears one layer down, inside a `--platform linux/amd64`
 container/image run *inside* that VM via VZ-Rosetta binfmt. `colima ssh -p
 cccc-linux-amd64` drops into the VM host, not that container, so `uname -m`
 there legitimately reports `aarch64` — that is not a misconfiguration. Only
-`uname -m` run *inside* the `--platform linux/amd64` image (as the
-`linux-x86_64-*` Make targets do, or `nerdctl run --platform linux/amd64
-cccc-linux-amd64 uname -m`) is expected to report `x86_64`. Ad-hoc
-verification probes (e.g. offsetof/sizeof checks against a real header) that
-just `colima ssh` into this profile are silently checking aarch64 twice, not
-x86_64 (#796) — run them inside the amd64-platform container instead.
+`uname -m` run *inside* the `--platform linux/amd64` image (as
+`linux_amd64_smoke`/`linux_amd64_test` do, or `colima -p cccc-linux-amd64
+nerdctl -- run --platform linux/amd64 cccc-linux-amd64 uname -m`) is expected
+to report `x86_64`. Ad-hoc verification probes (e.g. offsetof/sizeof checks
+against a real header) that just `colima ssh` into this profile are silently
+checking aarch64 twice, not x86_64 (#796) — run them inside the
+amd64-platform container instead.
 
 #### MemorySanitizer (MSan)
 
-MSan is Linux-only (clang, not available on macOS). The target builds `cccc-msan`
-(`-fsanitize=memory`) inside the existing base container and then runs the full
-suite in one pass:
+MSan is Linux-only (clang, not available on macOS). This target builds
+`cccc-msan` (`-fsanitize=memory`, via `--build-target=cccc_msan`) inside the
+existing container and then runs the full suite against it in one pass:
 
 ```bash
-make linux-x86_64-msan-test
+./cccc --build build.c --build-target=linux_amd64_msan_test
 ```
 
 MSan catches uninitialized reads that ASan cannot — use it to investigate latent
 UB in code paths that only manifest under specific heap/ASLR layouts.
 
-**Known limitation:** `linux-x86_64-msan-test` reports widespread
+**Known limitation:** `linux_amd64_msan_test` reports widespread
 use-of-uninitialized-value false positives (hundreds of tests, spanning
 unrelated areas — pthread, macros, math, sockets, minilua) inside the VM
 interpreter dispatch loop itself (e.g. `op_JZ3_fn`, `ld_i32`/`op_LDR_W_fn` in
@@ -342,8 +356,9 @@ legitimate writes made inside those uninstrumented calls read back as
 building against an MSan-instrumented libc/libffi sysroot (see
 [MemorySanitizerLibcxxHowTo](https://github.com/google/sanitizers/wiki/MemorySanitizerLibcxxHowTo)
 for the general approach), which does not exist yet — until then,
-`linux-x86_64-msan-test` is excluded from release-gating and its failures
-should be treated as expected noise, not investigated as regressions.
+`linux_amd64_msan_test` is excluded from release-gating and its (~262/700,
+#844) failures should be treated as expected noise, not investigated as
+regressions.
 
 ### Linux/aarch64 native
 
@@ -355,18 +370,20 @@ colima start cccc-linux-arm64 --runtime containerd --arch aarch64 \
   --vm-type vz --cpu 4 --memory 4
 ```
 
-Then run the three-stage workflow:
+Then run the staged workflow:
 
 ```bash
-make linux-aarch64-build    # nerdctl build --platform linux/arm64
-make linux-aarch64-smoke    # assert uname -m == aarch64; run test_fortytwo.c
-make linux-aarch64-test     # full run_tests.py suite (source + c4 + sqlite)
+./cccc --build build.c --build-target=linux_aarch64_build    # nerdctl build --platform linux/arm64
+./cccc --build build.c --build-target=linux_aarch64_smoke    # assert uname -m == aarch64; run test_fortytwo.c
+./cccc --build build.c --build-target=linux_aarch64_test     # full run_tests.py suite (source + c4 + sqlite)
 ```
 
-The smoke target asserts `uname -m` is `aarch64` and `file ./cccc` identifies
-an aarch64 ELF executable. The test target runs `tools/run_tests.py` in one
-unbatched pass (no Rosetta binfmt limit on native arm64). Override defaults with
-`LINUX_ARM64_PROFILE=name`, `LINUX_ARM64_IMAGE=tag`, or `TEST_JOBS=N`.
+`linux_aarch64_smoke` asserts `uname -m` is `aarch64` and `file ./cccc`
+identifies an aarch64 ELF executable (same `tools/linux_container_smoke.sh`
+script the amd64 side uses, parameterized differently). `linux_aarch64_test`
+runs `tools/run_tests.py` in one unbatched pass under a 600s `timeout` (no
+Rosetta binfmt limit on native arm64, so no sharding needed — this side of
+the Makefile was always single-shot too).
 
 ### Current results
 

@@ -12,20 +12,29 @@
 // src/std.c can therefore never go stale; `make stdlib` is never needed.
 //
 // Selective builds via --build-target=NAME:
-//   cccc_asan     AddressSanitizer + UBSan build  → cccc-asan
-//   cccc_ubsan    UndefinedBehaviourSanitizer      → cccc-ubsan
-//   cccc_tsan     ThreadSanitizer                  → cccc-tsan
-//   cccc_msan     MemorySanitizer (Linux+clang)    → cccc-msan
-//   fuzz_harness  libFuzzer + ASan harness         → fuzz_harness
-//   stdlib_gen    two-pass regenerate src/std.c only (no final rebuild)
-//   bench         hyperfine benchmark
+//   cccc_asan          AddressSanitizer + UBSan build  → cccc-asan
+//   cccc_ubsan         UndefinedBehaviourSanitizer      → cccc-ubsan
+//   cccc_tsan          ThreadSanitizer                  → cccc-tsan
+//   cccc_msan          MemorySanitizer (Linux+clang)    → cccc-msan
+//   sanitizers         all of the above in one graph
+//   fuzz_harness       libFuzzer + ASan harness         → fuzz_harness
+//   afl / afl_asan     AFL++ builds (needs afl-clang-fast/afl-clang)
+//   stdlib_gen         two-pass regenerate src/std.c only (no final rebuild)
+//   bench              hyperfine benchmark
+//   bench_compare{,_quick,_json}, profile_cpu, profile_mem, dsym
+//   clean, host_tests, test / test_suites / test_legacy, sqlite_smoke,
+//   audit_ffi, audit_reflection_enums, reflection_ffi_gen / _check
+//   macos_x86_64             macOS x86_64 cross-build only (Rosetta needed to run it)
+//   macos_x86_64_smoke       + Rosetta smoke test + the build_cache_arch_smoke guard
+//   macos_x86_64_test        + full test suite (source, --c4, host-signal debugger)
+//   build_cache_arch_smoke   #730 regression guard (native vs. cross --build-cache reuse)
+//   linux_amd64_build / linux_aarch64_build    build the Colima container image
+//   linux_amd64_smoke / linux_aarch64_smoke    + container arch/exit-42 sanity check
+//   linux_amd64_test / linux_aarch64_test      + full test suite (amd64 is 5-way sharded)
+//   linux_amd64_msan_test                      + cccc-msan build + full suite (#844 known-noise)
 //
 // Not covered here — use tools/Makefile.backup for:
-//   AFL++ fuzzing     (make afl, make afl-asan)
-//   Profiling builds  (make profile-cpu, make profile-mem)
-//   macOS x86_64 cross-compile (make macos-x86_64-*)
-//   Linux x86_64 via Colima    (make linux-x86_64-*)
-//   make clean, make dsym
+//   Cross-compiling for a 4th Colima profile / other architectures not listed above.
 
 #include <stdio.h>
 #include <string.h>
@@ -102,9 +111,25 @@ static void maybe_add_decimal(Builder *ctx, BuildTarget *t) {
 // ---- Vendored libbacktrace (src/backtrace/) -------------------------------
 // Compiled with distinct flags: no -std=c23 (sources are C99/C11), separate
 // warning suppressions, and platform-specific format reader.
+//
+// CCCC_HAS_BACKTRACE=0 opt-out (#850): returns NULL instead of declaring the
+// "backtrace" target at all. add_cccc_flags() already treats a NULL `bt` as
+// "no libbacktrace" (skips the CCCC_HAS_BACKTRACE define, the include path,
+// and the LinkWith) -- every one of the ~25 call sites that thread `bt`
+// through was already written against that contract from #842 onward, so
+// this opt-out needed no changes anywhere else except macos_x86_64's
+// SetTargetTriple(bt, ...) call, guarded below.
 
-static BuildTarget *make_libbacktrace(Builder *ctx) {
-    BuildTarget *bt = StaticLib(ctx, "backtrace");
+// Named variant (#850): lets a graph that needs two libbacktrace archives at
+// once -- e.g. build_cache_arch_smoke's native + Rosetta cross build, which
+// can't share one "backtrace" StaticLib since each needs a different (or no)
+// SetTargetTriple -- avoid the duplicate-target-name check (#842 Step 1).
+// make_libbacktrace(ctx) below is the common case: same body, fixed name.
+static BuildTarget *make_libbacktrace_named(Builder *ctx, const char *name) {
+    const char *has_bt = GetEnv(ctx, "CCCC_HAS_BACKTRACE");
+    if (has_bt && strcmp(has_bt, "0") == 0)
+        return NULL;
+    BuildTarget *bt = StaticLib(ctx, name);
     AddCFlag(bt, "-O2");
     AddCFlag(bt, "-g");
     AddCFlag(bt, "-std=c11");
@@ -141,6 +166,10 @@ static BuildTarget *make_libbacktrace(Builder *ctx) {
     else
         AddSource(bt, "src/backtrace/elf.c");
     return bt;
+}
+
+static BuildTarget *make_libbacktrace(Builder *ctx) {
+    return make_libbacktrace_named(ctx, "backtrace");
 }
 
 // ---- Common compile + link flags for all cccc-family targets --------------
@@ -604,32 +633,34 @@ BuildTarget *afl_asan(Builder *ctx) {
     return t;
 }
 
-// ---- macOS x86_64 cross-compile (Makefile:391-456) -------------------------
+// ---- macOS x86_64 cross-compile (Makefile:391-483) -------------------------
 // Cross-build only (SetTargetTriple + SDK include paths -- clang's
 // `--target=x86_64-apple-macos` cross-compiles without needing a different
 // compiler binary or SetToolchain's `-arch x86_64`, which does not work
 // there: SetToolchain treats its argument as a single executable path, not
 // a compiler-plus-flags command line, so "/usr/bin/clang -arch x86_64"
-// fails execvp with "No such file or directory"). The Makefile's Rosetta
-// smoke/test targets additionally shell out to `/usr/bin/arch -x86_64` and
-// the system python3, which is orchestration rather than target declaration
-// -- left to tools/Makefile.backup for now. Unlike the Makefile (which
-// hardcodes /usr/local/opt/readline and thereby defeats its own readline
-// auto-probe), no readline override is added here.
+// fails execvp with "No such file or directory"). Unlike the Makefile
+// (which hardcodes /usr/local/opt/readline and thereby defeats its own
+// readline auto-probe), no readline override is added here.
+//
+// #850 ports the staged -build/-smoke/-test workflow the Makefile keeps as
+// separate targets (build.c previously only had the single build-only
+// macos_x86_64 below). The Rosetta smoke/test recipes need $(...) command
+// substitution, $? capture, and (for -test) "run every phase, then fail if
+// any failed" -- none of which the vendored build shell supports (see
+// build_shell.c) -- so they're delegated to real shell scripts
+// (tools/macos_x86_64_smoke.sh / tools/macos_x86_64_test.sh) rather than
+// inlined into RunCustom command strings.
 
-[[cccc::build_target]]
-BuildTarget *macos_x86_64(Builder *ctx) {
-    if (strcmp(BuildHost(ctx), "darwin") != 0) {
-        fprintf(stderr, "build: macos_x86_64 requires macOS\n");
-        return RunCustom(ctx, "macos-x86_64", "false");
-    }
+// Builds the cross-compiled executable only (no SDK/OS-check duplication
+// between the plain macos_x86_64 target and the composing build_cache_arch_smoke
+// below, which needs its own separately-named libbacktrace -- see
+// make_libbacktrace_named's comment). Returns NULL (with no diagnostic; the
+// caller prints one) if the macOS SDK can't be found.
+static BuildTarget *make_macos_x86_64_exe(Builder *ctx, BuildTarget *bt) {
     const char *sdk = CaptureCommand(ctx, "xcrun --sdk macosx --show-sdk-path");
-    if (!sdk || !*sdk) {
-        fprintf(stderr, "build: macOS SDK not found. Install the Xcode Command Line Tools.\n");
-        return RunCustom(ctx, "macos-x86_64", "false");
-    }
-    BuildTarget *bt = make_libbacktrace(ctx);
-    SetTargetTriple(bt, "x86_64-apple-macos");
+    if (!sdk || !*sdk)
+        return NULL;
     BuildTarget *t = Executable(ctx, "cccc-macos-x86_64");
     SetOutput(t, "cccc-macos-x86_64");
     add_cccc_sources(ctx, t);
@@ -642,26 +673,197 @@ BuildTarget *macos_x86_64(Builder *ctx) {
     return t;
 }
 
-// ---- Linux via Colima (Makefile:458-529) -----------------------------------
+[[cccc::build_target]]
+BuildTarget *macos_x86_64(Builder *ctx) {
+    if (strcmp(BuildHost(ctx), "darwin") != 0) {
+        fprintf(stderr, "build: macos_x86_64 requires macOS\n");
+        return RunCustom(ctx, "macos-x86_64", "false");
+    }
+    BuildTarget *bt = make_libbacktrace(ctx);
+    if (bt) // CCCC_HAS_BACKTRACE=0 (#850): no "backtrace" target to cross-triple
+        SetTargetTriple(bt, "x86_64-apple-macos");
+    BuildTarget *t = make_macos_x86_64_exe(ctx, bt);
+    if (!t) {
+        fprintf(stderr, "build: macOS SDK not found. Install the Xcode Command Line Tools.\n");
+        return RunCustom(ctx, "macos-x86_64", "false");
+    }
+    return t;
+}
+
+// #730 regression guard (Makefile:436-450): reusing the same --build-cache
+// across a native build and a different-arch cccc binary must not serve
+// wrong-arch objects to the link step. Reproduces the ticket's exact repro
+// sequence: build native (arm64), then cross (x86_64 via Rosetta) into the
+// SAME --build-cache + --build-out-dir, and assert neither contaminates the
+// other's cached objects. Builds both a native and a cross executable in
+// ONE graph, so it needs two independently-named libbacktrace archives
+// (make_libbacktrace_named) -- one target can't be compiled for both
+// architectures.
+//
+// Factored out (rather than inlined into the build_cache_arch_smoke factory
+// below) so macos_x86_64_smoke can reuse the SAME cross-compiled
+// "cccc-macos-x86_64" binary via *out_cross instead of building a second one
+// under a second, differently-named set of targets -- the graph-uniqueness
+// rule that forces bt_x86's distinct name here would otherwise force a
+// second distinct name for the cross executable too.
+static BuildTarget *make_build_cache_arch_smoke(Builder *ctx, BuildTarget **out_cross) {
+    BuildTarget *bt_native = make_libbacktrace(ctx);
+    BuildTarget *native = make_cccc_exe_named(ctx, bt_native, "cccc");
+
+    BuildTarget *bt_x86 = make_libbacktrace_named(ctx, "backtrace-x86_64");
+    if (bt_x86)
+        SetTargetTriple(bt_x86, "x86_64-apple-macos");
+    BuildTarget *cross = make_macos_x86_64_exe(ctx, bt_x86);
+    if (out_cross)
+        *out_cross = cross;
+    if (!cross) {
+        fprintf(stderr, "build: macOS SDK not found. Install the Xcode Command Line Tools.\n");
+        return RunCustom(ctx, "build-cache-arch-smoke", "false");
+    }
+
+    char cmd[2048];
+    snprintf(cmd, sizeof(cmd),
+        "rm -rf build/build_cache_arch_smoke && "
+        "%s -I./include --build --build-out-dir=build/build_cache_arch_smoke "
+        "--build-cache tests/test_build_cache.c >/dev/null && "
+        "file build/build_cache_arch_smoke/bin/cache_app | grep -q 'arm64\\|aarch64\\|arm64e' && "
+        "/usr/bin/arch -x86_64 %s -I./include --build "
+        "--build-out-dir=build/build_cache_arch_smoke --build-cache tests/test_build_cache.c && "
+        "file build/build_cache_arch_smoke/bin/cache_app | grep -q 'x86_64' && "
+        "/usr/bin/arch -x86_64 build/build_cache_arch_smoke/bin/cache_app && "
+        "rm -rf build/build_cache_arch_smoke && "
+        "echo 'build-cache-arch-smoke: OK'",
+        TargetOutput(native), TargetOutput(cross));
+    BuildTarget *step = RunCustom(ctx, "build-cache-arch-smoke", cmd);
+    DependsOn(step, native);
+    DependsOn(step, cross);
+    return step;
+}
+
+[[cccc::build_target]]
+BuildTarget *build_cache_arch_smoke(Builder *ctx) {
+    if (strcmp(BuildHost(ctx), "darwin") != 0) {
+        fprintf(stderr, "build: build_cache_arch_smoke requires macOS (native arm64 + Rosetta x86_64)\n");
+        return RunCustom(ctx, "build-cache-arch-smoke", "false");
+    }
+    return make_build_cache_arch_smoke(ctx, NULL);
+}
+
+[[cccc::build_target]]
+BuildTarget *macos_x86_64_smoke(Builder *ctx) {
+    if (strcmp(BuildHost(ctx), "darwin") != 0) {
+        fprintf(stderr, "build: macos_x86_64_smoke requires macOS\n");
+        return RunCustom(ctx, "macos-x86_64-smoke", "false");
+    }
+    // Makefile:452 chains macos-x86_64-smoke onto build-cache-arch-smoke;
+    // reuse its cross-compiled binary rather than building a second one.
+    BuildTarget *cross = NULL;
+    BuildTarget *arch_step = make_build_cache_arch_smoke(ctx, &cross);
+    if (!cross)
+        return arch_step; // already printed its own diagnostic
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "sh tools/macos_x86_64_smoke.sh %s", TargetOutput(cross));
+    BuildTarget *step = RunCustom(ctx, "macos-x86_64-smoke", cmd);
+    DependsOn(step, cross);
+    DependsOn(step, arch_step);
+    return step;
+}
+
+[[cccc::build_target]]
+BuildTarget *macos_x86_64_test(Builder *ctx) {
+    if (strcmp(BuildHost(ctx), "darwin") != 0) {
+        fprintf(stderr, "build: macos_x86_64_test requires macOS\n");
+        return RunCustom(ctx, "macos-x86_64-test", "false");
+    }
+    BuildTarget *bt = make_libbacktrace(ctx);
+    if (bt)
+        SetTargetTriple(bt, "x86_64-apple-macos");
+    BuildTarget *t = make_macos_x86_64_exe(ctx, bt);
+    if (!t) {
+        fprintf(stderr, "build: macOS SDK not found. Install the Xcode Command Line Tools.\n");
+        return RunCustom(ctx, "macos-x86_64-test", "false");
+    }
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "sh tools/macos_x86_64_test.sh %s", TargetOutput(t));
+    BuildTarget *step = RunCustom(ctx, "macos-x86_64-test", cmd);
+    DependsOn(step, t);
+    return step;
+}
+
+// ---- Linux via Colima (Makefile:458-556) -----------------------------------
 // Orchestration around `colima -p <profile> nerdctl -- run ...`, run from
 // the host (these do not build anything themselves -- the container image
-// already has its own toolchain, per the Dockerfile). Simplified relative
-// to the Makefile: single-shot (no 5-way source-pattern sharding under a
-// per-shard timeout); use `make linux-x86_64-test` / `make
-// linux-aarch64-test` for the full sharded/timeout-guarded run.
+// already has its own toolchain, built from the repo's own Dockerfile).
+// #850 splits the previous single-shot linux_amd64_test/linux_aarch64_test
+// into the Makefile's staged -build/-smoke/-test workflow, plus the
+// amd64-only 5-way sharded test run and the MSan in-container test target.
+// The smoke/sharded-test recipes need $(...) substitution, $? capture, and
+// (for the sharded test) a `for` loop with a fail-flag accumulator -- none
+// of which the vendored build shell supports -- so they're delegated to
+// real shell scripts (tools/linux_container_smoke.sh, tools/linux_amd64_test.sh,
+// tools/linux_amd64_msan_test.sh) rather than inlined into RunCustom strings.
+
+[[cccc::build_target]]
+BuildTarget *linux_amd64_build(Builder *ctx) {
+    return RunCustom(ctx, "linux-amd64-build",
+        "colima -p cccc-linux-amd64 nerdctl -- build --platform linux/amd64 "
+        "-t cccc-linux-amd64 .");
+}
+
+[[cccc::build_target]]
+BuildTarget *linux_aarch64_build(Builder *ctx) {
+    return RunCustom(ctx, "linux-aarch64-build",
+        "colima -p cccc-linux-arm64 nerdctl -- build --platform linux/arm64 "
+        "-t cccc-linux-arm64 .");
+}
+
+[[cccc::build_target]]
+BuildTarget *linux_amd64_smoke(Builder *ctx) {
+    BuildTarget *step = RunCustom(ctx, "linux-amd64-smoke",
+        "sh tools/linux_container_smoke.sh cccc-linux-amd64 cccc-linux-amd64 "
+        "linux/amd64 x86_64 'x86-64|x86_64'");
+    DependsOn(step, linux_amd64_build(ctx));
+    return step;
+}
+
+[[cccc::build_target]]
+BuildTarget *linux_aarch64_smoke(Builder *ctx) {
+    BuildTarget *step = RunCustom(ctx, "linux-aarch64-smoke",
+        "sh tools/linux_container_smoke.sh cccc-linux-arm64 cccc-linux-arm64 "
+        "linux/arm64 aarch64 'aarch64|arm64'");
+    DependsOn(step, linux_aarch64_build(ctx));
+    return step;
+}
 
 [[cccc::build_target]]
 BuildTarget *linux_amd64_test(Builder *ctx) {
-    return RunCustom(ctx, "linux-amd64-test",
-        "colima -p cccc-linux-amd64 nerdctl -- run --rm --platform linux/amd64 "
-        "cccc-linux-amd64 python3 tools/run_tests.py -j 8");
+    BuildTarget *step = RunCustom(ctx, "linux-amd64-test",
+        "sh tools/linux_amd64_test.sh cccc-linux-amd64 cccc-linux-amd64 8");
+    DependsOn(step, linux_amd64_smoke(ctx));
+    return step;
 }
 
 [[cccc::build_target]]
 BuildTarget *linux_aarch64_test(Builder *ctx) {
-    return RunCustom(ctx, "linux-aarch64-test",
-        "colima -p cccc-linux-arm64 nerdctl -- run --rm "
-        "cccc-linux-arm64 python3 tools/run_tests.py -j 8");
+    // No 5-way sharding on this side (Makefile:552-555 was always
+    // single-shot here too -- only the x86_64/amd64 side shards).
+    BuildTarget *step = RunCustom(ctx, "linux-aarch64-test",
+        "colima -p cccc-linux-arm64 nerdctl -- run --rm --platform linux/arm64 "
+        "cccc-linux-arm64 timeout 600 python3 tools/run_tests.py -j 8");
+    DependsOn(step, linux_aarch64_smoke(ctx));
+    return step;
+}
+
+// MSan build + full in-container test run (Makefile:523-526). Expected to
+// report failures: an uninstrumented libc/libffi MSan blind spot
+// (documented in docs/TESTING.md, #844) accounts for ~262/700 of them --
+// not a regression on its own, compare against that documented baseline.
+[[cccc::build_target]]
+BuildTarget *linux_amd64_msan_test(Builder *ctx) {
+    BuildTarget *step = RunCustom(ctx, "linux-amd64-msan-test",
+        "sh tools/linux_amd64_msan_test.sh cccc-linux-amd64 cccc-linux-amd64 8");
+    DependsOn(step, linux_amd64_build(ctx));
+    return step;
 }
 
 // ---- Two-pass stdlib regeneration (#571/#842) ------------------------------
