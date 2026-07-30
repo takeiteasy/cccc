@@ -292,6 +292,57 @@ All tests pass at parity with the macOS arm64 baseline.
 No architecture-specific tests are silently skipped; `.c4` skips remain limited
 to mode-incompatible tests and include explicit reasons.
 
+## Continuous Integration
+
+CI is split across two hosts because no single CI provider covers all four
+release-target quadrants:
+
+| Quadrant | Host | Manifest |
+|---|---|---|
+| Linux amd64 | sr.ht (`builds.sr.ht`) | [`.builds/linux-amd64.yml`](../.builds/linux-amd64.yml) — **canonical**, gates `trunk` |
+| Linux aarch64 | GitHub Actions | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), `linux-aarch64` job |
+| macOS arm64 | GitHub Actions | same file, `macos-arm64` job |
+| macOS x86_64 | GitHub Actions | same file, `macos-x86_64` job (native Intel runner — not a Rosetta run) |
+
+`builds.sr.ht` cannot run arm64/aarch64 images at all (confirmed against the
+raw compatibility matrix — every arch: arm64/aarch64 cell is empty — and
+empirically, three different images all failed identically with "Image ..
+is not available for arch .arm64."), which is why the three arm64/aarch64
+quadrants live on GitHub Actions instead.
+
+The repo is mirrored to GitHub (`takeiteasy/cccc`) as a **manual second
+git remote** — no deploy key, PAT, or other credential is stored in either
+CI system, so nothing here can push on its own:
+
+```bash
+git remote add github git@github.com:takeiteasy/cccc.git   # one-time
+git push origin trunk     # sr.ht: fires .builds/linux-amd64.yml
+git push github trunk     # GitHub: fires .github/workflows/ci.yml
+```
+
+Only `trunk` triggers either CI system; `devel` is local-only (see
+[Branching](../CLAUDE.md) — never pushed to `origin`, and the GitHub
+workflow is scoped to `trunk`/`pull_request` so a `devel`-only push there
+wouldn't fire it either).
+
+Every CI job — sr.ht or Actions, any platform — repeats the same
+stage0-bootstrap dance before building, because a fresh clone has no
+`src/std.c` (gitignored) and the stage0 binary lacks `building.h`:
+
+```bash
+make cccc                       # stage0: bootstrap against src/std_seed.c
+sh tools/regen_stdlib.sh ./cccc # regenerate the real src/std.c
+make cccc                       # rebuild against the regenerated std.c
+./cccc --build build.c          # real build (own two-pass regen is now a no-op)
+python3 tools/run_tests.py --binary build/cccc -j 4
+```
+
+Skipping the regen step produces a confusing build failure complaining
+about a missing `building.h`, not an obviously-related error. The GitHub
+Actions jobs use `-j 4` rather than sr.ht's `-j 8` — hosted runners have
+fewer cores than the sr.ht builder, and parallel-load timing sensitivity is
+exactly what surfaced #853.
+
 ## Attribute syntax variants
 
 Three equivalent syntaxes are supported for all test attributes:

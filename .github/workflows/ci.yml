@@ -1,0 +1,78 @@
+name: CI
+
+# Mirror CI (#849): builds.sr.ht (.builds/linux-amd64.yml) cannot run
+# arm64/aarch64 on any image -- confirmed against the raw compatibility
+# matrix (every arch: arm64/aarch64 cell is empty) and empirically (three
+# different images all failed identically with "Image .. is not available
+# for arch .arm64."). sr.ht stays the canonical Linux amd64 CI; this
+# workflow closes the three remaining release-target quadrants using
+# GitHub-hosted runners: Linux aarch64, macOS arm64, macOS x86_64.
+#
+# The mirror to this repo is a manual `git push github trunk` (see
+# docs/TESTING.md's Continuous Integration section) -- no deploy key or PAT
+# is stored anywhere, so this workflow only ever runs against whatever was
+# last pushed here.
+#
+# Only trunk (release/CI-gated branch) triggers -- devel is a local-only
+# working branch and is never pushed to either remote.
+on:
+  push:
+    branches: [trunk]
+  pull_request:
+    branches: [trunk]
+
+jobs:
+  linux-aarch64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang make pkg-config libffi-dev python3
+      - name: Bootstrap (stage0 -> regen std.c -> rebuild)
+        run: |
+          set -e
+          make cccc
+          sh tools/regen_stdlib.sh ./cccc
+          make cccc
+      - name: Build
+        run: ./cccc --build build.c
+      - name: Test
+        run: python3 tools/run_tests.py --binary build/cccc -j 4
+
+  macos-arm64:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install libffi pkg-config
+      - name: Bootstrap (stage0 -> regen std.c -> rebuild)
+        run: |
+          set -e
+          make cccc
+          sh tools/regen_stdlib.sh ./cccc
+          make cccc
+      - name: Build
+        run: ./cccc --build build.c
+      - name: Test
+        run: python3 tools/run_tests.py --binary build/cccc -j 4
+
+  macos-x86_64:
+    # Native Intel build+test -- NOT build.c's macos_x86_64 target, which is
+    # a cross-compile-only target meant to run from an arm64 host (see its
+    # comment in build.c); on a real Intel runner the plain bootstrap+build
+    # path below already produces and runs a native x86_64 binary.
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install libffi pkg-config
+      - name: Bootstrap (stage0 -> regen std.c -> rebuild)
+        run: |
+          set -e
+          make cccc
+          sh tools/regen_stdlib.sh ./cccc
+          make cccc
+      - name: Build
+        run: ./cccc --build build.c
+      - name: Test
+        run: python3 tools/run_tests.py --binary build/cccc -j 4
