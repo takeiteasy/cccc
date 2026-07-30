@@ -343,6 +343,26 @@ Actions jobs use `-j 4` rather than sr.ht's `-j 8` — hosted runners have
 fewer cores than the sr.ht builder, and parallel-load timing sensitivity is
 exactly what surfaced #853.
 
+`CC=clang` must be set explicitly for the `linux-aarch64` job (and is, in
+`.github/workflows/ci.yml`'s `env:`): Ubuntu's plain `cc` resolves to gcc,
+which rejects `-std=c23`. macOS runners don't need this — Apple Clang is
+already the default `cc`.
+
+### Known intermittent failures under heavy parallel load
+
+A handful of `tests/suites/test_suite_posix.c` subtests (timing-sensitive
+fork/signal/stat tests, including `test_posix_sigaction_siginfo`) can fail
+under *severe* CPU contention — confirmed by directly reproducing it: running
+8 copies of the compiled test binary concurrently on a resource-constrained
+container reproduces the failure in roughly half of repeated trials, and
+different subtests fail from run to run (not always the same one). This is
+scheduler starvation, not a VM signal-dispatch defect — investigated per
+#853 and ruled out as a `_cccc_pending`/dispatch-loop drop path; a plain
+sequential run never fails. `-j 4` on GitHub's smaller hosted runners
+reduces how often this is hit but does not eliminate it. An occasional
+`test_suite_posix.c` failure on a CI re-run, with a clean resubmit, is
+expected and not a regression.
+
 ## Attribute syntax variants
 
 Three equivalent syntaxes are supported for all test attributes:

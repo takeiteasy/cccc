@@ -24,6 +24,11 @@ on:
 jobs:
   linux-aarch64:
     runs-on: ubuntu-24.04-arm
+    env:
+      # CC must be explicit -- Ubuntu's plain `cc` resolves to gcc, which
+      # rejects `-std=c23` ("did you mean -std=c2x?") and fails the stage0
+      # bootstrap. .builds/linux-amd64.yml sets this the same way.
+      CC: clang
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
