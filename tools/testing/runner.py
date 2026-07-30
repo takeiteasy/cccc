@@ -324,13 +324,26 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
             else:
                 is_leaking = False
 
+    # "TAP version" only appears once execution of a --testing binary has
+    # actually started, which is only possible after a successful compile.
+    # Past that point, any "expected ... got ..." text is the [[cccc::test]]
+    # framework's own assertion-failure wording (src/testing.c, e.g.
+    # "expected return value %s %d, got %d"), not a compiler diagnostic —
+    # counting it as a compile error misclassified flaky/failing TAP
+    # subtests as COMPILATION ERROR and hid the real diagnostic (only the
+    # first 3 lines of combined output were ever printed, i.e. just the TAP
+    # preamble). Gate the generic "expected"+"got" match on TAP not having
+    # started so genuine pre-execution diagnostics phrased that way (e.g.
+    # "expected unique generated function name, got existing definition
+    # 'foo'") are still caught.
+    started_running = "TAP version" in output
     has_compile_error = (
         "error generated" in output
         or "errors generated" in output
         or "cannot open file" in output
         or "undefined function" in output
         or "unknown warning option" in output
-        or ("expected" in output and "got" in output)
+        or (not started_running and "expected" in output and "got" in output)
     )
 
     crashed = exit_code in (134, 139, 136, 141, -6, -11, -8, -13)
@@ -357,6 +370,12 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
         # A --build script CLI/resolution error (e.g. main() defined, ambiguous
         # entry). The expect_stderr regex below validates the diagnostic.
         status = "negative_pass"
+    elif is_testing_mode:
+        # Compiled and ran, but the [[cccc::test]] framework reported a
+        # failing/erroring subtest (nonzero exit, no compile-error markers
+        # matched above). Distinct status so the runner can surface the
+        # actual TAP failure lines instead of a generic exit-code message.
+        status = "test_failed"
     else:
         status = "failed"
 

@@ -83,8 +83,31 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
             failed_tests.append(f"{test_name} (COMPILATION ERROR)")
             if not quiet:
                 print(f"✗ {test_name} (COMPILATION ERROR){timing_str}")
-                for line in output.splitlines()[:3]:
+                for line in output.splitlines()[:10]:
                     print(f"  {line}")
+        elif status == "test_failed":
+            # Compiled and ran under --testing, but a subtest failed/errored
+            # (nonzero exit). Surface the TAP "not ok" lines plus their
+            # diagnostic follow-up so the actual failure is visible instead
+            # of just the exit code.
+            failed += 1
+            failed_tests.append(f"{test_name} (TEST FAILED, exit {exit_code})")
+            if not quiet:
+                print(f"✗ {test_name} (TEST FAILED, exit {exit_code}){timing_str}")
+                lines = output.splitlines()
+                shown = 0
+                for i, line in enumerate(lines):
+                    if line.startswith("not ok"):
+                        for follow in lines[i:i + 6]:
+                            print(f"  {follow}")
+                            shown += 1
+                        if shown >= 18:
+                            break
+                if shown == 0:
+                    # No TAP "not ok" markers found (e.g. crashed before
+                    # emitting one) — fall back to the tail of the output.
+                    for line in lines[-10:]:
+                        print(f"  {line}")
         elif status == "leak":
             failed += 1
             failed_tests.append(f"{test_name} (MEMORY LEAK)")
