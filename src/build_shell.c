@@ -141,7 +141,11 @@ typedef enum shell_token_type {
     SHELL_TOKEN_AMPERSAND = '&',
     SHELL_TOKEN_GREATER = '>',
     SHELL_TOKEN_LESSER = '<',
-    SHELL_TOKEN_SEMICOLON = ';'
+    SHELL_TOKEN_SEMICOLON = ';',
+    /* Two-character operators; values outside the ASCII range used by the
+     * single-character tokens above so they can never collide. */
+    SHELL_TOKEN_AND = 256,  /* && */
+    SHELL_TOKEN_OR = 257,   /* || */
 } shell_token_type;
 
 typedef struct shell_token {
@@ -168,7 +172,9 @@ typedef enum shell_ast_type {
     SHELL_AST_SEQ,
     SHELL_AST_REDIR_IN,
     SHELL_AST_REDIR_OUT,
-    SHELL_AST_PIPE
+    SHELL_AST_PIPE,
+    SHELL_AST_AND,
+    SHELL_AST_OR
 } shell_ast_type_t;
 
 typedef struct shell_ast {
@@ -368,8 +374,20 @@ static shell_token_t read_token(shell_lexer_t *l) {
                 p += len;
             }
         }
-        case '|':
         case '&':
+            advance(l);
+            if (peek(l) == '&') {
+                advance(l);
+                return new_token(l, SHELL_TOKEN_AND);
+            }
+            return new_token(l, SHELL_TOKEN_AMPERSAND);
+        case '|':
+            advance(l);
+            if (peek(l) == '|') {
+                advance(l);
+                return new_token(l, SHELL_TOKEN_OR);
+            }
+            return new_token(l, SHELL_TOKEN_PIPE);
         case '<':
         case '>':
         case ';':
@@ -417,6 +435,8 @@ static shell_token_array_t shell_parse(shell_lexer_t *l) {
             case SHELL_TOKEN_GREATER:
             case SHELL_TOKEN_LESSER:
             case SHELL_TOKEN_SEMICOLON:
+            case SHELL_TOKEN_AND:
+            case SHELL_TOKEN_OR:
                 if (!shell_token_array_append(&tokens, token))
                     l->error = "out of memory";
                 break;
@@ -528,27 +548,50 @@ static shell_ast_t *full_command(shell_parser *p) {
     shell_ast_t *left = _pipe(p);
     if (left == NULL)
         return NULL;
+    /* `&` and `;` allow a trailing operator (nothing after them is fine —
+     * parser_next(p) returning NULL means the operator was the last token,
+     * so the cursor is correctly left on it and ast->right stays NULL). Must
+     * consume the operator via parser_next() BEFORE checking what follows —
+     * checking first (the previous bug here) always sees the operator token
+     * itself, which is never SHELL_TOKEN_ATOM, so every `&`/`;` command was
+     * unconditionally rejected. */
     if (match_token(p, SHELL_TOKEN_AMPERSAND)) {
-        if (!expect_token(p, SHELL_TOKEN_ATOM) && parser_peek(p) != NULL) {
-            free_ast(left);
-            return NULL;
-        }
         shell_ast_t *ast = new_ast();
         ast->type = SHELL_AST_BACKGROUND;
         ast->left = left;
-        parser_next(p);
-        ast->right = full_command(p);
+        ast->right = parser_next(p) != NULL ? full_command(p) : NULL;
         return ast;
     }
     if (match_token(p, SHELL_TOKEN_SEMICOLON)) {
-        if (!expect_token(p, SHELL_TOKEN_ATOM) && parser_peek(p) != NULL) {
+        shell_ast_t *ast = new_ast();
+        ast->type = SHELL_AST_SEQ;
+        ast->left = left;
+        ast->right = parser_next(p) != NULL ? full_command(p) : NULL;
+        return ast;
+    }
+    /* `&&` and `||` require a right-hand command — a trailing `&&`/`||` is
+     * malformed, unlike `&`/`;`. */
+    if (match_token(p, SHELL_TOKEN_AND)) {
+        parser_next(p);
+        if (!expect_token(p, SHELL_TOKEN_ATOM)) {
             free_ast(left);
             return NULL;
         }
         shell_ast_t *ast = new_ast();
-        ast->type = SHELL_AST_SEQ;
+        ast->type = SHELL_AST_AND;
         ast->left = left;
+        ast->right = full_command(p);
+        return ast;
+    }
+    if (match_token(p, SHELL_TOKEN_OR)) {
         parser_next(p);
+        if (!expect_token(p, SHELL_TOKEN_ATOM)) {
+            free_ast(left);
+            return NULL;
+        }
+        shell_ast_t *ast = new_ast();
+        ast->type = SHELL_AST_OR;
+        ast->left = left;
         ast->right = full_command(p);
         return ast;
     }
@@ -794,6 +837,22 @@ static int eval_sequence(shell_ctx *ctx, shell_ast_t *ast) {
     return rc;
 }
 
+/* `&&`: short-circuits — right runs only if left succeeded (exit 0). */
+static int eval_and(shell_ctx *ctx, shell_ast_t *ast) {
+    int rc = ast_exec(ctx, ast->left);
+    if (rc != 0)
+        return rc;
+    return ast_exec(ctx, ast->right);
+}
+
+/* `||`: short-circuits — right runs only if left failed (exit != 0). */
+static int eval_or(shell_ctx *ctx, shell_ast_t *ast) {
+    int rc = ast_exec(ctx, ast->left);
+    if (rc == 0)
+        return rc;
+    return ast_exec(ctx, ast->right);
+}
+
 /* CCCC patch: returns exit code of the redirected command. */
 static int eval_redirection(shell_ctx *ctx, shell_ast_t *ast) {
     int fd;
@@ -884,6 +943,10 @@ static int ast_exec(shell_ctx *ctx, shell_ast_t *ast) {
         case SHELL_AST_SEQ:
         case SHELL_AST_BACKGROUND:
             return eval_sequence(ctx, ast);
+        case SHELL_AST_AND:
+            return eval_and(ctx, ast);
+        case SHELL_AST_OR:
+            return eval_or(ctx, ast);
         case SHELL_AST_CMD:
             return eval_commandtail(ctx, ast);
         default:
