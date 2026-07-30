@@ -690,7 +690,8 @@ int test_posix_sys_wait(void) {
     if (pid < 0) return 1;
     if (pid == 0) { _exit(42); }
     int status;
-    pid_t r = waitpid(pid, &status, 0);
+    pid_t r;
+    do { r = waitpid(pid, &status, 0); } while (r < 0 && errno == EINTR);
     if (r != pid) return 2;
     if (!WIFEXITED(status)) return 3;
     if (WEXITSTATUS(status) != 42) return 4;
@@ -1657,26 +1658,56 @@ int test_posix_sigaction_siginfo(void) {
     sc.sa_flags = SA_SIGINFO;
     if (sigaction(SIGCHLD, &sc, 0) != 0) return 6;
 
-    pid_t pid = fork();
-    if (pid < 0) return 7;
+    /* #853: every path below this point must fall through to the SIGCHLD
+       disposition restore (dfl2) before returning -- an early `return`
+       here used to leave a live SA_SIGINFO/no-SA_RESTART SIGCHLD handler
+       installed for the rest of the process's tests, which meant a
+       failure here could cascade into a spurious EINTR in a *later*
+       test's own waitpid()/blocking call (see test_posix_spawn). A single
+       `rc` + fallthrough replaces the old direct returns so cleanup always
+       runs. */
+    int rc = 0;
+    pid_t pid = -1;
+    int status;
+
+    pid = fork();
+    if (pid < 0) { rc = 7; goto cleanup; }
     if (pid == 0) { _exit(7); }
 
-    int status;
     /* waitpid() reaps the child; SIGCHLD delivery is polled for separately
-       via the dispatch loop's pending-signal check, so give it a moment. */
-    for (int i = 0; i < 2000 && sigchld_pid != pid; i++) usleep(1000);
-    waitpid(pid, &status, 0);
+       via the dispatch loop's pending-signal check, so give it a wall-
+       clock bound (not an iteration count -- under CPU contention the
+       iteration count's wall time only grows, so it can't shrink the
+       window; a wall-clock bound keeps that property explicit and makes
+       a future timeout unambiguous evidence of a real delivery gap). */
+    {
+        struct timeval start, now;
+        gettimeofday(&start, 0);
+        do {
+            if (sigchld_pid == pid) break;
+            usleep(1000);
+            gettimeofday(&now, 0);
+        } while ((now.tv_sec - start.tv_sec) < 30);
+    }
 
-    if (sigchld_pid != pid) return 8;
-    if (sigchld_code != CLD_EXITED) return 9;
-    if (sigchld_status != 7) return 10;
+    {
+        pid_t r;
+        do { r = waitpid(pid, &status, 0); } while (r < 0 && errno == EINTR);
+    }
 
-    struct sigaction dfl2;
-    for (int i = 0; i < (int)sizeof(dfl2); i++) ((char *)&dfl2)[i] = 0;
-    dfl2.sa_handler = SIG_DFL;
-    if (sigaction(SIGCHLD, &dfl2, 0) != 0) return 11;
+    if (sigchld_pid != pid) { rc = 8; goto cleanup; }
+    if (sigchld_code != CLD_EXITED) { rc = 9; goto cleanup; }
+    if (sigchld_status != 7) { rc = 10; goto cleanup; }
+    rc = 42;
 
-    return 42;
+cleanup:
+    {
+        struct sigaction dfl2;
+        for (int i = 0; i < (int)sizeof(dfl2); i++) ((char *)&dfl2)[i] = 0;
+        dfl2.sa_handler = SIG_DFL;
+        if (sigaction(SIGCHLD, &dfl2, 0) != 0 && rc == 42) rc = 11;
+    }
+    return rc;
 }
 
 // test_posix_sigaction_flags
@@ -2123,7 +2154,15 @@ int test_posix_spawn(void) {
     if (posix_spawnp(&pid, "echo", &fa, &attr, argv, environ) != 0) return 9;
 
     int status;
-    if (waitpid(pid, &status, 0) != pid) return 10;
+    /* #853: retry on EINTR -- a prior test's failure could leave a
+       SIGCHLD handler installed without SA_RESTART (now fixed for
+       test_posix_sigaction_siginfo, but this stays defensive against any
+       other test doing the same), which would otherwise interrupt this
+       single blocking waitpid() and turn an unrelated failure into a
+       spurious `return 10` here. */
+    pid_t reaped;
+    do { reaped = waitpid(pid, &status, 0); } while (reaped < 0 && errno == EINTR);
+    if (reaped != pid) return 10;
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) return 11;
 
     posix_spawn_file_actions_destroy(&fa);
