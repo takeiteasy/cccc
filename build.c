@@ -86,6 +86,14 @@ static BuildTarget *make_libbacktrace(Builder *ctx) {
     AddCFlag(bt, "-Wno-shift-count-overflow");
     AddCFlag(bt, "-Wno-implicit-function-declaration");
     AddCFlag(bt, "-Wno-deprecated-declarations");
+    if (strcmp(BuildHost(ctx), "linux") == 0)
+        // elf.c's phdr_callback() needs the full (non-forward-declared)
+        // struct dl_phdr_info from <link.h>, only visible under
+        // _GNU_SOURCE on glibc. Without this every build.c target that
+        // links libbacktrace fails to compile on Linux (Makefile:176 has
+        // always had this; build.c never did until #842 Step 5 actually
+        // exercised a Linux build).
+        AddDefine(bt, "_GNU_SOURCE", (const char *)0);
     AddInclude(bt, "src/backtrace");
     // Common sources (platform-independent)
     AddSource(bt, "src/backtrace/backtrace.c");

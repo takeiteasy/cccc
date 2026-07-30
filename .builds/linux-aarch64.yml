@@ -1,0 +1,35 @@
+image: ubuntu/lts
+arch: arm64
+packages:
+  - clang
+  - make
+  - pkg-config
+  - libffi-dev
+  - python3
+sources:
+  - https://git.sr.ht/~takeiteasy/cccc
+environment:
+  CC: clang
+tasks:
+  - bootstrap: |
+      # Stage0 invariant (#842): a plain `make` with only a system cc and
+      # libffi must produce a working compiler capable of running build.c.
+      cd cccc
+      set -e
+      make cccc
+  - build: |
+      # Two-pass build (#571/#842): regenerates src/std.c from
+      # tools/generate_stdlib.c, then rebuilds the real cccc against it.
+      # This is also the enforcement point for "developers never run
+      # `make stdlib`" -- CI always does the regen itself.
+      cd cccc
+      set -e
+      ./cccc --build build.c
+  - test: |
+      # Aggregate driver: source suite, .c4 bytecode round-trip,
+      # audit_ffi, and sqlite_smoke (skips cleanly -- the amalgamation
+      # zip is not committed to the repo) all in one run, against the
+      # build.c-produced (not the stage0 bootstrap) binary.
+      cd cccc
+      set -e
+      python3 tools/run_tests.py --binary build/cccc -j 8
