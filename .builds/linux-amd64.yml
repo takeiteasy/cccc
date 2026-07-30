@@ -16,16 +16,16 @@ tasks:
       # src/std.c, gitignored) it links against src/std_seed.c instead --
       # a minimal seed with only enough of the embedded-header table
       # (reflection.h) to run tools/generate_stdlib.c, NOT enough to run
-      # --build (which needs building.h). So finish the bootstrap here:
-      # regenerate the real src/std.c, then rebuild against it. From this
-      # point on, ./cccc --build build.c's own two-pass regen is a no-op
-      # (src/std.c already matches disk) and stays that way for the rest
-      # of the job.
+      # --build (which needs building.h). `make bootstrap` (#857) finishes
+      # the bootstrap: regenerate the real src/std.c, then unconditionally
+      # relink against it (a plain second `make cccc` is subject to an
+      # mtime race and can silently skip the relink -- see the Makefile's
+      # `bootstrap` target for the full explanation). From this point on,
+      # ./cccc --build build.c's own two-pass regen is a no-op (src/std.c
+      # already matches disk) and stays that way for the rest of the job.
       cd cccc
       set -e
-      make cccc
-      sh tools/regen_stdlib.sh ./cccc
-      make cccc
+      make bootstrap
   - build: |
       # Two-pass build (#571/#842): regenerates src/std.c from
       # tools/generate_stdlib.c, then rebuilds the real cccc against it.

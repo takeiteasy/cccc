@@ -27,9 +27,10 @@ jobs:
     env:
       # Two separate compiler-selection mechanisms need overriding here,
       # not one:
-      #  - CC: the stage0 `make cccc` steps use plain `CC ?= cc` in the
-      #    Makefile, which a `CC` env var overrides per normal make
-      #    semantics.
+      #  - CC: the stage0 `make bootstrap` target's recursive `make cccc`
+      #    invocations use plain `CC ?= cc` in the Makefile, which a `CC`
+      #    env var overrides per normal make semantics (exported job env
+      #    propagates through recursive $(MAKE) automatically).
       #  - CCCC_NATIVE_CC: `./cccc --build build.c`'s own internal compiler
       #    probe (cccc_find_native_cc(), src/vm.c) is a *different* lookup
       #    that only honours CCCC_NATIVE_CC -- it ignores CC entirely and
@@ -47,18 +48,13 @@ jobs:
       - name: Bootstrap (stage0 -> regen std.c -> rebuild)
         run: |
           set -e
-          make cccc
-          sh tools/regen_stdlib.sh ./cccc
-          # `rm -f cccc` forces the second `make cccc` to relink
-          # unconditionally: make's mtime-based dependency check can see
-          # the freshly-regenerated src/std.c as not newer than the binary
-          # linked seconds earlier on a fast CI runner (observed
-          # intermittently as "make: `cccc' is up to date." even though
-          # std.c changed from std_seed.c to the real std.c) and wrongly
-          # skip the relink. This is a pre-existing race in the shared
-          # bootstrap dance, not specific to this workflow.
-          rm -f cccc
-          make cccc
+          # `make bootstrap` (#857) does the full stage0 dance -- including
+          # an unconditional relink after regen_stdlib.sh, so a fast CI
+          # runner can't hit the mtime race where make's dependency check
+          # sees src/std.c as not strictly newer than the just-linked
+          # binary and wrongly reports "cccc is up to date" (see the
+          # Makefile's `bootstrap` target for the full explanation).
+          make bootstrap
       - name: Build
         run: ./cccc --build build.c
       - name: Test
@@ -73,18 +69,13 @@ jobs:
       - name: Bootstrap (stage0 -> regen std.c -> rebuild)
         run: |
           set -e
-          make cccc
-          sh tools/regen_stdlib.sh ./cccc
-          # `rm -f cccc` forces the second `make cccc` to relink
-          # unconditionally: make's mtime-based dependency check can see
-          # the freshly-regenerated src/std.c as not newer than the binary
-          # linked seconds earlier on a fast CI runner (observed
-          # intermittently as "make: `cccc' is up to date." even though
-          # std.c changed from std_seed.c to the real std.c) and wrongly
-          # skip the relink. This is a pre-existing race in the shared
-          # bootstrap dance, not specific to this workflow.
-          rm -f cccc
-          make cccc
+          # `make bootstrap` (#857) does the full stage0 dance -- including
+          # an unconditional relink after regen_stdlib.sh, so a fast CI
+          # runner can't hit the mtime race where make's dependency check
+          # sees src/std.c as not strictly newer than the just-linked
+          # binary and wrongly reports "cccc is up to date" (see the
+          # Makefile's `bootstrap` target for the full explanation).
+          make bootstrap
       - name: Build
         run: ./cccc --build build.c
       - name: Test
@@ -103,18 +94,13 @@ jobs:
       - name: Bootstrap (stage0 -> regen std.c -> rebuild)
         run: |
           set -e
-          make cccc
-          sh tools/regen_stdlib.sh ./cccc
-          # `rm -f cccc` forces the second `make cccc` to relink
-          # unconditionally: make's mtime-based dependency check can see
-          # the freshly-regenerated src/std.c as not newer than the binary
-          # linked seconds earlier on a fast CI runner (observed
-          # intermittently as "make: `cccc' is up to date." even though
-          # std.c changed from std_seed.c to the real std.c) and wrongly
-          # skip the relink. This is a pre-existing race in the shared
-          # bootstrap dance, not specific to this workflow.
-          rm -f cccc
-          make cccc
+          # `make bootstrap` (#857) does the full stage0 dance -- including
+          # an unconditional relink after regen_stdlib.sh, so a fast CI
+          # runner can't hit the mtime race where make's dependency check
+          # sees src/std.c as not strictly newer than the just-linked
+          # binary and wrongly reports "cccc is up to date" (see the
+          # Makefile's `bootstrap` target for the full explanation).
+          make bootstrap
       - name: Build
         run: ./cccc --build build.c
       - name: Test

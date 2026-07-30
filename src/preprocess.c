@@ -4587,8 +4587,8 @@ static char *format_time(VirtualMachine *vm, struct tm *tm) {
 // wrap_fe*() functions pass FE_* straight through to the real host libc, so
 // the guest header's constants MUST match whatever <fenv.h> this binary was
 // actually compiled against on this machine -- they cannot be baked into
-// src/std.c at `make stdlib` time on one dev's machine and expected to be
-// correct on another platform (#771).
+// src/std.c at stdlib-regen time (`make bootstrap`) on one dev's machine
+// and expected to be correct on another platform (#771).
 static void init_fenv_macros(VirtualMachine *vm) {
     define_macro(vm, "__CCCC_FE_INVALID__", arena_format(vm, "%d", FE_INVALID));
     define_macro(vm, "__CCCC_FE_DIVBYZERO__", arena_format(vm, "%d", FE_DIVBYZERO));
@@ -5023,7 +5023,7 @@ Token *preprocess(VirtualMachine *vm, Token *tok) {
         const char *hint = "";
         if (ci_tok->file && ci_tok->file->name &&
             strstr(ci_tok->file->name, "implicit-reflection.h"))
-            hint = "\n  hint: embedded reflection.h may be truncated — run `make stdlib`";
+            hint = "\n  hint: embedded reflection.h may be truncated — run `make bootstrap` to regenerate src/std.c";
         error_tok(vm, ci_tok,
                   "unterminated conditional directive (started with #%.*s)%s",
                   ci_tok->len, ci_tok->loc, hint);

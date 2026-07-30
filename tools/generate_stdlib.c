@@ -1,5 +1,5 @@
 // generate_stdlib.c - builds get_std_header as AST; use -G to emit C.
-// Usage: make stdlib
+// Usage: make bootstrap (or: sh tools/regen_stdlib.sh <cccc-binary>)
 
 #include <string.h>
 

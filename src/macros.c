@@ -1100,10 +1100,11 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
     // Sanity-check that the embedded string wasn't truncated (e.g. by a
     // C array that was too small in std.c after reflection.h grew).
     // A truncated string silently drops the closing #endif, producing the
-    // cryptic "unterminated conditional directive" error.  Run `make stdlib`
-    // to re-embed the header after editing it.
+    // cryptic "unterminated conditional directive" error.  Run
+    // `make bootstrap` (or `sh tools/regen_stdlib.sh <cccc>`) to re-embed
+    // the header after editing it.
     if (!strstr(header, "#endif // CCCC_REFLECTION_H"))
-        error("embedded reflection.h appears truncated — run `make stdlib` to regenerate src/std.c");
+        error("embedded reflection.h appears truncated — run `make bootstrap` (or `sh tools/regen_stdlib.sh <cccc>`) to regenerate src/std.c");
 
     // Temporarily suppress user-defined TK_*/NK_* macros (TypeKind/NodeKind
     // enum constant names) so they can't expand inside reflection.h's enum

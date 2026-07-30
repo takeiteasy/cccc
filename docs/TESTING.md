@@ -330,24 +330,31 @@ stage0-bootstrap dance before building, because a fresh clone has no
 `src/std.c` (gitignored) and the stage0 binary lacks `building.h`:
 
 ```bash
-make cccc                       # stage0: bootstrap against src/std_seed.c
-sh tools/regen_stdlib.sh ./cccc # regenerate the real src/std.c
-make cccc                       # rebuild against the regenerated std.c
+make bootstrap                  # stage0 (src/std_seed.c) -> regen the real
+                                 # src/std.c -> unconditional relink (#857)
 ./cccc --build build.c          # real build (own two-pass regen is now a no-op)
 python3 tools/run_tests.py --binary build/cccc -j 4
 ```
 
-Skipping the regen step produces a confusing build failure complaining
-about a missing `building.h`, not an obviously-related error. The GitHub
-Actions jobs use `-j 4` rather than sr.ht's `-j 8` — hosted runners have
-fewer cores than the sr.ht builder, and parallel-load timing sensitivity is
-exactly what surfaced #853.
+`make bootstrap` exists (#857) instead of the equivalent three commands
+run by hand because a plain second `make cccc` is subject to a real race:
+`regen_stdlib.sh`'s `mv` can land `src/std.c`'s mtime in the same clock
+tick as the just-linked stage0 binary on a fast CI runner, and `make`
+treats an equal mtime as up to date — silently skipping the relink and
+leaving the binary linked against `src/std_seed.c`. `make bootstrap` avoids
+this by `rm -f`ing the binary between the two links, forcing an
+unconditional relink; see the Makefile's `bootstrap` target for the full
+explanation. Skipping the regen step (or hitting the race) produces a
+confusing build failure complaining about a missing `building.h`, not an
+obviously-related error. The GitHub Actions jobs use `-j 4` rather than
+sr.ht's `-j 8` — hosted runners have fewer cores than the sr.ht builder, and
+parallel-load timing sensitivity is exactly what surfaced #853.
 
 `CC=clang` and `CCCC_NATIVE_CC=clang` must both be set explicitly for the
 `linux-aarch64` job (and are, in `.github/workflows/ci.yml`'s `env:`):
 Ubuntu's plain `cc` resolves to gcc, which rejects `-std=c23`. These are two
-separate compiler-selection mechanisms — `CC` for the stage0 `make cccc`
-steps (plain `CC ?= cc` in the Makefile), `CCCC_NATIVE_CC` for `./cccc
+separate compiler-selection mechanisms — `CC` for `make bootstrap`'s
+recursive `make cccc` steps (plain `CC ?= cc` in the Makefile), `CCCC_NATIVE_CC` for `./cccc
 --build build.c`'s own internal compiler probe (`cccc_find_native_cc()` in
 `src/vm.c`), which ignores `CC` entirely and otherwise tries `{cc, clang,
 gcc}` on `PATH` in that order. GitHub's `ubuntu-24.04-arm` runner ships a

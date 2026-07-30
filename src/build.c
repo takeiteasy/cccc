@@ -1143,7 +1143,7 @@ void cc_load_build_runtime(VirtualMachine *vm) {
 Token *cc_inject_build_header(VirtualMachine *vm) {
     char *src = get_std_header("building.h");
     if (!src)
-        error("could not load embedded building.h — run `make stdlib` to regenerate src/std.c");
+        error("could not load embedded building.h — run `make bootstrap` (or `sh tools/regen_stdlib.sh <cccc>`) to regenerate src/std.c");
     Token *toks = tokenize_string(vm, "<building.h>", src);
     return preprocess(vm, toks);
 }

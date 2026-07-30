@@ -76,3 +76,23 @@ default: cccc$(EXE)
 
 cccc$(EXE): $(SRCS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+# bootstrap (#857): the full stage0 dance in one target -- link against
+# src/std_seed.c, regenerate the real src/std.c, then relink against it.
+# Needs a *recursive* $(MAKE), not three lines run back to back: STDLIB_SRC
+# above is chosen by $(wildcard src/std.c) at make-parse time, so switching
+# from the seed to the real stdlib only takes effect in a fresh make
+# invocation. The `rm -f` between the two links is required, not cosmetic:
+# make's prerequisite check treats an *equal* mtime as up to date (not
+# stale), and regen_stdlib.sh's mv() can land src/std.c's mtime in the same
+# clock tick as the just-linked cccc binary on a fast filesystem/CI runner --
+# observed intermittently as "make: `cccc' is up to date." even though
+# src/std.c had just switched from the seed to the real stdlib, leaving the
+# stage0 binary permanently linked against std_seed.c. Removing the binary
+# first forces an unconditional relink regardless of mtime comparison.
+.PHONY: bootstrap
+bootstrap:
+	$(MAKE) cccc$(EXE)
+	sh tools/regen_stdlib.sh ./cccc$(EXE)
+	rm -f cccc$(EXE)
+	$(MAKE) cccc$(EXE)

@@ -256,6 +256,11 @@ make                       # bootstrap: produce ./cccc
 ./cccc --build build.c --build-list-targets
 ```
 
+On a fresh clone, `./cccc --build build.c` does its own regen of the
+embedded stdlib table as part of its default build. If you need a working
+`cccc` from the plain Makefile alone (no `--build`), use `make bootstrap`
+instead of `make` — see [docs/BUILDING.md](docs/BUILDING.md).
+
 Produces:
 - `cccc` — compiler executable (C source → VM bytecode, or → native via `-c=native`)
 - `build/lib/libcccc.dylib` (macOS) or `build/lib/libcccc.so` (Linux) — shared library

@@ -1056,14 +1056,25 @@ seed compiler can run `-G` (the regen step needs only `reflection.h`) but
 stage0-to-full path on a fresh clone is:
 
 ```sh
-make cccc                            # stage0, linked against src/std_seed.c
-sh tools/regen_stdlib.sh ./cccc      # produces the real src/std.c
-make cccc                            # rebuild against it (self-correcting:
-                                      # SRCS picks src/std.c over the seed
-                                      # automatically once it exists on disk)
+make bootstrap                       # stage0 (src/std_seed.c) -> regen the
+                                      # real src/std.c -> unconditional relink
 ./cccc --build build.c               # now works; its own two-pass regen is
                                       # a no-op from here on
 ```
+
+`make bootstrap` (#857) is `$(MAKE) cccc` (links against `src/std_seed.c` on
+a fresh clone), `sh tools/regen_stdlib.sh ./cccc`, then an `rm -f cccc` and
+a second `$(MAKE) cccc` against the now-real `src/std.c`. The `rm -f` is
+required, not cosmetic: a plain second `make cccc` relies on `make`'s
+mtime-based dependency check, and `regen_stdlib.sh`'s `mv` can land
+`src/std.c`'s mtime in the same clock tick as the just-linked binary on a
+fast filesystem/CI runner — `make` treats an *equal* mtime as up to date,
+not stale, and silently skips the relink (`make: 'cccc' is up to date.`),
+leaving the stage0 binary permanently linked against the seed. Removing the
+binary first forces an unconditional relink regardless of mtime comparison.
+(`SRCS` picks `src/std.c` over the seed automatically once it exists on
+disk — this only needs a *recursive* `$(MAKE)` because that choice is made
+by `$(wildcard src/std.c)` at make-parse time, once per invocation.)
 
 `build.c` itself, once bootstrapped, covers what used to be Makefile
 targets: `cccc_asan`/`cccc_ubsan`/`cccc_tsan`/`cccc_msan`/`sanitizers`,

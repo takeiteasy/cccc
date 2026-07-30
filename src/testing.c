@@ -562,7 +562,7 @@ void cc_load_test_runtime(VirtualMachine *vm) {
 Token *cc_inject_test_header(VirtualMachine *vm) {
     char *src = get_std_header("testing.h");
     if (!src)
-        error("could not load embedded testing.h — run `make stdlib` to regenerate src/std.c");
+        error("could not load embedded testing.h — run `make bootstrap` (or `sh tools/regen_stdlib.sh <cccc>`) to regenerate src/std.c");
     Token *toks = tokenize_string(vm, "<testing.h>", src);
     return preprocess(vm, toks);
 }
