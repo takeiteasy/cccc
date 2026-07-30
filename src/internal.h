@@ -338,7 +338,17 @@ static inline unsigned long long cccc_f64_to_u64(double x) {
         feraiseexcept(FE_INVALID);
         return 0;
     }
-    return (unsigned long long)x;
+    // x is proven finite and in [0, 2^64). x86_64 has no native
+    // double->uint64 instruction below AVX-512 (VCVTTSD2USI); typical
+    // compiler-generated code for this cast synthesizes it from a signed
+    // cvttsd2si on the full magnitude as part of a branchless fixup, which
+    // spuriously raises FE_INVALID on real x86 hardware even though the
+    // result is exact. aarch64's FCVTZU has no such issue. Since x is
+    // already proven in range here, any FE_INVALID raised by the cast
+    // itself is spurious -- clear it.
+    unsigned long long r = (unsigned long long)x;
+    feclearexcept(FE_INVALID);
+    return r;
 }
 
 static inline unsigned long long cccc_f32_to_u64(float x) {
@@ -354,7 +364,11 @@ static inline unsigned long long cccc_f32_to_u64(float x) {
         feraiseexcept(FE_INVALID);
         return 0;
     }
-    return (unsigned long long)x;
+    // See cccc_f64_to_u64 above: suppress the spurious FE_INVALID that
+    // x86_64's software double->uint64 fixup can raise for in-range values.
+    unsigned long long r = (unsigned long long)x;
+    feclearexcept(FE_INVALID);
+    return r;
 }
 
 static inline long long cccc_freg_raw_f64(VirtualMachine *vm, int reg) {
