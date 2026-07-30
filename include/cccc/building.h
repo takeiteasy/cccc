@@ -84,6 +84,28 @@ BuildTarget *__builtin_build_dynamic_lib(Builder *ctx, const char *name);
  *  @abstract Override the target's output path (relative to the out dir). */
 void __builtin_build_set_output(BuildTarget *t, const char *path);
 
+/*! @function __builtin_build_target_output
+ *  @abstract On-disk output path for @c t, so a @c RunCustom command can
+ *            reference the binary a dependency target just built instead of
+ *            hardcoding a path. For EXE/STATIC/DYNAMIC/BYTECODE targets this
+ *            is @c \<out_dir\>/\<path\> — the explicit @c SetOutput() path if
+ *            given, else the kind-appropriate default (@c bin/\<name\>,
+ *            @c lib/lib\<name\>.a, ...). For a @c RunCustom target it is
+ *            whatever @c DeclareOutput() recorded, returned verbatim (@b not
+ *            joined onto @c out_dir, since a custom command can write
+ *            anywhere) — @c "" if @c DeclareOutput() was never called. */
+const char *__builtin_build_target_output(BuildTarget *t);
+
+/*! @function __builtin_build_declare_output
+ *  @abstract Record the file path a @c RunCustom target (only) produces —
+ *            taken verbatim, not joined onto @c out_dir — so
+ *            @c TargetOutput() can resolve it and so the dependency is
+ *            documented for downstream consumers. This does @b not add a
+ *            staleness/skip check — a @c RunCustom step still runs every
+ *            build regardless of whether @c path already exists. No-op with
+ *            a diagnostic on non-@c RunCustom targets. */
+void __builtin_build_declare_output(BuildTarget *t, const char *path);
+
 /*! @function __builtin_build_add_source
  *  @abstract Add a C source file to the target. */
 void __builtin_build_add_source(BuildTarget *t, const char *path);
@@ -124,6 +146,13 @@ void __builtin_build_add_cflag(BuildTarget *t, const char *flag);
 /*! @function __builtin_build_add_ldflag
  *  @abstract Add a raw linker flag. */
 void __builtin_build_add_ldflag(BuildTarget *t, const char *flag);
+
+/*! @function __builtin_build_set_target_env
+ *  @abstract Set an environment variable for @c t's compiler/linker child
+ *            process only (e.g. @c AFL_USE_ASAN=1 for an afl-asan target).
+ *            Has no effect on a @c RunCustom target, whose command runs
+ *            through the vendored build shell, not the host toolchain. */
+void __builtin_build_set_target_env(BuildTarget *t, const char *name, const char *value);
 
 /*! @function __builtin_build_link_with
  *  @abstract Declare that @c t links against (and is built after) @c dep.
@@ -361,6 +390,8 @@ int __builtin_build_run_default(Builder *ctx);
 #define DynamicLib(ctx, name)   __builtin_build_dynamic_lib(ctx, name)
 
 #define SetOutput(t, p)         __builtin_build_set_output(t, p)
+#define TargetOutput(t)         __builtin_build_target_output(t)
+#define DeclareOutput(t, p)     __builtin_build_declare_output(t, p)
 #define AddSource(t, p)         __builtin_build_add_source(t, p)
 #define AddSourcesGlob(t, pat)  __builtin_build_add_sources_glob(t, pat)
 #define AddSourceStr(t, n, c)   __builtin_build_add_source_str(t, n, c)
@@ -370,6 +401,7 @@ int __builtin_build_run_default(Builder *ctx);
 #define AddUndef(t, n)          __builtin_build_add_undef(t, n)
 #define AddCFlag(t, f)          __builtin_build_add_cflag(t, f)
 #define AddLdFlag(t, f)         __builtin_build_add_ldflag(t, f)
+#define SetTargetEnv(t, n, v)   __builtin_build_set_target_env(t, n, v)
 #define LinkWith(t, dep)        __builtin_build_link_with(t, dep)
 #define DependsOn(t, dep)       __builtin_build_depends_on(t, dep)
 #define AddLib(t, n)            __builtin_build_add_lib(t, n)

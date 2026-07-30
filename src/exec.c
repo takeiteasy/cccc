@@ -63,9 +63,58 @@ char *make_tmp_path(const char *suffix) {
 #endif
 }
 
-int run_argv(char *const argv[]) {
+#if !defined(_WIN32)
+extern char **environ;
+
+// Merge the process environment with a NULL-terminated array of "NAME=VALUE"
+// overrides (extra_env). Entries in extra_env shadow same-named entries from
+// environ. Returns NULL if extra_env is NULL/empty (caller should fall back
+// to plain execvp, which inherits environ unmodified). The returned array's
+// pointers alias environ/extra_env strings — only the array itself is owned
+// by the caller.
+static char **merge_env(char *const extra_env[]) {
+    if (!extra_env || !extra_env[0])
+        return NULL;
+    int base_count = 0;
+    while (environ[base_count])
+        base_count++;
+    int extra_count = 0;
+    while (extra_env[extra_count])
+        extra_count++;
+    char **merged = malloc(sizeof(char *) * (size_t)(base_count + extra_count + 1));
+    if (!merged)
+        return NULL;
+    int n = 0;
+    for (int i = 0; i < base_count; i++) {
+        int shadowed = 0;
+        for (int j = 0; j < extra_count; j++) {
+            const char *eq = strchr(extra_env[j], '=');
+            size_t namelen = eq ? (size_t)(eq - extra_env[j]) : strlen(extra_env[j]);
+            if (strncmp(environ[i], extra_env[j], namelen) == 0 && environ[i][namelen] == '=') {
+                shadowed = 1;
+                break;
+            }
+        }
+        if (!shadowed)
+            merged[n++] = environ[i];
+    }
+    for (int j = 0; j < extra_count; j++)
+        merged[n++] = extra_env[j];
+    merged[n] = NULL;
+    return merged;
+}
+#endif
+
+// Like run_argv, but with an optional NULL-terminated "NAME=VALUE" array of
+// environment overrides applied on top of the process environment (envp may
+// be NULL for "inherit environment unmodified", identical to run_argv).
+// Used by the build.c SetTargetEnv() API (#842) — e.g. AFL_USE_ASAN=1 for the
+// afl-asan target — since neither RunCustom's vendored shell nor run_argv's
+// plain execvp gives a target's compiler child its own environment.
+int run_argv_env(char *const argv[], char *const envp[]) {
 #if defined(_WIN32)
     (void)argv;
+    (void)envp;
     fprintf(stderr, "error: -c=native is not supported on Windows yet\n");
     return 1;
 #else
@@ -76,7 +125,11 @@ int run_argv(char *const argv[]) {
         return 1;
     }
     if (pid == 0) {
-        execvp(argv[0], argv);
+        char **merged = merge_env(envp);
+        if (merged)
+            execve(argv[0], argv, merged);
+        else
+            execvp(argv[0], argv);
         fprintf(stderr, "error: failed to execute %s: %s\n", argv[0],
                 strerror(errno));
         _exit(127);
@@ -94,4 +147,8 @@ int run_argv(char *const argv[]) {
         return 128 + WTERMSIG(status);
     return 1;
 #endif
+}
+
+int run_argv(char *const argv[]) {
+    return run_argv_env(argv, NULL);
 }

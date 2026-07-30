@@ -87,6 +87,8 @@ struct BuildTarget {
     StringArray ldflags;
     StringArray libs;      // bare -l names
     StringArray libpaths;  // -L paths
+    StringArray env;       // "NAME=VALUE" environment overrides for the
+                            // target's compiler/linker child (#842, SetTargetEnv)
     BuildTarget **deps;
     int *deps_link;        // parallel to deps: 1=LinkWith (add -l), 0=DependsOn (order only)
     int deps_count, deps_cap;
@@ -236,6 +238,10 @@ static char *join(const char *a, const char *b) {
     return r;
 }
 
+// Forward declaration: defined with the other environment/filesystem
+// helpers below; needed early by TargetOutput() (#842).
+static const char *builder_intern(Builder *ctx, char *s);
+
 // Default output path (relative to out_dir) for a target.
 static char *default_output(const BuildTarget *t) {
     char buf[512];
@@ -261,6 +267,21 @@ static char *default_output(const BuildTarget *t) {
         break;
     }
     return xstrdup(buf);
+}
+
+// Resolve a target's on-disk output path exactly the way build_target() does
+// internally: explicit SetOutput() path if given, else the kind-appropriate
+// default (bin/<name>, lib/lib<name>.a, ...). Both paths funnel through the
+// same default_output()/join() primitives, so this and build_target()'s own
+// computation cannot drift. Returns a freshly allocated absolute path;
+// CCCC_TGT_CUSTOM targets have no output artifact (default_output() returns
+// "" for them) so this returns "<out_dir>/" for those unless SetOutput() was
+// called explicitly — TargetOutput() below special-cases that to plain "".
+static char *resolved_target_output(Builder *ctx, const BuildTarget *t) {
+    char *out_rel = t->output ? xstrdup(t->output) : default_output(t);
+    char *out_abs = join(ctx->out_dir, out_rel);
+    free(out_rel);
+    return out_abs;
 }
 
 // ============================================================================
@@ -348,10 +369,25 @@ static int run_capture(char *const argv[], char **out) {
 // ctx handle is ignored in favour of s_ctx.
 // ============================================================================
 
+// Target names must be unique (#842): two targets sharing a name silently
+// share the same build/obj/<name> objdir and build/<default-output> path
+// (find_target_by_name() also just returns the first match), which is
+// exactly the failure mode a two-pass build (pass1/pass2 compiling the same
+// binary name against different inputs) must not hit silently.
+static void check_name_unique(Builder *ctx, CcTargetKind kind, const char *name) {
+    for (int i = 0; i < ctx->targets_count; i++) {
+        if (strcmp(ctx->targets[i]->name, name) == 0)
+            error("build: duplicate target name '%s' (first declared as kind %d, "
+                  "redeclared as kind %d) — target names must be unique",
+                  name, ctx->targets[i]->kind, kind);
+    }
+}
+
 static BuildTarget *new_target(CcTargetKind kind, const char *name) {
     Builder *ctx = s_ctx;
     if (!ctx)
         error("build: target factory called outside a build run");
+    check_name_unique(ctx, kind, name);
     BuildTarget *t = calloc(1, sizeof(*t));
     if (!t)
         error("build: out of memory");
@@ -385,6 +421,71 @@ static long long impl_set_output(long long t, long long path) {
     BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
     free(tgt->output);
     tgt->output = xstrdup((const char *)path);
+    return 0;
+}
+
+// TargetOutput: the on-disk path build_target() will produce for this
+// target, so a RunCustom command can reference the binary a dependency just
+// built instead of hardcoding a path (#842).
+//
+// For EXE/STATIC/DYNAMIC/BYTECODE targets this is always <out_dir>/<path> —
+// the explicit SetOutput() path if given, else the kind-appropriate default
+// (bin/<name>, lib/lib<name>.a, ...) — since those targets' outputs are
+// always written under the build output directory.
+//
+// For CCCC_TGT_CUSTOM targets there is no such convention: a RunCustom
+// command can write anywhere (e.g. the stdlib regen writes to the repo's
+// src/std.c, not under out_dir). So a CUSTOM target's output is whatever
+// DeclareOutput() recorded, returned verbatim (not joined onto out_dir); ""
+// if DeclareOutput() was never called.
+static long long impl_target_output(long long t) {
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    if (!s_ctx)
+        error("build: TargetOutput called outside a build run");
+    if (tgt->kind == CCCC_TGT_CUSTOM)
+        return (long long)(intptr_t)builder_intern(s_ctx, xstrdup(tgt->output ? tgt->output : ""));
+    char *path = resolved_target_output(s_ctx, tgt);
+    return (long long)(intptr_t)builder_intern(s_ctx, path);
+}
+
+// DeclareOutput: record the path a CCCC_TGT_CUSTOM step produces — taken
+// verbatim (see TargetOutput() above; not joined onto out_dir) — so
+// downstream DependsOn consumers are known to depend on that file (#842).
+// This is invalidation metadata only — it does NOT give the step a "skip if
+// output exists" staleness check.  A CUSTOM target has no `sources`, so
+// "output exists" would be the only test available, and for the stdlib regen
+// specifically the output (src/std.c) always exists once committed; treating
+// that as "up to date" would silently stop the regen from ever running again.
+// Real skip semantics need declared *inputs*, not just an output path — a
+// follow-up (see #842 Step 6 tickets).
+static long long impl_declare_output(long long t, long long path) {
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    if (tgt->kind != CCCC_TGT_CUSTOM) {
+        fprintf(stderr, "build: DeclareOutput is only valid on a RunCustom target ('%s' is not one)\n",
+                tgt->name);
+        return 0;
+    }
+    free(tgt->output);
+    tgt->output = xstrdup((const char *)path);
+    return 0;
+}
+
+// SetTargetEnv: set an environment variable ("NAME=VALUE") for this target's
+// compiler/linker child process only (#842) — e.g. AFL_USE_ASAN=1 for an
+// afl-asan target. Threaded through run_step()/run_argv_env(); has no effect
+// on CCCC_TGT_CUSTOM targets, whose RunCustom command runs through the
+// vendored shell (build_shell.c), not run_argv.
+static long long impl_set_target_env(long long t, long long name, long long value) {
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    const char *n = (const char *)name;
+    const char *v = (const char *)value;
+    if (!n || !*n) return 0;
+    size_t len = strlen(n) + strlen(v ? v : "") + 2;
+    char *entry = malloc(len);
+    if (!entry)
+        error("build: out of memory");
+    snprintf(entry, len, "%s=%s", n, v ? v : "");
+    strarray_push(&tgt->env, entry);
     return 0;
 }
 static long long impl_add_source(long long t, long long path) {
@@ -972,6 +1073,8 @@ void cc_load_build_runtime(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__builtin_build_static_lib",    (void *)impl_static_lib,         2, 0);
     cc_register_cfunc(vm, "__builtin_build_dynamic_lib",   (void *)impl_dynamic_lib,        2, 0);
     cc_register_cfunc(vm, "__builtin_build_set_output",    (void *)impl_set_output,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_target_output", (void *)impl_target_output,      1, 0);
+    cc_register_cfunc(vm, "__builtin_build_declare_output",(void *)impl_declare_output,     2, 0);
     cc_register_cfunc(vm, "__builtin_build_add_source",    (void *)impl_add_source,         2, 0);
     cc_register_cfunc(vm, "__builtin_build_add_sources_glob",(void*)impl_add_sources_glob,  2, 0);
     cc_register_cfunc(vm, "__builtin_build_add_source_str",(void *)impl_add_source_str,     3, 0);
@@ -981,6 +1084,7 @@ void cc_load_build_runtime(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__builtin_build_add_undef",     (void *)impl_add_undef,          2, 0);
     cc_register_cfunc(vm, "__builtin_build_add_cflag",     (void *)impl_add_cflag,          2, 0);
     cc_register_cfunc(vm, "__builtin_build_add_ldflag",    (void *)impl_add_ldflag,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_set_target_env",(void *)impl_set_target_env,     3, 0);
     cc_register_cfunc(vm, "__builtin_build_link_with",     (void *)impl_link_with,          2, 0);
     cc_register_cfunc(vm, "__builtin_build_depends_on",    (void *)impl_depends_on,         2, 0);
     cc_register_cfunc(vm, "__builtin_build_add_lib",       (void *)impl_add_lib,            2, 0);
@@ -1229,14 +1333,20 @@ static void print_cmd(int n, int total, char *const argv[]) {
     printf("\n");
 }
 
-// Run (or, in dry-run, just print) one toolchain command.  Returns its exit code.
-static int run_step(Builder *ctx, int n, int total, ArgVec *args) {
+// Run (or, in dry-run, just print) one toolchain command.  Returns its exit
+// code.  `t` may be NULL (no per-target environment overrides); when it has
+// SetTargetEnv() entries (t->env), they are applied on top of the process
+// environment for this child only — e.g. AFL_USE_ASAN=1 for an afl-asan
+// target (#842).
+static int run_step(Builder *ctx, int n, int total, ArgVec *args, const BuildTarget *t) {
     if (!ctx->quiet || ctx->verbose || ctx->dry_run) {
         print_cmd(n, total, (char *const *)args->data);
         fflush(stdout);
     }
     if (ctx->dry_run)
         return 0;
+    if (t && t->env.len > 0)
+        return run_argv_env((char *const *)args->data, (char *const *)t->env.data);
     return run_argv((char *const *)args->data);
 }
 
@@ -1705,7 +1815,7 @@ serial_fallback:;
             }
         }
 
-        rc = run_step(ctx, ++(*step), total, &a);
+        rc = run_step(ctx, ++(*step), total, &a, t);
         free(a.data);
         if (rc == 0 && ctx->cache_dir)
             cache_store(ctx->cache_dir, ckey, ofile, ".o");
@@ -2050,7 +2160,7 @@ static int build_target(Builder *ctx, const char *cc,
             }
         }
 
-        brc = run_step(ctx, ++(*step), total, &a);
+        brc = run_step(ctx, ++(*step), total, &a, t);
         if (brc == 0 && ctx->cache_dir && !ctx->dry_run && bc_key)
             cache_store(ctx->cache_dir, bc_key, out_abs, bc_ext);
 
@@ -2086,7 +2196,7 @@ static int build_target(Builder *ctx, const char *cc,
         argv_push(&a, out_abs);
         for (int i = 0; i < objs.len; i++)
             argv_push(&a, objs.data[i]);
-        rc = run_step(ctx, ++(*step), total, &a);
+        rc = run_step(ctx, ++(*step), total, &a, t);
         free(a.data);
         free(ar);
     } else {
@@ -2132,7 +2242,7 @@ static int build_target(Builder *ctx, const char *cc,
         }
         for (int i = 0; i < t->ldflags.len; i++)
             argv_push(&a, t->ldflags.data[i]);
-        rc = run_step(ctx, ++(*step), total, &a);
+        rc = run_step(ctx, ++(*step), total, &a, t);
         free(a.data);
         free_strarray(&owned);
         free(libdir);

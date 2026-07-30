@@ -133,7 +133,8 @@ void   cc_load_symbolize_runtime(VirtualMachine *vm);
 Token *cc_inject_test_header(VirtualMachine *vm);
 int    cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts);
 
-// native.c / main.c shared infrastructure
+// exec.c: shared infrastructure for spawning host toolchain processes
+// (cc/ar/ld), used by both -c=native (main.c) and --build (build.c).
 typedef struct {
     const char **data;
     int          len;
@@ -143,6 +144,7 @@ typedef struct {
 void   argv_push(ArgVec *args, const char *arg);
 char  *make_tmp_path(const char *suffix);
 int    run_argv(char *const argv[]);
+int    run_argv_env(char *const argv[], char *const envp[]);
 
 // Native compile flags extracted from a CCCC vm instance.
 typedef struct {
