@@ -9787,7 +9787,7 @@ static Token *backtick_splice_end(VirtualMachine *vm, Token *fragment,
 }
 
 // Lower `fragment ${expr} fragment` to the parser-visible equivalent of
-// __builtin_quote(__builtin_get_vm(), "fragment $1 fragment", expr).
+// __builtin_quote("fragment $1 fragment", expr).
 // Interpolation tokens have already passed through the preprocessor, so this
 // preserves macro expansion inside ${...}.
 static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest, Token *tok) {
@@ -9860,10 +9860,6 @@ static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest, Token *tok) 
     (cur = cur->next = new_backtick_synthetic_token(vm, kind, text, tok))
     APPEND_BT_TOKEN(TK_IDENT, "__builtin_quote");
     APPEND_BT_TOKEN(TK_PUNCT, "(");
-    APPEND_BT_TOKEN(TK_IDENT, "__builtin_get_vm");
-    APPEND_BT_TOKEN(TK_PUNCT, "(");
-    APPEND_BT_TOKEN(TK_PUNCT, ")");
-    APPEND_BT_TOKEN(TK_PUNCT, ",");
 
     Token *template_tok = new_backtick_synthetic_token(vm, TK_STR,
                                                         tok->loc, tok);

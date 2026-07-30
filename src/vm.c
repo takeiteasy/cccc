@@ -924,6 +924,14 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     // Zero-initialize the VM struct
     memset(vm, 0, sizeof(VirtualMachine));
 
+    // Seed the compiler-internal VM global that every comptime __builtin_*
+    // (src/reflection.c) reads instead of taking a VirtualMachine* parameter.
+    // Macro execution windows in src/macros.c save/restore this around
+    // nested calls; cc_destroy clears it back to NULL so a later reader
+    // never dereferences a VM that has gone out of scope (see src/fuzzing.c,
+    // which constructs a fresh stack-local VirtualMachine per iteration).
+    __builtin_current_vm = vm;
+
     // Set runtime flags
     vm->flags = flags;
 
@@ -1127,6 +1135,12 @@ void cccc_gil_release(VirtualMachine *vm) {
 void cc_destroy(VirtualMachine *vm) {
     if (!vm)
         return;
+
+    // Drop the compiler-internal VM global if it still points at this VM,
+    // so a stack-local VirtualMachine going out of scope (e.g. src/fuzzing.c,
+    // one fresh VM per iteration) never leaves a dangling read target.
+    if (__builtin_current_vm == vm)
+        __builtin_current_vm = NULL;
 
     // If compile_macro_program was interrupted by longjmp (error exit), its
     // hashmap_snapshot is still live in macro_snapshot_backup.  Free it here

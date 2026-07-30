@@ -964,20 +964,19 @@ DebugSymbol *cc_lookup_symbol(VirtualMachine *vm, const char *name) {
 // local-extern pattern src/macros.c and src/repl.c use for the same
 // functions (see the comment at the top of src/repl.c) -- the public
 // prototypes in include/cccc/reflection.h are meant for *user* comptime
-// macro programs, not compiler-internal callers.
-extern const char *__builtin_gensym(VirtualMachine *vm, const char *prefix);
-extern Obj *__builtin_ast_function(VirtualMachine *vm, const char *name,
-                                   Type *return_type);
-extern Node *__builtin_ast_return(VirtualMachine *vm, Node *expr);
-extern void __builtin_ast_function_set_body(VirtualMachine *vm, Obj *fn,
-                                            Node *body);
-extern Obj *__builtin_ast_global_var(VirtualMachine *vm, const char *name,
-                                     Type *ty);
-extern Node *__builtin_ast_var_ref(VirtualMachine *vm, const char *name);
-extern Node *__builtin_ast_cast(VirtualMachine *vm, Node *expr, Type *target_type);
-extern Node *__builtin_ast_unary(VirtualMachine *vm, NodeKind op, Node *operand);
-extern Node *__builtin_ast_subscript(VirtualMachine *vm, Node *arr, Node *idx);
-extern Node *__builtin_ast_int_literal(VirtualMachine *vm, int64_t value);
+// macro programs, not compiler-internal callers. Both read
+// __builtin_current_vm internally now (seeded by cc_init for the whole
+// compile) rather than taking a VirtualMachine* parameter.
+extern const char *__builtin_gensym(const char *prefix);
+extern Obj *__builtin_ast_function(const char *name, Type *return_type);
+extern Node *__builtin_ast_return(Node *expr);
+extern void __builtin_ast_function_set_body(Obj *fn, Node *body);
+extern Obj *__builtin_ast_global_var(const char *name, Type *ty);
+extern Node *__builtin_ast_var_ref(const char *name);
+extern Node *__builtin_ast_cast(Node *expr, Type *target_type);
+extern Node *__builtin_ast_unary(NodeKind op, Node *operand);
+extern Node *__builtin_ast_subscript(Node *arr, Node *idx);
+extern Node *__builtin_ast_int_literal(int64_t value);
 
 static void debugger_add_condition_scope_var(VarScopeNode **vars, Obj *var) {
     if (!var || !var->name || !*var->name)
@@ -1037,17 +1036,17 @@ static void debugger_rewrite_locals(VirtualMachine *vm, Obj *current_fn, Node *n
     if (node->kind == ND_VAR && node->var &&
         debugger_var_is_paused_frame_local(current_fn, node->var)) {
         Obj *var = node->var;
-        Node *frame_ref = __builtin_ast_var_ref(vm, "__cccc_dbg_frame");
-        Node *char_ptr = __builtin_ast_cast(vm, frame_ref, pointer_to(vm, ty_char));
-        Node *idx = __builtin_ast_int_literal(vm, (int64_t)var->offset *
+        Node *frame_ref = __builtin_ast_var_ref("__cccc_dbg_frame");
+        Node *char_ptr = __builtin_ast_cast(frame_ref, pointer_to(vm, ty_char));
+        Node *idx = __builtin_ast_int_literal((int64_t)var->offset *
                                                         (int64_t)sizeof(long long));
-        Node *elem = __builtin_ast_subscript(vm, char_ptr, idx);
-        Node *addr = __builtin_ast_unary(vm, ND_ADDR, elem);
+        Node *elem = __builtin_ast_subscript(char_ptr, idx);
+        Node *addr = __builtin_ast_unary(ND_ADDR, elem);
         add_type(vm, addr); // types elem + addr; __builtin_ast_cast doesn't type
                              // its operand for us (unlike parse.c's new_cast), and
                              // once typed_ptr wraps addr in a CAST, add_type would
                              // never reach it again (see the node->ty note below).
-        Node *typed_ptr = __builtin_ast_cast(vm, addr, pointer_to(vm, var->ty));
+        Node *typed_ptr = __builtin_ast_cast(addr, pointer_to(vm, var->ty));
 
         node->kind = ND_DEREF;
         node->lhs = typed_ptr;
@@ -1088,7 +1087,7 @@ static Obj *debugger_frame_var(VirtualMachine *vm) {
     vm->error_jmp_buf = &jb;
 
     if (setjmp(jb) == 0) {
-        Obj *var = __builtin_ast_global_var(vm, "__cccc_dbg_frame",
+        Obj *var = __builtin_ast_global_var("__cccc_dbg_frame",
                                             pointer_to(vm, ty_void));
         cc_repl_compile_new(vm, snap.globals_head);
         vm->error_jmp_buf = saved_jmp_buf;
@@ -1174,10 +1173,10 @@ static bool debugger_compile_condition_once(VirtualMachine *vm, Breakpoint *bp) 
 
     if (setjmp(jb) == 0) {
         debugger_rewrite_locals(vm, current_fn, expr);
-        const char *name = __builtin_gensym(vm, "__cccc_dbg_cond");
-        Obj *fn = __builtin_ast_function(vm, name, cond_ty);
-        Node *ret = __builtin_ast_return(vm, expr);
-        __builtin_ast_function_set_body(vm, fn, ret);
+        const char *name = __builtin_gensym("__cccc_dbg_cond");
+        Obj *fn = __builtin_ast_function(name, cond_ty);
+        Node *ret = __builtin_ast_return(expr);
+        __builtin_ast_function_set_body(fn, ret);
         cc_repl_compile_new(vm, snap.globals_head);
         vm->error_jmp_buf = saved_jmp_buf;
         cc_expr_snapshot_discard(&snap);

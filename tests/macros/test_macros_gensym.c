@@ -3,7 +3,7 @@
 [[cccc::comptime]]
 Node *gensym_test(void) {
     const char *a = Gensym("helper");
-    const char *b = __builtin_gensym(VM, "helper");
+    const char *b = __builtin_gensym("helper");
 
     int same = 1;
     for (int i = 0; a[i] || b[i]; i++) {

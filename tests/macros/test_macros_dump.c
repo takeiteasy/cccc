@@ -22,13 +22,12 @@ static int contains(const char *hay, const char *needle) {
 // returns the original node (the dumps are the side effect we inspect).
 [[cccc::comptime]]
 Node *dump_and_pass(Node *n) {
-    VirtualMachine *vm = __builtin_get_vm();
 
     // Tree form -- print to stdout
-    __builtin_dump_tree(vm, n);
+    __builtin_dump_tree(n);
 
     // Gen form -- print to stdout
-    __builtin_dump_ast_gen(vm, n);
+    __builtin_dump_ast_gen(n);
 
     return n;
 }
@@ -36,18 +35,16 @@ Node *dump_and_pass(Node *n) {
 // Macro: returns the tree dump string of the argument node.
 [[cccc::comptime]]
 Node *tree_string(Node *n) {
-    VirtualMachine *vm = __builtin_get_vm();
-    const char *s = __builtin_dump_tree_to_string(vm, n);
+    const char *s = __builtin_dump_tree_to_string(n);
     // Return the string as a string literal node (for use with contains())
-    return __builtin_ast_string_literal(vm, s);
+    return __builtin_ast_string_literal(s);
 }
 
 // Macro: returns the ast-gen dump string of the argument node.
 [[cccc::comptime]]
 Node *gen_string(Node *n) {
-    VirtualMachine *vm = __builtin_get_vm();
-    const char *s = __builtin_dump_ast_gen_to_string(vm, n);
-    return __builtin_ast_string_literal(vm, s);
+    const char *s = __builtin_dump_ast_gen_to_string(n);
+    return __builtin_ast_string_literal(s);
 }
 
 int main(void) {

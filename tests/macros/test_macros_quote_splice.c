@@ -6,11 +6,10 @@
 // into a block using the positional $@1 splice.
 [[cccc::comptime]]
 Node *double_inc(Node *x) {
-    VirtualMachine *vm = __builtin_get_vm();
-    Node *s1    = __builtin_quote(vm, "$1 += 1;", x);
-    Node *s2    = __builtin_quote(vm, "$1 += 1;", x);
-    Node *chain = __builtin_node_list(vm, (Node*[]){ s1, s2 }, 2);
-    return __builtin_quote(vm, "{ $@1; }", chain);
+    Node *s1    = __builtin_quote("$1 += 1;", x);
+    Node *s2    = __builtin_quote("$1 += 1;", x);
+    Node *chain = __builtin_node_list((Node*[]){ s1, s2 }, 2);
+    return __builtin_quote("{ $@1; }", chain);
 }
 
 int get_plus_two(int v) {
@@ -24,12 +23,11 @@ int get_plus_two(int v) {
 // macro arguments (which are call-site nodes, in scope at macro execution).
 [[cccc::comptime]]
 Node *accumulate3(Node *acc, Node *a, Node *b, Node *c) {
-    VirtualMachine *vm = __builtin_get_vm();
-    Node *s1    = __builtin_quote(vm, "$1 += $2;", acc, a);
-    Node *s2    = __builtin_quote(vm, "$1 += $2;", acc, b);
-    Node *s3    = __builtin_quote(vm, "$1 += $2;", acc, c);
-    Node *chain = __builtin_node_list(vm, (Node*[]){ s1, s2, s3 }, 3);
-    return __builtin_quote(vm, "{ $@1; }", chain);
+    Node *s1    = __builtin_quote("$1 += $2;", acc, a);
+    Node *s2    = __builtin_quote("$1 += $2;", acc, b);
+    Node *s3    = __builtin_quote("$1 += $2;", acc, c);
+    Node *chain = __builtin_node_list((Node*[]){ s1, s2, s3 }, 3);
+    return __builtin_quote("{ $@1; }", chain);
 }
 
 int test_accumulate(void) {
@@ -42,10 +40,9 @@ int test_accumulate(void) {
 // two_increments builds two stmts and splices them via incremental $@.
 [[cccc::comptime]]
 Node *two_increments(Node *a, Node *b) {
-    VirtualMachine *vm = __builtin_get_vm();
-    Node *s1 = __builtin_quote(vm, "$1 += 10;", a);
-    Node *s2 = __builtin_quote(vm, "$1 += 20;", b);
-    return __builtin_quote(vm, "{ $@; $@; }", s1, s2);
+    Node *s1 = __builtin_quote("$1 += 10;", a);
+    Node *s2 = __builtin_quote("$1 += 20;", b);
+    return __builtin_quote("{ $@; $@; }", s1, s2);
 }
 
 int test_incr(void) {
@@ -58,10 +55,9 @@ int test_incr(void) {
 // if_then uses scalar $1 for the condition and list splice $@2 for the body.
 [[cccc::comptime]]
 Node *if_then(Node *cond, Node *body_expr) {
-    VirtualMachine *vm = __builtin_get_vm();
     // Wrap the expression argument in a statement so it can be list-spliced.
-    Node *stmt = __builtin_quote(vm, "$1;", body_expr);
-    return __builtin_quote(vm, "{ if ($1) { $@2; } }", cond, stmt);
+    Node *stmt = __builtin_quote("$1;", body_expr);
+    return __builtin_quote("{ if ($1) { $@2; } }", cond, stmt);
 }
 
 int test_if_then(void) {

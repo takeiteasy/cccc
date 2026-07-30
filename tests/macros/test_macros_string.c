@@ -5,7 +5,7 @@
 // Define a pragma macro that generates a string literal
 [[cccc::comptime]]
 Node *make_hello(void) {
-    return __builtin_ast_string_literal(__builtin_get_vm(), "Hello, World!");
+    return __builtin_ast_string_literal("Hello, World!");
 }
 
 int main(void) {

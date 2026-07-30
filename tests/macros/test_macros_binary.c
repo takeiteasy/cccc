@@ -3,10 +3,9 @@
 // Define a pragma macro that generates: (a + b) * 2
 [[cccc::comptime]]
 Node *double_sum(Node *a, Node *b) {
-    VirtualMachine *vm = __builtin_get_vm();
-    Node *sum = __builtin_ast_binary(vm, NK_ADD, a, b);
-    Node *two = __builtin_ast_int_literal(vm, 2);
-    return __builtin_ast_binary(vm, NK_MUL, sum, two);
+    Node *sum = __builtin_ast_binary(NK_ADD, a, b);
+    Node *two = __builtin_ast_int_literal(2);
+    return __builtin_ast_binary(NK_MUL, sum, two);
 }
 
 int main(void) {

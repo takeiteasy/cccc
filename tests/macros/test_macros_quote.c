@@ -4,24 +4,21 @@
 // Produces: a + b * a  (reuses $1)
 [[cccc::comptime]]
 Node *add_mul(Node *a, Node *b) {
-    VirtualMachine *vm = __builtin_get_vm();
-    return __builtin_quote(vm, "$1 + $2 * $1", a, b);
+    return __builtin_quote("$1 + $2 * $1", a, b);
 }
 
 // ---- Expression splice: reorder ($2 * $1 + $2) ---------------------------
 // Produces: y*x + y
 [[cccc::comptime]]
 Node *quad(Node *x, Node *y) {
-    VirtualMachine *vm = __builtin_get_vm();
-    return __builtin_quote(vm, "$2 * $1 + $2", x, y);
+    return __builtin_quote("$2 * $1 + $2", x, y);
 }
 
 // ---- Statement splice: return $1; ----------------------------------------
 // Must be called in statement position (not as an expression).
 [[cccc::comptime]]
 Node *ret_val(Node *v) {
-    VirtualMachine *vm = __builtin_get_vm();
-    return __builtin_quote(vm, "return $1;", v);
+    return __builtin_quote("return $1;", v);
 }
 
 int get_99(void) {
@@ -33,32 +30,28 @@ int get_99(void) {
 // Produces: a + b
 [[cccc::comptime]]
 Node *sum_incr(Node *a, Node *b) {
-    VirtualMachine *vm = __builtin_get_vm();
-    return __builtin_quote(vm, "$$ + $$", a, b);
+    return __builtin_quote("$$ + $$", a, b);
 }
 
 // ---- __builtin_quote_n: array form ---------------------------------------------
 // Produces: a + b + c
 [[cccc::comptime]]
 Node *add3(Node *a, Node *b, Node *c) {
-    VirtualMachine *vm = __builtin_get_vm();
     Node *args[3] = { a, b, c };
-    return __builtin_quote_n(vm, "$1 + $2 + $3", args, 3);
+    return __builtin_quote_n("$1 + $2 + $3", args, 3);
 }
 
 // ---- No splice points (plain expression) ---------------------------------
 [[cccc::comptime]]
 Node *const_expr(void) {
-    VirtualMachine *vm = __builtin_get_vm();
-    return __builtin_quote(vm, "6 * 7");
+    return __builtin_quote("6 * 7");
 }
 
 // ---- If-statement template -----------------------------------------------
 // Returns one of two values based on sign; invoked as statement in function body.
 [[cccc::comptime]]
 Node *clamp_zero(Node *val) {
-    VirtualMachine *vm = __builtin_get_vm();
-    return __builtin_quote(vm, "if ($1 < 0) return 0; else return $1;", val);
+    return __builtin_quote("if ($1 < 0) return 0; else return $1;", val);
 }
 
 int clamp(int x) {

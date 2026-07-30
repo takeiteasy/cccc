@@ -4,9 +4,8 @@
 
 [[cccc::comptime]]
 Node *bad_splice(Node *x) {
-    VirtualMachine *vm = __builtin_get_vm();
     // $@1 is a list splice — it cannot be used as an expression operand.
-    return __builtin_quote(vm, "$@1 + 1", x);
+    return __builtin_quote("$@1 + 1", x);
 }
 
 int main(void) {

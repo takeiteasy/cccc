@@ -3,30 +3,28 @@
 // A simple macro to expand in tests
 [[cccc::comptime]]
 Node *make_answer(void) {
-    return __builtin_ast_int_literal(__builtin_get_vm(), 42);
+    return __builtin_ast_int_literal(42);
 }
 
 // A macro that wraps make_answer() — used to test multi-level expansion
 [[cccc::comptime]]
 Node *wrap_answer(void) {
-    return __builtin_quote(__builtin_get_vm(), "make_answer()");
+    return __builtin_quote("make_answer()");
 }
 
 // Test 1: macroexpand_1 on a macro-call node expands one level
 [[cccc::comptime]]
 Node *test_expand_1_macro_call(void) {
-    VirtualMachine *vm = __builtin_get_vm();
-    Node *call = __builtin_quote(vm, "make_answer()");
-    return __builtin_macroexpand_1(vm, call);
+    Node *call = __builtin_quote("make_answer()");
+    return __builtin_macroexpand_1(call);
 }
 
 // Test 2: macroexpand_1 on a non-macro node is identity
 [[cccc::comptime]]
 Node *test_expand_1_identity(void) {
-    VirtualMachine *vm = __builtin_get_vm();
-    Node *lit = __builtin_ast_int_literal(vm, 99);
-    Node *result = __builtin_macroexpand_1(vm, lit);
-    return __builtin_ast_int_literal(vm, result == lit ? 1 : 0);
+    Node *lit = __builtin_ast_int_literal(99);
+    Node *result = __builtin_macroexpand_1(lit);
+    return __builtin_ast_int_literal(result == lit ? 1 : 0);
 }
 
 // Test 3: macroexpand_1 on wrap_answer() expands only one level.
@@ -34,28 +32,25 @@ Node *test_expand_1_identity(void) {
 // resolves that to 42, proving the first step stopped after one expansion.
 [[cccc::comptime]]
 Node *test_expand_1_single_level(void) {
-    VirtualMachine *vm = __builtin_get_vm();
-    Node *call = __builtin_quote(vm, "wrap_answer()");
-    Node *step1 = __builtin_macroexpand_1(vm, call);
-    Node *step2 = __builtin_macroexpand_1(vm, step1);
+    Node *call = __builtin_quote("wrap_answer()");
+    Node *step1 = __builtin_macroexpand_1(call);
+    Node *step2 = __builtin_macroexpand_1(step1);
     return step2;
 }
 
 // Test 4: macroexpand fully expands wrap_answer() -> make_answer() -> 42
 [[cccc::comptime]]
 Node *test_expand_full(void) {
-    VirtualMachine *vm = __builtin_get_vm();
-    Node *call = __builtin_quote(vm, "wrap_answer()");
-    return __builtin_macroexpand(vm, call);
+    Node *call = __builtin_quote("wrap_answer()");
+    return __builtin_macroexpand(call);
 }
 
 // Test 5: macroexpand on a non-macro node is identity
 [[cccc::comptime]]
 Node *test_expand_full_identity(void) {
-    VirtualMachine *vm = __builtin_get_vm();
-    Node *lit = __builtin_ast_int_literal(vm, 77);
-    Node *result = __builtin_macroexpand(vm, lit);
-    return __builtin_ast_int_literal(vm, result == lit ? 1 : 0);
+    Node *lit = __builtin_ast_int_literal(77);
+    Node *result = __builtin_macroexpand(lit);
+    return __builtin_ast_int_literal(result == lit ? 1 : 0);
 }
 
 int main(void) {

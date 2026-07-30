@@ -7,9 +7,8 @@
 // then returns the argument unchanged.
 [[cccc::comptime]]
 Node *warn_if_zero(Node *n) {
-    VirtualMachine *vm = __builtin_get_vm();
     // Always emit a warning — we're testing the mechanism, not the logic
-    __builtin_macro_warning_at(vm, n, "warn_if_zero: inspecting argument (test warning)");
+    __builtin_macro_warning_at(n, "warn_if_zero: inspecting argument (test warning)");
     return n;
 }
 

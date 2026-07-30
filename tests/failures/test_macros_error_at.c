@@ -4,8 +4,7 @@
 // Macro that always errors with a located message.
 [[cccc::comptime]]
 Node *always_error(Node *n) {
-    VirtualMachine *vm = __builtin_get_vm();
-    __builtin_macro_error_at(vm, n, "always_error: this argument is not allowed");
+    __builtin_macro_error_at(n, "always_error: this argument is not allowed");
     return n; // unreachable
 }
 

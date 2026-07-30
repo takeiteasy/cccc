@@ -66,13 +66,14 @@
 // public prototypes live in include/cccc/reflection.h, which is the header
 // injected into *user* [[cccc::comptime]] programs; compiler-internal
 // callers instead use local extern declarations, the same pattern
-// src/macros.c uses for the same functions.
-extern const char *__builtin_gensym(VirtualMachine *vm, const char *prefix);
-extern Obj *__builtin_ast_function(VirtualMachine *vm, const char *name,
-                                   Type *return_type);
-extern Node *__builtin_ast_return(VirtualMachine *vm, Node *expr);
-extern void __builtin_ast_function_set_body(VirtualMachine *vm, Obj *fn,
-                                            Node *body);
+// src/macros.c uses for the same functions. Both read __builtin_current_vm
+// internally now rather than taking a VirtualMachine* parameter; that global
+// is seeded by cc_init for the whole compile (see src/vm.c), so it is valid
+// here even though this call happens outside a macro-execution window.
+extern const char *__builtin_gensym(const char *prefix);
+extern Obj *__builtin_ast_function(const char *name, Type *return_type);
+extern Node *__builtin_ast_return(Node *expr);
+extern void __builtin_ast_function_set_body(Obj *fn, Node *body);
 
 #define REPL_PROMPT      "cccc> "
 #define REPL_CONT_PROMPT "  ... "
@@ -530,10 +531,10 @@ static void repl_process_unit(VirtualMachine *vm, const char *text) {
             break;
 
         case REPL_UNIT_EXPR: {
-            const char *name = __builtin_gensym(vm, "__repl_eval");
-            Obj *fn = __builtin_ast_function(vm, name, expr_node->ty);
-            Node *ret = __builtin_ast_return(vm, expr_node);
-            __builtin_ast_function_set_body(vm, fn, ret);
+            const char *name = __builtin_gensym("__repl_eval");
+            Obj *fn = __builtin_ast_function(name, expr_node->ty);
+            Node *ret = __builtin_ast_return(expr_node);
+            __builtin_ast_function_set_body(fn, ret);
             cc_repl_compile_new(vm, snap.globals_head);
 
             long long ival = 0;

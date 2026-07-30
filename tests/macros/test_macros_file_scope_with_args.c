@@ -4,11 +4,10 @@
 
 [[cccc::comptime]]
 void make_named_func(char *name) {
-    VirtualMachine *vm = __builtin_get_vm();
-    Type *int_ty = __builtin_ast_get_type(vm, "int");
-    Obj *fn = __builtin_ast_function(vm, name, int_ty);
-    Node *body = __builtin_ast_return(vm, __builtin_ast_int_literal(vm, 42));
-    __builtin_ast_function_set_body(vm, fn, body);
+    Type *int_ty = __builtin_ast_get_type("int");
+    Obj *fn = __builtin_ast_function(name, int_ty);
+    Node *body = __builtin_ast_return(__builtin_ast_int_literal(42));
+    __builtin_ast_function_set_body(fn, body);
 }
 
 make_named_func("genned");

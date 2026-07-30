@@ -528,7 +528,7 @@ void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
                                 AttrTarget *target, Node *args,
                                 int arg_count);
 void ensure_reflection_attrs_registered(VirtualMachine *vm);
-void __builtin_ensure_string_h_decls(VirtualMachine *vm);
+void __builtin_ensure_string_h_decls(void);
 void cc_apply_attr_to_fn(VirtualMachine *vm, Obj *fn, const char *attr_text, Token *site_tok);
 // Expand a deferred ND_INIT_SPLICE node into positional ND_ASSIGN chains.
 // Called by quote_substitute in relfection.c after the splice chain is resolved.
@@ -975,6 +975,12 @@ char *fetch_url_to_cache(VirtualMachine *vm, const char *url);
 
 // vm.c — global pointer to the currently executing VM (set/cleared by cc_run_at)
 extern VirtualMachine *cc_running_vm;
+
+// reflection.c — the VM live for the current compile. Seeded by cc_init,
+// save/restored around macro execution windows in macros.c, cleared by
+// cc_destroy. Every comptime __builtin_* reads this instead of taking an
+// explicit VirtualMachine* parameter.
+extern VirtualMachine *__builtin_current_vm;
 
 // ops.c (included into vm.c) — propagate the #653 heap type shadow from
 // src to dst, exposed for the memcpy/memmove shims in stdlib/string.c

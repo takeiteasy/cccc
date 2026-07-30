@@ -6,9 +6,8 @@ struct Point { int x; int y; };
 
 [[cccc::comptime]]
 Node *bad_point(Node *a) {
-    VirtualMachine *vm = __builtin_get_vm();
     // Only 1 element in chain but struct Point has 2 fields → error.
-    Node *chain = __builtin_node_list(vm, (Node*[]){ a }, 1);
+    Node *chain = __builtin_node_list((Node*[]){ a }, 1);
     return Quote("(struct Point){ $@1 }", chain);
 }
 

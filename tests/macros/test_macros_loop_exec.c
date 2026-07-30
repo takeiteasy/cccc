@@ -19,54 +19,52 @@ int g_do_result;
 // Generated: while (g_while_result < 10) g_while_result = g_while_result + 1;
 [[cccc::comptime]]
 Node *gen_while_func() {
-    VirtualMachine *vm = __builtin_get_vm();
-    Type *void_ty = __builtin_ast_get_type(vm, "void");
-    Obj *fn = __builtin_ast_function(vm, "fill_while", void_ty);
+    Type *void_ty = __builtin_ast_get_type("void");
+    Obj *fn = __builtin_ast_function("fill_while", void_ty);
 
-    Type *int_ty = __builtin_ast_get_type(vm, "int");
+    Type *int_ty = __builtin_ast_get_type("int");
     (void)int_ty;
 
     // cond: g_while_result < 10
-    Node *lhs_c  = __builtin_ast_var_ref(vm, "g_while_result");
-    Node *ten    = __builtin_ast_int_literal(vm, 10);
-    Node *cond   = __builtin_ast_binary(vm, NK_LT, lhs_c, ten);
+    Node *lhs_c  = __builtin_ast_var_ref("g_while_result");
+    Node *ten    = __builtin_ast_int_literal(10);
+    Node *cond   = __builtin_ast_binary(NK_LT, lhs_c, ten);
 
     // body: g_while_result = g_while_result + 1
-    Node *lhs_a  = __builtin_ast_var_ref(vm, "g_while_result");
-    Node *lhs_a2 = __builtin_ast_var_ref(vm, "g_while_result");
-    Node *one    = __builtin_ast_int_literal(vm, 1);
-    Node *add    = __builtin_ast_binary(vm, NK_ADD, lhs_a2, one);
-    Node *asgn   = __builtin_ast_assign(vm, lhs_a, add);
-    Node *body   = __builtin_ast_expr_stmt(vm, asgn);
+    Node *lhs_a  = __builtin_ast_var_ref("g_while_result");
+    Node *lhs_a2 = __builtin_ast_var_ref("g_while_result");
+    Node *one    = __builtin_ast_int_literal(1);
+    Node *add    = __builtin_ast_binary(NK_ADD, lhs_a2, one);
+    Node *asgn   = __builtin_ast_assign(lhs_a, add);
+    Node *body   = __builtin_ast_expr_stmt(asgn);
 
-    Node *loop = __builtin_ast_while(vm, cond, body);
-    __builtin_ast_function_set_body(vm, fn, loop);
-    return __builtin_ast_int_literal(vm, 0);
+    Node *loop = __builtin_ast_while(cond, body);
+    __builtin_ast_function_set_body(fn, loop);
+    return __builtin_ast_int_literal(0);
 }
 
 // Macro: generates a function that uses a for loop.
 // Generated: for (; g_for_result < 5; ) g_for_result = g_for_result + 1;
 [[cccc::comptime]]
 Node *gen_for_func() {
-    VirtualMachine *vm = __builtin_get_vm();
-    Type *void_ty = __builtin_ast_get_type(vm, "void");
-    Obj *fn = __builtin_ast_function(vm, "fill_for", void_ty);
+    Type *void_ty = __builtin_ast_get_type("void");
+    Obj *fn = __builtin_ast_function("fill_for", void_ty);
 
-    Node *lhs_c  = __builtin_ast_var_ref(vm, "g_for_result");
-    Node *five   = __builtin_ast_int_literal(vm, 5);
-    Node *cond   = __builtin_ast_binary(vm, NK_LT, lhs_c, five);
+    Node *lhs_c  = __builtin_ast_var_ref("g_for_result");
+    Node *five   = __builtin_ast_int_literal(5);
+    Node *cond   = __builtin_ast_binary(NK_LT, lhs_c, five);
 
-    Node *lhs_a  = __builtin_ast_var_ref(vm, "g_for_result");
-    Node *lhs_a2 = __builtin_ast_var_ref(vm, "g_for_result");
-    Node *one    = __builtin_ast_int_literal(vm, 1);
-    Node *add    = __builtin_ast_binary(vm, NK_ADD, lhs_a2, one);
-    Node *asgn   = __builtin_ast_assign(vm, lhs_a, add);
-    Node *body   = __builtin_ast_expr_stmt(vm, asgn);
+    Node *lhs_a  = __builtin_ast_var_ref("g_for_result");
+    Node *lhs_a2 = __builtin_ast_var_ref("g_for_result");
+    Node *one    = __builtin_ast_int_literal(1);
+    Node *add    = __builtin_ast_binary(NK_ADD, lhs_a2, one);
+    Node *asgn   = __builtin_ast_assign(lhs_a, add);
+    Node *body   = __builtin_ast_expr_stmt(asgn);
 
     // for(NULL, cond, NULL, body) — init and inc are NULL
-    Node *loop = __builtin_ast_for(vm, (void*)0, cond, (void*)0, body);
-    __builtin_ast_function_set_body(vm, fn, loop);
-    return __builtin_ast_int_literal(vm, 0);
+    Node *loop = __builtin_ast_for((void*)0, cond, (void*)0, body);
+    __builtin_ast_function_set_body(fn, loop);
+    return __builtin_ast_int_literal(0);
 }
 
 // Macro: generates a function that uses a do-while loop.
@@ -74,24 +72,23 @@ Node *gen_for_func() {
 // After: g_do_result == 3 (started at 0, runs 3 times)
 [[cccc::comptime]]
 Node *gen_do_func() {
-    VirtualMachine *vm = __builtin_get_vm();
-    Type *void_ty = __builtin_ast_get_type(vm, "void");
-    Obj *fn = __builtin_ast_function(vm, "fill_do", void_ty);
+    Type *void_ty = __builtin_ast_get_type("void");
+    Obj *fn = __builtin_ast_function("fill_do", void_ty);
 
-    Node *lhs_b  = __builtin_ast_var_ref(vm, "g_do_result");
-    Node *lhs_b2 = __builtin_ast_var_ref(vm, "g_do_result");
-    Node *one    = __builtin_ast_int_literal(vm, 1);
-    Node *add    = __builtin_ast_binary(vm, NK_ADD, lhs_b2, one);
-    Node *asgn   = __builtin_ast_assign(vm, lhs_b, add);
-    Node *body   = __builtin_ast_expr_stmt(vm, asgn);
+    Node *lhs_b  = __builtin_ast_var_ref("g_do_result");
+    Node *lhs_b2 = __builtin_ast_var_ref("g_do_result");
+    Node *one    = __builtin_ast_int_literal(1);
+    Node *add    = __builtin_ast_binary(NK_ADD, lhs_b2, one);
+    Node *asgn   = __builtin_ast_assign(lhs_b, add);
+    Node *body   = __builtin_ast_expr_stmt(asgn);
 
-    Node *lhs_c  = __builtin_ast_var_ref(vm, "g_do_result");
-    Node *three  = __builtin_ast_int_literal(vm, 3);
-    Node *cond   = __builtin_ast_binary(vm, NK_LT, lhs_c, three);
+    Node *lhs_c  = __builtin_ast_var_ref("g_do_result");
+    Node *three  = __builtin_ast_int_literal(3);
+    Node *cond   = __builtin_ast_binary(NK_LT, lhs_c, three);
 
-    Node *loop = __builtin_ast_do_while(vm, body, cond);
-    __builtin_ast_function_set_body(vm, fn, loop);
-    return __builtin_ast_int_literal(vm, 0);
+    Node *loop = __builtin_ast_do_while(body, cond);
+    __builtin_ast_function_set_body(fn, loop);
+    return __builtin_ast_int_literal(0);
 }
 
 void fill_while(void);

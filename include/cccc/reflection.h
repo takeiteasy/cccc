@@ -63,9 +63,9 @@
  *
  * This private header is embedded into CCCC and automatically injected when
  * compiling pragma macros. It is not installed as a public runtime header.
- * All functions that require VM context use the VM macro, which
- * expands to __builtin_get_vm() - a builtin that returns the current
- * VM instance during macro execution.
+ * Functions that need VM context read it internally from a process-global
+ * set by the compiler for the duration of macro execution -- macro authors
+ * never see or pass a VM object.
  *
  * ## Example (expression macro)
  *
@@ -175,35 +175,14 @@ typedef enum {
     ATTR_TARGET_GLOBAL = 4,
 } AttrTargetKind;
 
-// ============================================================================
-// Magic VM Builtin
-// ============================================================================
-
-/*!
- * @function __builtin_get_vm
- * @abstract Builtin that returns the current parent VM context.
- * @discussion Set before calling a pragma macro and cleared after.
- *             Use the @c VM convenience macro inside a macro body to refer
- *             to the active VM instance.
- * @return Pointer to the current CCCC VM instance.
- */
-extern VirtualMachine *__builtin_get_vm(void);
-
-/*!
- * @define VM
- * @abstract Magic macro that references the VM instance in pragma macros.
- */
-#define VM __builtin_get_vm()
-
 /*!
  * @function __builtin_gensym
  * @abstract Generate a unique identifier string for macro-created symbols.
- * @param vm The VM context.
  * @param prefix Prefix for the generated name.
  * @return An arena-allocated string of the form "<prefix>__<n>".
  * @discussion Convenience wrapper: Gensym(prefix).
  */
-const char *__builtin_gensym(VirtualMachine *vm, const char *prefix);
+const char *__builtin_gensym(const char *prefix);
 
 /*!
  * @function __builtin_macroexpand_1
@@ -213,11 +192,10 @@ const char *__builtin_gensym(VirtualMachine *vm, const char *prefix);
  *             or recursing into nested macro calls. If @a node is not a macro
  *             call, it is returned unchanged (identity).
  *             Convenience wrapper: MacroExpand1(node).
- * @param vm The VM context.
  * @param node The node to (possibly) expand.
  * @return The expanded node, or @a node itself if it is not a macro call.
  */
-Node *__builtin_macroexpand_1(VirtualMachine *vm, Node *node);
+Node *__builtin_macroexpand_1(Node *node);
 
 /*!
  * @function __builtin_macroexpand
@@ -226,35 +204,31 @@ Node *__builtin_macroexpand_1(VirtualMachine *vm, Node *node);
  *             until it is no longer an @c NK_MACRO_CALL (i.e. the form is
  *             stable). Does not recurse into child nodes. Respects the VM's
  *             @c macro_recursion_limit.  Convenience wrapper: MacroExpand(node).
- * @param vm The VM context.
  * @param node The node to fully expand.
  * @return The fully expanded node, or @a node itself if it is not a macro call.
  */
-Node *__builtin_macroexpand(VirtualMachine *vm, Node *node);
+Node *__builtin_macroexpand(Node *node);
 
 /*!
  * @function __builtin_ast_vararg_count
  * @abstract Return the number of variadic arguments for the active macro call.
- * @param vm The VM context.
  * @return Number of arguments after the fixed parameters.
  */
-int __builtin_ast_vararg_count(VirtualMachine *vm);
+int __builtin_ast_vararg_count(void);
 
 /*!
  * @function __builtin_ast_vararg_at
  * @abstract Return an inline macro's variadic AST argument by zero-based index.
- * @param vm The VM context.
  * @param index Zero-based variadic argument index.
  * @return The argument node.
  * @discussion Emits a compile-time error if @a index is out of range or the
  *             active macro call is a global-generation string macro.
  */
-Node *__builtin_ast_vararg_at(VirtualMachine *vm, int index);
+Node *__builtin_ast_vararg_at(int index);
 
 /*!
  * @function __builtin_ast_varargs_as_array
  * @abstract Return an inline macro's variadic AST arguments as an array.
- * @param vm The VM context.
  * @return Borrowed array of variadic argument nodes, or NULL when the active
  *         inline macro call has no variadic arguments.
  * @discussion The returned array is read-only and valid only for the current
@@ -263,18 +237,17 @@ Node *__builtin_ast_vararg_at(VirtualMachine *vm, int index);
  *             compile-time error if the active macro call is a
  *             global-generation string macro.
  */
-Node **__builtin_ast_varargs_as_array(VirtualMachine *vm);
+Node **__builtin_ast_varargs_as_array(void);
 
 /*!
  * @function __builtin_ast_vararg_str_at
  * @abstract Return a global-generation macro's stringified variadic argument.
- * @param vm The VM context.
  * @param index Zero-based variadic argument index.
  * @return The stringified token argument.
  * @discussion Emits a compile-time error if @a index is out of range or the
  *             active macro call is an inline AST macro.
  */
-const char *__builtin_ast_vararg_str_at(VirtualMachine *vm, int index);
+const char *__builtin_ast_vararg_str_at(int index);
 
 // ============================================================================
 // Generated Node Source Locations (ticket #173)
@@ -283,24 +256,22 @@ const char *__builtin_ast_vararg_str_at(VirtualMachine *vm, int index);
 /*!
  * @function __builtin_ast_current_token
  * @abstract Return the token for the macro invocation currently being executed.
- * @param vm The VM context.
  * @return Opaque token for the active macro call site, or NULL outside macro
  *         execution.
  * @discussion Convenience wrapper: CurrentToken().
  */
-Token *__builtin_ast_current_token(VirtualMachine *vm);
+Token *__builtin_ast_current_token(void);
 
 /*!
  * @function __builtin_ast_synthetic_token
  * @abstract Create an opaque synthetic source token for generated AST nodes.
- * @param vm The VM context.
  * @param label Short diagnostic label for the synthetic location.
  * @return Arena-allocated synthetic token, or NULL on error.
  * @discussion Use this when a generated node should diagnose against a stable
  *             generated location instead of the macro call or an input node.
  *             Convenience wrapper: SyntheticToken(label).
  */
-Token *__builtin_ast_synthetic_token(VirtualMachine *vm, const char *label);
+Token *__builtin_ast_synthetic_token(const char *label);
 
 /*!
  * @function __builtin_ast_token_from_node
@@ -339,7 +310,6 @@ Node *__builtin_ast_copy_location(Node *dst, Node *src);
 /*!
  * @function __builtin_macro_error_at
  * @abstract Emit a compiler error pointing at the source location of a node.
- * @param vm The VM context.
  * @param node A node whose tok field provides file/line/col. May be NULL
  *             (falls back to a location-less error).
  * @param fmt printf-style format string, followed by format arguments.
@@ -349,27 +319,25 @@ Node *__builtin_ast_copy_location(Node *dst, Node *src);
  *             it records the error and compilation may continue.
  *             Convenience wrapper: MacroErrorAt(node, ...).
  */
-void __builtin_macro_error_at(VirtualMachine *vm, Node *node, const char *fmt, ...)
-    __attribute__((format(printf, 3, 4)));
+void __builtin_macro_error_at(Node *node, const char *fmt, ...)
+    __attribute__((format(printf, 2, 3)));
 
 /*!
  * @function __builtin_macro_warning_at
  * @abstract Emit a compiler warning pointing at the source location of a node.
- * @param vm The VM context.
  * @param node A node whose tok field provides file/line/col. May be NULL.
  * @param fmt printf-style format string, followed by format arguments.
  * @discussion Emitted only when -Wcccc-macro is enabled. Non-fatal unless
  *             promoted with -Werror or -Werror=cccc-macro.
  *             Convenience wrapper: MacroWarningAt(node, ...).
  */
-void __builtin_macro_warning_at(VirtualMachine *vm, Node *node, const char *fmt, ...)
-    __attribute__((format(printf, 3, 4)));
+void __builtin_macro_warning_at(Node *node, const char *fmt, ...)
+    __attribute__((format(printf, 2, 3)));
 
 /*!
  * @function __builtin_quote
  * @abstract Parse a C code template string into an AST node, substituting
  *           splice points with the provided argument nodes.
- * @param vm The VM context.
  * @param tmpl A C expression or statement as a string literal.
  *
  *   **Scalar splices** — replace a single position with one node:
@@ -398,13 +366,12 @@ void __builtin_macro_warning_at(VirtualMachine *vm, Node *node, const char *fmt,
  *             nodes; use __builtin_quote_n for larger node arrays.
  *             Convenience wrapper: Quote(tmpl, ...).
  */
-Node *__builtin_quote(VirtualMachine *vm, const char *tmpl, ...);
+Node *__builtin_quote(const char *tmpl, ...);
 
 /*!
  * @function __builtin_quote_n
  * @abstract Array-form quasi-quote that validates the caller-provided splice
  *           count and supports larger node arrays than the variadic form.
- * @param vm The VM context.
  * @param tmpl A C expression or statement as a string literal with $N / $@N
  *             splice points.
  * @param nodes Array of Node* splice arguments.
@@ -413,13 +380,12 @@ Node *__builtin_quote(VirtualMachine *vm, const char *tmpl, ...);
  * @return The parsed and substituted AST node, or NULL on error.
  * @discussion Convenience wrapper: QuoteN(tmpl, nodes, count).
  */
-Node *__builtin_quote_n(VirtualMachine *vm, const char *tmpl, Node **nodes, int count);
+Node *__builtin_quote_n(const char *tmpl, Node **nodes, int count);
 
 /*!
  * @function __builtin_node_list
  * @abstract Build a `->next`-linked node chain from an array, returning the
  *           head.  Use the result as the argument to a `$@k` list splice.
- * @param vm    The VM context.
  * @param nodes Array of Node* to link together.  Linking stops at the first
  *              NULL element or at count, whichever comes first.
  * @param count Number of elements in the array.
@@ -429,7 +395,7 @@ Node *__builtin_quote_n(VirtualMachine *vm, const char *tmpl, Node **nodes, int 
  *             passed directly as the splice argument without going through
  *             this helper.  Convenience wrapper: NodeList(nodes, count).
  */
-Node *__builtin_node_list(VirtualMachine *vm, Node **nodes, int count);
+Node *__builtin_node_list(Node **nodes, int count);
 
 // ============================================================================
 // Type Lookup and Introspection
@@ -438,32 +404,29 @@ Node *__builtin_node_list(VirtualMachine *vm, Node **nodes, int count);
 /*!
  * @function __builtin_ast_find_type
  * @abstract Look up a type by tag name (struct/union/enum).
- * @param vm The VM context.
  * @param name The tag name to look up.
  * @return The matching Type*, or NULL if not found.
  * @discussion Convenience wrapper: FindType(name).
  */
-Type *__builtin_ast_find_type(VirtualMachine *vm, const char *name);
+Type *__builtin_ast_find_type(const char *name);
 
 /*!
  * @function __builtin_ast_type_exists
  * @abstract Check whether a type is currently in scope by name.
- * @param vm The VM context.
  * @param name The type name to look up.
  * @return True if the name resolves to a type, false otherwise.
  * @discussion Convenience wrapper: TypeExists(name).
  */
-bool __builtin_ast_type_exists(VirtualMachine *vm, const char *name);
+bool __builtin_ast_type_exists(const char *name);
 
 /*!
  * @function __builtin_ast_get_type
  * @abstract Look up a type by name, falling back to the built-in primitives.
- * @param vm The VM context.
  * @param name The type name to look up.
  * @return The matching Type*, or NULL if not found.
  * @discussion Convenience wrapper: GetType(name).
  */
-Type *__builtin_ast_get_type(VirtualMachine *vm, const char *name);
+Type *__builtin_ast_get_type(const char *name);
 
 /*!
  * @function __builtin_ast_type_kind
@@ -577,68 +540,62 @@ const char *__builtin_ast_type_name(Type *ty);
 /*!
  * @function __builtin_ast_type_c_name
  * @abstract Return a valid C identifier fragment naming `ty`.
- * @param vm The VM context.
  * @param ty The type to inspect.
  * @return TypeName(ty) for named types, or a builtin spelling ("int",
  *   "double", "ulong", ...) for builtin scalar types, or NULL.
  * @discussion Convenience wrapper: TypeCName(ty). Intended for naming
  *   generated functions, e.g. sum_<T> from GenerateSum(elem_type).
  */
-const char *__builtin_ast_type_c_name(VirtualMachine *vm, Type *ty);
+const char *__builtin_ast_type_c_name(Type *ty);
 
 /*!
  * @function __builtin_ast_make_pointer
  * @abstract Build a pointer-to-base type.
- * @param vm The VM context.
  * @param base The pointed-to type.
  * @return A Type* representing "base *", or NULL on error.
  * @discussion Convenience wrapper: MakePointer(base).
  */
-Type *__builtin_ast_make_pointer(VirtualMachine *vm, Type *base);
+Type *__builtin_ast_make_pointer(Type *base);
 
 /*!
  * @function __builtin_ast_make_array
  * @abstract Build a fixed-length array type.
- * @param vm The VM context.
  * @param base The element type.
  * @param length The element count.
  * @return A Type* representing "base[length]", or NULL on error.
  * @discussion Convenience wrapper: MakeArray(base, length).
  */
-Type *__builtin_ast_make_array(VirtualMachine *vm, Type *base, int length);
+Type *__builtin_ast_make_array(Type *base, int length);
 
 /*!
  * @function __builtin_ast_make_func_ptr_type
  * @abstract Build a pointer-to-function type, e.g. "T (*)(T)".
- * @param vm The VM context.
  * @param return_ty The function's return type.
  * @param param_types Array of parameter types (each copy_type()'d internally).
  * @param nparams Number of entries in param_types (max 16).
  * @return A Type* representing "return_ty (*)(param_types...)", or NULL on error.
  * @discussion Convenience wrapper: MakeFuncPtrType(return_ty, param_types, nparams).
  */
-Type *__builtin_ast_make_func_ptr_type(VirtualMachine *vm, Type *return_ty,
+Type *__builtin_ast_make_func_ptr_type(Type *return_ty,
                                         Type **param_types, int nparams);
 
 // Ticket #171: qualified type constructors
 /*!
  * @function __builtin_ast_make_const
  * @abstract Return a const-qualified copy of ty.
- * @param vm The VM context.
  * @param ty The type to qualify.
  * @return A const-qualified Type*, or NULL on error.
  * @discussion Convenience wrapper: MakeConst(ty).
  */
-Type *__builtin_ast_make_const(VirtualMachine *vm, Type *ty);
+Type *__builtin_ast_make_const(Type *ty);
 /*!
  * @function __builtin_ast_make_volatile
  * @abstract Return a volatile-qualified copy of ty.
- * @param vm The VM context.
  * @param ty The type to qualify.
  * @return A volatile-qualified Type*, or NULL on error.
  * @discussion Convenience wrapper: MakeVolatile(ty).
  */
-Type *__builtin_ast_make_volatile(VirtualMachine *vm, Type *ty);
+Type *__builtin_ast_make_volatile(Type *ty);
 
 // ============================================================================
 // Enum Reflection
@@ -647,34 +604,31 @@ Type *__builtin_ast_make_volatile(VirtualMachine *vm, Type *ty);
 /*!
  * @function __builtin_ast_enum_count
  * @abstract Return the number of constants in an enum type.
- * @param vm The VM context.
  * @param enum_type The enum type to inspect.
  * @return The constant count, or -1 if enum_type is not an enum.
  * @discussion Convenience wrapper: EnumCount(ty).
  */
-int __builtin_ast_enum_count(VirtualMachine *vm, Type *enum_type);
+int __builtin_ast_enum_count(Type *enum_type);
 
 /*!
  * @function __builtin_ast_enum_at
  * @abstract Return the enum constant at a given index.
- * @param vm The VM context.
  * @param enum_type The enum type to inspect.
  * @param index Zero-based index.
  * @return The EnumConstant*, or NULL on out-of-range or non-enum.
  * @discussion Convenience wrapper: EnumAt(ty, index).
  */
-EnumConstant *__builtin_ast_enum_at(VirtualMachine *vm, Type *enum_type, int index);
+EnumConstant *__builtin_ast_enum_at(Type *enum_type, int index);
 
 /*!
  * @function __builtin_ast_enum_find
  * @abstract Look up an enum constant by name.
- * @param vm The VM context.
  * @param enum_type The enum type to search.
  * @param name The constant name to look up.
  * @return The matching EnumConstant*, or NULL if not found.
  * @discussion Convenience wrapper: EnumFind(ty, name).
  */
-EnumConstant *__builtin_ast_enum_find(VirtualMachine *vm, Type *enum_type,
+EnumConstant *__builtin_ast_enum_find(Type *enum_type,
                                     const char *name);
 
 /*!
@@ -737,27 +691,25 @@ int64_t __builtin_ast_enum_value(Type *e, int index);
  * @function __builtin_ast_enum_to_string_switch
  * @abstract Build a `switch (expr) { case V0: return "Name0"; ...
  *           default: return ""; }` over the constants of an enum type.
- * @param vm The virtual machine instance.
  * @param ty The enum type.
  * @param expr The expression to switch on (the enum value).
  * @return An NK_SWITCH node. Caller wraps it in a function returning
  *         `const char *`.
  * @discussion Convenience wrapper: EnumToString(ty, expr).
  */
-Node *__builtin_ast_enum_to_string_switch(VirtualMachine *vm, Type *ty, Node *expr);
+Node *__builtin_ast_enum_to_string_switch(Type *ty, Node *expr);
 
 /*!
  * @function __builtin_ast_enum_from_string_chain
  * @abstract Build a block of `if (strcmp(expr, "Name0") == 0) return V0; ...
  *           return -1;` over the constants of an enum type.
- * @param vm The virtual machine instance.
  * @param ty The enum type.
  * @param expr The expression to compare (a `const char *`).
  * @return An NK_BLOCK node. Caller wraps it in a function returning the
  *         enum type (or an int).
  * @discussion Convenience wrapper: EnumFromString(ty, expr).
  */
-Node *__builtin_ast_enum_from_string_chain(VirtualMachine *vm, Type *ty, Node *expr);
+Node *__builtin_ast_enum_from_string_chain(Type *ty, Node *expr);
 
 // ============================================================================
 // Struct/Union Member Introspection
@@ -766,35 +718,32 @@ Node *__builtin_ast_enum_from_string_chain(VirtualMachine *vm, Type *ty, Node *e
 /*!
  * @function __builtin_ast_struct_member_count
  * @abstract Return the number of members of a struct or union type.
- * @param vm The VM context.
  * @param struct_type The struct or union type to inspect.
  * @return The member count, or -1 if struct_type is not a struct/union.
  * @discussion Convenience wrapper: StructMemberCount(ty).
  */
-int __builtin_ast_struct_member_count(VirtualMachine *vm, Type *struct_type);
+int __builtin_ast_struct_member_count(Type *struct_type);
 
 /*!
  * @function __builtin_ast_struct_member_at
  * @abstract Return the member at the given index.
- * @param vm The VM context.
  * @param struct_type The struct or union type to inspect.
  * @param index Zero-based member index.
  * @return The Member*, or NULL on out-of-range or non-aggregate.
  * @discussion Convenience wrapper: StructMemberAt(ty, index).
  */
-Member *__builtin_ast_struct_member_at(VirtualMachine *vm, Type *struct_type,
+Member *__builtin_ast_struct_member_at(Type *struct_type,
                                         int index);
 
 /*!
  * @function __builtin_ast_struct_member_find
  * @abstract Look up a struct or union member by name.
- * @param vm The VM context.
  * @param struct_type The struct or union type to search.
  * @param name The member name to look up.
  * @return The matching Member*, or NULL if not found.
  * @discussion Convenience wrapper: StructMemberFind(ty, name).
  */
-Member *__builtin_ast_struct_member_find(VirtualMachine *vm, Type *struct_type,
+Member *__builtin_ast_struct_member_find(Type *struct_type,
                                         const char *name);
 
 /*!
@@ -845,14 +794,13 @@ int __builtin_ast_member_bitfield_width(Member *m);
 /*!
  * @function __builtin_ast_offsetof_chain
  * @abstract Compute the byte offset of a (possibly nested) member chain.
- * @param vm The virtual machine instance.
  * @param ty The starting struct/union type.
  * @param names An array of member names to walk, innermost last.
  * @param n The number of names in the chain.
  * @return The summed byte offset, or -1 if any name cannot be resolved.
  * @discussion Convenience wrapper: OffsetofChain(ty, "a", "b", ...).
  */
-int64_t __builtin_ast_offsetof_chain(VirtualMachine *vm, Type *ty,
+int64_t __builtin_ast_offsetof_chain(Type *ty,
                                    const char **names, int n);
 
 // ============================================================================
@@ -862,31 +810,28 @@ int64_t __builtin_ast_offsetof_chain(VirtualMachine *vm, Type *ty,
 /*!
  * @function __builtin_ast_find_global
  * @abstract Look up a global symbol by name.
- * @param vm The VM context.
  * @param name The global name to look up.
  * @return The matching Obj*, or NULL if not found.
  * @discussion Convenience wrapper: FindGlobal(name).
  */
-Obj *__builtin_ast_find_global(VirtualMachine *vm, const char *name);
+Obj *__builtin_ast_find_global(const char *name);
 
 /*!
  * @function __builtin_ast_global_count
  * @abstract Return the total number of global symbols.
- * @param vm The VM context.
  * @return The count of globals.
  * @discussion Convenience wrapper: GlobalCount().
  */
-int __builtin_ast_global_count(VirtualMachine *vm);
+int __builtin_ast_global_count(void);
 
 /*!
  * @function __builtin_ast_global_at
  * @abstract Return the global symbol at the given index.
- * @param vm The VM context.
  * @param index Zero-based global index.
  * @return The Obj* at the given slot, or NULL on out-of-range.
  * @discussion Convenience wrapper: GlobalAt(index).
  */
-Obj *__builtin_ast_global_at(VirtualMachine *vm, int index);
+Obj *__builtin_ast_global_at(int index);
 
 /*!
  * @function __builtin_ast_obj_name
@@ -970,54 +915,49 @@ Token *__builtin_attr_target_token(AttrTarget *target);
 /*!
  * @function __builtin_ast_int_literal
  * @abstract Build an integer literal AST node.
- * @param vm The VM context.
  * @param value The integer value.
  * @return An NK_NUM node for value.
  * @discussion Convenience wrapper: MakeIntLiteral(value).
  */
-Node *__builtin_ast_int_literal(VirtualMachine *vm, int64_t value);
+Node *__builtin_ast_int_literal(int64_t value);
 
 /*!
  * @function __builtin_ast_float_literal
  * @abstract Build a floating-point literal AST node.
- * @param vm The VM context.
  * @param value The floating-point value.
  * @return An NK_NUM node for value.
  * @discussion Convenience wrapper: MakeFloatLiteral(value).
  */
-Node *__builtin_ast_float_literal(VirtualMachine *vm, double value);
+Node *__builtin_ast_float_literal(double value);
 
 /*!
  * @function __builtin_ast_string_literal
  * @abstract Build a string literal AST node.
- * @param vm The VM context.
  * @param str A NUL-terminated string.
  * @return An NK_NUM string-literal node.
  * @discussion Convenience wrapper: MakeStringLiteral(str).
  */
-Node *__builtin_ast_string_literal(VirtualMachine *vm, const char *str);
+Node *__builtin_ast_string_literal(const char *str);
 
 /*!
  * @function __builtin_ast_var_ref
  * @abstract Build a variable reference AST node.
- * @param vm The VM context.
  * @param name The variable name.
  * @return An NK_VAR node referencing name.
  * @discussion Convenience wrapper: MakeVarRef(name).
  */
-Node *__builtin_ast_var_ref(VirtualMachine *vm, const char *name);
+Node *__builtin_ast_var_ref(const char *name);
 
 /*!
  * @function __builtin_ast_param_ref
  * @abstract Build a reference to a function parameter by name.
- * @param vm The VM context.
  * @param fn The function object whose parameter is being referenced.
  * @param name The parameter name.
  * @return An NK_VAR node for the named parameter.
  * @discussion Use this when building function bodies to reference parameters
  *             by name.  Convenience wrapper: MakeParamRef(fn, name).
  */
-Node *__builtin_ast_param_ref(VirtualMachine *vm, Obj *fn, const char *name);
+Node *__builtin_ast_param_ref(Obj *fn, const char *name);
 
 // ============================================================================
 // AST Node Construction - Expressions
@@ -1026,113 +966,103 @@ Node *__builtin_ast_param_ref(VirtualMachine *vm, Obj *fn, const char *name);
 /*!
  * @function __builtin_ast_binary
  * @abstract Build a binary operation AST node.
- * @param vm The VM context.
  * @param op The operator kind (NK_ADD, NK_SUB, ...).
  * @param left The left-hand operand.
  * @param right The right-hand operand.
  * @return The binary expression node.
  * @discussion Convenience wrapper: MakeBinary(op, left, right).
  */
-Node *__builtin_ast_binary(VirtualMachine *vm, NodeKind op, Node *left,
+Node *__builtin_ast_binary(NodeKind op, Node *left,
                             Node *right);
 
 /*!
  * @function __builtin_ast_unary
  * @abstract Build a unary operation AST node.
- * @param vm The VM context.
  * @param op The operator kind (NK_NEG, NK_DEREF, ...).
  * @param operand The operand expression.
  * @return The unary expression node.
  * @discussion Convenience wrapper: MakeUnary(op, operand).
  */
-Node *__builtin_ast_unary(VirtualMachine *vm, NodeKind op, Node *operand);
+Node *__builtin_ast_unary(NodeKind op, Node *operand);
 
 /*!
  * @function __builtin_ast_cast
  * @abstract Build a type cast AST node.
- * @param vm The VM context.
  * @param expr The expression to cast.
  * @param target_type The type to cast to.
  * @return An NK_CAST node.
  * @discussion Convenience wrapper: MakeCast(expr, target_type).
  */
-Node *__builtin_ast_cast(VirtualMachine *vm, Node *expr, Type *target_type);
+Node *__builtin_ast_cast(Node *expr, Type *target_type);
 
 // Ticket #171: new expression builders
 
 /*!
  * @function __builtin_ast_cond
  * @abstract Build a ternary conditional expression node (cond ? then : else).
- * @param vm The VM context.
  * @param cond The condition expression.
  * @param then_expr The expression evaluated when cond is non-zero.
  * @param else_expr The expression evaluated when cond is zero.
  * @return An NK_COND node.
  * @discussion Convenience wrapper: MakeCond(cond, then_expr, else_expr).
  */
-Node *__builtin_ast_cond(VirtualMachine *vm, Node *cond, Node *then_expr,
+Node *__builtin_ast_cond(Node *cond, Node *then_expr,
                           Node *else_expr);
 
 /*!
  * @function __builtin_ast_null
  * @abstract Build a typed null pointer node: (void *)0.
- * @param vm The VM context.
  * @return An NK_NUM node representing a typed NULL.
  * @discussion Convenience wrapper: MakeNull().
  */
-Node *__builtin_ast_null(VirtualMachine *vm);
+Node *__builtin_ast_null(void);
 
 /*!
  * @function __builtin_ast_sizeof_type
  * @abstract Emit sizeof(ty) as a compile-time integer literal.
- * @param vm The VM context.
  * @param ty The type to measure.
  * @return An NK_NUM node holding sizeof(ty).
  * @discussion Convenience wrapper: MakeSizeofType(ty).
  */
-Node *__builtin_ast_sizeof_type(VirtualMachine *vm, Type *ty);
+Node *__builtin_ast_sizeof_type(Type *ty);
 
 /*!
  * @function __builtin_ast_alignof_type
  * @abstract Emit _Alignof(ty) as a compile-time integer literal.
- * @param vm The VM context.
  * @param ty The type to measure.
  * @return An NK_NUM node holding _Alignof(ty).
  * @discussion Convenience wrapper: MakeAlignofType(ty).
  */
-Node *__builtin_ast_alignof_type(VirtualMachine *vm, Type *ty);
+Node *__builtin_ast_alignof_type(Type *ty);
 
 /*!
  * @function __builtin_ast_sizeof_expr
  * @abstract Emit sizeof(expr): resolve the expression's type then its size.
- * @param vm The VM context.
  * @param expr The expression whose type to measure.
  * @return An NK_NUM node holding sizeof(expr).
  * @discussion Convenience wrapper: MakeSizeofExpr(expr).
  */
-Node *__builtin_ast_sizeof_expr(VirtualMachine *vm, Node *expr);
+Node *__builtin_ast_sizeof_expr(Node *expr);
 
 /*!
  * @function __builtin_ast_subscript
  * @abstract Build an array subscript node: arr[idx], desugared as *(arr+idx).
- * @param vm The VM context.
  * @param arr The array (or pointer) expression.
  * @param idx The index expression.
  * @return An NK_ADD / NK_DEREF node pair representing the subscript.
  * @discussion Convenience wrapper: MakeSubscript(arr, idx).
  */
-Node *__builtin_ast_subscript(VirtualMachine *vm, Node *arr, Node *idx);
+Node *__builtin_ast_subscript(Node *arr, Node *idx);
 
 /*!
  * @function __builtin_ast_comma
  * @abstract Build a comma expression: evaluate lhs, yield rhs.
- * @param vm The VM context.
  * @param lhs The expression evaluated for side effects.
  * @param rhs The expression whose value is the result.
  * @return An NK_COMMA node.
  * @discussion Convenience wrapper: MakeComma(lhs, rhs).
  */
-Node *__builtin_ast_comma(VirtualMachine *vm, Node *lhs, Node *rhs);
+Node *__builtin_ast_comma(Node *lhs, Node *rhs);
 
 // ============================================================================
 // AST Node Construction - Statements
@@ -1141,94 +1071,86 @@ Node *__builtin_ast_comma(VirtualMachine *vm, Node *lhs, Node *rhs);
 /*!
  * @function __builtin_ast_return
  * @abstract Build a return statement node.
- * @param vm The VM context.
  * @param expr The value to return (may be NULL for `return;` in void functions).
  * @return An NK_RETURN node.
  * @discussion Convenience wrapper: MakeReturn(expr).
  */
-Node *__builtin_ast_return(VirtualMachine *vm, Node *expr);
+Node *__builtin_ast_return(Node *expr);
 
 /*!
  * @function __builtin_ast_block
  * @abstract Build a block (compound statement) node.
- * @param vm The VM context.
  * @param stmts Array of statement nodes, or NULL if count is 0.
  * @param count Number of statements in the array.
  * @return An NK_BLOCK node.
  * @discussion Convenience wrapper: MakeBlock(stmts, count).
  */
-Node *__builtin_ast_block(VirtualMachine *vm, Node **stmts, int count);
+Node *__builtin_ast_block(Node **stmts, int count);
 
 /*!
  * @function __builtin_ast_block_add_stmt
  * @abstract Append a statement to a block node.
- * @param vm The VM context.
  * @param block The NK_BLOCK node to modify.
  * @param stmt The statement to append.
  * @return The block on success, or NULL on invalid arguments.
  * @discussion Convenience wrapper: BlockAddStmt(block, stmt), or
  *             BlockAddStmt(stmt) inside WithBlock(block).
  */
-Node *__builtin_ast_block_add_stmt(VirtualMachine *vm, Node *block, Node *stmt);
+Node *__builtin_ast_block_add_stmt(Node *block, Node *stmt);
 
 /*!
  * @function __builtin_ast_if
  * @abstract Build an if statement node.
- * @param vm The VM context.
  * @param cond The condition expression.
  * @param then_body The body executed when cond is non-zero.
  * @param else_body The body executed when cond is zero, or NULL.
  * @return An NK_IF node.
  * @discussion Convenience wrapper: MakeIf(cond, then_body, else_body).
  */
-Node *__builtin_ast_if(VirtualMachine *vm, Node *cond, Node *then_body,
+Node *__builtin_ast_if(Node *cond, Node *then_body,
                         Node *else_body);
 
 /*!
  * @function __builtin_ast_switch
  * @abstract Build a switch statement node.
- * @param vm The VM context.
  * @param cond The expression to switch on.
  * @return An NK_SWITCH node.  Use __builtin_ast_switch_add_case and
  *         __builtin_ast_switch_set_default to populate it.
  * @discussion Convenience wrapper: MakeSwitch(cond).
  */
-Node *__builtin_ast_switch(VirtualMachine *vm, Node *cond);
+Node *__builtin_ast_switch(Node *cond);
 
 /*!
  * @function __builtin_ast_switch_add_case
  * @abstract Append a case to a switch statement.
- * @param vm The VM context.
  * @param switch_node The switch node returned by __builtin_ast_switch.
  * @param value The case value expression.
  * @param body The body statement for this case.
  * @discussion Convenience wrapper: SwitchAddCase(sw, value, body), or
  *             SwitchAddCase(value, body) inside WithSwitch(sw).
  */
-void __builtin_ast_switch_add_case(VirtualMachine *vm, Node *switch_node,
+void __builtin_ast_switch_add_case(Node *switch_node,
                                 Node *value, Node *body);
 
 /*!
  * @function __builtin_ast_switch_set_default
  * @abstract Set the default case for a switch statement.
- * @param vm The VM context.
  * @param switch_node The switch node returned by __builtin_ast_switch.
  * @param body The default-case body statement.
  * @discussion Convenience wrapper: SwitchSetDefault(sw, body), or
  *             SwitchSetDefault(body) inside WithSwitch(sw).
  */
-void __builtin_ast_switch_set_default(VirtualMachine *vm, Node *switch_node,
+void __builtin_ast_switch_set_default(Node *switch_node,
                                     Node *body);
 
 /*!
  * @function __builtin_ast_expr_stmt
  * @abstract Build an expression statement node.
- * @param vm The VM context.
  * @param expr The expression to evaluate for side effects.
  * @return An NK_EXPR_STMT node.
  * @discussion Convenience wrapper: MakeExprStmt(expr).
  */
-Node *__builtin_ast_expr_stmt(VirtualMachine *vm, Node *expr);
+Node *__builtin_ast_expr_stmt(Node *expr);
 
 // ============================================================================
 // AST Node Construction - Local Variable Injection (ticket #77)
@@ -1238,7 +1160,6 @@ Node *__builtin_ast_expr_stmt(VirtualMachine *vm, Node *expr);
  * @function __builtin_ast_local_var
  * @abstract Declare a named local variable in the current function scope
  *           and return a variable-reference node for it.
- * @param vm The VM context.
  * @param name The variable name (user-visible).
  * @param ty The variable type.
  * @return A NK_VAR node referencing the new local, or NULL if called
@@ -1249,13 +1170,12 @@ Node *__builtin_ast_expr_stmt(VirtualMachine *vm, Node *expr);
  *        __builtin_ast_local_var_unique().
  * @discussion Convenience wrapper: MakeLocalVar(name, ty).
  */
-Node *__builtin_ast_local_var(VirtualMachine *vm, const char *name, Type *ty);
+Node *__builtin_ast_local_var(const char *name, Type *ty);
 
 /*!
  * @function __builtin_ast_local_var_unique
  * @abstract Declare a hygienic (gensym'd) local variable in the current
  *           function scope and return a variable-reference node for it.
- * @param vm The VM context.
  * @param ty The variable type.
  * @return A NK_VAR node referencing the new local, or NULL on error.
  * @note  The generated name begins with ".L.." and is therefore not
@@ -1263,23 +1183,21 @@ Node *__builtin_ast_local_var(VirtualMachine *vm, const char *name, Type *ty);
  *        This is the safe default for macro temporaries.
  * @discussion Convenience wrapper: MakeLocalVarUnique(ty).
  */
-Node *__builtin_ast_local_var_unique(VirtualMachine *vm, Type *ty);
+Node *__builtin_ast_local_var_unique(Type *ty);
 
 /*!
  * @function __builtin_ast_assign
  * @abstract Build an assignment node (target = value).
- * @param vm The VM context.
  * @param target The lvalue expression being assigned to.
  * @param value The rvalue expression to assign.
  * @return An NK_ASSIGN node, or NULL on error.
  * @discussion Convenience wrapper: MakeAssign(target, value).
  */
-Node *__builtin_ast_assign(VirtualMachine *vm, Node *target, Node *value);
+Node *__builtin_ast_assign(Node *target, Node *value);
 
 /*!
  * @function __builtin_ast_member
  * @abstract Create a struct/union member access node (obj.name).
- * @param vm The VM context.
  * @param obj An expression node whose type must be a struct or union.
  * @param name The member name as a NUL-terminated string.
  * @return A NK_MEMBER node, or NULL if the member is not found or
@@ -1289,12 +1207,11 @@ Node *__builtin_ast_assign(VirtualMachine *vm, Node *target, Node *value);
  *       for pointer-to-struct access).
  * @discussion Convenience wrapper: MakeMember(obj, name).
  */
-Node *__builtin_ast_member(VirtualMachine *vm, Node *obj, const char *name);
+Node *__builtin_ast_member(Node *obj, const char *name);
 
 /*!
  * @function __builtin_ast_funcall
  * @abstract Create a function call node.
- * @param vm The VM context.
  * @param callee An expression node that evaluates to a function (or function
  *               pointer). The callee's lhs field holds this expression.
  * @param args Array of argument nodes (may be NULL if n == 0).
@@ -1302,24 +1219,22 @@ Node *__builtin_ast_member(VirtualMachine *vm, Node *obj, const char *name);
  * @return A NK_FUNCALL node, or NULL on error.
  * @discussion Convenience wrapper: MakeFuncCall(callee, args, n).
  */
-Node *__builtin_ast_funcall(VirtualMachine *vm, Node *callee, Node **args, int n);
+Node *__builtin_ast_funcall(Node *callee, Node **args, int n);
 
 /*!
  * @function __builtin_ast_while
  * @abstract Create a while loop node.
- * @param vm The VM context.
  * @param cond The loop condition expression.
  * @param body The loop body statement.
  * @return A NK_FOR node (CCCC represents while as for with no init/inc),
  *         or NULL on error.
  * @discussion Convenience wrapper: MakeWhile(cond, body).
  */
-Node *__builtin_ast_while(VirtualMachine *vm, Node *cond, Node *body);
+Node *__builtin_ast_while(Node *cond, Node *body);
 
 /*!
  * @function __builtin_ast_for
  * @abstract Create a for loop node.
- * @param vm The VM context.
  * @param init Initialiser expression/statement (may be NULL).
  * @param cond Loop condition (may be NULL for infinite loop).
  * @param inc Increment expression (may be NULL).
@@ -1327,19 +1242,18 @@ Node *__builtin_ast_while(VirtualMachine *vm, Node *cond, Node *body);
  * @return A NK_FOR node, or NULL on error.
  * @discussion Convenience wrapper: MakeFor(init, cond, inc, body).
  */
-Node *__builtin_ast_for(VirtualMachine *vm, Node *init, Node *cond,
+Node *__builtin_ast_for(Node *init, Node *cond,
                        Node *inc, Node *body);
 
 /*!
  * @function __builtin_ast_do_while
  * @abstract Create a do-while loop node.
- * @param vm The VM context.
  * @param body The loop body.
  * @param cond The loop condition (tested after each iteration).
  * @return A NK_DO node, or NULL on error.
  * @discussion Convenience wrapper: MakeDoWhile(body, cond).
  */
-Node *__builtin_ast_do_while(VirtualMachine *vm, Node *body, Node *cond);
+Node *__builtin_ast_do_while(Node *body, Node *cond);
 
 // ============================================================================
 // Function Generation
@@ -1348,7 +1262,6 @@ Node *__builtin_ast_do_while(VirtualMachine *vm, Node *body, Node *cond);
 /*!
  * @function __builtin_ast_function
  * @abstract Create a new function object.
- * @param vm The VM context.
  * @param name The function name.
  * @param return_type The return type.
  * @return The newly created function object, or NULL on error.
@@ -1356,13 +1269,12 @@ Node *__builtin_ast_do_while(VirtualMachine *vm, Node *body, Node *cond);
  *             and will be compiled when the main program is compiled.
  *             Convenience wrapper: MakeFunction(name, return_type).
  */
-Obj *__builtin_ast_function(VirtualMachine *vm, const char *name,
+Obj *__builtin_ast_function(const char *name,
                             Type *return_type);
 
 /*!
  * @function __builtin_ast_publish
  * @abstract Make a generated object visible at the current source position.
- * @param vm The VM context.
  * @param obj A function or global variable object created by the AST builders.
  * @param tok Optional representative token for diagnostics, or NULL.
  * @return A no-op Node on success, or NULL on invalid arguments.
@@ -1372,12 +1284,11 @@ Obj *__builtin_ast_function(VirtualMachine *vm, const char *name,
  *             able to reference it without a handwritten declaration.
  *             Convenience wrapper: PublishNode(obj) / PublishNodeAt(obj, tok).
  */
-Node *__builtin_ast_publish(VirtualMachine *vm, Obj *obj, Token *tok);
+Node *__builtin_ast_publish(Obj *obj, Token *tok);
 
 /*!
  * @function __builtin_ast_publish_type
  * @abstract Accept a generated type declaration as already published.
- * @param vm The VM context.
  * @param ty A type created by MakeStruct, MakeUnion,
  *           MakeEnum, or MakeTypedef.
  * @param tok Optional representative token for diagnostics, or NULL.
@@ -1386,22 +1297,20 @@ Node *__builtin_ast_publish(VirtualMachine *vm, Obj *obj, Token *tok);
  *             This function lets PublishNode(type) be used uniformly; there
  *             is no separate convenience macro for this entry point.
  */
-Node *__builtin_ast_publish_type(VirtualMachine *vm, Type *ty, Token *tok);
+Node *__builtin_ast_publish_type(Type *ty, Token *tok);
 
 /*!
  * @function __builtin_emit_directive
  * @abstract Emit one raw preprocessor directive line into generated output.
- * @param vm The VM context.
  * @param line Complete directive text, for example "#ifdef _WIN32".
  * @discussion Convenience wrapper: EmitDirective(line).
  */
-void __builtin_emit_directive(VirtualMachine *vm, const char *line);
+void __builtin_emit_directive(const char *line);
 
 
 /*!
  * @function __builtin_ast_function_add_param
  * @abstract Add a parameter to a function.
- * @param vm The VM context.
  * @param fn The function object.
  * @param name The parameter name.
  * @param type The parameter type.
@@ -1409,19 +1318,18 @@ void __builtin_emit_directive(VirtualMachine *vm, const char *line);
  *             for multiple parameters.  Convenience wrapper:
  *             FunctionAddParam(fn, name, type).
  */
-void __builtin_ast_function_add_param(VirtualMachine *vm, Obj *fn, const char *name,
+void __builtin_ast_function_add_param(Obj *fn, const char *name,
                                 Type *type);
 
 /*!
  * @function __builtin_ast_function_set_body
  * @abstract Set the body of a function.
- * @param vm The VM context.
  * @param fn The function object.
  * @param body The function body (a statement or block node).
  * @discussion If body is not already a NK_BLOCK, it will be wrapped in one.
  *             Convenience wrapper: FunctionSetBody(fn, body).
  */
-void __builtin_ast_function_set_body(VirtualMachine *vm, Obj *fn, Node *body);
+void __builtin_ast_function_set_body(Obj *fn, Node *body);
 
 /*!
  * @function __builtin_ast_function_set_static
@@ -1454,7 +1362,6 @@ void __builtin_ast_function_set_variadic(Obj *fn, bool is_variadic);
 /*!
  * @function __builtin_ast_function_prototype
  * @abstract Create a function forward declaration (prototype) without a body.
- * @param vm The VM context.
  * @param name The function name.
  * @param return_type The return type.
  * @return The declaration Obj*, or NULL on error.
@@ -1463,7 +1370,7 @@ void __builtin_ast_function_set_variadic(Obj *fn, bool is_variadic);
  *             MakeFunction call with the same name will reuse this Obj and
  *             fill in the body.  Convenience wrapper: FunctionPrototype(name, return_type).
  */
-Obj *__builtin_ast_function_prototype(VirtualMachine *vm, const char *name,
+Obj *__builtin_ast_function_prototype(const char *name,
                                     Type *return_type);
 
 // ============================================================================
@@ -1473,7 +1380,6 @@ Obj *__builtin_ast_function_prototype(VirtualMachine *vm, const char *name,
 /*!
  * @function __builtin_ast_add_attribute
  * @abstract Apply an attribute string to a programmatically created function.
- * @param vm The VM context.
  * @param fn The function object to attribute (created by MakeFunction).
  * @param attr_text Attribute text as it would appear between [[ and ]] in source,
  *                  e.g. "cccc::test", "cccc::test(suite=\"gen\", timeout=5000)",
@@ -1486,40 +1392,37 @@ Obj *__builtin_ast_function_prototype(VirtualMachine *vm, const char *name,
  *             cccc::comptime cannot be applied this way and will error.
  *             Convenience wrapper: AddAttribute(fn, text).
  */
-void __builtin_ast_add_attribute(VirtualMachine *vm, Obj *fn, const char *attr_text);
+void __builtin_ast_add_attribute(Obj *fn, const char *attr_text);
 
 // Internal helper for MarkAsBuildTarget: composes "cccc::build_target(kind=…)"
 // at runtime so the macro doesn't require string concatenation.
-void __builtin_ast_add_build_target_attr(VirtualMachine *vm, Obj *fn, const char *kind);
+void __builtin_ast_add_build_target_attr(Obj *fn, const char *kind);
 
 // Ticket #171: struct/union/enum/typedef type builders
 
 /*!
  * @function __builtin_ast_make_struct
  * @abstract Create and expose a new named struct type.
- * @param vm The VM context.
  * @param name The struct tag name.
  * @return The new struct Type*, or NULL on error.
  * @discussion Use StructAddField to add fields after creation.
  *             The type is immediately visible via FindType(name).
  *             Convenience wrapper: MakeStruct(name).
  */
-Type *__builtin_ast_make_struct(VirtualMachine *vm, const char *name);
+Type *__builtin_ast_make_struct(const char *name);
 
 /*!
  * @function __builtin_ast_make_union
  * @abstract Create and expose a new named union type.
- * @param vm The VM context.
  * @param name The union tag name.
  * @return The new union Type*, or NULL on error.
  * @discussion Convenience wrapper: MakeUnion(name).
  */
-Type *__builtin_ast_make_union(VirtualMachine *vm, const char *name);
+Type *__builtin_ast_make_union(const char *name);
 
 /*!
  * @function __builtin_ast_struct_add_field
  * @abstract Append a field to a struct or union and recompute its layout.
- * @param vm The VM context.
  * @param ty The struct or union type to modify.
  * @param name The field name.
  * @param field_type The field's type.
@@ -1529,24 +1432,22 @@ Type *__builtin_ast_make_union(VirtualMachine *vm, const char *name);
  *             and the union size is updated to the maximum field size.
  *             Convenience wrapper: StructAddField(ty, name, field_type).
  */
-Type *__builtin_ast_struct_add_field(VirtualMachine *vm, Type *ty, const char *name,
+Type *__builtin_ast_struct_add_field(Type *ty, const char *name,
                                    Type *field_type);
 
 /*!
  * @function __builtin_ast_make_enum
  * @abstract Create and expose a new named enum type.
- * @param vm The VM context.
  * @param name The enum tag name.
  * @return The new enum Type*, or NULL on error.
  * @discussion Use EnumAddConstant to add constants after creation.
  *             Convenience wrapper: MakeEnum(name).
  */
-Type *__builtin_ast_make_enum(VirtualMachine *vm, const char *name);
+Type *__builtin_ast_make_enum(const char *name);
 
 /*!
  * @function __builtin_ast_enum_add_constant
  * @abstract Add a named constant to an enum type and expose it in scope.
- * @param vm The VM context.
  * @param ty The enum type.
  * @param name The constant name.
  * @param value The constant integer value.
@@ -1555,13 +1456,12 @@ Type *__builtin_ast_make_enum(VirtualMachine *vm, const char *name);
  *             subsequently compiled code.  Convenience wrapper:
  *             EnumAddConstant(ty, name, value).
  */
-void __builtin_ast_enum_add_constant(VirtualMachine *vm, Type *ty, const char *name,
+void __builtin_ast_enum_add_constant(Type *ty, const char *name,
                                   int64_t value);
 
 /*!
  * @function __builtin_ast_make_typedef
  * @abstract Register a typedef alias for a type and expose it in scope.
- * @param vm The VM context.
  * @param name The typedef name.
  * @param underlying The aliased type.
  * @return The aliased type after registration, or NULL on invalid arguments.
@@ -1569,7 +1469,7 @@ void __builtin_ast_enum_add_constant(VirtualMachine *vm, Type *ty, const char *n
  *             subsequently compiled code can use name as a type name.
  *             Convenience wrapper: MakeTypedef(name, underlying).
  */
-Type *__builtin_ast_make_typedef(VirtualMachine *vm, const char *name, Type *underlying);
+Type *__builtin_ast_make_typedef(const char *name, Type *underlying);
 
 // ============================================================================
 // Global Variable Generation (ticket #152)
@@ -1578,7 +1478,6 @@ Type *__builtin_ast_make_typedef(VirtualMachine *vm, const char *name, Type *und
 /*!
  * @function __builtin_ast_global_var
  * @abstract Create a new named global variable definition.
- * @param vm   The VM context.
  * @param name The variable name (must be unique among globals).
  * @param ty   The variable type.  Use MakeArray(char_ty, len) for byte
  *             arrays so that the size matches the init_data length.
@@ -1589,18 +1488,17 @@ Type *__builtin_ast_make_typedef(VirtualMachine *vm, const char *name, Type *und
  *             the parser can resolve references.
  *             Convenience wrapper: GlobalVar(name, ty).
  */
-Obj *__builtin_ast_global_var(VirtualMachine *vm, const char *name, Type *ty);
+Obj *__builtin_ast_global_var(const char *name, Type *ty);
 
 /*!
  * @function __builtin_ast_global_var_set_init_data
  * @abstract Set the initial data for a generated global variable.
- * @param vm   The VM context.
  * @param var  The global variable object.
  * @param data Pointer to the raw byte data.
  * @param len  Number of bytes to copy.  Must equal var->ty->size.
  * @discussion Convenience wrapper: GlobalVarSetInitData(var, data, len).
  */
-void __builtin_ast_global_var_set_init_data(VirtualMachine *vm, Obj *var,
+void __builtin_ast_global_var_set_init_data(Obj *var,
                                         const char *data, int len);
 
 /*!
@@ -1620,7 +1518,6 @@ void __builtin_ast_global_var_set_static(Obj *var, bool is_static);
  * @function __builtin_ast_push_fn
  * @abstract Establish fn as the "function currently being built" so that
  *           Quote("return x;") applies the correct implicit return-type cast.
- * @param vm The VM context.
  * @param fn The generated function whose return type should be used.
  * @discussion Call __builtin_ast_pop_fn (or use the WithFn macro) to
  *             restore the previous context.  execute_pragma_macro always
@@ -1629,68 +1526,63 @@ void __builtin_ast_global_var_set_static(Obj *var, bool is_static);
  *             1:1 convenience macro; use the @c WithFn(fn) { ... } block
  *             helper to bracket push/pop pairs in a macro body.
  */
-void __builtin_ast_push_fn(VirtualMachine *vm, Obj *fn);
+void __builtin_ast_push_fn(Obj *fn);
 
 /*!
  * @function __builtin_ast_pop_fn
  * @abstract Restore the function context saved by the most recent push.
- * @param vm The VM context.
  * @discussion Inverse of __builtin_ast_push_fn; typically used through the
  *             @c WithFn(fn) { ... } block helper, which performs the
  *             matching pop even on early exit.
  */
-void __builtin_ast_pop_fn(VirtualMachine *vm);
+void __builtin_ast_pop_fn(void);
 
 /*!
  * @function __builtin_ast_push_block
  * @abstract Establish a block as the current statement-append context.
- * @param vm The VM context.
  * @param block The NK_BLOCK node being populated.
  * @discussion Use with WithBlock(block) so BlockAddStmt(stmt) appends to
  *             block without repeating the block pointer.
  */
-void __builtin_ast_push_block(VirtualMachine *vm, Node *block);
-void __builtin_ast_pop_block(VirtualMachine *vm);
-Node *__builtin_ast_block_add_current_stmt(VirtualMachine *vm, Node *stmt);
+void __builtin_ast_push_block(Node *block);
+void __builtin_ast_pop_block(void);
+Node *__builtin_ast_block_add_current_stmt(Node *stmt);
 
 /*!
  * @function __builtin_ast_push_struct
  * @abstract Establish a struct or union as the current field-add context.
- * @param vm The VM context.
  * @param ty The aggregate type being populated.
  * @discussion Use with WithStruct(ty) so StructAddField(name, ty) appends
  *             to the current aggregate.
  */
-void __builtin_ast_push_struct(VirtualMachine *vm, Type *ty);
-void __builtin_ast_pop_struct(VirtualMachine *vm);
-Type *__builtin_ast_struct_add_current_field(VirtualMachine *vm, const char *name,
+void __builtin_ast_push_struct(Type *ty);
+void __builtin_ast_pop_struct(void);
+Type *__builtin_ast_struct_add_current_field(const char *name,
                                             Type *field_type);
 
 /*!
  * @function __builtin_ast_push_switch
  * @abstract Establish a switch node as the current case/default context.
- * @param vm The VM context.
  * @param switch_node The switch node being populated.
  * @discussion Use with WithSwitch(sw) so SwitchAddCase(value, body) and
  *             SwitchSetDefault(body) append to the current switch.
  */
-void __builtin_ast_push_switch(VirtualMachine *vm, Node *switch_node);
-void __builtin_ast_pop_switch(VirtualMachine *vm);
-void __builtin_ast_switch_add_current_case(VirtualMachine *vm, Node *value,
+void __builtin_ast_push_switch(Node *switch_node);
+void __builtin_ast_pop_switch(void);
+void __builtin_ast_switch_add_current_case(Node *value,
                                        Node *body);
-void __builtin_ast_switch_set_current_default(VirtualMachine *vm, Node *body);
+void __builtin_ast_switch_set_current_default(Node *body);
 
 /*!
  * @function __builtin_ast_push_enum
  * @abstract Establish an enum as the current constant-add context.
- * @param vm The VM context.
  * @param ty The enum type being populated.
  * @discussion Use with WithEnum(ty) so EnumAddConstant(name, value)
  *             appends to the current enum.
  */
-void __builtin_ast_push_enum(VirtualMachine *vm, Type *ty);
-void __builtin_ast_pop_enum(VirtualMachine *vm);
-void __builtin_ast_enum_add_current_constant(VirtualMachine *vm, const char *name,
+void __builtin_ast_push_enum(Type *ty);
+void __builtin_ast_pop_enum(void);
+void __builtin_ast_enum_add_current_constant(const char *name,
                                          int value);
 
 // ============================================================================
@@ -1700,84 +1592,80 @@ void __builtin_ast_enum_add_current_constant(VirtualMachine *vm, const char *nam
 /*!
  * @function __builtin_dump_tree
  * @abstract Print a human-readable tree representation of a node to stdout.
- * @param vm The VM context.
  * @param node The root node to print.
  * @discussion Reuses the compiler's internal cc_dump_ast text renderer.
  *             Convenience wrapper: DumpTree(node).
  */
-void __builtin_dump_tree(VirtualMachine *vm, Node *node);
+void __builtin_dump_tree(Node *node);
 
 /*!
  * @function __builtin_dump_tree_to_string
  * @abstract Render the tree representation to a heap-allocated string.
- * @param vm The VM context.
  * @param node The root node.
  * @return An arena-allocated NUL-terminated string, or NULL on error.
  * @discussion Convenience wrapper: DumpTreeToString(node).
  */
-const char *__builtin_dump_tree_to_string(VirtualMachine *vm, Node *node);
+const char *__builtin_dump_tree_to_string(Node *node);
 
 /*!
  * @function __builtin_dump_ast_gen
  * @abstract Print __builtin_ast_*() builder calls that would reconstruct the node.
- * @param vm The VM context.
  * @param node The root node to emit builder calls for.
  * @discussion Covers all node kinds for which relfection.c has a builder.
  *             Unsupported kinds are emitted as C comments.
  *             Convenience wrapper: DumpAstGen(node).
  */
-void __builtin_dump_ast_gen(VirtualMachine *vm, Node *node);
+void __builtin_dump_ast_gen(Node *node);
 
 /*!
  * @function __builtin_dump_ast_gen_to_string
  * @abstract Render the __builtin_ast_*() builder call sequence to a string.
- * @param vm The VM context.
  * @param node The root node.
  * @return An arena-allocated NUL-terminated string, or NULL on error.
  * @discussion Convenience wrapper: DumpAstGenToString(node).
  */
-const char *__builtin_dump_ast_gen_to_string(VirtualMachine *vm, Node *node);
+const char *__builtin_dump_ast_gen_to_string(Node *node);
 
 // ============================================================================
 // Convenience Macros (automatically pass VM)
 // ============================================================================
 
 // Quasi-quoting helpers (ticket #1, #172)
-#define Quote(tmpl, ...) __builtin_quote(VM, tmpl, ##__VA_ARGS__)
-#define QuoteN(tmpl, nodes, count) __builtin_quote_n(VM, tmpl, nodes, count)
+#define Quote(tmpl, ...) __builtin_quote(tmpl, ##__VA_ARGS__)
+#define QuoteN(tmpl, nodes, count) __builtin_quote_n(tmpl, nodes, count)
 // Build a ->next-linked chain from a compound-literal array for $@k splices:
 //   NodeList((Node*[]){ a, b, c }, 3)
-#define NodeList(nodes, count) __builtin_node_list(VM, nodes, count)
+#define NodeList(nodes, count) __builtin_node_list(nodes, count)
 
 // Diagnostic helpers (ticket #78) — note: variadic macros require C99+
-#define MacroErrorAt(node, ...) __builtin_macro_error_at(VM, node, __VA_ARGS__)
-#define MacroWarningAt(node, ...) __builtin_macro_warning_at(VM, node, __VA_ARGS__)
+#define MacroErrorAt(node, ...) __builtin_macro_error_at(node, __VA_ARGS__)
+#define MacroWarningAt(node, ...) __builtin_macro_warning_at(node, __VA_ARGS__)
 
 // AST dump helpers (ticket #58)
-#define DumpTree(node) __builtin_dump_tree(VM, node)
-#define DumpTreeToString(node) __builtin_dump_tree_to_string(VM, node)
-#define DumpAstGen(node) __builtin_dump_ast_gen(VM, node)
-#define DumpAstGenToString(node) __builtin_dump_ast_gen_to_string(VM, node)
-#define Gensym(prefix) __builtin_gensym(VM, prefix)
-#define MacroExpand1(node) __builtin_macroexpand_1(VM, node)
-#define MacroExpand(node) __builtin_macroexpand(VM, node)
-#define VarargCount() __builtin_ast_vararg_count(VM)
-#define VarargAt(i) __builtin_ast_vararg_at(VM, i)
-#define VarargAsArray() __builtin_ast_varargs_as_array(VM)
-#define VarargStrAt(i) __builtin_ast_vararg_str_at(VM, i)
+#define DumpTree(node) __builtin_dump_tree(node)
+#define DumpTreeToString(node) __builtin_dump_tree_to_string(node)
+#define DumpAstGen(node) __builtin_dump_ast_gen(node)
+#define DumpAstGenToString(node) __builtin_dump_ast_gen_to_string(node)
+#define Gensym(prefix) __builtin_gensym(prefix)
+#define MacroExpand1(node) __builtin_macroexpand_1(node)
+#define MacroExpand(node) __builtin_macroexpand(node)
+#define VarargCount() __builtin_ast_vararg_count()
+#define VarargAt(i) __builtin_ast_vararg_at(i)
+#define VarargAsArray() __builtin_ast_varargs_as_array()
+#define VarargStrAt(i) __builtin_ast_vararg_str_at(i)
 
 #define __builtin_dispatch_2(_1, _2, which, ...) which(_1, _2)
 #define __builtin_dispatch_3(_1, _2, _3, which, ...) which(_1, _2, _3)
 
-#define CurrentToken() __builtin_ast_current_token(VM)
-#define SyntheticToken(label) __builtin_ast_synthetic_token(VM, label)
+#define CurrentToken() __builtin_ast_current_token()
+#define SyntheticToken(label) __builtin_ast_synthetic_token(label)
 #define TokenFromNode(node) __builtin_ast_token_from_node(node)
 #define SetToken(node, tok) __builtin_ast_set_token(node, tok)
 #define CopyLocation(dst, src) __builtin_ast_copy_location(dst, src)
 
-#define FindType(name) __builtin_ast_find_type(VM, name)
-#define TypeExists(name) __builtin_ast_type_exists(VM, name)
-#define GetType(name) __builtin_ast_get_type(VM, name)
+#define FindType(name) __builtin_ast_find_type(name)
+#define TypeExists(name) __builtin_ast_type_exists(name)
+#define GetType(name) __builtin_ast_get_type(name)
 
 // Type introspection — no VM needed
 #define GetTypeKind(ty)          __builtin_ast_type_kind(ty)
@@ -1792,92 +1680,92 @@ const char *__builtin_dump_ast_gen_to_string(VirtualMachine *vm, Node *node);
 #define TypeParamAt(ty, i)   __builtin_ast_type_param_at(ty, i)
 #define TypeIsVariadic(ty)   __builtin_ast_type_is_variadic(ty)
 #define TypeName(ty)          __builtin_ast_type_name(ty)
-#define TypeCName(ty)        __builtin_ast_type_c_name(VM, ty)
+#define TypeCName(ty)        __builtin_ast_type_c_name(ty)
 
-#define MakeIntLiteral(val) __builtin_ast_int_literal(VM, val)
-#define MakeFloatLiteral(val) __builtin_ast_float_literal(VM, val)
-#define MakeStringLiteral(str) __builtin_ast_string_literal(VM, str)
-#define MakeVarRef(name) __builtin_ast_var_ref(VM, name)
-#define MakeParamRef(fn, name) __builtin_ast_param_ref(VM, fn, name)
+#define MakeIntLiteral(val) __builtin_ast_int_literal(val)
+#define MakeFloatLiteral(val) __builtin_ast_float_literal(val)
+#define MakeStringLiteral(str) __builtin_ast_string_literal(str)
+#define MakeVarRef(name) __builtin_ast_var_ref(name)
+#define MakeParamRef(fn, name) __builtin_ast_param_ref(fn, name)
 
-#define MakeBinary(op, l, r) __builtin_ast_binary(VM, op, l, r)
-#define MakeUnary(op, operand) __builtin_ast_unary(VM, op, operand)
-#define MakeCast(expr, ty) __builtin_ast_cast(VM, expr, ty)
+#define MakeBinary(op, l, r) __builtin_ast_binary(op, l, r)
+#define MakeUnary(op, operand) __builtin_ast_unary(op, operand)
+#define MakeCast(expr, ty) __builtin_ast_cast(expr, ty)
 
 // Ticket #171: new expression builders
 // Ternary conditional: cond ? then_expr : else_expr
-#define MakeCond(c, t, e) __builtin_ast_cond(VM, c, t, e)
+#define MakeCond(c, t, e) __builtin_ast_cond(c, t, e)
 // Typed null pointer: (void *)0
-#define MakeNull() __builtin_ast_null(VM)
+#define MakeNull() __builtin_ast_null()
 // sizeof(type) / _Alignof(type) as a compile-time integer literal
-#define MakeSizeofType(ty) __builtin_ast_sizeof_type(VM, ty)
-#define MakeAlignofType(ty) __builtin_ast_alignof_type(VM, ty)
+#define MakeSizeofType(ty) __builtin_ast_sizeof_type(ty)
+#define MakeAlignofType(ty) __builtin_ast_alignof_type(ty)
 // sizeof(expr): resolves expr's type then returns its size as an integer literal
-#define MakeSizeofExpr(expr) __builtin_ast_sizeof_expr(VM, expr)
+#define MakeSizeofExpr(expr) __builtin_ast_sizeof_expr(expr)
 // Array subscript: arr[idx] (desugared as *(arr+idx))
-#define MakeSubscript(arr, idx) __builtin_ast_subscript(VM, arr, idx)
+#define MakeSubscript(arr, idx) __builtin_ast_subscript(arr, idx)
 // Comma expression: evaluate lhs (for side effects), yield rhs
-#define MakeComma(lhs, rhs) __builtin_ast_comma(VM, lhs, rhs)
+#define MakeComma(lhs, rhs) __builtin_ast_comma(lhs, rhs)
 
-#define MakeReturn(expr) __builtin_ast_return(VM, expr)
-#define MakeBlock(stmts, count) __builtin_ast_block(VM, stmts, count)
+#define MakeReturn(expr) __builtin_ast_return(expr)
+#define MakeBlock(stmts, count) __builtin_ast_block(stmts, count)
 #define __builtin_block_add_stmt_1(stmt, _ignored)                          \
-    __builtin_ast_block_add_current_stmt(VM, stmt)
+    __builtin_ast_block_add_current_stmt(stmt)
 #define __builtin_block_add_stmt_2(block, stmt)                              \
-    __builtin_ast_block_add_stmt(VM, block, stmt)
+    __builtin_ast_block_add_stmt(block, stmt)
 #define BlockAddStmt(...)                                             \
     __builtin_dispatch_2(__VA_ARGS__, __builtin_block_add_stmt_2,                \
                      __builtin_block_add_stmt_1)
-#define MakeIf(c, t, e) __builtin_ast_if(VM, c, t, e)
-#define MakeSwitch(cond) __builtin_ast_switch(VM, cond)
+#define MakeIf(c, t, e) __builtin_ast_if(c, t, e)
+#define MakeSwitch(cond) __builtin_ast_switch(cond)
 #define __builtin_switch_add_case_2(v, b, _ignored)                          \
-    __builtin_ast_switch_add_current_case(VM, v, b)
+    __builtin_ast_switch_add_current_case(v, b)
 #define __builtin_switch_add_case_3(sw, v, b)                                \
-    __builtin_ast_switch_add_case(VM, sw, v, b)
+    __builtin_ast_switch_add_case(sw, v, b)
 #define SwitchAddCase(...)                                            \
     __builtin_dispatch_3(__VA_ARGS__, __builtin_switch_add_case_3,               \
                      __builtin_switch_add_case_2)
 #define __builtin_switch_set_default_1(b, _ignored)                          \
-    __builtin_ast_switch_set_current_default(VM, b)
+    __builtin_ast_switch_set_current_default(b)
 #define __builtin_switch_set_default_2(sw, b)                                \
-    __builtin_ast_switch_set_default(VM, sw, b)
+    __builtin_ast_switch_set_default(sw, b)
 #define SwitchSetDefault(...)                                         \
     __builtin_dispatch_2(__VA_ARGS__, __builtin_switch_set_default_2,            \
                      __builtin_switch_set_default_1)
-#define MakeExprStmt(expr) __builtin_ast_expr_stmt(VM, expr)
-#define MakeLocalVar(name, ty) __builtin_ast_local_var(VM, name, ty)
-#define MakeLocalVarUnique(ty) __builtin_ast_local_var_unique(VM, ty)
-#define MakeAssign(target, value) __builtin_ast_assign(VM, target, value)
-#define MakeMember(obj, name) __builtin_ast_member(VM, obj, name)
-#define MakeFuncCall(callee, args, n) __builtin_ast_funcall(VM, callee, args, n)
+#define MakeExprStmt(expr) __builtin_ast_expr_stmt(expr)
+#define MakeLocalVar(name, ty) __builtin_ast_local_var(name, ty)
+#define MakeLocalVarUnique(ty) __builtin_ast_local_var_unique(ty)
+#define MakeAssign(target, value) __builtin_ast_assign(target, value)
+#define MakeMember(obj, name) __builtin_ast_member(obj, name)
+#define MakeFuncCall(callee, args, n) __builtin_ast_funcall(callee, args, n)
 
 // Ticket #235: thin AST wrappers over <string.h> functions, available via
 // the implicit #include <string.h> at the top of this header.
 #define Memcpy(dst, src, n)                                              \
-    __builtin_ast_funcall(VM, __builtin_ast_var_ref(VM, "memcpy"),            \
+    __builtin_ast_funcall(__builtin_ast_var_ref("memcpy"),            \
         (Node *[]){(dst), (src), (n)}, 3)
 #define Strlen(s)                                                        \
-    __builtin_ast_funcall(VM, __builtin_ast_var_ref(VM, "strlen"),            \
+    __builtin_ast_funcall(__builtin_ast_var_ref("strlen"),            \
         (Node *[]){(s)}, 1)
 #define Strcmp(a, b)                                                     \
-    __builtin_ast_funcall(VM, __builtin_ast_var_ref(VM, "strcmp"),            \
+    __builtin_ast_funcall(__builtin_ast_var_ref("strcmp"),            \
         (Node *[]){(a), (b)}, 2)
-#define MakeWhile(cond, body) __builtin_ast_while(VM, cond, body)
-#define MakeFor(init, cond, inc, body) __builtin_ast_for(VM, init, cond, inc, body)
-#define MakeDoWhile(body, cond) __builtin_ast_do_while(VM, body, cond)
+#define MakeWhile(cond, body) __builtin_ast_while(cond, body)
+#define MakeFor(init, cond, inc, body) __builtin_ast_for(init, cond, inc, body)
+#define MakeDoWhile(body, cond) __builtin_ast_do_while(body, cond)
 
-#define MakePointer(base) __builtin_ast_make_pointer(VM, base)
-#define MakeArray(base, len) __builtin_ast_make_array(VM, base, len)
+#define MakePointer(base) __builtin_ast_make_pointer(base)
+#define MakeArray(base, len) __builtin_ast_make_array(base, len)
 #define MakeFuncPtrType(ret, params, n) \
-    __builtin_ast_make_func_ptr_type(VM, ret, params, n)
+    __builtin_ast_make_func_ptr_type(ret, params, n)
 
 // Ticket #171: qualified type constructors
-#define MakeConst(ty)    __builtin_ast_make_const(VM, ty)
-#define MakeVolatile(ty) __builtin_ast_make_volatile(VM, ty)
+#define MakeConst(ty)    __builtin_ast_make_const(ty)
+#define MakeVolatile(ty) __builtin_ast_make_volatile(ty)
 
-#define EnumCount(ty) __builtin_ast_enum_count(VM, ty)
-#define EnumAt(ty, i) __builtin_ast_enum_at(VM, ty, i)
-#define EnumFind(ty, name) __builtin_ast_enum_find(VM, ty, name)
+#define EnumCount(ty) __builtin_ast_enum_count(ty)
+#define EnumAt(ty, i) __builtin_ast_enum_at(ty, i)
+#define EnumFind(ty, name) __builtin_ast_enum_find(ty, name)
 #define EnumConstantName(ec)   __builtin_ast_enum_constant_name(ec)
 #define EnumConstantValue(ec)  __builtin_ast_enum_constant_value(ec)
 #define EnumName(ty)            __builtin_ast_enum_name(ty)
@@ -1886,13 +1774,13 @@ const char *__builtin_dump_ast_gen_to_string(VirtualMachine *vm, Node *node);
 #define EnumValue(ty, i)        __builtin_ast_enum_value(ty, i)
 
 // Ticket #235: EnumToString(ty, expr) / EnumFromString(ty, expr)
-#define EnumToString(ty, expr)   __builtin_ast_enum_to_string_switch(VM, ty, expr)
-#define EnumFromString(ty, expr) __builtin_ast_enum_from_string_chain(VM, ty, expr)
+#define EnumToString(ty, expr)   __builtin_ast_enum_to_string_switch(ty, expr)
+#define EnumFromString(ty, expr) __builtin_ast_enum_from_string_chain(ty, expr)
 
-#define StructMemberCount(ty) __builtin_ast_struct_member_count(VM, ty)
-#define StructMemberAt(ty, i) __builtin_ast_struct_member_at(VM, ty, i)
+#define StructMemberCount(ty) __builtin_ast_struct_member_count(ty)
+#define StructMemberAt(ty, i) __builtin_ast_struct_member_at(ty, i)
 #define StructMemberFind(ty, name)                                   \
-    __builtin_ast_struct_member_find(VM, ty, name)
+    __builtin_ast_struct_member_find(ty, name)
 #define MemberName(m)             __builtin_ast_member_name(m)
 #define MemberType(m)             __builtin_ast_member_type(m)
 #define MemberOffset(m)           __builtin_ast_member_offset(m)
@@ -1924,13 +1812,13 @@ const char *__builtin_dump_ast_gen_to_string(VirtualMachine *vm, Node *node);
 // Ticket #235: OffsetofChain(ty, "a", "b", ...) — offsetof(ty, a.b) as an
 // MakeIntLiteral AST node.
 #define OffsetofChain(type, ...)                                       \
-    MakeIntLiteral(__builtin_ast_offsetof_chain(VM, type,                   \
+    MakeIntLiteral(__builtin_ast_offsetof_chain(type,                   \
         (const char *[]){__VA_ARGS__},                                  \
         (int)(sizeof((const char *[]){__VA_ARGS__}) / sizeof(const char *))))
 
-#define FindGlobal(name)        __builtin_ast_find_global(VM, name)
-#define GlobalCount()           __builtin_ast_global_count(VM)
-#define GlobalAt(i)             __builtin_ast_global_at(VM, i)
+#define FindGlobal(name)        __builtin_ast_find_global(name)
+#define GlobalCount()           __builtin_ast_global_count()
+#define GlobalAt(i)             __builtin_ast_global_at(i)
 #define ObjName(obj)            __builtin_ast_obj_name(obj)
 #define ObjType(obj)            __builtin_ast_obj_type(obj)
 #define ObjIsFunction(obj)     __builtin_ast_obj_is_function(obj)
@@ -1943,22 +1831,22 @@ const char *__builtin_dump_ast_gen_to_string(VirtualMachine *vm, Node *node);
 #define AttrTargetToken(target) __builtin_attr_target_token(target)
 
 #define MakeFunction(name, ret_type)                                       \
-    __builtin_ast_function(VM, name, ret_type)
+    __builtin_ast_function(name, ret_type)
 #define PublishNode(decl)                                                  \
     _Generic((decl),                                                        \
         Obj *: __builtin_ast_publish,                                          \
         Type *: __builtin_ast_publish_type                                     \
-    )(VM, (decl), 0)
+    )((decl), 0)
 #define PublishNodeAt(decl, tok)                                          \
     _Generic((decl),                                                        \
         Obj *: __builtin_ast_publish,                                          \
         Type *: __builtin_ast_publish_type                                     \
-    )(VM, (decl), (tok))
-#define EmitDirective(line) __builtin_emit_directive(VM, line)
+    )((decl), (tok))
+#define EmitDirective(line) __builtin_emit_directive(line)
 #define FunctionAddParam(fn, name, type)                             \
-    __builtin_ast_function_add_param(VM, fn, name, type)
+    __builtin_ast_function_add_param(fn, name, type)
 #define FunctionSetBody(fn, body)                                    \
-    __builtin_ast_function_set_body(VM, fn, body)
+    __builtin_ast_function_set_body(fn, body)
 #define FunctionSetStatic(fn, is_static)                             \
     __builtin_ast_function_set_static(fn, is_static)
 #define FunctionSetInline(fn, is_inline)                             \
@@ -1970,15 +1858,15 @@ const char *__builtin_dump_ast_gen_to_string(VirtualMachine *vm, Node *node);
 // Creates a declaration-only Obj (no body); use FunctionAddParam for
 // parameters and PublishNode to make it visible in scope.
 #define FunctionPrototype(name, ret)                                  \
-    __builtin_ast_function_prototype(VM, name, ret)
+    __builtin_ast_function_prototype(name, ret)
 
 // Mode attribute registration for AST-generated functions.
 // Ticket #619: generic attribute application and convenience shorthands.
 // Use AddAttribute(fn, "cccc::test(suite=\"s\", timeout=5000)") for fine-grained control.
-#define AddAttribute(fn, text)          __builtin_ast_add_attribute(VM, fn, text)
+#define AddAttribute(fn, text)          __builtin_ast_add_attribute(fn, text)
 #define MarkAsTest(fn)                  AddAttribute(fn, "cccc::test")
 #define MarkAsBuild(fn)                 AddAttribute(fn, "cccc::build")
-#define MarkAsBuildTarget(fn, kind)     __builtin_ast_add_build_target_attr(VM, fn, kind)
+#define MarkAsBuildTarget(fn, kind)     __builtin_ast_add_build_target_attr(fn, kind)
 
 // Ticket #171: struct/union/enum/typedef type builders
 // Build a new named aggregate and expose it so GetType(name) resolves it.
@@ -1990,92 +1878,86 @@ const char *__builtin_dump_ast_gen_to_string(VirtualMachine *vm, Node *node);
 // StructAddField works for both struct and union types.
 // MakeTypedef registers name as an alias for underlying and returns it.
 // EnumAddConstant adds a constant to the enum AND to scope (usable as int).
-#define MakeStruct(name)     __builtin_ast_make_struct(VM, name)
-#define MakeUnion(name)      __builtin_ast_make_union(VM, name)
+#define MakeStruct(name)     __builtin_ast_make_struct(name)
+#define MakeUnion(name)      __builtin_ast_make_union(name)
 #define __builtin_struct_add_field_2(name, field_type, _ignored)             \
-    __builtin_ast_struct_add_current_field(VM, name, field_type)
+    __builtin_ast_struct_add_current_field(name, field_type)
 #define __builtin_struct_add_field_3(ty, name, field_type)                   \
-    __builtin_ast_struct_add_field(VM, ty, name, field_type)
+    __builtin_ast_struct_add_field(ty, name, field_type)
 #define StructAddField(...)                                           \
     __builtin_dispatch_3(__VA_ARGS__, __builtin_struct_add_field_3,              \
                      __builtin_struct_add_field_2)
-#define MakeEnum(name)       __builtin_ast_make_enum(VM, name)
+#define MakeEnum(name)       __builtin_ast_make_enum(name)
 #define __builtin_enum_add_constant_2(name, value, _ignored)                 \
-    __builtin_ast_enum_add_current_constant(VM, name, value)
+    __builtin_ast_enum_add_current_constant(name, value)
 #define __builtin_enum_add_constant_3(ty, name, value)                       \
-    __builtin_ast_enum_add_constant(VM, ty, name, value)
+    __builtin_ast_enum_add_constant(ty, name, value)
 #define EnumAddConstant(...)                                          \
     __builtin_dispatch_3(__VA_ARGS__, __builtin_enum_add_constant_3,             \
                      __builtin_enum_add_constant_2)
 #define MakeTypedef(name, underlying) \
-    __builtin_ast_make_typedef(VM, name, underlying)
+    __builtin_ast_make_typedef(name, underlying)
 
 // Comptime variable access (ticket #188)
 /*!
  * @function __builtin_get_comptime_int
  * @abstract Read an integer-typed @c #pragma comptime variable's value at
  *           compile time.
- * @param vm The VM context.
  * @param name The comptime variable's name.
  * @return The 64-bit integer value, or 0 if the variable is not defined.
  * @discussion Convenience wrapper: GetComptimeInt(name).
  */
-int64_t __builtin_get_comptime_int(VirtualMachine *vm, const char *name);
+int64_t __builtin_get_comptime_int(const char *name);
 /*!
  * @function __builtin_get_comptime_float
  * @abstract Read a float/double-typed @c #pragma comptime variable's value
  *           at compile time.
- * @param vm The VM context.
  * @param name The comptime variable's name.
  * @return The double value, or 0.0 if the variable is not defined.
  * @discussion Convenience wrapper: GetComptimeFloat(name).
  */
-double __builtin_get_comptime_float(VirtualMachine *vm, const char *name);
+double __builtin_get_comptime_float(const char *name);
 /*!
  * @function __builtin_get_comptime_var
  * @abstract Read a comptime scalar variable as an AST literal node.
- * @param vm The VM context.
  * @param name The comptime variable's name.
  * @return A NK_NUM node representing the variable's value, or NULL on error.
  * @discussion Convenience wrapper: GetComptimeVar(name).
  */
-Node *__builtin_get_comptime_var(VirtualMachine *vm, const char *name);
+Node *__builtin_get_comptime_var(const char *name);
 /*!
  * @function __builtin_get_comptime_ptr
  * @abstract Return the address of a comptime variable as a generated-code AST
  *           pointer node.
- * @param vm The VM context.
  * @param name The comptime variable's name.
  * @return An NK_ADDR node pointing at a static shadow copy of the evaluated
  *         comptime variable, or NULL on error.
  * @discussion Convenience wrapper: GetComptimePtr(name).
  */
-Node *__builtin_get_comptime_ptr(VirtualMachine *vm, const char *name);
+Node *__builtin_get_comptime_ptr(const char *name);
 /*!
  * @function __builtin_get_comptime_member
  * @abstract Read a named field from a comptime struct variable as an AST
  *           literal node.
- * @param vm The VM context.
  * @param var_name The comptime struct variable's name.
  * @param field The field name to look up.
  * @return A NK_NUM node for the field's value, or NULL on error.
  * @discussion Convenience wrapper: GetComptimeMember(var_name, field).
  */
-Node *__builtin_get_comptime_member(VirtualMachine *vm, const char *var_name,
+Node *__builtin_get_comptime_member(const char *var_name,
                                   const char *field);
 
-#define GetComptimeInt(name)           __builtin_get_comptime_int(VM, name)
-#define GetComptimeFloat(name)         __builtin_get_comptime_float(VM, name)
-#define GetComptimeVar(name)           __builtin_get_comptime_var(VM, name)
-#define GetComptimePtr(name)           __builtin_get_comptime_ptr(VM, name)
-#define GetComptimeMember(var, field)  __builtin_get_comptime_member(VM, var, field)
+#define GetComptimeInt(name)           __builtin_get_comptime_int(name)
+#define GetComptimeFloat(name)         __builtin_get_comptime_float(name)
+#define GetComptimeVar(name)           __builtin_get_comptime_var(name)
+#define GetComptimePtr(name)           __builtin_get_comptime_ptr(name)
+#define GetComptimeMember(var, field)  __builtin_get_comptime_member(var, field)
 
 // Constexpr variable access (ticket #189)
 /*!
  * @function __builtin_get_constexpr_value
  * @abstract Read the evaluated initializer of a global @c constexpr variable
  *           as an AST literal node.
- * @param vm The VM context.
  * @param name The constexpr variable's name.
  * @return A NK_NUM node (integer or float, depending on the variable's type),
  *         or NULL on error.
@@ -2083,9 +1965,9 @@ Node *__builtin_get_comptime_member(VirtualMachine *vm, const char *var_name,
  *             @c constexpr variable.  Convenience wrapper:
  *             GetConstexprValue(name).
  */
-Node *__builtin_get_constexpr_value(VirtualMachine *vm, const char *name);
+Node *__builtin_get_constexpr_value(const char *name);
 
-#define GetConstexprValue(name)  __builtin_get_constexpr_value(VM, name)
+#define GetConstexprValue(name)  __builtin_get_constexpr_value(name)
 
 // ============================================================================
 // Initializer Builders (ticket #296)
@@ -2096,36 +1978,36 @@ Node *__builtin_get_constexpr_value(VirtualMachine *vm, const char *name);
  *           local var then positionally assign @a inits via node_expand_init_splice.
  * @note Requires function scope (file-scope not supported in V1).
  */
-Node *__builtin_ast_compound_literal(VirtualMachine *vm, Type *ty, Node **inits, int n);
+Node *__builtin_ast_compound_literal(Type *ty, Node **inits, int n);
 
 /**
  * @abstract Build an array compound literal.  Element type is explicit to avoid
  *           long-inference surprises with MakeIntLiteral.
  */
-Node *__builtin_ast_init_array(VirtualMachine *vm, Type *elem_ty, Node **elems, int n);
+Node *__builtin_ast_init_array(Type *elem_ty, Node **elems, int n);
 
 /**
  * @abstract Build a designated struct/union initializer.  Unmentioned fields
  *           are zero-initialised.  Partial init (n < member count) is allowed.
  */
-Node *__builtin_ast_init_struct(VirtualMachine *vm, Type *ty, const char **fields,
+Node *__builtin_ast_init_struct(Type *ty, const char **fields,
                                 Node **values, int n);
 
 /** Positional compound literal — element count inferred from __VA_ARGS__. */
 #define CompoundLiteral(ty, ...)                                      \
-    __builtin_ast_compound_literal(VM, ty,                                 \
+    __builtin_ast_compound_literal(ty,                                 \
         (Node *[]){__VA_ARGS__},                                     \
         (int)(sizeof((Node *[]){__VA_ARGS__}) / sizeof(Node *)))
 
 /** Array compound literal with explicit element type. */
 #define InitArray(elem_ty, ...)                                       \
-    __builtin_ast_init_array(VM, elem_ty,                                  \
+    __builtin_ast_init_array(elem_ty,                                  \
         (Node *[]){__VA_ARGS__},                                     \
         (int)(sizeof((Node *[]){__VA_ARGS__}) / sizeof(Node *)))
 
 /** Designated struct/union init — fields and values are separate arrays. */
 #define InitStruct(ty, fields, values, n)                             \
-    __builtin_ast_init_struct(VM, ty, fields, values, n)
+    __builtin_ast_init_struct(ty, fields, values, n)
 
 // ============================================================================
 // Serialization (ticket #235)
@@ -2140,7 +2022,7 @@ Node *__builtin_ast_init_struct(VirtualMachine *vm, Type *ty, const char **field
  * @note V1 placeholder: pointer-typed members are copied as raw pointer
  *       bytes, not followed.
  */
-Node *__builtin_ast_serialize(VirtualMachine *vm, Type *ty, Node *expr, Node *buf);
+Node *__builtin_ast_serialize(Type *ty, Node *expr, Node *buf);
 
 /**
  * @abstract Build `*(ty*)buf` — reinterpret buf as a ty value.
@@ -2148,16 +2030,16 @@ Node *__builtin_ast_serialize(VirtualMachine *vm, Type *ty, Node *expr, Node *bu
  *       if Serialize ever produces a packed/portable layout this must
  *       change to field-by-field reconstruction.
  */
-Node *__builtin_ast_deserialize(VirtualMachine *vm, Type *ty, Node *buf);
+Node *__builtin_ast_deserialize(Type *ty, Node *buf);
 
-#define Serialize(ty, expr, buf)   __builtin_ast_serialize(VM, ty, expr, buf)
-#define Deserialize(ty, buf)       __builtin_ast_deserialize(VM, ty, buf)
+#define Serialize(ty, expr, buf)   __builtin_ast_serialize(ty, expr, buf)
+#define Deserialize(ty, buf)       __builtin_ast_deserialize(ty, buf)
 
 // Global variable generation (ticket #152)
 #define GlobalVar(name, ty)                                           \
-    __builtin_ast_global_var(VM, name, ty)
+    __builtin_ast_global_var(name, ty)
 #define GlobalVarSetInitData(var, data, len)                       \
-    __builtin_ast_global_var_set_init_data(VM, var, data, len)
+    __builtin_ast_global_var_set_init_data(var, data, len)
 #define GlobalVarSetStatic(var, is_static)                          \
     __builtin_ast_global_var_set_static(var, is_static)
 
@@ -2169,29 +2051,29 @@ Node *__builtin_ast_deserialize(VirtualMachine *vm, Type *ty, Node *buf);
 // Inside the block, current_fn is set to fn so Quote("return x;") casts
 // to the correct return type.  The pop always runs even on early exit.
 #define WithFn(fn)                                                    \
-    for (int _cccc_fn_ctx_ = (__builtin_ast_push_fn(VM, (fn)), 1);             \
+    for (int _cccc_fn_ctx_ = (__builtin_ast_push_fn((fn)), 1);             \
          _cccc_fn_ctx_;                                                      \
-         _cccc_fn_ctx_ = (__builtin_ast_pop_fn(VM), 0))
+         _cccc_fn_ctx_ = (__builtin_ast_pop_fn(), 0))
 
 #define WithBlock(block)                                               \
-    for (int _cccc_block_ctx_ = (__builtin_ast_push_block(VM, (block)), 1);  \
+    for (int _cccc_block_ctx_ = (__builtin_ast_push_block((block)), 1);  \
          _cccc_block_ctx_;                                                \
-         _cccc_block_ctx_ = (__builtin_ast_pop_block(VM), 0))
+         _cccc_block_ctx_ = (__builtin_ast_pop_block(), 0))
 
 #define WithStruct(ty)                                                 \
-    for (int _cccc_struct_ctx_ = (__builtin_ast_push_struct(VM, (ty)), 1);   \
+    for (int _cccc_struct_ctx_ = (__builtin_ast_push_struct((ty)), 1);   \
          _cccc_struct_ctx_;                                               \
-         _cccc_struct_ctx_ = (__builtin_ast_pop_struct(VM), 0))
+         _cccc_struct_ctx_ = (__builtin_ast_pop_struct(), 0))
 
 #define WithSwitch(sw)                                                 \
-    for (int _cccc_switch_ctx_ = (__builtin_ast_push_switch(VM, (sw)), 1);   \
+    for (int _cccc_switch_ctx_ = (__builtin_ast_push_switch((sw)), 1);   \
          _cccc_switch_ctx_;                                               \
-         _cccc_switch_ctx_ = (__builtin_ast_pop_switch(VM), 0))
+         _cccc_switch_ctx_ = (__builtin_ast_pop_switch(), 0))
 
 #define WithEnum(ty)                                                   \
-    for (int _cccc_enum_ctx_ = (__builtin_ast_push_enum(VM, (ty)), 1);       \
+    for (int _cccc_enum_ctx_ = (__builtin_ast_push_enum((ty)), 1);       \
          _cccc_enum_ctx_;                                                 \
-         _cccc_enum_ctx_ = (__builtin_ast_pop_enum(VM), 0))
+         _cccc_enum_ctx_ = (__builtin_ast_pop_enum(), 0))
 
 // ============================================================================
 // Macro Standard Library Attributes (ticket #235)
@@ -2450,7 +2332,7 @@ void __builtin_attr_generate_constructor(AttrTarget *target) {
  * @abstract Publish `T sum_T(T *arr, size_t n)` summing all elements.
  * @discussion Convenience wrapper: GenerateSum(elem_type).
  */
-void __builtin_generate_sum(VirtualMachine *vm, Type *elem_ty);
+void __builtin_generate_sum(Type *elem_ty);
 
 /*!
  * @function __builtin_generate_map
@@ -2458,7 +2340,7 @@ void __builtin_generate_sum(VirtualMachine *vm, Type *elem_ty);
  *   writing `f(arr[i])` into `out[i]` for each element.
  * @discussion Convenience wrapper: GenerateMap(elem_type).
  */
-void __builtin_generate_map(VirtualMachine *vm, Type *elem_ty);
+void __builtin_generate_map(Type *elem_ty);
 
 /*!
  * @function __builtin_generate_reduce
@@ -2466,7 +2348,7 @@ void __builtin_generate_map(VirtualMachine *vm, Type *elem_ty);
  *   folding `f` over the array starting from `init`.
  * @discussion Convenience wrapper: GenerateReduce(elem_type).
  */
-void __builtin_generate_reduce(VirtualMachine *vm, Type *elem_ty);
+void __builtin_generate_reduce(Type *elem_ty);
 
 /*!
  * @function __builtin_generate_filter
@@ -2475,12 +2357,12 @@ void __builtin_generate_reduce(VirtualMachine *vm, Type *elem_ty);
  *   setting `*out_n` to the match count.
  * @discussion Convenience wrapper: GenerateFilter(elem_type).
  */
-void __builtin_generate_filter(VirtualMachine *vm, Type *elem_ty);
+void __builtin_generate_filter(Type *elem_ty);
 
-#define GenerateSum(elem_type)    __builtin_generate_sum(VM, elem_type)
-#define GenerateMap(elem_type)    __builtin_generate_map(VM, elem_type)
-#define GenerateReduce(elem_type) __builtin_generate_reduce(VM, elem_type)
-#define GenerateFilter(elem_type) __builtin_generate_filter(VM, elem_type)
+#define GenerateSum(elem_type)    __builtin_generate_sum(elem_type)
+#define GenerateMap(elem_type)    __builtin_generate_map(elem_type)
+#define GenerateReduce(elem_type) __builtin_generate_reduce(elem_type)
+#define GenerateFilter(elem_type) __builtin_generate_filter(elem_type)
 
 #ifdef __cplusplus
 }

@@ -4,9 +4,8 @@
 
 [[cccc::comptime]]
 Node *bad_mix(Node *a, Node *b) {
-    VirtualMachine *vm = __builtin_get_vm();
     // $1 and $$ in the same template — must error
-    return __builtin_quote(vm, "$1 + $$", a, b);
+    return __builtin_quote("$1 + $$", a, b);
 }
 
 int main(void) {

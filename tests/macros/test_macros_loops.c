@@ -21,28 +21,25 @@ static int contains(const char *hay, const char *needle) {
 // Macro: builds a while node and returns its gen-dump string.
 [[cccc::comptime]]
 Node *while_gen_str(Node *cond, Node *body) {
-    VirtualMachine *vm = __builtin_get_vm();
-    Node *w = __builtin_ast_while(vm, cond, body);
-    const char *s = __builtin_dump_ast_gen_to_string(vm, w);
-    return __builtin_ast_string_literal(vm, s);
+    Node *w = __builtin_ast_while(cond, body);
+    const char *s = __builtin_dump_ast_gen_to_string(w);
+    return __builtin_ast_string_literal(s);
 }
 
 // Macro: builds a for node and returns its gen-dump string.
 [[cccc::comptime]]
 Node *for_gen_str(Node *init, Node *cond, Node *inc, Node *body) {
-    VirtualMachine *vm = __builtin_get_vm();
-    Node *f = __builtin_ast_for(vm, init, cond, inc, body);
-    const char *s = __builtin_dump_ast_gen_to_string(vm, f);
-    return __builtin_ast_string_literal(vm, s);
+    Node *f = __builtin_ast_for(init, cond, inc, body);
+    const char *s = __builtin_dump_ast_gen_to_string(f);
+    return __builtin_ast_string_literal(s);
 }
 
 // Macro: builds a do-while node and returns its gen-dump string.
 [[cccc::comptime]]
 Node *do_while_gen_str(Node *body, Node *cond) {
-    VirtualMachine *vm = __builtin_get_vm();
-    Node *d = __builtin_ast_do_while(vm, body, cond);
-    const char *s = __builtin_dump_ast_gen_to_string(vm, d);
-    return __builtin_ast_string_literal(vm, s);
+    Node *d = __builtin_ast_do_while(body, cond);
+    const char *s = __builtin_dump_ast_gen_to_string(d);
+    return __builtin_ast_string_literal(s);
 }
 
 int main(void) {

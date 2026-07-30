@@ -6,8 +6,7 @@
 // After expansion: int y = (x = 99);  => y == 99, x == 99
 [[cccc::comptime]]
 Node *set_var(Node *target, Node *value) {
-    VirtualMachine *vm = __builtin_get_vm();
-    return __builtin_ast_assign(vm, target, value);
+    return __builtin_ast_assign(target, value);
 }
 
 // ---- __builtin_ast_member test -----------------------------------------------
@@ -16,8 +15,7 @@ struct Point { int x; int y; };
 
 [[cccc::comptime]]
 Node *get_x(Node *pt) {
-    VirtualMachine *vm = __builtin_get_vm();
-    return __builtin_ast_member(vm, pt, "x");
+    return __builtin_ast_member(pt, "x");
 }
 
 // ---- __builtin_ast_funcall test ----------------------------------------------
@@ -27,10 +25,9 @@ int triple(int n) { return n * 3; }
 // Macro that generates: triple(arg)
 [[cccc::comptime]]
 Node *call_triple(Node *arg) {
-    VirtualMachine *vm = __builtin_get_vm();
-    Node *callee = __builtin_ast_var_ref(vm, "triple");
+    Node *callee = __builtin_ast_var_ref("triple");
     Node *args[1] = { arg };
-    return __builtin_ast_funcall(vm, callee, args, 1);
+    return __builtin_ast_funcall(callee, args, 1);
 }
 
 int main(void) {

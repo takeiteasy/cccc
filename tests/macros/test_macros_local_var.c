@@ -4,16 +4,15 @@
 // Demonstrates that the gensym'd name doesn't collide with user locals.
 [[cccc::comptime]]
 Node *doubled(Node *arg) {
-    VirtualMachine *vm = __builtin_get_vm();
 
     // Inject a unique (gensym'd) local of type int
-    Type *ty_int = __builtin_ast_get_type(vm, "int");
-    Node *tmp = __builtin_ast_local_var_unique(vm, ty_int);
+    Type *ty_int = __builtin_ast_get_type("int");
+    Node *tmp = __builtin_ast_local_var_unique(ty_int);
 
     // Build: tmp = arg * 2
-    Node *two   = __builtin_ast_int_literal(vm, 2);
-    Node *mul   = __builtin_ast_binary(vm, NK_MUL, arg, two);
-    Node *asgn  = __builtin_ast_assign(vm, tmp, mul);
+    Node *two   = __builtin_ast_int_literal(2);
+    Node *mul   = __builtin_ast_binary(NK_MUL, arg, two);
+    Node *asgn  = __builtin_ast_assign(tmp, mul);
 
     // Return tmp (the assignment expression already set tmp, but return tmp ref
     // as an ND_ASSIGN evaluates to the assigned value — return the assign expr)
@@ -24,11 +23,10 @@ Node *doubled(Node *arg) {
 // Proves __builtin_ast_local_var works (not just the unique variant).
 [[cccc::comptime]]
 Node *make_local_forty_two(void) {
-    VirtualMachine *vm = __builtin_get_vm();
-    Type *ty_int = __builtin_ast_get_type(vm, "int");
-    Node *var  = __builtin_ast_local_var(vm, "named_tmp", ty_int);
-    Node *val  = __builtin_ast_int_literal(vm, 42);
-    return __builtin_ast_assign(vm, var, val);
+    Type *ty_int = __builtin_ast_get_type("int");
+    Node *var  = __builtin_ast_local_var("named_tmp", ty_int);
+    Node *val  = __builtin_ast_int_literal(42);
+    return __builtin_ast_assign(var, val);
 }
 
 // Ticket #305: MakeLocalVarUnique inside WithFn must land in the inner
