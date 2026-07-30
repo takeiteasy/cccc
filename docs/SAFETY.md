@@ -359,6 +359,10 @@ Blocking calls — `read`, `write`, `pwrite`, `poll`, `accept`, `connect`, `wait
 
 Stack canary checks work correctly under threading. Each VM thread runs with its own `bp`/`sp`/`stack_seg` via `ExecState` (saved and restored on every GIL hand-off), so canary slots are isolated per thread. Stack canary protection enabled with `-1` or `--stack-canaries` is not disabled when `pthread_create` is used.
 
+**Dangling-pointer detection under threading**
+
+`--dangling-pointers`'s per-frame liveness bookkeeping (`frame_epochs`/`live_epochs`/`stack_ptr_epochs`/`stack_intervals`, see below) is isolated per thread the same way stack canaries are: each field lives in `ExecState` and is swapped in/out on every GIL hand-off (`#866`), so a worker thread's own `ENT3`/`LEV3` bookkeeping is never compared against another thread's unrelated stack. Before this, running any worker thread at `-3`/`--dangling-pointers` while another thread had an outstanding escaping local (e.g. simply because `main` took `&thread_id` for `pthread_create`'s out-parameter) would assert almost immediately. Detection of a pointer escaping **across** threads (a worker's local address stored somewhere and dereferenced by a different thread after the worker has exited) is not implemented — each thread's liveness bookkeeping is discarded when that thread exits, so such a dereference is a real, undetected use-after-free rather than a diagnosed one.
+
 **`--thread-safety` diagnostics** _(off by default; enables the checks below)_
 
 Enable with `--thread-safety`. Intended for development and testing — not enabled by preset safety levels.

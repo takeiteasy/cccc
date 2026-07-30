@@ -913,6 +913,17 @@ typedef struct ExecState {
     long long *shadow_stack;
     long long *shadow_sp;
     HashMap init_state;
+    // Per-thread dangling-detector state (#866) -- see the comment above
+    // VirtualMachine's own copy of these fields in cccc.h. frame_epoch_counter
+    // starts at 0 for a brand-new thread (via cccc_exec_state_alloc_stack's
+    // memset) and is safe to do so: it only needs to be monotonic *within*
+    // one stack's address range to disambiguate a reused address's old vs.
+    // new occupant, and no two threads ever share a stack allocation.
+    unsigned long long frame_epoch_counter;
+    FrameEpochs frame_epochs;
+    HashMap live_epochs;
+    HashMap stack_ptr_epochs;
+    StackIntervals stack_intervals;
 } ExecState;
 
 void cccc_exec_state_save(VirtualMachine *vm, ExecState *state);

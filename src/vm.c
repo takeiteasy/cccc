@@ -734,6 +734,15 @@ void cccc_exec_state_save(VirtualMachine *vm, ExecState *state) {
     state->shadow_stack = vm->shadow_stack;
     state->shadow_sp = vm->shadow_sp;
     state->init_state = vm->init_state;
+    // #866: dangling-detector bookkeeping is per-thread, same as everything
+    // else above -- must move with the rest of this thread's execution
+    // state, not stay behind as VM-wide state another thread would then
+    // desync against.
+    state->frame_epoch_counter = vm->frame_epoch_counter;
+    state->frame_epochs = vm->frame_epochs;
+    state->live_epochs = vm->live_epochs;
+    state->stack_ptr_epochs = vm->stack_ptr_epochs;
+    state->stack_intervals = vm->stack_intervals;
 }
 
 void cccc_exec_state_restore(VirtualMachine *vm, const ExecState *state) {
@@ -752,6 +761,12 @@ void cccc_exec_state_restore(VirtualMachine *vm, const ExecState *state) {
     vm->shadow_stack = state->shadow_stack;
     vm->shadow_sp = state->shadow_sp;
     vm->init_state = state->init_state;
+    // #866: see the matching comment in cccc_exec_state_save above.
+    vm->frame_epoch_counter = state->frame_epoch_counter;
+    vm->frame_epochs = state->frame_epochs;
+    vm->live_epochs = state->live_epochs;
+    vm->stack_ptr_epochs = state->stack_ptr_epochs;
+    vm->stack_intervals = state->stack_intervals;
 }
 
 int cccc_exec_state_alloc_stack(VirtualMachine *vm, ExecState *state) {
@@ -802,6 +817,27 @@ void cccc_exec_state_release_stack(VirtualMachine *vm, ExecState *state) {
     if (state->shadow_stack)
         cccc_vm_release(state->shadow_stack, reserved_stack);
     hashmap_deinit(&state->init_state);
+    // #866: mirrors the vm-level dangling-detector cleanup in cc_destroy --
+    // now needed here too since this state is a thread's own copy rather
+    // than an alias of the VM-wide fields. By the time a thread's ExecState
+    // reaches here (via free_thread_record, after cccc_exec_state_save has
+    // captured its final state), frame_epochs/live_epochs/stack_ptr_epochs
+    // should already be logically empty (the thread's own call chain fully
+    // unwound), but stack_intervals retains dead-frame entries by design
+    // (#675) and the hashmaps/arrays themselves still own allocated storage
+    // either way.
+    hashmap_deinit(&state->live_epochs);
+    hashmap_deinit(&state->stack_ptr_epochs);
+    free(state->frame_epochs.bps);
+    free(state->frame_epochs.epochs);
+    free(state->stack_intervals.iv);
+    state->frame_epochs.bps = NULL;
+    state->frame_epochs.epochs = NULL;
+    state->frame_epochs.count = 0;
+    state->frame_epochs.capacity = 0;
+    state->stack_intervals.iv = NULL;
+    state->stack_intervals.count = 0;
+    state->stack_intervals.capacity = 0;
     state->stack_seg = NULL;
     state->shadow_stack = NULL;
 }

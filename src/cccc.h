@@ -2739,6 +2739,26 @@ typedef struct Compiler {
                        // or execute (used by AFL++ and other fuzzers)
 } Compiler;
 
+// Named (rather than anonymous) so ExecState (internal.h) can hold its own
+// per-thread copy of the same shape -- see the frame_epochs/stack_intervals
+// fields below and #866 (this dangling-detector bookkeeping used to be
+// VM-wide only, desyncing across a worker-thread's separate stack).
+typedef struct {
+    long long **bps;            // parallel array: bp at push time
+    unsigned long long *epochs; // parallel array: epoch assigned
+    int count;
+    int capacity;
+} FrameEpochs;
+
+typedef struct {
+    struct {
+        long long lo, hi;         // [lo, hi) byte range, raw host addrs
+        unsigned long long epoch; // creating frame's epoch
+    } *iv;
+    int count;
+    int capacity;
+} StackIntervals;
+
 /*!
  @struct CCCC
  @abstract Encapsulates all state for the CCCC compiler and virtual
@@ -2847,13 +2867,17 @@ struct VirtualMachine {
                                 // (comptime macros, --build factories), so
                                 // each call scans only the newly-appended
                                 // words rather than a fixed one-shot prefix.
+    // frame_epoch_counter/frame_epochs/live_epochs/stack_ptr_epochs/
+    // stack_intervals (below) are the CURRENTLY ACTIVE thread's dangling-
+    // detector state -- ExecState (internal.h) holds each thread's own copy,
+    // swapped in/out by cccc_exec_state_save/restore at every thread switch
+    // (full thread start/exit via vm_thread_start, and the save/release-GIL/
+    // reacquire/restore dance around any blocking pthread call), exactly
+    // like regs/pc/sp/bp already are (#866 -- this used to be genuinely
+    // VM-wide, comparing one thread's bp against another's stale entries
+    // since each thread's stack lives at a disjoint address range).
     unsigned long long frame_epoch_counter; // monotonic, bumped per ENT3
-    struct {
-        long long **bps;            // parallel array: bp at push time
-        unsigned long long *epochs; // parallel array: epoch assigned
-        int count;
-        int capacity;
-    } frame_epochs; // mirrors the saved-bp chain, for ordered pop/truncate
+    FrameEpochs frame_epochs; // mirrors the saved-bp chain, for ordered pop/truncate
     HashMap live_epochs;      // epoch -> present; O(1) liveness membership
     HashMap stack_ptr_epochs; // &local address -> creating frame's epoch
 
@@ -2871,14 +2895,7 @@ struct VirtualMachine {
     // stack_interval_stab in ops.c. Exact-address hits are already covered
     // by stack_ptr_epochs above; this table is consulted by CHKP3 only when
     // that lookup misses (i.e. only for interior addresses).
-    struct {
-        struct {
-            long long lo, hi;           // [lo, hi) byte range, raw host addrs
-            unsigned long long epoch;   // creating frame's epoch
-        } *iv;
-        int count;
-        int capacity;
-    } stack_intervals;
+    StackIntervals stack_intervals;
 
     // Sorted allocation array for O(log n) base-address range queries.
     // Populated by MALC (CALC/REALC delegate to MALC) as a simple append —
