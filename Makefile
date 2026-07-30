@@ -1,4 +1,16 @@
-SRCS := $(filter-out src/ops.c, $(wildcard src/*.c src/stdlib/*.c))
+# std.c is the generated embedded-stdlib table (see `make stdlib` / build.c's
+# default two-pass build). A fresh clone has no src/std.c until a build has
+# run once; src/std_seed.c is a small committed stand-in with just enough of
+# the table (reflection.h) to bootstrap the comptime machinery
+# tools/generate_stdlib.c needs to produce the real src/std.c. Once std.c
+# exists on disk it always wins (self-correcting: no explicit step needed to
+# switch back). See #842 Step 3 / docs/BUILDING.md.
+ifeq ($(wildcard src/std.c),)
+STDLIB_SRC := src/std_seed.c
+else
+STDLIB_SRC := src/std.c
+endif
+SRCS := $(filter-out src/ops.c src/std.c src/std_seed.c, $(wildcard src/*.c src/stdlib/*.c)) $(STDLIB_SRC)
 BASE_CFLAGS := -Wall -O0 -g -std=c23 -Wno-deprecated-declarations -Wno-switch
 CFLAGS := $(BASE_CFLAGS)
 LDFLAGS :=

@@ -2,6 +2,12 @@
 /cccc.exe
 /cccc-*
 libcccc*
+# Generated embedded-stdlib table (#842 Step 3, #571): produced by
+# `make stdlib` / build.c's default two-pass build from
+# tools/generate_stdlib.c. src/std_seed.c (committed) is the stage0
+# fallback used only when this file doesn't exist yet.
+/src/std.c
+/src/std.c.tmp.*
 *.dSYM
 *~
 *.bak

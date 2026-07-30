@@ -1890,7 +1890,14 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
     //   Non-owned std headers do NOT fall back to ./include; if missing from
     //   system paths the include fails with "cannot open file".
     bool is_std = get_std_header(filename) != NULL;
-    bool owned  = is_std && is_compiler_owned_header(filename);
+    // `owned` must NOT be gated on is_std (#842): is_std reflects whatever
+    // subset of headers happens to be in the embedded get_std_header table
+    // (e.g. a near-empty stage0 seed table), but is_compiler_owned_header()
+    // is a fixed, VM-ABI-driven list (stdarg.h, stdint.h, ...) that must
+    // stay force-resolved to CCCC's own copies regardless of what the table
+    // currently knows about — otherwise a reduced table silently
+    // de-protects them under --use-system-headers.
+    bool owned  = is_compiler_owned_header(filename);
     bool force_cccc = owned || (!vm->compiler.use_system_headers && is_std);
 
     if (vm->compiler.use_system_headers && is_std && !owned && is_system) {

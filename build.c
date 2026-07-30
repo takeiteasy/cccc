@@ -142,10 +142,19 @@ static void add_cccc_flags(Builder *ctx, BuildTarget *t, BuildTarget *bt) {
 
 // ---- Source glob shared by all cccc executable targets -------------------
 
-static void add_cccc_sources(BuildTarget *t) {
+static void add_cccc_sources(Builder *ctx, BuildTarget *t) {
     AddSourcesGlob(t, "src/*.c");
     AddSourcesGlob(t, "src/stdlib/*.c");
     ExcludeSource(t, "src/ops.c");
+    // src/std.c (generated) and src/std_seed.c (committed stage0 fallback,
+    // #842 Step 3) both define get_std_header/get_stdlib_reg_fn_name/
+    // get_std_header_name -- never compile both into the same target.
+    // std.c wins whenever it exists on disk; same self-correcting rule the
+    // Makefile's SRCS uses.
+    if (FileExists(ctx, "src/std.c"))
+        ExcludeSource(t, "src/std_seed.c");
+    else
+        ExcludeSource(t, "src/std.c"); // no-op when absent; harmless
 }
 
 // ---- Reusable cccc executable factory ------------------------------------
@@ -153,7 +162,7 @@ static void add_cccc_sources(BuildTarget *t) {
 static BuildTarget *make_cccc_exe_named(Builder *ctx, BuildTarget *bt, const char *name) {
     BuildTarget *t = Executable(ctx, name);
     SetOutput(t, name);
-    add_cccc_sources(t);
+    add_cccc_sources(ctx, t);
     add_cccc_flags(ctx, t, bt);
     return t;
 }
@@ -165,7 +174,7 @@ BuildTarget *cccc_asan(Builder *ctx) {
     BuildTarget *bt = make_libbacktrace(ctx);
     BuildTarget *t = Executable(ctx, "cccc-asan");
     SetOutput(t, "cccc-asan");
-    add_cccc_sources(t);
+    add_cccc_sources(ctx, t);
     add_cccc_flags(ctx, t, bt);
     AddCFlag(t, "-fsanitize=address,undefined");
     AddLdFlag(t, "-fsanitize=address,undefined");
@@ -177,7 +186,7 @@ BuildTarget *cccc_ubsan(Builder *ctx) {
     BuildTarget *bt = make_libbacktrace(ctx);
     BuildTarget *t = Executable(ctx, "cccc-ubsan");
     SetOutput(t, "cccc-ubsan");
-    add_cccc_sources(t);
+    add_cccc_sources(ctx, t);
     add_cccc_flags(ctx, t, bt);
     AddCFlag(t, "-fsanitize=undefined");
     AddLdFlag(t, "-fsanitize=undefined");
@@ -189,7 +198,7 @@ BuildTarget *cccc_tsan(Builder *ctx) {
     BuildTarget *bt = make_libbacktrace(ctx);
     BuildTarget *t = Executable(ctx, "cccc-tsan");
     SetOutput(t, "cccc-tsan");
-    add_cccc_sources(t);
+    add_cccc_sources(ctx, t);
     add_cccc_flags(ctx, t, bt);
     AddCFlag(t, "-fsanitize=thread");
     AddLdFlag(t, "-fsanitize=thread");
@@ -202,7 +211,7 @@ BuildTarget *cccc_msan(Builder *ctx) {
     BuildTarget *bt = make_libbacktrace(ctx);
     BuildTarget *t = Executable(ctx, "cccc-msan");
     SetOutput(t, "cccc-msan");
-    add_cccc_sources(t);
+    add_cccc_sources(ctx, t);
     add_cccc_flags(ctx, t, bt);
     AddCFlag(t, "-fsanitize=memory");
     AddLdFlag(t, "-fsanitize=memory");
@@ -214,7 +223,7 @@ BuildTarget *fuzz_harness(Builder *ctx) {
     BuildTarget *bt = make_libbacktrace(ctx);
     BuildTarget *t = Executable(ctx, "fuzz_harness");
     SetOutput(t, "fuzz_harness");
-    add_cccc_sources(t);
+    add_cccc_sources(ctx, t);
     ExcludeSource(t, "src/main.c");
     add_cccc_flags(ctx, t, bt);
     AddCFlag(t, "-fsanitize=fuzzer,address");
