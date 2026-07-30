@@ -116,17 +116,35 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
                 leak_lines = [line for line in output.splitlines() if "Leak:" in line][:3]
                 for line in leak_lines:
                     print(f"  {line}")
+        elif status == "leaks_error":
+            # The leak tool itself produced unparseable output (crash
+            # report, timeout, empty output, ...) rather than a real
+            # leak/no-leak verdict. Reported as a failure so it gets a human
+            # look, but kept distinct from "leak" so it is never confused
+            # with a genuine MEMORY LEAK finding (#845).
+            failed += 1
+            failed_tests.append(f"{test_name} (LEAKS TOOL ERROR)")
+            if not quiet:
+                print(f"⚠️  {test_name} (LEAKS TOOL ERROR){timing_str}")
+                for line in output.splitlines()[-5:]:
+                    print(f"  {line}")
         elif status == "negative_pass":
             negative_passed += 1
             if not quiet:
+                leak_note = ""
+                if result.get("expect_leak_reason"):
+                    leak_note = f" [expected leak: {result['expect_leak_reason']}]"
                 if result["is_negative_test"]:
-                    print(f"✓ {test_name} (correctly rejected invalid code){timing_str}")
+                    print(f"✓ {test_name} (correctly rejected invalid code){timing_str}{leak_note}")
                 else:
-                    print(f"✓ {test_name} (correctly detected runtime error){timing_str}")
+                    print(f"✓ {test_name} (correctly detected runtime error){timing_str}{leak_note}")
         elif status == "passed":
             passed += 1
             if not quiet:
-                print(f"✓ {test_name}{timing_str}")
+                leak_note = ""
+                if result.get("expect_leak_reason"):
+                    leak_note = f" [expected leak: {result['expect_leak_reason']}]"
+                print(f"✓ {test_name}{timing_str}{leak_note}")
         elif status == "timeout":
             failed += 1
             failed_tests.append(f"{test_name} (TIMEOUT)")

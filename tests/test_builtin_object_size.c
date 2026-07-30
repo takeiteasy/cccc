@@ -262,6 +262,7 @@ void test_object_size_malloc_const(void) {
     AssertEq((unsigned long long)__builtin_object_size(p, 1), 128ULL);
     AssertEq((unsigned long long)__builtin_object_size(p, 2), 128ULL);
     AssertEq((unsigned long long)__builtin_object_size(p, 3), 128ULL);
+    free(p);
 }
 
 [[cccc::test]]
@@ -269,6 +270,7 @@ void test_object_size_calloc_const(void) {
     // calloc(nmemb, size) → nmemb * size = 64.
     char *p = calloc(4, 16);
     AssertEq((unsigned long long)__builtin_object_size(p, 0), 64ULL);
+    free(p);
 }
 
 [[cccc::test]]
@@ -279,12 +281,14 @@ void test_object_size_realloc_const(void) {
     char *base = malloc(8);
     char *p = realloc(base, 96);
     AssertEq((unsigned long long)__builtin_object_size(p, 0), 96ULL);
+    free(p);
 }
 
 [[cccc::test]]
 void test_object_size_aligned_alloc_const(void) {
     char *p = aligned_alloc(16, 256);
     AssertEq((unsigned long long)__builtin_object_size(p, 0), 256ULL);
+    free(p);
 }
 
 [[cccc::test]]
@@ -292,6 +296,7 @@ void test_object_size_malloc_cast(void) {
     // A cast on the initializer is seen through.
     int *p = (int *)malloc(64);
     AssertEq((unsigned long long)__builtin_object_size(p, 0), 64ULL);
+    free(p);
 }
 
 static void check_object_size_nonconst(size_t n) {
@@ -299,6 +304,7 @@ static void check_object_size_nonconst(size_t n) {
     char *p = malloc(n);
     AssertEq((unsigned long long)__builtin_object_size(p, 0),
              (unsigned long long)(size_t)-1);
+    free(p);
 }
 
 [[cccc::test]]
@@ -314,9 +320,12 @@ void test_object_size_malloc_nonconst_unresolved(void) {
 [[cccc::test]]
 void test_object_size_malloc_reassigned_conservative(void) {
     char *p = malloc(128);
+    char *orphaned = p; // capture so the poisoned-over allocation can still be freed
     p = malloc(16); // reassignment poisons the tracked allocation
     AssertEq((unsigned long long)__builtin_object_size(p, 0),
              (unsigned long long)(size_t)-1);
+    free(orphaned);
+    free(p);
 }
 
 [[cccc::test]]
@@ -326,6 +335,7 @@ void test_object_size_malloc_address_taken_conservative(void) {
     AssertTrue(pp != NULL);
     AssertEq((unsigned long long)__builtin_object_size(p, 0),
              (unsigned long long)(size_t)-1);
+    free(p);
 }
 
 [[cccc::test]]
@@ -339,9 +349,12 @@ void test_object_size_malloc_loop_reassign_conservative(void) {
     unsigned long long sum = 0;
     for (int i = 0; i < 3; i++) {
         sum += __builtin_object_size(p, 0);
+        char *orphaned = p;
         p = malloc(16);
+        free(orphaned);
     }
     AssertEq(sum, 3ULL * (unsigned long long)(size_t)-1);
+    free(p);
 }
 
 [[cccc::test]]
@@ -354,10 +367,13 @@ void test_object_size_malloc_nested_fn_reassign_conservative(void) {
     // body (nested ones included) so this poisoning lands before the
     // enclosing function's own query is resolved.
     char *p = malloc(128);
+    char *orphaned = p;
     void reassign(void) { p = malloc(4); }
     reassign();
     AssertEq((unsigned long long)__builtin_object_size(p, 0),
              (unsigned long long)(size_t)-1);
+    free(orphaned);
+    free(p);
 }
 
 [[cccc::test]]
@@ -366,10 +382,13 @@ void test_object_size_malloc_block_reassign_conservative(void) {
     // reference) variable — plain by-value block captures can't alias the
     // outer pointer, but __block ones share the same Obj.
     __block char *p = malloc(128);
+    char *orphaned = p;
     void (^reassign)(void) = ^{ p = malloc(4); };
     reassign();
     AssertEq((unsigned long long)__builtin_object_size(p, 0),
              (unsigned long long)(size_t)-1);
+    free(orphaned);
+    free(p);
 }
 
 [[cccc::test]]
@@ -385,6 +404,7 @@ void test_object_size_malloc_query_in_nested_fn_conservative(void) {
     // in (Obj.objsize_decl_fn), so this case must stay conservative on both
     // calls.
     char *p = malloc(128);
+    char *orphaned = p;
     size_t s = 0;
     void q(void) { s = __builtin_object_size(p, 0); }
     q();
@@ -392,6 +412,8 @@ void test_object_size_malloc_query_in_nested_fn_conservative(void) {
     p = malloc(4);
     q();
     AssertEq((unsigned long long)s, (unsigned long long)(size_t)-1);
+    free(orphaned);
+    free(p);
 }
 
 // ---------------------------------------------------------------------------
@@ -418,6 +440,7 @@ void *test_objsize_arena_alloc(size_t n) { return malloc(n); }
 void test_object_size_custom_allocator_c23_syntax(void) {
     char *p = test_objsize_arena_alloc(96);
     AssertEq((unsigned long long)__builtin_object_size(p, 0), 96ULL);
+    free(p);
 }
 
 // Same custom-allocator coverage via the GNU __attribute__((alloc_size(...)))
@@ -434,6 +457,7 @@ void test_object_size_custom_allocator_two_arg(void) {
     // non-libc function.
     char *p = test_objsize_pool_calloc(4, 16);
     AssertEq((unsigned long long)__builtin_object_size(p, 0), 64ULL);
+    free(p);
 }
 
 // Fixes #649's limitation #1: a user function literally named "malloc" with
@@ -459,6 +483,7 @@ void test_object_size_unannotated_malloc_lookalike_conservative(void) {
 void test_object_size_libc_malloc_via_attribute(void) {
     char *p = malloc(48);
     AssertEq((unsigned long long)__builtin_object_size(p, 0), 48ULL);
+    free(p);
 }
 
 // reallocarray(ptr, nmemb, size) -- alloc_size(2,3) product form. #642's
@@ -469,6 +494,7 @@ void test_object_size_reallocarray_const(void) {
     char *base = malloc(8);
     char *p = reallocarray(base, 4, 8);
     AssertEq((unsigned long long)__builtin_object_size(p, 0), 32ULL);
+    free(p);
 }
 
 // ---------------------------------------------------------------------------
@@ -488,6 +514,7 @@ void test_object_size_malloc_interior_type0(void) {
     AssertEq((unsigned long long)__builtin_object_size(p + 32, 1), 96ULL);
     AssertEq((unsigned long long)__builtin_object_size(p + 32, 2), 96ULL);
     AssertEq((unsigned long long)__builtin_object_size(p + 32, 3), 96ULL);
+    free(p);
 }
 
 [[cccc::test]]
@@ -495,6 +522,7 @@ void test_object_size_interior_zero_offset(void) {
     // offset 0 must behave exactly like the bare-var case (128).
     char *p = malloc(128);
     AssertEq((unsigned long long)__builtin_object_size(p + 0, 0), 128ULL);
+    free(p);
 }
 
 [[cccc::test]]
@@ -504,6 +532,7 @@ void test_object_size_interior_cast(void) {
     // Inline form (no intermediate variable).
     char *p = malloc(64);
     AssertEq((unsigned long long)__builtin_object_size((char *)((int *)p + 4), 0), 48ULL);
+    free(p);
 }
 
 [[cccc::test]]
@@ -512,6 +541,7 @@ void test_object_size_interior_custom_allocator(void) {
     // allocator -- confirms this is attribute-driven, not name-based.
     char *p = test_objsize_arena_alloc(96);
     AssertEq((unsigned long long)__builtin_object_size(p + 16, 0), 80ULL);
+    free(p);
 }
 
 [[cccc::test]]
@@ -522,6 +552,7 @@ void test_object_size_interior_past_end_conservative(void) {
     AssertEq((unsigned long long)__builtin_object_size(p + 200, 0),
              (unsigned long long)(size_t)-1);
     AssertEq((unsigned long long)__builtin_object_size(p + 200, 2), 0ULL);
+    free(p);
 }
 
 [[cccc::test]]
@@ -531,9 +562,12 @@ void test_object_size_interior_reassigned_conservative(void) {
     // fold in objsize_resolve_ptr -- otherwise this would incorrectly freeze
     // at 96 despite the later reassignment.
     char *p = malloc(128);
+    char *orphaned = p;
     size_t sz = __builtin_object_size(p + 32, 0);
     p = malloc(16);
     AssertEq((unsigned long long)sz, (unsigned long long)(size_t)-1);
+    free(orphaned);
+    free(p);
 }
 
 // ---------------------------------------------------------------------------
@@ -557,6 +591,7 @@ void test_object_size_derived_var_basic(void) {
     // inline offset on top of it.
     AssertEq((unsigned long long)__builtin_object_size(q, 0), 96ULL);
     AssertEq((unsigned long long)__builtin_object_size(q + 8, 0), 88ULL);
+    free(p);
 }
 
 [[cccc::test]]
@@ -567,6 +602,7 @@ void test_object_size_derived_var_chain(void) {
     char *r = q + 20; // 70 remaining
     AssertEq((unsigned long long)__builtin_object_size(q, 0), 90ULL);
     AssertEq((unsigned long long)__builtin_object_size(r, 0), 70ULL);
+    free(p);
 }
 
 [[cccc::test]]
@@ -576,6 +612,7 @@ void test_object_size_derived_var_cast(void) {
     char *p = malloc(64);
     char *q = (char *)((int *)p + 4); // 16 bytes in -> 48 remaining
     AssertEq((unsigned long long)__builtin_object_size(q, 0), 48ULL);
+    free(p);
 }
 
 [[cccc::test]]
@@ -583,6 +620,7 @@ void test_object_size_derived_var_custom_allocator(void) {
     char *p = test_objsize_arena_alloc(96);
     char *q = p + 16;
     AssertEq((unsigned long long)__builtin_object_size(q, 0), 80ULL);
+    free(p);
 }
 
 [[cccc::test]]
@@ -593,6 +631,7 @@ void test_object_size_derived_var_nonconst_offset_conservative(void) {
     char *q = p + n;
     AssertEq((unsigned long long)__builtin_object_size(q, 0),
              (unsigned long long)(size_t)-1);
+    free(p);
 }
 
 [[cccc::test]]
@@ -601,6 +640,7 @@ void test_object_size_derived_var_past_end_conservative(void) {
     char *q = p + 100; // past the end
     AssertEq((unsigned long long)__builtin_object_size(q, 0),
              (unsigned long long)(size_t)-1);
+    free(p);
 }
 
 [[cccc::test]]
@@ -613,6 +653,8 @@ void test_object_size_derived_var_own_reassignment_conservative(void) {
     q = malloc(4);
     AssertEq((unsigned long long)__builtin_object_size(q, 0),
              (unsigned long long)(size_t)-1);
+    free(p);
+    free(q);
 }
 
 [[cccc::test]]
@@ -623,6 +665,7 @@ void test_object_size_derived_var_own_address_taken_conservative(void) {
     AssertTrue(qq != NULL);
     AssertEq((unsigned long long)__builtin_object_size(q, 0),
              (unsigned long long)(size_t)-1);
+    free(p);
 }
 
 [[cccc::test]]
@@ -633,10 +676,13 @@ void test_object_size_derived_var_base_reassigned_after_conservative(void) {
     // be single-assignment for the whole function) so the query must stay
     // conservative, not silently return the original 96.
     char *p = malloc(128);
+    char *orphaned = p;
     char *q = p + 32;
     p = malloc(16);
     AssertEq((unsigned long long)__builtin_object_size(q, 0),
              (unsigned long long)(size_t)-1);
+    free(orphaned);
+    free(p);
 }
 
 [[cccc::test]]
@@ -646,10 +692,13 @@ void test_object_size_derived_var_base_reassigned_before_conservative(void) {
     // poison-scanned, so q's derived query must stay conservative even
     // though the reassignment is textually earlier than the derivation.
     char *p = malloc(128);
+    char *orphaned = p;
     p = malloc(16);
     char *q = p + 4;
     AssertEq((unsigned long long)__builtin_object_size(q, 0),
              (unsigned long long)(size_t)-1);
+    free(orphaned);
+    free(p);
 }
 
 [[cccc::test]]
@@ -661,7 +710,10 @@ void test_object_size_derived_var_loop_reassign_conservative(void) {
     unsigned long long sum = 0;
     for (int i = 0; i < 3; i++) {
         sum += __builtin_object_size(n, 0);
+        char *orphaned = m;
         m = malloc(4);
+        free(orphaned);
     }
     AssertEq(sum, 3ULL * (unsigned long long)(size_t)-1);
+    free(m);
 }

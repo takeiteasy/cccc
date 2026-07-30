@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing
+// CCCC_LEAKS_KEEP_VM_HEAP: DYNOBJSZ needs AllocHeader; degrades to (size_t)-1 without it
 // Tests for __builtin_dynamic_object_size(ptr, type).
 //
 // type bits (same encoding as __builtin_object_size):

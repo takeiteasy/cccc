@@ -263,7 +263,10 @@ static void usage(const char *argv0, int exit_code) {
            "\t                             inversion, double-lock, and atomic cast warnings\n");
     printf("\t-V/--vm-heap                 VM heap is on by default; pass -V to route malloc/free\n");
     printf("\t                             through the host allocator instead. Not compatible with\n");
-    printf("\t                             -1/-2/-3 (or --safety=basic/standard/max), which require it\n");
+    printf("\t                             -1/-2/-3 (or --safety=basic/standard/max), or with\n");
+    printf("\t                             --bounds-checks/--uaf-detection/--type-checks/\n");
+    printf("\t                             --heap-canaries/--memory-leak-detection/--memory-tagging,\n");
+    printf("\t                             which require it\n");
     printf("\nFFI Safety Options:\n");
     printf("\t   --ffi-allow=list       Allow only comma-separated native function names\n");
     printf("\t   --ffi-deny=list        Deny comma-separated native function names\n");
@@ -1579,12 +1582,31 @@ int main(int argc, const char *argv[]) {
     // Resolve -V/--vm-heap now that the final safety level is known (#665).
     // VM heap is required by -1/-2/-3, so disabling it there is a hard error;
     // at level 0 (default or explicit -0) -V just turns the default off.
+    //
+    // It is also required by any individual flag in CCCC_VM_HEAP_TRIGGERS
+    // (bounds/UAF/type checks, heap canaries, leak detection, memory
+    // tagging): all of them key off AllocHeader metadata that only exists
+    // for VM-heap allocations. Without this check, -V + one of these flags
+    // silently produces a program where the requested check never fires
+    // instead of an error -- e.g. -V --bounds-checks segfaults on the exact
+    // out-of-bounds write it was asked to catch, rather than trapping it
+    // (#845).
     if (vm_heap_disable_requested) {
         if (safety_level_gt0) {
             fprintf(stderr,
                     "error: -V/--vm-heap cannot be combined with -1/-2/-3 "
                     "(or --safety=basic/standard/max); those levels require "
                     "the VM heap\n");
+            usage(argv[0], 1);
+        }
+        uint32_t vm_heap_dependent =
+            flags & (CCCC_VM_HEAP_TRIGGERS & ~(uint32_t)CCCC_VM_HEAP);
+        if (vm_heap_dependent) {
+            fprintf(stderr,
+                    "error: -V/--vm-heap cannot be combined with "
+                    "--bounds-checks/--uaf-detection/--type-checks/"
+                    "--heap-canaries/--memory-leak-detection or memory "
+                    "tagging; those checks require the VM heap\n");
             usage(argv[0], 1);
         }
         flags &= ~CCCC_VM_HEAP;

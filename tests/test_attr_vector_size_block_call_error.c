@@ -1,4 +1,5 @@
 // EXPECT_COMPILE_ERROR
+// CCCC_EXPECT_LEAK: compiler exits before gen_function's post-pass cleanup of ensure_local_set's lazy hashmap (codegen.c:8255-8261) runs
 // Vector-by-value through a GNU/Apple block invocation (ND_BLOCK_CALL) is
 // not supported (tracker #714 follow-up): block calls have no by-memory
 // (RETBUF/pointer-arg) ABI for aggregates at all. Must be rejected with a

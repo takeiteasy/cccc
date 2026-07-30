@@ -638,7 +638,13 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
   - Automatically skips validation for main() exit (no corresponding CALL)
 - `-V` / `--vm-heap` **VM heap allocator** — see [VM Heap Allocator](#vm-heap-allocator) below;
   as of #665 this flag *disables* the VM heap (it's on by default) and cannot be combined with
-  `-1`/`-2`/`-3` or `--safety=basic/standard/max`, which require it.
+  `-1`/`-2`/`-3` or `--safety=basic/standard/max`, nor (as of #845) with any individual flag
+  whose checks key off the VM heap's `AllocHeader` metadata: `--bounds-checks`,
+  `--uaf-detection`, `--type-checks`, `--heap-canaries`, `--memory-leak-detection`,
+  `--memory-tagging`, `--pointer-sanitizer`. All of these are hard compile-time errors, not a
+  silent no-op — before #845, `-V --bounds-checks` compiled and ran with the requested check
+  never firing (it segfaults on the exact out-of-bounds write it was supposed to trap, instead
+  of trapping it).
 
 ## VM Heap Allocator
 
@@ -648,9 +654,11 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
 normal code.
 
 - `-V` / `--vm-heap` **turns the VM heap off**, reverting all of the above to the host allocator
-  via FFI. It is only valid at safety level 0 (default or explicit `-0`); combining it with
-  `-1`/`-2`/`-3` (or `--safety=basic/standard/max`) is a hard compile-time error since those
-  presets require the VM heap.
+  via FFI. It is only valid at safety level 0 (default or explicit `-0`) with none of
+  `--bounds-checks`/`--uaf-detection`/`--type-checks`/`--heap-canaries`/
+  `--memory-leak-detection`/`--memory-tagging`/`--pointer-sanitizer` set; combining it with any
+  of those, `-1`/`-2`/`-3`, or `--safety=basic/standard/max` is a hard compile-time error since
+  they all require the VM heap (#845).
 - `free_sized`/`free_aligned_sized` (C23) are routed through the same `MFRE` opcode as `free`,
   so a VM-heap-allocated pointer freed through either call is handled correctly.
 - `aligned_alloc`/`posix_memalign` (#668) are intercepted the same way as `malloc`/`calloc`, via

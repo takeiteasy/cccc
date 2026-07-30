@@ -112,6 +112,83 @@ run this category with its own build.c target:
 ./cccc --build build.c --build-target=host_tests
 ```
 
+### Memory leak detection (`--leaks`)
+
+```bash
+python3 tools/tests.py --leaks -j 8   # macOS: leaks; Linux: valgrind; Windows: drmemory
+```
+
+`--leaks` is not part of any `make`/`build.c` target or CI manifest -- it is a
+manual pass, and a slow one: `leaks -atExit` in particular has large fixed
+per-invocation overhead (30s+ observed on macOS 15.7.5/arm64, even for a
+test that runs in 0.05s on its own), so run it with `-j` rather than
+serially to keep the wall-clock time down.
+
+Each test runs **twice**: once normally to get the real pass/fail verdict,
+and again under the platform's leak tool to check for unfreed memory. The
+second run adds `-V`/`--vm-heap`, which routes the **guest** program's
+malloc/free through the host allocator instead of cccc's internal VM-heap
+arena -- without it, the whole VM heap looks like one allocation to
+`leaks`/valgrind and every test trivially reports zero leaks.
+
+**`-V` is withheld for tests that need the VM heap to mean anything.**
+`--bounds-checks`, `--uaf-detection`, `--type-checks`, `--heap-canaries`,
+`--memory-leak-detection`, `--memory-tagging`, `--pointer-sanitizer`, and the
+`-1`/`-2`/`-3`/`--safety=` presets all key off the VM heap's `AllocHeader`
+metadata (`tools/testing/__init__.py`'s `LEAKS_VM_HEAP_DEPENDENT_FLAGS`); `cccc`
+itself now hard-errors on `-V` combined with any of them (mirroring the
+existing `-V` + `-1/-2/-3` rejection), so the leak pass detects the test's
+`CCCC_FLAGS:` and drops `-V` rather than get a false "0 leaks" or a segfault
+on a check that silently stopped firing. A test whose VM-heap dependence
+can't be seen from `CCCC_FLAGS` at all -- e.g. a runtime builtin like
+`__builtin_dynamic_object_size` that degrades to a conservative fallback for
+non-VM-heap pointers -- can force the same behavior with a header
+annotation:
+
+```c
+// CCCC_LEAKS_KEEP_VM_HEAP: DYNOBJSZ needs AllocHeader; degrades to (size_t)-1 without it
+```
+
+**Triage a flag by reading the `leaks`/valgrind stack, not the test source.**
+Where the reported allocation call site sits tells you which of three
+buckets it's in:
+
+| Stack shows | Meaning |
+|---|---|
+| `malloc`/`calloc`/`memalign in ffi_call_SYSV`, or `cccc_realloc`/`cccc_reallocarray` reached *via* `ffi_call_SYSV` | a guest-program allocation |
+| pthread / child-process machinery | `leaks --atExit` misattributing a thread's or fork()'d child's allocation to the wrong task |
+| a cccc host frame with no `ffi_call_SYSV` below it | a genuine cccc leak -- fix it, or file a ticket and leave the test flagged |
+
+For a confirmed **expected** guest-side leak (most commonly: the VM's safety
+instrumentation aborts the guest program before its own cleanup runs, exactly
+like a real C program segfaulting mid-function and "leaking" whatever it had
+allocated), annotate the test rather than adding it to a skip list:
+
+```c
+// CCCC_EXPECT_LEAK: guest malloc live when the type-check abort kills the program
+```
+
+The reason must fit on one line (only the first 5 lines of the file are
+scanned for headers). `CCCC_EXPECT_LEAK` suppresses the MEMORY LEAK verdict
+for that test only -- it does not affect the test's normal pass/fail
+criteria, and it is a different mechanism from `LEAKS_SKIP_TESTS`
+(`tools/testing/__init__.py`): that set is for tests that **hang** under
+`leaks -atExit` due to fork()/wait() interactions with the leak
+instrumentation's `MallocStackLogging` hooks (tracked as #574), not for
+tests with an expected leak. Do not add a hanging test's cause to
+`CCCC_EXPECT_LEAK`, and do not add an expected-leak test to
+`LEAKS_SKIP_TESTS` -- they solve different problems and conflating them
+makes it impossible to tell later whether #574 got fixed.
+
+**macOS only:** when `leaks` itself fails -- crashes, times out (a 30s cap
+per test in `tools/testing/runner.py`), or produces output that doesn't
+match the expected summary format -- the test is reported as `leaks_error`,
+distinct from both `leak` and a clean pass, so a tool failure is never
+silently read as either a false MEMORY LEAK or a false clean run. The
+Linux/valgrind and Windows/drmemory branches still use substring matching on
+the tool's own output and don't yet distinguish a tool failure from "no
+leak found" the same way.
+
 ### Interactive REPL integration test
 
 `tools/test_repl.py` drives `./cccc --repl` over a real pseudo-terminal (the

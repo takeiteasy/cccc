@@ -1,4 +1,7 @@
 // Expected return: 42
+// Known --leaks flag (not suppressed): worker's tss_set'd allocation is
+// never freed by dtor because tss_create's destructor is not invoked on
+// thread exit (C11 7.26.6.1p2 nonconformance) -- tracked separately.
 #include <threads.h>
 #include <stdlib.h>
 

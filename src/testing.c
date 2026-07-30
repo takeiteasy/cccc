@@ -874,6 +874,8 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         for (TestListNode *n2 = ordered,  *nx; n2; n2 = nx) { nx = n2->next; free(n2); }
         for (TestListNode *n2 = filtered, *nx; n2; n2 = nx) { nx = n2->next; free(n2); }
         for (TestSetupRecord *s = setups, *nx; s; s = nx) { nx = s->next; free(s); }
+        free(once_suite); // this path bypasses the main run's free() at the
+                           // bottom of the function (#845)
         return 0;
     }
 

@@ -1,5 +1,9 @@
 // CCCC_FLAGS: --thread-safety
 // Expected return: 42
+// Known --leaks flag (not suppressed): the main thread's ThreadRecord
+// held_locks array (thread_add_held_lock, src/stdlib/pthread.c) is only
+// freed on the worker-thread exit path, never for main -- tracked
+// separately.
 // #623 regression guard: the recursive-mutex bypass added to
 // wrap_pthread_mutex_lock (src/stdlib/pthread.c) must only skip the
 // --thread-safety double-lock diagnostic for PTHREAD_MUTEX_RECURSIVE

@@ -5,7 +5,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import LEAKS_SKIP_TESTS, vm_profile_path
+from . import LEAKS_SKIP_TESTS, leak_pass_wants_vm_heap, vm_profile_path
 from .c4 import run_c4_roundtrip
 
 
@@ -44,6 +44,8 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
     reject_stderr = None
     expect_stdout = None
     reject_stdout = None
+    expect_leak_reason = None
+    leak_suppressed = False
     stdout = ""
     stderr = ""
     try:
@@ -56,9 +58,17 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
                 expects_runtime_error = True
             c4_skip = False
             matrix_skip_reason = None
+            leaks_keep_vm_heap = False
             for line in header_lines:
                 if "CCCC_C4_SKIP" in line:
                     c4_skip = True
+                if "CCCC_LEAKS_KEEP_VM_HEAP" in line:
+                    leaks_keep_vm_heap = True
+                if "CCCC_EXPECT_LEAK" in line:
+                    if ":" in line:
+                        expect_leak_reason = line.split("CCCC_EXPECT_LEAK:", 1)[1].strip().rstrip("*/").strip()
+                    else:
+                        expect_leak_reason = "expected leak"
                 if "CCCC_MATRIX_SKIP" in line:
                     if ":" in line:
                         matrix_skip_reason = line.split("CCCC_MATRIX_SKIP:", 1)[1].strip().rstrip("*/").strip()
@@ -189,13 +199,26 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
                     "vm_profile": str(profile_json) if profile_json else None,
                 }
             skip_leaks = test_file.name in LEAKS_SKIP_TESTS
+            leaks_error = False
             if not skip_leaks:
+                # -V makes guest malloc/free visible to `leaks`, but it also
+                # disables the VM heap; for tests whose safety flags depend
+                # on the VM heap that silently changes what the program does
+                # (see LEAKS_VM_HEAP_DEPENDENT_FLAGS) -- cccc now refuses to
+                # even start in that combination (#845), so withhold -V
+                # there instead. Guest allocations become invisible to
+                # `leaks` in that case, but cccc's own host-side allocations
+                # are still checked.
+                vm_heap_flag = (
+                    [] if leak_pass_wants_vm_heap(cccc_args, per_test_flags, leaks_keep_vm_heap)
+                    else ["-V"]
+                )
                 leak_cmd = [
                     "leaks",
                     "-atExit",
                     "--",
                     str(cccc),
-                    "-V",
+                    *vm_heap_flag,
                     "-I./include",
                     *cccc_args,
                     *per_test_flags,
@@ -221,18 +244,42 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
                 + leak_output
             )
             exit_code = normal_result.returncode
-            is_leaking = "0 leaks" not in leak_output
+            # Parse the real `leaks` summary line rather than a bare "0
+            # leaks" substring match, which also matched (and thus hid) a
+            # crash report, "leaks timed out", or empty output as if it were
+            # a clean run. Anything that doesn't match the summary format is
+            # a tool failure, not a verdict either way.
+            if skip_leaks:
+                is_leaking = False
+            else:
+                leak_match = re.search(
+                    r"(\d+) leaks? for \d+ total leaked bytes", leak_output)
+                if leak_match:
+                    is_leaking = int(leak_match.group(1)) > 0
+                else:
+                    is_leaking = False
+                    leaks_error = True
+            if is_leaking and expect_leak_reason:
+                output += f"\n[CCCC_EXPECT_LEAK: {expect_leak_reason}]\n"
+                is_leaking = False
+                leak_suppressed = True
             cmd = None
         elif platform == "linux":
             profile_json = vm_profile_path(profile_dir, test_name, "source")
             profile_args = ["--vm-profile", "--json"] if profile_json else []
+            # See the macOS branch above: withhold -V for tests whose safety
+            # flags require the VM heap (#845).
+            vm_heap_flag = (
+                [] if leak_pass_wants_vm_heap(cccc_args, per_test_flags, leaks_keep_vm_heap)
+                else ["-V"]
+            )
             cmd = [
                 "valgrind",
                 "--leak-check=full",
                 "--error-exitcode=1",
                 "--quiet",
                 str(cccc),
-                "-V",
+                *vm_heap_flag,
                 "-I./include",
                 *cccc_args,
                 *per_test_flags,
@@ -243,13 +290,17 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
         elif platform == "windows":
             profile_json = vm_profile_path(profile_dir, test_name, "source")
             profile_args = ["--vm-profile", "--json"] if profile_json else []
+            vm_heap_flag = (
+                [] if leak_pass_wants_vm_heap(cccc_args, per_test_flags, leaks_keep_vm_heap)
+                else ["-V"]
+            )
             cmd = [
                 "drmemory",
                 "-batch",
                 "-quiet",
                 "--",
                 str(cccc),
-                "-V",
+                *vm_heap_flag,
                 "-I./include",
                 *cccc_args,
                 *per_test_flags,
@@ -302,6 +353,7 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
         exit_code = result.returncode
 
         is_leaking = False
+        leaks_error = False
         if use_leaks and platform == "linux":
             if (
                 "no leaks are possible" in output
@@ -323,6 +375,12 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
                 is_leaking = True
             else:
                 is_leaking = False
+
+        leak_suppressed = False
+        if is_leaking and expect_leak_reason:
+            output += f"\n[CCCC_EXPECT_LEAK: {expect_leak_reason}]\n"
+            is_leaking = False
+            leak_suppressed = True
 
     # "TAP version" only appears once execution of a --testing binary has
     # actually started, which is only possible after a successful compile.
@@ -353,6 +411,13 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
         status = "crashed"
     elif is_leaking:
         status = "leak"
+    elif leaks_error:
+        # `leaks`/valgrind/drmemory produced output that didn't match any
+        # recognized summary format (crash report, "leaks timed out", empty
+        # output, ...). Distinct from "leak" so it isn't silently reported
+        # as a false MEMORY LEAK, and distinct from "passed" so it isn't
+        # silently reported as clean either -- it needs a human look (#845).
+        status = "leaks_error"
     elif has_compile_error:
         if is_negative_test:
             status = "negative_pass"
@@ -404,4 +469,5 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
         "stderr_mismatch": stderr_mismatch,
         "elapsed": elapsed,
         "vm_profile": str(profile_json) if profile_json else None,
+        "expect_leak_reason": expect_leak_reason if leak_suppressed else None,
     }
