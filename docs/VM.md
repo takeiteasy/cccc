@@ -727,6 +727,23 @@ even when one operand is NaN; `>`/`>=` never reach codegen as distinct
 opcodes — like binary float, they're normalized to a swapped `<`/`<=` at
 parse time.
 
+**Clobber contract (#838):** every `D*` opcode and every `WIDE_*` opcode
+reads/writes only `REG_A0`–`REG_A5` and the fixed-A-register block's opaque
+side effects (`emit_wide_op`, `src/codegen.c`) — none of them touch a `T`
+register, and codegen relies on this: the decimal and wide-`_BitInt` binop
+branches stage one operand's address across the other operand's evaluation
+in a `T` register, which would be silently clobbered if these opcodes reset
+the temp-register allocator the way a real call does. This differs from
+`AND`/`OR`/`XOR`/comparison wide-`_BitInt` ops and any decimal op reached
+through a genuine FFI call path (`emit_wide_helper`'s `CALLF`), which *do*
+clobber caller-saved `T` registers like any other call and must reset the
+allocator accordingly. Before #838, `emit_wide_op` also called
+`reset_temp_regs()` defensively; that was removed because no `op_*_fn` handler
+for a `D*`/`WIDE_*` opcode (`src/ops.c`) ever reads or writes a `REG_T*` slot,
+and the reset was unsound — it silently freed a live temp belonging to an
+*enclosing* stack frame's still-in-progress expression, not just the current
+one.
+
 `__builtin_decimal_to_chars(buf, n, decimal_value)` lowers directly to `DFMT`
 and always produces BID's canonical shortest-form string (no flags, width, or
 precision — that's its whole contract).

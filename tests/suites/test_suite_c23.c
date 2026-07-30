@@ -1,6 +1,7 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: C23: _BitInt, auto, nullptr, constexpr, char8_t, embed, literals
 // Source tests: test_c23_attributes, test_c23_auto, test_c23_bitint, test_c23_bitint_wide,
+//   test_c23_bitint_wide_inline_binop_operands, test_c23_bitint_wide_operand_chain_pressure,
 //   test_c23_bitint_wide_safety, test_c23_bool_keywords, test_c23_bool_stdbool_compat,
 //   test_c23_char8, test_c23_decimal, test_c23_empty_params_void_equiv, test_c23_exp10_pi,
 //   test_c23_keywords, test_c23_literals, test_c23_mbrtoc8, test_c23_nullptr,
@@ -645,6 +646,59 @@ int test_c23_bitint_wide(void) {
                  t3 = (_BitInt(128))30, t4 = (_BitInt(128))40;
     _BitInt(128) multi = (t1 + t2) + (t3 + t4);
     if (multi != 100) return 64;
+
+    return 42;
+}
+
+// #838: two inline wide-_BitInt binops compared directly, e.g.
+// `(a+b) == (c+d)`, evaluated wrong (false negative) because the LHS
+// result's address (held live in a T register across the RHS recursion)
+// got clobbered by emit_wide_helper's CALLF while evaluating the RHS.
+// Same defect class and fix as the _Decimal64 case in test_suite_decimal.c.
+[[cccc::test(return = 42)]]
+int test_c23_bitint_wide_inline_binop_operands(void) {
+    _BitInt(128) a = 1, b = 2, c = 1, d = 2; // a+b == c+d == 3
+    if (!((a + b) == (c + d))) return 1;
+    if ((a + b) != (c + d)) return 2;
+
+    _BitInt(128) e = 5, f = 1, g = 6, h = 4; // e+f == 6, g-h == 2
+    if (!((e + f) != (g - h))) return 3;
+    if ((e + f) == (g - h)) return 4;
+
+    if (!((g - h) < (a + b))) return 5;  // 2 < 3
+    if ((a + b) < (g - h)) return 6;
+    if (!((a + b) <= (c + d))) return 7; // 3 <= 3 (equal)
+    if (!((g - h) <= (a + b))) return 8; // 2 <= 3
+
+    _BitInt(128) p = 2, q = 3, r = 1, s = 6; // p*q == r*s == 6
+    if (!((p * q) == (r * s))) return 9;
+
+    // #838's second root cause: a real function call inside one operand
+    // (here add128, which itself dispatches through emit_wide_helper's
+    // CALLF) resets the temp-reg bitmap in a way contains_funcall() can't
+    // see, since the reset is emitted implicitly by codegen rather than
+    // tied to an ND_FUNCALL the compiler can inspect.
+    _BitInt(128) x = 10, y = 20, z = 25; // add128(x,y) == 30 == z+5
+    if (!((add128(x, y) - 5) == z)) return 10;
+
+    return 42;
+}
+
+// #838 register-pressure regression: a flat 6-operand wide-_BitInt chain
+// failed to compile at all pre-fix (the binop branch held a temp live
+// across each recursion, O(depth) instead of O(1) per level).
+[[cccc::test(return = 42)]]
+int test_c23_bitint_wide_operand_chain_pressure(void) {
+    _BitInt(128) a = 1, b = 2, c = 3, d = 4, e = 5, f = 6;
+
+    _BitInt(128) flat = a + b + c + d + e + f; // flat left-leaning
+    if (flat != 21) return 1;
+
+    _BitInt(128) paren = (((((a + b) + c) + d) + e) + f); // parenthesised
+    if (paren != 21) return 2;
+
+    _BitInt(128) right = a + (b + (c + (d + (e + f)))); // right-leaning
+    if (right != 21) return 3;
 
     return 42;
 }

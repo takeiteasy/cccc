@@ -616,13 +616,7 @@ int test_decimal_strtod(void) {
     _Decimal64 b0 = strtod64("0.2", &end);
     if (a != 0.1dd) return 1;
     if (b0 != 0.2dd) return 2;
-    // Named temps -- avoid several inline decimal subexpressions sharing one
-    // statement (a separate decimal-scratch-slot-reuse issue, orthogonal to
-    // strtod itself: confirmed by storing each intermediate to its own
-    // variable first).
-    _Decimal64 sum_strtod = a + b0;
-    _Decimal64 sum_lit = 0.1dd + 0.2dd;
-    if (sum_strtod != sum_lit) return 3;
+    if ((a + b0) != (0.1dd + 0.2dd)) return 3;
 
     // endptr past the numeric token, trailing garbage untouched.
     _Decimal64 b = strtod64("123.456e2xyz", &end);
@@ -735,6 +729,60 @@ int test_decimal_static_fold(void) {
     if (test_decimal_fold_d != 3.3) return 4;
     if (test_decimal_fold_e != 1) return 5;
     if (!isinfd64(test_decimal_fold_inf)) return 6;
+    return 42;
+}
+
+// #838: two inline decimal binops compared directly, e.g. `(a+b) == (c+d)`,
+// evaluated wrong (false negative) because the LHS result address (held live
+// in a T register across the RHS recursion) got clobbered while evaluating
+// the RHS. Covers every comparison operator, and +-*/ inline on both sides.
+[[cccc::test(return = 42)]]
+int test_decimal_inline_binop_operands(void) {
+    _Decimal64 a = 1.0dd, b = 2.0dd, c = 1.5dd, d = 1.5dd; // a+b == c+d == 3.0
+    if (!((a + b) == (c + d))) return 1;
+    if ((a + b) != (c + d)) return 2;
+
+    _Decimal64 e = 5.0dd, f = 1.0dd, g = 6.0dd, h = 4.0dd; // e+f == 6.0, g-h == 2.0
+    if (!((e + f) != (g - h))) return 3;
+    if ((e + f) == (g - h)) return 4;
+
+    if (!((g - h) < (a + b))) return 5;  // 2.0 < 3.0
+    if ((a + b) < (g - h)) return 6;
+    if (!((a + b) <= (c + d))) return 7; // 3.0 <= 3.0 (equal)
+    if (!((g - h) <= (a + b))) return 8; // 2.0 <= 3.0
+
+    _Decimal64 p = 2.0dd, q = 3.0dd, r = 1.0dd, s = 6.0dd; // p*q == r*s == 6.0
+    if (!((p * q) == (r * s))) return 9;
+    if (!((p / r) == (s / q))) return 10; // 2/1 == 6/3 == 2.0, exact
+
+    // #838's second root cause: a real function call (FFI CALLF) inside one
+    // operand resets the temp-reg bitmap in a way contains_funcall() can't
+    // see (the reset is emitted implicitly by emit_wide_helper, not tied to
+    // an ND_FUNCALL the compiler can inspect). sqrtd64(4.0dd) == 2.0dd, so
+    // sqrtd64(4.0dd) + 1.0dd == 3.0dd == a + b.
+    if (!((sqrtd64(4.0dd) + 1.0dd) == (a + b))) return 11;
+
+    return 42;
+}
+
+// #838 register-pressure regression: before the fix, the decimal binop
+// branch held a temp live across each recursion (O(depth) instead of O(1)
+// per level), so long chains ran out of temp registers. A flat 6-operand
+// chain failed to compile at all pre-fix.
+[[cccc::test(return = 42)]]
+int test_decimal_operand_chain_pressure(void) {
+    _Decimal64 a = 1.0dd, b = 2.0dd, c = 3.0dd, d = 4.0dd, e = 5.0dd,
+               f = 6.0dd;
+
+    _Decimal64 flat = a + b + c + d + e + f; // flat left-leaning
+    if (flat != 21.0dd) return 1;
+
+    _Decimal64 paren = (((((a + b) + c) + d) + e) + f); // fully parenthesised
+    if (paren != 21.0dd) return 2;
+
+    _Decimal64 right = a + (b + (c + (d + (e + f)))); // right-leaning
+    if (right != 21.0dd) return 3;
+
     return 42;
 }
 

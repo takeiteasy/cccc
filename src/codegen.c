@@ -2086,7 +2086,6 @@ static bool emit_wide_helper(VirtualMachine *vm, const char *name, int nargs) {
 static void emit_wide_op(VirtualMachine *vm, int op) {
     emit(vm, op);
     restrict_cache_invalidate_all(vm);
-    reset_temp_regs();
 }
 
 // Allocate a fresh stack slot for a wide _BitInt intermediate result.
@@ -4629,12 +4628,29 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             bool is_cmp = (node->kind == ND_EQ || node->kind == ND_NE ||
                            node->kind == ND_LT || node->kind == ND_LE);
 
-            int r_lhs = alloc_temp_reg();
-            gen_expr(vm, node->lhs, r_lhs); // decimal operand -> its address
-            mark_temp_reg_used(r_lhs);
+            // dest_reg may be REG_ZERO (a discarded-value expression
+            // statement, e.g. `(void)(a+b);`): REG_ZERO is hardwired to
+            // always read back 0, so staging an address through it here
+            // would silently produce a null pointer. Fall back to a fresh
+            // temp in that case -- everything else still writes the final
+            // result to dest_reg, which is the correct discard target.
+            int work_reg = (dest_reg == REG_ZERO) ? alloc_temp_reg() : dest_reg;
+            gen_expr(vm, node->lhs, work_reg); // decimal operand -> its address
+            emit_psh3(vm, work_reg);
+            gen_expr(vm, node->rhs, work_reg); // temp pool is empty here
+            // The RHS recursion may contain a call whose emit_wide_helper
+            // CALLF resets the whole temp-reg bitmap, marking work_reg's bit
+            // free again even though it still holds the live RHS value.
+            // Re-mark it used so alloc_temp_reg() below can't hand out the
+            // same register for r_rhs (which would then get silently
+            // clobbered once r_lhs is popped into that same slot).
+            mark_temp_reg_used(work_reg);
             int r_rhs = alloc_temp_reg();
-            gen_expr(vm, node->rhs, r_rhs);
-            mark_temp_reg_used(r_rhs);
+            emit_mov3(vm, r_rhs, work_reg);
+            if (work_reg != dest_reg)
+                free_temp_reg(work_reg);
+            int r_lhs = alloc_temp_reg();
+            emit_pop3(vm, r_lhs);
 
             if (is_cmp) {
                 emit_mov3(vm, REG_A0, r_lhs);
@@ -4714,12 +4730,24 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             Type *operand_ty = node->lhs->ty;
             bool wide_op = is_wide_bitint(operand_ty);
 
-            int r_lhs = alloc_temp_reg();
-            gen_expr(vm, node->lhs, r_lhs);
-            mark_temp_reg_used(r_lhs);
+            // See the matching decimal-binop REG_ZERO note above: dest_reg
+            // may be a discarded-value expression statement, so stage
+            // through a fresh temp in that case rather than REG_ZERO.
+            int work_reg = (dest_reg == REG_ZERO) ? alloc_temp_reg() : dest_reg;
+            gen_expr(vm, node->lhs, work_reg);
+            emit_psh3(vm, work_reg);
+            gen_expr(vm, node->rhs, work_reg); // temp pool is empty here
+            // See the decimal-binop comment above: a CALLF inside the RHS
+            // (emit_wide_helper, e.g. a bitwise/comparison wide-_BitInt op)
+            // resets the temp-reg bitmap, so re-mark work_reg used before
+            // anything else can be allocated over it.
+            mark_temp_reg_used(work_reg);
             int r_rhs = alloc_temp_reg();
-            gen_expr(vm, node->rhs, r_rhs);
-            mark_temp_reg_used(r_rhs);
+            emit_mov3(vm, r_rhs, work_reg);
+            if (work_reg != dest_reg)
+                free_temp_reg(work_reg);
+            int r_lhs = alloc_temp_reg();
+            emit_pop3(vm, r_lhs);
 
             int words  = wide_op ? (operand_ty->size / 8) : 0;
             int width  = wide_op ? operand_ty->bit_width  : 0;
@@ -5415,8 +5443,24 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 emit_lea3(vm, dest_reg, dst_offset);
                 return;
             } else if (!is_decimal(dst) && is_decimal(src)) {
-                int r_src = alloc_temp_reg();
+                // dest_reg holds the source address directly (#838): no
+                // fresh temp is held across anything here, matching the
+                // O(1)-per-level discipline the binop branches use, so a
+                // decimal cast nested in a deep operand chain costs no
+                // extra register. dest_reg is written last in every arm
+                // below (result overwrites the address it started with).
+                // Exception: dest_reg may be REG_ZERO (discarded-value
+                // statement, e.g. `(void)(_Decimal64)d;`) -- REG_ZERO always
+                // reads back 0, so staging the source address through it
+                // would hand DTOI/DTOBITS/DCMP a null pointer. Use a fresh
+                // temp in that case instead.
+                int r_src = (dest_reg == REG_ZERO) ? alloc_temp_reg() : dest_reg;
                 gen_expr(vm, node->lhs, r_src); // address of decimal value
+                // node->lhs may be a call (e.g. a decimal-returning FFI
+                // function) whose CALLF resets the temp-reg bitmap. The
+                // TY_BOOL arm below allocates r_zero before r_src is fully
+                // consumed -- re-mark r_src used so that alloc can't hand
+                // out the same register out from under it.
                 mark_temp_reg_used(r_src);
                 if (is_flonum(dst)) {
                     emit_mov3(vm, REG_A0, r_src);
@@ -5483,16 +5527,33 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     else if (dst->kind == TY_BITINT && !is_wide_bitint(dst))
                         emit_bitint_trunc(vm, dst, dest_reg);
                 }
-                free_temp_reg(r_src);
+                if (r_src != dest_reg)
+                    free_temp_reg(r_src);
                 return;
             } else if (is_decimal(src) && is_decimal(dst)) {
-                int r_src = alloc_temp_reg();
+                // Same dest_reg discipline (and REG_ZERO exception) as the
+                // decimal->non-decimal arm above -- with one more wrinkle:
+                // a fixed decimal FFI/native argument in register position
+                // evaluates its expression with dest_reg == REG_A0+i
+                // directly (see the "generic branch" callers of gen_expr
+                // with REG_A0+int_arg_idx for a decimal arg). So r_src can
+                // legitimately alias REG_A0 here. emit_mov3(REG_A1, r_src)
+                // MUST run before emit_lea3(REG_A0, dst_offset) clobbers it
+                // -- reading r_src first makes the sequence correct
+                // regardless of which register it aliases.
+                int r_src = (dest_reg == REG_ZERO) ? alloc_temp_reg() : dest_reg;
                 gen_expr(vm, node->lhs, r_src);
+                // node->lhs may be a call; re-mark r_src used in case its
+                // CALLF reset the temp-reg bitmap (matches the cast arm
+                // above -- alloc_decimal_temp itself never allocates a
+                // temp reg, but this keeps the two arms' discipline
+                // identical and independent of that implementation detail).
+                mark_temp_reg_used(r_src);
                 long long dst_offset = node->ret_buffer
                     ? (long long)node->ret_buffer->offset
                     : alloc_decimal_temp(vm, dst->size);
-                emit_lea3(vm, REG_A0, dst_offset);
                 emit_mov3(vm, REG_A1, r_src);
+                emit_lea3(vm, REG_A0, dst_offset);
                 emit_li3(vm, REG_A2, dec_width_code(dst));
                 emit_li3(vm, REG_A3, dec_width_code(src));
                 if (vm->flags & CCCC_POINTER_CHECKS) {
@@ -5501,7 +5562,8 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 }
                 emit_wide_op(vm, DCVT);
                 emit_lea3(vm, dest_reg, dst_offset);
-                free_temp_reg(r_src);
+                if (r_src != dest_reg)
+                    free_temp_reg(r_src);
                 return;
             }
         }
