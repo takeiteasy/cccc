@@ -9,18 +9,9 @@ from pathlib import Path
 from . import REPO_ROOT
 from .platform import detect_platform
 from .discovery import discover_tests
-from .suite import _run_test_suite, merge_suite_results
+from .suite import run_test_suite_with_isolation
 from .report import print_summary
 from .matrix import run_pass_matrix
-
-# tests/suites/test_suite_posix.c's fork/signal-timing subtests are prone to
-# scheduler-starvation flakiness when several other CPU-bound test-file
-# processes run concurrently under -j (#853 -- confirmed by direct
-# reproduction: running N copies of the compiled test binary concurrently
-# fails intermittently, sequential runs never do). Running it in its own
-# serial pass, sequenced after the rest of the parallel batch has finished,
-# removes that contention for the one file that's sensitive to it.
-ISOLATED_SERIAL_TESTS = frozenset({"test_suite_posix.c"})
 
 
 def build_parser():
@@ -206,25 +197,10 @@ def main():
         ok = run_pass_matrix(cccc, script_dir, platform, cccc_args, n_jobs, args, test_files)
         sys.exit(0 if ok else 1)
 
-    isolated_files = [t for t in test_files if t.name in ISOLATED_SERIAL_TESTS]
-    parallel_files = [t for t in test_files if t.name not in ISOLATED_SERIAL_TESTS]
-
-    if isolated_files and n_jobs > 1 and parallel_files:
-        r = _run_test_suite(
-            cccc, script_dir, use_leaks, platform, cccc_args,
-            n_jobs, args, parallel_files,
-        )
-        r_isolated = _run_test_suite(
-            cccc, script_dir, use_leaks, platform, cccc_args,
-            1, args, isolated_files,
-            header="[ isolated (serial) tests -- see #853 ]" if not args.quiet else None,
-        )
-        r = merge_suite_results(r, r_isolated)
-    else:
-        r = _run_test_suite(
-            cccc, script_dir, use_leaks, platform, cccc_args,
-            n_jobs, args, test_files,
-        )
+    r = run_test_suite_with_isolation(
+        cccc, script_dir, use_leaks, platform, cccc_args,
+        n_jobs, args, test_files,
+    )
 
     ok = print_summary(r, args)
     sys.exit(0 if ok else 1)

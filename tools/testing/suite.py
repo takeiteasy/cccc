@@ -242,3 +242,44 @@ def merge_suite_results(a, b):
     merged = {k: a[k] + b[k] for k in _SUM_KEYS}
     merged.update({k: a[k] + b[k] for k in _LIST_KEYS})
     return merged
+
+
+# tests/suites/test_suite_posix.c's fork/signal-timing subtests are prone to
+# scheduler-starvation flakiness when several other CPU-bound test-file
+# processes run concurrently under -j (#853 -- confirmed by direct
+# reproduction: running N copies of the compiled test binary concurrently
+# fails intermittently, sequential runs never do). Running it in its own
+# serial pass, sequenced after the rest of the parallel batch has finished,
+# removes that contention for the one file that's sensitive to it.
+ISOLATED_SERIAL_TESTS = frozenset({"test_suite_posix.c"})
+
+
+def run_test_suite_with_isolation(cccc, script_dir, use_leaks, platform, cccc_args,
+                                  n_jobs, args, test_files, header=None, matrix_mode=False):
+    """_run_test_suite(), but ISOLATED_SERIAL_TESTS run in their own -j1 pass
+    after the rest of the batch. Every caller (tools/testing/cli.py,
+    tools/run_tests.py) must go through this, not _run_test_suite directly,
+    or the isolation silently doesn't apply."""
+    isolated_files = [t for t in test_files if t.name in ISOLATED_SERIAL_TESTS]
+    parallel_files = [t for t in test_files if t.name not in ISOLATED_SERIAL_TESTS]
+
+    if not (isolated_files and n_jobs > 1 and parallel_files):
+        return _run_test_suite(
+            cccc, script_dir, use_leaks, platform, cccc_args,
+            n_jobs, args, test_files, header=header, matrix_mode=matrix_mode,
+        )
+
+    r = _run_test_suite(
+        cccc, script_dir, use_leaks, platform, cccc_args,
+        n_jobs, args, parallel_files, header=header, matrix_mode=matrix_mode,
+    )
+    isolated_header = "[ isolated (serial) tests -- see #853 ]"
+    if header:
+        isolated_header = f"{header} {isolated_header}"
+    r_isolated = _run_test_suite(
+        cccc, script_dir, use_leaks, platform, cccc_args,
+        1, args, isolated_files,
+        header=isolated_header if not getattr(args, "quiet", False) else None,
+        matrix_mode=matrix_mode,
+    )
+    return merge_suite_results(r, r_isolated)

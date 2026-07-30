@@ -36,7 +36,7 @@ sys.path.insert(0, str(_TOOLS_DIR))
 from testing import REPO_ROOT
 from testing.platform import detect_platform
 from testing.discovery import discover_tests
-from testing.suite import _run_test_suite
+from testing.suite import run_test_suite_with_isolation
 from testing.report import print_summary
 
 
@@ -60,7 +60,7 @@ def _run_source_suite(cccc, n_jobs, quiet, process_timeout):
     args = _make_suite_args(quiet=quiet, process_timeout=process_timeout)
     if not quiet:
         print(f"Running source suite ({len(test_files)} tests)…")
-    r = _run_test_suite(cccc, REPO_ROOT, False, platform, [], n_jobs, args, test_files)
+    r = run_test_suite_with_isolation(cccc, REPO_ROOT, False, platform, [], n_jobs, args, test_files)
     ok = r["failed"] == 0 and r["crashed"] == 0
     return r, ok
 
@@ -73,7 +73,7 @@ def _run_c4_suite(cccc, n_jobs, quiet, process_timeout):
     args = _make_suite_args(quiet=quiet, c4=True, process_timeout=process_timeout)
     if not quiet:
         print(f"Running c4 round-trip suite ({len(test_files)} tests)…")
-    r = _run_test_suite(cccc, REPO_ROOT, False, platform, [], n_jobs, args, test_files)
+    r = run_test_suite_with_isolation(cccc, REPO_ROOT, False, platform, [], n_jobs, args, test_files)
     ok = r["failed"] == 0 and r["crashed"] == 0
     return r, ok
 
