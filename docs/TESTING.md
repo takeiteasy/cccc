@@ -343,10 +343,16 @@ Actions jobs use `-j 4` rather than sr.ht's `-j 8` — hosted runners have
 fewer cores than the sr.ht builder, and parallel-load timing sensitivity is
 exactly what surfaced #853.
 
-`CC=clang` must be set explicitly for the `linux-aarch64` job (and is, in
-`.github/workflows/ci.yml`'s `env:`): Ubuntu's plain `cc` resolves to gcc,
-which rejects `-std=c23`. macOS runners don't need this — Apple Clang is
-already the default `cc`.
+`CC=clang` and `CCCC_NATIVE_CC=clang` must both be set explicitly for the
+`linux-aarch64` job (and are, in `.github/workflows/ci.yml`'s `env:`):
+Ubuntu's plain `cc` resolves to gcc, which rejects `-std=c23`. These are two
+separate compiler-selection mechanisms — `CC` for the stage0 `make cccc`
+steps (plain `CC ?= cc` in the Makefile), `CCCC_NATIVE_CC` for `./cccc
+--build build.c`'s own internal compiler probe (`cccc_find_native_cc()` in
+`src/vm.c`), which ignores `CC` entirely and otherwise tries `{cc, clang,
+gcc}` on `PATH` in that order. GitHub's `ubuntu-24.04-arm` runner ships a
+pre-installed `cc` (→ gcc), which wins that fallback unless overridden.
+macOS runners don't need either — Apple Clang is already the default `cc`.
 
 ### Known intermittent failures under heavy parallel load
 
@@ -358,10 +364,20 @@ container reproduces the failure in roughly half of repeated trials, and
 different subtests fail from run to run (not always the same one). This is
 scheduler starvation, not a VM signal-dispatch defect — investigated per
 #853 and ruled out as a `_cccc_pending`/dispatch-loop drop path; a plain
-sequential run never fails. `-j 4` on GitHub's smaller hosted runners
-reduces how often this is hit but does not eliminate it. An occasional
-`test_suite_posix.c` failure on a CI re-run, with a clean resubmit, is
-expected and not a regression.
+sequential run never fails.
+
+**Mitigation:** `tools/testing/cli.py`'s `ISOLATED_SERIAL_TESTS` set makes
+`test_suite_posix.c` run in its own serial (`-j1`) pass, sequenced after the
+rest of the parallel batch finishes, in both plain and `--c4` runs (labeled
+`[ isolated (serial) tests -- see #853 ]` in output). This removes
+contention from other test-file processes during that file's
+signal-timing-sensitive window and was confirmed effective under repeated
+stress testing (concurrent contending processes plus the normal `-j8`
+batch). It is a CI-determinism mitigation, not a fix to the underlying VM
+signal-dispatch responsiveness under host load — that investigation is
+tracked separately in #858. It does not fully guarantee zero-flakiness
+under arbitrarily severe contention, just removes the specific, confirmed
+contention source.
 
 ## Attribute syntax variants
 

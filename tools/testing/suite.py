@@ -225,3 +225,20 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
         "matrix_skipped_tests": matrix_skipped_tests,
         "timings": timings,
     }
+
+
+_SUM_KEYS = (
+    "total", "passed", "failed", "crashed", "negative_passed",
+    "c4_passed", "c4_failed", "c4_skipped", "c4_save_failed", "matrix_skipped",
+)
+_LIST_KEYS = (
+    "failed_tests", "crashed_tests", "c4_skipped_tests",
+    "matrix_skipped_tests", "timings",
+)
+
+
+def merge_suite_results(a, b):
+    """Combine two _run_test_suite() result dicts into one for reporting."""
+    merged = {k: a[k] + b[k] for k in _SUM_KEYS}
+    merged.update({k: a[k] + b[k] for k in _LIST_KEYS})
+    return merged
