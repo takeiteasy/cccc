@@ -1173,11 +1173,24 @@ static char *effective_cc_for_target(const Builder *ctx, const BuildTarget *t) {
 // Effective triple: t->target_triple ?? ctx->cross_triple.
 // --target is accepted by clang; gcc-style cross-compilers use a prefixed
 // binary (SetToolchain) and do not need this flag.
-static void push_cross_flags(ArgVec *args, const Builder *ctx, const BuildTarget *t) {
+static void push_cross_flags(ArgVec *args, const Builder *ctx, const BuildTarget *t,
+                             StringArray *owned) {
     const char *triple = t->target_triple ? t->target_triple : ctx->cross_triple;
     if (!triple || !*triple) return;
-    argv_push(args, "--target");
-    argv_push(args, (char *)triple); // lifetime: ctx/t outlive the spawn
+    // Must be a single joined "--target=<triple>" token (#842): clang
+    // accepts "--target=<triple>" or "-target <triple>" (single dash, two
+    // tokens) but NOT "--target <triple>" (double dash, two tokens) --
+    // verified against real clang, which reports "unknown argument
+    // '--target'; did you mean '-target'?" for that form. This was never
+    // exercised by a real (non-dry-run) build before #842 added
+    // macos_x86_64 to build.c.
+    size_t len = strlen(triple) + 10;
+    char *f = malloc(len);
+    if (!f)
+        error("build: out of memory");
+    snprintf(f, len, "--target=%s", triple);
+    strarray_push(owned, f); // caller frees `owned` after run_step
+    argv_push(args, f);
 }
 
 // ============================================================================
@@ -1250,7 +1263,7 @@ static void push_compile_flags(ArgVec *args, const Builder *ctx,
     push_profile_defines(args, profile);
 
     // Cross-compilation triple (#547): --target=<triple> when set.
-    push_cross_flags(args, ctx, t);
+    push_cross_flags(args, ctx, t, owned);
 
     for (int i = 0; i < t->includes.len; i++) {
         argv_push(args, "-I");
@@ -2202,10 +2215,11 @@ static int build_target(Builder *ctx, const char *cc,
     } else {
         // Executable or dynamic library: link with effective cc.
         ArgVec a = {0};
+        StringArray owned = {0};
         argv_push(&a, eff_cc);
         if (t->kind == CCCC_TGT_DYNAMIC)
             argv_push(&a, "-shared");
-        push_cross_flags(&a, ctx, t); // --target=<triple> for clang-style cross-link
+        push_cross_flags(&a, ctx, t, &owned); // --target=<triple>
         argv_push(&a, "-o");
         argv_push(&a, out_abs);
         for (int i = 0; i < objs.len; i++)
@@ -2233,7 +2247,6 @@ static int build_target(Builder *ctx, const char *cc,
             argv_push(&a, "-L");
             argv_push(&a, t->libpaths.data[i]);
         }
-        StringArray owned = {0};
         for (int i = 0; i < t->libs.len; i++) {
             char *f = malloc(strlen(t->libs.data[i]) + 3);
             snprintf(f, strlen(t->libs.data[i]) + 3, "-l%s", t->libs.data[i]);

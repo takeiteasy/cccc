@@ -14,11 +14,22 @@
 // tail is untouched. src/stdlib/posix.c's wrap_statfs/wrap_fstatfs
 // translate through a host-sized local and copy only the documented
 // fields across, which is what keeps this test passing.
+//
+// fstatfs() needs an fd backed by a real mount -- NOT stdin (fd 0), which
+// this test originally (incorrectly) used: fd 0 is only mount-backed when
+// the test happens to run with a terminal or regular file attached, and
+// legitimately fails with ENOTTY/EBADF whenever it's a pipe instead (any
+// subprocess chain that doesn't explicitly wire a real file to stdin --
+// RunCustom's vendored shell, most CI runners, `foo | tee log`, ...; see
+// #847). Open "." explicitly instead, which is always mount-backed.
 #include <sys/mount.h>
+#include <fcntl.h>
 
 extern void *malloc(unsigned long size);
 extern void free(void *ptr);
 extern void *memset(void *s, int c, unsigned long n);
+extern int open(const char *path, int flags, ...);
+extern int close(int fd);
 
 int main(void) {
     unsigned long guest_size = sizeof(struct statfs);
@@ -43,8 +54,12 @@ int main(void) {
     if (!buf2) { free(buf); return 5; }
     memset(buf2, 0xAA, guest_size + tail);
 
+    int fd = open(".", O_RDONLY);
+    if (fd < 0) { free(buf); free(buf2); return 8; }
+
     struct statfs *sb2 = (struct statfs *)buf2;
-    if (fstatfs(0, sb2) != 0) return 6;
+    if (fstatfs(fd, sb2) != 0) { close(fd); free(buf); free(buf2); return 6; }
+    close(fd);
     for (unsigned long i = guest_size; i < guest_size + tail; i++) {
         if (buf2[i] != 0xAA) {
             free(buf);

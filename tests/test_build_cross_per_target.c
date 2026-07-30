@@ -1,5 +1,5 @@
 // CCCC_FLAGS: --build --build-dry-run
-// CCCC_EXPECT_STDOUT: --target aarch64-linux-gnu
+// CCCC_EXPECT_STDOUT: --target=aarch64-linux-gnu
 //
 // SetTargetTriple() applies --target=<triple> to a single target.
 // Verified via dry-run so no cross-compiler is needed.
