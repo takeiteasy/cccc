@@ -221,6 +221,87 @@ static void *cccc_reallocarray(void *ptr, size_t nmemb, size_t size) {
     return cccc_realloc(ptr, nmemb * size);
 }
 
+// #865: malloc/free/calloc/realloc/reallocarray/aligned_alloc/
+// posix_memalign taken as function-pointer VALUES (rather than called
+// directly by name) bypass codegen's VM-heap opcode routing
+// (is_extern_func_name's special-casing in codegen.c, guarded by
+// CCCC_VM_HEAP) and previously resolved to the raw host libc function
+// registered below -- fatal for free/realloc, since the bytes preceding a
+// VM-heap pointer are cccc's own AllocHeader, not a real libmalloc chunk,
+// and real free()/realloc() abort on it. These wrappers restore parity with
+// the direct-call path: same CCCC_VM_HEAP flag check codegen uses for the
+// allocating functions, and the same VM-heap-vs-host-pointer fallback
+// cccc_vm_heap_free/cccc_vm_heap_realloc (ops.c) already perform for free/
+// realloc regardless of the flag. cccc_current_ffi_vm() returns NULL outside
+// any VM context, which can't happen for a call reached through the VM's own
+// dispatch loop, but is handled defensively (falls back to the host
+// allocator) rather than assumed away.
+static void *cccc_ffi_malloc(size_t size) {
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    if (vm && (vm->flags & CCCC_VM_HEAP))
+        return cccc_vm_heap_malloc(vm, (long long)size);
+    return malloc(size);
+}
+
+static void cccc_ffi_free(void *ptr) {
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    if (!vm) {
+        free(ptr);
+        return;
+    }
+    // cccc_vm_heap_free already falls back to the real free() for any
+    // pointer outside the VM heap arena or without a valid AllocHeader, so
+    // no separate CCCC_VM_HEAP flag check is needed here -- unlike the
+    // allocating functions, whose result depends on the flag.
+    if (cccc_vm_heap_free(vm, ptr) != 0)
+        // A double-free/canary-corruption detected via the direct MFRE
+        // opcode path traps into the debugger (auto-debug-on-crash) or
+        // returns a VM error cleanly; from here -- several native C frames
+        // below the FFI dispatch, with no such return path available --
+        // the best available option is a hard exit with the diagnostic
+        // cccc_vm_heap_free already printed above.
+        error("free(): heap safety violation detected via an indirect call (see diagnostic above)");
+}
+
+static void *cccc_ffi_calloc(size_t nmemb, size_t size) {
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    if (vm && (vm->flags & CCCC_VM_HEAP))
+        return cccc_vm_heap_calloc(vm, (long long)nmemb, (long long)size);
+    return calloc(nmemb, size);
+}
+
+static void *cccc_ffi_realloc(void *ptr, size_t size) {
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    if (vm && (vm->flags & CCCC_VM_HEAP))
+        return cccc_vm_heap_realloc(vm, ptr, (long long)size);
+    return cccc_realloc(ptr, size);
+}
+
+static void *cccc_ffi_reallocarray(void *ptr, size_t nmemb, size_t size) {
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    if (vm && (vm->flags & CCCC_VM_HEAP))
+        return cccc_vm_heap_reallocarray(vm, ptr, (long long)nmemb, (long long)size);
+    return cccc_reallocarray(ptr, nmemb, size);
+}
+
+static void *cccc_ffi_aligned_alloc(size_t alignment, size_t size) {
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    if (vm && (vm->flags & CCCC_VM_HEAP))
+        return cccc_vm_heap_malloc_aligned(vm, (long long)size, alignment);
+#ifdef CCCC_HAVE_NATIVE_ALIGNED_ALLOC
+    return aligned_alloc(alignment, size);
+#else
+    return cccc_aligned_alloc(alignment, size);
+#endif
+}
+
+static int cccc_ffi_posix_memalign(void **memptr, size_t alignment, size_t size) {
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    if (vm && (vm->flags & CCCC_VM_HEAP))
+        return cccc_vm_heap_posix_memalign(vm, memptr, alignment, (long long)size);
+    return posix_memalign(memptr, alignment, size);
+}
+
 // Wrappers for int-returning functions that can return negative values
 static long long wrap_atoi(long long s)                      { return (long long)atoi((const char *)s); }
 static long long wrap_system(long long cmd)                  { return (long long)system((const char *)cmd); }
@@ -229,16 +310,19 @@ static long long wrap_mbtowc(long long pwc, long long s, long long n) { return (
 static long long wrap_wctomb(long long s, long long wc)      { return (long long)wctomb((char *)s, (wchar_t)wc); }
 
 // C23: free_sized/free_aligned_sized - a conforming implementation may
-// simply call free(), ignoring the size/alignment hints.
+// simply call free(), ignoring the size/alignment hints. Taken as a
+// function-pointer value and called indirectly, these have the exact same
+// #865 exposure as free() itself (codegen's direct-call routing to MFRE is
+// bypassed), so they go through cccc_ffi_free rather than raw free().
 static void cccc_free_sized(void *ptr, size_t size) {
     (void)size;
-    free(ptr);
+    cccc_ffi_free(ptr);
 }
 
 static void cccc_free_aligned_sized(void *ptr, size_t alignment, size_t size) {
     (void)alignment;
     (void)size;
-    free(ptr);
+    cccc_ffi_free(ptr);
 }
 
 // C23: memalignment - the largest power-of-two alignment satisfied by p.
@@ -339,20 +423,21 @@ void register_stdlib_functions(VirtualMachine *vm) {
     // Apple Blocks extension: heap-copy a block descriptor for escape
     cc_register_cfunc(vm, "__cccc_block_copy_impl", (void*)cccc_block_copy_impl, 1, 0);
 
-    // Memory allocation functions
-#ifdef CCCC_HAVE_NATIVE_ALIGNED_ALLOC
-    cc_register_cfunc(vm, "aligned_alloc", (void*)aligned_alloc, 2, 0);
-#else
-    cc_register_cfunc(vm, "aligned_alloc", (void*)cccc_aligned_alloc, 2, 0);
-#endif
-    cc_register_cfunc(vm, "calloc", (void*)calloc, 2, 0);
-    cc_register_cfunc(vm, "free", (void*)free, 1, 0);
+    // Memory allocation functions -- registered under the cccc_ffi_* wrappers
+    // (not the raw host functions) so that a bare malloc/free/calloc/
+    // realloc/reallocarray/aligned_alloc/posix_memalign value taken as a
+    // function pointer and called indirectly gets the same VM-heap-aware
+    // behavior as the direct-call opcode path (MALC/MFRE/CALC/REALC/REALCA/
+    // MALCA/PMEMA in ops.c), instead of crashing/silently diverging (#865).
+    cc_register_cfunc(vm, "aligned_alloc", (void*)cccc_ffi_aligned_alloc, 2, 0);
+    cc_register_cfunc(vm, "calloc", (void*)cccc_ffi_calloc, 2, 0);
+    cc_register_cfunc(vm, "free", (void*)cccc_ffi_free, 1, 0);
     cc_register_cfunc(vm, "free_sized", (void*)cccc_free_sized, 2, 0);
     cc_register_cfunc(vm, "free_aligned_sized", (void*)cccc_free_aligned_sized, 3, 0);
-    cc_register_cfunc(vm, "malloc", (void*)malloc, 1, 0);
-    cc_register_cfunc(vm, "realloc", (void*)cccc_realloc, 2, 0);  // Use wrapper for C11 semantics
-    cc_register_cfunc(vm, "reallocarray", (void*)cccc_reallocarray, 3, 0);  // Portable polyfill (#699)
-    cc_register_cfunc(vm, "posix_memalign", (void*)posix_memalign, 3, 0);
+    cc_register_cfunc(vm, "malloc", (void*)cccc_ffi_malloc, 1, 0);
+    cc_register_cfunc(vm, "realloc", (void*)cccc_ffi_realloc, 2, 0);
+    cc_register_cfunc(vm, "reallocarray", (void*)cccc_ffi_reallocarray, 3, 0);  // Portable polyfill (#699)
+    cc_register_cfunc(vm, "posix_memalign", (void*)cccc_ffi_posix_memalign, 3, 0);
     cc_register_cfunc(vm, "memalignment", (void*)cccc_memalignment, 1, 0);
 
     // Process control

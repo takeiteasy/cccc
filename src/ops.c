@@ -3055,38 +3055,77 @@ static inline void *vm_heap_bump_alloc(VirtualMachine *vm, long long requested_s
     return user_ptr;
 }
 
+// Shared by op_MALC_fn (direct `malloc(...)` calls, routed here by codegen's
+// is_extern_func_name special-casing) and cccc_ffi_malloc (src/stdlib/
+// stdlib.c, #865) -- a bare `malloc` value escaping into a function pointer
+// and called indirectly bypasses codegen's syntactic routing entirely, so it
+// needs the identical VM-heap-aware implementation available as a plain
+// callable function rather than only as register-based opcode glue.
+void *cccc_vm_heap_malloc(VirtualMachine *vm, long long requested_size) {
+    void *user_ptr = vm_heap_bump_alloc(vm, requested_size, 8);
+    if (vm->debug_vm && user_ptr) {
+        printf("MALC: allocated %zu bytes at 0x%llx\n", (size_t)((requested_size + 7) & ~7),
+               (long long)user_ptr);
+    }
+    return user_ptr;
+}
+
 static inline int op_MALC_fn(VirtualMachine *vm) {
     // malloc: size in REG_A0, return pointer in REG_A0
     long long requested_size = vm->regs[REG_A0];
-    void *user_ptr = vm_heap_bump_alloc(vm, requested_size, 8);
-    vm->regs[REG_A0] = (long long)user_ptr;
-
-    if (vm->debug_vm && user_ptr) {
-        printf("MALC: allocated %zu bytes at 0x%llx\n", (size_t)((requested_size + 7) & ~7), vm->regs[REG_A0]);
-    }
+    vm->regs[REG_A0] = (long long)cccc_vm_heap_malloc(vm, requested_size);
     return 0;
+}
+
+// Shared by op_MALCA_fn (direct `aligned_alloc(...)` calls) and
+// cccc_ffi_aligned_alloc (stdlib.c, #865) -- see cccc_vm_heap_malloc above.
+void *cccc_vm_heap_malloc_aligned(VirtualMachine *vm, long long requested_size, size_t alignment) {
+    // aligned_alloc requires a power-of-two alignment; reject anything else
+    // (and anything smaller than the default 8-byte alignment just uses 8).
+    if (alignment == 0 || (alignment & (alignment - 1)) != 0)
+        return NULL;
+    if (alignment < 8)
+        alignment = 8;
+
+    void *user_ptr = vm_heap_bump_alloc(vm, requested_size, alignment);
+    if (vm->debug_vm && user_ptr) {
+        printf("MALCA: allocated %zu bytes aligned to %zu at 0x%llx\n", (size_t)requested_size, alignment,
+               (long long)user_ptr);
+    }
+    return user_ptr;
 }
 
 static inline int op_MALCA_fn(VirtualMachine *vm) {
     // aligned_alloc: size in REG_A0, alignment in REG_A1, return pointer in REG_A0
     long long requested_size = vm->regs[REG_A0];
     size_t alignment = (size_t)vm->regs[REG_A1];
+    vm->regs[REG_A0] = (long long)cccc_vm_heap_malloc_aligned(vm, requested_size, alignment);
+    return 0;
+}
 
-    // aligned_alloc requires a power-of-two alignment; reject anything else
-    // (and anything smaller than the default 8-byte alignment just uses 8).
-    if (alignment == 0 || (alignment & (alignment - 1)) != 0) {
-        vm->regs[REG_A0] = 0;
-        return 0;
+// Shared by op_PMEMA_fn (direct `posix_memalign(...)` calls) and
+// cccc_ffi_posix_memalign (stdlib.c, #865) -- see cccc_vm_heap_malloc above.
+// Returns 0/EINVAL/ENOMEM, matching posix_memalign's own return convention.
+int cccc_vm_heap_posix_memalign(VirtualMachine *vm, void **memptr, size_t alignment,
+                                long long requested_size) {
+    // POSIX: alignment must be a power of two and a multiple of sizeof(void*).
+    if (alignment == 0 || (alignment & (alignment - 1)) != 0 || alignment % sizeof(void *) != 0)
+        return EINVAL;
+
+    if (requested_size == 0) {
+        // Implementation-defined: either NULL or a unique freeable pointer.
+        // Return a minimal unique allocation, matching glibc's behaviour.
+        requested_size = 1;
     }
-    if (alignment < 8)
-        alignment = 8;
 
     void *user_ptr = vm_heap_bump_alloc(vm, requested_size, alignment);
-    vm->regs[REG_A0] = (long long)user_ptr;
+    if (!user_ptr)
+        return ENOMEM;
 
-    if (vm->debug_vm && user_ptr) {
-        printf("MALCA: allocated %zu bytes aligned to %zu at 0x%llx\n", (size_t)requested_size, alignment,
-               vm->regs[REG_A0]);
+    *memptr = user_ptr;
+    if (vm->debug_vm) {
+        printf("PMEMA: allocated %zu bytes aligned to %zu at 0x%llx\n", (size_t)requested_size, alignment,
+               (long long)user_ptr);
     }
     return 0;
 }
@@ -3097,32 +3136,7 @@ static inline int op_PMEMA_fn(VirtualMachine *vm) {
     void **memptr = (void **)vm->regs[REG_A0];
     size_t alignment = (size_t)vm->regs[REG_A1];
     long long requested_size = vm->regs[REG_A2];
-
-    // POSIX: alignment must be a power of two and a multiple of sizeof(void*).
-    if (alignment == 0 || (alignment & (alignment - 1)) != 0 || alignment % sizeof(void *) != 0) {
-        vm->regs[REG_A0] = EINVAL;
-        return 0;
-    }
-
-    if (requested_size == 0) {
-        // Implementation-defined: either NULL or a unique freeable pointer.
-        // Return a minimal unique allocation, matching glibc's behaviour.
-        requested_size = 1;
-    }
-
-    void *user_ptr = vm_heap_bump_alloc(vm, requested_size, alignment);
-    if (!user_ptr) {
-        vm->regs[REG_A0] = ENOMEM;
-        return 0;
-    }
-
-    *memptr = user_ptr;
-    vm->regs[REG_A0] = 0;
-
-    if (vm->debug_vm) {
-        printf("PMEMA: allocated %zu bytes aligned to %zu at 0x%llx\n", (size_t)requested_size, alignment,
-               (long long)user_ptr);
-    }
+    vm->regs[REG_A0] = cccc_vm_heap_posix_memalign(vm, memptr, alignment, requested_size);
     return 0;
 }
 
@@ -3137,9 +3151,19 @@ static inline int is_vm_heap_ptr(VirtualMachine *vm, void *ptr) {
     return (char *)ptr >= vm->heap_seg + sizeof(AllocHeader) && (char *)ptr < vm->heap_end;
 }
 
-static inline int op_MFRE_fn(VirtualMachine *vm) {
-    // free: pointer in REG_A0
-    void *ptr = (void *)vm->regs[REG_A0];
+// Shared by op_MFRE_fn (direct `free(...)`/`free_sized(...)`/
+// `free_aligned_sized(...)` calls) and cccc_ffi_free (stdlib.c, #865) -- a
+// bare `free` value escaping into a function pointer and called indirectly
+// bypasses codegen's syntactic routing entirely and previously fell through
+// to the raw host free(), which aborts when handed a VM-heap pointer (the
+// bytes preceding it are cccc's own AllocHeader, not a real libmalloc
+// chunk). Returns 0 on success, -1 if a fatal heap-safety violation
+// (double-free, canary corruption) was detected and already reported via
+// printf above -- op_MFRE_fn propagates that through the opcode dispatch's
+// normal VM_TRAP_OR_RETURN/auto-debug-on-crash path; cccc_ffi_free (which
+// has no such path available several C frames deep in a native call) instead
+// hard-exits via error() using the same already-printed diagnostic.
+int cccc_vm_heap_free(VirtualMachine *vm, void *ptr) {
     if (!ptr) {
         return 0; // free(NULL) is a no-op
     }
@@ -3230,6 +3254,12 @@ static inline int op_MFRE_fn(VirtualMachine *vm) {
         printf("MFRE: freed pointer 0x%llx\n", (long long)ptr);
     }
     return 0;
+}
+
+static inline int op_MFRE_fn(VirtualMachine *vm) {
+    // free: pointer in REG_A0
+    void *ptr = (void *)vm->regs[REG_A0];
+    return cccc_vm_heap_free(vm, ptr);
 }
 
 static inline int op_MCPY_fn(VirtualMachine *vm) {
@@ -3552,6 +3582,63 @@ static inline int op_REALCA_fn(VirtualMachine *vm) {
 
     vm->regs[REG_A1] = nmemb * size;
     return op_REALC_fn(vm);
+}
+
+// #865: cccc_ffi_calloc/realloc/reallocarray (stdlib.c) back a bare
+// calloc/realloc/reallocarray value escaping into a function pointer and
+// called indirectly -- unlike op_CALC_fn/op_REALC_fn/op_REALCA_fn above,
+// these are NOT register-based opcode glue but fresh, small orchestrations
+// built from the same shared primitives (cccc_vm_heap_malloc/
+// cccc_vm_heap_free), so the opcode functions above are untouched and their
+// direct-call behavior carries zero risk from this addition.
+void *cccc_vm_heap_calloc(VirtualMachine *vm, long long nmemb, long long size) {
+    long long total = nmemb * size;
+    void *ptr = cccc_vm_heap_malloc(vm, total);
+    if (ptr)
+        memset(ptr, 0, total);
+    return ptr;
+}
+
+void *cccc_vm_heap_realloc(VirtualMachine *vm, void *ptr, long long new_size) {
+    if (!ptr)
+        return cccc_vm_heap_malloc(vm, new_size); // realloc(NULL, size) == malloc(size)
+
+    if (new_size <= 0) {
+        // realloc(ptr, 0) == free(ptr); a fatal free-path violation here is
+        // already reported by cccc_vm_heap_free's own diagnostic printf --
+        // nothing further to add before returning NULL.
+        cccc_vm_heap_free(vm, ptr);
+        return NULL;
+    }
+
+    // Pointer isn't inside the VM heap arena, or has no valid AllocHeader
+    // (e.g. Block_copy's malloc, strdup, aligned_alloc under -V) -- fall
+    // back to system realloc directly, same fallback op_REALC_fn applies.
+    if (!is_vm_heap_ptr(vm, ptr))
+        return realloc(ptr, (size_t)new_size);
+    AllocHeader *old_header = ((AllocHeader *)ptr) - 1;
+    if (old_header->magic != 0xDEADBEEF)
+        return realloc(ptr, (size_t)new_size);
+
+    size_t old_size = old_header->size;
+    void *new_ptr = cccc_vm_heap_malloc(vm, new_size);
+    if (!new_ptr)
+        return NULL;
+
+    size_t copy_size = old_size < (size_t)new_size ? old_size : (size_t)new_size;
+    memcpy(new_ptr, ptr, copy_size);
+    // realloc is always a fresh bump allocation here (never in-place), so
+    // carry the old block's effective type across the same way MCPY/op_REALC_fn
+    // do (#653) -- must run before cccc_vm_heap_free below clears the old range.
+    type_shadow_copy(vm, new_ptr, ptr, copy_size);
+    cccc_vm_heap_free(vm, ptr);
+    return new_ptr;
+}
+
+void *cccc_vm_heap_reallocarray(VirtualMachine *vm, void *ptr, long long nmemb, long long size) {
+    if (nmemb < 0 || size < 0 || (size != 0 && nmemb > (INT64_MAX / size)))
+        return NULL; // overflow/negative -- original ptr untouched, matches op_REALCA_fn
+    return cccc_vm_heap_realloc(vm, ptr, nmemb * size);
 }
 
 // ========== Dynamic Object Size Opcode ==========

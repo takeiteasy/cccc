@@ -802,6 +802,27 @@ int cc_run_at1(VirtualMachine *vm, Pc entry, void *arg);
 // (stubbed out under _WIN32, same as the rest of that file).
 void cccc_pthread_run_main_tss_destructors(VirtualMachine *vm);
 
+// VM-heap-aware allocator primitives (ops.c, part of vm.c's translation
+// unit) -- back both the MALC/MALCA/PMEMA/MFRE opcodes (direct
+// malloc/aligned_alloc/posix_memalign/free calls, routed here by codegen's
+// is_extern_func_name special-casing) AND the cccc_ffi_* wrappers in
+// stdlib.c that a bare malloc/free/calloc/realloc/reallocarray/aligned_alloc/
+// posix_memalign value resolves to when taken as a function pointer and
+// called indirectly (#865) -- that indirect path bypasses codegen's
+// syntactic routing entirely, so it needs these as plain callable functions
+// rather than only as register-based opcode glue. cccc_vm_heap_calloc/
+// realloc/reallocarray are built from cccc_vm_heap_malloc/free rather than
+// extracted from their opcode counterparts (op_CALC_fn/op_REALC_fn/
+// op_REALCA_fn), which remain untouched.
+void *cccc_vm_heap_malloc(VirtualMachine *vm, long long requested_size);
+void *cccc_vm_heap_malloc_aligned(VirtualMachine *vm, long long requested_size, size_t alignment);
+int cccc_vm_heap_posix_memalign(VirtualMachine *vm, void **memptr, size_t alignment,
+                                long long requested_size);
+int cccc_vm_heap_free(VirtualMachine *vm, void *ptr);
+void *cccc_vm_heap_calloc(VirtualMachine *vm, long long nmemb, long long size);
+void *cccc_vm_heap_realloc(VirtualMachine *vm, void *ptr, long long new_size);
+void *cccc_vm_heap_reallocarray(VirtualMachine *vm, void *ptr, long long nmemb, long long size);
+
 //
 // hashmap.c
 //
