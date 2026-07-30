@@ -473,15 +473,9 @@ BuildTarget *profile_cpu(Builder *ctx) {
     // (a real POSIX shell feature; ours doesn't parse it), so `env` does the
     // env-var assignment instead -- `env VAR=value cmd args...` is a single
     // argv[0]="env" invocation the shell's plain command parser handles fine.
-    //
-    // `|| true` matches Makefile:592's own tolerance for this step failing:
-    // PROFILE_TEST (tests/test_comprehensive.c) does not currently exist in
-    // this repo (filed as a follow-up), so both the Makefile's recipe and
-    // this one already run against a missing file -- `|| true` keeps the
-    // (pre-existing, tracked separately) gap from also failing the build.
     char cmd[512];
     snprintf(cmd, sizeof(cmd),
-        "mkdir -p profile && env CPUPROFILE=profile/cpu.prof %s -I./include tests/test_comprehensive.c || true",
+        "mkdir -p profile && env CPUPROFILE=profile/cpu.prof %s -I./include profile/benchmarks/mandelbrot.c || true",
         TargetOutput(t));
     BuildTarget *step = RunCustom(ctx, "profile-cpu", cmd);
     DependsOn(step, t);
@@ -492,19 +486,16 @@ BuildTarget *profile_cpu(Builder *ctx) {
 BuildTarget *profile_mem(Builder *ctx) {
     BuildTarget *bt = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    // See profile_cpu()'s comment: tests/test_comprehensive.c does not
-    // currently exist, so `|| true` matches the Makefile's own tolerance
-    // for this (pre-existing, tracked separately) gap.
     char cmd[512];
     if (strcmp(BuildHost(ctx), "darwin") == 0)
         snprintf(cmd, sizeof(cmd),
-            "mkdir -p profile && leaks -atExit -- %s -I./include tests/test_comprehensive.c "
+            "mkdir -p profile && leaks -atExit -- %s -I./include profile/benchmarks/mandelbrot.c "
             "> profile/mem-leaks.txt 2>&1 || true",
             TargetOutput(cccc));
     else
         snprintf(cmd, sizeof(cmd),
             "mkdir -p profile && valgrind --tool=massif --massif-out-file=profile/mem.massif "
-            "%s -I./include tests/test_comprehensive.c || true",
+            "%s -I./include profile/benchmarks/mandelbrot.c || true",
             TargetOutput(cccc));
     BuildTarget *step = RunCustom(ctx, "profile-mem", cmd);
     DependsOn(step, cccc);
@@ -678,7 +669,7 @@ BuildTarget *bench(Builder *ctx) {
     char cmd[512];
     snprintf(cmd, sizeof(cmd),
         "mkdir -p profile && hyperfine --warmup 3 --ignore-failure "
-        "--export-json profile/bench.json '%s -I./include tests/test_comprehensive.c'",
+        "--export-json profile/bench.json '%s -I./include profile/benchmarks/mandelbrot.c'",
         TargetOutput(cccc));
     BuildTarget *step = RunCustom(ctx, "bench", cmd);
     DependsOn(step, cccc);

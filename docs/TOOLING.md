@@ -660,8 +660,8 @@ On Linux it uses `valgrind --tool=massif`.
 ### VM Opcode Profiling
 
 ```bash
-./cccc --vm-profile -I./include tests/test_comprehensive.c
-./cccc --vm-profile --json -I./include tests/test_comprehensive.c > profile/vm-opcodes/comprehensive.json
+./cccc --vm-profile -I./include profile/benchmarks/mandelbrot.c
+./cccc --vm-profile --json -I./include profile/benchmarks/mandelbrot.c > profile/vm-opcodes/mandelbrot.json
 ./cccc -Y build/fib.c4
 ```
 
@@ -711,18 +711,18 @@ profile to surface the strongest fusion candidates.
 
 ```bash
 # Single test
-hyperfine --warmup 3 './cccc -I./include tests/test_comprehensive.c'
+hyperfine --warmup 3 './cccc -I./include profile/benchmarks/mandelbrot.c'
 
 # Compare two versions
 hyperfine --warmup 3 \
-  -n 'main' './cccc -I./include tests/test_comprehensive.c' \
-  -n 'branch' './cccc-branch -I./include tests/test_comprehensive.c'
+  -n 'main' './cccc -I./include profile/benchmarks/mandelbrot.c' \
+  -n 'branch' './cccc-branch -I./include profile/benchmarks/mandelbrot.c'
 ```
 
 #### macOS `sample` (built-in, no install needed)
 
 ```bash
-./cccc -I./include tests/test_comprehensive.c &
+./cccc -I./include profile/benchmarks/mandelbrot.c &
 PID=$!
 sample $PID -mayDie -file profile/sample.txt
 ```
@@ -730,7 +730,7 @@ sample $PID -mayDie -file profile/sample.txt
 #### macOS `heap` (built-in heap profiler)
 
 ```bash
-heap -s -guessNonObjects ./cccc -I./include tests/test_comprehensive.c
+heap -s -guessNonObjects ./cccc -I./include profile/benchmarks/mandelbrot.c
 ```
 
 #### gperftools CPU profiler
@@ -738,8 +738,8 @@ heap -s -guessNonObjects ./cccc -I./include tests/test_comprehensive.c
 ```bash
 make profile-cpu-build
 
-CPUPROFILE=profile/out.prof ./cccc-prof -I./include tests/test_comprehensive.c
-CPUPROFILE_FREQUENCY=1000 ./cccc-prof -I./include tests/test_comprehensive.c
+CPUPROFILE=profile/out.prof ./cccc-prof -I./include profile/benchmarks/mandelbrot.c
+CPUPROFILE_FREQUENCY=1000 ./cccc-prof -I./include profile/benchmarks/mandelbrot.c
 ```
 
 ### `tools/tests.py` Integration

@@ -562,7 +562,7 @@ all: clean $(EXE_OUT) $(LIB_OUT) test
 HAS_HYPERFINE := $(shell which hyperfine 2>/dev/null || echo "")
 HAS_GPROFILER := $(shell test -f /opt/homebrew/lib/libprofiler.dylib && echo "yes" || test -f /usr/lib/libprofiler.so && echo "yes" || echo "")
 
-PROFILE_TEST ?= tests/test_comprehensive.c
+PROFILE_TEST ?= profile/benchmarks/mandelbrot.c
 
 bench:
 ifeq ($(HAS_HYPERFINE),)
