@@ -1102,6 +1102,15 @@ void cccc_pthread_cleanup(VirtualMachine *vm) {
             value = next;
         }
         main_thread->values = NULL;
+        // The main thread's ThreadRecord is embedded in PthreadState (not
+        // heap-allocated), so it never goes through free_thread_record --
+        // free its host allocations here instead. tls_seg is always NULL for
+        // main (its TLS copy lives in vm->current_tls_seg, freed separately
+        // in vm.c), so held_locks is the only other field to reclaim.
+        free(main_thread->held_locks);
+        main_thread->held_locks = NULL;
+        main_thread->held_locks_count = 0;
+        main_thread->held_locks_cap = 0;
     }
     vm->thread_records = NULL;
 
