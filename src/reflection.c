@@ -22,6 +22,14 @@
 
 #include "./internal.h"
 
+// Prototypes generated from include/cccc/reflection.h (see
+// tools/gen_reflection_ffi.py). Including them here -- not just in
+// macros.c, where they're used to take function addresses for FFI
+// registration -- turns any drift between a reflection.h prototype and this
+// file's definition into a compile error (conflicting declaration),
+// instead of the two silently going out of sync.
+#include "reflection_ffi_protos.inc"
+
 // Aliases so the public API types match reflection.h
 typedef Type Type;
 typedef Node Node;

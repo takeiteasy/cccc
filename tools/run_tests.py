@@ -237,6 +237,30 @@ def _run_audit_ffi_suite():
         return f"FAILED ({e})", False
 
 
+def _run_reflection_ffi_check():
+    """Check src/reflection_ffi_{protos,register}.inc are up to date with
+    include/cccc/reflection.h (#859).
+
+    Pure source scan -- no cccc binary needed. Returns (status_str, ok).
+    """
+    script = _TOOLS_DIR / "gen_reflection_ffi.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("gen_reflection_ffi", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rc = mod.main(check=True)
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
 def _run_bench(cccc):
     """Run the cross-compiler benchmark as a subprocess (bench.py uses sys.exit)."""
     script = _TOOLS_DIR / "bench.py"
@@ -343,6 +367,13 @@ def main():
     audit_status, ok_audit = _run_audit_ffi_suite()
     print(f"  {audit_status}")
     suite_results["audit_ffi"] = ok_audit
+
+    # --- Reflection FFI generation check (#859) ---
+    print()
+    print("[ reflection_ffi_check ]")
+    refl_status, ok_refl = _run_reflection_ffi_check()
+    print(f"  {refl_status}")
+    suite_results["reflection_ffi_check"] = ok_refl
 
     # --- Optional bench ---
     if args.bench:

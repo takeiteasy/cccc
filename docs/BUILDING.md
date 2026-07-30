@@ -1076,13 +1076,31 @@ binary first forces an unconditional relink regardless of mtime comparison.
 disk — this only needs a *recursive* `$(MAKE)` because that choice is made
 by `$(wildcard src/std.c)` at make-parse time, once per invocation.)
 
+**`src/reflection_ffi_protos.inc`** and **`src/reflection_ffi_register.inc`**
+(the comptime-builtin FFI table: an `extern` prototype and a
+`cc_register_cfunc`/`cc_register_variadic_cfunc` call per builtin) are
+generated from `include/cccc/reflection.h` by `tools/gen_reflection_ffi.py`
+and `#include`'d by both `src/macros.c` (FFI registration) and
+`src/reflection.c` (the actual definitions) — so any drift between a
+`reflection.h` prototype and its definition is now a compile error, not a
+silently-broken comptime builtin. Unlike `src/std.c`, these two files **are
+committed**: they're pure-Python-generated (no `cccc` binary needed), so
+committing them keeps the Makefile's stage0 invariant intact — a fresh clone
+with nothing but a system `cc` and libffi still builds with plain `make`,
+no `python3` required. `./cccc --build build.c`'s default build regenerates
+them via the `reflection_ffi_gen` step; run `python3
+tools/gen_reflection_ffi.py` directly to refresh them by hand, or `--check`
+to verify they're current without writing (this is what the `test` build
+target's `reflection_ffi_check` sub-suite runs).
+
 `build.c` itself, once bootstrapped, covers what used to be Makefile
 targets: `cccc_asan`/`cccc_ubsan`/`cccc_tsan`/`cccc_msan`/`sanitizers`,
 `fuzz_harness`, `libcccc`, `clean`, `host_tests`, `test`/`test_suites`/
-`test_legacy`, `sqlite_smoke`, `audit_ffi`, `bench`/`bench_compare`/
-`bench_compare_quick`/`bench_compare_json`, `profile_cpu`/`profile_mem`,
-`dsym`, `afl`/`afl_asan`, `macos_x86_64` (cross-build only — the Makefile's
-Rosetta smoke/test orchestration around `arch -x86_64` stays in
+`test_legacy`, `sqlite_smoke`, `audit_ffi`, `reflection_ffi_gen`/
+`reflection_ffi_check`, `bench`/`bench_compare`/`bench_compare_quick`/
+`bench_compare_json`, `profile_cpu`/`profile_mem`, `dsym`, `afl`/
+`afl_asan`, `macos_x86_64` (cross-build only — the Makefile's Rosetta
+smoke/test orchestration around `arch -x86_64` stays in
 `tools/Makefile.backup`), `linux_amd64_test`/`linux_aarch64_test`
 (single-shot — no source-pattern sharding; the vendored shell has no loop
 construct to replicate that with), and `stdlib_gen` (the two-pass regen

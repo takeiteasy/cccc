@@ -31,6 +31,18 @@ compiled, but that bundled header is not on the public include path. Macro code
 can use the `$*`, `Quote*`, `MacroErrorAt`, `Gensym`, and `$dump_*`
 convenience macros directly.
 
+`include/cccc/reflection.h` is the single source of truth for every comptime
+builtin's C signature and FFI registration: `src/reflection_ffi_protos.inc`
+(the `extern` prototypes) and `src/reflection_ffi_register.inc` (the
+`cc_register_cfunc`/`cc_register_variadic_cfunc` calls, including their
+arity) are generated from it by `tools/gen_reflection_ffi.py` and
+`#include`'d by both `src/macros.c` and `src/reflection.c`. Adding a new
+builtin means editing `reflection.h` and writing its definition in
+`src/reflection.c` (or `src/macros.c`, for the handful that need direct
+compiler state) — nothing else; the FFI table picks it up on the next
+build. See [BUILDING.md](BUILDING.md) for the generated-file/regeneration
+details.
+
 ## Return-Value Model
 
 A macro's return value is **the node spliced at the call site**, replacing the
