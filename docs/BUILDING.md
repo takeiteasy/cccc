@@ -1096,8 +1096,8 @@ target's `reflection_ffi_check` sub-suite runs).
 `build.c` itself, once bootstrapped, covers what used to be Makefile
 targets: `cccc_asan`/`cccc_ubsan`/`cccc_tsan`/`cccc_msan`/`sanitizers`,
 `fuzz_harness`, `libcccc`, `clean`, `host_tests`, `test`/`test_suites`/
-`test_legacy`, `sqlite_smoke`, `audit_ffi`, `reflection_ffi_gen`/
-`reflection_ffi_check`, `bench`/`bench_compare`/`bench_compare_quick`/
+`test_legacy`, `sqlite_smoke`, `audit_ffi`, `audit_reflection_enums`,
+`reflection_ffi_gen`/`reflection_ffi_check`, `bench`/`bench_compare`/`bench_compare_quick`/
 `bench_compare_json`, `profile_cpu`/`profile_mem`, `dsym`, `afl`/
 `afl_asan`, `macos_x86_64` (cross-build only — the Makefile's Rosetta
 smoke/test orchestration around `arch -x86_64` stays in

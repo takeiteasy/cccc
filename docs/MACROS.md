@@ -43,6 +43,14 @@ compiler state) — nothing else; the FFI table picks it up on the next
 build. See [BUILDING.md](BUILDING.md) for the generated-file/regeneration
 details.
 
+`reflection.h` also hand-copies three of the compiler's internal enums for
+macro code to use: `TypeKind` (`TK_*`), `NodeKind` (`NK_*`, a deliberate
+subset), and `AttrTargetKind` (`ATTR_TARGET_*`, an exact copy). Their
+numeric values must match `src/cccc.h`'s internal `TypeKind`/`NodeKind`/
+`AttrTargetKind` exactly; `tools/audit_reflection_enums.py` (wired into the
+`test` build target) fails the build if they drift — see
+[TESTING.md](TESTING.md#reflection-enum-parity-audit).
+
 ## Return-Value Model
 
 A macro's return value is **the node spliced at the call site**, replacing the

@@ -430,6 +430,16 @@ BuildTarget *audit_ffi(Builder *ctx) {
     return RunCustom(ctx, "audit-ffi", "python3 tools/audit_ffi.py");
 }
 
+[[cccc::build_target]]
+BuildTarget *audit_reflection_enums(Builder *ctx) {
+    // Pure source scan: include/cccc/reflection.h's TypeKind (TK_*) /
+    // NodeKind (NK_*) / AttrTargetKind hand-copied enums vs the compiler's
+    // internal TypeKind (TY_*) / NodeKind (ND_*) / AttrTargetKind in
+    // src/cccc.h -- no build required, same reasoning as audit_ffi above.
+    return RunCustom(ctx, "audit-reflection-enums",
+        "python3 tools/audit_reflection_enums.py");
+}
+
 // src/reflection_ffi_protos.inc / src/reflection_ffi_register.inc are
 // generated from include/cccc/reflection.h by tools/gen_reflection_ffi.py
 // and #include'd by both src/macros.c and src/reflection.c. Unlike

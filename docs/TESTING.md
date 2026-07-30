@@ -18,7 +18,7 @@ Run each group independently:
 python3 tools/tests.py --suites     # framework suites only (tests/suites/)
 python3 tools/tests.py --legacy     # legacy single-file tests only (tests/)
 python3 tools/tests.py              # all tests in both directories
-python3 tools/run_tests.py          # unified orchestrator (source + c4 + debugger + repl + debugger_condition + sqlite + audit_ffi)
+python3 tools/run_tests.py          # unified orchestrator (source + c4 + debugger + repl + debugger_condition + sqlite + audit_ffi + reflection_ffi_check + audit_reflection_enums)
 
 ./cccc --build build.c --build-target=test_suites   # build + run framework suites
 ./cccc --build build.c --build-target=test_legacy   # build + run legacy tests
@@ -42,14 +42,16 @@ flags with `--std=` at file scope) remain as standalone files in `tests/`.
 
 `./cccc --build build.c --build-target=test` calls `tools/run_tests.py`,
 which is the unified orchestrator. It
-runs seven sub-suites in sequence: source mode, `.c4` round-trip, the macOS
+runs nine sub-suites in sequence: source mode, `.c4` round-trip, the macOS
 host-signal debugger integration (skipped on other platforms), the interactive
 REPL PTY integration (`tools/test_repl.py`, POSIX-only -- skipped on Windows),
 the conditional-breakpoint PTY integration (`tools/test_debugger_condition.py`,
 same POSIX-only gating), the SQLite amalgamation smoke test (skips cleanly
-when the zip is absent), and the `src/stdlib` FFI registration audit
-(`tools/audit_ffi.py`, see below). A non-zero exit is produced if any
-sub-suite fails.
+when the zip is absent), the `src/stdlib` FFI registration audit
+(`tools/audit_ffi.py`, see below), the `reflection_ffi_gen` freshness check
+(`tools/gen_reflection_ffi.py --check`, see [BUILDING.md](BUILDING.md)), and
+the reflection.h enum-parity audit (`tools/audit_reflection_enums.py`, see
+below). A non-zero exit is produced if any sub-suite fails.
 
 ### FFI registration audit
 
@@ -74,6 +76,24 @@ through the FFI registration table at all.
 ```bash
 make audit-ffi                 # run standalone
 python3 tools/audit_ffi.py      # equivalent, no build required
+```
+
+### Reflection enum-parity audit
+
+`./cccc --build build.c --build-target=audit_reflection_enums` (also run as
+the `audit_reflection_enums` sub-suite of the `test` target) runs
+`tools/audit_reflection_enums.py`, a pure source scan with no build step
+required. `include/cccc/reflection.h` hand-copies three of the compiler's
+internal enums for comptime macro code to use: `TypeKind` (`TK_*`, matching
+internal `TY_*`), `NodeKind` (`NK_*`, matching internal `ND_*`, a
+deliberate *subset* of the internal enum), and `AttrTargetKind`
+(`ATTR_TARGET_*`, an exact full copy). Nothing ties these hand-typed
+integer values to `src/cccc.h`'s canonical definitions, so the audit
+cross-checks every value reflection.h defines against its internal
+counterpart and fails on any mismatch or renamed/removed counterpart.
+
+```bash
+python3 tools/audit_reflection_enums.py      # run standalone, no build required
 ```
 
 ### Host-side test harnesses

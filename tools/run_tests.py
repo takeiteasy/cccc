@@ -12,6 +12,8 @@ Sub-suites:
   debugger_condition  — conditional breakpoint PTY integration (POSIX only, ticket 113)
   sqlite              — SQLite 3.53.2 amalgamation smoke test (skips if zip absent)
   audit_ffi           — src/stdlib FFI registration audit (ticket #784)
+  reflection_ffi_check — reflection.h FFI table generation freshness (ticket #859)
+  audit_reflection_enums — reflection.h enum values vs internal enums (ticket #860)
 
 Optional:
   --bench  — run the cross-compiler benchmark after the test suites
@@ -237,6 +239,30 @@ def _run_audit_ffi_suite():
         return f"FAILED ({e})", False
 
 
+def _run_audit_reflection_enums_suite():
+    """Run reflection.h TypeKind/NodeKind/AttrTargetKind vs internal enum
+    value audit (#860).
+
+    Pure source scan -- no cccc binary needed. Returns (status_str, ok).
+    """
+    script = _TOOLS_DIR / "audit_reflection_enums.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("audit_reflection_enums", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rc = mod.main()
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
 def _run_reflection_ffi_check():
     """Check src/reflection_ffi_{protos,register}.inc are up to date with
     include/cccc/reflection.h (#859).
@@ -374,6 +400,13 @@ def main():
     refl_status, ok_refl = _run_reflection_ffi_check()
     print(f"  {refl_status}")
     suite_results["reflection_ffi_check"] = ok_refl
+
+    # --- Reflection enum parity audit (#860) ---
+    print()
+    print("[ audit_reflection_enums ]")
+    enum_status, ok_enum = _run_audit_reflection_enums_suite()
+    print(f"  {enum_status}")
+    suite_results["audit_reflection_enums"] = ok_enum
 
     # --- Optional bench ---
     if args.bench:
