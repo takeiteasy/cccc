@@ -1,4 +1,4 @@
-image: ubuntu/jammy
+image: debian/stable
 arch: arm64
 packages:
   - clang
