@@ -25,10 +25,21 @@ jobs:
   linux-aarch64:
     runs-on: ubuntu-24.04-arm
     env:
-      # CC must be explicit -- Ubuntu's plain `cc` resolves to gcc, which
-      # rejects `-std=c23` ("did you mean -std=c2x?") and fails the stage0
-      # bootstrap. .builds/linux-amd64.yml sets this the same way.
+      # Two separate compiler-selection mechanisms need overriding here,
+      # not one:
+      #  - CC: the stage0 `make cccc` steps use plain `CC ?= cc` in the
+      #    Makefile, which a `CC` env var overrides per normal make
+      #    semantics.
+      #  - CCCC_NATIVE_CC: `./cccc --build build.c`'s own internal compiler
+      #    probe (cccc_find_native_cc(), src/vm.c) is a *different* lookup
+      #    that only honours CCCC_NATIVE_CC -- it ignores CC entirely and
+      #    otherwise tries {cc, clang, gcc} on PATH in that order. sr.ht's
+      #    minimal image only has clang installed (no cc/gcc), so that
+      #    fallback happens to land on clang there; GitHub's ubuntu-24.04-arm
+      #    runner ships a pre-installed `cc` (-> gcc), which wins first and
+      #    breaks on `-std=c23` ("did you mean -std=c2x?").
       CC: clang
+      CCCC_NATIVE_CC: clang
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -38,6 +49,15 @@ jobs:
           set -e
           make cccc
           sh tools/regen_stdlib.sh ./cccc
+          # `rm -f cccc` forces the second `make cccc` to relink
+          # unconditionally: make's mtime-based dependency check can see
+          # the freshly-regenerated src/std.c as not newer than the binary
+          # linked seconds earlier on a fast CI runner (observed
+          # intermittently as "make: `cccc' is up to date." even though
+          # std.c changed from std_seed.c to the real std.c) and wrongly
+          # skip the relink. This is a pre-existing race in the shared
+          # bootstrap dance, not specific to this workflow.
+          rm -f cccc
           make cccc
       - name: Build
         run: ./cccc --build build.c
@@ -55,6 +75,15 @@ jobs:
           set -e
           make cccc
           sh tools/regen_stdlib.sh ./cccc
+          # `rm -f cccc` forces the second `make cccc` to relink
+          # unconditionally: make's mtime-based dependency check can see
+          # the freshly-regenerated src/std.c as not newer than the binary
+          # linked seconds earlier on a fast CI runner (observed
+          # intermittently as "make: `cccc' is up to date." even though
+          # std.c changed from std_seed.c to the real std.c) and wrongly
+          # skip the relink. This is a pre-existing race in the shared
+          # bootstrap dance, not specific to this workflow.
+          rm -f cccc
           make cccc
       - name: Build
         run: ./cccc --build build.c
@@ -76,6 +105,15 @@ jobs:
           set -e
           make cccc
           sh tools/regen_stdlib.sh ./cccc
+          # `rm -f cccc` forces the second `make cccc` to relink
+          # unconditionally: make's mtime-based dependency check can see
+          # the freshly-regenerated src/std.c as not newer than the binary
+          # linked seconds earlier on a fast CI runner (observed
+          # intermittently as "make: `cccc' is up to date." even though
+          # std.c changed from std_seed.c to the real std.c) and wrongly
+          # skip the relink. This is a pre-existing race in the shared
+          # bootstrap dance, not specific to this workflow.
+          rm -f cccc
           make cccc
       - name: Build
         run: ./cccc --build build.c
