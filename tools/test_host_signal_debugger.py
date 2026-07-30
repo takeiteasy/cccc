@@ -70,7 +70,27 @@ class PtyProcess:
             pass
 
     def wait(self, timeout=8):
-        rc = self.proc.wait(timeout=timeout)
+        # Keep draining while waiting (ticket #856): the crash-handler paths
+        # (src/host_backtrace.c's fatal-signal handler, installed
+        # unconditionally regardless of --no-debug-on-crash) can write over
+        # 1KB to stderr -- e.g. a full libbacktrace frame dump. macOS's pty
+        # output buffer blocks the writer well under that (measured: fine at
+        # 1KB, blocks by 2KB), so a plain proc.wait() with nobody reading the
+        # master can deadlock the child forever against a full buffer. Model:
+        # tools/test_repl.py's PtyProcess.wait(), which hit the same class of
+        # bug via readline's atexit tcsetattr(TCSADRAIN, ...).
+        deadline = time.monotonic() + timeout
+        while True:
+            self._read_once(0.1)
+            if self.proc.poll() is not None:
+                break
+            if time.monotonic() >= deadline:
+                self.proc.kill()
+                self.proc.wait(timeout=2)
+                raise AssertionError(
+                    f"process did not exit within {timeout}s; output:\n{self.text()}"
+                )
+        rc = self.proc.wait(timeout=2)
         self.drain()
         os.close(self.master)
         return rc
@@ -98,6 +118,21 @@ def assert_host_fault(source, expected_signal, commands=()):
     return output
 
 
+def test_wait_drains_large_output():
+    """Regression guard for #856: PtyProcess.wait() must not deadlock against
+    a child that fills the pty output buffer before exiting. Doesn't need a
+    cccc binary, so it runs unconditionally (even on non-macOS/no-binary
+    hosts) as a fast, deterministic check on the harness itself."""
+    payload_size = 8192  # comfortably above the ~1-2KB macOS pty block point
+    child = PtyProcess([
+        sys.executable, "-c",
+        f"import sys; sys.stderr.write('x' * {payload_size}); sys.stderr.flush()",
+    ])
+    rc = child.wait(timeout=8)
+    assert rc == 0, (rc, child.text())
+    assert len(child.output) >= payload_size, len(child.output)
+
+
 def main():
     global CCCC
 
@@ -111,6 +146,10 @@ def main():
     )
     args = parser.parse_args()
     CCCC = Path(args.binary).resolve()
+
+    # Harness self-test (#856): needs no cccc binary and no macOS, so it runs
+    # unconditionally, ahead of the platform/binary gating below.
+    test_wait_drains_large_output()
 
     if not CCCC.exists():
         print(f"error: CCCC binary not found: {CCCC}", file=sys.stderr)
