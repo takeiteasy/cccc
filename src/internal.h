@@ -784,6 +784,24 @@ int cccc_call_guest_callback(VirtualMachine *vm, long long fn_value,
                               const long long *args, int nargs,
                               long long *out_ival);
 
+// Runs `entry` as a complete, non-nested top-level VM execution cycle (same
+// machinery as cc_run_at) with a single pointer argument in REG_A0 --
+// i.e. matching a void (*)(void *) signature. Used from
+// cccc_pthread_run_main_tss_destructors (stdlib/pthread.c) to invoke TSS/
+// pthread-key destructors after pthread_exit() on the main thread, a
+// post-GIL-release context where cccc_call_guest_callback above cannot be
+// used. See its definition in vm.c for the full rationale.
+int cc_run_at1(VirtualMachine *vm, Pc entry, void *arg);
+
+// Called once, right after cc_run_at(main) returns in cc_run (vm.c), before
+// atexit handlers/destructors run. Drains TSS/pthread-key destructors for
+// the main thread's ThreadRecord, but ONLY if pthread_exit() was actually
+// called by main -- a plain `return` from main() must NOT run them (matches
+// glibc; see docs/COVERAGE.md's <threads.h> row). No-op if pthread_exit()
+// was never called on the main thread. Implemented in stdlib/pthread.c
+// (stubbed out under _WIN32, same as the rest of that file).
+void cccc_pthread_run_main_tss_destructors(VirtualMachine *vm);
+
 //
 // hashmap.c
 //

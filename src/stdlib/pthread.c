@@ -69,6 +69,13 @@ struct ThreadRecord {
     int    held_locks_cap;
     // Per-thread TLS segment (copy of vm->tls_template made at thread creation)
     char *tls_seg;
+    // Set when THIS thread called pthread_exit()/thrd_exit() itself (as
+    // opposed to just returning from its start function). Only meaningful
+    // for the main thread's record today: cc_run (vm.c) checks it after
+    // cc_run_at(main) returns to decide whether to drain TSS/pthread-key
+    // destructors for main, since POSIX/glibc run them for an explicit
+    // pthread_exit() but not for a plain `return` from main() (#863).
+    int exited_via_pthread_exit;
 };
 
 struct PthreadState {
@@ -406,8 +413,10 @@ static long long wrap_pthread_exit(long long retval) {
     if (!vm)
         return 0;
     ThreadRecord *rec = current_thread(vm);
-    if (rec)
+    if (rec) {
         rec->retval = (void *)retval;
+        rec->exited_via_pthread_exit = 1;
+    }
     vm->regs[REG_A0] = retval;
     vm->pc = CCCC_INVALID_PC;
     return 0;
@@ -728,6 +737,69 @@ static void run_tss_destructors(VirtualMachine *vm, ThreadRecord *rec) {
             cccc_call_guest_callback(vm, keyrec->destructor_value, args, 1, &ignored);
             /* A faulting destructor doesn't abort the remaining keys, same
                rationale as drain_exit_handlers_nested (stdlib.c). */
+            ran_any = 1;
+        }
+        if (!ran_any)
+            break;
+    }
+}
+
+// Invokes a single TSS/pthread-key destructor from a TOP-LEVEL (non-nested)
+// context -- no GIL-held vm_eval on the C stack, so cccc_call_guest_callback
+// cannot be used here (see its contract in internal.h). Mirrors the two
+// dispatch cases cc_run_atexit_entries (vm.c) already handles for atexit
+// handlers in this same kind of context: an FFI token (the destructor is
+// itself an already-registered host function taken as a value, e.g.
+// tss_create(&key, free) -- an idiomatic and fully valid C11 program) calls
+// straight through via cccc_call_native_function; a guest byte offset runs
+// via cc_run_at1, a complete top-level VM execution cycle.
+static void call_tss_destructor_top_level(VirtualMachine *vm, long long destructor_value,
+                                          void *arg) {
+    if (destructor_value <= CCCC_FFI_TOKEN_BASE) {
+        int ffi_idx = (int)(CCCC_FFI_TOKEN_BASE - destructor_value);
+        if (ffi_idx < 0 || ffi_idx >= vm->compiler.ffi_count)
+            return;
+        ForeignFunc *ff = &vm->compiler.ffi_table[ffi_idx];
+        long long argbuf[1] = { (long long)arg };
+        cccc_call_native_function(vm, ff->func_ptr, ff->name, argbuf, 1,
+                                  0, 0, 0, 0, ff->is_variadic, ff->num_fixed_args);
+        return;
+    }
+    Pc entry = cc_byte_offset_to_pc(destructor_value);
+    if (entry == CCCC_INVALID_PC || entry > vm->text_ptr)
+        return;
+    cc_run_at1(vm, entry, arg);
+}
+
+// Drains the main thread's TSS/pthread-key destructors after pthread_exit()
+// was called ON THE MAIN THREAD -- POSIX/glibc run them in that case, unlike
+// a plain `return` from main() (which must NOT run them; see #863 and the
+// <threads.h> row in docs/COVERAGE.md). Called exactly once, from cc_run
+// (vm.c) right after cc_run_at(main) returns and before atexit handlers/
+// destructors run -- a no-op if pthread_exit() was never called on main.
+//
+// Same re-check-up-to-CCCC_TSS_DTOR_ITERATIONS / null-before-call structure
+// as run_tss_destructors above, just dispatched via
+// call_tss_destructor_top_level instead of cccc_call_guest_callback since
+// this runs post-GIL-release with no live vm_eval on the C stack.
+void cccc_pthread_run_main_tss_destructors(VirtualMachine *vm) {
+    if (!vm || !vm->pthread_state)
+        return;
+    ThreadRecord *main_thread = &vm->pthread_state->main_thread;
+    if (!main_thread->exited_via_pthread_exit)
+        return;
+    main_thread->exited_via_pthread_exit = 0;
+    for (int pass = 0; pass < CCCC_TSS_DTOR_ITERATIONS; pass++) {
+        int ran_any = 0;
+        for (CCCCPthreadValue *value = main_thread->values; value; value = value->next) {
+            if (!value->value)
+                continue;
+            PthreadKeyRecord *keyrec = find_key(vm, value->key);
+            if (!keyrec || keyrec->deleted || !keyrec->destructor_value)
+                continue;
+            void *slot_value = value->value;
+            value->value = NULL;
+            call_tss_destructor_top_level(vm, keyrec->destructor_value, slot_value);
             ran_any = 1;
         }
         if (!ran_any)
@@ -1142,6 +1214,10 @@ void register_threads_functions(VirtualMachine *vm) {
 }
 
 void cccc_pthread_cleanup(VirtualMachine *vm) {
+    (void)vm;
+}
+
+void cccc_pthread_run_main_tss_destructors(VirtualMachine *vm) {
     (void)vm;
 }
 #endif

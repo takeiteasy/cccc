@@ -1977,7 +1977,15 @@ static void cc_scan_dynobjsz(VirtualMachine *vm) {
     vm->dynobjsz_scan_pc = pc;
 }
 
-int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv) {
+// Shared by cc_run_at (main-style argc/argv entry point) and cc_run_at1
+// (single register-argument entry point, used to drain TSS/pthread-key
+// destructors when pthread_exit() is called on the main thread -- #863).
+// Everything from GIL acquire through vm_eval/teardown is common "run a
+// complete top-level VM execution cycle" setup; only how the two argument
+// registers are populated, and what debugger_run is told argc/argv were,
+// differs between the two callers.
+static int cc_run_at_regs(VirtualMachine *vm, Pc entry, long long a0, long long a1,
+                           int debugger_argc, char **debugger_argv) {
     if (!vm || !vm->text_seg) {
         error("VM not initialized - call cc_compile first");
     }
@@ -2048,10 +2056,11 @@ int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv) {
         memcpy(vm->current_tls_seg, vm->tls_template, vm->tls_template_size);
     }
 
-    // Pass argc/argv via integer argument registers (ENT3 spills these to the
-    // stack frame at bp[-1]/bp[-2], matching the register-based calling convention).
-    vm->regs[REG_A0] = argc;
-    vm->regs[REG_A1] = (long long)argv;
+    // Pass the entry's argument(s) via integer argument registers (ENT3 spills
+    // these to the stack frame at bp[-1]/bp[-2], matching the register-based
+    // calling convention).
+    vm->regs[REG_A0] = a0;
+    vm->regs[REG_A1] = a1;
 
     // Push a sentinel return address (0) so LEV can detect when main returns.
     // Stack layout before main's ENT:  [ret=0] ← sp
@@ -2059,12 +2068,33 @@ int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv) {
     *--vm->sp = 0;
 
     int rc = ((vm->flags & CCCC_ENABLE_DEBUGGER) && !vm->dbg.crash_debug_auto)
-                 ? debugger_run(vm, argc, argv) : vm_eval(vm);
+                 ? debugger_run(vm, debugger_argc, debugger_argv) : vm_eval(vm);
     if (rc == CCCC_HOST_SIGNAL_RC && vm->dbg.host_fault_signal > 0)
         rc = 128 + vm->dbg.host_fault_signal;
     cccc_gil_release(vm);
     cc_running_vm = NULL;
     return rc;
+}
+
+int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv) {
+    return cc_run_at_regs(vm, entry, argc, (long long)argv, argc, argv);
+}
+
+// Runs `entry` with a single pointer argument in REG_A0 (matching a
+// void (*)(void *) signature) -- used to invoke TSS/pthread-key destructors
+// from cccc_pthread_run_main_tss_destructors (src/stdlib/pthread.c) when
+// pthread_exit() is called ON THE MAIN THREAD. That path runs after
+// cc_run_at(main) has already returned -- the GIL is released and there is
+// no live vm_eval on the C stack, so cccc_call_guest_callback's nested-
+// reentry mechanism does not apply (same reasoning as cc_run_atexit_entries
+// just below). If the debugger is enabled, debugger_run is told argc=0/
+// argv=NULL, same as every other non-main cc_run_at caller (ctors/dtors,
+// test functions) -- debugger_run always re-locates "main" internally
+// regardless of what entry point was actually requested, a pre-existing
+// characteristic of every one of those call sites, not something this
+// function changes.
+int cc_run_at1(VirtualMachine *vm, Pc entry, void *arg) {
+    return cc_run_at_regs(vm, entry, (long long)arg, 0, 0, NULL);
 }
 
 // Synchronously invoke a guest function-pointer value from host C code that
@@ -2252,6 +2282,16 @@ int cc_run(VirtualMachine *vm, int argc, char **argv) {
 
     cc_run_init_entries(vm, vm->compiler.ctor_list, vm->compiler.ctor_count);
     int rc = cc_run_at(vm, vm->text_seg[0], argc, argv);
+    // pthread_exit() called on the main thread reaches here the same way a
+    // plain `return` from main() does (wrap_pthread_exit just sets pc =
+    // CCCC_INVALID_PC), but POSIX/glibc DO run TSS/pthread-key destructors
+    // for the former and not the latter -- cccc_pthread_run_main_tss_
+    // destructors (stdlib/pthread.c) tells the two apart via a flag set only
+    // by an actual pthread_exit()/thrd_exit() call, and is a no-op otherwise
+    // (#863). Must run before atexit handlers, matching a real joined
+    // pthread's destructors running at thread-exit time, well before any
+    // later process-level atexit.
+    cccc_pthread_run_main_tss_destructors(vm);
     // atexit handlers and destructors run only on normal return from
     // main(); a guest exit()/_Exit()/abort() bypasses this (see
     // docs/COVERAGE.md) since it calls straight through to the host libc
