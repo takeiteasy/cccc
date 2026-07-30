@@ -447,12 +447,18 @@ BuildTarget *audit_reflection_enums(Builder *ctx) {
 // why) so this step -- pure Python, no cccc binary needed -- keeps them
 // fresh on every default build; reflection_ffi_check below (wired into the
 // test target) catches staleness for any build that skips it.
+//
+// AddInput (#851) declares the real dependency (the source header + the
+// generator script itself) so build_target() can skip re-running the
+// generator when neither has changed since the .inc files were last written.
 [[cccc::build_target]]
 BuildTarget *reflection_ffi_gen(Builder *ctx) {
     BuildTarget *gen = RunCustom(ctx, "reflection-ffi-gen",
         "python3 tools/gen_reflection_ffi.py");
     DeclareOutput(gen, "src/reflection_ffi_protos.inc");
     DeclareOutput(gen, "src/reflection_ffi_register.inc");
+    AddInput(gen, "include/cccc/reflection.h");
+    AddInput(gen, "tools/gen_reflection_ffi.py");
     return gen;
 }
 
@@ -673,6 +679,19 @@ BuildTarget *linux_aarch64_test(Builder *ctx) {
 // enabled for this graph, every source recompiles unconditionally
 // (src/build.c's incremental checks are gated on ctx->cache_dir), so pass 2
 // genuinely picks up whatever pass 1 wrote.
+//
+// AddInput (#851) declares the generator's real inputs -- generate_stdlib.c
+// itself, the regen script, and every embedded header -- so build_target()
+// can report this step "up to date" and skip it when none of them changed.
+// Two things this does NOT buy, worth being honest about: the step still
+// DependsOn(gen, pass1), a full compiler build that recompiles
+// unconditionally without --build-cache, so on the default build skipping
+// the (already fast) regen script itself saves little -- reflection_ffi_gen
+// above is where AddInput's win actually shows up. And regen_stdlib.sh
+// deliberately preserves src/std.c's mtime on a no-change regen, so merely
+// touching a header (without changing its content) makes this step re-run
+// every build until the generated content actually differs -- intended, not
+// a bug in either regen_stdlib.sh or this up-to-date check.
 static BuildTarget *stdlib_regen_step(Builder *ctx, BuildTarget *bt) {
     BuildTarget *pass1 = make_cccc_exe_named(ctx, bt, "cccc-pass1");
     char cmd[512];
@@ -680,6 +699,14 @@ static BuildTarget *stdlib_regen_step(Builder *ctx, BuildTarget *bt) {
     BuildTarget *gen = RunCustom(ctx, "stdlib-regen", cmd);
     DeclareOutput(gen, "src/std.c");
     DependsOn(gen, pass1);
+    AddInput(gen, "tools/generate_stdlib.c");
+    AddInput(gen, "tools/regen_stdlib.sh");
+    const char **hdrs1 = GlobFiles(ctx, "include/*.h");
+    for (int i = 0; hdrs1 && hdrs1[i]; i++)
+        AddInput(gen, hdrs1[i]);
+    const char **hdrs2 = GlobFiles(ctx, "include/*/*.h");
+    for (int i = 0; hdrs2 && hdrs2[i]; i++)
+        AddInput(gen, hdrs2[i]);
     return gen;
 }
 

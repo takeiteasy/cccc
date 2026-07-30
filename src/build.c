@@ -73,12 +73,23 @@ typedef struct Builder Builder;
 struct BuildTarget {
     CcTargetKind kind;
     char *name;
+    StringArray outputs;   // CCCC_TGT_CUSTOM: DeclareOutput() paths, in call order (#851);
+                            // outputs.data[0] (or NULL) is what TargetOutput() returns.
+                            // Kept alongside `output` below rather than replacing it, since
+                            // EXE/STATIC/DYNAMIC/BYTECODE targets still use `output` for
+                            // their single SetOutput() path.
     char *output;          // explicit output path (relative to out_dir) or NULL
     char *command;         // CCCC_TGT_CUSTOM: shell command to run
+    StringArray inputs;    // CCCC_TGT_CUSTOM: AddInput() paths (#851) — declared prerequisites
+                            // used for the "up to date" skip check; NOT invalidation-only
+                            // like DeclareOutput's `outputs` used to be before this.
     char *profile;         // "debug"|"release"|"relwithdebinfo"|"minsizerel", or NULL (#548)
     char *cc_override;     // per-target compiler binary; NULL = use ctx->cross_cc or global (#547)
     char *target_triple;   // per-target cross-compilation triple; NULL = inherit from ctx (#547)
     StringArray sources;
+    StringArray deferred_globs; // AddSourcesGlobDeferred() patterns (#851), expanded at the
+                                // start of build_target() rather than declaration time, so a
+                                // dependency's codegen step can create the matched files first.
     StringArray excludes;  // glob/path patterns excluded from sources (#542)
     StringArray includes;
     StringArray defines;   // "NAME=VALUE" or "NAME"
@@ -435,29 +446,37 @@ static long long impl_set_output(long long t, long long path) {
 //
 // For CCCC_TGT_CUSTOM targets there is no such convention: a RunCustom
 // command can write anywhere (e.g. the stdlib regen writes to the repo's
-// src/std.c, not under out_dir). So a CUSTOM target's output is whatever
-// DeclareOutput() recorded, returned verbatim (not joined onto out_dir); ""
-// if DeclareOutput() was never called.
+// src/std.c, not under out_dir). So a CUSTOM target's output is the *first*
+// path DeclareOutput() recorded (call order, not last-wins — #851 lets
+// DeclareOutput be called more than once, e.g. reflection_ffi_gen's two
+// generated .inc files), returned verbatim (not joined onto out_dir); "" if
+// DeclareOutput() was never called.
 static long long impl_target_output(long long t) {
     BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
     if (!s_ctx)
         error("build: TargetOutput called outside a build run");
-    if (tgt->kind == CCCC_TGT_CUSTOM)
-        return (long long)(intptr_t)builder_intern(s_ctx, xstrdup(tgt->output ? tgt->output : ""));
+    if (tgt->kind == CCCC_TGT_CUSTOM) {
+        const char *first = tgt->outputs.len > 0 ? tgt->outputs.data[0] : "";
+        return (long long)(intptr_t)builder_intern(s_ctx, xstrdup(first));
+    }
     char *path = resolved_target_output(s_ctx, tgt);
     return (long long)(intptr_t)builder_intern(s_ctx, path);
 }
 
-// DeclareOutput: record the path a CCCC_TGT_CUSTOM step produces — taken
+// DeclareOutput: record a path a CCCC_TGT_CUSTOM step produces — taken
 // verbatim (see TargetOutput() above; not joined onto out_dir) — so
-// downstream DependsOn consumers are known to depend on that file (#842).
-// This is invalidation metadata only — it does NOT give the step a "skip if
-// output exists" staleness check.  A CUSTOM target has no `sources`, so
-// "output exists" would be the only test available, and for the stdlib regen
-// specifically the output (src/std.c) always exists once committed; treating
-// that as "up to date" would silently stop the regen from ever running again.
-// Real skip semantics need declared *inputs*, not just an output path — a
-// follow-up (see #842 Step 6 tickets).
+// downstream DependsOn consumers are known to depend on it, and so AddInput
+// (#851, below) has something to check freshness against. May be called
+// more than once (e.g. reflection_ffi_gen's two generated .inc files); each
+// call appends rather than replacing.
+//
+// On its own (no AddInput calls) this is still invalidation metadata only —
+// it does not give the step a "skip if output exists" staleness check. A
+// CUSTOM target has no `sources`, so "output exists" would be the only test
+// available, and for the stdlib regen specifically the output (src/std.c)
+// always exists once committed; treating that as "up to date" would silently
+// stop the regen from ever running again. Real skip semantics need declared
+// *inputs* too — see AddInput below.
 static long long impl_declare_output(long long t, long long path) {
     BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
     if (tgt->kind != CCCC_TGT_CUSTOM) {
@@ -465,8 +484,25 @@ static long long impl_declare_output(long long t, long long path) {
                 tgt->name);
         return 0;
     }
-    free(tgt->output);
-    tgt->output = xstrdup((const char *)path);
+    strarray_push(&tgt->outputs, xstrdup((const char *)path));
+    return 0;
+}
+
+// AddInput: record a path a CCCC_TGT_CUSTOM step reads (#851). RunCustom-only,
+// same diagnostic shape as DeclareOutput. Combined with DeclareOutput, gives
+// build_target() a real "up to date" skip check: if every declared output
+// exists and is at least as new as every declared input, the command is
+// skipped rather than re-run unconditionally. A target with no AddInput
+// calls keeps today's behaviour (always runs) — the check only activates
+// once both inputs and outputs are declared.
+static long long impl_add_input(long long t, long long path) {
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    if (tgt->kind != CCCC_TGT_CUSTOM) {
+        fprintf(stderr, "build: AddInput is only valid on a RunCustom target ('%s' is not one)\n",
+                tgt->name);
+        return 0;
+    }
+    strarray_push(&tgt->inputs, xstrdup((const char *)path));
     return 0;
 }
 
@@ -562,28 +598,52 @@ static long long impl_add_libpath(long long t, long long path) {
 // #542 — source-set ergonomics
 // ============================================================================
 
-// AddSourcesGlob: expand a glob pattern (relative to build root) and add each
-// matched file as a source.  POSIX glob(3) only; on non-POSIX platforms this
-// is a no-op (a future Windows port can use FindFirstFile).
-static long long impl_add_sources_glob(long long t, long long pattern) {
-    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
-    const char *pat = (const char *)pattern;
-    if (!pat || !*pat) return 0;
+// Shared by AddSourcesGlob (declaration-time) and the deferred expansion that
+// AddSourcesGlobDeferred triggers at build_target() start (#851). Expands
+// `pat` (relative to build root) and appends each match to `into`. POSIX
+// glob(3) only; a no-op with a diagnostic on non-POSIX platforms. Matches are
+// returned in sorted order (no GLOB_NOSORT, #851 item 4) so compile order —
+// and therefore --build-verbose output and object-file enumeration order —
+// is reproducible across machines/runs.
+static void glob_into(StringArray *into, const char *pat) {
+    if (!pat || !*pat) return;
 #ifdef _POSIX_VERSION
     glob_t g;
     memset(&g, 0, sizeof(g));
-    int rc = glob(pat, GLOB_NOSORT, NULL, &g);
+    int rc = glob(pat, 0, NULL, &g);
     if (rc == 0) {
         for (size_t i = 0; i < g.gl_pathc; i++)
-            strarray_push(&tgt->sources, xstrdup(g.gl_pathv[i]));
+            strarray_push(into, xstrdup(g.gl_pathv[i]));
     } else if (rc != GLOB_NOMATCH) {
         fprintf(stderr, "build: glob('%s') failed\n", pat);
     }
     globfree(&g);
 #else
-    (void)tgt;
-    fprintf(stderr, "build: AddSourcesGlob not supported on this platform\n");
+    (void)into;
+    fprintf(stderr, "build: glob('%s') not supported on this platform\n", pat);
 #endif
+}
+
+// AddSourcesGlob: expand a glob pattern (relative to build root) and add each
+// matched file as a source, immediately (at declaration time).
+static long long impl_add_sources_glob(long long t, long long pattern) {
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    glob_into(&tgt->sources, (const char *)pattern);
+    return 0;
+}
+
+// AddSourcesGlobDeferred (#851): like AddSourcesGlob, but expansion is
+// deferred to the start of build_target() — after this target's dependencies
+// (e.g. a RunCustom codegen step) have already run — so a pattern can match
+// files a dependency creates during this same build. AddSourcesGlob expands
+// immediately and cannot see such files; count_steps() and the ~70 existing
+// AddSourcesGlob-based tests rely on that immediate timing, so this is a
+// separate API rather than a change to AddSourcesGlob's behaviour.
+static long long impl_add_sources_glob_deferred(long long t, long long pattern) {
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    const char *pat = (const char *)pattern;
+    if (!pat || !*pat) return 0;
+    strarray_push(&tgt->deferred_globs, xstrdup(pat));
     return 0;
 }
 
@@ -1075,8 +1135,11 @@ void cc_load_build_runtime(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__builtin_build_set_output",    (void *)impl_set_output,         2, 0);
     cc_register_cfunc(vm, "__builtin_build_target_output", (void *)impl_target_output,      1, 0);
     cc_register_cfunc(vm, "__builtin_build_declare_output",(void *)impl_declare_output,     2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_input",     (void *)impl_add_input,          2, 0);
     cc_register_cfunc(vm, "__builtin_build_add_source",    (void *)impl_add_source,         2, 0);
     cc_register_cfunc(vm, "__builtin_build_add_sources_glob",(void*)impl_add_sources_glob,  2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_sources_glob_deferred",
+                       (void*)impl_add_sources_glob_deferred,                                2, 0);
     cc_register_cfunc(vm, "__builtin_build_add_source_str",(void *)impl_add_source_str,     3, 0);
     cc_register_cfunc(vm, "__builtin_build_exclude_source",(void *)impl_exclude_source,     2, 0);
     cc_register_cfunc(vm, "__builtin_build_add_include",   (void *)impl_add_include,        2, 0);
@@ -1427,10 +1490,22 @@ static uint64_t fnv1a_file(const char *path, uint64_t h) {
     return h;
 }
 
-// Build a 64-bit cache key from the compile command + source content.
-// Skips the -o <path> pair so the key is output-path-agnostic. Folds in
-// CCCC_HOST_ARCH_TAG so a cross-arch cache/build-dir reuse misses (#730).
-static uint64_t source_cache_key(const char *src, char *const *argv) {
+// Build a 64-bit cache key from the compile command + source content + the
+// content of every header prerequisite in `prereqs` (#851; from a -MMD .d
+// file -- see read_dep_prereqs below). Skips the -o <path> pair so the key
+// is output-path-agnostic. Folds in CCCC_HOST_ARCH_TAG so a cross-arch
+// cache/build-dir reuse misses (#730).
+//
+// `prereqs` may be NULL/empty, but a caller must only do that when no .d
+// file exists yet for this source in this objdir (see compile_sources()'s
+// "header-less key never touches the CAS" rule) -- never to represent "no
+// headers this source happens to include". The CAS (`ctx->cache_dir`) is a
+// *global* content-addressable store shared across objdirs, while `.d`
+// files are per-target/per-objdir; a header-less key computed just because
+// this objdir hasn't compiled the source yet could otherwise collide with
+// (and silently restore) an object some other objdir compiled against
+// different header content.
+static uint64_t source_cache_key(const char *src, char *const *argv, StringArray *prereqs) {
     uint64_t h = CACHE_FNV_OFFSET;
     h = fnv1a_update(h, CCCC_HOST_ARCH_TAG, strlen(CCCC_HOST_ARCH_TAG));
     h = fnv1a_update(h, "\0", 1);
@@ -1439,14 +1514,132 @@ static uint64_t source_cache_key(const char *src, char *const *argv) {
         h = fnv1a_update(h, argv[i], strlen(argv[i]));
         h = fnv1a_update(h, "\0", 1); // arg separator
     }
-    return fnv1a_file(src, h);
+    h = fnv1a_file(src, h);
+    if (prereqs)
+        for (int i = 0; i < prereqs->len; i++)
+            h = fnv1a_file(prereqs->data[i], h);
+    return h;
 }
 
-// Returns 1 if the existing ofile is at least as new as src (mtime fast path).
-static int ofile_is_current(const char *ofile, const char *src) {
+// Read a Makefile-rule dependency file as produced by `-MMD -MF dfile`
+// (#851) and append each prerequisite path listed after the first ':' to
+// `out`. Handles backslash-newline line continuations and backslash-space
+// escaped spaces within a path. Returns 1 if `dfile` existed and was parsed
+// (even with zero prerequisites found), 0 if it does not exist or cannot be
+// read -- callers must treat that as "cannot trust the mtime fast path /
+// cannot safely touch the CAS", not as "this source has zero headers".
+static int read_dep_prereqs(const char *dfile, StringArray *out) {
+    FILE *f = fopen(dfile, "rb");
+    if (!f) return 0;
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return 0; }
+    long size = ftell(f);
+    if (size < 0) { fclose(f); return 0; }
+    rewind(f);
+    char *buf = malloc((size_t)size + 1);
+    if (!buf) { fclose(f); return 0; }
+    size_t n = fread(buf, 1, (size_t)size, f);
+    fclose(f);
+    buf[n] = '\0';
+
+    // Join backslash-newline continuations (and backslash-CRLF) into spaces
+    // so the tokenizer below can treat the whole rule as one line.
+    for (char *p = buf; *p; p++) {
+        if (p[0] == '\\' && p[1] == '\n') {
+            p[0] = ' '; p[1] = ' ';
+        } else if (p[0] == '\\' && p[1] == '\r' && p[2] == '\n') {
+            p[0] = ' '; p[1] = ' '; p[2] = ' ';
+        }
+    }
+
+    // Skip past "target:" -- everything before the first ':' is the rule's
+    // target list (the .o itself), not a prerequisite.
+    char *rest = strchr(buf, ':');
+    if (!rest) { free(buf); return 1; } // malformed/empty .d: zero prereqs
+    rest++;
+
+    char *p = rest;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+        if (!*p) break;
+        char *tok_start = p;
+        char *w = p; // collapses escaped "\ " -> " " in place as we scan
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+            if (p[0] == '\\' && p[1] == ' ') {
+                *w++ = ' ';
+                p += 2;
+            } else {
+                *w++ = *p++;
+            }
+        }
+        // Copy out [tok_start, w) rather than NUL-terminating in place at
+        // `w`: when there was no escape, w == p, and writing '\0' there
+        // would clobber the delimiter char `p` is sitting on -- the outer
+        // loop's `while (*p)` would then see that NUL and stop scanning
+        // early, silently dropping every prerequisite after the first.
+        size_t toklen = (size_t)(w - tok_start);
+        if (toklen > 0) {
+            char *tok = malloc(toklen + 1);
+            if (tok) {
+                memcpy(tok, tok_start, toklen);
+                tok[toklen] = '\0';
+                strarray_push(out, tok);
+            }
+        }
+    }
+    free(buf);
+    return 1;
+}
+
+// Returns 1 if the existing ofile is at least as new as src AND at least as
+// new as every header prerequisite recorded in dfile (#851). No .d on disk
+// => not current: a first build, or an objdir compiled before this .d
+// tracking existed, must not be trusted by mtime alone once header tracking
+// is available -- this self-heals a stale objdir on its next build.
+static int ofile_is_current(const char *ofile, const char *src, const char *dfile) {
     struct stat o_st, s_st;
     if (stat(ofile, &o_st) != 0 || stat(src, &s_st) != 0) return 0;
-    return o_st.st_mtime >= s_st.st_mtime;
+    if (o_st.st_mtime < s_st.st_mtime) return 0;
+
+    StringArray prereqs = {0};
+    if (!read_dep_prereqs(dfile, &prereqs)) {
+        free_strarray(&prereqs);
+        return 0;
+    }
+    int current = 1;
+    for (int i = 0; i < prereqs.len; i++) {
+        struct stat h_st;
+        if (stat(prereqs.data[i], &h_st) != 0 || o_st.st_mtime < h_st.st_mtime) {
+            current = 0;
+            break;
+        }
+    }
+    free_strarray(&prereqs);
+    return current;
+}
+
+// AddInput/DeclareOutput "up to date" check for a CCCC_TGT_CUSTOM target
+// (#851). Requires at least one declared input AND one declared output —
+// a target with neither (today's default) always runs, as before. Every
+// output must exist and be at least as new as every input (>=, matching
+// ofile_is_current(): a fresh checkout gives inputs and committed outputs
+// near-identical mtimes, and a strict > would make a target like
+// reflection_ffi_gen re-run on every build).
+static int custom_target_is_current(const BuildTarget *t) {
+    if (t->inputs.len == 0 || t->outputs.len == 0)
+        return 0;
+    for (int i = 0; i < t->outputs.len; i++) {
+        struct stat o_st;
+        if (stat(t->outputs.data[i], &o_st) != 0)
+            return 0;
+        for (int j = 0; j < t->inputs.len; j++) {
+            struct stat in_st;
+            if (stat(t->inputs.data[j], &in_st) != 0)
+                return 0;
+            if (o_st.st_mtime < in_st.st_mtime)
+                return 0;
+        }
+    }
+    return 1;
 }
 
 // Per-target arch stamp (<objdir>/.cccc-arch): guards the Level 1 mtime fast
@@ -1473,6 +1666,68 @@ static void arch_stamp_write(const char *objdir) {
     if (!f) return;
     fputs(CCCC_HOST_ARCH_TAG, f);
     fclose(f);
+}
+
+// ============================================================================
+// Link-step staleness (#851)
+// ============================================================================
+// The compile-object cache above (Levels 1/2) had no equivalent at the
+// link/archive step: only kind=bytecode targets got any incremental check
+// (bytecode_output_is_current). A native EXE/STATIC/DYNAMIC target relinked
+// unconditionally every build even when every .o and the link command line
+// were unchanged. Gated on ctx->cache_dir, matching Levels 1/2 -- without
+// --build-cache, build.c's two-pass stdlib comment explicitly relies on
+// every step rebuilding unconditionally, and an ungated link check would
+// break that invariant.
+
+// Hash the link/archive argv (skipping the -o <path> pair, like
+// source_cache_key), so a flag change is detected even when no object file
+// did.
+static uint64_t link_argv_hash(char *const *argv) {
+    uint64_t h = CACHE_FNV_OFFSET;
+    for (int i = 0; argv[i]; i++) {
+        if (strcmp(argv[i], "-o") == 0) { i++; continue; }
+        h = fnv1a_update(h, argv[i], strlen(argv[i]));
+        h = fnv1a_update(h, "\0", 1);
+    }
+    return h;
+}
+
+static int link_stamp_matches(const char *tobjdir, uint64_t hash) {
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/.cccc-link", tobjdir);
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    char buf[32] = {0};
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) buf[--n] = '\0';
+    return strtoull(buf, NULL, 16) == hash;
+}
+
+static void link_stamp_write(const char *tobjdir, uint64_t hash) {
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/.cccc-link", tobjdir);
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    fprintf(f, "%016llx", (unsigned long long)hash);
+    fclose(f);
+}
+
+// Returns 1 if out_abs exists, is at least as new as every object in
+// obj_paths[0..obj_count), and the link argv hash matches the stamp written
+// after the last successful link/archive step.
+static int link_output_is_current(const char *out_abs, char *const *obj_paths,
+                                   int obj_count, char *const *argv,
+                                   const char *tobjdir) {
+    struct stat out_st;
+    if (stat(out_abs, &out_st) != 0) return 0;
+    for (int i = 0; i < obj_count; i++) {
+        struct stat o_st;
+        if (stat(obj_paths[i], &o_st) != 0 || out_st.st_mtime < o_st.st_mtime)
+            return 0;
+    }
+    return link_stamp_matches(tobjdir, link_argv_hash(argv));
 }
 
 // CAS layout: <cache_dir>/<key[0:2]>/<key_hex><ext>
@@ -1650,6 +1905,26 @@ static uint64_t bytecode_target_cache_key(char *const *argv, StringArray *srcs) 
     return h;
 }
 
+// Build the argv for compiling a single source, including -MMD/-MF header
+// tracking (#851). Shared by the lookup-key, actual-invocation, and
+// store-key call sites below so all three always agree on exactly the same
+// command line (source_cache_key skips the -o pair, so -MF's argument does
+// not need the same treatment).
+static void build_compile_argv(ArgVec *a, StringArray *owned, Builder *ctx,
+                                const char *cc, BuildTarget *t,
+                                const char *src, const char *ofile,
+                                const char *dfile) {
+    argv_push(a, cc);
+    argv_push(a, "-c");
+    argv_push(a, src);
+    argv_push(a, "-o");
+    argv_push(a, ofile);
+    argv_push(a, "-MMD");
+    argv_push(a, "-MF");
+    argv_push(a, dfile);
+    push_compile_flags(a, ctx, t, owned);
+}
+
 // Compile one target's sources to object files; collect the .o paths in `objs`.
 // Sources matching the target's exclude list are silently skipped.
 // Returns 0 on success.
@@ -1671,7 +1946,11 @@ static int compile_sources(Builder *ctx, const char *cc,
     int jobs = ctx->jobs > 1 ? ctx->jobs : 1;
     if (jobs > 1 && !ctx->dry_run) {
         // Parallel pid pool: launch up to `jobs` cc -c children at once.
-        typedef struct { pid_t pid; char *ofile; uint64_t cache_key; } Job;
+        // No cache key is precomputed into the pool slot (#851): the
+        // store-time key must be built from the .d THIS compile just wrote,
+        // not from whatever .d (if any) existed beforehand, so it is
+        // recomputed at reap time from `src`/`ofile`/`dfile`.
+        typedef struct { pid_t pid; char *ofile; char *dfile; const char *src; } Job;
         Job *pool = calloc(jobs, sizeof(Job));
         if (!pool) goto serial_fallback;
 
@@ -1691,14 +1970,33 @@ static int compile_sources(Builder *ctx, const char *cc,
                         fprintf(stderr, "build: compile failed (exit %d)\n", exit_code);
                         any_failed = 1;
                         free(pool[j].ofile);
+                        free(pool[j].dfile);
                     } else {
-                        if (ctx->cache_dir)
-                            cache_store(ctx->cache_dir, pool[j].cache_key, pool[j].ofile, ".o");
+                        // Level 2 store (#851): key from the .d this compile
+                        // JUST wrote. Skip storing (rather than store under a
+                        // header-less key) if somehow no .d resulted.
+                        if (ctx->cache_dir) {
+                            StringArray post = {0};
+                            if (read_dep_prereqs(pool[j].dfile, &post)) {
+                                StringArray o2 = {0};
+                                ArgVec a2 = {0};
+                                build_compile_argv(&a2, &o2, ctx, cc, t, pool[j].src,
+                                                   pool[j].ofile, pool[j].dfile);
+                                uint64_t skey = source_cache_key(pool[j].src,
+                                    (char *const *)a2.data, &post);
+                                cache_store(ctx->cache_dir, skey, pool[j].ofile, ".o");
+                                free(a2.data);
+                                free_strarray(&o2);
+                            }
+                            free_strarray(&post);
+                        }
                         strarray_push(objs, pool[j].ofile); // transfer ownership
+                        free(pool[j].dfile);
                     }
                     pool[j].pid = 0;
                     pool[j].ofile = NULL;
-                    pool[j].cache_key = 0;
+                    pool[j].dfile = NULL;
+                    pool[j].src = NULL;
                     in_flight--;
                     break;
                 }
@@ -1708,15 +2006,18 @@ static int compile_sources(Builder *ctx, const char *cc,
             if (source_is_excluded(t, t->sources.data[i])) continue;
             if (any_failed) continue; // drain remaining, don't launch more
 
-            char *stem = stem_of(t->sources.data[i]);
-            char ofile[1024];
+            const char *src = t->sources.data[i];
+            char *stem = stem_of(src);
+            char ofile[1024], dfile[1024];
             snprintf(ofile, sizeof(ofile), "%s/%s.o", objdir, stem);
+            snprintf(dfile, sizeof(dfile), "%s/%s.d", objdir, stem);
             free(stem);
 
-            // Level 1: mtime check — skip recompile when ofile is up to date.
-            if (ctx->cache_dir && arch_ok && ofile_is_current(ofile, t->sources.data[i])) {
+            // Level 1: mtime check — skip recompile when ofile (and every
+            // header prerequisite recorded in dfile) is up to date.
+            if (ctx->cache_dir && arch_ok && ofile_is_current(ofile, src, dfile)) {
                 if (!ctx->quiet || ctx->verbose)
-                    printf("[%d/%d] (cached) %s\n", ++(*step), total, t->sources.data[i]);
+                    printf("[%d/%d] (cached) %s\n", ++(*step), total, src);
                 else
                     ++(*step);
                 strarray_push(objs, xstrdup(ofile));
@@ -1724,27 +2025,33 @@ static int compile_sources(Builder *ctx, const char *cc,
             }
 
             ArgVec a = {0};
-            argv_push(&a, cc);
-            argv_push(&a, "-c");
-            argv_push(&a, t->sources.data[i]);
-            argv_push(&a, "-o");
-            argv_push(&a, ofile);
-            push_compile_flags(&a, ctx, t, &owned);
+            build_compile_argv(&a, &owned, ctx, cc, t, src, ofile, dfile);
 
-            // Level 2: content-hash CAS lookup — restore from cache if key matches.
-            uint64_t ckey = 0;
+            // Level 2: content-hash CAS lookup — restore from cache if key
+            // matches. Only attempted when a .d already exists for this
+            // source in THIS objdir: a header-less key must never touch the
+            // CAS (see source_cache_key's comment) since a fresh objdir
+            // sharing a global --build-cache would otherwise "hit" an
+            // object some other objdir compiled against different headers.
+            StringArray prereqs = {0};
+            int have_dfile = 0;
             if (ctx->cache_dir) {
-                ckey = source_cache_key(t->sources.data[i], (char *const *)a.data);
-                if (cache_lookup(ctx->cache_dir, ckey, ofile, ".o")) {
+                have_dfile = read_dep_prereqs(dfile, &prereqs);
+                if (have_dfile &&
+                    cache_lookup(ctx->cache_dir,
+                        source_cache_key(src, (char *const *)a.data, &prereqs),
+                        ofile, ".o")) {
                     if (!ctx->quiet || ctx->verbose)
-                        printf("[%d/%d] (cached) %s\n", ++(*step), total, t->sources.data[i]);
+                        printf("[%d/%d] (cached) %s\n", ++(*step), total, src);
                     else
                         ++(*step);
                     free(a.data);
+                    free_strarray(&prereqs);
                     strarray_push(objs, xstrdup(ofile));
                     continue;
                 }
             }
+            free_strarray(&prereqs);
 
             if (!ctx->quiet || ctx->verbose) {
                 print_cmd(++(*step), total, (char *const *)a.data);
@@ -1770,7 +2077,8 @@ static int compile_sources(Builder *ctx, const char *cc,
                 if (pool[j].pid == 0) {
                     pool[j].pid = pid;
                     pool[j].ofile = xstrdup(ofile);
-                    pool[j].cache_key = ckey;
+                    pool[j].dfile = xstrdup(dfile);
+                    pool[j].src = src; // alias into t->sources; stable for this call
                     in_flight++;
                     break;
                 }
@@ -1789,16 +2097,19 @@ serial_fallback:;
     for (int i = 0; i < t->sources.len && rc == 0; i++) {
         if (source_is_excluded(t, t->sources.data[i]))
             continue;
-        char *stem = stem_of(t->sources.data[i]);
-        char ofile[1024];
+        const char *src = t->sources.data[i];
+        char *stem = stem_of(src);
+        char ofile[1024], dfile[1024];
         snprintf(ofile, sizeof(ofile), "%s/%s.o", objdir, stem);
+        snprintf(dfile, sizeof(dfile), "%s/%s.d", objdir, stem);
         free(stem);
 
-        // Level 1: mtime check — skip recompile when ofile is up to date.
+        // Level 1: mtime check — skip recompile when ofile (and every header
+        // prerequisite recorded in dfile) is up to date.
         if (ctx->cache_dir && !ctx->dry_run && arch_ok &&
-            ofile_is_current(ofile, t->sources.data[i])) {
+            ofile_is_current(ofile, src, dfile)) {
             if (!ctx->quiet || ctx->verbose)
-                printf("[%d/%d] (cached) %s\n", ++(*step), total, t->sources.data[i]);
+                printf("[%d/%d] (cached) %s\n", ++(*step), total, src);
             else
                 ++(*step);
             strarray_push(objs, xstrdup(ofile));
@@ -1806,32 +2117,48 @@ serial_fallback:;
         }
 
         ArgVec a = {0};
-        argv_push(&a, cc);
-        argv_push(&a, "-c");
-        argv_push(&a, t->sources.data[i]);
-        argv_push(&a, "-o");
-        argv_push(&a, ofile);
-        push_compile_flags(&a, ctx, t, &owned);
+        build_compile_argv(&a, &owned, ctx, cc, t, src, ofile, dfile);
 
-        // Level 2: content-hash CAS lookup (skipped in dry-run).
-        uint64_t ckey = 0;
+        // Level 2: content-hash CAS lookup (skipped in dry-run, and skipped
+        // — not treated as a miss under a header-less key — when no .d
+        // exists yet for this source in this objdir; see the parallel path's
+        // comment above for why).
+        StringArray prereqs = {0};
+        int have_dfile = 0;
         if (ctx->cache_dir && !ctx->dry_run) {
-            ckey = source_cache_key(t->sources.data[i], (char *const *)a.data);
-            if (cache_lookup(ctx->cache_dir, ckey, ofile, ".o")) {
+            have_dfile = read_dep_prereqs(dfile, &prereqs);
+            if (have_dfile &&
+                cache_lookup(ctx->cache_dir,
+                    source_cache_key(src, (char *const *)a.data, &prereqs),
+                    ofile, ".o")) {
                 if (!ctx->quiet || ctx->verbose)
-                    printf("[%d/%d] (cached) %s\n", ++(*step), total, t->sources.data[i]);
+                    printf("[%d/%d] (cached) %s\n", ++(*step), total, src);
                 else
                     ++(*step);
                 free(a.data);
+                free_strarray(&prereqs);
                 strarray_push(objs, xstrdup(ofile));
                 continue;
             }
         }
+        free_strarray(&prereqs);
 
         rc = run_step(ctx, ++(*step), total, &a, t);
+        if (rc == 0 && ctx->cache_dir) {
+            // Store-time key (#851): from the .d THIS compile just wrote,
+            // not from whatever (if anything) existed before it — see
+            // build_compile_argv's comment. Must run before free(a.data)
+            // below since source_cache_key reads the argv. Skip storing if
+            // no .d resulted (e.g. dry-run never reaches here since rc
+            // short-circuits to 0 above without invoking the compiler).
+            StringArray post = {0};
+            if (read_dep_prereqs(dfile, &post))
+                cache_store(ctx->cache_dir,
+                    source_cache_key(src, (char *const *)a.data, &post),
+                    ofile, ".o");
+            free_strarray(&post);
+        }
         free(a.data);
-        if (rc == 0 && ctx->cache_dir)
-            cache_store(ctx->cache_dir, ckey, ofile, ".o");
         strarray_push(objs, xstrdup(ofile));
     }
     free_strarray(&owned);
@@ -1943,13 +2270,34 @@ static void mark_bytecode_folded_deps(BuildTarget *dep, int for_exe) {
 
 // Build a single target (its sources already; deps assumed built).  Returns 0 ok.
 // `cc` is the global fallback CC; per-target and cross_cc overrides are applied
-// inside this function via effective_cc_for_target.
+// inside this function via effective_cc_for_target. `total_p` is a pointer
+// (not a plain int) because deferred-glob expansion below (#851) can grow the
+// step count for THIS target after count_steps() already ran; every other use
+// in this function reads it once into a local `total` since the count is
+// stable for the rest of the call.
 static int build_target(Builder *ctx, const char *cc,
-                        BuildTarget *t, int *step, int total) {
+                        BuildTarget *t, int *step, int *total_p) {
     // Bytecode-library targets are folded into their bytecode dependent's single
     // cccc invocation and must not be built standalone (#563).
     if (t->bytecode_folded)
         return 0;
+
+    // AddSourcesGlobDeferred (#851): expand now, after this target's deps
+    // (e.g. a RunCustom codegen step) have already been built, so a pattern
+    // can match files a dependency just created. Only native EXE/STATIC/
+    // DYNAMIC targets bill one step per source (compile_sources()); bytecode
+    // targets fold all their sources into a single cccc invocation and
+    // CUSTOM targets have no sources at all, so the step count only grows
+    // for the native case.
+    if (t->deferred_globs.len > 0) {
+        int before = t->sources.len;
+        for (int i = 0; i < t->deferred_globs.len; i++)
+            glob_into(&t->sources, t->deferred_globs.data[i]);
+        int added = t->sources.len - before;
+        if (added > 0 && t->kind != CCCC_TGT_CUSTOM && t->kind != CCCC_TGT_BYTECODE)
+            *total_p += added;
+    }
+    int total = *total_p;
 
     if (ctx->verbose) {
         const char *kind_str = t->kind == CCCC_TGT_EXE      ? "executable"
@@ -1970,6 +2318,19 @@ static int build_target(Builder *ctx, const char *cc,
     // Custom steps: run the shell command and return its exit code.
     if (t->kind == CCCC_TGT_CUSTOM) {
         if (t->command && *t->command) {
+            // #851: skip a declared-current step (AddInput + DeclareOutput
+            // both present, every output at least as new as every input).
+            // Not gated on ctx->cache_dir — this is declared intent from the
+            // build script, not a heuristic like the compile-object cache.
+            // Dry-run always prints the plain (custom) line unconditionally,
+            // matching pre-#851 output byte-for-byte, since a dry run must
+            // not depend on whether AddInput/DeclareOutput happen to be wired
+            // up for a given target.
+            if (!ctx->dry_run && custom_target_is_current(t)) {
+                printf("[%d/%d] (up to date) %s\n", ++(*step), total, t->name);
+                fflush(stdout);
+                return 0;
+            }
             printf("[%d/%d] (custom) %s\n", ++(*step), total, t->command);
             fflush(stdout);
             if (ctx->dry_run)
@@ -2199,6 +2560,10 @@ static int build_target(Builder *ctx, const char *cc,
     if (rc != 0) {
         goto done;
     }
+    // Snapshot the real object count before either branch below reuses
+    // `objs` as a scratch owner pool for "-l<dep>" strings (#851): the
+    // link-staleness mtime check must only stat actual .o files.
+    int n_real_objs = objs.len;
 
     if (t->kind == CCCC_TGT_STATIC) {
         char *ar = cccc_find_native_tool("ar");
@@ -2209,7 +2574,21 @@ static int build_target(Builder *ctx, const char *cc,
         argv_push(&a, out_abs);
         for (int i = 0; i < objs.len; i++)
             argv_push(&a, objs.data[i]);
-        rc = run_step(ctx, ++(*step), total, &a, t);
+        // Link-step staleness check (#851): skip re-archiving when the .a is
+        // already newer than every .o and the ar argv is unchanged.
+        if (ctx->cache_dir && !ctx->dry_run &&
+            link_output_is_current(out_abs, objs.data, n_real_objs,
+                                    (char *const *)a.data, tobjdir)) {
+            if (!ctx->quiet || ctx->verbose)
+                printf("[%d/%d] (up to date) %s\n", ++(*step), total, t->name);
+            else
+                ++(*step);
+            rc = 0;
+        } else {
+            rc = run_step(ctx, ++(*step), total, &a, t);
+            if (rc == 0 && ctx->cache_dir && !ctx->dry_run)
+                link_stamp_write(tobjdir, link_argv_hash((char *const *)a.data));
+        }
         free(a.data);
         free(ar);
     } else {
@@ -2255,7 +2634,21 @@ static int build_target(Builder *ctx, const char *cc,
         }
         for (int i = 0; i < t->ldflags.len; i++)
             argv_push(&a, t->ldflags.data[i]);
-        rc = run_step(ctx, ++(*step), total, &a, t);
+        // Link-step staleness check (#851): skip relinking when out_abs is
+        // already newer than every .o and the link argv is unchanged.
+        if (ctx->cache_dir && !ctx->dry_run &&
+            link_output_is_current(out_abs, objs.data, n_real_objs,
+                                    (char *const *)a.data, tobjdir)) {
+            if (!ctx->quiet || ctx->verbose)
+                printf("[%d/%d] (up to date) %s\n", ++(*step), total, t->name);
+            else
+                ++(*step);
+            rc = 0;
+        } else {
+            rc = run_step(ctx, ++(*step), total, &a, t);
+            if (rc == 0 && ctx->cache_dir && !ctx->dry_run)
+                link_stamp_write(tobjdir, link_argv_hash((char *const *)a.data));
+        }
         free(a.data);
         free_strarray(&owned);
         free(libdir);
@@ -2448,7 +2841,7 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
             if (!stop_dispatch && ready_count == 1 && in_flight == 0) {
                 for (int i = 0; i < n; i++) {
                     if (!target_is_ready(order[i])) continue;
-                    if (build_target(ctx, cc, order[i], &step, total) != 0) {
+                    if (build_target(ctx, cc, order[i], &step, &total) != 0) {
                         fprintf(stderr, "build: target '%s' failed%s\n",
                                 order[i]->name,
                                 ctx->keep_going ? ", continuing" : "");
@@ -2483,7 +2876,7 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
                         ctx->jobs = 1;
                         int local_step = 0;
                         int local_total = count_steps(&order[i], 1);
-                        int rc = build_target(ctx, cc, order[i], &local_step, local_total);
+                        int rc = build_target(ctx, cc, order[i], &local_step, &local_total);
                         fflush(stdout); fflush(stderr);
                         _exit(rc == 0 ? 0 : 1);
                     }
@@ -2554,7 +2947,7 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
     {
         // Serial path: jobs==1, dry-run, or non-POSIX.
         for (int i = 0; i < n; i++) {
-            if (build_target(ctx, cc, order[i], &step, total) != 0) {
+            if (build_target(ctx, cc, order[i], &step, &total) != 0) {
                 fprintf(stderr, "build: target '%s' failed%s\n", order[i]->name,
                         ctx->keep_going ? ", continuing" : "");
                 if (failed_names)
@@ -2640,6 +3033,9 @@ static void free_target(BuildTarget *t) {
     free(t->profile);
     free(t->cc_override);
     free(t->target_triple);
+    free_strarray(&t->outputs);
+    free_strarray(&t->inputs);
+    free_strarray(&t->deferred_globs);
     free_strarray(&t->sources);
     free_strarray(&t->excludes);
     free_strarray(&t->includes);

@@ -98,7 +98,7 @@ cccc --build build.c --build-cache=~/.cache/cccc  # incremental builds with expl
 | `--build-verbose` | off | Print a per-target header (`>> target 'name' [kind, N source(s)]`) before each target and show all command lines. Overrides `--build-quiet`. `-v` also enables this. |
 | `--build-list-targets` | off | Print the names of all `[[cccc::build_target]]` factory functions (one per line) and exit without running the build entry. |
 | `--build-profile=NAME` | (none) | Set a global build profile for all targets: `debug`, `release`, `relwithdebinfo`, or `minsizerel`. Individual targets can override with `SetProfile`. |
-| `--build-cache[=PATH]` | (off) | Enable incremental builds. Two-level strategy: (1) mtime fast path — skips recompile when the existing output is newer than all sources, gated by a per-target host-architecture stamp (see below); (2) content-hash CAS — on a mtime miss, looks up `hash(host-arch + source_content + compile_flags)` in a content-addressable store and restores the cached output without recompiling. Native targets cache at per-source (`.o`) granularity; bytecode targets cache at per-target granularity (all sources hashed together) and are not arch-tagged, since `.c4` bytecode is portable across same-OS architectures. Outputs compiled fresh are stored in the CAS for future reuse. Default cache directory: `<out-dir>/.cccc-cache`. Pass `=PATH` to use a shared or cross-build cache directory — for genuine cross-compiles the target triple set via `--build-cc`/`--build-triple` is folded into the compile flags and thus the key; for two *native* builds of different host architectures sharing an out-dir (e.g. arm64 and Rosetta x86_64 macOS binaries), a per-target arch stamp (`<out-dir>/obj/<target>/.cccc-arch`) additionally invalidates the mtime fast path on a host-arch change, so a build dir reused across architectures always recompiles instead of linking mismatched objects. |
+| `--build-cache[=PATH]` | (off) | Enable incremental builds. Two-level strategy: (1) mtime fast path — skips recompile when the existing output is newer than all sources *and* every header prerequisite recorded by `-MMD` (#851, see "Incremental builds and header dependencies" below), gated by a per-target host-architecture stamp (see below); (2) content-hash CAS — on a mtime miss, looks up `hash(host-arch + source_content + header_content + compile_flags)` in a content-addressable store and restores the cached output without recompiling. Native targets cache at per-source (`.o`) granularity, plus a separate link/archive-step check (#851); bytecode targets cache at per-target granularity (all sources hashed together) and are not arch-tagged, since `.c4` bytecode is portable across same-OS architectures. Outputs compiled fresh are stored in the CAS for future reuse. Default cache directory: `<out-dir>/.cccc-cache`. Pass `=PATH` to use a shared or cross-build cache directory — for genuine cross-compiles the target triple set via `--build-cc`/`--build-triple` is folded into the compile flags and thus the key; for two *native* builds of different host architectures sharing an out-dir (e.g. arm64 and Rosetta x86_64 macOS binaries), a per-target arch stamp (`<out-dir>/obj/<target>/.cccc-arch`) additionally invalidates the mtime fast path on a host-arch change, so a build dir reused across architectures always recompiles instead of linking mismatched objects. |
 | `--build-option=KEY=VALUE` | (none) | Pass a typed build option to the build script. Queried via `GetBuildOption(ctx, key)` / `HaveBuildOption(ctx, key)`. Repeated flags accumulate. (#559) |
 | `--build-install` | off | After a successful build, copy artifacts registered with `InstallArtifact` to the install prefix. Default prefix: `PREFIX` env var or `/usr/local`. (#560) |
 | `-- [args...]` | (none) | Positional arguments forwarded to the build entry. Accessible via `BuildArgc(ctx)` / `BuildArgv(ctx, i)`. (#558) |
@@ -585,12 +585,30 @@ kind-appropriate default (`bin/<name>`, `lib/lib<name>.a`, ...). A
 `RunCustom` target has no such convention (its command can write anywhere,
 e.g. straight into the source tree), so `TargetOutput()` on one returns
 whatever **`DeclareOutput(t, path)`** recorded — verbatim, not joined onto
-`out_dir` — or `""` if `DeclareOutput()` was never called.
+`out_dir` — or `""` if `DeclareOutput()` was never called. `DeclareOutput`
+may be called more than once on the same target (e.g. a codegen step that
+produces two files); `TargetOutput()` returns the **first** one recorded.
 
-`DeclareOutput()` is invalidation metadata only: it does **not** give a
-`RunCustom` step a "skip if output exists" staleness check (it has no
-declared *inputs* to check the output's freshness against — a `RunCustom`
-step still runs every build).
+**`AddInput(t, path)`** (#851) records a file a `RunCustom` step reads.
+Combined with `DeclareOutput`, this gives `build_target()` a real "up to
+date" skip check: if the target has at least one declared input and one
+declared output, and every output exists and is at least as new as every
+input, the command is skipped — printed as `(up to date)` rather than
+`(custom)`. A target with no `AddInput` calls keeps the old behavior
+(always runs); this check is **not** gated on `--build-cache` since it
+reflects the build script's own declared intent, not a heuristic cache:
+
+```c
+BuildTarget *gen = RunCustom(ctx, "gen-api",
+    "python3 tools/gen_api.py include/api.h > gen/api.inc");
+AddInput(gen, "include/api.h");
+AddInput(gen, "tools/gen_api.py");
+DeclareOutput(gen, "gen/api.inc");
+```
+
+Without `AddInput`, `DeclareOutput()` alone is invalidation metadata only —
+it just lets `TargetOutput()` resolve a path for downstream consumers; the
+step still runs every build.
 
 **`SetTargetEnv(t, name, value)`** sets an environment variable for `t`'s
 compiler/linker child process only — e.g. `AFL_USE_ASAN=1` for a target
@@ -610,11 +628,28 @@ args...` inside a `RunCustom` command instead.
 ### Source-set ergonomics (#542)
 
 **`AddSourcesGlob(t, pattern)`** expands a POSIX `glob(3)` pattern relative to
-the current working directory and adds each match as a source file:
+the current working directory and adds each match as a source file,
+**immediately** — at the point this call is made, before the rest of the
+build entry runs. Matches are returned in sorted order (deterministic across
+machines/runs — #851):
 
 ```c
 AddSourcesGlob(lib, "src/lib/**/*.c");    // all .c under src/lib/
 AddSourcesGlob(app, "src/platform/*.c");  // platform-specific sources
+```
+
+**`AddSourcesGlobDeferred(t, pattern)`** (#851) is the same expansion, but
+deferred to `build_target()` time — after `t`'s dependencies (e.g. a
+`RunCustom` codegen step) have already run. Use this when a pattern needs to
+match a file a dependency creates during this same build; `AddSourcesGlob`
+expands too early to see it:
+
+```c
+BuildTarget *gen = RunCustom(ctx, "gen-sources",
+    "python3 tools/codegen.py --out-dir gen/sources");
+BuildTarget *app = Executable(ctx, "app");
+AddSourcesGlobDeferred(app, "gen/sources/*.c"); // doesn't exist yet at this line
+DependsOn(app, gen);
 ```
 
 **`ExcludeSource(t, pattern)`** removes sources matching an `fnmatch` glob
@@ -634,6 +669,41 @@ generation:
 AddSourceStr(core, "version.c",
     "const char *version(void) { return \"1.0\"; }\n");
 ```
+
+### Incremental builds and header dependencies (#851)
+
+Under `--build-cache`, every native compile also gets `-MMD -MF
+<objdir>/<stem>.d`, giving the incremental cache visibility into headers a
+source `#include`s — not just the `.c`/`.cpp` file itself:
+
+- **Level 1 (mtime).** An existing `.o` is only considered current if it is
+  at least as new as its source **and** every header prerequisite listed in
+  its `.d`. A source with no `.d` yet (a first build, or an objdir from
+  before this tracking existed) is never trusted by mtime alone — it
+  self-heals on its next build rather than silently serving a stale object.
+- **Level 2 (content-hash CAS).** The cache key folds in the *content* of
+  every header prerequisite, not just the `.c` file's — a header edit that
+  doesn't happen to change the source's own mtime relationship still
+  produces a different key. Crucially, a source **with no `.d` file present
+  in its objdir never touches the CAS at all** (neither lookup nor store):
+  `--build-cache=PATH` is a *global* content-addressable store shared across
+  every objdir that points at it, while `.d` files are per-objdir, so a
+  fresh objdir sharing a warm cache could otherwise "hit" an object some
+  other objdir compiled against different header content. The very first
+  compile of a source in a given objdir always runs for real and stores
+  under the key computed from the `.d` it just wrote.
+- **Link/archive-step staleness.** The link (`cc -o ...`) or archive (`ar
+  rcs ...`) step is skipped — reported as `(up to date) <target>` — when the
+  output already exists, is at least as new as every object file, and an
+  argv hash stamped in the objdir (`<objdir>/.cccc-link`) matches the
+  current link command line. Before this, only `kind=bytecode` targets had
+  any incremental check at the link step; a native EXE/STATIC/DYNAMIC
+  target relinked unconditionally every build even when nothing changed.
+
+All of this is gated on `ctx->cache_dir` (i.e. `--build-cache` must be
+passed) — without it, every step rebuilds unconditionally, which the
+two-pass stdlib regeneration in `build.c` explicitly relies on (see its
+`stdlib_regen_step` comment).
 
 ### Environment and filesystem
 
@@ -972,6 +1042,17 @@ AddSourcesGlob(core, "src/*.c");
 LinkWith(app, core);    // app gets -lcore (ordinary link dep)
 ```
 
+Add `AddInput`/`DeclareOutput` (see "Referencing a target's own output"
+above) to let a `RunCustom` step skip itself once its declared inputs stop
+changing, instead of re-running on every build:
+
+```c
+BuildTarget *gen = RunCustom(ctx, "gen-headers",
+    "python3 tools/gen.py > include/gen.h");
+AddInput(gen, "tools/gen.py");
+DeclareOutput(gen, "include/gen.h");
+```
+
 ### Cross-compilation (#547)
 
 Two mechanisms let a build script target a different architecture or OS than the
@@ -1178,8 +1259,13 @@ a self-hosting `build.c` at Makefile parity (#549, #842) — see
 path, `SetTargetEnv` for per-target compiler-child environment variables,
 and a duplicate-target-name diagnostic (#842),
 `__CCCC_BUILD_MODE__` / `__CCCC_TEST_MODE__` / `__CCCC_COMP_MODE__` predefined
-mode macros (#575), and `#include [[cccc::build]]` / `#include [[cccc::test]]`
-conditional include directives (#570).
+mode macros (#575), `#include [[cccc::build]]` / `#include [[cccc::test]]`
+conditional include directives (#570), and, from #851:
+`AddSourcesGlobDeferred` for glob expansion deferred to build time,
+`AddInput` giving `RunCustom` targets a real "up to date" skip check,
+multiple `DeclareOutput` calls per target, `-MMD`/`.d` header-dependency
+tracking folded into both the mtime and content-hash cache levels, and a
+link/archive-step staleness check.
 
 ## See also
 

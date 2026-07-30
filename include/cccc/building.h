@@ -90,21 +90,36 @@ void __builtin_build_set_output(BuildTarget *t, const char *path);
  *            hardcoding a path. For EXE/STATIC/DYNAMIC/BYTECODE targets this
  *            is @c \<out_dir\>/\<path\> — the explicit @c SetOutput() path if
  *            given, else the kind-appropriate default (@c bin/\<name\>,
- *            @c lib/lib\<name\>.a, ...). For a @c RunCustom target it is
- *            whatever @c DeclareOutput() recorded, returned verbatim (@b not
- *            joined onto @c out_dir, since a custom command can write
- *            anywhere) — @c "" if @c DeclareOutput() was never called. */
+ *            @c lib/lib\<name\>.a, ...). For a @c RunCustom target it is the
+ *            @b first path @c DeclareOutput() recorded (call order), returned
+ *            verbatim (@b not joined onto @c out_dir, since a custom command
+ *            can write anywhere) — @c "" if @c DeclareOutput() was never
+ *            called. */
 const char *__builtin_build_target_output(BuildTarget *t);
 
 /*! @function __builtin_build_declare_output
- *  @abstract Record the file path a @c RunCustom target (only) produces —
+ *  @abstract Record a file path a @c RunCustom target (only) produces —
  *            taken verbatim, not joined onto @c out_dir — so
- *            @c TargetOutput() can resolve it and so the dependency is
- *            documented for downstream consumers. This does @b not add a
- *            staleness/skip check — a @c RunCustom step still runs every
+ *            @c TargetOutput() can resolve it, the dependency is documented
+ *            for downstream consumers, and (combined with @c AddInput)
+ *            @c build_target() can decide the step is already up to date.
+ *            May be called more than once; each call appends rather than
+ *            replacing, and @c TargetOutput() returns the first. On its own
+ *            (no @c AddInput calls) this is invalidation metadata only — a
+ *            @c RunCustom step with no declared inputs still runs every
  *            build regardless of whether @c path already exists. No-op with
  *            a diagnostic on non-@c RunCustom targets. */
 void __builtin_build_declare_output(BuildTarget *t, const char *path);
+
+/*! @function __builtin_build_add_input
+ *  @abstract Record a file path a @c RunCustom target (only) reads.
+ *            Combined with @c DeclareOutput, gives @c build_target() a real
+ *            "up to date" skip check: if the target has at least one
+ *            declared input and one declared output, and every output exists
+ *            and is at least as new as every input, the command is skipped.
+ *            A target with no @c AddInput calls always runs, as before.
+ *            No-op with a diagnostic on non-@c RunCustom targets. */
+void __builtin_build_add_input(BuildTarget *t, const char *path);
 
 /*! @function __builtin_build_add_source
  *  @abstract Add a C source file to the target. */
@@ -112,8 +127,17 @@ void __builtin_build_add_source(BuildTarget *t, const char *path);
 
 /*! @function __builtin_build_add_sources_glob
  *  @abstract Expand a glob pattern relative to the build root and add each
- *            match as a source file.  Requires POSIX @c glob(3). */
+ *            match as a source file, immediately.  Requires POSIX @c glob(3).
+ *            Matches are returned in sorted order. */
 void __builtin_build_add_sources_glob(BuildTarget *t, const char *pattern);
+
+/*! @function __builtin_build_add_sources_glob_deferred
+ *  @abstract Like @c AddSourcesGlob, but expansion happens at build time,
+ *            after @c t's dependencies have already been built — so the
+ *            pattern can match a file a @c RunCustom codegen dependency
+ *            creates during this same build.  @c AddSourcesGlob expands
+ *            immediately and cannot see such files. */
+void __builtin_build_add_sources_glob_deferred(BuildTarget *t, const char *pattern);
 
 /*! @function __builtin_build_add_source_str
  *  @abstract Write @c content to @c \<out_dir\>/gen/\<name\> and add it as a source.
@@ -394,7 +418,9 @@ int __builtin_build_run_default(Builder *ctx);
 #define DeclareOutput(t, p)     __builtin_build_declare_output(t, p)
 #define AddSource(t, p)         __builtin_build_add_source(t, p)
 #define AddSourcesGlob(t, pat)  __builtin_build_add_sources_glob(t, pat)
+#define AddSourcesGlobDeferred(t, pat) __builtin_build_add_sources_glob_deferred(t, pat)
 #define AddSourceStr(t, n, c)   __builtin_build_add_source_str(t, n, c)
+#define AddInput(t, p)          __builtin_build_add_input(t, p)
 #define ExcludeSource(t, pat)   __builtin_build_exclude_source(t, pat)
 #define AddInclude(t, p)        __builtin_build_add_include(t, p)
 #define AddDefine(t, n, v)      __builtin_build_add_define(t, n, v)

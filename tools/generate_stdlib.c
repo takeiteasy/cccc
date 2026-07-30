@@ -23,7 +23,13 @@ char *read_header_file(const char *path) {
 }
 
 // Sanitize a header filename into a valid C identifier, e.g.
-// "sys/cdefs.h" -> "__builtin_std_sys_cdefs_h"
+// "sys/cdefs.h" -> "__builtin_sys_cdefs_h"
+// (#851: this comment previously claimed an "__builtin_std_" prefix, but the
+// memcpy below only ever copies 10 of those 14 bytes -- the emitted prefix
+// has always been "__builtin_". Harmless: the same function both generates
+// the definition and every reference to it, so it's self-consistent; this is
+// a documentation fix, not a behaviour change -- changing the emitted prefix
+// would require also regenerating and re-committing src/std_seed.c.)
 char *make_global_name(const char *header) {
     char *buf = malloc(strlen(header) + 12);
     memcpy(buf, "__builtin_std_", 10);
