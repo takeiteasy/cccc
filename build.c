@@ -71,6 +71,34 @@ static void maybe_add_curl(Builder *ctx, BuildTarget *t) {
     AddLib(t, "curl");
 }
 
+// ---- Intel BID decimal FP library (optional; controlled by CCCC_HAS_DECIMAL) --
+// Never vendored (see tools/fetch_intel_bid.sh); fetched/built on demand into
+// a gitignored prefix. Mirrors Makefile.backup's CCCC_HAS_DECIMAL block, one
+// difference: a missing libbid.a here degrades to a non-decimal build with a
+// diagnostic rather than aborting the whole graph (add_cccc_flags(), which
+// calls this, has no way to fail its caller's target outright).
+
+static void maybe_add_decimal(Builder *ctx, BuildTarget *t) {
+    const char *v = GetEnv(ctx, "CCCC_HAS_DECIMAL");
+    if (!v || strcmp(v, "0") == 0)
+        return;
+    const char *prefix = GetEnv(ctx, "CCCC_BID_PREFIX");
+    if (!prefix || !*prefix)
+        prefix = "build/intel-bid";
+    char bid_a[512], bid_inc[512];
+    snprintf(bid_a, sizeof(bid_a), "%s/lib/libbid.a", prefix);
+    snprintf(bid_inc, sizeof(bid_inc), "%s/src", prefix);
+    if (!FileExists(ctx, bid_a)) {
+        fprintf(stderr,
+            "build: CCCC_HAS_DECIMAL=1 but %s is missing — run tools/fetch_intel_bid.sh "
+            "first. Building without decimal FP support.\n", bid_a);
+        return;
+    }
+    AddDefine(t, "CCCC_HAS_DECIMAL", "1");
+    AddInclude(t, bid_inc);
+    AddLdFlag(t, bid_a);
+}
+
 // ---- Vendored libbacktrace (src/backtrace/) -------------------------------
 // Compiled with distinct flags: no -std=c23 (sources are C99/C11), separate
 // warning suppressions, and platform-specific format reader.
@@ -141,6 +169,7 @@ static void add_cccc_flags(Builder *ctx, BuildTarget *t, BuildTarget *bt) {
     }
     probe_libffi(ctx, t);
     maybe_add_curl(ctx, t);
+    maybe_add_decimal(ctx, t);
     if (bt) {
         AddDefine(t, "CCCC_HAS_BACKTRACE", "1");
         AddInclude(t, "src/backtrace");

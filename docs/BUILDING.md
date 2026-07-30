@@ -478,6 +478,10 @@ BuildTarget *DynamicLib(Builder *ctx, const char *name);
 void SetOutput(BuildTarget *t, const char *path);
 void AddSource(BuildTarget *t, const char *path);
 
+// Output path resolution (#842)
+const char *TargetOutput(BuildTarget *t);          // resolved on-disk output path
+void        DeclareOutput(BuildTarget *t, const char *path); // record a RunCustom step's output
+
 // Source-set ergonomics (#542)
 void AddSourcesGlob(BuildTarget *t, const char *pattern); // POSIX glob(3)
 void AddSourceStr(BuildTarget *t, const char *name, const char *content);
@@ -490,6 +494,7 @@ void AddDefine(BuildTarget *t, const char *name, const char *value);
 void AddUndef(BuildTarget *t, const char *name);
 void AddCFlag(BuildTarget *t, const char *flag);
 void AddLdFlag(BuildTarget *t, const char *flag);
+void SetTargetEnv(BuildTarget *t, const char *name, const char *value); // (#842)
 
 // Dependencies
 void LinkWith(BuildTarget *t, BuildTarget *dep); // build before + -l<dep>
@@ -557,6 +562,50 @@ int BuildDefault(Builder *ctx);           // run_all + summary
 `Build*` compiles and links synchronously inside the call, so the
 entry's return value reflects the real build status (this is why
 `return BuildDefault();` is the idiomatic last line).
+
+### Referencing a target's own output (#842)
+
+**`TargetOutput(t)`** returns the on-disk path `t` will produce, so a
+`RunCustom` command can reference a binary a dependency target just built
+instead of hardcoding a path:
+
+```c
+BuildTarget *tool = Executable(ctx, "codegen");
+AddSource(tool, "src/codegen.c");
+
+char cmd[256];
+snprintf(cmd, sizeof(cmd), "%s --out gen/api.h", TargetOutput(tool));
+BuildTarget *gen = RunCustom(ctx, "gen-api", cmd);
+DependsOn(gen, tool);
+```
+
+For `Executable`/`StaticLib`/`DynamicLib`/bytecode targets this is always
+`<out_dir>/<path>` — the explicit `SetOutput()` path if given, else the
+kind-appropriate default (`bin/<name>`, `lib/lib<name>.a`, ...). A
+`RunCustom` target has no such convention (its command can write anywhere,
+e.g. straight into the source tree), so `TargetOutput()` on one returns
+whatever **`DeclareOutput(t, path)`** recorded — verbatim, not joined onto
+`out_dir` — or `""` if `DeclareOutput()` was never called.
+
+`DeclareOutput()` is invalidation metadata only: it does **not** give a
+`RunCustom` step a "skip if output exists" staleness check (it has no
+declared *inputs* to check the output's freshness against — a `RunCustom`
+step still runs every build).
+
+**`SetTargetEnv(t, name, value)`** sets an environment variable for `t`'s
+compiler/linker child process only — e.g. `AFL_USE_ASAN=1` for a target
+whose toolchain is an AFL++ wrapper that reads it at invocation time:
+
+```c
+SetToolchain(t, "/usr/bin/afl-clang-fast");
+SetTargetEnv(t, "AFL_USE_ASAN", "1");
+```
+
+Has no effect on a `RunCustom` target — its command runs through the
+vendored build shell (`src/build_shell.c`), not through `t`'s compiler
+invocation. That shell also has no `VAR=value cmd` env-prefix syntax (a
+real POSIX shell feature it doesn't implement); use `env VAR=value cmd
+args...` inside a `RunCustom` command instead.
 
 ### Source-set ergonomics (#542)
 
@@ -894,8 +943,20 @@ with `AddUndef(t, "NDEBUG")`).
 
 **`RunCustom(ctx, name, cmd)`** registers an arbitrary shell command as a build
 step in the DAG. The command runs through a vendored bourne-compatible shell
-(POSIX; pipes and redirections work). The step's exit code is propagated — a
-non-zero exit stops the build.
+(`src/build_shell.c`) supporting pipes, `<`/`>` redirection, `;`/`&`
+sequencing, and `&&`/`||` with real short-circuit semantics (#846). The
+step's exit code is propagated — a non-zero exit stops the build, and a
+malformed command is itself a non-zero exit (never a silent no-op).
+
+The shell is intentionally minimal: no variables, no `$(...)` command
+substitution, no `VAR=value cmd` env-prefix syntax, no `for`/`if`/`while`.
+For anything needing those, either use `env VAR=value cmd args...` (a plain
+command, not special syntax) or delegate to a real shell/script:
+`RunCustom(ctx, "regen", "sh tools/some_script.sh arg")`. `SetToolchain(t,
+cc)` has the same constraint in a different spot — its argument is a single
+executable path, not a command line, so `SetToolchain(t, "clang -arch
+x86_64")` fails at execvp time ("No such file or directory"); use
+`AddCFlag`/`SetTargetTriple` for extra compiler arguments instead.
 
 **`DependsOn(t, dep)`** creates an ordering-only edge from `t` to `dep`: `dep`
 is built first but no `-l<dep>` linker flag is added. This is the correct way
@@ -910,10 +971,6 @@ BuildTarget *core = StaticLib(ctx, "core");
 AddSourcesGlob(core, "src/*.c");
 LinkWith(app, core);    // app gets -lcore (ordinary link dep)
 ```
-
-> **v1 limitation (#568):** the vendored shell's `die()` helper calls `exit()` on
-> OOM or a failed `open()` call inside a redirected step, which terminates the
-> whole CCCC process rather than cleanly failing the build step.
 
 ### Cross-compilation (#547)
 
@@ -968,6 +1025,59 @@ if (triple && strstr(triple, "aarch64"))
 > Cross-compilation tests use `--build-dry-run` to verify the correct flags
 > appear in output without requiring a cross-toolchain on the host.
 
+## Bootstrapping (`Makefile` + `build.c`, #842)
+
+The repo-root `Makefile` is a bare-minimum bootstrap: it builds just enough
+of a `cccc` (no `libbacktrace`, no readline — both optional, gated behind
+their own `#ifdef`s) to run `./cccc --build build.c`, which is the real
+build system for this repo from there on. `make -f tools/Makefile.backup
+<target>` is the pre-cut, full-featured Makefile, kept as an escape hatch
+for when there is no working `cccc` yet.
+
+**`src/std.c`** (the embedded-stdlib header table this repo's own `cccc`
+needs to run comptime code) is a gitignored **build artifact**, never
+committed. `./cccc --build build.c`'s default build is a two-pass build:
+
+1. `cccc-pass1` is compiled against whatever `src/std.c` is currently on disk.
+2. `cccc-pass1` regenerates `src/std.c` from `tools/generate_stdlib.c`, via
+   `tools/regen_stdlib.sh`'s atomic `mktemp`+`cmp`+`mv` recipe (a literal
+   `> src/std.c` shell redirect would truncate the file before the generator
+   writes a byte; the vendored `RunCustom` shell has no `set -e`/`mktemp`
+   built in, hence the separate script).
+3. The real `cccc` is (re)compiled against the regenerated `src/std.c`.
+
+`src/std.c` can therefore never go stale, and `make stdlib` no longer
+exists. A fresh clone has no `src/std.c` yet; `src/std_seed.c` (committed —
+a minimal stand-in containing only `reflection.h`, the one header
+`implicit_reflection_tokens()` in `src/macros.c` hard-requires to run any
+comptime code at all) is what the Makefile links against in that case. That
+seed compiler can run `-G` (the regen step needs only `reflection.h`) but
+**not** `--build` (needs `building.h`, absent from the seed) — so the
+stage0-to-full path on a fresh clone is:
+
+```sh
+make cccc                            # stage0, linked against src/std_seed.c
+sh tools/regen_stdlib.sh ./cccc      # produces the real src/std.c
+make cccc                            # rebuild against it (self-correcting:
+                                      # SRCS picks src/std.c over the seed
+                                      # automatically once it exists on disk)
+./cccc --build build.c               # now works; its own two-pass regen is
+                                      # a no-op from here on
+```
+
+`build.c` itself, once bootstrapped, covers what used to be Makefile
+targets: `cccc_asan`/`cccc_ubsan`/`cccc_tsan`/`cccc_msan`/`sanitizers`,
+`fuzz_harness`, `libcccc`, `clean`, `host_tests`, `test`/`test_suites`/
+`test_legacy`, `sqlite_smoke`, `audit_ffi`, `bench`/`bench_compare`/
+`bench_compare_quick`/`bench_compare_json`, `profile_cpu`/`profile_mem`,
+`dsym`, `afl`/`afl_asan`, `macos_x86_64` (cross-build only — the Makefile's
+Rosetta smoke/test orchestration around `arch -x86_64` stays in
+`tools/Makefile.backup`), `linux_amd64_test`/`linux_aarch64_test`
+(single-shot — no source-pattern sharding; the vendored shell has no loop
+construct to replicate that with), and `stdlib_gen` (the two-pass regen
+alone, no final rebuild). `./cccc --build build.c --build-list-targets`
+lists them all.
+
 ## Tool allowlist (`--build-tool-allow`)
 
 By default, build mode allows all tools to be probed and run. Passing
@@ -982,6 +1092,13 @@ cccc --build build.c --build-tool-allow=pkg-config --build-tool-allow=python3
 
 The native build-runtime tools (`cc`/`ar`/`ld`) are invoked directly by the
 host runner via `fork`+`execvp` and are never affected by this list.
+
+> **Bootstrap caveat:** the two-pass stdlib regen (`stdlib_gen`, and the
+> default build's own regen step) invokes the freshly-built `cccc` binary
+> through `RunCustom` (`sh tools/regen_stdlib.sh <cccc-path>`). Under
+> `--build-tool-allow`, `sh` must be in the allowlist or the bootstrap
+> silently breaks with a permission diagnostic instead of regenerating
+> `src/std.c`.
 
 ## FFI policy
 
@@ -1026,8 +1143,11 @@ modules into a running VM (#564),
 `--build-option=KEY=VALUE` (#559),
 `InstallArtifact` / `SetInstallPrefix` / `BuildWantsInstall` / `--build-install` (#560),
 `DirExists` / `GlobFiles` / `ReadFile` / `WriteFile` filesystem helpers (#561),
-a self-hosting `build.c` that builds cccc, libcccc, sanitizer variants,
-`fuzz_harness`, stdlib regeneration, and bench (#549),
+a self-hosting `build.c` at Makefile parity (#549, #842) — see
+"Bootstrapping" above for the full target list,
+`TargetOutput` / `DeclareOutput` for referencing a target's resolved output
+path, `SetTargetEnv` for per-target compiler-child environment variables,
+and a duplicate-target-name diagnostic (#842),
 `__CCCC_BUILD_MODE__` / `__CCCC_TEST_MODE__` / `__CCCC_COMP_MODE__` predefined
 mode macros (#575), and `#include [[cccc::build]]` / `#include [[cccc::test]]`
 conditional include directives (#570).
