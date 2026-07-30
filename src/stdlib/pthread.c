@@ -7,6 +7,11 @@
 #include <pthread.h>
 #include <string.h>
 
+// Mirrors TSS_DTOR_ITERATIONS in include/threads.h (the guest-visible C11
+// macro) -- this is the host-side implementation file, compiled independently
+// of the guest stdlib headers, so the value is duplicated rather than shared.
+#define CCCC_TSS_DTOR_ITERATIONS 4
+
 typedef struct CCCCUserMutex {
     void *handle;
     long state;
@@ -37,7 +42,10 @@ typedef struct CCCCPthreadValue {
 
 struct PthreadKeyRecord {
     int key;
-    void (*destructor)(void *);
+    // Guest byte offset (or FFI token) for the registered destructor -- NOT a
+    // host-callable pointer. Must be invoked via cccc_call_guest_callback,
+    // never called directly (see run_tss_destructors below).
+    long long destructor_value;
     int deleted;
     struct PthreadKeyRecord *next;
 };
@@ -240,6 +248,13 @@ static int check_lock_safety(VirtualMachine *vm, ThreadRecord *tr, void *mutex) 
     return 0;
 }
 
+// Forward declaration -- defined below alongside the rest of the TSS/key
+// machinery (find_key, wrap_pthread_key_create, etc). Invokes every
+// tss_create/pthread_key_create destructor still owed to `rec` per C11
+// 7.26.6.1p2, run from vm_thread_start below while the worker's VM context
+// (active_thread, current_tls_seg, sp/bp) is still live.
+static void run_tss_destructors(VirtualMachine *vm, ThreadRecord *rec);
+
 static void *vm_thread_start(void *arg) {
     ThreadRecord *rec = arg;
     VirtualMachine *vm = rec->vm;
@@ -258,6 +273,15 @@ static void *vm_thread_start(void *arg) {
     rec->vm_rc = vm_eval(vm);
     rec->retval = (void *)vm->regs[REG_A0];
     rec->exited = 1;
+    // Run TSS destructors here, before anything below unwinds this thread's
+    // VM context -- this is the only point where active_thread == rec,
+    // current_tls_seg == rec->tls_seg, and sp/bp are still the worker's, all
+    // of which cccc_call_guest_callback requires (see its contract in
+    // internal.h). A plain `return` from main() intentionally does NOT reach
+    // here (matches glibc); pthread_exit() called ON the main thread also
+    // doesn't run key destructors in cccc today -- that's a separate,
+    // post-GIL-release teardown path, tracked as a followup ticket.
+    run_tss_destructors(vm, rec);
     cccc_exec_state_save(vm, &rec->exec);
     vm->active_thread = saved_active;
     vm->current_tls_seg = saved_tls_seg;
@@ -623,7 +647,7 @@ static long long wrap_pthread_key_create(long long keyp, long long destructor) {
     if (!rec)
         return EAGAIN;
     rec->key = ++vm->pthread_next_key;
-    rec->destructor = (void (*)(void *))destructor;
+    rec->destructor_value = destructor;
     rec->next = vm->pthread_keys;
     vm->pthread_keys = rec;
     *(unsigned int *)keyp = (unsigned int)rec->key;
@@ -674,6 +698,41 @@ static long long wrap_pthread_setspecific(long long key, long long value) {
     cur->next = thread->values;
     thread->values = cur;
     return 0;
+}
+
+// C11 7.26.6.1p2 / 7.26.1p7: on thread exit, for each key whose associated
+// value in this thread is non-NULL, call its destructor with that value.
+// Re-checked up to TSS_DTOR_ITERATIONS passes since a destructor is allowed
+// to tss_set() the same (or another) key again -- the slot is nulled out
+// *before* the guest callback runs so a re-set during the callback is picked
+// up by the next pass rather than lost or looped on forever. Deleted keys
+// (tss_delete/pthread_key_delete) are skipped, matching find_key's existing
+// deleted-gate in wrap_pthread_getspecific/setspecific.
+//
+// Must run mid-vm_eval with the GIL held and rec == vm->active_thread (see
+// cccc_call_guest_callback's contract, internal.h) -- the only caller is
+// vm_thread_start, before it restores the caller's VM context.
+static void run_tss_destructors(VirtualMachine *vm, ThreadRecord *rec) {
+    for (int pass = 0; pass < CCCC_TSS_DTOR_ITERATIONS; pass++) {
+        int ran_any = 0;
+        for (CCCCPthreadValue *value = rec->values; value; value = value->next) {
+            if (!value->value)
+                continue;
+            PthreadKeyRecord *keyrec = find_key(vm, value->key);
+            if (!keyrec || keyrec->deleted || !keyrec->destructor_value)
+                continue;
+            void *slot_value = value->value;
+            value->value = NULL;
+            long long args[1] = { (long long)slot_value };
+            long long ignored;
+            cccc_call_guest_callback(vm, keyrec->destructor_value, args, 1, &ignored);
+            /* A faulting destructor doesn't abort the remaining keys, same
+               rationale as drain_exit_handlers_nested (stdlib.c). */
+            ran_any = 1;
+        }
+        if (!ran_any)
+            break;
+    }
 }
 
 static long long wrap_pthread_attr_init(long long attrp) {

@@ -1,13 +1,14 @@
 // Expected return: 42
-// Known --leaks flag (not suppressed): worker's tss_set'd allocation is
-// never freed by dtor because tss_create's destructor is not invoked on
-// thread exit (C11 7.26.6.1p2 nonconformance) -- tracked separately.
 #include <threads.h>
 #include <stdlib.h>
 
 static tss_t g_key;
+static int g_dtor_calls = 0;
+static int g_dtor_last_value = -1;
 
 static void dtor(void *p) {
+    g_dtor_calls++;
+    g_dtor_last_value = *(int *)p;
     free(p);
 }
 
@@ -28,7 +29,13 @@ int main(void) {
     int res = -1;
     if (thrd_create(&t, worker, &val) != thrd_success) return 2;
     if (thrd_join(t, &res) != thrd_success)            return 3;
+    if (res != 0)                                      return 4;
+
+    // C11 7.26.6.1p2: worker's tss_set'd value was non-NULL when it exited,
+    // so the destructor must have run exactly once with that value.
+    if (g_dtor_calls != 1)      return 5;
+    if (g_dtor_last_value != 99) return 6;
 
     tss_delete(g_key);
-    return res == 0 ? 42 : 4;
+    return 42;
 }

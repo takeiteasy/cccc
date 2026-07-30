@@ -16,6 +16,10 @@ typedef pthread_t thrd_t;
 typedef pthread_key_t tss_t;
 typedef void (*tss_dtor_t)(void *);
 
+/* C11 7.26.1p7: minimum number of destructor-call passes per thread exit,
+   guarding against a destructor that keeps re-setting its own key. */
+#define TSS_DTOR_ITERATIONS 4
+
 /* Mutex: store the C11 type flag so mtx_init can configure appropriately.
    Layout mirrors CCCCUserMutex (void *__handle, long __state) plus an int
    type tag; the host mutex is lazily allocated on first lock. */
