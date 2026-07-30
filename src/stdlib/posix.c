@@ -2007,6 +2007,28 @@ static int *__cccc_optind_ptr(void) { return &optind; }
 static int *__cccc_opterr_ptr(void) { return &opterr; }
 static int *__cccc_optopt_ptr(void) { return &optopt; }
 
+// #841 -- macOS libc's _strfmon() (see the "monetary.h" registration below)
+// over-reads its own internal scratch allocation under AddressSanitizer:
+// it mallocs a 15-byte buffer and then memcpy()s 9 bytes starting at offset
+// 15 of it. Confirmed with a standalone 6-line clang -fsanitize=address
+// program with zero CCCC involvement -- every conversion directive
+// ("%n", "%i", "%!n", "%.2n", "%#5n") triggers it, a format with no
+// directive doesn't. It's benign against a real allocator (15 bytes rounds
+// up to a 16-byte malloc bucket, so the bytes read are mapped) and only
+// aborts against ASan's exact-size redzones. Confirmed clean on
+// Linux/glibc. Suppress just this frame under ASan rather than avoiding
+// strfmon(): reimplementing it would go against the no-lossy-POSIX-
+// emulation policy for a bug that's harmless outside ASan. A user's own
+// ASAN_OPTIONS=suppressions=<file> merges with this list rather than
+// replacing it (confirmed empirically), so this doesn't hide anything from
+// someone actively debugging with a custom suppression file.
+#if defined(__APPLE__) && (defined(__SANITIZE_ADDRESS__) || \
+    (defined(__has_feature) && __has_feature(address_sanitizer)))
+const char *__asan_default_suppressions(void) {
+    return "interceptor_via_fun:_strfmon\n";
+}
+#endif
+
 void register_posix_functions(VirtualMachine *vm) {
     // Blocking I/O — GIL released while blocked so other VM threads can run
     cc_register_cfunc(vm, "read",    (void*)wrap_read_gil,    3, 0);
@@ -2336,7 +2358,9 @@ void register_posix_functions(VirtualMachine *vm) {
     // site double_arg_mask threads the double through correctly -- no
     // split-format host-side reimplementation needed (confirmed
     // empirically: a real double argument round-trips through a "%n"
-    // conversion correctly).
+    // conversion correctly). On macOS, this host strfmon() has an internal
+    // over-read that only ASan notices -- see the __asan_default_suppressions
+    // hook above (#841).
     cc_register_variadic_cfunc(vm, "strfmon", (void*)strfmon, 3, 0);
     // strfmon_l (#820) -- locale_t sits before the format string, so this
     // is 4 fixed args, not 3 like strfmon above.

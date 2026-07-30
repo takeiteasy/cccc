@@ -10,6 +10,12 @@
  * in this codebase actually applies. strfmon_l follows the same variadic
  * registration, just with a locale_t (see locale.h) ahead of the format
  * string.
+ *
+ * On macOS, the host strfmon() itself has an internal scratch-buffer
+ * over-read that only AddressSanitizer notices (not a CCCC bug -- confirmed
+ * with a standalone clang -fsanitize=address program with no CCCC involved).
+ * ASan builds carry a built-in suppression for it; see the
+ * __asan_default_suppressions hook in src/stdlib/posix.c (#841).
  */
 
 #ifndef __MONETARY_H

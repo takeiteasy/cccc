@@ -2273,6 +2273,13 @@ int test_posix_search(void) {
 // #808: strfmon(buf, sizeof buf, "%n", 1234.56) succeeds and contains
 // "1234"; a multi-conversion format with literal text between two
 // directives; a maxsize too small for the output returns -1/E2BIG.
+//
+// #841: under ASan on macOS, calling strfmon() at all (regardless of the
+// specific format used here) trips a heap-buffer-overflow inside Apple's
+// own libc _strfmon -- a genuine host-libc over-read, not a CCCC bug, and
+// not specific to this test's formats (glibc is unaffected). It's suppressed
+// for ASan builds via the __asan_default_suppressions hook in
+// src/stdlib/posix.c.
 [[cccc::test(return = 42)]]
 int test_posix_strfmon(void) {
     char buf[64] = {0};

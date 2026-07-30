@@ -391,6 +391,11 @@ python3 tools/tests.py --asan -j 4
 python3 tools/tests.py --ubsan -j 4
 ```
 
+On macOS, `cccc-asan` carries a built-in suppression for a heap over-read
+inside Apple's own `strfmon()` (not a CCCC bug -- confirmed with a standalone
+`clang -fsanitize=address` program; glibc is unaffected). See the
+`__asan_default_suppressions` hook in `src/stdlib/posix.c`.
+
 ## Credits 
 
 This project builds on [chibicc](https://github.com/rui314/chibicc) for the C frontend and on ideas from [c4](https://github.com/rswier/c4) / [write-a-C-interpreter](https://github.com/lotabout/write-a-C-interpreter) for the VM-oriented execution model (You can run [test_c4](tests/test_c4.c) inside cccc by running `python3 tools/test.py --match "*c4*"`).
