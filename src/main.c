@@ -136,7 +136,7 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
 }
 
 static void usage(const char *argv0, int exit_code) {
-    printf("CCCC: Comprehensiev C Compensation Compiler\n");
+    printf("CCCC: Comprehensive C Compensation Compiler\n");
     printf("https://git.sr.ht/~takeiteasy/cccc\n\n");
     printf("Usage: %s [options] file...\n\n", argv0);
     printf("Options:\n");
